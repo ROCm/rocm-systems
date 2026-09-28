@@ -7,10 +7,12 @@
 Analyze mode
 ************
 
-ROCm Compute Profiler offers several ways to interact with the metrics it generates from
-profiling. Your level of familiarity with the profiled application, computing
-environment, and experience with ROCm Compute Profiler should inform the analysis method you
-choose.
+ROCm Compute Profiler offers two ways to interact with the metrics it generates
+from profiling: the built-in command line analyzer, which prints the analysis
+report to the terminal, and ROCm Optiq, a graphical application that explores
+the analysis databases the tool writes. Your level of familiarity with the
+profiled application, computing environment, and experience with ROCm Compute
+Profiler should inform the analysis method you choose.
 
 .. note::
 

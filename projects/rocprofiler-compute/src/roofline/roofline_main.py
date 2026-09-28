@@ -676,9 +676,6 @@ class Roofline:
         """Ship the standalone figure already narrowed to the precisions the page
         opens with, so the first paint matches the controller's initial state
         instead of flashing every ceiling before the client hides them.
-
-        Only the standalone document is touched; the Dash figures keep every
-        ceiling because the WebUI has no precision selector to restore them.
         """
         selected = set(view_model.default_precisions)
         if not selected:
