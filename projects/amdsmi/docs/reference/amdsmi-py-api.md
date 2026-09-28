@@ -614,7 +614,7 @@ Input parameters:
 
 Output: `True` for the integrated GPU of an APU, `False` for a discrete GPU
 
-**Note:** An APU's GPU keeps `AmdSmiProcessorType.AMD_GPU`, so `amdsmi_get_processor_handles_by_type(socket, AmdSmiProcessorType.AMD_APU)` returns an empty `processor_handles` list with a `processor_count` of `0`; `UNKNOWN` is not a wildcard either. This query is also distinct from the `is_apu` key of `amdsmi_get_gpu_metrics_info()`, which reports only whether the metrics table carries APU fields. An APU can still have a BIOS VRAM carveout, so this query says nothing about the size of its shared memory pool.
+**Note:** An APU's GPU keeps `AmdSmiProcessorType.AMD_GPU`, so `amdsmi_get_processor_handles_by_type(socket, AmdSmiProcessorType.AMD_APU)` returns an empty `processor_handles` list with a `processor_count` of `0`. Passing `UNKNOWN` raises `AmdSmiLibraryException` with `AMDSMI_STATUS_INVAL`; it is not a wildcard. This query is also distinct from the `is_apu` key of `amdsmi_get_gpu_metrics_info()`, which reports only whether the metrics table carries APU fields. An APU can still have a BIOS VRAM carveout, so this query says nothing about the size of its shared memory pool.
 
 Exceptions that can be thrown by `amdsmi_is_gpu_apu` function:
 

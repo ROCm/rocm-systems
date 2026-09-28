@@ -3470,8 +3470,8 @@ amdsmi_status_t amdsmi_get_processor_count_from_handles(amdsmi_processor_handle*
  *  @details This function retrieves processor list as per the processor type
  *  from the total processor handles list.
  *  The @p list of processor_handles and processor type must be provided.
- *  On Linux, declared types with no matching processors return an empty list.
- *  UNKNOWN is not a wildcard, and out-of-range types return ::AMDSMI_STATUS_INVAL.
+ *  On Linux, concrete types with no matching processors return an empty list.
+ *  UNKNOWN and out-of-range types return ::AMDSMI_STATUS_INVAL; neither is a wildcard.
  *  Separate AMD_APU handles are not enumerated; query AMD_GPU and use
  *  ::amdsmi_is_gpu_apu on each GPU handle instead.
  *

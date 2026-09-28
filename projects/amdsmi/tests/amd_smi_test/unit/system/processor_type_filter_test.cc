@@ -40,9 +40,9 @@ TEST(SystemUnit, ProcessorTypeFilterKeepsSupportedTypesSeparate) {
 TEST(SystemUnit, ProcessorTypeFilterUnimplementedTypesNeverReturnGpus) {
   AMDSmiSocket socket(std::string("test"));
   socket.add_processor(new AMDSmiProcessor(AMDSMI_PROCESSOR_TYPE_AMD_GPU));
-  const std::array<amdsmi_processor_type_t, 4> types = {
-      AMDSMI_PROCESSOR_TYPE_UNKNOWN, AMDSMI_PROCESSOR_TYPE_NON_AMD_GPU,
-      AMDSMI_PROCESSOR_TYPE_NON_AMD_CPU, AMDSMI_PROCESSOR_TYPE_AMD_APU};
+  const std::array<amdsmi_processor_type_t, 3> types = {AMDSMI_PROCESSOR_TYPE_NON_AMD_GPU,
+                                                        AMDSMI_PROCESSOR_TYPE_NON_AMD_CPU,
+                                                        AMDSMI_PROCESSOR_TYPE_AMD_APU};
   for (auto type : types) {
     uint32_t count = UINT32_MAX;
     EXPECT_TRUE(socket.get_processors(type).empty()) << "type=" << type;
@@ -56,10 +56,13 @@ TEST(SystemUnit, ProcessorTypeFilterInvalidTypeIsRejected) {
   socket.add_processor(new AMDSmiProcessor(AMDSMI_PROCESSOR_TYPE_AMD_GPU));
   // Value 10 is unnamed but inside the enum's representable range.
   const auto invalid = static_cast<amdsmi_processor_type_t>(10);
-  uint32_t count = UINT32_MAX;
-  EXPECT_EQ(socket.get_processor_count(invalid, &count), AMDSMI_STATUS_INVAL);
-  EXPECT_EQ(count, 0u);
-  EXPECT_TRUE(socket.get_processors(invalid).empty());
+  for (auto type : {AMDSMI_PROCESSOR_TYPE_UNKNOWN, invalid}) {
+    SCOPED_TRACE(type);
+    uint32_t count = UINT32_MAX;
+    EXPECT_EQ(socket.get_processor_count(type, &count), AMDSMI_STATUS_INVAL);
+    EXPECT_EQ(count, 0u);
+    EXPECT_TRUE(socket.get_processors(type).empty());
+  }
 }
 
 class RegisteredTestSocket {
@@ -88,6 +91,29 @@ TEST(SystemUnit, ProcessorTypeBufferCountQuery) {
                                                  nullptr, &count),
             AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(count, 3u);
+}
+
+TEST(SystemUnit, ProcessorTypeInvalidQueryPreservesOutput) {
+  RegisteredTestSocket registered;
+  const auto invalid = static_cast<amdsmi_processor_type_t>(10);
+  const auto guard = reinterpret_cast<amdsmi_processor_handle>(uintptr_t{1});
+  for (auto type : {AMDSMI_PROCESSOR_TYPE_UNKNOWN, invalid}) {
+    for (uint32_t capacity : {0u, 1u, 3u}) {
+      std::array<amdsmi_processor_handle, 4> handles;
+      handles.fill(guard);
+      for (auto* buffer : {static_cast<amdsmi_processor_handle*>(nullptr), handles.data()}) {
+        SCOPED_TRACE(type);
+        SCOPED_TRACE(capacity);
+        uint32_t count = capacity;
+        EXPECT_EQ(amdsmi_get_processor_handles_by_type(&registered.socket_, type, buffer, &count),
+                  AMDSMI_STATUS_INVAL);
+        EXPECT_EQ(count, capacity);
+        for (auto handle : handles) {
+          EXPECT_EQ(handle, guard);
+        }
+      }
+    }
+  }
 }
 
 TEST(SystemUnit, ProcessorTypeBufferPartialFillAndBounds) {
