@@ -59,6 +59,14 @@ TEST(ReduceScatterPolicySliceBytes, ElementsTimesSize) {
   EXPECT_EQ(sliceBytes(128, 1), 128u);
 }
 
+// ---- reduceScatterSliceOffset -----------------------------------------------
+
+TEST(ReduceScatterPolicySliceOffset, SelectsOwnedSlice) {
+  EXPECT_EQ(reduceScatterSliceOffset(0, 512), 0u);
+  EXPECT_EQ(reduceScatterSliceOffset(3, 512), 1536u);
+  EXPECT_EQ(reduceScatterSliceOffset(7, 17), 119u);
+}
+
 // ---- reduceScatterKernelTier: slice <= threshold is LSA (reserved) -----------
 
 TEST(ReduceScatterPolicyTier, BelowOrEqualThresholdIsLsa) {
@@ -222,6 +230,8 @@ TEST(ReduceScatterPolicyEnv, ParseCtasEnvRejectsGarbage) {
   EXPECT_EQ(parseReduceScatterCtasEnvString(nullptr), kThresholdUnset);
   EXPECT_EQ(parseReduceScatterCtasEnvString(""), kThresholdUnset);
   EXPECT_EQ(parseReduceScatterCtasEnvString("-2"), kThresholdUnset);
+  EXPECT_EQ(parseReduceScatterCtasEnvString(" -2"), kThresholdUnset);
+  EXPECT_EQ(parseReduceScatterCtasEnvString("\t-2"), kThresholdUnset);
   EXPECT_EQ(parseReduceScatterCtasEnvString("8foo"), kThresholdUnset);
   EXPECT_EQ(parseReduceScatterCtasEnvString("8"), 8u);
 }

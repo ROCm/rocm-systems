@@ -19,7 +19,8 @@
 #   RCCL_CI_DEBUG_DIR  Dir for NCCL_DEBUG_FILE output when RCCL_CI_DEBUG=1
 #                  (default: ${SLURM_SUBMIT_DIR:-$PWD}/nccl-debug)
 #   RCCL_TESTS_DIR     rccl-tests source tree (default: $WORKDIR/projects/rccl-tests)
-#   GIN_PYTEST_TIMEOUT Wall-clock cap for pytest matrix entries (default: 1800s)
+#   GIN_PYTEST_TIMEOUT Wall-clock cap for Broadcast pytest (default: 1800s)
+#   GIN_PYTEST_RS_TIMEOUT Wall-clock cap for ReduceScatter pytest (default: 3600s)
 #   GIN_PYTEST_HW_CASES  Broadcast mpirun cases under -k GinSdma (default: 9).
 #                  Offline parser/tier guards do not launch and are not counted.
 #   GIN_PYTEST_RS_HW_CASES  ReduceScatter GinSdma mpirun cases (default: 15).
@@ -41,6 +42,7 @@ MSG_SIZE="${MSG_SIZE:-33554432}"
 BENCH_TIMEOUT="${BENCH_TIMEOUT:-600s}"
 BENCH_KILL_AFTER="${BENCH_KILL_AFTER:-30s}"
 GIN_PYTEST_TIMEOUT="${GIN_PYTEST_TIMEOUT:-1800s}"
+GIN_PYTEST_RS_TIMEOUT="${GIN_PYTEST_RS_TIMEOUT:-3600s}"
 # Hardware launches selected by rccl-gin-bcast-pytest (-k GinSdma): 6 segmented
 # (2 sizes x 3 dtypes) + scatter-allgather + 2 hang guards.
 GIN_PYTEST_HW_CASES="${GIN_PYTEST_HW_CASES:-9}"
@@ -161,18 +163,18 @@ gin_duration_sec() {
 # Size TIMEOUT_S and CONN_RETRIES so even the worst-case inner budget (every
 # hardware case using every retry, each waiting the full per-attempt cap) is
 # strictly under GIN_PYTEST_TIMEOUT. Leave already-set env vars alone.
-# $1 = BCAST|RS, $2 = hardware-case count for that pytest file.
+# $1 = BCAST|RS, $2 = hardware-case count, $3 = outer pytest timeout.
 apply_gin_pytest_inner_budget() {
-  local prefix="$1" hw_cases="$2"
+  local prefix="$1" hw_cases="$2" outer_timeout="$3"
   local retries_var="RCCL_TESTS_${prefix}_CONN_RETRIES"
   local timeout_var="RCCL_TESTS_${prefix}_TIMEOUT_S"
   local outer_s kill_s slack usable retries denom timeout_s inner
-  outer_s="$(gin_duration_sec "${GIN_PYTEST_TIMEOUT}")" || return 1
+  outer_s="$(gin_duration_sec "${outer_timeout}")" || return 1
   kill_s="$(gin_duration_sec "${BENCH_KILL_AFTER}")" || return 1
   slack=60
   usable=$((outer_s - kill_s - slack))
   if ((usable < 30)); then
-    echo "ERROR: GIN_PYTEST_TIMEOUT=${GIN_PYTEST_TIMEOUT} leaves no room for pytest after kill-after/slack" >&2
+    echo "ERROR: pytest timeout ${outer_timeout} leaves no room after kill-after/slack" >&2
     return 1
   fi
   if [[ -z "${!retries_var:-}" ]]; then
@@ -197,7 +199,7 @@ apply_gin_pytest_inner_budget() {
   inner=$((hw_cases * retries * ${!timeout_var}))
   echo "==> pytest inner budget (${prefix}): ${timeout_var}=${!timeout_var}s retries=${retries} hw_cases=${hw_cases} max=${inner}s < outer ${outer_s}s (kill-after ${kill_s}s, slack ${slack}s)"
   if ((inner + kill_s + slack >= outer_s)); then
-    echo "WARNING: inner budget ${inner}s is not strictly under GIN_PYTEST_TIMEOUT=${outer_s}s; raise the outer cap or lower TIMEOUT_S/retries" >&2
+    echo "WARNING: inner budget ${inner}s is not strictly under outer timeout ${outer_s}s; raise the outer cap or lower TIMEOUT_S/retries" >&2
   fi
 }
 
@@ -229,7 +231,7 @@ run_test() {
   if [[ "${kind}" == "pytest" ]]; then
     local pytest_dir="${RCCL_TESTS_DIR}/test"
     local pytest_file="${pytest_dir}/${bin}"
-    local pytest_exe pytest_enable pytest_prefix hw_cases gin_type_var timeout_var retries_var xenv_var exe_var np_var xenv
+    local pytest_exe pytest_enable pytest_prefix hw_cases outer_timeout gin_type_var timeout_var retries_var xenv_var exe_var np_var xenv
     if [[ ! -f "${pytest_file}" ]]; then
       echo "  SKIP ${name}: pytest file not found: ${pytest_file}"
       FAILED_RUNS+=("${name} (missing ${bin})")
@@ -242,12 +244,15 @@ run_test() {
         pytest_enable="RCCL_TESTS_GIN_SDMA_BCAST"
         pytest_prefix="BCAST"
         hw_cases="${GIN_PYTEST_HW_CASES}"
+        outer_timeout="${GIN_PYTEST_TIMEOUT}"
         ;;
       test_ReduceScatterGinSdma.py)
         pytest_exe="${RCCL_TESTS_BIN_DIR}/reduce_scatter_perf"
         pytest_enable="RCCL_TESTS_GIN_SDMA_RS"
         pytest_prefix="RS"
         hw_cases="${GIN_PYTEST_RS_HW_CASES}"
+        outer_timeout="${GIN_PYTEST_RS_TIMEOUT}"
+        bench_timeout="${outer_timeout}"
         ;;
       *)
         echo "  SKIP ${name}: unsupported pytest file '${bin}'"
@@ -263,7 +268,7 @@ run_test() {
       return
     fi
     ensure_pytest
-    apply_gin_pytest_inner_budget "${pytest_prefix}" "${hw_cases}" || {
+    apply_gin_pytest_inner_budget "${pytest_prefix}" "${hw_cases}" "${outer_timeout}" || {
       FAILED_RUNS+=("${name} (inner budget)")
       set -e
       return

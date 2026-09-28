@@ -107,7 +107,8 @@ __global__ void rsReadReduceSimKernel(const T* send, T* recv, int nRanks, size_t
   const int rank = blockIdx.x;  // one CTA per rank (simple smoke layout)
   if (rank >= nRanks) return;
   const size_t totalPerPeer = (size_t)nRanks * count;
-  const size_t myOff = (size_t)rank * count;
+  const size_t myOff =
+      gin_sdma_reducescatter::reduceScatterSliceOffset(rank, count);
   const int tid = threadIdx.x;
   const int nthreads = blockDim.x;
   for (size_t i = tid; i < count; i += nthreads) {

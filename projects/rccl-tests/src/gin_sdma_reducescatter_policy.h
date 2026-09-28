@@ -65,6 +65,12 @@ GIN_SDMA_RS_HD inline size_t sliceBytes(size_t perRankCount, size_t eltSize) {
   return perRankCount * eltSize;
 }
 
+// Element offset of rank's owned output slice in every peer's send buffer.
+// Shared by the production LSA read-reduce and its GPU addressing test.
+GIN_SDMA_RS_HD inline size_t reduceScatterSliceOffset(int rank, size_t perRankCount) {
+  return (size_t)rank * perRankCount;
+}
+
 // Compiled default ReduceScatter LSA<->GIN crossover (bytes per rank slice).
 // 256 KiB/rank is the provisional cutover from the Phase-2 design plan. RETAINED
 // FOR DOCUMENTATION ONLY: the shipped kernel is single-tier LSA read-reduce and
@@ -198,7 +204,11 @@ GIN_SDMA_RS_HD inline void bandwidthGBps(size_t perRankCount, int typeSize, doub
 // trailing-garbage so "8foo" and "-2" do not pin a CTA count. strtoull wraps a
 // leading '-' into a huge unsigned, which the CTA clamp would then honor.
 inline size_t parseReduceScatterCtasEnvString(const char* e) {
-  if (e == nullptr || e[0] == '\0' || e[0] == '-') return kThresholdUnset;
+  if (e == nullptr) return kThresholdUnset;
+  // strtoull skips leading whitespace before a sign; trim it first so " -2"
+  // cannot wrap to a large unsigned CTA pin.
+  while (*e == ' ' || *e == '\t') e++;
+  if (e[0] == '\0' || e[0] == '-') return kThresholdUnset;
   char* end = nullptr;
   unsigned long long v = strtoull(e, &end, 10);
   if (end == e || *end != '\0') return kThresholdUnset;

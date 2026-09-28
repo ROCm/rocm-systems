@@ -250,7 +250,9 @@ __device__ __forceinline__ void ginReduceScatterBody(ncclWindow_t sendwin, size_
   struct alignas(16) Pack { T e[VEC]; };
   Pack* dstP = (Pack*)ncclGetLocalPointer(recvwin, recvoffset);
   const size_t nPacks = count / (size_t)VEC;
-  const size_t myBaseP = ((size_t)devComm.rank * count) / (size_t)VEC;  // pack idx of my slice
+  const size_t myBaseP =
+      gin_sdma_reducescatter::reduceScatterSliceOffset(devComm.rank, count) /
+      (size_t)VEC;  // pack idx of my slice
 
   // High-occupancy grid-stride with FULL N-way PEER ILP + src0 prefetch.
   // One pack per thread (register-light -> max wave occupancy). This path is

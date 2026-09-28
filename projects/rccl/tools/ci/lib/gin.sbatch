@@ -209,6 +209,11 @@ if [[ ! -x "${rccl_tests_build}/broadcast_perf" ]]; then
   ls -la "${rccl_tests_build}" 2>/dev/null >&2 || true
   exit 1
 fi
+if [[ ! -x "${rccl_tests_build}/reduce_scatter_perf" ]]; then
+  echo "ERROR: reduce_scatter_perf not built under ${rccl_tests_build}" >&2
+  ls -la "${rccl_tests_build}" 2>/dev/null >&2 || true
+  exit 1
+fi
 
 # Diag: confirm alltoall_perf exports the rocSHMEM host symbol librccl.so resolves
 # at runtime (log_flags); a miss here => runtime 'undefined symbol'.
