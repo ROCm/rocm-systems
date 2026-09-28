@@ -1897,6 +1897,19 @@ public:
   }
 };
 
+/// An instruction carrying only decoded memory-issue metadata: no MEMORY_OP,
+/// no pipeline state, and a mnemonic that matches no memory prefix. The CDNA5
+/// `cluster_load_*` set decodes exactly this way.
+class IssueMetadataTestInstruction final : public Instruction {
+public:
+  IssueMetadataTestInstruction(std::string_view mnemonic,
+                               amdgpu::MemoryCompletionClass completion_class)
+      : Instruction(mnemonic, nullptr) {
+    set_memory_issue_info(
+        {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT, completion_class}});
+  }
+};
+
 struct ParsedThroughputRecord {
   std::string record;
   uint64_t dispatch_id = 0;
@@ -2438,6 +2451,26 @@ TEST(InstructionMixPluginTest, AgreesWithThroughputOnInstructionFamilies) {
       // otherwise bucket it with ALU work.
       {"s_buffer_atomic_add", 0, InstructionFamily::Global},
       {"s_buffer_load_dword", MEMORY_OP, InstructionFamily::Global},
+      // generated/*/smem.cpp stopped setting MEMORY_OP altogether when the
+      // decoded memory-issue metadata landed, so every scalar-memory encoding
+      // now arrives unflagged and the bare `s_` prefix would call it ALU work.
+      {"s_load_b32", 0, InstructionFamily::Global},
+      {"s_load_dwordx4", 0, InstructionFamily::Global},
+      {"s_store_dword", 0, InstructionFamily::Global},
+      {"s_atomic_add", 0, InstructionFamily::Global},
+      {"s_scratch_load_dword", 0, InstructionFamily::Global},
+      // Scalar cache maintenance and prefetch: MEMORY_WAIT_PRODUCER only.
+      {"s_dcache_inv", 0, InstructionFamily::Global},
+      {"s_dcache_wb", 0, InstructionFamily::Global},
+      {"s_prefetch_data", 0, InstructionFamily::Global},
+      {"s_prefetch_inst", 0, InstructionFamily::Global},
+      {"s_atc_probe", 0, InstructionFamily::Global},
+      {"s_gl1_inv", 0, InstructionFamily::Global},
+      // Not memory: these carry MEMORY_WAIT_PRODUCER too, so the flag is not a
+      // usable signal on its own and these must stay where they are.
+      {"s_memtime", 0, InstructionFamily::Scalar},
+      {"s_sendmsg", 0, InstructionFamily::Scalar},
+      {"s_get_waveid_in_workgroup", 0, InstructionFamily::Scalar},
       {"s_branch", BRANCH | IGNORES_EXEC, InstructionFamily::Control},
       {"s_cbranch_execz", COND_BRANCH, InstructionFamily::Control},
       {"s_endpgm", PROGRAM_TERMINATOR, InstructionFamily::Control},
@@ -2490,6 +2523,35 @@ TEST(InstructionMixPluginTest, AgreesWithThroughputOnInstructionFamilies) {
 // Merging walks unordered maps, so a mnemonic seen through two encodings must
 // not have its reported encoding decided by hash order -- the whole point of
 // the report is that two runs of the same workload diff cleanly.
+// A prefix table can only recognise families it has been told about. The CDNA5
+// `cluster_load_*` set follows no memory naming convention, carries no
+// MEMORY_OP, and would be reported as `other` -- but it does declare its
+// completion domain, so the classifier can still place it.
+TEST(InstructionMixPluginTest, ClassifiesMemoryByIssueMetadataWhenThePrefixIsUnknown) {
+  using plugins::instruction_mix::InstructionFamily;
+  struct Case {
+    const char *mnemonic;
+    amdgpu::MemoryCompletionClass completion_class;
+    InstructionFamily expected;
+  };
+  const Case kCases[] = {
+      {"cluster_load_b32", amdgpu::MemoryCompletionClass::VMEM, InstructionFamily::Global},
+      {"cluster_load_async_to_lds_b32", amdgpu::MemoryCompletionClass::ASYNC_LOAD,
+       InstructionFamily::Global},
+      {"some_future_lds_op", amdgpu::MemoryCompletionClass::LDS, InstructionFamily::Lds},
+  };
+
+  for (const auto &c : kCases) {
+    const IssueMetadataTestInstruction inst(c.mnemonic, c.completion_class);
+    const auto mix = plugins::instruction_mix::InstructionMixPlugin::classify(inst);
+    const auto thr = plugins::throughput::ThroughputPlugin::classify(inst);
+    EXPECT_EQ(mix, c.expected) << "wrong family for " << c.mnemonic;
+    EXPECT_EQ(plugins::instruction_mix::InstructionMixPlugin::family_name(mix),
+              plugins::throughput::ThroughputPlugin::family_name(thr))
+        << "classifiers disagree on " << c.mnemonic;
+  }
+}
+
 TEST(InstructionMixPluginTest, PicksTheSameEncodingRegardlessOfMergeOrder) {
   PluginFixture f(/*num_wf_slots=*/1);
   // Wavefront slots are created on demand by the CU's dispatch path, so take
@@ -2938,6 +3000,32 @@ TEST(InstructionMixPluginTest, CombinedGroupKeepsOffloadAndDropsSgprCallbacks) {
   ASSERT_TRUE(group.add(std::make_unique<plugins::instruction_mix::InstructionMixPlugin>()));
   EXPECT_TRUE(group.supports_async_instructions());
   EXPECT_FALSE(group.observes_sgpr_reads());
+
+  // Throughput times instructions at after-execute, so the combined group must
+  // keep that hook even though instruction-mix declines it. These are ORed.
+  EXPECT_TRUE(group.observes_after_execute_instruction());
+}
+
+// Alone, instruction-mix should ask for nothing it does not consume. The
+// register hooks matter most: any member requesting them keeps
+// ComputeUnit::observes_register_access_ on for the whole run.
+TEST(InstructionMixPluginTest, AloneItSubscribesToOnlyTheHooksItConsumes) {
+  PluginSinkConfig sink_config;
+  sink_config.emplace<StringSink>();
+  ExecutionPluginGroup group(std::move(sink_config));
+  ASSERT_TRUE(group.add(std::make_unique<plugins::instruction_mix::InstructionMixPlugin>()));
+
+  // Counted here.
+  EXPECT_TRUE(group.observes_before_execute_instruction());
+  EXPECT_TRUE(group.supports_async_instructions());
+
+  // Never consumed.
+  EXPECT_FALSE(group.observes_after_execute_instruction());
+  EXPECT_FALSE(group.observes_memory_instruction_routing());
+  EXPECT_FALSE(group.observes_vgpr_reads());
+  EXPECT_FALSE(group.observes_vgpr_writes());
+  EXPECT_FALSE(group.observes_sgpr_reads());
+  EXPECT_FALSE(group.observes_scalar_register_writes());
 }
 
 // With helpers configured the WMMA instructions are actually offloaded, so they

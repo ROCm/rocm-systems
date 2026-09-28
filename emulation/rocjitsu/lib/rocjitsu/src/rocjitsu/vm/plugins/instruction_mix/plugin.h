@@ -92,6 +92,19 @@ public:
   /// as any member asks for them. Opt out.
   bool observes_sgpr_reads() const override { return false; }
 
+  /// The mix is counted entirely at before-execute and async-issue, so every
+  /// other observation hook is dead weight here. The group ORs these, so a
+  /// member that does want them (throughput takes after-execute) still gets
+  /// them; opting out only matters when instruction-mix runs alone. The
+  /// register hooks are the expensive ones: any member asking for them keeps
+  /// `ComputeUnit::observes_register_access_` on, which puts a VGPR-ownership
+  /// check and a callback dispatch on every register access.
+  bool observes_after_execute_instruction() const override { return false; }
+  bool observes_memory_instruction_routing() const override { return false; }
+  bool observes_vgpr_reads() const override { return false; }
+  bool observes_vgpr_writes() const override { return false; }
+  bool observes_scalar_register_writes() const override { return false; }
+
   /// Offloaded instructions still executed, so they still belong in the mix.
   /// The group ANDs this capability across its members, so inheriting the
   /// `false` default would disable MMA offload for every plugin in the group --
