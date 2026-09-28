@@ -39,9 +39,8 @@ concept session_types = requires {
 
 template <typename T>
 concept session_gpu_queries =
-    requires(T sess, typename T::processor_handle ph, typename T::asic_info_t* aip,
-             typename T::memory_type_t mt, std::uint64_t* u64p,
-             typename T::temperature_type_t tt, typename T::temperature_metric_t tm) {
+    requires(T sess, T::processor_handle ph, T::asic_info_t* aip, T::memory_type_t mt,
+             std::uint64_t* u64p, T::temperature_type_t tt, T::temperature_metric_t tm) {
         { T::MEM_TYPE_VRAM } -> std::convertible_to<typename T::memory_type_t>;
         { T::TEMP_CURRENT } -> std::convertible_to<typename T::temperature_metric_t>;
         {
@@ -61,7 +60,7 @@ template <typename T>
 concept sdma_session_types = requires { typename T::proc_info_t; };
 
 template <typename T>
-concept sdma_session_queries = requires(T sess, typename T::processor_handle ph) {
+concept sdma_session_queries = requires(T sess, T::processor_handle ph) {
     { sess.probe_sdma_support(ph) } -> std::convertible_to<bool>;
     {
         sess.get_gpu_process_list(ph)
@@ -81,9 +80,9 @@ concept nic_session_types = requires {
 
 template <typename T>
 concept nic_session_queries =
-    requires(T sess, typename T::processor_handle ph, typename T::nic_asic_info_t* nap,
-             typename T::nic_port_info_t* npp, typename T::nic_rdma_devices_info_t* ndp,
-             std::uint8_t port_idx, std::uint32_t* cp, typename T::nic_stat_t* nsp) {
+    requires(T sess, T::processor_handle ph, T::nic_asic_info_t* nap,
+             T::nic_port_info_t* npp, T::nic_rdma_devices_info_t* ndp,
+             std::uint8_t port_idx, std::uint32_t* cp, T::nic_stat_t* nsp) {
         { sess.get_nic_asic_info(ph, nap) };
         { sess.get_nic_port_info(ph, npp) };
         { sess.get_nic_rdma_dev_info(ph, ndp) };
@@ -247,7 +246,7 @@ public:
 #endif
 
 private:
-    using gpu_metrics_t = typename Backend::gpu_metrics_t;
+    using gpu_metrics_t = Backend::gpu_metrics_t;
 
     // ── Metric conversion ─────────────────────────────────────────────────────
 
@@ -325,8 +324,8 @@ private:
 
     // ── Members ───────────────────────────────────────────────────────────────
 
-    std::shared_ptr<Backend>           m_session;
-    typename Backend::processor_handle m_handle;
+    std::shared_ptr<Backend>  m_session;
+    Backend::processor_handle m_handle;
 };
 
 }  // namespace rocprofsys::backends::amd_smi

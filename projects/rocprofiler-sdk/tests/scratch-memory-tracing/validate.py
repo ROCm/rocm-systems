@@ -24,7 +24,6 @@
 
 import sys
 import pytest
-import json
 
 from collections import defaultdict
 
@@ -247,9 +246,12 @@ def test_scratch_memory_tracking(input_data):
     bf_threads = defaultdict(list)
 
     # fetch node["payload"]
-    pl = lambda x: x["payload"]
+    def pl(x):
+        return x["payload"]
+
     # fetch node
-    rc = lambda x: x
+    def rc(x):
+        return x
 
     for node in scratch_callback_data:
         cb_threads[rc(node)["thread_id"]].append(node)

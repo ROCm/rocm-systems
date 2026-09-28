@@ -6,9 +6,7 @@
 #include <cctype>
 #include <string_view>
 
-namespace rocprofsys
-{
-namespace env_vars
+namespace rocprofsys::env_vars
 {
 
 // --- General ---
@@ -366,5 +364,4 @@ log_level_to_verbose(std::string_view level) noexcept
     return -1;
 }
 
-}  // namespace env_vars
-}  // namespace rocprofsys
+}  // namespace rocprofsys::env_vars

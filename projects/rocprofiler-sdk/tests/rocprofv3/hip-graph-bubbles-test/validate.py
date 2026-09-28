@@ -171,8 +171,8 @@ def test_kernel_trace_no_bubbles(
                 all_gaps.append(gap)
             except (KeyError, ValueError) as e:
                 raise ValueError(
-                    f"Correlation ID {corr_id}, dispatch pair {i},{i+1}: "
-                    f"failed to parse timestamps from {sorted_dispatches[i]} and {sorted_dispatches[i+1]}"
+                    f"Correlation ID {corr_id}, dispatch pair {i},{i + 1}: "
+                    f"failed to parse timestamps from {sorted_dispatches[i]} and {sorted_dispatches[i + 1]}"
                 ) from e
 
     # Analyze gaps
@@ -192,9 +192,9 @@ def test_kernel_trace_no_bubbles(
     if p99_9_gap > OUTLIER_THRESHOLD_NS:
         raise AssertionError(
             f"Bubble detected: batching pattern with large inter-batch gaps. "
-            f"99.9th percentile gap is {p99_9_gap}ns ({p99_9_gap/1000:.2f}µs), "
-            f"which exceeds the threshold of {OUTLIER_THRESHOLD_NS}ns ({OUTLIER_THRESHOLD_NS/1000}µs). "
-            f"Max gap: {max_gap}ns ({max_gap/1000:.2f}µs). "
+            f"99.9th percentile gap is {p99_9_gap}ns ({p99_9_gap / 1000:.2f}µs), "
+            f"which exceeds the threshold of {OUTLIER_THRESHOLD_NS}ns ({OUTLIER_THRESHOLD_NS / 1000}µs). "
+            f"Max gap: {max_gap}ns ({max_gap / 1000:.2f}µs). "
             f"Total gaps analyzed: {len(all_gaps)}. "
             f"This indicates kernels are being dispatched in batches rather than continuously."
         )

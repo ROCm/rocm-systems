@@ -1300,12 +1300,6 @@ private:
     {
         const auto a = std::string(alias);
 
-        // `base` is a mutable, shared builder -- every .where()/.and_where()
-        // call below mutates the same underlying stream. Capture the
-        // unfiltered SQL now, before any of that happens, for later reuse
-        // building the UNION-based track_filtered/track_and_time_filtered
-        // queries (get_query_string() after those calls would otherwise
-        // pick up their leftover WHERE clause).
         const auto unfiltered_sql = base.get_query_string();
 
         out.base = m_backend->create_read_statement_executor<timeline_event_result>(
@@ -1336,23 +1330,6 @@ private:
                 &timeline_event_result::tid,
                 &timeline_event_result::track_id);
 
-        // track_filtered/track_and_time_filtered used to express "own track OR
-        // sample-linked track" as a single OR spanning two tables inside a
-        // LEFT JOIN. SQLite can't use an index for that (confirmed via
-        // EXPLAIN QUERY PLAN: always a full table SCAN, regardless of any
-        // added index or time bounds). Rewritten as a UNION ALL of two
-        // independently-indexable branches instead: verified on a 5.9GB
-        // trace this drops a ~1.7s query to ~4ms (with the (nid,pid,tid)
-        // index from initialize_track_topology_indexes()). UNION ALL (not
-        // UNION) is safe here because the two branches are disjoint BY
-        // CONSTRUCTION: "own track" requires S.track_id IS NULL, so it can
-        // never match the same row as the "S.track_id = ?" branch. This
-        // matters now that a thread's sample-tagged events are surfaced as
-        // a separate thread_sample track (see reader_catalog.cpp) instead
-        // of just being (historically, in every trace observed) absent.
-        // UNION ALL skips the DISTINCT temp-b-tree dedup pass, which
-        // otherwise roughly doubles the cost of reading a whole large track
-        // (measured).
         const auto own_track_where = a + ".nid = ? AND " + a + ".pid = ? AND " + a +
                                      ".tid = ? AND S.track_id IS NULL";
 

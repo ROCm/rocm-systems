@@ -40,6 +40,8 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `FreshRegistration*`.
   - `rma/rma_proxy_progress.cc` (`RMA_PROXY_PROGRESS_CC_PATH`, from
     `rma-proxy-progress-test.cc`); suite `RmaProxyProgressTest.*`.
+  - `plugin/gin.cc` (`GIN_CC_PATH`, from `gin-plugin-init-test.cc`); suite
+    `GinPluginInitTest.*`. NVIDIA/nccl#2179 GIN init-context leak.
   - `group.cc` (`GROUP_CC_PATH`, from `group-test.cc`); suite
     `GroupEndInternalTest.*`.
   - `devcomm/devcomm_v22902.cc` + `devcomm/devcomm_v22907.cc`
@@ -92,6 +94,12 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     every header declaring a renamed name must precede it and the undef half
     must immediately follow the unit -- see `fakes/libc_seam.h:9-19`) instead
     of the shared `fakes/nccl_fakes.cc` the other units in this binary use.
+  - `tuning/tuning_general.cc` (`TUNING_GENERAL_CC_PATH`, from
+    `tuning-general-test.cc`); suite `TuningGeneralMicrotest.*`. Covers the
+    shared step-count, hardware-index, time-estimation, thread-threshold,
+    channel/warp-selection, and tuning-ID helpers without a GPU. This TU
+    defines `ncclParamNthreads` and `ncclParamLl128Nthreads`; do not duplicate
+    them in `fakes/tuning_fakes.cc`.
 - **`rccl-UnitTestsMicroEnqueue`** — `enqueue.cc` (via `ENQUEUE_CC_PATH`); suite
   `EnqueueMicrotest.*`. All tests live in `enqueue-test.cc`, grouped by unit under
   test; several fixtures are reused by later groups, so the order within the file
@@ -209,7 +217,7 @@ test:
    `rccl-UnitTestsMicro`). If you add a new gtest suite, add its pattern to the
    target's `test/test_categories_micro*.yaml` so CTest runs it.
 3. **Write the `TEST` / fixture.** Use a fixture whose `TearDown()` calls the
-   unit's reset entry point (`ResetP2pFakes()`, `ResetEnqueueFakes()`, ...) so
+   unit's reset entry point (`ResetP2pFakes()`, `ResetInitFakes()`, ...) so
    hooks do not leak between tests. Install per-test behaviour by overwriting a
    `std::function` hook rather than editing a fake's default. Prefer the
    `ScopedHook` helper in `ScopedHook.h` (see
@@ -283,7 +291,7 @@ symbol.
 | `src/recorder.cc` | `fakes/recorder_fakes.cc` |
 | `src/register/*.cc` | `fakes/register_stubs.cc` |
 | `src/scheduler/*.cc`'s own public entry points (targets that don't compile the real files, e.g. `rccl-UnitTestsMicroEnqueue`) and the deep launch paths | `fakes/sched_stubs.cc` |
-| `src/scheduler/*.cc`'s dependencies (`rccl-UnitTestsMicroWarpSpeed`, which compiles the real files and tests them directly) | `fakes/enqueue_symbols_fakes.cc` |
+| `src/scheduler/*.cc`'s dependencies (`rccl-UnitTestsMicroWarpSpeed`, which compiles the real files and tests them directly) | `fakes/enqueue_fakes.cc` |
 | `src/sym_kernels.cc` | `fakes/sym_kernels_fakes.cc` |
 | `src/transport/*`, `src/plugin/net.cc` | `fakes/transport_stubs.cc` |
 | libc (`gethostname`, `dladdr`) | `fakes/libc_interposers.cc` |
@@ -331,9 +339,10 @@ Five things do NOT follow the TU-per-file rule, deliberately:
   them *do* have an owner — `src/misc/utils.cc` — so they live in
   `fakes/utils_fakes.cc`, not here.)
 
-`<uut>_fakes.h` (e.g. `enqueue_fakes.h`) is an aggregation header: it includes
-the per-TU headers that unit's tests use and declares the `Reset<Uut>Fakes()`
-that chains their per-TU resets. It defines no seams itself.
+An aggregation header includes the per-TU headers a unit's tests use and
+declares the reset that chains their per-TU resets, and defines no seams itself.
+`enqueue_test_deps.h` is the only one: it is named for that role rather than
+`<uut>_fakes.h`, because `enqueue_fakes.h` now holds `enqueue.cc`'s own seams.
 
 **`RCCL_STUBS_OMIT_<symbol>` is only for a symbol the unit under test defines**,
 where the omission exists purely to avoid a duplicate at link time. If a target

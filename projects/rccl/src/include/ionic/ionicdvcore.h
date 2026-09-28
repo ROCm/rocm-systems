@@ -1,6 +1,10 @@
 #ifndef NCCL_IONICDV_CORE_H_
 #define NCCL_IONICDV_CORE_H_
 
+/* Check whether the full ionic_dv.h header has already been included elsewhere.
+ * E.g. by rocSHMEM or GIN-GDA. */
+#ifndef IONIC_DV_H
+
 /* Basic ionic direct verbs structs.
  * Needed to dynamically load ionic direct verbs functions without
  * explicit including of ionic direct verbs header.
@@ -16,5 +20,7 @@ enum ionicdv_reg_udma_mask {
   IONIC_UDMA_MASK_LOW = 1,
   IONIC_UDMA_MASK_HIGH = 2
 };
+
+#endif  // IONIC_DV_H
 
 #endif  // NCCL_IONICDV_CORE_H_
