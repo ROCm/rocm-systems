@@ -13,6 +13,7 @@
 
 #include <memory>
 #include <optional>
+#include <unordered_map>
 
 namespace profiler_hub
 {
@@ -64,6 +65,10 @@ struct reader_t::impl
         reader_types::track_info_ptr_t      track,
         const reader_types::event_filter_t& filter);
 
+    [[nodiscard]] reader_types::counter_timeline_event_list_t
+    get_counter_events_for_track(reader_types::track_info_ptr_t      track,
+                                 const reader_types::event_filter_t& filter);
+
     [[nodiscard]] size_t get_event_count(const reader_types::event_filter_t& filter);
 
     // Event detail queries
@@ -100,6 +105,11 @@ struct reader_t::impl
 private:
     void initialize_string_list();
     void initialize_all_info_lists();
+
+    // Track id -> total event count, used to populate track_info_t::event_count.
+    // `tracks` must be the raw rows just read from track_info_statement().
+    [[nodiscard]] std::unordered_map<size_t, size_t> get_track_event_counts(
+        const std::vector<data_storage::schema_v3::track_info_result>& tracks);
 
     // Resolve event metadata from event-specific table by db_id and type.
     // Returns event_id_result containing event_id + stack_id + call_stack JSON etc.

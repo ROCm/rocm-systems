@@ -19,6 +19,7 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
 option(PROFILER_HUB_BUILD_TESTS "Build unit tests" ON)
 option(PROFILER_HUB_BUILD_BENCHMARKS "Build performance benchmarks" ON)
+option(PROFILER_HUB_BUILD_EXAMPLES "Build examples" ON)
 option(PROFILER_HUB_ENABLE_LOGGING "Enable logging" OFF)
 option(PROFILER_HUB_ENABLE_COVERAGE "Enable code coverage" OFF)
 
@@ -84,6 +85,12 @@ add_subdirectory(source)
 # ------------------------------------------------------------ #
 
 add_subdirectory(include/cpp)
+
+list(
+    APPEND profiler-hub_public_headers
+    ${CMAKE_CURRENT_LIST_DIR}/include/c/profiler_hub.h
+    ${CMAKE_CURRENT_LIST_DIR}/include/c/profiler_hub_types.h
+)
 
 foreach(HEADER_FILE ${profiler-hub_public_headers})
     file(
@@ -334,6 +341,7 @@ install(
     COMPONENT profiler-hub
     FILES_MATCHING
     PATTERN "*.hpp"
+    PATTERN "*.h"
 )
 
 install(
@@ -479,4 +487,8 @@ endif()
 
 if(PROFILER_HUB_BUILD_TESTS OR PROFILER_HUB_BUILD_BENCHMARKS)
     add_subdirectory(tests)
+endif()
+
+if(PROFILER_HUB_BUILD_EXAMPLES)
+    add_subdirectory(examples/clients)
 endif()

@@ -84,6 +84,13 @@ reader_t::get_events_for_track(reader_types::track_info_ptr_t      track,
     return m_impl->get_events_for_track(std::move(track), filter);
 }
 
+reader_types::counter_timeline_event_list_t
+reader_t::get_counter_events_for_track(reader_types::track_info_ptr_t      track,
+                                       const reader_types::event_filter_t& filter) const
+{
+    return m_impl->get_counter_events_for_track(std::move(track), filter);
+}
+
 reader_types::timeline_event_list_t
 reader_t::get_events(const reader_types::event_filter_t& filter) const
 {

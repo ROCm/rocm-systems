@@ -10,6 +10,9 @@ set(profiler-hub_sources
     ${CMAKE_CURRENT_LIST_DIR}/reader_impl.cpp
     ${CMAKE_CURRENT_LIST_DIR}/storage.cpp
     ${CMAKE_CURRENT_LIST_DIR}/storage_impl.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/profiler_hub_ctx.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/profiler_hub_ctx.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/profiler_hub_c_api.cpp
 )
 target_sources(profiler-hub-objects PRIVATE ${profiler-hub_sources})
 

@@ -123,6 +123,16 @@ struct reader_t
         const reader_types::event_filter_t& filter = {}) const;
 
     /**
+     * @brief Get PMC/counter samples for a track within an optional time window
+     * @param track Track to query samples for (must have a non-zero agent_id)
+     * @param filter Optional filter for time window
+     * @return List of lightweight counter events for display
+     */
+    [[nodiscard]] reader_types::counter_timeline_event_list_t
+    get_counter_events_for_track(reader_types::track_info_ptr_t      track,
+                                 const reader_types::event_filter_t& filter = {}) const;
+
+    /**
      * @brief Get events across all tracks matching filter
      * @param filter Optional filter for time window and pagination
      * @return List of lightweight timeline events for display

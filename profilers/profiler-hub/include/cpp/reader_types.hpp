@@ -8,6 +8,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -264,8 +265,11 @@ using kernel_symbol_info_list_t = std::vector<kernel_symbol_info_ptr_t>;
 
 struct track_info_t
 {
+    size_t      id{};
     std::string name{};
     std::string extdata{};
+    size_t      event_count{};
+    size_t      agent_id{};
 
     std::shared_ptr<node_info_t>    node_info;
     std::shared_ptr<process_info_t> process_info;
@@ -480,8 +484,8 @@ struct timeline_event_t
     timestamp_ns_t start_timestamp;
     timestamp_ns_t end_timestamp;
 
-    std::string display_name;
-    std::string category;
+    std::string_view display_name;
+    std::string_view category;
 
     track_info_ptr_t track;
 };
@@ -493,7 +497,7 @@ struct counter_timeline_event_t
     unique_timeline_event_id_t unique_identifier;
 
     timestamp_ns_t timestamp;
-    size_t         value;
+    double         value;
 
     track_info_ptr_t track;
 };
