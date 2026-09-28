@@ -33,10 +33,15 @@ TEST(LibMountHelper, GetMountInfoThrowsOnContextCreationFailure)
 
     auto dev{makedev(123, 456)};
 
-    EXPECT_CALL(mlibmount, mnt_new_context).Times(1).WillOnce(Return(nullptr));
+    EXPECT_CALL(mlibmount, mnt_new_context).WillOnce(Return(nullptr));
 
-    ASSERT_THAT(([=] { LibMountHelper().getMountInfo(dev); }),
-                ThrowsMessage<std::runtime_error>(StrEq("libmount: Could not create context")));
+    try {
+        LibMountHelper().getMountInfo(dev);
+        FAIL() << "Expected std::runtime_error";
+    }
+    catch (const std::runtime_error &err) {
+        ASSERT_STREQ(err.what(), "libmount: Could not create context");
+    }
 }
 
 TEST(LibMountHelper, GetMountInfoThrowsOnGetMountTableFailure)
@@ -50,11 +55,16 @@ TEST(LibMountHelper, GetMountInfoThrowsOnGetMountTableFailure)
     EXPECT_CALL(mlibmount, mnt_context_get_mtab(cxt, NotNull())).WillOnce(Return(-1));
     EXPECT_CALL(mlibmount, mnt_free_context(cxt));
 
-    ASSERT_THAT(([=] { LibMountHelper().getMountInfo(dev); }),
-                ThrowsMessage<std::runtime_error>(StrEq("libmount: Could not get mount table")));
+    try {
+        LibMountHelper().getMountInfo(dev);
+        FAIL() << "Expected std::system_error";
+    }
+    catch (const std::runtime_error &err) {
+        ASSERT_STREQ(err.what(), "libmount: Could not get mount table");
+    }
 }
 
-TEST(LibMountHelper, GetMountInfoThowsOnGetFilesystemOptionFailure)
+TEST(LibMountHelper, GetMountInfoThrowsOnGetFilesystemOptionFailure)
 {
     StrictMock<MLibMount> mlibmount;
 
@@ -71,8 +81,13 @@ TEST(LibMountHelper, GetMountInfoThowsOnGetFilesystemOptionFailure)
     EXPECT_CALL(mlibmount, mnt_fs_get_option(fs, StrEq("data"), NotNull(), _)).WillOnce(Return(-1));
     EXPECT_CALL(mlibmount, mnt_free_context(cxt));
 
-    ASSERT_THAT(([=] { LibMountHelper().getMountInfo(dev); }),
-                ThrowsMessage<std::runtime_error>(StrEq("libmount: Could not get mount option: data")));
+    try {
+        LibMountHelper().getMountInfo(dev);
+        FAIL() << "Expected std::runtime_error";
+    }
+    catch (const std::runtime_error &err) {
+        ASSERT_STREQ(err.what(), "libmount: Could not get mount option: data");
+    }
 }
 
 TEST(LibMountHelper, GetMountInfoReturnsEmptyOptionIfNoInfoForDevFound)
