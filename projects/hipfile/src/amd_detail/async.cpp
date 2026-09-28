@@ -6,12 +6,16 @@
 #include "async.h"
 #include "backend.h"
 #include "context.h"
+#include "hip.h"
 #include "hipfile.h"
 #include "stream.h"
 #include "sys.h"
 #include "thread-pool.h"
+#include "util.h"
 
+#include <algorithm>
 #include <atomic>
+#include <hip/hip_runtime_api.h>
 #include <memory>
 #include <stdexcept>
 #include <syslog.h>
@@ -126,6 +130,70 @@ AsyncOp::AsyncOp(IoType _io_type, std::shared_ptr<IFile> _file, std::shared_ptr<
 
 AsyncOp::~AsyncOp()
 {
+}
+
+void
+async_run_io(void *userargs)
+{
+    auto         op   = static_cast<AsyncOp *>(userargs);
+    const size_t size = std::min(*get_variant_ptr(op->size), getMaxRwCount());
+    const hoff_t fo   = *get_variant_ptr(op->file_offset);
+    const hoff_t bo   = *get_variant_ptr(op->buffer_offset);
+    try {
+        op->bytes_transferred_internal =
+            op->backend->io(op->io_type, op->file, op->buffer, size, fo, bo, op->stream->copyStream());
+    }
+    catch (...) {
+        op->bytes_transferred_internal = -hipFileInternalError;
+    }
+}
+
+void
+enqueueAsync(std::shared_ptr<Backend> backend, IoType type, std::shared_ptr<IFile> file,
+             std::shared_ptr<IBuffer> buffer, size_t *size_p, hoff_t *file_offset_p, hoff_t *buffer_offset_p,
+             ssize_t *bytes_transferred_p, std::shared_ptr<IStream> stream)
+{
+    *bytes_transferred_p = 0;
+
+    auto op     = std::make_shared<AsyncOp>(type, std::move(file), std::move(buffer), stream, size_p,
+                                            file_offset_p, buffer_offset_p, bytes_transferred_p);
+    op->backend = std::move(backend);
+    op->io_fn   = async_run_io;
+    Context<AsyncMonitor>::get()->addOp(op);
+
+    auto        stream_lock = stream->getLock();
+    hipStream_t hip_stream  = stream->getHipStream();
+    bool        wait_value  = stream->canUseStreamWaitValue();
+    bool        dispatched  = false;
+    bool        targeted    = false;
+
+    try {
+        if (wait_value) {
+            op->wait_target = stream->nextSignalTarget();
+            targeted        = true;
+            Context<Hip>::get()->hipLaunchHostFunc(hip_stream, async_dispatch, op.get());
+            dispatched = true;
+            Context<Hip>::get()->hipStreamWaitValue64(hip_stream, stream->signalSlot(), op->wait_target,
+                                                      hipStreamWaitValueGte, ~uint64_t{0});
+        }
+        else {
+            Context<Hip>::get()->hipLaunchHostFunc(hip_stream, async_run_io, op.get());
+        }
+        Context<Hip>::get()->hipLaunchHostFunc(hip_stream, async_io_cleanup, op.get());
+    }
+    catch (...) {
+        if (targeted && !dispatched) {
+            std::atomic_ref<uint64_t>{*stream->signalSlot()}.fetch_add(1, std::memory_order_release);
+        }
+        try {
+            Context<Hip>::get()->hipLaunchHostFunc(hip_stream, async_io_cleanup, op.get());
+        }
+        catch (...) {
+            Context<Sys>::get()->syslog(LOG_CRIT,
+                                        "Unable to enqueue async cleanup function. This will leak memory.");
+        }
+        throw;
+    }
 }
 
 }

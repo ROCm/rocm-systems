@@ -150,6 +150,16 @@ TEST_F(HipFileStream, no_signal_slot_when_wait_value_unsupported)
     ASSERT_NE(stream->copyStream(), nullptr);
 }
 
+TEST_F(HipFileStream, next_signal_target_increments_monotonically)
+{
+    EXPECT_CALL(mhip, hipStreamGetDevice);
+    stream_map.registerStream(nonnull_stream, 0);
+    auto stream = stream_map.getStream(nonnull_stream);
+    ASSERT_EQ(stream->nextSignalTarget(), 1u);
+    ASSERT_EQ(stream->nextSignalTarget(), 2u);
+    ASSERT_EQ(stream->nextSignalTarget(), 3u);
+}
+
 TEST_F(HipFileStream, register_with_invalid_flags_throws)
 {
     ASSERT_THROW(stream_map.registerStream(nonnull_stream, HIPFILE_STREAM_FLAGS_MASK + 1),

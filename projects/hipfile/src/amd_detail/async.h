@@ -27,6 +27,9 @@ namespace hipFile {
 class IStream;
 }
 namespace hipFile {
+struct Backend;
+}
+namespace hipFile {
 enum class IoType;
 }
 
@@ -51,7 +54,8 @@ public:
     bool                                 write_result{true};
     bool                                 committed{true};
     void (*io_fn)(void *){nullptr};
-    uint64_t wait_target{0};
+    uint64_t                 wait_target{0};
+    std::shared_ptr<Backend> backend{};
 
     AsyncOp(const AsyncOp &)            = delete;
     AsyncOp &operator=(const AsyncOp &) = delete;
@@ -83,6 +87,12 @@ private:
     std::condition_variable                              cv;
     bool                                                 is_finished;
 };
+
+void async_run_io(void *userargs);
+
+void enqueueAsync(std::shared_ptr<Backend> backend, IoType type, std::shared_ptr<IFile> file,
+                  std::shared_ptr<IBuffer> buffer, size_t *size_p, hoff_t *file_offset_p,
+                  hoff_t *buffer_offset_p, ssize_t *bytes_transferred_p, std::shared_ptr<IStream> stream);
 }
 
 extern "C" {
