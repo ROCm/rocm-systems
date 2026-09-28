@@ -46,6 +46,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+#include <cstdio>
 #include <vector>
 #include <algorithm>
 
@@ -659,6 +660,30 @@ static hsa_status_t GetPoolInfo(hsa_amd_memory_pool_t pool, void* data) {
   return HSA_STATUS_SUCCESS;
 }
 
+// Return the OS NUMA node that a PCI device is attached to, as reported by
+// sysfs (/sys/bus/pci/devices/<domain:bus:device.function>/numa_node). Returns
+// -1 when the affinity is unknown, matching the kernel convention on systems
+// without NUMA information. This replaces the hwloc PCI-ancestor NUMA lookup.
+static int ReadPciDeviceNumaNode(uint32_t domain, uint8_t bus, uint8_t device,
+                                 uint8_t function) {
+  char path[64];
+  snprintf(path, sizeof(path),
+           "/sys/bus/pci/devices/%04x:%02x:%02x.%x/numa_node",
+           domain, bus, device, function);
+
+  FILE* f = fopen(path, "r");
+  if (f == nullptr) {
+    return -1;
+  }
+
+  int node = -1;
+  if (fscanf(f, "%d", &node) != 1) {
+    node = -1;
+  }
+  fclose(f);
+  return node;
+}
+
 static hsa_status_t GetGPUAgents(hsa_agent_t agent, void* data) {
   hsa_status_t err;
   MemoryAsyncCopy* ptr = reinterpret_cast<MemoryAsyncCopy*>(data);
@@ -702,10 +727,23 @@ static hsa_status_t GetGPUAgents(hsa_agent_t agent, void* data) {
     is_dxg = true;
   }
 
+  // Determine the GPU's OS NUMA node from the NUMA node its PCI device is
+  // attached to. HSA_AGENT_INFO_NODE returns the KFD topology node id, which is
+  // unique per agent, so a CPU and a GPU never share it and it cannot be used
+  // to test locality. The GPU's PCI numa_node, compared against the CPU agent's
+  // NUMA node below, is a real local-vs-remote test.
   uint32_t gpu_numa_node_id = MemoryAsyncCopy::kUnknownNumaNode;
   if ((agent_bdf_id != kDtifBdfId) && !is_dxg) {
-    err = hsa_agent_get_info(agent, HSA_AGENT_INFO_NODE, &gpu_numa_node_id);
+    uint32_t pci_domain_id = 0;
+    err = hsa_agent_get_info(agent,
+                (hsa_agent_info_t)HSA_AMD_AGENT_INFO_DOMAIN, &pci_domain_id);
     RET_IF_HSA_ERR(err);
+
+    int gpu_os_numa =
+        ReadPciDeviceNumaNode(pci_domain_id, bus, device, function);
+    if (gpu_os_numa >= 0) {
+      gpu_numa_node_id = static_cast<uint32_t>(gpu_os_numa);
+    }
   }
 
   if (gpu_numa_node_id != MemoryAsyncCopy::kUnknownNumaNode) {
@@ -879,6 +917,10 @@ static hsa_status_t GetAgentInfo(hsa_agent_t agent, void* data) {
   }
 
   ptr->set_cpu_agent(agent);
+  // For a CPU agent the KFD topology node id returned by HSA_AGENT_INFO_NODE
+  // corresponds to its OS NUMA node (KFD enumerates CPU NUMA nodes first, with
+  // matching indices), so it is comparable against a GPU's PCI numa_node in
+  // GetGPUAgents. This mirrors the assumption the previous hwloc code made.
   uint32_t cpu_numa_node_id;
 
   err = hsa_agent_get_info(ptr->cpu_agent(), HSA_AGENT_INFO_NODE,
