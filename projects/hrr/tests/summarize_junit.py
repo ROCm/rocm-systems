@@ -55,6 +55,16 @@ def summarize_xml(path: Path) -> dict[str, object]:
     return {"counts": counts, "failed": failed, "total": len(cases)}
 
 
+def try_summarize(path: Path, errors: list[str]) -> dict[str, object]:
+    # A job killed mid-run (timeout, lost runner) can upload a truncated or
+    # empty file. Report it as unreadable rather than abort the whole table.
+    try:
+        return summarize_xml(path)
+    except (ET.ParseError, OSError) as error:
+        errors.append(f"{path.name}: {error}")
+        return {"error": str(error)}
+
+
 def cell(value: object) -> str:
     return "—" if value is None else str(value)
 
@@ -70,12 +80,12 @@ def failed_cell(names: list[str]) -> str:
     return text
 
 
-def render(directory: Path) -> str:
+def render(directory: Path, errors: list[str]) -> str:
     rows: list[tuple[str, str, dict[str, object] | None]] = []
     for filename, suite, platform in COLUMNS:
         path = directory / filename
         if path.is_file():
-            rows.append((suite, platform, summarize_xml(path)))
+            rows.append((suite, platform, try_summarize(path, errors)))
         else:
             rows.append((suite, platform, None))
 
@@ -85,7 +95,7 @@ def render(directory: Path) -> str:
         if path.name not in {filename for filename, _, _ in COLUMNS}
     )
     for filename in extra:
-        rows.append(("Other", filename, summarize_xml(directory / filename)))
+        rows.append(("Other", filename, try_summarize(directory / filename, errors)))
 
     lines = [
         "## HRR results by platform",
@@ -96,6 +106,11 @@ def render(directory: Path) -> str:
     for suite, platform, data in rows:
         if data is None:
             lines.append(f"| {suite} | {platform} | — | — | — | _no results_ |")
+            continue
+        if "error" in data:
+            lines.append(
+                f"| {suite} | {platform} | — | — | — | _unreadable XML: {data['error']}_ |"
+            )
             continue
         counts = data["counts"]
         lines.append(
@@ -112,7 +127,7 @@ def render(directory: Path) -> str:
     lines.extend(
         [
             "",
-            "Counts are top-level Catch2 cases. Missing XML means that job did not upload results (cancelled or not started).",
+            "Counts are top-level Catch2 cases. Missing XML means that job did not upload results (cancelled or not started). Unreadable XML is usually a job killed mid-run; its results are incomplete.",
             "",
             "### Counts grid",
             "",
@@ -126,7 +141,7 @@ def render(directory: Path) -> str:
         values = []
         for _, _, data in rows:
             values.append(
-                cell(None if data is None else data["counts"][key])
+                cell(None if data is None or "error" in data else data["counts"][key])
             )
         lines.append("| " + " | ".join([label, *values]) + " |")
 
@@ -145,12 +160,15 @@ def main() -> int:
     if not args.dir.is_dir():
         print(f"not a directory: {args.dir}", file=sys.stderr)
         return 1
-    markdown = render(args.dir)
+    errors: list[str] = []
+    markdown = render(args.dir, errors)
     sys.stdout.write(markdown)
     if args.summary is not None:
         with args.summary.open("a", encoding="utf-8") as out:
             out.write(markdown)
-    return 0
+    for error in errors:
+        print(f"::error::unreadable JUnit XML {error}")
+    return 1 if errors else 0
 
 
 if __name__ == "__main__":
