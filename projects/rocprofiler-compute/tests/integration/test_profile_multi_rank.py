@@ -27,6 +27,7 @@ def assert_gpu_ids_are_agent_node_ids(rank_dir):
         agents_csv = rank_dir / dispatch_csv.name.replace("dispatch_", "agents_", 1)
         assert agents_csv.is_file(), f"No agents CSV beside {dispatch_csv.name}"
         node_ids = set(pd.read_csv(agents_csv)["node_id"])
+        # Subset: agents lists every GPU, not just the ones dispatched to.
         assert set(pd.read_csv(dispatch_csv)["gpu_id"]) <= node_ids
 
 

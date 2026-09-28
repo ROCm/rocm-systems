@@ -37,12 +37,11 @@ std::filesystem::path expected_output_directory(std::string_view output_path,
 rocprofiler_agent_t make_agent(uint64_t handle, rocprofiler_agent_type_t type, uint32_t node_id)
 {
     rocprofiler_agent_t agent{};
-    agent.id.handle       = handle;
-    agent.type            = type;
-    agent.node_id         = node_id;
-    agent.logical_node_id = static_cast<int32_t>(node_id);
-    agent.name            = "gfx942";
-    agent.product_name    = "AMD Instinct MI300X";
+    agent.id.handle    = handle;
+    agent.type         = type;
+    agent.node_id      = node_id;
+    agent.name         = "gfx942";
+    agent.product_name = "AMD Instinct MI300X";
     return agent;
 }
 }  // namespace

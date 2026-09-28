@@ -11,12 +11,10 @@ import pandas as pd
 import pytest
 
 from utils.file_io import (
-    build_node_to_gpu_map,
     create_df_kernel_top_stats,
     create_df_pmc,
     is_single_panel_config,
     load_kernel_short_names,
-    load_node_to_gpu_map,
     rank_kernels_by_total_duration,
     validate_kernel_filter_ids,
 )
@@ -39,10 +37,16 @@ NATIVE_KERNEL_SYMBOLS_CSV = (
     "kernel_id,kernel_name,kernel_short_name,arch_vgpr,accum_vgpr,sgpr\n"
     "7,kernel_a,kernel_a,8,0,16\n"
 )
+NATIVE_AGENTS_HEADER = "node_id,name,product_name\n"
 
 
-def write_native_process(workload_dir, fbase, pid, counters, dispatch_ids, gpu_id=0):
-    """Write one process's native CSVs; counters are (dispatch_id, name, value)."""
+def write_native_process(
+    workload_dir, fbase, pid, counters, dispatch_ids, gpu_id=0, agent_node_ids=None
+):
+    """Write one process's native CSVs; counters are (dispatch_id, name, value).
+
+    The agents CSV lists agent_node_ids, or just gpu_id when not given.
+    """
     common.write_gzip_csv(
         workload_dir / f"counters_{fbase}_{pid}.csv.gz",
         NATIVE_COUNTERS_HEADER
@@ -59,6 +63,14 @@ def write_native_process(workload_dir, fbase, pid, counters, dispatch_ids, gpu_i
     common.write_gzip_csv(
         workload_dir / f"kernel_symbols_{fbase}_{pid}.csv.gz",
         NATIVE_KERNEL_SYMBOLS_CSV,
+    )
+    common.write_gzip_csv(
+        workload_dir / f"agents_{fbase}_{pid}.csv.gz",
+        NATIVE_AGENTS_HEADER
+        + "".join(
+            f'{node_id},"gfx942","AMD Instinct MI300X"\n'
+            for node_id in (agent_node_ids or [gpu_id])
+        ),
     )
 
 
@@ -287,6 +299,21 @@ def test_create_df_pmc_pivots_long_form_without_a_profiling_config(tmp_path) -> 
     assert "Counter_Name" not in df.columns
 
 
+def test_create_df_pmc_numbers_result_gpus_from_zero(tmp_path) -> None:
+    """rocpd GPU ids are node ids, numbered from 0 among the GPUs that ran."""
+    common.write_gzip_csv(
+        tmp_path / "results_pmc_perf_0.csv.gz",
+        ROCPD_COUNTER_HEADER
+        + "5"
+        + ROCPD_COUNTER_ROW_PREFIX.removeprefix("0")
+        + "SQ_WAVES,4\n",
+    )
+
+    df = create_df_pmc(str(tmp_path), verbose=0)
+
+    assert df["GPU_ID"].tolist() == [0]
+
+
 def test_create_df_pmc_combines_result_files_of_one_workload(tmp_path) -> None:
     """Counters split across passes land on the same dispatch row."""
     common.write_gzip_csv(
@@ -437,30 +464,21 @@ def test_create_df_pmc_numbers_gpus_in_node_order_across_processes(tmp_path) -> 
     assert dict(zip(df["SQ_WAVES"], df["GPU_ID"])) == {4: 1, 8: 0}
 
 
-# Native agents CSV
-# =============================================================================
-
-
-def test_build_node_to_gpu_map_numbers_gpus_in_node_order() -> None:
-    agents = pd.DataFrame({"node_id": [5, 2, 3]})
-
-    assert build_node_to_gpu_map(agents) == {2: 0, 3: 1, 5: 2}
-
-
-def test_load_node_to_gpu_map_reads_the_agents_csv(tmp_path) -> None:
-    agents_csv = tmp_path / "agents_pmc_perf_0_100.csv.gz"
-    common.write_gzip_csv(
-        agents_csv,
-        "node_id,logical_node_id,name,product_name\n"
-        '3,1,"gfx942","AMD Instinct MI300X"\n'
-        '2,0,"gfx942","AMD Instinct MI300X"\n',
+def test_create_df_pmc_counts_gpus_that_ran_no_dispatch(tmp_path) -> None:
+    """GPU ids number every agent, so an idle GPU still takes an id."""
+    write_native_process(
+        tmp_path,
+        "pmc_perf_0",
+        100,
+        [(1, "SQ_WAVES", 4)],
+        [1],
+        gpu_id=3,
+        agent_node_ids=[2, 3],
     )
 
-    assert load_node_to_gpu_map(agents_csv) == {2: 0, 3: 1}
+    df = create_df_pmc(str(tmp_path), verbose=0)
 
-
-def test_load_node_to_gpu_map_missing_file_maps_nothing(tmp_path) -> None:
-    assert load_node_to_gpu_map(tmp_path / "agents_pmc_perf_0_100.csv.gz") == {}
+    assert df["GPU_ID"].tolist() == [1]
 
 
 def test_load_kernel_short_names_dedupes_repeated_symbols(tmp_path):
@@ -489,6 +507,7 @@ def test_load_kernel_short_names_prefers_the_native_symbols(tmp_path):
     for prefix, columns in (
         ("counters", ["dispatch_id"]),
         ("dispatch", ["dispatch_id"]),
+        ("agents", ["node_id"]),
     ):
         pd.DataFrame([(1,)], columns=columns).to_csv(
             tmp_path / f"{prefix}_run0_100.csv.gz", index=False
