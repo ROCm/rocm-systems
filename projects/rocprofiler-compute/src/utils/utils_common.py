@@ -36,6 +36,11 @@ from vendored import yaml
 METRIC_ID_RE = re.compile(pattern=r"^\d{1,2}(?:\.\d{1,2}){0,2}$")
 PC_SAMPLING_BLOCK_IDS = ("21", "pc_sampling")
 PROFILE_OUTPUT_FORMAT = "rocpd"
+# Profile names the native tool's per-pid CSVs <prefix>_<fbase>_<pid>.csv.gz
+# in the workload directory, and analyze reads them back by these prefixes.
+NATIVE_COUNTERS_PREFIX = "counters"
+NATIVE_DISPATCH_PREFIX = "dispatch"
+NATIVE_KERNEL_SYMBOLS_PREFIX = "kernel_symbols"
 # Panel id of block 30, Memory Bandwidth Analysis
 MEMBW_ANALYSIS_PANEL_ID: int = 3000
 
