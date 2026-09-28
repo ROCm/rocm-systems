@@ -27,9 +27,6 @@ from hipfile import (
     get_version,
 )
 
-DEFAULT_INPUT_PATH = "/mnt/ais/ext4/random_2MiB.bin"
-DEFAULT_OUTPUT_PATH = "/mnt/ais/ext4/output.bin"
-
 # Max IO in a single transaction is 2GiB - 4KiB as set by the Linux Kernel.
 # Larger IOs will be quietly truncated.
 MAX_TRANSFER_SIZE = 2 * 1024 * 1024 * 1024 - 4 * 1024
@@ -42,17 +39,13 @@ def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "input",
-        nargs="?",
-        default=DEFAULT_INPUT_PATH,
         type=pathlib.Path,
-        help=f"File to read through hipFile (default: {DEFAULT_INPUT_PATH})",
+        help="File to read through hipFile. Must live on an AIS-capable filesystem.",
     )
     parser.add_argument(
         "output",
-        nargs="?",
-        default=DEFAULT_OUTPUT_PATH,
         type=pathlib.Path,
-        help=f"File to write through hipFile (default: {DEFAULT_OUTPUT_PATH})",
+        help="File to write through hipFile. Must live on an AIS-capable filesystem.",
     )
     return parser.parse_args()
 

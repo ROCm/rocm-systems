@@ -49,7 +49,7 @@ on:
         type: string
       run_hardware_test:
         description: >-
-          Run python/main.py against real hardware. Also selects the runner:
+          Run python/tests/main.py against real hardware. Also selects the runner:
           when true the job moves off the GitHub-hosted runner onto a
           self-hosted AIS one. Off by default: it needs a GPU and an
           AIS-capable filesystem, and it is platform/compiler independent, so
@@ -72,7 +72,7 @@ jobs:
     # The sdist build itself is platform-agnostic and happy on a GitHub-hosted
     # runner, so only the leg that also runs the hardware test claims one of the
     # scarce self-hosted AIS runners (shared with the AIS_system_* jobs).
-    runs-on: ${{ inputs.run_hardware_test && fromJSON('["AIS"]') || fromJSON('["ubuntu-24.04"]') }}
+    runs-on: ["${{ inputs.run_hardware_test && 'AIS' || 'ubuntu-24.04' }}"]
     outputs:
       hipfile_python_sdist_filename: ${{ steps.sdist-metadata.outputs.HIPFILE_PYTHON_SDIST_FILENAME }}
     steps:
@@ -238,17 +238,12 @@ jobs:
           retention-days: 1
           compression-level: 0
       # End-to-end exercise of the *real* Cython extension, and the reason this
-      # job claims an AIS runner for one matrix leg: python/tests above is
+      # job claims an AIS runner for one matrix leg: the pytest suite above is
       # deliberately hermetic (it fakes hipfile._hipfile), so nothing there
       # touches a GPU or AIS storage. main.py does. It runs after the artifact
       # upload so a hardware failure still leaves the sdist published for
       # downstream consumers, while the red job keeps gating them.
-      #
-      # -P is load-bearing: without it Python prepends main.py's own directory
-      # to sys.path, and python/ contains the *source* hipfile package (.py
-      # files plus an uncompiled _hipfile.pyx). That would shadow the installed
-      # sdist and fail at `from hipfile._hipfile import ...`.
-      - name: Run python/main.py against AIS hardware
+      - name: Run python/tests/main.py against AIS hardware
         if: ${{ inputs.run_hardware_test }}
         run: |
           docker exec \
@@ -260,7 +255,7 @@ jobs:
               set -e
               mkdir -p "${_AIS_IO_DIR}"
               head --bytes 2M /dev/urandom > "${_AIS_IO_DIR}/random_2MiB.bin"
-              .venv/bin/python -P python/main.py \
+              .venv/bin/python python/tests/main.py \
                 "${_AIS_IO_DIR}/random_2MiB.bin" \
                 "${_AIS_IO_DIR}/output.bin"
             '
