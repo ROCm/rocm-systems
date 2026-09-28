@@ -61,7 +61,10 @@ auto
 perfetto_counter_track<Tp>::exists(size_t _idx, std::int64_t _n)
 {
     bool _v = get_data().second.count(_idx) != 0;
-    if(_n < 0 || !_v) return _v;
+    if(_n < 0 || !_v)
+    {
+        return _v;
+    }
     return static_cast<size_t>(_n) < get_data().second.at(_idx).size();
 }
 
@@ -70,7 +73,10 @@ size_t
 perfetto_counter_track<Tp>::size(size_t _idx)
 {
     bool _v = get_data().second.count(_idx) != 0;
-    if(!_v) return 0;
+    if(!_v)
+    {
+        return 0;
+    }
     return get_data().second.at(_idx).size();
 }
 
@@ -121,15 +127,23 @@ perfetto_counter_track<Tp>::emplace(size_t _idx, const std::string& _v,
             std::set<void*> _prev = {};
             std::set<void*> _curr = {};
             for(const auto& eitr : _missing)
+            {
                 _prev.emplace(static_cast<void*>(const_cast<char*>(std::get<1>(eitr))));
+            }
             for(const auto& eitr : _name_data)
+            {
                 _curr.emplace(static_cast<void*>(const_cast<char*>(eitr->c_str())));
+            }
             std::stringstream _pss{};
             for(auto&& eitr : _prev)
+            {
                 _pss << " " << std::hex << std::setw(12) << std::left << eitr;
+            }
             std::stringstream _css{};
             for(auto&& eitr : _curr)
+            {
                 _css << " " << std::hex << std::setw(12) << std::left << eitr;
+            }
             throw std::runtime_error(fmt::format(
                 "perfetto_counter_track emplace method for '{}' ({:p}) "
                 "invalidated C-string '{}' ({:p}).\nprevious: {}\ncurrent: {}\n",

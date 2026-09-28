@@ -1260,6 +1260,28 @@
         {"name": "CollImplInfo.ReduceScatterSymkNotReportedWhenCuMemDisabled", "description": "With cuMem disabled, rcclSymKGetInfo falls back to the real ReduceScatter backend and never claims SYM", "test_filter": "CollImplInfo.ReduceScatterSymkNotReportedWhenCuMemDisabled"}
       ]
     },
+    "collimplinfo_symmetric_cumem": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTests",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 0,
+      "description": "CollImplInfo symmetric sweeps with cuMem enabled.",
+      "env_variables": {
+        "NCCL_DEBUG": "",
+        "UT_MIN_GPUS": "8",
+        "NCCL_CUMEM_ENABLE": "1"
+      },
+      "rerun_env_variables": {
+        "NCCL_DEBUG": "INFO"
+      },
+      "tests": [
+        {"name": "CollImplInfo.AllReduceSymmetricMatchesDispatchLog.CuMem", "description": "AllReduce with buffers registered as symmetric windows", "test_filter": "CollImplInfo.AllReduceSymmetricMatchesDispatchLog"},
+        {"name": "CollImplInfo.AllGatherSymmetricMatchesDispatchLog.CuMem", "description": "AllGather with buffers registered as symmetric windows", "test_filter": "CollImplInfo.AllGatherSymmetricMatchesDispatchLog"},
+        {"name": "CollImplInfo.ReduceScatterSymmetricMatchesDispatchLog.CuMem", "description": "ReduceScatter with buffers registered as symmetric windows", "test_filter": "CollImplInfo.ReduceScatterSymmetricMatchesDispatchLog"}
+      ]
+    },
     "asymmetric_visibility": {
       "is_gtest": true,
       "binary": "rccl-UnitTests",
@@ -1336,6 +1358,22 @@
         {"name": "NetPluginInitFail.DoesNotFinalizeAfterFailedInit", "description": "AICOMRCCL-1891 / NCCL 2.29.7: ncclNetPluginInit() must not call finalize() for a plugin whose init() failed (crashes on v10 and older, where the compat layer leaves ncclNet.finalize null until init() succeeds)", "test_filter": "NetPluginInitFail.DoesNotFinalizeAfterFailedInit"},
         {"name": "NetPluginInitFail.FailedPluginIsNotRetriedOrFinalized", "description": "AICOMRCCL-1891 / NCCL 2.29.7: a plugin disabled by a failed init() is neither re-inited nor finalized by later comm cycles", "test_filter": "NetPluginInitFail.FailedPluginIsNotRetriedOrFinalized"},
         {"name": "NetPluginInitFail.FinalizesWhenDevicesFailsAfterInit", "description": "AICOMRCCL-1891 / NCCL 2.29.7: the finalize() guard must not suppress cleanup when init() succeeded and devices() failed", "test_filter": "NetPluginInitFail.FinalizesWhenDevicesFailsAfterInit"}
+      ]
+    },
+    "gin_plugin_init_fail": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTests",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 120,
+      "rerun_env_variables": {
+        "NCCL_DEBUG": "INFO"
+      },
+      "tests": [
+        {"name": "GinPluginInitFail.FinalizesWhenDevicesFailsAfterInit", "description": "NCCL 2.30.7 / NVIDIA/nccl#2179: ncclGinPluginInit() must finalize() the context when devices() fails after a successful init()", "test_filter": "GinPluginInitFail.FinalizesWhenDevicesFailsAfterInit"},
+        {"name": "GinPluginInitFail.FinalizesWhenDevicesReportsZero", "description": "NCCL 2.30.7 / NVIDIA/nccl#2179: ncclGinPluginInit() must finalize() the context when devices() reports ndev <= 0 after a successful init()", "test_filter": "GinPluginInitFail.FinalizesWhenDevicesReportsZero"},
+        {"name": "GinPluginInitFail.DoesNotFinalizeAfterFailedInit", "description": "NCCL 2.30.7 / NVIDIA/nccl#2179: finalize() must not run for a GIN plugin whose init() failed", "test_filter": "GinPluginInitFail.DoesNotFinalizeAfterFailedInit"}
       ]
     },
     "debug_tests": {
@@ -2311,7 +2349,7 @@
         { "name": "SymCheckMode_Registration_Match", "description": "DEBUG_GLOBAL is transparent when every rank registers matching symmetric windows.", "test_filter": "SymCheckMode_Registration.DebugGlobal_MatchingRegistration_Succeeds" },
         { "name": "SymCheckMode_Registration_Mismatch", "description": "DEBUG_GLOBAL rejects a collective when one rank's buffer is outside any window.", "test_filter": "SymCheckMode_Registration.DebugGlobal_RegistrationMismatch_Rejected" },
         { "name": "SymCheckMode_Registration_OffsetMismatch", "description": "DEBUG_GLOBAL rejects a user-offset mismatch inside the window.", "test_filter": "SymCheckMode_Registration.DebugGlobal_UserOffsetMismatch_Rejected" },
-        { "name": "SymCheckMode_Registration_DefaultAccepts", "description": "Without NCCL_CHECK_MODE the same mismatch is accepted on the fast path.", "test_filter": "SymCheckMode_Registration.Default_RegistrationMismatch_Accepted" }
+        { "name": "SymCheckMode_Registration_DefaultMatching", "description": "Without NCCL_CHECK_MODE the registered path still runs and reduces correctly.", "test_filter": "SymCheckMode_Registration.Default_MatchingRegistration_Succeeds" }
       ]
     },
     "net_ib_branch_coverage": {
@@ -4431,9 +4469,21 @@
       "enabled": true
     },
     {
+      "name": "GIN Plugin Init Context Leak",
+      "description": "NCCL 2.30.7 / NVIDIA/nccl#2179: GIN plugin finalize() after devices() fails",
+      "config": "gin_plugin_init_fail",
+      "enabled": true
+    },
+    {
       "name": "Unit Tests - Standard Collectives",
       "description": "Basic collective operation tests",
       "config": "unit_tests_standard",
+      "enabled": true
+    },
+    {
+      "name": "Unit Tests - Symmetric CollImplInfo with cuMem",
+      "description": "CollImplInfo symmetric sweeps with cuMem enabled",
+      "config": "collimplinfo_symmetric_cumem",
       "enabled": true
     },
     {

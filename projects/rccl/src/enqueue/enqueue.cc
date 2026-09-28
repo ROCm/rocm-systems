@@ -60,11 +60,15 @@ static ncclKernelMatch const ncclKerns[6] = {
   {(void*)ncclDevKernel_Generic_16, true}, {(void*)ncclDevKernel_Generic_32, true}
 };
 
+/* Host mirror of device side NCCL_LL128_SHMEM_ELEMS_PER_THREAD. Must match the arch gate in
+ * device.h; gfx1250 reports cudaArch 1250 (100 * major + 10 * minor). */
+constexpr int rcclLL128ShmemElemsPerThread(int cudaArch) { return cudaArch == 1250 ? 32 : 8; }
+
 /* Copy of ncclShmemScratchWarpSize */
 constexpr int rcclShmemScratchWarpSize(int cudaArch = NCCL_CUDA_ARCH, int WarpSize = 32) {
   return (max_constexpr<int>(
             /*LL    */ 0,
-            /*LL128 */ (NCCL_LL128_SHMEM_ELEMS_PER_THREAD * WarpSize) * sizeof(uint64_t),
+            /*LL128 */ (rcclLL128ShmemElemsPerThread(cudaArch) * WarpSize) * sizeof(uint64_t),
             /*SIMPLE*/ (ncclCollUnroll(cudaArch) * WarpSize + 1) * 16,
       // NVLS needs an extra 16B to read unaligned data.
             /*NVLS  */ WarpSize * (cudaArch >= 900 ? ncclNvlsUnrollBytes(cudaArch) : 0) + 16) +

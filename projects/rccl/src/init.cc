@@ -486,6 +486,7 @@ static ncclResult_t commFree(ncclComm_t comm) {
   if (comm == NULL) return ncclSuccess;
 
   NCCLCHECK(ncclCeFinalize(comm));
+  NCCLCHECK(ncclRmaCeFinalize(comm));
 
   if (comm->nNodes == 1) {
     NCCLCHECK(ncclMemFree(comm->localSizes));
@@ -2925,9 +2926,10 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   comm->cudaArch = cudaArch;
   comm->archName = archName;
   comm->cuCount = cuCount;
-  // [RCCL] Host mirrors of device side NCCL_LL128_LINEELEMS / NCCL_LL128_DATAELEMS
+  // [RCCL] Host mirrors of device side NCCL_LL128_LINEELEMS / NCCL_LL128_DATAELEMS / NCCL_LL128_SHMEM_ELEMS_PER_THREAD
   comm->ll128LineElems = rcclLL128LineElemsFromArch(comm->archName);
   comm->ll128DataElems = rcclLL128DataElemsFromArch(comm->archName);
+  comm->ll128ShmemElemsPerThread = rcclLL128ShmemElemsPerThreadFromArch(comm->archName);
   comm->archThresholds = rcclGetArchThresholds(comm->archName);
 
   NCCLCHECKGOTO(initTransportsRank(comm, job->parent, timers), res, fail);
@@ -3999,6 +4001,7 @@ static ncclResult_t commDestroySync(struct ncclAsyncJob* job_) {
   struct ncclCommFinalizeAsyncJob* job = (struct ncclCommFinalizeAsyncJob*)job_;
   ncclComm_t comm = job->comm;
   ncclResult_t ret = ncclSuccess;
+  ncclResult_t proxyStopResult = ncclSuccess;
 
   CUDACHECKGOTO(cudaSetDevice(comm->cudaDev), ret, fail);
 
@@ -4050,8 +4053,11 @@ static ncclResult_t commDestroySync(struct ncclAsyncJob* job_) {
     }
   }
 
-  if ((ret = ncclProxyStop(comm)) != ncclSuccess) {
-    INFO(NCCL_DESTROY | NCCL_PROXY, "commDestroySync: comm %p (rank = %d) proxy stop error %d", comm, comm->rank, ret);
+  proxyStopResult = ncclProxyStop(comm);
+  if (proxyStopResult != ncclSuccess) {
+    INFO(NCCL_DESTROY | NCCL_PROXY, "commDestroySync: comm %p (rank = %d) proxy stop error %d", comm, comm->rank,
+         proxyStopResult);
+    if (ret == ncclSuccess) ret = proxyStopResult;
   } else if (comm->finalizeCalled) {
     TRACE_CALL("ncclCommFinalize(%p)", comm);
     INFO(NCCL_DESTROY, "comm %p rank %d nranks %d cudaDev %d busId %lx commId 0x%" PRIx64 " - Finalize COMPLETE", comm,

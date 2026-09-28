@@ -3,7 +3,14 @@
 Full documentation for AMD Debugger API is available at
 [rocm.docs.amd.com/rocdbgapi](https://rocm.docs.amd.com/projects/ROCdbgapi/en/latest/index.html).
 
-## rocm-dbgapi-0.80 for ROCm-X
+## rocm-dbgapi-0.81 for ROCm-X
+### Changed
+- Add `process_id` argument to `amd_dbgapi_convert_address_space`.
+- Multi-GPU configurations on Windows now show a clear error message
+  when attaching. This restriction was already documented in 0.78; it
+  is now enforced before any GPU interaction takes place.
+
+## rocm-dbgapi-0.80
 ### Added
 - amd_dbgapi_process_get_info() adds a new query to get a mask spanning
   over all the bits used by all the address spaces.  The query is called

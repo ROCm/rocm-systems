@@ -8,6 +8,7 @@
 #include "core/trace_cache/sample_processor.hpp"
 #include "core/trace_cache/sample_type.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <limits>
@@ -19,9 +20,7 @@
 #include <unordered_map>
 #include <utility>
 
-namespace rocprofsys
-{
-namespace trace_cache
+namespace rocprofsys::trace_cache
 {
 
 class output_file_sink_view
@@ -67,8 +66,8 @@ struct migration_stats
         count++;
         total_size_bytes += size_bytes;
         total_time_ns += duration_ns;
-        if(size_bytes < min_size_bytes) min_size_bytes = size_bytes;
-        if(size_bytes > max_size_bytes) max_size_bytes = size_bytes;
+        min_size_bytes = std::min(size_bytes, min_size_bytes);
+        max_size_bytes = std::max(size_bytes, max_size_bytes);
     }
 
     [[nodiscard]] double avg_size_bytes() const noexcept
@@ -217,5 +216,4 @@ private:
     std::unordered_map<std::uint32_t, std::string> m_gpu_name_cache;
 };
 
-}  // namespace trace_cache
-}  // namespace rocprofsys
+}  // namespace rocprofsys::trace_cache

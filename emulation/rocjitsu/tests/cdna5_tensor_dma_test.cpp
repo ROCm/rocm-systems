@@ -2227,7 +2227,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaCoalescingMatchesElementCopiesAtBoundaries) 
           const TensorDmaLayout layout(desc);
           ASSERT_TRUE(validate_supported_descriptor(desc, layout).succeeded());
           auto reset = [&] {
-            std::copy(initial.begin(), initial.end(), backing.begin());
+            std::ranges::copy(initial, backing.begin());
             for (uint32_t i = 0; i < kLdsBytes; ++i)
               cu->lds().write8(wf->lds_base() + i, static_cast<uint8_t>(i * 19 + 3));
           };

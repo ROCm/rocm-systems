@@ -33,7 +33,9 @@ TEST(to_bool_test, false_tokens)
 TEST(to_bool_test, true_tokens)
 {
     for(const auto* true_token : { "on", "true", "yes", "y", "t", "garbage" })
+    {
         EXPECT_TRUE(to_bool(true_token)) << "value: " << true_token;
+    }
 }
 
 TEST(to_bool_test, case_insensitive)

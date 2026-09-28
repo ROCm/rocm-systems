@@ -10,9 +10,7 @@
 #include <type_traits>
 #include <utility>
 
-namespace rocprofsys
-{
-inline namespace common
+namespace rocprofsys::inline common
 {
 /**
  * Sychronized is a wrapper that adds lock based write/read
@@ -74,7 +72,7 @@ public:
     // This overload to wlock allows a synchronized map whose keys map to synchronized
     // data to use a read lock on the key data and then a write lock on the mapped data.
     template <typename FuncT, typename... Args>
-        requires(IsMappedTypeV)
+        requires IsMappedTypeV
     decltype(auto) wlock(FuncT&& lambda, Args&&... args) const;
 
     // Upgradable lock. If read returns false, write will be called with a unique_lock.
@@ -123,7 +121,7 @@ synchronized<LockedType, ThreadStatePolicy, IsMappedTypeV>::wlock(FuncT&& lambda
 template <typename LockedType, policies::thread_state_policy ThreadStatePolicy,
           bool IsMappedTypeV>
 template <typename FuncT, typename... Args>
-    requires(IsMappedTypeV)
+    requires IsMappedTypeV
 decltype(auto)
 synchronized<LockedType, ThreadStatePolicy, IsMappedTypeV>::wlock(FuncT&& lambda,
                                                                   Args&&... args) const
@@ -156,11 +154,13 @@ synchronized<LockedType, ThreadStatePolicy, IsMappedTypeV>::ulock(ReadFuncT&&  r
 
     {
         auto lock = std::shared_lock{ m_mutex };
-        if(read(m_data, std::forward<Args>(args)...)) return true;
+        if(read(m_data, std::forward<Args>(args)...))
+        {
+            return true;
+        }
     }
 
     auto lock = std::unique_lock{ m_mutex };
     return write(m_data, std::forward<Args>(args)...);
 }
-}  // namespace common
-}  // namespace rocprofsys
+}  // namespace rocprofsys::inline common

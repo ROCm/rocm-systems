@@ -69,10 +69,16 @@ std::vector<emitted_sample>
 inserted_xgmi_samples(std::string_view base, bool is_enabled, const xgmi_link_array& arr)
 {
     auto samples = std::vector<emitted_sample>{};
-    if(!is_enabled) return samples;
+    if(!is_enabled)
+    {
+        return samples;
+    }
     for(size_t i = 0; i < arr.size(); ++i)
     {
-        if(arr[i] == amd_smi::METRIC_VALUE_NOT_SUPPORTED_64) continue;
+        if(arr[i] == amd_smi::METRIC_VALUE_NOT_SUPPORTED_64)
+        {
+            continue;
+        }
         samples.push_back({ info::format_link_pmc_name(base, i),
                             info::format_link_track_name(base, i) });
     }
@@ -84,7 +90,9 @@ all_links_reporting()
 {
     auto arr = xgmi_link_array{};
     for(size_t i = 0; i < arr.size(); ++i)
+    {
         arr[i] = static_cast<std::uint64_t>(i + 1) * 1024;
+    }
     return arr;
 }
 
@@ -101,7 +109,9 @@ pmc_names_of(const std::vector<emitted_sample>& samples)
 {
     auto names = std::set<std::string>{};
     for(const auto& itr : samples)
+    {
         names.insert(itr.pmc_name);
+    }
     return names;
 }
 
@@ -113,7 +123,9 @@ registered_device_level_names(size_t count)
 {
     auto names = std::set<std::string>{};
     for(size_t i = 0; i < count; ++i)
+    {
         names.insert(info::format_track_name<Category>(static_cast<int>(i)));
+    }
     return names;
 }
 
@@ -125,7 +137,9 @@ inserted_device_level_names(size_t count)
     const auto base  = info::format_track_name<Category>();
     auto       names = std::vector<std::string>{};
     for(size_t i = 0; i < count; ++i)
+    {
         names.push_back(fmt::format("{}_{}", base, i));
+    }
     return names;
 }
 
@@ -137,9 +151,13 @@ per_xcp_names(size_t engines)
 {
     auto names = std::set<std::string>{};
     for(size_t xcp = 0; xcp < amd_smi::MAX_NUM_XCP; ++xcp)
+    {
         for(size_t engine = 0; engine < engines; ++engine)
+        {
             names.insert(info::format_track_name<Category>(static_cast<int>(xcp),
                                                            static_cast<int>(engine)));
+        }
+    }
     return names;
 }
 }  // namespace
@@ -216,7 +234,9 @@ TEST(rocpd_pmc_name_contract, base_name_alone_covers_no_inserted_link_name)
 
     ASSERT_FALSE(samples.empty());
     for(const auto& itr : samples)
+    {
         EXPECT_NE(itr.pmc_name, base);
+    }
 }
 
 TEST(rocpd_pmc_name_contract, unsupported_links_emit_no_sample)
@@ -291,5 +311,7 @@ TEST(rocpd_pmc_name_contract, device_level_and_per_xcp_names_do_not_collide)
         per_xcp_names<category::amd_smi_jpeg_activity>(amd_smi::MAX_NUM_JPEG_V1);
 
     for(const auto& itr : device_level)
+    {
         EXPECT_EQ(per_xcp.count(itr), 0U) << "colliding PMC name: " << itr;
+    }
 }

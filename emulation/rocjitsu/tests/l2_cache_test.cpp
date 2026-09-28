@@ -119,7 +119,8 @@ public:
       return read_outcome;
     if (domain != rocjitsu::amdgpu::VmMemoryDomain::System || !contains(address, bytes.size()))
       return rocjitsu::amdgpu::VmAccessOutcome::Faulted;
-    std::copy_n(bytes_.begin() + static_cast<std::ptrdiff_t>(address), bytes.size(), bytes.begin());
+    std::ranges::copy_n(bytes_.begin() + static_cast<std::ptrdiff_t>(address), bytes.size(),
+                        bytes.begin());
     return rocjitsu::amdgpu::VmAccessOutcome::Complete;
   }
 
@@ -130,7 +131,7 @@ public:
       return write_outcome;
     if (domain != rocjitsu::amdgpu::VmMemoryDomain::System || !contains(address, bytes.size()))
       return rocjitsu::amdgpu::VmAccessOutcome::Faulted;
-    std::copy(bytes.begin(), bytes.end(), bytes_.begin() + static_cast<std::ptrdiff_t>(address));
+    std::ranges::copy(bytes, bytes_.begin() + static_cast<std::ptrdiff_t>(address));
     return rocjitsu::amdgpu::VmAccessOutcome::Complete;
   }
 
@@ -1062,7 +1063,7 @@ TEST(DeviceCacheCoherenceTest, FailedMemorySideWritebackRetainsDirtyLineForRetry
   }
   EXPECT_FALSE(rocjitsu::amdgpu::MemorySideCacheTestAccess::line_is_dirty(memory_side_cache,
                                                                           kGpuAddress, kVmid));
-  EXPECT_TRUE(std::equal(dirty_line.begin(), dirty_line.end(), mapping.data()));
+  EXPECT_TRUE(std::ranges::equal(dirty_line, std::span(mapping.data(), dirty_line.size())));
   EXPECT_TRUE(legacy_vm.unregister_vmid(kVmid));
 }
 
@@ -1299,11 +1300,11 @@ TEST_F(LegacySubPageCacheTest, VectorAccessCachesOnlyAccessibleBytesOfIncomplete
                      stored.data(), Mtype::RW,
                      /*non_temporal=*/false, /*wf_size=*/1, kVmid),
             rocjitsu::amdgpu::VmAccessOutcome::Complete);
-  EXPECT_TRUE(std::equal(stored.begin(), stored.end(), backing_.begin() + 8));
+  EXPECT_TRUE(std::ranges::equal(stored, std::span(backing_).subspan(8, stored.size())));
 
   std::array<uint8_t, kAccessSize> replacement{};
   std::ranges::fill(replacement, uint8_t{0xa5});
-  std::copy(replacement.begin(), replacement.end(), backing_.begin() + 8);
+  std::ranges::copy(replacement, backing_.begin() + 8);
   std::array<uint8_t, kAccessSize> observed{};
   ASSERT_EQ(l1.load(addresses, /*lane_mask=*/1, sizeof(uint32_t), kAccessSize / sizeof(uint32_t),
                     observed.data(), Mtype::RW,
@@ -1853,7 +1854,7 @@ TEST(L2CacheTest, UnalignedVectorStoreSkipsBackingReads) {
   for (uint32_t i = 0; i < values.size(); ++i)
     values[i] = static_cast<uint8_t>(i);
   std::array<uint8_t, 3 * L2Cache::LINE_SIZE> expected = initial;
-  std::copy(values.begin(), values.end(), expected.begin() + sizeof(uint32_t));
+  std::ranges::copy(values, expected.begin() + sizeof(uint32_t));
   const uint64_t addrs[] = {kAddr + sizeof(uint32_t)};
   l1.store(addrs, /*lane_mask=*/1, sizeof(uint32_t), values.size() / sizeof(uint32_t),
            values.data(), Mtype::RW,
@@ -2537,7 +2538,7 @@ TEST(L2CacheTest, AliasedVasRequireCoherenceBoundary) {
   replacement.fill(0x22);
   dirty.fill(0x33);
 
-  std::copy(initial.begin(), initial.end(), backing.begin());
+  std::ranges::copy(initial, backing.begin());
   l2.read(kVaA, actual.data(), actual.size(), Mtype::RW, kVmidA);
   ASSERT_EQ(actual, initial);
   l2.read(kVaB, actual.data(), actual.size(), Mtype::RW, kVmidB);
@@ -2550,10 +2551,10 @@ TEST(L2CacheTest, AliasedVasRequireCoherenceBoundary) {
   EXPECT_EQ(actual, replacement);
 
   l2.writeback_line(kVaA, dirty.data(), Mtype::RW, kVmidA);
-  std::copy_n(backing.begin(), actual.size(), actual.begin());
+  std::ranges::copy_n(backing.begin(), actual.size(), actual.begin());
   EXPECT_EQ(actual, replacement);
   l2.flush_line(kVaA, kVmidA);
-  std::copy_n(backing.begin(), actual.size(), actual.begin());
+  std::ranges::copy_n(backing.begin(), actual.size(), actual.begin());
   EXPECT_EQ(actual, dirty);
 
   l2.read(kVaB, actual.data(), actual.size(), Mtype::RW, kVmidB);
@@ -2750,21 +2751,21 @@ TEST(L2CacheTest, InvalidateRangeOnlyAffectsRequestedVmid) {
   dirty_a.fill(0x33);
   replacement_b.fill(0x44);
 
-  std::copy(initial_a.begin(), initial_a.end(), backing_a.begin());
-  std::copy(initial_b.begin(), initial_b.end(), backing_b.begin());
+  std::ranges::copy(initial_a, backing_a.begin());
+  std::ranges::copy(initial_b, backing_b.begin());
   l2.read(kAddr, actual.data(), actual.size(), Mtype::RW, kVmidA);
   ASSERT_EQ(actual, initial_a);
   l2.read(kAddr, actual.data(), actual.size(), Mtype::RW, kVmidB);
   ASSERT_EQ(actual, initial_b);
   l2.writeback_line(kAddr, dirty_a.data(), Mtype::RW, kVmidA);
 
-  std::copy(replacement_b.begin(), replacement_b.end(), backing_b.begin());
+  std::ranges::copy(replacement_b, backing_b.begin());
   l2.invalidate_range(kAddr, L2Cache::LINE_SIZE, kVmidB);
   l2.read(kAddr, actual.data(), actual.size(), Mtype::RW, kVmidB);
   EXPECT_EQ(actual, replacement_b);
 
   l2.flush_line(kAddr, kVmidA);
-  std::copy_n(backing_a.begin(), actual.size(), actual.begin());
+  std::ranges::copy_n(backing_a.begin(), actual.size(), actual.begin());
   EXPECT_EQ(actual, dirty_a);
 }
 

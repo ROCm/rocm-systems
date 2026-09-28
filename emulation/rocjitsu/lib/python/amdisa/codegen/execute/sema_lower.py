@@ -156,9 +156,9 @@ _INFIX_OPS: dict[SemaNodeKind, str] = {
 
 _CONTEXT_READS: dict[str, str] = {
     'SCC': 'wf.read_scc()',
-    'VCC': 'wf.vcc()',
+    'VCC': 'wf.vcc_mask()',
     'EXEC': 'wf.exec()',
-    'EXEC_RAW': 'wf.exec_raw()',
+    'EXEC_RAW': 'wf.read_exec()',
     'EXEC_LO': 'static_cast<uint32_t>(wf.exec())',
     'M0': 'wf.m0()',
     'laneId': 'lane',
@@ -168,7 +168,7 @@ _CONTEXT_WRITES: dict[str, str] = {
     'SCC': 'wf.write_scc',
     'VCC': 'wf.write_vcc',
     'EXEC': 'wf.set_exec',
-    'EXEC_RAW': 'wf.set_exec_raw',
+    'EXEC_RAW': 'wf.write_exec',
 }
 
 _STD_MATH: dict[SemaNodeKind, str] = {
@@ -1219,12 +1219,9 @@ def _lower_arrayderef(node: SemaNode, ctx: LoweringContext) -> str:
             return f'wf.lds().read<{elem_ty}>({index_expr})'
 
     # Bit index (VCC/EXEC bitmask access)
-    if (
-        array_node.kind == SemaNodeKind.ID
-        and array_node.id_name == 'VCC'
-        and ctx.vcc_read is not None
-    ):
-        return f'(({ctx.vcc_read} >> {index_expr}) & 1)'
+    if array_node.kind == SemaNodeKind.ID and array_node.id_name == 'VCC':
+        vcc_read = ctx.vcc_read or f'wf.vcc_mask(uint64_t{{1}} << {index_expr})'
+        return f'(({vcc_read} >> {index_expr}) & 1)'
     return f'(({array_expr} >> {index_expr}) & 1)'
 
 

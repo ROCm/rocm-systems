@@ -25,9 +25,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace rocprofiler_sdk
+namespace rocprofsys::rocprofiler_sdk
 {
 struct counter_dispatch_record
 {
@@ -96,12 +94,9 @@ struct counter_storage
     static void write(counter_storage_type* storage, const std::string& metric_name,
                       const std::string& metric_description);
 };
-}  // namespace rocprofiler_sdk
-}  // namespace rocprofsys
+}  // namespace rocprofsys::rocprofiler_sdk
 
-namespace tim
-{
-namespace operation
+namespace tim::operation
 {
 template <>
 struct set_storage<::rocprofsys::rocprofiler_sdk::counter_data_tracker>
@@ -146,8 +141,7 @@ struct get_storage<::rocprofsys::rocprofiler_sdk::counter_data_tracker>
 
     auto operator()(type&, size_t _idx) const { return (*this)(_idx); }
 };
-}  // namespace operation
-}  // namespace tim
+}  // namespace tim::operation
 
 // Add columns for MIN, MAX, VAR, STDDEV
 TIMEMORY_STATISTICS_TYPE(rocprofsys::rocprofiler_sdk::counter_data_tracker, double)

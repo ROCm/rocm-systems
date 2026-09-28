@@ -395,6 +395,7 @@ void SBarrierSignalIsfirstSop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t member_count = source_is_m0 ? ((source >> 16) & 0x7fu) : 0;
   bool barrier_valid = (wf.barrier_state(barrier_id) & 1u) != 0;
   bool is_first = wf.barrier_signal(barrier_id, member_count);
+  set_memory_wait_result_written(barrier_valid);
   if (barrier_valid)
     wf.write_scc(is_first);
 }
