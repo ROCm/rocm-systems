@@ -27,6 +27,7 @@ from rocprof_sys_nightly.environment import make_rocm_env  # noqa: E402
 from rocprof_sys_nightly.gpu import (  # noqa: E402
     _gfx_from_kfd_version,
     _kfd_gpu_archs,
+    report_under_test,
     resolve_variant,
 )
 from rocprof_sys_nightly.tarball import (  # noqa: E402
@@ -157,3 +158,35 @@ def test_offline_cannot_combine_with_force_sync():
     with pytest.raises(SystemExit) as exc:
         main(["--offline", "--force-sync"])
     assert exc.value.code == 1
+
+
+def _rocm_with_manifest(tmp_path: Path, text: str) -> Path:
+    rocm = tmp_path / "rocm"
+    manifest = rocm / "share" / "therock"
+    manifest.mkdir(parents=True)
+    (manifest / "therock_manifest.json").write_text(text)
+    return rocm
+
+
+def test_report_under_test_emits_pretty_manifest(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rocm = _rocm_with_manifest(tmp_path, '{"version": "10.2.0"}\n')
+    facts: dict[str, str] = {}
+
+    rc = report_under_test(rocm, {}, facts)
+
+    assert rc is None
+    assert facts["rocprofsys_version"] == "unknown"
+    out = capsys.readouterr().out
+    assert '"version": "10.2.0"' in out
+
+
+def test_report_under_test_emits_raw_manifest_when_json_is_invalid(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rocm = _rocm_with_manifest(tmp_path, "not-json\n")
+
+    report_under_test(rocm, {}, {})
+
+    assert "not-json" in capsys.readouterr().out

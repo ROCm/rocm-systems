@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import NoReturn
 
 
-from .command import die, log, step
+from .command import die, emit, log, step
 from .constants import MULTIARCH_VARIANT, NIGHTLY_TARBALL_INDEX
 from .environment import _foreign_rocm_roots, _is_under, _resolved, make_rocm_env
 from .tarball import fetch_tarball_index
@@ -307,9 +307,9 @@ def report_under_test(rocm_dir: Path, env: dict, facts: dict) -> int | None:
         log(f"TheRock manifest: {manifest}")
         try:
             data = json.loads(manifest.read_text())
-            _emit(json.dumps(data, indent=2))
+            emit(json.dumps(data, indent=2))
         except Exception:  # noqa: BLE001
-            _emit(manifest.read_text())
+            emit(manifest.read_text())
 
     avail = rocm_dir / "bin" / "rocprof-sys-avail"
     if avail.exists():
