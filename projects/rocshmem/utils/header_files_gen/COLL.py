@@ -38,17 +38,62 @@ types = [
     ("unsigned int", "uint"),
     ("unsigned long", "ulong"),
     ("unsigned long long", "ulonglong"),
+    ("__half", "half"),
+    ("__hip_bfloat16", "bfloat16"),
+    ("int8_t", "int8"),
+    ("int16_t", "int16"),
+    ("int32_t", "int32"),
+    ("int64_t", "int64"),
+    ("uint8_t", "uint8"),
+    ("uint16_t", "uint16"),
+    ("uint32_t", "uint32"),
+    ("uint64_t", "uint64"),
+    ("size_t", "size"),
+    ("ptrdiff_t", "ptrdiff"),
 ]
 
+_int_types = [
+    0, # ("float", "float"),
+    0, # ("double", "double"),
+    1, # ("char", "char"),
+    1, # ("signed char", "schar"),
+    1, # ("short", "short"),
+    1, # ("int", "int"),
+    1, # ("long", "long"),
+    1, # ("long long", "longlong"),
+    1, # ("unsigned char", "uchar"),
+    1, # ("unsigned short", "ushort"),
+    1, # ("unsigned int", "uint"),
+    1, # ("unsigned long", "ulong"),
+    1, # ("unsigned long long", "ulonglong"),
+    0, # ("__half", "half"),
+    0, # ("__hip_bfloat16", "bfloat16"),
+    1, # ("int8_t", "int8"),
+    1, # ("int16_t", "int16"),
+    1, # ("int32_t", "int32"),
+    1, # ("int64_t", "int64"),
+    1, # ("uint8_t", "uint8"),
+    1, # ("uint16_t", "uint16"),
+    1, # ("uint32_t", "uint32"),
+    1, # ("uint64_t", "uint64"),
+    1, # ("size_t", "size"),
+    1, # ("ptrdiff_t", "ptrdiff"),
+]
 
-def alltoall_api(T, TNAME):
+def alltoall_ctx_wg_api(T, TNAME):
     return (
         f"__device__ ATTR_NO_INLINE void rocshmem_ctx_{TNAME}_alltoall_wg(\n"
         f"    rocshmem_ctx_t ctx, rocshmem_team_t team, {T} *dest,\n"
         f"    const {T} *source, int nelems);\n\n"
     )
 
-def generate_alltoall_api():
+def alltoall_wg_api(T, TNAME):
+    return (
+        f"__device__ ATTR_NO_INLINE void rocshmem_{TNAME}_alltoall_wg(\n"
+        f"    rocshmem_team_t team, {T} *dest, const {T} *source, int nelems);\n\n"
+    )
+
+def generate_alltoall_wg_api():
     expanded_code = """
 /**
  * @name SHMEM_ALLTOALL
@@ -57,6 +102,7 @@ def generate_alltoall_api():
  *
  * This function must be called as a work-group collective.
  *
+ * @param[in] ctx          The ROCSHMEM context associated with this operation.
  * @param[in] team         The team participating in the collective.
  * @param[in] dest         Destination address. Must be an address on the
  *                         symmetric heap.
@@ -67,7 +113,30 @@ def generate_alltoall_api():
  * @return void
  */\n"""
     for type_, tname_ in types:
-        expanded_code += alltoall_api(type_, tname_)
+        expanded_code += alltoall_ctx_wg_api(type_, tname_)
+    for type_, tname_ in types:
+        expanded_code += alltoall_wg_api(type_, tname_)
+
+    expanded_code += '''/**
+ * @name ROCSHMEM_ALLTOALLMEM_WG
+ * @brief Exchanges a fixed amount of contiguous data blocks between all pairs
+ * of PEs participating in the collective routine.
+ *
+ * This function must be called as a work-group collective.
+ *
+ * @param[in] ctx          The ROCSHMEM context associated with this operation.    
+ * @param[in] team         The team participating in the collective.
+ * @param[in] dest         Destination address. Must be an address on the
+ *                         symmetric heap.
+ * @param[in] source       Source address. Must be an address on the symmetric
+ *                         heap.
+ * @param[in] nelems       Number of data blocks transferred per pair of PEs.
+ *
+ * @return void
+ */
+__device__ void rocshmem_ctx_alltoallmem_wg(rocshmem_ctx_t ctx,
+    rocshmem_team_t team, void *dest, const void *source, int nelems);
+'''
 
     return expanded_code
 
@@ -98,9 +167,64 @@ def generate_alltoall_wave_api():
  */\n"""
     for type_, tname_ in types:
         expanded_code += alltoall_wave_api(type_, tname_)
+    expanded_code += """/**
+ * @name ROCSHMEM_ALLTOALLMEM_WAVE
+ * @brief Exchanges a fixed amount of contiguous data blocks between all pairs
+ * of PEs participating in the collective routine.
+ *
+ * This function must be called as a wave collective.
+ *
+ * @param[in] ctx          The ROCSHMEM context associated with this operation.    
+ * @param[in] team         The team participating in the collective.
+ * @param[in] dest         Destination address. Must be an address on the
+ *                         symmetric heap.
+ * @param[in] source       Source address. Must be an address on the symmetric
+ *                         heap.
+ * @param[in] nelems       Number of data blocks transferred per pair of PEs.
+ *
+ * @return int; zero on success, non-zero otherwise
+ */
+__device__ int rocshmem_ctx_alltoallmem_wave(rocshmem_ctx_t ctx,
+    rocshmem_team_t team, void *dest, const void *source, int nelems);
+"""
 
     return expanded_code
 
+def alltoallv_wg_api(T, TNAME):
+    function_name_len = len(f"__device__ ATTR_NO_INLINE void rocshmem_{TNAME}_alltoallv_wg(")
+    return (
+        f"__device__ ATTR_NO_INLINE void rocshmem_{TNAME}_alltoallv_wg(rocshmem_team_t team,\n"
+        f"{' ' * function_name_len}{T} *dest, const size_t dest_nelems[],\n"
+        f"{' ' * function_name_len}const size_t dest_displs[],\n"
+        f"{' ' * function_name_len}{T} *source, const size_t source_nelems[],\n"
+        f"{' ' * function_name_len}const size_t source_displs[]);\n\n"
+    )
+
+def generate_alltoallv_wg_api():
+    expanded_code = """
+/**
+ * @name SHMEM_ALLTOALLV
+ * @brief PE i sends source_nelems[j] of data from source + source_displs[j] to PE j.
+ * At the same time, PE i receives dest_nelems[j] of data from PE j to be placed at dest + dest_displs[j].
+ *
+ * This function must be called as a work-group collective.
+ *
+ * @param[in] team          The team participating in the collective.
+ * @param[in] dest          Destination address. Must be an address on the symmetric heap.
+ * @param[in] dest_nelems   Array containing number of elements to receive from each participating PE
+ * @param[in] dest_displs   Array of offsets into dest buffer for each participating PE
+ * @param[in] source        Source address. Must be an address on the symmetric heap.
+ * @param[in] source_nelems Array containing number of elements to send from each participating PE
+ * @param[in] source_displs Array of offsets into source buffer for each participating PE
+ *
+ * @return void
+ */
+\n"""
+
+    for type_, tname_ in types:
+        expanded_code += alltoallv_wg_api(type_, tname_)
+
+    return expanded_code
 
 def broadcast_api(T, TNAME):
     return (
@@ -130,7 +254,7 @@ def generate_broadcast_api():
  *                         symmetric heap.
  * @param[in] source       Source address. Must be an address on the symmetric
  *                         heap.
- * @param[in] nelement     Size of the buffer to participate in the broadcast.
+ * @param[in] nelems       Size of the buffer to participate in the broadcast.
  * @param[in] PE_root      Zero-based ordinal of the PE, with respect to the
  *                         active set, from which the data is copied
  * @param[in] PE_start     PE to start the reduction.
@@ -144,9 +268,7 @@ def generate_broadcast_api():
     for type_, tname_ in types:
         expanded_code += broadcast_api(type_, tname_)
 
-    expanded_code += """
-
-/**
+    expanded_code += """/**
  * @name ROCSHMEM_CTX_BROADCASTMEM_WG
  * @brief Perform a broadcast between PEs in the active set. The caller
  * is blocked until the broadcast completes.
@@ -159,14 +281,14 @@ def generate_broadcast_api():
  *                         symmetric heap.
  * @param[in] source       Source address. Must be an address on the symmetric
  *                         heap.
- * @param[in] nelement     Size of buffer to participate in the broadcast.
+ * @param[in] nelems       Size of buffer to participate in the broadcast.
  * @param[in] PE_root      Root PE (relative to team) from which to broadcast.
  *
  *
  * @return void
  */
 __device__ void rocshmem_ctx_broadcastmem_wg(rocshmem_ctx_t ctx, rocshmem_team_t team,
-              void *dest, const void *source, int nelement, int PE_root);\n
+              void *dest, const void *source, int nelems, int PE_root);
 """
 
     return expanded_code
@@ -189,6 +311,7 @@ def generate_fcollect_api():
  *
  * This function must be called as a work-group collective.
  *
+ * @param[in] ctx          The context associated with this operation.
  * @param[in] team         The team participating in the collective.
  * @param[in] dest         Destination address. Must be an address on the
  *                         symmetric heap.
@@ -201,13 +324,13 @@ def generate_fcollect_api():
     for type_, tname_ in types:
         expanded_code += fcollect_api(type_, tname_)
 
-    expanded_code += """
-/**
+    expanded_code += """/**
  * @name ROCSHMEM_CTX_FCOLLECTMEM_WG
  * @brief Concatenates @p nelems bytes from each PE's @p source into every PE's
  * @p dest buffer.
  * Must be called as a work-group collective.
  *
+ * @param[in] ctx          The context associated with this operation.
  * @param[in] team         The team participating in the collective.
  * @param[in] dest         Destination address. Must be an address on the
  *                         symmetric heap.
@@ -217,8 +340,8 @@ def generate_fcollect_api():
  *
  * @return void
  */
-__device__ ATTR_NO_INLINE void rocshmem_ctx_fcollectmem_wg(rocshmem_ctx_t
-    rocshmem_team_t team, void *dest, const void *source, int nelems);\n
+__device__ ATTR_NO_INLINE void rocshmem_ctx_fcollectmem_wg(rocshmem_ctx_t ctx,
+    rocshmem_team_t team, void *dest, const void *source, int nelems);
 """
 
     return expanded_code
@@ -254,13 +377,13 @@ def generate_fcollect_wave_api():
     for type_, tname_ in types:
         expanded_code += fcollect_wave_api(type_, tname_)
 
-    expanded_code += """
-/**
+    expanded_code += """/**
  * @name ROCSHMEM_CTX_FCOLLECTMEM_WAVE
  * @brief Concatenates @p nelems bytes from each PE's @p source into every PE's
  * @p dest buffer.
  * Must be called as a wave-level collective.
  *
+ * @param[in] ctx          The context associated with this operation.
  * @param[in] team         The team participating in the collective.
  * @param[in] dest         Destination address. Must be an address on the
  *                         symmetric heap.
@@ -291,7 +414,7 @@ def reduction_wave_api(T, TNAME, Op_API):
     return (
         f"__device__ ATTR_NO_INLINE int rocshmem_ctx_{TNAME}_{Op_API}_reduce_wave(\n"
         f"    rocshmem_ctx_t ctx, rocshmem_team_t team, {T} *dest, const {T} *source,\n"
-        f"    int nreduce);\n\n"
+        f"    int nreduce);\n"
     )
 
 def arith_reduction_wave_api(T, TNAME):
@@ -303,13 +426,12 @@ def bitwise_reduction_wave_api(T, TNAME):
     return "".join([reduction_wave_api(T, TNAME, op) for op in operations])
 
 def generate_reduction_wave_api():
-    expanded_code = """
-/**
- * @name SHMEM_REDUCTIONS_WAVE
+    expanded_code = """/**
+ * @name ROCSHMEM_CTX_REDUCE_WAVE
  * @brief Perform an allreduce between PEs in the active set. The caller
  * is blocked until the reduction completes.
  *
- * This function must be called as a wave-front collective.
+ * This function must be called as a wave-level collective.
  *
  * @param[in] ctx          The context associated with this operation.
  * @param[in] team         The team participating in the collective.
@@ -322,23 +444,13 @@ def generate_reduction_wave_api():
  * @return int (Zero on successful local completion. Nonzero otherwise.)
  */\n"""
 
-    int_types = [
-        ("short", "short"),
-        ("int", "int"),
-        ("long", "long"),
-        ("long long", "longlong")
-    ]
-
-    float_types = [
-        ("float", "float"),
-        ("double", "double")
-    ]
-
-    for type_, tname_ in int_types:
+    # int types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if cond]:
         expanded_code += arith_reduction_wave_api(type_, tname_)
         expanded_code += bitwise_reduction_wave_api(type_, tname_)
 
-    for type_, tname_ in float_types:
+    # float types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if not cond]:
         expanded_code += arith_reduction_wave_api(type_, tname_)
 
     return expanded_code
@@ -350,6 +462,127 @@ def arith_reduction_api(T, TNAME):
 def bitwise_reduction_api(T, TNAME):
     operations = ["or", "and", "xor"]
     return "".join([reduction_api(T, TNAME, op) for op in operations])
+
+
+def reducescatter_api(T, TNAME, Op_API):
+    return (
+        f"__device__ ATTR_NO_INLINE int rocshmem_ctx_{TNAME}_{Op_API}_reduce_scatter_wg(\n"
+        f"    rocshmem_ctx_t ctx, rocshmem_team_t team, {T} *dest, const {T} *source,\n"
+        f"    int nreduce);\n"
+    )
+
+def arith_reducescatter_api(T, TNAME):
+    operations = ["sum", "min", "max", "prod"]
+    return "".join([reducescatter_api(T, TNAME, op) for op in operations])
+
+def bitwise_reducescatter_api(T, TNAME):
+    operations = ["or", "and", "xor"]
+    return "".join([reducescatter_api(T, TNAME, op) for op in operations])
+
+
+def generate_reducescatter_wg_api():
+    expanded_code = """
+/**
+ * @name SHMEM_REDUCE_SCATTER
+ * @brief Perform a reduce-scatter between PEs in the team. Each PE contributes
+ * nreduce * n_pes elements from source; after reduction across all PEs,
+ * PE i receives the nreduce elements corresponding to block i.
+ *
+ * This function must be called as a work-group collective.
+ *
+ * @param[in] team         The team participating in the collective.
+ * @param[in] dest         Destination address (nreduce elements). Must be an
+ *                         address on the symmetric heap.
+ * @param[in] source       Source address (nreduce * n_pes elements). Must be
+ *                         an address on the symmetric heap.
+ * @param[in] nreduce      Number of elements each PE receives.
+ *
+ * @return int (Zero on successful local completion. Nonzero otherwise.)
+ */\n"""
+
+    # int types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if cond]:
+        expanded_code += arith_reducescatter_api(type_, tname_)
+        expanded_code += bitwise_reducescatter_api(type_, tname_)
+
+    # float types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if not cond]:
+        expanded_code += arith_reducescatter_api(type_, tname_)
+
+    return expanded_code
+
+def reducescatter_wave_api(T, TNAME, Op_API):
+    return (
+        f"__device__ ATTR_NO_INLINE int rocshmem_ctx_{TNAME}_{Op_API}_reduce_scatter_wave(\n"
+        f"    rocshmem_ctx_t ctx, rocshmem_team_t team, {T} *dest, const {T} *source,\n"
+        f"    int nreduce);\n"
+    )
+
+def arith_reducescatter_wave_api(T, TNAME):
+    operations = ["sum", "min", "max", "prod"]
+    return "".join([reducescatter_wave_api(T, TNAME, op) for op in operations])
+
+def bitwise_reducescatter_wave_api(T, TNAME):
+    operations = ["or", "and", "xor"]
+    return "".join([reducescatter_wave_api(T, TNAME, op) for op in operations])
+
+
+def generate_reducescatter_wave_api():
+    expanded_code = """
+/**
+ * @name SHMEM_REDUCE_SCATTER_WAVE device-side (wave-level)
+ * @brief Wave-level reduce-scatter: PE i receives the element-wise reduction
+ * of source[i*nreduce..(i+1)*nreduce-1] across all PEs in the team.
+ * Only the wave (wavefront) participates. Returns ROCSHMEM_SUCCESS on success.
+ */\n"""
+
+    # int types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if cond]:
+        expanded_code += arith_reducescatter_wave_api(type_, tname_)
+        expanded_code += bitwise_reducescatter_wave_api(type_, tname_)
+
+    # float types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if not cond]:
+        expanded_code += arith_reducescatter_wave_api(type_, tname_)
+
+    return expanded_code
+
+
+def reducescatter_host_api(T, TNAME, Op_API):
+    return (
+        f"__host__ int rocshmem_ctx_{TNAME}_{Op_API}_reduce_scatter(\n"
+        f"    rocshmem_ctx_t ctx, rocshmem_team_t team, {T} *dest, const {T} *source, int nreduce);\n"
+    )
+
+def arith_reducescatter_host_api(T, TNAME):
+    operations = ["sum", "min", "max", "prod"]
+    return "".join([reducescatter_host_api(T, TNAME, op) for op in operations])
+
+def bitwise_reducescatter_host_api(T, TNAME):
+    operations = ["or", "and", "xor"]
+    return "".join([reducescatter_host_api(T, TNAME, op) for op in operations])
+
+
+def generate_reducescatter_host_api():
+    expanded_code = """
+/**
+ * @name SHMEM_REDUCE_SCATTER host-side
+ * @brief Host-side reduce-scatter: PE i receives the element-wise reduction
+ * of source[i*nreduce..(i+1)*nreduce-1] across all PEs.
+ */\n"""
+
+    # int types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if cond]:
+        expanded_code += arith_reducescatter_host_api(type_, tname_)
+        expanded_code += bitwise_reducescatter_host_api(type_, tname_)
+
+    # float types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if not cond]:
+        expanded_code += arith_reducescatter_host_api(type_, tname_)
+
+    return expanded_code
+
+
 
 def reduce_on_stream_api(T, TNAME, Op_API):
     return (
@@ -386,31 +619,20 @@ def generate_reduction_api():
  * @return int (Zero on successful local completion. Nonzero otherwise.)
  */\n"""
 
-    int_types = [
-        ("short", "short"),
-        ("int", "int"),
-        ("long", "long"),
-        ("long long", "longlong")
-    ]
-
-    float_types = [
-        ("float", "float"),
-        ("double", "double")
-    ]
-
-    for type_, tname_ in int_types:
+    # int types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if cond]:
         expanded_code += arith_reduction_api(type_, tname_)
         expanded_code += bitwise_reduction_api(type_, tname_)
 
-    for type_, tname_ in float_types:
+    # float types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if not cond]:
         expanded_code += arith_reduction_api(type_, tname_)
 
     return expanded_code
 
 
 def generate_reduce_on_stream_api():
-    expanded_code = """
-/**
+    expanded_code = """/**
  * @name ROCSHMEM_REDUCE_ON_STREAM
  * @brief Performs a reduction across all PEs in a team on the specified HIP
  *        stream.
@@ -427,23 +649,13 @@ def generate_reduce_on_stream_api():
  * @return int (Zero on successful local completion. Nonzero otherwise.)
  */\n"""
 
-    int_types = [
-        ("short", "short"),
-        ("int", "int"),
-        ("long", "long"),
-        ("long long", "longlong")
-    ]
-
-    float_types = [
-        ("float", "float"),
-        ("double", "double")
-    ]
-
-    for type_, tname_ in int_types:
+    # int types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if cond]:
         expanded_code += arith_reduce_on_stream_api(type_, tname_)
         expanded_code += bitwise_reduce_on_stream_api(type_, tname_)
 
-    for type_, tname_ in float_types:
+    # float types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if not cond]:
         expanded_code += arith_reduce_on_stream_api(type_, tname_)
 
     return expanded_code
@@ -452,7 +664,7 @@ def generate_reduce_on_stream_api():
 def broadcast_wave_api(T, TNAME):
     return (
         f"__device__ int rocshmem_ctx_{TNAME}_broadcast_wave(rocshmem_ctx_t ctx, rocshmem_team_t team,\n"
-        f"              {T} *dest, const {T} *source, int nelement, int PE_root);\n\n"
+        f"              {T} *dest, const {T} *source, int nelems, int PE_root);\n\n"
     )
 
 def generate_broadcast_wave_api():
@@ -470,7 +682,7 @@ def generate_broadcast_wave_api():
  *                         symmetric heap.
  * @param[in] source       Source address. Must be an address on the symmetric
  *                         heap.
- * @param[in] nelement     Number of elements to participate in the broadcast.
+ * @param[in] nelems       Number of elements to participate in the broadcast.
  * @param[in] PE_root      Root PE (relative to team) from which to broadcast.
  *
  *
@@ -480,8 +692,7 @@ def generate_broadcast_wave_api():
     for type_, tname_ in types:
         expanded_code += broadcast_wave_api(type_, tname_)
 
-    expanded_code += """
-/**
+    expanded_code += """/**
  * @name ROCSHMEM_CTX_BROADCASTMEM_WAVE
  * @brief Perform a broadcast between PEs in the active set. The caller
  * is blocked until the broadcast completes.
@@ -494,17 +705,306 @@ def generate_broadcast_wave_api():
  *                         symmetric heap.
  * @param[in] source       Source address. Must be an address on the symmetric
  *                         heap.
- * @param[in] nelement     Size of buffer to participate in the broadcast.
+ * @param[in] nelems       Size of buffer to participate in the broadcast.
  * @param[in] PE_root      Root PE (relative to team) from which to broadcast.
  *
  *
  * @return int; zero when successful, non-zero otherwise
  */
 __device__ int rocshmem_ctx_broadcastmem_wave(rocshmem_ctx_t ctx, rocshmem_team_t team,
-              void *dest, const void *source, int nelement, int PE_root);
+              void *dest, const void *source, int nelems, int PE_root);
 """
 
     return expanded_code
+
+def add_misc():
+    return '''
+/**
+ * @brief kernel for performing a barrier synchronization.
+ * Caller enqueues the kernel on given stream
+ *
+ * @return void
+ */
+__global__ ATTR_NO_INLINE void rocshmem_barrier_all_kernel();
+
+/**
+ * @brief kernel for performing a team-scoped barrier synchronization.
+ * Caller enqueues the kernel on given stream.
+ *
+ * @param[in] team  The team participating in the barrier.
+ *
+ * @return void
+ */
+__global__ ATTR_NO_INLINE void rocshmem_barrier_kernel(rocshmem_team_t team);
+
+/**
+ * @brief kernel for performing a sync_all operation.
+ * Caller enqueues the kernel on given stream
+ *
+ * @return void
+ */
+__global__ ATTR_NO_INLINE void rocshmem_sync_all_kernel();
+
+/**
+ * @brief kernel for performing a team-scoped sync operation.
+ * Caller enqueues the kernel on given stream.
+ *
+ * @param[in] team  The team participating in the sync.
+ *
+ * @return void
+ */
+__global__ ATTR_NO_INLINE void rocshmem_team_sync_kernel(rocshmem_team_t team);
+
+/**
+ * @brief kernel for performing an alltoall collective operation.
+ * Caller enqueues the kernel on given stream
+ *
+ * @param[in] team    The team participating in the collective.
+ * @param[in] dest    Destination address. Must be an address on the symmetric
+ *                    heap.
+ * @param[in] source  Source address. Must be an address on the symmetric heap.
+ * @param[in] size    Number of bytes to transfer per pair of PEs.
+ *
+ * @return void
+ */
+__global__ ATTR_NO_INLINE void rocshmem_alltoallmem_kernel(rocshmem_team_t team,
+                                                           void *dest,
+                                                           const void *source,
+                                                           size_t size);
+
+/**
+ * @brief kernel for performing a reduce on stream operation.
+ *
+ * @param[in] team     The team participating in the collective.
+ * @param[in] dest     Destination address. Must be an address on the symmetric
+ *                     heap.
+ * @param[in] source   Source address. Must be an address on the symmetric heap.
+ * @param[in] nreduce  Number of elements to reduce.
+ *
+ * @return void
+ */
+template <typename T, ROCSHMEM_OP Op>
+__global__ ATTR_NO_INLINE void rocshmem_reduce_on_stream_kernel(rocshmem_team_t team,
+                                                                T *dest,
+                                                                const T *source,
+                                                                int nreduce);
+
+/**
+ * @brief kernel for performing a broadcast collective operation.
+ * Caller enqueues the kernel on given stream
+ *
+ * @param[in] team    The team participating in the collective.
+ * @param[in] dest    Destination address. Must be an address on the symmetric
+ *                    heap.
+ * @param[in] source  Source address. Must be an address on the symmetric heap.
+ * @param[in] nelems  Number of bytes to broadcast.
+ * @param[in] pe_root Root PE (relative to team) from which to broadcast.
+ *
+ * @return void
+ */
+__global__ ATTR_NO_INLINE void rocshmem_broadcastmem_kernel(
+    rocshmem_team_t team, void *dest, const void *source, size_t nelems,
+    int pe_root);
+
+/**
+ * @brief perform a collective barrier between all PEs in the system.
+ * The caller is blocked until the barrier is resolved.
+ *
+ * This function must be invoked by a single thread within the PE.
+ *
+ * @return void
+ */
+__device__ ATTR_NO_INLINE void rocshmem_barrier_all();
+
+/**
+ * @brief perform a collective barrier between all PEs in the system.
+ * The caller is blocked until the barrier is resolved.
+ *
+ * This function must be called as a wave-front collective.
+ *
+ * @return void
+ */
+__device__ ATTR_NO_INLINE void rocshmem_barrier_all_wave();
+
+/**
+ * @brief perform a collective barrier between all PEs in the system.
+ * The caller is blocked until the barrier is resolved.
+ *
+ * This function must be called as a work-group collective.
+ *
+ * @return void
+ */
+__device__ ATTR_NO_INLINE void rocshmem_barrier_all_wg();
+
+/**
+ * @brief perform a collective barrier between all PEs in the team.
+ * The caller is blocked until the barrier is resolved.
+ *
+ * This function must be invoked by a single thread within the PE.
+ *
+ * @param[in] handle GPU side handle.
+ *
+ * @param[in] team The team on which to perform barrier synchronization
+ *
+ * @return void
+ */
+__device__ void rocshmem_ctx_barrier(rocshmem_ctx_t ctx, rocshmem_team_t team);
+
+/**
+ * @brief perform a collective barrier between all PEs in the team.
+ * The caller is blocked until the barrier is resolved.
+ *
+ * This function must be called as a wave-front collective.
+ *
+ * @param[in] handle GPU side handle.
+ *
+ * @param[in] team The team on which to perform barrier synchronization
+ *
+ * @return void
+ */
+__device__ void rocshmem_ctx_barrier_wave(rocshmem_ctx_t ctx, rocshmem_team_t team);
+
+/**
+ * @brief perform a collective barrier between all PEs in the team.
+ * The caller is blocked until the barrier is resolved.
+ *
+ * This function must be called as a work-group collective.
+ *
+ * @param[in] handle GPU side handle.
+ *
+ * @param[in] team The team on which to perform barrier synchronization
+ *
+ * @return void
+ */
+__device__ void rocshmem_ctx_barrier_wg(rocshmem_ctx_t ctx, rocshmem_team_t team);
+
+/**
+ * @brief perform a collective barrier between all PEs in the team world.
+ * The caller is blocked until the barrier is resolved.
+ *
+ * This function must be invoked by a single thread within the PE.
+ *
+ * @return void
+ */
+__device__ void rocshmem_barrier();
+
+/**
+ * @brief perform a collective barrier between all PEs in the team world.
+ * The caller is blocked until the barrier is resolved.
+ *
+ * This function must be called as a wave-front collective.
+ *
+ * @return void
+ */
+__device__ void rocshmem_barrier_wave();
+
+/**
+ * @brief perform a collective barrier between all PEs in the team world.
+ * The caller is blocked until the barrier is resolved.
+ *
+ * This function must be called as a work-group collective.
+ *
+ * @return void
+ */
+__device__ void rocshmem_barrier_wg();
+
+/**
+ * @brief registers the arrival of a PE at a barrier.
+ * The caller is blocked until the synchronization is resolved.
+ *
+ * In contrast with the shmem_barrier_all routine, shmem_sync_all only ensures
+ * completion and visibility of previously issued memory stores and does not
+ * ensure completion of remote memory updates issued via OpenSHMEM routines.
+ *
+ * This function must be invoked by a single thread within the PE.
+ *
+ * @return void
+ */
+__device__ ATTR_NO_INLINE void rocshmem_sync_all();
+
+/**
+ * @brief registers the arrival of a PE at a barrier.
+ * The caller is blocked until the synchronization is resolved.
+ *
+ * In contrast with the shmem_barrier_all routine, shmem_sync_all only ensures
+ * completion and visibility of previously issued memory stores and does not
+ * ensure completion of remote memory updates issued via OpenSHMEM routines.
+ *
+ * This function must be called as a wave-front collective.
+ *
+ * @return void
+ */
+__device__ ATTR_NO_INLINE void rocshmem_sync_all_wave();
+
+/**
+ * @brief registers the arrival of a PE at a barrier.
+ * The caller is blocked until the synchronization is resolved.
+ *
+ * In contrast with the shmem_barrier_all routine, shmem_sync_all only ensures
+ * completion and visibility of previously issued memory stores and does not
+ * ensure completion of remote memory updates issued via OpenSHMEM routines.
+ *
+ * This function must be called as a work-group collective.
+ *
+ * @return void
+ */
+__device__ ATTR_NO_INLINE void rocshmem_sync_all_wg();
+
+/**
+ * @brief registers the arrival of a PE at a barrier.
+ * The caller is blocked until the synchronization is resolved.
+ *
+ * In contrast with the shmem_barrier_all routine, shmem_team_sync only ensures
+ * completion and visibility of previously issued memory stores and does not
+ * ensure completion of remote memory updates issued via OpenSHMEM routines.
+ *
+ * This function must be invoked by a single thread within the PE.
+ *
+ * @param[in] handle GPU side handle.
+ * @param[in] team  Handle of the team being synchronized
+ *
+ * @return void
+ */
+__device__ ATTR_NO_INLINE void rocshmem_ctx_sync(
+    rocshmem_ctx_t ctx, rocshmem_team_t team);
+
+/**
+ * @brief registers the arrival of a PE at a barrier.
+ * The caller is blocked until the synchronization is resolved.
+ *
+ * In contrast with the shmem_barrier_all routine, shmem_team_sync only ensures
+ * completion and visibility of previously issued memory stores and does not
+ * ensure completion of remote memory updates issued via OpenSHMEM routines.
+ *
+ * This function must be called as a wave-front collective.
+ *
+ * @param[in] handle GPU side handle.
+ * @param[in] team  Handle of the team being synchronized
+ *
+ * @return void
+ */
+__device__ ATTR_NO_INLINE void rocshmem_ctx_sync_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team);
+
+/**
+ * @brief registers the arrival of a PE at a barrier.
+ * The caller is blocked until the synchronization is resolved.
+ *
+ * In contrast with the shmem_barrier_all routine, shmem_team_sync only ensures
+ * completion and visibility of previously issued memory stores and does not
+ * ensure completion of remote memory updates issued via OpenSHMEM routines.
+ *
+ * This function must be called as a work-group collective.
+ *
+ * @param[in] handle GPU side handle.
+ * @param[in] team  Handle of the team being synchronized
+ *
+ * @return void
+ */
+__device__ ATTR_NO_INLINE void rocshmem_ctx_sync_wg(
+    rocshmem_ctx_t ctx, rocshmem_team_t team);
+
+'''
 
 def write_to_file(filename, content):
     with open(filename, 'w') as file:
@@ -522,19 +1022,23 @@ namespace rocshmem {
 """
 
     expanded_code += (
-        generate_alltoall_api() +
+        generate_alltoall_wg_api() +
         generate_alltoall_wave_api() +
+        generate_alltoallv_wg_api() +
         generate_broadcast_api() +
+        generate_broadcast_wave_api() +
         generate_fcollect_api() +
         generate_fcollect_wave_api() +
-        generate_reduction_api() +
-        generate_reduce_on_stream_api() +
-        generate_broadcast_wave_api() +
-        generate_reduction_wave_api()
+        generate_reducescatter_wg_api() +
+        generate_reducescatter_wave_api() +
+        generate_reducescatter_host_api() +
+        generate_reduction_api() + 
+        generate_reduction_wave_api() +
+        add_misc() +
+        generate_reduce_on_stream_api()
     )
 
-    expanded_code += """
-}  // namespace rocshmem
+    expanded_code += """}  // namespace rocshmem
 
 #endif  // LIBRARY_INCLUDE_ROCSHMEM_COLL_HPP
 """

@@ -41,6 +41,8 @@ class TeamReduceScatterTester : public Tester {
       std::function<std::pair<bool, std::string>(const T1 &, const T1 &)> f2);
   virtual ~TeamReduceScatterTester();
 
+  std::string typeName() const override { return type_name<T1>(); }
+
  protected:
   virtual void resetBuffers(uint64_t size) override;
 
