@@ -714,6 +714,21 @@ std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologu
     return std::nullopt;
   }
 
+  // The prologue is spliced over the entry rather than reached from dispatch
+  // alone, so any edge into the entry runs it again. A second run loads through
+  // the guest's kernarg pointer, which the first run restored, and corrupts both
+  // the storage and that pointer. Fail closed on any predecessor, including a
+  // fallthrough that leaves the entry mid-block. Unresolved indirect branches
+  // are not edges, so this cannot see them.
+  const auto entry_block = std::find_if(scope.begin(), scope.end(), [&](const BasicBlock *block) {
+    return block != nullptr && block->start_offset() == entry_offset;
+  });
+  if (entry_block == scope.end() || !(*entry_block)->predecessors().empty()) {
+    report(error_out, "control flow reaches the kernel entry other than from dispatch, and the "
+                      "entry prologue cannot run twice");
+    return std::nullopt;
+  }
+
   // Both this and a user site splice a branch over their anchor, so overlapping
   // ranges would each overwrite part of the other's patched bytes.
   const uint32_t entry_size = entry->size();
@@ -1137,6 +1152,12 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   // The kernel-entry prologue, planned only for kernels whose probes ask for the
   // framework's entry storage. It runs before every site because it is anchored
   // at the kernel entry.
+  //
+  // TODO: The prologue loads through a kernarg wrapper that only a dispatch-time
+  // runtime can build, and no runtime builds one for DBI. On an ordinary launch
+  // both prologue loads read past the kernarg allocation and the guest's kernarg
+  // pointer is overwritten. Loading such an object must be refused unless a
+  // runtime will build the wrapper.
   std::optional<EntryProloguePatch> entry_patch;
   std::optional<uint16_t> entry_storage_base;
   if (probes_read_entry_storage(resolved.probes)) {
