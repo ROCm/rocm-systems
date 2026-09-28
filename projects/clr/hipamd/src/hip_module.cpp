@@ -639,7 +639,7 @@ hipError_t hipModuleLaunchKernel(hipFunction_t f, uint32_t gridDimX, uint32_t gr
   HIPLaunchParams launch_params(gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ,
                                 sharedMemBytes, *device, 0, 0, 0, 1, 1, 1);
   static constexpr LaunchErrorRule kRules[] = {
-      {kConfigBits | kBlockExceedsMaxWG,          hipErrorInvalidValue},
+      {kCommonRulesBits | kBlockExceedsMaxWG,     hipErrorInvalidValue},
       {kSharedMemExceedsMax | kSharedMemOverflow, hipErrorInvalidValue},
       {kZeroGlobal,                               hipErrorInvalidValue},
       {kZeroBlock,                                hipErrorInvalidValue},
@@ -680,9 +680,9 @@ hipError_t hipExtModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX,
                              1, 1, 1, 1, 1, 1, false);
 
   static constexpr LaunchErrorRule kRules[] = {
-      {kConfigBits | kZeroBlock | kBlockExceedsMaxWG, hipErrorInvalidConfiguration},
-      {kSharedMemExceedsMax | kSharedMemOverflow,     hipErrorInvalidValue},
-      {kZeroGlobal,                                   hipErrorInvalidValue},
+      {kCommonRulesBits | kZeroBlock | kBlockExceedsMaxWG, hipErrorInvalidConfiguration},
+      {kSharedMemExceedsMax | kSharedMemOverflow,          hipErrorInvalidValue},
+      {kZeroGlobal,                                        hipErrorInvalidValue},
       // kZeroBlock needs no rule of its own, it is folded into the first rule above.
   };
   hipError_t status = launch_params.Validate(kRules);
@@ -739,7 +739,7 @@ hipError_t hipModuleLaunchCooperativeKernel(hipFunction_t f, unsigned int gridDi
                                 sharedMemBytes, *device, 0, 0, 0, 1, 1, 1);
 
   static constexpr LaunchErrorRule kRules[] = {
-      {kConfigBits | kBlockExceedsMaxWG,          hipErrorInvalidValue},
+      {kCommonRulesBits | kBlockExceedsMaxWG,     hipErrorInvalidValue},
       {kSharedMemExceedsMax | kSharedMemOverflow, hipErrorInvalidValue},
       {kZeroGlobal,                               hipErrorInvalidValue},
       {kZeroBlock,                                hipErrorInvalidValue},
@@ -845,7 +845,7 @@ hipError_t ihipModuleLaunchCooperativeKernelMultiDevice(hipFunctionLaunchParams*
                                   launch.sharedMemBytes, device, 0, 0, 0, 1, 1, 1);
 
     static constexpr LaunchErrorRule kRules[] = {
-        {kConfigBits, hipErrorInvalidConfiguration},
+        {kCommonRulesBits, hipErrorInvalidConfiguration},
     };
     hipError_t status = launch_params.Validate(kRules);
     if (status != hipSuccess) {
@@ -981,7 +981,7 @@ hipError_t hipLaunchCooperativeKernel_common(const void* f, dim3 gridDim, dim3 b
                                 blockDim.z, sharedMemBytes, *device, 0, 0, 0, 1, 1, 1);
 
   static constexpr LaunchErrorRule kRules[] = {
-      {kConfigBits | kBlockExceedsMaxWG,          hipErrorInvalidConfiguration},
+      {kCommonRulesBits | kBlockExceedsMaxWG,     hipErrorInvalidConfiguration},
       {kSharedMemExceedsMax | kSharedMemOverflow, hipErrorCooperativeLaunchTooLarge},
   };
   hipError_t status = launch_params.Validate(kRules);
@@ -1457,7 +1457,7 @@ hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f
                                 config->sharedMemBytes, *drvDevice, 0, 0, 0, 1, 1, 1);
 
   static constexpr LaunchErrorRule kRules[] = {
-      {kConfigBits, hipErrorInvalidConfiguration},
+      {kCommonRulesBits, hipErrorInvalidConfiguration},
   };
   hipError_t configStatus = launch_params.Validate(kRules);
   if (configStatus != hipSuccess) {
