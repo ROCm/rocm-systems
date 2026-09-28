@@ -44,8 +44,8 @@ module_function::get_source_object_name(procedure_t* func)
         return string_t{};
     }
     auto* module = func->getModule();
-    auto* object = (module) ? module->getObject() : nullptr;
-    auto  _name  = (object) ? object->name() : string_t{};
+    auto* object = module ? module->getObject() : nullptr;
+    auto  _name  = object ? object->name() : string_t{};
     return _name;
 }
 
@@ -378,12 +378,10 @@ module_function::is_user_restricted() const
                                   module_name);
             return false;
         }
-        else
-        {
-            messages.emplace_back(3, "Skipping", "module", "module-restrict-regex",
-                                  module_name);
-            return true;
-        }
+
+        messages.emplace_back(3, "Skipping", "module", "module-restrict-regex",
+                              module_name);
+        return true;
     }
 
     if(!func_restrict.empty())
@@ -394,7 +392,7 @@ module_function::is_user_restricted() const
                                   function_name);
             return false;
         }
-        else if(check_regex_restrictions(signature.get(), func_restrict))
+        if(check_regex_restrictions(signature.get(), func_restrict))
         {
             messages.emplace_back(2, "Forcing", "function", "function-restrict-regex",
                                   signature.get());
@@ -432,7 +430,7 @@ module_function::is_user_included() const
                                   function_name);
             return true;
         }
-        else if(check_regex_restrictions(signature.get(), func_include))
+        if(check_regex_restrictions(signature.get(), func_include))
         {
             messages.emplace_back(2, "Forcing", "function", "function-include-regex",
                                   signature.get());
@@ -464,7 +462,7 @@ module_function::is_user_excluded() const
                                   function_name);
             return true;
         }
-        else if(check_regex_restrictions(signature.get(), func_exclude))
+        if(check_regex_restrictions(signature.get(), func_exclude))
         {
             messages.emplace_back(2, "Skipping", "function", "function-exclude-regex",
                                   signature.get());
@@ -540,7 +538,7 @@ module_function::get_visibility() const
 const string_t&
 module_function::get_module_identity(const string_t& module_base) const
 {
-    auto* _object = (module) ? module->getObject() : nullptr;
+    auto* _object = module ? module->getObject() : nullptr;
 
     // module_name is the object's own path when the code had no debug info
     const bool _is_object_module =
@@ -570,11 +568,11 @@ module_function::is_internal_constrained() const
     {
         return _report("Excluding", "module", "rocprofsys", 3);
     }
-    else if(std::regex_match(module_name,
-                             std::regex{ ".*/source/lib/"
-                                         "(core|common|binary|"
-                                         "rocprofsys|rocprofsys-dl|"
-                                         "rocprofsys-user)/.*/.*\\.(h|c|cpp|hpp)$" }))
+    if(std::regex_match(module_name,
+                        std::regex{ ".*/source/lib/"
+                                    "(core|common|binary|"
+                                    "rocprofsys|rocprofsys-dl|"
+                                    "rocprofsys-user)/.*/.*\\.(h|c|cpp|hpp)$" }))
     {
         return _report("Excluding", "module", "rocprofsys", 3);
     }
@@ -584,11 +582,11 @@ module_function::is_internal_constrained() const
     {
         return _report("Excluding", "function", "rocprofsys", 3);
     }
-    else if(std::regex_search(function_name, std::regex{ "3tim|tim::|timemory(::|_)" }))
+    if(std::regex_search(function_name, std::regex{ "3tim|tim::|timemory(::|_)" }))
     {
         return _report("Excluding", "function", "timemory", 3);
     }
-    else if(std::regex_search(function_name, std::regex{ "9perfetto|perfetto(::|_)" }))
+    if(std::regex_search(function_name, std::regex{ "9perfetto|perfetto(::|_)" }))
     {
         return _report("Excluding", "function", "perfetto", 3);
     }
@@ -1078,12 +1076,12 @@ module_function::operator()(address_space_t* _addr_space, procedure_t* _entr_tra
     auto _serialized_args = rocprofsys::get_args_string(_args);
     bool use_args_entr    = (!_serialized_args.empty() && _entr_trace_args);
 
-    auto _trace_entr = (use_args_entr)
+    auto _trace_entr = use_args_entr
                            ? rocprofsys_call_expr(_name.c_str(), _serialized_args)
                            : rocprofsys_call_expr(_name.c_str());
     auto _trace_exit = rocprofsys_call_expr(_name.c_str());
 
-    auto _entr = _trace_entr.get((use_args_entr) ? _entr_trace_args : _entr_trace);
+    auto _entr = _trace_entr.get(use_args_entr ? _entr_trace_args : _entr_trace);
     auto _exit = _trace_exit.get(_exit_trace);
 
     if(insert_instr(_addr_space, function, _entr, BPatch_entry) &&
@@ -1146,11 +1144,11 @@ module_function::operator()(address_space_t* _addr_space, procedure_t* _entr_tra
             continue;
         }
 
-        auto _ltrace_entr = (use_args_entr)
+        auto _ltrace_entr = use_args_entr
                                 ? rocprofsys_call_expr(_lname.c_str(), _serialized_args)
                                 : rocprofsys_call_expr(_lname.c_str());
         auto _ltrace_exit = rocprofsys_call_expr(_lname.c_str());
-        auto _lentr = _ltrace_entr.get((use_args_entr) ? _entr_trace_args : _entr_trace);
+        auto _lentr = _ltrace_entr.get(use_args_entr ? _entr_trace_args : _entr_trace);
         auto _lexit = _ltrace_exit.get(_exit_trace);
 
         if(insert_instr(_addr_space, function, _lentr, BPatch_entry, flow_graph, itr,

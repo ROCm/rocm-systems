@@ -24,12 +24,13 @@ endfunction()
 
 # Mirrors the opt-out in test/CMakeLists.txt, whose loop does not reach these
 # micro targets. Inheriting ENABLE_ROCSHMEM_GIN defaults NCCL_GIN_ANVIL_SDMA_ENABLE
-# to 1, which pulls in rocSHMEM's sdma device headers. Only meaningful in-build
-# where ENABLE_ROCSHMEM_GIN exists (standalone never defines it, so the guard is
-# simply false there).
+# and NCCL_GIN_ROCSHMEM_GDA_ENABLE to 1, which pulls in rocSHMEM's QP/SDMA device
+# headers. Only meaningful in-build where ENABLE_ROCSHMEM_GIN exists (standalone
+# never defines it, so the guard is simply false there).
 function(rccl_apply_rocshmem_gin_optout _tgt)
   if(ENABLE_ROCSHMEM_GIN)
-    target_compile_definitions(${_tgt} PRIVATE NCCL_GIN_ANVIL_SDMA_ENABLE=0)
+    target_compile_definitions(${_tgt} PRIVATE
+      NCCL_GIN_ANVIL_SDMA_ENABLE=0 NCCL_GIN_ROCSHMEM_GDA_ENABLE=0)
   endif()
 endfunction()
 

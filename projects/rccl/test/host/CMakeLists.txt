@@ -58,6 +58,7 @@ function(rccl_define_micro_source_lists)
   # rccl-UnitTestsMicro -- the broad-coverage micro binary.
   set(TEST_MICRO_SOURCE_FILES
     p2p-test.cc
+    rma-proxy-launch-test.cc            # RMA proxy queue + stream-memop coverage
     rma-proxy-progress-test.cc
     gin-plugin-init-test.cc
     rma-test.cc
@@ -223,17 +224,21 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
-  # rccl-UnitTestsMicroTaskPrep -- host-only microtests for src/enqueue/task_prep/.
+  # rccl-UnitTestsMicroTaskPrep -- host-only microtests for src/enqueue/task_prep/
+  # and src/enqueue/task_sched/.
   # Its own binary, not rccl-UnitTestsMicro: that target compiles group.cc, rccl_wrap.cc and
   # dev_runtime.cc as real units under test, and this suite fakes all three to drive them.
-  # The four production files are separate TUs so task_prep.cc's three sibling externs resolve to
-  # real code. task-prep-test.cc #includes TASK_PREP_CC_PATH; each remaining file moves from this
-  # source list into its own test TU as that unit comes under test.
+  # The four task_prep/ files are separate TUs so task_prep.cc's three sibling externs resolve to
+  # real code. Each leaves this source list for its own test TU, which #includes its *_CC_PATH, as
+  # that unit comes under test; listing both would be a duplicate symbol. The seven task_sched/
+  # files instead share one test TU (task-sched-test.cc): none references another, and each defines
+  # exactly one distinct extern-linkage function, so there is no cross-file resolution to preserve.
   set(TEST_MICRO_TASKPREP_SOURCE_FILES
     task-prep-test.cc
-    ${RCCL_HOST_HIPIFY_DIR}/src/enqueue/task_prep/task_classify.cc
-    ${RCCL_HOST_HIPIFY_DIR}/src/enqueue/task_prep/task_pretuning.cc
-    ${RCCL_HOST_HIPIFY_DIR}/src/enqueue/task_prep/task_posttuning.cc
+    task-classify-test.cc
+    task-pretuning-test.cc
+    task-posttuning-test.cc
+    task-sched-test.cc
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
     fakes/transport_stubs.cc
@@ -241,6 +246,7 @@ function(rccl_define_micro_source_lists)
     fakes/nccl_fakes.cc
     fakes/hip_fakes.cc
     # Shared per-production-TU fakes (see MICROTEST_README.md for the map).
+    fakes/allocator_fakes.cc             # src/allocator.cc
     fakes/ce_fakes.cc                    # src/ce_coll.cc
     fakes/collectives_fakes.cc           # src/collectives.cc name tables/helpers
     fakes/comm_fakes.cc                  # src/init.cc comm lifecycle + CTA/channel params
@@ -728,6 +734,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     RAS_DIAGNOSTICS_COMMON_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_checks_common.cc"
     TUNING_GENERAL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_general.cc"
     RAS_CLIENT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/client.cc"
+    RMA_PROXY_LAUNCH_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_proxy_launch.cc"
     RMA_PROXY_PROGRESS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_proxy_progress.cc"
     # rma_tmp.cc, not rma.cc: src/CMakeLists.txt lists plugin/rma.cc first, so
     # add_file_unique() renames this one. Re-check after any source-list reorder.
@@ -819,6 +826,8 @@ endif()
 if(_MICRO_BUILD_SYM_KERNELS)
   rccl_add_micro_binary(rccl-UnitTestsMicroSymKernels
     SOURCES ${TEST_MICRO_SYM_KERNELS_SOURCE_FILES}
+    EXTRA_INCLUDES
+      ${RCCL_HOST_HIPIFY_DIR}/src/device               # sym_kernels.cc includes "tdm/tdmCopy.h"
     EXTRA_DEFS
       ${_MICRO_MODE_DEFS}
       ${_MICRO_AMDSMI_DEF}
@@ -838,9 +847,6 @@ endif()
 # task_prep/ and config/ oracle TUs live outside src/misc/, so mark them GENERATED
 # here (rccl_mark_oracle_tus_generated only covers the misc/ argcheck/archinfo/utils set).
 set_source_files_properties(
-  ${RCCL_HOST_HIPIFY_DIR}/src/enqueue/task_prep/task_classify.cc
-  ${RCCL_HOST_HIPIFY_DIR}/src/enqueue/task_prep/task_pretuning.cc
-  ${RCCL_HOST_HIPIFY_DIR}/src/enqueue/task_prep/task_posttuning.cc
   ${RCCL_HOST_HIPIFY_DIR}/src/config/algorithm_parser.cc
   ${RCCL_HOST_HIPIFY_DIR}/src/config/algorithm_registry.cc
   ${RCCL_HOST_HIPIFY_DIR}/src/config/collconfig.cc
@@ -854,10 +860,19 @@ rccl_add_micro_binary(rccl-UnitTestsMicroTaskPrep
     ${_MICRO_MODE_DEFS}
     ${_MICRO_AMDSMI_DEF}
     # Hipify preserves src/enqueue/task_prep/ and renames none of the four (no basename collisions).
+    # Same for src/enqueue/task_sched/: the _tmp.cc rename lands on src/scheduler/allgatherv_sched.cc,
+    # the only basename collision (see the ALLGATHERV_SCHED_CC_PATH note above).
     TASK_PREP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/enqueue/task_prep/task_prep.cc"
     TASK_CLASSIFY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/enqueue/task_prep/task_classify.cc"
     TASK_PRETUNING_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/enqueue/task_prep/task_pretuning.cc"
     TASK_POSTTUNING_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/enqueue/task_prep/task_posttuning.cc"
+    TASK_SCHED_DISPATCH_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/enqueue/task_sched/task_sched.cc"
+    TASK_SCHED_SYM_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/enqueue/task_sched/sym_sched.cc"
+    TASK_SCHED_LEGACY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/enqueue/task_sched/legacy_sched.cc"
+    TASK_SCHED_ALLGATHERV_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/enqueue/task_sched/allgatherv_sched.cc"
+    TASK_SCHED_P2P_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/enqueue/task_sched/p2p_sched.cc"
+    TASK_SCHED_RMA_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/enqueue/task_sched/rma_sched.cc"
+    TASK_SCHED_CE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/enqueue/task_sched/ce_sched.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_taskprep.yaml")
 
 # =====================================================================
