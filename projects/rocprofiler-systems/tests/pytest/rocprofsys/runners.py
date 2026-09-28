@@ -23,6 +23,7 @@ import shutil
 import subprocess
 import tempfile
 from typing import Optional
+from .cache import resolve_username
 from .config import RocprofsysConfig
 from .environment import TestEnvironment, TestEnvKind
 
@@ -225,11 +226,11 @@ class BaseRunner(ABC):
         # shared machines where multiple users run the same test as different OS
         # users: the second user cannot write into a /tmp/<test-name>/ directory
         # that was created (and is owned) by the first user.
-        _tmpdir = Path(tempfile.gettempdir()) / getpass.getuser()
+        tmpdir = Path(tempfile.gettempdir()) / resolve_username()
         self.environment.set_test_environment(
             {
                 "ROCPROFSYS_OUTPUT_PATH": str(self.output_dir),
-                "ROCPROFSYS_TMPDIR": str(_tmpdir),
+                "ROCPROFSYS_TMPDIR": str(tmpdir),
             }
         )
         self.environment.set_user_environment()
