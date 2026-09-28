@@ -15,8 +15,9 @@
 #   1. consume ROCm (provisioned on the head node) via .ci-out/rocm.env
 #   2. lib/build-ompi.sh      build OpenMPI (--with-rocm) -> ompi.env
 #   3. lib/build-rocshmem.sh  build rocSHMEM (IPC+SDMA)   -> rocshmem.env
-#   4. projects/rccl  install.sh  build RCCL (GIN/rocSHMEM), then build only
-#      rccl-UnitTestsFixtures and rccl-UnitTestsGinSdmaBroadcastPolicy
+#   4. projects/rccl  install.sh  build RCCL (GIN/rocSHMEM), then build
+#      rccl-UnitTestsFixtures, the ConnCheck host/device tests, and
+#      rccl-UnitTestsGinSdmaBroadcastPolicy
 #      (GIN_ANVIL_UNIT_TESTS=ON) -> rccl.env
 #   5. projects/rccl-tests        build rccl-tests (DEVICE_API + ROCSHMEM)
 #   6. rccl-UnitTestsGinAnvilSdmaFactory  SDMA factory gtest (single-node)
@@ -108,16 +109,18 @@ set +a
 
 # 4) RCCL with GIN / rocSHMEM. Mirrors the Dockerfile: patch the rocSHMEM
 # threshold guard, then install.sh with ENABLE_ROCSHMEM_GIN. Build
-# rccl-UnitTestsFixtures in a second step (reconfigure BUILD_TESTS=ON,
-# GIN_ANVIL_UNIT_TESTS=ON, make only that target). Do not pass install.sh -t:
-# that builds every test executable and pulls in rccl-UnitTestsGinAnvilPlugin,
-# which can compile before hipify headers exist under parallel -j and aborts
-# before librccl.so is installed.
+# rccl-UnitTestsFixtures plus the GIN gtest binaries in a second step
+# (reconfigure BUILD_TESTS=ON, GIN_ANVIL_UNIT_TESTS=ON). Do not pass
+# install.sh -t: that builds every test executable and can compile plugin
+# tests before hipify headers exist under parallel -j and abort before
+# librccl.so is installed.
 echo "==> [4/7] build RCCL (GIN, targets=${gpu_targets})"
 rccl_src="${workdir}/projects/rccl"
 rccl_prefix="${workdir}/.ci-out/rccl-install"
 rccl_build="${rccl_src}/build/release"
 rccl_fixtures_bin="${rccl_build}/test/rccl-UnitTestsFixtures"
+rccl_conn_plugin_bin="${rccl_build}/test/rccl-UnitTestsGinAnvilPlugin"
+rccl_conn_device_bin="${rccl_build}/test/rccl-UnitTestsGinAnvilConnCheckDevice"
 rccl_bcast_policy_ut_bin="${rccl_build}/test/rccl-UnitTestsGinSdmaBroadcastPolicy"
 rm -rf "${rccl_prefix}"
 (
@@ -133,15 +136,83 @@ if [[ ! -f "${rccl_prefix}/lib/librccl.so" && ! -f "${rccl_prefix}/lib/librccl.s
   ls -la "${rccl_prefix}/lib" 2>/dev/null >&2 || true
   exit 1
 fi
+# CMake's namelink (librccl.so) may be a GNU ld script, not an ELF.
+# The shipped library that carries .hip_fatbin is librccl.so.1 / .so.1.0.
+# Prefer a real ELF so readelf/objcopy see the fatbin section (GIN CI on
+# d913f3f7c4 failed this pin on the namelink after device-link produced a
+# 27.7 MiB .hip_fatbin in the build-tree library).
+rccl_readelf() {
+  if command -v llvm-readelf >/dev/null 2>&1; then
+    llvm-readelf "$@"
+  else
+    readelf "$@"
+  fi
+}
+resolve_librccl_elf() {
+  local prefix="$1"
+  local cand
+  for cand in \
+      "${prefix}/lib/librccl.so.1.0" \
+      "${prefix}/lib/librccl.so.1" \
+      "${prefix}/lib/librccl.so"; do
+    if [[ -e "${cand}" ]] && rccl_readelf -h "${cand}" >/dev/null 2>&1; then
+      printf '%s\n' "${cand}"
+      return 0
+    fi
+  done
+  return 1
+}
+librccl="$(resolve_librccl_elf "${rccl_prefix}")" || {
+  echo "ERROR: no ELF librccl under ${rccl_prefix}/lib" >&2
+  ls -la "${rccl_prefix}/lib"/librccl.so* 2>/dev/null >&2 || true
+  file "${rccl_prefix}/lib"/librccl.so* 2>/dev/null >&2 || true
+  exit 1
+}
+# The #10930 regression was an unlinked conn-check fatbin. Pin the two kernel
+# names in the shipped .hip_fatbin section, not host stubs / registration text.
+assert_conn_check_kernels_in_fatbin() {
+  local lib="$1"
+  if ! rccl_readelf -S "${lib}" 2>/dev/null | grep -q '\.hip_fatbin'; then
+    echo "ERROR: ${lib} has no .hip_fatbin section" >&2
+    rccl_readelf -S "${lib}" >&2 || true
+    exit 1
+  fi
+  local fatbin
+  fatbin="$(mktemp)"
+  if llvm-objcopy -O binary --only-section=.hip_fatbin "${lib}" "${fatbin}" 2>/dev/null \
+     || objcopy -O binary --only-section=.hip_fatbin "${lib}" "${fatbin}" 2>/dev/null; then
+    :
+  else
+    echo "ERROR: could not extract .hip_fatbin from ${lib}" >&2
+    rm -f "${fatbin}"
+    exit 1
+  fi
+  local kernel
+  for kernel in ginAnvilConnWriteKernel ginAnvilConnCheckKernel; do
+    if ! grep -qa "${kernel}" "${fatbin}"; then
+      echo "ERROR: ${kernel} missing from ${lib} .hip_fatbin (conn-check not device-linked)" >&2
+      rm -f "${fatbin}"
+      exit 1
+    fi
+  done
+  rm -f "${fatbin}"
+}
+assert_conn_check_kernels_in_fatbin "${librccl}"
+echo "    conn-check kernels present in ${librccl} .hip_fatbin"
 
-echo "==> [4/7] build rccl-UnitTestsFixtures + GinSdmaBroadcastPolicy + GinAnvilSdmaFactory (GIN_ANVIL_UNIT_TESTS=ON)"
+echo "==> [4/7] build fixtures, ConnCheck, GinSdmaBroadcastPolicy, and GinAnvilSdmaFactory (GIN_ANVIL_UNIT_TESTS=ON)"
 (
   cd "${rccl_build}"
   cmake . \
     -DBUILD_TESTS=ON \
     -DGIN_ANVIL_UNIT_TESTS=ON \
     -DROCSHMEM_INSTALL_DIR="${ROCSHMEM_INSTALL_DIR}"
-  make -j"${build_jobs}" rccl-UnitTestsFixtures rccl-UnitTestsGinSdmaBroadcastPolicy rccl-UnitTestsGinAnvilSdmaFactory
+  make -j"${build_jobs}" \
+    rccl-UnitTestsFixtures \
+    rccl-UnitTestsGinAnvilPlugin \
+    rccl-UnitTestsGinAnvilConnCheckDevice \
+    rccl-UnitTestsGinSdmaBroadcastPolicy \
+    rccl-UnitTestsGinAnvilSdmaFactory
 )
 if [[ ! -x "${rccl_fixtures_bin}" ]]; then
   echo "ERROR: rccl-UnitTestsFixtures not built at ${rccl_fixtures_bin}" >&2
@@ -153,8 +224,15 @@ if [[ ! -x "${rccl_bcast_policy_ut_bin}" ]]; then
   ls -la "$(dirname "${rccl_bcast_policy_ut_bin}")" 2>/dev/null >&2 || true
   exit 1
 fi
+if [[ ! -x "${rccl_conn_plugin_bin}" || ! -x "${rccl_conn_device_bin}" ]]; then
+  echo "ERROR: ConnCheck unit tests were not built under ${rccl_build}/test" >&2
+  ls -la "${rccl_build}/test" 2>/dev/null >&2 || true
+  exit 1
+fi
 echo "    rccl-UnitTestsFixtures: ${rccl_fixtures_bin}"
 echo "    rccl-UnitTestsGinSdmaBroadcastPolicy: ${rccl_bcast_policy_ut_bin}"
+echo "    rccl-UnitTestsGinAnvilPlugin: ${rccl_conn_plugin_bin}"
+echo "    rccl-UnitTestsGinAnvilConnCheckDevice: ${rccl_conn_device_bin}"
 
 # Locate the in-tree RCCL CMake package config. rccl-tests' find_package(RCCL)
 # otherwise resolves roc::rccl to the nightly ROCm (its toolchain prepends
