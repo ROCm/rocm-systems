@@ -1,5 +1,6 @@
 #include "profiler_hub_ctx.hpp"
 #include "profiler-hub/cpp/storage.hpp"
+#include <limits>
 
 ph_ctx::ph_ctx(std::string_view trace_path)
 : m_file_path{ trace_path }
@@ -50,7 +51,10 @@ ph_ctx::get_track_events(uint32_t track_id, uint64_t start_ts, uint64_t end_ts)
     if(start_ts != 0 || end_ts != 0)
     {
         filter.time_window.start = start_ts;
-        filter.time_window.end   = end_ts;
+        filter.time_window.end =
+            (end_ts != 0) ? end_ts
+                          : static_cast<profiler_hub::reader_types::timestamp_ns_t>(
+                                std::numeric_limits<std::int64_t>::max());
     }
 
     m_events = m_reader->get_events_for_track(track_it->second, filter);
@@ -83,7 +87,10 @@ ph_ctx::get_track_samples(uint32_t track_id, uint64_t start_ts, uint64_t end_ts)
     if(start_ts != 0 || end_ts != 0)
     {
         filter.time_window.start = start_ts;
-        filter.time_window.end   = end_ts;
+        filter.time_window.end =
+            (end_ts != 0) ? end_ts
+                          : static_cast<profiler_hub::reader_types::timestamp_ns_t>(
+                                std::numeric_limits<std::int64_t>::max());
     }
 
     const auto samples = m_reader->get_counter_events_for_track(track_it->second, filter);

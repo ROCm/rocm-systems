@@ -77,6 +77,51 @@ protected:
         writer.insert_region_data(region_data, trace_environment);
     }
 
+    void seed_track_with_two_events(writer_t& writer) const
+    {
+        const writer_types::node_info_t node_info{ 1, 42, "machine-1" };
+        writer.register_node_info(node_info);
+
+        writer_types::process_info_t process_info;
+        process_info.pid     = 100;
+        process_info.node_id = 1;
+        writer.register_process_info(process_info);
+
+        writer_types::thread_info_t thread_info;
+        thread_info.thread_id  = 200;
+        thread_info.node_id    = 1;
+        thread_info.process_id = 100;
+        writer.register_thread_info(thread_info);
+
+        writer_types::track_info_t track_info;
+        track_info.node_id    = 1;
+        track_info.process_id = 100;
+        track_info.thread_id  = 200;
+        writer.register_track_info(track_info);
+
+        writer_types::trace_environment_t trace_environment;
+        trace_environment.node_id    = 1;
+        trace_environment.process_id = 100;
+        trace_environment.thread_id  = 200;
+
+        writer_types::event_data_t event_data;
+        event_data.stack_id = 1;
+
+        writer_types::region_data_t region_a;
+        region_a.name            = "region-a";
+        region_a.start_timestamp = 1000;
+        region_a.end_timestamp   = 2000;
+        region_a.event           = event_data;
+        writer.insert_region_data(region_a, trace_environment);
+
+        writer_types::region_data_t region_b;
+        region_b.name            = "region-b";
+        region_b.start_timestamp = 5000;
+        region_b.end_timestamp   = 6000;
+        region_b.event           = event_data;
+        writer.insert_region_data(region_b, trace_environment);
+    }
+
     std::string m_db_path;
     // Embedded verbatim into unquoted SQL table names by insert_statements, so it
     // must be a valid identifier fragment - no hyphens.
@@ -163,6 +208,76 @@ TEST_F(ph_ctx_test, get_track_events_returns_empty_for_unknown_track)
     const auto events = ctx.get_track_events(999999, 0, 0);
     EXPECT_EQ(events.list_size, 0U);
     EXPECT_EQ(events.events, nullptr);
+}
+
+TEST_F(ph_ctx_test, get_track_events_start_only_filters_to_overlapping_events)
+{
+    auto writer = make_writer();
+    seed_track_with_two_events(*writer);
+    writer->flush_in_memory_data_to_disk();
+    writer.reset();
+
+    ph_ctx ctx{ m_db_path };
+
+    const auto tracks = ctx.get_track_list();
+    ASSERT_EQ(tracks.list_size, 1U);
+
+    const auto events = ctx.get_track_events(tracks.tracks[0].id, 3000, 0);
+    ASSERT_EQ(events.list_size, 1U);
+    EXPECT_EQ(events.events[0].start, 5000U);
+    EXPECT_EQ(events.events[0].end, 6000U);
+}
+
+TEST_F(ph_ctx_test, get_track_events_end_only_filters_to_overlapping_events)
+{
+    auto writer = make_writer();
+    seed_track_with_two_events(*writer);
+    writer->flush_in_memory_data_to_disk();
+    writer.reset();
+
+    ph_ctx ctx{ m_db_path };
+
+    const auto tracks = ctx.get_track_list();
+    ASSERT_EQ(tracks.list_size, 1U);
+
+    const auto events = ctx.get_track_events(tracks.tracks[0].id, 0, 3000);
+    ASSERT_EQ(events.list_size, 1U);
+    EXPECT_EQ(events.events[0].start, 1000U);
+    EXPECT_EQ(events.events[0].end, 2000U);
+}
+
+TEST_F(ph_ctx_test, get_track_events_both_bounds_filters_to_overlapping_events)
+{
+    auto writer = make_writer();
+    seed_track_with_two_events(*writer);
+    writer->flush_in_memory_data_to_disk();
+    writer.reset();
+
+    ph_ctx ctx{ m_db_path };
+
+    const auto tracks = ctx.get_track_list();
+    ASSERT_EQ(tracks.list_size, 1U);
+
+    const auto events = ctx.get_track_events(tracks.tracks[0].id, 1200, 1800);
+    ASSERT_EQ(events.list_size, 1U);
+    EXPECT_EQ(events.events[0].start, 1000U);
+    EXPECT_EQ(events.events[0].end, 2000U);
+}
+
+TEST_F(ph_ctx_test, get_track_events_no_bounds_returns_all_events)
+{
+    auto writer = make_writer();
+    seed_track_with_two_events(*writer);
+    writer->flush_in_memory_data_to_disk();
+    writer.reset();
+
+    ph_ctx ctx{ m_db_path };
+
+    const auto tracks = ctx.get_track_list();
+    ASSERT_EQ(tracks.list_size, 1U);
+
+    const auto events = ctx.get_track_events(tracks.tracks[0].id, 0, 0);
+    EXPECT_EQ(events.list_size, 2U);
 }
 
 TEST_F(ph_ctx_test, get_track_samples_returns_empty_for_non_pmc_track)
