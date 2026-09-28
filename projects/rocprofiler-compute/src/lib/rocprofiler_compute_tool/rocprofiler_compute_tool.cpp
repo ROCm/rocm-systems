@@ -3,6 +3,7 @@
 
 #include "rocprofiler_compute_tool.h"
 
+#include "agent_writer.h"
 #include "counters_writer.h"
 #include "dispatch_writer.h"
 #include "input_parameters.h"
@@ -14,6 +15,7 @@
 #include <unistd.h>
 
 #include <atomic>
+#include <exception>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -111,12 +113,50 @@ void kernel_dispatch_callback(rocprofiler_callback_tracing_record_t record,
     g_sdk_callbacks->kernel_dispatch_callback(record, callback_data);
 }
 
+rocprofiler_status_t collect_gpu_agents(rocprofiler_agent_version_t /*version*/,
+                                        const void** agents,
+                                        size_t       num_agents,
+                                        void*        user_data)
+{
+    auto& gpu_agents = *static_cast<std::unordered_map<uint64_t, agent_record_t>*>(user_data);
+    for (size_t i = 0; i < num_agents; ++i)
+    {
+        const auto* agent = static_cast<const rocprofiler_agent_t*>(agents[i]);
+        if (agent->type != ROCPROFILER_AGENT_TYPE_GPU)
+            continue;
+
+        gpu_agents[agent->id.handle] = agent_record_t{agent->node_id,
+                                                      agent->logical_node_id,
+                                                      agent->name ? agent->name : "",
+                                                      agent->product_name ? agent->product_name : ""};
+    }
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
+void record_gpu_agents(tool_data_t* tool_data)
+{
+    std::unordered_map<uint64_t, agent_record_t> gpu_agents;
+    try
+    {
+        g_sdk_wrapper->query_available_agents(collect_gpu_agents, &gpu_agents);
+    }
+    catch (const std::exception& error)
+    {
+        // Profiling goes on without the agent table.
+        std::cerr << "[rocprofiler-compute] " << error.what() << std::endl;
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock(tool_data->mut);
+    tool_data->agents = std::move(gpu_agents);
+}
+
 void on_hsa_runtime_loaded(rocprofiler_intercept_table_t /*type*/,
                            uint64_t /*lib_version*/,
                            uint64_t /*lib_instance*/,
                            void** /*tables*/,
                            uint64_t /*num_tables*/,
-                           void* /*user_data*/)
+                           void* user_data)
 {
     // Defer start_context until HSA loads: it starts HSA worker threads, which
     // would deadlock on fork() in non-GPU LD_PRELOAD'd shells.
@@ -126,6 +166,7 @@ void on_hsa_runtime_loaded(rocprofiler_intercept_table_t /*type*/,
     if (g_hsa_intercept_done.exchange(true, std::memory_order_acq_rel))
         return;
 
+    record_gpu_agents(static_cast<std::unique_ptr<tool_data_t>*>(user_data)->get());
     g_sdk_wrapper->start_context(get_client_ctx());
 }
 
@@ -207,6 +248,7 @@ std::unique_ptr<tool_data_t> create_tool_data(rocprofiler_client_id_t* /*id*/)
     tool_data->dispatch_filename = generate_output_filename(output_path, DispatchWriter::kFileSuffix);
     tool_data->kernel_symbols_filename = generate_output_filename(output_path,
                                                                   KernelSymbolsWriter::kFileSuffix);
+    tool_data->agents_filename = generate_output_filename(output_path, AgentWriter::kFileSuffix);
 
     const auto pc_sampling_method = g_input_parameters->get_pc_sampling_method();
     if (!pc_sampling_method.empty())
@@ -299,6 +341,7 @@ rocprofiler_tool_configure_result_t* rocprofiler_configure(uint32_t             
         g_output_registry.register_writer(std::make_shared<CsvCountersWriter>());
         g_output_registry.register_writer(std::make_shared<DispatchWriter>());
         g_output_registry.register_writer(std::make_shared<KernelSymbolsWriter>());
+        g_output_registry.register_writer(std::make_shared<AgentWriter>());
         g_output_registry.register_writer(g_tool_data->pc_sampling);
 
         g_cfg = std::make_shared<rocprofiler_tool_configure_result_t>(

@@ -6,7 +6,7 @@ import json
 import re
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
 import pandas as pd
 import yaml
@@ -217,6 +217,23 @@ def build_agent_to_gpu_map_from_json(
         key=lambda agent: agent["node_id"],
     )
     return {agent["id"]["handle"]: index for index, agent in enumerate(gpu_agents)}
+
+
+def build_node_to_gpu_map(agents: pd.DataFrame) -> Dict[int, int]:
+    """Map the node ids of a native agents CSV to 0-indexed GPU IDs, in node order."""
+    node_ids = sorted(int(node_id) for node_id in agents["node_id"])
+    return {node_id: index for index, node_id in enumerate(node_ids)}
+
+
+def load_node_to_gpu_map(agents_csv: Path) -> Dict[int, int]:
+    """Read one process's native agents CSV into build_node_to_gpu_map.
+
+    A process that never loaded the GPU runtime writes no agents CSV, so a
+    missing file maps nothing.
+    """
+    if not agents_csv.is_file():
+        return {}
+    return build_node_to_gpu_map(pd.read_csv(agents_csv))
 
 
 @demarcate
