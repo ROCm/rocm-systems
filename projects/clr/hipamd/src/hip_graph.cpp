@@ -124,18 +124,22 @@ hipError_t ihipGraphAddKernelNode(hip::GraphNode** pGraphNode, hip::Graph* graph
   }
 
   const amd::Device* device = g_devices[deviceId]->devices()[0];
-  HIPLaunchParams launch_params(pNodeParams->gridDim.x, pNodeParams->gridDim.y,
-                                pNodeParams->gridDim.z, pNodeParams->blockDim.x,
-                                pNodeParams->blockDim.y, pNodeParams->blockDim.z,
-                                pNodeParams->sharedMemBytes, *device,
-                                globalWorkSizeX_remainder, globalWorkSizeY_remainder,
-                                globalWorkSizeZ_remainder, clusterDim.x, clusterDim.y,
-                                clusterDim.z);
-  if (!launch_params.IsValidConfig()) {
-    return hipErrorInvalidConfiguration;
+  static constexpr LaunchErrorRule kConfigRules[] = {
+      {kInvalidConfigBits, hipErrorInvalidConfiguration},
+  };
+  amd::NDRangeContainer ndrange(3);
+  amd::NDRange32 grid(1, 1, 1);
+  hipError_t status = MakeLaunchNDRangeFromGrid(
+      ndrange, grid, pNodeParams->gridDim.x, pNodeParams->gridDim.y, pNodeParams->gridDim.z,
+      pNodeParams->blockDim.x, pNodeParams->blockDim.y, pNodeParams->blockDim.z,
+      globalWorkSizeX_remainder, globalWorkSizeY_remainder, globalWorkSizeZ_remainder,
+      clusterDim.x, clusterDim.y, clusterDim.z, pNodeParams->sharedMemBytes, *device, kConfigRules);
+  if (status != hipSuccess) {
+    return status;
   }
-  hipError_t status = ihipLaunchKernel_validate(func, launch_params, pNodeParams->kernelParams,
-                                                pNodeParams->extra, deviceId, coopKernel);
+  status = ihipLaunchKernel_validate(func, ndrange, pNodeParams->sharedMemBytes,
+                                     pNodeParams->kernelParams, pNodeParams->extra, deviceId,
+                                     coopKernel);
   if (hipSuccess != status) {
     return status;
   }

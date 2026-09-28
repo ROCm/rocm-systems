@@ -98,6 +98,27 @@ class NDRangeContainer {
   uint8_t dimensions_;   //!< Number of dimensions (1, 2, or 3).
 
  public:
+  //! Empty index space — every dim 1, no offset. Callers fill it in afterwards.
+  explicit NDRangeContainer(size_t dimensions)
+      : offset_(0, 0, 0),
+        global_(1, 1, 1),
+        local_(1, 1, 1),
+        cluster_(1, 1, 1),
+        dimensions_(static_cast<uint8_t>(dimensions)) {
+    assert(dimensions_ >= 1 && dimensions_ <= 3 && "Dimensions must be 1, 2, or 3");
+  }
+
+  //! From already narrowed typed index spaces.
+  NDRangeContainer(size_t dimensions, const NDRange& globalWorkOffset, const NDRange32& global,
+                   const NDRange16& local, const NDRange8& cluster)
+      : offset_(globalWorkOffset),
+        global_(global),
+        local_(local),
+        cluster_(cluster),
+        dimensions_(static_cast<uint8_t>(dimensions)) {
+    assert(dimensions_ >= 1 && dimensions_ <= 3 && "Dimensions must be 1, 2, or 3");
+  }
+
   //! From size_t arrays (blit, OCL, devprogram callers — no cluster).
   NDRangeContainer(size_t dimensions, const size_t* globalWorkOffset, const size_t* globalWorkSize,
                    const size_t* localWorkSize)
@@ -139,6 +160,12 @@ class NDRangeContainer {
   const NDRange32& global() const { return global_; }
   const NDRange16& local() const { return local_; }
   const NDRange8& cluster() const { return cluster_; }
+
+  //! Shrink the workgroup in one dim (used to clamp local to global on a HIP launch).
+  void setLocal(size_t dim, uint16_t value) { local_[dim] = value; }
+
+  //! Override the cluster dims (used when the kernel metadata carries its own cluster size).
+  void setCluster(const NDRange8& cluster) { cluster_ = cluster; }
 };
 
 static_assert(sizeof(NDRangeContainer) <= 64,
