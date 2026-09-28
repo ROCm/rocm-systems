@@ -40,16 +40,18 @@ jobs:
         with:
           sparse-checkout: |
             profilers/profiler-hub
+            projects/rocprofiler-sdk/source/share/rocprofiler-sdk-rocpd
             .github/workflows
 
+      # No gtest/gmock/benchmark: this job configures with tests and benchmarks
+      # off, and cmake/{gtest,benchmark}.cmake are reached only from tests/.
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             cmake \
             gcc g++ clang-tidy-18 \
-            libsqlite3-dev libspdlog-dev libfmt-dev nlohmann-json3-dev \
-            libgtest-dev libgmock-dev libbenchmark-dev
+            libsqlite3-dev libspdlog-dev libfmt-dev nlohmann-json3-dev
           sudo update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-18 100
 
       - name: Configure
@@ -64,7 +66,8 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
             -DPROFILER_HUB_BUILD_TESTS=OFF \
-            -DPROFILER_HUB_BUILD_BENCHMARKS=OFF
+            -DPROFILER_HUB_BUILD_BENCHMARKS=OFF \
+            -DPROFILER_HUB_FETCH_DEPENDENCIES=ON
 
       - name: Build
         working-directory: profilers/profiler-hub

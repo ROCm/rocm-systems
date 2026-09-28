@@ -59,13 +59,13 @@ jobs:
         with:
           sparse-checkout: |
             profilers/profiler-hub
+            projects/rocprofiler-sdk/source/share/rocprofiler-sdk-rocpd
             .github/workflows
 
       # cmake, gcc/g++, util-linux are preinstalled on ubuntu-24.04 runners.
       # The sqlite3/spdlog/fmt/nlohmann_json system packages are intentionally
-      # omitted: the project's cmake/{sqlite3,spdlog,nlohmann_json}.cmake fall
-      # back to FetchContent when find_package fails, so deps build with the
-      # sanitizer flags applied. System libs built without -fsanitize would
+      # omitted so PROFILER_HUB_FETCH_DEPENDENCIES builds them from source with
+      # the sanitizer flags applied. System libs built without -fsanitize would
       # produce false-positive reports.
       - name: Install dependencies
         run: |
@@ -98,6 +98,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Debug \
             -DPROFILER_HUB_BUILD_TESTS=ON \
             -DPROFILER_HUB_BUILD_BENCHMARKS=OFF \
+            -DPROFILER_HUB_FETCH_DEPENDENCIES=ON \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_C_FLAGS="${{ matrix.sanitizer.cflags }}" \
