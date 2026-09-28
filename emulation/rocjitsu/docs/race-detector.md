@@ -12,9 +12,12 @@ instructions.
 
 The race detector focuses on pre-GFX12 architectures. Its current end-to-end
 coverage exercises gfx950 (GFX9/CDNA4) and gfx1151 (GFX11.5/RDNA3.5). GFX12
-and later architectures are not supported; their counter, scheduling, and
-writeback rules will be modeled when that support is added rather than being
-partially anticipated here.
+and later architectures are not supported. Some GFX12 split-counter behavior
+is already modeled and covered by plugin tests, including partial load waits
+and generic FLAT stores that require both STORECNT and DSCNT waits. This partial
+coverage does not establish complete counter, scheduling, or writeback support;
+issue-time counter-capacity backpressure remains limited to CDNA1 through CDNA4
+and GFX11.
 
 ## Quick start
 
