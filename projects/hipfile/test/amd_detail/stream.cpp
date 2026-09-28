@@ -36,6 +36,24 @@ hipFileFlagsPowerSet()
                               ::testing::Values(0, HIPFILE_STREAM_PAGE_ALIGNED_INPUTS));
 }
 
+static uint64_t g_stream_signal_slot_storage = 0;
+
+static void
+expectStreamResources(StrictMock<MHip> &mhip)
+{
+    EXPECT_CALL(mhip, hipStreamCreateWithFlags)
+        .Times(::testing::AnyNumber())
+        .WillRepeatedly(::testing::Return(reinterpret_cast<hipStream_t>(0xC0C0)));
+    EXPECT_CALL(mhip, hipStreamDestroy).Times(::testing::AnyNumber());
+    EXPECT_CALL(mhip, hipExtMallocWithFlags)
+        .Times(::testing::AnyNumber())
+        .WillRepeatedly(::testing::Return(&g_stream_signal_slot_storage));
+    EXPECT_CALL(mhip, hipFree).Times(::testing::AnyNumber());
+    EXPECT_CALL(mhip, hipDeviceGetAttribute(hipDeviceAttributeCanUseStreamWaitValue, ::testing::_))
+        .Times(::testing::AnyNumber())
+        .WillRepeatedly(::testing::Return(1));
+}
+
 static void
 expectStreamBuffer(StrictMock<MConfiguration> &mconfig, StrictMock<MHip> &mhip)
 {
@@ -49,9 +67,7 @@ expectStreamBuffer(StrictMock<MConfiguration> &mconfig, StrictMock<MHip> &mhip)
         .Times(::testing::AnyNumber())
         .WillRepeatedly(::testing::Return(reinterpret_cast<void *>(0x5678)));
     EXPECT_CALL(mhip, hipHostFree).Times(::testing::AnyNumber());
-    EXPECT_CALL(mhip, hipDeviceGetAttribute(hipDeviceAttributeCanUseStreamWaitValue, ::testing::_))
-        .Times(::testing::AnyNumber())
-        .WillRepeatedly(::testing::Return(1));
+    expectStreamResources(mhip);
 }
 
 struct HipFileStream : public ::testing::Test {
@@ -114,6 +130,26 @@ TEST_F(HipFileStream, canUseStreamWaitValue_reflects_device_attribute_unsupporte
     ASSERT_FALSE(stream_map.getStream(nonnull_stream)->canUseStreamWaitValue());
 }
 
+TEST_F(HipFileStream, owns_copy_stream_and_signal_slot)
+{
+    EXPECT_CALL(mhip, hipStreamGetDevice);
+    stream_map.registerStream(nonnull_stream, 0);
+    auto stream = stream_map.getStream(nonnull_stream);
+    ASSERT_EQ(stream->copyStream(), reinterpret_cast<hipStream_t>(0xC0C0));
+    ASSERT_EQ(stream->signalSlot(), &g_stream_signal_slot_storage);
+}
+
+TEST_F(HipFileStream, no_signal_slot_when_wait_value_unsupported)
+{
+    EXPECT_CALL(mhip, hipStreamGetDevice);
+    EXPECT_CALL(mhip, hipDeviceGetAttribute(hipDeviceAttributeCanUseStreamWaitValue, ::testing::_))
+        .WillRepeatedly(::testing::Return(0));
+    stream_map.registerStream(nonnull_stream, 0);
+    auto stream = stream_map.getStream(nonnull_stream);
+    ASSERT_EQ(stream->signalSlot(), nullptr);
+    ASSERT_NE(stream->copyStream(), nullptr);
+}
+
 TEST_F(HipFileStream, register_with_invalid_flags_throws)
 {
     ASSERT_THROW(stream_map.registerStream(nonnull_stream, HIPFILE_STREAM_FLAGS_MASK + 1),
@@ -171,9 +207,7 @@ TEST(HipFileStreamDestructor, buffer_free_failure_logs)
     EXPECT_CALL(mhip, hipHostFree)
         .Times(::testing::AnyNumber())
         .WillRepeatedly(::testing::Throw(Hip::RuntimeError(hipErrorInvalidValue)));
-    EXPECT_CALL(mhip, hipDeviceGetAttribute(hipDeviceAttributeCanUseStreamWaitValue, ::testing::_))
-        .Times(::testing::AnyNumber())
-        .WillRepeatedly(::testing::Return(1));
+    expectStreamResources(mhip);
     EXPECT_CALL(msys, syslog);
     {
         StreamMap stream_map;

@@ -10,6 +10,8 @@
 #include "stream.h"
 #include "sys.h"
 
+#include <atomic>
+#include <cstdint>
 #include <hip/hip_runtime_api.h>
 #include <memory>
 #include <mutex>
@@ -34,7 +36,8 @@ Stream::Stream(const hipStream_t _hip_stream, uint32_t flags, const PassKey<Stre
       fixed_file_offset{(flags & HIPFILE_STREAM_FIXED_FILE_OFFSET) != 0},
       fixed_io_size{(flags & HIPFILE_STREAM_FIXED_FILE_SIZE) != 0},
       page_aligned{(flags & HIPFILE_STREAM_PAGE_ALIGNED_INPUTS) != 0}, can_use_stream_wait_value{false},
-      async_buffer{nullptr, hipHostDeleter}, async_buffer_dev_ptr{nullptr}, async_buffer_size{0}
+      copy_stream{nullptr}, signal_slot{nullptr}, async_buffer{nullptr, hipHostDeleter},
+      async_buffer_dev_ptr{nullptr}, async_buffer_size{0}
 
 {
     if ((flags & HIPFILE_STREAM_FLAGS_MASK) != flags) {
@@ -45,6 +48,14 @@ Stream::Stream(const hipStream_t _hip_stream, uint32_t flags, const PassKey<Stre
 
     can_use_stream_wait_value =
         Context<Hip>::get()->hipDeviceGetAttribute(hipDeviceAttributeCanUseStreamWaitValue, device_id) != 0;
+
+    copy_stream = Context<Hip>::get()->hipStreamCreateWithFlags(hipStreamNonBlocking);
+
+    if (can_use_stream_wait_value) {
+        signal_slot = static_cast<uint64_t *>(
+            Context<Hip>::get()->hipExtMallocWithFlags(sizeof(uint64_t), hipMallocSignalMemory));
+        std::atomic_ref<uint64_t>{*signal_slot}.store(0, std::memory_order_release);
+    }
 
     size_t buffer_size = Context<Configuration>::get()->asyncBufferSize();
     void  *host_ptr    = Context<Hip>::get()->hipHostMalloc(buffer_size, 0);
@@ -147,6 +158,33 @@ bool
 Stream::canUseStreamWaitValue() const
 {
     return can_use_stream_wait_value;
+}
+
+hipStream_t
+Stream::copyStream() const
+{
+    return copy_stream;
+}
+
+uint64_t *
+Stream::signalSlot() const
+{
+    return signal_slot;
+}
+
+Stream::~Stream()
+{
+    try {
+        if (signal_slot) {
+            Context<Hip>::get()->hipFree(signal_slot);
+        }
+        if (copy_stream) {
+            Context<Hip>::get()->hipStreamDestroy(copy_stream);
+        }
+    }
+    catch (...) {
+        Context<Sys>::get()->syslog(LOG_CRIT, "Error releasing stream async resources.");
+    }
 }
 
 StreamMap::~StreamMap()

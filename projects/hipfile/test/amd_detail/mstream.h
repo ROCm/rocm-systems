@@ -23,6 +23,8 @@ public:
     MOCK_METHOD(void *, asyncBufferDevPtr, (), (const, override));
     MOCK_METHOD(size_t, asyncBufferSize, (), (const, override));
     MOCK_METHOD(bool, canUseStreamWaitValue, (), (const, override));
+    MOCK_METHOD(hipStream_t, copyStream, (), (const, override));
+    MOCK_METHOD(uint64_t *, signalSlot, (), (const, override));
 };
 
 }
