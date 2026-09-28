@@ -351,8 +351,8 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const LaunchConfig& config
   }
 
   const amd::Device* device = g_devices[deviceId]->devices()[0];
-  const amd::NDRange32& global = config.ndrange_.global();
-  const amd::NDRange16& local = config.ndrange_.local();
+  const amd::NDRange32& global = config.ndrange().global();
+  const amd::NDRange16& local = config.ndrange().local();
 
   // Already computed when the config was built; only re-derived if this launch ended up on a
   // different device than the one whose limits were used back then.
@@ -368,13 +368,13 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const LaunchConfig& config
     LogPrintfError("%s", "At least one of kernelParams or extra Params should be provided");
     return hipErrorInvalidValue;
   }
-
-  const amd::device::Kernel* device_kernel = kernel->getDeviceKernel(*device);
-  if (device_kernel == nullptr) {
+  // Looking this up costs a map probe, so hold on to it rather than re-probing per use.
+  const amd::device::Kernel* devKernel = kernel->getDeviceKernel(*device);
+  if (!devKernel) {
     return hipErrorInvalidDevice;
   }
   {
-    const amd::device::Kernel::WorkGroupInfo* work_group_info = device_kernel->workGroupInfo();
+    const amd::device::Kernel::WorkGroupInfo* work_group_info = devKernel->workGroupInfo();
     if (work_group_info == nullptr) {
       return hipErrorInvalidDeviceFunction;
     }
@@ -385,10 +385,10 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const LaunchConfig& config
 
   // Make sure the launch params are not larger than if specified launch_bounds
   // If it exceeds, then return a failure
-  if (local.product() > device_kernel->workGroupInfo()->size_) {
+  const size_t launchBounds = devKernel->workGroupInfo()->size_;
+  if (local.product() > launchBounds) {
     LogPrintfError("Launch params (%u, %u, %u) are larger than launch bounds (%lu) for kernel %s",
-                   local[0], local[1], local[2], device_kernel->workGroupInfo()->size_,
-                   kernel->name().c_str());
+                   local[0], local[1], local[2], launchBounds, kernel->name().c_str());
     return hipErrorLaunchFailure;
   }
 
@@ -548,9 +548,9 @@ hipError_t UpdateNumClustersFromKernel(const hip::Stream* stream, const amd::Ker
   size_t selected_cluster[3] = {};
   // Launch-supplied dimensions are a separate source: every nonzero compile/runtime requirement
   // must match, while zero requirements are filled by the launch.
-  if (config.clusterDimsSpecified_) {
+  if (config.clusterDimsSpecified()) {
     for (size_t i = 0; i < 3; ++i) {
-      selected_cluster[i] = config.ndrange_.cluster()[i];
+      selected_cluster[i] = config.ndrange().cluster()[i];
       if (required_cluster[i] != 0 && selected_cluster[i] != required_cluster[i]) {
         return hipErrorInvalidClusterSize;
       }
@@ -581,6 +581,8 @@ hipError_t UpdateNumClustersFromKernel(const hip::Stream* stream, const amd::Ker
     return hipErrorInvalidClusterSize;
   }
 
+  // Code-object dims bypass the hipLaunchKernelExC() checks. An oversized cluster is dropped
+  // by the SPI without signalling completion, which hangs the host, so bound it here.
   if ((requested_cluster_size > 1 && device.info().clusterMaxSize_ == 0) ||
       (device.info().clusterMaxSize_ > 0 &&
        requested_cluster_size > device.info().clusterMaxSize_)) {
@@ -591,8 +593,9 @@ hipError_t UpdateNumClustersFromKernel(const hip::Stream* stream, const amd::Ker
     const dim3 cluster(static_cast<uint32_t>(selected_cluster[0]),
                        static_cast<uint32_t>(selected_cluster[1]),
                        static_cast<uint32_t>(selected_cluster[2]));
-    const amd::NDRangeContainer& ndrange = config.ndrange_;
-    if (!IsClusterDivisible(config.grid_, cluster)) {
+    config.SetCluster(cluster, config.clusterDimsSpecified());
+    if (config.HasClusterViolation()) {
+      const amd::NDRangeContainer& ndrange = config.ndrange();
       LogPrintfError("This is not a valid Cluster Launch, please recheck parameters"
                      "global[0]: %d, global[1]: %d, global[2]: %d, local[0]: %d, local[1]: %d,"
                      "local[2] :%d, numClusters[0]: %d, numClusters[1]: %d, numClusters[2]: %d",
@@ -601,9 +604,6 @@ hipError_t UpdateNumClustersFromKernel(const hip::Stream* stream, const amd::Ker
                       cluster.x, cluster.y, cluster.z);
       return hipErrorInvalidClusterSize;
     }
-    config.ndrange_.setCluster(amd::NDRange8(static_cast<uint8_t>(cluster.x),
-                                             static_cast<uint8_t>(cluster.y),
-                                             static_cast<uint8_t>(cluster.z)));
   }
   return hipSuccess;
 }
@@ -627,7 +627,7 @@ static hipError_t ihipCreateKernelCommand(amd::Command*& command, hipFunction_t 
   }
 
   amd::NDRangeKernelCommand* kernelCommand = new amd::NDRangeKernelCommand(
-      *stream, waitList, *kernel, config.ndrange_, config.sharedMemBytes32(), params, gridId,
+      *stream, waitList, *kernel, config.ndrange(), config.sharedMemBytes32(), params, gridId,
       numGrids, prevGridSum, allGridSum, firstDevice, profileNDRange);
   address kernargs = nullptr;
   size_t kernargs_size = 0;
@@ -721,22 +721,14 @@ hipError_t ihipModuleLaunchKernel(hipFunction_t f, LaunchConfig& config, hipStre
   IHIP_RETURN_ONFAIL(
       ihipLaunchKernel_validate(f, config, kernelParams, extra, deviceId, params));
 
-  amd::NDRangeContainer& ndrange = config.ndrange_;
   // Make sure the app doesn't launch a workgroup bigger than the global size
-  for (size_t i = 0; i < 3; ++i) {
-    if (ndrange.global()[i] < ndrange.local()[i]) {
-      ndrange.setLocal(i, static_cast<uint16_t>(ndrange.global()[i]));
-    }
-  }
+  config.ClampLocalToGlobal();
 
   auto device = g_devices[deviceId]->devices()[0];
   // Check if it's a uniform kernel and validate dimensions
-  if (kernel->getDeviceKernel(*device)->getUniformWorkGroupSize()) {
-    if (((ndrange.global()[0] % ndrange.local()[0]) != 0) ||
-        ((ndrange.global()[1] % ndrange.local()[1]) != 0) ||
-        ((ndrange.global()[2] % ndrange.local()[2]) != 0)) {
-      return hipErrorInvalidValue;
-    }
+  if (kernel->getDeviceKernel(*device)->getUniformWorkGroupSize() &&
+      !config.IsUniformWorkGroupValid()) {
+    return hipErrorInvalidValue;
   }
   amd::Command* command = nullptr;
   hip::Stream* hip_stream = hip::getStream(hStream);
@@ -984,7 +976,7 @@ hipError_t ihipModuleLaunchCooperativeKernelMultiDevice(hipFunctionLaunchParams*
         {launch.blockDimX, launch.blockDimY, launch.blockDimZ}, launch.sharedMemBytes, device);
     IHIP_RETURN_ONFAIL(config.Status(kMalformedDimsRules));
 
-    const size_t launchGridSize = config.ndrange_.global().product();
+    const size_t launchGridSize = config.ndrange().global().product();
     result = ihipModuleLaunchKernel(launch.function, config, launch.hStream, launch.kernelParams,
                                     nullptr, nullptr, nullptr, flags, extFlags, i, numDevices,
                                     prevGridSize, allGridSize, firstDevice);
@@ -1636,13 +1628,10 @@ hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f
     HIP_RETURN(hipErrorInvalidConfiguration);
   }
 
-  // Rebuild with the requested cluster dims, which carry no rule table and stay unvalidated.
-  LaunchConfig clusterConfig = MakeLaunchConfigFromGrid(
-      {config->gridDimX, config->gridDimY, config->gridDimZ},
-      {config->blockDimX, config->blockDimY, config->blockDimZ}, config->sharedMemBytes, *drvDevice,
-      clusterDim, kNoRemainder, clusterDimsSpecified);
+  // Apply the requested cluster dims, which carry no rule table and stay unvalidated here.
+  launchConfig.SetCluster(clusterDim, clusterDimsSpecified);
 
-  HIP_RETURN(ihipModuleLaunchKernel(f, clusterConfig, hStream, kernelParams, extra, nullptr,
+  HIP_RETURN(ihipModuleLaunchKernel(f, launchConfig, hStream, kernelParams, extra, nullptr,
                                     nullptr, 0, 0, 0, 0, 0, 0, 0,
                                     dynDataPrefetchConfig.isEnabled() ? &dynDataPrefetchConfig : nullptr));
 }
