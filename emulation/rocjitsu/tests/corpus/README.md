@@ -137,6 +137,39 @@ existing CTS binary overrides. That guide also documents direct hardware runs;
 the corpus adapter has no simulator dependency. Simulator configuration,
 thread budgets and launcher selection belong to this wrapper.
 
+## HRX AMDGPU driver CTS
+
+The release lane checks out the HRX corpus at its own commit pin, builds an
+unmodified pinned HRX revision with the corpus's pinned ROCm wheel, then runs
+the 16 CTest records separately on gfx1201 and single-XCC gfx1250. It runs
+after the existing HIP/DBT coverage and keeps that corpus pin unchanged.
+The full MI455X topology currently fails HRX queue-resource initialization;
+the checked-in `gfx1250_mi455x_single_xcc.json` lets the CTS reach execution.
+Known CTS failures remain visible in per-record logs and JUnit artifacts;
+these two run steps are temporarily non-gating.
+
+For local reproduction, build Release RocJITsu, then run from a checkout of
+the HRX corpus commit:
+
+```sh
+uv venv --system-site-packages .venv
+uv pip install --python .venv/bin/python --prerelease allow \
+  -r corpus/hrx-system/requirements-rocm.txt
+source .venv/bin/activate
+rocm-sdk init
+bash scripts/build_hrx_cts.sh
+ROCJITSU_CORPUS_DIR="$PWD" \
+ROCJITSU_BUILD_DIR=/path/to/rocjitsu/build \
+  bash /path/to/rocm-systems/emulation/rocjitsu/tests/corpus/run-hrx-cts.sh all
+```
+
+Use `gfx1201` or `gfx1250` instead of `all` to run one target, or append
+`--case core_tests` for one CTest record. The runner accepts
+`ROCJITSU_SOURCE_DIR` for target configs and `HRX_CTS_BUILD_ROOT` for an
+alternate HRX build. The corpus's `corpus/hrx-system/README.md` documents
+direct CTest execution. Publish a coordinated corpus update before advancing
+`HRX_CORPUS_REF` and the `hrx_corpus_ref` workflow-dispatch default.
+
 ## Sanitizer simulator coverage
 
 The Clang and GCC ASan+UBSan lanes run the same target-qualified corpus as the
