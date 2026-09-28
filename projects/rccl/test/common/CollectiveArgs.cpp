@@ -70,6 +70,30 @@ namespace RcclUnitTesting
     // No attachment/offsetting is necessary.
     if (!this->inPlace) return TEST_SUCCESS;
 
+    size_t requiredBytes = 0;
+    size_t allocatedBytes = 0;
+    if (this->funcType == ncclCollScatter || this->funcType == ncclCollReduceScatter)
+    {
+      requiredBytes  = (this->globalRank + 1) * currentOutputBytes;
+      allocatedBytes = this->numInputBytesAllocated;
+    }
+    else if (this->funcType == ncclCollGather || this->funcType == ncclCollAllGather)
+    {
+      requiredBytes  = (this->globalRank + 1) * currentInputBytes;
+      allocatedBytes = this->numOutputBytesAllocated;
+    }
+    else
+    {
+      requiredBytes  = std::max(currentInputBytes, currentOutputBytes);
+      allocatedBytes = std::max(this->numInputBytesAllocated, this->numOutputBytesAllocated);
+    }
+    if (requiredBytes > allocatedBytes)
+    {
+      TEST_ERROR("Rank %d in-place %s needs %zu bytes but only %zu were allocated",
+            this->globalRank, ncclFuncNames[this->funcType], requiredBytes, allocatedBytes);
+      return TEST_FAIL;
+    }
+
     if (this->funcType == ncclCollScatter || this->funcType == ncclCollReduceScatter)
     {
       // inputGpu holds the base pointer. Offset outputGpu.

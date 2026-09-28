@@ -87,6 +87,7 @@
         {"name": "Teardown.PoolAfterParentHipInitialization", "description": "Pooled workers start clean after the parent initialized HIP", "test_filter": "Teardown.PoolAfterParentHipInitialization"},
         {"name": "AllReduce.UserBufferRegistrationTestBed", "description": "Out-of-place AllReduce on ncclCommRegister'd buffers through TestBed", "test_filter": "AllReduce.UserBufferRegistrationTestBed"},
         {"name": "AllGather.UserBufferRegistrationTestBed", "description": "Out-of-place AllGather on ncclCommRegister'd buffers through TestBed", "test_filter": "AllGather.UserBufferRegistrationTestBed"},
+        {"name": "ReduceScatter.InPlaceUserBufferRegistrationTestBed", "description": "In-place ReduceScatter on an ncclCommRegister'd base buffer through TestBed", "test_filter": "ReduceScatter.InPlaceUserBufferRegistrationTestBed"},
         {"name": "Broadcast.ExplicitPrepareDataFunc", "description": "Explicit PrepareData function crosses the parent/worker pipe under ASLR", "test_filter": "Broadcast.ExplicitPrepareDataFunc"},
         {"name": "ProfilerPluginClose.UnusablePluginIsUnloaded", "description": "Verify a profiler plugin exposing no usable interface is unloaded instead of being left mapped", "test_filter": "ProfilerPluginClose.UnusablePluginIsUnloaded"},
         {"name": "Register.ProcessIsolatedRegisterTests", "description": "Process isolated buffer registration tests", "test_filter": "Register.ProcessIsolatedRegisterTests"},

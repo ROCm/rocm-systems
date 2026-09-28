@@ -126,8 +126,11 @@ namespace RcclUnitTesting
       }
       ErrCode status = TEST_SUCCESS;
       if (command < 0 || command >= NUM_CHILD_COMMANDS) {
+        // The payload length is unknown, so the stream cannot be resynchronized:
+        // report the failure to the parent, then stop.
         TEST_ERROR("Child %d received invalid command ID: %d", this->childId, command);
         status = TEST_FAIL;
+        RcclUnitTesting::detail::safe_pipe_write(childWriteFd, &status, sizeof(status));
         goto stop;
       }
 
@@ -151,6 +154,7 @@ namespace RcclUnitTesting
       default:
         TEST_ERROR("Child %d received unknown command ID: %d", this->childId, command);
         status = TEST_FAIL;
+        RcclUnitTesting::detail::safe_pipe_write(childWriteFd, &status, sizeof(status));
         goto stop;
       }
 
@@ -209,6 +213,11 @@ namespace RcclUnitTesting
     // --- Read numCollectivesInGroup ---
     int numCollSize = 0;
     PIPE_READ(numCollSize);
+    if (numCollSize < 0)
+    {
+      TEST_ERROR("Child %d received invalid numCollectivesInGroup size %d", this->childId, numCollSize);
+      return TEST_FAIL;
+    }
     this->numCollectivesInGroup.resize(numCollSize);
     if (numCollSize > 0)
     {
@@ -228,6 +237,11 @@ namespace RcclUnitTesting
     // --- Read numStreamsPerGroup ---
     int numStreamsSize = 0;
     PIPE_READ(numStreamsSize);
+    if (numStreamsSize < 0)
+    {
+      TEST_ERROR("Child %d received invalid numStreamsPerGroup size %d", this->childId, numStreamsSize);
+      return TEST_FAIL;
+    }
     this->numStreamsPerGroup.resize(numStreamsSize);
     if (numStreamsSize > 0)
     {
@@ -241,6 +255,23 @@ namespace RcclUnitTesting
     // Read GPUs and prepare storage
     int numGpus;
     PIPE_READ(numGpus);
+    if (numGpus < 0)
+    {
+      TEST_ERROR("Child %d received invalid GPU count %d", this->childId, numGpus);
+      return TEST_FAIL;
+    }
+    std::vector<int> newDeviceIds(numGpus);
+    for (int& deviceId : newDeviceIds) PIPE_READ(deviceId);
+
+    if (this->numGroupCalls < 0 ||
+        static_cast<int>(this->numCollectivesInGroup.size()) < this->numGroupCalls ||
+        static_cast<int>(this->numStreamsPerGroup.size()) < this->numGroupCalls)
+    {
+      TEST_ERROR("Child %d received %d group calls but %zu collective counts and %zu stream counts",
+                 this->childId, this->numGroupCalls, this->numCollectivesInGroup.size(),
+                 this->numStreamsPerGroup.size());
+      return TEST_FAIL;
+    }
 
     // Destroy existing HIP streams before clearing vector to prevent hardware queue leak!
     // deviceIds still holds the previous config's devices here; each stream must be
@@ -260,7 +291,7 @@ namespace RcclUnitTesting
       }
     }
 
-    this->deviceIds.resize(numGpus);
+    this->deviceIds = newDeviceIds;
     this->streams.clear();
     this->streams.resize(this->numGroupCalls);
     this->collArgs.resize(this->numGroupCalls);
@@ -275,11 +306,6 @@ namespace RcclUnitTesting
         this->collArgs[i][j].resize(numCollectivesInGroup[i]);
         this->streams[i][j].resize(numStreamsPerGroup[i], nullptr);
       }
-    }
-
-    for (int i = 0; i < numGpus; i++)
-    {
-      PIPE_READ(this->deviceIds[i]);
     }
 
     // Initialize graph tracking
@@ -1252,14 +1278,6 @@ namespace RcclUnitTesting
             "ncclCommDeregister");
           collArg.outputRegHandle = nullptr;
         }
-
-        if (collArg.biasRegHandle != nullptr)
-        {
-          CHILD_NCCL_CALL(
-            ncclCommDeregister(this->comms[localRank], collArg.biasRegHandle),
-            "ncclCommDeregister (bias)");
-          collArg.biasRegHandle = nullptr;
-        }
       }
       return TEST_SUCCESS;
     }();
@@ -1789,13 +1807,14 @@ namespace RcclUnitTesting
   {
     if (collArg.inPlace)
     {
-      if (collArg.outputGpu.ptr && collArg.numOutputBytesAllocated > 0)
-      {
-        CHILD_NCCL_CALL(
-          ncclCommRegister(this->comms[localRank], collArg.outputGpu.ptr,
-                           collArg.numOutputBytesAllocated, &(collArg.outputRegHandle)),
-          "ncclCommRegister (output in-place)");
-      }
+      void* buff = nullptr;
+      size_t bufSize = 0;
+      InPlaceBaseAllocation(collArg, &buff, &bufSize);
+      if (buff == nullptr || bufSize == 0) return TEST_SUCCESS;
+
+      CHILD_NCCL_CALL(
+        ncclCommRegister(this->comms[localRank], buff, bufSize, &(collArg.outputRegHandle)),
+        "ncclCommRegister (in-place)");
       return TEST_SUCCESS;
     }
 

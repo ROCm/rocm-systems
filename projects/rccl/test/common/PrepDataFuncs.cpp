@@ -68,6 +68,8 @@ namespace RcclUnitTesting
     {
       CHECK_HIP(hipMemset(collArgs.expectedGpu.ptr, kDeviceDataFaultByte,
                           DataTypeToBytes(collArgs.dataType)));
+      // Fp8Validation.DeviceCorruptionMustAffectBothReferences models this memset;
+      // keep the two in step, since an intact FP32 reference would mask the fault.
       if (collArgs.hasFp8AlternativeExpected)
       {
         CHECK_HIP(hipMemset(collArgs.fp8AlternativeExpectedGpu.ptr, kDeviceDataFaultByte,

@@ -199,10 +199,6 @@ namespace RcclUnitTesting
     // Used to track total number of calls to ExecuteCollectives()
     static int& NumTestsRun();
 
-  protected:
-    // Ends the specified child process
-    void StopChild(int const childId);
-
   private:
     // Starts a worker in a fresh process image so it never inherits HIP/HSA
     // runtime state from the test parent.
@@ -216,11 +212,11 @@ namespace RcclUnitTesting
     // compatibility with existing tests, and extend registration for symmetric memory.
     // Returns false if any child failed, so registration can be skipped.
     bool AllocateMemInternal(bool   const inPlace = false,
-                                    bool   const useManagedMem = false,
-                                    int    const groupId  = -1,
-                                    int    const collId   = -1,
-                                    int    const rank     = -1,
-                                    bool   const userRegistered = false);
+                             bool   const useManagedMem = false,
+                             int    const groupId  = -1,
+                             int    const collId   = -1,
+                             int    const rank     = -1,
+                             bool   const userRegistered = false);
 
     void RegisterMemInternal(int    const groupId,
                              int    const collId,

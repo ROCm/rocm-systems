@@ -621,7 +621,8 @@ namespace RcclUnitTesting
     }
     if (!this->AllocateMemInternal(inPlace,useManagedMem,groupId,collId,rank,userRegistered))
       return;
-    this->RegisterMemInternal(groupId,collId,rank);
+    if (this->memAllocType == MEM_ALLOC_SYMMETRIC_WIN || userRegistered)
+      this->RegisterMemInternal(groupId,collId,rank);
   }
 
   void TestBed::PrepareData(int         const groupId,
@@ -1313,26 +1314,6 @@ namespace RcclUnitTesting
   {
     static int numTestsRun = 0;
     return numTestsRun;
-  }
-
-  void TestBed::StopChild(int const childId)
-  {
-    if (childId < 0 || childId >= this->childList.size()) return;
-    TestBedChild* child = this->childList[childId];
-    if (child != nullptr)
-     {
-      // 1. Send CHILD_STOP command to the child
-       int const cmd = TestBedChild::CHILD_STOP;
-       PIPE_WRITE(childId, cmd);
-       // 2. Wait for child process to exit cleanly before closing pipes
-       int status;
-       waitpid(child->pid, &status, 0);
-       // 3. Close pipes and delete object
-       close(child->parentWriteFd);
-       close(child->parentReadFd);
-       delete child;
-       this->childList[childId] = nullptr;
-     }
   }
 
 }
