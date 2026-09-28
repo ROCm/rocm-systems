@@ -53,6 +53,8 @@ struct LaunchErrorRule {
   hipError_t error;                //!< code to return if violation occurred
 };
 
+namespace detail {
+
 //! Return the error for the FIRST rule matching any violation bit; hipSuccess if none.
 template <size_t N>
 hipError_t MapLaunchViolations(LaunchViolationBits violations, const LaunchErrorRule (&rules)[N]) {
@@ -62,6 +64,39 @@ hipError_t MapLaunchViolations(LaunchViolationBits violations, const LaunchError
   }
   return hipSuccess;
 }
+
+//! A cluster splits the grid across one shader engine, so grid must divide by cluster.
+inline bool IsClusterDivisible(const amd::NDRange32& grid, const dim3& cluster) {
+  return (grid[0] % cluster.x == 0) && (grid[1] % cluster.y == 0) && (grid[2] % cluster.z == 0);
+}
+
+//! The violations derivable from a narrowed index space plus a device. See kDeviceDependentBits.
+inline LaunchViolationBits CheckNDRangeAgainstDevice(const amd::NDRange32& global,
+                                                     const amd::NDRange16& local,
+                                                     size_t sharedMemBytes,
+                                                     const amd::Device& device) {
+  LaunchViolationBits violations = kLaunchOk;
+  const auto& info = device.info();
+
+  if (local.product() > info.maxWorkGroupSize_) {
+    violations |= kBlockExceedsMaxWG;
+  }
+  if (static_cast<uint32_t>(sharedMemBytes) > info.localMemSizePerCU_) {
+    violations |= kSharedMemExceedsMax;
+  }
+  if (sharedMemBytes > std::numeric_limits<uint32_t>::max()) {
+    violations |= kSharedMemOverflow;
+  }
+  if (global[0] == 0 || global[1] == 0 || global[2] == 0) {
+    violations |= kZeroGlobal;
+  }
+  if (local[0] == 0 || local[1] == 0 || local[2] == 0) {
+    violations |= kZeroBlock;
+  }
+  return violations;
+}
+
+}  // namespace detail
 
 // =================================================================================================
 // Per entry point rule tables. Every launch API's error-code contract lives here, so the
@@ -115,52 +150,16 @@ static constexpr dim3 kNoCluster{1, 1, 1};
 //! No leftover work-items beyond grid * block.
 static constexpr dim3 kNoRemainder{0, 0, 0};
 
-//! A cluster splits the grid across one shader engine, so grid must divide by cluster.
-inline bool IsClusterDivisible(const amd::NDRange32& grid, const dim3& cluster) {
-  return (grid[0] % cluster.x == 0) && (grid[1] % cluster.y == 0) && (grid[2] % cluster.z == 0);
-}
-
-//! The violations derivable from a narrowed index space plus a device. See kDeviceDependentBits.
-inline LaunchViolationBits CheckNDRangeAgainstDevice(const amd::NDRange32& global,
-                                                     const amd::NDRange16& local,
-                                                     size_t sharedMemBytes,
-                                                     const amd::Device& device) {
-  LaunchViolationBits violations = kLaunchOk;
-  const auto& info = device.info();
-
-  if (local.product() > info.maxWorkGroupSize_) {
-    violations |= kBlockExceedsMaxWG;
-  }
-  if (static_cast<uint32_t>(sharedMemBytes) > info.localMemSizePerCU_) {
-    violations |= kSharedMemExceedsMax;
-  }
-  if (sharedMemBytes > std::numeric_limits<uint32_t>::max()) {
-    violations |= kSharedMemOverflow;
-  }
-  if (global[0] == 0 || global[1] == 0 || global[2] == 0) {
-    violations |= kZeroGlobal;
-  }
-  if (local[0] == 0 || local[1] == 0 || local[2] == 0) {
-    violations |= kZeroBlock;
-  }
-  return violations;
-}
-
 //! Everything the launch path needs to dispatch a kernel, plus the violations found building it.
 //!
 //! Built once per launch by MakeLaunchConfigFromGrid/FromGlobal and threaded down through
 //! ihipModuleLaunchKernel. The violations are computed during construction and never recomputed,
 //! so a launch costs exactly one pass over the device limits.
-struct LaunchConfig {
-  // Declaration order matters: violations_ is initialised from ndrange_ in the member init list.
-  amd::NDRangeContainer ndrange_;   //!< offset / global / local / cluster, ready for dispatch
-  amd::NDRange32 grid_;             //!< blocks in the grid (global / local is lossy with remainder)
-  const amd::Device* device_;       //!< the device the device-dependent bits were derived against
-  size_t sharedMemBytes_;           //!< dynamic shared memory, un-narrowed
-  LaunchViolationBits violations_;  //!< everything wrong with this config
-
+class LaunchConfig {
+ public:
   //! Narrow \a globalDim / \a localDim / \a clusterDim and record every violation found doing so.
   //! \a grid is taken from \a gridIn, or deduced as global / local when \a deduceGrid.
+  //! Call sites should prefer MakeLaunchConfigFromGrid / MakeLaunchConfigFromGlobal below.
   LaunchConfig(const amd::NDRange& globalDim, const amd::NDRange32& gridIn, const dim3& localDim,
                const dim3& clusterDim, size_t sharedMemBytes, const amd::Device& device,
                bool deduceGrid)
@@ -171,19 +170,13 @@ struct LaunchConfig {
                  amd::NDRange16(static_cast<uint16_t>(localDim.x),
                                 static_cast<uint16_t>(localDim.y),
                                 static_cast<uint16_t>(localDim.z)),
-                 amd::NDRange8(static_cast<uint8_t>(clusterDim.x),
-                               static_cast<uint8_t>(clusterDim.y),
-                               static_cast<uint8_t>(clusterDim.z))),
+                 amd::NDRange8(1, 1, 1)),  // placeholder; ApplyCluster writes the real one
         grid_(gridIn),
         device_(&device),
         sharedMemBytes_(sharedMemBytes),
-        violations_(CheckNDRangeAgainstDevice(ndrange_.global(), ndrange_.local(), sharedMemBytes,
-                                              device)) {
+        violations_(detail::CheckNDRangeAgainstDevice(ndrange_.global(), ndrange_.local(),
+                                                      sharedMemBytes, device)) {
     // The remaining violations need the un-narrowed inputs, so they can only be spotted here.
-    if (!amd::NDRange8::CanSafelyNarrow(clusterDim.x, clusterDim.y, clusterDim.z)) {
-      violations_ |= kClusterOverflow;
-    }
-
     if (!amd::NDRange16::CanSafelyNarrow(localDim.x, localDim.y, localDim.z)) {
       violations_ |= kBlockOverflow;
     }
@@ -192,26 +185,25 @@ struct LaunchConfig {
       violations_ |= kGridOverflow;
     }
 
-    if (deduceGrid) {
-      if (violations_ & kZeroBlock) {
-        // Avoid divide by 0 — the grid cannot be deduced, so the cluster check is skipped too.
-        return;
-      }
+    // A zero block means global / local would divide by 0, leaving the grid — and so cluster
+    // divisibility — unknowable.
+    const bool gridKnown = !(deduceGrid && (violations_ & kZeroBlock));
+    if (deduceGrid && gridKnown) {
       const amd::NDRange32& global = ndrange_.global();
       const amd::NDRange16& local = ndrange_.local();
       grid_ = amd::NDRange32(global[0] / local[0], global[1] / local[1], global[2] / local[2]);
     }
-
-    if (clusterDim.x > 1 || clusterDim.y > 1 || clusterDim.z > 1) {
-      if (!IsClusterDivisible(grid_, clusterDim)) {
-        violations_ |= kClusterIndivisible;
-      }
-    }
+    ApplyCluster(clusterDim, gridKnown);
   }
+
+  const amd::NDRangeContainer& ndrange() const { return ndrange_; }
+
+  //! Shared memory narrowed for the AQL packet. Only valid once kSharedMemOverflow is ruled out.
+  uint32_t sharedMemBytes32() const { return static_cast<uint32_t>(sharedMemBytes_); }
 
   //! Map the violations found at construction through this entry point's rule table.
   template <size_t N> hipError_t Status(const LaunchErrorRule (&rules)[N]) const {
-    return MapLaunchViolations(violations_, rules);
+    return detail::MapLaunchViolations(violations_, rules);
   }
 
   //! As Status(), but re-derives the device-dependent bits if \a device is not the build device.
@@ -220,13 +212,62 @@ struct LaunchConfig {
     LaunchViolationBits violations = violations_;
     if (&device != device_) {
       violations = (violations & ~kDeviceDependentBits) |
-          CheckNDRangeAgainstDevice(ndrange_.global(), ndrange_.local(), sharedMemBytes_, device);
+          detail::CheckNDRangeAgainstDevice(ndrange_.global(), ndrange_.local(), sharedMemBytes_,
+                                            device);
     }
-    return MapLaunchViolations(violations, rules);
+    return detail::MapLaunchViolations(violations, rules);
   }
 
-  //! Shared memory narrowed for the AQL packet. Only valid once kSharedMemOverflow is ruled out.
-  uint32_t sharedMemBytes32() const { return static_cast<uint32_t>(sharedMemBytes_); }
+  //! Re-point this config at \a clusterDim, refreshing the cluster violation bits.
+  void SetCluster(const dim3& clusterDim) { ApplyCluster(clusterDim, true /*gridKnown*/); }
+
+  //! True if the current cluster dims cannot be encoded, or do not divide the grid.
+  bool HasClusterViolation() const {
+    return (violations_ & (kClusterOverflow | kClusterIndivisible)) != kLaunchOk;
+  }
+
+  //! Shrink the workgroup to the global size in any dim where it overhangs.
+  void ClampLocalToGlobal() {
+    for (size_t i = 0; i < 3; ++i) {
+      if (ndrange_.global()[i] < ndrange_.local()[i]) {
+        ndrange_.setLocal(i, static_cast<uint16_t>(ndrange_.global()[i]));
+      }
+    }
+  }
+
+  //! True if global divides evenly by local in every dim. Call only once kZeroBlock is ruled out.
+  bool IsUniformWorkGroupValid() const {
+    const amd::NDRange32& global = ndrange_.global();
+    const amd::NDRange16& local = ndrange_.local();
+    return ((global[0] % local[0]) == 0) && ((global[1] % local[1]) == 0) &&
+        ((global[2] % local[2]) == 0);
+  }
+
+ private:
+  //! Narrow \a clusterDim into the NDRange and recompute the two cluster bits. Divisibility can
+  //! only be judged when \a gridKnown, since it is the grid the cluster has to divide.
+  void ApplyCluster(const dim3& clusterDim, bool gridKnown) {
+    ndrange_.setCluster(amd::NDRange8(static_cast<uint8_t>(clusterDim.x),
+                                      static_cast<uint8_t>(clusterDim.y),
+                                      static_cast<uint8_t>(clusterDim.z)));
+    violations_ &= ~(kClusterOverflow | kClusterIndivisible);
+
+    if (!amd::NDRange8::CanSafelyNarrow(clusterDim.x, clusterDim.y, clusterDim.z)) {
+      violations_ |= kClusterOverflow;
+    }
+    if (gridKnown && (clusterDim.x > 1 || clusterDim.y > 1 || clusterDim.z > 1)) {
+      if (!detail::IsClusterDivisible(grid_, clusterDim)) {
+        violations_ |= kClusterIndivisible;
+      }
+    }
+  }
+
+  // Declaration order matters: violations_ is initialised from ndrange_ in the member init list.
+  amd::NDRangeContainer ndrange_;   //!< offset / global / local / cluster, ready for dispatch
+  amd::NDRange32 grid_;             //!< blocks in the grid (global / local is lossy with remainder)
+  const amd::Device* device_;       //!< the device the device-dependent bits were derived against
+  size_t sharedMemBytes_;           //!< dynamic shared memory, un-narrowed
+  LaunchViolationBits violations_;  //!< everything wrong with this config
 };
 
 //! Build HIP style, where the app supplies the grid and block and the global is computed.
