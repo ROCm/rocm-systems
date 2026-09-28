@@ -10,8 +10,10 @@ namespace sdma_anvil {
 // test/CMakeLists.txt compiles IPC, Suite H and that TU -fgpu-rdc and
 // device-links rccl-UnitTestsFixtures whenever ENABLE_ROCSHMEM_GIN is on.
 extern __device__ unsigned long long g_sdmaStubQuietCount;
-// When non-null, quiet() fetch_adds 1 so Flush sees an epoch change mid-quiet.
-extern __device__ uint64_t* g_sdmaStubBumpEpochOnQuiet;
+// When non-null, quiet() ORs g_sdmaStubMarkBitOnQuiet into it, simulating a put
+// that rings its doorbell and marks dirty while Flush is draining.
+extern __device__ uint64_t* g_sdmaStubMarkDirtyOnQuiet;
+extern __device__ uint64_t g_sdmaStubMarkBitOnQuiet;
 
 struct SdmaQueueDeviceHandle {
   int tag;
@@ -43,8 +45,11 @@ __device__ __forceinline__ void putSignal(SdmaQueueDeviceHandle& handle, void* d
 __device__ __forceinline__ void quiet(SdmaQueueDeviceHandle& handle) {
   (void)handle;
   atomicAdd(&g_sdmaStubQuietCount, 1ULL);
-  uint64_t* epoch = g_sdmaStubBumpEpochOnQuiet;
-  if (epoch != nullptr) atomicAdd(epoch, 1ULL);
+  uint64_t* dirty = g_sdmaStubMarkDirtyOnQuiet;
+  if (dirty != nullptr) {
+    atomicOr(reinterpret_cast<unsigned long long*>(dirty),
+             static_cast<unsigned long long>(g_sdmaStubMarkBitOnQuiet));
+  }
 }
 
 }  // namespace sdma_anvil

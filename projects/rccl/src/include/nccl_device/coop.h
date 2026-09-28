@@ -394,8 +394,10 @@ NCCL_DEVICE_INLINE T ncclCoopBcast(ncclCoopLanes coop, T value, int root, bool e
   return v;
 }
 
+// 16 slots, not 15: ncclCoopWarpSpan::id runs 0..15, matching
+// ncclCoopNamedBarrierSlots. Indexing by id needs the full range.
 NCCL_DEVICE_INLINE ulong2* ncclCoopBcast_WarpSpan_stash() {
-  __shared__ ulong2 stash[15];
+  __shared__ ulong2 stash[16];
   return stash;
 }
 
@@ -420,16 +422,6 @@ NCCL_DEVICE_INLINE T ncclCoopBcast(ncclCoopCta coop, T value, int root, bool ent
   if (coop.thread_rank() == root) *(T*)ncclCoopBcast_Cta_stash() = value;
   coop.sync();
   return *(T*)ncclCoopBcast_Cta_stash();
-}
-
-// ncclCoopAny has no typed stash. size==1 (the gin.put helper) is identity.
-// size>1: only root's value is defined; other threads get T(). Anvil Flush
-// does not use this overload when size>1: rank 0 quiets the whole snapshot.
-template <typename T>
-NCCL_DEVICE_INLINE T ncclCoopBcast(ncclCoopAny coop, T value, int root, bool entrySync = true) {
-  if (entrySync) coop.sync();
-  if (coop.size() <= 1) return value;
-  return coop.thread_rank() == root ? value : T();
 }
 #endif
 

@@ -118,6 +118,7 @@ rccl_prefix="${workdir}/.ci-out/rccl-install"
 rccl_build="${rccl_src}/build/release"
 rccl_fixtures_bin="${rccl_build}/test/rccl-UnitTestsFixtures"
 rccl_bcast_policy_ut_bin="${rccl_build}/test/rccl-UnitTestsGinSdmaBroadcastPolicy"
+rccl_mpi_ut_bin="${rccl_build}/test/rccl-UnitTestsMPI"
 rm -rf "${rccl_prefix}"
 (
   cd "${rccl_src}"
@@ -133,14 +134,14 @@ if [[ ! -f "${rccl_prefix}/lib/librccl.so" && ! -f "${rccl_prefix}/lib/librccl.s
   exit 1
 fi
 
-echo "==> [4/6] build rccl-UnitTestsFixtures + GinSdmaBroadcastPolicy (GIN_ANVIL_UNIT_TESTS=ON)"
+echo "==> [4/6] build rccl-UnitTestsFixtures + GinSdmaBroadcastPolicy + UnitTestsMPI (GIN_ANVIL_UNIT_TESTS=ON)"
 (
   cd "${rccl_build}"
   cmake . \
     -DBUILD_TESTS=ON \
     -DGIN_ANVIL_UNIT_TESTS=ON \
     -DROCSHMEM_INSTALL_DIR="${ROCSHMEM_INSTALL_DIR}"
-  make -j"${build_jobs}" rccl-UnitTestsFixtures rccl-UnitTestsGinSdmaBroadcastPolicy
+  make -j"${build_jobs}" rccl-UnitTestsFixtures rccl-UnitTestsGinSdmaBroadcastPolicy rccl-UnitTestsMPI
 )
 if [[ ! -x "${rccl_fixtures_bin}" ]]; then
   echo "ERROR: rccl-UnitTestsFixtures not built at ${rccl_fixtures_bin}" >&2
@@ -152,8 +153,14 @@ if [[ ! -x "${rccl_bcast_policy_ut_bin}" ]]; then
   ls -la "$(dirname "${rccl_bcast_policy_ut_bin}")" 2>/dev/null >&2 || true
   exit 1
 fi
+if [[ ! -x "${rccl_mpi_ut_bin}" ]]; then
+  echo "ERROR: rccl-UnitTestsMPI not built at ${rccl_mpi_ut_bin}" >&2
+  ls -la "$(dirname "${rccl_mpi_ut_bin}")" 2>/dev/null >&2 || true
+  exit 1
+fi
 echo "    rccl-UnitTestsFixtures: ${rccl_fixtures_bin}"
 echo "    rccl-UnitTestsGinSdmaBroadcastPolicy: ${rccl_bcast_policy_ut_bin}"
+echo "    rccl-UnitTestsMPI: ${rccl_mpi_ut_bin}"
 
 # Locate the in-tree RCCL CMake package config. rccl-tests' find_package(RCCL)
 # otherwise resolves roc::rccl to the nightly ROCm (its toolchain prepends
