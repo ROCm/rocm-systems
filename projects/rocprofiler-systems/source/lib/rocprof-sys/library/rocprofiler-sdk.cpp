@@ -2340,7 +2340,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
                                                 ROCPROFILER_CALLBACK_TRACING_RCCL_API));
 
         domain_selection selection;
-        selection.name       = "rccl";
+        selection.name       = "rccl_api";
         selection.operations = get_operation_names(ROCPROFILER_CALLBACK_TRACING_RCCL_API);
         domain_selection_list.push_back(selection);
     }

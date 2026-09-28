@@ -300,9 +300,8 @@ struct fmt::formatter<rocprofsys::domains::domain_info> : fmt::formatter<std::st
     template <typename FormatContext>
     auto format(const rocprofsys::domains::domain_info& info, FormatContext& ctx) const
     {
-        fmt::format_to(ctx.out(),
-                       "domain_info [key: {} name: {} operations: [{}] group: ", info.key,
-                       info.name, fmt::join(info.operations, ", "));
+        fmt::format_to(ctx.out(), "domain_info [key: {} name: {} group: ", info.key,
+                       info.name);
         if(info.group)
         {
             fmt::format_to(ctx.out(), "{}", *info.group);
@@ -311,7 +310,7 @@ struct fmt::formatter<rocprofsys::domains::domain_info> : fmt::formatter<std::st
         {
             fmt::format_to(ctx.out(), "none");
         }
-        return fmt::format_to(ctx.out(), "]");
+        return fmt::format_to(ctx.out(), "]\n");
     }
 };
 
