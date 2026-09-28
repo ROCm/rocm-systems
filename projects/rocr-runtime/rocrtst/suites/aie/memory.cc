@@ -19,27 +19,11 @@
 #include "hsa/hsa.h"
 #include "hsa/hsa_ext_amd.h"
 
+#include "aie_test_env.h"
+
 namespace {
 
-template <hsa_device_type_t DeviceType>
-hsa_status_t discover_agents(hsa_agent_t agent, void* data) {
-  if (!data) {
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  }
-
-  hsa_device_type_t device_type = {};
-  const auto status = hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &device_type);
-  if (status != HSA_STATUS_SUCCESS) {
-    return status;
-  }
-
-  if (device_type == DeviceType) {
-    auto* const agents = static_cast<std::vector<hsa_agent_t>*>(data);
-    agents->push_back(agent);
-  }
-
-  return HSA_STATUS_SUCCESS;
-}
+using aie_test::discover_agents;
 
 hsa_status_t discover_first_global_coarse_grain_mem_pool(hsa_amd_memory_pool_t pool, void* data) {
   if (!data) {
@@ -84,14 +68,21 @@ hsa_status_t collect_all_pools(hsa_amd_memory_pool_t pool, void* data) {
 
 }  // namespace
 
-TEST(Memory, PoolAllocate) {
-  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+// AieTestBase initializes the runtime per test and shuts it down in TearDown, including after a
+// failed ASSERT or a skip. These tests need no kernel artifacts, so the binary is expected to run
+// on any machine: like ErrorCallback, they skip rather than fail when there is no NPU. Tests that
+// also need a GPU skip the same way when there is none.
+class MemoryTest : public aie_test::AieTestBase {
+ protected:
+  void SetUp() override {
+    ASSERT_NO_FATAL_FAILURE(AieTestBase::SetUp());
+    if (aie_agents.empty()) {
+      GTEST_SKIP() << "No AIE device found; skipping test";
+    }
+  }
+};
 
-  std::vector<hsa_agent_t> aie_agents;
-  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
-            HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(aie_agents.empty());
-
+TEST_F(MemoryTest, PoolAllocate) {
   hsa_amd_memory_pool_t global_memory_pool = {};
   ASSERT_EQ(
       hsa_amd_agent_iterate_memory_pools(
@@ -112,21 +103,18 @@ TEST(Memory, PoolAllocate) {
 
   // cleanup
   EXPECT_EQ(hsa_amd_memory_pool_free(buffer), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
-TEST(Memory, DMABufExportImportGPUtoAIE) {
-  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-
+// Known limitation (see the TODO below): exporting a GPU allocation as a DMA-buf succeeds, but
+// importing it into the AIE agents with hsa_amd_interop_map_buffer does not, because InteropMap
+// only supports KFD handles. The test expects the import to fail; flip it once AIE import works.
+TEST_F(MemoryTest, DMABufExportImportGPUtoAIE) {
   std::vector<hsa_agent_t> gpu_agents;
   ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_GPU>, &gpu_agents),
             HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(gpu_agents.empty());
-
-  std::vector<hsa_agent_t> aie_agents;
-  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
-            HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(aie_agents.empty());
+  if (gpu_agents.empty()) {
+    GTEST_SKIP() << "No GPU found; skipping test";
+  }
 
   hsa_amd_memory_pool_t global_memory_pool = {};
   ASSERT_EQ(
@@ -165,21 +153,19 @@ TEST(Memory, DMABufExportImportGPUtoAIE) {
   // cleanup
   EXPECT_EQ(hsa_amd_portable_close_dmabuf(dma_buf_fd), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_memory_pool_free(buffer), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
-TEST(Memory, DMABufExportImportAIEtoGPU) {
-  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-
+// Known limitation (see the TODOs below): neither half of sharing an AIE allocation with the GPU
+// works. hsa_amd_portable_export_dmabuf assumes KFD memory, and hsa_amd_interop_map_buffer cannot
+// import an XDNA DMA-buf into GPU nodes. The test expects both calls to fail; flip it once
+// cross-driver DMA-buf sharing is supported.
+TEST_F(MemoryTest, DMABufExportImportAIEtoGPU) {
   std::vector<hsa_agent_t> gpu_agents;
   ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_GPU>, &gpu_agents),
             HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(gpu_agents.empty());
-
-  std::vector<hsa_agent_t> aie_agents;
-  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
-            HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(aie_agents.empty());
+  if (gpu_agents.empty()) {
+    GTEST_SKIP() << "No GPU found; skipping test";
+  }
 
   hsa_amd_memory_pool_t global_memory_pool = {};
   ASSERT_EQ(
@@ -219,17 +205,12 @@ TEST(Memory, DMABufExportImportAIEtoGPU) {
   // cleanup
   EXPECT_EQ(hsa_amd_portable_close_dmabuf(dma_buf_fd), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_memory_pool_free(buffer), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
-TEST(Memory, MemoryLock) {
-  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-
-  std::vector<hsa_agent_t> aie_agents;
-  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
-            HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(aie_agents.empty());
-
+// Known limitation (see the TODO below): hsa_amd_memory_lock cannot pin host memory for AIE agents,
+// because XdnaDriver::RegisterMemory always fails. The test expects the lock to fail; flip it once
+// XDNA supports registering host memory.
+TEST_F(MemoryTest, MemoryLock) {
   std::vector<void*> agent_ptrs(aie_agents.size());
 
   constexpr std::size_t buffer_size = 1024;
@@ -249,23 +230,18 @@ TEST(Memory, MemoryLock) {
             HSA_STATUS_SUCCESS);
 
   delete[] buffer;
-
-  // cleanup
-  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
-TEST(Memory, PoolAllocateAllowAccessGPUtoAIE) {
-  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-
+// Known limitation (see the TODO below): hsa_amd_agents_allow_access rejects AIE agents, so a GPU
+// allocation cannot be shared with them this way; the VMem API is the supported path. The test
+// expects the call to fail; flip it if AllowAccess gains AIE support.
+TEST_F(MemoryTest, PoolAllocateAllowAccessGPUtoAIE) {
   std::vector<hsa_agent_t> gpu_agents;
   ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_GPU>, &gpu_agents),
             HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(gpu_agents.empty());
-
-  std::vector<hsa_agent_t> aie_agents;
-  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
-            HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(aie_agents.empty());
+  if (gpu_agents.empty()) {
+    GTEST_SKIP() << "No GPU found; skipping test";
+  }
 
   hsa_amd_memory_pool_t global_memory_pool = {};
   ASSERT_EQ(
@@ -294,21 +270,18 @@ TEST(Memory, PoolAllocateAllowAccessGPUtoAIE) {
 
   // cleanup
   EXPECT_EQ(hsa_amd_memory_pool_free(buffer), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
-TEST(Memory, PoolAllocateAllowAccessAIEtoGPU) {
-  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-
+// Known limitation (see the TODO below): hsa_amd_agents_allow_access cannot give GPU agents access
+// to an AIE allocation, which was not made through the KFD thunk. The test expects the call to
+// fail; flip it if AllowAccess gains support for AIE allocations.
+TEST_F(MemoryTest, PoolAllocateAllowAccessAIEtoGPU) {
   std::vector<hsa_agent_t> gpu_agents;
   ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_GPU>, &gpu_agents),
             HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(gpu_agents.empty());
-
-  std::vector<hsa_agent_t> aie_agents;
-  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
-            HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(aie_agents.empty());
+  if (gpu_agents.empty()) {
+    GTEST_SKIP() << "No GPU found; skipping test";
+  }
 
   hsa_amd_memory_pool_t global_memory_pool = {};
   ASSERT_EQ(
@@ -337,12 +310,9 @@ TEST(Memory, PoolAllocateAllowAccessAIEtoGPU) {
 
   // cleanup
   EXPECT_EQ(hsa_amd_memory_pool_free(buffer), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
-TEST(Memory, VMemSetAccessFromGPU) {
-  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-
+TEST_F(MemoryTest, VMemSetAccessFromGPU) {
   std::vector<hsa_agent_t> cpu_agents;
   ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_CPU>, &cpu_agents),
             HSA_STATUS_SUCCESS);
@@ -351,12 +321,9 @@ TEST(Memory, VMemSetAccessFromGPU) {
   std::vector<hsa_agent_t> gpu_agents;
   ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_GPU>, &gpu_agents),
             HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(gpu_agents.empty());
-
-  std::vector<hsa_agent_t> aie_agents;
-  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
-            HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(aie_agents.empty());
+  if (gpu_agents.empty()) {
+    GTEST_SKIP() << "No GPU found; skipping test";
+  }
 
   hsa_amd_memory_pool_t global_memory_pool = {};
   ASSERT_EQ(
@@ -404,12 +371,9 @@ TEST(Memory, VMemSetAccessFromGPU) {
   EXPECT_EQ(hsa_amd_vmem_unmap(buffer, allocation_size), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_vmem_address_free(buffer, allocation_size), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_vmem_handle_release(memory_handle), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
-TEST(Memory, VMemSetUnsetAccessFromGPU) {
-  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-
+TEST_F(MemoryTest, VMemSetUnsetAccessFromGPU) {
   std::vector<hsa_agent_t> cpu_agents;
   ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_CPU>, &cpu_agents),
             HSA_STATUS_SUCCESS);
@@ -418,12 +382,9 @@ TEST(Memory, VMemSetUnsetAccessFromGPU) {
   std::vector<hsa_agent_t> gpu_agents;
   ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_GPU>, &gpu_agents),
             HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(gpu_agents.empty());
-
-  std::vector<hsa_agent_t> aie_agents;
-  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
-            HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(aie_agents.empty());
+  if (gpu_agents.empty()) {
+    GTEST_SKIP() << "No GPU found; skipping test";
+  }
 
   hsa_amd_memory_pool_t global_memory_pool = {};
   ASSERT_EQ(
@@ -487,17 +448,9 @@ TEST(Memory, VMemSetUnsetAccessFromGPU) {
   EXPECT_EQ(hsa_amd_vmem_unmap(buffer, allocation_size), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_vmem_address_free(buffer, allocation_size), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_vmem_handle_release(memory_handle), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
-TEST(Memory, VMemCreateNPU) {
-  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-
-  std::vector<hsa_agent_t> aie_agents;
-  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
-            HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(aie_agents.empty());
-
+TEST_F(MemoryTest, VMemCreateNPU) {
   hsa_amd_memory_pool_t global_memory_pool = {};
   ASSERT_EQ(
       hsa_amd_agent_iterate_memory_pools(
@@ -514,17 +467,9 @@ TEST(Memory, VMemCreateNPU) {
 
   // cleanup
   EXPECT_EQ(hsa_amd_vmem_handle_release(memory_handle), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
-TEST(Memory, VMemMapNPU) {
-  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-
-  std::vector<hsa_agent_t> aie_agents;
-  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
-            HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(aie_agents.empty());
-
+TEST_F(MemoryTest, VMemMapNPU) {
   hsa_amd_memory_pool_t global_memory_pool = {};
   ASSERT_EQ(
       hsa_amd_agent_iterate_memory_pools(
@@ -556,12 +501,9 @@ TEST(Memory, VMemMapNPU) {
   EXPECT_EQ(hsa_amd_vmem_unmap(buffer, allocation_size), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_vmem_address_free(buffer, allocation_size), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_vmem_handle_release(memory_handle), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
-TEST(Memory, VMemSetAccessFromNPU) {
-  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-
+TEST_F(MemoryTest, VMemSetAccessFromNPU) {
   std::vector<hsa_agent_t> cpu_agents;
   ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_CPU>, &cpu_agents),
             HSA_STATUS_SUCCESS);
@@ -570,12 +512,9 @@ TEST(Memory, VMemSetAccessFromNPU) {
   std::vector<hsa_agent_t> gpu_agents;
   ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_GPU>, &gpu_agents),
             HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(gpu_agents.empty());
-
-  std::vector<hsa_agent_t> aie_agents;
-  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
-            HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(aie_agents.empty());
+  if (gpu_agents.empty()) {
+    GTEST_SKIP() << "No GPU found; skipping test";
+  }
 
   hsa_amd_memory_pool_t global_memory_pool = {};
   ASSERT_EQ(
@@ -626,12 +565,9 @@ TEST(Memory, VMemSetAccessFromNPU) {
   EXPECT_EQ(hsa_amd_vmem_unmap(buffer, allocation_size), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_vmem_address_free(buffer, allocation_size), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_vmem_handle_release(memory_handle), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
-TEST(Memory, VMemSetUnsetAccessFromNPU) {
-  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-
+TEST_F(MemoryTest, VMemSetUnsetAccessFromNPU) {
   std::vector<hsa_agent_t> cpu_agents;
   ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_CPU>, &cpu_agents),
             HSA_STATUS_SUCCESS);
@@ -640,12 +576,9 @@ TEST(Memory, VMemSetUnsetAccessFromNPU) {
   std::vector<hsa_agent_t> gpu_agents;
   ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_GPU>, &gpu_agents),
             HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(gpu_agents.empty());
-
-  std::vector<hsa_agent_t> aie_agents;
-  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
-            HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(aie_agents.empty());
+  if (gpu_agents.empty()) {
+    GTEST_SKIP() << "No GPU found; skipping test";
+  }
 
   hsa_amd_memory_pool_t global_memory_pool = {};
   ASSERT_EQ(
@@ -712,17 +645,9 @@ TEST(Memory, VMemSetUnsetAccessFromNPU) {
   EXPECT_EQ(hsa_amd_vmem_unmap(buffer, allocation_size), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_vmem_address_free(buffer, allocation_size), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_vmem_handle_release(memory_handle), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
-TEST(Memory, PoolGetInfo) {
-  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-
-  std::vector<hsa_agent_t> aie_agents;
-  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
-            HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(aie_agents.empty());
-
+TEST_F(MemoryTest, PoolGetInfo) {
   hsa_amd_memory_pool_t global_memory_pool = {};
   ASSERT_EQ(
       hsa_amd_agent_iterate_memory_pools(
@@ -777,22 +702,13 @@ TEST(Memory, PoolGetInfo) {
                                          HSA_AMD_MEMORY_POOL_INFO_ALLOC_MAX_SIZE, &alloc_max_size),
             HSA_STATUS_SUCCESS);
   EXPECT_GT(alloc_max_size, 0u);
-
-  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
-TEST(Memory, AgentPoolGetInfo) {
-  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-
+TEST_F(MemoryTest, AgentPoolGetInfo) {
   std::vector<hsa_agent_t> cpu_agents;
   ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_CPU>, &cpu_agents),
             HSA_STATUS_SUCCESS);
   ASSERT_FALSE(cpu_agents.empty());
-
-  std::vector<hsa_agent_t> aie_agents;
-  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
-            HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(aie_agents.empty());
 
   hsa_amd_memory_pool_t global_memory_pool = {};
   ASSERT_EQ(
@@ -810,22 +726,13 @@ TEST(Memory, AgentPoolGetInfo) {
   EXPECT_EQ(hsa_amd_agent_memory_pool_get_info(cpu_agents.front(), global_memory_pool,
                                                HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS, &cpu_access),
             HSA_STATUS_SUCCESS);
-
-  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
-TEST(Memory, VMemGetAccess) {
-  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-
+TEST_F(MemoryTest, VMemGetAccess) {
   std::vector<hsa_agent_t> cpu_agents;
   ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_CPU>, &cpu_agents),
             HSA_STATUS_SUCCESS);
   ASSERT_FALSE(cpu_agents.empty());
-
-  std::vector<hsa_agent_t> aie_agents;
-  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
-            HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(aie_agents.empty());
 
   hsa_amd_memory_pool_t global_memory_pool = {};
   ASSERT_EQ(
@@ -869,21 +776,13 @@ TEST(Memory, VMemGetAccess) {
   EXPECT_EQ(hsa_amd_vmem_unmap(buffer, allocation_size), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_vmem_address_free(buffer, allocation_size), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_vmem_handle_release(memory_handle), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
-TEST(Memory, VMemDataIntegrity) {
-  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-
+TEST_F(MemoryTest, VMemDataIntegrity) {
   std::vector<hsa_agent_t> cpu_agents;
   ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_CPU>, &cpu_agents),
             HSA_STATUS_SUCCESS);
   ASSERT_FALSE(cpu_agents.empty());
-
-  std::vector<hsa_agent_t> aie_agents;
-  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
-            HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(aie_agents.empty());
 
   hsa_amd_memory_pool_t global_memory_pool = {};
   ASSERT_EQ(
@@ -927,17 +826,9 @@ TEST(Memory, VMemDataIntegrity) {
   EXPECT_EQ(hsa_amd_vmem_unmap(buffer, allocation_size), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_vmem_address_free(buffer, allocation_size), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_vmem_handle_release(memory_handle), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
-TEST(Memory, VMemExportImportShareableHandle) {
-  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-
-  std::vector<hsa_agent_t> aie_agents;
-  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
-            HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(aie_agents.empty());
-
+TEST_F(MemoryTest, VMemExportImportShareableHandle) {
   hsa_amd_memory_pool_t global_memory_pool = {};
   ASSERT_EQ(
       hsa_amd_agent_iterate_memory_pools(
@@ -957,21 +848,19 @@ TEST(Memory, VMemExportImportShareableHandle) {
 
   hsa_amd_vmem_alloc_handle_t imported_handle = {};
   EXPECT_EQ(hsa_amd_vmem_import_shareable_handle(dmabuf_fd, &imported_handle), HSA_STATUS_SUCCESS);
+  // Import duplicates the descriptor, so the exported one is still ours to close.
+  EXPECT_EQ(hsa_amd_portable_close_dmabuf(dmabuf_fd), HSA_STATUS_SUCCESS);
 
   // cleanup
   EXPECT_EQ(hsa_amd_vmem_handle_release(imported_handle), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_vmem_handle_release(memory_handle), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
-TEST(Memory, PointerInfo) {
-  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-
-  std::vector<hsa_agent_t> aie_agents;
-  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
-            HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(aie_agents.empty());
-
+// Known limitation (see the TODO below): hsa_amd_pointer_info does not recognize AIE allocations,
+// because it queries the KFD thunk. The call succeeds but reports an unknown pointer with no size
+// or agent address, and the test expects exactly that; flip it once pointer info covers XDNA
+// allocations.
+TEST_F(MemoryTest, PointerInfo) {
   hsa_amd_memory_pool_t global_memory_pool = {};
   ASSERT_EQ(
       hsa_amd_agent_iterate_memory_pools(
@@ -997,17 +886,9 @@ TEST(Memory, PointerInfo) {
 
   // cleanup
   EXPECT_EQ(hsa_amd_memory_pool_free(buffer), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
-TEST(Memory, IterateAllPools) {
-  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-
-  std::vector<hsa_agent_t> aie_agents;
-  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
-            HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(aie_agents.empty());
-
+TEST_F(MemoryTest, IterateAllPools) {
   std::vector<hsa_amd_memory_pool_t> pools;
   ASSERT_EQ(hsa_amd_agent_iterate_memory_pools(aie_agents.front(), collect_all_pools, &pools),
             HSA_STATUS_SUCCESS);
@@ -1028,22 +909,13 @@ TEST(Memory, IterateAllPools) {
     }
   }
   EXPECT_EQ(coarse_grain_count, 3u);
-
-  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
-TEST(Memory, PoolCanMigrate) {
-  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-
+TEST_F(MemoryTest, PoolCanMigrate) {
   std::vector<hsa_agent_t> cpu_agents;
   ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_CPU>, &cpu_agents),
             HSA_STATUS_SUCCESS);
   ASSERT_FALSE(cpu_agents.empty());
-
-  std::vector<hsa_agent_t> aie_agents;
-  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
-            HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(aie_agents.empty());
 
   hsa_amd_memory_pool_t aie_pool = {};
   ASSERT_EQ(hsa_amd_agent_iterate_memory_pools(
@@ -1064,22 +936,22 @@ TEST(Memory, PoolCanMigrate) {
   EXPECT_EQ(hsa_amd_memory_pool_can_migrate(cpu_pool, aie_pool, &can_migrate),
             HSA_STATUS_ERROR_OUT_OF_RESOURCES);
   EXPECT_FALSE(can_migrate);
-
-  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
-TEST(Memory, VMemMapWithOffset) {
-  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-
+// Maps the same allocation at two VAs and checks that both are views of the same pages: values
+// written through one mapping, in either granule, are read back through the other, and the reverse.
+// Both mappings start at offset 0, since hsa_amd_vmem_map documents in_offset as currently
+// unsupported (the runtime ignores a non-zero value and maps from the start).
+//
+// Whichever agent's access is enabled last decides what backs a VA, so granting the CPU and the AIE
+// agent together would only exercise the AIE path. The second mapping is made once per agent type
+// instead: the CPU agent's access maps the BO through os::MapMemory, the AIE agent's through
+// XdnaDriver::Map.
+TEST_F(MemoryTest, VMemMapSameHandleTwice) {
   std::vector<hsa_agent_t> cpu_agents;
   ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_CPU>, &cpu_agents),
             HSA_STATUS_SUCCESS);
   ASSERT_FALSE(cpu_agents.empty());
-
-  std::vector<hsa_agent_t> aie_agents;
-  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
-            HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(aie_agents.empty());
 
   hsa_amd_memory_pool_t global_memory_pool = {};
   ASSERT_EQ(
@@ -1093,50 +965,63 @@ TEST(Memory, VMemMapWithOffset) {
             HSA_STATUS_SUCCESS);
   ASSERT_GT(alloc_granule, 0u);
 
+  // Two granules, so the check covers more than the first page of the mapping.
   const std::size_t allocation_size = alloc_granule * 2;
   hsa_amd_vmem_alloc_handle_t memory_handle = {};
   ASSERT_EQ(hsa_amd_vmem_handle_create(global_memory_pool, allocation_size, MEMORY_TYPE_PINNED, 0,
                                        &memory_handle),
             HSA_STATUS_SUCCESS);
 
-  const std::size_t map_size = alloc_granule;
-  void* buffer = nullptr;
-  ASSERT_EQ(
-      hsa_amd_vmem_address_reserve_align(&buffer, map_size, 0, 0, HSA_AMD_VMEM_ADDRESS_NO_REGISTER),
-      HSA_STATUS_SUCCESS);
+  void* first = nullptr;
+  ASSERT_EQ(hsa_amd_vmem_address_reserve_align(&first, allocation_size, 0, 0,
+                                               HSA_AMD_VMEM_ADDRESS_NO_REGISTER),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(hsa_amd_vmem_map(first, allocation_size, 0, memory_handle, 0), HSA_STATUS_SUCCESS);
+  const hsa_amd_memory_access_desc_t cpu_desc{HSA_ACCESS_PERMISSION_RW, cpu_agents.front()};
+  ASSERT_EQ(hsa_amd_vmem_set_access(first, allocation_size, &cpu_desc, 1), HSA_STATUS_SUCCESS);
 
-  const std::uint64_t offset = alloc_granule;
-  EXPECT_EQ(hsa_amd_vmem_map(buffer, map_size, offset, memory_handle, 0), HSA_STATUS_SUCCESS);
-
-  std::vector<hsa_amd_memory_access_desc_t> desc;
-  for (auto const& agent : cpu_agents) {
-    desc.push_back({HSA_ACCESS_PERMISSION_RW, agent});
-  }
-  for (auto const& agent : aie_agents) {
-    desc.push_back({HSA_ACCESS_PERMISSION_RW, agent});
-  }
-  EXPECT_EQ(hsa_amd_vmem_set_access(buffer, map_size, desc.data(), desc.size()),
+  void* second = nullptr;
+  ASSERT_EQ(hsa_amd_vmem_address_reserve_align(&second, allocation_size, 0, 0,
+                                               HSA_AMD_VMEM_ADDRESS_NO_REGISTER),
             HSA_STATUS_SUCCESS);
 
-  auto* typed_buffer = static_cast<std::uint32_t*>(buffer);
-  typed_buffer[0] = 0xDEADBEEF;
-  EXPECT_EQ(typed_buffer[0], 0xDEADBEEF);
+  // Index of the first word of the second granule.
+  const std::size_t second_granule = alloc_granule / sizeof(std::uint32_t);
+  auto* const first_view = static_cast<std::uint32_t*>(first);
+  auto* const second_view = static_cast<std::uint32_t*>(second);
+
+  const struct {
+    const char* name;
+    hsa_agent_t agent;
+  } accessors[] = {{"CPU", cpu_agents.front()}, {"AIE", aie_agents.front()}};
+  for (const auto& accessor : accessors) {
+    SCOPED_TRACE(accessor.name);
+    first_view[0] = 0x11111111;
+    first_view[second_granule] = 0x22222222;
+
+    ASSERT_EQ(hsa_amd_vmem_map(second, allocation_size, 0, memory_handle, 0), HSA_STATUS_SUCCESS);
+    const hsa_amd_memory_access_desc_t desc{HSA_ACCESS_PERMISSION_RW, accessor.agent};
+    ASSERT_EQ(hsa_amd_vmem_set_access(second, allocation_size, &desc, 1), HSA_STATUS_SUCCESS);
+
+    EXPECT_EQ(second_view[0], 0x11111111u);
+    EXPECT_EQ(second_view[second_granule], 0x22222222u);
+
+    second_view[0] = 0x33333333;
+    second_view[second_granule] = 0x44444444;
+    EXPECT_EQ(first_view[0], 0x33333333u);
+    EXPECT_EQ(first_view[second_granule], 0x44444444u);
+
+    ASSERT_EQ(hsa_amd_vmem_unmap(second, allocation_size), HSA_STATUS_SUCCESS);
+  }
 
   // cleanup
-  EXPECT_EQ(hsa_amd_vmem_unmap(buffer, map_size), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_vmem_address_free(buffer, map_size), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_vmem_address_free(second, allocation_size), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_vmem_unmap(first, allocation_size), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_vmem_address_free(first, allocation_size), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_vmem_handle_release(memory_handle), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
-TEST(Memory, VMemDoubleMap) {
-  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-
-  std::vector<hsa_agent_t> aie_agents;
-  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
-            HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(aie_agents.empty());
-
+TEST_F(MemoryTest, VMemDoubleMap) {
   hsa_amd_memory_pool_t global_memory_pool = {};
   ASSERT_EQ(
       hsa_amd_agent_iterate_memory_pools(
@@ -1162,17 +1047,9 @@ TEST(Memory, VMemDoubleMap) {
   EXPECT_EQ(hsa_amd_vmem_unmap(buffer, allocation_size), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_vmem_address_free(buffer, allocation_size), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_vmem_handle_release(memory_handle), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
-TEST(Memory, VMemReleaseBeforeUnmap) {
-  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-
-  std::vector<hsa_agent_t> aie_agents;
-  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
-            HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(aie_agents.empty());
-
+TEST_F(MemoryTest, VMemReleaseBeforeUnmap) {
   hsa_amd_memory_pool_t global_memory_pool = {};
   ASSERT_EQ(
       hsa_amd_agent_iterate_memory_pools(
@@ -1199,17 +1076,9 @@ TEST(Memory, VMemReleaseBeforeUnmap) {
   // cleanup
   EXPECT_EQ(hsa_amd_vmem_unmap(buffer, allocation_size), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_vmem_address_free(buffer, allocation_size), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
-TEST(Memory, PoolDoubleFree) {
-  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-
-  std::vector<hsa_agent_t> aie_agents;
-  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
-            HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(aie_agents.empty());
-
+TEST_F(MemoryTest, PoolDoubleFree) {
   hsa_amd_memory_pool_t global_memory_pool = {};
   ASSERT_EQ(
       hsa_amd_agent_iterate_memory_pools(
@@ -1225,18 +1094,9 @@ TEST(Memory, PoolDoubleFree) {
   ASSERT_EQ(hsa_amd_memory_pool_free(buffer), HSA_STATUS_SUCCESS);
 
   EXPECT_NE(hsa_amd_memory_pool_free(buffer), HSA_STATUS_SUCCESS);
-
-  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
-TEST(Memory, PoolAllocateMultiple) {
-  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-
-  std::vector<hsa_agent_t> aie_agents;
-  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
-            HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(aie_agents.empty());
-
+TEST_F(MemoryTest, PoolAllocateMultiple) {
   hsa_amd_memory_pool_t global_memory_pool = {};
   ASSERT_EQ(
       hsa_amd_agent_iterate_memory_pools(
@@ -1273,18 +1133,12 @@ TEST(Memory, PoolAllocateMultiple) {
   for (std::size_t i = num_buffers; i > 0; --i) {
     EXPECT_EQ(hsa_amd_memory_pool_free(buffers[i - 1]), HSA_STATUS_SUCCESS);
   }
-
-  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
-TEST(Memory, MemoryLockToPool) {
-  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-
-  std::vector<hsa_agent_t> aie_agents;
-  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
-            HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(aie_agents.empty());
-
+// Known limitation (see the TODO below): hsa_amd_memory_lock_to_pool cannot pin host memory for AIE
+// agents, because XdnaDriver::RegisterMemory always fails. The test expects the lock to fail; flip
+// it once XDNA supports registering host memory.
+TEST_F(MemoryTest, MemoryLockToPool) {
   hsa_amd_memory_pool_t global_memory_pool = {};
   ASSERT_EQ(
       hsa_amd_agent_iterate_memory_pools(
@@ -1305,18 +1159,9 @@ TEST(Memory, MemoryLockToPool) {
             HSA_STATUS_SUCCESS);
 
   delete[] buffer;
-
-  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
-TEST(Memory, VMemMapOutOfBoundsRejected) {
-  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-
-  std::vector<hsa_agent_t> aie_agents;
-  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
-            HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(aie_agents.empty());
-
+TEST_F(MemoryTest, VMemMapOutOfBoundsRejected) {
   hsa_amd_memory_pool_t global_memory_pool = {};
   ASSERT_EQ(
       hsa_amd_agent_iterate_memory_pools(
@@ -1347,17 +1192,9 @@ TEST(Memory, VMemMapOutOfBoundsRejected) {
   // cleanup
   EXPECT_EQ(hsa_amd_vmem_address_free(buffer, reservation_size), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_vmem_handle_release(memory_handle), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
-TEST(Memory, VMemExportImportedHandleRejected) {
-  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-
-  std::vector<hsa_agent_t> aie_agents;
-  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
-            HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(aie_agents.empty());
-
+TEST_F(MemoryTest, VMemExportImportedHandleRejected) {
   hsa_amd_memory_pool_t global_memory_pool = {};
   ASSERT_EQ(
       hsa_amd_agent_iterate_memory_pools(
@@ -1389,17 +1226,9 @@ TEST(Memory, VMemExportImportedHandleRejected) {
   // cleanup
   EXPECT_EQ(hsa_amd_vmem_handle_release(imported_handle), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_vmem_handle_release(memory_handle), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
-TEST(Memory, VMemSetAccessPermissionChange) {
-  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-
-  std::vector<hsa_agent_t> aie_agents;
-  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
-            HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(aie_agents.empty());
-
+TEST_F(MemoryTest, VMemSetAccessPermissionChange) {
   hsa_amd_memory_pool_t global_memory_pool = {};
   ASSERT_EQ(
       hsa_amd_agent_iterate_memory_pools(
@@ -1440,17 +1269,9 @@ TEST(Memory, VMemSetAccessPermissionChange) {
   EXPECT_EQ(hsa_amd_vmem_unmap(buffer, allocation_size), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_vmem_address_free(buffer, allocation_size), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_vmem_handle_release(memory_handle), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
-TEST(Memory, VMemGetAccessBeforeSetAccess) {
-  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-
-  std::vector<hsa_agent_t> aie_agents;
-  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
-            HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(aie_agents.empty());
-
+TEST_F(MemoryTest, VMemGetAccessBeforeSetAccess) {
   hsa_amd_memory_pool_t global_memory_pool = {};
   ASSERT_EQ(
       hsa_amd_agent_iterate_memory_pools(
@@ -1480,17 +1301,9 @@ TEST(Memory, VMemGetAccessBeforeSetAccess) {
   EXPECT_EQ(hsa_amd_vmem_unmap(buffer, allocation_size), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_vmem_address_free(buffer, allocation_size), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_vmem_handle_release(memory_handle), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
-TEST(Memory, VMemUnmapRemapCycle) {
-  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-
-  std::vector<hsa_agent_t> aie_agents;
-  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
-            HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(aie_agents.empty());
-
+TEST_F(MemoryTest, VMemUnmapRemapCycle) {
   hsa_amd_memory_pool_t global_memory_pool = {};
   ASSERT_EQ(
       hsa_amd_agent_iterate_memory_pools(
@@ -1532,7 +1345,6 @@ TEST(Memory, VMemUnmapRemapCycle) {
   EXPECT_EQ(hsa_amd_vmem_unmap(buffer, allocation_size), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_vmem_address_free(buffer, allocation_size), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_vmem_handle_release(memory_handle), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
 // Repeats the unmap/remap cycle so that a premature release shows up as a failure rather than
@@ -1540,14 +1352,7 @@ TEST(Memory, VMemUnmapRemapCycle) {
 // granted access, so every set_access re-imports a bo XdnaDriver already owns. Note this
 // detects only releasing too early; leaking a handle per cycle would still pass, as nothing
 // here accounts for the bo handles the driver holds.
-TEST(Memory, VMemRepeatedUnmapRemapCycles) {
-  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-
-  std::vector<hsa_agent_t> aie_agents;
-  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
-            HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(aie_agents.empty());
-
+TEST_F(MemoryTest, VMemRepeatedUnmapRemapCycles) {
   hsa_amd_memory_pool_t global_memory_pool = {};
   ASSERT_EQ(
       hsa_amd_agent_iterate_memory_pools(
@@ -1591,25 +1396,19 @@ TEST(Memory, VMemRepeatedUnmapRemapCycles) {
   // cleanup
   EXPECT_EQ(hsa_amd_vmem_address_free(buffer, allocation_size), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_vmem_handle_release(memory_handle), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
 // Covers the other side of XdnaDriver::ImportMemoryHandle: the allocation belongs to the GPU,
 // so granting the AIE agent access is a genuine foreign import that must create a bo of its
 // own. Releasing that import must not disturb the GPU allocation, which is still mapped and
 // remapped here afterwards.
-TEST(Memory, VMemUnmapRemapCycleFromGPUPool) {
-  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-
+TEST_F(MemoryTest, VMemUnmapRemapCycleFromGPUPool) {
   std::vector<hsa_agent_t> gpu_agents;
   ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_GPU>, &gpu_agents),
             HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(gpu_agents.empty());
-
-  std::vector<hsa_agent_t> aie_agents;
-  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
-            HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(aie_agents.empty());
+  if (gpu_agents.empty()) {
+    GTEST_SKIP() << "No GPU found; skipping test";
+  }
 
   hsa_amd_memory_pool_t global_memory_pool = {};
   ASSERT_EQ(
@@ -1644,17 +1443,9 @@ TEST(Memory, VMemUnmapRemapCycleFromGPUPool) {
   EXPECT_EQ(hsa_amd_vmem_unmap(buffer, allocation_size), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_vmem_address_free(buffer, allocation_size), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_vmem_handle_release(memory_handle), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
-TEST(Memory, VMemRetainAllocHandle) {
-  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-
-  std::vector<hsa_agent_t> aie_agents;
-  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
-            HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(aie_agents.empty());
-
+TEST_F(MemoryTest, VMemRetainAllocHandle) {
   hsa_amd_memory_pool_t global_memory_pool = {};
   ASSERT_EQ(
       hsa_amd_agent_iterate_memory_pools(
@@ -1685,17 +1476,9 @@ TEST(Memory, VMemRetainAllocHandle) {
   EXPECT_EQ(hsa_amd_vmem_unmap(buffer, allocation_size), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_vmem_address_free(buffer, allocation_size), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_vmem_handle_release(memory_handle), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
-TEST(Memory, VMemGetAllocPropertiesFromHandle) {
-  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-
-  std::vector<hsa_agent_t> aie_agents;
-  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
-            HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(aie_agents.empty());
-
+TEST_F(MemoryTest, VMemGetAllocPropertiesFromHandle) {
   hsa_amd_memory_pool_t global_memory_pool = {};
   ASSERT_EQ(
       hsa_amd_agent_iterate_memory_pools(
@@ -1719,17 +1502,9 @@ TEST(Memory, VMemGetAllocPropertiesFromHandle) {
 
   // cleanup
   EXPECT_EQ(hsa_amd_vmem_handle_release(memory_handle), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
-TEST(Memory, VMemDoubleReleaseRejected) {
-  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-
-  std::vector<hsa_agent_t> aie_agents;
-  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
-            HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(aie_agents.empty());
-
+TEST_F(MemoryTest, VMemDoubleReleaseRejected) {
   hsa_amd_memory_pool_t global_memory_pool = {};
   ASSERT_EQ(
       hsa_amd_agent_iterate_memory_pools(
@@ -1747,18 +1522,9 @@ TEST(Memory, VMemDoubleReleaseRejected) {
   // The handle is fully destroyed after the first release (ref_count reached 0 with no
   // outstanding mappings); releasing it again must be rejected, not use-after-free.
   EXPECT_NE(hsa_amd_vmem_handle_release(memory_handle), HSA_STATUS_SUCCESS);
-
-  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
-TEST(Memory, VMemCreateZeroSizeRejected) {
-  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-
-  std::vector<hsa_agent_t> aie_agents;
-  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
-            HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(aie_agents.empty());
-
+TEST_F(MemoryTest, VMemCreateZeroSizeRejected) {
   hsa_amd_memory_pool_t global_memory_pool = {};
   ASSERT_EQ(
       hsa_amd_agent_iterate_memory_pools(
@@ -1769,18 +1535,9 @@ TEST(Memory, VMemCreateZeroSizeRejected) {
   EXPECT_NE(
       hsa_amd_vmem_handle_create(global_memory_pool, 0, MEMORY_TYPE_PINNED, 0, &memory_handle),
       HSA_STATUS_SUCCESS);
-
-  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
-TEST(Memory, VMemCreateMisalignedSizeRejected) {
-  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-
-  std::vector<hsa_agent_t> aie_agents;
-  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
-            HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(aie_agents.empty());
-
+TEST_F(MemoryTest, VMemCreateMisalignedSizeRejected) {
   hsa_amd_memory_pool_t global_memory_pool = {};
   ASSERT_EQ(
       hsa_amd_agent_iterate_memory_pools(
@@ -1794,22 +1551,13 @@ TEST(Memory, VMemCreateMisalignedSizeRejected) {
   EXPECT_NE(hsa_amd_vmem_handle_create(global_memory_pool, allocation_size, MEMORY_TYPE_PINNED, 0,
                                        &memory_handle),
             HSA_STATUS_SUCCESS);
-
-  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
-TEST(Memory, VMemSetAccessMixedPermissions) {
-  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-
+TEST_F(MemoryTest, VMemSetAccessMixedPermissions) {
   std::vector<hsa_agent_t> cpu_agents;
   ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_CPU>, &cpu_agents),
             HSA_STATUS_SUCCESS);
   ASSERT_FALSE(cpu_agents.empty());
-
-  std::vector<hsa_agent_t> aie_agents;
-  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
-            HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(aie_agents.empty());
 
   hsa_amd_memory_pool_t global_memory_pool = {};
   ASSERT_EQ(
@@ -1852,7 +1600,6 @@ TEST(Memory, VMemSetAccessMixedPermissions) {
   EXPECT_EQ(hsa_amd_vmem_unmap(buffer, allocation_size), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_vmem_address_free(buffer, allocation_size), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_vmem_handle_release(memory_handle), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
 // Unmapping a buffer that both the CPU and the AIE agent can access must succeed and leave its
@@ -1861,18 +1608,11 @@ TEST(Memory, VMemSetAccessMixedPermissions) {
 // a hole another mmap can claim, and fails the CPU agent's removal of access if it runs second.
 // Which agent is removed first depends on their addresses, so the test checks both outcomes: the
 // unmap status catches the second ordering and mincore the first.
-TEST(Memory, VMemUnmapKeepsReservation) {
-  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-
+TEST_F(MemoryTest, VMemUnmapKeepsReservation) {
   std::vector<hsa_agent_t> cpu_agents;
   ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_CPU>, &cpu_agents),
             HSA_STATUS_SUCCESS);
   ASSERT_FALSE(cpu_agents.empty());
-
-  std::vector<hsa_agent_t> aie_agents;
-  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
-            HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(aie_agents.empty());
 
   hsa_amd_memory_pool_t global_memory_pool = {};
   ASSERT_EQ(
@@ -1915,5 +1655,4 @@ TEST(Memory, VMemUnmapKeepsReservation) {
   // cleanup
   EXPECT_EQ(hsa_amd_vmem_address_free(buffer, allocation_size), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_vmem_handle_release(memory_handle), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }

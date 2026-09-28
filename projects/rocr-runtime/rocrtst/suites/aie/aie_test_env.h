@@ -62,9 +62,9 @@ hsa_status_t discover_agents(hsa_agent_t agent, void* data) {
 // Runtime lifetime and AIE agent discovery, per test. Derive from this and add whatever else the
 // binary needs; the pools each one wants are not the same.
 //
-// What to do when there is no NPU is left to the derived fixture: the dispatch and memory tests
-// treat a missing agent as a failure, ErrorCallback skips. Both did that already, and the
-// difference is not this header's to settle.
+// What to do when there is no NPU is left to the derived fixture: the dispatch tests treat a
+// missing agent as a failure, while ErrorCallback and the memory tests, which need no kernel
+// artifacts and so are built everywhere, skip.
 //
 // TearDown shuts the runtime down even when SetUp or the test failed partway, which the
 // hand-written per-test versions did not: an ASSERT in the middle of a test returned before its
