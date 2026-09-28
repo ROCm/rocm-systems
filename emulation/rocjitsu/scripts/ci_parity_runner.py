@@ -22,7 +22,13 @@ import time
 from pathlib import Path
 
 GTEST_RESULT = re.compile(
-    r"^\[\s+(OK|FAILED)\s+\]\s+(\S+)\s+\((\d+)\s+ms\)\s*$"
+    r"^(?:\d+:\s*)?\[\s+(OK|FAILED)\s+\]\s+(\S+)\s+\((\d+)\s+ms\)\s*$"
+)
+ADD_TEST_RE = re.compile(
+    r'^add_test\((?P<name>[A-Za-z0-9_\-]+)\s+"(?P<command>[^"]+)"\)\s*$'
+)
+LABELS_RE = re.compile(
+    r'^set_tests_properties\("(?P<name>[^"]+)"\s+PROPERTIES\s+LABELS\s+"(?P<labels>[^"]+)"\)\s*$'
 )
 UNSUPPORTED_MARKERS = (
     "UnimplementedInst",
@@ -47,6 +53,44 @@ def parse_gtest_output(text: str) -> list[dict]:
             }
         )
     return cases
+
+
+def parse_installed_tests(text: str) -> list[dict]:
+    """Read add_test() and LABELS lines from an install-tree CTestTestfile.cmake."""
+    commands = {}
+    labels = {}
+    for raw in text.splitlines():
+        line = raw.strip()
+        added = ADD_TEST_RE.match(line)
+        if added:
+            commands[added.group("name")] = added.group("command")
+            continue
+        labeled = LABELS_RE.match(line)
+        if labeled:
+            labels[labeled.group("name")] = labeled.group("labels").split(";")
+    return [
+        {
+            "name": name,
+            "command": command,
+            "labels": labels.get(name, []),
+        }
+        for name, command in commands.items()
+    ]
+
+
+def select_labeled_tests(tests: list[dict], label_regex: str) -> list[dict]:
+    """Match labels the way `ctest -L` does: a search against each label."""
+    pattern = re.compile(label_regex)
+    return [
+        test
+        for test in tests
+        if any(pattern.search(label) for label in test["labels"])
+    ]
+
+
+def cmake_quote(value: str) -> str:
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
 
 
 def looks_unsupported(text: str) -> bool:
@@ -96,6 +140,7 @@ def stream_merged_output(proc: subprocess.Popen, index: int, timeout_seconds: in
         lines.append(text)
         print(f"{index}: {text}", flush=True)
     returncode = proc.wait()
+    proc.stdout.close()
     return lines, returncode, timed_out
 
 
@@ -173,6 +218,140 @@ def run_binary(
     }
 
 
+def stream_raw_output(proc: subprocess.Popen) -> tuple[list[str], int]:
+    """Print a process's merged output as it arrives, without an extra prefix."""
+    lines = []
+    pending = queue.Queue()
+
+    def reader():
+        for line in proc.stdout:
+            pending.put(line)
+        pending.put(None)
+
+    thread = threading.Thread(target=reader, daemon=True)
+    thread.start()
+    while True:
+        line = pending.get()
+        if line is None:
+            break
+        text = line.rstrip("\n")
+        lines.append(text)
+        print(text, flush=True)
+    returncode = proc.wait()
+    proc.stdout.close()
+    return lines, returncode
+
+
+def run_labeled_ctest(
+    rocjitsu: str,
+    config: str,
+    rocm_root: str,
+    label_regex: str,
+    gtest_filter: str,
+    timeout_seconds: int,
+    env: dict,
+    daemon: bool,
+    out_dir: Path,
+) -> dict:
+    """Run `ctest -L <label> -V` with rocJITsu in front of each test command.
+
+    hipRAND's quick and standard labels select the same five binaries the
+    hardware baseline runs. Real ctest prints the Start / Test command /
+    [ RUN ] / Passed lines, so the job log matches that baseline.
+    """
+    ctest_file = Path(rocm_root) / "bin" / "hipRAND" / "CTestTestfile.cmake"
+    if not ctest_file.is_file():
+        raise FileNotFoundError(f"missing install-tree ctest file: {ctest_file}")
+    selected = select_labeled_tests(
+        parse_installed_tests(ctest_file.read_text(encoding="utf-8")),
+        label_regex,
+    )
+    if not selected:
+        raise RuntimeError(f"no hipRAND tests matched ctest label {label_regex}")
+
+    work = out_dir / "ctest-quick"
+    work.mkdir(parents=True, exist_ok=True)
+    launcher_parts = [shlex.quote(rocjitsu)]
+    if daemon:
+        launcher_parts.append("--daemon")
+    launcher_parts.extend(["--config", shlex.quote(config), "--", '"$@"'])
+    launcher = work / "rocjitsu-launch"
+    launcher.write_text(
+        "#!/bin/bash\nset -euo pipefail\nexec " + " ".join(launcher_parts) + "\n",
+        encoding="utf-8",
+    )
+    launcher.chmod(0o755)
+
+    hiprand_dir = ctest_file.parent
+    cmake_lines = [
+        "# Generated so ctest -V runs each hipRAND binary under rocJITsu.",
+    ]
+    for test in selected:
+        binary = str((hiprand_dir / test["command"]).resolve())
+        args = [str(launcher), binary]
+        if gtest_filter:
+            args.append(f"--gtest_filter={gtest_filter}")
+        quoted = " ".join(cmake_quote(arg) for arg in args)
+        cmake_lines.append(f"add_test({test['name']} {quoted})")
+        label_value = ";".join(test["labels"])
+        cmake_lines.append(
+            f'set_tests_properties("{test["name"]}" PROPERTIES LABELS "{label_value}")'
+        )
+    (work / "CTestTestfile.cmake").write_text(
+        "\n".join(cmake_lines) + "\n", encoding="utf-8"
+    )
+
+    command = [
+        "ctest",
+        "--test-dir",
+        str(work),
+        "-L",
+        label_regex,
+        "-LE",
+        "ex_gpu",
+        "--output-on-failure",
+        "--parallel",
+        "1",
+        "--timeout",
+        str(timeout_seconds),
+        "-V",
+        "--test-output-size-passed",
+        "0",
+        "--test-output-size-failed",
+        "0",
+    ]
+    print(f"Test project {work}", flush=True)
+    print(flush=True)
+    print(f"Running: {shlex.join(command)}", flush=True)
+    proc = subprocess.Popen(
+        command,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        bufsize=1,
+    )
+    log_lines, returncode = stream_raw_output(proc)
+    log_text = "\n".join(log_lines)
+    cases = parse_gtest_output(log_text)
+    errors = []
+    if returncode != 0 and not cases:
+        errors.append(
+            {
+                "binary": "ctest",
+                "returncode": returncode,
+                "timed_out": False,
+                "tail": "\n".join(log_lines[-40:]),
+            }
+        )
+    return {
+        "returncode": returncode,
+        "cases": cases,
+        "errors": errors,
+        "log_lines": [f"Running: {shlex.join(command)}", ""] + log_lines,
+    }
+
+
 def build_env(rocm_root: str) -> dict:
     env = os.environ.copy()
     lib = str(Path(rocm_root) / "lib")
@@ -189,7 +368,12 @@ def main() -> int:
     parser.add_argument("--rocjitsu", required=True)
     parser.add_argument("--config", required=True)
     parser.add_argument("--rocm-root", required=True)
-    parser.add_argument("--binary", action="append", required=True)
+    parser.add_argument("--binary", action="append", default=[])
+    parser.add_argument(
+        "--ctest-label",
+        default="",
+        help="Run install-tree tests whose labels match this regex, via ctest -L -V.",
+    )
     parser.add_argument("--gtest-filter", default="")
     parser.add_argument("--timeout-seconds", type=int, default=1800)
     parser.add_argument(
@@ -202,29 +386,52 @@ def main() -> int:
     parser.add_argument("--out", required=True)
     args = parser.parse_args()
 
+    if not args.ctest_label and not args.binary:
+        parser.error("pass --ctest-label or at least one --binary")
+
     env = build_env(args.rocm_root)
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
     cases = []
     errors = []
-    log_lines = [f"Test project {args.rocm_root}/bin/hipRAND", ""]
-    print(log_lines[0], flush=True)
-    print(flush=True)
-    total = len(args.binary)
-    for index, binary in enumerate(args.binary, start=1):
-        result = run_binary(
+    if args.ctest_label:
+        result = run_labeled_ctest(
             args.rocjitsu,
             args.config,
-            binary,
+            args.rocm_root,
+            args.ctest_label,
             args.gtest_filter,
             args.timeout_seconds,
             env,
             args.daemon,
-            index=index,
-            total=total,
+            out.parent,
         )
         cases.extend(result["cases"])
-        log_lines.extend(result["log_lines"])
-        if result["error"]:
-            errors.append({"binary": binary, **result["error"]})
+        errors.extend(result["errors"])
+        log_lines = result["log_lines"]
+        ctest_status = result["returncode"]
+    else:
+        log_lines = [f"Test project {args.rocm_root}/bin/hipRAND", ""]
+        print(log_lines[0], flush=True)
+        print(flush=True)
+        total = len(args.binary)
+        for index, binary in enumerate(args.binary, start=1):
+            result = run_binary(
+                args.rocjitsu,
+                args.config,
+                binary,
+                args.gtest_filter,
+                args.timeout_seconds,
+                env,
+                args.daemon,
+                index=index,
+                total=total,
+            )
+            cases.extend(result["cases"])
+            log_lines.extend(result["log_lines"])
+            if result["error"]:
+                errors.append({"binary": binary, **result["error"]})
+        ctest_status = 0
 
     payload = {
         "component": "hiprand",
@@ -233,18 +440,17 @@ def main() -> int:
         "rocm_root": args.rocm_root,
         "rocm_version": args.rocm_version,
         "gtest_filter": args.gtest_filter,
+        "ctest_label": args.ctest_label,
         "runner_label": args.runner_label,
         "cases": cases,
         "errors": errors,
     }
-    out = Path(args.out)
-    out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     log_path = out.with_name("ctest.log")
     log_path.write_text("\n".join(log_lines) + "\n", encoding="utf-8")
     print(f"wrote {out} cases={len(cases)} errors={len(errors)}")
     print(f"wrote {log_path}")
-    if errors or not cases:
+    if errors or not cases or ctest_status != 0:
         return 1
     return 0
 
