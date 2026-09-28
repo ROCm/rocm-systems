@@ -5,6 +5,7 @@
  */
 
 #include "hip_conversions.hpp"
+#include "hip_launch_validation.hpp"
 
 namespace hip {
 hipError_t ihipMemcpy3D_validate(const hipMemcpy3DParms* p);
@@ -32,7 +33,7 @@ void ihipHtoHMemcpy(void* dst, const void* src, size_t sizeBytes, hip::Stream& s
 
 bool IsHtoHMemcpy(void* dst, const void* src);
 
-hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& launch_params,
+hipError_t ihipLaunchKernel_validate(hipFunction_t f, const LaunchParams& launch_params,
                                      void** kernelParams, void** extra, int deviceId,
                                      uint32_t params);
 
@@ -43,7 +44,7 @@ hipError_t ihipMemset3D_validate(hipPitchedPtr pitchedDevPtr, amd::Memory* memor
                                  int value, hipExtent extent, size_t sizeBytes);
 
 hipError_t ihipLaunchKernelCommand(amd::Command*& command, hipFunction_t f,
-                                   amd::LaunchParams& launch_params, hip::Stream* stream,
+                                   LaunchParams& launch_params, hip::Stream* stream,
                                    void** kernelParams, void** extra, hipEvent_t startEvent,
                                    hipEvent_t stopEvent, uint32_t flags, uint32_t params,
                                    uint32_t gridId, uint32_t numGrids, uint64_t prevGridSum,
