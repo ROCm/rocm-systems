@@ -47,6 +47,29 @@ namespace RcclUnitTesting
     // The former relative bounds accepted these missing-rank examples.
     EXPECT_FALSE(matchesEither(ncclFloat8e4m3, 6.0f, 8.0f, 8.0f));
     EXPECT_FALSE(matchesEither(ncclFloat8e5m2, 4.0f, 8.0f, 8.0f));
+
+    // Non-reduce FP8 collectives pass no alternative reference: only the primary matches.
+    auto matchesPrimaryOnly = [](ncclDataType_t const dataType, float const actualValue,
+                                 float const expectedValue)
+    {
+      uint8_t actualStorage = 0;
+      uint8_t expectedStorage = 0;
+      PtrUnion actual;
+      PtrUnion expected;
+      EXPECT_EQ(actual.Attach(&actualStorage), TEST_SUCCESS);
+      EXPECT_EQ(expected.Attach(&expectedStorage), TEST_SUCCESS);
+      EXPECT_EQ(actual.Set(dataType, 0, 0, actualValue), TEST_SUCCESS);
+      EXPECT_EQ(expected.Set(dataType, 0, 0, expectedValue), TEST_SUCCESS);
+
+      bool isMatch = false;
+      EXPECT_EQ(actual.IsEqual(dataType, 1, expected, nullptr, false, isMatch), TEST_SUCCESS);
+      return isMatch;
+    };
+    for (ncclDataType_t const dataType : {ncclFloat8e4m3, ncclFloat8e5m2})
+    {
+      EXPECT_TRUE(matchesPrimaryOnly(dataType, 1.5f, 1.5f));
+      EXPECT_FALSE(matchesPrimaryOnly(dataType, 1.75f, 1.5f));
+    }
   }
 
   // GPU validation compares output against stepwise-FP8 and FP32-accumulation references.
@@ -76,6 +99,18 @@ namespace RcclUnitTesting
       ASSERT_EQ(hipMemset(fp32.ptr, 0xFF, 1), hipSuccess);
       ASSERT_EQ(PtrUnion::IsEqualDevice(dataType, 1, actual.ptr, stepwise.ptr,
                                         fp32.ptr, mismatches, false),
+                TEST_SUCCESS);
+      EXPECT_EQ(mismatches, 1);
+
+      // Non-reduce FP8 collectives pass no alternative reference.
+      ASSERT_EQ(stepwise.ClearGpuMem(1), TEST_SUCCESS);
+      ASSERT_EQ(PtrUnion::IsEqualDevice(dataType, 1, actual.ptr, stepwise.ptr,
+                                        nullptr, mismatches, false),
+                TEST_SUCCESS);
+      EXPECT_EQ(mismatches, 0);
+      ASSERT_EQ(hipMemset(stepwise.ptr, 0xFF, 1), hipSuccess);
+      ASSERT_EQ(PtrUnion::IsEqualDevice(dataType, 1, actual.ptr, stepwise.ptr,
+                                        nullptr, mismatches, false),
                 TEST_SUCCESS);
       EXPECT_EQ(mismatches, 1);
 

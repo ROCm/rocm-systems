@@ -14,7 +14,8 @@
 #include <rccl/rccl.h>
 
 #define PIPE_WRITE(childId, val)                                        \
-  ASSERT_EQ(RcclUnitTesting::detail::safe_pipe_write(childList[childId]->parentWriteFd, &val, sizeof(val)), sizeof(val))
+  ASSERT_EQ(RcclUnitTesting::detail::safe_pipe_write(childList[childId]->parentWriteFd, &val, sizeof(val)), \
+            static_cast<ssize_t>(sizeof(val)))
 
 
 #define PIPE_READ(childId, val)                                                         \
@@ -366,7 +367,7 @@ namespace RcclUnitTesting
         ASSERT_EQ(RcclUnitTesting::detail::safe_pipe_write(childList[childId]->parentWriteFd,
                                                            this->numCollectivesInGroup.data(),
                                                            numCollSize * sizeof(int)),
-                  numCollSize * sizeof(int));
+                  static_cast<ssize_t>(numCollSize * sizeof(int)));
       }
 
       // Send the RCCL communication with blocking or non-blocking option
@@ -386,7 +387,7 @@ namespace RcclUnitTesting
         ASSERT_EQ(RcclUnitTesting::detail::safe_pipe_write(childList[childId]->parentWriteFd,
                                                            this->numStreamsPerGroup.data(),
                                                            numStreamsSize * sizeof(int)),
-                  numStreamsSize * sizeof(int));
+                  static_cast<ssize_t>(numStreamsSize * sizeof(int)));
       }
 
       // Send the GPUs this child uses
@@ -618,6 +619,7 @@ namespace RcclUnitTesting
 
     // Loop over all ranks and send prepare data command to appropriate child process
     int const cmd = TestBedChild::CHILD_PREPARE_DATA;
+    intptr_t const prepDataFuncOffset = CollFuncPtrToOffset(prepDataFunc);
     for (auto currGroup : groupList)
     {
       for (auto currRank : rankList)
@@ -627,7 +629,7 @@ namespace RcclUnitTesting
         PIPE_WRITE(childId, currRank);
         PIPE_WRITE(childId, currGroup);
         PIPE_WRITE(childId, collId);
-        PIPE_WRITE(childId, prepDataFunc);
+        PIPE_WRITE(childId, prepDataFuncOffset);
         PIPE_CHECK(childId);
       }
     }
@@ -976,6 +978,14 @@ namespace RcclUnitTesting
         {
           waitResult = waitpid(c->pid, &returnVal, 0);
         } while (waitResult == -1 && errno == EINTR);
+        if (waitResult > 0 && WIFSIGNALED(returnVal))
+        {
+          TEST_ERROR("Pool worker %d killed by signal %d", c->childId, WTERMSIG(returnVal));
+        }
+        else if (waitResult > 0 && WIFEXITED(returnVal) && WEXITSTATUS(returnVal) != 0)
+        {
+          TEST_ERROR("Pool worker %d exited with code %d", c->childId, WEXITSTATUS(returnVal));
+        }
       }
       delete c;
     }
