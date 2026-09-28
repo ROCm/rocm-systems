@@ -18,16 +18,17 @@ class IStream {
 public:
     virtual ~IStream() = default;
 
-    virtual hipStream_t                  getHipStream() const       = 0;
-    virtual hipDevice_t                  getHipDevice() const       = 0;
-    virtual bool                         fixedBufferOffset() const  = 0;
-    virtual bool                         fixedFileOffset() const    = 0;
-    virtual bool                         fixedIOSize() const        = 0;
-    virtual bool                         pageAligned() const        = 0;
-    virtual std::unique_lock<std::mutex> getLock()                  = 0;
-    virtual void                        *asyncBufferHostPtr() const = 0;
-    virtual void                        *asyncBufferDevPtr() const  = 0;
-    virtual size_t                       asyncBufferSize() const    = 0;
+    virtual hipStream_t                  getHipStream() const          = 0;
+    virtual hipDevice_t                  getHipDevice() const          = 0;
+    virtual bool                         fixedBufferOffset() const     = 0;
+    virtual bool                         fixedFileOffset() const       = 0;
+    virtual bool                         fixedIOSize() const           = 0;
+    virtual bool                         pageAligned() const           = 0;
+    virtual std::unique_lock<std::mutex> getLock()                     = 0;
+    virtual void                        *asyncBufferHostPtr() const    = 0;
+    virtual void                        *asyncBufferDevPtr() const     = 0;
+    virtual size_t                       asyncBufferSize() const       = 0;
+    virtual bool                         canUseStreamWaitValue() const = 0;
 };
 
 class StreamMap;
@@ -46,6 +47,7 @@ public:
     virtual void                        *asyncBufferHostPtr() const override;
     virtual void                        *asyncBufferDevPtr() const override;
     virtual size_t                       asyncBufferSize() const override;
+    virtual bool                         canUseStreamWaitValue() const override;
 
     Stream(const hipStream_t hip_stream, uint32_t flags, const PassKey<StreamMap> &k);
 
@@ -61,6 +63,7 @@ private:
     bool        fixed_file_offset;
     bool        fixed_io_size;
     bool        page_aligned;
+    bool        can_use_stream_wait_value;
     std::mutex  mutex;
 
     std::unique_ptr<void, void (*)(void *)> async_buffer;

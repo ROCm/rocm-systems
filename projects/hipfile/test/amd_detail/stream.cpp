@@ -49,6 +49,9 @@ expectStreamBuffer(StrictMock<MConfiguration> &mconfig, StrictMock<MHip> &mhip)
         .Times(::testing::AnyNumber())
         .WillRepeatedly(::testing::Return(reinterpret_cast<void *>(0x5678)));
     EXPECT_CALL(mhip, hipHostFree).Times(::testing::AnyNumber());
+    EXPECT_CALL(mhip, hipDeviceGetAttribute(hipDeviceAttributeCanUseStreamWaitValue, ::testing::_))
+        .Times(::testing::AnyNumber())
+        .WillRepeatedly(::testing::Return(1));
 }
 
 struct HipFileStream : public ::testing::Test {
@@ -91,6 +94,24 @@ TEST_F(HipFileStream, get_stream_with_unregistered_stream_works)
     EXPECT_CALL(mhip, hipStreamGetDevice);
     auto stream = stream_map.getStream(nonnull_stream);
     ASSERT_EQ(nonnull_stream, stream->getHipStream());
+}
+
+TEST_F(HipFileStream, canUseStreamWaitValue_reflects_device_attribute_supported)
+{
+    EXPECT_CALL(mhip, hipStreamGetDevice);
+    EXPECT_CALL(mhip, hipDeviceGetAttribute(hipDeviceAttributeCanUseStreamWaitValue, ::testing::_))
+        .WillRepeatedly(::testing::Return(1));
+    stream_map.registerStream(nonnull_stream, 0);
+    ASSERT_TRUE(stream_map.getStream(nonnull_stream)->canUseStreamWaitValue());
+}
+
+TEST_F(HipFileStream, canUseStreamWaitValue_reflects_device_attribute_unsupported)
+{
+    EXPECT_CALL(mhip, hipStreamGetDevice);
+    EXPECT_CALL(mhip, hipDeviceGetAttribute(hipDeviceAttributeCanUseStreamWaitValue, ::testing::_))
+        .WillRepeatedly(::testing::Return(0));
+    stream_map.registerStream(nonnull_stream, 0);
+    ASSERT_FALSE(stream_map.getStream(nonnull_stream)->canUseStreamWaitValue());
 }
 
 TEST_F(HipFileStream, register_with_invalid_flags_throws)
@@ -150,6 +171,9 @@ TEST(HipFileStreamDestructor, buffer_free_failure_logs)
     EXPECT_CALL(mhip, hipHostFree)
         .Times(::testing::AnyNumber())
         .WillRepeatedly(::testing::Throw(Hip::RuntimeError(hipErrorInvalidValue)));
+    EXPECT_CALL(mhip, hipDeviceGetAttribute(hipDeviceAttributeCanUseStreamWaitValue, ::testing::_))
+        .Times(::testing::AnyNumber())
+        .WillRepeatedly(::testing::Return(1));
     EXPECT_CALL(msys, syslog);
     {
         StreamMap stream_map;
