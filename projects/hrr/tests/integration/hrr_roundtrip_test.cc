@@ -1508,6 +1508,47 @@ HRR_TEST_CASE(Unit_HRR_FailedMemcpy3DNotRecorded) {
     REQUIRE(ret == 0);
   }
   const auto counts = hrr_info_api_counts(cap.path);
-  CHECK(counts.count("hipMalloc3D") == 1);  // the capture was live
+  const auto it = counts.find("hipMalloc3D");
+  REQUIRE(it != counts.end());  // the capture was live
+  CHECK(it->second == 1);
   CHECK(counts.count("hipMemcpy3D") == 0);
+}
+
+// ---------------------------------------------------------------------------
+/**
+ * Test Description
+ * ----------------
+ *   - Runs Unit_HRR_FailedShimCalls_Direct under capture: one rejected call for
+ *     each hand-written shim that inlines a struct, plus an accepted and a
+ *     rejected hipMemPoolSetAttribute.
+ *   - The archive holds only the accepted calls and replays cleanly. Replay
+ *     issues every recorded call again, so a recorded rejected call stops it.
+ */
+HRR_TEST_CASE(Unit_HRR_FailedShimCallsNotRecorded) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_failed_shim_calls"};
+  {
+    hrr::test::SpawnProc proc(HRR_TEST_EXE);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    const int ret = proc.run("\"Unit_HRR_FailedShimCalls_Direct\"");
+    INFO("Capture exit code: " << ret);
+    REQUIRE(ret == 0);
+  }
+  const auto counts = hrr_info_api_counts(cap.path);
+  const auto pools = counts.find("hipMemPoolCreate");
+  REQUIRE(pools != counts.end());  // the capture was live
+  CHECK(pools->second == 1);
+  const auto attrs = counts.find("hipMemPoolSetAttribute");
+  REQUIRE(attrs != counts.end());
+  CHECK(attrs->second == 1);
+  for (const char* api :
+       {"hipMemPoolSetAccess", "hipMemSetAccess", "hipArrayCreate", "hipArray3DCreate",
+        "hipStreamSetAttribute", "hipMemGetAllocationGranularity"}) {
+    INFO("API: " << api);
+    CHECK(counts.count(api) == 0);
+  }
+
+  auto [rc, out] = hrr_playback_merged(hrr_single_process_archive(cap.path));
+  INFO("Replay output:\n" << out);
+  CHECK(rc == 0);
 }

@@ -430,15 +430,17 @@ static void serialize_kernel_launch(
   // whole archive incomplete so replay/validation can never silently treat a
   // capture missing a GPU launch (and its downstream writes) as faithful.
   if (arg_oversized || name_oversized || payload.size() > UINT32_MAX) {
-    LogPrintfError("[HRR capture] Kernel launch for '%s' cannot be serialized "
-                   "(payload=%zu bytes, oversized_by_value_arg=%s, name_len=%zu): dropping "
-                   "the event and marking the capture INCOMPLETE. Replay of this "
-                   "archive will be unfaithful (this launch and its effects are "
-                   "absent).",
-                   kernel_name, payload.size(), arg_oversized ? "yes" : "no",
-                   kernel_name_len);
-    hrr_cap::writer::mark_incomplete(
-        "kernel launch payload exceeds wire-format limits");
+    // log_printf truncates at 4 KiB, so the name goes last and is capped.
+    LogPrintfError(
+        "[HRR capture] Kernel launch cannot be serialized "
+        "(name_len=%zu, payload=%zu bytes, oversized_by_value_arg=%s): dropping "
+        "the event and marking the capture INCOMPLETE. Replay of this "
+        "archive will be unfaithful (this launch and its effects are "
+        "absent). Kernel: '%.1024s'",
+        kernel_name_len, payload.size(), arg_oversized ? "yes" : "no", kernel_name);
+    const char* reason = name_oversized ? "kernel name exceeds the uint16 wire-format length"
+                                        : "kernel launch payload exceeds wire-format limits";
+    hrr_cap::writer::mark_incomplete(reason);
     return;
   }
   hrr_cap::writer::write_event_raw(HRR_API_HIPMODULELAUNCHKERNEL,
@@ -1085,7 +1087,7 @@ hipError_t capture_hipHostUnregister(void* hostPtr) {
 
 // ---------------------------------------------------------------------------
 // hipMemPoolSetAttribute: value is void* to a scalar, stored inline in the low
-// bytes of value_u64 (an int for the three reuse policies, uint64_t otherwise).
+// bytes of value_u64 (an int32_t for the three reuse policies, uint64_t otherwise).
 // ---------------------------------------------------------------------------
 
 hipError_t capture_hipMemPoolSetAttribute(hipMemPool_t mem_pool,
@@ -1101,7 +1103,7 @@ hipError_t capture_hipMemPoolSetAttribute(hipMemPool_t mem_pool,
   const bool int_valued = attr == hipMemPoolReuseFollowEventDependencies ||
                           attr == hipMemPoolReuseAllowOpportunistic ||
                           attr == hipMemPoolReuseAllowInternalDependencies;
-  if (value) std::memcpy(&a.value_u64, value, int_valued ? sizeof(int) : sizeof(a.value_u64));
+  if (value) std::memcpy(&a.value_u64, value, int_valued ? sizeof(int32_t) : sizeof(a.value_u64));
   hrr_cap::writer::write_event_raw(HRR_API_HIPMEMPOOLSETATTRIBUTE, &a.hdr, sizeof(a));
   return r;
 }
@@ -1113,9 +1115,10 @@ hipError_t capture_hipMemPoolSetAttribute(hipMemPool_t mem_pool,
 hipError_t capture_hipMemPoolCreate(hipMemPool_t* mem_pool,
                                     const hipMemPoolProps* pool_props) {
   hipError_t r = g_real_table.hipMemPoolCreate_fn(mem_pool, pool_props);
+  if (r != hipSuccess) return r;
   hrr_args_hipMemPoolCreate a{};
   a.ret      = static_cast<int32_t>(r);
-  a.mem_pool = reinterpret_cast<uint64_t>(r == hipSuccess ? *mem_pool : nullptr);
+  a.mem_pool = reinterpret_cast<uint64_t>(*mem_pool);
   if (pool_props)
     std::memcpy(a.pool_props_bytes, pool_props, sizeof(a.pool_props_bytes));
   hrr_cap::writer::write_event_raw(HRR_API_HIPMEMPOOLCREATE, &a.hdr, sizeof(a));
@@ -1451,9 +1454,10 @@ hipError_t capture_hipMemcpy2DAsync(void* dst, size_t dpitch, const void* src,
 hipError_t capture_hipArrayCreate(hipArray_t* pHandle,
                                   const HIP_ARRAY_DESCRIPTOR* pAllocateArray) {
   hipError_t r = g_real_table.hipArrayCreate_fn(pHandle, pAllocateArray);
+  if (r != hipSuccess) return r;
   hrr_args_hipArrayCreate a{};
   a.ret     = static_cast<int32_t>(r);
-  a.pHandle = reinterpret_cast<uint64_t>(r == hipSuccess ? *pHandle : nullptr);
+  a.pHandle = reinterpret_cast<uint64_t>(*pHandle);
   if (pAllocateArray)
     std::memcpy(a.array_desc_bytes, pAllocateArray, sizeof(a.array_desc_bytes));
   hrr_cap::writer::write_event_raw(HRR_API_HIPARRAYCREATE, &a.hdr, sizeof(a));
@@ -1463,9 +1467,10 @@ hipError_t capture_hipArrayCreate(hipArray_t* pHandle,
 hipError_t capture_hipArray3DCreate(hipArray_t* array,
                                     const HIP_ARRAY3D_DESCRIPTOR* pAllocateArray) {
   hipError_t r = g_real_table.hipArray3DCreate_fn(array, pAllocateArray);
+  if (r != hipSuccess) return r;
   hrr_args_hipArray3DCreate a{};
   a.ret   = static_cast<int32_t>(r);
-  a.array = reinterpret_cast<uint64_t>(r == hipSuccess ? *array : nullptr);
+  a.array = reinterpret_cast<uint64_t>(*array);
   if (pAllocateArray)
     std::memcpy(a.array3d_desc_bytes, pAllocateArray, sizeof(a.array3d_desc_bytes));
   hrr_cap::writer::write_event_raw(HRR_API_HIPARRAY3DCREATE, &a.hdr, sizeof(a));
@@ -1479,6 +1484,7 @@ hipError_t capture_hipArray3DCreate(hipArray_t* array,
 hipError_t capture_hipStreamSetAttribute(hipStream_t stream, hipStreamAttrID attr,
                                          const hipStreamAttrValue* value) {
   hipError_t r = g_real_table.hipStreamSetAttribute_fn(stream, attr, value);
+  if (r != hipSuccess) return r;
   hrr_args_hipStreamSetAttribute a{};
   a.ret    = static_cast<int32_t>(r);
   a.stream = reinterpret_cast<uint64_t>(stream);
@@ -1496,6 +1502,7 @@ hipError_t capture_hipMemGetAllocationGranularity(size_t* granularity,
                                                    const hipMemAllocationProp* prop,
                                                    hipMemAllocationGranularity_flags option) {
   hipError_t r = g_real_table.hipMemGetAllocationGranularity_fn(granularity, prop, option);
+  if (r != hipSuccess) return r;
   hrr_args_hipMemGetAllocationGranularity a{};
   a.ret         = static_cast<int32_t>(r);
   a.granularity = reinterpret_cast<uint64_t>(granularity);
@@ -1512,6 +1519,7 @@ hipError_t capture_hipMemGetAllocationGranularity(size_t* granularity,
 hipError_t capture_hipMemPoolSetAccess(hipMemPool_t mem_pool,
                                        const hipMemAccessDesc* desc_list, size_t count) {
   hipError_t r = g_real_table.hipMemPoolSetAccess_fn(mem_pool, desc_list, count);
+  if (r != hipSuccess) return r;
   hrr_args_hipMemPoolSetAccess a{};
   a.ret      = static_cast<int32_t>(r);
   a.mem_pool = reinterpret_cast<uint64_t>(mem_pool);
@@ -1525,6 +1533,7 @@ hipError_t capture_hipMemPoolSetAccess(hipMemPool_t mem_pool,
 hipError_t capture_hipMemSetAccess(void* ptr, size_t size,
                                    const hipMemAccessDesc* desc, size_t count) {
   hipError_t r = g_real_table.hipMemSetAccess_fn(ptr, size, desc, count);
+  if (r != hipSuccess) return r;
   hrr_args_hipMemSetAccess a{};
   a.ret   = static_cast<int32_t>(r);
   a.ptr   = reinterpret_cast<uint64_t>(ptr);
