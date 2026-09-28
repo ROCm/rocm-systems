@@ -412,22 +412,22 @@ bool UpdateNumClustersFromKernel(const hip::Stream* stream, const amd::Kernel* k
 
   const amd::Device& device = stream->vdev()->device();
   amd::device::Kernel* devKernel = const_cast<device::Kernel*>(kernel->getDeviceKernel(device));
-  const uint32_t clusterX = devKernel->getClusterSize(0);
-  const uint32_t clusterY = devKernel->getClusterSize(1);
-  const uint32_t clusterZ = devKernel->getClusterSize(2);
+  const dim3 cluster(devKernel->getClusterSize(0), devKernel->getClusterSize(1),
+                     devKernel->getClusterSize(2));
   // If cluster size from device kernel is > 1, then we need to update the cluster params.
-  if (clusterX > 1 || clusterY > 1 || clusterZ > 1) {
-    if (!IsClusterDivisible(grid, clusterX, clusterY, clusterZ)) {
+  if (cluster.x > 1 || cluster.y > 1 || cluster.z > 1) {
+    if (!IsClusterDivisible(grid, cluster)) {
       LogPrintfError("This is not a valid Cluster Launch, please recheck parameters"
                      "global[0]: %d, global[1]: %d, global[2]: %d, local[0]: %d, local[1]: %d,"
                      "local[2] :%d, numClusters[0]: %d, numClusters[1]: %d, numClusters[2]: %d",
                       ndrange.global()[0], ndrange.global()[1], ndrange.global()[2],
                       ndrange.local()[0], ndrange.local()[1], ndrange.local()[2],
-                      clusterX, clusterY, clusterZ);
+                      cluster.x, cluster.y, cluster.z);
       return false;
     }
-    ndrange.setCluster(amd::NDRange8(static_cast<uint8_t>(clusterX), static_cast<uint8_t>(clusterY),
-                                     static_cast<uint8_t>(clusterZ)));
+    ndrange.setCluster(amd::NDRange8(static_cast<uint8_t>(cluster.x),
+                                     static_cast<uint8_t>(cluster.y),
+                                     static_cast<uint8_t>(cluster.z)));
   }
   return true;
 }
@@ -615,9 +615,10 @@ hipError_t hipModuleLaunchKernel(hipFunction_t f, uint32_t gridDimX, uint32_t gr
   };
   amd::NDRangeContainer ndrange(3);
   amd::NDRange32 grid(1, 1, 1);
-  hipError_t status = MakeLaunchNDRangeFromGrid(ndrange, grid, gridDimX, gridDimY, gridDimZ,
-                                                blockDimX, blockDimY, blockDimZ, 0, 0, 0, 1, 1, 1,
-                                                sharedMemBytes, *device, kRules);
+  hipError_t status =
+      MakeLaunchNDRangeFromGrid(ndrange, grid, {gridDimX, gridDimY, gridDimZ},
+                                {blockDimX, blockDimY, blockDimZ}, kNoRemainder, kNoCluster,
+                                sharedMemBytes, *device, kRules);
   if (status != hipSuccess) {
     HIP_RETURN(status);
   }
@@ -657,8 +658,9 @@ hipError_t hipExtModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX,
   amd::NDRangeContainer ndrange(3);
   amd::NDRange32 grid(1, 1, 1);
   hipError_t status = MakeLaunchNDRangeFromGlobal(
-      ndrange, grid, globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ, localWorkSizeX,
-      localWorkSizeY, localWorkSizeZ, 1, 1, 1, sharedMemBytes, *device, kRules);
+      ndrange, grid, {globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ},
+      {localWorkSizeX, localWorkSizeY, localWorkSizeZ}, kNoCluster, sharedMemBytes, *device,
+      kRules);
   if (status != hipSuccess) {
     HIP_RETURN(status);
   }
@@ -685,8 +687,9 @@ hipError_t hipHccModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX,
   // ihipLaunchKernel_validate.
   amd::NDRangeContainer ndrange(3);
   amd::NDRange32 grid(1, 1, 1);
-  MakeLaunchNDRangeFromGlobal(ndrange, grid, globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ,
-                              blockDimX, blockDimY, blockDimZ, 1, 1, 1, sharedMemBytes, *device);
+  MakeLaunchNDRangeFromGlobal(ndrange, grid, {globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ},
+                              {blockDimX, blockDimY, blockDimZ}, kNoCluster, sharedMemBytes,
+                              *device);
 
   HIP_RETURN(ihipModuleLaunchKernel(f, ndrange, grid, sharedMemBytes, hStream, kernelParams, extra,
                                     startEvent, stopEvent));
@@ -719,9 +722,10 @@ hipError_t hipModuleLaunchCooperativeKernel(hipFunction_t f, unsigned int gridDi
   };
   amd::NDRangeContainer ndrange(3);
   amd::NDRange32 grid(1, 1, 1);
-  hipError_t status = MakeLaunchNDRangeFromGrid(ndrange, grid, gridDimX, gridDimY, gridDimZ,
-                                                blockDimX, blockDimY, blockDimZ, 0, 0, 0, 1, 1, 1,
-                                                sharedMemBytes, *device, kRules);
+  hipError_t status =
+      MakeLaunchNDRangeFromGrid(ndrange, grid, {gridDimX, gridDimY, gridDimZ},
+                                {blockDimX, blockDimY, blockDimZ}, kNoRemainder, kNoCluster,
+                                sharedMemBytes, *device, kRules);
   if (status != hipSuccess) {
     HIP_RETURN(status);
   }
@@ -824,9 +828,9 @@ hipError_t ihipModuleLaunchCooperativeKernelMultiDevice(hipFunctionLaunchParams*
     amd::NDRangeContainer ndrange(3);
     amd::NDRange32 grid(1, 1, 1);
     hipError_t status = MakeLaunchNDRangeFromGrid(
-        ndrange, grid, launch.gridDimX, launch.gridDimY, launch.gridDimZ, launch.blockDimX,
-        launch.blockDimY, launch.blockDimZ, 0, 0, 0, 1, 1, 1, launch.sharedMemBytes, device,
-        kRules);
+        ndrange, grid, {launch.gridDimX, launch.gridDimY, launch.gridDimZ},
+        {launch.blockDimX, launch.blockDimY, launch.blockDimZ}, kNoRemainder, kNoCluster,
+        launch.sharedMemBytes, device, kRules);
     if (status != hipSuccess) {
       return status;
     }
@@ -964,9 +968,8 @@ hipError_t hipLaunchCooperativeKernel_common(const void* f, dim3 gridDim, dim3 b
   };
   amd::NDRangeContainer ndrange(3);
   amd::NDRange32 grid(1, 1, 1);
-  hipError_t status = MakeLaunchNDRangeFromGrid(ndrange, grid, gridDim.x, gridDim.y, gridDim.z,
-                                                blockDim.x, blockDim.y, blockDim.z, 0, 0, 0, 1, 1,
-                                                1, sharedMemBytes, *device, kRules);
+  hipError_t status = MakeLaunchNDRangeFromGrid(ndrange, grid, gridDim, blockDim, kNoRemainder,
+                                                kNoCluster, sharedMemBytes, *device, kRules);
   if (status != hipSuccess) {
     return status;
   }
@@ -1440,9 +1443,9 @@ hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f
   amd::NDRangeContainer ndrange(3);
   amd::NDRange32 grid(1, 1, 1);
   hipError_t configStatus = MakeLaunchNDRangeFromGrid(
-      ndrange, grid, config->gridDimX, config->gridDimY, config->gridDimZ, config->blockDimX,
-      config->blockDimY, config->blockDimZ, 0, 0, 0, 1, 1, 1, config->sharedMemBytes, *drvDevice,
-      kRules);
+      ndrange, grid, {config->gridDimX, config->gridDimY, config->gridDimZ},
+      {config->blockDimX, config->blockDimY, config->blockDimZ}, kNoRemainder, kNoCluster,
+      config->sharedMemBytes, *drvDevice, kRules);
   if (configStatus != hipSuccess) {
     HIP_RETURN(configStatus);
   }
@@ -1498,10 +1501,10 @@ hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f
   // the cluster dims themselves stay unvalidated here.
   amd::NDRangeContainer ndrangeCluster(3);
   amd::NDRange32 gridCluster(1, 1, 1);
-  MakeLaunchNDRangeFromGrid(ndrangeCluster, gridCluster, config->gridDimX, config->gridDimY,
-                            config->gridDimZ, config->blockDimX, config->blockDimY,
-                            config->blockDimZ, 0, 0, 0, clusterDim.x, clusterDim.y, clusterDim.z,
-                            config->sharedMemBytes, *drvDevice);
+  MakeLaunchNDRangeFromGrid(ndrangeCluster, gridCluster,
+                            {config->gridDimX, config->gridDimY, config->gridDimZ},
+                            {config->blockDimX, config->blockDimY, config->blockDimZ},
+                            kNoRemainder, clusterDim, config->sharedMemBytes, *drvDevice);
 
   HIP_RETURN(ihipModuleLaunchKernel(f, ndrangeCluster, gridCluster, config->sharedMemBytes, hStream,
                                     kernelParams, extra, nullptr, nullptr, 0, 0, 0, 0, 0, 0, 0,
