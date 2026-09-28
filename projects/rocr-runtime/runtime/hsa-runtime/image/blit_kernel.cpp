@@ -297,6 +297,9 @@ hsa_status_t BlitKernel::CopyBufferToImage(
   KernelArgs* args = (KernelArgs*)Allocate(dst_image_view->component, sizeof(KernelArgs));
   if (args == nullptr) {
     assert(false && "Failed to allocate kernel args");
+    if (&dst_image != dst_image_view) {
+      Image::Destroy(dst_image_view);
+    }
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
   memset(args, 0, sizeof(KernelArgs));
@@ -411,6 +414,9 @@ hsa_status_t BlitKernel::CopyImageToBuffer(
   KernelArgs* args = (KernelArgs*)Allocate(src_image_view->component, sizeof(KernelArgs));
   if (args == nullptr) {
     assert(false && "Failed to allocate kernel args");
+    if (&src_image != src_image_view) {
+      Image::Destroy(src_image_view);
+    }
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
   memset(args, 0, sizeof(KernelArgs));
@@ -490,11 +496,17 @@ hsa_status_t BlitKernel::CopyImage(
 
     status = ConvertImage(dst_image, &dst_image_view);
     if (HSA_STATUS_SUCCESS != status) {
+      if (&src_image != src_image_view) {
+        Image::Destroy(src_image_view);
+      }
       return status;
     }
 
     if (dst_image_view == nullptr) {
       assert(false && "dst_image_view is NULL");
+      if (&src_image != src_image_view) {
+        Image::Destroy(src_image_view);
+      }
       return HSA_STATUS_ERROR;
     }
 
@@ -537,6 +549,12 @@ hsa_status_t BlitKernel::CopyImage(
   KernelArgs* args = (KernelArgs*)Allocate(dst_image_view->component, sizeof(KernelArgs));
   if (args == nullptr) {
     assert(false && "Failed to allocate kernel args");
+    if (&src_image != src_image_view) {
+      Image::Destroy(src_image_view);
+    }
+    if (&dst_image != dst_image_view) {
+      Image::Destroy(dst_image_view);
+    }
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
   memset(args, 0, sizeof(KernelArgs));
@@ -923,6 +941,10 @@ hsa_status_t BlitKernel::ConvertImage(const Image& original_image,
       static_cast<hsa_ext_image_channel_order32_t>(converted_order)};
 
   Image* new_image_handle = Image::Create(original_image.component);
+  if (new_image_handle == nullptr) {
+    assert(false && "Failed to allocate converted image view");
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
   *new_image_handle=original_image;
   new_image_handle->desc.geometry = converted_geometry;
 
@@ -930,6 +952,7 @@ hsa_status_t BlitKernel::ConvertImage(const Image& original_image,
                             ->image_manager(new_image_handle->component)
                             ->ModifyImageSrd(*new_image_handle, new_format);
   if (status != HSA_STATUS_SUCCESS) {
+    Image::Destroy(new_image_handle);
     return status;
   }
 
