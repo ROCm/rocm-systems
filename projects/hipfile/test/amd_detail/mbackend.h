@@ -21,7 +21,7 @@ struct MBackend : Backend {
                 (const, override));
     MOCK_METHOD(ssize_t, io,
                 (hipFile::IoType type, std::shared_ptr<IFile>, std::shared_ptr<IBuffer>, size_t, hoff_t,
-                 hoff_t),
+                 hoff_t, hipStream_t),
                 (override));
     MOCK_METHOD(void, async_io,
                 (hipFile::IoType type, std::shared_ptr<IFile>, std::shared_ptr<IBuffer>, size_t *, hoff_t *,
@@ -33,7 +33,7 @@ struct MBackend : Backend {
                 (override));
     MOCK_METHOD(ssize_t, _io_impl,
                 (hipFile::IoType type, std::shared_ptr<IFile>, std::shared_ptr<IBuffer>, size_t, hoff_t,
-                 hoff_t),
+                 hoff_t, hipStream_t),
                 (override));
 };
 
@@ -43,7 +43,7 @@ struct MBackendWithFallback : BackendWithFallback {
                 (const, override));
     MOCK_METHOD(ssize_t, _io_impl,
                 (IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer, size_t size,
-                 hoff_t file_offset, hoff_t buffer_offset),
+                 hoff_t file_offset, hoff_t buffer_offset, hipStream_t copy_stream),
                 (override));
     MOCK_METHOD(void, enqueueAsyncIo,
                 (hipFile::IoType type, std::shared_ptr<IFile>, std::shared_ptr<IBuffer>, size_t *, hoff_t *,
