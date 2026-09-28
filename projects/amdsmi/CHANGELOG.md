@@ -37,6 +37,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Added unified `amdsmi_get_link_topology()` API on baremetal**.  
   - Returns link weight, status, type, hop count, and framebuffer-sharing data.
   - Matches the existing host interface; includes Python and Rust bindings.
+  - Exports `AmdSmiLinkStatus` in Python and `AmdsmiLinkStatusT` in Rust for status interpretation.
   - Self pair (same GPU): `INTERNAL`, `ENABLED`, zero hops and weight, `fb_sharing=1`.
   - Migration from component APIs on baremetal:
     - `amdsmi_topo_get_link_type(gpu, gpu)` reports PCIe and 2 hops instead.

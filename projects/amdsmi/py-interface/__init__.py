@@ -334,6 +334,7 @@ from .amdsmi_interface import AmdSmiFreqInd
 from .amdsmi_interface import AmdSmiXgmiStatus
 from .amdsmi_interface import AmdSmiMemoryPageStatus
 from .amdsmi_interface import AmdSmiLinkType
+from .amdsmi_interface import AmdSmiLinkStatus
 from .amdsmi_interface import AmdSmiUtilizationCounterType
 from .amdsmi_interface import AmdSmiProcessorType
 from .amdsmi_interface import AmdSmiVirtualizationMode

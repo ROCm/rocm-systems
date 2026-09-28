@@ -693,6 +693,13 @@ class AmdSmiLinkType(IntEnum):
     AMDSMI_LINK_TYPE_UNKNOWN = amdsmi_wrapper.AMDSMI_LINK_TYPE_UNKNOWN
 
 
+class AmdSmiLinkStatus(IntEnum):
+    AMDSMI_LINK_STATUS_ENABLED = amdsmi_wrapper.AMDSMI_LINK_STATUS_ENABLED
+    AMDSMI_LINK_STATUS_DISABLED = amdsmi_wrapper.AMDSMI_LINK_STATUS_DISABLED
+    AMDSMI_LINK_STATUS_INACTIVE = amdsmi_wrapper.AMDSMI_LINK_STATUS_INACTIVE
+    AMDSMI_LINK_STATUS_ERROR = amdsmi_wrapper.AMDSMI_LINK_STATUS_ERROR
+
+
 class AmdSmiUtilizationCounterType(IntEnum):
     COARSE_GRAIN_GFX_ACTIVITY = amdsmi_wrapper.AMDSMI_COARSE_GRAIN_GFX_ACTIVITY
     COARSE_GRAIN_MEM_ACTIVITY = amdsmi_wrapper.AMDSMI_COARSE_GRAIN_MEM_ACTIVITY
@@ -4364,7 +4371,7 @@ def amdsmi_get_link_topology(
     Returns:
         dict: ``{"weight": int, "link_status": int, "link_type": int,
         "num_hops": int, "fb_sharing": int}``.
-        Status/type use ``AMDSMI_LINK_STATUS_*``/``AMDSMI_LINK_TYPE_*`` values.
+        Interpret status/type with :class:`AmdSmiLinkStatus`/:class:`AmdSmiLinkType`.
 
     Note:
         Baremetal behavior:
