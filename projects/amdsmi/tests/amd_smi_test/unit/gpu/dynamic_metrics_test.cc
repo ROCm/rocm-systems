@@ -198,9 +198,10 @@ TEST(GpuUnit, XCPMetricDynamicVersionSupported) {
 
 // gpu_metrics versions we can model must build an object; versions we cannot
 // must classify as kGpuMetricNone (no object) so callers get NOT_SUPPORTED
-// rather than corrupt data. APUs expose the v2.x family: v2.0-v2.3 are
+// rather than corrupt data. APUs expose the v2.x family: v2.1-v2.3 are
 // byte-prefix subsets read with the v2.4 layout, while v2.4 and v3.0 are exact
-// matches -- all are supported. Guard that contract here.
+// matches. v2.0 orders its fields differently (system_clock_counter before the
+// temperature block), so it is not modeled. Guard that contract here.
 TEST(GpuUnit, GPUMetricVersionSupportClassification) {
   PRINT_VERBOSITY();
   const bool is_partition_metrics = false;
@@ -211,10 +212,11 @@ TEST(GpuUnit, GPUMetricVersionSupportClassification) {
     bool recognized;
   };
   const VersionCase cases[] = {
-      {1, 4, true},                                               // GPU metrics positive control
-      {2, 0, true},  {2, 1, true},  {2, 2, true},  {2, 3, true},  // APU v2.x prefix subsets
-      {2, 4, true},  {3, 0, true},                                // APU exact matches
-      {2, 5, false}, {4, 0, false}, {5, 0, false},                // beyond what we model
+      {1, 4, true},                                 // GPU metrics positive control
+      {2, 1, true},  {2, 2, true},  {2, 3, true},   // APU v2.x prefix subsets
+      {2, 4, true},  {3, 0, true},                  // APU exact matches
+      {2, 0, false},                                // v2.0: different field order
+      {2, 5, false}, {4, 0, false}, {5, 0, false},  // beyond what we model
   };
 
   for (const auto& c : cases) {
@@ -257,7 +259,6 @@ using ApuMetricsV30 = amd::smi::AMDApuMetrics_v30_t;
 // Declared table sizes of the APU revisions the v2.4 layout covers: each
 // revision stops at a different field, so its declared size is the offset of
 // the first field it does not define.
-constexpr std::size_t kApuV20Size = offsetof(ApuMetrics, m_padding) + sizeof(uint16_t);
 constexpr std::size_t kApuV21Size = offsetof(ApuMetrics, m_indep_throttle_status);
 constexpr std::size_t kApuV22Size = offsetof(ApuMetrics, m_average_temperature_gfx);
 constexpr std::size_t kApuV23Size = offsetof(ApuMetrics, m_average_cpu_voltage);
@@ -332,7 +333,6 @@ TEST(GpuUnit, APUMetricsShortRevisionReadsTrailingFieldsAsNotApplicable) {
     bool has_average_voltage;        // added in v2.4
   };
   const ReadCase cases[] = {
-      {"v2_0", 0, kApuV20Size, false, false, false},
       {"v2_1", 1, kApuV21Size, false, false, false},
       {"v2_2", 2, kApuV22Size, true, false, false},
       {"v2_3", 3, kApuV23Size, true, true, false},

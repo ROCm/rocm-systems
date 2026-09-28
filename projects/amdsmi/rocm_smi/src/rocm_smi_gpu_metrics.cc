@@ -352,9 +352,11 @@ const AMDGpuMetricsUnitTypeTranslationTbl_t amdgpu_metrics_unit_type_translation
 //
 // Resolve a metrics header to its version flag without logging. Minor revisions
 // are byte-prefix supersets of the newest struct we model, so an APU exposing
-// gpu_metrics v2.0-v2.3 is read with the v2.4 layout (its extra trailing fields
-// report as not-applicable). Returns kGpuMetricNone when the version cannot be
-// modeled.
+// gpu_metrics v2.1-v2.3 is read with the v2.4 layout (its extra trailing fields
+// report as not-applicable). v2.0 is excluded: it stores system_clock_counter
+// right after the header instead of after the temperature/utilization block, so
+// it is not a byte-prefix of v2.1+ and is left unmodeled. Returns kGpuMetricNone
+// when the version cannot be modeled.
 AMDGpuMetricVersionFlags_t lookup_header_flag_version(
     const AMDGpuMetricsHeader_v1_t& metrics_header, bool is_partition_metrics) {
   const auto flag_version = join_metrics_version(metrics_header);
@@ -366,7 +368,8 @@ AMDGpuMetricVersionFlags_t lookup_header_flag_version(
     if (metrics_header.m_format_revision == 1 && metrics_header.m_content_revision >= 9) {
       return AMDGpuMetricVersionFlags_t::kGpuMetricDynV19Plus;
     }
-    if (metrics_header.m_format_revision == 2 && metrics_header.m_content_revision <= 4) {
+    if (metrics_header.m_format_revision == 2 && metrics_header.m_content_revision >= 1 &&
+        metrics_header.m_content_revision <= 4) {
       return AMDGpuMetricVersionFlags_t::kApuMetricV24;
     }
   } else {
