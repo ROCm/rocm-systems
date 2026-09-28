@@ -47,6 +47,30 @@ library:
   Unit_hipKernelSetAttributeForDevice_Negative_Parameters:
     <<: *level_2
     tags: [module]
+  Unit_hipKernelSetAttributeForDevice_Positive_Values:
+    <<: *level_2
+    tags: [module]
+  Unit_hipKernelSetAttributeForDevice_Positive_LaunchLimit:
+    <<: *level_2
+    tags: [module]
+  Unit_hipKernelSetAttributeForDevice_Positive_ClusterLaunch:
+    <<: *level_2
+    tags: [module]
+  Unit_hipKernelSetAttributeForDevice_Positive_CrossDevice:
+    <<: *level_2
+    tags: [module]
+  Unit_hipKernelSetAttributeForDevice_Positive_FunctionOverride:
+    <<: *level_2
+    tags: [module]
+  Unit_hipKernelSetAttributeForDevice_Negative_Parameters:
+    <<: *level_2
+    tags: [module]
+  Unit_hipKernelSetCacheConfig_Positive:
+    <<: *level_2
+    tags: [module]
+  Unit_hipKernelSetCacheConfig_Negative:
+    <<: *level_2
+    tags: [module]
   Unit_hipKernelGetFunction_Negative_Parameters:
     <<: *level_default
     tags: [module]
