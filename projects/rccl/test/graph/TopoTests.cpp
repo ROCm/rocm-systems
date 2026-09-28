@@ -706,6 +706,46 @@ TEST_F(TopoTest, MloPartSiblings_LinkedWhenXgmiUnreported) {
 
   ncclTopoFree(built);
 }
+
+// A one-sided XGMI report (partition 0 names partition 1, not the reverse) leaves the pair with a
+// link in one direction only, since ncclTopoAddXGMI() connects just the reporting DEV for a GPU
+// target. Filling in the missing direction must not touch the reported one:
+// ncclTopoConnectNodes() accumulates, so topping it up would leave 0->1 at two XGMI widths
+// against 1->0's one, and the two ranks would then read different bandwidths off their paths.
+TEST_F(TopoTest, MloPartSiblings_OneSidedXgmiKeepsBothDirectionsAtOneWidth) {
+  const uint64_t host = 0xc3;
+  struct ncclXmlNode* cpu = addSystemCpu(host);
+  struct ncclXmlNode* pci = addGpuPci(cpu, "0000:0c:00.0", "gfx942", 0, 0, /*mloPart=*/0);
+  struct ncclXmlNode* gpu0 = nullptr;
+  ASSERT_EQ(xmlGetSub(pci, "gpu", &gpu0), ncclSuccess);
+  ASSERT_NE(gpu0, nullptr);
+  addGpuUnderPci(pci, "gfx942", 1, 1, /*mloPart=*/1);
+  // Only partition 0 reports the link; partition 1 gets no <xgmi> entry.
+  addGpuLink(gpu0, "0000:0c:00.1", 1, PCI_ACCELERATOR_CLASS);
+
+  struct ncclTopoSystem* built = nullptr;
+  ASSERT_EQ(ncclTopoGetSystemFromXml(xml, &built, host), ncclSuccess);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nodes[DEV].count, 2);
+  ASSERT_EQ(built->nodes[GPU].count, 2);
+
+  struct ncclTopoLink* l01 = findLink(built->nodes[DEV].nodes, built->nodes[DEV].nodes + 1);
+  struct ncclTopoLink* l10 = findLink(built->nodes[DEV].nodes + 1, built->nodes[DEV].nodes);
+  ASSERT_NE(l01, nullptr);
+  ASSERT_NE(l10, nullptr);
+  EXPECT_FLOAT_EQ(l01->bw, ncclTopoXGMISpeed("gfx942"));
+  EXPECT_FLOAT_EQ(l10->bw, ncclTopoXGMISpeed("gfx942"));
+
+  ASSERT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
+  struct ncclTopoLinkList* p01 = built->nodes[GPU].nodes[0].paths[GPU] + 1;
+  struct ncclTopoLinkList* p10 = built->nodes[GPU].nodes[1].paths[GPU];
+  EXPECT_EQ(p01->type, PATH_NVL);
+  EXPECT_EQ(p10->type, PATH_NVL);
+  EXPECT_FLOAT_EQ(p01->bw, p10->bw);
+
+  ncclTopoFree(built);
+}
+
 // GDR for an MLOPart partition is a property of the physical GPU: every CPX partition is a HIP
 // logical device behind one PCI function, so a NIC one switch away is PATH_PXB for all of them and
 // GDR must be enabled for all of them. Before the rework ncclTopoCheckGdr() refused GDR to any
