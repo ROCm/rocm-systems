@@ -2054,6 +2054,9 @@ memory:
   Unit_hipMemPrefetchAsync_Negative_Parameters:
     <<: *level_2
     tags: [query, P1]
+  Unit_hipMemPrefetchAsync_WaitsForPrecedingStreamWork:
+    <<: *level_2
+    tags: [query]
   Unit_hipMemPrefetchBatchAsync_SingleOperationSingleLocation:
     <<: *level_2
     tags: [query]

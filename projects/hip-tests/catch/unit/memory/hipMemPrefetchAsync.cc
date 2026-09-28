@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include <chrono>
 #include <vector>
 
 #include <hip_test_common.hh>
@@ -107,6 +108,44 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsync_Rounding_Behavior) {
                                     3 * kPageSize));
   REQUIRE((rounded_up == 3 * kPageSize ? device : hipInvalidDeviceId) ==
           static_cast<int>(attribute));
+}
+
+__global__ void WaitForHostRelease(int* release) {
+  while (__hip_atomic_load(release, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_SYSTEM) == 0) {
+  }
+}
+
+// The kernel spins until the host sets the release flag, so hipStreamQuery must report
+// hipErrorNotReady until that happens.
+HIP_TEST_CASE(Unit_hipMemPrefetchAsync_WaitsForPrecedingStreamWork) {
+  const auto supported_devices = GetDevicesWithPrefetchSupport();
+  if (supported_devices.empty()) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+  }
+  const auto device = supported_devices.front();
+  HIP_CHECK(hipSetDevice(device));
+  const auto stream_type = GENERATE(Streams::nullstream, Streams::created);
+  StreamGuard sg(stream_type);
+  LinearAllocGuard<int> release(LinearAllocs::hipHostMalloc, sizeof(int));
+  *release.ptr() = 0;
+  LinearAllocGuard<uint8_t> alloc(LinearAllocs::hipMallocManaged, kPageSize);
+  HIP_CHECK(hipMemPrefetchAsync(alloc.ptr(), kPageSize, device, sg.stream()));
+  HIP_CHECK(hipStreamSynchronize(sg.stream()));
+
+  WaitForHostRelease<<<1, 1, 0, sg.stream()>>>(release.ptr());
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipMemPrefetchAsync(alloc.ptr(), kPageSize, hipCpuDeviceId, sg.stream()));
+
+  auto query_while_blocked = hipErrorNotReady;
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{1};
+  while (query_while_blocked == hipErrorNotReady && std::chrono::steady_clock::now() < deadline) {
+    query_while_blocked = hipStreamQuery(sg.stream());
+  }
+
+  __atomic_store_n(release.ptr(), 1, __ATOMIC_RELEASE);
+  HIP_CHECK(hipStreamSynchronize(sg.stream()));
+
+  REQUIRE(query_while_blocked == hipErrorNotReady);
 }
 
 HIP_TEST_CASE(Unit_hipMemPrefetchAsync_Negative_Parameters) {
