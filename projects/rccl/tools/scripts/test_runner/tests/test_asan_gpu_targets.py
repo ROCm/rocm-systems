@@ -137,6 +137,7 @@ class AsanGpuTargetsTest(unittest.TestCase):
 
 
 @unittest.skipUnless(shutil.which("cmake"), "cmake not available on PATH")
+@unittest.skipUnless(ROCSHMEM_MODULE.exists(), "projects/rocshmem not in this checkout")
 class RocshmemAsanGpuTargetsTest(AsanGpuTargetsTest):
     """Every case above, run against the rocSHMEM copy of the policy."""
 
