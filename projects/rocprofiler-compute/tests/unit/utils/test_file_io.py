@@ -12,10 +12,12 @@ import pytest
 
 from utils import file_io
 from utils.file_io import (
+    build_node_to_gpu_map,
     create_df_kernel_top_stats,
     create_df_pmc,
     is_single_panel_config,
     load_kernel_short_names,
+    load_node_to_gpu_map,
     rank_kernels_by_total_duration,
     validate_kernel_filter_ids,
 )
@@ -40,7 +42,7 @@ NATIVE_KERNEL_SYMBOLS_CSV = (
 )
 
 
-def write_native_process(workload_dir, fbase, pid, counters, dispatch_ids):
+def write_native_process(workload_dir, fbase, pid, counters, dispatch_ids, gpu_id=0):
     """Write one process's native CSVs; counters are (dispatch_id, name, value)."""
     common.write_gzip_csv(
         workload_dir / f"counters_{fbase}_{pid}.csv.gz",
@@ -51,7 +53,7 @@ def write_native_process(workload_dir, fbase, pid, counters, dispatch_ids):
         workload_dir / f"dispatch_{fbase}_{pid}.csv.gz",
         NATIVE_DISPATCH_HEADER
         + "".join(
-            f"{d},0,7,256,64,0,0,{d * 100},{d * 100 + 50},{d + 500}\n"
+            f"{d},{gpu_id},7,256,64,0,0,{d * 100},{d * 100 + 50},{d + 500}\n"
             for d in dispatch_ids
         ),
     )
@@ -444,6 +446,60 @@ def test_create_df_pmc_errors_when_no_native_counter_joins(tmp_path) -> None:
 
     with pytest.raises(SystemExit):
         create_df_pmc(str(tmp_path), verbose=0)
+
+
+def test_create_df_pmc_gives_processes_on_one_gpu_one_gpu_id(tmp_path) -> None:
+    """The dispatch CSV carries the node id, which every process shares."""
+    write_native_process(
+        tmp_path, "pmc_perf_0", 100, [(1, "SQ_WAVES", 4)], [1], gpu_id=2
+    )
+    write_native_process(
+        tmp_path, "pmc_perf_0", 200, [(1, "SQ_WAVES", 8)], [1], gpu_id=2
+    )
+
+    df = create_df_pmc(str(tmp_path), verbose=0)
+
+    assert df["GPU_ID"].tolist() == [0, 0]
+
+
+def test_create_df_pmc_numbers_gpus_in_node_order_across_processes(tmp_path) -> None:
+    """GPU ids follow node ids, not the order processes are read in."""
+    write_native_process(
+        tmp_path, "pmc_perf_0", 100, [(1, "SQ_WAVES", 4)], [1], gpu_id=3
+    )
+    write_native_process(
+        tmp_path, "pmc_perf_0", 200, [(1, "SQ_WAVES", 8)], [1], gpu_id=2
+    )
+
+    df = create_df_pmc(str(tmp_path), verbose=0)
+
+    assert dict(zip(df["SQ_WAVES"], df["GPU_ID"])) == {4: 1, 8: 0}
+
+
+# Native agents CSV
+# =============================================================================
+
+
+def test_build_node_to_gpu_map_numbers_gpus_in_node_order() -> None:
+    agents = pd.DataFrame({"node_id": [5, 2, 3]})
+
+    assert build_node_to_gpu_map(agents) == {2: 0, 3: 1, 5: 2}
+
+
+def test_load_node_to_gpu_map_reads_the_agents_csv(tmp_path) -> None:
+    agents_csv = tmp_path / "agents_pmc_perf_0_100.csv.gz"
+    common.write_gzip_csv(
+        agents_csv,
+        "node_id,logical_node_id,name,product_name\n"
+        '3,1,"gfx942","AMD Instinct MI300X"\n'
+        '2,0,"gfx942","AMD Instinct MI300X"\n',
+    )
+
+    assert load_node_to_gpu_map(agents_csv) == {2: 0, 3: 1}
+
+
+def test_load_node_to_gpu_map_missing_file_maps_nothing(tmp_path) -> None:
+    assert load_node_to_gpu_map(tmp_path / "agents_pmc_perf_0_100.csv.gz") == {}
 
 
 def test_load_kernel_short_names_dedupes_repeated_symbols(tmp_path):

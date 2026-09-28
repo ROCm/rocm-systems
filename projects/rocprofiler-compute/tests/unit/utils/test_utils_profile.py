@@ -1154,3 +1154,15 @@ def test_augment_marker_csv_handles_unknown_schema(tmp_path):
     _augment_marker_csv(str(src), str(dst))
 
     assert dst.read_bytes() == src.read_bytes()
+
+
+def test_keep_native_artifacts_keeps_the_agents_file(tmp_path):
+    """The agents CSV is named like its siblings in the workload directory."""
+    source_dir = tmp_path / "out"
+    source_dir.mkdir()
+    (source_dir / "1234_agents.csv.gz").write_bytes(b"")
+
+    utils_profile.keep_native_artifacts(source_dir, tmp_path, "pmc_perf_0")
+
+    assert (tmp_path / "agents_pmc_perf_0_1234.csv.gz").is_file()
+    assert not (source_dir / "1234_agents.csv.gz").exists()
