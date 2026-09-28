@@ -923,10 +923,6 @@ private:
                 &track_id_count_result::count);
     }
 
-    // Per-device (agent) breakdown of PMC/counter track samples. A track's
-    // total event_count can span multiple physical devices (e.g. two GPUs
-    // both writing "device_temp"); this lets ph_ctx split such a track into
-    // one logical track per device.
     void initialize_track_agent_count_statement()
     {
         auto query = queries::select::table_select_query{}
@@ -1118,12 +1114,6 @@ private:
     {
         const auto a = std::string(alias);
 
-        // `base` is a mutable, shared builder -- every .where()/.and_where()
-        // call below mutates the same underlying stream. Capture the
-        // unfiltered SQL now, before any of that happens, for later reuse
-        // building the UNION-based track_filtered/track_and_time_filtered
-        // queries (get_query_string() after those calls would otherwise
-        // pick up their leftover WHERE clause).
         const auto unfiltered_sql = base.get_query_string();
 
         out.base = m_backend->create_read_statement_executor<timeline_event_result>(
@@ -1154,21 +1144,6 @@ private:
                 &timeline_event_result::tid,
                 &timeline_event_result::track_id);
 
-        // track_filtered/track_and_time_filtered used to express "own track OR
-        // sample-linked track" as a single OR spanning two tables inside a
-        // LEFT JOIN. SQLite can't use an index for that (confirmed via
-        // EXPLAIN QUERY PLAN: always a full table SCAN, regardless of any
-        // added index or time bounds). Rewritten as a UNION ALL of two
-        // independently-indexable branches instead: verified on a 5.9GB
-        // trace this drops a ~1.7s query to ~4ms (with the (nid,pid,tid)
-        // index from initialize_track_topology_indexes()). UNION ALL (not
-        // UNION) is safe here because the two branches are always disjoint
-        // in every trace observed: rocpd_sample never actually references a
-        // region/kernel_dispatch/memory_allocate/memory_copy event_id (only
-        // PMC/counter events populate it), so the S.track_id branch matches
-        // zero of the same rows as the (nid,pid,tid) branch. UNION ALL skips
-        // the DISTINCT temp-b-tree dedup pass, which otherwise roughly
-        // doubles the cost of reading a whole large track (measured).
         const auto own_track_where =
             a + ".nid = ? AND " + a + ".pid = ? AND " + a + ".tid = ?";
 

@@ -224,7 +224,7 @@ TEST(WaveDebugTest, UnmappedInstructionFetchReportsMemoryViolationAtBranchTarget
   constexpr uint64_t kBranchTarget = 0x100;
   std::vector<uint8_t> kernel_page(amdgpu::GpuMemory::PAGE_SIZE);
   KfdProcess::PageTable page_table;
-  std::shared_mutex page_table_mutex;
+  util::DistributedSharedMutex page_table_mutex;
   page_table[kKernelAddr >> amdgpu::GpuMemory::PAGE_SHIFT] = {kernel_page.data(),
                                                               amdgpu::Mtype::RW};
   fx.gpu_mem.register_process(kProcessId, &page_table, &page_table_mutex);
@@ -263,7 +263,7 @@ TEST(WaveDebugTest, UnmappedScalarLoadReportsMemoryViolationAfterInstruction) {
   constexpr uint32_t kProcessId = 7;
   std::vector<uint8_t> kernel_page(amdgpu::GpuMemory::PAGE_SIZE);
   KfdProcess::PageTable page_table;
-  std::shared_mutex page_table_mutex;
+  util::DistributedSharedMutex page_table_mutex;
   page_table[kKernelAddr >> amdgpu::GpuMemory::PAGE_SHIFT] = {kernel_page.data(),
                                                               amdgpu::Mtype::RW};
   fx.gpu_mem.register_process(kProcessId, &page_table, &page_table_mutex);
@@ -702,7 +702,7 @@ TEST(WaveDebugTest, DeclinedMemoryViolationStillIssuesTheAccess) {
   std::vector<uint8_t> kernel_page(kPageSize);
   std::vector<uint8_t> data_page(kPageSize);
   KfdProcess::PageTable page_table;
-  std::shared_mutex page_table_mutex;
+  util::DistributedSharedMutex page_table_mutex;
   page_table[kKernelAddr >> amdgpu::GpuMemory::PAGE_SHIFT] = {kernel_page.data(),
                                                               amdgpu::Mtype::RW};
   fx.gpu_mem.register_process(kProcessId, &page_table, &page_table_mutex);
@@ -768,7 +768,7 @@ TEST(WaveDebugTest, ScalarLoadStraddlingIntoUnmappedPageReportsMemoryViolation) 
   std::vector<uint8_t> kernel_page(kPageSize);
   std::vector<uint8_t> data_page(kPageSize);
   KfdProcess::PageTable page_table;
-  std::shared_mutex page_table_mutex;
+  util::DistributedSharedMutex page_table_mutex;
   page_table[kKernelAddr >> amdgpu::GpuMemory::PAGE_SHIFT] = {kernel_page.data(),
                                                               amdgpu::Mtype::RW};
   // Exactly one data page is mapped; the page above it deliberately is not.
@@ -1324,7 +1324,7 @@ TEST(WaveDebugTest, Gfx1250CwsrMatchesDbgapiWave32LayoutAndRoundTrips) {
   EXPECT_EQ(restored.queue_packet_id, wave.queue_packet_id);
   EXPECT_EQ(restored.trap_id, wave.trap_id);
   ASSERT_EQ(restored.lds.size(), 1024u);
-  EXPECT_TRUE(std::equal(wave.lds.begin(), wave.lds.end(), restored.lds.begin()));
+  EXPECT_TRUE(std::ranges::equal(wave.lds, std::span(restored.lds).first(wave.lds.size())));
   for (uint32_t r = 0; r < wave.num_vgprs; ++r)
     for (uint32_t lane = 0; lane < 32; ++lane)
       EXPECT_EQ(restored.vgprs[r * 64 + lane], wave.vgprs[r * 64 + lane]);
@@ -1421,7 +1421,7 @@ TEST(WaveDebugTest, CwsrSerializationRoundTripsThroughDbgapiLayout) {
         EXPECT_EQ(out.vgprs[r * 64 + l], in.vgprs[r * 64 + l]) << "vgpr " << r << " lane " << l;
     if (in.is_first_in_group) {
       ASSERT_GE(out.lds.size(), in.lds.size());
-      EXPECT_TRUE(std::equal(in.lds.begin(), in.lds.end(), out.lds.begin()));
+      EXPECT_TRUE(std::ranges::equal(in.lds, std::span(out.lds).first(in.lds.size())));
     } else {
       EXPECT_TRUE(out.lds.empty());
     }

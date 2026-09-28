@@ -61,11 +61,7 @@
         fflush(stderr);                                                                  \
     }
 
-namespace rocprofsys
-{
-inline namespace common
-{
-namespace path
+namespace rocprofsys::inline common::path
 {
 inline std::vector<std::string>
 get_link_map(const char*, std::vector<int>&& = { (RTLD_LAZY | RTLD_NOLOAD) },
@@ -480,6 +476,4 @@ get_internal_libdir()
     return get_rocprofsys_root() + "/lib";
 }
 
-}  // namespace path
-}  // namespace common
-}  // namespace rocprofsys
+}  // namespace rocprofsys::inline common::path

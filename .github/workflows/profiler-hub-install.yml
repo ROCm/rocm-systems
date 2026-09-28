@@ -79,9 +79,9 @@ jobs:
           test -f ${INSTALL_PREFIX}/lib/libprofiler-hub.so       || { echo "::error::libprofiler-hub.so missing"; exit 1; }
           test -f ${INSTALL_PREFIX}/lib/libprofiler-hub.a        || { echo "::error::libprofiler-hub.a missing";  exit 1; }
           test -d ${INSTALL_PREFIX}/include/profiler-hub         || { echo "::error::include/profiler-hub missing"; exit 1; }
-          test -f ${INSTALL_PREFIX}/include/profiler-hub/writer.hpp  || { echo "::error::writer.hpp missing"; exit 1; }
-          test -f ${INSTALL_PREFIX}/include/profiler-hub/reader.hpp  || { echo "::error::reader.hpp missing"; exit 1; }
-          test -f ${INSTALL_PREFIX}/include/profiler-hub/storage.hpp || { echo "::error::storage.hpp missing"; exit 1; }
+          test -f ${INSTALL_PREFIX}/include/profiler-hub/cpp/writer.hpp  || { echo "::error::writer.hpp missing"; exit 1; }
+          test -f ${INSTALL_PREFIX}/include/profiler-hub/cpp/reader.hpp  || { echo "::error::reader.hpp missing"; exit 1; }
+          test -f ${INSTALL_PREFIX}/include/profiler-hub/cpp/storage.hpp || { echo "::error::storage.hpp missing"; exit 1; }
           test -f ${INSTALL_PREFIX}/lib/cmake/profiler-hub/profiler-hub-config.cmake         || { echo "::error::profiler-hub-config.cmake missing"; exit 1; }
           test -f ${INSTALL_PREFIX}/lib/cmake/profiler-hub/profiler-hub-config-version.cmake || { echo "::error::profiler-hub-config-version.cmake missing"; exit 1; }
           test -f ${INSTALL_PREFIX}/lib/cmake/profiler-hub/profiler-hub-targets.cmake        || { echo "::error::profiler-hub-targets.cmake missing"; exit 1; }

@@ -1153,6 +1153,21 @@ hipError_t PlatformState::GetFuncCount(unsigned int* count, hipModule_t hmod) {
 }
 
 // ================================================================================================
+hipError_t PlatformState::EnumerateFunctions(hipFunction_t* functions, unsigned int numFunctions,
+                                             hipModule_t hmod) {
+  std::unordered_map<hipModule_t, hip::DynCO*>::iterator it;
+  {
+    std::scoped_lock lock(lock_);
+    it = dynCO_map_.find(hmod);
+    if (it == dynCO_map_.end()) {
+      LogPrintfError("Cannot find the module: %p", hmod);
+      return hipErrorNotFound;
+    }
+  }
+  return it->second->enumerateFunctions(functions, numFunctions);
+}
+
+// ================================================================================================
 hipError_t PlatformState::GetDynGlobalVar(const char* hostVar, hipModule_t hmod,
                                           hipDeviceptr_t* dev_ptr, size_t* size_ptr) {
   std::scoped_lock lock(lock_);

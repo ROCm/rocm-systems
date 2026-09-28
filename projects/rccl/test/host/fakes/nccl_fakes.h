@@ -68,6 +68,33 @@ extern std::function<ncclResult_t(struct ncclComm*,
                                   int /*localFd*/, int* /*rmtFd*/)>
     g_proxyClientQueryFdBlocking;
 
+// ncclProxyClientBatchQueryFdBlocking: the POSIX_FD, cross-process arm of
+// ipcHandleMultiSegmentRegistration ships every exported segment fd to the
+// remote proxy and receives an imported fd per segment. Default returns
+// ncclSystemError so unexpected calls fail loudly; tests driving that arm
+// install a hook that succeeds and fills the imported-fd array.
+extern std::function<ncclResult_t(struct ncclComm*,
+                                  struct ncclProxyConnector*,
+                                  int* /*localFds*/, int* /*rmtFds*/,
+                                  int /*numSegments*/)>
+    g_proxyClientBatchQueryFdBlocking;
+
+// ncclDynMemMarkExportToPeer / ncclMemTrackImportFromPeer: the memory-manager
+// bookkeeping the cuMem arms of ncclP2pAllocateShareableBuffer /
+// ncclP2pImportShareableBuffer drive. Neither leaves observable public state
+// here, so the shareable-buffer tests assert mock-style that the arm reached
+// (or skipped) them. Defaults succeed.
+extern std::function<ncclResult_t(struct ncclMemManager*, void* /*ptr*/,
+                                  int /*peerRank*/)>
+    g_dynMemMarkExportToPeer;
+extern std::function<ncclResult_t(struct ncclMemManager*, void* /*ptr*/,
+                                  size_t /*size*/,
+                                  hipMemGenericAllocationHandle_t /*handle*/,
+                                  hipMemAllocationHandleType /*handleType*/,
+                                  ncclMemType_t /*memType*/, int /*ownerRank*/,
+                                  int /*ownerDev*/, void* /*ownerPtr*/)>
+    g_memTrackImportFromPeer;
+
 // NCCL_PARAM redirector: p2p-test.cc replaces the body of every
 // NCCL_PARAM(name, env, deftVal) generator in the #included p2p.cc with a
 // thin trampoline that calls g_loadParam(env, deftVal) on every invocation
@@ -87,6 +114,41 @@ extern std::function<int64_t(const char* /*env*/, int64_t /*deftVal*/)>
 extern std::function<ncclResult_t(int /*cudaDev1*/, int /*cudaDev2*/, bool* /*isXGMI*/, int /*maxInter*/)>
     g_ncclTopoGetLinkType;
 extern int g_ncclTopoGetLinkTypeCalls;
+
+// Controllable seams for the topology eligibility checks p2pCanConnect drives.
+// (rank1, rank2, p2p, read, intermediateRank, cudaP2p, isCrossClique) -- the
+// topo system pointer and comm are dropped; only the rank pair and out-params
+// matter. isCrossClique is defaulted to 0 by the wrapper before the hook runs,
+// so a hook that ignores it keeps the common case; a hook that sets it drives
+// the cross-clique arm that skips the ncclTopoCheckNet block (p2p.cc).
+extern std::function<ncclResult_t(int /*rank1*/, int /*rank2*/, int* /*p2p*/,
+                                  int* /*read*/, int* /*intermediateRank*/,
+                                  int* /*cudaP2p*/, int* /*isCrossClique*/)>
+    g_ncclTopoCheckP2p;
+extern std::function<ncclResult_t(int /*rank1*/, int /*rank2*/, int* /*net*/)>
+    g_ncclTopoCheckNet;
+
+// ncclRegLocalIsValid / ncclCommGraphRegister / ncclCommGraphDeregister:
+// the register-family wrappers (ncclIpcLocalRegisterBuffer /
+// ncclIpcGraphRegisterBuffer / cleanupIpc) drive these. Defaults preserve
+// the old stubs (isValid=false, graph-register fails, graph-deregister
+// succeeds); tests install hooks to reach the delegate/enqueue/cleanup arms.
+extern std::function<ncclResult_t(struct ncclReg*, bool* /*isValid*/)>
+    g_regLocalIsValid;
+extern std::function<ncclResult_t(struct ncclComm*, void* /*buff*/,
+                                  size_t /*size*/, void** /*handle*/)>
+    g_commGraphRegister;
+extern std::function<ncclResult_t(struct ncclComm*, struct ncclReg* /*reg*/)>
+    g_commGraphDeregister;
+
+// ncclShmAllocateShareableBuffer: the CE-memcpy arm of p2pSendProxySetup
+// allocates its peer SHM segment through this. Default fails so unexpected
+// call sites surface loudly; the CE proxy-setup test installs a hook that
+// succeeds and hands back backing storage for the host/device SHM pointers.
+extern std::function<ncclResult_t(size_t /*size*/, bool /*legacy*/,
+                                  void* /*desc*/,
+                                  void** /*hptr*/, void** /*dptr*/)>
+    g_shmAllocateShareableBuffer;
 
 // Restore every NCCL controllable seam in this header to its default.
 // Called by ResetP2pFakes(); exposed for tests that only touch NCCL hooks.

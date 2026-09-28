@@ -61,7 +61,7 @@ int64_t ncclParamCGAClusterSize() { return g_loadParam("CGA_CLUSTER_SIZE", NCCL_
 
 // --- Pure instrumentation (no behaviour to assert) ------------------------
 // rccl::Recorder lives in recorder_fakes.cc: it was defined identically here, in
-// init_fakes.cc and in enqueue_fakes.cc, differing only in which record()
+// init_fakes.cc and in enqueue_test_deps.cc, differing only in which record()
 // overloads each target referenced.
 
 roctx_scoped_range_in::roctx_scoped_range_in(const char*) noexcept {}

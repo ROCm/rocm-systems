@@ -10,6 +10,7 @@
 #include "rocjitsu/kmd/linux/linux_kfd.h"
 #include "rocjitsu/kmd/linux/sysfs.h"
 #include "rocjitsu/vm/amdgpu/interrupt_sink.h"
+#include "rocjitsu/vm/amdgpu/pm4.h"
 #include "rocjitsu/vm/soc.h"
 
 #include "simdojo/sim/simulation.h"
@@ -79,6 +80,10 @@ struct IpcObject {
 /// shared mutable state.
 class SimulatedKfd : public LinuxKfd {
 public:
+  /// Minimum backing descriptor requested when the process limit permits it.
+  /// Shared with the interposer so its early table growth covers this range.
+  static constexpr int kBackingFdMin = 4096;
+
   /// @brief Test seam invoked between procfs authorization and pidfd revalidation.
   using DebugIdentityValidationHook = std::function<void()>;
 
@@ -250,11 +255,18 @@ public:
   /// @details Public so the interposer's DRM GEM_VA path can install page-table
   /// entries with the same coherency type the KFD alloc requested.
   static amdgpu::Mtype pte_mtype_for_flags(uint32_t alloc_flags);
+  /// @brief Submit compute IBs to the CP assigned to a DRM file/context/ring key.
+  int submit_pm4(uint32_t render_minor, uint64_t queue_key, amdgpu::Pm4Submission submission);
+  /// Cancel accepted work and release the queue owned by one DRM context/ring.
+  void retire_pm4_queue(uint64_t queue_key);
 
   /// @brief Install a host range into the local process's GPU page table.
   /// @details Drives DRM AMDGPU_GEM_VA MAP/REPLACE from the interposer: maps
   /// @p size bytes at @p gpu_va to @p host_ptr with the MTYPE derived from
   /// @p alloc_flags.
+  /// @pre host_ptr names the interposer-owned read-write dmabuf mapping, which
+  /// remains alive until these GPU mappings are removed. Application-owned
+  /// pointers must use map_to_gpu with HostExtentOwner::Application instead.
   /// @retval true the range was installed.
   /// @retval false the local process is gone, so nothing was mapped (the caller
   ///         must surface an error rather than report a phantom success).
@@ -536,6 +548,8 @@ private:
   /// interrupt_mutex_ is a leaf: the CP interrupt callback takes it and only
   /// descends into EventState::mutex_, and close() takes it only after releasing
   /// process_mutex_, so there is no cycle.
+  /// PM4 registration/enqueue takes pm4_mutex_ -> hw_queue_mutex_. Neither the
+  /// engine nor code holding process_mutex_ acquires pm4_mutex_.
   /// The CP engine thread acquires hw_queue_mutex_ first, then reaches
   /// process_mutex_ (scratch resolver) or alloc_mutex_ (scratch allocator) through
   /// the callbacks — hw_queue_mutex_ -> process_mutex_ and, separately,
@@ -544,6 +558,13 @@ private:
   /// CommandProcessor call that takes hw_queue_mutex_ (e.g. register_queue) — build
   /// state under alloc_mutex_, release it, then call the CP.
   mutable std::mutex process_mutex_;
+
+  /// @brief PM4 queue registry; nests outside CP queue locks, never inside process_mutex_.
+  /// The engine does not acquire this mutex when completing a submission.
+  std::mutex pm4_mutex_;
+  std::unordered_map<uint64_t, std::pair<amdgpu::CommandProcessor *, uint32_t>> pm4_queues_;
+  static constexpr uint32_t kPm4QueueIdBase = 0x80000000; ///< Separate from KFD queue IDs.
+  uint32_t next_pm4_queue_id_ = kPm4QueueIdBase;
   std::unordered_map<uint32_t, std::shared_ptr<KfdProcess>> processes_;
   // Hardware-visible VMIDs/PASIDs share the SoC namespace even when tests or
   // an embedder attach more than one KFD frontend to that SoC. A per-driver

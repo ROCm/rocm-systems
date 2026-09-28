@@ -3,6 +3,7 @@
 #include "profiler_hub_future.hpp"
 
 #include <algorithm>
+#include <limits>
 #include <optional>
 #include <thread>
 #include <tuple>
@@ -110,7 +111,10 @@ ph_ctx::core_get_track_events(profiler_hub::common::connection& conn,
     if(start_ts != 0 || end_ts != 0)
     {
         filter.time_window.start = start_ts;
-        filter.time_window.end   = end_ts;
+        filter.time_window.end =
+            (end_ts != 0) ? end_ts
+                          : static_cast<profiler_hub::reader_types::timestamp_ns_t>(
+                                std::numeric_limits<std::int64_t>::max());
     }
 
     auto events = conn.reader().get_events_for_track(track.value(), filter);
@@ -149,7 +153,10 @@ ph_ctx::core_get_track_samples(profiler_hub::common::connection& conn,
     if(start_ts != 0 || end_ts != 0)
     {
         filter.time_window.start = start_ts;
-        filter.time_window.end   = end_ts;
+        filter.time_window.end =
+            (end_ts != 0) ? end_ts
+                          : static_cast<profiler_hub::reader_types::timestamp_ns_t>(
+                                std::numeric_limits<std::int64_t>::max());
     }
 
     auto samples = conn.reader().get_counter_events_for_track(track.value(), filter);
@@ -235,18 +242,30 @@ ph_ctx::initilaize_node_info()
     m_nodes  = m_connection_pool.run_sync([](profiler_hub::common::connection& conn) {
         return conn.reader().get_all_nodes();
     });
-    const auto& node = m_nodes[0];
 
-    m_c_node->info = {
-        .id            = static_cast<uint32_t>(node->node_id),
-        .machine_id    = node->machine_id.c_str(),
-        .system_name   = node->system_name.c_str(),
-        .hostname      = node->hostname.c_str(),
-        .release       = node->release.c_str(),
-        .version       = node->version.c_str(),
-        .hardware_name = node->hardware_name.c_str(),
-        .domain_name   = node->domain_name.c_str(),
-    };
+    m_c_node->info = ph_node_info_t{ .id            = 0,
+                                     .machine_id    = "",
+                                     .system_name   = "",
+                                     .hostname      = "",
+                                     .release       = "",
+                                     .version       = "",
+                                     .hardware_name = "",
+                                     .domain_name   = "" };
+
+    if(!m_nodes.empty())
+    {
+        const auto& node = m_nodes[0];
+        m_c_node->info   = {
+              .id            = static_cast<uint32_t>(node->node_id),
+              .machine_id    = node->machine_id.c_str(),
+              .system_name   = node->system_name.c_str(),
+              .hostname      = node->hostname.c_str(),
+              .release       = node->release.c_str(),
+              .version       = node->version.c_str(),
+              .hardware_name = node->hardware_name.c_str(),
+              .domain_name   = node->domain_name.c_str(),
+        };
+    }
 
     m_c_node->agents =
         ph_agent_list_t{ .list_size = static_cast<std::uint32_t>(m_c_agents.size()),

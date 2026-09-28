@@ -20,6 +20,10 @@ if TYPE_CHECKING:
     from amdisa.isa_profile import IsaProfile
 
 
+# Floating-source conversions that accept VOP3 ABS/NEG before integer conversion.
+F32_TO_INTEGER_DTYPES = frozenset({'i32_f32', 'u32_f32', 'rpi_i32_f32', 'flr_i32_f32'})
+
+
 @dataclass
 class InstructionSemantics:
     """Semantic metadata for a single instruction.
@@ -2128,7 +2132,6 @@ def _derive_buffer_data(
     suffix: str,
     is_store: bool,
     typed: bool,
-    typed_format_executable: bool = True,
 ) -> InstructionSemantics | None:
     """Classify a buffer/typed-buffer LOAD/STORE data suffix.
 
@@ -2137,20 +2140,12 @@ def _derive_buffer_data(
     class prefix differs (``buffer_*`` vs ``tbuffer_*``).
 
     D16 FORMAT loads/stores pack two 16-bit components per VGPR. That packed
-    layout is not modeled by the memory pipeline, so they are given dedicated
-    non-executable classes (``buffer_{load,store}_format_d16``) that carry the
-    partial-def metadata (num_elems/elem_size/d16 flags) for liveness without
-    activating incorrect execution. Non-D16 FORMAT (one dword per component) and
-    byte/short/dword data execute correctly and keep their normal classes; the
-    FORMAT variants are modeled as raw dword moves without DFMT/NFMT
-    (data/numeric format) conversion.
+    layout uses dedicated classes (``buffer_{load,store}_format_d16``) carrying
+    partial-def metadata (num_elems/elem_size/d16 flags). Codegen enables format
+    conversion and packed D16 execution on RDNA1-4 and CDNA1-4 targets, with
+    generation-specific descriptor decoding. Non-D16 FORMAT keeps the normal
+    buffer classes and selects conversion in codegen.
 
-    ``typed_format_executable`` gates the executable ``tbuffer_*`` class for
-    non-D16 typed FORMAT ops. Real MTBUF encodings supply mtbuf-style addressing
-    and keep it enabled; RDNA4 folds typed buffers into VBUFFER (mubuf-style
-    addressing, no ``mtbuf_calculate_addresses``), so it is disabled there,
-    leaving non-D16 typed ops unclassified (``nop``) as before -- only the D16
-    typed loads need the partial-def metadata.
     """
     normalized = _normalize_buffer_format_suffix(suffix)
     flat_info = _FLAT_DATA_MAP.get(normalized)
@@ -2159,10 +2154,8 @@ def _derive_buffer_data(
     if not info:
         return None
     esz, ne, se = info
-    if fmt_info is not None and esz == 2:  # D16 FORMAT: packed, metadata-only
+    if fmt_info is not None and esz == 2:  # D16 FORMAT: packed VGPR components
         cls = 'buffer_store_format_d16' if is_store else 'buffer_load_format_d16'
-    elif typed and not typed_format_executable:
-        return None  # non-D16 typed FORMAT under VBUFFER: leave as nop
     else:
         base = 'tbuffer' if typed else 'buffer'
         cls = f'{base}_store' if is_store else f'{base}_load'
@@ -2220,7 +2213,6 @@ def _derive_mubuf(name: str) -> InstructionSemantics | None:
                 upper[len(prefix) :],
                 is_store,
                 typed=prefix.startswith('TBUFFER'),
-                typed_format_executable=False,
             )
             if sem:
                 return sem
@@ -2274,6 +2266,10 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
     (was ``DS_CMPST``), which are handled by the atomic fallthrough.
     """
     upper = name.upper()
+    if upper.startswith('DS_BVH_STACK'):
+        return InstructionSemantics(
+            name, 'ds_stack', elem_size=4, num_elems=2 if 'POP2' in upper else 1
+        )
     is_write2 = '_WRITE2' in upper or 'DS_STORE_2ADDR' in upper
     is_read2 = '_READ2' in upper or 'DS_LOAD_2ADDR' in upper
     is_write = ('_WRITE_' in upper or 'DS_STORE_' in upper) and not is_write2
@@ -2454,6 +2450,7 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
         '_CMPSTORE_RTN_B32': ('cmpswap', 4, 2),
         '_CMPSTORE_RTN_B64': ('cmpswap', 8, 4),
         '_CONDXCHG32_RTN_B64': ('condxchg32', 8, 2),
+        '_WRAP_RTN_B32': ('wrap', 4, 2),
         '_ADD_F32': ('fadd', 4, 1),
         '_ADD_RTN_F32': ('fadd', 4, 1),
         '_ADD_F64': ('fadd', 8, 2),

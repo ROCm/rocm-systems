@@ -213,7 +213,7 @@ void reap_stale_runtime_dirs() {
     if (status_error || status.type() != std::filesystem::file_type::directory)
       continue;
     const std::string name = it->path().filename().string();
-    if (!std::all_of(name.begin(), name.end(), [](unsigned char c) { return std::isdigit(c); }))
+    if (!std::ranges::all_of(name, [](unsigned char c) { return std::isdigit(c); }))
       continue;
     pid_t pid = 0;
     auto [ptr, parse_error] = std::from_chars(name.data(), name.data() + name.size(), pid);
@@ -303,8 +303,7 @@ std::vector<KfdGpuOrdinal> real_kfd_gpu_ordinals() {
     }
   }
 
-  std::sort(nodes.begin(), nodes.end(),
-            [](const auto &lhs, const auto &rhs) { return lhs.node_id < rhs.node_id; });
+  std::ranges::sort(nodes, {}, &KfdNodeInfo::node_id);
 
   std::vector<KfdGpuOrdinal> gpus;
   gpus.reserve(nodes.size());
