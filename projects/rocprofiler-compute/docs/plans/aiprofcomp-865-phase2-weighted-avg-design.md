@@ -2,8 +2,8 @@
 
 **Status:** Milestone A implemented on branch (parser, aggregation, analyze wiring); pilot YAML pending SLOT_LIMIT sign-off
 **JIRA:** AIPROFCOMP-865 (bullet 2–3), parent AIPROFCOMP-864
-**Prerequisite:** Phase 1 worksheet classifies metrics as `SLOT_LIMIT` with inspector evidence
-**Out of scope:** `BOUND_RATIO`, partition normalization (AIPROFCOMP-798), alola-only workflows
+**Prerequisite:** Phase 1 Single-pass packable ships (see [single-pass packable plan](aiprofcomp-865-single-pass-packable-plan.md)); remaining gaps are `SLOT_LIMIT` only
+**Out of scope:** `BOUND_RATIO`, partition normalization (AIPROFCOMP-798), alola-only workflows; former POLICY_GAP metrics (fixed by Phase 1 packing, not `WEIGHTED_AVG`)
 
 ---
 
@@ -11,7 +11,7 @@
 
 When a ratio metric \(M = (A+B)/C\) (or a sum of numerators over one denominator) cannot fit all required PMCs in **one perfmon bucket**, multi-pass profiling makes `SUM(A)/SUM(C)` and `MAX(A/C)` unreliable.
 
-Phase 1 addresses the common case \(M = A/B\) via **metric-aware coalescing** and `profiling_counter_grouping_policy.yaml`. Phase 2 covers **hard slot limits** by:
+Phase 1 (Single-pass packable) covers every metric whose PMC set fits one hardware bucket. Phase 2 covers **hard slot limits** by:
 
 1. Splitting into submetrics collected in **separate single-pass replays**:
    - \(M_0 = A/C_0\), \(M_1 = B/C_1\)
