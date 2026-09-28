@@ -506,14 +506,8 @@ HIP_TEST_CASE(Contract_Library_HipLibraryGetModule_ModuleUnload_IsRejected) {
 
   // The module is owned by the library, not by the caller: releasing it through
   // hipModuleUnload would leave the library holding a freed code object, so the
-  // runtime must refuse. hipLibraryUnload is the only way to release it.
-  //
-  // BACKEND-DIFF: the refusal is portable but the code is not. CUDA documents
-  // CUDA_ERROR_NOT_PERMITTED for cuModuleUnload on a library module; HIP has no
-  // NotPermitted code and AMD reports hipErrorIllegalState. Parity would need a
-  // shared error enumerator, so only the non-success outcome is pinned here.
-  const hipError_t status = hipModuleUnload(module);
-  REQUIRE(status != hipSuccess);
+  // runtime must refuse with hipErrorNotPermitted.
+  HIP_CHECK_ERROR(hipModuleUnload(module), hipErrorNotPermitted);
   (void)hipGetLastError();
 
   // Refusing must be non-destructive: the library and its module stay usable.

@@ -187,6 +187,9 @@ typedef enum __HIP_NODISCARD hipError_t UINT32_BASE {
                                             ///< launched per grid for a kernel that was launched
                                             ///< via cooperative launch APIs exceeds the maximum
                                             ///< number of allowed blocks for the current device.
+  hipErrorNotPermitted = 800,  ///< The attempted operation is not permitted, typically because the
+                               ///< resource is owned by another object that is responsible for
+                               ///< releasing it.
   hipErrorNotSupported = 801,  ///< Produced when the hip API is not supported/implemented
   hipErrorStreamCaptureUnsupported = 900,  ///< The operation is not permitted when the stream
                                            ///< is capturing.
@@ -7127,9 +7130,16 @@ hipError_t hipModuleLoad(hipModule_t* module, const char* fname);
  *
  * @param [in] module  Module to free
  *
- * @returns #hipSuccess, #hipErrorInvalidResourceHandle
+ * @returns #hipSuccess, #hipErrorInvalidResourceHandle, #hipErrorNotFound,
+ *          #hipErrorNotPermitted
  *
  * The module is freed, and the code objects associated with it are destroyed.
+ *
+ * @note Returns #hipErrorNotPermitted if @p module was obtained from
+ * hipLibraryGetModule(). Such a module is owned by its library and should be released with
+ * hipLibraryUnload() instead.
+ *
+ * @see hipLibraryGetModule, hipLibraryUnload
  */
 hipError_t hipModuleUnload(hipModule_t module);
 /**
@@ -7310,7 +7320,7 @@ hipError_t hipLibraryGetManaged(void** dptr, size_t* bytes, hipLibrary_t library
  *
  * @note The returned module is owned by @p library and stays valid until
  * hipLibraryUnload(). Do not release it with hipModuleUnload(), which returns
- * #hipErrorIllegalState for such a handle.
+ * #hipErrorNotPermitted for such a handle.
  *
  * @see hipLibraryLoadData, hipLibraryLoadFromFile, hipLibraryUnload,
  * hipModuleGetFunction, hipModuleUnload

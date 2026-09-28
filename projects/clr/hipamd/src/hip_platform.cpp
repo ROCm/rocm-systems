@@ -1136,7 +1136,7 @@ hipError_t PlatformState::UnloadModule(hipModule_t hmod) {
   // Unloading them should be done via hipLibraryUnload(), which also tears down the library's DynCO.
   if (library_modules_.find(hmod) != library_modules_.end()) {
     LogPrintfError("Module %p is owned by a library, unload it with hipLibraryUnload", hmod);
-    return hipErrorIllegalState;
+    return hipErrorNotPermitted;
   }
 
   if (auto it = dynCO_map_.find(hmod); it == dynCO_map_.end()) {

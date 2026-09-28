@@ -164,8 +164,7 @@ HIP_TEST_CASE(Unit_hipLibraryGetModule_Positive_MatchesLibraryGetKernel) {
 
 // The module is owned by the library. Releasing it through hipModuleUnload
 // would leave the library holding a freed code object, so the runtime must
-// refuse. CUDA reports CUDA_ERROR_NOT_PERMITTED here, which has no HIP
-// equivalent, so only the AMD path pins the exact error code.
+// refuse with hipErrorNotPermitted.
 HIP_TEST_CASE(Unit_hipLibraryGetModule_Negative_ModuleUnloadRefused) {
   HIP_TEST_DRIVER_INIT();
   hipLibrary_t lib = nullptr;
@@ -176,11 +175,8 @@ HIP_TEST_CASE(Unit_hipLibraryGetModule_Negative_ModuleUnloadRefused) {
   HIP_CHECK(hipLibraryGetModule(&mod, lib));
   REQUIRE(mod != nullptr);
 
-#ifdef __HIP_PLATFORM_AMD__
-  HIP_CHECK_ERROR(hipModuleUnload(mod), hipErrorIllegalState);
-#else
-  REQUIRE(hipModuleUnload(mod) != hipSuccess);
-#endif
+  HIP_CHECK_ERROR(hipModuleUnload(mod), hipErrorNotPermitted);
+  (void)hipGetLastError();
 
   // Refusing must be non-destructive. The library is still fully usable.
   hipFunction_t func = nullptr;
@@ -207,6 +203,7 @@ HIP_TEST_CASE(Unit_hipLibraryGetModule_Negative_StaleAfterLibraryUnload) {
 
   hipFunction_t func = nullptr;
   REQUIRE(hipModuleGetFunction(&func, mod, "add_kernel") != hipSuccess);
+  (void)hipGetLastError();
 }
 
 HIP_TEST_CASE(Unit_hipLibraryGetModule_Negative_Parameters) {
@@ -219,9 +216,11 @@ HIP_TEST_CASE(Unit_hipLibraryGetModule_Negative_Parameters) {
 
   SECTION("null module out-param") {
     HIP_CHECK_ERROR(hipLibraryGetModule(nullptr, lib), hipErrorInvalidValue);
+    (void)hipGetLastError();
   }
   SECTION("null library") {
     HIP_CHECK_ERROR(hipLibraryGetModule(&mod, nullptr), hipErrorInvalidResourceHandle);
+    (void)hipGetLastError();
   }
 
   HIP_CHECK(hipLibraryUnload(lib));
