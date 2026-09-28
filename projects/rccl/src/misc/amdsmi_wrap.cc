@@ -135,7 +135,7 @@ ncclResult_t fabricInitResult = ncclSuccess;
 std::mutex amdSmiInitLock;
 ncclResult_t amdSmiInitResult = ncclSuccess;
 bool amdSmiInitCalled = false;
-bool amdSmiLibInitialized = false;
+std::atomic<bool> amdSmiLibInitialized{false};
 
 // Major version of the loaded amd_smi, as it reports itself. Selects the telemetry
 // name call convention; see amdSmiTelemIdUsesOutParam().
@@ -251,11 +251,8 @@ static ncclResult_t amd_smi_init_impl() {
     amdSmiLibMajor.store(version.major, std::memory_order_release);
   } else {
 fallback_to_arsmi:
-    // initialize alternate rsmi
+    // Reached when RCCL_USE_AMD_SMI_LIB=0 OR dlopen failed; use sysfs for fabric discovery
     ARSMICHECK(ARSMI_init());
-    // RCCL_USE_AMD_SMI_LIB only selects who performs fabric *discovery*: amd_smi_lib, or the
-    // ualink sysfs nodes via ARSMI_get_fabric_info(). Both populate amdsmiFabricDevices
-    // identically, so UALoE/UALLink works on this path.
     INFO(NCCL_INIT, "initialized internal alternative rsmi functionality; UALoE/UALLink fabric discovery uses sysfs");
   }
   return ncclSuccess;
@@ -391,30 +388,11 @@ ncclResult_t amd_smi_getDeviceIndexByPciBusId(const char* pciBusId, uint32_t* de
     int64_t busid;
 
     busIdToInt64(pciBusId, &busid);
-    /** convert to amd-smi's bus ID format
-     *  | Name        | Field   |
-     *  ------------- | ------- |
-     *  | Domain      | [63:16] |
-     *  | Bus         | [15: 8] |
-     *  | Device      | [ 7: 3] |
-     *  | Function    | [ 2: 0] |
-     **/
-
-    // instead of getting device count and then comparing the busid to each GPUs BDF
-
-    // with amd-smi, we can use amdsmi_get_processor_handle_from_bdf,
-    // and then query the enumeration info for that processor_handle
+    // NCCL int64 format: domain[35:20] bus[19:12] device[11:4] function[3:0]
     if (amdSmiLibInitialized) {
       amdsmi_processor_handle processor_handle = 0;
 
       amdsmi_bdf_t bdf = {};
-      // This is the format that matches amd-smi BDF
-      // bdf.function_number = (busid & 0x7);
-      // bdf.device_number = (busid & 0xf8) >> 3;
-      // bdf.bus_number = (busid & 0xff00) >> 8;
-      // bdf.domain_number = (busid & 0xffffffffffff0000) >> 16;
-
-      // NCCL int64 format: domain[35:20] bus[19:12] device[11:4] function[3:0]
       bdf.function_number = (busid & 0xf);
       bdf.device_number = (busid & 0xff0) >> 4;
       bdf.bus_number = (busid & 0xff000) >> 12;
