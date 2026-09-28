@@ -4,6 +4,8 @@
 
 import logging
 
+from amdsmi_cli_exceptions import AmdSmiCommandNotSupportedException
+
 from amdsmi import amdsmi_exception, amdsmi_interface
 
 
@@ -25,12 +27,6 @@ class ListDevicesCommands:
         # Set args.* to passed in arguments
         if gpu:
             args.gpu = gpu
-
-        cpu_attributes = ["cpu"]
-        for attr in cpu_attributes:
-            if hasattr(args, "cpu") and getattr(args, "cpu"):
-                print("N/A")
-                return
 
         # Handle No GPU passed
         if args.gpu == None:
@@ -363,6 +359,16 @@ class ListDevicesCommands:
         return nics, ainics
 
     def list_devices(self, args, multiple_devices=False, gpu=None, nic=None, switch=None):
+
+        # `list` only reports GPU information; --cpu and --core are accepted by the
+        # shared device-argument group but are not serviced by this command.
+        if getattr(args, "cpu", None) or getattr(args, "core", None):
+            raise AmdSmiCommandNotSupportedException(
+                "list",
+                self.helpers.get_output_format(),
+                message="list reports GPU information. --cpu and --core are not "
+                "supported for this command.",
+            )
 
         if gpu:
             args.gpu = gpu
