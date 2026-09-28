@@ -25,9 +25,7 @@
 // status,
 //                int flags);
 
-namespace rocprofsys
-{
-namespace component
+namespace rocprofsys::component
 {
 namespace
 {
@@ -198,7 +196,6 @@ numa_gotcha::audit(const gotcha_data& _data, audit::outgoing, void* ret)
     category_region<category::numa>::stop(std::string_view{ _data.tool_id }, "return",
                                           ret);
 }
-}  // namespace component
-}  // namespace rocprofsys
+}  // namespace rocprofsys::component
 
 TIMEMORY_STORAGE_INITIALIZER(rocprofsys::component::numa_gotcha)

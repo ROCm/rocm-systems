@@ -187,8 +187,8 @@ struct shmem_gotcha : tim::component::base<shmem_gotcha<SHMEMPolicy>, void>
     static void resume();
 
     template <typename... Args>
-    static void audit(const typename SHMEMPolicy::gotcha_data& _data,
-                      tim::audit::incoming, Args...)
+    static void audit(const SHMEMPolicy::gotcha_data& _data, tim::audit::incoming,
+                      Args...)
     {
         SHMEMPolicy::category_region::start(std::string_view{ _data.tool_id });
     }
@@ -196,13 +196,10 @@ struct shmem_gotcha : tim::component::base<shmem_gotcha<SHMEMPolicy>, void>
     // Outgoing audit overloads must match the return types of wrapped APIs (like UCX).
     // Missing overloads cause the bundle's audit call to be a no-op for that component,
     // so the region is never stopped and the call may not appear correctly in traces.
-    static void audit(const typename SHMEMPolicy::gotcha_data&, tim::audit::outgoing);
-    static void audit(const typename SHMEMPolicy::gotcha_data&, tim::audit::outgoing,
-                      void*);
-    static void audit(const typename SHMEMPolicy::gotcha_data&, tim::audit::outgoing,
-                      int);
-    static void audit(const typename SHMEMPolicy::gotcha_data&, tim::audit::outgoing,
-                      long);
+    static void audit(const SHMEMPolicy::gotcha_data&, tim::audit::outgoing);
+    static void audit(const SHMEMPolicy::gotcha_data&, tim::audit::outgoing, void*);
+    static void audit(const SHMEMPolicy::gotcha_data&, tim::audit::outgoing, int);
+    static void audit(const SHMEMPolicy::gotcha_data&, tim::audit::outgoing, long);
 
 private:
     static std::mutex s_mutex;
@@ -228,9 +225,9 @@ shmem_gotcha<SHMEMPolicy>::configure()
                   "shmem_gotcha<Policy>::configure requires Policy to expose "
                   "shmem_bundle_t and shmem_gotcha_t");
 
-    using shmem_gotcha_t = typename SHMEMPolicy::shmem_gotcha_t;
+    using shmem_gotcha_t = SHMEMPolicy::shmem_gotcha_t;
 
-    using gotcha_data_t = typename SHMEMPolicy::gotcha_data;
+    using gotcha_data_t = SHMEMPolicy::gotcha_data;
     for(size_t i = 0; i < shmem_gotcha_t::capacity(); ++i)
     {
         auto* itr = static_cast<gotcha_data_t*>(shmem_gotcha_t::at(i));
@@ -491,7 +488,7 @@ shmem_gotcha<SHMEMPolicy>::shutdown()
     static_assert(traits::configurable_shmem_policy<SHMEMPolicy>,
                   "shmem_gotcha<Policy>::shutdown requires Policy to expose "
                   "shmem_bundle_t and shmem_gotcha_t");
-    using shmem_gotcha_t = typename SHMEMPolicy::shmem_gotcha_t;
+    using shmem_gotcha_t = SHMEMPolicy::shmem_gotcha_t;
     shmem_gotcha_t::disable();
 }
 
@@ -503,7 +500,7 @@ shmem_gotcha<SHMEMPolicy>::start()
     static_assert(traits::configurable_shmem_policy<SHMEMPolicy>,
                   "shmem_gotcha<Policy>::start requires Policy to expose "
                   "shmem_bundle_t and shmem_gotcha_t");
-    using shmem_gotcha_t = typename SHMEMPolicy::shmem_gotcha_t;
+    using shmem_gotcha_t = SHMEMPolicy::shmem_gotcha_t;
 
     if(!detail::get_shmem_gotcha<SHMEMPolicy>()
             .template get<shmem_gotcha_t>()
@@ -534,7 +531,7 @@ shmem_gotcha<SHMEMPolicy>::pause()
                   "shmem_gotcha<Policy>::pause requires Policy to expose "
                   "shmem_bundle_t and shmem_gotcha_t");
     std::scoped_lock<std::mutex> _lk{ s_mutex };
-    using shmem_gotcha_t = typename SHMEMPolicy::shmem_gotcha_t;
+    using shmem_gotcha_t = SHMEMPolicy::shmem_gotcha_t;
     shmem_gotcha_t::set_ready(false);
 }
 
@@ -547,14 +544,14 @@ shmem_gotcha<SHMEMPolicy>::resume()
                   "shmem_gotcha<Policy>::resume requires Policy to expose "
                   "shmem_bundle_t and shmem_gotcha_t");
     std::scoped_lock<std::mutex> _lk{ s_mutex };
-    using shmem_gotcha_t = typename SHMEMPolicy::shmem_gotcha_t;
+    using shmem_gotcha_t = SHMEMPolicy::shmem_gotcha_t;
     shmem_gotcha_t::set_ready(true);
 }
 
 template <typename SHMEMPolicy>
     requires traits::valid_shmem_policy<SHMEMPolicy>
 void
-shmem_gotcha<SHMEMPolicy>::audit(const typename SHMEMPolicy::gotcha_data& _data,
+shmem_gotcha<SHMEMPolicy>::audit(const SHMEMPolicy::gotcha_data& _data,
                                  tim::audit::outgoing)
 {
     SHMEMPolicy::category_region::stop(std::string_view{ _data.tool_id });
@@ -563,7 +560,7 @@ shmem_gotcha<SHMEMPolicy>::audit(const typename SHMEMPolicy::gotcha_data& _data,
 template <typename SHMEMPolicy>
     requires traits::valid_shmem_policy<SHMEMPolicy>
 void
-shmem_gotcha<SHMEMPolicy>::audit(const typename SHMEMPolicy::gotcha_data& _data,
+shmem_gotcha<SHMEMPolicy>::audit(const SHMEMPolicy::gotcha_data& _data,
                                  tim::audit::outgoing, void* ret)
 {
     SHMEMPolicy::category_region::stop(std::string_view{ _data.tool_id }, "return", ret);
@@ -572,7 +569,7 @@ shmem_gotcha<SHMEMPolicy>::audit(const typename SHMEMPolicy::gotcha_data& _data,
 template <typename SHMEMPolicy>
     requires traits::valid_shmem_policy<SHMEMPolicy>
 void
-shmem_gotcha<SHMEMPolicy>::audit(const typename SHMEMPolicy::gotcha_data& _data,
+shmem_gotcha<SHMEMPolicy>::audit(const SHMEMPolicy::gotcha_data& _data,
                                  tim::audit::outgoing, int ret)
 {
     SHMEMPolicy::category_region::stop(std::string_view{ _data.tool_id }, "return", ret);
@@ -581,7 +578,7 @@ shmem_gotcha<SHMEMPolicy>::audit(const typename SHMEMPolicy::gotcha_data& _data,
 template <typename SHMEMPolicy>
     requires traits::valid_shmem_policy<SHMEMPolicy>
 void
-shmem_gotcha<SHMEMPolicy>::audit(const typename SHMEMPolicy::gotcha_data& _data,
+shmem_gotcha<SHMEMPolicy>::audit(const SHMEMPolicy::gotcha_data& _data,
                                  tim::audit::outgoing, long ret)
 {
     SHMEMPolicy::category_region::stop(std::string_view{ _data.tool_id }, "return", ret);

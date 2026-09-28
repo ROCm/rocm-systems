@@ -89,13 +89,13 @@ TEST(LaunchPreloadTest, EnvpCacheRebuildsAfterSet) {
   environment.set(name, "before");
 
   const std::vector<std::string> initial = copy_environment(environment.envp());
-  EXPECT_NE(initial.end(), std::find(initial.begin(), initial.end(), before));
+  EXPECT_NE(initial.end(), std::ranges::find(initial, before));
 
   environment.set(name, "after");
 
   const std::vector<std::string> rebuilt = copy_environment(environment.envp());
-  EXPECT_EQ(rebuilt.end(), std::find(rebuilt.begin(), rebuilt.end(), before));
-  EXPECT_NE(rebuilt.end(), std::find(rebuilt.begin(), rebuilt.end(), after));
+  EXPECT_EQ(rebuilt.end(), std::ranges::find(rebuilt, before));
+  EXPECT_NE(rebuilt.end(), std::ranges::find(rebuilt, after));
 }
 
 TEST(LaunchPreloadTest, NoAsanPrependsInterposerBeforeExistingPreload) {

@@ -731,13 +731,13 @@ public:
       if (byte_mask_ != rocjitsu::ExecutionPlugin::kFullByteMask)
         throw std::logic_error("partial-byte VgprReadRegion cannot copy raw words");
       if (!valid_ || !observed_) {
-        std::fill(destination.begin(), destination.end(), 0);
+        std::ranges::fill(destination, 0);
         return;
       }
       size_t copied = 0;
       for_each([&](std::span<const uint32_t> lanes) {
         const size_t count = std::min(lanes.size(), destination.size() - copied);
-        std::copy_n(lanes.begin(), count, destination.begin() + copied);
+        std::ranges::copy_n(lanes.begin(), count, destination.begin() + copied);
         copied += count;
       });
     }
@@ -972,6 +972,17 @@ public:
       return 0;
     return op.read_scalar(wf);
   }
+
+  /// Statically typed fast path for generated final class, enabling
+  /// devirtualization of the hot 32-bit operand accessors.
+  template <typename OperandT>
+    requires OperandT::kStaticRegisterAccess
+  [[nodiscard]] uint32_t read_scalar(const OperandT &op) const {
+    const Wavefront &wf = wavefront();
+    if (auto base = op.simd_vgpr_base(wf); base && !cu_->owns_vgpr_range(wf, *base, 1))
+      return 0;
+    return op.read_scalar(wf);
+  }
   [[nodiscard]] uint64_t read_scalar64(const Operand &op) const {
     const Wavefront &wf = wavefront();
     if (auto base = op.simd_vgpr_base(wf); base && !cu_->owns_vgpr_range(wf, *base, 2))
@@ -979,6 +990,15 @@ public:
     return op.read_scalar64(wf);
   }
   [[nodiscard]] uint32_t read_lane(const Operand &op, uint32_t lane) const {
+    const Wavefront &wf = wavefront();
+    if (auto base = op.simd_vgpr_base(wf); base && !cu_->owns_vgpr_range(wf, *base, 1))
+      return 0;
+    return op.read_lane(wf, lane);
+  }
+  /// Optimization: fast path for generated operands opted in via kStaticRegisterAccess.
+  template <typename OperandT>
+    requires OperandT::kStaticRegisterAccess
+  [[nodiscard]] uint32_t read_lane(const OperandT &op, uint32_t lane) const {
     const Wavefront &wf = wavefront();
     if (auto base = op.simd_vgpr_base(wf); base && !cu_->owns_vgpr_range(wf, *base, 1))
       return 0;
@@ -1044,6 +1064,15 @@ public:
       return;
     op.write_scalar(wf, value);
   }
+  /// Optimization: fast path for generated operands opted in via kStaticRegisterAccess.
+  template <typename OperandT>
+    requires OperandT::kStaticRegisterAccess
+  void write_scalar(const OperandT &op, uint32_t value) const {
+    Wavefront &wf = mutable_wavefront();
+    if (auto base = op.simd_vgpr_base_mut(wf); base && !mutable_cu().owns_vgpr_range(wf, *base, 1))
+      return;
+    op.write_scalar(wf, value);
+  }
   void write_scalar64(const Operand &op, uint64_t value) const {
     Wavefront &wf = mutable_wavefront();
     if (auto base = op.simd_vgpr_base_mut(wf); base && !mutable_cu().owns_vgpr_range(wf, *base, 2))
@@ -1051,6 +1080,17 @@ public:
     op.write_scalar64(wf, value);
   }
   void write_lane(const Operand &op, uint32_t lane, uint32_t value) const {
+    Wavefront &wf = mutable_wavefront();
+    if (auto base = op.simd_vgpr_base_mut(wf); base && !mutable_cu().owns_vgpr_range(wf, *base, 1))
+      return;
+    if (op.simd_vgpr_storage_mut(wf) && !(wf.vgpr_write_mask() & (uint64_t{1} << lane)))
+      return;
+    op.write_lane(wf, lane, value);
+  }
+  /// Optimization: fast path for generated operands opted in via kStaticRegisterAccess.
+  template <typename OperandT>
+    requires OperandT::kStaticRegisterAccess
+  void write_lane(const OperandT &op, uint32_t lane, uint32_t value) const {
     Wavefront &wf = mutable_wavefront();
     if (auto base = op.simd_vgpr_base_mut(wf); base && !mutable_cu().owns_vgpr_range(wf, *base, 1))
       return;
@@ -1113,7 +1153,7 @@ public:
   void read_chunk(const Operand &op, uint32_t lane_base, uint32_t count, uint32_t *out) const {
     const Wavefront &wf = wavefront();
     if (auto base = op.simd_vgpr_base(wf); base && !cu_->owns_vgpr_range(wf, *base, 1)) {
-      std::fill_n(out, count, 0u);
+      std::ranges::fill_n(out, count, 0u);
       return;
     }
     op.read_lane_chunk(wf, lane_base, count, out);

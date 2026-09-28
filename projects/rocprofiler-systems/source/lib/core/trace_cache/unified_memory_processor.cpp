@@ -21,9 +21,7 @@
 #include <type_traits>
 #include <utility>
 
-namespace rocprofsys
-{
-namespace trace_cache
+namespace rocprofsys::trace_cache
 {
 
 namespace detail
@@ -518,5 +516,4 @@ unified_memory_processor_t::write_json_output(std::ostream& out) const
     out << root.dump(2);
 }
 
-}  // namespace trace_cache
-}  // namespace rocprofsys
+}  // namespace rocprofsys::trace_cache

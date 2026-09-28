@@ -99,8 +99,8 @@ TEST(Gfx1250SimulationTest, MultiWaveDispatchHonorsPackedTidComponentCount) {
       lane31_values.push_back(wf.vgpr(0, 31));
     }
 
-    std::sort(lane0_values.begin(), lane0_values.end());
-    std::sort(lane31_values.begin(), lane31_values.end());
+    std::ranges::sort(lane0_values);
+    std::ranges::sort(lane31_values);
     const uint32_t y_scale = component_count >= 1 ? 1u << 10 : 0;
     const std::vector<uint32_t> expected_lane0{0u, y_scale, 2 * y_scale, 3 * y_scale};
     const std::vector<uint32_t> expected_lane31{31u, 31u | y_scale, 31u | (2 * y_scale),
@@ -115,7 +115,7 @@ std::vector<uint64_t> collect_active_exec_masks(Gfx1250Sim &sim) {
   std::vector<uint64_t> exec_masks;
   for (const auto &wf : sim.snapshot->snapshots())
     exec_masks.push_back(wf.exec);
-  std::sort(exec_masks.begin(), exec_masks.end());
+  std::ranges::sort(exec_masks);
   return exec_masks;
 }
 
@@ -508,7 +508,7 @@ TEST(Gfx1250SimulationTest, Ttmp8EncodesWaveIdWithinWorkgroup) {
   std::vector<uint32_t> ttmp8_values;
   for (const auto &wf : sim.snapshot->snapshots())
     ttmp8_values.push_back(wf.ttmp(8));
-  std::sort(ttmp8_values.begin(), ttmp8_values.end());
+  std::ranges::sort(ttmp8_values);
   EXPECT_EQ(ttmp8_values, (std::vector<uint32_t>{0, 1u << 25}));
 }
 
@@ -532,7 +532,7 @@ TEST(Gfx1250SimulationTest, Ttmp8EncodesQueuePacketId) {
     ASSERT_GE(wf.dispatch_id, 1u);
     by_dispatch[i++] = {wf.dispatch_id, wf.ttmp(8) & 0x1FFFFFFu};
   }
-  std::sort(by_dispatch.begin(), by_dispatch.end());
+  std::ranges::sort(by_dispatch);
   ASSERT_LT(by_dispatch[0].first, by_dispatch[1].first);
   EXPECT_EQ(by_dispatch[0].second, 0u);
   EXPECT_EQ(by_dispatch[1].second, 1u);

@@ -18,6 +18,7 @@ Pre-built simulator configs are in `configs/`:
 | `gfx950_mi355x_kmd_2gpu.json` | Two CDNA4 GPUs (multi-GPU daemon mode) |
 | `gfx1250_mi455x.json` | Single CDNA5 GPU (standalone or PCI/VFIO simulation) |
 | `gfx1250_mi455x_kmd_4gpu.json` | Four MI455X GPUs (multi-GPU daemon mode) |
+| `gfx1251_synthetic.json` | Minimal synthetic gfx1251 topology for functional simulation; not a product model |
 | `gfx1100_w7900.json` | Single RDNA3 GPU (standalone simulation) |
 | `gfx1151.json` | Single RDNA3.5 GPU (standalone simulation) |
 | `gfx1201_r9700.json` | Single RDNA4 GPU (standalone simulation) |
@@ -93,7 +94,15 @@ The example above is intentionally minimal.
 | `async_helper_threads` | int | Shared MMA helpers per VM. Omitted/-1 selects the table; 0 disables; explicit values are 0–128. |
 | `thread_allocations` | array | Preferred `num_threads` / `cpu_dispatch_threads` / `async_helper_threads` triples, selected by total execution-thread cost. |
 | `exec_mode` | string | Execution mode. Use `"clocked"` for clocked execution; `"functional"` is the default/fallback. |
-| `vm.arch` | string | Architecture: `cdna3`, `cdna4`, etc. |
+| `vm.arch` | string | ISA architecture family: `cdna3`, `cdna4`, `cdna5`, etc. |
+| `vm.target` | string | Optional concrete GPU target, such as `gfx1250` or `gfx1251`. |
+
+`vm.target` selects target-specific instruction legality and behavior within an
+ISA architecture family. When it is present, it must belong to `vm.arch`. If
+both the target binding and `vm.gpu.device.gfx_target_version` provide nonzero
+packed versions, they must match. CDNA5 currently defaults an omitted target to
+`gfx1250` for compatibility; new configs for an architecture with multiple
+concrete targets should specify the target explicitly.
 
 `exec_mode` is matched literally: only the exact string `"clocked"` selects
 clocked mode. If the field is omitted, set to `"functional"`, or given any

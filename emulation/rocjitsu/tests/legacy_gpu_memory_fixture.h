@@ -68,9 +68,9 @@ public:
   using GpuMemory::write32;
 
   void register_process(uint32_t vmid, amdgpu::LegacyPageTable *page_table,
-                        std::shared_mutex *page_table_mutex,
+                        util::DistributedSharedMutex *page_table_mutex,
                         const uint64_t *page_table_generation = nullptr,
-                        std::shared_ptr<std::shared_mutex> request_mutex = {}) {
+                        std::shared_ptr<util::DistributedSharedMutex> request_mutex = {}) {
     unregister_process(vmid);
     const amdgpu::AddressSpaceHandle handle =
         legacy_vm_.register_address_space(vmid, {.page_table = page_table,

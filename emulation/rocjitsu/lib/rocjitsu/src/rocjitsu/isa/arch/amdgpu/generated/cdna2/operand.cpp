@@ -120,7 +120,7 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value)
     break;
   case OperandType::OPR_SSRC_LANESEL:
     if (!((encoding_value >= 0 && encoding_value <= 124) ||
-          (encoding_value >= 128 && encoding_value <= 191)))
+          (encoding_value >= 128 && encoding_value <= 192)))
       defer_encoding_error(EncodingError::InvalidLaneSelector);
     break;
   case OperandType::OPR_SSRC_NOLIT:
@@ -773,6 +773,8 @@ std::string Operand::name() const {
     break;
   }
   case OperandType::OPR_SSRC_LANESEL: {
+    if (encoding_value_ == 192u)
+      return "64";
     if (encoding_value_ >= OpSelSsrcLanesel::OPR_SSRC_LANESEL_SGPR_MIN &&
         encoding_value_ <= OpSelSsrcLanesel::OPR_SSRC_LANESEL_SGPR_MAX)
       return reg_name("s", encoding_value_ - OpSelSsrcLanesel::OPR_SSRC_LANESEL_SGPR_MIN,

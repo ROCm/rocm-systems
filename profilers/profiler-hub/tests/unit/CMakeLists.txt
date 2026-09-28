@@ -13,6 +13,8 @@ set(UNIT_TEST_SOURCES
     writer_test.cpp
     reader_test.cpp
     sqlite_backend_impl_test.cpp
+    ph_ctx_test.cpp
+    c_api_test.cpp
 )
 
 add_executable(profiler-hub_unit_tests ${UNIT_TEST_SOURCES})
@@ -46,6 +48,14 @@ target_compile_definitions(
 target_compile_definitions(
     profiler-hub_unit_tests
     PRIVATE PROFILER_HUB_SHARED_LIB="$<TARGET_FILE:profiler-hub>"
+)
+
+target_compile_definitions(
+    profiler-hub_unit_tests
+    PRIVATE
+        PROFILER_HUB_VERSION_MAJOR=${profiler-hub_VERSION_MAJOR}
+        PROFILER_HUB_VERSION_MINOR=${profiler-hub_VERSION_MINOR}
+        PROFILER_HUB_VERSION_PATCH=${profiler-hub_VERSION_PATCH}
 )
 add_dependencies(profiler-hub_unit_tests profiler-hub)
 

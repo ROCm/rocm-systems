@@ -23,9 +23,7 @@
 #include <set>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace component
+namespace rocprofsys::component
 {
 struct callchain : comp::empty_base
 {
@@ -72,5 +70,4 @@ struct callchain : comp::empty_base
 private:
     data_t m_data = {};
 };
-}  // namespace component
-}  // namespace rocprofsys
+}  // namespace rocprofsys::component

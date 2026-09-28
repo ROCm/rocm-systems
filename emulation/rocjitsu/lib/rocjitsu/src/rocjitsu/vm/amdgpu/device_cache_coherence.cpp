@@ -17,7 +17,7 @@ namespace amdgpu {
 namespace {
 
 template <typename T> void unregister_cache(std::vector<T *> &caches, T *cache) {
-  typename std::vector<T *>::iterator position = std::find(caches.begin(), caches.end(), cache);
+  typename std::vector<T *>::iterator position = std::ranges::find(caches, cache);
   assert(position != caches.end());
   if (position != caches.end())
     caches.erase(position);
@@ -193,7 +193,7 @@ void DeviceCacheCoherence::register_l2_cache(L2Cache *cache) {
   std::unique_lock lock(mutex_);
   assert(cache != nullptr);
   const std::vector<L2Cache *>::iterator position =
-      std::lower_bound(l2_caches_.begin(), l2_caches_.end(), cache, std::less<L2Cache *>());
+      std::ranges::lower_bound(l2_caches_, cache, std::less<L2Cache *>{});
   assert(position == l2_caches_.end() || *position != cache);
   if (position == l2_caches_.end() || *position != cache)
     l2_caches_.insert(position, cache);
@@ -208,8 +208,7 @@ void DeviceCacheCoherence::register_memory_side_cache(MemorySideCache *cache) {
   std::unique_lock lock(mutex_);
   assert(cache != nullptr);
   const std::vector<MemorySideCache *>::iterator position =
-      std::lower_bound(memory_side_caches_.begin(), memory_side_caches_.end(), cache,
-                       std::less<MemorySideCache *>());
+      std::ranges::lower_bound(memory_side_caches_, cache, std::less<MemorySideCache *>{});
   assert(position == memory_side_caches_.end() || *position != cache);
   if (position == memory_side_caches_.end() || *position != cache)
     memory_side_caches_.insert(position, cache);
