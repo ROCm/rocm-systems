@@ -88,6 +88,21 @@ def select_labeled_tests(tests: list[dict], label_regex: str) -> list[dict]:
     ]
 
 
+def apply_gtest_filter_env(env: dict, gtest_filter: str) -> dict:
+    """Drop an empty GTEST_FILTER.
+
+    The workflow sets GTEST_FILTER to "" when no filter was requested. gtest
+    treats that empty value as a filter matching nothing, so every binary
+    reports "Running 0 tests" and exits.
+    """
+    test_env = env.copy()
+    if gtest_filter:
+        test_env["GTEST_FILTER"] = gtest_filter
+    else:
+        test_env.pop("GTEST_FILTER", None)
+    return test_env
+
+
 def cmake_quote(value: str) -> str:
     escaped = value.replace("\\", "\\\\").replace('"', '\\"')
     return f'"{escaped}"'
@@ -173,7 +188,7 @@ def run_binary(
     started = time.monotonic()
     proc = subprocess.Popen(
         command,
-        env=env,
+        env=apply_gtest_filter_env(env, gtest_filter),
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -332,7 +347,7 @@ def run_labeled_ctest(
     print(f"Running: {shlex.join(command)}", flush=True)
     proc = subprocess.Popen(
         command,
-        env=env,
+        env=apply_gtest_filter_env(env, gtest_filter),
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
