@@ -97,7 +97,8 @@ extern "C"
      * @param events Out parameter receiving the event list.
      * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_CONTEXT if
      *         @p ctx is null, PH_RESULT_INVALID_ARGUMENT if @p events is
-     *         null or @p track_id does not identify a known track.
+     *         null or @p track_id does not identify a known track,
+     *         PH_RESULT_INTERNAL_ERROR on failure.
      * @note @p events->events and every ph_event_t::name in it point into
      *       memory owned by @p ctx and follow the same lifetime rule as
      *       ph_get_track_list().
@@ -119,7 +120,8 @@ extern "C"
      * @param samples Out parameter receiving the sample list.
      * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_CONTEXT if
      *         @p ctx is null, PH_RESULT_INVALID_ARGUMENT if @p samples is
-     *         null or @p track_id does not identify a known track.
+     *         null or @p track_id does not identify a known track,
+     *         PH_RESULT_INTERNAL_ERROR on failure.
      * @note @p samples->samples points into memory owned by @p ctx and
      *       follows the same lifetime rule as ph_get_track_list().
      */

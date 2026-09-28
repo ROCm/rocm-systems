@@ -23,6 +23,8 @@ extern "C"
         PH_RESULT_INVALID_CONTEXT,           /**< Context argument was null or invalid. */
         PH_RESULT_INVALID_ARGUMENT,          /**< A non-context argument was null or
                                                  invalid. */
+        PH_RESULT_INTERNAL_ERROR,            /**< An internal error occurred while
+                                                 servicing the call. */
     } ph_result_t;
 
     struct ph_ctx;
