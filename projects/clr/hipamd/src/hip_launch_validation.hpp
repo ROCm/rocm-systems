@@ -29,6 +29,16 @@ enum LaunchViolation : uint16_t {
   kSharedMemOverflow   = 1u << 8,  //!< sharedMemBytes does not fit uint32_t
 };
 
+//! Helper specifying most used bits to be checked
+static constexpr uint16_t kConfigBits =
+    kGridOverflow | kBlockOverflow | kClusterOverflow | kClusterIndivisible;
+
+//! One entry in a launch-error rule table: the violation bits it matches and the error to return.
+struct LaunchErrorRule {
+  uint16_t violations;   //!< bits this rule matches
+  hipError_t error;      //!< code to return if violation occurred
+};
+
 //! Structure to store launch parameters. Lives here rather than in platform/ndrange.hpp so the
 //! ctor can read amd::Device::info() without an include cycle.
 struct LaunchParams {
@@ -128,6 +138,16 @@ struct LaunchParams {
     return true;
   }
 
+  //! Return the error for the FIRST rule matching any violation bit; hipSuccess if none. Callers
+  //! list rules in their original check order so the reported error code does not change.
+  template <size_t N> hipError_t Validate(const LaunchErrorRule (&rules)[N]) const {
+    if (violations_ == kLaunchOk) return hipSuccess;
+    for (const auto& rule : rules) {
+      if (violations_ & rule.violations) return rule.error;
+    }
+    return hipSuccess;
+  }
+
   static constexpr uint16_t kInvalidConfigBits =
       kGridOverflow | kBlockOverflow | kClusterOverflow | kClusterIndivisible | kZeroBlock;
 
@@ -148,27 +168,6 @@ struct HIPLaunchParams : public LaunchParams {
                                  blockX, blockY, blockZ, sharedMemBytes, device, clusterX,
                                  clusterY, clusterZ, gridX, gridY, gridZ, true /*hipParams*/) {}
 };
-
-//! One entry in a launch-error rule table: the violation bits it matches and the error to return.
-struct LaunchErrorRule {
-  uint16_t violations;   //!< bits this rule matches
-  hipError_t error;      //!< code to return if violation occurred
-};
-
-//! Return the error for the FIRST rule matching any set bit; hipSuccess if none. Callers list
-//! rules in their original check order so the reported error code does not change.
-template <size_t N>
-inline hipError_t MapLaunchViolations(uint16_t violations, const LaunchErrorRule (&rules)[N]) {
-  if (violations == kLaunchOk) return hipSuccess;
-  for (const auto& rule : rules) {
-    if (violations & rule.violations) return rule.error;
-  }
-  return hipSuccess;
-}
-
-//! Helper specifying most used bits to be checked
-static constexpr uint16_t kConfigBits =
-    kGridOverflow | kBlockOverflow | kClusterOverflow | kClusterIndivisible;
 
 }  // namespace hip
 
