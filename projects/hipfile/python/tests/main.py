@@ -27,11 +27,30 @@ from hipfile import (
     get_version,
 )
 
-# Max IO in a single transaction is 2GiB - 4KiB as set by the Linux Kernel.
-# Larger IOs will be quietly truncated.
-MAX_TRANSFER_SIZE = 2 * 1024 * 1024 * 1024 - 4 * 1024
-
+# Size of a single read/write transaction. Keep it a multiple of the 4 KiB
+# O_DIRECT block so every transfer but a trailing partial one stays eligible for
+# the fast path -- hipFile silently falls back to the buffered backend when the
+# offset or length is unaligned, which would defeat the point of this check.
+# Must also stay under the kernel's 2 GiB - 4 KiB per-transaction ceiling, above
+# which hipFile clamps the request and returns short.
 CHUNK_SIZE = 1 * 1024 * 1024  # 1 MiB
+
+
+def is_same_file(input_path, output_path):
+    """Return whether both paths name the same file on disk.
+
+    Compares the resolved paths, which normalizes relative spellings, ``..``
+    segments and symlinks, and additionally compares inode identity when both
+    already exist, which catches hard links and bind mounts that resolve to
+    different paths.
+    """
+    if input_path.resolve() == output_path.resolve():
+        return True
+    try:
+        return input_path.samefile(output_path)
+    except OSError:
+        # At least one does not exist yet, so they cannot be the same file.
+        return False
 
 
 def parse_args():
@@ -47,7 +66,17 @@ def parse_args():
         type=pathlib.Path,
         help="File to write through hipFile. Must live on an AIS-capable filesystem.",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if is_same_file(args.input, args.output):
+        # The output is opened O_TRUNC, so a shared path destroys the input
+        # before it is ever read and leaves both digests covering the same
+        # wreckage -- which the round trip would then report as a pass.
+        parser.error(
+            f"input and output must name different files, but '{args.input}' "
+            f"and '{args.output}' are the same file. Writing would destroy the "
+            f"input before it is read."
+        )
+    return args
 
 
 def sha256(path):
@@ -61,32 +90,70 @@ def sha256(path):
     return digest.hexdigest()
 
 
+def drain_write(fh_output, buffer, count, file_offset):
+    """Write *count* bytes of *buffer* to *fh_output* at *file_offset*.
+
+    ``hipFileWrite`` may transfer fewer bytes than asked for, so keep issuing
+    writes -- advancing both the file and buffer offsets -- until the whole
+    range is out.
+    """
+    written = 0
+    while written < count:
+        put = fh_output.write(buffer, count - written, file_offset + written, written)
+        if put == 0:
+            raise RuntimeError(
+                f"Write to {fh_output.path} stalled at offset "
+                f"{file_offset + written}: {written} of {count} bytes written."
+            )
+        written += put
+
+
+def copy(fh_input, fh_output, buffer, size):
+    """Copy *size* bytes from *fh_input* to *fh_output* through *buffer*.
+
+    Both sides are driven by the byte counts the calls return rather than the
+    counts requested: a short read must not cause the untouched tail of the
+    buffer -- which holds whatever ``hipMalloc`` handed back, not file data --
+    to be written out, and a short write must be finished rather than accepted.
+    """
+    offset = 0
+    while offset < size:
+        want = min(CHUNK_SIZE, size - offset)
+        got = fh_input.read(buffer, want, offset, 0)
+        if got == 0:
+            raise RuntimeError(
+                f"Unexpected EOF reading {fh_input.path} at offset {offset}: "
+                f"{offset} of {size} bytes read."
+            )
+        drain_write(fh_output, buffer, got, offset)
+        offset += got
+    return offset
+
+
 def transfer(input_path, output_path):
     """Copy *input_path* to *output_path* via GPU memory using hipFile."""
     print(f"hipFile Version: {get_version()}")
     print(f"Driver Use Count Before: {Driver.use_count()}")
 
-    size = min(input_path.stat().st_size, MAX_TRANSFER_SIZE)
-    buffer = hipMalloc(size)
+    size = input_path.stat().st_size
+    buffer = hipMalloc(CHUNK_SIZE)
     buffer_ptr = buffer.value  # pylint: disable=C0103  # False Positive
     print(f"Buffer located at: {buffer_ptr} | {hex(buffer_ptr)}")
 
     with Driver() as hipfile_driver:
         print(f"Driver Use Count After: {hipfile_driver.use_count()}")
-        with Buffer.from_ctypes_void_p(buffer, size, 0) as registered_buffer:
+        with Buffer.from_ctypes_void_p(buffer, CHUNK_SIZE, 0) as registered_buffer:
             with FileHandle(
                 input_path,
-                os.O_RDWR | os.O_DIRECT | os.O_CREAT,
+                os.O_RDONLY | os.O_DIRECT,
                 handle_type=FileHandleType.OPAQUE_FD,
             ) as fh_input:
                 with FileHandle(
                     output_path, os.O_RDWR | os.O_DIRECT | os.O_CREAT | os.O_TRUNC
                 ) as fh_output:
-                    print(f"Transferring {size} bytes...")
-                    bytes_read = fh_input.read(registered_buffer, size, 0, 0)
-                    print(f"Bytes Read: {bytes_read}")
-                    bytes_written = fh_output.write(registered_buffer, size, 0, 0)
-                    print(f"Bytes Written: {bytes_written}")
+                    print(f"Transferring {size} bytes in {CHUNK_SIZE} byte chunks...")
+                    transferred = copy(fh_input, fh_output, registered_buffer, size)
+                    print(f"Bytes Transferred: {transferred}")
 
     hipFree(buffer)
 
