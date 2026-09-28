@@ -20,10 +20,7 @@
 #include <optional>
 #include <string_view>
 
-namespace rocprofsys::domains::callback
-{
-
-namespace rccl
+namespace rocprofsys::domains::callback::rccl
 {
 
 template <policies::domain_service::externals Externals>
@@ -68,7 +65,6 @@ register_gpu_pmc(std::uint32_t device_id)
     register_rccl_info(Externals::rccl_recv_label,
                        "Tracks RCCL communication data sizes (recv)");
 }
-}  // namespace rccl
 
 template <policies::domain_service::externals Externals>
 struct rccl_api_category
@@ -138,7 +134,7 @@ on_rccl_exit(typename SdkBackend::callback_tracing_record_t record,
 
 template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals>
-inline constexpr auto k_rccl = callback_domain_definition<SdkBackend>{
+inline constexpr auto k_rccl_api = callback_domain_definition<SdkBackend>{
     .meta      = domain_descriptor{ .name  = "rccl_api",
                                     .id    = SdkBackend::CALLBACK_TRACING_RCCL_API,
                                     .mode  = collection_mode::callback,
@@ -149,4 +145,4 @@ inline constexpr auto k_rccl = callback_domain_definition<SdkBackend>{
     .on_configure = on_rccl_configure<SdkBackend, Externals>
 };
 
-}  // namespace rocprofsys::domains::callback
+}  // namespace rocprofsys::domains::callback::rccl

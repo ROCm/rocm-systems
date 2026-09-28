@@ -28,7 +28,7 @@
 #include "library/rocprofiler-sdk/callback/hsa/core_api.hpp"
 #include "library/rocprofiler-sdk/callback/hsa/finalize_ext_api.hpp"
 #include "library/rocprofiler-sdk/callback/hsa/image_ext_api.hpp"
-#include "library/rocprofiler-sdk/callback/rccl.hpp"
+#include "library/rocprofiler-sdk/callback/rccl/rccl.hpp"
 #include "library/rocprofiler-sdk/callback/rocdecode_api.hpp"
 #include "library/rocprofiler-sdk/callback/rocjpeg_api.hpp"
 #include "library/rocprofiler-sdk/callback/rocshmem_api.hpp"
@@ -181,7 +181,7 @@ private:
         result.add(callback::hsa::k_amd_ext_api<SdkBackend, Externals>);
         result.add(callback::hsa::k_image_ext_api<SdkBackend, Externals>);
         result.add(callback::hsa::k_finalize_ext_api<SdkBackend, Externals>);
-        result.add(callback::k_rccl<SdkBackend, Externals>);
+        result.add(callback::rccl::k_rccl_api<SdkBackend, Externals>);
 
         constexpr auto k_hip_stream_min_version =
             version{ .major = 0, .minor = 7, .patch = 0 };
