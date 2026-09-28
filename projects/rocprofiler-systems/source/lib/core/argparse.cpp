@@ -194,8 +194,8 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 auto _monochrome     = p.get<bool>("monochrome");
                 _data.out.monochrome = _monochrome;
                 p.set_use_color(!_monochrome);
-                update_env(_data, env_vars::MONOCHROME, (_monochrome) ? "1" : "0");
-                update_env(_data, "MONOCHROME", (_monochrome) ? "1" : "0");
+                update_env(_data, env_vars::MONOCHROME, _monochrome ? "1" : "0");
+                update_env(_data, "MONOCHROME", _monochrome ? "1" : "0");
             });
 
         _data.reg.processed_environs.emplace("monochrome");

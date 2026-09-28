@@ -690,12 +690,9 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
 
                 return;
             }
-            else
-            {
-                LOG_DEBUG(
-                    "[causal] experiment failed to start. Number of PC candidates: {}",
-                    eligible_pc_candidates.load());
-            }
+
+            LOG_DEBUG("[causal] experiment failed to start. Number of PC candidates: {}",
+                      eligible_pc_candidates.load());
         }
 
         LOG_TRACE("[causal] experiment started. Number of PC candidates: {}",
@@ -877,7 +874,7 @@ sample_selection(size_t _nitr, size_t _wait_ns)
 
             if(get_causal_mode() == state::process::CausalMode::function)
             {
-                _sym_addr = (_dl_info.symbol) ? _dl_info.symbol.address() : _addr;
+                _sym_addr = _dl_info.symbol ? _dl_info.symbol.address() : _addr;
             }
 
             // lookup the PC line info at either the address or the symbol address
@@ -892,7 +889,7 @@ sample_selection(size_t _nitr, size_t _wait_ns)
             if(ROCPROFSYS_UNLIKELY(config::get_debug()))
             {
                 auto _location =
-                    (_dl_info.location)
+                    _dl_info.location
                         ? path::realpath(std::string{ _dl_info.location.name })
                         : std::string{};
                 for(const auto& itr : linfo)
@@ -1104,18 +1101,16 @@ pop_progress_point(std::string_view _name)
         _data->pop_back();
         return;
     }
-    else
+
+    auto _hash = tim::add_hash_id(_name);
+    for(auto itr = _data->rbegin(); itr != _data->rend(); ++itr)
     {
-        auto _hash = tim::add_hash_id(_name);
-        for(auto itr = _data->rbegin(); itr != _data->rend(); ++itr)
+        if((*itr)->get_hash() == _hash)
         {
-            if((*itr)->get_hash() == _hash)
-            {
-                (*itr)->stop();
-                (*itr)->pop();
-                _data->destroy(itr);
-                return;
-            }
+            (*itr)->stop();
+            (*itr)->pop();
+            _data->destroy(itr);
+            return;
         }
     }
 }
@@ -1149,18 +1144,16 @@ sample_virtual_speedup()
     {
         return 0;
     }
-    else if(speedup_dist.size() == 1)
+    if(speedup_dist.size() == 1)
     {
         return speedup_dist.front();
     }
-    else
-    {
-        struct virtual_speedup
-        {};
-        auto _dist =
-            std::uniform_int_distribution<size_t>{ size_t{ 0 }, speedup_dist.size() - 1 };
-        return speedup_dist.at(_dist(get_engine<virtual_speedup>()));
-    }
+
+    struct virtual_speedup
+    {};
+    auto _dist =
+        std::uniform_int_distribution<size_t>{ size_t{ 0 }, speedup_dist.size() - 1 };
+    return speedup_dist.at(_dist(get_engine<virtual_speedup>()));
 }
 
 void

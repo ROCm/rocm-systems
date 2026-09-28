@@ -59,10 +59,8 @@ dynamic_library::invoke(std::string_view _name, RetT (*&_func)(Args...), Args...
         {
             return (*_func)(_args...);
         }
-        else
-        {
-            LOG_WARNING("[rocprof-sys][pid={}]> {} :: {}", getpid(), _name, dlerror());
-        }
+
+        LOG_WARNING("[rocprof-sys][pid={}]> {} :: {}", getpid(), _name, dlerror());
     }
     return RetT{};
 }

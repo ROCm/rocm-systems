@@ -332,7 +332,7 @@ rocprofsys_register_coverage_hidden(const char* file, const char* func, size_t a
     {
         return;
     }
-    else if(rocprofsys::state::process::get() >= rocprofsys::state::process::Finalized)
+    if(rocprofsys::state::process::get() >= rocprofsys::state::process::Finalized)
     {
         return;
     }
