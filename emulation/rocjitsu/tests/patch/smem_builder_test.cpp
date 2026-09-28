@@ -203,7 +203,8 @@ TEST(SmemBuilder, OutOfRangeRegisterIndexIsRejectedOnEveryTarget) {
 TEST(SmemBuilder, OffsetIsBoundedByTheArchSignedImmediateRange) {
   for (const SmemArch &a : kArchs) {
     EXPECT_EQ(max_smem_byte_offset(a.arch), a.max_byte_offset) << a.name;
-    EXPECT_NO_THROW((void)build_s_load_dwordx2(/*sdst=*/4, /*sbase=*/0, a.max_byte_offset, a.arch))
+    const uint32_t aligned_max = a.max_byte_offset & ~0x3u;
+    EXPECT_NO_THROW((void)build_s_load_dwordx2(/*sdst=*/4, /*sbase=*/0, aligned_max, a.arch))
         << a.name;
     EXPECT_THROW((void)build_s_load_dwordx2(/*sdst=*/4, /*sbase=*/0, a.max_byte_offset + 1, a.arch),
                  util::InvalidInst)
@@ -213,7 +214,7 @@ TEST(SmemBuilder, OffsetIsBoundedByTheArchSignedImmediateRange) {
     // refused. Nothing in simulation distinguishes these, since the decoder
     // zero-extends, so this bound is the only guard against an offset that runs
     // backwards on hardware.
-    const uint32_t unsigned_max = (a.max_byte_offset << 1) | 1u;
+    const uint32_t unsigned_max = ((a.max_byte_offset << 1) | 1u) & ~0x3u;
     EXPECT_THROW((void)build_s_load_dwordx2(/*sdst=*/4, /*sbase=*/0, unsigned_max, a.arch),
                  util::InvalidInst)
         << a.name;
@@ -223,6 +224,16 @@ TEST(SmemBuilder, OffsetIsBoundedByTheArchSignedImmediateRange) {
   EXPECT_THROW((void)build_s_load_dwordx2(4, 0, 0x100000u, ROCJITSU_CODE_ARCH_CDNA4),
                util::InvalidInst);
   EXPECT_NO_THROW((void)build_s_load_dwordx2(4, 0, 0x100000u, ROCJITSU_CODE_ARCH_RDNA4));
+}
+
+// Scalar loads drop the low two address bits, so offset 1 would load from the
+// base itself.
+TEST(SmemBuilder, UnalignedOffsetIsRejectedOnEveryTarget) {
+  for (const SmemArch &a : kArchs) {
+    EXPECT_THROW((void)build_s_load_dwordx2(/*sdst=*/4, /*sbase=*/0, /*byte_offset=*/1, a.arch),
+                 util::InvalidInst)
+        << a.name;
+  }
 }
 
 // The scalar-load wait is its own counter. On GFX12 it must be KMCNT: the

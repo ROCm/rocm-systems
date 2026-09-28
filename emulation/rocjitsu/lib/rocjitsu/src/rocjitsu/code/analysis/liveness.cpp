@@ -36,6 +36,8 @@ namespace {
   return count <= std::numeric_limits<uint8_t>::max();
 }
 
+// Iterative DFS from start that appends blocks in post-order, never leaving
+// the allowed set.
 void dfs_reverse_post_order(const BasicBlock &start,
                             const std::unordered_set<const BasicBlock *> &allowed,
                             std::unordered_set<const BasicBlock *> &visited,
@@ -61,6 +63,7 @@ void dfs_reverse_post_order(const BasicBlock &start,
   }
 }
 
+// Ordinary registers that du overwrites on every path and in every lane.
 [[nodiscard]] RegisterSet kill_defs(const InstDefUse &du, ExecState exec_before) {
   // Ordinary registers only: special singletons (EXEC/VCC/...) live in du.defs
   // but are not part of scratch-allocation liveness and must not become kills.
@@ -79,6 +82,7 @@ void dfs_reverse_post_order(const BasicBlock &start,
   return kills;
 }
 
+// The 32-bit word at offset in text, or nullopt if it runs past the end.
 [[nodiscard]] std::optional<uint32_t> text_word_at(std::span<const uint8_t> text, uint64_t offset) {
   if (text.empty() || offset + sizeof(uint32_t) > text.size())
     return std::nullopt;
@@ -87,6 +91,8 @@ void dfs_reverse_post_order(const BasicBlock &start,
   return word;
 }
 
+// True if inst may reach VGPRs through M0-relative or GPR-index addressing,
+// which explicit operands do not show.
 [[nodiscard]] bool may_access_vgprs_indirectly(const Instruction &inst,
                                                std::span<const uint8_t> text, rj_code_arch_t arch) {
   const std::string_view mnemonic = inst.mnemonic();
@@ -140,6 +146,7 @@ LivenessAnalysis::LivenessAnalysis(UnavailableTag) : available_(false) {}
 
 LivenessAnalysis LivenessAnalysis::unavailable() { return LivenessAnalysis(UnavailableTag{}); }
 
+// Blocks are visited in scope order, so unreachable blocks still appear.
 std::vector<const BasicBlock *> reverse_post_order(KernelBlockScope blocks) {
   std::vector<const BasicBlock *> postorder;
   std::unordered_set<const BasicBlock *> allowed;
@@ -162,6 +169,7 @@ std::vector<const BasicBlock *> reverse_post_order(KernelBlockScope blocks) {
 
 namespace {
 
+// Raises bound past operand if it names an allocatable ordinary SGPR.
 void raise_sgpr_bound_for_operand(uint32_t &bound, const Operand *operand) {
   if (operand == nullptr)
     return;
@@ -175,6 +183,7 @@ void raise_sgpr_bound_for_operand(uint32_t &bound, const Operand *operand) {
 
 } // namespace
 
+// Syntactic scan over explicit operands; see liveness.h for what is excluded.
 uint32_t explicit_ordinary_sgpr_bound(KernelBlockScope blocks) {
   uint32_t bound = 0;
   for (BasicBlock *block : blocks) {

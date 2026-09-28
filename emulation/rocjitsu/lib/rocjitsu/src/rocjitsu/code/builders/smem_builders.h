@@ -92,7 +92,7 @@ inline constexpr uint32_t kSmem24BitMaxByteOffset = 0x7FFFFFu;
 /// @param sbase Base of the 64-bit address SGPR pair. Must be even: the encoding
 ///        carries the index halved and has no bit for the low one.
 /// @param byte_offset Forward immediate byte offset from the base address. Must
-///        not exceed @ref max_smem_byte_offset for @p arch.
+///        be a multiple of 4 and not exceed @ref max_smem_byte_offset for @p arch.
 ///
 /// @details Three things the caller should not have to know. SBASE is the
 /// register index halved on every generation; the decoder multiplies it back.
@@ -105,7 +105,7 @@ inline constexpr uint32_t kSmem24BitMaxByteOffset = 0x7FFFFFu;
 /// than a shared constant or the generic scalar-source table.
 ///
 /// @throws util::InvalidInst if either pair base is odd or out of field range, or
-///         if @p byte_offset is out of range.
+///         if @p byte_offset is unaligned or out of range.
 /// @throws util::UnimplementedInst for a non-AMDGPU architecture.
 [[nodiscard]] inline std::array<uint32_t, 2>
 build_s_load_dwordx2(uint16_t sdst, uint16_t sbase, uint32_t byte_offset, rj_code_arch_t arch) {
@@ -123,6 +123,10 @@ build_s_load_dwordx2(uint16_t sdst, uint16_t sbase, uint32_t byte_offset, rj_cod
     throw util::InvalidInst("SMEM destination SGPR index exceeds the SDATA field");
   if (byte_offset > max_smem_byte_offset(arch))
     throw util::InvalidInst("SMEM immediate byte offset out of range for target architecture");
+  // Scalar loads ignore the low two address bits, so an unaligned offset would
+  // silently load from the aligned-down address.
+  if ((byte_offset & 0x3u) != 0)
+    throw util::InvalidInst("SMEM immediate byte offset must be a multiple of 4");
 
   const auto base = static_cast<uint8_t>(sbase / 2);
   const auto data = static_cast<uint8_t>(sdst);
