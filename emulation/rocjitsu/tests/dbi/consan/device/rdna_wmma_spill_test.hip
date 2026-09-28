@@ -10,6 +10,8 @@ namespace {
 // register pressure forces the probe to spill; memory waits alone cannot make
 // the pending WMMA result safe to save and later restore. The explicit wave
 // scheduling mode matches the hipBLASLt kernel that exposed the corruption.
+// Use the architectural register ID because ROCm 7.2 assemblers do not yet
+// recognize the HW_REG_WAVE_SCHED_MODE spelling used by newer assemblers.
 __global__ __launch_bounds__(32) void rdna_wmma_spill_for_consan(float *output) {
 #if defined(__gfx1201__)
   __shared__ uint4 staged[32];
@@ -39,7 +41,7 @@ __global__ __launch_bounds__(32) void rdna_wmma_spill_for_consan(float *output) 
       "v_mov_b32 v10, v8\n\t"
       "v_mov_b32 v11, v8\n\t"
       "s_wait_dscnt 0\n\t"
-      "s_setreg_imm32_b32 hwreg(HW_REG_WAVE_SCHED_MODE, 0, 2), 2\n\t"
+      "s_setreg_imm32_b32 hwreg(26, 0, 2), 2\n\t"
       "v_wmma_f32_16x16x16_f16 v[0:7], v[8:11], v[8:11], v[0:7]\n\t"
       "ds_load_b128 v[20:23], %8\n\t" RJ_CONSAN_DEVICE_LARGE_CAVE "s_wait_dscnt 0\n\t"
       "s_wait_alu 0\n\t"
@@ -53,7 +55,7 @@ __global__ __launch_bounds__(32) void rdna_wmma_spill_for_consan(float *output) 
       "v_mov_b32 v\\r, v\\r\n\t"
       ".endr\n\t"
       "s_wait_dscnt 0\n\t"
-      "s_setreg_imm32_b32 hwreg(HW_REG_WAVE_SCHED_MODE, 0, 2), 0\n\t"
+      "s_setreg_imm32_b32 hwreg(26, 0, 2), 0\n\t"
       : "+v"(accumulator0), "+v"(accumulator1), "+v"(accumulator2), "+v"(accumulator3),
         "+v"(accumulator4), "+v"(accumulator5), "+v"(accumulator6), "+v"(accumulator7)
       : "v"(address)

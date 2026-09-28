@@ -76,8 +76,7 @@ mod tests {
             let agent = agent(name).unwrap();
             let json = serde_json::to_value(agent).unwrap();
             assert_eq!(
-                json["vm"]["gpu"]["device"]["num_sdma_queues_per_engine"],
-                expected,
+                json["vm"]["gpu"]["device"]["num_sdma_queues_per_engine"], expected,
                 "{name} must advertise its SDMA queue capacity to rocjitsu"
             );
         }
