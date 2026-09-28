@@ -76,7 +76,7 @@ DecodeResult Decoder::decode_window(std::span<const rj_code_binary_inst_t> words
   const rj_code_binary_inst_t *decode_words = words.data();
   if (needs_padding) {
     window.resize(maximum_words, 0);
-    std::copy(words.begin(), words.end(), window.begin());
+    std::ranges::copy(words, window.begin());
     decode_words = window.data();
   }
 

@@ -878,7 +878,8 @@ static const GpuBlockInfo CbCounterBlockInfo = {"CB",
                                                 gfx9_cntx_prim::select_value_CB_PERFCOUNTER0_SELECT,
                                                 CounterBlockSeAttr | CounterBlockCleanAttr,
                                                 CbBlockDelayInfo,
-                                                SPM_SE_BLOCK_NAME_CB};
+                                                SPM_SE_BLOCK_NAME_CB,
+                                                spm::CbCounterBlockNumCounters};
 // Counter block DB
 static const GpuBlockInfo DbCounterBlockInfo = {"DB",
                                                 DbCounterBlockId,
@@ -889,7 +890,8 @@ static const GpuBlockInfo DbCounterBlockInfo = {"DB",
                                                 gfx9_cntx_prim::select_value_DB_PERFCOUNTER0_SELECT,
                                                 CounterBlockSeAttr | CounterBlockCleanAttr,
                                                 DbBlockDelayInfo,
-                                                SPM_SE_BLOCK_NAME_DB};
+                                                SPM_SE_BLOCK_NAME_DB,
+                                                spm::DbCounterBlockNumCounters};
 // Counter block GRBM
 static const GpuBlockInfo GrbmCounterBlockInfo = {
     "GRBM",
@@ -900,7 +902,9 @@ static const GpuBlockInfo GrbmCounterBlockInfo = {
     GrbmCounterRegAddr,
     gfx9_cntx_prim::select_value_GRBM_PERFCOUNTER0_SELECT,
     CounterBlockDfltAttr | CounterBlockGRBMAttr,
-    BLOCK_DELAY_NONE};
+    BLOCK_DELAY_NONE,
+    0,
+    spm::GrbmCounterBlockNumCounters};
 // Counter block GRBMSE
 static const GpuBlockInfo GrbmSeCounterBlockInfo = {
     "GRBM_SE",
@@ -911,7 +915,9 @@ static const GpuBlockInfo GrbmSeCounterBlockInfo = {
     GrbmSeCounterRegAddr,
     gfx9_cntx_prim::select_value_GRBM_SE0_PERFCOUNTER_SELECT,
     CounterBlockDfltAttr,
-    BLOCK_DELAY_NONE};
+    BLOCK_DELAY_NONE,
+    0,
+    spm::GrbmSeCounterBlockNumCounters};
 // Counter block PA_SU
 static const GpuBlockInfo PaSuCounterBlockInfo = {
     "PA_SU",
@@ -923,7 +929,8 @@ static const GpuBlockInfo PaSuCounterBlockInfo = {
     gfx9_cntx_prim::select_value_PA_SU_PERFCOUNTER0_SELECT,
     CounterBlockSeAttr,
     PaSuBlockDelayInfo,
-    SPM_SE_BLOCK_NAME_PA};
+    SPM_SE_BLOCK_NAME_PA,
+    spm::PaSuCounterBlockNumCounters};
 // Counter block PA_SC
 static const GpuBlockInfo PaScCounterBlockInfo = {
     "PA_SC",
@@ -935,7 +942,8 @@ static const GpuBlockInfo PaScCounterBlockInfo = {
     gfx9_cntx_prim::select_value_PA_SC_PERFCOUNTER0_SELECT,
     CounterBlockSeAttr,
     PaScBlockDelayInfo,
-    SPM_SE_BLOCK_NAME_SC};
+    SPM_SE_BLOCK_NAME_SC,
+    spm::PaScCounterBlockNumCounters};
 // Counter block SPI
 static const GpuBlockInfo SpiCounterBlockInfo = {
     "SPI",
@@ -947,7 +955,8 @@ static const GpuBlockInfo SpiCounterBlockInfo = {
     gfx9_cntx_prim::select_value_SPI_PERFCOUNTER0_SELECT,
     CounterBlockSeAttr | CounterBlockSPIAttr,
     SpiBlockDelayInfo,
-    SPM_SE_BLOCK_NAME_SPI};
+    SPM_SE_BLOCK_NAME_SPI,
+    spm::SpiCounterBlockNumCounters};
 // Counter block SQ
 static const GpuBlockInfo SqCounterBlockInfo   = {"SQ",
                                                 SqCounterBlockId,
@@ -958,7 +967,8 @@ static const GpuBlockInfo SqCounterBlockInfo   = {"SQ",
                                                 gfx9_cntx_prim::sq_select_value,
                                                 CounterBlockSeAttr | CounterBlockSqAttr,
                                                 SqBlockDelayInfo,
-                                                SPM_SE_BLOCK_NAME_SQG};
+                                                SPM_SE_BLOCK_NAME_SQG,
+                                                spm::SqCounterBlockNumCounters};
 static const GpuBlockInfo SqGsCounterBlockInfo = {"SQ_GS",
                                                   SqCounterBlockId,
                                                   1,
@@ -1014,7 +1024,8 @@ static const GpuBlockInfo SxCounterBlockInfo = {"SX",
                                                 gfx9_cntx_prim::select_value_SX_PERFCOUNTER0_SELECT,
                                                 CounterBlockSeAttr | CounterBlockCleanAttr,
                                                 SxBlockDelayInfo,
-                                                SPM_SE_BLOCK_NAME_SX};
+                                                SPM_SE_BLOCK_NAME_SX,
+                                                spm::SxCounterBlockNumCounters};
 // Counter block TA
 static const GpuBlockInfo TaCounterBlockInfo = {"TA",
                                                 TaCounterBlockId,
@@ -1025,7 +1036,8 @@ static const GpuBlockInfo TaCounterBlockInfo = {"TA",
                                                 gfx9_cntx_prim::select_value_TA_PERFCOUNTER0_SELECT,
                                                 CounterBlockSeAttr | CounterBlockTcAttr,
                                                 TaBlockDelayInfo,
-                                                SPM_SE_BLOCK_NAME_TA};
+                                                SPM_SE_BLOCK_NAME_TA,
+                                                spm::TaCounterBlockNumCounters};
 // Counter block TCA
 static const GpuBlockInfo TcaCounterBlockInfo = {
     "TCA",
@@ -1037,7 +1049,8 @@ static const GpuBlockInfo TcaCounterBlockInfo = {
     gfx9_cntx_prim::select_value_TCA_PERFCOUNTER0_SELECT,
     CounterBlockDfltAttr | CounterBlockTcAttr | CounterBlockSpmGlobalAttr,
     TcaBlockDelayInfo,
-    SPM_GLOBAL_BLOCK_NAME_TCA};
+    SPM_GLOBAL_BLOCK_NAME_TCA,
+    spm::TcaCounterBlockNumCounters};
 // Counter block TCC
 static const GpuBlockInfo TccCounterBlockInfo = {
     "TCC",
@@ -1049,7 +1062,8 @@ static const GpuBlockInfo TccCounterBlockInfo = {
     gfx9_cntx_prim::select_value_TCC_PERFCOUNTER0_SELECT,
     CounterBlockDfltAttr | CounterBlockTcAttr | CounterBlockSpmGlobalAttr,
     TccBlockDelayInfo,
-    SPM_GLOBAL_BLOCK_NAME_TCC};
+    SPM_GLOBAL_BLOCK_NAME_TCC,
+    spm::TccCounterBlockNumCounters};
 // Counter block TD
 static const GpuBlockInfo TdCounterBlockInfo = {"TD",
                                                 TdCounterBlockId,
@@ -1060,7 +1074,8 @@ static const GpuBlockInfo TdCounterBlockInfo = {"TD",
                                                 gfx9_cntx_prim::select_value_TD_PERFCOUNTER0_SELECT,
                                                 CounterBlockSeAttr | CounterBlockTcAttr,
                                                 TdBlockDelayInfo,
-                                                SPM_SE_BLOCK_NAME_TD};
+                                                SPM_SE_BLOCK_NAME_TD,
+                                                spm::TdCounterBlockNumCounters};
 // Counter block TCP
 static const GpuBlockInfo TcpCounterBlockInfo = {
     "TCP",
@@ -1072,7 +1087,8 @@ static const GpuBlockInfo TcpCounterBlockInfo = {
     gfx9_cntx_prim::select_value_TCP_PERFCOUNTER0_SELECT,
     CounterBlockSeAttr | CounterBlockTcAttr,
     TcpBlockDelayInfo,
-    SPM_SE_BLOCK_NAME_TCP};
+    SPM_SE_BLOCK_NAME_TCP,
+    spm::TcpCounterBlockNumCounters};
 // Counter block GDS
 static const GpuBlockInfo GdsCounterBlockInfo = {
     "GDS",
@@ -1084,7 +1100,8 @@ static const GpuBlockInfo GdsCounterBlockInfo = {
     gfx9_cntx_prim::select_value_GDS_PERFCOUNTER0_SELECT,
     CounterBlockDfltAttr | CounterBlockSpmGlobalAttr,
     GdsBlockDelayInfo,
-    SPM_GLOBAL_BLOCK_NAME_GDS};
+    SPM_GLOBAL_BLOCK_NAME_GDS,
+    spm::GdsCounterBlockNumCounters};
 // Counter block VGT
 static const GpuBlockInfo VgtCounterBlockInfo = {
     "VGT",
@@ -1096,7 +1113,8 @@ static const GpuBlockInfo VgtCounterBlockInfo = {
     gfx9_cntx_prim::select_value_VGT_PERFCOUNTER0_SELECT,
     CounterBlockSeAttr,
     VgtBlockDelayInfo,
-    SPM_SE_BLOCK_NAME_VGT};
+    SPM_SE_BLOCK_NAME_VGT,
+    spm::VgtCounterBlockNumCounters};
 // Counter block IA
 static const GpuBlockInfo IaCounterBlockInfo = {"IA",
                                                 IaCounterBlockId,
@@ -1107,7 +1125,8 @@ static const GpuBlockInfo IaCounterBlockInfo = {"IA",
                                                 gfx9_cntx_prim::select_value_IA_PERFCOUNTER0_SELECT,
                                                 CounterBlockSeAttr | CounterBlockSpmGlobalAttr,
                                                 IaBlockDelayInfo,
-                                                SPM_GLOBAL_BLOCK_NAME_IA};
+                                                SPM_GLOBAL_BLOCK_NAME_IA,
+                                                spm::IaCounterBlockNumCounters};
 // Counter block WD
 static const GpuBlockInfo WdCounterBlockInfo = {"WD",
                                                 WdCounterBlockId,
@@ -1129,7 +1148,8 @@ static const GpuBlockInfo CpcCounterBlockInfo = {
     gfx9_cntx_prim::select_value_CPC_PERFCOUNTER0_SELECT,
     CounterBlockDfltAttr | CounterBlockSpmGlobalAttr,
     CpcBlockDelayInfo,
-    SPM_GLOBAL_BLOCK_NAME_CPC};
+    SPM_GLOBAL_BLOCK_NAME_CPC,
+    spm::CpcCounterBlockNumCounters};
 // Counter block CPF
 static const GpuBlockInfo CpfCounterBlockInfo = {
     "CPF",
@@ -1141,7 +1161,8 @@ static const GpuBlockInfo CpfCounterBlockInfo = {
     gfx9_cntx_prim::select_value_CPF_PERFCOUNTER0_SELECT,
     CounterBlockDfltAttr | CounterBlockSpmGlobalAttr,
     CpfBlockDelayInfo,
-    SPM_GLOBAL_BLOCK_NAME_CPF};
+    SPM_GLOBAL_BLOCK_NAME_CPF,
+    spm::CpfCounterBlockNumCounters};
 // Counter block MCVM L2
 static const GpuBlockInfo McVmL2CounterBlockInfo = {
     "MCVML2",
@@ -1185,7 +1206,9 @@ static const GpuBlockInfo GceaCounterBlockInfo = {
     GceaCounterRegAddr,
     gfx9_cntx_prim::mc_select_value_GCEA_PERFCOUNTER0_CFG,
     CounterBlockMcAttr,
-    BLOCK_DELAY_NONE};
+    BLOCK_DELAY_NONE,
+    0,
+    spm::GceaCounterBlockNumCounters};
 // Counter block RPB
 static const GpuBlockInfo RpbCounterBlockInfo = {
     "RPB",
@@ -1196,7 +1219,9 @@ static const GpuBlockInfo RpbCounterBlockInfo = {
     RpbCounterRegAddr,
     gfx9_cntx_prim::mc_select_value_RPB_PERFCOUNTER0_CFG,
     CounterBlockRpbAttr | CounterBlockAidAttr,
-    BLOCK_DELAY_NONE};
+    BLOCK_DELAY_NONE,
+    0,
+    spm::RpbCounterBlockNumCounters};
 
 }  // namespace gfx9
 }  // namespace gfxip

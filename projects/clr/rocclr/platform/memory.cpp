@@ -13,6 +13,7 @@
 #include "device/device.hpp"
 
 #include <atomic>
+#include <cmath>
 
 namespace amd {
 
@@ -1509,9 +1510,9 @@ void SvmBuffer::Add(uintptr_t k, uintptr_t v) {
   Allocated_.insert(std::pair<uintptr_t, uintptr_t>(k, v));
 }
 
-void SvmBuffer::Remove(uintptr_t k) {
+bool SvmBuffer::Remove(uintptr_t k) {
   std::scoped_lock lock(AllocatedLock_);
-  Allocated_.erase(k);
+  return Allocated_.erase(k) != 0;
 }
 
 bool SvmBuffer::Contains(uintptr_t ptr) {
@@ -1537,9 +1538,12 @@ void* SvmBuffer::malloc(Context& context, cl_svm_mem_flags flags, size_t size, s
   return ret;
 }
 
-void SvmBuffer::free(const Context& context, void* ptr) {
-  Remove(reinterpret_cast<uintptr_t>(ptr));
+bool SvmBuffer::free(const Context& context, void* ptr) {
+  if (!Remove(reinterpret_cast<uintptr_t>(ptr))) {
+    return false;
+  }
   context.svmFree(ptr);
+  return true;
 }
 
 void SvmBuffer::memFill(void* dst, const void* src, size_t srcSize, size_t times) {

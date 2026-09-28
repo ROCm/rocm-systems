@@ -20,7 +20,9 @@ serialize_source_object(const std::string& source_object)
 {
     function_args_t args{};
     if(!source_object.empty())
+    {
         args.push_back({ 0U, "string", "source_object", source_object });
+    }
     return get_args_string(args);
 }
 }  // namespace

@@ -639,6 +639,11 @@
           "test_filter": "ParameterApiTests.*:ParameterApiTypedTests*"
         },
         {
+          "name": "CollConfigTests",
+          "description": "Per-collective ncclCollConfig_t validation tests",
+          "test_filter": "CollConfigTests.*:CollConfigTypedTests*"
+        },
+        {
           "name": "ArgCheck",
           "description": "Argument validation tests",
           "test_filter": "ArgCheckTest.*"
@@ -723,6 +728,26 @@
           "name": "TimeoutTests",
           "description": "ncclTimeout host API unit tests: enum ordering, error string, async-error set/get/clear, argument validation",
           "test_filter": "TimeoutTests.*"
+        },
+        {
+          "name": "RcclAlltoAllDecision",
+          "description": "AlltoAll dispatch decision unit tests (DDA, CE, pivot selection)",
+          "test_filter": "RcclAlltoAllDecision.*"
+        },
+        {
+          "name": "RcclCeAr2ShotMax",
+          "description": "CE AllReduce 2-shot arch threshold upper-bound tests",
+          "test_filter": "RcclCeAr2ShotMax.*"
+        },
+        {
+          "name": "RcclCeArGrownBuffer",
+          "description": "CE AllReduce grown-buffer (ceRegMax) eligibility tests",
+          "test_filter": "RcclCeArGrownBuffer.*"
+        },
+        {
+          "name": "SkipPresetTopoMatching",
+          "description": "SkipPreset arch topology matching and threshold lookup tests",
+          "test_filter": "SkipPresetTopoMatching.*"
         }
       ]
     },
@@ -2416,7 +2441,7 @@
         { "name": "SymCheckMode_Registration_Match", "description": "DEBUG_GLOBAL is transparent when every rank registers matching symmetric windows.", "test_filter": "SymCheckMode_Registration.DebugGlobal_MatchingRegistration_Succeeds" },
         { "name": "SymCheckMode_Registration_Mismatch", "description": "DEBUG_GLOBAL rejects a collective when one rank's buffer is outside any window.", "test_filter": "SymCheckMode_Registration.DebugGlobal_RegistrationMismatch_Rejected" },
         { "name": "SymCheckMode_Registration_OffsetMismatch", "description": "DEBUG_GLOBAL rejects a user-offset mismatch inside the window.", "test_filter": "SymCheckMode_Registration.DebugGlobal_UserOffsetMismatch_Rejected" },
-        { "name": "SymCheckMode_Registration_DefaultAccepts", "description": "Without NCCL_CHECK_MODE the same mismatch is accepted on the fast path.", "test_filter": "SymCheckMode_Registration.Default_RegistrationMismatch_Accepted" }
+        { "name": "SymCheckMode_Registration_DefaultMatching", "description": "Without NCCL_CHECK_MODE the registered path still runs and reduces correctly.", "test_filter": "SymCheckMode_Registration.Default_MatchingRegistration_Succeeds" }
       ]
     },
     "net_ib_branch_coverage": {

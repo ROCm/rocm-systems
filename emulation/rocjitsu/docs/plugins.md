@@ -406,7 +406,13 @@ group divides hooks by frequency and synchronization cost:
   register-access callbacks are high-frequency and run concurrently with both
   other high-frequency callbacks and infrequent callbacks by default. Each
   callback is scoped to a wavefront below the simulation's shader-engine
-  partition granularity.
+  partition granularity. During the before-instruction callback, a memory
+  instruction exposes its decoded wait-counter obligations and completion-order
+  metadata through `amdgpu_memory_issue_info()`, before address or store-data
+  operands are read. This metadata describes operations
+  routed through the scalar, vector, and local memory pipelines; it is not a
+  complete inventory of non-memory events, such as messages and timestamp
+  queries, that hardware wait counters may also track.
 
 A plugin whose high-frequency callbacks reach shared mutable state may override
 `requires_serial_hot_hooks()` to return `true`. The group samples that stable
@@ -443,6 +449,12 @@ skipped entirely unless a contained plugin asks for it. A plugin that overrides
 return `true`; the group samples this policy when each plugin is added, and its
 conservative default is `false`. Overriding the hook alone is silent — the
 plugin simply never sees an access.
+
+Plugins that also need execution state may override the context-preserving
+`onAmdgpuMemoryAccessRouted(access, inst, wf)` form. Its default implementation
+forwards to the observation-only form, so existing observers keep the same
+behavior. The borrowed instruction and wavefront already reflect the selected
+route and are valid only during the callback.
 
 The observation's spans borrow execution-owned storage and are valid only for
 the duration of the callback. A plugin that keeps one must copy them.
