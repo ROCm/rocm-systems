@@ -145,6 +145,32 @@ TEST_F(ph_ctx_test, construction_populates_schema_version_and_node)
     EXPECT_STREQ(node.info.machine_id, "machine-1");
 }
 
+TEST_F(ph_ctx_test, construction_with_no_nodes_succeeds_with_empty_node_info)
+{
+    auto writer = make_writer();
+    writer->flush_in_memory_data_to_disk();
+    writer.reset();
+
+    ph_ctx ctx{ m_db_path };
+
+    const auto node = ctx.get_node();
+    EXPECT_EQ(node.info.id, 0U);
+    ASSERT_NE(node.info.machine_id, nullptr);
+    EXPECT_STREQ(node.info.machine_id, "");
+    ASSERT_NE(node.info.system_name, nullptr);
+    EXPECT_STREQ(node.info.system_name, "");
+    ASSERT_NE(node.info.hostname, nullptr);
+    EXPECT_STREQ(node.info.hostname, "");
+    ASSERT_NE(node.info.release, nullptr);
+    EXPECT_STREQ(node.info.release, "");
+    ASSERT_NE(node.info.version, nullptr);
+    EXPECT_STREQ(node.info.version, "");
+    ASSERT_NE(node.info.hardware_name, nullptr);
+    EXPECT_STREQ(node.info.hardware_name, "");
+    ASSERT_NE(node.info.domain_name, nullptr);
+    EXPECT_STREQ(node.info.domain_name, "");
+}
+
 TEST_F(ph_ctx_test, get_track_list_returns_seeded_non_empty_track)
 {
     auto writer = make_writer();

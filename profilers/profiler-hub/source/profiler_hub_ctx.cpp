@@ -140,20 +140,32 @@ ph_ctx::initialize_track_list()
 void
 ph_ctx::initilaize_node_info()
 {
-    m_c_node         = std::make_unique<ph_node_t>();
-    m_nodes          = m_reader->get_all_nodes();
-    const auto& node = m_nodes[0];
+    m_c_node = std::make_unique<ph_node_t>();
+    m_nodes  = m_reader->get_all_nodes();
 
-    m_c_node->info = {
-        .id            = static_cast<uint32_t>(node->node_id),
-        .machine_id    = node->machine_id.c_str(),
-        .system_name   = node->system_name.c_str(),
-        .hostname      = node->hostname.c_str(),
-        .release       = node->release.c_str(),
-        .version       = node->version.c_str(),
-        .hardware_name = node->hardware_name.c_str(),
-        .domain_name   = node->domain_name.c_str(),
-    };
+    m_c_node->info = ph_node_info_t{ .id            = 0,
+                                     .machine_id    = "",
+                                     .system_name   = "",
+                                     .hostname      = "",
+                                     .release       = "",
+                                     .version       = "",
+                                     .hardware_name = "",
+                                     .domain_name   = "" };
+
+    if(!m_nodes.empty())
+    {
+        const auto& node = m_nodes[0];
+        m_c_node->info   = {
+              .id            = static_cast<uint32_t>(node->node_id),
+              .machine_id    = node->machine_id.c_str(),
+              .system_name   = node->system_name.c_str(),
+              .hostname      = node->hostname.c_str(),
+              .release       = node->release.c_str(),
+              .version       = node->version.c_str(),
+              .hardware_name = node->hardware_name.c_str(),
+              .domain_name   = node->domain_name.c_str(),
+        };
+    }
 
     m_c_node->agents =
         ph_agent_list_t{ .list_size = static_cast<std::uint32_t>(m_c_agents.size()),
