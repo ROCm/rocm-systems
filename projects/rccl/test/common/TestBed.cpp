@@ -442,6 +442,20 @@ namespace RcclUnitTesting
       FAIL();
     }
 
+    // An out-of-range value would make the worker exit, and the parent's broken
+    // pipe would then abort the whole test binary rather than fail this test.
+    // redOp is not checked: custom scalar reductions use values >= ncclNumOps.
+    if (funcType < 0 || funcType >= ncclNumFuncs)
+    {
+      TEST_ERROR("Invalid function type %d for group %d collective %d", funcType, groupId, collId);
+      FAIL();
+    }
+    if (dataType < 0 || dataType >= ncclNumTypes)
+    {
+      TEST_ERROR("Invalid datatype %d for group %d collective %d", dataType, groupId, collId);
+      FAIL();
+    }
+
     // Loop over all ranks and send CollectiveArgs to appropriate child process
     int const cmd = TestBedChild::CHILD_SET_COLL_ARGS;
     for (auto currRank : rankList)
