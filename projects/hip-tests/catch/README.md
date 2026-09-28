@@ -69,7 +69,9 @@ All configuration for the test cases is done through the `hip_tests_config.yaml`
 Every test case has its own entry. Currently supported options are:
 - level : Specify to which level the case belongs to (e.g. Level_2 is a standard test)
 - tags : List all Catch2 tags that the case is associated with
-- disabled : List all platforms where the case should be disabled
+- disabled : Temporarily skip the case on the listed targets (a regression or tracked bug that is expected to be re-enabled)
+- unsupported : Permanently skip the case on the listed targets, where the platform, architecture, or backend cannot support it
+`disabled` and `unsupported` share the same syntax and produce the same skip; they differ only in intent (temporary regression versus permanent capability gap).
 The group name is automatically added as a tag for every case.
 Changing the configuration file will retrigger the build, so we have an up to date configuration every time.
 
@@ -80,8 +82,12 @@ unit:
     Unit_atomicExch_system_Positive_Peer_GPUs:
       <<: *level_2
       tags: [multigpu]
-      # SWDEV-435667: Below tests failing randomly in stress test on 01/12/23
-      disabled: [amd_wsl]
+      disabled:
+        targets: [amd_wsl]
+        reason: "SWDEV-435667: fails randomly in stress test"
+      unsupported:
+        targets: [gfx900]
+        reason: requires a hardware feature not present on this architecture
 ```
 will be generated (on an AMD linux machine) as:
 ```cpp
