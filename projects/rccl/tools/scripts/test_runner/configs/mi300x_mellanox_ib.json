@@ -3999,7 +3999,7 @@
         },
         {
           "name": "GIN_Signal_ExplicitStrong",
-          "description": "Strong GIN signal publishes its bundled and preceding puts over the IB proxy",
+          "description": "IB proxy (NCCL_GIN_TYPE=2) drops the strong bit; a pass shows same-QP order, not strong-signal enforcement",
           "test_filter": "GinMPIDeviceTests.Signal_ExplicitStrong"
         },
         {

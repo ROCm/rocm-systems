@@ -316,8 +316,8 @@ __global__ void putBasicConsumerKernel(
   gin.waitSignal(ncclCoopCta(), sigIdx, expectedSignalValue);
 }
 
-// Weak publishes only its bundled put. Strong also publishes the preceding
-// unsignaled put because both target the same peer through the same context.
+// On the type-2 IB proxy, this checks same-QP ordering rather than enforcement
+// of the strong bit, which that backend ignores.
 __global__ void explicitSignalProducerKernel(
     ncclWindow_t srcWin, ncclWindow_t dstWin, size_t chunkBytes,
     ncclGinSignal_t sigIdx, int peer, bool strong,
@@ -347,10 +347,10 @@ __global__ void explicitSignalConsumerKernel(
   gin.waitSignal(ncclCoopCta(), sigIdx, /*least=*/1);
 
   for (size_t i = threadIdx.x; i < 2 * chunkBytes; i += blockDim.x) {
-    if (!strong && i < chunkBytes) continue;
-    const uint8_t expected = i < chunkBytes
-        ? static_cast<uint8_t>(0x31 + (i & 0x3f))
-        : static_cast<uint8_t>(0x91 + ((i - chunkBytes) & 0x3f));
+    // The weak producer never issues the preceding put, so that chunk stays zero.
+    const uint8_t expected = i >= chunkBytes
+        ? static_cast<uint8_t>(0x91 + ((i - chunkBytes) & 0x3f))
+        : (strong ? static_cast<uint8_t>(0x31 + (i & 0x3f)) : static_cast<uint8_t>(0));
     if (dst[i] != expected) atomicCAS(error, 0, static_cast<int>(i + 1));
   }
 }

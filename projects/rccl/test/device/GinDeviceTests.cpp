@@ -95,46 +95,49 @@ TEST_F(GinDeviceTest, ExplicitSignalActions) {
   syncAndCheck();
 
   const std::vector<SignalActionResult> results = d_results.copyTo();
-  const bool expectedStrong[kResultCount] = {
-      true, true, false, false, true, true, false, false,
-      false, false, true, true, false};
-  const ncclGinSignalOp_t expectedOps[kResultCount] = {
-      ncclGinSignalInc, ncclGinSignalAdd, ncclGinSignalInc, ncclGinSignalAdd,
-      ncclGinSignalInc, ncclGinSignalAdd, ncclGinSignalInc, ncclGinSignalAdd,
-      ncclGinSignalInc, ncclGinSignalAdd, ncclGinSignalAdd, ncclGinSignalInc,
-      ncclGinSignalAdd};
-  const uint64_t expectedArgs[kResultCount] = {
-      1, 0x1234, 1, 0x5678, 1, 0x9abc, 1, 0xdef0,
-      1, 0x1111, 0x2222, 1, 0x3333};
+
+  struct ExpectedSignal {
+    bool strong;
+    ncclGinSignalOp_t op;
+    uint64_t arg;
+    ncclGinSignalType type;
+    ncclGinSignal_t signalId;
+    size_t vaOffset;
+  };
+  const ExpectedSignal cases[] = {
+      {true,  ncclGinSignalInc, 1,      NCCL_GIN_SIGNAL_TYPE_INDEXED, 3, 0},
+      {true,  ncclGinSignalAdd, 0x1234, NCCL_GIN_SIGNAL_TYPE_INDEXED, 4, 0},
+      {false, ncclGinSignalInc, 1,      NCCL_GIN_SIGNAL_TYPE_INDEXED, 5, 0},
+      {false, ncclGinSignalAdd, 0x5678, NCCL_GIN_SIGNAL_TYPE_INDEXED, 6, 0},
+      {true,  ncclGinSignalInc, 1,      NCCL_GIN_SIGNAL_TYPE_VA,      0, 64},
+      {true,  ncclGinSignalAdd, 0x9abc, NCCL_GIN_SIGNAL_TYPE_VA,      0, 72},
+      {false, ncclGinSignalInc, 1,      NCCL_GIN_SIGNAL_TYPE_VA,      0, 80},
+      {false, ncclGinSignalAdd, 0xdef0, NCCL_GIN_SIGNAL_TYPE_VA,      0, 88},
+      {false, ncclGinSignalInc, 1,      NCCL_GIN_SIGNAL_TYPE_INDEXED, 7, 0},
+      {false, ncclGinSignalAdd, 0x1111, NCCL_GIN_SIGNAL_TYPE_VA,      0, 96},
+      {true,  ncclGinSignalAdd, 0x2222, NCCL_GIN_SIGNAL_TYPE_INDEXED, 8, 0},
+      {true,  ncclGinSignalInc, 1,      NCCL_GIN_SIGNAL_TYPE_VA,      0, 104},
+      {false, ncclGinSignalAdd, 0x3333, NCCL_GIN_SIGNAL_TYPE_INDEXED, 9, 0},
+  };
+  static_assert(sizeof(cases) / sizeof(cases[0]) == kResultCount,
+                "one expected row per captured signal action");
 
   for (size_t i = 0; i < kResultCount; ++i) {
-    EXPECT_EQ(results[i].descriptor.isStrong, expectedStrong[i]) << "case " << i;
-    EXPECT_EQ(results[i].op, expectedOps[i]) << "case " << i;
-    EXPECT_EQ(results[i].arg, expectedArgs[i]) << "case " << i;
-  }
-
-  const ncclGinSignal_t expectedIds[] = {3, 4, 5, 6};
-  for (size_t i = 0; i < 4; ++i) {
-    EXPECT_EQ(results[i].descriptor.type, NCCL_GIN_SIGNAL_TYPE_INDEXED) << "case " << i;
-    EXPECT_EQ(results[i].descriptor.indexedSignal.signalId, expectedIds[i]) << "case " << i;
-  }
-  EXPECT_EQ(results[8].descriptor.type, NCCL_GIN_SIGNAL_TYPE_INDEXED);
-  EXPECT_EQ(results[8].descriptor.indexedSignal.signalId, 7u);
-  EXPECT_EQ(results[10].descriptor.type, NCCL_GIN_SIGNAL_TYPE_INDEXED);
-  EXPECT_EQ(results[10].descriptor.indexedSignal.signalId, 8u);
-  EXPECT_EQ(results[12].descriptor.type, NCCL_GIN_SIGNAL_TYPE_INDEXED);
-  EXPECT_EQ(results[12].descriptor.indexedSignal.signalId, 9u);
-
-  const size_t vaOffsets[] = {64, 72, 80, 88, 96, 104};
-  const size_t vaCases[] = {4, 5, 6, 7, 9, 11};
-  for (size_t i = 0; i < 6; ++i) {
-    const auto& descriptor = results[vaCases[i]].descriptor;
-    EXPECT_EQ(descriptor.type, NCCL_GIN_SIGNAL_TYPE_VA) << "case " << vaCases[i];
-    EXPECT_EQ(descriptor.vaSignal.signalWindow,
-              reinterpret_cast<ncclGinWindow_t>(kGinWindowToken)) << "case " << vaCases[i];
-    EXPECT_EQ(descriptor.vaSignal.signalOffset,
-              4096 * kGinOffset4K + vaOffsets[i]) << "case " << vaCases[i];
-    EXPECT_EQ(descriptor.vaSignal.ncclWindow, d_signalWindow.ptr) << "case " << vaCases[i];
+    const auto& expected = cases[i];
+    const auto& descriptor = results[i].descriptor;
+    EXPECT_EQ(descriptor.isStrong, expected.strong) << "case " << i;
+    EXPECT_EQ(results[i].op, expected.op) << "case " << i;
+    EXPECT_EQ(results[i].arg, expected.arg) << "case " << i;
+    EXPECT_EQ(descriptor.type, expected.type) << "case " << i;
+    if (expected.type == NCCL_GIN_SIGNAL_TYPE_INDEXED) {
+      EXPECT_EQ(descriptor.indexedSignal.signalId, expected.signalId) << "case " << i;
+    } else {
+      EXPECT_EQ(descriptor.vaSignal.signalWindow,
+                reinterpret_cast<ncclGinWindow_t>(kGinWindowToken)) << "case " << i;
+      EXPECT_EQ(descriptor.vaSignal.signalOffset,
+                4096 * kGinOffset4K + expected.vaOffset) << "case " << i;
+      EXPECT_EQ(descriptor.vaSignal.ncclWindow, d_signalWindow.ptr) << "case " << i;
+    }
   }
 }
 
@@ -539,7 +542,7 @@ TEST_F(GinDeviceTest, BuildGfd_SignalAndCounter) {
   EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdQwords - 1].flag.v), 1ULL);
 }
 
-__global__ void kernelBuildGfdSignalStrength(ncclGinProxyGfd_t* gfds) {
+__global__ void kernelBuildGfdSignalStrength(ncclGinProxyGfd_t* gfds, uint64_t signalVal) {
   if (threadIdx.x != 0 || blockIdx.x != 0) return;
   for (int i = 0; i < 2; ++i) {
     nccl::gin::proxy::buildGfd<uint64_t>(
@@ -551,21 +554,32 @@ __global__ void kernelBuildGfdSignalStrength(ncclGinProxyGfd_t* gfds) {
         /*srcOff=*/0, /*srcHandle=*/nullptr,
         /*dstOff=*/0, /*dstHandle=*/nullptr,
         /*size=*/64, /*counterId=*/0, /*signalId=*/1,
-        /*signalVal=*/1, /*signalWindow=*/nullptr, /*signalOff=*/0,
+        /*signalVal=*/signalVal, /*signalWindow=*/nullptr, /*signalOff=*/0,
         /*isStrongSignal=*/i == 1);
   }
 }
 
 TEST_F(GinDeviceTest, BuildGfd_SignalStrength) {
+  // Exercise every field sharing the qword with isStrongSignal.
+  constexpr uint64_t kSignalVal = 0x0123456789ABCDEFULL;
+  constexpr uint16_t kSigValLow2 = static_cast<uint16_t>(kSignalVal >> 16);
+  constexpr uint32_t kSigValHigh = static_cast<uint32_t>(kSignalVal >> 32);
+
   DeviceBuffer<ncclGinProxyGfd_t> d_gfds(2);
   d_gfds.zero();
 
-  kernelBuildGfdSignalStrength<<<1, 1>>>(d_gfds.ptr);
+  kernelBuildGfdSignalStrength<<<1, 1>>>(d_gfds.ptr, kSignalVal);
   syncAndCheck();
 
   const std::vector<ncclGinProxyGfd_t> gfds = d_gfds.copyTo();
-  EXPECT_EQ(gfds[0].qword[ncclGinProxyGfdSignalVal].signalVal.isStrongSignal, 0u);
-  EXPECT_EQ(gfds[1].qword[ncclGinProxyGfdSignalVal].signalVal.isStrongSignal, 1u);
+  for (int i = 0; i < 2; ++i) {
+    const auto& signalVal = gfds[i].qword[ncclGinProxyGfdSignalVal].signalVal;
+    EXPECT_EQ(signalVal.flag, 1u) << i;
+    EXPECT_EQ(signalVal.resv, 0u) << i;
+    EXPECT_EQ(signalVal.isStrongSignal, static_cast<uint32_t>(i)) << i;
+    EXPECT_EQ(signalVal.signalValLow2, kSigValLow2) << i;
+    EXPECT_EQ(signalVal.signalValHigh, kSigValHigh) << i;
+  }
 }
 
 // ---------------------------------------------------------------------------

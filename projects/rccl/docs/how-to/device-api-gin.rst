@@ -123,6 +123,11 @@ For example, a CTA can issue a put and wait for local queue completion:
 remote visibility; the peer must wait for the associated signal before using
 the destination bytes.
 
+``NCCL_GIN_RESOURCE_SHARING_GPU`` permits sharing across the GPU;
+``NCCL_GIN_RESOURCE_SHARING_CTA`` limits sharing to a CTA. These modes select
+resource-sharing behavior on direct device backends. The AMD GIN host-proxy
+backend uses the same proxy queue behavior for both modes.
+
 Choose strong or weak signal semantics
 ======================================
 
@@ -179,11 +184,6 @@ Do not issue a strong action from a device communicator created with
 ``ncclGin_SignalInc``, ``ncclGin_SignalAdd``, and VA equivalents are
 deprecated. Their strength is selected globally by
 ``ginStrongSignalsRequired``; new code should use an explicit type.
-
-``NCCL_GIN_RESOURCE_SHARING_GPU`` permits sharing across the GPU;
-``NCCL_GIN_RESOURCE_SHARING_CTA`` limits sharing to a CTA. These modes select
-resource-sharing behavior on direct device backends. The AMD GIN host-proxy
-backend uses the same proxy queue behavior for both modes.
 
 Use world-team barriers and timeouts
 ====================================
