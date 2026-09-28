@@ -106,9 +106,6 @@ public:
   hsa_status_t SetCuMask(uint32_t cu_mask_count, const uint32_t* queue_cu_mask);
 
   uint64_t *GetSyncAddr(void) const { return sync_addr; }
-  // The KMD stamps UINT64_MAX into every monitored fence of the device when it resets the GPU,
-  // including queues that never submitted anything.
-  bool IsDeviceLost(void) const { return *sync_addr == UINT64_MAX; }
   uint64_t GetCmdbufAddr(void) const { return cmdbuf_addr; }
 
   Wkmi::SchedLevel ConvertSchedLevel(hsa_amd_queue_priority_t prio) const {

@@ -854,16 +854,9 @@ hsa_status_t ComputeQueue::BarrierGenericAqlToPm4(char* cpu, hsa_barrier_and_pac
     for (int i = 0; i < 5; i++) {
       if (!packet->dep_signal[i].handle) continue;
 
-      // Sliced wait so a reset GPU, which will never signal this dependency, is noticed.
-      constexpr uint64_t kWaitSlice = 100000000;
-      while (hsakmt_hsa_signal_wait_relaxed(packet->dep_signal[i], HSA_SIGNAL_CONDITION_EQ, 0,
-                                            kWaitSlice, HSA_WAIT_STATE_BLOCKED) != 0) {
-        if (IsDeviceLost()) {
-          pr_err("dep[%d] %#" PRIx64 " abandoned, device lost, rptr=%" PRIx64 "\n", i,
-                 packet->dep_signal[i].handle, ring_rptr->load());
-          break;
-        }
-      }
+      hsa_signal_value_t value = hsakmt_hsa_signal_wait_relaxed(
+          packet->dep_signal[i], HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+      assert(value == 0);
     }
   }
 
@@ -1103,12 +1096,6 @@ hsa_status_t ComputeQueue::Process(void) {
   const uint32_t frame_num = device->GetAqlFrameNum();
 
   while (cmdbuf_aql_frame_write_index < ring_wptr->load() && !IsInvalidPacket()) {
-    if (IsDeviceLost()) {
-      pr_err("queue %p device lost, fence abandoned at wi=%" PRIx64 " rptr=%" PRIx64 "\n", ring,
-             cmdbuf_aql_frame_write_index, ring_rptr->load());
-      return HSA_STATUS_ERROR_EXCEPTION;
-    }
-
     pr_debug("process %p wptr=%" PRIx64 " rptr=%" PRIx64 "\n", ring, ring_wptr->load(),
              ring_rptr->load());
 
