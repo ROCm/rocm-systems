@@ -185,7 +185,7 @@ compiler. The runner compiles a controlled native fixture against the public
 header; no installed AMD SMI library, GPU, root, or network is needed.
 
 ```bash
-python3 -B -m unittest discover -s tests/go -p test_run_tests.py -v
+python3 -B -m unittest discover -s tests/go -p 'test_*.py' -v
 python3 -B tests/go/test_api_contract.py
 python3 -B tests/go/run_tests.py
 python3 -B tests/go/run_tests.py --race
@@ -201,6 +201,8 @@ bridge and fixtures are not installed with the module.
 | Check | What it verifies |
 | --- | --- |
 | Default runner | Go wrappers across the real CGO boundary into controlled native responses |
+| External-package contract | Host-style `Init(InitAMDGPUs)`, ASIC fields, BDF getter, and index-lookup signatures compile without private-package access |
+| Index and flag cases | Filtered GPU discovery order, bounds and lifetime checks, rejection of unsupported initialization flags |
 | `--native --include-dir ... --library-dir ... --run '^TestNativeVersion$'` | Fresh matching 27.1 header/library linkage and runtime version, without initialization |
 | `--native --include-dir ... --library-dir ... --build-example` | Example links against the real library; it is not executed |
 | `python3 -B tests/go/test_install.py --build-dir "$AMDSMI_NATIVE_BUILD_DIR"` | Temporary `DESTDIR` install, exact source contents, build from staged sources, independent local-replacement consumer against staged headers/library |

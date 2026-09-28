@@ -22,23 +22,19 @@ GO_CALLS = re.compile(r"\bC\s*\.\s*(amdsmi_[a-z0-9_]+)\s*\(")
 C_CALLS = re.compile(r"\b(amdsmi_[a-z0-9_]+)\s*\(")
 MODULE_DEPENDENCIES = re.compile(r"^\s*(require|replace|exclude|toolchain)\b", re.M)
 ENUM_OWNERS = {
-    "status_codes_linux.go": (("amdsmi_status_t", "StatusCode"),),
-    "memory_types_linux.go": (("amdsmi_vram_type_t", "VRAMType"),),
-    "identity_types_linux.go": (("amdsmi_fw_block_t", "FirmwareBlock"),),
-    "telemetry_types_linux.go": (
+    "amdsmi_interface.go": (
+        ("amdsmi_status_t", "StatusCode"),
+        ("amdsmi_vram_type_t", "VRAMType"),
+        ("amdsmi_fw_block_t", "FirmwareBlock"),
         ("amdsmi_temperature_type_t", "TemperatureType"),
         ("amdsmi_temperature_metric_t", "TemperatureMetric"),
         ("amdsmi_clk_type_t", "ClockType"),
         ("amdsmi_memory_type_t", "MemoryType"),
-    ),
-    "partition_types_linux.go": (
         ("amdsmi_memory_partition_type_t", "MemoryPartitionType"),
         ("amdsmi_accelerator_partition_type_t", "AcceleratorPartitionType"),
-    ),
-    "ras_types_linux.go": (
         ("amdsmi_gpu_block_t", "GPUBlock"),
         ("amdsmi_ras_err_state_t", "RASState"),
-    ),
+    )
 }
 ALLOWED_NATIVE_CALLS = {
     "amdsmi_init",

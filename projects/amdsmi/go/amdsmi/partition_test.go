@@ -24,6 +24,15 @@ func TestPartitionCurrent(t *testing.T) {
 			MemoryCapabilities: 5, ProfileIndex: 3, NumResources: 0, PartitionID: 7})
 }
 
+func TestPartitionIDArray(t *testing.T) {
+	h := fixtureHandle(t)
+	mockConfigure("amdsmi_get_gpu_accelerator_partition_profile", AMDSMI_STATUS_SUCCESS, 5)
+	got, err := GetAcceleratorPartitionProfile(h)
+	if err != nil || got.PartitionID != 7 {
+		t.Fatalf("current partition ID: %+v, %v", got, err)
+	}
+}
+
 func TestPartitionMemoryRanges(t *testing.T) {
 	h := fixtureHandle(t)
 	mockConfigure("amdsmi_get_gpu_memory_partition_config", AMDSMI_STATUS_SUCCESS, 1)

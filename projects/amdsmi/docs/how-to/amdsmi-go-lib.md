@@ -66,7 +66,7 @@ The standalone guide gives the separate network-enabled acquisition command.
 
 ## Lifecycle and data handling
 
-Balance every successful `amdsmi.Init()` with `amdsmi.ShutDown()`. Final package
+Balance every successful `amdsmi.Init(amdsmi.InitAMDGPUs)` with `amdsmi.ShutDown()`. Final package
 shutdown invalidates handles even on cleanup failure; rediscover after
 reinitialization. Calls are serialized within this package, but other bindings
 must coordinate their native lifetime and first-initializer flags. Driver reload,
@@ -78,6 +78,24 @@ Use `errors.Is(err, amdsmi.AMDSMI_STATUS_NOT_SUPPORTED)` or `errors.As` with
 or partial native data. The API reference lists field types, units, and native
 limitations. The [telemetry example](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/go/examples/telemetry/main.go) balances
 shutdown and reports per-query failures without replacing them with zero readings.
+
+## Host-style API conventions
+
+The production bindings are kept in `go/amdsmi/amdsmi_interface.go`. Public examples
+use `GetGPUAsicInfo`, `AsicInfo`, `GetGPUDeviceBDF`, and explicit initialization flags.
+`GetProcessorHandleFromIndex(uint32)` selects from the current GPU discovery order.
+It is not a persistent device identifier; use BDF lookup when selecting a known GPU.
+
+| Contract | Bare-metal behavior |
+| --- | --- |
+| `Init(InitAMDGPUs)` | GPU-only initialization; other flag values are rejected |
+| `GetGPUAsicInfo(handle)` | Returns `AsicInfo`, including `RevID`, `AsicSerial`, `OamID`, and `NumComputeUnits` |
+| `GetGPUDeviceBDF(handle)` | Returns a typed `BDF`; use `String()` to format it |
+| `GetProcessorHandleFromIndex(index)` | Checked lookup; an invalid index returns `AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS` |
+
+This is a direct pre-release rename, not an alias layer. The module guide lists
+the migration mapping. Native errors, other query names, and units are unchanged;
+the Host design does not yet define a complete shared contract for them.
 
 ## Legacy Go interface
 

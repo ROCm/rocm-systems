@@ -23,6 +23,10 @@ for native requirements.
 import "github.com/ROCm/rocm-systems/projects/amdsmi/go/amdsmi"
 ```
 
+Production bindings live in [amdsmi/amdsmi_interface.go](amdsmi/amdsmi_interface.go).
+The public naming and interface layout follow the Host binding design. This is
+still a bare-metal implementation, not a combined BM/Host backend.
+
 ## Build with a custom native prefix
 
 Run from this module directory with explicit header and library paths:
@@ -76,7 +80,9 @@ GOTOOLCHAIN=local GOWORK=off GOPROXY=https://proxy.golang.org,direct GOSUMDB=sum
 
 | Contract | Behavior |
 | --- | --- |
-| Initialization | Each successful `Init()` acquires an AMD-GPU reference; balance it with `ShutDown()` |
+| Initialization | Each successful `Init(InitAMDGPUs)` acquires an AMD-GPU reference; balance it with `ShutDown()` |
+| Flags | `InitFlags` is `uint64`; only `InitAMDGPUs` is supported. Other values return `AMDSMI_STATUS_INVAL` before calling C |
+| Index lookup | `GetProcessorHandleFromIndex(uint32)` uses current filtered GPU discovery order; an out-of-range index returns `AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS` |
 | Final shutdown | All package handles expire, even on cleanup error; rediscover after reinitialization |
 | Concurrency | Calls are serialized; external lifecycle changes must not run concurrently |
 | Other bindings | Coordinate first-initializer flags and the entire native lifetime; later initialization does not change those flags |
@@ -124,6 +130,22 @@ public C enumerator names and values.
 
 ## Compatibility
 
+### Pre-release API migration
+
+These names replace the initial pre-release API directly, without compatibility aliases:
+
+| Previous API | Current API |
+| --- | --- |
+| `Init()` | `Init(InitAMDGPUs)` |
+| `GetASICInfo()` / `ASICInfo` | `GetGPUAsicInfo()` / `AsicInfo` |
+| `GetBDF()` | `GetGPUDeviceBDF()` |
+| `RevisionID`, `Serial`, `OAMID`, `ComputeUnits` | `RevID`, `AsicSerial`, `OamID`, `NumComputeUnits` |
+
+`GetGPUDeviceBDF` still returns the typed `BDF`, with `String()` for display.
+`StatusCode`, `Error`, native enum names, units, and other query names are unchanged.
+The Host design does not fully specify those contracts; full cross-backend source
+compatibility is not claimed. Index lookup uses Go enumeration on BM, not a new C API.
+
 The existing `goamdsmi` API and shim remain unchanged. This additive module is
 not their source-compatible replacement. CPU, NIC, set/reset, all-profile
 configuration, and event APIs are outside this module.
@@ -146,8 +168,9 @@ python3 -B tests/go/run_tests.py --vet
 python3 -B tests/go/run_tests.py --build-example
 ```
 
+The external-package contract test compiles Host-style names, fields and initialization.
 `--cgocheck2` requires Go 1.21+. Native checks require a fresh matching build;
-only the version test executes native code, without `Init()` or GPU access.
+only the version test executes native code, without initialization or GPU access.
 The example is linked, not run. The staging check uses temporary `DESTDIR`,
 verifies installed source contents, and builds an independent local-replacement
 consumer against the staged header/library pair:

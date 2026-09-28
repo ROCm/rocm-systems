@@ -39,13 +39,18 @@ amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile(
   amdsmi_status_t status = mock_begin(__func__, h);
   if (status != AMDSMI_STATUS_SUCCESS) return mock_finish(status);
   if (!out || !mock_is_zero(out, sizeof(*out)) || !partition_id ||
-      !mock_is_zero(partition_id, sizeof(*partition_id)))
+      !mock_is_zero(partition_id, AMDSMI_MAX_ACCELERATOR_PARTITIONS * sizeof(*partition_id)))
     return mock_finish(AMDSMI_STATUS_UNEXPECTED_DATA);
   out->profile_type = AMDSMI_ACCELERATOR_PARTITION_CPX;
   out->num_partitions = AMDSMI_MAX_ACCELERATOR_PARTITIONS;
   out->memory_caps.nps_cap_mask = 5;
   out->profile_index = 3;
   *partition_id = 7;
+  if (mock_mode(__func__) == 5) {
+    for (uint32_t i = 1; i < AMDSMI_MAX_ACCELERATOR_PARTITIONS; ++i) {
+      partition_id[i] = i;
+    }
+  }
   if (mock_mode(__func__) == 1) {
     out->num_resources = AMDSMI_MAX_CP_PROFILE_RESOURCES;
     for (uint32_t i = 0; i < out->num_partitions; ++i) {

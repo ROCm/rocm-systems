@@ -14,7 +14,7 @@ import (
 )
 
 func run() (err error) {
-	if err = amdsmi.Init(); err != nil {
+	if err = amdsmi.Init(amdsmi.InitAMDGPUs); err != nil {
 		return err
 	}
 	defer func() { err = errors.Join(err, amdsmi.ShutDown()) }()
@@ -32,7 +32,7 @@ func run() (err error) {
 	}
 	for index, handle := range handles {
 		label := fmt.Sprintf("GPU %d", index)
-		if bdf, queryErr := amdsmi.GetBDF(handle); queryErr != nil {
+		if bdf, queryErr := amdsmi.GetGPUDeviceBDF(handle); queryErr != nil {
 			fmt.Fprintf(os.Stderr, "%s BDF: %v\n", label, queryErr)
 		} else {
 			label = bdf.String()

@@ -20,23 +20,19 @@ typedef enum {
 MEMBERS = ["AMDSMI_TEST_FIRST", "AMDSMI_TEST_ALIAS", "AMDSMI_TEST_LAST"]
 MODULE = "module github.com/ROCm/rocm-systems/projects/amdsmi/go\n\ngo 1.20\n"
 ENUM_OWNERS = {
-    "status_codes_linux.go": (("amdsmi_status_t", "StatusCode"),),
-    "memory_types_linux.go": (("amdsmi_vram_type_t", "VRAMType"),),
-    "identity_types_linux.go": (("amdsmi_fw_block_t", "FirmwareBlock"),),
-    "telemetry_types_linux.go": (
+    "amdsmi_interface.go": (
+        ("amdsmi_status_t", "StatusCode"),
+        ("amdsmi_vram_type_t", "VRAMType"),
+        ("amdsmi_fw_block_t", "FirmwareBlock"),
         ("amdsmi_temperature_type_t", "TemperatureType"),
         ("amdsmi_temperature_metric_t", "TemperatureMetric"),
         ("amdsmi_clk_type_t", "ClockType"),
         ("amdsmi_memory_type_t", "MemoryType"),
-    ),
-    "partition_types_linux.go": (
         ("amdsmi_memory_partition_type_t", "MemoryPartitionType"),
         ("amdsmi_accelerator_partition_type_t", "AcceleratorPartitionType"),
-    ),
-    "ras_types_linux.go": (
         ("amdsmi_gpu_block_t", "GPUBlock"),
         ("amdsmi_ras_err_state_t", "RASState"),
-    ),
+    )
 }
 ALLOWED_CALLS = set(
     """
@@ -265,13 +261,13 @@ class ProjectTests(unittest.TestCase):
                 self.assertIn("Go API contract checks passed", result.stdout)
 
     def test_cli_reports_failures_without_tracebacks(self) -> None:
-        owner = self.package / "identity_types_linux.go"
+        owner = self.package / "amdsmi_interface.go"
         owner.unlink()
         result = self.run_cli("--available-only")
         self.assertEqual(result.returncode, 0, result.stderr)
         result = self.run_cli()
         self.assertEqual(result.returncode, 1)
-        self.assertIn("missing enum owner files: identity_types_linux.go", result.stderr)
+        self.assertIn("missing enum owner files: amdsmi_interface.go", result.stderr)
         self.assertNotIn("Traceback", result.stderr)
         self.assertNotIn("passed", result.stdout)
         (self.project / "go" / "go.mod").unlink()

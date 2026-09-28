@@ -25,14 +25,15 @@ numeric values are preserved, and unknown input enums are forwarded to the nativ
 
 | Signature | Contract |
 | --- | --- |
-| `Init() error` | Acquires one AMD-GPU initialization reference |
+| `Init(InitFlags) error` | Acquires one AMD-GPU reference; only `InitAMDGPUs` is accepted |
 | `ShutDown() error` | Releases one reference; final package shutdown expires all handles, even on cleanup error |
 | `GetProcessorHandles() ([]ProcessorHandle, error)` | Enumerates AMD GPUs across sockets, preserving native order without a fixed device cap |
+| `GetProcessorHandleFromIndex(uint32) (ProcessorHandle, error)` | Selects the current filtered discovery index; out-of-range indices return `AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS` |
 | `GetProcessorHandleFromBDF(BDF) (ProcessorHandle, error)` | Native BDF lookup; rejects values outside the native bit widths |
-| `GetBDF(ProcessorHandle) (BDF, error)` | Reads PCI domain, bus, device, and function |
+| `GetGPUDeviceBDF(ProcessorHandle) (BDF, error)` | Reads PCI domain, bus, device, and function |
 | `(BDF).String() string` | Hexadecimal `domain:bus:device.function`, retaining the full domain |
-| `GetLibraryVersion() (Version, error)` | Native library version; does not require `Init()` |
-| `StatusString(StatusCode) string` | Native message or numeric fallback; does not require `Init()` |
+| `GetLibraryVersion() (Version, error)` | Native library version; does not require initialization |
+| `StatusString(StatusCode) string` | Native message or numeric fallback; does not require initialization |
 | `(StatusCode).Error() string` | Numeric status text |
 | `(*Error).Error() string` | Operation, status, and message |
 | `(*Error).Unwrap() error` | Underlying `StatusCode` for `errors.Is` |
@@ -40,12 +41,13 @@ numeric values are preserved, and unknown input enums are forwarded to the nativ
 | Type | Fields / underlying type | Meaning |
 | --- | --- | --- |
 | `ProcessorHandle` | Opaque struct, no exported fields | Package-lifetime handle; rediscover after final shutdown |
+| `InitFlags` | `uint64` | `InitAMDGPUs` maps to the native GPU initialization flag; zero and other values return `AMDSMI_STATUS_INVAL` |
 | `BDF` | `Domain uint64`; `Bus, Device, Function uint8` | Domain 48 bits, bus 8, device 5, function 3 |
 | `Version` | `Major, Minor, Release uint32`; `Build string` | Native version components and build string |
 | `StatusCode` | `uint32` | All `AMDSMI_STATUS_*` values preserved |
 | `Error` | `Op string`; `Code StatusCode`; `Message string` | Inspect with `errors.As` into `*Error` |
 
-Every successful `Init()` must be balanced. Calls are serialized, including
+Every successful `Init(InitAMDGPUs)` must be balanced. Calls are serialized, including
 status/version lookup. External bindings must coordinate the entire native
 lifetime and first-initializer flags; later initialization does not change those
 flags. No external concurrent lifecycle, driver reload, partition change, or
@@ -77,7 +79,7 @@ if errors.Is(err, amdsmi.AMDSMI_STATUS_NOT_SUPPORTED) {
 | Signature | Native entry |
 | --- | --- |
 | `GetUUID(ProcessorHandle) (string, error)` | `amdsmi_get_gpu_device_uuid` |
-| `GetASICInfo(ProcessorHandle) (ASICInfo, error)` | `amdsmi_get_gpu_asic_info` |
+| `GetGPUAsicInfo(ProcessorHandle) (AsicInfo, error)` | `amdsmi_get_gpu_asic_info` |
 | `GetDriverInfo(ProcessorHandle) (DriverInfo, error)` | `amdsmi_get_gpu_driver_info` |
 | `GetBoardInfo(ProcessorHandle) (BoardInfo, error)` | `amdsmi_get_gpu_board_info` |
 | `GetFirmwareInfo(ProcessorHandle) ([]FirmwareInfo, error)` | `amdsmi_get_fw_info` |
@@ -85,10 +87,10 @@ if errors.Is(err, amdsmi.AMDSMI_STATUS_NOT_SUPPORTED) {
 
 | Type | Fields and Go types | Meaning |
 | --- | --- | --- |
-| `ASICInfo` | `MarketName, VendorName, Serial string` | Copied identity strings |
-| `ASICInfo` | `VendorID, SubvendorID, RevisionID, OAMID, ComputeUnits, SubsystemID uint32` | Native IDs and compute-unit count |
-| `ASICInfo` | `DeviceID, TargetGraphicsVersion, Flags uint64` | Native ID, graphics target, and raw flags |
-| `ASICInfo` | `PhysicalAcceleratorID, ChipRevisionID, ExternalRevisionID uint32` | Native physical/revision IDs; `UINT32_MAX` can mean unavailable |
+| `AsicInfo` | `MarketName, VendorName, AsicSerial string` | Copied identity strings |
+| `AsicInfo` | `VendorID, SubvendorID, RevID, OamID, NumComputeUnits, SubsystemID uint32` | Native IDs and compute-unit count |
+| `AsicInfo` | `DeviceID, TargetGraphicsVersion, Flags uint64` | Native ID, graphics target, and raw flags |
+| `AsicInfo` | `PhysicalAcceleratorID, ChipRevisionID, ExternalRevisionID uint32` | Native physical/revision IDs; `UINT32_MAX` can mean unavailable |
 | `DriverInfo` | `Version, Date, Name string` | Native driver metadata |
 | `BoardInfo` | `ModelNumber, ProductSerial, FRUID, ProductName, ManufacturerName string` | Native board metadata |
 | `FirmwareBlock` | `uint32` | `AMDSMI_FW_ID_*` constants |

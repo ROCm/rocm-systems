@@ -110,6 +110,12 @@ def verify_install(*, project: Path, build_dir: Path) -> None:
         )
         (consumer / "main.go").write_text(
             'package main\nimport smi "' + module_path + '/amdsmi"\n'
+            "var _ func(smi.InitFlags) error = smi.Init\n"
+            "var _ func(uint32) (smi.ProcessorHandle, error) = smi.GetProcessorHandleFromIndex\n"
+            "var _ func(smi.ProcessorHandle) (smi.AsicInfo, error) = smi.GetGPUAsicInfo\n"
+            "var _ func(smi.ProcessorHandle) (smi.BDF, error) = smi.GetGPUDeviceBDF\n"
+            'var _ = smi.AsicInfo{RevID: 0, AsicSerial: "", OamID: 0, NumComputeUnits: 0}\n'
+            "var _ smi.InitFlags = smi.InitAMDGPUs\n"
             "func main() { v, err := smi.GetLibraryVersion(); "
             "if err != nil { panic(err) }; "
             'if v.Major != 27 || v.Minor != 1 { panic("native version mismatch") } }\n'

@@ -44,10 +44,10 @@ func TestIdentityUUIDEmpty(t *testing.T) {
 }
 
 func TestIdentityASIC(t *testing.T) {
-	checkQuery(t, "amdsmi_get_gpu_asic_info", GetASICInfo, ASICInfo{
+	checkQuery(t, "amdsmi_get_gpu_asic_info", GetGPUAsicInfo, AsicInfo{
 		MarketName: "test-gpu", VendorID: 0x1002, VendorName: "AMD",
-		SubvendorID: 0x1002, DeviceID: 1<<40 + 0x1234, RevisionID: ^uint32(0),
-		Serial: "asic-serial", OAMID: 7, ComputeUnits: 304,
+		SubvendorID: 0x1002, DeviceID: 1<<40 + 0x1234, RevID: ^uint32(0),
+		AsicSerial: "asic-serial", OamID: 7, NumComputeUnits: 304,
 		TargetGraphicsVersion: 1<<40 + 950, SubsystemID: 0x42, Flags: 1<<63 + 1,
 		PhysicalAcceleratorID: 9, ChipRevisionID: 0x91, ExternalRevisionID: 0x92,
 	})
@@ -56,11 +56,11 @@ func TestIdentityASIC(t *testing.T) {
 func TestIdentityASICStringsUnterminated(t *testing.T) {
 	h := fixtureHandle(t)
 	mockConfigure("amdsmi_get_gpu_asic_info", AMDSMI_STATUS_SUCCESS, 1)
-	got, err := GetASICInfo(h)
-	want := ASICInfo{
+	got, err := GetGPUAsicInfo(h)
+	want := AsicInfo{
 		MarketName: strings.Repeat("M", nativeStringCapacity),
 		VendorName: strings.Repeat("V", nativeStringCapacity),
-		Serial:     strings.Repeat("S", nativeStringCapacity),
+		AsicSerial: strings.Repeat("S", nativeStringCapacity),
 	}
 	if err != nil || got != want {
 		t.Fatalf("want %#v, got %#v, err=%v", want, got, err)

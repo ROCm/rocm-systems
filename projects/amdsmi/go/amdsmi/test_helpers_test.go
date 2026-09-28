@@ -34,7 +34,7 @@ func resetCoreFixture(t *testing.T) {
 func fixtureHandle(t *testing.T) ProcessorHandle {
 	t.Helper()
 	resetCoreFixture(t)
-	if err := Init(); err != nil {
+	if err := Init(InitAMDGPUs); err != nil {
 		t.Fatal(err)
 	}
 	handles, err := GetProcessorHandles()
@@ -93,7 +93,7 @@ func checkQuery[T any](t *testing.T, op string,
 	got, err = query(h)
 	assertNativeError(t, err, op, AMDSMI_STATUS_NOT_INIT)
 	assertZero(t, got)
-	if err := Init(); err != nil {
+	if err := Init(InitAMDGPUs); err != nil {
 		t.Fatal(err)
 	}
 	got, err = query(h)
