@@ -135,6 +135,19 @@ RocJITsu sink, and the v13 tensor-DMA descriptor geometry. Tensor-DMA descriptor
 strides are converted from element units to the byte units required by the v13
 callback.
 
+A backend may optionally export
+`ffm_observer_plugin_get_capabilities(uint32_t negotiated_api_version)`. Bit 0
+declares that callbacks for independent wavefronts may run concurrently while
+preserving order within each wave. Bit 1 declares transactional dispatch
+discard and requires the backend to also export
+`ffm_observer_plugin_discard_dispatch(uint64_t dispatch_id)`. RocJITsu uses the
+direct concurrent path only when both bits and the discard entry point are
+present. A late validation failure then discards the backend transaction rather
+than closing a partial dispatch. Capability-absent and older backends retain
+the ordered staging path. If dispatches overlap across queues, RocJITsu stages
+the additional dispatches and replays each as a complete transaction after the
+active direct dispatch finishes.
+
 These FFM versions do not expose a table size or ABI fingerprint, and `on_init`
 returns no status. Qualify the exact Perfsim build with a known dispatch and
 require a nonempty report containing that dispatch.
