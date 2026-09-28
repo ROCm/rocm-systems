@@ -226,14 +226,4 @@ TEST(ReduceScatterPolicyEnv, ParseCtasEnvRejectsGarbage) {
   EXPECT_EQ(parseReduceScatterCtasEnvString("8"), 8u);
 }
 
-TEST(ReduceScatterPolicyEnv, ParseUnrollMinRejectsGarbageAndOverflow) {
-  EXPECT_EQ(parseReduceScatterUnrollMinBytesString(nullptr), 0u);
-  EXPECT_EQ(parseReduceScatterUnrollMinBytesString(""), 0u);
-  EXPECT_EQ(parseReduceScatterUnrollMinBytesString("-1"), 0u);
-  EXPECT_EQ(parseReduceScatterUnrollMinBytesString("48foo"), 0u);
-  EXPECT_EQ(parseReduceScatterUnrollMinBytesString("48"), 48u << 20);
-  // A shift that wraps must not come back as a plausible threshold.
-  EXPECT_EQ(parseReduceScatterUnrollMinBytesString("18446744073709551615"), 0u);
-}
-
 }  // namespace

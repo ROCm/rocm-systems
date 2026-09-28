@@ -121,9 +121,8 @@ GIN_SDMA_RS_HD inline DevReqs reduceScatterDevReqs(int deviceCtaCount) {
 // stride 8-way path covers them). The bare -V default (16) badly under-launches
 // the mid-band (16 MiB ~46%, 33 MiB ~43% of host); self-selecting repairs that for
 // callers that don't pass -V. NCCL_GIN_ANVIL_RS_CTAS pins a fixed count (diagnostic).
-// NOTE: the shipped kernel now runs the grid-stride path for ALL sizes (the warp-
-// unroll large tier is disabled by default, see reduce_scatter.cu ReduceScatter-
-// UnrollMinBytes); this ladder's >=kReduceScatterCtaMidHi arm applies to that path.
+// The kernel uses one grid-stride load schedule for all sizes; this ladder's
+// >=kReduceScatterCtaMidHi arm still applies to that path.
 static constexpr int    kReduceScatterCtasMid   = 48;                    // grid-stride mid-band
 static constexpr int    kReduceScatterCtasOther = 32;                    // small + large sizes
 static constexpr size_t kReduceScatterCtaMidLo  = 8ull  * 1024 * 1024;   // >= -> mid band
@@ -191,9 +190,9 @@ GIN_SDMA_RS_HD inline void bandwidthGBps(size_t perRankCount, int typeSize, doub
 // Deliberately NOT wrapped in `#if !defined(__HIP_DEVICE_COMPILE__)`. HIP parses
 // the whole translation unit in the device pass, including the bodies of host
 // functions it will not codegen, so hiding these there breaks name lookup in
-// ReduceScatterParseCtasEnv/ReduceScatterUnrollMinBytes and fails the
-// reduce_scatter_perf build on every arch. Plain `inline` is already host-only;
-// it is what gin_sdma_allgather_policy.h's parseAllGatherCtasEnv relies on.
+// ReduceScatterParseCtasEnv and fails the reduce_scatter_perf build on every
+// arch. Plain `inline` is already host-only; it is what
+// gin_sdma_allgather_policy.h's parseAllGatherCtasEnv relies on.
 
 // Parse NCCL_GIN_ANVIL_RS_CTAS. Returns kThresholdUnset for null/empty/negative/
 // trailing-garbage so "8foo" and "-2" do not pin a CTA count. strtoull wraps a
@@ -209,22 +208,6 @@ inline size_t parseReduceScatterCtasEnvString(const char* e) {
 
 inline size_t parseReduceScatterCtasEnv(const char* name) {
   return parseReduceScatterCtasEnvString(getenv(name));
-}
-
-// NCCL_GIN_ANVIL_RS_UNROLL_MIN is a MiB crossover. Absent/unparseable -> 0
-// (warp-unroll tier stays off). Rejects a leading '-', trailing garbage, and a
-// shift that would wrap back into a plausible threshold.
-inline size_t parseReduceScatterUnrollMinBytesString(const char* e) {
-  if (e == nullptr || e[0] == '\0' || e[0] == '-') return 0;
-  char* end = nullptr;
-  unsigned long long mib = strtoull(e, &end, 10);
-  if (end == e || *end != '\0') return 0;
-  if (mib > (((size_t)-1) >> 20)) return 0;
-  return (size_t)mib << 20;
-}
-
-inline size_t parseReduceScatterUnrollMinBytes() {
-  return parseReduceScatterUnrollMinBytesString(getenv("NCCL_GIN_ANVIL_RS_UNROLL_MIN"));
 }
 
 }  // namespace gin_sdma_reducescatter
