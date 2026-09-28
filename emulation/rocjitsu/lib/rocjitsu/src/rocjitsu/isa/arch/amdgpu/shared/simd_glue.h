@@ -3644,11 +3644,12 @@ template <FmaMixDst DstMode, bool Fused = false, typename Inst>
       !inst.src1.simd_capable() || !inst.src2.simd_capable() || !inst.vdst.simd_capable())
     return false;
 
-#if defined(__clang__) && defined(__FMA__)
+#if defined(__FMA__)
   if constexpr (!Fused && DstMode == FmaMixDst::F32) {
     // Legacy scalar a*b+c and stdx SIMD expressions can contract differently
-    // under Clang. Keep the established fallback for those profiles; CDNA5
-    // explicitly uses fused arithmetic in both execution paths.
+    // with hardware FMA, including GCC with UBSan. Preserve the scalar path
+    // for those profiles; CDNA5 explicitly uses fused arithmetic in both
+    // execution paths.
     return false;
   }
 #endif
