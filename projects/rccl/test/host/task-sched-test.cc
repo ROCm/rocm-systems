@@ -14,6 +14,8 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdint>
+
 #include "ScopedHook.h"
 #include "TaskPrepScene.h"
 

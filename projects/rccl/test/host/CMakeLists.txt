@@ -833,8 +833,8 @@ if(BUILD_TESTS)
     ${PROJECT_BINARY_DIR}/hipify/src/device          # device/common.h (neutered)
     ${PROJECT_BINARY_DIR}/hipify/src/include/nccl_device)
   # Hipify preserves src/enqueue/task_prep/ and renames none of the four (no basename collisions).
-  # Same for src/enqueue/task_sched/: the _tmp.cc rename goes to the unrelated src/scheduler/
-  # copies instead (see the standalone block below and MICROTEST_README.md for the map).
+  # Same for src/enqueue/task_sched/: the _tmp.cc rename lands on src/scheduler/allgatherv_sched.cc,
+  # the only basename collision (see the ALLGATHERV_SCHED_CC_PATH note above, CMakeLists.txt:331).
   target_compile_definitions(rccl-UnitTestsMicroTaskPrep PRIVATE
     ${RCCL_COMMON_COMPILE_DEFS}
     TASK_PREP_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/enqueue/task_prep/task_prep.cc"
