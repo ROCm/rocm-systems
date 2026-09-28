@@ -44,9 +44,13 @@ namespace RcclUnitTesting
     EXPECT_TRUE(matchesEither(ncclFloat8e5m2, 1.75f, 1.75f, 1.5f));
     EXPECT_TRUE(matchesEither(ncclFloat8e5m2, 1.5f, 1.75f, 1.5f));
 
-    // The former relative bounds accepted these missing-rank examples.
+    // Missing-rank examples are rejected.
     EXPECT_FALSE(matchesEither(ncclFloat8e4m3, 6.0f, 8.0f, 8.0f));
     EXPECT_FALSE(matchesEither(ncclFloat8e5m2, 4.0f, 8.0f, 8.0f));
+
+    // One FP8 step apart and inside the former absolute bound (< 9e-2), yet not equal.
+    EXPECT_FALSE(matchesEither(ncclFloat8e4m3, 0.5f, 0.5625f, 0.5625f));
+    EXPECT_FALSE(matchesEither(ncclFloat8e5m2, 0.25f, 0.3125f, 0.3125f));
 
     // Non-reduce FP8 collectives pass no alternative reference: only the primary matches.
     auto matchesPrimaryOnly = [](ncclDataType_t const dataType, float const actualValue,

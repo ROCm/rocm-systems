@@ -6,6 +6,7 @@
 #include "TestBed.hpp"
 #include <hip/hip_runtime.h>
 #include <cerrno>
+#include <fcntl.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -143,6 +144,9 @@ namespace RcclUnitTesting
     siginfo_t childInfo{};
     ASSERT_EQ(waitid(P_PID, child->pid, &childInfo, WEXITED | WNOWAIT), 0);
     pid_t const childPid = child->pid;
+    // Teardown deletes the child, so snapshot the parent-side descriptors first.
+    int const parentWriteFd = child->parentWriteFd;
+    int const parentReadFd = child->parentReadFd;
 
     testBed.TeardownOwnedChildList();
 
@@ -152,6 +156,12 @@ namespace RcclUnitTesting
     errno = 0;
     EXPECT_EQ(waitpid(childPid, nullptr, WNOHANG), -1);
     EXPECT_EQ(errno, ECHILD);
+    for (int const fd : {parentWriteFd, parentReadFd})
+    {
+      errno = 0;
+      EXPECT_EQ(fcntl(fd, F_GETFD), -1) << "parent pipe fd " << fd << " left open";
+      EXPECT_EQ(errno, EBADF);
+    }
   }
 
   // Pool workers must start from a fresh process image even when an earlier
