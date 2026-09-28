@@ -6070,9 +6070,9 @@ amdsmi_status_t amdsmi_get_link_topology_nearest(amdsmi_processor_handle process
     constexpr bool operator()(const LinkTopolyInfo_t& left,
                               const LinkTopolyInfo_t& right) const noexcept {
       if (left.num_hops == right.num_hops) {
-        return (left.num_hops >= right.num_hops);
+        return left.link_weight > right.link_weight;
       } else {
-        return (left.link_weight > right.link_weight);
+        return left.num_hops > right.num_hops;
       }
     }
   };
