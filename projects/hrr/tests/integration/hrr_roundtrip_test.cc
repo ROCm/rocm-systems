@@ -203,10 +203,10 @@ HRR_TEST_CASE(Unit_HRR_CaptureReplayRoundtrip) {
 /**
  * Test Description
  * ----------------
- *   - Spawns Unit_HRR_GpuWorkload_Direct with HIP_HRR_CAPTURE_OUTPUT set, at the
- *     default AMD_LOG_LEVEL, with stdout and stderr captured. The capture layer
- *     must print its start notice exactly once, naming the per-process archive
- *     directory.
+ *   - Spawns Unit_HRR_GpuWorkload_Direct with HIP_HRR_CAPTURE_OUTPUT set and
+ *     AMD_LOG_LEVEL=0, capturing stdout and stderr. The capture layer must print
+ *     its start notice exactly once, naming the per-process archive directory
+ *     and the base directory that child processes record to.
  *   - Spawns the same workload without HIP_HRR_CAPTURE_OUTPUT: no notice.
  */
 HRR_TEST_CASE(Unit_HRR_CaptureStartNotice) {
@@ -233,12 +233,16 @@ HRR_TEST_CASE(Unit_HRR_CaptureStartNotice) {
     REQUIRE(ret == 0);
     REQUIRE(count_notices(out) == 1);
 
-    const size_t begin = out.find(kNotice) + kNotice.size();
-    std::string named = out.substr(begin, out.find('\n', begin) - begin);
-    if (!named.empty() && named.back() == '\r') named.pop_back();
+    const size_t begin = out.find(kNotice);
+    std::string line = out.substr(begin, out.find('\n', begin) - begin);
+    if (!line.empty() && line.back() == '\r') line.pop_back();
+    const std::string base = cap.path.string();
+    const std::string pid_dir = hrr_single_process_archive(cap.path).filename().string();
     // The writer joins the pid-<pid> component with '/' on every platform.
-    CHECK(fs::path(named).make_preferred().string() ==
-          hrr_single_process_archive(cap.path).string());
+    const std::string expected = kNotice + base + "/" + pid_dir +
+                                 " (child processes record to their own pid-* directories in " +
+                                 base + ")";
+    CHECK(line == expected);
   }
 
   {
