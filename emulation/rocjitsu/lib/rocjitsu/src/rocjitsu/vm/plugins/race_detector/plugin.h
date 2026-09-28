@@ -125,6 +125,10 @@ public:
 
   void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts) override;
 
+  bool observes_hot_hooks_for_wavefront(const amdgpu::Wavefront *wf) const override {
+    return wf != nullptr && wavefront_state<RaceWavefrontState>(*wf) != nullptr;
+  }
+
   std::string getSummary() const;
 
 private:
@@ -142,7 +146,7 @@ private:
   };
 
   RaceWavefrontState *get_state(const amdgpu::Wavefront &wf) {
-    return static_cast<RaceWavefrontState *>(wf.plugin_state(slot_index()));
+    return wavefront_state<RaceWavefrontState>(wf);
   }
   RaceWavefrontState *get_state(const amdgpu::Wavefront *wf) {
     return wf ? get_state(*wf) : nullptr;

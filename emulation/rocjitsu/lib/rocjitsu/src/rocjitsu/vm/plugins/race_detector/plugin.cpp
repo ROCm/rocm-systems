@@ -300,7 +300,7 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
     auto state = std::make_unique<RaceWavefrontState>();
     state->race_state = &det.getWaveRaceState(static_cast<int>(w));
     state->disasm = dc;
-    wavefronts[w]->set_plugin_state(slot_index(), std::move(state));
+    set_wavefront_state(*wavefronts[w], std::move(state));
   }
 }
 
@@ -519,7 +519,9 @@ void RaceDetectorPlugin::onAmdgpuAfterExecuteInstruction(uint64_t /*pc*/, const 
 void RaceDetectorPlugin::onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts) {
   for (auto *wf : wavefronts) {
     auto *s = get_state(wf);
-    assert(s && s->race_state);
+    if (!s)
+      continue;
+    assert(s->race_state);
     s->race_state->flushBarrierPendingEvents();
   }
 }
