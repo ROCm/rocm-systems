@@ -192,11 +192,11 @@ bool hsakmtRuntime::ReserveLocalHeapSpace() {
   for (uint64_t scale : {8ull, 4ull, 2ull}) {
     local_heap_space_size_ = total_local_size * scale;
 
-    pr_info("try to reserve %" PRIu64 " MB (%" PRIu64 "x VRAM) of local heap VA\n",
+    pr_debug("try to reserve %" PRIu64 " MB (%" PRIu64 "x VRAM) of local heap VA\n",
       (total_local_size * scale) >> 20, scale);
 
     if (ReserveSvmSpace(local_heap_space_start_, local_heap_space_size_, align)) {
-      pr_info("successfully reserved %" PRIu64 " MB of local heap VA at 0x%" PRIx64 "\n",
+      pr_debug("successfully reserved %" PRIu64 " MB of local heap VA at 0x%" PRIx64 "\n",
         (total_local_size * scale) >> 20, local_heap_space_start_);
       return true;
     }
@@ -251,7 +251,7 @@ bool hsakmtRuntime::ReserveSystemHeapSpace() {
   for (uint64_t divisor : {1ull, 2ull, 4ull}) {
     system_heap_space_size_ = total_ram / divisor;
 
-    pr_info("try to reserve %" PRIu64 " MB (1/%" PRIu64 " RAM) of system heap VA\n",
+    pr_debug("try to reserve %" PRIu64 " MB (1/%" PRIu64 " RAM) of system heap VA\n",
       (total_ram / divisor) >> 20, divisor);
 
     if (divisor > 1 && system_heap_space_size_ < alignment * 2) {
@@ -261,7 +261,7 @@ bool hsakmtRuntime::ReserveSystemHeapSpace() {
     }
 
     if (ReserveSvmSpace(system_heap_space_start_, system_heap_space_size_, alignment)) {
-      pr_info("successfully reserved %" PRIu64 " MB of system heap VA at 0x%" PRIx64 "\n",
+      pr_debug("successfully reserved %" PRIu64 " MB of system heap VA at 0x%" PRIx64 "\n",
         (total_ram / divisor) >> 20, system_heap_space_start_);
       return true;
     }
