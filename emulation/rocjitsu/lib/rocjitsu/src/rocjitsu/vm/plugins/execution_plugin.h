@@ -72,6 +72,32 @@ public:
   /// value from construction onward.
   virtual bool requires_serial_hot_hooks() const { return false; }
 
+  /// Whether this plugin consumes high-frequency callbacks for @p wf.
+  ///
+  /// The conservative default preserves the historical behavior. A plugin may
+  /// return false after its wavefront-dispatch callback has decided that the
+  /// wave is outside its observation scope. The group samples the decision once
+  /// after every plugin's wavefront-dispatch callback and reuses it until halt.
+  /// Reentrant hooks during dispatch/halt and hooks without a wavefront use a
+  /// live query, so this method must remain lock-free and thread-safe. The
+  /// decision must be stable between dispatch completion and the matching halt.
+  /// Lifecycle and dispatch/workgroup/wavefront callbacks are unaffected.
+  virtual bool observes_hot_hooks_for_wavefront(const amdgpu::Wavefront * /*wf*/) const {
+    return true;
+  }
+
+  /// Per-hook interest declarations for callbacks on the instruction hot path.
+  /// The conservative defaults preserve existing plugins. Implementations may
+  /// opt out of callbacks they do not consume; the group samples these stable
+  /// capabilities once when the plugin is added.
+  virtual bool observes_before_execute_instruction() const { return true; }
+  virtual bool observes_after_execute_instruction() const { return true; }
+  virtual bool observes_async_instruction_issued() const { return true; }
+  virtual bool observes_memory_instruction_routing() const { return true; }
+  virtual bool observes_vgpr_reads() const { return true; }
+  virtual bool observes_vgpr_writes() const { return true; }
+  virtual bool observes_scalar_register_writes() const { return true; }
+
   /// Opt in to asynchronous arithmetic and its issue notification.
   /// Leave false when relying on synchronous before/after state inspection:
   /// any such plugin disables offload for its group. Async-aware plugins must
@@ -149,14 +175,22 @@ public:
   /// requires_serial_hot_hooks() returns true.
   virtual void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation & /*access*/) {}
 
+  /// Wavefront-aware form of onAmdgpuMemoryAccessRouted(). The default keeps
+  /// source compatibility with plugins that only need the observation payload.
+  /// Plugins with wave-local state can override this form to avoid a shared
+  /// identity lookup in concurrent hot callbacks.
+  virtual void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access,
+                                          const amdgpu::Wavefront & /*wf*/) {
+    onAmdgpuMemoryAccessRouted(access);
+  }
+
   /// Context-preserving form of onAmdgpuMemoryAccessRouted(). The instruction
   /// and wavefront are borrowed for the duration of the callback and already
   /// reflect the selected route. The default preserves source compatibility by
-  /// forwarding to the observation-only hook.
+  /// forwarding to the wavefront-aware hook.
   virtual void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access,
-                                          const Instruction & /*inst*/,
-                                          amdgpu::Wavefront & /*wf*/) {
-    onAmdgpuMemoryAccessRouted(access);
+                                          const Instruction & /*inst*/, amdgpu::Wavefront &wf) {
+    onAmdgpuMemoryAccessRouted(access, wf);
   }
 
   /// Called after one tensor DMA instruction and any descriptor-requested
@@ -168,6 +202,13 @@ public:
   /// requires_serial_hot_hooks() returns true.
   virtual void
   onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation & /*access*/) {}
+
+  /// Wavefront-aware form of onAmdgpuTensorDmaMemoryAccess(). See the regular
+  /// memory overload above for the compatibility and concurrency contract.
+  virtual void onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &access,
+                                             const amdgpu::Wavefront & /*wf*/) {
+    onAmdgpuTensorDmaMemoryAccess(access);
+  }
 
   /// Called when the command processor has parsed an AQL kernel dispatch packet
   /// and created a DispatchEntry. Fires during packet fetching, before any

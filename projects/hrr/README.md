@@ -10,6 +10,9 @@ The information presented in this document is for informational purposes only an
 
 © 2026 Advanced Micro Devices, Inc. All Rights Reserved.
 
+## Note
+HRR Capture is now disabled by default on AMD platforms. The feature will be securely re-enabled in a future release
+
 ## Capture
 
 ```bash

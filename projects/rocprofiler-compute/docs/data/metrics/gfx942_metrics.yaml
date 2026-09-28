@@ -103,7 +103,7 @@ Roofline Performance Rates:
     rst: 'The total 64-bit floating-point operations executed per second on the VALU. This is presented with the value of the peak empirical F64 FLOPs achievable on the specific accelerator. Note: this does not include any F64 operations from MFMA instructions.'
     unit: GFLOP/s
   MFMA FLOPs (F8):
-    rst: The total number of 8-bit brain floating point MFMA operations executed per second. This does not include any 16-bit brain floating point operations from VALU instructions. The peak empirically measured F8 MFMA operations achievable on the specific accelerator is displayed alongside for comparison. It is supported on AMD Instinct MI300 series and later only.
+    rst: The total number of 8-bit floating point MFMA operations executed per second. This is also presented as a percent of the peak theoretical F8 MFMA operations achievable on the specific accelerator. It is supported on AMD Instinct MI300 series and later only.
     unit: GFLOP/s
   MFMA FLOPs (BF16):
     rst: 'The total number of 16-bit brain floating point MFMA operations executed per second. Note: this does not include any 16-bit brain floating point operations from VALU instructions. The peak empirically measured BF16 MFMA operations achievable on the specific accelerator is displayed alongside for comparison.'
@@ -455,7 +455,7 @@ Arithmetic operations:
     rst: The total number of integer operations executed on either the :ref:`VALU <desc-valu>` or :ref:`MFMA <desc-mfma>` units, per :ref:`normalization unit <normalization-units>`.
     unit: IOPS per Normalization Unit
   F8 OPs:
-    rst: The total number of 8-bit floating-point MFMA operations executed, per normalization unit.
+    rst: The total number of 8-bit floating-point operations executed on the MFMA units, per normalization unit.
     unit: FLOPs per Normalization Unit
   F16 OPs:
     rst: The total number of 16-bit floating-point operations executed on either the :ref:`VALU <desc-valu>` or :ref:`MFMA <desc-mfma>` units, per :ref:`normalization unit <normalization-units>`.

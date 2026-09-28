@@ -31,7 +31,9 @@ read_fd(int fd)
     char        buf[4096];
     ssize_t     n;
     while((n = read(fd, buf, sizeof(buf))) > 0)
+    {
         result.append(buf, static_cast<size_t>(n));
+    }
     return result;
 }
 
@@ -249,14 +251,12 @@ TEST_F(logger_test, fork_child_gets_different_pid_in_filename)
 
         _exit((pid_differs && filename_correct) ? 0 : 1);
     }
-    else
-    {
-        int status;
-        waitpid(child_pid, &status, 0);
-        const int child_exit_code = WEXITSTATUS(status);
 
-        EXPECT_EQ(child_exit_code, 0) << "Child should have different PID in filename";
-    }
+    int status;
+    waitpid(child_pid, &status, 0);
+    const int child_exit_code = WEXITSTATUS(status);
+
+    EXPECT_EQ(child_exit_code, 0) << "Child should have different PID in filename";
 }
 
 TEST_F(logger_test, fork_resets_logger_in_child)
@@ -382,15 +382,13 @@ TEST_F(logger_test, fork_child_creates_log_file_with_child_pid)
 
         _exit(child_log_exists && has_content ? 0 : 1);
     }
-    else
-    {
-        int status;
-        waitpid(child_pid, &status, 0);
-        const int child_exit_code = WEXITSTATUS(status);
 
-        EXPECT_EQ(child_exit_code, 0)
-            << "Child process failed to create its own log file with child PID";
-    }
+    int status;
+    waitpid(child_pid, &status, 0);
+    const int child_exit_code = WEXITSTATUS(status);
+
+    EXPECT_EQ(child_exit_code, 0)
+        << "Child process failed to create its own log file with child PID";
 }
 
 TEST_F(logger_test, concurrent_logging_during_fork_no_deadlock)
@@ -410,7 +408,10 @@ TEST_F(logger_test, concurrent_logging_during_fork_no_deadlock)
             while(keep_logging.load(std::memory_order_relaxed))
             {
                 logger.info("Thread {} iteration {}", i, iter++);
-                if(iter >= log_iterations) break;
+                if(iter >= log_iterations)
+                {
+                    break;
+                }
             }
         });
     }
@@ -439,7 +440,9 @@ TEST_F(logger_test, concurrent_logging_during_fork_no_deadlock)
 
     keep_logging.store(false, std::memory_order_relaxed);
     for(auto& t : threads)
+    {
         t.join();
+    }
 
     int         status;
     const pid_t waited = waitpid(child_pid, &status, 0);
@@ -658,7 +661,9 @@ TEST_F(logger_test, concurrent_logging_stress_with_fork)
     close(pipefd[0]);
 
     for(auto& t : threads)
+    {
         t.join();
+    }
 
     int         status;
     const pid_t waited = waitpid(child_pid, &status, 0);

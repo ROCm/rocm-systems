@@ -140,6 +140,21 @@ template <class T> using native = stdx::native_simd<T>;
 /// Native-SIMD width measured in 32-bit lanes. Convenience constant.
 template <class T> constexpr std::size_t native_width_v = native<T>::size();
 
+/// Fused multiply-add for native f32 SIMD. GCC's experimental::simd FMA
+/// customization point does not inline on AVX-512 and otherwise emits a call
+/// plus a ZMM spill/reload. Keep that toolchain workaround in the shared SIMD
+/// layer; other targets use the portable TS operation.
+[[gnu::always_inline]] inline native<float> native_fma(native<float> a, native<float> b,
+                                                       native<float> c) {
+#if defined(__AVX512F__)
+  static_assert(native<float>::size() == 16);
+  return std::bit_cast<native<float>>(_mm512_fmadd_ps(
+      std::bit_cast<__m512>(a), std::bit_cast<__m512>(b), std::bit_cast<__m512>(c)));
+#else
+  return stdx::fma(a, b, c);
+#endif
+}
+
 /// Pack a SIMD predicate into the low mask.size() bits. Bit i corresponds to
 /// SIMD lane i. libstdc++ exposes a bitset bridge that maps native masks to
 /// movemask-style instructions; retain a lane fallback for other TS
@@ -212,6 +227,7 @@ template <class T> native<T> broadcast(uint32_t) { return {}; }
 template <class Mask> uint64_t simd_mask_to_bits(const Mask &) { return 0; }
 template <class Simd> bool simd_mask_from_bits(uint64_t) { return false; }
 inline native<uint32_t> simd_u32_lanes_from_bits(uint64_t) { return {}; }
+inline native<float> native_fma(native<float>, native<float>, native<float>) { return {}; }
 template <class T> void masked_store(uint32_t *, native<T>, uint64_t) {}
 template <class T> void blit_to_buffer(uint32_t (&)[native<T>::size()], native<T>) {}
 template <class T> native<T> load64(const uint32_t *, const uint32_t *) { return {}; }

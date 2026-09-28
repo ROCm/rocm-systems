@@ -37,7 +37,10 @@ file_size_or_zero(const std::string& path) noexcept
 {
     struct stat st
     {};
-    if(::stat(path.c_str(), &st) != 0) return 0;
+    if(::stat(path.c_str(), &st) != 0)
+    {
+        return 0;
+    }
     return static_cast<std::uint64_t>(st.st_size);
 }
 
@@ -46,8 +49,10 @@ sum_storage_bytes(const std::vector<std::shared_ptr<data::processor_config_t>>& 
 {
     std::uint64_t total = 0;
     for(const auto& cfg : configs)
+    {
         total += file_size_or_zero(
             utility::get_buffered_storage_filename(cfg->_ppid, cfg->_pid));
+    }
     return total;
 }
 
@@ -155,9 +160,13 @@ post_processor::process(
     const data::enabled_formats_t&                                formats)
 {
     if(formats.has_sequential_formats())
+    {
         run_sequential(configs, formats.get_sequential_formats());
+    }
     if(formats.has_parallel_formats())
+    {
         run_multithreaded(configs, formats.get_parallel_formats());
+    }
 }
 
 void
@@ -215,9 +224,13 @@ post_processor::run_multithreaded(
         std::vector<std::thread> processing_threads;
         processing_threads.reserve(batch_end - batch_start);
         for(auto i = batch_start; i < batch_end; ++i)
+        {
             processing_threads.emplace_back(spawn_for_config(configs[i]));
+        }
         for(auto& thread : processing_threads)
+        {
             thread.join();
+        }
     }
     LOG_DEBUG("Multithreaded processing completed");
 }
@@ -233,7 +246,10 @@ post_processor::make_configs(const data::mapped_cache_files_t& cache_files,
 
     for(const auto& [pid, files] : cache_files)
     {
-        if(files.empty()) continue;
+        if(files.empty())
+        {
+            continue;
+        }
 
         std::vector<std::shared_ptr<agent>> _agents;
         auto _metadata = std::make_shared<metadata_registry>();
