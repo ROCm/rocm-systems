@@ -29,6 +29,15 @@ std::optional<DbiEntryStorage> plan_dbi_entry_storage(KernelBlockScope blocks, c
                                                       uint32_t kernel_sgpr_count,
                                                       const RegisterSet &reserved,
                                                       std::string *error_out) {
+  // The floor is an operand scan, so an M0-displaced write can land above it,
+  // including on the run chosen here, and clobber it before a probe reads it.
+  if (accesses_sgprs_indirectly_via_movrel(blocks)) {
+    if (error_out != nullptr)
+      *error_out = "kernel has relative SGPR access (s_movrel*), so no SGPR can be shown free "
+                   "for the entry prologue's reserved storage";
+    return std::nullopt;
+  }
+
   const uint32_t floor = dbi_entry_storage_floor(blocks, desc, arch);
   const uint32_t bound = std::min<uint32_t>(kernel_sgpr_count, REGISTER_SET_ALLOCATABLE_SGPRS);
 

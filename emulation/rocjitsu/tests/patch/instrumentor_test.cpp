@@ -2350,6 +2350,26 @@ TEST(InstrumentorEntryPrologue, UnrelocatableKernelEntryFailsClosed) {
       << result.errors.front();
 }
 
+// The prologue is spliced over the entry, so a loop back to it would run the
+// prologue a second time through the kernarg pointer the first run restored.
+TEST(InstrumentorEntryPrologue, BranchBackToTheKernelEntryFailsClosed) {
+  // s_cbranch_scc0 at offset 8 with simm16 -3 targets 8 + 4 - 12 = offset 0.
+  constexpr uint32_t kCbranchScc0ToEntry = 0xBF84FFFDu;
+  auto target = make_gfx950_kernel_elf({0xBF800000u, 0xBF800000u, kCbranchScc0ToEntry, 0xBF810000u},
+                                       /*private_bytes=*/0);
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/4));
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("reaches the kernel entry"), std::string::npos)
+      << result.errors.front();
+}
+
 // Instrumentation does not support multi-kernel objects, so neither does the
 // prologue. Rejected here rather than downstream at the argument-VGPR bound,
 // which would reject it for a reason that reads as unrelated.
