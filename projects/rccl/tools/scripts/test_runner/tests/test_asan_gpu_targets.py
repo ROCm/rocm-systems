@@ -15,10 +15,18 @@ from pathlib import Path
 
 RCCL_ROOT = Path(__file__).resolve().parents[4]
 MODULE = RCCL_ROOT / "cmake" / "AsanGpuTargets.cmake"
+# The same policy, duplicated because rccl builds rocSHMEM as a separate cmake
+# process. Drift between the two shows up only as librocshmem.a built for a
+# different arch set than the librccl.so it links into, so run the cases
+# against both.
+ROCSHMEM_MODULE = (RCCL_ROOT.parent / "rocshmem" / "cmake" / "AsanGpuTargets.cmake")
 
 
 @unittest.skipUnless(shutil.which("cmake"), "cmake not available on PATH")
 class AsanGpuTargetsTest(unittest.TestCase):
+    module = MODULE
+    function = "rccl_asan_adjust_gpu_targets"
+
     def adjust(self, targets):
         """Run rccl_asan_adjust_gpu_targets over the given targets.
 
@@ -29,8 +37,8 @@ class AsanGpuTargetsTest(unittest.TestCase):
             out_file = Path(temp_dir) / "out.txt"
             script = Path(temp_dir) / "probe.cmake"
             script.write_text(
-                f'include("{MODULE}")\n'
-                f"rccl_asan_adjust_gpu_targets(RESULT {quoted})\n"
+                f'include("{self.module}")\n'
+                f"{self.function}(RESULT {quoted})\n"
                 f'file(WRITE "{out_file}" "${{RESULT}}")\n'
             )
             completed = subprocess.run(
@@ -126,6 +134,24 @@ class AsanGpuTargetsTest(unittest.TestCase):
 
         self.assertIn("ASAN requires a GPU target that supports xnack",
                       str(cm.exception))
+
+
+@unittest.skipUnless(shutil.which("cmake"), "cmake not available on PATH")
+class RocshmemAsanGpuTargetsTest(AsanGpuTargetsTest):
+    """Every case above, run against the rocSHMEM copy of the policy."""
+
+    module = ROCSHMEM_MODULE
+    function = "rocshmem_asan_adjust_gpu_targets"
+
+    def test_full_default_target_list(self):
+        """rocSHMEM's DEFAULT_GPUS differs from rccl's; see its CMakeLists.txt."""
+        result, _ = self.adjust([
+            "gfx90a", "gfx1100", "gfx1201", "gfx942", "gfx950",
+            "gfx1250", "gfx1250-strict"])
+
+        self.assertEqual(result, [
+            "gfx90a:xnack+", "gfx942:xnack+", "gfx950:xnack+",
+            "gfx1250", "gfx1250-strict"])
 
 
 if __name__ == "__main__":

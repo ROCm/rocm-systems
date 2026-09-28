@@ -161,14 +161,16 @@ function(add_rocshmem_targets)
             INSTALL_COMMAND ""
         )
 
-        # ExternalProject stamps its build step on completion, not on the text
-        # of BUILD_COMMAND, so flipping ASAN over an existing tree leaves the
-        # step up to date and keeps the previous, uninstrumented
-        # librocshmem.a. Record the options in a file and hang the build step
-        # off it: file(GENERATE) rewrites only when the content differs, so the
-        # sub-build re-runs exactly when its options change, without the
-        # every-invocation cost of BUILD_ALWAYS.
-        set(_rocshmem_opts_stamp "${CMAKE_CURRENT_BINARY_DIR}/rocshmem_ext_options.txt")
+        # The build step is stamped on completion, not on BUILD_COMMAND text,
+        # so flipping ASAN would otherwise keep the previous librocshmem.a.
+        # file(GENERATE) rewrites only on a content change, so this re-runs the
+        # sub-build exactly then, unlike BUILD_ALWAYS.
+        #
+        # The stamp sits beside the install it describes, not in this build
+        # dir: ext/rocshmem is shared by the release and debug trees, so a
+        # per-config stamp goes unchanged while the other config overwrites
+        # the archive underneath it.
+        set(_rocshmem_opts_stamp "${ROCSHMEM_INSTALL_DIR}/rccl_build_options.txt")
         file(GENERATE OUTPUT "${_rocshmem_opts_stamp}"
              CONTENT "${CMAKE_BUILD_TYPE} ${_rocshmem_gpu_targets} ${_rocshmem_sdma_opt} ${_rocshmem_asan_opt} ${_rocshmem_cmake_opts}\n")
         ExternalProject_Add_StepDependencies(rocshmem_ext build "${_rocshmem_opts_stamp}")

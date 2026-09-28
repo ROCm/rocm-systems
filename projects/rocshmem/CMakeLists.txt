@@ -241,81 +241,12 @@ if(GPU_TARGETS)
   list(REMOVE_DUPLICATES GPU_TARGETS)
 endif()
 
-# Device ASAN needs xnack. gfx9 must request it explicitly, or a bare arch name
-# compiles with the sanitizer silently ignored; gfx1250 has it always on and
-# rejects an explicit xnack term as an invalid target ID; no other family has
-# it at all. Drop what cannot be instrumented rather than ship an
-# uninstrumented target inside an ASAN build. Same policy as
-# projects/rccl/cmake/AsanGpuTargets.cmake, repeated here because rccl builds
-# rocSHMEM as a separate cmake process.
-#
-# This runs before rocm_check_target_ids, not after. gfx1250:xnack+ is a hard
-# "invalid target ID" error from clang, so a target this policy exists to
-# normalise to gfx1250 would otherwise fail validation and be dropped before
-# the policy ever saw it. Normalising first also means SUPPORTED_GPUS, and so
-# both GPU_TARGETS and GPU_TARGETS_FULL below, are already correct.
-#
-# Variable names deliberately mirror the rccl copy so the two can be diffed.
-set(_ROCSHMEM_ASAN_XNACK_ALWAYS_ON gfx1250 gfx1250-strict)
+include(cmake/AsanGpuTargets.cmake)
 
-function(rocshmem_asan_adjust_gpu_targets OUT_VAR)
-  set(_result "")
-  set(_dropped "")
-
-  foreach(_target IN LISTS ARGN)
-    if(_target STREQUAL "")
-      continue()
-    endif()
-
-    # A requested suffix says what the caller wants, not what the part
-    # supports, so classify on the bare name.
-    string(REGEX REPLACE ":.*" "" _base "${_target}")
-    list(FIND _ROCSHMEM_ASAN_XNACK_ALWAYS_ON "${_base}" _always_on)
-
-    # Drop any xnack term the caller wrote before deciding what to do with it:
-    # it may be ":xnack-", which contradicts the build. Other feature terms
-    # (e.g. ":sramecc+") are part of the requested target and are kept; xnack
-    # sorts last, so re-appending it keeps the target ID canonical.
-    string(REGEX REPLACE ":xnack[+-]" "" _without_xnack "${_target}")
-
-    if(_base MATCHES "^gfx9")
-      list(APPEND _result "${_without_xnack}:xnack+")
-    elseif(NOT _always_on EQUAL -1)
-      # Always on here, so naming xnack at all is an invalid target ID.
-      list(APPEND _result "${_without_xnack}")
-    else()
-      list(APPEND _dropped "${_target}")
-    endif()
-  endforeach()
-
-  # Both xnack spellings of one arch normalise to the same string.
-  if(_result)
-    list(REMOVE_DUPLICATES _result)
-  endif()
-
-  if(_dropped)
-    message(STATUS
-      "ASAN: dropping GPU target(s) with no xnack support: ${_dropped}")
-  endif()
-  if(NOT _result)
-    message(FATAL_ERROR
-      "ASAN requires a GPU target that supports xnack (gfx9* with :xnack+, "
-      "or gfx1250 where it is always on). None of the requested GPU targets "
-      "do: ${ARGN}")
-  endif()
-
-  message(STATUS "ASAN: GPU targets = ${_result}")
-  set(${OUT_VAR} "${_result}" PARENT_SCOPE)
-endfunction()
-
-# GPU_TARGETS is FORCE-written from SUPPORTED_GPUS below, so whatever the
-# policy produces is what the next configure of this build directory reads back
-# as its input. Applying the policy to its own previous output makes it stick:
-# a later -DASAN=OFF would keep the :xnack+ and would never bring back the
-# families ASAN dropped. Remember the request as it arrived and re-derive from
-# that every time. GPU_TARGETS matching the value we wrote last time means no
-# one has touched it since, so the remembered request still stands; anything
-# else is a user edit and becomes the new request.
+# GPU_TARGETS is FORCE-written from SUPPORTED_GPUS below, so the policy would
+# otherwise feed on its own output and a later -DASAN=OFF would never bring
+# back the dropped families. Re-derive from the request instead; still matching
+# what we wrote last time means nobody edited it.
 if(DEFINED ROCSHMEM_GPU_TARGETS_DERIVED AND GPU_TARGETS STREQUAL ROCSHMEM_GPU_TARGETS_DERIVED)
   set(GPU_TARGETS "${ROCSHMEM_GPU_TARGETS_REQUESTED}")
 else()
@@ -352,13 +283,9 @@ endif()
 # Consumed by DeviceBitcode.cmake to embed correct amdhsa.target metadata in
 # the device bitcode — HIP error 209 occurs if the suffix in the bitcode
 # metadata does not match the active feature configuration of the GPU.
-# Keyed on whether SUPPORTED_GPUS actually carries a suffix rather than on
-# whether the user set GPU_TARGETS: under ASAN the defaults path produces
-# :xnack+ as well, and testing GPU_TARGETS would skip it and leave the bitcode
-# compile on DeviceBitcode.cmake's bare _BITCODE_DEFAULT_ARCHS fallback.
-# Explicitly cleared otherwise so a stale cached value from a previous
-# -DGPU_TARGETS=... configure run cannot persist into the defaults path; that
-# arm loses nothing, since the fallback is the same bare list.
+# Keyed on whether SUPPORTED_GPUS carries a suffix, not on whether the user set
+# GPU_TARGETS: under ASAN the defaults path produces :xnack+ too. Cleared
+# otherwise, which costs nothing since the fallback is the same bare list.
 if(SUPPORTED_GPUS MATCHES ":")
   set(GPU_TARGETS_FULL "${SUPPORTED_GPUS}" CACHE STRING
     "Validated GPU arch strings with feature suffixes (consumed by DeviceBitcode.cmake)" FORCE)
@@ -442,18 +369,27 @@ if (NOT BUILD_TESTS_ONLY)
   # on every configure so hip::device's --offload-arch flags stay in sync.
   set(GPU_BUILD_TARGETS "${GPU_TARGETS}" CACHE STRING "GPU targets to compile for" FORCE)
 
-  # cmake/DeviceBitcode.cmake derives BITCODE_GPU_ARCHS_FULL from
-  # GPU_TARGETS_FULL, also without FORCE, so it goes stale the same way: a
-  # build directory first configured without ASAN keeps the bare gfx942 and the
-  # bitcode compile loses the :xnack+ this policy just added. Same treatment.
-  # The else arm mirrors the unset above: without it a suffixed value from an
-  # earlier configure outlives the configure that resolved to bare archs, and
-  # the bitcode metadata stops matching the targets being built.
+  # DeviceBitcode.cmake caches this without FORCE too, so it goes stale the
+  # same way in both directions: a pre-ASAN directory loses the :xnack+, and
+  # without the else arm a suffixed value outlives a bare-arch configure.
   if(GPU_TARGETS_FULL)
     set(BITCODE_GPU_ARCHS_FULL "${GPU_TARGETS_FULL}" CACHE STRING
       "Full GPU arch strings with feature suffixes for device bitcode" FORCE)
   else()
     unset(BITCODE_GPU_ARCHS_FULL CACHE)
+  endif()
+
+  # Same staleness, and this is the list DeviceBitcode.cmake iterates: a
+  # pre-ASAN directory keeps the dropped families and builds them instrumented.
+  set(_bitcode_archs "")
+  foreach(_target ${GPU_TARGETS})
+    string(REGEX REPLACE ":.*" "" _bare "${_target}")
+    list(APPEND _bitcode_archs "${_bare}")
+  endforeach()
+  if(_bitcode_archs)
+    list(REMOVE_DUPLICATES _bitcode_archs)
+    set(BITCODE_GPU_ARCHS "${_bitcode_archs}" CACHE STRING
+      "GPU architectures for device bitcode (semicolon-separated)" FORCE)
   endif()
 
   find_package(hip REQUIRED)

@@ -1,16 +1,11 @@
-# GPU target selection for device AddressSanitizer builds. Device ASAN needs
-# xnack, which gfx9 must request explicitly, gfx1250 has always on (and rejects
-# the suffix), and no other family has. Cases pinned in
-# tests/test_asan_gpu_targets.py; projects/rocshmem repeats the policy inline.
+# Device ASAN needs xnack: gfx9 must request it explicitly, gfx1250 has it
+# always on and rejects the term, no other family has it. Mirrors
+# projects/rccl/cmake/AsanGpuTargets.cmake, repeated because rccl builds
+# rocSHMEM as a separate cmake process. Runs before rocm_check_target_ids,
+# which rejects gfx1250:xnack+ before the policy could normalise it.
+set(_ROCSHMEM_ASAN_XNACK_ALWAYS_ON gfx1250 gfx1250-strict)
 
-# Parts where xnack is always on, so naming it is an error.
-set(_RCCL_ASAN_XNACK_ALWAYS_ON gfx1250 gfx1250-strict)
-
-# rccl_asan_adjust_gpu_targets(OUT_VAR gfx942 gfx1100 gfx1250)
-#   -> OUT_VAR = gfx942:xnack+;gfx1250
-# Uninstrumentable targets are dropped rather than left to produce an
-# uninstrumented image inside an ASAN build.
-function(rccl_asan_adjust_gpu_targets OUT_VAR)
+function(rocshmem_asan_adjust_gpu_targets OUT_VAR)
   set(_result "")
   set(_dropped "")
 
@@ -22,9 +17,7 @@ function(rccl_asan_adjust_gpu_targets OUT_VAR)
     # A requested suffix says what the caller wants, not what the part
     # supports, so classify on the bare name.
     string(REGEX REPLACE ":.*" "" _base "${_target}")
-    # list(FIND) not IN_LIST: the test loads this via cmake -P, where CMP0057
-    # is unset.
-    list(FIND _RCCL_ASAN_XNACK_ALWAYS_ON "${_base}" _always_on)
+    list(FIND _ROCSHMEM_ASAN_XNACK_ALWAYS_ON "${_base}" _always_on)
 
     # Drop any xnack term the caller wrote before deciding what to do with it:
     # it may be ":xnack-", which contradicts the build. Other feature terms
@@ -42,8 +35,7 @@ function(rccl_asan_adjust_gpu_targets OUT_VAR)
     endif()
   endforeach()
 
-  # Both xnack spellings of one arch normalise together, and a duplicate
-  # becomes a second add_library() in DeviceLinker.cmake.
+  # Both xnack spellings of one arch normalise to the same string.
   if(_result)
     list(REMOVE_DUPLICATES _result)
   endif()
@@ -59,5 +51,6 @@ function(rccl_asan_adjust_gpu_targets OUT_VAR)
       "do: ${ARGN}")
   endif()
 
+  message(STATUS "ASAN: GPU targets = ${_result}")
   set(${OUT_VAR} "${_result}" PARENT_SCOPE)
 endfunction()
