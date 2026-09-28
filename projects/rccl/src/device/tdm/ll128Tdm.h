@@ -4,17 +4,12 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-/* gfx1250 TDM (async-to-LDS) path for the LL128 user-buffer legs.
+/* TDM (async-to-LDS) path for the LL128 user-buffer legs.
  *
- * This file is #included INSIDE the ProtoLL128 Primitives class body, so that
- * prims_ll128.h -- a file that tracks upstream NCCL closely -- carries only the
- * one-line call sites and not the implementation. Keeping the bodies here means
- * an NCCL sync conflicts on at most those call sites.
  *
  * Covers two of the four LL128 memory legs:
  *   load  -- user source buffer, issued in loadRegsBegin, consumed in loadRegsFinish.
- *            Overlaps the global read with the receive-FIFO spin, so it only pays on
- *            collectives that actually reduce (AllReduce, ReduceScatter).
+ *            Overlaps the global read with the receive-FIFO spin.
  *   store -- user destination buffer, staged in LDS and pushed out as one bulk
  *            transfer instead of per-lane vector stores.
  *
@@ -23,8 +18,8 @@
  * payload, so neither survives a bulk copy.
  *
  * Both legs share ONE per-warp staging window (ncclScratchForWarp), so every write
- * to that window must first drain whatever async op is still reading it. That is why
- * tdmLoadBegin() and tdmStoreRegs() both open with a drain. Splitting the windows
+ * to that window must first drain whatever async op is still reading the staging window.
+ * That is why tdmLoadBegin() and tdmStoreRegs() both open with a drain. Splitting the windows
  * would buy more overlap at the cost of another slice of LDS per warp.
  */
 
