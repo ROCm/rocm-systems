@@ -45,9 +45,12 @@ initialization fail, and the communicator remains usable after the check.
 Reading the report
 ==================
 
-The report is printed to standard output (not to ``NCCL_DEBUG_FILE``) by the
-process that hosts rank 0 of the communicator. Other ranks do not print the
-report. Every line starts with ``<hostname>:<pid> NCCL DIAG``.
+The report is printed to standard output, not to ``NCCL_DEBUG_FILE``. Every
+line starts with ``<hostname>:<pid> NCCL DIAG``. The process that hosts rank 0
+of the communicator prints the header, the summary, and the ``completed``
+line. Failed edges are listed by the first rank on the node where they occur,
+and a few notices are printed by the rank they concern. Collect the standard
+output of all processes, not only of rank 0.
 
 A passing run on an 8-GPU AMD Instinct MI355X node, with one process per GPU,
 looks like this:
@@ -213,13 +216,15 @@ Running in containers
 =====================
 
 When the ranks of one node run as separate processes, they share GPU memory
-through HIP IPC handles. If the processes run in containers that cannot share
-these handles, the check reports every affected edge as
-``destination buffer unavailable ... handle=LEGACY_CUDA_IPC reason=noDescriptor``.
-
-Run all ranks of a node in one container, or start the containers with
-``--ipc=host``, and make all GPUs of the node visible to them with
+through HIP IPC handles. Run all ranks of a node in one container and make all
+GPUs of the node visible to it, for example with
 ``--device /dev/kfd --device /dev/dri``.
+
+If the ranks of one node are split over several containers, for example with a
+different ``ROCR_VISIBLE_DEVICES`` in each container, RCCL cannot share GPU
+memory between the ranks and communicator initialization fails. When the check
+runs before that failure, it reports the affected edges as
+``destination buffer unavailable ... handle=LEGACY_CUDA_IPC reason=noDescriptor``.
 
 Collecting the report
 =====================

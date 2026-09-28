@@ -128,7 +128,7 @@ Collect the following information about the RCCL installation and configuration.
       export NCCL_DEBUG=INFO
 
 *  Verify the GPU peer-to-peer paths on each node with the RCCL diagnostics and
-   collect the ``NCCL DIAG`` lines from the output of rank 0. For details, see
+   collect the ``NCCL DIAG`` lines from the output of all processes. For details, see
    :ref:`using-rccl-diagnostics`.
 
    .. code:: shell
