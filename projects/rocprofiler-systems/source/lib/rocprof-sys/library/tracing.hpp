@@ -46,9 +46,7 @@
 #include <utility>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace tracing
+namespace rocprofsys::tracing
 {
 using interval_data_instances = thread_data<std::vector<bool>>;
 using hash_value_t            = core::perfetto::hash_value_t;
@@ -627,5 +625,4 @@ get_clock_skew(FuncT&& _timestamp_func, std::int64_t _n = 1)
     }
     return (_diff / _n);
 }
-}  // namespace tracing
-}  // namespace rocprofsys
+}  // namespace rocprofsys::tracing

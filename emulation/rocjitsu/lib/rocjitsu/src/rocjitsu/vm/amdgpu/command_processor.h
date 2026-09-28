@@ -7,7 +7,8 @@
 /// @brief Command processor (CP) component.
 ///
 /// @details Models a CP that works with the ROCm runtime to fetch
-/// and process HSA AQL packets and dispatch work to compute units.
+/// and process HSA AQL packets, or consume DRM PM4 compute submissions, and
+/// dispatch work to compute units.
 ///
 /// Architecture: the CP directly owns queue state and doorbell monitoring
 /// (CP hardware functions). Four sub-blocks handle distinct pipeline stages:
@@ -29,6 +30,7 @@
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
 #include "rocjitsu/vm/amdgpu/interrupt_sink.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
+#include "rocjitsu/vm/amdgpu/pm4.h"
 #include "rocjitsu/vm/amdgpu/pm4/pm4_packet_processor.h"
 #include "rocjitsu/vm/amdgpu/spi.h"
 #include "rocjitsu/vm/amdgpu/workgroup_key.h"
@@ -77,10 +79,27 @@ struct AtomicLoadResult;
 struct Pm4QueueConfig;
 struct QueueReconfigureRequest;
 
+/// @brief Dispatches belonging to one DRM indirect-buffer submission queue.
+struct Pm4DispatchState {
+  std::deque<DispatchEntry> entries;
+  void push_entry(DispatchEntry entry) { entries.push_back(std::move(entry)); }
+};
+
+/// @brief CP-owned DRM queue, independent of AQL rings and PM4 transport rings.
+struct Pm4SubmitQueue {
+  AddressSpaceHandle address_space;
+  std::optional<GpuVmBindingLease> binding;
+  uint32_t process_id = 0;
+  uint32_t queue_id = 0;
+  bool faulted = false;
+  std::shared_ptr<Pm4QueueState> pm4;
+  Pm4DispatchState dispatches;
+};
+
 /// @brief AMDGPU command processor that dispatches wavefronts to compute units.
 ///
 /// @details Distributes AQL dispatch packets across the registered compute units in
-/// round-robin order, activating pre-allocated wavefront slots.
+/// round-robin order, materializing wavefronts in configured slots on first use.
 ///
 /// Event-driven: the CP monitors registered AQL queue doorbells via a
 /// polling thread. When new AQL packets are detected, it fetches them from the
@@ -105,7 +124,7 @@ public:
     // Idempotent: the config-driven builder and the Xcd full constructor may
     // both attempt to register the same L2. Avoid duplicate entries so cache
     // maintenance does not flush the same L2 twice.
-    if (std::find(l2_caches_.begin(), l2_caches_.end(), l2) == l2_caches_.end())
+    if (std::ranges::find(l2_caches_, l2) == l2_caches_.end())
       l2_caches_.push_back(l2);
   }
   void set_packed_tid(bool enabled) { packed_tid_ = enabled; }
@@ -190,6 +209,13 @@ public:
   [[nodiscard]] QueuePrepareCloseStatus
   prepare_unregister_queue_registration(uint64_t registration_id) noexcept;
 
+  /// @brief Register one DRM indirect-buffer submission queue.
+  [[nodiscard]] bool register_drm_queue(Pm4SubmitQueue queue);
+  /// @brief Cancel DRM work before its frontend revokes the process VM binding.
+  void unregister_drm_queues(uint32_t process_id);
+  void unregister_drm_queue(uint32_t queue_id, uint32_t process_id);
+  /// @brief Enqueue a DRM submission; return false if the queue has faulted.
+  [[nodiscard]] bool submit_pm4(uint32_t queue_id, uint32_t process_id, Pm4Submission submission);
   /// @brief Remove the queue currently identified by the legacy routing tuple.
   void unregister_queue(uint32_t queue_id, uint32_t process_id);
   void set_queue_cu_selection(uint32_t queue_id, uint32_t process_id,
@@ -311,7 +337,7 @@ public:
                                                                 uint32_t process_id) const {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
     const std::vector<AqlQueueRecord>::const_iterator queue =
-        std::find_if(aql_queues_.begin(), aql_queues_.end(), [&](const AqlQueueRecord &candidate) {
+        std::ranges::find_if(aql_queues_, [&](const AqlQueueRecord &candidate) {
           return candidate.queue_id == queue_id && candidate.process_id == process_id;
         });
     return queue == aql_queues_.end() ? std::nullopt
@@ -325,7 +351,7 @@ public:
                                                                 uint32_t process_id) const {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
     const std::vector<AqlQueueRecord>::const_iterator queue =
-        std::find_if(aql_queues_.begin(), aql_queues_.end(), [&](const AqlQueueRecord &candidate) {
+        std::ranges::find_if(aql_queues_, [&](const AqlQueueRecord &candidate) {
           return candidate.queue_id == queue_id && candidate.process_id == process_id;
         });
     return queue == aql_queues_.end() ? AddressSpaceHandle{} : queue->address_space;
@@ -420,7 +446,7 @@ public:
   [[nodiscard]] bool queue_debug_suspended_for_test(uint32_t queue_id, uint32_t process_id) {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
     std::vector<AqlQueueRecord>::iterator queue =
-        std::find_if(aql_queues_.begin(), aql_queues_.end(), [&](const AqlQueueRecord &candidate) {
+        std::ranges::find_if(aql_queues_, [&](const AqlQueueRecord &candidate) {
           return candidate.queue_id == queue_id && candidate.process_id == process_id;
         });
     return queue != aql_queues_.end() && queue->debug_suspended;
@@ -429,7 +455,7 @@ public:
   [[nodiscard]] bool queue_runtime_suspended_for_test(uint32_t queue_id, uint32_t process_id) {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
     std::vector<AqlQueueRecord>::iterator queue =
-        std::find_if(aql_queues_.begin(), aql_queues_.end(), [&](const AqlQueueRecord &candidate) {
+        std::ranges::find_if(aql_queues_, [&](const AqlQueueRecord &candidate) {
           return candidate.queue_id == queue_id && candidate.process_id == process_id;
         });
     return queue != aql_queues_.end() && queue->runtime_suspended;
@@ -572,6 +598,11 @@ private:
   /// is returned. The caller must then fault the dispatch without retaining a
   /// reference into the queue entry container across that operation.
   [[nodiscard]] DispatchWorkgroupResult dispatch_workgroups(DispatchEntry &entry);
+  void fail_pm4_queue(Pm4SubmitQueue &queue, Pm4DispatchState &qs);
+  void fetch_pm4(Pm4SubmitQueue &queue, Pm4DispatchState &qs, simdojo::Tick now);
+  void dispatch_pm4(const Pm4SubmitQueue &queue, Pm4DispatchState &qs,
+                    const std::array<uint32_t, 4> &dimensions);
+  void service_drm_queues(simdojo::Tick now);
 
   /// @brief Split a dispatch across the SoC's XCDs, keeping this XCD's share.
   ///
@@ -720,6 +751,8 @@ private:
     size_t total = 0;
     for (auto &qs : aql_queues_)
       total += qs.entries.size();
+    for (const auto &queue : drm_queues_)
+      total += queue.dispatches.entries.size() + queue.pm4->submissions.size();
     return total;
   }
 
@@ -754,6 +787,7 @@ private:
   AqlPacketProcessor aql_packet_processor_;
   std::unique_ptr<Pm4QueueController> pm4_queue_controller_;
   std::vector<AqlQueueRecord> aql_queues_;
+  std::vector<Pm4SubmitQueue> drm_queues_;
   std::unordered_map<uint32_t, DispatchLaunchMetadata> dispatch_launch_metadata_;
   std::vector<ComputeUnitCore *> cus_;
   std::vector<simdojo::Port *> dispatch_ports_;

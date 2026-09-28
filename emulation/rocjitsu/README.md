@@ -55,6 +55,7 @@ configs/                GPU topology JSON files
 schemas/                FlatBuffers schemas
 tests/                  Test suite
 docs/                   Design documents and guides
+website/                React dashboard source and web tests
 ```
 
 ## Building

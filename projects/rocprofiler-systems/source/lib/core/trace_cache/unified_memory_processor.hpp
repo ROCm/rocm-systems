@@ -19,9 +19,7 @@
 #include <unordered_map>
 #include <utility>
 
-namespace rocprofsys
-{
-namespace trace_cache
+namespace rocprofsys::trace_cache
 {
 
 class output_file_sink_view
@@ -217,5 +215,4 @@ private:
     std::unordered_map<std::uint32_t, std::string> m_gpu_name_cache;
 };
 
-}  // namespace trace_cache
-}  // namespace rocprofsys
+}  // namespace rocprofsys::trace_cache

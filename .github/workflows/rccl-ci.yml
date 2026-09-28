@@ -22,7 +22,7 @@ on:
         description: 'ROCm/TheRock git ref for build_tools + setup_test_environment.'
         type: string
         required: false
-        default: '54ed4ae0a9cf2d5a531d55f206a4d5f2235b6624'
+        default: 'a4cdc81d1c7ad7f4f8c872ba728bbc0e3734ad05'
       amdgpu_targets:
         description: 'GPU arch for rocSHMEM/RCCL/rccl-tests (must match the ROCm family ARCH).'
         type: string
@@ -61,7 +61,7 @@ jobs:
       artifact_group: ${{ inputs.artifact_group || 'gfx950-dcgpu' }}
       artifact_run_id: ${{ inputs.artifact_run_id || '' }}
       # TheRock pinned ref committed 2026-09-19; bump when refreshing artifacts.
-      therock_ref: ${{ inputs.therock_ref || '54ed4ae0a9cf2d5a531d55f206a4d5f2235b6624' }}
+      therock_ref: ${{ inputs.therock_ref || 'a4cdc81d1c7ad7f4f8c872ba728bbc0e3734ad05' }}
       amdgpu_targets: ${{ inputs.amdgpu_targets || 'gfx950' }}
 
   # ext-plugins suite on ruby: builds RCCL, a UCX-enabled OpenMPI, rccl-tests and
@@ -83,7 +83,7 @@ jobs:
       artifact_group: ${{ inputs.artifact_group || 'gfx950-dcgpu' }}
       artifact_run_id: ${{ inputs.artifact_run_id || '' }}
       # TheRock pinned ref committed 2026-09-19; bump when refreshing artifacts.
-      therock_ref: ${{ inputs.therock_ref || '54ed4ae0a9cf2d5a531d55f206a4d5f2235b6624' }}
+      therock_ref: ${{ inputs.therock_ref || 'a4cdc81d1c7ad7f4f8c872ba728bbc0e3734ad05' }}
       amdgpu_targets: ${{ inputs.amdgpu_targets || 'gfx950' }}
 
   # GIN suite (WIP) on Tensorwave. Failures show red with logs on this job.
@@ -106,7 +106,7 @@ jobs:
       artifact_group: ${{ inputs.artifact_group || 'gfx950-dcgpu' }}
       artifact_run_id: ${{ inputs.artifact_run_id || '' }}
       # TheRock pinned ref committed 2026-09-19; bump when refreshing artifacts.
-      therock_ref: ${{ inputs.therock_ref || '54ed4ae0a9cf2d5a531d55f206a4d5f2235b6624' }}
+      therock_ref: ${{ inputs.therock_ref || 'a4cdc81d1c7ad7f4f8c872ba728bbc0e3734ad05' }}
       amdgpu_targets: ${{ inputs.amdgpu_targets || 'gfx950' }}
 
   # Gates GIN on build/infra failures only; test failures stay non-gating (red

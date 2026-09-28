@@ -21,9 +21,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace avail
+namespace rocprofsys::avail
 {
 namespace
 {
@@ -213,5 +211,4 @@ query_gpu_hw_counters()
 
     return result;
 }
-}  // namespace avail
-}  // namespace rocprofsys
+}  // namespace rocprofsys::avail

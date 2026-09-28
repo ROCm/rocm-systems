@@ -87,8 +87,7 @@ add_subdirectory(source)
 add_subdirectory(include/cpp)
 
 list(
-    APPEND
-    profiler-hub_public_headers
+    APPEND profiler-hub_public_headers
     ${CMAKE_CURRENT_LIST_DIR}/include/c/profiler_hub.h
     ${CMAKE_CURRENT_LIST_DIR}/include/c/profiler_hub_types.h
 )
@@ -455,6 +454,7 @@ if(CLANG_TIDY_EXE)
         clang-tidy
         COMMAND
             ${CLANG_TIDY_EXE} -p ${CMAKE_BINARY_DIR}
+            --extra-arg=-I${CMAKE_BINARY_DIR}/include
             --config-file=${CMAKE_SOURCE_DIR}/.clang-tidy
             ${PROFILER_HUB_CLANG_TIDY_SOURCES}
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
@@ -467,6 +467,7 @@ if(CLANG_TIDY_EXE)
         clang-tidy-fix
         COMMAND
             ${CLANG_TIDY_EXE} -p ${CMAKE_BINARY_DIR}
+            --extra-arg=-I${CMAKE_BINARY_DIR}/include
             --config-file=${CMAKE_SOURCE_DIR}/.clang-tidy --fix --fix-errors
             ${PROFILER_HUB_CLANG_TIDY_SOURCES}
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}

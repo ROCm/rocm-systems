@@ -23,6 +23,8 @@ extern "C"
         PH_RESULT_INVALID_CONTEXT,           /**< Context argument was null or invalid. */
         PH_RESULT_INVALID_ARGUMENT,          /**< A non-context argument was null or
                                                  invalid. */
+        PH_RESULT_INTERNAL_ERROR,            /**< An internal error occurred while
+                                                 servicing the call. */
         PH_RESULT_FUTURE_ALLOCATION_FAILED,  /**< An async task could not be submitted
                                                  (out of memory). */
     } ph_result_t;

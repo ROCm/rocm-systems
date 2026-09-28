@@ -244,7 +244,7 @@ parse_args(int argc, char** argv, std::vector<std::string>& _env,
            std::vector<std::map<std::string_view, std::string>>& _causal_envs)
 {
     using parser_t     = argparse::argument_parser;
-    using parser_err_t = typename parser_t::result_type;
+    using parser_err_t = parser_t::result_type;
 
     auto help_check = [](parser_t& p, int _argc, char** _argv) {
         std::unordered_set<std::string> help_args = { "-h", "--help", "-?" };

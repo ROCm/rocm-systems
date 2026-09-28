@@ -1095,6 +1095,9 @@
     },
     "host_api_custom_gin_plugin": {
       "extends": "host_api_tests_symmem",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
       "env_variables": {
         "NCCL_GIN_PLUGIN": "example",
         "NCCL_GIN_ENABLE": "1"
@@ -1102,7 +1105,7 @@
       "tests": [
         {
           "name": "HostApi_CustomGinPluginPutSignal",
-          "description": "Host API put/wait with NCCL_GIN_PLUGIN=example (NCCL 2.30.7 regression)",
+          "description": "Host API put/wait with NCCL_GIN_PLUGIN=example (NCCL 2.30.7 regression). Single-node only: 2n hangs on the RMA IB proxy path (AICOMRCCL-2331).",
           "test_filter": "HostApiCustomGinPluginTest.PutSignalWithExternalGinPlugin"
         }
       ]
@@ -1333,6 +1336,22 @@
         {"name": "NetPluginInitFail.DoesNotFinalizeAfterFailedInit", "description": "AICOMRCCL-1891 / NCCL 2.29.7: ncclNetPluginInit() must not call finalize() for a plugin whose init() failed (crashes on v10 and older, where the compat layer leaves ncclNet.finalize null until init() succeeds)", "test_filter": "NetPluginInitFail.DoesNotFinalizeAfterFailedInit"},
         {"name": "NetPluginInitFail.FailedPluginIsNotRetriedOrFinalized", "description": "AICOMRCCL-1891 / NCCL 2.29.7: a plugin disabled by a failed init() is neither re-inited nor finalized by later comm cycles", "test_filter": "NetPluginInitFail.FailedPluginIsNotRetriedOrFinalized"},
         {"name": "NetPluginInitFail.FinalizesWhenDevicesFailsAfterInit", "description": "AICOMRCCL-1891 / NCCL 2.29.7: the finalize() guard must not suppress cleanup when init() succeeded and devices() failed", "test_filter": "NetPluginInitFail.FinalizesWhenDevicesFailsAfterInit"}
+      ]
+    },
+    "gin_plugin_init_fail": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTests",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 120,
+      "rerun_env_variables": {
+        "NCCL_DEBUG": "INFO"
+      },
+      "tests": [
+        {"name": "GinPluginInitFail.FinalizesWhenDevicesFailsAfterInit", "description": "NCCL 2.30.7 / NVIDIA/nccl#2179: ncclGinPluginInit() must finalize() the context when devices() fails after a successful init()", "test_filter": "GinPluginInitFail.FinalizesWhenDevicesFailsAfterInit"},
+        {"name": "GinPluginInitFail.FinalizesWhenDevicesReportsZero", "description": "NCCL 2.30.7 / NVIDIA/nccl#2179: ncclGinPluginInit() must finalize() the context when devices() reports ndev <= 0 after a successful init()", "test_filter": "GinPluginInitFail.FinalizesWhenDevicesReportsZero"},
+        {"name": "GinPluginInitFail.DoesNotFinalizeAfterFailedInit", "description": "NCCL 2.30.7 / NVIDIA/nccl#2179: finalize() must not run for a GIN plugin whose init() failed", "test_filter": "GinPluginInitFail.DoesNotFinalizeAfterFailedInit"}
       ]
     },
     "debug_tests": {
@@ -4428,6 +4447,12 @@
       "enabled": true
     },
     {
+      "name": "GIN Plugin Init Context Leak",
+      "description": "NCCL 2.30.7 / NVIDIA/nccl#2179: GIN plugin finalize() after devices() fails",
+      "config": "gin_plugin_init_fail",
+      "enabled": true
+    },
+    {
       "name": "Unit Tests - Standard Collectives",
       "description": "Basic collective operation tests",
       "config": "unit_tests_standard",
@@ -5015,8 +5040,11 @@
     },
     {
       "name": "Host API Tests - Custom GIN Plugin",
-      "description": "Host API regression for NCCL 2.30.7 custom GIN plugin + one-sided host APIs",
+      "description": "Single-node Host API regression for NCCL 2.30.7 custom GIN plugin + one-sided host APIs (excluded from multi-node; AICOMRCCL-2331)",
       "config": "host_api_custom_gin_plugin",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
       "enabled": true
     },
     {

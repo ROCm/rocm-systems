@@ -35,6 +35,8 @@ namespace rocjitsu {
 namespace amdgpu {
 
 class ComputeUnitCore;
+class Pm4ScratchPool;
+struct Pm4FailureState;
 using QueueCuSelection = std::optional<std::vector<ComputeUnitCore *>>;
 class GpuVmAccess;
 
@@ -326,6 +328,13 @@ struct DispatchEntry {
   uint32_t kernarg_size = 0;
   uint32_t num_user_sgprs = 2;
   uint32_t kernel_code_properties = 0;
+  /// Register-programmed compute launches use the PM4 user-data register ABI.
+  bool pm4_abi = false;
+  std::shared_ptr<Pm4FailureState>
+      pm4_failure{};                     ///< Shared with all waves and the owning submission.
+  std::array<uint32_t, 16> user_sgprs{}; ///< PM4 COMPUTE_USER_DATA register values.
+  uint32_t pm4_scratch_waves_per_se = 0; ///< COMPUTE_TMPRING_SIZE wave capacity per SE.
+  std::shared_ptr<Pm4ScratchPool> pm4_scratch_pool{}; ///< Resident-wave slot allocator.
   uint32_t num_named_barriers = 0;
   /// Architectural wave size selected by the kernel descriptor and used by
   /// the dispatched wavefront.
@@ -339,6 +348,7 @@ struct DispatchEntry {
   uint32_t grid_size_x = 1;
   uint32_t grid_size_y = 1;
   uint32_t grid_size_z = 1;
+  std::array<uint32_t, 3> workgroup_origin{}; ///< PM4 COMPUTE_START origin (zero for AQL).
   uint32_t grid_wgs_x = 0;
   uint32_t grid_wgs_y = 1;
   uint32_t grid_wgs_z = 1;
@@ -355,6 +365,7 @@ struct DispatchEntry {
   bool enable_wg_id_x = true;
   bool enable_wg_id_y = false;
   bool enable_wg_id_z = false;
+  bool enable_wg_info = false;
   uint8_t enable_vgpr_workitem_id = 0;
   uint16_t workgroup_size_x = 64;
   uint16_t workgroup_size_y = 1;

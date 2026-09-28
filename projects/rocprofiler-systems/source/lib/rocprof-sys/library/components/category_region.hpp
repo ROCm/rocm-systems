@@ -42,9 +42,7 @@
 #include <type_traits>
 #include <utility>
 
-namespace rocprofsys
-{
-namespace utility
+namespace rocprofsys::utility
 {
 
 struct entry_key
@@ -432,18 +430,15 @@ private:
                            args_str.c_str());
     }
 
-    typename Policy::clock_type                           clock_{};
-    typename Policy::region_sink_type                     sink_{};
-    typename Policy::thread_metadata_type                 thread_meta_{};
+    Policy::clock_type                                    clock_{};
+    Policy::region_sink_type                              sink_{};
+    Policy::thread_metadata_type                          thread_meta_{};
     std::map<entry_key, std::vector<pending_cache_entry>> map_name_to_args{};
 };
 
-}  // namespace utility
-}  // namespace rocprofsys
+}  // namespace rocprofsys::utility
 
-namespace tim
-{
-namespace quirk
+namespace tim::quirk
 {
 struct causal : concepts::quirk_type
 {};
@@ -453,12 +448,9 @@ struct perfetto : concepts::quirk_type
 
 struct timemory : concepts::quirk_type
 {};
-}  // namespace quirk
-}  // namespace tim
+}  // namespace tim::quirk
 
-namespace rocprofsys
-{
-namespace component
+namespace rocprofsys::component
 {
 using tim::is_one_of;
 using tim::type_list;
@@ -920,5 +912,4 @@ struct local_category_region : comp::base<local_category_region<CategoryT>, void
 private:
     std::string_view m_prefix = {};
 };
-}  // namespace component
-}  // namespace rocprofsys
+}  // namespace rocprofsys::component

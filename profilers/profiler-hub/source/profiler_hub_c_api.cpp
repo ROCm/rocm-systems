@@ -5,6 +5,24 @@
 #include <tuple>
 #include <utility>
 
+#include <utility>
+
+namespace
+{
+template <typename Fn>
+ph_result_t
+guard_call(Fn&& fn)
+{
+    try
+    {
+        return std::forward<Fn>(fn)();
+    } catch(...)
+    {
+        return PH_RESULT_INTERNAL_ERROR;
+    }
+}
+}  // namespace
+
 ph_result_t
 ph_ctx_create(ph_ctx_t* ctx, const char* file_path)
 {
@@ -48,9 +66,9 @@ ph_get_library_version(ph_ctx_t ctx, ph_library_version_t* version)
         return PH_RESULT_INVALID_ARGUMENT;
     }
 
-    version->major = 0;
-    version->minor = 1;
-    version->patch = 0;
+    version->major = PROFILER_HUB_VERSION_MAJOR;
+    version->minor = PROFILER_HUB_VERSION_MINOR;
+    version->patch = PROFILER_HUB_VERSION_PATCH;
     return PH_RESULT_SUCCESS;
 }
 
@@ -122,14 +140,16 @@ ph_get_track_events(ph_ctx_t         ctx,
         return PH_RESULT_INVALID_CONTEXT;
     }
 
-    if(events == nullptr || !ctx->has_track(track_id))
-    {
-        return PH_RESULT_INVALID_ARGUMENT;
-    }
+    return guard_call([ctx, track_id, start_ts, end_ts, events]() {
+        if(events == nullptr || !ctx->has_track(track_id))
+        {
+            return PH_RESULT_INVALID_ARGUMENT;
+        }
 
-    *events = ctx->get_track_events(track_id, start_ts, end_ts);
+        *events = ctx->get_track_events(track_id, start_ts, end_ts);
 
-    return PH_RESULT_SUCCESS;
+        return PH_RESULT_SUCCESS;
+    });
 }
 
 ph_result_t
@@ -144,14 +164,16 @@ ph_get_track_samples(ph_ctx_t          ctx,
         return PH_RESULT_INVALID_CONTEXT;
     }
 
-    if(samples == nullptr || !ctx->has_track(track_id))
-    {
-        return PH_RESULT_INVALID_ARGUMENT;
-    }
+    return guard_call([ctx, track_id, start_ts, end_ts, samples]() {
+        if(samples == nullptr || !ctx->has_track(track_id))
+        {
+            return PH_RESULT_INVALID_ARGUMENT;
+        }
 
-    *samples = ctx->get_track_samples(track_id, start_ts, end_ts);
+        *samples = ctx->get_track_samples(track_id, start_ts, end_ts);
 
-    return PH_RESULT_SUCCESS;
+        return PH_RESULT_SUCCESS;
+    });
 }
 
 namespace
