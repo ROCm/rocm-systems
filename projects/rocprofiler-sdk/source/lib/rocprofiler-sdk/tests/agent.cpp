@@ -276,7 +276,21 @@ TEST(rocprofiler_lib, agent)
             EXPECT_TRUE(false) << msg << " :: agent-type != CPU|GPU :: " << agent->type;
         }
 
-        EXPECT_EQ(std::string_view{agent->name}, std::string_view{hsa_agent->name}) << msg;
+        // HSA re-points A0 silicon on gfx12+ targets to a "-strict" ISA variant (see
+        // amd_gpu_agent.cpp in the HSA runtime). That suffix only selects an alternate
+        // ISA for code generation, it is not a distinct GPU architecture, so
+        // rocprofiler's name (reconstructed independently from KFD's gfx_target_version)
+        // intentionally omits it.
+        constexpr auto strict_suffix  = std::string_view{"-strict"};
+        auto           hsa_agent_name = std::string_view{hsa_agent->name};
+        if(hsa_agent_name.size() > strict_suffix.size() &&
+           hsa_agent_name.compare(hsa_agent_name.size() - strict_suffix.size(),
+                                   strict_suffix.size(),
+                                   strict_suffix) == 0)
+        {
+            hsa_agent_name.remove_suffix(strict_suffix.size());
+        }
+        EXPECT_EQ(std::string_view{agent->name}, hsa_agent_name) << msg;
         EXPECT_EQ(std::string_view{agent->vendor_name}, std::string_view{hsa_agent->vendor_name})
             << msg;
         EXPECT_EQ(std::string_view{agent->product_name},
