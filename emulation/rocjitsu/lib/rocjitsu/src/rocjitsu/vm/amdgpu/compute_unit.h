@@ -440,7 +440,20 @@ public:
 
   /// @brief Set the execution plugin group (shared ownership).
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
-    plugin_group_ = pg ? std::move(pg) : ExecutionPluginGroup::empty_group();
+    std::lock_guard<std::recursive_mutex> lock(wave_state_mutex_);
+    auto replacement = pg ? std::move(pg) : ExecutionPluginGroup::empty_group();
+    if (plugin_group_.get() != replacement.get()) {
+      // A resident wave's cached decisions belong to the group that observed
+      // its dispatch. A replacement group may have the same plugin count but
+      // different per-wave subscriptions, so force it onto the live-query path.
+      for (const auto &wf : wfs_) {
+        if (!wf)
+          continue;
+        wf->hot_hook_subscriptions_valid_ = false;
+        wf->hot_hook_observer_count_ = 0;
+      }
+    }
+    plugin_group_ = std::move(replacement);
     observes_before_execute_instruction_ = plugin_group_->observes_before_execute_instruction();
     observes_after_execute_instruction_ = plugin_group_->observes_after_execute_instruction();
     observes_async_instruction_issued_ = plugin_group_->observes_async_instruction_issued();

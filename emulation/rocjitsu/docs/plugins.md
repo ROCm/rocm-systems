@@ -167,13 +167,16 @@ required exports.
 
 The `config_schema` string describes the accepted config keys. Each key
 maps to an object with a `type` (`string`, `number`, or `boolean`), an
-optional `description`, and an optional `default`. Keys without a
-`default` are required. Example:
+optional `description`, an optional `default`, and an optional boolean
+`optional`. A key with neither a `default` nor `"optional": true` is required.
+An optional key is omitted from the resolved object when the user does not
+provide it. Example:
 
 ```json
 {
   "argname": { "type": "string", "description": "does something important", "default": "defaultvalue" },
-  "requiredarg": { "type": "number" }
+  "requiredarg": { "type": "number" },
+  "optionalarg": { "type": "boolean", "optional": true }
 }
 ```
 
@@ -337,6 +340,27 @@ every high-frequency callback, serializing it with the infrequent callbacks
 without a per-instruction scan of the plugin list. Plugins that protect their
 own shared state should retain the parallel default.
 
+Plugins can opt out of individual high-frequency hooks by overriding
+`observes_before_execute_instruction()`,
+`observes_after_execute_instruction()`,
+`observes_async_instruction_issued()`,
+`observes_memory_instruction_routing()`, `observes_vgpr_reads()`,
+`observes_vgpr_writes()`, `observes_sgpr_reads()`,
+`observes_scalar_register_writes()`, `observes_memory_routing()`, or
+`observes_tensor_dma_memory_access()`. The group samples these stable flags
+when the plugin is added and avoids both fanout and upstream observation work
+when no contained plugin consumes a hook.
+
+For finer-grained selection, `observes_hot_hooks_for_wavefront(wf)` controls
+all high-frequency callbacks for one wavefront. After every plugin's
+`onAmdgpuWavefrontDispatched()` callback completes, the group samples and caches
+that predicate on the wavefront until halt. Reentrant hooks during dispatch or
+halt, hooks without a wavefront, and hooks on a resident wave after live plugin-
+group replacement use the current group's live predicate instead. The predicate
+must therefore be lock-free, thread-safe, and stable for the subscribed portion
+of a wavefront's lifetime. Lifecycle, dispatch, workgroup, wavefront, and barrier
+callbacks are not filtered by this predicate.
+
 ### Observing memory accesses
 
 There are two memory hooks, and they see different things.
@@ -366,11 +390,16 @@ return `true`; the group samples this policy when each plugin is added, and its
 conservative default is `false`. Overriding the hook alone is silent — the
 plugin simply never sees an access.
 
-Plugins that also need execution state may override the context-preserving
-`onAmdgpuMemoryAccessRouted(access, inst, wf)` form. Its default implementation
-forwards to the observation-only form, so existing observers keep the same
-behavior. The borrowed instruction and wavefront already reflect the selected
-route and are valid only during the callback.
+The routed-memory callback has a source-compatible overload chain. Existing
+plugins may override the observation-only
+`onAmdgpuMemoryAccessRouted(access)` form. Plugins that need wave-local state may
+instead override `onAmdgpuMemoryAccessRouted(access, wf)`, avoiding a shared
+identity lookup. Plugins that also need the decoded instruction may override
+the context-preserving `onAmdgpuMemoryAccessRouted(access, inst, wf)` form.
+RocJITsu calls the most specific form; its defaults forward through the
+wavefront-aware form to the observation-only form. The borrowed instruction and
+wavefront already reflect the selected route and are valid only during the
+callback.
 
 The observation's spans borrow execution-owned storage and are valid only for
 the duration of the callback. A plugin that keeps one must copy them.
@@ -384,7 +413,9 @@ with duplicates preserved. Empty and fully masked transfers produce no callback.
 Consumers must opt in through `observes_tensor_dma_memory_access()`. A consumer
 that retains addresses must use `size()` to budget and allocate the event, then
 call `copy_to()` during the callback; a failed copy means the observation is
-malformed and must be rejected.
+malformed and must be rejected. Tensor-DMA observers that need wave-local state
+may override `onAmdgpuTensorDmaMemoryAccess(access, wf)`; its default forwards to
+the observation-only overload.
 
 SGPR owner resolution is skipped when no contained plugin observes scalar
 register reads. Plugins that consume neither `onAmdgpuReadScalarRegister` nor
@@ -412,11 +443,13 @@ concurrently.
    high-frequency and infrequent callbacks. Override
    `requires_serial_hot_hooks()` when that state cannot be protected within the
    plugin.
-6. Override `observes_sgpr_reads()` to return `false` when the plugin does not
-   consume `onAmdgpuReadSgpr`, and `observes_memory_routing()` to return `true`
-   when it does consume `onAmdgpuMemoryAccessRouted`. A consumer of
-   `onAmdgpuTensorDmaMemoryAccess` must likewise return `true` from
-   `observes_tensor_dma_memory_access()`.
+6. Override the per-hook `observes_*()` methods for the high-frequency hooks the
+   plugin consumes. Use `observes_hot_hooks_for_wavefront()` when subscription
+   also depends on the dispatched wavefront; keep that predicate lock-free,
+   thread-safe, and stable after dispatch. A consumer of
+   `onAmdgpuMemoryAccessRouted` or `onAmdgpuTensorDmaMemoryAccess` must explicitly
+   return `true` from the corresponding interest method because those two
+   conservative defaults are `false`.
 7. Enable it by adding `"myname": { ... }` to the `plugins` section of
    the config file.
 8. Return `true` from `supports_async_instructions()` only when the plugin accepts

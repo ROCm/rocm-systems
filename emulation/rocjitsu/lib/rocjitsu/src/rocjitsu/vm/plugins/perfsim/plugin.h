@@ -15,8 +15,9 @@ namespace rocjitsu::plugins::perfsim {
 class PerfsimPlugin final : public ExecutionPlugin {
 public:
   /// @param config_json Resolved plugin configuration containing the required
-  ///        string field `library_path` and optional positive integer
-  ///        `max_staged_bytes`.
+  ///        non-empty string `library_path`; optional positive integers
+  ///        `max_staged_bytes` and `max_observed_wgps`; and the optional
+  ///        non-empty string `dispatch_name`.
   explicit PerfsimPlugin(const char *config_json);
   ~PerfsimPlugin() override;
 
