@@ -44,8 +44,8 @@ __managed__ int g_managed_prefetch_data[kTestBufferElements];
     HIP_SKIP_TEST("Device does not support concurrent managed access");                            \
   }
 
-__global__ void WaitForHostRelease(int* release) {
-  while (__hip_atomic_load(release, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_SYSTEM) == 0) {
+__global__ void WaitForHostRelease(volatile int* release) {
+  while (*release == 0) {
   }
 }
 

@@ -62,8 +62,8 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsync_Basic_AllDevices) {
   ArrayFindIfNot(alloc1.ptr(), fill_value, count);
 }
 
-__global__ void WaitForHostRelease(int* release) {
-  while (__hip_atomic_load(release, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_SYSTEM) == 0) {
+__global__ void WaitForHostRelease(volatile int* release) {
+  while (*release == 0) {
   }
 }
 
