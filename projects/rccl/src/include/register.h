@@ -22,7 +22,10 @@ enum {
   NVLS_REG_POSSIBLE = 0x04,
   NVLS_REG_NO_SUPPORT = 0x08,
   COLLNET_REG_COMPLETE = 0x10,
-  IPC_REG_COMPLETE = 0x20
+  IPC_REG_COMPLETE = 0x20,
+  // RCCL: every peer in this NET register call succeeded. NET_REG_COMPLETE is
+  // set on the first peer, so it cannot mean the cached segment count is valid.
+  NET_REG_ALL_PEERS = 0x40
 };
 
 struct ncclPeerRegIpcAddr {
