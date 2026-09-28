@@ -196,7 +196,7 @@ blocking_gotcha::operator()(gotcha_index<sigwait_idx>,
     causal_gotcha::remove_signals(&set);
     siginfo_t info;  // NOLINT(misc-include-cleaner)
 
-    const std::int64_t _delay_value = (_active) ? causal::delay::get_global().load() : 0;
+    const std::int64_t _delay_value = _active ? causal::delay::get_global().load() : 0;
 
     auto* _data         = blocking_gotcha_t::at(16);
     auto  f_sigwaitinfo = reinterpret_cast<decltype(&sigwaitinfo)>(_data->wrappee);
@@ -216,10 +216,8 @@ blocking_gotcha::operator()(gotcha_index<sigwait_idx>,
     {
         return errno;  // If there was an error, return the error code
     }
-    else
-    {
-        *sig = ret;  // sig is declared as non-null so skip check
-    }
+
+    *sig = ret;  // sig is declared as non-null so skip check
 
     return 0;
 }
@@ -241,7 +239,7 @@ blocking_gotcha::operator()(gotcha_index<sigwaitinfo_idx>,
     causal_gotcha::remove_signals(&set);
     siginfo_t _info;
 
-    const std::int64_t _delay_value = (_active) ? causal::delay::get_global().load() : 0;
+    const std::int64_t _delay_value = _active ? causal::delay::get_global().load() : 0;
 
     causal::sampling::block_backtrace_samples();
     auto ret = (*_func)(&set, &_info);
@@ -280,7 +278,7 @@ blocking_gotcha::operator()(gotcha_index<sigtimedwait_idx>,
     causal_gotcha::remove_signals(&set);
     siginfo_t _info;
 
-    const std::int64_t _delay_value = (_active) ? causal::delay::get_global().load() : 0;
+    const std::int64_t _delay_value = _active ? causal::delay::get_global().load() : 0;
 
     causal::sampling::block_backtrace_samples();
     auto ret = (*_func)(&set, &_info, _wait_v);

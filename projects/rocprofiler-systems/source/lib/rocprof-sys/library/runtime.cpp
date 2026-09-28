@@ -64,7 +64,7 @@ sampling_on_child_threads()
     // default if there is no history, disable by default (first thread) otherwise,
     // inherit the last state
     static thread_local bool _v =
-        (_thr_info) ? !_thr_info->is_offset
+        _thr_info ? !_thr_info->is_offset
         : (state::process::get() != state::process::Active ||
            state::thread::get() != state::thread::Enabled)
             ? false
@@ -138,7 +138,7 @@ create_cpu_cid_entry(std::int64_t _tid)
         _lk.lock();
     }
 
-    const std::int64_t _p_idx = (get_cpu_cid_stack(_tid)->empty()) ? 0 : _tid;
+    const std::int64_t _p_idx = get_cpu_cid_stack(_tid)->empty() ? 0 : _tid;
 
     auto&       _p_mtx = get_cpu_cid_stack_lock(_p_idx);
     auto_lock_t _p_lk{ _p_mtx, std::defer_lock };

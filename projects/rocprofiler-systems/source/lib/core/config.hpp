@@ -167,7 +167,7 @@ get_setting_value(const std::string& _name)
     }
 
     auto&& _ret = _setting->second->get<Tp>();
-    return (_ret.first) ? std::optional<Tp>{ _ret.second } : std::optional<Tp>{};
+    return _ret.first ? std::optional<Tp>{ _ret.second } : std::optional<Tp>{};
 }
 
 //
