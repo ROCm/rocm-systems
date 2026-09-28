@@ -1253,8 +1253,9 @@ protected:
  *   recvbuff = [N * kSegmentSize,  2N * kSegmentSize)  covers last  N segments
  *
  * The collective operates on four segments per half, while ncclCommRegister
- * covers the complete eight-segment allocation. Skip unless some rank cached
- * netNSegments (NET register completed for every peer). That count must be 8.
+ * covers the complete eight-segment allocation. Skip unless some rank finished
+ * NET registration for every peer. The cached count is a separate write and
+ * must be 8; gating the skip on that count would hide a missing cache write.
  */
 TEST_F(UBR_MultiSegment, Generic)
 {
@@ -1318,14 +1319,16 @@ TEST_F(UBR_MultiSegment, Generic)
     struct ncclReg* reg = nullptr;
     ncclRegFind(reinterpret_cast<struct ncclComm*>(getActiveCommunicator()), buf.vaBase, buf.totalSize, &reg);
     ASSERT_NE(reg, nullptr) << "ncclCommRegister did not publish a cache entry for the multi-segment buffer";
-    const bool netDone = reg->netNSegments != 0;
+    // NET_REG_COMPLETE is set on the first peer. ALL_PEERS is the all-peers
+    // success, so a missing netNSegments write fails instead of skipping.
+    const bool netPeersDone = (reg->state & NET_REG_ALL_PEERS) != 0;
     {
         const std::string why = mpiCoordinatedSkipReason(
-            !MPIHelpers::anyRankTrue(netDone),
-            "NET full-range segment count not cached on any rank");
+            !MPIHelpers::anyRankTrue(netPeersDone),
+            "NET registration did not finish for every peer on any rank");
         if (!why.empty()) GTEST_SKIP() << why;
     }
-    if (netDone) {
+    if (netPeersDone) {
         ASSERT_EQ(reg->netNSegments, kNumSegments)
             << "NET registration walked a prefix of the ncclCommRegister range, not the full 8-segment allocation";
     }
