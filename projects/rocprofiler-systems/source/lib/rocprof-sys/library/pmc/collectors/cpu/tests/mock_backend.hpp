@@ -23,24 +23,22 @@ static constexpr float       DEFAULT_CPU_FREQ_MHZ = 2000.0F;
 static constexpr std::int64_t KB_TO_BYTES = 1024;
 static constexpr std::int64_t MB_TO_BYTES = KB_TO_BYTES * KB_TO_BYTES;
 
-static constexpr cpu_jiffies DEFAULT_JIFFIES{ /* user    */ .user = std::uint64_t{ 200 },
-                                              /* nice    */ .nice = std::uint64_t{ 10 },
-                                              /* system  */ .system =
-                                                  std::uint64_t{ 150 },
-                                              /* idle    */ .idle = std::uint64_t{ 9500 },
-                                              /* iowait  */ .iowait = std::uint64_t{ 50 },
-                                              /* irq     */ .irq    = std::uint64_t{ 30 },
-                                              /* softirq */ .softirq =
-                                                  std::uint64_t{ 60 } };
+static constexpr cpu_jiffies DEFAULT_JIFFIES{ .user    = std::uint64_t{ 200 },
+                                              .nice    = std::uint64_t{ 10 },
+                                              .system  = std::uint64_t{ 150 },
+                                              .idle    = std::uint64_t{ 9500 },
+                                              .iowait  = std::uint64_t{ 50 },
+                                              .irq     = std::uint64_t{ 30 },
+                                              .softirq = std::uint64_t{ 60 } };
 
 static constexpr rusage_snapshot DEFAULT_RUSAGE{
-    /* page_rss         */ .page_rss         = std::int64_t{ 50 } * MB_TO_BYTES,
-    /* virt_mem         */ .virt_mem         = std::int64_t{ 200 } * MB_TO_BYTES,
-    /* peak_rss         */ .peak_rss         = std::int64_t{ 60 } * MB_TO_BYTES,
-    /* context_switches */ .context_switches = std::int64_t{ 1000 },
-    /* page_faults      */ .page_faults      = std::int64_t{ 500 },
-    /* user_mode_time   */ .user_mode_time   = std::int64_t{ 5'000'000 },
-    /* kernel_mode_time */ .kernel_mode_time = std::int64_t{ 1'000'000 },
+    .page_rss         = std::int64_t{ 50 } * MB_TO_BYTES,
+    .virt_mem         = std::int64_t{ 200 } * MB_TO_BYTES,
+    .peak_rss         = std::int64_t{ 60 } * MB_TO_BYTES,
+    .context_switches = std::int64_t{ 1000 },
+    .page_faults      = std::int64_t{ 500 },
+    .user_mode_time   = std::int64_t{ 5'000'000 },
+    .kernel_mode_time = std::int64_t{ 1'000'000 },
 };
 
 /**
