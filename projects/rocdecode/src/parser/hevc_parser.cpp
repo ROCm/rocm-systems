@@ -1853,6 +1853,12 @@ ParserResult HevcVideoParser::ParseSliceHeader(uint8_t *nalu, size_t size, HevcS
                 }
                 p_slice_header->num_long_term_pics = Parser::ExpGolomb::ReadUe(nalu, offset);
                 CHECK_ALLOWED_MAX("num_long_term_pics", p_slice_header->num_long_term_pics, HEVC_MAX_DPB_FRAMES - 1);
+                // 7.4.7.1: when nuh_layer_id is equal to 0, the sum of NumNegativePics[CurrRpsIdx], NumPositivePics[CurrRpsIdx],
+                // num_long_term_sps and num_long_term_pics shall be less than or equal to
+                // sps_max_dec_pic_buffering_minus1[sps_max_sub_layers_minus1] (== dpb_size - 1).
+                // This must be checked before the loop below, which uses num_long_term_sps + num_long_term_pics to index
+                // the fixed-size long-term RPS arrays of the slice header.
+                CHECK_ALLOWED_MAX("num_of_delta_pocs + num_long_term_sps + num_long_term_pics", p_slice_header->st_rps.num_of_delta_pocs + p_slice_header->num_long_term_sps + p_slice_header->num_long_term_pics, dpb_buffer_.dpb_size - 1);
 
                 int bits_for_ltrp_in_sps = 0;
                 while (sps_ptr->num_long_term_ref_pics_sps > (1 << bits_for_ltrp_in_sps)) {
