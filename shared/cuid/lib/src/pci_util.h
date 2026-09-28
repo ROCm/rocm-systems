@@ -18,7 +18,14 @@ class PciUtil {
   static amdcuid_status_t read_pci_config_space(std::string bdf, uint8_t* buffer,
                                                 size_t buffer_size, uint16_t offset);
   static amdcuid_status_t get_pci_dsn_cap_offset(std::string bdf, uint16_t& offset);
-  static amdcuid_status_t get_pci_vsec_cap_offset(std::string bdf, uint16_t& offset);
+  // Offset of 8 serial bytes in the first Vendor-Specific Extended Capability
+  // long enough to hold them, in the configuration space of a function whose
+  // Vendor ID is `vendor_id`.
+  static amdcuid_status_t get_pci_vsec_cap_offset(std::string bdf, uint16_t vendor_id,
+                                                  uint16_t& offset);
+  // The same over a configuration space already read.
+  static amdcuid_status_t find_vsec_serial_offset(const uint8_t* config_space, size_t size,
+                                                  uint16_t vendor_id, uint16_t& offset);
 
   // Load a 16-bit little-endian config-space field. Use this instead of
   // casting the buffer to uint16_t*, which violates alignment and aliasing.

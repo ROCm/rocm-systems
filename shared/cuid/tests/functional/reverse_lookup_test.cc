@@ -22,16 +22,49 @@
 //   [14]     bits[4:0]=unit_id upper 5 bits | bit[5]=aux_indicator |
 //            bits[7:6]=device_type[1:0]   (payload bits 112:119)
 //   [15]     bits[1:0]=device_type[3:2] | bits[7:2]=padding (payload 120:127)
+// Callers skip adopted primaries first (AdoptedPrimary), so this is always framed.
 static void extract_primary_raw_bits(const amdcuid_id_t& uuid, uint8_t raw_bits[16]) {
   amdcuid_id_t mutable_uuid = uuid;
-  // An adopted Platform CUID (e.g. the SMBIOS system UUID) is not a framed
-  // UUIDv8: it has no version/variant bits to strip, so its raw bytes must be
-  // taken verbatim.
-  if (CuidUtilities::is_constructed(&mutable_uuid)) {
-    CuidUtilities::remove_UUIDv8_bits(&mutable_uuid, raw_bits);
-  } else {
-    memcpy(raw_bits, mutable_uuid.bytes, 16);
+  CuidUtilities::remove_UUIDv8_bits(&mutable_uuid, raw_bits);
+}
+
+// Adopted firmware bytes have no CUID payload to reverse. Verify their source
+// and reject missing-UUID sentinels before bypassing field decoding. Restricting
+// adoption to Platform keeps this from hiding a GPU framing defect.
+static bool AdoptedPrimary(const amdcuid_id_t& handle, const amdcuid_id_t& primary,
+                           const char* device_node) {
+  if (CuidUtilities::is_constructed(&primary)) {
+    return false;
   }
+
+  amdcuid_device_type_t device_type = AMDCUID_DEVICE_TYPE_NONE;
+  uint32_t length = sizeof(device_type);
+  EXPECT_EQ(amdcuid_query_device_property(handle, AMDCUID_QUERY_DEVICE_TYPE, &device_type, &length),
+            AMDCUID_STATUS_SUCCESS);
+  EXPECT_EQ(device_type, AMDCUID_DEVICE_TYPE_PLATFORM)
+      << "a non-Platform component reported a primary that is not a UUIDv8, so its payload "
+         "was never packed: "
+      << device_node;
+
+  // Firmware UUIDs are opaque, including their version and variant bits.
+  uint8_t firmware[16]{};
+  EXPECT_EQ(SmbiosUtil::get_system_uuid(firmware), AMDCUID_STATUS_SUCCESS);
+  EXPECT_TRUE(std::memcmp(primary.bytes, firmware, sizeof(firmware)) == 0)
+      << "adopted primary differs from firmware";
+  bool all_zero = true;
+  bool all_ones = true;
+  for (size_t b = 0; b < sizeof(primary.bytes); ++b) {
+    all_zero = all_zero && primary.bytes[b] == 0;
+    all_ones = all_ones && primary.bytes[b] == 0xff;
+  }
+  EXPECT_FALSE(all_zero) << "adopted primary is all zero for device " << device_node;
+  EXPECT_FALSE(all_ones) << "adopted primary is all ones for device " << device_node;
+
+  IF_VERB(1) {
+    printf("  Device [%s] primary is adopted (UUID version %u); field decode skipped\n",
+           device_node, static_cast<unsigned>((primary.bytes[6] >> 4) & 0x0F));
+  }
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -56,21 +89,27 @@ void TestReverseSerialNumber::Run() {
     amdcuid_query_device_property(device_handles_[i], AMDCUID_QUERY_DEVICE_PATH, device_node,
                                   &node_len);
 
-    uint64_t serial_number = 0;
-    uint32_t length = sizeof(serial_number);
+    amdcuid_id_t primary_id = {};
+    uint32_t length = sizeof(primary_id);
     amdcuid_status_t status = amdcuid_query_device_property(
-        device_handles_[i], AMDCUID_QUERY_HARDWARE_FINGERPRINT, &serial_number, &length);
+        device_handles_[i], AMDCUID_QUERY_PRIMARY_CUID, &primary_id, &length);
+    ASSERT_EQ(status, AMDCUID_STATUS_SUCCESS);
+    if (AdoptedPrimary(device_handles_[i], primary_id, device_node)) continue;
 
-    if (status == AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND) {
-      // Expect a temporary CUID; build the same fallback fingerprint the
-      // library uses so we have something to compare against.
-      bool is_temporary = false;
-      length = sizeof(is_temporary);
-      status = amdcuid_query_device_property(device_handles_[i], AMDCUID_QUERY_TEMPORARY_CUID,
-                                             &is_temporary, &length);
-      EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
-      EXPECT_TRUE(is_temporary);
+    uint8_t raw_bits[16] = {0};
+    extract_primary_raw_bits(primary_id, raw_bits);
+    const bool auxiliary_primary = (raw_bits[14] >> 5) & 1;
 
+    uint64_t serial_number = 0;
+    length = sizeof(serial_number);
+    status = amdcuid_query_device_property(device_handles_[i], AMDCUID_QUERY_HARDWARE_FINGERPRINT,
+                                           &serial_number, &length);
+    if (status == AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND) EXPECT_TRUE(auxiliary_primary);
+
+    if (auxiliary_primary) {
+      // An auxiliary primary carries the fallback serial even where the
+      // device's own serial is readable, as for a GPU the driver does not name.
+      // Build the same fallback fingerprint the library uses to compare against.
       amdcuid_device_type_t device_type;
       length = sizeof(device_type);
       amdcuid_query_device_property(device_handles_[i], AMDCUID_QUERY_DEVICE_TYPE, &device_type,
@@ -78,8 +117,7 @@ void TestReverseSerialNumber::Run() {
 
       // Rebuild the auxiliary input structure from the device's own published
       // properties. The fixed-width structure removes the chance for test and
-      // library to disagree about formatting, as they did when the CPU seed was
-      // a string.
+      // library to disagree about formatting.
       CuidUtilities::AuxiliaryInput aux;
       aux.component_type = static_cast<uint8_t>(device_type);
 
@@ -108,11 +146,15 @@ void TestReverseSerialNumber::Run() {
           // here means the library reported a temporary Platform CUID.
           FAIL() << "Platform CUID must not be temporary";
           break;
-        case AMDCUID_DEVICE_TYPE_CPU:
+        case AMDCUID_DEVICE_TYPE_CPU: {
+          uint16_t physical_id = 0;
+          length = sizeof(physical_id);
+          amdcuid_query_device_property(device_handles_[i], AMDCUID_QUERY_PHYSICAL_ID, &physical_id,
+                                        &length);
           aux.format = CuidUtilities::kAuxFormatCpu;
-          aux.routing_id = 0;
+          aux.routing_id = physical_id;
           CuidUtilities::make_fallback_fingerprint(aux, serial_number);
-          break;
+        } break;
         case AMDCUID_DEVICE_TYPE_GPU:
         case AMDCUID_DEVICE_TYPE_NIC:
         case AMDCUID_DEVICE_TYPE_NPU: {
@@ -131,20 +173,6 @@ void TestReverseSerialNumber::Run() {
       EXPECT_NE(serial_number, 0u);
     }
 
-    amdcuid_id_t primary_id = {};
-    length = sizeof(primary_id);
-    status = amdcuid_query_device_property(device_handles_[i], AMDCUID_QUERY_PRIMARY_CUID,
-                                           &primary_id, &length);
-    EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
-
-    if (!CuidUtilities::is_constructed(&primary_id)) {
-      // An adopted firmware UUID (e.g. a Platform's SMBIOS system UUID) carries
-      // no packed info to reverse-check; it is opaque firmware bytes.
-      continue;
-    }
-
-    uint8_t raw_bits[16] = {0};
-    extract_primary_raw_bits(primary_id, raw_bits);
     uint64_t extracted_serial = 0;
     memcpy(&extracted_serial, raw_bits, sizeof(extracted_serial));
 
@@ -187,9 +215,7 @@ void TestReverseVendorId::Run() {
         device_handles_[i], AMDCUID_QUERY_PRIMARY_CUID, &primary_id, &length);
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
 
-    if (!CuidUtilities::is_constructed(&primary_id)) {
-      // An adopted firmware UUID (e.g. a Platform's SMBIOS system UUID) carries
-      // no packed info to reverse-check; it is opaque firmware bytes.
+    if (AdoptedPrimary(device_handles_[i], primary_id, device_node)) {
       continue;
     }
 
@@ -241,9 +267,7 @@ void TestReverseDeviceId::Run() {
         device_handles_[i], AMDCUID_QUERY_PRIMARY_CUID, &primary_id, &length);
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
 
-    if (!CuidUtilities::is_constructed(&primary_id)) {
-      // An adopted firmware UUID (e.g. a Platform's SMBIOS system UUID) carries
-      // no packed info to reverse-check; it is opaque firmware bytes.
+    if (AdoptedPrimary(device_handles_[i], primary_id, device_node)) {
       continue;
     }
 
@@ -298,9 +322,7 @@ void TestReverseRevisionId::Run() {
         device_handles_[i], AMDCUID_QUERY_PRIMARY_CUID, &primary_id, &length);
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
 
-    if (!CuidUtilities::is_constructed(&primary_id)) {
-      // An adopted firmware UUID (e.g. a Platform's SMBIOS system UUID) carries
-      // no packed info to reverse-check; it is opaque firmware bytes.
+    if (AdoptedPrimary(device_handles_[i], primary_id, device_node)) {
       continue;
     }
 
@@ -355,9 +377,7 @@ void TestReverseUnitId::Run() {
         device_handles_[i], AMDCUID_QUERY_PRIMARY_CUID, &primary_id, &length);
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
 
-    if (!CuidUtilities::is_constructed(&primary_id)) {
-      // An adopted firmware UUID (e.g. a Platform's SMBIOS system UUID) carries
-      // no packed info to reverse-check; it is opaque firmware bytes.
+    if (AdoptedPrimary(device_handles_[i], primary_id, device_node)) {
       continue;
     }
 
@@ -414,9 +434,7 @@ void TestReverseDeviceType::Run() {
         device_handles_[i], AMDCUID_QUERY_PRIMARY_CUID, &primary_id, &length);
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
 
-    if (!CuidUtilities::is_constructed(&primary_id)) {
-      // An adopted firmware UUID (e.g. a Platform's SMBIOS system UUID) carries
-      // no packed info to reverse-check; it is opaque firmware bytes.
+    if (AdoptedPrimary(device_handles_[i], primary_id, device_node)) {
       continue;
     }
 
@@ -424,7 +442,7 @@ void TestReverseDeviceType::Run() {
     extract_primary_raw_bits(primary_id, raw_bits);
     // device_type is 4 bits: bits [7:6] of raw_bits[14] hold bits [1:0]
     // (payload 118:119), bits [1:0] of raw_bits[15] hold bits [3:2] (payload
-    // 120:121). This used to read raw_bits[15] bits [7:6], which is padding.
+    // 120:121).
     uint8_t extracted_type =
         static_cast<uint8_t>(((raw_bits[14] >> 6) & 0x3) | ((raw_bits[15] << 2) & 0xC));
 

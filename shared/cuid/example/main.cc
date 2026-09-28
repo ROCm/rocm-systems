@@ -3,9 +3,10 @@
 
 #include <climits>
 #include <iostream>
+#include <string>
 #include <vector>
 
-#include "include/amd_cuid.h"
+#include "amd_cuid.h"
 
 int main() {
   amdcuid_status_t err;

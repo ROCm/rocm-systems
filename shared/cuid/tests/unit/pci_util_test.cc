@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 
 #include "src/pci_util.h"
 
@@ -86,3 +87,40 @@ void TestPciConfigDecode::Run() {
 void TestPciConfigDecode::DisplayTestInfo() { TestBase::DisplayTestInfo(); }
 void TestPciConfigDecode::DisplayResults() const { TestBase::DisplayResults(); }
 void TestPciConfigDecode::Close() {}
+
+namespace {
+
+// An extended configuration space whose only capability is one VSEC at 0x100,
+// `length` bytes long by its own header, in a function of vendor 0x1002.
+void VsecConfig(uint8_t (&config)[kPciConfigSpaceSize], uint16_t length) {
+  std::memset(config, 0, sizeof(config));
+  config[0] = 0x02;
+  config[1] = 0x10;
+  config[0x100] = 0x0b;  // Vendor-Specific Extended Capability, next pointer 0
+  const uint32_t vsec_header = static_cast<uint32_t>(length) << 20;
+  std::memcpy(&config[0x104], &vsec_header, sizeof(vsec_header));
+}
+
+}  // namespace
+
+TEST(cuidtstUnprivileged, VsecSerialNeedsRoomAndTheDevicesVendor) {
+  uint8_t config[kPciConfigSpaceSize];
+  uint16_t offset = 0;
+
+  // The length counts both 4-byte headers: 8 is a VSEC with no body at all.
+  for (uint16_t length : {0, 8, 12, 15}) {
+    VsecConfig(config, length);
+    EXPECT_EQ(PciUtil::find_vsec_serial_offset(config, sizeof(config), 0x1002, offset),
+              AMDCUID_STATUS_UNSUPPORTED)
+        << "a " << length << "-byte VSEC was taken as holding an 8-byte serial";
+  }
+
+  VsecConfig(config, 16);
+  ASSERT_EQ(PciUtil::find_vsec_serial_offset(config, sizeof(config), 0x1002, offset),
+            AMDCUID_STATUS_SUCCESS);
+  EXPECT_EQ(offset, 0x108);
+
+  EXPECT_EQ(PciUtil::find_vsec_serial_offset(config, sizeof(config), 0x15b3, offset),
+            AMDCUID_STATUS_UNSUPPORTED)
+      << "a VSEC was read from a function of another vendor";
+}

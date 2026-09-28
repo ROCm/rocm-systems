@@ -50,22 +50,9 @@ jobs:
       # table -- the only way a vector can decay in the direction of the bug it
       # was meant to catch -- and nothing else.
       #
-      # It does NOT verify that the amdgpu driver runs the same table. The
-      # kernel tree carries byte-identical copies of both files under
-      # tools/testing/selftests/amdgpu/, and the cross-layer comparison lives
-      # there, in check_vectors_drift.py, which sha256-compares both files
-      # against $AMDCUID_LIBRARY_TREE. That gate runs on the kernel side only,
-      # and only when that variable is set. Nothing in this repository notices
-      # if the kernel's copy diverges from this one.
-      #
-      # TODO(cuid): make the cross-layer comparison run from this side too.
-      # Pinning the kernel copy by digest here was considered and rejected: the
-      # digest would have to be bumped in lockstep with every legitimate change
-      # to the vectors, so it would fail on the correct change and pass on the
-      # drift it is meant to catch. The real fix is a shared source of truth --
-      # vendoring the generator from one tree into the other at a recorded
-      # revision, or having this job check out the kernel tree and run
-      # check_vectors_drift.py with AMDCUID_LIBRARY_TREE pointed here.
+      # It does NOT verify the amdgpu driver. The kernel has no copy of this
+      # table; its KUnit known-answer test asserts a subset of the rows, and
+      # nothing compares that subset with this file.
       - name: Check the conformance vectors match their generator
         run: python3 shared/cuid/tests/vectors/cuid_vectors.py --check
 
@@ -75,9 +62,12 @@ jobs:
     runs-on:
       - self-hosted
       - ${{ vars.RUNNER_TYPE }}
-    continue-on-error: true
+    # Ubuntu22 gates the merge; the other self-hosted distros stay advisory
+    # because their runner flakiness is unrelated to CUID.
+    continue-on-error: ${{ matrix.os != 'Ubuntu22' }}
     strategy:
       max-parallel: 10
+      fail-fast: false
       matrix:
         os:
           - Ubuntu20
@@ -100,6 +90,17 @@ jobs:
         run: find "$GITHUB_WORKSPACE" -mindepth 1 -delete
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      # Container images ship no machine-id, and without one the library gives
+      # no component a temporary CUID, so the tests would only see the refusal.
+      # cuid_gpu_paths fakes /sys, /dev and /run but reads the real
+      # /etc/machine-id. A random one is what systemd writes on first boot.
+      - name: Give the container a machine-id
+        run: |
+          set -eu
+          if ! grep -qE '^[0-9a-f]{32}$' /etc/machine-id 2>/dev/null; then
+            tr -d '-' < /proc/sys/kernel/random/uuid > /etc/machine-id
+          fi
 
       - name: Set Project Directory
         run: |
@@ -130,8 +131,16 @@ jobs:
           mkdir -p $BUILD_FOLDER
           cd $BUILD_FOLDER
 
+          # The lifecycle suite needs Python 3.9; distros shipping an older
+          # python3 build without it.
+          LIFECYCLE=OFF
+          if python3 -c 'import sys; sys.exit(sys.version_info < (3, 9))'; then
+            LIFECYCLE=ON
+          fi
+          echo "LIFECYCLE=$LIFECYCLE" >> $GITHUB_ENV
+
           # Configure
-          cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DBUILD_DAEMON=OFF
+          cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DAMDCUID_BUILD_LIFECYCLE_TESTS=$LIFECYCLE
 
           # Build
           make -j $(nproc)
@@ -139,9 +148,6 @@ jobs:
           # Install
           # This requires sudo or root, container runs as root
           make install
-
-          # run post install step
-          /opt/rocm/core/share/amdcuid/amdcuid_postinst.sh
 
       - name: Run CUID Tests
         run: |
@@ -152,10 +158,6 @@ jobs:
           mkdir -p $OUTPUT_DIR
           TEST_LOG="$OUTPUT_DIR/amdcuid_test.log"
 
-          # Start daemon if present (daemon is not built in this workflow).
-          if [ -x /opt/rocm/core/bin/amdcuid_daemon ]; then
-            /opt/rocm/core/bin/amdcuid_daemon &
-          fi
           # Run the test binary
           if /opt/rocm/core/share/amdcuid/tests/amdcuid_test > $TEST_LOG 2>&1; then
              echo "CUID tests passed"
@@ -165,11 +167,38 @@ jobs:
              exit 1
           fi
 
+      # cuid_gpu_paths runs GPU discovery against a synthetic /sys, /dev and /run
+      # it mounts in a private mount namespace, so it needs root with
+      # CAP_SYS_ADMIN, which this privileged root container has. It exits 77,
+      # which CTest reports as skipped, only for a non-root caller; require that
+      # it passed so a skip cannot pass the gate. The merge-gating Ubuntu22 job
+      # must run it.
+      - name: Run the registered CTest suite
+        run: |
+          set -e
+          OUTPUT_DIR="/tmp/test-results-${{ matrix.os }}"
+          mkdir -p $OUTPUT_DIR
+          CTEST_LOG="$OUTPUT_DIR/ctest.log"
+          if [ "$LIFECYCLE" != ON ] && [ "${{ matrix.os }}" = Ubuntu22 ]; then
+             echo "cuid_gpu_paths was not built: python3 is older than 3.9"
+             exit 1
+          fi
+          cd ${{ env.PROJECT_DIR }}/build
+          if ctest --output-on-failure > $CTEST_LOG 2>&1 &&
+             { [ "$LIFECYCLE" != ON ] || grep -Eq 'cuid_gpu_paths \.+ +Passed' $CTEST_LOG; }; then
+             echo "CTest suite passed"
+          else
+             echo "CTest suite failed"
+             cat $CTEST_LOG
+             exit 1
+          fi
+
       - name: Display Test Results
         if: always()
         run: |
           echo "Displaying CUID test results for ${{ matrix.os }}"
           cat /tmp/test-results-${{ matrix.os }}/amdcuid_test.log || echo "No CUID test results found for ${{ matrix.os }}"
+          cat /tmp/test-results-${{ matrix.os }}/ctest.log || echo "No CTest results found for ${{ matrix.os }}"
 
       - name: Upload Test Results
         if: always()
@@ -217,13 +246,12 @@ jobs:
         run: |
           set -e
 
-          # Build daemon so its sources land in compile_commands.json
           BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
           rm -rf $BUILD_FOLDER
           mkdir -p $BUILD_FOLDER
           cd $BUILD_FOLDER
 
-          cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DBUILD_DAEMON=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
           make -j $(nproc)
 
       - name: Run clang-tidy
@@ -236,4 +264,4 @@ jobs:
 
           cd ${{ env.PROJECT_DIR }}
           # .clang-tidy at the project root is picked up per-file automatically.
-          clang-tidy -p build $(find lib/src cli daemon -name '*.cc')
+          clang-tidy -p build $(find lib/src -name '*.cc')
