@@ -167,17 +167,22 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `TASK_PREP_CC_PATH`, suite `TaskPrepMicrotest.*`),
   `src/enqueue/task_prep/task_classify.cc` (via `TASK_CLASSIFY_CC_PATH`, suite
   `TaskClassifyMicrotest.*`), `src/enqueue/task_prep/task_pretuning.cc` (via
-  `TASK_PRETUNING_CC_PATH`, suite `TaskPreTuningMicrotest.*`) and
+  `TASK_PRETUNING_CC_PATH`, suite `TaskPreTuningMicrotest.*`),
   `src/enqueue/task_prep/task_posttuning.cc` (via `TASK_POSTTUNING_CC_PATH`, suite
-  `TaskPostTuningMicrotest.*`). Its own binary, not sharing
-  `rccl-UnitTestsMicro`: that target links `collective_stubs.cc`, whose fail-loud
-  `ncclTaskPrepare` would be a duplicate symbol against the real one, and
-  `group-test.cc` drives the path that stub stands in for. All four production
-  files are now test TUs, one per file, so `task_prep.cc`'s sibling externs
-  resolve to real code and no file is listed twice. Shared scene, vocabulary
-  and fake-reset fixture live in `TaskPrepScene.h`. `ENABLE_WARP_SPEED` is
-  deliberately absent: all four files are free of it. See
-  `test_categories_micro_taskprep.yaml`.
+  `TaskPostTuningMicrotest.*`), and the seven `src/enqueue/task_sched/*.cc` files
+  (`task_sched.cc`, `sym_sched.cc`, `legacy_sched.cc`, `allgatherv_sched.cc`,
+  `p2p_sched.cc`, `rma_sched.cc`, `ce_sched.cc`, one `TASK_SCHED_*_CC_PATH` macro
+  each, all in one test TU, suite `TaskSchedMicrotest.*`). Its own binary, not
+  sharing `rccl-UnitTestsMicro`: that target links `collective_stubs.cc`, whose
+  fail-loud `ncclTaskPrepare` would be a duplicate symbol against the real one,
+  and `group-test.cc` drives the path that stub stands in for. The four
+  `task_prep/` files are separate test TUs, one per file, so `task_prep.cc`'s
+  sibling externs resolve to real code and no file is listed twice; the seven
+  `task_sched/` files share one TU instead, since none of them reference each
+  other and each defines exactly one distinct extern-linkage function. Shared
+  scene, vocabulary and fake-reset fixture live in `TaskPrepScene.h`.
+  `ENABLE_WARP_SPEED` is deliberately absent: all eleven files are free of it.
+  See `test_categories_micro_taskprep.yaml`.
 
 Everything below (seams, fakes, coverage) applies to both; the concrete examples
 use `p2p.cc`.
@@ -713,7 +718,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroEnqueue            # enqueue.cc tests
 ./build/rccl-UnitTestsMicroEnqueue-devlinker  # same, RCCL_DEVICE_LINKER arm
 ./build/rccl-UnitTestsMicroSymKernels         # sym_kernels.cc tests
-./build/rccl-UnitTestsMicroTaskPrep           # src/enqueue/task_prep/ tests
+./build/rccl-UnitTestsMicroTaskPrep           # src/enqueue/task_prep/ + task_sched/ tests
 ./build/rccl-HostUnitTests
 ```
 

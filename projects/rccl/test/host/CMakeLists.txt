@@ -763,23 +763,27 @@ if(BUILD_TESTS)
   endif()
 
   # ---------------------------------------------------------------------------
-  # rccl-UnitTestsMicroTaskPrep: host-only microtests for src/enqueue/task_prep/.
+  # rccl-UnitTestsMicroTaskPrep: host-only microtests for src/enqueue/task_prep/
+  # and src/enqueue/task_sched/.
   #
   # Its own binary, not rccl-UnitTestsMicro: that target compiles group.cc, rccl_wrap.cc and
   # dev_runtime.cc as real units under test, and this suite fakes all three to drive them. Merging was
   # measured: 49 duplicate symbols, 67 of these tests break, and ~49 seams die silently because the
-  # real code wins every collision. ENABLE_WARP_SPEED is not set: all four files are free of it, and
+  # real code wins every collision. ENABLE_WARP_SPEED is not set: all eleven files are free of it, and
   # their five MAXCHANNELS uses are clamp arguments rather than layout.
   #
-  # The four production files are separate TUs so task_prep.cc's three sibling externs resolve to
-  # real code. Each file leaves this source list for its own test TU, which #includes its *_CC_PATH,
-  # as that unit comes under test; listing both would be a duplicate symbol.
+  # The four task_prep/ files are separate TUs so task_prep.cc's three sibling externs resolve to
+  # real code. Each leaves this source list for its own test TU, which #includes its *_CC_PATH, as
+  # that unit comes under test; listing both would be a duplicate symbol. The seven task_sched/
+  # files instead share one test TU (task-sched-test.cc): none references another, and each defines
+  # exactly one distinct extern-linkage function, so there is no cross-file resolution to preserve.
   # ---------------------------------------------------------------------------
   set(TEST_MICRO_TASKPREP_SOURCE_FILES
     task-prep-test.cc
     task-classify-test.cc
     task-pretuning-test.cc
     task-posttuning-test.cc
+    task-sched-test.cc
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
     fakes/transport_stubs.cc
@@ -829,12 +833,21 @@ if(BUILD_TESTS)
     ${PROJECT_BINARY_DIR}/hipify/src/device          # device/common.h (neutered)
     ${PROJECT_BINARY_DIR}/hipify/src/include/nccl_device)
   # Hipify preserves src/enqueue/task_prep/ and renames none of the four (no basename collisions).
+  # Same for src/enqueue/task_sched/: the _tmp.cc rename goes to the unrelated src/scheduler/
+  # copies instead (see the standalone block below and MICROTEST_README.md for the map).
   target_compile_definitions(rccl-UnitTestsMicroTaskPrep PRIVATE
     ${RCCL_COMMON_COMPILE_DEFS}
     TASK_PREP_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/enqueue/task_prep/task_prep.cc"
     TASK_CLASSIFY_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/enqueue/task_prep/task_classify.cc"
     TASK_PRETUNING_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/enqueue/task_prep/task_pretuning.cc"
-    TASK_POSTTUNING_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/enqueue/task_prep/task_posttuning.cc")
+    TASK_POSTTUNING_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/enqueue/task_prep/task_posttuning.cc"
+    TASK_SCHED_DISPATCH_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/enqueue/task_sched/task_sched.cc"
+    TASK_SCHED_SYM_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/enqueue/task_sched/sym_sched.cc"
+    TASK_SCHED_LEGACY_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/enqueue/task_sched/legacy_sched.cc"
+    TASK_SCHED_ALLGATHERV_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/enqueue/task_sched/allgatherv_sched.cc"
+    TASK_SCHED_P2P_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/enqueue/task_sched/p2p_sched.cc"
+    TASK_SCHED_RMA_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/enqueue/task_sched/rma_sched.cc"
+    TASK_SCHED_CE_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/enqueue/task_sched/ce_sched.cc")
 
   if(ENABLE_ROCSHMEM_GIN)
     target_compile_definitions(rccl-UnitTestsMicroTaskPrep PRIVATE NCCL_GIN_ANVIL_SDMA_ENABLE=0)
@@ -1573,13 +1586,14 @@ endif()
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroTaskPrep (standalone mode): see the in-build block for the rationale behind
-# the separate binary, the absent ENABLE_WARP_SPEED, and the four-TU layout.
+# the separate binary, the absent ENABLE_WARP_SPEED, and the five-TU layout.
 # ---------------------------------------------------------------------------
 set(TEST_MICRO_TASKPREP_SOURCE_FILES
   ${CMAKE_CURRENT_SOURCE_DIR}/task-prep-test.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/task-classify-test.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/task-pretuning-test.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/task-posttuning-test.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/task-sched-test.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/bootstrap_stubs.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/topo_stubs.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/transport_stubs.cc
@@ -1633,6 +1647,13 @@ target_compile_definitions(rccl-UnitTestsMicroTaskPrep PRIVATE
   TASK_CLASSIFY_CC_PATH="${RCCL_HIPIFY_DIR}/src/enqueue/task_prep/task_classify.cc"
   TASK_PRETUNING_CC_PATH="${RCCL_HIPIFY_DIR}/src/enqueue/task_prep/task_pretuning.cc"
   TASK_POSTTUNING_CC_PATH="${RCCL_HIPIFY_DIR}/src/enqueue/task_prep/task_posttuning.cc"
+  TASK_SCHED_DISPATCH_CC_PATH="${RCCL_HIPIFY_DIR}/src/enqueue/task_sched/task_sched.cc"
+  TASK_SCHED_SYM_CC_PATH="${RCCL_HIPIFY_DIR}/src/enqueue/task_sched/sym_sched.cc"
+  TASK_SCHED_LEGACY_CC_PATH="${RCCL_HIPIFY_DIR}/src/enqueue/task_sched/legacy_sched.cc"
+  TASK_SCHED_ALLGATHERV_CC_PATH="${RCCL_HIPIFY_DIR}/src/enqueue/task_sched/allgatherv_sched.cc"
+  TASK_SCHED_P2P_CC_PATH="${RCCL_HIPIFY_DIR}/src/enqueue/task_sched/p2p_sched.cc"
+  TASK_SCHED_RMA_CC_PATH="${RCCL_HIPIFY_DIR}/src/enqueue/task_sched/rma_sched.cc"
+  TASK_SCHED_CE_CC_PATH="${RCCL_HIPIFY_DIR}/src/enqueue/task_sched/ce_sched.cc"
 )
 target_link_options(rccl-UnitTestsMicroTaskPrep PRIVATE -no-hip-rt -Wl,--gc-sections)
 target_link_libraries(rccl-UnitTestsMicroTaskPrep PRIVATE
