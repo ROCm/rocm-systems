@@ -254,6 +254,16 @@ TEST_F(GroupEndInternalTest, MultiRankSymmetricCommEnqueuesAsyncJob) {
   queued->destructor(queued);
 }
 
+// Minimal construction reclaimPlannerState needs on a fresh, value-initialised ncclComm. Shared
+// by ReclaimPlannerStateTest::SetUp and the plain TEST() below (which can't use a fixture).
+void ConstructPlannerComm(struct ncclComm* comm) {
+  ncclMemoryStackConstruct(&comm->memPermanent);
+  ncclMemoryPoolConstruct(&comm->memPool_ncclKernelPlan);
+  ncclMemoryPoolConstruct(&comm->memPool_ncclProxyOp);
+  ncclIntruQueueConstruct(&comm->planner.collCleanupQueue);
+  ncclIntruQueueConstruct(&comm->planner.planQueue);
+}
+
 // reclaimPlannerState: pure struct manipulation on comm->planner, called from the fail path
 // (via groupCleanup) and groupLaunchLegacy's simInfo branch; neither was exercised before.
 class ReclaimPlannerStateTest : public ::testing::Test {
@@ -262,11 +272,7 @@ class ReclaimPlannerStateTest : public ::testing::Test {
 
   void SetUp() override {
     comm_ = std::make_unique<ncclComm>();  // value-initialised => zeroed
-    ncclMemoryStackConstruct(&comm_->memPermanent);
-    ncclMemoryPoolConstruct(&comm_->memPool_ncclKernelPlan);
-    ncclMemoryPoolConstruct(&comm_->memPool_ncclProxyOp);
-    ncclIntruQueueConstruct(&comm_->planner.collCleanupQueue);
-    ncclIntruQueueConstruct(&comm_->planner.planQueue);
+    ConstructPlannerComm(comm_.get());
   }
 
   void TearDown() override {
@@ -347,6 +353,13 @@ TEST_F(ReclaimPlannerStateTest, DequeuesButDoesNotFreeAPersistentPlan) {
     << "a persistent plan's proxy ops must not be pooled back while the plan is still alive";
 }
 
+// hasSeen is always seeded 1 (so a clear is observable); only p2pOnly/transportComm vary.
+void SetConn(struct ncclConnector& conn, int p2pOnly, struct ncclTransportComm* transportComm) {
+  conn.p2pOnly = p2pOnly;
+  conn.hasSeen = 1;
+  conn.transportComm = transportComm;
+}
+
 TEST_F(ReclaimPlannerStateTest, ClearsP2pOnlyOnlyForConnectionsWithNoTransportComm) {
   // Needs NCCL_MAX_CONNS >= 3 for "index 0 / middle / last" below to mean distinct slots.
   static_assert(NCCL_MAX_CONNS >= 3, "peer10->send[1] below assumes a middle index exists");
@@ -369,34 +382,19 @@ TEST_F(ReclaimPlannerStateTest, ClearsP2pOnlyOnlyForConnectionsWithNoTransportCo
   // connections at index 0/middle/last (not just index 0), and a p2pOnly==0-but-disconnected
   // case on each of send/recv (peer10) proving the guard is a conjunction, not just transportComm.
   auto peer00 = std::make_unique<struct ncclChannelPeer>();
-  peer00->send[0].p2pOnly = 1;
-  peer00->send[0].hasSeen = 1;
-  peer00->send[0].transportComm = nullptr;  // disconnected -> cleared
-  peer00->recv[NCCL_MAX_CONNS - 1].p2pOnly = 1;
-  peer00->recv[NCCL_MAX_CONNS - 1].hasSeen = 1;
-  peer00->recv[NCCL_MAX_CONNS - 1].transportComm = reinterpret_cast<struct ncclTransportComm*>(0x2);  // connected
+  SetConn(peer00->send[0], /*p2pOnly=*/1, /*transportComm=*/nullptr);  // disconnected -> cleared
+  SetConn(peer00->recv[NCCL_MAX_CONNS - 1], /*p2pOnly=*/1,
+          reinterpret_cast<struct ncclTransportComm*>(0x2));  // connected -> survives
 
   auto peer01 = std::make_unique<struct ncclChannelPeer>();
-  peer01->send[NCCL_MAX_CONNS - 1].p2pOnly = 1;
-  peer01->send[NCCL_MAX_CONNS - 1].hasSeen = 1;
-  peer01->send[NCCL_MAX_CONNS - 1].transportComm = nullptr;  // disconnected -> cleared
-  peer01->recv[0].p2pOnly = 1;
-  peer01->recv[0].hasSeen = 1;
-  peer01->recv[0].transportComm = reinterpret_cast<struct ncclTransportComm*>(0x3);  // connected
+  SetConn(peer01->send[NCCL_MAX_CONNS - 1], /*p2pOnly=*/1, /*transportComm=*/nullptr);  // disconnected -> cleared
+  SetConn(peer01->recv[0], /*p2pOnly=*/1, reinterpret_cast<struct ncclTransportComm*>(0x3));  // connected -> survives
 
   auto peer10 = std::make_unique<struct ncclChannelPeer>();
-  peer10->send[1].p2pOnly = 1;
-  peer10->send[1].hasSeen = 1;
-  peer10->send[1].transportComm = nullptr;  // disconnected -> cleared, on channel 1 this time
-  peer10->send[0].p2pOnly = 0;
-  peer10->send[0].hasSeen = 1;
-  peer10->send[0].transportComm = nullptr;  // disconnected but NOT p2pOnly -> hasSeen must survive
-  peer10->recv[0].p2pOnly = 0;
-  peer10->recv[0].hasSeen = 1;
-  peer10->recv[0].transportComm = nullptr;  // disconnected but NOT p2pOnly -> hasSeen must survive
-  peer10->recv[1].p2pOnly = 1;
-  peer10->recv[1].hasSeen = 1;
-  peer10->recv[1].transportComm = nullptr;  // disconnected AND p2pOnly -> cleared (recv side)
+  SetConn(peer10->send[1], /*p2pOnly=*/1, /*transportComm=*/nullptr);  // disconnected -> cleared
+  SetConn(peer10->send[0], /*p2pOnly=*/0, /*transportComm=*/nullptr);  // not p2pOnly -> survives
+  SetConn(peer10->recv[0], /*p2pOnly=*/0, /*transportComm=*/nullptr);  // not p2pOnly -> survives
+  SetConn(peer10->recv[1], /*p2pOnly=*/1, /*transportComm=*/nullptr);  // disconnected AND p2pOnly -> cleared
 
   struct ncclChannelPeer* peersChan0[kRanks] = {peer00.get(), peer01.get()};
   struct ncclChannelPeer* peersChan1[kRanks] = {peer10.get(), nullptr};  // rank 1 has no peer here
@@ -446,11 +444,7 @@ TEST_F(ReclaimPlannerStateTest, ClearsP2pOnlyOnlyForConnectionsWithNoTransportCo
 TEST(ReclaimPlannerStateIsolated, KnownBug_RmaTaskQueuesNotRestoredAfterReclaim_SegfaultsOnNextUse) {
   RUN_ISOLATED_TEST("ReclaimPlannerState_RmaTaskQueuesNotRestored", []() {
     auto comm = std::make_unique<ncclComm>();
-    ncclMemoryStackConstruct(&comm->memPermanent);
-    ncclMemoryPoolConstruct(&comm->memPool_ncclKernelPlan);
-    ncclMemoryPoolConstruct(&comm->memPool_ncclProxyOp);
-    ncclIntruQueueConstruct(&comm->planner.collCleanupQueue);
-    ncclIntruQueueConstruct(&comm->planner.planQueue);
+    ConstructPlannerComm(comm.get());
     comm->config.numRmaCtx = 1;
     auto rmaTaskQueues =
       std::make_unique<struct ncclIntruQueue<struct ncclTaskRma, &ncclTaskRma::next>[]>(1);
@@ -497,7 +491,10 @@ class AsyncLaunchTest : public ::testing::Test {
   }
 
   void TearDown() override {
-    s_active = nullptr;  // next test's SetUp() already resets group thread-locals
+    // Not just this class's own SetUp: other TUs sharing this binary/thread (e.g. rccl_wrap.cc's
+    // rcclDdaEnabled reading ncclGroupDepth) can run next, especially under --gtest_shuffle.
+    ResetGroupThreadLocals();
+    s_active = nullptr;
   }
 
   static ncclResult_t Func(struct ncclAsyncJob*) {
@@ -754,7 +751,10 @@ class GroupApiWrapperTest : public ::testing::Test {
     ResetGroupThreadLocals();
     ResetRecorderFakes();
   }
-  void TearDown() override { ResetRecorderFakes(); }
+  void TearDown() override {
+    ResetGroupThreadLocals();  // several tests here deliberately leave ncclGroupDepth nonzero
+    ResetRecorderFakes();
+  }
 };
 
 TEST_F(GroupApiWrapperTest, GroupStart_IncrementsDepthAndReturnsSuccess) {
