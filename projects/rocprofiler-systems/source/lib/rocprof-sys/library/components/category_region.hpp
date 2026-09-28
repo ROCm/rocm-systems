@@ -397,7 +397,7 @@ struct category_region
                 }
 
                 renumber_serialized_args(args_str, *next_idx);
-                entry.args += std::move(args_str);
+                entry.args += args_str;
             }
         }
     }
