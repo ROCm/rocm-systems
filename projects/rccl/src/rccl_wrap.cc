@@ -2014,13 +2014,15 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
     // Probe real window registration on both paths so the reported decision and
     // the dispatched one cannot disagree. The lookups are null-safe, so the
     // buffer-less ABI (rcclSymKGetInfo) simply sees unregistered buffers.
-    if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && !a2aHasSysmem &&
+    const size_t a2aCeRegMax = rcclCeRegMaxTab(archTable, ncclFuncAlltoAll);
+    const bool a2aCeRegWindow = a2aCeRegMax > 0 && totalBytes <= a2aCeRegMax;
+    if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && !a2aHasSysmem && a2aCeRegWindow &&
         ncclCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, a2aWinRegType, a2aSendWin, a2aRecvWin)) {
       decision->algo = RCCL_CE_REGISTERED;
       return ncclSuccess;
     }
-    if (!query) INFO(NCCL_TUNING, "A2A CE-registered disqualified: CTAPolicy=%d hasSysmem=%d ceAvailable=%d",
-         (int)comm->config.CTAPolicy, (int)a2aHasSysmem,
+    if (!query) INFO(NCCL_TUNING, "A2A CE-registered disqualified: CTAPolicy=%d hasSysmem=%d ceRegWindow=%d ceAvailable=%d",
+         (int)comm->config.CTAPolicy, (int)a2aHasSysmem, (int)a2aCeRegWindow,
          (int)ncclCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, a2aWinRegType, a2aSendWin, a2aRecvWin));
 
     // (5) Hierarchical CE: multi-node, non-LSA-spanning.
