@@ -285,14 +285,19 @@ protected:
     return built;
   }
 
-  static struct ncclTopoLink* findLink(struct ncclTopoNode* from,
-                                       struct ncclTopoNode* to) {
+  static struct ncclTopoLink* findLinkOfType(struct ncclTopoNode* from,
+                                             struct ncclTopoNode* to, int type) {
     if (from == nullptr || to == nullptr) return nullptr;
     for (int i = 0; i < from->nlinks; i++) {
-      if (from->links[i].type == LINK_NVL && from->links[i].remNode == to)
+      if (from->links[i].type == type && from->links[i].remNode == to)
         return &from->links[i];
     }
     return nullptr;
+  }
+
+  static struct ncclTopoLink* findLink(struct ncclTopoNode* from,
+                                       struct ncclTopoNode* to) {
+    return findLinkOfType(from, to, LINK_NVL);
   }
 
   struct ncclTopoSystem* system = nullptr;
@@ -656,10 +661,12 @@ TEST_F(TopoTest, MloPartSiblingPath_IsNvlAtOneXgmiWidth) {
   struct ncclTopoLink* l10 = findLink(built->nodes[DEV].nodes + 1, built->nodes[DEV].nodes);
   ASSERT_NE(l01, nullptr);
   ASSERT_NE(l10, nullptr);
-  EXPECT_EQ(l01->type, LINK_NVL);
-  EXPECT_EQ(l10->type, LINK_NVL);
   EXPECT_FLOAT_EQ(l01->bw, ncclTopoXGMISpeed("gfx942"));
   EXPECT_FLOAT_EQ(l10->bw, ncclTopoXGMISpeed("gfx942"));
+  // The XGMI link is the only one between the siblings: a LINK_LOC entry alongside it is what
+  // used to shadow it in the path search.
+  EXPECT_EQ(findLinkOfType(built->nodes[DEV].nodes, built->nodes[DEV].nodes + 1, LINK_LOC), nullptr);
+  EXPECT_EQ(findLinkOfType(built->nodes[DEV].nodes + 1, built->nodes[DEV].nodes, LINK_LOC), nullptr);
 
   ASSERT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
   struct ncclTopoLinkList* p01 = built->nodes[GPU].nodes[0].paths[GPU] + 1;
@@ -688,9 +695,10 @@ TEST_F(TopoTest, MloPartSiblings_LinkedWhenXgmiUnreported) {
   struct ncclTopoLink* l10 = findLink(built->nodes[DEV].nodes + 1, built->nodes[DEV].nodes);
   ASSERT_NE(l01, nullptr);
   ASSERT_NE(l10, nullptr);
-  EXPECT_EQ(l01->type, LINK_NVL);
-  EXPECT_EQ(l10->type, LINK_NVL);
   EXPECT_FLOAT_EQ(l01->bw, ncclTopoXGMISpeed("gfx942"));
+  EXPECT_FLOAT_EQ(l10->bw, ncclTopoXGMISpeed("gfx942"));
+  EXPECT_EQ(findLinkOfType(built->nodes[DEV].nodes, built->nodes[DEV].nodes + 1, LINK_LOC), nullptr);
+  EXPECT_EQ(findLinkOfType(built->nodes[DEV].nodes + 1, built->nodes[DEV].nodes, LINK_LOC), nullptr);
 
   ASSERT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
   struct ncclTopoLinkList* p01 = built->nodes[GPU].nodes[0].paths[GPU] + 1;
@@ -698,7 +706,6 @@ TEST_F(TopoTest, MloPartSiblings_LinkedWhenXgmiUnreported) {
 
   ncclTopoFree(built);
 }
-
 // GDR for an MLOPart partition is a property of the physical GPU: every CPX partition is a HIP
 // logical device behind one PCI function, so a NIC one switch away is PATH_PXB for all of them and
 // GDR must be enabled for all of them. Before the rework ncclTopoCheckGdr() refused GDR to any
