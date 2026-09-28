@@ -13,8 +13,8 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 
 | Tier | Cases | Tagged | Missing `@asserts` |
 |---|---:|---:|---:|
-| `contract` | 612 | 612 | 0 |
-| **total** | **612** | **612** | **0** |
+| `contract` | 614 | 614 | 0 |
+| **total** | **614** | **614** | **0** |
 
 ## Tier: `contract`
 
@@ -1211,12 +1211,14 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_Vmm_HipMemMap_MapUnmap_SucceedsWhenSupported` | hipMemMap | mapping a handle into a reserved address range succeeds and unmaps cleanly when supported |
 | `Contract_Vmm_HipMemSetAccess_Default_AllowsRoundTripWhenSupported` | hipMemSetAccess | granting read-write access to mapped VMM memory allows a host round-trip through it |
 
-### `vmm_handle` (4 cases)
+### `vmm_handle` (6 cases)
 
 | Case | API | Asserts |
 |---|---|---|
 | `Contract_VmmHandle_HipMemExportToShareableHandle_ExportImportShareableHandle_RoundTrips` | hipMemExportToShareableHandle | an exported POSIX-fd shareable handle imports back into a usable allocation handle within the same process |
 | `Contract_VmmHandle_HipMemGetAllocationPropertiesFromHandle_GetAllocationProperties_RoundTripsFromHandle` | hipMemGetAllocationPropertiesFromHandle | properties queried from the handle reflect the pinned type and device location it was created with |
 | `Contract_VmmHandle_HipMemGetHandleForAddressRange_DmaBufFd_IsQueryableWhenSupported` | hipMemGetHandleForAddressRange | a dma-buf fd export yields a non-negative descriptor when supported, else reports non-success and skips |
+| `Contract_VmmHandle_HipMemGetHandleForAddressRange_HostPointer_ReturnsInvalidValue` | hipMemGetHandleForAddressRange | a pointer that is not a device allocation is rejected with hipErrorInvalidValue |
+| `Contract_VmmHandle_HipMemGetHandleForAddressRange_PcieMappingFlag_IsAcceptedOrReportsNotSupported` | hipMemGetHandleForAddressRange | a PCIe-mapped dma-buf export is accepted or reported unsupported, never rejected as an invalid argument |
 | `Contract_VmmHandle_HipMemRetainAllocationHandle_ByAddress_Succeeds` | hipMemRetainAllocationHandle | retaining the handle for a mapped address yields a usable handle releasable independently of the original |
 

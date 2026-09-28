@@ -1272,6 +1272,12 @@ contract:
   Contract_VmmHandle_HipMemGetHandleForAddressRange_DmaBufFd_IsQueryableWhenSupported:
     <<: *level_0
     tags: [vmm_handle, P0]
+  Contract_VmmHandle_HipMemGetHandleForAddressRange_PcieMappingFlag_IsAcceptedOrReportsNotSupported:
+    <<: *level_0
+    tags: [vmm_handle, P0]
+  Contract_VmmHandle_HipMemGetHandleForAddressRange_HostPointer_ReturnsInvalidValue:
+    <<: *level_0
+    tags: [vmm_handle, P0]
   Contract_VmmHandle_HipMemExportToShareableHandle_ExportImportShareableHandle_RoundTrips:
     <<: *level_0
     tags: [vmm_handle, P0]
