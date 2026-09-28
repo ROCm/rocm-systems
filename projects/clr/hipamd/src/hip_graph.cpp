@@ -130,10 +130,9 @@ hipError_t ihipGraphAddKernelNode(hip::GraphNode** pGraphNode, hip::Graph* graph
   amd::NDRangeContainer ndrange(3);
   amd::NDRange32 grid(1, 1, 1);
   hipError_t status = MakeLaunchNDRangeFromGrid(
-      ndrange, grid, pNodeParams->gridDim.x, pNodeParams->gridDim.y, pNodeParams->gridDim.z,
-      pNodeParams->blockDim.x, pNodeParams->blockDim.y, pNodeParams->blockDim.z,
-      globalWorkSizeX_remainder, globalWorkSizeY_remainder, globalWorkSizeZ_remainder,
-      clusterDim.x, clusterDim.y, clusterDim.z, pNodeParams->sharedMemBytes, *device, kConfigRules);
+      ndrange, grid, pNodeParams->gridDim, pNodeParams->blockDim,
+      dim3(globalWorkSizeX_remainder, globalWorkSizeY_remainder, globalWorkSizeZ_remainder),
+      clusterDim, pNodeParams->sharedMemBytes, *device, kConfigRules);
   if (status != hipSuccess) {
     return status;
   }

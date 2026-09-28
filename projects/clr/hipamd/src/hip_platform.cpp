@@ -434,9 +434,9 @@ hipError_t hipLaunchByPtr(const void* hostFunction) {
   };
   amd::NDRangeContainer ndrange(3);
   amd::NDRange32 grid(1, 1, 1);
-  hipError_t status = MakeLaunchNDRangeFromGrid(
-      ndrange, grid, exec.gridDim_.x, exec.gridDim_.y, exec.gridDim_.z, exec.blockDim_.x,
-      exec.blockDim_.y, exec.blockDim_.z, 0, 0, 0, 1, 1, 1, exec.sharedMem_, *device, kRules);
+  hipError_t status =
+      MakeLaunchNDRangeFromGrid(ndrange, grid, exec.gridDim_, exec.blockDim_, kNoRemainder,
+                                kNoCluster, exec.sharedMem_, *device, kRules);
   if (status != hipSuccess) {
     HIP_RETURN(status);
   }
@@ -782,9 +782,8 @@ hipError_t ihipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDi
   };
   amd::NDRangeContainer ndrange(3);
   amd::NDRange32 grid(1, 1, 1);
-  hipError_t status = MakeLaunchNDRangeFromGrid(
-      ndrange, grid, gridDim.x, gridDim.y, gridDim.z, blockDim.x, blockDim.y, blockDim.z, 0, 0, 0,
-      clusterDim.x, clusterDim.y, clusterDim.z, sharedMemBytes, *device, kConfigRules);
+  hipError_t status = MakeLaunchNDRangeFromGrid(ndrange, grid, gridDim, blockDim, kNoRemainder,
+                                                clusterDim, sharedMemBytes, *device, kConfigRules);
   if (status != hipSuccess) {
     return status;
   }

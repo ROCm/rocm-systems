@@ -2013,11 +2013,9 @@ class GraphKernelNode : public GraphNode {
     amd::NDRangeContainer ndrange(3);
     amd::NDRange32 grid(1, 1, 1);
     status = MakeLaunchNDRangeFromGrid(
-        ndrange, grid, kernelParams_.gridDim.x, kernelParams_.gridDim.y, kernelParams_.gridDim.z,
-        kernelParams_.blockDim.x, kernelParams_.blockDim.y, kernelParams_.blockDim.z,
-        globalWorkSizeX_remainder_, globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_,
-        clusterDim_.x, clusterDim_.y, clusterDim_.z, kernelParams_.sharedMemBytes, *device,
-        kConfigRules);
+        ndrange, grid, kernelParams_.gridDim, kernelParams_.blockDim,
+        dim3(globalWorkSizeX_remainder_, globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_),
+        clusterDim_, kernelParams_.sharedMemBytes, *device, kConfigRules);
     if (status != hipSuccess) {
       return status;
     }
@@ -2126,11 +2124,9 @@ class GraphKernelNode : public GraphNode {
       amd::NDRangeContainer ndrange(3);
       amd::NDRange32 grid(1, 1, 1);
       hipError_t clusterStatus = MakeLaunchNDRangeFromGrid(
-          ndrange, grid, kernelParams_.gridDim.x, kernelParams_.gridDim.y, kernelParams_.gridDim.z,
-          kernelParams_.blockDim.x, kernelParams_.blockDim.y, kernelParams_.blockDim.z,
-          globalWorkSizeX_remainder_, globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_,
-          clusterDim.x, clusterDim.y, clusterDim.z, kernelParams_.sharedMemBytes, *device,
-          kConfigRules);
+          ndrange, grid, kernelParams_.gridDim, kernelParams_.blockDim,
+          dim3(globalWorkSizeX_remainder_, globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_),
+          clusterDim, kernelParams_.sharedMemBytes, *device, kConfigRules);
       if (clusterStatus != hipSuccess) {
         return clusterStatus;
       }
@@ -2209,11 +2205,9 @@ class GraphKernelNode : public GraphNode {
     amd::NDRangeContainer ndrange(3);
     amd::NDRange32 grid(1, 1, 1);
     hipError_t status = MakeLaunchNDRangeFromGrid(
-        ndrange, grid, pNodeParams->gridDim.x, pNodeParams->gridDim.y, pNodeParams->gridDim.z,
-        pNodeParams->blockDim.x, pNodeParams->blockDim.y, pNodeParams->blockDim.z,
-        globalWorkSizeX_remainder_, globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_,
-        clusterDim_.x, clusterDim_.y, clusterDim_.z, pNodeParams->sharedMemBytes, *device,
-        kConfigRules);
+        ndrange, grid, pNodeParams->gridDim, pNodeParams->blockDim,
+        dim3(globalWorkSizeX_remainder_, globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_),
+        clusterDim_, pNodeParams->sharedMemBytes, *device, kConfigRules);
     if (status != hipSuccess) {
       HIP_RETURN(status);
     }
