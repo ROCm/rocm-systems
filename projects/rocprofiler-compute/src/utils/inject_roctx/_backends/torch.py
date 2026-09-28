@@ -179,12 +179,13 @@ def roctx_wrapper(
             args=format_wrap_args(args, kwargs),
         )
         try:
-            if publish_launcher_tid:
-                torch_trace_collector.push_launcher_tid()
+            launcher_pushed = (
+                publish_launcher_tid and torch_trace_collector.push_launcher_tid()
+            )
             try:
                 return func(*args, **kwargs)
             finally:
-                if publish_launcher_tid:
+                if launcher_pushed:
                     torch_trace_collector.pop_launcher_tid()
         finally:
             _pop_scope()
