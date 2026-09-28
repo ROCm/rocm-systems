@@ -866,8 +866,11 @@ endif()
 # operator new for an impossible allocation (which aborts rather than throws).
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SIZEOF_VOID_P EQUAL 8)
     target_sources(rocjitsu_tests PRIVATE allocation_failure_test_support.cpp)
-    set_property(SOURCE dbt/translate_test.cpp APPEND PROPERTY
-        COMPILE_DEFINITIONS RJ_TEST_ALLOCATION_FAILURE_INJECTION=1)
+    set_property(
+        SOURCE dbt/translate_test.cpp
+        APPEND
+        PROPERTY COMPILE_DEFINITIONS RJ_TEST_ALLOCATION_FAILURE_INJECTION=1
+    )
     target_link_options(rocjitsu_tests PRIVATE "LINKER:--wrap=_Znwm")
 endif()
 rj_add_consan_unit_sources(rocjitsu_tests)
@@ -1555,8 +1558,7 @@ set(_rj_removed_cdna4_kmd_config
     "${CMAKE_SOURCE_DIR}/configs/gfx950_cdna4_kmd.json"
 )
 if(RJ_HIP_TEST_CONFIG STREQUAL _rj_removed_cdna4_kmd_config)
-    set(
-        RJ_HIP_TEST_CONFIG
+    set(RJ_HIP_TEST_CONFIG
         "${RJ_CDNA4_KMD_CONFIG}"
         CACHE FILEPATH
         "rocjitsu config used by basic HIP smoke tests"
@@ -1572,8 +1574,7 @@ set(_rj_removed_cdna4_kmd_2gpu_config
     "${CMAKE_SOURCE_DIR}/configs/gfx950_cdna4_kmd_2gpu.json"
 )
 if(RJ_HIP_TEST_2GPU_CONFIG STREQUAL _rj_removed_cdna4_kmd_2gpu_config)
-    set(
-        RJ_HIP_TEST_2GPU_CONFIG
+    set(RJ_HIP_TEST_2GPU_CONFIG
         "${RJ_CDNA4_KMD_2GPU_CONFIG}"
         CACHE FILEPATH
         "rocjitsu config used by basic two-GPU HIP tests"
@@ -2637,7 +2638,10 @@ if(HSA_RUNTIME64)
         list(APPEND _rj_hsa_tests SdmaPublishesCompletePackets)
     endif()
     if(RJ_ENABLE_ASAN AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
-        target_compile_definitions(hsa_init_test PRIVATE RJ_TEST_LEAK_SANITIZER=1)
+        target_compile_definitions(
+            hsa_init_test
+            PRIVATE RJ_TEST_LEAK_SANITIZER=1
+        )
         list(APPEND _rj_hsa_tests LiveSignalsRemainReachableForLeakSanitizer)
     endif()
     foreach(_hsa_test IN LISTS _rj_hsa_tests)
@@ -3819,7 +3823,11 @@ if(RJ_ENABLE_HIP_TESTS)
     endforeach()
     # Custom HIP link commands must use the same host C++ runtime search paths
     # as CMake-built support libraries (notably Google Test).
-    separate_arguments(RJ_HIP_HOST_LINK_FLAGS NATIVE_COMMAND "${CMAKE_EXE_LINKER_FLAGS}")
+    separate_arguments(
+        RJ_HIP_HOST_LINK_FLAGS
+        NATIVE_COMMAND
+        "${CMAKE_EXE_LINKER_FLAGS}"
+    )
     set(RJ_HIP_SANITIZER_LINK_FLAGS)
     foreach(_rj_sanitizer_flag IN LISTS RJ_SANITIZER_LINK_OPTIONS)
         list(
@@ -3863,24 +3871,20 @@ if(RJ_ENABLE_HIP_TESTS)
         set(_rj_hip_compiler_command ${AMDCXX})
         if(CMAKE_HIP_COMPILER_LAUNCHER)
             list(
-                PREPEND
-                _rj_hip_compiler_command
+                PREPEND _rj_hip_compiler_command
                 ${CMAKE_HIP_COMPILER_LAUNCHER}
             )
         endif()
         add_custom_command(
             OUTPUT ${HIP_TEST_OBJ}
             COMMAND
-                ${_rj_hip_compiler_command} -x hip
-                --offload-arch=${ARG_ARCH}
-                --rocm-path=${ROCM_PATH} -std=c++20 -O2
-                ${ARG_COMPILE_OPTIONS}
+                ${_rj_hip_compiler_command} -x hip --offload-arch=${ARG_ARCH}
+                --rocm-path=${ROCM_PATH} -std=c++20 -O2 ${ARG_COMPILE_OPTIONS}
                 ${RJ_HIP_SANITIZER_FLAGS} -isystem ${GTEST_INC}
                 -I${CMAKE_CURRENT_SOURCE_DIR}
-                -I${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
-                ${HIP_INCLUDE_FLAGS}
-                ${HIP_DEFINITION_FLAGS} -MMD -MF ${HIP_TEST_OBJ}.d
-                -c -o ${HIP_TEST_OBJ} ${HIP_TEST_SRC}
+                -I${CMAKE_SOURCE_DIR}/lib/rocjitsu/include ${HIP_INCLUDE_FLAGS}
+                ${HIP_DEFINITION_FLAGS} -MMD -MF ${HIP_TEST_OBJ}.d -c -o
+                ${HIP_TEST_OBJ} ${HIP_TEST_SRC}
             DEPENDS ${HIP_TEST_SRC} ${ARG_EXTRA_DEPENDS}
             DEPFILE ${HIP_TEST_OBJ}.d
             COMMENT
@@ -3890,12 +3894,12 @@ if(RJ_ENABLE_HIP_TESTS)
         add_custom_command(
             OUTPUT ${HIP_TEST_BIN}
             COMMAND
-                ${AMDCXX} --offload-arch=${ARG_ARCH}
-                --rocm-path=${ROCM_PATH} -o ${HIP_TEST_BIN} ${HIP_TEST_OBJ}
-                ${HIP_EXTRA_LIBS} -L${GTEST_LIB_DIR} -lgtest
-                -L${RJ_HSA_LIBRARY_DIR} -lamdhip64 -lpthread
-                -Wl,-rpath,${GTEST_LIB_DIR} -Wl,-rpath,${RJ_HSA_LIBRARY_DIR}
-                ${RJ_HIP_HOST_LINK_FLAGS} ${RJ_HIP_SANITIZER_LINK_FLAGS}
+                ${AMDCXX} --offload-arch=${ARG_ARCH} --rocm-path=${ROCM_PATH} -o
+                ${HIP_TEST_BIN} ${HIP_TEST_OBJ} ${HIP_EXTRA_LIBS}
+                -L${GTEST_LIB_DIR} -lgtest -L${RJ_HSA_LIBRARY_DIR} -lamdhip64
+                -lpthread -Wl,-rpath,${GTEST_LIB_DIR}
+                -Wl,-rpath,${RJ_HSA_LIBRARY_DIR} ${RJ_HIP_HOST_LINK_FLAGS}
+                ${RJ_HIP_SANITIZER_LINK_FLAGS}
             DEPENDS
                 ${HIP_TEST_OBJ}
                 ${HIP_TEST_SRC}
@@ -4368,8 +4372,10 @@ if(RJ_ENABLE_HIP_TESTS)
             if(EXISTS "${ROCM_PATH}/.kpack/rccl_lib_gfx950.kpack")
                 # TheRock ships RCCL device code separately. Resolve the
                 # archive independently of the test process's working directory.
-                list(APPEND _rccl_test_environment
-                    "ROCM_KPACK_PATH=${ROCM_PATH}/.kpack/rccl_lib_gfx950.kpack")
+                list(
+                    APPEND _rccl_test_environment
+                    "ROCM_KPACK_PATH=${ROCM_PATH}/.kpack/rccl_lib_gfx950.kpack"
+                )
             endif()
             foreach(TC IN LISTS RJ_RCCL_TESTS)
                 rj_add_test(
@@ -4555,7 +4561,8 @@ if(RJ_ENABLE_HIP_TESTS AND RJ_HIP_RUNTIME_SUPPORTS_GFX950)
             "-I$<JOIN:$<TARGET_PROPERTY:util,INTERFACE_INCLUDE_DIRECTORIES>,;-I>"
             -o ${CVT_NARROW_BIN}
             ${CMAKE_CURRENT_SOURCE_DIR}/hip_cvt_narrow_test.cpp
-            -Wl,-rpath,${ROCM_PATH}/lib ${RJ_HIP_HOST_LINK_FLAGS} ${RJ_HIP_SANITIZER_LINK_FLAGS}
+            -Wl,-rpath,${ROCM_PATH}/lib ${RJ_HIP_HOST_LINK_FLAGS}
+            ${RJ_HIP_SANITIZER_LINK_FLAGS}
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/hip_cvt_narrow_test.cpp ${AMDCXX}
         COMMENT "Building hip_cvt_narrow_test with amdclang++ -x hip (gfx950)"
         VERBATIM
