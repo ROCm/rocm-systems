@@ -221,6 +221,9 @@ class SmiNic {
   virtual std::optional<std::string> vendor_name() const;
   virtual std::optional<std::string> part_number() const;
   virtual std::optional<std::string> serial_number() const;
+  // True once the NIC's own vpd, or its port 0's, was opened and parsed; false
+  // when neither could be opened at all (permission denied or no vpd node).
+  bool is_vpd_readable() const;
 
   /**
    * Absolute path of the hwmon `tempN_input` file (millidegrees C) backing
