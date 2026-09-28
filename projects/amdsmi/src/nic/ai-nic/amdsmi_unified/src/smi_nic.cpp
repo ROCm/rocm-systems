@@ -106,7 +106,9 @@ static amd::smi::nic::vpd::VpdFields read_device_vpd(const std::string& sysfs_bu
   }
   std::vector<uint8_t> image((std::istreambuf_iterator<char>(file)),
                              std::istreambuf_iterator<char>());
-  return amd::smi::nic::vpd::parse_pci_vpd(image);
+  auto fields = amd::smi::nic::vpd::parse_pci_vpd(image);
+  fields.is_vpd_readable = true;
+  return fields;
 }
 
 // **** SmiNicPort ****
@@ -573,6 +575,7 @@ static amd::smi::nic::vpd::VpdFields read_identity_vpd(const std::string& sysfs_
   if (!fields.serial_number.has_value()) {
     fields.serial_number = port_fields.serial_number;
   }
+  fields.is_vpd_readable = (fields.is_vpd_readable || port_fields.is_vpd_readable);
   return fields;
 }
 
@@ -586,6 +589,10 @@ std::optional<std::string> SmiNic::part_number() const {
 
 std::optional<std::string> SmiNic::serial_number() const {
   return read_identity_vpd(sysfs_bus_path_, ports_).serial_number;
+}
+
+bool SmiNic::is_vpd_readable() const {
+  return read_identity_vpd(sysfs_bus_path_, ports_).is_vpd_readable;
 }
 
 std::optional<std::string> SmiNic::vendor_name() const {

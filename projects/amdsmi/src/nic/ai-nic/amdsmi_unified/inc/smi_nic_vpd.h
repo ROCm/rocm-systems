@@ -17,6 +17,9 @@ struct VpdFields {
   std::optional<std::string> product_name;   // Identifier String resource (0x82)
   std::optional<std::string> part_number;    // VPD-R keyword "PN"
   std::optional<std::string> serial_number;  // VPD-R keyword "SN"
+  // True once the vpd file was opened and parsed, whether or not any keyword
+  // above was present. False means the file could not be opened at all.
+  bool is_vpd_readable = false;
 };
 
 /**

@@ -345,6 +345,8 @@ int main() {
           has_one_nic && (vnics[0]->part_number() == std::string("DSC3-2Q400-64R64E64P-O")));
     check("serial_number falls back to the ionic port",
           has_one_nic && (vnics[0]->serial_number() == std::string("FPK2615006E")));
+    check("is_vpd_readable is true when only the port's vpd opens",
+          has_one_nic && vnics[0]->is_vpd_readable());
     fs::remove_all(vpd_root);
   }
 
@@ -394,7 +396,29 @@ int main() {
           has_one_part_nic && (partnics[0]->serial_number() == std::string("PORT-SN")));
     check("absent product_name fills from the port",
           has_one_part_nic && (partnics[0]->product_name() == std::string("PORT-NAME")));
+    check("is_vpd_readable is true when the bridge's own vpd opens, even partial",
+          has_one_part_nic && partnics[0]->is_vpd_readable());
     fs::remove_all(part_root);
+  }
+
+  // ---- is_vpd_readable() is false when neither the bridge nor its port has a
+  //      vpd node ----
+  // Distinguishes "VPD absent" from "VPD present but serial-less": the devlink
+  // fallback in smi_get_nic_asic_info() must not fire in the former case.
+  {
+    fs::path novpd_root = make_tmp_root();
+    make_fake_pci_tree(novpd_root, "0003:40", "0003:41:00.0", "0x1008", "0003:42:01.0",
+                       "0003:44:00.0", "enP3p68s0");
+
+    SmiNicSubsystemPensando novpd_disc;
+    novpd_disc.discover((novpd_root / "sys/bus/pci/devices").string(),
+                        (novpd_root / "sys/class/net").string(), nullptr);
+    const auto& novpd_nics = novpd_disc.get_nics();
+    const bool has_one_novpd_nic = (novpd_nics.size() == 1);
+    check("no vpd anywhere registers one NIC", has_one_novpd_nic);
+    check("is_vpd_readable is false with no vpd node on bridge or port",
+          has_one_novpd_nic && !novpd_nics[0]->is_vpd_readable());
+    fs::remove_all(novpd_root);
   }
 
   // ---- IFoE discovery: an AMD fabric endpoint (0x1022:0x1747) ----
