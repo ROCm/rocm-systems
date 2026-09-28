@@ -46,14 +46,17 @@ namespace RcclUnitTesting
   TEST(Ipcsocket, SendAndReceiveFd) {
     int pipeFd[2]; // for sync from child -> parent
     ASSERT_EQ(pipe(pipeFd), 0);
-  
+
+    const int rank = 1;
+    // Derive a per-process-unique hash BEFORE fork so the parent and child of THIS test
+    // agree on the AF_UNIX path, while concurrent test processes (parallel --jobs runs)
+    // never collide on a shared /tmp/ipc_sock_* name.
+    const uint64_t hash = (((uint64_t)getpid()) << 20) ^ 0x12345678ULL;
+    volatile uint32_t abortFlag = 0;
+
     pid_t pid = fork();
     ASSERT_NE(pid, -1);
-  
-    const int rank = 1;
-    const uint64_t hash = 0x12345678;
-    volatile uint32_t abortFlag = 0;
-  
+
     if (pid == 0) {
       // === Child: Receiver ===
       close(pipeFd[0]);
