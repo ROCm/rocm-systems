@@ -125,6 +125,8 @@ ncclResult_t IbCastInitCommDevBase(int ibDevN, struct ncclIbNetCommDevBase* base
     base->pd = ibDev->pd;
   }
 
+  IbCastGidInfoSnapshot(base, ibDev);
+
   if (ibDev->maxCqe > 0 && cqSize > ibDev->maxCqe) {
     WARN("NET/IB: %s: requested CQ size %ld exceeds device %s max_cqe %d, clamping",
          __func__, cqSize, ibDev->devName, ibDev->maxCqe);
@@ -393,6 +395,17 @@ ncclResult_t IbCastGetGidIndex(struct ibv_context* context, uint8_t portNum, str
 
   return ncclSuccess;
 }
+
+ncclResult_t IbCastGidInfoQuery(struct ibv_context* context, uint8_t portNum, struct ibv_port_attr* portAttr,
+                                struct ncclIbGidInfo* gidInfo) {
+  if (context == NULL || portAttr == NULL || gidInfo == NULL) return ncclInternalError;
+  gidInfo->link_layer = portAttr->link_layer;
+  NCCLCHECK(IbCastGetGidIndex(context, portNum, portAttr, &gidInfo->localGidIndex));
+  if (gidInfo->localGidIndex < 0) return ncclInternalError;
+  NCCLCHECK(wrap_ibv_query_gid(context, portNum, gidInfo->localGidIndex, &gidInfo->localGid));
+  return ncclSuccess;
+}
+
 ncclResult_t IbCastQpInit(struct ncclIbQp* qp) {
   struct ncclIbQpInitAttr* initAttr = &qp->initAttr;
   struct ibv_qp_attr qpAttr;
@@ -1423,13 +1436,7 @@ ib_recv_dev_list:
     devInfo->rkey = commDev->ctsFifoMr->rkey;
 
     // Pack local GID info
-    devInfo->link_layer = commDev->base.gidInfo.link_layer = ibDev->portAttr.link_layer;
-    NCCLCHECKGOTO(IbCastGetGidIndex(ibDev->context, ibDev->portNum, &ibDev->portAttr,
-                                    &commDev->base.gidInfo.localGidIndex),
-                  ret, fail);
-    NCCLCHECKGOTO(wrap_ibv_query_gid(ibDev->context, ibDev->portNum, commDev->base.gidInfo.localGidIndex,
-                                     &commDev->base.gidInfo.localGid),
-                  ret, fail);
+    devInfo->link_layer = commDev->base.gidInfo.link_layer;
     devInfo->gid.global.subnet_prefix = commDev->base.gidInfo.localGid.global.subnet_prefix;
     devInfo->gid.global.interface_id = commDev->base.gidInfo.localGid.global.interface_id;
 
@@ -2283,12 +2290,6 @@ ib_recv:
       NCCLCHECKGOTO(IbCastResiliencyDevInit(rComm->base.resiliency, i, &IbCastDevs[ibDevN]), ret, fail);
     }
     ibDev = IbCastDevs + ibDevN;
-    NCCLCHECKGOTO(IbCastGetGidIndex(ibDev->context, ibDev->portNum, &ibDev->portAttr,
-                                    &rCommDev->base.gidInfo.localGidIndex),
-                  ret, fail);
-    NCCLCHECKGOTO(wrap_ibv_query_gid(ibDev->context, ibDev->portNum, rCommDev->base.gidInfo.localGidIndex,
-                                     &rCommDev->base.gidInfo.localGid),
-                  ret, fail);
     if (link_layer == IBV_LINK_LAYER_UNSPECIFIED) link_layer = ibDev->portAttr.link_layer;
     if (link_layer != ibDev->portAttr.link_layer) {
       int ibDev0 = rComm->devs[0].base.ibDevN;
@@ -2487,7 +2488,7 @@ ib_recv:
 
     // Fill Handle
     meta.devs[i].lid = ibDev->portAttr.lid;
-    meta.devs[i].link_layer = rCommDev->base.gidInfo.link_layer = ibDev->portAttr.link_layer;
+    meta.devs[i].link_layer = rCommDev->base.gidInfo.link_layer;
     meta.devs[i].ib_port = ibDev->portNum;
     meta.devs[i].gid.global.subnet_prefix = rCommDev->base.gidInfo.localGid.global.subnet_prefix;
     meta.devs[i].gid.global.interface_id = rCommDev->base.gidInfo.localGid.global.interface_id;

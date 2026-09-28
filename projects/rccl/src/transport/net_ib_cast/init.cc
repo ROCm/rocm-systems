@@ -536,6 +536,9 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
             IbCastDevs[IbCastNDevs].ar = (portAttr.link_layer == IBV_LINK_LAYER_INFINIBAND) ? 1 : 0;
             if (ncclParamIbCastAdaptiveRouting() != -2) IbCastDevs[IbCastNDevs].ar = ncclParamIbCastAdaptiveRouting();
 
+            NCCLCHECKGOTO(IbCastGidInfoQuery(context, port_num, &portAttr, &IbCastDevs[IbCastNDevs].gidInfo), ret,
+                          fail);
+
             INFO(NCCL_NET, "NET/IB: [%d] %s:%s:%d/%s provider=%s speed=%d context=%p pciPath=%s ar=%d oooRqSize=%d", d,
                  devices[d]->name, devices[d]->dev_name, IbCastDevs[IbCastNDevs].portNum,
                  NCCL_IB_LLSTR(portAttr.link_layer), ibCastProviderName[IbCastDevs[IbCastNDevs].ibProvider],

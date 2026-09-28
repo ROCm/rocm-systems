@@ -98,6 +98,37 @@ ncclResult_t IbCastSendCommInit(struct ncclIbSendComm* sendComm) {
   return ncclSuccess;
 }
 
+static ncclResult_t IbCastEventGidChange(struct ncclIbDev* dev) {
+  INFO(NCCL_NET, "NET/IB: %s: GID table changed on %s:%d", __func__, dev->devName, dev->portNum);
+  if (dev->gidInfo.link_layer != IBV_LINK_LAYER_ETHERNET) {
+    INFO(NCCL_NET, "NET/IB : %s:%d link is not Ethernet; ignoring GID change", dev->devName, dev->portNum);
+    return ncclSuccess;
+  }
+  struct ibv_port_attr portAttr;
+  ncclResult_t res = wrap_ibv_query_port(dev->context, dev->portNum, &portAttr);
+  if (res != ncclSuccess) {
+    WARN("NET/IB : %s:%d query_port failed during GID change (res=%d)", dev->devName, dev->portNum, (int)res);
+    return res;
+  }
+
+  std::lock_guard<std::mutex> lock(dev->mutex);
+  int oldIdx = dev->gidInfo.localGidIndex;
+  union ibv_gid oldGid = dev->gidInfo.localGid;
+  res = IbCastGidInfoQuery(dev->context, dev->portNum, &portAttr, &dev->gidInfo);
+  if (res != ncclSuccess) {
+    WARN("NET/IB : %s:%d GID info query failed (%d) during GID change", dev->devName, dev->portNum, (int)res);
+    return res;
+  }
+  dev->portAttr = portAttr; // publish only once everything succeeded
+  char oldGidStr[INET6_ADDRSTRLEN] = "";
+  char newGidStr[INET6_ADDRSTRLEN] = "";
+  ibvGetGidStr(&oldGid, oldGidStr, sizeof(oldGidStr));
+  ibvGetGidStr(&dev->gidInfo.localGid, newGidStr, sizeof(newGidStr));
+  INFO(NCCL_NET, "NET/IB : %s:%d GID refreshed: idx %d -> %d, gid %s -> %s", dev->devName, dev->portNum, oldIdx,
+       dev->gidInfo.localGidIndex, oldGidStr, newGidStr);
+  return ncclSuccess;
+}
+
 std::thread IbCastAsyncThread;
 void* IbCastAsyncThreadMain(void* args) {
   struct ncclIbDev* dev = (struct ncclIbDev*)args;
@@ -148,7 +179,11 @@ void* IbCastAsyncThreadMain(void* args) {
       WARN("NET/IB : %s:%d async fatal event on SRQ, unused for now (%p): %s", dev->devName, dev->portNum, srq, str);
       break;
     case IBV_EVENT_GID_CHANGE:
-      WARN("NET/IB : %s:%d GID table changed", dev->devName, dev->portNum);
+      if (IbCastEventGidChange(dev) != ncclSuccess) {
+        WARN("NET/IB : %s:%d marking device with fatal error after GID-change event handler failed", dev->devName,
+             dev->portNum);
+        IbCastDevFatalError(dev);
+      }
       break;
     case IBV_EVENT_PATH_MIG_ERR:
     case IBV_EVENT_PORT_ERR:
@@ -202,3 +237,104 @@ ncclNet_t netIbCast = {
   IbCastFinalize,
   IbCastSetNetAttr,
 };
+
+#ifdef ENABLE_FAULT_INJECTION
+#include "net_ib_gid_inspect.h"
+
+static void IbCastGidToState(const struct ncclIbGidInfo* info, int ibDev, struct ncclIbGidState* out) {
+  out->linkLayer = info->link_layer;
+  out->gidIndex = info->localGidIndex;
+  memcpy(out->gid, info->localGid.raw, sizeof(out->gid));
+  out->ibDev = ibDev;
+}
+
+static void IbCastGidFromState(const struct ncclIbGidState* in, struct ncclIbGidInfo* info) {
+  info->link_layer = in->linkLayer;
+  info->localGidIndex = in->gidIndex;
+  memcpy(info->localGid.raw, in->gid, sizeof(in->gid));
+}
+
+static struct ncclIbNetCommBase* IbCastGidCommBase(void* comm) {
+  static_assert(offsetof(struct ncclIbSendComm, base) == 0 && offsetof(struct ncclIbRecvComm, base) == 0,
+                "base must be the first member of send and recv comms");
+  return comm ? &((struct ncclIbSendComm*)comm)->base : NULL;
+}
+
+static struct ncclIbNetCommDevBase* IbCastGidCommDevBase(void* comm, int devIndex) {
+  struct ncclIbNetCommBase* base = IbCastGidCommBase(comm);
+  if (base == NULL || devIndex < 0 || devIndex >= base->vProps.ndevs) return NULL;
+  return IbCastGetNetCommDevBase(base, devIndex);
+}
+
+extern "C" ncclResult_t ncclIbCastGidGetDev(int ibDev, struct ncclIbGidState* out) {
+  if (out == NULL || ibDev < 0 || ibDev >= IbCastNDevs) return ncclInvalidArgument;
+  std::lock_guard<std::mutex> lock(IbCastDevs[ibDev].mutex);
+  IbCastGidToState(&IbCastDevs[ibDev].gidInfo, -1, out);
+  return ncclSuccess;
+}
+
+extern "C" ncclResult_t ncclIbCastGidSetDev(int ibDev, const struct ncclIbGidState* in) {
+  if (in == NULL || ibDev < 0 || ibDev >= IbCastNDevs) return ncclInvalidArgument;
+  std::lock_guard<std::mutex> lock(IbCastDevs[ibDev].mutex);
+  IbCastGidFromState(in, &IbCastDevs[ibDev].gidInfo);
+  return ncclSuccess;
+}
+
+extern "C" ncclResult_t ncclIbCastGidGetComm(void* comm, int devIndex, struct ncclIbGidState* out) {
+  struct ncclIbNetCommDevBase* devBase = IbCastGidCommDevBase(comm, devIndex);
+  if (devBase == NULL || out == NULL) return ncclInvalidArgument;
+  IbCastGidToState(&devBase->gidInfo, devBase->ibDevN, out);
+  return ncclSuccess;
+}
+
+extern "C" ncclResult_t ncclIbCastGidSetComm(void* comm, int devIndex, const struct ncclIbGidState* in) {
+  struct ncclIbNetCommDevBase* devBase = IbCastGidCommDevBase(comm, devIndex);
+  if (devBase == NULL || in == NULL) return ncclInvalidArgument;
+  IbCastGidFromState(in, &devBase->gidInfo);
+  return ncclSuccess;
+}
+
+extern "C" ncclResult_t ncclIbCastGidChangeEvent(int ibDev) {
+  if (ibDev < 0 || ibDev >= IbCastNDevs) return ncclInvalidArgument;
+  return IbCastEventGidChange(&IbCastDevs[ibDev]);
+}
+
+extern "C" ncclResult_t ncclIbCastGidGetQpState(void* comm, struct ncclIbGidQpState* out) {
+  struct ncclIbNetCommBase* base = IbCastGidCommBase(comm);
+  if (base == NULL || out == NULL) return ncclInvalidArgument;
+  memset(out, 0, sizeof(*out));
+  out->nqps = std::min(std::max(base->nqps, 0), NCCL_IB_MAX_QPS);
+  for (int i = 0; i < out->nqps; i++) {
+    struct ncclIbQp* qp = &base->qps[i];
+    out->devIndex[i] = qp->devIndex;
+    if (qp->qp == NULL) continue;
+    struct ibv_qp_attr attr;
+    struct ibv_qp_init_attr initAttr;
+    memset(&attr, 0, sizeof(attr));
+    memset(&initAttr, 0, sizeof(initAttr));
+    if (wrap_ibv_query_qp(qp->qp, &attr, IBV_QP_AV, &initAttr) == ncclSuccess) {
+      out->sgidIndex[i] = attr.ah_attr.grh.sgid_index;
+      out->queryOk[i] = true;
+    }
+  }
+  return ncclSuccess;
+}
+
+extern "C" ncclResult_t ncclIbCastGidGetDevState(void* comm, int devIndex, int* state) {
+  struct ncclIbNetCommBase* base = IbCastGidCommBase(comm);
+  if (base == NULL || state == NULL || base->resiliency == NULL) return ncclInvalidArgument;
+  if (devIndex < 0 || devIndex >= base->resiliency->ndevs) return ncclInvalidArgument;
+  *state = (int)base->resiliency->devs[devIndex].state.load(std::memory_order_acquire);
+  return ncclSuccess;
+}
+
+extern "C" ncclResult_t ncclIbCastGidDriveQpToError(void* comm, int qpIdx) {
+  struct ncclIbNetCommBase* base = IbCastGidCommBase(comm);
+  if (base == NULL || qpIdx < 0 || qpIdx >= base->nqps || base->qps[qpIdx].qp == NULL) return ncclInvalidArgument;
+  struct ibv_qp_attr attr;
+  memset(&attr, 0, sizeof(attr));
+  attr.qp_state = IBV_QPS_ERR;
+  NCCLCHECK(wrap_ibv_modify_qp(base->qps[qpIdx].qp, &attr, IBV_QP_STATE));
+  return ncclSuccess;
+}
+#endif /* ENABLE_FAULT_INJECTION */
