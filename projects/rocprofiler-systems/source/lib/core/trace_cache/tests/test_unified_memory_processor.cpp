@@ -65,7 +65,7 @@ struct recording_output_sink
 
     void clear() { files.clear(); }
 
-    std::vector<registered_file> files = {};
+    std::vector<registered_file> files;
 };
 
 // The processor reads output config from timemory globals at construction

@@ -23,9 +23,9 @@ namespace
 {
 struct attach_options
 {
-    int                      pid            = -1;
-    std::string              output_path    = {};
-    std::vector<std::string> profile_format = {};
+    int                      pid = -1;
+    std::string              output_path;
+    std::vector<std::string> profile_format;
 };
 
 void

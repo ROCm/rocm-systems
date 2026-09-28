@@ -33,10 +33,10 @@ inline constexpr std::size_t fields_per_record = 4;
  */
 struct argument_info
 {
-    std::uint32_t arg_number = 0;   ///< Argument position/index
-    std::string   arg_type   = {};  ///< Argument type (e.g., "int", "float*")
-    std::string   arg_name   = {};  ///< Argument name
-    std::string   arg_value  = {};  ///< Argument value as string
+    std::uint32_t arg_number = 0;  ///< Argument position/index
+    std::string   arg_type;        ///< Argument type (e.g., "int", "float*")
+    std::string   arg_name;        ///< Argument name
+    std::string   arg_value;       ///< Argument value as string
 };
 
 using function_args_t = std::vector<argument_info>;

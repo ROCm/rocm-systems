@@ -253,19 +253,19 @@ metadata_initialize_track(std::int64_t tid)
 
 struct timer_sampling_data
 {
-    std::int64_t                              m_tid     = -1;
-    std::uint64_t                             m_beg     = 0;
-    std::uint64_t                             m_end     = 0;
-    std::vector<tim::unwind::processed_entry> m_stack   = {};
+    std::int64_t                              m_tid = -1;
+    std::uint64_t                             m_beg = 0;
+    std::uint64_t                             m_end = 0;
+    std::vector<tim::unwind::processed_entry> m_stack;
     backtrace_metrics                         m_metrics = {};
 };
 
 struct overflow_sampling_data
 {
-    std::int64_t                              m_tid   = -1;
-    std::uint64_t                             m_beg   = 0;
-    std::uint64_t                             m_end   = 0;
-    std::vector<tim::unwind::processed_entry> m_stack = {};
+    std::int64_t                              m_tid = -1;
+    std::uint64_t                             m_beg = 0;
+    std::uint64_t                             m_end = 0;
+    std::vector<tim::unwind::processed_entry> m_stack;
 };
 
 std::vector<timer_sampling_data>
