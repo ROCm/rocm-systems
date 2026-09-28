@@ -213,8 +213,8 @@ bool Event::Wait(std::chrono::duration<float> timeout  // max time to wait
   int ret = poll(&pfd, 1, timeout_ms);
   if (ret > 0 && (pfd.revents & POLLIN)) {
     uint64_t val;
-    read(fd, &val, sizeof(val));
-    return true;
+    // Another waiter may have consumed the counter since poll(); EFD_NONBLOCK gives EAGAIN.
+    return read(fd, &val, sizeof(val)) == static_cast<ssize_t>(sizeof(val));
   }
   return false;
 }

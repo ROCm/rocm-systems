@@ -76,10 +76,16 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCheckRuntimeDebugSupport(void) {
   }
 
   for (auto&& device : dxg_topology->wdevices_) {
-    if (Wkmi::KmdDbgVersion version;
-        !device->GetKmdDbgVersion(&version) || version.major != 1 || version.minor < 2) {
-       return HSAKMT_STATUS_NOT_SUPPORTED;
-     }
+    Wkmi::KmdDbgVersion version;
+    if (!device->GetKmdDbgVersion(&version)) {
+      pr_warn_once("KMD debug version query failed; runtime debug unsupported\n");
+      return HSAKMT_STATUS_NOT_SUPPORTED;
+    }
+    if (version.major != 1 || version.minor < 2) {
+      pr_warn_once("KMD debug version %u.%u < 1.2; runtime debug unsupported\n",
+                   version.major, version.minor);
+      return HSAKMT_STATUS_NOT_SUPPORTED;
+    }
   }
 
   return HSAKMT_STATUS_SUCCESS;
