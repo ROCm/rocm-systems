@@ -13,6 +13,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <sys/sysmacros.h>
 #include <sys/types.h>
 #include <tuple>
@@ -59,8 +60,12 @@ TEST(LibMountHelper, GetMountInfoThrowsOnGetMountTableFailure)
         LibMountHelper().getMountInfo(dev);
         FAIL() << "Expected std::system_error";
     }
-    catch (const std::runtime_error &err) {
-        ASSERT_STREQ(err.what(), "libmount: Could not get mount table");
+    catch (const std::system_error &err) {
+        // Additionally assert that the errno is being passed through.
+        // Note that the sign of the errno value is negated.
+        ASSERT_EQ(err.code().value(), 1);
+        // Don't check the message std::system_error appends to the error message.
+        ASSERT_THAT(err.what(), StartsWith("libmount: Could not get mount table"));
     }
 }
 
