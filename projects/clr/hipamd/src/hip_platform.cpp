@@ -157,7 +157,7 @@ struct __CudaFatBinaryWrapper {
 
 // Forward declarations
 hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align = 0, bool use_host_ptr = 0);
-hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::LaunchParams& launch_params,
+hipError_t ihipModuleLaunchKernel(hipFunction_t f, LaunchParams& launch_params,
                                   hipStream_t hStream, void** kernelParams, void** extra,
                                   hipEvent_t startEvent, hipEvent_t stopEvent,
                                   uint32_t flags = 0, uint32_t params = 0,
@@ -428,14 +428,11 @@ hipError_t hipLaunchByPtr(const void* hostFunction) {
                  exec.sharedMem_, extra);
 
   const amd::Device* device = g_devices[deviceId]->devices()[0];
-  amd::HIPLaunchParams launch_params(exec.gridDim_.x, exec.gridDim_.y, exec.gridDim_.z,
-                                           exec.blockDim_.x, exec.blockDim_.y, exec.blockDim_.z,
-                                           exec.sharedMem_,
-                                           {device->info().maxWorkGroupSize_,
-                                            device->info().localMemSizePerCU_},
-                                           0, 0, 0, 1, 1, 1);
+  HIPLaunchParams launch_params(exec.gridDim_.x, exec.gridDim_.y, exec.gridDim_.z,
+                                exec.blockDim_.x, exec.blockDim_.y, exec.blockDim_.z,
+                                exec.sharedMem_, *device, 0, 0, 0, 1, 1, 1);
   static constexpr LaunchErrorRule kRules[] = {
-      {kConfigBits | amd::kBlockExceedsMaxWG, hipErrorInvalidValue},
+      {kConfigBits | kBlockExceedsMaxWG, hipErrorInvalidValue},
   };
   hipError_t status = MapLaunchViolations(launch_params.violations_, kRules);
   if (status != hipSuccess) {
@@ -778,11 +775,9 @@ hipError_t ihipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDi
     return hipErrorInvalidConfiguration;
   }
 
-  amd::HIPLaunchParams launch_params(gridDim.x, gridDim.y, gridDim.z, blockDim.x, blockDim.y,
-                                     blockDim.z, sharedMemBytes,
-                                     {device->info().maxWorkGroupSize_,
-                                      device->info().localMemSizePerCU_},
-                                     0, 0, 0, clusterDim.x, clusterDim.y, clusterDim.z);
+  HIPLaunchParams launch_params(gridDim.x, gridDim.y, gridDim.z, blockDim.x, blockDim.y,
+                                blockDim.z, sharedMemBytes, *device,
+                                0, 0, 0, clusterDim.x, clusterDim.y, clusterDim.z);
   if (!launch_params.IsValidConfig()) {
     return hipErrorInvalidConfiguration;
   }

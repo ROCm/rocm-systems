@@ -128,15 +128,13 @@ hipError_t ihipGraphAddKernelNode(hip::GraphNode** pGraphNode, hip::Graph* graph
   }
 
   const amd::Device* device = g_devices[deviceId]->devices()[0];
-  amd::HIPLaunchParams launch_params(pNodeParams->gridDim.x, pNodeParams->gridDim.y,
-                                     pNodeParams->gridDim.z, pNodeParams->blockDim.x,
-                                     pNodeParams->blockDim.y, pNodeParams->blockDim.z,
-                                     pNodeParams->sharedMemBytes,
-                                     {device->info().maxWorkGroupSize_,
-                                      device->info().localMemSizePerCU_},
-                                     globalWorkSizeX_remainder, globalWorkSizeY_remainder,
-                                     globalWorkSizeZ_remainder, clusterDim.x, clusterDim.y,
-                                     clusterDim.z);
+  HIPLaunchParams launch_params(pNodeParams->gridDim.x, pNodeParams->gridDim.y,
+                                pNodeParams->gridDim.z, pNodeParams->blockDim.x,
+                                pNodeParams->blockDim.y, pNodeParams->blockDim.z,
+                                pNodeParams->sharedMemBytes, *device,
+                                globalWorkSizeX_remainder, globalWorkSizeY_remainder,
+                                globalWorkSizeZ_remainder, clusterDim.x, clusterDim.y,
+                                clusterDim.z);
   if (!launch_params.IsValidConfig()) {
     return hipErrorInvalidConfiguration;
   }
