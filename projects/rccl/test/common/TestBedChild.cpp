@@ -243,17 +243,19 @@ namespace RcclUnitTesting
     PIPE_READ(numGpus);
 
     // Destroy existing HIP streams before clearing vector to prevent hardware queue leak!
+    // deviceIds still holds the previous config's devices here; each stream must be
+    // destroyed with its owning device current.
     for (auto& groupStreams : this->streams)
     {
-      for (auto& rankStreams : groupStreams)
+      for (size_t localRank = 0; localRank < groupStreams.size(); ++localRank)
       {
-        for (hipStream_t& stream : rankStreams)
+        for (hipStream_t& stream : groupStreams[localRank])
         {
-          if (stream != nullptr)
-          {
-            hipStreamDestroy(stream);
-            stream = nullptr;
-          }
+          if (stream == nullptr) continue;
+          if (localRank < this->deviceIds.size())
+            CHECK_HIP(hipSetDevice(this->deviceIds[localRank]));
+          CHECK_HIP(hipStreamDestroy(stream));
+          stream = nullptr;
         }
       }
     }
@@ -380,21 +382,28 @@ namespace RcclUnitTesting
         TEST_ERROR("Child %d ncclGroupEnd failed with error %d", this->childId, groupEndState);
         status = TEST_FAIL;
       }
-      else if (status == TEST_SUCCESS)
+      else
       {
-        // Grouped non-blocking initialization starts at ncclGroupEnd(). Wait
-        // until every communicator has completed before returning to the parent.
+        // Grouped non-blocking initialization starts at ncclGroupEnd(). Wait for
+        // every communicator that was created, even when setup above already
+        // failed, so DestroyComms never finalizes one that is still initializing.
         for (int localRank = 0; localRank < numGpus; ++localRank)
         {
+          if (this->comms[localRank] == nullptr) continue;
           int const currGpu = this->deviceIds[localRank];
           if (hipSetDevice(currGpu) != hipSuccess)
           {
             TEST_ERROR("Child %d unable to switch to GPU %d while waiting for communicator initialization",
                        this->childId, currGpu);
             status = TEST_FAIL;
-            break;
+            continue;
           }
-          CHILD_NCCL_CALL_NON_BLOCKING("ncclCommGetAsyncErrorInitRankConfig", localRank);
+          ErrCode const pollStatus = [&]() -> ErrCode
+          {
+            CHILD_NCCL_CALL_NON_BLOCKING("ncclCommGetAsyncErrorInitRankConfig", localRank);
+            return TEST_SUCCESS;
+          }();
+          if (pollStatus != TEST_SUCCESS) status = TEST_FAIL;
         }
       }
     }
@@ -533,12 +542,13 @@ namespace RcclUnitTesting
     int globalRank;
     int collId;
     int groupId;
-    CollFuncPtr prepDataFunc;
+    intptr_t prepDataFuncOffset;
 
     PIPE_READ(globalRank);
     PIPE_READ(groupId);
     PIPE_READ(collId);
-    PIPE_READ(prepDataFunc);
+    PIPE_READ(prepDataFuncOffset);
+    CollFuncPtr const prepDataFunc = CollFuncPtrFromOffset(prepDataFuncOffset);
 
     if (globalRank < this->rankOffset || (this->rankOffset + comms.size() <= globalRank))
     {
@@ -551,12 +561,11 @@ namespace RcclUnitTesting
 
     for (int collIdx = 0; collIdx < collArgs[groupId][localRank].size(); ++collIdx)
     {
-      if (collId == -1 || collId == collIdx)
-      {
-        if (this->verbose) TEST_INFO("Rank %d on child %d prepares data for collective %d in group %d",
-                                globalRank, this->childId, collIdx, groupId);
-        CHECK_CALL(this->collArgs[groupId][localRank][collIdx].PrepareData(prepDataFunc));
-      }
+      if (collId != -1 && collId != collIdx) continue;
+
+      if (this->verbose) TEST_INFO("Rank %d on child %d prepares data for collective %d in group %d",
+                              globalRank, this->childId, collIdx, groupId);
+      CHECK_CALL(this->collArgs[groupId][localRank][collIdx].PrepareData(prepDataFunc));
     }
     if (this->verbose) TEST_INFO("Child %d finishes PrepareData()", this->childId);
     return TEST_SUCCESS;
@@ -938,7 +947,13 @@ namespace RcclUnitTesting
       if (this->useBlocking == false)
       {
         ncclResult_t const groupEndState = ncclGroupEnd();
-        if (groupEndState != ncclSuccess)
+        if (groupEndState != ncclSuccess && groupEndState != ncclInProgress)
+        {
+          TEST_ERROR("Child process %d fails ncclGroupEnd ExecuteCollectives with code %d",
+                     this->childId, groupEndState);
+          return TEST_FAIL;
+        }
+        if (groupEndState == ncclInProgress)
         {
           for (int localRank = 0; localRank < this->comms.size(); ++localRank)
           {
@@ -1279,34 +1294,38 @@ namespace RcclUnitTesting
   ErrCode TestBedChild::DeallocateMemInternal_impl(int groupId, int collId, int localRank)
   {
     if (this->verbose) TEST_INFO("Child %d begins DeallocateMemInternal", this->childId);
+    // Release every collective even if one fails; a pooled worker would otherwise
+    // keep the remaining buffers alive into the next config.
+    ErrCode status = TEST_SUCCESS;
     for (size_t collIdx = 0; collIdx < collArgs[groupId][localRank].size(); ++collIdx)
     {
-      CollectiveArgs& collArg = this->collArgs[groupId][localRank][collIdx];
-      if (collId == -1 || collId == static_cast<int>(collIdx))
-      {
-        CHECK_CALL(collArg.DeallocateMem());
+      if (collId != -1 && collId != static_cast<int>(collIdx)) continue;
 
-        if (collArg.options.scalarMode >= 0)
+      CollectiveArgs& collArg = this->collArgs[groupId][localRank][collIdx];
+      if (collArg.DeallocateMem() != TEST_SUCCESS) status = TEST_FAIL;
+
+      if (collArg.options.scalarMode >= 0)
+      {
+        ncclResult_t const result = ncclRedOpDestroy(collArg.options.redOp, this->comms[localRank]);
+        if (result != ncclSuccess)
         {
-          CHILD_NCCL_CALL(
-            ncclRedOpDestroy(collArg.options.redOp, this->comms[localRank]),
-            "ncclRedOpDestroy");
-          if (this->verbose)
-          {
-            TEST_INFO("Child %d destroys custom redop %d for collective %zu in group %d",
-                    this->childId, collArg.options.redOp, collIdx, groupId);
-          }
+          TEST_ERROR("Child process %d fails NCCL call ncclRedOpDestroy with code %d", this->childId, result);
+          status = TEST_FAIL;
+        }
+        else if (this->verbose)
+        {
+          TEST_INFO("Child %d destroys custom redop %d for collective %zu in group %d",
+                  this->childId, collArg.options.redOp, collIdx, groupId);
         }
       }
     }
     if (this->verbose) TEST_INFO("Child %d finishes DeallocateMemInternal", this->childId);
-    return TEST_SUCCESS;
+    return status;
   }
 
   ErrCode TestBedChild::DeallocateMem()
   {
     if (this->verbose) TEST_INFO("Child %d begins DeallocateMem", this->childId);
-    ErrCode errCode = TEST_SUCCESS;
     // Read values sent by parent [matches IPC pipe format]
     int globalRank, groupId, collId;
     PIPE_READ(globalRank);
@@ -1320,9 +1339,11 @@ namespace RcclUnitTesting
     }
 
     int const localRank = globalRank - rankOffset;
-    CHECK_CALL(this->DeregisterMemInternal_impl(groupId,collId,localRank));
-    CHECK_CALL(this->DeallocateMemInternal_impl(groupId,collId,localRank));
-    return errCode;
+    // Free the buffers even if deregistration fails, so a pooled worker does not
+    // carry them into the next config.
+    ErrCode const deregisterStatus = this->DeregisterMemInternal_impl(groupId, collId, localRank);
+    ErrCode const deallocateStatus = this->DeallocateMemInternal_impl(groupId, collId, localRank);
+    return deregisterStatus != TEST_SUCCESS ? deregisterStatus : deallocateStatus;
   }
 
   ErrCode TestBedChild::DestroyComms()
@@ -1345,52 +1366,74 @@ namespace RcclUnitTesting
     // host-local ranks, so when this child owns several ranks they must be
     // finalized inside one group call: finalizing them one at a time blocks the
     // first rank in the barrier before any of the others can enter it.
+    // Every step below runs even if an earlier one fails, so a pooled worker does
+    // not carry live comms or streams into the next config.
+    ErrCode status = graphStatus;
     bool hasActiveComm = false;
     for (ncclComm_t comm : this->comms)
       hasActiveComm |= comm != nullptr;
 
     if (hasActiveComm)
     {
-      CHILD_NCCL_CALL(ncclGroupStart(), "ncclGroupStart");
-      ErrCode const finalizeStatus = [&]() -> ErrCode
+      ncclResult_t const groupStartState = ncclGroupStart();
+      if (groupStartState != ncclSuccess)
       {
-        for (int i = 0; i < this->comms.size(); ++i)
-        {
-          if (this->comms[i] == nullptr) continue;
-          CHILD_NCCL_CALL(ncclCommFinalize(this->comms[i]), "ncclCommFinalize");
-        }
-        return TEST_SUCCESS;
-      }();
-
-      if (this->useBlocking == false)
-      {
-        ncclResult_t const groupEndState = ncclGroupEnd();
-        if (groupEndState != ncclSuccess && groupEndState != ncclInProgress)
-        {
-          TEST_ERROR("Child %d ncclGroupEnd failed during communicator finalization with error %d",
-                     this->childId, groupEndState);
-          return TEST_FAIL;
-        }
-        CHECK_CALL(finalizeStatus);
-        for (int i = 0; i < this->comms.size(); ++i)
-        {
-          if (this->comms[i] == nullptr) continue;
-          CHILD_NCCL_CALL_NON_BLOCKING("ncclCommGetAsyncErrorCommFinalize", i);
-        }
+        TEST_ERROR("Child process %d fails NCCL call ncclGroupStart with code %d", this->childId, groupStartState);
+        status = TEST_FAIL;
       }
       else
       {
-        CHECK_CALL(this->EndGroup(finalizeStatus, "ncclGroupEnd"));
+        ErrCode const finalizeStatus = [&]() -> ErrCode
+        {
+          for (int i = 0; i < this->comms.size(); ++i)
+          {
+            if (this->comms[i] == nullptr) continue;
+            CHILD_NCCL_CALL(ncclCommFinalize(this->comms[i]), "ncclCommFinalize");
+          }
+          return TEST_SUCCESS;
+        }();
+
+        if (this->useBlocking == false)
+        {
+          ncclResult_t const groupEndState = ncclGroupEnd();
+          if (groupEndState != ncclSuccess && groupEndState != ncclInProgress)
+          {
+            TEST_ERROR("Child %d ncclGroupEnd failed during communicator finalization with error %d",
+                       this->childId, groupEndState);
+            status = TEST_FAIL;
+          }
+          else
+          {
+            if (finalizeStatus != TEST_SUCCESS) status = TEST_FAIL;
+            for (int i = 0; i < this->comms.size(); ++i)
+            {
+              if (this->comms[i] == nullptr) continue;
+              ErrCode const pollStatus = [&]() -> ErrCode
+              {
+                CHILD_NCCL_CALL_NON_BLOCKING("ncclCommGetAsyncErrorCommFinalize", i);
+                return TEST_SUCCESS;
+              }();
+              if (pollStatus != TEST_SUCCESS) status = TEST_FAIL;
+            }
+          }
+        }
+        else if (this->EndGroup(finalizeStatus, "ncclGroupEnd") != TEST_SUCCESS)
+        {
+          status = TEST_FAIL;
+        }
       }
     }
 
     for (int i = 0; i < this->comms.size(); ++i)
     {
-      if (this->comms[i] != nullptr)
+      if (this->comms[i] == nullptr) continue;
+      ncclResult_t const destroyState = ncclCommDestroy(this->comms[i]);
+      if (destroyState != ncclSuccess)
       {
-        CHILD_NCCL_CALL(ncclCommDestroy(this->comms[i]), "ncclCommDestroy");
-        this->comms[i] = nullptr;
+        TEST_ERROR("Child process %d fails NCCL call ncclCommDestroy with code %d", this->childId, destroyState);
+        status = TEST_FAIL;
       }
+      this->comms[i] = nullptr;
     }
 
     // 2. Safely release HIP streams with correct device context
@@ -1399,14 +1442,23 @@ namespace RcclUnitTesting
       for (int j = 0; j < this->streams[i].size(); ++j)
       {
         // Switch active GPU context to the device that owns this stream group
-        CHECK_HIP(hipSetDevice(this->deviceIds[j]));
+        if (hipSetDevice(this->deviceIds[j]) != hipSuccess)
+        {
+          TEST_ERROR("Child %d unable to switch to GPU %d to destroy streams", this->childId, this->deviceIds[j]);
+          status = TEST_FAIL;
+          continue;
+        }
 
         for (int k = 0; k < this->streams[i][j].size(); ++k)
         {
           // Avoid destroying null handles or the default stream (0)
           if (this->streams[i][j][k] != nullptr)
           {
-            CHECK_HIP(hipStreamDestroy(this->streams[i][j][k]));
+            if (hipStreamDestroy(this->streams[i][j][k]) != hipSuccess)
+            {
+              TEST_ERROR("Child %d unable to destroy stream %d for rank %d", this->childId, k, j);
+              status = TEST_FAIL;
+            }
             this->streams[i][j][k] = nullptr; // Avoid double-destruction
           }
         }
@@ -1416,7 +1468,7 @@ namespace RcclUnitTesting
     this->comms.clear();
     this->streams.clear();
     if (this->verbose) TEST_INFO("Child %d finishes DestroyComms", this->childId);
-    return graphStatus;
+    return status;
   }
 
   ErrCode TestBedChild::EndGroup(ErrCode const bodyStatus, char const* msg)
@@ -1552,14 +1604,22 @@ namespace RcclUnitTesting
     PIPE_READ(collId);
     PIPE_READ(numRanks);
 
-    if (numRanks < 0 || numRanks > this->totalRanks)
+    if (numRanks < 0)
     {
       TEST_ERROR("Child %d received invalid registration rank count %d", this->childId, numRanks);
       return TEST_FAIL;
     }
 
+    // Consume the whole payload before validating it, so a rejected request does
+    // not leave rank ids in the pipe to be decoded as the next command.
     std::vector<int> globalRanks(numRanks);
     for (int& globalRank : globalRanks) PIPE_READ(globalRank);
+
+    if (numRanks > this->totalRanks)
+    {
+      TEST_ERROR("Child %d received invalid registration rank count %d", this->childId, numRanks);
+      return TEST_FAIL;
+    }
 
     std::vector<int> localRanks;
     localRanks.reserve(numRanks);
@@ -1588,95 +1648,10 @@ namespace RcclUnitTesting
           if (collId != -1 && collId != static_cast<int>(collIdx)) continue;
 
           CollectiveArgs& collArg = this->collArgs[groupId][localRank][collIdx];
-
-          // CASE 1: Symmetric Window Path (ncclCommWindowRegister)
           if (this->memAllocType == MEM_ALLOC_SYMMETRIC_WIN)
-          {
-            if (collArg.inPlace)
-            {
-              // For in-place collectives, register the FULL allocation first
-              RcclUnitTesting::ncclFunc_t fn = collArg.funcType;
-              bool const usesInputBuffer = (fn == ncclCollScatter || fn == ncclCollReduceScatter);
-              void* buff = usesInputBuffer ? collArg.inputGpu.ptr : collArg.outputGpu.ptr;
-              size_t bufSize = usesInputBuffer ? collArg.numInputBytesAllocated
-                                               : collArg.numOutputBytesAllocated;
-
-              if (this->verbose)
-                TEST_INFO("Child %d rank %d registers in-place symmetric window buff=%p bufSize=%zu",
-                          this->childId, localRank, buff, bufSize);
-              CHILD_NCCL_CALL(
-                ncclCommWindowRegister(this->comms[localRank],
-                                       buff,
-                                       bufSize,
-                                       &(collArg.outputWin),
-                                       NCCL_WIN_COLL_SYMMETRIC),
-                "ncclCommWindowRegister (output in-place)");
-            }
-            else
-            {
-              // Out-of-place: Register input and output buffers independently
-              if (collArg.inputGpu.ptr && collArg.numInputBytesAllocated > 0)
-              {
-                CHILD_NCCL_CALL(
-                  ncclCommWindowRegister(this->comms[localRank],
-                                         collArg.inputGpu.ptr,
-                                         collArg.numInputBytesAllocated,
-                                         &(collArg.inputWin),
-                                         NCCL_WIN_COLL_SYMMETRIC),
-                  "ncclCommWindowRegister (input)");
-              }
-
-              if (collArg.outputGpu.ptr && collArg.numOutputBytesAllocated > 0)
-              {
-                CHILD_NCCL_CALL(
-                  ncclCommWindowRegister(this->comms[localRank],
-                                         collArg.outputGpu.ptr,
-                                         collArg.numOutputBytesAllocated,
-                                         &(collArg.outputWin),
-                                         NCCL_WIN_COLL_SYMMETRIC),
-                  "ncclCommWindowRegister (output)");
-              }
-            }
-          }
-          // CASE 2: Legacy / Buffer Registration Path (ncclCommRegister)
+            CHECK_CALL(this->RegisterMemSymmetric(localRank, collArg));
           else if (collArg.userRegistered)
-          {
-            if (collArg.inPlace)
-            {
-              if (collArg.outputGpu.ptr && collArg.numOutputBytesAllocated > 0)
-              {
-                CHILD_NCCL_CALL(
-                  ncclCommRegister(this->comms[localRank],
-                                   collArg.outputGpu.ptr,
-                                   collArg.numOutputBytesAllocated,
-                                   &(collArg.outputRegHandle)),
-                  "ncclCommRegister (output in-place)");
-              }
-            }
-            else
-            {
-              // Register BOTH input AND output buffers for out-of-place operations
-              if (collArg.inputGpu.ptr && collArg.numInputBytesAllocated > 0)
-              {
-                CHILD_NCCL_CALL(
-                  ncclCommRegister(this->comms[localRank],
-                                   collArg.inputGpu.ptr,
-                                   collArg.numInputBytesAllocated,
-                                   &(collArg.inputRegHandle)),
-                  "ncclCommRegister (input)");
-              }
-
-              if (collArg.outputGpu.ptr && collArg.numOutputBytesAllocated > 0)
-              {
-                CHILD_NCCL_CALL(
-                  ncclCommRegister(this->comms[localRank],
-                                   collArg.outputGpu.ptr,
-                                   collArg.numOutputBytesAllocated,
-                                   &(collArg.outputRegHandle)),
-                  "ncclCommRegister (output)");
-              }
-            }
-          }
+            CHECK_CALL(this->RegisterMemLegacy(localRank, collArg));
         }
       }
       return TEST_SUCCESS;
@@ -1741,5 +1716,97 @@ namespace RcclUnitTesting
 
     if (this->verbose) TEST_INFO("Child %d finishes RegisterMem()", this->childId);
     return status;
+  }
+
+  // In-place collectives share one base allocation; see CollectiveArgs::AllocateMem.
+  static void InPlaceBaseAllocation(CollectiveArgs const& collArg, void** buff, size_t* bufSize)
+  {
+    ncclFunc_t const fn = collArg.funcType;
+    if (fn == ncclCollScatter || fn == ncclCollReduceScatter)
+    {
+      *buff = collArg.inputGpu.ptr;
+      *bufSize = collArg.numInputBytesAllocated;
+    }
+    else if (fn == ncclCollGather || fn == ncclCollAllGather)
+    {
+      *buff = collArg.outputGpu.ptr;
+      *bufSize = collArg.numOutputBytesAllocated;
+    }
+    else
+    {
+      *buff = collArg.inputGpu.ptr;
+      *bufSize = std::max(collArg.numInputBytesAllocated, collArg.numOutputBytesAllocated);
+    }
+  }
+
+  // Must run inside the caller's ncclGroupStart/End: the window handles are only
+  // final after ncclGroupEnd().
+  ErrCode TestBedChild::RegisterMemSymmetric(int const localRank, CollectiveArgs& collArg)
+  {
+    if (collArg.inPlace)
+    {
+      void* buff = nullptr;
+      size_t bufSize = 0;
+      InPlaceBaseAllocation(collArg, &buff, &bufSize);
+      if (buff == nullptr || bufSize == 0) return TEST_SUCCESS;
+
+      if (this->verbose)
+        TEST_INFO("Child %d rank %d registers in-place symmetric window buff=%p bufSize=%zu",
+                  this->childId, localRank, buff, bufSize);
+      CHILD_NCCL_CALL(
+        ncclCommWindowRegister(this->comms[localRank], buff, bufSize,
+                               &(collArg.outputWin), NCCL_WIN_COLL_SYMMETRIC),
+        "ncclCommWindowRegister (output in-place)");
+      return TEST_SUCCESS;
+    }
+
+    if (collArg.inputGpu.ptr && collArg.numInputBytesAllocated > 0)
+    {
+      CHILD_NCCL_CALL(
+        ncclCommWindowRegister(this->comms[localRank], collArg.inputGpu.ptr,
+                               collArg.numInputBytesAllocated,
+                               &(collArg.inputWin), NCCL_WIN_COLL_SYMMETRIC),
+        "ncclCommWindowRegister (input)");
+    }
+    if (collArg.outputGpu.ptr && collArg.numOutputBytesAllocated > 0)
+    {
+      CHILD_NCCL_CALL(
+        ncclCommWindowRegister(this->comms[localRank], collArg.outputGpu.ptr,
+                               collArg.numOutputBytesAllocated,
+                               &(collArg.outputWin), NCCL_WIN_COLL_SYMMETRIC),
+        "ncclCommWindowRegister (output)");
+    }
+    return TEST_SUCCESS;
+  }
+
+  ErrCode TestBedChild::RegisterMemLegacy(int const localRank, CollectiveArgs& collArg)
+  {
+    if (collArg.inPlace)
+    {
+      if (collArg.outputGpu.ptr && collArg.numOutputBytesAllocated > 0)
+      {
+        CHILD_NCCL_CALL(
+          ncclCommRegister(this->comms[localRank], collArg.outputGpu.ptr,
+                           collArg.numOutputBytesAllocated, &(collArg.outputRegHandle)),
+          "ncclCommRegister (output in-place)");
+      }
+      return TEST_SUCCESS;
+    }
+
+    if (collArg.inputGpu.ptr && collArg.numInputBytesAllocated > 0)
+    {
+      CHILD_NCCL_CALL(
+        ncclCommRegister(this->comms[localRank], collArg.inputGpu.ptr,
+                         collArg.numInputBytesAllocated, &(collArg.inputRegHandle)),
+        "ncclCommRegister (input)");
+    }
+    if (collArg.outputGpu.ptr && collArg.numOutputBytesAllocated > 0)
+    {
+      CHILD_NCCL_CALL(
+        ncclCommRegister(this->comms[localRank], collArg.outputGpu.ptr,
+                         collArg.numOutputBytesAllocated, &(collArg.outputRegHandle)),
+        "ncclCommRegister (output)");
+    }
+    return TEST_SUCCESS;
   }
 }

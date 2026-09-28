@@ -180,6 +180,9 @@ namespace RcclUnitTesting
     RunTeardownCycles(testBed, testBed.ev.maxGpus, /*useBlocking*/ true,
                       /*iterations*/ 1, isCorrect);
     EXPECT_TRUE(isCorrect);
+    // InitComms silently falls back to fork-fresh workers if the pool cannot
+    // serve the config, which would make this test cover the wrong path.
+    EXPECT_TRUE(testBed.configUsedPool) << "Config was not served from the communicator pool";
     testBed.Finalize();
   }
 }

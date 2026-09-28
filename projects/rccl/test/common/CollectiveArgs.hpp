@@ -115,6 +115,21 @@ namespace RcclUnitTesting
   // e.g. For filling input / computing expected results
   typedef ErrCode (*CollFuncPtr)(CollectiveArgs &);
 
+  // Workers are exec'd copies of this binary, so under ASLR a parent code address
+  // is meaningless in the worker. A CollFuncPtr therefore crosses the pipe as an
+  // offset from DefaultPrepareDataFunc, which is constant within one executable
+  // image. nullptr maps to offset 0, i.e. DefaultPrepareDataFunc itself.
+  inline intptr_t CollFuncPtrToOffset(CollFuncPtr const func)
+  {
+    return func == nullptr ? 0 : reinterpret_cast<intptr_t>(func) -
+                                 reinterpret_cast<intptr_t>(&DefaultPrepareDataFunc);
+  }
+
+  inline CollFuncPtr CollFuncPtrFromOffset(intptr_t const offset)
+  {
+    return reinterpret_cast<CollFuncPtr>(reinterpret_cast<intptr_t>(&DefaultPrepareDataFunc) + offset);
+  }
+
   class CollectiveArgs
   {
   public:

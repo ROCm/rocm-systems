@@ -68,23 +68,22 @@ namespace RcclUnitTesting
 
     // For out-of-place, both pointers remain at the start of their respective base allocations.
     // No attachment/offsetting is necessary.
-    if (this->inPlace)
+    if (!this->inPlace) return TEST_SUCCESS;
+
+    if (this->funcType == ncclCollScatter || this->funcType == ncclCollReduceScatter)
     {
-      if (this->funcType == ncclCollScatter || this->funcType == ncclCollReduceScatter)
-      {
-        // inputGpu holds the base pointer. Offset outputGpu.
-        this->outputGpu.Attach(this->inputGpu.U1 + (this->globalRank * currentOutputBytes));
-      }
-      else if (this->funcType == ncclCollGather || this->funcType == ncclCollAllGather)
-      {
-        // outputGpu holds the base pointer. Offset inputGpu.
-        this->inputGpu.Attach(this->outputGpu.U1 + (this->globalRank * currentInputBytes));
-      }
-      else
-      {
-        // Both buffers share the exact same base pointer
-        this->outputGpu.Attach(this->inputGpu.ptr);
-      }
+      // inputGpu holds the base pointer. Offset outputGpu.
+      this->outputGpu.Attach(this->inputGpu.U1 + (this->globalRank * currentOutputBytes));
+    }
+    else if (this->funcType == ncclCollGather || this->funcType == ncclCollAllGather)
+    {
+      // outputGpu holds the base pointer. Offset inputGpu.
+      this->inputGpu.Attach(this->outputGpu.U1 + (this->globalRank * currentInputBytes));
+    }
+    else
+    {
+      // Both buffers share the exact same base pointer
+      this->outputGpu.Attach(this->inputGpu.ptr);
     }
     return TEST_SUCCESS;
   }
@@ -261,18 +260,29 @@ namespace RcclUnitTesting
 
   ErrCode CollectiveArgs::DeallocateMem()
   {
-    // If in-place, either only inputGpu or outputGpu was allocated
+    // Free everything even if one release fails, then report the failure.
+    ErrCode status = TEST_SUCCESS;
+    auto track = [&status](ErrCode const result) { if (result != TEST_SUCCESS) status = result; };
+
+    // If in-place, either only inputGpu or outputGpu was allocated; the other
+    // is an alias into it and is cleared without being freed.
     if (this->inPlace)
     {
       if (this->funcType == ncclCollGather || this->funcType == ncclCollAllGather)
-        this->outputGpu.FreeGpuMem(this->userRegistered);
+      {
+        track(this->outputGpu.FreeGpuMem(this->userRegistered));
+        this->inputGpu.Attach(nullptr);
+      }
       else
-        this->inputGpu.FreeGpuMem(this->userRegistered);
+      {
+        track(this->inputGpu.FreeGpuMem(this->userRegistered));
+        this->outputGpu.Attach(nullptr);
+      }
     }
     else
     {
-      this->inputGpu.FreeGpuMem(this->userRegistered);
-      this->outputGpu.FreeGpuMem(this->userRegistered);
+      track(this->inputGpu.FreeGpuMem(this->userRegistered));
+      track(this->outputGpu.FreeGpuMem(this->userRegistered));
     }
 
     this->outputCpu.FreeCpuMem();
@@ -283,11 +293,11 @@ namespace RcclUnitTesting
     }
     if (this->expectedGpu.ptr != nullptr)
     {
-      this->expectedGpu.FreeGpuMem(this->userRegistered);
+      track(this->expectedGpu.FreeGpuMem(this->userRegistered));
     }
     if (this->fp8AlternativeExpectedGpu.ptr != nullptr)
     {
-      this->fp8AlternativeExpectedGpu.FreeGpuMem(this->userRegistered);
+      track(this->fp8AlternativeExpectedGpu.FreeGpuMem(this->userRegistered));
     }
 
     if (this->localScalar.ptr != nullptr)
@@ -300,12 +310,12 @@ namespace RcclUnitTesting
     // Deallocate bias buffers if they were allocated
     if (this->options.useBias && this->numBiasBytesAllocated > 0)
     {
-      this->biasGpu.FreeGpuMem(this->userRegistered);
+      track(this->biasGpu.FreeGpuMem(this->userRegistered));
       this->biasCpu.FreeCpuMem();
       this->biasRegHandle = nullptr;
     }
 
-    return TEST_SUCCESS;
+    return status;
   }
 
   std::string CollectiveArgs::GetDescription() const

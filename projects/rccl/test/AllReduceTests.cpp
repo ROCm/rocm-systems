@@ -251,6 +251,53 @@ namespace RcclUnitTesting
     callCollectiveForked(nranks, ncclCollAllReduce, sendBuff, recvBuff, expected, use_managed_mem);
   }
 
+  // Out-of-place AllReduce on ncclCommRegister'd buffers driven through TestBed, so the
+  // separate input and output registrations and their deregistration are exercised.
+  TEST(AllReduce, UserBufferRegistrationTestBed)
+  {
+    TestBed testBed;
+    std::vector<ncclDataType_t> dataTypes;
+    testBed.GetSupportedDataTypes(dataTypes, {ncclInt32, ncclFloat32});
+    if (dataTypes.empty())
+      GTEST_SKIP() << "Skipping... test datatypes excluded by UT_DATATYPES.";
+
+    std::vector<int> const numElements    = {1048576, 1024};
+    bool             const inPlace        = false;
+    bool             const useManagedMem  = false;
+    bool             const userRegistered = true;
+    int              const totalRanks     = testBed.ev.maxGpus;
+    OptionalColArgs options;
+    options.redOp = ncclSum;
+
+    bool isCorrect = true;
+    for (int isMultiProcess = 0; isMultiProcess <= 1 && isCorrect; ++isMultiProcess)
+    {
+      if (!(testBed.ev.processMask & (1 << isMultiProcess))) continue;
+      int const numProcesses = isMultiProcess ? totalRanks : 1;
+      testBed.InitComms(TestBed::GetDeviceIdsList(numProcesses, totalRanks,
+                                                  testBed.ev.GetGpuPriorityOrder()));
+
+      for (size_t dtIdx = 0; dtIdx < dataTypes.size() && isCorrect; ++dtIdx)
+      for (size_t neIdx = 0; neIdx < numElements.size() && isCorrect; ++neIdx)
+      {
+        if (testBed.ev.showNames)
+          TEST_INFO("%s AllReduce UserBufferRegistration %s [%d elements]",
+                    isMultiProcess ? "MP" : "SP", ncclDataTypeNames[dataTypes[dtIdx]],
+                    numElements[neIdx]);
+        testBed.SetCollectiveArgs(ncclCollAllReduce, dataTypes[dtIdx],
+                                  numElements[neIdx], numElements[neIdx], options);
+        testBed.AllocateMem(inPlace, useManagedMem, -1, -1, -1, userRegistered);
+        testBed.PrepareData();
+        testBed.ExecuteCollectives();
+        testBed.ValidateResults(isCorrect);
+        testBed.DeallocateMem();
+      }
+      testBed.DestroyComms();
+    }
+    EXPECT_TRUE(isCorrect);
+    testBed.Finalize();
+  }
+
   TEST(AllReduce, ROCTX)
   {
     // Set RCCL_LOG_ROCTX=1 to enable ROCTX logging
