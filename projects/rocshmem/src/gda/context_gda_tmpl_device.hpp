@@ -1494,8 +1494,6 @@ __device__ inline void GDAContext::tile_quiet_gda_workers(int pe, int worker_id,
 __device__ inline void GDAContext::tile_put_contig_slices_nbi(
     char *dst, const char *src, size_t bytes, int pe, int qp_index,
     int worker_id, [[maybe_unused]] int worker_count) {
-  // One RDMA for the whole region. A 64 B per-worker split turned a 4 KiB
-  // wave transfer into 64 WQEs on the same QP.
   if (worker_id == 0 && bytes != 0) {
     tile_put_chunk_nbi(dst, src, bytes, pe, qp_index);
   }
