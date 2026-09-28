@@ -181,6 +181,7 @@ HIP_TEST_CASE(Unit_hipLibraryGetModule_Negative_ModuleUnloadRefused) {
 #else
   REQUIRE(hipModuleUnload(mod) != hipSuccess);
 #endif
+  (void)hipGetLastError();
 
   // Refusing must be non-destructive. The library is still fully usable.
   hipFunction_t func = nullptr;
@@ -207,6 +208,7 @@ HIP_TEST_CASE(Unit_hipLibraryGetModule_Negative_StaleAfterLibraryUnload) {
 
   hipFunction_t func = nullptr;
   REQUIRE(hipModuleGetFunction(&func, mod, "add_kernel") != hipSuccess);
+  (void)hipGetLastError();
 }
 
 HIP_TEST_CASE(Unit_hipLibraryGetModule_Negative_Parameters) {
@@ -219,9 +221,11 @@ HIP_TEST_CASE(Unit_hipLibraryGetModule_Negative_Parameters) {
 
   SECTION("null module out-param") {
     HIP_CHECK_ERROR(hipLibraryGetModule(nullptr, lib), hipErrorInvalidValue);
+    (void)hipGetLastError();
   }
   SECTION("null library") {
     HIP_CHECK_ERROR(hipLibraryGetModule(&mod, nullptr), hipErrorInvalidResourceHandle);
+    (void)hipGetLastError();
   }
 
   HIP_CHECK(hipLibraryUnload(lib));
