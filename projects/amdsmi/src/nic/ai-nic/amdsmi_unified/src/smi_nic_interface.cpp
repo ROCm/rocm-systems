@@ -212,10 +212,12 @@ smi_nic_status_t smi_get_nic_asic_info(smi_nic_ctx_t ctx, uint64_t device,
   std::snprintf(info->part_number, SMI_NIC_MAX_STRING_LENGTH, "%s",
                 nic->part_number().value_or("N/A").c_str());
 
-  // VPD is the primary serial source; when a card exposes no VPD serial, fall
-  // back to the board serial reported over devlink before giving up.
+  // VPD is the primary serial source; when it was readable but carried no
+  // serial keyword, fall back to the board serial reported over devlink. Skip
+  // the fallback when VPD could not be opened at all, since the devlink round
+  // trip costs ~1s per NIC and has never yet produced a serial in that case.
   std::string serial = nic->serial_number().value_or("");
-  if (serial.empty()) {
+  if (serial.empty() && nic->is_vpd_readable()) {
     auto devlink = amd::nic::netlink::create_devlink_client();
     auto dev_info = devlink->get_device_info(nic->telemetry_bdf());
     if (dev_info.success && dev_info.value.board_serial_number[0] != '\0') {
