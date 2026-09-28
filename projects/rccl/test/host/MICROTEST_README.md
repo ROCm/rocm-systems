@@ -90,6 +90,9 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `RasDiagnosticsCommonMicrotest.*`. Covers communicator snapshots and
     filtering, aligned local-record collection, allocation and callback
     failures, rank ordering and formatting, and reporter output.
+  - `ras/rasnet.cc` (`RASNET_CC_PATH`, from `rasnet-test.cc`); suite
+    `RasNetMicrotest.*`. Covers connection and socket lifecycles, event-loop
+    I/O, timeout recovery, keep-alives, and fallback-link maintenance.
   - `ras/client.cc` (`RAS_CLIENT_CC_PATH`, from `ras-client-test.cc`); suite
     `RasClientMicrotest.*`. With
     `NCCL_RAS_CLIENT` defined, `ras_internal.h` reduces to four macros, so this
