@@ -1613,9 +1613,9 @@ ParserResult HevcVideoParser::ParsePps(uint8_t *nalu, size_t size) {
     pps_ptr->entropy_coding_sync_enabled_flag = Parser::GetBit(nalu, offset);
     if (pps_ptr->tiles_enabled_flag) {
         pps_ptr->num_tile_columns_minus1 = Parser::ExpGolomb::ReadUe(nalu, offset);
-        CHECK_ALLOWED_RANGE("num_tile_columns_minus1", pps_ptr->num_tile_columns_minus1, 0, pic_width_in_ctbs_y_ - 1);
+        CHECK_ALLOWED_RANGE("num_tile_columns_minus1", pps_ptr->num_tile_columns_minus1, 0, std::min(pic_width_in_ctbs_y_ - 1, HEVC_MAX_TILE_COLS - 1));
         pps_ptr->num_tile_rows_minus1 = Parser::ExpGolomb::ReadUe(nalu, offset);
-        CHECK_ALLOWED_RANGE("num_tile_rows_minus1", pps_ptr->num_tile_rows_minus1, 0, pic_height_in_ctbs_y_ - 1);
+        CHECK_ALLOWED_RANGE("num_tile_rows_minus1", pps_ptr->num_tile_rows_minus1, 0, std::min(pic_height_in_ctbs_y_ - 1, HEVC_MAX_TILE_ROWS - 1));
         pps_ptr->uniform_spacing_flag = Parser::GetBit(nalu, offset);
         if (!pps_ptr->uniform_spacing_flag) {
             int temp_size = pic_width_in_ctbs_y_; // PicWidthInCtbsY
