@@ -26,6 +26,7 @@
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
 #include "rocjitsu/vm/soc.h"
+#include "util/diagnostic.h"
 
 #include "simdojo/sim/simulation.h"
 
@@ -1178,7 +1179,9 @@ TEST(EffectiveConfigTest, ReplacesTheBudgetAndLeavesEveryOtherFieldAsWritten) {
   "num_threads": 2
 })";
 
-  EXPECT_EQ(config::json_with_cpu_thread_budget(json, 4), R"({
+  FailureOr<std::string> rewritten = config::json_with_cpu_thread_budget(json, 4);
+  ASSERT_TRUE(rewritten.succeeded());
+  EXPECT_EQ(rewritten.value(), R"({
   "max_ticks": 4,
   "cpu_thread_budget": 4,
   "num_threads": 2
@@ -1186,40 +1189,70 @@ TEST(EffectiveConfigTest, ReplacesTheBudgetAndLeavesEveryOtherFieldAsWritten) {
 }
 
 TEST(EffectiveConfigTest, AddsTheBudgetToConfigsThatDoNotAskForOne) {
-  EXPECT_EQ(config::json_with_cpu_thread_budget("{}", 8), R"({"cpu_thread_budget": 8})");
-  EXPECT_EQ(config::json_with_cpu_thread_budget(R"({"num_threads": 2})", 8),
-            R"({"cpu_thread_budget": 8,"num_threads": 2})");
+  FailureOr<std::string> inserted = config::json_with_cpu_thread_budget("{}", 8);
+  ASSERT_TRUE(inserted.succeeded());
+  EXPECT_EQ(inserted.value(), R"({"cpu_thread_budget": 8})");
+
+  FailureOr<std::string> prefixed = config::json_with_cpu_thread_budget(R"({"num_threads": 2})", 8);
+  ASSERT_TRUE(prefixed.succeeded());
+  EXPECT_EQ(prefixed.value(), R"({"cpu_thread_budget": 8,"num_threads": 2})");
 }
 
 // The nested name is an unknown field the config parser discards, so only the scanner
 // can tell the two apart -- and picking the wrong one would silently launch under the
 // config's own budget instead of the requested one.
 TEST(EffectiveConfigTest, SetsTheTopLevelBudgetAndNotANestedFieldOfTheSameName) {
-  EXPECT_EQ(config::json_with_cpu_thread_budget(R"({"vm": {"cpu_thread_budget": 1}})", 6),
-            R"({"cpu_thread_budget": 6,"vm": {"cpu_thread_budget": 1}})");
+  FailureOr<std::string> rewritten =
+      config::json_with_cpu_thread_budget(R"({"vm": {"cpu_thread_budget": 1}})", 6);
+  ASSERT_TRUE(rewritten.succeeded());
+  EXPECT_EQ(rewritten.value(), R"({"cpu_thread_budget": 6,"vm": {"cpu_thread_budget": 1}})");
 }
 
 TEST(EffectiveConfigTest, AcceptsTheCommentsAndBareKeysTheConfigParserAccepts) {
-  EXPECT_EQ(config::json_with_cpu_thread_budget("{\n  // ceiling\n  cpu_thread_budget: 32\n}", 2),
-            "{\n  // ceiling\n  cpu_thread_budget: 2\n}");
+  FailureOr<std::string> rewritten =
+      config::json_with_cpu_thread_budget("{\n  // ceiling\n  cpu_thread_budget: 32\n}", 2);
+  ASSERT_TRUE(rewritten.succeeded());
+  EXPECT_EQ(rewritten.value(), "{\n  // ceiling\n  cpu_thread_budget: 2\n}");
 }
 
 TEST(EffectiveConfigTest, PreservesCommentsAdjacentToScalarValues) {
-  EXPECT_EQ(config::json_with_cpu_thread_budget(R"({"cpu_thread_budget":32/*,}*/})", 4),
-            R"({"cpu_thread_budget":4/*,}*/})");
-  EXPECT_EQ(config::json_with_cpu_thread_budget("{\"cpu_thread_budget\":32// ceiling\n}", 4),
-            "{\"cpu_thread_budget\":4// ceiling\n}");
+  FailureOr<std::string> block_comment =
+      config::json_with_cpu_thread_budget(R"({"cpu_thread_budget":32/*,}*/})", 4);
+  ASSERT_TRUE(block_comment.succeeded());
+  EXPECT_EQ(block_comment.value(), R"({"cpu_thread_budget":4/*,}*/})");
+
+  FailureOr<std::string> line_comment =
+      config::json_with_cpu_thread_budget("{\"cpu_thread_budget\":32// ceiling\n}", 4);
+  ASSERT_TRUE(line_comment.succeeded());
+  EXPECT_EQ(line_comment.value(), "{\"cpu_thread_budget\":4// ceiling\n}");
 }
 
 TEST(EffectiveConfigTest, MatchesSingleQuotedAndEscapedQuotedFieldNames) {
-  EXPECT_EQ(config::json_with_cpu_thread_budget(R"({'cpu_thread_budget':32})", 4),
-            R"({'cpu_thread_budget':4})");
-  EXPECT_EQ(config::json_with_cpu_thread_budget(R"({"cpu_thread_budge\u0074":32})", 4),
-            R"({"cpu_thread_budge\u0074":4})");
+  FailureOr<std::string> single_quoted =
+      config::json_with_cpu_thread_budget(R"({'cpu_thread_budget':32})", 4);
+  ASSERT_TRUE(single_quoted.succeeded());
+  EXPECT_EQ(single_quoted.value(), R"({'cpu_thread_budget':4})");
+
+  FailureOr<std::string> escaped =
+      config::json_with_cpu_thread_budget(R"({"cpu_thread_budge\u0074":32})", 4);
+  ASSERT_TRUE(escaped.succeeded());
+  EXPECT_EQ(escaped.value(), R"({"cpu_thread_budge\u0074":4})");
+}
+
+TEST(EffectiveConfigTest, ReportsAnUnknownFieldNameEscape) {
+  util::StringDiagnostic diagnostic;
+  FailureOr<std::string> rewritten =
+      config::json_with_cpu_thread_budget(R"({"cpu_thread_budget\q": 1})", 4, diagnostic.emitter());
+  EXPECT_TRUE(rewritten.failed());
+  EXPECT_EQ(diagnostic.message(), "unknown escape code in string constant");
 }
 
 TEST(EffectiveConfigTest, RejectsInputThatIsNotASimulationConfigObject) {
-  EXPECT_THROW((void)config::json_with_cpu_thread_budget("[1]", 1), std::runtime_error);
+  util::StringDiagnostic diagnostic;
+  FailureOr<std::string> rewritten =
+      config::json_with_cpu_thread_budget("[1]", 1, diagnostic.emitter());
+  EXPECT_TRUE(rewritten.failed());
+  EXPECT_EQ(diagnostic.message(), "simulation config must be a JSON object");
 }
 
 TEST(EffectiveConfigTest, WritesTheLaunchCopyBesideTheInvocationHandoff) {
@@ -1228,11 +1261,14 @@ TEST(EffectiveConfigTest, WritesTheLaunchCopyBesideTheInvocationHandoff) {
   const std::string source = test::config_path("gfx942_cdna3.json");
   const std::string source_before = config::read_config_file(source);
 
-  const std::string copy = config::write_effective_config(source, 12, getpid());
+  FailureOr<std::string> copy = config::write_effective_config(source, 12, getpid());
+  ASSERT_TRUE(copy.succeeded());
 
-  EXPECT_EQ(copy, rocjitsu::rpc_invocation_runtime_dir(getpid()) + "/effective_config.json");
+  EXPECT_EQ(copy.value(),
+            rocjitsu::rpc_invocation_runtime_dir(getpid()) + "/effective_config.json");
   EXPECT_EQ(config::read_config_file(source), source_before);
-  EXPECT_EQ(config::load_execution_thread_settings(copy, rocjitsu::kEmbeddedSchema).request.budget,
+  EXPECT_EQ(config::load_execution_thread_settings(copy.value(), rocjitsu::kEmbeddedSchema)
+                .request.budget,
             12u);
 }
 
@@ -1242,9 +1278,11 @@ TEST(EffectiveConfigTest, ReportsAnUnwritableRuntimeDirectory) {
   std::ofstream(blocked_root) << "not a directory";
   test::ScopedEnvironmentVariable runtime_dir("ROCJITSU_RUNTIME_DIR", blocked_root.string());
 
-  EXPECT_THROW(
-      (void)config::write_effective_config(test::config_path("gfx942_cdna3.json"), 12, getpid()),
-      std::runtime_error);
+  util::StringDiagnostic diagnostic;
+  FailureOr<std::string> written = config::write_effective_config(
+      test::config_path("gfx942_cdna3.json"), 12, getpid(), diagnostic.emitter());
+  EXPECT_TRUE(written.failed());
+  EXPECT_THAT(diagnostic.message(), testing::HasSubstr("cannot create runtime directory"));
 }
 
 // This case is registered as a native CLI test because it expects the launcher

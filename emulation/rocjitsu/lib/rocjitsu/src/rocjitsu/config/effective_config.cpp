@@ -15,6 +15,7 @@
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <utility>
 
 namespace rocjitsu {
 namespace config {
@@ -62,21 +63,23 @@ int hex_digit(char c) {
   return -1;
 }
 
-uint32_t parse_hex_digits(std::string_view json, size_t &at, size_t count) {
+FailureOr<uint32_t> parse_hex_digits(std::string_view json, size_t &at, size_t count,
+                                     const util::DiagnosticEmitter &emit_error) {
   if (json.size() - at < count)
-    throw std::runtime_error("unterminated escape sequence");
+    return emit_error.emit() << "unterminated escape sequence";
 
   uint32_t value = 0;
   for (size_t i = 0; i < count; ++i) {
     const int digit = hex_digit(json[at++]);
     if (digit < 0)
-      throw std::runtime_error("escape code must be followed by hexadecimal digits");
+      return emit_error.emit() << "escape code must be followed by hexadecimal digits";
     value = (value << 4) | static_cast<uint32_t>(digit);
   }
   return value;
 }
 
-void append_utf8(uint32_t code_point, std::string &decoded) {
+Result append_utf8(uint32_t code_point, std::string &decoded,
+                   const util::DiagnosticEmitter &emit_error) {
   if (code_point <= 0x7f) {
     decoded += static_cast<char>(code_point);
   } else if (code_point <= 0x7ff) {
@@ -92,14 +95,16 @@ void append_utf8(uint32_t code_point, std::string &decoded) {
     decoded += static_cast<char>(0x80 | ((code_point >> 6) & 0x3f));
     decoded += static_cast<char>(0x80 | (code_point & 0x3f));
   } else {
-    throw std::runtime_error("Unicode code point is out of range");
+    return emit_error.emit() << "Unicode code point is out of range";
   }
+  return Result::success();
 }
 
 /// @brief Decode a quoted string and advance past it.
-std::string parse_quoted_string(std::string_view json, size_t &at) {
+FailureOr<std::string> parse_quoted_string(std::string_view json, size_t &at,
+                                           const util::DiagnosticEmitter &emit_error) {
   if (at >= json.size() || (json[at] != '"' && json[at] != '\''))
-    throw std::runtime_error("expected a quoted string");
+    return emit_error.emit() << "expected a quoted string";
 
   const char quote = json[at++];
   std::string decoded;
@@ -108,24 +113,24 @@ std::string parse_quoted_string(std::string_view json, size_t &at) {
     const char c = json[at++];
     if (c == quote) {
       if (unicode_high_surrogate != -1)
-        throw std::runtime_error("illegal Unicode sequence");
+        return emit_error.emit() << "illegal Unicode sequence";
       return decoded;
     }
 
     if (static_cast<unsigned char>(c) < ' ')
-      throw std::runtime_error("illegal character in string constant");
+      return emit_error.emit() << "illegal character in string constant";
     if (c != '\\') {
       if (unicode_high_surrogate != -1)
-        throw std::runtime_error("illegal Unicode sequence");
+        return emit_error.emit() << "illegal Unicode sequence";
       decoded += c;
       continue;
     }
 
     if (at >= json.size())
-      throw std::runtime_error("unterminated escape sequence");
+      return emit_error.emit() << "unterminated escape sequence";
     const char escape = json[at++];
     if (unicode_high_surrogate != -1 && escape != 'u')
-      throw std::runtime_error("illegal Unicode sequence");
+      return emit_error.emit() << "illegal Unicode sequence";
 
     switch (escape) {
     case 'n':
@@ -155,57 +160,73 @@ std::string parse_quoted_string(std::string_view json, size_t &at) {
     case '/':
       decoded += '/';
       break;
-    case 'x':
-      decoded += static_cast<char>(parse_hex_digits(json, at, 2));
+    case 'x': {
+      FailureOr<uint32_t> digits = parse_hex_digits(json, at, 2, emit_error);
+      if (digits.failed())
+        return Result::failure();
+      decoded += static_cast<char>(digits.value());
       break;
+    }
     case 'u': {
-      const uint32_t value = parse_hex_digits(json, at, 4);
+      FailureOr<uint32_t> digits = parse_hex_digits(json, at, 4, emit_error);
+      if (digits.failed())
+        return Result::failure();
+      const uint32_t value = digits.value();
       if (value >= 0xd800 && value <= 0xdbff) {
         if (unicode_high_surrogate != -1)
-          throw std::runtime_error("illegal Unicode sequence");
+          return emit_error.emit() << "illegal Unicode sequence";
         unicode_high_surrogate = static_cast<int>(value);
       } else if (value >= 0xdc00 && value <= 0xdfff) {
         if (unicode_high_surrogate == -1)
-          throw std::runtime_error("illegal Unicode sequence");
+          return emit_error.emit() << "illegal Unicode sequence";
         const uint32_t code_point =
             0x10000 + ((static_cast<uint32_t>(unicode_high_surrogate) & 0x3ff) << 10) +
             (value & 0x3ff);
-        append_utf8(code_point, decoded);
+        Result appended = append_utf8(code_point, decoded, emit_error);
+        if (appended.failed())
+          return Result::failure();
         unicode_high_surrogate = -1;
       } else {
         if (unicode_high_surrogate != -1)
-          throw std::runtime_error("illegal Unicode sequence");
-        append_utf8(value, decoded);
+          return emit_error.emit() << "illegal Unicode sequence";
+        Result appended = append_utf8(value, decoded, emit_error);
+        if (appended.failed())
+          return Result::failure();
       }
       break;
     }
     default:
-      throw std::runtime_error("unknown escape code in string constant");
+      return emit_error.emit() << "unknown escape code in string constant";
     }
   }
 
-  throw std::runtime_error("unterminated string constant");
+  return emit_error.emit() << "unterminated string constant";
 }
 
 /// @brief Advance past a quoted string, honoring the loader's escapes.
-void skip_string(std::string_view json, size_t &at) { (void)parse_quoted_string(json, at); }
+Result skip_string(std::string_view json, size_t &at, const util::DiagnosticEmitter &emit_error) {
+  FailureOr<std::string> parsed = parse_quoted_string(json, at, emit_error);
+  if (parsed.failed())
+    return Result::failure();
+  return Result::success();
+}
 
 /// @brief Advance past one value, descending through nested objects and arrays.
-void skip_value(std::string_view json, size_t &at) {
+Result skip_value(std::string_view json, size_t &at, const util::DiagnosticEmitter &emit_error) {
   if (at >= json.size())
-    return;
+    return Result::success();
 
-  if (json[at] == '"' || json[at] == '\'') {
-    skip_string(json, at);
-    return;
-  }
+  if (json[at] == '"' || json[at] == '\'')
+    return skip_string(json, at, emit_error);
 
   if (json[at] == '{' || json[at] == '[') {
     size_t depth = 0;
     while (at < json.size()) {
       const char c = json[at];
       if (c == '"' || c == '\'') {
-        skip_string(json, at);
+        Result skipped = skip_string(json, at, emit_error);
+        if (skipped.failed())
+          return skipped;
         continue;
       }
       if (starts_comment(json, at)) {
@@ -218,12 +239,12 @@ void skip_value(std::string_view json, size_t &at) {
         --depth;
         if (depth == 0) {
           ++at;
-          return;
+          return Result::success();
         }
       }
       ++at;
     }
-    return;
+    return Result::success();
   }
 
   while (at < json.size() && json[at] != ',' && json[at] != '}' && json[at] != ']' &&
@@ -232,6 +253,7 @@ void skip_value(std::string_view json, size_t &at) {
       break;
     ++at;
   }
+  return Result::success();
 }
 
 /// @brief Return @p json with top-level @p field set to @p value, inserting it when absent.
@@ -239,12 +261,13 @@ void skip_value(std::string_view json, size_t &at) {
 /// @details Only the one field's text changes, so every other field keeps the
 /// spelling, ordering and formatting the author gave it and stays readable when a
 /// failing run is reproduced from the launch copy.
-std::string set_top_level_field(std::string_view json, std::string_view field,
-                                std::string_view value) {
+FailureOr<std::string> set_top_level_field(std::string_view json, std::string_view field,
+                                           std::string_view value,
+                                           const util::DiagnosticEmitter &emit_error) {
   size_t at = 0;
   skip_filler(json, at);
   if (at >= json.size() || json[at] != '{')
-    throw std::runtime_error("simulation config must be a JSON object");
+    return emit_error.emit() << "simulation config must be a JSON object";
   const size_t fields_begin = ++at;
 
   skip_filler(json, at);
@@ -257,26 +280,31 @@ std::string set_top_level_field(std::string_view json, std::string_view field,
 
     std::string name;
     if (json[at] == '"' || json[at] == '\'') {
-      name = parse_quoted_string(json, at);
+      FailureOr<std::string> parsed_name = parse_quoted_string(json, at, emit_error);
+      if (parsed_name.failed())
+        return Result::failure();
+      name = std::move(parsed_name.value());
     } else {
       const size_t name_begin = at;
       if (at >= json.size() || !is_identifier_start(json[at]))
-        throw std::runtime_error("simulation config has an unreadable field name");
+        return emit_error.emit() << "simulation config has an unreadable field name";
       while (at < json.size() && is_identifier_char(json[at]))
         ++at;
       name.assign(json.substr(name_begin, at - name_begin));
     }
     if (name.empty())
-      throw std::runtime_error("simulation config has an empty field name");
+      return emit_error.emit() << "simulation config has an empty field name";
 
     skip_filler(json, at);
     if (at >= json.size() || json[at] != ':')
-      throw std::runtime_error("simulation config field '" + std::string(name) + "' has no value");
+      return emit_error.emit() << "simulation config field '" << name << "' has no value";
     ++at;
 
     skip_filler(json, at);
     const size_t value_begin = at;
-    skip_value(json, at);
+    Result skipped_value = skip_value(json, at, emit_error);
+    if (skipped_value.failed())
+      return Result::failure();
     if (name == field) {
       std::string rewritten(json.substr(0, value_begin));
       rewritten.append(value);
@@ -299,38 +327,59 @@ std::string set_top_level_field(std::string_view json, std::string_view field,
 
 } // namespace
 
-std::string json_with_cpu_thread_budget(std::string_view json, uint32_t budget) {
-  std::string rewritten = set_top_level_field(json, kBudgetField, std::to_string(budget));
+FailureOr<std::string> json_with_cpu_thread_budget(std::string_view json, uint32_t budget,
+                                                   const util::DiagnosticEmitter &emit_error) {
+  FailureOr<std::string> rewritten =
+      set_top_level_field(json, kBudgetField, std::to_string(budget), emit_error);
+  if (rewritten.failed())
+    return Result::failure();
 
-  // Rewriting text must never be able to start a simulation under a budget nobody
-  // asked for, so the result is parsed and the field read back before it is used.
-  const uint32_t applied = with_parsed_simulation_config_json(
-      rewritten, rocjitsu::kEmbeddedSchema,
-      [](const fb::SimulationConfig *config) { return config->cpu_thread_budget(); });
+  // The schema parser reports a bad document by throwing. Callers of this function
+  // handle failure through the returned result, so that message is emitted here.
+  uint32_t applied = 0;
+  try {
+    applied = with_parsed_simulation_config_json(
+        rewritten.value(), rocjitsu::kEmbeddedSchema,
+        [](const fb::SimulationConfig *config) { return config->cpu_thread_budget(); });
+  } catch (const std::runtime_error &error) {
+    return emit_error.emit() << error.what();
+  }
   if (applied != budget)
-    throw std::runtime_error("cannot apply cpu_thread_budget to the simulation config");
-  return rewritten;
+    return emit_error.emit() << "cannot apply cpu_thread_budget to the simulation config";
+  return std::move(rewritten.value());
 }
 
-std::string write_effective_config(const std::string &source_path, uint32_t budget, pid_t pid) {
-  const std::string json = json_with_cpu_thread_budget(read_config_file(source_path), budget);
+FailureOr<std::string> write_effective_config(const std::string &source_path, uint32_t budget,
+                                              pid_t pid,
+                                              const util::DiagnosticEmitter &emit_error) {
+  // Reading the source throws when the file cannot be opened. The launch path
+  // reports that through the same result as a rewrite or publish failure.
+  std::string source_json;
+  try {
+    source_json = read_config_file(source_path);
+  } catch (const std::runtime_error &error) {
+    return emit_error.emit() << error.what();
+  }
+  FailureOr<std::string> json = json_with_cpu_thread_budget(source_json, budget, emit_error);
+  if (json.failed())
+    return Result::failure();
 
   const std::filesystem::path directory(rocjitsu::rpc_invocation_runtime_dir(pid));
   std::error_code directory_error;
   std::filesystem::create_directories(directory, directory_error);
   if (directory_error)
-    throw std::runtime_error("cannot create runtime directory " + directory.string() + ": " +
-                             directory_error.message());
+    return emit_error.emit() << "cannot create runtime directory " << directory.string() << ": "
+                             << directory_error.message();
 
   const std::filesystem::path target = directory / kEffectiveConfigName;
   const std::filesystem::path temporary = target.string() + ".tmp";
   std::ofstream output(temporary);
-  output << json;
+  output << json.value();
   output.close();
   if (!output.good()) {
     std::error_code remove_error;
     std::filesystem::remove(temporary, remove_error);
-    throw std::runtime_error("cannot write effective config " + target.string());
+    return emit_error.emit() << "cannot write effective config " << target.string();
   }
 
   std::error_code rename_error;
@@ -338,8 +387,8 @@ std::string write_effective_config(const std::string &source_path, uint32_t budg
   if (rename_error) {
     std::error_code remove_error;
     std::filesystem::remove(temporary, remove_error);
-    throw std::runtime_error("cannot publish effective config " + target.string() + ": " +
-                             rename_error.message());
+    return emit_error.emit() << "cannot publish effective config " << target.string() << ": "
+                             << rename_error.message();
   }
   return target.string();
 }
