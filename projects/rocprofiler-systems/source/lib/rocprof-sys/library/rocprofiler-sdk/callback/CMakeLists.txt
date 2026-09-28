@@ -13,7 +13,6 @@ set(callback_domains_headers
     ${CMAKE_CURRENT_LIST_DIR}/code_object.hpp
     ${CMAKE_CURRENT_LIST_DIR}/common_tracing_callbacks.hpp
     ${CMAKE_CURRENT_LIST_DIR}/hipfile_api.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/rccl.hpp
     ${CMAKE_CURRENT_LIST_DIR}/rocdecode_api.hpp
     ${CMAKE_CURRENT_LIST_DIR}/rocjpeg_api.hpp
     ${CMAKE_CURRENT_LIST_DIR}/rocshmem_api.hpp

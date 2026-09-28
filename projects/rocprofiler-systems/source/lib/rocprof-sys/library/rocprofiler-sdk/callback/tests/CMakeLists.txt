@@ -7,7 +7,6 @@ add_library(
     test_code_object.cpp
     test_common_tracing_callbacks.cpp
     test_hipfile_api.cpp
-    test_rccl.cpp
     test_rocdecode_api.cpp
     test_rocjpeg_api.cpp
     test_rocshmem_api.cpp
