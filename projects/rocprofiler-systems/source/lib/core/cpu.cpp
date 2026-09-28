@@ -154,7 +154,7 @@ query_cpu_agents()
     for(const auto& cpu : cpu_data)
     {
         const auto socket_id = static_cast<size_t>(std::max(0L, cpu.physical_id));
-        if(socket_model_names.find(socket_id) == socket_model_names.end())
+        if(!socket_model_names.contains(socket_id))
         {
             socket_model_names[socket_id] = cpu.model_name;
             socket_vendor_ids[socket_id]  = cpu.vendor_id;

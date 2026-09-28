@@ -96,8 +96,7 @@ callchain::get() const
     // remove some known functions which are by-products of interrupts
     for(auto& itr : _v)
     {
-        while(!itr.second.empty() &&
-              _known_excludes.find(itr.second.back().name) != _known_excludes.end())
+        while(!itr.second.empty() && _known_excludes.contains(itr.second.back().name))
         {
             itr.second.pop_back();
         }

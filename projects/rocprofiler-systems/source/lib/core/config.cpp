@@ -2188,7 +2188,7 @@ configure_disabled_settings(const std::shared_ptr<settings>& _config)
     for(const auto& itr : *_config)
     {
         auto const _v = itr.second->get_env_name();
-        if(_hidden_exact.count(_v) > 0 ||
+        if(_hidden_exact.contains(_v) ||
            std::regex_match(_v, std::regex{ _hidden_exact_re }) ||
            std::regex_match(_v, std::regex{ _hidden_begin_re }))
         {
@@ -2911,7 +2911,7 @@ get_category_config()
                     static_cast<tim::tsettings<std::string>&>(*_setting->second).get(),
                     " ,;:\n\t"))
             {
-                if(_avail.count(itr) > 0)
+                if(_avail.contains(itr))
                 {
                     _ret.emplace(itr);
                 }
@@ -2932,7 +2932,7 @@ get_category_config()
         {
             for(const auto& itr : _avail)
             {
-                if(_disabled.count(itr) == 0)
+                if(!_disabled.contains(itr))
                 {
                     _enabled.emplace(itr);
                 }
@@ -2942,7 +2942,7 @@ get_category_config()
         {
             for(const auto& itr : _avail)
             {
-                if(_enabled.count(itr) == 0)
+                if(!_enabled.contains(itr))
                 {
                     _disabled.emplace(itr);
                 }
@@ -3311,7 +3311,7 @@ get_debug_tid()
         parse_numeric_range<std::int64_t, std::unordered_set<std::int64_t>>(
             rocprofsys::get_env<std::string>(env_vars::DEBUG_TIDS, ""), "debug tids", 1L);
     static thread_local const bool _v =
-        _vlist.empty() || _vlist.count(tim::threading::get_id()) > 0;
+        _vlist.empty() || _vlist.contains(tim::threading::get_id());
     return _v;
 }
 
@@ -3321,8 +3321,8 @@ get_debug_pid()
     static auto const _vlist =
         parse_numeric_range<std::int64_t, std::unordered_set<std::int64_t>>(
             rocprofsys::get_env<std::string>(env_vars::DEBUG_PIDS, ""), "debug pids", 1L);
-    static const bool _v = _vlist.empty() || _vlist.count(tim::process::get_id()) > 0 ||
-                           _vlist.count(dmp::rank()) > 0;
+    static const bool _v = _vlist.empty() || _vlist.contains(tim::process::get_id()) ||
+                           _vlist.contains(dmp::rank());
     return _v;
 }
 
@@ -3792,7 +3792,7 @@ rank_passes_filter(std::optional<std::uint64_t> current_rank,
     }
 
     const auto is_enabled =
-        enabled_ranks.count(static_cast<std::int64_t>(*current_rank)) != 0;
+        enabled_ranks.contains(static_cast<std::int64_t>(*current_rank));
     LOG_DEBUG("Output for MPI rank {} is {}", *current_rank,
               is_enabled ? "enabled" : "disabled");
     return is_enabled;

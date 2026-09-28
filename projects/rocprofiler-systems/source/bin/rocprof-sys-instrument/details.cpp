@@ -164,7 +164,7 @@ get_symtab_function(procedure_t* _func)
             }
         }
 
-        if(_v.find(_func) == _v.end())
+        if(!_v.contains(_func))
         {
             _v.emplace(_func, nullptr);
         }
@@ -1185,9 +1185,8 @@ filter_modules(std::vector<module_t*> const* app_modules)
 
         bool _is_excluded = false;
 
-        if(_internal_libs.find(_module_name) != _internal_libs.end() ||
-           _internal_libs.find(_module_real) != _internal_libs.end() ||
-           _internal_libs.find(_module_base) != _internal_libs.end())
+        if(_internal_libs.contains(_module_name) ||
+           _internal_libs.contains(_module_real) || _internal_libs.contains(_module_base))
         {
             _is_excluded = true;
         }
@@ -1198,9 +1197,8 @@ filter_modules(std::vector<module_t*> const* app_modules)
             {
                 auto const _lib_base = rocprofsys::path::filename(lib_path);
                 if(_module_base == _lib_base || _module_real == lib_path ||
-                   sub_map.find(_module_base) != sub_map.end() ||
-                   sub_map.find(_module_real) != sub_map.end() ||
-                   sub_map.find(_module_name) != sub_map.end())
+                   sub_map.contains(_module_base) || sub_map.contains(_module_real) ||
+                   sub_map.contains(_module_name))
                 {
                     _is_excluded = true;
                     break;
@@ -1425,7 +1423,7 @@ process_modules(const std::vector<module_t*>& _app_modules)
         auto const _base_name = rocprofsys::path::filename(itr->fullName());
         auto const _real_name = rocprofsys::path::realpath(itr->fullName());
 
-        if(_names.count(_base_name) == 0 && _names.count(_real_name) == 0)
+        if(!_names.contains(_base_name) && !_names.contains(_real_name))
         {
             verbprintf(2, "Processing symbol table for module '%s'...\n",
                        itr->fullName().c_str());

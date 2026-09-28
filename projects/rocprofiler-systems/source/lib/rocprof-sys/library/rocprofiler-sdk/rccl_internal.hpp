@@ -119,7 +119,7 @@ public:
         bool newly_registered = false;
         {
             std::unique_lock<std::mutex> const _lk{ m_registered_gpus_mutex };
-            if(m_registered_gpus.count(rccl_device_idx) == 0)
+            if(!m_registered_gpus.contains(rccl_device_idx))
             {
                 m_registered_gpus.insert(rccl_device_idx);
                 newly_registered = true;
@@ -154,7 +154,7 @@ public:
     [[nodiscard]] bool is_registered(std::uint32_t rccl_device_idx) const
     {
         std::unique_lock<std::mutex> const _lk{ m_registered_gpus_mutex };
-        return m_registered_gpus.count(rccl_device_idx) > 0;
+        return m_registered_gpus.contains(rccl_device_idx);
     }
 
     /**

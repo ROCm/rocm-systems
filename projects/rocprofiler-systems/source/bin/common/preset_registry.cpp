@@ -149,7 +149,7 @@ preset_registry::translate_legacy_flag(std::string_view arg) const
     }
 
     auto const name = std::string{ arg.substr(2) };
-    if(m_presets.count(name) == 0)
+    if(!m_presets.contains(name))
     {
         return {};
     }
@@ -313,7 +313,7 @@ preset_registry::ensure_all_loaded()
             std::string{ filename.substr(0, filename.size() - json_ext.size()) };
 
         // Skip if preset is already cached (e.g. from embedded presets)
-        if(m_presets.count(preset_name) > 0)
+        if(m_presets.contains(preset_name))
         {
             continue;
         }

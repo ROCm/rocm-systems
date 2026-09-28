@@ -317,7 +317,7 @@ insert_instr(address_space_t* mutatee, const std::vector<point_t*>& _points, Tp 
     size_t _n = 0;
     for(const auto& itr : _points)
     {
-        if(!itr || _traps.count(itr) > 0)
+        if(!itr || _traps.contains(itr))
         {
             continue;
         }
@@ -408,7 +408,7 @@ insert_instr(address_space_t* mutatee, procedure_t* funcToInstr, Tp traceFunc,
     size_t _n = 0;
     for(auto& itr : *_points)
     {
-        if(!itr || _traps.count(itr) > 0)
+        if(!itr || _traps.contains(itr))
         {
             continue;
         }

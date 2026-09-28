@@ -201,7 +201,7 @@ struct nic_traits
         }
         for(const auto& requested : filter.names)
         {
-            if(available_names.find(requested) == available_names.end())
+            if(!available_names.contains(requested))
             {
                 LOG_WARNING("Requested AI NIC device '{}' not found. "
                             "Available device(s): [{}]",

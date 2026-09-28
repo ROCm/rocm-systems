@@ -62,7 +62,7 @@ auto
 counter_track<Tp>::exists(size_t _idx, std::int64_t _n)
 {
     std::lock_guard<std::mutex> const _lk{ get_mutex() };
-    bool const                        _v = get_data().second.count(_idx) != 0;
+    bool const                        _v = get_data().second.contains(_idx);
     if(_n < 0 || !_v)
     {
         return _v;
@@ -75,7 +75,7 @@ size_t
 counter_track<Tp>::size(size_t _idx)
 {
     std::lock_guard<std::mutex> _lk{ get_mutex() };
-    bool                        _v = get_data().second.count(_idx) != 0;
+    bool                        _v = get_data().second.contains(_idx);
     if(!_v)
     {
         return 0;

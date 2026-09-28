@@ -47,7 +47,7 @@ collect_enabled_entry_names(const nlohmann::json&             metrics_obj,
     std::vector<std::string> result;
     for(const auto& [name, metric] : metrics_obj.items())
     {
-        if(exclude.count(name) > 0)
+        if(exclude.contains(name))
         {
             continue;
         }
@@ -273,7 +273,7 @@ resolve_schema_config(const nlohmann::json& config)
             if(rocm.contains("enabled") && rocm["enabled"].get<bool>())
             {
                 // Top-level rocm.enabled ensures tracing is on and default domains set
-                if(result.find(std::string{ env_vars::TRACE }) == result.end())
+                if(!result.contains(std::string{ env_vars::TRACE }))
                 {
                     result[std::string{ env_vars::TRACE }] = "true";
                 }

@@ -38,7 +38,7 @@ auto&
 get_perfetto_tmp_file(pid_t _pid = process::get_id())
 {
     static auto _v = std::unordered_map<pid_t, std::shared_ptr<tmp_file>>{};
-    if(_v.find(_pid) == _v.end())
+    if(!_v.contains(_pid))
     {
         _v.emplace(_pid, std::shared_ptr<tmp_file>{});
     }
@@ -57,7 +57,7 @@ get_session(pid_t _pid = process::get_id())
 {
     static auto _v =
         std::unordered_map<pid_t, std::unique_ptr<::perfetto::TracingSession>>{};
-    if(_v.find(_pid) == _v.end())
+    if(!_v.contains(_pid))
     {
         _v.emplace(_pid, std::unique_ptr<::perfetto::TracingSession>{});
     }

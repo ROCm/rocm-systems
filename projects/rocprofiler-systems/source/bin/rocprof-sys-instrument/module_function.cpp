@@ -592,9 +592,8 @@ module_function::is_internal_constrained() const
         return _report("Excluding", "function", "perfetto", 3);
     }
 
-    if(_gnu_libs.find(module_name) != _gnu_libs.end() ||
-       _gnu_libs.find(_module_real) != _gnu_libs.end() ||
-       _gnu_libs.find(_module_base) != _gnu_libs.end())
+    if(_gnu_libs.contains(module_name) || _gnu_libs.contains(_module_real) ||
+       _gnu_libs.contains(_module_base))
     {
         return _report("Excluding", "module", "internal library", 3);
     }
@@ -602,10 +601,8 @@ module_function::is_internal_constrained() const
     for(const auto& litr : _gnu_libs)
     {
         if(_module_base == rocprofsys::path::filename(litr.first) ||
-           litr.second.find(_module_base) != litr.second.end() ||
-           _module_real == litr.first ||
-           litr.second.find(_module_real) != litr.second.end() ||
-           litr.second.find(module_name) != litr.second.end())
+           litr.second.contains(_module_base) || _module_real == litr.first ||
+           litr.second.contains(_module_real) || litr.second.contains(module_name))
         {
             return _report("Excluding", "module",
                            fmt::format("internal library {}", litr.first), 3);
@@ -613,7 +610,7 @@ module_function::is_internal_constrained() const
 
         for(const auto& fitr : litr.second)
         {
-            if(fitr.second.find(function_name) != fitr.second.end())
+            if(fitr.second.contains(function_name))
             {
                 return _report("Excluding", "function",
                                fmt::format("internal library {}", litr.first), 3);
@@ -774,7 +771,7 @@ module_function::is_routine_constrained() const
     //    return _report("Excluding", "critical-printf", 3);
     //}
 
-    if(whole.count(function_name) > 0)
+    if(whole.contains(function_name))
     {
         return _report("Excluding", "critical-whole-match", 3);
     }
@@ -960,16 +957,14 @@ bool
 module_function::is_visibility_constrained() const
 {
     auto const _visibility = get_visibility();
-    return (_visibility != SV_UNKNOWN &&
-            enabled_visibility.find(_visibility) == enabled_visibility.end());
+    return (_visibility != SV_UNKNOWN && !enabled_visibility.contains(_visibility));
 }
 
 bool
 module_function::is_linkage_constrained() const
 {
     auto const _linkage = get_linkage();
-    return (_linkage != SL_UNKNOWN &&
-            enabled_linkage.find(_linkage) == enabled_linkage.end());
+    return (_linkage != SL_UNKNOWN && !enabled_linkage.contains(_linkage));
 }
 
 bool

@@ -87,14 +87,14 @@ ignore_setting(const Tp& _v, const format_options& fmt_opts)
             return true;
         }
     }
-    if(category_view.count("deprecated") == 0 &&
-       category_view.count("settings::deprecated") == 0 &&
+    if(!category_view.contains("deprecated") &&
+       !category_view.contains("settings::deprecated") &&
        _v->get_categories().count("deprecated") > 0)
     {
         return true;
     }
-    if(!fmt_opts.print_advanced && category_view.count("advanced") == 0 &&
-       category_view.count("settings::advanced") == 0 &&
+    if(!fmt_opts.print_advanced && !category_view.contains("advanced") &&
+       !category_view.contains("settings::advanced") &&
        _v->get_categories().count("advanced") > 0)
     {
         return true;
@@ -333,7 +333,7 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
         return _ofs;
     };
 
-    if(_fmts.count("json") > 0)
+    if(_fmts.contains("json"))
     {
         // JSON schema output includes all ROCPROFSYS_* settings regardless of
         // --filter, --categories, or --advanced flags. This is intentional: the
@@ -384,7 +384,7 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
         _open(ofs, _fname, "JSON") << preset_json.dump(4) << "\n";
     }
 
-    if(_fmts.count("xml") > 0)
+    if(_fmts.contains("xml"))
     {
         std::stringstream _ss{};
         output_archive<cereal::XMLOutputArchive>::indent() = true;
@@ -395,7 +395,7 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
         _open(ofs, _fname, "XML") << _ss.str() << "\n";
     }
 
-    if(_fmts.count("txt") > 0 || _fmts.count("cfg") > 0 || _nout == 0)
+    if(_fmts.contains("txt") || _fmts.contains("cfg") || _nout == 0)
     {
         std::stringstream _ss{};
         size_t            _w = fmt_opts.min_width;

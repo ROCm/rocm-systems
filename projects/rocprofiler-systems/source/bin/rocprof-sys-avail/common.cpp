@@ -384,7 +384,7 @@ process_categories(parser_t& p, const str_set_t& _category_options)
 bool
 exclude_setting(const std::string& _v)
 {
-    if(settings_exclude.find(_v) != settings_exclude.end())
+    if(settings_exclude.contains(_v))
     {
         return true;
     }

@@ -462,7 +462,7 @@ pthread_create_gotcha::shutdown()
         for(auto itr : native_handles)
         {
             // skip sending signals to internal threads
-            if(internal_native_handles.count(itr) != 0)
+            if(internal_native_handles.contains(itr))
             {
                 continue;
             }
