@@ -2338,6 +2338,9 @@ static ncclResult_t netRegisterBuffer(ncclComm* comm, const void* userbuff, size
   }
 
 exit:
+  // First-peer NET_REG_COMPLETE stays set on a later-peer failure so cleanup
+  // still frees those handles. This bit is only the all-peers success.
+  if (regRecord != NULL && *outRegBufFlag) regRecord->state |= NET_REG_ALL_PEERS;
   return ret;
 fail:
   *outRegBufFlag = 0;
