@@ -3280,12 +3280,16 @@ TEST_CASE("Unit_HRR_ModuleAPI_Direct", "[.][hrr][direct]") {
     hipModule_t mod_file = nullptr;
     HRR_HIP_CHECK(hipModuleLoad(&mod_file, tmp_co.string().c_str()));
     {
+      // Regression guard for a launch from a file-loaded module. Replay
+      // resolves the launch by its own code-object hash, so this does not
+      // check what the hipModuleLoad event itself loaded.
       hipFunction_t fn_file = nullptr;
       HRR_HIP_CHECK(hipModuleGetFunction(&fn_file, mod_file, "rtc_fill"));
       int* d_file = nullptr;
       HRR_HIP_CHECK(hipMalloc(&d_file, SZ));
       // Replay compares D2H buffers under a float tolerance, so a small
       // integer would also pass against a buffer the kernel never wrote.
+      // 0x3F800000 is 1.0f, which is outside the tolerance of an unwritten buffer.
       int  val   = 0x3F800000;
       int  n     = N;
       void* args[] = { &d_file, &val, &n };

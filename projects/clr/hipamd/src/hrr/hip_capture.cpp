@@ -656,10 +656,9 @@ hipError_t capture_hipMemcpyWithStream(void* dst, const void* src,
 // ---------------------------------------------------------------------------
 
 // Helper: get the actual device binary from a successfully loaded hipModule_t.
-// The caller passes an in-memory image (which may be a fat binary bundle, not
-// a raw ELF).  The runtime unbundles/extracts the device ELF internally and
-// stores it in the amd::Program.  We read it back from there so we always
-// capture the processed ELF, not the raw (possibly bundled) input image.
+// The module may come from an in-memory image or from a file (possibly a
+// bundle); either way the runtime stores the extracted device ELF in the
+// amd::Program, and we read it back from there.
 static hrr_cap::Hash128 write_module_code_object(hipModule_t module) {
   amd::Program* prog = as_amd(reinterpret_cast<cl_program>(module));
   if (!prog) return {0, 0};
