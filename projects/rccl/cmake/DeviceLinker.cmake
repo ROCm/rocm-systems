@@ -1336,7 +1336,7 @@ if(GENERATE_SYM_KERNELS)
     add_custom_command(
       OUTPUT ${_cm_bc}
       COMMAND ${DL_CLANG}
-        -x hip --cuda-device-only --offload-arch=${_bc_arch}
+        -x hip --cuda-device-only --offload-arch=${DL_TARGET_ID_${_bc_arch}}
         -emit-llvm -Xclang -disable-llvm-passes
         -std=c++17 -fPIC
         -I${ROCSHMEM_SOURCE_DIR}/src
