@@ -201,8 +201,7 @@ preset_registry::resolve_filepath(const std::string& name_or_path)
     }
 
     const bool is_path = name_or_path.find('/') != std::string::npos ||
-                         (name_or_path.size() > 5 &&
-                          name_or_path.compare(name_or_path.size() - 5, 5, ".json") == 0);
+                         (name_or_path.size() > 5 && name_or_path.ends_with(".json"));
 
     if(is_path)
     {
@@ -300,9 +299,7 @@ preset_registry::ensure_all_loaded()
         std::string_view filename{ entry->d_name };
 
         constexpr std::string_view json_ext = ".json";
-        if(filename.size() <= json_ext.size() ||
-           filename.compare(filename.size() - json_ext.size(), json_ext.size(),
-                            json_ext) != 0)
+        if(filename.size() <= json_ext.size() || !filename.ends_with(json_ext))
         {
             continue;
         }
