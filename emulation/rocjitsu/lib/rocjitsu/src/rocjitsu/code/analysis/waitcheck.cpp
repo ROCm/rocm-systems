@@ -1468,6 +1468,12 @@ private:
     }
   }
 
+  [[nodiscard]] static bool is_counter_no_wait_value(rj_code_arch_t arch, WaitCounterKind counter,
+                                                     uint32_t count) {
+    const auto no_wait = counter_no_wait_value(arch, counter);
+    return no_wait && count == *no_wait;
+  }
+
   [[nodiscard]] static std::optional<std::array<std::optional<uint32_t>, kCounterCount>>
   explicit_wait_fields(const Instruction &inst, rj_code_arch_t arch) {
     std::array<std::optional<uint32_t>, kCounterCount> fields;
@@ -2702,7 +2708,30 @@ private:
       state.uncertain_order[idx] = false;
   }
 
+  template <typename Predicate>
+  static void retire_event_kind_ages(PendingState &state, WaitCounterKind counter,
+                                     Predicate belongs_to_group, uint32_t minimum_age = 0) {
+    const size_t idx = counter_index(counter);
+    auto &ages = state.pending_event_ages[idx].values;
+    for (size_t kind = 0; kind < ages.size(); ++kind) {
+      PendingEvent probe;
+      probe.counter = counter;
+      probe.kind = static_cast<WaitEventKind>(kind);
+      if (belongs_to_group(probe) && ages[kind] != kNoPendingEventAge &&
+          ages[kind] >= minimum_age) {
+        ages[kind] = kNoPendingEventAge;
+      }
+    }
+    PendingEvent smem;
+    smem.counter = counter;
+    smem.kind = WaitEventKind::Smem;
+    if (minimum_age == 0 && belongs_to_group(smem))
+      state.pending_smem[idx] = false;
+  }
+
   static void apply_kmcnt_wait(PendingState &state, uint32_t count, rj_code_arch_t arch) {
+    if (is_counter_no_wait_value(arch, WaitCounterKind::Km, count))
+      return;
     // LLVM cannot use a partial wait to advance any part of a counter whose
     // pending event kinds may complete out of order.
     if (count != 0 && counter_out_of_order(state, WaitCounterKind::Km, arch))
@@ -2735,20 +2764,15 @@ private:
                                           uint32_t count) {
     const size_t idx = counter_index(WaitCounterKind::VmVsrc);
     auto &pending = state.pending[idx];
-    if (pending.empty())
-      return;
-
-    const size_t matching = static_cast<size_t>(std::ranges::count_if(pending, is_implied));
-    if (matching == 0)
-      return;
-
     if (count == 0) {
       retire_events(state, pending, is_implied);
+      retire_event_kind_ages(state, WaitCounterKind::VmVsrc, is_implied);
       if (pending.empty())
         state.uncertain_order[idx] = false;
       return;
     }
 
+    const size_t matching = static_cast<size_t>(std::ranges::count_if(pending, is_implied));
     if (state.uncertain_order[idx] || count >= matching)
       return;
 
@@ -2773,6 +2797,7 @@ private:
     retire_events(state, pending, [&](const PendingEvent &event) {
       return is_implied(event) && event.min_younger >= youngest_retired_age;
     });
+    retire_event_kind_ages(state, WaitCounterKind::VmVsrc, is_implied, youngest_retired_age);
   }
 
   static void apply_implied_vm_vsrc_wait(PendingState &state, WaitCounterKind counter,
@@ -2979,6 +3004,8 @@ private:
 
   static void apply_counter_wait(PendingState &state, WaitCounterKind counter, uint32_t count,
                                  rj_code_arch_t arch) {
+    if (is_counter_no_wait_value(arch, counter, count))
+      return;
     if (count != 0 && counter_out_of_order(state, counter, arch))
       return;
     apply_wait(state, counter, count);
@@ -2993,13 +3020,52 @@ private:
     return std::min(event.min_younger, maximum_dependency_wait(arch, event.counter));
   }
 
+  [[nodiscard]] static bool same_operation(const PendingEvent &lhs, const PendingEvent &rhs) {
+    return lhs.kind == rhs.kind && lhs.section_name == rhs.section_name &&
+           lhs.section_offset == rhs.section_offset && lhs.file_offset == rhs.file_offset &&
+           lhs.instruction == rhs.instruction;
+  }
+
   static void apply_memory_wait(PendingState &state, WaitCounterKind counter, uint32_t count,
                                 rj_code_arch_t arch) {
+    if (is_counter_no_wait_value(arch, counter, count))
+      return;
     // SIInsertWaitcnts cannot use a nonzero wait to retire a particular event
     // while scalar memory is pending on this counter. This notably covers
     // legacy LGKMCNT shared by SMEM and DS operations.
     if (count != 0 && counter_out_of_order(state, counter, arch))
       return;
+    if (count != 0) {
+      // A primary-counter wait can complete an operation even when unrelated
+      // VM_VSRC events have saturated its source facet's global age. Correlate
+      // the facets by operation before removing primary events.
+      const auto &primary = state.pending[counter_index(counter)];
+      auto &sources = state.pending[counter_index(WaitCounterKind::VmVsrc)];
+      const auto kind_completed = [&](const PendingEvent &source) {
+        const uint8_t age = state.pending_event_ages[counter_index(counter)]
+                                .values[static_cast<size_t>(source.kind)];
+        return vm_vsrc_event_implied_by_wait(source.kind, counter) && age != kNoPendingEventAge &&
+               age >= count;
+      };
+      retire_events(state, sources, [&](const PendingEvent &source) {
+        if (!vm_vsrc_event_implied_by_wait(source.kind, counter))
+          return false;
+        if (kind_completed(source))
+          return true;
+        bool matched_primary = false;
+        for (const PendingEvent &event : primary) {
+          if (!same_operation(event, source))
+            continue;
+          if (event.min_younger < count)
+            return false;
+          matched_primary = true;
+        }
+        return matched_primary;
+      });
+      retire_event_kind_ages(state, WaitCounterKind::VmVsrc, kind_completed);
+      if (sources.empty())
+        state.uncertain_order[counter_index(WaitCounterKind::VmVsrc)] = false;
+    }
     apply_wait(state, counter, count);
     apply_implied_vm_vsrc_wait(state, counter, count);
     if (counter == WaitCounterKind::Load)
@@ -3201,7 +3267,8 @@ private:
     } else if (mnemonic == "s_wait_expcnt") {
       apply_counter_wait(state, WaitCounterKind::Exp, value, arch);
     } else if (mnemonic == "s_wait_xcnt") {
-      apply_xcnt_wait(state, value);
+      if (!is_counter_no_wait_value(arch, WaitCounterKind::X, value))
+        apply_xcnt_wait(state, value);
     } else if (mnemonic == "s_wait_asynccnt") {
       apply_counter_wait(state, WaitCounterKind::Async, value, arch);
     } else if (mnemonic == "s_wait_tensorcnt") {

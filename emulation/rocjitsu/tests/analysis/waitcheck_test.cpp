@@ -675,9 +675,11 @@ void append_image_bvhs(std::vector<uint32_t> &program, uint32_t count, uint32_t 
   return sopp(8, 0xf19f); // depctr_va_sdst(0)
 }
 
-[[nodiscard]] rdna4::SoppMachineInst s_wait_alu_vm_vsrc_0() {
-  return sopp(8, 0xff83); // depctr_vm_vsrc(0)
+[[nodiscard]] rdna4::SoppMachineInst s_wait_alu_vm_vsrc(uint32_t count) {
+  return sopp(8, 0xff83u | (count << 2u));
 }
+
+[[nodiscard]] rdna4::SoppMachineInst s_wait_alu_vm_vsrc_0() { return s_wait_alu_vm_vsrc(0); }
 
 [[nodiscard]] rdna4::SoppMachineInst s_delay_alu(uint32_t simm16) { return sopp(7, simm16); }
 
@@ -4993,6 +4995,48 @@ TEST(WaitcheckTest, Gfx1250ClampsVmVsrcDiagnosticPastDependencyWaitLimit) {
   EXPECT_EQ(report.diagnostics[0].required_count, 6u);
 }
 
+// depctr_vm_vsrc(7) is the no-wait sentinel. Other s_wait_alu fields must not
+// make it retire an old VM_VSRC hazard whose internal ordering age exceeds 6.
+TEST(WaitcheckTest, Gfx1250WaitAluNoWaitPreservesVmVsrcPastDependencyWaitLimit) {
+  constexpr uint32_t kHwRegWaveSchedMode = 26;
+  std::vector<uint32_t> program;
+  append_inst(program, s_setreg_imm32_b32(hwreg(kHwRegWaveSchedMode, 0, 2), 2));
+  for (uint32_t i = 0; i < 8; ++i)
+    append_gfx1250_ds_bpermute_b32(program, 10 + i, 1, 100 + i);
+  append_inst(program, s_wait_alu_sa_sdst_0());
+  append_inst(program, v_mov_b32(100, 0));
+
+  TestCodeObject code_object(program);
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::VmVsrc);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Def);
+  EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 100, 1}));
+  EXPECT_EQ(report.diagnostics[0].required_count, 6u);
+}
+
+TEST(WaitcheckTest, Gfx1250MaximumWaitAluRetiresOldVmVsrcPastDependencyWaitLimit) {
+  constexpr uint32_t kHwRegWaveSchedMode = 26;
+  std::vector<uint32_t> program;
+  append_inst(program, s_setreg_imm32_b32(hwreg(kHwRegWaveSchedMode, 0, 2), 2));
+  for (uint32_t i = 0; i < 8; ++i)
+    append_gfx1250_ds_bpermute_b32(program, 10 + i, 1, 100 + i);
+  append_inst(program, s_wait_alu_vm_vsrc(6));
+  append_inst(program, v_mov_b32(100, 0));
+  append_inst(program, v_mov_b32(102, 0));
+
+  TestCodeObject code_object(program);
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::VmVsrc);
+  EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 102, 1}));
+  EXPECT_EQ(report.diagnostics[0].required_count, 5u);
+}
+
 // Reduced from the gfx1250 top-k/top-p kernel attached to #11864. VM_VSRC has
 // only a 3-bit wait field, but DS_CNT can distinguish more than seven younger
 // source reads. Saturating internal VM_VSRC ages at depctr_vm_vsrc(6) makes the
@@ -5006,12 +5050,80 @@ TEST(WaitcheckTest, Gfx1250DscntPartialWaitsRetireVmVsrcPastDependencyWaitLimit)
   append_inst(program, sopp(70, 7)); // s_wait_dscnt 7 retires the oldest operation.
   append_inst(program, sopp(70, 1)); // The source read of v106 is now complete.
   append_inst(program, v_mov_b32(106, 0));
+  append_inst(program, v_mov_b32(107, 0));
 
   TestCodeObject code_object(program);
   auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5);
 
-  EXPECT_TRUE(report.supported) << report.analysis_error;
-  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::VmVsrc);
+  EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 107, 1}));
+  EXPECT_EQ(report.diagnostics[0].required_count, 0u);
+}
+
+TEST(WaitcheckTest, Gfx1250DscntMaximumPartialWaitRetiresSaturatedVmVsrcAges) {
+  constexpr uint32_t kHwRegWaveSchedMode = 26;
+  std::vector<uint32_t> program;
+  append_inst(program, s_setreg_imm32_b32(hwreg(kHwRegWaveSchedMode, 0, 2), 2));
+  for (uint32_t i = 0; i < 64; ++i)
+    append_gfx1250_ds_bpermute_b32(program, 10 + i, 1, 100 + i);
+  append_inst(program, sopp(70, 62)); // Leaves the 62 youngest DS operations pending.
+  append_inst(program, v_mov_b32(100, 0));
+  append_inst(program, v_mov_b32(102, 0));
+
+  TestCodeObject code_object(program);
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::VmVsrc);
+  EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 102, 1}));
+  EXPECT_EQ(report.diagnostics[0].required_count, 6u);
+}
+
+TEST(WaitcheckTest, Gfx1250DscntNoWaitPreservesSaturatedVmVsrcAge) {
+  constexpr uint32_t kHwRegWaveSchedMode = 26;
+  std::vector<uint32_t> program;
+  append_inst(program, s_setreg_imm32_b32(hwreg(kHwRegWaveSchedMode, 0, 2), 2));
+  for (uint32_t i = 0; i < 64; ++i)
+    append_gfx1250_ds_bpermute_b32(program, 10 + i, 1, 100 + i);
+  append_inst(program, sopp(70, 63)); // DSCNT's all-ones no-wait sentinel.
+  append_inst(program, v_mov_b32(100, 0));
+
+  TestCodeObject code_object(program);
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::VmVsrc);
+  EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 100, 1}));
+  EXPECT_EQ(report.diagnostics[0].required_count, 6u);
+}
+
+// VM_VSRC ages include every expert-scheduled memory operation, but DS_CNT
+// orders only DS operations. Interleaved loads must not make two DS source
+// hazards indistinguishable to a partial DS wait.
+TEST(WaitcheckTest, Gfx1250DscntUsesPrimaryOrderPastInterleavedVmVsrcSaturation) {
+  constexpr uint32_t kHwRegWaveSchedMode = 26;
+  std::vector<uint32_t> program;
+  append_inst(program, s_setreg_imm32_b32(hwreg(kHwRegWaveSchedMode, 0, 2), 2));
+  append_gfx1250_ds_bpermute_b32(program, 10, 1, 100);
+  append_gfx1250_ds_bpermute_b32(program, 11, 1, 101);
+  append_global_loads(program, 63, 20);
+  append_gfx1250_ds_bpermute_b32(program, 12, 1, 102);
+  append_inst(program, sopp(70, 2)); // Leaves the two youngest DS operations pending.
+  append_inst(program, v_mov_b32(100, 0));
+  append_inst(program, v_mov_b32(101, 0));
+
+  TestCodeObject code_object(program);
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::VmVsrc);
+  EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 101, 1}));
+  EXPECT_EQ(report.diagnostics[0].required_count, 0u);
 }
 
 TEST(WaitcheckTest, VopdMovDoesNotReadUnusedVsrc1Encoding) {
