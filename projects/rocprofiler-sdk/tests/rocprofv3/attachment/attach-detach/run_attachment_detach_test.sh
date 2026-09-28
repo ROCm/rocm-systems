@@ -41,12 +41,46 @@ wait_for_attach_ready() {
     return 1
 }
 
+# The prompt is printed only once attachment has completed and the SIGINT handler is
+# installed, so a detach triggered earlier would be buffered or fatal.
+wait_for_detach_prompt() {
+    local pid=$1
+    local log=$2
+    local max_wait=30
+    local elapsed=0
+    echo "Waiting for rocprofv3 to prompt for detach..."
+    while [ $elapsed -lt $max_wait ]; do
+        if grep -q "Press Enter to detach" ${log} 2>/dev/null; then
+            echo "Detach prompt shown (${elapsed}s elapsed)"
+            return 0
+        fi
+        if ! kill -0 ${pid} 2>/dev/null; then
+            echo "rocprofv3 exited before prompting for detach"
+            cat ${log}
+            return 1
+        fi
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+    echo "Timed out after ${max_wait}s waiting for the detach prompt"
+    cat ${log}
+    return 1
+}
+
 TEST_APP=$1
 ROCPROFV3=$2
 OUTPUT_DIR=${3:-${PWD}}
 LOG_LEVEL=${4:-info}
 OUTPUT_FILENAME=${5:-out}
 DETACH_MODE=${6:-enter}
+
+case ${DETACH_MODE} in
+    enter | sigint) ;;
+    *)
+        echo "Error: unknown detach mode '${DETACH_MODE}'"
+        exit 1
+        ;;
+esac
 
 # Seconds to profile before triggering the detach.
 SETTLE=3
@@ -77,12 +111,14 @@ echo "Launching test application: ${TEST_APP}"
 LD_PRELOAD=${ROCPROF_PRELOAD} ${TEST_APP} &
 APP_PID=$!
 
-# The workload outlives an early exit under `set -e`, and while it lives it holds this
-# script's stdout open, so ctest would block until its timeout.
+# The workload and the profiler outlive an early exit under `set -e`, and while they
+# live they hold this script's output open, so ctest would block until its timeout.
 cleanup_app() {
-    if kill -0 ${APP_PID} 2>/dev/null; then
-        kill -9 ${APP_PID} 2>/dev/null
-    fi
+    for pid in ${ROCPROF_PID} ${APP_PID}; do
+        if kill -0 ${pid} 2>/dev/null; then
+            kill -9 ${pid} 2>/dev/null
+        fi
+    done
 }
 trap cleanup_app EXIT
 
@@ -111,40 +147,39 @@ ROCPROFV3_ARGS=(
     --log-level ${LOG_LEVEL}
 )
 
-echo "Attaching to PID $APP_PID, detaching via '${DETACH_MODE}' after ${SETTLE}s..."
+# Hold stdin open so the prompt blocks instead of reaching EOF; the detach is then
+# triggered only by the newline or SIGINT sent below.
+FIFO=${OUTPUT_DIR}/${OUTPUT_SUBDIR}/stdin.fifo
+ROCPROF_LOG=${OUTPUT_DIR}/${OUTPUT_SUBDIR}/rocprofv3.log
+mkfifo ${FIFO}
+exec 3<>${FIFO}
+
+echo "Attaching to PID $APP_PID..."
+LD_PRELOAD=${ROCPROF_PRELOAD} ${ROCPROFV3} "${ROCPROFV3_ARGS[@]}" <${FIFO} >${ROCPROF_LOG} &
+ROCPROF_PID=$!
+
+wait_for_detach_prompt ${ROCPROF_PID} ${ROCPROF_LOG}
+
+echo "Profiling for ${SETTLE}s before detaching via '${DETACH_MODE}'..."
+sleep ${SETTLE}
 
 case ${DETACH_MODE} in
     enter)
-        # Feed the newline that the "Press Enter to detach..." prompt waits for.
-        (
-            sleep ${SETTLE}
-            printf '\n'
-        ) | LD_PRELOAD=${ROCPROF_PRELOAD} ${ROCPROFV3} "${ROCPROFV3_ARGS[@]}"
-        ROCPROF_EXIT_CODE=${PIPESTATUS[1]}
+        printf '\n' >&3
         ;;
     sigint)
-        # Hold stdin open so the prompt blocks instead of reaching EOF, leaving SIGINT
-        # as the only way out.
-        FIFO=${OUTPUT_DIR}/${OUTPUT_SUBDIR}/stdin.fifo
-        mkfifo ${FIFO}
-        exec 3<>${FIFO}
-        LD_PRELOAD=${ROCPROF_PRELOAD} ${ROCPROFV3} "${ROCPROFV3_ARGS[@]}" <${FIFO} &
-        ROCPROF_PID=$!
-        sleep ${SETTLE}
         echo "Sending SIGINT to rocprofv3 (PID ${ROCPROF_PID})..."
         kill -2 ${ROCPROF_PID}
-        set +e
-        wait ${ROCPROF_PID}
-        ROCPROF_EXIT_CODE=$?
-        set -e
-        exec 3>&-
-        rm -f ${FIFO}
-        ;;
-    *)
-        echo "Error: unknown detach mode '${DETACH_MODE}'"
-        exit 1
         ;;
 esac
+
+set +e
+wait ${ROCPROF_PID}
+ROCPROF_EXIT_CODE=$?
+set -e
+exec 3>&-
+rm -f ${FIFO}
+cat ${ROCPROF_LOG}
 
 if [ ${ROCPROF_EXIT_CODE} -ne 0 ]; then
     echo "rocprofv3 attach test failed with exit code ${ROCPROF_EXIT_CODE}"
