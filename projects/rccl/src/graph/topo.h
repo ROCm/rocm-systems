@@ -17,7 +17,13 @@
 #include <string.h>
 
 #define LOC_BW 5000.0
-// Bw of the on-package fabric between the compute partitions of one physical device.
+// Bw of the path between the compute partitions of one physical device. Partitions share HBM
+// rather than crossing a link, so a sibling access measures the same as a local one: 529 GB/s on
+// an MI300X CPX partition, against 48 GB/s for a real XGMI hop. They share one pool rather than
+// owning independent links -- eight concurrent sibling pairs reach 1877 GB/s in aggregate, 235
+// each. The exact figure is not load-bearing: 529, 1877 and 2618 all yield the same graphs. It
+// only has to stay well clear of what ncclTopoSearch spends on one hop, which an XGMI width does
+// not -- see ncclTopoConnectMloPartSiblings().
 #define MLOPART_LOC_BW 2618.0
 #define SM60_NVLINK_BW 18.0
 #define SM70_NVLINK_BW 20.0
