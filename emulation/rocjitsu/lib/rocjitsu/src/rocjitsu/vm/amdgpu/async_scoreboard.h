@@ -177,6 +177,20 @@ public:
       ++async_execution::stats.full;
       return false;
     }
+    if (active_memory_wait_check) {
+      // The upper footprint bank contains ACC registers, which are not memory
+      // destinations. High VGPRs are rejected by footprint() and run inline.
+      for (unsigned r = 0; r < async_execution::Access::kRegistersPerBank; ++r) {
+        if (access->reads[r])
+          active_memory_wait_check->access({RegClass::VGPR, static_cast<uint16_t>(r), 1},
+                                           wf_.exec(), MemoryWaitScoreboard::kFullDwordByteMask,
+                                           false);
+        if (access->writes[r])
+          active_memory_wait_check->access({RegClass::VGPR, static_cast<uint16_t>(r), 1},
+                                           wf_.exec(), MemoryWaitScoreboard::kFullDwordByteMask,
+                                           true);
+      }
+    }
     materialize();
     if (!arithmetic_)
       arithmetic_.emplace(pool_);

@@ -116,7 +116,7 @@ public:
                 auto it = METRIC_MAP.find(stat.name);
                 if(it != METRIC_MAP.end())
                 {
-                    nic_metrics.*(it->second) = stat.value;
+                    nic_metrics.*it->second = stat.value;
                 }
             }
         } catch(const std::runtime_error& e)

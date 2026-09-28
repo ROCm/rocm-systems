@@ -8,7 +8,7 @@
 
 #include "gin_anvil_plugin_test_stubs.h"
 
-#include <gin_anvil/sdma_factory.h>
+#include "gin/gin_anvil_sdma_factory.h"
 
 #include "bootstrap.h"
 #include "debug.h"
@@ -130,11 +130,16 @@ extern "C" int gin_anvil_sdma_create(int nRanks, int myRank, int my_device_id,
   }
   if (hipExtMallocWithFlags(reinterpret_cast<void**>(&dirty), sizeof(uint64_t),
                             hipDeviceMallocFinegrained) != hipSuccess) {
-    hipFree(row);
+    if (hipFree(row) != hipSuccess) fprintf(stderr, "hipFree(row) failed in stub cleanup\n");
     delete impl;
     return -1;
   }
-  (void)hipMemset(dirty, 0, sizeof(uint64_t));
+  if (hipMemset(dirty, 0, sizeof(uint64_t)) != hipSuccess) {
+    if (hipFree(row) != hipSuccess) fprintf(stderr, "hipFree(row) failed in stub cleanup\n");
+    if (hipFree(dirty) != hipSuccess) fprintf(stderr, "hipFree(dirty) failed in stub cleanup\n");
+    delete impl;
+    return -1;
+  }
   impl->deviceHandles_d = row;
   impl->sdmaDirty_d = dirty;
 
@@ -147,8 +152,10 @@ extern "C" int gin_anvil_sdma_create(int nRanks, int myRank, int my_device_id,
 extern "C" void gin_anvil_sdma_destroy(gin_anvil_sdma_handle_t handle) {
   if (!handle) return;
   auto* impl = reinterpret_cast<GinAnvilPluginStubs::FakeSdmaOpaque*>(handle);
-  if (impl->deviceHandles_d) hipFree(impl->deviceHandles_d);
-  if (impl->sdmaDirty_d) hipFree(impl->sdmaDirty_d);
+  if (impl->deviceHandles_d && hipFree(impl->deviceHandles_d) != hipSuccess)
+    fprintf(stderr, "hipFree(deviceHandles_d) failed in stub destroy\n");
+  if (impl->sdmaDirty_d && hipFree(impl->sdmaDirty_d) != hipSuccess)
+    fprintf(stderr, "hipFree(sdmaDirty_d) failed in stub destroy\n");
   delete impl;
 }
 

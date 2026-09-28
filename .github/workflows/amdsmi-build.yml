@@ -149,7 +149,13 @@ jobs:
         include:
           - { os: Ubuntu20,    package_format: deb, arch_suffix: _amd64.deb }
           - { os: Ubuntu22,    package_format: deb, arch_suffix: _amd64.deb }
-          - { os: Debian10,    package_format: deb, arch_suffix: _amd64.deb }
+          # The internal registry has no debian-12/13, so these two use the
+          # official images, pinned by digest. They ship no build tooling;
+          # run_amdsmi_build.py installs it.
+          - { os: Debian12,    package_format: deb, arch_suffix: _amd64.deb,
+              image: "debian:12@sha256:6ebd97fa83deb272194a2cf015b3d26a4d538e9ad3a7a79d544c8af5b0a01443" } # bookworm, 2026-08-24
+          - { os: Debian13,    package_format: deb, arch_suffix: _amd64.deb,
+              image: "debian:13@sha256:f324c7ff54321e8d9c588493a20244965938ce0aa50bbd1022d38010e9ffc4b1" } # trixie, 2026-08-24
           - { os: SLES,        package_format: rpm, arch_suffix: .rpm }
           - { os: RHEL8,       package_format: rpm, arch_suffix: .rpm }
           - { os: RHEL9,       package_format: rpm, arch_suffix: .rpm }
@@ -157,10 +163,28 @@ jobs:
           - { os: AlmaLinux8,  package_format: rpm, arch_suffix: .rpm }
           - { os: AzureLinux3, package_format: rpm, arch_suffix: .rpm }
     container:
-      image: ${{ vars[format('{0}_DOCKER_IMAGE', matrix.os)] }}
+      image: ${{ matrix.image || vars[format('{0}_DOCKER_IMAGE', matrix.os)] }}
       options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules -u root
 
     steps:
+      # An empty container image does not fail the job: it runs on the bare
+      # self-hosted runner instead, unsandboxed.
+      - name: Verify container image is configured
+        run: |
+          if [ -z "${{ matrix.image || vars[format('{0}_DOCKER_IMAGE', matrix.os)] }}" ]; then
+            echo "::error::No image for ${{ matrix.os }}: set the ${{ matrix.os }}_DOCKER_IMAGE repository variable"
+            exit 1
+          fi
+
+      # The official Debian images carry neither git, which actions/checkout
+      # needs to clone rather than fall back to a tarball, nor python3, which
+      # launches the build script.
+      - name: Bootstrap git and python3
+        run: |
+          command -v git >/dev/null && command -v python3 >/dev/null && exit 0
+          apt-get update
+          apt-get install -y --no-install-recommends git python3 ca-certificates
+
       # rocm-systems is a large monorepo; only the amdsmi project and this
       # workflow are needed, so sparse-checkout keeps the fetch cheap.
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -191,8 +215,8 @@ jobs:
         run: |
           set -euo pipefail
           # The script autodetects package manager, format, and distro
-          # quirks (Debian10 archived repos, RHEL10/AlmaLinux8 QA_RPATHS,
-          # AzureLinux3 more_itertools, etc.) from /etc/os-release.
+          # quirks (RHEL10/AlmaLinux8 QA_RPATHS, AzureLinux3
+          # more_itertools, etc.) from /etc/os-release.
           python3 "${{ env.PROJECT_DIR }}/tests/amdsmi_build/run_amdsmi_build.py" \
             --project-dir "${{ env.PROJECT_DIR }}" \
             --os-label "${{ matrix.os }}" \

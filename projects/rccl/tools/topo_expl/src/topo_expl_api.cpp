@@ -179,6 +179,9 @@ TopoExplResult topoExplCreate(
       ctx->comms[i].nRanks = ctx->nRanks;
       ctx->comms[i].pxnDisable      = RCCL_VALUE_UNSET;
       ctx->comms[i].p2pNetChunkSize = RCCL_VALUE_UNSET;
+      // ncclTopoComputeP2pChannelsPerPeer normally sets this, but topo_expl calls only
+      // ncclTopoComputeP2pChannels. nRanks is what it resolves an unset maxP2pPeers to.
+      ctx->comms[i].p2pMaxPeers     = ctx->nRanks;
       TOPO_NCCLCHECK(ncclCalloc(&ctx->comms[i].connectSend, NCCL_MAX_CONNS * ctx->nRanks));
       TOPO_NCCLCHECK(ncclCalloc(&ctx->comms[i].connectRecv, NCCL_MAX_CONNS * ctx->nRanks));
       

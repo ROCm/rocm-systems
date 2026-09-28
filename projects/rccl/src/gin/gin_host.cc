@@ -547,6 +547,7 @@ ncclResult_t ncclGinDeregister(struct ncclComm* comm,
     struct ncclGinBackendState* backend = &ginState->backends[backendIdx];
     for (int commIdx = 0; commIdx < backend->ginCommCount; commIdx++) {
       int slot = backendIdx * NCCL_GIN_MAX_CONNECTIONS + commIdx;
+      if (ginHostWins[slot] == nullptr) continue;
       NCCLCHECK(backend->ncclGin->deregMrSym(backend->ginComms[commIdx], ginHostWins[slot]));
     }
   }
