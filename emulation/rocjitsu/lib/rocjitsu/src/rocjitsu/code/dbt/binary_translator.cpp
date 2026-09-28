@@ -5,6 +5,7 @@
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/analysis/control_flow.h"
 #include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/analysis/exec_state.h"
 #include "rocjitsu/code/analysis/gfx1250_vgpr_msb.h"
@@ -3751,10 +3752,12 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
     // Raw marker bytes are only candidates. Preserve a pool for this kernel
     // when either its marker and skip are adjacent decoded instructions in this
     // CFG scope, a reachable private slot proves that the kernel uses it, or a
-    // reachable direct branch immediately before the pool skips exactly to the
-    // first instruction after it. The latter two forms cover used and unused
-    // pools whose headers became unreachable after relocation. Candidate
-    // discovery already proved that every private slot is a one-word direct
+    // reachable non-fallthrough terminator immediately before the pool keeps
+    // execution outside it. The latter two forms cover used and unused pools
+    // whose headers became unreachable after relocation. A preceding direct
+    // branch can be a loop back edge or can skip additional instructions after
+    // the pool, so its target need not be the first instruction after the pool.
+    // Candidate discovery already proved that every private slot is a one-word direct
     // branch; requiring reachable code here rejects marker-shaped literal data
     // and keeps preservation local to the kernel that owns the generated pool.
     constexpr uint64_t kGeneratedIslandPoolWords =
@@ -3813,11 +3816,19 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
                                       static_cast<int64_t>(*delta);
           }
         }
-        const bool reachable_skip_over_pool =
-            preceding_terminator != nullptr && preceding_terminator->mnemonic() == "s_branch" &&
-            source_instruction_by_offset.contains(pool_end) && preceding_branch_target >= 0 &&
-            static_cast<uint64_t>(preceding_branch_target) == pool_end;
-        if (!reachable_header && !reachable_slot && !reachable_skip_over_pool)
+        const bool preceding_direct_branch_away_from_pool =
+            preceding_terminator != nullptr && (preceding_terminator->flags() & BRANCH) != 0 &&
+            (preceding_terminator->flags() & COND_BRANCH) == 0 && preceding_branch_target >= 0 &&
+            source_instruction_by_offset.contains(static_cast<uint64_t>(preceding_branch_target)) &&
+            (static_cast<uint64_t>(preceding_branch_target) < pool_offset ||
+             static_cast<uint64_t>(preceding_branch_target) >= pool_end);
+        const bool preceding_non_direct_terminator =
+            preceding_terminator != nullptr &&
+            (is_program_path_terminator(*preceding_terminator) ||
+             (preceding_terminator->flags() & INDIRECT_BRANCH) != 0);
+        const bool reachable_non_fallthrough_before_pool =
+            preceding_direct_branch_away_from_pool || preceding_non_direct_terminator;
+        if (!reachable_header && !reachable_slot && !reachable_non_fallthrough_before_pool)
           continue;
 
         generated_island_pool_offsets.insert(pool_offset);

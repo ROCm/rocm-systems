@@ -1,8 +1,36 @@
 {
   "expected_failures": {
-    "a3b66d0a9b5b3e0f35526296659792339c2e0a69adf2497f6b4f24f4275c4bc2": {
+    "2039b7ca01182a0f6707efc642a2c8993f78e1a4e66b153bc7f293c4088656fe": {
       "kind": "memory-limit",
-      "reason": "RCCL code object exceeds the per-object DBT memory limit in indirect-branch discovery"
+      "reason": "Idempotence verification of this roughly 604 MiB object exceeds the 4 GiB corpus-process RSS limit."
+    },
+    "230ee131988736666ad59c1d515036ee800ef85ef639bc45ff475e89b12ffb8c": {
+      "kind": "translation-error",
+      "reason": "Unreferenced externally visible STT_FUNC split points overlap compacted kernel text and perturb second-pass layout.",
+      "returncode": 5,
+      "stderr_regex": "translation output is not byte-idempotent: section '\\.text' first differs at 0x84"
+    },
+    "73c673e323c616f35ae0ba77ff2bda795d8c2ff1b3401ed78e723603d5cd2eff": {
+      "kind": "memory-limit",
+      "reason": "Idempotence verification of this roughly 604 MiB object exceeds the 4 GiB corpus-process RSS limit."
+    },
+    "7a5661a16f2141ef83492c3ee61862243383e832c4af726926f7097d323d00f7": {
+      "kind": "translation-error",
+      "reason": "Target recovery for this relocated s_swap_pc_i64 is not implemented.",
+      "returncode": 3,
+      "stderr_regex": "legalization \\.text\\+0x3b338 s_swap_pc_i64: indirect branch or call target recovery is not implemented for relocated kernel text"
+    },
+    "942b1ca3ec85c12b4d5defe8e2d0b67a27680a08844903f1fd87998f37c8a271": {
+      "kind": "translation-error",
+      "reason": "The first-pass output exposes an s_set_pc_i64 whose target recovery is not implemented on the verification pass.",
+      "returncode": 5,
+      "stderr_regex": "idempotence error: legalization \\.text\\+0xc3b4 s_set_pc_i64: indirect branch or call target recovery is not implemented for relocated kernel text"
+    },
+    "cf914d39eeec2127ef882b1c192370f83cabf0826d7b12e09fb93353e81317a7": {
+      "kind": "translation-error",
+      "reason": "Target recovery for this relocated s_swap_pc_i64 is not implemented.",
+      "returncode": 3,
+      "stderr_regex": "legalization \\.text\\+0x3b138 s_swap_pc_i64: indirect branch or call target recovery is not implemented for relocated kernel text"
     }
   },
   "input_revision": "b0",

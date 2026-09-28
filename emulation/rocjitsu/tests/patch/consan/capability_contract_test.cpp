@@ -470,6 +470,8 @@ TEST(ConSanCapabilityContract, TargetProfileValidatorRejectsEveryMalformedInvari
                  [](auto &profiles) { profiles[0].target = ROCJITSU_CODE_TARGET_INVALID; });
   expect_invalid("invalid architecture",
                  [](auto &profiles) { profiles[0].arch = ROCJITSU_CODE_ARCH_INVALID; });
+  expect_invalid("missing program analysis operations",
+                 [](auto &profiles) { profiles[0].program_analysis = nullptr; });
   expect_invalid("missing wave64 allocation granularity",
                  [](auto &profiles) { profiles[0].vgpr_allocation_granularity_wave64 = 0u; });
   expect_invalid("missing SGPR allocation granularity",

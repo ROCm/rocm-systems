@@ -195,7 +195,7 @@ __global__ __launch_bounds__(
     out[output_base + i] = values[i];
 }
 
-__attribute__((amdgpu_num_vgpr(256))) __global__
+__attribute__((amdgpu_waves_per_eu(1, 1))) __global__
 __launch_bounds__(64) void relocated_b128_load_after_barrier_for_instrumentation(uint32_t *out) {
   __shared__ uint4 lds[1];
   const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
@@ -216,7 +216,7 @@ __launch_bounds__(64) void relocated_b128_load_after_barrier_for_instrumentation
   __syncthreads();
 }
 
-__attribute__((amdgpu_num_vgpr(256))) __global__
+__attribute__((amdgpu_waves_per_eu(1, 1))) __global__
 __launch_bounds__(64) void full_vgpr_file_test_kernel_for_instrumentation(uint32_t *out) {
   __shared__ uint32_t lds[1];
   const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
@@ -272,8 +272,8 @@ __global__ __launch_bounds__(64) void shared_atomic_helper_caller_a(uint32_t *co
                                                                     uint32_t *out) {
   __shared__ uint32_t lds;
   const auto lds_addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&lds) & 0xFFFFu);
-  // Force a real 32-VGPR descriptor allocation. The amdgpu_num_vgpr attribute
-  // is only an upper bound and does not create a spillable architectural
+  // Force a real 32-VGPR descriptor allocation. Resource-control attributes
+  // only constrain allocation and do not create a spillable architectural
   // window for this otherwise tiny caller.
   asm volatile("v_mov_b32 v31, 0" ::: "v31");
   if (threadIdx.x == 0) {

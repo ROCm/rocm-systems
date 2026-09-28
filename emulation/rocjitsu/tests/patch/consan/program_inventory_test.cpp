@@ -892,7 +892,7 @@ TEST(ConSanProgramInventory, SemanticRangeDeduplicationPreservesEveryAccessRecor
 
 TEST(ConSanProgramInventory, SingleRangeNativeOffsetsPreferNormalizedAtomicFacet) {
   const std::array<uint8_t, 8> bytes = {0x34, 0x12, 0, 0, 0, 0, 0, 0};
-  for (const auto [kind, decoded_atomic_offset, expected] : {
+  for (const auto &[kind, decoded_atomic_offset, expected] : {
            std::tuple{LdsAccessKind::Atomic, std::optional<int32_t>{0x56},
                       std::optional<int64_t>{0x56}},
            std::tuple{LdsAccessKind::Read, std::optional<int32_t>{},
@@ -925,7 +925,7 @@ TEST(ConSanProgramInventory, SingleRangeNativeOffsetsPreferNormalizedAtomicFacet
 
 TEST(ConSanProgramInventory, AccessOnlyNativeAtomicOffsetsUseTheTargetEncodingFact) {
   const std::array<uint8_t, 8> bytes = {0x34, 0x12, 0, 0, 0, 0, 0, 0};
-  for (const auto [arch, target, expected] : {
+  for (const auto &[arch, target, expected] : {
            std::tuple{ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_TARGET_GFX942, int64_t{0x34}},
            std::tuple{ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_TARGET_GFX950, int64_t{0x34}},
            std::tuple{ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_TARGET_GFX1100, int64_t{0x1234}},

@@ -49,7 +49,7 @@ cd rocm-systems/emulation/rocjitsu
 uv venv --python 3.12 .venv
 source .venv/bin/activate
 uv pip install --prerelease allow \
-  --index-url https://rocm.nightlies.amd.com/whl-multi-arch/ \
+  --index-url https://nightly.repo.amd.com/rocm/whl-next/ \
   "rocm[libraries,devel,device-gfx1250]"
 rocm-sdk init
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
@@ -127,7 +127,7 @@ Install the gfx1250 nightly wheel in a virtual environment:
 uv venv --python 3.12 .venv-gfx1250
 source .venv-gfx1250/bin/activate
 uv pip install --prerelease allow \
-  --index-url https://rocm.nightlies.amd.com/whl-multi-arch/ \
+  --index-url https://nightly.repo.amd.com/rocm/whl-next/ \
   amd-torch-device-gfx1250 numpy
 ```
 

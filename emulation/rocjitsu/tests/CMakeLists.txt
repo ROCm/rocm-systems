@@ -1016,6 +1016,13 @@ set_property(
 )
 rj_configure_target(waitcheck_c_header_test PRIVATE_INCLUDES WARNINGS)
 rj_add_test(NAME RjWaitcheck.CHeader COMMAND waitcheck_c_header_test LABELS waitcheck)
+set_property(
+    TEST RjWaitcheck.CHeader
+    APPEND
+    PROPERTY
+        ENVIRONMENT_MODIFICATION
+            "LD_LIBRARY_PATH=path_list_prepend:$<TARGET_FILE_DIR:rocjitsu_shared>"
+)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(waitcheck_dlopen_test analysis/waitcheck_dlopen_test.cpp)
@@ -3851,7 +3858,7 @@ if(RJ_ENABLE_HIP_TESTS)
         endforeach()
         set(HIP_EXTRA_LIBS)
         if(ARG_EXTRA_LIBS)
-            set(HIP_EXTRA_LIBS -x none ${ARG_EXTRA_LIBS})
+            set(HIP_EXTRA_LIBS ${ARG_EXTRA_LIBS})
         endif()
         set(_rj_hip_compiler_command ${AMDCXX})
         if(CMAKE_HIP_COMPILER_LAUNCHER)

@@ -23,7 +23,11 @@ constexpr std::array kProfiles = {
     kGfx1201TargetProfile, kGfx1250TargetProfile,
 };
 
-static_assert(target_profiles_are_valid(kProfiles));
+// GCC cannot constant-evaluate a null comparison against operation-table
+// addresses defined in other translation units. Validate the value-only
+// contract here; target_profiles_are_valid() validates the registrations at
+// runtime and is covered by the capability-contract tests.
+static_assert(target_profile_values_are_valid(kProfiles));
 static_assert(!kGfx942TargetProfile.requires_split_two_address_lds_relocation);
 static_assert(!kGfx950TargetProfile.requires_split_two_address_lds_relocation);
 static_assert(!kGfx1100TargetProfile.requires_split_two_address_lds_relocation);

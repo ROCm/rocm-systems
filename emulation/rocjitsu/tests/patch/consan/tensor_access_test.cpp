@@ -40,8 +40,8 @@ TEST(ConSanTensor, SuperColliderPlansFullWaveSpillAndDescriptorSafeScalarState) 
   constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA5;
   for (bool store : {false, true}) {
     SCOPED_TRACE(store);
-    for (const auto [alias, bank] : {std::pair{false, 0u}, std::pair{true, 0u},
-                                     std::pair{false, 0x55u}, std::pair{true, 0x55u}}) {
+    for (const auto &[alias, bank] : {std::pair{false, 0u}, std::pair{true, 0u},
+                                      std::pair{false, 0x55u}, std::pair{true, 0x55u}}) {
       SCOPED_TRACE(alias);
       SCOPED_TRACE(bank);
       const auto tensor = cdna5::build_vimage(store ? cdna5::kTensorStoreFromLdsVimage
@@ -1314,8 +1314,8 @@ TEST(ConSanTensor, ValueComparisonPreservesStateAndDefersExactlyOneCompletionArr
   constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA5;
   for (bool store : {false, true}) {
     SCOPED_TRACE(store);
-    for (const auto [alias, wave_delay] : {std::pair{false, false}, std::pair{true, false},
-                                           std::pair{false, true}, std::pair{true, true}}) {
+    for (const auto &[alias, wave_delay] : {std::pair{false, false}, std::pair{true, false},
+                                            std::pair{false, true}, std::pair{true, true}}) {
       SCOPED_TRACE(alias);
       SCOPED_TRACE(wave_delay);
       constexpr uint16_t scratch = 8;

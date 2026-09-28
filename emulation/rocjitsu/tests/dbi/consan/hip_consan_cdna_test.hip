@@ -92,7 +92,7 @@ bool set_report_buffer_env(void *report, size_t report_bytes) {
          setenv("RJ_CONSAN_REPORT_BUFFER_SIZE", size, 1) == 0;
 }
 
-__attribute__((amdgpu_num_vgpr(256))) __global__
+__attribute__((amdgpu_waves_per_eu(1, 1))) __global__
 __launch_bounds__(64) void cdna_forced_spill_test_kernel_for_instrumentation(uint32_t *out) {
   __shared__ uint32_t lds[1];
   const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
@@ -119,7 +119,7 @@ __launch_bounds__(64) void cdna_forced_spill_test_kernel_for_instrumentation(uin
     out[output_base + i] = values[i];
 }
 
-__attribute__((amdgpu_num_vgpr(256))) __global__
+__attribute__((amdgpu_waves_per_eu(1, 1))) __global__
 __launch_bounds__(64) void cdna_barrier_forced_spill_kernel_for_instrumentation(uint32_t *out) {
   __shared__ uint32_t lds[1];
   const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
@@ -151,7 +151,7 @@ __launch_bounds__(64) void cdna_barrier_forced_spill_kernel_for_instrumentation(
     out[output_base + i] = values[i];
 }
 
-__attribute__((amdgpu_num_vgpr(256))) __global__ __launch_bounds__(
+__attribute__((amdgpu_waves_per_eu(1, 1))) __global__ __launch_bounds__(
     64) void cdna_atomic_forced_spill_kernel_for_instrumentation(uint32_t *vector_atomic_value,
                                                                  uint32_t *scalar_atomic_value,
                                                                  uint32_t *out) {
@@ -226,7 +226,7 @@ __device__ __noinline__ uint32_t cdna_shared_lds_helper_for_instrumentation(uint
   return value ^ 0x51a7ed00u;
 }
 
-__attribute__((amdgpu_num_vgpr(256))) __global__
+__attribute__((amdgpu_waves_per_eu(1, 1))) __global__
 __launch_bounds__(64) void cdna_shared_helper_caller_a(uint32_t *out) {
   __shared__ uint32_t lds[1];
   const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
@@ -235,7 +235,7 @@ __launch_bounds__(64) void cdna_shared_helper_caller_a(uint32_t *out) {
   out[tid] = cdna_shared_lds_helper_for_instrumentation(lds_addr, 0xa0000000u | tid);
 }
 
-__attribute__((amdgpu_num_vgpr(256))) __global__
+__attribute__((amdgpu_waves_per_eu(1, 1))) __global__
 __launch_bounds__(64) void cdna_shared_helper_caller_b(uint32_t *out) {
   __shared__ uint32_t lds[1];
   const uint32_t tid = static_cast<uint32_t>(threadIdx.x);

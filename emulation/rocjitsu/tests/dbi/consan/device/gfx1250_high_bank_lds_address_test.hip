@@ -50,8 +50,7 @@ __device__ __forceinline__ uint32_t load_high_bank_address(uint32_t address) {
 
 // Restricting occupancy to one wave per execution unit makes the code-object
 // descriptor reserve enough physical VGPRs for the explicit v286 operand.
-// The amdgpu_num_vgpr attribute remains an upper bound for register allocation.
-__attribute__((amdgpu_num_vgpr(512), amdgpu_waves_per_eu(1, 1))) __global__
+__attribute__((amdgpu_waves_per_eu(1, 1))) __global__
 __launch_bounds__(kThreadCount) void gfx1250_high_bank_lds_address_for_consan(DeviceState *state) {
   __shared__ uint32_t staged[kWaveSize];
   const uint32_t tid = threadIdx.x;

@@ -461,7 +461,7 @@ template <typename Values>
 
 template <std::size_t N>
 [[nodiscard]] constexpr bool
-target_profiles_are_valid(const std::array<TargetProfile, N> &profiles) {
+target_profile_values_are_valid(const std::array<TargetProfile, N> &profiles) {
   constexpr uint16_t all_form_bits =
       static_cast<uint16_t>((1u << static_cast<uint8_t>(CapabilityForm::Count)) - 1u);
   if (profiles.empty())
@@ -470,7 +470,7 @@ target_profiles_are_valid(const std::array<TargetProfile, N> &profiles) {
     const TargetProfile &profile = profiles[lhs];
     const auto &workgroup_identity = profile.command_processor_workgroup_identity;
     if (profile.target == ROCJITSU_CODE_TARGET_INVALID ||
-        profile.arch == ROCJITSU_CODE_ARCH_INVALID || profile.program_analysis == nullptr ||
+        profile.arch == ROCJITSU_CODE_ARCH_INVALID ||
         (profile.flat_compare_swap_data_pair_alignment != 1u &&
          profile.flat_compare_swap_data_pair_alignment != 2u) ||
         profile.vgpr_allocation_granularity_wave64 == 0u ||
@@ -557,6 +557,17 @@ target_profiles_are_valid(const std::array<TargetProfile, N> &profiles) {
       if (profile.target == profiles[rhs].target || profile.arch == profiles[rhs].arch)
         return false;
     }
+  }
+  return true;
+}
+
+template <std::size_t N>
+[[nodiscard]] bool target_profiles_are_valid(const std::array<TargetProfile, N> &profiles) {
+  if (!target_profile_values_are_valid(profiles))
+    return false;
+  for (const TargetProfile &profile : profiles) {
+    if (profile.program_analysis == nullptr)
+      return false;
   }
   return true;
 }
