@@ -58,7 +58,8 @@ struct DbiEntryStorage {
 ///        so a kernel can place storage below them.
 /// @param error_out Optional; filled with the reason on failure.
 /// @returns The chosen storage, or nullopt when the allocation leaves no
-///          aligned run of @ref kDbiEntryStorageRegisters above the floor.
+///          aligned run of @ref kDbiEntryStorageRegisters above the floor, or
+///          when @p blocks has `s_movrel*` access that the floor cannot bound.
 [[nodiscard]] std::optional<DbiEntryStorage>
 plan_dbi_entry_storage(KernelBlockScope blocks, const rocr::llvm::amdhsa::kernel_descriptor_t &desc,
                        rj_code_arch_t arch, uint32_t kernel_sgpr_count, const RegisterSet &reserved,

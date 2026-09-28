@@ -218,6 +218,19 @@ TEST(PlanDbiEntryStorage, FailsClosedWhenTheFloorIsAtOrPastTheAllocation) {
   EXPECT_FALSE(error.empty());
 }
 
+// s_movreld writes the SGPR M0 selects, which the operand scan cannot see, so
+// no run above the floor is provably unused.
+TEST(PlanDbiEntryStorage, FailsClosedOnRelativeSgprAccess) {
+  constexpr uint32_t kSMovreldB32S4S2 = 0xBE842C02u; // s_movreld_b32 s4, s2
+  const Kernel kernel({kSMovreldB32S4S2, build_s_endpgm(kArch)});
+  std::string error;
+  const auto storage =
+      plan_dbi_entry_storage(kernel.scope(), descriptor(/*user_sgpr_count=*/0), kArch,
+                             /*kernel_sgpr_count=*/40, link_pair(), &error);
+  EXPECT_FALSE(storage.has_value());
+  EXPECT_NE(error.find("relative SGPR access"), std::string::npos) << error;
+}
+
 // The bound is the lower of the kernel's own allocation and the cross-ISA
 // allocatable maximum, so a kernel advertising more SGPRs than any target
 // allocates still cannot place storage past REGISTER_SET_ALLOCATABLE_SGPRS.
