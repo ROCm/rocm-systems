@@ -1838,15 +1838,12 @@ namespace elf {
       return true;
     }
 
-    // Size-0 / pointer-only discovery. Do not index the section-header table:
-    // e_shoff is typically at EOF and is untrusted without an allocation bound.
-    // Standard AMDGPU code objects (ld.lld) place the SHT last, so the SHT span
-    // is the file size. If section file data sits after the SHT, PT_LOAD
-    // p_offset+p_filesz still covers it; those program headers are walked only
-    // when the PHDR table immediately follows the ELF header (e_phoff ==
-    // sizeof(Elf64_Ehdr)), which is the SysV layout and is adjacent to bytes
-    // already treated as the start of the image. A far e_phoff is not followed.
-    uint64_t UnboundedImageSize(const Elf64_Ehdr* ehdr, const void* emi) {
+    // Size-0 / pointer-only discovery. Only ELF header fields are read, so no
+    // table is indexed without an allocation bound. Standard AMDGPU code
+    // objects (ld.lld) place the section header table last, so the SHT span is
+    // the image size. The PHDR table span is folded in for layouts that put it
+    // after the SHT.
+    uint64_t UnboundedImageSize(const Elf64_Ehdr* ehdr) {
       uint64_t total = sizeof(Elf64_Ehdr);
 
       uint64_t shdr_table_size =
@@ -1876,25 +1873,6 @@ namespace elf {
         total = phtab_end;
       }
 
-      constexpr uint16_t kMaxNearPhnum = 128;
-      if (ehdr->e_phoff != sizeof(Elf64_Ehdr) || ehdr->e_phnum > kMaxNearPhnum) {
-        return total;
-      }
-
-      const Elf64_Phdr* phdr =
-          reinterpret_cast<const Elf64_Phdr*>(static_cast<const char*>(emi) + ehdr->e_phoff);
-      for (uint16_t i = 0; i < ehdr->e_phnum; ++i) {
-        if (phdr[i].p_type == PT_NULL) {
-          continue;
-        }
-        uint64_t seg_end = 0;
-        if (!ElfOffsetAdd(phdr[i].p_offset, phdr[i].p_filesz, &seg_end)) {
-          return 0;
-        }
-        if (seg_end > total) {
-          total = seg_end;
-        }
-      }
       return total;
     }
     }  // namespace
@@ -1928,7 +1906,7 @@ namespace elf {
       }
 
       if (!bounded) {
-        return UnboundedImageSize(ehdr, emi);
+        return UnboundedImageSize(ehdr);
       }
 
       if (ehdr->e_shoff >= buffer_size) {

@@ -226,9 +226,8 @@ namespace elf {
     // Returns the in-memory extent of the ELF image at `buffer`.
     // When `buffer_size` is non-zero it is the allocation length and section
     // headers are validated against it. When `buffer_size` is 0 (deprecated
-    // pointer-only load APIs) the section-header table is not walked; size is
-    // the SHT/PHDR table spans from the ELF header, plus PT_LOAD file extents
-    // when the PHDR table immediately follows the ELF header.
+    // pointer-only load APIs) no header table is indexed; size is the SHT and
+    // PHDR table spans taken from ELF header fields.
     uint64_t ElfSize(const void* buffer, size_t buffer_size);
 
     std::string GetNoteString(uint32_t s_size, const char* s);
