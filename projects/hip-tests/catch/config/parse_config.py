@@ -64,6 +64,8 @@ def create_test_definition(
     group, case_name, case_config, platform, os_name, arch, asan=False
 ):
     levels = case_config.get("level", [0, 1, 2])
+    if not isinstance(levels, list):
+        levels = [levels]
     tags = case_config.get("tags", [])
     disabled = case_config.get("disabled", [])
     unsupported = case_config.get("unsupported", [])
