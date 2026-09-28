@@ -39,6 +39,8 @@ template <typename F>
 inline hipError_t ihipGraphExecNodeUpdate(GraphExecBase* graphExec, GraphNode* node,
                                           const F& setParams) {
   std::unique_lock<std::shared_mutex> updateLock(graphExec->execUpdateLock_);
+  graphExec->BeginKernargReuse();
+  MAKE_SCOPE_GUARD(endKernargReuse, [&]() { graphExec->EndKernargReuse(); });
   hipError_t status = setParams();
   if (status != hipSuccess) {
     return status;

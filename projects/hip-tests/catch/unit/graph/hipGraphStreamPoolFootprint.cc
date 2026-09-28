@@ -330,3 +330,187 @@ HIP_TEST_CASE(Unit_hipGraphExecUpdate_KernargFootprint) {
     HIP_CHECK(hipFree(out));
   }
 }
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Repeated idle per-node executable updates reuse kernarg storage for both
+ *    kernel nodes and blit-backed memset nodes.
+ *  - A launch after the updates observes the final parameters.
+ * Test source
+ * ------------------------
+ *  - unit/graph/hipGraphStreamPoolFootprint.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.0
+ */
+HIP_TEST_CASE(Unit_hipGraphExecNodeSetParams_KernargFootprint) {
+  constexpr int kUpdates = 8191;
+  constexpr size_t kMaxUpdateGrowth = 4 * 1024 * 1024;
+
+  requireDeviceKernargPool();
+
+  SECTION("kernel node") {
+    int* out = nullptr;
+    HIP_CHECK(hipMalloc(&out, sizeof(int)));
+
+    hipGraph_t graph = nullptr;
+    HIP_CHECK(hipGraphCreate(&graph, 0));
+    LargeKernarg payload = makePayload(0);
+    void* args[] = {&out, &payload};
+    hipKernelNodeParams params = {};
+    params.func = reinterpret_cast<void*>(writeValueKernel);
+    params.gridDim = dim3(1);
+    params.blockDim = dim3(1);
+    params.kernelParams = args;
+
+    hipGraphNode_t node = nullptr;
+    HIP_CHECK(hipGraphAddKernelNode(&node, graph, nullptr, 0, &params));
+    hipGraphExec_t exec = nullptr;
+    HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+
+    auto updateNode = [&](int value) {
+      LargeKernarg updated_payload = makePayload(value);
+      void* updated_args[] = {&out, &updated_payload};
+      hipKernelNodeParams updated_params = params;
+      updated_params.kernelParams = updated_args;
+      HIP_CHECK(hipGraphExecKernelNodeSetParams(exec, node, &updated_params));
+    };
+
+    for (int i = 0; i < 8; ++i) {
+      updateNode(i);
+    }
+    const size_t free_before = freeDeviceMemory();
+    for (int i = 1; i <= kUpdates; ++i) {
+      updateNode(i);
+    }
+    const size_t free_after = freeDeviceMemory();
+    const size_t update_growth = free_before > free_after ? free_before - free_after : 0;
+    INFO("device memory growth over " << kUpdates
+                                      << " kernel-node updates: " << update_growth << " bytes");
+    REQUIRE(update_growth <= kMaxUpdateGrowth);
+
+    HIP_CHECK(hipGraphLaunch(exec, nullptr));
+    HIP_CHECK(hipDeviceSynchronize());
+    int result = 0;
+    HIP_CHECK(hipMemcpy(&result, out, sizeof(int), hipMemcpyDeviceToHost));
+    REQUIRE(result == kUpdates);
+
+    HIP_CHECK(hipGraphExecDestroy(exec));
+    HIP_CHECK(hipGraphDestroy(graph));
+    HIP_CHECK(hipFree(out));
+  }
+
+  SECTION("kernel node while a launch is active") {
+    int* out = nullptr;
+    unsigned int* index = nullptr;
+    unsigned int* host_gate = nullptr;
+    unsigned int* device_gate = nullptr;
+    HIP_CHECK(hipMalloc(&out, 2 * sizeof(int)));
+    HIP_CHECK(hipMalloc(&index, sizeof(unsigned int)));
+    HIP_CHECK(hipMemset(index, 0, sizeof(unsigned int)));
+    HIP_CHECK(hipHostMalloc(&host_gate, sizeof(unsigned int),
+                            hipHostMallocMapped | hipHostMallocCoherent));
+    HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&device_gate), host_gate, 0));
+    *host_gate = 0;
+    GateGuard gate_guard(host_gate);
+
+    hipGraph_t graph = nullptr;
+    HIP_CHECK(hipGraphCreate(&graph, 0));
+    LargeKernarg payload = makePayload(11);
+    void* args[] = {&out, &index, &device_gate, &payload};
+    hipKernelNodeParams params = {};
+    params.func = reinterpret_cast<void*>(waitAndRecordValueKernel);
+    params.gridDim = dim3(1);
+    params.blockDim = dim3(1);
+    params.kernelParams = args;
+
+    hipGraphNode_t node = nullptr;
+    HIP_CHECK(hipGraphAddKernelNode(&node, graph, nullptr, 0, &params));
+    hipGraphExec_t exec = nullptr;
+    HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+    hipStream_t stream = nullptr;
+    HIP_CHECK(hipStreamCreate(&stream));
+
+    HIP_CHECK(hipGraphLaunch(exec, stream));
+
+    LargeKernarg updated_payload = makePayload(22);
+    void* updated_args[] = {&out, &index, &device_gate, &updated_payload};
+    hipKernelNodeParams updated_params = params;
+    updated_params.kernelParams = updated_args;
+    HIP_CHECK(hipGraphExecKernelNodeSetParams(exec, node, &updated_params));
+
+    gate_guard.Open();
+    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipGraphLaunch(exec, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+
+    int result[2] = {};
+    HIP_CHECK(hipMemcpy(result, out, sizeof(result), hipMemcpyDeviceToHost));
+    REQUIRE(result[0] == 11);
+    REQUIRE(result[1] == 22);
+
+    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipGraphExecDestroy(exec));
+    HIP_CHECK(hipGraphDestroy(graph));
+    HIP_CHECK(hipHostFree(host_gate));
+    HIP_CHECK(hipFree(index));
+    HIP_CHECK(hipFree(out));
+  }
+
+  SECTION("blit-backed memset node") {
+    constexpr size_t kWidth = 256;
+    constexpr size_t kHeight = 16;
+    unsigned char* out = nullptr;
+    size_t pitch = 0;
+    HIP_CHECK(hipMallocPitch(&out, &pitch, kWidth, kHeight));
+
+    hipMemsetParams params = {};
+    params.dst = out;
+    params.pitch = pitch;
+    params.value = 0;
+    params.elementSize = 1;
+    params.width = kWidth;
+    params.height = kHeight;
+
+    hipGraph_t graph = nullptr;
+    HIP_CHECK(hipGraphCreate(&graph, 0));
+    hipGraphNode_t node = nullptr;
+    HIP_CHECK(hipGraphAddMemsetNode(&node, graph, nullptr, 0, &params));
+    hipGraphExec_t exec = nullptr;
+    HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+
+    auto updateNode = [&](int value) {
+      hipMemsetParams updated_params = params;
+      updated_params.value = static_cast<unsigned int>(value);
+      HIP_CHECK(hipGraphExecMemsetNodeSetParams(exec, node, &updated_params));
+    };
+
+    for (int i = 0; i < 8; ++i) {
+      updateNode(i);
+    }
+    const size_t free_before = freeDeviceMemory();
+    for (int i = 1; i <= kUpdates; ++i) {
+      updateNode(i);
+    }
+    const size_t free_after = freeDeviceMemory();
+    const size_t update_growth = free_before > free_after ? free_before - free_after : 0;
+    INFO("device memory growth over " << kUpdates
+                                      << " memset-node updates: " << update_growth << " bytes");
+    REQUIRE(update_growth <= kMaxUpdateGrowth);
+
+    HIP_CHECK(hipGraphLaunch(exec, nullptr));
+    HIP_CHECK(hipDeviceSynchronize());
+    std::vector<unsigned char> result(kWidth * kHeight);
+    HIP_CHECK(hipMemcpy2D(result.data(), kWidth, out, pitch, kWidth, kHeight,
+                          hipMemcpyDeviceToHost));
+    const unsigned char expected = static_cast<unsigned char>(kUpdates);
+    for (const unsigned char value : result) {
+      REQUIRE(value == expected);
+    }
+
+    HIP_CHECK(hipGraphExecDestroy(exec));
+    HIP_CHECK(hipGraphDestroy(graph));
+    HIP_CHECK(hipFree(out));
+  }
+}

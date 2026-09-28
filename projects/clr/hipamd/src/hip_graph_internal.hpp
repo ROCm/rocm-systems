@@ -1290,6 +1290,8 @@ class GraphExecBase : public amd::ReferenceCountedObject, public Graph {
   virtual hipError_t Run(hip::Stream* stream) = 0;
   // AQL packet update — no-op on the classic path (PAL has no AQL capture).
   virtual hipError_t UpdateAQLPacket(hip::GraphNode* node) { return hipSuccess; }
+  virtual void BeginKernargReuse(bool allowKernargReuse = true) {}
+  virtual void EndKernargReuse() {}
   virtual void BeginAQLPacketUpdates(bool allowKernargReuse = true) {}
   virtual void EndAQLPacketUpdates() {}
   virtual hipError_t UpdatePacketBatchesForNodeEnableDisable(hip::GraphNode* node, bool isEnabled) {
@@ -1361,6 +1363,8 @@ class GraphExecSegmented : public GraphExecBase {
   // Capture GPU Packets from graph commands
   hipError_t CaptureAQLPackets();
   hipError_t UpdateAQLPacket(hip::GraphNode* node) override;
+  void BeginKernargReuse(bool allowKernargReuse = true) override;
+  void EndKernargReuse() override;
   // No default: on virtuals a default binds to the static type, so callers pass the flag explicitly.
   void BeginAQLPacketUpdates(bool allowKernargReuse) override;
   void EndAQLPacketUpdates() override;
