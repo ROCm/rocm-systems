@@ -679,15 +679,8 @@ static ncclResult_t ncclTopoAddGpuSub(struct ncclXmlNode* xmlPci, struct ncclXml
     NCCLCHECK(xmlGetAttrInt(xmlGpu, "gdr", &gpudeviceNode->dev.gdrSupport));
     NCCLCHECK(ncclTopoConnectNodes(gpudeviceNode, parent, LINK_PCI, bw));
     NCCLCHECK(ncclTopoConnectNodes(parent, gpudeviceNode, LINK_PCI, bw));
-    // add the local link with the existing uGPUs.
-    struct ncclTopoNode* sibDevs[NCCL_TOPO_MLOPART_DEV_MAX];
-    int nSibDevs = 0;
-    NCCLCHECK(ncclTopoGetDevNodes(system, gpudeviceNode->id, sibDevs, &nSibDevs));
-    for (int s = 0; s < nSibDevs; s++) {
-      if (sibDevs[s] == gpudeviceNode) continue;
-      NCCLCHECK(ncclTopoConnectNodes(gpudeviceNode, sibDevs[s], LINK_LOC, MLOPART_LOC_BW));
-      NCCLCHECK(ncclTopoConnectNodes(sibDevs[s], gpudeviceNode, LINK_LOC, MLOPART_LOC_BW));
-    }
+    // Sibling partitions of this device are linked once the XGMI pass has run, see
+    // ncclTopoConnectMloPartSiblings().
   }
 
   struct ncclTopoNode* gpuNode = NULL;
@@ -1146,6 +1139,37 @@ ncclResult_t ncclTopoAddC2c(struct ncclXmlNode* node, struct ncclTopoSystem* sys
   return ncclSuccess;
 }
 
+static bool ncclTopoNodesLinked(struct ncclTopoNode* node, struct ncclTopoNode* remNode) {
+  for (int l = 0; l < node->nlinks; l++)
+    if (node->links[l].remNode == remNode) return true;
+  return false;
+}
+
+// Compute partitions of one physical device (CPX/DPX, carried as MLOPart) reach each other over
+// the on-package fabric, which sysfs reports as XGMI between the partitions' PCI functions, so
+// ncclTopoAddXGMI() has normally already linked their DEV nodes. Cover the case where a platform
+// does not report those links: without a link the partitions are unreachable. The hop is XGMI,
+// not LINK_LOC -- PATH_LOC outranks PATH_NVL in the path search, so a LINK_LOC here would shadow
+// the real XGMI links and hide the peer from everything keyed on PATH_NVL (P2P channel counts,
+// XGMI topology classification), leaving it with the PCIe fallbacks.
+static ncclResult_t ncclTopoConnectMloPartSiblings(struct ncclTopoSystem* system) {
+  for (int d = 0; d < system->nodes[DEV].count; d++) {
+    struct ncclTopoNode* dev = system->nodes[DEV].nodes + d;
+    struct ncclTopoNode* sibDevs[NCCL_TOPO_MLOPART_DEV_MAX];
+    int nSibDevs = 0;
+    NCCLCHECK(ncclTopoGetDevNodes(system, dev->id, sibDevs, &nSibDevs));
+    for (int s = 0; s < nSibDevs; s++) {
+      if (sibDevs[s] == dev || ncclTopoNodesLinked(dev, sibDevs[s])) continue;
+      float xgmiBw = ncclTopoXGMISpeed(dev->dev.gcn);
+      INFO(NCCL_GRAPH, "No XGMI link reported between MLOPart siblings %lx and %lx, assuming %.1f GB/s", dev->id,
+           sibDevs[s]->id, xgmiBw);
+      NCCLCHECK(ncclTopoConnectNodes(dev, sibDevs[s], LINK_NVL, xgmiBw));
+      NCCLCHECK(ncclTopoConnectNodes(sibDevs[s], dev, LINK_NVL, xgmiBw));
+    }
+  }
+  return ncclSuccess;
+}
+
 ncclResult_t ncclTopoGetSystemFromXml(struct ncclXml* xml, struct ncclTopoSystem** topoSystem,
                                       const uint64_t localHostHash) {
   NCCLCHECK(ncclCalloc(topoSystem, 1));
@@ -1177,6 +1201,7 @@ ncclResult_t ncclTopoGetSystemFromXml(struct ncclXml* xml, struct ncclTopoSystem
 #endif
   NCCLCHECK(ncclTopoAddC2c(topNode, *topoSystem, NULL, 0));
   NCCLCHECK(ncclTopoAddPciLinks(topNode, *topoSystem, NULL, 0));
+  NCCLCHECK(ncclTopoConnectMloPartSiblings(*topoSystem));
 
   NCCLCHECK(ncclTopoFlattenBcmSwitches(*topoSystem));
   NCCLCHECK(ncclTopoConnectCpus(*topoSystem));
