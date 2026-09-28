@@ -337,7 +337,7 @@ void ConvertPackedYUYVToPlanarYUV(hipStream_t stream, uint32_t dst_width, uint32
     uint8_t *destination_y, uint8_t *destination_u, uint8_t *destination_v, uint32_t dst_luma_stride_in_bytes,
     uint32_t dst_chroma_stride_in_bytes, const uint8_t *src_image, uint32_t src_image_stride_in_bytes);
 
-// ---- Auto-generated batched param structs + prototypes ----
+// ---- batched param structs + prototypes ----
 
 struct RGBAToRGBBatchParams {
     uint32_t dst_width;
