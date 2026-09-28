@@ -123,9 +123,11 @@ struct cache_policy
             return;
         }
 
-        auto add_process_pmc = [&, socket_id](const char* metric_name, const char* symbol,
-                                              const char* description, const char* units,
-                                              const char* value_type) {
+        auto const add_process_pmc = [&, socket_id](const char* metric_name,
+                                                    const char* symbol,
+                                                    const char* description,
+                                                    const char* units,
+                                                    const char* value_type) {
             registry.add_pmc_info({ .type             = agent_type::cpu,
                                     .agent_type_index = socket_id,
                                     .target_arch      = target_arch,

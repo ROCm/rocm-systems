@@ -197,7 +197,7 @@ toggle_suppression(std::tuple<bool, bool> incoming)
 const auto pre_main_suppression_guard = toggle_suppression({ true, true });
 
 bool
-needs_full_parse(int argc, char** argv)
+needs_full_parse(int argc, char* const* argv)
 {
     for(int arg_idx = 1; arg_idx < argc; ++arg_idx)
     {
@@ -205,7 +205,7 @@ needs_full_parse(int argc, char** argv)
         {
             continue;
         }
-        auto arg = std::string_view{ argv[arg_idx] };
+        auto const arg = std::string_view{ argv[arg_idx] };
         if(arg == "--" || arg == "-?" || arg == "-h" || arg == "--help" ||
            arg == "--version" || arg == "--export-config" ||
            arg.starts_with("--export-config=") || arg == "--list-presets" ||
@@ -218,7 +218,7 @@ needs_full_parse(int argc, char** argv)
 }
 
 bool
-help_requested(const parser_t& parser, int argc, char** argv)
+help_requested(const parser_t& parser, int argc, char* const* argv)
 {
     constexpr std::array<std::string_view, 3> help_args{ "-h", "--help", "-?" };
     if(parser.exists("help") || argc == 1)
@@ -267,7 +267,7 @@ private:
 std::string
 tool_runner::build_description() const
 {
-    auto cmd = std::string{ "rocprof-sys-" }.append(config.tool_name);
+    auto const cmd = std::string{ "rocprof-sys-" }.append(config.tool_name);
 
     auto desc = replace_all(
         R"(
@@ -333,14 +333,14 @@ tool_runner::get_initial_environment()
         }
     }
 
-    auto libexec_path = path::realpath(path::get_internal_script_path());
+    auto const libexec_path = path::realpath(path::get_internal_script_path());
     if(!libexec_path.empty())
     {
         data.env.set(env_vars::SCRIPT_PATH, libexec_path);
     }
 
     update_verbose_from_env();
-    if(auto llvm_dir = rocprofsys::common::discover_llvm_libdir_for_ompt();
+    if(auto const llvm_dir = rocprofsys::common::discover_llvm_libdir_for_ompt();
        !llvm_dir.empty())
     {
         data.env.set("LD_LIBRARY_PATH", llvm_dir, update_mode::append);
@@ -355,7 +355,7 @@ tool_runner::get_initial_environment()
 
     if(config.force_sampling)
     {
-        auto mode = getenv_string(env_vars::MODE, "sampling");
+        auto const mode = getenv_string(env_vars::MODE, "sampling");
         // Bool value flows through update_env's to_env_string(bool) overload,
         // becoming "true"/"false" in the env string.
         data.env.set(env_vars::USE_SAMPLING, (mode != "causal"));
@@ -448,7 +448,8 @@ tool_runner::configure_parser(parser_t& parser)
     parser.enable_version(std::string{ config.version_name },
                           ROCPROFSYS_ARGPARSE_VERSION_INFO);
 
-    if(auto cols = terminal_columns(); cols > parser.get_help_width() + HELP_PADDING)
+    if(auto const cols = terminal_columns();
+       cols > parser.get_help_width() + HELP_PADDING)
     {
         parser.set_description_width(
             std::min<int>(cols - parser.get_help_width() - HELP_PADDING, MAX_DESC_WIDTH));
@@ -532,7 +533,7 @@ tool_runner::do_full_parse()
         argc, argv, domain_state.registry, config.deprecated_flags);
     data.out.command = std::move(args.command);
 
-    auto parse_err =
+    auto const parse_err =
         parser.parse_args(static_cast<int>(args.argv_ptrs.size()), args.argv_ptrs.data());
     if(help_requested(parser, argc, argv))
     {
@@ -614,7 +615,7 @@ try
 
     if(data.out.fork_exec)
     {
-        auto pid = fork();
+        auto const pid = fork();
         if(pid < 0)
         {
             std::perror("fork");
@@ -628,8 +629,8 @@ try
             _exit(EXEC_FAILURE_STATUS);
         }
 
-        auto status    = rocprofsys::mproc::wait_pid(pid);
-        auto exit_code = rocprofsys::mproc::diagnose_status(pid, status);
+        auto const status    = rocprofsys::mproc::wait_pid(pid);
+        auto const exit_code = rocprofsys::mproc::diagnose_status(pid, status);
         if(exit_code != 0 && data.out.verbose >= 0)
         {
             std::fprintf(stderr,

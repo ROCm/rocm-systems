@@ -118,7 +118,7 @@ public:
     {
         bool newly_registered = false;
         {
-            std::unique_lock<std::mutex> _lk{ m_registered_gpus_mutex };
+            std::unique_lock<std::mutex> const _lk{ m_registered_gpus_mutex };
             if(m_registered_gpus.count(rccl_device_idx) == 0)
             {
                 m_registered_gpus.insert(rccl_device_idx);
@@ -140,7 +140,7 @@ public:
      */
     [[nodiscard]] std::uint64_t add_bytes(std::uint32_t rccl_device_idx, size_t bytes)
     {
-        std::unique_lock<std::mutex> _lk{ m_cumulative_mutex };
+        std::unique_lock<std::mutex> const _lk{ m_cumulative_mutex };
         auto& device_bytes = m_cumulative_bytes_per_device[rccl_device_idx];
         device_bytes += bytes;
         return device_bytes;
@@ -153,7 +153,7 @@ public:
      */
     [[nodiscard]] bool is_registered(std::uint32_t rccl_device_idx) const
     {
-        std::unique_lock<std::mutex> _lk{ m_registered_gpus_mutex };
+        std::unique_lock<std::mutex> const _lk{ m_registered_gpus_mutex };
         return m_registered_gpus.count(rccl_device_idx) > 0;
     }
 
@@ -164,8 +164,8 @@ public:
      */
     [[nodiscard]] std::uint64_t get_bytes(std::uint32_t rccl_device_idx) const
     {
-        std::unique_lock<std::mutex> _lk{ m_cumulative_mutex };
-        auto it = m_cumulative_bytes_per_device.find(rccl_device_idx);
+        std::unique_lock<std::mutex> const _lk{ m_cumulative_mutex };
+        auto const it = m_cumulative_bytes_per_device.find(rccl_device_idx);
         return (it != m_cumulative_bytes_per_device.end()) ? it->second : 0;
     }
 
@@ -175,11 +175,11 @@ public:
     void reset()
     {
         {
-            std::unique_lock<std::mutex> _lk{ m_registered_gpus_mutex };
+            std::unique_lock<std::mutex> const _lk{ m_registered_gpus_mutex };
             m_registered_gpus.clear();
         }
         {
-            std::unique_lock<std::mutex> _lk{ m_cumulative_mutex };
+            std::unique_lock<std::mutex> const _lk{ m_cumulative_mutex };
             m_cumulative_bytes_per_device.clear();
         }
     }

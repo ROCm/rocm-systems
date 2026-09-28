@@ -65,7 +65,7 @@ public:
         setNextName(name);
         writeName();
 
-        auto base64string =
+        auto const base64string =
             base64::encode(reinterpret_cast<const unsigned char*>(data), size);
         saveValue(base64string);
     }

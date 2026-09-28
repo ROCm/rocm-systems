@@ -111,7 +111,7 @@ setup_output_format_env(const std::vector<std::string>& formats)
         return;
     }
 
-    auto has_format = [&formats](const std::string& fmt) {
+    auto const has_format = [&formats](const std::string& fmt) {
         return std::find(formats.begin(), formats.end(), fmt) != formats.end();
     };
 
@@ -247,7 +247,7 @@ main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
 
-    auto opts = parse_args(argc, argv);
+    auto const opts = parse_args(argc, argv);
 
     if(opts.pid < 0)
     {

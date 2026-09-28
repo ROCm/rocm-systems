@@ -96,7 +96,7 @@ std::vector<backtrace::entry_type>
 backtrace::filter_and_patch(const std::vector<entry_type>& _data)
 {
     // check whether the call-stack entry should be used. -1 means break, 0 means continue
-    auto _use_label = [](std::string_view _lbl) -> short {
+    auto const _use_label = [](std::string_view _lbl) -> short {
         // debugging feature
         const bool _keep_internal = get_sampling_keep_internal();
         const auto _npos          = std::string::npos;
@@ -152,14 +152,14 @@ backtrace::filter_and_patch(const std::vector<entry_type>& _data)
 
     // in the dyninst binary rewrite runtime, instrumented functions are appended with
     // "_dyninst", i.e. "main" will show up as "main_dyninst" in the backtrace.
-    auto _patch_label = [](std::string_view _lbl) -> std::string {
+    auto const _patch_label = [](std::string_view _lbl) -> std::string {
         // debugging feature
         if(_keep_suffix)
         {
             return std::string{ _lbl };
         }
         const std::string _dyninst{ "_dyninst" };
-        auto              _pos = _lbl.find(_dyninst);
+        auto const        _pos = _lbl.find(_dyninst);
         if(_pos == std::string::npos)
         {
             return std::string{ _lbl };
@@ -171,8 +171,8 @@ backtrace::filter_and_patch(const std::vector<entry_type>& _data)
     _ret.reserve(_data.size());
     for(const auto& itr : _data)
     {
-        auto _name = rocprofsys::utility::demangle(_patch_label(itr.name));
-        auto _use  = _use_label(_name);
+        auto const _name = rocprofsys::utility::demangle(_patch_label(itr.name));
+        auto const _use  = _use_label(_name);
         if(_use == -1)
         {
             break;
@@ -218,7 +218,7 @@ backtrace::sample(int signo)
     }
 
     // on RedHat, the unw_step within get_unw_stack involves a mutex lock
-    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    auto const _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     using namespace tim::backtrace;
     constexpr bool   with_signal_frame = false;

@@ -47,7 +47,7 @@ namespace
 const auto&
 get_regex_constants()
 {
-    static auto _constants = []() {
+    static auto const _constants = []() {
         auto _v = regex_const::egrep | regex_const::optimize;
         if(case_insensitive)
         {
@@ -61,7 +61,7 @@ get_regex_constants()
 const auto&
 get_regex_pattern()
 {
-    static auto _pattern = []() {
+    static auto const _pattern = []() {
         std::array<std::string, 2> _v{};
         for(const auto& itr : regex_keys)
         {
@@ -98,7 +98,7 @@ get_regex_pattern()
 auto
 get_regex()
 {
-    static auto _rc = std::array<std::regex, 2>{
+    static auto const _rc = std::array<std::regex, 2>{
         std::regex(get_regex_pattern().at(0), get_regex_constants()),
         std::regex(get_regex_pattern().at(1), get_regex_constants())
     };
@@ -175,7 +175,7 @@ regex_replace(const std::string& _line)
 const auto&
 get_category_regex_pattern()
 {
-    static auto _pattern = []() {
+    static auto const _pattern = []() {
         std::array<std::string, 2> _v{};
         for(const auto& itr : category_regex_keys)
         {
@@ -212,7 +212,7 @@ get_category_regex_pattern()
 auto
 get_category_regex()
 {
-    static auto _rc = std::array<std::regex, 2>{
+    static auto const _rc = std::array<std::regex, 2>{
         std::regex(get_category_regex_pattern().at(0), get_regex_constants()),
         std::regex(get_category_regex_pattern().at(1), get_regex_constants())
     };
@@ -318,17 +318,17 @@ process_categories(parser_t& p, const str_set_t& _category_options)
 
     for(const auto& opt : _category_options)
     {
-        auto opt_lower           = rocprofsys::utility::string::to_lower(opt);
+        auto const opt_lower     = rocprofsys::utility::string::to_lower(opt);
         _category_map[opt_lower] = opt;
 
         // Add shorthand mappings if the option starts with a known prefix
-        for(auto prefix : _prefixes)
+        for(auto const prefix : _prefixes)
         {
             if(opt_lower.size() > prefix.size() &&
                opt_lower.starts_with(rocprofsys::utility::string::to_lower(prefix)))
             {
                 // Map the shorthand (without prefix) to the full canonical form
-                auto shorthand           = opt_lower.substr(prefix.size());
+                auto const shorthand     = opt_lower.substr(prefix.size());
                 _category_map[shorthand] = opt;
                 break;
             }
@@ -336,9 +336,10 @@ process_categories(parser_t& p, const str_set_t& _category_options)
     }
 
     // Helper to find case-insensitive match in category options
-    auto find_category = [&_category_map](std::string_view input) -> std::string_view {
-        auto input_lower = rocprofsys::utility::string::to_lower(input);
-        auto it          = _category_map.find(input_lower);
+    auto const find_category =
+        [&_category_map](std::string_view input) -> std::string_view {
+        auto const input_lower = rocprofsys::utility::string::to_lower(input);
+        auto const it          = _category_map.find(input_lower);
         if(it != _category_map.end())
         {
             return it->second;
@@ -350,7 +351,7 @@ process_categories(parser_t& p, const str_set_t& _category_options)
     // map
     for(const auto& itr : category_view)
     {
-        auto matched = find_category(itr);
+        auto const matched = find_category(itr);
         if(!matched.empty())
         {
             // Only create patch if the matched form differs from input (normalization
@@ -387,7 +388,7 @@ exclude_setting(const std::string& _v)
     {
         return true;
     }
-    auto itr = settings::instance()->find(_v, false);
+    auto const itr = settings::instance()->find(_v, false);
     if(itr == settings::instance()->end())
     {
         return true;

@@ -129,23 +129,25 @@ enabled_formats_t::get_sequential_formats() const
 bool
 enabled_formats_t::is_rocpd_enabled() const
 {
-    auto it = std::find_if(formats.begin(), formats.end(),
-                           [](const auto& f) { return f.kind == format_kind::rocpd; });
+    auto const it = std::find_if(formats.begin(), formats.end(), [](const auto& f) {
+        return f.kind == format_kind::rocpd;
+    });
     return it != formats.end() && it->enabled;
 }
 
 bool
 enabled_formats_t::is_perfetto_enabled() const
 {
-    auto it = std::find_if(formats.begin(), formats.end(),
-                           [](const auto& f) { return f.kind == format_kind::perfetto; });
+    auto const it = std::find_if(formats.begin(), formats.end(), [](const auto& f) {
+        return f.kind == format_kind::perfetto;
+    });
     return it != formats.end() && it->enabled;
 }
 
 bool
 enabled_formats_t::is_unified_memory_enabled() const
 {
-    auto it = std::find_if(formats.begin(), formats.end(), [](const auto& f) {
+    auto const it = std::find_if(formats.begin(), formats.end(), [](const auto& f) {
         return f.kind == format_kind::unified_memory;
     });
     return it != formats.end() && it->enabled;

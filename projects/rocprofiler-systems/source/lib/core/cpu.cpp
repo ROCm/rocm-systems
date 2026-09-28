@@ -99,7 +99,7 @@ process_cpu_info_data()
             utility::string::to_lower(utility::string::trim(line.substr(0, colon_pos)));
         const auto value = utility::string::trim(line.substr(colon_pos + 1));
 
-        auto it = field_parsers.find(key);
+        auto const it = field_parsers.find(key);
         if(it != field_parsers.end())
         {
             it->second(current_cpu, std::string{ value });
@@ -121,7 +121,7 @@ process_cpu_info_data()
 std::vector<cpu_info>
 get_cpu_info()
 {
-    static auto _v = process_cpu_info_data();
+    static auto const _v = process_cpu_info_data();
     return _v;
 }
 
@@ -129,7 +129,7 @@ size_t
 device_count()
 {
     // Return unique socket count from parsed CPU info
-    auto           cpu_data = get_cpu_info();
+    auto const     cpu_data = get_cpu_info();
     std::set<long> sockets;
     for(const auto& cpu : cpu_data)
     {
@@ -141,7 +141,7 @@ device_count()
 void
 query_cpu_agents()
 {
-    auto cpu_data = get_cpu_info();
+    auto const cpu_data = get_cpu_info();
     if(cpu_data.empty())
     {
         return;
