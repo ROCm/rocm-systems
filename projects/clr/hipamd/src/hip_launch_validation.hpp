@@ -9,6 +9,7 @@
 
 #include <hip/hip_runtime.h>
 #include <limits>
+#include <type_traits>
 
 #include "device/device.hpp"
 #include "platform/ndrange.hpp"
@@ -29,14 +30,17 @@ enum LaunchViolation : uint16_t {
   kSharedMemOverflow   = 1u << 8,  //!< sharedMemBytes does not fit uint32_t
 };
 
+//! Storage type for a combination of LaunchViolation bits.
+using LaunchViolationBits = std::underlying_type_t<LaunchViolation>;
+
 //! Helper specifying most used bits to be checked
-static constexpr uint16_t kCommonRulesBits =
+static constexpr LaunchViolationBits kCommonRulesBits =
     kGridOverflow | kBlockOverflow | kClusterOverflow | kClusterIndivisible;
 
 //! One entry in a launch-error rule table: the violation bits it matches and the error to return.
 struct LaunchErrorRule {
-  uint16_t violations;   //!< bits this rule matches
-  hipError_t error;      //!< code to return if violation occurred
+  LaunchViolationBits violations;  //!< bits this rule matches
+  hipError_t error;                //!< code to return if violation occurred
 };
 
 //! Structure to store launch parameters. Lives here rather than in platform/ndrange.hpp so the
@@ -48,7 +52,7 @@ struct LaunchParams {
   amd::NDRange32 grid_;      //!< Total number of workgroups in grid in N-dims
   uint32_t sharedMemBytes_;  //!< Shared Memory bytes
   bool hipParams_;           //!< If this is launched through hipParams_
-  uint16_t violations_;      //!< Bitmask of LaunchViolation bits detected for this config.
+  LaunchViolationBits violations_;  //!< Bitmask of LaunchViolation bits detected for this config.
 
   LaunchParams(size_t globalX, size_t globalY, size_t globalZ, uint32_t localX, uint32_t localY,
                uint32_t localZ, size_t sharedMemBytes, const amd::Device& device,
@@ -130,7 +134,7 @@ struct LaunchParams {
         violations_ |= kClusterIndivisible;
         return false;
       }
-      violations_ &= ~static_cast<uint16_t>(kClusterIndivisible);
+      violations_ &= ~static_cast<LaunchViolationBits>(kClusterIndivisible);
       cluster_[0] = static_cast<uint8_t>(clusterX);
       cluster_[1] = static_cast<uint8_t>(clusterY);
       cluster_[2] = static_cast<uint8_t>(clusterZ);
@@ -148,7 +152,7 @@ struct LaunchParams {
     return hipSuccess;
   }
 
-  static constexpr uint16_t kInvalidConfigBits =
+  static constexpr LaunchViolationBits kInvalidConfigBits =
       kGridOverflow | kBlockOverflow | kClusterOverflow | kClusterIndivisible | kZeroBlock;
 
   bool IsValidConfig() const { return (violations_ & kInvalidConfigBits) == 0; }
