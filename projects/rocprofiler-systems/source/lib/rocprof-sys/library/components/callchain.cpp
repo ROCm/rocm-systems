@@ -14,6 +14,7 @@
 #include "library/sampling.hpp"
 #include "library/thread_info.hpp"
 
+#include <algorithm>
 #include <timemory/backends/papi.hpp>
 #include <timemory/backends/threading.hpp>
 #include <timemory/components/data_tracker/components.hpp>
@@ -70,7 +71,7 @@ callchain::get() const
 
     _v.reserve(size());
     auto _data = m_data;
-    std::sort(_data.begin(), _data.end());
+    std::ranges::sort(_data, [](const auto& lhs, const auto& rhs) { return lhs < rhs; });
     for(const auto& itr : _data)
     {
         auto _v2 = ts_entry_vec_t{ itr.timestamp, {} };
@@ -86,7 +87,7 @@ callchain::get() const
         if(!_v2.second.empty())
         {
             // put the bottom of the call-stack on top
-            std::reverse(_v2.second.begin(), _v2.second.end());
+            std::ranges::reverse(_v2.second);
             _v.emplace_back(std::move(_v2));
         }
     }
@@ -102,8 +103,8 @@ callchain::get() const
         }
     }
 
-    std::sort(_v.begin(), _v.end(),
-              [](const auto& _lhs, const auto& _rhs) { return _lhs.first < _rhs.first; });
+    std::ranges::sort(
+        _v, [](const auto& _lhs, const auto& _rhs) { return _lhs.first < _rhs.first; });
 
     return _v;
 }

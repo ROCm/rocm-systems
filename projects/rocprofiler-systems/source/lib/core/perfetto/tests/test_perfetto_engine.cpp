@@ -565,8 +565,7 @@ public:
     void on_source_drained(int source_id, std::span<const char> bytes) override
     {
         m_drained_count++;
-        if(std::find(m_throw_pids.begin(), m_throw_pids.end(), source_id) !=
-           m_throw_pids.end())
+        if(std::ranges::find(m_throw_pids, source_id) != m_throw_pids.end())
         {
             if(m_throw_count == 0)
             {

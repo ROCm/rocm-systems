@@ -21,6 +21,7 @@
 #include "sdk/tracing-config.hpp"
 #include "utility.hpp"
 
+#include <algorithm>
 #include <timemory/backends/capability.hpp>
 #include <timemory/backends/dmp.hpp>
 #include <timemory/backends/mpi.hpp>
@@ -201,8 +202,9 @@ is_recognized_boolean_text_value(std::string_view value)
     constexpr auto accepted_values =
         std::array<std::string_view, 10>{ "on", "off", "true", "false", "yes",
                                           "no", "y",   "n",    "t",     "f" };
-    return std::any_of(accepted_values.begin(), accepted_values.end(),
-                       [value](auto accepted_value) { return value == accepted_value; });
+    return std::ranges::any_of(accepted_values, [value](auto accepted_value) {
+        return value == accepted_value;
+    });
 }
 
 [[nodiscard]] bool
@@ -315,9 +317,8 @@ validate_config_setting_value(std::string_view name, std::string_view raw_value,
             auto value = utility::string::trim(raw_value);
             if(choices)
             {
-                valid =
-                    std::any_of(choices->begin(), choices->end(),
-                                [&value](const auto& choice) { return value == choice; });
+                valid = std::ranges::any_of(
+                    *choices, [&value](const auto& choice) { return value == choice; });
                 expectation = format_config_choices(*choices);
             }
             break;
@@ -2352,7 +2353,7 @@ print_settings(
         }
     }
 
-    std::sort(_data.begin(), _data.end(), [](const auto& lhs, const auto& rhs) {
+    std::ranges::sort(_data, [](const auto& lhs, const auto& rhs) {
         auto const _npos = std::string::npos;
         // ROCPROFSYS_CONFIG_FILE always first
         if(lhs.at(0) == env_vars::MODE)
@@ -2781,9 +2782,8 @@ get_use_vaapi_tracing()
     const std::string domains =
         static_cast<tim::tsettings<std::string>&>(*_v->second).get();
     auto domain_list = rocprofsys::delimit(domains, " ,;:\t\n");
-    return std::find(domain_list.begin(), domain_list.end(), "rocdecode_api") !=
-               domain_list.end() ||
-           std::find(domain_list.begin(), domain_list.end(), "rocjpeg_api") !=
+    return std::ranges::find(domain_list, "rocdecode_api") != domain_list.end() ||
+           std::ranges::find(domain_list, "rocjpeg_api") !=
                domain_list.end();  // Check rocdecode_api or rocjpeg_api is present
 }
 
