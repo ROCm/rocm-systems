@@ -123,7 +123,7 @@ get_linked_path(const char*        _name,
     }
 
     const tim::scope::destructor _dtor{ [&_noload, &_handle]() {
-        if(_noload == false)
+        if(!_noload)
         {
             dlclose(_handle);
         }
@@ -174,7 +174,7 @@ get_link_map(const std::string& _lib,
             _next = _next->l_next;
         }
 
-        if(_noload == false)
+        if(!_noload)
         {
             dlclose(_handle);
         }
@@ -189,7 +189,7 @@ get_library_search_paths_impl()
 
     auto _path_exists = [](const std::string& _filename) {
         struct stat dummy;
-        return (_filename.empty()) ? false : (stat(_filename.c_str(), &dummy) == 0);
+        return _filename.empty() ? false : (stat(_filename.c_str(), &dummy) == 0);
     };
 
     auto _emplace_if_exists = [&_paths, _path_exists](const std::string& _directory) {
