@@ -200,8 +200,11 @@ public:
 
   explicit TestMemoryInstruction(
       std::unique_ptr<DynamicInstState> state, std::string_view mnemonic = "test_mem",
-      std::optional<WaitCounterType> additional_wait_counter_type = std::nullopt)
+      std::optional<WaitCounterType> additional_wait_counter_type = std::nullopt,
+      bool memory_wait_producer = false)
       : Instruction(mnemonic, nullptr) {
+    if (memory_wait_producer)
+      flags_ |= MEMORY_WAIT_PRODUCER;
     if (state->tag() == SCALAR_MEM) {
       const auto &memory = *static_cast<const ScalarMemState *>(state.get());
       if (additional_wait_counter_type) {
@@ -694,6 +697,66 @@ public:
   bool requires_serial_hot_hooks() const override { return true; }
 };
 
+class UnsubscribedHotHookPlugin final : public ExecutionPlugin {
+public:
+  UnsubscribedHotHookPlugin() : ExecutionPlugin("unsubscribed_hot_hook") {}
+  bool requires_serial_hot_hooks() const override { return true; }
+  bool observes_hot_hooks_for_wavefront(const amdgpu::Wavefront *) const override { return false; }
+  void onAmdgpuReadSgpr(const amdgpu::Wavefront *, uint32_t) override { ++hot_callbacks; }
+  void onAmdgpuWorkgroupCompleted(uint32_t, uint32_t) override { ++cold_callbacks; }
+
+  uint32_t hot_callbacks = 0;
+  uint32_t cold_callbacks = 0;
+};
+
+class HotHookSubscriptionProbe final : public ExecutionPlugin {
+public:
+  HotHookSubscriptionProbe(std::string name, bool subscribe_on_dispatch,
+                           bool serial_hot_hooks = false)
+      : ExecutionPlugin(std::move(name)), subscribe_on_dispatch_(subscribe_on_dispatch),
+        serial_hot_hooks_(serial_hot_hooks) {}
+
+  bool requires_serial_hot_hooks() const override { return serial_hot_hooks_; }
+
+  bool observes_hot_hooks_for_wavefront(const amdgpu::Wavefront *) const override {
+    ++predicate_queries;
+    return subscribed;
+  }
+
+  void onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) override {
+    ++dispatch_callbacks;
+    subscribed = subscribe_on_dispatch_;
+    if (reenter_on_dispatch && group)
+      group->onAmdgpuReadSgpr(&wf, 0);
+  }
+
+  void onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) override {
+    ++halt_callbacks;
+    if (unsubscribe_on_halt)
+      subscribed = false;
+    if (reenter_on_halt && group)
+      group->onAmdgpuReadSgpr(&wf, 0);
+  }
+
+  void onAmdgpuReadSgpr(const amdgpu::Wavefront *, uint32_t) override { ++hot_callbacks; }
+
+  void set_subscribe_on_dispatch(bool value) { subscribe_on_dispatch_ = value; }
+
+  ExecutionPluginGroup *group = nullptr;
+  bool reenter_on_dispatch = false;
+  bool reenter_on_halt = false;
+  bool unsubscribe_on_halt = false;
+  bool subscribed = false;
+  mutable uint32_t predicate_queries = 0;
+  uint32_t dispatch_callbacks = 0;
+  uint32_t halt_callbacks = 0;
+  uint32_t hot_callbacks = 0;
+
+private:
+  bool subscribe_on_dispatch_ = false;
+  bool serial_hot_hooks_ = false;
+};
+
 class NoSgprReadPlugin final : public ExecutionPlugin {
 public:
   NoSgprReadPlugin() : ExecutionPlugin("no_sgpr_read") {}
@@ -702,6 +765,28 @@ public:
   void onAmdgpuReadScalarRegister(const amdgpu::Wavefront *, RegisterRef) override { ++callbacks; }
 
   uint32_t callbacks = 0;
+};
+
+class AsyncIssueInterestPlugin final : public ExecutionPlugin {
+public:
+  AsyncIssueInterestPlugin(std::string name, bool observes_issue, bool throws_on_issue = false)
+      : ExecutionPlugin(std::move(name)), observes_issue_(observes_issue),
+        throws_on_issue_(throws_on_issue) {}
+
+  bool supports_async_instructions() const override { return true; }
+  bool observes_async_instruction_issued() const override { return observes_issue_; }
+
+  void onAmdgpuAsyncInstructionIssued(uint64_t, const Instruction &, Wavefront &) override {
+    ++callbacks;
+    if (throws_on_issue_)
+      throw std::runtime_error("injected async issue failure");
+  }
+
+  uint32_t callbacks = 0;
+
+private:
+  bool observes_issue_ = false;
+  bool throws_on_issue_ = false;
 };
 
 class OverlapProbe {
@@ -1121,6 +1206,7 @@ struct PluginFixture {
               {{"key":"num_wf_slots","value":"{}"}},
               {{"key":"sgprs_per_wf","value":"{}"}},
               {{"key":"vgprs_per_wf","value":"{}"}},
+              {{"key":"memory_wait_diagnostics","value":"warn"}},
               {{"key":"lds_size_kb","value":"64"}}
             ]}}
           ]}}
@@ -1261,7 +1347,9 @@ struct Wave32PluginFixture {
   std::unique_ptr<amdgpu::ComputeUnitCore> cu;
   std::shared_ptr<ExecutionPluginGroup> plugin_group;
 
-  explicit Wave32PluginFixture(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA5)
+  explicit Wave32PluginFixture(
+      rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA5,
+      amdgpu::MemoryWaitDiagnostics wait_checks = amdgpu::MemoryWaitDiagnostics::Warn)
       : gpu_mem(std::make_unique<amdgpu::GpuMemory>("wave32_plugin_mem")),
         l2(std::make_unique<amdgpu::L2Cache>("wave32_plugin_l2")) {
     amdgpu::ComputeUnitCore::Config cfg{};
@@ -1270,6 +1358,7 @@ struct Wave32PluginFixture {
     cfg.sgprs_per_wf = 104;
     cfg.vgprs_per_wf = 256;
     cfg.lds_size_kb = 64;
+    cfg.memory_wait_diagnostics = wait_checks;
     cu = amdgpu::ComputeUnitCore::create("wave32_plugin_cu", cfg, gpu_mem.get(), l2.get());
   }
 
@@ -1477,6 +1566,140 @@ TEST(ExecutionPluginTest, VopdIntegerPairsPreserveMasksAliasesAndObservation) {
       }
     }
   }
+}
+
+TEST(ExecutionPluginTest, DisabledWaitCheckingPreservesRegisterHooksAcrossPluginReplacement) {
+  Wave32PluginFixture f(ROCJITSU_CODE_ARCH_CDNA5, amdgpu::MemoryWaitDiagnostics::Off);
+  auto *wf = f.cu->dispatch_wf(0, 0, 104, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+  const amdgpu::RegisterAccess regs(*wf);
+  const uint32_t vbase = wf->vgpr_alloc().base + 4;
+  const uint32_t sbase = wf->sgpr_alloc().base + 2;
+  auto access = [&](uint32_t value) {
+    auto write = regs.write_vgpr_region(vbase, 2, 1);
+    write.set_lane(0, 0, value);
+    write.set_lane(1, 0, value + 1);
+    auto read = regs.read_vgpr_region(vbase, 2, 1);
+    EXPECT_EQ(read.lane(0, 0), value);
+    EXPECT_EQ(read.lane(1, 0), value + 1);
+    const uint64_t pair = uint64_t{value} | (uint64_t{value + 1} << 32);
+    regs.write_sgpr64(sbase, pair);
+    EXPECT_EQ(regs.read_sgpr64(sbase), pair);
+  };
+  access(3);
+  auto *plugin = f.attach_ordering_plugin();
+  for (bool attached : {true, false, true}) {
+    SCOPED_TRACE(attached);
+    f.cu->set_plugin_group(attached ? f.plugin_group : nullptr);
+    plugin->events.clear();
+    access(7);
+    if (!attached) {
+      EXPECT_TRUE(plugin->events.empty());
+      continue;
+    }
+    for (auto kind :
+         {HookEvent::READ_VGPR, HookEvent::WRITE_VGPR, HookEvent::READ_SGPR, HookEvent::WRITE_SGPR})
+      EXPECT_EQ(std::ranges::count(plugin->events, kind, &HookEvent::kind), 2);
+  }
+}
+
+TEST(ExecutionPluginTest, RegisterObserverSnapshotsPreservePendingWaits) {
+  class SnapshotPlugin : public ExecutionPlugin {
+  public:
+    SnapshotPlugin() : ExecutionPlugin("register_snapshot") {}
+    void snapshot(const Wavefront *wf) {
+      (void)wf->read_scc();
+      ++snapshots;
+    }
+    void onAmdgpuReadScalarRegister(const Wavefront *wf, RegisterRef) override { snapshot(wf); }
+    void onAmdgpuWriteScalarRegister(const Wavefront *wf, RegisterRef) override { snapshot(wf); }
+    void onAmdgpuReadVgprLanes(const Wavefront *wf, uint32_t, uint64_t, uint8_t) override {
+      snapshot(wf);
+    }
+    void onAmdgpuWriteVgprLanes(const Wavefront *wf, uint32_t, uint64_t, uint8_t) override {
+      snapshot(wf);
+    }
+    void onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &) override {
+      snapshot(tensor_wave);
+    }
+    bool observes_tensor_dma_memory_access() const override { return true; }
+    const Wavefront *tensor_wave = nullptr;
+    unsigned snapshots = 0;
+  };
+  Wave32PluginFixture f;
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto plugin = std::make_unique<SnapshotPlugin>();
+  auto *snapshots = plugin.get();
+  ASSERT_TRUE(group->add(std::move(plugin)));
+  f.cu->set_plugin_group(group);
+  auto *wf = f.cu->dispatch_wf(0, 0x200, 104, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+  snapshots->tensor_wave = wf;
+  const amdgpu::RegisterAccess regs(*wf);
+  const uint32_t sbase = wf->sgpr_alloc().base;
+  const uint32_t vbase = wf->vgpr_alloc().base;
+  f.cu->write_sgpr(sbase, 0);
+  f.cu->write_vgpr(vbase, 0, 0);
+  auto &state = wf->ensure_memory_wait_scoreboard();
+  unsigned hazards = 0;
+  state.bind(wf->pc, &hazards, [](void *p, const auto &) { ++*static_cast<unsigned *>(p); });
+  for (unsigned hook = 0; hook < 6; ++hook) {
+    SCOPED_TRACE(hook);
+    state.clear();
+    hazards = snapshots->snapshots = 0;
+    state.add({state.issue(WaitCounterKind::Km),
+               0x100,
+               ~uint64_t{0},
+               {RegClass::SCC, 0, 1},
+               WaitCounterKind::Km,
+               0xf});
+    amdgpu::ScopedMemoryWaitCheck scope(&state);
+    switch (hook) {
+    case 0:
+      (void)regs.read_sgpr(sbase);
+      break;
+    case 1:
+      regs.write_sgpr(sbase, 7);
+      break;
+    case 2:
+      (void)regs.read_vgpr_region(vbase, 1, 1).lane(0, 0);
+      break;
+    case 3:
+      regs.write_vgpr_region(vbase, 1, 1).set_lane(0, 0, 7);
+      break;
+    case 4:
+      f.cu->notify_scalar_lane_vgpr_write(wf, vbase, 1);
+      break;
+    case 5:
+      wf->cu().report_tensor_dma_memory_access({});
+      break;
+    }
+    EXPECT_EQ(snapshots->snapshots, 1u);
+    EXPECT_EQ(hazards, 0u);
+    EXPECT_FALSE(state.empty());
+    (void)wf->read_scc();
+    EXPECT_EQ(hazards, 1u); // The instruction's actual SCC use still diagnoses.
+  }
+}
+
+TEST(ExecutionPluginTest, SpecialDestinationTrackingIncludesTheHighDword) {
+  Wave32PluginFixture f;
+  auto *wf = f.cu->dispatch_wf(0, 0, 104, 32);
+  ASSERT_NE(wf, nullptr);
+  const amdgpu::RegisterAccess regs(*wf);
+  const cdna5::Operand operand(64, cdna5::OperandType::OPR_VCC, 0);
+  ASSERT_FALSE(operand.to_register_ref());
+  const auto destination = regs.destination_register(operand);
+  ASSERT_TRUE(destination);
+  auto &state = wf->ensure_memory_wait_scoreboard();
+  unsigned hazards = 0;
+  state.bind(0x200, &hazards, [](void *p, const auto &) { ++*static_cast<unsigned *>(p); });
+  state.add({state.issue(WaitCounterKind::Ds), 0x100, ~uint64_t{0}, *destination,
+             WaitCounterKind::Ds, 0xf});
+  state.access({RegClass::VCC, 1, 1}, ~uint64_t{0}, 0xf, false);
+  EXPECT_EQ(hazards, 1u);
 }
 
 TEST(ExecutionPluginTest, Vop3CompareObservesOnlyArchitecturalDestinationReads) {
@@ -2253,6 +2476,47 @@ TEST(ExecutionPluginTest, SgprReadOptOutSkipsComputeUnitCallback) {
   EXPECT_EQ(plugin_ptr->callbacks, 0u);
 }
 
+TEST(ExecutionPluginTest, AsyncIssueFanoutHonorsPerPluginInterest) {
+  PluginFixture fixture(/*num_wf_slots=*/1);
+  auto *wave = fixture.cu()->dispatch_wf(/*wg_id=*/1, /*pc=*/0, /*sgprs=*/32, /*vgprs=*/32);
+  ASSERT_NE(wave, nullptr);
+  Instruction instruction("v_wmma_test", nullptr);
+
+  ExecutionPluginGroup normal(PluginSinkConfig{});
+  auto first = std::make_unique<AsyncIssueInterestPlugin>("async_first", true);
+  auto *first_ptr = first.get();
+  auto skipped = std::make_unique<AsyncIssueInterestPlugin>("async_skipped", false);
+  auto *skipped_ptr = skipped.get();
+  auto last = std::make_unique<AsyncIssueInterestPlugin>("async_last", true);
+  auto *last_ptr = last.get();
+  ASSERT_TRUE(normal.add(std::move(first)));
+  ASSERT_TRUE(normal.add(std::move(skipped)));
+  ASSERT_TRUE(normal.add(std::move(last)));
+
+  normal.onAmdgpuAsyncInstructionIssued(0x1000, instruction, *wave);
+  EXPECT_EQ(first_ptr->callbacks, 1u);
+  EXPECT_EQ(skipped_ptr->callbacks, 0u);
+  EXPECT_EQ(last_ptr->callbacks, 1u);
+
+  ExecutionPluginGroup exceptional(PluginSinkConfig{});
+  auto throwing = std::make_unique<AsyncIssueInterestPlugin>("async_throwing", true, true);
+  auto *throwing_ptr = throwing.get();
+  auto skipped_after_throw =
+      std::make_unique<AsyncIssueInterestPlugin>("async_skipped_after_throw", false);
+  auto *skipped_after_throw_ptr = skipped_after_throw.get();
+  auto continued = std::make_unique<AsyncIssueInterestPlugin>("async_continued", true);
+  auto *continued_ptr = continued.get();
+  ASSERT_TRUE(exceptional.add(std::move(throwing)));
+  ASSERT_TRUE(exceptional.add(std::move(skipped_after_throw)));
+  ASSERT_TRUE(exceptional.add(std::move(continued)));
+
+  EXPECT_THROW(exceptional.onAmdgpuAsyncInstructionIssued(0x1000, instruction, *wave),
+               std::runtime_error);
+  EXPECT_EQ(throwing_ptr->callbacks, 1u);
+  EXPECT_EQ(skipped_after_throw_ptr->callbacks, 0u);
+  EXPECT_EQ(continued_ptr->callbacks, 1u);
+}
+
 TEST(ExecutionPluginTest, InfrequentHooksSerializeAtGroupBoundary) {
   ExecutionPluginGroup group(PluginSinkConfig{});
   auto probe = std::make_unique<ConcurrencyProbePlugin>(false);
@@ -2333,6 +2597,131 @@ TEST(ExecutionPluginTest, HighFrequencyHooksHonorSerialOptIn) {
   EXPECT_TRUE(result.first_entered);
   EXPECT_FALSE(result.overlap_observed);
   EXPECT_EQ(probe_ptr->hot_probe().max_active(), 1);
+}
+
+TEST(ExecutionPluginTest, UnsubscribedWaveBypassesHotHookAndCallbackLock) {
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  auto plugin = std::make_unique<UnsubscribedHotHookPlugin>();
+  auto *plugin_ptr = plugin.get();
+  ASSERT_TRUE(group.add(std::move(plugin)));
+  ASSERT_TRUE(group.requires_serial_hot_hooks());
+
+  const uint64_t before = test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(group);
+  group.onAmdgpuReadSgpr(nullptr, 0);
+
+  EXPECT_EQ(plugin_ptr->hot_callbacks, 0u);
+  EXPECT_EQ(test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(group), before);
+
+  group.onAmdgpuWorkgroupCompleted(1, 2);
+  EXPECT_EQ(plugin_ptr->cold_callbacks, 1u);
+  EXPECT_EQ(test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(group), before + 1);
+}
+
+TEST(ExecutionPluginTest, WaveDispatchCachesEachPluginsHotHookSubscription) {
+  PluginFixture fixture(/*num_wf_slots=*/1);
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  auto subscribed = std::make_unique<HotHookSubscriptionProbe>("subscribed_probe", true);
+  auto *subscribed_ptr = subscribed.get();
+  auto unsubscribed = std::make_unique<HotHookSubscriptionProbe>("unsubscribed_probe", false);
+  auto *unsubscribed_ptr = unsubscribed.get();
+  ASSERT_TRUE(group.add(std::move(subscribed)));
+  ASSERT_TRUE(group.add(std::move(unsubscribed)));
+
+  auto *wave = fixture.cu()->dispatch_wf(/*wg_id=*/1, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/32);
+  ASSERT_NE(wave, nullptr);
+  group.onAmdgpuWavefrontDispatched(*wave);
+
+  EXPECT_EQ(subscribed_ptr->predicate_queries, 1u);
+  EXPECT_EQ(unsubscribed_ptr->predicate_queries, 1u);
+  for (uint32_t i = 0; i != 8; ++i)
+    group.onAmdgpuReadSgpr(wave, i);
+
+  EXPECT_EQ(subscribed_ptr->hot_callbacks, 8u);
+  EXPECT_EQ(unsubscribed_ptr->hot_callbacks, 0u);
+  EXPECT_EQ(subscribed_ptr->predicate_queries, 1u);
+  EXPECT_EQ(unsubscribed_ptr->predicate_queries, 1u);
+}
+
+TEST(ExecutionPluginTest, CachedUnsubscribedWaveBypassesCallbackLock) {
+  PluginFixture fixture(/*num_wf_slots=*/1);
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  auto plugin =
+      std::make_unique<HotHookSubscriptionProbe>("serial_unsubscribed_probe", false, true);
+  auto *plugin_ptr = plugin.get();
+  ASSERT_TRUE(group.add(std::move(plugin)));
+
+  auto *wave = fixture.cu()->dispatch_wf(/*wg_id=*/1, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/32);
+  ASSERT_NE(wave, nullptr);
+  group.onAmdgpuWavefrontDispatched(*wave);
+  const uint64_t before = test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(group);
+
+  group.onAmdgpuReadSgpr(wave, 0);
+
+  EXPECT_EQ(plugin_ptr->predicate_queries, 1u);
+  EXPECT_EQ(plugin_ptr->hot_callbacks, 0u);
+  EXPECT_EQ(test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(group), before);
+}
+
+TEST(ExecutionPluginTest, ReentrantDispatchHotHookFallsBackUntilCachePublication) {
+  PluginFixture fixture(/*num_wf_slots=*/1);
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  auto plugin = std::make_unique<HotHookSubscriptionProbe>("reentrant_dispatch_probe", true, true);
+  auto *plugin_ptr = plugin.get();
+  plugin_ptr->group = &group;
+  plugin_ptr->reenter_on_dispatch = true;
+  ASSERT_TRUE(group.add(std::move(plugin)));
+
+  auto *wave = fixture.cu()->dispatch_wf(/*wg_id=*/1, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/32);
+  ASSERT_NE(wave, nullptr);
+  group.onAmdgpuWavefrontDispatched(*wave);
+
+  // The reentrant hook uses the original live-query path (aggregate + fanout),
+  // then dispatch publishes one cached decision for all subsequent hooks.
+  EXPECT_EQ(plugin_ptr->predicate_queries, 3u);
+  EXPECT_EQ(plugin_ptr->hot_callbacks, 1u);
+  group.onAmdgpuReadSgpr(wave, 1);
+  EXPECT_EQ(plugin_ptr->predicate_queries, 3u);
+  EXPECT_EQ(plugin_ptr->hot_callbacks, 2u);
+}
+
+TEST(ExecutionPluginTest, HaltAndRedispatchCannotReuseAStaleHotHookSubscription) {
+  PluginFixture fixture(/*num_wf_slots=*/1);
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  auto plugin = std::make_unique<HotHookSubscriptionProbe>("halt_reuse_probe", true, true);
+  auto *plugin_ptr = plugin.get();
+  plugin_ptr->group = &group;
+  plugin_ptr->unsubscribe_on_halt = true;
+  plugin_ptr->reenter_on_halt = true;
+  ASSERT_TRUE(group.add(std::move(plugin)));
+
+  auto *wave = fixture.cu()->dispatch_wf(/*wg_id=*/1, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/32);
+  ASSERT_NE(wave, nullptr);
+  group.onAmdgpuWavefrontDispatched(*wave);
+  group.onAmdgpuReadSgpr(wave, 0);
+  ASSERT_EQ(plugin_ptr->hot_callbacks, 1u);
+  ASSERT_EQ(plugin_ptr->predicate_queries, 1u);
+
+  group.onAmdgpuWavefrontHalted(*wave);
+  EXPECT_EQ(plugin_ptr->halt_callbacks, 1u);
+  EXPECT_EQ(plugin_ptr->hot_callbacks, 1u)
+      << "the halt callback observed the stale subscribed decision";
+  EXPECT_EQ(plugin_ptr->predicate_queries, 2u);
+
+  plugin_ptr->set_subscribe_on_dispatch(false);
+  plugin_ptr->reenter_on_dispatch = false;
+  group.onAmdgpuWavefrontDispatched(*wave);
+  EXPECT_EQ(plugin_ptr->predicate_queries, 3u);
+  group.onAmdgpuReadSgpr(wave, 1);
+  EXPECT_EQ(plugin_ptr->predicate_queries, 3u);
+  EXPECT_EQ(plugin_ptr->hot_callbacks, 1u);
+
+  // reset() independently invalidates the decision while retaining its vector
+  // allocation for the next incarnation.
+  plugin_ptr->subscribed = true;
+  wave->reset();
+  group.onAmdgpuReadSgpr(wave, 2);
+  EXPECT_EQ(plugin_ptr->predicate_queries, 5u);
+  EXPECT_EQ(plugin_ptr->hot_callbacks, 2u);
 }
 
 TEST(ExecutionPluginTest, InfrequentAndHighFrequencyHooksMayOverlapByDefault) {
@@ -5584,6 +5973,52 @@ TEST(ExecutionPluginTest, WmmaF32NativeWidthFastPathUsesRegionReads) {
   }
 }
 
+TEST(ExecutionPluginTest, WmmaBf16F32FastPathReadsBeforePackedWrites) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "stdx SIMD is unavailable";
+  } else {
+    if (util::native<float>::size() != 16)
+      GTEST_SKIP() << "the BF16F32 fast path requires 16-lane native SIMD";
+
+    ForceScalarOverride force_simd(false);
+    Wave32PluginFixture f;
+    auto *plugin = f.attach_ordering_plugin();
+    auto *cu = f.cu.get();
+    auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+    ASSERT_NE(wf, nullptr);
+    ASSERT_EQ(wf->wf_size(), 32u);
+
+    const uint32_t vb = wf->vgpr_alloc().base;
+    constexpr uint32_t S0 = 0, S1 = 16, ACC = 32, DST = 48;
+    for (uint32_t reg = 0; reg < 56; ++reg)
+      for (uint32_t lane = 0; lane < 32; ++lane)
+        cu->write_vgpr(vb + reg, lane, 0);
+    plugin->events.clear();
+
+    amdgpu::exec_wmma_bf16f32_16x16x32_bf16(*cu, vb + DST, vb + S0, vb + S1, vb + ACC,
+                                            amdgpu::ACC_FROM_VGPR,
+                                            /*c_modifier=*/0);
+
+    expect_vgpr_read_set(vgpr_read_events(*plugin), vb,
+                         {S0 + 0,  S0 + 1,  S0 + 2,  S0 + 3,  S0 + 4,  S0 + 5,  S0 + 6,  S0 + 7,
+                          S1 + 0,  S1 + 1,  S1 + 2,  S1 + 3,  S1 + 4,  S1 + 5,  S1 + 6,  S1 + 7,
+                          ACC + 0, ACC + 1, ACC + 2, ACC + 3, ACC + 4, ACC + 5, ACC + 6, ACC + 7},
+                         0xFFFF'FFFFu);
+    expect_vgpr_read_set(vgpr_write_events(*plugin), vb, {DST + 0, DST + 1, DST + 2, DST + 3},
+                         0xFFFF'FFFFu);
+
+    size_t last_read = 0;
+    size_t first_write = plugin->events.size();
+    for (size_t i = 0; i < plugin->events.size(); ++i) {
+      if (plugin->events[i].kind == HookEvent::READ_VGPR)
+        last_read = i;
+      if (plugin->events[i].kind == HookEvent::WRITE_VGPR)
+        first_write = std::min(first_write, i);
+    }
+    ASSERT_LT(last_read, first_write);
+  }
+}
+
 TEST(ExecutionPluginTest, MfmaReadObservationReportsRace) {
   PluginFixture f(/*num_wf_slots=*/1);
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
@@ -6799,13 +7234,14 @@ TEST(RoutedMemoryObservationTest, AFlatAccessSeparatesDdsFromLdsLanes) {
   state->elem_size = 4;
   state->num_elems = 1;
   state->is_load = true;
+  state->dst_reg_base = wave->vgpr_alloc().base + 2;
   state->exec_mask = 0b111;
   state->lane_mask = 0b111;
   state->per_lane_addr[0] = kDdsAddress;
   state->per_lane_addr[1] = kLdsAddress;
   state->per_lane_addr[2] = 0x2000;
   test::ComputeUnitTestAccess::route_memory_inst(
-      *cu, new TestMemoryInstruction(std::move(state), "flat_load_b32"), *wave);
+      *cu, new TestMemoryInstruction(std::move(state), "flat_load_b32", std::nullopt, true), *wave);
 
   ASSERT_EQ(plugin->accesses.size(), 1u);
   const auto &access = plugin->accesses.front();
@@ -6820,6 +7256,16 @@ TEST(RoutedMemoryObservationTest, AFlatAccessSeparatesDdsFromLdsLanes) {
   EXPECT_EQ(access.pre_routing_addresses[0], kDdsAddress);
   EXPECT_EQ(access.pre_routing_addresses[1], kLdsAddress);
   EXPECT_EQ(access.pre_routing_addresses[2], 0x2000u);
+  auto *scoreboard = wave->memory_wait_scoreboard();
+  ASSERT_NE(scoreboard, nullptr);
+  EXPECT_EQ(scoreboard->outstanding(WaitCounterKind::Load), 1u);
+  EXPECT_EQ(scoreboard->outstanding(WaitCounterKind::Ds), 1u);
+  scoreboard->wait(WaitCounterKind::Load, 0);
+  const auto shared = access.flat_local_lane_mask | access.flat_dds_lane_mask;
+  scoreboard->access({RegClass::VGPR, 2, 1}, access.active_lane_mask & ~shared, 0xf, false);
+  EXPECT_EQ(cu->memory_wait_diagnostic_count(), 0u);
+  scoreboard->access({RegClass::VGPR, 2, 1}, shared, 0xf, false);
+  EXPECT_EQ(cu->memory_wait_diagnostic_count(), 1u);
 }
 
 TEST(RoutedMemoryObservationTest, AFlatAccessRetainsPerLaneLdsRoutingWhenFirstLaneIsGlobal) {
@@ -6838,13 +7284,14 @@ TEST(RoutedMemoryObservationTest, AFlatAccessRetainsPerLaneLdsRoutingWhenFirstLa
   state->elem_size = 4;
   state->num_elems = 1;
   state->is_load = true;
+  state->dst_reg_base = wave->vgpr_alloc().base + 2;
   state->exec_mask = 0b1111;
   state->lane_mask = 0b0111;
   state->per_lane_addr[0] = 0x2000;
   state->per_lane_addr[1] = kSharedBase + 0x20;
   state->per_lane_addr[2] = kSharedBase + 0x28;
   test::ComputeUnitTestAccess::route_memory_inst(
-      *cu, new TestMemoryInstruction(std::move(state), "flat_load_b32"), *wave);
+      *cu, new TestMemoryInstruction(std::move(state), "flat_load_b32", std::nullopt, true), *wave);
 
   ASSERT_EQ(plugin->accesses.size(), 1u);
   const auto &access = plugin->accesses.front();
@@ -6856,6 +7303,16 @@ TEST(RoutedMemoryObservationTest, AFlatAccessRetainsPerLaneLdsRoutingWhenFirstLa
   EXPECT_EQ(access.addresses[0], 0x2000u);
   EXPECT_EQ(access.addresses[1], kSharedBase + 0x20);
   EXPECT_EQ(access.addresses[2], kSharedBase + 0x28);
+  auto *scoreboard = wave->memory_wait_scoreboard();
+  ASSERT_NE(scoreboard, nullptr);
+  EXPECT_EQ(scoreboard->outstanding(WaitCounterKind::Load), 1u);
+  EXPECT_EQ(scoreboard->outstanding(WaitCounterKind::Ds), 1u);
+  scoreboard->wait(WaitCounterKind::Load, 0);
+  const auto shared = access.flat_local_lane_mask | access.flat_dds_lane_mask;
+  scoreboard->access({RegClass::VGPR, 2, 1}, access.active_lane_mask & ~shared, 0xf, false);
+  EXPECT_EQ(cu->memory_wait_diagnostic_count(), 0u);
+  scoreboard->access({RegClass::VGPR, 2, 1}, shared, 0xf, false);
+  EXPECT_EQ(cu->memory_wait_diagnostic_count(), 1u);
 }
 
 TEST(RoutedMemoryObservationTest, AnExplicitGlobalAccessIgnoresTheSharedAperture) {

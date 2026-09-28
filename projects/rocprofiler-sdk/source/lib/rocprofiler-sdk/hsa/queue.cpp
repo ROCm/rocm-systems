@@ -306,7 +306,6 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
                                                      packet,
                                                      packet.instrumentation_packets,
                                                      dispatch_time);
-
         // SPM completion is migrated off the callback registry (see WriteInterceptor); invoke
         // it explicitly here.
         spm::kernel_dispatch_phase_exit_hook(&queue_info_session.queue,
@@ -315,7 +314,6 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
                                              packet,
                                              packet.instrumentation_packets,
                                              dispatch_time);
-
         // Counter collection completion is migrated off the callback registry (see
         // WriteInterceptor); invoke it explicitly here.
         counters::kernel_dispatch_phase_exit_hook(&queue_info_session.queue,
@@ -324,7 +322,6 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
                                                   packet,
                                                   packet.instrumentation_packets,
                                                   dispatch_time);
-
         // Thread trace completion is migrated off the callback registry (see WriteInterceptor);
         // invoke it explicitly here.
         thread_trace::kernel_dispatch_phase_exit_hook(queue_info_session.queue,

@@ -136,7 +136,9 @@ add_perfetto_annotation(perfetto_event_context_t&      ctx,
     // the name to a null pointer, type to none, or value to a null pointer
     if(_annotation.name == nullptr || _annotation.type == 0 ||
        _annotation.value == nullptr)
+    {
         return;
+    }
 
     if(_annotation.type == Idx)
     {
@@ -159,8 +161,8 @@ add_perfetto_annotation(perfetto_event_context_t&      ctx,
         // the first "iteration": check whether annotation type has valid range
         if constexpr(Idx == ROCPROFSYS_VALUE_NONE + 1)
         {
-            if(!(_annotation.type > ROCPROFSYS_VALUE_NONE &&
-                 _annotation.type < ROCPROFSYS_VALUE_LAST))
+            if(_annotation.type <= ROCPROFSYS_VALUE_NONE ||
+               _annotation.type >= ROCPROFSYS_VALUE_LAST)
             {
                 LOG_CRITICAL("Annotation '{}' has an invalid type designation "
                              "{} which is outside of acceptable range [{}, {}]",

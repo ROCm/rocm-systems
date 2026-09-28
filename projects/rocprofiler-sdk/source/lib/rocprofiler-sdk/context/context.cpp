@@ -313,8 +313,8 @@ get_contexts_mutex()
 }
 
 bool
-dispatch_counter_collection_service::intersects(
-    const dispatch_counter_collection_service& rhs) const
+spm_dispatch_counter_collection_service::intersects(
+    const spm_dispatch_counter_collection_service& rhs) const
 {
     if(agents.empty() || rhs.agents.empty()) return true;
     const auto& small = (agents.size() < rhs.agents.size()) ? agents : rhs.agents;
@@ -327,8 +327,8 @@ dispatch_counter_collection_service::intersects(
 }
 
 bool
-spm_dispatch_counter_collection_service::intersects(
-    const spm_dispatch_counter_collection_service& rhs) const
+dispatch_counter_collection_service::intersects(
+    const dispatch_counter_collection_service& rhs) const
 {
     if(agents.empty() || rhs.agents.empty()) return true;
     const auto& small = (agents.size() < rhs.agents.size()) ? agents : rhs.agents;

@@ -569,6 +569,14 @@ std::unordered_map<std::string, FactoryFn> &factories() {
       cc.lds_size_kb = config_u32(cfg, "lds_size_kb", 160);
       cc.functional_quantum =
           config_u32(cfg, "functional_quantum", amdgpu::ComputeUnitCore::kFunctionalQuantum);
+      if (auto it = cfg.find("memory_wait_diagnostics"); it != cfg.end()) {
+        if (it->second == "off")
+          cc.memory_wait_diagnostics = amdgpu::MemoryWaitDiagnostics::Off;
+        else if (it->second == "warn")
+          cc.memory_wait_diagnostics = amdgpu::MemoryWaitDiagnostics::Warn;
+        else
+          throw std::invalid_argument("memory_wait_diagnostics must be warn or off");
+      }
       return amdgpu::ComputeUnitCore::create(n, cc, mem, nullptr, mode);
     };
   }
@@ -1084,6 +1092,11 @@ ExecutionThreadSettings load_execution_thread_settings(const std::string &json_p
                                                        const std::string &schema_text) {
   return with_parsed_simulation_config_json(read_config_file(json_path), schema_text,
                                             execution_thread_settings);
+}
+
+ExecutionThreadSettings load_execution_thread_settings_from_string(const std::string &json,
+                                                                   const std::string &schema_text) {
+  return with_parsed_simulation_config_json(json, schema_text, execution_thread_settings);
 }
 
 LoadedConfig load_config(const std::string &json_path, const std::string &schema_text,

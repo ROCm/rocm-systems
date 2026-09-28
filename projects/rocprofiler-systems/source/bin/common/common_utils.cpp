@@ -44,7 +44,9 @@ to_c_argv(std::vector<std::string>& src)
     std::vector<char*> out;
     out.reserve(src.size() + 1);
     for(auto& entry : src)
+    {
         out.emplace_back(entry.data());
+    }
     out.emplace_back(nullptr);
     return out;
 }
@@ -54,11 +56,17 @@ print_command(const std::vector<std::string>& argv, std::string_view prefix)
 {
     auto cmd = std::accumulate(argv.begin(), argv.end(), std::string{},
                                [](std::string acc, const std::string& arg) {
-                                   if(!acc.empty()) acc += ' ';
+                                   if(!acc.empty())
+                                   {
+                                       acc += ' ';
+                                   }
                                    acc += arg;
                                    return acc;
                                });
-    if(cmd.empty()) return;
+    if(cmd.empty())
+    {
+        return;
+    }
     std::cerr << prefix << "Executing '" << cmd << "'...\n" << std::flush;
 }
 
@@ -85,15 +93,26 @@ print_environment_impl(const std::vector<std::string>&              env,
     const bool has_updated = std::any_of(entries.begin(), entries.end(), is_updated);
     const bool has_general =
         include_general_vars && std::any_of(entries.begin(), entries.end(), is_general);
-    if(!has_updated && !has_general) return;
+    if(!has_updated && !has_general)
+    {
+        return;
+    }
 
     auto emit_matching = [&](auto pred) {
         for(const auto& entry : entries)
-            if(pred(entry)) std::cerr << prefix << entry << '\n';
+        {
+            if(pred(entry))
+            {
+                std::cerr << prefix << entry << '\n';
+            }
+        }
     };
 
     std::cerr << '\n';
-    if(include_general_vars) emit_matching(is_general);
+    if(include_general_vars)
+    {
+        emit_matching(is_general);
+    }
     emit_matching(is_updated);
     std::cerr << std::flush;
 }
@@ -118,7 +137,10 @@ translate_arguments(int argc, char** argv, preset_registry& registry,
 
     for(int arg_idx = 0; arg_idx < argc; ++arg_idx)
     {
-        if(argv[arg_idx] == nullptr) continue;
+        if(argv[arg_idx] == nullptr)
+        {
+            continue;
+        }
 
         if(past_separator)
         {
@@ -180,7 +202,10 @@ std::string
 get_output_directory(const char* env_var = nullptr)
 {
     const char* output_path = std::getenv(env_var ? env_var : env_vars::OUTPUT_PATH);
-    if(output_path && std::strlen(output_path) > 0) return std::string(output_path);
+    if(output_path && std::strlen(output_path) > 0)
+    {
+        return std::string(output_path);
+    }
 
     return "rocprof-sys-output";
 }
@@ -189,7 +214,10 @@ bool
 check_directory_writable(const std::string& dir)
 {
     struct stat st;
-    if(stat(dir.c_str(), &st) == 0) return access(dir.c_str(), W_OK) == 0;
+    if(stat(dir.c_str(), &st) == 0)
+    {
+        return access(dir.c_str(), W_OK) == 0;
+    }
 
     std::string candidate = dir;
     while(true)
@@ -206,7 +234,10 @@ check_directory_writable(const std::string& dir)
             candidate = "/";
             break;
         }
-        if(stat(candidate.c_str(), &st) == 0) break;
+        if(stat(candidate.c_str(), &st) == 0)
+        {
+            break;
+        }
     }
 
     return access(candidate.c_str(), W_OK) == 0;
@@ -235,7 +266,9 @@ print_pre_execution_info(std::string_view tool_name, std::string_view preset_mod
         std::string box_line;
         box_line.reserve(box_width * 3);
         for(size_t col = 0; col < box_width; ++col)
+        {
             box_line += "\u2550";
+        }
 
         constexpr std::string_view prefix       = "ROCm Systems Profiler - ";
         const size_t               content_size = prefix.size() + tool_name.size();
@@ -405,7 +438,10 @@ collect_resolved_settings(const std::vector<std::string>&        current_env,
     {
         const std::string_view entry{ env_entry };
         auto                   eq_pos = entry.find('=');
-        if(eq_pos == std::string_view::npos) continue;
+        if(eq_pos == std::string_view::npos)
+        {
+            continue;
+        }
 
         const std::string key(entry.substr(0, eq_pos));
         const std::string val(entry.substr(eq_pos + 1));
@@ -487,7 +523,10 @@ strip_ansi(const std::string& text)
     {
         if(in_escape)
         {
-            if(ch == 'm') in_escape = false;
+            if(ch == 'm')
+            {
+                in_escape = false;
+            }
             continue;
         }
         if(ch == '\033')
@@ -505,10 +544,16 @@ is_section_header(const std::string& line, std::string& bracket_name)
 {
     auto ansi_stripped = strip_ansi(line);
     auto stripped      = utility::string::ltrim(ansi_stripped);
-    if(stripped.empty() || stripped.front() != '[') return false;
+    if(stripped.empty() || stripped.front() != '[')
+    {
+        return false;
+    }
     // Find the closing bracket -the bracket name ends at the first ']'
     auto close = stripped.find(']');
-    if(close == std::string::npos) return false;
+    if(close == std::string::npos)
+    {
+        return false;
+    }
     bracket_name = std::string{ stripped.substr(0, close + 1) };
     return true;
 }
@@ -519,14 +564,19 @@ line_contains_flag(const std::string& line, const std::string& flag)
     auto stripped = strip_ansi(line);
     // Flag lines have leading whitespace then the flag name
     auto pos = stripped.find(flag);
-    if(pos == std::string::npos) return false;
+    if(pos == std::string::npos)
+    {
+        return false;
+    }
     // Verify it's a word boundary (not a substring of a longer flag)
     auto end = pos + flag.size();
     if(end < stripped.size())
     {
         const char next = stripped[end];
         if(next != ' ' && next != ',' && next != '=' && next != '\t' && next != '[')
+        {
             return false;
+        }
     }
     return true;
 }
@@ -648,7 +698,9 @@ get_help_topic_map()
     static const help_topic_map map = [] {
         help_topic_map result;
         for(const auto& topic : group_topic_table())
+        {
             result.emplace(topic.name, topic.sections);
+        }
         return result;
     }();
     return map;
@@ -660,7 +712,9 @@ get_domain_help_map()
     static const domain_help_map map = [] {
         domain_help_map result;
         for(const auto& domain : domain_topic_table())
+        {
             result.emplace(domain.name, domain.info);
+        }
         return result;
     }();
     return map;
@@ -696,11 +750,16 @@ print_see_also(std::string_view topic, std::ostream& out)
 {
     const auto& relations = get_related_topics_map();
     auto        it        = relations.find(topic);
-    if(it == relations.end() || it->second.empty()) return;
+    if(it == relations.end() || it->second.empty())
+    {
+        return;
+    }
 
     out << "\n  See also (related topics):\n";
     for(const auto& related : it->second)
+    {
         out << "    --help=" << related << "\n";
+    }
 }
 
 void
@@ -711,9 +770,13 @@ print_topic_listing(std::string_view tool_name, std::ostream& out)
     const int name_width = [] {
         std::size_t longest = std::string_view{ "all" }.size();
         for(const auto& topic : group_topic_table())
+        {
             longest = std::max(longest, std::string_view{ topic.name }.size());
+        }
         for(const auto& domain : domain_topic_table())
+        {
             longest = std::max(longest, std::string_view{ domain.name }.size());
+        }
         return std::max<int>(topic_col_width, static_cast<int>(longest) + name_blurb_gap);
     }();
 
@@ -726,13 +789,18 @@ print_topic_listing(std::string_view tool_name, std::ostream& out)
     out << "    " << std::setw(name_width) << "all" << "Full help output (all options)\n";
     for(const auto& topic : group_topic_table())
     {
-        if(!shown_for_tool(topic.tools, tool_name)) continue;
+        if(!shown_for_tool(topic.tools, tool_name))
+        {
+            continue;
+        }
         out << "    " << std::setw(name_width) << topic.name << topic.blurb << "\n";
     }
     out << "\n  Domain topics:\n";
     for(const auto& domain : domain_topic_table())
+    {
         out << "    " << std::setw(name_width) << domain.name << domain.info.description
             << "\n";
+    }
 
     out.flags(saved_flags);
 }
@@ -757,7 +825,10 @@ print_compact_help(std::string_view tool_name, std::ostream& out)
         << "  -o, --output PATH      Output directory\n"
         << "  -T, --trace            Enable/disable Perfetto tracing\n"
         << "  -P, --profile          Enable/disable call-stack profiling\n";
-    if(tool_name == "run") out << "  -S, --sample           Enable/disable sampling\n";
+    if(tool_name == "run")
+    {
+        out << "  -S, --sample           Enable/disable sampling\n";
+    }
     out << "  --export-config[=FILE] Export resolved config as JSON\n"
         << "  -v, --verbose          Increase verbosity\n"
         << "\n"
@@ -779,7 +850,10 @@ print_help_for_topic(const std::string& captured, std::string_view topic,
 {
     const auto& topic_map = get_help_topic_map();
     auto        match     = topic_map.find(std::string{ topic });
-    if(match == topic_map.end()) return false;
+    if(match == topic_map.end())
+    {
+        return false;
+    }
 
     // Build set of target header strings
     const std::set<std::string> target_headers(match->second.begin(),
@@ -790,7 +864,9 @@ print_help_for_topic(const std::string& captured, std::string_view topic,
     std::string              line;
     std::vector<std::string> lines;
     while(std::getline(iss, line))
+    {
         lines.push_back(line);
+    }
 
     // Find section boundaries
     struct Section
@@ -806,7 +882,10 @@ print_help_for_topic(const std::string& captured, std::string_view topic,
         std::string bracket_name;
         if(is_section_header(lines[line_idx], bracket_name))
         {
-            if(!sections.empty()) sections.back().end = line_idx;
+            if(!sections.empty())
+            {
+                sections.back().end = line_idx;
+            }
             sections.push_back({ line_idx, lines.size(), bracket_name });
         }
     }
@@ -821,7 +900,9 @@ print_help_for_topic(const std::string& captured, std::string_view topic,
         {
             found = true;
             for(size_t line_idx = sec.start; line_idx < sec.end; ++line_idx)
+            {
                 out << lines[line_idx] << '\n';
+            }
         }
     }
 
@@ -839,7 +920,10 @@ print_help_for_domain(const std::string& captured, std::string_view domain,
 {
     const auto& domain_map = get_domain_help_map();
     auto        match      = domain_map.find(std::string{ domain });
-    if(match == domain_map.end()) return false;
+    if(match == domain_map.end())
+    {
+        return false;
+    }
 
     const auto& entry = match->second;
 
@@ -848,7 +932,9 @@ print_help_for_domain(const std::string& captured, std::string_view domain,
     std::string              line;
     std::vector<std::string> lines;
     while(std::getline(iss, line))
+    {
         lines.push_back(line);
+    }
 
     // Print header
     out << utility::string::to_upper(domain) << " OPTIONS (" << entry.description
@@ -880,7 +966,10 @@ print_help_for_domain(const std::string& captured, std::string_view domain,
         // Skip separators and empty lines at the top
         if(trimmed.empty())
         {
-            if(in_match) out << '\n';
+            if(in_match)
+            {
+                out << '\n';
+            }
             in_match = false;
             continue;
         }

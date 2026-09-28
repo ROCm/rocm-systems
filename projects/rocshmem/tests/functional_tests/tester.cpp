@@ -74,6 +74,7 @@
 #include "hipmodule_init_tester.hpp"
 #include "device_bitcode_tester.hpp"
 #include "library_info_tester.hpp"
+#include "buffer_register_symmetric_tester.hpp"
 #include "fence_ordering_tester.hpp"
 #include "tile_rma_tester.hpp"
 #include "tile_broadcast_tester.hpp"
@@ -864,6 +865,10 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       test_name = "Library Info Test";
       testers.push_back(new LibraryInfoTester(args));
       break;
+    case BufferRegisterSymmetricTestType:
+      test_name = "Buffer Register Symmetric Test";
+      testers.push_back(new BufferRegisterSymmetricTester(args));
+      break;
     case FenceOrderPutWaveSignalTestType:
       test_name = "Fence PutWaveSignal Ordering";
       testers.push_back(new FenceOrderingTester(args));
@@ -1165,6 +1170,7 @@ bool Tester::peLaunchesKernel() {
     case FloodFAddTestType:
     case FloodWaitAmoTestType:
     case DeviceBitcodeTestType:
+    case BufferRegisterSymmetricTestType:
     case FenceOrderPutWaveSignalTestType:
     case FenceOrderPutLargeSmallTestType:
     case FenceOrderFanoutTestType:

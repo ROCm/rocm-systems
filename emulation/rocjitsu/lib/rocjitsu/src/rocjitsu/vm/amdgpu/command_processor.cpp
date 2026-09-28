@@ -732,7 +732,7 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
     };
     VmAccessOutcome scratch_outcome = scratch_range_outcome(false);
 
-    if (!pkt.pm4_abi && scratch_outcome != VmAccessOutcome::Complete && scratch_allocator_) {
+    if (!pkt.pm4_abi && scratch_allocator_) {
       // Size against the whole grid, not this XCD's share: every XCD of a
       // fanned-out dispatch shares the allocation. CDNA5 uses the complete
       // physical XCC/SE/scoreboard address space instead of logical grid slots.
@@ -746,10 +746,19 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
       if (scratch_slots == 0 || per_wave_size > std::numeric_limits<size_t>::max() / scratch_slots)
         return VmAccessOutcome::Malformed;
       const size_t total_scratch = static_cast<size_t>(per_wave_size * scratch_slots);
-      if (!scratch_allocator_(pkt.process_id, scratch_pool, total_scratch))
-        return VmAccessOutcome::Faulted;
-      scratch_access = snapshot_gpu_access(pkt.address_space);
-      scratch_outcome = scratch_access ? scratch_range_outcome(true) : VmAccessOutcome::Unavailable;
+      // Provision the complete pool before this shard admits its first wave.
+      // A smaller pool left by a preceding dispatch can cover that wave while
+      // a later XCD needs more backing. Let the allocator check its allocation
+      // records instead of probing every unused slot's host pages. Provisioning
+      // is idempotent and preserves backing used by overlapping dispatches.
+      const bool first_wave = pkt.dispatched_wgs == 0 && wf_index_in_wg == 0;
+      if (first_wave || scratch_outcome != VmAccessOutcome::Complete) {
+        if (!scratch_allocator_(pkt.process_id, scratch_pool, total_scratch))
+          return VmAccessOutcome::Faulted;
+        scratch_access = snapshot_gpu_access(pkt.address_space);
+        scratch_outcome =
+            scratch_access ? scratch_range_outcome(true) : VmAccessOutcome::Unavailable;
+      }
     }
 
     // A successful allocator result is only a provisioning claim. Require the

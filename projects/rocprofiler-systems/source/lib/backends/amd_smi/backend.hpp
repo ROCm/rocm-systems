@@ -289,7 +289,10 @@ public:
         std::uint32_t count = 0;
         check_status(m_amdsmi.get_gpu_process_list(h, &count, nullptr),
                      "amdsmi_get_gpu_process_list (count)");
-        if(count == 0) return {};
+        if(count == 0)
+        {
+            return {};
+        }
         std::vector<proc_info_t> procs(count);
         check_status(m_amdsmi.get_gpu_process_list(h, &count, procs.data()),
                      "amdsmi_get_gpu_process_list (data)");
@@ -327,7 +330,10 @@ private:
 
     static void check_status(status_t status, const char* func)
     {
-        if(status == STATUS_SUCCESS) return;
+        if(status == STATUS_SUCCESS)
+        {
+            return;
+        }
         throw std::runtime_error(std::string(func) +
                                  " failed: " + status_to_string(status));
     }
@@ -342,7 +348,10 @@ private:
         check_status(m_amdsmi.get_socket_handles(&socket_count, nullptr),
                      "amdsmi_get_socket_handles (count)");
 
-        if(socket_count == 0) return result;
+        if(socket_count == 0)
+        {
+            return result;
+        }
 
         std::vector<socket_handle> sockets(socket_count);
         check_status(m_amdsmi.get_socket_handles(&socket_count, sockets.data()),
@@ -351,7 +360,10 @@ private:
         for(auto socket : sockets)
         {
             std::uint32_t count = 0;
-            if(query(socket, &count, nullptr) != STATUS_SUCCESS || count == 0) continue;
+            if(query(socket, &count, nullptr) != STATUS_SUCCESS || count == 0)
+            {
+                continue;
+            }
 
             std::vector<processor_handle> procs(count);
             check_status(query(socket, &count, procs.data()),
