@@ -299,6 +299,48 @@ struct external_dependencies
 
     static const char* dlerror() { return ::dlerror(); }
 
+    // ─── Members required by domains::callback::k_rccl ──────────────────────────────
+    using rocm_rccl_api_category = category::rocm_rccl_api;
+    using pmc_event_with_sample  = trace_cache::pmc_event_with_sample;
+    using metadata_registry_t    = trace_cache::metadata_registry;
+    using buffer_storage_t       = trace_cache::buffer_storage_t;
+
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr std::string_view rocm_rccl_api_category_name =
+        trait::name<category::rocm_rccl_api>::value;
+
+    // Single source of truth for these strings is core/categories.hpp's
+    // trait::name<category::comm_data>; rccl.hpp itself never includes
+    // categories.hpp, so the values are surfaced here instead.
+    static constexpr std::string_view comm_data_name =
+        trait::name<category::comm_data>::value;
+    static constexpr std::string_view comm_data_description =
+        trait::name<category::comm_data>::description;
+    static constexpr std::size_t comm_data_enum_value =
+        static_cast<std::size_t>(category_enum_id<category::comm_data>::value);
+
+    static constexpr std::string_view rccl_send_label      = "RCCL Comm Send";
+    static constexpr std::string_view rccl_recv_label      = "RCCL Comm Recv";
+    static constexpr std::string_view rccl_send_track_name = rccl_send_label;
+    static constexpr std::string_view rccl_recv_track_name = rccl_recv_label;
+
+    static metadata_registry_t& get_metadata_registry()
+    {
+        return trace_cache::get_metadata_registry();
+    }
+
+    static buffer_storage_t& get_buffer_storage()
+    {
+        return trace_cache::get_buffer_storage();
+    }
+
+    static void* dlsym(const char* symbol_name)
+    {
+        return ::dlsym(RTLD_DEFAULT, symbol_name);
+    }
+
+    static const char* dlerror() { return ::dlerror(); }
+
     static bool check_backtrace_operations(rocprofiler_callback_tracing_kind_t kind,
                                            rocprofiler_tracing_operation_t     operation)
     {
