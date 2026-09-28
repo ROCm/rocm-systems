@@ -25,6 +25,11 @@ std::function<ncclResult_t(void* commState, void* allData, int size)> g_bootstra
 ncclResult_t bootstrapAllGather(void* commState, void* allData, int size) {
   return g_bootstrapAllGather(commState, allData, size);
 }
+// Only init.cc:2958 reaches this, to hand the rocSHMEM unique id to the other
+// ranks. A single-rank microtest has nobody to broadcast to, so succeeding
+// without touching bcastData leaves the root's own copy in place.
+ncclResult_t bootstrapBroadcast(void*, int, int, int, void*, int) { return ncclSuccess; }
+
 ncclResult_t bootstrapClose(void* commState) { ::abort(); }
 static ncclResult_t DefaultBootstrapCreateRoot(struct ncclBootstrapHandle*, bool) { ::abort(); }
 std::function<ncclResult_t(struct ncclBootstrapHandle*, bool)> g_bootstrapCreateRoot = DefaultBootstrapCreateRoot;
