@@ -2068,9 +2068,9 @@
           "test_filter": "IbvSymbolsEnv.PrimaryTakesPrecedenceOverAlias"
         },
         {
-          "name": "CpuAffinity.RestoredAfterInitRank",
-          "description": "Verify CPU affinity mask is restored after ncclCommInitRank (NCCL #2033 regression)",
-          "test_filter": "CpuAffinity.RestoredAfterInitRank"
+          "name": "CpuAffinity.PinnedToLocalAfterInitRank",
+          "description": "Verify the calling thread stays pinned to the GPU-local CPUs after ncclCommInitRank (NCCL #2033 regression)",
+          "test_filter": "CpuAffinity.PinnedToLocalAfterInitRank"
         },
         {
           "name": "CollImplInfo.AllReduceMatchesDispatchLog",
