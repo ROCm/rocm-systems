@@ -622,7 +622,8 @@ static constexpr uint64_t kSpaceCheckMax = 64ull << 20;
 // Set by open(); g_keep_free stays 0 when free space cannot be read at all.
 static uint64_t              g_keep_free = 0;
 static uint64_t              g_space_check_bytes = kSpaceCheckMax;
-static std::atomic<uint64_t> g_bytes_since_space_check{0};
+// Events and blobs both count here. Protected by g_file_mu.
+static uint64_t g_bytes_since_space_check = 0;
 // Bytes already accepted by reserve_space and not yet finished writing. Concurrent
 // blob writers all count against the free-space check until they release.
 static std::atomic<uint64_t> g_bytes_reserved{0};
@@ -644,35 +645,58 @@ static bool fs_space(const std::string& dir, uint64_t* avail, uint64_t* total) {
 }
 
 // Flush what is buffered, close events.bin and mark the archive incomplete.
-// Every write path already treats a closed events fd as "capture off".
+// Every write path already treats a closed events fd as "capture off". The flag
+// is raised under g_file_mu, so a writer that sees it and then takes the mutex
+// finds events.bin already closed.
 static void stop_for_space(uint64_t keep_free) {
-  if (g_out_of_space.exchange(true)) return;
   char reason[160];
   snprintf(reason, sizeof(reason),
            "stopped writing: less than %llu MiB would stay free on the file system "
            "holding the archive",
            static_cast<unsigned long long>(keep_free >> 20));
-  mark_incomplete(reason);
-  BufWriteGuard lk;
-  if (g_events_fd >= 0) {
-    flush_buffer_locked();
-    HRR_FSYNC(g_events_fd);
-    HRR_CLOSE(g_events_fd);
-    g_events_fd = -1;
+  {
+    BufWriteGuard lk;
+    if (g_out_of_space.exchange(true)) return;
+    if (g_events_fd >= 0) {
+      flush_buffer_locked();
+      HRR_FSYNC(g_events_fd);
+      HRR_CLOSE(g_events_fd);
+      g_events_fd = -1;
+    }
   }
+  mark_incomplete(reason);
 }
 
 // Size the reserve for the archive's file system. False when less than the
 // reserve is free to begin with.
 static bool init_space_reserve() {
   g_keep_free = 0;
-  g_bytes_since_space_check.store(0, std::memory_order_relaxed);
+  g_bytes_since_space_check = 0;
   g_bytes_reserved.store(0, std::memory_order_relaxed);
   uint64_t avail = 0, total = 0;
   if (!fs_space(g_output_dir, &avail, &total)) return true;
   g_keep_free = std::min<uint64_t>(total / 100 * 15, kKeepFreeMax);
   g_space_check_bytes = std::max<uint64_t>(std::min<uint64_t>(kSpaceCheckMax, g_keep_free / 4), 1);
   return avail >= g_keep_free;
+}
+
+// Count `len` bytes toward the next free-space check and return true when one is
+// due. Caller must hold g_file_mu.
+static bool space_check_due_locked(uint64_t len) {
+  g_bytes_since_space_check += len;
+  if (len < g_space_check_bytes && g_bytes_since_space_check < g_space_check_bytes) return false;
+  g_bytes_since_space_check = 0;
+  return true;
+}
+
+// Read free space and return false, having stopped the capture, if `pending` more
+// bytes would eat into the reserve. Must not be called with g_file_mu held.
+static bool check_space(uint64_t pending) {
+  uint64_t avail = 0, total = 0;
+  if (!fs_space(g_output_dir, &avail, &total)) return true;
+  if (avail >= g_keep_free && avail - g_keep_free >= pending) return true;
+  stop_for_space(g_keep_free);
+  return false;
 }
 
 // Account for `len` bytes of archive data and return false, having stopped the
@@ -683,14 +707,13 @@ static bool reserve_space(uint64_t len) {
   if (g_keep_free == 0) return true;
   const uint64_t reserved =
       g_bytes_reserved.fetch_add(len, std::memory_order_acq_rel) + len;
-  const uint64_t since = g_bytes_since_space_check.fetch_add(len, std::memory_order_relaxed) + len;
-  if (len < g_space_check_bytes && since < g_space_check_bytes) return true;
-  g_bytes_since_space_check.store(0, std::memory_order_relaxed);
-  uint64_t avail = 0, total = 0;
-  if (!fs_space(g_output_dir, &avail, &total)) return true;
-  if (avail >= g_keep_free && avail - g_keep_free >= reserved) return true;
+  bool due;
+  {
+    std::lock_guard<std::mutex> lk(g_file_mu);
+    due = space_check_due_locked(len);
+  }
+  if (!due || check_space(reserved)) return true;
   g_bytes_reserved.fetch_sub(len, std::memory_order_acq_rel);
-  stop_for_space(g_keep_free);
   return false;
 }
 
@@ -699,13 +722,26 @@ static void release_space(uint64_t len) {
   g_bytes_reserved.fetch_sub(len, std::memory_order_acq_rel);
 }
 
+// For open() refusing for lack of space. A forked child inherits these paths and
+// atexit(hip_capture_shutdown), so without this its flush() would finalize the
+// parent's archive, or one the child never opened. An empty g_base_dir also stops
+// atfork_child() trying again in later forks.
+static void clear_archive_paths() {
+  g_base_dir.clear();
+  g_output_dir.clear();
+  g_manifest_path[0] = '\0';
+}
+
 // ---------------------------------------------------------------------------
 // open / close / flush / checkpoint
 // ---------------------------------------------------------------------------
 
 bool open(const char* output_dir) {
   if (g_events_fd >= 0) return true;  // already open — guard against double-invocation
-  if (g_out_of_space.load(std::memory_order_relaxed)) return false;  // e.g. a child after fork
+  if (g_out_of_space.load(std::memory_order_relaxed)) {  // e.g. a child after fork
+    clear_archive_paths();
+    return false;
+  }
 #ifndef _WIN32
   install_atfork_handlers_once();
 #endif
@@ -734,6 +770,7 @@ bool open(const char* output_dir) {
     fprintf(stderr, "[HRR capture] Capture disabled: less than %llu MiB free on the file "
             "system holding %s.\n", static_cast<unsigned long long>(g_keep_free >> 20),
             g_output_dir.c_str());
+    clear_archive_paths();
     return false;
   }
 
@@ -1007,6 +1044,7 @@ void write_event_raw(uint16_t api_id, hrr_event_header* hdr, uint32_t payload_le
   // back fsyncs (a thundering herd at every 4096-event boundary). Doing the
   // fsync under the lock blocks other writers for the duration of the syscall,
   // but guarantees exactly one fsync per checkpoint and removes the race.
+  bool space_due = false;
   {
     BufWriteGuard lk;
     if (g_events_fd < 0) return;
@@ -1018,10 +1056,11 @@ void write_event_raw(uint16_t api_id, hrr_event_header* hdr, uint32_t payload_le
       HRR_FSYNC(g_events_fd);
       g_events_since_ckpt = 0;
     }
+    space_due = g_keep_free != 0 && space_check_due_locked(payload_len);
   }
-  // After the event is buffered, and outside g_file_mu: this only counts its bytes
-  // and stops capture for the next event, since reserve_space may take the mutex.
-  if (reserve_space(payload_len)) release_space(payload_len);
+  // After the event is buffered, and outside g_file_mu since check_space may take it
+  // to stop the capture: a stop applies from the next event.
+  if (space_due) (void)check_space(g_bytes_reserved.load(std::memory_order_acquire));
 }
 
 // ---------------------------------------------------------------------------
