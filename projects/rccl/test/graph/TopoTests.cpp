@@ -803,6 +803,90 @@ TEST_F(TopoTest, MloPartSiblings_EightPartitionsFormFullNvlMesh) {
   ncclTopoFree(built);
 }
 
+// ncclTopoConnectMloPartSiblings() walks every DEV node and rewrites the bw of the links it finds,
+// so it has to be selective about which ones: a node with more than one physical device carries
+// inter-device XGMI links on the same DEV nodes, and those must keep the width sysfs reported for
+// them. Two partitioned devices with a wider link between them than within them separate the two
+// ratings -- a pass that re-rated by DEV node rather than by sibling would pull the inter-device
+// link up to MLOPART_LOC_BW and hand the graph search a budget no XGMI link can deliver.
+TEST_F(TopoTest, MloPartSiblings_LeaveInterDeviceXgmiAtItsReportedWidth) {
+  const uint64_t host = 0xc5;
+  const int interDeviceCount = 8;
+  struct ncclXmlNode* cpu = addSystemCpu(host);
+  struct ncclXmlNode* pciA = addGpuPci(cpu, "0000:0c:00.0", "gfx942", /*rank=*/0, /*dev=*/0, /*mloPart=*/0);
+  struct ncclXmlNode* gpuA0 = nullptr;
+  ASSERT_EQ(xmlGetSub(pciA, "gpu", &gpuA0), ncclSuccess);
+  ASSERT_NE(gpuA0, nullptr);
+  struct ncclXmlNode* gpuA1 = addGpuUnderPci(pciA, "gfx942", /*rank=*/1, /*dev=*/1, /*mloPart=*/1);
+  struct ncclXmlNode* pciB = addGpuPci(cpu, "0000:22:00.0", "gfx942", /*rank=*/2, /*dev=*/2, /*mloPart=*/0);
+  struct ncclXmlNode* gpuB0 = nullptr;
+  ASSERT_EQ(xmlGetSub(pciB, "gpu", &gpuB0), ncclSuccess);
+  ASSERT_NE(gpuB0, nullptr);
+  struct ncclXmlNode* gpuB1 = addGpuUnderPci(pciB, "gfx942", /*rank=*/3, /*dev=*/3, /*mloPart=*/1);
+
+  // Within each device, the partitions report each other at four widths.
+  addGpuLink(gpuA0, "0000:0c:00.1", 4, PCI_ACCELERATOR_CLASS);
+  addGpuLink(gpuA1, "0000:0c:00.0", 4, PCI_ACCELERATOR_CLASS);
+  addGpuLink(gpuB0, "0000:22:00.1", 4, PCI_ACCELERATOR_CLASS);
+  addGpuLink(gpuB1, "0000:22:00.0", 4, PCI_ACCELERATOR_CLASS);
+  // Between the devices, a wider link, so the two ratings cannot be confused.
+  addGpuLink(gpuA0, "0000:22:00.0", interDeviceCount, PCI_ACCELERATOR_CLASS);
+  addGpuLink(gpuB0, "0000:0c:00.0", interDeviceCount, PCI_ACCELERATOR_CLASS);
+
+  struct ncclTopoSystem* built = nullptr;
+  ASSERT_EQ(ncclTopoGetSystemFromXml(xml, &built, host), ncclSuccess);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nodes[DEV].count, 4);
+  ASSERT_EQ(built->nodes[GPU].count, 4);
+
+  // Address the partitions by rank rather than by node index, which the XML ordering does not pin.
+  struct ncclTopoNode* gpuOfRank[4] = {};
+  for (int i = 0; i < built->nodes[GPU].count; i++) {
+    struct ncclTopoNode* gpu = built->nodes[GPU].nodes + i;
+    ASSERT_GE(gpu->gpu.rank, 0);
+    ASSERT_LT(gpu->gpu.rank, 4);
+    gpuOfRank[gpu->gpu.rank] = gpu;
+  }
+  for (int r = 0; r < 4; r++) {
+    ASSERT_NE(gpuOfRank[r], nullptr) << "no GPU node for rank " << r;
+    ASSERT_NE(gpuOfRank[r]->gpu.parent, nullptr) << "rank " << r << " has no DEV node";
+  }
+
+  const float interDeviceBw = interDeviceCount * ncclTopoXGMISpeed("gfx942");
+  ASSERT_NE(interDeviceBw, MLOPART_LOC_BW);
+  // ranks 0,1 partition one device; ranks 2,3 the other.
+  const int siblingPairs[2][2] = {{0, 1}, {2, 3}};
+  for (auto& pair : siblingPairs) {
+    EXPECT_TRUE(ncclTopoIsMloPartSibling(gpuOfRank[pair[0]], gpuOfRank[pair[1]]));
+    for (int d = 0; d < 2; d++) {
+      struct ncclTopoNode* from = gpuOfRank[pair[d]]->gpu.parent;
+      struct ncclTopoNode* to = gpuOfRank[pair[1 - d]]->gpu.parent;
+      struct ncclTopoLink* link = findLink(from, to);
+      ASSERT_NE(link, nullptr) << "no sibling link for ranks " << pair[d] << " -> " << pair[1 - d];
+      EXPECT_FLOAT_EQ(link->bw, MLOPART_LOC_BW) << "ranks " << pair[d] << " -> " << pair[1 - d];
+    }
+  }
+
+  // The reported hop between the two devices keeps its own width in both directions.
+  EXPECT_FALSE(ncclTopoIsMloPartSibling(gpuOfRank[0], gpuOfRank[2]));
+  struct ncclTopoLink* lAB = findLink(gpuOfRank[0]->gpu.parent, gpuOfRank[2]->gpu.parent);
+  struct ncclTopoLink* lBA = findLink(gpuOfRank[2]->gpu.parent, gpuOfRank[0]->gpu.parent);
+  ASSERT_NE(lAB, nullptr);
+  ASSERT_NE(lBA, nullptr);
+  EXPECT_FLOAT_EQ(lAB->bw, interDeviceBw);
+  EXPECT_FLOAT_EQ(lBA->bw, interDeviceBw);
+
+  ASSERT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
+  struct ncclTopoLinkList* pSibling = gpuOfRank[0]->paths[GPU] + (gpuOfRank[1] - built->nodes[GPU].nodes);
+  struct ncclTopoLinkList* pInterDevice = gpuOfRank[0]->paths[GPU] + (gpuOfRank[2] - built->nodes[GPU].nodes);
+  EXPECT_EQ(pSibling->type, PATH_NVL);
+  EXPECT_FLOAT_EQ(pSibling->bw, MLOPART_LOC_BW);
+  EXPECT_EQ(pInterDevice->type, PATH_NVL);
+  EXPECT_FLOAT_EQ(pInterDevice->bw, interDeviceBw);
+
+  ncclTopoFree(built);
+}
+
 // GDR for an MLOPart partition is a property of the physical GPU: every CPX partition is a HIP
 // logical device behind one PCI function, so a NIC one switch away is PATH_PXB for all of them and
 // GDR must be enabled for all of them. Before the rework ncclTopoCheckGdr() refused GDR to any
