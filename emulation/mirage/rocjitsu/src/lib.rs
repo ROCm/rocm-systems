@@ -781,7 +781,9 @@ fn resolve_sim_config(def: &EmulatorDef) -> Result<SimConfig> {
     // profile's topology. This is the `--config` of the upstream
     // `rocjitsu` CLI. (Container path remapping is not applied; the
     // explicit-config path is intended for direct, non-containerised
-    // drop-in use.)
+    // drop-in use.) A CPU thread budget is the one override that still
+    // applies, because upstream `rocjitsu --cpu-thread-budget` takes it
+    // alongside `--config`; it goes to a session copy, never to the file.
     if let Some(SimpleValue::String(path)) = def.options.get("config") {
         let cfg = PathBuf::from(path);
         if !cfg.exists() {
@@ -789,7 +791,12 @@ fn resolve_sim_config(def: &EmulatorDef) -> Result<SimConfig> {
                 "rocjitsu config not found: {path}"
             )));
         }
-        return Ok(SimConfig::Supplied(cfg));
+        return match def.options.get("cpu_thread_budget") {
+            None => Ok(SimConfig::Supplied(cfg)),
+            Some(budget) => Ok(SimConfig::Synthesised(supplied_config_with_budget(
+                &cfg, budget,
+            )?)),
+        };
     }
 
     let topology: TopologyDef = match &def.topology {
@@ -887,6 +894,57 @@ fn resolve_sim_config(def: &EmulatorDef) -> Result<SimConfig> {
     Ok(SimConfig::Synthesised(bytes))
 }
 
+/// Re-emit the supplied `--config` file with `cpu_thread_budget` replaced.
+///
+/// A run's budget belongs to that run, so the override produces a session copy
+/// and never touches the user's file. The copy is what the backend loads, and a
+/// `dbt_guest.simulator_config` would not survive the move: it names the host's
+/// own simulator config relative to the file declaring it, and that file, not
+/// this one, is where the budget would have to land. So that pairing is refused.
+fn supplied_config_with_budget(cfg: &std::path::Path, budget: &SimpleValue) -> Result<Vec<u8>> {
+    let budget = match budget {
+        SimpleValue::Number(n) if (0..=i64::from(u32::MAX)).contains(n) => *n,
+        _ => {
+            return Err(MirageError::Other(format!(
+                "rocjitsu cpu_thread_budget must be an integer between 0 and {}",
+                u32::MAX
+            )));
+        }
+    };
+    let text = std::fs::read_to_string(cfg)
+        .map_err(|e| MirageError::Other(format!("rocjitsu config {}: {e}", cfg.display())))?;
+    let mut sim: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
+        MirageError::Other(format!(
+            "rocjitsu config {}: {e}. --cpu-thread-budget rewrites the config, so it \
+             needs plain JSON; set cpu_thread_budget in the file instead.",
+            cfg.display()
+        ))
+    })?;
+    let Some(map) = sim.as_object_mut() else {
+        return Err(MirageError::Other(format!(
+            "rocjitsu config {} is not a JSON object",
+            cfg.display()
+        )));
+    };
+    if let Some(simulator_config) = map
+        .get("dbt_guest")
+        .and_then(|dbt| dbt.get("simulator_config"))
+        .and_then(serde_json::Value::as_str)
+        && !simulator_config.is_empty()
+    {
+        return Err(MirageError::Other(format!(
+            "--cpu-thread-budget cannot be combined with a dbt_guest simulator_config; \
+             set cpu_thread_budget in {simulator_config} instead"
+        )));
+    }
+    map.insert(
+        "cpu_thread_budget".to_string(),
+        serde_json::Value::from(budget),
+    );
+    serde_json::to_vec_pretty(&sim)
+        .map_err(|e| MirageError::Other(format!("rocjitsu kmd_config: serialize sim config: {e}")))
+}
+
 /// Materialise the rocjitsu `SimulationConfig` for `def` in
 /// `session_dir` — the session's scratch directory — and return its
 /// path. That path is what gets recorded in the rocjitsu `config_path`
@@ -895,7 +953,8 @@ fn resolve_sim_config(def: &EmulatorDef) -> Result<SimConfig> {
 /// One file per session, rewritten on each call so it always reflects
 /// the current profile, and removed with the session. A profile that
 /// supplies its own config (drop-in `--config`) is returned as-is and
-/// nothing is written.
+/// nothing is written, unless a run overrides its CPU thread budget —
+/// then the session gets a copy carrying the override.
 ///
 /// # Errors
 ///
@@ -1405,6 +1464,62 @@ mod tests {
             1,
             "nothing may be written beside the user's own config file"
         );
+    }
+
+    /// Upstream `rocjitsu --cpu-thread-budget` applies to a `--config` file, so
+    /// mirage's must too -- against a copy, since the file is the user's.
+    #[test]
+    fn a_budget_override_reaches_a_supplied_config_without_editing_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = tmp.path().join("cfg.json");
+        let original = r#"{"max_ticks": 7, "cpu_thread_budget": 32}"#;
+        std::fs::write(&config, original).unwrap();
+        let mut def = def_with_gpus(1);
+        def.options.insert(
+            "config".to_owned(),
+            SimpleValue::String(config.display().to_string()),
+        );
+
+        let SimConfig::Supplied(verbatim) = resolve_sim_config(&def).unwrap() else {
+            panic!("a config with no override is used as it is");
+        };
+        assert_eq!(verbatim, config);
+
+        def.options
+            .insert("cpu_thread_budget".to_owned(), SimpleValue::Number(4));
+        let SimConfig::Synthesised(bytes) = resolve_sim_config(&def).unwrap() else {
+            panic!("an override has to produce a copy");
+        };
+        let copy: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(copy["cpu_thread_budget"], 4);
+        assert_eq!(copy["max_ticks"], 7);
+        assert_eq!(std::fs::read_to_string(&config).unwrap(), original);
+    }
+
+    /// `dbt_guest.simulator_config` names the host's simulator config relative to
+    /// the file declaring it, so a copy elsewhere would resolve it to the wrong
+    /// place -- and that file, not this one, is the one the budget belongs in.
+    #[test]
+    fn a_budget_override_is_refused_for_a_config_naming_a_dbt_simulator_config() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = tmp.path().join("cfg.json");
+        std::fs::write(
+            &config,
+            r#"{"dbt_guest": {"enabled": true, "simulator_config": "host.json"}}"#,
+        )
+        .unwrap();
+        let mut def = def_with_gpus(1);
+        def.options.insert(
+            "config".to_owned(),
+            SimpleValue::String(config.display().to_string()),
+        );
+        def.options
+            .insert("cpu_thread_budget".to_owned(), SimpleValue::Number(4));
+
+        let msg = resolve_sim_config(&def).unwrap_err().to_string();
+
+        assert!(msg.contains("--cpu-thread-budget"), "{msg}");
+        assert!(msg.contains("host.json"), "{msg}");
     }
 
     #[test]

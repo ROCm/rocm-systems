@@ -212,8 +212,16 @@ rocjitsu --config configs/gfx950_mi355x.json --thread-budget-table
 
 The configured row reflects the file's budget and current affinity. Remaining
 rows show explicit budget ceilings while retaining the file's knob overrides.
-The total column reports actual allocation, which may be below the ceiling or
-above it when explicitly overridden.
+`rocjitsu --cpu-thread-budget N` (or `--cpu-thread-budget=N`) replaces JSON
+`cpu_thread_budget` for that invocation, including the Configured row of
+`--thread-budget-table`. The named file is never rewritten: the launcher copies
+it to `effective_config.json` in the invocation's runtime directory, applies the
+budget there, and launches from the copy, which is removed with the rest of that
+directory. The flag is refused with `--attach`, which joins a daemon that has
+already built its machine, and with a config whose `dbt_guest.simulator_config`
+names a separate host config — the budget belongs in that file instead. The total
+column reports actual allocation, which may be below the ceiling or above it when
+explicitly overridden.
 
 For multiple GPUs, selection counts every retained dispatch pool, so the same
 pair costs more than on a single GPU. Useful parallelism depends on work reaching
@@ -274,6 +282,16 @@ serial fallback.
 Components are defined hierarchically under `topology.root`. Range
 expansion (`xcd[0:8]`) creates multiple instances. Links connect
 component ports using pattern expressions with loop variables.
+
+### Memory wait diagnostics
+
+With memory wait diagnostics enabled, compute units warn when an instruction reads
+or overwrites a pending memory result without a sufficient wait. Results still
+execute eagerly. See
+[memory wait diagnostics](memory-wait-diagnostics.md) for coverage and the
+`memory_wait_diagnostics` setting (`off`, the default, or `warn`).
+On gfx1250, this setting also controls XCNT replay-source warnings. Both checks
+are disabled by default and enabled together with `memory_wait_diagnostics=warn`.
 
 ### KFD device sections
 

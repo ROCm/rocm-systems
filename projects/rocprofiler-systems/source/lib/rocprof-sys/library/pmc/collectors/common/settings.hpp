@@ -15,6 +15,7 @@
 #include "logger/debug.hpp"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <regex>
@@ -59,6 +60,8 @@ inline constexpr std::uint32_t NUM_GPU_METRIC_BITS = 17;
 inline constexpr std::uint32_t ENABLE_ALL_METRICS  = (1U << NUM_GPU_METRIC_BITS) - 1U;
 inline constexpr std::uint32_t DISABLE_ALL_METRICS = 0x0000;
 
+using ::rocprofsys::utility::parse_numeric_range;
+
 struct settings_policy
 {
     /**
@@ -83,8 +86,10 @@ struct settings_policy
             return result;
         }
         device_filter result;
-        result.mode    = device_selection_mode::specific;
-        result.indices = parse_numeric_range(filter_str);
+        result.mode = device_selection_mode::specific;
+        const auto parsed_indices =
+            parse_numeric_range<>(filter_str, "Enabled Devices", 1L);
+        result.indices = std::set<size_t>{ parsed_indices.begin(), parsed_indices.end() };
         return result;
     }
 
@@ -213,7 +218,10 @@ struct settings_policy
             std::string       subtoken;
             while(std::getline(sub_stream, subtoken, ';'))
             {
-                if(subtoken.empty()) continue;
+                if(subtoken.empty())
+                {
+                    continue;
+                }
                 auto pos = subtoken.find(device_qualifier);
                 if(pos == std::string::npos)
                 {
@@ -223,7 +231,10 @@ struct settings_policy
                 {
                     auto name       = subtoken.substr(0, pos);
                     auto device_str = subtoken.substr(pos + device_qualifier.size());
-                    if(name.empty()) continue;
+                    if(name.empty())
+                    {
+                        continue;
+                    }
                     if(device_str.empty() ||
                        !std::all_of(device_str.begin(), device_str.end(), ::isdigit))
                     {
@@ -271,7 +282,9 @@ private:
             [](std::initializer_list<std::uint8_t> positions) -> std::uint32_t {
             std::uint32_t v = 0;
             for(auto b : positions)
+            {
                 v |= (1u << b);
+            }
             return v;
         };
 
@@ -294,7 +307,10 @@ private:
         for(; it != end; ++it)
         {
             const auto found = mapper.find(it->str());
-            if(found != mapper.end()) metrics.value |= found->second;
+            if(found != mapper.end())
+            {
+                metrics.value |= found->second;
+            }
         }
 
         if(metrics.value == DISABLE_ALL_METRICS)
@@ -379,54 +395,6 @@ private:
         }
 
         return metrics;
-    }
-
-    static std::set<size_t> parse_numeric_range(const std::string& input_range)
-    {
-        std::set<size_t> result;
-
-        const std::regex validator{ R"(^\d+(?:-\d+)?(?:[;,]\d+(?:[-:]\d+)?)*$)" };
-
-        if(!std::regex_match(input_range, validator))
-        {
-            LOG_ERROR("Failed to parse device index list: {}", input_range);
-            return result;
-        }
-
-        const std::regex           tokenizer{ R"(\d+(?:[-:]\d+)*)" };
-        std::sregex_iterator       it(input_range.begin(), input_range.end(), tokenizer);
-        const std::sregex_iterator end;
-
-        for(; it != end; ++it)
-        {
-            auto token              = it->str();
-            auto delimiter_position = std::find_if(
-                token.begin(), token.end(), [](char c) { return c == ':' || c == '-'; });
-
-            if(delimiter_position != token.end())
-            {
-                size_t begin =
-                    std::stoul(std::string{ token.begin(), delimiter_position });
-                size_t range_end =
-                    std::stoul(std::string{ delimiter_position + 1, token.end() });
-
-                if(begin > range_end)
-                {
-                    std::swap(begin, range_end);
-                }
-
-                for(auto i = begin; i <= range_end; ++i)
-                {
-                    result.insert(i);
-                }
-            }
-            else
-            {
-                result.insert(std::stoul(token));
-            }
-        }
-
-        return result;
     }
 
     /**

@@ -97,14 +97,18 @@ get_availability<Type>::get_info()
     auto _cleanup = [](std::string _type, const std::string& _pattern) {
         auto _pos = std::string::npos;
         while((_pos = _type.find(_pattern)) != std::string::npos)
+        {
             _type.erase(_pos, _pattern.length());
+        }
         return _type;
     };
     auto _replace = [](std::string _type, const std::string& _pattern,
                        const std::string& _with) {
         auto _pos = std::string::npos;
         while((_pos = _type.find(_pattern)) != std::string::npos)
+        {
             _type.replace(_pos, _pattern.length(), _with);
+        }
         return _type;
     };
 
@@ -113,12 +117,10 @@ get_availability<Type>::get_info()
     bool is_available   = trait::is_available<Type>::value;
     bool file_output    = trait::generates_output<Type>::value;
     auto name           = component::metadata<Type>::name();
-    auto label          = (file_output)
-                              ? ((has_metadata) ? metadata_t::label() : Type::get_label())
-                              : std::string("");
-    auto description =
-        (has_metadata) ? metadata_t::description() : Type::get_description();
-    auto     data_type = rocprofsys::utility::demangle<value_type>();
+    auto label = file_output ? (has_metadata ? metadata_t::label() : Type::get_label())
+                             : std::string("");
+    auto description = has_metadata ? metadata_t::description() : Type::get_description();
+    auto data_type   = rocprofsys::utility::demangle<value_type>();
     string_t enum_type = property_t::enum_string();
     string_t id_type   = property_t::id();
     auto     ids_set   = property_t::ids();
@@ -132,8 +134,8 @@ get_availability<Type>::get_info()
     string_t ids_str = {};
     {
         auto     itr = ids_set.begin();
-        string_t db  = (markdown) ? "`\"" : (csv) ? "" : "\"";
-        string_t de  = (markdown) ? "\"`" : (csv) ? "" : "\"";
+        string_t db  = markdown ? "`\"" : csv ? "" : "\"";
+        string_t de  = markdown ? "\"`" : csv ? "" : "\"";
         if(has_metadata)
         {
             description += ". " + metadata_t::extra_description();

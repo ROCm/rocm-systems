@@ -34,7 +34,10 @@ protected:
 
     void cleanup_temp_dir(const std::string& dir)
     {
-        if(dir.empty()) return;
+        if(dir.empty())
+        {
+            return;
+        }
         std::error_code ec;
         std::filesystem::remove_all(dir, ec);
     }
