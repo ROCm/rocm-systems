@@ -59,6 +59,29 @@ inline InstructionFamily classify_instruction(const Instruction &inst) {
       has_prefix("v_swmmac_"))
     return InstructionFamily::Matrix;
 
+  // Memory traffic that the generated encodings describe only by name. Whole
+  // prefix families never set MEMORY_OP on some architectures -- RDNA4
+  // `ds_direct_load` and `tbuffer_load_format_x`, RDNA3.5 `lds_direct_load`,
+  // the image encodings (generated/rdna4/vimage.cpp mentions MEMORY_OP
+  // nowhere), the CDNA5 tensor transfers, and the `s_buffer_atomic_*` set --
+  // and several mnemonics carry the flag on one architecture but not another.
+  // Classifying by prefix as well as by flag keeps a mnemonic in the same
+  // family whichever architecture executed it.
+  //
+  // The tensor pair moves between global memory and LDS; it is bucketed as
+  // global for the same reason a non-LDS memory op is -- the global side is
+  // the access being described. Cache maintenance (`buffer_inv`, `buffer_wb*`)
+  // acts on the global hierarchy and is counted there too.
+  const auto memory_family = [&has_prefix]() -> InstructionFamily {
+    if (has_prefix("ds_") || has_prefix("lds_"))
+      return InstructionFamily::Lds;
+    if (has_prefix("buffer_") || has_prefix("tbuffer_") || has_prefix("s_buffer") ||
+        has_prefix("global_") || has_prefix("scratch_") || has_prefix("flat_") ||
+        has_prefix("image_") || has_prefix("tensor_"))
+      return InstructionFamily::Global;
+    return InstructionFamily::Other;
+  };
+
   if (inst.is_memory_op()) {
     if (const auto *state = inst.data()) {
       if (state->tag() == amdgpu::LOCAL_MEM)
@@ -67,31 +90,29 @@ inline InstructionFamily classify_instruction(const Instruction &inst) {
         return InstructionFamily::Global;
     }
 
-    // These fallbacks keep synthetic/model-only instructions useful even when
-    // they do not carry execution-pipeline state.
-    if (has_prefix("ds_"))
-      return InstructionFamily::Lds;
-    return InstructionFamily::Global;
+    // No execution-pipeline state: synthetic and model-only instructions reach
+    // here. Name them instead, defaulting to global as the flag already said
+    // this is a memory op.
+    const InstructionFamily named = memory_family();
+    return named == InstructionFamily::Other ? InstructionFamily::Global : named;
   }
-
-  // Some generated encodings never set MEMORY_OP, so the flag test above does
-  // not see them and they would fall through to `other`: the image encodings
-  // (e.g. generated/rdna4/vimage.cpp, which mentions MEMORY_OP nowhere) and the
-  // CDNA5 tensor transfers. They are memory traffic, so classify them by
-  // mnemonic instead. The tensor pair moves between global memory and LDS;
-  // they are bucketed as global for the same reason the fallback above sends a
-  // non-`ds_` memory op there -- the global side is the access being described.
-  if (has_prefix("image_") || has_prefix("tensor_"))
-    return InstructionFamily::Global;
 
   constexpr uint64_t control_flags = BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL |
                                      PROGRAM_TERMINATOR | WAITCNT | BARRIER;
-  // `s_barrier` catches the split barrier family: on CDNA5 only `s_barrier_wait`
-  // carries the BARRIER flag, so init/join/leave/signal/signal_isfirst would
-  // otherwise land in `scalar` next to ordinary ALU work.
+  // Checked before the memory fallback below so that LDS-pipe synchronisation
+  // and no-ops are not counted as LDS traffic. `s_barrier` catches the split
+  // barrier family: on CDNA5 only `s_barrier_wait` carries the BARRIER flag,
+  // so init/join/leave/signal/signal_isfirst would otherwise land in `scalar`
+  // next to ordinary ALU work. `ds_gws_` is the GWS barrier/semaphore set,
+  // which carries no flag on any architecture.
   if ((inst.flags() & control_flags) != 0 || has_prefix("s_nop") || has_prefix("s_sleep") ||
-      has_prefix("s_delay") || has_prefix("s_barrier"))
+      has_prefix("s_delay") || has_prefix("s_barrier") || has_prefix("ds_nop") ||
+      has_prefix("ds_gws_"))
     return InstructionFamily::Control;
+
+  if (const InstructionFamily named = memory_family(); named != InstructionFamily::Other)
+    return named;
+
   if (has_prefix("s_"))
     return InstructionFamily::Scalar;
   if (has_prefix("v_"))

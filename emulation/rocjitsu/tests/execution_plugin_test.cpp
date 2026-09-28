@@ -1906,10 +1906,10 @@ TEST(InstructionMixPluginTest, AgreesWithThroughputOnInstructionFamilies) {
   // that are control flow despite a scalar prefix.
   //
   // The expectations matter as much as the agreement: two classifiers can agree
-  // and both be wrong. The image, tensor and split-barrier entries below are
-  // exactly that case -- their generated constructors set neither MEMORY_OP nor
-  // BARRIER, so before the mnemonic fallbacks they agreed on `other` and
-  // `scalar` respectively.
+  // and both be wrong. The image, tensor, LDS-direct, typed-buffer,
+  // scalar-buffer and split-barrier entries below are exactly that case --
+  // their generated constructors set neither MEMORY_OP nor BARRIER, so before
+  // the mnemonic fallbacks they agreed on `other` and `scalar` respectively.
   constexpr Case kCases[] = {
       {"s_add_u32", 0, InstructionFamily::Scalar},
       {"v_add_f32", 0, InstructionFamily::Vector},
@@ -1929,6 +1929,29 @@ TEST(InstructionMixPluginTest, AgreesWithThroughputOnInstructionFamilies) {
       {"image_atomic_add", 0, InstructionFamily::Global},
       {"tensor_load_to_lds", 0, InstructionFamily::Global},
       {"tensor_store_from_lds", 0, InstructionFamily::Global},
+      // The same gap, in the LDS-direct and typed-buffer encodings: RDNA4
+      // `ds_direct_load`/`ds_param_load` (generated/rdna4/vdsdir.cpp), RDNA3.5
+      // `lds_direct_load`/`lds_param_load` (generated/rdna3_5/ldsdir.cpp) and
+      // the RDNA4 `tbuffer_*` set (generated/rdna4/vbuffer.cpp, where the
+      // neighbouring `buffer_*` constructors do set MEMORY_OP) all arrive
+      // unflagged, so a flag-only classifier reports them as `other`.
+      {"ds_direct_load", 0, InstructionFamily::Lds},
+      {"ds_param_load", 0, InstructionFamily::Lds},
+      {"lds_direct_load", 0, InstructionFamily::Lds},
+      {"lds_param_load", 0, InstructionFamily::Lds},
+      {"tbuffer_load_format_x", 0, InstructionFamily::Global},
+      {"tbuffer_store_format_xyzw", 0, InstructionFamily::Global},
+      // Unflagged on at least one architecture while the same mnemonic is
+      // flagged on another; the prefix fallback keeps the family stable.
+      {"buffer_atomic_cmpswap_b32", 0, InstructionFamily::Global},
+      {"global_atomic_cmpswap_b32", 0, InstructionFamily::Global},
+      {"flat_prefetch_b8", 0, InstructionFamily::Global},
+      {"ds_bpermute_b32", 0, InstructionFamily::Lds},
+      // Scalar memory: `s_load_*`/`s_store_*` are flagged everywhere, but the
+      // `s_buffer_atomic_*` set never is, and the bare `s_` prefix would
+      // otherwise bucket it with ALU work.
+      {"s_buffer_atomic_add", 0, InstructionFamily::Global},
+      {"s_buffer_load_dword", MEMORY_OP, InstructionFamily::Global},
       {"s_branch", BRANCH | IGNORES_EXEC, InstructionFamily::Control},
       {"s_cbranch_execz", COND_BRANCH, InstructionFamily::Control},
       {"s_endpgm", PROGRAM_TERMINATOR, InstructionFamily::Control},
@@ -1944,6 +1967,13 @@ TEST(InstructionMixPluginTest, AgreesWithThroughputOnInstructionFamilies) {
       {"s_nop", 0, InstructionFamily::Control},
       {"s_sleep", 0, InstructionFamily::Control},
       {"s_delay_alu", 0, InstructionFamily::Control},
+      // LDS-pipe synchronisation and no-ops: named like LDS traffic, but they
+      // move no data, so the control carve-out is checked before the memory
+      // fallback. None of them carries a flag on any architecture.
+      {"ds_nop", 0, InstructionFamily::Control},
+      {"ds_gws_barrier", 0, InstructionFamily::Control},
+      {"ds_gws_init", 0, InstructionFamily::Control},
+      {"ds_gws_sema_v", 0, InstructionFamily::Control},
       {"exp", 0, InstructionFamily::Other},
   };
 
