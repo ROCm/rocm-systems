@@ -53,6 +53,7 @@ struct ncclIbQpCreateAttr {
   int channelId;
   int ibDevN;
   bool useIonic;
+  bool isP2p;
 };
 
 // Per-QP connection metatdata

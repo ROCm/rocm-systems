@@ -496,6 +496,7 @@ struct alignas(32) ncclIbNetCommBase {
   int nRemDevs;
   bool remOooRq;
   bool localOooRq;
+  bool isP2p;
   int recvMatchingScheme;
   int nDataQps;
   struct ncclIbDevInfo remDevs[NCCL_IB_MAX_DEVS_PER_NIC];
