@@ -263,7 +263,6 @@ RCCL_PARAM_DECLARE(SymKMaxBytes);       // -1 = use arch table; overrides symMax
 RCCL_PARAM_DECLARE(CeArMinMsgBytes);     // -1 = use arch table; AR CE non-reg lower bound
 RCCL_PARAM_DECLARE(CeCollMinBytes);      // -1 = use arch table; non-AR CE non-reg lower bound
 RCCL_PARAM_DECLARE(SymKMinBytes);        // -1 = use arch table; overrides symMinR2 for all collectives
-
 // True when NCCL_ALGO is set by the user. Used to skip CE/DDA/Symmetric in
 // both the selector (rccl_wrap.cc) and taskAppend (enqueue.cc).
 bool rcclNcclAlgoEnvIsSet();
