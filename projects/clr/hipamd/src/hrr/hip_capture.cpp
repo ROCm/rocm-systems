@@ -976,8 +976,9 @@ static size_t compute_bundle_size(const void* blob) {
   uint64_t n = hdr->numOfCodeObjects;
   if (n == 0) return 0;
 
-  // HIP hands COMGR only the first 4096 bytes to find the code objects in, and
-  // COMGR fails the lookup when the entry table runs past them.
+  // HIP hands COMGR only the first 4096 bytes, and COMGR reads the entry table from
+  // that slice and fails if a read runs off its end. __hipRegisterFatBinary passes
+  // no length, so this bound is also what keeps the walk below in range.
   constexpr size_t kEntryTableLimit = 4096;
   constexpr size_t kEntryHeaderSize = offsetof(hip::symbols::ClangOffloadBundleInfo, bundleEntryId);
   size_t pos = offsetof(hip::symbols::ClangOffloadBundleUncompressedHeader, desc);
@@ -993,6 +994,8 @@ static size_t compute_bundle_size(const void* blob) {
       return 0;
     }
     pos += kEntryHeaderSize + static_cast<size_t>(entry->bundleEntryIdSize);
+    // HIP makes this check only for the code objects it picks for this host's GPUs.
+    // Every entry counts towards the end here, so capture checks them all.
     const uint64_t entry_end = entry->offset + entry->size;
     if (entry_end < entry->offset) {
       LogPrintfWarning(
@@ -1003,13 +1006,7 @@ static size_t compute_bundle_size(const void* blob) {
     }
     if (entry_end > end) end = entry_end;
   }
-  if (end > static_cast<uint64_t>(SIZE_MAX)) {
-    LogPrintfWarning(
-        "[HRR capture] Fat binary at %p not recorded: recorded size %llu does "
-        "not fit in size_t",
-        blob, static_cast<unsigned long long>(end));
-    return 0;
-  }
+  static_assert(sizeof(size_t) >= sizeof(uint64_t), "a 64-bit bundle size must fit in size_t");
   return static_cast<size_t>(end);
 }
 
@@ -1024,11 +1021,15 @@ void** capture___hipRegisterFatBinary(const void* data) {
   const void* blob = (wrapper && (wrapper->magic == 0x48495046u /*HIPF*/ ||
                                    wrapper->magic == 0x4B504948u /*HIPK*/))
                      ? wrapper->binary : nullptr;
-  // PlatformState is initialized before this shim is installed, so HIP has
-  // already digested the bundle and returns no handle only when it refused it.
+  // PlatformState is initialized before this shim is installed, so HIP has already
+  // digested the bundle, and no handle means it could not load it on this host: a bad
+  // header or, more often, no code object for any GPU here. Then no launch from it can
+  // succeed and be recorded, so replay never needs the blob.
   if (blob && !r) {
-    LogPrintfWarning("[HRR capture] Fat binary at %p not recorded: HIP refused to register it",
-                     blob);
+    LogPrintfWarning(
+        "[HRR capture] Fat binary at %p not recorded: HIP did not register it "
+        "(no code object for any GPU here, or a bad header)",
+        blob);
     blob = nullptr;
   }
   size_t blob_size = blob ? compute_bundle_size(blob) : 0;
@@ -1568,7 +1569,8 @@ void hip_capture_uninstall() {
 // Record a single fat binary blob as a HRR_API_HIPREGISTERFATBINARY event.
 // blob_ptr is the fbwrapper->binary pointer (the actual clang offload bundle).
 // These were registered before HIP initialized and are not digested yet, so
-// unlike the live shim there is no HIP verdict to check, only the header.
+// unlike the live shim there is no HIP verdict to check, only the header, and a
+// bundle with no code object for this host is still recorded.
 static void record_fat_binary_blob(const void* blob_ptr) {
   if (!blob_ptr) return;
   size_t blob_size = compute_bundle_size(blob_ptr);
