@@ -852,6 +852,10 @@ def main():
         args.target_id = args.arch
     if args.arch:
         args.arch = args.arch.split(':', 1)[0]
+        if args.target_id.split(':', 1)[0] != args.arch:
+            raise SystemExit(
+                f"ERROR: --target-id={args.target_id} is not a target ID "
+                f"for --arch={args.arch}")
 
     if args.compile:
         if not positional:

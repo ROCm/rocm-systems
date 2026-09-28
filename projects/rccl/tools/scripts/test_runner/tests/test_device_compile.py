@@ -212,6 +212,12 @@ class TargetIdTest(unittest.TestCase):
         self.assertEqual(args.arch, "gfx942")
         self.assertEqual(args.target_id, "gfx942:xnack+")
 
+    def test_rejects_a_target_id_for_another_processor(self):
+        with self.assertRaises(SystemExit):
+            self._main_with(["--compile", "--arch=gfx942",
+                             "--target-id=gfx950:xnack+",
+                             "-o", "out.o", "in.cpp"])
+
     def test_codegen_command_builders_emit_the_id_they_are_given(self):
         compile_cmd = driver.dispatcher_compile_cmd(
             "clang", "gfx942:xnack+", [], "disp.s", "common.cu.cpp")
