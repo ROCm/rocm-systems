@@ -13,6 +13,7 @@ import json
 import os
 import random
 import sys
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -20,12 +21,27 @@ import common
 import pytest
 
 from tests.integration.common import require_torch
+from utils.inject_roctx._backends import torch as torch_backend
 
-# Allow collection on CPU-only hosts.
-try:
-    import torch  # noqa: E402
-except Exception:
-    torch = None
+# torch_trace_coverage_utils imports torch at module load.
+torch = pytest.importorskip("torch")
+
+from torch_trace_coverage_utils import (  # noqa: E402
+    C_TIER_BACKWARD_SENTINELS,
+    categorize_skip_reason,
+    compare_single_op,
+    detect_cpp_tier_signature,
+    discover_operators,
+    format_cpp_tier_signature_report,
+    format_missing_arg_builder_report,
+    format_skip_breakdown_lines,
+    multiline_coverage_failure_warning,
+    parse_roctx_markers,
+    print_torch_trace_coverage_session_header,
+    run_ground_truth_torch_profiler_subprocess,
+    unique_output_param_id,
+    write_coverage_workload_artifacts,
+)
 
 COVERAGE_TEST_CONFIG: Dict[str, Any] = {"cleanup": True}
 
@@ -55,24 +71,6 @@ def test_random_operator_kernel_coverage(
     least one operator must pass overall.
     """
     require_torch(gpu=True)
-    from collections import Counter, defaultdict
-
-    from torch_trace_coverage_utils import (
-        C_TIER_BACKWARD_SENTINELS,
-        categorize_skip_reason,
-        compare_single_op,
-        detect_cpp_tier_signature,
-        discover_operators,
-        format_cpp_tier_signature_report,
-        format_missing_arg_builder_report,
-        format_skip_breakdown_lines,
-        multiline_coverage_failure_warning,
-        parse_roctx_markers,
-        print_torch_trace_coverage_session_header,
-        run_ground_truth_torch_profiler_subprocess,
-        unique_output_param_id,
-        write_coverage_workload_artifacts,
-    )
 
     seed, sample_budget = torch_trace_coverage_sampling
     rng = random.Random(seed)
@@ -256,11 +254,7 @@ def test_random_operator_kernel_coverage(
 @pytest.mark.torch_trace
 def test_function_apply_wrappers_idempotent(monkeypatch):
     """A grandchild ``Function`` subclass does not get a second ``apply`` wrapper."""
-    require_torch()
-
-    from utils.inject_roctx._backends import torch as _torch_backend
-
-    if not _torch_backend._resolve_torch():
+    if not torch_backend._resolve_torch():
         pytest.skip("torch could not be resolved for inject_roctx backend")
 
     push_counter = {"count": 0}
@@ -268,8 +262,8 @@ def test_function_apply_wrappers_idempotent(monkeypatch):
     def _count_push(*_args, **_kwargs):
         push_counter["count"] += 1
 
-    monkeypatch.setattr(_torch_backend, "_push_scope", _count_push)
-    monkeypatch.setattr(_torch_backend, "_pop_scope", lambda: None)
+    monkeypatch.setattr(torch_backend, "_push_scope", _count_push)
+    monkeypatch.setattr(torch_backend, "_pop_scope", lambda: None)
 
     class Foo(torch.autograd.Function):
         @staticmethod
@@ -283,7 +277,7 @@ def test_function_apply_wrappers_idempotent(monkeypatch):
     class Bar(Foo):
         pass
 
-    assert _torch_backend.install_function_apply_wrappers() is True
+    assert torch_backend.install_function_apply_wrappers() is True
 
     assert getattr(
         getattr(Foo.__dict__.get("apply"), "__func__", None),
