@@ -44,6 +44,8 @@
 #endif
 
 #if ROCPROFILER_VERSION >= 600
+#    include <rocprofiler-sdk/rccl/details/api_trace.h>
+
 #    include <rocprofiler-sdk/rccl/api_args.h>
 #    include <rocprofiler-sdk/rccl/api_id.h>
 #endif
@@ -267,7 +269,15 @@ struct wrapper
     static constexpr nccl_data_type_t NCCL_INT64    = ncclInt64;
     static constexpr nccl_data_type_t NCCL_UINT64   = ncclUint64;
     static constexpr nccl_data_type_t NCCL_FLOAT64  = ncclFloat64;
+
 #    if defined(ncclFp8E4M3) && defined(ncclFp8E5M2)
+    static constexpr bool k_are_nccl_fp8_types_available = true;
+#    else
+    static constexpr bool k_are_nccl_fp8_types_available = false;
+#    endif
+
+#    if defined(ncclFp8E4M3) && defined(ncclFp8E5M2)
+
     static constexpr nccl_data_type_t NCCL_FP8_E4M3 = ncclFp8E4M3;
     static constexpr nccl_data_type_t NCCL_FP8_E5M2 = ncclFp8E5M2;
 #    endif
@@ -291,6 +301,14 @@ struct wrapper
         ROCPROFILER_RCCL_API_ID_ncclReduceScatter;
     static constexpr rccl_api_id_t RCCL_API_ID_ncclSend =
         ROCPROFILER_RCCL_API_ID_ncclSend;
+
+#    if defined(ROCPROFILER_RCCL_API_ID_ncclAlltoAll)
+    // RCCL renamed ncclAllToAll to ncclAlltoAll (note the lowercase 't'). The deprecated
+    // ncclAllToAll now forwards to ncclAlltoAll, so the SDK reports the collective under
+    // this id too on toolchains new enough to define it.
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclAlltoAll =
+        ROCPROFILER_RCCL_API_ID_ncclAlltoAll;
+#    endif
     using memory_alloc_record = rocprofiler_buffer_tracing_memory_allocation_record_t;
 #endif
 

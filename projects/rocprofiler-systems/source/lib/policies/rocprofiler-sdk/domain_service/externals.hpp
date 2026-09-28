@@ -61,6 +61,11 @@ concept externals =
         typename Externals::rocm_rocdecode_api_category;
         typename Externals::rocm_rocshmem_api_category;
         typename Externals::rocm_hipfile_api_category;
+        typename Externals::rocm_rccl_api_category;
+        typename Externals::state_thread;
+        typename Externals::pmc_event_with_sample;
+        typename Externals::metadata_registry_t;
+        typename Externals::buffer_storage_t;
         requires agent_manager_policy<typename Externals::agent_manager_t,
                                       typename Externals::agent_t,
                                       typename Externals::agent_type_t>;
@@ -150,6 +155,16 @@ concept externals =
             Externals::rocm_hipfile_api_category_name
         } -> std::convertible_to<std::string_view>;
         {
+            Externals::rocm_rccl_api_category_name
+        } -> std::convertible_to<std::string_view>;
+        { Externals::comm_data_name } -> std::convertible_to<std::string_view>;
+        { Externals::comm_data_description } -> std::convertible_to<std::string_view>;
+        { Externals::comm_data_enum_value } -> std::convertible_to<std::size_t>;
+        { Externals::rccl_send_label } -> std::convertible_to<std::string_view>;
+        { Externals::rccl_recv_label } -> std::convertible_to<std::string_view>;
+        { Externals::rccl_send_track_name } -> std::convertible_to<std::string_view>;
+        { Externals::rccl_recv_track_name } -> std::convertible_to<std::string_view>;
+        {
             typename Externals::pmc_info_t{
                 .type             = typename Externals::agent_type_t{},
                 .agent_type_index = std::size_t{},
@@ -191,6 +206,17 @@ concept externals =
                                               double{},
                                               std::optional<std::int64_t>{} }
         };
+        {
+            typename Externals::pmc_event_with_sample{
+                std::size_t{},      std::string_view{},
+                std::size_t{},      std::string_view{},
+                std::size_t{},      std::size_t{},
+                std::size_t{},      std::string_view{},
+                std::string_view{}, std::uint32_t{},
+                std::uint8_t{},     std::string_view{},
+                double{},           std::optional<std::int64_t>{}
+            }
+        };
     } &&
     requires(std::string_view text, Externals::thread_info_t thread_info,
              Externals::track_t track, Externals::pmc_info_t pmc_info,
@@ -227,6 +253,18 @@ concept externals =
            { Externals::get_metadata_registry().add_string(text) };
            { Externals::get_metadata_registry().add_thread_info(thread_info) };
            { Externals::get_buffer_storage().store(std::move(sample)) };
+       }
+    // ─── Members required by domains::callback::k_rccl ──────────────────────────────
+    && requires(const char* symbol_name, Externals::pmc_event_with_sample rccl_sample) {
+           {
+               Externals::get_metadata_registry()
+           } -> std::convertible_to<typename Externals::metadata_registry_t&>;
+           {
+               Externals::get_buffer_storage()
+           } -> std::convertible_to<typename Externals::buffer_storage_t&>;
+           { Externals::dlsym(symbol_name) } -> std::convertible_to<void*>;
+           { Externals::dlerror() } -> std::convertible_to<const char*>;
+           { Externals::state_thread::scoped(Externals::state_thread::Internal) };
        };
 
 }  // namespace rocprofsys::policies::domain_service

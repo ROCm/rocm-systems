@@ -37,23 +37,20 @@ struct rccl_send
 namespace
 {
 
-[[nodiscard]] size_t
-rccl_type_size_or_abort(ncclDataType_t datatype) noexcept;
+// [[nodiscard]] size_t
+// rccl_type_size_or_abort(ncclDataType_t datatype) noexcept;
 
-void
-rccl_metadata_initialize_categories()
-{
-    static bool _is_initialized = false;
-    if(_is_initialized)
-    {
-        return;
-    }
+// void
+// rccl_metadata_initialize_categories()
+// {
+//     static bool _is_initialized = false;
+//     if(_is_initialized) return;
 
-    trace_cache::get_metadata_registry().add_string(
-        trait::name<category::comm_data>::value);
+//     trace_cache::get_metadata_registry().add_string(
+//         trait::name<category::comm_data>::value);
 
-    _is_initialized = true;
-}
+//     _is_initialized = true;
+// }
 
 }  // anonymous namespace
 
@@ -116,107 +113,110 @@ namespace
 rccl_gpu_tracking_state&
 rccl_get_gpu_tracking_state();
 
-[[nodiscard]] rccl_event_info
-rccl_get_event_info_impl(
-    std::uint32_t                                       operation,
-    const rocprofiler_callback_tracing_rccl_api_data_t& payload) noexcept
-{
-    rccl_event_info info{};
+// [[nodiscard]] rccl_event_info
+// rccl_get_event_info_impl(
+//     std::uint32_t                                       operation,
+//     const rocprofiler_callback_tracing_rccl_api_data_t& payload) noexcept
+// {
+//     rccl_event_info info{};
 
-    const auto set_event = [](rccl_event_info& out, bool send, size_t count,
-                              ncclDataType_t _dt, ncclComm_t _comm) {
-        out.is_send = send;
-        out.size    = count * rccl_type_size_or_abort(_dt);
-        out.comm    = _comm;
-    };
+//     const auto set_event = [](rccl_event_info& out, bool send, size_t count,
+//                               ncclDataType_t _dt, ncclComm_t _comm) {
+//         out.is_send = send;
+//         out.size    = count * rccl_type_size_or_abort(_dt);
+//         out.comm    = _comm;
+//     };
 
-    switch(operation)
-    {
-        case ROCPROFILER_RCCL_API_ID_ncclAllGather:
-            set_event(info, false, payload.args.ncclAllGather.sendcount,
-                      payload.args.ncclAllGather.datatype,
-                      payload.args.ncclAllGather.comm);
-            break;
-        case ROCPROFILER_RCCL_API_ID_ncclAllToAll:
-            set_event(info, false, payload.args.ncclAllToAll.count,
-                      payload.args.ncclAllToAll.datatype, payload.args.ncclAllToAll.comm);
-            break;
-#if RCCL_API_TRACE_VERSION_PATCH >= 3
-        // RCCL renamed ncclAllToAll to ncclAlltoAll (note the lowercase 't').
-        // The deprecated ncclAllToAll now forwards to ncclAlltoAll, so the SDK
-        // reports the collective under this id and it must be handled here too.
-        case ROCPROFILER_RCCL_API_ID_ncclAlltoAll:
-            set_event(info, false, payload.args.ncclAlltoAll.count,
-                      payload.args.ncclAlltoAll.datatype, payload.args.ncclAlltoAll.comm);
-            break;
-#endif
-        case ROCPROFILER_RCCL_API_ID_ncclAllReduce:
-            set_event(info, false, payload.args.ncclAllReduce.count,
-                      payload.args.ncclAllReduce.datatype,
-                      payload.args.ncclAllReduce.comm);
-            break;
-        case ROCPROFILER_RCCL_API_ID_ncclGather:
-            set_event(info, false, payload.args.ncclGather.sendcount,
-                      payload.args.ncclGather.datatype, payload.args.ncclGather.comm);
-            break;
-        case ROCPROFILER_RCCL_API_ID_ncclRecv:
-            set_event(info, false, payload.args.ncclRecv.count,
-                      payload.args.ncclRecv.datatype, payload.args.ncclRecv.comm);
-            break;
-        case ROCPROFILER_RCCL_API_ID_ncclReduce:
-            set_event(info, false, payload.args.ncclReduce.count,
-                      payload.args.ncclReduce.datatype, payload.args.ncclReduce.comm);
-            break;
-        case ROCPROFILER_RCCL_API_ID_ncclBroadcast:
-            set_event(info, true, payload.args.ncclBroadcast.count,
-                      payload.args.ncclBroadcast.datatype,
-                      payload.args.ncclBroadcast.comm);
-            break;
-        case ROCPROFILER_RCCL_API_ID_ncclReduceScatter:
-            set_event(info, true, payload.args.ncclReduceScatter.recvcount,
-                      payload.args.ncclReduceScatter.datatype,
-                      payload.args.ncclReduceScatter.comm);
-            break;
-        case ROCPROFILER_RCCL_API_ID_ncclSend:
-            set_event(info, true, payload.args.ncclSend.count,
-                      payload.args.ncclSend.datatype, payload.args.ncclSend.comm);
-            break;
-        default: break;
-    }
+//     switch(operation)
+//     {
+//         case ROCPROFILER_RCCL_API_ID_ncclAllGather:
+//             set_event(info, false, payload.args.ncclAllGather.sendcount,
+//                       payload.args.ncclAllGather.datatype,
+//                       payload.args.ncclAllGather.comm);
+//             break;
+//         case ROCPROFILER_RCCL_API_ID_ncclAllToAll:
+//             set_event(info, false, payload.args.ncclAllToAll.count,
+//                       payload.args.ncclAllToAll.datatype,
+//                       payload.args.ncclAllToAll.comm);
+//             break;
+// #if RCCL_API_TRACE_VERSION_PATCH >= 3
+//         // RCCL renamed ncclAllToAll to ncclAlltoAll (note the lowercase 't').
+//         // The deprecated ncclAllToAll now forwards to ncclAlltoAll, so the SDK
+//         // reports the collective under this id and it must be handled here too.
+//         case ROCPROFILER_RCCL_API_ID_ncclAlltoAll:
+//             set_event(info, false, payload.args.ncclAlltoAll.count,
+//                       payload.args.ncclAlltoAll.datatype,
+//                       payload.args.ncclAlltoAll.comm);
+//             break;
+// #endif
+//         case ROCPROFILER_RCCL_API_ID_ncclAllReduce:
+//             set_event(info, false, payload.args.ncclAllReduce.count,
+//                       payload.args.ncclAllReduce.datatype,
+//                       payload.args.ncclAllReduce.comm);
+//             break;
+//         case ROCPROFILER_RCCL_API_ID_ncclGather:
+//             set_event(info, false, payload.args.ncclGather.sendcount,
+//                       payload.args.ncclGather.datatype, payload.args.ncclGather.comm);
+//             break;
+//         case ROCPROFILER_RCCL_API_ID_ncclRecv:
+//             set_event(info, false, payload.args.ncclRecv.count,
+//                       payload.args.ncclRecv.datatype, payload.args.ncclRecv.comm);
+//             break;
+//         case ROCPROFILER_RCCL_API_ID_ncclReduce:
+//             set_event(info, false, payload.args.ncclReduce.count,
+//                       payload.args.ncclReduce.datatype, payload.args.ncclReduce.comm);
+//             break;
+//         case ROCPROFILER_RCCL_API_ID_ncclBroadcast:
+//             set_event(info, true, payload.args.ncclBroadcast.count,
+//                       payload.args.ncclBroadcast.datatype,
+//                       payload.args.ncclBroadcast.comm);
+//             break;
+//         case ROCPROFILER_RCCL_API_ID_ncclReduceScatter:
+//             set_event(info, true, payload.args.ncclReduceScatter.recvcount,
+//                       payload.args.ncclReduceScatter.datatype,
+//                       payload.args.ncclReduceScatter.comm);
+//             break;
+//         case ROCPROFILER_RCCL_API_ID_ncclSend:
+//             set_event(info, true, payload.args.ncclSend.count,
+//                       payload.args.ncclSend.datatype, payload.args.ncclSend.comm);
+//             break;
+//         default: break;
+//     }
 
-    return info;
-}
+//     return info;
+// }
 
-template <typename Track>
-void
-rccl_metadata_initialize_track()
-{
-    trace_cache::get_metadata_registry().add_track({ Track::label, std::nullopt, "{}" });
-}
+// template <typename Track>
+// void
+// rccl_metadata_initialize_track()
+// {
+//     trace_cache::get_metadata_registry().add_track({ Track::label, std::nullopt, "{}"
+//     });
+// }
 
-template <typename Tp, typename... Args>
-void
-write_perfetto_counter_track(std::uint64_t _val, std::uint64_t _begin_ts,
-                             std::uint64_t _end_ts)
-{
-    using counter_track = rocprofsys::perfetto_counter_track<Tp>;
+// template <typename Tp, typename... Args>
+// void
+// write_perfetto_counter_track(std::uint64_t _val, std::uint64_t _begin_ts,
+//                              std::uint64_t _end_ts)
+// {
+//     using counter_track = rocprofsys::perfetto_counter_track<Tp>;
 
-    if(rocprofsys::get_use_perfetto() &&
-       rocprofsys::state::process::get() == rocprofsys::state::process::Active)
-    {
-        const size_t _idx = 0;
+//     if(rocprofsys::get_use_perfetto() &&
+//        rocprofsys::state::process::get() == rocprofsys::state::process::Active)
+//     {
+//         const size_t _idx = 0;
 
-        if(!counter_track::exists(_idx))
-        {
-            const std::string _label =
-                (_idx > 0) ? fmt::format("{} [{}]", Tp::label, _idx) : Tp::label;
-            counter_track::emplace(_idx, _label, "bytes");
-        }
+//         if(!counter_track::exists(_idx))
+//         {
+//             const std::string _label =
+//                 (_idx > 0) ? fmt::format("{} [{}]", Tp::label, _idx) : Tp::label;
+//             counter_track::emplace(_idx, _label, "bytes");
+//         }
 
-        TRACE_COUNTER(Tp::value, counter_track::at(_idx, 0), _begin_ts, _val);
-        TRACE_COUNTER(Tp::value, counter_track::at(_idx, 0), _end_ts, 0);
-    }
-}
+//         TRACE_COUNTER(Tp::value, counter_track::at(_idx, 0), _begin_ts, _val);
+//         TRACE_COUNTER(Tp::value, counter_track::at(_idx, 0), _end_ts, 0);
+//     }
+// }
 
 template <typename Track>
 void
@@ -247,70 +247,64 @@ cache_rccl_comm_data_events(std::uint32_t rccl_device_idx, size_t bytes,
         static_cast<double>(cumulative), std::nullopt });
 }
 
-rccl_gpu_tracking_state&
-rccl_get_gpu_tracking_state()
-{
-    static auto const registrar = std::make_shared<production_pmc_registrar>();
-    static rccl_gpu_tracking_state state{ registrar };
-    return state;
-}
+// rccl_gpu_tracking_state&
+// rccl_get_gpu_tracking_state()
+// {
+//     static auto registrar = std::make_shared<production_pmc_registrar>();
+//     static rccl_gpu_tracking_state state{ registrar };
+//     return state;
+// }
 
-[[nodiscard]] size_t
-rccl_type_size_or_abort(ncclDataType_t datatype) noexcept
-{
-    auto const size = rccl_type_size(datatype);
-    if(size == 0)
-    {
-        LOG_WARNING("Unsupported RCCL datatype: {}", static_cast<int>(datatype));
-        return 0;
-    }
-    return size;
-}
+// [[nodiscard]] size_t
+// rccl_type_size_or_abort(ncclDataType_t datatype) noexcept
+// {
+//     auto size = rccl_type_size(datatype);
+//     if(size == 0)
+//     {
+//         LOG_WARNING("Unsupported RCCL datatype: {}", static_cast<int>(datatype));
+//         return 0;
+//     }
+//     return size;
+// }
 
 }  // anonymous namespace
 
-[[nodiscard]] std::uint32_t
-rccl_get_device_id(ncclComm_t comm) noexcept
-{
-    constexpr std::uint32_t DEFAULT_DEVICE_ID = 0;
+// [[nodiscard]] std::uint32_t
+// rccl_get_device_id(ncclComm_t comm) noexcept
+// {
+//     constexpr std::uint32_t DEFAULT_DEVICE_ID = 0;
 
-    if(comm == nullptr)
-    {
-        return DEFAULT_DEVICE_ID;
-    }
+//     if(comm == nullptr) return DEFAULT_DEVICE_ID;
 
-    using ncclCommCuDevice_fn = ncclResult_t (*)(ncclComm_t, int*);
+//     using ncclCommCuDevice_fn = ncclResult_t (*)(ncclComm_t, int*);
 
-    static ncclCommCuDevice_fn ncclCommCuDevice_ptr = nullptr;
-    static std::once_flag      lookup_flag;
+//     static ncclCommCuDevice_fn ncclCommCuDevice_ptr = nullptr;
+//     static std::once_flag      lookup_flag;
 
-    std::call_once(lookup_flag, []() {
-        ncclCommCuDevice_ptr = reinterpret_cast<ncclCommCuDevice_fn>(
-            dlsym(RTLD_DEFAULT, "ncclCommCuDevice"));
-        if(ncclCommCuDevice_ptr == nullptr)
-        {
-            const char* error = dlerror();
-            LOG_DEBUG(
-                "ncclCommCuDevice not found via dlsym ({}), using default device_id",
-                error ? error : "unknown error");
-        }
-    });
+//     std::call_once(lookup_flag, []() {
+//         ncclCommCuDevice_ptr = reinterpret_cast<ncclCommCuDevice_fn>(
+//             dlsym(RTLD_DEFAULT, "ncclCommCuDevice"));
+//         if(ncclCommCuDevice_ptr == nullptr)
+//         {
+//             const char* error = dlerror();
+//             LOG_DEBUG(
+//                 "ncclCommCuDevice not found via dlsym ({}), using default device_id",
+//                 error ? error : "unknown error");
+//         }
+//     });
 
-    if(ncclCommCuDevice_ptr == nullptr)
-    {
-        return DEFAULT_DEVICE_ID;
-    }
+//     if(ncclCommCuDevice_ptr == nullptr) return DEFAULT_DEVICE_ID;
 
-    int          device_id = DEFAULT_DEVICE_ID;
-    ncclResult_t result    = ncclCommCuDevice_ptr(comm, &device_id);
-    if(result != ncclSuccess)
-    {
-        LOG_DEBUG("ncclCommCuDevice failed with error {}, using default device_id",
-                  static_cast<int>(result));
-        return DEFAULT_DEVICE_ID;
-    }
-    return static_cast<std::uint32_t>(device_id);
-}
+//     int          device_id = DEFAULT_DEVICE_ID;
+//     ncclResult_t result    = ncclCommCuDevice_ptr(comm, &device_id);
+//     if(result != ncclSuccess)
+//     {
+//         LOG_DEBUG("ncclCommCuDevice failed with error {}, using default device_id",
+//                   static_cast<int>(result));
+//         return DEFAULT_DEVICE_ID;
+//     }
+//     return static_cast<std::uint32_t>(device_id);
+// }
 
 /**
  * @brief Initialize RCCL communication data tracking metadata
@@ -319,13 +313,13 @@ rccl_get_device_id(ncclComm_t comm) noexcept
  * and tracking infrastructure for RCCL send/recv operations.
  * Called once during SDK initialization when RCCL callbacks are configured.
  */
-void
-rccl_comm_data_initialize()
-{
-    rccl_metadata_initialize_categories();
-    rccl_metadata_initialize_track<rccl_send>();
-    rccl_metadata_initialize_track<rccl_recv>();
-}
+// void
+// rccl_comm_data_initialize()
+// {
+//     rccl_metadata_initialize_categories();
+//     rccl_metadata_initialize_track<rccl_send>();
+//     rccl_metadata_initialize_track<rccl_recv>();
+// }
 
 /**
  * @brief Main callback handler for RCCL API tracing events
@@ -353,12 +347,12 @@ tool_tracing_callback_rccl(std::uint32_t                                       o
         if(info.is_send)
         {
             cache_rccl_comm_data_events<rccl_send>(device_id, info.size, end_ts);
-            write_perfetto_counter_track<rccl_send>(info.size, begin_ts, end_ts);
+            // write_perfetto_counter_track<rccl_send>(info.size, begin_ts, end_ts);
         }
         else
         {
             cache_rccl_comm_data_events<rccl_recv>(device_id, info.size, end_ts);
-            write_perfetto_counter_track<rccl_recv>(info.size, begin_ts, end_ts);
+            // write_perfetto_counter_track<rccl_recv>(info.size, begin_ts, end_ts);
         }
     }
 }
