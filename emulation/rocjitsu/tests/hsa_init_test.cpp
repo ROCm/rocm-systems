@@ -48,7 +48,14 @@ TEST_F(HsaTest, GpuAgentFound) {
 }
 
 #if defined(RJ_TEST_LEAK_SANITIZER)
-TEST_F(HsaTest, LiveSignalsRemainReachableForLeakSanitizer) {
+// The signal ABI block lives in driver-managed memory, so LeakSanitizer cannot
+// trace its owning host allocation. Suppress only allocations whose stack
+// includes the external HSA runtime; rocjitsu allocations remain covered.
+extern "C" __attribute__((visibility("default"))) const char *__lsan_default_suppressions() {
+  return "leak:libhsa-runtime64.so\n";
+}
+
+TEST_F(HsaTest, ExternalRuntimeSignalAllocationsAreSuppressed) {
   hsa_signal_t signal{};
   ASSERT_EQ(hsa_signal_create(0, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
   // The signal handle points into driver-managed memory, which in turn owns

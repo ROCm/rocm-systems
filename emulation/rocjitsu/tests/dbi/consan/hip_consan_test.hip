@@ -20,6 +20,7 @@
 #include <gtest/gtest.h>
 
 #include "hip_consan_address_group_test.h"
+#include "hip_consan_lsan_test_support.h"
 #include "rocjitsu/code/patch/consan/consan_abi.h"
 
 int main(int argc, char **argv) {

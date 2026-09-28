@@ -15,6 +15,8 @@
 
 #include <gtest/gtest.h>
 
+#include "hip_consan_lsan_test_support.h"
+
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   // The focused clean controls publish evidence only after every in-process

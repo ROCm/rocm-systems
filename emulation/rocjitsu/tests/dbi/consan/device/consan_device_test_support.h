@@ -8,6 +8,8 @@
 
 #include <gtest/gtest.h>
 
+#include "../hip_consan_lsan_test_support.h"
+
 // The prototype patcher needs nearby relocation space. This is fixture
 // accommodation, not part of the behavioral contract: a replacement patcher
 // may ignore it, and no test observes how this space is used.

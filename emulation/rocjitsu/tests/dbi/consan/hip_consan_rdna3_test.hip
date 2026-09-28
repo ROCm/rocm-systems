@@ -14,6 +14,8 @@
 
 #include <gtest/gtest.h>
 
+#include "hip_consan_lsan_test_support.h"
+
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   hipDeviceProp_t properties{};

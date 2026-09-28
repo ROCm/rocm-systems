@@ -2650,7 +2650,7 @@ if(HSA_RUNTIME64)
             hsa_init_test
             PRIVATE RJ_TEST_LEAK_SANITIZER=1
         )
-        list(APPEND _rj_hsa_tests LiveSignalsRemainReachableForLeakSanitizer)
+        list(APPEND _rj_hsa_tests ExternalRuntimeSignalAllocationsAreSuppressed)
     endif()
     foreach(_hsa_test IN LISTS _rj_hsa_tests)
         rj_add_test(

@@ -11,6 +11,8 @@
 #include <array>
 #include <cstdint>
 
+#include "hip_consan_lsan_test_support.h"
+
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   const int rc = RUN_ALL_TESTS();

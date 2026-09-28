@@ -11,6 +11,8 @@
 #include <cstdint>
 #include <vector>
 
+#include "hip_consan_lsan_test_support.h"
+
 #define HIP_ASSERT(call)                                                                           \
   do {                                                                                             \
     hipError_t err = (call);                                                                       \
