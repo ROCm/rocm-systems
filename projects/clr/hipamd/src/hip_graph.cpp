@@ -128,47 +128,26 @@ hipError_t ihipGraphAddKernelNode(hip::GraphNode** pGraphNode, hip::Graph* graph
   }
 
   const amd::Device* device = g_devices[deviceId]->devices()[0];
-  amd::NDRangeContainer ndrange(3);
-  amd::NDRange32 grid(1, 1, 1);
-  hipError_t status = MakeLaunchNDRangeFromGrid(
-      ndrange, grid, pNodeParams->gridDim, pNodeParams->blockDim,
-      dim3(globalWorkSizeX_remainder, globalWorkSizeY_remainder, globalWorkSizeZ_remainder),
-      clusterDim, pNodeParams->sharedMemBytes, *device, kUnlaunchableConfigRules);
-  if (status != hipSuccess) {
-    return status;
-  }
-  status = ihipLaunchKernel_validate(func, ndrange, pNodeParams->sharedMemBytes,
-                                     pNodeParams->kernelParams, pNodeParams->extra, deviceId,
-                                     coopKernel);
-  if (hipSuccess != status) {
-    return status;
-  }
+  LaunchConfig config = MakeLaunchConfigFromGrid(
+      pNodeParams->gridDim, pNodeParams->blockDim, pNodeParams->sharedMemBytes, *device, clusterDim,
+      dim3(globalWorkSizeX_remainder, globalWorkSizeY_remainder, globalWorkSizeZ_remainder));
+  IHIP_RETURN_ONFAIL(config.Status(kUnlaunchableConfigRules));
+  IHIP_RETURN_ONFAIL(ihipLaunchKernel_validate(func, config, pNodeParams->kernelParams,
+                                               pNodeParams->extra, deviceId, coopKernel));
 
-  size_t globalWorkSizeX = static_cast<size_t>(pNodeParams->gridDim.x) * pNodeParams->blockDim.x +
-      globalWorkSizeX_remainder;
-  size_t globalWorkSizeY = static_cast<size_t>(pNodeParams->gridDim.y) * pNodeParams->blockDim.y +
-      globalWorkSizeY_remainder;
-  size_t globalWorkSizeZ = static_cast<size_t>(pNodeParams->gridDim.z) * pNodeParams->blockDim.z +
-      globalWorkSizeZ_remainder;
-  if (globalWorkSizeX > std::numeric_limits<uint32_t>::max() ||
-      globalWorkSizeY > std::numeric_limits<uint32_t>::max() ||
-      globalWorkSizeZ > std::numeric_limits<uint32_t>::max()) {
-    return hipErrorInvalidConfiguration;
-  }
-
+  // The grid * block + remainder overflow check is kGridOverflow, already ruled out above.
   auto* kernelNode =
       new hip::GraphKernelNode(pNodeParams, pNodeEvents, coopKernel, globalWorkSizeX_remainder,
                                globalWorkSizeY_remainder, globalWorkSizeZ_remainder, clusterDim,
                                launchFlags);
-  status = kernelNode->GetParamCopyStatus();
+  const hipError_t status = kernelNode->GetParamCopyStatus();
   if (status != hipSuccess) {
     delete kernelNode;
     *pGraphNode = nullptr;
     return status;
   }
   *pGraphNode = kernelNode;
-  status = ihipGraphAddNode(*pGraphNode, graph, pDependencies, numDependencies, capture, deviceId);
-  return status;
+  return ihipGraphAddNode(*pGraphNode, graph, pDependencies, numDependencies, capture, deviceId);
 }
 
 hipError_t ihipGraphAddMemcpyNode(hip::GraphNode** pGraphNode, hip::Graph* graph,
