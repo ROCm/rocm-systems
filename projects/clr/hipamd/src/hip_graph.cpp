@@ -124,15 +124,12 @@ hipError_t ihipGraphAddKernelNode(hip::GraphNode** pGraphNode, hip::Graph* graph
   }
 
   const amd::Device* device = g_devices[deviceId]->devices()[0];
-  static constexpr LaunchErrorRule kConfigRules[] = {
-      {kInvalidConfigBits, hipErrorInvalidConfiguration},
-  };
   amd::NDRangeContainer ndrange(3);
   amd::NDRange32 grid(1, 1, 1);
   hipError_t status = MakeLaunchNDRangeFromGrid(
       ndrange, grid, pNodeParams->gridDim, pNodeParams->blockDim,
       dim3(globalWorkSizeX_remainder, globalWorkSizeY_remainder, globalWorkSizeZ_remainder),
-      clusterDim, pNodeParams->sharedMemBytes, *device, kConfigRules);
+      clusterDim, pNodeParams->sharedMemBytes, *device, kUnlaunchableConfigRules);
   if (status != hipSuccess) {
     return status;
   }
