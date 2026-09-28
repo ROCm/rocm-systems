@@ -291,10 +291,8 @@ template <bool useGCR, bool scopeFields> hsa_status_t BlitSdma<useGCR, scopeFiel
   if (queue_resource_.QueueId != 0) {
     // Release queue resources from the kernel
     auto err = agent_->driver().DestroyQueue(queue_resource_.QueueId);
-    if (err != HSA_STATUS_SUCCESS) {
-      assert(false && "DestroyQueue failed");
-      // Continue cleanup even on failure
-    }
+    assert(err == HSA_STATUS_SUCCESS);
+    (void)err;
     memset(&queue_resource_, 0, sizeof(queue_resource_));
   }
 
@@ -2158,8 +2156,9 @@ template <bool useGCR, bool scopeFields>
 void BlitSdma<useGCR, scopeFields>::BuildFenceCommand(char* fence_command_addr, uint32_t* fence,
                                          uint32_t fence_value) {
   if (fence_command_addr == nullptr) {
-    assert(false && "fence_command_addr is NULL");
-    abort();  // Unrecoverable: null command addr would submit garbage to SDMA ring
+    // Unrecoverable: a null command address would submit garbage to the SDMA ring.
+    throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ARGUMENT,
+                             "BuildFenceCommand: fence_command_addr is NULL.");
   }
 
   // GFX12 or later use a different packet format that is incompatible (fields changed in size and location).
@@ -3083,8 +3082,9 @@ template <bool useGCR, bool scopeFields> void BlitSdma<useGCR, scopeFields>::Bui
 
 template <bool useGCR, bool scopeFields> void BlitSdma<useGCR, scopeFields>::BuildHdpFlushCommand(char* cmd_addr) {
   if (cmd_addr == nullptr) {
-    assert(false && "cmd_addr is NULL in BuildHdpFlushCommand");
-    abort();  // Unrecoverable: null command addr would submit garbage to SDMA ring
+    // Unrecoverable: a null command address would submit garbage to the SDMA ring.
+    throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ARGUMENT,
+                             "BuildHdpFlushCommand: cmd_addr is NULL.");
   }
   SDMA_PKT_HDP_FLUSH* addr = reinterpret_cast<SDMA_PKT_HDP_FLUSH*>(cmd_addr);
   memcpy(addr, &hdp_flush_cmd, flush_command_size_);
@@ -3092,8 +3092,9 @@ template <bool useGCR, bool scopeFields> void BlitSdma<useGCR, scopeFields>::Bui
 
 template <bool useGCR, bool scopeFields> void BlitSdma<useGCR, scopeFields>::BuildGCRCommand(char* cmd_addr, bool invalidate) {
   if (cmd_addr == nullptr) {
-    assert(false && "cmd_addr is NULL in BuildGCRCommand");
-    abort();  // Unrecoverable: null command addr would submit garbage to SDMA ring
+    // Unrecoverable: a null command address would submit garbage to the SDMA ring.
+    throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ARGUMENT,
+                             "BuildGCRCommand: cmd_addr is NULL.");
   }
   assert(useGCR && "Unsupported SDMA command - GCR.");
 

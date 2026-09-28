@@ -79,16 +79,11 @@ Image* Image::Create(hsa_agent_t agent) {
 }
 
 void Image::Destroy(const Image* image) {
-  if (image == nullptr) {
-    assert(false && "Image::Destroy called with NULL image");
-    return;
-  }
+  assert(image != nullptr);
   image->~Image();
 
   hsa_status_t status = AMD::hsa_amd_memory_pool_free(const_cast<Image*>(image));
-  if (status != HSA_STATUS_SUCCESS) {
-    assert(false && "hsa_amd_memory_pool_free failed for Image");
-  }
+  assert(status == HSA_STATUS_SUCCESS);
 }
 
 Sampler* Sampler::Create(hsa_agent_t agent) {
@@ -114,16 +109,11 @@ Sampler* Sampler::Create(hsa_agent_t agent) {
 }
 
 void Sampler::Destroy(const Sampler* sampler) {
-  if (sampler == nullptr) {
-    assert(false && "Sampler::Destroy called with NULL sampler");
-    return;
-  }
+  assert(sampler != nullptr);
   sampler->~Sampler();
 
   hsa_status_t status = AMD::hsa_amd_memory_pool_free(const_cast<Sampler*>(sampler));
-  if (status != HSA_STATUS_SUCCESS) {
-    assert(false && "hsa_amd_memory_pool_free failed for Sampler");
-  }
+  assert(status == HSA_STATUS_SUCCESS);
 }
 
 MipmappedArray* MipmappedArray::Create(hsa_agent_t agent) {
@@ -150,17 +140,12 @@ MipmappedArray* MipmappedArray::Create(hsa_agent_t agent) {
 }
 
 void MipmappedArray::Destroy(const MipmappedArray* mipmapped_array) {
-  if (mipmapped_array == nullptr) {
-    assert(false && "MipmappedArray::Destroy called with NULL mipmapped_array");
-    return;
-  }
+  assert(mipmapped_array != nullptr);
   mipmapped_array->~MipmappedArray();
 
   hsa_status_t status = AMD::hsa_amd_memory_pool_free(
                         const_cast<MipmappedArray*>(mipmapped_array));
-  if (status != HSA_STATUS_SUCCESS) {
-    assert(false && "hsa_amd_memory_pool_free failed for MipmappedArray");
-  }
+  assert(status == HSA_STATUS_SUCCESS);
 }
 
 ImageManager::ImageManager() {}

@@ -162,9 +162,16 @@ void SvmProfileControl::PollSmi() {
     auto gpu_agent = core::Runtime::runtime_singleton_->gpu_agents()[i];
     auto err = gpu_agent->driver().OpenSMI(gpu_agent->node_id(), &files[i + 1].fd);
     if (err != HSA_STATUS_SUCCESS) {
+      // Throwing here would unwind out of the polling thread and terminate the
+      // process, so this reports and gives up on profiling instead. The warning
+      // has to survive NDEBUG, otherwise a release build stops profiling with no
+      // trace of why.
+      log_warning_n(1, "SVM profiler: could not open the SMI event channel on node %u, "
+                       "profiling is disabled.\n",
+                    gpu_agent->node_id());
       assert(false && "OpenSMI failed");
       cleanup_fds();
-      return;  // Log and return instead of throwing to avoid process termination
+      return;
     }
     opened_fds++;
     files[i + 1].events = POLLIN;
@@ -172,9 +179,12 @@ void SvmProfileControl::PollSmi() {
     // Enable collecting masked events.
     auto wrote = write(files[i + 1].fd, &events, sizeof(events));
     if (wrote != sizeof(events)) {
+      log_warning_n(1, "SVM profiler: could not subscribe to SMI events on node %u, "
+                       "profiling is disabled.\n",
+                    gpu_agent->node_id());
       assert(false && "write to SMI fd failed");
       cleanup_fds();
-      return;  // Log and return instead of throwing to avoid process termination
+      return;
     }
   }
   MAKE_NAMED_SCOPE_GUARD(smiGuard, [&]() {
