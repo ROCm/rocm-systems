@@ -30,7 +30,7 @@ enum LaunchViolation : uint16_t {
 };
 
 //! Helper specifying most used bits to be checked
-static constexpr uint16_t kConfigBits =
+static constexpr uint16_t kCommonRulesBits =
     kGridOverflow | kBlockOverflow | kClusterOverflow | kClusterIndivisible;
 
 //! One entry in a launch-error rule table: the violation bits it matches and the error to return.
