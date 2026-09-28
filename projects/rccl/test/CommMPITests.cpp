@@ -15,7 +15,14 @@
 #include "nccl_device.h"
 #include "comm.h"
 
+// Storage types the datatype table dispatches to. DeviceBufferHelpers.hpp owns the ROCm-version
+// split behind hip_bfloat16; ncclTypeSize arrives with comm.h -> collectives.h.
+#include "DeviceBufferHelpers.hpp"
+#include "rccl_float8.h"
+#include <hip/hip_fp16.h>
+
 #include <array>
+#include <cstdint>
 #include <cstdlib>
 #include <regex>
 #include <string>
@@ -664,6 +671,587 @@ TEST_F(PatSharedConnectionMPITest, GroupedReduceScatterAndAllGatherOnOneCommunic
         ASSERT_MPI_EQ(size_t{0}, ag_mismatches);
     }
 }
+
+namespace
+{
+    /**
+     * @brief Size regime for one row of the datatype/size table.
+     *
+     * Short is the tier every config runs. Large pins the ReduceScatter shard at ~2MiB, which is
+     * only a real algorithm-eligibility boundary on a multi-node job (the PAT ceiling at <= 4
+     * nodes, the Direct-ReduceScatter ceiling at exactly 2), so those rows are registered against
+     * a 2-node config and left out of the single-node ones.
+     */
+    enum class SizeTier
+    {
+        Short,
+        Large
+    };
+
+    /// One row of the table: what to run, and what the generated test gets called.
+    struct DtypeSizeCase
+    {
+        ncclDataType_t dtype;
+        const char*    dtypeName;
+        SizeTier       sizeTier;
+        const char*    sizeTierName;
+    };
+
+    // Every datatype RCCL actually has, in enum order (test/common/CollectiveArgs.hpp). All twelve
+    // run at the short tier: a per-datatype reduction-kernel bug shows up at any size.
+    constexpr DtypeSizeCase kShortTierCases[] = {
+        {ncclInt8, "int8", SizeTier::Short, "short"},
+        {ncclUint8, "uint8", SizeTier::Short, "short"},
+        {ncclInt32, "int32", SizeTier::Short, "short"},
+        {ncclUint32, "uint32", SizeTier::Short, "short"},
+        {ncclInt64, "int64", SizeTier::Short, "short"},
+        {ncclUint64, "uint64", SizeTier::Short, "short"},
+        {ncclFloat16, "fp16", SizeTier::Short, "short"},
+        {ncclFloat32, "fp32", SizeTier::Short, "short"},
+        {ncclFloat64, "fp64", SizeTier::Short, "short"},
+        {ncclBfloat16, "bf16", SizeTier::Short, "short"},
+        {ncclFloat8e4m3, "fp8e4m3", SizeTier::Short, "short"},
+        {ncclFloat8e5m2, "fp8e5m2", SizeTier::Short, "short"},
+    };
+
+    // Three byte widths (4/2/1), enough to show the shard-element arithmetic divides exactly at
+    // every width without paying the 2MiB cost twelve times. ncclFloat8e5m2 is left out on purpose:
+    // ncclFloat8e4m3 already covers the 1-byte width, and e5m2 has the narrowest exact-integer
+    // range in the table, so it belongs in the cheap tier where it runs on every config.
+    constexpr DtypeSizeCase kLargeTierCases[] = {
+        {ncclFloat32, "fp32", SizeTier::Large, "large"},
+        {ncclBfloat16, "bf16", SizeTier::Large, "large"},
+        {ncclFloat8e4m3, "fp8e4m3", SizeTier::Large, "large"},
+    };
+
+    std::vector<DtypeSizeCase> allDtypeSizeCases()
+    {
+        std::vector<DtypeSizeCase> cases(std::begin(kShortTierCases), std::end(kShortTierCases));
+        cases.insert(cases.end(), std::begin(kLargeTierCases), std::end(kLargeTierCases));
+        return cases;
+    }
+
+    // Varied and cycled across the 24 buckets, because DDP fuses gradients into unequal buckets
+    // and a uniform size would let a per-plan sizing bug cancel out across the whole burst.
+    constexpr size_t kBucketCounts[] = {64, 128, 256, 512, 1024, 2048};
+    constexpr size_t kBucketSizes    = sizeof(kBucketCounts) / sizeof(kBucketCounts[0]);
+
+    // Derived, never hardcoded: the host staging buffer is sized from this, so a larger entry added
+    // to kBucketCounts next to a stale separate constant would be a silent heap overflow.
+    constexpr size_t largestBucketCount()
+    {
+        size_t largest = 0;
+        for(size_t i = 0; i < kBucketSizes; ++i)
+        {
+            if(kBucketCounts[i] > largest)
+            {
+                largest = kBucketCounts[i];
+            }
+        }
+        return largest;
+    }
+
+    constexpr size_t kLargestBucket = largestBucketCount();
+
+    // Keeps HIP and NCCL codes apart inside the single per-step status accumulator, so the value an
+    // assertion reports still identifies which layer failed.
+    constexpr int kNcclStatusOffset = 1000;
+
+    // Every payload here is a small non-negative integer, so the dispatch needs exactly one
+    // int-to-storage conversion per type and one back, and exact equality works for every type.
+    template <typename T>
+    T makeStorageValue(int value)
+    {
+        return static_cast<T>(value);
+    }
+
+    template <>
+    __half makeStorageValue<__half>(int value)
+    {
+        return __float2half(static_cast<float>(value));
+    }
+
+    template <>
+    hip_bfloat16 makeStorageValue<hip_bfloat16>(int value)
+    {
+        return hip_bfloat16(static_cast<float>(value));
+    }
+
+    template <>
+    rccl_float8 makeStorageValue<rccl_float8>(int value)
+    {
+        return rccl_float8(static_cast<float>(value));
+    }
+
+    template <>
+    rccl_bfloat8 makeStorageValue<rccl_bfloat8>(int value)
+    {
+        return rccl_bfloat8(static_cast<float>(value));
+    }
+
+    template <typename T>
+    float storageValueAsFloat(T value)
+    {
+        return static_cast<float>(value);
+    }
+
+    template <>
+    float storageValueAsFloat<__half>(__half value)
+    {
+        return __half2float(value);
+    }
+}
+
+/**
+ * @class PersistentCommunicatorMPITest
+ * @brief Replays a heterogeneous collective and P2P mix on one long-lived communicator.
+ *
+ * A long-running job builds one communicator and one stream at startup and reuses both, unchanged,
+ * for every step of the run. Each step issues a heterogeneous mix: a parameter Broadcast, a fused
+ * burst of small gradient AllReduces, a ReduceScatter/AllGather pair, a pipeline-stage Send/Recv,
+ * and a metric Reduce to rank 0. Nothing in the tree replays that whole mix on one communicator
+ * across many steps. The closest tests each cover one axis: GroupCallTests.cpp GroupCall.Different
+ * fuses seven families but runs once, DdaFabricSimpleMPITests AlternatingCollectivesOnSameCommunicator
+ * makes one sequential pass with no grouping and no P2P, and WarpSpeedMPITests MixedThresholdRace
+ * repeats with per-iteration validation but only ever calls AllReduce.
+ *
+ * Value-parameterized over the datatype/size table above, so every real ncclDataType_t replays the
+ * same sequence and the three collective families that get the full datatype reduction-kernel
+ * cross product (AllReduce, ReduceScatter, Reduce) are all exercised on all of them.
+ *
+ * No NCCL_ALGO or NCCL_PROTO forcing: the point is the sequence a real job runs under whatever
+ * the tuner picks. The full_pow2_* tiers cover the forced-algorithm direction separately.
+ */
+class PersistentCommunicatorMPITest
+    : public MPITestBase
+    , public ::testing::WithParamInterface<DtypeSizeCase>
+{
+protected:
+    // The rank-count ceiling every formula here is designed against, enforced in the test body.
+    // Two independent limits pin it, and raising it means rechecking both. Value: a reduced element
+    // is a sum of at most nranks 0/1 contributions, and ncclFloat8e5m2 -- the narrowest exact-integer
+    // range in the table -- is exact only to 8. Variance: contribution() collapses to a constant at
+    // nranks equal to its modulus, so the cap must stay strictly below that modulus, currently 9.
+    static constexpr int kMaxRanksAssumed = 8;
+
+    static constexpr int    kSteps           = 64;
+    static constexpr int    kGradientBuckets = 24;
+    static constexpr size_t kParamCount      = 1024;
+    static constexpr size_t kActivationCount = 1024;
+    static constexpr size_t kMetricCount     = 64;
+    static constexpr size_t kShortShardCount = 4096;
+
+    // One shard is exactly this many bytes at the large tier for every datatype: ncclTypeSize is
+    // 1, 2, 4 or 8, all of which divide 2^21 evenly, so the element count is never rounded.
+    static constexpr size_t kLargeShardBytes = 2 * 1024 * 1024;
+
+    // Puts the metric payload out of phase with every other buffer's fill, so a Reduce that lands
+    // on the wrong buffer cannot be masked by a coincidentally equal value.
+    static constexpr size_t kMetricIndexBase = 4099;
+
+    static size_t bucketCount(int bucket)
+    {
+        return kBucketCounts[static_cast<size_t>(bucket) % kBucketSizes];
+    }
+
+    // Spreads the buckets apart in index space so a burst that reduces the wrong bucket is not
+    // masked by a neighbour holding the same payload.
+    static size_t bucketIndex(int bucket, size_t element)
+    {
+        return static_cast<size_t>(bucket) * 31 + element;
+    }
+
+    // One rank's contribution to one element: 0 or 1, with which ranks carry a 1 rotating by both
+    // step and element index. Five of every nine combinations contribute, which keeps the reduced
+    // sum varying across elements at every rank count from 2 to kMaxRanksAssumed instead of
+    // collapsing to a constant, so a collective that silently does nothing leaves the previous
+    // step's pattern and a reduction that drops one rank while double-counting another changes the
+    // sum. Ranks 0..M-1 cover every residue mod M once, so the modulus here is the first rank count
+    // at which that property dies; it must stay above kMaxRanksAssumed.
+    static int contribution(int step, int rank, size_t index)
+    {
+        return ((index + static_cast<size_t>(step) + static_cast<size_t>(rank)) % 9 < 5) ? 1 : 0;
+    }
+
+    // What contribution() sums to once every rank has contributed exactly once. Bounded by nranks,
+    // hence by kMaxRanksAssumed, which is what keeps every datatype's comparison exact.
+    static int reducedContribution(int step, int nranks, size_t index)
+    {
+        int sum = 0;
+        for(int r = 0; r < nranks; ++r)
+        {
+            sum += contribution(step, r, index);
+        }
+        return sum;
+    }
+
+    template <typename T>
+    void runPersistentCommunicatorCase(ncclDataType_t dtype, size_t shard_count);
+};
+
+/**
+ * @brief One row of the table: kSteps iterations on one long-lived communicator, in storage type T.
+ *
+ * Allocates every buffer once and reuses it, the way a real job keeps its gradient buckets for the
+ * life of the run; allocating per step would measure the allocator instead of the communicator.
+ *
+ * The burst size is deliberate. scheduleCollTasksToPlan (src/enqueue/enqueue.cc:876-880) caps
+ * every kernel plan at three collectives unconditionally on every arch, so one ncclGroupEnd over
+ * 24 AllReduces drives the plan-minting loop (enqueue.cc:2202-2289) around eight times per step,
+ * re-binning the per-plan task queues from scratch on each pass.
+ *
+ * ReduceScatter feeds AllGather directly, so the pair is numerically an AllReduce: every rank must
+ * end the step holding the sum of all ranks' inputs. That is the "two-shot allreduce" composition
+ * built from the public API, re-run every step rather than once.
+ *
+ * Nothing here assumes a power-of-two rank count: the ring P2P pattern is defined for any
+ * nranks >= 2, and the only divisibility requirement (ReduceScatter) is met by construction.
+ */
+template <typename T>
+void PersistentCommunicatorMPITest::runPersistentCommunicatorCase(ncclDataType_t dtype, size_t shard_count)
+{
+    ncclComm_t comm = getActiveCommunicator();
+    ASSERT_MPI_TRUE(comm != nullptr);
+    hipStream_t stream = getActiveStream();
+    ASSERT_MPI_TRUE(stream != nullptr);
+
+    const int rank      = comm->rank;
+    const int nranks    = comm->nRanks;
+    const int next_rank = (rank + 1) % nranks;
+    const int prev_rank = (rank - 1 + nranks) % nranks;
+
+    // ReduceScatter needs the flat buffer to divide evenly, which holds by construction here.
+    const size_t total_grad = shard_count * static_cast<size_t>(nranks);
+
+    void* param_buffer = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&param_buffer, kParamCount * sizeof(T)));
+    auto param_guard = makeDeviceBufferAutoGuard(param_buffer);
+
+    std::vector<void*>                 bucket_buffers(kGradientBuckets, nullptr);
+    std::vector<DeviceBufferAutoGuard> bucket_guards;
+    bucket_guards.reserve(kGradientBuckets);
+    for(int b = 0; b < kGradientBuckets; ++b)
+    {
+        ASSERT_MPI_EQ(hipSuccess, hipMalloc(&bucket_buffers[b], bucketCount(b) * sizeof(T)));
+        bucket_guards.push_back(makeDeviceBufferAutoGuard(bucket_buffers[b]));
+    }
+
+    void* grad_flat  = nullptr;
+    void* grad_shard = nullptr;
+    void* grad_full  = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&grad_flat, total_grad * sizeof(T)));
+    auto grad_flat_guard = makeDeviceBufferAutoGuard(grad_flat);
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&grad_shard, shard_count * sizeof(T)));
+    auto grad_shard_guard = makeDeviceBufferAutoGuard(grad_shard);
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&grad_full, total_grad * sizeof(T)));
+    auto grad_full_guard = makeDeviceBufferAutoGuard(grad_full);
+
+    void* activation_send = nullptr;
+    void* activation_recv = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&activation_send, kActivationCount * sizeof(T)));
+    auto activation_send_guard = makeDeviceBufferAutoGuard(activation_send);
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&activation_recv, kActivationCount * sizeof(T)));
+    auto activation_recv_guard = makeDeviceBufferAutoGuard(activation_recv);
+
+    void* metric_send = nullptr;
+    void* metric_recv = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&metric_send, kMetricCount * sizeof(T)));
+    auto metric_send_guard = makeDeviceBufferAutoGuard(metric_send);
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&metric_recv, kMetricCount * sizeof(T)));
+    auto metric_recv_guard = makeDeviceBufferAutoGuard(metric_recv);
+
+    std::vector<T> host_param(kParamCount);
+    std::vector<T> host_bucket(kLargestBucket);
+    std::vector<T> host_grad(total_grad);
+    std::vector<T> host_shard(shard_count);
+    std::vector<T> host_full(total_grad);
+    std::vector<T> host_activation(kActivationCount);
+    std::vector<T> host_metric(kMetricCount);
+
+    // Only prints under NCCL_DEBUG=INFO; it is how a log can confirm the shape actually run.
+    TEST_INFO("persistent communicator: %d steps, %d ranks, %d fused AllReduce buckets/step, "
+              "%zu elements (%zu KiB) ReduceScatter+AllGather/step",
+              kSteps,
+              nranks,
+              kGradientBuckets,
+              total_grad,
+              total_grad * sizeof(T) / 1024);
+
+    for(int step = 0; step < kSteps; ++step)
+    {
+        SCOPED_TRACE("step " + std::to_string(step));
+
+        // Refill every buffer so a collective that silently does nothing shows up as the previous
+        // step's values rather than as a coincidentally correct result.
+        for(size_t i = 0; i < kParamCount; ++i)
+        {
+            host_param[i] = makeStorageValue<T>(contribution(step, rank, i));
+        }
+        for(size_t i = 0; i < total_grad; ++i)
+        {
+            host_grad[i] = makeStorageValue<T>(contribution(step, rank, i));
+        }
+        for(size_t i = 0; i < kActivationCount; ++i)
+        {
+            host_activation[i] = makeStorageValue<T>(contribution(step, rank, i));
+        }
+        for(size_t i = 0; i < kMetricCount; ++i)
+        {
+            host_metric[i] = makeStorageValue<T>(contribution(step, rank, kMetricIndexBase + i));
+        }
+
+        // Every HIP and NCCL return code in the step folds into one accumulator that keeps the
+        // first error: an ASSERT_MPI_EQ costs an MPI_Allreduce and the step issues over thirty
+        // calls, so the step pays two collective checks instead of one per call. Accumulating is
+        // also the only correct option inside a group, where returning early leaves it open.
+        int  step_status = 0;
+        auto recordHip   = [&step_status](hipError_t status) {
+            if(status != hipSuccess && step_status == 0)
+            {
+                step_status = static_cast<int>(status);
+            }
+        };
+        auto recordNccl = [&step_status](ncclResult_t status) {
+            if(status != ncclSuccess && step_status == 0)
+            {
+                step_status = kNcclStatusOffset + static_cast<int>(status);
+            }
+        };
+
+        recordHip(hipMemcpy(
+            param_buffer, host_param.data(), kParamCount * sizeof(T), hipMemcpyHostToDevice));
+        recordHip(hipMemcpy(
+            grad_flat, host_grad.data(), total_grad * sizeof(T), hipMemcpyHostToDevice));
+        recordHip(hipMemcpy(activation_send,
+                            host_activation.data(),
+                            kActivationCount * sizeof(T),
+                            hipMemcpyHostToDevice));
+        recordHip(hipMemcpy(
+            metric_send, host_metric.data(), kMetricCount * sizeof(T), hipMemcpyHostToDevice));
+        for(int b = 0; b < kGradientBuckets; ++b)
+        {
+            const size_t count = bucketCount(b);
+            for(size_t i = 0; i < count; ++i)
+            {
+                host_bucket[i] = makeStorageValue<T>(contribution(step, rank, bucketIndex(b, i)));
+            }
+            recordHip(hipMemcpy(
+                bucket_buffers[b], host_bucket.data(), count * sizeof(T), hipMemcpyHostToDevice));
+        }
+
+        // Phase 0: parameter sync from rank 0, every step rather than once, so Broadcast keeps
+        // re-entering a communicator the other families have just finished using. In place, so a
+        // rank that never receives keeps its own fill and the check below sees its rank term.
+        recordNccl(ncclBroadcast(
+            param_buffer, param_buffer, kParamCount, dtype, /*root=*/0, comm, stream));
+
+        // Phase 1: the DDP bucket-fusion burst. One group, 24 in-place AllReduces.
+        recordNccl(ncclGroupStart());
+        for(int b = 0; b < kGradientBuckets; ++b)
+        {
+            recordNccl(ncclAllReduce(bucket_buffers[b],
+                                     bucket_buffers[b],
+                                     bucketCount(b),
+                                     dtype,
+                                     ncclSum,
+                                     comm,
+                                     stream));
+        }
+        recordNccl(ncclGroupEnd());
+
+        // Phases 2 and 3: FSDP-style gradient reduce then parameter gather. Chained, so the pair
+        // is numerically an AllReduce and both halves are validated below.
+        recordNccl(
+            ncclReduceScatter(grad_flat, grad_shard, shard_count, dtype, ncclSum, comm, stream));
+        recordNccl(ncclAllGather(grad_shard, grad_full, shard_count, dtype, comm, stream));
+
+        // Phase 4: pipeline-parallel activation exchange around the ring. At two ranks the peer is
+        // the same in both directions, which is the degenerate case the loop has to keep working
+        // for; at three it is the odd-rank case that a power-of-two assumption would break on.
+        recordNccl(ncclGroupStart());
+        recordNccl(ncclSend(activation_send, kActivationCount, dtype, next_rank, comm, stream));
+        recordNccl(ncclRecv(activation_recv, kActivationCount, dtype, prev_rank, comm, stream));
+        recordNccl(ncclGroupEnd());
+
+        // Phase 5: the metric aggregation a long-running job repeats every step so rank 0 can log.
+        // Reduce is the third of the three families that get the full datatype x reduction-op
+        // kernel cross product (src/device/generate.py), so without it the table below would
+        // sweep every datatype through only two of them. Only rank 0 gets a result to check.
+        recordNccl(ncclReduce(
+            metric_send, metric_recv, kMetricCount, dtype, ncclSum, /*root=*/0, comm, stream));
+
+        recordHip(hipStreamSynchronize(stream));
+
+        recordHip(hipMemcpy(
+            host_param.data(), param_buffer, kParamCount * sizeof(T), hipMemcpyDeviceToHost));
+        recordHip(hipMemcpy(
+            host_shard.data(), grad_shard, shard_count * sizeof(T), hipMemcpyDeviceToHost));
+        recordHip(hipMemcpy(
+            host_full.data(), grad_full, total_grad * sizeof(T), hipMemcpyDeviceToHost));
+        recordHip(hipMemcpy(host_activation.data(),
+                            activation_recv,
+                            kActivationCount * sizeof(T),
+                            hipMemcpyDeviceToHost));
+        recordHip(hipMemcpy(
+            host_metric.data(), metric_recv, kMetricCount * sizeof(T), hipMemcpyDeviceToHost));
+
+        // Checked before any downloaded buffer is compared. A failed download would otherwise be
+        // scored as a pile of mismatches against stale data, burying the error that caused them.
+        // The EXPECT prints the code on the rank that saw it and costs no MPI.
+        EXPECT_EQ(0, step_status) << "rank " << rank;
+        ASSERT_MPI_EQ(0, step_status);
+
+        // Counted rather than asserted per element, and accumulated across all five phases, so the
+        // step costs one MPI_Allreduce for validation instead of one per phase.
+        size_t mismatches = 0;
+
+        for(size_t i = 0; i < kParamCount; ++i)
+        {
+            if(storageValueAsFloat(host_param[i])
+               != static_cast<float>(contribution(step, /*rank=*/0, i)))
+            {
+                ++mismatches;
+            }
+        }
+
+        for(int b = 0; b < kGradientBuckets; ++b)
+        {
+            const size_t     count         = bucketCount(b);
+            const hipError_t bucket_status = hipMemcpy(
+                host_bucket.data(), bucket_buffers[b], count * sizeof(T), hipMemcpyDeviceToHost);
+            recordHip(bucket_status);
+            if(bucket_status != hipSuccess)
+            {
+                // Same reason as above: comparing the staging buffer after a failed download
+                // scores stale data instead of reporting the download that actually broke.
+                continue;
+            }
+            for(size_t i = 0; i < count; ++i)
+            {
+                if(storageValueAsFloat(host_bucket[i])
+                   != static_cast<float>(reducedContribution(step, nranks, bucketIndex(b, i))))
+                {
+                    ++mismatches;
+                }
+            }
+        }
+
+        for(size_t i = 0; i < shard_count; ++i)
+        {
+            const size_t global_index = static_cast<size_t>(rank) * shard_count + i;
+            if(storageValueAsFloat(host_shard[i])
+               != static_cast<float>(reducedContribution(step, nranks, global_index)))
+            {
+                ++mismatches;
+            }
+        }
+
+        for(size_t i = 0; i < total_grad; ++i)
+        {
+            if(storageValueAsFloat(host_full[i])
+               != static_cast<float>(reducedContribution(step, nranks, i)))
+            {
+                ++mismatches;
+            }
+        }
+
+        for(size_t i = 0; i < kActivationCount; ++i)
+        {
+            if(storageValueAsFloat(host_activation[i])
+               != static_cast<float>(contribution(step, prev_rank, i)))
+            {
+                ++mismatches;
+            }
+        }
+
+        // Only rank 0 receives the Reduce result; the others issued the call and have nothing to
+        // check, so validating their untouched recv buffer would fail for the wrong reason.
+        if(rank == 0)
+        {
+            for(size_t i = 0; i < kMetricCount; ++i)
+            {
+                if(storageValueAsFloat(host_metric[i])
+                   != static_cast<float>(
+                       reducedContribution(step, nranks, kMetricIndexBase + i)))
+                {
+                    ++mismatches;
+                }
+            }
+        }
+
+        // The watchdog poll a real process group runs every step: a communicator that went into
+        // an error state stays usable-looking until something asks. Folded in with the mismatch
+        // count and the bucket-download statuses so the validation half costs one MPI_Allreduce.
+        ncclResult_t async_error = ncclSuccess;
+        recordNccl(ncclCommGetAsyncError(comm, &async_error));
+        recordNccl(async_error);
+
+        EXPECT_EQ(size_t{0}, mismatches) << "rank " << rank;
+        EXPECT_EQ(0, step_status) << "rank " << rank;
+        ASSERT_MPI_TRUE(mismatches == 0 && step_status == 0);
+    }
+}
+
+/**
+ * @test PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator
+ *
+ * One communicator, one stream, 24 gradient buckets, all created once and reused for 64 steps.
+ * Each step runs Broadcast, a grouped 24-way AllReduce burst, ReduceScatter, AllGather, a grouped
+ * ring Send/Recv and a Reduce to rank 0, in that order, validating every payload before the next
+ * step. One instantiation per datatype/size row; each row gets its own communicator, so the
+ * "one communicator reused across many steps" property holds within a row, not across the table.
+ *
+ * Payloads are keyed on the step index, the element index, and the rank, so three failure modes
+ * stay separable: a collective that silently does nothing leaves the previous step's values, a
+ * wrong data-block index shows up as a permutation, and a reduction that drops one rank's
+ * contribution while double-counting another's changes the sum. A rank-independent fill cannot
+ * see that last class, since the total comes out the same regardless of which ranks contributed.
+ */
+TEST_P(PersistentCommunicatorMPITest, HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator)
+{
+    const DtypeSizeCase& test_case = GetParam();
+    SCOPED_TRACE(std::string("dtype=") + test_case.dtypeName + " tier=" + test_case.sizeTierName);
+
+    // The maximum is load-bearing, not decoration: above kMaxRanksAssumed both ncclFloat8e5m2's
+    // exact-integer range and contribution()'s across-element variance stop holding, so the run
+    // would either compare inexactly or stop being able to fail at all. A larger world size is an
+    // environment mismatch rather than a defect, so it skips rather than fails.
+    SKIP_UNLESS_MPI_PREREQS(/*min_processes=*/2, /*max_processes=*/kMaxRanksAssumed);
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    // Only the ReduceScatter/AllGather shard scales with the tier. Scaling the other four phases
+    // too would multiply validation cost without adding a size regime this test does not cover.
+    const size_t shard_count
+        = (test_case.sizeTier == SizeTier::Large)
+              ? kLargeShardBytes / static_cast<size_t>(ncclTypeSize(test_case.dtype))
+              : kShortShardCount;
+
+    switch(test_case.dtype)
+    {
+    case ncclInt8: runPersistentCommunicatorCase<int8_t>(test_case.dtype, shard_count); break;
+    case ncclUint8: runPersistentCommunicatorCase<uint8_t>(test_case.dtype, shard_count); break;
+    case ncclInt32: runPersistentCommunicatorCase<int32_t>(test_case.dtype, shard_count); break;
+    case ncclUint32: runPersistentCommunicatorCase<uint32_t>(test_case.dtype, shard_count); break;
+    case ncclInt64: runPersistentCommunicatorCase<int64_t>(test_case.dtype, shard_count); break;
+    case ncclUint64: runPersistentCommunicatorCase<uint64_t>(test_case.dtype, shard_count); break;
+    case ncclFloat16: runPersistentCommunicatorCase<__half>(test_case.dtype, shard_count); break;
+    case ncclFloat32: runPersistentCommunicatorCase<float>(test_case.dtype, shard_count); break;
+    case ncclFloat64: runPersistentCommunicatorCase<double>(test_case.dtype, shard_count); break;
+    case ncclBfloat16: runPersistentCommunicatorCase<hip_bfloat16>(test_case.dtype, shard_count); break;
+    case ncclFloat8e4m3: runPersistentCommunicatorCase<rccl_float8>(test_case.dtype, shard_count); break;
+    case ncclFloat8e5m2: runPersistentCommunicatorCase<rccl_bfloat8>(test_case.dtype, shard_count); break;
+    default: FAIL() << "no storage type mapped for datatype " << test_case.dtypeName;
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(DtypeSizeCases,
+                         PersistentCommunicatorMPITest,
+                         ::testing::ValuesIn(allDtypeSizeCases()),
+                         [](const ::testing::TestParamInfo<DtypeSizeCase>& info) {
+                             return std::string(info.param.dtypeName) + "_"
+                                    + info.param.sizeTierName;
+                         });
 
 /**
  * @class TrafficClassMPITest
