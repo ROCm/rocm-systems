@@ -17,7 +17,6 @@
 #include <string.h>
 
 #define LOC_BW 5000.0
-#define MLOPART_LOC_BW 2618.0
 #define SM60_NVLINK_BW 18.0
 #define SM70_NVLINK_BW 20.0
 #define SM80_NVLINK_BW 20.0
