@@ -5,224 +5,30 @@
 
 #include "library/rocprofiler-sdk/callback/common_tracing_callbacks.hpp"
 #include "library/rocprofiler-sdk/types.hpp"
+
+#include "library/rocprofiler-sdk/callback/rccl/device_resolver.hpp"
+#include "library/rocprofiler-sdk/callback/rccl/event_info.hpp"
+#include "library/rocprofiler-sdk/callback/rccl/transferred_bytes_tracker.hpp"
+
 #include "policies/rocprofiler-sdk/domain_service/backend.hpp"
 #include "policies/rocprofiler-sdk/domain_service/externals.hpp"
-
-#include "logger/debug.hpp"
 
 #include <fmt/format.h>
 
 #include <cstddef>
 #include <cstdint>
-#include <mutex>
 #include <optional>
 #include <string_view>
-#include <unordered_map>
-#include <unordered_set>
 
 namespace rocprofsys::domains::callback
 {
 
-// maybe move this to backend
-namespace detail
+namespace rccl
 {
-enum class event_type
-{
-    recv,
-    send
-};
-
-template <policies::domain_service::backend SdkBackend>
-struct rccl_event_info
-{
-    template <typename EventT>
-    rccl_event_info(const EventT& event, event_type ev_type)
-    : type(ev_type)
-    , comm(event.comm)
-    {
-        auto data_type_size = SdkBackend::rccl_type_size(event.datatype);
-        if constexpr(requires { event.count; })
-        {
-            size = data_type_size * event.count;
-        }
-        else if constexpr(requires { event.sendcount; })
-        {
-            size = data_type_size * event.sendcount;
-        }
-        else if constexpr(requires { event.recvcount; })
-        {
-            size = data_type_size * event.recvcount;
-        }
-    }
-
-    rccl_event_info() = default;
-
-    size_t                  size = 0;  ///< Transfer size in bytes
-    event_type              type{ event_type::recv };
-    SdkBackend::nccl_comm_t comm = nullptr;  ///< RCCL communicator handle
-};
-
-template <policies::domain_service::backend SdkBackend>
-[[nodiscard]] inline rccl_event_info<SdkBackend>
-extract_event_info(const typename SdkBackend::callback_tracing_record_t& record)
-{
-    if(record.payload == nullptr)
-    {
-        return {};
-    }
-
-    auto operation = static_cast<SdkBackend::rccl_api_id_t>(record.operation);
-    auto payload   = *static_cast<SdkBackend::rccl_api_data*>(record.payload);
-
-    // <rocprofiler-sdk/rccl/api_args.h> <- source of truth for nccl types
-    switch(operation)
-    {
-        case SdkBackend::RCCL_API_ID_ncclAllGather:
-            return rccl_event_info<SdkBackend>{ payload.args.ncclAllGather,
-                                                event_type::recv };
-        case SdkBackend::RCCL_API_ID_ncclAllToAll:
-            return rccl_event_info<SdkBackend>{ payload.args.ncclAllToAll,
-                                                event_type::recv };
-        case SdkBackend::RCCL_API_ID_ncclAllReduce:
-            return rccl_event_info<SdkBackend>{ payload.args.ncclAllReduce,
-                                                event_type::recv };
-        case SdkBackend::RCCL_API_ID_ncclGather:
-            return rccl_event_info<SdkBackend>{ payload.args.ncclGather,
-                                                event_type::recv };
-        case SdkBackend::RCCL_API_ID_ncclRecv:
-            return rccl_event_info<SdkBackend>{ payload.args.ncclRecv, event_type::recv };
-        case SdkBackend::RCCL_API_ID_ncclReduce:
-            return rccl_event_info<SdkBackend>{ payload.args.ncclReduce,
-                                                event_type::recv };
-        case SdkBackend::RCCL_API_ID_ncclBroadcast:
-            return rccl_event_info<SdkBackend>{ payload.args.ncclBroadcast,
-                                                event_type::send };
-        case SdkBackend::RCCL_API_ID_ncclReduceScatter:
-            return rccl_event_info<SdkBackend>{ payload.args.ncclReduceScatter,
-                                                event_type::send };
-        case SdkBackend::RCCL_API_ID_ncclSend:
-            return rccl_event_info<SdkBackend>{ payload.args.ncclSend, event_type::send };
-        default: break;
-    }
-
-    // RCCL renamed ncclAllToAll to ncclAlltoAll (note the lowercase 't'). The deprecated
-    // ncclAllToAll now forwards to ncclAlltoAll, so on toolchains new enough to define
-    // this id the SDK reports the collective under it too, and it must be handled here
-    // as well. Expressed via SdkBackend so this header stays SDK-agnostic: SdkBackend
-    // (backend<Wrapper>) only defines RCCL_API_ID_ncclAlltoAll when the underlying
-    // rocprofiler-sdk headers define ROCPROFILER_RCCL_API_ID_ncclAlltoAll.
-    if constexpr(requires { SdkBackend::RCCL_API_ID_ncclAlltoAll; })
-    {
-        if(operation == SdkBackend::RCCL_API_ID_ncclAlltoAll)
-        {
-            return rccl_event_info<SdkBackend>{ payload.args.ncclAlltoAll,
-                                                event_type::recv };
-        }
-    }
-
-    return {};
-}
-
-}  // namespace detail
-
-namespace detail2
-{
-
-template <policies::domain_service::backend SdkBackend>
-struct device_id_resolver
-{
-    template <policies::domain_service::externals Externals>
-    static void configure_comm_cu_device_function()
-    {
-        auto func                 = Externals::dlsym("ncclCommCuDevice");
-        s_nccl_comm_cu_device_ptr = reinterpret_cast<nccl_comm_cu_device_fn>(func);
-        if(s_nccl_comm_cu_device_ptr == nullptr)
-        {
-            const char* error = Externals::dlerror();
-            LOG_DEBUG(
-                "ncclCommCuDevice not found via dlsym ({}), using default device_id",
-                error ? error : "unknown error");
-        }
-    }
-
-    [[nodiscard]] static std::uint32_t resolve_device_id(
-        SdkBackend::nccl_comm_t comm) noexcept
-    {
-        constexpr std::uint32_t k_default_device_id = 0;
-
-        if(comm == nullptr)
-        {
-            return k_default_device_id;
-        }
-
-        if(s_nccl_comm_cu_device_ptr == nullptr)
-        {
-            return k_default_device_id;
-        }
-
-        int                                device_id = k_default_device_id;
-        typename SdkBackend::nccl_result_t result =
-            s_nccl_comm_cu_device_ptr(comm, &device_id);
-        if(result != SdkBackend::NCCL_SUCCESS)
-        {
-            LOG_DEBUG("ncclCommCuDevice failed with error {}, using default device_id",
-                      static_cast<int>(result));
-            return k_default_device_id;
-        }
-        return static_cast<std::uint32_t>(device_id);
-    }
-
-private:
-    using nccl_comm_cu_device_fn =
-        SdkBackend::nccl_result_t (*)(typename SdkBackend::nccl_comm_t, int*);
-
-    static inline nccl_comm_cu_device_fn s_nccl_comm_cu_device_ptr{ nullptr };
-};
-
-}  // namespace detail2
-
-namespace detail3
-{
-
-template <policies::domain_service::externals Externals>
-struct rccl_device_transferred_bytes_tracking
-{
-    static bool register_gpu(std::uint32_t rccl_device_idx)
-    {
-        auto thread_state_guard =
-            Externals::state_thread::scoped(Externals::state_thread::Internal);
-        const std::unique_lock<std::mutex> lock{ m_registered_gpus_mutex };
-        if(m_registered_gpus.contains(rccl_device_idx))
-        {
-            return false;
-        }
-        m_registered_gpus.insert(rccl_device_idx);
-
-        return true;
-    }
-
-    [[nodiscard]] static std::uint64_t add_bytes(std::uint32_t rccl_device_idx,
-                                                 size_t        bytes)
-    {
-        auto thread_state_guard =
-            Externals::state_thread::scoped(Externals::state_thread::Internal);
-        const std::unique_lock<std::mutex> lock{ m_cumulative_mutex };
-        auto& device_bytes = m_cumulative_bytes_per_device[rccl_device_idx];
-        device_bytes += bytes;
-        return device_bytes;
-    }
-
-private:
-    static inline std::mutex                        m_registered_gpus_mutex;
-    static inline std::unordered_set<std::uint32_t> m_registered_gpus;
-    static inline std::mutex                        m_cumulative_mutex;
-    static inline std::unordered_map<std::uint32_t, std::uint64_t>
-        m_cumulative_bytes_per_device;
-};
 
 template <policies::domain_service::externals Externals>
 void
-register_gpu_pmc(std::uint32_t rccl_device_idx)
+register_gpu_pmc(std::uint32_t device_id)
 {
     constexpr size_t k_event_code  = 0;
     constexpr size_t k_instance_id = 0;
@@ -236,11 +42,10 @@ register_gpu_pmc(std::uint32_t rccl_device_idx)
 
     auto register_rccl_info = [&](std::string_view direction_label,
                                   const char*      description) {
-        const std::string label =
-            fmt::format("{} GPU {}", direction_label, rccl_device_idx);
+        const std::string label = fmt::format("{} GPU {}", direction_label, device_id);
         Externals::get_metadata_registry().add_pmc_info(typename Externals::pmc_info_t{
             .type             = Externals::k_agent_type_gpu,
-            .agent_type_index = rccl_device_idx,
+            .agent_type_index = device_id,
             .target_arch      = k_target_arch,
             .event_code       = k_event_code,
             .instance_id      = k_instance_id,
@@ -263,7 +68,7 @@ register_gpu_pmc(std::uint32_t rccl_device_idx)
     register_rccl_info(Externals::rccl_recv_label,
                        "Tracks RCCL communication data sizes (recv)");
 }
-}  // namespace detail3
+}  // namespace rccl
 
 template <policies::domain_service::externals Externals>
 struct rccl_api_category
@@ -286,10 +91,8 @@ on_rccl_configure()
     Externals::get_metadata_registry().add_track(typename Externals::track_t{
         std::string{ Externals::rccl_recv_track_name }, k_no_thread_id, k_empty_json });
 
-    detail2::device_id_resolver<SdkBackend>::template configure_comm_cu_device_function<
+    rccl::device_id_resolver<SdkBackend>::template configure_comm_cu_device_function<
         Externals>();
-
-    LOG_CRITICAL("RCCL CONFIGURE");
 }
 
 template <policies::domain_service::backend   SdkBackend,
@@ -302,26 +105,22 @@ on_rccl_exit(typename SdkBackend::callback_tracing_record_t record,
     on_tracing_api_exit<SdkBackend, Externals, rccl_api_category>(
         record, user_data, callback_data, timestamp);
 
-    const auto info = detail::extract_event_info<SdkBackend>(record);
+    const auto info = rccl::extract_event_info<SdkBackend>(record);
     const auto device_id =
-        detail2::device_id_resolver<SdkBackend>::resolve_device_id(info.comm);
+        rccl::device_id_resolver<SdkBackend>::resolve_device_id(info.comm);
 
-    const auto is_present =
-        detail3::rccl_device_transferred_bytes_tracking<Externals>::register_gpu(
-            device_id);
-    if(!is_present)
+    const auto [cumulative, is_first_registration] =
+        rccl::transferred_bytes_tracker<Externals>::add_bytes(device_id, info.size);
+
+    if(is_first_registration)
     {
-        detail3::register_gpu_pmc<Externals>(device_id);
+        rccl::register_gpu_pmc<Externals>(device_id);
     }
-
-    const auto cumulative =
-        detail3::rccl_device_transferred_bytes_tracking<Externals>::add_bytes(device_id,
-                                                                              info.size);
 
     const auto event_metadata = fmt::format(R"({{"transfer_bytes":{}}})", info.size);
 
     const auto label =
-        info.type == detail::event_type::send ? "RCCL Comm Send" : "RCCL Comm Recv";
+        info.type == rccl::event_type::send ? "RCCL Comm Send" : "RCCL Comm Recv";
     const auto pmc_label = fmt::format("{} GPU {}", label, device_id);
 
     constexpr size_t           k_stack_id        = 0;
