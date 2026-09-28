@@ -636,14 +636,15 @@ TEST_F(TopoTest, GetSystemFromXml_CpxEightMlopartsUnderPhysicalPci) {
 // PCI functions and ncclTopoAddXGMI() wires it onto their DEV nodes. ncclTopoAddGpuSub() used to
 // also connect the siblings with LINK_LOC, and since PATH_LOC outranks PATH_NVL in the path search
 // that shadowed the real XGMI links, hiding the peer from everything keyed on PATH_NVL (P2P channel
-// counts, XGMI classification) and leaving it with the PCIe fallbacks. The link bw must come out at
-// exactly what sysfs reported too: ncclTopoConnectNodes() accumulates, so a second link here would
-// add to it and inflate the P2P channel count. The report names four XGMI widths so that it is
-// distinguishable from the single width ncclTopoConnectMloPartSiblings() fabricates -- at one width
-// the two are the same number, and a sibling the XGMI pass silently skipped would go unnoticed.
-TEST_F(TopoTest, MloPartSiblingPath_IsNvlAtTheReportedXgmiWidth) {
+// counts, XGMI classification) and leaving it with the PCIe fallbacks.
+//
+// The hop is rated at MLOPART_LOC_BW, not at the width sysfs reports: the report carries an
+// inter-device XGMI width, while the partitions actually reach each other over the much wider
+// on-package fabric, and ncclTopoSearch's followPath() spends link bw as a budget. The report here
+// names four widths so the test can tell the two apart -- a sibling link left at 4 * the XGMI
+// width would pass any assertion that only pinned it to one.
+TEST_F(TopoTest, MloPartSiblingPath_IsNvlAtOnPackageBw) {
   const uint64_t host = 0xc1;
-  const float reportedBw = 4 * ncclTopoXGMISpeed("gfx942");
   struct ncclXmlNode* cpu = addSystemCpu(host);
   struct ncclXmlNode* pci = addGpuPci(cpu, "0000:0c:00.0", "gfx942", 0, 0, /*mloPart=*/0);
   struct ncclXmlNode* gpu0 = nullptr;
@@ -664,8 +665,8 @@ TEST_F(TopoTest, MloPartSiblingPath_IsNvlAtTheReportedXgmiWidth) {
   struct ncclTopoLink* l10 = findLink(built->nodes[DEV].nodes + 1, built->nodes[DEV].nodes);
   ASSERT_NE(l01, nullptr);
   ASSERT_NE(l10, nullptr);
-  EXPECT_FLOAT_EQ(l01->bw, reportedBw);
-  EXPECT_FLOAT_EQ(l10->bw, reportedBw);
+  EXPECT_FLOAT_EQ(l01->bw, MLOPART_LOC_BW);
+  EXPECT_FLOAT_EQ(l10->bw, MLOPART_LOC_BW);
   // The XGMI link is the only one between the siblings: a LINK_LOC entry alongside it is what
   // used to shadow it in the path search.
   EXPECT_EQ(findLinkOfType(built->nodes[DEV].nodes, built->nodes[DEV].nodes + 1, LINK_LOC), nullptr);
@@ -674,7 +675,7 @@ TEST_F(TopoTest, MloPartSiblingPath_IsNvlAtTheReportedXgmiWidth) {
   ASSERT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
   struct ncclTopoLinkList* p01 = built->nodes[GPU].nodes[0].paths[GPU] + 1;
   EXPECT_EQ(p01->type, PATH_NVL);
-  EXPECT_FLOAT_EQ(p01->bw, reportedBw);
+  EXPECT_FLOAT_EQ(p01->bw, MLOPART_LOC_BW);
 
   ncclTopoFree(built);
 }
@@ -698,8 +699,8 @@ TEST_F(TopoTest, MloPartSiblings_LinkedWhenXgmiUnreported) {
   struct ncclTopoLink* l10 = findLink(built->nodes[DEV].nodes + 1, built->nodes[DEV].nodes);
   ASSERT_NE(l01, nullptr);
   ASSERT_NE(l10, nullptr);
-  EXPECT_FLOAT_EQ(l01->bw, ncclTopoXGMISpeed("gfx942"));
-  EXPECT_FLOAT_EQ(l10->bw, ncclTopoXGMISpeed("gfx942"));
+  EXPECT_FLOAT_EQ(l01->bw, MLOPART_LOC_BW);
+  EXPECT_FLOAT_EQ(l10->bw, MLOPART_LOC_BW);
   EXPECT_EQ(findLinkOfType(built->nodes[DEV].nodes, built->nodes[DEV].nodes + 1, LINK_LOC), nullptr);
   EXPECT_EQ(findLinkOfType(built->nodes[DEV].nodes + 1, built->nodes[DEV].nodes, LINK_LOC), nullptr);
 
@@ -712,14 +713,12 @@ TEST_F(TopoTest, MloPartSiblings_LinkedWhenXgmiUnreported) {
 
 // A one-sided XGMI report (partition 0 names partition 1, not the reverse) leaves the pair with a
 // link in one direction only, since ncclTopoAddXGMI() connects just the reporting DEV for a GPU
-// target. Both directions must end at the reported width. The reported one must not be topped up:
-// ncclTopoConnectNodes() accumulates, so that would leave 0->1 at eight XGMI widths against 1->0's
-// four. And the fabricated one must not be left at a bare single width, or the two ranks read
-// different bandwidths off their paths and ncclTopoComputeP2pChannelsPerPeer() mins the pair down
-// to what that direction carries.
-TEST_F(TopoTest, MloPartSiblings_OneSidedXgmiKeepsBothDirectionsAtTheReportedWidth) {
+// target. Both directions must end at MLOPART_LOC_BW regardless. The reported one must be re-rated
+// rather than topped up: ncclTopoConnectNodes() accumulates, so adding to it would leave 0->1
+// above the on-package bw while 1->0 sat at it, and the two ranks of the pair would then read
+// different bandwidths off their directional paths.
+TEST_F(TopoTest, MloPartSiblings_OneSidedXgmiRatesBothDirectionsAtOnPackageBw) {
   const uint64_t host = 0xc3;
-  const float reportedBw = 4 * ncclTopoXGMISpeed("gfx942");
   struct ncclXmlNode* cpu = addSystemCpu(host);
   struct ncclXmlNode* pci = addGpuPci(cpu, "0000:0c:00.0", "gfx942", 0, 0, /*mloPart=*/0);
   struct ncclXmlNode* gpu0 = nullptr;
@@ -739,8 +738,8 @@ TEST_F(TopoTest, MloPartSiblings_OneSidedXgmiKeepsBothDirectionsAtTheReportedWid
   struct ncclTopoLink* l10 = findLink(built->nodes[DEV].nodes + 1, built->nodes[DEV].nodes);
   ASSERT_NE(l01, nullptr);
   ASSERT_NE(l10, nullptr);
-  EXPECT_FLOAT_EQ(l01->bw, reportedBw);
-  EXPECT_FLOAT_EQ(l10->bw, reportedBw);
+  EXPECT_FLOAT_EQ(l01->bw, MLOPART_LOC_BW);
+  EXPECT_FLOAT_EQ(l10->bw, MLOPART_LOC_BW);
 
   ASSERT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
   struct ncclTopoLinkList* p01 = built->nodes[GPU].nodes[0].paths[GPU] + 1;
@@ -755,13 +754,13 @@ TEST_F(TopoTest, MloPartSiblings_OneSidedXgmiKeepsBothDirectionsAtTheReportedWid
 // All eight CPX partitions of one physical device are XGMI peers, but a platform only has to
 // report the links it observes. An eight-partition device that reports a ring names 8 of the 56
 // ordered pairs and leaves the other 48 to ncclTopoConnectMloPartSiblings(), which is the only
-// case that exercises the N-way mesh it fabricates. Every pair must come out LINK_NVL at the width
-// the device reports for the pairs it does name: ncclTopoComputeP2pChannelsPerPeer() mins the
-// channel count over the whole communicator, so one narrower direction pins every rank to it.
+// case that exercises the N-way mesh it builds. Every pair must come out LINK_NVL at
+// MLOPART_LOC_BW, reported or not. A partitioned node is where rating these hops at an XGMI width
+// does real damage: ncclTopoSearch's followPath() spends link bw as a budget, and 56 hops of it
+// walk the balanced-tree search down the whole speed array.
 TEST_F(TopoTest, MloPartSiblings_EightPartitionsFormFullNvlMesh) {
   const uint64_t host = 0xc4;
   const int nParts = NCCL_TOPO_MLOPART_DEV_MAX;
-  const float reportedBw = 4 * ncclTopoXGMISpeed("gfx942");
   struct ncclXmlNode* cpu = addSystemCpu(host);
   struct ncclXmlNode* pci = addGpuPci(cpu, "0000:0c:00.0", "gfx942", 0, 0, /*mloPart=*/0);
   struct ncclXmlNode* gpus[NCCL_TOPO_MLOPART_DEV_MAX] = {};
@@ -787,7 +786,7 @@ TEST_F(TopoTest, MloPartSiblings_EightPartitionsFormFullNvlMesh) {
       if (a == b) continue;
       struct ncclTopoLink* link = findLink(built->nodes[DEV].nodes + a, built->nodes[DEV].nodes + b);
       ASSERT_NE(link, nullptr) << "no XGMI link from DEV " << a << " to DEV " << b;
-      EXPECT_FLOAT_EQ(link->bw, reportedBw) << "DEV " << a << " to DEV " << b;
+      EXPECT_FLOAT_EQ(link->bw, MLOPART_LOC_BW) << "DEV " << a << " to DEV " << b;
     }
   }
 
@@ -797,7 +796,7 @@ TEST_F(TopoTest, MloPartSiblings_EightPartitionsFormFullNvlMesh) {
       if (a == b) continue;
       struct ncclTopoLinkList* path = built->nodes[GPU].nodes[a].paths[GPU] + b;
       EXPECT_EQ(path->type, PATH_NVL) << "GPU " << a << " to GPU " << b;
-      EXPECT_FLOAT_EQ(path->bw, reportedBw) << "GPU " << a << " to GPU " << b;
+      EXPECT_FLOAT_EQ(path->bw, MLOPART_LOC_BW) << "GPU " << a << " to GPU " << b;
     }
   }
 
