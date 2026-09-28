@@ -93,20 +93,21 @@ ssize_t
 Fallback::io(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer, size_t size,
              hoff_t file_offset, hoff_t buffer_offset, size_t chunk_size)
 {
-    return _io_impl(type, std::move(file), std::move(buffer), size, file_offset, buffer_offset, chunk_size);
+    return _io_impl(type, std::move(file), std::move(buffer), size, file_offset, buffer_offset, nullptr,
+                    chunk_size);
 }
 
 ssize_t
 Fallback::_io_impl(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer, size_t size,
-                   hoff_t file_offset, hoff_t buffer_offset)
+                   hoff_t file_offset, hoff_t buffer_offset, hipStream_t copy_stream)
 {
-    return _io_impl(type, std::move(file), std::move(buffer), size, file_offset, buffer_offset,
+    return _io_impl(type, std::move(file), std::move(buffer), size, file_offset, buffer_offset, copy_stream,
                     DefaultChunkSize);
 }
 
 ssize_t
 Fallback::_io_impl(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer, size_t size,
-                   hoff_t file_offset, hoff_t buffer_offset, size_t chunk_size)
+                   hoff_t file_offset, hoff_t buffer_offset, hipStream_t copy_stream, size_t chunk_size)
 {
     if (!Context<Configuration>::get()->fallback()) {
         throw BackendDisabled();
@@ -141,14 +142,28 @@ Fallback::_io_impl(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBu
                     io_bytes =
                         Context<Sys>::get()->pread(file->bufferedFd(), bounce_buffer.get(), count, offset);
                     if (io_bytes > 0) {
-                        Context<Hip>::get()->hipMemcpy(device_buffer_position, bounce_buffer.get(),
-                                                       static_cast<size_t>(io_bytes), hipMemcpyHostToDevice);
+                        if (copy_stream) {
+                            Context<Hip>::get()->hipMemcpyWithStream(
+                                device_buffer_position, bounce_buffer.get(), static_cast<size_t>(io_bytes),
+                                hipMemcpyHostToDevice, copy_stream);
+                        }
+                        else {
+                            Context<Hip>::get()->hipMemcpy(device_buffer_position, bounce_buffer.get(),
+                                                           static_cast<size_t>(io_bytes),
+                                                           hipMemcpyHostToDevice);
+                        }
                     }
                     break;
                 case IoType::Write:
-                    Context<Hip>::get()->hipMemcpy(bounce_buffer.get(), device_buffer_position, count,
-                                                   hipMemcpyDeviceToHost);
-                    Context<Hip>::get()->hipStreamSynchronize(nullptr);
+                    if (copy_stream) {
+                        Context<Hip>::get()->hipMemcpyWithStream(bounce_buffer.get(), device_buffer_position,
+                                                                 count, hipMemcpyDeviceToHost, copy_stream);
+                    }
+                    else {
+                        Context<Hip>::get()->hipMemcpy(bounce_buffer.get(), device_buffer_position, count,
+                                                       hipMemcpyDeviceToHost);
+                        Context<Hip>::get()->hipStreamSynchronize(nullptr);
+                    }
                     io_bytes =
                         Context<Sys>::get()->pwrite(file->bufferedFd(), bounce_buffer.get(), count, offset);
                     Context<Sys>::get()->fdatasync(file->bufferedFd());

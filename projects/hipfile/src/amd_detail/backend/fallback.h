@@ -48,9 +48,9 @@ struct Fallback : public Backend {
 
 protected:
     ssize_t _io_impl(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer, size_t size,
-                     hoff_t file_offset, hoff_t buffer_offset) override;
+                     hoff_t file_offset, hoff_t buffer_offset, hipStream_t copy_stream) override;
     ssize_t _io_impl(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer, size_t size,
-                     hoff_t file_offset, hoff_t buffer_offset, size_t chunk_size);
+                     hoff_t file_offset, hoff_t buffer_offset, hipStream_t copy_stream, size_t chunk_size);
 };
 
 }

@@ -218,7 +218,7 @@ try {
 
     std::shared_ptr<Backend> backend{selectBackend(backends, file, buffer, size, file_offset, buffer_offset)};
 
-    return backend->io(type, std::move(file), std::move(buffer), size, file_offset, buffer_offset);
+    return backend->io(type, std::move(file), std::move(buffer), size, file_offset, buffer_offset, nullptr);
 }
 catch (hipFileError_t e) {
     return -e.err;

@@ -172,8 +172,9 @@ Fastpath::score(const shared_ptr<IFile> &file, const shared_ptr<IBuffer> &buffer
 
 ssize_t
 Fastpath::_io_impl(IoType type, shared_ptr<IFile> file, shared_ptr<IBuffer> buffer, size_t size,
-                   hoff_t file_offset, hoff_t buffer_offset)
+                   hoff_t file_offset, hoff_t buffer_offset, hipStream_t copy_stream)
 {
+    (void)copy_stream;
     StatsIoTracker ioTracker{type, StatsBackend::Fastpath};
     if (!Context<Configuration>::get()->fastpath()) {
         throw BackendDisabled();

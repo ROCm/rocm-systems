@@ -781,14 +781,14 @@ TEST_P(HipFileIoBackendSelectionParam, HipFileIoIssuesIoToHighestScoringBackend)
 
     switch (io_type) {
         case IoType::Read:
-            EXPECT_CALL(*mbe2,
-                        io(Eq(IoType::Read), Eq(mfile), Eq(mbuffer), io_size, file_offset, buffer_offset))
+            EXPECT_CALL(*mbe2, io(Eq(IoType::Read), Eq(mfile), Eq(mbuffer), io_size, file_offset,
+                                  buffer_offset, ::testing::_))
                 .WillOnce(Return(io_size));
             ASSERT_EQ(hipFileRead(handle, buffer, io_size, file_offset, buffer_offset), io_size);
             break;
         case IoType::Write:
-            EXPECT_CALL(*mbe2,
-                        io(Eq(IoType::Write), Eq(mfile), Eq(mbuffer), io_size, file_offset, buffer_offset))
+            EXPECT_CALL(*mbe2, io(Eq(IoType::Write), Eq(mfile), Eq(mbuffer), io_size, file_offset,
+                                  buffer_offset, ::testing::_))
                 .WillOnce(Return(io_size));
             ASSERT_EQ(hipFileWrite(handle, buffer, io_size, file_offset, buffer_offset), io_size);
             break;

@@ -26,18 +26,18 @@ using namespace hipFile;
 
 ssize_t
 Backend::io(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer, size_t size,
-            hoff_t file_offset, hoff_t buffer_offset)
+            hoff_t file_offset, hoff_t buffer_offset, hipStream_t copy_stream)
 {
-    return _io_impl(type, std::move(file), std::move(buffer), size, file_offset, buffer_offset);
+    return _io_impl(type, std::move(file), std::move(buffer), size, file_offset, buffer_offset, copy_stream);
 }
 
 ssize_t
 BackendWithFallback::io(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer,
-                        size_t size, hoff_t file_offset, hoff_t buffer_offset)
+                        size_t size, hoff_t file_offset, hoff_t buffer_offset, hipStream_t copy_stream)
 {
     ssize_t nbytes{0};
     try {
-        nbytes = _io_impl(type, file, buffer, size, file_offset, buffer_offset);
+        nbytes = _io_impl(type, file, buffer, size, file_offset, buffer_offset, copy_stream);
         if (nbytes < 0) {
             // Typically we should not reach this point. But in case we do, throw
             // an exception to use the fallback backend.
@@ -49,7 +49,7 @@ BackendWithFallback::io(IoType type, std::shared_ptr<IFile> file, std::shared_pt
         if (fallback_backend && is_fallback_eligible(e_ptr, nbytes) &&
             fallback_backend->score(file, buffer, size, file_offset, buffer_offset) >= 0) {
             nbytes = fallback_backend->io(type, std::move(file), std::move(buffer), size, file_offset,
-                                          buffer_offset);
+                                          buffer_offset, copy_stream);
         }
         else {
             throw;

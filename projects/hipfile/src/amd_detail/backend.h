@@ -92,7 +92,7 @@ struct Backend {
     ///
     /// @throws Hip::RuntimeError Sys::RuntimeError
     virtual ssize_t io(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer, size_t size,
-                       hoff_t file_offset, hoff_t buffer_offset);
+                       hoff_t file_offset, hoff_t buffer_offset, hipStream_t copy_stream = nullptr);
 
     /// @brief Perform a read or write operation
     ///
@@ -133,14 +133,15 @@ protected:
     ///
     /// @throws Hip::RuntimeError Sys::RuntimeError
     virtual ssize_t _io_impl(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer,
-                             size_t size, hoff_t file_offset, hoff_t buffer_offset) = 0;
+                             size_t size, hoff_t file_offset, hoff_t buffer_offset,
+                             hipStream_t copy_stream) = 0;
 };
 
 // BackendWithFallback allows for an IO to be retried automatically with a
 // different Backend in the event of an error.
 struct BackendWithFallback : public Backend {
     ssize_t io(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer, size_t size,
-               hoff_t file_offset, hoff_t buffer_offset) override final;
+               hoff_t file_offset, hoff_t buffer_offset, hipStream_t copy_stream = nullptr) override final;
 
     void async_io(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer, size_t *size_p,
                   hoff_t *file_offset_p, hoff_t *buffer_offset_p, ssize_t *bytes_transferred_p,
