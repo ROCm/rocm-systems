@@ -57,7 +57,7 @@ class basic_cached_perfetto_engine
 {
 public:
     using backend_t   = Backend;
-    using session_ptr = typename Backend::session_ptr;
+    using session_ptr = Backend::session_ptr;
 
     explicit basic_cached_perfetto_engine(engine_config cfg);
     ~basic_cached_perfetto_engine() noexcept;

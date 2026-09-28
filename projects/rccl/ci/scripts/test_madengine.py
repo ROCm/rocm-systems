@@ -357,6 +357,72 @@ def patch_madengine_for_cluster(
             template.write_text(content)
             log.info("Patched SLURM template: NFS detection now matches nfs4")
 
+    # /var/tmp is persistent and shared, so job-scope the workspace and delete
+    # it after use. Anchor-guarded: a no-op once ROCm/madengine#190 is pinned.
+    template = src / "deployment" / "templates" / "slurm" / "job.sh.j2"
+    if template.exists():
+        content = template.read_text()
+        original = content
+        patches = [
+            (
+                # Matches the /tmp branch below, job-scoped all along.
+                "multi-node workspace scoping",
+                "    WORKSPACE=$SLURM_TMPDIR/madengine_node_${SLURM_PROCID}\n",
+                "    WORKSPACE=$SLURM_TMPDIR"
+                "/madengine_job_${SLURM_JOB_ID}_node_${SLURM_PROCID}\n",
+            ),
+            (
+                # Bare SLURM_TMPDIR would rsync the project into /var/tmp.
+                "single-node workspace scoping",
+                '        WORKSPACE=$SLURM_TMPDIR\n'
+                '        WORKSPACE_TYPE="local-slurm"\n',
+                '        WORKSPACE=$SLURM_TMPDIR/madengine_job_${SLURM_JOB_ID:-$$}\n'
+                '        mkdir -p $WORKSPACE\n'
+                '        WORKSPACE_TYPE="local-slurm"\n',
+            ),
+        ]
+        # Any upstream removal of the workspace wins: #190 keeps it when the
+        # task failed or artifacts did not all copy out, and a second
+        # unconditional delete here would undo that.
+        if 'rm -rf "$WORKSPACE"' not in content:
+            patches.append(
+                (
+                    # Last in the per-node task script, so artifacts are in
+                    # $NODE_COLLECTION_DIR on shared storage by now. Only the
+                    # node-local workspace: shared-nfs is the submission dir.
+                    "node-local workspace cleanup",
+                    "\nexit $TASK_EXIT\nTASK_SCRIPT_EOF\n",
+                    "\n"
+                    "# Nothing else reclaims this on a persistent"
+                    " SLURM_TMPDIR; a failed task keeps it for the"
+                    " post-mortem.\n"
+                    'if [ $TASK_EXIT -eq 0 ] && '
+                    '[ "$WORKSPACE_TYPE" = "local-multinode" ] && '
+                    '[ -n "$WORKSPACE" ]; then\n'
+                    '    echo "Node ${SLURM_PROCID}: removing local workspace '
+                    '$WORKSPACE"\n'
+                    '    cd / && rm -rf "$WORKSPACE" || true\n'
+                    "fi\n"
+                    "\n"
+                    "exit $TASK_EXIT\n"
+                    "TASK_SCRIPT_EOF\n",
+                )
+            )
+
+        for label, old, new in patches:
+            if old not in content:
+                log.warning(
+                    "SLURM template: %s anchor not found — already patched "
+                    "upstream, or the template drifted",
+                    label,
+                )
+                continue
+            content = content.replace(old, new)
+            log.info("Patched SLURM template: %s", label)
+
+        if content != original:
+            template.write_text(content)
+
     run_orch = src / "orchestration" / "run_orchestrator.py"
     if run_orch.exists():
         content = run_orch.read_text()

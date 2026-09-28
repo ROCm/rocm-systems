@@ -599,7 +599,7 @@ static ncclResult_t IbCastResiliencyProbeProgress(struct ncclIbResiliencySend* s
 ncclResult_t IbCastResiliencyInit(struct ncclIbNetCommBase* baseComm, struct ncclIbResiliency** resCtx) {
   assert(baseComm != NULL);
   assert(resCtx != NULL);
-  if (ncclParamIbCastResiliencyPortFailover() == 0 || IbCastQpSharingEnabled()) {
+  if (IbCastByOrderRequested() ||  ncclParamIbCastResiliencyPortFailover() == 0 || IbCastQpSharingEnabled()) {
     // Resiliency and QP sharing are kept orthogonal for now: disable resiliency
     // when QP sharing is enabled.
     INFO(NCCL_NET, "NET/IB: %s: Resiliency is disabled on the %s communicator (comm=%p)%s", __func__,

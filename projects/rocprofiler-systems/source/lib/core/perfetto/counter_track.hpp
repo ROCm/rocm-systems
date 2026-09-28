@@ -63,7 +63,10 @@ counter_track<Tp>::exists(size_t _idx, std::int64_t _n)
 {
     std::lock_guard<std::mutex> _lk{ get_mutex() };
     bool                        _v = get_data().second.count(_idx) != 0;
-    if(_n < 0 || !_v) return _v;
+    if(_n < 0 || !_v)
+    {
+        return _v;
+    }
     return static_cast<size_t>(_n) < get_data().second.at(_idx).size();
 }
 
@@ -73,7 +76,10 @@ counter_track<Tp>::size(size_t _idx)
 {
     std::lock_guard<std::mutex> _lk{ get_mutex() };
     bool                        _v = get_data().second.count(_idx) != 0;
-    if(!_v) return 0;
+    if(!_v)
+    {
+        return 0;
+    }
     return get_data().second.at(_idx).size();
 }
 
