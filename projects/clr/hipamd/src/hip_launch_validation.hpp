@@ -65,6 +65,35 @@ inline bool IsClusterDivisible(const amd::NDRange32& grid, uint32_t clusterX, ui
   return (grid[0] % clusterX == 0) && (grid[1] % clusterY == 0) && (grid[2] % clusterZ == 0);
 }
 
+//! The violations that depend only on an already narrowed index space and the target device, so
+//! they can be re-derived later from an NDRangeContainer alone. Shared by the launch builders and
+//! by ihipLaunchKernel_validate, which re-runs them against the device the launch actually goes
+//! to — keeping the logic here means the two cannot drift apart.
+inline LaunchViolationBits CheckNDRangeAgainstDevice(const amd::NDRange32& global,
+                                                     const amd::NDRange16& local,
+                                                     size_t sharedMemBytes,
+                                                     const amd::Device& device) {
+  LaunchViolationBits violations = kLaunchOk;
+  const device::Info& info = device.info();
+
+  if (local.product() > info.maxWorkGroupSize_) {
+    violations |= kBlockExceedsMaxWG;
+  }
+  if (static_cast<uint32_t>(sharedMemBytes) > info.localMemSizePerCU_) {
+    violations |= kSharedMemExceedsMax;
+  }
+  if (sharedMemBytes > std::numeric_limits<uint32_t>::max()) {
+    violations |= kSharedMemOverflow;
+  }
+  if (global[0] == 0 || global[1] == 0 || global[2] == 0) {
+    violations |= kZeroGlobal;
+  }
+  if (local[0] == 0 || local[1] == 0 || local[2] == 0) {
+    violations |= kZeroBlock;
+  }
+  return violations;
+}
+
 //! Narrow the app supplied index space into \a ndrange and report every configuration violation
 //! detected while doing so. Shared by both entry styles; \a deduceGrid tells the two apart. When
 //! it is false \a grid must already hold the app supplied grid (total blocks); when it is true the
@@ -83,33 +112,16 @@ inline LaunchViolationBits BuildLaunchNDRange(amd::NDRangeContainer& ndrange, am
                               static_cast<uint8_t>(clusterZ));
   ndrange = amd::NDRangeContainer(3, amd::NDRange(0, 0, 0), global, local, cluster);
 
-  LaunchViolationBits violations = kLaunchOk;
-  const device::Info& info = device.info();
+  LaunchViolationBits violations =
+      CheckNDRangeAgainstDevice(global, local, sharedMemBytes, device);
 
-  if (local.product() > info.maxWorkGroupSize_) {
-    violations |= kBlockExceedsMaxWG;
-  }
-  if (static_cast<uint32_t>(sharedMemBytes) > info.localMemSizePerCU_) {
-    violations |= kSharedMemExceedsMax;
-  }
-  if (sharedMemBytes > std::numeric_limits<uint32_t>::max()) {
-    violations |= kSharedMemOverflow;
-  }
-
-  if (global[0] == 0 || global[1] == 0 || global[2] == 0) {
-    violations |= kZeroGlobal;
-  }
-
+  // The remaining violations need the un-narrowed inputs, so they can only be spotted here.
   if (!amd::NDRange8::CanSafelyNarrow(clusterX, clusterY, clusterZ)) {
     violations |= kClusterOverflow;
   }
 
   if (!amd::NDRange16::CanSafelyNarrow(localX, localY, localZ)) {
     violations |= kBlockOverflow;
-  }
-
-  if (local[0] == 0 || local[1] == 0 || local[2] == 0) {
-    violations |= kZeroBlock;
   }
 
   if (!amd::NDRange32::CanSafelyNarrow(globalX, globalY, globalZ)) {
