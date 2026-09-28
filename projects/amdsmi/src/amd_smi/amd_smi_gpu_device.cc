@@ -30,7 +30,6 @@ extern "C" {
 #include <vector>
 
 #include "amd_smi/impl/amd_smi_common.h"
-#include "amd_smi/impl/amd_smi_process_cache_testing.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "amd_smi/impl/fdinfo.h"
 #include "rocm_smi/rocm_smi_kfd.h"
@@ -164,6 +163,7 @@ amdsmi_status_t AMDSmiGPUDevice::amdgpu_query_cpu_affinity(std::string& cpu_affi
   return drm_.amdgpu_query_cpu_affinity(domain_bus_sstream.str(), cpu_affinity);
 }
 
+namespace {
 // cache the compute process list for the device
 struct ComputeProcessCache {
   std::unique_ptr<rsmi_process_info_t[]> list_all_processes_ptr = nullptr;
@@ -173,7 +173,6 @@ struct ComputeProcessCache {
   uint32_t num_running_processes = 0;
 };
 
-namespace {
 std::unordered_map<uint32_t, amdsmi_proc_info_t> process_info_cache_map;
 std::unordered_map<uint32_t, std::unique_ptr<ComputeProcessCache>> compute_process_cache_map;
 std::mutex compute_process_list_mutex;
@@ -182,18 +181,16 @@ static const std::chrono::milliseconds kComputeProcessCacheDuration =
 
 }  // namespace
 
-ComputeProcessCache* get_compute_process_cache(uint32_t gpu_id) {
-  std::lock_guard<std::mutex> lock(compute_process_list_mutex);
-  auto& cache = compute_process_cache_map[gpu_id];
-  if (!cache) {
-    cache = std::make_unique<ComputeProcessCache>();
-  }
-  return cache.get();
-}
-
 int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
     GPUComputeProcessList_t& compute_process_list, ComputeProcessListType_t list_type) {
-  ComputeProcessCache* cache_ptr = get_compute_process_cache(gpu_id_);
+  ComputeProcessCache* cache_ptr = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(compute_process_list_mutex);
+    if (compute_process_cache_map.find(gpu_id_) == compute_process_cache_map.end()) {
+      compute_process_cache_map[gpu_id_] = std::make_unique<ComputeProcessCache>();
+    }
+    cache_ptr = compute_process_cache_map[gpu_id_].get();
+  }
 
   /**
    *  The first call to rsmi_compute_process_info_get() to find the number of
