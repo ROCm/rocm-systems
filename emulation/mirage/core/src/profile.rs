@@ -393,6 +393,33 @@ impl ProfileDef {
             )),
         }
     }
+
+    /// The agent every GPU in this profile instantiates, when the profile
+    /// is resolved. See [`crate::emulator::EmulatorDef::agent`].
+    #[must_use]
+    pub fn agent(&self) -> Option<&crate::agent::AgentDef> {
+        self.emulator.agent()
+    }
+
+    /// The gfx target a session on this profile presents to the
+    /// workload's ROCm runtime, or `None` when there is nothing for that
+    /// runtime to recognise.
+    ///
+    /// Two things have to be true for there to be an answer: the agent
+    /// has to name a GPU, and the backend has to be one that stands a
+    /// synthetic GPU up rather than retargeting onto the host's real one
+    /// (see
+    /// [`EmulatorBackend::presents_emulated_device`](crate::emulator::EmulatorBackend::presents_emulated_device)).
+    /// `None` on every other path, including a profile whose references
+    /// have not been followed and a backend this build was not compiled
+    /// with — the callers of this are diagnostics, and a diagnostic that
+    /// guesses is worse than one that stays quiet.
+    #[must_use]
+    pub fn emulated_gfx_target(&self) -> Option<crate::hardware::GfxTarget> {
+        let backend = crate::emulator::get_emulator_backend(&self.emulator.emulator)?;
+        backend.presents_emulated_device().then_some(())?;
+        self.agent()?.gfx_target()
+    }
 }
 
 #[cfg(test)]

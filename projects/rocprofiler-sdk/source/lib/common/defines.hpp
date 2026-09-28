@@ -68,6 +68,10 @@
 #define ROCPROFILER_COMPUTE_VERSION(MAJOR, MINOR, PATCH)                                           \
     ROCPROFILER_SDK_COMPUTE_VERSION(MAJOR, MINOR, PATCH)
 
+#define ROCPROFILER_GFXIP_MAJOR(V)    (((V) / 10000) % 100)
+#define ROCPROFILER_GFXIP_MINOR(V)    (((V) / 100) % 100)
+#define ROCPROFILER_GFXIP_STEPPING(V) ((V) % 100)
+
 // Below are used in HSA, HIP, and Marker API tracing
 #define IMPL_DETAIL_EXPAND(X) X
 #define IMPL_DETAIL_FOR_EACH_NARG(...)                                                             \

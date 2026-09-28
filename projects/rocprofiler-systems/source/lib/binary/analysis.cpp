@@ -65,7 +65,10 @@ parse_line_info(const std::string& _name, bool _process_dwarf, bool _process_bfd
         auto  _processed   = std::set<uintptr_t>{};
         for(auto&& itr : _bfd->get_symbols())
         {
-            if(!_include_all && itr.symsize == 0) continue;
+            if(!_include_all && itr.symsize == 0)
+            {
+                continue;
+            }
             auto& _sym = _info.symbols.emplace_back(symbol{ itr });
             // if(itr.symsize == 0) continue;
             auto* _section = static_cast<asection*>(itr.section);
@@ -73,7 +76,10 @@ parse_line_info(const std::string& _name, bool _process_dwarf, bool _process_bfd
             _processed.emplace(itr.address);
             _info.ranges.emplace_back(
                 address_range{ itr.address, itr.address + itr.symsize });
-            if(_process_bfd) _sym.read_bfd_line_info(*_bfd);
+            if(_process_bfd)
+            {
+                _sym.read_bfd_line_info(*_bfd);
+            }
         }
 
         for(auto* itr : _section_set)
@@ -122,7 +128,10 @@ get_binary_info(const std::vector<std::string>&  _files,
         {
             // if the filter is for the specified scope and itr does not satisfy the
             // include/exclude mode, return false
-            if((itr.scope & _scope) == _scope && !itr(_value)) return false;
+            if((itr.scope & _scope) == _scope && !itr(_value))
+            {
+                return false;
+            }
         }
         return true;
     };
@@ -135,7 +144,10 @@ get_binary_info(const std::vector<std::string>&  _files,
     // ensures that we do not process rocprof-sys/gotcha/libunwind libraries
     // and do not process the libraries outside of the binary scope
     auto _filter = [&_satisfies_binary_filter](const procfs::maps& _v) {
-        if(_v.pathname.empty()) return false;
+        if(_v.pathname.empty())
+        {
+            return false;
+        }
         auto _path = path::realpath(_v.pathname);
         return (path::is_regular_file(_path) && _satisfies_binary_filter(_path));
     };
@@ -163,7 +175,12 @@ get_binary_info(const std::vector<std::string>&  _files,
     for(auto& itr : _data)
     {
         for(const auto& mitr : _maps)
-            if(itr.bfd->name == mitr.pathname) itr.mappings.emplace_back(mitr);
+        {
+            if(itr.bfd->name == mitr.pathname)
+            {
+                itr.mappings.emplace_back(mitr);
+            }
+        }
     }
 
     for(auto& itr : _data)
@@ -174,13 +191,18 @@ get_binary_info(const std::vector<std::string>&  _files,
             for(auto& sitr : itr.symbols)
             {
                 auto _addr = sitr.address + mitr.load_address;
-                if(mrange.contains(_addr)) sitr.load_address = mitr.load_address;
+                if(mrange.contains(_addr))
+                {
+                    sitr.load_address = mitr.load_address;
+                }
             }
         }
     }
 
     for(auto& itr : _data)
+    {
         itr.sort();
+    }
 
     return _data;
 }
@@ -218,24 +240,39 @@ lookup_ipaddr_entry(uintptr_t _addr, unw_context_t* _context_p,
             };
 
             for(const auto& itr : binary::get_link_map("librocprof-sys.so", "", ""))
+            {
                 _insert_exclude_range(itr.real());
+            }
 
             for(const auto& itr : binary::get_link_map("librocprof-sys-dl.so", "", ""))
+            {
                 _insert_exclude_range(itr.real());
+            }
 
             return _exclude_range_v;
         }();
 
         for(auto itr : _exclude_range)
-            if(itr.contains(_addr)) return std::optional<tim::unwind::processed_entry>{};
+        {
+            if(itr.contains(_addr))
+            {
+                return std::optional<tim::unwind::processed_entry>{};
+            }
+        }
     }
 
     // NOLINTNEXTLINE(readability-misleading-indentation)
-    if(_addr == 0) return std::optional<tim::unwind::processed_entry>{};
+    if(_addr == 0)
+    {
+        return std::optional<tim::unwind::processed_entry>{};
+    }
 
     auto _lk = locking::atomic_lock{ _mutex, std::defer_lock };
 
-    if(!_context_p) _context_p = &_context_v;
+    if(!_context_p)
+    {
+        _context_p = &_context_v;
+    }
     if(!_cache_p)
     {
         _cache_p = &_cache_v;
@@ -248,7 +285,10 @@ lookup_ipaddr_entry(uintptr_t _addr, unw_context_t* _context_p,
     auto citr = _cache_p->entries.find(_entry);
     if(citr != _cache_p->entries.end())
     {
-        if(citr->second.error == 0) return citr->second;
+        if(citr->second.error == 0)
+        {
+            return citr->second;
+        }
         return std::optional<tim::unwind::processed_entry>{};
     }
 

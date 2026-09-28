@@ -82,8 +82,14 @@ public:
     static void OnTracePacket(InterceptorContext context)
     {
         auto& tls = context.GetThreadLocalState();
-        if(tls.engine == nullptr || tls.collect == nullptr) return;
-        if(tls.pid < 0) return;  // emitter never called set_emitting_pid
+        if(tls.engine == nullptr || tls.collect == nullptr)
+        {
+            return;
+        }
+        if(tls.pid < 0)
+        {
+            return;  // emitter never called set_emitting_pid
+        }
 
         // Primary safety: parser threads join via post_processor::run_multithreaded
         // before cached_perfetto_session destructs the engine. The reload below
@@ -91,7 +97,10 @@ public:
         // different engine since this thread's TLS cached the pointer, refuse
         // the dereference so a hypothetical TLS-cache-outlives-engine race
         // degrades into a dropped packet rather than UAF.
-        if(g_active_cached_engine.load(std::memory_order_acquire) != tls.engine) return;
+        if(g_active_cached_engine.load(std::memory_order_acquire) != tls.engine)
+        {
+            return;
+        }
 
         tls.collect(tls.engine, tls.pid, context.packet_data.data,
                     context.packet_data.size);
@@ -137,7 +146,9 @@ make_tracing_error_callback()
 {
     return [](::perfetto::TracingError err) {
         if(err.code == ::perfetto::TracingError::kTracingFailed)
+        {
             LOG_WARNING("Perfetto encountered a tracing error: {}", err.message);
+        }
     };
 }
 
@@ -160,11 +171,17 @@ build_engine_config_from_settings()
 
     const auto& backend = config::get_perfetto_backend();
     if(backend == "system")
+    {
         out.backend = engine_config::backend_t::system;
+    }
     else if(backend == "all")
+    {
         out.backend = engine_config::backend_t::all;
+    }
     else
+    {
         out.backend = engine_config::backend_t::inprocess;
+    }
 
     const auto& disabled = config::get_disabled_categories();
     out.disabled_categories.assign(disabled.begin(), disabled.end());
@@ -210,7 +227,10 @@ clear_active_cached_engine(void* expected, void** observed) noexcept
     {
         g_active_cached_collect.store(nullptr, std::memory_order_release);
     }
-    if(observed != nullptr) *observed = local_expected;
+    if(observed != nullptr)
+    {
+        *observed = local_expected;
+    }
     return cleared;
 }
 
@@ -224,12 +244,18 @@ perfetto_sdk_backend::init_sdk(const engine_config& cfg) const
         args.shmem_size_hint_kb = cfg.shmem_size_hint_kb;
 
         if(cfg.backend != engine_config::backend_t::inprocess)
+        {
             args.backends |= ::perfetto::kSystemBackend;
+        }
         if(cfg.backend != engine_config::backend_t::system)
+        {
             args.backends |= ::perfetto::kInProcessBackend;
+        }
 
         if(cfg.suppress_sdk_log_output)
+        {
             args.log_message_callback = [](::perfetto::base::LogMessageCallbackArgs) {};
+        }
 
         ::perfetto::Tracing::Initialize(args);
         ::perfetto::TrackEvent::Register();
@@ -261,7 +287,10 @@ perfetto_sdk_backend::start_cached_session(const engine_config& cfg) const
 void
 perfetto_sdk_backend::flush_and_stop(session_ptr& session) const
 {
-    if(!session) return;
+    if(!session)
+    {
+        return;
+    }
     session_backend backend{};
     rocprofsys::core::flush_and_stop_session(backend, *session);
 }
@@ -277,7 +306,9 @@ set_emitting_pid(int pid) noexcept
         {
             auto it = g_pid_owner_tids.find(t_emitting_pid);
             if(it != g_pid_owner_tids.end() && it->second == self)
+            {
                 g_pid_owner_tids.erase(it);
+            }
         }
         if(pid >= 0)
         {

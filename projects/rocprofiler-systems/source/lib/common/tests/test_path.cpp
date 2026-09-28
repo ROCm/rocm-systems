@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 #include "common/path.hpp"
-#include "filesystem.hpp"
 
 #include <array>
+#include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
 #include <string>
@@ -34,9 +34,12 @@ protected:
 
     void cleanup_temp_dir(const std::string& dir)
     {
-        if(dir.empty()) return;
+        if(dir.empty())
+        {
+            return;
+        }
         std::error_code ec;
-        test_common::fs::remove_all(dir, ec);
+        std::filesystem::remove_all(dir, ec);
     }
 
     std::string create_file(const std::string& name, const std::string& content = "test")

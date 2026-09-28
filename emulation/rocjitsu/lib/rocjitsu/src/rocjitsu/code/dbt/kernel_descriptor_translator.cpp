@@ -360,14 +360,16 @@ descriptor_vgpr_granularity_for_wavefront(rj_code_arch_t arch, uint32_t wavefron
 // Kernel-entry prologue construction.
 // -----------------------------------------------------------------------------
 
-void append_salu_write(std::vector<uint32_t> &words, uint32_t word, rj_code_arch_t host_arch) {
+void append_rdna4_salu_write(std::vector<uint32_t> &words, uint32_t word) {
   words.push_back(word);
   // The prologue feeds the original kernel entry, whose first few instructions
   // may immediately consume these SGPRs. GFX12 needs an explicit ALU delay for
   // scalar producer/consumer dependencies; entry prologues bypass the normal
   // instruction-level HazardTracker, so serialize each injected scalar write
   // before the patcher appends the branch back to the original entry.
-  words.push_back(build_s_delay_alu(kDelayAluSaluDep1, host_arch));
+  constexpr auto delay = build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4);
+  static_assert(delay.succeeded());
+  words.push_back(delay.value());
 }
 
 void append_rdna4_workgroup_grid_prologue(std::vector<uint32_t> &words, const KD &desc,
@@ -378,30 +380,27 @@ void append_rdna4_workgroup_grid_prologue(std::vector<uint32_t> &words, const KD
   const int16_t sgpr_wg_id_z = workgroup_id_sgpr(desc, 2, guest_arch);
 
   if (sgpr_wg_id_x >= 0) {
-    append_salu_write(words,
-                      build_s_mov_b32(static_cast<uint16_t>(sgpr_wg_id_x),
-                                      ttmp_scalar_operand(kTtmpRdna4GridX), host_arch),
-                      host_arch);
+    append_rdna4_salu_write(words,
+                            build_s_mov_b32(static_cast<uint16_t>(sgpr_wg_id_x),
+                                            ttmp_scalar_operand(kTtmpRdna4GridX), host_arch));
   }
 
   if (sgpr_wg_id_y >= 0) {
     const auto sgpr_y = static_cast<uint16_t>(sgpr_wg_id_y);
     // RDNA4 packs GridY into TTMP7[15:0]. Preserve CDNA's 32-bit SGPR contract
     // by zero-extending the low half without needing an extra temporary SGPR.
-    append_salu_write(words,
-                      build_s_mov_b32(sgpr_y, ttmp_scalar_operand(kTtmpRdna4GridYz), host_arch),
-                      host_arch);
-    append_salu_write(words, build_s_lshl_b32(sgpr_y, sgpr_y, shift16, host_arch), host_arch);
-    append_salu_write(words, build_s_lshr_b32(sgpr_y, sgpr_y, shift16, host_arch), host_arch);
+    append_rdna4_salu_write(
+        words, build_s_mov_b32(sgpr_y, ttmp_scalar_operand(kTtmpRdna4GridYz), host_arch));
+    append_rdna4_salu_write(words, build_s_lshl_b32(sgpr_y, sgpr_y, shift16, host_arch));
+    append_rdna4_salu_write(words, build_s_lshr_b32(sgpr_y, sgpr_y, shift16, host_arch));
   }
 
   if (sgpr_wg_id_z >= 0) {
     const auto sgpr_z = static_cast<uint16_t>(sgpr_wg_id_z);
     // RDNA4 packs GridZ into TTMP7[31:16]. CDNA code expects that value in its
     // descriptor-selected workgroup_id_z SGPR.
-    append_salu_write(
-        words, build_s_lshr_b32(sgpr_z, ttmp_scalar_operand(kTtmpRdna4GridYz), shift16, host_arch),
-        host_arch);
+    append_rdna4_salu_write(
+        words, build_s_lshr_b32(sgpr_z, ttmp_scalar_operand(kTtmpRdna4GridYz), shift16, host_arch));
   }
 }
 

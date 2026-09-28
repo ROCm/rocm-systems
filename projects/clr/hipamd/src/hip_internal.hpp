@@ -104,10 +104,16 @@ const char* ihipGetErrorName(hipError_t hip_error);
 } // namespace hip
 
 #if defined(__GNUC__) || defined(__clang__)
-extern "C" __attribute__((visibility("default"))) void __hipOnError(const void *err_info);
+#define HIP_PUBLIC_API extern "C" __attribute__((visibility("default")))
+#define HIP_INTERNAL_EXPORTED_API extern "C" __attribute__((visibility("default")))
 #else
-extern "C" void __hipOnError(const void *err_info);
+// MSVC could have use __declspec(dllexport), but we'll see a redeclaration
+// warning. Let's just rely on the .def file under MSVC.
+#define HIP_PUBLIC_API extern "C"
+#define HIP_INTERNAL_EXPORTED_API extern "C"
 #endif
+
+HIP_PUBLIC_API void __hipOnError(const void *err_info);
 
 // Helper: set up TLS device pointer on first use.
 #define HIP_INIT_TLS_DEVICE()                                                                      \

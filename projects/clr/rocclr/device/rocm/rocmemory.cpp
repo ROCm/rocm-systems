@@ -1274,9 +1274,15 @@ bool Buffer::ExportHandle(void* handle) const {
 }
 
 // ================================================================================================
-bool Buffer::GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handle) {
+bool Buffer::GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handle,
+                               unsigned long long flags) {
   int dmabuffd = -1;
   size_t offset = 0;
+
+  uint64_t dmabuf_mapping_type = HSA_AMD_DMABUF_MAPPING_TYPE_NONE;
+  if ((flags & amd::MemRangeDmaBufMappingTypePcie) != 0) {
+    dmabuf_mapping_type = HSA_AMD_DMABUF_MAPPING_TYPE_PCIE;
+  }
 
   // In case of vmm, we use a different set of APIs for retrieving the dmabuffd.
   if (vmm) {
@@ -1291,7 +1297,7 @@ bool Buffer::GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handl
     }
 
     // Now, retrieve the shareable handle (fd in linux) for the phys_mem handle.
-    hsa_status = Hsa::vmem_export_shareable_handle(&dmabuffd, mem_handle, 0);
+    hsa_status = Hsa::vmem_export_shareable_handle(&dmabuffd, mem_handle, dmabuf_mapping_type);
 
     // hsa_amd_vmem_retain_alloc_handle() must be balanced by hsa_amd_vmem_handle_release(),
     // regardless of whether the export above succeeded. A successfully exported dmabuf fd
@@ -1317,7 +1323,8 @@ bool Buffer::GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handl
     }
   } else {
     // Retrieve a shareable handle for the device ptr.
-    hsa_status_t hsa_status = Hsa::portable_export_dmabuf(dev_ptr, size, &dmabuffd, &offset);
+    hsa_status_t hsa_status = Hsa::portable_export_dmabuf_v2(dev_ptr, size, &dmabuffd,
+                                                             &offset, dmabuf_mapping_type);
     if (hsa_status != HSA_STATUS_SUCCESS) {
       LogPrintfError(
           "Cannot export a portable fd for dev_ptr: 0x%x with size: %lu,"

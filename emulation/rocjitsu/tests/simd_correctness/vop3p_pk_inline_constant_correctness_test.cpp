@@ -104,7 +104,7 @@ struct Fixture {
     if (decoded.failed())
       return {};
     std::unique_ptr<Instruction> inst = std::move(decoded).value();
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
     std::array<uint32_t, WF_SIZE> out{};
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
       out[lane] = cu->read_vgpr(vb + kDstVgpr, lane);
@@ -314,6 +314,8 @@ TEST(Vop3pPkInlineConstantCorrectness, AddF16LiteralValuedLikeInlineConstantIsVe
   Fixture fx(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(fx.cu, nullptr);
   ASSERT_NE(fx.wf, nullptr);
+  // The literal is a half subnormal; preserve inputs for this source-decoding test.
+  fx.wf->set_mode_raw(0xf0);
   const auto out = fx.run(words.data(), 0x08000800u);
   expect_all_active(out, 0x08790879u, "v_pk_add_f16 v4, v0, lit(0xF2) op_sel_hi:[1,0]");
 }

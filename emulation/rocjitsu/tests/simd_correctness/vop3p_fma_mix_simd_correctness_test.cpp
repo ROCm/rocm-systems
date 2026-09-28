@@ -297,7 +297,7 @@ template <uint32_t WF_SIZE, int ArchTag> struct Fixture {
   std::array<uint32_t, WF_SIZE> run(Instruction *inst, uint32_t rot, bool widen0, bool widen1,
                                     bool widen2, uint64_t exec, uint32_t dst_seed) {
     seed_vgprs(rot, widen0, widen1, widen2, exec, dst_seed);
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     std::array<uint32_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)

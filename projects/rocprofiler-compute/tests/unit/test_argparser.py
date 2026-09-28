@@ -116,6 +116,48 @@ def test_config_dir_requires_value(capsys):
     assert "--config-dir" in capsys.readouterr().err
 
 
+# =============================================================================
+# profile -d / --output-directory
+# =============================================================================
+
+
+@pytest.mark.parametrize("flag", ["-d", "--output-directory"])
+def test_profile_output_directory(flag):
+    args = build_args(["profile", flag, "/tmp/out", "--", "./vcopy"])
+    assert args.output_directory == "/tmp/out"
+
+
+# =============================================================================
+# profile --kernel-iteration-range
+# =============================================================================
+
+
+def test_profile_kernel_iteration_range():
+    args = build_args([
+        "profile",
+        "--kernel-iteration-range",
+        "1",
+        "3:5",
+        "--",
+        "./vcopy",
+    ])
+    assert args.kernel_iteration_range == ["1", "3:5"]
+
+
+# =============================================================================
+# analyze --verify-deps
+# =============================================================================
+
+
+def test_analyze_verify_deps_defaults_off():
+    assert build_args(["analyze", "-p", "/tmp/workload"]).verify_deps is False
+
+
+def test_analyze_verify_deps_needs_no_workload():
+    """The flag is a standalone environment check, so -p stays optional."""
+    assert build_args(["analyze", "--verify-deps"]).verify_deps is True
+
+
 def test_pc_sampling_analyze_options():
     """Defaults, overrides, and validation for the analyze PC sampling options."""
     defaults = build_args(["analyze"])

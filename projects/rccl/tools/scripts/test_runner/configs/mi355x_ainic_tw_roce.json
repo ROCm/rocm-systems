@@ -173,9 +173,56 @@
           "test_filter": "NetIbMPITest.MultipleSequentialTransfers"
         },
         {
+          "name": "A17_NetIB_MultiThread_SendRecvMultipleSizes",
+          "description": "Concurrent workers each walk the size ladder on an independent connection.",
+          "test_filter": "NetIbMPITest.SendRecvMultipleSizes"
+        },
+        {
+          "name": "A17_NetIB_MultiThread_LongRunningEndurance",
+          "description": "Concurrent workers each run a long transfer loop, so a leak or a slow drift shows up.",
+          "test_filter": "NetIbMPITest.LongRunningEndurance"
+        },
+        {
+          "name": "A17_NetIB_MultiThread_MemoryRegistrationStorm",
+          "description": "Concurrent register/deregister storms contend on the shared per-device MR cache.",
+          "test_filter": "NetIbMPITest.MemoryRegistrationStorm"
+        },
+        {
+          "name": "A17_NetIB_MultiThread_MrCacheRefCount",
+          "description": "All workers register the same address, contending on one cache entry's refcount.",
+          "test_filter": "NetIbMPITest.MrCacheRefCount"
+        },
+        {
           "name": "A17_NetIB_MultiThread_ProgressDoesNotSerialize",
           "description": "Gate: concurrent workers must progress at the same time. Catches a lock held across a progress call, which functional tests pass straight through.",
           "test_filter": "NetIbMPITest.ThreadedProgressDoesNotSerialize"
+        }
+      ]
+    },
+
+    "cast_grh": {
+      "extends": "cast_base",
+      "description": "GRH/GID addressing on the CAST path.",
+      "tests": [
+        {
+          "name": "A20_Cast_GrhSetOnRoceQp",
+          "description": "RoCE QPs use global (GRH/GID) addressing: is_global=1 read back from the driver via ibv_query_qp on every RoCE QP, plus a data-integrity send/recv.",
+          "test_filter": "NetIbMPITest.CastGrhSetOnRoceQp"
+        }
+      ]
+    },
+
+    "cast_subnet_routing": {
+      "extends": "cast_base",
+      "description": "NCCL_IB_SUBNET_AWARE_ROUTING=1 smoke test on single-subnet hardware.",
+      "env_variables": {
+        "NCCL_IB_SUBNET_AWARE_ROUTING": "1"
+      },
+      "tests": [
+        {
+          "name": "A19_Cast_SubnetAwareRoutingSameSubnet",
+          "description": "Exercises the default-device-matches-peer-subnet fast path in IbCastFindDevBySubnet plus a data-integrity send/recv.",
+          "test_filter": "NetIbMPITest.CastSubnetAwareRoutingSameSubnet"
         }
       ]
     },
@@ -245,6 +292,57 @@
       ]
     },
 
+    "cast_by_order_no_cts": {
+      "extends": "gtest_base",
+      "timeout": 600,
+      "description": "Software BY_ORDER receive matching with CTS offload forced off (the no-offload arm). QP scheduler off so TX fan-out stays at base nqps. QPS=4 / splitData=0 covers FIFO matching across QPs.",
+      "env_variables": {
+        "NCCL_NET": "ib-cast",
+        "RCCL_CTS_OFFLOAD_ENABLED": "0",
+        "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME": "2",
+        "RCCL_IB_QP_SCHED_ENABLE": "0",
+        "NCCL_IB_QPS_PER_CONNECTION": "4",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "0"
+      },
+      "tests": [
+        {
+          "name": "A18_ByOrder_NoCts_SimpleSendRecv",
+          "description": "Basic send/recv on software BY_ORDER with CTS offload off.",
+          "test_filter": "NetIbMPITest.SimpleSendRecv"
+        },
+        {
+          "name": "A18_ByOrder_NoCts_MultipleSizes",
+          "description": "Size ladder on software BY_ORDER with CTS offload off.",
+          "test_filter": "NetIbMPITest.SendRecvMultipleSizes"
+        },
+        {
+          "name": "A18_ByOrder_NoCts_LargeTransfer",
+          "description": "Large transfer on software BY_ORDER with CTS offload off.",
+          "test_filter": "NetIbMPITest.LargeTransfer"
+        },
+        {
+          "name": "A18_ByOrder_NoCts_MultipleOutstanding",
+          "description": "Multiple in-flight send/recv on software BY_ORDER with CTS offload off.",
+          "test_filter": "NetIbMPITest.MultipleOutstandingSendRecv"
+        },
+        {
+          "name": "A18_ByOrder_NoCts_MultiRecv",
+          "description": "irecv batching matched by posted WR identity (software BY_ORDER, no CTS offload).",
+          "test_filter": "NetIbMPITest.MultiRecv"
+        },
+        {
+          "name": "A18_ByOrder_NoCts_MultiRecvShuffled",
+          "description": "Shuffled irecv slots: wr_id is the request index, not the CTS slot (software BY_ORDER, no CTS offload).",
+          "test_filter": "NetIbMPITest.MultiRecvShuffled"
+        },
+        {
+          "name": "A18_ByOrder_NoCts_FlushAfterRecv",
+          "description": "GDR flush after recv hits the BY_ORDER IBV_WC_RDMA_READ completion arm (skipped if GDR unavailable).",
+          "test_filter": "NetIbMPITest.FlushAfterRecv"
+        }
+      ]
+    },
+
     "bootstrap_socket_poll": {
       "extends": "gtest_base",
       "binary": "rccl-UnitTestsFixturesDebug",
@@ -258,6 +356,53 @@
           "name": "A16_Socket_BootstrapPollNoBusyLoop",
           "description": "With NCCL_SOCKET_POLL_TIMEOUT_MSEC set, a receiver blocked on a slow peer sleeps in poll() (low CPU); the control case with the param at 0 reproduces the pre-fix busy loop (high CPU).",
           "test_filter": "SocketPollTimeout.*"
+        }
+      ]
+    },
+
+    "net_ib_cast_plane_subnet": {
+      "extends": "gtest_base",
+      "binary": "rccl-UnitTestsFixturesDebug",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 120,
+      "description": "Pure host-side unit tests for CAST plane-index dedup and subnet-aware-routing GID compare helpers. Synthetic GIDs, no MPI/verbs/NIC required.",
+      "tests": [
+        {
+          "name": "A18_GetPlaneIndexDedup",
+          "description": "IbCastGetPlaneIndex dedups plane IDs into a compact index space.",
+          "test_filter": "NetIbCastPlaneRail.GetPlaneIndexDedup"
+        },
+        {
+          "name": "A18_GetPlaneIndexRejectsVirtBit",
+          "description": "IbCastGetPlaneIndex rejects plane IDs with the VIRT_BIT set.",
+          "test_filter": "NetIbCastPlaneRail.GetPlaneIndexRejectsVirtBit"
+        },
+        {
+          "name": "A18_GetPlaneIndexNullArgs",
+          "description": "IbCastGetPlaneIndex rejects null count/planes/idx arguments.",
+          "test_filter": "NetIbCastPlaneRail.GetPlaneIndexNullArgs"
+        },
+        {
+          "name": "A18_GidSameSubnetIPv4",
+          "description": "gidSameSubnet IPv4 prefix-length matching.",
+          "test_filter": "NetIbCastSubnet.GidSameSubnetIPv4"
+        },
+        {
+          "name": "A18_GidSameSubnetIPv6",
+          "description": "gidSameSubnet IPv6 prefix-length matching.",
+          "test_filter": "NetIbCastSubnet.GidSameSubnetIPv6"
+        },
+        {
+          "name": "A18_GidSameSubnetFamilyMismatch",
+          "description": "gidSameSubnet rejects AF_INET vs AF_INET6 comparisons.",
+          "test_filter": "NetIbCastSubnet.GidSameSubnetFamilyMismatch"
+        },
+        {
+          "name": "A18_SubnetMatchesAny",
+          "description": "subnetMatchesAny skips invalid/zero GIDs and matches against the remaining set.",
+          "test_filter": "NetIbCastSubnet.SubnetMatchesAny"
         }
       ]
     },
@@ -464,10 +609,14 @@
     { "config": "cts_on_depth32",        "enabled": true, "smoke": true },
     { "config": "cast_wrr",              "enabled": true, "smoke": true },
     { "config": "cast_fault_injection",  "enabled": true, "smoke": true },
+    { "config": "cast_by_order_no_cts",  "enabled": true, "smoke": true },
+    { "config": "cast_grh",              "enabled": true, "smoke": true },
+    { "config": "cast_subnet_routing",   "enabled": true, "smoke": true },
     { "config": "gin_proxy",             "enabled": true, "smoke": true },
     { "config": "gin_enable_gate",       "enabled": true },
     { "config": "gin_ainic_backend",     "enabled": true },
     { "config": "bootstrap_socket_poll", "enabled": true, "smoke": true },
+    { "config": "net_ib_cast_plane_subnet", "enabled": true, "smoke": true },
     { "config": "a_netib_multithread",   "enabled": true, "smoke": true },
 
     { "config": "ib_baseline",           "enabled": true, "smoke": true },
