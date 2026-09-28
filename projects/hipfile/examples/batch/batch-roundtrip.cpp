@@ -49,14 +49,14 @@
 namespace {
 
 // Size to copy with each IO
-constexpr size_t BATCH_IO_SIZE = BLOCK_ALIGN;
+constexpr size_t BATCH_IO_SIZE{BLOCK_ALIGN};
 
 // Maximum queue size for a batch context
-constexpr unsigned MAX_BATCH_SIZE = 128;
+constexpr unsigned MAX_BATCH_SIZE{128};
 
 struct BatchCookie {
-    size_t chunk_index;
-    size_t expected_bytes;
+    size_t chunk_index{};
+    size_t expected_bytes{};
 };
 
 struct BatchRequest {
@@ -71,7 +71,7 @@ Integral
 parse_integral(std::string_view text)
 {
     Integral    value{};
-    const char *end    = text.data() + text.size();
+    const char *end{text.data() + text.size()};
     const auto  result = std::from_chars(text.data(), end, value, 10);
     if (result.ec != std::errc{} || result.ptr != end) {
         throw std::invalid_argument{"Invalid integral"};
@@ -96,10 +96,10 @@ void
 configure_request(BatchRequest &request, size_t chunk_index, hipFileHandle_t file_handle,
                   hipFileOpcode_t opcode, void *device_buffer, size_t payload_size)
 {
-    const size_t operation_offset = chunk_index * BATCH_IO_SIZE;
-    const size_t bytes_remaining  = payload_size - std::min(payload_size, operation_offset);
-    const size_t expected_bytes =
-        opcode == hipFileBatchRead ? std::min(bytes_remaining, BATCH_IO_SIZE) : BATCH_IO_SIZE;
+    const size_t operation_offset{chunk_index * BATCH_IO_SIZE};
+    const size_t bytes_remaining{payload_size - std::min(payload_size, operation_offset)};
+    const size_t expected_bytes{opcode == hipFileBatchRead ? std::min(bytes_remaining, BATCH_IO_SIZE)
+                                                           : BATCH_IO_SIZE};
 
     if (request.cookie == nullptr)
         request.cookie = std::make_unique<BatchCookie>();
@@ -122,12 +122,12 @@ int
 run_batch_phase(hipFileBatchHandle_t batch_handle, hipFileHandle_t file_handle, hipFileOpcode_t opcode,
                 void *device_buffer, size_t payload_size, unsigned batch_capacity)
 {
-    const char  *op_name         = operation_name(opcode);
-    const size_t operation_count = align_up(payload_size, BATCH_IO_SIZE) / BATCH_IO_SIZE;
-    const size_t request_count   = std::min(operation_count, static_cast<size_t>(batch_capacity));
+    const char  *op_name{operation_name(opcode)};
+    const size_t operation_count{align_up(payload_size, BATCH_IO_SIZE) / BATCH_IO_SIZE};
+    const size_t request_count{std::min(operation_count, static_cast<size_t>(batch_capacity))};
 
     std::vector<BatchRequest> requests(request_count);
-    size_t                    next_chunk = 0;
+    size_t                    next_chunk{0};
     for (auto &request : requests) {
         configure_request(request, next_chunk, file_handle, opcode, device_buffer, payload_size);
         ++next_chunk;
@@ -136,11 +136,11 @@ run_batch_phase(hipFileBatchHandle_t batch_handle, hipFileHandle_t file_handle, 
     std::vector<hipFileIOEvents_t> events(batch_capacity);
     std::vector<hipFileIOParams_t> submissions;
     submissions.reserve(batch_capacity);
-    size_t in_flight = 0;
+    size_t in_flight{0};
 
     while (!requests.empty()) {
         submissions.clear();
-        const size_t available = static_cast<size_t>(batch_capacity) - in_flight;
+        const size_t available{static_cast<size_t>(batch_capacity) - in_flight};
         for (auto &request : requests) {
             if (submissions.size() == available)
                 break;
@@ -161,7 +161,7 @@ run_batch_phase(hipFileBatchHandle_t batch_handle, hipFileHandle_t file_handle, 
             in_flight += submissions.size();
         }
 
-        unsigned             nr = batch_capacity;
+        unsigned             nr{batch_capacity};
         const hipFileError_t hipfile_err =
             hipFileBatchIOGetStatus(batch_handle, /*min_nr=*/1, &nr, events.data(), /*timeout=*/nullptr);
         if (hipFileSuccess != hipfile_err.err) {
@@ -174,7 +174,7 @@ run_batch_phase(hipFileBatchHandle_t batch_handle, hipFileHandle_t file_handle, 
             return 1;
         }
 
-        for (unsigned i = 0; i < nr; ++i) {
+        for (unsigned i{0}; i < nr; ++i) {
             const hipFileIOEvents_t &event = events[i];
             const auto request = std::find_if(requests.begin(), requests.end(), [&event](const auto &entry) {
                 return event.cookie == entry.cookie.get();
@@ -183,7 +183,7 @@ run_batch_phase(hipFileBatchHandle_t batch_handle, hipFileHandle_t file_handle, 
                 fprintf(stderr, "%s batch returned an unknown cookie\n", op_name);
                 return 1;
             }
-            const BatchCookie *cookie = request->cookie.get();
+            const BatchCookie *cookie{request->cookie.get()};
             if (event.status != hipFileComplete) {
                 fprintf(stderr, "%s batch request %zu failed: status=%d ret=%zd\n", op_name,
                         cookie->chunk_index, static_cast<int>(event.status), static_cast<ssize_t>(event.ret));
@@ -221,10 +221,10 @@ main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
-    const char *read_path  = argv[1];
-    const char *write_path = argv[2];
+    const char *read_path{argv[1]};
+    const char *write_path{argv[2]};
 
-    size_t payload_size;
+    size_t payload_size{};
     try {
         payload_size = parse_integral<size_t>(argv[3]);
     }
@@ -237,7 +237,7 @@ main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
-    unsigned batch_capacity;
+    unsigned batch_capacity{};
     try {
         batch_capacity = parse_integral<unsigned>(argv[4]);
     }
@@ -250,7 +250,7 @@ main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
-    unsigned gpu_id = 0;
+    unsigned gpu_id{0};
     if (argc == 6) {
         try {
             gpu_id = parse_integral<unsigned>(argv[5]);
@@ -270,18 +270,18 @@ main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
-    const size_t buffer_size = align_up(payload_size, BATCH_IO_SIZE);
+    const size_t buffer_size{align_up(payload_size, BATCH_IO_SIZE)};
 
-    int                  read_fd = -1, write_fd = -1;
-    hipFileHandle_t      read_handle = nullptr, write_handle = nullptr;
-    hipFileBatchHandle_t batch_handle     = nullptr;
-    bool                 read_handle_open = false, write_handle_open = false;
-    void                *device_buffer     = nullptr;
-    bool                 buffer_registered = false;
-    int                  exit_status       = EXIT_FAILURE;
+    int                  read_fd{-1}, write_fd{-1};
+    hipFileHandle_t      read_handle{nullptr}, write_handle{nullptr};
+    hipFileBatchHandle_t batch_handle{nullptr};
+    bool                 read_handle_open{false}, write_handle_open{false};
+    void                *device_buffer{nullptr};
+    bool                 buffer_registered{false};
+    int                  exit_status{EXIT_FAILURE};
     hipFileError_t       hipfile_err{};
 
-    hipError_t hip_err = hipSetDevice(static_cast<int>(gpu_id));
+    hipError_t hip_err{hipSetDevice(static_cast<int>(gpu_id))};
     if (hipSuccess != hip_err) {
         fprintf(stderr, "Could not select GPU %u (%d)\n", gpu_id, hip_err);
         return EXIT_FAILURE;
@@ -342,24 +342,24 @@ main(int argc, char *argv[])
     }
 
     {
-        const int close_status = close_file(write_path, write_fd, write_handle);
-        write_fd               = -1;
-        write_handle           = nullptr;
-        write_handle_open      = false;
+        const int close_status{close_file(write_path, write_fd, write_handle)};
+        write_fd          = -1;
+        write_handle      = nullptr;
+        write_handle_open = false;
         if (close_status)
             goto cleanup;
     }
     {
-        const int close_status = close_file(read_path, read_fd, read_handle);
-        read_fd                = -1;
-        read_handle            = nullptr;
-        read_handle_open       = false;
+        const int close_status{close_file(read_path, read_fd, read_handle)};
+        read_fd          = -1;
+        read_handle      = nullptr;
+        read_handle_open = false;
         if (close_status)
             goto cleanup;
     }
 
     {
-        uint64_t hash;
+        uint64_t hash{};
         if (verify_files_match(read_path, write_path, payload_size, &hash))
             goto cleanup;
         printf("OK  %s == %s  (%zu bytes, hash 0x%016" PRIx64 ")\n", read_path, write_path, payload_size,
