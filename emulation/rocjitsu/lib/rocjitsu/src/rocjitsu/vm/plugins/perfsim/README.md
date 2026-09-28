@@ -75,16 +75,17 @@ Nonmatching dispatches still execute normally in RocJITsu, including their
 functional memory effects. The adapter only suppresses their observer event
 staging and replay into Perfsim. Matching is exact; it is neither a prefix nor
 a regular-expression match. If `dispatch_name` is absent, every supported
-dispatch is forwarded exactly as before.
+dispatch is forwarded exactly as before. If no dispatch matches the configured
+name, the adapter reports that name once when the plugin shuts down.
 
-For diagnostic runs, `max_observed_wgps` can additionally cap the number of
-distinct workgroups whose events are staged for each selected dispatch:
+For diagnostic runs, `max_observed_workgroups` can additionally cap the number
+of distinct workgroups whose events are staged for each selected dispatch:
 
 ```json
 "perfsim": {
   "library_path": "/absolute/path/to/libgpucsim_ffm_plugin.so",
   "dispatch_name": "_topk_topp_kernel",
-  "max_observed_wgps": 1
+  "max_observed_workgroups": 1
 }
 ```
 
