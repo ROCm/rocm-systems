@@ -24,8 +24,7 @@ static_assert(DispatchWriter::kFileSuffix.size() >= compression::kGzipSuffix.siz
                       compression::kGzipSuffix,
               "DispatchWriter::kFileSuffix must end in the gzip suffix");
 
-// Handles are randomized per process, so write the node id. An unknown agent
-// keeps its handle, which still orders this process's GPUs.
+// Handles are randomized per process, so write the node id.
 uint64_t gpu_id(const tool_data_t& tool_data, uint64_t agent_handle)
 {
     const auto agent = tool_data.agents.find(agent_handle);

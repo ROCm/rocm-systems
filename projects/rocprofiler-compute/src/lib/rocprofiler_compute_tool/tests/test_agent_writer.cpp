@@ -13,7 +13,7 @@ using namespace rocprofiler_compute_tool;
 
 namespace
 {
-constexpr const char* kHeader = "node_id,logical_node_id,name,product_name\n";
+constexpr const char* kHeader = "node_id,name,product_name\n";
 
 std::filesystem::path test_directory()
 {
@@ -39,7 +39,6 @@ void TestAgentWriter::add_agent(uint64_t handle, uint32_t node_id, const std::st
 {
     agent_record_t agent{};
     agent.node_id              = node_id;
-    agent.logical_node_id      = static_cast<int32_t>(node_id);
     agent.name                 = "gfx942";
     agent.product_name         = product_name;
     m_tool_data.agents[handle] = std::move(agent);
@@ -50,22 +49,18 @@ TEST_F(TestAgentWriter, NoAgents_WritesOnlyTheHeader)
     EXPECT_EQ(format(), kHeader);
 }
 
-TEST_F(TestAgentWriter, Agents_AreWrittenInNodeIdOrder)
+TEST_F(TestAgentWriter, Agent_IsWrittenAsOneRow)
 {
-    // Handle order is not node order, and the map preserves neither.
-    add_agent(4001, 3, "AMD Instinct MI300X");
     add_agent(4000, 2, "AMD Instinct MI300X");
 
-    EXPECT_EQ(format(),
-              std::string{kHeader} + "2,2,\"gfx942\",\"AMD Instinct MI300X\"\n" +
-                  "3,3,\"gfx942\",\"AMD Instinct MI300X\"\n");
+    EXPECT_EQ(format(), std::string{kHeader} + "2,\"gfx942\",\"AMD Instinct MI300X\"\n");
 }
 
 TEST_F(TestAgentWriter, ProductNameWithAComma_IsQuoted)
 {
     add_agent(4000, 2, "AMD Instinct MI300X, OAM");
 
-    EXPECT_EQ(format(), std::string{kHeader} + "2,2,\"gfx942\",\"AMD Instinct MI300X, OAM\"\n");
+    EXPECT_EQ(format(), std::string{kHeader} + "2,\"gfx942\",\"AMD Instinct MI300X, OAM\"\n");
 }
 
 TEST_F(TestAgentWriter, SinkFailure_IsReported)

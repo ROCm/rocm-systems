@@ -95,8 +95,7 @@ struct kernel_symbol_record_t
 /// device outside this process.
 struct agent_record_t
 {
-    uint32_t    node_id         = 0;
-    int32_t     logical_node_id = 0;
+    uint32_t    node_id = 0;
     std::string name;
     std::string product_name;
 };

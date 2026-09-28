@@ -19,6 +19,7 @@ from utils.logger import (
     demarcate,
 )
 from utils.utils_common import (
+    NATIVE_AGENTS_PREFIX,
     NATIVE_COUNTERS_PREFIX,
     NATIVE_DISPATCH_PREFIX,
     NATIVE_KERNEL_SYMBOLS_PREFIX,
@@ -55,7 +56,8 @@ COUNTER_RESULTS_COLUMNS: List[str] = [
 
 _NATIVE_ARTIFACT_RE = re.compile(
     rf"^(?P<kind>{NATIVE_COUNTERS_PREFIX}|{NATIVE_DISPATCH_PREFIX}"
-    rf"|{NATIVE_KERNEL_SYMBOLS_PREFIX})_(?P<fbase>.+)_(?P<pid>\d+)\.csv\.gz$"
+    rf"|{NATIVE_KERNEL_SYMBOLS_PREFIX}|{NATIVE_AGENTS_PREFIX})"
+    rf"_(?P<fbase>.+)_(?P<pid>\d+)\.csv\.gz$"
 )
 
 # Native CSV column names mapped to their results_*.csv names.
@@ -159,13 +161,14 @@ class NodeRollup:
 
 @dataclass(frozen=True)
 class NativeArtifacts:
-    """The three CSVs one process wrote for one counter set."""
+    """The four CSVs one process wrote for one counter set."""
 
     fbase: str
     pid: int
     counters: Path
     dispatch: Path
     kernel_symbols: Path
+    agents: Path
 
 
 def simplify_kernel_name(full_kernel_name: str) -> str:
@@ -848,8 +851,6 @@ def process_rocpd_csv(df: pd.DataFrame) -> pd.DataFrame:
         row.update(dict(zip(group_df["Counter_Name"], group_df["Counter_Value"])))
         data.append(row)
     df = pd.DataFrame(data)
-    # Rank GPU IDs, map lowest number to 0, next to 1, etc.
-    df["GPU_ID"] = df["GPU_ID"].rank(method="dense").astype(int) - 1
     # Reset dispatch IDs
     df["Dispatch_ID"] = range(1, len(df) + 1)
     return df
@@ -873,6 +874,7 @@ def find_native_artifacts(workload_dir: Path) -> List[NativeArtifacts]:
         NATIVE_COUNTERS_PREFIX,
         NATIVE_DISPATCH_PREFIX,
         NATIVE_KERNEL_SYMBOLS_PREFIX,
+        NATIVE_AGENTS_PREFIX,
     }
     artifacts = []
     for (fbase, pid), paths in sorted(found.items()):
@@ -890,9 +892,16 @@ def find_native_artifacts(workload_dir: Path) -> List[NativeArtifacts]:
                 counters=paths[NATIVE_COUNTERS_PREFIX],
                 dispatch=paths[NATIVE_DISPATCH_PREFIX],
                 kernel_symbols=paths[NATIVE_KERNEL_SYMBOLS_PREFIX],
+                agents=paths[NATIVE_AGENTS_PREFIX],
             )
         )
     return artifacts
+
+
+def number_gpus_by_node(agents: pd.DataFrame) -> Dict[int, int]:
+    """Map every GPU's node id to a GPU id from 0, in node order."""
+    node_ids = sorted({int(node_id) for node_id in agents["node_id"]})
+    return {node_id: gpu_id for gpu_id, node_id in enumerate(node_ids)}
 
 
 def join_native_counters(
