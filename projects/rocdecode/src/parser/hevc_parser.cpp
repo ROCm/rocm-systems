@@ -1314,6 +1314,7 @@ ParserResult HevcVideoParser::ParseVps(uint8_t *nalu, size_t size) {
     p_vps->vps_base_layer_available_flag = Parser::GetBit(nalu, offset);
     p_vps->vps_max_layers_minus1 = Parser::ReadBits(nalu, offset, 6);
     p_vps->vps_max_sub_layers_minus1 = Parser::ReadBits(nalu, offset, 3);
+    CHECK_ALLOWED_RANGE("vps_max_sub_layers_minus1", p_vps->vps_max_sub_layers_minus1, 0, 6);
     p_vps->vps_temporal_id_nesting_flag = Parser::GetBit(nalu, offset);
     p_vps->vps_reserved_0xffff_16bits = Parser::ReadBits(nalu, offset, 16);
     if (p_vps->vps_reserved_0xffff_16bits != 0xFFFF) {
@@ -1389,6 +1390,7 @@ ParserResult HevcVideoParser::ParseSps(uint8_t *nalu, size_t size) {
 
     uint32_t vps_id = Parser::ReadBits(nalu, offset, 4);
     uint32_t max_sub_layer_minus1 = Parser::ReadBits(nalu, offset, 3);
+    CHECK_ALLOWED_RANGE("sps_max_sub_layers_minus1", max_sub_layer_minus1, 0, 6);
     uint32_t sps_temporal_id_nesting_flag = Parser::GetBit(nalu, offset);
     HevcProfileTierLevel ptl;
     memset (&ptl, 0, sizeof(ptl));
