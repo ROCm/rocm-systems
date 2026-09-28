@@ -58,8 +58,12 @@ def run_binary(
     gtest_filter: str,
     timeout_seconds: int,
     env: dict,
+    daemon: bool,
 ) -> dict:
-    command = [rocjitsu, "--daemon", "--config", config, "--", binary]
+    command = [rocjitsu]
+    if daemon:
+        command.append("--daemon")
+    command.extend(["--config", config, "--", binary])
     if gtest_filter:
         command.append(f"--gtest_filter={gtest_filter}")
     started = time.monotonic()
@@ -125,6 +129,11 @@ def main() -> int:
     parser.add_argument("--binary", action="append", required=True)
     parser.add_argument("--gtest-filter", default="")
     parser.add_argument("--timeout-seconds", type=int, default=1800)
+    parser.add_argument(
+        "--daemon",
+        action="store_true",
+        help="Fork the rocJITsu daemon. Required for kmd configs when local mode cannot see the simulated GPU.",
+    )
     parser.add_argument("--rocm-version", default="")
     parser.add_argument("--runner-label", default="")
     parser.add_argument("--out", required=True)
@@ -141,6 +150,7 @@ def main() -> int:
             args.gtest_filter,
             args.timeout_seconds,
             env,
+            args.daemon,
         )
         cases.extend(result["cases"])
         if result["error"]:
