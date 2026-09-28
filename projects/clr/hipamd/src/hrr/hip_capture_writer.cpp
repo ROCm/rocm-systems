@@ -37,6 +37,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <cerrno>
 #include <filesystem>
@@ -89,7 +90,7 @@ static inline uint64_t current_parent_process_id() {
 #  include <sys/stat.h>
 #  include <sys/syscall.h>
 #  include <pthread.h>
-#  define HRR_OPEN(p)        ::open((p), O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0600)
+#  define HRR_OPEN(p)        open_private_fd((p))
 #  define HRR_WRITE(fd,b,n)  ::write((fd), (b), (n))
 #  define HRR_CLOSE(fd)      ::close((fd))
 #  define HRR_FSYNC(fd)      ::fsync((fd))
@@ -273,11 +274,19 @@ static void buffer_append_locked(const void* data, size_t len) {
 // Create `path` and any missing parents. Never throws: this runs inside
 // hip::init, the API shims and atexit, where an exception ends the process.
 static bool ensure_dir(const std::string& path) {
-  if (path.empty()) return false;
+  if (path.empty()) {
+    errno = ENOENT;
+    return false;
+  }
 #ifdef _WIN32
   std::error_code ec;
   fs::create_directories(path, ec);
-  return !ec;
+  if (ec) {
+    const std::error_condition cond = ec.default_error_condition();
+    errno = cond.category() == std::generic_category() ? cond.value() : EIO;
+    return false;
+  }
+  return true;
 #else
   if (::mkdir(path.c_str(), 0700) == 0 || errno == EEXIST) return true;
   std::string cur;
@@ -286,8 +295,16 @@ static bool ensure_dir(const std::string& path) {
     pos = path.find('/', pos + 1);
     cur.assign(path, 0, pos);
     if (::mkdir(cur.c_str(), 0700) != 0 && errno != EEXIST) {
+      const int err = errno;
       struct stat st{};
-      if (::stat(cur.c_str(), &st) != 0 || !S_ISDIR(st.st_mode)) return false;
+      if (::stat(cur.c_str(), &st) != 0) {
+        errno = err;
+        return false;
+      }
+      if (!S_ISDIR(st.st_mode)) {
+        errno = ENOTDIR;
+        return false;
+      }
     }
   } while (pos != std::string::npos);
   return true;
@@ -353,24 +370,53 @@ static int open_events_file(const std::string& path, std::int64_t* existing_size
 #endif
 }
 
-// fopen(path, "w") for a file inside the archive: 0600 and never through a
-// symbolic link or a hard link on POSIX. Truncation happens only after the
+#ifndef _WIN32
+// Open a file inside the archive for writing and truncate it: 0600, never
+// through a symbolic link or a hard link. Truncation happens only after the
 // opened inode has been checked, so a planted hard link cannot empty a file
-// outside the archive.
+// outside the archive, and O_NONBLOCK keeps a planted FIFO from blocking the
+// open. Async-signal-safe: emergency_finalize reaches it through HRR_OPEN.
+static int open_private_fd(const char* path) {
+  const int fd = ::open(path, O_WRONLY | O_CREAT | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC, 0600);
+  if (fd < 0) return -1;
+  struct stat st{};
+  if (::fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_nlink != 1 || !owned_by_euid(st) ||
+      ((st.st_mode & 07777) != 0600 && ::fchmod(fd, 0600) != 0) || ::ftruncate(fd, 0) != 0) {
+    ::close(fd);
+    return -1;
+  }
+  return fd;
+}
+#endif
+
+// fopen(path, "w") for a file inside the archive, opened by open_private_fd on POSIX.
 static FILE* fopen_private(const std::string& path) {
 #ifdef _WIN32
   return fopen(path.c_str(), "w");
 #else
-  const int fd = ::open(path.c_str(), O_WRONLY | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0600);
+  const int fd = open_private_fd(path.c_str());
+  if (fd < 0) return nullptr;
+  FILE* f = ::fdopen(fd, "w");
+  if (!f) ::close(fd);
+  return f;
+#endif
+}
+
+// fopen(path, "r") for a file inside the archive. On POSIX only a regular file
+// is read, never through a symbolic link, and a planted FIFO is refused rather
+// than blocking the open.
+static FILE* fopen_read_regular(const std::string& path) {
+#ifdef _WIN32
+  return fopen(path.c_str(), "r");
+#else
+  const int fd = ::open(path.c_str(), O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
   if (fd < 0) return nullptr;
   struct stat st{};
-  if (::fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_nlink != 1 || !owned_by_euid(st) ||
-      ((st.st_mode & 07777) != 0600 && ::fchmod(fd, 0600) != 0) ||
-      ::ftruncate(fd, 0) != 0) {
+  if (::fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
     ::close(fd);
     return nullptr;
   }
-  FILE* f = ::fdopen(fd, "w");
+  FILE* f = ::fdopen(fd, "r");
   if (!f) ::close(fd);
   return f;
 #endif
@@ -480,7 +526,7 @@ static ScanResult scan_events_for_resume(FILE* f, std::int64_t file_size) {
 static bool try_load_writer_state(const std::string& path, std::int64_t file_size,
                                   uint64_t* next_seq, uint64_t* ev_count,
                                   uint64_t* bl_count) {
-  FILE* f = fopen(path.c_str(), "r");
+  FILE* f = fopen_read_regular(path);
   if (!f) return false;
 
   uint64_t ns = 0, ec = 0, bc = 0;
@@ -569,8 +615,8 @@ static void atfork_child() {
     // pid-<pid> sub-archive.
     dir = g_base_dir;
   }
-  // NOTE: this is hrr_cap::writer::open(const char*) — the writer's archive-open
-  // routine — NOT POSIX ::open(). It runs fs::create_directories / fopen,
+  // NOTE: this is hrr_cap::writer::open(const char*), the writer's archive-open
+  // routine, NOT POSIX ::open(). It creates directories and opens files,
   // which are not async-signal-safe in general, but pthread_atfork's child
   // handler runs in the (single-threaded) child immediately after fork() with no
   // mutex held, so these calls are safe here. We deliberately do NOT call this
@@ -621,7 +667,7 @@ struct ProcessManifestEntry {
 };
 
 static bool read_process_manifest(const std::string& path, ProcessManifestEntry* out) {
-  FILE* f = fopen(path.c_str(), "r");
+  FILE* f = fopen_read_regular(path);
   if (!f) return false;
 
   ProcessManifestEntry e{};
@@ -713,6 +759,14 @@ static void update_root_manifest() {
 // open / close / flush / checkpoint
 // ---------------------------------------------------------------------------
 
+// A failed open() keeps no archive path, so atfork_child does not reopen one in
+// a forked child.
+static bool open_failed() {
+  g_base_dir.clear();
+  g_output_dir.clear();
+  return false;
+}
+
 bool open(const char* output_dir) {
   if (g_events_fd >= 0) return true;  // already open — guard against double-invocation
 #ifndef _WIN32
@@ -741,7 +795,7 @@ bool open(const char* output_dir) {
                    g_output_dir.c_str(), strerror(err));
     fprintf(stderr, "[HRR capture] Capture disabled: cannot use %s as a private archive "
             "directory (%s).\n", g_output_dir.c_str(), strerror(err));
-    return false;
+    return open_failed();
   }
 #ifndef _WIN32
   for (auto& claimed : g_blob_prefix_claimed) claimed.store(false, std::memory_order_relaxed);
@@ -758,7 +812,7 @@ bool open(const char* output_dir) {
     LogPrintfError("[HRR capture] Failed to open %s: %s", events_path.c_str(), strerror(err));
     fprintf(stderr, "[HRR capture] Capture disabled: cannot open %s (%s).\n",
             events_path.c_str(), strerror(err));
-    return false;
+    return open_failed();
   }
 
   if (existing_size > 0) {
@@ -800,7 +854,7 @@ bool open(const char* output_dir) {
       LogPrintfError("[HRR capture] seek end of %s failed", events_path.c_str());
       HRR_CLOSE(g_events_fd);
       g_events_fd = -1;
-      return false;
+      return open_failed();
     }
 
     g_seq_id.store(next_seq, std::memory_order_relaxed);

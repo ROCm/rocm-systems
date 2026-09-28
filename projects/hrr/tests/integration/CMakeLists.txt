@@ -22,7 +22,8 @@
 # every API's replay class still matches what HRR's generator declares.
 #
 # hrr_capture_access_test.cc covers what capture does with the file system: a
-# private archive, and no writes through planted symbolic links.
+# private archive, no writes through planted symbolic and hard links, and no
+# wait on a planted FIFO.
 #
 # hrr_api_matrix_expectations.h is GENERATED from the pair api_classes.json +
 # api_matrix.yaml.  Regenerate after an upstream classification change with:

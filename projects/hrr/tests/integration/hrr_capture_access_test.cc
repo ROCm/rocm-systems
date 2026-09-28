@@ -16,22 +16,35 @@
  *
  *   Unit_HRR_CaptureRefusesPlantedLinks:
  *     a symbolic link planted at pid-<pid>/events.bin, at pid-<pid> itself, or
- *     at pid-<pid>/blobs, or a hard link at pid-<pid>/manifest.json, disables
- *     the write instead of being written through (POSIX).
+ *     at pid-<pid>/blobs disables the capture, and a hard link planted at
+ *     pid-<pid>/manifest.json is not written through, neither at exit nor from
+ *     the crash callback (POSIX).
+ *
+ *   Unit_HRR_CaptureDoesNotBlockOnPlantedFifo:
+ *     a FIFO planted at pid-<pid>/manifest.json does not hold up the exit
+ *     (POSIX).
  */
 
 #include "hrr_test_common.hh"
 #include "hrr_test_process.hh"
 
+#include <csignal>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
 
 namespace {
 
 #ifndef _WIN32
+constexpr const char* kCaptureDisabled = "[HRR capture] Capture disabled";
+// Far above what one small workload needs; a capture blocked on a planted FIFO
+// never finishes.
+constexpr int kCaptureTimeoutSeconds = 120;
+
 fs::perms perms_of(const fs::path& p) {
-  return fs::symlink_status(p).permissions() & fs::perms::mask;
+  return fs::symlink_status(p).permissions() & fs::perms::all;
 }
 
 void write_text(const fs::path& p, const std::string& text) {
@@ -39,22 +52,57 @@ void write_text(const fs::path& p, const std::string& text) {
   out << text;
 }
 
-// Runs the GPU workload through /bin/sh so the script can plant entries named
-// after its own pid; exec keeps that pid for the workload, and therefore for
-// the pid-<pid> directory the capture writes to.
-int capture_after_planting(const fs::path& base, const fs::path& script, const std::string& body) {
-  write_text(script, "#!/bin/sh\nset -e\n" + body + "exec \"$HRR_TEST_WORKLOAD\" " +
-                         "Unit_HRR_GpuWorkload_Direct\n");
-  hrr::test::SpawnProc proc("/bin/sh");
+struct PlantedRun {
+  int ret;
+  std::string output;  // stdout and stderr
+};
+
+// Runs a workload through /bin/sh so the script can plant entries named after
+// its own pid; exec keeps that pid for the workload, and therefore for the
+// pid-<pid> directory the capture writes to.
+PlantedRun capture_after_planting(const fs::path& base, const fs::path& script,
+                                  const std::string& body,
+                                  const std::string& workload = "Unit_HRR_GpuWorkload_Direct") {
+  write_text(script,
+             "#!/bin/sh\nset -e\n" + body + "exec \"$HRR_TEST_WORKLOAD\" " + workload + "\n");
+  hrr::test::SpawnProc proc("/bin/sh", /*capture_stdout=*/true, /*capture_stderr=*/true);
   proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", base.string());
   proc.setEnv("HRR_TEST_BASE", base.string());
   proc.setEnv("HRR_TEST_WORKLOAD", HRR_TEST_EXE);
   set_proc_search_path(proc);
-  return proc.run(script.string());
+  const int ret = proc.runWithTimeout(script.string(), kCaptureTimeoutSeconds);
+  return {ret, proc.getOutput()};
+}
+
+// Size of the one pid-<pid>/events.bin under base, 0 unless there is exactly
+// one. More than a file header tells a capture that ran from one that never
+// started.
+std::uintmax_t events_bytes(const fs::path& base) {
+  const std::vector<fs::path> archives = hrr_process_archives(base);
+  if (archives.size() != 1) return 0;
+  std::error_code ec;
+  const std::uintmax_t n = fs::file_size(archives.front() / "events.bin", ec);
+  return ec ? 0 : n;
 }
 #endif
 
 }  // namespace
+
+#ifndef _WIN32
+// ---------------------------------------------------------------------------
+// Hidden ([.]) workload for the crash-callback section: records a few events,
+// then dies on SIGABRT so the CLR crash callback finalizes the archive through
+// emergency_finalize.
+// ---------------------------------------------------------------------------
+TEST_CASE("Unit_HRR_CaptureAbort_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  void* d = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&d, 256));
+  HRR_HIP_CHECK(hipMemset(d, 0, 256));
+  HRR_HIP_CHECK(hipDeviceSynchronize());
+  std::raise(SIGABRT);
+}
+#endif
 
 // ---------------------------------------------------------------------------
 /**
@@ -96,10 +144,15 @@ HRR_TEST_CASE(Unit_HRR_CaptureArchiveIsPrivate) {
  *   - Plants a symbolic link at pid-<pid>/events.bin pointing at a file with
  *     known contents, at pid-<pid> pointing at an empty directory, or at
  *     pid-<pid>/blobs pointing at an empty directory; and a hard link at
- *     pid-<pid>/manifest.json pointing at a file with known contents.
- *   - The workload still succeeds and each target stays untouched: a resume
- *     would otherwise truncate and append to the file, and a fresh capture
- *     would fill the directory or overwrite the hard-linked manifest.
+ *     pid-<pid>/manifest.json pointing at a file with known contents, followed
+ *     by a workload that exits cleanly or one that aborts and leaves the
+ *     manifest to the crash callback.
+ *   - Each target stays untouched: a resume would otherwise truncate and
+ *     append to the file, and a fresh capture would fill the directory or
+ *     overwrite the hard-linked manifest.
+ *   - Each symbolic link disables the capture, which says so on stderr, and the
+ *     workload still succeeds; with the hard link the capture runs and writes
+ *     events.bin.
  */
 HRR_TEST_CASE(Unit_HRR_CaptureRefusesPlantedLinks) {
 #ifdef _WIN32
@@ -116,45 +169,89 @@ HRR_TEST_CASE(Unit_HRR_CaptureRefusesPlantedLinks) {
   write_text(victim_file, contents);
 
   SECTION("link at pid-<pid>/events.bin") {
-    const int ret = capture_after_planting(
+    const PlantedRun run = capture_after_planting(
         base, script,
         "mkdir -p \"$HRR_TEST_BASE/pid-$$\"\n"
         "ln -s '" + victim_file.string() + "' \"$HRR_TEST_BASE/pid-$$/events.bin\"\n");
-    INFO("Workload exit code: " << ret);
-    REQUIRE(ret == 0);
+    INFO("Workload exit code: " << run.ret << "\n" << run.output);
+    REQUIRE(run.ret == 0);
+    CHECK(run.output.find(kCaptureDisabled) != std::string::npos);
     CHECK(read_text_file(victim_file) == contents);
     CHECK_FALSE(fs::exists(base / "manifest.json"));
   }
 
   SECTION("link at pid-<pid>") {
-    const int ret = capture_after_planting(
+    const PlantedRun run = capture_after_planting(
         base, script,
         "ln -s '" + victim_dir.string() + "' \"$HRR_TEST_BASE/pid-$$\"\n");
-    INFO("Workload exit code: " << ret);
-    REQUIRE(ret == 0);
+    INFO("Workload exit code: " << run.ret << "\n" << run.output);
+    REQUIRE(run.ret == 0);
+    CHECK(run.output.find(kCaptureDisabled) != std::string::npos);
     CHECK(fs::is_empty(victim_dir));
+    CHECK_FALSE(fs::exists(base / "manifest.json"));
   }
 
   SECTION("link at pid-<pid>/blobs") {
-    const int ret = capture_after_planting(
+    const PlantedRun run = capture_after_planting(
         base, script,
         "mkdir -p \"$HRR_TEST_BASE/pid-$$\"\n"
         "ln -s '" + victim_dir.string() + "' \"$HRR_TEST_BASE/pid-$$/blobs\"\n");
-    INFO("Workload exit code: " << ret);
-    REQUIRE(ret == 0);
+    INFO("Workload exit code: " << run.ret << "\n" << run.output);
+    REQUIRE(run.ret == 0);
+    CHECK(run.output.find(kCaptureDisabled) != std::string::npos);
     CHECK(fs::is_empty(victim_dir));
     CHECK_FALSE(fs::exists(base / "manifest.json"));
   }
 
   SECTION("hard link at pid-<pid>/manifest.json") {
-    const int ret = capture_after_planting(
+    const PlantedRun run = capture_after_planting(
         base, script,
         "mkdir -p \"$HRR_TEST_BASE/pid-$$\"\n"
         "ln '" + victim_file.string() + "' \"$HRR_TEST_BASE/pid-$$/manifest.json\"\n");
-    INFO("Workload exit code: " << ret);
-    REQUIRE(ret == 0);
+    INFO("Workload exit code: " << run.ret << "\n" << run.output);
+    REQUIRE(run.ret == 0);
+    CHECK(events_bytes(base) > sizeof(hrr_file_header));
     CHECK(read_text_file(victim_file) == contents);
   }
+
+  SECTION("hard link at pid-<pid>/manifest.json, crash callback") {
+    const PlantedRun run = capture_after_planting(
+        base, script,
+        "ulimit -c 0\n"
+        "mkdir -p \"$HRR_TEST_BASE/pid-$$\"\n"
+        "ln '" + victim_file.string() + "' \"$HRR_TEST_BASE/pid-$$/manifest.json\"\n",
+        "Unit_HRR_CaptureAbort_Direct");
+    INFO("Workload exit code: " << run.ret << "\n" << run.output);
+    REQUIRE(run.ret == 128 + SIGABRT);
+    CHECK(events_bytes(base) > sizeof(hrr_file_header));
+    CHECK(read_text_file(victim_file) == contents);
+  }
+#endif
+}
+
+// ---------------------------------------------------------------------------
+/**
+ * Test Description
+ * ----------------
+ *   - Plants a FIFO at pid-<pid>/manifest.json with nothing on the other end.
+ *   - The workload exits cleanly before the deadline and events.bin is
+ *     written: neither the manifest write at exit nor the root manifest's read
+ *     of it waits for the other end of the FIFO.
+ */
+HRR_TEST_CASE(Unit_HRR_CaptureDoesNotBlockOnPlantedFifo) {
+#ifdef _WIN32
+  HRR_SKIP("POSIX FIFOs");
+#else
+  ScopedDir work{fs::temp_directory_path() / "hrr_access_fifo"};
+  const fs::path base = work.path / "capture";
+  fs::create_directories(base);
+
+  const PlantedRun run = capture_after_planting(base, work.path / "plant.sh",
+                                                "mkdir -p \"$HRR_TEST_BASE/pid-$$\"\n"
+                                                "mkfifo \"$HRR_TEST_BASE/pid-$$/manifest.json\"\n");
+  INFO("Workload exit code: " << run.ret << "\n" << run.output);
+  REQUIRE(run.ret == 0);
+  CHECK(events_bytes(base) > sizeof(hrr_file_header));
 #endif
 }
 
