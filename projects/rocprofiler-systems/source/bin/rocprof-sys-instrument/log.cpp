@@ -4,7 +4,7 @@
 #include "log.hpp"
 #include "fwd.hpp"
 
-#include <fmt/format.h>
+#include "common/string_utility.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -15,25 +15,6 @@
 namespace
 {
 std::vector<log_entry> log_entries = {};
-
-auto
-get_color_regex(std::string _v)
-{
-    auto _p = _v.find("[");
-    if(_p != std::string::npos)
-    {
-        _v.insert(_p, 1, '\\');
-    }
-    return fmt::format("\\{}", _v);
-}
-
-auto _color_regex =
-    std::regex{ fmt::format("({}|{}|{}|{}|{})", get_color_regex(tim::log::color::info()),
-                            get_color_regex(tim::log::color::source()),
-                            get_color_regex(tim::log::color::warning()),
-                            get_color_regex(tim::log::color::fatal()),
-                            get_color_regex(tim::log::color::end())),
-                std::regex_constants::optimize };
 }  // namespace
 
 log_entry::log_entry(std::string _msg)
@@ -72,7 +53,7 @@ log_entry::as_string(const char* _color, const char* _src, const char* _end) con
     _ss << " " << _color << std::regex_replace(m_message, std::regex{ "\n" }, " ... ")
         << _end;
 
-    return _remove_color ? std::regex_replace(_ss.str(), _color_regex, "") : _ss.str();
+    return _remove_color ? rocprofsys::utility::string::strip_ansi(_ss.str()) : _ss.str();
 }
 
 log_entry&
