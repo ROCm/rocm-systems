@@ -63,9 +63,37 @@ Hip::hipMemcpy(void *dst, const void *src, size_t sizeBytes, hipMemcpyKind kind)
 }
 
 void
+Hip::hipMemcpyWithStream(void *dst, const void *src, size_t sizeBytes, hipMemcpyKind kind,
+                         hipStream_t stream) const
+{
+    (void)throwOnHipError<Hip::RuntimeError>(::hipMemcpyWithStream(dst, src, sizeBytes, kind, stream));
+}
+
+void
 Hip::hipStreamSynchronize(hipStream_t stream) const
 {
     (void)throwOnHipError<Hip::RuntimeError>(::hipStreamSynchronize(stream));
+}
+
+hipStream_t
+Hip::hipStreamCreateWithFlags(unsigned int flags) const
+{
+    hipStream_t stream;
+    (void)throwOnHipError<Hip::RuntimeError>(::hipStreamCreateWithFlags(&stream, flags));
+    return stream;
+}
+
+void
+Hip::hipStreamDestroy(hipStream_t stream) const
+{
+    (void)throwOnHipError<Hip::RuntimeError>(::hipStreamDestroy(stream));
+}
+
+void
+Hip::hipStreamWaitValue64(hipStream_t stream, void *ptr, uint64_t value, unsigned int flags,
+                          uint64_t mask) const
+{
+    (void)throwOnHipError<Hip::RuntimeError>(::hipStreamWaitValue64(stream, ptr, value, flags, mask));
 }
 
 void *
@@ -80,6 +108,20 @@ void
 Hip::hipHostFree(void *ptr) const
 {
     (void)throwOnHipError<Hip::RuntimeError>(::hipHostFree(ptr));
+}
+
+void *
+Hip::hipExtMallocWithFlags(size_t size, unsigned int flags) const
+{
+    void *ptr;
+    (void)throwOnHipError<Hip::RuntimeError>(::hipExtMallocWithFlags(&ptr, size, flags));
+    return ptr;
+}
+
+void
+Hip::hipFree(void *ptr) const
+{
+    (void)throwOnHipError<Hip::RuntimeError>(::hipFree(ptr));
 }
 
 void *
