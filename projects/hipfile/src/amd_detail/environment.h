@@ -86,12 +86,5 @@ public:
     /// nullopt if HIPFILE_UNSUPPORTED_FILE_SYSTEMS was unset or had a value other than
     /// true or false.
     static std::optional<bool> unsupported_file_systems();
-
-    /// @brief Control the size of the host bounce buffer used for async fallback I/O operations
-    ///
-    /// The default value is 1 MiB.
-    static constexpr const char *const ASYNC_BUFFER_SIZE{"HIPFILE_ASYNC_BUFFER_SIZE"};
-
-    static std::optional<size_t> async_buffer_size();
 };
 }

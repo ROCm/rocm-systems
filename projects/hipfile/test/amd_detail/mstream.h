@@ -19,9 +19,6 @@ public:
     MOCK_METHOD(bool, fixedIOSize, (), (const, override));
     MOCK_METHOD(bool, pageAligned, (), (const, override));
     MOCK_METHOD(std::unique_lock<std::mutex>, getLock, (), (override));
-    MOCK_METHOD(void *, asyncBufferHostPtr, (), (const, override));
-    MOCK_METHOD(void *, asyncBufferDevPtr, (), (const, override));
-    MOCK_METHOD(size_t, asyncBufferSize, (), (const, override));
     MOCK_METHOD(bool, canUseStreamWaitValue, (), (const, override));
     MOCK_METHOD(hipStream_t, copyStream, (), (const, override));
     MOCK_METHOD(uint64_t *, signalSlot, (), (const, override));

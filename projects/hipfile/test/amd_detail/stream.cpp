@@ -57,16 +57,7 @@ expectStreamResources(StrictMock<MHip> &mhip)
 static void
 expectStreamBuffer(StrictMock<MConfiguration> &mconfig, StrictMock<MHip> &mhip)
 {
-    EXPECT_CALL(mconfig, asyncBufferSize)
-        .Times(::testing::AnyNumber())
-        .WillRepeatedly(::testing::Return(1 << 20));
-    EXPECT_CALL(mhip, hipHostMalloc)
-        .Times(::testing::AnyNumber())
-        .WillRepeatedly(::testing::Return(reinterpret_cast<void *>(0x1234)));
-    EXPECT_CALL(mhip, hipHostGetDevicePointer)
-        .Times(::testing::AnyNumber())
-        .WillRepeatedly(::testing::Return(reinterpret_cast<void *>(0x5678)));
-    EXPECT_CALL(mhip, hipHostFree).Times(::testing::AnyNumber());
+    (void)mconfig;
     expectStreamResources(mhip);
 }
 
@@ -193,31 +184,16 @@ TEST_F(HipFileStream, deregister_with_unregistered_stream_throws)
     ASSERT_THROW(stream_map.deregisterStream(nonnull_stream), std::invalid_argument);
 }
 
-TEST_F(HipFileStream, register_buffer_alloc_fails_throws)
-{
-    EXPECT_CALL(mhip, hipStreamGetDevice);
-    EXPECT_CALL(mhip, hipHostMalloc).WillOnce(::testing::Return(nullptr));
-    ASSERT_THROW(stream_map.registerStream(nonnull_stream, 0), std::runtime_error);
-}
-
-TEST(HipFileStreamDestructor, buffer_free_failure_logs)
+TEST(HipFileStreamDestructor, resource_free_failure_logs)
 {
     StrictMock<MConfiguration> mconfig;
     StrictMock<MHip>           mhip;
     StrictMock<MSys>           msys;
-    EXPECT_CALL(mconfig, asyncBufferSize)
-        .Times(::testing::AnyNumber())
-        .WillRepeatedly(::testing::Return(1 << 20));
-    EXPECT_CALL(mhip, hipHostMalloc)
-        .Times(::testing::AnyNumber())
-        .WillRepeatedly(::testing::Return(reinterpret_cast<void *>(0x1234)));
-    EXPECT_CALL(mhip, hipHostGetDevicePointer)
-        .Times(::testing::AnyNumber())
-        .WillRepeatedly(::testing::Return(reinterpret_cast<void *>(0x5678)));
-    EXPECT_CALL(mhip, hipHostFree)
+    (void)mconfig;
+    expectStreamResources(mhip);
+    EXPECT_CALL(mhip, hipFree)
         .Times(::testing::AnyNumber())
         .WillRepeatedly(::testing::Throw(Hip::RuntimeError(hipErrorInvalidValue)));
-    expectStreamResources(mhip);
     EXPECT_CALL(msys, syslog);
     {
         StreamMap stream_map;
