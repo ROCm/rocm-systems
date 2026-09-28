@@ -98,6 +98,21 @@ TEST_F(GinAnvilConnCheckDeviceTest, ReportsAnUnwrittenSourceSlot) {
   EXPECT_EQ(hostMissing[1], 1);
 }
 
+TEST_F(GinAnvilConnCheckDeviceTest, AcceptsKernelRankCap) {
+  constexpr int kRanks = gin_anvil::conn_check::kMaxConnCheckKernelRanks;
+  uintptr_t* remoteAddrs = nullptr;
+
+  ASSERT_EQ(CreateStream(), hipSuccess);
+  ASSERT_EQ(Allocate(&remoteAddrs, kRanks), hipSuccess);
+  // Zero bases: the kernel returns before any store, so a launch at the rank
+  // cap pins nRanks == kMaxConnCheckKernelRanks without writing peer slots.
+  ASSERT_EQ(hipMemsetAsync(remoteAddrs, 0, sizeof(uintptr_t) * static_cast<size_t>(kRanks), stream_),
+            hipSuccess);
+  ASSERT_EQ(ginAnvilConnWrite(remoteAddrs, kRanks, /*selfRank=*/kRanks - 1, 1, stream_), 0);
+  ASSERT_EQ(hipStreamSynchronize(stream_), hipSuccess);
+  EXPECT_EQ(hipPeekAtLastError(), hipSuccess);
+}
+
 TEST(GinAnvilConnCheckDeviceValidationTest, RejectsTooManyRanksBeforeLaunch) {
   const int tooMany = gin_anvil::conn_check::kMaxConnCheckKernelRanks + 1;
   // Rank guards return before hipLaunchKernelGGL, so they must not record a HIP error.
@@ -106,6 +121,13 @@ TEST(GinAnvilConnCheckDeviceValidationTest, RejectsTooManyRanksBeforeLaunch) {
   EXPECT_EQ(ginAnvilConnCheck(reinterpret_cast<void*>(1), tooMany, 1, reinterpret_cast<int*>(1),
                               nullptr),
             -1);
+  EXPECT_EQ(hipPeekAtLastError(), hipSuccess);
+}
+
+TEST(GinAnvilConnCheckDeviceValidationTest, RejectsSelfRankOutOfRangeBeforeLaunch) {
+  (void)hipGetLastError();
+  EXPECT_EQ(ginAnvilConnWrite(reinterpret_cast<void*>(1), 2, -1, 1, nullptr), -1);
+  EXPECT_EQ(ginAnvilConnWrite(reinterpret_cast<void*>(1), 2, 2, 1, nullptr), -1);
   EXPECT_EQ(hipPeekAtLastError(), hipSuccess);
 }
 

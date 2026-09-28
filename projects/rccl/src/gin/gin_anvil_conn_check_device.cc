@@ -48,6 +48,7 @@ extern "C" int ginAnvilConnWrite(void* remoteAddrsDev, int nRanks, int selfRank,
                                  unsigned long long stamp, hipStream_t stream) {
   if (remoteAddrsDev == nullptr) return -1;
   if (nRanks <= 0 || nRanks > gin_anvil::conn_check::kMaxConnCheckKernelRanks) return -1;
+  if (selfRank < 0 || selfRank >= nRanks) return -1;
   (void)hipGetLastError();
   hipLaunchKernelGGL(gin_anvil::conn_check::ginAnvilConnWriteKernel, dim3(1), dim3(nRanks), 0, stream,
                      reinterpret_cast<uintptr_t*>(remoteAddrsDev), nRanks, selfRank, stamp);

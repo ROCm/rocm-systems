@@ -689,6 +689,13 @@ static ncclResult_t ginAnvilCheckSignalConnectivity(ginAnvilGinCtx* ctx, void* l
            "(peer-reported missing increments=%d). Re-launch the job, or set "
            "NCCL_GIN_ANVIL_SDMA_CONN_CHECK=0 to bypass.",
            MAX_ATTEMPTS, rank, lastGlobalMissing);
+    } else if (lastLocalFail) {
+      // localMissing is lsaTeamSize here only so the allgather aborts the team.
+      // That sentinel is not a measured missing-stamp count.
+      WARN("GIN anvil-sdma: LSA signal connectivity gate failed after %d attempts on rank %d "
+           "(local step failure, last step='%s'). Re-launch the job, or set "
+           "NCCL_GIN_ANVIL_SDMA_CONN_CHECK=0 to bypass.",
+           MAX_ATTEMPTS, rank, ginAnvilConnCheckStepName(failedStep));
     } else {
       WARN("GIN anvil-sdma: LSA signal connectivity gate failed after %d attempts on rank %d "
            "(local missing=%d, last step='%s'). Re-launch the job, or set "
