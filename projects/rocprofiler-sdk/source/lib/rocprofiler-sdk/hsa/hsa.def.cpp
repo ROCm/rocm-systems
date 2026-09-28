@@ -677,6 +677,9 @@ HSA_API_INFO_DEFINITION_V(
 HSA_API_META_DEFINITION(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_memory_async_copy, hsa_amd_memory_async_copy, hsa_amd_memory_async_copy_fn)
 HSA_API_META_DEFINITION(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_memory_async_copy_on_engine, hsa_amd_memory_async_copy_on_engine, hsa_amd_memory_async_copy_on_engine_fn)
 HSA_API_META_DEFINITION(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_memory_async_copy_rect, hsa_amd_memory_async_copy_rect, hsa_amd_memory_async_copy_rect_fn)
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0A
+HSA_API_META_DEFINITION(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_memory_async_batch_copy, hsa_amd_memory_async_batch_copy, hsa_amd_memory_async_batch_copy_fn)
+#    endif
 // clang-format on
 
 #elif defined(ROCPROFILER_LIB_ROCPROFILER_HSA_MEMORY_ALLOCATION_CPP_IMPL) &&                       \

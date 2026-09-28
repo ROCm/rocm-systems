@@ -369,6 +369,7 @@ class GinMPIDeviceTests : public MPITestBase {
   void runBasicPutSelfCheck() {
     // Bring up the comm + stream from the fixture.
     ASSERT_EQ(ncclSuccess, createTestCommunicator());
+    SKIP_IF_GIN_UNSUPPORTED();
     ncclComm_t  comm   = getActiveCommunicator();
     hipStream_t stream = getActiveStream();
 
@@ -508,6 +509,7 @@ void GinMPIDeviceTests::runPutBasicAndOffsets(int nContexts) {
     GTEST_SKIP() << "Requires exactly 2 ranks";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t  comm   = getActiveCommunicator();
   hipStream_t stream = getActiveStream();
 
@@ -648,6 +650,7 @@ TEST_F(GinMPIDeviceTests, Put_CrossNode) {
     GTEST_SKIP() << reason;
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t  comm   = getActiveCommunicator();
   hipStream_t stream = getActiveStream();
 
@@ -770,6 +773,7 @@ TEST_F(GinMPIDeviceTests, Put_CoopCta_Regression) {
     GTEST_SKIP() << "Requires exactly 2 ranks";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t  comm   = getActiveCommunicator();
   hipStream_t stream = getActiveStream();
 
@@ -895,6 +899,7 @@ TEST_F(GinMPIDeviceTests, Put_CoopWarpSpan_Regression_AMD) {
     GTEST_SKIP() << "Requires exactly 2 ranks";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t  comm   = getActiveCommunicator();
   hipStream_t stream = getActiveStream();
 
@@ -1023,6 +1028,7 @@ void GinMPIDeviceTests::runPutValueInline(int nContexts) {
     GTEST_SKIP() << "Requires exactly 2 ranks";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t  comm   = getActiveCommunicator();
   hipStream_t stream = getActiveStream();
 
@@ -1163,6 +1169,7 @@ TEST_F(GinMPIDeviceTests, Signal_NoPayload) {
     GTEST_SKIP() << "Requires exactly 2 ranks";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t  comm   = getActiveCommunicator();
   hipStream_t stream = getActiveStream();
 
@@ -1226,6 +1233,7 @@ TEST_F(GinMPIDeviceTests, Signal_HighIdNoOverflow) {
     GTEST_SKIP() << "Requires exactly 2 ranks";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t  comm   = getActiveCommunicator();
   hipStream_t stream = getActiveStream();
 
@@ -1306,6 +1314,7 @@ TEST_F(GinMPIDeviceTests, WaitCounter_Local) {
     GTEST_SKIP() << "Requires exactly 2 ranks";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t  comm   = getActiveCommunicator();
   hipStream_t stream = getActiveStream();
 
@@ -1442,6 +1451,7 @@ void GinMPIDeviceTests::runWaitCounterAndSignal(int nContexts) {
     GTEST_SKIP() << "Requires exactly 2 ranks";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t  comm   = getActiveCommunicator();
   hipStream_t stream = getActiveStream();
 
@@ -1897,6 +1907,7 @@ TEST_F(GinMPIDeviceTests, Barrier_TwoRanks) {
     GTEST_SKIP() << "Requires exactly " << kRanksPerNode << " rank per node";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t  comm   = getActiveCommunicator();
   hipStream_t stream = getActiveStream();
 
@@ -1985,6 +1996,7 @@ TEST_F(GinMPIDeviceTests, Barrier_FourRanks) {
     GTEST_SKIP() << "Requires exactly 4 ranks";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t  comm   = getActiveCommunicator();
   hipStream_t stream = getActiveStream();
 
@@ -2097,6 +2109,7 @@ TEST_F(GinMPIDeviceTests, Barrier_WorldTeamUsesWorldPool) {
     GTEST_SKIP() << "Requires exactly " << kRanksPerNode << " ranks per node";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t comm = getActiveCommunicator();
   hipStream_t stream = getActiveStream();
   ncclTeam_t world = ncclTeamWorld(comm);
@@ -2188,6 +2201,7 @@ TEST_F(GinMPIDeviceTests, Barrier_WorldMultiIndex) {
     GTEST_SKIP() << "Requires 2-8 ranks";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t  comm   = getActiveCommunicator();
   hipStream_t stream = getActiveStream();
 
@@ -2354,6 +2368,94 @@ TEST_F(GinMPIDeviceTests, BarrierSession_LsaOnly) {
   MPI_Barrier(MPI_COMM_WORLD);
 }
 
+// AICOMRCCL-2241: registering a symmetric window after ncclDevCommCreate is
+// legal. Anvil SDMA resolves the user VA via ncclDevrGetLsaSelfAddr, which
+// only walks memHead, so ginEnabled must already see this mem on the list.
+// BarrierSession_LsaOnly also registers after create, but it never activates
+// GIN (plain NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER), so it cannot catch this.
+TEST_F(GinMPIDeviceTests, WindowRegister_AfterDevCommCreate) {
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
+    GTEST_SKIP() << "Requires exactly 2 ranks";
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  ncclComm_t  comm   = getActiveCommunicator();
+  hipStream_t stream = getActiveStream();
+
+  int rank = -1, nRanks = -1;
+  ncclCommUserRank(comm, &rank);
+  ncclCommCount(comm, &nRanks);
+  ASSERT_EQ(2, nRanks);
+
+  ncclDevCommRequirements reqs = defaultGinReqs();
+  reqs.railGinBarrierCount = 1;
+  reqs.ginSignalCount      = 1;
+  ncclDevComm devComm{};
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
+  auto devCommCleanup = makeScopeGuard([&]() {
+    (void)ncclDevCommDestroy(comm, &devComm);
+  });
+
+  constexpr size_t          kBufBytes      = 64;
+  constexpr size_t          kTransferBytes = 64;
+  constexpr ncclGinSignal_t kSigIdx        = 0;
+  constexpr int             kPeer          = 1;
+
+  void* dSrc = nullptr;
+  void* dDst = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSrc, kBufBytes));
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dDst, kBufBytes));
+  auto memCleanup = makeScopeGuard([&]() {
+    if (dSrc) (void)ncclMemFree(dSrc);
+    if (dDst) (void)ncclMemFree(dDst);
+  });
+
+  ncclWindow_t srcWin = nullptr, dstWin = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess,
+                ncclCommWindowRegister(comm, dSrc, kBufBytes, &srcWin, NCCL_WIN_COLL_SYMMETRIC));
+  ASSERT_MPI_EQ(ncclSuccess,
+                ncclCommWindowRegister(comm, dDst, kBufBytes, &dstWin, NCCL_WIN_COLL_SYMMETRIC));
+  auto winCleanup = makeScopeGuard([&]() {
+    if (srcWin) (void)ncclCommWindowDeregister(comm, srcWin);
+    if (dstWin) (void)ncclCommWindowDeregister(comm, dstWin);
+  });
+
+  std::vector<uint8_t> hostSrc(kBufBytes, 0);
+  std::vector<uint8_t> hostDst(kBufBytes, 0);
+  for (size_t i = 0; i < kTransferBytes; i++) {
+    hostSrc[i] = static_cast<uint8_t>(0xA0 + (i & 0x3F));
+  }
+  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dSrc, hostSrc.data(), kBufBytes, hipMemcpyHostToDevice));
+  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dDst, hostDst.data(), kBufBytes, hipMemcpyHostToDevice));
+
+  MPI_Barrier(MPI_COMM_WORLD);
+
+  if (rank == 0) {
+    putBasicProducerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
+        srcWin, /*srcOff=*/0,
+        dstWin, /*dstOff=*/0,
+        kTransferBytes, kSigIdx, kPeer,
+        devComm);
+  } else {
+    putBasicConsumerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
+        kSigIdx, /*expectedSignalValue=*/1, devComm);
+  }
+  ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+
+  MPI_Barrier(MPI_COMM_WORLD);
+
+  if (rank == 1) {
+    std::vector<uint8_t> hostResult(kBufBytes, 0);
+    ASSERT_EQ(hipSuccess,
+              hipMemcpy(hostResult.data(), dDst, kBufBytes, hipMemcpyDeviceToHost));
+    for (size_t i = 0; i < kTransferBytes; i++) {
+      ASSERT_EQ(hostSrc[i], hostResult[i]) << "byte " << i << " mismatched";
+    }
+  }
+}
+
 // Collective over the world team: composes the inner LSA barrier with the
 // outer rail-GIN barrier (ncclTeamTagWorld ctor). Mirrors Barrier_TwoRanks'
 // "completion == success" philosophy -- a broken inner LSA epoch or outer
@@ -2391,6 +2493,7 @@ TEST_F(GinMPIDeviceTests, BarrierSession_Hybrid) {
                  << kMinLsaRanksPerNode << " ranks per node";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t  comm   = getActiveCommunicator();
   hipStream_t stream = getActiveStream();
 
@@ -2499,6 +2602,7 @@ TEST_F(GinMPIDeviceTests, BarrierPools_AreIsolated) {
     GTEST_SKIP() << "Requires exactly " << kRanksPerNode << " ranks per node";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t comm = getActiveCommunicator();
   hipStream_t stream = getActiveStream();
   ncclTeam_t lsa = ncclTeamLsa(comm);
@@ -2627,6 +2731,7 @@ TEST_F(GinMPIDeviceTests, BarrierPools_NoCrossTalk) {
     GTEST_SKIP() << "Requires 2-8 ranks";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t comm = getActiveCommunicator();
   hipStream_t stream = getActiveStream();
   int worldRanks = ncclTeamWorld(comm).nRanks;
@@ -2818,6 +2923,7 @@ TEST_F(GinMPIDeviceTests, SignalAdd_AndShadow) {
     GTEST_SKIP() << "Requires exactly 2 ranks";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t  comm   = getActiveCommunicator();
   hipStream_t stream = getActiveStream();
 
@@ -3017,6 +3123,7 @@ TEST_F(GinMPIDeviceTests, SymPtr_PutAndPutValue) {
     GTEST_SKIP() << "Requires exactly 2 ranks";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t  comm   = getActiveCommunicator();
   hipStream_t stream = getActiveStream();
 
@@ -3321,6 +3428,7 @@ TEST_F(GinMPIDeviceTests, Alltoall_PureReference) {
     GTEST_SKIP() << "Requires 2-8 ranks";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t  comm   = getActiveCommunicator();
   hipStream_t stream = getActiveStream();
 
@@ -3358,6 +3466,7 @@ TEST_F(GinMPIDeviceTests, Alltoall_WorldGinBarrierReference) {
     GTEST_SKIP() << "Requires 2-8 ranks";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t  comm   = getActiveCommunicator();
   hipStream_t stream = getActiveStream();
 
@@ -3480,6 +3589,7 @@ TEST_F(GinMPIDeviceTests, AlltoallHybrid_Reference) {
   }
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t  comm   = getActiveCommunicator();
   hipStream_t stream = getActiveStream();
 
@@ -3588,6 +3698,7 @@ TEST_F(GinMPIDeviceTests, DevComm_LegacyGinSignalRequestRejected) {
     GTEST_SKIP() << "Requires exactly 2 ranks";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t comm = getActiveCommunicator();
 
   // GIN device code compiled against 2.29.7 is ABI-incompatible with 2.30.
@@ -3639,6 +3750,7 @@ TEST_F(GinMPIDeviceTests, DevComm_PerInstanceGinHandlesAreDistinct) {
     GTEST_SKIP() << "Requires exactly 2 ranks";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t comm = getActiveCommunicator();
   ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.ginContextCount = 1;
@@ -3769,6 +3881,7 @@ TEST_F(GinMPIDeviceTests, DevComm_PerInstanceGinResourcesRemainUsable) {
     GTEST_SKIP() << "Requires exactly 2 ranks";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t comm = getActiveCommunicator();
   hipStream_t stream = getActiveStream();
   int rank = -1;
@@ -3936,6 +4049,7 @@ TEST_F(GinMPIDeviceTests, Alltoall_SdmaInternal) {
     GTEST_SKIP() << "Requires 2-8 ranks";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t  comm   = getActiveCommunicator();
   hipStream_t stream = getActiveStream();
 
@@ -4065,6 +4179,7 @@ TEST_F(GinMPIDeviceTests, MultiContext_AllFourRoute) {
     GTEST_SKIP() << "Requires exactly 2 ranks";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t  comm   = getActiveCommunicator();
   hipStream_t stream = getActiveStream();
 
@@ -4210,6 +4325,7 @@ TEST_F(GinMPIDeviceTests, MultiContext_NonPowerOf2) {
     GTEST_SKIP() << "Requires exactly 2 ranks";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t  comm   = getActiveCommunicator();
   hipStream_t stream = getActiveStream();
 
@@ -4339,6 +4455,7 @@ TEST_F(GinMPIDeviceTests, LargeBuffer_Sweep) {
     GTEST_SKIP() << "Requires exactly 2 ranks";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t  comm   = getActiveCommunicator();
   hipStream_t stream = getActiveStream();
 
@@ -4460,7 +4577,8 @@ TEST_F(GinMPIDeviceTests, Disable_Error) {
     GTEST_SKIP() << "Requires exactly 2 ranks";
 
   // Skip ginProxyTestSkipReason: bare comm bring-up does not call into GIN,
-  // so the data-path gates don't apply here.
+  // so the data-path gates don't apply here. Do not SKIP_IF_GIN_UNSUPPORTED:
+  // ENABLE=0 leaves globalGinSupport NONE, which is the condition under test.
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
   ncclComm_t comm = getActiveCommunicator();
 
@@ -4525,6 +4643,7 @@ TEST_F(GinMPIDeviceTests, Teardown_NoLeaks) {
   {
     // Setup: comm, stream, geometry.
     ASSERT_EQ(ncclSuccess, createTestCommunicator());
+    SKIP_IF_GIN_UNSUPPORTED();
     ncclComm_t  comm   = getActiveCommunicator();
     hipStream_t stream = getActiveStream();
 
@@ -4606,6 +4725,7 @@ TEST_F(GinMPIDeviceTests, Init_Destroy_Stress) {
   for (int i = 0; i < kIterations; ++i) {
     // Fresh comm each iter.
     ASSERT_EQ(ncclSuccess, createTestCommunicator()) << "iter " << i;
+    SKIP_IF_GIN_UNSUPPORTED();
     ncclComm_t comm = getActiveCommunicator();
 
     // Allocate + register a tiny window to actually trigger the GIN
@@ -4640,6 +4760,7 @@ TEST_F(GinMPIDeviceTests, Alltoall_CrossNode) {
     GTEST_SKIP() << "Requires >=2 ranks";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t  comm   = getActiveCommunicator();
   hipStream_t stream = getActiveStream();
 
@@ -4770,6 +4891,7 @@ TEST_F(GinMPIDeviceTests, Properties_NLsaTeams) {
     GTEST_SKIP() << "Requires 2-8 ranks";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t comm = getActiveCommunicator();
 
   int nRanks = -1;
@@ -4798,6 +4920,7 @@ TEST_F(GinMPIDeviceTests, MultiContext_Exclusive) {
     GTEST_SKIP() << "Requires exactly 2 ranks";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t  comm   = getActiveCommunicator();
   hipStream_t stream = getActiveStream();
 
@@ -4986,6 +5109,7 @@ void GinMPIDeviceTests::runVASignalPut(int nContexts) {
     GTEST_SKIP() << "Requires exactly 2 ranks";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t  comm   = getActiveCommunicator();
   hipStream_t stream = getActiveStream();
   int rank = -1, nRanks = -1;
@@ -5227,6 +5351,7 @@ TEST_F(GinMPIDeviceTests, VASignal_NoPayload_IncAndAdd) {
     GTEST_SKIP() << "Requires exactly 2 ranks";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t  comm   = getActiveCommunicator();
   hipStream_t stream = getActiveStream();
   int rank = -1, nRanks = -1;
@@ -5341,6 +5466,7 @@ TEST_F(GinMPIDeviceTests, VASignal_ReadAndReset) {
     GTEST_SKIP() << "Requires exactly 2 ranks";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t  comm   = getActiveCommunicator();
   hipStream_t stream = getActiveStream();
   int rank = -1, nRanks = -1;
@@ -5464,6 +5590,7 @@ TEST_F(GinMPIDeviceTests, SignalAdd_PutValue) {
     GTEST_SKIP() << "Requires exactly 2 ranks";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t  comm   = getActiveCommunicator();
   hipStream_t stream = getActiveStream();
   int rank = -1, nRanks = -1;
@@ -5533,6 +5660,7 @@ TEST_F(GinMPIDeviceTests, SignalInc_MixingRule) {
     GTEST_SKIP() << "Requires exactly 2 ranks";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t  comm   = getActiveCommunicator();
   hipStream_t stream = getActiveStream();
   int rank = -1, nRanks = -1;
@@ -5635,6 +5763,7 @@ TEST_F(GinMPIDeviceTests, Signal_WaitRead_Low32Bits) {
     GTEST_SKIP() << "Requires exactly 2 ranks";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t  comm   = getActiveCommunicator();
   hipStream_t stream = getActiveStream();
   int rank = -1, nRanks = -1;
@@ -5693,6 +5822,7 @@ TEST_F(GinMPIDeviceTests, VASignal_StrictOrderingFlag) {
     GTEST_SKIP() << "Requires exactly 2 ranks";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t  comm   = getActiveCommunicator();
   hipStream_t stream = getActiveStream();
   int rank = -1, nRanks = -1;
@@ -5761,6 +5891,7 @@ TEST_F(GinMPIDeviceTests, SignalShadow_GetPtr) {
     GTEST_SKIP() << "Requires exactly 2 ranks";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t  comm   = getActiveCommunicator();
   hipStream_t stream = getActiveStream();
 
@@ -5809,6 +5940,9 @@ TEST_F(GinMPIDeviceTests, RailConnection_Create) {
     GTEST_SKIP() << "RAIL connection requires NCCL_CROSS_NIC=0 (rail-only mode)";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  // RAIL is the connection under test. Skip only when GIN is absent; a
+  // rail-only communicator must not take the FULL skip used by defaultGinReqs().
+  SKIP_IF_GIN_REQUIRES(NCCL_GIN_CONNECTION_RAIL);
   ncclComm_t comm = getActiveCommunicator();
 
   // RAIL is only valid when the communicator advertises a railed GIN type.

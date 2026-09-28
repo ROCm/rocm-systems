@@ -117,9 +117,13 @@ add_perfetto_annotation(::perfetto::EventContext& ctx, Np&& name, Tp&& value,
     else if constexpr(std::is_integral<value_type>::value)
     {
         if constexpr(std::is_unsigned<value_type>::value)
+        {
             get_debug_annotation()->set_uint_value(value);
+        }
         else
+        {
             get_debug_annotation()->set_int_value(value);
+        }
     }
     else if constexpr(std::is_pointer<value_type>::value)
     {
@@ -191,7 +195,10 @@ inline void
 push_perfetto_track(CategoryT, const char* name, ::perfetto::Track track,
                     std::uint64_t timestamp, Args&&... args)
 {
-    if(!::tim::trait::runtime_enabled<CategoryT>::get()) return;
+    if(!::tim::trait::runtime_enabled<CategoryT>::get())
+    {
+        return;
+    }
 
     TRACE_EVENT_BEGIN(::tim::trait::name<CategoryT>::value, get_perfetto_string(name),
                       track, timestamp, std::forward<Args>(args)...);
@@ -202,7 +209,10 @@ inline void
 pop_perfetto_track(CategoryT, const char*, ::perfetto::Track track,
                    std::uint64_t timestamp, Args&&... args)
 {
-    if(!::tim::trait::runtime_enabled<CategoryT>::get()) return;
+    if(!::tim::trait::runtime_enabled<CategoryT>::get())
+    {
+        return;
+    }
 
     TRACE_EVENT_END(::tim::trait::name<CategoryT>::value, track, timestamp,
                     std::forward<Args>(args)...);

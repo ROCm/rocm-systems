@@ -44,6 +44,7 @@ class EventRegistry {
     MemoryOrderClass memoryOrder;
     EventStatus status;
     uint8_t byteMask;
+    uint8_t lastRegisterByteMask;
     uint64_t execMask;
     std::vector<uint32_t> registers;
     IntervalSet ldsIntervals;
@@ -54,7 +55,7 @@ public:
   EventId add(WaveId waveId, uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers,
               uint64_t execMask, uint8_t byteMask, IntervalSet ldsIntervals,
               std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-              MemoryOrderClass memoryOrder) {
+              MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0) {
     int id = base_offset_ + static_cast<int>(entries_.size());
     assert(!counterObligations.empty());
     assert(counterObligations.size() <= amdgpu::MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS);
@@ -67,6 +68,7 @@ public:
                     memoryOrder,
                     EventStatus::ACTIVE,
                     byteMask,
+                    lastRegisterByteMask ? lastRegisterByteMask : byteMask,
                     execMask,
                     std::move(registers),
                     std::move(ldsIntervals)};
@@ -135,6 +137,13 @@ public:
   bool isTrimmable(EventId id) const { return isEntryTrimmable(entries_[index(id)]); }
   uint64_t pc(EventId id) const { return entries_[index(id)].pc; }
   uint8_t byteMask(EventId id) const { return entries_[index(id)].byteMask; }
+  /// Packed loads can write fewer bytes in the last destination without
+  /// creating a second event or consuming another wait-counter increment.
+  uint8_t registerByteMask(EventId id, uint32_t reg) const {
+    const auto &event = entries_[index(id)];
+    return !event.registers.empty() && reg == event.registers.back() ? event.lastRegisterByteMask
+                                                                     : event.byteMask;
+  }
   uint64_t execMask(EventId id) const { return entries_[index(id)].execMask; }
   WaveId waveId(EventId id) const { return entries_[index(id)].waveId; }
 

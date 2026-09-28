@@ -142,10 +142,10 @@ struct __half {
   }
 #endif
 
-// MANIPULATORS - DEVICE ONLY
+// MANIPULATORS - INTEGRAL
 #if !defined(__HIP_NO_HALF_CONVERSIONS__)
   template <typename T, Enable_if_t<__hip_internal::is_integral<T>{}>* = nullptr>
-  __device__ __half& operator=(T x) {
+  __HOST_DEVICE__ __half& operator=(T x) {
     data = static_cast<_Float16>(x);
     return *this;
   }

@@ -569,6 +569,14 @@ std::unordered_map<std::string, FactoryFn> &factories() {
       cc.lds_size_kb = config_u32(cfg, "lds_size_kb", 160);
       cc.functional_quantum =
           config_u32(cfg, "functional_quantum", amdgpu::ComputeUnitCore::kFunctionalQuantum);
+      if (auto it = cfg.find("memory_wait_diagnostics"); it != cfg.end()) {
+        if (it->second == "off")
+          cc.memory_wait_diagnostics = amdgpu::MemoryWaitDiagnostics::Off;
+        else if (it->second == "warn")
+          cc.memory_wait_diagnostics = amdgpu::MemoryWaitDiagnostics::Warn;
+        else
+          throw std::invalid_argument("memory_wait_diagnostics must be warn or off");
+      }
       return amdgpu::ComputeUnitCore::create(n, cc, mem, nullptr, mode);
     };
   }
@@ -961,6 +969,11 @@ LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint
   result.async_resources = make_async_execution_resources(result.execution_threads.helpers);
   result.build_result =
       build_topology(topo_def, result.exec_mode, arch, result.target, result.async_resources);
+  if (result.device.present)
+    if (SoC *soc = result.soc())
+      soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
+        cp->set_scratch_slots_per_cu(result.device.max_slots_scratch_cu);
+      });
 
   // A config that describes no bus still yields usable defaults, so front ends
   // that attach the GPU to a VMM work without every config being updated.
@@ -979,9 +992,14 @@ LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint
       result.devices[i].drm_render_minor = 128 + i;
       result.devices[i].unique_id = result.device.unique_id + i;
     }
-    for (uint32_t i = 1; i < result.num_gpus; ++i)
+    for (uint32_t i = 1; i < result.num_gpus; ++i) {
       result.extra_gpu_builds.push_back(
           build_topology(topo_def, result.exec_mode, arch, result.target, result.async_resources));
+      if (auto *soc = dynamic_cast<SoC *>(result.extra_gpu_builds.back().root.get()))
+        soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
+          cp->set_scratch_slots_per_cu(result.device.max_slots_scratch_cu);
+        });
+    }
   }
 
   return result;
@@ -1074,6 +1092,11 @@ ExecutionThreadSettings load_execution_thread_settings(const std::string &json_p
                                                        const std::string &schema_text) {
   return with_parsed_simulation_config_json(read_config_file(json_path), schema_text,
                                             execution_thread_settings);
+}
+
+ExecutionThreadSettings load_execution_thread_settings_from_string(const std::string &json,
+                                                                   const std::string &schema_text) {
+  return with_parsed_simulation_config_json(json, schema_text, execution_thread_settings);
 }
 
 LoadedConfig load_config(const std::string &json_path, const std::string &schema_text,

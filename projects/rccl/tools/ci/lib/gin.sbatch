@@ -15,11 +15,13 @@
 #   1. consume ROCm (provisioned on the head node) via .ci-out/rocm.env
 #   2. lib/build-ompi.sh      build OpenMPI (--with-rocm) -> ompi.env
 #   3. lib/build-rocshmem.sh  build rocSHMEM (IPC+SDMA)   -> rocshmem.env
-#   4. projects/rccl  install.sh  build RCCL (GIN/rocSHMEM), then build only
-#      rccl-UnitTestsFixtures and rccl-UnitTestsGinSdmaBroadcastPolicy
+#   4. projects/rccl  install.sh  build RCCL (GIN/rocSHMEM), then build
+#      rccl-UnitTestsFixtures, the ConnCheck host/device tests, and
+#      rccl-UnitTestsGinSdmaBroadcastPolicy
 #      (GIN_ANVIL_UNIT_TESTS=ON) -> rccl.env
 #   5. projects/rccl-tests        build rccl-tests (DEVICE_API + ROCSHMEM)
-#   6. run-gin-ci.sh              run the GIN/rocSHMEM tests (non-gating)
+#   6. rccl-UnitTestsGinAnvilSdmaFactory  SDMA factory gtest (single-node)
+#   7. run-gin-ci.sh              run the GIN/rocSHMEM tests (non-gating)
 #
 # Required env (from the workflow via `sbatch --export=ALL,...`):
 #   RCCL_DEVICE_API_WORKDIR   GHA workspace (rocm-systems root)
@@ -60,7 +62,7 @@ build_rc=0
 (
 # 1) ROCm: provisioned on the head node from TheRock CI artifacts; consume the
 # workspace tree via rocm.env.
-echo "==> [1/6] use ROCm (provisioned from TheRock artifacts on head node)"
+echo "==> [1/7] use ROCm (provisioned from TheRock artifacts on head node)"
 rocm_env="${workdir}/.ci-out/rocm.env"
 if [[ ! -f "${rocm_env}" ]]; then
   echo "ERROR: ${rocm_env} not found. The workflow must run 'Provision ROCm" >&2
@@ -85,7 +87,7 @@ export CMAKE_PREFIX_PATH="${ROCM_PATH}/lib/cmake:${ROCM_PATH}${CMAKE_PREFIX_PATH
 
 # 2) OpenMPI: built here against ROCM_PATH into the per-job workspace cache
 # (no shared cache), then ompi.env (MPI_HOME) is sourced below.
-echo "==> [2/6] build OpenMPI"
+echo "==> [2/7] build OpenMPI"
 "${ci_dir}/lib/build-ompi.sh"
 set -a
 # shellcheck source=/dev/null
@@ -98,7 +100,7 @@ export PATH="${MPI_HOME}/bin:${PATH}"
 source "${ci_dir}/lib/ensure-python-yaml.sh"
 
 # 3) rocSHMEM (in-tree, IPC+SDMA) -> rocshmem.env (ROCSHMEM_INSTALL_DIR)
-echo "==> [3/6] build rocSHMEM"
+echo "==> [3/7] build rocSHMEM"
 GPU_TARGETS="${gpu_targets}" "${ci_dir}/lib/build-rocshmem.sh"
 set -a
 # shellcheck source=/dev/null
@@ -107,16 +109,18 @@ set +a
 
 # 4) RCCL with GIN / rocSHMEM. Mirrors the Dockerfile: patch the rocSHMEM
 # threshold guard, then install.sh with ENABLE_ROCSHMEM_GIN. Build
-# rccl-UnitTestsFixtures in a second step (reconfigure BUILD_TESTS=ON,
-# GIN_ANVIL_UNIT_TESTS=ON, make only that target). Do not pass install.sh -t:
-# that builds every test executable and pulls in rccl-UnitTestsGinAnvilPlugin,
-# which can compile before hipify headers exist under parallel -j and aborts
-# before librccl.so is installed.
-echo "==> [4/6] build RCCL (GIN, targets=${gpu_targets})"
+# rccl-UnitTestsFixtures plus the GIN gtest binaries in a second step
+# (reconfigure BUILD_TESTS=ON, GIN_ANVIL_UNIT_TESTS=ON). Do not pass
+# install.sh -t: that builds every test executable and can compile plugin
+# tests before hipify headers exist under parallel -j and abort before
+# librccl.so is installed.
+echo "==> [4/7] build RCCL (GIN, targets=${gpu_targets})"
 rccl_src="${workdir}/projects/rccl"
 rccl_prefix="${workdir}/.ci-out/rccl-install"
 rccl_build="${rccl_src}/build/release"
 rccl_fixtures_bin="${rccl_build}/test/rccl-UnitTestsFixtures"
+rccl_conn_plugin_bin="${rccl_build}/test/rccl-UnitTestsGinAnvilPlugin"
+rccl_conn_device_bin="${rccl_build}/test/rccl-UnitTestsGinAnvilConnCheckDevice"
 rccl_bcast_policy_ut_bin="${rccl_build}/test/rccl-UnitTestsGinSdmaBroadcastPolicy"
 rccl_mpi_ut_bin="${rccl_build}/test/rccl-UnitTestsMPI"
 rm -rf "${rccl_prefix}"
@@ -133,15 +137,84 @@ if [[ ! -f "${rccl_prefix}/lib/librccl.so" && ! -f "${rccl_prefix}/lib/librccl.s
   ls -la "${rccl_prefix}/lib" 2>/dev/null >&2 || true
   exit 1
 fi
+# CMake's namelink (librccl.so) may be a GNU ld script, not an ELF.
+# The shipped library that carries .hip_fatbin is librccl.so.1 / .so.1.0.
+# Prefer a real ELF so readelf/objcopy see the fatbin section (GIN CI on
+# d913f3f7c4 failed this pin on the namelink after device-link produced a
+# 27.7 MiB .hip_fatbin in the build-tree library).
+rccl_readelf() {
+  if command -v llvm-readelf >/dev/null 2>&1; then
+    llvm-readelf "$@"
+  else
+    readelf "$@"
+  fi
+}
+resolve_librccl_elf() {
+  local prefix="$1"
+  local cand
+  for cand in \
+      "${prefix}/lib/librccl.so.1.0" \
+      "${prefix}/lib/librccl.so.1" \
+      "${prefix}/lib/librccl.so"; do
+    if [[ -e "${cand}" ]] && rccl_readelf -h "${cand}" >/dev/null 2>&1; then
+      printf '%s\n' "${cand}"
+      return 0
+    fi
+  done
+  return 1
+}
+librccl="$(resolve_librccl_elf "${rccl_prefix}")" || {
+  echo "ERROR: no ELF librccl under ${rccl_prefix}/lib" >&2
+  ls -la "${rccl_prefix}/lib"/librccl.so* 2>/dev/null >&2 || true
+  file "${rccl_prefix}/lib"/librccl.so* 2>/dev/null >&2 || true
+  exit 1
+}
+# The #10930 regression was an unlinked conn-check fatbin. Pin the two kernel
+# names in the shipped .hip_fatbin section, not host stubs / registration text.
+assert_conn_check_kernels_in_fatbin() {
+  local lib="$1"
+  if ! rccl_readelf -S "${lib}" 2>/dev/null | grep -q '\.hip_fatbin'; then
+    echo "ERROR: ${lib} has no .hip_fatbin section" >&2
+    rccl_readelf -S "${lib}" >&2 || true
+    exit 1
+  fi
+  local fatbin
+  fatbin="$(mktemp)"
+  if llvm-objcopy -O binary --only-section=.hip_fatbin "${lib}" "${fatbin}" 2>/dev/null \
+     || objcopy -O binary --only-section=.hip_fatbin "${lib}" "${fatbin}" 2>/dev/null; then
+    :
+  else
+    echo "ERROR: could not extract .hip_fatbin from ${lib}" >&2
+    rm -f "${fatbin}"
+    exit 1
+  fi
+  local kernel
+  for kernel in ginAnvilConnWriteKernel ginAnvilConnCheckKernel; do
+    if ! grep -qa "${kernel}" "${fatbin}"; then
+      echo "ERROR: ${kernel} missing from ${lib} .hip_fatbin (conn-check not device-linked)" >&2
+      rm -f "${fatbin}"
+      exit 1
+    fi
+  done
+  rm -f "${fatbin}"
+}
+assert_conn_check_kernels_in_fatbin "${librccl}"
+echo "    conn-check kernels present in ${librccl} .hip_fatbin"
 
-echo "==> [4/6] build rccl-UnitTestsFixtures + GinSdmaBroadcastPolicy + UnitTestsMPI (GIN_ANVIL_UNIT_TESTS=ON)"
+echo "==> [4/7] build fixtures, ConnCheck, GinSdmaBroadcastPolicy, GinAnvilSdmaFactory, and UnitTestsMPI (GIN_ANVIL_UNIT_TESTS=ON)"
 (
   cd "${rccl_build}"
   cmake . \
     -DBUILD_TESTS=ON \
     -DGIN_ANVIL_UNIT_TESTS=ON \
     -DROCSHMEM_INSTALL_DIR="${ROCSHMEM_INSTALL_DIR}"
-  make -j"${build_jobs}" rccl-UnitTestsFixtures rccl-UnitTestsGinSdmaBroadcastPolicy rccl-UnitTestsMPI
+  make -j"${build_jobs}" \
+    rccl-UnitTestsFixtures \
+    rccl-UnitTestsGinAnvilPlugin \
+    rccl-UnitTestsGinAnvilConnCheckDevice \
+    rccl-UnitTestsGinSdmaBroadcastPolicy \
+    rccl-UnitTestsGinAnvilSdmaFactory \
+    rccl-UnitTestsMPI
 )
 if [[ ! -x "${rccl_fixtures_bin}" ]]; then
   echo "ERROR: rccl-UnitTestsFixtures not built at ${rccl_fixtures_bin}" >&2
@@ -153,6 +226,11 @@ if [[ ! -x "${rccl_bcast_policy_ut_bin}" ]]; then
   ls -la "$(dirname "${rccl_bcast_policy_ut_bin}")" 2>/dev/null >&2 || true
   exit 1
 fi
+if [[ ! -x "${rccl_conn_plugin_bin}" || ! -x "${rccl_conn_device_bin}" ]]; then
+  echo "ERROR: ConnCheck unit tests were not built under ${rccl_build}/test" >&2
+  ls -la "${rccl_build}/test" 2>/dev/null >&2 || true
+  exit 1
+fi
 if [[ ! -x "${rccl_mpi_ut_bin}" ]]; then
   echo "ERROR: rccl-UnitTestsMPI not built at ${rccl_mpi_ut_bin}" >&2
   ls -la "$(dirname "${rccl_mpi_ut_bin}")" 2>/dev/null >&2 || true
@@ -160,6 +238,8 @@ if [[ ! -x "${rccl_mpi_ut_bin}" ]]; then
 fi
 echo "    rccl-UnitTestsFixtures: ${rccl_fixtures_bin}"
 echo "    rccl-UnitTestsGinSdmaBroadcastPolicy: ${rccl_bcast_policy_ut_bin}"
+echo "    rccl-UnitTestsGinAnvilPlugin: ${rccl_conn_plugin_bin}"
+echo "    rccl-UnitTestsGinAnvilConnCheckDevice: ${rccl_conn_device_bin}"
 echo "    rccl-UnitTestsMPI: ${rccl_mpi_ut_bin}"
 
 # Locate the in-tree RCCL CMake package config. rccl-tests' find_package(RCCL)
@@ -176,7 +256,7 @@ echo "    in-tree RCCL cmake config: ${rccl_cmake_dir}"
 
 # 5) rccl-tests (DEVICE_API + ROCSHMEM). allreduce fails to build; -k keeps going
 # so alltoall_perf still lands (matches the Dockerfile's `make -k || true`).
-echo "==> [5/6] build rccl-tests (ENABLE_DEVICE_API + ENABLE_ROCSHMEM_GIN)"
+echo "==> [5/7] build rccl-tests (ENABLE_DEVICE_API + ENABLE_ROCSHMEM_GIN)"
 rccl_tests_src="${workdir}/projects/rccl-tests"
 rccl_tests_build="${workdir}/.ci-out/rccl-tests-build"
 
@@ -234,12 +314,38 @@ if [[ "${build_rc}" -ne 0 ]]; then
   exit "${build_rc}"
 fi
 
+# Re-source env files written by the build subshell — ROCM_PATH,
+# ROCSHMEM_INSTALL_DIR, RCCL_INSTALL_PREFIX etc. don't survive the subshell.
+set -a
+for _env in rocm ompi rocshmem rccl; do
+  _f="${workdir}/.ci-out/${_env}.env"
+  # shellcheck source=/dev/null
+  [[ -f "${_f}" ]] && source "${_f}"
+done
+set +a
+
+# --- unit test: SDMA factory gtest (single-node, no MPI needed). ---
+# Self-contained: compiles factory + anvil.cpp directly, no librccl.so link.
+echo "==> [6/7] run SDMA factory unit tests"
+sdma_factory_test="${RCCL_FIXTURES_BIN_DIR}/rccl-UnitTestsGinAnvilSdmaFactory"
+if [[ -x "${sdma_factory_test}" ]]; then
+  _sysdeps_lib=""
+  for _sp in "${ROCM_PATH}/lib/rocm_sysdeps/lib" "${ROCM_PATH}/core/lib/rocm_sysdeps/lib"; do
+    [[ -d "${_sp}" ]] && _sysdeps_lib="${_sp}"
+  done
+  export LD_LIBRARY_PATH="${RCCL_INSTALL_PREFIX}/lib:${ROCSHMEM_INSTALL_DIR}/lib:${ROCM_PATH}/lib${_sysdeps_lib:+:${_sysdeps_lib}}:${LD_LIBRARY_PATH:-}"
+  "${sdma_factory_test}" --gtest_output="xml:${logs_dir}/sdma-factory-test.xml" \
+    || echo "WARNING: SDMA factory unit tests failed (non-gating)" >&2
+else
+  echo "  SKIP: ${sdma_factory_test} not found (BUILD_TESTS may be off)"
+fi
+
 # --- test phase -> test-%j.{out,err}. Don't fail the sbatch on test failures
 # (that would look like a build/infra failure); drop a `tests-failed` sentinel
 # instead, which the workflow turns into a red (non-gating for gin) result. ---
 test_rc=0
 {
-echo "==> [6/6] run GIN tests"
+echo "==> [7/7] run GIN tests"
 "${ci_dir}/run-gin-ci.sh"
 } > "${test_out}" 2> "${test_err}" || test_rc=$?
 echo "==> test phase logs: ${test_out} / ${test_err}"

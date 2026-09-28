@@ -48,7 +48,10 @@ template <typename RetT, typename... Args>
 inline RetT
 dynamic_library::invoke(std::string_view _name, RetT (*&_func)(Args...), Args... _args)
 {
-    if(!handle) open();
+    if(!handle)
+    {
+        open();
+    }
     if(handle)
     {
         *(void**) (&_func) = dlsym(handle, _name.data());
@@ -56,10 +59,8 @@ dynamic_library::invoke(std::string_view _name, RetT (*&_func)(Args...), Args...
         {
             return (*_func)(_args...);
         }
-        else
-        {
-            LOG_WARNING("[rocprof-sys][pid={}]> {} :: {}", getpid(), _name, dlerror());
-        }
+
+        LOG_WARNING("[rocprof-sys][pid={}]> {} :: {}", getpid(), _name, dlerror());
     }
     return RetT{};
 }

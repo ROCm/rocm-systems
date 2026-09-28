@@ -48,7 +48,10 @@ scope_filter::satisfies_filter(const ContainerT& _filters, filter_scope _scope,
     {
         // if the filter is for the specified scope and itr does not satisfy the
         // include/exclude mode, return false
-        if((itr.scope & _scope) > 0 && !itr(_value)) return false;
+        if((itr.scope & _scope) > 0 && !itr(_value))
+        {
+            return false;
+        }
     }
     return true;
 }

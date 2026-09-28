@@ -23,7 +23,7 @@
 # Misc local working artifacts
 *.swp
 .vscode
-build
+build*/
 third_party
 Testing
 tmp
