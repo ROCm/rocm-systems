@@ -10,8 +10,6 @@ set(HIPFILE_SOURCES
     api_trace/api-trace.cpp
     async.cpp
     backend.cpp
-    backend/asyncop-fallback.cpp
-    backend/memcpy-kernel.hip
     backend/fallback.cpp
     backend/fastpath.cpp
     batch/batch.cpp

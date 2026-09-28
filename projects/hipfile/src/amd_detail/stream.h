@@ -25,9 +25,6 @@ public:
     virtual bool                         fixedIOSize() const           = 0;
     virtual bool                         pageAligned() const           = 0;
     virtual std::unique_lock<std::mutex> getLock()                     = 0;
-    virtual void                        *asyncBufferHostPtr() const    = 0;
-    virtual void                        *asyncBufferDevPtr() const     = 0;
-    virtual size_t                       asyncBufferSize() const       = 0;
     virtual bool                         canUseStreamWaitValue() const = 0;
     virtual hipStream_t                  copyStream() const            = 0;
     virtual uint64_t                    *signalSlot() const            = 0;
@@ -47,9 +44,6 @@ public:
     virtual bool                         fixedIOSize() const override;
     virtual bool                         pageAligned() const override;
     virtual std::unique_lock<std::mutex> getLock() override;
-    virtual void                        *asyncBufferHostPtr() const override;
-    virtual void                        *asyncBufferDevPtr() const override;
-    virtual size_t                       asyncBufferSize() const override;
     virtual bool                         canUseStreamWaitValue() const override;
     virtual hipStream_t                  copyStream() const override;
     virtual uint64_t                    *signalSlot() const override;
@@ -75,10 +69,6 @@ private:
     hipStream_t copy_stream;
     uint64_t   *signal_slot;
     uint64_t    signal_counter;
-
-    std::unique_ptr<void, void (*)(void *)> async_buffer;
-    void                                   *async_buffer_dev_ptr;
-    size_t                                  async_buffer_size;
 };
 
 class StreamMap {
