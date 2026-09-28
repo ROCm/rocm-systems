@@ -1,0 +1,148 @@
+# Config package for the HIP Fortran bindings.
+#
+#   find_package(hip-fortran REQUIRED)
+#   target_link_libraries(my_app PRIVATE hip::hip_fortran)
+#
+# The bindings ship as one static archive and one .mod set PER FORTRAN COMPILER,
+# because a .mod is not portable across compilers or even across versions of the
+# same compiler. This package therefore checks that the consumer is building with
+# the compiler the bindings were installed for, and fails with a named diagnostic
+# rather than letting the build hit an unreadable .mod much later.
+
+@PACKAGE_INIT@
+
+set(HIP_FORTRAN_COMPILER_DIR "@HIP_FORTRAN_COMPILER_DIR@")
+
+# A consumer asks "is a HIP Fortran binding available here?" through
+# hip_FORTRAN_FOUND, which is set whether this package is reached directly by
+# find_package(hip-fortran) or through the OPTIONAL include at the end of
+# hip-config.cmake. It stays FALSE on every early return below.
+set(hip_FORTRAN_FOUND FALSE)
+
+if(NOT CMAKE_Fortran_COMPILER_LOADED)
+  set(hip-fortran_FOUND FALSE)
+  # One argument, not several. set() with multiple arguments builds a LIST, and
+  # find_package renders a list with a semicolon at every element boundary, so a
+  # message split across lines for readability comes out as
+  # "... find_package: ;add Fortran to ...". string(CONCAT) keeps the source
+  # readable and the rendered text clean.
+  string(CONCAT hip-fortran_NOT_FOUND_MESSAGE
+      "The HIP Fortran bindings need Fortran enabled before find_package: "
+      "add Fortran to your project() languages, or call enable_language(Fortran).")
+  return()
+endif()
+
+# This MUST mirror the mapping in projects/hip/fortran/CMakeLists.txt exactly: it
+# recomputes, for the compiler the CONSUMER is using, the same directory name the
+# bindings were installed under. The two cannot share code, because this
+# file runs in a consumer's build long after ours is gone, so they are kept in
+# step by hand.
+# Get it wrong and the check never matches: the package then rejects every
+# consumer with a message claiming a compiler mismatch that does not exist.
+if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
+  set(_hip_fc "gfortran")
+elseif(CMAKE_Fortran_COMPILER_ID MATCHES "Flang")     # Flang, LLVMFlang
+  set(_hip_fc "amdflang")
+elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "Cray")
+  set(_hip_fc "ftn")
+elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "IntelLLVM")
+  set(_hip_fc "ifx")
+elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "Intel")
+  set(_hip_fc "ifort")
+elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "NVHPC")
+  set(_hip_fc "nvfortran")
+else()
+  get_filename_component(_hip_fc "${CMAKE_Fortran_COMPILER}" NAME_WE)
+  string(TOLOWER "${_hip_fc}" _hip_fc)
+endif()
+
+function(_hip_dir_matches DIR FC OUT)
+  set(${OUT} FALSE PARENT_SCOPE)
+  if(DIR STREQUAL FC)
+    set(${OUT} TRUE PARENT_SCOPE)
+    return()
+  endif()
+  string(LENGTH "${FC}" _n)
+  string(LENGTH "${DIR}" _dn)
+  if(_dn GREATER _n)
+    string(SUBSTRING "${DIR}" 0 ${_n} _head)
+    string(SUBSTRING "${DIR}" ${_n} 1 _sep)
+    if(_head STREQUAL FC AND _sep MATCHES "^[-._]$")
+      set(${OUT} TRUE PARENT_SCOPE)
+    endif()
+  endif()
+endfunction()
+
+# Which per-compiler directory to use.
+#
+# The recorded HIP_FORTRAN_COMPILER_DIR is the compiler the package was built
+# with, and it is only a default. A prefix can hold artifacts for several
+# compilers at once, since installing the bindings twice writes
+# include/fortran/gfortran and include/fortran/amdflang side by side, but the
+# config package is written once, so the recorded value names whichever install
+# ran last. Trusting it blindly rejects a consumer whose .mod is present.
+#
+# So prefer the consumer's OWN compiler when its artifacts are installed here,
+# and fall back to the recorded directory when they are not.
+set(_hip_dir "")
+if(EXISTS "${PACKAGE_PREFIX_DIR}/include/fortran/${_hip_fc}/hip.mod")
+  set(_hip_dir "${_hip_fc}")
+else()
+  _hip_dir_matches("${HIP_FORTRAN_COMPILER_DIR}" "${_hip_fc}" _hip_ok)
+  if(_hip_ok)
+    set(_hip_dir "${HIP_FORTRAN_COMPILER_DIR}")
+  endif()
+endif()
+
+if(NOT _hip_dir)
+  # Name what IS installed, so the reader can see whether they need to rebuild
+  # or merely point at an existing directory.
+  file(GLOB _hip_avail RELATIVE "${PACKAGE_PREFIX_DIR}/include/fortran"
+       "${PACKAGE_PREFIX_DIR}/include/fortran/*")
+  set(hip-fortran_FOUND FALSE)
+  string(CONCAT hip-fortran_NOT_FOUND_MESSAGE
+      "This project builds with ${_hip_fc}, but no hip.mod for it is installed "
+      "under ${PACKAGE_PREFIX_DIR}/include/fortran. Available: ${_hip_avail}. "
+      "A Fortran .mod cannot be shared across compilers; rebuild the bindings "
+      "with ${_hip_fc}, or set HIP_FORTRAN_COMPILER_DIR to the directory to use.")
+  return()
+endif()
+
+# The exported target carries hip::host in its link interface, so that target has
+# to exist before the targets file is read, otherwise CMake stops with "the
+# link interface of target hip::hip_fortran contains: hip::host but the target
+# was not found", which reads like a packaging bug rather than a missing
+# find_package in the consumer.
+#
+# hip-config.cmake reaches FindThreads, which hard-errors unless C or CXX is
+# enabled. A Fortran-only consumer has neither, so C is enabled here. Enabling a
+# language from a config package is unusual, and it is done deliberately: the
+# alternative is making every Fortran consumer of these bindings write
+# enable_language(C) for a reason that has nothing to do with their code.
+if(NOT TARGET hip::host)
+  if(NOT CMAKE_C_COMPILER_LOADED AND NOT CMAKE_CXX_COMPILER_LOADED)
+    enable_language(C)
+  endif()
+  include(CMakeFindDependencyMacro)
+  find_dependency(hip)
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/hip-fortran-targets.cmake")
+
+# The targets file hardcodes the directory the package was BUILT with. When the
+# consumer's compiler resolved to a different one above, repoint the imported
+# target at it, otherwise the .mod found and the archive linked would disagree.
+if(NOT _hip_dir STREQUAL "${HIP_FORTRAN_COMPILER_DIR}")
+  set_target_properties(hip::hip_fortran PROPERTIES
+    INTERFACE_INCLUDE_DIRECTORIES "${PACKAGE_PREFIX_DIR}/include/fortran/${_hip_dir}")
+  get_target_property(_hip_cfgs hip::hip_fortran IMPORTED_CONFIGURATIONS)
+  foreach(_hip_c IN LISTS _hip_cfgs)
+    set_target_properties(hip::hip_fortran PROPERTIES
+      IMPORTED_LOCATION_${_hip_c}
+        "${PACKAGE_PREFIX_DIR}/lib/fortran/${_hip_dir}/libhip_fortran.a")
+  endforeach()
+endif()
+
+set(hip_FORTRAN_FOUND TRUE)
+
+check_required_components(hip-fortran)
