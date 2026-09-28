@@ -67,6 +67,8 @@ test_categories:
       - test_soc_base
       - test-pc-sampling-collector
       - test-compression
+      - test-torch-trace-collector
+      - test-torch-trace-collector-before-install
     therock_ci_exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
@@ -158,6 +160,8 @@ test_categories:
       - test_soc_base
       - test-pc-sampling-collector
       - test-compression
+      - test-torch-trace-collector
+      - test-torch-trace-collector-before-install
       - test_profile_torch_trace
       - test_profile_live_attach_detach
       - test_metric_validation
@@ -252,6 +256,8 @@ test_categories:
       - test_soc_base
       - test-pc-sampling-collector
       - test-compression
+      - test-torch-trace-collector
+      - test-torch-trace-collector-before-install
       - test_profile_torch_trace
       - test_profile_live_attach_detach
       - test_metric_validation
@@ -346,6 +352,8 @@ test_categories:
       - test_soc_base
       - test-pc-sampling-collector
       - test-compression
+      - test-torch-trace-collector
+      - test-torch-trace-collector-before-install
       - test_profile_torch_trace
       - test_profile_live_attach_detach
       - test_metric_validation
