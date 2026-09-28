@@ -566,6 +566,8 @@ inline SwmmacIndexLoc swmmac_index_loc(uint32_t M, uint32_t K, uint32_t elem_bit
     }
     return {row + 16u * ((group / 2u) & 1u), 2u * (group & 1u) + 4u * (group / 4u) + slot};
   }
+  if (M == 16 && K == 64 && elem_bits == 4 && index_entries == 16)
+    return {row + 16u * ((compressed_k / 8u) & 1u), 8u * (compressed_k / 16u) + compressed_k % 8u};
   // This generic routing is also intentional for gfx1250 K=128 8-bit
   // SWMMAC. Hardware-reference Tensile kernels require contiguous 32-entry
   // selector blocks even though sparse A changes lane halves every 16 packed
