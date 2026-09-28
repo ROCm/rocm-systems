@@ -13,7 +13,7 @@ provenance is a string.
 | Field | Content |
 |---|---|
 | Primary CUID | the canonical UUIDv8 string, or empty where the caller is not privileged enough to have it |
-| Derived CUID | the secondary UUIDv8 string |
+| Derived CUID | the derived UUIDv8 string |
 | Component type | the on-wire Component Type value |
 | Auxiliary | whether payload bit 117 is set |
 | Source | which stage of the staged lookup answered |
@@ -47,14 +47,14 @@ without being root therefore still receives an empty primary through this call.
 
 #### Scenario: Both callers see the same driver-published derived CUID
 
-- **WHEN** the driver publishes `cuid_secondary` for a GPU, or a record store
+- **WHEN** the driver publishes `cuid_derived` for a GPU, or a record store
   holds its derived value, and both a privileged and an unprivileged caller ask
 - **THEN** both receive the same derived CUID
 
 *The equality is scoped to those two stages on purpose. Where neither answers,
 the library computes the value itself, and an unprivileged process cannot read
 the component's serial, so it computes an auxiliary identity where a root process
-computes the canonical one and the two derived values differ. `cuid_secondary` is
+computes the canonical one and the two derived values differ. `cuid_derived` is
 `0444` precisely so that the value an ordinary user records is the value root
 records.*
 
@@ -102,7 +102,7 @@ rather than guessed apart.
 
 #### Scenario: A driver-published value is identified as such
 
-- **WHEN** the driver publishes `cuid_secondary` for a GPU
+- **WHEN** the driver publishes `cuid_derived` for a GPU
 - **THEN** the reported source is the driver interface
 
 #### Scenario: A source that cannot be determined is reported as unknown

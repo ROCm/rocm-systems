@@ -44,7 +44,8 @@ These land as one commit. Any subset is wrong.
 - [x] 3.1 Add the vector suite to the library's tests as real assertions, not a
       transcription.
 - [x] 3.2 Add the vector suite to the kernel side. A userspace harness over the
-      same packing, framing and derive functions is sufficient.
+      same packing, framing and derive functions is sufficient. Since replaced
+      by a KUnit test in amdgpu over a subset of the vectors.
 - [x] 3.3 Add the drift check that fails the build when a local copy differs
       from the shared artifact, modelled on the existing SHA-256 drift check.
 - [x] 3.4 Retire or regenerate the stale reference artifacts that still carry
@@ -114,7 +115,7 @@ These land as one commit. Any subset is wrong.
 
 ## 9. Specification edits
 
-_Superseded. These are edits to Confluence pages, now specified in full, with
+_Superseded. These are edits to the published specification, now specified in full, with
 replacement text, in `amend-published-cuid-spec`. The entries below stay as the
 pointer; do not work them from this file._
 
@@ -137,7 +138,7 @@ pointer; do not work them from this file._
 
 _Done, against the two W6800s at `0000:03:00.0` and `0000:63:00.0` with the CUID
 driver loaded. `cuid_primary` reads `d4abaad3-9b34-8c50-9800-028dcc084200` and
-`ffeb5272-7771-88c8-b800-028dcc084200` (P-1, P-2); `cuid_secondary` reads
+`ffeb5272-7771-88c8-b800-028dcc084200` (P-1, P-2); `cuid_derived` reads
 `61ffe99a-b3e0-8e16-a802-4b1d515d5438` (D-1), which
 `cuidtstUnprivileged.ConformanceVectors` computes independently from the P-1
 inputs. Writing the 32-octet key `00..1f` to `cuid_seed` produced
