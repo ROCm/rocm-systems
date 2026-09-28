@@ -1249,7 +1249,7 @@ class AMDSMILogger:
         rocm_version = "N/A"
         if output["version_info"]["rocm version"][0]:
             rocm_version = str(output["version_info"]["rocm version"][1]).ljust(8)
-        driver_info = output["version_info"]["driver info"]
+        driver_info = output["version_info"]["amdgpu version"]
         if driver_info == "N/A":
             amdgpu_version = "N/A"
         else:

@@ -133,7 +133,7 @@ def _banner_payload() -> dict:
     return {
         "version_info": {
             "amd-smi": "27.1.0",
-            "driver info": _DRIVER_INFO,
+            "amdgpu version": _DRIVER_INFO,
             "kernel version": "6.8.0-124-generic",
             "fw pldm version": "N/A",
             "vbios version": "N/A",
@@ -154,7 +154,7 @@ class TestDefaultDriverHeader(unittest.TestCase):
 
     def test_default_payload_uses_driver_info(self) -> None:
         output = _run_default()
-        self.assertEqual(output["version_info"]["driver info"], _DRIVER_INFO)
+        self.assertEqual(output["version_info"]["amdgpu version"], _DRIVER_INFO)
         self.assertNotIn("amdgpu dkms version", output["version_info"])
 
     def test_banner_prints_driver_rows_in_order(self) -> None:
@@ -182,7 +182,7 @@ class TestDefaultDriverHeader(unittest.TestCase):
             helpers=types.SimpleNamespace(os_info=lambda: "Linux Baremetal")
         )
         payload = _banner_payload()
-        payload["version_info"]["driver info"] = "N/A"
+        payload["version_info"]["amdgpu version"] = "N/A"
         stdout = io.StringIO()
 
         with redirect_stdout(stdout):
