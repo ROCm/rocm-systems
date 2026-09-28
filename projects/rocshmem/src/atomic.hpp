@@ -63,14 +63,22 @@ struct type_identity { using type = T; };
 template <typename T>
 using type_identity_t = typename type_identity<T>::type;
 
-// Some compiler versions restrict the non-arithmetic __scoped_atomic_*
+// Older compiler versions restrict the non-arithmetic __scoped_atomic_*
 // builtins to integer or pointer operands and reject float/double/etc.
+// Fixed upstream in clang; see llvm/llvm-project#183843.
+#if defined(__clang_major__) && __clang_major__ >= 23
+#define ROCSHMEM_HAVE_FLOAT_SCOPED_ATOMIC_N
+#endif
 
 // atomic_storage_t<T> is the type actually handed to the builtin: T itself for
-// integers and pointers, or a same-size unsigned integer for float/double. 
+// integers and pointers, or a same-size unsigned integer for float/double on
+// compilers that need the workaround.
 template <typename T> struct atomic_storage { using type = T; };
+
+#ifndef ROCSHMEM_HAVE_FLOAT_SCOPED_ATOMIC_N
 template <> struct atomic_storage<float>    { using type = uint32_t; };
 template <> struct atomic_storage<double>   { using type = uint64_t; };
+#endif
 
 template <typename T>
 using atomic_storage_t = typename atomic_storage<T>::type;
@@ -82,9 +90,7 @@ __host__ __device__ __forceinline__ To atomic_bit_cast(const From& from) {
   } else {
     static_assert(sizeof(To) == sizeof(From),
                   "atomic_bit_cast requires source/destination of equal size");
-    To to;
-    __builtin_memcpy(&to, &from, sizeof(To));
-    return to;
+    return __builtin_bit_cast(To, from);
   }
 }
 
@@ -147,7 +153,7 @@ bool compare_exchange_strong(T* obj, T& expected, type_identity_t<T> desired) {
   using U = atomic_storage_t<T>;
   U expected_bits = atomic_bit_cast<U>(expected);
   bool result = __scoped_atomic_compare_exchange_n(reinterpret_cast<U*>(obj),
-                                                   &expected_bits, 
+                                                   &expected_bits,
                                                    atomic_bit_cast<U>(desired), false,
                                                    static_cast<int>(success),
                                                    static_cast<int>(failure),
