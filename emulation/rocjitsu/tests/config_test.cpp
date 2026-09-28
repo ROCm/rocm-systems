@@ -1300,16 +1300,22 @@ TEST(EffectiveConfigTest, ReadsNativeLaunchConfigHandoff) {
   ASSERT_TRUE(std::getline(handoff, effective_path));
   ASSERT_FALSE(effective_path.empty());
 
-  EXPECT_EQ(std::filesystem::absolute(effective_path).lexically_normal(),
-            (invocation_path / config::kEffectiveConfigName).lexically_normal());
+  EXPECT_EQ(
+      std::filesystem::absolute(effective_path).lexically_normal(),
+      std::filesystem::absolute(invocation_path / config::kEffectiveConfigName).lexically_normal());
   ASSERT_TRUE(std::filesystem::exists(effective_path));
 
   const std::string source_path = test::config_path("gfx942_cdna3.json");
   const std::string source_before = config::read_config_file(source_path);
-  const auto settings =
+  const auto source_settings =
+      config::load_execution_thread_settings(source_path, rocjitsu::kEmbeddedSchema);
+  // Default config json does not specify a budget, so 0 is the pre-launch value.
+  EXPECT_EQ(source_settings.request.budget, 0u);
+
+  const auto effective_settings =
       config::load_execution_thread_settings(effective_path, rocjitsu::kEmbeddedSchema);
 
-  EXPECT_EQ(settings.request.budget, 4u);
+  EXPECT_EQ(effective_settings.request.budget, 4u);
   EXPECT_EQ(config::read_config_file(source_path), source_before);
 }
 
