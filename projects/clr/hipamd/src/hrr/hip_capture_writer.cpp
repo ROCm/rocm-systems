@@ -211,6 +211,11 @@ struct BufWriteGuard {
   ~BufWriteGuard() { g_buf_busy.clear(std::memory_order_release); }
 };
 
+// emergency_finalize builds the crash manifest here rather than on the stack:
+// the crash handler can run on a thread with little stack left.
+static std::atomic_flag g_emergency_manifest_busy = ATOMIC_FLAG_INIT;
+static char g_emergency_manifest_buf[kEmergencyManifestMax];
+
 static std::atomic<uint64_t> g_seq_id{0};
 static std::atomic<uint64_t> g_event_count{0};
 static std::atomic<uint64_t> g_blob_count{0};
@@ -471,8 +476,10 @@ static void atfork_child() {
   g_file_mu.unlock();
   g_blob_mu.unlock();
   // A crash callback on another thread can raise g_buf_busy after
-  // atfork_prepare clears it, and that thread does not exist in the child.
+  // atfork_prepare clears it, or hold g_emergency_manifest_busy, which
+  // atfork_prepare does not take. That thread does not exist in the child.
   g_buf_busy.clear(std::memory_order_release);
+  g_emergency_manifest_busy.clear(std::memory_order_release);
   std::string dir;
   {
     std::lock_guard<std::mutex> lk(g_file_mu);
@@ -865,9 +872,8 @@ void emergency_finalize(bool clean_shutdown) {
   // complete:true (the trailer is present); a crash writes complete:false — its
   // absence-of-trailer is how the reader detects truncation.
   if (g_manifest_path[0] == '\0') return;
-  // Concurrent crash callbacks (or a crash overlapping clean shutdown) must not
-  // share the emergency buffer. A second entrant skips the manifest.
-  static std::atomic_flag g_emergency_manifest_busy = ATOMIC_FLAG_INIT;
+  // Concurrent crash callbacks must not share the emergency buffer. A second
+  // entrant skips the manifest.
   if (g_emergency_manifest_busy.test_and_set(std::memory_order_acquire)) return;
   bool complete = clean_shutdown && locked;
   int mfd = HRR_OPEN(g_manifest_path);
@@ -875,9 +881,7 @@ void emergency_finalize(bool clean_shutdown) {
     g_emergency_manifest_busy.clear(std::memory_order_release);
     return;
   }
-  // Static, not on the stack: the crash handler can run on a thread with little
-  // stack left.
-  static char buf[kEmergencyManifestMax];
+  auto& buf = g_emergency_manifest_buf;
   size_t p = 0;
   p = append_lit(buf, p,
                  "{\n"
