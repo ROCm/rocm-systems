@@ -1157,6 +1157,24 @@ static ncclResult_t ncclTopoConnectMloPartSibling(struct ncclTopoNode* dev, stru
   return ncclSuccess;
 }
 
+// A reported sibling link carries count * width (see ncclTopoAddXGMI above), while a fabricated
+// one has no count to read. ncclTopoComputeP2pChannelsPerPeer() mins the channel count over every
+// rank, so a bare width alongside wider reported links would pin the whole communicator down to
+// what the fabricated direction carries. Reuse what the device does report between its own
+// partitions, and fall back to a single width when it reports nothing at all.
+static float ncclTopoMloPartSiblingBw(struct ncclTopoNode** sibDevs, int nSibDevs, float defaultBw) {
+  float bw = 0.0;
+  for (int s = 0; s < nSibDevs; s++) {
+    struct ncclTopoNode* dev = sibDevs[s];
+    for (int l = 0; l < dev->nlinks; l++) {
+      if (dev->links[l].type != LINK_NVL || dev->links[l].bw <= bw) continue;
+      for (int r = 0; r < nSibDevs; r++)
+        if (dev->links[l].remNode == sibDevs[r]) bw = dev->links[l].bw;
+    }
+  }
+  return bw > 0.0 ? bw : defaultBw;
+}
+
 // Compute partitions of one physical device (CPX/DPX, carried as MLOPart) reach each other over
 // the on-package fabric, which sysfs reports as XGMI between the partitions' PCI functions, so
 // ncclTopoAddXGMI() has normally already linked their DEV nodes. Cover the case where a platform
@@ -1170,10 +1188,12 @@ static ncclResult_t ncclTopoConnectMloPartSiblings(struct ncclTopoSystem* system
     struct ncclTopoNode* sibDevs[NCCL_TOPO_MLOPART_DEV_MAX];
     int nSibDevs = 0;
     NCCLCHECK(ncclTopoGetDevNodes(system, dev->id, sibDevs, &nSibDevs));
+    // Siblings are partitions of one physical device, so they share its GCN arch. A link an
+    // earlier device of this group fabricated carries this same bw, so reading it back here
+    // leaves the width unchanged.
+    float xgmiBw = ncclTopoMloPartSiblingBw(sibDevs, nSibDevs, ncclTopoXGMISpeed(dev->dev.gcn));
     for (int s = 0; s < nSibDevs; s++) {
       if (sibDevs[s] == dev) continue;
-      // Siblings are partitions of one physical device, so they share its GCN arch.
-      float xgmiBw = ncclTopoXGMISpeed(dev->dev.gcn);
       NCCLCHECK(ncclTopoConnectMloPartSibling(dev, sibDevs[s], xgmiBw));
       NCCLCHECK(ncclTopoConnectMloPartSibling(sibDevs[s], dev, xgmiBw));
     }
