@@ -85,55 +85,82 @@ public:
      * @brief Get memory sizes for current test level
      * @return Vector of memory sizes in bytes
      */
-    const std::vector<size_t>& getMemorySizesForCurrentLevel() const;
+    const std::vector<size_t>& getMemorySizesForCurrentLevel() const {
+        if (!currentTestLevel.empty() && levelMemorySizes.count(currentTestLevel)) {
+            return levelMemorySizes.at(currentTestLevel);
+        }
+        static const std::vector<size_t> fallback(defaultMemorySizes.begin(), defaultMemorySizes.end());
+        return fallback;
+    }
 
     /**
      * @brief Get block sizes for current test level
      * @return Vector of block sizes
      */
-    const std::vector<int>& getBlockSizesForCurrentLevel() const;
+    const std::vector<int>& getBlockSizesForCurrentLevel() const {
+        if (!currentTestLevel.empty() && levelBlockSizes.count(currentTestLevel)) {
+            return levelBlockSizes.at(currentTestLevel);
+        }
+        static const std::vector<int> fallback(defaultBlockSizes.begin(), defaultBlockSizes.end());
+        return fallback;
+    }
 
     /**
      * @brief Get iterations for current test level
      * @return Number of iterations
      */
-    int getIterationsForCurrentLevel() const;
+    int getIterationsForCurrentLevel() const {
+        return valueForCurrentLevel(levelIterations, defaultIterations);
+    }
 
     /**
      * @brief Get warmup iterations for current test level
      * @return Number of warmup iterations
      */
-    int getWarmupsForCurrentLevel() const;
+    int getWarmupsForCurrentLevel() const {
+        return valueForCurrentLevel(levelWarmups, defaultWarmups);
+    }
 
     /**
      * @brief Get cooperative groups iterations for current test level
      * @return Number of iterations
      */
-    int getCgIterationsForCurrentLevel() const;
+    int getCgIterationsForCurrentLevel() const {
+        return valueForCurrentLevel(levelCgIterations, defaultCgIterations);
+    }
 
     /**
      * @brief Get math accuracy iteration count for current test level
      * @return Number of math accuracy iterations
      */
-    uint64_t getMathAccuracyIterationsForCurrentLevel() const;
+    uint64_t getMathAccuracyIterationsForCurrentLevel() const {
+        return valueForCurrentLevel(levelMathAccuracyIterations, defaultMathAccuracyIterations);
+    }
 
     /**
      * @brief Get math accuracy max memory percentage for current test level
      * @return Percentage (0-100) of available memory to use for math accuracy tests
      */
-    int getMathAccuracyMaxMemoryPercentageForCurrentLevel() const;
+    int getMathAccuracyMaxMemoryPercentageForCurrentLevel() const {
+        return valueForCurrentLevel(levelMathAccuracyMaxMemoryPercentage,
+                                    defaultMathAccuracyMaxMemoryPercentage);
+    }
 
     /**
      * @brief Get maximum memory for current test level
      * @return Maximum memory in bytes
      */
-    size_t getMathMaxMemoryForCurrentLevel() const;
+    size_t getMathMaxMemoryForCurrentLevel() const {
+        return valueForCurrentLevel(levelMathMaxMemory, defaultMathMaxMemory);
+    }
 
     /**
      * @brief Get math reduction factor for current test level
      * @return Reduction factor applied to math test workloads
      */
-    double getMathReductionFactorForCurrentLevel() const;
+    double getMathReductionFactorForCurrentLevel() const {
+        return valueForCurrentLevel(levelMathReductionFactor, defaultMathReductionFactor);
+    }
 
     /**
      * @brief Clear all stored data
@@ -164,6 +191,14 @@ private:
     ~TestParameterStore() = default;
     TestParameterStore(const TestParameterStore&) = delete;
     TestParameterStore& operator=(const TestParameterStore&) = delete;
+
+    template <typename T>
+    T valueForCurrentLevel(const std::map<std::string, T>& levelValues, T fallback) const {
+        if (!currentTestLevel.empty() && levelValues.count(currentTestLevel)) {
+            return levelValues.at(currentTestLevel);
+        }
+        return fallback;
+    }
     
     /**
      * @brief Fallback parameters (if no level specified) - mirror level_2.
