@@ -4284,6 +4284,12 @@ static ncclResult_t parseRomeSystem(struct ncclTopoSystem* system, struct rcclRo
       // Only count direct XGMI links: since NCCL 2.30, GPU->GPU routes via DEV nodes, so direct is
       // count==3 and indirect count==4. Counting indirect breaks Rome matching on sparse topos.
       if (path->type != PATH_NVL || path->count > 3) continue;
+      // A hop between compute partitions of one physical device is on-package, not a board-level
+      // XGMI link, and these models describe how GPUs are wired to each other on a board. Counting
+      // it makes a comm of one device's partitions look like a hive to parseRome4P2H(), which then
+      // sets RCCL_TOPO_4P2H_ROME even with no model matched and caps the ring at 2 channels. Its bw
+      // is MLOPART_LOC_BW as well, so the width division below would score it at ~54 links.
+      if (ncclTopoIsMloPartSibling(node, system->nodes[GPU].nodes + gpu_scores[n].g)) continue;
       romeTopo->connMatrix[i * romeTopo->nGpus + n] = path->bw / ncclTopoXGMISpeed(node->gpu.gcn);
       count++;
     }
