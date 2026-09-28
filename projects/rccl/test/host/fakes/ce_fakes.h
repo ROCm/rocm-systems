@@ -23,6 +23,8 @@ struct ncclDevrWindow;
 struct ncclCeBatchOpsParams;
 struct ncclCeCollArgs;
 
+extern std::function<ncclResult_t(struct ncclComm*)> g_ncclCeInit;
+
 extern bool g_ceImplemented;
 extern bool g_ceAvailableValue;
 extern bool g_ceScratchAvailableValue;

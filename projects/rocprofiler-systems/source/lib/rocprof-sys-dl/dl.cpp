@@ -84,7 +84,7 @@ inline int
 get_rocprofsys_env()
 {
     auto&& _debug = get_env(env_vars::DEBUG_MODE, false);
-    return get_env(env_vars::VERBOSE, (_debug) ? 100 : 0);
+    return get_env(env_vars::VERBOSE, _debug ? 100 : 0);
 }
 
 inline int
@@ -620,7 +620,7 @@ extern "C"
 
     int rocprofsys_preload_library(void)
     {
-        return (::rocprofsys::dl::get_rocprofsys_preload()) ? 1 : 0;
+        return ::rocprofsys::dl::get_rocprofsys_preload() ? 1 : 0;
     }
 
     void rocprofsys_init_library(void)
@@ -667,7 +667,7 @@ extern "C"
             if(dl::get_instrumented() >= dl::instrument_mode::none &&
                dl::get_instrumented() < dl::instrument_mode::python_profile)
             {
-                dl::rocprofsys_postinit((c) ? std::string{ c } : std::string{});
+                dl::rocprofsys_postinit(c ? std::string{ c } : std::string{});
             }
         }
     }
@@ -766,10 +766,9 @@ extern "C"
         {
             return ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_push_region_f, name);
         }
-        else
-        {
-            ++dl::get_thread_count();
-        }
+
+        ++dl::get_thread_count();
+
         return 0;
     }
 
@@ -783,13 +782,12 @@ extern "C"
         {
             return ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_pop_region_f, name);
         }
-        else
+
+        if(dl::get_thread_count()-- == 0)
         {
-            if(dl::get_thread_count()-- == 0)
-            {
-                dl::get_thread_enabled() = true;
-            }
+            dl::get_thread_enabled() = true;
         }
+
         return 0;
     }
 
@@ -806,10 +804,9 @@ extern "C"
             return ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_push_category_region_f,
                                         _category, name, _annotations, _annotation_count);
         }
-        else
-        {
-            ++dl::get_thread_count();
-        }
+
+        ++dl::get_thread_count();
+
         return 0;
     }
 
@@ -826,10 +823,9 @@ extern "C"
             return ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_pop_category_region_f,
                                         _category, name, _annotations, _annotation_count);
         }
-        else
-        {
-            ++dl::get_thread_count();
-        }
+
+        ++dl::get_thread_count();
+
         return 0;
     }
 
@@ -1229,7 +1225,7 @@ get_link_map(const char* _name, std::vector<int>&& _open_modes)
             _next = _next->l_next;
         }
 
-        if(_noload == false)
+        if(!_noload)
         {
             dlclose(_handle);
         }

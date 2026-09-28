@@ -21,12 +21,6 @@
 
 int64_t ncclParamEnqueueRearchEnable() { return g_loadParam("ENQUEUE_REARCH_ENABLE", 0); }
 
-// Real in enqueue.cc, which this binary does not compile. init.cc reads it when
-// it lays out the NVB peers' P2P channel bases. Mirrors what the real one
-// answers with RCCL_P2P_BATCH_ENABLE unset on a single-node comm -- batching
-// off -- which is the layout every init suite here asserts. Not a seam: the
-// batched layout is covered by enqueue-test.cc against the real function.
-int rcclEffectiveP2pBatchEnable(struct ncclComm*) { return 0; }
 int64_t ncclParamRasDiagnostics() { return g_loadParam("RUN_RAS_DIAGNOSTICS", 0); }
 int64_t ncclParamDiagnostics() { return g_loadParam("RUN_DIAGNOSTICS", 0); }
 int64_t rcclParamIntraGraphGen() { return g_loadParam("INTRA_GRAPH_GEN", 0); }
@@ -68,6 +62,7 @@ void InstallDevCommSetupSuccess() {
 void ResetInitFakes() {
   ResetAmdSmiFakes();
   ResetBootstrapStubs();
+  ResetEnqueueFakes();
   ResetEnvFakes();
   ResetEnvPluginFakes();
   ResetGinFakes();
