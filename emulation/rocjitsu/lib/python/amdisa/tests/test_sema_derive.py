@@ -545,8 +545,8 @@ class TestDeriveScalarSaveexec:
         sem = _FakeSem('S_AND_SAVEEXEC_B64', 'scalar_saveexec', 'and', 'b64', 'nonzero')
         block = derive_sema_block(sem)
         cpp = lower_sema_block(block)
-        assert 'wf.exec_raw()' in cpp
-        assert 'wf.set_exec_raw(' in cpp
+        assert 'wf.read_exec()' in cpp
+        assert 'wf.write_exec(' in cpp
         assert 'write_scc' in cpp
 
     def test_saves_old_exec(self):
@@ -554,7 +554,7 @@ class TestDeriveScalarSaveexec:
         block = derive_sema_block(sem)
         cpp = lower_sema_block(block)
         assert 'write_scalar' in cpp
-        assert 'wf.exec_raw()' in cpp
+        assert 'wf.read_exec()' in cpp
 
     def test_not1_saveexec_uses_source_and_negated_exec(self):
         sem = _FakeSem(
@@ -2854,10 +2854,10 @@ class TestDeriveSpecialScalar:
         if dtype == 'b32':
             assert 'wf.exec()' in cpp
             assert 'wf.set_exec(' in cpp
-            assert 'exec_raw' not in cpp
+            assert 'wf.read_exec()' not in cpp
         else:
-            assert 'wf.exec_raw()' in cpp
-            assert 'wf.set_exec_raw(' in cpp
+            assert 'wf.read_exec()' in cpp
+            assert 'wf.write_exec(' in cpp
         assert 'write_scc' in cpp
 
     @pytest.mark.parametrize(
@@ -2928,7 +2928,7 @@ class TestDeriveSpecialScalar:
                 'amdgpu::RegisterAccess(wf).write_scalar(inst.dst0, '
                 'static_cast<uint64_t>(result));'
             ) in cpp
-            assert 'wf.set_exec_raw(result);' in cpp
+            assert 'wf.write_exec(result);' in cpp
 
     def test_wrexec_rejects_unsupported_operation(self):
         sem = _FakeSem(

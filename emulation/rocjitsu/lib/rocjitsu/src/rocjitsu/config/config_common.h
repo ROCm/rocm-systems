@@ -13,7 +13,10 @@
 #include "flatbuffers/idl.h"
 #include "simulation_config_generated.h"
 
+#include <charconv>
+#include <cstdint>
 #include <fstream>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -22,6 +25,16 @@
 
 namespace rocjitsu {
 namespace config {
+
+/// @brief Parse a complete unsigned 32-bit decimal value.
+inline std::optional<uint32_t> parse_uint32(std::string_view text) {
+  uint32_t value = 0;
+  const std::from_chars_result result =
+      std::from_chars(text.data(), text.data() + text.size(), value);
+  if (result.ec != std::errc{} || result.ptr != text.data() + text.size())
+    return std::nullopt;
+  return value;
+}
 
 inline std::string read_config_file(const std::string &path) {
   std::ifstream file(path);
