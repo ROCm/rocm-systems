@@ -8,7 +8,10 @@
 /// @brief Serializes host mapping changes against accesses that hold a pointer.
 
 #include "util/observable_shared_mutex.h"
+#include <cassert>
+#include <cstdint>
 #include <new>
+#include <optional>
 
 namespace rocjitsu {
 
@@ -49,11 +52,68 @@ inline util::ObservableSharedMutex &host_mapping_lock() {
   return lock;
 }
 
+/// @brief Whether this thread already holds the mapping layout stable for a
+/// batch of emulated GPU accesses.
+inline thread_local uint32_t host_mapping_batch_depth = 0;
+
+/// @brief Hold the host mapping layout stable across a functional CU quantum.
+///
+/// @details The interposer takes the exclusive side around mmap, munmap, and
+/// mprotect. Retaining the shared side across a bounded quantum therefore
+/// preserves the existing pointer-lifetime guarantee while amortizing reader
+/// admission over the many small GPU accesses executed in that quantum.
+class HostMappingBatchGuard {
+public:
+  HostMappingBatchGuard() {
+    if (host_mapping_batch_depth == 0)
+      lock_.emplace(host_mapping_lock().lock_shared());
+    ++host_mapping_batch_depth;
+  }
+
+  ~HostMappingBatchGuard() {
+    assert(host_mapping_batch_depth != 0);
+    --host_mapping_batch_depth;
+  }
+
+  HostMappingBatchGuard(const HostMappingBatchGuard &) = delete;
+  HostMappingBatchGuard &operator=(const HostMappingBatchGuard &) = delete;
+
+private:
+  // The destructor body lowers the depth before member destruction releases
+  // the shared lock, so nested per-access guards cannot observe a false gap.
+  std::optional<std::shared_lock<util::DistributedSharedMutex>> lock_;
+};
+
+/// @brief Shared mapping guard for one access, unless its thread is in a batch.
+class HostMappingAccessGuard {
+public:
+  HostMappingAccessGuard() {
+    if (host_mapping_batch_depth == 0)
+      lock_.emplace(host_mapping_lock().lock_shared());
+  }
+
+  HostMappingAccessGuard(const HostMappingAccessGuard &) = delete;
+  HostMappingAccessGuard &operator=(const HostMappingAccessGuard &) = delete;
+
+  void unlock() {
+    if (lock_)
+      lock_->unlock();
+  }
+
+private:
+  std::optional<std::shared_lock<util::DistributedSharedMutex>> lock_;
+};
+
+[[nodiscard]] inline HostMappingAccessGuard lock_host_mapping_for_access() {
+  return HostMappingAccessGuard();
+}
+
 /// @brief Reset the mapping lock in a fork child that inherited no GPU backend.
 /// @pre Called by the child atfork handler, before publishing its fresh context.
 /// No other thread survives fork, and the inherited lock must not be destroyed
 /// or acquired: a vanished parent thread may have held it.
 inline void reset_host_mapping_lock_after_fork() {
+  host_mapping_batch_depth = 0;
   new (&host_mapping_lock()) util::ObservableSharedMutex();
 }
 
