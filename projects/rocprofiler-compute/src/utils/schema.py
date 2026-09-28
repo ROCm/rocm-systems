@@ -69,6 +69,4 @@ class Workload:
     ml_api_call_trees: dict[str, list[Any]] = field(default_factory=dict)
     # ML API trace errors collected during analyze; reported after the tree.
     ml_api_trace_errors: list[Any] = field(default_factory=list)
-    # Glob-matched operator nodes from --torch-operator / --triton-operator.
-    ml_api_glob_matches: list[Any] = field(default_factory=list)
     membw_result: Optional[MemBwAnalysisResult] = None
