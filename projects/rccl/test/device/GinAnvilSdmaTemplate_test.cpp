@@ -542,8 +542,8 @@ TEST_F(GinAnvilSdmaTemplateTest, Flush_MultiDirtyBits) {
   EXPECT_EQ(d_dirty.download(), 0ULL);
 }
 
-// H12b: ncclCoopAny size>1 must quiet every snapshot bit on rank 0. A stub
-// bcast leaves non-root dirty=0, so a 32-thread stride only visits peer 0.
+// H12b: a multi-thread coop must still drain every dirty peer. The capture and
+// the drain both run on rank 0, so the extra 31 threads must not lose peer 1.
 __global__ void kernelFlushCoopAny(TemplateHarness* h, uint64_t* dirty) {
   h->ctx.sdmaDirty = dirty;
   ncclGinCtx ginCtx{};
@@ -574,16 +574,14 @@ TEST_F(GinAnvilSdmaTemplateTest, Flush_CoopAnyQuietsAllDirtyPeers) {
   EXPECT_EQ(readQuietCount(), 2ULL);
 }
 
-__global__ void kernelMarkSdmaDirty(TemplateHarness* h, uint64_t* dirty, uint64_t* epoch, int peer) {
+__global__ void kernelMarkSdmaDirty(TemplateHarness* h, uint64_t* dirty, int peer) {
   if (threadIdx.x != 0) return;
   h->ctx.sdmaDirty = dirty;
-  h->ctx.sdmaEpoch = epoch;
   nccl::gin::anvil::detail::markSdmaDirty(&h->ctx, peer, h->ctx.numChannels, /*effCh=*/0);
 }
 
-__global__ void kernelFlushWithEpoch(TemplateHarness* h, uint64_t* dirty, uint64_t* epoch) {
+__global__ void kernelFlushDirty(TemplateHarness* h, uint64_t* dirty) {
   h->ctx.sdmaDirty = dirty;
-  h->ctx.sdmaEpoch = epoch;
   ncclGinCtx ginCtx{};
   ginCtx.handle = &h->ctx;
   ginCtx.nRanks = 2;
@@ -591,11 +589,14 @@ __global__ void kernelFlushWithEpoch(TemplateHarness* h, uint64_t* dirty, uint64
                                                          cuda::memory_order_seq_cst, nullptr);
 }
 
-static void setBumpEpochOnQuiet(uint64_t* epoch) {
-  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(sdma_anvil::g_sdmaStubBumpEpochOnQuiet), &epoch, sizeof(epoch)));
+// Drives the stub's quiet() to mark `bit` dirty, imitating a put on another
+// wave that rings its doorbell mid-drain.
+static void setMarkDirtyOnQuiet(uint64_t* dirty, uint64_t bit) {
+  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(sdma_anvil::g_sdmaStubMarkDirtyOnQuiet), &dirty, sizeof(dirty)));
+  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(sdma_anvil::g_sdmaStubMarkBitOnQuiet), &bit, sizeof(bit)));
 }
 
-TEST_F(GinAnvilSdmaTemplateTest, MarkSdmaDirty_BumpsEpoch) {
+TEST_F(GinAnvilSdmaTemplateTest, MarkSdmaDirty_SetsPeerBit) {
   DeviceBuffer<uint8_t> d_src(1);
   DeviceBuffer<uint8_t> d_dst(1);
   DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(1);
@@ -603,21 +604,17 @@ TEST_F(GinAnvilSdmaTemplateTest, MarkSdmaDirty_BumpsEpoch) {
   DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle*> d_row(2);
   DeviceBuffer<TemplateHarness> d_h(1);
   DeviceBuffer<uint64_t> d_dirty(1);
-  DeviceBuffer<uint64_t> d_epoch(1);
   d_dirty.zero();
-  d_epoch.zero();
   TemplateHarness host{};
   uploadHarness(&d_h, &host, &d_src, &d_dst, &d_entry, &d_q, &d_row, 128);
   host.ctx.sdmaDirty = d_dirty.ptr;
-  host.ctx.sdmaEpoch = d_epoch.ptr;
   d_h.upload(host);
-  kernelMarkSdmaDirty<<<1, 1>>>(d_h.ptr, d_dirty.ptr, d_epoch.ptr, /*peer=*/0);
+  kernelMarkSdmaDirty<<<1, 1>>>(d_h.ptr, d_dirty.ptr, /*peer=*/1);
   syncAndCheck();
-  EXPECT_EQ(d_epoch.download(), 1ULL);
-  EXPECT_EQ(d_dirty.download(), 1ULL);
+  EXPECT_EQ(d_dirty.download(), 1ULL << 1);
 }
 
-TEST_F(GinAnvilSdmaTemplateTest, Flush_StableEpochClearsDirty) {
+TEST_F(GinAnvilSdmaTemplateTest, Flush_CapturesAndClearsDirty) {
   DeviceBuffer<uint8_t> d_src(1);
   DeviceBuffer<uint8_t> d_dst(1);
   DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(1);
@@ -625,20 +622,20 @@ TEST_F(GinAnvilSdmaTemplateTest, Flush_StableEpochClearsDirty) {
   DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle*> d_row(2);
   DeviceBuffer<TemplateHarness> d_h(1);
   DeviceBuffer<uint64_t> d_dirty(1);
-  DeviceBuffer<uint64_t> d_epoch(1);
   uint64_t one = 1;
-  uint64_t five = 5;
   d_dirty.copyFrom(&one, 1);
-  d_epoch.copyFrom(&five, 1);
   TemplateHarness host{};
   uploadHarness(&d_h, &host, &d_src, &d_dst, &d_entry, &d_q, &d_row, 128);
-  kernelFlushWithEpoch<<<1, 1>>>(d_h.ptr, d_dirty.ptr, d_epoch.ptr);
+  resetQuietCount();
+  kernelFlushDirty<<<1, 1>>>(d_h.ptr, d_dirty.ptr);
   syncAndCheck();
   EXPECT_EQ(d_dirty.download(), 0ULL);
-  EXPECT_EQ(d_epoch.download(), 5ULL);
+  EXPECT_EQ(readQuietCount(), 1ULL);
 }
 
-TEST_F(GinAnvilSdmaTemplateTest, Flush_EpochBumpDuringQuietSkipsClear) {
+// The capture-and-clear is one RMW, so a mark that lands while Flush is
+// draining is not swallowed: its bit survives for the next Flush.
+TEST_F(GinAnvilSdmaTemplateTest, Flush_MarkDuringQuietSurvives) {
   DeviceBuffer<uint8_t> d_src(1);
   DeviceBuffer<uint8_t> d_dst(1);
   DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(1);
@@ -646,18 +643,17 @@ TEST_F(GinAnvilSdmaTemplateTest, Flush_EpochBumpDuringQuietSkipsClear) {
   DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle*> d_row(2);
   DeviceBuffer<TemplateHarness> d_h(1);
   DeviceBuffer<uint64_t> d_dirty(1);
-  DeviceBuffer<uint64_t> d_epoch(1);
   uint64_t one = 1;
   d_dirty.copyFrom(&one, 1);
-  d_epoch.zero();
   TemplateHarness host{};
   uploadHarness(&d_h, &host, &d_src, &d_dst, &d_entry, &d_q, &d_row, 128);
-  setBumpEpochOnQuiet(d_epoch.ptr);
-  kernelFlushWithEpoch<<<1, 1>>>(d_h.ptr, d_dirty.ptr, d_epoch.ptr);
+  resetQuietCount();
+  setMarkDirtyOnQuiet(d_dirty.ptr, 1ULL << 1);
+  kernelFlushDirty<<<1, 1>>>(d_h.ptr, d_dirty.ptr);
   syncAndCheck();
-  setBumpEpochOnQuiet(nullptr);
-  EXPECT_EQ(d_dirty.download(), 1ULL);
-  EXPECT_EQ(d_epoch.download(), 1ULL);
+  setMarkDirtyOnQuiet(nullptr, 0);
+  EXPECT_EQ(d_dirty.download(), 1ULL << 1);
+  EXPECT_EQ(readQuietCount(), 1ULL);
 }
 
 using nccl::gin::anvil::detail::ncclGinAnvilSdmaRequest;
