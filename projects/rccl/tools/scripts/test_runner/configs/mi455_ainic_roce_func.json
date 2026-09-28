@@ -1333,10 +1333,10 @@
         },
         {
           "name": "CeAllReduceEligibilityTest",
-          "description": "CE AllReduce eligibility gate tests. RCCL_CE_AR_MAX_MSG_BYTES activates 2-shot on gfx1250 (ceNonRegMax[AllReduce]=0 by table design).",
+          "description": "CE AllReduce eligibility gate tests. RCCL_CE_AR_2SHOT_MAX_BYTES activates 2-shot on gfx1250 (ceNonRegMax[AllReduce]=0 by table design).",
           "test_filter": "CeAllReduceEligibilityTest.*:RcclCeAllReduceEligibility.*",
           "env_variables": {
-            "RCCL_CE_AR_MAX_MSG_BYTES": "268435456"
+            "RCCL_CE_AR_2SHOT_MAX_BYTES": "268435456"
           }
         },
         {

@@ -53,7 +53,7 @@ struct rcclArchThresholds {
   // ceNonRegMax[func] = 0 means CE-Scratch / CE 2-shot disabled for that collective.
   // AllReduce 2-shot: this is a selector cap only. ceARTmpBuf is allocated at
   // NCCL_CE_AR_TMPBUF_DEFAULT_BYTES and grown only when this entry (or
-  // RCCL_CE_AR_MAX_MSG_BYTES) is larger.
+  // RCCL_CE_AR_2SHOT_MAX_BYTES) is larger.
   size_t ceNonRegMin[RCCL_DDA_FUNC_COUNT];
   size_t ceNonRegMax[RCCL_DDA_FUNC_COUNT];
 
