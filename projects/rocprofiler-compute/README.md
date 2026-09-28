@@ -80,6 +80,8 @@ Common CMake options:
 - `-D TEST_FROM_INSTALL=ON` - Enable testing from installation directory instead of build directory
 - `-D ENABLE_SANITIZER=ASAN|HOST_ASAN|TSAN` - Build with sanitizer instrumentation for development (default OFF)
 
+Note that for `TSAN` on Linux kernel 6.6.0 and newer, GCC 15.1.0 or newer or Clang 18.1.0 or newer is required.
+
 Note that per the above command, build assets will be stored under `build` directory and installed assets will be stored under `install` directory.
 
 Then, to run the automated test suite, run the following commands:
