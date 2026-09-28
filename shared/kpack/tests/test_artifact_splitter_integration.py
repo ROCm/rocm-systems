@@ -486,6 +486,74 @@ class TestArtifactSplitterIntegration:
             "binary must pass through unchanged"
         )
 
+    @pytest.mark.parametrize("binary_format", ["elf", "coff"])
+    @pytest.mark.parametrize("layout", ["same-prefix", "processed-first", "fat-first"])
+    @pytest.mark.parametrize("reuse_output", [False, True])
+    def test_mixed_resplit_rejected_before_writing(
+        self, test_assets_dir, toolchain, tmp_path, binary_format, layout, reuse_output
+    ):
+        """A partial rebuild must not replace an archive with only new kernels.
+
+        Validate across the entire artifact, including prefixes visited before
+        the processed binary is discovered, and preserve any previous output.
+        """
+        if binary_format == "elf":
+            source = patch_hip_fatbin_size(
+                test_assets_dir
+                / "bundled_binaries/linux/cov5/libtest_kernel_single.so",
+                tmp_path / "small.so",
+                new_size=3000,
+            )
+        else:
+            source = (
+                test_assets_dir / "bundled_binaries/windows/cov5/test_kernel_single.dll"
+            )
+
+        processed_prefix = "a/stage"
+        fat_prefix = processed_prefix if layout == "same-prefix" else "b/stage"
+        prefixes = [processed_prefix]
+        if fat_prefix != processed_prefix:
+            prefixes.append(fat_prefix)
+        if layout == "fat-first":
+            prefixes.reverse()
+
+        input_dir = tmp_path / "input"
+        input_dir.mkdir()
+        write_artifact_manifest(input_dir, prefixes)
+        processed_relpath = Path(processed_prefix) / "lib/a.so"
+        fat_relpath = Path(fat_prefix) / "lib/b.so"
+        for relpath in (processed_relpath, fat_relpath):
+            dest = input_dir / relpath
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, dest)
+
+        first_output = tmp_path / "first_output"
+        self._split(toolchain, input_dir, first_output)
+        mixed_input = tmp_path / "mixed_input"
+        shutil.copytree(first_output / "test_lib_generic", mixed_input)
+        shutil.copy2(source, mixed_input / fat_relpath)
+
+        output_dir = first_output if reuse_output else tmp_path / "new_output"
+
+        def snapshot(root):
+            return {
+                path.relative_to(root): path.read_bytes() if path.is_file() else None
+                for path in root.rglob("*")
+            }
+
+        input_before = snapshot(mixed_input)
+        output_before = snapshot(output_dir)
+        with pytest.raises(
+            RuntimeError, match="both already kpack-processed and unprocessed"
+        ) as exc:
+            self._split(toolchain, mixed_input, output_dir)
+
+        assert processed_relpath.as_posix() in str(exc.value)
+        assert fat_relpath.as_posix() in str(exc.value)
+        assert snapshot(mixed_input) == input_before
+        assert snapshot(output_dir) == output_before
+        assert output_dir.exists() == reuse_output
+
     def test_artifact_with_database_files(
         self, create_test_artifact, toolchain, tmp_path
     ):
