@@ -470,8 +470,8 @@ get_signal_names(Tp&& _v)
                           static_cast<tim::signals::sys_signal>(itr))) +
                       " ";
     }
-    return (_sig_names.empty()) ? _sig_names
-                                : _sig_names.substr(0, _sig_names.length() - 1);
+    return _sig_names.empty() ? _sig_names
+                              : _sig_names.substr(0, _sig_names.length() - 1);
 }
 
 unique_ptr_t<sampler_t>&
@@ -993,7 +993,7 @@ configure(bool _setup, std::int64_t _tid)
         LOG_DEBUG("Sampler destroyed for thread {}...", _tid);
     }
 
-    return (_signal_types) ? *_signal_types : std::set<int>{};
+    return _signal_types ? *_signal_types : std::set<int>{};
 }
 
 void

@@ -212,8 +212,16 @@ rocjitsu --config configs/gfx950_mi355x.json --thread-budget-table
 
 The configured row reflects the file's budget and current affinity. Remaining
 rows show explicit budget ceilings while retaining the file's knob overrides.
-The total column reports actual allocation, which may be below the ceiling or
-above it when explicitly overridden.
+`rocjitsu --cpu-thread-budget N` (or `--cpu-thread-budget=N`) replaces JSON
+`cpu_thread_budget` for that invocation, including the Configured row of
+`--thread-budget-table`. The named file is never rewritten: the launcher copies
+it to `effective_config.json` in the invocation's runtime directory, applies the
+budget there, and launches from the copy, which is removed with the rest of that
+directory. The flag is refused with `--attach`, which joins a daemon that has
+already built its machine, and with a config whose `dbt_guest.simulator_config`
+names a separate host config — the budget belongs in that file instead. The total
+column reports actual allocation, which may be below the ceiling or above it when
+explicitly overridden.
 
 For multiple GPUs, selection counts every retained dispatch pool, so the same
 pair costs more than on a single GPU. Useful parallelism depends on work reaching

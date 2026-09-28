@@ -302,22 +302,21 @@ struct fini_bundle
     template <typename... Args>
     void start(Args&&... _args)
     {
-        ((tim::operation::start<Tp>{}(std::get<Tp>(m_data),
-                                      std::forward<Args>(_args)...)),
+        (tim::operation::start<Tp>{}(std::get<Tp>(m_data), std::forward<Args>(_args)...),
          ...);
     }
 
     template <typename... Args>
     void stop(Args&&... _args)
     {
-        ((tim::operation::stop<Tp>{}(std::get<Tp>(m_data), std::forward<Args>(_args)...)),
+        (tim::operation::stop<Tp>{}(std::get<Tp>(m_data), std::forward<Args>(_args)...),
          ...);
     }
 
     std::string as_string(bool _print_prefix = true) const
     {
         std::stringstream _ss;
-        if(_print_prefix && m_label.length() > 0)
+        if(_print_prefix && !m_label.empty())
         {
             _ss << m_label << " : ";
         }
@@ -990,7 +989,7 @@ rocprofsys_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _
 
     auto _count   = _total_count++;
     auto _mode_sv = std::string_view{ _mode };
-    auto _argv0   = (_argv0_c) ? std::string{ _argv0_c } : config::get_exe_name();
+    auto _argv0   = _argv0_c ? std::string{ _argv0_c } : config::get_exe_name();
     // this function may be called multiple times if multiple libraries are instrumented
     // we want to guard against multiple calls which with different arguments
     if(_count > 0 &&
@@ -1039,7 +1038,7 @@ rocprofsys_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _
         }
         if(state::process::get() == state::process::Active)
         {
-            auto _name = (_argv0_c) ? std::string{ _argv0_c } : config::get_exe_name();
+            auto _name = _argv0_c ? std::string{ _argv0_c } : config::get_exe_name();
             // if main hasn't been popped yet, pop it
             LOG_DEBUG("Running rocprofsys_pop_trace({})...", _name);
             rocprofsys_pop_trace_hidden(_name.c_str());

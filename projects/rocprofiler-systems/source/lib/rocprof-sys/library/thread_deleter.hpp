@@ -22,7 +22,7 @@ struct thread_deleter
     void operator()(Tp* ptr) const
     {
         constexpr bool delete_pointer =
-            (use_placement_new_when_generating_unique_ptr<Tp>::value == false);
+            (!static_cast<bool>(use_placement_new_when_generating_unique_ptr<Tp>::value));
 
         thread_deleter<void>{}();
         if constexpr(delete_pointer)
