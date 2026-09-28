@@ -40,6 +40,7 @@
 # (The app verifies its own results in the generate step, guarding the restored data itself.)
 
 import collections
+import re
 import sys
 
 # Python 3.6 compatibility: dataclasses added in 3.7
@@ -328,6 +329,41 @@ def test_dispatch_id_constant_across_replay_passes(json_data, expected_passes):
             f"dispatch {did} (kernel_id={entry['kernel_id']}) replay_pass sequence {passes} != "
             f"{want}: dispatch_id must stay constant while replay_pass covers 0..N-1 once each"
         )
+
+
+# rocprofv3 names each thread trace file <agent>_shader_engine_<se>_<dispatch_id>.att.
+_ATT_FILENAME = re.compile(r"(\d+)_shader_engine_(\d+)_(\d+)\.att$")
+
+
+def test_one_thread_trace_per_dispatch(json_data, expect_thread_trace):
+    # With --att, replay traces a dispatch on one pass of its own ahead of its counter passes. A
+    # trace on every pass would write the same agent/shader-engine/dispatch file once per pass, and
+    # a trace on a dispatch without counter records (or the reverse) would mean the two services
+    # disagreed about which dispatches were profiled.
+    if not expect_thread_trace:
+        pytest.skip("--thread-trace was not specified")
+
+    att_files = _sdk(json_data).get("strings", {}).get("att_filenames")
+    assert att_files, "run used --att but produced no thread trace files"
+
+    keys = []
+    for name in att_files:
+        match = _ATT_FILENAME.search(name)
+        assert match, f"unexpected thread trace file name: {name}"
+        keys.append(tuple(int(group) for group in match.groups()))
+
+    repeated = sorted(key for key, count in collections.Counter(keys).items() if count > 1)
+    assert not repeated, (
+        "dispatches traced more than once, as (agent, shader_engine, dispatch_id): "
+        f"{repeated}"
+    )
+
+    traced = {dispatch_id for _, _, dispatch_id in keys}
+    counted = set(_dispatch_passes(_sdk(json_data)))
+    assert traced == counted, (
+        f"traced dispatch_ids {sorted(traced)} != dispatch_ids with counter records "
+        f"{sorted(counted)}"
+    )
 
 
 def test_expected_logical_dispatch_count(json_data, expected_dispatch_count):
