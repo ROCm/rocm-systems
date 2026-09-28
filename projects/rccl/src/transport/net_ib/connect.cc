@@ -1309,7 +1309,9 @@ static ncclResult_t ncclIbReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
       initAttr->state = IBV_QPS_INIT;
       initAttr->pkeyIndex = ncclParamIbPkey();
       initAttr->portNum = ibDev->portNum;
-      initAttr->qpAccessFlags = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ;
+      // RCCL: ncclIbIflush posts an RDMA_WRITE into the GPU flush scratchpad on this QP,
+      // which the responder rejects unless REMOTE_WRITE is granted here.
+      initAttr->qpAccessFlags = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE;
       NCCLCHECK(ncclIbQpInit(flushQp));
 
       struct ncclIbQpRtrAttr* rtrAttr = &flushQp->rtrAttr;
@@ -1680,7 +1682,7 @@ ib_recv:
         }
 #endif
 #if defined(__HIP_PLATFORM_AMD__)
-        if (!gpuFlushRegistered) {
+        if (!gpuFlushRegistered && ncclCuMemEnable()) {
           // The cuMem attempt above may have left a buffer behind before failing.
           (void)ncclIbFreeGpuFlushMem(&rCommDev->gpuFlush);
 #if defined(HIP_UNCACHED_MEMORY)
