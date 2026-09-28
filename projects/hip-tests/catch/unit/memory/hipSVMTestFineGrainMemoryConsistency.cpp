@@ -61,7 +61,7 @@ __global__ void build_hash_table_on_device(unsigned int* input, size_t inputSize
     next = old;
     // Use CAS to ensure atomic operation
     // pNew->pNext =  (BinNode*)next;
-    atomicExch((unsigned long long*)&(pNew->pNext), next);
+    atomicExch_system((unsigned long long*)&(pNew->pNext), next);
     old = atomicCAS_system((unsigned long long*)&(pNodes[b].pNext), next, (unsigned long long)pNew);
   } while (old != next);
 #ifdef DEBUG_ATOMIC_PRINT_THREAD
@@ -205,7 +205,7 @@ void launch_kernels_and_verify(std::vector<hipStream_t>& streams, unsigned int n
         hipHostMallocCoherent(CL_MEM_SVM_FINE_GRAIN_BUFFER + CL_MEM_SVM_ATOMICS)
       atomicAdd_system()(in kernel)
       atomicCAS_system()(in kernel)
-      atomicExch()(in kernel)
+      atomicExch_system()(in kernel)
       InterlockedExchangeAdd()(in WINDOWS host)
       __sync_add_and_fetch()(in LINUX host)
       InterlockedExchangeAdd64()(in WINDOWS host)
