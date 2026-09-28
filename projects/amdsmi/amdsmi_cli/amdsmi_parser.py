@@ -1302,7 +1302,9 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         parser.error = _intercept
 
-    def _add_device_arguments(self, subcommand_parser: argparse.ArgumentParser, required=False):
+    def _add_device_arguments(
+        self, subcommand_parser: argparse.ArgumentParser, required=False, cpu_core_supported=True
+    ):
         # Device arguments help text
         gpu_help = (
             f"Select a GPU ID, BDF, or UUID from the possible choices:\n{self.gpu_choices_str}"
@@ -1325,13 +1327,18 @@ class AMDSMIParser(argparse.ArgumentParser):
             )
 
         if self.helpers.is_amd_hsmp_initialized():
+            # Some subcommands accept --cpu/--core only so they can reject them
+            # with a clear COMMAND_NOT_SUPPORTED error; hide the flags from help
+            # in that case instead of advertising unsupported device targets.
+            cpu_arg_help = cpu_help if cpu_core_supported else argparse.SUPPRESS
+            core_arg_help = core_help if cpu_core_supported else argparse.SUPPRESS
             device_args.add_argument(
                 "-U",
                 "--cpu",
                 type=self._validate_cpu_core,
                 action=self._cpu_select(self.cpu_choices),
                 nargs="+",
-                help=cpu_help,
+                help=cpu_arg_help,
             )
             if subcommand_parser._optionals.title != "Static Arguments":
                 device_args.add_argument(
@@ -1340,7 +1347,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                     type=self._validate_cpu_core,
                     action=self._core_select(self.core_choices),
                     nargs="+",
-                    help=core_help,
+                    help=core_arg_help,
                 )
 
         if self.helpers.is_hypervisor():
@@ -1448,14 +1455,17 @@ class AMDSMIParser(argparse.ArgumentParser):
             help=gpu_version_help,
             default=None,
         )
-        version_parser.add_argument(
-            "-c",
-            "--cpu_version",
-            action="store_true",
-            required=False,
-            help=cpu_version_help,
-            default=None,
-        )
+        # --cpu_version is only meaningful when the amd_hsmp/hsmp_acpi driver is
+        # present; hide it (like every other CPU surface) when CPU is absent.
+        if self.helpers.is_amd_hsmp_initialized():
+            version_parser.add_argument(
+                "-c",
+                "--cpu_version",
+                action="store_true",
+                required=False,
+                help=cpu_version_help,
+                default=None,
+            )
         version_parser.add_argument(
             "-n",
             "--nic_version",
@@ -1473,10 +1483,12 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Subparser help text
         list_help = "List GPU information"
         list_optionals_title = "List Arguments"
-        list_subcommand_help = f"{self.description}\n\nLists all detected devices on the system.\
-                            \nLists the BDF, UUID, KFD_ID, NODE_ID, and Partition ID for each GPU and/or CPUs.\
+        list_subcommand_help = f"{self.description}\n\nLists all detected GPUs on the system.\
+                            \nLists the BDF, UUID, KFD_ID, NODE_ID, and Partition ID for each GPU.\
                             \nIn virtualization environments, it can also list VFs associated to each\
-                            \nGPU with some basic information for each VF."
+                            \nGPU with some basic information for each VF.\
+                            \n--cpu and --core are not supported for this command; use\
+                            \n`amd-smi static --cpu` instead."
         enumeration_help = "Enumeration mapping to other features.\
                             \n    Includes CARD, RENDER, HSA_ID, HIP_ID, HIP_UUID, OAM_ID, and PHYSICAL_ACC_ID"
 
@@ -1492,7 +1504,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         list_parser.add_argument("-e", "--enumeration", action="store_true", help=enumeration_help)
 
         # Add Universal Arguments
-        self._add_device_arguments(list_parser, required=False)
+        self._add_device_arguments(list_parser, required=False, cpu_core_supported=False)
         self._add_command_modifiers(list_parser)
 
     def _add_static_parser(self, subparsers: argparse._SubParsersAction, func):
@@ -1706,7 +1718,7 @@ class AMDSMIParser(argparse.ArgumentParser):
             )
 
         # Add Universal Arguments
-        self._add_device_arguments(firmware_parser, required=False)
+        self._add_device_arguments(firmware_parser, required=False, cpu_core_supported=False)
         self._add_command_modifiers(firmware_parser)
 
     def _add_bad_pages_parser(self, subparsers: argparse._SubParsersAction, func):
@@ -1752,7 +1764,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         )
 
         # Add Universal Arguments
-        self._add_device_arguments(bad_pages_parser, required=False)
+        self._add_device_arguments(bad_pages_parser, required=False, cpu_core_supported=False)
         self._add_command_modifiers(bad_pages_parser)
 
     def _add_metric_parser(self, subparsers: argparse._SubParsersAction, func):
@@ -2275,7 +2287,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Add Universal Arguments & watch Args
         self._add_watch_arguments(process_parser)
-        self._add_device_arguments(process_parser, required=False)
+        self._add_device_arguments(process_parser, required=False, cpu_core_supported=False)
         self._add_command_modifiers(process_parser)
 
     def _add_profile_parser(self, subparsers: argparse._SubParsersAction, func):
@@ -2356,7 +2368,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Add Universal Arguments
         self._add_command_modifiers(topology_parser)
-        self._add_device_arguments(topology_parser, required=False)
+        self._add_device_arguments(topology_parser, required=False, cpu_core_supported=False)
 
         # Optional Args
         topology_parser.add_argument(
@@ -3113,7 +3125,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Add Universal Arguments & Watch Args
         self._add_watch_arguments(monitor_parser)
-        self._add_device_arguments(monitor_parser, required=False)
+        self._add_device_arguments(monitor_parser, required=False, cpu_core_supported=False)
         self._add_command_modifiers(monitor_parser)
 
     def _add_xgmi_parser(self, subparsers: argparse._SubParsersAction, func):
@@ -3156,7 +3168,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         )
 
         # Add Universal Arguments
-        self._add_device_arguments(xgmi_parser, required=False)
+        self._add_device_arguments(xgmi_parser, required=False, cpu_core_supported=False)
         self._add_command_modifiers(xgmi_parser)
 
     def _add_partition_parser(self, subparsers: argparse._SubParsersAction, func):
@@ -3195,7 +3207,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         )
 
         # Add Universal Arguments
-        self._add_device_arguments(partition_parser, required=False)
+        self._add_device_arguments(partition_parser, required=False, cpu_core_supported=False)
         self._add_command_modifiers(partition_parser)
 
     def _add_ras_parser(self, subparsers: argparse._SubParsersAction, func):
@@ -3349,7 +3361,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         )
 
         # Add Universal Arguments
-        self._add_device_arguments(fabric_parser, required=False)
+        self._add_device_arguments(fabric_parser, required=False, cpu_core_supported=False)
         self._add_command_modifiers(fabric_parser)
 
     def error(self, message):
