@@ -536,16 +536,8 @@ def do_compile(args, forwarded_flags):
 
     try:
         # Step 1: Compile to assembly
-        compile_cmd = [
-            clang,
-            '-x', 'hip',
-            '--offload-device-only',
-            f'--offload-arch={target_id}',
-            '-gline-tables-only',
-            '-w',
-        ] + forwarded_flags + [
-            '-S', '-o', asm_file, source,
-        ]
+        compile_cmd = dispatcher_compile_cmd(clang, target_id, forwarded_flags,
+                                             asm_file, source)
         run(compile_cmd, f"compile {os.path.basename(source)}")
 
         # Step 2: Extract device function (inline)
@@ -580,13 +572,12 @@ def do_compile(args, forwarded_flags):
 # ---------------------------------------------------------------------------
 
 def dispatcher_compile_cmd(clang, target_id, forwarded_flags, disp_asm, dispatcher):
-    """Device-only dispatcher compile to assembly.
+    """Device-only compile to assembly, for the dispatcher and each kernel.
 
-    -gline-tables-only is placed before forwarded_flags so it matches the
-    per-kernel compile. Clang takes the last debug-info option, so coverage's
-    -g0 in DL_OPT_FLAGS still wins (see the ENABLE_FULL_COVERAGE branch of
-    DL_OPT_FLAGS in cmake/DeviceLinker.cmake) while Release (bare -O3) keeps
-    line tables.
+    -gline-tables-only is placed before forwarded_flags. Clang takes the last
+    debug-info option, so coverage's -g0 in DL_OPT_FLAGS still wins (see the
+    ENABLE_FULL_COVERAGE branch of DL_OPT_FLAGS in cmake/DeviceLinker.cmake)
+    while Release (bare -O3) keeps line tables.
     """
     return [
         clang,
