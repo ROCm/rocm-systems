@@ -1693,6 +1693,6 @@ perfetto_processor_t::handle(const kfd_sample& sample)
         LOG_WARNING("Unknown KFD category: {}", sample.category);
         return;
     }
-    (this->*(entry->second))(sample);
+    (this->*entry->second)(sample);
 }
 }  // namespace rocprofsys::trace_cache

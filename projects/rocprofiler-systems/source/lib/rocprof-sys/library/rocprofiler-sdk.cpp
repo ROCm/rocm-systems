@@ -984,11 +984,11 @@ tool_tracing_callback_stop(
                         for(const auto& itr : *_bt_data)
                         {
                             auto        _linfo = itr.lineinfo.get();
-                            const auto* _func  = (itr.name.empty()) ? &_unk : &itr.name;
+                            const auto* _func  = itr.name.empty() ? &_unk : &itr.name;
                             const auto* _loc =
                                 (_linfo && !_linfo.location.empty())
                                     ? &_linfo.location
-                                    : ((itr.location.empty()) ? &_unk : &itr.location);
+                                    : (itr.location.empty() ? &_unk : &itr.location);
                             auto _line =
                                 (_linfo && _linfo.line > 0)
                                     ? fmt::format("{}", _linfo.line)
@@ -1562,11 +1562,11 @@ ompt_tracing_callback_stop(
                     for(const auto& itr : *_bt_data)
                     {
                         auto        _linfo = itr.lineinfo.get();
-                        const auto* _func  = (itr.name.empty()) ? &_unk : &itr.name;
+                        const auto* _func  = itr.name.empty() ? &_unk : &itr.name;
                         const auto* _loc =
                             (_linfo && !_linfo.location.empty())
                                 ? &_linfo.location
-                                : ((itr.location.empty()) ? &_unk : &itr.location);
+                                : (itr.location.empty() ? &_unk : &itr.location);
                         auto _line =
                             (_linfo && _linfo.line > 0)
                                 ? fmt::format("{}", _linfo.line)
