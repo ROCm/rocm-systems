@@ -1466,9 +1466,19 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
     // below 4 KiB legacy LL, 4 KiB through the topology max LL128, above that SIMPLE.
     // Otherwise: at/below the latency threshold use LL128 (gfx9 + ALLOC, or gfx1250 ENABLE=1)
     // or legacy LL, and SIMPLE above it. P2P_LL128_THRESHOLD=0 means no upper bound.
+    // Registered user buffers need SIMPLE for NET/IPC UBR (enqueue registers only then).
+    // ncclSend/ncclRecv stamp allowUB=true even when the pointer is not in the cache, so
+    // skip the auto window only when ncclRegFind hits. Otherwise every SendRecv would
+    // stay SIMPLE and the gfx1250 windows would never fire.
+    bool skipAutoLl128 = false;
+    if (p2pTasks[dir] && p2pTasks[dir]->allowUB && addrs[dir] && bytes[dir] > 0) {
+      struct ncclReg* reg = nullptr;
+      NCCLCHECKGOTO(ncclRegFind(comm, addrs[dir], bytes[dir], &reg), ret, cleanup);
+      skipAutoLl128 = reg != nullptr;
+    }
     if (bytes[dir] == -1) {
       protocol[dir] = NCCL_PROTO_SIMPLE;
-    } else if (srLl128Hi[dir] > 0) {
+    } else if (srLl128Hi[dir] > 0 && !skipAutoLl128) {
       if (bytes[dir] >= rcclGfx1250SendRecvLl128MinBytes && bytes[dir] <= srLl128Hi[dir] && hasLL128[dir])
         protocol[dir] = NCCL_PROTO_LL128;
       else if (bytes[dir] < rcclGfx1250SendRecvLl128MinBytes && hasLL[dir])
@@ -1483,20 +1493,22 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
     }
   }
 
-  // One P2P kernel variant for both dirs (ncclDevWorkP2p has no per-dir LL vs LL128). If this
-  // round mixed LL and LL128, demote LL128 to LL. Promoting the LL dir to LL128 would pick that
-  // connection's framing from the other dir's size, and the peer on that link never saw that
-  // size (it is a different rank except delta 0 or n/2). Demoting keeps mixed rounds on legacy
-  // LL, which every rank with the same send/recv sizes computes the same way. It also leaves
-  // AlltoAll (srLl128Hi=0) on the threshold path instead of inheriting a paired SendRecv window.
+  // One P2P kernel variant for both dirs (ncclDevWorkP2p has no per-dir LL vs LL128). Protocol
+  // stays f(bytes[dir]): send is to r+delta and recv is from r-delta, so this rank must not pick
+  // one link's framing from the other link's size. SIMPLE vs latency in one kernel is fine
+  // (sendProtoLL/recvProtoLL). Mixed LL and LL128 is not; split into two one-sided work items
+  // so each kernel is one family and each peer still sees the same bytes[dir].
   if (bytes[0] != -1 && bytes[1] != -1) {
     bool llFam0 = protocol[0] == NCCL_PROTO_LL || protocol[0] == NCCL_PROTO_LL128;
     bool llFam1 = protocol[1] == NCCL_PROTO_LL || protocol[1] == NCCL_PROTO_LL128;
     if (llFam0 && llFam1 && protocol[0] != protocol[1]) {
-      for (int d = 0; d < 2; d++) {
-        if (protocol[d] != NCCL_PROTO_LL128) continue;
-        protocol[d] = hasLL[d] ? NCCL_PROTO_LL : NCCL_PROTO_SIMPLE;
-      }
+      struct ncclTaskP2p* recvOnly[2] = {p2pTasks[0], nullptr};
+      struct ncclTaskP2p* sendOnly[2] = {nullptr, p2pTasks[1]};
+      NCCLCHECK(addP2pToPlan(comm, plan, nChannelsMin, nChannelsMax, p2pRound, sendRank, nullptr, -1, recvRank,
+                             recvAddr, recvBytes, 0, recvOpCount, planTotalTasks, recvOnly));
+      NCCLCHECK(addP2pToPlan(comm, plan, nChannelsMin, nChannelsMax, p2pRound, sendRank, sendAddr, sendBytes, recvRank,
+                             nullptr, -1, sendOpCount, 0, planTotalTasks, sendOnly));
+      return ncclSuccess;
     }
   }
 
@@ -1829,9 +1841,10 @@ static ncclResult_t scheduleP2pTasksToPlan(struct ncclComm* comm, int* p2pEpoch,
         comm->planner.nTasksP2pSend -= 1;
         comm->planner.nTasksP2pRecv -= 1;
       } else {
-        // Ensure room for worst case of one new batch per channel.
-        if (!ncclTestBudget(budget, plan->nWorkBatches + nChannelsMax,
-                            plan->workBytes + sizeof(struct ncclDevWorkP2p))) {
+        // Ensure room for worst case of one new batch per channel. Mixed LL/LL128 rounds
+        // split into two one-sided work items, so reserve twice the P2P work.
+        if (!ncclTestBudget(budget, plan->nWorkBatches + 2 * nChannelsMax,
+                            plan->workBytes + 2 * sizeof(struct ncclDevWorkP2p))) {
           return ncclSuccess;
         }
         struct ncclTaskP2p* p2pTasks[2] = {recv, send};

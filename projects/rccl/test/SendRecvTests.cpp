@@ -777,7 +777,6 @@ namespace RcclUnitTesting
   TEST(SendRecv, UserBufferRegister)
   {
     setenv("RCCL_ENABLE_INTRANET", "1", 1);
-    setenv("NCCL_P2P_LL128_ENABLE", "0", 1); // keep UBR on SIMPLE; auto windows would skip it
     TestBed testBed;
 
     // Configuration
@@ -937,6 +936,70 @@ namespace RcclUnitTesting
     EXPECT_TRUE(sawLL) << "2 KiB should stay legacy LL below the 4 KiB floor";
     EXPECT_TRUE(sawLL128) << "16 KiB should take the gfx1250 SendRecv auto LL128 window";
     EXPECT_TRUE(sawSimple) << "2 MiB should be SIMPLE above the auto-window cap";
+    RemoveGlobbedFiles(debugGlob);
+    unsetenv("NCCL_DEBUG_FILE");
+    unsetenv("NCCL_DEBUG_SUBSYS");
+    unsetenv("NCCL_DEBUG");
+  }
+
+  // Argus: 4 ranks, rank 0 recvs 2 KiB (LL) and sends 8 KiB (LL128) while rank 1's 8 KiB recv
+  // is not mixed. Demoting the mixed round made rank 0 write LL and rank 1 poll LL128.
+  TEST(SendRecv, Gfx1250MixedRoundKeepsPeerFraming)
+  {
+    if (!DeviceIsGfx1250()) {
+      GTEST_SKIP() << "Skipping... gfx1250 SendRecv auto windows are gfx1250-only.";
+    }
+    unsetenv("NCCL_P2P_LL128_ENABLE");
+    std::string const debugGlob = "/tmp/rccl_gfx1250_mixed_round_" + std::to_string(getpid()) + ".*";
+    RemoveGlobbedFiles(debugGlob);
+    setenv("NCCL_DEBUG", "INFO", 1);
+    setenv("NCCL_DEBUG_SUBSYS", "COLL", 1);
+    setenv("NCCL_DEBUG_FILE", ("/tmp/rccl_gfx1250_mixed_round_" + std::to_string(getpid()) + ".%p").c_str(), 1);
+    {
+      TestBed testBed;
+      if (testBed.ev.maxGpus < 4) {
+        testBed.Finalize();
+        RemoveGlobbedFiles(debugGlob);
+        unsetenv("NCCL_DEBUG_FILE");
+        unsetenv("NCCL_DEBUG_SUBSYS");
+        unsetenv("NCCL_DEBUG");
+        GTEST_SKIP() << "Skipping... mixed-round ring needs 4 GPUs (detected " << testBed.ev.maxGpus << ").";
+      }
+      int const numGpus = 4;
+      const std::vector<int>& gpuPriorityOrder = testBed.ev.GetGpuPriorityOrder();
+      testBed.InitComms(TestBed::GetDeviceIdsList(1, numGpus, 1, gpuPriorityOrder), {2},
+                        testBed.GetNumStreamsPerGroup(1, 2), 1);
+      if (::testing::Test::HasFatalFailure()) return;
+
+      // Ring send to +1, recv from -1. Rank 0 send 8 KiB recv 2 KiB; rank 3 send 2 KiB recv 8 KiB;
+      // ranks 1-2 send/recv 8 KiB.
+      int const sendBytes[4] = {8192, 8192, 8192, 2048};
+      int const recvBytes[4] = {2048, 8192, 8192, 8192};
+      OptionalColArgs options;
+      bool isCorrect = true;
+      for (int r = 0; r < numGpus; ++r) {
+        options.root = (r + 1) % numGpus;
+        testBed.SetCollectiveArgs(ncclCollSend, ncclInt8, sendBytes[r], sendBytes[r], options, 0, 0, r);
+        testBed.AllocateMem(false, false, 0, 0, r);
+        testBed.PrepareData(0, 0, r);
+        options.root = (r + numGpus - 1) % numGpus;
+        testBed.SetCollectiveArgs(ncclCollRecv, ncclInt8, recvBytes[r], recvBytes[r], options, 1, 0, r);
+        testBed.AllocateMem(false, false, 0, 1, r);
+        testBed.PrepareData(0, 1, r);
+      }
+      testBed.ExecuteCollectives({0, 1, 2, 3}, 0);
+      for (int r = 0; r < numGpus && isCorrect; ++r) {
+        testBed.ValidateResults(isCorrect, 0, 0, r);
+        testBed.ValidateResults(isCorrect, 0, 1, r);
+      }
+      EXPECT_TRUE(isCorrect);
+      testBed.DestroyComms();
+      testBed.Finalize();
+    }
+    bool const sawLl128Send8k = DebugLogsContainProtocol(debugGlob, "LL128");
+    bool const sawLlRecv2k = DebugLogsContainProtocol(debugGlob, "LL");
+    EXPECT_TRUE(sawLl128Send8k) << "8 KiB ring sends must stay LL128; demoting the mixed rank would drop them to LL";
+    EXPECT_TRUE(sawLlRecv2k) << "2 KiB ring recvs must stay legacy LL";
     RemoveGlobbedFiles(debugGlob);
     unsetenv("NCCL_DEBUG_FILE");
     unsetenv("NCCL_DEBUG_SUBSYS");
