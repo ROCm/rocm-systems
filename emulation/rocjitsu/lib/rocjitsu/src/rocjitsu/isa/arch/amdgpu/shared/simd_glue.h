@@ -4265,17 +4265,19 @@ template <int ElemBits, bool Signed, typename Inst>
     if (packed_opsel(inst.inst_) != 0u || packed_opsel_hi(inst.inst_) != 3u)
       return false;
   }
+  const bool clamp = inst.inst_.clamp && (ElemBits != 8 || dot4_clamp_supported(wf));
+#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+  if (clamp)
+    return false;
+#endif
   constexpr int N = 32 / ElemBits;
   constexpr uint32_t kElemMask = (ElemBits == 16) ? 0xFFFFu : (ElemBits == 8) ? 0xFFu : 0xFu;
   using T = uint32_t;
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  const bool clamp = inst.inst_.clamp && (ElemBits != 8 || dot4_clamp_supported(wf));
   using U = util::native<uint32_t>;
   using I = util::native<int32_t>;
-  using U64 = util::stdx::fixed_size_simd<uint64_t, W>;
-  using I64 = util::stdx::fixed_size_simd<int64_t, W>;
   RegisterAccess regs(wf);
   auto src0 = regs.read_operand(inst.src0, exec);
   auto src1 = regs.read_operand(inst.src1, exec);
@@ -4289,7 +4291,9 @@ template <int ElemBits, bool Signed, typename Inst>
     const U raw1 = src1.template load_native<uint32_t>(base);
     const U acc = src2.template load_native<uint32_t>(base);
     if constexpr (Signed) {
+#if !UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
       if (clamp) {
+        using I64 = util::stdx::fixed_size_simd<int64_t, W>;
         I64 sum = util::stdx::static_simd_cast<I64>(std::bit_cast<I>(acc));
         for (int i = 0; i < N; ++i) {
           const U ea = (raw0 >> (i * ElemBits)) & kElemMask;
@@ -4303,19 +4307,22 @@ template <int ElemBits, bool Signed, typename Inst>
         util::stdx::where(sum > I64(std::numeric_limits<int32_t>::max()), sum) =
             I64(std::numeric_limits<int32_t>::max());
         dst.template store_native<uint32_t>(base, util::stdx::static_simd_cast<U>(sum), chunk);
-      } else {
-        U sum = acc;
-        for (int i = 0; i < N; ++i) {
-          const U ea = (raw0 >> (i * ElemBits)) & kElemMask;
-          const U eb = (raw1 >> (i * ElemBits)) & kElemMask;
-          const I a = std::bit_cast<I>(simd_sign_extend_u32(ea, ElemBits));
-          const I b = std::bit_cast<I>(simd_sign_extend_u32(eb, ElemBits));
-          sum += std::bit_cast<U>(a * b);
-        }
-        dst.template store_native<uint32_t>(base, sum, chunk);
+        continue;
       }
+#endif
+      U sum = acc;
+      for (int i = 0; i < N; ++i) {
+        const U ea = (raw0 >> (i * ElemBits)) & kElemMask;
+        const U eb = (raw1 >> (i * ElemBits)) & kElemMask;
+        const I a = std::bit_cast<I>(simd_sign_extend_u32(ea, ElemBits));
+        const I b = std::bit_cast<I>(simd_sign_extend_u32(eb, ElemBits));
+        sum += std::bit_cast<U>(a * b);
+      }
+      dst.template store_native<uint32_t>(base, sum, chunk);
     } else {
+#if !UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
       if (clamp) {
+        using U64 = util::stdx::fixed_size_simd<uint64_t, W>;
         U64 sum = util::stdx::static_simd_cast<U64>(acc);
         for (int i = 0; i < N; ++i) {
           const U ea = (raw0 >> (i * ElemBits)) & kElemMask;
@@ -4325,15 +4332,16 @@ template <int ElemBits, bool Signed, typename Inst>
         util::stdx::where(sum > U64(std::numeric_limits<uint32_t>::max()), sum) =
             U64(std::numeric_limits<uint32_t>::max());
         dst.template store_native<uint32_t>(base, util::stdx::static_simd_cast<U>(sum), chunk);
-      } else {
-        U sum = acc;
-        for (int i = 0; i < N; ++i) {
-          const U ea = (raw0 >> (i * ElemBits)) & kElemMask;
-          const U eb = (raw1 >> (i * ElemBits)) & kElemMask;
-          sum += ea * eb;
-        }
-        dst.template store_native<uint32_t>(base, sum, chunk);
+        continue;
       }
+#endif
+      U sum = acc;
+      for (int i = 0; i < N; ++i) {
+        const U ea = (raw0 >> (i * ElemBits)) & kElemMask;
+        const U eb = (raw1 >> (i * ElemBits)) & kElemMask;
+        sum += ea * eb;
+      }
+      dst.template store_native<uint32_t>(base, sum, chunk);
     }
   }
   return true;
@@ -4451,11 +4459,14 @@ template <int ElemBits, typename Inst>
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = dpp::execution_lane_mask(inst, wf);
   const bool clamp = inst.inst_.clamp && (ElemBits != 8 || dot4_clamp_supported(wf));
+#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+  if (clamp)
+    return false;
+#endif
   const bool src0_signed = (inst.inst_.neg & 0x1u) != 0;
   const bool src1_signed = (inst.inst_.neg & 0x2u) != 0;
   using U = util::native<uint32_t>;
   using I = util::native<int32_t>;
-  using I64 = util::stdx::fixed_size_simd<int64_t, W>;
   RegisterAccess regs(wf);
   auto src0 = regs.read_operand(inst.src0, exec);
   auto src1 = regs.read_operand(inst.src1, exec);
@@ -4468,7 +4479,9 @@ template <int ElemBits, typename Inst>
     const U raw0 = src0.template load_native<uint32_t>(base);
     const U raw1 = src1.template load_native<uint32_t>(base);
     const U acc = src2.template load_native<uint32_t>(base);
+#if !UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
     if (clamp) {
+      using I64 = util::stdx::fixed_size_simd<int64_t, W>;
       I64 sum = util::stdx::static_simd_cast<I64>(std::bit_cast<I>(acc));
       for (int i = 0; i < N; ++i) {
         const U ea = (raw0 >> (i * ElemBits)) & kElemMask;
@@ -4484,19 +4497,20 @@ template <int ElemBits, typename Inst>
       util::stdx::where(sum > I64(std::numeric_limits<int32_t>::max()), sum) =
           I64(std::numeric_limits<int32_t>::max());
       dst.template store_native<uint32_t>(base, util::stdx::static_simd_cast<U>(sum), chunk);
-    } else {
-      U sum = acc;
-      for (int i = 0; i < N; ++i) {
-        const U ea = (raw0 >> (i * ElemBits)) & kElemMask;
-        const U eb = (raw1 >> (i * ElemBits)) & kElemMask;
-        const I a = src0_signed ? std::bit_cast<I>(simd_sign_extend_u32(ea, ElemBits))
-                                : util::stdx::static_simd_cast<I>(ea);
-        const I b = src1_signed ? std::bit_cast<I>(simd_sign_extend_u32(eb, ElemBits))
-                                : util::stdx::static_simd_cast<I>(eb);
-        sum += std::bit_cast<U>(a * b);
-      }
-      dst.template store_native<uint32_t>(base, sum, chunk);
+      continue;
     }
+#endif
+    U sum = acc;
+    for (int i = 0; i < N; ++i) {
+      const U ea = (raw0 >> (i * ElemBits)) & kElemMask;
+      const U eb = (raw1 >> (i * ElemBits)) & kElemMask;
+      const I a = src0_signed ? std::bit_cast<I>(simd_sign_extend_u32(ea, ElemBits))
+                              : util::stdx::static_simd_cast<I>(ea);
+      const I b = src1_signed ? std::bit_cast<I>(simd_sign_extend_u32(eb, ElemBits))
+                              : util::stdx::static_simd_cast<I>(eb);
+      sum += std::bit_cast<U>(a * b);
+    }
+    dst.template store_native<uint32_t>(base, sum, chunk);
   }
   return true;
 }
@@ -5250,13 +5264,9 @@ template <bool Vop3, typename Inst>
 
 /// VOP3P integer dot-product probe. Args: (ElemBits, Signed) — e.g.
 /// (8, true) for v_dot4_i32_i8, (4, false) for v_dot8_u32_u4. Functorless.
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
-#define ROCJITSU_TRY_SIMD_VOP3P_DOT_INT(...) static_cast<void>(inst)
-#else
 #define ROCJITSU_TRY_SIMD_VOP3P_DOT_INT(...)                                                       \
   if (::rocjitsu::amdgpu::try_execute_vop3p_dot_int_simd<__VA_ARGS__>(inst, wf))                   \
   return
-#endif
 
 /// VOP3P v_dot2_f32_{f16,bf16} SIMD probe. Arg: the half-precision widening
 /// format (F16 or BF16) as a ::rocjitsu::amdgpu::Vop3pDotHalfFormat enumerator.
@@ -5267,13 +5277,9 @@ template <bool Vop3, typename Inst>
 
 /// VOP3P mixed-sign integer dot probe (v_dot4_i32_iu8 / v_dot8_i32_iu4). Arg:
 /// ElemBits (8 or 4). Per-operand sign read at runtime from inst.neg.
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
-#define ROCJITSU_TRY_SIMD_VOP3P_DOT_INT_MIXED(ElemBits) static_cast<void>(inst)
-#else
 #define ROCJITSU_TRY_SIMD_VOP3P_DOT_INT_MIXED(ElemBits)                                            \
   if (::rocjitsu::amdgpu::try_execute_vop3p_dot_int_mixed_simd<ElemBits>(inst, wf))                \
   return
-#endif
 
 /// VOP2/VOP3 dst-accumulate integer dot probe (the "c" forms). Args:
 /// (ElemBits, Vop3) — e.g. (8, true) for v_dot4c_i32_i8_vop3.

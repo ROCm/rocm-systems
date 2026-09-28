@@ -464,6 +464,41 @@ TEST(SmfmacSimdExact, SparseGatherMatchesIndependentPhysicalLayoutOracle) {
   }
 }
 
+TEST(SmfmacSimdExact, Cdna4IgnoresPartialExecAndUpdatesFullWave) {
+  const auto &test = CDNA4_CASES[0];
+  SmfmacFixture fx(test.arch);
+  ASSERT_NE(fx.wf, nullptr);
+  restore(fx, std::vector<uint32_t>(static_cast<size_t>(STATE_REGS) * WF_SIZE, 0));
+
+  constexpr uint32_t packed_f16_ones = 0x3C003C00u;
+  for (uint32_t reg = 0; reg < test.a_regs; ++reg)
+    for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+      fx.cu->write_vgpr(fx.vbase + A_OFF + reg, lane, packed_f16_ones);
+  for (uint32_t reg = 0; reg < test.b_regs; ++reg)
+    for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+      fx.cu->write_vgpr(fx.vbase + B_OFF + reg, lane, packed_f16_ones);
+  for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+    fx.cu->write_vgpr(fx.vbase + INDEX_OFF, lane, 0x44444444u);
+
+  auto instruction = decode(test, A_OFF, B_OFF, INDEX_OFF);
+  ASSERT_NE(instruction, nullptr);
+  const auto initial = fx.snapshot(0, STATE_REGS);
+  const std::vector<uint32_t> expected(static_cast<size_t>(test.dst_regs) * WF_SIZE,
+                                       std::bit_cast<uint32_t>(32.0f));
+  constexpr uint64_t partial_exec = 0xAAAAAAAAAAAAAAAAULL;
+  ForceScalarGuard force_scalar_guard;
+  for (bool force_scalar : {true, false}) {
+    restore(fx, initial);
+    fx.wf->set_exec(partial_exec);
+    util::set_force_scalar_for_testing(force_scalar);
+    ASSERT_TRUE(fx.cu->execute_instruction(instruction.get(), *fx.wf).succeeded())
+        << (force_scalar ? "scalar execution failed" : "default execution failed");
+    EXPECT_EQ(fx.snapshot(DST_OFF, test.dst_regs), expected)
+        << (force_scalar ? "scalar result" : "default result");
+    EXPECT_EQ(fx.wf->exec(), partial_exec);
+  }
+}
+
 TEST(SmfmacSimdExact, Cdna3DestinationAliasesEachSource) {
   SKIP_IF_NO_SIMD();
   if (util::native<float>::size() != 16)
@@ -507,9 +542,6 @@ TEST(SmfmacSimdExact, Cdna4NaNSourcePriority) {
 }
 
 TEST(SmfmacSimdExact, Bf16OverflowCancellationRequiresFusion) {
-  SKIP_IF_NO_SIMD();
-  if (util::native<float>::size() != 16)
-    GTEST_SKIP() << "SMFMAC AVX-512 fast path requires 16-wide native SIMD";
   for (const auto &test : {CDNA3_CASES[2], CDNA4_CASES[2]})
     for (bool negate : {false, true}) {
       SCOPED_TRACE(::testing::Message()
