@@ -7,8 +7,8 @@
 #include "hsa/hsa_api_trace_minimal.h"
 #include "rocjitsu/hooks/hsa_tool_lifetime.h"
 
-#include "rocjitsu/code/analysis/waitcheck.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
+#include "rocjitsu/code/analysis/waitcheck.h"
 #include "rocjitsu/hooks/hsa_api_function_patch.h"
 #include "rocjitsu/hooks/hsa_code_object_file_snapshot.h"
 
@@ -158,7 +158,7 @@ void print_report(const rocjitsu::AmdGpuCodeObject &code_object,
   if (report.passed())
     return;
 
-  if (report.diagnostics_truncated) {
+  if (report.stopped_early) {
     std::fprintf(stderr,
                  "rocjitsu-waitcheck: at least %zu waitcnt hazard(s) in %s code object%s%.*s\n",
                  report.diagnostics_observed, rj_code_target_name(code_object.target_id()),
@@ -183,11 +183,12 @@ void print_report(const rocjitsu::AmdGpuCodeObject &code_object,
                  diagnostic.producer_instruction.c_str());
     std::fprintf(stderr, "rocjitsu-waitcheck:   consumer: %s\n", diagnostic.instruction.c_str());
   }
-  if (report.diagnostics.size() > limit) {
-    std::fprintf(stderr, "rocjitsu-waitcheck: omitted %zu additional diagnostic(s)\n",
-                 report.diagnostics.size() - limit);
-  } else if (report.diagnostics_truncated) {
-    std::fprintf(stderr, "rocjitsu-waitcheck: omitted additional diagnostic(s) after limit\n");
+  if (report.diagnostics_observed > limit) {
+    std::fprintf(stderr, "rocjitsu-waitcheck: omitted %s%zu diagnostic(s) after limit\n",
+                 report.stopped_early ? "at least " : "", report.diagnostics_observed - limit);
+  } else if (report.stopped_early) {
+    std::fprintf(stderr,
+                 "rocjitsu-waitcheck: analysis stopped early; additional diagnostics may exist\n");
   }
 }
 

@@ -316,9 +316,10 @@ void print_waitcheck_issue(uint64_t reader, const AmdGpuCodeObject &code_object,
 
   std::fprintf(stderr,
                "rocjitsu-waitcheck: ConSan preflight reported reader=%llu target=%s "
-               "reason=wait-hazard diagnostics=%zu action=continue\n",
+               "reason=wait-hazard diagnostics=%s%zu action=continue\n",
                static_cast<unsigned long long>(reader),
-               rj_code_target_name(code_object.target_id()), report.diagnostics_observed);
+               rj_code_target_name(code_object.target_id()), report.stopped_early ? ">=" : "",
+               report.diagnostics_observed);
   constexpr size_t kMaxDiagnostics = 32;
   const size_t limit = std::min(kMaxDiagnostics, report.diagnostics.size());
   for (size_t i = 0; i < limit; ++i) {
@@ -331,11 +332,12 @@ void print_waitcheck_issue(uint64_t reader, const AmdGpuCodeObject &code_object,
                  diagnostic.producer_instruction.c_str());
     std::fprintf(stderr, "rocjitsu-waitcheck:   consumer: %s\n", diagnostic.instruction.c_str());
   }
-  if (report.diagnostics.size() > limit) {
-    std::fprintf(stderr, "rocjitsu-waitcheck: omitted %zu additional diagnostic(s)\n",
-                 report.diagnostics.size() - limit);
-  } else if (report.diagnostics_truncated) {
-    std::fprintf(stderr, "rocjitsu-waitcheck: omitted additional diagnostic(s) after limit\n");
+  if (report.diagnostics_observed > limit) {
+    std::fprintf(stderr, "rocjitsu-waitcheck: omitted %s%zu diagnostic(s) after limit\n",
+                 report.stopped_early ? "at least " : "", report.diagnostics_observed - limit);
+  } else if (report.stopped_early) {
+    std::fprintf(stderr,
+                 "rocjitsu-waitcheck: analysis stopped early; additional diagnostics may exist\n");
   }
 }
 

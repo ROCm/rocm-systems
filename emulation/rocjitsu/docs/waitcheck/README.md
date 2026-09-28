@@ -217,9 +217,11 @@ the English `message` is explanatory text and should not be parsed.
 A hazard is not an API failure: the call returns `ROCJITSU_STATUS_SUCCESS`,
 sets `result.passed` to zero, and reports structured producer/consumer
 diagnostics through the callback. `result.diagnostics_observed` is complete
-with the default unlimited callback delivery. If no callback is installed,
-`max_diagnostics` limits delivery, or checking stops early,
-`result.diagnostics_truncated` is set and the observed count is a lower bound.
+when analysis finishes, even with limited or disabled callback delivery.
+`result.diagnostics_truncated` indicates omitted diagnostic details or early
+termination. Only early termination (`result.stopped_early`) makes the observed
+count a lower bound. The CLI and hooks likewise report exact totals and omitted
+counts when diagnostic storage is capped.
 Link the installed dedicated library with `-lrocjitsu_waitcheck`.
 
 `librocjitsu_waitcheck.so.1` contains only the decode and analysis path. It does

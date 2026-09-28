@@ -4520,6 +4520,29 @@ TEST(HsaHooksUnitTest, ConSanWaitcheckReportsHazardBeforeTransformRegardlessOfWa
   EXPECT_LT(waitcheck_pos, consan_pos) << log;
 }
 
+TEST(HsaHooksUnitTest, ConSanWaitcheckStorageCapReportsExactTotalAndOmittedCount) {
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
+  reset_code_object_observations();
+  configure_consan_profile(kConSanHookProfiles[1], false);
+  g_transform_override_result.outcome = rocjitsu::consan::TransformOutcome::Unchanged;
+  FakeApiTable api;
+  InstalledDbiHook hook(api);
+  ASSERT_TRUE(hook.installed()) << hook.error();
+  const auto image = rocjitsu::waitcheck_test::make_diagnostic_count_code_object(80);
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(
+      api.core.hsa_code_object_reader_create_from_memory_fn(image.data(), image.size(), &reader),
+      HSA_STATUS_SUCCESS);
+  testing::internal::CaptureStderr();
+  const hsa_status_t status = api.core.hsa_executable_load_agent_code_object_fn(
+      hsa_executable_t{7}, kHostAgent, reader, nullptr, nullptr);
+  const std::string log = testing::internal::GetCapturedStderr();
+  EXPECT_EQ(status, HSA_STATUS_SUCCESS);
+  EXPECT_NE(log.find("reason=wait-hazard diagnostics=80 action=continue"), std::string::npos)
+      << log;
+  EXPECT_NE(log.find("omitted 48 diagnostic(s) after limit"), std::string::npos) << log;
+}
+
 TEST(HsaHooksUnitTest, ConSanWaitcheckReportsAnalysisFailureBeforeTransform) {
   ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
   reset_code_object_observations();

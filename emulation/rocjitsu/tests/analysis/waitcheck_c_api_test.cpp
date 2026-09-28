@@ -445,10 +445,48 @@ TEST(WaitcheckCApiTest, DiagnosticLimitReportsTruncationAndPreservesFailure) {
   EXPECT_EQ(result.passed, 0u);
   EXPECT_EQ(result.kernels_discovered, 2u);
   EXPECT_EQ(result.kernels_analyzed, 2u);
-  EXPECT_EQ(result.diagnostics_observed, 1u);
+  EXPECT_EQ(result.diagnostics_observed, 2u);
   EXPECT_EQ(result.diagnostics_reported, 1u);
   EXPECT_EQ(result.diagnostics_truncated, 1u);
   EXPECT_EQ(state.diagnostics.size(), 1u);
+}
+
+TEST(WaitcheckCApiTest, StorageCapDoesNotLimitObservedCount) {
+  const auto image = rocjitsu::waitcheck_test::make_diagnostic_count_code_object(80);
+  for (size_t cap : {0u, 1u, 32u, 80u, 100u}) {
+    SCOPED_TRACE(cap);
+    CallbackState state;
+    rj_waitcheck_options_t options = callback_options(state);
+    options.max_diagnostics = cap;
+    if (cap == 0)
+      options.diagnostic_callback = nullptr;
+    rj_waitcheck_result_t result = initialized_result();
+    ASSERT_EQ(rj_waitcheck_analyze(image.data(), image.size(), &options, &result),
+              ROCJITSU_STATUS_SUCCESS);
+    EXPECT_EQ(result.diagnostics_observed, 80u);
+    EXPECT_EQ(result.diagnostics_reported, std::min(cap, size_t{80}));
+    EXPECT_EQ(result.diagnostics_truncated, cap < 80);
+    EXPECT_EQ(result.stopped_early, 0u);
+    EXPECT_EQ(result.instructions_analyzed, 241u);
+    EXPECT_EQ(result.memory_events_tracked, 80u);
+  }
+}
+
+TEST(WaitcheckCApiTest, StopAfterFirstStillStopsWithZeroStorage) {
+  const auto image = rocjitsu::waitcheck_test::make_diagnostic_count_code_object(80);
+  CallbackState state;
+  rj_waitcheck_options_t options = callback_options(state);
+  options.max_diagnostics = 0;
+  options.stop_after_first_diagnostic = 1;
+  options.diagnostic_callback = nullptr;
+  rj_waitcheck_result_t result = initialized_result();
+  ASSERT_EQ(rj_waitcheck_analyze(image.data(), image.size(), &options, &result),
+            ROCJITSU_STATUS_SUCCESS);
+  EXPECT_EQ(result.diagnostics_observed, 1u);
+  EXPECT_EQ(result.diagnostics_reported, 0u);
+  EXPECT_EQ(result.stopped_early, 1u);
+  EXPECT_EQ(result.diagnostics_truncated, 1u);
+  EXPECT_LT(result.instructions_analyzed, 241u);
 }
 
 TEST(WaitcheckCApiTest, AttributesWholeObjectDiagnosticsToEachKernel) {

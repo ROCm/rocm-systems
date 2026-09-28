@@ -170,7 +170,10 @@ struct WaitcheckReport {
   size_t memory_events_tracked = 0;
   size_t kernels_discovered = 0;
   size_t kernels_analyzed = 0;
+  /// @brief Exact observed count, even when storage is capped. A lower bound
+  /// when analysis stops early.
   size_t diagnostics_observed = 0;
+  /// @brief Details were omitted, or analysis stopped early.
   bool diagnostics_truncated = false;
   bool stopped_early = false;
   size_t counter_parity_wait_groups = 0;

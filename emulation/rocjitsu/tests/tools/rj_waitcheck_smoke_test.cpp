@@ -645,9 +645,36 @@ TEST(RjWaitcheck, MaxDiagnosticsZeroKeepsHazardStatusWithoutDetails) {
                                          << stderr_text << "\nstdout:\n"
                                          << stdout_text;
   EXPECT_TRUE(stderr_text.empty()) << stderr_text;
-  EXPECT_TRUE(contains(stdout_text, "diagnostics=>=1")) << stdout_text;
-  EXPECT_TRUE(contains(stdout_text, "omitted at least 1 diagnostic(s) after limit")) << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "diagnostics=1")) << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "omitted 1 diagnostic(s) after limit")) << stdout_text;
   EXPECT_FALSE(contains(stdout_text, "missing s_wait_loadcnt")) << stdout_text;
+}
+
+TEST(RjWaitcheck, StorageCapReportsExactTotalAndOmittedCount) {
+  const TempDir temp_dir(std::filesystem::temp_directory_path() /
+                         ("rj_waitcheck_counts_" + std::to_string(getpid())));
+  const auto input = temp_dir.path / "counts.co";
+  const auto output = temp_dir.path / "stdout.txt";
+  for (bool clean : {false, true}) {
+    ASSERT_TRUE(write_binary_file(
+        input, rocjitsu::waitcheck_test::make_diagnostic_count_code_object(80, clean)));
+    for (const std::string cap : {"", " --max-diagnostics 100", " --max-diagnostics 80"}) {
+      SCOPED_TRACE(cap);
+      const std::string command = shell_quote(g_waitcheck_tool.string()) + " " +
+                                  shell_quote(input.string()) +
+                                  " --target gfx1201 --all-code-objects --no-fail" + cap + " > " +
+                                  shell_quote(output.string());
+      ASSERT_TRUE(command_succeeded(std::system(command.c_str())));
+      const std::string text = read_text_file(output);
+      EXPECT_TRUE(contains(text, clean ? "diagnostics=0" : "diagnostics=80")) << text;
+      EXPECT_FALSE(contains(text, "diagnostics=>=")) << text;
+      if (!clean && cap.empty()) {
+        EXPECT_TRUE(contains(text, "omitted 48 diagnostic(s) after limit")) << text;
+      } else {
+        EXPECT_FALSE(contains(text, "omitted")) << text;
+      }
+    }
+  }
 }
 
 TEST(RjWaitcheck, BatchSkipsUnsupportedInputs) {
