@@ -866,6 +866,23 @@ ncclResult_t IbCastResiliencySenderCreateQps(struct ncclIbResiliency* resCtx,
   return ncclSuccess;
 }
 
+// A peer without port recovery leaves its recovery QPNs zeroed. QPN 0 is never a user QP.
+static bool IbCastResiliencyPeerHasRecovery(struct ncclIbConnectionMetadata* remInfo) {
+  return remInfo->resiliencyInfo.portRecoveryQpsInfo[0].qpn != 0;
+}
+
+// Undo what DevInit (and, on the sender, QP creation) allocated for recovery.
+static ncclResult_t IbCastResiliencyRecoveryDisable(struct ncclIbResiliency* resCtx, int nCreatedQps) {
+  INFO(NCCL_NET, "NET/IB-CAST: peer has no port recovery; port recovery off for %s comm %p",
+       resCtx->baseComm->isSend ? "send" : "recv", resCtx->baseComm);
+  NCCLCHECK(IbCastPortRecoveryQpsDestroy(resCtx, nCreatedQps));
+  for (int i = 0; i < nCreatedQps; i++) resCtx->portRecoveryQps[i].qp = NULL;
+  for (int i = 0; i < resCtx->ndevs; i++) NCCLCHECK(IbCastPortRecoveryDevDestroy(resCtx, i));
+  resCtx->recoveryEnabled = false;
+  resCtx->nPortRecoveryQps = 0;
+  return ncclSuccess;
+}
+
 ncclResult_t IbCastResiliencySenderQpsToRts(struct ncclIbResiliency* resCtx, struct ncclIbConnectionMetadata* remInfo) {
   ncclIbSendComm* sendComm = (ncclIbSendComm*)resCtx->baseComm;
   ncclIbQp* localQp = NULL;
@@ -905,6 +922,9 @@ ncclResult_t IbCastResiliencySenderQpsToRts(struct ncclIbResiliency* resCtx, str
          __func__, localQpIndex, localQp->qp->qp_num, rtrAttr->remoteQpNum, localDevIndex, resCtx->baseComm);
   }
 
+  if (resCtx->recoveryEnabled && !IbCastResiliencyPeerHasRecovery(remInfo)) {
+    NCCLCHECK(IbCastResiliencyRecoveryDisable(resCtx, resCtx->nPortRecoveryQps));
+  }
   if (resCtx->recoveryEnabled) {
     NCCLCHECK(IbCastPortRecoverySenderQpsToRts(resCtx, remInfo, resCtx->nPortRecoveryQps));
   }
@@ -974,6 +994,9 @@ ncclResult_t IbCastResiliencyReceiverQpsCreateToRts(struct ncclIbResiliency* res
          __func__, localQpIndex, localQp->qp->qp_num, rtrAttr->remoteQpNum, localDevIndex, resCtx->baseComm);
   }
 
+  if (resCtx->recoveryEnabled && !IbCastResiliencyPeerHasRecovery(remInfo)) {
+    NCCLCHECK(IbCastResiliencyRecoveryDisable(resCtx, 0));
+  }
   if (resCtx->recoveryEnabled) {
     NCCLCHECK(IbCastPortRecoveryReceiverQpsCreateToRts(resCtx, remInfo, localResiliencyInfo->portRecoveryQpsInfo,
                                                        resCtx->nPortRecoveryQps));
