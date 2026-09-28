@@ -383,9 +383,10 @@ thread_local auto tl_current_replay_pass = std::optional<uint64_t>{};
 // The iteration filter is stateful: every consultation advances the kernel's iteration count, and
 // --kernel-iteration-range numbers the launches the application made. Replay turns one launch into
 // several executions, so the filter is consulted exactly once per logical dispatch, at CONFIG, and
-// every later callback for the same dispatch id -- each replay pass, or the single run of a dispatch
-// that ends up not replayed -- reuses the answer. Deciding at CONFIG rather than on the first pass
-// also lets a dispatch that no filter selects run once instead of being replayed for nothing.
+// every later callback for the same dispatch id -- each replay pass, or the single run of a
+// dispatch that ends up not replayed -- reuses the answer. Deciding at CONFIG rather than on the
+// first pass also lets a dispatch that no filter selects run once instead of being replayed for
+// nothing.
 //
 // CONFIG, the passes and the dispatch callbacks all run synchronously on the enqueuing thread, and
 // a lookup only matches the dispatch id the plan was made for, so a plan cannot leak into another
@@ -402,7 +403,8 @@ struct replay_dispatch_plan_t
 thread_local auto tl_replay_plan = std::optional<replay_dispatch_plan_t>{};
 
 // Iteration counts behind counter collection's targeting decision. Kernel replay's CONFIG consults
-// the same counts, so a kernel numbers its launches the same way whether or not replay handles them.
+// the same counts, so a kernel numbers its launches the same way whether or not replay handles
+// them.
 auto counter_kernel_iteration = common::Synchronized<kernel_iteration_t, true>{};
 
 // Stores stream ids, graph attribution, and kernel region ids for the
