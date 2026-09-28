@@ -2435,13 +2435,8 @@ hipError_t GraphExecSegmented::UpdateAQLPacket(hip::GraphNode* node) {
   return hipSuccess;
 }
 
-void GraphExecSegmented::BeginAQLPacketUpdates(bool allowKernargReuse) {
-  for (auto* packetBatch : updatedPacketBatches_) {
-    packetBatch->updatePending = false;
-  }
-  updatedPacketBatches_.clear();
+void GraphExecSegmented::BeginKernargReuse(bool allowKernargReuse) {
   reuseKernargSlots_ = allowKernargReuse && referenceCount() == 1;
-  batchAQLPacketUpdates_ = true;
   for (auto node : Graph::GetNodes()) {
     if (node->GetType() == hipGraphNodeTypeGraph) {
       static_cast<ChildGraphNode*>(node)->SetParentKernargReuse(reuseKernargSlots_);
@@ -2449,9 +2444,27 @@ void GraphExecSegmented::BeginAQLPacketUpdates(bool allowKernargReuse) {
   }
 }
 
+void GraphExecSegmented::EndKernargReuse() {
+  reuseKernargSlots_ = false;
+  for (auto node : Graph::GetNodes()) {
+    if (node->GetType() == hipGraphNodeTypeGraph) {
+      static_cast<ChildGraphNode*>(node)->SetParentKernargReuse(false);
+    }
+  }
+}
+
+void GraphExecSegmented::BeginAQLPacketUpdates(bool allowKernargReuse) {
+  for (auto* packetBatch : updatedPacketBatches_) {
+    packetBatch->updatePending = false;
+  }
+  updatedPacketBatches_.clear();
+  BeginKernargReuse(allowKernargReuse);
+  batchAQLPacketUpdates_ = true;
+}
+
 void GraphExecSegmented::EndAQLPacketUpdates() {
   batchAQLPacketUpdates_ = false;
-  reuseKernargSlots_ = false;
+  EndKernargReuse();
   for (auto* packetBatch : updatedPacketBatches_) {
     RebuildAQLPacketBatch(*packetBatch);
     packetBatch->updatePending = false;
