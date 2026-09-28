@@ -2014,6 +2014,29 @@ class AMDSMIHelpers:
                 continue
         return pci_devices
 
+    @staticmethod
+    def is_amd_gpu_present(pci_devices_path: Path = Path("/sys/bus/pci/devices")) -> bool:
+        """Return True if sysfs lists an AMD display or processing-accelerator PCI function.
+
+        Needs no driver, so it tells "no AMD GPU" apart from "amdgpu not loaded".
+        """
+        # sysfs "class" is 0xBBSSPP; Instinct GPUs (e.g. MI300, MI450) use base class 0x12
+        gpu_base_classes = (0x03, 0x12)  # display controller, processing accelerator
+        for device in pci_devices_path.glob("*"):
+            try:
+                if int((device / "vendor").read_text(encoding="ascii"), 16) != AMD_VENDOR_ID:
+                    continue
+                pci_class = int((device / "class").read_text(encoding="ascii"), 16)
+            except (OSError, ValueError):
+                continue
+            if (pci_class >> 16) not in gpu_base_classes:
+                continue
+            driver = device / "driver"
+            if driver.exists() and driver.resolve().name != "amdgpu":
+                continue  # owned by another driver, e.g. vfio-pci
+            return True
+        return False
+
     def progressbar(self, it, prefix="", size=60, out=sys.stdout, add_newline=False):
         count = len(it)
         if add_newline:

@@ -274,6 +274,24 @@ class AmdSmiPermissionDeniedException(AmdSmiException):
         self.stdout_message = f"{common_message} Error code: {self.value}"
 
 
+class AmdSmiGpuDriverNotLoadedException(AmdSmiException):
+    def __init__(self, command: str, outputformat: str) -> None:
+        super().__init__()
+        self.value = -12
+        self.command = command
+        self.output_format = outputformat
+
+        common_message = (
+            f"Command '{self.command}' requires the amdgpu driver but it is not loaded."
+            " Check amdgpu version and module status (sudo modprobe amdgpu)."
+        )
+
+        self.json_message["error"] = common_message
+        self.json_message["code"] = self.value
+        self.csv_message = f"error,code\n{common_message}, {self.value}"
+        self.stdout_message = f"{common_message} Error code: {self.value}"
+
+
 class AmdSmiUnknownErrorException(AmdSmiException):
     def __init__(self, command, outputformat: str):
         super().__init__()

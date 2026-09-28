@@ -228,6 +228,23 @@ class AMDSMIParser(argparse.ArgumentParser):
             "fabric",
             "default",
         ]
+        # Subcommands and aliases whose parsers are skipped without amdgpu; error() uses this to
+        # tell "amdgpu not loaded" from "not supported" (a unit test flags drift)
+        self.amdgpu_required_commands = [
+            "list",
+            "firmware",
+            "ucode",
+            "bad-pages",
+            "process",
+            "event",
+            "topology",
+            "reset",
+            "monitor",
+            "dmon",
+            "xgmi",
+            "partition",
+            "fabric",
+        ]
 
         # Add all subparsers
         if sys_argv is not None:
@@ -3316,6 +3333,14 @@ class AMDSMIParser(argparse.ArgumentParser):
             message = message.split("'")[0]
             # Check if the command is possible in other system configurations and error accordingly
             if message in self.possible_commands:
+                if (
+                    message in self.amdgpu_required_commands
+                    and not self.helpers.is_amdgpu_initialized()
+                    and self.helpers.is_amd_gpu_present()
+                ):
+                    raise amdsmi_cli_exceptions.AmdSmiGpuDriverNotLoadedException(
+                        message, outputformat
+                    )
                 raise amdsmi_cli_exceptions.AmdSmiCommandNotSupportedException(
                     message, outputformat
                 )
