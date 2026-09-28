@@ -432,12 +432,7 @@ perf_event::iterator::has_data() const
                                       sizeof(struct perf_event_header));
 
     // If the first record is larger than the available data, nothing can be read
-    if(m_index + _hdr.size > m_head)
-    {
-        return false;
-    }
-
-    return true;
+    return m_index + _hdr.size <= m_head;
 }
 
 void

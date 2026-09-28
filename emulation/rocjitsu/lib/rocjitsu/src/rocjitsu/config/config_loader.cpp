@@ -1094,6 +1094,11 @@ ExecutionThreadSettings load_execution_thread_settings(const std::string &json_p
                                             execution_thread_settings);
 }
 
+ExecutionThreadSettings load_execution_thread_settings_from_string(const std::string &json,
+                                                                   const std::string &schema_text) {
+  return with_parsed_simulation_config_json(json, schema_text, execution_thread_settings);
+}
+
 LoadedConfig load_config(const std::string &json_path, const std::string &schema_text,
                          uint32_t host_threads) {
   std::string json_text = read_config_file(json_path);

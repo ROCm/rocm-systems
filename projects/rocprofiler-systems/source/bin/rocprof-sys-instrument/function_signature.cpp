@@ -111,7 +111,7 @@ function_signature::get(bool _all, bool _save) const
             errprintf(3, "line info for %s is empty! [{%s}] [{%s}]\n", m_name.c_str(),
                       _rc1.c_str(), _rc2.c_str());
     }
-    if((_all || use_file_info) && m_file.length() > 0)
+    if((_all || use_file_info) && !m_file.empty())
     {
         ss << " [" << m_file;
     }
@@ -119,7 +119,7 @@ function_signature::get(bool _all, bool _save) const
     {
         ss << ":" << m_row.first;
     }
-    if((_all || use_file_info) && m_file.length() > 0)
+    if((_all || use_file_info) && !m_file.empty())
     {
         ss << "]";
     }
@@ -142,7 +142,7 @@ function_signature::get_coverage(bool _basic_block) const
     ss << m_name << m_params;
     if(_basic_block && m_loop && m_info_beg)
     {
-        if(m_file.length() > 0)
+        if(!m_file.empty())
         {
             ss << " [" << m_file << "]";
         }
@@ -186,7 +186,7 @@ function_signature::get_coverage(bool _basic_block) const
     }
     else
     {
-        if(m_file.length() > 0)
+        if(!m_file.empty())
         {
             ss << " [" << m_file;
         }
@@ -194,7 +194,7 @@ function_signature::get_coverage(bool _basic_block) const
         {
             ss << ":" << m_row.first;
         }
-        if(m_file.length() > 0)
+        if(!m_file.empty())
         {
             ss << "]";
         }
