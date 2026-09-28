@@ -121,6 +121,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - The WSL backend returned success with a zeroed structure, so `rev_id` read as `0x0`, and where it did report the not-supported value Python rendered it as the raw `0xffffffff`. Python and the CLI now render it as `N/A`.
   - `amdsmi_asic_info_t` is now reset through one shared initializer used by every backend, so a field a backend cannot supply keeps its not-supported value rather than a plausible zero.
 
+- **Fixed several WSL backend metrics reporting a raw driver sentinel or zero instead of `N/A`**.  
+  - `amdsmi_get_clock_info()`, `amdsmi_get_gpu_busy_percent()`, `amdsmi_get_gpu_activity()`, `amdsmi_get_gpu_fan_speed()`, `amdsmi_get_pcie_info()` and `amdsmi_get_power_cap_info()` returned a raw PMLog sentinel or a zero-filled struct field when the underlying WDDM/dxg sensor was unavailable or rocdxg had no data source at all.
+  - Affected fields now report `N/A`; `amdsmi_get_gpu_fan_speed()` returns `AMDSMI_STATUS_NOT_SUPPORTED` instead, since it has no downstream `N/A` translation.
+
 ### Upcoming Changes
 
 - **UUIDs will be replaced by CUIDs in an upcoming version**.  
