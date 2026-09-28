@@ -356,10 +356,22 @@ all high-frequency callbacks for one wavefront. After every plugin's
 `onAmdgpuWavefrontDispatched()` callback completes, the group samples and caches
 that predicate on the wavefront until halt. Reentrant hooks during dispatch or
 halt, hooks without a wavefront, and hooks on a resident wave after live plugin-
-group replacement use the current group's live predicate instead. The predicate
-must therefore be lock-free, thread-safe, and stable for the subscribed portion
-of a wavefront's lifetime. Lifecycle, dispatch, workgroup, wavefront, and barrier
-callbacks are not filtered by this predicate.
+group replacement use the current group's live predicate instead.
+
+Per-wave state is owned by the concrete plugin instance that installed it;
+slot indices alone are not identities because every group numbers its plugins
+from zero. Use `wavefront_state<T>()`, `set_wavefront_state()`, and
+`clear_wavefront_state()` rather than accessing a slot directly. Replacing a
+group discards the old group's retained wave state and does not synthesize
+`onAmdgpuWavefrontDispatched()` for waves already resident. A stateful plugin
+must therefore return `false` while `wavefront_state()` is null. It starts
+ordinary observation when the next wave dispatch initializes state. It must
+also tolerate infrequent callbacks, including wavefront halt and barrier
+resolution, for a resident wave it did not initialize. Stateless plugins may
+return `true` and observe the remainder of a resident wave immediately after
+replacement. The predicate must be lock-free, thread-safe, and stable for the
+subscribed portion of a wavefront's lifetime. Lifecycle, dispatch, workgroup,
+wavefront, and barrier callbacks are not filtered by this predicate.
 
 ### Observing memory accesses
 
@@ -443,13 +455,16 @@ concurrently.
    high-frequency and infrequent callbacks. Override
    `requires_serial_hot_hooks()` when that state cannot be protected within the
    plugin.
-6. Override the per-hook `observes_*()` methods for the high-frequency hooks the
-   plugin consumes. Use `observes_hot_hooks_for_wavefront()` when subscription
-   also depends on the dispatched wavefront; keep that predicate lock-free,
-   thread-safe, and stable after dispatch. A consumer of
+6. The ordinary high-frequency per-hook `observes_*()` methods default to
+   `true` for compatibility; override each unused hook to return `false`. Use
+   `observes_hot_hooks_for_wavefront()` when subscription also depends on the
+   dispatched wavefront; keep that predicate lock-free, thread-safe, and stable
+   after dispatch. If hot hooks depend on per-wave state, install it with
+   `set_wavefront_state()` and return false when `wavefront_state()` is null so
+   live group replacement cannot expose an uninitialized wave. A consumer of
    `onAmdgpuMemoryAccessRouted` or `onAmdgpuTensorDmaMemoryAccess` must explicitly
    return `true` from the corresponding interest method because those two
-   conservative defaults are `false`.
+   hooks are exceptions whose defaults are `false`.
 7. Enable it by adding `"myname": { ... }` to the `plugins` section of
    the config file.
 8. Return `true` from `supports_async_instructions()` only when the plugin accepts

@@ -6964,6 +6964,49 @@ private:
   bool observes_ = false;
 };
 
+struct LiveStatefulWavefrontState final : WavefrontState {
+  static constexpr uint64_t kMagic = 0x51a7eful;
+  uint64_t magic = kMagic;
+};
+
+class LiveStatefulHotHookPlugin final : public ExecutionPlugin {
+public:
+  explicit LiveStatefulHotHookPlugin(std::string name) : ExecutionPlugin(std::move(name)) {}
+
+  bool observes_hot_hooks_for_wavefront(const amdgpu::Wavefront *wf) const override {
+    return wf != nullptr && wavefront_state<LiveStatefulWavefrontState>(*wf) != nullptr;
+  }
+
+  void onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) override {
+    ++dispatch_callbacks;
+    set_wavefront_state(wf, std::make_unique<LiveStatefulWavefrontState>());
+  }
+
+  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &,
+                                        amdgpu::Wavefront &wf) override {
+    auto *state = wavefront_state<LiveStatefulWavefrontState>(wf);
+    ASSERT_NE(state, nullptr);
+    EXPECT_EQ(state->magic, LiveStatefulWavefrontState::kMagic);
+    ++hot_callbacks;
+  }
+
+  void onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) override {
+    auto *state = wavefront_state<LiveStatefulWavefrontState>(wf);
+    if (!state) {
+      ++uninitialized_halts;
+      return;
+    }
+    EXPECT_EQ(state->magic, LiveStatefulWavefrontState::kMagic);
+    ++initialized_halts;
+    // Deliberately retain the state to exercise reset and group replacement.
+  }
+
+  uint32_t dispatch_callbacks = 0;
+  uint32_t hot_callbacks = 0;
+  uint32_t initialized_halts = 0;
+  uint32_t uninitialized_halts = 0;
+};
+
 TEST(AqlDispatchTest, DebugPausedPoolWaveDoesNotKeepSchedulingContinuations) {
   VmFixture f("cdna4", /*num_cus=*/1, /*num_wf_slots=*/1);
   f.cp()->set_dispatch_threads(2);
@@ -7097,6 +7140,96 @@ TEST(AqlDispatchTest, LivePluginReplacementRefreshesResidentWaveHotHookSubscript
 
   run_case(/*initial_observes=*/false, /*replacement_observes=*/true);
   run_case(/*initial_observes=*/true, /*replacement_observes=*/false);
+}
+
+TEST(AqlDispatchTest, LivePluginReplacementDefersStatefulHooksUntilNextWaveDispatch) {
+  VmFixture f("cdna4", /*num_cus=*/1, /*num_wf_slots=*/1);
+  auto initial_group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto initial = std::make_unique<LiveStatefulHotHookPlugin>("initial_stateful");
+  auto *initial_ptr = initial.get();
+  ASSERT_TRUE(initial_group->add(std::move(initial)));
+  f.soc_ptr->set_plugin_group(initial_group);
+
+  const auto code = make_multi_quantum_nop_kernel();
+  const uint64_t kernel = f.write_kernel(0x1000, code.data(), code.size() * sizeof(uint32_t));
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(kernel, /*grid_size=*/64, /*workgroup_size=*/64);
+  step_until_first_quantum(f, f.cu());
+
+  auto *wave = f.cu()->wf(0);
+  ASSERT_NE(wave, nullptr);
+  ASSERT_NE(initial_ptr->wavefront_state<LiveStatefulWavefrontState>(*wave), nullptr);
+  ASSERT_GT(initial_ptr->hot_callbacks, 0u);
+
+  auto replacement_group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto replacement = std::make_unique<LiveStatefulHotHookPlugin>("replacement_stateful");
+  auto *replacement_ptr = replacement.get();
+  ASSERT_TRUE(replacement_group->add(std::move(replacement)));
+  f.soc_ptr->set_plugin_group(replacement_group);
+
+  EXPECT_EQ(initial_ptr->wavefront_state<LiveStatefulWavefrontState>(*wave), nullptr);
+  EXPECT_EQ(replacement_ptr->wavefront_state<LiveStatefulWavefrontState>(*wave), nullptr);
+  EXPECT_EQ(replacement_ptr->dispatch_callbacks, 0u);
+
+  f.engine->run();
+  EXPECT_EQ(replacement_ptr->hot_callbacks, 0u);
+  EXPECT_EQ(replacement_ptr->initialized_halts, 0u);
+  EXPECT_EQ(replacement_ptr->uninitialized_halts, 1u);
+
+  // SimulationEngine::run() makes one fixture generation terminal. Attach the
+  // same replacement group to a fresh generation to prove that its first
+  // ordinary wave-dispatch callback enables stateful observation.
+  VmFixture next("cdna4", /*num_cus=*/1, /*num_wf_slots=*/1);
+  next.soc_ptr->set_plugin_group(replacement_group);
+  const uint64_t next_kernel =
+      next.write_kernel(0x1000, code.data(), code.size() * sizeof(uint32_t));
+  test::AqlQueue next_queue(next.mem(), next.cp());
+  next_queue.dispatch(next_kernel, /*grid_size=*/64, /*workgroup_size=*/64);
+  next.engine->run();
+  EXPECT_EQ(replacement_ptr->dispatch_callbacks, 1u);
+  EXPECT_GT(replacement_ptr->hot_callbacks, 0u);
+  EXPECT_EQ(replacement_ptr->initialized_halts, 1u);
+  EXPECT_EQ(replacement_ptr->uninitialized_halts, 1u);
+}
+
+TEST(AqlDispatchTest, IdlePluginReplacementClearsRetainedStateBeforeSlotReuse) {
+  VmFixture f("cdna4", /*num_cus=*/1, /*num_wf_slots=*/1);
+  auto initial_group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto initial = std::make_unique<LiveStatefulHotHookPlugin>("initial_stateful");
+  auto *initial_ptr = initial.get();
+  ASSERT_TRUE(initial_group->add(std::move(initial)));
+  f.soc_ptr->set_plugin_group(initial_group);
+
+  const auto code = make_multi_quantum_nop_kernel();
+  const uint64_t kernel = f.write_kernel(0x1000, code.data(), code.size() * sizeof(uint32_t));
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(kernel, /*grid_size=*/64, /*workgroup_size=*/64);
+  f.engine->run();
+
+  auto *wave = f.cu()->wf(0);
+  ASSERT_NE(wave, nullptr);
+  ASSERT_NE(initial_ptr->wavefront_state<LiveStatefulWavefrontState>(*wave), nullptr);
+
+  auto replacement_group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto replacement = std::make_unique<LiveStatefulHotHookPlugin>("replacement_stateful");
+  auto *replacement_ptr = replacement.get();
+  ASSERT_TRUE(replacement_group->add(std::move(replacement)));
+  f.soc_ptr->set_plugin_group(replacement_group);
+
+  EXPECT_EQ(initial_ptr->wavefront_state<LiveStatefulWavefrontState>(*wave), nullptr);
+  EXPECT_EQ(replacement_ptr->wavefront_state<LiveStatefulWavefrontState>(*wave), nullptr);
+
+  VmFixture next("cdna4", /*num_cus=*/1, /*num_wf_slots=*/1);
+  next.soc_ptr->set_plugin_group(replacement_group);
+  const uint64_t next_kernel =
+      next.write_kernel(0x1000, code.data(), code.size() * sizeof(uint32_t));
+  test::AqlQueue next_queue(next.mem(), next.cp());
+  next_queue.dispatch(next_kernel, /*grid_size=*/64, /*workgroup_size=*/64);
+  next.engine->run();
+  EXPECT_EQ(replacement_ptr->dispatch_callbacks, 1u);
+  EXPECT_GT(replacement_ptr->hot_callbacks, 0u);
+  EXPECT_EQ(replacement_ptr->initialized_halts, 1u);
+  EXPECT_EQ(replacement_ptr->uninitialized_halts, 0u);
 }
 
 uint64_t instructions_visible_at_tick_ten(uint32_t dispatch_threads) {
