@@ -5,7 +5,9 @@
 """GPU-independent checks for topology ABI, exports, arguments, and dict mapping."""
 
 import ctypes
+import json
 import unittest
+from enum import IntEnum
 from unittest import mock
 
 from common.common import amdsmi
@@ -41,6 +43,43 @@ class TestLinkTopology(unittest.TestCase):
     def test_symbol_is_exported(self):
         self.assertTrue(hasattr(amdsmi, "amdsmi_get_link_topology"))
 
+    def test_link_status_enum_is_exported(self) -> None:
+        self.assertTrue(hasattr(amdsmi, "AmdSmiLinkStatus"))
+        status_type = amdsmi.AmdSmiLinkStatus
+        self.assertIs(status_type, amdsmi.amdsmi_interface.AmdSmiLinkStatus)
+        self.assertTrue(issubclass(status_type, IntEnum))
+        expected = {
+            "AMDSMI_LINK_STATUS_ENABLED": 0,
+            "AMDSMI_LINK_STATUS_DISABLED": 1,
+            "AMDSMI_LINK_STATUS_INACTIVE": 2,
+            "AMDSMI_LINK_STATUS_ERROR": 3,
+        }
+        self.assertEqual(status_type.__members__, expected)
+        for name, value in expected.items():
+            with self.subTest(status=name):
+                self.assertEqual(status_type[name].value, getattr(amdsmi.amdsmi_wrapper, name))
+                self.assertIs(status_type(value), status_type[name])
+
+    def test_link_status_result_matches_public_enum(self) -> None:
+        wrapper = amdsmi.amdsmi_wrapper
+        src = wrapper.amdsmi_processor_handle()
+        dst = wrapper.amdsmi_processor_handle()
+        for status in amdsmi.AmdSmiLinkStatus:
+            with self.subTest(status=status.name):
+
+                def _fill(_src: ctypes.c_void_p, _dst: ctypes.c_void_p, output: object) -> int:
+                    topology = ctypes.cast(output, ctypes.POINTER(wrapper.amdsmi_link_topology_t))
+                    topology.contents.link_status = status.value
+                    return wrapper.AMDSMI_STATUS_SUCCESS
+
+                with mock.patch.object(wrapper, "amdsmi_get_link_topology", side_effect=_fill):
+                    result = amdsmi.amdsmi_get_link_topology(src, dst)
+
+                self.assertIs(type(result["link_status"]), int)
+                self.assertEqual(result["link_status"], status)
+                self.assertIs(amdsmi.AmdSmiLinkStatus(result["link_status"]), status)
+                self.assertEqual(json.loads(json.dumps(result))["link_status"], status.value)
+
     def test_rejects_non_handle_arguments(self):
         with self.assertRaises(amdsmi.amdsmi_interface.AmdSmiParameterException):
             amdsmi.amdsmi_interface.amdsmi_get_link_topology("not-a-handle", "also-bad")
@@ -58,8 +97,7 @@ class TestLinkTopology(unittest.TestCase):
             # Access the struct passed through ctypes.byref().
             topology = topology_ref._obj
             topology.weight = 42
-            # ENABLED (0), XGMI (2).
-            topology.link_status = 0
+            topology.link_status = amdsmi.AmdSmiLinkStatus.AMDSMI_LINK_STATUS_ENABLED
             topology.link_type = 2
             topology.num_hops = 3
             topology.fb_sharing = 1
@@ -74,7 +112,7 @@ class TestLinkTopology(unittest.TestCase):
             set(result), {"weight", "link_status", "link_type", "num_hops", "fb_sharing"}
         )
         self.assertEqual(result["weight"], 42)
-        self.assertEqual(result["link_status"], 0)
+        self.assertEqual(result["link_status"], amdsmi.AmdSmiLinkStatus.AMDSMI_LINK_STATUS_ENABLED)
         self.assertEqual(result["link_type"], 2)
         self.assertEqual(result["num_hops"], 3)
         self.assertEqual(result["fb_sharing"], 1)
@@ -90,7 +128,7 @@ class TestLinkTopology(unittest.TestCase):
                 topology_ref, ctypes.POINTER(wrapper.amdsmi_link_topology_t)
             ).contents
             topology.weight = 0
-            topology.link_status = wrapper.AMDSMI_LINK_STATUS_ENABLED
+            topology.link_status = amdsmi.AmdSmiLinkStatus.AMDSMI_LINK_STATUS_ENABLED
             topology.link_type = wrapper.AMDSMI_LINK_TYPE_INTERNAL
             topology.num_hops = 0
             topology.fb_sharing = 1
@@ -104,7 +142,7 @@ class TestLinkTopology(unittest.TestCase):
             result,
             {
                 "weight": 0,
-                "link_status": wrapper.AMDSMI_LINK_STATUS_ENABLED,
+                "link_status": amdsmi.AmdSmiLinkStatus.AMDSMI_LINK_STATUS_ENABLED,
                 "link_type": wrapper.AMDSMI_LINK_TYPE_INTERNAL,
                 "num_hops": 0,
                 "fb_sharing": 1,

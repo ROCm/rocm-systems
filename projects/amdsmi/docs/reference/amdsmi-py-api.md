@@ -5556,10 +5556,19 @@ Output:  Dictionary with fields:
 Field | Description
 ---|---
 `weight` | The link weight
-`link_status` | Integer `AMDSMI_LINK_STATUS_*` value, retained for host API parity
+`link_status` | Integer value of `amdsmi.AmdSmiLinkStatus`, retained for host API parity
 `link_type` | Integer `AMDSMI_LINK_TYPE_*` value
 `num_hops` | Abstracted topology steps, capped at 255, not physical xGMI links
 `fb_sharing` | 1 if P2P framebuffer access is available; 0 if unavailable or the query failed
+
+`amdsmi.AmdSmiLinkStatus` members:
+
+Member | Value
+---|---
+`AMDSMI_LINK_STATUS_ENABLED` | 0
+`AMDSMI_LINK_STATUS_DISABLED` | 1
+`AMDSMI_LINK_STATUS_INACTIVE` | 2
+`AMDSMI_LINK_STATUS_ERROR` | 3
 
 Baremetal notes:
 
@@ -5601,7 +5610,7 @@ try:
         print(topology['weight'])
         print(topology['num_hops'])
         print(topology['fb_sharing'])
-        print(topology['link_status'])
+        print(amdsmi.AmdSmiLinkStatus(topology['link_status']).name)
         if topology['link_type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_XGMI:
             print('xgmi')
         if topology['link_type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_PCIE:
