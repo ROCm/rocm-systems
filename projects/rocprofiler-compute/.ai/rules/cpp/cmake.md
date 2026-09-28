@@ -44,9 +44,9 @@ they show up in IDEs.
 ## Language standard
 
 Set the standard once for the tree, as `src/lib/CMakeLists.txt` does. Raise it
-for one target with `target_compile_features`, which is how
-`torch_trace_collector` gets C++20. Do not put `-std=c++XX` in
-`target_compile_options`.
+for one target with `target_compile_features`, which is how the
+`torch_trace_collector` tests build against libtorch. Do not put `-std=c++XX`
+in `target_compile_options`.
 
 Guard a raised standard on compiler support and fail with a clear message rather
 than a link error later.

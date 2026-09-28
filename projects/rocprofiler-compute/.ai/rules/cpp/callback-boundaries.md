@@ -13,11 +13,20 @@ Assume any callback can run on a thread we have never seen, at any time,
 concurrently with itself on another thread. Nothing about our own call order
 holds.
 
-On the sampling and dispatch path:
+On the dispatch path, meaning the rocprofiler-sdk dispatch and record callbacks
+and the torch observer:
 
-- No allocation.
-- No blocking. No mutex you might wait on, no I/O, no logging to a file.
-- No call back into the host API that invoked us.
+- Do not write to files or the console. When you catch an error, log one line
+  to `stderr`.
+- Read-only rocprofiler-sdk queries are fine, as in `record_callback`. Do not
+  create, start, or stop a context from inside a callback.
+- Hold a lock only for a short span.
+- Allocate up front where it is practical, and `reserve()` a container that
+  grows per record.
+- Build expensive state lazily, once, on first use, and cache it.
+  `SdkCallbacksImpl::dispatch_callback` builds an agent's counter profiles
+  under the write lock on its first dispatch, and later dispatches reuse the
+  cache.
 
 The tools for shared state on that path, in order of preference:
 
@@ -28,8 +37,7 @@ The tools for shared state on that path, in order of preference:
    `thread_state()` in `src/lib/torch_trace_collector/torch_trace_collector.cpp`
    holds the marker stack this way.
 3. `synchronized_t<T>` from `src/lib/utils/synchronized/synchronized.hpp` when
-   state really is shared and a lock is unavoidable. Keep the critical section
-   to the shortest possible span, and shard the data if contention is real.
+   state really is shared. Shard the data if contention is real.
    `SnapshotStore` shards its map for that reason.
 
 ## What must not cross the boundary

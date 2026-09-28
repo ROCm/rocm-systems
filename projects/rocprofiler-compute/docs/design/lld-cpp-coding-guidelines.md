@@ -72,8 +72,8 @@ Dropped:
   rocprofiler-sdk tool callbacks call us. The torch dispatcher calls us. Python
   calls the extension module.
 - That shapes three things at once, so they belong in one file:
-  - What thread we are on and what is allowed there. No blocking and no
-    allocation on the sampling path. `synchronized_t`, atomics, `thread_local`.
+  - What thread we are on and what is allowed there. No I/O and only brief
+    locks on the dispatch path. `synchronized_t`, atomics, `thread_local`.
   - What must not cross the boundary. No exceptions out of a rocprofiler-sdk,
     torch, or Python callback. Status codes instead, and how to report an error
     from a callback.
@@ -126,8 +126,7 @@ Dropped:
 
 ## Other edits while porting
 
-- Keep the C++17 baseline, and add an exception for `torch_trace_collector`,
-  which needs C++20 because libtorch does.
+- Keep the C++17 baseline with no exceptions.
 - Remove the line saying these rules beat the existing code style.
 
 ## How we wire it in

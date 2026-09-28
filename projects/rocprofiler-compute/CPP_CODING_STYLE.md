@@ -24,13 +24,12 @@ only index.
 
 ## The short version
 
-- C++17 everywhere, except `torch_trace_collector`, which is C++20 because
-  libtorch requires it.
+- C++17 everywhere.
 - RAII for every resource. No raw `new` or `delete`.
 - Types are PascalCase.
 - Everything must be unit testable without a GPU. Dependencies come in through a
   virtual interface.
-- We run inside somebody else's callback: no allocation or blocking on the
-  sampling path, and no exception ever escapes into the host.
+- We run inside somebody else's callback: no I/O and only brief locks on the
+  dispatch path, and no exception ever escapes into the host.
 - Performance is part of correctness here. A slow collector changes the numbers
   it exists to measure.

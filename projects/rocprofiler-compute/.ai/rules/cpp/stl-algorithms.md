@@ -6,8 +6,8 @@ it.
 
 Reference: [cppreference, algorithms](https://en.cppreference.com/w/cpp/algorithm).
 
-C++20 ranges are not available outside `torch_trace_collector`. Use iterator
-pairs. See [`core.md`](core.md) for the language version rule.
+C++20 ranges are not available. Use iterator pairs. See [`core.md`](core.md)
+for the language version rule.
 
 ## Replace a loop with
 

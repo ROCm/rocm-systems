@@ -18,14 +18,9 @@ is the reference. The short version:
 
 ## The hot path
 
-The sampling and dispatch callbacks are the hot path. On that path:
-
-- No allocation.
-- No blocking.
-- No I/O.
-
-Everything else follows from those three. What counts as the hot path and what
-you are allowed to do on it is in
+The dispatch callbacks are the hot path. On that path: no I/O per dispatch,
+locks held only briefly, and allocation up front where it is practical. What
+counts as the hot path and what you are allowed to do on it is in
 [`callback-boundaries.md`](callback-boundaries.md).
 
 ## Allocation
@@ -111,7 +106,7 @@ for (int row = 0; row < rows; ++row)
 
 ## Checklist
 
-- [ ] No allocation, blocking, or I/O on the hot path
+- [ ] No I/O on the hot path, locks held briefly, allocation up front
 - [ ] Large objects passed by `const&`, small ones by value
 - [ ] `std::move` on ownership transfer
 - [ ] `reserve()` where the size is known

@@ -5,12 +5,9 @@ are the reference for anything this file does not cover.
 
 ## Language version
 
-C++17 is the baseline. `src/lib/CMakeLists.txt` sets it for the whole tree.
-
-One exception: `torch_trace_collector` builds as C++20, because libtorch
-requires it. Its `CMakeLists.txt` raises the standard for that target only.
-Outside that target, do not use concepts, ranges, `std::span`, `std::format`,
-coroutines, `consteval`, `constinit`, or `[[nodiscard("message")]]`.
+C++17 everywhere. `src/lib/CMakeLists.txt` sets it for the whole tree. Do not
+use concepts, ranges, `std::span`, `std::format`, coroutines, `consteval`,
+`constinit`, or `[[nodiscard("message")]]`.
 
 For a span, look for an existing view type in the tree first. If there is none,
 pass a pointer and a size, or an iterator pair.
