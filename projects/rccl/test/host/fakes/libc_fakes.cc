@@ -6,13 +6,14 @@
 
 #include "fakes/libc_fakes.h"
 
-// Puts the seam's 15 micro_* prototypes in scope so the compiler checks them against the definitions at the bottom of
+// Puts the seam's micro_* prototypes in scope so the compiler checks them against the definitions at the bottom of
 // this file. Without it the two lists are hand-maintained and both extern "C", so a drifted parameter type would link
 // cleanly and corrupt arguments at run time. Include the undef half immediately: this file's defaults call real libc.
 #include "fakes/libc_seam.h"
 #include "fakes/libc_seam_undef.h"
 
 #include <arpa/inet.h>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <sys/time.h>
 
@@ -22,6 +23,8 @@
 #include <cstdarg>
 #include <cstdlib>
 #include <cstring>
+
+#include "signature-drift.h"
 
 // LogCapture.hpp's ncclDebugLevel/ncclDebugMask come from fakes/nccl_fakes.cc,
 // which this binary already links. A libc-only unit reports via plain
@@ -37,8 +40,28 @@ std::vector<int> g_writtenFds;
 std::vector<int> g_readFds;
 std::vector<MicroReadStep> g_readScript;
 size_t g_readScriptPos = 0;
+std::vector<int> g_boundFds;
+std::vector<int> g_listenedFds;
+std::vector<int> g_acceptedFds;
+std::vector<MicroFcntlCall> g_fcntlCalls;
+std::vector<int> g_recvFds;
+std::vector<int> g_recvFlags;
+std::vector<MicroReadStep> g_recvScript;
+size_t g_recvScriptPos = 0;
+std::vector<int> g_sentFds;
+std::vector<int> g_sendFlags;
+std::string g_sentData;
 int g_nextSocketFd = 42;
 int g_socketFailErrno = EAFNOSUPPORT;
+int g_bindResult = 0;
+int g_bindErrno = EADDRINUSE;
+int g_listenResult = 0;
+int g_listenErrno = EADDRINUSE;
+int g_nextAcceptFd = 44;
+int g_acceptErrno = ECONNABORTED;
+int g_fcntlResult = 0;
+int g_fcntlErrno = EBADF;
+int g_fcntlGetFlags = 0;
 int g_lastSetsockoptLevel = -1;
 int g_lastSetsockoptOptname = -1;
 struct timeval g_lastSetsockoptTimeval = {-1, -1};
@@ -103,6 +126,56 @@ static int DefaultSocket(int, int, int) {
 static int DefaultConnect(int, const struct sockaddr*, socklen_t) {
   if (g_connectResult != 0) errno = g_connectErrno;
   return g_connectResult;
+}
+
+static int DefaultBind(int fd, const struct sockaddr*, socklen_t) {
+  g_boundFds.push_back(fd);
+  if (g_bindResult != 0) errno = g_bindErrno;
+  return g_bindResult;
+}
+
+static int DefaultListen(int fd, int) {
+  g_listenedFds.push_back(fd);
+  if (g_listenResult != 0) errno = g_listenErrno;
+  return g_listenResult;
+}
+
+static int DefaultAccept(int fd, struct sockaddr* addr, socklen_t* addrlen) {
+  g_acceptedFds.push_back(fd);
+  if (g_nextAcceptFd == -1) {
+    errno = g_acceptErrno;
+    return -1;
+  }
+  if (addr && addrlen && *addrlen >= static_cast<socklen_t>(sizeof(struct sockaddr_in))) {
+    struct sockaddr_in accepted = {};
+    accepted.sin_family = AF_INET;
+    accepted.sin_port = htons(0);
+    accepted.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    std::memcpy(addr, &accepted, sizeof(accepted));
+    *addrlen = sizeof(accepted);
+  }
+  return g_nextAcceptFd;
+}
+
+static int DefaultFcntl(int fd, int cmd, int arg) {
+  g_fcntlCalls.push_back(MicroFcntlCall{fd, cmd, arg});
+  if (g_fcntlResult == -1) errno = g_fcntlErrno;
+  return cmd == F_GETFL && g_fcntlResult != -1 ? g_fcntlGetFlags : g_fcntlResult;
+}
+
+static ssize_t DefaultRecv(int fd, void* buf, size_t count, int flags) {
+  g_recvFds.push_back(fd);
+  g_recvFlags.push_back(flags);
+  if (count == 0) return 0;
+  if (g_recvScriptPos >= g_recvScript.size()) return 0;
+  return DeliverReadStep(g_recvScript[g_recvScriptPos++], buf, count);
+}
+
+static ssize_t DefaultSend(int fd, const void* buf, size_t count, int flags) {
+  g_sentFds.push_back(fd);
+  g_sendFlags.push_back(flags);
+  g_sentData.append(static_cast<const char*>(buf), count);
+  return static_cast<ssize_t>(count);
 }
 
 static int DefaultSetsockopt(int, int level, int optname, const void* optval, socklen_t optlen) {
@@ -204,6 +277,12 @@ std::function<ssize_t(int, void*, size_t)> g_read = DefaultRead;
 std::function<int(int)> g_close = DefaultClose;
 std::function<int(int, int, int)> g_socket = DefaultSocket;
 std::function<int(int, const struct sockaddr*, socklen_t)> g_connect = DefaultConnect;
+std::function<int(int, const struct sockaddr*, socklen_t)> g_bind = DefaultBind;
+std::function<int(int, int)> g_listen = DefaultListen;
+std::function<int(int, struct sockaddr*, socklen_t*)> g_accept = DefaultAccept;
+std::function<int(int, int, int)> g_fcntl = DefaultFcntl;
+std::function<ssize_t(int, void*, size_t, int)> g_recv = DefaultRecv;
+std::function<ssize_t(int, const void*, size_t, int)> g_send = DefaultSend;
 std::function<int(int, int, int, const void*, socklen_t)> g_setsockopt = DefaultSetsockopt;
 std::function<int(const char*, const char*, const struct addrinfo*, struct addrinfo**)> g_getaddrinfo =
     DefaultGetaddrinfo;
@@ -216,6 +295,12 @@ std::function<int(FILE*)> g_fflush = DefaultFflush;
 std::function<void(const char*)> g_perror = DefaultPerror;
 std::function<void(int)> g_exit = DefaultExit;
 
+ASSERT_HOOK_MATCHES_PROD(g_accept, ::accept);
+ASSERT_HOOK_MATCHES_PROD(g_recv, ::recv);
+ASSERT_HOOK_MATCHES_PROD(g_send, ::send);
+
+#undef ASSERT_HOOK_MATCHES_PROD
+
 void ScriptRead(ssize_t ret, int err, std::string data) {
   g_readScript.push_back(MicroReadStep{ret, err, std::move(data)});
 }
@@ -225,12 +310,27 @@ void ScriptReadData(std::string data) {
   g_readScript.push_back(MicroReadStep{n, 0, std::move(data)});
 }
 
+void ScriptRecv(ssize_t ret, int err, std::string data) {
+  g_recvScript.push_back(MicroReadStep{ret, err, std::move(data)});
+}
+
+void ScriptRecvData(std::string data) {
+  const ssize_t n = static_cast<ssize_t>(data.size());
+  g_recvScript.push_back(MicroReadStep{n, 0, std::move(data)});
+}
+
 void ResetLibcFakes() {
   g_write = DefaultWrite;
   g_read = DefaultRead;
   g_close = DefaultClose;
   g_socket = DefaultSocket;
   g_connect = DefaultConnect;
+  g_bind = DefaultBind;
+  g_listen = DefaultListen;
+  g_accept = DefaultAccept;
+  g_fcntl = DefaultFcntl;
+  g_recv = DefaultRecv;
+  g_send = DefaultSend;
   g_setsockopt = DefaultSetsockopt;
   g_getaddrinfo = DefaultGetaddrinfo;
   g_freeaddrinfo = DefaultFreeaddrinfo;
@@ -251,8 +351,28 @@ void ResetLibcFakes() {
   g_readFds.clear();
   g_readScript.clear();
   g_readScriptPos = 0;
+  g_boundFds.clear();
+  g_listenedFds.clear();
+  g_acceptedFds.clear();
+  g_fcntlCalls.clear();
+  g_recvFds.clear();
+  g_recvFlags.clear();
+  g_recvScript.clear();
+  g_recvScriptPos = 0;
+  g_sentFds.clear();
+  g_sendFlags.clear();
+  g_sentData.clear();
   g_nextSocketFd = 42;
   g_socketFailErrno = EAFNOSUPPORT;
+  g_bindResult = 0;
+  g_bindErrno = EADDRINUSE;
+  g_listenResult = 0;
+  g_listenErrno = EADDRINUSE;
+  g_nextAcceptFd = 44;
+  g_acceptErrno = ECONNABORTED;
+  g_fcntlResult = 0;
+  g_fcntlErrno = EBADF;
+  g_fcntlGetFlags = 0;
   g_lastSetsockoptLevel = -1;
   g_lastSetsockoptOptname = -1;
   g_lastSetsockoptTimeval = {-1, -1};
@@ -277,6 +397,21 @@ ssize_t micro_read(int fd, void* buf, size_t count) { return g_read(fd, buf, cou
 int micro_close(int fd) { return g_close(fd); }
 int micro_socket(int domain, int type, int protocol) { return g_socket(domain, type, protocol); }
 int micro_connect(int fd, const struct sockaddr* addr, socklen_t len) { return g_connect(fd, addr, len); }
+int micro_bind(int fd, const struct sockaddr* addr, socklen_t len) { return g_bind(fd, addr, len); }
+int micro_listen(int fd, int backlog) { return g_listen(fd, backlog); }
+int micro_accept(int fd, struct sockaddr* addr, socklen_t* addrlen) { return g_accept(fd, addr, addrlen); }
+int micro_fcntl(int fd, int cmd, ...) {
+  int arg = 0;
+  if (cmd == F_SETFL) {
+    va_list args;
+    va_start(args, cmd);
+    arg = va_arg(args, int);
+    va_end(args);
+  }
+  return g_fcntl(fd, cmd, arg);
+}
+ssize_t micro_recv(int fd, void* buf, size_t count, int flags) { return g_recv(fd, buf, count, flags); }
+ssize_t micro_send(int fd, const void* buf, size_t count, int flags) { return g_send(fd, buf, count, flags); }
 int micro_setsockopt(int fd, int level, int optname, const void* optval, socklen_t optlen) {
   return g_setsockopt(fd, level, optname, optval, optlen);
 }
