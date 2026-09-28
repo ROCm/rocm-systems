@@ -296,10 +296,9 @@ template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals>
 void
 on_rccl_exit(typename SdkBackend::callback_tracing_record_t record,
-             typename SdkBackend::user_data_t* user_data, void* callback_data)
+             typename SdkBackend::user_data_t* user_data, void* callback_data,
+             typename SdkBackend::timestamp_t timestamp)
 {
-    typename SdkBackend::timestamp_t timestamp = SdkBackend::get_timestamp();
-
     on_tracing_api_exit<SdkBackend, Externals, rccl_api_category>(
         record, user_data, callback_data, timestamp);
 

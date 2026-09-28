@@ -21,22 +21,26 @@ template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals>
 inline void
 on_code_object_enter(typename SdkBackend::callback_tracing_record_t record,
-                     typename SdkBackend::user_data_t* user_data, void* callback_data)
+                     typename SdkBackend::user_data_t* user_data, void* callback_data,
+                     typename SdkBackend::timestamp_t timestamp)
 {
     (void) record;
     (void) user_data;
     (void) callback_data;
+    (void) timestamp;
 }
 
 template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals>
 inline void
 on_code_object_exit(typename SdkBackend::callback_tracing_record_t record,
-                    typename SdkBackend::user_data_t* user_data, void* callback_data)
+                    typename SdkBackend::user_data_t* user_data, void* callback_data,
+                    typename SdkBackend::timestamp_t timestamp)
 {
     (void) record;
     (void) user_data;
     (void) callback_data;
+    (void) timestamp;
 }
 
 template <policies::domain_service::backend   SdkBackend,
