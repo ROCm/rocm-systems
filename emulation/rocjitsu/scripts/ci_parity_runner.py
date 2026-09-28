@@ -269,13 +269,18 @@ def run_labeled_ctest(
     if not selected:
         raise RuntimeError(f"no hipRAND tests matched ctest label {label_regex}")
 
-    work = out_dir / "ctest-quick"
+    # ctest changes into --test-dir before it looks up the command. A relative
+    # launcher path is then resolved from that directory and reported as
+    # "Could not find executable".
+    work = (out_dir / "ctest-quick").resolve()
     work.mkdir(parents=True, exist_ok=True)
-    launcher_parts = [shlex.quote(rocjitsu)]
+    launcher_parts = [shlex.quote(str(Path(rocjitsu).resolve()))]
     if daemon:
         launcher_parts.append("--daemon")
-    launcher_parts.extend(["--config", shlex.quote(config), "--", '"$@"'])
-    launcher = work / "rocjitsu-launch"
+    launcher_parts.extend(
+        ["--config", shlex.quote(str(Path(config).resolve())), "--", '"$@"']
+    )
+    launcher = (work / "rocjitsu-launch").resolve()
     launcher.write_text(
         "#!/bin/bash\nset -euo pipefail\nexec " + " ".join(launcher_parts) + "\n",
         encoding="utf-8",
@@ -295,7 +300,9 @@ def run_labeled_ctest(
         cmake_lines.append(f"add_test({test['name']} {quoted})")
         label_value = ";".join(test["labels"])
         cmake_lines.append(
-            f'set_tests_properties("{test["name"]}" PROPERTIES LABELS "{label_value}")'
+            f'set_tests_properties("{test["name"]}" PROPERTIES '
+            f'LABELS "{label_value}" '
+            f"WORKING_DIRECTORY {cmake_quote(str(hiprand_dir.resolve()))})"
         )
     (work / "CTestTestfile.cmake").write_text(
         "\n".join(cmake_lines) + "\n", encoding="utf-8"
