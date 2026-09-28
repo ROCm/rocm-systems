@@ -630,6 +630,15 @@ class ConfigureCITest(unittest.TestCase):
             }
             self.assertIn("amdsmi", tests, group)
 
+    def test_every_subtree_maps_to_a_known_project(self):
+        """configure_ci silently drops a subtree mapped to an unknown project."""
+        for subtree, project in therock_matrix.subtree_to_project_map.items():
+            self.assertIn(
+                project,
+                therock_matrix.project_map,
+                f"{subtree} maps to {project!r}, which is not a key of project_map",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

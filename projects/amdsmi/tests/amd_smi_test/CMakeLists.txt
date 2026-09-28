@@ -106,10 +106,13 @@ target_compile_definitions(${TEST} PRIVATE AMDSMI_TEST_MOCK_DIR="${CMAKE_CURRENT
 
 # The ABI is identical either way, so without this the tests cannot tell a build
 # without libamdcuid from one where the library has nothing to say for this
-# device, and they skip on AMDSMI_STATUS_NOT_SUPPORTED in both cases. src/ is
-# configured first, so BUILD_CUID is already in the cache.
-if(BUILD_CUID)
+# device, and they skip on AMDSMI_STATUS_NOT_SUPPORTED in both cases. The cached
+# BUILD_CUID is the request (AUTO is truthy); src/ publishes the outcome.
+if(AMDSMI_WITH_CUID)
     target_compile_definitions(${TEST} PRIVATE BUILD_CUID)
+    if(AMDSMI_CUID_TEST_SYSFS_OVERRIDE)
+        target_compile_definitions(${TEST} PRIVATE AMDSMI_CUID_TEST_SYSFS_OVERRIDE)
+    endif()
 endif()
 
 if(ENABLE_WSL_BACKEND)

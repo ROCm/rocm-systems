@@ -385,14 +385,53 @@ class AMDSMIHelpers:
         except amdsmi_exception.AmdSmiLibraryException:
             return "N/A"
 
-    def get_gpu_cuid_or_uuid(self, device_handle):
-        """Return the device CUID when available, falling back to the UUID."""
-        identifier = self._query_or_na(amdsmi_interface.amdsmi_get_gpu_device_cuid, device_handle)
-        if identifier == "N/A":
-            identifier = self._query_or_na(
-                amdsmi_interface.amdsmi_get_gpu_device_uuid, device_handle
+    def get_gpu_cuid_info(self, device_handle, include_primary=False):
+        """CUID presentation metadata; unavailable metadata does not imply a legacy UUID."""
+        result = {
+            "derived_cuid": "N/A",
+            "primary_cuid": "N/A" if include_primary else "N/A (not requested)",
+            "component_type": "UNKNOWN",
+            "auxiliary": "unknown",
+            "source": "UNKNOWN",
+            "identifier_kind": "unknown",
+            "cuid_metadata_status": "unknown",
+        }
+        try:
+            info = amdsmi_interface.amdsmi_get_gpu_cuid_info(device_handle)
+        except (amdsmi_exception.AmdSmiLibraryException, AttributeError) as error:
+            result["cuid_metadata_status"] = (
+                f"amdsmi_error_{error.get_error_code()}"
+                if isinstance(error, amdsmi_exception.AmdSmiLibraryException)
+                else "unsupported"
             )
-        return identifier
+            # Older libraries may provide the CUID-only API but not its metadata.
+            try:
+                cuid = amdsmi_interface.amdsmi_get_gpu_device_cuid(device_handle)
+            except (amdsmi_exception.AmdSmiLibraryException, AttributeError):
+                return result
+            if cuid and cuid != "N/A":
+                result.update(derived_cuid=cuid, identifier_kind="cuid")
+            return result
+
+        cuid = info.get("derived")
+        if not cuid or cuid == "N/A":
+            result["cuid_metadata_status"] = "invalid_value"
+            return result
+        result.update(derived_cuid=cuid, identifier_kind="cuid", cuid_metadata_status="available")
+        result["component_type"] = info.get("component_type", "UNKNOWN")
+        source = info.get("source")
+        if source in ("DRIVER", "LIBRARY", "UNKNOWN"):
+            result["source"] = source
+        else:
+            result["cuid_metadata_status"] = "partial"
+        auxiliary = info.get("auxiliary")
+        if isinstance(auxiliary, bool):
+            result["auxiliary"] = auxiliary
+        else:
+            result["cuid_metadata_status"] = "partial"
+        if include_primary:
+            result["primary_cuid"] = info.get("primary") or "N/A (requires root)"
+        return result
 
     def get_gpu_choices(self):
         """Return dictionary of possible GPU choices and string of the output:

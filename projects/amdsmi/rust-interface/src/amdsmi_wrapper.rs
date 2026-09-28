@@ -3847,6 +3847,102 @@ extern "C" {
         cuid: *mut ::std::os::raw::c_char,
     ) -> AmdsmiStatusT;
 }
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum AmdsmiCuidSourceT {
+    AmdsmiCuidSourceUnknown = 0,
+    AmdsmiCuidSourceDriver = 1,
+    AmdsmiCuidSourceLibrary = 3,
+}
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum AmdsmiCuidComponentTypeT {
+    AmdsmiCuidComponentPlatform = 0,
+    AmdsmiCuidComponentCpu = 1,
+    AmdsmiCuidComponentGpu = 2,
+    AmdsmiCuidComponentNic = 3,
+    AmdsmiCuidComponentNpu = 4,
+    AmdsmiCuidComponentStorage = 5,
+    AmdsmiCuidComponentMemory = 6,
+    AmdsmiCuidComponentGenpcie = 7,
+    AmdsmiCuidComponentGenc = 8,
+    AmdsmiCuidComponentRacktray = 9,
+    AmdsmiCuidComponentRack = 10,
+    AmdsmiCuidComponentOther = 15,
+    AmdsmiCuidComponentUnknown = 255,
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct AmdsmiCuidInfoT {
+    pub primary: [::std::os::raw::c_char; 38usize],
+    pub derived: [::std::os::raw::c_char; 38usize],
+    pub component_type: AmdsmiCuidComponentTypeT,
+    pub source: AmdsmiCuidSourceT,
+    pub auxiliary: u8,
+    pub reserved_flags: [u8; 11usize],
+    pub reserved: [u64; 8usize],
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of AmdsmiCuidInfoT"][::std::mem::size_of::<AmdsmiCuidInfoT>() - 160usize];
+    ["Alignment of AmdsmiCuidInfoT"][::std::mem::align_of::<AmdsmiCuidInfoT>() - 8usize];
+    ["Offset of field: AmdsmiCuidInfoT::primary"]
+        [::std::mem::offset_of!(AmdsmiCuidInfoT, primary) - 0usize];
+    ["Offset of field: AmdsmiCuidInfoT::derived"]
+        [::std::mem::offset_of!(AmdsmiCuidInfoT, derived) - 38usize];
+    ["Offset of field: AmdsmiCuidInfoT::component_type"]
+        [::std::mem::offset_of!(AmdsmiCuidInfoT, component_type) - 76usize];
+    ["Offset of field: AmdsmiCuidInfoT::source"]
+        [::std::mem::offset_of!(AmdsmiCuidInfoT, source) - 80usize];
+    ["Offset of field: AmdsmiCuidInfoT::auxiliary"]
+        [::std::mem::offset_of!(AmdsmiCuidInfoT, auxiliary) - 84usize];
+    ["Offset of field: AmdsmiCuidInfoT::reserved_flags"]
+        [::std::mem::offset_of!(AmdsmiCuidInfoT, reserved_flags) - 85usize];
+    ["Offset of field: AmdsmiCuidInfoT::reserved"]
+        [::std::mem::offset_of!(AmdsmiCuidInfoT, reserved) - 96usize];
+};
+extern "C" {
+    pub fn amdsmi_get_gpu_cuid_info(
+        processor_handle: AmdsmiProcessorHandle,
+        info: *mut AmdsmiCuidInfoT,
+    ) -> AmdsmiStatusT;
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct AmdsmiCuidComponentT {
+    pub info: AmdsmiCuidInfoT,
+    pub bdf: [::std::os::raw::c_char; 256usize],
+    pub device_path: [::std::os::raw::c_char; 256usize],
+    pub vendor_id: u16,
+    pub reserved_id: u16,
+    pub reserved_pad: u32,
+    pub reserved: [u64; 4usize],
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of AmdsmiCuidComponentT"][::std::mem::size_of::<AmdsmiCuidComponentT>() - 712usize];
+    ["Alignment of AmdsmiCuidComponentT"][::std::mem::align_of::<AmdsmiCuidComponentT>() - 8usize];
+    ["Offset of field: AmdsmiCuidComponentT::info"]
+        [::std::mem::offset_of!(AmdsmiCuidComponentT, info) - 0usize];
+    ["Offset of field: AmdsmiCuidComponentT::bdf"]
+        [::std::mem::offset_of!(AmdsmiCuidComponentT, bdf) - 160usize];
+    ["Offset of field: AmdsmiCuidComponentT::device_path"]
+        [::std::mem::offset_of!(AmdsmiCuidComponentT, device_path) - 416usize];
+    ["Offset of field: AmdsmiCuidComponentT::vendor_id"]
+        [::std::mem::offset_of!(AmdsmiCuidComponentT, vendor_id) - 672usize];
+    ["Offset of field: AmdsmiCuidComponentT::reserved_id"]
+        [::std::mem::offset_of!(AmdsmiCuidComponentT, reserved_id) - 674usize];
+    ["Offset of field: AmdsmiCuidComponentT::reserved_pad"]
+        [::std::mem::offset_of!(AmdsmiCuidComponentT, reserved_pad) - 676usize];
+    ["Offset of field: AmdsmiCuidComponentT::reserved"]
+        [::std::mem::offset_of!(AmdsmiCuidComponentT, reserved) - 680usize];
+};
+extern "C" {
+    pub fn amdsmi_get_cuid_components(
+        count: *mut u32,
+        components: *mut AmdsmiCuidComponentT,
+    ) -> AmdsmiStatusT;
+}
 extern "C" {
     pub fn amdsmi_get_gpu_enumeration_info(
         processor_handle: AmdsmiProcessorHandle,

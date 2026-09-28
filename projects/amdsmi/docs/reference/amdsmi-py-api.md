@@ -515,10 +515,16 @@ Output: Dictionary with fields
 Field | Content
 ---|---
 `primary` | Canonical CUID as a UUIDv8 string. Empty when the caller lacks the privilege to read it, since the primary payload embeds the raw serial number. An empty value is not an error
-`derived` | Derived (secondary) CUID as a UUIDv8 string. Names the component without disclosing its serial, and is the value to record
+`derived` | Derived CUID as a UUIDv8 string. Names the component without disclosing its serial, and is the value to record
 `component_type` | On-wire Component Type by name: `PLATFORM`, `CPU`, `GPU`, `NIC`, `NPU`, `STORAGE`, `MEMORY`, `GENPCIE`, `GENC`, `RACKTRAY`, `RACK`, `OTHER`, or `UNKNOWN`
-`source` | Which stage of the staged lookup answered: `DRIVER`, `STORE`, `LIBRARY` or `UNKNOWN`. Only `DRIVER` is authoritative
-`auxiliary` | `True` when the identity was synthesised from non-privileged information because no hardware serial was reachable. Such a value changes when the OS is reinstalled and is not unique across nodes
+`source` | Which stage of the staged lookup answered: `DRIVER`, `LIBRARY` or `UNKNOWN`
+`auxiliary` | `True` for a temporary CUID: the identity was synthesised from non-privileged information. Such a value changes when the OS is reinstalled and is not unique across nodes
+
+Auxiliary (temporary) CUIDs are keyed by the machine ID. There is no node key
+yet, so every derived CUID is temporary, and a GPU partition has none.
+The result is built from several queries, so it is not atomic under a
+topology change. If the auxiliary flag cannot be read, the call raises
+rather than reporting `False`.
 
 Exceptions that can be thrown by `amdsmi_get_gpu_cuid_info` function:
 
@@ -528,6 +534,7 @@ Exceptions that can be thrown by `amdsmi_get_gpu_cuid_info` function:
 #### Possible Library Exceptions
 
 - `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_NO_PERM` - The auxiliary flag cannot be read by this caller
 - `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
 
 Example:
@@ -552,74 +559,36 @@ finally:
     amdsmi.amdsmi_shut_down()
 ```
 
-### amdsmi_set_cuid_seed
+### amdsmi_get_cuid_components
 
-Description: Provisions the node-wide CUID derivation seed. The seed is
-node-wide, not per device: provisioning replaces every derived CUID handed out
-on this node and leaves every primary CUID unchanged, so it is an administrative
-invalidation rather than a routine operation. Requires elevation.
-
-Input parameters:
-
-* `seed` exactly `AMDSMI_CUID_SEED_SIZE` (32) bytes of secret material. Any
-  other size is corruption, not a shorter secret
-
-Output: None
-
-Exceptions that can be thrown by `amdsmi_set_cuid_seed` function:
-
-* `AmdSmiParameterException`
-* `AmdSmiLibraryException`
-
-#### Possible Library Exceptions
-
-- `AMDSMI_STATUS_INVAL` - Invalid parameters
-- `AMDSMI_STATUS_NO_PERM` - Permission Denied (requires sudo)
-- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
-- `AMDSMI_STATUS_API_FAILED` - API call failed
-
-Example:
-
-```python
-import amdsmi
-try:
-    amdsmi.amdsmi_init()
-    with open("/path/to/cuid.seed", "rb") as f:
-        amdsmi.amdsmi_set_cuid_seed(f.read())
-except amdsmi.AmdSmiException as e:
-    print(e)
-finally:
-    amdsmi.amdsmi_shut_down()
-```
-
-### amdsmi_get_cuid_seed_info
-
-Description: Reports whether the node-wide CUID derivation seed is provisioned,
-and a fingerprint of it. The seed itself is never returned.
+Description: Lists every component on the node that has a CUID: the platform,
+each CPU package, each AMD GPU, and each NIC, ordered by component type, then
+BDF, then device path. Needs no processor handle. Every derived CUID is
+temporary; for a caller other than root `primary` is empty.
 
 Input parameters: `None`
 
-Output: Dictionary with fields
+Output: List of dictionaries, one per component, with fields; empty list if the node has none
 
 Field | Content
 ---|---
-`provisioned` | `True` when an administrator has provisioned a seed; `False` when the public canonical fallback seed is in use, in which case every derived CUID on this node is reproducible by anyone
-`fingerprint` | First 8 octets of the unkeyed SHA-256 of the seed in use, as lowercase hex
+`primary` | Primary CUID, or `""` without root
+`derived` | Derived CUID
+`component_type` | `PLATFORM`, `CPU`, `GPU`, `NIC`, ...
+`source` | `DRIVER`, `LIBRARY` or `UNKNOWN`
+`auxiliary` | `True` for a temporary CUID
+`bdf` | PCI address, or `""` for the platform and CPUs
+`device_path` | Sysfs path, or `""` for the platform
+`vendor_id` | PCI or CPUID vendor ID, `0` for the platform
 
-A node with no provisioned seed is a success, not a failure: it reports
-`provisioned` as `False` and the fingerprint of the public canonical fallback
-seed. A seed store this caller is not allowed to read is distinct from that: it
-raises `AMDSMI_STATUS_NO_PERM` and reports no state at all, since the node may
-well be provisioned.
-
-Exceptions that can be thrown by `amdsmi_get_cuid_seed_info` function:
+Exceptions that can be thrown by `amdsmi_get_cuid_components` function:
 
 * `AmdSmiLibraryException`
 
 #### Possible Library Exceptions
 
-- `AMDSMI_STATUS_NO_PERM` - Permission Denied (requires sudo)
-- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NO_PERM` - A component's auxiliary flag cannot be read by this caller
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Built without CUID support
 - `AMDSMI_STATUS_API_FAILED` - API call failed
 
 Example:
@@ -628,9 +597,8 @@ Example:
 import amdsmi
 try:
     amdsmi.amdsmi_init()
-    info = amdsmi.amdsmi_get_cuid_seed_info()
-    print("Provisioned:", info['provisioned'])
-    print("Fingerprint:", info['fingerprint'])
+    for component in amdsmi.amdsmi_get_cuid_components():
+        print(component['component_type'], component['bdf'], component['derived'])
 except amdsmi.AmdSmiException as e:
     print(e)
 finally:

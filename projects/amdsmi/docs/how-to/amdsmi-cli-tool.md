@@ -114,7 +114,28 @@ details for usage.
 (cmd-list)=
 ### amd-smi list
 
-Lists GPU information.
+Lists GPU information, including identifier kind and CUID provenance.
+
+#### CUID identity and compatibility
+
+The `uuid` field (human-readable/JSON) and `gpu_uuid` column (CSV) are
+**CUID-first compatibility aliases**: the derived CUID when available,
+otherwise the legacy GPU UUID, otherwise `N/A`. The fields below follow all
+existing list fields, including those selected by `--enumeration`; new
+consumers should use `identifier_kind` and `cuid`.
+
+Field | Meaning
+---|---
+`identifier_kind` | `cuid`, `legacy_uuid`, or `unknown`; identifies the value in the compatibility alias
+`cuid` | Derived CUID, or `N/A`; never contains a legacy UUID
+`source` | `DRIVER`, `LIBRARY`, or `UNKNOWN`, from the CUID API
+`auxiliary` | Boolean `true`/`false` in JSON, `True`/`False` in CSV, or the string `unknown`; unknown is not false
+`cuid_metadata_status` | `available`, `partial`, `unsupported`, `invalid_value`, or `amdsmi_error_<numeric status>`; preserves metadata failures even when an identifier remains available
+
+If the CUID info API fails, the CUID-only API is tried before the legacy UUID
+API, so a metadata failure alone does not turn a readable CUID into a legacy UUID.
+
+`list` never reports the primary CUID.
 
 ```{note}
 `amd-smi list -e` is useful for mapping physical-to-logical GPU IDs.
@@ -170,10 +191,19 @@ Command Modifiers:
 Gets static information about the specified GPU. See the [sample
 output](#cli-ex-static) for `amd-smi static`.
 
+`amd-smi static --cuid` adds a per-GPU `cuid` block with `derived_cuid`,
+`primary_cuid`, `component_type`, `auxiliary`, `source`, `identifier_kind`
+and `cuid_metadata_status`, with the semantics
+described under [`amd-smi list`](#cmd-list). It does not fall back to a legacy
+UUID. `primary_cuid` is `N/A (not requested)` unless `--cuid-primary` is given.
+
+For every component on the node, not only GPUs, use
+[`amd-smi node --cuid`](#cmd-node).
+
 ```shell-session
 ~$ amd-smi static --help
 usage: amd-smi static [-h] [-g GPU [GPU ...] | -U CPU [CPU ...]] [-a] [-b] [-V] [-d] [-v]
-                      [-c] [-B] [-R] [-r] [-p] [-l] [-P] [-x] [-u] [-s] [-i]
+                      [-c] [-B] [-R] [-r] [-Y] [-y] [-p] [-l] [-P] [-x] [-u] [-s] [-i]
                       [--json | --csv] [--file FILE] [--loglevel LEVEL]
 
 If no GPU is specified, returns static information for all GPUs on the system.
@@ -191,6 +221,14 @@ Static Arguments:
   -R, --process-isolation  The process isolation status
   -r, --ras                Displays RAS features information;
                                 Sudo may be required for some features
+  -Y, --cuid               Component Unified ID: the derived CUID, its component type, whether it is a
+                           temporary (auxiliary) identifier, and which layer answered.
+                           Not part of the default `amd-smi static` output; ask for it.
+                           The primary CUID is not shown by default either: its payload embeds the raw
+                           serial number. Add --cuid-primary, as root, to include it.
+  -y, --cuid-primary       Include the primary CUID in the CUID output, implying --cuid. Requires
+                           privilege, and prints a value that embeds the device serial number. Do not
+                           paste it into a bug report.
   -C, --clock [CLOCK ...]  Show one or more valid clock frequency levels. Available options:
                                 SYS, DF, DCEF, SOC, MEM, VCLK0, VCLK1, DCLK0, DCLK1, ALL
   -p, --partition          Partition information
@@ -1028,15 +1066,17 @@ Command Modifiers:
                              DEBUG, INFO, WARNING, ERROR, CRITICAL
 ```
 
+(cmd-node)=
+
 ### amd-smi node
 
 Gets power and baseboard information for the node. Returns information for
 node 0 (OAM_ID 0) on the system. If no node argument is provided, all node
-information will be displayed.
+information except CUIDs will be displayed.
 
 ```shell-session
 ~$ amd-smi node --help
-usage: amd-smi node [-h] [-p] [-b] [-G] [-T] [--json | --csv] [--file FILE]
+usage: amd-smi node [-h] [-p] [-b] [-G] [-T] [-Y] [-y] [--json | --csv] [--file FILE]
                      [--loglevel LEVEL]
 
 Node arguments:
@@ -1045,6 +1085,9 @@ Node arguments:
   -b, --base-board-temps        Displays baseboard temperatures
   -G, --gtt                     Displays GTT (shared GPU memory) size
   -T, --tray                    Displays compute tray type and accelerator count
+  -Y, --cuid                    Lists the CUID of every component on the node: the platform, CPU
+                                packages, GPUs and NICs. Every derived CUID is temporary.
+  -y, --cuid-primary            Include each component's primary CUID, implying --cuid. Requires root.
 
 Command Modifiers:
   --json                        Displays output in JSON format (human readable by default).
@@ -1068,6 +1111,49 @@ NODE:
 On systems without UALoE hardware/session, `amdsmi_get_tray_info()` returns
 `AMDSMI_STATUS_NOT_SUPPORTED` and the `TRAY:` block (and the `tray`/
 `max_acc_per_tray`/`tray_type` keys in `--json`/`--csv`) is omitted entirely.
+
+`amd-smi node --cuid` lists every component that has a CUID, whether or not
+amd-smi manages it: the platform, each CPU package, each AMD GPU, and each
+NIC. Components are named by type and position (`CPU 0`, `GPU 1`); `GPU n`
+here counts CUID components, not amd-smi GPU indexes, so match on `bdf`. Each
+has `derived_cuid`, `primary_cuid`, `source`, `auxiliary`, `bdf` and
+`device_path`. There is no node key, so every derived CUID is temporary
+(`AUXILIARY: True`), and a GPU partition is not listed. `--csv` gives one row
+per component.
+
+```shell-session
+~$ sudo amd-smi node --cuid
+NODE:
+    CUID:
+        PLATFORM:
+            DERIVED_CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+            PRIMARY_CUID: N/A (not requested)
+            SOURCE: LIBRARY
+            AUXILIARY: True
+            BDF: N/A
+            DEVICE_PATH: N/A
+        CPU 0:
+            DERIVED_CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+            PRIMARY_CUID: N/A (not requested)
+            SOURCE: LIBRARY
+            AUXILIARY: True
+            BDF: N/A
+            DEVICE_PATH: /sys/devices/system/cpu/cpu0
+        GPU 0:
+            DERIVED_CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+            PRIMARY_CUID: N/A (not requested)
+            SOURCE: LIBRARY
+            AUXILIARY: True
+            BDF: 0000:03:00.0
+            DEVICE_PATH: /sys/class/drm/renderD129
+        NIC 0:
+            DERIVED_CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+            PRIMARY_CUID: N/A (not requested)
+            SOURCE: LIBRARY
+            AUXILIARY: True
+            BDF: 0000:69:00.0
+            DEVICE_PATH: /sys/class/net/eno1
+```
 
 ## Interpreting the output
 

@@ -3255,12 +3255,10 @@ except AttributeError:
 amdsmi_cuid_source_t__enumvalues = {
     0: 'AMDSMI_CUID_SOURCE_UNKNOWN',
     1: 'AMDSMI_CUID_SOURCE_DRIVER',
-    2: 'AMDSMI_CUID_SOURCE_STORE',
     3: 'AMDSMI_CUID_SOURCE_LIBRARY',
 }
 AMDSMI_CUID_SOURCE_UNKNOWN = 0
 AMDSMI_CUID_SOURCE_DRIVER = 1
-AMDSMI_CUID_SOURCE_STORE = 2
 AMDSMI_CUID_SOURCE_LIBRARY = 3
 amdsmi_cuid_source_t = ctypes.c_uint32 # enum
 
@@ -3310,35 +3308,32 @@ struct_amdsmi_cuid_info_t._fields_ = [
 ]
 
 amdsmi_cuid_info_t = struct_amdsmi_cuid_info_t
-class struct_amdsmi_cuid_seed_info_t(Structure):
-    pass
-
-struct_amdsmi_cuid_seed_info_t._pack_ = 1 # source:False
-struct_amdsmi_cuid_seed_info_t._layout_ = 'ms'
-struct_amdsmi_cuid_seed_info_t._fields_ = [
-    ('provisioned', ctypes.c_ubyte),
-    ('reserved_flags', ctypes.c_ubyte * 7),
-    ('fingerprint', ctypes.c_ubyte * 8),
-    ('reserved', ctypes.c_uint64 * 4),
-]
-
-amdsmi_cuid_seed_info_t = struct_amdsmi_cuid_seed_info_t
 try:
     amdsmi_get_gpu_cuid_info = _libraries['libamd_smi.so'].amdsmi_get_gpu_cuid_info
     amdsmi_get_gpu_cuid_info.restype = amdsmi_status_t
     amdsmi_get_gpu_cuid_info.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_cuid_info_t)]
 except AttributeError:
     pass
-try:
-    amdsmi_set_cuid_seed = _libraries['libamd_smi.so'].amdsmi_set_cuid_seed
-    amdsmi_set_cuid_seed.restype = amdsmi_status_t
-    amdsmi_set_cuid_seed.argtypes = [ctypes.c_ubyte * 32]
-except AttributeError:
+class struct_amdsmi_cuid_component_t(Structure):
     pass
+
+struct_amdsmi_cuid_component_t._pack_ = 1 # source:False
+struct_amdsmi_cuid_component_t._layout_ = 'ms'
+struct_amdsmi_cuid_component_t._fields_ = [
+    ('info', amdsmi_cuid_info_t),
+    ('bdf', ctypes.c_char * 256),
+    ('device_path', ctypes.c_char * 256),
+    ('vendor_id', ctypes.c_uint16),
+    ('reserved_id', ctypes.c_uint16),
+    ('reserved_pad', ctypes.c_uint32),
+    ('reserved', ctypes.c_uint64 * 4),
+]
+
+amdsmi_cuid_component_t = struct_amdsmi_cuid_component_t
 try:
-    amdsmi_get_cuid_seed_info = _libraries['libamd_smi.so'].amdsmi_get_cuid_seed_info
-    amdsmi_get_cuid_seed_info.restype = amdsmi_status_t
-    amdsmi_get_cuid_seed_info.argtypes = [ctypes.POINTER(struct_amdsmi_cuid_seed_info_t)]
+    amdsmi_get_cuid_components = _libraries['libamd_smi.so'].amdsmi_get_cuid_components
+    amdsmi_get_cuid_components.restype = amdsmi_status_t
+    amdsmi_get_cuid_components.argtypes = [ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(struct_amdsmi_cuid_component_t)]
 except AttributeError:
     pass
 try:
@@ -5118,8 +5113,8 @@ __all__ = \
     'AMDSMI_CUID_COMPONENT_RACK', 'AMDSMI_CUID_COMPONENT_RACKTRAY',
     'AMDSMI_CUID_COMPONENT_STORAGE', 'AMDSMI_CUID_COMPONENT_UNKNOWN',
     'AMDSMI_CUID_SOURCE_DRIVER', 'AMDSMI_CUID_SOURCE_LIBRARY',
-    'AMDSMI_CUID_SOURCE_STORE', 'AMDSMI_CUID_SOURCE_UNKNOWN',
-    'AMDSMI_DEV_PERF_LEVEL_AUTO', 'AMDSMI_DEV_PERF_LEVEL_DETERMINISM',
+    'AMDSMI_CUID_SOURCE_UNKNOWN', 'AMDSMI_DEV_PERF_LEVEL_AUTO',
+    'AMDSMI_DEV_PERF_LEVEL_DETERMINISM',
     'AMDSMI_DEV_PERF_LEVEL_FIRST', 'AMDSMI_DEV_PERF_LEVEL_HIGH',
     'AMDSMI_DEV_PERF_LEVEL_LAST', 'AMDSMI_DEV_PERF_LEVEL_LOW',
     'AMDSMI_DEV_PERF_LEVEL_MANUAL',
@@ -5439,16 +5434,17 @@ __all__ = \
     'amdsmi_cper_sev_t', 'amdsmi_cper_timestamp_t',
     'amdsmi_cper_valid_bits_t', 'amdsmi_cpu_apb_disable',
     'amdsmi_cpu_apb_enable', 'amdsmi_cpu_info_t', 'amdsmi_cpu_util_t',
-    'amdsmi_cpusocket_handle', 'amdsmi_cuid_component_type_t',
-    'amdsmi_cuid_info_t', 'amdsmi_cuid_seed_info_t',
-    'amdsmi_cuid_source_t', 'amdsmi_ddr_bw_metrics_t',
-    'amdsmi_dev_perf_level_t', 'amdsmi_dimm_power_t',
-    'amdsmi_dimm_thermal_t', 'amdsmi_dpm_level_t',
-    'amdsmi_dpm_policy_entry_t', 'amdsmi_dpm_policy_t',
-    'amdsmi_driver_info_t', 'amdsmi_engine_usage_t',
-    'amdsmi_enumeration_info_t', 'amdsmi_error_count_t',
-    'amdsmi_event_group_t', 'amdsmi_event_handle_t',
-    'amdsmi_event_type_t', 'amdsmi_evt_notification_data_t',
+    'amdsmi_cpusocket_handle', 'amdsmi_cuid_component_t',
+    'amdsmi_cuid_component_type_t', 'amdsmi_cuid_info_t',
+    'amdsmi_cuid_source_t',
+    'amdsmi_ddr_bw_metrics_t', 'amdsmi_dev_perf_level_t',
+    'amdsmi_dimm_power_t', 'amdsmi_dimm_thermal_t',
+    'amdsmi_dpm_level_t', 'amdsmi_dpm_policy_entry_t',
+    'amdsmi_dpm_policy_t', 'amdsmi_driver_info_t',
+    'amdsmi_engine_usage_t', 'amdsmi_enumeration_info_t',
+    'amdsmi_error_count_t', 'amdsmi_event_group_t',
+    'amdsmi_event_handle_t', 'amdsmi_event_type_t',
+    'amdsmi_evt_notification_data_t',
     'amdsmi_evt_notification_type_t',
     'amdsmi_fabric_accelerator_vpod_state_t', 'amdsmi_fabric_info_t',
     'amdsmi_fabric_info_v1_t', 'amdsmi_fabric_label_t',
@@ -5504,9 +5500,9 @@ __all__ = \
     'amdsmi_get_cpu_socket_temperature',
     'amdsmi_get_cpu_svi3_vr_controller_temp', 'amdsmi_get_cpu_tdelta',
     'amdsmi_get_cpu_xgmi_pstate_range', 'amdsmi_get_cpucore_handles',
-    'amdsmi_get_cuid_seed_info', 'amdsmi_get_energy_count',
-    'amdsmi_get_esmi_err_msg', 'amdsmi_get_fabric_telemetry_data',
-    'amdsmi_get_fw_info',
+    'amdsmi_get_cuid_components',
+    'amdsmi_get_energy_count', 'amdsmi_get_esmi_err_msg',
+    'amdsmi_get_fabric_telemetry_data', 'amdsmi_get_fw_info',
     'amdsmi_get_gpu_accelerator_partition_mem_alloc_mode',
     'amdsmi_get_gpu_accelerator_partition_profile',
     'amdsmi_get_gpu_accelerator_partition_profile_config',
@@ -5635,7 +5631,6 @@ __all__ = \
     'amdsmi_set_cpu_socket_lclk_dpm_level',
     'amdsmi_set_cpu_socket_power_cap',
     'amdsmi_set_cpu_xgmi_pstate_range', 'amdsmi_set_cpu_xgmi_width',
-    'amdsmi_set_cuid_seed',
     'amdsmi_set_gpu_accelerator_partition_mem_alloc_mode',
     'amdsmi_set_gpu_accelerator_partition_profile',
     'amdsmi_set_gpu_clk_limit', 'amdsmi_set_gpu_compute_partition',
@@ -5679,8 +5674,8 @@ __all__ = \
     'struct_amdsmi_clk_info_t', 'struct_amdsmi_counter_value_t',
     'struct_amdsmi_cper_guid_t', 'struct_amdsmi_cper_hdr_t',
     'struct_amdsmi_cper_timestamp_t', 'struct_amdsmi_cpu_info_t',
-    'struct_amdsmi_cpu_util_t', 'struct_amdsmi_cuid_info_t',
-    'struct_amdsmi_cuid_seed_info_t',
+    'struct_amdsmi_cpu_util_t', 'struct_amdsmi_cuid_component_t',
+    'struct_amdsmi_cuid_info_t',
     'struct_amdsmi_ddr_bw_metrics_t', 'struct_amdsmi_dimm_power_t',
     'struct_amdsmi_dimm_thermal_t', 'struct_amdsmi_dpm_level_t',
     'struct_amdsmi_dpm_policy_entry_t', 'struct_amdsmi_dpm_policy_t',

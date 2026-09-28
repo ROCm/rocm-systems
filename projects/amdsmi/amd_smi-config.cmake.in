@@ -7,6 +7,39 @@
 @PACKAGE_INIT@
 get_filename_component(AMD_SMI_CMAKE_DIR "${CMAKE_CURRENT_LIST_FILE}" PATH)
 
+include(CMakeFindDependencyMacro)
+
+# A nested find_package overwrites PACKAGE_PREFIX_DIR on CMake <= 3.29.
+set(_amd_smi_package_prefix_dir "${PACKAGE_PREFIX_DIR}")
+
+# amd_smi_static links an installed libamdcuid PRIVATE, which a static library
+# exports as $<LINK_ONLY:amdcuid::amdcuid>. libamdcuid installs under
+# ${ROCM_DIR}/core, which config-mode search does not reach from ${ROCM_DIR}.
+# Not find_dependency(): a miss would fail the whole package, shared library
+# included, although only a consumer linking amd_smi_static needs amdcuid. That
+# consumer instead gets CMake's generate-time error naming amdcuid::amdcuid.
+if(@AMDSMI_CUID_NEEDS_FIND_DEPENDENCY@)
+    find_package(
+        amdcuid
+        @AMDSMI_AMDCUID_MIN_VERSION@
+        CONFIG
+        QUIET
+        HINTS "${_amd_smi_package_prefix_dir}/core" "@AMDCUID_HINT_DIR@"
+    )
+endif()
+
+# Same reason: Threads::Threads is PRIVATE in amd_smi_static. FindThreads needs
+# C or CXX enabled, and superbuilds resolve packages before project() enables
+# any language.
+get_property(_amd_smi_languages GLOBAL PROPERTY ENABLED_LANGUAGES)
+if("C" IN_LIST _amd_smi_languages OR "CXX" IN_LIST _amd_smi_languages)
+    find_dependency(Threads)
+endif()
+unset(_amd_smi_languages)
+
+set(PACKAGE_PREFIX_DIR "${_amd_smi_package_prefix_dir}")
+unset(_amd_smi_package_prefix_dir)
+
 set_and_check(amd_smi_INCLUDE_DIR "@PACKAGE_CMAKE_INSTALL_INCLUDEDIR@")
 set_and_check(AMD_SMI_INCLUDE_DIR "@PACKAGE_CMAKE_INSTALL_INCLUDEDIR@")
 set_and_check(AMD_SMI_INCLUDE_DIRS "@PACKAGE_CMAKE_INSTALL_INCLUDEDIR@")
