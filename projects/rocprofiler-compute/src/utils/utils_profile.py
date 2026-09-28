@@ -17,7 +17,7 @@ from typing import Any, Optional, Union, cast
 
 import config
 import utils.utils_profile_csv as csv_ops
-from utils import csv_compression, native_data, rocpd_data
+from utils import csv_compression, rocpd_data
 from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 from utils.logger import (
     console_debug,
@@ -27,6 +27,9 @@ from utils.logger import (
     demarcate,
 )
 from utils.utils_common import (
+    NATIVE_COUNTERS_PREFIX,
+    NATIVE_DISPATCH_PREFIX,
+    NATIVE_KERNEL_SYMBOLS_PREFIX,
     capture_subprocess_output,
     create_temp_rocprofiler_metrics_path,
     get_rocprof_cmd,
@@ -161,9 +164,9 @@ def keep_native_artifacts(source_dir: Path, workload_dir: Path, fbase: str) -> N
     own processes and dispatch ids.
     """
     for prefix, suffix in (
-        (native_data.COUNTERS_PREFIX, "_native_counter_collection.csv"),
-        (native_data.DISPATCH_PREFIX, "_dispatch.csv"),
-        (native_data.KERNEL_SYMBOLS_PREFIX, "_kernel_symbols.csv"),
+        (NATIVE_COUNTERS_PREFIX, "_native_counter_collection.csv"),
+        (NATIVE_DISPATCH_PREFIX, "_dispatch.csv"),
+        (NATIVE_KERNEL_SYMBOLS_PREFIX, "_kernel_symbols.csv"),
     ):
         pattern = f"*{suffix}{csv_compression.GZIP_SUFFIX}"
         for source in sorted(source_dir.glob(pattern)):
@@ -365,7 +368,7 @@ def run_prof(
         out_pmc_1 / f"{fbase}_marker_api_trace.csv"
     )
     kernel_symbols_csv = csv_compression.compressed_name(
-        Path(workload_dir) / f"kernel_symbols_{fbase}.csv"
+        Path(workload_dir) / f"rocpd_kernel_symbols_{fbase}.csv"
     )
     rocpd_data.convert_dbs_to_csv(
         [str(p) for p in db_paths],

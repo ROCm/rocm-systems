@@ -6,13 +6,13 @@ import json
 import re
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 import pandas as pd
 import yaml
 
 import config
-from utils import csv_compression, native_data, utils_analysis
+from utils import csv_compression, utils_analysis
 from utils.logger import (
     console_debug,
     console_error,
@@ -25,7 +25,7 @@ from utils.utils_common import (
     normalize_filter_to_str_list,
 )
 
-KERNEL_SYMBOLS_CSV_GLOB = f"kernel_symbols_*.csv{csv_compression.GZIP_SUFFIX}"
+KERNEL_SYMBOLS_CSV_GLOB = f"rocpd_kernel_symbols_*.csv{csv_compression.GZIP_SUFFIX}"
 
 # TODO: use pandas chunksize or dask to read really large csv file
 # from dask import dataframe as dd
@@ -270,7 +270,7 @@ def _read_kernel_symbol_csvs(workload_path: str) -> list[pd.DataFrame]:
     failed leaves an empty file behind rather than no file.
     """
     symbol_frames = []
-    artifacts = native_data.find_native_artifacts(Path(workload_path))
+    artifacts = utils_analysis.find_native_artifacts(Path(workload_path))
     symbol_csv_paths = [artifact.kernel_symbols for artifact in artifacts] or sorted(
         Path(workload_path).glob(KERNEL_SYMBOLS_CSV_GLOB)
     )
@@ -369,17 +369,15 @@ def create_df_pmc(
     """
     Read all raw pmc counters into one analysis df.
 
-    Counter data is read straight from the rocpd result artifacts. Bad profiling
-    output stops the run instead of producing a partial frame.
+    Counter data comes from the native tool's per-pid artifacts when there are
+    any, and from the rocpd result artifacts otherwise. Bad profiling output
+    stops the run instead of producing a partial frame.
     """
-    result_files = sorted(
-        Path(raw_data_dir).glob(f"results_*.csv{csv_compression.GZIP_SUFFIX}")
-    )
-    if not result_files:
+    counter_rows = _read_counter_rows(Path(raw_data_dir))
+    if counter_rows.empty:
         return pd.DataFrame()
 
-    frames = [_read_counter_results(result_file) for result_file in result_files]
-    df = utils_analysis.process_rocpd_csv(pd.concat(frames, ignore_index=True))
+    df = utils_analysis.process_rocpd_csv(counter_rows)
 
     utils_analysis.add_unit_counter(df)
 
@@ -390,33 +388,59 @@ def create_df_pmc(
     return df
 
 
+def _read_counter_rows(workload_dir: Path) -> pd.DataFrame:
+    """Read the long counter rows of a workload, one row per counter per dispatch.
+
+    Older workloads and attach mode have no native artifacts, so they fall back
+    to the rocpd result artifacts.
+    """
+    artifacts = utils_analysis.find_native_artifacts(workload_dir)
+    if artifacts:
+        return _read_native_counter_rows(workload_dir, artifacts)
+
+    result_files = sorted(
+        workload_dir.glob(f"results_*.csv{csv_compression.GZIP_SUFFIX}")
+    )
+    if not result_files:
+        return pd.DataFrame()
+    frames = [_read_counter_results(result_file) for result_file in result_files]
+    return pd.concat(frames, ignore_index=True)
+
+
+def _read_native_counter_rows(
+    workload_dir: Path,
+    artifacts: List[utils_analysis.NativeArtifacts],
+) -> pd.DataFrame:
+    """Join each process's native CSVs, numbering ids per counter set."""
+    counter_sets = []
+    for fbase in sorted({artifact.fbase for artifact in artifacts}):
+        processes = [
+            utils_analysis.join_native_counters(
+                _read_profiling_csv(artifact.counters),
+                _read_profiling_csv(artifact.dispatch),
+                _read_profiling_csv(artifact.kernel_symbols),
+                artifact.pid,
+            )
+            for artifact in artifacts
+            if artifact.fbase == fbase
+        ]
+        counter_sets.append(
+            utils_analysis.assign_native_ids(pd.concat(processes, ignore_index=True))
+        )
+
+    counter_rows = pd.concat(counter_sets, ignore_index=True)
+    if counter_rows.empty:
+        console_error(
+            "profiling",
+            f"No counter data in the native profiling data under {workload_dir}.\n"
+            "Please re-run 'rocprof-compute profile'.",
+        )
+    return counter_rows
+
+
 def _read_counter_results(result_file: Path) -> pd.DataFrame:
     """Read one rocpd result artifact and check it carries counter rows."""
-    try:
-        df = pd.read_csv(result_file)
-    except pd.errors.EmptyDataError:
-        console_error(
-            "profiling",
-            f"No counter data in {result_file}.\n"
-            "Please re-run 'rocprof-compute profile'.",
-        )
-        return pd.DataFrame()
-    except csv_compression.CORRUPT_CSV_ERRORS as error:
-        console_error(
-            "profiling",
-            f"{result_file} is truncated or corrupt: {error}\n"
-            "A profile run killed mid-write leaves this behind; "
-            "re-run 'rocprof-compute profile' to regenerate the "
-            "workload.",
-        )
-        return pd.DataFrame()
-
-    if df.empty:
-        console_error(
-            "profiling",
-            f"No counter data in {result_file}.\n"
-            "Please re-run 'rocprof-compute profile'.",
-        )
+    df = _read_profiling_csv(result_file)
 
     # The rocpd counter CSV is long: one row per counter per dispatch.
     if not {"Counter_Name", "Counter_Value"}.issubset(df.columns):
@@ -426,6 +450,34 @@ def _read_counter_results(result_file: Path) -> pd.DataFrame:
             "Please re-profile this workload with a current release.",
         )
 
+    return df
+
+
+def _read_profiling_csv(csv_path: Path) -> pd.DataFrame:
+    """Read one profiling CSV, stopping the run if it is empty or corrupt."""
+    try:
+        df = pd.read_csv(csv_path)
+    except pd.errors.EmptyDataError:
+        console_error(
+            "profiling",
+            f"No counter data in {csv_path}.\nPlease re-run 'rocprof-compute profile'.",
+        )
+        return pd.DataFrame()
+    except csv_compression.CORRUPT_CSV_ERRORS as error:
+        console_error(
+            "profiling",
+            f"{csv_path} is truncated or corrupt: {error}\n"
+            "A profile run killed mid-write leaves this behind; "
+            "re-run 'rocprof-compute profile' to regenerate the "
+            "workload.",
+        )
+        return pd.DataFrame()
+
+    if df.empty:
+        console_error(
+            "profiling",
+            f"No counter data in {csv_path}.\nPlease re-run 'rocprof-compute profile'.",
+        )
     return df
 
 
