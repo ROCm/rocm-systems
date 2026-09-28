@@ -1244,7 +1244,13 @@ static ncclResult_t ncclTopoGetNchannels(struct ncclComm* comm, int g /*local gp
     }
     // Local rank
     path = system->nodes[GPU].nodes[peer].paths[GPU] + g;
-    if (path->type == PATH_NVL) {
+    if (path->type == PATH_NVL &&
+        ncclTopoIsMloPartSibling(system->nodes[GPU].nodes + g, system->nodes[GPU].nodes + peer)) {
+      // On-package hop between compute partitions of one device: path->bw is MLOPART_LOC_BW,
+      // which is not a multiple of the XGMI width, so the division below cannot read a link
+      // count out of it. See MLOPART_P2P_NCHANNELS.
+      *nChannels = MLOPART_P2P_NCHANNELS;
+    } else if (path->type == PATH_NVL) {
       float nvlBw = ncclTopoXGMISpeed(system->nodes[GPU].nodes[g].gpu.gcn);
       *nChannels = ((IsArchMatch(system->nodes[GPU].nodes[0].gpu.gcn, "gfx942") ||
                      IsArchMatch(system->nodes[GPU].nodes[0].gpu.gcn, "gfx950") ||
