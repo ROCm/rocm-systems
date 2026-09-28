@@ -1,10 +1,11 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+import re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -17,6 +18,11 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
+from utils.utils_common import (
+    NATIVE_COUNTERS_PREFIX,
+    NATIVE_DISPATCH_PREFIX,
+    NATIVE_KERNEL_SYMBOLS_PREFIX,
+)
 from utils.utils_counter_defs import UNIT_COUNTER
 
 NS_TO_MS = 1.0 / 1_000_000.0
@@ -24,6 +30,63 @@ NS_TO_MS = 1.0 / 1_000_000.0
 # Canonical column-name preference order for Percent of Peak lookups
 VALUE_COL_PREFERENCE: tuple[str, ...] = ("Avg", "Value")
 PEAK_COL_PREFERENCE: tuple[str, ...] = ("Peak", "Peak (Empirical)")
+
+# The long counter frame both lanes hand to process_rocpd_csv, in the column
+# order of results_*.csv.
+COUNTER_RESULTS_COLUMNS: List[str] = [
+    "GPU_ID",
+    "GUID",
+    "Correlation_Id",
+    "Dispatch_ID",
+    "Grid_Size",
+    "Workgroup_Size",
+    "LDS_Per_Workgroup",
+    "Scratch_Per_Workitem",
+    "Arch_VGPR",
+    "Accum_VGPR",
+    "SGPR",
+    "Kernel_Name",
+    "Start_Timestamp",
+    "End_Timestamp",
+    "Kernel_ID",
+    "Counter_Name",
+    "Counter_Value",
+]
+
+_NATIVE_ARTIFACT_RE = re.compile(
+    rf"^(?P<kind>{NATIVE_COUNTERS_PREFIX}|{NATIVE_DISPATCH_PREFIX}"
+    rf"|{NATIVE_KERNEL_SYMBOLS_PREFIX})_(?P<fbase>.+)_(?P<pid>\d+)\.csv\.gz$"
+)
+
+# Native CSV column names mapped to their results_*.csv names.
+_NATIVE_TO_RESULTS_COLUMNS = {
+    "gpu_id": "GPU_ID",
+    "correlation_id": "Correlation_Id",
+    "grid_size": "Grid_Size",
+    "workgroup_size": "Workgroup_Size",
+    "lds_per_workgroup": "LDS_Per_Workgroup",
+    "scratch_per_workitem": "Scratch_Per_Workitem",
+    "arch_vgpr": "Arch_VGPR",
+    "accum_vgpr": "Accum_VGPR",
+    "sgpr": "SGPR",
+    "kernel_name": "Kernel_Name",
+    "start_timestamp": "Start_Timestamp",
+    "end_timestamp": "End_Timestamp",
+    "counter_name": "Counter_Name",
+    "counter_value": "Counter_Value",
+}
+
+# The keys profile mode numbers results_*.csv dispatches and kernels by.
+_DISPATCH_ID_KEYS = [
+    "PID",
+    "Kernel_Name",
+    "Grid_Size",
+    "Workgroup_Size",
+    "LDS_Per_Workgroup",
+    "Start_Timestamp",
+    "End_Timestamp",
+]
+_KERNEL_ID_KEYS = ["Kernel_Name", "Grid_Size", "Workgroup_Size", "LDS_Per_Workgroup"]
 
 
 def get_bw_scale_and_unit(value: float) -> tuple[float, str]:
@@ -92,6 +155,17 @@ class NodeRollup:
     total_duration_ns: float
     min_dispatch_ns: Optional[float]
     max_dispatch_ns: Optional[float]
+
+
+@dataclass(frozen=True)
+class NativeArtifacts:
+    """The three CSVs one process wrote for one counter set."""
+
+    fbase: str
+    pid: int
+    counters: Path
+    dispatch: Path
+    kernel_symbols: Path
 
 
 def simplify_kernel_name(full_kernel_name: str) -> str:
@@ -779,6 +853,82 @@ def process_rocpd_csv(df: pd.DataFrame) -> pd.DataFrame:
     # Reset dispatch IDs
     df["Dispatch_ID"] = range(1, len(df) + 1)
     return df
+
+
+def find_native_artifacts(workload_dir: Path) -> List[NativeArtifacts]:
+    """Return the complete per-pid native artifact sets in workload_dir.
+
+    Sorted by counter set then pid, since ids are numbered in read order. An
+    incomplete set cannot be joined, so it is skipped with a warning.
+    """
+    found: Dict[Tuple[str, int], Dict[str, Path]] = {}
+    for path in workload_dir.glob(f"*.csv{csv_compression.GZIP_SUFFIX}"):
+        match = _NATIVE_ARTIFACT_RE.match(path.name)
+        if match is None:
+            continue
+        key = (match["fbase"], int(match["pid"]))
+        found.setdefault(key, {})[match["kind"]] = path
+
+    kinds = {
+        NATIVE_COUNTERS_PREFIX,
+        NATIVE_DISPATCH_PREFIX,
+        NATIVE_KERNEL_SYMBOLS_PREFIX,
+    }
+    artifacts = []
+    for (fbase, pid), paths in sorted(found.items()):
+        missing = kinds - set(paths)
+        if missing:
+            console_warning(
+                f"Incomplete native profiling data for pid {pid} of {fbase}: "
+                f"missing {', '.join(sorted(missing))}. Skipping this process."
+            )
+            continue
+        artifacts.append(
+            NativeArtifacts(
+                fbase=fbase,
+                pid=pid,
+                counters=paths[NATIVE_COUNTERS_PREFIX],
+                dispatch=paths[NATIVE_DISPATCH_PREFIX],
+                kernel_symbols=paths[NATIVE_KERNEL_SYMBOLS_PREFIX],
+            )
+        )
+    return artifacts
+
+
+def join_native_counters(
+    counters: pd.DataFrame,
+    dispatches: pd.DataFrame,
+    symbols: pd.DataFrame,
+    pid: int,
+) -> pd.DataFrame:
+    """Join one process's native counters to its dispatches and kernel symbols.
+
+    Counter instances are summed per dispatch. A row whose dispatch or kernel
+    symbol is missing is dropped. The pid fills GUID, since the native tool has
+    no session uuid and GUID only tells processes apart.
+    """
+    totals = counters.groupby(
+        ["dispatch_id", "counter_name"], sort=False, as_index=False
+    )["counter_value"].sum()
+    joined = totals.merge(dispatches, on="dispatch_id", how="inner").merge(
+        symbols, on="kernel_id", how="inner"
+    )
+    return joined.rename(columns=_NATIVE_TO_RESULTS_COLUMNS).assign(GUID=pid, PID=pid)
+
+
+def assign_native_ids(counter_set: pd.DataFrame) -> pd.DataFrame:
+    """Number one counter set's dispatches from 1 and its kernels from 0.
+
+    Ids follow first appearance and use the keys profile mode uses for
+    results_*.csv, so the same dispatch gets the same id in every counter set.
+    """
+    dispatch_groups = counter_set.groupby(_DISPATCH_ID_KEYS, sort=False, dropna=False)
+    kernel_groups = counter_set.groupby(_KERNEL_ID_KEYS, sort=False, dropna=False)
+    numbered = counter_set.assign(
+        Dispatch_ID=dispatch_groups.ngroup() + 1,
+        Kernel_ID=kernel_groups.ngroup(),
+    )
+    return numbered.loc[:, COUNTER_RESULTS_COLUMNS]
 
 
 def get_matrix_ops_type(gpu_series: str) -> str:
