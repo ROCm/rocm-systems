@@ -15,7 +15,7 @@
 
 use std::path::PathBuf;
 
-use mirage_core::agent::AgentDef;
+use mirage_core::agent::{AgentDef, KfdDeviceInfo};
 use mirage_core::common::{MaybeRef, SimpleMap, SimpleValue};
 use mirage_core::config::OptionDef;
 use mirage_core::discovery::{LibSearch, RuntimeLocation};
@@ -40,8 +40,8 @@ pub mod dbt;
 /// model and stay on a single loopback socket, while ROCr must use SDMA
 /// copies and skip scratch reclaim. rocprofiler-register is disabled
 /// since the simulated GPU does not back it. Applied as defaults in
-/// [`Rocjitsu::injection_def`]; the per-exec environment overrides any
-/// of them.
+/// [`Rocjitsu::injection_def_with`]; the per-exec environment overrides
+/// any of them.
 const RCCL_ENV_DEFAULTS: &[(&str, &str)] = &[
     ("HSA_ENABLE_SDMA", "1"),
     ("ROCPROFILER_REGISTER_ENABLED", "0"),
@@ -178,12 +178,153 @@ impl EmulatorBackend for Rocjitsu {
     }
 
     fn injection_def(&self, ctx: &SessionContext) -> Result<InjectionDef> {
+        self.injection_def_with(ctx, kmd_preload())
+    }
+
+    /// rocjitsu synthesises the KFD node the workload enumerates, so the
+    /// agent's ISA is exactly what its ROCm runtime has to recognise.
+    fn presents_emulated_device(&self) -> bool {
+        true
+    }
+
+    /// Point the profile's agent at the device a drop-in `--config`
+    /// describes, because that file — not the profile's own agent — is
+    /// what the interposer will stand up.
+    ///
+    /// A config mirage cannot read leaves the agent with no target rather
+    /// than the profile's original one: the session is about to emulate
+    /// whatever that file says, and naming the device it replaced would be
+    /// a confident wrong answer where silence is available. rocjitsu
+    /// itself reads the file through FlatBuffers, which accepts JSON this
+    /// does not, so failing to parse it here says nothing about whether
+    /// the run will work — only that mirage cannot describe it.
+    ///
+    /// The file is read once. Its snapshot in `session_dir` becomes the
+    /// profile's `config`, so [`kmd_config`] injects the bytes the device
+    /// was read from instead of re-reading a file the user may have
+    /// rewritten since.
+    fn reconcile_profile(
+        &self,
+        profile: &mut ProfileDef,
+        session_dir: &std::path::Path,
+    ) -> Result<()> {
+        let Some(SimpleValue::String(path)) = profile.emulator.options.get("config") else {
+            return Ok(());
+        };
+        let original = absolute_supplied_config(PathBuf::from(path));
+        // A file that cannot be read or snapshotted is left for the
+        // injection to report: it fails on the same file with the error the
+        // user needs, and there is no device to name in the meantime.
+        let device = match snapshot_supplied_config(&original, session_dir) {
+            Ok((snapshot, bytes)) => {
+                profile.emulator.options.insert(
+                    "config".to_string(),
+                    SimpleValue::String(snapshot.display().to_string()),
+                );
+                device_of_bytes(&bytes)
+            }
+            Err(_) => None,
+        };
+        // A default device is one with no `gfx_target_version`, which is
+        // the "mirage cannot name this" answer the doc above promises.
+        let device = device.unwrap_or_default();
+        // Both already owned by the contract on the trait method: the
+        // caller resolves the profile first. Matching rather than
+        // asserting keeps a misuse a no-op instead of a panic, and the
+        // preflight's answer for an unresolved profile is silence either
+        // way.
+        if let MaybeRef::Owned(topology) = &mut profile.emulator.topology
+            && let MaybeRef::Owned(agent) = &mut topology.agent
+        {
+            agent.vm.gpu.device = device;
+        }
+        Ok(())
+    }
+
+    fn daemon_capability(&self) -> Result<()> {
+        // Answered once per process; see `located_daemon_capability`.
+        located_daemon_capability()
+            .as_ref()
+            .map_or_else(|e| Err(MirageError::Other(e.to_string())), |()| Ok(()))
+    }
+
+    fn start_daemon(&self, ctx: &SessionContext) -> Result<Option<Box<dyn EmulatorDaemon>>> {
+        // One rocjitsu daemon per session. If the KMD library cannot be
+        // located there is nothing to host the emulated device with;
+        // return `None` rather than erroring, since the per-exec
+        // `injection_def` already fails loudly in that case.
+        let Some(lib) = kmd_preload() else {
+            tracing::warn!(
+                "rocjitsu: KMD library ({LIB_NAME}) not found; \
+                 not starting daemon"
+            );
+            return Ok(None);
+        };
+        // The configuration `injection_def` already materialised for this
+        // session, not a second resolution of the profile: an edit
+        // between the two would leave the daemon emulating one device
+        // while `SessionDescription` reports another and the preflight
+        // warns about a third. See [`session_config`].
+        let config = session_config(&ctx.runtime_dir)?;
+        // The daemon binds its socket under the same runtime directory the
+        // workload's interposer probes (`$ROCJITSU_RUNTIME_DIR`), which is
+        // exactly what `injection_def` exports — so the workload connects
+        // to *this* daemon with no extra wiring. Both live in the
+        // session's scratch directory and go away with it.
+        let runtime_dir = write_config_discovery(&ctx.runtime_dir, &config)?;
+        let daemon = rocjitsu_sys::daemon::Daemon::start(&lib, &config, &runtime_dir)
+            .map_err(|e| MirageError::Other(format!("rocjitsu daemon: {e}")))?;
+        Ok(Some(Box::new(RocjitsuDaemon(daemon))))
+    }
+}
+
+impl Rocjitsu {
+    /// [`EmulatorBackend::injection_def`] against an explicit KMD
+    /// interposer, as [`kmd_preload`] located it.
+    ///
+    /// Threaded in for the reason `hotswap` and `rocjitsu-dbt` thread
+    /// theirs: whether rocjitsu is installed is a fact about the host,
+    /// Rust 2024 makes `set_var` `unsafe` and this workspace forbids
+    /// `unsafe`, so a test that could not supply the library could only
+    /// assert about the machine it happened to run on. With it as a
+    /// parameter, the injection this backend really hands the supervisor
+    /// is what the tests check.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the profile does not describe a machine
+    /// rocjitsu can stand up, when `preload` is `None`, or when the
+    /// session's config or discovery file cannot be written.
+    pub fn injection_def_with(
+        &self,
+        ctx: &SessionContext,
+        preload: Option<PathBuf>,
+    ) -> Result<InjectionDef> {
         let def = ctx.emulator();
         let config = kmd_config(def, &ctx.runtime_dir)?;
+        // A node container sees the session's scratch directory, not
+        // arbitrary host files a supplied config names. This checks both
+        // halves: the config itself when `kmd_config` had to leave it
+        // where it lay, and a `dbt_guest.simulator_config` that a
+        // successfully copied config still points at outside the
+        // session. Checking only `config` misses the second one.
+        if ctx.profile.containerize.is_some()
+            && let Some(unreachable) = container_unreachable_config_path(&config, &ctx.runtime_dir)?
+        {
+            return Err(MirageError::Other(format!(
+                "rocjitsu: the drop-in config {} cannot be used in a \
+                 containerised session because it depends on {}, which is \
+                 outside the session and is not mounted into the container. \
+                 Run it without `--image`, or use a self-contained config \
+                 with no external `dbt_guest.simulator_config`.",
+                config.display(),
+                unreachable.display(),
+            )));
+        }
         // Refuse to run unemulated: if the KMD interposer can't be
         // located there is nothing to emulate the workload, so fail
         // loudly rather than silently running on real hardware.
-        let ld_preload = kmd_preload().ok_or_else(|| {
+        let ld_preload = preload.ok_or_else(|| {
             // The search itself says where it looked, so this cannot
             // drift from it the way the hand-written list did.
             let detail = runtime_location()
@@ -217,12 +358,10 @@ impl EmulatorBackend for Rocjitsu {
         // the supervisor existed, a per-node `mirage host` process inside
         // each container re-resolved the whole injection instead.)
         //
-        // The runtime directory is the session's, whoever wrote the
-        // config: in drop-in `--config` mode `config` is a file of the
-        // user's, and deriving the runtime directory from *its* location
-        // would leave the discovery file and the daemon socket beside it,
-        // outside the session, uncleaned, and shared with any other run
-        // pointed at the same config.
+        // The runtime directory is the session's whatever config it is
+        // handed: derived from it, two runs pointed at the same config
+        // would share a discovery file and a daemon socket. Whether the
+        // config itself is the session's is [`kmd_config`]'s question.
         let runtime_dir = write_config_discovery(&ctx.runtime_dir, &config)?;
 
         let mut env = std::collections::BTreeMap::new();
@@ -285,37 +424,6 @@ impl EmulatorBackend for Rocjitsu {
             libraries,
             host_gpus: false,
         })
-    }
-
-    fn daemon_capability(&self) -> Result<()> {
-        // Answered once per process; see `located_daemon_capability`.
-        located_daemon_capability()
-            .as_ref()
-            .map_or_else(|e| Err(MirageError::Other(e.to_string())), |()| Ok(()))
-    }
-
-    fn start_daemon(&self, ctx: &SessionContext) -> Result<Option<Box<dyn EmulatorDaemon>>> {
-        // One rocjitsu daemon per session. If the KMD library cannot be
-        // located there is nothing to host the emulated device with;
-        // return `None` rather than erroring, since the per-exec
-        // `injection_def` already fails loudly in that case.
-        let Some(lib) = kmd_preload() else {
-            tracing::warn!(
-                "rocjitsu: KMD library ({LIB_NAME}) not found; \
-                 not starting daemon"
-            );
-            return Ok(None);
-        };
-        let config = kmd_config(ctx.emulator(), &ctx.runtime_dir)?;
-        // The daemon binds its socket under the same runtime directory the
-        // workload's interposer probes (`$ROCJITSU_RUNTIME_DIR`), which is
-        // exactly what `injection_def` exports — so the workload connects
-        // to *this* daemon with no extra wiring. Both live in the
-        // session's scratch directory and go away with it.
-        let runtime_dir = write_config_discovery(&ctx.runtime_dir, &config)?;
-        let daemon = rocjitsu_sys::daemon::Daemon::start(&lib, &config, &runtime_dir)
-            .map_err(|e| MirageError::Other(format!("rocjitsu daemon: {e}")))?;
-        Ok(Some(Box::new(RocjitsuDaemon(daemon))))
     }
 }
 
@@ -435,16 +543,27 @@ pub fn enabled_plugin_libs(preload: &std::path::Path, plugins: &PluginsDef) -> V
         .collect()
 }
 
-/// Name of the synthesised rocjitsu `SimulationConfig` written into a
-/// session's scratch directory.
+/// Name of the rocjitsu `SimulationConfig` a session runs on, written
+/// into its scratch directory — synthesised from the profile, or copied
+/// there from a drop-in `--config` [`kmd_config`] was able to pin.
 pub const RJ_CONFIG_NAME: &str = "rj_config.json";
 
-/// Path of the synthesised `SimulationConfig` inside a session's scratch
-/// directory.
+/// Path of the `SimulationConfig` inside a session's scratch directory.
+///
+/// Written by [`kmd_config`] during bring-up. Ask [`session_config`] for
+/// the document a live session actually emulates rather than assuming it
+/// is this one: a drop-in `--config` that cannot be pinned is left where
+/// it lies, and then there is no file here at all.
 #[must_use]
 pub fn rj_config_path(runtime_dir: &std::path::Path) -> PathBuf {
     runtime_dir.join(RJ_CONFIG_NAME)
 }
+
+/// Name of the KMD interposer's discovery file, read from
+/// `$ROCJITSU_RUNTIME_DIR`. Its contents are the path of the
+/// `SimulationConfig` the session runs on — the interposer's answer to
+/// which config that is, and therefore everything else's.
+pub const CONFIG_PATH_NAME: &str = "config_path";
 
 /// Adapter making a [`rocjitsu_sys::daemon::Daemon`] usable as the
 /// emulator-agnostic handle mirage's supervisor holds.
@@ -462,23 +581,26 @@ impl EmulatorDaemon for RocjitsuDaemon {
 /// runtime directory (to export as `ROCJITSU_RUNTIME_DIR`).
 ///
 /// The interposer resolves its `SimulationConfig` by reading a
-/// `config_path` file from its per-user runtime directory; the file's
-/// contents are the path to the config JSON.
+/// [`CONFIG_PATH_NAME`] file from its per-user runtime directory; the
+/// file's contents are the path to the config JSON.
 ///
 /// The runtime directory is always [`RUNTIME_SUBDIR`] under
 /// `session_dir` — the session's own scratch directory — and never
 /// derived from where `config` happens to live. The daemon socket lands
 /// there too, so both are owned by the session, disappear with it, and
-/// stay distinct between two runs. That matters for the drop-in
-/// `--config` mode in particular, where `config` is a file of the
-/// user's that mirage has no business writing next to and that two
-/// concurrent runs may well share.
+/// stay distinct between two runs.
+///
+/// `config` is a session-owned path in every mode but one: [`kmd_config`]
+/// copies a drop-in `--config` in rather than naming the user's file,
+/// because the interposer reopens whatever is written here for as long as
+/// the session lives. The exception is a config mirage cannot copy
+/// without changing what it means, which it names where it lies.
 pub fn write_config_discovery(
     session_dir: &std::path::Path,
     config: &std::path::Path,
 ) -> Result<PathBuf> {
     let runtime_dir = session_dir.join(RUNTIME_SUBDIR);
-    let config_path_file = runtime_dir.join("config_path");
+    let config_path_file = runtime_dir.join(CONFIG_PATH_NAME);
     mirage_core::state::write_bytes(
         &config_path_file,
         format!("{}\n", config.display()).as_bytes(),
@@ -748,11 +870,50 @@ fn spread_thread_allocations_over_gpus(
 #[derive(Debug)]
 enum SimConfig {
     /// A config file of the user's own, named by the drop-in `--config`
-    /// option and used verbatim. Already on disk; mirage only reads it.
+    /// option. Already on disk; mirage reads it and copies it into the
+    /// session when it can preserve the meaning of its references —
+    /// byte for byte but for the reference [`pin_external_references`]
+    /// pins — and never writes to the original.
+    ///
+    /// Always absolute: [`absolute_supplied_config`] settles that at the
+    /// boundary, because everything downstream reads this path from
+    /// somewhere else — including the pin, which anchors the config's
+    /// siblings to its directory.
     Supplied(PathBuf),
     /// Config JSON synthesised from the profile's topology + agent,
     /// still to be written into a session's scratch directory.
     Synthesised(Vec<u8>),
+}
+
+/// A supplied config path, made absolute against the working directory
+/// mirage resolved the profile in.
+///
+/// This is the boundary where a profile option becomes a path this
+/// backend acts on, and it is the last moment the option's own spelling
+/// still means what its author meant. `mirage run --config` canonicalises
+/// what it is given, but that is the CLI's doing and not every profile
+/// arrives that way: one written by hand, by another tool, or by an
+/// older mirage carries whatever was typed. Left relative it would be
+/// re-read against whatever directory the next reader happens to be in —
+/// and the session's copy of it lives somewhere else entirely, so the
+/// references pinned to it would follow the copy rather than the
+/// original.
+///
+/// Absolute, not canonical: rocjitsu resolves a relative
+/// `dbt_guest.simulator_config` against the parent of the path it is
+/// handed, without following symlinks, so resolving them here would move
+/// the anchor a symlinked config's siblings hang from.
+fn absolute_supplied_config(path: PathBuf) -> PathBuf {
+    if path.is_absolute() {
+        return path;
+    }
+    match std::env::current_dir() {
+        Ok(working_directory) => working_directory.join(path),
+        // Nothing to make it absolute against. The path is still the one
+        // the profile asked for, and the existence check below is about
+        // to report it if it does not resolve.
+        Err(_) => path,
+    }
 }
 
 /// Resolve the rocjitsu `SimulationConfig` `def` asks for, writing
@@ -785,8 +946,10 @@ fn resolve_sim_config(def: &EmulatorDef) -> Result<SimConfig> {
     // applies, because upstream `rocjitsu --cpu-thread-budget` takes it
     // alongside `--config`; it goes to a session copy, never to the file.
     if let Some(SimpleValue::String(path)) = def.options.get("config") {
-        let cfg = PathBuf::from(path);
+        let cfg = absolute_supplied_config(PathBuf::from(path));
         if !cfg.exists() {
+            // Named as the user spelled it, which is the spelling they
+            // can compare against what they wrote.
             return Err(MirageError::Other(format!(
                 "rocjitsu config not found: {path}"
             )));
@@ -950,26 +1113,385 @@ fn supplied_config_with_budget(cfg: &std::path::Path, budget: &SimpleValue) -> R
 /// path. That path is what gets recorded in the rocjitsu `config_path`
 /// discovery file so the LD_PRELOAD'd interposer loads it.
 ///
-/// One file per session, rewritten on each call so it always reflects
-/// the current profile, and removed with the session. A profile that
-/// supplies its own config (drop-in `--config`) is returned as-is and
-/// nothing is written, unless a run overrides its CPU thread budget —
-/// then the session gets a copy carrying the override.
+/// One file per session, written by bring-up and removed with the
+/// session.
+///
+/// A drop-in `--config` is copied here rather than pointed at whenever
+/// it can be, which is what makes the device a session emulates fixed
+/// for as long as the session lives. `kmd_config` used to hand the
+/// interposer the user's own path, and the interposer reopens it: in
+/// `--in-process` mode every later workload re-read whatever was on disk
+/// *then*, so editing the file after bring-up changed the emulated device
+/// while the agent [`Rocjitsu::reconcile_profile`] read it into — and the
+/// preflight warning drawn from that agent — still described the old one.
+/// Copying costs a few kilobytes in a directory that is already the
+/// session's and removes the whole class.
+///
+/// In a session the copy already exists: [`Rocjitsu::reconcile_profile`]
+/// took it at session creation, read the device from it, and pointed the
+/// profile at it, so this hands the interposer those same bytes. It copies
+/// here only for a profile that was never reconciled.
+///
+/// The copy is byte for byte apart from one thing: a relative
+/// `dbt_guest.simulator_config` is made absolute against the original's
+/// directory first, because moving the file would otherwise move what
+/// that reference means. A config whose references cannot be pinned is
+/// not copied at all — see [`pin_external_references`].
+///
+/// A run that overrides its CPU thread budget gets the same session copy,
+/// carrying the override — see [`supplied_config_with_budget`].
+///
+/// Nothing is written beside the user's file, then or now.
 ///
 /// # Errors
 ///
 /// Returns an error when the topology or agent references cannot be
 /// resolved, the profile asks for more GPUs than rocjitsu will emulate
-/// (see [`MAX_GPUS_PER_NODE`]), or the config cannot be written.
+/// (see [`MAX_GPUS_PER_NODE`]), or the config cannot be read or written.
 pub fn kmd_config(def: &EmulatorDef, session_dir: &std::path::Path) -> Result<PathBuf> {
+    let cfg = rj_config_path(session_dir);
     match resolve_sim_config(def)? {
-        SimConfig::Supplied(cfg) => Ok(cfg),
+        // Already the session's own copy: `reconcile_profile` took it at
+        // session creation and read the device from it. Copying it onto
+        // itself would change nothing, and every exec would rewrite a file
+        // the interposer may be reading.
+        SimConfig::Supplied(path) if path == cfg => Ok(path),
+        SimConfig::Supplied(path) => snapshot_supplied_config(&path, session_dir).map(|(p, _)| p),
         SimConfig::Synthesised(bytes) => {
-            let cfg = rj_config_path(session_dir);
             mirage_core::state::write_bytes(&cfg, &bytes)?;
             Ok(cfg)
         }
     }
+}
+
+/// Copy a drop-in `--config` into `session_dir`, as [`kmd_config`]
+/// describes, and return where the session's config now is along with
+/// the bytes read from the original.
+///
+/// The bytes are the ones the interposer will be handed, so they are what
+/// [`Rocjitsu::reconcile_profile`] reads the device from: one reading of
+/// the user's file serves both.
+///
+/// # Errors
+///
+/// Returns an error when the original cannot be read or the copy cannot
+/// be written.
+fn snapshot_supplied_config(
+    original: &std::path::Path,
+    session_dir: &std::path::Path,
+) -> Result<(PathBuf, Vec<u8>)> {
+    let bytes = std::fs::read(original).map_err(|e| MirageError::io(original.to_path_buf(), e))?;
+    match pin_external_references(bytes.clone(), original) {
+        Some(pinned) => {
+            let cfg = rj_config_path(session_dir);
+            mirage_core::state::write_bytes(&cfg, &pinned)?;
+            Ok((cfg, pinned))
+        }
+        // Owning the document is worth less than the document still
+        // meaning what it says, so the session declines it and the
+        // interposer is handed the user's own file — as it was before the
+        // copy existed. What is given up is the narrow guarantee the copy
+        // buys: an edit to this file can still retarget the session under
+        // itself. The device is not read from it either — mirage could
+        // not parse these bytes — so no warning names the old device.
+        None => {
+            // Silent otherwise, and it is the one thing that would explain
+            // a session behaving as it did before the snapshot existed.
+            tracing::debug!(
+                config = %original.display(),
+                "rocjitsu: config not snapshotted into the session; \
+                 mirage cannot pin the references it names"
+            );
+            Ok((original.to_path_buf(), bytes))
+        }
+    }
+}
+
+/// JSON pointer to the one field in a rocjitsu `SimulationConfig` that
+/// names another file relative to the config's own directory.
+const SIMULATOR_CONFIG_POINTER: &str = "/dbt_guest/simulator_config";
+
+/// A config or one of its dependencies that a node container cannot
+/// open at the host path recorded in the config.
+///
+/// The supervisor bind-mounts `session_dir` at its own host path because
+/// rocjitsu's discovery file and config contents are not rewritten for a
+/// container. A config [`kmd_config`] leaves elsewhere is therefore
+/// unreachable. A config copied under `session_dir` can still name an
+/// external `dbt_guest.simulator_config`; pinning a relative reference
+/// makes that dependency absolute but does not make it part of the
+/// session or mount it.
+///
+/// The dependency exists only when DBT guest mode is enabled with its
+/// simulator backend. `simulator_config` is ignored for a disabled or
+/// hardware-backed DBT block, so those are not rejected merely for
+/// carrying an unused value.
+///
+/// A relative reference is resolved exactly as rocjitsu resolves it:
+/// beside the config that contains it. Empty means the same config and
+/// therefore introduces no dependency.
+///
+/// "Inside the session" is decided on the path the loader will reach, not
+/// on its spelling: `<session>/../host.json` names the session in its
+/// prefix and a file outside it, and so does a symlink out of the session.
+fn container_unreachable_config_path(
+    config: &std::path::Path,
+    session_dir: &std::path::Path,
+) -> Result<Option<PathBuf>> {
+    if !lies_within(config, session_dir) {
+        return Ok(Some(config.to_path_buf()));
+    }
+    let bytes = std::fs::read(config).map_err(|e| MirageError::io(config.to_path_buf(), e))?;
+    let parsed: serde_json::Value = match serde_json::from_slice(&bytes) {
+        Ok(parsed) => parsed,
+        // A dialect only FlatBuffers reads. [`kmd_config`] copies one into
+        // the session only when it never names `simulator_config`, so it
+        // has no dependency that could be out of reach.
+        Err(_) if !mentions_external_reference(&bytes) => return Ok(None),
+        Err(e) => {
+            return Err(MirageError::Other(format!(
+                "rocjitsu: could not inspect materialised config {} for \
+                 container-visible references: {e}",
+                config.display()
+            )));
+        }
+    };
+    let dbt = parsed.pointer("/dbt_guest");
+    let enabled = dbt
+        .and_then(|dbt| dbt.get("enabled"))
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let simulator_backend = dbt
+        .and_then(|dbt| dbt.get("execution_backend"))
+        .is_some_and(|backend| {
+            backend.as_str() == Some("simulator") || backend.as_u64() == Some(1)
+        });
+    if !enabled || !simulator_backend {
+        return Ok(None);
+    }
+    let Some(reference) = parsed
+        .pointer(SIMULATOR_CONFIG_POINTER)
+        .and_then(serde_json::Value::as_str)
+        .filter(|path| !path.is_empty())
+    else {
+        return Ok(None);
+    };
+    let reference = std::path::Path::new(reference);
+    let resolved = if reference.is_absolute() {
+        reference.to_path_buf()
+    } else {
+        config
+            .parent()
+            .map_or_else(|| reference.to_path_buf(), |parent| parent.join(reference))
+    };
+    Ok((!lies_within(&resolved, session_dir)).then_some(resolved))
+}
+
+/// Whether `path` is under `directory` as a container that mounts
+/// `directory` at its own spelling would see it.
+///
+/// Both halves have to hold. The mount is made at the directory's
+/// spelling, so the path must be spelled inside it once `..` is settled;
+/// and the container has only what is under the mount, so it must still
+/// be inside once symlinks are followed. A path that does not exist cannot
+/// be followed and is judged on its spelling alone — the interposer fails
+/// to open it on either side of the mount.
+fn lies_within(path: &std::path::Path, directory: &std::path::Path) -> bool {
+    let spelled_inside = lexically_normal(path).starts_with(lexically_normal(directory));
+    let resolved_inside = match (
+        std::fs::canonicalize(path),
+        std::fs::canonicalize(directory),
+    ) {
+        (Ok(path), Ok(directory)) => path.starts_with(directory),
+        _ => true,
+    };
+    spelled_inside && resolved_inside
+}
+
+/// `path` with `.` dropped and each `..` removing the component before it.
+fn lexically_normal(path: &std::path::Path) -> PathBuf {
+    let mut normal = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normal.pop();
+            }
+            other => normal.push(other),
+        }
+    }
+    normal
+}
+
+/// A drop-in `--config`'s external reference, pinned to where it was
+/// written rather than to where the copy lands.
+///
+/// rocjitsu resolves a relative `dbt_guest.simulator_config` beside the
+/// config file it was handed — `resolve_dbt_host_config_path` joins it
+/// onto that file's parent directory — and the file it is handed is
+/// whatever the `config_path` discovery file names. Copying the config
+/// into the session therefore moves the anchor: the shipped
+/// `guest_gfx950_on_simulated_gfx942.json` asks for
+/// `gfx942_cdna3_kmd.json` beside itself and would be looked up in the
+/// session scratch directory instead. Making the reference absolute
+/// against the original's directory is the same path rocjitsu would
+/// have resolved, so the composition form keeps working while the bytes
+/// the session emulates stay the session's own.
+///
+/// An absolute reference and a config without one are returned byte for
+/// byte. It is the only such field in the schema —
+/// `ProgramConfig::binary_path` is the other path-valued one and nothing
+/// loads it — so this is a pin, not a rewriter.
+///
+/// `None` means the document cannot be relocated: mirage could not read
+/// it, and it mentions the one field whose meaning the move would
+/// change. rocjitsu parses its configs with FlatBuffers, which accepts a
+/// JSON dialect `serde_json` does not — comments, trailing commas and
+/// unquoted keys among it — so a parse failure here is not evidence that
+/// rocjitsu will fail too, and it says nothing about whether the
+/// document names a sibling. Matching that dialect would mean carrying a
+/// second JSON parser in mirage; declining the copy costs one guarantee
+/// on configs mirage cannot read, and keeps every config rocjitsu
+/// accepts working. [`kmd_config`] is where that is paid.
+///
+/// The file it points *at* is still the user's, and still theirs to
+/// edit. Following the reference would mean copying a graph; the value
+/// here is that a supplied config no longer silently retargets the
+/// device, not that every file it can reach becomes immutable.
+fn pin_external_references(bytes: Vec<u8>, original: &std::path::Path) -> Option<Vec<u8>> {
+    let parsed = serde_json::from_slice::<serde_json::Value>(&bytes);
+    let (Some(directory), Ok(mut config)) = (original.parent(), parsed) else {
+        return (!mentions_external_reference(&bytes)).then_some(bytes);
+    };
+    let reference = match config
+        .pointer(SIMULATOR_CONFIG_POINTER)
+        .and_then(serde_json::Value::as_str)
+    {
+        Some(path) if !path.is_empty() && !std::path::Path::new(path).is_absolute() => {
+            directory.join(path)
+        }
+        _ => return Some(bytes),
+    };
+    let Some(slot) = config.pointer_mut(SIMULATOR_CONFIG_POINTER) else {
+        return Some(bytes);
+    };
+    *slot = serde_json::Value::String(reference.display().to_string());
+    // Unreachable in practice — this `Value` came from `from_slice`, so
+    // it holds nothing serde_json cannot write back — and the original
+    // bytes are the only honest fallback if it ever is reached.
+    Some(serde_json::to_vec_pretty(&config).unwrap_or(bytes))
+}
+
+/// Whether these bytes mention the field whose value moves with the file.
+///
+/// Asked of the raw bytes rather than of a parse, because it is only
+/// asked when the parse is the thing that failed. A field is set by
+/// naming it, and every dialect rocjitsu accepts spells the name the
+/// same way, so the literal absence of it is enough to know there is
+/// nothing to pin — which is the direction that has to be right.
+fn mentions_external_reference(bytes: &[u8]) -> bool {
+    /// The leaf of [`SIMULATOR_CONFIG_POINTER`].
+    const FIELD: &[u8] = b"simulator_config";
+    bytes.windows(FIELD.len()).any(|window| window == FIELD)
+}
+
+/// The configuration bring-up materialised for a live session.
+///
+/// The counterpart of [`kmd_config`] for everything that runs *after*
+/// bring-up: it reads back the answer bring-up recorded rather than
+/// resolving the profile a second time, so a topology, agent or
+/// `--config` edited while a session is up cannot change what that
+/// session emulates.
+///
+/// The answer is read out of the `config_path` discovery file, which is
+/// the same byte the interposer opens. That is deliberate: the session's
+/// config is [`rj_config_path`] in the ordinary case and the user's own
+/// file in the one case [`kmd_config`] declines to copy, and a second
+/// rule for which of those it is would be a second thing to keep in step
+/// with the first.
+///
+/// The path is the file's first line, with one trailing `\r` removed and
+/// nothing else trimmed. That is how rocjitsu's own reader
+/// (`parse_dbt_runtime_config_handoff`) takes it, so a config whose path
+/// begins or ends with a space names the same file here as there.
+///
+/// Private because it is the second half of a sequence bring-up owns,
+/// not an entry point of its own, and reading a session's configuration
+/// before bring-up wrote one is a question with no good answer.
+///
+/// # Errors
+///
+/// Returns an error when the session has no recorded configuration,
+/// which means bring-up did not get as far as [`kmd_config`].
+fn session_config(session_dir: &std::path::Path) -> Result<PathBuf> {
+    let discovery = session_dir.join(RUNTIME_SUBDIR).join(CONFIG_PATH_NAME);
+    let recorded = match std::fs::read_to_string(&discovery) {
+        Ok(recorded) => recorded,
+        // "Not there" is the one error with a better answer than itself,
+        // because it is the one this function exists to explain. A file
+        // that is there and cannot be read is a real failure and reports
+        // as one rather than as a session that never came up.
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+            return Err(MirageError::io(discovery, e));
+        }
+        Err(_) => String::new(),
+    };
+    let recorded = recorded.split('\n').next().unwrap_or_default();
+    let recorded = recorded.strip_suffix('\r').unwrap_or(recorded);
+    if recorded.is_empty() {
+        return Err(MirageError::Other(format!(
+            "rocjitsu: no configuration recorded at {}; bring-up writes \
+             one before anything reads it",
+            discovery.display()
+        )));
+    }
+    Ok(PathBuf::from(recorded))
+}
+
+/// JSON pointer to the device a rocjitsu `SimulationConfig` describes.
+const VM_DEVICE_POINTER: &str = "/vm/gpu/device";
+
+/// JSON pointer to whether a rocjitsu `SimulationConfig` adds a DBT guest
+/// device.
+const DBT_GUEST_ENABLED_POINTER: &str = "/dbt_guest/enabled";
+
+/// The device a supplied `SimulationConfig` describes, as the workload's
+/// ROCm runtime will see it.
+///
+/// `None` when the bytes cannot be parsed, carry no recognisable device,
+/// or describe more than one. Every one of those means the same thing to
+/// the only caller — mirage does not know what this session will present
+/// — and [`Rocjitsu::reconcile_profile`] turns that into an agent with no
+/// target rather than a guess.
+///
+/// Fields `KfdDeviceInfo` does not model are dropped rather than refused.
+/// The type rejects unknown fields so a stored agent stays exactly what
+/// mirage wrote, but a supplied config is rocjitsu's document: its schema
+/// grows independently, and the shipped gfx1250 configs already carry
+/// `revision_id` and `num_sdma_queues_per_engine`. Refusing those would
+/// silence the warning for the very target it exists for.
+///
+/// A config with an enabled DBT guest describes no single device: the
+/// interposer appends the guest to the host's topology, so the session
+/// presents both, and "the workload will see no GPU" would be false.
+fn device_of_bytes(bytes: &[u8]) -> Option<KfdDeviceInfo> {
+    let config: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+    if config
+        .pointer(DBT_GUEST_ENABLED_POINTER)
+        .and_then(serde_json::Value::as_bool)
+        == Some(true)
+    {
+        return None;
+    }
+    let serde_json::Value::Object(mut device) = config.pointer(VM_DEVICE_POINTER)?.clone() else {
+        return None;
+    };
+    let serde_json::Value::Object(known) = serde_json::to_value(KfdDeviceInfo::default()).ok()?
+    else {
+        return None;
+    };
+    device.retain(|field, _| known.contains_key(field));
+    serde_json::from_value(serde_json::Value::Object(device)).ok()
 }
 
 /// Check that `def` describes a machine rocjitsu can stand up, without
@@ -1076,6 +1598,7 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
     use super::*;
+    use mirage_core::profile::ContainerizedDef;
 
     #[test]
     fn the_installed_flag_and_the_located_library_are_one_answer() {
@@ -1173,6 +1696,21 @@ mod tests {
                 gpus_per_node,
                 agent: MaybeRef::Owned(AgentDef::default()),
             }),
+        }
+    }
+
+    /// A single-GPU [`EmulatorDef`] whose owned agent emulates
+    /// `gfx_target_version`.
+    fn def_for_target(gfx_target_version: u32) -> EmulatorDef {
+        let mut agent = AgentDef::default();
+        agent.vm.gpu.device.gfx_target_version = gfx_target_version;
+        EmulatorDef {
+            topology: MaybeRef::Owned(TopologyDef {
+                num_nodes: 1,
+                gpus_per_node: 1,
+                agent: MaybeRef::Owned(agent),
+            }),
+            ..def_with_gpus(1)
         }
     }
 
@@ -1439,10 +1977,862 @@ mod tests {
         assert!(resolve_sim_config(&def).is_err());
     }
 
-    /// A drop-in `--config` is used verbatim, but its runtime directory
-    /// belongs to the session: the discovery file (and the daemon socket
-    /// beside it) must never land next to the user's config file, which
-    /// mirage does not own and cannot clean up.
+    /// The session context a backend is handed for `emulator`, with a
+    /// scratch directory of its own named `session` under `root`.
+    ///
+    /// The name is a parameter because a session's configuration is
+    /// materialised once and then belongs to that session: two cases
+    /// sharing one scratch directory would be one session being brought
+    /// up twice, which is not a thing that happens.
+    fn ctx_for(emulator: EmulatorDef, root: &std::path::Path, session: &str) -> SessionContext {
+        SessionContext {
+            id: mirage_core::session::SessionId::new(session).unwrap(),
+            profile: ProfileDef {
+                name: "isa-test".to_string(),
+                description: None,
+                emulator,
+                containerize: None,
+            },
+            runtime_dir: root.join(session),
+            daemon: false,
+        }
+    }
+
+    /// A resolved profile around `emulator`, as a session would hold it.
+    ///
+    /// `ctx_for` builds the same profile for the bring-up tests; this is
+    /// the half the derivation needs, without a session directory.
+    fn profile_for(emulator: EmulatorDef) -> ProfileDef {
+        ProfileDef {
+            name: "isa-test".to_string(),
+            description: None,
+            emulator,
+            containerize: None,
+        }
+    }
+
+    fn containerise(ctx: &mut SessionContext) {
+        ctx.profile.containerize = Some(ContainerizedDef {
+            provider: None,
+            image: "rocm/dev-ubuntu-24.04:latest".to_string(),
+            mounts: Vec::new(),
+            ports: Vec::new(),
+            devices: Vec::new(),
+            groups: Vec::new(),
+            hacks: Vec::new(),
+        });
+    }
+
+    /// The interposer this backend would preload, stood in for by a file
+    /// that merely exists.
+    ///
+    /// Whether rocjitsu is installed is a fact about the host, so the
+    /// library is supplied rather than searched for — see
+    /// [`Rocjitsu::injection_def_with`]. Nothing here loads it: a
+    /// non-containerised injection only records its path.
+    fn stand_in_interposer(root: &std::path::Path) -> Option<PathBuf> {
+        let lib = root.join(LIB_NAME);
+        std::fs::write(&lib, b"").unwrap();
+        Some(lib)
+    }
+
+    /// The target a session emulates is the one its agent names.
+    ///
+    /// This is the fact the whole of issue #11361 turns on: a ROCm that
+    /// does not know the target skips the emulated agent, so the
+    /// workload sees no GPU and exits 0 with nothing said. The warning
+    /// mirage prints is only as good as this answer, and the answer is
+    /// the agent's own — nothing computes a second copy of it.
+    #[test]
+    fn the_emulated_target_is_the_agents_gfx_target() {
+        // gfx1250 is the MI450X target, and the one a ROCm 7.0 host has
+        // never heard of; gfx942 is one the same host does support, so a
+        // passing test cannot be one that answers `gfx1250` to
+        // everything.
+        for (version, isa) in [(120500, "gfx1250"), (90402, "gfx942")] {
+            let profile = profile_for(def_for_target(version));
+            assert_eq!(
+                profile.emulated_gfx_target().map(|t| t.to_string()),
+                Some(isa.to_string())
+            );
+        }
+    }
+
+    /// A drop-in `--config` names a device of its own, and that is the
+    /// device the interposer will stand up — so `reconcile_profile` makes
+    /// it the agent's device before anything reads the agent.
+    ///
+    /// Leaving the profile's own agent in place would be wrong in both
+    /// directions here: silent about a config whose target this ROCm
+    /// cannot see, and warning about a profile agent that is not going
+    /// to exist.
+    #[test]
+    fn a_supplied_config_becomes_the_agents_device() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = tmp.path().join("mine.json");
+        std::fs::write(
+            &config,
+            br#"{"vm": {"gpu": {"device": {"gfx_target_version": 90500}}}}"#,
+        )
+        .unwrap();
+
+        // The profile's own agent is a gfx1250 the `--config` overrides.
+        let mut def = def_for_target(120500);
+        def.options.insert(
+            "config".to_string(),
+            SimpleValue::String(config.display().to_string()),
+        );
+
+        let mut profile = profile_for(def);
+        Rocjitsu
+            .reconcile_profile(&mut profile, &tmp.path().join("session"))
+            .unwrap();
+        assert_eq!(
+            profile.emulated_gfx_target().map(|t| t.to_string()),
+            Some("gfx950".to_string())
+        );
+    }
+
+    /// A `--config` mirage cannot read leaves no target at all, rather
+    /// than the agent's own.
+    ///
+    /// rocjitsu reads these through FlatBuffers, which accepts JSON
+    /// `serde_json` does not, so a file this cannot parse may still run
+    /// perfectly well — it just describes a device mirage cannot name.
+    /// Keeping the profile's original agent would name the device the
+    /// config replaced, which is the one thing worse than saying nothing.
+    #[test]
+    fn a_config_that_cannot_be_read_leaves_no_target() {
+        let tmp = tempfile::tempdir().unwrap();
+        let commented = tmp.path().join("commented.json");
+        std::fs::write(
+            &commented,
+            br#"{
+  // the device this session stands up
+  "vm": {"gpu": {"device": {"gfx_target_version": 90500}}}
+}"#,
+        )
+        .unwrap();
+
+        for path in [commented, tmp.path().join("absent.json")] {
+            let session_dir = tmp.path().join(path.file_stem().unwrap());
+            let mut def = def_for_target(120500);
+            def.options.insert(
+                "config".to_string(),
+                SimpleValue::String(path.display().to_string()),
+            );
+            let mut profile = profile_for(def);
+            Rocjitsu
+                .reconcile_profile(&mut profile, &session_dir)
+                .unwrap();
+            assert_eq!(
+                profile.emulated_gfx_target(),
+                None,
+                "a config mirage cannot read must not leave the agent's own target in place"
+            );
+        }
+    }
+
+    /// The configs rocjitsu ships are read for their target even though
+    /// they carry device fields mirage does not model.
+    ///
+    /// Both gfx1250 configs set `revision_id` and
+    /// `num_sdma_queues_per_engine`. Decoded strictly they failed, the
+    /// agent was left with no target, and a gfx1250 session on a ROCm
+    /// that cannot see gfx1250 — the case issue #11361 is about — said
+    /// nothing. gfx942 is here so a passing test cannot be one that
+    /// answers gfx1250 to everything.
+    #[test]
+    fn shipped_configs_name_their_target() {
+        let configs =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rocjitsu/configs");
+        let tmp = tempfile::tempdir().unwrap();
+        for (name, isa) in [
+            ("gfx1250_mi455x.json", "gfx1250"),
+            ("gfx1250_mi455x_kmd_4gpu.json", "gfx1250"),
+            ("gfx942_cdna3_kmd.json", "gfx942"),
+        ] {
+            let mut def = def_for_target(90500);
+            def.options.insert(
+                "config".to_string(),
+                SimpleValue::String(configs.join(name).display().to_string()),
+            );
+            let mut profile = profile_for(def);
+            Rocjitsu
+                .reconcile_profile(&mut profile, &tmp.path().join(name))
+                .unwrap();
+            assert_eq!(
+                profile
+                    .emulated_gfx_target()
+                    .map(|t| t.to_string())
+                    .as_deref(),
+                Some(isa),
+                "{name}"
+            );
+        }
+
+        // Tolerance is for rocjitsu's documents only: a stored agent is
+        // still refused for a field mirage did not write.
+        assert!(
+            serde_json::from_value::<KfdDeviceInfo>(serde_json::json!({"revision_id": 1})).is_err()
+        );
+    }
+
+    /// A config with an enabled DBT guest presents the host's devices and
+    /// the guest together, so there is no one target to warn about.
+    #[test]
+    fn a_dbt_guest_config_names_no_target() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = tmp.path().join("guest.json");
+        std::fs::write(
+            &config,
+            serde_json::to_vec(&serde_json::json!({
+                "vm": {"gpu": {"device": {"gfx_target_version": 90402}}},
+                "dbt_guest": {"enabled": true, "guest_device": {"gfx_target_version": 90500}},
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let mut def = def_for_target(120500);
+        def.options.insert(
+            "config".to_string(),
+            SimpleValue::String(config.display().to_string()),
+        );
+        let mut profile = profile_for(def);
+        Rocjitsu
+            .reconcile_profile(&mut profile, &tmp.path().join("session"))
+            .unwrap();
+        assert_eq!(profile.emulated_gfx_target(), None);
+    }
+
+    /// The device a session reports and the config it injects are one
+    /// reading of the user's file.
+    ///
+    /// `reconcile_profile` used to read the file at session creation and
+    /// `kmd_config` to copy it again at injection, so a rewrite between
+    /// the two left the session reporting gfx942 while injecting gfx1250.
+    /// The snapshot is taken once now, and the profile points at it.
+    #[test]
+    fn the_reported_and_injected_device_are_one_reading() {
+        let _g = mirage_core::paths::test_env_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        mirage_core::paths::set_test_root(tmp.path());
+
+        let config = tmp.path().join("cfg.json");
+        let write_target = |version: u32| {
+            std::fs::write(
+                &config,
+                serde_json::to_vec(&serde_json::json!({
+                    "vm": {"gpu": {"device": {"gfx_target_version": version}}}
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+        };
+        write_target(90402);
+
+        let mut def = def_with_gpus(1);
+        def.options.insert(
+            "config".to_string(),
+            SimpleValue::String(config.display().to_string()),
+        );
+        let mut ctx = ctx_for(def, tmp.path(), "one-reading");
+        Rocjitsu
+            .reconcile_profile(&mut ctx.profile, &ctx.runtime_dir)
+            .unwrap();
+
+        write_target(120500);
+        Rocjitsu
+            .injection_def_with(&ctx, stand_in_interposer(tmp.path()))
+            .unwrap();
+
+        let injected = std::fs::read(session_config(&ctx.runtime_dir).unwrap()).unwrap();
+        let injected = device_of_bytes(&injected).and_then(|d| d.gfx_target());
+        assert_eq!(injected, ctx.profile.emulated_gfx_target());
+        assert_eq!(injected.map(|t| t.to_string()).as_deref(), Some("gfx942"));
+    }
+
+    /// A device with no ISA is not a device to check a runtime against,
+    /// and nothing to say is said as nothing: the injection is still the
+    /// one bring-up wants, just with no target to warn about.
+    ///
+    /// A profile that cannot be resolved at all is a different answer.
+    /// It fails here, as it always did, because that is the error the
+    /// user needs — inventing an ISA for it would only put a wrong
+    /// warning in front of the right failure.
+    #[test]
+    fn a_device_without_a_gfx_target_names_no_isa() {
+        let _g = mirage_core::paths::test_env_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        mirage_core::paths::set_test_root(tmp.path());
+
+        // A default agent's `gfx_target_version` is 0.
+        assert_eq!(profile_for(def_with_gpus(1)).emulated_gfx_target(), None);
+
+        // An unresolvable topology reference.
+        let mut def = def_with_gpus(1);
+        def.topology = MaybeRef::Ref("does-not-exist".to_string());
+        let ctx = ctx_for(def, tmp.path(), "unresolvable");
+        assert!(
+            Rocjitsu
+                .injection_def_with(&ctx, stand_in_interposer(tmp.path()))
+                .is_err()
+        );
+
+        // A `--config` that is not there.
+        let mut def = def_with_gpus(1);
+        def.options.insert(
+            "config".to_string(),
+            SimpleValue::String("/no/such/config.json".to_string()),
+        );
+        let ctx = ctx_for(def, tmp.path(), "absent-config");
+        assert!(
+            Rocjitsu
+                .injection_def_with(&ctx, stand_in_interposer(tmp.path()))
+                .is_err()
+        );
+    }
+
+    /// A drop-in `--config` is copied into the session, so the device a
+    /// live session emulates cannot be edited out from under it.
+    ///
+    /// The interposer does not read the config once: it reopens whatever
+    /// the discovery file names, and in `--in-process` mode every later
+    /// workload opens it again. Naming the user's own file therefore
+    /// left a live session tracking a document mirage does not own — an
+    /// edit after bring-up retargeted the emulated device while the ISA
+    /// captured at bring-up, and the preflight warning drawn from it,
+    /// still described the old one.
+    #[test]
+    fn a_supplied_config_is_snapshotted_into_the_session() {
+        let _g = mirage_core::paths::test_env_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        mirage_core::paths::set_test_root(tmp.path());
+
+        // In a directory of the user's, so "nothing beside it" is a
+        // thing this test can actually look at.
+        let user_dir = tmp.path().join("mine");
+        std::fs::create_dir_all(&user_dir).unwrap();
+        let config = user_dir.join("cfg.json");
+        std::fs::write(
+            &config,
+            br#"{"vm": {"gpu": {"device": {"gfx_target_version": 90500}}}}"#,
+        )
+        .unwrap();
+
+        let mut def = def_with_gpus(1);
+        def.options.insert(
+            "config".to_string(),
+            SimpleValue::String(config.display().to_string()),
+        );
+        let ctx = ctx_for(def, tmp.path(), "snapshot");
+        let injection = Rocjitsu
+            .injection_def_with(&ctx, stand_in_interposer(tmp.path()))
+            .unwrap();
+
+        // What the interposer will open is the session's copy.
+        let runtime_dir = PathBuf::from(
+            injection
+                .env
+                .get("ROCJITSU_RUNTIME_DIR")
+                .expect("the injection names a runtime directory"),
+        );
+        let named = PathBuf::from(
+            std::fs::read_to_string(runtime_dir.join(CONFIG_PATH_NAME))
+                .unwrap()
+                .trim(),
+        );
+        assert_eq!(named, rj_config_path(&ctx.runtime_dir));
+        assert_eq!(session_config(&ctx.runtime_dir).unwrap(), named);
+
+        // So rewriting the user's file retargets nothing.
+        std::fs::write(
+            &config,
+            br#"{"vm": {"gpu": {"device": {"gfx_target_version": 120500}}}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            device_of_bytes(&std::fs::read(&named).unwrap()).and_then(|d| d.gfx_target()),
+            mirage_core::hardware::GfxTarget::new(90500),
+            "a live session must emulate the device it was brought up on"
+        );
+
+        // And the copy went into the session, not next to the original.
+        assert_eq!(
+            std::fs::read_dir(&user_dir).unwrap().count(),
+            1,
+            "nothing may be written beside the user's own config file"
+        );
+    }
+
+    /// Run `f` with the process working directory at `directory`.
+    ///
+    /// The working directory is process-wide, so callers hold
+    /// [`mirage_core::paths::test_env_lock`] for the same reason the
+    /// path override's callers do. Restoring it is a `Drop` so a failed
+    /// assertion cannot leave the rest of the binary somewhere else, and
+    /// the restore is deliberately silent: panicking while unwinding
+    /// another panic aborts the process and loses the real failure.
+    fn in_working_directory<R>(directory: &std::path::Path, f: impl FnOnce() -> R) -> R {
+        struct Restore(PathBuf);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                let _ = std::env::set_current_dir(&self.0);
+            }
+        }
+
+        let _restore = Restore(std::env::current_dir().expect("a working directory"));
+        std::env::set_current_dir(directory).expect("entering the fixture directory");
+        f()
+    }
+
+    /// A profile's `config` option can be relative, and it has to be
+    /// absolute before the session pins anything to it.
+    ///
+    /// `mirage run --config` canonicalises what it is handed, but that
+    /// is the CLI's doing: a saved profile reaches the backend spelled
+    /// however it was written. Left relative, the pin below produces a
+    /// relative sibling reference, and rocjitsu resolves that against
+    /// the parent of the config it is handed — the session directory —
+    /// where the sibling has never existed.
+    #[test]
+    fn a_relative_profile_config_still_finds_its_sibling() {
+        let _g = mirage_core::paths::test_env_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        mirage_core::paths::set_test_root(tmp.path());
+
+        // The shipped composition form: a guest config naming the host
+        // config beside it.
+        let configs = tmp.path().join("configs");
+        std::fs::create_dir_all(&configs).unwrap();
+        std::fs::write(
+            configs.join("guest.json"),
+            br#"{"dbt_guest": {"simulator_config": "gfx942_cdna3_kmd.json"}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            configs.join("gfx942_cdna3_kmd.json"),
+            br#"{"vm": {"gpu": {"device": {"gfx_target_version": 90402}}}}"#,
+        )
+        .unwrap();
+
+        let mut def = def_with_gpus(1);
+        def.options.insert(
+            "config".to_string(),
+            SimpleValue::String("configs/guest.json".to_string()),
+        );
+        let ctx = ctx_for(def, tmp.path(), "relative-config");
+        let preload = stand_in_interposer(tmp.path());
+
+        in_working_directory(tmp.path(), || Rocjitsu.injection_def_with(&ctx, preload))
+            .expect("a relative config that exists must bring up");
+
+        let handed = session_config(&ctx.runtime_dir).unwrap();
+        let snapshot: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&handed).unwrap()).unwrap();
+        let reference = snapshot
+            .pointer(SIMULATOR_CONFIG_POINTER)
+            .and_then(serde_json::Value::as_str)
+            .expect("the snapshot keeps the external reference");
+
+        assert!(
+            std::path::Path::new(reference).is_absolute(),
+            "a reference that leaves the original's directory must be absolute: {reference}"
+        );
+
+        // And the property that matters, resolved the way
+        // `resolve_dbt_host_config_path` resolves it.
+        let parent = handed.parent().expect("the session copy has a directory");
+        let resolved = parent.join(reference);
+        assert!(
+            resolved.is_file(),
+            "rocjitsu resolves `{reference}` against {}, and must find the host config there",
+            parent.display()
+        );
+
+        assert_eq!(
+            device_of_bytes(&std::fs::read(&handed).unwrap()).and_then(|d| d.gfx_target()),
+            None,
+            "the guest config names no `vm.gpu.device` of its own"
+        );
+    }
+
+    /// Copying a drop-in `--config` moves it, so the one reference that
+    /// resolves *beside* it has to be pinned before it travels.
+    ///
+    /// `resolve_dbt_host_config_path` joins a relative
+    /// `dbt_guest.simulator_config` onto the parent of the config the
+    /// interposer was handed, and after bring-up that is the session's
+    /// copy — so the shipped `guest_gfx950_on_simulated_gfx942.json`
+    /// would look for `gfx942_cdna3_kmd.json` in the session scratch
+    /// directory. Absolute references and configs without one travel
+    /// byte for byte.
+    #[test]
+    fn a_relative_external_reference_survives_the_copy() {
+        let tmp = tempfile::tempdir().unwrap();
+        let user_dir = tmp.path().join("configs");
+        std::fs::create_dir_all(&user_dir).unwrap();
+        let original = user_dir.join("guest.json");
+
+        let relative = br#"{"dbt_guest": {"simulator_config": "gfx942_cdna3_kmd.json"}}"#;
+        let pinned = pin_external_references(relative.to_vec(), &original).unwrap();
+        let pinned: serde_json::Value = serde_json::from_slice(&pinned).unwrap();
+        assert_eq!(
+            pinned
+                .pointer(SIMULATOR_CONFIG_POINTER)
+                .and_then(serde_json::Value::as_str),
+            Some(
+                user_dir
+                    .join("gfx942_cdna3_kmd.json")
+                    .display()
+                    .to_string()
+                    .as_str()
+            ),
+            "the reference must still name the file beside the original"
+        );
+
+        // Nothing to pin, nothing touched — which is what keeps the
+        // ordinary copy a copy.
+        for untouched in [
+            &br#"{"dbt_guest": {"simulator_config": "/opt/rocm/share/kmd.json"}}"#[..],
+            br#"{"dbt_guest": {"enabled": true}}"#,
+            br#"{"vm": {"gpu": {"device": {"gfx_target_version": 90500}}}}"#,
+            b"not json at all",
+        ] {
+            assert_eq!(
+                pin_external_references(untouched.to_vec(), &original),
+                Some(untouched.to_vec())
+            );
+        }
+
+        // And a config mirage cannot read, which names a sibling it
+        // therefore cannot pin, is refused rather than moved.
+        for unreadable in [
+            // The dialect rocjitsu accepts and `serde_json` does not.
+            &br#"{"dbt_guest": {
+                   // the host this guest runs on
+                   "simulator_config": "gfx942_cdna3_kmd.json"}}"#[..],
+            br#"{"dbt_guest": {"simulator_config": "gfx942_cdna3_kmd.json",}}"#,
+            br#"{dbt_guest: {simulator_config: "gfx942_cdna3_kmd.json"}}"#,
+        ] {
+            assert_eq!(
+                pin_external_references(unreadable.to_vec(), &original),
+                None,
+                "a sibling reference mirage cannot pin must not be relocated"
+            );
+        }
+    }
+
+    /// A drop-in `--config` mirage cannot parse is left where it lies, so
+    /// the sibling it names still resolves.
+    ///
+    /// rocjitsu reads its configs with FlatBuffers, whose JSON accepts
+    /// comments, trailing commas and unquoted keys. `serde_json` accepts
+    /// none of those, and a config it cannot read is one the pin cannot
+    /// be applied to — so copying it into the session would re-anchor
+    /// `dbt_guest.simulator_config` to the session directory, where the
+    /// host config has never been. The run then fails, or picks up a
+    /// different simulator, for a diagnostic's benefit.
+    #[test]
+    fn a_config_that_cannot_be_pinned_is_not_relocated() {
+        let _g = mirage_core::paths::test_env_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        mirage_core::paths::set_test_root(tmp.path());
+
+        // The shipped composition form, with one comment in it.
+        let configs = tmp.path().join("configs");
+        std::fs::create_dir_all(&configs).unwrap();
+        let original = configs.join("guest.json");
+        std::fs::write(
+            &original,
+            br#"{
+  // gfx950 guest on a simulated gfx942 host
+  "dbt_guest": {"enabled": true, "simulator_config": "gfx942_cdna3_kmd.json"}
+}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            configs.join("gfx942_cdna3_kmd.json"),
+            br#"{"vm": {"gpu": {"device": {"gfx_target_version": 90402}}}}"#,
+        )
+        .unwrap();
+
+        let mut def = def_with_gpus(1);
+        def.options.insert(
+            "config".to_string(),
+            SimpleValue::String(original.display().to_string()),
+        );
+        let ctx = ctx_for(def, tmp.path(), "unpinnable-config");
+        let injection = Rocjitsu
+            .injection_def_with(&ctx, stand_in_interposer(tmp.path()))
+            .expect("a config rocjitsu can read must bring up");
+
+        // The interposer is pointed at the original, so the relative
+        // reference resolves the way it did before the session existed.
+        let handed = session_config(&ctx.runtime_dir).unwrap();
+        assert_eq!(handed, original);
+        assert!(
+            !rj_config_path(&ctx.runtime_dir).exists(),
+            "a config that cannot be pinned must not be snapshotted"
+        );
+        let resolved = handed
+            .parent()
+            .unwrap()
+            .join("gfx942_cdna3_kmd.json")
+            .is_file();
+        assert!(resolved, "the sibling must still resolve beside the config");
+
+        // And the daemon is handed the same file the interposer is, which
+        // is the whole reason this reads the discovery file.
+        let runtime_dir = PathBuf::from(
+            injection
+                .env
+                .get("ROCJITSU_RUNTIME_DIR")
+                .expect("the injection names a runtime directory"),
+        );
+        assert_eq!(
+            std::fs::read_to_string(runtime_dir.join(CONFIG_PATH_NAME))
+                .unwrap()
+                .trim(),
+            original.display().to_string()
+        );
+
+        // Containerised, the same config is refused rather than left for
+        // an interposer that cannot open it: a node container mounts the
+        // session's scratch directory and nothing else.
+        let mut containerised = ctx_for(
+            ctx.profile.emulator.clone(),
+            tmp.path(),
+            "unpinnable-in-container",
+        );
+        containerise(&mut containerised);
+        let err = Rocjitsu
+            .injection_def_with(&containerised, stand_in_interposer(tmp.path()))
+            .expect_err("a config the container cannot reach must be refused")
+            .to_string();
+        assert!(err.contains("containerised session"), "{err}");
+        assert!(err.contains("--image"), "{err}");
+    }
+
+    /// Copying the top-level config into the session does not make files
+    /// it names visible in a node container.
+    ///
+    /// A relative `dbt_guest.simulator_config` is pinned to an absolute
+    /// host path before the copy, and an already-absolute one stays as
+    /// written. Both still point outside the session scratch directory,
+    /// which is the only path mounted at the same spelling inside the
+    /// container. Reject both rather than starting an interposer that
+    /// cannot read the simulator configuration.
+    #[test]
+    fn a_containerised_config_cannot_name_host_only_files() {
+        let _g = mirage_core::paths::test_env_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        mirage_core::paths::set_test_root(tmp.path());
+
+        let user_dir = tmp.path().join("configs");
+        std::fs::create_dir_all(&user_dir).unwrap();
+        let simulator = user_dir.join("gfx942_cdna3_kmd.json");
+        std::fs::write(&simulator, b"{}").unwrap();
+
+        for (session, reference) in [
+            (
+                "relative-external-in-container",
+                simulator
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned(),
+            ),
+            (
+                "absolute-external-in-container",
+                simulator.display().to_string(),
+            ),
+        ] {
+            let config = user_dir.join(format!("{session}.json"));
+            let value = serde_json::json!({
+                "dbt_guest": {
+                    "enabled": true,
+                    "execution_backend": "simulator",
+                    "simulator_config": reference,
+                }
+            });
+            std::fs::write(&config, serde_json::to_vec(&value).unwrap()).unwrap();
+
+            let mut def = def_with_gpus(1);
+            def.options.insert(
+                "config".to_string(),
+                SimpleValue::String(config.display().to_string()),
+            );
+            let mut ctx = ctx_for(def, tmp.path(), session);
+            containerise(&mut ctx);
+
+            let err = Rocjitsu
+                .injection_def_with(&ctx, stand_in_interposer(tmp.path()))
+                .expect_err("an external simulator config is not mounted")
+                .to_string();
+            assert!(err.contains(&simulator.display().to_string()), "{err}");
+            assert!(err.contains("self-contained config"), "{err}");
+        }
+    }
+
+    /// `simulator_config` is not a dependency unless the DBT guest
+    /// simulator backend is active.
+    #[test]
+    fn unused_simulator_config_does_not_refuse_a_container() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = tmp.path().join(RJ_CONFIG_NAME);
+        let external = tmp.path().parent().unwrap().join("host.json");
+
+        for dbt in [
+            serde_json::json!({
+                "enabled": false,
+                "execution_backend": "simulator",
+                "simulator_config": external,
+            }),
+            serde_json::json!({
+                "enabled": true,
+                "execution_backend": "hardware",
+                "simulator_config": external,
+            }),
+        ] {
+            std::fs::write(
+                &config,
+                serde_json::to_vec(&serde_json::json!({"dbt_guest": dbt})).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(
+                container_unreachable_config_path(&config, tmp.path()).unwrap(),
+                None
+            );
+        }
+    }
+
+    /// A reference that climbs out of the session, or a symlink that leads
+    /// out of it, is outside the mount whatever its spelling starts with.
+    #[test]
+    fn a_reference_that_leaves_the_session_is_unreachable() {
+        let tmp = tempfile::tempdir().unwrap();
+        let session = tmp.path().join("session");
+        std::fs::create_dir_all(&session).unwrap();
+        let host = tmp.path().join("host.json");
+        std::fs::write(&host, b"{}").unwrap();
+        let link = session.join("linked.json");
+        std::os::unix::fs::symlink(&host, &link).unwrap();
+
+        let config = session.join(RJ_CONFIG_NAME);
+        for reference in ["../host.json".to_string(), link.display().to_string()] {
+            std::fs::write(
+                &config,
+                serde_json::to_vec(&serde_json::json!({"dbt_guest": {
+                    "enabled": true,
+                    "execution_backend": "simulator",
+                    "simulator_config": reference,
+                }}))
+                .unwrap(),
+            )
+            .unwrap();
+            assert!(
+                container_unreachable_config_path(&config, &session)
+                    .unwrap()
+                    .is_some(),
+                "{reference} resolves outside the session"
+            );
+        }
+
+        // The mount is made at the session's own spelling. Reached through
+        // an alias, a file named by the real path is the same file on the
+        // host and absent in the container.
+        let alias = tmp.path().join("alias");
+        std::os::unix::fs::symlink(&session, &alias).unwrap();
+        let inside = session.join("sim.json");
+        std::fs::write(&inside, b"{}").unwrap();
+        std::fs::write(
+            &config,
+            serde_json::to_vec(&serde_json::json!({"dbt_guest": {
+                "enabled": true,
+                "execution_backend": "simulator",
+                "simulator_config": inside,
+            }}))
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            container_unreachable_config_path(&alias.join(RJ_CONFIG_NAME), &alias).unwrap(),
+            Some(inside),
+            "a path spelled outside the mount is not in the container"
+        );
+    }
+
+    /// A self-contained config in a dialect only FlatBuffers reads is not
+    /// refused for a container: it names no file that could be missing.
+    #[test]
+    fn a_self_contained_flatbuffers_config_reaches_a_container() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = tmp.path().join(RJ_CONFIG_NAME);
+        std::fs::write(
+            &config,
+            b"{\n  // FlatBuffers accepts comments and trailing commas\n  max_ticks: 1,\n}\n",
+        )
+        .unwrap();
+        assert_eq!(
+            container_unreachable_config_path(&config, tmp.path()).unwrap(),
+            None
+        );
+    }
+
+    /// Nothing may read a session's configuration before bring-up has
+    /// recorded one, and the message says so rather than resolving the
+    /// profile a second time to paper over it.
+    #[test]
+    fn a_session_without_a_materialised_config_is_refused() {
+        let tmp = tempfile::tempdir().unwrap();
+        let err = session_config(tmp.path()).unwrap_err().to_string();
+        assert!(err.contains(CONFIG_PATH_NAME), "{err}");
+
+        // A discovery file with nothing in it is the same answer: the
+        // path is what is being asked for, and there isn't one.
+        write_config_discovery(tmp.path(), std::path::Path::new("")).unwrap();
+        let err = session_config(tmp.path()).unwrap_err().to_string();
+        assert!(err.contains(CONFIG_PATH_NAME), "{err}");
+    }
+
+    /// The recorded path is read the way rocjitsu reads it: the first
+    /// line, less one trailing `\r`, with spaces kept. Trimming them named
+    /// a different file from the one the interposer opens.
+    #[test]
+    fn a_recorded_config_path_keeps_its_spaces() {
+        let tmp = tempfile::tempdir().unwrap();
+        let spaced = tmp.path().join(" cfg .json");
+        write_config_discovery(tmp.path(), &spaced).unwrap();
+        assert_eq!(session_config(tmp.path()).unwrap(), spaced);
+
+        let discovery = tmp.path().join(RUNTIME_SUBDIR).join(CONFIG_PATH_NAME);
+        std::fs::write(&discovery, format!("{}\r\n12\n", spaced.display())).unwrap();
+        assert_eq!(session_config(tmp.path()).unwrap(), spaced);
+    }
+
+    /// Without the interposer there is nothing to emulate the workload,
+    /// so the injection fails rather than quietly describing a run on
+    /// real hardware — and it says which library and where to get it.
+    #[test]
+    fn a_missing_interposer_refuses_the_injection() {
+        let _g = mirage_core::paths::test_env_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        mirage_core::paths::set_test_root(tmp.path());
+
+        let ctx = ctx_for(def_for_target(120500), tmp.path(), "no-interposer");
+        let err = Rocjitsu.injection_def_with(&ctx, None).unwrap_err();
+
+        let msg = err.to_string();
+        assert!(msg.contains(LIB_NAME), "{msg}");
+        assert!(msg.contains("docs/building.md"), "{msg}");
+    }
+
+    /// Whatever config it is handed, the runtime directory
+    /// `write_config_discovery` picks belongs to the session: the
+    /// discovery file (and the daemon socket beside it) must never land
+    /// next to a config file mirage does not own and cannot clean up.
     #[test]
     fn discovery_file_lands_in_the_session_not_beside_the_config() {
         let tmp = tempfile::tempdir().unwrap();
@@ -1456,7 +2846,7 @@ mod tests {
 
         assert_eq!(runtime_dir, session.join(RUNTIME_SUBDIR));
         assert_eq!(
-            std::fs::read_to_string(runtime_dir.join("config_path")).unwrap(),
+            std::fs::read_to_string(runtime_dir.join(CONFIG_PATH_NAME)).unwrap(),
             format!("{}\n", config.display())
         );
         assert_eq!(
