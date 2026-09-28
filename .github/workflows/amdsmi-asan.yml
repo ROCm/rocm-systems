@@ -1,0 +1,227 @@
+# ---------------------------------------------------------------------------
+# AMD-SMI ASAN CI.
+#
+# Builds AMD-SMI with AddressSanitizer (ASAN, including LeakSanitizer) and
+# runs its tests, so memory errors fail CI. AMD-SMI has no GPU kernels, so
+# host ASAN covers all of it.
+#
+#   unit: hardware-free unit tests on a GitHub-hosted runner.
+#   gpu:  full test suite plus an amd-smi CLI sweep on a self-hosted GPU runner.
+#
+# Both jobs build with GCC in the same pinned image, so findings reproduce
+# locally with `docker run` on it.
+# ---------------------------------------------------------------------------
+
+name: AMDSMI ASAN
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'projects/amdsmi/**'
+      - '.github/workflows/amdsmi-asan.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'projects/amdsmi/**'
+      - '.github/workflows/amdsmi-asan.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Group by PR number so a new push supersedes the previous run. Pushes to
+  # develop fall back to the commit sha, which is unique, so post-merge runs
+  # never cancel each other.
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+  BUILD_DIR: /tmp/amdsmi-asan-build
+  RESULTS_DIR: /tmp/amdsmi-asan-results
+  # Only instrumented processes read this. The flags enable checks that are
+  # off by default; the first error aborts the process and fails the step.
+  ASAN_OPTIONS: detect_leaks=1:strict_string_checks=1:detect_stack_use_after_return=1:check_initialization_order=1
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  unit:
+    name: ASAN unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    container:
+      image: ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3 # noble, 2026-09-11
+
+    steps:
+      # The official image ships no git, which actions/checkout needs to clone
+      # rather than fall back to a tarball, and configure uses to fetch
+      # esmi_ib_library.
+      - name: Bootstrap git
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git ca-certificates
+
+      # rocm-systems is a large monorepo; only the amdsmi project and this
+      # workflow are needed, so sparse-checkout keeps the fetch cheap.
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            projects/amdsmi
+            .github/workflows
+
+      - name: Install build dependencies
+        run: |
+          set -euo pipefail
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config python3 \
+            libdrm-dev libnl-3-dev libnl-genl-3-dev libmnl-dev libgtest-dev
+
+      - name: Configure
+        run: |
+          set -euo pipefail
+          cmake -S "$GITHUB_WORKSPACE/projects/amdsmi" -B "$BUILD_DIR" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DADDRESS_SANITIZER=ON \
+            -DBUILD_TESTS=ON \
+            -DENABLE_ESMI_LIB=ON
+
+      - name: Build
+        run: cmake --build "$BUILD_DIR" --parallel "$(nproc)"
+
+      - name: Run unit tests under ASAN
+        run: |
+          set -euo pipefail
+          mkdir -p "$RESULTS_DIR"
+          export LSAN_OPTIONS="suppressions=$GITHUB_WORKSPACE/projects/amdsmi/tests/amd_smi_test/lsan.supp:print_suppressions=1"
+          "$BUILD_DIR/tests/amd_smi_test/amdsmitst" --gtest_filter='*Unit*' \
+            --gtest_output="xml:$RESULTS_DIR/amdsmitst-unit.xml"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: amdsmi-asan-unit-results
+          path: ${{ env.RESULTS_DIR }}
+          if-no-files-found: warn
+          retention-days: 7
+
+  gpu:
+    name: ASAN GPU tests
+    # Privileged self-hosted runner: never auto-run untrusted fork-PR code on
+    # it. Mirrors the guard in amdsmi-build.yml.
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+    runs-on:
+      - self-hosted
+      - ${{ vars.RUNNER_TYPE }}
+    timeout-minutes: 45
+    container:
+      image: ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3 # noble, 2026-09-11
+      options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -u root
+    env:
+      # Skip the tests that change GPU settings: an ASAN abort mid-test would
+      # leave them changed on this shared runner. amdsmi-build.yml runs them.
+      AMDSMI_NON_PRIVILEGED: 1
+      AMDSMI_PREFIX: /opt/amdsmi-asan
+
+    steps:
+      # The official image ships no git, which actions/checkout needs to clone
+      # rather than fall back to a tarball, and configure uses to fetch
+      # esmi_ib_library.
+      - name: Bootstrap git
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git ca-certificates
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            projects/amdsmi
+            .github/workflows
+
+      - name: Install build dependencies
+        run: |
+          set -euo pipefail
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config python3 \
+            libdrm-dev libnl-3-dev libnl-genl-3-dev libmnl-dev libgtest-dev
+
+      - name: Configure
+        run: |
+          set -euo pipefail
+          cmake -S "$GITHUB_WORKSPACE/projects/amdsmi" -B "$BUILD_DIR" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DADDRESS_SANITIZER=ON \
+            -DBUILD_TESTS=ON \
+            -DENABLE_ESMI_LIB=ON
+
+      - name: Build
+        id: build
+        run: cmake --build "$BUILD_DIR" --parallel "$(nproc)"
+
+      - name: Run full test suite under ASAN
+        run: |
+          set -euo pipefail
+          mkdir -p "$RESULTS_DIR"
+          export LSAN_OPTIONS="suppressions=$GITHUB_WORKSPACE/projects/amdsmi/tests/amd_smi_test/lsan.supp:print_suppressions=1"
+          cd "$GITHUB_WORKSPACE/projects/amdsmi/tests/amd_smi_test"
+          source amdsmitst.exclude
+          source detect_asic_filter.sh
+          "$BUILD_DIR/tests/amd_smi_test/amdsmitst" --gtest_filter="-${GTEST_EXCLUDE}" \
+            --gtest_output="xml:$RESULTS_DIR/amdsmitst.xml"
+
+      # The CLI sweep still runs when the test suite fails, so one run
+      # reports both.
+      - name: Install
+        id: install
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: cmake --install "$BUILD_DIR" --prefix "$AMDSMI_PREFIX"
+
+      # Python is not instrumented: preload ASAN (with libstdc++, so it can
+      # intercept the library's C++ throws) and use PYTHONMALLOC=malloc so it
+      # sees overflows of ctypes buffers. The interpreter leaks, so no LSan.
+      - name: Run amd-smi CLI under ASAN
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RESULTS_DIR/cli"
+          asan_rt="$(realpath "$(gcc -print-file-name=libasan.so)")"
+          cxx_rt="$(realpath "$(g++ -print-file-name=libstdc++.so)")"
+          export LD_PRELOAD="$asan_rt:$cxx_rt"
+          export PYTHONMALLOC=malloc
+          export ASAN_OPTIONS="$ASAN_OPTIONS:detect_leaks=0"
+          # Must pass, or the sweep below proves nothing.
+          "$AMDSMI_PREFIX/bin/amd-smi" version
+          # Same commands as amdsmi-build.yml, which judges their exit codes;
+          # only an ASAN report (lines prefixed ==<pid>==) fails this step.
+          commands=(list static firmware ucode bad-pages metric process topology monitor dmon xgmi partition)
+          findings=()
+          for cmd in "${commands[@]}"; do
+            log="$RESULTS_DIR/cli/amd-smi_$cmd.log"
+            rc=0
+            "$AMDSMI_PREFIX/bin/amd-smi" "$cmd" > "$log" 2>&1 || rc=$?
+            echo "amd-smi $cmd: exit $rc"
+            if grep -qE '^==[0-9]+==' "$log"; then
+              findings+=("$cmd")
+              cat "$log"
+            fi
+          done
+          if [ "${#findings[@]}" -gt 0 ]; then
+            echo "::error::ASAN reported errors in: amd-smi ${findings[*]}"
+            exit 1
+          fi
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: amdsmi-asan-gpu-results
+          path: ${{ env.RESULTS_DIR }}
+          if-no-files-found: warn
+          retention-days: 7
