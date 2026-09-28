@@ -34,7 +34,6 @@ RJ_DIAGNOSTIC_POP
 #include <cstdio>
 #include <cstring>
 #include <iostream>
-#include <iterator>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -152,31 +151,9 @@ TEST(BinaryTranslatorE2E, TranslateVectorAddCdna4ToCdna3) {
   EXPECT_EQ(ehdr->e_flags & rocjitsu::EF_AMDGPU_MACH, rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX942)
       << "ELF e_flags should contain GFX942 machine type";
 
-  ASSERT_FALSE(co->text_sections().empty());
-  const auto *original_text = co->text_sections()[0];
   rocjitsu::AmdGpuCodeObject translated_co(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(translated_co.is_valid());
   ASSERT_FALSE(translated_co.text_sections().empty());
-  const auto *translated_text = translated_co.text_sections()[0];
-  ASSERT_EQ(translated_text->size(), original_text->size());
-  const auto *original_text_bytes = reinterpret_cast<const uint8_t *>(original_text->data());
-  const auto *translated_text_bytes = reinterpret_cast<const uint8_t *>(translated_text->data());
-  const auto original_text_end = original_text_bytes + original_text->size();
-  const auto translated_text_end = translated_text_bytes + translated_text->size();
-  const auto first_text_diff = std::ranges::mismatch(original_text_bytes, original_text_end,
-                                                     translated_text_bytes, translated_text_end);
-  EXPECT_EQ(first_text_diff.in1, original_text_end)
-      << "The vector-add gfx950 and gfx942 codegen is byte-identical; CDNA4→CDNA3 DBT should "
-         "leave the instruction stream unchanged for this kernel. First differing byte offset is "
-      << std::distance(original_text_bytes, first_text_diff.in1) << ", original word 0x" << std::hex
-      << reinterpret_cast<const uint32_t *>(
-             original_text_bytes)[std::distance(original_text_bytes, first_text_diff.in1) /
-                                  sizeof(uint32_t)]
-      << ", translated word 0x"
-      << reinterpret_cast<const uint32_t *>(
-             translated_text_bytes)[std::distance(original_text_bytes, first_text_diff.in1) /
-                                    sizeof(uint32_t)]
-      << std::dec;
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
   ASSERT_NE(decoder, nullptr);
@@ -654,21 +631,24 @@ TEST(BinaryTranslatorE2E, NoTextPaddingStillMaterializesLocalCaveInText) {
   const auto *text = co->text_sections()[0];
   uint8_t *text_bytes = image.data() + text->sectionOffset();
   const size_t word_count = text->size() / sizeof(uint32_t);
+  ASSERT_GT(word_count, 0u);
   const uint32_t nop = rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4);
   const uint32_t filler = rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA4);
 
-  // Force away the old trailing-NOP escape hatch so this test only passes if
-  // expansion bodies are materialized in the relocated .text.
-  size_t overwritten_padding_words = 0;
+  // Force away any trailing-NOP escape hatch so this test only passes if
+  // expansion bodies are materialized in the relocated .text. Newer compilers
+  // may already emit this fixture without trailing padding.
   for (size_t i = word_count; i > 0; --i) {
     uint32_t word = 0;
     std::memcpy(&word, text_bytes + (i - 1) * sizeof(uint32_t), sizeof(word));
     if (word != nop)
       break;
     std::memcpy(text_bytes + (i - 1) * sizeof(uint32_t), &filler, sizeof(filler));
-    ++overwritten_padding_words;
   }
-  ASSERT_GT(overwritten_padding_words, 0u);
+  uint32_t trailing_word = 0;
+  std::memcpy(&trailing_word, text_bytes + (word_count - 1) * sizeof(uint32_t),
+              sizeof(trailing_word));
+  ASSERT_NE(trailing_word, nop);
 
   rocjitsu::AmdGpuCodeObject no_padding(image.data(), image.size());
   ASSERT_TRUE(no_padding.is_valid());

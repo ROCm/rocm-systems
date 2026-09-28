@@ -23,13 +23,17 @@ RJ_DIAGNOSTIC_POP
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/executable.h"
+#include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/instrumentor.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/target_registry.h"
+#include "util/diagnostic.h"
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -66,8 +70,9 @@ constexpr DbiTargetParams kRdna4Params{ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_T
 
 } // namespace
 
-// Shared fixture: loads the target's vector_add build, decodes .text, finds the
-// first two relocatable anchors, and patches them via Instrumentor. The
+// Shared fixture: loads the target's vector_add build, decodes code reachable
+// from the kernel entry, finds the first two relocatable anchors, and patches
+// them via Instrumentor. The
 // concrete suites at the bottom of this file inherit it so CMake can register
 // one CTest entry per (target, gating policy) pair:
 //   - HsaDbiNopAsm<Target>Static.*   - no GPU needed, registered unconditionally
@@ -95,20 +100,27 @@ protected:
                                reinterpret_cast<const uint8_t *>(co->image_data()) +
                                    co->image_size());
 
-    // Decode .text and find the first v_add_f32-mnemonic anchor that the
-    // trampoline machinery considers relocatable. Decode-and-search so the
-    // test is stable across compiler revisions.
+    // Decode code reachable from the kernel entry and find the first anchors
+    // that the trampoline machinery considers relocatable. Limiting the search
+    // to reachable code prevents compiler-emitted padding or dead functions
+    // from producing an anchor that a dispatch cannot exercise.
     // TODO: instrument multiple instructions
-    auto decoder = Decoder::create(params_.arch);
+    auto decoder = Decoder::create(default_isa_target_registry(), params_.target);
     ASSERT_NE(decoder, nullptr);
-    auto block_result = BasicBlock::build(*co, *decoder, params_.arch);
-    ASSERT_TRUE(block_result.succeeded());
-    auto blocks = std::move(block_result).value();
-
     ASSERT_FALSE(co->text_sections().empty());
     const auto *text = co->text_sections().front();
     const std::span<const uint8_t> text_bytes(reinterpret_cast<const uint8_t *>(text->data()),
                                               text->size());
+    const auto kernels = scan_kernel_descriptors(
+        {reinterpret_cast<const uint8_t *>(co->image_data()), co->image_size()},
+        text->sectionOffset(), text->size());
+    ASSERT_EQ(kernels.size(), 1u);
+    const std::array<uint64_t, 1> entries{kernels.front().entry_text_offset};
+    util::StringDiagnostic decode_error;
+    auto block_result = BasicBlock::build_reachable(
+        *co, *decoder, params_.arch, entries, decode_error.emitter(), {}, {}, {}, params_.target);
+    ASSERT_TRUE(block_result.succeeded()) << decode_error.message();
+    auto blocks = std::move(block_result).value();
 
     for (const auto &block : blocks) {
       uint64_t cur = block->start_offset();
@@ -189,7 +201,7 @@ void HsaDbiNopAsmFixture::run_patched_elf_actually_contains_instrumentation() {
   const Section *text = patched.text_sections().front();
   ASSERT_GT(text->size(), anchor_offsets_[0] + 4);
 
-  auto decoder = Decoder::create(params_.arch);
+  auto decoder = Decoder::create(default_isa_target_registry(), params_.target);
   ASSERT_NE(decoder, nullptr);
   for (uint64_t anchor_idx = 0; anchor_idx < anchor_count_; ++anchor_idx) {
     rj_code_binary_inst_t anchor_word = 0;

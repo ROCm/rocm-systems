@@ -37,16 +37,20 @@ RJ_DIAGNOSTIC_POP
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/executable.h"
+#include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/instrumentor.h"
 #include "rocjitsu/code/patch/probe_callable.h"
 #include "rocjitsu/code/patch/probe_symbol.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/target_registry.h"
+#include "util/diagnostic.h"
 
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -149,17 +153,26 @@ protected:
     probe_body_words_ = callable->body_words;
     ASSERT_FALSE(probe_body_words_.empty());
 
-    // Decode .text and collect relocatable anchors. Decode-and-search so the
-    // test stays stable across compiler revisions.
-    auto decoder = Decoder::create(params_.arch);
+    // Decode code reachable from the kernel entry and collect relocatable
+    // anchors. Limiting the search to reachable code prevents compiler-emitted
+    // padding or dead functions from producing an anchor that a dispatch cannot
+    // exercise.
+    auto decoder = Decoder::create(default_isa_target_registry(), params_.target);
     ASSERT_NE(decoder, nullptr);
-    auto block_result = BasicBlock::build(*co, *decoder, params_.arch);
-    ASSERT_TRUE(block_result.succeeded());
-    auto blocks = std::move(block_result).value();
     ASSERT_FALSE(co->text_sections().empty());
     const auto *text = co->text_sections().front();
     const std::span<const uint8_t> text_bytes(reinterpret_cast<const uint8_t *>(text->data()),
                                               text->size());
+    const auto kernels = scan_kernel_descriptors(
+        {reinterpret_cast<const uint8_t *>(co->image_data()), co->image_size()},
+        text->sectionOffset(), text->size());
+    ASSERT_EQ(kernels.size(), 1u);
+    const std::array<uint64_t, 1> entries{kernels.front().entry_text_offset};
+    util::StringDiagnostic decode_error;
+    auto block_result = BasicBlock::build_reachable(
+        *co, *decoder, params_.arch, entries, decode_error.emitter(), {}, {}, {}, params_.target);
+    ASSERT_TRUE(block_result.succeeded()) << decode_error.message();
+    auto blocks = std::move(block_result).value();
 
     std::vector<uint64_t> candidates;
     for (const auto &block : blocks) {
@@ -252,7 +265,7 @@ void HsaDbiNopProbeFixture::run_patched_elf_contains_probe_call_instrumentation(
       << ".text must grow to hold the copied probe body and trampoline cave";
 
   // (c) The anchor now decodes as an s_branch stub (redirected to the cave).
-  auto decoder = Decoder::create(params_.arch);
+  auto decoder = Decoder::create(default_isa_target_registry(), params_.target);
   ASSERT_NE(decoder, nullptr);
   ASSERT_GT(text->size(), anchor_offset_ + sizeof(uint32_t));
   rj_code_binary_inst_t anchor_word = 0;

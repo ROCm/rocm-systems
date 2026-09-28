@@ -18,6 +18,7 @@
 #include "rocjitsu/code/patch/probe_live_in.h"
 #include "rocjitsu/code/patch/probe_symbol.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
+#include "rocjitsu/code/relocation_function_table.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/target_registry.h"
@@ -652,13 +653,33 @@ bool Instrumentor::ensure_blocks_built(std::string *error_out) {
   }
   decoder_ = std::move(decoder);
   util::StringDiagnostic decode_error;
-  auto blocks = BasicBlock::build(obj_, *decoder_, arch_, decode_error.emitter());
+  const std::vector<TextFunctionSymbolRange> function_symbols =
+      discover_text_function_symbol_ranges(obj_);
+  std::vector<uint64_t> function_entries;
+  std::vector<BasicBlock::CodeRange> function_ranges;
+  function_entries.reserve(function_symbols.size());
+  function_ranges.reserve(function_symbols.size());
+  for (const TextFunctionSymbolRange &function : function_symbols) {
+    function_entries.push_back(function.start_offset);
+    function_ranges.push_back({.start_offset = function.start_offset, .size = function.size});
+  }
+
+  // Linked HIP code objects can contain zero-filled alignment gaps between
+  // sized STT_FUNC symbols. Decode the functions that the ELF identifies and
+  // leave those non-code gaps alone. Synthetic and stripped inputs without
+  // usable function ranges retain the historical whole-section behavior.
+  auto blocks =
+      function_ranges.empty()
+          ? BasicBlock::build(obj_, *decoder_, arch_, decode_error.emitter(), {},
+                              ExternalEntryPolicy::InferPredecessorless, {}, target)
+          : BasicBlock::build_reachable(obj_, *decoder_, arch_, function_entries,
+                                        decode_error.emitter(), function_ranges, {}, {}, target);
   if (blocks.failed()) {
     report(error_out, decode_error.message().c_str());
     return false;
   }
   blocks_ = std::move(blocks).value();
-  // BasicBlock::build returns blocks in .text order. Keep clause state across
+  // CFG construction returns blocks in .text order. Keep clause state across
   // block boundaries because a branch target may split the linear instruction
   // stream in the middle of a clause.
   uint32_t clause_remaining = 0;
