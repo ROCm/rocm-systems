@@ -208,7 +208,9 @@ jobs:
             git \
             libclang-rt-dev \
             libdrm-dev \
+            libzstd-dev \
             ninja-build \
+            zlib1g-dev \
             clang
 
       - name: Checkout rocm-systems
