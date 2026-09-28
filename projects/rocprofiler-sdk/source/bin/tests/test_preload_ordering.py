@@ -87,8 +87,9 @@ def launch(rocprofv3, rocm_root):
                 *REPORT_LD_PRELOAD,
             ],
             env=environ,
-            capture_output=True,
-            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
         )
         assert result.returncode == 0, result.stderr
 
