@@ -1617,13 +1617,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 break;
             }
 #endif
-            // case ROCPROFILER_CALLBACK_TRACING_RCCL_API:
-            // {
-            //     tool_tracing_callback_start(category::rocm_rccl_api{}, record,
-            //     user_data,
-            //                                 ts);
-            //     break;
-            // }
+
             // MARKER_CORE_API is handled by roctx_client on control_ctx
             case ROCPROFILER_CALLBACK_TRACING_NONE:
             case ROCPROFILER_CALLBACK_TRACING_LAST:
@@ -1677,18 +1671,6 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 break;
             }
 #endif
-            // case ROCPROFILER_CALLBACK_TRACING_RCCL_API:
-            // {
-            //     auto* rccl_payload =
-            //         static_cast<rocprofiler_callback_tracing_rccl_api_data_t*>(
-            //             record.payload);
-            //     tool_tracing_callback_rccl(record.operation, rccl_payload,
-            //                                user_data->value, ts);
-            //     tool_tracing_callback_stop(category::rocm_rccl_api{}, record,
-            //     user_data,
-            //                                ts, _bt_data);
-            //     break;
-            // }
             case ROCPROFILER_CALLBACK_TRACING_NONE:
             case ROCPROFILER_CALLBACK_TRACING_LAST:
             case ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API:
@@ -2169,15 +2151,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 
     // MARKER_CORE_API is handled by roctx_client on control_ctx
     for(auto itr : {
-    // HSA_CORE_API/HSA_AMD_EXT_API/HSA_IMAGE_EXT_API/HSA_FINALIZE_EXT_API,
-    // HIP_RUNTIME_API/HIP_COMPILER_API, and ROCDECODE_API/ROCJPEG_API/
-    // ROCSHMEM_API/HIPFILE_API are configured via domain_service
-    // (domains::callback::hsa::k_core_api/k_amd_ext_api/k_image_ext_api/
-    // k_finalize_ext_api, domains::callback::hip::k_runtime_api/k_compiler_api,
-    // domains::callback::k_rocdecode_api/k_rocjpeg_api/k_rocshmem_api/
-    // k_hipfile_api) below, on their own context, to avoid double-registering
-    // these kinds on primary_ctx.
-    // ROCPROFILER_CALLBACK_TRACING_RCCL_API,
 #if (ROCPROFILER_VERSION >= 600)
             ROCPROFILER_CALLBACK_TRACING_OMPT,
 #endif

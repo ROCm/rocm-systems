@@ -6,7 +6,6 @@ set(rocprofiler_sdk_sources
     ${CMAKE_CURRENT_LIST_DIR}/fwd.cpp
     ${CMAKE_CURRENT_LIST_DIR}/roctx_client.cpp
     ${CMAKE_CURRENT_LIST_DIR}/marker_writer.cpp
-    # ${CMAKE_CURRENT_LIST_DIR}/rccl.cpp
 )
 
 set(rocprofiler_sdk_headers
@@ -14,8 +13,6 @@ set(rocprofiler_sdk_headers
     ${CMAKE_CURRENT_LIST_DIR}/fwd.hpp
     ${CMAKE_CURRENT_LIST_DIR}/roctx_client.hpp
     ${CMAKE_CURRENT_LIST_DIR}/marker_writer.hpp
-    # ${CMAKE_CURRENT_LIST_DIR}/rccl.hpp
-    # ${CMAKE_CURRENT_LIST_DIR}/rccl_internal.hpp
     ${CMAKE_CURRENT_LIST_DIR}/types.hpp
     ${CMAKE_CURRENT_LIST_DIR}/buffered_domain.hpp
     ${CMAKE_CURRENT_LIST_DIR}/callback_domain.hpp
