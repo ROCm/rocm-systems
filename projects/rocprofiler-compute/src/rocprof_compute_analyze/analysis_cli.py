@@ -365,19 +365,18 @@ class cli_analysis(OmniAnalyze_Base):
     ) -> None:
         """Set workload.filter_kernel_ids from the given backends' operator filter.
 
-        Operator matches are intersected with the -k/--kernel filter when set;
-        matched nodes are stored in workload.ml_api_glob_matches.
+        Operator matches are intersected with the -k/--kernel filter when set.
         """
         framewise_patterns = parse_operator_patterns(args, backends)
         if framewise_patterns is None:
             return
-        matched_nodes = _collect_glob_matched_nodes(
-            workload.ml_api_call_trees, framewise_patterns
-        )
-        workload.ml_api_glob_matches = matched_nodes
         labels = ", ".join(
             _ML_API_ANALYSIS_CLI_OPTIONS[backend]["label"] for backend in backends
         )
+        confined_forest = filter_forest_by_backends(
+            workload.ml_api_call_trees, list(framewise_patterns)
+        )
+        matched_nodes = _collect_glob_matched_nodes(confined_forest, framewise_patterns)
         if not matched_nodes:
             all_patterns = ", ".join(
                 pattern
@@ -388,7 +387,11 @@ class cli_analysis(OmniAnalyze_Base):
                 "ml api trace",
                 f"No {labels} operators matched the pattern(s): {all_patterns}",
             )
+            workload.ml_api_call_trees = {}
             return
+        workload.ml_api_call_trees = copy_matched_operator_subtree(
+            confined_forest, matched_nodes
+        )
 
         kernel_top_df = workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID]
         name_to_id: dict[str, int] = {
@@ -396,8 +399,9 @@ class cli_analysis(OmniAnalyze_Base):
             for idx, kernel_name in enumerate(kernel_top_df["Kernel_Name"].tolist())
         }
         kernel_ids: set[int] = set()
-        for node in matched_nodes:
-            kernel_ids.update(_assign_kernel_ids_from_top(node, name_to_id))
+        for roots in workload.ml_api_call_trees.values():
+            for root in roots:
+                kernel_ids.update(_assign_kernel_ids_from_top(root, name_to_id))
         if not kernel_ids:
             console_warning(
                 "ml api trace",
@@ -428,7 +432,7 @@ class cli_analysis(OmniAnalyze_Base):
         self, args: argparse.Namespace, workload: schema.Workload, backends: list[str]
     ) -> None:
         """Display the matched operator call tree."""
-        if not workload.ml_api_glob_matches:
+        if not workload.ml_api_call_trees:
             return
         framewise_patterns = parse_operator_patterns(args, backends)
         patterns_str = ", ".join(
@@ -439,9 +443,7 @@ class cli_analysis(OmniAnalyze_Base):
         labels = ", ".join(
             _ML_API_ANALYSIS_CLI_OPTIONS[backend]["label"] for backend in backends
         )
-        subtree = copy_matched_operator_subtree(
-            workload.ml_api_call_trees, workload.ml_api_glob_matches
-        )
+        subtree = workload.ml_api_call_trees
         print(f"\n{'=' * 80}")
         print(f"Matched {labels} Operators: {patterns_str}")
         print("Sorted by total GPU kernel duration.")
