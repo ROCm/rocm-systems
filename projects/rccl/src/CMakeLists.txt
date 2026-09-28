@@ -214,6 +214,8 @@ set(SRC_FILES
   include/gin/gin_host_proxy.h
   include/gin/gin_host_rocshmem_gda.h
   include/gin/gin_rocshmem_gda_factory.h
+  include/gin/gin_host_anvil_sdma.h
+  include/gin/gin_anvil_sdma_factory.h
   include/git_version.h
   include/graph.h
   include/group.h
@@ -590,10 +592,12 @@ if(ENABLE_ROCSHMEM_GIN)
     src/gin/gin_plugin_rocshmem_gda.cc
     src/gin/gin_rocshmem_gda_factory.cc
     src/gin/gin_plugin_anvil_sdma.cc
+    src/gin/gin_anvil_sdma_factory.cc
     src/gin/gin_anvil_ipc_table_host.cc
     src/algorithms/gin/sdma/gin_alltoall_sdma.cu
-    src/algorithms/gin/sdma/gin_all_reduce_sdma.cu 
+    src/algorithms/gin/sdma/gin_all_reduce_sdma.cu
   )
+  # GIN shim headers: in SRC_FILES so hipify copies them to the build tree.
   list(APPEND SRC_FILES
     src/include/nccl_device/gin/rocshmem_gda/log.hpp
     src/include/nccl_device/gin/rocshmem_gda/util.hpp
@@ -601,6 +605,8 @@ if(ENABLE_ROCSHMEM_GIN)
     src/include/nccl_device/gin/rocshmem_gda/gda/ibv_core.hpp
     src/include/nccl_device/gin/rocshmem_gda/rocshmem/rocshmem_common.hpp
   )
+  # anvil.cpp is compiled from rocshmem source via target_sources after
+  # add_library (bypasses SRC_FILES/hipify). See block after add_library.
 endif()
 
 if(USE_AMDSMI)
@@ -1054,6 +1060,10 @@ if (ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
     target_include_directories(rccl PRIVATE ${ROCSHMEM_INCLUDE_DIR})
   endif()
 
+  # GDA factory (gin_rocshmem_gda_factory.cc) directly includes rocshmem
+  # host headers (ibv_wrapper, topology, envvar, debug_gda) that are not
+  # yet shimmed or copied. These paths will be removed when GDA host
+  # dependencies are severed (like SDMA was).
   if (ROCSHMEM_SOURCE_DIR)
     target_include_directories(rccl PRIVATE ${ROCSHMEM_SOURCE_DIR}/src)
     target_include_directories(rccl PRIVATE ${ROCSHMEM_SOURCE_DIR}/include)
@@ -1141,6 +1151,57 @@ if (ENABLE_ROCSHMEM_GIN)
     )
     add_custom_target(copy_rocshmem_source_headers DEPENDS ${GIN_GDA_ROCSHMEM_SOURCE_HEADERS})
     add_dependencies(copy_rocshmem_headers copy_rocshmem_source_headers)
+
+    # SDMA anvil host code: copied into build tree (no sed — host code needs
+    # unqualified log.hpp to find the host shim via include path ordering).
+    set(_GIN_SDMA_DIR "${PROJECT_BINARY_DIR}/gin/sdma")
+    foreach(_f anvil.cpp anvil.hpp)
+      add_custom_command(
+        OUTPUT "${_GIN_SDMA_DIR}/${_f}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${_GIN_SDMA_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          "${ROCSHMEM_SOURCE_DIR}/src/sdma/${_f}" "${_GIN_SDMA_DIR}/${_f}"
+        # Qualify device header includes so they resolve from the installed
+        # layout (nccl_device/gin/anvil_sdma/sdma/) without extra include dirs.
+        COMMAND sed -i
+          "s|#include \"anvil_device\\.hpp\"|#include \"nccl_device/gin/anvil_sdma/sdma/anvil_device.hpp\"|g"
+          "${_GIN_SDMA_DIR}/${_f}"
+        COMMAND sed -i
+          "s|#include \"sdma_pkt_struct\\.h\"|#include \"nccl_device/gin/anvil_sdma/sdma/sdma_pkt_struct.h\"|g"
+          "${_GIN_SDMA_DIR}/${_f}"
+        COMMAND sed -i
+          "s|#include \"sdma_pkt_struct_mi4\\.h\"|#include \"nccl_device/gin/anvil_sdma/sdma/sdma_pkt_struct_mi4.h\"|g"
+          "${_GIN_SDMA_DIR}/${_f}"
+        COMMAND sed -i
+          "s|#include \"sdma_opcodes\\.h\"|#include \"nccl_device/gin/anvil_sdma/sdma/sdma_opcodes.h\"|g"
+          "${_GIN_SDMA_DIR}/${_f}"
+        DEPENDS "${ROCSHMEM_SOURCE_DIR}/src/sdma/${_f}"
+        COMMENT "Copying ${_f} -> ${_GIN_SDMA_DIR}/${_f}"
+        VERBATIM)
+      list(APPEND _GIN_SDMA_OUTPUTS "${_GIN_SDMA_DIR}/${_f}")
+    endforeach()
+    add_custom_target(copy_rocshmem_sdma_sources DEPENDS ${_GIN_SDMA_OUTPUTS})
+    add_dependencies(copy_rocshmem_headers copy_rocshmem_sdma_sources)
+    target_sources(rccl PRIVATE "${_GIN_SDMA_DIR}/anvil.cpp")
+    # src/gin/ so host log.hpp wins over the device shim for anvil.cpp.
+    target_include_directories(rccl BEFORE PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/gin")
+
+    # Copy SDMA device headers next to gin_anvil_sdma.h so "sdma/anvil_device.hpp"
+    # resolves during build (same layout as the install tree).
+    set(_SDMA_DEV_DST "${PROJECT_BINARY_DIR}/include/nccl_device/gin/anvil_sdma/sdma")
+    foreach(_f anvil_device.hpp sdma_opcodes.h sdma_pkt_struct.h sdma_pkt_struct_mi4.h)
+      add_custom_command(
+        OUTPUT "${_SDMA_DEV_DST}/${_f}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${_SDMA_DEV_DST}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          "${ROCSHMEM_SOURCE_DIR}/src/sdma/${_f}" "${_SDMA_DEV_DST}/${_f}"
+        DEPENDS "${ROCSHMEM_SOURCE_DIR}/src/sdma/${_f}"
+        COMMENT "Copying sdma/${_f} -> ${_SDMA_DEV_DST}/${_f}"
+        VERBATIM)
+      list(APPEND _SDMA_DEV_OUTPUTS "${_SDMA_DEV_DST}/${_f}")
+    endforeach()
+    add_custom_target(copy_sdma_device_headers DEPENDS ${_SDMA_DEV_OUTPUTS})
+    add_dependencies(copy_rocshmem_headers copy_sdma_device_headers)
   endif()
 
   # Add rule to install ibvcore.h so that it can be found by ibv_core.hpp
@@ -1495,7 +1556,6 @@ if(ENABLE_ROCSHMEM)
   # of the final librccl.so link.
   target_link_libraries(rccl PRIVATE ${ROCSHMEM_LIBRARY})
   target_link_libraries(rccl PRIVATE ${HSAKMT_LIBRARY})
-  target_link_libraries(rccl PRIVATE ${IBVERBS})
   set(_rocshmem_offload_arch_flags "")
   foreach(_gpu_raw ${GPU_TARGETS})
     string(REGEX REPLACE ":.*" "" _gpu "${_gpu_raw}")
@@ -1508,15 +1568,10 @@ elseif(ENABLE_ROCSHMEM_GIN)
   # With the device linker (default), per-arch .bc files are injected directly
   # into the per-arch device link step via DeviceLinker.cmake.
   #
-  # Pull the SDMA host objects out of librocshmem.a so apps running only SDMA do
-  # not have to link it. Seeding by symbol rather than by file survives renames.
-  # GDA stays unresolved, as it needs constmem registration this mode cannot do.
+  # Seed rocshmem host symbols needed by GDA into librccl.so.  SDMA factory
+  # symbols are compiled in directly (gin_anvil_sdma_factory.cc) and no longer
+  # need pulling from librocshmem.a.
   set(_gin_rocshmem_syms
-    gin_anvil_sdma_probe
-    gin_anvil_sdma_create
-    gin_anvil_sdma_destroy
-    gin_anvil_sdma_get_num_channels
-    gin_anvil_sdma_get_channel_stride
     _ZN8rocshmem3ibvE)
   set(_gin_rocshmem_undefine "")
   foreach(_sym ${_gin_rocshmem_syms})
