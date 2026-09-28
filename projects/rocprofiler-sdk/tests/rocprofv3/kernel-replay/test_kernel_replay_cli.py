@@ -254,9 +254,9 @@ def test_counters_only_replay_has_no_service_conflict():
     assert service_conflicts(pmc=["SQ_WAVES"]) == []
 
 
-def test_att_conflicts_with_replay():
-    # ATT instruments every pass and reports them all under the dispatch id replay reuses.
-    assert service_conflicts(advanced_thread_trace=True) == ["--att"]
+def test_att_is_a_replay_pass_not_a_conflict():
+    # Replay gives the dispatch thread trace a pass of its own ahead of the counter passes.
+    assert service_conflicts(advanced_thread_trace=True, pmc=["SQ_WAVES"]) == []
 
 
 def test_pc_sampling_flag_conflicts_with_replay():
@@ -280,7 +280,7 @@ def test_every_conflicting_service_is_reported_together():
     # A user who asked for all of them should be told about all of them, not one per run.
     assert service_conflicts(
         advanced_thread_trace=True, pc_sampling_beta_enabled=True, spm=["SQ_WAVES"]
-    ) == ["--att", "PC sampling", "--spm"]
+    ) == ["PC sampling", "--spm"]
 
 
 def test_unset_service_options_do_not_conflict():
@@ -343,7 +343,7 @@ def test_conflicts_are_reported_in_a_stable_order():
     for _ in range(5):
         assert service_conflicts(
             spm=["SQ_WAVES"], advanced_thread_trace=True, pc_sampling_beta_enabled=True
-        ) == ["--att", "PC sampling", "--spm"]
+        ) == ["PC sampling", "--spm"]
 
 
 def test_missing_attributes_are_treated_as_unset():
@@ -356,7 +356,74 @@ def test_missing_attributes_are_treated_as_unset():
 
 
 def test_att_alone_does_not_drag_in_other_services():
-    assert service_conflicts(advanced_thread_trace=True, spm=None) == ["--att"]
+    assert service_conflicts(advanced_thread_trace=True, spm=None) == []
+
+
+def att_conflicts(**attrs):
+    return rocprofv3().att_options_conflicting_with_kernel_replay(
+        rocprofv3().dotdict(attrs)
+    )
+
+
+def test_dispatch_att_has_no_replay_option_conflict():
+    # The plain dispatch thread trace is what replay knows how to give a pass of its own.
+    assert att_conflicts(advanced_thread_trace=True, att_target_cu="1") == []
+
+
+def test_device_mode_att_options_conflict_with_replay():
+    # Each of these traces the device rather than one dispatch, so it would capture every pass.
+    for attr, name in (
+        ("att_consecutive_kernels", "--att-consecutive-kernels"),
+        ("att_no_intercept", "--att-no-intercept"),
+        ("selected_regions", "--selected-regions"),
+        ("collection_period", "--collection-period"),
+    ):
+        value = ["1:1:1"] if attr == "collection_period" else True
+        assert att_conflicts(advanced_thread_trace=True, **{attr: value}) == [name], attr
+
+
+def test_att_option_conflicts_need_att():
+    """Without --att these options belong to other services (counters honor --selected-regions,
+    for instance), and replay has no thread trace pass for them to escape."""
+    assert (
+        att_conflicts(
+            advanced_thread_trace=False,
+            selected_regions=True,
+            collection_period=["1:1:1"],
+            att_consecutive_kernels="4",
+        )
+        == []
+    )
+
+
+def test_att_option_conflicts_are_reported_together_in_a_stable_order():
+    for _ in range(5):
+        assert att_conflicts(
+            collection_period=["1:1:1"],
+            selected_regions=True,
+            att_no_intercept=True,
+            att_consecutive_kernels="4",
+            advanced_thread_trace=True,
+        ) == [
+            "--att-consecutive-kernels",
+            "--att-no-intercept",
+            "--selected-regions",
+            "--collection-period",
+        ]
+
+
+def test_unset_att_options_do_not_conflict():
+    # argparse leaves these as None/False rather than absent; none of them may look enabled.
+    assert (
+        att_conflicts(
+            advanced_thread_trace=True,
+            att_consecutive_kernels=None,
+            att_no_intercept=False,
+            selected_regions=False,
+            collection_period=None,
+        )
+        == []
+    )
 
 
 def test_counter_collection_is_never_itself_a_conflict():
