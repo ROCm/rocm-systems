@@ -673,9 +673,10 @@ registers `hip_capture_shutdown` via `atexit`. Runtime shims are **not** install
 `libamdhip64` static-init time: that pulled every HIP call through capture from DSO
 load before `hip::init()` completed and disturbed host stacks that load HIP early
 (e.g. Python + `spawn`). Events before `writer::open()` were never persisted anyway.
-Shutdown uninstalls shims from the slots that still hold them and flushes `events.bin` +
-`manifest.json`; a slot that another component wrapped after install keeps its wrapper,
-and the writer drops any event that reaches a shim after the trailer is written.
+Shutdown uninstalls the runtime shims from the slots that still hold them (the compiler
+table keeps its shims) and flushes `events.bin` + `manifest.json`; a slot that another
+component wrapped after install keeps its wrapper, and the writer drops any event that
+reaches a shim after the trailer is written.
 
 ## Enable Flag
 
