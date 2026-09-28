@@ -5,6 +5,7 @@
 
 #include <filesystem>
 #include <string>
+#include <system_error>
 #include <vector>
 
 namespace profiler_hub::common
@@ -13,13 +14,22 @@ namespace profiler_hub::common
 inline std::string
 dirname(const std::string& path)
 {
-    return std::filesystem::path(path).parent_path().string();
+    // parent_path() is empty for a bare filename; POSIX dirname returns ".".
+    const auto parent = std::filesystem::path(path).parent_path().string();
+    return parent.empty() ? std::string{ "." } : parent;
 }
 
 inline bool
 direxists(const std::string& path)
 {
-    return std::filesystem::is_directory(path);
+    try
+    {
+        std::error_code ec;
+        return std::filesystem::is_directory(path, ec);
+    } catch(const std::filesystem::filesystem_error&)
+    {
+        return false;
+    }
 }
 
 inline bool
@@ -40,8 +50,13 @@ makedir(const std::string& path)
     // Collect the ancestors that don't exist yet so we can apply 0755 to each
     // one we create, matching the previous mkdir(..., 0755) behavior on POSIX.
     std::vector<fs::path> created;
-    for(fs::path p = path; !p.empty() && !fs::exists(p); p = p.parent_path())
+    for(fs::path p = path; !p.empty(); p = p.parent_path())
     {
+        std::error_code exists_ec;
+        if(fs::exists(p, exists_ec))
+        {
+            break;
+        }
         created.push_back(p);
     }
 

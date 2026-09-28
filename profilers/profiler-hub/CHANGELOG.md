@@ -22,7 +22,9 @@ downstream consumer of the library.
 
 ### Added
 
-- Windows/MSVC build support (Visual Studio 2022 or 2026 Build Tools).
+- Windows/MSVC build support (Visual Studio 2022 or later Build Tools). SQLite
+  on Windows is obtained from the official amalgamation zip; bundled sqlite
+  symbols stay sealed (not re-exported from the DLL).
 
 ## [0.2.0] - 2026-09-02
 

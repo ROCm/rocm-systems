@@ -209,7 +209,8 @@ else()
     )
     target_link_options(
         profiler-hub
-        PRIVATE -Wl,--exclude-libs,$<TARGET_FILE_NAME:profiler-hub-sqlite3-static>
+        PRIVATE
+            -Wl,--exclude-libs,$<TARGET_FILE_NAME:profiler-hub-sqlite3-static>
     )
 endif()
 

@@ -62,7 +62,7 @@ include_process_id_in_filename(std::string_view filename)
         return std::string{};
     }
 
-    auto last_sep       = filename.find_last_of('/');
+    auto last_sep       = filename.find_last_of("/\\");
     auto filename_start = (last_sep == std::string_view::npos) ? 0 : last_sep + 1;
     auto dot_pos        = filename.find_last_of('.');
 
@@ -181,7 +181,8 @@ public:
         static std::shared_ptr<spdlog::logger> instance;
         static std::atomic<bool>               initialized{ false };
         static std::mutex                      init_mutex;
-
+        // POSIX child: explicitly resets inherited logger.
+        // Windows child: begins with a new uninitialized logger automatically.
 #ifndef _WIN32
         static std::once_flag atfork_flag;
         std::call_once(atfork_flag, [] {
