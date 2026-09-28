@@ -1,0 +1,28 @@
+{
+  "expected_failures": {
+    "2039b7ca01182a0f6707efc642a2c8993f78e1a4e66b153bc7f293c4088656fe": {
+      "kind": "memory-limit",
+      "reason": "Translation of this roughly 604 MiB object exceeds the corpus-process RSS limit."
+    },
+    "73c673e323c616f35ae0ba77ff2bda795d8c2ff1b3401ed78e723603d5cd2eff": {
+      "kind": "memory-limit",
+      "reason": "Translation of this roughly 604 MiB object exceeds the corpus-process RSS limit."
+    },
+    "7a5661a16f2141ef83492c3ee61862243383e832c4af726926f7097d323d00f7": {
+      "kind": "translation-error",
+      "reason": "Target recovery for this relocated s_swap_pc_i64 is not implemented.",
+      "returncode": 3,
+      "stderr_regex": "legalization \\.text\\+0x3b338 s_swap_pc_i64: indirect branch or call target recovery is not implemented for relocated kernel text"
+    },
+    "cf914d39eeec2127ef882b1c192370f83cabf0826d7b12e09fb93353e81317a7": {
+      "kind": "translation-error",
+      "reason": "Target recovery for this relocated s_swap_pc_i64 is not implemented.",
+      "returncode": 3,
+      "stderr_regex": "legalization \\.text\\+0x3b138 s_swap_pc_i64: indirect branch or call target recovery is not implemented for relocated kernel text"
+    }
+  },
+  "input_revision": "b0",
+  "output_revision": "a0",
+  "schema_version": 1,
+  "target": "gfx1250"
+}

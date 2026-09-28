@@ -654,8 +654,10 @@ jobs:
           DBT_ROCM_PATH="$("${ROCJITSU_DBT_VENV}/bin/rocm-sdk" path --root)"
           DBT_TRANSLATOR_BINARY="${ROCJITSU_BUILD_DIR}/tools/rj_dbt_translate"
           DBT_TRANSLATOR="${DBT_TRANSLATOR_BINARY}"
+          DBT_EXPECTED_FAILURES="${ROCJITSU_SOURCE_DIR}/tests/corpus/dbt/gfx1250_b0_a0_expected_failures_single_pass.json"
           if [[ "${{ matrix.verify_dbt_idempotence }}" == "1" ]]; then
             DBT_TRANSLATOR="${RUNNER_TEMP}/rj_dbt_translate-verify-idempotence"
+            DBT_EXPECTED_FAILURES="${ROCJITSU_SOURCE_DIR}/tests/corpus/dbt/gfx1250_b0_a0_expected_failures.json"
             printf '#!/usr/bin/env bash\nexec %q --verify-idempotence --verify-rewrite-discharge "$@"\n' \
               "${DBT_TRANSLATOR_BINARY}" \
               > "${DBT_TRANSLATOR}"
@@ -672,7 +674,7 @@ jobs:
             --dbt-translator "${DBT_TRANSLATOR}" \
             --dbt-llvm-objdump "${DBT_ROCM_PATH}/lib/llvm/bin/llvm-objdump" \
             --dbt-package-lock "${ROCJITSU_SOURCE_DIR}/tests/corpus/dbt/gfx1250_20260928_package_lock.json" \
-            --dbt-expected-failures "${ROCJITSU_SOURCE_DIR}/tests/corpus/dbt/gfx1250_b0_a0_expected_failures.json" \
+            --dbt-expected-failures "${DBT_EXPECTED_FAILURES}" \
             --dbt-expected-rewrites "${ROCJITSU_SOURCE_DIR}/tests/corpus/dbt/gfx1250_b0_a0_expected_rewrites.json" \
             --dbt-allow-incomplete-corpus \
             --dbt-timeout "${{ matrix.dbt_timeout }}" \
