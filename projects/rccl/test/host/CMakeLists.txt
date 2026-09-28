@@ -709,7 +709,8 @@ if(BUILD_TESTS)
     add_executable(rccl-UnitTestsMicroSymKernels ${TEST_MICRO_SYM_KERNELS_SOURCE_FILES})
     target_include_directories(rccl-UnitTestsMicroSymKernels PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}
-      ${RCCL_COMMON_INCLUDE_DIRS})
+      ${RCCL_COMMON_INCLUDE_DIRS}
+      ${PROJECT_BINARY_DIR}/hipify/src/device)  # sym_kernels.cc includes "tdm/tdmCopy.h"
     target_compile_definitions(rccl-UnitTestsMicroSymKernels PRIVATE ${RCCL_COMMON_COMPILE_DEFS}
       GENERATE_SYM_KERNELS
       SYM_KERNELS_HOST_CC_PATH="${PROJECT_BINARY_DIR}/hipify/gensrc/symmetric/sym_kernels_host.cc"
@@ -771,14 +772,14 @@ if(BUILD_TESTS)
   # their five MAXCHANNELS uses are clamp arguments rather than layout.
   #
   # The four production files are separate TUs so task_prep.cc's three sibling externs resolve to
-  # real code. task-prep-test.cc #includes TASK_PREP_CC_PATH; each remaining file moves from this
-  # source list into its own test TU as that unit comes under test.
+  # real code. Each file leaves this source list for its own test TU, which #includes its *_CC_PATH,
+  # as that unit comes under test; listing both would be a duplicate symbol.
   # ---------------------------------------------------------------------------
   set(TEST_MICRO_TASKPREP_SOURCE_FILES
     task-prep-test.cc
-    ${PROJECT_BINARY_DIR}/hipify/src/enqueue/task_prep/task_classify.cc
-    ${PROJECT_BINARY_DIR}/hipify/src/enqueue/task_prep/task_pretuning.cc
-    ${PROJECT_BINARY_DIR}/hipify/src/enqueue/task_prep/task_posttuning.cc
+    task-classify-test.cc
+    task-pretuning-test.cc
+    task-posttuning-test.cc
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
     fakes/transport_stubs.cc
@@ -786,6 +787,7 @@ if(BUILD_TESTS)
     fakes/nccl_fakes.cc
     fakes/hip_fakes.cc
     # Shared per-production-TU fakes (see MICROTEST_README.md for the map).
+    fakes/allocator_fakes.cc             # src/allocator.cc
     fakes/ce_fakes.cc                    # src/ce_coll.cc
     fakes/collectives_fakes.cc           # src/collectives.cc name tables/helpers
     fakes/comm_fakes.cc                  # src/init.cc comm lifecycle + CTA/channel params
@@ -812,9 +814,6 @@ if(BUILD_TESTS)
     ../common/main_altrsmi.cpp
   )
   set_source_files_properties(
-    ${PROJECT_BINARY_DIR}/hipify/src/enqueue/task_prep/task_classify.cc
-    ${PROJECT_BINARY_DIR}/hipify/src/enqueue/task_prep/task_pretuning.cc
-    ${PROJECT_BINARY_DIR}/hipify/src/enqueue/task_prep/task_posttuning.cc
     ${PROJECT_BINARY_DIR}/hipify/src/config/algorithm_parser.cc
     ${PROJECT_BINARY_DIR}/hipify/src/config/algorithm_registry.cc
     ${PROJECT_BINARY_DIR}/hipify/src/config/collconfig.cc
@@ -1548,6 +1547,7 @@ if(EXISTS "${RCCL_HIPIFY_DIR}/gensrc/symmetric/sym_kernels_host.cc")
   target_include_directories(rccl-UnitTestsMicroSymKernels PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${RCCL_INCLUDE_DIRS}
+    ${RCCL_HIPIFY_DIR}/src/device  # sym_kernels.cc includes "tdm/tdmCopy.h"
   )
 
   target_compile_definitions(rccl-UnitTestsMicroSymKernels PRIVATE
@@ -1577,15 +1577,16 @@ endif()
 # ---------------------------------------------------------------------------
 set(TEST_MICRO_TASKPREP_SOURCE_FILES
   ${CMAKE_CURRENT_SOURCE_DIR}/task-prep-test.cc
-  ${RCCL_HIPIFY_DIR}/src/enqueue/task_prep/task_classify.cc
-  ${RCCL_HIPIFY_DIR}/src/enqueue/task_prep/task_pretuning.cc
-  ${RCCL_HIPIFY_DIR}/src/enqueue/task_prep/task_posttuning.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/task-classify-test.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/task-pretuning-test.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/task-posttuning-test.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/bootstrap_stubs.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/topo_stubs.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/transport_stubs.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/nccl_stubs.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/nccl_fakes.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/hip_fakes.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/allocator_fakes.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/ce_fakes.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/collectives_fakes.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/comm_fakes.cc

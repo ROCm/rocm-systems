@@ -254,7 +254,7 @@ comm_data::configure()
 
     auto _fmt_flags = comm_data_tracker_t::get_format_flags();
     _fmt_flags &= (std::ios_base::fixed & std::ios_base::scientific);
-    _fmt_flags |= (std::ios_base::scientific);
+    _fmt_flags |= std::ios_base::scientific;
     comm_data_tracker_t::set_precision(3);
     comm_data_tracker_t::set_format_flags(_fmt_flags);
 }
