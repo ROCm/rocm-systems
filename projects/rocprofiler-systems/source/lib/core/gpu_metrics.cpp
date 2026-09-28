@@ -264,11 +264,13 @@ deserialize_gpu_metrics(const std::vector<std::uint8_t>& serialized_data,
     // Deserialize per-XCP sizes
     std::vector<std::uint8_t> vcn_xcp_sizes;
     std::vector<std::uint8_t> jpeg_xcp_sizes;
-    for(std::uint8_t i = 0; i < vcn_xcp_count; ++i)
+    vcn_xcp_sizes.reserve(vcn_xcp_count);
+for(std::uint8_t i = 0; i < vcn_xcp_count; ++i)
     {
         vcn_xcp_sizes.push_back(deserialize_uint8(serialized_data, offset));
     }
-    for(std::uint8_t i = 0; i < jpeg_xcp_count; ++i)
+    jpeg_xcp_sizes.reserve(jpeg_xcp_count);
+for(std::uint8_t i = 0; i < jpeg_xcp_count; ++i)
     {
         jpeg_xcp_sizes.push_back(deserialize_uint8(serialized_data, offset));
     }

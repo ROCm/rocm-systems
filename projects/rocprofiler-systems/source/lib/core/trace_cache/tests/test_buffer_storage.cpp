@@ -412,7 +412,8 @@ TEST_F(buffer_storage_test, concurrent_mixed_type_store)
     const int                items_per_thread = 10;
     std::vector<std::thread> threads;
 
-    for(int t = 0; t < num_threads; ++t)
+    threads.reserve(num_threads);
+for(int t = 0; t < num_threads; ++t)
     {
         threads.emplace_back([&, t]() {
             for(int i = 0; i < items_per_thread; ++i)
