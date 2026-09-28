@@ -7,6 +7,7 @@
 
 #include "common_cast.h"
 #include "p2p_resiliency_recovery_cast.h"
+#include "capability_cast.h"
 #include "net_telemetry.h"
 #include "qp_sharing.h"
 
@@ -707,6 +708,8 @@ ncclResult_t IbCastInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config
   ncclNetCommConfig_t* netCommConfig = nullptr;
   // Telemetry is initialized and reported by IbCastInitDevices below.
   NCCLCHECK(IbCastInitDevices(logFunction, profFunction));
+  // After IbCastInitDevices: the probe QP must use the final IbCastUseInline, like the recovery QPs.
+  if (ncclParamIbCastResiliencyPortRecovery()) NCCLCHECK(IbCastCapProbeDevices());
   NCCLCHECK(IbCastPortRecoveryThreadStart());
   NCCLCHECK(ncclCalloc(&netCommConfig, 1));
   netCommConfig->trafficClass = config->trafficClass;

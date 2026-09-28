@@ -10,6 +10,7 @@
 #include "connect_cast.h" // For IbCastQpCreate()
 #include "p2p_resiliency_recovery_cast.h"
 #include "qp_sharing.h"
+#include "capability_cast.h"
 
 NCCL_PARAM(IbCastResiliencyPortFailover, "IB_RESILIENCY_PORT_FAILOVER", 0);
 NCCL_PARAM(IbCastResiliencyPortFailoverMaxAttempts, "IB_RESILIENCY_PORT_FAILOVER_MAX_ATTEMPTS", 1);
@@ -680,6 +681,23 @@ ncclResult_t IbCastResiliencyDevInit(struct ncclIbResiliency* resCtx, uint devIn
   NCCLCHECK(wrap_ibv_create_cq(&resDev->probingCq, ibDev->context, cqSize, cqContext, NULL, 0));
   INFO(NCCL_NET, "NET/IB: %s: Created probing CQ (cq=%p) on device %d for resiliency context (%s comm=%p, cq_size=%d)",
        __func__, resDev->probingCq, devIndex, resCtx->baseComm->isSend ? "send" : "recv", resCtx->baseComm, cqSize);
+
+  // Recovery keep-alive needs a UD QP. Check every device before the first recovery CQ is created.
+  if (resCtx->recoveryEnabled && devIndex == 0) {
+    struct ncclIbNetCommBase* base = resCtx->baseComm;
+    for (int i = 0; i < base->vProps.ndevs; i++) {
+      int phys = base->vProps.devs[i];
+      bool ud = false;
+      NCCLCHECK(IbCastCapHasUd(&IbCastDevs[phys], &ud));
+      if (!ud) {
+        INFO(NCCL_NET, "NET/IB-CAST: device %s has no UD; port recovery off for comm %p", IbCastDevs[phys].devName,
+             base);
+        resCtx->recoveryEnabled = false;
+        resCtx->nPortRecoveryQps = 0;
+        break;
+      }
+    }
+  }
 
   if (resCtx->recoveryEnabled) {
     NCCLCHECK(IbCastPortRecoveryDevInit(resCtx, devIndex, ibDev));

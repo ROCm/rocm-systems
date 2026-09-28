@@ -11,7 +11,6 @@
 #include "p2p_resiliency_cast.h"
 #include "net_telemetry.h"
 #include "qp_sharing.h"
-#include "net_ib_cast_inspect.h"
 
 NCCL_PARAM(IbCastGidIndex, "IB_GID_INDEX", -1);
 NCCL_PARAM(IbCastRoutableFlidIbGidIndex, "IB_ROUTABLE_FLID_GID_INDEX", 1);
@@ -646,55 +645,6 @@ ncclResult_t IbCastQpError(struct ncclIbQp* qp) {
   memset(&attr, 0, sizeof(attr));
   attr.qp_state = IBV_QPS_ERR;
   NCCLCHECK(wrap_ibv_modify_qp(qp->qp, &attr, IBV_QP_STATE));
-  return ncclSuccess;
-}
-
-// UD has no capability bit, so try to create a UD QP. A failure means "no".
-static ncclResult_t IbCastProbeUdSupport(struct ncclIbDev* dev, bool* supported) {
-  *supported = false;
-  struct ibv_pd* pd = NULL;
-  struct ibv_cq* cq = NULL;
-  struct ncclIbQp probeQp;
-  memset(&probeQp, 0, sizeof(probeQp));
-
-  if (wrap_ibv_alloc_pd(&pd, dev->context) != ncclSuccess || pd == NULL) goto cleanup;
-  if (wrap_ibv_create_cq(&cq, dev->context, 1, NULL, NULL, 0) != ncclSuccess || cq == NULL) goto cleanup;
-  {
-    struct ncclIbQpCreateAttr createAttr;
-    memset(&createAttr, 0, sizeof(createAttr));
-    createAttr.type = IBV_QPT_UD;
-    createAttr.cq = cq;
-    createAttr.pd = pd;
-    createAttr.maxSendWorkRequest = 1;
-    createAttr.maxRecvWorkRequest = 1;
-    createAttr.qpContext = &dev->stats;
-    createAttr.ctsQpSlot = NCCL_CTS_QP_SLOT_INVALID;
-    if (IbCastQpCreate(&probeQp, &createAttr) == ncclSuccess && probeQp.qp != NULL) *supported = true;
-  }
-
-cleanup:
-  if (probeQp.qp) (void)wrap_ibv_destroy_qp(probeQp.qp);
-  if (cq) (void)wrap_ibv_destroy_cq(cq);
-  if (pd) (void)wrap_ibv_dealloc_pd(pd);
-  return ncclSuccess;
-}
-
-extern "C" ncclResult_t ncclIbCastGetDeviceCaps(int dev, struct ncclIbCastDeviceCaps* out) {
-  if (out == NULL) return ncclInvalidArgument;
-  if (dev < 0 || dev >= IbCastNMergedDevs) return ncclInvalidArgument;
-  int physDev = IbCastMergedDevs[dev].vProps.devs[0];
-  if (physDev < 0 || physDev >= IbCastNDevs) return ncclInvalidArgument;
-  struct ncclIbDev* ibDev = &IbCastDevs[physDev];
-
-  std::lock_guard<std::mutex> lock(ibDev->mutex);
-  if (ibDev->udSupported < 0) {
-    bool ok = false;
-    IbCastProbeUdSupport(ibDev, &ok);
-    ibDev->udSupported = ok ? 1 : 0;
-    INFO(NCCL_NET, "NET/IB-CAST: device %s capability probe: UD=%s", ibDev->devName,
-         ibDev->udSupported ? "yes" : "no");
-  }
-  out->hasUd = (ibDev->udSupported == 1);
   return ncclSuccess;
 }
 
