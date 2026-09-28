@@ -25,7 +25,6 @@
 """GPU-free unit tests for the rocprofv3 MPI rank/size environment handling."""
 
 import json
-import os
 import subprocess
 import sys
 
@@ -116,9 +115,9 @@ def launch(rocprofv3, rocm_root):
                 "--",
                 *REPORT_ENVIRONMENT,
             ],
-            env=dict(os.environ),
-            capture_output=True,
-            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
         )
         assert result.returncode == 0, result.stderr
 
