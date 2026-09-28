@@ -13,9 +13,12 @@
 
 #include "nccl.h"
 
+struct ncclComm;
 struct ncclGroupJob;
 
 extern std::function<ncclResult_t(struct ncclGroupJob*)> g_ncclGroupJobAbort;
+
+extern std::function<ncclResult_t(struct ncclComm*, bool*)> g_ncclCollPreconnect;
 
 void ResetGroupFakes();
 

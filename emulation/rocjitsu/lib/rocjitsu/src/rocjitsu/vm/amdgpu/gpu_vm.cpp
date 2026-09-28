@@ -20,7 +20,8 @@ namespace rocjitsu::amdgpu {
 class GpuVmAccessState {
 public:
   mutable std::shared_mutex mutex;
-  bool valid = true;
+  // Written under mutex; atomic so copied policy hits can check retirement without a lease.
+  std::atomic<bool> valid{true};
 };
 
 class GpuVmBindingState {
@@ -216,6 +217,32 @@ VmTranslationResult GpuVmAccess::translate(uint64_t address, std::size_t size,
   return translated;
 }
 
+bool GpuVmAccess::try_read_contiguous(uint64_t address, std::span<std::byte> bytes) const {
+  if (!access_state_)
+    return false;
+  std::shared_lock state_lock(access_state_->mutex);
+  if (!access_state_->valid || !translator_ || !physical_memory_)
+    return false;
+  // Bypass the fault-reporting translate() wrapper for this optional span.
+  const auto translation = translator_->translate(address, bytes.size(), VmAccessKind::Read);
+  return translation && translation.translation.contiguous_bytes >= bytes.size() &&
+         physical_memory_->try_read_contiguous(translation.translation.domain,
+                                               translation.translation.address, bytes);
+}
+
+bool GpuVmAccess::try_write_contiguous(uint64_t address, std::span<const std::byte> bytes) const {
+  if (!access_state_)
+    return false;
+  std::shared_lock state_lock(access_state_->mutex);
+  if (!access_state_->valid || !translator_ || !physical_memory_)
+    return false;
+  // Bypass the fault-reporting translate() wrapper for this optional span.
+  const auto translation = translator_->translate(address, bytes.size(), VmAccessKind::Write);
+  return translation && translation.translation.contiguous_bytes >= bytes.size() &&
+         physical_memory_->try_write_contiguous(translation.translation.domain,
+                                                translation.translation.address, bytes);
+}
+
 std::optional<Mtype> GpuVmAccess::query_mtype(uint64_t address) const {
   if (access_state_ == nullptr)
     return std::nullopt;
@@ -223,6 +250,22 @@ std::optional<Mtype> GpuVmAccess::query_mtype(uint64_t address) const {
   if (!access_state_->valid || translator_ == nullptr)
     return std::nullopt;
   return translator_->query_mtype(address);
+}
+
+std::optional<Mtype> GpuVmAccess::query_mtype(uint64_t address, VmMtypeCache &cache) const {
+  if (access_state_ == nullptr)
+    return std::nullopt;
+  // A hit uses copied policy only. Retirement invalidates the retained state
+  // before releasing any frontend storage; misses remain under its lease.
+  if (cache.access_state_ == access_state_ &&
+      access_state_->valid.load(std::memory_order_acquire) && cache.snapshot_.unchanged(address))
+    return cache.snapshot_.mtype;
+  std::shared_lock state_lock(access_state_->mutex);
+  if (!access_state_->valid || translator_ == nullptr)
+    return std::nullopt;
+  cache.snapshot_ = translator_->snapshot_mtype(address);
+  cache.access_state_ = access_state_;
+  return cache.snapshot_.mtype;
 }
 
 VmAccessOutcome GpuVmAccess::query_access(uint64_t address, std::size_t size,

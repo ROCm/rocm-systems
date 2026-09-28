@@ -16,9 +16,7 @@
 #include <utility>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace argparse
+namespace rocprofsys::argparse
 {
 struct parser_data;
 
@@ -132,5 +130,4 @@ add_group_arguments(parser_t&, const std::string&, parser_data&, bool _add_group
 
 parser_data&
 add_extended_arguments(parser_t&, parser_data&);
-}  // namespace argparse
-}  // namespace rocprofsys
+}  // namespace rocprofsys::argparse

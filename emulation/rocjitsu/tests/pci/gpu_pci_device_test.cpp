@@ -12,6 +12,7 @@
 #include "rocjitsu/vm/amdgpu/pci/register_symbols.h"
 #include "rocjitsu/vm/amdgpu/xcd.h"
 #include "rocjitsu/vm/soc.h"
+#include "util/distributed_shared_mutex.h"
 
 #include <gtest/gtest.h>
 
@@ -72,6 +73,8 @@ protected:
   rocjitsu::amdgpu::GpuMemory memory_{"memory"};
   rocjitsu::amdgpu::CommandProcessor command_processor_{"cp"};
   rocjitsu::amdgpu::Xcd xcd_{"xcd"};
+  rocjitsu::amdgpu::CommandProcessor hidden_command_processor_{"hidden-cp"};
+  rocjitsu::amdgpu::Xcd hidden_xcd_{"hidden-xcd"};
   rocjitsu::SoC soc_{"soc", &memory_, ROCJITSU_CODE_ARCH_CDNA5};
   rocjitsu::GpuPciDevice device_{"gpu", configured_spec(), &trace_, &soc_};
 
@@ -110,6 +113,15 @@ protected:
     bars = device_.bars();
     const auto found = std::ranges::find(bars, index, &simdojo::BarSpec::index);
     return found == bars.end() ? nullptr : &*found;
+  }
+
+  void add_hidden_xcd() {
+    ASSERT_EQ(soc_.num_xcds(), 1u);
+    hidden_xcd_.set_command_processor(&hidden_command_processor_);
+    soc_.add_xcd(&hidden_xcd_);
+    command_processor_.set_xcd_topology(0, {&command_processor_, &hidden_command_processor_});
+    hidden_command_processor_.set_xcd_topology(1,
+                                               {&command_processor_, &hidden_command_processor_});
   }
 };
 
@@ -1043,6 +1055,11 @@ protected:
   static constexpr uint64_t kDefaultComputeDoorbell = 0x900;
   static constexpr uint64_t kDefaultComputeRingGpu = 0x10000;
   static constexpr uint64_t kDefaultComputeReadPointerGpu = 0x11ff0;
+  static constexpr uint64_t kDefaultComputeWritePointerGpu = 0x11ff8;
+  static constexpr uint64_t kSecondComputeDoorbell = 0x904;
+  static constexpr uint64_t kSecondComputeRingGpu = 0x12000;
+  static constexpr uint64_t kSecondComputeReadPointerGpu = 0x13ff0;
+  static constexpr uint64_t kSecondComputeWritePointerGpu = 0x13ff8;
   static constexpr uint64_t kDefaultProcessPageTable = 0x30000;
   static constexpr uint64_t kDefaultProcessPdb2 = 0x31000;
   static constexpr uint64_t kDefaultProcessPdb1 = 0x32000;
@@ -1052,6 +1069,8 @@ protected:
   static constexpr uint64_t kDefaultComputeSecondPagePhysical = 0x2a0000;
   static constexpr uint64_t kDefaultComputeReadPointerPhysical =
       kDefaultComputeSecondPagePhysical + 0xff0;
+  static constexpr uint64_t kSecondComputeRingPhysical = 0x2b0000;
+  static constexpr uint64_t kSecondComputeSecondPagePhysical = 0x2c0000;
 
   RecordingTransport transport_;
   simdojo::PciDevice::Transport attached_{.irq = &transport_, .dma = &transport_};
@@ -1137,44 +1156,66 @@ protected:
     device_.drain_doorbell_inbox_for_test();
   }
 
-  void submit_default_compute_queue() {
+  void submit_default_compute_queue(bool aql = false, bool second = false) {
+    const uint64_t ring_gpu = second ? kSecondComputeRingGpu : kDefaultComputeRingGpu;
+    const uint64_t read_pointer_gpu =
+        second ? kSecondComputeReadPointerGpu : kDefaultComputeReadPointerGpu;
+    const uint64_t write_pointer_gpu =
+        second ? kSecondComputeWritePointerGpu : kDefaultComputeWritePointerGpu;
+    const uint64_t doorbell = second ? kSecondComputeDoorbell : kDefaultComputeDoorbell;
+    const uint64_t frame = kRingPhysical + (second ? 64 * sizeof(uint32_t) : 0);
     store_vram_qword(kDefaultProcessPageTable, kDefaultProcessPdb2 | 1);
     store_vram_qword(kDefaultProcessPdb2, kDefaultProcessPdb1 | 1);
     store_vram_qword(kDefaultProcessPdb1, kDefaultProcessPdb0 | 1);
     store_vram_qword(kDefaultProcessPdb0, kDefaultProcessPtb | 1);
-    store_vram_qword(kDefaultProcessPtb + 0x10 * sizeof(uint64_t),
-                     kDefaultComputeRingPhysical | kGfx12SystemLeafPteFlags);
-    store_vram_qword(kDefaultProcessPtb + 0x11 * sizeof(uint64_t),
-                     kDefaultComputeSecondPagePhysical | kGfx12SystemLeafPteFlags);
+    store_vram_qword(kDefaultProcessPtb + (second ? 0x12 : 0x10) * sizeof(uint64_t),
+                     (second ? kSecondComputeRingPhysical : kDefaultComputeRingPhysical) |
+                         kGfx12SystemLeafPteFlags);
+    store_vram_qword(
+        kDefaultProcessPtb + (second ? 0x13 : 0x11) * sizeof(uint64_t),
+        (second ? kSecondComputeSecondPagePhysical : kDefaultComputeSecondPagePhysical) |
+            kGfx12SystemLeafPteFlags);
 
-    store_qword(kReadPointerPhysical, 0);
+    if (!second)
+      store_qword(kReadPointerPhysical, 0);
     store_dword(kApiStatusPhysical, 0);
-    store_dword(kRingPhysical, 0x00040021);
-    store_dword(kRingPhysical + 1 * sizeof(uint32_t), 3);
-    store_qword(kRingPhysical + 2 * sizeof(uint32_t), kDefaultProcessPageTable);
-    store_qword(kRingPhysical + 20 * sizeof(uint32_t), kSchedulerMqdGpu);
-    store_dword(kRingPhysical + 28 * sizeof(uint32_t), 1);
-    store_qword(kRingPhysical + 38 * sizeof(uint32_t), kApiStatusGpu);
-    store_qword(kRingPhysical + 40 * sizeof(uint32_t), 1);
+    store_dword(frame, 0x00040021);
+    store_dword(frame + 1 * sizeof(uint32_t), 3);
+    store_qword(frame + 2 * sizeof(uint32_t), kDefaultProcessPageTable);
+    store_dword(frame + 18 * sizeof(uint32_t), static_cast<uint32_t>(doorbell / 4));
+    store_qword(frame + 20 * sizeof(uint32_t), kSchedulerMqdGpu);
+    store_qword(frame + 22 * sizeof(uint32_t), write_pointer_gpu);
+    store_dword(frame + 28 * sizeof(uint32_t), 1);
+    store_qword(frame + 38 * sizeof(uint32_t), kApiStatusGpu);
+    store_qword(frame + 40 * sizeof(uint32_t), 1);
 
     store_dword(kSchedulerMqdPhysical + 130 * sizeof(uint32_t), 0);
     store_dword(kSchedulerMqdPhysical + 136 * sizeof(uint32_t),
-                static_cast<uint32_t>(kDefaultComputeRingGpu >> 8));
+                static_cast<uint32_t>(ring_gpu >> 8));
     store_dword(kSchedulerMqdPhysical + 137 * sizeof(uint32_t),
-                static_cast<uint32_t>(kDefaultComputeRingGpu >> 40));
+                static_cast<uint32_t>(ring_gpu >> 40));
     store_dword(kSchedulerMqdPhysical + 139 * sizeof(uint32_t),
-                static_cast<uint32_t>(kDefaultComputeReadPointerGpu));
+                static_cast<uint32_t>(read_pointer_gpu));
     store_dword(kSchedulerMqdPhysical + 140 * sizeof(uint32_t),
-                static_cast<uint32_t>(kDefaultComputeReadPointerGpu >> 32));
-    store_dword(kSchedulerMqdPhysical + 143 * sizeof(uint32_t), kDefaultComputeDoorbell);
-    store_dword(kSchedulerMqdPhysical + 145 * sizeof(uint32_t), 9);
+                static_cast<uint32_t>(read_pointer_gpu >> 32));
+    store_dword(kSchedulerMqdPhysical + 141 * sizeof(uint32_t),
+                static_cast<uint32_t>(write_pointer_gpu));
+    store_dword(kSchedulerMqdPhysical + 142 * sizeof(uint32_t),
+                static_cast<uint32_t>(write_pointer_gpu >> 32));
+    store_dword(kSchedulerMqdPhysical + 143 * sizeof(uint32_t), doorbell);
+    store_dword(kSchedulerMqdPhysical + 145 * sizeof(uint32_t), 9 | (aql ? 0x08000000 : 0));
+    store_dword(kSchedulerMqdPhysical + 181 * sizeof(uint32_t), aql ? 1 : 0);
 
-    auto mes_doorbell = std::bit_cast<std::array<std::byte, sizeof(uint64_t)>>(uint64_t{64});
+    auto mes_doorbell = std::bit_cast<std::array<std::byte, sizeof(uint64_t)>>(
+        second ? uint64_t{128} : uint64_t{64});
     ring_doorbell(0x60, mes_doorbell);
     ASSERT_EQ(transport_.dword_at(kApiStatusPhysical), 1u);
-    ASSERT_EQ(soc_.mes_engine().active_queues(), 1u);
-    ASSERT_EQ(soc_.queue_registry().active_queues(), 1u);
-    ASSERT_EQ(command_processor_.registered_pm4_queue_count_for_test(), 1u);
+    ASSERT_EQ(soc_.mes_engine().active_queues(), second ? 2u : 1u);
+    ASSERT_EQ(soc_.queue_registry().active_queues(), second ? 2u : 1u);
+    if (aql)
+      ASSERT_EQ(command_processor_.registered_queue_count_for_test(), second ? 2u : 1u);
+    else
+      ASSERT_EQ(command_processor_.registered_pm4_queue_count_for_test(), second ? 2u : 1u);
   }
 
   [[nodiscard]] std::optional<rocjitsu::amdgpu::AddressSpaceHandle>
@@ -1238,6 +1279,38 @@ TEST_F(GpuDeviceMes, ExecutesTheKernelQueueAndPublishesBothCompletionFences) {
   EXPECT_EQ(transport_.dword_at(kApiStatusPhysical), 1u);
   EXPECT_EQ(transport_.dword_at(kRingFencePhysical), 7u);
   EXPECT_EQ(transport_.dword_at(kReadPointerPhysical), 128u);
+}
+
+TEST_F(GpuDeviceMes, AqlQueuesDoNotUseXcdsHiddenFromPciDiscovery) {
+  const rocjitsu::GpuPciDeviceSpec spec = configured_spec();
+  ASSERT_EQ(std::ranges::count(spec.discovery.blocks, rocjitsu::IpHardwareId::Gc,
+                               &rocjitsu::IpBlock::hardware_id),
+            1);
+  add_hidden_xcd();
+  ASSERT_EQ(soc_.num_xcds(), 2u);
+
+  submit_default_compute_queue(/*aql=*/true);
+  submit_default_compute_queue(/*aql=*/true, /*second=*/true);
+
+  EXPECT_EQ(command_processor_.registered_queue_count_for_test(), 2u);
+  EXPECT_EQ(hidden_command_processor_.registered_queue_count_for_test(), 0u)
+      << "both queue owners must stay on the advertised XCC";
+}
+
+TEST_F(GpuDeviceMes, Pm4QueuesDoNotUseXcdsHiddenFromPciDiscovery) {
+  const rocjitsu::GpuPciDeviceSpec spec = configured_spec();
+  ASSERT_EQ(std::ranges::count(spec.discovery.blocks, rocjitsu::IpHardwareId::Gc,
+                               &rocjitsu::IpBlock::hardware_id),
+            1);
+  add_hidden_xcd();
+  ASSERT_EQ(soc_.num_xcds(), 2u);
+
+  submit_default_compute_queue(/*aql=*/false);
+  submit_default_compute_queue(/*aql=*/false, /*second=*/true);
+
+  EXPECT_EQ(command_processor_.registered_pm4_queue_count_for_test(), 2u);
+  EXPECT_EQ(hidden_command_processor_.registered_pm4_queue_count_for_test(), 0u)
+      << "both queue owners must stay on the advertised XCC";
 }
 
 TEST_F(GpuDeviceMes, DropsADoorbellQueuedByARevokedTransportGeneration) {
@@ -2389,7 +2462,7 @@ TEST_F(GpuDeviceMes, LostConnectionReleasesOnlyPciQueuesAndAllowsPasidReuse) {
   rocjitsu::amdgpu::CommandProcessor legacy_cp("legacy-cp");
   legacy_cp.set_gpu_vm(&soc_.gpu_vm());
   rocjitsu::amdgpu::LegacyPageTable legacy_page_table;
-  std::shared_mutex legacy_page_table_mutex;
+  util::DistributedSharedMutex legacy_page_table_mutex;
   rocjitsu::amdgpu::LegacyGpuVmAdapter legacy_vm(soc_.gpu_vm(), soc_.memory());
   const rocjitsu::amdgpu::AddressSpaceHandle legacy_address_space =
       legacy_vm.register_address_space(9, &legacy_page_table, &legacy_page_table_mutex);

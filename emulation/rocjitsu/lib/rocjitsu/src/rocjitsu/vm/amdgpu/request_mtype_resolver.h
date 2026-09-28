@@ -28,7 +28,7 @@ public:
   Mtype at(uint64_t addr) {
     if (!access_)
       return fallback_;
-    const std::optional<Mtype> mtype = access_->query_mtype(addr);
+    const std::optional<Mtype> mtype = access_->query_mtype(addr, mtype_cache_);
     if (!mtype)
       return fallback_;
     return combine_ ? effective_mtype(fallback_, *mtype) : *mtype;
@@ -36,6 +36,7 @@ public:
 
 private:
   std::optional<GpuVmAccess> access_;
+  VmMtypeCache mtype_cache_;
   Mtype fallback_;
   bool combine_;
 };

@@ -3,6 +3,8 @@
 
 """Tests for packed execute code generation."""
 
+from amdisa.isa_profile import FloatDotAccumulation
+
 from amdisa.codegen.execute.packed import (
     gen_dot2,
     gen_dot2_true16,
@@ -259,6 +261,41 @@ def test_dot2_half_forms_narrow_inline_float_constants():
         assert f'raw1 = util::{narrow}(std::bit_cast<float>(raw1));' in cpp
         # src2 is an f32 accumulator on this family, so it stays 32-bit.
         assert 'raw2' not in cpp
+        assert (
+            'isa_properties(wf.cu().arch()).float_dot_accumulation == FloatDotAccumulation::Gfx11'
+            in cpp
+        )
+        assert 'amdgpu::gfx11_dot2_f32<' in cpp
+        if cls == 'dot2_f32_bf16':
+            for index in range(2):
+                assert f'dot2_src_needs_half_replication(inst_.src{index})' in cpp
+                assert (
+                    f'raw{index} = (amdgpu::RegisterAccess(wf).read_lane(src{index}, lane) >> 16) * 0x10001u;'
+                    in cpp
+                )
+
+
+def test_rdna4_dot2_uses_exact_policy_and_encoding_specific_inline_halves():
+    for cls in ('dot2_f32_f16', 'dot2_f32_bf16'):
+        cpp = gen_dot2(
+            ['vdst'],
+            ['src0', 'src1', 'src2'],
+            cls,
+            opsel_exprs=('inst_.opsel', 'inst_.opsel_hi'),
+            dot_accumulation=FloatDotAccumulation.GFX12,
+        )
+        assert 'amdgpu::gfx12_dot2_f32<' in cpp
+        assert 'gfx11_dot2_f32' not in cpp
+        assert 'float result = a0 * b0' not in cpp
+        for index in range(2):
+            if cls == 'dot2_f32_f16':
+                assert f'dot2_src_needs_half_replication(inst_.src{index})' not in cpp
+            else:
+                raw = f'amdgpu::RegisterAccess(wf).read_lane(src{index}, lane)'
+                assert (
+                    f'raw{index} = (amdgpu::is_inline_float_src(inst_.src{index}) ? '
+                    f'({raw} >> 16) : ({raw} & 0xffffu)) * 0x10001u;' in cpp
+                )
 
 
 def test_dot2_true16_narrows_inline_float_constants():
@@ -467,7 +504,8 @@ def test_renamed_vop3p_packed_f32_probe_passes_profile_selectors():
         is None
     )
     assert (
-        vop3p_local_simd_probe_line('v_pk_add_f16_vop3p', ('opsel', 'opsel_hi')) is None
+        vop3p_local_simd_probe_line('v_pk_add_f16_vop3p', ('opsel', 'opsel_hi'))
+        == '  ROCJITSU_TRY_SIMD_PACKED_FLOAT(ADD, false);'
     )
 
 
@@ -600,3 +638,18 @@ def test_gfx1250_bf16_mad_mix_variants_use_mode_rounding_helper():
     assert 'wf.fp_round_mode_f16_f64(), inst_.clamp' in cpp_lo
     assert 'util::f32_to_bf16(result)' not in cpp_lo
     assert 'util::f32_to_bf16(result)' not in cpp_hi
+
+
+def test_renamed_packed_float_routes_use_exact_helpers():
+    for spelling, operation, bf16 in (
+        ('v_pk_fma_f16_vop3p', 'FMA', False),
+        ('v_pk_min_f16_vop3p', 'MIN', False),
+        ('v_pk_max_f16_vop3p', 'MAX', False),
+        ('v_pk_add_bf16_vop3p', 'ADD', True),
+        ('v_pk_fma_bf16_vop3p', 'FMA', True),
+    ):
+        probe = vop3p_local_simd_probe_line(spelling, ('opsel', 'opsel_hi'))
+        assert (
+            probe
+            == f'  ROCJITSU_TRY_SIMD_PACKED_FLOAT({operation}, {str(bf16).lower()});'
+        )

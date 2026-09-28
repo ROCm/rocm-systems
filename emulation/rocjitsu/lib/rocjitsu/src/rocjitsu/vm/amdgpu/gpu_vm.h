@@ -9,6 +9,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_handles.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -183,6 +184,26 @@ public:
   [[nodiscard]] virtual VmAccessOutcome write(VmMemoryDomain domain, uint64_t address,
                                               std::span<const std::byte> bytes) = 0;
 
+  /// @brief Attempt a batched copy with all-or-nothing refusal.
+  /// @details A false result leaves the destination unchanged and reports no
+  /// guest fault. Backings may decline spans they cannot service with this
+  /// guarantee; callers retry smaller accesses. A successful copy is not atomic
+  /// with respect to concurrent data accesses.
+  [[nodiscard]] virtual bool try_read_contiguous(VmMemoryDomain domain, uint64_t address,
+                                                 std::span<std::byte> bytes) {
+    (void)domain;
+    (void)address;
+    (void)bytes;
+    return false;
+  }
+  [[nodiscard]] virtual bool try_write_contiguous(VmMemoryDomain domain, uint64_t address,
+                                                  std::span<const std::byte> bytes) {
+    (void)domain;
+    (void)address;
+    (void)bytes;
+    return false;
+  }
+
   /// @brief Perform one acquire load from naturally aligned backing storage.
   /// @details Loads may be 2, 4, or 8 bytes. The 2-byte form is required by
   /// the AQL packet-header publication protocol.
@@ -254,6 +275,30 @@ public:
   }
 };
 
+/// @brief Copied page policy with an optional retained mutation token.
+/// @details A translator may cache a range only when it invalidates the token
+/// before every policy mutation. Capture the policy and token under the same
+/// lease that excludes those mutations. No backing pointer is retained.
+struct VmMtypeSnapshot {
+  std::optional<Mtype> mtype;
+  uint64_t begin = 0;
+  uint64_t size = 0;
+  std::shared_ptr<const std::atomic<uint64_t>> mutation_epoch{};
+  uint64_t captured_epoch = 0;
+
+  [[nodiscard]] bool unchanged(uint64_t address) const {
+    return address >= begin && address - begin < size && mutation_epoch &&
+           captured_epoch == mutation_epoch->load(std::memory_order_acquire);
+  }
+};
+
+/// @brief Request-local policy cache, including the binding that owns it.
+class VmMtypeCache {
+  friend class GpuVmAccess;
+  std::shared_ptr<GpuVmAccessState> access_state_;
+  VmMtypeSnapshot snapshot_;
+};
+
 /// @brief Address-space policy separated from the physical backing transport.
 class AddressSpaceTranslator {
 public:
@@ -269,6 +314,14 @@ public:
   [[nodiscard]] virtual std::optional<Mtype> query_mtype(uint64_t address) const {
     const VmTranslationResult translated = translate(address, 1, VmAccessKind::Read);
     return translated ? std::optional<Mtype>(translated.translation.mtype) : std::nullopt;
+  }
+
+  /// @brief Optionally retain a mutation-checked copy of page policy.
+  /// @details Cacheable snapshots capture the policy and token under the same
+  /// lease and invalidate that token before every policy mutation. Retain only
+  /// copied policy, never a backing pointer. The default remains uncached.
+  [[nodiscard]] virtual VmMtypeSnapshot snapshot_mtype(uint64_t address) const {
+    return {.mtype = query_mtype(address)};
   }
 
   /// @brief Translate one span for a non-mutating address-validity probe.
@@ -426,6 +479,8 @@ public:
                                               VmAccessKind access) const;
   /// @brief Query cache policy without exposing physical backing metadata.
   [[nodiscard]] std::optional<Mtype> query_mtype(uint64_t address) const;
+  /// @brief Reuse a copied policy while both its binding and mutation token are valid.
+  [[nodiscard]] std::optional<Mtype> query_mtype(uint64_t address, VmMtypeCache &cache) const;
   /// @brief Query whether a complete virtual range currently permits an access.
   /// @details This side-effect-free query is for provisioning and routing decisions
   /// where an absent mapping is expected and must not be delivered as a GPU fault.
@@ -451,6 +506,12 @@ public:
   /// @brief Resume a translated write at @p completed_bytes.
   [[nodiscard]] VmAccessOutcome write(uint64_t address, std::span<const std::byte> bytes,
                                       std::size_t &completed_bytes) const;
+  /// @brief Try one translated span with all-or-nothing refusal.
+  /// @details Refusal leaves both bytes and backing untouched. It does not
+  /// report a guest fault; the caller must issue its original smaller accesses.
+  /// A successful copy is not atomic with respect to concurrent data accesses.
+  [[nodiscard]] bool try_read_contiguous(uint64_t address, std::span<std::byte> bytes) const;
+  [[nodiscard]] bool try_write_contiguous(uint64_t address, std::span<const std::byte> bytes) const;
   [[nodiscard]] AtomicLoadResult atomic_load(uint64_t address, uint32_t width) const;
   [[nodiscard]] VmAccessOutcome atomic_store(uint64_t address, uint32_t width,
                                              uint64_t value) const;

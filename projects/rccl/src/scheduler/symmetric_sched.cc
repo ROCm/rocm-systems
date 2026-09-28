@@ -104,7 +104,8 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
     int index;
     struct ncclTaskColl* next = task->next;
     ncclDevRedOp_t symkOp = symkRedOp(task->opHost, task->opDev.op);
-    bool symAvailable = ncclSymkAvailable(comm, task->func, symkOp, task->datatype, task->count);
+    bool symAvailable = task->symkExtract != RCCL_SYMK_EXTRACT_DENY &&
+                        ncclSymkAvailable(comm, task->func, symkOp, task->datatype, task->count);
     // Env (NCCL_ALGO/PROTO/SYM_KERNEL) is a global override that wins over per-call
     // algSelection for any function it forced.
     uint64_t effAlgMask = comm->tuningContext.forced[task->func] ? 0 : task->algMask;
@@ -296,6 +297,28 @@ exit:
   return ret;
 }
 
+// Tma kernels cut a ncclTmaShmemScratchWarpSize() staging window per warp out of the block's grant
+// (ncclSymkTileSmem()). sym_kernels.h static_asserts the constants; the width this launch actually
+// carries and the grant it actually received are only visible here. No-op for every other kernel.
+static ncclResult_t symCheckTmaLaunch(ncclSymkKernelId kernelId, const char* kernelName, int nWarps,
+                                      int maxDynamicSmem) {
+  if (!(1 & (ncclSymkTmaKernelMask() >> (int)kernelId))) return ncclSuccess;
+  // An overrun would DMA a neighbour's window to every peer.
+  if (nWarps * ncclTmaShmemScratchWarpSize() > maxDynamicSmem) {
+    WARN("Symmetric kernel %s needs %d warps x %d B of tile staging LDS (%d B) but the launch reserves %d B",
+         kernelName, nWarps, ncclTmaShmemScratchWarpSize(), nWarps * ncclTmaShmemScratchWarpSize(), maxDynamicSmem);
+    return ncclInternalError;
+  }
+  // ncclTuningSymkModelSim() is the only producer of this width, so a mismatch means something
+  // downstream overwrote it or the kernel took the LL arm by mistake.
+  if (nWarps != ncclSymkWarpsPerBlock) {
+    WARN("Symmetric kernel %s launching with %d warps, expected the tuned %d", kernelName, nWarps,
+         ncclSymkWarpsPerBlock);
+    return ncclInternalError;
+  }
+  return ncclSuccess;
+}
+
 ncclResult_t ncclSymmetricTaskScheduler(struct ncclComm* comm,
                                         struct ncclIntruQueue<struct ncclTaskColl, &ncclTaskColl::next>* symTaskQueue,
                                         struct ncclKernelPlan* plan) {
@@ -339,7 +362,8 @@ ncclResult_t ncclSymmetricTaskScheduler(struct ncclComm* comm,
                      ncclSymkKernelListProfile[kernelIndex] :
                      ncclSymkKernelList[kernelIndex];
   int maxDynamicSmem = ncclSymkKernelMaxDynamicSmem[kernelIndex];
-  plan->kernelDynSmem = (1 & ncclSymkDynamicSmemKernelMask() >> (int)kernelId) ? maxDynamicSmem : 0;
+  plan->kernelDynSmem = (1 & (ncclSymkDynamicSmemKernelMask() >> (int)kernelId)) ? maxDynamicSmem : 0;
+  NCCLCHECKGOTO(symCheckTmaLaunch(kernelId, kernelName, headTask->nWarps, maxDynamicSmem), ret, fail);
   task = headTask;
   while (task != nullptr && task->devFuncId == devFuncId) {
     workCount++;

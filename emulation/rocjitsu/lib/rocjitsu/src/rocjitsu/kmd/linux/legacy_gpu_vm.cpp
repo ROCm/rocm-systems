@@ -30,7 +30,8 @@ public:
   Binding(std::shared_ptr<GpuMemory> memory, uint32_t vmid,
           LegacyAddressSpaceRegistration registration, std::shared_ptr<void> frontend_lifetime)
       : memory_(std::move(memory)), address_space_(std::make_shared<LegacyAddressSpace>(*memory_)),
-        vmid_(vmid), frontend_lifetime_(std::move(frontend_lifetime)) {
+        vmid_(vmid), mutation_epoch_(std::move(registration.mutation_epoch)),
+        frontend_lifetime_(std::move(frontend_lifetime)) {
     address_space_->register_process(vmid_, registration.page_table, registration.page_table_mutex,
                                      registration.page_table_generation,
                                      std::move(registration.request_mutex));
@@ -75,16 +76,34 @@ public:
     return address_space_->pte_mtype(address, vmid_);
   }
 
+  [[nodiscard]] VmMtypeSnapshot snapshot_mtype(uint64_t address) const override {
+    auto guard = address_space_->acquire_page_table_request(vmid_);
+    if (!mutation_epoch_ || !guard.cacheable())
+      return {.mtype = guard.owns_lock() ? address_space_->pte_mtype(address, guard)
+                                         : query_mtype(address)};
+    return {.mtype = address_space_->pte_mtype(address, guard),
+            .begin = address & ~(kLegacyPageSize - 1),
+            .size = kLegacyPageSize,
+            .mutation_epoch = mutation_epoch_,
+            .captured_epoch = mutation_epoch_->load(std::memory_order_relaxed)};
+  }
+
   [[nodiscard]] VmTranslationResult probe_translation(uint64_t address, std::size_t size,
                                                       VmAccessKind access) const override {
-    const bool accessible = access == VmAccessKind::Execute
-                                ? address_space_->is_fetchable(address, vmid_)
-                            : access == VmAccessKind::Write || access == VmAccessKind::Atomic
-                                ? address_space_->has_writable_host_backing(address, vmid_, size)
-                                : address_space_->has_host_backing(address, vmid_, size);
+    const auto translated = translate(address, size, access);
+    if (!translated)
+      return translated;
+    // GpuVmAccess walks translation spans. Probe only this span so a large
+    // range does not repeatedly rescan every remaining host page.
+    const auto span_size = std::min<uint64_t>(size, translated.translation.contiguous_bytes);
+    const bool accessible =
+        access == VmAccessKind::Execute ? address_space_->is_fetchable(address, vmid_)
+        : access == VmAccessKind::Write || access == VmAccessKind::Atomic
+            ? address_space_->has_writable_host_backing(address, vmid_, span_size)
+            : address_space_->has_host_backing(address, vmid_, span_size);
     if (!accessible)
       return {.outcome = VmAccessOutcome::Faulted, .translation = {}};
-    return translate(address, size, access);
+    return translated;
   }
 
   [[nodiscard]] VmAccessOutcome read(VmMemoryDomain domain, uint64_t address,
@@ -118,6 +137,19 @@ public:
         address,
         std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size()),
         vmid_));
+  }
+
+  [[nodiscard]] bool try_read_contiguous(VmMemoryDomain domain, uint64_t address,
+                                         std::span<std::byte> bytes) override {
+    return domain == VmMemoryDomain::Compatibility &&
+           address_space_->try_copy_contiguous(address, bytes.data(), bytes.size(), vmid_, false);
+  }
+
+  [[nodiscard]] bool try_write_contiguous(VmMemoryDomain domain, uint64_t address,
+                                          std::span<const std::byte> bytes) override {
+    return domain == VmMemoryDomain::Compatibility &&
+           address_space_->try_copy_contiguous(address, const_cast<std::byte *>(bytes.data()),
+                                               bytes.size(), vmid_, true);
   }
 
   [[nodiscard]] AtomicLoadResult atomic_load(VmMemoryDomain domain, uint64_t address,
@@ -200,6 +232,7 @@ private:
   std::shared_ptr<GpuMemory> memory_;
   std::shared_ptr<LegacyAddressSpace> address_space_;
   uint32_t vmid_ = 0;
+  std::shared_ptr<const std::atomic<uint64_t>> mutation_epoch_;
   std::shared_ptr<void> frontend_lifetime_;
 };
 
@@ -257,8 +290,9 @@ LegacyGpuVmAdapter::register_address_space(uint32_t vmid,
 }
 
 AddressSpaceHandle LegacyGpuVmAdapter::register_address_space(
-    uint32_t vmid, LegacyPageTable *page_table, std::shared_mutex *page_table_mutex,
-    const uint64_t *page_table_generation, std::shared_ptr<std::shared_mutex> request_mutex,
+    uint32_t vmid, LegacyPageTable *page_table, util::DistributedSharedMutex *page_table_mutex,
+    const uint64_t *page_table_generation,
+    std::shared_ptr<util::DistributedSharedMutex> request_mutex,
     std::shared_ptr<void> frontend_lifetime) {
   return register_address_space(vmid,
                                 {.page_table = page_table,

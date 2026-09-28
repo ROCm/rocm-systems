@@ -1921,12 +1921,10 @@ void VFrexpMantF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
         *this, wf, vdst, lane,
         amdgpu::sdwa::round_f16_result(
             *this, wf,
-            [&]() {
-              int e;
-              return std::frexp(static_cast<float>(util::f16_to_f32(static_cast<uint16_t>(
-                                    amdgpu::RegisterAccess(wf).read_lane(src0, lane)))),
-                                &e);
-            }(),
+            amdgpu::frexp_f32(util::f16_to_f32(static_cast<uint16_t>(
+                                  amdgpu::RegisterAccess(wf).read_lane(src0, lane))),
+                              wf.fp_denorm_mode_f32())
+                .mantissa,
             wf.fp16_ovfl()));
   }
 }
@@ -1955,12 +1953,10 @@ RJ_NOINLINE void VFrexpMantF16Vop1::execute_modifier_impl(amdgpu::Wavefront &wf)
         *this, wf, vdst, lane,
         amdgpu::sdwa::round_f16_result(
             *this, wf,
-            [&]() {
-              int e;
-              return std::frexp(static_cast<float>(util::f16_to_f32(static_cast<uint16_t>(
-                                    amdgpu::RegisterAccess(wf).read_lane(src0, lane)))),
-                                &e);
-            }(),
+            amdgpu::frexp_f32(util::f16_to_f32(static_cast<uint16_t>(
+                                  amdgpu::RegisterAccess(wf).read_lane(src0, lane))),
+                              wf.fp_denorm_mode_f32())
+                .mantissa,
             wf.fp16_ovfl()));
   }
   dpp_write_mask_scope_.restore();
@@ -2182,7 +2178,7 @@ void VRndneF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
         *this, wf, vdst, lane,
         amdgpu::sdwa::round_f16_result(*this, wf,
-                                       std::nearbyint(util::f16_to_f32(static_cast<uint16_t>(
+                                       util::rndne_scalar(util::f16_to_f32(static_cast<uint16_t>(
                                            amdgpu::RegisterAccess(wf).read_lane(src0, lane)))),
                                        wf.fp16_ovfl()));
   }
@@ -2211,7 +2207,7 @@ RJ_NOINLINE void VRndneF16Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
         *this, wf, vdst, lane,
         amdgpu::sdwa::round_f16_result(*this, wf,
-                                       std::nearbyint(util::f16_to_f32(static_cast<uint16_t>(
+                                       util::rndne_scalar(util::f16_to_f32(static_cast<uint16_t>(
                                            amdgpu::RegisterAccess(wf).read_lane(src0, lane)))),
                                        wf.fp16_ovfl()));
   }

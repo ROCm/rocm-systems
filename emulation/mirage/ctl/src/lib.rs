@@ -833,13 +833,23 @@ pub struct RunArgs {
     /// would have gone into a synthesised config — `--gpus-per-node`,
     /// `--exec-mode`, `-o`/`--option`, `--plugin` — cannot also be
     /// honoured and are refused rather than ignored. Put them in the
-    /// config file instead.
+    /// config file instead. `--cpu-thread-budget` is the exception: it
+    /// is applied to a session copy of the file.
     #[arg(
         long,
         value_name = "PATH",
         conflicts_with_all = ["gpus_per_node", "exec_mode", "options", "plugins"]
     )]
     config: Option<String>,
+    /// Replace the emulator config's CPU thread budget for this run
+    /// (the upstream `rocjitsu --cpu-thread-budget`). Zero selects
+    /// automatic sizing.
+    ///
+    /// Shorthand for `-o cpu_thread_budget=<N>` that, unlike `-o`, is
+    /// also honoured with `--config`: the file itself is left alone and
+    /// the run gets a session copy carrying the budget.
+    #[arg(long = "cpu-thread-budget", value_name = "N")]
+    cpu_thread_budget: Option<u32>,
     /// Run the emulator in out-of-process daemon mode. This is the
     /// default; the flag is accepted for explicitness and under the
     /// upstream `rocjitsu` spelling `--attach`, which means the same
@@ -926,6 +936,7 @@ impl Default for RunArgs {
             options: Vec::new(),
             plugins: Vec::new(),
             config: None,
+            cpu_thread_budget: None,
             daemon: false,
             in_process: false,
             clear_env_vars: false,
@@ -2061,6 +2072,9 @@ fn profile_node_count(profile: &ProfileDef) -> Option<u32> {
 /// work.
 const CONFIG_SECTIONS: [&str; 2] = ["vm", "topology"];
 
+/// The emulator option `--cpu-thread-budget` is a spelling of.
+const CPU_THREAD_BUDGET_OPTION: &str = "cpu_thread_budget";
+
 /// Resolve `--config <path>` to an absolute path, having checked that it
 /// is a config file the emulator can actually be given.
 ///
@@ -2149,6 +2163,7 @@ fn apply_profile_overrides(
         && a.options.is_empty()
         && a.plugins.is_empty()
         && a.config.is_none()
+        && a.cpu_thread_budget.is_none()
         && a.num_nodes.is_none()
         && a.gpus_per_node.is_none()
         && a.hacks.is_empty()
@@ -2237,13 +2252,16 @@ fn apply_profile_overrides(
     // build does not have compiled in is left to bring-up to report:
     // there is no schema here to check against, and refusing on that
     // basis would blame the option for a missing backend.
+    // `--cpu-thread-budget` is a spelling of the `cpu_thread_budget` option, so it
+    // is checked like one: a backend without that option refuses the flag instead
+    // of accepting it and dropping it.
+    let mut option_keys: Vec<String> = options.iter().map(|(k, _)| k.clone()).collect();
+    if a.cpu_thread_budget.is_some() {
+        option_keys.push(CPU_THREAD_BUDGET_OPTION.to_string());
+    }
     if let Some(spec) = find_emulator(&profile.emulator.emulator) {
         let name = &spec.name;
-        check_option_keys(
-            name,
-            &option_names(&spec),
-            &options.iter().map(|(k, _)| k.clone()).collect::<Vec<_>>(),
-        )?;
+        check_option_keys(name, &option_names(&spec), &option_keys)?;
         check_plugin_names(
             name,
             &spec.plugins,
@@ -2253,6 +2271,13 @@ fn apply_profile_overrides(
 
     profile.emulator.options.extend(options);
     profile.emulator.plugins.extend(plugins);
+    // After the `-o` options, so the dedicated flag wins where a run gives both.
+    if let Some(budget) = a.cpu_thread_budget {
+        profile.emulator.options.insert(
+            CPU_THREAD_BUDGET_OPTION.to_string(),
+            SimpleValue::Number(i64::from(budget)),
+        );
+    }
     // Drop-in `--config <path>`: an explicit emulator config file
     // (the upstream `rocjitsu --config`). Stored as the `config`
     // emulator option (absolute, so it resolves regardless of the
@@ -3826,6 +3851,38 @@ mod tests {
         // `--num-nodes` is not in that set: how many nodes the emulated
         // machine has is mirage's business, not the emulator config's.
         parse_run(&["--config", "cfg.json", "--num-nodes", "2", "--", "./app"]).unwrap();
+        // Nor is `--cpu-thread-budget`, which upstream `rocjitsu` also takes
+        // alongside `--config`. The backend applies it to a copy of the file.
+        let run = parse_run(&[
+            "--config",
+            "cfg.json",
+            "--cpu-thread-budget",
+            "4",
+            "--",
+            "./app",
+        ])
+        .unwrap();
+        assert_eq!(run.cpu_thread_budget, Some(4));
+    }
+
+    /// The flag is a spelling of the `cpu_thread_budget` option, so it has to
+    /// land as that option -- and beat an `-o` that spells it the long way,
+    /// rather than losing to whichever the map happened to take last.
+    #[test]
+    fn the_cpu_thread_budget_flag_becomes_the_option_and_outranks_dash_o() {
+        let mut profile = sample_profile();
+        let args = RunArgs {
+            options: vec!["cpu_thread_budget=32".to_string()],
+            cpu_thread_budget: Some(4),
+            ..RunArgs::default()
+        };
+
+        apply_profile_overrides(&mut profile, &args).unwrap();
+
+        assert_eq!(
+            profile.emulator.options.get("cpu_thread_budget"),
+            Some(&SimpleValue::Number(4))
+        );
     }
 
     #[test]

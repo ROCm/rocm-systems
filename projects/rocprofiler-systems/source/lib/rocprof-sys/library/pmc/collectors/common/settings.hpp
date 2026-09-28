@@ -213,7 +213,10 @@ struct settings_policy
             std::string       subtoken;
             while(std::getline(sub_stream, subtoken, ';'))
             {
-                if(subtoken.empty()) continue;
+                if(subtoken.empty())
+                {
+                    continue;
+                }
                 auto pos = subtoken.find(device_qualifier);
                 if(pos == std::string::npos)
                 {
@@ -223,7 +226,10 @@ struct settings_policy
                 {
                     auto name       = subtoken.substr(0, pos);
                     auto device_str = subtoken.substr(pos + device_qualifier.size());
-                    if(name.empty()) continue;
+                    if(name.empty())
+                    {
+                        continue;
+                    }
                     if(device_str.empty() ||
                        !std::all_of(device_str.begin(), device_str.end(), ::isdigit))
                     {
@@ -271,7 +277,9 @@ private:
             [](std::initializer_list<std::uint8_t> positions) -> std::uint32_t {
             std::uint32_t v = 0;
             for(auto b : positions)
+            {
                 v |= (1u << b);
+            }
             return v;
         };
 
@@ -294,7 +302,10 @@ private:
         for(; it != end; ++it)
         {
             const auto found = mapper.find(it->str());
-            if(found != mapper.end()) metrics.value |= found->second;
+            if(found != mapper.end())
+            {
+                metrics.value |= found->second;
+            }
         }
 
         if(metrics.value == DISABLE_ALL_METRICS)

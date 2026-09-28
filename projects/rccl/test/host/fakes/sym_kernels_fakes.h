@@ -20,7 +20,7 @@
 // is an explicit, counted, overridable seam rather than a fixed stub result.
 extern ncclSymRegType_t g_symRegType;
 extern ncclResult_t g_getSymRegTypeResult;
-extern int g_getSymRegTypeCalls;
+extern int g_getSymRegTypeCalls;  // no test currently reads this counter
 extern std::function<ncclResult_t(struct ncclDevrWindow*, struct ncclDevrWindow*, ncclSymRegType_t*)>
     g_getSymRegType;
 
@@ -28,6 +28,10 @@ extern std::function<ncclResult_t(struct ncclComm*)> g_symkInitOnce;
 extern std::function<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t)> g_symkAvailable;
 extern std::function<bool(int)> g_symkKernelIdIsLL;
 extern std::function<ncclResult_t(struct ncclComm*)> g_symkFinalize;
+
+// ncclSymkLLKernelMask/ncclSymkDynamicSmemKernelMask/ncclSymkGetKernelIndex/ncclSymkKernelIdToString/
+// ncclSymkMakeDevWork seams live in sym_kernels_index_fakes.h, not here (rccl-UnitTestsMicro links the
+// real sym_kernels_host.cc, which defines those symbols for real -- a duplicate-symbol error if faked here too).
 
 void ResetSymKernelsFakes();
 

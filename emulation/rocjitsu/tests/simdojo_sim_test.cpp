@@ -416,9 +416,7 @@ TEST(TopologyPartitionTest, RepartitionRetainsExternalLinkOwnerOnce) {
     SCOPED_TRACE(::testing::Message() << "pass=" << pass);
     topology.partition_manual(2, [](Component *) { return PartitionID{0}; });
     EXPECT_EQ(external.partition_id(), 0u);
-    EXPECT_EQ(std::count(topology.partitions()[0].components.begin(),
-                         topology.partitions()[0].components.end(), &external),
-              1);
+    EXPECT_EQ(std::ranges::count(topology.partitions()[0].components, &external), 1);
   }
 }
 
@@ -463,9 +461,7 @@ TEST(TopologyPartitionTest, BalancedSinglePartitionIncludesExternalLinkOwner) {
 
   ASSERT_EQ(topology.partitions().size(), 1u);
   EXPECT_EQ(external.partition_id(), 0u);
-  EXPECT_EQ(std::count(topology.partitions()[0].components.begin(),
-                       topology.partitions()[0].components.end(), &external),
-            1);
+  EXPECT_EQ(std::ranges::count(topology.partitions()[0].components, &external), 1);
 }
 
 TEST(TopologyPartitionTest, BalancedRepartitionRetainsExternalLinkOwnerOnce) {
@@ -488,8 +484,7 @@ TEST(TopologyPartitionTest, BalancedRepartitionRetainsExternalLinkOwnerOnce) {
 
     size_t occurrences = 0;
     for (const auto &partition : topology.partitions())
-      occurrences +=
-          std::count(partition.components.begin(), partition.components.end(), &external);
+      occurrences += std::ranges::count(partition.components, &external);
     EXPECT_EQ(occurrences, 1u);
   }
 }
@@ -1629,10 +1624,10 @@ TEST(StressTest, AsyncInjectionDuringActiveSimulation) {
 }
 
 // ============================================================================
-// Cache storage, maintenance, and VMID invariants
+// Cache storage, LRU replacement, maintenance, and VMID invariants
 // ============================================================================
 //
-// Exercise byte storage lifetime, maintenance behavior, and VMID isolation
+// Exercise storage lifetime, replacement order, maintenance behavior, and VMID isolation
 // directly on the header-only Cache.
 
 namespace {
@@ -1653,24 +1648,54 @@ uint32_t read_line_word(TestCache &cache, uint64_t addr, uint32_t vmid) {
   cache.read_line(addr, reinterpret_cast<uint8_t *>(&word), 0, sizeof(word), vmid);
   return word;
 }
+
+template <uint32_t Ways> void check_lru_way_indices() {
+  LRUPolicy<2, Ways> policy;
+  for (uint32_t way = 0; way < Ways; ++way) {
+    EXPECT_EQ(policy.victim(0), way);
+    policy.access(0, way);
+    EXPECT_EQ(policy.victim(1), 0u);
+  }
+  // Copy a non-default order so a fresh policy cannot pass as a copied one.
+  policy.access(0, 0);
+  LRUPolicy<2, Ways> copied = policy;
+  for (uint32_t way = 0; way < Ways; ++way) {
+    const uint32_t victim = (way + 1) % Ways;
+    EXPECT_EQ(copied.victim(0), victim);
+    copied.access(0, victim);
+    EXPECT_EQ(policy.victim(0), Ways > 1 ? 1u : 0u);
+    EXPECT_EQ(policy.victim(1), 0u);
+    EXPECT_EQ(copied.victim(1), 0u);
+  }
+}
 } // namespace
+
+TEST(CacheLruTest, WayIndicesCoverByteBoundary) {
+  check_lru_way_indices<1>();
+  check_lru_way_indices<16>();
+  check_lru_way_indices<256>();
+  check_lru_way_indices<257>();
+}
 
 TEST(CacheStorageTest, InitialBytesAreZeroAndInvalidationRetainsData) {
   TestCache cache;
   for (uint32_t set = 0; set < 4; ++set) {
     for (uint32_t way = 0; way < 2; ++way) {
       const uint64_t addr = (set + way * 4) * TestCache::LINE_SIZE;
-      auto allocation = cache.allocate_with_data(addr);
+      CacheTag evicted;
+      evicted.valid = true;
+      TestCache::Allocation allocation = cache.allocate_with_data(addr, /*vmid=*/0, &evicted);
+      EXPECT_FALSE(evicted.valid);
       ASSERT_NE(allocation.data, nullptr);
       for (uint32_t i = 0; i < TestCache::LINE_SIZE; ++i)
         EXPECT_EQ(allocation.data[i], 0);
-      std::fill_n(allocation.data, TestCache::LINE_SIZE, 0xA5);
+      std::ranges::fill_n(allocation.data, TestCache::LINE_SIZE, 0xA5);
     }
   }
   cache.invalidate_all();
   TestCache invalid_copy(cache);
   for (auto *retained : {&cache, &invalid_copy}) {
-    auto allocation = retained->allocate_with_data(0);
+    TestCache::Allocation allocation = retained->allocate_with_data(0);
     for (uint32_t i = 0; i < TestCache::LINE_SIZE; ++i)
       EXPECT_EQ(allocation.data[i], 0xA5);
   }
@@ -1872,7 +1897,7 @@ TEST(CacheVmidTest, AllocateWithDataReturnsWritableLineAndEvictedBytes) {
   ASSERT_NE(first.tag, nullptr);
   ASSERT_NE(first.data, nullptr);
   first.tag->dirty = true;
-  std::fill_n(first.data, TestCache::LINE_SIZE, 0xA5);
+  std::ranges::fill_n(first.data, TestCache::LINE_SIZE, 0xA5);
   cache.allocate(kAddrB, /*vmid=*/8);
 
   CacheTag evicted;
@@ -1884,8 +1909,7 @@ TEST(CacheVmidTest, AllocateWithDataReturnsWritableLineAndEvictedBytes) {
   EXPECT_TRUE(evicted.valid);
   EXPECT_TRUE(evicted.dirty);
   EXPECT_EQ(evicted.vmid, 7u);
-  EXPECT_TRUE(std::all_of(evicted_data.begin(), evicted_data.end(),
-                          [](uint8_t byte) { return byte == 0xA5; }));
+  EXPECT_TRUE(std::ranges::all_of(evicted_data, [](uint8_t byte) { return byte == 0xA5; }));
 }
 
 TEST(CacheVmidTest, InvalidateAllVmidsRemovesEveryAliasedLine) {

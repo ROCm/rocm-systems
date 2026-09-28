@@ -119,7 +119,8 @@ public:
       return read_outcome;
     if (domain != rocjitsu::amdgpu::VmMemoryDomain::System || !contains(address, bytes.size()))
       return rocjitsu::amdgpu::VmAccessOutcome::Faulted;
-    std::copy_n(bytes_.begin() + static_cast<std::ptrdiff_t>(address), bytes.size(), bytes.begin());
+    std::ranges::copy_n(bytes_.begin() + static_cast<std::ptrdiff_t>(address), bytes.size(),
+                        bytes.begin());
     return rocjitsu::amdgpu::VmAccessOutcome::Complete;
   }
 
@@ -130,7 +131,7 @@ public:
       return write_outcome;
     if (domain != rocjitsu::amdgpu::VmMemoryDomain::System || !contains(address, bytes.size()))
       return rocjitsu::amdgpu::VmAccessOutcome::Faulted;
-    std::copy(bytes.begin(), bytes.end(), bytes_.begin() + static_cast<std::ptrdiff_t>(address));
+    std::ranges::copy(bytes, bytes_.begin() + static_cast<std::ptrdiff_t>(address));
     return rocjitsu::amdgpu::VmAccessOutcome::Complete;
   }
 
@@ -1062,7 +1063,7 @@ TEST(DeviceCacheCoherenceTest, FailedMemorySideWritebackRetainsDirtyLineForRetry
   }
   EXPECT_FALSE(rocjitsu::amdgpu::MemorySideCacheTestAccess::line_is_dirty(memory_side_cache,
                                                                           kGpuAddress, kVmid));
-  EXPECT_TRUE(std::equal(dirty_line.begin(), dirty_line.end(), mapping.data()));
+  EXPECT_TRUE(std::ranges::equal(dirty_line, std::span(mapping.data(), dirty_line.size())));
   EXPECT_TRUE(legacy_vm.unregister_vmid(kVmid));
 }
 
@@ -1227,8 +1228,11 @@ protected:
     process_.map_pages(kBase + GpuMemory::PAGE_SIZE, second_page_.data(), second_page_.size(),
                        second_mtype);
     address_space_ = legacy_vm_.register_address_space(
-        kVmid, &process_.page_table_, &process_.page_table_mutex_, process_.page_table_generation(),
-        process_.page_table_request_mutex());
+        kVmid, {.page_table = &process_.page_table_,
+                .page_table_mutex = &process_.page_table_mutex_,
+                .page_table_generation = process_.page_table_generation(),
+                .request_mutex = process_.page_table_request_mutex(),
+                .mutation_epoch = process_.page_table_mutation_epoch()});
     ASSERT_TRUE(address_space_);
     l2_.set_backing_memory(&memory_);
     l2_.set_gpu_vm(&gpu_vm_);
@@ -1275,7 +1279,7 @@ protected:
 
   std::array<uint8_t, kBackingSize> backing_{};
   rocjitsu::KfdProcess::PageTable page_table_;
-  std::shared_mutex page_table_mutex_;
+  util::DistributedSharedMutex page_table_mutex_;
   GpuMemory memory_{"memory"};
   rocjitsu::amdgpu::GpuVm gpu_vm_;
   rocjitsu::amdgpu::LegacyGpuVmAdapter legacy_vm_{gpu_vm_, &memory_};
@@ -1296,11 +1300,11 @@ TEST_F(LegacySubPageCacheTest, VectorAccessCachesOnlyAccessibleBytesOfIncomplete
                      stored.data(), Mtype::RW,
                      /*non_temporal=*/false, /*wf_size=*/1, kVmid),
             rocjitsu::amdgpu::VmAccessOutcome::Complete);
-  EXPECT_TRUE(std::equal(stored.begin(), stored.end(), backing_.begin() + 8));
+  EXPECT_TRUE(std::ranges::equal(stored, std::span(backing_).subspan(8, stored.size())));
 
   std::array<uint8_t, kAccessSize> replacement{};
   std::ranges::fill(replacement, uint8_t{0xa5});
-  std::copy(replacement.begin(), replacement.end(), backing_.begin() + 8);
+  std::ranges::copy(replacement, backing_.begin() + 8);
   std::array<uint8_t, kAccessSize> observed{};
   ASSERT_EQ(l1.load(addresses, /*lane_mask=*/1, sizeof(uint32_t), kAccessSize / sizeof(uint32_t),
                     observed.data(), Mtype::RW,
@@ -1483,6 +1487,129 @@ TEST_F(L1CacheMtypeTest, VmidUnregistrationRevokesLiveResolverSnapshot) {
 
   RequestMtypeResolver new_request(&gpu_vm_, kVmid);
   EXPECT_EQ(new_request.at(kAddr + 1), Mtype::RW);
+}
+
+TEST_F(L1CacheMtypeTest, SamePageHitDoesNotTakePageTableLocks) {
+  map_pages(Mtype::UC, Mtype::RW);
+  RequestMtypeResolver request(&gpu_vm_, kVmid);
+  ASSERT_EQ(request.at(kBase), Mtype::UC);
+  std::unique_lock request_lock(*process_.page_table_request_mutex());
+  std::unique_lock table_lock(process_.page_table_mutex_);
+  auto hit = std::async(std::launch::async, [&] { return request.at(kBase + 4); });
+  const auto status = hit.wait_for(std::chrono::seconds(2));
+  table_lock.unlock();
+  request_lock.unlock();
+  EXPECT_EQ(status, std::future_status::ready);
+  EXPECT_EQ(hit.get(), Mtype::UC);
+}
+
+TEST_F(L1CacheMtypeTest, InstructionPolicyIsPreservedAcrossHitsAndMutation) {
+  map_pages(Mtype::RW, Mtype::RW);
+  RequestMtypeResolver request(&gpu_vm_, kVmid, Mtype::NT);
+  ASSERT_EQ(request.at(kBase), Mtype::NT);
+  EXPECT_EQ(request.at(kBase + 4), Mtype::NT);
+  process_.set_page_mtype(kBase, GpuMemory::PAGE_SIZE, Mtype::UC);
+  EXPECT_EQ(request.at(kBase + 4), Mtype::UC);
+  process_.set_page_mtype(kBase, GpuMemory::PAGE_SIZE, Mtype::RW);
+  EXPECT_EQ(request.at(kBase + 4), Mtype::NT);
+}
+
+TEST_F(L1CacheMtypeTest, LiveResolverObservesUnmapAndRemapOnSamePage) {
+  map_pages(Mtype::UC, Mtype::RW);
+  RequestMtypeResolver request(&gpu_vm_, kVmid);
+  ASSERT_EQ(request.at(kAddr), Mtype::UC);
+  EXPECT_EQ(request.at(kAddr + 1), Mtype::UC);
+
+  process_.unmap_pages(kBase, GpuMemory::PAGE_SIZE);
+  EXPECT_EQ(request.at(kAddr), Mtype::RW);
+  process_.map_pages(kBase, first_page_.data(), first_page_.size(), Mtype::CC);
+  EXPECT_EQ(request.at(kAddr + 1), Mtype::CC);
+}
+
+TEST_F(L1CacheMtypeTest, LiveResolverSurvivesRegisteredProcessDestruction) {
+  auto process = std::make_unique<rocjitsu::KfdProcess>(kVmid);
+  process->map_pages(kBase, first_page_.data(), first_page_.size(), Mtype::UC);
+  address_space_ = legacy_vm_.register_address_space(
+      kVmid, {.page_table = &process->page_table_,
+              .page_table_mutex = &process->page_table_mutex_,
+              .page_table_generation = process->page_table_generation(),
+              .request_mutex = process->page_table_request_mutex(),
+              .mutation_epoch = process->page_table_mutation_epoch()});
+  ASSERT_TRUE(address_space_);
+  RequestMtypeResolver request(&gpu_vm_, kVmid);
+  ASSERT_EQ(request.at(kAddr), Mtype::UC);
+  ASSERT_TRUE(legacy_vm_.unregister_vmid(kVmid));
+  address_space_ = {};
+  process.reset();
+  EXPECT_EQ(request.at(kAddr), Mtype::RW);
+
+  map_pages(Mtype::CC, Mtype::RW);
+  // A retired snapshot must not adopt a new owner of the same numeric VMID.
+  EXPECT_EQ(request.at(kAddr), Mtype::RW);
+  RequestMtypeResolver replacement(&gpu_vm_, kVmid);
+  EXPECT_EQ(replacement.at(kAddr), Mtype::CC);
+}
+
+TEST_F(L1CacheMtypeTest, LiveResolverWithoutMutationTokenStillRefreshes) {
+  map_pages(Mtype::UC, Mtype::RW);
+  ASSERT_TRUE(legacy_vm_.unregister_vmid(kVmid));
+  address_space_ = legacy_vm_.register_address_space(
+      kVmid, {.page_table = &process_.page_table_,
+              .page_table_mutex = &process_.page_table_mutex_,
+              .page_table_generation = process_.page_table_generation(),
+              .request_mutex = process_.page_table_request_mutex(),
+              .mutation_epoch = {}});
+  ASSERT_TRUE(address_space_);
+  RequestMtypeResolver request(&gpu_vm_, kVmid);
+  ASSERT_EQ(request.at(kAddr), Mtype::UC);
+  process_.set_page_mtype(kBase, GpuMemory::PAGE_SIZE, Mtype::CC);
+  EXPECT_EQ(request.at(kAddr + 1), Mtype::CC);
+}
+
+TEST_F(L1CacheMtypeTest, LiveResolverWithoutGenerationDoesNotCacheMutationToken) {
+  map_pages(Mtype::UC, Mtype::RW);
+  ASSERT_TRUE(legacy_vm_.unregister_vmid(kVmid));
+  address_space_ = legacy_vm_.register_address_space(
+      kVmid, {.page_table = &process_.page_table_,
+              .page_table_mutex = &process_.page_table_mutex_,
+              .page_table_generation = nullptr,
+              .request_mutex = process_.page_table_request_mutex(),
+              .mutation_epoch = process_.page_table_mutation_epoch()});
+  ASSERT_TRUE(address_space_);
+  RequestMtypeResolver request(&gpu_vm_, kVmid);
+  ASSERT_EQ(request.at(kAddr), Mtype::UC);
+  {
+    // Legacy registrations may omit generation publication; they must keep
+    // observing the table through the locked path on every lookup.
+    std::unique_lock request_lock(*process_.page_table_request_mutex());
+    std::unique_lock table_lock(process_.page_table_mutex_);
+    process_.page_table_.at(kBase >> GpuMemory::PAGE_SHIFT).mtype = Mtype::CC;
+  }
+  EXPECT_EQ(request.at(kAddr + 1), Mtype::CC);
+}
+
+TEST_F(L1CacheMtypeTest, MutationTokenRefreshesPolicyWithoutGenerationPublication) {
+  map_pages(Mtype::UC, Mtype::RW);
+  auto epoch = std::make_shared<std::atomic<uint64_t>>(1);
+  ASSERT_TRUE(legacy_vm_.unregister_vmid(kVmid));
+  address_space_ = legacy_vm_.register_address_space(
+      kVmid, {.page_table = &process_.page_table_,
+              .page_table_mutex = &process_.page_table_mutex_,
+              .page_table_generation = process_.page_table_generation(),
+              .request_mutex = process_.page_table_request_mutex(),
+              .mutation_epoch = epoch});
+  ASSERT_TRUE(address_space_);
+  RequestMtypeResolver request(&gpu_vm_, kVmid);
+  ASSERT_EQ(request.at(kAddr), Mtype::UC);
+  {
+    // Model a mutation that invalidates snapshots and changes a PTE, then
+    // throws before publishing the ordinary page-table generation.
+    std::unique_lock request_lock(*process_.page_table_request_mutex());
+    std::unique_lock table_lock(process_.page_table_mutex_);
+    epoch->fetch_add(1, std::memory_order_release);
+    process_.page_table_.at(kBase >> GpuMemory::PAGE_SHIFT).mtype = Mtype::CC;
+  }
+  EXPECT_EQ(request.at(kAddr + 1), Mtype::CC);
 }
 
 TEST_F(L1CacheMtypeTest, VectorLoadKeepsPageSpecificMtypeAcrossBoundary) {
@@ -1727,7 +1854,7 @@ TEST(L2CacheTest, UnalignedVectorStoreSkipsBackingReads) {
   for (uint32_t i = 0; i < values.size(); ++i)
     values[i] = static_cast<uint8_t>(i);
   std::array<uint8_t, 3 * L2Cache::LINE_SIZE> expected = initial;
-  std::copy(values.begin(), values.end(), expected.begin() + sizeof(uint32_t));
+  std::ranges::copy(values, expected.begin() + sizeof(uint32_t));
   const uint64_t addrs[] = {kAddr + sizeof(uint32_t)};
   l1.store(addrs, /*lane_mask=*/1, sizeof(uint32_t), values.size() / sizeof(uint32_t),
            values.data(), Mtype::RW,
@@ -2411,7 +2538,7 @@ TEST(L2CacheTest, AliasedVasRequireCoherenceBoundary) {
   replacement.fill(0x22);
   dirty.fill(0x33);
 
-  std::copy(initial.begin(), initial.end(), backing.begin());
+  std::ranges::copy(initial, backing.begin());
   l2.read(kVaA, actual.data(), actual.size(), Mtype::RW, kVmidA);
   ASSERT_EQ(actual, initial);
   l2.read(kVaB, actual.data(), actual.size(), Mtype::RW, kVmidB);
@@ -2424,10 +2551,10 @@ TEST(L2CacheTest, AliasedVasRequireCoherenceBoundary) {
   EXPECT_EQ(actual, replacement);
 
   l2.writeback_line(kVaA, dirty.data(), Mtype::RW, kVmidA);
-  std::copy_n(backing.begin(), actual.size(), actual.begin());
+  std::ranges::copy_n(backing.begin(), actual.size(), actual.begin());
   EXPECT_EQ(actual, replacement);
   l2.flush_line(kVaA, kVmidA);
-  std::copy_n(backing.begin(), actual.size(), actual.begin());
+  std::ranges::copy_n(backing.begin(), actual.size(), actual.begin());
   EXPECT_EQ(actual, dirty);
 
   l2.read(kVaB, actual.data(), actual.size(), Mtype::RW, kVmidB);
@@ -2624,21 +2751,21 @@ TEST(L2CacheTest, InvalidateRangeOnlyAffectsRequestedVmid) {
   dirty_a.fill(0x33);
   replacement_b.fill(0x44);
 
-  std::copy(initial_a.begin(), initial_a.end(), backing_a.begin());
-  std::copy(initial_b.begin(), initial_b.end(), backing_b.begin());
+  std::ranges::copy(initial_a, backing_a.begin());
+  std::ranges::copy(initial_b, backing_b.begin());
   l2.read(kAddr, actual.data(), actual.size(), Mtype::RW, kVmidA);
   ASSERT_EQ(actual, initial_a);
   l2.read(kAddr, actual.data(), actual.size(), Mtype::RW, kVmidB);
   ASSERT_EQ(actual, initial_b);
   l2.writeback_line(kAddr, dirty_a.data(), Mtype::RW, kVmidA);
 
-  std::copy(replacement_b.begin(), replacement_b.end(), backing_b.begin());
+  std::ranges::copy(replacement_b, backing_b.begin());
   l2.invalidate_range(kAddr, L2Cache::LINE_SIZE, kVmidB);
   l2.read(kAddr, actual.data(), actual.size(), Mtype::RW, kVmidB);
   EXPECT_EQ(actual, replacement_b);
 
   l2.flush_line(kAddr, kVmidA);
-  std::copy_n(backing_a.begin(), actual.size(), actual.begin());
+  std::ranges::copy_n(backing_a.begin(), actual.size(), actual.begin());
   EXPECT_EQ(actual, dirty_a);
 }
 

@@ -13,6 +13,7 @@
 
 #include "amdsmi_fakes.h"        // src/misc/amdsmi_wrap.cc
 #include "bootstrap_stubs.h"     // src/bootstrap.cc
+#include "enqueue_fakes.h"       // src/enqueue/enqueue.cc
 #include "env_fakes.h"           // src/misc/param.cc + getenv interposition
 #include "env_plugin_fakes.h"    // src/plugin/env.cc
 #include "gin_fakes.h"           // src/plugin/gin.cc + src/gin/gin_host.cc

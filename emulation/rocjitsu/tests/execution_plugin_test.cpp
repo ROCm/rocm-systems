@@ -17,10 +17,12 @@
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/vop1.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/execution_backend.h"
@@ -33,13 +35,17 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vop1.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vop3.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/ds_transpose.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
@@ -51,6 +57,7 @@
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
@@ -183,11 +190,61 @@ constexpr uint64_t kPartialExecMask = 0xA5A5'F0F0'1234'8001ULL;
 
 class TestMemoryInstruction : public Instruction {
 public:
-  explicit TestMemoryInstruction(std::unique_ptr<DynamicInstState> state,
-                                 std::string_view mnemonic = "test_mem")
-      : Instruction(mnemonic, nullptr) {
-    flags_ |= MEMORY_OP;
+  TestMemoryInstruction(std::unique_ptr<DynamicInstState> state,
+                        std::initializer_list<MemoryCounterObligation> counter_obligations,
+                        bool exec_masked = true)
+      : Instruction("test_mem", nullptr) {
+    set_memory_issue_info(counter_obligations, exec_masked);
     set_data(std::move(state));
+  }
+
+  explicit TestMemoryInstruction(
+      std::unique_ptr<DynamicInstState> state, std::string_view mnemonic = "test_mem",
+      std::optional<WaitCounterType> additional_wait_counter_type = std::nullopt,
+      bool memory_wait_producer = false)
+      : Instruction(mnemonic, nullptr) {
+    if (memory_wait_producer)
+      flags_ |= MEMORY_WAIT_PRODUCER;
+    if (state->tag() == SCALAR_MEM) {
+      const auto &memory = *static_cast<const ScalarMemState *>(state.get());
+      if (additional_wait_counter_type) {
+        set_memory_issue_info({{memory.wait_counter_type, MemoryCompletionClass::UNORDERED},
+                               {*additional_wait_counter_type, MemoryCompletionClass::UNORDERED}},
+                              false);
+      } else {
+        set_memory_issue_info({{memory.wait_counter_type, MemoryCompletionClass::UNORDERED}},
+                              false);
+      }
+    } else if (state->tag() == GLOBAL_MEM || state->tag() == LOCAL_MEM) {
+      const auto &memory = *static_cast<const VectorMemState *>(state.get());
+      const auto completion_class =
+          state->tag() == LOCAL_MEM ? MemoryCompletionClass::LDS : MemoryCompletionClass::VMEM;
+      if (additional_wait_counter_type) {
+        set_memory_issue_info({{memory.wait_counter_type, completion_class},
+                               {*additional_wait_counter_type, completion_class}});
+      } else {
+        set_memory_issue_info({{memory.wait_counter_type, completion_class}});
+      }
+    }
+    set_data(std::move(state));
+  }
+};
+
+class CounterObservingPipeline : public MemoryPipeline {
+public:
+  CounterObservingPipeline() : MemoryPipeline(WaitCounterType::VMCNT) {}
+
+  WaitCounters counters_at_access{};
+
+protected:
+  VmAccessOutcome initiate_access(Instruction &, Wavefront &wf) override {
+    counters_at_access = wf.wait_counters();
+    return VmAccessOutcome::Complete;
+  }
+
+  MemoryAccessCompletion complete_access(Instruction &, Wavefront &,
+                                         MemoryAccessDeferredCompletion) override {
+    return MemoryAccessCompletion::Complete;
   }
 };
 
@@ -255,6 +312,7 @@ struct HookEvent {
   uint32_t physical_reg = 0;
   uint64_t lane_mask = 0;
   uint8_t byte_mask = 0;
+  uint8_t memory_tag = 0;
   uint64_t pc = 0;
   std::thread::id callback_thread;
   std::vector<MemoryCounterObligation> counter_obligations;
@@ -486,6 +544,7 @@ public:
     e.wg_id = wf.wg_id();
     e.wf_id = wf.wf_id();
     e.mnemonic = inst.mnemonic();
+    e.memory_tag = inst.data()->tag();
     events.push_back(e);
   }
 
@@ -638,6 +697,66 @@ public:
   bool requires_serial_hot_hooks() const override { return true; }
 };
 
+class UnsubscribedHotHookPlugin final : public ExecutionPlugin {
+public:
+  UnsubscribedHotHookPlugin() : ExecutionPlugin("unsubscribed_hot_hook") {}
+  bool requires_serial_hot_hooks() const override { return true; }
+  bool observes_hot_hooks_for_wavefront(const amdgpu::Wavefront *) const override { return false; }
+  void onAmdgpuReadSgpr(const amdgpu::Wavefront *, uint32_t) override { ++hot_callbacks; }
+  void onAmdgpuWorkgroupCompleted(uint32_t, uint32_t) override { ++cold_callbacks; }
+
+  uint32_t hot_callbacks = 0;
+  uint32_t cold_callbacks = 0;
+};
+
+class HotHookSubscriptionProbe final : public ExecutionPlugin {
+public:
+  HotHookSubscriptionProbe(std::string name, bool subscribe_on_dispatch,
+                           bool serial_hot_hooks = false)
+      : ExecutionPlugin(std::move(name)), subscribe_on_dispatch_(subscribe_on_dispatch),
+        serial_hot_hooks_(serial_hot_hooks) {}
+
+  bool requires_serial_hot_hooks() const override { return serial_hot_hooks_; }
+
+  bool observes_hot_hooks_for_wavefront(const amdgpu::Wavefront *) const override {
+    ++predicate_queries;
+    return subscribed;
+  }
+
+  void onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) override {
+    ++dispatch_callbacks;
+    subscribed = subscribe_on_dispatch_;
+    if (reenter_on_dispatch && group)
+      group->onAmdgpuReadSgpr(&wf, 0);
+  }
+
+  void onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) override {
+    ++halt_callbacks;
+    if (unsubscribe_on_halt)
+      subscribed = false;
+    if (reenter_on_halt && group)
+      group->onAmdgpuReadSgpr(&wf, 0);
+  }
+
+  void onAmdgpuReadSgpr(const amdgpu::Wavefront *, uint32_t) override { ++hot_callbacks; }
+
+  void set_subscribe_on_dispatch(bool value) { subscribe_on_dispatch_ = value; }
+
+  ExecutionPluginGroup *group = nullptr;
+  bool reenter_on_dispatch = false;
+  bool reenter_on_halt = false;
+  bool unsubscribe_on_halt = false;
+  bool subscribed = false;
+  mutable uint32_t predicate_queries = 0;
+  uint32_t dispatch_callbacks = 0;
+  uint32_t halt_callbacks = 0;
+  uint32_t hot_callbacks = 0;
+
+private:
+  bool subscribe_on_dispatch_ = false;
+  bool serial_hot_hooks_ = false;
+};
+
 class NoSgprReadPlugin final : public ExecutionPlugin {
 public:
   NoSgprReadPlugin() : ExecutionPlugin("no_sgpr_read") {}
@@ -646,6 +765,28 @@ public:
   void onAmdgpuReadScalarRegister(const amdgpu::Wavefront *, RegisterRef) override { ++callbacks; }
 
   uint32_t callbacks = 0;
+};
+
+class AsyncIssueInterestPlugin final : public ExecutionPlugin {
+public:
+  AsyncIssueInterestPlugin(std::string name, bool observes_issue, bool throws_on_issue = false)
+      : ExecutionPlugin(std::move(name)), observes_issue_(observes_issue),
+        throws_on_issue_(throws_on_issue) {}
+
+  bool supports_async_instructions() const override { return true; }
+  bool observes_async_instruction_issued() const override { return observes_issue_; }
+
+  void onAmdgpuAsyncInstructionIssued(uint64_t, const Instruction &, Wavefront &) override {
+    ++callbacks;
+    if (throws_on_issue_)
+      throw std::runtime_error("injected async issue failure");
+  }
+
+  uint32_t callbacks = 0;
+
+private:
+  bool observes_issue_ = false;
+  bool throws_on_issue_ = false;
 };
 
 class OverlapProbe {
@@ -846,8 +987,8 @@ void expect_vgpr_read_set(const std::vector<HookEvent> &events, uint32_t physica
     ASSERT_GE(e.physical_reg, physical_base);
     actual_logical_regs.push_back(e.physical_reg - physical_base);
   }
-  std::sort(actual_logical_regs.begin(), actual_logical_regs.end());
-  std::sort(expected_logical_regs.begin(), expected_logical_regs.end());
+  std::ranges::sort(actual_logical_regs);
+  std::ranges::sort(expected_logical_regs);
   EXPECT_EQ(actual_logical_regs, expected_logical_regs);
 }
 
@@ -926,7 +1067,7 @@ public:
     std::vector<uint32_t> ids;
     for (const auto &e : events_) {
       if (e.kind == Kind::DISPATCH_PACKET_PROCESSED &&
-          std::find(ids.begin(), ids.end(), e.dispatch_id) == ids.end())
+          std::ranges::find(ids, e.dispatch_id) == ids.end())
         ids.push_back(e.dispatch_id);
     }
     return ids;
@@ -1065,6 +1206,7 @@ struct PluginFixture {
               {{"key":"num_wf_slots","value":"{}"}},
               {{"key":"sgprs_per_wf","value":"{}"}},
               {{"key":"vgprs_per_wf","value":"{}"}},
+              {{"key":"memory_wait_diagnostics","value":"warn"}},
               {{"key":"lds_size_kb","value":"64"}}
             ]}}
           ]}}
@@ -1205,7 +1347,9 @@ struct Wave32PluginFixture {
   std::unique_ptr<amdgpu::ComputeUnitCore> cu;
   std::shared_ptr<ExecutionPluginGroup> plugin_group;
 
-  explicit Wave32PluginFixture(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA5)
+  explicit Wave32PluginFixture(
+      rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA5,
+      amdgpu::MemoryWaitDiagnostics wait_checks = amdgpu::MemoryWaitDiagnostics::Warn)
       : gpu_mem(std::make_unique<amdgpu::GpuMemory>("wave32_plugin_mem")),
         l2(std::make_unique<amdgpu::L2Cache>("wave32_plugin_l2")) {
     amdgpu::ComputeUnitCore::Config cfg{};
@@ -1214,6 +1358,7 @@ struct Wave32PluginFixture {
     cfg.sgprs_per_wf = 104;
     cfg.vgprs_per_wf = 256;
     cfg.lds_size_kb = 64;
+    cfg.memory_wait_diagnostics = wait_checks;
     cu = amdgpu::ComputeUnitCore::create("wave32_plugin_cu", cfg, gpu_mem.get(), l2.get());
   }
 
@@ -1423,6 +1568,140 @@ TEST(ExecutionPluginTest, VopdIntegerPairsPreserveMasksAliasesAndObservation) {
   }
 }
 
+TEST(ExecutionPluginTest, DisabledWaitCheckingPreservesRegisterHooksAcrossPluginReplacement) {
+  Wave32PluginFixture f(ROCJITSU_CODE_ARCH_CDNA5, amdgpu::MemoryWaitDiagnostics::Off);
+  auto *wf = f.cu->dispatch_wf(0, 0, 104, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+  const amdgpu::RegisterAccess regs(*wf);
+  const uint32_t vbase = wf->vgpr_alloc().base + 4;
+  const uint32_t sbase = wf->sgpr_alloc().base + 2;
+  auto access = [&](uint32_t value) {
+    auto write = regs.write_vgpr_region(vbase, 2, 1);
+    write.set_lane(0, 0, value);
+    write.set_lane(1, 0, value + 1);
+    auto read = regs.read_vgpr_region(vbase, 2, 1);
+    EXPECT_EQ(read.lane(0, 0), value);
+    EXPECT_EQ(read.lane(1, 0), value + 1);
+    const uint64_t pair = uint64_t{value} | (uint64_t{value + 1} << 32);
+    regs.write_sgpr64(sbase, pair);
+    EXPECT_EQ(regs.read_sgpr64(sbase), pair);
+  };
+  access(3);
+  auto *plugin = f.attach_ordering_plugin();
+  for (bool attached : {true, false, true}) {
+    SCOPED_TRACE(attached);
+    f.cu->set_plugin_group(attached ? f.plugin_group : nullptr);
+    plugin->events.clear();
+    access(7);
+    if (!attached) {
+      EXPECT_TRUE(plugin->events.empty());
+      continue;
+    }
+    for (auto kind :
+         {HookEvent::READ_VGPR, HookEvent::WRITE_VGPR, HookEvent::READ_SGPR, HookEvent::WRITE_SGPR})
+      EXPECT_EQ(std::ranges::count(plugin->events, kind, &HookEvent::kind), 2);
+  }
+}
+
+TEST(ExecutionPluginTest, RegisterObserverSnapshotsPreservePendingWaits) {
+  class SnapshotPlugin : public ExecutionPlugin {
+  public:
+    SnapshotPlugin() : ExecutionPlugin("register_snapshot") {}
+    void snapshot(const Wavefront *wf) {
+      (void)wf->read_scc();
+      ++snapshots;
+    }
+    void onAmdgpuReadScalarRegister(const Wavefront *wf, RegisterRef) override { snapshot(wf); }
+    void onAmdgpuWriteScalarRegister(const Wavefront *wf, RegisterRef) override { snapshot(wf); }
+    void onAmdgpuReadVgprLanes(const Wavefront *wf, uint32_t, uint64_t, uint8_t) override {
+      snapshot(wf);
+    }
+    void onAmdgpuWriteVgprLanes(const Wavefront *wf, uint32_t, uint64_t, uint8_t) override {
+      snapshot(wf);
+    }
+    void onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &) override {
+      snapshot(tensor_wave);
+    }
+    bool observes_tensor_dma_memory_access() const override { return true; }
+    const Wavefront *tensor_wave = nullptr;
+    unsigned snapshots = 0;
+  };
+  Wave32PluginFixture f;
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto plugin = std::make_unique<SnapshotPlugin>();
+  auto *snapshots = plugin.get();
+  ASSERT_TRUE(group->add(std::move(plugin)));
+  f.cu->set_plugin_group(group);
+  auto *wf = f.cu->dispatch_wf(0, 0x200, 104, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+  snapshots->tensor_wave = wf;
+  const amdgpu::RegisterAccess regs(*wf);
+  const uint32_t sbase = wf->sgpr_alloc().base;
+  const uint32_t vbase = wf->vgpr_alloc().base;
+  f.cu->write_sgpr(sbase, 0);
+  f.cu->write_vgpr(vbase, 0, 0);
+  auto &state = wf->ensure_memory_wait_scoreboard();
+  unsigned hazards = 0;
+  state.bind(wf->pc, &hazards, [](void *p, const auto &) { ++*static_cast<unsigned *>(p); });
+  for (unsigned hook = 0; hook < 6; ++hook) {
+    SCOPED_TRACE(hook);
+    state.clear();
+    hazards = snapshots->snapshots = 0;
+    state.add({state.issue(WaitCounterKind::Km),
+               0x100,
+               ~uint64_t{0},
+               {RegClass::SCC, 0, 1},
+               WaitCounterKind::Km,
+               0xf});
+    amdgpu::ScopedMemoryWaitCheck scope(&state);
+    switch (hook) {
+    case 0:
+      (void)regs.read_sgpr(sbase);
+      break;
+    case 1:
+      regs.write_sgpr(sbase, 7);
+      break;
+    case 2:
+      (void)regs.read_vgpr_region(vbase, 1, 1).lane(0, 0);
+      break;
+    case 3:
+      regs.write_vgpr_region(vbase, 1, 1).set_lane(0, 0, 7);
+      break;
+    case 4:
+      f.cu->notify_scalar_lane_vgpr_write(wf, vbase, 1);
+      break;
+    case 5:
+      wf->cu().report_tensor_dma_memory_access({});
+      break;
+    }
+    EXPECT_EQ(snapshots->snapshots, 1u);
+    EXPECT_EQ(hazards, 0u);
+    EXPECT_FALSE(state.empty());
+    (void)wf->read_scc();
+    EXPECT_EQ(hazards, 1u); // The instruction's actual SCC use still diagnoses.
+  }
+}
+
+TEST(ExecutionPluginTest, SpecialDestinationTrackingIncludesTheHighDword) {
+  Wave32PluginFixture f;
+  auto *wf = f.cu->dispatch_wf(0, 0, 104, 32);
+  ASSERT_NE(wf, nullptr);
+  const amdgpu::RegisterAccess regs(*wf);
+  const cdna5::Operand operand(64, cdna5::OperandType::OPR_VCC, 0);
+  ASSERT_FALSE(operand.to_register_ref());
+  const auto destination = regs.destination_register(operand);
+  ASSERT_TRUE(destination);
+  auto &state = wf->ensure_memory_wait_scoreboard();
+  unsigned hazards = 0;
+  state.bind(0x200, &hazards, [](void *p, const auto &) { ++*static_cast<unsigned *>(p); });
+  state.add({state.issue(WaitCounterKind::Ds), 0x100, ~uint64_t{0}, *destination,
+             WaitCounterKind::Ds, 0xf});
+  state.access({RegClass::VCC, 1, 1}, ~uint64_t{0}, 0xf, false);
+  EXPECT_EQ(hazards, 1u);
+}
+
 TEST(ExecutionPluginTest, Vop3CompareObservesOnlyArchitecturalDestinationReads) {
   Wave32PluginFixture f;
   ASSERT_NE(f.cu, nullptr);
@@ -1595,7 +1874,7 @@ TEST(ExecutionPluginTest, DispatchPacketCarriesExecutionShapeAndTargetMetadata) 
   queue.submit(packet);
   ASSERT_NO_THROW(fixture.run_until_idle());
 
-  auto dispatch = std::find_if(plugin->events.begin(), plugin->events.end(), [](const auto &event) {
+  auto dispatch = std::ranges::find_if(plugin->events, [](const auto &event) {
     return event.kind == HookEvent::DISPATCH_PACKET_PROCESSED;
   });
   ASSERT_NE(dispatch, plugin->events.end());
@@ -1900,13 +2179,20 @@ public:
   explicit AsyncEventPlugin(std::string name = "async-events") : ExecutionPlugin(std::move(name)) {}
   bool supports_async_instructions() const override { return true; }
   bool observes_sgpr_reads() const override { return false; }
-  void onAmdgpuAsyncInstructionIssued(uint64_t, const Instruction &inst, Wavefront &) override {
+  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &inst, Wavefront &wf) override {
+    if (inst.mnemonic() == "s_set_vgpr_msb")
+      hazard_before_set_vgpr = wf.setreg_vgpr_msb_hazard();
+  }
+  void onAmdgpuAsyncInstructionIssued(uint64_t, const Instruction &inst, Wavefront &wf) override {
     EXPECT_EQ(std::this_thread::get_id(), issuer_thread);
     EXPECT_EQ(inst.mnemonic(), "v_wmma_f32_16x16x64_fp8_fp8");
+    hazard_at_async_issue = wf.setreg_vgpr_msb_hazard();
     ++issued;
   }
   std::thread::id issuer_thread = std::this_thread::get_id();
   unsigned issued = 0;
+  std::optional<bool> hazard_at_async_issue;
+  std::optional<bool> hazard_before_set_vgpr;
 };
 
 TEST(ExecutionPluginTest, AsyncSupportComesFromCapabilities) {
@@ -1940,6 +2226,33 @@ std::vector<uint32_t> independent_wmma_kernel() {
   }
   code.push_back(cdna5::build_sopp(cdna5::kSEndpgmSopp, {})[0]);
   return code;
+}
+
+TEST(ExecutionPluginTest, AsyncMmaEndsSetregVgprMsbAdjacencyHazard) {
+  PluginFixture f(1, "cdna5", 32, 128, 256, 1, /*async_helpers=*/4);
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto observer = std::make_unique<AsyncEventPlugin>();
+  auto *events = observer.get();
+  ASSERT_TRUE(f.plugin_group_->add(std::move(observer)));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+
+  constexpr auto setreg =
+      cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = amdgpu::MODE_HWREG});
+  constexpr auto set_vgpr_msb = cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 0xC3});
+  std::vector<uint32_t> code{setreg[0], 0u};
+  auto mma_code = independent_wmma_kernel();
+  code.insert(code.end(), mma_code.begin(), mma_code.end() - 1);
+  code.push_back(set_vgpr_msb[0]);
+  code.push_back(mma_code.back());
+
+  f.run_kernel(code.data(), code.size(), 32, 32);
+  f.shutdown();
+  ASSERT_EQ(events->issued, 1u);
+  ASSERT_TRUE(events->hazard_at_async_issue.has_value());
+  EXPECT_FALSE(*events->hazard_at_async_issue);
+  ASSERT_TRUE(events->hazard_before_set_vgpr.has_value());
+  EXPECT_FALSE(*events->hazard_before_set_vgpr);
 }
 
 TEST(ExecutionPluginTest, SynchronousObserverDisablesActualMmaOffload) {
@@ -2163,6 +2476,47 @@ TEST(ExecutionPluginTest, SgprReadOptOutSkipsComputeUnitCallback) {
   EXPECT_EQ(plugin_ptr->callbacks, 0u);
 }
 
+TEST(ExecutionPluginTest, AsyncIssueFanoutHonorsPerPluginInterest) {
+  PluginFixture fixture(/*num_wf_slots=*/1);
+  auto *wave = fixture.cu()->dispatch_wf(/*wg_id=*/1, /*pc=*/0, /*sgprs=*/32, /*vgprs=*/32);
+  ASSERT_NE(wave, nullptr);
+  Instruction instruction("v_wmma_test", nullptr);
+
+  ExecutionPluginGroup normal(PluginSinkConfig{});
+  auto first = std::make_unique<AsyncIssueInterestPlugin>("async_first", true);
+  auto *first_ptr = first.get();
+  auto skipped = std::make_unique<AsyncIssueInterestPlugin>("async_skipped", false);
+  auto *skipped_ptr = skipped.get();
+  auto last = std::make_unique<AsyncIssueInterestPlugin>("async_last", true);
+  auto *last_ptr = last.get();
+  ASSERT_TRUE(normal.add(std::move(first)));
+  ASSERT_TRUE(normal.add(std::move(skipped)));
+  ASSERT_TRUE(normal.add(std::move(last)));
+
+  normal.onAmdgpuAsyncInstructionIssued(0x1000, instruction, *wave);
+  EXPECT_EQ(first_ptr->callbacks, 1u);
+  EXPECT_EQ(skipped_ptr->callbacks, 0u);
+  EXPECT_EQ(last_ptr->callbacks, 1u);
+
+  ExecutionPluginGroup exceptional(PluginSinkConfig{});
+  auto throwing = std::make_unique<AsyncIssueInterestPlugin>("async_throwing", true, true);
+  auto *throwing_ptr = throwing.get();
+  auto skipped_after_throw =
+      std::make_unique<AsyncIssueInterestPlugin>("async_skipped_after_throw", false);
+  auto *skipped_after_throw_ptr = skipped_after_throw.get();
+  auto continued = std::make_unique<AsyncIssueInterestPlugin>("async_continued", true);
+  auto *continued_ptr = continued.get();
+  ASSERT_TRUE(exceptional.add(std::move(throwing)));
+  ASSERT_TRUE(exceptional.add(std::move(skipped_after_throw)));
+  ASSERT_TRUE(exceptional.add(std::move(continued)));
+
+  EXPECT_THROW(exceptional.onAmdgpuAsyncInstructionIssued(0x1000, instruction, *wave),
+               std::runtime_error);
+  EXPECT_EQ(throwing_ptr->callbacks, 1u);
+  EXPECT_EQ(skipped_after_throw_ptr->callbacks, 0u);
+  EXPECT_EQ(continued_ptr->callbacks, 1u);
+}
+
 TEST(ExecutionPluginTest, InfrequentHooksSerializeAtGroupBoundary) {
   ExecutionPluginGroup group(PluginSinkConfig{});
   auto probe = std::make_unique<ConcurrencyProbePlugin>(false);
@@ -2243,6 +2597,131 @@ TEST(ExecutionPluginTest, HighFrequencyHooksHonorSerialOptIn) {
   EXPECT_TRUE(result.first_entered);
   EXPECT_FALSE(result.overlap_observed);
   EXPECT_EQ(probe_ptr->hot_probe().max_active(), 1);
+}
+
+TEST(ExecutionPluginTest, UnsubscribedWaveBypassesHotHookAndCallbackLock) {
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  auto plugin = std::make_unique<UnsubscribedHotHookPlugin>();
+  auto *plugin_ptr = plugin.get();
+  ASSERT_TRUE(group.add(std::move(plugin)));
+  ASSERT_TRUE(group.requires_serial_hot_hooks());
+
+  const uint64_t before = test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(group);
+  group.onAmdgpuReadSgpr(nullptr, 0);
+
+  EXPECT_EQ(plugin_ptr->hot_callbacks, 0u);
+  EXPECT_EQ(test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(group), before);
+
+  group.onAmdgpuWorkgroupCompleted(1, 2);
+  EXPECT_EQ(plugin_ptr->cold_callbacks, 1u);
+  EXPECT_EQ(test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(group), before + 1);
+}
+
+TEST(ExecutionPluginTest, WaveDispatchCachesEachPluginsHotHookSubscription) {
+  PluginFixture fixture(/*num_wf_slots=*/1);
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  auto subscribed = std::make_unique<HotHookSubscriptionProbe>("subscribed_probe", true);
+  auto *subscribed_ptr = subscribed.get();
+  auto unsubscribed = std::make_unique<HotHookSubscriptionProbe>("unsubscribed_probe", false);
+  auto *unsubscribed_ptr = unsubscribed.get();
+  ASSERT_TRUE(group.add(std::move(subscribed)));
+  ASSERT_TRUE(group.add(std::move(unsubscribed)));
+
+  auto *wave = fixture.cu()->dispatch_wf(/*wg_id=*/1, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/32);
+  ASSERT_NE(wave, nullptr);
+  group.onAmdgpuWavefrontDispatched(*wave);
+
+  EXPECT_EQ(subscribed_ptr->predicate_queries, 1u);
+  EXPECT_EQ(unsubscribed_ptr->predicate_queries, 1u);
+  for (uint32_t i = 0; i != 8; ++i)
+    group.onAmdgpuReadSgpr(wave, i);
+
+  EXPECT_EQ(subscribed_ptr->hot_callbacks, 8u);
+  EXPECT_EQ(unsubscribed_ptr->hot_callbacks, 0u);
+  EXPECT_EQ(subscribed_ptr->predicate_queries, 1u);
+  EXPECT_EQ(unsubscribed_ptr->predicate_queries, 1u);
+}
+
+TEST(ExecutionPluginTest, CachedUnsubscribedWaveBypassesCallbackLock) {
+  PluginFixture fixture(/*num_wf_slots=*/1);
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  auto plugin =
+      std::make_unique<HotHookSubscriptionProbe>("serial_unsubscribed_probe", false, true);
+  auto *plugin_ptr = plugin.get();
+  ASSERT_TRUE(group.add(std::move(plugin)));
+
+  auto *wave = fixture.cu()->dispatch_wf(/*wg_id=*/1, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/32);
+  ASSERT_NE(wave, nullptr);
+  group.onAmdgpuWavefrontDispatched(*wave);
+  const uint64_t before = test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(group);
+
+  group.onAmdgpuReadSgpr(wave, 0);
+
+  EXPECT_EQ(plugin_ptr->predicate_queries, 1u);
+  EXPECT_EQ(plugin_ptr->hot_callbacks, 0u);
+  EXPECT_EQ(test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(group), before);
+}
+
+TEST(ExecutionPluginTest, ReentrantDispatchHotHookFallsBackUntilCachePublication) {
+  PluginFixture fixture(/*num_wf_slots=*/1);
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  auto plugin = std::make_unique<HotHookSubscriptionProbe>("reentrant_dispatch_probe", true, true);
+  auto *plugin_ptr = plugin.get();
+  plugin_ptr->group = &group;
+  plugin_ptr->reenter_on_dispatch = true;
+  ASSERT_TRUE(group.add(std::move(plugin)));
+
+  auto *wave = fixture.cu()->dispatch_wf(/*wg_id=*/1, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/32);
+  ASSERT_NE(wave, nullptr);
+  group.onAmdgpuWavefrontDispatched(*wave);
+
+  // The reentrant hook uses the original live-query path (aggregate + fanout),
+  // then dispatch publishes one cached decision for all subsequent hooks.
+  EXPECT_EQ(plugin_ptr->predicate_queries, 3u);
+  EXPECT_EQ(plugin_ptr->hot_callbacks, 1u);
+  group.onAmdgpuReadSgpr(wave, 1);
+  EXPECT_EQ(plugin_ptr->predicate_queries, 3u);
+  EXPECT_EQ(plugin_ptr->hot_callbacks, 2u);
+}
+
+TEST(ExecutionPluginTest, HaltAndRedispatchCannotReuseAStaleHotHookSubscription) {
+  PluginFixture fixture(/*num_wf_slots=*/1);
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  auto plugin = std::make_unique<HotHookSubscriptionProbe>("halt_reuse_probe", true, true);
+  auto *plugin_ptr = plugin.get();
+  plugin_ptr->group = &group;
+  plugin_ptr->unsubscribe_on_halt = true;
+  plugin_ptr->reenter_on_halt = true;
+  ASSERT_TRUE(group.add(std::move(plugin)));
+
+  auto *wave = fixture.cu()->dispatch_wf(/*wg_id=*/1, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/32);
+  ASSERT_NE(wave, nullptr);
+  group.onAmdgpuWavefrontDispatched(*wave);
+  group.onAmdgpuReadSgpr(wave, 0);
+  ASSERT_EQ(plugin_ptr->hot_callbacks, 1u);
+  ASSERT_EQ(plugin_ptr->predicate_queries, 1u);
+
+  group.onAmdgpuWavefrontHalted(*wave);
+  EXPECT_EQ(plugin_ptr->halt_callbacks, 1u);
+  EXPECT_EQ(plugin_ptr->hot_callbacks, 1u)
+      << "the halt callback observed the stale subscribed decision";
+  EXPECT_EQ(plugin_ptr->predicate_queries, 2u);
+
+  plugin_ptr->set_subscribe_on_dispatch(false);
+  plugin_ptr->reenter_on_dispatch = false;
+  group.onAmdgpuWavefrontDispatched(*wave);
+  EXPECT_EQ(plugin_ptr->predicate_queries, 3u);
+  group.onAmdgpuReadSgpr(wave, 1);
+  EXPECT_EQ(plugin_ptr->predicate_queries, 3u);
+  EXPECT_EQ(plugin_ptr->hot_callbacks, 1u);
+
+  // reset() independently invalidates the decision while retaining its vector
+  // allocation for the next incarnation.
+  plugin_ptr->subscribed = true;
+  wave->reset();
+  group.onAmdgpuReadSgpr(wave, 2);
+  EXPECT_EQ(plugin_ptr->predicate_queries, 5u);
+  EXPECT_EQ(plugin_ptr->hot_callbacks, 2u);
 }
 
 TEST(ExecutionPluginTest, InfrequentAndHighFrequencyHooksMayOverlapByDefault) {
@@ -3362,6 +3841,244 @@ TEST(ExecutionPluginTest, SdwaClampIsAppliedInsideArchitecturalDestinationWrite)
   EXPECT_EQ(writes[0].byte_mask, ExecutionPlugin::kFullByteMask);
 }
 
+TEST(ExecutionPluginTest, SdwaF16ClampPrecedesDestinationPlacement) {
+  constexpr uint32_t kSrc0 = 2;
+  constexpr uint32_t kSrc1 = 3;
+  constexpr uint32_t kDst = 5;
+  constexpr uint32_t kOldDst = 0xBEEFBEEFu;
+  struct Case {
+    uint16_t source;
+    uint16_t expected;
+    bool dx10_clamp;
+  };
+  constexpr std::array cases{
+      Case{0x4000, 0x3C00, false}, // 2 + 2 saturates to one.
+      Case{0xB800, 0, false},      // Negative result saturates to positive zero.
+      Case{0x3000, 0x3400, false}, // Interior value stays unchanged.
+      Case{0x8000, 0, false},      // Negative zero clamps to positive zero.
+      Case{0x7C00, 0x3C00, false}, // Positive infinity saturates to one.
+      Case{0xFC00, 0, false},      // Negative infinity saturates to zero.
+      Case{0x7E55, 0x7E55, false}, // NaN payload survives without DX10_CLAMP.
+      Case{0x7E55, 0, true},
+  };
+  for (bool force_scalar : {false, true}) {
+    ForceScalarOverride scalar_override(force_scalar);
+    PluginFixture fixture(/*num_wf_slots=*/1);
+    OrderingPlugin *plugin = fixture.attach_ordering_plugin();
+    amdgpu::ComputeUnitCore *compute_unit = fixture.cu();
+    amdgpu::Wavefront *wavefront = compute_unit->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+    ASSERT_NE(wavefront, nullptr);
+    constexpr uint64_t kActiveLanes = 0b101;
+    wavefront->set_exec(kActiveLanes);
+    const uint32_t register_base = wavefront->vgpr_alloc().base;
+    std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    for (uint32_t selection : {amdgpu::sdwa::WORD_0, amdgpu::sdwa::WORD_1, amdgpu::sdwa::DWORD}) {
+      cdna4::Vop2VopSdwaMachineInst encoding{};
+      encoding.src0 = amdgpu::SRC_SDWA;
+      encoding.vsrc0 = kSrc0;
+      encoding.vsrc1 = kSrc1;
+      encoding.vdst = kDst;
+      encoding.op = cdna4::kVAddF16Vop2;
+      encoding.src0_sel = amdgpu::sdwa::WORD_0;
+      encoding.src1_sel = amdgpu::sdwa::WORD_0;
+      encoding.dst_sel = selection;
+      encoding.dst_unused = amdgpu::sdwa::UNUSED_PRESERVE;
+      encoding.clamp = 1;
+      std::unique_ptr<Instruction> instruction(
+          decode_valid(*decoder, reinterpret_cast<const uint32_t *>(&encoding)));
+      ASSERT_NE(instruction, nullptr);
+      for (const Case &test_case : cases) {
+        SCOPED_TRACE(test_case.source);
+        SCOPED_TRACE(selection);
+        wavefront->set_mode_raw(0xF0u |
+                                (test_case.dx10_clamp ? amdgpu::Wavefront::DX10_CLAMP_BIT : 0u));
+        for (uint32_t lane = 0; lane < wavefront->wf_size(); ++lane) {
+          compute_unit->write_vgpr(register_base + kSrc0, lane, test_case.source);
+          compute_unit->write_vgpr(register_base + kSrc1, lane, test_case.source);
+          compute_unit->write_vgpr(register_base + kDst, lane, kOldDst);
+        }
+        plugin->events.clear();
+        EXPECT_TRUE(compute_unit->execute_instruction(instruction.get(), *wavefront).succeeded());
+        const uint32_t expected = selection == amdgpu::sdwa::DWORD ? test_case.expected
+                                  : selection == amdgpu::sdwa::WORD_0
+                                      ? 0xBEEF0000u | test_case.expected
+                                      : (uint32_t{test_case.expected} << 16) | 0xBEEFu;
+        for (uint32_t lane = 0; lane < wavefront->wf_size(); ++lane)
+          EXPECT_EQ(compute_unit->read_vgpr_storage(register_base + kDst, lane),
+                    (kActiveLanes & (uint64_t{1} << lane)) ? expected : kOldDst);
+        const std::vector<HookEvent> writes = vgpr_write_events(*plugin);
+        uint64_t written_lanes = 0;
+        for (const HookEvent &write : writes) {
+          EXPECT_EQ(write.physical_reg, register_base + kDst);
+          EXPECT_EQ(write.byte_mask, selection == amdgpu::sdwa::DWORD    ? 0b1111
+                                     : selection == amdgpu::sdwa::WORD_0 ? 0b0011
+                                                                         : 0b1100);
+          written_lanes |= write.lane_mask;
+        }
+        EXPECT_EQ(written_lanes, kActiveLanes);
+      }
+    }
+  }
+}
+
+TEST(ExecutionPluginTest, SdwaPackedF16ClampTreatsEachHalfIndependently) {
+  for (bool force_scalar : {false, true}) {
+    ForceScalarOverride scalar_override(force_scalar);
+    PluginFixture fixture(/*num_wf_slots=*/1);
+    amdgpu::ComputeUnitCore *compute_unit = fixture.cu();
+    amdgpu::Wavefront *wavefront = compute_unit->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+    ASSERT_NE(wavefront, nullptr);
+    wavefront->set_exec(1);
+    wavefront->set_mode_raw(0xF0);
+    const uint32_t register_base = wavefront->vgpr_alloc().base;
+    std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    cdna4::Vop2VopSdwaMachineInst encoding{};
+    encoding.src0 = amdgpu::SRC_SDWA;
+    encoding.vsrc0 = 2;
+    encoding.vsrc1 = 3;
+    encoding.vdst = 5;
+    encoding.op = cdna4::kVPkFmacF16Vop2;
+    encoding.src0_sel = amdgpu::sdwa::DWORD;
+    encoding.src1_sel = amdgpu::sdwa::DWORD;
+    encoding.dst_sel = amdgpu::sdwa::DWORD;
+    encoding.clamp = 1;
+    std::unique_ptr<Instruction> instruction(
+        decode_valid(*decoder, reinterpret_cast<const uint32_t *>(&encoding)));
+    ASSERT_NE(instruction, nullptr);
+    // Each half computes its source times one plus zero. Saturate the low
+    // result while preserving the high result, then exercise the reverse.
+    for (bool high_saturates : {false, true}) {
+      compute_unit->write_vgpr(register_base + 2, 0, high_saturates ? 0x40003800u : 0x38004000u);
+      compute_unit->write_vgpr(register_base + 3, 0, 0x3C003C00u);
+      compute_unit->write_vgpr(register_base + 5, 0, 0);
+      EXPECT_TRUE(compute_unit->execute_instruction(instruction.get(), *wavefront).succeeded());
+      EXPECT_EQ(compute_unit->read_vgpr_storage(register_base + 5, 0),
+                high_saturates ? 0x3C003800u : 0x38003C00u);
+    }
+  }
+}
+
+TEST(ExecutionPluginTest, SdwaPackedConversionClampsBothHalvesBeforePlacement) {
+  constexpr uint32_t kSrc0 = 2;
+  constexpr uint32_t kSrc1 = 3;
+  constexpr uint32_t kDst = 5;
+  constexpr uint32_t kOldDst = 0xBEEFBEEFu;
+  struct Case {
+    float src0;
+    float src1;
+    uint32_t unclamped;
+    uint32_t clamped;
+  };
+  constexpr std::array cases{
+      Case{2.0f, -0.5f, 0xB8004000u, 0x00003C00u},
+      Case{-0.5f, 2.0f, 0x4000B800u, 0x3C000000u},
+      Case{2.0f, 0.5f, 0x38004000u, 0x38003C00u},
+      Case{0.5f, 2.0f, 0x40003800u, 0x3C003800u},
+  };
+  for (const auto &[arch, arch_name] : {std::pair{ROCJITSU_CODE_ARCH_RDNA1, "rdna1"},
+                                        std::pair{ROCJITSU_CODE_ARCH_RDNA2, "rdna2"}}) {
+    SCOPED_TRACE(arch_name);
+    for (bool force_scalar : {false, true}) {
+      ForceScalarOverride scalar_override(force_scalar);
+      PluginFixture fixture(/*num_wf_slots=*/1, arch_name, /*wavefront_size=*/32);
+      OrderingPlugin *plugin = fixture.attach_ordering_plugin();
+      amdgpu::ComputeUnitCore *cu = fixture.cu();
+      amdgpu::Wavefront *wave = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+      ASSERT_NE(wave, nullptr);
+      wave->set_mode_raw(0xF0u);
+      const uint32_t base = wave->vgpr_alloc().base;
+      std::unique_ptr<Decoder> decoder = Decoder::create(arch);
+      for (bool clamp : {false, true}) {
+        SCOPED_TRACE(clamp);
+        for (uint32_t selection :
+             {amdgpu::sdwa::DWORD, amdgpu::sdwa::WORD_0, amdgpu::sdwa::WORD_1}) {
+          SCOPED_TRACE(selection);
+          // RDNA1/2 V_CVT_PKRTZ_F16_F32 uses VOP2 opcode 47 and the same SDWA layout.
+          const std::array<uint32_t, 2> words{
+              vop2_encode(47, kDst, kSrc1, amdgpu::SRC_SDWA),
+              vop1_sdwa_word(kSrc0, selection, amdgpu::sdwa::UNUSED_PRESERVE, amdgpu::sdwa::DWORD,
+                             clamp) |
+                  (amdgpu::sdwa::DWORD << 24),
+          };
+          std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
+          ASSERT_NE(instruction, nullptr);
+          for (const Case &test_case : cases) {
+            SCOPED_TRACE(test_case.unclamped);
+            const uint32_t result = clamp ? test_case.clamped : test_case.unclamped;
+            const uint32_t expected = selection == amdgpu::sdwa::DWORD ? result
+                                      : selection == amdgpu::sdwa::WORD_0
+                                          ? 0xBEEF0000u | (result & 0xFFFFu)
+                                          : (result << 16) | 0xBEEFu;
+            for (uint64_t exec : {uint64_t{0b101}, uint64_t{0xFFFFFFFFu}}) {
+              wave->set_exec(exec);
+              for (uint32_t lane = 0; lane < wave->wf_size(); ++lane) {
+                cu->write_vgpr(base + kSrc0, lane, std::bit_cast<uint32_t>(test_case.src0));
+                cu->write_vgpr(base + kSrc1, lane, std::bit_cast<uint32_t>(test_case.src1));
+                cu->write_vgpr(base + kDst, lane, kOldDst);
+              }
+              plugin->events.clear();
+              ASSERT_TRUE(cu->execute_instruction(instruction.get(), *wave).succeeded());
+              for (uint32_t lane = 0; lane < wave->wf_size(); ++lane)
+                EXPECT_EQ(cu->read_vgpr_storage(base + kDst, lane),
+                          (exec & (uint64_t{1} << lane)) ? expected : kOldDst);
+              uint64_t written_lanes = 0;
+              for (const HookEvent &write : vgpr_write_events(*plugin)) {
+                EXPECT_EQ(write.physical_reg, base + kDst);
+                EXPECT_EQ(write.byte_mask, selection == amdgpu::sdwa::DWORD    ? 0b1111
+                                           : selection == amdgpu::sdwa::WORD_0 ? 0b0011
+                                                                               : 0b1100);
+                written_lanes |= write.lane_mask;
+              }
+              EXPECT_EQ(written_lanes, exec);
+              for (const HookEvent &read : vgpr_read_events(*plugin))
+                EXPECT_NE(read.physical_reg, base + kDst);
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(ExecutionPluginTest, SdwaIntegerResultsDoNotUseFloatingClamp) {
+  for (bool force_scalar : {false, true}) {
+    ForceScalarOverride scalar_override(force_scalar);
+    PluginFixture fixture(/*num_wf_slots=*/1);
+    amdgpu::ComputeUnitCore *compute_unit = fixture.cu();
+    amdgpu::Wavefront *wavefront = compute_unit->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+    ASSERT_NE(wavefront, nullptr);
+    wavefront->set_exec(1);
+    wavefront->set_mode_raw(0xF0u | amdgpu::Wavefront::DX10_CLAMP_BIT);
+    const uint32_t register_base = wavefront->vgpr_alloc().base;
+    std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    struct Case {
+      uint32_t encoding;
+      uint32_t modifiers;
+      uint32_t source;
+      uint32_t result;
+    };
+    // LLVM gfx950 encodings: FREXP_EXP_I32_F32 with DWORD input and the
+    // normalized I16/U16 conversions with WORD_0 input. Each has CLAMP set.
+    constexpr std::array cases{
+        Case{0x7E0A66F9u, 0x00062602u, std::bit_cast<uint32_t>(0.25f), 0xFFFFFFFFu},
+        Case{0x7E0A66F9u, 0x00062602u, std::bit_cast<uint32_t>(0.125f), 0xFFFFFFFEu},
+        Case{0x7E0A66F9u, 0x00062602u, std::bit_cast<uint32_t>(8.0f), 4u},
+        Case{0x7E0A9AF9u, 0x00042602u, 0x3C00u, 0x7FFFu},
+        Case{0x7E0A9CF9u, 0x00042602u, 0x3C00u, 0xFFFFu},
+    };
+    for (const Case &test_case : cases) {
+      const uint32_t encoding[] = {test_case.encoding, test_case.modifiers};
+      std::unique_ptr<Instruction> instruction(decode_valid(*decoder, encoding));
+      ASSERT_NE(instruction, nullptr);
+      compute_unit->write_vgpr(register_base + 2, 0, test_case.source);
+      compute_unit->write_vgpr(register_base + 5, 0, 0xDEADBEEFu);
+      EXPECT_TRUE(compute_unit->execute_instruction(instruction.get(), *wavefront).succeeded());
+      // These integer bit patterns must not be interpreted as floating NaNs.
+      EXPECT_EQ(compute_unit->read_vgpr_storage(register_base + 5, 0), test_case.result);
+    }
+  }
+}
+
 TEST(ExecutionPluginTest, SdwaClampHonorsDx10ClampMode) {
   ForceScalarOverride force_simd(false);
   PluginFixture f(/*num_wf_slots=*/1);
@@ -3402,7 +4119,7 @@ TEST(ExecutionPluginTest, SdwaClampHonorsDx10ClampMode) {
   }
 }
 
-TEST(ExecutionPluginTest, SdwaPartialPreserveClampReportsFullDwordWrite) {
+TEST(ExecutionPluginTest, SdwaPartialPreserveClampReportsOnlySelectedBytes) {
   ForceScalarOverride force_simd(false);
   PluginFixture f(/*num_wf_slots=*/1);
   auto *plugin = f.attach_ordering_plugin();
@@ -3415,8 +4132,8 @@ TEST(ExecutionPluginTest, SdwaPartialPreserveClampReportsFullDwordWrite) {
   constexpr uint32_t kDst = 5;
   const uint32_t vb = wf->vgpr_alloc().base;
   cu->write_vgpr(vb + kSrc, 0, std::bit_cast<uint32_t>(0.5f));
-  // v_rcp produces 2.0f (0x40000000). BYTE_1 replaces 0xCC with 0x00,
-  // yielding 2.0f before clamp; clamp then changes the complete dword to 1.0f.
+  // Clamp the reciprocal to 1.0f before BYTE_1 selects its low byte. The
+  // original destination bytes must not become part of the numeric result.
   cu->write_vgpr(vb + kDst, 0, 0x4000CC00u);
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
@@ -3430,7 +4147,7 @@ TEST(ExecutionPluginTest, SdwaPartialPreserveClampReportsFullDwordWrite) {
   plugin->events.clear();
   EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
-  EXPECT_EQ(cu->read_vgpr_storage(vb + kDst, 0), std::bit_cast<uint32_t>(1.0f));
+  EXPECT_EQ(cu->read_vgpr_storage(vb + kDst, 0), 0x40000000u);
   const auto reads = vgpr_read_events(*plugin);
   ASSERT_EQ(reads.size(), 1u);
   EXPECT_EQ(reads[0].physical_reg, vb + kSrc);
@@ -3439,7 +4156,7 @@ TEST(ExecutionPluginTest, SdwaPartialPreserveClampReportsFullDwordWrite) {
   ASSERT_EQ(writes.size(), 1u);
   EXPECT_EQ(writes[0].physical_reg, vb + kDst);
   EXPECT_EQ(writes[0].lane_mask, 1u);
-  EXPECT_EQ(writes[0].byte_mask, ExecutionPlugin::kFullByteMask);
+  EXPECT_EQ(writes[0].byte_mask, 0b0010);
 }
 
 TEST(ExecutionPluginTest, MemoryPipelineCompletionDoesNotObserveInstructionWrite) {
@@ -3565,6 +4282,63 @@ TEST(ExecutionPluginTest, FlatStoreDwordx4ReportsEverySourceRegisterAndActiveLan
   }
 }
 
+TEST(ExecutionPluginTest, MemoryPipelineHoldsBothGenericFlatCountersUntilCompletion) {
+  PluginFixture f(/*num_wf_slots=*/1);
+  auto *wf = f.cu()->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+
+  auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
+  state->wait_counter_type = WaitCounterType::VMCNT;
+  CounterObservingPipeline pipeline;
+  pipeline.issue(new TestMemoryInstruction(std::move(state), "test_mem", WaitCounterType::LGKMCNT),
+                 *wf);
+
+  EXPECT_EQ(pipeline.counters_at_access.vmcnt, 1);
+  EXPECT_EQ(pipeline.counters_at_access.lgkmcnt, 1);
+  EXPECT_EQ(wf->wait_counters().vmcnt, 0);
+  EXPECT_EQ(wf->wait_counters().lgkmcnt, 0);
+}
+
+TEST(ExecutionPluginTest, MemoryPipelineHoldsAllGenericFlatStoreCountersUntilCompletion) {
+  PluginFixture f(/*num_wf_slots=*/1);
+  auto *wf = f.cu()->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+
+  auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
+  state->wait_counter_type = WaitCounterType::VMCNT;
+  CounterObservingPipeline pipeline;
+  pipeline.issue(
+      new TestMemoryInstruction(std::move(state),
+                                {{WaitCounterType::VMCNT, MemoryCompletionClass::VMEM},
+                                 {WaitCounterType::LGKMCNT, MemoryCompletionClass::LDS},
+                                 {WaitCounterType::EXPCNT, MemoryCompletionClass::UNORDERED}}),
+      *wf);
+
+  EXPECT_EQ(pipeline.counters_at_access.vmcnt, 1);
+  EXPECT_EQ(pipeline.counters_at_access.lgkmcnt, 1);
+  EXPECT_EQ(pipeline.counters_at_access.expcnt, 1);
+  EXPECT_EQ(wf->wait_counters().vmcnt, 0);
+  EXPECT_EQ(wf->wait_counters().lgkmcnt, 0);
+  EXPECT_EQ(wf->wait_counters().expcnt, 0);
+}
+
+TEST(ExecutionPluginTest, MemoryPipelineHonorsWideScalarCounterIncrement) {
+  PluginFixture f(/*num_wf_slots=*/1);
+  auto *wf = f.cu()->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+
+  auto state = std::make_unique<ScalarMemState>();
+  state->wait_counter_type = WaitCounterType::LGKMCNT;
+  CounterObservingPipeline pipeline;
+  pipeline.issue(new TestMemoryInstruction(
+                     std::move(state),
+                     {{WaitCounterType::LGKMCNT, MemoryCompletionClass::UNORDERED, 2}}, false),
+                 *wf);
+
+  EXPECT_EQ(pipeline.counters_at_access.lgkmcnt, 2);
+  EXPECT_EQ(wf->wait_counters().lgkmcnt, 0);
+}
+
 TEST(ExecutionPluginTest, MemoryPipelineCompletionDoesNotCrossWaveVgprBlock) {
   constexpr uint32_t kVgprsPerWave = 16;
   PluginFixture f(/*num_wf_slots=*/2, /*arch=*/"rdna4", /*wavefront_size=*/32,
@@ -3601,6 +4375,52 @@ TEST(ExecutionPluginTest, MemoryPipelineCompletionDoesNotCrossWaveVgprBlock) {
   EXPECT_EQ(cu->read_vgpr_storage(adjacent->vgpr_alloc().base, 0), kAdjacentSentinel);
 }
 
+TEST(ExecutionPluginTest, DualOffsetCompletionRejectsBothDestinationsBeforeWriteback) {
+  constexpr uint32_t kVgprsPerWave = 16;
+  PluginFixture f(/*num_wf_slots=*/2, /*arch=*/"rdna4", /*wavefront_size=*/32,
+                  /*sgprs_per_wf=*/128, kVgprsPerWave);
+  auto *cu = f.cu();
+  auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/128, kVgprsPerWave, 32);
+  auto *adjacent = cu->dispatch_wf(1, 0, /*sgprs=*/128, kVgprsPerWave, 32);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_NE(adjacent, nullptr);
+  ASSERT_EQ(adjacent->vgpr_alloc().base, wf->vgpr_alloc().base + kVgprsPerWave);
+
+  constexpr std::array<uint64_t, 2> kLoaded = {0x1111222233334444ULL, 0x5555666677778888ULL};
+  constexpr uint32_t kFirstDst = 3;
+  constexpr uint32_t kFirstSentinelLo = 0xA5A5A5A5u;
+  constexpr uint32_t kFirstSentinelHi = 0xB6B6B6B6u;
+  constexpr uint32_t kSecondSentinel = 0xC7C7C7C7u;
+  constexpr uint32_t kAdjacentSentinel = 0xD8D8D8D8u;
+  wf->lds().write(uint32_t{0}, reinterpret_cast<const uint8_t *>(kLoaded.data()),
+                  static_cast<uint32_t>(sizeof(kLoaded)));
+  cu->write_vgpr(wf->vgpr_alloc().base + kFirstDst, 0, kFirstSentinelLo);
+  cu->write_vgpr(wf->vgpr_alloc().base + kFirstDst + 1, 0, kFirstSentinelHi);
+  cu->write_vgpr(wf->vgpr_alloc().base + kVgprsPerWave - 1, 0, kSecondSentinel);
+  cu->write_vgpr(adjacent->vgpr_alloc().base, 0, kAdjacentSentinel);
+
+  auto state = std::make_unique<VectorMemState>(LOCAL_MEM);
+  state->elem_size = sizeof(uint64_t);
+  state->num_elems = 1;
+  state->is_load = true;
+  state->wf_size = wf->wf_size();
+  state->exec_mask = 1;
+  state->lane_mask = 1;
+  state->dst_reg_base = wf->vgpr_alloc().base + kFirstDst;
+  state->per_lane_addr[0] = 0;
+  state->ds2_active = true;
+  state->ds2_dst_reg_base = wf->vgpr_alloc().base + kVgprsPerWave - 1;
+  state->ds2_per_lane_addr[0] = sizeof(uint64_t);
+
+  LocalMemPipeline pipeline;
+  pipeline.issue(new TestMemoryInstruction(std::move(state)), *wf);
+
+  EXPECT_EQ(cu->read_vgpr_storage(wf->vgpr_alloc().base + kFirstDst, 0), kFirstSentinelLo);
+  EXPECT_EQ(cu->read_vgpr_storage(wf->vgpr_alloc().base + kFirstDst + 1, 0), kFirstSentinelHi);
+  EXPECT_EQ(cu->read_vgpr_storage(wf->vgpr_alloc().base + kVgprsPerWave - 1, 0), kSecondSentinel);
+  EXPECT_EQ(cu->read_vgpr_storage(adjacent->vgpr_alloc().base, 0), kAdjacentSentinel);
+}
+
 TEST(ExecutionPluginTest, ScalarMemoryCompletionDoesNotObserveInstructionWrite) {
   PluginFixture f(/*num_wf_slots=*/1);
   auto *plugin = f.attach_ordering_plugin();
@@ -3625,9 +4445,8 @@ TEST(ExecutionPluginTest, ScalarMemoryCompletionDoesNotObserveInstructionWrite) 
   pipeline.issue(new TestMemoryInstruction(std::move(state)), *wf);
 
   EXPECT_EQ(cu->read_sgpr_storage(wf->sgpr_alloc().base + kDst), kLoadedValue);
-  EXPECT_TRUE(
-      std::none_of(plugin->events.begin(), plugin->events.end(),
-                   [](const HookEvent &event) { return event.kind == HookEvent::WRITE_SGPR; }));
+  EXPECT_TRUE(std::ranges::none_of(
+      plugin->events, [](const HookEvent &event) { return event.kind == HookEvent::WRITE_SGPR; }));
 
   constexpr uint64_t kTtmpAddress = 0x8300;
   constexpr uint32_t kTtmpValue = 0xAABBCCDDu;
@@ -3654,9 +4473,8 @@ TEST(ExecutionPluginTest, ScalarMemoryCompletionDoesNotObserveInstructionWrite) 
   pipeline.issue(new TestMemoryInstruction(std::move(vcc_state)), *wf);
 
   EXPECT_EQ(wf->vcc(), 0xAABBCCDD55667788ull);
-  EXPECT_TRUE(
-      std::none_of(plugin->events.begin(), plugin->events.end(),
-                   [](const HookEvent &event) { return event.kind == HookEvent::WRITE_SGPR; }));
+  EXPECT_TRUE(std::ranges::none_of(
+      plugin->events, [](const HookEvent &event) { return event.kind == HookEvent::WRITE_SGPR; }));
 }
 
 TEST(ExecutionPluginTest, Gfx1250ScalarMemoryRoutesSpecialSelectorsAtNonzeroSgprBase) {
@@ -3839,8 +4657,139 @@ TEST(ExecutionPluginTest, D16MemoryCompletionPreservesHalfWithoutObservation) {
   }
 }
 
+class FormattedLoadRaceTest : public ::testing::Test {
+protected:
+  PluginFixture fixture{1, "rdna4", 32, 128};
+  StringSink *sink = nullptr;
+  Wavefront *wave = nullptr;
+  RaceWavefrontState *plugin_state = nullptr;
+  std::unique_ptr<Decoder> decoder;
+
+  void SetUp() override {
+    PluginSinkConfig sink_config;
+    sink = &sink_config.emplace<StringSink>();
+    fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+    auto plugin = std::make_unique<RaceDetectorPlugin>();
+    auto *plugin_ptr = plugin.get();
+    ASSERT_TRUE(fixture.plugin_group_->add(std::move(plugin)));
+    fixture.soc->set_plugin_group(fixture.plugin_group_);
+    fixture.plugin_group_->onInit();
+    wave = fixture.cu()->dispatch_wf(0, 0, 128, 256, 32);
+    ASSERT_NE(wave, nullptr);
+    wave->set_exec(1);
+    std::array<Wavefront *, 1> waves{wave};
+    fixture.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 256, 128, waves);
+    plugin_state = static_cast<RaceWavefrontState *>(wave->plugin_state(plugin_ptr->slot_index()));
+    decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+    ASSERT_NE(decoder, nullptr);
+  }
+
+  void issue(uint16_t opcode, uint32_t format, uint8_t destination, uint32_t components) {
+    auto *cu = fixture.cu();
+    const uint32_t scalar_base = wave->sgpr_alloc().base;
+    cu->write_sgpr(scalar_base + 4, 0x1000);
+    cu->write_sgpr(scalar_base + 5, 0);
+    cu->write_sgpr(scalar_base + 6, 64);
+    cu->write_sgpr(scalar_base + 7,
+                   4 | (5 << 3) | (6 << 6) | (7 << 9) | (format << 12) | (1u << 28));
+    const auto words = rdna4::build_vbuffer(opcode, {.soffset = rdna4::OPR_SREG_M0_NULL,
+                                                     .vdata = destination,
+                                                     .rsrc = 4,
+                                                     .format = static_cast<uint8_t>(format)});
+    std::unique_ptr<Instruction> load(decode_valid(*decoder, words.data()));
+    ASSERT_NE(load, nullptr);
+    wave->pc += 16; // Give each probe a distinct PC so report deduplication cannot hide it.
+    ASSERT_TRUE(cu->execute_instruction(load.get(), *wave).succeeded());
+    ASSERT_NE(load->data(), nullptr);
+    const auto &state = *load->data_as<VectorMemState>();
+    EXPECT_EQ(state.buffer_components, components);
+    EXPECT_EQ(state.num_elems, 1u);
+    EXPECT_EQ(state.elem_size, format == 46 ? 4u : 16u);
+    fixture.plugin_group_->onAmdgpuMemoryAccessRouted({}, *load, *wave);
+  }
+
+  void wait(uint32_t count) {
+    wave->set_wait_target_loadcnt(count);
+    TestWaitcntInstruction instruction("s_wait_loadcnt");
+    fixture.plugin_group_->onAmdgpuAfterExecuteInstruction(wave->pc + 4, instruction, *wave);
+  }
+
+  bool probe(uint32_t destination, uint8_t byte_mask, bool write, uint64_t lanes = 1) {
+    const size_t previous = sink->str().size();
+    const uint32_t physical = wave->vgpr_alloc().base + destination;
+    if (write)
+      fixture.plugin_group_->onAmdgpuWriteVgprLanes(wave, physical, lanes, byte_mask);
+    else
+      fixture.plugin_group_->onAmdgpuReadVgprLanes(wave, physical, lanes, byte_mask);
+    return sink->str().find("RACE ", previous) != std::string::npos;
+  }
+};
+
+TEST_F(FormattedLoadRaceTest, TracksEveryDestinationAndWrittenHalf) {
+  struct Case {
+    uint16_t opcode;
+    uint32_t components;
+    std::array<uint8_t, 4> masks;
+  };
+  const Case cases[] = {
+      {rdna4::kBufferLoadFormatXVbuffer, 1, {0xf, 0, 0, 0}},
+      {rdna4::kBufferLoadFormatXyzwVbuffer, 4, {0xf, 0xf, 0xf, 0xf}},
+      {rdna4::kTbufferLoadFormatXyzwVbuffer, 4, {0xf, 0xf, 0xf, 0xf}},
+      {rdna4::kBufferLoadD16FormatXVbuffer, 1, {0x3, 0, 0, 0}},
+      {rdna4::kBufferLoadD16HiFormatXVbuffer, 1, {0xc, 0, 0, 0}},
+      {rdna4::kBufferLoadD16FormatXyVbuffer, 2, {0xf, 0, 0, 0}},
+      {rdna4::kBufferLoadD16FormatXyzVbuffer, 3, {0xf, 0x3, 0, 0}},
+      {rdna4::kBufferLoadD16FormatXyzwVbuffer, 4, {0xf, 0xf, 0, 0}},
+  };
+  for (const auto &test : cases) {
+    for (uint32_t format : {46u, 62u}) { // Four-byte and sixteen-byte memory footprints.
+      for (uint32_t offset = 0; offset < 5; ++offset) {
+        for (uint8_t mask : {0x3, 0xc}) {
+          for (bool write : {false, true}) {
+            SCOPED_TRACE(std::format("opcode={} format={} offset={} mask={} write={}", test.opcode,
+                                     format, offset, mask, write));
+            issue(test.opcode, format, 8, test.components);
+            ASSERT_EQ(plugin_state->race_state->getWaveMemoryEvents().size(), 1u);
+            EXPECT_FALSE(probe(8 + offset, mask, write, /*lanes=*/2));
+            const bool expected = offset < test.masks.size() && (test.masks[offset] & mask);
+            EXPECT_EQ(probe(8 + offset, mask, write), expected);
+            wait(0);
+            EXPECT_TRUE(plugin_state->race_state->getWaveMemoryEvents().empty());
+            EXPECT_FALSE(probe(8 + offset, mask, write));
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST_F(FormattedLoadRaceTest, PartialWaitRetiresOneLoadWithAllItsDestinations) {
+  issue(rdna4::kBufferLoadD16FormatXyzVbuffer, 46, 8, 3);
+  issue(rdna4::kBufferLoadD16FormatXyzVbuffer, 46, 12, 3);
+  ASSERT_EQ(plugin_state->race_state->getWaveMemoryEvents().size(), 2u);
+  wait(1);
+  ASSERT_EQ(plugin_state->race_state->getWaveMemoryEvents().size(), 1u);
+  EXPECT_FALSE(probe(8, 0xf, false));
+  EXPECT_FALSE(probe(9, 0xf, false));
+  EXPECT_FALSE(probe(13, 0xc, false));
+  EXPECT_TRUE(probe(13, 0x3, false));
+  wait(0);
+  EXPECT_FALSE(probe(12, 0xf, false));
+  EXPECT_FALSE(probe(13, 0xf, false));
+}
+
+TEST_F(FormattedLoadRaceTest, RejectsWholeDestinationRangeWhenItExceedsTheWaveAllocation) {
+  issue(rdna4::kBufferLoadFormatXyzwVbuffer, 46, 255, 4);
+  EXPECT_TRUE(plugin_state->race_state->getWaveMemoryEvents().empty());
+  EXPECT_FALSE(probe(255, 0xf, false));
+  issue(rdna4::kBufferLoadD16FormatXyzVbuffer, 46, 255, 3);
+  EXPECT_TRUE(plugin_state->race_state->getWaveMemoryEvents().empty());
+  EXPECT_FALSE(probe(255, 0xf, false));
+}
+
 TEST(RaceDetectorPluginTest, D16LoadTracksFullDwordWhenSramEccEnabled) {
-  auto opposite_half_read_reports_race = [](std::string_view arch, uint32_t wavefront_size) {
+  auto opposite_half_read_reports_race = [](std::string_view arch, uint32_t wavefront_size,
+                                            bool formatted) {
     PluginFixture f(/*num_wf_slots=*/1, arch, wavefront_size);
     PluginSinkConfig sink_config;
     StringSink &sink = sink_config.emplace<StringSink>();
@@ -3871,18 +4820,613 @@ TEST(RaceDetectorPluginTest, D16LoadTracksFullDwordWhenSramEccEnabled) {
     state->exec_mask = 1;
     state->lane_mask = 1;
     state->dst_reg_base = wf->vgpr_alloc().base + kDst;
-    state->d16_lo = true;
+    state->d16_lo = !formatted;
+    state->buffer_d16 = formatted;
+    state->buffer_components = formatted ? 3 : 0;
     TestMemoryInstruction load(std::move(state));
-    f.plugin_group_->onAmdgpuRouteMemoryInstruction(load, *wf);
+    f.plugin_group_->onAmdgpuMemoryAccessRouted({}, load, *wf);
 
-    f.plugin_group_->onAmdgpuReadVgprLanes(wf, wf->vgpr_alloc().base + kDst, /*lane_mask=*/1,
-                                           ExecutionPlugin::kHighHalfByteMask);
+    f.plugin_group_->onAmdgpuReadVgprLanes(wf, wf->vgpr_alloc().base + kDst + (formatted ? 1 : 0),
+                                           /*lane_mask=*/1, ExecutionPlugin::kHighHalfByteMask);
     return sink.str().find("RACE ") != std::string::npos;
   };
 
-  EXPECT_TRUE(opposite_half_read_reports_race("cdna4", /*wavefront_size=*/64));
-  EXPECT_TRUE(opposite_half_read_reports_race("cdna5", /*wavefront_size=*/32));
-  EXPECT_FALSE(opposite_half_read_reports_race("rdna4", /*wavefront_size=*/32));
+  for (bool formatted : {false, true}) {
+    SCOPED_TRACE(formatted);
+    EXPECT_TRUE(opposite_half_read_reports_race("cdna4", /*wavefront_size=*/64, formatted));
+    EXPECT_TRUE(opposite_half_read_reports_race("cdna5", /*wavefront_size=*/32, formatted));
+    EXPECT_FALSE(opposite_half_read_reports_race("rdna4", /*wavefront_size=*/32, formatted));
+  }
+}
+
+TEST(RaceDetectorPluginTest, InvalidVectorLoadDestinationIsRejectedBeforeWawChecks) {
+  auto rejects_without_access = [](MemPipelineTag tag) {
+    constexpr uint32_t kVgprsPerWave = 16;
+    PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"rdna4", /*wavefront_size=*/32,
+                    /*sgprs_per_wf=*/128, kVgprsPerWave);
+    PluginSinkConfig sink_config;
+    StringSink &sink = sink_config.emplace<StringSink>();
+    f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+    EXPECT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+    f.soc->set_plugin_group(f.plugin_group_);
+    f.plugin_group_->onInit();
+
+    auto *wf = f.cu()->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/128, kVgprsPerWave, 32);
+    EXPECT_NE(wf, nullptr);
+    if (!wf)
+      return false;
+    wf->set_exec(1u);
+    std::array<amdgpu::Wavefront *, 1> waves{wf};
+    f.plugin_group_->onAmdgpuWorkgroupDispatched(
+        /*dispatch_id=*/1, /*wg_id=*/0, /*physical_vgpr_count=*/kVgprsPerWave,
+        /*physical_sgpr_count=*/128, waves);
+
+    auto state = std::make_unique<VectorMemState>(tag);
+    state->elem_size = sizeof(uint32_t);
+    state->num_elems = 2;
+    state->is_load = true;
+    state->wf_size = wf->wf_size();
+    state->exec_mask = 1;
+    state->lane_mask = 1;
+    state->dst_reg_base = wf->vgpr_alloc().base + kVgprsPerWave - 1;
+    TestMemoryInstruction load(std::move(state));
+    f.plugin_group_->onAmdgpuMemoryAccessRouted({}, load, *wf);
+
+    f.plugin_group_->onAmdgpuReadVgprLanes(wf, wf->vgpr_alloc().base + kVgprsPerWave - 1,
+                                           /*lane_mask=*/1);
+    return sink.str().find("RACE ") == std::string::npos;
+  };
+
+  EXPECT_TRUE(rejects_without_access(GLOBAL_MEM));
+  EXPECT_TRUE(rejects_without_access(LOCAL_MEM));
+}
+
+TEST(RaceDetectorPluginTest, WideVectorLoadTracksEveryDestinationVgpr) {
+  PluginFixture f(/*num_wf_slots=*/1);
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+
+  auto *wf = f.cu()->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+  std::array<amdgpu::Wavefront *, 1> waves{wf};
+  f.plugin_group_->onAmdgpuWorkgroupDispatched(
+      /*dispatch_id=*/1, /*wg_id=*/0, /*physical_vgpr_count=*/256,
+      /*physical_sgpr_count=*/104, waves);
+
+  constexpr uint32_t kDst = 4;
+  auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
+  state->elem_size = sizeof(uint64_t);
+  state->num_elems = 1;
+  state->is_load = true;
+  state->wf_size = wf->wf_size();
+  state->exec_mask = 1;
+  state->lane_mask = 1;
+  state->dst_reg_base = wf->vgpr_alloc().base + kDst;
+  TestMemoryInstruction load(std::move(state));
+  f.plugin_group_->onAmdgpuMemoryAccessRouted({}, load, *wf);
+
+  f.plugin_group_->onAmdgpuReadVgprLanes(wf, wf->vgpr_alloc().base + kDst + 1,
+                                         /*lane_mask=*/1);
+  EXPECT_NE(sink.str().find("RACE "), std::string::npos);
+}
+
+TEST(RaceDetectorPluginTest, DualOffsetLoadTracksBothDestinationRanges) {
+  PluginFixture f(/*num_wf_slots=*/1);
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+
+  auto *wf = f.cu()->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+  std::array<amdgpu::Wavefront *, 1> waves{wf};
+  f.plugin_group_->onAmdgpuWorkgroupDispatched(
+      /*dispatch_id=*/1, /*wg_id=*/0, /*physical_vgpr_count=*/256,
+      /*physical_sgpr_count=*/104, waves);
+
+  constexpr uint32_t kFirstDst = 4;
+  constexpr uint32_t kSecondDst = 7;
+  auto state = std::make_unique<VectorMemState>(LOCAL_MEM);
+  state->elem_size = sizeof(uint32_t);
+  state->num_elems = 1;
+  state->is_load = true;
+  state->wf_size = wf->wf_size();
+  state->exec_mask = 1;
+  state->lane_mask = 1;
+  state->dst_reg_base = wf->vgpr_alloc().base + kFirstDst;
+  state->ds2_active = true;
+  state->ds2_dst_reg_base = wf->vgpr_alloc().base + kSecondDst;
+  TestMemoryInstruction load(std::move(state));
+  f.plugin_group_->onAmdgpuMemoryAccessRouted({}, load, *wf);
+
+  f.plugin_group_->onAmdgpuReadVgprLanes(wf, wf->vgpr_alloc().base + kSecondDst,
+                                         /*lane_mask=*/1);
+  EXPECT_NE(sink.str().find("RACE "), std::string::npos);
+}
+
+TEST(RaceDetectorPluginTest, DualOffsetStoreTracksSecondLdsRange) {
+  PluginFixture f(/*num_wf_slots=*/2);
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+
+  auto *writer = f.cu()->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
+  auto *reader = f.cu()->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(writer, nullptr);
+  ASSERT_NE(reader, nullptr);
+  writer->set_exec(1u);
+  reader->set_exec(1u);
+  std::array<amdgpu::Wavefront *, 2> waves{writer, reader};
+  f.plugin_group_->onAmdgpuWorkgroupDispatched(
+      /*dispatch_id=*/1, /*wg_id=*/0, /*physical_vgpr_count=*/512,
+      /*physical_sgpr_count=*/208, waves);
+
+  auto store_state = std::make_unique<VectorMemState>(LOCAL_MEM);
+  store_state->elem_size = sizeof(uint32_t);
+  store_state->num_elems = 1;
+  store_state->is_load = false;
+  store_state->wf_size = writer->wf_size();
+  store_state->exec_mask = 1;
+  store_state->lane_mask = 1;
+  store_state->per_lane_addr[0] = 0;
+  store_state->ds2_active = true;
+  store_state->ds2_per_lane_addr[0] = 16;
+  TestMemoryInstruction store(std::move(store_state));
+  f.plugin_group_->onAmdgpuMemoryAccessRouted({}, store, *writer);
+
+  auto load_state = std::make_unique<VectorMemState>(LOCAL_MEM);
+  load_state->elem_size = sizeof(uint32_t);
+  load_state->num_elems = 1;
+  load_state->is_load = true;
+  load_state->wf_size = reader->wf_size();
+  load_state->exec_mask = 1;
+  load_state->lane_mask = 1;
+  load_state->dst_reg_base = reader->vgpr_alloc().base;
+  load_state->per_lane_addr[0] = 16;
+  TestMemoryInstruction load(std::move(load_state));
+  f.plugin_group_->onAmdgpuMemoryAccessRouted({}, load, *reader);
+
+  EXPECT_NE(sink.str().find("RACE "), std::string::npos);
+}
+
+TEST(RaceDetectorPluginTest, DualOffsetAccessValidatesSecondLdsRange) {
+  const auto second_range_reports_race = [](bool dual_is_load) {
+    PluginFixture f(/*num_wf_slots=*/2);
+    PluginSinkConfig sink_config;
+    StringSink &sink = sink_config.emplace<StringSink>();
+    f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+    EXPECT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+    f.soc->set_plugin_group(f.plugin_group_);
+    f.plugin_group_->onInit();
+
+    auto *first = f.cu()->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
+    auto *second = f.cu()->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
+    EXPECT_NE(first, nullptr);
+    EXPECT_NE(second, nullptr);
+    if (!first || !second)
+      return false;
+    first->set_exec(1u);
+    second->set_exec(1u);
+    std::array<amdgpu::Wavefront *, 2> waves{first, second};
+    f.plugin_group_->onAmdgpuWorkgroupDispatched(
+        /*dispatch_id=*/1, /*wg_id=*/0, /*physical_vgpr_count=*/512,
+        /*physical_sgpr_count=*/208, waves);
+
+    auto first_state = std::make_unique<VectorMemState>(LOCAL_MEM);
+    first_state->elem_size = sizeof(uint32_t);
+    first_state->num_elems = 1;
+    first_state->is_load = !dual_is_load;
+    first_state->wf_size = first->wf_size();
+    first_state->exec_mask = 1;
+    first_state->lane_mask = 1;
+    first_state->dst_reg_base = first->vgpr_alloc().base;
+    first_state->per_lane_addr[0] = 16;
+    TestMemoryInstruction first_access(std::move(first_state));
+    f.plugin_group_->onAmdgpuMemoryAccessRouted({}, first_access, *first);
+
+    auto dual_state = std::make_unique<VectorMemState>(LOCAL_MEM);
+    dual_state->elem_size = sizeof(uint32_t);
+    dual_state->num_elems = 1;
+    dual_state->is_load = dual_is_load;
+    dual_state->wf_size = second->wf_size();
+    dual_state->exec_mask = 1;
+    dual_state->lane_mask = 1;
+    dual_state->dst_reg_base = second->vgpr_alloc().base;
+    dual_state->ds2_active = true;
+    dual_state->ds2_dst_reg_base = second->vgpr_alloc().base + 1;
+    dual_state->per_lane_addr[0] = 0;
+    dual_state->ds2_per_lane_addr[0] = 16;
+    TestMemoryInstruction dual_access(std::move(dual_state));
+    f.plugin_group_->onAmdgpuMemoryAccessRouted({}, dual_access, *second);
+
+    return sink.str().find("RACE ") != std::string::npos;
+  };
+
+  EXPECT_TRUE(second_range_reports_race(/*dual_is_load=*/true));
+  EXPECT_TRUE(second_range_reports_race(/*dual_is_load=*/false));
+}
+
+TEST(RaceDetectorPluginTest, LocalMemoryUsesEffectiveIssueMask) {
+  PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"cdna5", /*wavefront_size=*/32,
+                  /*sgprs_per_wf=*/128);
+  PluginSinkConfig sink_config;
+  sink_config.emplace<StringSink>();
+  auto plugin = std::make_unique<RaceDetectorPlugin>();
+  auto *plugin_ptr = plugin.get();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(f.plugin_group_->add(std::move(plugin)));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+
+  auto *cu = f.cu();
+  auto *wf = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/128, /*vgprs=*/256, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0);
+  wf->set_lds_base(cu->allocate_lds(512));
+  wf->set_lds_size(512);
+  std::array<amdgpu::Wavefront *, 1> waves{wf};
+  f.plugin_group_->onAmdgpuWorkgroupDispatched(
+      /*dispatch_id=*/1, /*wg_id=*/0, /*physical_vgpr_count=*/256,
+      /*physical_sgpr_count=*/128, waves);
+
+  constexpr uint32_t kAddressVgpr = 4;
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+    cu->write_vgpr(wf->vgpr_alloc().base + kAddressVgpr, lane, lane * sizeof(uint64_t));
+  const auto words = cdna5::build_vds(cdna5::kDsLoadTr8B64Vds, {.addr = kAddressVgpr, .vdst = 0});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> load(decode_valid(*decoder, words.data()));
+  ASSERT_NE(load, nullptr);
+  ASSERT_TRUE(cu->execute_instruction(load.get(), *wf).succeeded());
+  const auto *state = load->data_as<VectorMemState>();
+  ASSERT_NE(state, nullptr);
+  ASSERT_EQ(state->exec_mask, 0xFFFF'FFFFu);
+  f.plugin_group_->onAmdgpuMemoryAccessRouted({}, *load, *wf);
+
+  auto *plugin_state =
+      static_cast<RaceWavefrontState *>(wf->plugin_state(plugin_ptr->slot_index()));
+  ASSERT_NE(plugin_state, nullptr);
+  auto &events = plugin_state->race_state->getDetector()->events();
+  ASSERT_EQ(events.totalAllocated(), 1);
+  const EventId event{events.totalAllocated() - 1};
+  EXPECT_EQ(events.execMask(event), 0xFFFF'FFFFu);
+}
+
+TEST(RaceDetectorPluginTest, MixedCounterClassesUseUnorderedEventOrdering) {
+  PluginFixture f(/*num_wf_slots=*/1);
+  PluginSinkConfig sink_config;
+  sink_config.emplace<StringSink>();
+  auto plugin = std::make_unique<RaceDetectorPlugin>();
+  auto *plugin_ptr = plugin.get();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(f.plugin_group_->add(std::move(plugin)));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+
+  auto *wf = f.cu()->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+  std::array<amdgpu::Wavefront *, 1> waves{wf};
+  f.plugin_group_->onAmdgpuWorkgroupDispatched(
+      /*dispatch_id=*/1, /*wg_id=*/0, /*physical_vgpr_count=*/256,
+      /*physical_sgpr_count=*/104, waves);
+
+  auto state = std::make_unique<VectorMemState>(LOCAL_MEM);
+  state->elem_size = sizeof(uint32_t);
+  state->num_elems = 1;
+  state->is_load = true;
+  state->wf_size = wf->wf_size();
+  state->exec_mask = 1;
+  state->lane_mask = 1;
+  state->dst_reg_base = wf->vgpr_alloc().base;
+  state->per_lane_addr[0] = 0;
+  state->wait_counter_type = WaitCounterType::LGKMCNT;
+  TestMemoryInstruction load(std::move(state),
+                             {{WaitCounterType::VMCNT, MemoryCompletionClass::VMEM},
+                              {WaitCounterType::LGKMCNT, MemoryCompletionClass::LDS}});
+  f.plugin_group_->onAmdgpuMemoryAccessRouted({}, load, *wf);
+
+  auto *plugin_state =
+      static_cast<RaceWavefrontState *>(wf->plugin_state(plugin_ptr->slot_index()));
+  ASSERT_NE(plugin_state, nullptr);
+  auto &events = plugin_state->race_state->getDetector()->events();
+  ASSERT_EQ(events.totalAllocated(), 1);
+  const EventId event{events.totalAllocated() - 1};
+  EXPECT_EQ(events.memoryOrder(event), MemoryOrderClass::UNORDERED);
+}
+
+TEST(RaceDetectorPluginTest, LdsRoutedFlatStoreDwordx2TracksTrailingDword) {
+  auto trailing_access_reports_race = [](bool flat_store_first) {
+    PluginFixture f(/*num_wf_slots=*/2);
+    PluginSinkConfig sink_config;
+    StringSink &sink = sink_config.emplace<StringSink>();
+    f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+    EXPECT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+    f.soc->set_plugin_group(f.plugin_group_);
+    f.plugin_group_->onInit();
+
+    constexpr uint64_t kSharedBase = 0x0001'0000'0000'0000ULL;
+    auto *cu = f.cu();
+    cu->set_apertures(kSharedBase, kSharedBase + 0xFFFF, /*private_base=*/0,
+                      /*private_limit=*/0);
+    auto *writer = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
+    auto *reader = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
+    EXPECT_NE(writer, nullptr);
+    EXPECT_NE(reader, nullptr);
+    if (!writer || !reader)
+      return false;
+    writer->set_exec(1u);
+    reader->set_exec(1u);
+    EXPECT_EQ(writer->lds_base(), reader->lds_base());
+    std::array<amdgpu::Wavefront *, 2> waves{writer, reader};
+    f.plugin_group_->onAmdgpuWorkgroupDispatched(
+        /*dispatch_id=*/1, /*wg_id=*/0, /*physical_vgpr_count=*/512,
+        /*physical_sgpr_count=*/208, waves);
+
+    auto route_flat_store = [&] {
+      const uint32_t vb = writer->vgpr_alloc().base;
+      cu->write_vgpr(vb, /*lane=*/0, static_cast<uint32_t>(kSharedBase));
+      cu->write_vgpr(vb + 1, /*lane=*/0, static_cast<uint32_t>(kSharedBase >> 32));
+      cu->write_vgpr(vb + 2, /*lane=*/0, 0x11112222u);
+      cu->write_vgpr(vb + 3, /*lane=*/0, 0x33334444u);
+
+      const auto words = cdna4::build_flat(cdna4::kFlatStoreDwordx2Flat,
+                                           {.seg = 0, .addr = 0, .data = 2, .saddr = 0x7F});
+      auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+      EXPECT_NE(decoder, nullptr);
+      if (!decoder)
+        return false;
+      std::unique_ptr<Instruction> store(decode_valid(*decoder, words.data()));
+      EXPECT_NE(store, nullptr);
+      if (!store)
+        return false;
+      EXPECT_TRUE(cu->execute_instruction(store.get(), *writer).succeeded());
+      EXPECT_NE(store->data(), nullptr);
+      if (!store->data())
+        return false;
+      EXPECT_EQ(store->data()->tag(), GLOBAL_MEM);
+      test::ComputeUnitTestAccess::route_memory_inst(*cu, store.release(), *writer);
+      return true;
+    };
+
+    auto route_trailing_load = [&] {
+      auto state = std::make_unique<VectorMemState>(LOCAL_MEM);
+      state->elem_size = sizeof(uint32_t);
+      state->num_elems = 1;
+      state->is_load = true;
+      state->wf_size = reader->wf_size();
+      state->exec_mask = 1;
+      state->lane_mask = 1;
+      state->dst_reg_base = reader->vgpr_alloc().base;
+      state->per_lane_addr[0] = reader->lds_base() + sizeof(uint32_t);
+      TestMemoryInstruction load(std::move(state));
+      f.plugin_group_->onAmdgpuMemoryAccessRouted({}, load, *reader);
+    };
+
+    if (flat_store_first) {
+      if (!route_flat_store())
+        return false;
+      route_trailing_load();
+    } else {
+      route_trailing_load();
+      if (!route_flat_store())
+        return false;
+    }
+    return sink.str().find("RACE ") != std::string::npos;
+  };
+
+  EXPECT_TRUE(trailing_access_reports_race(/*flat_store_first=*/true));
+  EXPECT_TRUE(trailing_access_reports_race(/*flat_store_first=*/false));
+}
+
+TEST(RaceDetectorPluginTest, Rdna4PartialLoadWaitRetiresOnlyOldestOrderedEvent) {
+  PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"rdna4", /*wavefront_size=*/32,
+                  /*sgprs_per_wf=*/128);
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+
+  auto *cu = f.cu();
+  auto *wf = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/128, /*vgprs=*/256, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+  std::array<amdgpu::Wavefront *, 1> waves{wf};
+  f.plugin_group_->onAmdgpuWorkgroupDispatched(
+      /*dispatch_id=*/1, /*wg_id=*/0, /*physical_vgpr_count=*/256,
+      /*physical_sgpr_count=*/128, waves);
+
+  constexpr uint32_t kAddressVgpr = 4;
+  cu->write_vgpr(wf->vgpr_alloc().base + kAddressVgpr, /*lane=*/0, 0);
+  cu->write_vgpr(wf->vgpr_alloc().base + kAddressVgpr + 1, /*lane=*/0, 0);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(decoder, nullptr);
+  for (uint32_t dst : {0u, 1u}) {
+    const auto words =
+        rdna4::build_vglobal(rdna4::kGlobalLoadB32Vglobal, {.saddr = amdgpu::kModernNullSelector,
+                                                            .vdst = static_cast<uint8_t>(dst),
+                                                            .vaddr = kAddressVgpr});
+    std::unique_ptr<Instruction> load(decode_valid(*decoder, words.data()));
+    ASSERT_NE(load, nullptr);
+    EXPECT_TRUE(cu->execute_instruction(load.get(), *wf).succeeded());
+    f.plugin_group_->onAmdgpuMemoryAccessRouted({}, *load, *wf);
+  }
+
+  wf->set_wait_target_loadcnt(1);
+  TestWaitcntInstruction wait("s_wait_loadcnt");
+  f.plugin_group_->onAmdgpuAfterExecuteInstruction(/*pc=*/4, wait, *wf);
+
+  f.plugin_group_->onAmdgpuReadVgprLanes(wf, wf->vgpr_alloc().base, /*lane_mask=*/1);
+  EXPECT_EQ(sink.str().find("RACE "), std::string::npos);
+  f.plugin_group_->onAmdgpuReadVgprLanes(wf, wf->vgpr_alloc().base + 1, /*lane_mask=*/1);
+  EXPECT_NE(sink.str().find("RACE "), std::string::npos);
+}
+
+TEST(RaceDetectorPluginTest, Rdna4GenericFlatPartialWaitRetiresOldestEvent) {
+  PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"rdna4", /*wavefront_size=*/32,
+                  /*sgprs_per_wf=*/128);
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  auto plugin = std::make_unique<RaceDetectorPlugin>();
+  auto *plugin_ptr = plugin.get();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(f.plugin_group_->add(std::move(plugin)));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+
+  auto *cu = f.cu();
+  auto *wf = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/128, /*vgprs=*/256, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+  std::array<amdgpu::Wavefront *, 1> waves{wf};
+  f.plugin_group_->onAmdgpuWorkgroupDispatched(
+      /*dispatch_id=*/1, /*wg_id=*/0, /*physical_vgpr_count=*/256,
+      /*physical_sgpr_count=*/128, waves);
+
+  constexpr uint32_t kAddressVgpr = 4;
+  cu->write_vgpr(wf->vgpr_alloc().base + kAddressVgpr, /*lane=*/0, 0);
+  cu->write_vgpr(wf->vgpr_alloc().base + kAddressVgpr + 1, /*lane=*/0, 0);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(decoder, nullptr);
+  for (uint32_t dst : {0u, 1u}) {
+    const auto words =
+        rdna4::build_vflat(rdna4::kFlatLoadB32Vflat, {.saddr = amdgpu::kModernNullSelector,
+                                                      .vdst = static_cast<uint8_t>(dst),
+                                                      .vaddr = kAddressVgpr});
+    std::unique_ptr<Instruction> load(decode_valid(*decoder, words.data()));
+    ASSERT_NE(load, nullptr);
+    const auto *issue = load->amdgpu_memory_issue_info();
+    ASSERT_NE(issue, nullptr);
+    const auto obligations = issue->counter_obligations();
+    ASSERT_EQ(obligations.size(), 2u);
+    EXPECT_EQ(obligations[0].wait_counter_type(), WaitCounterType::LOADCNT);
+    EXPECT_EQ(obligations[0].completion_class(), MemoryCompletionClass::VMEM);
+    EXPECT_EQ(obligations[1].wait_counter_type(), WaitCounterType::DSCNT);
+    EXPECT_EQ(obligations[1].completion_class(), MemoryCompletionClass::LDS);
+
+    EXPECT_TRUE(cu->execute_instruction(load.get(), *wf).succeeded());
+    f.plugin_group_->onAmdgpuMemoryAccessRouted({}, *load, *wf);
+  }
+
+  auto *plugin_state =
+      static_cast<RaceWavefrontState *>(wf->plugin_state(plugin_ptr->slot_index()));
+  ASSERT_NE(plugin_state, nullptr);
+  ASSERT_NE(plugin_state->race_state, nullptr);
+  const auto &events = plugin_state->race_state->getDetector()->events();
+  ASSERT_EQ(events.totalAllocated(), 2);
+  EXPECT_EQ(events.memoryOrder(EventId{0}), MemoryOrderClass::UNORDERED);
+  EXPECT_EQ(events.memoryOrder(EventId{1}), MemoryOrderClass::UNORDERED);
+
+  wf->set_wait_target_loadcnt_dscnt(/*loadcnt=*/1, /*dscnt=*/1);
+  TestWaitcntInstruction wait("s_wait_loadcnt_dscnt");
+  f.plugin_group_->onAmdgpuAfterExecuteInstruction(/*pc=*/4, wait, *wf);
+
+  // Both ordered counter domains prove the oldest mixed-order event complete.
+  EXPECT_EQ(events.status(EventId{0}), EventStatus::WAVE_COMPLETE);
+  EXPECT_EQ(events.status(EventId{1}), EventStatus::ACTIVE);
+  f.plugin_group_->onAmdgpuReadVgprLanes(wf, wf->vgpr_alloc().base, /*lane_mask=*/1);
+  EXPECT_EQ(sink.str().find("RACE "), std::string::npos);
+  f.plugin_group_->onAmdgpuReadVgprLanes(wf, wf->vgpr_alloc().base + 1, /*lane_mask=*/1);
+  EXPECT_NE(sink.str().find("RACE "), std::string::npos);
+}
+
+TEST(RaceDetectorPluginTest, Rdna4GenericFlatStoreRequiresBothCounterWaits) {
+  auto verify_wait_order = [](bool storecnt_first) {
+    PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"rdna4", /*wavefront_size=*/32,
+                    /*sgprs_per_wf=*/128);
+    PluginSinkConfig sink_config;
+    sink_config.emplace<StringSink>();
+    auto plugin = std::make_unique<RaceDetectorPlugin>();
+    auto *plugin_ptr = plugin.get();
+    f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+    ASSERT_TRUE(f.plugin_group_->add(std::move(plugin)));
+    f.soc->set_plugin_group(f.plugin_group_);
+    f.plugin_group_->onInit();
+
+    auto *cu = f.cu();
+    auto *wf = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/128, /*vgprs=*/256, 32);
+    ASSERT_NE(wf, nullptr);
+    wf->set_exec(1u);
+    std::array<amdgpu::Wavefront *, 1> waves{wf};
+    f.plugin_group_->onAmdgpuWorkgroupDispatched(
+        /*dispatch_id=*/1, /*wg_id=*/0, /*physical_vgpr_count=*/256,
+        /*physical_sgpr_count=*/128, waves);
+
+    constexpr uint32_t kAddressVgpr = 0;
+    constexpr uint32_t kDataVgpr = 2;
+    cu->write_vgpr(wf->vgpr_alloc().base + kAddressVgpr, /*lane=*/0, 0);
+    cu->write_vgpr(wf->vgpr_alloc().base + kAddressVgpr + 1, /*lane=*/0, 0);
+    cu->write_vgpr(wf->vgpr_alloc().base + kDataVgpr, /*lane=*/0, 0x12345678u);
+
+    const auto words = rdna4::build_vflat(
+        rdna4::kFlatStoreB32Vflat,
+        {.saddr = amdgpu::kModernNullSelector, .vsrc = kDataVgpr, .vaddr = kAddressVgpr});
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+    ASSERT_NE(decoder, nullptr);
+    std::unique_ptr<Instruction> store(decode_valid(*decoder, words.data()));
+    ASSERT_NE(store, nullptr);
+    const auto *issue = store->amdgpu_memory_issue_info();
+    ASSERT_NE(issue, nullptr);
+    const auto obligations = issue->counter_obligations();
+    ASSERT_EQ(obligations.size(), 2u);
+    EXPECT_EQ(obligations[0].wait_counter_type(), WaitCounterType::STORECNT);
+    EXPECT_EQ(obligations[0].completion_class(), MemoryCompletionClass::UNORDERED);
+    EXPECT_EQ(obligations[1].wait_counter_type(), WaitCounterType::DSCNT);
+    EXPECT_EQ(obligations[1].completion_class(), MemoryCompletionClass::LDS);
+
+    EXPECT_TRUE(cu->execute_instruction(store.get(), *wf).succeeded());
+    f.plugin_group_->onAmdgpuMemoryAccessRouted({}, *store, *wf);
+
+    auto *plugin_state =
+        static_cast<RaceWavefrontState *>(wf->plugin_state(plugin_ptr->slot_index()));
+    ASSERT_NE(plugin_state, nullptr);
+    ASSERT_NE(plugin_state->race_state, nullptr);
+    auto &events = plugin_state->race_state->getDetector()->events();
+    ASSERT_EQ(events.totalAllocated(), 1);
+    const EventId event{events.totalAllocated() - 1};
+    ASSERT_TRUE(events.contains(event));
+    EXPECT_EQ(events.type(event), MemoryEventType::VGPR_TO_GLOBAL);
+    EXPECT_EQ(events.status(event), EventStatus::ACTIVE);
+
+    const auto apply_wait = [&](WaitCounterType counter) {
+      if (counter == WaitCounterType::STORECNT) {
+        wf->set_wait_target_storecnt(0);
+        TestWaitcntInstruction wait("s_wait_storecnt");
+        f.plugin_group_->onAmdgpuAfterExecuteInstruction(/*pc=*/4, wait, *wf);
+      } else {
+        wf->set_wait_target_dscnt(0);
+        TestWaitcntInstruction wait("s_wait_dscnt");
+        f.plugin_group_->onAmdgpuAfterExecuteInstruction(/*pc=*/8, wait, *wf);
+      }
+    };
+
+    const WaitCounterType first =
+        storecnt_first ? WaitCounterType::STORECNT : WaitCounterType::DSCNT;
+    const WaitCounterType second =
+        storecnt_first ? WaitCounterType::DSCNT : WaitCounterType::STORECNT;
+    apply_wait(first);
+    EXPECT_EQ(events.status(event), EventStatus::ACTIVE);
+    EXPECT_FALSE(events.hasPendingWaitCounter(event, first));
+    EXPECT_TRUE(events.hasPendingWaitCounter(event, second));
+    apply_wait(second);
+    EXPECT_EQ(events.status(event), EventStatus::WAVE_COMPLETE);
+  };
+
+  verify_wait_order(/*storecnt_first=*/true);
+  verify_wait_order(/*storecnt_first=*/false);
 }
 
 TEST(RaceDetectorPluginTest, ScalarLoadToTtmpReportsReadBeforeWait) {
@@ -3917,7 +5461,7 @@ TEST(RaceDetectorPluginTest, ScalarLoadToTtmpReportsReadBeforeWait) {
   cu->write_sgpr(wf->sgpr_alloc().base + 1, 0u);
   EXPECT_TRUE(cu->execute_instruction(load.get(), *wf).succeeded());
   ASSERT_NE(load->data(), nullptr);
-  f.plugin_group_->onAmdgpuRouteMemoryInstruction(*load, *wf);
+  f.plugin_group_->onAmdgpuMemoryAccessRouted({}, *load, *wf);
 
   static_cast<void>(RegisterAccess(*wf).read_scalar(*load->dst_operand(0)));
   EXPECT_NE(sink.str().find("type=TTMP"), std::string::npos);
@@ -3945,7 +5489,7 @@ TEST(RaceDetectorPluginTest, ScalarLoadToTtmpReportsWriteBeforeWait) {
   state->dst_register = {ScalarRegisterStorage::TTMP, 0, 1};
   state->is_load = true;
   TestMemoryInstruction load(std::move(state));
-  f.plugin_group_->onAmdgpuRouteMemoryInstruction(load, *wf);
+  f.plugin_group_->onAmdgpuMemoryAccessRouted({}, load, *wf);
 
   RegisterAccess(*wf).write_ttmp(0, 0x12345678u);
   EXPECT_NE(sink.str().find("type=TTMP"), std::string::npos);
@@ -3976,7 +5520,7 @@ TEST(RaceDetectorPluginTest, ScalarLoadToTtmpHonorsSplitKmcntWait) {
   state->is_load = true;
   state->wait_counter_type = WaitCounterType::KMCNT;
   TestMemoryInstruction load(std::move(state));
-  f.plugin_group_->onAmdgpuRouteMemoryInstruction(load, *wf);
+  f.plugin_group_->onAmdgpuMemoryAccessRouted({}, load, *wf);
 
   wf->set_wait_target_kmcnt(0);
   TestWaitcntInstruction wait("s_wait_kmcnt");
@@ -4014,7 +5558,7 @@ TEST(RaceDetectorPluginTest, NamedVmcntWaitRetiresMonolithicAndSplitLoadEvents) 
     state->exec_mask = 1;
     state->wait_counter_type = event_counter;
     TestMemoryInstruction load(std::move(state));
-    f.plugin_group_->onAmdgpuRouteMemoryInstruction(load, *wf);
+    f.plugin_group_->onAmdgpuMemoryAccessRouted({}, load, *wf);
 
     wf->set_wait_target_loadcnt(0);
     TestWaitcntInstruction wait("s_waitcnt_vmcnt");
@@ -4025,6 +5569,46 @@ TEST(RaceDetectorPluginTest, NamedVmcntWaitRetiresMonolithicAndSplitLoadEvents) 
 
   EXPECT_TRUE(run(WaitCounterType::VMCNT));
   EXPECT_TRUE(run(WaitCounterType::LOADCNT));
+}
+
+TEST(RaceDetectorPluginTest, GenericFlatLoadRequiresBothWaitCounterDomains) {
+  auto reports_race_after_wait = [](uint8_t vmcnt, uint8_t lgkmcnt) {
+    PluginFixture f(/*num_wf_slots=*/1);
+    PluginSinkConfig sink_config;
+    StringSink &sink = sink_config.emplace<StringSink>();
+    f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+    EXPECT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+    f.soc->set_plugin_group(f.plugin_group_);
+    f.plugin_group_->onInit();
+
+    auto *wf = f.cu()->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
+    EXPECT_NE(wf, nullptr);
+    if (!wf)
+      return false;
+    wf->set_exec(1u);
+    std::array<amdgpu::Wavefront *, 1> waves{wf};
+    f.plugin_group_->onAmdgpuWorkgroupDispatched(
+        /*dispatch_id=*/1, /*wg_id=*/0, /*physical_vgpr_count=*/256,
+        /*physical_sgpr_count=*/104, waves);
+
+    auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
+    state->is_load = true;
+    state->num_elems = 1;
+    state->dst_reg_base = wf->vgpr_alloc().base;
+    state->exec_mask = 1;
+    TestMemoryInstruction flat(std::move(state), "test_mem", WaitCounterType::LGKMCNT);
+    f.plugin_group_->onAmdgpuMemoryAccessRouted({}, flat, *wf);
+
+    wf->set_wait_target(vmcnt, lgkmcnt, WaitCounters::EXPCNT_MAX);
+    TestWaitcntInstruction wait;
+    f.plugin_group_->onAmdgpuAfterExecuteInstruction(/*pc=*/4, wait, *wf);
+    f.plugin_group_->onAmdgpuReadVgprLanes(wf, wf->vgpr_alloc().base, /*lane_mask=*/1);
+    return sink.str().find("RACE ") != std::string::npos;
+  };
+
+  EXPECT_TRUE(reports_race_after_wait(/*vmcnt=*/0, /*lgkmcnt=*/15));
+  EXPECT_TRUE(reports_race_after_wait(/*vmcnt=*/63, /*lgkmcnt=*/0));
+  EXPECT_FALSE(reports_race_after_wait(/*vmcnt=*/0, /*lgkmcnt=*/0));
 }
 
 TEST(RaceDetectorPluginTest, NamedLgkmcntWaitRetiresSplitScalarEvent) {
@@ -4051,7 +5635,7 @@ TEST(RaceDetectorPluginTest, NamedLgkmcntWaitRetiresSplitScalarEvent) {
   state->is_load = true;
   state->wait_counter_type = WaitCounterType::KMCNT;
   TestMemoryInstruction load(std::move(state));
-  f.plugin_group_->onAmdgpuRouteMemoryInstruction(load, *wf);
+  f.plugin_group_->onAmdgpuMemoryAccessRouted({}, load, *wf);
 
   const auto current_wait = wf->wait_target();
   wf->set_wait_target(current_wait.vmcnt, 0, current_wait.expcnt);
@@ -4102,12 +5686,14 @@ TEST(ExecutionPluginTest, Vop3FmacSimdReadObservationReportsAccumulator) {
     return;
   } else {
     ForceScalarOverride force_simd(false);
+    amdgpu::fp_mode::detail::ScopedFenv floating_environment(0);
     PluginFixture f(/*num_wf_slots=*/1);
     auto *plugin = f.attach_ordering_plugin();
     auto *cu = f.cu();
     auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
     ASSERT_NE(wf, nullptr);
     wf->set_exec(kPartialExecMask);
+    wf->set_mode_raw(0xf0u);
 
     const uint32_t vb = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
@@ -4387,6 +5973,52 @@ TEST(ExecutionPluginTest, WmmaF32NativeWidthFastPathUsesRegionReads) {
   }
 }
 
+TEST(ExecutionPluginTest, WmmaBf16F32FastPathReadsBeforePackedWrites) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "stdx SIMD is unavailable";
+  } else {
+    if (util::native<float>::size() != 16)
+      GTEST_SKIP() << "the BF16F32 fast path requires 16-lane native SIMD";
+
+    ForceScalarOverride force_simd(false);
+    Wave32PluginFixture f;
+    auto *plugin = f.attach_ordering_plugin();
+    auto *cu = f.cu.get();
+    auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+    ASSERT_NE(wf, nullptr);
+    ASSERT_EQ(wf->wf_size(), 32u);
+
+    const uint32_t vb = wf->vgpr_alloc().base;
+    constexpr uint32_t S0 = 0, S1 = 16, ACC = 32, DST = 48;
+    for (uint32_t reg = 0; reg < 56; ++reg)
+      for (uint32_t lane = 0; lane < 32; ++lane)
+        cu->write_vgpr(vb + reg, lane, 0);
+    plugin->events.clear();
+
+    amdgpu::exec_wmma_bf16f32_16x16x32_bf16(*cu, vb + DST, vb + S0, vb + S1, vb + ACC,
+                                            amdgpu::ACC_FROM_VGPR,
+                                            /*c_modifier=*/0);
+
+    expect_vgpr_read_set(vgpr_read_events(*plugin), vb,
+                         {S0 + 0,  S0 + 1,  S0 + 2,  S0 + 3,  S0 + 4,  S0 + 5,  S0 + 6,  S0 + 7,
+                          S1 + 0,  S1 + 1,  S1 + 2,  S1 + 3,  S1 + 4,  S1 + 5,  S1 + 6,  S1 + 7,
+                          ACC + 0, ACC + 1, ACC + 2, ACC + 3, ACC + 4, ACC + 5, ACC + 6, ACC + 7},
+                         0xFFFF'FFFFu);
+    expect_vgpr_read_set(vgpr_write_events(*plugin), vb, {DST + 0, DST + 1, DST + 2, DST + 3},
+                         0xFFFF'FFFFu);
+
+    size_t last_read = 0;
+    size_t first_write = plugin->events.size();
+    for (size_t i = 0; i < plugin->events.size(); ++i) {
+      if (plugin->events[i].kind == HookEvent::READ_VGPR)
+        last_read = i;
+      if (plugin->events[i].kind == HookEvent::WRITE_VGPR)
+        first_write = std::min(first_write, i);
+    }
+    ASSERT_LT(last_read, first_write);
+  }
+}
+
 TEST(ExecutionPluginTest, MfmaReadObservationReportsRace) {
   PluginFixture f(/*num_wf_slots=*/1);
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
@@ -4562,7 +6194,7 @@ TEST(ExecutionPluginTest, DispatchPacketNameResolvesForVmidMappedCodeObject) {
   f.cp()->engine()->schedule_event_now(f.cp()->doorbell_event());
   f.run_until_idle();
 
-  auto it = std::find_if(plugin->events.begin(), plugin->events.end(), [](const HookEvent &event) {
+  auto it = std::ranges::find_if(plugin->events, [](const HookEvent &event) {
     return event.kind == HookEvent::DISPATCH_PACKET_PROCESSED;
   });
   bool found_dispatch = it != plugin->events.end();
@@ -4633,9 +6265,8 @@ TEST(HookOrderingTest, WorkgroupDispatchedReportsPhysicalRegisterBlockSizes) {
   f.run_kernel(code, 1, /*grid=*/64, /*workgroup=*/64, kGranulatedSgprCount);
   f.shutdown();
 
-  auto it = std::find_if(p->events.begin(), p->events.end(), [](const HookEvent &e) {
-    return e.kind == HookEvent::WORKGROUP_DISPATCHED;
-  });
+  auto it = std::ranges::find_if(
+      p->events, [](const HookEvent &e) { return e.kind == HookEvent::WORKGROUP_DISPATCHED; });
   ASSERT_NE(it, p->events.end());
   EXPECT_EQ(it->physical_vgpr_count, f.cu()->vgpr_allocation_block_size());
   EXPECT_GT(it->physical_vgpr_count, f.cu()->config().vgprs_per_wf);
@@ -4652,10 +6283,9 @@ TEST(HookOrderingTest, BeforeInstructionExposesMemoryIssueBeforeOperandReadsAndR
   f.run_kernel(code.data(), code.size());
   f.shutdown();
 
-  const auto before_instruction =
-      std::find_if(p->events.begin(), p->events.end(), [](const HookEvent &e) {
-        return e.kind == HookEvent::BEFORE_INSTRUCTION && e.mnemonic == "s_load_dword";
-      });
+  const auto before_instruction = std::ranges::find_if(p->events, [](const HookEvent &e) {
+    return e.kind == HookEvent::BEFORE_INSTRUCTION && e.mnemonic == "s_load_dword";
+  });
   ASSERT_NE(before_instruction, p->events.end());
   ASSERT_EQ(before_instruction->counter_obligations.size(), 1u);
   EXPECT_EQ(before_instruction->counter_obligations[0].wait_counter_type(),
@@ -4664,10 +6294,10 @@ TEST(HookOrderingTest, BeforeInstructionExposesMemoryIssueBeforeOperandReadsAndR
             MemoryCompletionClass::UNORDERED);
 
   const auto first_operand_read =
-      std::find_if(std::next(before_instruction), p->events.end(),
-                   [](const HookEvent &e) { return e.kind == HookEvent::READ_SGPR; });
+      std::ranges::find_if(std::next(before_instruction), p->events.end(),
+                           [](const HookEvent &e) { return e.kind == HookEvent::READ_SGPR; });
   const auto route =
-      std::find_if(std::next(before_instruction), p->events.end(), [](const HookEvent &e) {
+      std::ranges::find_if(std::next(before_instruction), p->events.end(), [](const HookEvent &e) {
         return e.kind == HookEvent::ROUTE_MEMORY && e.mnemonic == "s_load_dword";
       });
   ASSERT_NE(first_operand_read, p->events.end());
@@ -4793,6 +6423,37 @@ TEST(InstructionMetadataTest, CounterObligationPackingRoundTrips) {
   EXPECT_EQ(obligation.completion_class(), MemoryCompletionClass::ASYNC_STORE);
   EXPECT_EQ(obligation.counter_increment(), 2u);
   EXPECT_FALSE(MemoryCounterObligation{}.valid());
+}
+
+TEST(HookOrderingTest, UniformLdsFlatPreservesPreAndPostRoutingViews) {
+  PluginFixture f(/*num_wf_slots=*/1);
+  auto *plugin = f.attach_memory_observation_plugin();
+  auto *cu = f.cu();
+
+  constexpr uint64_t kSharedBase = 0x0001'0000'0000'0000ULL;
+  cu->set_apertures(kSharedBase, kSharedBase + 0xFFFF, /*private_base=*/0,
+                    /*private_limit=*/0);
+  auto *wf = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+  cu->write_vgpr(wf->vgpr_alloc().base, /*lane=*/0, static_cast<uint32_t>(kSharedBase));
+  cu->write_vgpr(wf->vgpr_alloc().base + 1, /*lane=*/0, static_cast<uint32_t>(kSharedBase >> 32));
+
+  const auto words =
+      cdna4::build_flat(cdna4::kFlatLoadDwordFlat, {.seg = 0, .addr = 0, .saddr = 0x7F, .vdst = 2});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> flat(decode_valid(*decoder, words.data()));
+  ASSERT_NE(flat, nullptr);
+
+  EXPECT_TRUE(cu->execute_instruction(flat.get(), *wf).succeeded());
+  test::ComputeUnitTestAccess::route_memory_inst(*cu, flat.release(), *wf);
+
+  ASSERT_EQ(plugin->before_tag.size(), 1u);
+  EXPECT_EQ(plugin->before_tag[0], GLOBAL_MEM);
+  ASSERT_EQ(plugin->accesses.size(), 1u);
+  EXPECT_EQ(plugin->accesses[0].route, MemoryRoute::LOCAL);
+  EXPECT_TRUE(plugin->accesses[0].normalized_to_local);
 }
 
 // The immediate-halt branch frees a wave's registers the instant s_endpgm
@@ -5290,7 +6951,7 @@ TEST(RaceDetectorPluginTest, DroppedAsyncLdsLaneDoesNotCreateLowAddressRace) {
   dropped->lane_mask = 0x1u;
   dropped->per_lane_lds_addr[0] = amdgpu::kInvalidLdsAddress;
   TestMemoryInstruction dropped_inst(std::move(dropped));
-  f.plugin_group_->onAmdgpuRouteMemoryInstruction(dropped_inst, *writer);
+  f.plugin_group_->onAmdgpuMemoryAccessRouted({}, dropped_inst, *writer);
 
   auto read = std::make_unique<VectorMemState>(LOCAL_MEM);
   read->elem_size = 4;
@@ -5301,7 +6962,7 @@ TEST(RaceDetectorPluginTest, DroppedAsyncLdsLaneDoesNotCreateLowAddressRace) {
   read->per_lane_addr[0] = 0;
   read->dst_reg_base = reader->vgpr_alloc().base;
   TestMemoryInstruction read_inst(std::move(read));
-  f.plugin_group_->onAmdgpuRouteMemoryInstruction(read_inst, *reader);
+  f.plugin_group_->onAmdgpuMemoryAccessRouted({}, read_inst, *reader);
 
   EXPECT_EQ(sink.str().find("RACE "), std::string::npos);
 }
@@ -5336,7 +6997,7 @@ TEST_P(IgnoredGlobalMemoryRaceTest, DoesNotCreateDestinationRace) {
   ignored->wf_size = wf->wf_size();
   ignored->dst_reg_base = wf->vgpr_alloc().base + kDestinationVgpr;
   TestMemoryInstruction ignored_inst(std::move(ignored));
-  f.plugin_group_->onAmdgpuRouteMemoryInstruction(ignored_inst, *wf);
+  f.plugin_group_->onAmdgpuMemoryAccessRouted({}, ignored_inst, *wf);
 
   f.plugin_group_->onAmdgpuReadVgprLanes(wf, wf->vgpr_alloc().base + kDestinationVgpr,
                                          /*lane_mask=*/0x1u, /*byte_mask=*/0xFu);
@@ -5370,7 +7031,7 @@ TEST_P(IgnoredGlobalMemoryRaceTest, DoesNotConsumeVmcntOrderingSlot) {
   load->wf_size = wf->wf_size();
   load->dst_reg_base = wf->vgpr_alloc().base + kDestinationVgpr;
   TestMemoryInstruction load_inst(std::move(load));
-  f.plugin_group_->onAmdgpuRouteMemoryInstruction(load_inst, *wf);
+  f.plugin_group_->onAmdgpuMemoryAccessRouted({}, load_inst, *wf);
 
   auto ignored = std::make_unique<VectorMemState>(GLOBAL_MEM);
   ignored->elem_size = 4;
@@ -5381,7 +7042,7 @@ TEST_P(IgnoredGlobalMemoryRaceTest, DoesNotConsumeVmcntOrderingSlot) {
   ignored->lane_mask = 0;
   ignored->wf_size = wf->wf_size();
   TestMemoryInstruction ignored_inst(std::move(ignored));
-  f.plugin_group_->onAmdgpuRouteMemoryInstruction(ignored_inst, *wf);
+  f.plugin_group_->onAmdgpuMemoryAccessRouted({}, ignored_inst, *wf);
 
   wf->set_wait_target(/*vmcnt=*/1, /*lgkmcnt=*/0, /*expcnt=*/0);
   TestWaitcntInstruction waitcnt;
@@ -5424,7 +7085,7 @@ TEST(ExecutionPluginGroupTest, FansOutToEveryConfiguredSink) {
   EXPECT_EQ(events[0], "write:destroyed\n");
   EXPECT_EQ(events[1], "write:destroyed\n");
   EXPECT_EQ(events[2], "plugin");
-  EXPECT_EQ(std::count(events.begin() + 3, events.end(), "sink"), 2);
+  EXPECT_EQ(std::ranges::count(events.begin() + 3, events.end(), "sink"), 2);
 }
 
 TEST(ExecutionPluginGroupTest, OwnsFileSinkThroughPluginDestruction) {
@@ -5573,13 +7234,14 @@ TEST(RoutedMemoryObservationTest, AFlatAccessSeparatesDdsFromLdsLanes) {
   state->elem_size = 4;
   state->num_elems = 1;
   state->is_load = true;
+  state->dst_reg_base = wave->vgpr_alloc().base + 2;
   state->exec_mask = 0b111;
   state->lane_mask = 0b111;
   state->per_lane_addr[0] = kDdsAddress;
   state->per_lane_addr[1] = kLdsAddress;
   state->per_lane_addr[2] = 0x2000;
   test::ComputeUnitTestAccess::route_memory_inst(
-      *cu, new TestMemoryInstruction(std::move(state), "flat_load_b32"), *wave);
+      *cu, new TestMemoryInstruction(std::move(state), "flat_load_b32", std::nullopt, true), *wave);
 
   ASSERT_EQ(plugin->accesses.size(), 1u);
   const auto &access = plugin->accesses.front();
@@ -5594,6 +7256,16 @@ TEST(RoutedMemoryObservationTest, AFlatAccessSeparatesDdsFromLdsLanes) {
   EXPECT_EQ(access.pre_routing_addresses[0], kDdsAddress);
   EXPECT_EQ(access.pre_routing_addresses[1], kLdsAddress);
   EXPECT_EQ(access.pre_routing_addresses[2], 0x2000u);
+  auto *scoreboard = wave->memory_wait_scoreboard();
+  ASSERT_NE(scoreboard, nullptr);
+  EXPECT_EQ(scoreboard->outstanding(WaitCounterKind::Load), 1u);
+  EXPECT_EQ(scoreboard->outstanding(WaitCounterKind::Ds), 1u);
+  scoreboard->wait(WaitCounterKind::Load, 0);
+  const auto shared = access.flat_local_lane_mask | access.flat_dds_lane_mask;
+  scoreboard->access({RegClass::VGPR, 2, 1}, access.active_lane_mask & ~shared, 0xf, false);
+  EXPECT_EQ(cu->memory_wait_diagnostic_count(), 0u);
+  scoreboard->access({RegClass::VGPR, 2, 1}, shared, 0xf, false);
+  EXPECT_EQ(cu->memory_wait_diagnostic_count(), 1u);
 }
 
 TEST(RoutedMemoryObservationTest, AFlatAccessRetainsPerLaneLdsRoutingWhenFirstLaneIsGlobal) {
@@ -5612,13 +7284,14 @@ TEST(RoutedMemoryObservationTest, AFlatAccessRetainsPerLaneLdsRoutingWhenFirstLa
   state->elem_size = 4;
   state->num_elems = 1;
   state->is_load = true;
+  state->dst_reg_base = wave->vgpr_alloc().base + 2;
   state->exec_mask = 0b1111;
   state->lane_mask = 0b0111;
   state->per_lane_addr[0] = 0x2000;
   state->per_lane_addr[1] = kSharedBase + 0x20;
   state->per_lane_addr[2] = kSharedBase + 0x28;
   test::ComputeUnitTestAccess::route_memory_inst(
-      *cu, new TestMemoryInstruction(std::move(state), "flat_load_b32"), *wave);
+      *cu, new TestMemoryInstruction(std::move(state), "flat_load_b32", std::nullopt, true), *wave);
 
   ASSERT_EQ(plugin->accesses.size(), 1u);
   const auto &access = plugin->accesses.front();
@@ -5630,6 +7303,16 @@ TEST(RoutedMemoryObservationTest, AFlatAccessRetainsPerLaneLdsRoutingWhenFirstLa
   EXPECT_EQ(access.addresses[0], 0x2000u);
   EXPECT_EQ(access.addresses[1], kSharedBase + 0x20);
   EXPECT_EQ(access.addresses[2], kSharedBase + 0x28);
+  auto *scoreboard = wave->memory_wait_scoreboard();
+  ASSERT_NE(scoreboard, nullptr);
+  EXPECT_EQ(scoreboard->outstanding(WaitCounterKind::Load), 1u);
+  EXPECT_EQ(scoreboard->outstanding(WaitCounterKind::Ds), 1u);
+  scoreboard->wait(WaitCounterKind::Load, 0);
+  const auto shared = access.flat_local_lane_mask | access.flat_dds_lane_mask;
+  scoreboard->access({RegClass::VGPR, 2, 1}, access.active_lane_mask & ~shared, 0xf, false);
+  EXPECT_EQ(cu->memory_wait_diagnostic_count(), 0u);
+  scoreboard->access({RegClass::VGPR, 2, 1}, shared, 0xf, false);
+  EXPECT_EQ(cu->memory_wait_diagnostic_count(), 1u);
 }
 
 TEST(RoutedMemoryObservationTest, AnExplicitGlobalAccessIgnoresTheSharedAperture) {
@@ -6063,3 +7746,75 @@ TEST(RoutedMemoryObservationTest, AnUnroutableAccessIsReportedRatherThanDropped)
 }
 
 } // namespace
+
+TEST(ExecutionPluginTest, SdwaFloatingConversionsUseDestinationFormat) {
+  struct Architecture {
+    rj_code_arch_t arch;
+    uint16_t cvt_f16_i16;
+  };
+  constexpr std::array architectures{
+      Architecture{ROCJITSU_CODE_ARCH_CDNA4, cdna4::kVCvtF16I16Vop1},
+      Architecture{ROCJITSU_CODE_ARCH_CDNA3, cdna3::kVCvtF16I16Vop1},
+      Architecture{ROCJITSU_CODE_ARCH_CDNA2, cdna2::kVCvtF16I16Vop1},
+      Architecture{ROCJITSU_CODE_ARCH_CDNA1, cdna1::kVCvtF16I16Vop1},
+      Architecture{ROCJITSU_CODE_ARCH_RDNA2, rdna2::kVCvtF16I16Vop1},
+      Architecture{ROCJITSU_CODE_ARCH_RDNA1, rdna1::kVCvtF16I16Vop1},
+  };
+  struct Case {
+    uint16_t opcode;
+    uint32_t source;
+    uint32_t source_selection;
+    uint32_t expected;
+  };
+  for (const Architecture &architecture : architectures) {
+    const std::array cases{
+        Case{cdna4::kVCvtF32I32Vop1, 2u, amdgpu::sdwa::DWORD, 0x3f800000u},
+        Case{architecture.cvt_f16_i16, 2u, amdgpu::sdwa::WORD_0, 0x3c00u},
+        Case{cdna4::kVCvtF16F32Vop1, 0x40000000u, amdgpu::sdwa::DWORD, 0x3c00u},
+        Case{cdna4::kVCvtF32F16Vop1, 0x4000u, amdgpu::sdwa::WORD_0, 0x3f800000u},
+        Case{cdna4::kVCvtF32Ubyte0Vop1, 2u, amdgpu::sdwa::DWORD, 0x3f800000u},
+        // Integer destinations keep their conversion controls, without floating modifiers.
+        Case{cdna4::kVCvtI32F32Vop1, 0x40000000u, amdgpu::sdwa::DWORD, 2u},
+    };
+    for (bool force_scalar : {false, true}) {
+      ForceScalarOverride scalar_override(force_scalar);
+      amdgpu::GpuMemory memory("sdwa_conversion_memory");
+      amdgpu::L2Cache cache("sdwa_conversion_cache");
+      amdgpu::ComputeUnitCore::Config config{};
+      config.arch = architecture.arch;
+      config.num_wf_slots = 1;
+      config.sgprs_per_wf = 106;
+      config.vgprs_per_wf = 256;
+      config.lds_size_kb = 64;
+      std::unique_ptr<amdgpu::ComputeUnitCore> compute_unit =
+          amdgpu::ComputeUnitCore::create("sdwa_conversion", config, &memory, &cache);
+      std::unique_ptr<Decoder> decoder = Decoder::create(architecture.arch);
+      amdgpu::Wavefront *wave = compute_unit->dispatch_wf(0, 0, 106, 256);
+      ASSERT_NE(wave, nullptr);
+      wave->set_mode_raw(0);
+      wave->set_exec(0b101);
+      const uint32_t base = wave->vgpr_alloc().base;
+      for (const Case &test : cases) {
+        SCOPED_TRACE(::testing::Message() << "arch=" << architecture.arch << " op=" << test.opcode
+                                          << " scalar=" << force_scalar);
+        for (uint32_t lane = 0; lane < wave->wf_size(); ++lane) {
+          compute_unit->write_vgpr(base, lane, test.source);
+          compute_unit->write_vgpr(base + 6, lane, 0xbeefbeefu);
+        }
+        // Common VOP1 opcodes except the per-family F16 integer conversion above.
+        const std::array<uint32_t, 2> words{
+            0x7e000000u | (6u << 17) | (uint32_t{test.opcode} << 9) | amdgpu::SRC_SDWA,
+            (amdgpu::sdwa::DWORD << 8) | (1u << 13) | (test.source_selection << 16),
+        };
+        std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
+        ASSERT_NE(instruction, nullptr);
+        EXPECT_TRUE(compute_unit->execute_instruction(instruction.get(), *wave).succeeded());
+        for (uint32_t lane = 0; lane < wave->wf_size(); ++lane) {
+          EXPECT_EQ(compute_unit->read_vgpr_storage(base + 6, lane),
+                    (wave->exec() & (uint64_t{1} << lane)) ? test.expected : 0xbeefbeefu);
+        }
+      }
+      wave->halt();
+    }
+  }
+}

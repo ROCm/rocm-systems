@@ -34,8 +34,14 @@
 #include "nccl.h"
 #include "nccl_fakes.h"  // g_loadParam, for the NCCL_PARAM defaults this floor stands in for
 #include "os.h"
+#include "profiler.h"
 
 #include "nccl_stubs.h"
+
+#include "signature-drift.h"
+ASSERT_HOOK_MATCHES_PROD(g_ncclProfilerPluginFinalize, ncclProfilerPluginFinalize);
+ASSERT_HOOK_MATCHES_PROD(g_ncclProfilerThreadDestroy,  ncclProfilerThreadDestroy);
+#undef ASSERT_HOOK_MATCHES_PROD
 
 struct ncclAsyncJob;
 struct ncclChannel;
@@ -62,6 +68,7 @@ ncclResult_t ncclCeFinalize(struct ncclComm* comm) {
   g_cleanupCallOrder.push_back("commFree");
   return g_ncclCeFinalizeResult;
 }
+ncclResult_t ncclRmaCeFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclCheckMultiRank(struct ncclComm* comm) { ::abort(); }
 void ncclCudaContextDrop(struct ncclCudaContext* cxt) { ::abort(); }
 // ncclCudaContextTrack lives in strongstream_stubs.cc (v2.31 three-argument ABI).
@@ -97,14 +104,20 @@ ncclResult_t ncclMnnvlCheck(struct ncclComm* comm) {
 ncclResult_t ncclNetFinalize(struct ncclComm* comm) { return ncclSuccess; }
 // The src/os/*.cc entry points (ncclOsCpuCount, ncclOsGetAffinity, ncclOsSetAffinity,
 // ncclOsTopoGetStrFromSys) and their seams: os_fakes.cc.
-ncclResult_t ncclProfilerPluginFinalize(struct ncclComm* comm) { return ncclSuccess; }
+static ncclResult_t DefaultNcclProfilerPluginFinalize(struct ncclComm*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*)> g_ncclProfilerPluginFinalize = DefaultNcclProfilerPluginFinalize;
+ncclResult_t ncclProfilerPluginFinalize(struct ncclComm* comm) { return g_ncclProfilerPluginFinalize(comm); }
 ncclResult_t ncclProfilerPluginInit(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclProfilerThreadCreate(struct ncclComm* comm, struct ncclComm* parent) { return ncclSuccess; }
-ncclResult_t ncclProfilerThreadDestroy(struct ncclComm* comm) { return ncclSuccess; }
+static ncclResult_t DefaultNcclProfilerThreadDestroy(struct ncclComm*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*)> g_ncclProfilerThreadDestroy = DefaultNcclProfilerThreadDestroy;
+ncclResult_t ncclProfilerThreadDestroy(struct ncclComm* comm) { return g_ncclProfilerThreadDestroy(comm); }
 // src/plugin/profiler.cc:871. Not fail-loud: ncclPrepareTasks:601 reaches this on
 // a happy path, and "no profiler plugin loaded" is the truth for a host-only
 // binary that links no plugin, not a steering choice.
-bool ncclProfilerPluginLoaded(void) { return false; }
+static bool DefaultProfilerPluginLoaded() { return false; }
+std::function<bool()> g_profilerPluginLoaded = DefaultProfilerPluginLoaded;
+bool ncclProfilerPluginLoaded(void) { return g_profilerPluginLoaded(); }
 void ncclProfilerProxyTraceDumpIfAny(void* profilerContext) { }
 ncclResult_t ncclRasCommFini(const struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRunDiagnosticsPassive(struct ncclComm* comm) { return ncclSuccess; }
@@ -194,7 +207,8 @@ const char* rcclGitHash = "microtest";
 // under test writes them and no test assigns them. Give one a seam the moment a
 // test starts scripting it, because an unrestored global that a test DOES write
 // is an order-dependent flake.
-int ncclCudaDriverVersionCache = 12000;       // src/misc/cudawrap.cc
+// ncclCudaDriverVersionCache, ncclProfilerEventMask and ncclDevFuncNameToId are scripted, so all reset below.
+int ncclCudaDriverVersionCache = kDefaultCudaDriverVersion;  // src/misc/cudawrap.cc
 bool ncclCudaLaunchBlocking = false;          // src/misc/cudawrap.cc
 int ncclProfilerEventMask = 0;                // src/profiler.cc
 std::unordered_map<uint64_t, int> ncclDevFuncNameToId;  // generated device table
@@ -229,6 +243,8 @@ void ResetNcclStubs() {
   g_ncclMemFree = DefaultNcclMemFree;
   g_ncclCommDestroy = DefaultNcclCommDestroy;
   g_collTraceDestroy = DefaultCollTraceDestroy;
+  g_ncclProfilerThreadDestroy = DefaultNcclProfilerThreadDestroy;
+  g_ncclProfilerPluginFinalize = DefaultNcclProfilerPluginFinalize;
   g_ncclTunerPluginUnload = DefaultNcclTunerPluginUnload;
   g_initChannelResult = ncclSuccess;
   g_initChannelLastId = -1;
@@ -241,4 +257,8 @@ void ResetNcclStubs() {
   g_rocmVersionMajor = 0;
   g_rocmVersionMinor = 0;
   g_rocmVersionPatch = 0;
+  g_profilerPluginLoaded = DefaultProfilerPluginLoaded;
+  ncclCudaDriverVersionCache = kDefaultCudaDriverVersion;
+  ncclProfilerEventMask = 0;
+  ncclDevFuncNameToId.clear();
 }
