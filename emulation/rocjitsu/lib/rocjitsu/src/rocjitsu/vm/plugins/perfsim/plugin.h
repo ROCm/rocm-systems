@@ -16,8 +16,10 @@ class PerfsimPlugin final : public ExecutionPlugin {
 public:
   /// @param config_json Resolved plugin configuration containing the required
   ///        non-empty string `library_path`; optional positive integers
-  ///        `max_staged_bytes` and `max_observed_wgps`; and the optional
-  ///        non-empty string `dispatch_name`.
+  ///        `max_staged_bytes` and `max_observed_wgps`; and an optional string
+  ///        `dispatch_name`. A non-empty value exactly matches the dispatch
+  ///        display name and emits a marker after replay; an empty or omitted
+  ///        value disables the marker. It never filters supported dispatches.
   explicit PerfsimPlugin(const char *config_json);
   ~PerfsimPlugin() override;
 
