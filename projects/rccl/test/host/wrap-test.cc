@@ -2024,25 +2024,62 @@ TEST(WrapMicrotestIsolated, UseAllGatherDirect_Gfx950MultiNodeUnder64UsesNodeSca
       });
 }
 
-// Pins that gfx942 takes the ELSE-IF arm (flat 4MiB), not the gfx950 one.
+// Pins that gfx942 takes the ELSE-IF arm (off by default), not the gfx950 one.
 // Every other test here uses gfx950, so nothing separated the two arms: a
 // sweep showed the `!userThresholdInput && IsArchMatch(gfx950)` -> `||` mutant
 // survives, because `!userThresholdInput` alone is then enough to enter the
 // gfx950 block on ANY arch, which for single-node raises the threshold to
-// 8MiB. msgSize sits between the two (4MiB < 6MiB < 8MiB), so the correct arm
-// rejects it and the mutated one accepts it.
-TEST(WrapMicrotestIsolated, UseAllGatherDirect_Gfx942UsesItsOwnFlatThresholdNotGfx950s) {
+// 8MiB. msgSize is under that, so the correct arm rejects it and the mutated
+// one accepts it.
+TEST(WrapMicrotestIsolated, UseAllGatherDirect_Gfx942UsesItsOwnArmNotGfx950s) {
   RUN_ISOLATED_TEST(
-      "Wrap_UseAllGatherDirect_Gfx942UsesItsOwnFlatThresholdNotGfx950s",
+      "Wrap_UseAllGatherDirect_Gfx942UsesItsOwnArmNotGfx950s",
       []() {
         SetMicroEnvAbsent("RCCL_DIRECT_ALLGATHER_THRESHOLD");
         ncclComm* comm = MakeCommWithArch("gfx942");
         comm->nNodes = 1;
         comm->nRanks = 8;          // rankMultiple == 0
         comm->symmetricSupport = 0; // keeps the CTA-policy guard above from firing
-        size_t msgSize = 6000000;   // > gfx942's 4194304, < gfx950 single-node's 8388608
+        size_t msgSize = 6000000;   // < gfx950 single-node's 8388608
         EXPECT_FALSE(rcclUseAllGatherDirect(comm, msgSize))
-            << "gfx942's threshold is a flat 4MiB; it must not pick up gfx950's 8MiB single-node value";
+            << "gfx942 must not pick up gfx950's 8MiB single-node threshold";
+        DeleteCommWithArch(comm);
+      });
+}
+
+// gfx942 keeps Direct AllGather off by default at every node count, even for a
+// message far below the 4MiB the arm used to allow.
+TEST(WrapMicrotestIsolated, UseAllGatherDirect_Gfx942DefaultIsOff) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseAllGatherDirect_Gfx942DefaultIsOff",
+      []() {
+        SetMicroEnvAbsent("RCCL_DIRECT_ALLGATHER_THRESHOLD");
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->nRanks = 16;          // rankMultiple == 0
+        comm->symmetricSupport = 0; // keeps the CTA-policy guard above from firing
+        for (int nNodes : {1, 2, 16}) {
+          comm->nNodes = nNodes;
+          size_t msgSize = 1024;
+          EXPECT_FALSE(rcclUseAllGatherDirect(comm, msgSize)) << "nNodes=" << nNodes;
+        }
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The explicit threshold is the opt-in: it bypasses the gfx942 default-off arm.
+TEST(WrapMicrotestIsolated, UseAllGatherDirect_Gfx942UserThresholdOptsIn) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseAllGatherDirect_Gfx942UserThresholdOptsIn",
+      []() {
+        SetMicroEnv("RCCL_DIRECT_ALLGATHER_THRESHOLD", "4194304");
+        g_loadParam = ForceParam("RCCL_DIRECT_ALLGATHER_THRESHOLD", int64_t(4194304));
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->nNodes = 2;
+        comm->nRanks = 16; // rankMultiple == 0
+        size_t atThreshold = 4194304;
+        EXPECT_TRUE(rcclUseAllGatherDirect(comm, atThreshold));
+        size_t overThreshold = 4194305;
+        EXPECT_FALSE(rcclUseAllGatherDirect(comm, overThreshold));
         DeleteCommWithArch(comm);
       });
 }

@@ -1712,9 +1712,10 @@ TEST(Rcclwrap, RcclHierarchicalAlgoInfoTests)
                 CleanupMockComm(intra);
             }
         )
-            // Direct AllGather bails out when user buffer registration is enabled.
-            .withEnvironment({{"NCCL_LOCAL_REGISTER", "0"}, {"RCCL_DIRECT_ALLGATHER_DISABLE", "0"}})
-            .clearVariable("RCCL_DIRECT_ALLGATHER_THRESHOLD")
+            // gfx942 leaves Direct AllGather off unless a threshold is set explicitly.
+            .withEnvironment({{"NCCL_LOCAL_REGISTER", "0"},
+                              {"RCCL_DIRECT_ALLGATHER_DISABLE", "0"},
+                              {"RCCL_DIRECT_ALLGATHER_THRESHOLD", "4194304"}})
             .withTimeout(std::chrono::seconds(60))
             .withNumGpus(0)
     );

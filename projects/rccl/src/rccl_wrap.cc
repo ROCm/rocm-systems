@@ -1125,7 +1125,10 @@ bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
       threshold = comm->nNodes * 2097152;
     }
   } else if (!userThresholdInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") && threshold != -1) {
-    threshold = 4194304;
+    // Off by default on gfx942: the per-peer P2P connections Direct AllGather opens can exhaust
+    // the HBM left free by frameworks that preallocate most of it, for no consistent multi-node
+    // gain. RCCL_DIRECT_ALLGATHER_THRESHOLD opts back in.
+    threshold = -1;
   }
 
   comm->enableCustColl = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") ||
