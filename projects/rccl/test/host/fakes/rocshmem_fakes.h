@@ -8,7 +8,7 @@
 #define RCCL_TEST_HOST_FAKES_ROCSHMEM_FAKES_H_
 
 // The rocSHMEM host API. Reachable only from init.cc's ENABLE_ROCSHMEM arm,
-// which also needs rcclParamRocshmemEnabled(); no test turns that on yet.
+// which no test reaches yet: initTransportsRank fails host-only before it.
 
 #include <functional>
 
@@ -17,9 +17,10 @@
 namespace rocshmem {
 
 // The three calls init.cc checks a result from. Default ROCSHMEM_SUCCESS.
-extern std::function<int()> g_rocshmemGetUniqueId;        // UNDRIVEN
-extern std::function<int()> g_rocshmemSetAttrUniqueIdArgs;  // UNDRIVEN
-extern std::function<int()> g_rocshmemInitAttr;           // UNDRIVEN
+extern std::function<int(rocshmem_uniqueid_t*)> g_rocshmemGetUniqueId;  // UNDRIVEN
+extern std::function<int(int, int, rocshmem_uniqueid_t*, rocshmem_init_attr_t*)>
+    g_rocshmemSetAttrUniqueIdArgs;  // UNDRIVEN
+extern std::function<int(unsigned int, rocshmem_init_attr_t*)> g_rocshmemInitAttr;  // UNDRIVEN
 
 }  // namespace rocshmem
 

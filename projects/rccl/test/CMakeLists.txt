@@ -177,10 +177,11 @@ if(BUILD_TESTS)
     list(APPEND RCCL_COMMON_INCLUDE_DIRS ${MPI_CXX_INCLUDE_DIRS})
   endif()
 
-  # First, so it wins over any rocSHMEM installed under ${ROCM_PATH}/include:
-  # the tests must see the headers of the rocSHMEM librccl.so links.
+  # Ahead of ${ROCM_PATH}/include, so the tests see the headers of the rocSHMEM
+  # librccl.so links rather than any rocSHMEM installed there.
   if(ENABLE_ROCSHMEM AND ROCSHMEM_INCLUDE_DIR)
-    list(PREPEND RCCL_COMMON_INCLUDE_DIRS ${ROCSHMEM_INCLUDE_DIR})
+    list(FIND RCCL_COMMON_INCLUDE_DIRS "${ROCM_PATH}/include" _rocm_inc_idx)
+    list(INSERT RCCL_COMMON_INCLUDE_DIRS ${_rocm_inc_idx} ${ROCSHMEM_INCLUDE_DIR})
   endif()
 
   # Common compile definitions

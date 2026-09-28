@@ -26,8 +26,7 @@ ncclResult_t bootstrapAllGather(void* commState, void* allData, int size) {
   return g_bootstrapAllGather(commState, allData, size);
 }
 // Only init.cc:2958 reaches this, to hand the rocSHMEM unique id to the other
-// ranks. A single-rank microtest has nobody to broadcast to, so succeeding
-// without touching bcastData leaves the root's own copy in place.
+// ranks. Succeeds without touching bcastData; no test reaches it yet.
 ncclResult_t bootstrapBroadcast(void*, int, int, int, void*, int) { return ncclSuccess; }
 
 ncclResult_t bootstrapClose(void* commState) { ::abort(); }
