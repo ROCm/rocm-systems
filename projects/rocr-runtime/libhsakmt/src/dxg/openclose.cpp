@@ -692,6 +692,10 @@ static HSAKMT_STATUS init_vars_from_env(void) {
     dxg_runtime->hsakmt_debug_sysmem = safe_env_to_int(envvar, 0);
   }
 
+  if ((envvar = getenv("ROCDXG_DISPATCH_TIMEOUT_MS")) != nullptr) {
+    dxg_runtime->dispatch_timeout_ms_ = safe_env_to_int(envvar, dxg_runtime->dispatch_timeout_ms_);
+  }
+
   return HSAKMT_STATUS_SUCCESS;
 }
 

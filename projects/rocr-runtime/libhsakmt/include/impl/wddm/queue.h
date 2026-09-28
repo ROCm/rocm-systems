@@ -106,6 +106,9 @@ public:
   hsa_status_t SetCuMask(uint32_t cu_mask_count, const uint32_t* queue_cu_mask);
 
   uint64_t *GetSyncAddr(void) const { return sync_addr; }
+  // The KMD stamps UINT64_MAX into every monitored fence of the device when it resets the GPU,
+  // including queues that never submitted anything.
+  bool IsDeviceLost(void) const { return *sync_addr == UINT64_MAX; }
   uint64_t GetCmdbufAddr(void) const { return cmdbuf_addr; }
 
   Wkmi::SchedLevel ConvertSchedLevel(hsa_amd_queue_priority_t prio) const {
@@ -248,6 +251,7 @@ private:
     return AMD_HSA_BITS_GET(amd_queue_rocr_->queue_properties, AMD_QUEUE_PROPERTIES_ENABLE_PROFILING);
   }
   void HandleError(hsa_status_t status);
+  void AbandonInflightPackets(void);
   bool UpdateScratch(uint32_t private_segment_size, bool wave32);
 
   uint32_t UpdateIndexStride(uint32_t srd, bool wave32);
@@ -271,6 +275,11 @@ private:
   volatile std::atomic<int64_t> *error_code_;
   std::thread aql_to_pm4_thread_;
   bool thread_stop_;
+  // Set only when UpdateScratch cannot allocate. Both that and a PM4
+  // command-buffer overflow return HSA_STATUS_ERROR_OUT_OF_RESOURCES and stop
+  // the queue. This flag is the one whose waiters the thread exit releases,
+  // because the GPU will not retire the dispatch.
+  bool scratch_alloc_failed_ = false;
   std::mutex thread_cond_lock_;
   std::condition_variable thread_cond_;
   static void AqlToPm4Thread(ComputeQueue *queue);

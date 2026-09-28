@@ -41,6 +41,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include <algorithm>
+#include <chrono>
 #include <cstring>
 #include <cinttypes>
 #include <cstddef>
@@ -199,11 +200,19 @@ void ComputeQueue::HandleError(hsa_status_t status) {
       //{0x40000000, HSA_STATUS_ERROR_ILLEGAL_INSTRUCTION},
       {0x80000000, HSA_STATUS_ERROR_EXCEPTION},
   };
-  for (std::size_t i = 0; i < sizeof(QueueErrors) / sizeof(QueueErrors[0]); ++i) {
-    if (QueueErrors[i].status == status) {
-      val = QueueErrors[i].code;
-      pr_err("error %d, sig_val %" PRId64 "\n", status, val);
-      break;
+  // OUT_OF_RESOURCES stays OUT_OF_RESOURCES. 0x1000 is not a CP scratch-fault
+  // bit (0x1 / 0x400): those make ROCr reduce occupancy and retry the packet.
+  // AqlQueue::DynamicQueueEventsHandler maps 0x1000 back to this status.
+  if (status == HSA_STATUS_ERROR_OUT_OF_RESOURCES) {
+    val = 0x1000;
+    pr_err("error %d, sig_val %" PRId64 "\n", status, val);
+  } else {
+    for (std::size_t i = 0; i < sizeof(QueueErrors) / sizeof(QueueErrors[0]); ++i) {
+      if (QueueErrors[i].status == status) {
+        val = QueueErrors[i].code;
+        pr_err("error %d, sig_val %" PRId64 "\n", status, val);
+        break;
+      }
     }
   }
 
@@ -213,6 +222,25 @@ void ComputeQueue::HandleError(hsa_status_t status) {
   if (error_code_) {
     error_code_->store(val, std::memory_order_release);
   }
+}
+
+// Retire every packet the GPU will never finish. Completion signals are decremented by PM4 on
+// the GPU, so a wedged or abandoned dispatch leaves each waiter blocked forever; only the CPU
+// can release them once the translation thread gives up.
+void ComputeQueue::AbandonInflightPackets(void) {
+  const uint64_t wptr = ring_wptr->load(std::memory_order_acquire);
+  const uint64_t rptr = ring_rptr->load(std::memory_order_acquire);
+
+  for (uint64_t i = rptr; i < wptr; i++) {
+    // completion_signal sits at the same offset in every AQL packet type.
+    auto* packet = reinterpret_cast<hsa_kernel_dispatch_packet_t*>(ring) + (i % ring_size);
+    hsa_signal_t sig = packet->completion_signal;
+    if (sig.handle) hsakmt_hsa_signal_store_screlease(sig, 0);
+  }
+
+  // Drain the ring so hsa_queue_load_read_index() stops reporting the queue as busy.
+  cmdbuf_aql_frame_write_index = wptr;
+  ring_rptr->store(wptr, std::memory_order_release);
 }
 
 void ComputeQueue::AqlToPm4Thread(ComputeQueue* queue) {
@@ -227,21 +255,44 @@ void ComputeQueue::AqlToPm4Thread(ComputeQueue* queue) {
   constexpr std::chrono::microseconds kPollMin(50);
   constexpr std::chrono::microseconds kPollMax(2000);
   auto poll_interval = kPollMin;
+  // No trap handler and no exception interrupt exist on WSL/DXG, so a wedged dispatch can only
+  // be detected as a ring that stops moving. 0 disables the watchdog.
+  const std::chrono::milliseconds kDispatchTimeout(dxg_runtime->dispatch_timeout_ms_);
+  auto stall_since = std::chrono::steady_clock::now();
   uint64_t current_position = queue->GetAqlWriteIndex();
   bool sleep = false;
+  bool retry = false;
   // Last reported {wptr, rptr, gpu fence} so the idle log only fires on real progress.
   uint64_t last_wait_state[3] = {~0ull, ~0ull, ~0ull};
+  // Device lost, scratch allocation failure, and a packet the translator rejects
+  // all set this and leave the loop. Submit/wait failures stay HSA_STATUS_ERROR
+  // and only back off.
+  hsa_status_t status = HSA_STATUS_SUCCESS;
   start_time = std::chrono::steady_clock::now();
 
-  while (true) {
+  while (status == HSA_STATUS_SUCCESS) {
+    // Process() only probes the fence while it has packets to translate, so an idle queue would
+    // keep polling forever after a GPU reset; check here too. sync_addr is NULL until Init(),
+    // which runs after this thread is spawned.
+    if (queue->sync_addr && queue->IsDeviceLost()) {
+      status = HSA_STATUS_ERROR_EXCEPTION;
+      break;
+    }
+
     if (!queue->IsInvalidPacket()) {
-      hsa_status_t status = queue->Process();
-      if (status != HSA_STATUS_SUCCESS) {
-        pr_err("process compute queue fail status = %08x\n", status);
-        queue->HandleError(status);
+      hsa_status_t ret = queue->Process();
+      // Same as AQL: a rejected packet stops the queue. The packet stays in the
+      // ring. HSA_STATUS_ERROR is a submit or fence wait failure and is retried.
+      if (ret != HSA_STATUS_SUCCESS && ret != HSA_STATUS_ERROR) {
+        status = ret;
         break;
       }
-      sleep = false;
+      if (ret != HSA_STATUS_SUCCESS) {
+        retry = true;
+      } else {
+        retry = false;
+        sleep = false;
+      }
     } else {
       if (current_position == queue->GetAqlWriteIndex()) {
         time = std::chrono::steady_clock::now();
@@ -253,12 +304,12 @@ void ComputeQueue::AqlToPm4Thread(ComputeQueue* queue) {
       }
     }
 
-    if ((queue->GetRingWptr()->load() > queue->GetRingRptr()->load()) && !sleep) continue;
+    if ((queue->GetRingWptr()->load() > queue->GetRingRptr()->load()) && !sleep && !retry) continue;
 
     std::unique_lock<std::mutex> lock(queue->thread_cond_lock_);
     // CPU wait for valid packet
     if (queue->GetRingWptr()->load() <= queue->GetRingRptr()->load() ||
-        (sleep && queue->IsInvalidPacket())) {
+        (sleep && queue->IsInvalidPacket()) || retry) {
       if (queue->thread_stop_) break;
       const uint64_t state[3] = {queue->GetRingWptr()->load(), queue->GetRingRptr()->load(),
                                  *queue->sync_addr};
@@ -267,11 +318,34 @@ void ComputeQueue::AqlToPm4Thread(ComputeQueue* queue) {
                  state[0], state[1], state[2]);
         memcpy(last_wait_state, state, sizeof(state));
         poll_interval = kPollMin;
+        stall_since = std::chrono::steady_clock::now();
       } else {
         poll_interval = std::min(poll_interval * 2, kPollMax);
+        // state[0] > state[1]: packets are on the GPU and have not retired. TDR may be
+        // disabled, so IsDeviceLost() never fires. Leave through the same exit as device lost.
+        if (kDispatchTimeout.count() && state[0] > state[1] &&
+            std::chrono::steady_clock::now() - stall_since > kDispatchTimeout) {
+          pr_err("queue %p dispatch stalled for %" PRId64 " ms, wptr=%" PRIx64 " rptr=%" PRIx64
+                 " fence=%" PRIx64 "\n",
+                 queue->ring, static_cast<int64_t>(kDispatchTimeout.count()), state[0], state[1],
+                 state[2]);
+          status = HSA_STATUS_ERROR_EXCEPTION;
+          break;
+        }
       }
       queue->thread_cond_.wait_for(lock, poll_interval);
     }
+  }
+
+  if (status != HSA_STATUS_SUCCESS) {
+    pr_err("aql to pm4 queue %p failed, status %08x\n", queue->ring, status);
+    // Read before HandleError. A rejected packet matches AQL: report the error
+    // and leave the ring where it stopped. Device lost and scratch allocation
+    // failure will not be retired by the GPU, so release those waiters.
+    const bool release_waiters =
+        status == HSA_STATUS_ERROR_EXCEPTION || queue->scratch_alloc_failed_;
+    queue->HandleError(status);
+    if (release_waiters) queue->AbandonInflightPackets();
   }
 
   pr_debug("aql to pm4 thread %p exit\n", queue->ring);
@@ -506,7 +580,6 @@ bool ComputeQueue::UpdateScratch(uint32_t private_segment_size, bool wave32) {
 
   if (scratch_size > UINT32_MAX) {
     pr_err("scratch_size overflow!\n");
-    HandleError(HSA_STATUS_ERROR_INVALID_ARGUMENT);
     return false;
   }
 
@@ -726,8 +799,10 @@ hsa_status_t ComputeQueue::KernelDispatchAqlToPm4(char* cpu, hsa_kernel_dispatch
                                        AMD_KERNEL_CODE_PROPERTIES_ENABLE_WAVEFRONT_SIZE32);
 
   assert(packet->private_segment_size >= kernel_object->workitem_private_segment_byte_size);
-  if (!UpdateScratch(packet->private_segment_size, wave32))
+  if (!UpdateScratch(packet->private_segment_size, wave32)) {
+    scratch_alloc_failed_ = true;
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
 
   amd_signal_t* signal = (amd_signal_t*)packet->completion_signal.handle;
 
@@ -847,6 +922,7 @@ hsa_status_t ComputeQueue::BarrierGenericAqlToPm4(char* cpu, hsa_barrier_and_pac
         }
       }
       if (!unsignaled) break;
+      if (IsDeviceLost()) return HSA_STATUS_ERROR_EXCEPTION;
 
       std::this_thread::sleep_for(std::chrono::microseconds(20));
     }
@@ -854,9 +930,14 @@ hsa_status_t ComputeQueue::BarrierGenericAqlToPm4(char* cpu, hsa_barrier_and_pac
     for (int i = 0; i < 5; i++) {
       if (!packet->dep_signal[i].handle) continue;
 
-      hsa_signal_value_t value = hsakmt_hsa_signal_wait_relaxed(
-          packet->dep_signal[i], HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
-      assert(value == 0);
+      // Sliced wait so a reset GPU, which will never signal this dependency, is noticed.
+      // Returning EXCEPTION stops the queue at this packet. Emitting PM4 would
+      // submit onto a device that can no longer complete it.
+      constexpr uint64_t kWaitSlice = 100000000;
+      while (hsakmt_hsa_signal_wait_relaxed(packet->dep_signal[i], HSA_SIGNAL_CONDITION_EQ, 0,
+                                            kWaitSlice, HSA_WAIT_STATE_BLOCKED) != 0) {
+        if (IsDeviceLost()) return HSA_STATUS_ERROR_EXCEPTION;
+      }
     }
   }
 
@@ -1096,6 +1177,8 @@ hsa_status_t ComputeQueue::Process(void) {
   const uint32_t frame_num = device->GetAqlFrameNum();
 
   while (cmdbuf_aql_frame_write_index < ring_wptr->load() && !IsInvalidPacket()) {
+    if (IsDeviceLost()) return HSA_STATUS_ERROR_EXCEPTION;
+
     pr_debug("process %p wptr=%" PRIx64 " rptr=%" PRIx64 "\n", ring, ring_wptr->load(),
              ring_rptr->load());
 
@@ -1117,6 +1200,10 @@ hsa_status_t ComputeQueue::Process(void) {
     }
 
     ret = SwitchAql2PM4();
+    // A rejected packet stops the queue, as on AQL. Leave it in the ring:
+    // do not retire it and do not write its completion signal. Scratch
+    // allocation failure is OUT_OF_RESOURCES and is released at the thread exit
+    // because the GPU will not retire it.
     if (ret != HSA_STATUS_SUCCESS) return ret;
 
     if (!ready_to_submit) continue;
