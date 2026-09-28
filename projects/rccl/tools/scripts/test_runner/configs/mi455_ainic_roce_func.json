@@ -1340,6 +1340,11 @@
           }
         },
         {
+          "name": "CeReduceScatterEligibilityTest",
+          "description": "CE ReduceScatter eligibility gate and staging-layout tests. No env_variables: every RCCL_CE_REDUCESCATTER case sets its own env in-process.",
+          "test_filter": "CeReduceScatterEligibilityTest.*:RcclCeReduceScatterEligibility.*"
+        },
+        {
           "name": "DdaFabricEligibilityTest",
           "description": "DDA fabric eligibility tests for AllReduce, AllGather, ReduceScatter, AlltoAll across LL/LL128/VMM tiers on gfx1250",
           "test_filter": "DdaFabricEligibilityTest.*:DdaFabricLL128EligibilityTest.*"
