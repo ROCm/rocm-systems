@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <barrier>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -166,6 +167,13 @@ KernelDispatchInfo dispatch_info(uint32_t id) {
   info.sgprs_per_wf = 64;
   info.vgprs_per_wf = 96;
   return info;
+}
+
+void set_workgroup_grid(KernelDispatchInfo &info, const std::array<uint32_t, 3> &workgroup_grid) {
+  info.grid_size_x = workgroup_grid[0] * info.workgroup_size_x;
+  info.grid_size_y = workgroup_grid[1] * info.workgroup_size_y;
+  info.grid_size_z = workgroup_grid[2] * info.workgroup_size_z;
+  info.workgroup_count = workgroup_grid[0] * workgroup_grid[1] * workgroup_grid[2];
 }
 
 std::string json_string(std::string_view value) {
@@ -414,6 +422,81 @@ TEST_F(PerfsimPluginTest, GpuCompilerSimV13StagesUntilDispatchIsAccepted) {
   EXPECT_NE(line_with_prefix(trace, "end 43 "), trace.size());
 }
 
+TEST_F(PerfsimPluginTest, CanonicalizesConcurrentWaveInstructionOrder) {
+  WaveFixture fixture(4);
+
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  auto plugin = std::make_unique<PerfsimPlugin>(plugin_config().c_str());
+  EXPECT_TRUE(plugin->requires_serial_hot_hooks());
+  ASSERT_TRUE(group.add(std::move(plugin)));
+  group.onInit();
+
+  KernelDispatchInfo info = dispatch_info(46);
+  set_workgroup_grid(info, {4, 2, 3});
+  group.onAmdgpuDispatchPacketProcessed(info);
+  group.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
+  std::array<Wavefront *, 4> waves{};
+  for (uint32_t i = 0; i < waves.size(); ++i) {
+    waves[i] = &fixture.wave(info.dispatch_id, i, {i, 0, 0}, 0);
+    group.onAmdgpuWavefrontDispatched(*waves[i]);
+  }
+
+  constexpr uint32_t kRounds = 8;
+  const std::array<uint32_t, 1> add_words{0x7E000200};
+  SyntheticInstruction add("v_add_f32", add_words);
+  for (uint32_t round = 0; round < kRounds; ++round) {
+    std::barrier start(static_cast<std::ptrdiff_t>(waves.size()));
+    std::vector<std::thread> workers;
+    for (uint32_t i = 0; i < waves.size(); ++i) {
+      workers.emplace_back([&, i]() {
+        start.arrive_and_wait();
+        const uint32_t rank = (i + waves.size() - round % waves.size()) % waves.size();
+        std::this_thread::sleep_for(std::chrono::milliseconds(rank));
+        group.onAmdgpuBeforeExecuteInstruction(0x4000 + i * 0x100 + round * 4, add, *waves[i]);
+      });
+    }
+    for (auto &worker : workers)
+      worker.join();
+  }
+
+  const std::array<uint32_t, 1> end_words{0xBF810000};
+  SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
+  std::vector<std::thread> workers;
+  for (uint32_t i = 0; i < waves.size(); ++i)
+    workers.emplace_back(
+        [&, i]() { group.onAmdgpuBeforeExecuteInstruction(0x5000 + i * 4, end, *waves[i]); });
+  for (auto &worker : workers)
+    worker.join();
+
+  for (Wavefront *wave : waves)
+    group.onAmdgpuWavefrontHalted(*wave);
+  group.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
+  group.onShutdown();
+
+  const auto trace = lines(read_file(trace_.path()));
+  size_t cursor = line_with_prefix(trace, "begin 46 ");
+  ASSERT_LT(cursor, trace.size());
+  ++cursor;
+  for (uint32_t wave = 0; wave < waves.size(); ++wave) {
+    for (uint32_t instruction = 0; instruction < kRounds; ++instruction) {
+      const uint64_t pc = 0x4000 + wave * 0x100 + instruction * 4;
+      const std::string prefix = "instruction 46 " + std::to_string(wave) + " 0 0 0 " +
+                                 std::to_string(instruction) + " " + std::to_string(pc) + " ";
+      ASSERT_LT(cursor, trace.size());
+      EXPECT_TRUE(trace[cursor].starts_with(prefix)) << "trace line " << cursor;
+      ++cursor;
+    }
+    const std::string end_prefix = "instruction 46 " + std::to_string(wave) + " 0 0 0 " +
+                                   std::to_string(kRounds) + " " +
+                                   std::to_string(0x5000 + wave * 4) + " ";
+    ASSERT_LT(cursor, trace.size());
+    EXPECT_TRUE(trace[cursor].starts_with(end_prefix)) << "trace line " << cursor;
+    ++cursor;
+  }
+  ASSERT_LT(cursor, trace.size());
+  EXPECT_TRUE(trace[cursor].starts_with("end 46 "));
+}
+
 TEST_F(PerfsimPluginTest, ReclaimsFaultAbortedWaveStateBeforePhysicalSlotReuse) {
   WaveFixture fixture(1);
   testing::internal::CaptureStderr();
@@ -436,7 +519,9 @@ TEST_F(PerfsimPluginTest, ReclaimsFaultAbortedWaveStateBeforePhysicalSlotReuse) 
     fixture.cu->abort_dispatch(AbortedDispatch);
 
     constexpr uint32_t ReusedDispatch = 45;
-    plugin.onAmdgpuDispatchPacketProcessed(dispatch_info(ReusedDispatch));
+    KernelDispatchInfo reused_info = dispatch_info(ReusedDispatch);
+    set_workgroup_grid(reused_info, {2, 2, 3});
+    plugin.onAmdgpuDispatchPacketProcessed(reused_info);
     plugin.onAmdgpuDispatchExecutionBegin(ReusedDispatch);
     Wavefront &reused = fixture.wave(ReusedDispatch, 1, {1, 0, 0}, 0);
     ASSERT_EQ(&reused, &aborted);
@@ -618,7 +703,8 @@ TEST_F(PerfsimPluginTest, EmptyDispatchNameReplaysAllDispatchesWithoutMarker) {
     const std::array<uint32_t, 1> words{0xBF810000};
     SyntheticInstruction end("s_endpgm", words, PROGRAM_TERMINATOR);
     auto replay_dispatch = [&](uint32_t dispatch_id, uint32_t workgroup_id, uint64_t pc) {
-      const KernelDispatchInfo info = dispatch_info(dispatch_id);
+      KernelDispatchInfo info = dispatch_info(dispatch_id);
+      set_workgroup_grid(info, {workgroup_id + 1, 2, 3});
       plugin.onAmdgpuDispatchPacketProcessed(info);
       plugin.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
       Wavefront &wave = fixture.wave(info.dispatch_id, workgroup_id, {workgroup_id, 0, 0}, 0);
@@ -655,6 +741,7 @@ TEST_F(PerfsimPluginTest, CapsStagingToFirstDistinctWorkgroupsWithoutBlockingRep
 
     KernelDispatchInfo info = dispatch_info(42);
     info.wfs_per_workgroup = 2;
+    set_workgroup_grid(info, {1001, 2, 1});
     plugin.onAmdgpuDispatchPacketProcessed(info);
     plugin.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
     Wavefront &first = fixture.wave(info.dispatch_id, 10, {1000, 0, 0}, 0);
@@ -703,6 +790,7 @@ TEST_F(PerfsimPluginTest, RequestsV13AndForwardsOwnedFieldsInOrder) {
     KernelDispatchInfo info = dispatch_info(7);
     info.kernel_name = "v13_owned_kernel";
     info.lds_size_bytes = 1025;
+    set_workgroup_grid(info, {3, 4, 5});
     plugin.onAmdgpuDispatchPacketProcessed(info);
     info.kernel_name = "mutated_after_callback";
     plugin.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
@@ -786,16 +874,16 @@ TEST_F(PerfsimPluginTest, RequestsV13AndForwardsOwnedFieldsInOrder) {
   EXPECT_EQ(line_with_prefix(trace, "unload"), trace.size());
 
   const size_t begin =
-      line_with_prefix(trace, "begin 7 96 128 1025 32 1 32 2 3 32 1 1 v13_owned_kernel");
-  const size_t first_instruction = line_with_prefix(trace, "instruction 7 4003002 0 1 5 0 ");
-  const size_t memory = line_with_prefix(trace, "memory 7 4003002 0 1 5 0 9 32 8 5 0 1 0 1048576");
+      line_with_prefix(trace, "begin 7 96 128 1025 32 1 96 4 5 32 1 1 v13_owned_kernel");
+  const size_t first_instruction = line_with_prefix(trace, "instruction 7 59 0 1 5 0 ");
+  const size_t memory = line_with_prefix(trace, "memory 7 59 0 1 5 0 9 32 8 5 0 1 0 1048576");
   const size_t tensor_instruction =
-      line_with_prefix(trace, "instruction 7 4003002 0 1 5 1 ", first_instruction + 1);
+      line_with_prefix(trace, "instruction 7 59 0 1 5 1 ", first_instruction + 1);
   const size_t tensor =
-      line_with_prefix(trace, "tdm 7 4003002 0 1 5 1 3 4 1 0 11 12 2 52 104 3145728 3145732 "
+      line_with_prefix(trace, "tdm 7 59 0 1 5 1 3 4 1 0 11 12 2 52 104 3145728 3145732 "
                               "3145732");
   const size_t end_instruction =
-      line_with_prefix(trace, "instruction 7 4003002 0 1 5 2 ", tensor_instruction + 1);
+      line_with_prefix(trace, "instruction 7 59 0 1 5 2 ", tensor_instruction + 1);
   const size_t end = line_with_prefix(trace, "end 7 ");
   ASSERT_LT(begin, trace.size());
   ASSERT_LT(first_instruction, trace.size());
@@ -822,6 +910,7 @@ TEST_F(PerfsimPluginTest, FallsBackToV8AndForwardsLegacyPayloadPrefixes) {
 
     KernelDispatchInfo info = dispatch_info(8);
     info.kernel_name = "ignored_by_v8";
+    set_workgroup_grid(info, {3, 4, 5});
     plugin.onAmdgpuDispatchPacketProcessed(info);
     plugin.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
     Wavefront &wave = fixture.wave(info.dispatch_id, 99, {2, 3, 4}, 5);
@@ -866,8 +955,8 @@ TEST_F(PerfsimPluginTest, FallsBackToV8AndForwardsLegacyPayloadPrefixes) {
 
   const size_t begin = line_with_prefix(trace, "begin 8 ");
   ASSERT_LT(begin, trace.size());
-  EXPECT_EQ(trace[begin], "begin 8 96 128 4096 32 1 32 2 3 32 1 1");
-  EXPECT_NE(line_with_prefix(trace, "tdm 8 4003002 0 1 5 0 2 4 1 0 3145728 3145732"), trace.size());
+  EXPECT_EQ(trace[begin], "begin 8 96 128 4096 32 1 96 4 5 32 1 1");
+  EXPECT_NE(line_with_prefix(trace, "tdm 8 59 0 1 5 0 2 4 1 0 3145728 3145732"), trace.size());
 }
 
 TEST_F(PerfsimPluginTest, AcceptsBackendSelectedCompatibleVersion) {
@@ -1690,15 +1779,17 @@ TEST_F(PerfsimPluginTest, RejectsWholeDispatchWhenFlatAtomicResolvesToScratch) {
   EXPECT_EQ(line_with_prefix(trace, "end 12 "), trace.size());
 }
 
-TEST_F(PerfsimPluginTest, ReplaysInterleavedDispatchesAsOneGloballyOrderedEpoch) {
+TEST_F(PerfsimPluginTest, CanonicalizesInterleavedDispatchEpoch) {
   WaveFixture fixture;
   setenv("ROCJITSU_PERFSIM_FAKE_MODE", "gpucsim_name", 1);
   const std::string config = plugin_config();
   PerfsimPlugin plugin(config.c_str());
   plugin.onInit();
 
-  for (uint32_t id : {21u, 22u}) {
-    plugin.onAmdgpuDispatchPacketProcessed(dispatch_info(id));
+  for (uint32_t id : {22u, 21u}) {
+    KernelDispatchInfo info = dispatch_info(id);
+    set_workgroup_grid(info, {3, 2, 3});
+    plugin.onAmdgpuDispatchPacketProcessed(info);
     plugin.onAmdgpuDispatchExecutionBegin(id);
   }
   Wavefront &first = fixture.wave(21, 1, {1, 0, 0}, 0);
@@ -1708,14 +1799,14 @@ TEST_F(PerfsimPluginTest, ReplaysInterleavedDispatchesAsOneGloballyOrderedEpoch)
 
   const std::array<uint32_t, 1> words{0xBF810000};
   SyntheticInstruction end("s_endpgm", words, PROGRAM_TERMINATOR);
-  plugin.onAmdgpuBeforeExecuteInstruction(0x3000, end, first);
   plugin.onAmdgpuBeforeExecuteInstruction(0x4000, end, second);
-  plugin.onAmdgpuWavefrontHalted(first);
+  plugin.onAmdgpuBeforeExecuteInstruction(0x3000, end, first);
   plugin.onAmdgpuWavefrontHalted(second);
-  plugin.onAmdgpuDispatchExecutionEnd(21);
+  plugin.onAmdgpuWavefrontHalted(first);
+  plugin.onAmdgpuDispatchExecutionEnd(22);
   const auto partial_trace = lines(read_file(trace_.path()));
   EXPECT_EQ(line_with_prefix(partial_trace, "begin "), partial_trace.size());
-  plugin.onAmdgpuDispatchExecutionEnd(22);
+  plugin.onAmdgpuDispatchExecutionEnd(21);
   plugin.onShutdown();
 
   const auto trace = lines(read_file(trace_.path()));
@@ -1785,7 +1876,9 @@ TEST_F(PerfsimPluginTest, CompactsInterleavedChunksWithoutReorderingSurvivors) {
   plugin.onInit();
 
   for (uint32_t id : {33u, 34u}) {
-    plugin.onAmdgpuDispatchPacketProcessed(dispatch_info(id));
+    KernelDispatchInfo info = dispatch_info(id);
+    set_workgroup_grid(info, {2, 2, 3});
+    plugin.onAmdgpuDispatchPacketProcessed(info);
     plugin.onAmdgpuDispatchExecutionBegin(id);
   }
   Wavefront &rejected_wave = fixture.wave(33, 0, {0, 0, 0}, 0);
@@ -1871,7 +1964,8 @@ TEST_F(PerfsimPluginTest, RejectsLongLivedDispatchAtStagingBudgetAndReusesBudget
     plugin.onAmdgpuWavefrontHalted(rejected_wave);
     plugin.onAmdgpuDispatchExecutionEnd(rejected_info.dispatch_id);
 
-    const KernelDispatchInfo supported_info = dispatch_info(26);
+    KernelDispatchInfo supported_info = dispatch_info(26);
+    set_workgroup_grid(supported_info, {2, 2, 3});
     plugin.onAmdgpuDispatchPacketProcessed(supported_info);
     plugin.onAmdgpuDispatchExecutionBegin(supported_info.dispatch_id);
     Wavefront &supported_wave = fixture.wave(supported_info.dispatch_id, 1, {1, 0, 0}, 0);
@@ -1904,7 +1998,9 @@ TEST_F(PerfsimPluginTest, RejectedDispatchDoesNotBlockOverlappingSupportedDispat
   plugin.onInit();
 
   for (uint32_t id : {27u, 28u}) {
-    plugin.onAmdgpuDispatchPacketProcessed(dispatch_info(id));
+    KernelDispatchInfo info = dispatch_info(id);
+    set_workgroup_grid(info, {2, 2, 3});
+    plugin.onAmdgpuDispatchPacketProcessed(info);
     plugin.onAmdgpuDispatchExecutionBegin(id);
   }
   Wavefront &rejected_wave = fixture.wave(27, 0, {0, 0, 0}, 0);
@@ -1967,7 +2063,8 @@ TEST_F(PerfsimPluginTest, IgnoresCallbacksAfterEarlyDispatchRejection) {
     for (uint32_t i = 0; i < 512; ++i)
       plugin.onAmdgpuBeforeExecuteInstruction(0xD000 + i * 4, add, rejected_wave);
 
-    const KernelDispatchInfo supported_info = dispatch_info(30);
+    KernelDispatchInfo supported_info = dispatch_info(30);
+    set_workgroup_grid(supported_info, {2, 2, 3});
     plugin.onAmdgpuDispatchPacketProcessed(supported_info);
     plugin.onAmdgpuDispatchExecutionBegin(supported_info.dispatch_id);
     Wavefront &supported_wave = fixture.wave(supported_info.dispatch_id, 1, {1, 0, 0}, 0);
@@ -2058,36 +2155,70 @@ TEST_F(PerfsimPluginTest, RejectsTensorDmaBeforeMaterializingAddressesOverBudget
   EXPECT_EQ(line_with_prefix(trace, "end 32 "), trace.size());
 }
 
-TEST_F(PerfsimPluginTest, PreservesCollidingWrappedFfmWaveIdentities) {
+TEST_F(PerfsimPluginTest, CanonicalizesConcurrentWavesAcrossLegacyCoordinateCollision) {
   WaveFixture fixture;
   const std::string config = plugin_config();
-  PerfsimPlugin plugin(config.c_str());
-  plugin.onInit();
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  ASSERT_TRUE(group.add(std::make_unique<PerfsimPlugin>(config.c_str())));
+  group.onInit();
 
-  const KernelDispatchInfo info = dispatch_info(23);
-  plugin.onAmdgpuDispatchPacketProcessed(info);
-  plugin.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
-  Wavefront &first = fixture.wave(info.dispatch_id, 1, {1000, 0, 0}, 0);
-  Wavefront &second = fixture.wave(info.dispatch_id, 2, {0, 1, 0}, 0);
-  plugin.onAmdgpuWavefrontDispatched(first);
-  plugin.onAmdgpuWavefrontDispatched(second);
+  KernelDispatchInfo info = dispatch_info(23);
+  set_workgroup_grid(info, {1001, 2, 1});
+  group.onAmdgpuDispatchPacketProcessed(info);
+  group.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
+  Wavefront &first = fixture.wave(info.dispatch_id, 1000, {1000, 0, 0}, 0);
+  Wavefront &second = fixture.wave(info.dispatch_id, 1001, {0, 1, 0}, 0);
+  group.onAmdgpuWavefrontDispatched(first);
+  group.onAmdgpuWavefrontDispatched(second);
 
-  const std::array<uint32_t, 1> words{0xBF810000};
-  SyntheticInstruction end("s_endpgm", words, PROGRAM_TERMINATOR);
-  plugin.onAmdgpuBeforeExecuteInstruction(0x4100, end, first);
-  plugin.onAmdgpuBeforeExecuteInstruction(0x4200, end, second);
-  plugin.onAmdgpuWavefrontHalted(first);
-  plugin.onAmdgpuWavefrontHalted(second);
-  plugin.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
-  plugin.onShutdown();
+  const std::array<uint32_t, 1> add_words{0x7E000200};
+  SyntheticInstruction add("v_add_f32", add_words);
+  std::mutex order_mutex;
+  std::condition_variable order_cv;
+  bool second_recorded = false;
+  std::thread delayed_first([&]() {
+    std::unique_lock lock(order_mutex);
+    order_cv.wait(lock, [&]() { return second_recorded; });
+    lock.unlock();
+    group.onAmdgpuBeforeExecuteInstruction(0x4100, add, first);
+  });
+  std::thread early_second([&]() {
+    group.onAmdgpuBeforeExecuteInstruction(0x4200, add, second);
+    {
+      std::lock_guard lock(order_mutex);
+      second_recorded = true;
+    }
+    order_cv.notify_one();
+  });
+  delayed_first.join();
+  early_second.join();
+
+  const std::array<uint32_t, 1> end_words{0xBF810000};
+  SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
+  group.onAmdgpuBeforeExecuteInstruction(0x5100, end, first);
+  group.onAmdgpuBeforeExecuteInstruction(0x5200, end, second);
+  group.onAmdgpuWavefrontHalted(first);
+  group.onAmdgpuWavefrontHalted(second);
+  group.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
+  group.onShutdown();
 
   const auto trace = lines(read_file(trace_.path()));
-  const auto count_prefix = [&](std::string_view prefix) {
-    return std::ranges::count_if(
-        trace, [&](const std::string &line) { return std::string_view(line).starts_with(prefix); });
+  size_t cursor = line_with_prefix(trace, "begin 23 ");
+  ASSERT_LT(cursor, trace.size());
+  const std::array<std::string, 4> expected = {
+      "instruction 23 1000 0 0 0 0 16640 ",
+      "instruction 23 1000 0 0 0 1 20736 ",
+      "instruction 23 1001 0 0 0 0 16896 ",
+      "instruction 23 1001 0 0 0 1 20992 ",
   };
-  EXPECT_EQ(count_prefix("instruction 23 1000 0 0 0 0 "), 2);
-  EXPECT_NE(line_with_prefix(trace, "end 23 "), trace.size());
+  for (const std::string &prefix : expected) {
+    ++cursor;
+    ASSERT_LT(cursor, trace.size());
+    EXPECT_TRUE(trace[cursor].starts_with(prefix)) << "trace line " << cursor;
+  }
+  ++cursor;
+  ASSERT_LT(cursor, trace.size());
+  EXPECT_TRUE(trace[cursor].starts_with("end 23 "));
 }
 
 TEST_F(PerfsimPluginTest, RejectsWholeUnsupportedDispatchWithoutBackendCallbacks) {

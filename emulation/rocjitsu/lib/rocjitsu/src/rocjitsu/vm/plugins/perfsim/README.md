@@ -43,7 +43,10 @@ RocJITsu adapter:
 }
 ```
 
-The adapter stages ordered events before replaying them to the backend.
+The adapter stages events before replaying them to the backend. Replay uses a
+canonical order: dispatch begins by dispatch ID, wave records by dispatch ID
+and logical wave identity, and dispatch ends by dispatch ID. Callback order is
+preserved within each wave, so an instruction still precedes its memory records.
 `max_staged_bytes` defaults to `268435456` bytes (256 MiB). If the shared
 budget is exceeded, the adapter rejects and purges the entire affected
 dispatch. The workload can still exit zero, so check the logs for
