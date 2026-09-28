@@ -31,6 +31,7 @@ public:
     virtual bool                         canUseStreamWaitValue() const = 0;
     virtual hipStream_t                  copyStream() const            = 0;
     virtual uint64_t                    *signalSlot() const            = 0;
+    virtual uint64_t                     nextSignalTarget()            = 0;
 };
 
 class StreamMap;
@@ -52,6 +53,7 @@ public:
     virtual bool                         canUseStreamWaitValue() const override;
     virtual hipStream_t                  copyStream() const override;
     virtual uint64_t                    *signalSlot() const override;
+    virtual uint64_t                     nextSignalTarget() override;
 
     Stream(const hipStream_t hip_stream, uint32_t flags, const PassKey<StreamMap> &k);
 
@@ -72,6 +74,7 @@ private:
 
     hipStream_t copy_stream;
     uint64_t   *signal_slot;
+    uint64_t    signal_counter;
 
     std::unique_ptr<void, void (*)(void *)> async_buffer;
     void                                   *async_buffer_dev_ptr;

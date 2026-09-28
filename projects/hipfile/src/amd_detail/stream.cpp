@@ -36,7 +36,7 @@ Stream::Stream(const hipStream_t _hip_stream, uint32_t flags, const PassKey<Stre
       fixed_file_offset{(flags & HIPFILE_STREAM_FIXED_FILE_OFFSET) != 0},
       fixed_io_size{(flags & HIPFILE_STREAM_FIXED_FILE_SIZE) != 0},
       page_aligned{(flags & HIPFILE_STREAM_PAGE_ALIGNED_INPUTS) != 0}, can_use_stream_wait_value{false},
-      copy_stream{nullptr}, signal_slot{nullptr}, async_buffer{nullptr, hipHostDeleter},
+      copy_stream{nullptr}, signal_slot{nullptr}, signal_counter{0}, async_buffer{nullptr, hipHostDeleter},
       async_buffer_dev_ptr{nullptr}, async_buffer_size{0}
 
 {
@@ -170,6 +170,12 @@ uint64_t *
 Stream::signalSlot() const
 {
     return signal_slot;
+}
+
+uint64_t
+Stream::nextSignalTarget()
+{
+    return ++signal_counter;
 }
 
 Stream::~Stream()
