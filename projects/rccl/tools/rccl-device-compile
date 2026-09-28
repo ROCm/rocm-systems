@@ -536,7 +536,7 @@ def do_compile(args, forwarded_flags):
 
     try:
         # Step 1: Compile to assembly
-        compile_cmd = dispatcher_compile_cmd(clang, target_id, forwarded_flags,
+        compile_cmd = device_compile_cmd(clang, target_id, forwarded_flags,
                                              asm_file, source)
         run(compile_cmd, f"compile {os.path.basename(source)}")
 
@@ -571,7 +571,7 @@ def do_compile(args, forwarded_flags):
 # Link mode: objects -> device.elf
 # ---------------------------------------------------------------------------
 
-def dispatcher_compile_cmd(clang, target_id, forwarded_flags, disp_asm, dispatcher):
+def device_compile_cmd(clang, target_id, forwarded_flags, asm_out, source):
     """Device-only compile to assembly, for the dispatcher and each kernel.
 
     -gline-tables-only is placed before forwarded_flags. Clang takes the last
@@ -587,7 +587,7 @@ def dispatcher_compile_cmd(clang, target_id, forwarded_flags, disp_asm, dispatch
         '-gline-tables-only',
         '-w',
     ] + list(forwarded_flags) + [
-        '-S', '-o', disp_asm, dispatcher,
+        '-S', '-o', asm_out, source,
     ]
 
 
@@ -667,7 +667,7 @@ def do_link(args, forwarded_flags):
 
     try:
         # Step 2: Compile dispatcher to assembly.
-        disp_compile_cmd = dispatcher_compile_cmd(
+        disp_compile_cmd = device_compile_cmd(
             clang, target_id, forwarded_flags, disp_asm, dispatcher)
         run(disp_compile_cmd, f"compile dispatcher for {arch}")
 

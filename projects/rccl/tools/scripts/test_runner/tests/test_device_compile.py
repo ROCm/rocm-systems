@@ -218,19 +218,9 @@ class TargetIdTest(unittest.TestCase):
                              "--target-id=gfx950:xnack+",
                              "-o", "out.o", "in.cpp"])
 
-    def test_codegen_command_builders_emit_the_id_they_are_given(self):
-        compile_cmd = driver.dispatcher_compile_cmd(
-            "clang", "gfx942:xnack+", [], "disp.s", "common.cu.cpp")
-        assemble_cmd = driver.device_assemble_cmd(
-            "clang", "gfx942:xnack+", "disp.o", "disp.s")
-
-        self.assertIn("--offload-arch=gfx942:xnack+", compile_cmd)
-        self.assertIn("-mcpu=gfx942:xnack+", assemble_cmd)
-
     def test_link_hands_the_target_id_to_every_codegen_step(self):
-        """The builders above only prove they interpolate their argument;
-        this pins do_link to reaching all three of them with --target-id,
-        while ld.lld still gets the bare name. Runs the whole of do_link
+        """Pins do_link to reaching all three codegen builders with
+        --target-id, while ld.lld still gets the bare name. Runs the whole of do_link
         with only run() stubbed, so each command is the genuine one."""
         calls = []
 
@@ -320,9 +310,9 @@ class TargetIdTest(unittest.TestCase):
         self.assertTrue(driver._has_unified_vgpr_agpr(args.arch))
 
 
-class DispatcherCompileCmdTest(unittest.TestCase):
+class DeviceCompileCmdTest(unittest.TestCase):
     def test_gline_tables_only_precedes_forwarded_g0(self):
-        cmd = driver.dispatcher_compile_cmd(
+        cmd = driver.device_compile_cmd(
             "clang", "gfx942", ["-O1", "-g0"], "disp.s", "common.cu.cpp"
         )
 
@@ -330,7 +320,7 @@ class DispatcherCompileCmdTest(unittest.TestCase):
         self.assertLess(cmd.index("-gline-tables-only"), cmd.index("-g0"))
 
     def test_release_flags_keep_gline_tables_only(self):
-        cmd = driver.dispatcher_compile_cmd(
+        cmd = driver.device_compile_cmd(
             "clang", "gfx942", ["-O3"], "disp.s", "common.cu.cpp"
         )
 
