@@ -375,10 +375,16 @@ int HevcVideoParser::SendPicForDecode() {
     if (pps_ptr->tiles_enabled_flag) {
         pic_param_ptr->num_tile_columns_minus1 = pps_ptr->num_tile_columns_minus1;
         pic_param_ptr->num_tile_rows_minus1 = pps_ptr->num_tile_rows_minus1;
-        for (i = 0; i <= pps_ptr->num_tile_columns_minus1; i++) {
+        // RocdecHevcPicParams mirrors VAPictureParameterBufferHEVC, whose column_width_minus1[] and
+        // row_height_minus1[] hold only 19 and 21 entries. That is one fewer than the Table A.4 level
+        // limits allow, so the largest conforming tile counts cannot be passed on in full.
+        if (pps_ptr->num_tile_columns_minus1 > 18 || pps_ptr->num_tile_rows_minus1 > 20) {
+            ErrorLog(g_rocdec_logger, ROCDEC_STR("Tile count exceeds the picture parameter buffer capacity: num_tile_columns_minus1 = ") + ROCDEC_TOSTR(pps_ptr->num_tile_columns_minus1) + ", num_tile_rows_minus1 = " + ROCDEC_TOSTR(pps_ptr->num_tile_rows_minus1) + ". Only the first 19 columns and 21 rows are sent to the decoder.");
+        }
+        for (i = 0; i <= pps_ptr->num_tile_columns_minus1 && i < 19; i++) {
             pic_param_ptr->column_width_minus1[i] = pps_ptr->column_width_minus1[i];
         }
-        for (i = 0; i <= pps_ptr->num_tile_rows_minus1; i++) {
+        for (i = 0; i <= pps_ptr->num_tile_rows_minus1 && i < 21; i++) {
             pic_param_ptr->row_height_minus1[i] = pps_ptr->row_height_minus1[i];
         }
     }
