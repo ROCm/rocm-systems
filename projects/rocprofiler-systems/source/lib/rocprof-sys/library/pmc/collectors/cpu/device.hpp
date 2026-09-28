@@ -288,7 +288,8 @@ private:
         result.cpu_data.reserve(m_monitored_cpus.size());
         for(auto cpu_id : m_monitored_cpus)
         {
-            result.cpu_data.push_back({ cpu_id, 0.0f, 0.0 });
+            result.cpu_data.push_back(
+                { .cpu_id = cpu_id, .frequency = 0.0f, .load = 0.0 });
         }
         return result;
     }
@@ -302,7 +303,7 @@ private:
                 return &entry;
             }
         }
-        result.cpu_data.push_back({ cpu_id, 0.0f, 0.0 });
+        result.cpu_data.push_back({ .cpu_id = cpu_id, .frequency = 0.0f, .load = 0.0 });
         return &result.cpu_data.back();
     }
 

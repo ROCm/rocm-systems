@@ -243,12 +243,14 @@ struct config
     strset_t                exclude_functions = default_exclude_functions;
     strset_t                exclude_filenames = default_exclude_filenames;
     std::vector<profiler_t> records;
-    annotations_t           annotations = { note_t{ "file", ROCPROFSYS_STRING, nullptr },
-                                            note_t{ "line", ROCPROFSYS_INT32, nullptr },
-                                            note_t{ "lasti", ROCPROFSYS_INT32, nullptr },
-                                            note_t{ "argcount", ROCPROFSYS_INT32, nullptr },
-                                            note_t{ "nlocals", ROCPROFSYS_INT32, nullptr },
-                                            note_t{ "stacksize", ROCPROFSYS_INT32, nullptr } };
+    annotations_t           annotations = {
+        note_t{ .name = "file", .type = ROCPROFSYS_STRING, .value = nullptr },
+        note_t{ .name = "line", .type = ROCPROFSYS_INT32, .value = nullptr },
+        note_t{ .name = "lasti", .type = ROCPROFSYS_INT32, .value = nullptr },
+        note_t{ .name = "argcount", .type = ROCPROFSYS_INT32, .value = nullptr },
+        note_t{ .name = "nlocals", .type = ROCPROFSYS_INT32, .value = nullptr },
+        note_t{ .name = "stacksize", .type = ROCPROFSYS_INT32, .value = nullptr }
+    };
 };
 //
 inline config&

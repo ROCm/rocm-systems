@@ -83,7 +83,8 @@ protected:
         auto backend = std::make_shared<MockBackend>();
 
         ON_CALL(*backend, get_gpu_asic_info())
-            .WillByDefault(Return(asic_info{ "Test GPU", "AMD" }));
+            .WillByDefault(
+                Return(asic_info{ .product_name = "Test GPU", .vendor_name = "AMD" }));
         ON_CALL(*backend, probe_sdma_gpu_support()).WillByDefault(Return(true));
 
         if(bdf.empty())
@@ -273,7 +274,8 @@ TEST_F(GpuTraitsEnumerateTest, device_rejected_by_index_filter_is_not_probed_for
 
     auto excluded_backend = std::make_shared<MockBackend>();
     ON_CALL(*excluded_backend, get_gpu_asic_info())
-        .WillByDefault(Return(asic_info{ "Test GPU", "AMD" }));
+        .WillByDefault(
+            Return(asic_info{ .product_name = "Test GPU", .vendor_name = "AMD" }));
     ON_CALL(*excluded_backend, probe_sdma_gpu_support()).WillByDefault(Return(true));
     EXPECT_CALL(*excluded_backend, get_bdf()).Times(0);
 
