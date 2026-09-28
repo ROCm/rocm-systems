@@ -877,6 +877,35 @@ add_test(
 # Torch trace tests
 # -----------------------------------
 
+if(TARGET test-torch-trace-collector)
+    if(TEST_FROM_INSTALL)
+        set(_ttc_test_cmd tests/test-torch-trace-collector)
+    else()
+        set(_ttc_test_cmd $<TARGET_FILE:test-torch-trace-collector>)
+    endif()
+    add_test(
+        NAME test-torch-trace-collector
+        COMMAND ${_ttc_test_cmd} --gtest_filter=-TorchTraceCollectorBeforeInstall.*
+    )
+    add_test(
+        NAME test-torch-trace-collector-before-install
+        COMMAND ${_ttc_test_cmd} --gtest_filter=TorchTraceCollectorBeforeInstall.*
+    )
+    get_target_property(
+        _ttc_ld_path
+        test-torch-trace-collector
+        ROCPROF_TEST_LD_LIBRARY_PATH
+    )
+    set(_ttc_test_env "LD_LIBRARY_PATH=${_ttc_ld_path}:$ENV{LD_LIBRARY_PATH}")
+    sanitizer_runtime_env(_san_env)
+    list(APPEND _ttc_test_env ${_san_env})
+    set_tests_properties(
+        test-torch-trace-collector
+        test-torch-trace-collector-before-install
+        PROPERTIES LABELS "profile" ENVIRONMENT "${_ttc_test_env}"
+    )
+endif()
+
 add_test(
     NAME test_rocpd_data
     COMMAND
@@ -889,6 +918,7 @@ add_test(
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_inject_roctx_package.xml
         ${COV_OPTION} tests/unit/utils/inject_roctx/test_inject_roctx_package.py
+        tests/unit/utils/inject_roctx/_backends/test_torch_trace_collector.py
         ${WORKING_DIR_OPTION}
 )
 

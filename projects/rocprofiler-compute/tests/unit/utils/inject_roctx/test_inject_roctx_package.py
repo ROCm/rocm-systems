@@ -326,3 +326,74 @@ def test_extract_kernel_name_prefers_attr_then_meta_then_fn():
         triton_backend._extract_kernel_name(types.SimpleNamespace())
         == "<triton_kernel>"
     )
+
+
+@pytest.mark.parametrize("push_succeeds", [False, True])
+@pytest.mark.parametrize("workload_raises", [False, True])
+def test_torch_wrapper_only_pops_successful_launcher_push(
+    monkeypatch, push_succeeds, workload_raises
+):
+    from utils.inject_roctx._backends import torch as torch_backend
+
+    events = []
+    monkeypatch.setattr(
+        torch_backend, "_push_scope", lambda *_a, **_k: events.append("range")
+    )
+    monkeypatch.setattr(torch_backend, "_pop_scope", lambda: events.append("end range"))
+    monkeypatch.setattr(
+        torch_backend.torch_trace_collector,
+        "push_launcher_tid",
+        lambda: events.append("launcher push") or push_succeeds,
+    )
+    monkeypatch.setattr(
+        torch_backend.torch_trace_collector,
+        "pop_launcher_tid",
+        lambda: events.append("launcher pop"),
+    )
+
+    def workload():
+        events.append("workload")
+        if workload_raises:
+            raise ValueError("workload failed")
+        return "result"
+
+    wrapped = torch_backend.roctx_wrapper(workload, publish_launcher_tid=True)
+    if workload_raises:
+        with pytest.raises(ValueError, match="workload failed"):
+            wrapped()
+    else:
+        assert wrapped() == "result"
+    expected = ["range", "launcher push", "workload"]
+    if push_succeeds:
+        expected.append("launcher pop")
+    assert events == expected + ["end range"]
+
+
+def test_failed_nested_launcher_push_preserves_outer_launcher(monkeypatch):
+    from utils.inject_roctx._backends import torch as torch_backend
+
+    launcher_stack = []
+    push_results = iter([True, False])
+    monkeypatch.setattr(torch_backend, "_push_scope", lambda *_a, **_k: None)
+    monkeypatch.setattr(torch_backend, "_pop_scope", lambda: None)
+
+    def push_launcher():
+        pushed = next(push_results)
+        if pushed:
+            launcher_stack.append("outer")
+        return pushed
+
+    monkeypatch.setattr(
+        torch_backend.torch_trace_collector, "push_launcher_tid", push_launcher
+    )
+    monkeypatch.setattr(
+        torch_backend.torch_trace_collector, "pop_launcher_tid", launcher_stack.pop
+    )
+    nested = torch_backend.roctx_wrapper(lambda: None, publish_launcher_tid=True)
+
+    def outer():
+        nested()
+        assert launcher_stack == ["outer"]
+
+    torch_backend.roctx_wrapper(outer, publish_launcher_tid=True)()
+    assert launcher_stack == []
