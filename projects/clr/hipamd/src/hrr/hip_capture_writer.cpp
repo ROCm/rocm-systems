@@ -905,7 +905,9 @@ void write_event_raw(uint16_t api_id, hrr_event_header* hdr, uint32_t payload_le
   // but guarantees exactly one fsync per checkpoint and removes the race.
   {
     BufWriteGuard lk;
-    if (g_events_fd < 0) return;
+    // Shims stay reachable during shutdown through slots another component wrapped,
+    // and the reader would replay a record after the trailer as part of the archive.
+    if (g_events_fd < 0 || g_trailer_written) return;
     hdr->sequence_id = g_seq_id.fetch_add(1, std::memory_order_relaxed);
     buffer_append_locked(hdr, payload_len);
     g_event_count.fetch_add(1, std::memory_order_relaxed);

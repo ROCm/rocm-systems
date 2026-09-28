@@ -1524,8 +1524,9 @@ namespace {
 
 // Other threads keep calling through the live dispatch tables while the shims go
 // in and out, so the tables are written one slot at a time with atomic operations
-// and never copied over as a whole. Function-pointer slots are accessed through a
-// may_alias view so the store is well-defined against the typed table fields.
+// and never copied over as a whole. With GCC and Clang, function-pointer slots are
+// accessed through a may_alias view so the store is well-defined against the typed
+// table fields; MSVC does no type-based alias analysis.
 template <typename Table> constexpr size_t kDispatchSlots =
     (sizeof(Table) - sizeof(size_t)) / sizeof(void*);
 
@@ -1533,36 +1534,37 @@ template <typename Table> constexpr size_t kDispatchSlots =
 struct DispatchSlot {
   void* value;
 } __attribute__((__may_alias__));
-#else
+#elif IS_WINDOWS
 struct DispatchSlot {
   void* value;
 };
+#else
+#error "HRR dispatch slots need GCC, Clang or MSVC"
 #endif
 
 template <typename Table> DispatchSlot* dispatch_slots(Table& table) {
   static_assert(sizeof(void (*)()) == sizeof(void*),
                 "dispatch slot atomics need function pointers the size of void*");
-  static_assert(offsetof(Table, size) == 0 && sizeof(table.size) == sizeof(uint64_t) &&
-                    (sizeof(Table) - sizeof(size_t)) % sizeof(void*) == 0 &&
-                    sizeof(Table) == sizeof(size_t) + kDispatchSlots<Table> * sizeof(void*),
-                "layout must match HIP ComputeTableSize: uint64_t size then void* slots");
+  static_assert(offsetof(Table, size) == 0 && sizeof(table.size) == sizeof(size_t) &&
+                    (sizeof(Table) - sizeof(size_t)) % sizeof(void*) == 0,
+                "layout must match HIP dispatch tables: size_t size then void* slots");
   static_assert(sizeof(DispatchSlot) == sizeof(void*), "DispatchSlot must be a single pointer");
   return reinterpret_cast<DispatchSlot*>(reinterpret_cast<char*>(&table) + sizeof(size_t));
 }
 
 void store_slot(DispatchSlot* slot, void* value) {
-#ifdef _WIN32
+#if IS_WINDOWS
   std::atomic_ref<void*>(slot->value).store(value, std::memory_order_release);
-#else
+#elif defined(__GNUC__) || defined(__clang__)
   __atomic_store_n(&slot->value, value, __ATOMIC_RELEASE);
 #endif
 }
 
 void replace_slot(DispatchSlot* slot, void* expected, void* desired) {
-#ifdef _WIN32
+#if IS_WINDOWS
   std::atomic_ref<void*>(slot->value).compare_exchange_strong(
       expected, desired, std::memory_order_release, std::memory_order_relaxed);
-#else
+#elif defined(__GNUC__) || defined(__clang__)
   __atomic_compare_exchange_n(&slot->value, &expected, desired, false, __ATOMIC_RELEASE,
                               __ATOMIC_RELAXED);
 #endif
