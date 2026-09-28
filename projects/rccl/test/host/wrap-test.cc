@@ -5421,6 +5421,35 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_ForcedCeRegisteredBypassesCtaPol
       });
 }
 
+// The rejecting side of that same guard, which neither test above reaches:
+// the two of them drive one disjunct true each, so the guard as a whole is
+// never false and deleting it would leave both green. Here CTAPolicy is at
+// DEFAULT and force is off, so both disjuncts are false while every other
+// registered-arm input still says yes, and the call has to fall through to
+// the plain kernel. Drop `&& ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO)
+// || force)` and this returns RCCL_CE_REGISTERED instead of NCCL_ALGO_RING.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_CeRegisteredDeclinedWithoutPolicyZeroOrForce) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_CeRegisteredDeclinedWithoutPolicyZeroOrForce",
+      []() {
+        g_loadParam = ForceParam("RCCL_CE_REDUCESCATTER", int64_t(1));
+        ScopedHook ceAvailable(
+            g_ceAvailable,
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
+        ncclComm* comm = MakeSelectComm();
+        comm->nRanks = 4;
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/16, ncclFloat32,
+                                                       ncclSum, /*query=*/false, &decision));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
 // ceReduceScatterOpSupported's OR-chain (Sum||Prod||Min||Max) at
 // rccl_wrap.cc:1906 had only ever been driven through Sum. Each of the other
 // three is driven here on its own, so dropping any single disjunct puts that
