@@ -6,7 +6,7 @@ import json
 import re
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, List, Optional, Sequence
 
 import pandas as pd
 import yaml
@@ -219,23 +219,6 @@ def build_agent_to_gpu_map_from_json(
     return {agent["id"]["handle"]: index for index, agent in enumerate(gpu_agents)}
 
 
-def build_node_to_gpu_map(agents: pd.DataFrame) -> Dict[int, int]:
-    """Map the node ids of a native agents CSV to 0-indexed GPU IDs, in node order."""
-    node_ids = sorted(int(node_id) for node_id in agents["node_id"])
-    return {node_id: index for index, node_id in enumerate(node_ids)}
-
-
-def load_node_to_gpu_map(agents_csv: Path) -> Dict[int, int]:
-    """Read one process's native agents CSV into build_node_to_gpu_map.
-
-    A process that never loaded the GPU runtime writes no agents CSV, so a
-    missing file maps nothing.
-    """
-    if not agents_csv.is_file():
-        return {}
-    return build_node_to_gpu_map(pd.read_csv(agents_csv))
-
-
 @demarcate
 def load_pc_sampling_results(workload_path: str) -> list[dict[str, Any]]:
     """Load valid PC sampling tool records for a workload.
@@ -425,14 +408,18 @@ def _read_counter_rows(workload_dir: Path) -> pd.DataFrame:
     if not result_files:
         return pd.DataFrame()
     frames = [_read_counter_results(result_file) for result_file in result_files]
-    return pd.concat(frames, ignore_index=True)
+    counter_rows = pd.concat(frames, ignore_index=True)
+    # rocpd lists no agents, so number the GPUs that ran dispatches from 0.
+    counter_rows["GPU_ID"] = counter_rows["GPU_ID"].rank(method="dense").astype(int) - 1
+    return counter_rows
 
 
 def _read_native_counter_rows(
     workload_dir: Path,
     artifacts: List[utils_analysis.NativeArtifacts],
 ) -> pd.DataFrame:
-    """Join each process's native CSVs, numbering ids per counter set."""
+    """Join each process's native CSVs, numbering ids per counter set and GPUs
+    from the agents CSVs."""
     counter_sets = []
     for fbase in sorted({artifact.fbase for artifact in artifacts}):
         processes = [
@@ -454,6 +441,13 @@ def _read_native_counter_rows(
         )
 
     counter_rows = pd.concat(counter_sets, ignore_index=True)
+    gpu_ids = utils_analysis.number_gpus_by_node(
+        pd.concat(
+            [_read_profiling_csv(artifact.agents) for artifact in artifacts],
+            ignore_index=True,
+        )
+    )
+    counter_rows["GPU_ID"] = counter_rows["GPU_ID"].map(gpu_ids)
     if counter_rows.empty:
         console_error(
             "profiling",

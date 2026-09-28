@@ -126,7 +126,6 @@ rocprofiler_status_t collect_gpu_agents(rocprofiler_agent_version_t /*version*/,
             continue;
 
         gpu_agents[agent->id.handle] = agent_record_t{agent->node_id,
-                                                      agent->logical_node_id,
                                                       agent->name ? agent->name : "",
                                                       agent->product_name ? agent->product_name : ""};
     }
