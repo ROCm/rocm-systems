@@ -44,6 +44,7 @@ ncclResult_t IbCastPortRecoveryQpsRestoreAinic(struct ncclIbPortRecoveryContext*
     IbCastBuildDataQpCreateAttr(recoveryContext->resCtx->baseComm, recoveryContext->devIndex, &createAttr);
     createAttr.channelId = localQp->channelId;
     createAttr.isDataQp = localQp->isDataQp;
+    createAttr.qpIndexInDev = qpIndex / recoveryContext->resCtx->baseComm->vProps.ndevs;
     // isCtsEnabled and ctsQpSlot are left at 0 (from memset in IbCastBuildDataQpCreateAttr).
     // CTS offload is disabled when resiliency features are enabled (init.cc).
     // TODO - QP sharing:
