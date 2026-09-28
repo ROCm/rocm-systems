@@ -560,6 +560,97 @@ struct mock_sdk
         }
     }
 
+    // ─── Members required by domains::callback::k_rccl ──────────────────────────────
+    using nccl_data_type_t = int;
+    using nccl_comm_t      = void*;
+    using nccl_result_t    = int;
+
+    // NOLINTBEGIN(readability-identifier-naming)
+    static constexpr nccl_result_t    NCCL_SUCCESS                   = 0;
+    static constexpr nccl_data_type_t NCCL_INT8                      = 0;
+    static constexpr nccl_data_type_t NCCL_UINT8                     = 1;
+    static constexpr nccl_data_type_t NCCL_FLOAT16                   = 2;
+    static constexpr nccl_data_type_t NCCL_BFLOAT16                  = 3;
+    static constexpr nccl_data_type_t NCCL_INT32                     = 4;
+    static constexpr nccl_data_type_t NCCL_UINT32                    = 5;
+    static constexpr nccl_data_type_t NCCL_FLOAT32                   = 6;
+    static constexpr nccl_data_type_t NCCL_INT64                     = 7;
+    static constexpr nccl_data_type_t NCCL_UINT64                    = 8;
+    static constexpr nccl_data_type_t NCCL_FLOAT64                   = 9;
+    static constexpr bool             k_are_nccl_fp8_types_available = false;
+
+    using rccl_api_id_t                                          = std::size_t;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclAllGather     = 0;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclAllToAll      = 1;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclAllReduce     = 2;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclGather        = 3;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclRecv          = 4;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclReduce        = 5;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclBroadcast     = 6;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclReduceScatter = 7;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclSend          = 8;
+    // NOLINTEND(readability-identifier-naming)
+
+    struct rccl_arg_with_count
+    {
+        nccl_comm_t      comm     = nullptr;
+        nccl_data_type_t datatype = NCCL_INT8;
+        std::size_t      count    = 0;
+    };
+    struct rccl_arg_with_sendcount
+    {
+        nccl_comm_t      comm      = nullptr;
+        nccl_data_type_t datatype  = NCCL_INT8;
+        std::size_t      sendcount = 0;
+    };
+    struct rccl_arg_with_recvcount
+    {
+        nccl_comm_t      comm      = nullptr;
+        nccl_data_type_t datatype  = NCCL_INT8;
+        std::size_t      recvcount = 0;
+    };
+
+    // Mirrors the shape of rocprofiler_rccl_api_args_t: each collective exposes only the
+    // count member the real RCCL API uses for it, so extract_event_info's
+    // if-constexpr(requires{event.count/.sendcount/.recvcount}) branching is exercised
+    // exactly like production.
+    struct rccl_api_args_t
+    {
+        rccl_arg_with_sendcount ncclAllGather;
+        rccl_arg_with_count     ncclAllToAll;
+        rccl_arg_with_count     ncclAllReduce;
+        rccl_arg_with_sendcount ncclGather;
+        rccl_arg_with_count     ncclRecv;
+        rccl_arg_with_count     ncclReduce;
+        rccl_arg_with_count     ncclBroadcast;
+        rccl_arg_with_recvcount ncclReduceScatter;
+        rccl_arg_with_count     ncclSend;
+    };
+
+    struct rccl_api_data
+    {
+        rccl_api_args_t args;
+    };
+
+    [[nodiscard]] static constexpr std::size_t rccl_type_size(
+        nccl_data_type_t datatype) noexcept
+    {
+        switch(datatype)
+        {
+            case NCCL_INT8:
+            case NCCL_UINT8: return 1;
+            case NCCL_FLOAT16:
+            case NCCL_BFLOAT16: return 2;
+            case NCCL_INT32:
+            case NCCL_UINT32:
+            case NCCL_FLOAT32: return 4;
+            case NCCL_INT64:
+            case NCCL_UINT64:
+            case NCCL_FLOAT64: return 8;
+            default: return 0;
+        }
+    }
+
     static void create_context(context_id_t* context) { g_mock->create_context(context); }
     static void start_context(context_id_t context) { g_mock->start_context(context); }
 
