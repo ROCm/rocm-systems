@@ -16,11 +16,17 @@ on:
     branches: [develop]
     paths:
       - 'projects/amdsmi/**'
+      # libamd_smi compiles shared/cuid and shared/sha256 in-tree.
+      - 'shared/cuid/**'
+      - 'shared/sha256/**'
       - '.github/workflows/amdsmi-build.yml'
   push:
     branches: [develop]
     paths:
       - 'projects/amdsmi/**'
+      # libamd_smi compiles shared/cuid and shared/sha256 in-tree.
+      - 'shared/cuid/**'
+      - 'shared/sha256/**'
       - '.github/workflows/amdsmi-build.yml'
   workflow_dispatch:
 
@@ -55,11 +61,14 @@ jobs:
 
     steps:
       # rocm-systems is a large monorepo; the wheel gate only needs the amdsmi
-      # project and this workflow, so sparse-checkout keeps the fetch cheap.
+      # project, the CUID sources it builds in-tree and this workflow, so
+      # sparse-checkout keeps the fetch cheap.
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: |
             projects/amdsmi
+            shared/cuid
+            shared/sha256
             .github/workflows
 
       - name: Mark workspace safe for git
@@ -185,12 +194,25 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends git python3 ca-certificates
 
-      # rocm-systems is a large monorepo; only the amdsmi project and this
-      # workflow are needed, so sparse-checkout keeps the fetch cheap.
+      # Container images ship no machine-id, and without one libamdcuid gives
+      # a GPU the driver does not name no CUID at all, so the CUID tests would
+      # only see the refusal. A random one is what systemd writes on first boot.
+      - name: Give the container a machine-id
+        run: |
+          set -euo pipefail
+          if ! grep -qE '^[0-9a-f]{32}$' /etc/machine-id 2>/dev/null; then
+            tr -d '-' < /proc/sys/kernel/random/uuid > /etc/machine-id
+          fi
+
+      # rocm-systems is a large monorepo; only the amdsmi project, the CUID
+      # sources it builds in-tree and this workflow are needed, so
+      # sparse-checkout keeps the fetch cheap.
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: |
             projects/amdsmi
+            shared/cuid
+            shared/sha256
             .github/workflows
 
       - name: Mark workspace safe for git

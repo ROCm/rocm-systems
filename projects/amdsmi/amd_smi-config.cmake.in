@@ -7,6 +7,56 @@
 @PACKAGE_INIT@
 get_filename_component(AMD_SMI_CMAKE_DIR "${CMAKE_CURRENT_LIST_FILE}" PATH)
 
+# A nested find_package overwrites PACKAGE_PREFIX_DIR on CMake <= 3.29.
+set(_amd_smi_package_prefix_dir "${PACKAGE_PREFIX_DIR}")
+
+# The static library links Threads::Threads PRIVATE and, built against an
+# installed libamdcuid, amdcuid::amdcuid, which it exports as $<LINK_ONLY:...>.
+# The shared library exports neither, so each is looked up quietly and a miss
+# is charged to the static component below. FindThreads, which amdcuid's own
+# config also calls, needs C or CXX enabled, and superbuilds resolve packages
+# before project() enables any language. libamdcuid installs under
+# ${ROCM_DIR}/core, which config-mode search does not reach from ${ROCM_DIR}.
+set(_amd_smi_static_usable TRUE)
+if(@AMDSMI_PACKAGE_HAS_STATIC@)
+    get_property(_amd_smi_languages GLOBAL PROPERTY ENABLED_LANGUAGES)
+    if(NOT "C" IN_LIST _amd_smi_languages AND NOT "CXX" IN_LIST _amd_smi_languages)
+        set(_amd_smi_static_usable FALSE)
+        set(_amd_smi_static_message
+            "The static amd_smi library links Threads::Threads, which needs C or CXX enabled. "
+            "Call find_package(amd_smi) after project() or enable_language() to use it."
+        )
+    else()
+        find_package(Threads QUIET)
+        if(NOT Threads_FOUND)
+            set(_amd_smi_static_usable FALSE)
+            set(_amd_smi_static_message
+                "The static amd_smi library links Threads::Threads, but no thread library was found."
+            )
+        elseif(@AMDSMI_CUID_NEEDS_FIND_DEPENDENCY@)
+            find_package(
+                amdcuid
+                @AMDSMI_AMDCUID_MIN_VERSION@
+                CONFIG
+                QUIET
+                HINTS "${_amd_smi_package_prefix_dir}/core" "@AMDCUID_HINT_DIR@"
+            )
+            if(NOT amdcuid_FOUND)
+                set(_amd_smi_static_usable FALSE)
+                set(_amd_smi_static_message
+                    "The static amd_smi library links amdcuid::amdcuid, but no amdcuid @AMDSMI_AMDCUID_MIN_VERSION@ CMake package "
+                    "was found on CMAKE_PREFIX_PATH, in ${_amd_smi_package_prefix_dir}/core or in @AMDCUID_HINT_DIR@. "
+                    "Add the amdcuid install prefix to CMAKE_PREFIX_PATH or set amdcuid_DIR."
+                )
+            endif()
+        endif()
+    endif()
+    unset(_amd_smi_languages)
+endif()
+
+set(PACKAGE_PREFIX_DIR "${_amd_smi_package_prefix_dir}")
+unset(_amd_smi_package_prefix_dir)
+
 set_and_check(amd_smi_INCLUDE_DIR "@PACKAGE_CMAKE_INSTALL_INCLUDEDIR@")
 set_and_check(AMD_SMI_INCLUDE_DIR "@PACKAGE_CMAKE_INSTALL_INCLUDEDIR@")
 set_and_check(AMD_SMI_INCLUDE_DIRS "@PACKAGE_CMAKE_INSTALL_INCLUDEDIR@")
@@ -23,5 +73,25 @@ endif()
 # TODO: Need to check if OAM libraries are needed here!
 set(AMD_SMI_LIBRARIES amd_smi)
 set(AMD_SMI_LIBRARY amd_smi)
+
+# Components shared and static name the two libraries. Without its
+# dependencies the static one is not found: a package with no shared library
+# then fails outright, and one with both fails only for COMPONENTS static. A
+# consumer that links amd_smi_static without asking for it gets CMake's
+# generate-time error naming the missing target.
+set(amd_smi_shared_FOUND @AMDSMI_PACKAGE_HAS_SHARED@)
+set(amd_smi_static_FOUND FALSE)
+if(@AMDSMI_PACKAGE_HAS_STATIC@)
+    set(amd_smi_static_FOUND ${_amd_smi_static_usable})
+endif()
+
+if(NOT _amd_smi_static_usable)
+    string(CONCAT amd_smi_NOT_FOUND_MESSAGE ${_amd_smi_static_message})
+    if(NOT amd_smi_shared_FOUND)
+        set(amd_smi_FOUND FALSE)
+    endif()
+endif()
+unset(_amd_smi_static_usable)
+unset(_amd_smi_static_message)
 
 check_required_components(amd_smi)

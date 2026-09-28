@@ -18,6 +18,11 @@ on:
       - '!projects/amdsmi/docs/**'
       - '!projects/amdsmi/**/*.md'
       - '!projects/amdsmi/**/*.rst'
+      # libamd_smi compiles shared/cuid and shared/sha256 in-tree.
+      - 'shared/cuid/**'
+      - '!shared/cuid/docs/**'
+      - '!shared/cuid/openspec/**'
+      - 'shared/sha256/**'
       - '.github/workflows/amdsmi-manylinux-build.yml'
   push:
     branches: [develop]
@@ -26,6 +31,11 @@ on:
       - '!projects/amdsmi/docs/**'
       - '!projects/amdsmi/**/*.md'
       - '!projects/amdsmi/**/*.rst'
+      # libamd_smi compiles shared/cuid and shared/sha256 in-tree.
+      - 'shared/cuid/**'
+      - '!shared/cuid/docs/**'
+      - '!shared/cuid/openspec/**'
+      - 'shared/sha256/**'
       - '.github/workflows/amdsmi-manylinux-build.yml'
   workflow_dispatch:
 
@@ -76,11 +86,14 @@ jobs:
 
     steps:
       # rocm-systems is a large monorepo; the wheel build only needs the amdsmi
-      # project, so sparse-checkout keeps the fetch cheap.
+      # project and the CUID sources it builds in-tree, so sparse-checkout keeps
+      # the fetch cheap.
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: |
             projects/amdsmi
+            shared/cuid
+            shared/sha256
             .github/workflows
 
       - name: Install Debian build prerequisites
