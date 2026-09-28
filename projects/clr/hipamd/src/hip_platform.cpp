@@ -434,7 +434,7 @@ hipError_t hipLaunchByPtr(const void* hostFunction) {
   static constexpr LaunchErrorRule kRules[] = {
       {kConfigBits | kBlockExceedsMaxWG, hipErrorInvalidValue},
   };
-  hipError_t status = MapLaunchViolations(launch_params.violations_, kRules);
+  hipError_t status = launch_params.Validate(kRules);
   if (status != hipSuccess) {
     HIP_RETURN(status);
   }

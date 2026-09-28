@@ -344,7 +344,7 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const LaunchParams& launch
       {kSharedMemExceedsMax | kSharedMemOverflow, hipErrorInvalidValue},
       {kBlockExceedsMaxWG,                        hipErrorInvalidConfiguration},
   };
-  hipError_t status = MapLaunchViolations(launch_params.violations_, kValidateRules);
+  hipError_t status = launch_params.Validate(kValidateRules);
   if (status != hipSuccess) {
     return status;
   }
@@ -644,7 +644,7 @@ hipError_t hipModuleLaunchKernel(hipFunction_t f, uint32_t gridDimX, uint32_t gr
       {kZeroGlobal,                               hipErrorInvalidValue},
       {kZeroBlock,                                hipErrorInvalidValue},
   };
-  hipError_t status = MapLaunchViolations(launch_params.violations_, kRules);
+  hipError_t status = launch_params.Validate(kRules);
   if (status != hipSuccess) {
     HIP_RETURN(status);
   }
@@ -685,7 +685,7 @@ hipError_t hipExtModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX,
       {kZeroGlobal,                                   hipErrorInvalidValue},
       // kZeroBlock needs no rule of its own, it is folded into the first rule above.
   };
-  hipError_t status = MapLaunchViolations(launch_params.violations_, kRules);
+  hipError_t status = launch_params.Validate(kRules);
   if (status != hipSuccess) {
     HIP_RETURN(status);
   }
@@ -744,7 +744,7 @@ hipError_t hipModuleLaunchCooperativeKernel(hipFunction_t f, unsigned int gridDi
       {kZeroGlobal,                               hipErrorInvalidValue},
       {kZeroBlock,                                hipErrorInvalidValue},
   };
-  hipError_t status = MapLaunchViolations(launch_params.violations_, kRules);
+  hipError_t status = launch_params.Validate(kRules);
   if (status != hipSuccess) {
     HIP_RETURN(status);
   }
@@ -847,7 +847,7 @@ hipError_t ihipModuleLaunchCooperativeKernelMultiDevice(hipFunctionLaunchParams*
     static constexpr LaunchErrorRule kRules[] = {
         {kConfigBits, hipErrorInvalidConfiguration},
     };
-    hipError_t status = MapLaunchViolations(launch_params.violations_, kRules);
+    hipError_t status = launch_params.Validate(kRules);
     if (status != hipSuccess) {
       return status;
     }
@@ -984,7 +984,7 @@ hipError_t hipLaunchCooperativeKernel_common(const void* f, dim3 gridDim, dim3 b
       {kConfigBits | kBlockExceedsMaxWG,          hipErrorInvalidConfiguration},
       {kSharedMemExceedsMax | kSharedMemOverflow, hipErrorCooperativeLaunchTooLarge},
   };
-  hipError_t status = MapLaunchViolations(launch_params.violations_, kRules);
+  hipError_t status = launch_params.Validate(kRules);
   if (status != hipSuccess) {
     return status;
   }
@@ -1459,7 +1459,7 @@ hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f
   static constexpr LaunchErrorRule kRules[] = {
       {kConfigBits, hipErrorInvalidConfiguration},
   };
-  hipError_t configStatus = MapLaunchViolations(launch_params.violations_, kRules);
+  hipError_t configStatus = launch_params.Validate(kRules);
   if (configStatus != hipSuccess) {
     HIP_RETURN(configStatus);
   }
