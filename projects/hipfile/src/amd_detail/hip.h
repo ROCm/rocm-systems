@@ -56,10 +56,18 @@ hipAmdFileWrite_t getHipAmdFileWritePtr();
 struct Hip {
     virtual ~Hip() = default;
     virtual hipPointerAttribute_t hipPointerGetAttributes(const void *ptr) const;
-    virtual void     hipMemcpy(void *dst, const void *src, size_t sizeBytes, hipMemcpyKind kind) const;
-    virtual void     hipStreamSynchronize(hipStream_t stream) const;
+    virtual void        hipMemcpy(void *dst, const void *src, size_t sizeBytes, hipMemcpyKind kind) const;
+    virtual void        hipMemcpyWithStream(void *dst, const void *src, size_t sizeBytes, hipMemcpyKind kind,
+                                            hipStream_t stream) const;
+    virtual void        hipStreamSynchronize(hipStream_t stream) const;
+    virtual hipStream_t hipStreamCreateWithFlags(unsigned int flags) const;
+    virtual void        hipStreamDestroy(hipStream_t stream) const;
+    virtual void     hipStreamWaitValue64(hipStream_t stream, void *ptr, uint64_t value, unsigned int flags,
+                                          uint64_t mask) const;
     virtual void    *hipHostMalloc(size_t size, unsigned int flags) const;
     virtual void     hipHostFree(void *ptr) const;
+    virtual void    *hipExtMallocWithFlags(size_t size, unsigned int flags) const;
+    virtual void     hipFree(void *ptr) const;
     virtual void    *hipHostGetDevicePointer(void *hstPtr, unsigned int flags) const;
     virtual int      hipRuntimeGetVersion() const;
     virtual void    *hipGetProcAddress(const char *symbol, int hipVersion, uint64_t flags,
