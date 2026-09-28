@@ -713,7 +713,7 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
 
     state::thread::set(state::thread::Disabled);
     auto  blocked = get_sampling_signals();
-    auto  promise = (active) ? std::make_shared<std::promise<void>>() : promise_t{};
+    auto  promise = active ? std::make_shared<std::promise<void>>() : promise_t{};
     auto  config  = wrapper_config{ .enable_causal   = enable_causal,
                                     .enable_sampling = enable_sampling,
                                     .offset          = offset,

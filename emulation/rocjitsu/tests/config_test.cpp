@@ -10,8 +10,10 @@
 #include "checkpoint_generated.h"
 #include "embedded_schema.h"
 #include "rocjitsu/config/checkpoint.h"
+#include "rocjitsu/config/config_common.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/config/dbt_guest_config.h"
+#include "rocjitsu/config/effective_config.h"
 #include "rocjitsu/config/pci_device_config.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
@@ -1167,6 +1169,68 @@ TEST(ConfigLoaderTest, RoundTripsRuntimeConfigHandoff) {
   EXPECT_EQ(parsed->config_path, "/tmp/config.json");
   ASSERT_TRUE(parsed->resolved_gpu_id);
   EXPECT_EQ(*parsed->resolved_gpu_id, "28851");
+}
+
+TEST(EffectiveConfigTest, ReplacesTheBudgetAndLeavesEveryOtherFieldAsWritten) {
+  const std::string json = R"({
+  "max_ticks": 4,
+  "cpu_thread_budget": 32,
+  "num_threads": 2
+})";
+
+  EXPECT_EQ(config::json_with_cpu_thread_budget(json, 4), R"({
+  "max_ticks": 4,
+  "cpu_thread_budget": 4,
+  "num_threads": 2
+})");
+}
+
+TEST(EffectiveConfigTest, AddsTheBudgetToConfigsThatDoNotAskForOne) {
+  EXPECT_EQ(config::json_with_cpu_thread_budget("{}", 8), R"({"cpu_thread_budget": 8})");
+  EXPECT_EQ(config::json_with_cpu_thread_budget(R"({"num_threads": 2})", 8),
+            R"({"cpu_thread_budget": 8,"num_threads": 2})");
+}
+
+// The nested name is an unknown field the config parser discards, so only the scanner
+// can tell the two apart -- and picking the wrong one would silently launch under the
+// config's own budget instead of the requested one.
+TEST(EffectiveConfigTest, SetsTheTopLevelBudgetAndNotANestedFieldOfTheSameName) {
+  EXPECT_EQ(config::json_with_cpu_thread_budget(R"({"vm": {"cpu_thread_budget": 1}})", 6),
+            R"({"cpu_thread_budget": 6,"vm": {"cpu_thread_budget": 1}})");
+}
+
+TEST(EffectiveConfigTest, AcceptsTheCommentsAndBareKeysTheConfigParserAccepts) {
+  EXPECT_EQ(config::json_with_cpu_thread_budget("{\n  // ceiling\n  cpu_thread_budget: 32\n}", 2),
+            "{\n  // ceiling\n  cpu_thread_budget: 2\n}");
+}
+
+TEST(EffectiveConfigTest, RejectsInputThatIsNotASimulationConfigObject) {
+  EXPECT_THROW((void)config::json_with_cpu_thread_budget("[1]", 1), std::runtime_error);
+}
+
+TEST(EffectiveConfigTest, WritesTheLaunchCopyBesideTheInvocationHandoff) {
+  const test::ScopedTempDirectory runtime("rocjitsu-effective-config-");
+  test::ScopedEnvironmentVariable runtime_dir("ROCJITSU_RUNTIME_DIR", runtime.path());
+  const std::string source = test::config_path("gfx942_cdna3.json");
+  const std::string source_before = config::read_config_file(source);
+
+  const std::string copy = config::write_effective_config(source, 12, getpid());
+
+  EXPECT_EQ(copy, rocjitsu::rpc_invocation_runtime_dir(getpid()) + "/effective_config.json");
+  EXPECT_EQ(config::read_config_file(source), source_before);
+  EXPECT_EQ(config::load_execution_thread_settings(copy, rocjitsu::kEmbeddedSchema).request.budget,
+            12u);
+}
+
+TEST(EffectiveConfigTest, ReportsAnUnwritableRuntimeDirectory) {
+  const test::ScopedTempDirectory runtime("rocjitsu-effective-config-write-failure-");
+  const std::filesystem::path blocked_root = std::filesystem::path(runtime.path()) / "blocked";
+  std::ofstream(blocked_root) << "not a directory";
+  test::ScopedEnvironmentVariable runtime_dir("ROCJITSU_RUNTIME_DIR", blocked_root.string());
+
+  EXPECT_THROW(
+      (void)config::write_effective_config(test::config_path("gfx942_cdna3.json"), 12, getpid()),
+      std::runtime_error);
 }
 
 TEST(ConfigLoaderTest, RejectsUnresolvedAutomaticDbtHandoffWrite) {

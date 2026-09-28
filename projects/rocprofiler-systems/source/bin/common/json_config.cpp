@@ -98,19 +98,19 @@ json_value_to_string(const nlohmann::json& val)
     {
         return val.get<std::string>();
     }
-    else if(val.is_boolean())
+    if(val.is_boolean())
     {
         return val.get<bool>() ? "true" : "false";
     }
-    else if(val.is_number_integer())
+    if(val.is_number_integer())
     {
         return std::to_string(val.get<std::int64_t>());
     }
-    else if(val.is_number_float())
+    if(val.is_number_float())
     {
         return std::to_string(val.get<double>());
     }
-    else if(val.is_array())
+    if(val.is_array())
     {
         std::string result;
         for(const auto& item : val)
