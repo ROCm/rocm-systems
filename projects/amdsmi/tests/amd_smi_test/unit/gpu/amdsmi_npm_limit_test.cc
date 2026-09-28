@@ -149,6 +149,9 @@ TEST(GpuUnit, SetNpmLimitRootSuccessWritesValue) {
   }
 
   TempBoardDir board;
+  // NPM must be enabled on this node now that rsmi_dev_npm_limit_set()
+  // rejects the write outright when it is not.
+  board.WriteFile("npm_status", "enabled");
   // max_node_power_limit must be present and >= the requested limit now that
   // rsmi_dev_npm_limit_set() range-checks against it before writing (mirrors
   // rsmi_dev_power_cap_set()'s range_get()-before-write pattern).
@@ -160,6 +163,35 @@ TEST(GpuUnit, SetNpmLimitRootSuccessWritesValue) {
 
   EXPECT_EQ(amdsmi_set_npm_limit(handle, 250), AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(board.ReadFile("cur_node_power_limit"), "250");
+}
+
+// ---------------------------------------------------------------------
+// amdsmi_set_npm_limit() -- NPM-disabled enforcement
+//
+// rsmi_dev_npm_limit_set() rejects the write outright when NPM is disabled
+// on the node (before even reading the platform max): writing
+// cur_node_power_limit while NPM is disabled has no defined effect.
+// ---------------------------------------------------------------------
+
+TEST(GpuUnit, SetNpmLimitRootRejectsWhenNpmDisabled) {
+  ScopedAmdSmiInit init;
+  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+
+  if (!amd::smi::is_sudo_user()) {
+    GTEST_SKIP_("Invalid permission - Must run as super user");
+  }
+
+  TempBoardDir board;
+  board.WriteFile("npm_status", "disabled");
+  board.WriteFile("max_node_power_limit", "6400");
+  board.WriteFile("cur_node_power_limit", "0");
+  std::string board_path = board.path().string();
+  amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
+  ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
+
+  EXPECT_EQ(amdsmi_set_npm_limit(handle, 250), AMDSMI_STATUS_INVAL);
+  // The write must not have happened.
+  EXPECT_EQ(board.ReadFile("cur_node_power_limit"), "0");
 }
 
 // ---------------------------------------------------------------------
@@ -181,6 +213,7 @@ TEST(GpuUnit, SetNpmLimitRootRejectsZero) {
   }
 
   TempBoardDir board;
+  board.WriteFile("npm_status", "enabled");
   board.WriteFile("max_node_power_limit", "6400");
   board.WriteFile("cur_node_power_limit", "6000");
   std::string board_path = board.path().string();
@@ -201,6 +234,7 @@ TEST(GpuUnit, SetNpmLimitRootRejectsOverMax) {
   }
 
   TempBoardDir board;
+  board.WriteFile("npm_status", "enabled");
   board.WriteFile("max_node_power_limit", "6400");
   board.WriteFile("cur_node_power_limit", "6000");
   std::string board_path = board.path().string();
@@ -221,6 +255,7 @@ TEST(GpuUnit, SetNpmLimitRootRejectsWhenMaxUnreadable) {
   }
 
   TempBoardDir board;
+  board.WriteFile("npm_status", "enabled");
   // Deliberately do not create max_node_power_limit: the platform max is
   // unreadable, so the request must be rejected (fail closed) rather than
   // falling through to an unbounded write.
@@ -252,6 +287,7 @@ TEST(GpuUnit, SetNpmLimitRootRejectsWhenMaxCorrupted) {
   // treated as unreadable (fail closed), exactly like the missing-file case
   // in SetNpmLimitRootRejectsWhenMaxUnreadable above, not silently accepted
   // as UINT64_MAX.
+  board.WriteFile("npm_status", "enabled");
   board.WriteFile("max_node_power_limit", "-1");
   board.WriteFile("cur_node_power_limit", "6000");
   std::string board_path = board.path().string();
@@ -277,6 +313,7 @@ TEST(GpuUnit, SetNpmLimitRootAcceptsInRange) {
   }
 
   TempBoardDir board;
+  board.WriteFile("npm_status", "enabled");
   board.WriteFile("max_node_power_limit", "6400");
   board.WriteFile("cur_node_power_limit", "0");
   std::string board_path = board.path().string();
@@ -296,6 +333,7 @@ TEST(GpuUnit, SetNpmLimitRootMissingFileIsNotSupported) {
   }
 
   TempBoardDir board;
+  board.WriteFile("npm_status", "enabled");
   // max_node_power_limit present (so the new range check itself succeeds),
   // but cur_node_power_limit deliberately absent -- exercises the write-time
   // NOT_SUPPORTED path in set_npm_board_limit(), distinct from

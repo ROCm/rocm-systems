@@ -3102,7 +3102,11 @@ Description: Set the NPM (Node Power Management) power limit for the node
 associated with `node_handle` by writing to the board's
 `cur_node_power_limit` sysfs interface.
 
-This function validates `limit` against the platform max bound
+This function rejects the request with `AmdSmiLibraryException`
+(`AMDSMI_STATUS_INVAL`) if NPM is disabled on the node
+(`amdsmi_get_npm_info()`'s `status` == `AMDSMI_NPM_STATUS_DISABLED`), since
+writing `board/cur_node_power_limit` while NPM is disabled has no defined
+effect. It also validates `limit` against the platform max bound
 (`amdsmi_get_npm_info()`'s `max_node_power_limit`, sourced from
 `board/max_node_power_limit`) internally before ever issuing the write,
 raising `AmdSmiLibraryException` with `AMDSMI_STATUS_INVAL` if `limit` is `0`
@@ -3110,12 +3114,10 @@ or greater than that bound. If the platform max bound itself cannot be read
 (e.g. the sysfs interface is missing or returns unexpected data), this
 function fails closed and raises that underlying error rather than silently
 allowing an unbounded `limit` through. The amd-smi CLI's
-`set --node-power-limit` additionally performs the same range check itself
-ahead of calling this function, purely to fail fast and present a friendlier,
+`set --node-power-limit` additionally performs the same checks itself ahead
+of calling this function, purely to fail fast and present a friendlier,
 earlier user-facing error message; it is not the only validation and is not
-required for correctness. The CLI also rejects the request up front if NPM
-itself is disabled on the node (`amdsmi_npm_info_t::status ==
-AMDSMI_NPM_STATUS_DISABLED`) -- this function does not perform that check.
+required for correctness.
 
 Input parameters:
 

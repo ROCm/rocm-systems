@@ -3263,6 +3263,9 @@ class AMDSMIHelpers:
         (amdsmi_npm_info_t::status == AMDSMI_NPM_STATUS_DISABLED) -- there is no
         max bound to validate against in that case, and writing
         board/cur_node_power_limit while NPM is disabled has no defined effect.
+        Same fail-fast pattern as the max-bound check above: amdsmi_set_npm_limit()
+        itself already enforces this too, so this is a CLI-friendly early exit,
+        not the sole enforcement.
 
         Fails closed when the platform max is unavailable ("N/A"): rather than
         allowing any positive value through in that degraded-driver scenario, the

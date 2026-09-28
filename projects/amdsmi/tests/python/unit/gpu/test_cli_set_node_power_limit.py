@@ -716,11 +716,9 @@ class TestNodePowerLimitGuestRegistration(unittest.TestCase):
         )
         argv = ["amd-smi", "set", "--node-power-limit", "100", "--gpu", "0"]
 
-        with (
-            mock.patch.object(sys, "argv", argv),
-            contextlib.redirect_stderr(io.StringIO()) as stderr,
-            self.assertRaises(SystemExit) as raised,
-        ):
+        with mock.patch.object(sys, "argv", argv), contextlib.redirect_stderr(
+            io.StringIO()
+        ) as stderr, self.assertRaises(SystemExit) as raised:
             parser.error("argument --cpu: not allowed with argument --gpu/-g")
 
         self.assertEqual(raised.exception.code, 2)
@@ -738,11 +736,9 @@ class TestNodePowerLimitGuestRegistration(unittest.TestCase):
         )
         argv = ["amd-smi", "set", "--node-power-limit", "100", "--gpu"]
 
-        with (
-            mock.patch.object(sys, "argv", argv),
-            contextlib.redirect_stderr(io.StringIO()) as stderr,
-            self.assertRaises(SystemExit) as raised,
-        ):
+        with mock.patch.object(sys, "argv", argv), contextlib.redirect_stderr(
+            io.StringIO()
+        ) as stderr, self.assertRaises(SystemExit) as raised:
             parser.error("argument --gpu/-g: expected at least one argument")
 
         self.assertEqual(raised.exception.code, 2)
@@ -759,11 +755,9 @@ class TestNodePowerLimitGuestRegistration(unittest.TestCase):
         )
         argv = ["amd-smi", "set", "--node-power-limit", "100", "--gpu", "0", "--power-cap"]
 
-        with (
-            mock.patch.object(sys, "argv", argv),
-            contextlib.redirect_stderr(io.StringIO()) as stderr,
-            self.assertRaises(SystemExit) as raised,
-        ):
+        with mock.patch.object(sys, "argv", argv), contextlib.redirect_stderr(
+            io.StringIO()
+        ) as stderr, self.assertRaises(SystemExit) as raised:
             parser.error("argument -o/--power-cap: expected at least one argument")
 
         self.assertEqual(raised.exception.code, 2)

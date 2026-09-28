@@ -3322,6 +3322,27 @@ rsmi_status_t rsmi_dev_npm_limit_set(uint32_t dv_ind, uintptr_t node_handle, uin
     return RSMI_STATUS_INVALID_ARGS;
   }
 
+  // Reject the write outright when NPM is disabled on this node: writing
+  // board/cur_node_power_limit has no defined effect in that state. This is
+  // the authoritative check -- the CLI's own pre-check (amdsmi_helpers.py)
+  // is a fail-fast convenience for that one caller, not a substitute for
+  // enforcing this here for every caller of rsmi_dev_npm_limit_set().
+  bool npm_enabled = false;
+  rsmi_status_t status_ret = amd::smi::get_npm_board_status(*board_path_str, &npm_enabled);
+  if (status_ret != RSMI_STATUS_SUCCESS) {
+    ss << __PRETTY_FUNCTION__
+       << " | get_npm_board_status failed: " << getRSMIStatusString(status_ret, false)
+       << " -> rejecting write (fail closed)";
+    LOG_ERROR(ss);
+    return status_ret;
+  }
+  if (!npm_enabled) {
+    ss << __PRETTY_FUNCTION__ << " | NPM disabled on this node -> returning "
+       << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS);
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
   // Mirror rsmi_dev_power_cap_set(): query the platform bound before ever
   // touching sysfs, and reject out-of-range requests with
   // RSMI_STATUS_INVALID_ARGS. Fail closed if the bound itself can't be
