@@ -1340,6 +1340,11 @@
           }
         },
         {
+          "name": "CeReduceScatterEligibilityTest",
+          "description": "CE ReduceScatter eligibility and staging-layout tests.",
+          "test_filter": "CeReduceScatterEligibilityTest.*:RcclCeReduceScatterEligibility.*"
+        },
+        {
           "name": "DdaFabricEligibilityTest",
           "description": "DDA fabric eligibility tests for AllReduce, AllGather, ReduceScatter, AlltoAll across LL/LL128/VMM tiers on gfx1250",
           "test_filter": "DdaFabricEligibilityTest.*:DdaFabricLL128EligibilityTest.*"

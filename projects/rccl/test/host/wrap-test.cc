@@ -4685,12 +4685,11 @@ TEST(WrapMicrotestIsolated, SelectAllGather_PlainKernelFallbackReportsGetAlgoInf
 }
 
 // ===========================================================================
-// rcclSelectReduceScatter -- rccl_wrap.cc:1206-1317. Own priority order:
-// symmetric (op sum OR avg -- distinct from AllReduce's sum-only) -> DDA
-// (gfx1250 fabric may preempt symmetric eligibility, IPC stays strictly
-// gated on !symEligible) -> Hierarchical -> Direct -> symmetric (reported)
-// -> plain kernel. NO CE step anywhere -- confirmed empirically below, not
-// just by absence of a CE call in the source.
+// rcclSelectReduceScatter in rccl_wrap.cc. Own priority order:
+// symmetric (op sum OR avg -- distinct from AllReduce's sum-only) -> CE 2-shot
+// when RCCL_CE_REDUCESCATTER=1 and staging exists -> enqueue CE while staging
+// is still null -> DDA -> Hierarchical -> Direct -> symmetric (reported)
+// -> plain kernel. With the flag at its default of 0, CE is not selected.
 // ===========================================================================
 
 TEST(WrapMicrotestIsolated, SelectReduceScatter_SymmetricGatedOnSumOrAvgOpOnly) {
@@ -5173,17 +5172,13 @@ TEST(WrapMicrotestIsolated, HierarchicalAlgoInfo_ReduceScatterIntraNeverUsesDire
 }
 
 // ===========================================================================
-// Back to rcclSelectReduceScatter (rccl_wrap.cc:1206-1317) for three cases
-// that need the sub-comm helpers defined in the section above, which is why
-// they sit here rather than with the rest of that function's tests.
+// Back to rcclSelectReduceScatter for three cases that need the sub-comm
+// helpers defined in the section above, which is why they sit here rather
+// than with the rest of that function's tests.
 // ===========================================================================
 
-// No CE step anywhere in rcclSelectReduceScatter: confirmed empirically, not
-// just by absence of a call in the source. Forces every CE-related seam true
-// (the exact combination that WOULD produce CE_REGISTERED in
-// rcclSelectAllReduce/AllGather) and confirms the outcome is still
-// something else entirely -- that function simply never calls
-// ncclCeAvailable/ncclCeScratchAvailable at all.
+// CE ReduceScatter is opt-in. With RCCL_CE_REDUCESCATTER left at 0, hooking
+// ncclCeAvailable / ncclCeScratchAvailable still does not select CE.
 TEST(WrapMicrotestIsolated, SelectReduceScatter_NeverChoosesCeRegardlessOfCeSeams) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectReduceScatter_NeverChoosesCeRegardlessOfCeSeams",
@@ -5201,6 +5196,40 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_NeverChoosesCeRegardlessOfCeSeam
         EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
         EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
         EXPECT_EQ(NCCL_ALGO_RING, decision.algo); // fell all the way to the plain-kernel placeholder
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Opt-in path. Staging is allocated by the CE launch, so the first selection
+// (buffer still null) is RCCL_CE_REGISTERED, which enqueue can initialize.
+// Once ceARTmpBuf exists, the same call selects RCCL_CE_2SHOT.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_CeOptInSelectsRegisteredThenTwoShot) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_CeOptInSelectsRegisteredThenTwoShot",
+      []() {
+        g_loadParam = [](const char* env, int64_t defaultValue) {
+          if (std::strcmp(env, "RCCL_CE_REDUCESCATTER") == 0) return (int64_t)1;
+          if (std::strcmp(env, "RCCL_FORCE_CE_REDUCESCATTER") == 0) return (int64_t)1;
+          if (std::strcmp(env, "RCCL_CE_AR_MAX_MSG_BYTES") == 0) return (int64_t)268435456;
+          return defaultValue;
+        };
+        alignas(16) static uint8_t staging;
+        ncclComm* comm = MakeSelectComm();
+        comm->nRanks = 4;
+        comm->nNodes = 1;
+        comm->symmetricSupport = true;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        comm->ceColl.graphModeSeen = false;
+        comm->ceColl.ceARTmpBuf = nullptr;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                        ncclSum, /*query=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+
+        comm->ceColl.ceARTmpBuf = &staging;
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                        ncclSum, /*query=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
         DeleteCommWithArch(comm);
       });
 }

@@ -271,13 +271,30 @@ TEST(RcclCeReduceScatterEligibility, RcclUseCeReduceScatter_Isolated)
                     mock.comm.config.CTAPolicy = tc.ctaPolicy;
 
                     const bool result =
-                        rcclUseCeReduceScatter(mock.get(), tc.recvcount, tc.datatype, tc.op);
+                        rcclUseCeReduceScatter(mock.get(), tc.recvcount, tc.datatype, tc.op, nullptr);
                     EXPECT_EQ(result, tc.expected) << tc.name;
                 })
                 .withEnvironment(env)
                 .withTimeout(std::chrono::seconds(30))
                 .withNumGpus(0));
     }
+
+    ProcessIsolatedTestRunner::registerTest(
+        ProcessIsolatedTestRunner::TestConfig(
+            "MisalignedRecvbuffRejected_Isolated",
+            []()
+            {
+                CeReduceScatterMockComm mock;
+                mock.comm.nRanks           = 4;
+                mock.comm.nNodes           = 1;
+                mock.comm.symmetricSupport = true;
+                mock.comm.config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+                alignas(16) char storage[32];
+                EXPECT_FALSE(rcclUseCeReduceScatter(mock.get(), 1024, ncclFloat32, ncclSum, storage + 1));
+            })
+            .withEnvironment(baseEnv)
+            .withTimeout(std::chrono::seconds(30))
+            .withNumGpus(0));
 
     ProcessIsolatedTestRunner::ExecutionOptions options;
     options.stopOnFirstFailure = false;

@@ -1206,9 +1206,12 @@ bool rcclUseCeAr2Shot(struct ncclComm* comm, size_t count, ncclDataType_t dataty
   return true;
 }
 
-bool rcclUseCeReduceScatter(struct ncclComm* comm, size_t recvcount, ncclDataType_t datatype, ncclRedOp_t op) {
-  static int enabled = rcclParamCeReduceScatter();
-  static int force = rcclParamForceCeReduceScatter();
+bool rcclUseCeReduceScatter(struct ncclComm* comm, size_t recvcount, ncclDataType_t datatype, ncclRedOp_t op,
+                            const void* recvbuff) {
+  // Re-read every call. A function-local static latches the first value and
+  // ignores the host-test param seam.
+  const int enabled = rcclParamCeReduceScatter();
+  const int force = rcclParamForceCeReduceScatter();
   if (!enabled) {
     static bool warnedDisabled = false;
     if (!warnedDisabled) {
@@ -1255,6 +1258,13 @@ bool rcclUseCeReduceScatter(struct ncclComm* comm, size_t recvcount, ncclDataTyp
   }
   if (datatype == ncclFloat8e4m3 || datatype == ncclFloat8e5m2) {
     WARN("Skipping CE ReduceScatter: unsupported datatype: Float8");
+    return false;
+  }
+  // In-place ReduceScatter is recvbuff == sendbuff + rank * recvcount, which is
+  // not 16-byte aligned for every legal count. The reduce kernel stores a
+  // 16-byte vector, so reject here and let the caller fall back.
+  if (recvbuff != nullptr && ((uintptr_t)recvbuff & 15) != 0) {
+    WARN("Skipping CE ReduceScatter: recvbuff %p is not 16-byte aligned", recvbuff);
     return false;
   }
   return true;
@@ -1832,9 +1842,18 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
     const bool symReg =
       ncclCeAvailable(comm, ncclFuncReduceScatter, (int)op, datatype, rsWinRegType, rsSendWin, rsRecvWin);
     const bool ceReduceScatterAllowed = ncclGroupDepth == 0 && ceArGraphAllowed &&
-                                        rcclUseCeReduceScatter(comm, recvcount, datatype, op) && (force || symReg);
+                                        rcclUseCeReduceScatter(comm, recvcount, datatype, op, recvbuff) && (force || symReg);
     if (!symEligible && ceReduceScatterAllowed && comm->ceColl.ceARTmpBuf != NULL) {
       decision->algo = RCCL_CE_2SHOT;
+      decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, recvcount);
+      return ncclSuccess;
+    }
+    // ceReduceScatterAllowed does not look at ceARTmpBuf. The buffer is allocated
+    // by the CE launch, which the 2-shot early-return never reaches. Hand this
+    // call to enqueue so CE init runs and ncclLaunchCeColl allocates staging.
+    // Otherwise DDA is suppressed below and the call stays on the ring kernel.
+    if (!symEligible && ceReduceScatterAllowed && comm->ceColl.ceARTmpBuf == NULL) {
+      decision->algo = RCCL_CE_REGISTERED;
       decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, recvcount);
       return ncclSuccess;
     }

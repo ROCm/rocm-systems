@@ -256,13 +256,6 @@ bool rcclAllReduceShouldTakeDdaPath(const ncclComm* comm, size_t count, ncclData
   return result;
 }
 
-bool rcclReduceScatterShouldTakeDdaPath(const ncclComm* comm, size_t recvcount, ncclDataType_t datatype,
-                                        bool symEligible, bool ceReduceScatterAllowed) {
-  const size_t msgBytes = recvcount * ncclTypeSize(datatype) * (size_t)comm->nRanks;
-  const bool ddaFabricArch1250 = IsArchMatch(comm->archName, "gfx1250");
-  return !symEligible && (ddaFabricArch1250 || !ceReduceScatterAllowed) && rcclDdaEnabled(comm, msgBytes, 8388608);
-}
-
 bool rcclAlltoAllShouldTakeDdaPath(const ncclComm* comm, size_t totalBytes, bool ceAlltoAllAllowed) {
   // AlltoAll has no symmetric kernel, so DDA must yield here or registered-window
   // CE never dispatches. Full contract is on the declaration in rccl_common.h.
