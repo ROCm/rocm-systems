@@ -8,6 +8,12 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Changed
 
+**API:**
+
+  - Kernel replay keeps its snapshot staging memory between replayed dispatches instead of allocating, zero-filling, and freeing the whole tracked footprint on every dispatch. What is kept between dispatches is bounded by the most recent snapshot's footprint.
+  - Kernel replay takes its drain signal from the SDK's signal pool and no longer snapshots HIP's one-byte `__hip_cuid_*` compilation-unit markers.
+  - Each replayed dispatch logs its lock and drain, snapshot, pass, and restore times at `ROCPROFILER_LOG_LEVEL=info`.
+
 ### Resolved issues
 
 ### Known issues
