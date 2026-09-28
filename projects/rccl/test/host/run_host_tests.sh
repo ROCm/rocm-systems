@@ -254,7 +254,7 @@ do_kernel_count_guards() {
 # cases, so this also runs test_device_coverage_cmake.py, which shells out to
 # cmake and self-skips when cmake is absent. Nothing here needs a GPU or a
 # build directory. Run via unittest discover, as its README specifies.
-do_device_compile_guards() {
+do_test_runner_guards() {
   echo "==> Test-runner guards (unittest: tools/scripts/test_runner/tests)"
   ( cd "$RCCL_ROOT/tools/scripts/test_runner" \
     && python3 -m unittest discover -s tests -t . -v )
@@ -270,7 +270,7 @@ do_guards() {
   local rc=0
   do_device_table_guards || rc=1
   do_kernel_count_guards || rc=1
-  do_device_compile_guards || rc=1
+  do_test_runner_guards || rc=1
   do_poison_hip_atomics || rc=1
   return "$rc"
 }

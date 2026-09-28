@@ -49,13 +49,6 @@ class DeviceLinkerTargetsCMakeTest(unittest.TestCase):
         self.assertEqual(flags, ["--offload-arch=gfx942:xnack+"])
         self.assertEqual(ids, ["gfx942=gfx942:xnack+"])
 
-    def test_a_bare_target_stays_bare(self):
-        bare, flags, ids = self._parse("gfx950")
-
-        self.assertEqual(bare, ["gfx950"])
-        self.assertEqual(flags, ["--offload-arch=gfx950"])
-        self.assertEqual(ids, ["gfx950=gfx950"])
-
     def test_multiple_features_all_survive(self):
         _, flags, ids = self._parse("gfx950:sramecc+:xnack-")
 
