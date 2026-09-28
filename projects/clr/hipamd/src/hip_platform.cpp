@@ -432,7 +432,7 @@ hipError_t hipLaunchByPtr(const void* hostFunction) {
                                 exec.blockDim_.x, exec.blockDim_.y, exec.blockDim_.z,
                                 exec.sharedMem_, *device, 0, 0, 0, 1, 1, 1);
   static constexpr LaunchErrorRule kRules[] = {
-      {kConfigBits | kBlockExceedsMaxWG, hipErrorInvalidValue},
+      {kCommonRulesBits | kBlockExceedsMaxWG, hipErrorInvalidValue},
   };
   hipError_t status = launch_params.Validate(kRules);
   if (status != hipSuccess) {
