@@ -232,7 +232,7 @@ static_assert(NCCL_LL_CLEAN_MASK % NCCL_STEPS == 0, "Invalid NCCL_LL_CLEAN_MASK 
  * rcclLL128ShmemElemsPerThreadFromArch() (archinfo.h) or comm->ll128ShmemElemsPerThread
  * instead. */
 #if __HIP_DEVICE_COMPILE__
-#if defined(__gfx1250__)
+#if defined(__gfx1250__) || defined(__gfx1250_strict__)
 #define NCCL_LL128_SHMEM_ELEMS_PER_THREAD 32
 #else
 #define NCCL_LL128_SHMEM_ELEMS_PER_THREAD 8
