@@ -22,14 +22,15 @@ typedef Elf64_Xword Elf64_Relr;
 #endif
 
 #include <bfd.h>
-#include <coff/external.h>
-#include <coff/internal.h>
+// #include <coff/external.h>
+// #include <coff/internal.h>
+#include <algorithm>
 #include <cstddef>
 #include <cstdio>
 #include <dwarf.h>
 #include <elf-bfd.h>
 #include <elfutils/libdw.h>
-#include <libcoff.h>
+// #include <libcoff.h>
 
 #include "common/path.hpp"
 #include "core/binary/fwd.hpp"
@@ -42,9 +43,7 @@ typedef Elf64_Xword Elf64_Relr;
 
 #include <timemory/mpl/concepts.hpp>
 
-namespace rocprofsys
-{
-namespace binary
+namespace rocprofsys::binary
 {
 namespace
 {
@@ -61,7 +60,8 @@ read_inliner_info(bfd* _inp)
         {
             if(_file && _func && _line > 0)
             {
-                _data.emplace_back(inlined_symbol{ _line, path::realpath(_file), _func });
+                _data.emplace_back(inlined_symbol{
+                    .line = _line, .file = path::realpath(_file), .func = _func });
             }
         }
         else
@@ -131,14 +131,8 @@ symbol::operator+=(const symbol& _rhs)
         address += _rhs.address;
         utility::combine(inlines, _rhs.inlines);
         utility::combine(dwarf_info, _rhs.dwarf_info);
-        if(_rhs.binding < binding)
-        {
-            binding = _rhs.binding;
-        }
-        if(_rhs.visibility < visibility)
-        {
-            visibility = _rhs.visibility;
-        }
+        binding    = std::min(_rhs.binding, binding);
+        visibility = std::min(_rhs.visibility, visibility);
         if(load_address == 0 && _rhs.load_address > load_address)
         {
             load_address = _rhs.load_address;
@@ -169,13 +163,12 @@ symbol::read_dwarf_entries(const std::deque<dwarf_entry>& _info)
     }
 
     // make sure the dwarf info is sorted by address (low to high)
-    std::sort(dwarf_info.begin(), dwarf_info.end(),
-              [](const dwarf_entry& _lhs, const dwarf_entry& _rhs) {
-                  return _lhs.address < _rhs.address;
-              });
+    std::ranges::sort(dwarf_info, [](const dwarf_entry& _lhs, const dwarf_entry& _rhs) {
+        return _lhs.address < _rhs.address;
+    });
 
     // helper for getting the end address
-    auto _get_next_address = [&](auto nitr, uintptr_t _low) {
+    auto const _get_next_address = [&](auto nitr, uintptr_t _low) {
         while(++nitr != dwarf_info.end())
         {
             if(nitr->address.low > _low)
@@ -197,19 +190,19 @@ symbol::read_dwarf_entries(const std::deque<dwarf_entry>& _info)
         }
     }
 
-    std::sort(dwarf_info.begin(), dwarf_info.end(),
-              [](const auto& _lhs, const auto& _rhs) {
-                  return std::tie(_lhs.address, _lhs.file, _lhs.line, _lhs.col) <
-                         std::tie(_rhs.address, _rhs.file, _rhs.line, _rhs.col);
-              });
+    std::ranges::sort(dwarf_info, [](const auto& _lhs, const auto& _rhs) {
+        return std::tie(_lhs.address, _lhs.file, _lhs.line, _lhs.col) <
+               std::tie(_rhs.address, _rhs.file, _rhs.line, _rhs.col);
+    });
 
-    dwarf_info.erase(std::unique(dwarf_info.begin(), dwarf_info.end(),
-                                 [](const auto& _lhs, const auto& _rhs) {
-                                     return std::tie(_lhs.address, _lhs.file,
-                                                     _lhs.line) ==
-                                            std::tie(_rhs.address, _rhs.file, _rhs.line);
-                                 }),
-                     dwarf_info.end());
+    dwarf_info.erase(
+        std::ranges::unique(dwarf_info,
+                            [](const auto& _lhs, const auto& _rhs) {
+                                return std::tie(_lhs.address, _lhs.file, _lhs.line) ==
+                                       std::tie(_rhs.address, _rhs.file, _rhs.line);
+                            })
+            .begin(),
+        dwarf_info.end());
 
     return dwarf_info.size();
 }
@@ -226,7 +219,7 @@ symbol::read_dwarf_breakpoints(const std::vector<uintptr_t>& _bkpts)
     }
 
     // make sure the breakpoints are sorted low to high
-    std::sort(breakpoints.begin(), breakpoints.end());
+    std::ranges::sort(breakpoints);
 
     return breakpoints.size();
 }
@@ -238,18 +231,15 @@ symbol::read_bfd_line_info(bfd_file& _bfd)
     const bfd_vma       _vma     = bfd_section_vma(_section);
     const bfd_size_type _size    = bfd_section_size(_section);
 
-    auto& _pc     = address.low;
-    auto& _pc_end = address.high;
+    auto const& _pc     = address.low;
+    auto&       _pc_end = address.high;
 
     if(_pc < _vma || _pc >= _vma + _size)
     {
         return false;
     }
     // add one to vma + size because address range is exclusive of last address
-    if(_pc_end > _vma + _size)
-    {
-        _pc_end = (_vma + _size);
-    }
+    _pc_end = std::min(_pc_end, _vma + _size);
 
     auto* _inp  = static_cast<bfd*>(_bfd.data);
     auto* _syms = reinterpret_cast<asymbol**>(_bfd.syms);
@@ -309,7 +299,7 @@ Tp
 symbol::get_inline_symbols(const std::vector<scope_filter>& _filters) const
 {
     using sf         = scope_filter;
-    using value_type = typename Tp::value_type;
+    using value_type = Tp::value_type;
 
     auto _data = Tp{};
 
@@ -345,7 +335,7 @@ Tp
 symbol::get_debug_line_info(const std::vector<scope_filter>& _filters) const
 {
     using sf         = scope_filter;
-    using value_type = typename Tp::value_type;
+    using value_type = Tp::value_type;
 
     auto _data = Tp{};
 
@@ -439,5 +429,4 @@ symbol::get_debug_line_info<std::deque<symbol>>(
 template std::vector<dwarf_entry>
 symbol::get_debug_line_info<std::vector<dwarf_entry>>(
     const std::vector<scope_filter>& _filters) const;
-}  // namespace binary
-}  // namespace rocprofsys
+}  // namespace rocprofsys::binary
