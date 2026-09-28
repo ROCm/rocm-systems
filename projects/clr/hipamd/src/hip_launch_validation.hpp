@@ -33,13 +33,17 @@ enum LaunchViolation : uint16_t {
 //! Storage type for a combination of LaunchViolation bits.
 using LaunchViolationBits = std::underlying_type_t<LaunchViolation>;
 
-//! Helper specifying most used bits to be checked
-static constexpr LaunchViolationBits kCommonRulesBits =
+//! Dims that cannot be encoded in the AQL packet, or that contradict each other.
+static constexpr LaunchViolationBits kMalformedDimsBits =
     kGridOverflow | kBlockOverflow | kClusterOverflow | kClusterIndivisible;
 
 //! The bits that make a config outright unlaunchable, regardless of entry point.
-static constexpr LaunchViolationBits kInvalidConfigBits =
-    kGridOverflow | kBlockOverflow | kClusterOverflow | kClusterIndivisible | kZeroBlock;
+static constexpr LaunchViolationBits kUnlaunchableBits = kMalformedDimsBits | kZeroBlock;
+
+//! Every violation bit, spelled out so a new LaunchViolation forces a decision about this set.
+static constexpr LaunchViolationBits kAnyViolationBits = kZeroGlobal | kZeroBlock | kGridOverflow |
+    kBlockOverflow | kClusterOverflow | kClusterIndivisible | kBlockExceedsMaxWG |
+    kSharedMemExceedsMax | kSharedMemOverflow;
 
 //! One entry in a launch-error rule table: the violation bits it matches and the error to return.
 struct LaunchErrorRule {
@@ -47,8 +51,7 @@ struct LaunchErrorRule {
   hipError_t error;                //!< code to return if violation occurred
 };
 
-//! Return the error for the FIRST rule matching any violation bit; hipSuccess if none. Callers
-//! list rules in their original check order so the reported error code does not change.
+//! Return the error for the FIRST rule matching any violation bit; hipSuccess if none.
 template <size_t N>
 hipError_t MapLaunchViolations(LaunchViolationBits violations, const LaunchErrorRule (&rules)[N]) {
   if (violations == kLaunchOk) return hipSuccess;
@@ -58,22 +61,33 @@ hipError_t MapLaunchViolations(LaunchViolationBits violations, const LaunchError
   return hipSuccess;
 }
 
+//! Reject anything unlaunchable and leave the rest to ihipLaunchKernel_validate.
+static constexpr LaunchErrorRule kUnlaunchableConfigRules[] = {
+    {kUnlaunchableBits, hipErrorInvalidConfiguration},
+};
+
+//! As above but tolerating a zero block, which these entry points leave to a later check.
+static constexpr LaunchErrorRule kMalformedDimsRules[] = {
+    {kMalformedDimsBits, hipErrorInvalidConfiguration},
+};
+
+//! The classic hipModuleLaunchKernel contract: every violation reports hipErrorInvalidValue.
+static constexpr LaunchErrorRule kModuleLaunchRules[] = {
+    {kAnyViolationBits, hipErrorInvalidValue},
+};
+
 //! No cluster requested — one block per cluster in every dim.
 static constexpr dim3 kNoCluster{1, 1, 1};
 
 //! No leftover work-items beyond grid * block.
 static constexpr dim3 kNoRemainder{0, 0, 0};
 
-//! A cluster launch splits the same blocks across the CU/WGPs of one shader engine, so the grid
-//! dims have to be divisible by the cluster dims.
+//! A cluster splits the grid across one shader engine, so grid must divide by cluster.
 inline bool IsClusterDivisible(const amd::NDRange32& grid, const dim3& cluster) {
   return (grid[0] % cluster.x == 0) && (grid[1] % cluster.y == 0) && (grid[2] % cluster.z == 0);
 }
 
-//! The violations that depend only on an already narrowed index space and the target device, so
-//! they can be re-derived later from an NDRangeContainer alone. Shared by the launch builders and
-//! by ihipLaunchKernel_validate, which re-runs them against the device the launch actually goes
-//! to — keeping the logic here means the two cannot drift apart.
+//! The violations derivable from a narrowed index space plus a device, so validate can re-run them.
 inline LaunchViolationBits CheckNDRangeAgainstDevice(const amd::NDRange32& global,
                                                      const amd::NDRange16& local,
                                                      size_t sharedMemBytes,
@@ -99,10 +113,7 @@ inline LaunchViolationBits CheckNDRangeAgainstDevice(const amd::NDRange32& globa
   return violations;
 }
 
-//! Narrow the app supplied index space into \a ndrange and report every configuration violation
-//! detected while doing so. Shared by both entry styles; \a deduceGrid tells the two apart. When
-//! it is false \a grid must already hold the app supplied grid (total blocks); when it is true the
-//! grid is deduced here from global / local, which only the cluster checks need.
+//! Narrow into \a ndrange and report the violations; \a grid is deduced iff \a deduceGrid.
 inline LaunchViolationBits BuildLaunchNDRange(amd::NDRangeContainer& ndrange, amd::NDRange32& grid,
                                              const amd::NDRange& globalDim, const dim3& localDim,
                                              const dim3& clusterDim, size_t sharedMemBytes,
@@ -151,9 +162,7 @@ inline LaunchViolationBits BuildLaunchNDRange(amd::NDRangeContainer& ndrange, am
   return violations;
 }
 
-//! Build the launch NDRange from an app supplied global (total work-items) and local size. \a grid
-//! receives the deduced total number of workgroups. The global dims are already uint32_t here, so
-//! kGridOverflow can never fire on this path.
+//! Build from an app supplied global and local size; \a grid receives the deduced blocks.
 inline LaunchViolationBits BuildLaunchNDRangeFromGlobal(amd::NDRangeContainer& ndrange,
                                                        amd::NDRange32& grid, const dim3& globalDim,
                                                        const dim3& localDim, const dim3& clusterDim,
@@ -164,8 +173,7 @@ inline LaunchViolationBits BuildLaunchNDRangeFromGlobal(amd::NDRangeContainer& n
                             localDim, clusterDim, sharedMemBytes, device, true /*deduceGrid*/);
 }
 
-//! Build the launch NDRange in HIP style, where the app supplies a grid (total blocks) and a block
-//! size and the global size needs computation. \a grid receives the app supplied grid.
+//! Build HIP style, where the app supplies the grid and block and the global is computed.
 inline LaunchViolationBits BuildLaunchNDRangeFromGrid(amd::NDRangeContainer& ndrange,
                                                      amd::NDRange32& grid, const dim3& gridDim,
                                                      const dim3& blockDim, const dim3& remainder,
@@ -191,8 +199,7 @@ hipError_t MakeLaunchNDRangeFromGlobal(amd::NDRangeContainer& ndrange, amd::NDRa
                              rules);
 }
 
-//! Build the NDRange without mapping violations — for the entry points that historically deferred
-//! every check to ihipLaunchKernel_validate.
+//! Build without mapping violations, for entry points that defer to ihipLaunchKernel_validate.
 inline void MakeLaunchNDRangeFromGlobal(amd::NDRangeContainer& ndrange, amd::NDRange32& grid,
                                         const dim3& globalDim, const dim3& localDim,
                                         const dim3& clusterDim, size_t sharedMemBytes,

@@ -342,9 +342,7 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::NDRangeContaine
   const amd::NDRange32& global = ndrange.global();
   const amd::NDRange16& local = ndrange.local();
 
-  // Re-derive the launch violations that matter here from the NDRange we were handed, so the
-  // limits come from the device this launch actually targets. The checks themselves are shared
-  // with the launch builders; the rule order below is what decides the reported error code.
+  // Re-derived here so the limits come from the device this launch actually targets.
   static constexpr LaunchErrorRule kValidateRules[] = {
       {kZeroGlobal,                               hipErrorInvalidConfiguration},
       {kZeroBlock,                                hipErrorInvalidConfiguration},
@@ -607,18 +605,12 @@ hipError_t hipModuleLaunchKernel(hipFunction_t f, uint32_t gridDimX, uint32_t gr
   STREAM_CAPTURE(hipModuleLaunchKernel, hStream, f, gridDimX, gridDimY, gridDimZ, blockDimX,
                  blockDimY, blockDimZ, sharedMemBytes, kernelParams, extra);
 
-  static constexpr LaunchErrorRule kRules[] = {
-      {kCommonRulesBits | kBlockExceedsMaxWG,     hipErrorInvalidValue},
-      {kSharedMemExceedsMax | kSharedMemOverflow, hipErrorInvalidValue},
-      {kZeroGlobal,                               hipErrorInvalidValue},
-      {kZeroBlock,                                hipErrorInvalidValue},
-  };
   amd::NDRangeContainer ndrange(3);
   amd::NDRange32 grid(1, 1, 1);
   hipError_t status =
       MakeLaunchNDRangeFromGrid(ndrange, grid, {gridDimX, gridDimY, gridDimZ},
                                 {blockDimX, blockDimY, blockDimZ}, kNoRemainder, kNoCluster,
-                                sharedMemBytes, *device, kRules);
+                                sharedMemBytes, *device, kModuleLaunchRules);
   if (status != hipSuccess) {
     HIP_RETURN(status);
   }
@@ -649,11 +641,11 @@ hipError_t hipExtModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX,
                  globalWorkSizeZ, localWorkSizeX, localWorkSizeY, localWorkSizeZ, sharedMemBytes,
                  kernelParams, extra, startEvent, stopEvent, flags);
 
+  // Unique: a bad block is hipErrorInvalidConfiguration here, hipErrorInvalidValue elsewhere.
   static constexpr LaunchErrorRule kRules[] = {
-      {kCommonRulesBits | kZeroBlock | kBlockExceedsMaxWG, hipErrorInvalidConfiguration},
-      {kSharedMemExceedsMax | kSharedMemOverflow,          hipErrorInvalidValue},
-      {kZeroGlobal,                                        hipErrorInvalidValue},
-      // kZeroBlock needs no rule of its own, it is folded into the first rule above.
+      {kUnlaunchableBits | kBlockExceedsMaxWG,    hipErrorInvalidConfiguration},
+      {kSharedMemExceedsMax | kSharedMemOverflow, hipErrorInvalidValue},
+      {kZeroGlobal,                               hipErrorInvalidValue},
   };
   amd::NDRangeContainer ndrange(3);
   amd::NDRange32 grid(1, 1, 1);
@@ -683,8 +675,7 @@ hipError_t hipHccModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX,
 
   int deviceId = hip::Stream::DeviceId(hStream);
   const amd::Device* device = g_devices[deviceId]->devices()[0];
-  // No rule table here — this entry point has always deferred every check to
-  // ihipLaunchKernel_validate.
+  // No rule table — this entry point has always deferred every check to validate.
   amd::NDRangeContainer ndrange(3);
   amd::NDRange32 grid(1, 1, 1);
   MakeLaunchNDRangeFromGlobal(ndrange, grid, {globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ},
@@ -714,18 +705,12 @@ hipError_t hipModuleLaunchCooperativeKernel(hipFunction_t f, unsigned int gridDi
   STREAM_CAPTURE(hipModuleLaunchCooperativeKernel, stream, f, gridDimX, gridDimY, gridDimZ,
                  blockDimX, blockDimY, blockDimZ, sharedMemBytes, kernelParams);
 
-  static constexpr LaunchErrorRule kRules[] = {
-      {kCommonRulesBits | kBlockExceedsMaxWG,     hipErrorInvalidValue},
-      {kSharedMemExceedsMax | kSharedMemOverflow, hipErrorInvalidValue},
-      {kZeroGlobal,                               hipErrorInvalidValue},
-      {kZeroBlock,                                hipErrorInvalidValue},
-  };
   amd::NDRangeContainer ndrange(3);
   amd::NDRange32 grid(1, 1, 1);
   hipError_t status =
       MakeLaunchNDRangeFromGrid(ndrange, grid, {gridDimX, gridDimY, gridDimZ},
                                 {blockDimX, blockDimY, blockDimZ}, kNoRemainder, kNoCluster,
-                                sharedMemBytes, *device, kRules);
+                                sharedMemBytes, *device, kModuleLaunchRules);
   if (status != hipSuccess) {
     HIP_RETURN(status);
   }
@@ -822,15 +807,12 @@ hipError_t ihipModuleLaunchCooperativeKernelMultiDevice(hipFunctionLaunchParams*
     }
 
     const amd::Device& device = hip_stream->vdev()->device();
-    static constexpr LaunchErrorRule kRules[] = {
-        {kCommonRulesBits, hipErrorInvalidConfiguration},
-    };
     amd::NDRangeContainer ndrange(3);
     amd::NDRange32 grid(1, 1, 1);
     hipError_t status = MakeLaunchNDRangeFromGrid(
         ndrange, grid, {launch.gridDimX, launch.gridDimY, launch.gridDimZ},
         {launch.blockDimX, launch.blockDimY, launch.blockDimZ}, kNoRemainder, kNoCluster,
-        launch.sharedMemBytes, device, kRules);
+        launch.sharedMemBytes, device, kMalformedDimsRules);
     if (status != hipSuccess) {
       return status;
     }
@@ -963,7 +945,7 @@ hipError_t hipLaunchCooperativeKernel_common(const void* f, dim3 gridDim, dim3 b
   const amd::Device* device = g_devices[deviceId]->devices()[0];
 
   static constexpr LaunchErrorRule kRules[] = {
-      {kCommonRulesBits | kBlockExceedsMaxWG,     hipErrorInvalidConfiguration},
+      {kMalformedDimsBits | kBlockExceedsMaxWG,   hipErrorInvalidConfiguration},
       {kSharedMemExceedsMax | kSharedMemOverflow, hipErrorCooperativeLaunchTooLarge},
   };
   amd::NDRangeContainer ndrange(3);
@@ -1437,15 +1419,12 @@ hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f
 
   int drvDeviceId = hip::Stream::DeviceId(hStream);
   const amd::Device* drvDevice = g_devices[drvDeviceId]->devices()[0];
-  static constexpr LaunchErrorRule kRules[] = {
-      {kCommonRulesBits, hipErrorInvalidConfiguration},
-  };
   amd::NDRangeContainer ndrange(3);
   amd::NDRange32 grid(1, 1, 1);
   hipError_t configStatus = MakeLaunchNDRangeFromGrid(
       ndrange, grid, {config->gridDimX, config->gridDimY, config->gridDimZ},
       {config->blockDimX, config->blockDimY, config->blockDimZ}, kNoRemainder, kNoCluster,
-      config->sharedMemBytes, *drvDevice, kRules);
+      config->sharedMemBytes, *drvDevice, kMalformedDimsRules);
   if (configStatus != hipSuccess) {
     HIP_RETURN(configStatus);
   }
@@ -1497,8 +1476,7 @@ hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f
     HIP_RETURN(hipErrorInvalidConfiguration);
   }
 
-  // Rebuild with the requested cluster dims. Historically this rebuild carries no rule table, so
-  // the cluster dims themselves stay unvalidated here.
+  // Rebuild with the requested cluster dims, which carry no rule table and stay unvalidated.
   amd::NDRangeContainer ndrangeCluster(3);
   amd::NDRange32 gridCluster(1, 1, 1);
   MakeLaunchNDRangeFromGrid(ndrangeCluster, gridCluster,

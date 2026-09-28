@@ -430,7 +430,7 @@ hipError_t hipLaunchByPtr(const void* hostFunction) {
 
   const amd::Device* device = g_devices[deviceId]->devices()[0];
   static constexpr LaunchErrorRule kRules[] = {
-      {kCommonRulesBits | kBlockExceedsMaxWG, hipErrorInvalidValue},
+      {kMalformedDimsBits | kBlockExceedsMaxWG, hipErrorInvalidValue},
   };
   amd::NDRangeContainer ndrange(3);
   amd::NDRange32 grid(1, 1, 1);
@@ -777,13 +777,11 @@ hipError_t ihipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDi
     return hipErrorInvalidConfiguration;
   }
 
-  static constexpr LaunchErrorRule kConfigRules[] = {
-      {kInvalidConfigBits, hipErrorInvalidConfiguration},
-  };
   amd::NDRangeContainer ndrange(3);
   amd::NDRange32 grid(1, 1, 1);
-  hipError_t status = MakeLaunchNDRangeFromGrid(ndrange, grid, gridDim, blockDim, kNoRemainder,
-                                                clusterDim, sharedMemBytes, *device, kConfigRules);
+  hipError_t status =
+      MakeLaunchNDRangeFromGrid(ndrange, grid, gridDim, blockDim, kNoRemainder, clusterDim,
+                                sharedMemBytes, *device, kUnlaunchableConfigRules);
   if (status != hipSuccess) {
     return status;
   }
