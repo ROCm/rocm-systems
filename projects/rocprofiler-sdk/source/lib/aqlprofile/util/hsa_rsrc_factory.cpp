@@ -26,6 +26,8 @@
 #include "lib/common/static_object.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 
+#include <string_view>
+
 #ifdef _WIN32
 #    ifndef NOMINMAX
 #        define NOMINMAX
@@ -300,8 +302,13 @@ HsaRsrcFactory::AddAgentInfo(const hsa_agent_t agent)
         agent_info->dev_type = HSA_DEVICE_TYPE_GPU;
         rocprofiler::aqlprofile::get_core_table()->hsa_agent_get_info_fn(
             agent, HSA_AGENT_INFO_NAME, agent_info->name);
-        const int gfxip_label_len = strlen(agent_info->name) - 2;
-        memcpy(agent_info->gfxip, agent_info->name, gfxip_label_len);
+        // Derive the gfxip family bucket (e.g. "gfx9", "gfx12") by dropping the trailing
+        // minor+stepping digits. Strip variant suffixes such as "-strict" first, since
+        // they are not part of the <major><minor><stepping> encoding this assumes.
+        const std::string_view name_sv =
+            std::string_view(agent_info->name).substr(0, strcspn(agent_info->name, "-"));
+        const int gfxip_label_len = static_cast<int>(name_sv.size()) - 2;
+        memcpy(agent_info->gfxip, name_sv.data(), gfxip_label_len);
         agent_info->gfxip[gfxip_label_len] = '\0';
         rocprofiler::aqlprofile::get_core_table()->hsa_agent_get_info_fn(
             agent, HSA_AGENT_INFO_WAVEFRONT_SIZE, &agent_info->max_wave_size);
