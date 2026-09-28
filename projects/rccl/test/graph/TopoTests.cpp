@@ -9,6 +9,8 @@
 
 #include "graph/topo.h"
 #include "graph/xml.h"
+// rome_models.h relies on its includer for ncclResult_t and the topo types.
+#include "graph/rome_models.h"
 #include "gtest/gtest.h"
 
 #include "../common/ProcessIsolatedTestRunner.hpp"
@@ -799,6 +801,46 @@ TEST_F(TopoTest, MloPartSiblings_EightPartitionsFormFullNvlMesh) {
       EXPECT_FLOAT_EQ(path->bw, MLOPART_LOC_BW) << "GPU " << a << " to GPU " << b;
     }
   }
+
+  ncclTopoFree(built);
+}
+
+// parseRome4P2H() sets RCCL_TOPO_4P2H_ROME from romeTopo.nLinks as soon as a system has more than
+// four GPUs, whether or not one of its models matched, and ncclTopoCompute() then caps the ring at
+// 2 channels. The partitions of one physical device are not a hive: while they were PATH_LOC the
+// link count stayed 0 and the flag never armed, and retyping them must not change that. Eight
+// partitions is the shape that reaches it -- five to eight ranks on one device -- and the cost of
+// getting it wrong is a ring 64x narrower than the one the search would otherwise build.
+TEST_F(TopoTest, MloPartSiblings_DoNotCountAsRomeHiveLinks) {
+  const uint64_t host = 0xc6;
+  const int nParts = NCCL_TOPO_MLOPART_DEV_MAX;
+  struct ncclXmlNode* cpu = addSystemCpu(host);
+  struct ncclXmlNode* pci = addGpuPci(cpu, "0000:0c:00.0", "gfx942", 0, 0, /*mloPart=*/0);
+  struct ncclXmlNode* gpus[NCCL_TOPO_MLOPART_DEV_MAX] = {};
+  ASSERT_EQ(xmlGetSub(pci, "gpu", &gpus[0]), ncclSuccess);
+  ASSERT_NE(gpus[0], nullptr);
+  for (int p = 1; p < nParts; p++) gpus[p] = addGpuUnderPci(pci, "gfx942", p, p, p);
+  for (int p = 0; p < nParts; p++) {
+    char tgt[32];
+    snprintf(tgt, sizeof(tgt), "0000:0c:00.%d", (p + 1) % nParts);
+    addGpuLink(gpus[p], tgt, 4, PCI_ACCELERATOR_CLASS);
+  }
+
+  struct ncclTopoSystem* built = nullptr;
+  ASSERT_EQ(ncclTopoGetSystemFromXml(xml, &built, host), ncclSuccess);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nodes[GPU].count, nParts);
+  ASSERT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
+  ASSERT_FALSE(built->type & RCCL_TOPO_4P2H_ROME);
+
+  struct ncclTopoGraph graph;
+  memset(&graph, 0, sizeof(graph));
+  graph.pattern = NCCL_TOPO_PATTERN_RING;
+  graph.minChannels = 1;
+  graph.maxChannels = MAXCHANNELS / 2;
+  ASSERT_EQ(parseRome4P2H(built, &graph, nullptr), ncclSuccess);
+  EXPECT_FALSE(built->type & RCCL_TOPO_4P2H_ROME)
+    << "partitions of one device were taken for a Rome 4P2H hive, capping the ring at 2 channels";
 
   ncclTopoFree(built);
 }
