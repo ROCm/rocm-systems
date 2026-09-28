@@ -286,6 +286,7 @@ tracing_config<SdkBackend, Externals>::get_callback_domains()
         if(Externals::get_use_rcclp())
         {
             callback_domains.emplace(SdkBackend::CALLBACK_TRACING_RCCL_API);
+            LOG_CRITICAL("RCCL CONFIG");
         }
 
         if(Externals::get_use_ompt())

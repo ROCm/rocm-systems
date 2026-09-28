@@ -37,8 +37,8 @@ struct rccl_event_info
 {
     template <typename EventT>
     rccl_event_info(const EventT& event, event_type ev_type)
-    : comm(event.comm)
-    , type(ev_type)
+    : type(ev_type)
+    , comm(event.comm)
     {
         auto data_type_size = SdkBackend::rccl_type_size(event.datatype);
         if constexpr(requires { event.count; })
@@ -71,8 +71,8 @@ extract_event_info(const typename SdkBackend::callback_tracing_record_t& record)
         return {};
     }
 
-    typename SdkBackend::rccl_api_id_t operation = record.operation;
-    auto payload = *static_cast<SdkBackend::rccl_api_data*>(record.payload);
+    auto operation = static_cast<SdkBackend::rccl_api_id_t>(record.operation);
+    auto payload   = *static_cast<SdkBackend::rccl_api_data*>(record.payload);
 
     // <rocprofiler-sdk/rccl/api_args.h> <- source of truth for nccl types
     switch(operation)
@@ -278,8 +278,8 @@ template <policies::domain_service::backend   SdkBackend,
 inline void
 on_rccl_configure()
 {
-    constexpr auto          k_empty_json   = "{}";
-    constexpr std::uint64_t k_no_thread_id = 0;
+    constexpr auto k_empty_json   = "{}";
+    constexpr auto k_no_thread_id = std::nullopt;
     Externals::get_metadata_registry().add_string(Externals::comm_data_name);
     Externals::get_metadata_registry().add_track(typename Externals::track_t{
         std::string{ Externals::rccl_send_track_name }, k_no_thread_id, k_empty_json });
@@ -340,7 +340,7 @@ on_rccl_exit(typename SdkBackend::callback_tracing_record_t record,
 template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals>
 inline constexpr auto k_rccl = callback_domain_definition<SdkBackend>{
-    .meta      = domain_descriptor{ .name  = "rccl",
+    .meta      = domain_descriptor{ .name  = "rccl_api",
                                     .id    = SdkBackend::CALLBACK_TRACING_RCCL_API,
                                     .mode  = collection_mode::callback,
                                     .group = std::nullopt },
