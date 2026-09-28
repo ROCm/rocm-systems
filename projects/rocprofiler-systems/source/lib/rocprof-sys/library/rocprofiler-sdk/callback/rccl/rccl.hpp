@@ -102,6 +102,14 @@ on_rccl_exit(typename SdkBackend::callback_tracing_record_t record,
         record, user_data, callback_data, timestamp);
 
     const auto info = rccl::extract_event_info<SdkBackend>(record);
+
+    if(info.size == 0)
+    {
+        // We don't want to process events with 0 size
+        // Cumulative value will not change
+        return;
+    }
+
     const auto device_id =
         rccl::device_id_resolver<SdkBackend>::resolve_device_id(info.comm);
 
