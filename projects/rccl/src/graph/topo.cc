@@ -1145,6 +1145,18 @@ static bool ncclTopoNodesLinked(struct ncclTopoNode* node, struct ncclTopoNode* 
   return false;
 }
 
+// ncclTopoConnectNodes() accumulates onto an existing link of the same type, so a direction the
+// XGMI pass already reported must be left alone or it ends up at two XGMI widths while its
+// reverse stays at one, and the two ranks of the pair then read different bandwidths off their
+// paths. Each direction is its own link, so check the one being connected.
+static ncclResult_t ncclTopoConnectMloPartSibling(struct ncclTopoNode* dev, struct ncclTopoNode* sibDev, float bw) {
+  if (ncclTopoNodesLinked(dev, sibDev)) return ncclSuccess;
+  INFO(NCCL_GRAPH, "No XGMI link reported from MLOPart sibling %lx to %lx, assuming %.1f GB/s", dev->id, sibDev->id,
+       bw);
+  NCCLCHECK(ncclTopoConnectNodes(dev, sibDev, LINK_NVL, bw));
+  return ncclSuccess;
+}
+
 // Compute partitions of one physical device (CPX/DPX, carried as MLOPart) reach each other over
 // the on-package fabric, which sysfs reports as XGMI between the partitions' PCI functions, so
 // ncclTopoAddXGMI() has normally already linked their DEV nodes. Cover the case where a platform
@@ -1159,12 +1171,11 @@ static ncclResult_t ncclTopoConnectMloPartSiblings(struct ncclTopoSystem* system
     int nSibDevs = 0;
     NCCLCHECK(ncclTopoGetDevNodes(system, dev->id, sibDevs, &nSibDevs));
     for (int s = 0; s < nSibDevs; s++) {
-      if (sibDevs[s] == dev || ncclTopoNodesLinked(dev, sibDevs[s])) continue;
+      if (sibDevs[s] == dev) continue;
+      // Siblings are partitions of one physical device, so they share its GCN arch.
       float xgmiBw = ncclTopoXGMISpeed(dev->dev.gcn);
-      INFO(NCCL_GRAPH, "No XGMI link reported between MLOPart siblings %lx and %lx, assuming %.1f GB/s", dev->id,
-           sibDevs[s]->id, xgmiBw);
-      NCCLCHECK(ncclTopoConnectNodes(dev, sibDevs[s], LINK_NVL, xgmiBw));
-      NCCLCHECK(ncclTopoConnectNodes(sibDevs[s], dev, LINK_NVL, xgmiBw));
+      NCCLCHECK(ncclTopoConnectMloPartSibling(dev, sibDevs[s], xgmiBw));
+      NCCLCHECK(ncclTopoConnectMloPartSibling(sibDevs[s], dev, xgmiBw));
     }
   }
   return ncclSuccess;
