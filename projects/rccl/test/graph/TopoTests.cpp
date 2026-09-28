@@ -669,6 +669,36 @@ TEST_F(TopoTest, MloPartSiblingPath_IsNvlAtOneXgmiWidth) {
   ncclTopoFree(built);
 }
 
+// A platform that reports no XGMI between the partitions of one device must not leave them
+// unreachable: ncclTopoConnectMloPartSiblings() links whatever the XGMI pass left unconnected.
+TEST_F(TopoTest, MloPartSiblings_LinkedWhenXgmiUnreported) {
+  const uint64_t host = 0xc2;
+  struct ncclXmlNode* cpu = addSystemCpu(host);
+  struct ncclXmlNode* pci = addGpuPci(cpu, "0000:0c:00.0", "gfx942", 0, 0, /*mloPart=*/0);
+  addGpuUnderPci(pci, "gfx942", 1, 1, /*mloPart=*/1);
+  // No addGpuLink() calls: the partitions have no XGMI entries in the XML.
+
+  struct ncclTopoSystem* built = nullptr;
+  ASSERT_EQ(ncclTopoGetSystemFromXml(xml, &built, host), ncclSuccess);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nodes[DEV].count, 2);
+  ASSERT_EQ(built->nodes[GPU].count, 2);
+
+  struct ncclTopoLink* l01 = findLink(built->nodes[DEV].nodes, built->nodes[DEV].nodes + 1);
+  struct ncclTopoLink* l10 = findLink(built->nodes[DEV].nodes + 1, built->nodes[DEV].nodes);
+  ASSERT_NE(l01, nullptr);
+  ASSERT_NE(l10, nullptr);
+  EXPECT_EQ(l01->type, LINK_NVL);
+  EXPECT_EQ(l10->type, LINK_NVL);
+  EXPECT_FLOAT_EQ(l01->bw, ncclTopoXGMISpeed("gfx942"));
+
+  ASSERT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
+  struct ncclTopoLinkList* p01 = built->nodes[GPU].nodes[0].paths[GPU] + 1;
+  EXPECT_EQ(p01->type, PATH_NVL);
+
+  ncclTopoFree(built);
+}
+
 // GDR for an MLOPart partition is a property of the physical GPU: every CPX partition is a HIP
 // logical device behind one PCI function, so a NIC one switch away is PATH_PXB for all of them and
 // GDR must be enabled for all of them. Before the rework ncclTopoCheckGdr() refused GDR to any
