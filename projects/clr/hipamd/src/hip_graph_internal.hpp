@@ -1912,6 +1912,14 @@ class GraphKernelNode : public GraphNode {
     launchFlags_ = launchFlags;
   }
 
+  //! Build a launch config for \a params under \a cluster, using this node's stored remainders.
+  LaunchConfig MakeConfig(const hipKernelNodeParams& params, const amd::Device& device,
+                          const dim3& cluster) const {
+    return MakeLaunchConfigFromGrid(
+        params.gridDim, params.blockDim, params.sharedMemBytes, device, cluster,
+        dim3(globalWorkSizeX_remainder_, globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_));
+  }
+
   ~GraphKernelNode() { freeParams(); }
 
   hipError_t GetParamCopyStatus() const { return paramCopyStatus_; }
@@ -2026,10 +2034,7 @@ class GraphKernelNode : public GraphNode {
     uint32_t flags = launchFlags_;
 
     const amd::Device* device = g_devices[dev_id_]->devices()[0];
-    LaunchConfig config = MakeLaunchConfigFromGrid(
-        kernelParams_.gridDim, kernelParams_.blockDim, kernelParams_.sharedMemBytes, *device,
-        clusterDim,
-        dim3(globalWorkSizeX_remainder_, globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_));
+    LaunchConfig config = MakeConfig(kernelParams_, *device, clusterDim_);
     IHIP_RETURN_ONFAIL(config.Status(kUnlaunchableConfigRules));
 
     status = ihipLaunchKernelCommand(
@@ -2153,11 +2158,7 @@ class GraphKernelNode : public GraphNode {
       const amd::Device* device = g_devices[dev_id_]->devices()[0];
       // Built purely as a predicate on the proposed cluster dims; the config is discarded.
       IHIP_RETURN_ONFAIL(
-          MakeLaunchConfigFromGrid(kernelParams_.gridDim, kernelParams_.blockDim,
-                                   kernelParams_.sharedMemBytes, *device, clusterDim,
-                                   dim3(globalWorkSizeX_remainder_, globalWorkSizeY_remainder_,
-                                        globalWorkSizeZ_remainder_))
-              .Status(kUnlaunchableConfigRules));
+          MakeConfig(kernelParams_, *device, clusterDim).Status(kUnlaunchableConfigRules));
       clusterDim_ = clusterDim;
       clusterDimsSpecified_ = true;
       return hipSuccess;
@@ -2229,10 +2230,7 @@ class GraphKernelNode : public GraphNode {
                                   int devId, dim3 clusterDim) {
 
     const amd::Device* device = g_devices[devId]->devices()[0];
-    LaunchConfig config = MakeLaunchConfigFromGrid(
-        pNodeParams->gridDim, pNodeParams->blockDim, pNodeParams->sharedMemBytes, *device,
-        clusterDim,
-        dim3(globalWorkSizeX_remainder_, globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_));
+    LaunchConfig config = MakeConfig(*pNodeParams, *device, clusterDim);
     IHIP_RETURN_ONFAIL(config.Status(kUnlaunchableConfigRules));
 
     return ihipLaunchKernel_validate(func, config, pNodeParams->kernelParams, pNodeParams->extra,
