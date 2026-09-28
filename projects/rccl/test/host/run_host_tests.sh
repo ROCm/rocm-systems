@@ -79,8 +79,9 @@ PHASE="${1:-all}"
 
 # Install everything the host-test pipeline needs that the base ROCm dev image
 # lacks: cmake + host toolchain, gtest/fmt, moreutils (ts), python3-venv (the
-# guards phase creates a venv + pip-installs pytest), and lcov/genhtml (the
-# coverage phase merges per-binary lcov tracefiles into one overall report).
+# guards phase creates a venv + pip-installs pytest), lcov/genhtml (the
+# coverage phase merges per-binary lcov tracefiles into one overall report), and
+# ccache (the configure phase picks it up automatically when present).
 # Uses sudo when not already root so it works both in the root CI container and
 # locally.
 do_deps() {
@@ -89,7 +90,7 @@ do_deps() {
   [ "$(id -u)" -eq 0 ] || sudo="sudo"
   $sudo apt-get update
   $sudo apt-get install -y cmake git python3 python3-venv build-essential rocm-cmake \
-    moreutils libgtest-dev libgmock-dev libfmt-dev lcov llvm
+    moreutils libgtest-dev libgmock-dev libfmt-dev lcov llvm ccache
 }
 
 do_rccl_configure() {

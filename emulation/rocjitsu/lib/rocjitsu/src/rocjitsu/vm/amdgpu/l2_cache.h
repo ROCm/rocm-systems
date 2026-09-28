@@ -13,6 +13,7 @@
 #include "simdojo/components/cache.h"
 #include "simdojo/sim/component.h"
 #include "simdojo/sim/message.h"
+#include "util/distributed_shared_mutex.h"
 
 #include <algorithm>
 #include <array>
@@ -231,7 +232,7 @@ public:
 
   /// @brief Invalidate all L2 lines.
   void invalidate_all() {
-    std::unique_lock<std::shared_mutex> maintenance_lock = acquire_cache_maintenance();
+    auto maintenance_lock = acquire_cache_maintenance();
     cache_.invalidate_all();
     clear_all_dirty_bytes();
   }
@@ -291,7 +292,7 @@ private:
         }
       }
 
-      std::sort(sets_.begin(), sets_.begin() + count_);
+      std::ranges::sort(sets_.begin(), sets_.begin() + count_);
       try {
         for (size_t i = 0; i < count_; ++i) {
           mutexes_[sets_[i]].lock();
@@ -326,8 +327,8 @@ private:
     return SetRangeLocks(set_mutexes_, line_start, line_count);
   }
 
-  std::shared_lock<std::shared_mutex> acquire_cache_access();
-  std::unique_lock<std::shared_mutex> acquire_cache_maintenance();
+  std::shared_lock<util::DistributedSharedMutex> acquire_cache_access();
+  std::unique_lock<util::DistributedSharedMutex> acquire_cache_maintenance();
   void synchronize_epoch_locked();
   VmAccessOutcome cache_partial_bytes(uint64_t addr, const uint8_t *src, uint32_t size,
                                       uint32_t vmid);
@@ -357,7 +358,7 @@ private:
   static VmAccessOutcome access_outcome(simdojo::MessageStatus status);
 
   CacheStore cache_;
-  mutable std::shared_mutex maintenance_mutex_;
+  mutable util::DistributedSharedMutex maintenance_mutex_;
   mutable std::array<std::mutex, NUM_SETS> set_mutexes_;
   simdojo::Port *req_port_ = nullptr;
   GpuMemory *backing_memory_ = nullptr; ///< Direct writeback path (functional mode).

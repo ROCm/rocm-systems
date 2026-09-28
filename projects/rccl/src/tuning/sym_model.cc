@@ -381,6 +381,13 @@ ncclResult_t ncclTuningSymkModelSim(struct ncclTuningInput_t* const inputs, stru
 
   tuning->timeUs = kTime * (1.0f + smPenalty * kBlocks);
   tuning->nChannels = kBlocks;
-  tuning->nWarps = 16;
+  // LL kernels size their slots and iterations for ncclSymkMaxThreads. Convert
+  // that thread count using the runtime wave size; other symmetric kernels keep
+  // the upstream 16-warp launch.
+  if (rcclSymkKernelIdIsLL(tuning->symKernelId)) {
+    tuning->nWarps = ncclSymkMaxThreads / inputs->comm->WarpSize;
+  } else {
+    tuning->nWarps = 16;
+  }
   return ret;
 }

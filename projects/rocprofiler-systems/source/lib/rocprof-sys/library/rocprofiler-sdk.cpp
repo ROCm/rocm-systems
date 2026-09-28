@@ -102,9 +102,7 @@
 #include <utility>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace rocprofiler_sdk
+namespace rocprofsys::rocprofiler_sdk
 {
 namespace
 {
@@ -3346,8 +3344,7 @@ tool_attach_init([[maybe_unused]] rocprofiler_client_detach_t detach_func,
 }
 #endif
 
-}  // namespace rocprofiler_sdk
-}  // namespace rocprofsys
+}  // namespace rocprofsys::rocprofiler_sdk
 
 namespace
 {

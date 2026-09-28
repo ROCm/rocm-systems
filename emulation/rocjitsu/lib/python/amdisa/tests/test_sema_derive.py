@@ -1699,11 +1699,11 @@ class TestDeriveVectorTernary:
         assert SemaNodeKind.MUL in all_kinds
         assert SemaNodeKind.ADD in all_kinds
 
-    def test_lowers_to_std_fma(self):
+    def test_lowers_to_mode_aware_fma(self):
         sem = _FakeSem('V_FMA_F32', 'vector_ternary', 'fma', 'f32')
         block = derive_sema_block(sem)
         cpp = lower_sema_block(block)
-        assert 'std::fma(' in cpp
+        assert 'fp_mode::Arithmetic::FMA' in cpp
 
     def test_add_minmax_i32_u32_intrinsically_saturates_add_before_selection(self):
         cases = [
@@ -3184,10 +3184,11 @@ class TestDeriveBufferFormat:
         assert sem.num_elems == 1
         assert sem.d16_lo and not sem.d16_hi
 
-    def test_typed_non_d16_load_under_vbuffer_stays_nop(self):
+    def test_typed_non_d16_load_under_vbuffer_is_executable(self):
         sem = derive_semantics('TBUFFER_LOAD_FORMAT_XYZW', 'ENC_VBUFFER')
         assert sem is not None
-        assert sem.semantic_class == 'nop'
+        assert sem.semantic_class == 'tbuffer_load'
+        assert sem.num_elems == 4
 
     @pytest.mark.parametrize(
         'legacy,rdna_ordered,enc',
