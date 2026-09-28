@@ -475,6 +475,20 @@ install(
     PATTERN "amd_smi_cper.cc" EXCLUDE
 )
 
+install(
+    DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/go/
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${AMD_SMI}/go
+    COMPONENT dev
+    FILES_MATCHING
+    PATTERN "*.go"
+    PATTERN "go.mod"
+    PATTERN "README.md"
+    PATTERN "LICENSE"
+    PATTERN "*_test.go" EXCLUDE
+    PATTERN "mock_*" EXCLUDE
+    PATTERN "testdata" EXCLUDE
+)
+
 # Make for goamdsmi_shim library
 add_subdirectory(goamdsmi_shim)
 

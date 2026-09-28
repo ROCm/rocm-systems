@@ -178,6 +178,37 @@ tests/
 └── api_summary.py      parses amdsmi.h + test logs → api_summary.{csv,txt}
 ```
 
+### Go CGO tests (no GPU)
+
+From the project root, use the Python stdlib runner with a local Go 1.20+ and C
+compiler. The runner compiles a controlled native fixture against the public
+header; no installed AMD SMI library, GPU, root, or network is needed.
+
+```bash
+python3 -B -m unittest discover -s tests/go -p test_run_tests.py -v
+python3 -B tests/go/test_api_contract.py
+python3 -B tests/go/run_tests.py
+python3 -B tests/go/run_tests.py --race
+python3 -B tests/go/run_tests.py --checkptr
+python3 -B tests/go/run_tests.py --cgocheck2
+python3 -B tests/go/run_tests.py --vet
+python3 -B tests/go/run_tests.py --build-example
+```
+
+`--cgocheck2` needs Go 1.21+. The `amdsmi_mock` build tag is test-only; the mock
+bridge and fixtures are not installed with the module.
+
+| Check | What it verifies |
+| --- | --- |
+| Default runner | Go wrappers across the real CGO boundary into controlled native responses |
+| `--native --include-dir ... --library-dir ... --run '^TestNativeVersion$'` | Fresh matching 27.1 header/library linkage and runtime version, without initialization |
+| `--native --include-dir ... --library-dir ... --build-example` | Example links against the real library; it is not executed |
+| `python3 -B tests/go/test_install.py --build-dir "$AMDSMI_NATIVE_BUILD_DIR"` | Temporary `DESTDIR` install, exact source contents, build from staged sources, independent local-replacement consumer against staged headers/library |
+
+The native build must already exist and match the source tree. The staged check
+does not configure/build native code, run package scriptlets, or access GPUs.
+See the [module guide](../go/README.md) for the complete native commands.
+
 ## Where it all gets triggered
 
 ```text

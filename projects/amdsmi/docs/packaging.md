@@ -122,3 +122,24 @@ interpreter (and thus the baked path) exists:
 Debian's `dist-packages` is version-agnostic, so the deb keeps the loose
 `python3 (>= 3.6.8)` dependency and the `#!/usr/bin/python3` CLI shebang serves
 every python3 minor.
+
+## Go development sources
+
+The existing CMake/CPack `dev` component installs the read-only Go module under
+`${CMAKE_INSTALL_DATAROOTDIR}/amd_smi/go` (normally `share/amd_smi/go`).
+
+| Included | Excluded from the Go source directory |
+| --- | --- |
+| Module metadata, license, guide, production Go files, telemetry example | Tests, mock bridge, fixtures, native binaries, Go toolchain |
+
+Native builds do not find or invoke Go, download modules, or add Go install
+scriptlets. The source rule also applies to `BUILD_SHARED_LIBS=OFF`; consuming the
+module still requires the AMD SMI 27.1 public development header and matching
+shared `libamd_smi.so`, a C compiler, CGO, and Go 1.20+ on Linux.
+
+Use a local module replacement for the installed sources, and explicitly set
+include, link, and runtime library directories for the matching native release.
+See the [module guide](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/go/README.md) for the commands. The repository's staged
+install verifier checks the source set and byte contents, excludes test assets,
+then compiles an independent consumer against only the staged header/library
+pair. It runs library-version lookup without initialization or GPU access.
