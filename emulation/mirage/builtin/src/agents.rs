@@ -45,9 +45,8 @@ pub fn source_config_for_agent(agent: &AgentDef) -> Option<serde_json::Value> {
     PRESETS
         .iter()
         .find(|preset| {
-            serde_json::from_str::<AgentDef>(preset.agent).is_ok_and(|preset_agent| {
-                preset_agent.vm.gpu.device.gfx_target_version == target
-            })
+            serde_json::from_str::<AgentDef>(preset.agent)
+                .is_ok_and(|preset_agent| preset_agent.vm.gpu.device.gfx_target_version == target)
         })
         .and_then(|preset| serde_json::from_str(preset.config).ok())
 }

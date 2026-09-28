@@ -99,13 +99,12 @@ mirage_runtime_args=()
 if [[ -n "$runtime_library_path" ]]; then
   mirage_runtime_args+=(--env "LD_LIBRARY_PATH=$runtime_library_path")
 fi
-# The nightly gfx1250 HIP/ROCr stack enables its code-object rewrite path by
-# default. A debugger qualification must observe the code object that hipcc
-# emitted, not a replacement held in anonymous memory, so disable that path in
-# both CLR and ROCr for every scenario below. The first ROCgdb run also prints
-# the inherited value and loaded libraries; the assertions below make this
-# fail closed if the variable is lost or the rewrite library is loaded anyway.
-mirage_runtime_args+=(--env "HSA_HOTSWAP_DISABLE=1")
+# A debugger qualification must observe the code object that hipcc emitted, not
+# a replacement held in anonymous memory, so explicitly leave ROCr's hotswap
+# path disabled for every scenario below. The first ROCgdb run also prints the
+# inherited value and loaded libraries; the assertions below make this fail
+# closed if the variable is changed or the rewrite library is loaded anyway.
+mirage_runtime_args+=(--env "HSA_HOTSWAP_ENABLE=0")
 
 # --- Build the demo kernel --------------------------------------------------
 workdir="$(mktemp -d)"
@@ -136,7 +135,7 @@ echo "running rocgdb under: $mirage_bin run --profile $profile"
 outfile="$workdir/rocgdb.out"
 timeout 180 "$mirage_bin" run --profile "$profile" "${mirage_runtime_args[@]}" -- \
   rocgdb --batch \
-    -ex 'show environment HSA_HOTSWAP_DISABLE' \
+    -ex 'show environment HSA_HOTSWAP_ENABLE' \
     -ex 'set breakpoint pending on' \
     -ex 'break add_one' \
     -ex 'run' \
@@ -199,7 +198,7 @@ check() { # <regex> <description>
 }
 
 check 'hit Breakpoint 1, .*add_one .*at .*:[0-9]+' 'stopped at the GPU kernel breakpoint'
-check '^HSA_HOTSWAP_DISABLE = 1' 'disabled the gfx1250 code-object rewrite path'
+check '^HSA_HOTSWAP_ENABLE = 0' 'disabled the gfx1250 code-object rewrite path'
 if grep -qaE 'libhsa_hotswap_rocjitsu|HotSwap: forwarding' <<<"$out"; then
   echo "  FAIL: a HotSwap implementation was active during ROCgdb qualification" >&2
   fail=1

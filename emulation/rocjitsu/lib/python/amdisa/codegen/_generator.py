@@ -221,6 +221,48 @@ def _exec_mask_flag_stmts(sem) -> list[str]:
     ]
 
 
+def _memory_wait_producer(name: str) -> bool:
+    """Conservative decode-time filter for completion-counter producers.
+
+    The runtime target model decides the exact counter and register footprint.
+    Keeping this broad filter in generated metadata avoids scanning names on
+    ordinary ALU instructions, and includes inline producers without MEMORY_OP.
+    """
+    name = name.lower()
+    return name.startswith(
+        (
+            'ds_',
+            'lds_',
+            'flat_',
+            'global_',
+            'scratch_',
+            'buffer_',
+            'tbuffer_',
+            'image_',
+            'tensor_',
+            'cluster_',
+            's_load',
+            's_buffer_',
+            's_store',
+            's_prefetch_',
+            's_atc_probe',
+            's_atomic_',
+            's_scratch_',
+            's_dcache_',
+            's_sendmsg',
+            's_memtime',
+            's_memrealtime',
+        )
+    ) or name in (
+        's_gl1_inv',
+        's_get_barrier_state',
+        's_barrier_signal_isfirst',
+        's_get_waveid_in_workgroup',
+        'export',
+        'exp',
+    )
+
+
 def _result_combinator_flag_stmts(sem) -> list[str]:
     """Return ``flags_ |= ...;`` for how the instruction forms its result value.
     Only returns flags for scalar operations.
@@ -2106,7 +2148,7 @@ class CodeGenerator:
                     ('VopdCndmaskB32',),
                     '''
                     {
-                      uint64_t condition = slot.uses_vcc ? wf.vcc() : amdgpu::read_wave_mask_scalar(*slot.src2, wf);
+                      uint64_t condition = slot.uses_vcc ? wf.vcc_mask(uint64_t{1} << lane) : amdgpu::read_wave_mask_scalar(*slot.src2, wf);
                       return ((condition >> lane) & 1u) ? src1 : src0;
                     }
                     ''',
@@ -2705,6 +2747,7 @@ class CodeGenerator:
               uint32_t src0 = amdgpu::RegisterAccess(wf).read_lane(*slot.src0, lane);
               if (uses_src_neg_modifier(slot.op))
                 src0 = apply_neg(src0, slot.neg, 0);
+              // MOV has no src1: its unused encoding bits may name a pending register.
               if (slot.op == kVopdMovB32)
                 return src0;
               uint32_t src1 = amdgpu::RegisterAccess(wf).read_lane(*slot.src1, lane);
@@ -5260,8 +5303,10 @@ class CodeGenerator:
         but a 32-bit VGPR offset when SADDR supplies the scalar base. The ISA
         XML describes both variants with the same encoding and operand, so the
         generated decoder must derive the width from the encoded SADDR value.
-        VSCRATCH has its own fixed-width operand and does not use this rule.
+        VSCRATCH reads its 32-bit VADDR only when SVE enables it.
         """
+        if enc_name.upper() == 'ENC_VSCRATCH' and opnd_name == 'vaddr':
+            return '(reinterpret_cast<const OpEncoding *>(inst)->sve ? 32 : 0)'
         if enc_name.upper() not in ('ENC_VFLAT', 'ENC_VGLOBAL') or opnd_name != 'vaddr':
             return None
         return 'vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst))'
@@ -6725,15 +6770,19 @@ class CodeGenerator:
             # execution simply continues.
             return '  (void)wf;'
 
+        if cls == 'wait_idle':
+            return '  wf.set_wait_all();'
+
         if cls == 'waitcnt':
+            if self.isa_spec.arch_name == 'rdna4':
+                # RDNA4 SOPP opcode 9 ignores SIMM16 and acts as S_WAIT_IDLE.
+                return '  wf.set_wait_all();'
             L.append(
                 f'  uint16_t imm = static_cast<uint16_t>({src_ops[0]}.encoding_value_);'
             )
             wf = self.isa_spec.profile.waitcnt_family
-            if wf in ('gfx11', 'gfx12'):
-                # GFX11 (RDNA3/3.5) SIMM16 layout. GFX12 uses split S_WAIT_*
-                # instructions in the XML, but LLVM still accepts the
-                # monolithic S_WAITCNT compatibility opcode with this layout.
+            if wf == 'gfx11':
+                # GFX11 (RDNA3/3.5) SIMM16 layout.
                 #   expcnt[2:0] = bits [2:0]
                 #   lgkmcnt[5:0] = bits [9:4]
                 #   vmcnt[5:0] = bits [15:10]
@@ -6821,10 +6870,7 @@ class CodeGenerator:
                 'execnz': 'wf.exec() != 0',
             }
             if cond in ('vccz', 'vccnz'):
-                L.append(
-                    '  const uint64_t live_vcc = wf.vcc() & '
-                    '(wf.wf_size() >= 64 ? ~0ULL : ((1ULL << wf.wf_size()) - 1ULL));'
-                )
+                L.append('  const uint64_t live_vcc = wf.vcc_mask();')
             L.append(f'  if ({cond_map[cond]}) {{')
             L.append(
                 f'    int16_t offset = static_cast<int16_t>({src_ops[0]}.encoding_value_);'
@@ -7018,6 +7064,7 @@ class CodeGenerator:
                     L.append(
                         '  bool is_first = wf.barrier_signal(barrier_id, member_count);'
                     )
+                    L.append('  set_memory_wait_result_written(barrier_valid);')
                     L.append('  if (barrier_valid) wf.write_scc(is_first);')
                 else:
                     L.append('  wf.barrier_signal(barrier_id, member_count);')
@@ -8271,8 +8318,10 @@ class CodeGenerator:
         L.append('  uint64_t exec = wf.exec();')
         L.append(f'  uint32_t data_base = {data_base};')
         data_regs = ne if esz == 4 else 1
+        byte_mask = ((1 << esz) - 1) << (2 if sem.d16_hi else 0)
+        mask_arg = f', {byte_mask:#x}' if esz < 4 else ''
         L.append(
-            f'  auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, {data_regs}, exec);'
+            f'  auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, {data_regs}, exec{mask_arg});'
         )
         stride = esz * ne
         L.append(f'  d->store_data.resize(wf.wf_size() * {stride});')
@@ -8280,19 +8329,18 @@ class CodeGenerator:
             L.append('  data.copy_dwords_lane_major(d->store_data, exec);')
             L.append('  set_data(std::move(d));')
             return '\n'.join(L)
-        L.append('  const auto data0 = data.lanes(0);')
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
         for i in range(ne):
             if esz == 2:
-                L.append(f'    uint32_t val{i} = data0[lane];')
+                L.append(f'    uint32_t val{i} = data.lane(0, lane);')
                 if sem.d16_hi:
                     L.append(f'    val{i} >>= 16;')
                 L.append(
                     f'    std::memcpy(&d->store_data[lane * {stride} + {i * esz}], &val{i}, 2);'
                 )
             elif esz == 1:
-                L.append(f'    uint32_t val{i} = data0[lane];')
+                L.append(f'    uint32_t val{i} = data.lane(0, lane);')
                 if sem.d16_hi:
                     L.append(f'    val{i} >>= 16;')
                 L.append(
@@ -9029,7 +9077,7 @@ class CodeGenerator:
                 )
             elif esz == 2:
                 L.append(
-                    f'    uint32_t val{i} = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);'
+                    f'    uint32_t val{i} = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane, {((1 << esz) - 1) << (2 if sem.d16_hi else 0):#x});'
                 )
                 if sem.d16_hi:
                     L.append(f'    val{i} >>= 16;')
@@ -9038,7 +9086,7 @@ class CodeGenerator:
                 )
             elif esz == 1:
                 L.append(
-                    f'    uint32_t val{i} = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);'
+                    f'    uint32_t val{i} = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane, {((1 << esz) - 1) << (2 if sem.d16_hi else 0):#x});'
                 )
                 if sem.d16_hi:
                     L.append(f'    val{i} >>= 16;')
@@ -9236,7 +9284,7 @@ class CodeGenerator:
                 )
             elif esz == 2:
                 L.append(
-                    f'    uint32_t val{i} = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);'
+                    f'    uint32_t val{i} = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane, {((1 << esz) - 1) << (2 if sem.d16_hi else 0):#x});'
                 )
                 if sem.d16_hi:
                     L.append(f'    val{i} >>= 16;')
@@ -9245,7 +9293,7 @@ class CodeGenerator:
                 )
             elif esz == 1:
                 L.append(
-                    f'    uint32_t val{i} = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);'
+                    f'    uint32_t val{i} = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane, {((1 << esz) - 1) << (2 if sem.d16_hi else 0):#x});'
                 )
                 if sem.d16_hi:
                     L.append(f'    val{i} >>= 16;')
@@ -10140,6 +10188,41 @@ class CodeGenerator:
                     cdna5_f8f6f4_shape = self._cdna5_f8f6f4_wmma_shape(inst)
                     cdna4_f8f6f4_shape = self._cdna4_f8f6f4_mfma_shape(inst)
                     cdna5_swmmac_has_modifiers = self._cdna5_swmmac_has_modifiers(inst)
+                    tied_destination_name = None
+                    tied_destination_def_width = None
+                    tied_destination_result_name = None
+                    if inst.name.upper().startswith(
+                        self.isa_spec.profile.tied_destination_prefixes
+                    ):
+                        tied_destinations = [
+                            o
+                            for o in inst.operands
+                            if o.is_output and o.name in ('vdst', 'sdst')
+                        ]
+                        assert len(tied_destinations) == 1, (
+                            f'{inst.name}: tied destination requires exactly one '
+                            "'vdst' or 'sdst' output"
+                        )
+                        tied_destination = tied_destinations[0]
+                        tied_destination_name = tied_destination.name
+                        tied_destination_def_width = (
+                            self.isa_spec.profile.tied_destination_def_widths.get(
+                                inst.name.upper(), tied_destination.size
+                            )
+                        )
+                        assert (
+                            tied_destination_def_width > 0
+                            and tied_destination_def_width <= tied_destination.size
+                            and tied_destination_def_width % 32 == 0
+                            and tied_destination.size % 32 == 0
+                        ), (
+                            f'{inst.name}: tied destination widths must be positive, '
+                            'dword-aligned, and no wider than the encoded operand'
+                        )
+                        if tied_destination_def_width != tied_destination.size:
+                            tied_destination_result_name = (
+                                f'{tied_destination.name}_result'
+                            )
                     operand_size_exprs: dict[str, str] = {}
                     for opnd in inst.operands:
                         # FLAT's optional scalar address is constructed below,
@@ -10273,8 +10356,17 @@ class CodeGenerator:
                             and inst_sem.operation in ('cmpswap', 'fcmpswap')
                             and opnd.name == 'vdata'
                         )
+                        _needs_tied_destination_result_view = (
+                            opnd.name == tied_destination_name
+                            and tied_destination_result_name is not None
+                        )
                         atomic_return_operand = (
                             'vdata_return' if _needs_atomic_return_view else opnd.name
+                        )
+                        destination_operand = (
+                            tied_destination_result_name
+                            if _needs_tied_destination_result_view
+                            else opnd.name
                         )
                         if _is_optional_atomic_return:
                             sc0, _, _ = self._coherency_exprs()
@@ -10284,7 +10376,7 @@ class CodeGenerator:
                             )
                         elif opnd.is_output:
                             opnd_body.append(
-                                f'dst_operands_[{dst_idx}] = &{opnd.name};'
+                                f'dst_operands_[{dst_idx}] = &{destination_operand};'
                             )
                             dst_idx += 1
                         if not opnd.is_input and not opnd.is_output:
@@ -10380,6 +10472,19 @@ class CodeGenerator:
                                 f'OperandType::{opr_type}, '
                                 f'{operand_value}{packed_16bit_args})'
                             )
+                            if _needs_tied_destination_result_view:
+                                private_members.append(
+                                    cgen.Statement(f'Operand {opnd.name}_result')
+                                )
+                                opnd_ctor_init.append(
+                                    f'{opnd.name}_result({tied_destination_def_width}, '
+                                    f'OperandType::{opr_type}, {operand_value})'
+                                )
+                                if _uses_vgpr_msb_roles or _uses_gpr_idx_roles:
+                                    vgpr_msb_role_body.append(
+                                        f'{opnd.name}_result.set_vgpr_msb_role('
+                                        'amdgpu::VgprMsbRole::Dst);'
+                                    )
                             if _needs_atomic_return_view:
                                 private_members.append(
                                     cgen.Statement('Operand vdata_return')
@@ -10435,6 +10540,13 @@ class CodeGenerator:
                         public_members.append(
                             cgen.Statement('void execute_impl(amdgpu::Wavefront &wf)')
                         )
+                    if tied_destination_result_name is not None:
+                        public_members.append(
+                            cgen.Statement(
+                                'void append_dst_operand(std::string &out, '
+                                'uint8_t operand_index) const override'
+                            )
+                        )
                     # A sub-dword (< 32-bit) destination writes only part of its
                     # 32-bit register lane, so the old value survives and the
                     # register is also a read. Surface these partial defs as
@@ -10459,6 +10571,14 @@ class CodeGenerator:
                             for tag in ('IMM', 'LABEL', 'CONST')
                         )
                     ]
+                    # Two-address instructions can read their encoded
+                    # destination without listing it as a printed source. Keep
+                    # that tied input in the same hidden-use hooks as partial
+                    # destination preservation. For an asymmetric result view,
+                    # this intentionally names the original wider read operand.
+                    _implicit_destination_uses = list(_partial_def_outputs)
+                    if tied_destination_name is not None:
+                        _implicit_destination_uses.append(tied_destination_name)
                     # v_writelane preserves the other lanes of vdst, so it reads
                     # the old value: a lane-partial def, distinct from the
                     # sub-dword partial defs above. Surface it only where the XML
@@ -10483,7 +10603,10 @@ class CodeGenerator:
                         and self._supports_dpp_for_instruction(inst, inst_dpp_enc_name)
                         and any(o.name == 'sdst' and o.is_output for o in inst.operands)
                     )
-                    if _partial_def_outputs or _dpp_secondary_mask_preserve_output:
+                    if (
+                        _implicit_destination_uses
+                        or _dpp_secondary_mask_preserve_output
+                    ):
                         public_members.append(
                             cgen.Statement(
                                 'void implicit_uses(RegisterSet &uses) const override'
@@ -11613,6 +11736,22 @@ class CodeGenerator:
                         ctor_body_parts.append(
                             self._memory_issue_initializer(_mem_sem, inst_field_names)
                         )
+                    if _memory_wait_producer(inst.name):
+                        ctor_body_parts.append('flags_ |= MEMORY_WAIT_PRODUCER;')
+                    if self.isa_spec.arch_name == 'cdna5' and (
+                        inst.name in {'S_TRAP', 'S_GETREG_B32', 'S_SET_VGPR_MSB'}
+                        or inst.name.startswith(
+                            (
+                                'S_SETREG',
+                                'S_SENDMSG',
+                                'S_BARRIER_WAIT',
+                                'S_BARRIER_SIGNAL',
+                            )
+                        )
+                    ):
+                        ctor_body_parts.append('flags_ |= XCNT_DRAIN;')
+                    if inst.name.lower().startswith('v_interp_'):
+                        ctor_body_parts.append('flags_ |= EMBEDDED_MEMORY_WAIT;')
                     # Control-flow flags drive BasicBlock splitting and CFG
                     # edge construction. Keep this metadata generated from the
                     # semantic classification so generic code does not have to
@@ -11943,6 +12082,11 @@ class CodeGenerator:
                                 return f'    {prefix}dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask;\n'
 
                             if _is_vopc:
+                                if _has_sdwa_encoding:
+                                    _dpp_preamble += (
+                                        '  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(\n'
+                                        '      inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_);\n'
+                                    )
                                 if not _modern_dpp_compare:
                                     _dpp_preamble += (
                                         '  uint64_t dpp_old_vcc_ = wf.vcc();\n'
@@ -12662,11 +12806,27 @@ class CodeGenerator:
                                 f'}}'
                             )
                         )
-                    if _partial_def_outputs or _dpp_secondary_mask_preserve_output:
+                    if tied_destination_result_name is not None:
+                        inst_impls.append(
+                            cgen.Line(
+                                f'void {inst.fmt_name}::append_dst_operand'
+                                f'(std::string &out, uint8_t operand_index) const {{\n'
+                                f'  if (operand_index == 0) {{\n'
+                                f'    out += {tied_destination_name}.name();\n'
+                                f'    return;\n'
+                                f'  }}\n'
+                                f'  Instruction::append_dst_operand(out, operand_index);\n'
+                                f'}}'
+                            )
+                        )
+                    if (
+                        _implicit_destination_uses
+                        or _dpp_secondary_mask_preserve_output
+                    ):
                         _pd_body = ''.join(
                             f'  if (auto r = {name}.to_register_ref())\n'
                             f'    uses.expand(*r);\n'
-                            for name in _partial_def_outputs
+                            for name in _implicit_destination_uses
                         )
                         if _dpp_secondary_mask_preserve_output:
                             _pd_body += (
@@ -12686,8 +12846,8 @@ class CodeGenerator:
                                 f'}}'
                             )
                         )
-                        # Operand-backed twin of implicit_uses: report each partial
-                        # def as a preserved-read Operand so a caller can resolve it
+                        # Operand-backed twin of implicit_uses: report each hidden
+                        # destination read as an Operand so a caller can resolve it
                         # with its own VGPR-MSB role and width (see
                         # Instruction::implicit_use_operands). Gated to profiles
                         # with VGPR-MSB banking -- InstDefUse only consults this
@@ -12697,7 +12857,7 @@ class CodeGenerator:
                             _pd_operands_body = ''.join(
                                 f'  if ({name}.to_register_ref())\n'
                                 f'    operands.push_back(&{name});\n'
-                                for name in _partial_def_outputs
+                                for name in _implicit_destination_uses
                             )
                             inst_impls.append(
                                 cgen.Line(

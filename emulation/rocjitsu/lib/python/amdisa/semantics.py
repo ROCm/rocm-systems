@@ -357,6 +357,8 @@ def _derive_sopp(name: str) -> InstructionSemantics | None:
     }
     if name in _SPLIT_WAIT:
         return InstructionSemantics(name, 'wait_counter', operation=name[2:].lower())
+    if name == 'S_WAIT_IDLE':
+        return InstructionSemantics(name, 'wait_idle')
     if name == 'S_BARRIER':
         return InstructionSemantics(name, 'barrier')
     if name == 'S_BARRIER_WAIT':

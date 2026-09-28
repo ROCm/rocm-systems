@@ -608,17 +608,24 @@ def gen_mfma(ctx: ExecuteContext) -> str:
         # A-matrix broadcast and B-matrix lane permutation. RDNA does
         # not have MFMA (only WMMA), so these fields don't exist.
         if uses_fixed_wave_swmmac_layout:
-            if result_type == 'F16':
+            if result_type == 'BF16F32':
+                exec_fn = 'exec_swmmac_bf16f32'
+            elif result_type == 'F16':
                 exec_fn = 'exec_swmmac_f16'
             elif result_type == 'BF16':
                 exec_fn = 'exec_swmmac_bf16'
             else:
                 exec_fn = 'exec_swmmac_f32'
+            mode_args = (
+                ', amdgpu::WMMA_WAVE32, wf.fp16_ovfl()'
+                if result_type in ('F16', 'BF16', 'BF16F32')
+                else ''
+            )
             L.append(
                 f'  amdgpu::{exec_fn}(cu, {M}, {N}, {K}, {in_bits}, dst,'
                 f' {src0_base_expr}, {src1_base_expr}, s2, {index_base_expr},'
                 f' {swmmac_index_entries}, {index_key_expr},'
-                f' {ea}, {eb}, const_acc);'
+                f' {ea}, {eb}, const_acc{mode_args});'
             )
         elif uses_fixed_wave32_split_k_dense_layout:
             # Dense WMMA: a specialized Wave32 kernel where one exists, else

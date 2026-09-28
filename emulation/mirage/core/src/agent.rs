@@ -262,6 +262,20 @@ pub struct VirtualMachineConfig {
     pub gpu: AmdgpuConfig,
 }
 
+impl KfdDeviceInfo {
+    /// The gfx target this device presents, or `None` when it names no
+    /// GPU.
+    ///
+    /// The authority for the question, because this is where the answer
+    /// is written down: anything that needs the ISA a session emulates
+    /// reaches this device and asks, rather than keeping a second copy
+    /// that can disagree with it.
+    #[must_use]
+    pub fn gfx_target(&self) -> Option<crate::hardware::GfxTarget> {
+        crate::hardware::GfxTarget::new(self.gfx_target_version)
+    }
+}
+
 /// Top-level agent (single-device hardware) definition.
 ///
 /// # Absent is not zero
@@ -376,6 +390,15 @@ fn collect_omitted(
         for (index, (child, value)) in original.iter().zip(defaulted).enumerate() {
             collect_omitted(child, value, &format!("{path}/{index}"), omitted);
         }
+    }
+}
+
+impl AgentDef {
+    /// The gfx target this agent's GPU presents, or `None` when it names
+    /// no GPU. See [`KfdDeviceInfo::gfx_target`].
+    #[must_use]
+    pub fn gfx_target(&self) -> Option<crate::hardware::GfxTarget> {
+        self.vm.gpu.device.gfx_target()
     }
 }
 
