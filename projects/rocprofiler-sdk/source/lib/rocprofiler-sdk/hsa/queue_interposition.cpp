@@ -75,6 +75,10 @@
 #include <thread>
 #include <vector>
 
+#if defined(__x86_64__) || defined(__i386__)
+#    include <immintrin.h>
+#endif
+
 namespace rocprofiler
 {
 namespace hsa
@@ -210,6 +214,20 @@ cpu_relax()
 #endif
 }
 
+// Drain the CPU's write-combining buffers, making every preceding store visible before any
+// store that follows. Stores to write-combining memory -- which is how a queue ring buffer in
+// device memory is mapped -- retire out of order, so a packet body written there can reach the
+// command processor after the header that publishes the slot.
+inline void
+store_fence()
+{
+#if defined(__x86_64__) || defined(__i386__)
+    _mm_sfence();
+#else
+    std::atomic_thread_fence(std::memory_order_release);
+#endif
+}
+
 // Per-thread handoff from process_doorbell_impl() to ring_buffer_writer().
 struct doorbell_tls_t
 {
@@ -311,6 +329,7 @@ ring_buffer_writer(const void* pkts, uint64_t pkt_count)
                 ::memcpy(dst + header_size, s + header_size, pkt_size - header_size);
                 uint16_t header = 0;
                 ::memcpy(&header, s, header_size);
+                store_fence();
                 __atomic_store_n(reinterpret_cast<uint16_t*>(dst), header, __ATOMIC_RELEASE);
             }
             else
