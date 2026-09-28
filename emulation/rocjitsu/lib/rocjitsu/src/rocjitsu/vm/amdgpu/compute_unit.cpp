@@ -790,7 +790,10 @@ void ComputeUnitCore::tick_pipelines() {
 }
 
 VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront &wf) {
-  plugin_group_->onAmdgpuRouteMemoryInstruction(*inst, wf);
+  if (observes_memory_instruction_routing_)
+    plugin_group_->onAmdgpuRouteMemoryInstruction(*inst, wf);
+  const bool observe_routed_access =
+      observes_memory_routing_ && plugin_group_->observes_memory_routing(wf);
   const uint8_t decoded_route_tag = inst->data()->tag();
   bool normalized_to_local = false;
   uint64_t flat_local_lane_mask = 0;
@@ -827,7 +830,7 @@ VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront 
         request_lanes == 0 ? wf_size : static_cast<uint32_t>(std::countr_zero(request_lanes));
     const uint64_t flat_shared_lane_mask = flat_local_lane_mask | flat_dds_lane_mask;
     if (first_lane < wf_size && (flat_shared_lane_mask & (uint64_t{1} << first_lane)) != 0) {
-      if (observes_memory_routing_) {
+      if (observe_routed_access) {
         std::ranges::copy_n(d.per_lane_addr.begin(), wf_size, pre_routing_address_storage.begin());
         pre_routing_addresses = {pre_routing_address_storage.data(), wf_size};
       }
@@ -857,7 +860,7 @@ VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront 
   // wants it rather than on any plugin at all, because building the
   // observation is real work on the per-instruction path and most plugins have
   // no use for it.
-  if (observes_memory_routing_)
+  if (observe_routed_access)
     report_routed_access(*inst, wf, route_tag, decoded_route_tag, normalized_to_local,
                          pre_routing_addresses, flat_local_lane_mask, flat_dds_lane_mask);
 
@@ -1539,7 +1542,8 @@ template <bool EnableAsync>
         // Async execution bypasses execute_instruction(), but the submitted
         // instruction still ends the immediately-adjacent setreg hazard.
         active->clear_setreg_vgpr_msb_hazard();
-        plugin_group_->onAmdgpuAsyncInstructionIssued(active->pc, *inst, *active);
+        if (observes_async_instruction_issued_)
+          plugin_group_->onAmdgpuAsyncInstructionIssued(active->pc, *inst, *active);
         active->pc += inst_size;
         return;
       }
@@ -1571,8 +1575,9 @@ template <bool EnableAsync>
     }
   }
 
-  plugin_group_->onAmdgpuBeforeExecuteInstruction(active->pc, *inst, *active,
-                                                  std::span<const uint32_t>(words, 4));
+  if (observes_before_execute_instruction_)
+    plugin_group_->onAmdgpuBeforeExecuteInstruction(active->pc, *inst, *active,
+                                                    std::span<const uint32_t>(words, 4));
 
   // s_trap enters the per-process handler configured by SET_TRAP_HANDLER. The
   // hardware saves the interrupted PC/status in TTMPs and begins fetching at
@@ -1724,7 +1729,8 @@ template <bool EnableAsync>
       inst->is_memory_wait_producer() && !(inst->is_memory_op() && inst->data()))
     track_memory_wait(*inst, *active);
 
-  plugin_group_->onAmdgpuAfterExecuteInstruction(active->pc, *inst, *active);
+  if (observes_after_execute_instruction_)
+    plugin_group_->onAmdgpuAfterExecuteInstruction(active->pc, *inst, *active);
 
   if constexpr (util::Logger::group_enabled(util::Logger::GROUP_VM)) {
     if (active->num_vgprs_ > 0) {
