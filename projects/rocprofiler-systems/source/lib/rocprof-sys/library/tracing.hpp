@@ -266,7 +266,7 @@ get_timemory(CategoryT, std::string_view name)
     {
         return std::make_pair(_v_back, _data->size() - 1);
     }
-    else if(_data->size() > 1)
+    if(_data->size() > 1)
     {
         for(size_t i = _data->size() - 1; i > 0; --i)
         {
@@ -414,7 +414,7 @@ perfetto_annotate_timemory_data(CategoryT, const char* name, Arg&& arg)
     }
     else
     {
-        return std::move(arg);
+        return std::forward<Arg>(arg);
     }
 }
 
