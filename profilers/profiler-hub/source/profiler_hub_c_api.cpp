@@ -44,9 +44,9 @@ ph_get_library_version(ph_ctx_t ctx, ph_library_version_t* version)
         return PH_RESULT_INVALID_ARGUMENT;
     }
 
-    version->major = 0;
-    version->minor = 1;
-    version->patch = 0;
+    version->major = PROFILER_HUB_VERSION_MAJOR;
+    version->minor = PROFILER_HUB_VERSION_MINOR;
+    version->patch = PROFILER_HUB_VERSION_PATCH;
     return PH_RESULT_SUCCESS;
 }
 

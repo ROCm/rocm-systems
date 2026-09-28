@@ -75,6 +75,20 @@ TEST_F(c_api_real_ctx_test, create_and_free_succeeds_on_real_trace)
     EXPECT_EQ(ph_ctx_free(ctx), PH_RESULT_SUCCESS);
 }
 
+TEST_F(c_api_real_ctx_test, ph_get_library_version_returns_build_version)
+{
+    ph_ctx_t ctx = nullptr;
+    ASSERT_EQ(ph_ctx_create(&ctx, m_db_path.c_str()), PH_RESULT_SUCCESS);
+
+    ph_library_version_t version{};
+    EXPECT_EQ(ph_get_library_version(ctx, &version), PH_RESULT_SUCCESS);
+    EXPECT_EQ(version.major, PROFILER_HUB_VERSION_MAJOR);
+    EXPECT_EQ(version.minor, PROFILER_HUB_VERSION_MINOR);
+    EXPECT_EQ(version.patch, PROFILER_HUB_VERSION_PATCH);
+
+    ph_ctx_free(ctx);
+}
+
 TEST_F(c_api_real_ctx_test, ph_get_track_list_null_track_list_returns_invalid_argument)
 {
     ph_ctx_t ctx = nullptr;
