@@ -41,7 +41,7 @@ function(hrr_verify_generated_files)
       "  ${updated_files_text}\n\n"
       "Add the updated files to the change and rerun the build.\n"
       "Review whether new or changed HIP APIs require explicit classification in\n"
-      "projects/hrr/tools/gen_hrr_api_args.py.\n")
+      "projects/hrr/tools/gen_hrr_api_args.py, and then run script again.\n")
   endif()
 endfunction()
 
