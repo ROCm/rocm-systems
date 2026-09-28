@@ -4199,6 +4199,7 @@ static hipError_t capture_hipModuleOccupancyMaxPotentialBlockSizeWithFlags(int* 
   return r;
 }
 
+
 // Generated shim
 static hipError_t capture_hipOccupancyMaxActiveBlocksPerMultiprocessor(int* numBlocks, const void* f, int blockSize, size_t dynSharedMemPerBlk) {
   hipError_t r = g_real_table.hipOccupancyMaxActiveBlocksPerMultiprocessor_fn(numBlocks, f, blockSize, dynSharedMemPerBlk);
