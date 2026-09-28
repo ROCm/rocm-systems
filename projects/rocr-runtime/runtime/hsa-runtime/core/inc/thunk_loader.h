@@ -446,6 +446,13 @@ class ThunkLoader {
     bool DestroyThunkInstance();
     bool CheckThunkAbi();
     bool IsDXG() const { return is_dxg_; }
+    // On Linux, DXG is only present under WSL2.
+    // On Windows, DXG is the native driver (not WSL).
+#if defined(__linux__)
+    bool IsWslDxg() const { return is_dxg_; }
+#else
+    bool IsWslDxg() const { return false; }
+#endif
     bool IsDTIF() const { return is_dtif_; }
     bool IsSharedLibraryLoaded() const { return is_loaded_; }
     void* ThunkHandle() const { return thunk_handle; }
