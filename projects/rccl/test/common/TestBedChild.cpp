@@ -445,6 +445,7 @@ namespace RcclUnitTesting
     PIPE_READ(streamIdx);
     PIPE_READ(options);
 
+    if (!this->IsValidGroupId(groupId, "SetCollectiveArgs")) return TEST_FAIL;
     if (globalRank < this->rankOffset || (this->rankOffset + comms.size() <= globalRank))
     {
       TEST_ERROR("Child %d does not contain rank %d", this->childId, globalRank);
@@ -505,6 +506,7 @@ namespace RcclUnitTesting
     PIPE_READ(userRegistered);
     PIPE_READ(groupId);
 
+    if (!this->IsValidGroupId(groupId, "AllocateMem")) return TEST_FAIL;
     if (globalRank < this->rankOffset || (this->rankOffset + comms.size() <= globalRank))
     {
       TEST_ERROR("Child %d does not contain rank %d", this->childId, globalRank);
@@ -550,6 +552,7 @@ namespace RcclUnitTesting
     PIPE_READ(prepDataFuncOffset);
     CollFuncPtr const prepDataFunc = CollFuncPtrFromOffset(prepDataFuncOffset);
 
+    if (!this->IsValidGroupId(groupId, "PrepareData")) return TEST_FAIL;
     if (globalRank < this->rankOffset || (this->rankOffset + comms.size() <= globalRank))
     {
       TEST_ERROR("Child %d does not contain rank %d", this->childId, globalRank);
@@ -589,6 +592,7 @@ namespace RcclUnitTesting
       PIPE_READ(tempRank);
       ranksToExecute.push_back(tempRank - this->rankOffset);
     }
+    if (!this->IsValidGroupId(groupId, "ExecuteCollectives")) return TEST_FAIL;
     if (this->verbose) TEST_INFO("Child %d begins ExecuteCollectives() %s with allocation type %d", this->childId, useHipGraph ? "(using hipGraphs)" : "", (int32_t)this->memAllocType);
 
     // Determine which local ranks to execute on
@@ -944,29 +948,7 @@ namespace RcclUnitTesting
         return TEST_SUCCESS;
       }();
 
-      if (this->useBlocking == false)
-      {
-        ncclResult_t const groupEndState = ncclGroupEnd();
-        if (groupEndState != ncclSuccess && groupEndState != ncclInProgress)
-        {
-          TEST_ERROR("Child process %d fails ncclGroupEnd ExecuteCollectives with code %d",
-                     this->childId, groupEndState);
-          return TEST_FAIL;
-        }
-        if (groupEndState == ncclInProgress)
-        {
-          for (int localRank = 0; localRank < this->comms.size(); ++localRank)
-          {
-            CHECK_HIP(hipSetDevice(this->deviceIds[localRank]));
-            CHILD_NCCL_CALL_NON_BLOCKING("ncclCommGetAsyncErrorGroupEnd", localRank);
-          }
-        }
-        CHECK_CALL(submitStatus);
-      }
-      else
-      {
-        CHECK_CALL(this->EndGroup(submitStatus, "ncclGroupEnd ExecuteCollectives"));
-      }
+      CHECK_CALL(this->EndGroup(submitStatus, "ncclGroupEnd ExecuteCollectives"));
     }
 
     // Instantiate and launch HIP graph if requested
@@ -1111,12 +1093,7 @@ namespace RcclUnitTesting
       return TEST_FAIL;
     }
     int const localRank = globalRank - rankOffset;
-    if (groupId < 0 || groupId >= static_cast<int>(this->collArgs.size()))
-    {
-      TEST_ERROR("Child %d Rank %d: Invalid groupId %d (collArgs size: %zu)",
-               this->childId, globalRank, groupId, this->collArgs.size());
-      return TEST_FAIL;
-    }
+    if (!this->IsValidGroupId(groupId, "ValidateResults")) return TEST_FAIL;
     if (localRank >= static_cast<int>(this->collArgs[groupId].size()))
     {
       TEST_ERROR("Child %d Rank %d: localRank %d out of bounds for groupId %d (size: %zu)",
@@ -1332,6 +1309,7 @@ namespace RcclUnitTesting
     PIPE_READ(groupId);
     PIPE_READ(collId);
 
+    if (!this->IsValidGroupId(groupId, "DeallocateMem")) return TEST_FAIL;
     if (globalRank < this->rankOffset || (this->rankOffset + static_cast<int>(comms.size()) <= globalRank))
     {
       TEST_ERROR("Child %d does not contain rank %d", this->childId, globalRank);
@@ -1471,9 +1449,48 @@ namespace RcclUnitTesting
     return status;
   }
 
+  bool TestBedChild::IsValidGroupId(int const groupId, char const* handler) const
+  {
+    if (groupId >= 0 && groupId < static_cast<int>(this->collArgs.size())) return true;
+    TEST_ERROR("Child %d %s received invalid groupId %d (config has %zu group calls)",
+               this->childId, handler, groupId, this->collArgs.size());
+    return false;
+  }
+
+  void TestBedChild::AbortComms()
+  {
+    for (int localRank = 0; localRank < static_cast<int>(this->comms.size()); ++localRank)
+    {
+      if (this->comms[localRank] == nullptr) continue;
+      if (localRank < static_cast<int>(this->deviceIds.size()))
+        (void)hipSetDevice(this->deviceIds[localRank]);
+      ncclResult_t const abortState = ncclCommAbort(this->comms[localRank]);
+      if (abortState != ncclSuccess)
+        TEST_ERROR("Child %d fails ncclCommAbort for rank %d with code %d", this->childId, localRank, abortState);
+      this->comms[localRank] = nullptr;
+    }
+  }
+
   ErrCode TestBedChild::EndGroup(ErrCode const bodyStatus, char const* msg)
   {
     ncclResult_t const groupEndState = ncclGroupEnd();
+    if (groupEndState == ncclInProgress && !this->useBlocking)
+    {
+      // Non-blocking comms finish the group asynchronously; wait on every comm.
+      ErrCode pollStatus = TEST_SUCCESS;
+      for (int localRank = 0; localRank < static_cast<int>(this->comms.size()); ++localRank)
+      {
+        if (this->comms[localRank] == nullptr) continue;
+        ErrCode const rankStatus = [&]() -> ErrCode
+        {
+          CHECK_HIP(hipSetDevice(this->deviceIds[localRank]));
+          CHILD_NCCL_CALL_NON_BLOCKING(msg, localRank);
+          return TEST_SUCCESS;
+        }();
+        if (rankStatus != TEST_SUCCESS) pollStatus = TEST_FAIL;
+      }
+      return pollStatus != TEST_SUCCESS ? pollStatus : bodyStatus;
+    }
     if (groupEndState != ncclSuccess)
     {
       TEST_ERROR("Child process %d fails NCCL call %s with code %d", this->childId, msg, groupEndState);
@@ -1561,28 +1578,9 @@ namespace RcclUnitTesting
       CHECK_HIP(hipDeviceSynchronize());
     }
 
-    // Release graphs
-    for (size_t localRank = 0; localRank < this->deviceIds.size(); ++localRank)
-    {
-      CHECK_HIP(hipSetDevice(this->deviceIds[localRank]));
-      for (size_t streamIdx = 0; streamIdx < this->numStreamsPerGroup[groupId]; ++streamIdx)
-      {
-        if (streamIdx < this->graphEnabled[groupId][localRank].size() && this->graphEnabled[groupId][localRank][streamIdx])
-        {
-          if (this->verbose) TEST_INFO("Destroying graphs for group %d rank %zu stream %zu", groupId, localRank, streamIdx);
-          if (this->graphExecs[groupId][localRank][streamIdx])
-          {
-            CHECK_HIP(hipGraphExecDestroy(this->graphExecs[groupId][localRank][streamIdx]));
-            this->graphExecs[groupId][localRank][streamIdx] = nullptr;
-          }
-          if (this->graphs[groupId][localRank][streamIdx])
-          {
-            CHECK_HIP(hipGraphDestroy(this->graphs[groupId][localRank][streamIdx]));
-            this->graphs[groupId][localRank][streamIdx] = nullptr;
-          }
-        }
-      }
-    }
+    // Release every live handle, including a graph captured but never
+    // instantiated (graphEnabled stays false when hipGraphInstantiate fails).
+    CHECK_CALL(this->ReleaseGraphHandles(groupId));
 
     this->graphs[groupId].clear();
     this->graphExecs[groupId].clear();
@@ -1614,6 +1612,7 @@ namespace RcclUnitTesting
     // not leave rank ids in the pipe to be decoded as the next command.
     std::vector<int> globalRanks(numRanks);
     for (int& globalRank : globalRanks) PIPE_READ(globalRank);
+    if (!this->IsValidGroupId(groupId, "RegisterMem")) return TEST_FAIL;
 
     if (numRanks > this->totalRanks)
     {
@@ -1658,7 +1657,14 @@ namespace RcclUnitTesting
     }();
 
     // Completes handle exchange for all selected local ranks simultaneously.
-    CHECK_CALL(this->EndGroup(registerStatus, "ncclGroupEnd RegisterMem"));
+    ErrCode const groupStatus = this->EndGroup(registerStatus, "ncclGroupEnd RegisterMem");
+    if (groupStatus != TEST_SUCCESS)
+    {
+      // Peers that registered every window wait in the comm-wide symmetric
+      // registration barrier at their group end; abort so they fail instead of hanging.
+      if (this->memAllocType == MEM_ALLOC_SYMMETRIC_WIN) this->AbortComms();
+      return groupStatus;
+    }
     // Ensure GPU memory mapping / TLB invalidations complete on selected ranks.
     for (int localRank : localRanks)
     {

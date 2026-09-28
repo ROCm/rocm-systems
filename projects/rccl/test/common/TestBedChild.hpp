@@ -141,7 +141,14 @@ namespace RcclUnitTesting
     // Closes an NCCL group opened by the caller and returns bodyStatus unless
     // ncclGroupEnd itself fails. The group must be closed on every exit path,
     // otherwise a pooled worker carries the open group into the next config.
+    // With non-blocking comms, ncclInProgress is waited out on every comm.
     ErrCode EndGroup(ErrCode bodyStatus, char const* msg);
+
+    // Aborts and nulls every live comm of this child. Later teardown skips them.
+    void AbortComms();
+
+    // Rejects a pipe-supplied groupId that does not index the current config.
+    bool IsValidGroupId(int groupId, char const* handler) const;
 
     // Destroys any live graph / graph-exec handles for groupId after syncing
     // the owning devices.
