@@ -278,6 +278,46 @@ TEST(SwmmacK128SimdExact, TiedCIsReadFromD) {
   }
 }
 
+TEST(SwmmacK128SimdExact, IgnoresPartialExecAndUpdatesFullWave) {
+  constexpr uint64_t partial_exec = 0xAAAAAAAAu;
+  for (const auto &test : CASES) {
+    SCOPED_TRACE(test.name);
+    SwmmacFixture fx;
+    ASSERT_NE(fx.cu, nullptr);
+    ASSERT_NE(fx.wf, nullptr);
+    clear_state(fx);
+    seed_constant_indices(fx);
+
+    const uint32_t a_word = static_cast<uint32_t>(one(test.a_fmt)) * 0x01010101u;
+    const uint32_t b_word = static_cast<uint32_t>(one(test.b_fmt)) * 0x01010101u;
+    for (uint32_t reg = 0; reg < A_REGS; ++reg)
+      for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+        fx.cu->write_vgpr(fx.vbase + A_OFF + reg, lane, a_word);
+    for (uint32_t reg = 0; reg < B_REGS; ++reg)
+      for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+        fx.cu->write_vgpr(fx.vbase + B_OFF + reg, lane, b_word);
+
+    auto instruction = decode_case(test);
+    ASSERT_NE(instruction, nullptr);
+    const auto initial = fx.snapshot(0, STATE_REGS);
+    const uint32_t expected_word =
+        test.f32_result ? std::bit_cast<uint32_t>(64.0f) : uint32_t{0x54005400u};
+    const std::vector<uint32_t> expected(static_cast<size_t>(test.dst_regs()) * WF_SIZE,
+                                         expected_word);
+    ForceScalarGuard guard;
+    for (bool force_scalar : {true, false}) {
+      restore(fx, initial);
+      fx.wf->set_exec(partial_exec);
+      util::set_force_scalar_for_testing(force_scalar);
+      ASSERT_TRUE(fx.cu->execute_instruction(instruction.get(), *fx.wf).succeeded())
+          << (force_scalar ? "scalar execution failed" : "default execution failed");
+      EXPECT_EQ(fx.snapshot(D_OFF, test.dst_regs()), expected)
+          << (force_scalar ? "scalar result" : "default result");
+      EXPECT_EQ(fx.wf->exec(), partial_exec);
+    }
+  }
+}
+
 TEST(SwmmacK128SimdExact, UpperMetadataAndPhysicalGatherMatchIndependentOracle) {
   SKIP_IF_NO_SIMD();
   if (util::native<float>::size() != 16)
