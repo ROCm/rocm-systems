@@ -47,7 +47,7 @@ class TestSystemTopology(unittest.TestCase):
             topology,
             {
                 "weight": 0,
-                "link_status": amdsmi.amdsmi_wrapper.AMDSMI_LINK_STATUS_ENABLED,
+                "link_status": amdsmi.AmdSmiLinkStatus.AMDSMI_LINK_STATUS_ENABLED,
                 "link_type": amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_INTERNAL,
                 "num_hops": 0,
                 "fb_sharing": 1,
@@ -77,7 +77,9 @@ class TestSystemTopology(unittest.TestCase):
         link = amdsmi.amdsmi_topo_get_link_type(src, dst)
         self.assertEqual(topology["link_type"], link["type"])
         self.assertEqual(topology["num_hops"], min(link["hops"], 255))
-        self.assertEqual(topology["link_status"], amdsmi.amdsmi_wrapper.AMDSMI_LINK_STATUS_ENABLED)
+        self.assertEqual(
+            topology["link_status"], amdsmi.AmdSmiLinkStatus.AMDSMI_LINK_STATUS_ENABLED
+        )
         self.assertGreaterEqual(topology["weight"], 0)
         self.assertIn(topology["fb_sharing"], (0, 1))
 
