@@ -34,6 +34,7 @@
 #include <cstdint>
 #include <new>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -129,6 +130,26 @@ collect_module_variable(hsa_executable_t, hsa_agent_t, hsa_executable_symbol_t s
     }
 
     if(addr == 0 || size == 0) return HSA_STATUS_SUCCESS;
+
+    // HIP emits a one-byte __hip_cuid_<hash> marker into every code object so the runtime can pair
+    // host and device compilation units. No kernel writes it, and capturing it would cost one
+    // synchronous copy per loaded code object on every snapshot and on every restore.
+    if(size == 1)
+    {
+        constexpr auto hip_cuid_prefix = std::string_view{"__hip_cuid_"};
+        uint32_t       name_length     = 0;
+        if(core->hsa_executable_symbol_get_info_fn(symbol,
+                                                   HSA_EXECUTABLE_SYMBOL_INFO_NAME_LENGTH,
+                                                   &name_length) == HSA_STATUS_SUCCESS &&
+           name_length >= hip_cuid_prefix.size())
+        {
+            auto name = std::string(name_length, '\0');
+            if(core->hsa_executable_symbol_get_info_fn(
+                   symbol, HSA_EXECUTABLE_SYMBOL_INFO_NAME, name.data()) == HSA_STATUS_SUCCESS &&
+               std::string_view{name}.substr(0, hip_cuid_prefix.size()) == hip_cuid_prefix)
+                return HSA_STATUS_SUCCESS;
+        }
+    }
 
     // A variable above the cap is skipped, which means a kernel's writes to it leak across replay
     // passes and passes 2..N see mutated inputs. That is a wrong-counters outcome, so it cannot be
