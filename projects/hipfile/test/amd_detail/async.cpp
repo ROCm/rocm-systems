@@ -67,12 +67,6 @@ using ::testing::Throw;
 using ::testing::Values;
 using ::testing::WithParamInterface;
 
-static std::shared_ptr<void>
-make_shared_void(std::size_t num_bytes)
-{
-    return std::static_pointer_cast<void>(std::make_shared<std::byte[]>(num_bytes));
-}
-
 struct HipFileAsyncOp : public Test {
     HipFileAsyncOp()
         : buffer{std::make_shared<StrictMock<MBuffer>>()}, file{std::make_shared<StrictMock<MFile>>()},
@@ -82,10 +76,13 @@ struct HipFileAsyncOp : public Test {
         EXPECT_CALL(*stream, fixedFileOffset).Times(AnyNumber()).WillRepeatedly(Return(false));
         EXPECT_CALL(*stream, fixedIOSize).Times(AnyNumber()).WillRepeatedly(Return(false));
         EXPECT_CALL(*stream, pageAligned).Times(AnyNumber()).WillRepeatedly(Return(false));
+        EXPECT_CALL(*stream, getHipDevice).Times(AnyNumber()).WillRepeatedly(Return(0));
 
         EXPECT_CALL(*buffer, getBuffer)
             .Times(AnyNumber())
             .WillRepeatedly(Return(reinterpret_cast<hipStream_t>(0xFEFEFEFE)));
+        EXPECT_CALL(*buffer, getLength).Times(AnyNumber()).WillRepeatedly(Return(size_t{1} << 20));
+        EXPECT_CALL(*buffer, getGpuId).Times(AnyNumber()).WillRepeatedly(Return(0));
     }
     StrictMock<MHip>    mhip;
     StrictMock<MSys>    msys;
@@ -237,6 +234,32 @@ TEST_F(HipFileAsyncOp, enqueueAsync_compensates_signal_when_dispatch_fails)
                               &bytes, stream),
                  Hip::RuntimeError);
     ASSERT_EQ(slot_storage, 1u);
+}
+
+TEST_F(HipFileAsyncOp, enqueueAsync_throws_on_invalid_params)
+{
+    StrictMock<MAsyncMonitor> mmon;
+    auto                      backend       = std::make_shared<StrictMock<MBackend>>();
+    size_t                    size          = 100;
+    hoff_t                    file_offset   = 0;
+    hoff_t                    buffer_offset = -1;
+    ssize_t                   bytes         = 0;
+
+    EXPECT_THROW(enqueueAsync(backend, IoType::Read, file, buffer, &size, &file_offset, &buffer_offset,
+                              &bytes, stream),
+                 std::invalid_argument);
+}
+
+TEST_F(HipFileAsyncOp, async_run_io_reports_invalid_value_on_bad_params)
+{
+    size_t  size          = 100;
+    hoff_t  file_offset   = 0;
+    hoff_t  buffer_offset = size_t{2} << 20;
+    ssize_t bytes         = 0;
+    auto    op            = std::make_shared<AsyncOp>(IoType::Read, file, buffer, stream, &size, &file_offset,
+                                                      &buffer_offset, &bytes);
+    async_run_io(op.get());
+    ASSERT_EQ(op->bytes_transferred_internal, -hipFileInvalidValue);
 }
 
 static auto

@@ -5,9 +5,11 @@
 
 #include "async.h"
 #include "backend.h"
+#include "buffer.h"
 #include "context.h"
 #include "hip.h"
 #include "hipfile.h"
+#include "io.h"
 #include "stream.h"
 #include "sys.h"
 #include "thread-pool.h"
@@ -139,6 +141,10 @@ async_run_io(void *userargs)
     const size_t size = std::min(*get_variant_ptr(op->size), getMaxRwCount());
     const hoff_t fo   = *get_variant_ptr(op->file_offset);
     const hoff_t bo   = *get_variant_ptr(op->buffer_offset);
+    if (!paramsValid(op->buffer, size, fo, bo)) {
+        op->bytes_transferred_internal = -hipFileInvalidValue;
+        return;
+    }
     try {
         op->bytes_transferred_internal =
             op->backend->io(op->io_type, op->file, op->buffer, size, fo, bo, op->stream->copyStream());
@@ -153,6 +159,14 @@ enqueueAsync(std::shared_ptr<Backend> backend, IoType type, std::shared_ptr<IFil
              std::shared_ptr<IBuffer> buffer, size_t *size_p, hoff_t *file_offset_p, hoff_t *buffer_offset_p,
              ssize_t *bytes_transferred_p, std::shared_ptr<IStream> stream)
 {
+    if (!paramsValid(buffer, std::min(*size_p, getMaxRwCount()), *file_offset_p, *buffer_offset_p)) {
+        throw std::invalid_argument("The selected file or buffer region is invalid");
+    }
+
+    if (buffer->getGpuId() != stream->getHipDevice()) {
+        throw std::invalid_argument("Buffer GPU ID does not match Stream GPU ID");
+    }
+
     *bytes_transferred_p = 0;
 
     auto op     = std::make_shared<AsyncOp>(type, std::move(file), std::move(buffer), stream, size_p,
