@@ -1652,7 +1652,7 @@ typedef enum {
  *
  * @cond @tag{gpu_bm_linux} @endcond
  */
-#define AMDSMI_EVENT_MASK_FROM_INDEX(i) (1ULL << ((i) - 1))
+#define AMDSMI_EVENT_MASK_FROM_INDEX(i) (1ULL << ((i)-1))
 
 /**
  * @brief Event notification data returned from event notification API
@@ -2199,9 +2199,10 @@ typedef struct {
  * ::amdsmi_gpu_metrics_t.apu_metrics when APU-specific metrics are available.
  *
  * **Version Support:**
- * - v2.x: format_revision == 2 && content_revision <= 4. Revisions below 2.4 are
- *   byte-prefix subsets of the v2.4 layout, so they populate the fields their own
- *   revision defines and leave the later ones at the sentinel described below.
+ * - v2.x: format_revision == 2 && content_revision in [1, 4]. Revisions v2.1-v2.3
+ *   are byte-prefix subsets of the v2.4 layout, so they populate the fields their
+ *   own revision defines and leave the later ones at the sentinel described below.
+ *   v2.0 orders its fields differently and is not supported.
  * - v3.0: format_revision == 3 && content_revision == 0
  * Use ::amdsmi_gpu_metrics_t.common_header to identify which version populated
  * the fields.
@@ -2564,7 +2565,7 @@ typedef struct {
    * **Version Detection:**
    * Use ::common_header.format_revision and ::common_header.content_revision to
    * determine which APU metrics version is active:
-   * - v2.x: format_revision == 2 && content_revision <= 4
+   * - v2.x: format_revision == 2 && content_revision in [1, 4] (v2.0 unsupported)
    * - v3.0: format_revision == 3 && content_revision == 0
    *
    * **Field Validity:**
@@ -2572,7 +2573,7 @@ typedef struct {
    * 0xFFFF (65535) when not populated for the current version. Refer to inline
    * comments in ::amdsmi_apu_metrics_t for per-field version availability; the
    * `v2_4` annotation names the v2.x layout, and a device reporting an earlier
-   * v2 revision leaves the fields that revision omits at the sentinel.
+   * v2.1-v2.3 revision leaves the fields that revision omits at the sentinel.
    */
   amdsmi_apu_metrics_t* apu_metrics;
 
