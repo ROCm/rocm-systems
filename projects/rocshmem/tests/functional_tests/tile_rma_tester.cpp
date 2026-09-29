@@ -377,6 +377,15 @@ TileRMATester::TileRMATester(TesterArguments args) : Tester(args) {
   // columns must fit within the row stride: tile_extent_1 * col_stride <= row_stride.
   if ((_type == TilePutArbitraryTestType || _type == TileGetArbitraryTestType) &&
       tile_extent_1 > ARBITRARY_MAX_COLS) {
+    if (args.max_msg_size_set) {
+      size_t effective = static_cast<size_t>(tile_extent_0) * ARBITRARY_MAX_COLS * sizeof(float);
+      std::cerr << "Warning: tile_put/get_arbitrary: -s " << args.max_msg_size
+                << " exceeds the arbitrary-stride column limit (row_stride=257, col_stride=3"
+                << " -> max " << ARBITRARY_MAX_COLS << " cols)."
+                << " Effective max tile size is " << effective << " bytes ("
+                << tile_extent_0 << " rows x " << ARBITRARY_MAX_COLS
+                << " cols x " << sizeof(float) << " bytes).\n";
+    }
     tile_extent_1 = ARBITRARY_MAX_COLS;
   }
 
