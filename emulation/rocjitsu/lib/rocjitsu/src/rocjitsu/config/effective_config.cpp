@@ -9,6 +9,7 @@
 #include "embedded_schema.h"
 #include "simulation_config_generated.h"
 
+#include <charconv>
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
@@ -40,10 +41,8 @@ void skip_filler(std::string_view json, size_t &at) {
     if (c == ' ' || c == '\t' || c == '\r' || c == '\n') {
       ++at;
     } else if (json.compare(at, 2, "//") == 0) {
-      size_t line_end = at + 2;
-      while (line_end < json.size() && json[line_end] != '\n' && json[line_end] != '\r')
-        ++line_end;
-      at = line_end == json.size() ? json.size() : line_end + 1;
+      const size_t line_end = json.find_first_of("\r\n", at + 2);
+      at = line_end == std::string_view::npos ? json.size() : line_end + 1;
     } else if (json.compare(at, 2, "/*") == 0) {
       const size_t block_end = json.find("*/", at + 2);
       at = block_end == std::string_view::npos ? json.size() : block_end + 2;
@@ -53,28 +52,18 @@ void skip_filler(std::string_view json, size_t &at) {
   }
 }
 
-int hex_digit(char c) {
-  if (c >= '0' && c <= '9')
-    return c - '0';
-  if (c >= 'a' && c <= 'f')
-    return c - 'a' + 10;
-  if (c >= 'A' && c <= 'F')
-    return c - 'A' + 10;
-  return -1;
-}
-
 FailureOr<uint32_t> parse_hex_digits(std::string_view json, size_t &at, size_t count,
                                      const util::DiagnosticEmitter &emit_error) {
   if (json.size() - at < count)
     return emit_error.emit() << "unterminated escape sequence";
 
+  const std::string_view digits = json.substr(at, count);
   uint32_t value = 0;
-  for (size_t i = 0; i < count; ++i) {
-    const int digit = hex_digit(json[at++]);
-    if (digit < 0)
-      return emit_error.emit() << "escape code must be followed by hexadecimal digits";
-    value = (value << 4) | static_cast<uint32_t>(digit);
-  }
+  const auto [ptr, ec] = std::from_chars(digits.data(), digits.data() + digits.size(), value, 16);
+  if (ec != std::errc{} || ptr != digits.data() + digits.size())
+    return emit_error.emit() << "escape code must be followed by hexadecimal digits";
+
+  at += count;
   return value;
 }
 
