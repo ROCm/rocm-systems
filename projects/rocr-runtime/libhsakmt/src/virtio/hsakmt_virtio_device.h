@@ -126,7 +126,7 @@ struct vhsakmt_bo {
   struct vhsakmt_device* dev;
 
   _Atomic int refcount;
-  unsigned size;
+  uint64_t size;
   void* cpu_addr;
   void* host_addr;
   HsaMemFlags flags;
