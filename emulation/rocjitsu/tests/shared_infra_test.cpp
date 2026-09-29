@@ -764,6 +764,66 @@ void fill_vgprs(amdgpu::ComputeUnitCore &cu, uint32_t base, uint32_t regs, uint3
       cu.write_vgpr(base + reg, lane, value);
 }
 
+TEST(MfmaExecTest, SwmmacI32K64U4VaryingSelectorsMatchSparseReference) {
+  amdgpu::GpuMemory gpu_mem("rdna4_swmmac_u4_exec_mem");
+  amdgpu::L2Cache l2("rdna4_swmmac_u4_exec_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("rdna4_swmmac_u4_exec", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 32u);
+  wf->set_exec((1ULL << wf->wf_size()) - 1ULL);
+
+  const uint32_t vb = wf->vgpr_alloc().base;
+  const uint32_t a_base = vb, b_base = vb + 4, c_base = vb + 12;
+  const uint32_t d_base = vb + 20, index_base = vb + 32;
+  fill_vgprs(*cu, vb, 40, 32, 0);
+  constexpr std::array<std::array<uint32_t, 2>, 6> pairs = {
+      {{0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}}};
+  auto write_nibble = [&](uint32_t base, const amdgpu::InputLoc &loc, uint32_t value) {
+    const uint32_t reg = base + loc.vgpr_offset;
+    const uint32_t shift = 4u * loc.sub_element;
+    const uint32_t old = cu->read_vgpr(reg, loc.lane);
+    cu->write_vgpr(reg, loc.lane, old | (value << shift));
+  };
+
+  for (uint32_t row = 0; row < 16; ++row)
+    for (uint32_t group = 0; group < 16; ++group) {
+      const auto pair = pairs[(row + group + 73u) % pairs.size()];
+      // K=64 selectors follow the same interleaved lane halves as sparse A.
+      const uint32_t lane = row + 16u * ((group / 4u) & 1u);
+      const uint32_t shift = 4u * (4u * (group / 8u) + group % 4u);
+      const uint32_t old = cu->read_vgpr(index_base, lane);
+      cu->write_vgpr(index_base, lane, old | ((pair[0] | (pair[1] << 2u)) << shift));
+      for (uint32_t slot = 0; slot < 2; ++slot)
+        write_nibble(a_base, amdgpu::swmmac_a_input_loc(32, 16, 64, row, 2u * group + slot, 4), 1u);
+    }
+  for (uint32_t k = 0; k < 64; ++k)
+    for (uint32_t col = 0; col < 16; ++col)
+      write_nibble(b_base, amdgpu::swmmac_b_input_loc(32, 16, 64, col, k, 4), (k % 15u) + 1u);
+
+  amdgpu::exec_swmmac_i32(*cu, 16, 16, 64, 4, d_base, a_base, b_base, c_base, index_base, 16,
+                          /*index_key=*/0, amdgpu::extract_u4, amdgpu::extract_u4,
+                          /*clamp=*/false);
+  for (uint32_t row = 0; row < 16; ++row)
+    for (uint32_t col = 0; col < 16; ++col) {
+      uint32_t expected = 0;
+      for (uint32_t group = 0; group < 16; ++group) {
+        const auto pair = pairs[(row + group + 73u) % pairs.size()];
+        expected += ((4u * group + pair[0]) % 15u) + 1u;
+        expected += ((4u * group + pair[1]) % 15u) + 1u;
+      }
+      const auto out = amdgpu::wmma_output_loc_32(16, 16, row, col);
+      EXPECT_EQ(cu->read_vgpr(d_base + out.reg, out.lane), expected) << row << "," << col;
+    }
+}
+
 TEST(MfmaExecTest, SwmmacF32K32Fp8MatchesSparseReference) {
   amdgpu::GpuMemory gpu_mem("rdna4_swmmac_fp8_exec_mem");
   amdgpu::L2Cache l2("rdna4_swmmac_fp8_exec_l2");
