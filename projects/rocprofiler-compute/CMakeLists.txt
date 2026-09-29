@@ -1337,14 +1337,7 @@ install(
     DIRECTORY skills/
     DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/skills
     COMPONENT main
-    PATTERN "evals" EXCLUDE
-    PATTERN "run_evals.py" EXCLUDE
-    PATTERN "install-skills.sh" EXCLUDE
-)
-install(
-    PROGRAMS skills/install-skills.sh
-    DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/skills
-    COMPONENT main
+    USE_SOURCE_PERMISSIONS
 )
 # Docs the skills link to
 install(
