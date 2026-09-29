@@ -27,8 +27,8 @@ on:
         required: true
       corpus_ref:
         description: "Branch, tag, or SHA used by HIP, race, and DBT corpus tests"
-        # Last updated on 2026/09/23.
-        default: "d0e3182e981dfc45e38258965b297aa918c33f76"
+        # Last updated on 2026/10/05.
+        default: "49b2243937d044263543d967f40218480c6552e0"
         required: true
       vulkan_corpus_ref:
         description: "Branch, tag, or SHA used by the Vulkan compute/buffer CTS tests"
@@ -54,7 +54,7 @@ env:
   ROCJITSU_VULKAN_CORPUS_REF: 4c7fdd08d55bc1801cf1525732d6cabad06e05de
   ROCJITSU_DBT_VENV: ${{ github.workspace }}/gfx1250-dbt-venv-${{ github.run_id }}-${{ github.run_attempt }}
   ROCJITSU_HSACO_CORPUS: ${{ github.workspace }}/gfx1250-packaged-hsacos-${{ github.run_id }}-${{ github.run_attempt }}
-  ROCJITSU_DBT_CORPUS_REF: d0e3182e981dfc45e38258965b297aa918c33f76
+  ROCJITSU_DBT_CORPUS_REF: 49b2243937d044263543d967f40218480c6552e0
   ROCJITSU_DBT_SHA_FRAGMENTS: ${{ github.workspace }}/gfx1250-dbt-sha-pairs-${{ github.run_id }}-${{ github.run_attempt }}/fragments
   ROCJITSU_DBT_SHA_MANIFEST: ${{ github.workspace }}/gfx1250-dbt-sha-pairs-${{ github.run_id }}-${{ github.run_attempt }}/gfx1250-b0-a0-sha-pairs.json
   ROCM_SDK_VERSION: 10.1.0a20260812
