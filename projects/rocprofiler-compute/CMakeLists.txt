@@ -1045,6 +1045,23 @@ if(TARGET test-compression)
 endif()
 
 # -----------------------------------
+# CSV formatter Tests
+# -----------------------------------
+
+if(TARGET test-csv)
+    if(TEST_FROM_INSTALL)
+        set(_csv_test_cmd tests/test-csv)
+    else()
+        set(_csv_test_cmd $<TARGET_FILE:test-csv>)
+    endif()
+    add_test(NAME test-csv COMMAND ${_csv_test_cmd})
+    sanitizer_runtime_env(_san_env)
+    if(_san_env)
+        set_tests_properties(test-csv PROPERTIES ENVIRONMENT "${_san_env}")
+    endif()
+endif()
+
+# -----------------------------------
 # Generate coverage tests
 # -----------------------------------
 
