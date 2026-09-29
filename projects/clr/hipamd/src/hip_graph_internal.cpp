@@ -625,6 +625,7 @@ void GraphExecSegmented::BuildSyncPlan() {
     // is handled by the cheapest form the device offers: embedded in the first
     // captured packet's dep_signal when that packet is an ext kernel dispatch,
     // else a barrier-value packet, else a barrier-AND.
+    bool leading_barrier_placed = false;
     if (!barrier_dep_indices.empty()) {
       int num_deps = static_cast<int>(barrier_dep_indices.size());
       const bool use_ext_dep = num_deps == 1 && starts_with_ext_dispatch(firstBatch);
@@ -672,6 +673,7 @@ void GraphExecSegmented::BuildSyncPlan() {
         for (auto& nodeRange : firstBatch.nodeRanges) {
           nodeRange.startIndex += static_cast<size_t>(barrier_count);
         }
+        leading_barrier_placed = true;
       }
     } else if (segment.leads_with_uncaptured_sdma) {
       // No cross-stream dependency barrier, so the leading batch would be empty and the
@@ -688,6 +690,15 @@ void GraphExecSegmented::BuildSyncPlan() {
       for (auto& nodeRange : firstBatch.nodeRanges) {
         nodeRange.startIndex += 1;
       }
+      leading_barrier_placed = true;
+    }
+
+    // From here on the flag means "a leading barrier exists to carry the copy's signal".
+    // Both arms above place one when the first node is uncaptured (use_ext_dep needs a
+    // packet already in the batch), but clear the flag rather than rely on that.
+    assert(leading_barrier_placed || !segment.leads_with_uncaptured_sdma);
+    if (!leading_barrier_placed) {
+      segment.leads_with_uncaptured_sdma = false;
     }
 
     // PASS 2 only marks segments that got no wait packet above, so the first packet is the
@@ -3001,6 +3012,9 @@ hipError_t GraphExecSegmented::EnqueueSegment(const Segment& segment, hip::Strea
     // on the Compute->SDMA engine switch. A barrier packet also carries no fence of its own,
     // so raise the release scope for the copy engine to observe the producer's writes. Same
     // pairing as the mid-segment handoff below.
+    // BuildSyncPlan only keeps the flag set when it placed a leading barrier.
+    assert(!segment.leads_with_uncaptured_sdma ||
+           !segBatch->packet_batches[batchIndex].dispatchPackets.empty());
     if (segment.leads_with_uncaptured_sdma) {
       stream->vdev()->addSystemScope();
     }
