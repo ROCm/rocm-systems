@@ -768,7 +768,7 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterMemoryWithFlags(void* MemoryAddress,
                                                 (uint64_t)MemoryAddress + MemorySizeInBytes - 1UL);
     if (bo) {
       vhsa_debug(
-          "%s: memory already registered, MemoryAddress:%p, bo address: %p, size: %x, "
+          "%s: memory already registered, MemoryAddress:%p, bo address: %p, size: %lx, "
           "res_id: %d, count: %d\n",
           __FUNCTION__, MemoryAddress, bo->cpu_addr, bo->size, bo->real.res_id, bo->refcount);
       (void)vhsakmt_atomic_inc_return(&bo->refcount);
@@ -859,7 +859,7 @@ static int vhsakmt_deregister_userptr_non_svm(vhsakmt_device_handle dev, void* M
   while (n) {
     vhsakmt_bo_handle bo = (vhsakmt_bo_handle)((char*)n - offsetof(struct vhsakmt_bo, itn));
     if (bo->cpu_addr == (void*)aligned_addr) {
-      vhsa_debug("%s: found userptr: %p, size: %x, res_id: %d, count: %d\n", __FUNCTION__,
+      vhsa_debug("%s: found userptr: %p, size: %lx, res_id: %d, count: %d\n", __FUNCTION__,
                  bo->cpu_addr, bo->size, bo->real.res_id, bo->refcount);
 
       if (vhsakmt_atomic_dec_return(&bo->refcount) > 0) {
@@ -878,7 +878,7 @@ static int vhsakmt_deregister_userptr_non_svm(vhsakmt_device_handle dev, void* M
           hsakmt_interval_tree_iter_next(&dev->userptr_tree, n, aligned_addr, aligned_addr);
 
       if (bo->cpu_addr == (void*)aligned_addr) {
-        vhsa_debug("%s: destroying userptr: %p, size: %x, res_id: %d\n", __FUNCTION__, bo->cpu_addr,
+        vhsa_debug("%s: destroying userptr: %p, size: %lx, res_id: %d\n", __FUNCTION__, bo->cpu_addr,
                    bo->size, bo->real.res_id);
 
         hsakmt_interval_tree_remove(&dev->userptr_tree, &bo->itn);
