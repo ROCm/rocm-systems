@@ -5441,23 +5441,30 @@ amdsmi_status_t amdsmi_get_gpu_total_ecc_count(amdsmi_processor_handle processor
   if (gpu_device->backend()) return AMDSMI_STATUS_NOT_SUPPORTED;
 #endif
 
-  amdsmi_ras_err_state_t state = {};
+  // Read the enabled-blocks mask once and reuse it for every block below; calling
+  // amdsmi_get_gpu_ras_block_features_enabled() per block re-reads ras/features from
+  // sysfs on each call, which can trip host-side RAS read throttling on SR-IOV guests.
+  //
+  // We do not need to reopen/re-read `ras/features` once per block.
+  // Reading once per block (that's active) is sufficient to get the total ecc count.
+  uint64_t features_mask = 0;
+  amdsmi_status_t mask_status = smi_amdgpu_get_enabled_blocks(gpu_device, &features_mask);
+
   // Iterate through the ecc blocks
   for (auto block = AMDSMI_GPU_BLOCK_FIRST; block <= AMDSMI_GPU_BLOCK_LAST;
        block = (amdsmi_gpu_block_t)(block * 2)) {
+    // Only read counts from features which are enabled, otherwise continue
+    if (mask_status != AMDSMI_STATUS_SUCCESS || !(features_mask & block)) {
+      continue;
+    }
     // Clear the previous ecc block counts
     amdsmi_error_count_t block_ec = {};
-    // Check if the current ecc block is enabled
-    status = amdsmi_get_gpu_ras_block_features_enabled(processor_handle, block, &state);
-    if (status == AMDSMI_STATUS_SUCCESS && state == AMDSMI_RAS_ERR_STATE_ENABLED) {
-      // Increment the total ecc counts by the ecc block counts
-      status = amdsmi_get_gpu_ecc_count(processor_handle, block, &block_ec);
-      if (status == AMDSMI_STATUS_SUCCESS) {
-        // Increase the total ecc counts
-        ec->correctable_count += block_ec.correctable_count;
-        ec->uncorrectable_count += block_ec.uncorrectable_count;
-        ec->deferred_count += block_ec.deferred_count;
-      }
+    status = amdsmi_get_gpu_ecc_count(processor_handle, block, &block_ec);
+    if (status == AMDSMI_STATUS_SUCCESS) {
+      // Increase the total ecc counts
+      ec->correctable_count += block_ec.correctable_count;
+      ec->uncorrectable_count += block_ec.uncorrectable_count;
+      ec->deferred_count += block_ec.deferred_count;
     }
   }
 
