@@ -142,6 +142,12 @@ template <GpuIsa Isa> void validate_compute_unit_config(const ComputeUnitCore::C
   }
 }
 
+void ComputeUnitCore::set_diagnostic_hw_id_simd(std::optional<uint32_t> simd) {
+  if (simd && (config_.arch != ROCJITSU_CODE_ARCH_CDNA4 || *simd > 3u))
+    throw util::ConfigError("diagnostic_hw_id_simd requires CDNA4 and a value from 0 to 3");
+  config_.diagnostic_hw_id_simd = simd;
+}
+
 ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemory *memory,
                                  L2Cache *l2, uint32_t wf_size, uint32_t vgpr_storage_lane_count,
                                  uint32_t vgpr_allocation_block_size)
@@ -156,6 +162,7 @@ ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemo
       l2_(l2), l1_scalar_(l2), l1_vector_(l2), lds_(config.lds_size_kb),
       scalar_mem_pipeline_(&l1_scalar_), global_mem_pipeline_(&l1_vector_, l2),
       local_mem_pipeline_() {
+  set_diagnostic_hw_id_simd(config.diagnostic_hw_id_simd);
   if (!decoder_)
     throw std::runtime_error("Unsupported architecture for ComputeUnit decoder");
 

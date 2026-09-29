@@ -17,6 +17,8 @@ table ComputeUnitConfig {
   // Scratch-addressable wave slots per CU. Omitted in legacy checkpoints,
   // which retain the execution-slot count as their scratch capacity.
   scratch_slots_per_cu: uint32;
+  // Optional diagnostic CDNA4 HW_ID[5:4] value (0-3), not physical placement.
+  diagnostic_hw_id_simd: uint32 = null;
 }
 
 /// Configuration for a command processor.
