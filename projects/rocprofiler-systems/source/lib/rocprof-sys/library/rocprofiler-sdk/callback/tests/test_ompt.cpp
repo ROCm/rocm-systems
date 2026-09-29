@@ -766,6 +766,44 @@ TEST_F(ompt_test, finalize_orphan_events_emits_and_clears_both_storages)
     EXPECT_TRUE(detail::get_ompt_parallel_cb_storage<sdk>().empty());
 }
 
+// ─── on_ompt_finalize ────────────────────────────────────────────────────────
+
+TEST_F(ompt_test, on_ompt_finalize_flushes_orphan_standard_callback)
+{
+    const auto record =
+        make_record(sdk::OMPT_ID_task_create, sdk::CALLBACK_PHASE_ENTER, 1, 11);
+    detail::get_ompt_standard_cb_storage<sdk>().emplace(
+        11U, detail::rocprofsys_ompt_data_storage_t<sdk>{ record, 5, function_args_t{} });
+
+    EXPECT_CALL(*g_externals_mock, get_backtrace_data(false))
+        .WillOnce(Return(std::nullopt));
+    EXPECT_CALL(*g_tracing_backend_mock, get_callback_tracing_names())
+        .WillOnce(Return(tracing_names_t{}));
+    EXPECT_CALL(*g_tracing_backend_mock, get_parent_stack_id(_)).WillOnce(Return(0));
+    EXPECT_CALL(*g_externals_mock, metadata_add_string(_));
+    EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
+    EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
+    EXPECT_CALL(*g_externals_mock, metadata_add_thread_info(_, _, _));
+    EXPECT_CALL(*g_externals_mock,
+                region_sample_buffer_storage_store(_, _, _, _, _, _, _, _));
+
+    on_ompt_finalize<sdk, ext, ompt_api_category>();
+
+    EXPECT_TRUE(detail::get_ompt_standard_cb_storage<sdk>().empty());
+    EXPECT_TRUE(detail::get_ompt_parallel_cb_storage<sdk>().empty());
+}
+
+TEST_F(ompt_test, on_ompt_finalize_is_noop_when_no_pending_events)
+{
+    EXPECT_CALL(*g_externals_mock, get_backtrace_data(false))
+        .WillOnce(Return(std::nullopt));
+
+    on_ompt_finalize<sdk, ext, ompt_api_category>();
+
+    EXPECT_TRUE(detail::get_ompt_standard_cb_storage<sdk>().empty());
+    EXPECT_TRUE(detail::get_ompt_parallel_cb_storage<sdk>().empty());
+}
+
 // ─── ompt_tracing_callback_start / ompt_tracing_callback_stop ───────────────
 
 TEST_F(ompt_test, tracing_callback_start_pushes_timemory_when_enabled)
@@ -826,6 +864,8 @@ TEST(ompt_configure_test, is_a_noop) { on_ompt_configure<ext>(); }
 
 TEST_F(ompt_test, enter_skips_when_should_skip_true)
 {
+    EXPECT_CALL(*g_externals_mock, is_active()).WillOnce(Return(true));
+
     auto payload = sdk::callback_tracing_ompt_data_t{};
     payload.args.implicit_task.flags =
         static_cast<int>(detail::external_types::ompt_task_flag_t::ompt_task_initial);
@@ -838,6 +878,7 @@ TEST_F(ompt_test, enter_skips_when_should_skip_true)
 
 TEST_F(ompt_test, enter_starts_tracing_and_pushes_standard_callback_when_not_skipped)
 {
+    EXPECT_CALL(*g_externals_mock, is_active()).WillOnce(Return(true));
     EXPECT_CALL(*g_tracing_backend_mock, get_callback_tracing_names())
         .WillOnce(Return(tracing_names_t{}));
     EXPECT_CALL(*g_externals_mock, get_use_timemory()).WillOnce(Return(false));
@@ -857,6 +898,8 @@ TEST_F(ompt_test, enter_starts_tracing_and_pushes_standard_callback_when_not_ski
 
 TEST_F(ompt_test, exit_skips_when_should_skip_true)
 {
+    EXPECT_CALL(*g_externals_mock, is_active()).WillOnce(Return(true));
+
     auto payload = sdk::callback_tracing_ompt_data_t{};
     payload.args.implicit_task.flags =
         static_cast<int>(detail::external_types::ompt_task_flag_t::ompt_task_initial);
@@ -869,6 +912,7 @@ TEST_F(ompt_test, exit_skips_when_should_skip_true)
 
 TEST_F(ompt_test, exit_pops_found_standard_callback_and_emits_span)
 {
+    EXPECT_CALL(*g_externals_mock, is_active()).WillOnce(Return(true));
     EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
 
     auto payload = sdk::callback_tracing_ompt_data_t{};
@@ -902,6 +946,7 @@ TEST_F(ompt_test, exit_pops_found_standard_callback_and_emits_span)
 
 TEST_F(ompt_test, exit_without_matching_enter_emits_orphan_event)
 {
+    EXPECT_CALL(*g_externals_mock, is_active()).WillOnce(Return(true));
     EXPECT_CALL(*g_externals_mock, check_backtrace_operations(_, _))
         .WillOnce(Return(false));
     EXPECT_CALL(*g_externals_mock, get_backtrace_data(false))
@@ -931,6 +976,8 @@ TEST_F(ompt_test, exit_without_matching_enter_emits_orphan_event)
 
 TEST_F(ompt_test, none_skips_when_should_skip_true)
 {
+    EXPECT_CALL(*g_externals_mock, is_active()).WillOnce(Return(true));
+
     auto payload = sdk::callback_tracing_ompt_data_t{};
     payload.args.implicit_task.flags =
         static_cast<int>(detail::external_types::ompt_task_flag_t::ompt_task_initial);
@@ -943,6 +990,8 @@ TEST_F(ompt_test, none_skips_when_should_skip_true)
 
 TEST_F(ompt_test, none_ignores_callback_functions_marker)
 {
+    EXPECT_CALL(*g_externals_mock, is_active()).WillOnce(Return(true));
+
     auto payload   = sdk::callback_tracing_ompt_data_t{};
     auto record    = make_record(sdk::OMPT_ID_callback_functions);
     record.payload = &payload;
@@ -953,6 +1002,8 @@ TEST_F(ompt_test, none_ignores_callback_functions_marker)
 
 TEST_F(ompt_test, none_ignores_thread_end)
 {
+    EXPECT_CALL(*g_externals_mock, is_active()).WillOnce(Return(true));
+
     auto payload   = sdk::callback_tracing_ompt_data_t{};
     auto record    = make_record(sdk::OMPT_ID_thread_end);
     record.payload = &payload;
@@ -963,6 +1014,7 @@ TEST_F(ompt_test, none_ignores_thread_end)
 
 TEST_F(ompt_test, none_dispatches_parallel_begin_and_pushes_parallel_callback)
 {
+    EXPECT_CALL(*g_externals_mock, is_active()).WillOnce(Return(true));
     EXPECT_CALL(*g_externals_mock, check_backtrace_operations(_, _))
         .WillOnce(Return(false));
     EXPECT_CALL(*g_externals_mock, get_backtrace_data(false))
@@ -996,6 +1048,7 @@ TEST_F(ompt_test, none_dispatches_parallel_end_and_pops_parallel_callback)
     push_record.payload = &push_payload;
     detail::ompt_push_parallel_callback<sdk>(push_record, 5);
 
+    EXPECT_CALL(*g_externals_mock, is_active()).WillOnce(Return(true));
     EXPECT_CALL(*g_externals_mock, check_backtrace_operations(_, _))
         .WillOnce(Return(false));
     EXPECT_CALL(*g_externals_mock, get_backtrace_data(false))
@@ -1023,6 +1076,7 @@ TEST_F(ompt_test, none_dispatches_parallel_end_and_pops_parallel_callback)
 
 TEST_F(ompt_test, none_dispatches_instant_event_for_lock_init)
 {
+    EXPECT_CALL(*g_externals_mock, is_active()).WillOnce(Return(true));
     EXPECT_CALL(*g_externals_mock, check_backtrace_operations(_, _))
         .WillOnce(Return(false));
     EXPECT_CALL(*g_externals_mock, get_backtrace_data(false))
@@ -1052,6 +1106,7 @@ TEST_F(ompt_test, none_dispatches_instant_event_for_lock_init)
 
 TEST_F(ompt_test, none_dispatches_instant_event_for_thread_begin)
 {
+    EXPECT_CALL(*g_externals_mock, is_active()).WillOnce(Return(true));
     EXPECT_CALL(*g_externals_mock, check_backtrace_operations(_, _))
         .WillOnce(Return(false));
     EXPECT_CALL(*g_externals_mock, get_backtrace_data(false))
@@ -1082,6 +1137,7 @@ TEST_F(ompt_test, none_dispatches_instant_event_for_thread_begin)
 
 TEST_F(ompt_test, none_logs_warning_for_unhandled_operation)
 {
+    EXPECT_CALL(*g_externals_mock, is_active()).WillOnce(Return(true));
     EXPECT_CALL(*g_externals_mock, check_backtrace_operations(_, _))
         .WillOnce(Return(false));
     EXPECT_CALL(*g_externals_mock, get_backtrace_data(false))
@@ -1105,6 +1161,17 @@ TEST(ompt_domain_test, metadata_matches_ompt_domain)
     EXPECT_EQ(domain.meta.id, sdk::CALLBACK_TRACING_OMPT);
     EXPECT_EQ(domain.meta.mode, collection_mode::callback);
     EXPECT_FALSE(domain.meta.group.has_value());
+}
+
+TEST(ompt_domain_test, on_finalize_is_wired_to_orphan_event_flush)
+{
+    constexpr const auto& domain = k_ompt_api<sdk, ext>;
+
+    const finalize_cb_t expected_finalize =
+        &on_ompt_finalize<sdk, ext, ompt_api_category>;
+
+    ASSERT_NE(domain.on_finalize, nullptr);
+    EXPECT_EQ(domain.on_finalize, expected_finalize);
 }
 
 }  // namespace rocprofsys::domains::callback

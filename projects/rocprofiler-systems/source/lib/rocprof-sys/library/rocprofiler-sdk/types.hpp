@@ -89,6 +89,7 @@ using callback_tracing_cb_t =
              typename SdkBackend::user_data_t* user_data, void* callback_data);
 
 using configure_cb_t = void (*)();
+using finalize_cb_t  = void (*)();
 
 template <typename SdkBackend>
 struct buffered_domain_definition
@@ -99,6 +100,7 @@ struct buffered_domain_definition
     configure_cb_t                  on_configure = nullptr;
     std::optional<typename SdkBackend::external_correlation_request_kind_t>
         correlation_dependency = std::nullopt;
+    finalize_cb_t                   on_finalize = nullptr;
 };
 
 template <typename SdkBackend>
@@ -109,6 +111,7 @@ struct callback_domain_definition
     configure_cb_t                    on_configure = nullptr;
     std::optional<typename SdkBackend::external_correlation_request_kind_t>
         correlation_dependency = std::nullopt;
+    finalize_cb_t                   on_finalize = nullptr;
 };
 
 struct domain_configuration
