@@ -4260,14 +4260,17 @@ static ncclResult_t commDestroySync(struct ncclAsyncJob* job_) {
              comm->commHash, comm->rank);
       }
     }
-    if (COMPILER_ATOMIC_LOAD(comm->abortFlag, std::memory_order_acquire) == 0) {
+    if (COMPILER_ATOMIC_LOAD(comm->abortFlag, std::memory_order_acquire) == 0 && comm->childCount == 0 &&
+        comm->nNodes > 1) {
       int* hostRanks;
       int hostRank = 0;
       int nHostRanks = 0;
       // Wait for all host-local ranks before stopping the proxy threads, to ensure that PXN connection establishment
-      // can complete if some ranks were to try destroying the communicator early.  As an optimization, filter
-      // comm->localRanks to the local host only, since on MNNVL systems it can include other hosts, while PXN is
-      // strictly host-local.
+      // can complete if some ranks were to try destroying the communicator early.  Skip when childCount > 0 because
+      // after shrink/split some peers may have already aborted and will never reach this barrier.  Skip when
+      // nNodes == 1 because PXN is only used for multi-node communication, and on single-node configs the barrier
+      // can deadlock if processes reach destroy at different times.  As an optimization, filter comm->localRanks to
+      // the local host only, since on MNNVL systems it can include other hosts, while PXN is strictly host-local.
       NCCLCHECKGOTO(ncclCalloc(&hostRanks, comm->localRanks), ret, fail);
       for (int i = 0; i < comm->localRanks; i++) {
         if (comm->peerInfo[comm->localRankToRank[i]].hostHash == comm->peerInfo[comm->rank].hostHash) {
