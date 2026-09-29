@@ -1704,6 +1704,112 @@
         }
       ]
     },
+    "comm_mpi_tests_4rank": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 4,
+      "num_nodes": 1,
+      "num_gpus": 4,
+      "timeout": 240,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "INIT,COLL,NET,TUNING,ENV",
+        "RCCL_MPI_LOG_ALL_RANKS": "1"
+      },
+      "tests": [
+        {
+          "name": "CommMPITests_PersistentCommunicator_int8_short_4rank",
+          "description": "Persistent communicator reuse (int8, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (4 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/int8_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_uint8_short_4rank",
+          "description": "Persistent communicator reuse (uint8, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (4 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/uint8_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_int32_short_4rank",
+          "description": "Persistent communicator reuse (int32, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (4 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/int32_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_uint32_short_4rank",
+          "description": "Persistent communicator reuse (uint32, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (4 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/uint32_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_int64_short_4rank",
+          "description": "Persistent communicator reuse (int64, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (4 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/int64_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_uint64_short_4rank",
+          "description": "Persistent communicator reuse (uint64, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (4 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/uint64_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_fp16_short_4rank",
+          "description": "Persistent communicator reuse (fp16, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (4 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp16_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_fp32_short_4rank",
+          "description": "Persistent communicator reuse (fp32, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (4 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp32_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_fp64_short_4rank",
+          "description": "Persistent communicator reuse (fp64, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (4 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp64_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_bf16_short_4rank",
+          "description": "Persistent communicator reuse (bf16, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (4 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/bf16_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_fp8e4m3_short_4rank",
+          "description": "Persistent communicator reuse (fp8e4m3, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (4 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp8e4m3_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_fp8e5m2_short_4rank",
+          "description": "Persistent communicator reuse (fp8e5m2, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (4 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp8e5m2_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_fp32_large_4rank",
+          "description": "Persistent communicator reuse (fp32, large tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (4 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp32_large",
+          "timeout": 360
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_bf16_large_4rank",
+          "description": "Persistent communicator reuse (bf16, large tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (4 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/bf16_large",
+          "timeout": 480
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_fp8e4m3_large_4rank",
+          "description": "Persistent communicator reuse (fp8e4m3, large tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (4 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp8e4m3_large",
+          "timeout": 720
+        }
+      ]
+    },
     "ubr_multi_node": {
       "extends": "default",
       "is_gtest": true,
@@ -4682,6 +4788,12 @@
       "name": "Comm MPI Tests - 3-Rank (persistent communicator)",
       "description": "All 15 persistent-communicator rows from CommMPITests.cpp on 3 GPUs/ranks, single node: Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator",
       "config": "comm_mpi_tests_3rank",
+      "enabled": true
+    },
+    {
+      "name": "Comm MPI Tests - 4-Rank (persistent communicator)",
+      "description": "All 15 persistent-communicator rows from CommMPITests.cpp on 4 GPUs/ranks, single node: Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator",
+      "config": "comm_mpi_tests_4rank",
       "enabled": true
     },
     {
