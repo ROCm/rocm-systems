@@ -227,7 +227,19 @@ if(_deps_met)
       target_compile_options(${PROJECT_NAME} PRIVATE /wd4200 /wd4018 /wd4267 /wd4244 /wd4146)
     endif()
   endif()
-  target_link_libraries(${PROJECT_NAME} ${LINK_LIBRARY_LIST})
+  if(NOT WIN32)
+    target_link_libraries(${PROJECT_NAME} ${LINK_LIBRARY_LIST})
+  else()
+    # PRIVATE: rocdecode is a SHARED library exposing only a C API, so its link
+    # dependencies are implementation details. Linking them PRIVATE keeps them
+    # out of the exported INTERFACE_LINK_LIBRARIES. This is required on Windows,
+    # where the VA import libs (rocm_sysdeps_va*.lib) resolve to absolute
+    # build-tree paths; if propagated, a consumer relinking against the installed
+    # target (the ctest build-and-test samples, on a different machine) fails on
+    # a path that doesn't exist there. Windows-only to avoid changing the
+    # established transitive-linking behavior on Linux.
+    target_link_libraries(${PROJECT_NAME} PRIVATE ${LINK_LIBRARY_LIST})
+  endif()
 
   set_target_properties(${PROJECT_NAME} PROPERTIES POSITION_INDEPENDENT_CODE ON)
   set_target_properties(${PROJECT_NAME} PROPERTIES LINKER_LANGUAGE CXX)
