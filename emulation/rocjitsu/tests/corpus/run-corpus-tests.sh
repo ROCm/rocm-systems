@@ -221,7 +221,14 @@ run_pytest() {
   local skip_config_path="$5"
   local target_artifact_dir="$6"
   local target_cache_dir="$7"
-  shift 7
+  local suites="$8"
+  shift 8
+  local pytest_environment=(env)
+  if [[ "${suites}" == race ]]; then
+    pytest_environment+=("ROCJITSU_RACE_CONFIG=${config_path}")
+    # The race adapter materializes a private config for each GoogleTest case.
+    config_path="{config}"
+  fi
   # The run-wrapper timeout owns the per-test deadline and preserves the
   # command's captured diagnostics. Foreground mode keeps timeout and its child
   # in the supervisor-owned process group. Pytest gets cleanup headroom as a failsafe.
@@ -242,9 +249,8 @@ run_pytest() {
   local pytest_cmd=(
     pytest tests/test_corpus.py
     --target "${target_name}"
-    --suite "iree,kernels,cts"
+    --suite "${suites}"
     --run-wrapper "${run_wrapper_command% }"
-    --skip-tests-config "${skip_config_path}"
     --artifact-directory "${target_artifact_dir}"
     --durations=0
     -vv
@@ -254,57 +260,15 @@ run_pytest() {
     -o "timeout_func_only=true"
     -o "junit_duration_report=call"
   )
+  if [[ -n "${skip_config_path}" ]]; then
+    pytest_cmd+=(--skip-tests-config "${skip_config_path}")
+  fi
   if (( overall_timeout_seconds > 0 )); then
     timeout --signal=TERM --kill-after=10s "${overall_timeout_seconds}s" \
-      "${pytest_cmd[@]}" --timeout "${pytest_timeout_seconds}" "$@"
+      "${pytest_environment[@]}" "${pytest_cmd[@]}" --timeout "${pytest_timeout_seconds}" "$@"
     return
   fi
-  "${pytest_cmd[@]}" --timeout "${pytest_timeout_seconds}" "$@"
-}
-
-run_race_pytest() {
-  local timeout_seconds="$1"
-  local overall_timeout_seconds="$2"
-  local target_name="$3"
-  local config_path="$4"
-  local target_artifact_dir="$5"
-  local target_cache_dir="$6"
-  shift 6
-  local pytest_timeout_seconds=$((timeout_seconds + 15))
-  local run_wrapper=(
-    "${run_wrapper_prefix[@]}"
-    setpriv --pdeathsig TERM
-    "${corpus_process_supervisor}"
-    timeout --foreground --signal=TERM --kill-after=5s "${timeout_seconds}s"
-    "${rocjitsu_launcher}"
-    --config "{config}"
-    --
-  )
-  local run_wrapper_command
-  printf -v run_wrapper_command '%q ' "${run_wrapper[@]}"
-
-  local pytest_cmd=(
-    pytest tests/test_corpus.py
-    --target "${target_name}"
-    --suite race
-    --run-wrapper "${run_wrapper_command% }"
-    --artifact-directory "${target_artifact_dir}"
-    --durations=0
-    -vv
-    -o "cache_dir=${target_cache_dir}"
-    --tb=short
-    -n "${worker_count}"
-    -o "timeout_func_only=true"
-    -o "junit_duration_report=call"
-  )
-  if (( overall_timeout_seconds > 0 )); then
-    ROCJITSU_RACE_CONFIG="${config_path}" \
-      timeout --signal=TERM --kill-after=10s "${overall_timeout_seconds}s" \
-      "${pytest_cmd[@]}" --timeout "${pytest_timeout_seconds}" "$@"
-    return
-  fi
-  ROCJITSU_RACE_CONFIG="${config_path}" \
-    "${pytest_cmd[@]}" --timeout "${pytest_timeout_seconds}" "$@"
+  "${pytest_environment[@]}" "${pytest_cmd[@]}" --timeout "${pytest_timeout_seconds}" "$@"
 }
 
 for target in "${targets[@]}"; do
@@ -320,7 +284,7 @@ for target in "${targets[@]}"; do
   # Only the soft-timeout run is configured to output a JUnit XML report.
   first_run_status=0
   run_pytest "${soft_timeout_seconds}" 0 "${name}" "${rocjitsu_config_path}" \
-    "${skip_tests_config_path}" "${artifact_dir}" "${cache_dir}" \
+    "${skip_tests_config_path}" "${artifact_dir}" "${cache_dir}" "iree,kernels,cts" \
     --junitxml "${junit_xml}" || first_run_status=$?
   if [[ -f "${junit_xml}" ]]; then
     junit_xml_paths+=("${junit_xml}")
@@ -347,7 +311,7 @@ for target in "${targets[@]}"; do
   echo "::group::(${name}) pytest rerun failed tests"
   if run_pytest "${hard_timeout_seconds}" "${rerun_timeout_seconds}" "${name}" \
        "${rocjitsu_config_path}" "${skip_tests_config_path}" "${artifact_dir}" \
-       "${cache_dir}" --last-failed --last-failed-no-failures=none; then
+       "${cache_dir}" "iree,kernels,cts" --last-failed --last-failed-no-failures=none; then
     echo "::endgroup::"
     echo "::warning::Retried (${name}) tests passed."
     continue
@@ -370,8 +334,8 @@ if [[ "${race_tests}" == true ]]; then
     junit_xml="${junit_dir}/race-${name}.xml"
 
     first_run_status=0
-    run_race_pytest "${soft_timeout_seconds}" 0 "${name}" "${config_path}" \
-      "${artifact_dir}" "${cache_dir}" --junitxml "${junit_xml}" || \
+    run_pytest "${soft_timeout_seconds}" 0 "${name}" "${config_path}" "" \
+      "${artifact_dir}" "${cache_dir}" race --junitxml "${junit_xml}" || \
       first_run_status=$?
     if [[ -f "${junit_xml}" ]]; then
       junit_xml_paths+=("${junit_xml}")
@@ -391,8 +355,8 @@ if [[ "${race_tests}" == true ]]; then
     fi
 
     echo "::group::(race-${name}) pytest rerun failed tests"
-    if run_race_pytest "${hard_timeout_seconds}" "${rerun_timeout_seconds}" \
-         "${name}" "${config_path}" "${artifact_dir}" "${cache_dir}" \
+    if run_pytest "${hard_timeout_seconds}" "${rerun_timeout_seconds}" \
+         "${name}" "${config_path}" "" "${artifact_dir}" "${cache_dir}" race \
          --last-failed --last-failed-no-failures=none; then
       echo "::endgroup::"
       echo "::warning::Retried race (${name}) tests passed."
