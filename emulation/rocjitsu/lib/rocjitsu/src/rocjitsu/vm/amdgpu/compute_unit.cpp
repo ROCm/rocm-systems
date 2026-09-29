@@ -295,6 +295,24 @@ std::unique_ptr<ComputeUnitCore> ComputeUnitCore::create(std::string name, const
   throw std::runtime_error("Unsupported architecture for ComputeUnit");
 }
 
+void ComputeUnitCore::report_vgpr_allocation_violation(const Wavefront &wf, uint32_t relative_base,
+                                                       uint32_t register_count,
+                                                       bool accumulator) const {
+  const uint64_t prior =
+      register_allocation_violation_count_.fetch_add(1, std::memory_order_relaxed);
+  if (prior != 0)
+    return;
+  util::Logger::warn("RocJitsu register allocation violation: wave accessed ",
+                     accumulator ? "accumulator VGPR range acc" : "ordinary VGPR range v",
+                     relative_base, ":", accumulator ? "acc" : "v",
+                     relative_base + register_count - 1, " outside descriptor allocation (",
+                     accumulator ? "accumulator" : "ordinary",
+                     " count=", accumulator ? wf.num_accvgprs() : wf.num_ordinary_vgprs(),
+                     ") at pc=0x", std::hex, wf.pc, std::dec, " arch=", static_cast<int>(arch()));
+  if (engine())
+    engine()->request_exit("VGPR access exceeds descriptor allocation", 1);
+}
+
 Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t num_sgprs,
                                         uint32_t num_vgprs, uint32_t wave_size,
                                         uint32_t dispatch_id, uint32_t scratch_wave_limit_per_se) {

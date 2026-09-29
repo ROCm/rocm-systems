@@ -1404,22 +1404,12 @@ protected:
   ImmediateClusterLdsMulticastEngine default_cluster_lds_multicast_engine_;
   ClusterLdsMulticastEngine *cluster_lds_multicast_engine_ = &default_cluster_lds_multicast_engine_;
 
-  void report_vgpr_allocation_violation(const Wavefront &wf, uint32_t relative_base,
-                                        uint32_t register_count, bool accumulator) const {
-    const uint64_t prior =
-        register_allocation_violation_count_.fetch_add(1, std::memory_order_relaxed);
-    if (prior != 0)
-      return;
-    util::Logger::warn("RocJitsu register allocation violation: wave accessed ",
-                       accumulator ? "accumulator VGPR range acc" : "ordinary VGPR range v",
-                       relative_base, ":", accumulator ? "acc" : "v",
-                       relative_base + register_count - 1, " outside descriptor allocation (",
-                       accumulator ? "accumulator" : "ordinary",
-                       " count=", accumulator ? wf.num_accvgprs() : wf.num_ordinary_vgprs(),
-                       ") at pc=0x", std::hex, wf.pc, std::dec, " arch=", static_cast<int>(arch()));
-    if (engine())
-      engine()->request_exit("VGPR access exceeds descriptor allocation", 1);
-  }
+  // External execution plugins call this through inline register accessors.
+  // Keep engine internals behind the exported, cold reporting boundary.
+  RJ_API_EXPORT RJ_NOINLINE void report_vgpr_allocation_violation(const Wavefront &wf,
+                                                                  uint32_t relative_base,
+                                                                  uint32_t register_count,
+                                                                  bool accumulator) const;
 
   mutable std::atomic<uint64_t> register_allocation_violation_count_{0};
   uint32_t next_lds_alloc_ = 0; ///< Next free LDS offset for per-WG allocation.
