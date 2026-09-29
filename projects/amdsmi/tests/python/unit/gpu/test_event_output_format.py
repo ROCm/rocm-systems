@@ -104,6 +104,13 @@ class _LoggerTestBase(unittest.TestCase):
         return self.module.AMDSMILogger(format=output_format)
 
 
+class _IdentityHelpers:
+    """Minimal helpers stub: treats the device handle as the GPU id."""
+
+    def get_gpu_id_from_device_handle(self, device_handle):
+        return device_handle
+
+
 class TestEventCsvOutput(_LoggerTestBase):
     def test_header_printed_once_followed_by_rows(self):
         logger = self._make_logger("csv")
@@ -126,6 +133,40 @@ class TestEventCsvOutput(_LoggerTestBase):
 
         self.assertNotIn("\n\n", output)
         self.assertNotIn("\r", output)
+
+    def test_mixed_schema_events_do_not_leak_stale_values(self):
+        """A later event with a different message schema must not inherit a
+        prior event's flattened message columns.
+
+        The CSV header is fixed from the first event, so an event that lacks
+        those columns must render them as ``N/A`` rather than repeating the
+        previous event's values. Exercises the real store path
+        (``store_event_output``) which resets and re-flattens per event.
+        """
+        logger = self.module.AMDSMILogger(format="csv", helpers=_IdentityHelpers())
+
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            logger.store_event_output(
+                0,
+                {
+                    "timestamp": 100,
+                    "event": "PROCESS_START",
+                    "message": {"pid": "1", "task": "foo"},
+                },
+            )
+            logger.print_event_output()
+            logger.store_event_output(
+                0, {"timestamp": 101, "event": "VMFAULT", "message": {"addr": "0xdead"}}
+            )
+            logger.print_event_output()
+
+        lines = [line for line in buffer.getvalue().splitlines() if line != ""]
+
+        self.assertEqual(lines[0], "gpu,timestamp,event,pid,task")
+        self.assertEqual(lines[1], "0,100,PROCESS_START,1,foo")
+        self.assertEqual(lines[2], "0,101,VMFAULT,N/A,N/A")
+        self.assertNotIn("foo", lines[2])
 
 
 class TestEventJsonOutput(_LoggerTestBase):

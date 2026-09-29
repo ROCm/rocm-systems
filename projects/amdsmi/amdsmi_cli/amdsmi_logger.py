@@ -474,6 +474,19 @@ class AMDSMILogger:
         gpu_id = self.helpers.get_gpu_id_from_device_handle(device_handle)
         self._store_output_amdsmi(gpu_id=gpu_id, argument=argument, data=data)
 
+    def store_event_output(self, device_handle, values_dict):
+        """Store one streamed event as a fresh, self-contained record.
+
+        Event streaming emits one independent record per event, so the shared
+        ``output`` accumulator is cleared first. Without this reset a previous
+        event's flattened message keys (e.g. ``pid``/``task``) would linger and
+        leak stale values into a later event that carries a different message
+        schema — most visibly in ``--csv``, whose columns are fixed from the
+        first row and cannot grow to hold the new event's keys.
+        """
+        self.output = {}
+        self.store_output(device_handle, "values", values_dict)
+
     def store_nic_output(self, device_handle, argument, data):
         """Convert device handle to nic id and store output
         params:

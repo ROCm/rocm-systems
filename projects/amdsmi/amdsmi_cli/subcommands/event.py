@@ -104,13 +104,12 @@ class EventCommands:
                             item_list = item.split(": ")
                             message_dict.update({item_list[0]: item_list[1]})
                     values_dict["message"] = message_dict
-                    # store_output mutates the shared logger.output; hold the
-                    # event lock across store+print so a concurrent GPU thread
-                    # cannot overwrite it between this thread's store and print.
+                    # store_event_output resets and repopulates the shared
+                    # logger.output for this event; hold the event lock across
+                    # store+print so a concurrent GPU thread cannot overwrite it
+                    # between this thread's store and print.
                     with commands.logger._event_lock:
-                        commands.logger.store_output(
-                            event["processor_handle"], "values", values_dict
-                        )
+                        commands.logger.store_event_output(event["processor_handle"], values_dict)
                         commands.logger.print_event_output()
             except amdsmi_exception.AmdSmiLibraryException as e:
                 if e.err_code != amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_DATA:
