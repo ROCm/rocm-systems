@@ -300,17 +300,17 @@ TEST(RcclCeAllReduceEligibility, RcclUseCeAllReduce_Isolated)
 
 
 // ---------------------------------------------------------------------------
-// rcclCeNonRegMaxTab(table, ncclFuncAllReduce) / ncclCeInit staging-buffer growth.
+// rcclCeAr2ShotMax(comm) / ncclCeInit staging-buffer growth.
 //
 // ncclCeInit (ce_coll.cc:111-114) grows ceArMaxBytes past
-// NCCL_CE_AR_TMPBUF_DEFAULT_BYTES when rcclCeNonRegMaxTab returns a larger
+// NCCL_CE_AR_TMPBUF_DEFAULT_BYTES when rcclCeAr2ShotMax returns a larger
 // value.  Two sources can produce that:
 //   (a) table->ceNonRegMax[ncclFuncAllReduce] > default, read via archThresholds
 //   (b) RCCL_CE_AR_2SHOT_MAX_BYTES env var (rcclParamCeArMaxMsgBytes() >= 0)
 //
 // The tests below verify that the chunk-layout functions
 // (ncclCeAllReduceSlotChunkBytes, ncclCeAllReduceChooseChunkBytes) remain
-// correct when ceArMaxBytes is grown, and that rcclCeNonRegMaxTab resolves each
+// correct when ceArMaxBytes is grown, and that rcclCeAr2ShotMax resolves each
 // source correctly.
 
 static rcclArchThresholds MakeTableWithArMax(size_t arMax)
@@ -320,8 +320,8 @@ static rcclArchThresholds MakeTableWithArMax(size_t arMax)
     return t;
 }
 
-// Table path: ceNonRegMax[AR] = 512 MiB -> rcclCeNonRegMaxTab must return 512 MiB.
-TEST(RcclCeNonRegMaxTab, TablePathReturnsGrownValue)
+// Table path: ceNonRegMax[AR] = 512 MiB -> rcclCeAr2ShotMax must return 512 MiB.
+TEST(RcclCeAr2ShotMax, TablePathReturnsGrownValue)
 {
     constexpr size_t kGrownMax = 512ull * 1024 * 1024;
     rcclArchThresholds tbl = MakeTableWithArMax(kGrownMax);
@@ -329,27 +329,27 @@ TEST(RcclCeNonRegMaxTab, TablePathReturnsGrownValue)
     CeAllReduceMockComm mock;
     mock.comm.archThresholds = &tbl;
 
-    EXPECT_EQ(rcclCeNonRegMaxTab(extAlgoArchTable(mock.get()), ncclFuncAllReduce), kGrownMax);
+    EXPECT_EQ(rcclCeAr2ShotMax(mock.get()), kGrownMax);
 }
 
 // Table path at the default value: no spurious growth.
-TEST(RcclCeNonRegMaxTab, TablePathAtDefaultNoGrowth)
+TEST(RcclCeAr2ShotMax, TablePathAtDefaultNoGrowth)
 {
     rcclArchThresholds tbl = MakeTableWithArMax(NCCL_CE_AR_TMPBUF_DEFAULT_BYTES);
 
     CeAllReduceMockComm mock;
     mock.comm.archThresholds = &tbl;
 
-    EXPECT_EQ(rcclCeNonRegMaxTab(extAlgoArchTable(mock.get()), ncclFuncAllReduce), NCCL_CE_AR_TMPBUF_DEFAULT_BYTES);
+    EXPECT_EQ(rcclCeAr2ShotMax(mock.get()), NCCL_CE_AR_TMPBUF_DEFAULT_BYTES);
 }
 
 // Null table: falls back to NCCL_CE_AR_TMPBUF_DEFAULT_BYTES.
-TEST(RcclCeNonRegMaxTab, NullTableFallsBackToDefault)
+TEST(RcclCeAr2ShotMax, NullTableFallsBackToDefault)
 {
     CeAllReduceMockComm mock;
     mock.comm.archThresholds = nullptr;
 
-    EXPECT_EQ(rcclCeNonRegMaxTab(extAlgoArchTable(mock.get()), ncclFuncAllReduce), NCCL_CE_AR_TMPBUF_DEFAULT_BYTES);
+    EXPECT_EQ(rcclCeAr2ShotMax(mock.get()), NCCL_CE_AR_TMPBUF_DEFAULT_BYTES);
 }
 
 // Slot-stride invariants must hold when ceArMaxBytes is grown to 512 MiB.

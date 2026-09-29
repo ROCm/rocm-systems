@@ -3119,7 +3119,7 @@ TEST(WrapMicrotestIsolated, UseCeAllReduce_MsgTooLargeReturnsFalse) {
         comm->symmetricSupport = 1;
         comm->nNodes = 1;
         comm->nRanks = 1;
-        // count * sizeof(float) must exceed NCCL_CE_AR_MAX_MSG_BYTES (256MiB).
+        // count * sizeof(float) must exceed RCCL_CE_AR_2SHOT_MAX_BYTES (256MiB).
         size_t count = (256ull * 1024 * 1024 / 4) + 1;
         std::string log = RcclUnitTesting::CaptureLog(
             [&]() { EXPECT_FALSE(rcclUseCeAr2Shot(comm, count, ncclFloat32, ncclSum, nullptr)); });

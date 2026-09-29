@@ -36,7 +36,7 @@ namespace CeMPITestConstants
 constexpr size_t kSmallCount      = 4096;   // elements per rank for fast tests
 constexpr size_t kMediumCount     = 65536;  // elements per rank for larger tests
 // Total AllReduce message size that forces the CE multi-chunk pipeline. A shard
-// spills past one staging slot once the message exceeds NCCL_CE_AR_MAX_MSG_BYTES
+// spills past one staging slot once the message exceeds RCCL_CE_AR_2SHOT_MAX_BYTES
 // (256 MiB); 512 MiB yields >= 4 chunks per shard at every rank count, plus a
 // partial tail chunk whenever nRanks is not a power of two. Costs a transient
 // host buffer of the same size per rank in fill/verify.
@@ -795,7 +795,7 @@ TEST_F(CeMPI_AllReduce, LargeMessage)
 // CE-MPI-AR-06: Multi-chunk pipeline (chunksPerShard >= 2).
 //
 // ncclCeAllReduce() pipelines only when a shard does not fit one staging slot,
-// i.e. once the message passes NCCL_CE_AR_MAX_MSG_BYTES. That cap does not gate
+// i.e. once the message passes RCCL_CE_AR_2SHOT_MAX_BYTES. That cap does not gate
 // this path: it only sets ceAllReduceFits in taskAppend(), which gates the
 // unregistered "force" branch. With symmetric windows registered — as allocSymBuf
 // does here — ceAvailable alone selects CE, at any size.

@@ -871,6 +871,12 @@ inline size_t rcclCeNonRegMinTab(const rcclArchThresholds* table, ncclFunc_t fun
   if (table == nullptr) return 0;
   return (size_t)func < RCCL_DDA_FUNC_COUNT ? table->ceNonRegMin[(size_t)func] : 0;
 }
+size_t rcclCeAr2ShotMax(const struct ncclComm* comm) {
+  return rcclCeNonRegMaxTab(extAlgoArchTable(comm), ncclFuncAllReduce);
+}
+size_t rcclCeAr2ShotMin(const struct ncclComm* comm) {
+  return rcclCeNonRegMinTab(extAlgoArchTable(comm), ncclFuncAllReduce);
+}
 
 // Returns true when the message is within the CE-registered (2-shot) AllGather
 // window. Does not check symk eligibility -- callers gate on !symEligible explicitly.
@@ -892,6 +898,7 @@ bool rcclAllGatherCeRegisteredWindow(const ncclComm* comm, size_t totalBytes,
 
 
 inline size_t rcclDdaLLThresholdTab(const rcclArchThresholds* table, ncclFunc_t func) {
+  if (!rcclParamDdaLL()) return 0;
   size_t threshold;
   if (ddaThresholdFromEnv(rcclParamDdaLLThreshold(), &threshold)) return threshold;
   if (table == nullptr) return kDdaLLBaseDefault;
@@ -948,7 +955,7 @@ size_t rcclDdaVmmThreshold(const ncclComm* comm, ncclFunc_t func) {
 // and is a no-op for all other collectives.
 inline size_t rcclDdaEntryThresholdTab(const rcclArchThresholds* table, ncclFunc_t func) {
   size_t cap = rcclDdaVmmThresholdTab(table, func);
-  if (rcclParamDdaLL())    cap = std::max(cap, rcclDdaLLThresholdTab(table, func));
+  cap = std::max(cap, rcclDdaLLThresholdTab(table, func));
   cap = std::max(cap, rcclDdaLL128ThresholdTab(table, func));
   if (table != nullptr)    cap = std::max(cap, funcThresholdFromTable(table->ddaVmmMaxGraph, func));
   return cap;
@@ -1221,16 +1228,6 @@ bool rcclUseCeAr2Shot(struct ncclComm* comm, size_t count, ncclDataType_t dataty
     return false;
   }
 
-  // 2-shot selector cap (table/env). 0 means 2-shot is tuned off; registered CE
-  // still uses the default ceARTmpBuf. Does not override the allocated buffer:
-  // ncclCeInit grows ceArMaxBytes when this cap is larger than the default.
-  const size_t twoShotMax = rcclCeNonRegMaxTab(extAlgoArchTable(comm), ncclFuncAllReduce);
-  if (twoShotMax == 0) return false;
-  size_t msgBytes = count * ncclTypeSize(datatype);
-  if (msgBytes > twoShotMax) {
-    WARN("Skipping CE AllReduce: msgBytes (%zu) > twoShotMax (%zu)", msgBytes, twoShotMax);
-    return false;
-  }
 
   if (comm->config.CTAPolicy != NCCL_CTA_POLICY_ZERO && !force) {
     WARN("Skipping CE AllReduce: CTA policy is not ZERO");
@@ -1421,10 +1418,11 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
                              (arTwoShotMin == 0 || msgBytes >= arTwoShotMin);
   // This call site never carries a bias buffer (ncclAllReduceWithBias_impl bypasses it entirely
   // and goes straight to taskAppend), so /*acc=*/nullptr here is always correct.
+  const bool ceAr2ShotEligible = rcclUseCeAr2Shot(comm, count, datatype, op, /*acc=*/nullptr);
   const bool ceAllReduceAllowed = ncclGroupDepth == 0 && ceArGraphAllowed && twoShotWindow &&
-                                  rcclUseCeAr2Shot(comm, count, datatype, op, /*acc=*/nullptr) && (force || symReg);
+                                  ceAr2ShotEligible && (force || symReg);
   INFO(NCCL_TUNING, "AR CE-2SHOT symkRequested=%d criteria:ceAllReduceAllowed=%d twoShotWindow=%d (force=%d or symReg=%d) rcclUseCeAr2Shot=%d comm->ceColl.ceARTmpBuf not null:%d", 
-    (int)(!symkRequested), (int)ceAllReduceAllowed, (int)twoShotWindow, (int)force, (int)symReg, (int)rcclUseCeAr2Shot(comm, count, datatype, op, /*acc=*/nullptr), (int)(comm->ceColl.ceARTmpBuf != NULL));
+    (int)(symkRequested), (int)ceAllReduceAllowed, (int)twoShotWindow, (int)force, (int)symReg, (int)ceAr2ShotEligible, (int)(comm->ceColl.ceARTmpBuf != NULL));
     // (3) Eager CE 2-shot (staging buffer). Requires !symkRequested and an
     // initialized ceARTmpBuf (first call, before init, falls through to enqueue).
     // Gated on the raw symk signal, not symEligible: symmetric-window operands copy
@@ -1463,7 +1461,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
         const size_t arDdaLLMax    = rcclDdaLLThresholdTab(archTable, ncclFuncAllReduce);
         const size_t arDdaLL128Max = rcclDdaLL128ThresholdTab(archTable, ncclFuncAllReduce);
         // Small-message fast lane: LL protocol (no GPU barrier).
-        if (rcclParamDdaLL() && msgBytes <= arDdaLLMax &&
+        if (msgBytes <= arDdaLLMax &&
             ncclAllReduceDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
           decision->algo = RCCL_DDA_FABRIC_LL;
           decision->protocol = NCCL_PROTO_LL;
@@ -1619,7 +1617,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
       if (agFabricArch) {
         const size_t agDdaLLMax    = rcclDdaLLThresholdTab(archTable, ncclFuncAllGather);
         const size_t agDdaLL128Max = rcclDdaLL128ThresholdTab(archTable, ncclFuncAllGather);
-        if (rcclParamDdaLL() && msgSize <= agDdaLLMax &&
+        if (msgSize <= agDdaLLMax &&
             ncclAllGatherDdaFabricLLEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
           decision->algo = RCCL_DDA_FABRIC_LL;
           decision->protocol = NCCL_PROTO_LL;
@@ -1834,7 +1832,7 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
       if (ddaFabricArch) {
         const size_t rsDdaLLMax    = rcclDdaLLThresholdTab(archTable, ncclFuncReduceScatter);
         const size_t rsDdaLL128Max = rcclDdaLL128ThresholdTab(archTable, ncclFuncReduceScatter);
-        if (rcclParamDdaLL() && totalBytes <= rsDdaLLMax &&
+        if (totalBytes <= rsDdaLLMax &&
             ncclReduceScatterDdaFabricLLEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
           decision->algo = RCCL_DDA_FABRIC_LL;
           decision->protocol = NCCL_PROTO_LL;
@@ -2000,7 +1998,7 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
     if (a2aFabricArch) {
       const size_t llThresh    = rcclDdaLLThresholdTab(archTable, ncclFuncAlltoAll);
       const size_t ll128Thresh = rcclDdaLL128ThresholdTab(archTable, ncclFuncAlltoAll);
-      if (rcclParamDdaLL() && llThresh > 0 && totalBytes <= llThresh &&
+      if (llThresh > 0 && totalBytes <= llThresh &&
           ncclAllToAllDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype)) {
         decision->algo = RCCL_DDA_FABRIC_LL;
         decision->protocol = NCCL_PROTO_LL;

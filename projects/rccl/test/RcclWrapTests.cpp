@@ -2438,7 +2438,7 @@ static void CreateCeAllReduceEligibleComm(
     mockComm->config.CTAPolicy   = NCCL_CTA_POLICY_ZERO;
 }
 
-// A count of float32 divisible by the 8 mock ranks; well within NCCL_CE_AR_MAX_MSG_BYTES.
+// A count of float32 divisible by the 8 mock ranks; well within RCCL_CE_AR_2SHOT_MAX_BYTES.
 static constexpr size_t kCeAllReduceCount = 4096;
 
 // rcclUseCeAr2Shot gates the Copy Engine AllReduce path. The CE kernels never
