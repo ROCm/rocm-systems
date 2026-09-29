@@ -3307,6 +3307,10 @@ hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t c
 hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp* opList, size_t* failIdx,
                                  unsigned long long flags, hipStream_t stream) {
   HIP_INIT_API(hipMemcpy3DBatchAsync, numOps, opList, failIdx, flags, stream);
+  size_t ignored_fail_idx = SIZE_MAX;
+  if (failIdx == nullptr) {
+    failIdx = &ignored_fail_idx;
+  }
   if (flags != 0 || opList == nullptr || numOps == 0) {
     *failIdx = SIZE_MAX;
     HIP_RETURN(hipErrorInvalidValue);
@@ -3321,6 +3325,7 @@ hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp* opLis
 
   std::vector<std::vector<amd::BatchCopyRectOp>> copy_ops_by_device(g_devices.size());
   std::vector<std::pair<size_t, HIP_MEMCPY3D>> per_entry_copies;
+  std::vector<HIP_MEMCPY3D> host_copies;
   for (size_t i = 0; i < numOps; ++i) {
     const hipMemcpySrcAccessOrder access_order = opList[i].srcAccessOrder;
     if (access_order < hipMemcpySrcAccessOrderStream || access_order > hipMemcpySrcAccessOrderAny) {
@@ -3342,40 +3347,86 @@ hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp* opLis
     hipMemoryType src_memory_type;
     hipMemoryType dst_memory_type;
     ihipCopyMemParamSet(&desc, src_memory_type, dst_memory_type);
-    if (src_memory_type != hipMemoryTypeDevice || dst_memory_type != hipMemoryTypeDevice) {
+    if (src_memory_type == hipMemoryTypeArray || dst_memory_type == hipMemoryTypeArray) {
       per_entry_copies.emplace_back(i, desc);
       continue;
     }
 
-    amd::Coord3D src_origin = {desc.srcXInBytes, desc.srcY, desc.srcZ};
-    amd::Coord3D dst_origin = {desc.dstXInBytes, desc.dstY, desc.dstZ};
     amd::Coord3D copy_region = {desc.WidthInBytes, desc.Height, desc.Depth};
     amd::BufferRect src_rect;
     amd::BufferRect dst_rect;
-    amd::Image* src_image = nullptr;
-    amd::Image* dst_image = nullptr;
-    status = ihipDrvMemcpy3D_validate(&desc, src_origin, dst_origin, copy_region, &src_rect,
-                                      &dst_rect, &src_image, &dst_image);
-    if (status != hipSuccess) {
-      *failIdx = i;
-      HIP_RETURN(status);
-    }
-
     amd::Memory* src_memory = nullptr;
     amd::Memory* dst_memory = nullptr;
-    size_t src_offset = 0;
-    size_t dst_offset = 0;
-    getMemoryObjectPairs(hip::getCurrentDevice(), desc.srcDevice, desc.dstDevice, src_memory,
-                         dst_memory, src_offset, dst_offset);
-    int device_id = hip_stream->DeviceId();
-    if (ihipGetMemcpyType(src_memory, dst_memory, hipMemcpyDefault) != hipCopyBufferP2P) {
-      device_id = (getMemoryType(src_memory) == hipMemoryTypeDevice &&
-                   getMemoryType(dst_memory) == hipMemoryTypeHost)
-                      ? src_memory->getUserData().deviceId
-                      : dst_memory->getUserData().deviceId;
+    hip::MemcpyType type;
+    if (src_memory_type == hipMemoryTypeHost) {
+      type = (dst_memory_type == hipMemoryTypeHost) ? hipHostToHost : hipWriteBuffer;
+    } else if (dst_memory_type == hipMemoryTypeHost) {
+      type = hipReadBuffer;
+    } else {
+      amd::Coord3D src_origin = {desc.srcXInBytes, desc.srcY, desc.srcZ};
+      amd::Coord3D dst_origin = {desc.dstXInBytes, desc.dstY, desc.dstZ};
+      amd::Image* src_image = nullptr;
+      amd::Image* dst_image = nullptr;
+      status = ihipDrvMemcpy3D_validate(&desc, src_origin, dst_origin, copy_region, &src_rect,
+                                        &dst_rect, &src_image, &dst_image);
+      if (status != hipSuccess) {
+        *failIdx = i;
+        HIP_RETURN(status);
+      }
+      size_t src_offset = 0;
+      size_t dst_offset = 0;
+      getMemoryObjectPairs(hip::getCurrentDevice(), desc.srcDevice, desc.dstDevice, src_memory,
+                           dst_memory, src_offset, dst_offset);
+      const bool src_on_host = getMemoryType(src_memory) == hipMemoryTypeHost &&
+                               !IsManagedMemory(src_memory->getMemFlags());
+      const bool dst_on_host = getMemoryType(dst_memory) == hipMemoryTypeHost &&
+                               !IsManagedMemory(dst_memory->getMemFlags());
+      type = (src_on_host && dst_on_host)
+                 ? hipHostToHost
+                 : ihipGetMemcpyType(src_memory, dst_memory, hipMemcpyDefault);
     }
-    copy_ops_by_device[device_id].emplace_back(src_memory, dst_memory, src_rect, dst_rect,
-                                               copy_region);
+
+    switch (type) {
+      case hipCopyBuffer:
+      case hipCopyBufferSDMA: {
+        const int device_id = (getMemoryType(src_memory) == hipMemoryTypeDevice &&
+                               getMemoryType(dst_memory) == hipMemoryTypeHost)
+                                  ? src_memory->getUserData().deviceId
+                                  : dst_memory->getUserData().deviceId;
+        copy_ops_by_device[device_id].emplace_back(src_memory, dst_memory, src_rect, dst_rect,
+                                                   copy_region);
+        break;
+      }
+      case hipCopyBufferP2P: {
+        const int device_id = hip_stream->DeviceId();
+        copy_ops_by_device[device_id].emplace_back(src_memory, dst_memory, src_rect, dst_rect,
+                                                   copy_region);
+        break;
+      }
+      case hipHostToHost:
+        host_copies.push_back(desc);
+        break;
+      case hipWriteBuffer:
+      case hipReadBuffer:
+        per_entry_copies.emplace_back(i, desc);
+        break;
+    }
+  }
+
+  if (!host_copies.empty()) {
+    hip_stream->finish();
+    for (const HIP_MEMCPY3D& desc : host_copies) {
+      for (size_t z = 0; z < desc.Depth; ++z) {
+        for (size_t y = 0; y < desc.Height; ++y) {
+          const size_t src_offset =
+              ((desc.srcZ + z) * desc.srcHeight + desc.srcY + y) * desc.srcPitch + desc.srcXInBytes;
+          const size_t dst_offset =
+              ((desc.dstZ + z) * desc.dstHeight + desc.dstY + y) * desc.dstPitch + desc.dstXInBytes;
+          std::memcpy(static_cast<char*>(desc.dstHost) + dst_offset,
+                      static_cast<const char*>(desc.srcHost) + src_offset, desc.WidthInBytes);
+        }
+      }
+    }
   }
 
   amd::Command::EventWaitList marker_wait_list;

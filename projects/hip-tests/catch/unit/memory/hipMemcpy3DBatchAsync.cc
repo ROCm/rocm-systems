@@ -329,7 +329,8 @@ HIP_TEST_CASE(Unit_hipMemcpy3DBatchAsync_AllocationKinds_MatchesSourceAfterSync)
  * Test Description
  * ------------------------
  * - A tight copy from device 1 memory to device 0 memory on a device 0 stream, with device 0 peer
- *   access to device 1 enabled: after stream sync, the destination matches the source.
+ *   access to device 1 enabled, for a 7-byte width and a DWORD-aligned 16-byte width: after stream
+ *   sync, the destination matches the source.
  * Test source
  * ------------------------
  * - catch/unit/memory/hipMemcpy3DBatchAsync.cc
@@ -351,16 +352,21 @@ HIP_TEST_CASE(Unit_hipMemcpy3DBatchAsync_PeerDeviceCopy_MatchesSourceAfterSync) 
     HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
   }
 
-  constexpr size_t kWidth = 7;
+  const size_t width = GENERATE(7, 16);
+  INFO("width: " << width);
   constexpr size_t kHeight = 5;
   constexpr size_t kDepth = 3;
-  constexpr size_t kVolumeBytes = kWidth * kHeight * kDepth;
+  const size_t kVolumeBytes = width * kHeight * kDepth;
   constexpr int kUntouched = 0xFF;
 
   int original_device = 0;
   HIP_CHECK(hipGetDevice(&original_device));
   HIP_CHECK(hipSetDevice(kDestinationDevice));
-  HIP_CHECK(hipDeviceEnablePeerAccess(kSourceDevice, 0));
+  const hipError_t enable_status = hipDeviceEnablePeerAccess(kSourceDevice, 0);
+  if (enable_status != hipErrorPeerAccessAlreadyEnabled) {
+    HIP_CHECK(enable_status);
+  }
+  static_cast<void>(hipGetLastError());
 
   std::vector<uint8_t> pattern(kVolumeBytes);
   for (size_t byte = 0; byte < kVolumeBytes; ++byte) {
@@ -379,7 +385,7 @@ HIP_TEST_CASE(Unit_hipMemcpy3DBatchAsync_PeerDeviceCopy_MatchesSourceAfterSync) 
     StreamGuard stream(Streams::created);
 
     hipMemcpy3DBatchOp op = MakePointerToPointerOp(source.ptr(), destination.ptr(),
-                                                   make_hipExtent(kWidth, kHeight, kDepth));
+                                                   make_hipExtent(width, kHeight, kDepth));
 
     HIP_CHECK(hipStreamSynchronize(stream.stream()));
     HIP_CHECK(hipGetLastError());
@@ -388,7 +394,9 @@ HIP_TEST_CASE(Unit_hipMemcpy3DBatchAsync_PeerDeviceCopy_MatchesSourceAfterSync) 
     HIP_CHECK(hipStreamSynchronize(stream.stream()));
     HIP_CHECK(hipMemcpy(copied.data(), destination.ptr(), kVolumeBytes, hipMemcpyDeviceToHost));
   }
-  HIP_CHECK(hipDeviceDisablePeerAccess(kSourceDevice));
+  if (enable_status == hipSuccess) {
+    HIP_CHECK(hipDeviceDisablePeerAccess(kSourceDevice));
+  }
   HIP_CHECK(hipSetDevice(original_device));
   REQUIRE(copied == pattern);
 }
