@@ -44,11 +44,10 @@ hipError_t ihipMemset3D_validate(hipPitchedPtr pitchedDevPtr, amd::Memory* memor
                                  int value, hipExtent extent, size_t sizeBytes);
 
 hipError_t ihipLaunchKernelCommand(amd::Command*& command, hipFunction_t f, LaunchConfig& config,
-                                   hip::Stream* stream,
-                                   void** kernelParams, void* const* extra, hipEvent_t startEvent,
-                                   hipEvent_t stopEvent, uint32_t flags, uint32_t params,
-                                   uint32_t gridId, uint32_t numGrids, uint64_t prevGridSum,
-                                   uint64_t allGridSum, uint32_t firstDevice);
+                                   hip::Stream* stream, void** kernelParams, void* const* extra,
+                                   hipEvent_t startEvent, hipEvent_t stopEvent, uint32_t flags,
+                                   uint32_t params, uint32_t gridId, uint32_t numGrids,
+                                   uint64_t prevGridSum, uint64_t allGridSum, uint32_t firstDevice);
 
 hipError_t ihipMemcpy3DCommand(amd::Command*& command, const hipMemcpy3DParms* p,
                                hip::Stream* stream);

@@ -18,16 +18,16 @@ namespace hip {
 
 //! Bitmask of launch-configuration violations detected while building a LaunchConfig.
 enum LaunchViolation : uint16_t {
-  kLaunchOk            = 0,
-  kZeroGlobal          = 1u << 0,  //!< global has a zero dim (grid*block == 0)
-  kZeroBlock           = 1u << 1,  //!< local has a zero dim
-  kGridOverflow        = 1u << 2,  //!< global does not fit uint32_t
-  kBlockOverflow       = 1u << 3,  //!< local does not fit uint16_t
-  kClusterOverflow     = 1u << 4,  //!< cluster does not fit uint8_t
-  kClusterIndivisible  = 1u << 5,  //!< grid % cluster != 0
-  kBlockExceedsMaxWG   = 1u << 6,  //!< (local[0] * local[1] * local[2]) exceeds maxWorkGroupSize_
+  kLaunchOk = 0,
+  kZeroGlobal = 1u << 0,           //!< global has a zero dim (grid*block == 0)
+  kZeroBlock = 1u << 1,            //!< local has a zero dim
+  kGridOverflow = 1u << 2,         //!< global does not fit uint32_t
+  kBlockOverflow = 1u << 3,        //!< local does not fit uint16_t
+  kClusterOverflow = 1u << 4,      //!< cluster does not fit uint8_t
+  kClusterIndivisible = 1u << 5,   //!< grid % cluster != 0
+  kBlockExceedsMaxWG = 1u << 6,    //!< (local[0] * local[1] * local[2]) exceeds maxWorkGroupSize_
   kSharedMemExceedsMax = 1u << 7,  //!< sharedMemBytes exceeds localMemSizePerCU_
-  kSharedMemOverflow   = 1u << 8,  //!< sharedMemBytes does not fit uint32_t
+  kSharedMemOverflow = 1u << 8,    //!< sharedMemBytes does not fit uint32_t
 };
 
 //! Storage type for a combination of LaunchViolation bits.
@@ -121,14 +121,14 @@ static constexpr LaunchErrorRule kModuleLaunchRules[] = {
 
 //! hipExtModuleLaunchKernel: a bad block is hipErrorInvalidConfiguration, unlike everywhere else.
 static constexpr LaunchErrorRule kExtModuleLaunchRules[] = {
-    {kUnlaunchableBits | kBlockExceedsMaxWG,    hipErrorInvalidConfiguration},
+    {kUnlaunchableBits | kBlockExceedsMaxWG, hipErrorInvalidConfiguration},
     {kSharedMemExceedsMax | kSharedMemOverflow, hipErrorInvalidValue},
-    {kZeroGlobal,                               hipErrorInvalidValue},
+    {kZeroGlobal, hipErrorInvalidValue},
 };
 
 //! hipLaunchCooperativeKernel: too much shared memory is reported as a too-large launch.
 static constexpr LaunchErrorRule kCooperativeLaunchRules[] = {
-    {kMalformedDimsBits | kBlockExceedsMaxWG,   hipErrorInvalidConfiguration},
+    {kMalformedDimsBits | kBlockExceedsMaxWG, hipErrorInvalidConfiguration},
     {kSharedMemExceedsMax | kSharedMemOverflow, hipErrorCooperativeLaunchTooLarge},
 };
 
@@ -139,9 +139,9 @@ static constexpr LaunchErrorRule kLaunchByPtrRules[] = {
 
 //! The checks ihipLaunchKernel_validate applies on behalf of every entry point.
 static constexpr LaunchErrorRule kValidateRules[] = {
-    {kZeroGlobal | kZeroBlock,                  hipErrorInvalidConfiguration},
+    {kZeroGlobal | kZeroBlock, hipErrorInvalidConfiguration},
     {kSharedMemExceedsMax | kSharedMemOverflow, hipErrorInvalidValue},
-    {kBlockExceedsMaxWG,                        hipErrorInvalidConfiguration},
+    {kBlockExceedsMaxWG, hipErrorInvalidConfiguration},
 };
 
 //! No cluster requested — one block per cluster in every dim.
@@ -163,14 +163,13 @@ class LaunchConfig {
   LaunchConfig(const amd::NDRange& globalDim, const amd::NDRange32& gridIn, const dim3& localDim,
                const dim3& clusterDim, size_t sharedMemBytes, const amd::Device& device,
                bool deduceGrid)
-      : ndrange_(3, amd::NDRange(0, 0, 0),
-                 amd::NDRange32(static_cast<uint32_t>(globalDim[0]),
-                                static_cast<uint32_t>(globalDim[1]),
-                                static_cast<uint32_t>(globalDim[2])),
-                 amd::NDRange16(static_cast<uint16_t>(localDim.x),
-                                static_cast<uint16_t>(localDim.y),
-                                static_cast<uint16_t>(localDim.z)),
-                 amd::NDRange8(1, 1, 1)),  // placeholder; ApplyCluster writes the real one
+      : ndrange_(
+            3, amd::NDRange(0, 0, 0),
+            amd::NDRange32(static_cast<uint32_t>(globalDim[0]), static_cast<uint32_t>(globalDim[1]),
+                           static_cast<uint32_t>(globalDim[2])),
+            amd::NDRange16(static_cast<uint16_t>(localDim.x), static_cast<uint16_t>(localDim.y),
+                           static_cast<uint16_t>(localDim.z)),
+            amd::NDRange8(1, 1, 1)),  // placeholder; ApplyCluster writes the real one
         grid_(gridIn),
         device_(&device),
         sharedMemBytes_(sharedMemBytes),
@@ -212,8 +211,8 @@ class LaunchConfig {
     LaunchViolationBits violations = violations_;
     if (&device != device_) {
       violations = (violations & ~kDeviceDependentBits) |
-          detail::CheckNDRangeAgainstDevice(ndrange_.global(), ndrange_.local(), sharedMemBytes_,
-                                            device);
+                   detail::CheckNDRangeAgainstDevice(ndrange_.global(), ndrange_.local(),
+                                                     sharedMemBytes_, device);
     }
     return detail::MapLaunchViolations(violations, rules);
   }
@@ -240,7 +239,7 @@ class LaunchConfig {
     const amd::NDRange32& global = ndrange_.global();
     const amd::NDRange16& local = ndrange_.local();
     return ((global[0] % local[0]) == 0) && ((global[1] % local[1]) == 0) &&
-        ((global[2] % local[2]) == 0);
+           ((global[2] % local[2]) == 0);
   }
 
  private:
@@ -286,9 +285,8 @@ inline LaunchConfig MakeLaunchConfigFromGrid(const dim3& gridDim, const dim3& bl
 inline LaunchConfig MakeLaunchConfigFromGlobal(const dim3& globalDim, const dim3& localDim,
                                                size_t sharedMemBytes, const amd::Device& device,
                                                const dim3& clusterDim = kNoCluster) {
-  return LaunchConfig(amd::NDRange(globalDim.x, globalDim.y, globalDim.z),
-                      amd::NDRange32(1, 1, 1), localDim, clusterDim, sharedMemBytes, device,
-                      true /*deduceGrid*/);
+  return LaunchConfig(amd::NDRange(globalDim.x, globalDim.y, globalDim.z), amd::NDRange32(1, 1, 1),
+                      localDim, clusterDim, sharedMemBytes, device, true /*deduceGrid*/);
 }
 
 }  // namespace hip
