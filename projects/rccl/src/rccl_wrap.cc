@@ -964,6 +964,12 @@ inline size_t rcclCeNonRegMinTab(const rcclArchThresholds* table, ncclFunc_t fun
   if (table == nullptr) return 0;
   return (size_t)func < RCCL_DDA_FUNC_COUNT ? table->ceNonRegMin[(size_t)func] : 0;
 }
+size_t rcclCeAr2ShotMax(const struct ncclComm* comm) {
+  return rcclCeNonRegMaxTab(extAlgoArchTable(comm), ncclFuncAllReduce);
+}
+size_t rcclCeAr2ShotMin(const struct ncclComm* comm) {
+  return rcclCeNonRegMinTab(extAlgoArchTable(comm), ncclFuncAllReduce);
+}
 
 // Returns true when the message is within the CE-registered (2-shot) AllGather
 // window. Does not check symk eligibility -- callers gate on !symEligible explicitly.
@@ -1001,6 +1007,7 @@ inline size_t ddaTierCapFromTable(const rcclArchThresholds* table, const size_t*
 }
 
 inline size_t rcclDdaLLThresholdTab(const rcclArchThresholds* table, ncclFunc_t func, int nRanks) {
+  if (!rcclParamDdaLL()) return 0;
   size_t threshold;
   if (ddaThresholdFromEnv(rcclParamDdaLLThreshold(), &threshold)) return threshold;
   if (table == nullptr) return kDdaLLBaseDefault;
@@ -1383,16 +1390,6 @@ bool rcclUseCeAr2Shot(struct ncclComm* comm, size_t count, ncclDataType_t dataty
     return false;
   }
 
-  // 2-shot selector cap (table/env). 0 means 2-shot is tuned off; registered CE
-  // still uses the default ceARTmpBuf. Does not override the allocated buffer:
-  // ncclCeInit grows ceArMaxBytes when this cap is larger than the default.
-  const size_t twoShotMax = rcclCeNonRegMaxTab(extAlgoArchTable(comm), ncclFuncAllReduce);
-  if (twoShotMax == 0) return false;
-  size_t msgBytes = count * ncclTypeSize(datatype);
-  if (msgBytes > twoShotMax) {
-    WARN("Skipping CE AllReduce: msgBytes (%zu) > twoShotMax (%zu)", msgBytes, twoShotMax);
-    return false;
-  }
 
   if (comm->config.CTAPolicy != NCCL_CTA_POLICY_ZERO && !force) {
     WARN("Skipping CE AllReduce: CTA policy is not ZERO");
@@ -1583,10 +1580,11 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
                              (arTwoShotMin == 0 || msgBytes >= arTwoShotMin);
   // This call site never carries a bias buffer (ncclAllReduceWithBias_impl bypasses it entirely
   // and goes straight to taskAppend), so /*acc=*/nullptr here is always correct.
+  const bool ceAr2ShotEligible = rcclUseCeAr2Shot(comm, count, datatype, op, /*acc=*/nullptr);
   const bool ceAllReduceAllowed = ncclGroupDepth == 0 && ceArGraphAllowed && twoShotWindow &&
-                                  rcclUseCeAr2Shot(comm, count, datatype, op, /*acc=*/nullptr) && (force || symReg);
+                                  ceAr2ShotEligible && (force || symReg);
   INFO(NCCL_TUNING, "AR CE-2SHOT symkRequested=%d criteria:ceAllReduceAllowed=%d twoShotWindow=%d (force=%d or symReg=%d) rcclUseCeAr2Shot=%d comm->ceColl.ceARTmpBuf not null:%d", 
-    (int)(!symkRequested), (int)ceAllReduceAllowed, (int)twoShotWindow, (int)force, (int)symReg, (int)rcclUseCeAr2Shot(comm, count, datatype, op, /*acc=*/nullptr), (int)(comm->ceColl.ceARTmpBuf != NULL));
+    (int)(symkRequested), (int)ceAllReduceAllowed, (int)twoShotWindow, (int)force, (int)symReg, (int)ceAr2ShotEligible, (int)(comm->ceColl.ceARTmpBuf != NULL));
     // (3) Eager CE 2-shot (staging buffer). Requires !symkRequested and an
     // initialized ceARTmpBuf (first call, before init, falls through to enqueue).
     // Gated on the raw symk signal, not symEligible: symmetric-window operands copy
@@ -1633,7 +1631,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
           return ncclSuccess;
         }
         // Small-message fast lane: LL protocol (no GPU barrier).
-        if (rcclParamDdaLL() && msgBytes <= arDdaLLMax &&
+        if (msgBytes <= arDdaLLMax &&
             ncclAllReduceDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
           decision->algo = RCCL_DDA_FABRIC_LL;
           decision->protocol = NCCL_PROTO_LL;
@@ -1791,7 +1789,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
       if (agFabricArch) {
         const size_t agDdaLLMax    = rcclDdaLLThresholdTab(archTable, ncclFuncAllGather, comm->nRanks);
         const size_t agDdaLL128Max = rcclDdaLL128ThresholdTab(archTable, ncclFuncAllGather, comm->nRanks);
-        if (rcclParamDdaLL() && msgSize <= agDdaLLMax &&
+        if (msgSize <= agDdaLLMax &&
             ncclAllGatherDdaFabricLLEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
           decision->algo = RCCL_DDA_FABRIC_LL;
           decision->protocol = NCCL_PROTO_LL;
