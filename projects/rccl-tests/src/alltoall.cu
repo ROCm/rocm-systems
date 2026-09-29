@@ -284,7 +284,7 @@ __device__ void ginAlltoAllBody(ncclWindow_t sendwin, size_t sendoffset, ncclWin
     gin.put(ncclTeamWorld(devComm), r,
         recvwin, recvoffset + devComm.rank * size,
         sendwin, sendoffset + r * size,
-        size, ncclGin_SignalInc{signalIndex});
+        size, TEST_GIN_WEAK_SIGNAL_INC(signalIndex));
   }
 
   int receivingCta = (devComm.rank % nthreads) / blockDim.x;
@@ -332,13 +332,13 @@ __device__ void hybridAlltoAllBody(ncclWindow_t sendwin, size_t sendoffset, nccl
       gin.put(world, r,
           recvwin, recvoffset + world.rank * size,
           sendwin, sendoffset + r * size,
-          size, ncclGin_SignalInc{signalIndex});
+          size, TEST_GIN_WEAK_SIGNAL_INC(signalIndex));
     }
     for (int r = startLsa + lsaSize + tid; r < world.nRanks; r += nthreads) {
       gin.put(world, r,
           recvwin, recvoffset + world.rank * size,
           sendwin, sendoffset + r * size,
-          size, ncclGin_SignalInc{signalIndex});
+          size, TEST_GIN_WEAK_SIGNAL_INC(signalIndex));
     }
 
     if (numRemotePeers > 0)

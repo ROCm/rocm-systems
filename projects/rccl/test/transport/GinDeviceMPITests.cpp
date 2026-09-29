@@ -200,6 +200,24 @@ std::string sdmaIpcSignalIncEnvSkipReason() {
   return "";
 }
 
+// AnvilStrongSignal_* needs the payload on the SDMA queue, so it runs only on
+// Anvil SDMA and only while its put stays at or above the SDMA threshold.
+constexpr size_t kAnvilStrongSignalBytes = 4u << 20;
+std::string anvilStrongSignalSkipReason() {
+  if (requestedGinType() != NCCL_NET_DEVICE_GIN_ANVIL_SDMA)
+    return "AnvilStrongSignal tests target the Anvil SDMA backend (NCCL_GIN_TYPE=" +
+           std::to_string(NCCL_NET_DEVICE_GIN_ANVIL_SDMA) + ")";
+  size_t threshold = NCCL_GIN_ANVIL_SDMA_THRESHOLD_DEFAULT;
+  if (const char* e = std::getenv("NCCL_GIN_ANVIL_SDMA_THRESHOLD"); e && e[0] && *e != '-') {
+    char* end = nullptr;
+    unsigned long long v = std::strtoull(e, &end, 10);
+    if (end != e && *end == '\0') threshold = static_cast<size_t>(v);
+  }
+  if (threshold >= kAnvilStrongSignalBytes)
+    return "AnvilStrongSignal tests assume NCCL_GIN_ANVIL_SDMA_THRESHOLD is below 4 MiB";
+  return "";
+}
+
 std::string sdmaInternalA2AEnvSkipReason() {
   if (requestedGinType() != NCCL_NET_DEVICE_GIN_ANVIL_SDMA)
     return "GIN-SDMA alltoall requires NCCL_GIN_TYPE=" +
@@ -1864,6 +1882,103 @@ TEST_F(GinMPIDeviceTests, BarrierFence_IpcSignalIncMakesPutVisible_SingleNode) {
   int err = 0;
   ASSERT_MPI_EQ(hipSuccess, hipMemcpy(&err, dError, sizeof(int), hipMemcpyDeviceToHost));
   ASSERT_EQ(err, 0) << "payload byte mismatch at index " << (err - 1);
+}
+
+// Rank 0: an SDMA put with no signal, then a separate strong signal, no Flush.
+// Rank 1: waitSignal then read the window. A strong signal must not be seen
+// before an earlier put to the same peer has landed, so this fails if the
+// signal path skips draining the peer's SDMA queue (weak semantics).
+__global__ void anvilStrongSignalAfterSdmaPutKernel(
+    ncclWindow_t srcWin, ncclWindow_t dstWin, uint8_t* dst, size_t bytes, int* error,
+    struct ncclDevComm devComm) {
+  constexpr ncclGinSignal_t kSigIdx = 0;
+  int rank = devComm.rank;
+  int peer = (rank + 1) % devComm.nRanks;
+  ncclGin gin{devComm, /*ginContext=*/0};
+  if (rank == 0) {
+    if (threadIdx.x == 0) {
+      gin.put(ncclTeamWorld(devComm), peer, dstWin, /*dstOffset=*/0, srcWin, /*srcOffset=*/0, bytes);
+      gin.signal(ncclTeamWorld(devComm), peer, ncclGin_StrongSignalInc{kSigIdx});
+    }
+    return;
+  }
+  gin.waitSignal(ncclCoopCta(), kSigIdx, /*least=*/1);
+  for (size_t i = threadIdx.x; i < bytes; i += blockDim.x) {
+    uint8_t expected = static_cast<uint8_t>(0x20 + (i & 0x3f));
+    if (dst[i] != expected) atomicCAS(error, 0, static_cast<int>(i + 1));
+  }
+}
+
+TEST_F(GinMPIDeviceTests, AnvilStrongSignal_OrdersEarlierSdmaPut_SingleNode) {
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (auto reason = anvilStrongSignalSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (auto reason = singleNodeReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
+    GTEST_SKIP() << "Requires exactly 2 ranks";
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  ncclComm_t comm = getActiveCommunicator();
+  hipStream_t stream = getActiveStream();
+
+  constexpr size_t kBytes = kAnvilStrongSignalBytes;
+  void* dSrc = nullptr;
+  void* dDst = nullptr;
+  int* dError = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSrc, kBytes));
+  auto srcCleanup = makeScopeGuard([&]() {
+    if (dSrc) (void)ncclMemFree(dSrc);
+  });
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dDst, kBytes));
+  auto dstCleanup = makeScopeGuard([&]() {
+    if (dDst) (void)ncclMemFree(dDst);
+  });
+  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&dError, sizeof(int)));
+  auto errorCleanup = makeScopeGuard([&]() {
+    if (dError) (void)hipFree(dError);
+  });
+
+  ncclWindow_t srcWin = nullptr;
+  ncclWindow_t dstWin = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess,
+                ncclCommWindowRegister(comm, dSrc, kBytes, &srcWin, NCCL_WIN_COLL_SYMMETRIC));
+  auto srcWinCleanup = makeScopeGuard([&]() {
+    if (srcWin) (void)ncclCommWindowDeregister(comm, srcWin);
+  });
+  ASSERT_MPI_EQ(ncclSuccess,
+                ncclCommWindowRegister(comm, dDst, kBytes, &dstWin, NCCL_WIN_COLL_SYMMETRIC));
+  auto dstWinCleanup = makeScopeGuard([&]() {
+    if (dstWin) (void)ncclCommWindowDeregister(comm, dstWin);
+  });
+
+  std::vector<uint8_t> hostSrc(kBytes);
+  for (size_t i = 0; i < kBytes; ++i)
+    hostSrc[i] = static_cast<uint8_t>(0x20 + (i & 0x3f));
+  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dSrc, hostSrc.data(), kBytes, hipMemcpyHostToDevice));
+  ASSERT_MPI_EQ(hipSuccess, hipMemset(dDst, 0, kBytes));
+  ASSERT_MPI_EQ(hipSuccess, hipMemset(dError, 0, sizeof(int)));
+  ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(nullptr));
+
+  ncclDevCommRequirements reqs = defaultGinReqs();
+  reqs.ginSignalCount = 1;
+  ncclDevComm devComm{};
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
+  auto devCommCleanup = makeScopeGuard([&]() {
+    (void)ncclDevCommDestroy(comm, &devComm);
+  });
+
+  MPI_Barrier(MPI_COMM_WORLD);
+  anvilStrongSignalAfterSdmaPutKernel<<<1, kGinKernelThreads, 0, stream>>>(
+    srcWin, dstWin, static_cast<uint8_t*>(dDst), kBytes, dError, devComm);
+  ASSERT_MPI_EQ(hipSuccess, syncStreamWithinTimeout(stream, /*seconds=*/30));
+  MPI_Barrier(MPI_COMM_WORLD);
+
+  int err = 0;
+  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(&err, dError, sizeof(int), hipMemcpyDeviceToHost));
+  ASSERT_EQ(err, 0) << "strong signal observed before the earlier SDMA put landed; first bad byte "
+                    << (err - 1);
 }
 
 // Collective kernel: every rank runs the same code. The barrier composes

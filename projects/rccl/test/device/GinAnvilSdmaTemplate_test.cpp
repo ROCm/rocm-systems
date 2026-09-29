@@ -1009,7 +1009,7 @@ INSTANTIATE_TEST_SUITE_P(CleanAndDirtyPeer, GinAnvilSdmaStandaloneSignalQuietTes
                              // the signalled peer itself dirty: still no quiet
                              StandaloneSignalQuietParam{1ULL << 1, 0ULL, 1ULL}));
 
-TEST_F(GinAnvilSdmaTemplateTest, Put_WindowedIpcPutStrongSignalSkipsQuietWhenClean) {
+TEST_F(GinAnvilSdmaTemplateTest, Put_WindowedIpcPutWeakSignalSkipsQuietWhenClean) {
   constexpr int kN = 64;
   std::vector<uint8_t> pat(kN);
   for (int i = 0; i < kN; ++i) pat[static_cast<size_t>(i)] = static_cast<uint8_t>(0x51 + i);
@@ -1169,7 +1169,7 @@ TEST_F(GinAnvilSdmaTemplateTest, Put_WindowedIpcPutCounterOnlySkipsQuietWhenClea
   }
 }
 
-TEST_F(GinAnvilSdmaTemplateTest, PutValue_WindowedIpcPutStrongSignalSkipsQuietWhenClean) {
+TEST_F(GinAnvilSdmaTemplateTest, PutValue_WindowedIpcPutWeakSignalSkipsQuietWhenClean) {
   constexpr uint64_t kVal = 0xAABBCCDDEEFF0011ULL;
   DeviceBuffer<uint8_t> d_dst(sizeof(uint64_t));
   d_dst.zero();
@@ -1280,6 +1280,188 @@ INSTANTIATE_TEST_SUITE_P(
         IpcAgentFenceParam{"SdmaThenSignal_System", 0, IpcAgentFencePath::kSdmaThenSignal, 1ULL, 2ULL, 0ULL},
         IpcAgentFenceParam{"SdmaThenSignal_Agent", 1, IpcAgentFencePath::kSdmaThenSignal, 1ULL, 1ULL, 2ULL}),
     [](const ::testing::TestParamInfo<IpcAgentFenceParam>& info) { return std::string(info.param.name); });
+
+// H27: strong signals drain every queue to the peer before signalling, whatever
+// this call posted and whatever sdmaDirty says, then add a system fence ahead
+// of signalPeer's own release.
+__global__ void kernelPutStrongSignal(TemplateHarness* h, bool hasWins, size_t bytes) {
+  if (threadIdx.x != 0) return;
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = &h->ctx;
+  ginCtx.nRanks = 2;
+  ncclGinSignalDescriptor sig{};
+  sig.type = NCCL_GIN_SIGNAL_TYPE_INDEXED;
+  sig.indexedSignal.signalId = 0;
+  sig.isStrong = true;
+  ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(
+      ginCtx, ncclCoopThread{}, 1, hasWins, reinterpret_cast<ncclGinWindow_t>(&h->dstMh), 0,
+      reinterpret_cast<ncclGinWindow_t>(&h->srcMh), 0, bytes, sig, ncclGinSignalInc, 0, false, 0, false,
+      nullptr, cuda::thread_scope_system, cuda::thread_scope_system);
+}
+
+__global__ void kernelPutSdmaThenStrongSignal(TemplateHarness* h, size_t sdmaBytes, size_t ipcBytes) {
+  if (threadIdx.x != 0) return;
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = &h->ctx;
+  ginCtx.nRanks = 2;
+  ncclGinSignalDescriptor none{};
+  none.type = NCCL_GIN_SIGNAL_TYPE_NONE;
+  ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(
+      ginCtx, ncclCoopThread{}, 1, true, reinterpret_cast<ncclGinWindow_t>(&h->dstMh), 0,
+      reinterpret_cast<ncclGinWindow_t>(&h->srcMh), 0, sdmaBytes, none, ncclGinSignalInc, 0, false, 0,
+      false, nullptr, cuda::thread_scope_system, cuda::thread_scope_system);
+  ncclGinSignalDescriptor sig{};
+  sig.type = NCCL_GIN_SIGNAL_TYPE_INDEXED;
+  sig.indexedSignal.signalId = 0;
+  sig.isStrong = true;
+  ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(
+      ginCtx, ncclCoopThread{}, 1, true, reinterpret_cast<ncclGinWindow_t>(&h->dstMh), 0,
+      reinterpret_cast<ncclGinWindow_t>(&h->srcMh), 0, ipcBytes, sig, ncclGinSignalInc, 0, false, 0,
+      false, nullptr, cuda::thread_scope_system, cuda::thread_scope_system);
+}
+
+__global__ void kernelPutValueStrongSignal(TemplateHarness* h, uint64_t value) {
+  if (threadIdx.x != 0) return;
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = &h->ctx;
+  ginCtx.nRanks = 2;
+  ncclGinSignalDescriptor sig{};
+  sig.type = NCCL_GIN_SIGNAL_TYPE_INDEXED;
+  sig.indexedSignal.signalId = 0;
+  sig.isStrong = true;
+  ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(
+      ginCtx, ncclCoopThread{}, 1, reinterpret_cast<ncclGinWindow_t>(&h->dstMh), 0, value, sig,
+      ncclGinSignalInc, 0, false, nullptr, cuda::thread_scope_system, cuda::thread_scope_system);
+}
+
+// Buffers for the H27 cases: a 2-rank harness with a real sdmaDirty word and the
+// dst window plus signal cells in the IPC table.
+struct StrongSignalFixture {
+  static constexpr size_t kBytes = 512;
+  DeviceBuffer<uint8_t> d_src{kBytes};
+  DeviceBuffer<uint8_t> d_dst{kBytes};
+  DeviceBuffer<uint64_t> d_signals{2};
+  DeviceBuffer<uint64_t> d_dirty{1};
+  DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry{2};
+  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle> d_q{1};
+  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle*> d_row{2};
+  DeviceBuffer<TemplateHarness> d_h{1};
+  TemplateHarness host{};
+
+  explicit StrongSignalFixture(int threshold) {
+    d_src.zero();
+    d_dst.zero();
+    d_signals.zero();
+    d_dirty.zero();
+    uploadHarness(&d_h, &host, &d_src, &d_dst, &d_entry, &d_q, &d_row, threshold);
+    host.ctx.signals = d_signals.ptr;
+    host.ctx.nSignals = 2;
+    host.ctx.sdmaDirty = d_dirty.ptr;
+    mapIpcToTwo(&host, &d_entry, &d_dst, kBytes, &d_signals, 2 * sizeof(uint64_t));
+    d_h.upload(host);
+    resetQuietCount();
+    resetThreadfenceCount();
+    resetAgentReleaseCount();
+  }
+};
+
+TEST_F(GinAnvilSdmaTemplateTest, Put_StrongSignalCleanIpcQuietsPeerQueue) {
+  StrongSignalFixture f(128);
+  kernelPutStrongSignal<<<1, 1>>>(f.d_h.ptr, /*hasWins=*/true, /*bytes=*/64);
+  syncAndCheck();
+  EXPECT_EQ(f.d_signals.download(), 1ULL);
+  EXPECT_EQ(readQuietCount(), 1ULL);
+  EXPECT_EQ(readThreadfenceCount(), 2ULL);
+  EXPECT_EQ(readAgentReleaseCount(), 0ULL);
+}
+
+TEST_F(GinAnvilSdmaTemplateTest, Put_StandaloneStrongSignalQuietsPeerQueue) {
+  StrongSignalFixture f(128);
+  kernelPutStrongSignal<<<1, 1>>>(f.d_h.ptr, /*hasWins=*/false, /*bytes=*/0);
+  syncAndCheck();
+  EXPECT_EQ(f.d_signals.download(), 1ULL);
+  EXPECT_EQ(readQuietCount(), 1ULL);
+  EXPECT_EQ(readThreadfenceCount(), 2ULL);
+}
+
+// Strong counterpart of Put_WindowedIpcPutDoesNotQuietEarlierSdmaToSamePeer:
+// the IPC put issues no SDMA, but its strong signal still drains the queue the
+// earlier SDMA put went to. The dirty bit is Flush's business and stays set.
+TEST_F(GinAnvilSdmaTemplateTest, Put_StrongSignalDrainsEarlierSdmaToSamePeer) {
+  StrongSignalFixture f(128);
+  kernelPutSdmaThenStrongSignal<<<1, 1>>>(f.d_h.ptr, StrongSignalFixture::kBytes, /*ipcBytes=*/64);
+  syncAndCheck();
+  EXPECT_EQ(f.d_signals.download(), 1ULL);
+  EXPECT_EQ(readQuietCount(), 1ULL);
+  EXPECT_EQ(readThreadfenceCount(), 2ULL);
+  EXPECT_EQ(f.d_dirty.download(), 1ULL << 1);
+}
+
+TEST_F(GinAnvilSdmaTemplateTest, Put_StrongSignalDrainsEveryChannelToPeer) {
+  StrongSignalFixture f(128);
+  constexpr int kNumCh = 2;
+  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle*> d_row4(2 * kNumCh);
+  sdma_anvil::SdmaQueueDeviceHandle* rowHost[2 * kNumCh] = {f.d_q.ptr, f.d_q.ptr, f.d_q.ptr, f.d_q.ptr};
+  d_row4.copyFrom(rowHost, 2 * kNumCh);
+  f.host.ctx.numChannels = kNumCh;
+  f.host.ctx.queueHandles = reinterpret_cast<void**>(d_row4.ptr);
+  f.d_h.upload(f.host);
+  kernelPutStrongSignal<<<1, 1>>>(f.d_h.ptr, /*hasWins=*/true, /*bytes=*/64);
+  syncAndCheck();
+  EXPECT_EQ(f.d_signals.download(), 1ULL);
+  EXPECT_EQ(readQuietCount(), static_cast<unsigned long long>(kNumCh));
+}
+
+TEST_F(GinAnvilSdmaTemplateTest, Put_StrongSignalWithoutQueueTableStillFences) {
+  StrongSignalFixture f(128);
+  f.host.ctx.queueHandles = nullptr;
+  f.d_h.upload(f.host);
+  kernelPutStrongSignal<<<1, 1>>>(f.d_h.ptr, /*hasWins=*/false, /*bytes=*/0);
+  syncAndCheck();
+  EXPECT_EQ(f.d_signals.download(), 1ULL);
+  EXPECT_EQ(readQuietCount(), 0ULL);
+  EXPECT_EQ(readThreadfenceCount(), 2ULL);
+}
+
+// ipcAgentFence downgrades signalPeer only; the strong release stays system.
+TEST_F(GinAnvilSdmaTemplateTest, Put_StrongSignalKeepsSystemFenceUnderIpcAgentFence) {
+  StrongSignalFixture f(128);
+  f.host.ctx.ipcAgentFence = 1;
+  f.d_h.upload(f.host);
+  kernelPutStrongSignal<<<1, 1>>>(f.d_h.ptr, /*hasWins=*/true, /*bytes=*/64);
+  syncAndCheck();
+  EXPECT_EQ(f.d_signals.download(), 1ULL);
+  EXPECT_EQ(readQuietCount(), 1ULL);
+  EXPECT_EQ(readThreadfenceCount(), 1ULL);
+  EXPECT_EQ(readAgentReleaseCount(), 2ULL);
+}
+
+TEST_F(GinAnvilSdmaTemplateTest, PutValue_StrongSignalQuietsPeerQueue) {
+  StrongSignalFixture f(128);
+  kernelPutValueStrongSignal<<<1, 1>>>(f.d_h.ptr, 0x1122334455667788ULL);
+  syncAndCheck();
+  EXPECT_EQ(f.d_signals.download(), 1ULL);
+  EXPECT_EQ(readQuietCount(), 1ULL);
+  EXPECT_EQ(readThreadfenceCount(), 2ULL);
+}
+
+// A fused SDMA signal orders only its own queue, so a strong signal must not
+// take it even when the put is fused-eligible. The stub putSignal never bumps
+// the signal cell, so a signal value of 1 shows signalPeer ran instead.
+TEST_F(GinAnvilSdmaTemplateTest, Put_StrongSignalSkipsFusedSdmaSignal) {
+  StrongSignalFixture f(0);
+  DeviceBuffer<uintptr_t> d_sigAddrs(2);
+  uintptr_t sigAddrs[2] = {reinterpret_cast<uintptr_t>(f.d_signals.ptr),
+                           reinterpret_cast<uintptr_t>(f.d_signals.ptr)};
+  d_sigAddrs.copyFrom(sigAddrs, 2);
+  f.host.ctx.signal_remote_addrs = d_sigAddrs.ptr;
+  f.host.ctx.fusedSdmaSignal = 1;
+  f.d_h.upload(f.host);
+  kernelPutStrongSignal<<<1, 1>>>(f.d_h.ptr, /*hasWins=*/true, StrongSignalFixture::kBytes);
+  syncAndCheck();
+  EXPECT_EQ(f.d_signals.download(), 1ULL);
+  EXPECT_EQ(readQuietCount(), 1ULL);
+}
 
 #endif  // NCCL_GIN_ANVIL_SDMA_ENABLE
 
