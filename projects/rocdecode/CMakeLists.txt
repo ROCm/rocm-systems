@@ -230,15 +230,23 @@ if(_deps_met)
   if(NOT WIN32)
     target_link_libraries(${PROJECT_NAME} ${LINK_LIBRARY_LIST})
   else()
-    # PRIVATE: rocdecode is a SHARED library exposing only a C API, so its link
-    # dependencies are implementation details. Linking them PRIVATE keeps them
-    # out of the exported INTERFACE_LINK_LIBRARIES. This is required on Windows,
-    # where the VA import libs (rocm_sysdeps_va*.lib) resolve to absolute
-    # build-tree paths; if propagated, a consumer relinking against the installed
-    # target (the ctest build-and-test samples, on a different machine) fails on
-    # a path that doesn't exist there. Windows-only to avoid changing the
-    # established transitive-linking behavior on Linux.
-    target_link_libraries(${PROJECT_NAME} PRIVATE ${LINK_LIBRARY_LIST})
+    # On Windows the implementation libraries are linked PRIVATE so they stay out
+    # of the exported INTERFACE_LINK_LIBRARIES. The VA import libs
+    # (rocm_sysdeps_va*.lib) resolve to absolute build-tree paths; if propagated,
+    # a consumer relinking against the installed target (the ctest
+    # build-and-test samples, on a different machine) fails on a path that
+    # doesn't exist there. Windows-only to avoid changing the established
+    # transitive-linking behavior on Linux.
+    #
+    # hip::host stays PUBLIC: the installed public header rocdecode.h includes
+    # hip/hip_runtime.h, so it is a genuine usage requirement for consumers that
+    # link only rocdecode::rocdecode. It is an imported target (relocatable), so
+    # unlike the raw .lib paths it does not reintroduce the build-tree leak.
+    set(_PRIVATE_LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST})
+    list(REMOVE_ITEM _PRIVATE_LINK_LIBRARY_LIST hip::host)
+    target_link_libraries(${PROJECT_NAME}
+      PUBLIC hip::host
+      PRIVATE ${_PRIVATE_LINK_LIBRARY_LIST})
   endif()
 
   set_target_properties(${PROJECT_NAME} PROPERTIES POSITION_INDEPENDENT_CODE ON)
