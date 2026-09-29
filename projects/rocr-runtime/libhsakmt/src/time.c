@@ -25,6 +25,7 @@
 
 #include "libhsakmt.h"
 #include "kfd_ioctl.h"
+#include <time.h>
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtGetClockCountersCtx(HsaKFDContext *ctx,
 					       HSAuint32 NodeId,
@@ -33,7 +34,9 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetClockCountersCtx(HsaKFDContext *ctx,
 	HSAKMT_STATUS result;
 	uint32_t gpu_id;
 	struct kfd_ioctl_get_clock_counters_args args = {0};
-	int err;
+	struct kfd_ioctl_get_clock_counters_args best = {0};
+	uint64_t best_elapsed = UINT64_MAX;
+	unsigned int i, samples;
 
 	CHECK_KFD_OPEN();
 
@@ -41,20 +44,38 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetClockCountersCtx(HsaKFDContext *ctx,
 	if (result != HSAKMT_STATUS_SUCCESS)
 		return result;
 
-	args.gpu_id = gpu_id;
+	/* KFD reads the GPU counter before the CPU clocks. An interrupt or a
+	 * reschedule between those reads can displace the correlation by tens of
+	 * microseconds. Reduce that uncertainty by selecting the shortest of a
+	 * small, fixed number of queries. Keep all counters from the same sample.
+	 * CPU-only nodes have no GPU/CPU correlation to establish.
+	 */
+	samples = gpu_id ? 4 : 1;
+	for (i = 0; i < samples; i++) {
+		struct timespec before, after;
+		uint64_t elapsed;
 
-	err = hsakmt_ioctl(ctx->fd, AMDKFD_IOC_GET_CLOCK_COUNTERS, &args);
-	if (err < 0) {
-		result = HSAKMT_STATUS_ERROR;
-	} else {
-		/* At this point the result is already HSAKMT_STATUS_SUCCESS */
-		Counters->GPUClockCounter = args.gpu_clock_counter;
-		Counters->CPUClockCounter = args.cpu_clock_counter;
-		Counters->SystemClockCounter = args.system_clock_counter;
-		Counters->SystemClockFrequencyHz = args.system_clock_freq;
+		args.gpu_id = gpu_id;
+		if (clock_gettime(CLOCK_MONOTONIC_RAW, &before))
+			return HSAKMT_STATUS_ERROR;
+		if (hsakmt_ioctl(ctx->fd, AMDKFD_IOC_GET_CLOCK_COUNTERS, &args) < 0)
+			return HSAKMT_STATUS_ERROR;
+		if (clock_gettime(CLOCK_MONOTONIC_RAW, &after))
+			return HSAKMT_STATUS_ERROR;
+
+		elapsed = (uint64_t)(after.tv_sec - before.tv_sec) * 1000000000 +
+			  after.tv_nsec - before.tv_nsec;
+		if (elapsed < best_elapsed) {
+			best_elapsed = elapsed;
+			best = args;
+		}
 	}
 
-	return result;
+	Counters->GPUClockCounter = best.gpu_clock_counter;
+	Counters->CPUClockCounter = best.cpu_clock_counter;
+	Counters->SystemClockCounter = best.system_clock_counter;
+	Counters->SystemClockFrequencyHz = best.system_clock_freq;
+	return HSAKMT_STATUS_SUCCESS;
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtGetClockCounters(HSAuint32 NodeId,
