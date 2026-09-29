@@ -28,11 +28,14 @@ This runs as a single RUN_SERIAL ctest test. It lists the tests of the same buil
 a nested ctest, because a nested ctest would write the Testing/ logs that the outer dashboard
 run still has open.
 
-The budget cannot produce a false TIMEOUT: a test starts with its full timeout only if that fits
-in the remaining budget. Near the end, a test whose duration has already been observed may still
-start with its timeout cut down to what remains; if that cut timeout expires it is reported as
-CUT, which is not a failure. A test that genuinely times out twice is dropped for the rest of
-the run so that one hang cannot consume the budget of every other test.
+The budget cannot produce a false TIMEOUT: when a test's full timeout does not fit in the
+remaining budget it starts with its timeout cut down to what remains, and if that cut timeout
+expires it is reported as CUT, which is not a failure. A test that has already been seen to
+finish is only started that way if the remainder is comfortably longer than its longest run; a
+test that has never finished needs --min-unseen-start seconds, so tests whose timeout exceeds
+the whole budget still get run, and a CUT before a test ever finished is flagged as a possible
+hang. A test that genuinely times out twice is dropped for the rest of the run so that one hang
+cannot consume the budget of every other test. Selected tests that never ran are listed.
 
 Must stay Python 3.6 compatible: rhel-8.8 CI images ship 3.6 as python3.
 """
@@ -240,6 +243,7 @@ def main():
     parser.add_argument("--test-dir", required=True)
     parser.add_argument("--budget-seconds", type=float, default=300.0)
     parser.add_argument("--per-test-timeout-cap", type=float, default=120.0)
+    parser.add_argument("--min-unseen-start", type=float, default=30.0)
     parser.add_argument("--quarantine-after-timeouts", type=int, default=2)
     parser.add_argument("--select", action="append", default=None)
     parser.add_argument("--exclude", action="append", default=None)
@@ -298,6 +302,7 @@ def run(args):
     shown = set()
     printed = [0]
     quarantined = {}
+    cut_unseen = []
     timeouts = dict((t.name, 0) for t in chosen)
     setups = Setups(all_tests)
     iteration = 0
@@ -320,10 +325,11 @@ def run(args):
                 test.timeout or args.per_test_timeout_cap, args.per_test_timeout_cap
             )
             remaining = deadline - time.monotonic()
+            seen = longest.get(test.name)
             cut = False
             if remaining < timeout:
-                seen = longest.get(test.name)
-                if seen is None or remaining < max(3.0 * seen, 5.0):
+                needed = args.min_unseen_start if seen is None else max(3.0 * seen, 5.0)
+                if remaining < needed:
                     continue
                 timeout, cut = remaining, True
 
@@ -340,6 +346,12 @@ def run(args):
                 status, rc, output, took = run_test(test, timeout, args.test_dir)
                 if status == "TIMEOUT" and cut:
                     status = "CUT"
+                    if seen is None and test.name not in cut_unseen:
+                        cut_unseen.append(test.name)
+                        emit(
+                            "---- {} was cut after {:.0f}s and has never finished; possible "
+                            "hang ----".format(test.name, took)
+                        )
                 elif status != "TIMEOUT":
                     longest[test.name] = max(took, longest.get(test.name, 0.0))
             ran += 1
@@ -403,11 +415,21 @@ def run(args):
         )
         log(row.format(test.name, *(tuple(c[k] for k in columns) + (note,)), w=width))
 
+    never_ran = [t.name for t in chosen if counts[t.name]["runs"] == 0]
+    if never_ran:
+        log("{} selected tests never ran:".format(len(never_ran)))
+        for name in never_ran:
+            log("  - {}".format(name))
+    for name in cut_unseen:
+        log("cut before it ever finished (possible hang): {}".format(name))
+
     result = {
         "iterations": iteration,
         "elapsed_s": round(elapsed, 1),
         "budget_s": args.budget_seconds,
         "counts": counts,
+        "never_ran": never_ran,
+        "cut_unseen": cut_unseen,
         "quarantined": quarantined,
         "failures": failures[:50],
         "failures_total": len(failures),

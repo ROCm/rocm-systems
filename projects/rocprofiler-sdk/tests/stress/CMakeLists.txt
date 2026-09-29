@@ -13,12 +13,12 @@ endif()
 
 # The in-tree CI step is capped at 30 minutes and configure + build + the full suite takes
 # 14-17 of them, so the two budgets below share about six minutes of the remaining
-# headroom (with a 300 s budget the step took 19-22 minutes).
+# headroom (with six minutes in total the ubuntu step took 24 minutes).
 set(ROCPROFILER_STRESS_BUDGET_SECONDS
-    "120"
+    "240"
     CACHE STRING "Wall-clock budget for the stress.* repetition test, in seconds")
 set(ROCPROFILER_STRESS_PROBE_BUDGET_SECONDS
-    "240"
+    "120"
     CACHE STRING "Wall-clock budget for the multistream save/restore probe, in seconds")
 
 add_test(
