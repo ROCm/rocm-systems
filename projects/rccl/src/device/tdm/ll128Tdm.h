@@ -38,7 +38,7 @@ bool tdmLoadPending = false;
 int tdmLoadEltN = 0;
 
 // Runtime opt-in, mirroring TDM_SIMPLE: RCCL_TDM_LL128_ENABLE=1, gfx1250 only.
-// Off by default, so a default build behaves exactly as before.
+// Off by default, so the synchronous path is what runs unless asked otherwise.
 __device__ __forceinline__ bool tdmEnabled() const { return ncclShmem.comm.tdmLl128Enable; }
 
 __device__ __forceinline__ uint8_t* tdmWindow() const {
