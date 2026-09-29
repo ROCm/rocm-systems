@@ -68,7 +68,7 @@ __device__ inline void tile_memcpy_rma(
     const size_t* boundary, int ndim, size_t element_size) {
   const TileView view =
       tile_make_view(dst_data, src_data, dst_strides, src_strides, start_coord,
-                     boundary, ndim, element_size, is_put(Kind));
+                     boundary, ndim, element_size);
 
   int worker_id{0};
   int worker_count{1};
