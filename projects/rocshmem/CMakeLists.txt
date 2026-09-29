@@ -262,21 +262,26 @@ if(ASAN)
   endif()
 endif()
 
+if(GPU_TARGETS)
+  set(_requested_gpus ${GPU_TARGETS})
+else()
+  set(_requested_gpus ${DEFAULT_GPU_TARGETS})
+endif()
+
 if(COMMAND rocm_check_target_ids)
-  if(GPU_TARGETS)
-    message(STATUS "Checking for ROCm support for GPU targets: " "${GPU_TARGETS}")
-    rocm_check_target_ids(SUPPORTED_GPUS TARGETS ${GPU_TARGETS})
-  else()
-    message(STATUS "Checking for ROCm support for GPU targets: " "${DEFAULT_GPU_TARGETS}")
-    rocm_check_target_ids(SUPPORTED_GPUS TARGETS ${DEFAULT_GPU_TARGETS})
-  endif()
+  message(STATUS "Checking for ROCm support for GPU targets: " "${_requested_gpus}")
+  rocm_check_target_ids(SUPPORTED_GPUS TARGETS ${_requested_gpus})
 else()
   message(WARNING "Unable to check for supported GPU targets.")
-  if(GPU_TARGETS)
-    set(SUPPORTED_GPUS ${GPU_TARGETS})
-  else()
-    set(SUPPORTED_GPUS ${DEFAULT_GPU_TARGETS})
-  endif()
+  set(SUPPORTED_GPUS ${_requested_gpus})
+endif()
+
+# The ASAN policy already failed if it kept nothing; this catches the compiler
+# rejecting everything it kept, e.g. because of conflicting CXXFLAGS.
+if(ASAN AND NOT SUPPORTED_GPUS)
+  message(FATAL_ERROR
+    "ASAN requires a GPU target that supports xnack, but none of the "
+    "requested GPU targets passed rocm_check_target_ids: ${_requested_gpus}")
 endif()
 
 # GPU_TARGETS_FULL: validated arch strings with feature suffixes intact.
