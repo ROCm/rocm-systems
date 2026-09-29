@@ -426,6 +426,13 @@ add_test(
         ${COV_OPTION} tests/integration/test_profile_membw.py ${WORKING_DIR_OPTION}
 )
 
+add_test(
+    NAME test_profile_membw
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_profile_membw.xml
+        ${COV_OPTION} tests/integration/test_profile_membw.py ${WORKING_DIR_OPTION}
+)
+
 set_tests_properties(
     test_profile_kernel_execution
     test_profile_dispatch
@@ -1317,11 +1324,13 @@ install(
     COMPONENT main
 )
 
-# install librocprofiler-compute-tool.so
+# Install librocprofiler-compute-tool.so and the generic Torch collector.
 install(
     TARGETS rocprofiler-compute-tool
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/rocprofiler-compute COMPONENT main
 )
+# The collector builds without PyTorch and is loaded through its plain-C ABI.
+# The loader searches lib/rocprofiler-compute/ for the generic artifact.
 if(TARGET torch-trace-collector-module)
     install(
         TARGETS torch-trace-collector-module

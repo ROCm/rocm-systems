@@ -470,6 +470,12 @@ public:
 /// is allowed to finish against the binding it captured.
 class GpuVmAccess {
 public:
+  /// @brief Whether this snapshot's access state is still valid.
+  /// @details Replacement, invalidation, and unregistration retire ordinary snapshots.
+  /// Pinned snapshots remain valid across replacement until invalidation or unregistration.
+  /// This check does not prevent concurrent retirement; access methods still validate the state.
+  [[nodiscard]] bool is_current() const;
+
   [[nodiscard]] AddressSpaceInfo info() const { return info_; }
   [[nodiscard]] VmCacheNamespace cache_namespace() const {
     return {.address_space = address_space_, .translation_epoch = info_.translation_epoch};
