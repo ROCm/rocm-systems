@@ -598,6 +598,14 @@ hsa_status_t KfdVirtioDriver::Map(const core::DriverMemoryHandle& handle, void* 
                        drm_perm(perms), AMDGPU_VA_OP_MAP) != 0)
     return HSA_STATUS_ERROR;
 
+  // CPU side of the mapping: blob-map the allocation at the reserved VA
+  if (vhsaKmtVirtioMapHandleToVA(reinterpret_cast<void*>(handle.handle), mem, size) !=
+      HSAKMT_STATUS_SUCCESS) {
+    vamdgpu_bo_va_op(ldrm_bo, offset, size, reinterpret_cast<uint64_t>(mem), 0,
+                     AMDGPU_VA_OP_UNMAP);
+    return HSA_STATUS_ERROR;
+  }
+
   return HSA_STATUS_SUCCESS;
 }
 
@@ -606,6 +614,8 @@ hsa_status_t KfdVirtioDriver::Unmap(const core::DriverMemoryHandle& handle, void
   const auto ldrm_bo = reinterpret_cast<amdgpu_bo_handle>(handle.handle);
   if (!ldrm_bo)
     return HSA_STATUS_ERROR;
+
+  vhsaKmtVirtioUnmapHandleFromVA(mem, size);
 
   if (vamdgpu_bo_va_op(ldrm_bo, offset, size, reinterpret_cast<uint64_t>(mem), 0,
                       AMDGPU_VA_OP_UNMAP) != 0)
