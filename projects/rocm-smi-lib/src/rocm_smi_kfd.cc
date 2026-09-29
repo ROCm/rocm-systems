@@ -59,6 +59,7 @@
 #include <sstream>
 #include <string>
 #include <unordered_set>
+#include <vector>
 
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_exception.h"
@@ -71,6 +72,18 @@ namespace amd {
 namespace smi {
 
 static const char* kKFDProcPathRoot = "/sys/class/kfd/kfd/proc";
+// Empty unless a unit test has redirected process sysfs reads.
+static std::string kfd_proc_path_root_override;
+
+void SetKFDProcPathRootForTest(const std::string& path) { kfd_proc_path_root_override = path; }
+
+static std::string KFDProcPathRoot() {
+  if (!kfd_proc_path_root_override.empty()) {
+    return kfd_proc_path_root_override;
+  }
+  return std::string(kKFDProcPathRoot);
+}
+
 static const char* kKFDNodesPathRoot = "/sys/class/kfd/kfd/topology/nodes";
 // Sysfs file names
 static const char* kKFDPasidFName = "pasid";
@@ -419,9 +432,8 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t* proc,
   assert(gpu_set != nullptr);
   int err;
   std::string tmp;
-  std::unordered_set<uint64_t>::iterator itr;
 
-  std::string proc_str_path = kKFDProcPathRoot;
+  std::string proc_str_path = KFDProcPathRoot();
   proc_str_path += "/";
   proc_str_path += std::to_string(pid);
 
@@ -447,15 +459,21 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t* proc,
 
   proc->vram_usage = 0;
   proc->sdma_usage = 0;
-  proc->cu_occupancy = 0;
+  // Stay invalid until at least one GPU contributes a sample that can be
+  // normalized by its CU count. A later miss must not clear that sample.
+  proc->cu_occupancy = CU_OCCUPANCY_INVALID;
 
-  uint32_t cu_count = 0;
+  uint64_t occupancy_sum = 0;
+  uint64_t cu_count = 0;
   static amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
   static std::map<uint64_t, std::shared_ptr<KFDNode>>& kfd_node_map = smi.kfd_node_map();
 
-  for (itr = gpu_set->begin(); itr != gpu_set->end(); itr++) {
-    uint64_t gpu_id = (*itr);
+  // Sort so a missing file is applied in a stable order. The aggregate is
+  // commutative; tests rely on that to cover "miss then hit" and "hit then miss".
+  std::vector<uint64_t> gpu_ids(gpu_set->begin(), gpu_set->end());
+  std::sort(gpu_ids.begin(), gpu_ids.end());
 
+  for (uint64_t gpu_id : gpu_ids) {
     std::string vram_str_path = proc_str_path;
     vram_str_path += "/vram_";
     vram_str_path += std::to_string(gpu_id);
@@ -496,24 +514,38 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t* proc,
     err = ReadSysfsStr(cu_occupancy_path, &tmp);
     sysfs_data_errcode = CheckValidProcessInfoData(tmp, err);
 
+    // ENOENT: this process has no occupancy file for this KFD GPU. That is the
+    // cgroup / ROCR_VISIBLE_DEVICES case (the process never created
+    // stats_<gpu_id>/), and it is also the GFX revisions that do not provide
+    // the cu_occupancy debugfs method. Skip the GPU. Do not discard samples
+    // already collected from other GPUs.
+    //
+    // This matches vram_* and sdma_* above (rocm_smi_lib#194). rocm_smi_lib#155
+    // used to treat the first ENOENT as "the whole process is unsupported" and
+    // stored CU_OCCUPANCY_INVALID, which threw away a real percentage.
+    //
+    // ReadSysfsStr maps a failed stat() to ENOENT, so a stat-time permission
+    // error is indistinguishable from a missing file and is skipped, same as
+    // VRAM. An open() failure after stat succeeds still returns the real errno
+    // (EACCES, EIO, ...) and is reported here rather than ignored.
     if (!(sysfs_data_errcode == 0 || sysfs_data_errcode == ENOENT)) {
       return sysfs_data_errcode;
     } else if (sysfs_data_errcode == 0) {
-      // Update CU usage by the process
-      proc->cu_occupancy += std::stoi(tmp);
-      // Collect count of compute units
-      cu_count += kfd_node_map[gpu_id]->cu_count();
-    } else {
-      // Some GFX revisions do not provide cu_occupancy debugfs method
-      // which may cause ENOENT
-      proc->cu_occupancy = CU_OCCUPANCY_INVALID;
-      cu_count = 0;
+      auto node = kfd_node_map.find(gpu_id);
+      if (node == kfd_node_map.end() || node->second == nullptr) {
+        return ENODEV;
+      }
+      // Wide accumulator: the sysfs value is occupied CUs, not a percent.
+      // (sum * 100) / cu_count is the percent. uint32 multiply overflowed.
+      occupancy_sum += std::stoull(tmp);
+      cu_count += node->second->cu_count();
     }
   }
 
-  // Adjust CU occupancy to percent.
+  // CU-weighted percent across the GPUs that published a file. Zero CUs in
+  // the denominator cannot be normalized, so the result stays invalid.
   if (cu_count > 0) {
-    proc->cu_occupancy = ((proc->cu_occupancy * 100) / cu_count);
+    proc->cu_occupancy = static_cast<uint32_t>((occupancy_sum * 100) / cu_count);
   }
 
   return 0;
@@ -893,8 +925,8 @@ int read_node_properties(uint32_t node, std::string property_name, uint64_t* val
   if (property_name.empty() || val == nullptr) {
     ss << __PRETTY_FUNCTION__ << " | File: " << propertiesFullPath
        << " | Issue: Could not read node #" << std::to_string(node)
-       << ", property_name is empty or *val is nullptr "
-       << " | return = " << std::to_string(retVal) << " | ";
+       << ", property_name is empty or *val is nullptr " << " | return = " << std::to_string(retVal)
+       << " | ";
     LOG_DEBUG(ss);
     return retVal;
   }
@@ -911,8 +943,8 @@ int read_node_properties(uint32_t node, std::string property_name, uint64_t* val
     retVal = 1;
     ss << __PRETTY_FUNCTION__ << " | File: " << propertiesFullPath
        << " | Issue: Could not read node #" << std::to_string(node)
-       << ", KFD node was an unsupported node."
-       << " | return = " << std::to_string(retVal) << " | ";
+       << ", KFD node was an unsupported node." << " | return = " << std::to_string(retVal)
+       << " | ";
     LOG_ERROR(ss);
   }
   return retVal;

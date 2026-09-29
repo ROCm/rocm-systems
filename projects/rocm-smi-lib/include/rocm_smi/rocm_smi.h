@@ -1255,7 +1255,11 @@ typedef struct {
   uint32_t cu_occupancy;  //!< Compute Unit usage in percent
 } rsmi_process_info_t;
 
-//! CU occupancy invalidation value for the GFX revisions not providing cu_occupancy debugfs method
+//! CU occupancy invalidation value when no contributing GPU published a sample.
+//! A missing stats_<gpu_id>/cu_occupancy file on one KFD device (the process
+//! never opened that GPU, or that ASIC does not provide the file) does not set
+//! this for the process. It is returned only when every candidate GPU lacked a
+//! readable sample, including GFX revisions with no cu_occupancy debugfs method.
 #define CU_OCCUPANCY_INVALID 0xFFFFFFFF
 
 /**
