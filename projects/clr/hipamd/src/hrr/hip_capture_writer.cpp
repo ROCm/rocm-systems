@@ -653,24 +653,23 @@ static bool fs_space(const std::string& dir, uint64_t* avail, uint64_t* total,
 }
 
 // Flush what is buffered, close events.bin and mark the archive incomplete.
-// Every write path already treats a closed events fd as "capture off". The flag
-// is raised under g_file_mu, so a writer that sees it and then takes the mutex
-// finds events.bin already closed.
+// Every write path already treats a closed events fd as "capture off". Both flags
+// are raised under g_file_mu, so a writer that sees the stop flag and then takes
+// the mutex finds events.bin already closed, and flush() cannot find it closed
+// without also seeing the archive marked incomplete.
 static void stop_for_space(uint64_t keep_free) {
   char reason[160];
   snprintf(reason, sizeof(reason),
            "stopped writing: less than %llu MiB would stay free on the file system "
            "holding the archive",
            static_cast<unsigned long long>(keep_free >> 20));
-  {
-    BufWriteGuard lk;
-    if (g_out_of_space.exchange(true)) return;
-    if (g_events_fd >= 0) {
-      flush_buffer_locked();
-      HRR_FSYNC(g_events_fd);
-      HRR_CLOSE(g_events_fd);
-      g_events_fd = -1;
-    }
+  BufWriteGuard lk;
+  if (g_out_of_space.exchange(true)) return;
+  if (g_events_fd >= 0) {
+    flush_buffer_locked();
+    HRR_FSYNC(g_events_fd);
+    HRR_CLOSE(g_events_fd);
+    g_events_fd = -1;
   }
   mark_incomplete(reason);
 }
@@ -736,6 +735,13 @@ static void release_space(uint64_t len) {
   if (g_keep_free == 0 || len == 0) return;
   g_bytes_reserved.fetch_sub(file_bytes(len), std::memory_order_acq_rel);
 }
+
+// Held for the rest of a writer after reserve_space(len) succeeds, so every way
+// out of it, early returns and exceptions included, releases the bytes.
+struct SpaceReservation {
+  uint64_t len;
+  ~SpaceReservation() { release_space(len); }
+};
 
 // For open() refusing for lack of space. A forked child inherits these paths and
 // atexit(hip_capture_shutdown), so without this its flush() would finalize the
@@ -894,7 +900,8 @@ void mark_incomplete(const char* reason) {
   // Record once; the loud, AMD_LOG_LEVEL-routed message is emitted by the caller
   // (e.g. serialize_kernel_launch) which has the relevant context. Here we only
   // need the durable flag and a single stderr breadcrumb so a bare run still
-  // surfaces it.
+  // surfaces it. stop_for_space() calls this with g_file_mu held, so it must not
+  // take that mutex.
   if (!g_capture_incomplete.exchange(true, std::memory_order_relaxed)) {
     fprintf(stderr,
             "[HRR capture] Archive marked INCOMPLETE: %s. The clean-shutdown "
@@ -910,10 +917,12 @@ void flush(const char* /*output_dir*/) {
   // Always finalize the *effective* directory this process actually wrote to
   // (g_output_dir), which is always a pid-<pid> sub-archive. The caller passes
   // the base HIP_HRR_CAPTURE_OUTPUT path.
-  const bool incomplete = g_capture_incomplete.load(std::memory_order_relaxed);
+  bool incomplete;
   std::string out_dir;
   {
     BufWriteGuard lk;
+    // Must be read under the lock, see stop_for_space().
+    incomplete = g_capture_incomplete.load(std::memory_order_relaxed);
     out_dir = g_output_dir;
     // Skip the clean-shutdown trailer when the capture is known incomplete: its
     // absence is exactly how the reader detects a non-faithful archive.
@@ -1128,6 +1137,7 @@ Hash128 write_blob(const void* data, size_t len) {
     if (!g_written_blobs.insert(key).second) return h;  // already written
   }
   if (!reserve_space(len)) return {};
+  const SpaceReservation reservation{len};
 
   // blobs/<2-char-prefix>/<fullhash>.blob
   std::string subdir = g_output_dir + "/blobs/" + std::string(hex, 2);
@@ -1142,7 +1152,6 @@ Hash128 write_blob(const void* data, size_t len) {
     std::lock_guard<std::mutex> lk(g_blob_mu);
     g_written_blobs.erase(key);
   }
-  release_space(len);
   return h;
 }
 
@@ -1166,6 +1175,7 @@ Hash128 write_code_object(const void* image, size_t image_size) {
     if (!g_written_blobs.insert(key).second) return h;  // already written
   }
   if (!reserve_space(image_size)) return {};
+  const SpaceReservation reservation{image_size};
 
   std::string path = g_output_dir + "/code_objects/" + hex + ".hsaco";
   if (atomic_write_file(path, image, image_size)) {
@@ -1175,7 +1185,6 @@ Hash128 write_code_object(const void* image, size_t image_size) {
     std::lock_guard<std::mutex> lk(g_blob_mu);
     g_written_blobs.erase(key);
   }
-  release_space(image_size);
   return h;
 }
 
