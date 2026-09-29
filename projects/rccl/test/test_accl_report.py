@@ -9,7 +9,10 @@ import pytest
 sys.path.insert(
     0, os.path.join(os.path.dirname(__file__), "..", "plugins", "profiler", "accl")
 )
-from accl_report import parse_jsonl, fmt_size  # noqa: E402
+from accl_report import (  # noqa: E402
+    parse_jsonl, fmt_size, parse_summaries, load_summaries,
+    print_drop_warnings, reject_legacy_summaries,
+)
 
 
 def _make_record(sn, rank=0, n_ranks=8, exec_us=100.0,
@@ -39,6 +42,96 @@ def _write_jsonl(lines):
     f.write("\n".join(lines) + "\n")
     f.close()
     return f.name
+
+
+# --- summary parsing and the INCOMPLETE banner ----------------------------
+# print_drop_warnings is the reporter half of the loss-visibility path: it is
+# what turns a counter the plugin wrote into something a user sees.
+
+
+def _summary(**kw):
+    s = {"dropped_collectives": 0, "leaked_collectives": 0,
+         "inflight_collectives": 0, "dropped_proxy_ops": 0,
+         "dropped_proxy_steps": 0, "overflow_proxy_ops": 0,
+         "stale_proxy_steps": 0, "outstanding_proxy_ops": 0,
+         "outstanding_proxy_steps": 0, "write_error": False,
+         "coll_pool_size": 256, "complete": True}
+    s.update(kw)
+    return s
+
+
+def _write_summary_file(summary):
+    path = _write_jsonl([_make_record(sn=0), json.dumps({"summary": summary})])
+    return path
+
+
+def test_proxy_only_loss_warns(capsys):
+    path = _write_summary_file(
+        _summary(dropped_proxy_ops=7, complete=False))
+    try:
+        summaries = load_summaries(path)
+        assert len(summaries) == 1
+        print_drop_warnings(summaries)
+        err = capsys.readouterr().err
+        assert "INCOMPLETE" in err
+        assert "7 proxy ops dropped" in err
+        assert "coll_pool_size=256" in err
+    finally:
+        os.unlink(path)
+
+
+def test_clean_summary_is_silent(capsys):
+    path = _write_summary_file(_summary())
+    try:
+        print_drop_warnings(load_summaries(path))
+        assert capsys.readouterr().err == ""
+    finally:
+        os.unlink(path)
+
+
+def test_missing_summary_warns(capsys):
+    path = _write_jsonl([_make_record(sn=0)])
+    try:
+        assert parse_summaries(path) == []
+        print_drop_warnings([])
+        assert "no profiler summary" in capsys.readouterr().err
+    finally:
+        os.unlink(path)
+
+
+def test_old_format_summary_renders_question_mark(capsys):
+    """A pre-rename file has no coll_pool_size; the banner must degrade, not
+    raise."""
+    old = {"dropped_collectives": 3, "leaked_collectives": 0, "pool_size": 256}
+    path = _write_summary_file(old)
+    try:
+        print_drop_warnings(load_summaries(path))
+        err = capsys.readouterr().err
+        assert "coll_pool_size=?" in err
+    finally:
+        os.unlink(path)
+
+
+def test_write_error_alone_warns(capsys):
+    """ENOSPC leaves every counter at 0; write_error is the only cause shown."""
+    path = _write_summary_file(_summary(write_error=True, complete=False))
+    try:
+        print_drop_warnings(load_summaries(path))
+        err = capsys.readouterr().err
+        assert "INCOMPLETE" in err and "write_error=True" in err
+    finally:
+        os.unlink(path)
+
+
+def test_compare_refuses_pre_rename_baseline(capsys):
+    """proxy_* changed divisor at the rename, so an old baseline would show a
+    2x regression that is not one."""
+    with pytest.raises(SystemExit):
+        reject_legacy_summaries(
+            [{"dropped_collectives": 0, "pool_size": 256}], "baseline")
+    assert "pre-rename" in capsys.readouterr().err
+    # A current summary passes through.
+    reject_legacy_summaries([_summary()], "baseline")
 
 
 def test_warmup_does_not_multiply_by_nranks():
