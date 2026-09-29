@@ -38,6 +38,11 @@ dispatch:
   inflated_without_restore   SQ_WAVES >= 2 and SQ_WAVES_RESTORED == 0  (a real overlap)
   restore_without_inflation  SQ_WAVES == 1 but a wave was saved or restored  (refutes it)
   zero_waves                 SQ_WAVES == 0  (an undercount)
+  missing_counter            a counter has no row for this dispatch
+
+All three counters must come from the same pass. Giving rocprofv3 one --pmc per counter makes
+it replay the whole application once per counter, each run writing its own pass_N/ output, so
+the counters of one dispatch would come from different runs and could not be compared.
 
 It exits non-zero whenever anything other than `normal` is seen. Under --report-only, as
 registered in CI, it always exits 0 so it cannot fail the CI step and skip the steps after it;
@@ -68,6 +73,7 @@ CLASSES = (
     "inflated_without_restore",
     "restore_without_inflation",
     "zero_waves",
+    "missing_counter",
 )
 # the app's only kernel; the runtime's copy kernels also appear in the output and are ignored
 KERNEL_RE = re.compile(r"(^|[^A-Za-z0-9_])add($|[^A-Za-z0-9_])")
@@ -108,10 +114,29 @@ def read_counters(csv_path):
             entry = table[int(row[col["dispatch"]])]
             entry["kernel"] = row[col["kernel"]]
             entry[row[col["counter"]]] += float(row[col["value"]])
-    return table
+    return header, table
+
+
+def describe(csv_path, run_dir, header, add_entries):
+    """Print what the first parsed run contained, so a misread shows up in the log."""
+    log("first run: {}".format(os.path.relpath(csv_path, run_dir)))
+    log("  header: {}".format(",".join(header)))
+    names = sorted(set(k for _, e in add_entries for k in e if k != "kernel"))
+    for name in names:
+        values = [e[name] for _, e in add_entries if name in e]
+        log(
+            "  {}: {} of {} add dispatches, sum {:g}, min {:g}, max {:g}".format(
+                name, len(values), len(add_entries), sum(values), min(values), max(values)
+            )
+        )
+    absent = [name for name in COUNTERS if name not in names]
+    if absent:
+        log("  no rows at all for: {}".format(", ".join(absent)))
 
 
 def classify(entry):
+    if any(name not in entry for name in COUNTERS):
+        return "missing_counter"
     waves = int(round(entry.get("SQ_WAVES", 0.0)))
     restored = int(round(entry.get("SQ_WAVES_RESTORED", 0.0)))
     saved = int(round(entry.get("SQ_WAVES_SAVED", 0.0)))
@@ -125,9 +150,7 @@ def classify(entry):
 
 
 def run_once(args, run_dir, timeout):
-    cmd = [args.rocprofv3]
-    for counter in COUNTERS:
-        cmd += ["--pmc", counter]
+    cmd = [args.rocprofv3, "--pmc"] + list(COUNTERS)
     cmd += ["--output-format", "csv", "-d", run_dir, "-o", "out", "--", args.app]
     proc = subprocess.Popen(
         cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True
@@ -174,6 +197,7 @@ def run(args):
     run_failures = []
     runs = 0
     longest = None
+    described = False
 
     log(
         "PROBE rocprofv3 --pmc {} on {} for {:.0f}s".format(
@@ -197,9 +221,15 @@ def run(args):
         took = time.monotonic() - t0
         longest = took if longest is None else max(longest, took)
 
-        found = glob.glob(
-            os.path.join(run_dir, "**", "*counter_collection.csv"), recursive=True
+        found = sorted(
+            glob.glob(
+                os.path.join(run_dir, "**", "*counter_collection.csv"), recursive=True
+            )
         )
+        if status == "OK" and len(found) > 1:
+            status = "{} counter CSVs, expected one: {}".format(
+                len(found), ", ".join(os.path.relpath(f, run_dir) for f in found)
+            )
         if status != "OK" or not found:
             run_failures.append({"run": runs, "status": status, "csv": bool(found)})
             if len(run_failures) <= 2:
@@ -216,7 +246,7 @@ def run(args):
             continue
 
         try:
-            table = read_counters(found[0])
+            header, table = read_counters(found[0])
         except (ValueError, OSError, StopIteration) as err:
             run_failures.append(
                 {"run": runs, "status": "PARSE: {}".format(err), "csv": True}
@@ -225,23 +255,24 @@ def run(args):
             shutil.rmtree(run_dir, ignore_errors=True)
             continue
 
+        add_entries = [
+            (dispatch_id, entry)
+            for dispatch_id, entry in sorted(table.items())
+            if KERNEL_RE.search(entry.get("kernel", ""))
+        ]
+        if not described and add_entries:
+            describe(found[0], run_dir, header, add_entries)
+            described = True
+
         counts = dict((k, 0) for k in CLASSES)
-        for dispatch_id, entry in sorted(table.items()):
-            if not KERNEL_RE.search(entry.get("kernel", "")):
-                continue
+        for dispatch_id, entry in add_entries:
             kind = classify(entry)
             counts[kind] += 1
             if kind != "normal" and len(events) < args.max_events:
-                events.append(
-                    {
-                        "run": runs,
-                        "dispatch_id": dispatch_id,
-                        "class": kind,
-                        "SQ_WAVES": entry.get("SQ_WAVES", 0.0),
-                        "SQ_WAVES_RESTORED": entry.get("SQ_WAVES_RESTORED", 0.0),
-                        "SQ_WAVES_SAVED": entry.get("SQ_WAVES_SAVED", 0.0),
-                    }
-                )
+                event = {"run": runs, "dispatch_id": dispatch_id, "class": kind}
+                for name in COUNTERS:
+                    event[name] = entry.get(name)
+                events.append(event)
         for k in CLASSES:
             totals[k] += counts[k]
         log(
@@ -262,9 +293,19 @@ def run(args):
     if run_failures:
         log("  runs that produced no usable output: {}".format(len(run_failures)))
     for ev in events:
+        values = dict(
+            (name, "-" if ev[name] is None else "{:g}".format(ev[name]))
+            for name in COUNTERS
+        )
         log(
-            "  event run={run} dispatch={dispatch_id} {class}: SQ_WAVES={SQ_WAVES:g} "
-            "RESTORED={SQ_WAVES_RESTORED:g} SAVED={SQ_WAVES_SAVED:g}".format(**ev)
+            "  event run={} dispatch={} {}: SQ_WAVES={} RESTORED={} SAVED={}".format(
+                ev["run"],
+                ev["dispatch_id"],
+                ev["class"],
+                values["SQ_WAVES"],
+                values["SQ_WAVES_RESTORED"],
+                values["SQ_WAVES_SAVED"],
+            )
         )
     result = {
         "runs": runs,
