@@ -160,6 +160,9 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtGetNodeProperties(HSAuint32 NodeId,
   /* gws not supported currently */
   NodeProperties->NumGws = 0;
 
+  /* svm/hmm (kfd svm ioctls) not proxied over virtio */
+  NodeProperties->Capability.ui32.SVMAPISupported = 0;
+
   r = vhsakmt_set_node_props(dev, NodeId, NodeProperties);
   if (r) return r;
 
