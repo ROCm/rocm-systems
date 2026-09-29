@@ -7617,6 +7617,69 @@ TEST(HwregTest, GetregReadsModeAndStatusTargetIds) {
   }
 }
 
+TEST(HwregTest, Cdna4DiagnosticSimdControlsOnlyTheRequestedHwIdField) {
+  amdgpu::GpuMemory memory("diagnostic_simd_mem");
+  amdgpu::L2Cache l2("diagnostic_simd_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 104;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("diagnostic_simd", cfg, &memory, &l2);
+  auto decoder = Decoder::create(cfg.arch);
+  ASSERT_NE(cu, nullptr);
+  ASSERT_NE(decoder, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+
+  uint32_t value = 0xDEADBEEFu;
+  EXPECT_EQ(amdgpu::read_hwreg_field(*wf, encode_hwreg(4, 4, 1), value),
+            amdgpu::HwregAccessResult::Unsupported);
+  EXPECT_EQ(value, 0u);
+
+  for (uint32_t simd = 0; simd < 4; ++simd) {
+    SCOPED_TRACE(simd);
+    cu->set_diagnostic_hw_id_simd(simd);
+    for (const auto &[offset, width] :
+         std::array<std::pair<uint32_t, uint32_t>, 3>{{{4, 1}, {5, 1}, {4, 2}}}) {
+      SCOPED_TRACE(offset);
+      SCOPED_TRACE(width);
+      const auto field = encode_hwreg(4, offset, width);
+      const uint32_t expected = (simd >> (offset - 4)) & ((1u << width) - 1u);
+      EXPECT_EQ(amdgpu::read_hwreg_field(*wf, field, value), amdgpu::HwregAccessResult::Success);
+      EXPECT_EQ(value, expected);
+      const auto words = encode_sopk(cdna4::kSGetregB32Sopk, 4, field);
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+      ASSERT_NE(inst, nullptr);
+      ASSERT_EQ(std::string_view(inst->mnemonic()), "s_getreg_b32");
+      // SOPK remains scalar even when all vector lanes are inactive.
+      wf->set_exec(0);
+      cu->write_sgpr(wf->sgpr_alloc().base + 4, 0xDEADBEEFu);
+      ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+      EXPECT_EQ(cu->read_sgpr(wf->sgpr_alloc().base + 4), expected);
+    }
+
+    for (const auto field :
+         {encode_hwreg(4), encode_hwreg(4, 0, 4), encode_hwreg(4, 3, 2), encode_hwreg(4, 5, 2),
+          encode_hwreg(4, 6, 1), encode_hwreg(4, 31, 32), encode_hwreg(63, 4, 1)}) {
+      value = 0xDEADBEEFu;
+      EXPECT_EQ(amdgpu::read_hwreg_field(*wf, field, value),
+                amdgpu::HwregAccessResult::Unsupported);
+      EXPECT_EQ(value, 0u);
+    }
+    EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(4, 4, 2), 0),
+              amdgpu::HwregAccessResult::ReadOnly);
+    EXPECT_EQ(cu->config().diagnostic_hw_id_simd, simd);
+  }
+  EXPECT_THROW(cu->set_diagnostic_hw_id_simd(4), util::ConfigError);
+  EXPECT_EQ(cu->config().diagnostic_hw_id_simd, 3u);
+  cu->set_diagnostic_hw_id_simd(std::nullopt);
+  EXPECT_EQ(amdgpu::read_hwreg_field(*wf, encode_hwreg(4, 4, 1), value),
+            amdgpu::HwregAccessResult::Unsupported);
+  wf->halt();
+}
+
 TEST(HwregHelperTest, ReportsReadWriteResultContracts) {
   amdgpu::GpuMemory gpu_mem("hwreg_helper_contract_mem");
   amdgpu::L2Cache l2("hwreg_helper_contract_l2");
