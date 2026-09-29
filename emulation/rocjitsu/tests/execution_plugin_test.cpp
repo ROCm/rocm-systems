@@ -2446,14 +2446,13 @@ TEST(InstructionMixPluginTest, AgreesWithThroughputOnInstructionFamilies) {
       {"global_atomic_cmpswap_b32", 0, InstructionFamily::Global},
       {"flat_prefetch_b8", 0, InstructionFamily::Global},
       {"ds_bpermute_b32", 0, InstructionFamily::Lds},
-      // Scalar memory: `s_load_*`/`s_store_*` are flagged everywhere, but the
-      // `s_buffer_atomic_*` set never is, and the bare `s_` prefix would
-      // otherwise bucket it with ALU work.
+      // Scalar memory. generated/*/smem.cpp stopped setting MEMORY_OP
+      // altogether when the decoded memory-issue metadata landed, so these
+      // arrive unflagged and the bare `s_` prefix would bucket them with ALU
+      // work. The flagged `s_buffer_load_dword` case is kept to pin the other
+      // path: a synthetic or model-only instruction may still carry the flag.
       {"s_buffer_atomic_add", 0, InstructionFamily::Global},
       {"s_buffer_load_dword", MEMORY_OP, InstructionFamily::Global},
-      // generated/*/smem.cpp stopped setting MEMORY_OP altogether when the
-      // decoded memory-issue metadata landed, so every scalar-memory encoding
-      // now arrives unflagged and the bare `s_` prefix would call it ALU work.
       {"s_load_b32", 0, InstructionFamily::Global},
       {"s_load_dwordx4", 0, InstructionFamily::Global},
       {"s_store_dword", 0, InstructionFamily::Global},
@@ -2520,9 +2519,6 @@ TEST(InstructionMixPluginTest, AgreesWithThroughputOnInstructionFamilies) {
   }
 }
 
-// Merging walks unordered maps, so a mnemonic seen through two encodings must
-// not have its reported encoding decided by hash order -- the whole point of
-// the report is that two runs of the same workload diff cleanly.
 // A prefix table can only recognise families it has been told about. The CDNA5
 // `cluster_load_*` set follows no memory naming convention, carries no
 // MEMORY_OP, and would be reported as `other` -- but it does declare its
@@ -2552,6 +2548,9 @@ TEST(InstructionMixPluginTest, ClassifiesMemoryByIssueMetadataWhenThePrefixIsUnk
   }
 }
 
+// Merging walks unordered maps, so a mnemonic seen through two encodings must
+// not have its reported encoding decided by hash order -- the whole point of
+// the report is that two runs of the same workload diff cleanly.
 TEST(InstructionMixPluginTest, PicksTheSameEncodingRegardlessOfMergeOrder) {
   PluginFixture f(/*num_wf_slots=*/1);
   // Wavefront slots are created on demand by the CU's dispatch path, so take

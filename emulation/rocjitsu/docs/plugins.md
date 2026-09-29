@@ -97,8 +97,16 @@ instructions and counts an issue notification exactly as it counts a
 synchronous execution, because the group ANDs that capability across its
 members: a plugin that stayed with the default would switch MMA offload off for
 every plugin loaded beside it, so a report meant to describe a run would have
-changed how the run executed. It also opts out of scalar-register callbacks,
-which it never reads.
+changed how the run executed.
+
+It subscribes to nothing else. Before-execute and async-issue are where the mix
+is counted, so the plugin opts out of after-execute, memory-instruction
+routing, and the scalar- and vector-register callbacks, none of which it reads.
+These are ORed across the group, so a plugin that does want them still gets
+them -- throughput keeps after-execute for its timing. Declining them matters
+when instruction-mix runs alone: the register hooks in particular keep
+`ComputeUnit::observes_register_access_` enabled, which puts an ownership check
+and a callback dispatch on every register access.
 
 It emits one JSON object per line using the `rocjitsu.instruction_mix.v1`
 schema: one `"record":"dispatch"` object per completed dispatch and one
@@ -529,7 +537,7 @@ Callbacks must not retain instruction or wave references. There is no completion
 notification. Holding the callback mutex does not provide a complete
 architectural snapshot.
 
-Throughput and kernel logging support this contract. ConSan keeps synchronous
-execution until its dependency-event access and diagnostic context support
-concurrent register hooks within one wave. Plugins and the host must be rebuilt
-together, as for other execution-plugin interface changes.
+Throughput, instruction mix, and kernel logging support this contract. ConSan
+keeps synchronous execution until its dependency-event access and diagnostic
+context support concurrent register hooks within one wave. Plugins and the host
+must be rebuilt together, as for other execution-plugin interface changes.
