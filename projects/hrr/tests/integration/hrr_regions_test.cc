@@ -734,8 +734,15 @@ inline std::pair<uint64_t, uint64_t> hrr_capture_direct_hsa(
   int denied_status = 0;
   if (sscanf(out.c_str() + at, HRR_HSA_SEG_MARKER " denied %d",
              &denied_status) == 1) {
-    HRR_SKIP_CASE("HSA pool refused allow_access (status="
-                  << denied_status << ")");
+    // gfx1151 enumerates the pool and then rejects the grant with
+    // INVALID_AGENT. Any other refusal is a ROCr regression, not a platform
+    // limit, and has to fail.
+    if (denied_status == HSA_STATUS_ERROR_INVALID_AGENT) {
+      HRR_SKIP_CASE("HSA pool refused allow_access (status="
+                    << denied_status << ")");
+    }
+    FAIL("hsa_amd_agents_allow_access failed (status=" << denied_status
+                                                       << ")");
   }
   unsigned long long base = 0, size = 0;
   if (sscanf(out.c_str() + at, HRR_HSA_SEG_MARKER " 0x%llx %llu", &base,
