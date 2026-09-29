@@ -41,6 +41,6 @@
     "trace_entry_mismatch": "Trace entry structure differs from upstream NCCL",
     "missing_dump_pipe": "RCCL does not create flight recorder dump pipe",
     "pg_timeout_semantics": "extend_pg_timeout adds to existing vs sets absolute value",
-    "extra_context_heuristic": "Test infers an extra HIP context from >70% device memory growth across a collective; on ROCm the growth is a ROCr runtime allocation, not a second context and not RCCL memory (AICOMRCCL-2469)"
+    "extra_context_heuristic": "Test infers an extra HIP context from >70% device memory growth across a collective; on ROCm the growth is a ROCr runtime allocation, not a second context and not RCCL memory. Magnitude is build- and arch-dependent, and the ratio also varies with node co-tenancy (AICOMRCCL-2469)"
   }
 }
