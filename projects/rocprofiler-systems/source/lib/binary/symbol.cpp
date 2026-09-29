@@ -21,16 +21,13 @@ typedef Elf32_Word  Elf32_Relr;
 typedef Elf64_Xword Elf64_Relr;
 #endif
 
-#include <bfd.h>
-// #include <coff/external.h>
-// #include <coff/internal.h>
 #include <algorithm>
+#include <bfd.h>
 #include <cstddef>
 #include <cstdio>
 #include <dwarf.h>
 #include <elf-bfd.h>
 #include <elfutils/libdw.h>
-// #include <libcoff.h>
 
 #include "common/path.hpp"
 #include "core/binary/fwd.hpp"
