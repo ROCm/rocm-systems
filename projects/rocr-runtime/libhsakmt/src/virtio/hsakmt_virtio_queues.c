@@ -331,7 +331,11 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtSetQueueCUMask(HSA_QUEUEID QueueId, HSAuint32 CUM
   vhsakmt_device_handle dev = vhsakmt_dev();
   vhsakmt_bo_handle bo = (vhsakmt_bo_handle)QueueId;
   struct vhsakmt_ccmd_queue_rsp* rsp;
-  struct vhsakmt_ccmd_queue_req req = {
+  /* payload[] is a flexible array: size the request buffer for the maximum CU mask */
+  uint8_t reqbuf[sizeof(struct vhsakmt_ccmd_queue_req) +
+                 VHSAKMT_CCMD_QUEUE_MAX_CU_MASK_SIZE * sizeof(HSAuint32)];
+  struct vhsakmt_ccmd_queue_req* req = (struct vhsakmt_ccmd_queue_req*)reqbuf;
+  *req = (struct vhsakmt_ccmd_queue_req){
       .hdr = VHSAKMT_CCMD(QUEUE,
                           sizeof(struct vhsakmt_ccmd_queue_req) + CUMaskCount * sizeof(HSAuint32)),
       .type = VHSAKMT_CCMD_QUEUE_SET_CU_MASK,
@@ -339,15 +343,12 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtSetQueueCUMask(HSA_QUEUEID QueueId, HSAuint32 CUM
       .CUMaskCount = CUMaskCount,
   };
 
-  memcpy(req.payload, QueueCUMask, CUMaskCount * sizeof(HSAuint32));
-  rsp = vhsakmt_alloc_rsp(dev, &req.hdr, sizeof(struct vhsakmt_ccmd_queue_rsp));
+  memcpy(req->payload, QueueCUMask, CUMaskCount * sizeof(HSAuint32));
+  rsp = vhsakmt_alloc_rsp(dev, &req->hdr, sizeof(struct vhsakmt_ccmd_queue_rsp));
   if (!rsp) return -ENOMEM;
 
-  vhsakmt_execbuf_cpu(dev, &req.hdr, __FUNCTION__);
-  if (rsp->ret) return rsp->ret;
-
-  memcpy(QueueCUMask, rsp->payload, CUMaskCount * sizeof(HSAuint32));
-
+  vhsakmt_execbuf_cpu(dev, &req->hdr, __FUNCTION__);
+  /* no output payload: only rsp->ret is valid */
   return rsp->ret;
 }
 
