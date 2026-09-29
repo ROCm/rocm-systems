@@ -802,13 +802,14 @@ static ncclResult_t ginAnvilBindContextSignals(ginAnvilGinCtx* ctx, int contextI
     return ncclSystemError;
   }
   for (int pe = 0; pe < ctx->nRanks; pe++) {
-    hostAddrs[pe] = (uintptr_t)lsaSelf + static_cast<ptrdiff_t>(pe - ctx->rank) * stride;
+    hostAddrs[pe] = (uintptr_t)lsaSelf + static_cast<ptrdiff_t>(pe - devr->lsaSelf) * stride;
   }
 
   uintptr_t selfExpected = (uintptr_t)lsaSelf;
-  if (hostAddrs[ctx->rank] != selfExpected) {
-    WARN("GIN anvil-sdma: signal_remote_addrs[self=%d]=%#lx != signals=%#lx (lsaSelf=%#lx stride=%zd)", ctx->rank,
-         (unsigned long)hostAddrs[ctx->rank], (unsigned long)selfExpected, (unsigned long)lsaSelf, (long)stride);
+  if (hostAddrs[devr->lsaSelf] != selfExpected) {
+    WARN("GIN anvil-sdma: signal_remote_addrs[self=%d]=%#lx != signals=%#lx (lsaSelf=%#lx stride=%zd)",
+         devr->lsaSelf, (unsigned long)hostAddrs[devr->lsaSelf], (unsigned long)selfExpected,
+         (unsigned long)lsaSelf, (long)stride);
   }
 
   uintptr_t* gatheredLocalBases = (uintptr_t*)calloc((size_t)ctx->nRanks, sizeof(uintptr_t));
@@ -844,7 +845,7 @@ static ncclResult_t ginAnvilBindContextSignals(ginAnvilGinCtx* ctx, int contextI
   }
 
   uintptr_t remote0 = hostAddrs[0];
-  uintptr_t remoteSelf = hostAddrs[ctx->rank];
+  uintptr_t remoteSelf = hostAddrs[devr->lsaSelf];
   free(hostAddrs);
   if (hipMemcpy(ctx->gpuCtxDev + contextId, gpuCtxHost, sizeof(ncclGinAnvilSdmaGPUContext), hipMemcpyHostToDevice) !=
       hipSuccess) {
@@ -877,8 +878,8 @@ static ncclResult_t ginAnvilBindContextSignals(ginAnvilGinCtx* ctx, int contextI
 }
 
 ncclResult_t ncclGinAnvilBindResourceWindowSignals(struct ncclComm* comm, void* resourceUserPtr, size_t arenaByteOffset,
-                                                   int nContexts, int nSignalsPerContext) {
-  if (!comm || !resourceUserPtr || nContexts < 1 || nSignalsPerContext < 1) return ncclInvalidArgument;
+                                                   int nSignalSlots, int nSignalsPerContext) {
+  if (!comm || !resourceUserPtr || nSignalSlots < 1 || nSignalsPerContext < 1) return ncclInvalidArgument;
 
   void* spanLocalPtr = (char*)resourceUserPtr + arenaByteOffset;
   void* spanLsaSelf = nullptr;
@@ -889,7 +890,7 @@ ncclResult_t ncclGinAnvilBindResourceWindowSignals(struct ncclComm* comm, void* 
     return ncclSystemError;
   }
 
-  const size_t spanBytes = (size_t)nContexts * (size_t)nSignalsPerContext * sizeof(uint64_t);
+  const size_t spanBytes = (size_t)nSignalSlots * (size_t)nSignalsPerContext * sizeof(uint64_t);
   int spanRanks = 0;
   for (GinAnvilPendingEntry* e = g_pendingByComm[comm]; e != nullptr; e = e->next) {
     if (e->ctx->nSignals > 0) {
@@ -898,8 +899,11 @@ ncclResult_t ncclGinAnvilBindResourceWindowSignals(struct ncclComm* comm, void* 
     }
   }
   if (spanRanks <= 0) {
+    // Non-anvil GIN backends still call this bind from ncclDevCommCreate whenever
+    // signals and a resource window exist. An empty pending list means nothing
+    // anvil-owned needs binding; succeed so type-5 (and similar) bring-up keeps working.
     ginAnvilPendingClear(comm);
-    return ncclInvalidArgument;
+    return ncclSuccess;
   }
 
   ncclResult_t ret = ncclSuccess;
@@ -911,8 +915,8 @@ ncclResult_t ncclGinAnvilBindResourceWindowSignals(struct ncclComm* comm, void* 
     ctx->signalSpanLsaSelf = spanLsaSelf;
     ginAnvilSignalSpanRefInc(spanLsaSelf);
     for (int contextId = 0; contextId < ctx->nContexts; contextId++, slot++) {
-      if (slot >= nContexts) {
-        WARN("GIN anvil-sdma: signal slot %d out of range (nContexts=%d)", slot, nContexts);
+      if (slot >= nSignalSlots) {
+        WARN("GIN anvil-sdma: signal slot %d out of range (nSignalSlots=%d)", slot, nSignalSlots);
         ret = ncclInvalidArgument;
         goto fail;
       }

@@ -398,19 +398,19 @@ TEST_F(GinAnvilSdmaTemplateTest, CounterSignal_GetReset) {
 
 // AICOMRCCL-2339: the Anvil device dispatch must select the GPU context
 // indexed by ncclGinCtx::contextId instead of always using array element zero.
-__global__ void kernelSignalContextSelection(ncclGinAnvilSdmaGPUContext* contexts, uint64_t* counters) {
+__global__ void kernelSignalContextSelection(ncclGinAnvilSdmaGPUContext* contexts) {
   if (threadIdx.x != 0) return;
   ncclGinCtx ginCtx{};
   ginCtx.handle = contexts;
 
   ginCtx.contextId = 0;
   ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, 0).ptr[0] = 11;
-  ncclGinApi_ResetSignal<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(
-      ginCtx, ncclGinSignalDescriptor{NCCL_GIN_SIGNAL_TYPE_INDEXED, {.indexedSignal = {.signalId = 0}}});
   ncclGinApi_GetCounterPtr<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, 0).ptr[0] = 101;
 
   ginCtx.contextId = 1;
   ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, 0).ptr[0] = 22;
+  ncclGinApi_ResetSignal<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(
+      ginCtx, ncclGinSignalDescriptor{NCCL_GIN_SIGNAL_TYPE_INDEXED, {.indexedSignal = {.signalId = 0}}});
   ncclGinApi_ResetCounter<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, 0);
   ncclGinApi_GetCounterPtr<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, 0).ptr[0] = 202;
 }
@@ -431,12 +431,12 @@ TEST_F(GinAnvilSdmaTemplateTest, SignalApis_SelectLogicalContext) {
   DeviceBuffer<ncclGinAnvilSdmaGPUContext> d_contexts(2);
   d_contexts.copyFrom(hostCtx, 2);
 
-  kernelSignalContextSelection<<<1, 1>>>(d_contexts.ptr, d_counters.ptr);
+  kernelSignalContextSelection<<<1, 1>>>(d_contexts.ptr);
   syncAndCheck();
   auto signals = d_signals.copyTo();
   auto counters = d_counters.copyTo();
-  EXPECT_EQ(signals[0], 0ULL);
-  EXPECT_EQ(signals[1], 22ULL);
+  EXPECT_EQ(signals[0], 11ULL) << "ResetSignal must not clear context 0 when invoked on contextId=1";
+  EXPECT_EQ(signals[1], 0ULL) << "ResetSignal on contextId=1 must clear context 1 signal cell";
   EXPECT_EQ(counters[0], 101ULL);
   EXPECT_EQ(counters[1], 202ULL);
 }
@@ -461,12 +461,17 @@ __global__ void kernelPutValueContextSelection(ncclGinAnvilSdmaGPUContext* conte
 TEST_F(GinAnvilSdmaTemplateTest, PutValue_SelectLogicalContext) {
   DeviceBuffer<uint64_t> d_signals(2);
   DeviceBuffer<uint8_t> d_dst(8);
-  DeviceBuffer<uintptr_t> d_remoteAddrs(2);
+  DeviceBuffer<uintptr_t> d_remoteAddrs0(2);
+  DeviceBuffer<uintptr_t> d_remoteAddrs1(2);
   d_signals.zero();
   d_dst.zero();
 
-  uintptr_t remoteAddrs[2] = {0, reinterpret_cast<uintptr_t>(d_signals.ptr + 1)};
-  d_remoteAddrs.copyFrom(remoteAddrs, 2);
+  // Distinct peer-1 fallback entries so reverting anvilGpuCtx to handle[0]
+  // would write context 0's cell and fail the assertions below.
+  uintptr_t remoteAddrs0[2] = {0, reinterpret_cast<uintptr_t>(d_signals.ptr + 0)};
+  uintptr_t remoteAddrs1[2] = {0, reinterpret_cast<uintptr_t>(d_signals.ptr + 1)};
+  d_remoteAddrs0.copyFrom(remoteAddrs0, 2);
+  d_remoteAddrs1.copyFrom(remoteAddrs1, 2);
 
   DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(1);
   ncclGinAnvilIpcBufEntry ipcEntry{};
@@ -484,7 +489,7 @@ TEST_F(GinAnvilSdmaTemplateTest, PutValue_SelectLogicalContext) {
   for (int i = 0; i < 2; i++) {
     hostCtx[i].layoutMagic = NCCL_GIN_ANVIL_SDMA_LAYOUT_MAGIC;
     hostCtx[i].signals = d_signals.ptr + i;
-    hostCtx[i].signal_remote_addrs = d_remoteAddrs.ptr;
+    hostCtx[i].signal_remote_addrs = (i == 0) ? d_remoteAddrs0.ptr : d_remoteAddrs1.ptr;
     hostCtx[i].ipcTable = d_entry.ptr;
     hostCtx[i].ipcTableCount = 1;
     hostCtx[i].nRanks = 2;

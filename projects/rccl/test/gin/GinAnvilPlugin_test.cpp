@@ -374,7 +374,7 @@ TEST_F(GinAnvilPluginTest, BindSignals_LogicalContextsUseDistinctSignalStripes) 
   ncclGinConfig_t cfg{};
   cfg.nContexts = 3;
   cfg.nSignals = 2;
-  cfg.nCounters = 2;
+  cfg.nCounters = 5;
   void* ginCtx = nullptr;
   ncclNetDeviceHandle_v11_t* devHandle = nullptr;
   ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
@@ -397,8 +397,8 @@ TEST_F(GinAnvilPluginTest, BindSignals_LogicalContextsUseDistinctSignalStripes) 
   EXPECT_EQ(hostCtx[0].sdmaDirty, hostCtx[1].sdmaDirty);
   EXPECT_NE(hostCtx[0].counters, nullptr);
   EXPECT_NE(hostCtx[1].counters, nullptr);
-  EXPECT_EQ(hostCtx[1].counters - hostCtx[0].counters, 2);
-  EXPECT_EQ(hostCtx[2].counters - hostCtx[1].counters, 2);
+  EXPECT_EQ(hostCtx[1].counters - hostCtx[0].counters, 5);
+  EXPECT_EQ(hostCtx[2].counters - hostCtx[1].counters, 5);
 
   plugin_.destroyContext(ginCtx);
   plugin_.closeColl(coll);
