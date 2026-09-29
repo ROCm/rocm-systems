@@ -3347,14 +3347,25 @@ hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp* opLis
     hipMemoryType src_memory_type;
     hipMemoryType dst_memory_type;
     ihipCopyMemParamSet(&desc, src_memory_type, dst_memory_type);
+
+    amd::Coord3D src_origin = {desc.srcXInBytes, desc.srcY, desc.srcZ};
+    amd::Coord3D dst_origin = {desc.dstXInBytes, desc.dstY, desc.dstZ};
+    amd::Coord3D copy_region = {desc.WidthInBytes, desc.Height, desc.Depth};
+    amd::BufferRect src_rect;
+    amd::BufferRect dst_rect;
+    amd::Image* src_image = nullptr;
+    amd::Image* dst_image = nullptr;
+    status = ihipDrvMemcpy3D_validate(&desc, src_origin, dst_origin, copy_region, &src_rect,
+                                      &dst_rect, &src_image, &dst_image);
+    if (status != hipSuccess) {
+      *failIdx = i;
+      HIP_RETURN(status);
+    }
     if (src_memory_type == hipMemoryTypeArray || dst_memory_type == hipMemoryTypeArray) {
       per_entry_copies.emplace_back(i, desc);
       continue;
     }
 
-    amd::Coord3D copy_region = {desc.WidthInBytes, desc.Height, desc.Depth};
-    amd::BufferRect src_rect;
-    amd::BufferRect dst_rect;
     amd::Memory* src_memory = nullptr;
     amd::Memory* dst_memory = nullptr;
     hip::MemcpyType type;
@@ -3363,16 +3374,6 @@ hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp* opLis
     } else if (dst_memory_type == hipMemoryTypeHost) {
       type = hipReadBuffer;
     } else {
-      amd::Coord3D src_origin = {desc.srcXInBytes, desc.srcY, desc.srcZ};
-      amd::Coord3D dst_origin = {desc.dstXInBytes, desc.dstY, desc.dstZ};
-      amd::Image* src_image = nullptr;
-      amd::Image* dst_image = nullptr;
-      status = ihipDrvMemcpy3D_validate(&desc, src_origin, dst_origin, copy_region, &src_rect,
-                                        &dst_rect, &src_image, &dst_image);
-      if (status != hipSuccess) {
-        *failIdx = i;
-        HIP_RETURN(status);
-      }
       size_t src_offset = 0;
       size_t dst_offset = 0;
       getMemoryObjectPairs(hip::getCurrentDevice(), desc.srcDevice, desc.dstDevice, src_memory,
