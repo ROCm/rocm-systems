@@ -196,7 +196,7 @@ class AmdSmiMissingParameterValueException(AmdSmiException):
 
 
 class AmdSmiCommandNotSupportedException(AmdSmiException):
-    def __init__(self, command, outputformat: str):
+    def __init__(self, command, outputformat: str, message=None):
         super().__init__()
         self.value = -7
         self.command = command
@@ -205,6 +205,9 @@ class AmdSmiCommandNotSupportedException(AmdSmiException):
         common_message = (
             f"Command '{self.command}' is not supported on the system. Run '--help' for more info."
         )
+
+        if message:
+            common_message = message
 
         self.json_message["error"] = common_message
         self.json_message["code"] = self.value

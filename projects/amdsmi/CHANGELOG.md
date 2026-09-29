@@ -64,6 +64,18 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
+- **Fixed `amd-smi list --cpu`/`--core` silently exiting 0 with no output**.  
+  - `--cpu` and `--core` are accepted by the shared device-argument group, but `list` never implemented a CPU/core listing path. The command fell through to a dead guard that printed `N/A` straight to stdout, bypassing the logger entirely, so `--file`, `--json`, and `--csv` output was always empty even though the command reported success.
+  - `list` now rejects `--cpu`/`--core` with a `COMMAND_NOT_SUPPORTED` error and a non-zero exit code instead of silently succeeding. The `-U`/`--cpu` and `-O`/`--core` flags are also hidden from `list --help` (its Device Arguments and usage line) so help no longer advertises unsupported device targets.
+
+- **Fixed `amd-smi bad-pages`, `fabric`, `firmware`, `xgmi`, `partition`, `topology`, `process`, and `monitor` reporting GPU data when passed `--cpu`/`--core`**.  
+  - Each of these commands accepts `--cpu`/`--core` from the shared device-argument group but never implemented a CPU/core path. Passing either flag left `args.gpu` unset, so each command silently defaulted to "no GPU specified" and reported data for all GPUs instead of rejecting the request.
+  - All eight commands now reject `--cpu`/`--core` with the same `COMMAND_NOT_SUPPORTED` error and non-zero exit code as `list`, and the `-U`/`--cpu` and `-O`/`--core` flags are hidden from each command's `--help`.
+
+- **Fixed `amd-smi version` advertising `--cpu_version` on systems without that hardware**.  
+  - Every other CPU surface in the CLI (the `--cpu`/`--core` device arguments and the CPU option groups in `static`/`metric`/`set`) is only registered when the corresponding hardware is initialized, but `version` always listed `-c`/`--cpu_version` in `version --help` and accepted it even when no CPU was present.
+  - `version` now registers `--cpu_version` only when CPU (amd_hsmp) is initialized, so the flag is hidden from help and rejected when its hardware is absent. Plain `amd-smi version` also omits the corresponding line instead of printing `N/A`. `--gpu_version` and `--nic_version` are unchanged.
+
 - **Fixed `rsmi_dev_reg_table_get()` failing on register-state images that contain no SMN entries**.  
   - The loop-back test ran before the SMN and instance counters reached zero, so an image with no SMN entries re-entered the loop and read past the end of the image; the call then returned an error for a well-formed file.
 
