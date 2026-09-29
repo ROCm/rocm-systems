@@ -23,6 +23,9 @@ if TYPE_CHECKING:
 # Floating-source conversions that accept VOP3 ABS/NEG before integer conversion.
 F32_TO_INTEGER_DTYPES = frozenset({'i32_f32', 'u32_f32', 'rpi_i32_f32', 'flr_i32_f32'})
 
+# Mixed-type conversions that accept VOP3 ABS/NEG on a floating half source.
+F16_INPUT_CONVERSION_DTYPES = frozenset({'i16_f16', 'u16_f16', 'f32_f16'})
+
 
 @dataclass
 class InstructionSemantics:
@@ -2579,7 +2582,14 @@ def _derive_vintrp(name: str) -> InstructionSemantics | None:
 
 def _derive_ldsdir(name: str) -> InstructionSemantics | None:
     """Derive semantics for an LDSDIR/VDSDIR (LDS Direct) instruction."""
-    return InstructionSemantics(name, 'lds_direct')
+    return InstructionSemantics(
+        name,
+        (
+            'lds_direct_load'
+            if name.upper() in ('LDS_DIRECT_LOAD', 'DS_DIRECT_LOAD')
+            else 'lds_direct'
+        ),
+    )
 
 
 # Map encoding format name (with ENC_ prefix stripped) to derivation function.
