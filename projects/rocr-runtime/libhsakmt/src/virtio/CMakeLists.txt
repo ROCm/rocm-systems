@@ -70,7 +70,8 @@ target_include_directories ( ${HSAKMT_VIRTIO_TARGET}
     ${CMAKE_CURRENT_SOURCE_DIR}/virtio
     ${CMAKE_CURRENT_SOURCE_DIR}/../
     ${CMAKE_CURRENT_SOURCE_DIR}/../../include
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/linux )
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/linux
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../include/hsakmt/linux )
 
 set_property(TARGET ${HSAKMT_VIRTIO_TARGET} PROPERTY LINK_FLAGS ${HSAKMT_VIRTIO_LINK_FLAGS})
 
