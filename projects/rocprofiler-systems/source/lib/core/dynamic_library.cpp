@@ -41,7 +41,7 @@ find_library_path(const std::string& _name, const std::vector<std::string>& _env
     for(const std::string& itr : _env_vars)
     {
         auto const _env_val = get_env(itr.c_str(), std::string{});
-        for(auto const vitr : rocprofsys::delimit(_env_val, ":"))
+        for(const auto& vitr : rocprofsys::delimit(_env_val, ":"))
         {
             if(!vitr.empty())
             {

@@ -2907,7 +2907,7 @@ get_category_config()
         auto       _avail = get_available_categories<strset_t>();
         auto const _parse = [&_avail](const auto& _setting) {
             auto _ret = strset_t{};
-            for(auto const itr : rocprofsys::delimit(
+            for(const auto& itr : rocprofsys::delimit(
                     static_cast<tim::tsettings<std::string>&>(*_setting->second).get(),
                     " ,;:\n\t"))
             {
@@ -2930,7 +2930,7 @@ get_category_config()
         }
         else if(_enabled.empty() && !_disabled.empty())
         {
-            for(auto const itr : _avail)
+            for(const auto& itr : _avail)
             {
                 if(_disabled.count(itr) == 0)
                 {
@@ -2940,7 +2940,7 @@ get_category_config()
         }
         else if(!_enabled.empty() && _disabled.empty())
         {
-            for(auto const itr : _avail)
+            for(const auto& itr : _avail)
             {
                 if(_enabled.count(itr) == 0)
                 {

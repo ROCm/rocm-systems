@@ -721,7 +721,7 @@ generate(py::module& _pymod)
 
     static auto const _get_strset = [](const strset_t& _targ) {
         auto _out = py::list{};
-        for(auto const itr : _targ)
+        for(const auto& itr : _targ)
         {
             _out.append(itr);
         }
