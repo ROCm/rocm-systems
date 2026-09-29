@@ -14,14 +14,33 @@ A C++ library for storing and retrieving ROCm profiling data using SQLite (rocpd
 
 This library is part of the [rocm-systems](https://github.com/ROCm/rocm-systems) monorepo and is used by rocprofiler-systems for trace data output.
 
-## Requirements
+At configure time, profiler-hub clones RocPD schema SQL from `rocm-systems` and
+embeds it as generated C++ headers. No installed `rocprofiler-sdk-rocpd` package
+is required.
+
+## Build options
+
+These options apply on Linux and Windows.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `PROFILER_HUB_BUILD_TESTS` | ON | Build unit tests |
+| `PROFILER_HUB_BUILD_BENCHMARKS` | ON | Build performance benchmarks |
+| `PROFILER_HUB_ENABLE_LOGGING` | OFF | Enable debug logging |
+| `PROFILER_HUB_ENABLE_COVERAGE` | OFF | Enable code coverage instrumentation (requires Debug build, gcov, and lcov or gcovr) |
+| `PROFILER_HUB_FETCH_DEPENDENCIES` | OFF | Download missing dependencies at configure time. Required on Windows when SQLite3 is not already on `CMAKE_PREFIX_PATH` |
+| `SQLITE3_AMALGAMATION_YEAR` | `2024` | sqlite.org release-year folder for the Windows amalgamation download when bumping `SQLITE3_GIT_TAG` |
+
+## Linux
+
+### Requirements
 
 - CMake 3.21+
 - C++20 compatible compiler
 - SQLite3 (bundled via CMake module)
 - spdlog and fmt (system packages or FetchContent fallback)
 
-### System Package Dependencies
+### System package dependencies
 
 **Ubuntu/Debian:**
 ```bash
@@ -38,39 +57,22 @@ sudo dnf install sqlite-devel spdlog-devel fmt-devel
 sudo zypper install sqlite3-devel spdlog-devel fmt-devel
 ```
 
-## Building
+### Build
 
-### Standalone Build
-
-At configure time, profiler-hub clones RocPD schema SQL from `rocm-systems` and
-embeds it as generated C++ headers. No installed `rocprofiler-sdk-rocpd` package
-is required.
+From the `profilers/profiler-hub` directory:
 
 ```bash
 cmake -S . -B build
 cmake --build build -j$(nproc)
 ```
 
-### Build Options
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `PROFILER_HUB_BUILD_TESTS` | ON | Build unit tests |
-| `PROFILER_HUB_BUILD_BENCHMARKS` | ON | Build performance benchmarks |
-| `PROFILER_HUB_ENABLE_LOGGING` | OFF | Enable debug logging |
-| `PROFILER_HUB_ENABLE_COVERAGE` | OFF | Enable code coverage instrumentation (requires Debug build, gcov, and lcov or gcovr) |
-| `PROFILER_HUB_FETCH_DEPENDENCIES` | OFF | Download missing dependencies at configure time. Required on Windows when SQLite3 is not already on `CMAKE_PREFIX_PATH` |
-| `SQLITE3_AMALGAMATION_YEAR` | `2024` | sqlite.org release-year folder for the Windows amalgamation download when bumping `SQLITE3_GIT_TAG` |
-
-## Installation
+### Installation
 
 ```bash
 cmake --install build --prefix /opt/rocm
 ```
 
-## Usage in Linux
-
-### Linking with CMake
+### Usage
 
 For projects using an installed profiler-hub:
 
@@ -85,11 +87,11 @@ target_link_libraries(your_target PRIVATE profiler-hub::profiler-hub)
 <!-- | Benchmark           | Description                   | Time (ns) | -->
 <!-- |---------------------|-------------------------------|-----------| -->
 
-## Windows (MSVC)
+## Windows
 
 A native MSVC build is supported (CI runs on Linux only). fmt, spdlog, nlohmann_json, GoogleTest, and Google Benchmark are fetched when they are not already installed. SQLite3 is fetched only when `-DPROFILER_HUB_FETCH_DEPENDENCIES=ON` is set.
 
-### Requirements (Windows)
+### Requirements
 
 | Tool | Notes |
 |------|-------|
@@ -97,7 +99,7 @@ A native MSVC build is supported (CI runs on Linux only). fmt, spdlog, nlohmann_
 | **CMake 3.25+** | Bundled with Visual Studio, or install standalone: `winget install -e --id Kitware.CMake` |
 | **Git for Windows** | Used to clone the RocPD schema. SQLite on Windows is downloaded from sqlite.org (no git clone for SQLite). |
 
-### Build (Windows)
+### Build
 
 1. **Install the Visual Studio C++ toolchain** (skip if already installed). You only need
    the Build Tools — the full Visual Studio IDE is not required.
@@ -117,7 +119,7 @@ A native MSVC build is supported (CI runs on Linux only). fmt, spdlog, nlohmann_
 2. **Open a Visual Studio developer shell** so `cmake` and `cl.exe` are on `PATH`.
 
    The simplest way is to open the Start menu and launch **x64 Native Tools Command
-   Prompt for VS**  this sets up the environment for you.
+   Prompt for VS**. This sets up the environment for you.
 
    Alternatively, from any `cmd` window, run the `VsDevCmd.bat` that ships with your
    install. Its path depends on the Visual Studio *version number* (2022 = `2022`,
@@ -161,7 +163,7 @@ On Windows a `.lib` can be either an import library or a static archive, so the 
 profiler-hub targets use distinct base names: `profiler-hub.lib` (import lib, pairs with the DLL) vs
 `profiler-hub-static.lib` (static archive).
 
-### Windows-specific behavior
+### Platform behavior
 
 - **SQLite3:** with `PROFILER_HUB_FETCH_DEPENDENCIES=ON`, Windows downloads the official
   [amalgamation zip](https://www.sqlite.org/download.html) matching `SQLITE3_GIT_TAG`
@@ -172,7 +174,7 @@ profiler-hub targets use distinct base names: `profiler-hub.lib` (import lib, pa
   fetched via CMake `FetchContent` when not found on the system.
 - **Language standard:** library, tests, and benchmarks are built as **C++20**.
 
-### Install (Windows)
+### Installation
 
 ```cmd
 cmake --install build --config Release --prefix C:\opt\profiler-hub
@@ -183,7 +185,7 @@ Installed layout: `bin\profiler-hub.dll`, `lib\profiler-hub.lib` (import lib),
 `find_package` config under `lib\cmake\profiler-hub\`. When SQLite was fetched, also
 ship `profiler-hub-sqlite3.dll` beside `profiler-hub.dll`.
 
-### Usage (Windows)
+### Usage
 
 For projects using an installed profiler-hub:
 
