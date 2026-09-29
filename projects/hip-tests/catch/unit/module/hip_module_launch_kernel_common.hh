@@ -228,12 +228,12 @@ template <ExtModuleLaunchKernelSig* func> void ModuleLaunchKernelNegativeParamet
 // computed global work size fits uint32_t. A gridDim of 2^31 with blockDim 1 therefore launches
 // successfully instead of being rejected. This must be fixed in the runtime -- either by
 // enforcing the advertised limit or by reporting the limit the runtime actually enforces.
-template <ExtModuleLaunchKernelSig* func> void ModuleLaunchKernelNegativeMaxGridDim(
-                                                           bool extLaunch = false) {
+template <ExtModuleLaunchKernelSig* func>
+void ModuleLaunchKernelNegativeMaxGridDim(bool extLaunch = false) {
   auto mg = ModuleGuard::InitModule("launch_kernel_module.code");
   hipFunction_t f = GetKernel(mg.module(), "NOPKernel");
-  hipError_t expectedErrorLaunchParam = (extLaunch == true) ? hipErrorInvalidConfiguration
-                                                             : hipErrorInvalidValue;
+  hipError_t expectedErrorLaunchParam =
+      (extLaunch == true) ? hipErrorInvalidConfiguration : hipErrorInvalidValue;
 
   SECTION("gridDimX > maxGridDimX") {
     const unsigned int x = GetDeviceAttribute(hipDeviceAttributeMaxGridDimX, 0) + 1u;
