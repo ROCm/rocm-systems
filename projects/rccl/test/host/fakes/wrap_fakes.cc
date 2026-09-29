@@ -226,10 +226,10 @@ bool rcclAllReduceShouldTakeDdaPath(const struct ncclComm* comm, size_t count, n
 
 // ncclDdaNranksRelaxEnabled: real body lives in ipc_init.cu, a .cu that is not
 // in this host-only binary's link closure. rcclSelectAllGather /
-// rcclSelectReduceScatter call it to pick the DDA participant-count floor
-// (RCCL_DDA_NRANKS_RELAX). Default false = the stock 8-rank floor, which is the
-// behaviour every existing wrap-test case assumes; flip g_ddaNranksRelaxEnabled
-// to exercise the relaxed floor.
+// rcclSelectReduceScatter / rcclSelectAlltoAll call it to pick the DDA
+// participant-count floor (RCCL_DDA_NRANKS_RELAX). Default false = the stock
+// 8-rank floor, which is the behaviour every existing wrap-test case assumes;
+// flip g_ddaNranksRelaxEnabled to exercise the relaxed floor.
 bool g_ddaNranksRelaxEnabled = false;
 bool ncclDdaNranksRelaxEnabled() {
   return g_ddaNranksRelaxEnabled;

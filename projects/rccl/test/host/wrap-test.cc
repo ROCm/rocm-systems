@@ -6530,3 +6530,42 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_DdaNranksRelaxOpensFourRankFloor
         DeleteCommWithArch(comm);
       });
 }
+
+// The AlltoAll floor lives in rcclSelectAlltoAll(), the live AlltoAll dispatch
+// path (ncclAlltoAll -> rcclSelectAlltoAll). rcclAlltoAllShouldTakeDdaPath() in
+// collectives.cc applies the same floor but no longer has a caller in src/, so
+// tests of that helper alone would stay green with this site hardcoded to 8.
+// A zeroed topo keeps the pivot branch off, so the DDA arm is the first one
+// this call can take.
+TEST(WrapMicrotestIsolated, SelectAlltoAll_DdaNranksRelaxOpensFourRankFloor) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAlltoAll_DdaNranksRelaxOpensFourRankFloor",
+      []() {
+        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                                 size_t, const void*, void*, bool) { return false; });
+        ScopedHook ipcEligible(g_allToAllDdaIpcEligible,
+                               [](ncclComm*, const void*, void*, size_t, ncclDataType_t) { return true; });
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->nRanks = 4;
+        comm->nNodes = 1;
+
+        g_ddaNranksRelaxEnabled = false;
+        rcclCollDecision off{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAlltoAll(comm, nullptr, nullptr, /*count=*/8, ncclFloat32,
+                                                  /*stream=*/nullptr, /*query=*/true,
+                                                  /*graphCapturingHint=*/false, &off));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_DDA_IPC, off.algo)
+            << "4 ranks must stay below the stock 8-rank DDA floor";
+
+        g_ddaNranksRelaxEnabled = true;
+        rcclCollDecision on{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAlltoAll(comm, nullptr, nullptr, /*count=*/8, ncclFloat32,
+                                                  /*stream=*/nullptr, /*query=*/true,
+                                                  /*graphCapturingHint=*/false, &on));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_IPC, on.algo)
+            << "RCCL_DDA_NRANKS_RELAX must lower the floor to 2 and admit 4 ranks";
+
+        g_ddaNranksRelaxEnabled = false;
+        DeleteCommWithArch(comm);
+      });
+}
