@@ -30,7 +30,8 @@
     "test_batched_send_recv_op_sizes_per_coalesce1_timing_enabled_True": "missing_duration_ms",
     "test_coalescing_manager_collective_timing_enabled_True": "missing_duration_ms",
     "test_individual_send_recv_op_sizes0_timing_enabled_True": "missing_duration_ms",
-    "test_individual_send_recv_op_sizes1_timing_enabled_True": "missing_duration_ms"
+    "test_individual_send_recv_op_sizes1_timing_enabled_True": "missing_duration_ms",
+    "test_extra_cuda_context": "rocr_async_scratch"
   },
   "categories": {
     "missing_duration_ms": "RCCL flight recorder trace omits duration_ms field",
@@ -39,6 +40,7 @@
     "trace_timeout": "Flight recorder trace tests exceed pytest-timeout (600s)",
     "trace_entry_mismatch": "Trace entry structure differs from upstream NCCL",
     "missing_dump_pipe": "RCCL does not create flight recorder dump pipe",
-    "pg_timeout_semantics": "extend_pg_timeout adds to existing vs sets absolute value"
+    "pg_timeout_semantics": "extend_pg_timeout adds to existing vs sets absolute value",
+    "rocr_async_scratch": "Test infers an extra HIP context from device memory growth; on ROCm the growth is ROCr async scratch, not a context (AICOMRCCL-2469)"
   }
 }
