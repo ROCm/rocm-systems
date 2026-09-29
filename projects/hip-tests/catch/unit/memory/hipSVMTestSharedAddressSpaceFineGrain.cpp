@@ -257,10 +257,16 @@ HIP_TEST_CASE(Unit_svm_shared_address_space_fine_grain_system) {
     }
 
     int pageableAccess = 0;
+    int concurrentAccess = 0;
     // This need xnack+ on MiXXX. If xnack is off on MiXXX, try ENV HSA_XNACK=1
     HIP_CHECK(hipDeviceGetAttribute(&pageableAccess, hipDeviceAttributePageableMemoryAccess, id));
+    // This needs SVM API support
+    HIP_CHECK(hipDeviceGetAttribute(&concurrentAccess, hipDeviceAttributeConcurrentManagedAccess, id));
     if (!pageableAccess) {
       HIP_SKIP_TEST(HipTest::SkipReason::kPageableMemoryAccessUnsupported);
+    }
+    if (!concurrentAccess) {
+      HIP_SKIP_TEST(HipTest::SkipReason::kManagedNoConcurrentAccess);
     }
   }
 
