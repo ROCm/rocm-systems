@@ -639,6 +639,7 @@ static vhsakmt_bo_handle vhsakmt_map_to_gpu(void* addr, size_t size, bool use_sv
   size_t blob_size;
   uint64_t userptr_offset = 0, userptr_handle = 0;
   vhsakmt_bo_handle userptr;
+  int r_init;
   int r;
 
   if (use_svm) {
@@ -652,9 +653,9 @@ static vhsakmt_bo_handle vhsakmt_map_to_gpu(void* addr, size_t size, bool use_sv
   vhsa_debug("%s: addr: %p, size: 0x%lx, offset: 0x%lx, blob_addr: %p, blob_size: 0x%lx, svm: %d\n",
              __FUNCTION__, addr, size, addr_offset, blob_addr, blob_size, use_svm);
 
-  r = vhsakmt_init_userptr_blob(dev, blob_addr, blob_size, &userptr, &userptr_offset);
-  if (r < 0) {
-    vhsa_debug("%s: userptr create failed at address: %p, ret = %d\n", __FUNCTION__, addr, r);
+  r_init = vhsakmt_init_userptr_blob(dev, blob_addr, blob_size, &userptr, &userptr_offset);
+  if (r_init < 0) {
+    vhsa_debug("%s: userptr create failed at address: %p, ret = %d\n", __FUNCTION__, addr, r_init);
     return NULL;
   }
 
@@ -672,7 +673,7 @@ static vhsakmt_bo_handle vhsakmt_map_to_gpu(void* addr, size_t size, bool use_sv
     userptr->host_addr = VHSA_UINT64_TO_VPTR(userptr_handle);
   }
 
-  if (r > 0) {
+  if (r_init > 0) {
     vhsa_debug("%s: userptr: %p already registered, offset: %lx\n", __FUNCTION__, addr,
                userptr_offset);
     userptr->host_addr =
