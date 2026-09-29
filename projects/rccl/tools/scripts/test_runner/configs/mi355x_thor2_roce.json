@@ -1896,7 +1896,7 @@
       "num_nodes": 1,
       "num_gpus": 4,
       "timeout": 120,
-      "description": "Fourth rank count, the smallest at which a ring mis-wired in one direction cannot be masked by ring symmetry, and the rank count the fixture's payload formulas were originally designed against. Block timeout is the largest row budget here, the 120 s large tier. Known exposure: all three large rows here set HSA_DISABLE_CACHE=1, so the large tier never runs under the shipped cache configuration and a widening of AICOMRCCL-2275 into that tier would pass unnoticed; the 12 short rows still cover the stock path. No deliberately-failing canary row is registered to close that gap, because a test that is expected to be red trains readers to ignore red.",
+      "description": "Fourth rank count, inside the range the fixture supports rather than a distinguished point for it: CommMPITests.cpp sets kMaxRanksAssumed = 8, and the ring Send/Recv peers are already distinct at 3, where the activation recv is validated against contribution(step, prev_rank, ...) so a reversed ring already fails. Four adds coverage breadth rather than a new detection property. Block timeout is the largest row budget here, the 120 s large tier. Known exposure: all three large rows here set HSA_DISABLE_CACHE=1, so the large tier never runs under the shipped cache configuration and a widening of AICOMRCCL-2275 into that tier would pass unnoticed; the 12 short rows still cover the stock path. No deliberately-failing canary row is registered to close that gap, because a test that is expected to be red trains readers to ignore red.",
       "env_variables": {
         "NCCL_DEBUG": "INFO",
         "NCCL_DEBUG_SUBSYS": "INIT,COLL,NET,TUNING,ENV",
