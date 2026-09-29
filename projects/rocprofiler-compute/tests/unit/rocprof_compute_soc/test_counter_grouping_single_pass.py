@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Unit tests for experimental single-pass-packable packing helpers."""
+"""Unit tests for single-pass-packable packing helpers."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from rocprof_compute_soc.counter_grouping_single_pass import (
     _ensure_packable_union,
     _first_fit_unplaced,
     _reduce_passes,
+    legacy_heuristic_enabled_from_env,
     single_pass_packable_enabled_from_env,
     try_allocate_single_pass_packable,
 )
@@ -18,7 +19,7 @@ from rocprof_compute_soc.soc_base import flat_counters_in_perfmon_file
 
 
 class MinimalSoC:
-    """Minimum interface required by the experimental allocator."""
+    """Minimum interface required by the single-pass-packable allocator."""
 
     def _same_bucket_priority_metric_ids(self):
         return ()
@@ -27,23 +28,36 @@ class MinimalSoC:
         return []
 
 
-def test_env_gate_default_off(monkeypatch):
+def test_env_gate_default_on(monkeypatch):
+    monkeypatch.delenv("ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC", raising=False)
     monkeypatch.delenv("ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE", raising=False)
-    assert single_pass_packable_enabled_from_env() is False
-    monkeypatch.setenv("ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE", "1")
     assert single_pass_packable_enabled_from_env() is True
+    assert legacy_heuristic_enabled_from_env() is False
+
+
+def test_legacy_heuristic_env_disables_spp(monkeypatch):
+    monkeypatch.setenv("ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC", "1")
+    assert legacy_heuristic_enabled_from_env() is True
+    assert single_pass_packable_enabled_from_env() is False
+
+
+def test_explicit_spp_off_disables(monkeypatch):
+    monkeypatch.delenv("ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC", raising=False)
+    monkeypatch.setenv("ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE", "0")
+    assert single_pass_packable_enabled_from_env() is False
 
 
 def test_allocator_disabled_preserves_work_set(monkeypatch):
-    monkeypatch.delenv("ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE", raising=False)
+    monkeypatch.setenv("ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC", "1")
     work_set = {"SQ_A"}
 
     assert try_allocate_single_pass_packable(MinimalSoC(), work_set, {"SQ": 1}) is None
     assert work_set == {"SQ_A"}
 
 
-def test_allocator_enabled_places_leftovers_and_clears_work_set(monkeypatch):
-    monkeypatch.setenv("ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE", "1")
+def test_allocator_default_places_leftovers_and_clears_work_set(monkeypatch):
+    monkeypatch.delenv("ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC", raising=False)
+    monkeypatch.delenv("ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE", raising=False)
     work_set = {"SQ_A", "SQ_B"}
 
     result = try_allocate_single_pass_packable(
@@ -59,6 +73,7 @@ def test_allocator_enabled_places_leftovers_and_clears_work_set(monkeypatch):
     assert set(flat_counters_in_perfmon_file(files[0])) == {"SQ_A", "SQ_B"}
     assert file_count == 5
     assert stats.packable_multi_after == 0
+    assert stats.slot_additional_passes == 0
     assert work_set == set()
 
 
@@ -153,3 +168,43 @@ def test_slot_limit_fill_zero_extra_when_already_covered():
     assert stats.passes_after == 2
     assert stats.pmc_already_covered == 4
     assert len(files) == 2
+
+
+def test_allocator_integrates_slot_limit_fill(monkeypatch):
+    """try_allocate runs SLOT fill after packable layout (may add passes)."""
+    from rocprof_compute_soc.counter_grouping_single_pass import _first_fit_unplaced
+
+    monkeypatch.delenv("ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC", raising=False)
+    monkeypatch.delenv("ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE", raising=False)
+
+    slot = frozenset({"SQ_C", "SQ_D", "SQ_E", "SQ_F"})
+    monkeypatch.setattr(
+        "rocprof_compute_soc.counter_grouping_single_pass.collect_unique_packable_unions",
+        lambda soc, counters, cfg: ([], 0),
+    )
+    monkeypatch.setattr(
+        "rocprof_compute_soc.counter_grouping_single_pass.collect_unique_slot_limit_unions",
+        lambda soc, counters, cfg: ([slot], 1),
+    )
+    # Leave SLOT PMCs unplaced so fill must open buckets (gfx942 often +0).
+    monkeypatch.setattr(
+        "rocprof_compute_soc.counter_grouping_single_pass._first_fit_unplaced",
+        lambda files, work_set, cfg, fc: _first_fit_unplaced(
+            files, {"SQ_A", "SQ_B"}, cfg, fc
+        ),
+    )
+
+    work_set = {"SQ_A", "SQ_B", "SQ_C", "SQ_D", "SQ_E", "SQ_F"}
+    result = try_allocate_single_pass_packable(
+        MinimalSoC(),
+        work_set,
+        {"SQ": 2},
+    )
+    assert result is not None
+    files, _fc, stats = result
+    assert stats.packable_multi_after == 0
+    assert stats.slot_limit_metrics == 1
+    assert stats.slot_additional_passes >= 1
+    placed = {c for f in files for c in flat_counters_in_perfmon_file(f)}
+    assert slot <= placed
+    assert work_set == set()

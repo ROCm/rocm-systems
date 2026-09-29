@@ -741,19 +741,18 @@ class OmniSoC_Base:
         PMCs—one slot each. Legacy ``SQ_ACCUM_PREV_HIRES`` pairing / dedicated
         accum buckets / extra ``reserve`` slots are not used.
 
-        If the arch has priority metrics in profiling_counter_grouping_policy.yaml,
-        a metric-aware greedy pass runs before the final per-counter first-fit.
+        **Default:** single-pass-packable — every metric whose PMC set fits one
+        ``CounterFile`` gets a full-bucket collection (counters may be duplicated
+        across passes), then ``SLOT_LIMIT`` PMCs are filled into existing buckets.
 
-        **Experimental single-pass-packable path** (hard single-bucket for every
-        metric whose PMC set fits one ``CounterFile``, then minimize passes):
-        set ``ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE=1``. Replaces the
-        heuristic / CP-SAT / refill path when enabled.
+        **Legacy heuristic** (priority coalesce → first-fit → optional refill):
+        set ``ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC=1``.
 
-        **Optional CP-SAT path** (toward fewer buckets under hard same-bin groups):
-        set ``ROCPROF_COMPUTE_PERFMON_CP_SAT=1`` and install ``ortools`` (see
-        ``[optimizer]`` extra in ``pyproject.toml``). Applies only when the PMC
-        set has no TCC channel counters and is within size limits; otherwise
-        falls back to the heuristic above.
+        **Optional CP-SAT path** (legacy path only; fewer buckets under hard
+        same-bin groups): set ``ROCPROF_COMPUTE_PERFMON_CP_SAT=1`` and install
+        ``ortools`` (see ``[optimizer]`` extra in ``pyproject.toml``). Applies
+        only when the PMC set has no TCC channel counters and is within size
+        limits; otherwise falls back to the heuristic above.
         """
         output_files: list[CounterFile] = []
         # Kept for call-site compatibility; dedicated accum files are gone.
@@ -776,6 +775,7 @@ class OmniSoC_Base:
             output_files, file_count, _stats = single_pass
             return output_files, file_count, accu_file_count
 
+        # Legacy path: CP-SAT (optional) → priority coalesce → first-fit → refill.
         cp_sat_files = self._try_cp_sat_pmc_perf_buckets(work_set, file_count)
         if cp_sat_files is not None:
             output_files.extend(cp_sat_files)

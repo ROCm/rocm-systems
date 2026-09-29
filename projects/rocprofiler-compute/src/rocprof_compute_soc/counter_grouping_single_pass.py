@@ -1,9 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Experimental allocator: single-bucket guarantee for every packable metric.
-
-Enable with ``ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE=1``.
+"""Default allocator: single-bucket guarantee for every packable metric.
 
 Goal
 ----
@@ -11,15 +9,19 @@ Goal
    ``SLOT_LIMIT``) has **some** perfmon bucket containing its full PMC set.
 2. Minimize the number of passes under that hard constraint.
 3. Counters not required by any packable union use ordinary first-fit.
+4. Place remaining ``SLOT_LIMIT`` PMCs into existing buckets when possible
+   (open new passes only if needed).
 
 Notes
 -----
 Overlapping packable unions that cannot share one bucket are handled by
-**duplicating** counters into an additional bucket (additive passes). That is
-intentional for this experiment and differs from the shipping allocator, which
-places each counter in at most one bucket.
+**duplicating** counters into an additional bucket (additive passes). That
+differs from the legacy heuristic, which places each counter in at most one
+bucket.
 
-This path is an experiment — not the default shipping heuristic.
+Disable with ``ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC=1`` (or
+``ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE=0``) to restore the priority
+coalesce + first-fit + refill path.
 """
 
 from __future__ import annotations
@@ -48,24 +50,40 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class SinglePassPackableStats:
-    """Outcome of the experimental single-pass-packable allocator."""
+    """Outcome of the single-pass-packable allocator."""
 
     bucket_count: int
     packable_metric_count: int
     unique_packable_unions: int
     packable_multi_after: int
     merges_applied: int
+    slot_limit_metrics: int = 0
+    unique_slot_limit_unions: int = 0
+    slot_additional_passes: int = 0
+
+
+def legacy_heuristic_enabled_from_env() -> bool:
+    """Return True when the legacy coalesce / first-fit / refill path is forced."""
+    raw = os.environ.get("ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC", "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
 
 
 def single_pass_packable_enabled_from_env() -> bool:
-    """Return True when the experimental single-pass-packable path is requested."""
+    """Return True when single-pass-packable is the active allocate path.
+
+    Default is on. Set ``ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC=1`` to use the
+    legacy heuristic. ``ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE=0`` also
+    disables SPP for explicit A/B during migration.
+    """
+    if legacy_heuristic_enabled_from_env():
+        return False
     raw = (
         os.environ
-        .get("ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE", "")
+        .get("ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE", "1")
         .strip()
         .lower()
     )
-    return raw in {"1", "true", "yes", "on"}
+    return raw not in {"0", "false", "no", "off"}
 
 
 def collect_unique_packable_unions(
@@ -439,12 +457,35 @@ def try_allocate_single_pass_packable(
     file_count = file_count_start + len(files)
 
     packable_multi = _count_packable_multi(files, unions)
+    if packable_multi > 0:
+        console_warning(
+            "profiling",
+            "single-pass-packable: "
+            f"{packable_multi} packable union(s) still lack a full bucket "
+            "after allocate; falling back to legacy heuristic.",
+        )
+        return None
+
+    slot_unions, slot_n = collect_unique_slot_limit_unions(
+        soc, work_set, perfmon_config
+    )
+    files, file_count, slot_stats = fill_slot_limit_into_existing_passes(
+        files,
+        slot_unions,
+        perfmon_config,
+        slot_limit_metric_count=slot_n,
+        file_count_start=file_count,
+    )
+
     stats = SinglePassPackableStats(
         bucket_count=len(files),
         packable_metric_count=packable_metric_count,
         unique_packable_unions=len(unions),
         packable_multi_after=packable_multi,
         merges_applied=merges,
+        slot_limit_metrics=slot_stats.slot_limit_metrics,
+        unique_slot_limit_unions=slot_stats.unique_slot_limit_unions,
+        slot_additional_passes=slot_stats.additional_passes,
     )
     console_debug(
         "profiling",
@@ -453,16 +494,10 @@ def try_allocate_single_pass_packable(
         f"{stats.packable_metric_count} packable metric(s), "
         f"{stats.unique_packable_unions} unique union(s), "
         f"packable_multi={stats.packable_multi_after}, "
-        f"merges={stats.merges_applied}.",
+        f"merges={stats.merges_applied}, "
+        f"slot_limit={stats.slot_limit_metrics}, "
+        f"slot_+passes={stats.slot_additional_passes}.",
     )
-    if packable_multi > 0:
-        console_warning(
-            "profiling",
-            "single-pass-packable: "
-            f"{packable_multi} packable union(s) still lack a full bucket "
-            "after experimental allocate.",
-        )
-        return None
 
     work_set.clear()
     return files, file_count, stats

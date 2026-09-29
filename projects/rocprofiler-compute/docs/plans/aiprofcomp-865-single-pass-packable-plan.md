@@ -1,8 +1,9 @@
 # AIPROFCOMP-865 — Single-pass packable plan (replace shipping heuristic)
 
-**Status:** Draft plan (experimental path exists behind env flag)
+**Status:** Phase 1 implemented on branch (SPP default + SLOT fill); multi-arch / HW validation pending
 **JIRA:** AIPROFCOMP-865 (parent AIPROFCOMP-864)
 **Related:**
+- [Session handoff (resume here)](aiprofcomp-865-session-handoff.md)
 - [problem-decompose HTML](aiprofcomp-865-problem-decompose.html)
 - [Phase 2 WEIGHTED_AVG design](aiprofcomp-865-phase2-weighted-avg-design.md)
 - [impact report](aiprofcomp-865-gfx942-single-pass-impact-report.md)
@@ -44,7 +45,15 @@ Compare shipping today: **12** passes, **299** single-pass, **59** POLICY_GAP le
 | SLOT_LIMIT metrics / unique unions | — | 16 / 10 |
 | Extra passes for SLOT_LIMIT PMC presence | — | **+0** (all SLOT PMCs already in layout) |
 
-**Number reconcile (Phase 1 task P1-0):** Product narrative uses **358** = 374 − 16 (impact report / HTML). Eval currently reports **368** packable metrics. Before cutover, lock one definition (same `detect_counters` + YAML scan as inspector) and update HTML/plan/acceptance to match.
+**Number reconcile (P1-0 — locked for Phase 1 gates):**
+
+| Name | Definition | gfx942 |
+|------|------------|--------|
+| **Acceptance gates** | `packable_multi == 0`, passes == 14, SLOT_LIMIT == 16, SLOT +passes == 0 | hard CI/eval assert |
+| **packable_metrics** (allocator) | Rows from `_iter_metric_groups` whose PMC set fits one bucket | **368** (eval) |
+| **Product “358 single-pass”** | Inspector taxonomy: YAML metrics with profile PMCs minus SLOT_LIMIT (374 − 16) | narrative / HTML |
+
+Do not fail Phase 1 on 358 vs 368; they measure different scans. Prefer gates above.
 
 ---
 
