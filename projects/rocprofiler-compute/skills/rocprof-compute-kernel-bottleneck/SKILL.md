@@ -1,5 +1,5 @@
 ---
-name: kernel-bottleneck
+name: rocprof-compute-kernel-bottleneck
 description: Profiles an AMD GPU application with rocprof-compute and finds which kernel is slow and why, using performance metrics and PC sampling. Collects counters and selects kernels and dispatches, then analyzes GPU memory throughput, compute efficiency, wavefront occupancy and wavefront limits, scheduler stalls, etc. Use when the user asks to profile, benchmark, or speed up a HIP/ROCm kernel or application, or asks where a kernel's bottleneck is. Not for CUDA tools, Windows, system-wide CPU/MPI tracing, or writing kernel source.
 ---
 
@@ -21,7 +21,7 @@ different questions. Choose by what the user is asking, not by difficulty.
 
 | Source | Answers | Skill |
 |---|---|---|
-| Perfmon counters | How the architecture behaves: bandwidth, cache, occupancy, pipeline utilization | this skill, then `speed-of-light`, `memory`, `roofline` |
+| Perfmon counters | How the architecture behaves: bandwidth, cache, occupancy, pipeline utilization | this skill, then `rocprof-compute-speed-of-light`, `rocprof-compute-memory`, `rocprof-compute-roofline` |
 | PC sampling | How the source code behaves: which instruction or line is hot and why it stalls | `pc-sampling` |
 
 Counters are the default starting point because they cover the whole kernel
@@ -156,11 +156,11 @@ Where to go next:
 
 | Symptom in Speed-of-Light | Next step |
 |---|---|
-| Memory throughput near peak, low compute | the `memory` skill |
-| Compute near peak, or unclear compute vs memory | the `roofline` skill |
+| Memory throughput near peak, low compute | the `rocprof-compute-memory` skill |
+| Compute near peak, or unclear compute vs memory | the `rocprof-compute-roofline` skill |
 | Everything far below peak | `-b wavefront` for occupancy, then `-b spi` for launch limits, both below |
-| Question is about instructions, source lines, or stall reasons | the `pc-sampling` skill |
-| Kernels come from PyTorch | the `torch-trace` skill |
+| Question is about instructions, source lines, or stall reasons | the `rocprof-compute-pc-sampling` skill |
+| Kernels come from PyTorch | the `rocprof-compute-torch-trace` skill |
 
 ### Occupancy and wavefront limits
 

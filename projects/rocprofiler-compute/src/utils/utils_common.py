@@ -336,6 +336,15 @@ def get_version_display(version: str, sha: str, mode: str) -> str:
     return buf.getvalue()
 
 
+def get_skills_dir(rocprof_compute_home: Path) -> Optional[Path]:
+    """Return the Agent Skills directory of a source checkout or an install."""
+    search_dirs = [
+        rocprof_compute_home.parent / "skills",
+        rocprof_compute_home.parent.parent / "share" / config.PROJECT_NAME / "skills",
+    ]
+    return next((path for path in search_dirs if (path / "README.md").is_file()), None)
+
+
 def detect_rocprof(args: argparse.Namespace) -> str:
     """Detect loaded rocprof version. Resolve path and set cmd globally."""
     # Default is rocprofiler-sdk

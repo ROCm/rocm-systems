@@ -1,5 +1,5 @@
 ---
-name: torch-trace
+name: rocprof-compute-torch-trace
 description: Attributes AMD GPU kernel performance counters back to the PyTorch or Triton operators that launched them, using rocprof-compute torch and triton tracing. Use when the user asks which PyTorch layer or operator is slow, wants to map GPU kernels to model code, profiles a training or inference script, or asks about torch.compile and Inductor kernels. Not for CUDA tools, Windows, non-Python applications, or user-authored ROCTx ranges.
 ---
 

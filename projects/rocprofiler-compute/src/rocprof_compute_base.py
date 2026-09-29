@@ -40,6 +40,7 @@ from utils.utils_common import (
     detect_rocprof,
     get_arch_panel_id_to_alias,
     get_job_rank_and_size,
+    get_skills_dir,
     get_version,
     get_version_display,
     load_panel_configs,
@@ -111,6 +112,9 @@ class RocProfCompute:
                |_|                                           |_|
 """
         )
+        skills_dir = get_skills_dir(config.rocprof_compute_home)
+        if skills_dir is not None:
+            print(f"Agent Skills: see {skills_dir / 'README.md'} to install them.\n")
 
     def get_mode(self) -> Optional[str]:
         return self.__mode
