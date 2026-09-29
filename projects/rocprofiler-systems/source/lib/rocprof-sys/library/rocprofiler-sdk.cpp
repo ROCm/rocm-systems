@@ -324,6 +324,13 @@ struct external_dependencies
     static constexpr std::string_view rccl_send_track_name = rccl_send_label;
     static constexpr std::string_view rccl_recv_track_name = rccl_recv_label;
 
+    // ─── Members required by domains::callback::k_ompt_api ─────────────────────────
+    using rocm_ompt_api_category = category::rocm_ompt_api;
+
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr std::string_view rocm_ompt_api_category_name =
+        trait::name<category::rocm_ompt_api>::value;
+
     static metadata_registry_t& get_metadata_registry()
     {
         return trace_cache::get_metadata_registry();

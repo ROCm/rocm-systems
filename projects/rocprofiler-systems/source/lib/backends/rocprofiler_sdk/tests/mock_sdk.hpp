@@ -546,6 +546,37 @@ struct mock_sdk
     static constexpr rccl_api_id_t RCCL_API_ID_ncclReduceScatter = 7;
     static constexpr rccl_api_id_t RCCL_API_ID_ncclSend          = 8;
 
+    // ── OMPT types and constants ──────────────────────────────────────────────
+    // Minimal stand-ins so backend<Sdk>'s unconditional OMPT forwarding aliases
+    // type-check; no test in this TU exercises OMPT behavior.
+    struct ompt_data_t
+    {};
+    using ompt_operation_t = int;
+
+    static constexpr ompt_operation_t OMPT_ID_thread_begin       = 0;
+    static constexpr ompt_operation_t OMPT_ID_thread_end         = 1;
+    static constexpr ompt_operation_t OMPT_ID_parallel_begin     = 2;
+    static constexpr ompt_operation_t OMPT_ID_parallel_end       = 3;
+    static constexpr ompt_operation_t OMPT_ID_task_create        = 4;
+    static constexpr ompt_operation_t OMPT_ID_task_schedule      = 5;
+    static constexpr ompt_operation_t OMPT_ID_implicit_task      = 6;
+    static constexpr ompt_operation_t OMPT_ID_device_initialize  = 7;
+    static constexpr ompt_operation_t OMPT_ID_device_finalize    = 8;
+    static constexpr ompt_operation_t OMPT_ID_device_load        = 9;
+    static constexpr ompt_operation_t OMPT_ID_mutex_released     = 10;
+    static constexpr ompt_operation_t OMPT_ID_dependences        = 11;
+    static constexpr ompt_operation_t OMPT_ID_task_dependence    = 12;
+    static constexpr ompt_operation_t OMPT_ID_lock_init          = 13;
+    static constexpr ompt_operation_t OMPT_ID_lock_destroy       = 14;
+    static constexpr ompt_operation_t OMPT_ID_mutex_acquire      = 15;
+    static constexpr ompt_operation_t OMPT_ID_mutex_acquired     = 16;
+    static constexpr ompt_operation_t OMPT_ID_nest_lock          = 17;
+    static constexpr ompt_operation_t OMPT_ID_flush              = 18;
+    static constexpr ompt_operation_t OMPT_ID_cancel             = 19;
+    static constexpr ompt_operation_t OMPT_ID_dispatch           = 20;
+    static constexpr ompt_operation_t OMPT_ID_error              = 21;
+    static constexpr ompt_operation_t OMPT_ID_callback_functions = 22;
+
     static constexpr buffer_tracing_kind BUFFER_TRACING_HSA_CORE_API         = 1;
     static constexpr buffer_tracing_kind BUFFER_TRACING_HSA_AMD_EXT_API      = 2;
     static constexpr buffer_tracing_kind BUFFER_TRACING_HSA_IMAGE_EXT_API    = 3;

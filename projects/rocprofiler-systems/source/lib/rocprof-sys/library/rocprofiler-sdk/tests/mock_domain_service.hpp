@@ -444,6 +444,7 @@ struct mock_sdk
     static constexpr std::size_t      CALLBACK_TRACING_HIP_STREAM             = 12;
     static constexpr std::size_t      HIP_STREAM_SET                          = 0;
     static constexpr std::size_t      CALLBACK_TRACING_RCCL_API               = 13;
+    static constexpr std::size_t      CALLBACK_TRACING_OMPT                   = 14;
     static constexpr callback_phase_t CALLBACK_PHASE_ENTER                    = 0;
     static constexpr callback_phase_t CALLBACK_PHASE_EXIT                     = 1;
     static constexpr callback_phase_t CALLBACK_PHASE_NONE                     = 2;
@@ -650,6 +651,87 @@ struct mock_sdk
             default: return 0;
         }
     }
+
+    // ─── Members required by domains::callback::k_ompt_api ──────────────────────────
+    using ompt_operation_t = std::size_t;
+
+    // NOLINTBEGIN(readability-identifier-naming)
+    static constexpr ompt_operation_t OMPT_ID_thread_begin       = 0;
+    static constexpr ompt_operation_t OMPT_ID_thread_end         = 1;
+    static constexpr ompt_operation_t OMPT_ID_parallel_begin     = 2;
+    static constexpr ompt_operation_t OMPT_ID_parallel_end       = 3;
+    static constexpr ompt_operation_t OMPT_ID_task_create        = 4;
+    static constexpr ompt_operation_t OMPT_ID_task_schedule      = 5;
+    static constexpr ompt_operation_t OMPT_ID_implicit_task      = 6;
+    static constexpr ompt_operation_t OMPT_ID_device_initialize  = 7;
+    static constexpr ompt_operation_t OMPT_ID_device_finalize    = 8;
+    static constexpr ompt_operation_t OMPT_ID_device_load        = 9;
+    static constexpr ompt_operation_t OMPT_ID_mutex_released     = 10;
+    static constexpr ompt_operation_t OMPT_ID_dependences        = 11;
+    static constexpr ompt_operation_t OMPT_ID_task_dependence    = 12;
+    static constexpr ompt_operation_t OMPT_ID_lock_init          = 13;
+    static constexpr ompt_operation_t OMPT_ID_lock_destroy       = 14;
+    static constexpr ompt_operation_t OMPT_ID_mutex_acquire      = 15;
+    static constexpr ompt_operation_t OMPT_ID_mutex_acquired     = 16;
+    static constexpr ompt_operation_t OMPT_ID_nest_lock          = 17;
+    static constexpr ompt_operation_t OMPT_ID_flush              = 18;
+    static constexpr ompt_operation_t OMPT_ID_cancel             = 19;
+    static constexpr ompt_operation_t OMPT_ID_dispatch           = 20;
+    static constexpr ompt_operation_t OMPT_ID_error              = 21;
+    static constexpr ompt_operation_t OMPT_ID_callback_functions = 22;
+    // NOLINTEND(readability-identifier-naming)
+
+    enum class ompt_thread_type_t
+    {
+        ompt_thread_initial = 1,
+        ompt_thread_worker  = 2,
+        ompt_thread_other   = 3,
+        ompt_thread_unknown = 4
+    };
+
+    // Mirrors rocprofiler_ompt_args_t's shape (one struct member per OMPT operation
+    // whose fields ompt.hpp reads); a plain struct suffices since tests only ever
+    // populate the single branch matching the record's operation.
+    struct ompt_args_t
+    {
+        struct
+        {
+            ompt_thread_type_t thread_type = ompt_thread_type_t::ompt_thread_worker;
+        } thread_begin;
+
+        struct
+        {
+            void* parallel_data = nullptr;
+            int   flags         = 0;
+        } parallel_begin;
+
+        struct
+        {
+            void* parallel_data = nullptr;
+            int   flags         = 0;
+        } parallel_end;
+
+        struct
+        {
+            int flags = 0;
+        } task_create;
+
+        struct
+        {
+            int flags = 0;
+        } implicit_task;
+
+        struct
+        {
+            int flags = 0;
+        } cancel;
+    };
+
+    struct callback_tracing_ompt_data_t
+    {
+        std::uint64_t size = 0;
+        ompt_args_t   args;
+    };
 
     static void create_context(context_id_t* context) { g_mock->create_context(context); }
     static void start_context(context_id_t context) { g_mock->start_context(context); }
@@ -1220,6 +1302,13 @@ struct externals
 
     // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr std::string_view rocm_rccl_api_category_name = "rocm_rccl_api";
+
+    // ─── Members required by domains::callback::k_ompt_api ─────────────────────────
+    struct rocm_ompt_api_category
+    {};
+
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr std::string_view rocm_ompt_api_category_name = "rocm_ompt_api";
 
     static constexpr std::string_view comm_data_name        = "comm_data";
     static constexpr std::string_view comm_data_description = "comm data test category";
