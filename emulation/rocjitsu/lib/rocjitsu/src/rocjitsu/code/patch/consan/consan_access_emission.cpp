@@ -87,6 +87,26 @@ using detail::WorkitemOwnerDerivationPlan;
     return sequence.emit_branch(done_label, InstructionSequence::BranchKind::VccZero);
   };
 
+  // Packed tags repeat every 1024 barriers. A Ready window is immutable until
+  // dispatch completion and supplies the full epoch for this exact slot.
+  const uint64_t prior_window_address = plan.supercollider_report_buffer_address +
+                                        plan.causal_windows_offset +
+                                        uint64_t{prior_record_index} * sizeof(CausalWindow);
+  emission.stage("full epoch validation");
+  emission.require(append_banked_address(words, prior_window_address, sizeof(CausalWindow),
+                                         plan.window_bank_count, bank_vgpr, address_lo_vgpr, arch));
+  RecordEmitter prior_window(words, address_lo_vgpr, tmp_vgpr, arch);
+  emission.require(
+      prior_window.load(offsetof(CausalWindow, publication_state), tmp_vgpr) &&
+      append_required_predicate(instrumentation::build_v_cmp_eq_u32_vcc(
+          scalar_positive_inline_u32(static_cast<uint32_t>(CausalPublicationState::Ready)),
+          tmp_vgpr, arch)) &&
+      prior_window.load(offsetof(CausalWindow, epoch), tmp_vgpr) &&
+      append_required_predicate(instrumentation::build_v_cmp_eq_u32_vcc(
+          plan.owner_epoch_vgprs.epoch ? vector_source_vgpr(*plan.owner_epoch_vgprs.epoch)
+                                       : scalar_positive_inline_u32(0),
+          tmp_vgpr, arch)));
+
   emission.stage("validity and owner comparison");
   emission.require(
       sequence.emit(instrumentation::build_v_and_b32_literal(tmp_vgpr, 1u, prior_low_vgpr, arch)));
@@ -769,8 +789,8 @@ using detail::WorkitemOwnerDerivationPlan;
                      "ConSan probe could not encode owner field");
   if (plan.owner_epoch_vgprs.epoch)
     require_emission(append_add_shifted_vgpr_field(words, low_vgpr, *plan.owner_epoch_vgprs.epoch,
-                                                   watchpoint::epoch_shift, watchpoint::max_epoch,
-                                                   tmp_vgpr, arch),
+                                                   watchpoint::epoch_shift,
+                                                   watchpoint::epoch_tag_mask, tmp_vgpr, arch),
                      "ConSan probe could not encode epoch field");
   uint16_t effective_lds_byte_offset_vgpr = *lds_byte_offset_vgpr;
   if (spilled_lds_byte_offset_vgpr) {

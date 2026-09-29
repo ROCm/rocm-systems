@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
+#include "consan_model_test_support.h"
 #include "consan_test_support.h"
 #include "rocjitsu/code/patch/consan/consan_access_emission.h"
 #include "rocjitsu/code/patch/consan/consan_access_target.h"
@@ -341,104 +342,207 @@ TEST(ConSanTensor, TensorOwnerBarrierAdvancesEpochWithEmptyExecAndPreservesAllLa
     ASSERT_FALSE(cave.empty());
     const uint64_t begin = barrier->trampoline_offset;
     const uint64_t end = begin + cave.size() * 4;
-    for (uint32_t exec : {0xffffffffu, 0x80000001u, 0u}) {
-      SCOPED_TRACE(exec);
-      amdgpu::GpuMemory memory("tensor_barrier_mem");
-      amdgpu::L2Cache l2("tensor_barrier_l2");
-      l2.set_backing_memory(&memory);
-      amdgpu::ComputeUnitCore::Config config{};
-      config.arch = arch;
-      config.num_wf_slots = 1;
-      config.sgprs_per_wf = 106;
-      config.vgprs_per_wf = 64;
-      config.lds_size_kb = 4;
-      auto cu = amdgpu::ComputeUnitCore::create("tensor_barrier", config, &memory, &l2);
-      ASSERT_NE(cu, nullptr);
-      auto *wave = cu->dispatch_wf(0, begin, 106, 64, 32);
-      ASSERT_NE(wave, nullptr);
-      wave->set_scratch_base(0x400000);
-      wave->set_scratch_lane_size(256);
-      const auto sb = wave->sgpr_alloc().base;
-      const auto vb = wave->vgpr_alloc().base;
-      for (uint16_t reg = 0; reg < 106; ++reg)
-        cu->write_sgpr(sb + reg, 0);
-      for (uint16_t reg = 88; reg < 96; ++reg)
-        cu->write_sgpr(sb + reg, 0xcafe0000u + reg);
-      const auto &state = test_persistent_sgpr_state(result);
-      if (!private_identity) {
-        cu->write_sgpr(sb + *state.owner(), 0);
-        cu->write_sgpr(sb + *state.epoch(), 7);
-      }
-      for (uint16_t reg = 0; reg < 64; ++reg)
-        for (uint32_t lane = 0; lane < 32; ++lane)
-          cu->write_vgpr(vb + reg, lane, 0xa5a50000u + reg * 32 + lane);
-      for (uint64_t offset = 0; offset < options.report_buffer_size; offset += 4)
-        memory.write32(0x200000 + offset, 0);
-      for (size_t i = 0; i < cave.size(); ++i)
-        memory.write32(begin + i * 4, cave[i]);
-      const auto execute_private = [&](const std::vector<uint32_t> &code) {
-        constexpr uint64_t pc = 0x80000;
-        for (size_t i = 0; i < code.size(); ++i)
-          memory.write32(pc + i * 4, code[i]);
-        wave->pc = pc;
-        wave->set_exec(0xffffffffu);
+    for (uint32_t epoch : {7u, 1023u, 1024u, 65535u, watchpoint::max_epoch - 1u,
+                           watchpoint::max_epoch, watchpoint::exhausted_epoch}) {
+      SCOPED_TRACE(epoch);
+      const uint32_t next_epoch = epoch == watchpoint::exhausted_epoch ? epoch : epoch + 1u;
+      for (uint32_t exec : {0xffffffffu, 0x80000001u, 0u}) {
+        SCOPED_TRACE(exec);
+        amdgpu::GpuMemory memory("tensor_barrier_mem");
+        amdgpu::L2Cache l2("tensor_barrier_l2");
+        l2.set_backing_memory(&memory);
+        amdgpu::ComputeUnitCore::Config config{};
+        config.arch = arch;
+        config.num_wf_slots = 1;
+        config.sgprs_per_wf = 106;
+        config.vgprs_per_wf = 64;
+        config.lds_size_kb = 4;
+        auto cu = amdgpu::ComputeUnitCore::create("tensor_barrier", config, &memory, &l2);
+        ASSERT_NE(cu, nullptr);
+        auto *wave = cu->dispatch_wf(0, begin, 106, 64, 32);
+        ASSERT_NE(wave, nullptr);
+        wave->set_scratch_base(0x400000);
+        wave->set_scratch_lane_size(256);
+        const auto sb = wave->sgpr_alloc().base;
+        const auto vb = wave->vgpr_alloc().base;
+        for (uint16_t reg = 0; reg < 106; ++reg)
+          cu->write_sgpr(sb + reg, 0);
+        for (uint16_t reg = 88; reg < 96; ++reg)
+          cu->write_sgpr(sb + reg, 0xcafe0000u + reg);
+        const auto &state = test_persistent_sgpr_state(result);
+        if (!private_identity) {
+          cu->write_sgpr(sb + *state.owner(), 0);
+          cu->write_sgpr(sb + *state.epoch(), epoch);
+        }
+        for (uint16_t reg = 0; reg < 64; ++reg)
+          for (uint32_t lane = 0; lane < 32; ++lane)
+            cu->write_vgpr(vb + reg, lane, 0xa5a50000u + reg * 32 + lane);
+        for (uint64_t offset = 0; offset < options.report_buffer_size; offset += 4)
+          memory.write32(0x200000 + offset, 0);
+        for (size_t i = 0; i < cave.size(); ++i)
+          memory.write32(begin + i * 4, cave[i]);
+        const auto execute_private = [&](const std::vector<uint32_t> &code) {
+          constexpr uint64_t pc = 0x80000;
+          for (size_t i = 0; i < code.size(); ++i)
+            memory.write32(pc + i * 4, code[i]);
+          wave->pc = pc;
+          wave->set_exec(0xffffffffu);
+          size_t steps = 0;
+          while (wave->pc < pc + code.size() * 4 && steps++ < code.size() * 100)
+            cu->step();
+          cu->flush_all();
+          EXPECT_EQ(wave->pc, pc + code.size() * 4);
+        };
+        if (private_identity) {
+          const auto &layout = *barrier->private_state_layout;
+          for (uint32_t lane = 0; lane < 32; ++lane) {
+            cu->write_vgpr(vb + 60, lane, 0);
+            cu->write_vgpr(vb + 61, lane, epoch);
+          }
+          std::vector<uint32_t> seed;
+          for (uint32_t offset = 0; offset < layout.persistent_state_end; offset += 4) {
+            const auto store = instrumentation::build_private_store_b32(
+                offset == layout.epoch_offset ? 61 : 60, offset, arch);
+            ASSERT_TRUE(store);
+            seed.insert(seed.end(), store->begin(), store->end());
+          }
+          seed.push_back(*instrumentation::build_s_wait_private_store0(arch));
+          execute_private(seed);
+        }
+        wave->pc = begin;
+        wave->set_exec(exec);
+        wave->set_vcc(0x12345678);
+        wave->write_scc(true);
         size_t steps = 0;
-        while (wave->pc < pc + code.size() * 4 && steps++ < code.size() * 100)
+        while (wave->pc >= begin && wave->pc < end && steps++ < cave.size() * 100)
           cu->step();
         cu->flush_all();
-        EXPECT_EQ(wave->pc, pc + code.size() * 4);
-      };
-      if (private_identity) {
-        const auto &layout = *barrier->private_state_layout;
-        for (uint32_t lane = 0; lane < 32; ++lane) {
-          cu->write_vgpr(vb + 60, lane, 0);
-          cu->write_vgpr(vb + 61, lane, 7);
+        EXPECT_TRUE(wave->pc < begin || wave->pc >= end);
+        if (!private_identity) {
+          EXPECT_EQ(cu->read_sgpr(sb + *state.epoch()), next_epoch);
         }
-        std::vector<uint32_t> seed;
-        for (uint32_t offset = 0; offset < layout.persistent_state_end; offset += 4) {
-          const auto store = instrumentation::build_private_store_b32(
-              offset == layout.epoch_offset ? 61 : 60, offset, arch);
-          ASSERT_TRUE(store);
-          seed.insert(seed.end(), store->begin(), store->end());
+        EXPECT_EQ(wave->exec(), exec);
+        EXPECT_EQ(wave->vcc(), 0x12345678u);
+        EXPECT_TRUE(wave->read_scc());
+        if (scalar_spill) {
+          for (uint16_t reg = 88; reg < 96; ++reg)
+            EXPECT_EQ(cu->read_sgpr(sb + reg), 0xcafe0000u + reg);
         }
-        seed.push_back(*instrumentation::build_s_wait_private_store0(arch));
-        execute_private(seed);
-      }
-      wave->pc = begin;
-      wave->set_exec(exec);
-      wave->set_vcc(0x12345678);
-      wave->write_scc(true);
-      size_t steps = 0;
-      while (wave->pc >= begin && wave->pc < end && steps++ < cave.size() * 100)
-        cu->step();
-      cu->flush_all();
-      EXPECT_TRUE(wave->pc < begin || wave->pc >= end);
-      if (!private_identity) {
-        EXPECT_EQ(cu->read_sgpr(sb + *state.epoch()), 8u);
-      }
-      EXPECT_EQ(wave->exec(), exec);
-      EXPECT_EQ(wave->vcc(), 0x12345678u);
-      EXPECT_TRUE(wave->read_scc());
-      if (scalar_spill) {
-        for (uint16_t reg = 88; reg < 96; ++reg)
-          EXPECT_EQ(cu->read_sgpr(sb + reg), 0xcafe0000u + reg);
-      }
-      if (!lane_scalar_spill) {
-        for (uint16_t reg = *barrier->scratch_vgpr;
-             reg < *barrier->scratch_vgpr + barrier->spilled_vgpr_count; ++reg)
+        if (!lane_scalar_spill) {
+          for (uint16_t reg = *barrier->scratch_vgpr;
+               reg < *barrier->scratch_vgpr + barrier->spilled_vgpr_count; ++reg)
+            for (uint32_t lane = 0; lane < 32; ++lane)
+              EXPECT_EQ(cu->read_vgpr(vb + reg, lane), 0xa5a50000u + reg * 32 + lane);
+        }
+        if (private_identity) {
+          auto read = instrumentation::build_private_load_b32(
+              60, barrier->private_state_layout->epoch_offset, arch);
+          ASSERT_TRUE(read);
+          read->push_back(*instrumentation::build_s_wait_private_load0(arch));
+          execute_private(*read);
           for (uint32_t lane = 0; lane < 32; ++lane)
-            EXPECT_EQ(cu->read_vgpr(vb + reg, lane), 0xa5a50000u + reg * 32 + lane);
+            EXPECT_EQ(cu->read_vgpr(vb + 60, lane), next_epoch);
+        }
+        EXPECT_EQ(memory.read32(0x200000 + offsetof(ReportHeader, epoch_exhaustion_count)),
+                  epoch == watchpoint::max_epoch ? 1u : 0u);
+        wave->halt();
       }
-      if (private_identity) {
-        auto read = instrumentation::build_private_load_b32(
-            60, barrier->private_state_layout->epoch_offset, arch);
-        ASSERT_TRUE(read);
-        read->push_back(*instrumentation::build_s_wait_private_load0(arch));
-        execute_private(*read);
-        for (uint32_t lane = 0; lane < 32; ++lane)
-          EXPECT_EQ(cu->read_vgpr(vb + 60, lane), 8u);
+    }
+  }
+}
+
+TEST(ConSan, DeviceImmediateCheckUsesFullEpochAndRejectsExhaustion) {
+  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    SCOPED_TRACE(arch);
+    const std::vector<uint32_t> guest{0xd8d80000u, 0x01000000u, build_s_endpgm(arch)};
+    const auto bytes = arch == ROCJITSU_CODE_ARCH_CDNA5
+                           ? make_gfx1250_code_object(guest, "epoch_check")
+                           : make_rdna4_lds_code_object(guest);
+    const auto inventory = test_lower_consan(bytes, test_options());
+    ASSERT_EQ(inventory.program_inventory.access_sites().size(), 1u);
+    const Candidate candidate(inventory.program_inventory.access_sites().front());
+    detail::AccessEmissionPlan plan;
+    plan.check = true;
+    plan.supercollider_report_buffer_address = 0x200000;
+    plan.report_generation = 1;
+    plan.exec_save_sgpr = 80;
+    plan.owner_epoch_vgprs = {.owner = 20, .epoch = 21};
+    plan.dispatch_id.literal = 5;
+    plan.scratch_vgpr = 8;
+    plan.base_scratch_vgpr_count = plan.scratch_vgpr_count = 8;
+    plan.watchpoints_offset = 0x1000;
+    plan.causal_windows_offset = 0x2000;
+    plan.pending_acquires_offset = 0x3000;
+    plan.pending_acquire_owner_bank_count = 1;
+    plan.first_record_index = 1;
+    plan.prior_first_record_index = 0;
+    plan.prior_access_range_count = 1;
+    std::vector<std::string> errors;
+    const auto words =
+        detail::build_direct_watchpoint_words(bytes, candidate, 0, plan, nullptr, arch, errors);
+    ASSERT_TRUE(words) << testing::PrintToString(errors);
+    for (uint32_t epoch : {1024u, 65536u, watchpoint::max_epoch, watchpoint::exhausted_epoch}) {
+      for (bool same_epoch : {false, true}) {
+        SCOPED_TRACE(epoch);
+        SCOPED_TRACE(same_epoch);
+        amdgpu::GpuMemory memory("epoch_check_mem");
+        amdgpu::L2Cache l2("epoch_check_l2");
+        l2.set_backing_memory(&memory);
+        amdgpu::ComputeUnitCore::Config config{};
+        config.arch = arch;
+        config.num_wf_slots = 1;
+        config.sgprs_per_wf = 106;
+        config.vgprs_per_wf = 64;
+        config.lds_size_kb = 4;
+        auto cu = amdgpu::ComputeUnitCore::create("epoch_check", config, &memory, &l2);
+        ASSERT_NE(cu, nullptr);
+        auto *wave = cu->dispatch_wf(0, 0, 106, 64, 32);
+        ASSERT_NE(wave, nullptr);
+        const auto lds_base = cu->allocate_lds(4096);
+        ASSERT_NE(lds_base, UINT32_MAX);
+        wave->set_lds_base(lds_base);
+        cu->lds().write32(lds_base, 42);
+        const auto vb = wave->vgpr_alloc().base;
+        for (uint32_t lane = 0; lane < 32; ++lane) {
+          cu->write_vgpr(vb, lane, 0);
+          cu->write_vgpr(vb + 20, lane, 1);
+          cu->write_vgpr(vb + 21, lane, epoch);
+        }
+        for (uint64_t off = 0; off < 0x4000; off += 4)
+          memory.write32(0x200000 + off, 0);
+        CausalWindow prior{.generation = 1,
+                           .dispatch_id = 5,
+                           .epoch = same_epoch ? epoch : epoch - 1024u,
+                           .first_entry = 0,
+                           .entry_count = 1,
+                           .publication_state =
+                               static_cast<uint32_t>(CausalPublicationState::Ready)};
+        const auto *data = reinterpret_cast<const uint8_t *>(&prior);
+        for (size_t off = 0; off < sizeof(prior); off += 4) {
+          uint32_t word;
+          std::memcpy(&word, data + off, sizeof(word));
+          memory.write32(0x202000 + off, word);
+        }
+        memory.write64(0x201000,
+                       pack_watchpoint_entry(ShadowAccessKind::Write, 0, prior.epoch, 1, 0, 4));
+        for (size_t i = 0; i < words->size(); ++i)
+          memory.write32(i * 4, (*words)[i]);
+        wave->set_exec(1);
+        size_t steps = 0;
+        while (wave->pc < words->size() * 4 && steps++ < words->size() * 100)
+          cu->step();
+        cu->flush_all();
+        ASSERT_EQ(wave->pc, words->size() * 4);
+        EXPECT_EQ(cu->read_vgpr(vb + 1, 0), 42u);
+        const bool exhausted = epoch == watchpoint::exhausted_epoch;
+        EXPECT_EQ(memory.read32(0x200000 + offsetof(ReportHeader, event_counter)),
+                  same_epoch && !exhausted ? 1u : 0u);
+        EXPECT_EQ(memory.read32(0x202000 + sizeof(CausalWindow) + offsetof(CausalWindow, epoch)),
+                  exhausted ? 0u : epoch);
+        EXPECT_EQ(memory.read32(0x200000 + offsetof(ReportHeader, causal_window_count)),
+                  exhausted ? 0u : 1u);
+        wave->halt();
       }
-      wave->halt();
     }
   }
 }

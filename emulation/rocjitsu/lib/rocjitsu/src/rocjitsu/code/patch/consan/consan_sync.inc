@@ -285,7 +285,7 @@ plan_sync_emission(const Request &request, const BoundRuntimeResources &bound_re
     errors.emplace_back("ConSan barrier failed at owner narrowing");
   const auto max_epoch =
       instrumentation::build_v_mov_b32_literal(expected, watchpoint::max_epoch, arch);
-  const auto epoch_has_successor = instrumentation::build_v_cmp_ne_u32_vcc(
+  const auto epoch_has_successor = instrumentation::build_v_cmp_gt_u32_vcc(
       vector_source_vgpr(expected), *plan.owner_epoch_vgprs.epoch, arch);
   require_emission.append("ConSan barrier failed at epoch successor check", max_epoch,
                           epoch_has_successor);

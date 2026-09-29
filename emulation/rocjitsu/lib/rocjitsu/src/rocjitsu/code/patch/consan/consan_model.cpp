@@ -179,14 +179,15 @@ bool atomic_attachment_matches(const CausalWindow &window, uint64_t packed_watch
       window.generation != key.generation || window.dispatch_id != key.dispatch_id ||
       window.workgroup_x != key.workgroup_x || window.workgroup_y != key.workgroup_y ||
       window.workgroup_z != key.workgroup_z || window.epoch != key.epoch ||
-      window.cluster_workgroup_id != key.cluster_workgroup_id || window.first_entry != slot ||
-      window.entry_count != 1u)
+      window.cluster_workgroup_id != key.cluster_workgroup_id ||
+      key.epoch > watchpoint::max_epoch || window.first_entry != slot || window.entry_count != 1u)
     return false;
   const WatchpointEntry watchpoint = decode_watchpoint_entry(packed_watchpoint);
   return watchpoint.valid && !watchpoint.consumed &&
          (watchpoint.kind == ShadowAccessKind::Read ||
           watchpoint.kind == ShadowAccessKind::Write) &&
-         watchpoint.owner_id == key.owner_id && watchpoint.epoch == key.epoch &&
+         watchpoint.owner_id == key.owner_id &&
+         watchpoint.epoch == (key.epoch & watchpoint::epoch_tag_mask) &&
          watchpoint.generation ==
              (static_cast<uint32_t>(key.generation) & watchpoint::max_generation);
 }

@@ -38,10 +38,11 @@ inline constexpr uint64_t count_mask = bit_field_mask(count_shift, count_bits);
 inline constexpr uint64_t epoch_generation_mask = epoch_mask | generation_mask;
 
 inline constexpr uint32_t max_owner = (1u << owner_bits) - 1u;
-inline constexpr uint32_t max_epoch = (1u << epoch_bits) - 1u;
-// Persistent owner state has a full dword. This sentinel must never be packed
-// into an evidence entry: doing so would alias the first epoch.
-inline constexpr uint32_t exhausted_epoch = max_epoch + 1u;
+// The packed field is only a tag. CausalWindow carries the authoritative epoch;
+// retained evidence from different tag cycles must never share an identity.
+inline constexpr uint32_t epoch_tag_mask = (1u << epoch_bits) - 1u;
+inline constexpr uint32_t exhausted_epoch = 0xffffffffu;
+inline constexpr uint32_t max_epoch = exhausted_epoch - 1u;
 inline constexpr uint32_t max_generation = (1u << generation_bits) - 1u;
 
 } // namespace watchpoint
@@ -51,6 +52,7 @@ struct WatchpointEntry {
   bool consumed = false;
   ShadowAccessKind kind = ShadowAccessKind::Empty;
   uint32_t owner_id = 0;
+  // Raw decoding yields a tag; validated host evidence restores the full epoch.
   uint32_t epoch = 0;
   uint32_t generation = 0;
   uint32_t start_byte = 0;

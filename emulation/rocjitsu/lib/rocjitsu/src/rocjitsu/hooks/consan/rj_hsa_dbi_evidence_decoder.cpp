@@ -182,7 +182,7 @@ DecodedEvidence decode_evidence(const ReportPipelineInput &input, const ReportHe
     switch (snapshot.state) {
     case SnapshotState::Empty:
       break;
-    case SnapshotState::Stable:
+    case SnapshotState::Stable: {
       if ((header->publication_flags & kPublicationTraceEnabled) &&
           (window.publication_sequence == 0 ||
            window.publication_sequence > header->publication_clock)) {
@@ -192,19 +192,22 @@ DecodedEvidence decode_evidence(const ReportPipelineInput &input, const ReportHe
                           .words = {window.publication_sequence, header->publication_clock}});
         break;
       }
-      if (snapshot.entry.epoch != window_epoch) {
+      if (snapshot.entry.epoch != (window_epoch & watchpoint::epoch_tag_mask)) {
         ++summary.malformed_snapshot_count;
         issues.push_back({.reason = EvidenceReason::MalformedWatchpoint,
                           .index = i,
                           .words = {low_after, high, window_epoch, snapshot.entry.epoch}});
         break;
       }
-      visible.push_back({i, snapshot.entry, sync,
+      auto full_entry = snapshot.entry;
+      full_entry.epoch = window_epoch;
+      visible.push_back({i, full_entry, sync,
                          static_cast<uint64_t>(low_after) | (static_cast<uint64_t>(high) << 32u),
                          window_generation, window_dispatch_id, window_x, window_y, window_z,
                          window_epoch, window_cluster_workgroup_id, sync_snapshot_usable,
                          static_mapping_for_slot(i), exact_lane_mask, window.publication_sequence});
       break;
+    }
     case SnapshotState::StaleGeneration:
       ++summary.stale_snapshot_count;
       break;

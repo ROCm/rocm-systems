@@ -3620,6 +3620,70 @@ TEST(HsaHooksUnitTest, PublicationCompletenessRequiresDispatchLifetimeWitness) {
   EXPECT_EQ(decoded.summary.incomplete_snapshot_count, 1u);
 }
 
+TEST(HsaHooksUnitTest, FullEpochDisambiguatesTagsAndAtomicAttachments) {
+  AutoReportInventory inventory;
+  inventory.access_range_count = inventory.range_bank_count = inventory.watchpoint_count = 2;
+  const auto report = plan_auto_report(inventory);
+  ASSERT_TRUE(report.complete());
+  ReportPipelineInput input{.size = static_cast<size_t>(report.required_bytes),
+                            .layout = report.layout,
+                            .input_fingerprint = {},
+                            .expected_generation = 7};
+  for (uint32_t epoch : {1024u, 65536u, watchpoint::max_epoch}) {
+    SCOPED_TRACE(epoch);
+    for (bool same_epoch : {false, true}) {
+      SCOPED_TRACE(same_epoch);
+      ReportSnapshot snapshot;
+      snapshot.bytes.resize(report.required_bytes);
+      auto header = make_report_header_for_layout(7, 11, report.layout);
+      header.causal_window_count = 2;
+      std::memcpy(snapshot.bytes.data(), &header, sizeof(header));
+      for (uint32_t slot = 0; slot < 2; ++slot) {
+        const uint32_t full_epoch = slot == 0 && !same_epoch ? epoch - 1024u : epoch;
+        CausalWindow window{.generation = 7,
+                            .dispatch_id = 11,
+                            .epoch = full_epoch,
+                            .first_entry = slot,
+                            .entry_count = 1,
+                            .publication_state =
+                                static_cast<uint32_t>(CausalPublicationState::Ready)};
+        const auto packed =
+            pack_watchpoint_entry(slot == 0 ? ShadowAccessKind::Write : ShadowAccessKind::Read,
+                                  slot, full_epoch, 7, 0x10800, 2);
+        std::memcpy(snapshot.bytes.data() + report.layout.causal_windows_offset +
+                        slot * sizeof(window),
+                    &window, sizeof(window));
+        std::memcpy(snapshot.bytes.data() + report.layout.watchpoints_offset +
+                        slot * sizeof(packed),
+                    &packed, sizeof(packed));
+        AtomicAttachmentKey key{
+            .generation = 7, .dispatch_id = 11, .epoch = full_epoch, .owner_id = slot};
+        EXPECT_TRUE(atomic_attachment_matches(window, packed, slot, key));
+        key.epoch = full_epoch ^ 1024u;
+        EXPECT_FALSE(atomic_attachment_matches(window, packed, slot, key));
+      }
+      const auto decoded = decode_report(input, snapshot, {});
+      ASSERT_TRUE(decoded.complete());
+      EXPECT_EQ(decoded.summary.malformed_snapshot_count, 0u);
+      ASSERT_EQ(decoded.records.evidence.size(), 2u);
+      EXPECT_EQ(decoded.records.evidence[1].entry.epoch, epoch);
+      EXPECT_EQ(decoded.records.evidence[1].epoch, epoch);
+      EXPECT_EQ(
+          rocjitsu::consan::hook::analyze_conflicts(decoded.records.evidence, false).conflict_count,
+          same_epoch ? 1u : 0u);
+      // A mismatched tag and a reserved full epoch must remain invalid.
+      const uint32_t invalid_epoch =
+          epoch == watchpoint::max_epoch ? watchpoint::exhausted_epoch : epoch + 1u;
+      std::memcpy(snapshot.bytes.data() + report.layout.causal_windows_offset +
+                      sizeof(CausalWindow) + offsetof(CausalWindow, epoch),
+                  &invalid_epoch, sizeof(invalid_epoch));
+      const auto invalid = decode_report(input, snapshot, {});
+      EXPECT_EQ(invalid.summary.malformed_snapshot_count, 1u);
+      EXPECT_EQ(invalid.records.evidence.size(), 1u);
+    }
+  }
+}
+
 TEST(HsaHooksUnitTest, AutoReportDecoderRejectsStaleFullGenerationAcrossTagRollover) {
   AutoReportInventory inventory;
   inventory.access_range_count = inventory.range_bank_count = inventory.watchpoint_count = 1;

@@ -2634,10 +2634,11 @@ public:
                    static_coverage_summary.applicable_code_objects != 0 ? "true" : "false");
     }
     if (report_summary.epoch_exhaustion_count != 0) {
-      std::fprintf(stderr,
-                   "[rocjitsu-dbi-hooks] ConSan epoch exhausted: %llu wave(s) exceeded "
-                   "1023 barriers; later accesses were not checked. Analysis is incomplete.\n",
-                   static_cast<unsigned long long>(report_summary.epoch_exhaustion_count));
+      std::fprintf(
+          stderr,
+          "[rocjitsu-dbi-hooks] ConSan epoch exhausted: %llu wave(s) exceeded "
+          "the 32-bit epoch range; later accesses were not checked. Analysis is incomplete.\n",
+          static_cast<unsigned long long>(report_summary.epoch_exhaustion_count));
       std::fflush(stderr);
       if (forbid_overflow)
         std::_Exit(90);

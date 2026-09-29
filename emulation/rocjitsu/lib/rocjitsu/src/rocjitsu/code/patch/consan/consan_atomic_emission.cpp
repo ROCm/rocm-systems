@@ -1250,11 +1250,13 @@ std::optional<std::vector<uint32_t>> build_publication_cave_words(
       .branch(restore_label, InstructionSequence::BranchKind::SccZero);
 
   sequence.require(append_load_u32_vgpr_at_offset(words, base, 0u, value, arch))
-      .append(instrumentation::build_v_lshrrev_b32(
-                  value, scalar_positive_inline_u32(watchpoint::epoch_shift), value, arch),
-              instrumentation::build_v_and_b32_literal(value, watchpoint::max_epoch, value, arch),
-              instrumentation::build_v_cmp_eq_u32_vcc(
-                  vector_source_vgpr(*plan.owner_epoch_vgprs.epoch), value, arch));
+      .append(
+          instrumentation::build_v_lshrrev_b32(
+              value, scalar_positive_inline_u32(watchpoint::epoch_shift), value, arch),
+          instrumentation::build_v_and_b32_literal(value, watchpoint::epoch_tag_mask, value, arch),
+          instrumentation::build_v_and_b32_literal(expected, watchpoint::epoch_tag_mask,
+                                                   *plan.owner_epoch_vgprs.epoch, arch),
+          instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected), value, arch));
   narrow_current_vcc();
   sequence.require(append_load_u32_vgpr_at_offset(words, base, 0u, value, arch))
       .require(append_load_u32_vgpr_at_offset(words, base, sizeof(uint32_t), expected, arch))
