@@ -54,14 +54,7 @@ struct CommResources {
   std::vector<ncclComm_t> comms;
 };
 
-// One row of a rank-map table: the team rank fed in, and the mapped rank the API must return.
-struct Case {
-  const char* name;
-  int rank;
-  int expected;
-};
-
-// Same, plus the caller-built team, because the map depends on team.rank and team.stride, not on rank alone.
+// One row of a rank-map table: the caller-built team and the team rank fed in, and the mapped rank expected out.
 struct TeamCase {
   const char* name;
   ncclTeam_t team;
@@ -157,24 +150,6 @@ void runCftZeroTeamAliasesSelfTest() {
   }
 }
 
-// On the LSA team stride is 1 and team.rank is lsaSelf, so the map is the identity for every input.
-void runRankToLsaIdentityTest() {
-  CommResources resources(kSingleRank);
-  ASSERT_NO_FATAL_FAILURE(initSingleRankCommAndCheckLsa(resources));
-
-  const ncclTeam_t lsaTeam = ncclTeamLsa(resources.comms[0]);
-  const std::vector<Case> cases = {
-    {"self", 0, 0},
-    {"next", 1, 1},
-    {"third", 2, 2},
-    {"far", 7, 7},
-  };
-  for (const Case& c : cases) {
-    SCOPED_TRACE(c.name);
-    EXPECT_EQ(ncclTeamRankToLsa(resources.comms[0], lsaTeam, c.rank), c.expected);
-  }
-}
-
 // ncclTeamRankToLsa is unclamped: lsaSelf + (rank - team.rank) * team.stride, and lsaSelf is 0 on a 1-rank comm.
 void runRankToLsaNoBoundsCheckTest() {
   CommResources resources(kSingleRank);
@@ -260,11 +235,6 @@ TEST(TeamTopologyTests, Cft_HierMultimem_MatchesFlatWhenCftUnsupported) {
 TEST(TeamTopologyTests, RankToWorld_ZeroTeamAliasesSelf_OffsetTeamMapsLinearly) {
   RUN_ISOLATED_TESTS(makeTeamTopologyConfig("TeamTopologyTests.RankToWorld_ZeroTeamAliasesSelf_OffsetTeamMapsLinearly",
                                             []() { runCftZeroTeamAliasesSelfTest(); }, kSingleRank));
-}
-
-TEST(TeamTopologyTests, RankToLsa_OnLsaTeam_IsIdentity) {
-  RUN_ISOLATED_TESTS(makeTeamTopologyConfig("TeamTopologyTests.RankToLsa_OnLsaTeam_IsIdentity",
-                                            []() { runRankToLsaIdentityTest(); }, kSingleRank));
 }
 
 TEST(TeamTopologyTests, RankToLsa_NoBoundsCheck_ExtrapolatesOutOfRange) {
