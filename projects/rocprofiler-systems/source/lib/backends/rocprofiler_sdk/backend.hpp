@@ -139,7 +139,6 @@ struct backend
     static constexpr callback_tracing_kind_t CALLBACK_TRACING_RCCL_API =
         Wrapper::CALLBACK_TRACING_RCCL_API;
 
-#if ROCPROFILER_VERSION >= 600
     // ─── RCCL / NCCL types and constants ─────────────────────────────────────────
     using rccl_api_data    = Wrapper::rccl_api_data;
     using rccl_api_id_t    = Wrapper::rccl_api_id_t;
@@ -169,10 +168,9 @@ struct backend
         Wrapper::RCCL_API_ID_ncclReduceScatter;
     static constexpr rccl_api_id_t RCCL_API_ID_ncclSend = Wrapper::RCCL_API_ID_ncclSend;
 
-#    if defined(ROCPROFILER_RCCL_API_ID_ncclAlltoAll)
+#if defined(ROCPROFILER_RCCL_API_ID_ncclAlltoAll)
     static constexpr rccl_api_id_t RCCL_API_ID_ncclAlltoAll =
         Wrapper::RCCL_API_ID_ncclAlltoAll;
-#    endif
 #endif
 
 #if ROCPROFILER_VERSION >= 600
