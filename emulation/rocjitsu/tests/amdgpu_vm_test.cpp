@@ -70,6 +70,7 @@ RJ_DIAGNOSTIC_POP
 #include <sys/resource.h>
 #include <sys/wait.h>
 #include <thread>
+#include <tuple>
 #include <unistd.h>
 #include <vector>
 
@@ -3727,7 +3728,7 @@ TEST(DispatchEntryTest, InitialExecMaskHandles3DTailWithWorkgroupOffset) {
   EXPECT_EQ(amdgpu::initial_exec_mask_for_wave(entry, 103, 0, 64), 0xFULL);
 }
 
-class DynamicScratchTest : public ::testing::TestWithParam<bool> {};
+class DynamicScratchTest : public ::testing::TestWithParam<std::tuple<const char *, bool>> {};
 
 TEST_P(DynamicScratchTest, KfdQueueRequestsResizesAndReclaimsBeforeConsumingPacket) {
   using namespace rocr::llvm::amdhsa;
@@ -3751,8 +3752,9 @@ TEST_P(DynamicScratchTest, KfdQueueRequestsResizesAndReclaimsBeforeConsumingPack
   constexpr uint32_t kEventIdOffset = 24;
   constexpr uint32_t kWaveSizeFieldShift = 12;
 
-  VmFixture fixture("cdna5", /*num_cus=*/1, /*num_wf_slots=*/2);
-  const uint32_t code[] = {SOPP_S_ENDPGM};
+  const auto [arch, local_allocator] = GetParam();
+  VmFixture fixture(arch, /*num_cus=*/1, /*num_wf_slots=*/2);
+  const uint32_t code[] = {build_s_endpgm(fixture.cu()->arch())};
   const uint64_t first_kernel = fixture.write_kernel(0x1000, code, sizeof(code));
   fixture.mem()->write32(first_kernel + offsetof(kernel_descriptor_t, private_segment_fixed_size),
                          kFirstPrivateBytes);
@@ -3777,7 +3779,7 @@ TEST_P(DynamicScratchTest, KfdQueueRequestsResizesAndReclaimsBeforeConsumingPack
   fixture.mem()->write64(kQueueSignal + kMailboxPointerOffset, kMailbox);
   fixture.mem()->write32(kQueueSignal + kEventIdOffset, kEventId);
 
-  if (GetParam()) {
+  if (local_allocator) {
     // Local KFD installs these helpers even for runtime-managed queues. Neither
     // may bypass the queue's allocation/reclaim protocol or supply a shared
     // process-wide fallback in place of its private allocation.
@@ -3834,7 +3836,7 @@ TEST_P(DynamicScratchTest, KfdQueueRequestsResizesAndReclaimsBeforeConsumingPack
                                                            : kThirdPrivateBytes;
     const uint64_t raw_per_wave = static_cast<uint64_t>(private_bytes) * 32;
     const uint32_t wavesize_granule =
-        isa_properties(ROCJITSU_CODE_ARCH_CDNA5).compute_tmpring_wavesize_granule;
+        isa_properties(fixture.cu()->arch()).compute_tmpring_wavesize_granule;
     const uint64_t per_wave_stride =
         ((raw_per_wave + wavesize_granule - 1) / wavesize_granule) * wavesize_granule;
     const uint32_t provisioned_wavesize = static_cast<uint32_t>(per_wave_stride / wavesize_granule);
@@ -3896,12 +3898,20 @@ TEST_P(DynamicScratchTest, KfdQueueRequestsResizesAndReclaimsBeforeConsumingPack
   EXPECT_FALSE(fixture.cp()->queue_faulted_for_test(kQueueId, kProcessId));
   EXPECT_TRUE(fixture.cu()->is_idle());
   ASSERT_EQ(snapshots->snapshots().size(), 4u);
-  EXPECT_TRUE(std::ranges::all_of(snapshots->snapshots(), [](const auto &wave) {
-    return wave.wf_id == 0;
-  })) << "the CP used a physical wave slot beyond COMPUTE_TMPRING_SIZE.WAVES";
+  if (fixture.cu()->arch() == ROCJITSU_CODE_ARCH_CDNA5) {
+    EXPECT_TRUE(std::ranges::all_of(snapshots->snapshots(), [](const auto &wave) {
+      return wave.wf_id == 0;
+    })) << "the CP used a physical wave slot beyond COMPUTE_TMPRING_SIZE.WAVES";
+  }
 }
 
-INSTANTIATE_TEST_SUITE_P(WithAndWithoutLocalAllocator, DynamicScratchTest, ::testing::Bool());
+INSTANTIATE_TEST_SUITE_P(TargetsAndAllocators, DynamicScratchTest,
+                         ::testing::Combine(::testing::Values("cdna5", "rdna3", "rdna4"),
+                                            ::testing::Bool()),
+                         [](const ::testing::TestParamInfo<DynamicScratchTest::ParamType> &info) {
+                           return std::string(std::get<0>(info.param)) +
+                                  (std::get<1>(info.param) ? "LocalAllocator" : "RuntimeOnly");
+                         });
 TEST(CommandProcessorTest, DynamicScratchRequestBlocksRemovalOnlyUntilDelivery) {
   using namespace rocr::llvm::amdhsa;
 

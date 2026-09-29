@@ -692,9 +692,7 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
     // memory (rocdbgapi architecture.cpp scratch_memory_region).
     const uint64_t raw_per_wave =
         static_cast<uint64_t>(pkt.private_segment_fixed_size) * wf->wf_size();
-    const uint64_t granule = (pkt.pm4_abi || cu->arch() == ROCJITSU_CODE_ARCH_CDNA5)
-                                 ? properties.compute_tmpring_wavesize_granule
-                                 : 1024;
+    const uint64_t granule = properties.compute_tmpring_wavesize_granule;
     const uint64_t per_wave_size = ((raw_per_wave + granule - 1) / granule) * granule;
     const uint64_t wg_total_size = static_cast<uint64_t>(pkt.workgroup_size_x) *
                                    std::max<uint16_t>(1, pkt.workgroup_size_y) *
@@ -3892,8 +3890,7 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
       const auto properties = isa_properties(arch);
       const uint32_t wavesize_mask = util::mask<uint32_t>(properties.compute_tmpring_wavesize_bits);
       const uint64_t raw_per_wave = static_cast<uint64_t>(private_segment_fixed_size) * wave_size;
-      const uint64_t granule =
-          arch == ROCJITSU_CODE_ARCH_CDNA5 ? properties.compute_tmpring_wavesize_granule : 1024;
+      const uint64_t granule = properties.compute_tmpring_wavesize_granule;
       const uint64_t per_wave_stride = ((raw_per_wave + granule - 1) / granule) * granule;
       const uint64_t required_wavesize =
           per_wave_stride / properties.compute_tmpring_wavesize_granule;
@@ -4173,8 +4170,7 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
         // Match setup_wavefront()'s ISA-specific slot stride so flat_scratch
         // agrees with rocm-dbgapi for every scoreboard slot after slot zero.
         const auto properties = isa_properties(arch);
-        const uint64_t granule =
-            arch == ROCJITSU_CODE_ARCH_CDNA5 ? properties.compute_tmpring_wavesize_granule : 1024;
+        const uint64_t granule = properties.compute_tmpring_wavesize_granule;
         const uint64_t per_wave_stride = ((per_wave_bytes + granule - 1) / granule) * granule;
         const uint32_t wavesize_unit = properties.compute_tmpring_wavesize_granule;
         assert(wavesize_unit != 0 && properties.compute_tmpring_wavesize_bits != 0);
