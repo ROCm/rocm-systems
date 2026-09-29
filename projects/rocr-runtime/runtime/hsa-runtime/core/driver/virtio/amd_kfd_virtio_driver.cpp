@@ -50,6 +50,7 @@
 #include "core/inc/amd_gpu_agent.h"
 #include "core/inc/amd_memory_region.h"
 #include "core/inc/runtime.h"
+#include "core/util/os.h"
 
 extern r_debug _amdgpu_r_debug;
 
@@ -535,9 +536,10 @@ hsa_status_t KfdVirtioDriver::ExportMemoryHandle(const core::Agent& agent,
   case core::ShareType::DMABUF_FD: {
     int dmabuf_fd_res = -1;
     size_t offset_res = 0;
+    // After CreateShareableHandle handle.handle is the libdrm bo and the VA is in handle.vaddr
+    void* addr = handle.vaddr ? handle.vaddr : reinterpret_cast<void*>(handle.handle);
     HSAKMT_STATUS status =
-        vhsaKmtExportDMABufHandle(const_cast<void*>(reinterpret_cast<const void*>(&handle)), handle.size,
-                                  &dmabuf_fd_res, &offset_res);
+        vhsaKmtExportDMABufHandle(addr, handle.size, &dmabuf_fd_res, &offset_res);
     if (status != HSAKMT_STATUS_SUCCESS) {
       if (status == HSAKMT_STATUS_INVALID_PARAMETER) {
         return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -614,20 +616,56 @@ hsa_status_t KfdVirtioDriver::Unmap(const core::DriverMemoryHandle& handle, void
 
 hsa_status_t KfdVirtioDriver::CreateShareableHandle(core::DriverMemoryHandle* handle,
                                                     const core::Agent& agent, uint64_t* offset) {
-  return HSA_STATUS_ERROR;
+  // No CPU mmap offset: a virtio-gpu guest cannot mmap the host BO. The dmabuf fd is
+  // exported lazily when access is set.
+  if (handle == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  if (offset != nullptr) *offset = 0;
+
+  void* mem = reinterpret_cast<void*>(handle->handle);
+  const size_t size = handle->size;
+
+  core::DriverMemoryHandle src_alloc = {};
+  src_alloc.handle = handle->handle;
+  src_alloc.size = size;
+
+  int source_fd = -1;
+  hsa_status_t ret = ExportMemoryHandle(agent, src_alloc, core::ShareType::DMABUF_FD, &source_fd);
+  if (ret != HSA_STATUS_SUCCESS) return ret;
+
+  core::DriverMemoryHandle source_handle = {};
+  source_handle.dmabuf_fd = source_fd;
+
+  core::DriverMemoryHandle target_handle = {};
+  ret = ImportMemoryHandle(agent, &target_handle, core::ShareType::DMABUF_FD, &source_handle, mem);
+  rocr::os::DmaBufClose(&source_fd);
+  if (ret != HSA_STATUS_SUCCESS) return ret;
+
+  // handle->handle becomes the imported bo; the allocation stays in vaddr until destroy
+  handle->handle = target_handle.handle;
+  handle->vaddr = mem;
+  handle->size = size;
+  handle->dmabuf_fd = -1;
+  handle->mmap_offset = 0;
+  handle->owner = this;
+  handle->owns_allocation = true;
+  return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t KfdVirtioDriver::DestroyMemoryHandle(core::DriverMemoryHandle* handle) {
+  hsa_status_t ret = rocr::os::DmaBufClose(&handle->dmabuf_fd);
+
+  // release everything even if an earlier step fails
   const auto ldrm_bo = reinterpret_cast<amdgpu_bo_handle>(handle->handle);
-  if (!ldrm_bo)
-    return HSA_STATUS_ERROR;
+  if (ldrm_bo != nullptr && vamdgpu_bo_free(ldrm_bo) != 0) ret = HSA_STATUS_ERROR;
 
-  const auto ret = vamdgpu_bo_free(ldrm_bo);
-  if (ret)
-    return HSA_STATUS_ERROR;
+  if (handle->vaddr != nullptr) {
+    MakeMemoryUnresident(handle->vaddr);
+    if (vhsaKmtFreeMemory(handle->vaddr, handle->size) != HSAKMT_STATUS_SUCCESS)
+      ret = HSA_STATUS_ERROR;
+  }
 
-  handle = {};
-  return HSA_STATUS_SUCCESS;
+  *handle = {};
+  return ret;
 }
 
 hsa_status_t KfdVirtioDriver::GetTileConfig(uint32_t node_id, HsaGpuTileConfig* config) const {
