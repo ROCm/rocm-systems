@@ -652,7 +652,8 @@ struct mock_sdk
         }
     }
 
-    // ─── Members required by domains::callback::k_ompt_api ──────────────────────────
+    // ─── Members required by domains::callback::ompt::k_ompt_api
+    // ──────────────────────────
     using ompt_operation_t = std::size_t;
 
     // NOLINTBEGIN(readability-identifier-naming)
@@ -1303,7 +1304,8 @@ struct externals
     // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr std::string_view rocm_rccl_api_category_name = "rocm_rccl_api";
 
-    // ─── Members required by domains::callback::k_ompt_api ─────────────────────────
+    // ─── Members required by domains::callback::ompt::k_ompt_api
+    // ─────────────────────────
     struct rocm_ompt_api_category
     {};
 

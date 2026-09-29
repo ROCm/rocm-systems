@@ -20,7 +20,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace rocprofsys::domains::callback
+namespace rocprofsys::domains::callback::ompt
 {
 
 namespace detail
@@ -65,7 +65,7 @@ ompt_iterate_operation_args(const typename SdkBackend::callback_tracing_record_t
                                : 2;
 
     SdkBackend::iterate_callback_tracing_kind_operation_args(
-        record, detail::iterate_args_callback, max_deref, &args);
+        record, callback::detail::iterate_args_callback, max_deref, &args);
 
     const auto* payload =
         static_cast<const SdkBackend::callback_tracing_ompt_data_t*>(record.payload);
@@ -76,8 +76,7 @@ ompt_iterate_operation_args(const typename SdkBackend::callback_tracing_record_t
     }
 
     const auto representation =
-        rocprofsys::domains::callback::ompt::make_ompt_flag_representation<SdkBackend>(
-            operation, *payload);
+        make_ompt_flag_representation<SdkBackend>(operation, *payload);
 
     if(!representation)
     {
@@ -353,7 +352,7 @@ should_skip(const typename SdkBackend::callback_tracing_record_t& record)
     if(operation == SdkBackend::OMPT_ID_implicit_task)
     {
         const int flag = payload_data->args.implicit_task.flags;
-        if(ompt::has_flag(flag, ompt::ompt_task_flag_t::ompt_task_initial))
+        if(has_flag(flag, ompt_task_flag_t::ompt_task_initial))
         {
             return true;  // Skips both the start and end
         }
@@ -361,8 +360,8 @@ should_skip(const typename SdkBackend::callback_tracing_record_t& record)
     else if(operation == SdkBackend::OMPT_ID_thread_begin)
     {
         const auto thread_type =
-            static_cast<ompt::ompt_thread_t>(payload_data->args.thread_begin.thread_type);
-        if(thread_type == ompt::ompt_thread_t::ompt_thread_initial)
+            static_cast<ompt_thread_t>(payload_data->args.thread_begin.thread_type);
+        if(thread_type == ompt_thread_t::ompt_thread_initial)
         {
             return true;
         }
@@ -551,4 +550,4 @@ inline constexpr auto k_ompt_api = callback_domain_definition<SdkBackend>{
     .on_finalize  = on_ompt_finalize<SdkBackend, Externals, ompt_api_category>
 };
 
-}  // namespace rocprofsys::domains::callback
+}  // namespace rocprofsys::domains::callback::ompt
