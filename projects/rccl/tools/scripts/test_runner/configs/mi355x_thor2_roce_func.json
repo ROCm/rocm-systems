@@ -2119,27 +2119,27 @@
         },
         {
           "name": "CommMPITests_PersistentCommunicator_fp32_large",
-          "description": "Persistent communicator reuse (fp32, large tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator. HSA_DISABLE_CACHE=1 works around AICOMRCCL-2275, silent data corruption on gfx950: 0 failures in 400 runs with it vs 10/10 stock on the same nodes",
+          "description": "Persistent communicator reuse (fp32, large tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator. HSA_DISABLE_CACHE=1 works around AICOMRCCL-2275, silent data corruption on gfx950: 0 failures in 400 runs with it vs 10/10 stock on the same nodes, measured at 2 ranks on one node. Added 2026-09-29; drop this env_variables entry once AICOMRCCL-2275 is fixed below RCCL",
           "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp32_large",
-          "timeout": 180,
+          "timeout": 120,
           "env_variables": {
             "HSA_DISABLE_CACHE": "1"
           }
         },
         {
           "name": "CommMPITests_PersistentCommunicator_bf16_large",
-          "description": "Persistent communicator reuse (bf16, large tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator. HSA_DISABLE_CACHE=1 works around AICOMRCCL-2275, silent data corruption on gfx950: 0 failures in 400 runs with it vs 10/10 stock on the same nodes",
+          "description": "Persistent communicator reuse (bf16, large tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator. HSA_DISABLE_CACHE=1 works around AICOMRCCL-2275, silent data corruption on gfx950: 0 failures in 400 runs with it vs 10/10 stock on the same nodes, measured at 2 ranks on one node. Added 2026-09-29; drop this env_variables entry once AICOMRCCL-2275 is fixed below RCCL",
           "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/bf16_large",
-          "timeout": 240,
+          "timeout": 120,
           "env_variables": {
             "HSA_DISABLE_CACHE": "1"
           }
         },
         {
           "name": "CommMPITests_PersistentCommunicator_fp8e4m3_large",
-          "description": "Persistent communicator reuse (fp8e4m3, large tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator. HSA_DISABLE_CACHE=1 works around AICOMRCCL-2275, silent data corruption on gfx950: 0 failures in 400 runs with it vs 10/10 stock on the same nodes",
+          "description": "Persistent communicator reuse (fp8e4m3, large tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator. HSA_DISABLE_CACHE=1 works around AICOMRCCL-2275, silent data corruption on gfx950: 0 failures in 400 runs with it vs 10/10 stock on the same nodes, measured at 2 ranks on one node. Added 2026-09-29; drop this env_variables entry once AICOMRCCL-2275 is fixed below RCCL",
           "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp8e4m3_large",
-          "timeout": 360,
+          "timeout": 120,
           "env_variables": {
             "HSA_DISABLE_CACHE": "1"
           }

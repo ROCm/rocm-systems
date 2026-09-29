@@ -2133,19 +2133,19 @@
           "name": "CommMPITests_PersistentCommunicator_fp32_large",
           "description": "Persistent communicator reuse (fp32, large tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator",
           "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp32_large",
-          "timeout": 180
+          "timeout": 120
         },
         {
           "name": "CommMPITests_PersistentCommunicator_bf16_large",
           "description": "Persistent communicator reuse (bf16, large tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator",
           "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/bf16_large",
-          "timeout": 240
+          "timeout": 120
         },
         {
           "name": "CommMPITests_PersistentCommunicator_fp8e4m3_large",
           "description": "Persistent communicator reuse (fp8e4m3, large tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator",
           "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp8e4m3_large",
-          "timeout": 360
+          "timeout": 120
         }
       ]
     },
