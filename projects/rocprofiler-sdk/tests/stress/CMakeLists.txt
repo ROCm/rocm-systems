@@ -12,10 +12,14 @@ if(PROJECT_IS_TOP_LEVEL OR ROCPROFILER_BUILD_CODECOV)
 endif()
 
 # The in-tree CI step is capped at 30 minutes and configure + build + the full suite takes
-# 16-20 of them, so keep the default budget well inside the remaining headroom.
+# 14-17 of them, so the two budgets below share about six minutes of the remaining
+# headroom (with a 300 s budget the step took 19-22 minutes).
 set(ROCPROFILER_STRESS_BUDGET_SECONDS
-    "300"
+    "120"
     CACHE STRING "Wall-clock budget for the stress.* repetition test, in seconds")
+set(ROCPROFILER_STRESS_PROBE_BUDGET_SECONDS
+    "240"
+    CACHE STRING "Wall-clock budget for the multistream save/restore probe, in seconds")
 
 add_test(
     NAME stress.repeat-suspects
@@ -41,3 +45,33 @@ set_tests_properties(
                "stress"
                ENVIRONMENT
                "ROCPROFILER_FAILURE_SIGNAL_HANDLER=1;ROCPROF_FAILURE_SIGNAL_HANDLER=1")
+
+# Repeats multistream under rocprofv3 with SQ_WAVES_RESTORED and SQ_WAVES_SAVED next to
+# SQ_WAVES, to test whether the rare SQ_WAVES_sum == 2 in
+# counter-collection.test_counter_values is a preempted wave counted again on restore (see
+# probe_multistream_restore.py).
+if(TARGET multistream AND TARGET rocprofiler-sdk::rocprofv3)
+    add_test(
+        NAME stress.probe-multistream-restore
+        COMMAND
+            ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/probe_multistream_restore.py
+            --rocprofv3 $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --app
+            $<TARGET_FILE:multistream> --workdir ${CMAKE_CURRENT_BINARY_DIR}/probe
+            --budget-seconds ${ROCPROFILER_STRESS_PROBE_BUDGET_SECONDS}
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+
+    set_tests_properties(
+        stress.probe-multistream-restore
+        PROPERTIES
+            RUN_SERIAL
+            TRUE
+            COST
+            -1000001
+            TIMEOUT
+            360
+            LABELS
+            "stress"
+            ENVIRONMENT
+            "PYTHONPATH=${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages;ROCPROFILER_FAILURE_SIGNAL_HANDLER=1;ROCPROF_FAILURE_SIGNAL_HANDLER=1"
+        )
+endif()
