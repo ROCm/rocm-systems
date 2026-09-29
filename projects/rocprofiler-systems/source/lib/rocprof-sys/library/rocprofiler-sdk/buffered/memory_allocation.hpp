@@ -64,21 +64,19 @@ on_memory_allocation(typename SdkBackend::memory_allocation_record_t* record,
 
 template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals>
-inline constexpr buffered_domain_definition<SdkBackend> k_memory_allocation =
-    buffered_domain_definition<SdkBackend>{
-        .meta =
-            domain_descriptor{
-                .name  = "memory_allocation",
-                .id    = SdkBackend::BUFFER_TRACING_MEMORY_ALLOCATION,
-                .mode  = collection_mode::buffered,
-                .group = std::nullopt,
-            },
-        .on_records = buffered_callback_dispatcher<
-            SdkBackend, typename SdkBackend::memory_allocation_record_t,
-            on_memory_allocation<SdkBackend, Externals>>::callback,
-        .on_configure = on_memory_allocation_configure<Externals>,
-        .correlation_dependency =
-            SdkBackend::EXTERNAL_CORRELATION_REQUEST_MEMORY_ALLOCATION,
-    };
+inline constexpr auto k_memory_allocation = buffered_domain_definition<SdkBackend>{
+    .meta =
+        domain_descriptor{
+            .name  = "memory_allocation",
+            .id    = SdkBackend::BUFFER_TRACING_MEMORY_ALLOCATION,
+            .mode  = collection_mode::buffered,
+            .group = std::nullopt,
+        },
+    .on_records = buffered_callback_dispatcher<
+        SdkBackend, typename SdkBackend::memory_allocation_record_t,
+        on_memory_allocation<SdkBackend, Externals>>::callback,
+    .on_configure           = on_memory_allocation_configure<Externals>,
+    .correlation_dependency = SdkBackend::EXTERNAL_CORRELATION_REQUEST_MEMORY_ALLOCATION,
+};
 
 }  // namespace rocprofsys::domains::buffered

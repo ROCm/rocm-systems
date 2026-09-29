@@ -88,21 +88,20 @@ on_memory_copy(typename SdkBackend::memory_copy_record_t* record,
 
 template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals>
-inline constexpr buffered_domain_definition<SdkBackend> k_memory_copy =
-    buffered_domain_definition<SdkBackend>{
-        .meta =
-            domain_descriptor{
-                .name  = "memory_copy",
-                .id    = SdkBackend::BUFFER_TRACING_MEMORY_COPY,
-                .mode  = collection_mode::buffered,
-                .group = std::nullopt,
-            },
-        .on_records =
-            buffered_callback_dispatcher<SdkBackend,
-                                         typename SdkBackend::memory_copy_record_t,
-                                         on_memory_copy<SdkBackend, Externals>>::callback,
-        .on_configure           = on_memory_copy_configure<Externals>,
-        .correlation_dependency = SdkBackend::EXTERNAL_CORRELATION_REQUEST_MEMORY_COPY,
-    };
+inline constexpr auto k_memory_copy = buffered_domain_definition<SdkBackend>{
+    .meta =
+        domain_descriptor{
+            .name  = "memory_copy",
+            .id    = SdkBackend::BUFFER_TRACING_MEMORY_COPY,
+            .mode  = collection_mode::buffered,
+            .group = std::nullopt,
+        },
+    .on_records =
+        buffered_callback_dispatcher<SdkBackend,
+                                     typename SdkBackend::memory_copy_record_t,
+                                     on_memory_copy<SdkBackend, Externals>>::callback,
+    .on_configure           = on_memory_copy_configure<Externals>,
+    .correlation_dependency = SdkBackend::EXTERNAL_CORRELATION_REQUEST_MEMORY_COPY,
+};
 
 }  // namespace rocprofsys::domains::buffered
