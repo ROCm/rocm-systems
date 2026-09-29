@@ -656,6 +656,7 @@ void GinMPIDeviceTests::runExplicitSignalSemantics(bool strong) {
     GTEST_SKIP() << "Requires exactly 2 ranks";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t comm = getActiveCommunicator();
   hipStream_t stream = getActiveStream();
 
@@ -682,14 +683,14 @@ void GinMPIDeviceTests::runExplicitSignalSemantics(bool strong) {
   });
 
   ncclWindow_t srcWin = nullptr, dstWin = nullptr;
-  ASSERT_MPI_EQ(ncclSuccess,
-                ncclCommWindowRegister(comm, dSrc, kBufBytes, &srcWin, NCCL_WIN_COLL_SYMMETRIC));
-  ASSERT_MPI_EQ(ncclSuccess,
-                ncclCommWindowRegister(comm, dDst, kBufBytes, &dstWin, NCCL_WIN_COLL_SYMMETRIC));
   auto winCleanup = makeScopeGuard([&]() {
     if (srcWin) (void)ncclCommWindowDeregister(comm, srcWin);
     if (dstWin) (void)ncclCommWindowDeregister(comm, dstWin);
   });
+  ASSERT_MPI_EQ(ncclSuccess,
+                ncclCommWindowRegister(comm, dSrc, kBufBytes, &srcWin, NCCL_WIN_COLL_SYMMETRIC));
+  ASSERT_MPI_EQ(ncclSuccess,
+                ncclCommWindowRegister(comm, dDst, kBufBytes, &dstWin, NCCL_WIN_COLL_SYMMETRIC));
 
   ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.railGinBarrierCount = 1;
