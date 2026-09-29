@@ -54,6 +54,7 @@ env:
   ROCJITSU_VULKAN_CORPUS_REF: 4c7fdd08d55bc1801cf1525732d6cabad06e05de
   ROCJITSU_DBT_VENV: ${{ github.workspace }}/gfx1250-dbt-venv-${{ github.run_id }}-${{ github.run_attempt }}
   ROCJITSU_HSACO_CORPUS: ${{ github.workspace }}/gfx1250-packaged-hsacos-${{ github.run_id }}-${{ github.run_attempt }}
+  # Last updated on 2026/09/29.
   ROCJITSU_DBT_CORPUS_REF: 4c7fdd08d55bc1801cf1525732d6cabad06e05de
   ROCJITSU_DBT_SHA_FRAGMENTS: ${{ github.workspace }}/gfx1250-dbt-sha-pairs-${{ github.run_id }}-${{ github.run_attempt }}/fragments
   ROCJITSU_DBT_SHA_MANIFEST: ${{ github.workspace }}/gfx1250-dbt-sha-pairs-${{ github.run_id }}-${{ github.run_attempt }}/gfx1250-b0-a0-sha-pairs.json
