@@ -43,10 +43,6 @@ python3 python/tests/main.py INPUT OUTPUT
 
 - Everything except `main.py` is a **unit** suite — it verifies the Python
   wrapper's contract, not real GPU/driver/filesystem I/O.
-- `main.py` lives here rather than in `python/` so that the directory Python
-  prepends to `sys.path` contains no `hipfile` package. Run from `python/`, the
-  source tree (with its uncompiled `_hipfile.pyx`) would shadow the installed
-  package; that used to require `python -P`.
 - Per-test overrides use `unittest.mock.patch.object` on the *consuming* module
   (e.g. `hipfile.driver.hipFileDriverOpen`), since each module does
   `from hipfile._hipfile import ...` and holds its own reference.
