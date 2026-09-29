@@ -886,6 +886,40 @@ TEST_F(GinAnvilPluginTest, ConnCheck_CloseCollUnmarksCommForReuse) {
   stopGin(ictx, coll, ginCtx);
 }
 
+// destroyContext alone must leave the dedup marked: gin_host DevCommFree only
+// destroys contexts while the coll stays open, so a second bind on that coll
+// must still skip the gate (counters stay at 1/1).
+TEST_F(GinAnvilPluginTest, ConnCheck_DestroyContextKeepsDedupOnOpenColl) {
+  void* rawDevLsa = nullptr;
+  ASSERT_EQ(hipMalloc(&rawDevLsa, sizeof(uint64_t) * 2), hipSuccess);
+  HipAllocation devLsa(rawDevLsa);
+  GinAnvilPluginStubs::SetLsaSelfAddr(devLsa.get());
+
+  void* ictx = nullptr;
+  void* coll = nullptr;
+  void* ginCtx = nullptr;
+  startTwoRankGin(&ictx, &coll, &ginCtx);
+
+  char arena[4096] = {};
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 2), ncclSuccess);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckWriteCalls(), 1);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 1);
+
+  ASSERT_EQ(plugin_.destroyContext(ginCtx), ncclSuccess);
+  ginCtx = nullptr;
+  // Intentionally skip closeColl: matches ncclGinDevCommFree (destroyContext only).
+
+  ncclGinConfig_t cfg{};
+  cfg.nSignals = 2;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 2), ncclSuccess);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckWriteCalls(), 1);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 1);
+
+  stopGin(ictx, coll, ginCtx);
+}
+
 // A qualifying bind must still run the gate after an earlier ineligible bind on
 // the same comm (nSignals < nRanks must not mark the comm checked).
 TEST_F(GinAnvilPluginTest, ConnCheck_SkipThenQualifyingBindStillRunsGate) {
