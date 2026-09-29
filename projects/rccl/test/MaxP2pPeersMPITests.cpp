@@ -22,7 +22,8 @@
 #include "ResourceGuards.hpp"
 #include "TestChecks.hpp"
 
-#include "comm.h" // internal: struct ncclComm::config, p2pMaxPeers, p2pnChannelsPerPeer
+#include "comm.h"   // internal: struct ncclComm::config, p2pMaxPeers, p2pnChannelsPerPeer
+#include "device.h" // internal: NCCL_MAX_DEV_WORK_P2P_PER_BATCH
 
 #include <cstdlib>
 #include <cstring>
@@ -326,9 +327,9 @@ TEST_F(MaxP2pPeersMPITest, Zero_RejectedWithInvalidArgument)
 }
 
 // ---------------------------------------------------------------------------
-// The halving loop only runs when nNodes > 1, so this is where the knob changes the
-// mapping on real hardware. Seeds and pool sizes are arch/NIC dependent, so this
-// derives its expectation from the observed pool rather than a constant.
+// The multi-node halving loop, where the NICs rather than the intra-node fabric set the
+// limit (the single-node loop has its own test below). Seeds and pool sizes are arch/NIC
+// dependent, so this derives its expectation from the observed pool rather than a constant.
 //
 // Scope: this checks plumbing and invariants, not the divisor. The halving loop reads
 // divUp(maxP2pPeers, NCCL_MAX_DEV_WORK_P2P_PER_BATCH), which is 1 for every value below
@@ -342,7 +343,7 @@ TEST_F(MaxP2pPeersMPITest, MultiNode_PerPeerChannelsRespondToMaxP2pPeers)
                                   kNoPowerOfTwoRequired,
                                   /*min_nodes=*/2))
     {
-        GTEST_SKIP() << "Requires >= 2 nodes so the per-peer halving loop runs";
+        GTEST_SKIP() << "Requires >= 2 nodes so the multi-node per-peer halving loop runs";
     }
 
     unsetenv("NCCL_P2P_MAX_PEERS");
@@ -417,6 +418,64 @@ TEST_F(MaxP2pPeersMPITest, MultiNode_SaturateDividesByMaxP2pPeers)
     // pow2Down(pool / 2) == pool / 2, the pool being a power of two by this point.
     ASSERT_MPI_EQ(perpeer, pool / 2);
     expectAllRanksAgree(perpeer);
+}
+
+// ---------------------------------------------------------------------------
+// The single-node counterpart of the halving loop, where the on-package fabric between
+// compute partitions rather than the NICs sets the limit: the per-peer count comes down
+// until the declared peers fit the channel pool in one round. Checks the postcondition the
+// loop establishes and that it divides by the declared peer count rather than nRanks. Only
+// runs where the loop does, which is MLOPart comms -- see the gate in paths.cc.
+// ---------------------------------------------------------------------------
+TEST_F(MaxP2pPeersMPITest, SingleNode_PerPeerChannelsFitPeersInOneRound)
+{
+    ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI));
+
+    // Below 3 peers the divisor rounds to 1 and the loop cannot be told from no loop.
+    if(MPIEnvironment::world_size <= 2)
+        GTEST_SKIP() << "Needs > 2 ranks for the peer count to reduce anything";
+
+    unsetenv("NCCL_P2P_MAX_PEERS");
+    if(!maxP2pPeersEnvCachedAs(NCCL_CONFIG_UNDEF_INT))
+        GTEST_SKIP() << "NCCL_P2P_MAX_PEERS already cached this process; "
+                        "run this test in its own mpirun invocation.";
+
+    configured_value_ = kLeaveConfigUnset; // divisor resolves to nRanks
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    const int  nodes            = getActiveCommunicator()->nNodes;
+    const bool mlopart          = getActiveCommunicator()->hasMloPart;
+    const int  pool             = getActiveCommunicator()->p2pnChannels;
+    const int  peers            = getActiveCommunicator()->p2pMaxPeers;
+    const int  perpeer_declared = getActiveCommunicator()->p2pnChannelsPerPeer;
+    cleanupTestCommunicator();
+
+    // Both are properties of the communicator, so every rank skips or continues together.
+    if(nodes != 1) GTEST_SKIP() << "Requires a single node; the multi-node loop runs instead";
+    if(!mlopart)
+        GTEST_SKIP() << "Requires MLOPart (a partitioned compute mode such as CPX); a "
+                        "whole-device comm is deliberately left alone";
+
+    const int rounds =
+        (peers + NCCL_MAX_DEV_WORK_P2P_PER_BATCH - 1) / NCCL_MAX_DEV_WORK_P2P_PER_BATCH;
+    TEST_INFO("single node: pool=%d peers=%d p2pnChannelsPerPeer=%d (%d rounds)",
+              pool, peers, perpeer_declared, rounds);
+
+    // What the loop guarantees: one round of the pool holds every peer's channels, unless
+    // it bottomed out at a single channel per peer first.
+    ASSERT_MPI_TRUE(perpeer_declared == 1 || perpeer_declared * rounds <= pool);
+
+    // Declaring fewer peers can only stop the reduction earlier, never later -- which is
+    // what distinguishes dividing by maxP2pPeers from dividing by nRanks.
+    configured_value_ = 2;
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    ASSERT_MPI_EQ(getActiveCommunicator()->p2pMaxPeers, 2);
+    // The peer count must not move the channel pool itself.
+    ASSERT_MPI_EQ(getActiveCommunicator()->p2pnChannels, pool);
+    ASSERT_MPI_TRUE(getActiveCommunicator()->p2pnChannelsPerPeer >= perpeer_declared);
+    // ncclP2pChannelToPart cannot recover parts >= the pool.
+    ASSERT_MPI_TRUE(getActiveCommunicator()->p2pnChannelsPerPeer <= pool);
+
+    expectAllRanksAgree(getActiveCommunicator()->p2pnChannelsPerPeer);
 }
 
 // ---------------------------------------------------------------------------
