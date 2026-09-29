@@ -331,8 +331,9 @@ hipError_t hipMemImportFromShareableHandle(hipMemGenericAllocationHandle_t* hand
   size_t alloc_size = 0;
   if (!device->getVmmAllocInfo(phys_mem_obj->getUserData().hsa_handle, &location_type,
                                &owner_device_id, &alloc_size)) {
-    LogPrintfError("Could not recover allocation properties for imported handle %p, "
-                   "reporting device memory", osHandle);
+    // Supported fallback, not a failure: the import still succeeds.
+    LogPrintfInfo("Could not recover allocation properties for imported handle %p, "
+                  "reporting device memory", osHandle);
     owner_device_id = dev->deviceId();
   }
 
