@@ -45,6 +45,23 @@
 /// so a kernel that never used s[0:1] again would see them overwritten by the
 /// trampoline rather than by anything the prologue did.
 ///
+/// Call-and-return variants of both kernels put an s_call_b64 to a helper
+/// returning through s_setpc_b64 s[4:5] between the entry and the anchor, which
+/// then sits on the call's continuation. The indirect return is one the
+/// instrumentor accepts because it is validated against the call, so these show
+/// the prologue still runs exactly once in a kernel carrying indirect control
+/// flow. An indirect transfer with unknown targets is refused at patch time
+/// (tests/patch/instrumentor_test.cpp), so there is nothing of that kind to run.
+///
+/// Call delivery:                          Call restore:
+///   s_mov_b32 s0, 0       ; 0:  ENTRY       s_nop                 ; 0:  ENTRY
+///   s_mov_b32 s1, 0       ; 4               s_call_b64 s[4:5], 24 ; 4
+///   s_call_b64 s[4:5], 20 ; 8               v_mov_b32 v1, v0      ; 8:  ANCHOR
+///   v_mov_b32 v1, v0      ; 12: ANCHOR      v_mov_b32 v2, s0      ; 12
+///   s_endpgm              ; 16              v_mov_b32 v3, s1      ; 16
+///   s_setpc_b64 s[4:5]    ; 20: helper      s_endpgm              ; 20
+///                                           s_setpc_b64 s[4:5]    ; 24: helper
+///
 /// @note No nop-the-wait control. The simulator retires scalar loads
 /// synchronously, so removing the prologue's wait changes nothing observable and
 /// the control would fail to fail. Separately, build_s_load_dwordx2 always sets
@@ -149,6 +166,16 @@ protected:
         patch({build_s_nop(0, a_.arch), guest_anchor, build_v_mov_b32_src(2, 0, a_.arch),
                build_v_mov_b32_src(3, 1, a_.arch), endpgm},
               /*anchor_offset=*/4, probe_obj, restore_text_, restore_scratch_));
+
+    // s_call_b64's immediate is a signed dword offset from the next instruction.
+    const uint32_t ret = build_s_setpc_b64(/*s[4:5]=*/4, a_.arch);
+    ASSERT_NO_FATAL_FAILURE(
+        patch({clobber_s0, clobber_s1, build_s_call_b64(4, 2, a_.arch), guest_anchor, endpgm, ret},
+              /*anchor_offset=*/12, probe_obj, call_delivery_text_, call_delivery_scratch_));
+    ASSERT_NO_FATAL_FAILURE(
+        patch({build_s_nop(0, a_.arch), build_s_call_b64(4, 4, a_.arch), guest_anchor,
+               build_v_mov_b32_src(2, 0, a_.arch), build_v_mov_b32_src(3, 1, a_.arch), endpgm, ret},
+              /*anchor_offset=*/8, probe_obj, call_restore_text_, call_restore_scratch_));
   }
 
   // The prologue anchors the kernel entry, so a site there would collide with
@@ -191,9 +218,14 @@ protected:
   // The kernarg pair is destroyed between the prologue and the site, and the
   // probe still receives the pointer.
   void expect_probe_receives_the_payload_pointer() {
+    expect_probe_receives_the_payload_pointer(delivery_text_, delivery_scratch_);
+  }
+
+  void expect_probe_receives_the_payload_pointer(const std::vector<uint32_t> &text,
+                                                 uint32_t scratch) {
     test::DbiSim sim = make_sim();
     const std::vector<std::vector<uint32_t>> regs =
-        sim.run_and_read_vgprs(delivery_text_, delivery_scratch_, {/*v2=*/2, /*v3=*/3});
+        sim.run_and_read_vgprs(text, scratch, {/*v2=*/2, /*v3=*/3});
     ASSERT_EQ(regs[0].size(), a_.wave_size) << "kernel did not run to completion";
     ASSERT_EQ(regs[1].size(), a_.wave_size);
 
@@ -228,8 +260,13 @@ protected:
   // without the restore every kernarg-relative guest access reads through the
   // wrapper prefix at the wrong base.
   void expect_guest_kernarg_pointer_is_restored() {
+    expect_guest_kernarg_pointer_is_restored(restore_text_, restore_scratch_);
+  }
+
+  void expect_guest_kernarg_pointer_is_restored(const std::vector<uint32_t> &text,
+                                                uint32_t scratch) {
     test::DbiSim sim = make_sim();
-    const uint64_t seen = read_guest_kernarg_pointer(sim, restore_text_);
+    const uint64_t seen = read_guest_kernarg_pointer(sim, text, scratch);
     EXPECT_EQ(seen, kGuestKernargSentinel)
         << "the guest's kernarg pointer was not restored at entry";
     EXPECT_NE(seen, test::DbiSim::KERNARG_ADDR)
@@ -238,9 +275,10 @@ protected:
 
   // The pointer the guest itself reads out of s[0:1] after the anchor, as the
   // two halves it copied into v2 and v3.
-  uint64_t read_guest_kernarg_pointer(test::DbiSim &sim, const std::vector<uint32_t> &text) {
+  uint64_t read_guest_kernarg_pointer(test::DbiSim &sim, const std::vector<uint32_t> &text,
+                                      uint32_t scratch) {
     const std::vector<std::vector<uint32_t>> regs =
-        sim.run_and_read_vgprs(text, restore_scratch_, {/*v2=*/2, /*v3=*/3});
+        sim.run_and_read_vgprs(text, scratch, {/*v2=*/2, /*v3=*/3});
     if (regs[0].size() != a_.wave_size)
       return 0;
     return (static_cast<uint64_t>(regs[1][0]) << 32) | static_cast<uint64_t>(regs[0][0]);
@@ -266,7 +304,8 @@ protected:
     ASSERT_EQ(replaced, 2u) << "did not find both kernarg-pointer restores";
 
     test::DbiSim sim = make_sim();
-    EXPECT_EQ(read_guest_kernarg_pointer(sim, sabotaged), test::DbiSim::KERNARG_ADDR)
+    EXPECT_EQ(read_guest_kernarg_pointer(sim, sabotaged, restore_scratch_),
+              test::DbiSim::KERNARG_ADDR)
         << "without the restore the guest must still see the CP's wrapper pointer";
   }
 
@@ -307,6 +346,10 @@ protected:
   uint32_t delivery_scratch_ = 0;
   std::vector<uint32_t> restore_text_;
   uint32_t restore_scratch_ = 0;
+  std::vector<uint32_t> call_delivery_text_;
+  uint32_t call_delivery_scratch_ = 0;
+  std::vector<uint32_t> call_restore_text_;
+  uint32_t call_restore_scratch_ = 0;
 };
 
 class DbiCdna3EntryPrologueSim : public DbiEntryPrologueSimBase {
@@ -334,6 +377,12 @@ TEST_F(DbiCdna3EntryPrologueSim, GuestKernargPointerIsRestored) {
 TEST_F(DbiCdna3EntryPrologueSim, WithoutTheRestoreTheWrapperPointerRemains) {
   expect_without_the_restore_the_wrapper_pointer_remains();
 }
+TEST_F(DbiCdna3EntryPrologueSim, ProbeReceivesThePayloadPointerAcrossACallReturn) {
+  expect_probe_receives_the_payload_pointer(call_delivery_text_, call_delivery_scratch_);
+}
+TEST_F(DbiCdna3EntryPrologueSim, GuestKernargPointerIsRestoredAcrossACallReturn) {
+  expect_guest_kernarg_pointer_is_restored(call_restore_text_, call_restore_scratch_);
+}
 
 TEST_F(DbiCdna4EntryPrologueSim, ProbeReceivesThePayloadPointer) {
   expect_probe_receives_the_payload_pointer();
@@ -347,6 +396,12 @@ TEST_F(DbiCdna4EntryPrologueSim, GuestKernargPointerIsRestored) {
 TEST_F(DbiCdna4EntryPrologueSim, WithoutTheRestoreTheWrapperPointerRemains) {
   expect_without_the_restore_the_wrapper_pointer_remains();
 }
+TEST_F(DbiCdna4EntryPrologueSim, ProbeReceivesThePayloadPointerAcrossACallReturn) {
+  expect_probe_receives_the_payload_pointer(call_delivery_text_, call_delivery_scratch_);
+}
+TEST_F(DbiCdna4EntryPrologueSim, GuestKernargPointerIsRestoredAcrossACallReturn) {
+  expect_guest_kernarg_pointer_is_restored(call_restore_text_, call_restore_scratch_);
+}
 
 TEST_F(DbiRdna4EntryPrologueSim, ProbeReceivesThePayloadPointer) {
   expect_probe_receives_the_payload_pointer();
@@ -359,6 +414,12 @@ TEST_F(DbiRdna4EntryPrologueSim, GuestKernargPointerIsRestored) {
 }
 TEST_F(DbiRdna4EntryPrologueSim, WithoutTheRestoreTheWrapperPointerRemains) {
   expect_without_the_restore_the_wrapper_pointer_remains();
+}
+TEST_F(DbiRdna4EntryPrologueSim, ProbeReceivesThePayloadPointerAcrossACallReturn) {
+  expect_probe_receives_the_payload_pointer(call_delivery_text_, call_delivery_scratch_);
+}
+TEST_F(DbiRdna4EntryPrologueSim, GuestKernargPointerIsRestoredAcrossACallReturn) {
+  expect_guest_kernarg_pointer_is_restored(call_restore_text_, call_restore_scratch_);
 }
 
 } // namespace
