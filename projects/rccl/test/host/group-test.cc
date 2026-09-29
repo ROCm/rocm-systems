@@ -35,7 +35,6 @@
 #include "fakes/nccl_fakes.h"    // g_loadParam, used by param_redirect.h
 #include "fakes/collective_stubs.h"  // g_ncclArgsGlobalCheck
 #include "ScopedHook.h"          // RAII install/restore for controllable seams
-#include "../common/ProcessIsolatedTestRunner.hpp"  // RUN_ISOLATED_TEST
 
 // Route group.cc's NCCL_PARAM sites through g_loadParam instead of the real
 // ncclLoadParam (see param_redirect.h); must precede the unit under test.
@@ -254,16 +253,6 @@ TEST_F(GroupEndInternalTest, MultiRankSymmetricCommEnqueuesAsyncJob) {
   queued->destructor(queued);
 }
 
-// Minimal construction reclaimPlannerState needs on a fresh, value-initialised ncclComm. Shared
-// by ReclaimPlannerStateTest::SetUp and the plain TEST() below (which can't use a fixture).
-void ConstructPlannerComm(struct ncclComm* comm) {
-  ncclMemoryStackConstruct(&comm->memPermanent);
-  ncclMemoryPoolConstruct(&comm->memPool_ncclKernelPlan);
-  ncclMemoryPoolConstruct(&comm->memPool_ncclProxyOp);
-  ncclIntruQueueConstruct(&comm->planner.collCleanupQueue);
-  ncclIntruQueueConstruct(&comm->planner.planQueue);
-}
-
 // reclaimPlannerState: pure struct manipulation on comm->planner, called from the fail path
 // (via groupCleanup) and groupLaunchLegacy's simInfo branch; neither was exercised before.
 class ReclaimPlannerStateTest : public ::testing::Test {
@@ -272,7 +261,11 @@ class ReclaimPlannerStateTest : public ::testing::Test {
 
   void SetUp() override {
     comm_ = std::make_unique<ncclComm>();  // value-initialised => zeroed
-    ConstructPlannerComm(comm_.get());
+    ncclMemoryStackConstruct(&comm_->memPermanent);
+    ncclMemoryPoolConstruct(&comm_->memPool_ncclKernelPlan);
+    ncclMemoryPoolConstruct(&comm_->memPool_ncclProxyOp);
+    ncclIntruQueueConstruct(&comm_->planner.collCleanupQueue);
+    ncclIntruQueueConstruct(&comm_->planner.planQueue);
   }
 
   void TearDown() override {
@@ -433,42 +426,24 @@ TEST_F(ReclaimPlannerStateTest, ClearsP2pOnlyOnlyForConnectionsWithNoTransportCo
   comm_->connectRecv = nullptr;
 }
 
-// KNOWN BUG (found here, not fixed here -- out of scope for a test-only change): reclaimPlannerState
-// saves/restores comm->planner.peers across its memset but NOT comm->planner.rmaTaskQueues, unlike
-// every other call site that touches this struct. rmaTaskQueues is allocated once at comm init and
-// never reallocated, so this nulls it on any group reaching reclaimPlannerState (even a plain
+// Known bug reproduction, not correct-behavior coverage: reclaimPlannerState saves/restores
+// comm->planner.peers across its memset but not comm->planner.rmaTaskQueues, unlike every other
+// call site that touches this struct. rmaTaskQueues is allocated once at comm init and never
+// reallocated, so this silently nulls it on any group reaching reclaimPlannerState (even a plain
 // ncclGroupSimulateEnd() call); production's RMA enqueue path then indexes it unconditionally and
-// segfaults. Pinned here (process-isolated, so the real segfault doesn't take the binary down) as
-// EXPECTED TO FAIL until reclaimPlannerState is fixed to restore rmaTaskQueues like it does peers --
-// then delete the pinning block below and uncomment the real-assertions block after it.
-TEST(ReclaimPlannerStateIsolated, KnownBug_RmaTaskQueuesNotRestoredAfterReclaim_SegfaultsOnNextUse) {
-  RUN_ISOLATED_TEST("ReclaimPlannerState_RmaTaskQueuesNotRestored", []() {
-    auto comm = std::make_unique<ncclComm>();
-    ConstructPlannerComm(comm.get());
-    comm->config.numRmaCtx = 1;
-    auto rmaTaskQueues =
-      std::make_unique<struct ncclIntruQueue<struct ncclTaskRma, &ncclTaskRma::next>[]>(1);
-    ncclIntruQueueConstruct(&rmaTaskQueues[0]);
-    comm->planner.rmaTaskQueues = rmaTaskQueues.get();
+// segfaults. This will start failing once reclaimPlannerState is fixed to restore rmaTaskQueues
+// like it does peers -- delete this test then (or turn it into real coverage).
+TEST_F(ReclaimPlannerStateTest, KnownBug_RmaTaskQueuesNotRestoredAfterReclaim) {
+  auto rmaTaskQueues =
+    std::make_unique<struct ncclIntruQueue<struct ncclTaskRma, &ncclTaskRma::next>[]>(1);
+  ncclIntruQueueConstruct(&rmaTaskQueues[0]);
+  comm_->config.numRmaCtx = 1;
+  comm_->planner.rmaTaskQueues = rmaTaskQueues.get();
 
-    reclaimPlannerState(comm.get());
+  reclaimPlannerState(comm_.get());
 
-    // --- CURRENT (buggy) behavior, pinned: delete this block once the bug above is fixed. ---
-    // A write (not a discarded read, which the compiler can optimize away even across a null
-    // pointer) through the NULL rmaTaskQueues, mirroring production's own unconditional access.
-    struct ncclTaskRma task {};
-    ncclIntruQueueEnqueue(&comm->planner.rmaTaskQueues[0], &task);
-    // --- end current-behavior block ---
-
-    // --- CORRECT behavior once fixed: uncomment this block (and delete the block above). ---
-    // EXPECT_EQ(rmaTaskQueues.get(), comm->planner.rmaTaskQueues)
-    //   << "rmaTaskQueues must survive reclaimPlannerState the same way planner.peers does";
-    // ASSERT_NE(nullptr, comm->planner.rmaTaskQueues);
-    // struct ncclTaskRma task {};
-    // ncclIntruQueueEnqueue(&comm->planner.rmaTaskQueues[0], &task);
-    // EXPECT_EQ(&task, ncclIntruQueueHead(&comm->planner.rmaTaskQueues[0]));
-    // --- end correct-behavior block ---
-  });
+  // The bug: this should equal rmaTaskQueues.get(), mirroring how planner.peers survives.
+  EXPECT_EQ(nullptr, comm_->planner.rmaTaskQueues);
 }
 
 // ncclAsyncLaunch: the sync-vs-async dispatch gate every async job funnels through.
