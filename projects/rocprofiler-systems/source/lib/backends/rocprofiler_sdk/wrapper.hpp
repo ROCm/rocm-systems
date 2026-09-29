@@ -43,12 +43,10 @@
 #    include <rocprofiler-sdk/profile_config.h>
 #endif
 
-#if ROCPROFILER_VERSION >= 600
-#    include <rocprofiler-sdk/rccl/details/api_trace.h>
+#include <rocprofiler-sdk/rccl/details/api_trace.h>
 
-#    include <rocprofiler-sdk/rccl/api_args.h>
-#    include <rocprofiler-sdk/rccl/api_id.h>
-#endif
+#include <rocprofiler-sdk/rccl/api_args.h>
+#include <rocprofiler-sdk/rccl/api_id.h>
 
 #if ROCPROFILER_VERSION >= 700
 #    include <rocprofiler-sdk/hip.h>
@@ -251,6 +249,9 @@ struct wrapper
         ROCPROFILER_OMPT_ID_callback_functions;
     static constexpr ompt_operation_t OMPT_ID_LAST = ROCPROFILER_OMPT_ID_LAST;
 
+    using memory_alloc_record = rocprofiler_buffer_tracing_memory_allocation_record_t;
+#endif
+
     using rccl_api_data    = rocprofiler_callback_tracing_rccl_api_data_t;
     using rccl_api_id_t    = rocprofiler_rccl_api_id_t;
     using nccl_data_type_t = ncclDataType_t;
@@ -270,17 +271,17 @@ struct wrapper
     static constexpr nccl_data_type_t NCCL_UINT64   = ncclUint64;
     static constexpr nccl_data_type_t NCCL_FLOAT64  = ncclFloat64;
 
-#    if defined(ncclFp8E4M3) && defined(ncclFp8E5M2)
+#if defined(ncclFp8E4M3) && defined(ncclFp8E5M2)
     static constexpr bool k_are_nccl_fp8_types_available = true;
-#    else
+#else
     static constexpr bool k_are_nccl_fp8_types_available = false;
-#    endif
+#endif
 
-#    if defined(ncclFp8E4M3) && defined(ncclFp8E5M2)
+#if defined(ncclFp8E4M3) && defined(ncclFp8E5M2)
 
     static constexpr nccl_data_type_t NCCL_FP8_E4M3 = ncclFp8E4M3;
     static constexpr nccl_data_type_t NCCL_FP8_E5M2 = ncclFp8E5M2;
-#    endif
+#endif
 
     // ─── RCCL API ID constants ─────────────────────────────────────────────────
     static constexpr rccl_api_id_t RCCL_API_ID_ncclAllGather =
@@ -302,14 +303,12 @@ struct wrapper
     static constexpr rccl_api_id_t RCCL_API_ID_ncclSend =
         ROCPROFILER_RCCL_API_ID_ncclSend;
 
-#    if defined(ROCPROFILER_RCCL_API_ID_ncclAlltoAll)
+#if defined(ROCPROFILER_RCCL_API_ID_ncclAlltoAll)
     // RCCL renamed ncclAllToAll to ncclAlltoAll (note the lowercase 't'). The deprecated
     // ncclAllToAll now forwards to ncclAlltoAll, so the SDK reports the collective under
     // this id too on toolchains new enough to define it.
     static constexpr rccl_api_id_t RCCL_API_ID_ncclAlltoAll =
         ROCPROFILER_RCCL_API_ID_ncclAlltoAll;
-#    endif
-    using memory_alloc_record = rocprofiler_buffer_tracing_memory_allocation_record_t;
 #endif
 
 #if ROCPROFILER_VERSION >= 700

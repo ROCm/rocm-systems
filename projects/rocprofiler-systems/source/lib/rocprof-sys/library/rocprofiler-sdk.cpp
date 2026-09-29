@@ -2150,7 +2150,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     }
 
     // MARKER_CORE_API is handled by roctx_client on control_ctx
-    for(auto itr : {
+    for(rocprofiler_callback_tracing_kind_t itr :
+        std::initializer_list<rocprofiler_callback_tracing_kind_t>{
 #if (ROCPROFILER_VERSION >= 600)
             ROCPROFILER_CALLBACK_TRACING_OMPT,
 #endif
