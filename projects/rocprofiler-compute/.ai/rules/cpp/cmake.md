@@ -43,19 +43,22 @@ they show up in IDEs.
 
 ## Language standard
 
-Set the standard once for the tree, as `src/lib/CMakeLists.txt` does. Raise it
-for one target with `target_compile_features`, which is how the
-`torch_trace_collector` tests build against libtorch. Do not put `-std=c++XX`
-in `target_compile_options`.
+Set C++17 once for the tree, as `src/lib/CMakeLists.txt` does. The only raise
+is `test-torch-trace-collector`, which sets `target_compile_features` to
+`cxx_std_20` so that test can include libtorch headers. Do not use C++20
+features in our sources, including that test. Do not put `-std=c++XX` in
+`target_compile_options`.
 
-Guard a raised standard on compiler support and fail with a clear message rather
-than a link error later.
+Skip that test when PyTorch is absent. If the install is present but incomplete,
+fail configure with a clear message instead of dropping the test or failing at
+link time.
 
 ## Compile options
 
 ```cmake
 target_compile_options(mylib PRIVATE
-    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra>
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall>
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wextra>
 )
 ```
 

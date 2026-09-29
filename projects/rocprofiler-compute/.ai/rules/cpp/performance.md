@@ -99,7 +99,7 @@ for (int row = 0; row < rows; ++row)
 | `std::map` for a handful of entries | `std::vector` plus a linear scan |
 | Building a string by concatenation in a loop | Reserve, or use a stream |
 | `shared_ptr` where nothing is shared | `unique_ptr`, no atomic refcount |
-| A virtual call in a hot loop | A template or CRTP |
+| A virtual call in a hot loop | A template or CRTP, unless it is a virtual test seam required by [`testability.md`](testability.md) |
 | `std::function` on the hot path | A template or a function pointer |
 | Exceptions as control flow | A return value or `std::optional` |
 | Copying in a range-for | `const auto&` |
@@ -112,5 +112,5 @@ for (int row = 0; row < rows; ++row)
 - [ ] `reserve()` where the size is known
 - [ ] Sequential memory access
 - [ ] `constexpr` for anything computable at compile time
-- [ ] No unnecessary virtual calls in hot code
+- [ ] No unnecessary virtual calls in hot code, except a required virtual test seam
 - [ ] Measured before micro-optimizing

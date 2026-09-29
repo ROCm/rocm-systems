@@ -20,13 +20,13 @@ and the torch observer:
   to `stderr`.
 - Read-only rocprofiler-sdk queries are fine, as in `record_callback`. Do not
   create, start, or stop a context from inside a callback.
-- Hold a lock only for a short span.
+- Hold a lock only for a short span. On the steady-state path,
+  `SdkCallbacksImpl::dispatch_callback` takes a `shared_lock` and returns when
+  the agent's profile is already cached.
 - Allocate up front where it is practical, and `reserve()` a container that
   grows per record.
-- Build expensive state lazily, once, on first use, and cache it.
-  `SdkCallbacksImpl::dispatch_callback` builds an agent's counter profiles
-  under the write lock on its first dispatch, and later dispatches reuse the
-  cache.
+- Build expensive state lazily, once, on first use, and cache it. The one-time
+  fill may hold the write lock across that build. Later dispatches must not.
 
 The tools for shared state on that path, in order of preference:
 
@@ -103,9 +103,11 @@ exists.
 
 **A never-destroyed heap object behind a namespace-scope reference.** Use this
 only when the host tears down after our static destructors would have run, so a
-destructor at all is the bug. `rocprofiler_compute_tool.cpp` does this because
-rocprofiler-sdk calls `tool_fini` from its own `_dl_fini`, and the comment above
-the declarations says so.
+destructor at all is the bug. Allocate it with `new` and never delete it. That
+is the exception to the raw-allocation ban in [`core.md`](core.md).
+`rocprofiler_compute_tool.cpp` does this because rocprofiler-sdk calls
+`tool_fini` from its own `_dl_fini`, and the comment above the declarations
+says so.
 
 Either way, never a namespace-scope object whose destructor runs at shutdown.
 

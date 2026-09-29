@@ -5,9 +5,12 @@ are the reference for anything this file does not cover.
 
 ## Language version
 
-C++17 everywhere. `src/lib/CMakeLists.txt` sets it for the whole tree. Do not
-use concepts, ranges, `std::span`, `std::format`, coroutines, `consteval`,
-`constinit`, or `[[nodiscard("message")]]`.
+C++17 for production code. `src/lib/CMakeLists.txt` sets it for the tree.
+`test-torch-trace-collector` compiles as C++20, via `target_compile_features`,
+only so it can include libtorch headers. Do not use C++20 features in our own
+code, including in that test. Do not use concepts, ranges, `std::span`,
+`std::format`, coroutines, `consteval`, `constinit`, or
+`[[nodiscard("message")]]`.
 
 For a span, look for an existing view type in the tree first. If there is none,
 pass a pointer and a size, or an iterator pair.
@@ -52,7 +55,9 @@ pass a pointer and a size, or an iterator pair.
 
 - Manage every resource with RAII.
 - No raw `new`, `delete`, `malloc`, or `free`. Use `make_unique` and
-  `make_shared`.
+  `make_shared`. The exception is the never-destroyed process-lifetime object
+  in [`callback-boundaries.md`](callback-boundaries.md): that one is allocated
+  with `new` and never deleted.
 - Prefer scoped objects. Do not heap-allocate without a reason.
 - Prefer `unique_ptr` over `shared_ptr` unless ownership is genuinely shared.
 - Perform at most one explicit allocation per statement, and hand the result to
@@ -135,6 +140,9 @@ template.
 
 ```cpp
 template <typename T>
+inline constexpr bool always_false = false;
+
+template <typename T>
 auto process(T val) {
     if constexpr (std::is_integral_v<T>)            return val * 2;
     else if constexpr (std::is_floating_point_v<T>) return val * 2.0;
@@ -179,7 +187,7 @@ configurations and on variables used only in assertions.
 
 ## Checklist
 
-- [ ] No raw `new` or `delete`, no raw owning pointers
+- [ ] No raw `new` or `delete`, no raw owning pointers, except the never-destroyed form in [`callback-boundaries.md`](callback-boundaries.md)
 - [ ] RAII for every resource, ownership is clear
 - [ ] `const` correct
 - [ ] `constexpr` on compile-time constants and functions

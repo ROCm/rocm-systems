@@ -126,7 +126,7 @@ Dropped:
 
 ## Other edits while porting
 
-- Keep the C++17 baseline with no exceptions.
+- Keep the C++17 baseline for our code. `test-torch-trace-collector` compiles as C++20 only so it can include libtorch headers. Our sources, including that test, do not use C++20 features.
 - Remove the line saying these rules beat the existing code style.
 
 ## How we wire it in
@@ -134,7 +134,9 @@ Dropped:
 - Add `.ai/rules/cpp/`, one file per row in the table above. That is where the
   detail lives.
 - Add `CPP_CODING_STYLE.md` at the project root. It is both the table of
-  contents and the version a person reads.
+  contents and the version a person reads. It states that a review flags only
+  what the change introduces or moves, and that untouched code is not rewritten
+  to comply.
   - One line per topic, each linking to its file under `.ai/rules/cpp/`.
   - Short enough to skim and to keep current.
   - No second index inside `.ai/rules/cpp/`. Two tables of contents drift.

@@ -65,7 +65,9 @@ replace it.
 
 ## gtest and gmock conventions
 
-One test target per library, with its own `main.cpp`.
+One test target per library. Link `gtest_main`. Add `main.cpp` only when the
+target needs its own entry point. `test-torch-trace-collector` links
+`gtest_main` and has no `main.cpp`.
 
 Fixtures live in `test_<unit>.h` and derive from `::testing::Test`. The test
 bodies live in the matching `test_<unit>.cpp`.
@@ -83,7 +85,7 @@ thing.
 
 - [ ] No hidden dependency on the sdk, filesystem, environment, clock, or
       network
-- [ ] Dependencies injected through a virtual interface, taken by reference
+- [ ] Dependencies injected through a virtual interface, by reference or `shared_ptr`, not constructed inside the class
 - [ ] Pure functions where the work allows it
 - [ ] Single responsibility, which is what makes a class testable at all
 - [ ] Test names say condition and expectation
