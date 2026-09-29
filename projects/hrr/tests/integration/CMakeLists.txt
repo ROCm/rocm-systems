@@ -102,6 +102,15 @@ target_link_libraries(hrr-integration-tests PRIVATE
 if(NOT WIN32)
   find_package(hsa-runtime64 CONFIG REQUIRED)
   target_link_libraries(hrr-integration-tests PRIVATE hsa-runtime64::hsa-runtime64)
+  # ROCr is found REQUIRED and linked just above, so on every platform that gets
+  # here the HSA headers and symbols are available and the cases that call HSA
+  # directly can compile. Define the macro they are guarded by at the same place
+  # the dependency is resolved, so the two can never drift apart. Without this
+  # those cases leave the binary with no signal at all -- not failed, not
+  # skipped, absent from the report entirely -- which is how
+  # Unit_HRR_Regions_MemcpyFirstTouchMaterialization went missing from a green
+  # 106/106 run. tests/expected_cases_integration.txt is the backstop.
+  target_compile_definitions(hrr-integration-tests PRIVATE HRR_HAVE_HSA)
 endif()
 
 # Optional: hip_raw_trace, a genuine multi-threaded capture workload used only by

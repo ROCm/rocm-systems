@@ -158,16 +158,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureReplayRoundtrip) {
   // Step 1: capture
   // -------------------------------------------------------------------------
   {
-    hrr::test::SpawnProc proc(hrr_test_exe());
-    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
-    // Prepend ROCm bin to PATH so the subprocess finds amdhip64_7.dll.
-    // SpawnProc replaces PATH entirely, so we reconstruct the full value.
-    {
-      set_proc_search_path(proc);
-    }
-    int ret = proc.run("\"Unit_HRR_GpuWorkload_Direct\"");
-    INFO("Capture subprocess exit code: " << ret);
-    REQUIRE(ret == 0);
+    hrr_spawn_direct("Unit_HRR_GpuWorkload_Direct", cap.path);
   }
 
   // -------------------------------------------------------------------------
@@ -221,14 +212,7 @@ HRR_TEST_CASE(Unit_HRR_AllApisRoundtrip) {
   // Step 1: capture
   // -------------------------------------------------------------------------
   {
-    hrr::test::SpawnProc proc(hrr_test_exe());
-    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
-    {
-      set_proc_search_path(proc);
-    }
-    int ret = proc.run("\"Unit_HRR_AllApis_Direct\"");
-    INFO("AllApis capture subprocess exit code: " << ret);
-    REQUIRE(ret == 0);
+    hrr_spawn_direct("Unit_HRR_AllApis_Direct", cap.path, "AllApis capture");
   }
 
   // -------------------------------------------------------------------------
@@ -276,14 +260,8 @@ HRR_TEST_CASE(Unit_HRR_HostMemRoundtrip) {
   // Step 1: capture
   // -------------------------------------------------------------------------
   {
-    hrr::test::SpawnProc proc(hrr_test_exe());
-    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
-    {
-      set_proc_search_path(proc);
-    }
-    int ret = proc.run("\"Unit_HRR_HostMemWorkload_Direct\"");
-    INFO("HostMem capture subprocess exit code: " << ret);
-    REQUIRE(ret == 0);
+    hrr_spawn_direct("Unit_HRR_HostMemWorkload_Direct", cap.path,
+                     "HostMem capture");
   }
 
   // -------------------------------------------------------------------------
@@ -332,16 +310,8 @@ HRR_TEST_CASE(Unit_HRR_GraphRoundtrip) {
   // Step 1: capture
   // -------------------------------------------------------------------------
   {
-    hrr::test::SpawnProc proc(hrr_test_exe());
-    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
-    // Prepend ROCm bin to PATH so the subprocess finds amdhip64_7.dll.
-    // SpawnProc replaces PATH entirely, so we reconstruct the full value.
-    {
-      set_proc_search_path(proc);
-    }
-    int ret = proc.run("\"Unit_HRR_GraphWorkload_Direct\"");
-    INFO("Graph capture subprocess exit code: " << ret);
-    REQUIRE(ret == 0);
+    hrr_spawn_direct("Unit_HRR_GraphWorkload_Direct", cap.path,
+                     "Graph capture");
   }
 
   // -------------------------------------------------------------------------
@@ -385,14 +355,7 @@ HRR_TEST_CASE(Unit_HRR_StressApisRoundtrip) {
   // Step 1: capture
   // -------------------------------------------------------------------------
   {
-    hrr::test::SpawnProc proc(hrr_test_exe());
-    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
-    {
-      set_proc_search_path(proc);
-    }
-    int ret = proc.run("\"Unit_HRR_StressApis_Direct\"");
-    INFO("Stress capture subprocess exit code: " << ret);
-    REQUIRE(ret == 0);
+    hrr_spawn_direct("Unit_HRR_StressApis_Direct", cap.path, "Stress capture");
   }
 
   // -------------------------------------------------------------------------
@@ -893,12 +856,8 @@ HRR_TEST_CASE(Unit_HRR_MetadataManifest) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_metadata_manifest"};
 
   {
-    hrr::test::SpawnProc proc(hrr_test_exe());
-    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
-    set_proc_search_path(proc);
-    int ret = proc.run("\"Unit_HRR_DeviceInfo_Direct\"");
-    INFO("Metadata capture subprocess exit code: " << ret);
-    REQUIRE(ret == 0);
+    hrr_spawn_direct("Unit_HRR_DeviceInfo_Direct", cap.path,
+                     "Metadata capture");
   }
 
   fs::path archive_path = hrr_single_process_archive(cap.path);
@@ -965,11 +924,7 @@ HRR_TEST_CASE(Unit_HRR_DrvMemcpyRoundtrip) {
 
 HRR_TEST_CASE(Unit_HRR_OccupancyRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_occupancy"};
-  { hrr::test::SpawnProc proc(hrr_test_exe());
-    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
-    { set_proc_search_path(proc); }
-    int ret = proc.run("\"Unit_HRR_Occupancy_Direct\"");
-    INFO("Capture exit: " << ret); REQUIRE(ret == 0); }
+  hrr_spawn_direct("Unit_HRR_Occupancy_Direct", cap.path);
   fs::path archive_path = hrr_single_process_archive(cap.path);
   REQUIRE(fs::exists(archive_path / "events.bin"));
   REQUIRE(fs::exists(archive_path / "blobs"));
@@ -1227,13 +1182,18 @@ HRR_TEST_CASE(Unit_HRR_MultiThreadRoundtrip) {
   // Step 1: capture with hip_raw_trace (multi-threaded workload)
   // -------------------------------------------------------------------------
   {
-    hrr::test::SpawnProc proc(raw_trace_exe);
+    // Captured for the same reason as the hrr_spawn_direct children: this is a
+    // foreign binary with output of its own, wanted only if the step fails.
+    hrr::test::SpawnProc proc(raw_trace_exe, /*capture_stdout=*/true,
+                              /*capture_stderr=*/true);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     {
       set_proc_search_path(proc);
     }
     int ret = proc.run("");
-    INFO("hip_raw_trace capture exit code: " << ret);
+    INFO("hip_raw_trace capture exit code: " << ret << "\n--- child output ---\n"
+                                             << proc.getOutput()
+                                             << "--- end child output ---");
     REQUIRE(ret == 0);
   }
 
@@ -1391,12 +1351,7 @@ HRR_TEST_CASE(Unit_HRR_ReplaceKernelRoundtrip) {
   ScopedDir co_dir{fs::temp_directory_path() / "hrr_replace_co"};
 
   {
-    hrr::test::SpawnProc proc(hrr_test_exe());
-    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
-    set_proc_search_path(proc);
-    int ret = proc.run("\"Unit_HRR_GpuWorkload_Direct\"");
-    INFO("Capture exit: " << ret);
-    REQUIRE(ret == 0);
+    hrr_spawn_direct("Unit_HRR_GpuWorkload_Direct", cap.path);
   }
   REQUIRE(fs::exists(hrr_single_process_archive(cap.path) / "events.bin"));
 
@@ -1431,12 +1386,7 @@ HRR_TEST_CASE(Unit_HRR_ReplaceKernelMissingCO) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_replace_missing"};
 
   {
-    hrr::test::SpawnProc proc(hrr_test_exe());
-    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
-    set_proc_search_path(proc);
-    int ret = proc.run("\"Unit_HRR_GpuWorkload_Direct\"");
-    INFO("Capture exit: " << ret);
-    REQUIRE(ret == 0);
+    hrr_spawn_direct("Unit_HRR_GpuWorkload_Direct", cap.path);
   }
   REQUIRE(fs::exists(hrr_single_process_archive(cap.path) / "events.bin"));
 
@@ -1465,11 +1415,7 @@ HRR_TEST_CASE(Unit_HRR_ReplaceKernelBadSpec) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_replace_badspec"};
 
   {
-    hrr::test::SpawnProc proc(hrr_test_exe());
-    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
-    set_proc_search_path(proc);
-    int ret = proc.run("\"Unit_HRR_GpuWorkload_Direct\"");
-    REQUIRE(ret == 0);
+    hrr_spawn_direct("Unit_HRR_GpuWorkload_Direct", cap.path);
   }
   REQUIRE(fs::exists(hrr_single_process_archive(cap.path) / "events.bin"));
 

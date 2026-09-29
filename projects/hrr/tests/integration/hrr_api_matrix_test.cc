@@ -50,8 +50,6 @@
  * coverage report.
  */
 
-#include "hrr_test_process.hh"
-
 #include "hrr_test_common.hh"
 #include "hrr_api_matrix_expectations.h"
 
@@ -207,7 +205,13 @@ void observe_workload(const std::string& direct_case, TierObservation& obs) {
                 ("hrr_matrix_" + direct_case)};
 
   {
-    hrr::test::SpawnProc proc(hrr_test_exe());
+    // Captured, not inherited: this runs once per workload in the tier, and an
+    // uncaptured child prints a full Catch2 run banner to the parent's stdout
+    // every time. The transcript is kept and reported only on the failure path
+    // below, so a green tier is silent and a failed workload still shows what
+    // its child did. See hrr_spawn_direct in hrr_test_common.hh.
+    hrr::test::SpawnProc proc(hrr_test_exe(), /*capture_stdout=*/true,
+                              /*capture_stderr=*/true);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     set_proc_search_path(proc);
     const int ret = proc.run("\"" + direct_case + "\"");
@@ -215,7 +219,9 @@ void observe_workload(const std::string& direct_case, TierObservation& obs) {
     // exit clean, so a non-zero exit is a genuine failure. Reporting it as a
     // warning would let the tier quietly degrade to zero coverage.
     if (ret != 0) {
-      FAIL_CHECK("workload " << direct_case << " exited " << ret);
+      FAIL_CHECK("workload " << direct_case << " exited " << ret
+                             << "\n--- child output ---\n"
+                             << proc.getOutput() << "--- end child output ---");
       return;
     }
   }
@@ -328,6 +334,9 @@ void observe_workload(const std::string& direct_case, TierObservation& obs) {
 void run_tier(const std::string& tier) {
   const HrrTierFloor& floor = tier_floor(tier);
 
+  if (visible_device_count() < 1) {
+    HRR_SKIP_CASE("no ROCm-capable device is detected");
+  }
   if (floor.gpus > 1 && visible_device_count() < floor.gpus) {
     HRR_SKIP_CASE("tier requires at least two visible GPUs");
   }
@@ -513,8 +522,8 @@ TEST_CASE("Unit_HRR_ApiMatrix_T2_Roundtrip", "[hrr][api-matrix]") {
  *     and the problem is structural rather than per-API: events carry no
  *     device ID and alloc_map has no device field, so replay cannot know which
  *     GPU an allocation belonged to.
- *   - Requires two visible devices; run-api-matrix.sh supplies them with
- *     HIP_VISIBLE_DEVICES=6,7. Skips cleanly on a single-GPU host rather than
+ *   - Requires two visible devices and uses devices 0 and 1. CI does not pin
+ *     HIP_VISIBLE_DEVICES. Skips cleanly on a single-GPU host rather than
  *     failing, so the rest of the matrix stays runnable anywhere.
  */
 TEST_CASE("Unit_HRR_ApiMatrix_T3_Roundtrip", "[hrr][api-matrix]") {

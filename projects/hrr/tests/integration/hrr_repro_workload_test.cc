@@ -365,6 +365,7 @@ TEST_CASE("Unit_HRR_ZeroInitRead_Direct", "[.][hrr-direct]") {
 // the original test only failed where the window happened to be wide enough.
 // ===========================================================================
 TEST_CASE("Unit_HRR_NullStreamMemsetOrdering", "[hrr]") {
+  hrr_skip_without_gpu();
   HRR_HIP_CHECK(hipSetDevice(0));
 
   int canUseStreamValue = 0;

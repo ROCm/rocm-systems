@@ -1217,6 +1217,34 @@ hipError_t capture_hipLaunchByPtr(const void* func) {
 // hipModuleLoadData, making all kernel names resolvable.
 // ---------------------------------------------------------------------------
 
+// __hipRegisterFatBinary receives a HIPF/HIPK wrapper, not the clang offload
+// bundle itself; the live shim unwraps it before sizing.
+//
+// StatCO's keys are mixed, so the retroactive sweep at capture init sees both
+// kinds of pointer: HIPF modules are keyed by the unwrapped bundle
+// (AddFatBinary(fbwrapper->binary)), HIPK modules by the wrapper
+// (AddKpackBinary(..., data)). fat_binary_blob_ptr() is therefore tolerant by
+// design: it unwraps only on HIPF/HIPK magic and returns anything else as is.
+// A bundle cannot be mistaken for a wrapper, since it starts with "__CL" or
+// "CCOB" and is always longer than the 4-byte magic read. A HIPK wrapper
+// unwraps to msgpack metadata rather than a bundle, so compute_bundle_size()
+// returns 0 for it and no event is recorded.
+struct __HRRFatBinaryWrapper {
+  uint32_t magic;
+  uint32_t version;
+  const void* binary;
+  const void* dummy;
+};
+
+static const void* fat_binary_blob_ptr(const void* data) {
+  if (!data) return nullptr;
+  const auto* wrapper = static_cast<const __HRRFatBinaryWrapper*>(data);
+  if (wrapper->magic == 0x48495046u /* HIPF */ ||
+      wrapper->magic == 0x4B504948u /* HIPK */)
+    return wrapper->binary;
+  return data;
+}
+
 // Compute the total byte size of a clang offload bundle blob.
 // Supports both uncompressed ("__CLANG_OFFLOAD_BUNDLE__") and compressed ("CCOB") formats.
 // Returns 0 if the format is unrecognised.
@@ -1270,13 +1298,7 @@ void** capture___hipRegisterFatBinary(const void* data) {
   void** r = g_real_compiler_table.__hipRegisterFatBinary_fn(data);
   // Shim is only installed when capture is active — no hip_capture_enabled() check needed.
 
-  // data is a __CudaFatBinaryWrapper* { magic, version, binary, dummy }.
-  // Capture the fat binary blob (binary field) so replay can load it via hipModuleLoadData.
-  struct __HRRFatBinaryWrapper { uint32_t magic; uint32_t version; const void* binary; const void* dummy; };
-  const auto* wrapper = static_cast<const __HRRFatBinaryWrapper*>(data);
-  const void* blob = (wrapper && (wrapper->magic == 0x48495046u /*HIPF*/ ||
-                                   wrapper->magic == 0x4B504948u /*HIPK*/))
-                     ? wrapper->binary : nullptr;
+  const void* blob = fat_binary_blob_ptr(data);
   size_t blob_size = blob ? compute_bundle_size(blob) : 0;
 
   hrr_args___hipRegisterFatBinary a{};
@@ -2200,8 +2222,10 @@ void hip_capture_uninstall() {
 // ---------------------------------------------------------------------------
 
 // Record a single fat binary blob as a HRR_API_HIPREGISTERFATBINARY event.
-// blob_ptr is the fbwrapper->binary pointer (the actual clang offload bundle).
+// blob_ptr is a StatCO module key: the unwrapped bundle for HIPF, the wrapper
+// for HIPK. fat_binary_blob_ptr() accepts either (see its comment).
 static void record_fat_binary_blob(const void* blob_ptr) {
+  blob_ptr = fat_binary_blob_ptr(blob_ptr);
   if (!blob_ptr) return;
   size_t blob_size = compute_bundle_size(blob_ptr);
   if (blob_size == 0) return;
