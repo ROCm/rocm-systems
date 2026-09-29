@@ -553,6 +553,7 @@ add_executable(
     gpu_vm_pipeline_test.cpp
     gpu_vm_service_test.cpp
     gpu_vm_translation_test.cpp
+    legacy_page_table_cache_test.cpp
     config_test.cpp
     gfx1251_compiled_kernel_test.cpp
     daemon_api_test.cpp
@@ -598,6 +599,8 @@ add_executable(
     buffer_operand_test.cpp
     buffer_descriptor_vcc_test.cpp
     buffer_format_test.cpp
+    hwfloat_mul_f32_test.cpp
+    hwfloat_mul_f32_execution_test.cpp
     image_resource_test.cpp
     smem_sbase_operand_test.cpp
     shared_infra_test.cpp
@@ -651,8 +654,11 @@ add_executable(
     gfx12_dot_test.cpp
     packed_wmma_test.cpp
     atomic_semantics_and_decode_test.cpp
+    graphics_export_test.cpp
     isa_target_registry_test.cpp
     pseudo_scalar_exec_test.cpp
+    reciprocal_simd_test.cpp
+    transcendental_simd_test.cpp
     valu_fp_mode_test.cpp
     scalar_scc_test.cpp
     cdna3_predicate_mask_test.cpp
@@ -2000,9 +2006,11 @@ set(_rj_interposer_pm4_tests
     SubmissionFenceQueryRetiresOldHistory
     TransferWaitsForSubmissionWithoutWaitingForCompletion
     GraphicsRegistersRetainAllPacketForms
+    IndexedIndirectDrawsReadStridedArgumentsAndClampCount
     ContextMaskedUpdatesAndTranslationPrefetchPreserveOtherState
     DispatchInterleaveShadowIsQualifiedForGfx12
     ComputeTranslationPrefetchIgnoresPfpSelector
+    OcclusionQuerySamplesOnlyEnabledInstances
     StreamoutQuerySamplesAllFourMemoryCounterPairs
     StreamoutQueryEventMarksZeroCounterSamplesValid
     InterleavedDispatchExecutesDirectAndIndirectShaders

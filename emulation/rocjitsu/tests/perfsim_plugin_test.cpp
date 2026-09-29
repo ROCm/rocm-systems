@@ -1203,6 +1203,56 @@ TEST_F(PerfsimPluginTest, MatchesFfmRegularMemoryCallbackSizes) {
   }
 }
 
+TEST_F(PerfsimPluginTest, ReportsFilterTapsWhenThePrimaryTapIsBorderColor) {
+  WaveFixture fixture;
+  const std::string config = plugin_config();
+  PerfsimPlugin plugin(config.c_str());
+  plugin.onInit();
+  const KernelDispatchInfo info = dispatch_info(14);
+  plugin.onAmdgpuDispatchPacketProcessed(info);
+  plugin.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
+  Wavefront &wave = fixture.wave(info.dispatch_id, 0, {0, 0, 0}, 0);
+  plugin.onAmdgpuWavefrontDispatched(wave);
+  const std::array<uint32_t, 1> words{0xDEAD0014};
+  SyntheticInstruction instruction("image_sample_lz", words, MEMORY_OP);
+  plugin.onAmdgpuBeforeExecuteInstruction(0x2300, instruction, wave);
+  std::array<uint64_t, 32> primary{}, first{}, second{};
+  first[0] = 0x2000;
+  second[1] = 0x3000;
+  const std::array<MemoryAccessObservation::AddressSet, 3> extra{
+      {{first, 1}, {second, 2}, {primary, 0}}};
+  MemoryAccessObservation access;
+  access.mnemonic = "image_sample_lz";
+  access.pc = 0x2300;
+  access.compute_unit_id = static_cast<uint32_t>(wave.cu().id());
+  access.dispatch_id = info.dispatch_id;
+  access.queue_id = wave.queue_id();
+  access.workgroup_id = wave.wg_id();
+  access.wavefront_id = wave.wf_id();
+  access.process_id = wave.process_id();
+  access.route = MemoryRoute::GLOBAL;
+  access.decoded_space = DecodedMemorySpace::GLOBAL;
+  access.wavefront_size = 32;
+  access.element_size_bytes = 4;
+  access.elements_per_lane = 1;
+  access.active_lane_mask = access.architectural_exec_lane_mask = access.valid_lane_mask = 3;
+  access.addresses = primary;
+  access.additional_address_sets = extra;
+  plugin.onAmdgpuMemoryAccessRouted(access);
+  const std::array<uint32_t, 1> end_words{0xBF810000};
+  SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
+  plugin.onAmdgpuBeforeExecuteInstruction(0x2400, end, wave);
+  plugin.onAmdgpuWavefrontHalted(wave);
+  plugin.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
+  plugin.onShutdown();
+  const auto trace = lines(read_file(trace_.path()));
+  EXPECT_NE(line_with_prefix(trace, "memory 14 0 0 0 0 0 1 32 4 "), trace.size());
+  EXPECT_NE(line_with_prefix(trace, "memory 14 0 0 0 0 0 2 32 4 "), trace.size());
+  EXPECT_EQ(std::count_if(trace.begin(), trace.end(),
+                          [](const auto &line) { return line.starts_with("memory 14 "); }),
+            2);
+}
+
 TEST_F(PerfsimPluginTest, ForwardsNominalWidthsForPartialOobVbufferAccesses) {
   WaveFixture fixture;
   const std::string config = plugin_config();

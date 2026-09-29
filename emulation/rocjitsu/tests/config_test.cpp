@@ -396,6 +396,7 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   auto rdna4 =
       config::load_config(CONFIG_DIR_PATH + "/gfx1201_r9700.json", rocjitsu::kEmbeddedSchema);
   EXPECT_EQ(rdna4.soc()->arch(), ROCJITSU_CODE_ARCH_RDNA4);
+  EXPECT_EQ(rdna4.target, ROCJITSU_CODE_TARGET_GFX1201);
   EXPECT_EQ(rdna4.device.gpu_id, 8716u);
   EXPECT_EQ(rdna4.device.device_id, 0x7551u);
   EXPECT_EQ(rdna4.device.family_id, 0x98u);
@@ -445,6 +446,7 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   auto rdna3 =
       config::load_config(CONFIG_DIR_PATH + "/gfx1100_w7900.json", rocjitsu::kEmbeddedSchema);
   EXPECT_EQ(rdna3.soc()->arch(), ROCJITSU_CODE_ARCH_RDNA3);
+  EXPECT_EQ(rdna3.target, ROCJITSU_CODE_TARGET_GFX1100);
   EXPECT_EQ(rdna3.device.gpu_id, 7019u);
   EXPECT_EQ(rdna3.device.device_id, 0x7448u);
   EXPECT_EQ(rdna3.device.family_id, 0x91u);
@@ -1544,6 +1546,60 @@ TEST(ConfigLoaderTest, RejectsTargetVersionMismatch) {
                 testing::ThrowsMessage<std::runtime_error>(
                     "vm target does not match device.gfx_target_version"));
   }
+}
+
+TEST(ConfigLoaderTest, RdnaConcreteTargetsAreSelectedOnlyByExplicitConfiguration) {
+  struct Case {
+    const char *file;
+    std::string_view target_line;
+    rj_code_target_id_t target;
+  };
+  const Case cases[] = {
+      {"gfx1100_w7900.json", "    \"target\": \"gfx1100\",\n", ROCJITSU_CODE_TARGET_GFX1100},
+      {"gfx1201_r9700.json", "    \"target\": \"gfx1201\",\n", ROCJITSU_CODE_TARGET_GFX1201},
+  };
+  for (const Case &c : cases) {
+    SCOPED_TRACE(c.file);
+    std::ifstream base(test::config_path(c.file));
+    ASSERT_TRUE(base.is_open());
+    const std::string named((std::istreambuf_iterator<char>(base)),
+                            std::istreambuf_iterator<char>());
+
+    auto selected = config::load_config_from_string(named, rocjitsu::kEmbeddedSchema);
+    EXPECT_EQ(selected.target, c.target);
+    auto *selected_cu = selected.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+    ASSERT_NE(selected_cu, nullptr);
+    EXPECT_EQ(selected_cu->config().target, c.target);
+
+    // The architecture has no default target.
+    std::string architecture_only = named;
+    ASSERT_TRUE(replace_exactly_once(architecture_only, c.target_line, ""));
+    auto implicit = config::load_config_from_string(architecture_only, rocjitsu::kEmbeddedSchema);
+    EXPECT_EQ(implicit.target, ROCJITSU_CODE_TARGET_INVALID);
+    auto *implicit_cu = implicit.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+    ASSERT_NE(implicit_cu, nullptr);
+    EXPECT_EQ(implicit_cu->config().target, ROCJITSU_CODE_TARGET_INVALID);
+  }
+
+  std::ifstream base(test::config_path("gfx1100_w7900.json"));
+  ASSERT_TRUE(base.is_open());
+  const std::string gfx1100((std::istreambuf_iterator<char>(base)),
+                            std::istreambuf_iterator<char>());
+
+  std::string gfx1101_device = gfx1100;
+  ASSERT_TRUE(replace_exactly_once(gfx1101_device, "110000", "110001"));
+  EXPECT_THAT(
+      [&] { (void)config::load_config_from_string(gfx1101_device, rocjitsu::kEmbeddedSchema); },
+      testing::ThrowsMessage<std::runtime_error>(
+          "vm target does not match device.gfx_target_version"));
+
+  std::string rdna4_target = gfx1100;
+  ASSERT_TRUE(
+      replace_exactly_once(rdna4_target, R"("target": "gfx1100")", R"("target": "gfx1201")"));
+  EXPECT_THAT(
+      [&] { (void)config::load_config_from_string(rdna4_target, rocjitsu::kEmbeddedSchema); },
+      testing::ThrowsMessage<std::runtime_error>(
+          "vm target does not belong to the selected architecture"));
 }
 
 TEST(ConfigLoaderTest, DispatchDistributesAcrossCUs) {

@@ -18,8 +18,10 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/division.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/host_fma_simd.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mixed_fma_simd.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/transcendental_simd.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -764,6 +766,7 @@ fma_f16_mode_simd(util::native<uint32_t> src0, util::native<uint32_t> src1,
 /// F32 FMA runs in the caller's guest-rounding environment and applies MODE
 /// denormal controls explicitly. Exceptional lanes use scalar NaN selection
 /// and minimum-normal boundary handling.
+template <bool HardwareFma = true>
 inline util::native<float> fma_f32_simd(util::native<float> a, util::native<float> b,
                                         util::native<float> c, const Wavefront &wf,
                                         uint32_t omod = 0, bool force_flush = false) {
@@ -778,7 +781,7 @@ inline util::native<float> fma_f32_simd(util::native<float> a, util::native<floa
   auto exceptional = (std::bit_cast<U>(a) & U(0x7fffffffu)) >= U(0x7f800000u) ||
                      (std::bit_cast<U>(b) & U(0x7fffffffu)) >= U(0x7f800000u) ||
                      (std::bit_cast<U>(c) & U(0x7fffffffu)) >= U(0x7f800000u);
-  auto result = util::stdx::fma(a, b, c);
+  auto result = HardwareFma ? host_fma::fused(a, b, c) : util::stdx::fma(a, b, c);
   if (flush_output)
     exceptional |= (std::bit_cast<U>(result) & U(0x7fffffffu)) == U(0x00800000u);
   if (util::stdx::any_of(exceptional))
@@ -816,12 +819,13 @@ inline util::native<float> binary_f32_simd(util::native<float> a, util::native<f
               a[i], b[i], 0.0f);
     return (denorm_mode & 2u) ? result : util::flush_denorm_f32_simd(result);
   } else if constexpr (operation == fp_mode::Arithmetic::ADD)
-    return fma_f32_simd(a, util::native<float>(1.0f), b, wf, omod);
+    // Keep the binary expression visible so ADD can fold to packed addition.
+    return fma_f32_simd<false>(a, util::native<float>(1.0f), b, wf, omod);
   else {
     using U = util::native<uint32_t>;
     auto zero = std::bit_cast<util::native<float>>((std::bit_cast<U>(a) ^ std::bit_cast<U>(b)) &
                                                    U(0x80000000u));
-    return fma_f32_simd(a, b, zero, wf, omod);
+    return fma_f32_simd<false>(a, b, zero, wf, omod);
   }
 }
 
@@ -873,7 +877,7 @@ inline util::native<double> fma_f64_mode_simd(util::native<double> src0, util::n
   util::native<double> result;
   {
     fp_mode::ScopedEnvironment environment(round_mode);
-    result = util::stdx::fma(src0, src1, src2);
+    result = host_fma::fused(src0, src1, src2);
   }
   if ((denorm_mode & 2u) == 0)
     result = flush(result);
@@ -1108,6 +1112,100 @@ inline uint64_t cmp_class_f64_bits(util::native<uint64_t> s, util::narrow32<uint
 #else
   return util::simd_mask_to_bits(cmp_op(s, mask));
 #endif
+}
+
+/// Batch only pure integer transcendental mappings. Storage-backed operands
+/// have no per-chunk callbacks, so capturing the inputs before writeback also
+/// preserves aliases. Uniform inputs need only one evaluation. Non-storage
+/// destinations retain native-chunk load/store ordering.
+template <bool Vop3, typename Inst>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool
+try_execute_transcendental_f32_simd(Inst &inst, Wavefront &wf,
+                                    transcendental::F32Operation operation) {
+  if (simd_force_scalar() || !transcendental::supports_f32_simd() ||
+      wf.cu().observes_register_access() || wf.cu().debug_active() ||
+      !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
+      !inst.vdst.simd_capable())
+    return false;
+  uint32_t abs = 0, neg = 0;
+  if constexpr (Vop3) {
+    // Output scaling and clamping keep their established FP policy and order.
+    if (inst.inst_.omod || inst.inst_.clamp)
+      return false;
+    abs = inst.inst_.abs;
+    neg = inst.inst_.neg;
+  }
+  constexpr std::size_t W = util::native_width_v<uint32_t>;
+  const uint32_t count = wf.wf_size();
+  if ((count != 32 && count != 64) || count % W)
+    return false;
+  const uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  if (!exec)
+    return true;
+  // A single active lane does not amortize a whole-wave integer batch.
+  if (std::has_single_bit(exec))
+    return false;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const bool quiet = fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode());
+  const uint32_t denorm = wf.fp_denorm_mode_f32();
+  RegisterAccess regs(wf);
+  auto src = regs.read_operand(inst.src0, exec);
+  auto dst = regs.write_operand(inst.vdst, exec);
+  auto load = [&](uint32_t base) {
+    auto bits = src.template load_native<uint32_t>(base);
+    if (abs & 1)
+      bits &= 0x7fffffffu;
+    if (neg & 1)
+      bits ^= 0x80000000u;
+    return bits;
+  };
+  if (!src.has_storage() && dst.has_storage()) {
+    // RegisterAccess captures a uniform operand once when creating its view.
+    // Reusing this pure mapping preserves that read and every masked store.
+    const uint32_t input = load(0)[0];
+    uint32_t output;
+    transcendental::evaluate_f32_simd(operation, &input, &output, 1, denorm, quiet);
+    const util::native<uint32_t> result(output);
+    for (uint32_t base = 0; base < count; base += static_cast<uint32_t>(W)) {
+      const uint64_t chunk = (exec >> base) & chunk_full;
+      if (chunk)
+        dst.template store_native<uint32_t>(base, result, chunk);
+    }
+    return true;
+  }
+  if (!src.has_storage() || !dst.has_storage()) {
+    for (uint32_t base = 0; base < count; base += static_cast<uint32_t>(W)) {
+      const uint64_t chunk = (exec >> base) & chunk_full;
+      if (!chunk)
+        continue;
+      uint32_t input[W], output[W];
+      load(base).copy_to(input, util::stdx::element_aligned);
+      transcendental::evaluate_f32_simd(operation, input, output, W, denorm, quiet);
+      dst.template store_native<uint32_t>(
+          base, util::native<uint32_t>(output, util::stdx::element_aligned), chunk);
+    }
+    return true;
+  }
+  uint32_t input[64]{}, output[64];
+  for (uint32_t base = 0; base < count; base += static_cast<uint32_t>(W)) {
+    if ((exec >> base) & chunk_full)
+      load(base).copy_to(input + base, util::stdx::element_aligned);
+  }
+  transcendental::evaluate_f32_simd(operation, input, output, count, denorm, quiet);
+  for (uint32_t base = 0; base < count; base += static_cast<uint32_t>(W)) {
+    const uint64_t chunk = (exec >> base) & chunk_full;
+    if (chunk)
+      dst.template store_native<uint32_t>(
+          base, util::native<uint32_t>(output + base, util::stdx::element_aligned), chunk);
+  }
+  return true;
+}
+
+template <bool Vop3, typename Inst>
+[[nodiscard]] bool try_execute_transcendental_f32_simd(Inst &, Wavefront &,
+                                                       transcendental::F32Operation) {
+  return false;
 }
 
 /// VOP1 unary SIMD fast path. Reads `src0` as `Tin`, applies `un_op`

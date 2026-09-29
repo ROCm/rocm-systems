@@ -106,6 +106,35 @@ DeviceCacheCoherence::AtomicBoundary DeviceCacheCoherence::acquire_atomic_bounda
   return AtomicBoundary(this, locked_l2_count, std::move(atomic_lock), std::move(coherence_lock));
 }
 
+void DeviceCacheCoherence::AtomicBoundary::advance_data_epoch() {
+  assert(owner_ && outcome_ == VmAccessOutcome::Complete);
+  [[maybe_unused]] const uint64_t next =
+      owner_->data_epoch_.fetch_add(1, std::memory_order_release) + 1;
+  assert(next != 0 && "device cache coherence epoch wrapped");
+}
+
+DeviceCacheCoherence::AtomicBoundary DeviceCacheCoherence::try_acquire_clean_boundary() {
+  std::unique_lock atomic_lock(atomic_mutex_);
+  std::unique_lock coherence_lock(mutex_);
+  size_t locked_l2_count = 0;
+  try {
+    for (L2Cache *cache : l2_caches_) {
+      cache->maintenance_mutex_.lock();
+      ++locked_l2_count;
+    }
+    for (L2Cache *cache : l2_caches_) {
+      if (cache->has_dirty_lines_.load(std::memory_order_relaxed)) {
+        release_cache_locks(locked_l2_count, 0);
+        return AtomicBoundary(VmAccessOutcome::Unavailable);
+      }
+    }
+  } catch (...) {
+    release_cache_locks(locked_l2_count, 0);
+    throw;
+  }
+  return AtomicBoundary(this, locked_l2_count, std::move(atomic_lock), std::move(coherence_lock));
+}
+
 DeviceCacheMaintenanceLease
 DeviceCacheCoherence::acquire_cache_maintenance(DeviceCacheOperation operation) {
   std::unique_lock atomic_lock(atomic_mutex_);

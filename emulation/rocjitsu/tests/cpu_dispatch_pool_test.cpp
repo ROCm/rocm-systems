@@ -419,3 +419,20 @@ TEST(CpuDispatchPoolBenchmark, SparseConcurrentSubmissions) {
 }
 
 } // namespace
+
+TEST(CpuDispatchPoolTest, IndexedTasksJoinBeforeFailureAndPoolCanBeReused) {
+  amdgpu::CpuDispatchPool pool(4);
+  std::array<std::atomic<uint32_t>, 64> visits{};
+  EXPECT_THROW(pool.run_indexed(visits.size(), 4,
+                                [&](size_t index) {
+                                  visits[index].fetch_add(1);
+                                  if (index == 7)
+                                    throw std::runtime_error("indexed task failure");
+                                }),
+               std::runtime_error);
+  for (const auto &count : visits)
+    EXPECT_EQ(count.load(), 1u);
+  pool.run_indexed(visits.size(), 4, [&](size_t index) { visits[index].fetch_add(1); });
+  for (const auto &count : visits)
+    EXPECT_EQ(count.load(), 2u);
+}

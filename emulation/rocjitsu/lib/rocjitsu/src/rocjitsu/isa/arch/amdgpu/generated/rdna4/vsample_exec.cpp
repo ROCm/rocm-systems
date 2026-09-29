@@ -5,249 +5,1041 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vsample.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/addr_calc.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/image_transfer.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
+#include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 #include "util/except.h"
 #include <algorithm>
 #include <bit>
 #include <cmath>
+#include <cstring>
 #include <limits>
+#include <memory>
 
 namespace rocjitsu {
 namespace rdna4 {
 
 void ImageMsaaLoadVsample::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image load stub — not yet implemented.
-  (void)wf;
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageSampleVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Implicit, inst_.a16))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleDVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Derivatives, inst_.a16))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleLVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Explicit, inst_.a16))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleBVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Bias, inst_.a16))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleLzVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Zero, inst_.a16))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleCVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Implicit, inst_.a16, nullptr, amdgpu::ImageTransferMode::Default,
+          {.compare = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleCDVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Derivatives, inst_.a16, nullptr,
+          amdgpu::ImageTransferMode::Default, {.compare = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleCLVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Explicit, inst_.a16, nullptr, amdgpu::ImageTransferMode::Default,
+          {.compare = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleCBVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Bias, inst_.a16, nullptr, amdgpu::ImageTransferMode::Default,
+          {.compare = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleCLzVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Zero, inst_.a16, nullptr, amdgpu::ImageTransferMode::Default,
+          {.compare = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleOVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Implicit, inst_.a16, nullptr, amdgpu::ImageTransferMode::Default,
+          {.offset = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleDOVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Derivatives, inst_.a16, nullptr,
+          amdgpu::ImageTransferMode::Default, {.offset = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleLOVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Explicit, inst_.a16, nullptr, amdgpu::ImageTransferMode::Default,
+          {.offset = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleBOVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Bias, inst_.a16, nullptr, amdgpu::ImageTransferMode::Default,
+          {.offset = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleLzOVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Zero, inst_.a16, nullptr, amdgpu::ImageTransferMode::Default,
+          {.offset = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleCOVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Implicit, inst_.a16, nullptr, amdgpu::ImageTransferMode::Default,
+          {.offset = true, .compare = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleCDOVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Derivatives, inst_.a16, nullptr,
+          amdgpu::ImageTransferMode::Default, {.offset = true, .compare = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleCLOVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Explicit, inst_.a16, nullptr, amdgpu::ImageTransferMode::Default,
+          {.offset = true, .compare = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleCBOVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Bias, inst_.a16, nullptr, amdgpu::ImageTransferMode::Default,
+          {.offset = true, .compare = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleCLzOVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Zero, inst_.a16, nullptr, amdgpu::ImageTransferMode::Default,
+          {.offset = true, .compare = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageGather4Vsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Implicit, inst_.a16, nullptr, amdgpu::ImageTransferMode::Default,
+          {.gather = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageGather4LVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Explicit, inst_.a16, nullptr, amdgpu::ImageTransferMode::Default,
+          {.gather = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageGather4BVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Bias, inst_.a16, nullptr, amdgpu::ImageTransferMode::Default,
+          {.gather = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageGather4LzVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Zero, inst_.a16, nullptr, amdgpu::ImageTransferMode::Default,
+          {.gather = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageGather4CVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Implicit, inst_.a16, nullptr, amdgpu::ImageTransferMode::Default,
+          {.compare = true, .gather = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageGather4CLzVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Zero, inst_.a16, nullptr, amdgpu::ImageTransferMode::Default,
+          {.compare = true, .gather = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageGather4OVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Implicit, inst_.a16, nullptr, amdgpu::ImageTransferMode::Default,
+          {.offset = true, .gather = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageGather4LzOVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Zero, inst_.a16, nullptr, amdgpu::ImageTransferMode::Default,
+          {.offset = true, .gather = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageGather4CLzOVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Zero, inst_.a16, nullptr, amdgpu::ImageTransferMode::Default,
+          {.offset = true, .compare = true, .gather = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageGetLodVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  amdgpu::execute_image_lod(
+      wf, inst_.rsrc, inst_.samp, inst_.vdata,
+      {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u, inst_.vaddr3 + 2u,
+       inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u, inst_.vaddr3 + 6u,
+       inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+      inst_.dim, inst_.dmask, inst_.d16,
+      inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.a16);
 }
 
 void ImageSampleDG16Vsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Derivatives16, inst_.a16))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleCDG16Vsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Derivatives16, inst_.a16, nullptr,
+          amdgpu::ImageTransferMode::Default, {.compare = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleDOG16Vsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Derivatives16, inst_.a16, nullptr,
+          amdgpu::ImageTransferMode::Default, {.offset = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleCDOG16Vsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Derivatives16, inst_.a16, nullptr,
+          amdgpu::ImageTransferMode::Default, {.offset = true, .compare = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleClVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Implicit, inst_.a16, nullptr, amdgpu::ImageTransferMode::Default,
+          {.lod_clamp = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleDClVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Derivatives, inst_.a16, nullptr,
+          amdgpu::ImageTransferMode::Default, {.lod_clamp = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleBClVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Bias, inst_.a16, nullptr, amdgpu::ImageTransferMode::Default,
+          {.lod_clamp = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleCClVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Implicit, inst_.a16, nullptr, amdgpu::ImageTransferMode::Default,
+          {.compare = true, .lod_clamp = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleCDClVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Derivatives, inst_.a16, nullptr,
+          amdgpu::ImageTransferMode::Default, {.compare = true, .lod_clamp = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleCBClVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Bias, inst_.a16, nullptr, amdgpu::ImageTransferMode::Default,
+          {.compare = true, .lod_clamp = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleClOVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Implicit, inst_.a16, nullptr, amdgpu::ImageTransferMode::Default,
+          {.offset = true, .lod_clamp = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleDClOVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Derivatives, inst_.a16, nullptr,
+          amdgpu::ImageTransferMode::Default, {.offset = true, .lod_clamp = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleBClOVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Bias, inst_.a16, nullptr, amdgpu::ImageTransferMode::Default,
+          {.offset = true, .lod_clamp = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleCClOVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Implicit, inst_.a16, nullptr, amdgpu::ImageTransferMode::Default,
+          {.offset = true, .compare = true, .lod_clamp = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleCDClOVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Derivatives, inst_.a16, nullptr,
+          amdgpu::ImageTransferMode::Default, {.offset = true, .compare = true, .lod_clamp = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleCBClOVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Bias, inst_.a16, nullptr, amdgpu::ImageTransferMode::Default,
+          {.offset = true, .compare = true, .lod_clamp = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleCDClG16Vsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Derivatives16, inst_.a16, nullptr,
+          amdgpu::ImageTransferMode::Default, {.compare = true, .lod_clamp = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleDClOG16Vsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Derivatives16, inst_.a16, nullptr,
+          amdgpu::ImageTransferMode::Default, {.offset = true, .lod_clamp = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleCDClOG16Vsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Derivatives16, inst_.a16, nullptr,
+          amdgpu::ImageTransferMode::Default, {.offset = true, .compare = true, .lod_clamp = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleDClG16Vsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Derivatives16, inst_.a16, nullptr,
+          amdgpu::ImageTransferMode::Default, {.lod_clamp = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageGather4ClVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Implicit, inst_.a16, nullptr, amdgpu::ImageTransferMode::Default,
+          {.lod_clamp = true, .gather = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageGather4BClVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Bias, inst_.a16, nullptr, amdgpu::ImageTransferMode::Default,
+          {.lod_clamp = true, .gather = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageGather4CClVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Implicit, inst_.a16, nullptr, amdgpu::ImageTransferMode::Default,
+          {.compare = true, .lod_clamp = true, .gather = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageGather4CLVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Explicit, inst_.a16, nullptr, amdgpu::ImageTransferMode::Default,
+          {.compare = true, .gather = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageGather4CBVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Bias, inst_.a16, nullptr, amdgpu::ImageTransferMode::Default,
+          {.compare = true, .gather = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageGather4CBClVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Bias, inst_.a16, nullptr, amdgpu::ImageTransferMode::Default,
+          {.compare = true, .lod_clamp = true, .gather = true}))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageGather4hVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u, inst_.vaddr3 + 4u, inst_.vaddr3 + 5u,
+           inst_.vaddr3 + 6u, inst_.vaddr3 + 7u, inst_.vaddr3 + 8u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Implicit, inst_.a16, nullptr, amdgpu::ImageTransferMode::Default,
+          {.gather = true, .horizontal = true}))
+    return;
+  set_data(std::move(d));
 }
 
 } // namespace rdna4

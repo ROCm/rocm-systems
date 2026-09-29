@@ -7,6 +7,8 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/vm/amdgpu/atomic_op.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
+#include "rocjitsu/vm/amdgpu/graphics_draw.h"
+#include "rocjitsu/vm/amdgpu/graphics_stage.h"
 #include "rocjitsu/vm/amdgpu/hsa_clock.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/pm4/pm4_queue_binding_factory.h"
@@ -474,6 +476,11 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
                                                       uint32_t global_wg_id,
                                                       uint32_t wf_index_in_wg) {
   using namespace rocr::llvm::amdhsa;
+  if (pkt.graphics_stage) {
+    wf->set_graphics_stage(pkt.graphics_stage);
+    pkt.graphics_stage->initialize(*wf, global_wg_id, wf_index_in_wg);
+    return init_wavefront_scratch(cu, wf, pkt, global_wg_id, wf_index_in_wg, -1);
+  }
   uint32_t sbase = wf->sgpr_alloc().base;
   uint32_t kcp = pkt.kernel_code_properties;
 
@@ -670,6 +677,16 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
     }
   }
 
+  return init_wavefront_scratch(cu, wf, pkt, global_wg_id, wf_index_in_wg, flat_scratch_init_sgpr);
+}
+
+VmAccessOutcome CommandProcessor::init_wavefront_scratch(ComputeUnitCore *cu, Wavefront *wf,
+                                                         const DispatchEntry &pkt,
+                                                         uint32_t global_wg_id,
+                                                         uint32_t wf_index_in_wg,
+                                                         int flat_scratch_init_sgpr) {
+  const auto properties = isa_properties(cu->arch());
+  const uint32_t sbase = wf->sgpr_alloc().base;
   // Scratch (private segment) setup.
   // Each wavefront gets a unique slice of scratch memory. The per-lane
   // private size is private_segment_fixed_size; the per-wave region is
@@ -2220,6 +2237,13 @@ CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
   if (entry.grid_faulted())
     return {.dispatched = 0, .outcome = VmAccessOutcome::Complete};
 
+  // Graphics WGs rotate across shader engines as well as CUs within each SPI.
+  // Keep the established placement for observers and debugger-controlled waves.
+  const bool rotate_graphics_spis =
+      entry.graphics_stage && !entry.has_workgroup_clusters() && spis_.size() > 1 &&
+      plugin_group_->empty() &&
+      std::ranges::none_of(cus_, [](const auto *cu) { return cu->debug_active(); });
+
   // All waves in one workgroup currently land on one physical CU so the
   // existing barrier implementation remains local. WGP mode additionally
   // reserves that CU's sibling and binds the waves to their shared LDS pool.
@@ -2428,9 +2452,12 @@ CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
     // SPI selects the CU or sibling-CU WGP based on descriptor mode and
     // resource availability.
     std::optional<ShaderProcessorInput::WorkgroupPlacement> placement;
+    size_t selected_spi = 0;
     if (!spis_.empty()) {
-      for (auto *spi : spis_) {
-        placement = spi->allocate_workgroup(entry, global_wg_id);
+      const size_t first_spi = rotate_graphics_spis ? entry.graphics_spi_cursor : 0;
+      for (size_t attempt = 0; attempt < spis_.size(); ++attempt) {
+        selected_spi = rotate_graphics_spis ? (first_spi + attempt) % spis_.size() : attempt;
+        placement = spis_[selected_spi]->allocate_workgroup(entry, global_wg_id);
         if (placement)
           break;
       }
@@ -2461,6 +2488,8 @@ CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
         dispatch_to_placement(local_wg_id, global_wg_id, *placement);
     if (placement_outcome != VmAccessOutcome::Complete)
       return {.dispatched = dispatched, .outcome = placement_outcome};
+    if (rotate_graphics_spis)
+      entry.graphics_spi_cursor = (selected_spi + 1) % spis_.size();
   }
   return {.dispatched = dispatched, .outcome = VmAccessOutcome::Complete};
 }
@@ -2956,6 +2985,37 @@ bool CommandProcessor::submit_pm4(uint32_t queue_id, uint32_t process_id,
   return true;
 }
 
+void CommandProcessor::init_pm4_scratch(DispatchEntry &dp, uint32_t ring_size, uint32_t base_lo,
+                                        uint32_t base_hi) {
+  dp.pm4_scratch_waves_per_se = ring_size & 0xfff;
+  const auto properties = isa_properties(cus_[0]->config().arch);
+  const uint32_t wave_bytes =
+      ((ring_size >> 12) & util::mask<uint32_t>(properties.compute_tmpring_wavesize_bits)) *
+      properties.compute_tmpring_wavesize_granule;
+  // PAL may enable graphics scratch without allocating any when the shader
+  // does not spill. Leave those waves with no private storage.
+  if (!wave_bytes && dp.graphics_stage)
+    return;
+  if (!dp.pm4_scratch_waves_per_se || !wave_bytes)
+    throw std::runtime_error("PM4 scratch enabled with an empty descriptor");
+  dp.private_segment_fixed_size = wave_bytes / dp.kernel_wave_size;
+  dp.pm4_scratch_pool = std::make_shared<Pm4ScratchPool>(
+      dp.pm4_scratch_waves_per_se * std::max(scratch_wave_divisor_, scratch_shader_engine_count_));
+  uint64_t scratch = ((uint64_t{base_hi} << 32) | base_lo) << 8;
+  dp.scratch_backing_addr = static_cast<uint64_t>(static_cast<int64_t>(scratch << 16) >> 16);
+  if (dp.total_wgs) {
+    if (!dp.pm4_scratch_pool->available(dp.wfs_per_workgroup))
+      throw std::runtime_error("PM4 scratch cannot accommodate one workgroup");
+    const uint64_t slots = uint64_t{dp.pm4_scratch_waves_per_se} *
+                           std::max(scratch_wave_divisor_, scratch_shader_engine_count_);
+    const uint64_t bytes = slots * dp.private_segment_fixed_size * dp.kernel_wave_size;
+    const auto access = snapshot_gpu_access(dp.address_space);
+    if (!access || access->query_access(dp.scratch_backing_addr, bytes, VmAccessKind::Atomic) !=
+                       VmAccessOutcome::Complete)
+      throw std::runtime_error("PM4 scratch descriptor exceeds its mapped buffer");
+  }
+}
+
 void CommandProcessor::dispatch_pm4(const Pm4SubmitQueue &queue, Pm4DispatchState &qs,
                                     const std::array<uint32_t, 4> &dimensions) {
   using namespace rocr::llvm::amdhsa;
@@ -2975,22 +3035,6 @@ void CommandProcessor::dispatch_pm4(const Pm4SubmitQueue &queue, Pm4DispatchStat
   dp.process_id = queue.process_id;
   dp.queue_id = queue.queue_id;
   dp.kernel_wave_size = (initiator & (1u << 15)) ? 32 : 64;
-  if (AMDHSA_BITS_GET(rsrc2, COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT)) {
-    dp.pm4_scratch_waves_per_se = regs[kPm4ComputeTmpringSize] & 0xfff;
-    const auto properties = isa_properties(arch);
-    const uint32_t wave_bytes = ((regs[kPm4ComputeTmpringSize] >> 12) &
-                                 util::mask<uint32_t>(properties.compute_tmpring_wavesize_bits)) *
-                                properties.compute_tmpring_wavesize_granule;
-    if (!dp.pm4_scratch_waves_per_se || !wave_bytes)
-      throw std::runtime_error("PM4 scratch enabled with an empty descriptor");
-    dp.private_segment_fixed_size = wave_bytes / dp.kernel_wave_size;
-    dp.pm4_scratch_pool = std::make_shared<Pm4ScratchPool>(
-        dp.pm4_scratch_waves_per_se *
-        std::max(scratch_wave_divisor_, scratch_shader_engine_count_));
-    uint64_t scratch = ((uint64_t{regs[kPm4ComputeScratchHi]} << 32) | regs[kPm4ComputeScratchLo])
-                       << 8;
-    dp.scratch_backing_addr = static_cast<uint64_t>(static_cast<int64_t>(scratch << 16) >> 16);
-  }
   // Program addresses have 256-byte granularity and are sign-extended from 48 bits.
   uint64_t pc = ((uint64_t{regs[kPm4ComputePgmHi]} << 32) | regs[kPm4ComputePgmLo]) << 8;
   dp.kernel_entry_pc = static_cast<uint64_t>(static_cast<int64_t>(pc << 16) >> 16);
@@ -3049,17 +3093,9 @@ void CommandProcessor::dispatch_pm4(const Pm4SubmitQueue &queue, Pm4DispatchStat
     total *= counts[i];
   }
   dp.total_wgs = total;
-  if (dp.pm4_scratch_pool && dp.total_wgs) {
-    if (!dp.pm4_scratch_pool->available(dp.wfs_per_workgroup))
-      throw std::runtime_error("PM4 scratch cannot accommodate one workgroup");
-    const uint64_t slots = uint64_t{dp.pm4_scratch_waves_per_se} *
-                           std::max(scratch_wave_divisor_, scratch_shader_engine_count_);
-    const uint64_t bytes = slots * dp.private_segment_fixed_size * dp.kernel_wave_size;
-    const auto access = snapshot_gpu_access(queue.address_space);
-    if (!access || access->query_access(dp.scratch_backing_addr, bytes, VmAccessKind::Atomic) !=
-                       VmAccessOutcome::Complete)
-      throw std::runtime_error("PM4 scratch descriptor exceeds its mapped buffer");
-  }
+  if (AMDHSA_BITS_GET(rsrc2, COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT))
+    init_pm4_scratch(dp, regs[kPm4ComputeTmpringSize], regs[kPm4ComputeScratchLo],
+                     regs[kPm4ComputeScratchHi]);
   if (!thread_dimensions && ((dp.grid_wgs_x && dp.workgroup_size_x > UINT32_MAX / dp.grid_wgs_x) ||
                              (dp.grid_wgs_y && dp.workgroup_size_y > UINT32_MAX / dp.grid_wgs_y) ||
                              (dp.grid_wgs_z && dp.workgroup_size_z > UINT32_MAX / dp.grid_wgs_z)))
@@ -3104,6 +3140,67 @@ void CommandProcessor::dispatch_pm4(const Pm4SubmitQueue &queue, Pm4DispatchStat
   qs.push_entry(std::move(dp));
 }
 
+void CommandProcessor::draw_pm4(const Pm4SubmitQueue &queue, Pm4DispatchState &qs,
+                                uint32_t vertices, std::vector<uint32_t> indices) {
+  if (!vertices || !queue.pm4->num_instances)
+    return;
+  if (cus_.empty())
+    throw std::runtime_error("graphics draw requires a compute unit");
+  auto draw = std::make_shared<GraphicsDraw>(*queue.pm4, cus_[0]->config().arch, vertices,
+                                             std::move(indices));
+  if (plugin_group_->empty() &&
+      std::ranges::none_of(cus_, [](const auto *cu) { return cu->debug_active(); })) {
+    if (auto access = snapshot_gpu_access(queue.address_space))
+      draw->enable_vertex_batching(*access);
+  }
+  auto dp = draw->vertex_dispatch();
+  queue.pm4->draw = std::move(draw);
+  dispatch_graphics_pm4(queue, qs, std::move(dp));
+}
+
+void CommandProcessor::dispatch_graphics_pm4(const Pm4SubmitQueue &queue, Pm4DispatchState &qs,
+                                             DispatchEntry dp) {
+  if (dp.vgprs_per_wf > cus_[0]->vgpr_allocation_block_size())
+    throw std::runtime_error("graphics launch exceeds available VGPRs");
+  dp.kind = DispatchPacketKind::Kernel;
+  dp.dispatch_id = allocate_dispatch_id();
+  dp.process_id = queue.process_id;
+  dp.queue_id = queue.queue_id;
+  dp.sgprs_per_wf = cus_[0]->config().sgprs_per_wf;
+  dp.pm4_abi = true;
+  dp.pm4_failure = queue.pm4->submissions.front().failure;
+  dp.graphics_stage = queue.pm4->draw;
+  dp.address_space = queue.address_space;
+  const auto &state = *queue.pm4;
+  const uint32_t rsrc2 = state.sh_registers[state.draw->fragment_stage() ? 0xb : 0x8b];
+  if (rsrc2 & 1) { // SPI_SHADER_PGM_RSRC2_PS/GS.SCRATCH_EN.
+    // SPI_TMPRING_SIZE and SPI_GFX_SCRATCH_BASE share the compute descriptor
+    // layout and granularity on the supported graphics targets (GFX11+).
+    init_pm4_scratch(dp, state.context_registers[0x1ba], state.context_registers[0x1bb],
+                     state.context_registers[0x1bc]);
+  }
+  flush_gpu_caches();
+  util::Logger::cp("graphics dispatch pc=", std::hex, dp.kernel_entry_pc, std::dec,
+                   " workgroups=", dp.total_wgs);
+  KernelDispatchInfo info{};
+  info.dispatch_id = dp.dispatch_id;
+  info.entry_pc = dp.kernel_entry_pc;
+  info.kernel_name = queue.pm4->draw->fragment_stage() ? "PM4 fragment" : "PM4 vertex";
+  info.code_target = cus_[0]->config().target;
+  info.lds_size_bytes = dp.group_segment_fixed_size;
+  info.wave_size = dp.kernel_wave_size;
+  info.grid_size_x = dp.grid_size_x;
+  info.workgroup_size_x = dp.kernel_wave_size;
+  info.grid_size_y = info.grid_size_z = info.workgroup_size_y = info.workgroup_size_z = 1;
+  info.workgroup_count = dp.total_wgs;
+  info.wfs_per_workgroup = 1;
+  info.sgprs_per_wf = dp.sgprs_per_wf;
+  info.vgprs_per_wf = dp.vgprs_per_wf;
+  plugin_group_->onAmdgpuDispatchPacketProcessed(info);
+  ++total_dispatched_;
+  qs.push_entry(std::move(dp));
+}
+
 void CommandProcessor::fail_pm4_queue(Pm4SubmitQueue &queue, Pm4DispatchState &qs) {
   queue.faulted = true;
   // The CP owns the queue lock and CU workers have rejoined. Stop all resident
@@ -3124,6 +3221,8 @@ void CommandProcessor::fail_pm4_queue(Pm4SubmitQueue &queue, Pm4DispatchState &q
     if (submission.complete)
       submission.complete(false);
   queue.pm4->submissions.clear();
+  queue.pm4->draw.reset();
+  queue.pm4->indirect_draw.reset();
 }
 
 void CommandProcessor::fetch_pm4(Pm4SubmitQueue &queue, Pm4DispatchState &qs, simdojo::Tick now) {
@@ -3141,12 +3240,92 @@ void CommandProcessor::fetch_pm4(Pm4SubmitQueue &queue, Pm4DispatchState &qs, si
     const auto access = snapshot_gpu_access(queue.address_space);
     if (!access)
       throw std::runtime_error("PM4 queue has no GPU address space");
+    const auto read_indices = [&](uint64_t base, uint32_t available, uint32_t count) {
+      if (count > (1u << 20))
+        throw std::runtime_error("unsupported graphics index count");
+      const uint32_t type = state.uconfig_registers[0x243] & 3;
+      if (type > 2)
+        throw std::runtime_error("unsupported graphics index type");
+      const uint32_t bytes = type == 0 ? 2 : type == 1 ? 4 : 1;
+      const uint32_t valid = std::min(available, count);
+      flush_gpu_caches();
+      std::vector<uint8_t> data(valid * bytes);
+      if (!data.empty() &&
+          access->read(base, std::as_writable_bytes(std::span{data})) != VmAccessOutcome::Complete)
+        throw std::runtime_error("graphics index read failed");
+      std::vector<uint32_t> indices(count);
+      for (uint32_t i = 0; i < valid; ++i)
+        for (uint32_t b = 0; b < bytes; ++b)
+          indices[i] |= uint32_t{data[i * bytes + b]} << (b * 8);
+      return indices;
+    };
+    if (state.draw) {
+      flush_gpu_caches();
+      CpuDispatchPool *raster_pool = nullptr;
+      if (dispatch_threads_ > 1 && plugin_group_->empty()) {
+        if (shared_dispatch_pool_) {
+          raster_pool = shared_dispatch_pool_;
+        } else {
+          if (!local_dispatch_pool_ || local_dispatch_pool_->thread_count() < dispatch_threads_)
+            local_dispatch_pool_ = std::make_unique<CpuDispatchPool>(dispatch_threads_);
+          raster_pool = local_dispatch_pool_.get();
+        }
+      }
+      const bool allow_ram_read_batching =
+          plugin_group_->empty() &&
+          std::ranges::none_of(cus_, [](const auto *cu) { return cu->debug_active(); });
+      if (auto dp = state.draw->advance(*access, raster_pool, dispatch_threads_,
+                                        allow_ram_read_batching, allow_ram_read_batching)) {
+        dispatch_graphics_pm4(queue, qs, std::move(*dp));
+        return;
+      }
+      state.occlusion_samples += state.draw->occlusion_samples();
+      state.draw.reset();
+    }
     // Bound one event's packet work, including IB chains.
     for (uint32_t budget = 0; budget < 4096 && !state.submissions.empty(); ++budget) {
       auto &submission = state.submissions.front();
       if (submission.ready && !submission.ready()) {
         arm_stall_recheck(now);
         return;
+      }
+      if (state.indirect_draw) {
+        auto &draw = *state.indirect_draw;
+        if (draw.next == draw.count) {
+          state.indirect_draw.reset();
+          continue;
+        }
+        // Read each record after its predecessor retires, so shader writes to
+        // subsequent indirect arguments observe the same command ordering.
+        std::array<uint32_t, 5> arguments{};
+        flush_gpu_caches();
+        const uint64_t offset = uint64_t{draw.next} * draw.stride;
+        if (draw.arguments > UINT64_MAX - offset ||
+            access->read(draw.arguments + offset, std::as_writable_bytes(std::span{arguments})) !=
+                VmAccessOutcome::Complete)
+          throw std::runtime_error("PM4 indexed indirect arguments read failed");
+        state.num_instances = arguments[1];
+        state.sh_registers[draw.vertex_register] = arguments[3];
+        state.sh_registers[draw.instance_register] = arguments[4];
+        if (draw.first_index_register)
+          state.sh_registers[*draw.first_index_register] = arguments[2];
+        if (draw.draw_index_register)
+          state.sh_registers[*draw.draw_index_register] = draw.next;
+        ++draw.next;
+        if (!arguments[0] || !arguments[1])
+          continue;
+        const uint32_t type = state.uconfig_registers[0x243] & 3;
+        const uint32_t bytes = type == 0 ? 2 : type == 1 ? 4 : 1;
+        const uint64_t first = uint64_t{arguments[2]} * bytes;
+        if (state.index_base > UINT64_MAX - first)
+          throw std::runtime_error("PM4 indexed indirect index address overflow");
+        const uint32_t available =
+            arguments[2] < state.index_buffer_size ? state.index_buffer_size - arguments[2] : 0;
+        auto indices = read_indices(state.index_base + first, available, arguments[0]);
+        draw_pm4(queue, qs, arguments[0], std::move(indices));
+        if (!qs.entries.empty())
+          return;
+        continue;
       }
       if (submission.buffers.empty()) {
         flush_gpu_caches();
@@ -3570,6 +3749,16 @@ void CommandProcessor::fetch_pm4(Pm4SubmitQueue &queue, Pm4DispatchState &qs, si
         require(7);
         flush_gpu_caches();
         break;
+      case Pm4Opcode::EventWriteZpass:
+        require(2);
+        if (!submission.graphics_engine || cus_.empty() ||
+            (cus_[0]->config().arch != ROCJITSU_CODE_ARCH_RDNA3 &&
+             cus_[0]->config().arch != ROCJITSU_CODE_ARCH_RDNA3_5 &&
+             cus_[0]->config().arch != ROCJITSU_CODE_ARCH_RDNA4))
+          throw std::runtime_error("unsupported PM4 EVENT_WRITE_ZPASS engine or architecture");
+        // GFX11+ also encodes PIXEL_PIPE_STAT_DUMP with just its destination.
+        words.insert(words.begin(), 57u | (1u << 8));
+        [[fallthrough]];
       case Pm4Opcode::EventWrite: {
         const uint32_t event = words[0] & 0x3f;
         const uint32_t event_index = (words[0] >> 8) & 15;
@@ -3590,9 +3779,38 @@ void CommandProcessor::fetch_pm4(Pm4SubmitQueue &queue, Pm4DispatchState &qs, si
             throw std::runtime_error("PM4 streamout query write failed");
           break;
         }
+        if (submission.graphics_engine && event == 57) {
+          // PIXEL_PIPE_STAT_DUMP writes enabled occlusion counter instances.
+          require(3);
+          if (words[0] != (57u | (1u << 8)) || (words[1] & 7) ||
+              state.unsupported_pixel_counter_mode || !state.pixel_counter_instances)
+            throw std::runtime_error("unsupported PM4 occlusion query event");
+          flush_gpu_caches();
+          const uint64_t mask = state.pixel_counter_instances;
+          if (address(1) > UINT64_MAX - 16 * std::bit_width(mask))
+            throw std::runtime_error("PM4 occlusion query address overflow");
+          for (int instance = 0; instance < std::bit_width(mask); ++instance) {
+            if (!(mask & (uint64_t{1} << instance)))
+              continue;
+            // The rasterizer has one logical sample counter. Publish its sum
+            // in the first enabled instance and valid zeroes in the others.
+            const uint64_t value =
+                (uint64_t{1} << 63) |
+                (instance == std::countr_zero(mask) ? state.occlusion_samples : 0);
+            if (access->write(address(1) + 16 * instance, std::as_bytes(std::span{&value, 1})) !=
+                VmAccessOutcome::Complete)
+              throw std::runtime_error("PM4 occlusion query write failed");
+          }
+          break;
+        }
         if (submission.graphics_engine && event == 56) {
           // PIXEL_PIPE_STAT_CONTROL configures graphics counters, not a memory write.
           require(3);
+          // Mesa's ordinary preamble selects counter 0 and a 128-bit stride.
+          // Instance-enable bits do not mean an occlusion query is active.
+          state.unsupported_pixel_counter_mode =
+              words[0] != (56u | (1u << 8)) || (words[1] & 0x7ffu) != (2u << 9);
+          state.pixel_counter_instances = (uint64_t{words[2]} << 21) | (words[1] >> 11);
           break;
         }
         require(1);
@@ -3603,6 +3821,8 @@ void CommandProcessor::fetch_pm4(Pm4SubmitQueue &queue, Pm4DispatchState &qs, si
               (event == 15 || event == 16 || event == 36 || event == 38 || event == 44 ||
                event == 46 || event == 49)))
           throw std::runtime_error(std::format("unsupported PM4 EVENT_WRITE event {}", event));
+        if (event == 23 || event == 24)
+          state.performance_counters_active = event == 23;
         flush_gpu_caches();
         break;
       }
@@ -3667,6 +3887,84 @@ void CommandProcessor::fetch_pm4(Pm4SubmitQueue &queue, Pm4DispatchState &qs, si
         if (words[2] & (1u << 20))
           submission.buffers.pop_front();
         submission.buffers.push_front({address(0), words[2] & 0xfffff, depth});
+        break;
+      }
+      case Pm4Opcode::NumInstances:
+        require(1);
+        if (!submission.graphics_engine)
+          throw std::runtime_error("NUM_INSTANCES on compute engine");
+        state.num_instances = words[0];
+        break;
+      case Pm4Opcode::DrawIndexAuto:
+        require(2);
+        if (!submission.graphics_engine || words[1] != 2)
+          throw std::runtime_error("unsupported DRAW_INDEX_AUTO initiator");
+        draw_pm4(queue, qs, words[0]);
+        if (!qs.entries.empty())
+          return;
+        break;
+      case Pm4Opcode::IndexBase:
+        require(2);
+        if (!submission.graphics_engine || (words[0] & 1))
+          throw std::runtime_error("unsupported INDEX_BASE packet");
+        state.index_base = address(0);
+        break;
+      case Pm4Opcode::IndexBufferSize:
+        require(1);
+        if (!submission.graphics_engine)
+          throw std::runtime_error("INDEX_BUFFER_SIZE on compute engine");
+        state.index_buffer_size = words[0];
+        break;
+      case Pm4Opcode::DrawIndexIndirect:
+      case Pm4Opcode::DrawIndexIndirectMulti: {
+        const bool multi = opcode == uint32_t(Pm4Opcode::DrawIndexIndirectMulti);
+        require(multi ? 9 : 4);
+        if (!submission.graphics_engine || words.back() || (words[0] & 3) ||
+            (words[2] & (multi ? 0xffff0000u : 0xefff0000u)) ||
+            (multi && ((words[3] & ~0xf000ffffu) || (words[7] & 3))))
+          throw std::runtime_error("unsupported indexed indirect draw packet");
+        Pm4QueueState::IndirectDraw draw;
+        if (state.indirect_base > UINT64_MAX - words[0])
+          throw std::runtime_error("PM4 indexed indirect argument address overflow");
+        draw.arguments = state.indirect_base + words[0];
+        draw.vertex_register = words[1] & 0xffff;
+        draw.instance_register = words[2] & 0xffff;
+        draw.count = multi ? words[4] : 1;
+        draw.stride = multi ? words[7] : 20;
+        if ((multi ? words[3] : words[2]) & (1u << 28))
+          draw.first_index_register = words[1] >> 16;
+        else if (words[1] >> 16)
+          throw std::runtime_error("unsupported indexed indirect first-index register");
+        if (multi && (words[3] & (1u << 31)))
+          draw.draw_index_register = words[3] & 0xffff;
+        if (draw.vertex_register >= state.sh_registers.size() ||
+            draw.instance_register >= state.sh_registers.size() ||
+            (draw.first_index_register &&
+             *draw.first_index_register >= state.sh_registers.size()) ||
+            (draw.draw_index_register && *draw.draw_index_register >= state.sh_registers.size()))
+          throw std::runtime_error("indexed indirect draw register outside SH aperture");
+        if (multi && (words[3] & (1u << 30))) {
+          uint32_t count = 0;
+          flush_gpu_caches();
+          if ((words[5] & 3) ||
+              access->read(address(5), std::as_writable_bytes(std::span{&count, 1})) !=
+                  VmAccessOutcome::Complete)
+            throw std::runtime_error("PM4 indexed indirect count read failed");
+          draw.count = std::min(draw.count, count);
+        }
+        if (draw.count > (1u << 20))
+          throw std::runtime_error("indexed indirect draw count exceeds simulator limit");
+        state.indirect_draw = draw;
+        break;
+      }
+      case Pm4Opcode::DrawIndex2: {
+        require(5);
+        if (!submission.graphics_engine || words[4])
+          throw std::runtime_error("unsupported DRAW_INDEX_2 initiator");
+        auto indices = read_indices(address(1), words[0], words[3]);
+        draw_pm4(queue, qs, words[3], std::move(indices));
+        if (!qs.entries.empty())
+          return;
         break;
       }
       case Pm4Opcode::DispatchDirectInterleaved:

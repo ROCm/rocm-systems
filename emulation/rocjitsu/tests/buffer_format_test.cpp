@@ -37,6 +37,7 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_buffer.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/hwfloat/unorm.h"
 #include "rocjitsu/vm/amdgpu/buffer_format.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -49,9 +50,12 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <bit>
+#include <cerrno>
 #include <cfenv>
+#include <cmath>
 #include <cstdint>
 #include <memory>
 
@@ -78,6 +82,17 @@ TEST(BufferFormatTest, UnpacksNormalizedSignedHalfAndPackedChannels) {
             (std::array<uint32_t, 4>{bits(1), bits(2), bits(0.5f), 0}));
 }
 
+TEST(BufferFormatTest, CountsStoredComponentsForNarrowAndPackedFormats) {
+  for (uint32_t format : {20u, 21u, 22u})
+    EXPECT_EQ(amdgpu::decode_buffer_format(format).value().component_count(), 1u);
+  for (uint32_t format : {48u, 49u, 50u})
+    EXPECT_EQ(amdgpu::decode_buffer_format(format).value().component_count(), 2u);
+  EXPECT_EQ(amdgpu::decode_buffer_format(30).value().component_count(), 3u);
+  for (uint32_t format : {42u, 43u, 44u, 45u, 46u, 47u})
+    EXPECT_EQ(amdgpu::decode_buffer_format(format).value().component_count(), 4u);
+  EXPECT_EQ(amdgpu::decode_buffer_format(0).value().component_count(), 0u);
+}
+
 TEST(BufferFormatTest, PacksConvertedComponentsAndReplicatesMissingShaderValues) {
   std::array<uint8_t, 4> bytes{};
   const std::array<uint32_t, 4> values{bits(-2), bits(0.5f), bits(1), bits(2)};
@@ -92,6 +107,103 @@ TEST(BufferFormatTest, PacksConvertedComponentsAndReplicatesMissingShaderValues)
   const std::array<uint32_t, 3> floats{bits(1), bits(2), bits(0.5f)};
   ASSERT_TRUE(amdgpu::pack_buffer_format(30, identity, floats, bytes).succeeded());
   EXPECT_EQ(std::bit_cast<uint32_t>(bytes), (15u << 6) | ((16u << 6) << 11) | ((14u << 5) << 22));
+}
+
+TEST(BufferFormatTest, UnormBitsClampClassifyAndRoundQuantizationEdges) {
+  constexpr std::array<uint32_t, 4> widths{2, 8, 10, 16};
+  struct Case {
+    uint32_t input;
+    std::array<uint32_t, 4> expected;
+  };
+  constexpr Case cases[] = {
+      {0x00000000, {0, 0, 0, 0}},          {0x80000000, {0, 0, 0, 0}},
+      {0x00000001, {0, 0, 0, 0}},          {0x007fffff, {0, 0, 0, 0}},
+      {0x00800000, {0, 0, 0, 0}},          {0xbf000000, {0, 0, 0, 0}},
+      {0x7f800001, {0, 0, 0, 0}},          {0xff800001, {0, 0, 0, 0}},
+      {0x7fc00000, {0, 0, 0, 0}},          {0xffffffff, {0, 0, 0, 0}},
+      {0xff800000, {0, 0, 0, 0}},          {0x7f800000, {3, 255, 1023, 65535}},
+      {0x3f7fffff, {3, 255, 1023, 65535}}, {0x3f800000, {3, 255, 1023, 65535}},
+      {0x3f800001, {3, 255, 1023, 65535}}, {0x3effffff, {1, 127, 511, 32767}},
+      {0x3f000000, {2, 128, 512, 32768}},  {0x3f000001, {2, 128, 512, 32768}},
+      {0x3e2aaaaa, {0, 42, 170, 10922}},   {0x3e2aaaab, {1, 43, 171, 10923}},
+      {0x3b008080, {0, 0, 2, 128}},        {0x3b008081, {0, 1, 2, 129}},
+      {0x3a002008, {0, 0, 0, 32}},         {0x3a002009, {0, 0, 1, 32}},
+      {0x37000080, {0, 0, 0, 0}},          {0x37000081, {0, 0, 0, 1}}};
+  for (const auto &test : cases)
+    for (size_t i = 0; i < widths.size(); ++i)
+      EXPECT_EQ(amdgpu::hwfloat::unorm_from_f32(test.input, widths[i]), test.expected[i])
+          << "input=" << std::hex << test.input << " width=" << std::dec << widths[i];
+  EXPECT_FALSE(amdgpu::hwfloat::supports_unorm_width(11));
+  EXPECT_FALSE(amdgpu::hwfloat::supports_unorm_width(32));
+}
+
+TEST(BufferFormatTest, UnormBitsMatchPreviousDoubleQuantization) {
+  const amdgpu::fp_mode::detail::ScopedFenv environment(0);
+  const auto reference = [](uint32_t input, uint32_t width) {
+    const float value = std::bit_cast<float>(input);
+    const double number = std::isnan(value) ? 0 : value;
+    const double scaled = std::clamp(number, 0.0, 1.0) * ((1u << width) - 1);
+    const double lo = std::floor(scaled), fraction = scaled - lo;
+    return static_cast<uint32_t>(lo +
+                                 (fraction > 0.5 || (fraction == 0.5 && std::fmod(lo, 2.0) != 0)));
+  };
+  for (uint32_t width : {2u, 8u, 10u, 16u}) {
+    uint32_t random = 0x73b521e9;
+    for (uint32_t i = 0; i < 8192; ++i) {
+      random ^= random << 13;
+      random ^= random >> 17;
+      random ^= random << 5;
+      ASSERT_EQ(amdgpu::hwfloat::unorm_from_f32(random, width), reference(random, width));
+    }
+    const uint32_t maximum = (1u << width) - 1;
+    for (uint32_t integer = 0; integer < maximum; ++integer) {
+      const uint32_t midpoint = bits(static_cast<float>((double(integer) + 0.5) / maximum));
+      for (uint32_t input : {midpoint - 1, midpoint, midpoint + 1})
+        ASSERT_EQ(amdgpu::hwfloat::unorm_from_f32(input, width), reference(input, width))
+            << "input=" << std::hex << input << " width=" << std::dec << width;
+    }
+  }
+}
+
+TEST(BufferFormatTest, UnormStoresPreserveHostEnvironmentAndWiderFormatRounding) {
+  const amdgpu::fp_mode::detail::ScopedFenv restore_environment(0);
+  using E = amdgpu::BufferFormatEncoding;
+  for (int mode : {FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO}) {
+    for (uint32_t flush = 0; flush < 4; ++flush) {
+      ASSERT_EQ(std::fesetround(mode), 0);
+      ASSERT_EQ(std::feclearexcept(FE_ALL_EXCEPT), 0);
+      ASSERT_EQ(std::feraiseexcept(FE_INVALID | FE_DIVBYZERO), 0);
+#if defined(__x86_64__) || defined(__i386__)
+      _mm_setcsr((_mm_getcsr() & ~((1u << 6) | (1u << 15))) | ((flush & 1) ? 1u << 6 : 0) |
+                 ((flush & 2) ? 1u << 15 : 0));
+      const auto before_mxcsr = _mm_getcsr();
+#endif
+      const std::array<uint32_t, 4> input{0x7f800001, 0x3f000000, 0x7f800000, 0x80000001};
+      std::array<uint8_t, 8> bytes{};
+      ASSERT_TRUE(
+          amdgpu::pack_buffer_format(42, identity, input, std::span(bytes).first(4)).succeeded());
+      EXPECT_EQ(bytes, (std::array<uint8_t, 8>{0, 128, 255, 0, 0, 0, 0, 0}));
+      ASSERT_TRUE(amdgpu::pack_buffer_format(51, identity, input, bytes).succeeded());
+      EXPECT_EQ(bytes, (std::array<uint8_t, 8>{0, 0, 0, 128, 255, 255, 0, 0}));
+      constexpr uint32_t reverse = 7 | (6 << 3) | (5 << 6) | (4 << 9);
+      ASSERT_TRUE(
+          amdgpu::pack_buffer_format(36, reverse, input, std::span(bytes).first(4)).succeeded());
+      EXPECT_EQ((std::array<uint8_t, 4>{bytes[0], bytes[1], bytes[2], bytes[3]}),
+                (std::array<uint8_t, 4>{0, 252, 15, 32}));
+      // Width 32 deliberately retains the existing double intermediate. Exact
+      // integer quantization would differ here because of double rounding.
+      const std::array<uint32_t, 1> wide{0x3f000001};
+      ASSERT_TRUE(amdgpu::pack_buffer_format(4, identity, wide, std::span(bytes).first(4), E::Gfx9)
+                      .succeeded());
+      EXPECT_EQ((std::array<uint8_t, 4>{bytes[0], bytes[1], bytes[2], bytes[3]}),
+                (std::array<uint8_t, 4>{0, 1, 0, 128}));
+      EXPECT_EQ(std::fegetround(), mode);
+      EXPECT_EQ(std::fetestexcept(FE_ALL_EXCEPT), FE_INVALID | FE_DIVBYZERO);
+#if defined(__x86_64__) || defined(__i386__)
+      EXPECT_EQ(_mm_getcsr(), before_mxcsr);
+#endif
+    }
+  }
 }
 
 TEST(BufferFormatTest, SelectorsAndOobConstantsRespectNumericType) {
@@ -433,6 +545,424 @@ protected:
     ASSERT_EQ(pipeline.issue(inst, *wf), amdgpu::VmAccessOutcome::Complete);
   }
 };
+
+TEST(BufferFormatTest, Unorm8FirstDestinationSeesDecodeExceptions) {
+  using Base = amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, rdna3::Isa>;
+  class RecordingCu final : public Base {
+  public:
+    using Base::Base;
+    int first_flags = -1;
+    size_t first_chunks = 0;
+    void write_vgpr(uint32_t reg, uint32_t lane, uint32_t value) override {
+      if (first_flags == -1) {
+        first_flags = std::fetestexcept(FE_ALL_EXCEPT);
+        first_chunks = vgpr_file().materialized_chunk_count();
+      }
+      Base::write_vgpr(reg, lane, value);
+    }
+  };
+  const amdgpu::fp_mode::detail::ScopedFenv restore_environment(0);
+  amdgpu::GpuMemory memory("unorm_first_touch");
+  amdgpu::L2Cache l2("l2");
+  l2.set_backing_memory(&memory);
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_RDNA3;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 106;
+  config.vgprs_per_wf = 32;
+  config.lds_size_kb = 64;
+  RecordingCu cu("cu", config, &memory, &l2);
+  auto *wf = cu.dispatch_wf(0, 0, 106, 32);
+  ASSERT_NE(wf, nullptr);
+  amdgpu::VectorMemState state(amdgpu::GLOBAL_MEM);
+  state.wf_size = 32;
+  state.exec_mask = state.lane_mask = 1;
+  state.elem_size = state.buffer_components = 4;
+  state.buffer_selectors = identity;
+  state.decoded_buffer_format = amdgpu::decode_buffer_format(42).value();
+  state.image_sampling = true;
+  state.dst_reg_base = wf->vgpr_alloc().base + 8;
+  state.image_sample = std::make_unique<amdgpu::ImageSampleAccess>();
+  auto &sample = *state.image_sample;
+  sample.tap_count = sample.taps_per_filter = 4;
+  sample.texels_per_tap = sample.filter_counts[0] = 1;
+  sample.taps.resize(4);
+  sample.filters.resize(1);
+  for (auto &tap : sample.taps)
+    tap.lane_mask = 1;
+  sample.filters[0].fractions[0][0] = {0.0f, 0.0f};
+  state.response_data.assign(4 * state.wf_size * state.elem_size, 1);
+  ASSERT_EQ(std::feclearexcept(FE_ALL_EXCEPT), 0);
+  amdgpu::complete_buffer_format_load(*wf, cu, state);
+  EXPECT_EQ(cu.first_chunks, 0u);
+  // Decoding 1/255 raises inexact before the first lazy allocation. The
+  // completion's environment guard restores the caller only after all writes.
+  EXPECT_EQ(cu.first_flags, FE_INEXACT);
+  EXPECT_EQ(std::fetestexcept(FE_ALL_EXCEPT), 0);
+  EXPECT_EQ(cu.read_vgpr(state.dst_reg_base, 0), 0x3b808081u);
+  wf->halt();
+}
+
+TEST_P(BufferFormatExecutionTest, Unorm8FilteringMatchesWidenedAlphaReference) {
+  // Widening A to UNORM16 forces the generic decoder while preserving every
+  // UNORM8 input exactly: byte * 257 / 65535 == byte / 255. The filter still
+  // uses eight-bit texel units because R remains eight bits.
+  const amdgpu::fp_mode::detail::ScopedFenv restore_environment(0);
+  uint32_t seed = 0x53a92017;
+  const auto random = [&] { return seed = seed * 1664525u + 1013904223u; };
+  for (uint32_t test = 0; test < 384; ++test) {
+    SCOPED_TRACE(test);
+    const uint32_t format_id = std::array{1u, 14u, 42u}[test % 3];
+    const auto format = amdgpu::decode_buffer_format(format_id).value();
+    const uint32_t channels = format.component_count();
+    const uint32_t filters = std::array{1u, 3u, 16u}[(test / 3) % 3];
+    const uint32_t sources = (test / 9) % 2 ? 3 : 1;
+    const uint32_t levels = (test / 18) % 2 + 1;
+    const uint32_t taps = filters * levels * 4 * sources;
+    amdgpu::VectorMemState fast(amdgpu::GLOBAL_MEM), reference(amdgpu::GLOBAL_MEM);
+    for (auto *state : {&fast, &reference}) {
+      state->wf_size = 4;
+      state->exec_mask = 0b1101;
+      state->lane_mask = 0b0101; // Lane 3 completes with invalid texels.
+      state->elem_size = channels;
+      state->buffer_components = test % 4 + 1;
+      state->buffer_d16 = test & 1;
+      state->buffer_format = format_id;
+      state->decoded_buffer_format = format;
+      for (uint32_t c = 0; c < 4; ++c)
+        state->buffer_selectors |= ((test / 4 + c) % 8) << (3 * c);
+      state->image_sampling = true;
+      state->dst_reg_base = wf->vgpr_alloc().base + 8;
+      state->image_sample = std::make_unique<amdgpu::ImageSampleAccess>();
+      auto &sample = *state->image_sample;
+      sample.tap_count = taps;
+      sample.texels_per_tap = sources;
+      sample.taps_per_filter = levels * 4 * sources;
+      sample.border_color = (test / 36) % 3;
+      sample.taps.resize(taps);
+      sample.filters.resize(filters);
+      for (uint32_t lane = 0; lane < 4; ++lane) {
+        sample.filter_counts[lane] = lane == 2 ? 1 : filters;
+        sample.mip_fractions[lane] = test % 3 == 0 ? 0 : test % 3 == 1 ? 1 : 113.0f / 256;
+      }
+    }
+    reference.decoded_buffer_format.widths[3] = 16;
+    reference.elem_size += channels == 4 ? 1 : 2;
+    for (uint32_t filter = 0; filter < filters; ++filter)
+      for (uint32_t lane = 0; lane < 4; ++lane)
+        for (uint32_t level = 0; level < levels; ++level) {
+          auto &f = fast.image_sample->filters[filter];
+          f.fractions[lane][level] = {(random() & 255) / 256.0f, (random() & 255) / 256.0f};
+          f.cube_corners[lane][level] = sources == 3 ? random() & 15 : 0;
+          reference.image_sample->filters[filter] = f;
+        }
+    fast.response_data.resize(taps * 4 * fast.elem_size);
+    reference.response_data.resize(taps * 4 * reference.elem_size);
+    for (uint32_t tap = 0; tap < taps; ++tap) {
+      const uint64_t lane_mask = random() & 15;
+      fast.image_sample->taps[tap].lane_mask = lane_mask;
+      reference.image_sample->taps[tap].lane_mask = lane_mask;
+      for (uint32_t lane = 0; lane < 4; ++lane) {
+        const uint32_t original = (tap * 4 + lane) * fast.elem_size;
+        const uint32_t widened = (tap * 4 + lane) * reference.elem_size;
+        for (uint32_t c = 0; c < channels; ++c) {
+          const uint8_t value = random() >> 24;
+          fast.response_data[original + c] = value;
+          reference.response_data[widened + c] = value;
+          if (c == 3)
+            reference.response_data[widened + c + 1] = value;
+        }
+      }
+    }
+    const uint32_t registers =
+        fast.buffer_d16 ? (fast.buffer_components + 1) / 2 : fast.buffer_components;
+    const int mode = std::array{FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO}[test % 4];
+    ASSERT_EQ(std::fesetround(mode), 0);
+    ASSERT_EQ(std::feclearexcept(FE_ALL_EXCEPT), 0);
+    ASSERT_EQ(std::feraiseexcept(FE_INVALID), 0);
+    std::array<std::array<uint32_t, 4>, 4> expected{};
+    for (const auto *state : {&reference, &fast}) {
+      for (uint32_t reg = 0; reg < registers; ++reg)
+        for (uint32_t lane = 0; lane < 4; ++lane)
+          cu->write_vgpr(state->dst_reg_base + reg, lane, 0xa57ec031);
+      amdgpu::complete_buffer_format_load(*wf, *cu, *state);
+      EXPECT_EQ(std::fegetround(), mode);
+      EXPECT_EQ(std::fetestexcept(FE_ALL_EXCEPT), FE_INVALID);
+      for (uint32_t reg = 0; reg < registers; ++reg)
+        for (uint32_t lane = 0; lane < 4; ++lane) {
+          const uint32_t value = cu->read_vgpr(state->dst_reg_base + reg, lane);
+          if (state == &reference)
+            expected[reg][lane] = value;
+          else
+            EXPECT_EQ(value, expected[reg][lane]) << "reg=" << reg << " lane=" << lane;
+        }
+    }
+  }
+}
+
+TEST_P(BufferFormatExecutionTest, Unorm8SingleFilterKeepsQ8BoundariesAndFallback) {
+  const amdgpu::fp_mode::detail::ScopedFenv restore_environment(0);
+  // Include adjacent FP32 values around the Q8 lattice. Non-Q8 descriptors
+  // must retain the general filter, including both mips' separate rounding.
+  constexpr std::array<uint32_t, 16> fraction_bits{0,          0x80000000, 0x3a800000, 0x3b7fffff,
+                                                   0x3b800000, 0x3b800001, 0x3c400000, 0x3c800000,
+                                                   0x3cc00000, 0x3effffff, 0x3f000000, 0x3f000001,
+                                                   0x3f7effff, 0x3f7f0000, 0x3f7fffff, 0x3f800000};
+  for (uint32_t test = 0; test < fraction_bits.size() * 8; ++test) {
+    SCOPED_TRACE(test);
+    const uint32_t levels = test < 2 ? 2 : 1 + (test / fraction_bits.size()) % 2;
+    const uint32_t taps = levels * 4;
+    amdgpu::VectorMemState fast(amdgpu::GLOBAL_MEM), reference(amdgpu::GLOBAL_MEM);
+    for (auto *state : {&fast, &reference}) {
+      state->wf_size = 4;
+      state->exec_mask = test >= 2 && (test & 1) ? 0b1010 : 0b1101;
+      state->lane_mask = test >= 2 && (test & 1) ? 0b1010 : 0b0101;
+      state->elem_size = 4;
+      state->buffer_components = test < 2 ? 4 : 1 + (test / 4) % 4;
+      state->buffer_d16 = (test / (fraction_bits.size() * 2)) & 1;
+      state->d16_hi = state->buffer_d16 && (test & 2);
+      state->lds_dst = (test / (fraction_bits.size() * 4)) & 1;
+      state->lds_base = 256;
+      state->buffer_selectors = identity;
+      state->decoded_buffer_format = amdgpu::decode_buffer_format(42).value();
+      state->image_sampling = true;
+      state->dst_reg_base = wf->vgpr_alloc().base + 8;
+      state->image_sample = std::make_unique<amdgpu::ImageSampleAccess>();
+      auto &sample = *state->image_sample;
+      sample.tap_count = sample.taps_per_filter = taps;
+      sample.texels_per_tap = 1;
+      sample.border_color = test % 3;
+      sample.taps.resize(taps);
+      sample.filters.resize(1);
+      for (uint32_t lane = 0; lane < 4; ++lane) {
+        sample.filter_counts[lane] = 1;
+        sample.mip_fractions[lane] =
+            std::bit_cast<float>(fraction_bits[(test + 3 * lane) % fraction_bits.size()]);
+        for (uint32_t level = 0; level < levels; ++level)
+          sample.filters[0].fractions[lane][level] = {
+              std::bit_cast<float>(fraction_bits[(test + level) % fraction_bits.size()]),
+              std::bit_cast<float>(fraction_bits[(test + lane + 5) % fraction_bits.size()])};
+      }
+      if (test < 2) {
+        // Q16 values (4,5) with mip=1/256 round to Q19 (32,0),
+        // then Q13 zero. Rounding their combined product would give one.
+        // (12,11) rounds through (96,0), then Q13 two, not one.
+        sample.mip_fractions[0] = 1.0f / 256;
+        sample.filters[0].fractions[0][0] = {1.0f / 256, (test ? 12.0f : 4.0f) / 256};
+        sample.filters[0].fractions[0][1] = {1.0f / 256, (test ? 11.0f : 5.0f) / 256};
+      }
+    }
+    // Independent existing path: widening alpha prevents integer-texel
+    // admission while byte * 257 / 65535 preserves the original UNORM8 value.
+    reference.decoded_buffer_format.widths[3] = 16;
+    reference.elem_size = 5;
+    fast.response_data.resize(taps * 4 * fast.elem_size);
+    reference.response_data.resize(taps * 4 * reference.elem_size);
+    for (uint32_t tap = 0; tap < taps; ++tap) {
+      const uint64_t lanes = tap % 3 == 1 ? 0b1001 : 0b1101;
+      fast.image_sample->taps[tap].lane_mask = lanes;
+      reference.image_sample->taps[tap].lane_mask = lanes;
+      for (uint32_t lane = 0; lane < 4; ++lane)
+        for (uint32_t c = 0; c < 4; ++c) {
+          const uint8_t value = c == 0   ? 0
+                                : c == 1 ? 255
+                                : c == 2 ? (tap == 3 || tap == 7)
+                                         : test * 19 + tap * 37;
+          fast.response_data[(tap * 4 + lane) * 4 + c] = value;
+          reference.response_data[(tap * 4 + lane) * 5 + c] = value;
+          if (c == 3)
+            reference.response_data[(tap * 4 + lane) * 5 + c + 1] = value;
+        }
+    }
+    const uint32_t registers =
+        fast.buffer_d16 ? (fast.buffer_components + 1) / 2 : fast.buffer_components;
+    for (const int mode : {FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO}) {
+      SCOPED_TRACE(mode);
+      std::array<std::array<uint32_t, 4>, 4> expected{};
+      for (const auto *state : {&reference, &fast}) {
+        for (uint32_t reg = 0; reg < registers; ++reg)
+          for (uint32_t lane = 0; lane < 4; ++lane) {
+            constexpr uint32_t sentinel = 0xa57ec031;
+            cu->write_vgpr(state->dst_reg_base + reg, lane, sentinel);
+            wf->lds().write(state->lds_base + (lane * registers + reg) * 4,
+                            reinterpret_cast<const uint8_t *>(&sentinel), 4);
+          }
+        ASSERT_EQ(std::fesetround(mode), 0);
+        ASSERT_EQ(std::feclearexcept(FE_ALL_EXCEPT), 0);
+        ASSERT_EQ(std::feraiseexcept(FE_INVALID | FE_DIVBYZERO), 0);
+        errno = EILSEQ;
+        amdgpu::complete_buffer_format_load(*wf, *cu, *state);
+        const int saved_errno = errno;
+        EXPECT_EQ(std::fegetround(), mode);
+        EXPECT_EQ(std::fetestexcept(FE_ALL_EXCEPT), FE_INVALID | FE_DIVBYZERO);
+        EXPECT_EQ(saved_errno, EILSEQ);
+        for (uint32_t reg = 0; reg < registers; ++reg)
+          for (uint32_t lane = 0; lane < 4; ++lane) {
+            uint32_t value = 0;
+            if (state->lds_dst)
+              static_cast<const amdgpu::Lds &>(wf->lds()).read(
+                  state->lds_base + (lane * registers + reg) * 4,
+                  reinterpret_cast<uint8_t *>(&value), 4);
+            else
+              value = cu->read_vgpr(state->dst_reg_base + reg, lane);
+            if (state == &reference)
+              expected[reg][lane] = value;
+            else
+              EXPECT_EQ(value, expected[reg][lane]) << "reg=" << reg << " lane=" << lane;
+          }
+      }
+    }
+  }
+}
+
+TEST_P(BufferFormatExecutionTest, FixedUnormCompletionMatchesQualifiedScalingBoundaries) {
+  if (GetParam() != ROCJITSU_CODE_ARCH_RDNA3 && GetParam() != ROCJITSU_CODE_ARCH_RDNA3_5 &&
+      GetParam() != ROCJITSU_CODE_ARCH_RDNA4)
+    GTEST_SKIP() << "Fixed texture filtering is qualified on RDNA3/4";
+  const amdgpu::fp_mode::detail::ScopedFenv restore_environment(0);
+  // Retain the previous scaling and final conversion as the reference. A
+  // direct bit encoder must match zero, exponent boundaries and carries.
+  const auto round_even = [](double value) {
+    const double lo = std::floor(value), fraction = value - lo;
+    return lo + (fraction > 0.5 || (fraction == 0.5 && std::fmod(lo, 2.0) != 0));
+  };
+  const auto normalize = [&](double filtered, uint32_t width, uint32_t count) {
+    const uint64_t rounded =
+        count > 1 ? static_cast<uint64_t>(std::floor(std::ldexp(filtered, 13) + 0.5)) /
+                        std::bit_floor(count)
+                  : static_cast<uint64_t>(round_even(std::ldexp(filtered, 13)));
+    const uint64_t numerator = rounded << (34 - 13 - width);
+    uint64_t normalized = 0;
+    for (uint32_t offset = 0; offset < 34; offset += width)
+      normalized += numerator >> offset;
+    const uint32_t significant = std::bit_width(normalized);
+    const uint32_t shift = significant > 24 ? significant - 24 : 0;
+    if (shift)
+      normalized = (normalized + (uint64_t{1} << (shift - 1))) >> shift;
+    return bits(static_cast<float>(
+        std::ldexp(static_cast<double>(normalized), static_cast<int>(shift) - 34)));
+  };
+  constexpr std::array fractions{0u, 1u, 3u, 4u, 5u, 127u, 128u, 129u, 255u, 256u};
+  for (const uint32_t format_id : {42u, 36u}) {
+    const uint32_t width = format_id == 42 ? 8 : 10, maximum = (1u << width) - 1;
+    for (uint32_t test = 0; test < 80; ++test) {
+      SCOPED_TRACE(format_id);
+      SCOPED_TRACE(test);
+      const bool q13_boundary = test >= 16 && test < 24;
+      const uint32_t count = q13_boundary ? 1 : std::array{1u, 3u, 16u}[test % 3];
+      const uint32_t levels = q13_boundary ? 1 : 1 + (test / 3) % 2;
+      const uint32_t sources = q13_boundary ? 1 : (test / 6) % 2 ? 3 : 1;
+      const uint32_t taps = count * levels * 4 * sources;
+      amdgpu::VectorMemState state(amdgpu::GLOBAL_MEM);
+      state.wf_size = 2;
+      state.exec_mask = state.lane_mask = 1;
+      state.elem_size = 4;
+      state.buffer_components = 4;
+      state.buffer_selectors = identity;
+      state.decoded_buffer_format = amdgpu::decode_buffer_format(format_id).value();
+      state.image_sampling = true;
+      state.dst_reg_base = wf->vgpr_alloc().base + 8;
+      state.image_sample = std::make_unique<amdgpu::ImageSampleAccess>();
+      auto &sample = *state.image_sample;
+      sample.tap_count = taps;
+      sample.taps_per_filter = levels * 4 * sources;
+      sample.texels_per_tap = sources;
+      sample.filter_counts[0] = count;
+      sample.mip_fractions[0] = fractions[(test / 2) % fractions.size()] / 256.0f;
+      sample.filters.resize(count);
+      sample.taps.resize(taps);
+      state.response_data.resize(taps * state.wf_size * state.elem_size);
+      std::vector<std::array<double, 4>> texels(taps);
+      for (uint32_t tap = 0; tap < taps; ++tap) {
+        sample.taps[tap].lane_mask = 1;
+        const uint32_t raw = test < 2    ? test * maximum
+                             : test < 12 ? std::min(maximum, 1u << (test - 2))
+                             : test < 32 ? uint32_t(tap % (4 * sources) == 3 * sources)
+                                         : (test * 131 + tap * 37) & maximum;
+        const std::array channels{raw, raw, raw, width == 10 ? raw & 3 : raw};
+        uint32_t packed = 0, offset = 0;
+        for (uint32_t c = 0; c < 4; ++c) {
+          const uint32_t channel_width = state.decoded_buffer_format.widths[c];
+          packed |= channels[c] << offset;
+          offset += channel_width;
+          // Keep the old unpack-to-FP32 then recover-texel conversion,
+          // including expansion of packed two-bit alpha to ten-bit units.
+          texels[tap][c] =
+              round_even(double(float(channels[c]) / ((1u << channel_width) - 1)) * maximum);
+        }
+        for (uint32_t byte = 0; byte < 4; ++byte)
+          state.response_data[tap * state.wf_size * 4 + byte] = packed >> (8 * byte);
+      }
+      for (uint32_t filter = 0; filter < count; ++filter)
+        for (uint32_t level = 0; level < levels; ++level) {
+          auto &f = sample.filters[filter];
+          f.fractions[0][level] = {fractions[(test + filter) % fractions.size()] / 256.0f,
+                                   fractions[(test / 2 + level) % fractions.size()] / 256.0f};
+          if (q13_boundary) {
+            // The lone unit texel contributes Y/8 in Q13: both even/odd
+            // midpoint ties and neighboring representable fractions.
+            constexpr std::array y{3u, 4u, 5u, 11u, 12u, 13u, 19u, 20u};
+            f.fractions[0][level] = {1.0f / 256, y[test - 16] / 256.0f};
+          }
+          f.cube_corners[0][level] = sources == 3 ? (test + filter + level) & 15 : 0;
+        }
+      std::array<uint32_t, 4> expected{};
+      for (uint32_t c = 0; c < 4; ++c) {
+        double sum = 0;
+        for (uint32_t filter = 0; filter < count; ++filter) {
+          std::array<double, 2> filtered{};
+          for (uint32_t level = 0; level < levels; ++level) {
+            const auto &f = sample.filters[filter];
+            const double x = f.fractions[0][level][0], y = f.fractions[0][level][1];
+            const std::array weights{(1 - x) * (1 - y), x * (1 - y), (1 - x) * y, x * y};
+            for (uint32_t tap = 0; tap < 4; ++tap) {
+              const uint32_t first = filter * sample.taps_per_filter + (level * 4 + tap) * sources;
+              double channel = texels[first][c];
+              if (f.cube_corners[0][level] & (1u << tap))
+                channel = (channel * 21846 + texels[first + 1][c] * 21845 +
+                           texels[first + 2][c] * 21845) /
+                          65536;
+              filtered[level] += channel * weights[tap];
+            }
+          }
+          double value = filtered[0];
+          if (levels == 2) {
+            const double fraction = sample.mip_fractions[0];
+            value = (round_even(std::ldexp(value * (1 - fraction), 19)) +
+                     round_even(std::ldexp(filtered[1] * fraction, 19))) /
+                    std::ldexp(1.0, 19);
+          }
+          if (count > 1) {
+            const uint32_t denominator = 128 * std::bit_ceil(count), residual = denominator % count;
+            const uint32_t first = (count - residual) / 2;
+            const uint32_t weight =
+                denominator / count + (filter >= first && filter < first + residual);
+            value = round_even(std::ldexp(
+                        value * (double(weight) / denominator) * std::bit_floor(count), 19)) /
+                    std::ldexp(1.0, 19);
+          }
+          sum += value;
+        }
+        expected[c] = normalize(sum, width, count);
+      }
+      for (const int mode : {FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO}) {
+        ASSERT_EQ(std::fesetround(mode), 0);
+        ASSERT_EQ(std::feclearexcept(FE_ALL_EXCEPT), 0);
+        ASSERT_EQ(std::feraiseexcept(FE_INVALID | FE_DIVBYZERO), 0);
+        for (uint32_t c = 0; c < 4; ++c)
+          cu->write_vgpr(state.dst_reg_base + c, 1, 0xa57ec031);
+        amdgpu::complete_buffer_format_load(*wf, *cu, state);
+        EXPECT_EQ(std::fegetround(), mode);
+        EXPECT_EQ(std::fetestexcept(FE_ALL_EXCEPT), FE_INVALID | FE_DIVBYZERO);
+        for (uint32_t c = 0; c < 4; ++c) {
+          EXPECT_EQ(cu->read_vgpr(state.dst_reg_base + c, 0), expected[c]) << "channel=" << c;
+          EXPECT_EQ(cu->read_vgpr(state.dst_reg_base + c, 1), 0xa57ec031);
+        }
+      }
+      ASSERT_EQ(std::fesetround(FE_TONEAREST), 0);
+    }
+  }
+}
 
 TEST_P(BufferFormatExecutionTest, NormalizedLoadsIgnoreAndRestoreHostRoundingMode) {
   const amdgpu::fp_mode::detail::ScopedFenv restore_environment(0);

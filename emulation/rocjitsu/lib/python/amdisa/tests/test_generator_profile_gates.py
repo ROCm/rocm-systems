@@ -8666,3 +8666,58 @@ def test_sdwa_conversion_result_formats():
         assert CodeGenerator._sdwa_result_format(semantics) == (
             f'amdgpu::sdwa::ResultFormat::{expected}'
         )
+
+
+@pytest.mark.parametrize('operation,enum_name', [('rcp', 'Rcp'), ('rsq', 'Rsq')])
+@pytest.mark.parametrize('form', ['vop1', 'vop3'])
+def test_reciprocal_f32_batch_keeps_native_fallback(operation, enum_name, form):
+    probe = simd_probe_line(f'v_{operation}_f32_{form}')
+    assert f'F32Operation::{enum_name}' in probe
+    assert 'ROCJITSU_TRY_SIMD_' in probe
+    assert probe.index('try_execute_transcendental_f32_simd') < probe.index(
+        'ROCJITSU_TRY_SIMD_'
+    )
+
+
+@pytest.mark.parametrize(
+    'template',
+    [
+        'v_rcp_iflag_f32_vop1',
+        'v_rcp_iflag_f32_vop3',
+        'v_rsq_f16_vop1',
+        'v_rsq_f16_vop3',
+    ],
+)
+def test_reciprocal_special_policy_keeps_existing_path(template):
+    assert 'try_execute_transcendental_f32_simd' not in (
+        simd_probe_line(template) or ''
+    )
+
+
+@pytest.mark.parametrize('operation', ['log', 'exp', 'sqrt', 'cos', 'rcp', 'rsq'])
+@pytest.mark.parametrize('form', ['vop1', 'vop3'])
+def test_flush_nearest_integer_batch_retains_host_environment(
+    execute_shared_path: Path, operation, form
+):
+    source = execute_shared_path.read_text()
+    body = source.split(f'inline void execute_v_{operation}_f32_{form}(', 1)[1]
+    body = body.split('\ntemplate <', 1)[0]
+    assert body.count('try_execute_transcendental_f32_simd') == 1
+    assert (
+        body.index('fp_mode::ScopedEnvironment environment(0);')
+        < body.index('try_execute_transcendental_f32_simd')
+        < body.index('uint64_t exec = dpp::execution_lane_mask')
+    )
+
+
+@pytest.mark.parametrize('operation', ['sin'])
+@pytest.mark.parametrize('form', ['vop1', 'vop3'])
+def test_sine_keeps_unscoped_probe(execute_shared_path: Path, operation, form):
+    source = execute_shared_path.read_text()
+    body = source.split(f'inline void execute_v_{operation}_f32_{form}(', 1)[1]
+    body = body.split('\ntemplate <', 1)[0]
+    assert body.count('try_execute_transcendental_f32_simd') == 1
+    assert 'fp_mode::ScopedEnvironment' not in body
+    assert body.index('try_execute_transcendental_f32_simd') < body.index(
+        'uint64_t exec = dpp::execution_lane_mask'
+    )

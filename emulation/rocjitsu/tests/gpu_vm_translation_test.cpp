@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "legacy_gpu_memory_fixture.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -10,6 +11,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <bit>
 #include <chrono>
 #include <condition_variable>
@@ -21,11 +23,27 @@
 #include <mutex>
 #include <span>
 #include <sys/mman.h>
+#include <sys/wait.h>
+#include <thread>
 #include <unistd.h>
 #include <vector>
 
+#if defined(__SANITIZE_ADDRESS__)
+#define RJ_GPU_VM_TRANSLATION_TEST_WITH_ASAN 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define RJ_GPU_VM_TRANSLATION_TEST_WITH_ASAN 1
+#endif
+#endif
+
 namespace rocjitsu::amdgpu {
 namespace {
+
+#if defined(RJ_GPU_VM_TRANSLATION_TEST_WITH_ASAN)
+constexpr bool kSanitizedVmMetadata = true;
+#else
+constexpr bool kSanitizedVmMetadata = false;
+#endif
 
 class TestPhysicalMemory final : public PhysicalMemoryAccess {
 public:
@@ -129,23 +147,385 @@ public:
 
 class HostPage {
 public:
-  HostPage() {
-    void *mapping = mmap(nullptr, KfdProcess::kPageSize, PROT_READ | PROT_WRITE,
-                         MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  explicit HostPage(size_t size = KfdProcess::kPageSize) : size_(size) {
+    void *mapping =
+        mmap(nullptr, size_, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     data_ = mapping == MAP_FAILED ? nullptr : static_cast<uint8_t *>(mapping);
   }
   HostPage(const HostPage &) = delete;
   HostPage &operator=(const HostPage &) = delete;
   ~HostPage() {
     if (data_ != nullptr)
-      munmap(data_, KfdProcess::kPageSize);
+      munmap(data_, size_);
   }
 
   uint8_t *data() const { return data_; }
 
 private:
+  size_t size_;
   uint8_t *data_ = nullptr;
 };
+
+AddressSpaceHandle register_step_process(LegacyGpuVmAdapter &adapter, KfdProcess &process,
+                                         MemoryFaultReporter *reporter = nullptr) {
+  return adapter.register_address_space(7,
+                                        {.page_table = &process.page_table_,
+                                         .page_table_mutex = &process.page_table_mutex_,
+                                         .page_table_generation = process.page_table_generation(),
+                                         .request_mutex = process.page_table_request_mutex(),
+                                         .mutation_epoch = process.page_table_mutation_epoch(),
+                                         .page_table_cache_state = process.page_table_cache_state(),
+                                         .fault_reporter = reporter});
+}
+
+TEST(GpuVmTranslation, DefaultStepsPreserveCustomTransportProgressAndFaultOrigin) {
+  class Translator final : public AddressSpaceTranslator {
+  public:
+    VmTranslationResult translate(uint64_t address, size_t, VmAccessKind) const override {
+      addresses.push_back(address);
+      if (address == fault_address)
+        return {.outcome = VmAccessOutcome::Faulted, .translation = {}};
+      return {.outcome = VmAccessOutcome::Complete,
+              .translation = {.domain = VmMemoryDomain::System,
+                              .address = address + 0x100,
+                              .contiguous_bytes = 2,
+                              .permissions = {.readable = true, .writable = true}}};
+    }
+    mutable std::vector<uint64_t> addresses;
+    uint64_t fault_address = 0x104;
+  };
+  GpuVm vm;
+  auto translator = std::make_shared<Translator>();
+  auto transport = std::make_shared<TestPhysicalMemory>();
+  std::vector<uint64_t> faults;
+  const auto handle = vm.register_address_space(
+      7, translator, transport, [&](uint64_t address, VmAccessKind) { faults.push_back(address); });
+  ASSERT_TRUE(handle);
+  const auto access = vm.snapshot(handle);
+  ASSERT_TRUE(access);
+  std::array<std::byte, 6> bytes;
+  bytes.fill(std::byte{0x55});
+  ASSERT_EQ(transport->write(VmMemoryDomain::System, 0x200, bytes), VmAccessOutcome::Complete);
+  bytes.fill(std::byte{0xaa});
+  size_t completed = 0;
+  EXPECT_EQ(access->read(0x100, bytes, completed), VmAccessOutcome::Faulted);
+  EXPECT_EQ(completed, 4u);
+  EXPECT_EQ(translator->addresses, (std::vector<uint64_t>{0x100, 0x102, 0x104}));
+  EXPECT_EQ(faults, (std::vector<uint64_t>{0x104}));
+  EXPECT_EQ(transport->read_calls, 2u);
+  EXPECT_EQ(bytes, (std::array<std::byte, 6>{std::byte{0x55}, std::byte{0x55}, std::byte{0x55},
+                                             std::byte{0x55}, std::byte{0xaa}, std::byte{0xaa}}));
+  translator->fault_address = 0;
+  translator->addresses.clear();
+  faults.clear();
+  transport->system.erase(0x204);
+  EXPECT_EQ(access->read(0x100, bytes, completed), VmAccessOutcome::Unavailable);
+  EXPECT_EQ(completed, 4u);
+  EXPECT_TRUE(faults.empty());
+  EXPECT_EQ(translator->addresses, (std::vector<uint64_t>{0x104}));
+  EXPECT_EQ(bytes[4], std::byte{0xaa});
+  EXPECT_EQ(bytes[5], std::byte{0xaa});
+  transport->system[0x204] = std::byte{0x66};
+  EXPECT_EQ(access->read(0x100, bytes, completed), VmAccessOutcome::Complete);
+  EXPECT_EQ(completed, bytes.size());
+  EXPECT_EQ(bytes[4], std::byte{0x66});
+  EXPECT_EQ(bytes[5], std::byte{0x55});
+
+  translator->fault_address = 0x104;
+  translator->addresses.clear();
+  bytes.fill(std::byte{0x99});
+  completed = 0;
+  EXPECT_EQ(access->write(0x100, bytes, completed), VmAccessOutcome::Faulted);
+  EXPECT_EQ(completed, 4u);
+  EXPECT_EQ(faults, (std::vector<uint64_t>{0x104}));
+  EXPECT_EQ(transport->system[0x203], std::byte{0x99});
+  EXPECT_EQ(transport->system[0x204], std::byte{0x66});
+}
+
+TEST(GpuVmTranslation, LegacyStepsKeepExtentBoundariesAndRejectOverlappingCoverage) {
+  for (const auto owner : {LegacyHostExtentOwner::Driver, LegacyHostExtentOwner::Application}) {
+    for (const auto second_offset : {8u, 12u}) {
+      for (const auto first_size : {8u, 16u}) {
+        SCOPED_TRACE(static_cast<int>(owner));
+        SCOPED_TRACE(second_offset);
+        SCOPED_TRACE(first_size);
+        GpuMemory memory("memory");
+        KfdProcess process(7);
+        HostPage backing;
+        ASSERT_NE(backing.data(), nullptr);
+        std::memset(backing.data(), 0x55, 32);
+        LegacyPageTableEntry pte;
+        pte.host_extents = {{backing.data(), first_size, 0, owner},
+                            {backing.data() + 16, 8, second_offset, owner}};
+        process.page_table_[4] = std::move(pte);
+        RecordingFaultReporter reporter;
+        GpuVm vm;
+        LegacyGpuVmAdapter adapter(vm, &memory);
+        const auto handle = register_step_process(adapter, process, &reporter);
+        ASSERT_TRUE(handle);
+        const auto access = vm.snapshot(handle);
+        ASSERT_TRUE(access);
+        std::array<std::byte, 16> bytes;
+        bytes.fill(std::byte{0xaa});
+        size_t completed = 0;
+        EXPECT_EQ(access->read(0x4000, bytes, completed), VmAccessOutcome::Faulted);
+        EXPECT_EQ(completed, 0u);
+        EXPECT_TRUE(std::ranges::all_of(bytes, [](auto byte) { return byte == std::byte{0xaa}; }));
+        EXPECT_EQ(access->write(0x4000, bytes, completed), VmAccessOutcome::Faulted);
+        EXPECT_EQ(completed, 0u);
+        EXPECT_TRUE(std::ranges::all_of(std::span(backing.data(), 32),
+                                        [](auto byte) { return byte == 0x55; }));
+        EXPECT_EQ(reporter.addresses, (std::vector<uint64_t>{0x4000, 0x4000}));
+      }
+    }
+  }
+}
+
+TEST(GpuVmTranslation, LegacyStepsKeepPageProgressAndResumeWithoutReplayingPrefix) {
+  for (const auto owner : {LegacyHostExtentOwner::Driver, LegacyHostExtentOwner::Application}) {
+    GpuMemory memory("memory");
+    KfdProcess process(7);
+    HostPage first, second;
+    ASSERT_NE(first.data(), nullptr);
+    ASSERT_NE(second.data(), nullptr);
+    std::memset(first.data(), 0x55, KfdProcess::kPageSize);
+    std::memset(second.data(), 0x66, KfdProcess::kPageSize);
+    process.map_pages(0x4000, first.data(), KfdProcess::kPageSize, Mtype::RW, owner);
+    GpuVm vm;
+    LegacyGpuVmAdapter adapter(vm, &memory);
+    const auto handle = register_step_process(adapter, process);
+    ASSERT_TRUE(handle);
+    const auto access = vm.snapshot(handle);
+    ASSERT_TRUE(access);
+    std::array<std::byte, 32> bytes;
+    bytes.fill(std::byte{0xaa});
+    size_t completed = 0;
+    EXPECT_EQ(access->read(0x4ff0, bytes, completed), VmAccessOutcome::Unavailable);
+    EXPECT_EQ(completed, 16u);
+    for (size_t i = 0; i < bytes.size(); ++i)
+      EXPECT_EQ(bytes[i], i < 16 ? std::byte{0x55} : std::byte{0xaa});
+    std::memset(first.data() + KfdProcess::kPageSize - 16, 0x77, 16);
+    process.map_pages(0x5000, second.data(), KfdProcess::kPageSize, Mtype::CC, owner);
+    EXPECT_EQ(access->read(0x4ff0, bytes, completed), VmAccessOutcome::Complete);
+    EXPECT_EQ(completed, bytes.size());
+    EXPECT_EQ(bytes[0], std::byte{0x55});
+    EXPECT_EQ(bytes[16], std::byte{0x66});
+    process.unmap_pages(0x5000, KfdProcess::kPageSize);
+    bytes.fill(std::byte{0x88});
+    completed = 0;
+    EXPECT_EQ(access->write(0x4ff0, bytes, completed), VmAccessOutcome::Unavailable);
+    EXPECT_EQ(completed, 16u);
+    std::memset(first.data() + KfdProcess::kPageSize - 16, 0x99, 16);
+    process.map_pages(0x5000, second.data(), KfdProcess::kPageSize, Mtype::CC, owner);
+    EXPECT_EQ(access->write(0x4ff0, bytes, completed), VmAccessOutcome::Complete);
+    EXPECT_EQ(first.data()[KfdProcess::kPageSize - 1], 0x99);
+    EXPECT_EQ(second.data()[0], 0x88);
+  }
+}
+
+TEST(GpuVmTranslation, LegacyApplicationStepPrevalidatesCrossHostPageWrites) {
+  GpuMemory memory("memory");
+  KfdProcess process(7);
+  HostPage backing(2 * KfdProcess::kPageSize);
+  ASSERT_NE(backing.data(), nullptr);
+  auto *first = backing.data() + KfdProcess::kPageSize - 16;
+  std::memset(first, 0x55, 32);
+  process.map_pages(0x4000, first, 32, Mtype::RW, LegacyHostExtentOwner::Application);
+  RecordingFaultReporter reporter;
+  GpuVm vm;
+  LegacyGpuVmAdapter adapter(vm, &memory);
+  const auto handle = register_step_process(adapter, process, &reporter);
+  ASSERT_TRUE(handle);
+  const auto access = vm.snapshot(handle);
+  ASSERT_TRUE(access);
+  ASSERT_EQ(mprotect(backing.data() + KfdProcess::kPageSize, KfdProcess::kPageSize, PROT_READ), 0);
+  std::array<std::byte, 32> bytes;
+  bytes.fill(std::byte{0xaa});
+  size_t completed = 0;
+  EXPECT_EQ(access->write(0x4000, bytes, completed), VmAccessOutcome::Faulted);
+  EXPECT_EQ(completed, 0u);
+  EXPECT_TRUE(std::ranges::all_of(std::span(first, 32), [](auto byte) { return byte == 0x55; }));
+  EXPECT_EQ(reporter.addresses, (std::vector<uint64_t>{0x4000}));
+  ASSERT_EQ(mprotect(backing.data() + KfdProcess::kPageSize, KfdProcess::kPageSize, PROT_NONE), 0);
+  EXPECT_EQ(access->read(0x4000, bytes, completed), VmAccessOutcome::Faulted);
+  EXPECT_EQ(completed, 0u);
+  EXPECT_TRUE(std::ranges::all_of(bytes, [](auto byte) { return byte == std::byte{0xaa}; }));
+  EXPECT_EQ(reporter.addresses, (std::vector<uint64_t>{0x4000, 0x4000}));
+  ASSERT_EQ(mprotect(backing.data() + KfdProcess::kPageSize, KfdProcess::kPageSize,
+                     PROT_READ | PROT_WRITE),
+            0);
+}
+
+TEST(GpuVmTranslation, LegacyStepsPreserveClientBackingAndTerminalFaults) {
+  GpuMemory memory("memory");
+  KfdProcess process(7);
+  HostPage backing;
+  ASSERT_NE(backing.data(), nullptr);
+  backing.data()[0] = 0x55;
+  RecordingFaultReporter reporter;
+  GpuVm vm;
+  LegacyGpuVmAdapter adapter(vm, &memory);
+  const auto handle = register_step_process(adapter, process, &reporter);
+  ASSERT_TRUE(handle);
+  ASSERT_TRUE(adapter.set_client_pid(handle, getpid()));
+  const auto access = vm.snapshot(handle);
+  ASSERT_TRUE(access);
+  const auto address = reinterpret_cast<uintptr_t>(backing.data());
+  std::array<std::byte, 1> bytes{std::byte{0xaa}};
+  EXPECT_EQ(access->read(address, bytes), VmAccessOutcome::Complete);
+  EXPECT_EQ(bytes[0], std::byte{0x55});
+  bytes[0] = std::byte{0x66};
+  EXPECT_EQ(access->write(address, bytes), VmAccessOutcome::Complete);
+  EXPECT_EQ(backing.data()[0], 0x66);
+  EXPECT_TRUE(reporter.addresses.empty());
+  ASSERT_EQ(mprotect(backing.data(), KfdProcess::kPageSize, PROT_NONE), 0);
+  bytes[0] = std::byte{0xaa};
+  EXPECT_EQ(access->read(address, bytes), VmAccessOutcome::Faulted);
+  EXPECT_EQ(bytes[0], std::byte{0xaa});
+  EXPECT_EQ(access->write(address, bytes), VmAccessOutcome::Faulted);
+  EXPECT_EQ(reporter.addresses, (std::vector<uint64_t>{address, address}));
+  ASSERT_EQ(mprotect(backing.data(), KfdProcess::kPageSize, PROT_READ | PROT_WRITE), 0);
+  EXPECT_EQ(backing.data()[0], 0x66);
+}
+
+TEST(GpuVmTranslation, LegacyStepFaultCallbacksCanMutatePolicyAndHostMappings) {
+  EXPECT_EXIT(
+      ([] {
+        alarm(10);
+        for (const auto owner :
+             {LegacyHostExtentOwner::Driver, LegacyHostExtentOwner::Application}) {
+          GpuMemory memory("memory");
+          KfdProcess process(7);
+          HostPage backing;
+          if (!backing.data())
+            _exit(1);
+          backing.data()[0] = 0x55;
+          process.map_pages(0x4000, backing.data(), KfdProcess::kPageSize, Mtype::RW, owner);
+          class Reporter final : public MemoryFaultReporter {
+          public:
+            explicit Reporter(KfdProcess &process) : process(process) {}
+            void report_memory_fault(uint32_t, uint64_t address, MemoryFaultCause) override {
+              if (address != 0x4000)
+                _exit(2);
+              ++calls;
+              process.set_page_mtype(0x4000, KfdProcess::kPageSize, Mtype::CC);
+              const auto mapping = rocjitsu::host_mapping_lock().lock_exclusive();
+            }
+            KfdProcess &process;
+            unsigned calls = 0;
+          } reporter(process);
+          GpuVm vm;
+          LegacyGpuVmAdapter adapter(vm, &memory);
+          const auto handle = register_step_process(adapter, process, &reporter);
+          const auto access = vm.snapshot(handle);
+          std::array<std::byte, 1> bytes{std::byte{0xaa}};
+          if (!access || access->read(0x4000, bytes) != VmAccessOutcome::Complete)
+            _exit(3);
+          if (mprotect(backing.data(), KfdProcess::kPageSize, PROT_NONE) != 0)
+            _exit(4);
+          bytes[0] = std::byte{0xaa};
+          if (access->read(0x4000, bytes) != VmAccessOutcome::Faulted || reporter.calls != 1 ||
+              bytes[0] != std::byte{0xaa})
+            _exit(5);
+          if (access->write(0x4000, bytes) != VmAccessOutcome::Faulted || reporter.calls != 2)
+            _exit(6);
+          if (mprotect(backing.data(), KfdProcess::kPageSize, PROT_READ | PROT_WRITE) != 0 ||
+              backing.data()[0] != 0x55)
+            _exit(7);
+        }
+        _exit(0);
+      }()),
+      ::testing::ExitedWithCode(0), "");
+}
+
+TEST(GpuVmTranslation, LegacyStepKeepsOneMappedSpanStableDuringConcurrentRemap) {
+  EXPECT_EXIT(
+      ([] {
+        alarm(10);
+        for (const auto owner :
+             {LegacyHostExtentOwner::Driver, LegacyHostExtentOwner::Application}) {
+          GpuMemory memory("memory");
+          KfdProcess process(7);
+          HostPage first, second;
+          if (!first.data() || !second.data())
+            _exit(1);
+          std::memset(first.data(), 0x55, KfdProcess::kPageSize);
+          std::memset(second.data(), 0xaa, KfdProcess::kPageSize);
+          process.map_pages(0x4000, first.data(), KfdProcess::kPageSize, Mtype::RW, owner);
+          GpuVm vm;
+          LegacyGpuVmAdapter adapter(vm, &memory);
+          const auto handle = register_step_process(adapter, process);
+          const auto access = vm.snapshot(handle);
+          if (!access)
+            _exit(2);
+          std::atomic<bool> started{false};
+          std::thread writer([&] {
+            while (!started.load(std::memory_order_acquire))
+              std::this_thread::yield();
+            for (unsigned i = 0; i < 2000; ++i)
+              process.map_pages(0x4000, i % 2 ? first.data() : second.data(), KfdProcess::kPageSize,
+                                i % 2 ? Mtype::RW : Mtype::CC, owner);
+          });
+          started.store(true, std::memory_order_release);
+          for (unsigned i = 0; i < 2000; ++i) {
+            std::array<std::byte, 512> bytes;
+            bytes.fill(std::byte{0xcc});
+            const auto outcome = access->read(0x4000, bytes);
+            // Continuous remapping may exhaust the bounded metadata
+            // retry budget. That existing fail-closed result must not
+            // expose any partial read.
+            if (kSanitizedVmMetadata && outcome == VmAccessOutcome::Faulted &&
+                std::ranges::all_of(bytes, [](auto byte) { return byte == std::byte{0xcc}; }))
+              continue;
+            if (outcome != VmAccessOutcome::Complete ||
+                (bytes[0] != std::byte{0x55} && bytes[0] != std::byte{0xaa}) ||
+                !std::ranges::all_of(bytes, [&](auto byte) { return byte == bytes[0]; }))
+              _exit(3);
+          }
+          writer.join();
+          process.unmap_pages(0x4000, KfdProcess::kPageSize);
+          std::array<std::byte, 1> bytes{std::byte{0xcc}};
+          if (access->read(0x4000, bytes) != VmAccessOutcome::Unavailable ||
+              bytes[0] != std::byte{0xcc})
+            _exit(4);
+        }
+        _exit(0);
+      }()),
+      ::testing::ExitedWithCode(0), "");
+}
+
+#if defined(RJ_GPU_VM_TRANSLATION_TEST_WITH_ASAN)
+TEST(GpuVmTranslation, LegacyStepRevalidatesAfterUnlockedAllocatorMetadataQuery) {
+  GpuMemory memory("memory");
+  KfdProcess process(7);
+  HostPage first, second;
+  ASSERT_NE(first.data(), nullptr);
+  ASSERT_NE(second.data(), nullptr);
+  first.data()[0] = 0x55;
+  second.data()[0] = 0xaa;
+  process.map_pages(0x4000, first.data(), KfdProcess::kPageSize);
+  GpuVm vm;
+  LegacyGpuVmAdapter adapter(vm, &memory);
+  const auto handle = register_step_process(adapter, process);
+  ASSERT_TRUE(handle);
+  const auto access = vm.snapshot(handle);
+  ASSERT_TRUE(access);
+  unsigned calls = 0;
+  std::function<void()> remap = [&] {
+    if (++calls == 1)
+      process.map_pages(0x4000, second.data(), KfdProcess::kPageSize);
+  };
+  auto *address_space = adapter.address_space(7);
+  ASSERT_NE(address_space, nullptr);
+  LegacyAddressSpaceTestAccess::set_page_table_unlocked_hook(*address_space, &remap);
+  std::array<std::byte, 1> bytes{};
+  const auto outcome = access->read(0x4000, bytes);
+  LegacyAddressSpaceTestAccess::set_page_table_unlocked_hook(*address_space, nullptr);
+  EXPECT_EQ(outcome, VmAccessOutcome::Complete);
+  EXPECT_GE(calls, 2u);
+  EXPECT_EQ(bytes[0], std::byte{0xaa});
+}
+#endif
 
 constexpr uint64_t kValid = uint64_t{1} << 0;
 constexpr uint64_t kSystem = uint64_t{1} << 1;
@@ -681,6 +1061,255 @@ TEST(GpuVmTranslation, InvalidationDrainsAnInFlightAccessAndRevokesOldSnapshots)
   ASSERT_TRUE(current_access);
   EXPECT_NE(current_access->cache_namespace(), old_access->cache_namespace());
   EXPECT_EQ(current_access->read(0, stale_value), VmAccessOutcome::Complete);
+}
+
+TEST(GpuVmTranslation, AccessBatchRefreshesRevokedSnapshots) {
+  // A callback between operations must be able to invalidate the binding while
+  // its quantum cache remains alive. Keep this regression bounded.
+  const pid_t child = fork();
+  ASSERT_GE(child, 0);
+  if (child == 0) {
+    alarm(10);
+    GpuVm gpu_vm;
+    auto physical = std::make_shared<TestPhysicalMemory>();
+    auto translator = std::make_shared<ByteTranslator>();
+    physical->system[0] = std::byte{0x2a};
+    const AddressSpaceHandle handle = gpu_vm.register_translated(7, translator, physical);
+    if (!handle)
+      _exit(1);
+
+    const GpuVmAccessBatchGuard batch;
+    const GpuVmAccess *first = gpu_vm.borrow_snapshot_vmid(7);
+    if (first == nullptr)
+      _exit(2);
+    std::array<std::byte, 1> value{};
+    if (first->read(0, value) != VmAccessOutcome::Complete || value[0] != std::byte{0x2a})
+      _exit(3);
+    auto invalidation = std::async(std::launch::async, [&] { return gpu_vm.invalidate(handle); });
+    if (!invalidation.get())
+      _exit(4);
+
+    const GpuVmAccess *repeated = gpu_vm.borrow_snapshot_vmid(7);
+    if (!repeated || repeated == first || repeated->cache_namespace() == first->cache_namespace() ||
+        repeated->read(0, value) != VmAccessOutcome::Complete || value[0] != std::byte{0x2a})
+      _exit(5);
+    // The old pointer stays alive but loses authority to access backing.
+    value[0] = std::byte{0x5a};
+    if (first->read(0, value) != VmAccessOutcome::Unavailable || value[0] != std::byte{0x5a})
+      _exit(6);
+    if (!gpu_vm.invalidate(handle))
+      _exit(7);
+    const GpuVmAccess *by_handle = gpu_vm.borrow_snapshot(handle);
+    if (!by_handle || by_handle == repeated || !by_handle->is_current() || repeated->is_current())
+      _exit(8);
+    _exit(0);
+  }
+
+  int status = 0;
+  ASSERT_EQ(waitpid(child, &status, 0), child);
+  ASSERT_TRUE(WIFEXITED(status)) << "child status: " << status;
+  EXPECT_EQ(WEXITSTATUS(status), 0);
+}
+
+TEST(GpuVmTranslation, AccessBatchRefreshesReusedVmidAndKeepsHandleRoutingDistinct) {
+  GpuVm gpu_vm;
+  auto first_physical = std::make_shared<TestPhysicalMemory>();
+  auto second_physical = std::make_shared<TestPhysicalMemory>();
+  auto translator = std::make_shared<ByteTranslator>();
+  first_physical->system[0] = std::byte{0x11};
+  second_physical->system[0] = std::byte{0x22};
+  const AddressSpaceHandle routed = gpu_vm.register_translated(7, translator, first_physical);
+  const AddressSpaceHandle unrouted =
+      gpu_vm.register_unrouted_address_space(7, translator, second_physical);
+  ASSERT_TRUE(routed);
+  ASSERT_TRUE(unrouted);
+
+  const GpuVmAccessBatchGuard batch;
+  const GpuVmAccess *explicit_handle = gpu_vm.borrow_snapshot(unrouted);
+  ASSERT_NE(explicit_handle, nullptr);
+  const GpuVmAccess *first = gpu_vm.borrow_snapshot_vmid(7);
+  ASSERT_NE(first, nullptr);
+  EXPECT_NE(first, explicit_handle);
+  std::array<std::byte, 1> value{};
+  EXPECT_EQ(first->read(0, value), VmAccessOutcome::Complete);
+  EXPECT_EQ(value[0], std::byte{0x11});
+  EXPECT_EQ(explicit_handle->read(0, value), VmAccessOutcome::Complete);
+  EXPECT_EQ(value[0], std::byte{0x22});
+
+  ASSERT_TRUE(gpu_vm.unregister_address_space(routed));
+  EXPECT_EQ(gpu_vm.borrow_snapshot_vmid(7), nullptr);
+  const AddressSpaceHandle replacement = gpu_vm.register_translated(7, translator, second_physical);
+  ASSERT_TRUE(replacement);
+  const GpuVmAccess *repeated = gpu_vm.borrow_snapshot_vmid(7);
+  ASSERT_NE(repeated, nullptr);
+  EXPECT_NE(repeated, first);
+  EXPECT_EQ(repeated->cache_namespace().address_space, replacement);
+  EXPECT_FALSE(first->is_current());
+  EXPECT_EQ(repeated->read(0, value), VmAccessOutcome::Complete);
+  EXPECT_EQ(value[0], std::byte{0x22});
+  {
+    const GpuVmAccessBatchGuard nested;
+    EXPECT_EQ(gpu_vm.borrow_snapshot_vmid(7), repeated);
+  }
+  EXPECT_EQ(gpu_vm.borrow_snapshot_vmid(7), repeated);
+}
+
+TEST(GpuVmTranslation, AccessBatchDistinguishesReusedVmStorage) {
+  const GpuVmAccessBatchGuard batch;
+  std::optional<GpuVm> gpu_vm(std::in_place);
+  auto first_physical = std::make_shared<TestPhysicalMemory>();
+  auto second_physical = std::make_shared<TestPhysicalMemory>();
+  auto translator = std::make_shared<ByteTranslator>();
+  first_physical->system[0] = std::byte{0x11};
+  second_physical->system[0] = std::byte{0x22};
+  const AddressSpaceHandle first_handle =
+      gpu_vm->register_translated(7, translator, first_physical);
+  ASSERT_TRUE(first_handle);
+  const GpuVmAccess *first = gpu_vm->borrow_snapshot_vmid(7);
+  ASSERT_NE(first, nullptr);
+
+  gpu_vm.emplace();
+  const AddressSpaceHandle replacement =
+      gpu_vm->register_translated(7, translator, second_physical);
+  ASSERT_TRUE(replacement);
+  ASSERT_EQ(replacement, first_handle);
+  const GpuVmAccess *repeated = gpu_vm->borrow_snapshot_vmid(7);
+  ASSERT_NE(repeated, nullptr);
+  EXPECT_NE(repeated, first);
+  std::array<std::byte, 1> value{};
+  EXPECT_EQ(repeated->read(0, value), VmAccessOutcome::Complete);
+  EXPECT_EQ(value[0], std::byte{0x22});
+  const GpuVmAccess *by_handle = gpu_vm->borrow_snapshot(replacement);
+  ASSERT_NE(by_handle, nullptr);
+  EXPECT_EQ(by_handle->read(0, value), VmAccessOutcome::Complete);
+  EXPECT_EQ(value[0], std::byte{0x22});
+}
+
+TEST(GpuVmTranslation, ScopedVmidOperationBorrowsTheQuantumSnapshot) {
+  GpuVm gpu_vm;
+  auto physical = std::make_shared<TestPhysicalMemory>();
+  auto translator = std::make_shared<ByteTranslator>();
+  physical->system[0] = std::byte{0x2a};
+  const AddressSpaceHandle handle = gpu_vm.register_translated(7, translator, physical);
+  ASSERT_TRUE(handle);
+
+  const GpuVmAccess *first = nullptr;
+  {
+    const GpuVmAccessBatchGuard batch;
+    EXPECT_TRUE(gpu_vm.with_vmid_snapshot(7, [&](const GpuVmAccess *access) {
+      first = access;
+      std::array<std::byte, 1> value{};
+      return access != nullptr && access->read(0, value) == VmAccessOutcome::Complete &&
+             value[0] == std::byte{0x2a};
+    }));
+    EXPECT_TRUE(
+        gpu_vm.with_vmid_snapshot(7, [&](const GpuVmAccess *access) { return access == first; }));
+  }
+
+  EXPECT_TRUE(
+      gpu_vm.with_vmid_snapshot(7, [](const GpuVmAccess *access) { return access != nullptr; }));
+}
+
+TEST(GpuVmTranslation, PublicSnapshotsRefreshQueueMetadataInsideAccessBatch) {
+  GpuVm gpu_vm;
+  const AddressSpaceHandle handle = gpu_vm.register_translated(
+      7, std::make_shared<ByteTranslator>(), std::make_shared<TestPhysicalMemory>());
+  ASSERT_TRUE(handle);
+  const GpuVmAccessBatchGuard batch;
+  const GpuVmAccess *borrowed_handle = gpu_vm.borrow_snapshot(handle);
+  const GpuVmAccess *borrowed_vmid = gpu_vm.borrow_snapshot_vmid(7);
+  ASSERT_NE(borrowed_handle, nullptr);
+  ASSERT_NE(borrowed_vmid, nullptr);
+  const auto initial_handle = gpu_vm.snapshot(handle);
+  const auto initial_vmid = gpu_vm.snapshot_vmid(7);
+  ASSERT_TRUE(initial_handle);
+  ASSERT_TRUE(initial_vmid);
+  EXPECT_EQ(initial_handle->info().queue_references, 0u);
+  EXPECT_EQ(initial_vmid->info().queue_references, 0u);
+
+  ASSERT_TRUE(gpu_vm.retain_queue(handle));
+  const auto retained_handle = gpu_vm.snapshot(handle);
+  const auto retained_vmid = gpu_vm.snapshot_vmid(7);
+  ASSERT_TRUE(retained_handle);
+  ASSERT_TRUE(retained_vmid);
+  EXPECT_EQ(retained_handle->info().queue_references, 1u);
+  EXPECT_EQ(retained_vmid->info().queue_references, 1u);
+  EXPECT_EQ(initial_handle->info().queue_references, 0u);
+  EXPECT_EQ(initial_vmid->info().queue_references, 0u);
+
+  ASSERT_TRUE(gpu_vm.release_queue(handle));
+  const auto released_handle = gpu_vm.snapshot(handle);
+  const auto released_vmid = gpu_vm.snapshot_vmid(7);
+  ASSERT_TRUE(released_handle);
+  ASSERT_TRUE(released_vmid);
+  EXPECT_EQ(released_handle->info().queue_references, 0u);
+  EXPECT_EQ(released_vmid->info().queue_references, 0u);
+  EXPECT_EQ(retained_handle->info().queue_references, 1u);
+  EXPECT_EQ(retained_vmid->info().queue_references, 1u);
+  EXPECT_TRUE(retained_handle->is_current());
+  EXPECT_TRUE(retained_vmid->is_current());
+  EXPECT_EQ(gpu_vm.borrow_snapshot(handle), borrowed_handle);
+  EXPECT_EQ(gpu_vm.borrow_snapshot_vmid(7), borrowed_vmid);
+}
+
+TEST(GpuVmTranslation, AccessBatchAllowsSnapshotMissDuringInvalidation) {
+  // Isolate the cross-binding lock-order case so a regression becomes a
+  // bounded failure instead of hanging the test process.
+  const pid_t child = fork();
+  ASSERT_GE(child, 0);
+  if (child == 0) {
+    alarm(10);
+    GpuVm gpu_vm;
+    auto first_physical = std::make_shared<TestPhysicalMemory>();
+    auto second_physical = std::make_shared<TestPhysicalMemory>();
+    auto translator = std::make_shared<ByteTranslator>();
+    first_physical->system[0] = std::byte{0x11};
+    second_physical->system[0] = std::byte{0x22};
+    const AddressSpaceHandle first = gpu_vm.register_translated(7, translator, first_physical);
+    const AddressSpaceHandle second =
+        gpu_vm.register_unrouted_address_space(8, translator, second_physical);
+    if (!first || !second)
+      _exit(1);
+
+    std::atomic<bool> invalidation_started{false};
+    std::atomic<bool> invalidation_complete{false};
+    std::thread invalidator;
+    {
+      const GpuVmAccessBatchGuard batch;
+      auto first_access = gpu_vm.snapshot(first);
+      if (!first_access)
+        _exit(2);
+      std::array<std::byte, 1> value{};
+      if (first_access->read(0, value) != VmAccessOutcome::Complete || value[0] != std::byte{0x11})
+        _exit(3);
+
+      invalidator = std::thread([&] {
+        invalidation_started.store(true, std::memory_order_release);
+        const bool invalidated = gpu_vm.invalidate(first);
+        invalidation_complete.store(invalidated, std::memory_order_release);
+      });
+      while (!invalidation_started.load(std::memory_order_acquire))
+        std::this_thread::yield();
+      // A miss for another binding must make progress even if invalidation
+      // has already acquired the registry lock.
+      auto second_access = gpu_vm.snapshot(second);
+      if (!second_access)
+        _exit(5);
+      value[0] = std::byte{0};
+      if (second_access->read(0, value) != VmAccessOutcome::Complete || value[0] != std::byte{0x22})
+        _exit(6);
+    }
+
+    invalidator.join();
+    if (!invalidation_complete.load(std::memory_order_acquire))
+      _exit(7);
+    _exit(0);
+  }
+
+  int status = 0;
+  ASSERT_EQ(waitpid(child, &status, 0), child);
+  ASSERT_TRUE(WIFEXITED(status)) << "child status: " << status;
+  EXPECT_EQ(WEXITSTATUS(status), 0);
 }
 
 TEST(GpuVmTranslation, DeviceGartPublishesOnInvalidateAndRejectsItsHandleAfterReset) {
@@ -1383,3 +2012,482 @@ TEST(GpuVmTranslation, LegacyVmidZeroGetsGenerationSafePassthroughBinding) {
 
 } // namespace
 } // namespace rocjitsu::amdgpu
+
+namespace rocjitsu::amdgpu {
+TEST(GpuVmTranslation, StableRamLeaseRejectsUnknownBackingAndPinsTheWholeRange) {
+  GpuMemory memory("stable_ram");
+  LegacyPageTable page_table;
+  util::DistributedSharedMutex page_table_mutex;
+  auto request_mutex = std::make_shared<util::DistributedSharedMutex>();
+  std::array<uint8_t, 8192> backing{};
+  constexpr uint64_t base = 0x4000;
+  GpuVm vm;
+  LegacyGpuVmAdapter adapter(vm, &memory);
+  const auto handle =
+      adapter.register_address_space(7, &page_table, &page_table_mutex, nullptr, request_mutex);
+  auto access = vm.snapshot(handle);
+  ASSERT_TRUE(access);
+  for (const auto owner : {LegacyHostExtentOwner::Application, LegacyHostExtentOwner::Driver,
+                           LegacyHostExtentOwner::DriverSealedRam}) {
+    page_table[4] = {backing.data(), Mtype::RW, owner};
+    page_table[5] = {backing.data() + 4096, Mtype::RW, owner};
+    auto lease = access->try_lease_ram(base + 16, backing.size() - 32);
+    EXPECT_EQ(bool(lease), owner == LegacyHostExtentOwner::DriverSealedRam);
+    if (lease) {
+      EXPECT_EQ(lease->bytes().data(), reinterpret_cast<std::byte *>(backing.data() + 16));
+      EXPECT_EQ(lease->bytes().size(), backing.size() - 32);
+      // The caller retains the whole mapping, including pages not touched yet.
+      auto excluded_writer = std::async(std::launch::async, [&] {
+        const bool acquired = request_mutex->try_lock();
+        if (acquired)
+          request_mutex->unlock();
+        return acquired;
+      });
+      EXPECT_FALSE(excluded_writer.get());
+      lease->bytes().back() = std::byte{0x5a};
+      EXPECT_EQ(backing[backing.size() - 17], 0x5a);
+    }
+  }
+  // A later missing page or physical alias refuses without reading/writing any
+  // guest byte. The original ordered path remains responsible for its fault.
+  page_table.erase(5);
+  EXPECT_FALSE(access->try_lease_ram(base, backing.size()));
+  EXPECT_EQ(backing.front(), 0);
+  page_table[5] = {backing.data(), Mtype::RW, LegacyHostExtentOwner::DriverSealedRam};
+  EXPECT_FALSE(access->try_lease_ram(base, backing.size()));
+  page_table[5] = {backing.data() + 4096, Mtype::RW, LegacyHostExtentOwner::DriverSealedRam};
+  EXPECT_TRUE(access->try_lease_ram(base, backing.size()));
+  EXPECT_TRUE(vm.unregister_address_space(handle));
+  EXPECT_FALSE(access->try_lease_ram(base, backing.size()));
+}
+
+TEST(GpuVmTranslation, StableRamLeaseKeepsStrictSubpageTransferBoundaries) {
+  constexpr uint64_t base = 0x4000;
+  constexpr auto owner = LegacyHostExtentOwner::DriverSealedRam;
+  for (const size_t split : {2u, 6u}) {
+    SCOPED_TRACE(split);
+    GpuMemory memory("split_sealed_ram");
+    KfdProcess process(7);
+    HostPage backing;
+    ASSERT_NE(backing.data(), nullptr);
+    std::memset(backing.data(), 0x55, KfdProcess::kPageSize);
+    // Raw registrations accept split PTEs; map_pages would merge these extents.
+    auto &pte = process.page_table_[base >> KfdProcess::kPageShift];
+    pte.host_extents = {{backing.data(), split, 0, owner},
+                        {backing.data() + split, KfdProcess::kPageSize - split, split, owner}};
+    RecordingFaultReporter reporter;
+    GpuVm vm;
+    LegacyGpuVmAdapter adapter(vm, &memory);
+    const auto handle = register_step_process(adapter, process, &reporter);
+    const auto access = vm.snapshot(handle);
+    ASSERT_TRUE(access);
+    const uint64_t fault_address = base + (split / 4) * 4;
+    std::array<std::byte, 4> bytes;
+    bytes.fill(std::byte{0xaa});
+    size_t completed = 0;
+    EXPECT_EQ(access->read(fault_address, bytes, completed), VmAccessOutcome::Faulted);
+    EXPECT_EQ(completed, 0u);
+    EXPECT_TRUE(std::ranges::all_of(bytes, [](auto byte) { return byte == std::byte{0xaa}; }));
+    EXPECT_EQ(access->write(fault_address, bytes, completed), VmAccessOutcome::Faulted);
+    EXPECT_EQ(completed, 0u);
+    EXPECT_EQ(reporter.addresses, (std::vector<uint64_t>{fault_address, fault_address}));
+    EXPECT_FALSE(access->try_lease_ram(base, KfdProcess::kPageSize));
+    EXPECT_EQ(reporter.addresses.size(), 2u);
+    EXPECT_TRUE(std::ranges::all_of(std::span(backing.data(), KfdProcess::kPageSize),
+                                    [](auto byte) { return byte == 0x55; }));
+    if (split == 6) {
+      EXPECT_EQ(access->write(base, bytes), VmAccessOutcome::Complete);
+      EXPECT_TRUE(std::ranges::all_of(std::span(backing.data(), 4),
+                                      [](auto byte) { return byte == 0xaa; }));
+      EXPECT_EQ(backing.data()[4], 0x55);
+    }
+  }
+}
+
+TEST(GpuVmTranslation, StableRamLeaseRejectsOverlappingCoverage) {
+  constexpr uint64_t base = 0x4000;
+  constexpr auto owner = LegacyHostExtentOwner::DriverSealedRam;
+  GpuMemory memory("overlapping_sealed_ram");
+  KfdProcess process(7);
+  HostPage backing;
+  ASSERT_NE(backing.data(), nullptr);
+  std::memset(backing.data(), 0x55, KfdProcess::kPageSize);
+  auto &pte = process.page_table_[base >> KfdProcess::kPageShift];
+  pte.host_extents = {{backing.data(), KfdProcess::kPageSize, 0, owner},
+                      {backing.data() + 8, 8, 8, owner}};
+  RecordingFaultReporter reporter;
+  GpuVm vm;
+  LegacyGpuVmAdapter adapter(vm, &memory);
+  const auto handle = register_step_process(adapter, process, &reporter);
+  const auto access = vm.snapshot(handle);
+  ASSERT_TRUE(access);
+  std::array<std::byte, 4> bytes;
+  bytes.fill(std::byte{0xaa});
+  size_t completed = 0;
+  EXPECT_EQ(access->read(base + 8, bytes, completed), VmAccessOutcome::Faulted);
+  EXPECT_EQ(completed, 0u);
+  EXPECT_TRUE(std::ranges::all_of(bytes, [](auto byte) { return byte == std::byte{0xaa}; }));
+  EXPECT_EQ(access->write(base + 8, bytes, completed), VmAccessOutcome::Faulted);
+  EXPECT_EQ(completed, 0u);
+  EXPECT_EQ(reporter.addresses, (std::vector<uint64_t>{base + 8, base + 8}));
+  EXPECT_FALSE(access->try_lease_ram(base, KfdProcess::kPageSize));
+  EXPECT_EQ(reporter.addresses.size(), 2u);
+  EXPECT_TRUE(std::ranges::all_of(std::span(backing.data(), KfdProcess::kPageSize),
+                                  [](auto byte) { return byte == 0x55; }));
+}
+
+TEST(GpuVmTranslation, StableRamLeaseRequiresCoverageWithinSingleExtent) {
+  constexpr uint64_t base = 0x4000;
+  constexpr auto owner = LegacyHostExtentOwner::DriverSealedRam;
+  GpuMemory memory("partial_sealed_ram");
+  KfdProcess process(7);
+  HostPage backing;
+  ASSERT_NE(backing.data(), nullptr);
+  process.map_pages(base + 4, backing.data() + 4, 8, Mtype::RW, owner);
+  GpuVm vm;
+  LegacyGpuVmAdapter adapter(vm, &memory);
+  const auto handle = register_step_process(adapter, process);
+  const auto access = vm.snapshot(handle);
+  ASSERT_TRUE(access);
+  EXPECT_FALSE(access->try_lease_ram(base, 8));
+  EXPECT_FALSE(access->try_lease_ram(base + 4, 12));
+  auto lease = access->try_lease_ram(base + 4, 8);
+  ASSERT_TRUE(lease);
+  EXPECT_EQ(lease->bytes().data(), reinterpret_cast<std::byte *>(backing.data() + 4));
+  EXPECT_EQ(lease->bytes().size(), 8u);
+}
+
+TEST(GpuVmTranslation, StableRamLeasePairsRejectAliasesAndReleaseEveryRangeOnRefusal) {
+  GpuMemory memory("stable_ram_pair");
+  LegacyPageTable table;
+  util::DistributedSharedMutex table_mutex;
+  auto request_mutex = std::make_shared<util::DistributedSharedMutex>();
+  std::array<uint8_t, 16384> backing{};
+  for (uint64_t page = 0; page < 4; ++page)
+    table[4 + page] = {backing.data() + page * 4096, Mtype::RW,
+                       LegacyHostExtentOwner::DriverSealedRam};
+  RecordingFaultReporter reporter;
+  GpuVm vm;
+  LegacyGpuVmAdapter adapter(vm, &memory);
+  const auto handle = adapter.register_address_space(7, {.page_table = &table,
+                                                         .page_table_mutex = &table_mutex,
+                                                         .request_mutex = request_mutex,
+                                                         .fault_reporter = &reporter});
+  const auto access = vm.snapshot(handle);
+  ASSERT_TRUE(access);
+  const std::array<VmRamRange, 2> ranges{{{0x4010, 8192 - 32}, {0x6000, 8192}}};
+  auto lease = access->try_lease_ram(ranges);
+  ASSERT_TRUE(lease);
+  EXPECT_EQ(lease->bytes(0).data(), reinterpret_cast<std::byte *>(backing.data() + 16));
+  EXPECT_EQ(lease->bytes(1).data(), reinterpret_cast<std::byte *>(backing.data() + 8192));
+  EXPECT_EQ(lease->bytes(1).size(), 8192u);
+  auto writer = std::async(std::launch::async, [&] {
+    const bool acquired = request_mutex->try_lock();
+    if (acquired)
+      request_mutex->unlock();
+    return acquired;
+  });
+  EXPECT_FALSE(writer.get());
+  lease->bytes(0).front() = std::byte{0x5a};
+  lease->bytes(1).back() = std::byte{0xa5};
+  lease.reset();
+  EXPECT_EQ(backing[16], 0x5a);
+  EXPECT_EQ(backing.back(), 0xa5);
+  const auto initial = backing;
+  const auto original = table;
+  for (uint32_t refusal = 0; refusal < 7; ++refusal) {
+    SCOPED_TRACE(refusal);
+    if (refusal == 0) {
+      table.erase(7); // The second range has a missing final page.
+    } else if (refusal == 1) {
+      table[7].host_extents.front().owner = LegacyHostExtentOwner::Driver;
+    } else if (refusal >= 5) {
+      // The later range must preserve strict transfer boundaries too.
+      auto *second = backing.data() + 8192;
+      const auto owner = LegacyHostExtentOwner::DriverSealedRam;
+      table[6].host_extents =
+          refusal == 5
+              ? std::vector<LegacyHostExtent>{{second, 2, 0, owner}, {second + 2, 4094, 2, owner}}
+              : std::vector<LegacyHostExtent>{{second, 4096, 0, owner}, {second + 4, 4, 4, owner}};
+    } else {
+      // Each range is contiguous, but the second aliases all or part of the first.
+      const size_t offset = refusal == 2 ? 0 : refusal == 3 ? 16 : 4096;
+      table[6] = {backing.data() + offset, Mtype::RW, LegacyHostExtentOwner::DriverSealedRam};
+      table[7] = {backing.data() + offset + 4096, Mtype::RW,
+                  LegacyHostExtentOwner::DriverSealedRam};
+    }
+    EXPECT_FALSE(access->try_lease_ram(ranges));
+    EXPECT_EQ(backing, initial);
+    EXPECT_TRUE(reporter.addresses.empty());
+    // Failed acquisition releases both the request and mapping guards.
+    auto released = std::async(std::launch::async, [&] {
+      const bool acquired = request_mutex->try_lock();
+      if (acquired)
+        request_mutex->unlock();
+      return acquired;
+    });
+    EXPECT_TRUE(released.get());
+    { auto mapping = rocjitsu::host_mapping_lock().lock_exclusive(); }
+    table = original;
+  }
+  for (const VmRamRange bad : {VmRamRange{0x4020, 4}, {UINT64_MAX - 1, 4}, {0x6000, 0}}) {
+    const std::array<VmRamRange, 2> invalid{{ranges[0], bad}};
+    EXPECT_FALSE(access->try_lease_ram(invalid));
+  }
+  EXPECT_FALSE(access->try_lease_ram(std::span<const VmRamRange>{}));
+  const std::array<VmRamRange, 3> excessive{{{0x4000, 4}, {0x5000, 4}, {0x6000, 4}}};
+  EXPECT_FALSE(access->try_lease_ram(excessive));
+  EXPECT_TRUE(access->try_lease_ram(ranges));
+  EXPECT_TRUE(vm.unregister_address_space(handle));
+  EXPECT_FALSE(access->try_lease_ram(ranges));
+  EXPECT_EQ(backing, initial);
+  EXPECT_TRUE(reporter.addresses.empty());
+}
+
+TEST(GpuVmTranslation, StableRamLeaseDestroysPreparedStorageAfterReleasingOperationGuards) {
+  EXPECT_EXIT(
+      ([] {
+        alarm(10);
+        class Translator final : public AddressSpaceTranslator {
+        public:
+          GpuVm *vm = nullptr;
+          AddressSpaceHandle handle;
+          bool admitted = false;
+          mutable bool released = false, destroyed = false;
+          VmTranslationResult translate(uint64_t, size_t, VmAccessKind) const override {
+            return {};
+          }
+          std::unique_ptr<VmRamLeaseRequest>
+          prepare_ram_lease(PhysicalMemoryAccess &, std::span<const VmRamRange>) const override {
+            // Preparation may reenter VM metadata before any operation admission.
+            if (!vm->lookup(handle))
+              _exit(1);
+            { auto mapping = rocjitsu::host_mapping_lock().lock_exclusive(); }
+            class Request final : public VmRamLeaseRequest {
+            public:
+              explicit Request(const Translator &owner) : owner_(owner) {}
+              ~Request() override {
+                // This stands in for allocator instrumentation during destruction.
+                // Unregister takes exclusive state ownership and must not deadlock.
+                { auto mapping = rocjitsu::host_mapping_lock().lock_exclusive(); }
+                if (!owner_.released || !owner_.vm->unregister_address_space(owner_.handle))
+                  _exit(2);
+                owner_.destroyed = true;
+              }
+              bool try_acquire() override {
+                mapping_ = rocjitsu::host_mapping_lock().lock_shared();
+                return owner_.admitted;
+              }
+              void release() override {
+                if (mapping_.owns_lock())
+                  mapping_.unlock();
+                owner_.released = true;
+              }
+              std::span<std::byte> bytes(size_t) const override { return {}; }
+
+            private:
+              const Translator &owner_;
+              std::shared_lock<util::DistributedSharedMutex> mapping_;
+            };
+            return std::make_unique<Request>(*this);
+          }
+        };
+        for (bool admitted : {false, true}) {
+          GpuVm vm;
+          auto translator = std::make_shared<Translator>();
+          translator->vm = &vm;
+          translator->admitted = admitted;
+          translator->handle =
+              vm.register_address_space(7, translator, std::make_shared<TestPhysicalMemory>());
+          auto access = vm.snapshot(translator->handle);
+          if (!access)
+            _exit(3);
+          const std::array<VmRamRange, 2> ranges{{{0x4000, 4}, {0x8000, 4}}};
+          auto lease = access->try_lease_ram(ranges);
+          if (bool(lease) != admitted)
+            _exit(4);
+          lease.reset();
+          if (!translator->destroyed)
+            _exit(5);
+        }
+        _exit(0);
+      }()),
+      ::testing::ExitedWithCode(0), "");
+}
+} // namespace rocjitsu::amdgpu
+
+namespace rocjitsu::amdgpu {
+TEST(GpuVmTranslation, PreparedRamLeaseRevalidatesMappingAndSnapshotBeforeAdmission) {
+  GpuMemory memory("prepared_ram");
+  LegacyPageTable pages;
+  util::DistributedSharedMutex page_mutex;
+  auto request_mutex = std::make_shared<util::DistributedSharedMutex>();
+  std::array<uint8_t, 8192> backing{};
+  constexpr uint64_t base = 0x4000;
+  constexpr auto sealed = LegacyHostExtentOwner::DriverSealedRam;
+  pages[4] = {backing.data(), Mtype::RW, sealed};
+  pages[5] = {backing.data() + 4096, Mtype::RW, sealed};
+  GpuVm vm;
+  LegacyGpuVmAdapter adapter(vm, &memory);
+  const auto handle =
+      adapter.register_address_space(7, &pages, &page_mutex, nullptr, request_mutex);
+  const auto original = vm.snapshot(handle);
+  ASSERT_TRUE(original);
+  const auto fresh = vm.snapshot(handle);
+  ASSERT_TRUE(fresh);
+  EXPECT_TRUE(original->shares_access_state(*fresh));
+  const std::array<VmRamRange, 1> ranges{{{base, backing.size()}}};
+  auto request = original->prepare_ram_lease(ranges);
+  ASSERT_TRUE(request);
+  auto can_mutate = [&] {
+    return std::async(std::launch::async,
+                      [&] {
+                        const bool acquired = request_mutex->try_lock();
+                        if (acquired)
+                          request_mutex->unlock();
+                        return acquired;
+                      })
+        .get();
+  };
+  ASSERT_TRUE(can_mutate());
+  {
+    std::unique_lock lock(*request_mutex);
+    pages[5].host_extents.front().owner = LegacyHostExtentOwner::Application;
+  }
+  EXPECT_FALSE(request->try_acquire());
+  EXPECT_TRUE(can_mutate());
+  request->release();
+  request->release();
+  EXPECT_EQ(backing, (std::array<uint8_t, 8192>{}));
+  {
+    std::unique_lock lock(*request_mutex);
+    pages[5].host_extents.front().owner = sealed;
+  }
+  auto revoked = original->prepare_ram_lease(ranges);
+  ASSERT_TRUE(revoked);
+  ASSERT_TRUE(vm.invalidate(handle));
+  EXPECT_FALSE(revoked->try_acquire());
+  const auto replacement = vm.snapshot(handle);
+  ASSERT_TRUE(replacement);
+  EXPECT_FALSE(original->shares_access_state(*replacement));
+  auto admitted = replacement->prepare_ram_lease(ranges);
+  ASSERT_TRUE(admitted);
+  ASSERT_TRUE(admitted->try_acquire());
+  EXPECT_FALSE(can_mutate());
+  admitted->bytes().back() = std::byte{0x5a};
+  admitted->release();
+  EXPECT_TRUE(can_mutate());
+  EXPECT_EQ(backing.back(), 0x5a);
+  EXPECT_FALSE(admitted->try_acquire());
+}
+
+TEST(GpuVmTranslation, PreparedRamLeaseDeclinesRawRequestOwnerReplacement) {
+  GpuMemory memory("prepared_owner");
+  LegacyPageTable first, second;
+  util::DistributedSharedMutex first_mutex, second_mutex;
+  auto first_request = std::make_shared<util::DistributedSharedMutex>();
+  auto second_request = std::make_shared<util::DistributedSharedMutex>();
+  std::array<uint8_t, 4096> original{}, replacement{};
+  original[0] = 0x12;
+  replacement[0] = 0x34;
+  constexpr auto sealed = LegacyHostExtentOwner::DriverSealedRam;
+  first[4] = {original.data(), Mtype::RW, sealed};
+  second[4] = {replacement.data(), Mtype::RW, sealed};
+  GpuVm vm;
+  LegacyGpuVmAdapter adapter(vm, &memory);
+  const auto handle =
+      adapter.register_address_space(7, &first, &first_mutex, nullptr, first_request);
+  const auto access = vm.snapshot(handle);
+  ASSERT_TRUE(access);
+  const std::array<VmRamRange, 1> ranges{{{0x4000, 4}}};
+  auto prepared = access->prepare_ram_lease(ranges);
+  ASSERT_TRUE(prepared);
+  auto *space = adapter.address_space(7);
+  ASSERT_NE(space, nullptr);
+  space->register_process(7, &second, &second_mutex, nullptr, second_request);
+  EXPECT_FALSE(prepared->try_acquire());
+  EXPECT_FALSE(access->try_lease_ram(ranges));
+  std::array<std::byte, 1> byte{};
+  EXPECT_EQ(access->read(0x4000, byte), VmAccessOutcome::Complete);
+  EXPECT_EQ(byte[0], std::byte{0x34});
+  EXPECT_EQ(original[0], 0x12);
+  EXPECT_EQ(replacement[0], 0x34);
+}
+
+TEST(GpuVmTranslation, PreparedRamLeaseStorageDestructionCanReenterAfterCallerBoundary) {
+  EXPECT_EXIT(
+      ([] {
+        alarm(10);
+        std::mutex caller_boundary;
+        class Translator final : public AddressSpaceTranslator {
+        public:
+          GpuVm *vm = nullptr;
+          AddressSpaceHandle handle;
+          std::mutex *caller_boundary = nullptr;
+          mutable unsigned prepared = 0, released = 0, destroyed = 0;
+          VmTranslationResult translate(uint64_t, size_t, VmAccessKind) const override {
+            return {};
+          }
+          std::unique_ptr<VmRamLeaseRequest>
+          prepare_ram_lease(PhysicalMemoryAccess &, std::span<const VmRamRange>) const override {
+            std::lock_guard lock(*caller_boundary);
+            ++prepared;
+            class Request final : public VmRamLeaseRequest {
+            public:
+              explicit Request(const Translator &owner) : owner_(owner) {}
+              ~Request() override {
+                std::lock_guard lock(*owner_.caller_boundary);
+                if (!owner_.released || !owner_.vm->unregister_address_space(owner_.handle))
+                  _exit(1);
+                ++owner_.destroyed;
+              }
+              bool try_acquire() override {
+                mapping_ = rocjitsu::host_mapping_lock().lock_shared();
+                return true;
+              }
+              void release() override {
+                if (mapping_.owns_lock())
+                  mapping_.unlock();
+                ++owner_.released;
+              }
+              std::span<std::byte> bytes(size_t) const override { return {}; }
+
+            private:
+              const Translator &owner_;
+              std::shared_lock<util::DistributedSharedMutex> mapping_;
+            };
+            return std::make_unique<Request>(*this);
+          }
+        };
+        GpuVm vm;
+        auto translator = std::make_shared<Translator>();
+        translator->vm = &vm;
+        translator->caller_boundary = &caller_boundary;
+        translator->handle =
+            vm.register_address_space(7, translator, std::make_shared<TestPhysicalMemory>());
+        const auto access = vm.snapshot(translator->handle);
+        if (!access)
+          _exit(2);
+        const std::array<VmRamRange, 1> ranges{{{0x4000, 4}}};
+        auto request = access->prepare_ram_lease(ranges);
+        if (!request || translator->prepared != 1)
+          _exit(3);
+        {
+          std::lock_guard lock(caller_boundary);
+          if (!request->try_acquire())
+            _exit(4);
+          request->release();
+          { auto mapping = rocjitsu::host_mapping_lock().lock_exclusive(); }
+          if (translator->released != 1 || translator->destroyed)
+            _exit(5);
+        }
+        request.reset();
+        if (translator->released != 1 || translator->destroyed != 1)
+          _exit(6);
+        _exit(0);
+      }()),
+      ::testing::ExitedWithCode(0), "");
+}
+} // namespace rocjitsu::amdgpu
+
+#undef RJ_GPU_VM_TRANSLATION_TEST_WITH_ASAN

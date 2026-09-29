@@ -14,6 +14,9 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx11_dot2.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_dot.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/graphics_instructions.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/hwfloat/dx9_mul_f32_exec.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/hwfloat/mul_f32_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/lds_direct.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
@@ -276,11 +279,17 @@ inline void execute_ds_swizzle_b32_vds([[maybe_unused]] Inst &inst,
 
 template <typename Inst>
 inline void execute_image_bvh_intersect_ray_mimg([[maybe_unused]] Inst &inst,
-                                                 [[maybe_unused]] Wavefront &wf) {}
+                                                 [[maybe_unused]] Wavefront &wf) {
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+}
 
 template <typename Inst>
 inline void execute_lds_param_load_ldsdir([[maybe_unused]] Inst &inst,
-                                          [[maybe_unused]] Wavefront &wf) {}
+                                          [[maybe_unused]] Wavefront &wf) {
+  amdgpu::execute_graphics_parameter_load(wf, inst.inst_.vdst, inst.inst_.attr,
+                                          inst.inst_.attr_chan);
+}
 
 template <typename Inst>
 inline void execute_s_abs_i32_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
@@ -8324,6 +8333,9 @@ inline void execute_v_cos_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
 template <typename Inst>
 inline void execute_v_cos_f32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   fp_mode::ScopedEnvironment environment(0);
+  if (amdgpu::try_execute_transcendental_f32_simd<false>(inst, wf,
+                                                         amdgpu::transcendental::F32Operation::Cos))
+    return;
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -8339,6 +8351,9 @@ inline void execute_v_cos_f32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
 template <typename Inst>
 inline void execute_v_cos_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   fp_mode::ScopedEnvironment environment(0);
+  if (amdgpu::try_execute_transcendental_f32_simd<true>(inst, wf,
+                                                        amdgpu::transcendental::F32Operation::Cos))
+    return;
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -11308,6 +11323,9 @@ inline void execute_v_exp_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
 template <typename Inst>
 inline void execute_v_exp_f32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   fp_mode::ScopedEnvironment environment(0);
+  if (amdgpu::try_execute_transcendental_f32_simd<false>(inst, wf,
+                                                         amdgpu::transcendental::F32Operation::Exp))
+    return;
   ROCJITSU_TRY_SIMD_VOP1_UNARY(float32_t, float32_t, [&wf](auto a) {
     return util::exp_f32_simd(a, amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
   });
@@ -11326,6 +11344,9 @@ inline void execute_v_exp_f32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
 template <typename Inst>
 inline void execute_v_exp_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   fp_mode::ScopedEnvironment environment(0);
+  if (amdgpu::try_execute_transcendental_f32_simd<true>(inst, wf,
+                                                        amdgpu::transcendental::F32Operation::Exp))
+    return;
   ROCJITSU_TRY_SIMD_VOP3_UNARY_FP(
       float32_t, float32_t,
       [&wf](auto a) {
@@ -13178,6 +13199,9 @@ inline void execute_v_log_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
 template <typename Inst>
 inline void execute_v_log_f32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   fp_mode::ScopedEnvironment environment(0);
+  if (amdgpu::try_execute_transcendental_f32_simd<false>(inst, wf,
+                                                         amdgpu::transcendental::F32Operation::Log))
+    return;
   ROCJITSU_TRY_SIMD_VOP1_UNARY(float32_t, float32_t, [&wf](auto a) {
     return util::log_f32_simd(a, amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
   });
@@ -13196,6 +13220,9 @@ inline void execute_v_log_f32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
 template <typename Inst>
 inline void execute_v_log_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   fp_mode::ScopedEnvironment environment(0);
+  if (amdgpu::try_execute_transcendental_f32_simd<true>(inst, wf,
+                                                        amdgpu::transcendental::F32Operation::Log))
+    return;
   ROCJITSU_TRY_SIMD_VOP3_UNARY_FP(
       float32_t, float32_t,
       [&wf](auto a) {
@@ -16568,6 +16595,8 @@ inline void execute_v_msad_u8_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
 template <typename Inst>
 inline void execute_v_mul_dx9_zero_f32_vop2([[maybe_unused]] Inst &inst,
                                             [[maybe_unused]] Wavefront &wf) {
+  if (hwfloat::try_execute_qualified_dx9_mul_f32_vop2(inst, wf))
+    return;
   if (amdgpu::fp_mode::native_arithmetic_matches(wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32())) {
     ROCJITSU_TRY_SIMD_VOP2_BINARY(float32_t, [](auto a, auto b) {
       auto r = a * b;
@@ -16592,6 +16621,8 @@ inline void execute_v_mul_dx9_zero_f32_vop2([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_mul_dx9_zero_f32_vop3([[maybe_unused]] Inst &inst,
                                             [[maybe_unused]] Wavefront &wf) {
+  if (hwfloat::try_execute_qualified_dx9_mul_f32_vop3(inst, wf))
+    return;
   if (amdgpu::fp_mode::native_arithmetic_matches(wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32())) {
     ROCJITSU_TRY_SIMD_VOP3_BINARY_FP(float32_t, [](auto a, auto b) {
       auto r = a * b;
@@ -16742,6 +16773,8 @@ inline void execute_v_mul_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
 
 template <typename Inst>
 inline void execute_v_mul_f32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  if (hwfloat::try_execute_qualified_mul_f32_vop2(inst, wf))
+    return;
   uint32_t alu_causes = classify_mul_f32_vop2(inst, wf);
   wf.set_trapsts(wf.trapsts() | alu_causes);
   if (!alu_exception_trap_enables(wf)) {
@@ -16767,6 +16800,8 @@ inline void execute_v_mul_f32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
 
 template <typename Inst>
 inline void execute_v_mul_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  if (hwfloat::try_execute_qualified_mul_f32_vop3(inst, wf))
+    return;
   uint32_t alu_causes = classify_mul_f32_vop3(inst, wf);
   wf.set_trapsts(wf.trapsts() | alu_causes);
   if (!alu_exception_trap_enables(wf)) {
@@ -18381,6 +18416,9 @@ inline void execute_v_rcp_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
 template <typename Inst>
 inline void execute_v_rcp_f32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   fp_mode::ScopedEnvironment environment(0);
+  if (amdgpu::try_execute_transcendental_f32_simd<false>(inst, wf,
+                                                         amdgpu::transcendental::F32Operation::Rcp))
+    return;
   ROCJITSU_TRY_SIMD_VOP1_UNARY(float32_t, float32_t, [&wf](auto a) {
     return util::rcp_f32_simd(a, amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
   });
@@ -18399,6 +18437,9 @@ inline void execute_v_rcp_f32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
 template <typename Inst>
 inline void execute_v_rcp_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   fp_mode::ScopedEnvironment environment(0);
+  if (amdgpu::try_execute_transcendental_f32_simd<true>(inst, wf,
+                                                        amdgpu::transcendental::F32Operation::Rcp))
+    return;
   ROCJITSU_TRY_SIMD_VOP3_UNARY_FP(
       float32_t, float32_t,
       [&wf](auto a) {
@@ -18788,6 +18829,9 @@ inline void execute_v_rsq_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
 template <typename Inst>
 inline void execute_v_rsq_f32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   fp_mode::ScopedEnvironment environment(0);
+  if (amdgpu::try_execute_transcendental_f32_simd<false>(inst, wf,
+                                                         amdgpu::transcendental::F32Operation::Rsq))
+    return;
   ROCJITSU_TRY_SIMD_VOP1_UNARY(float32_t, float32_t, [&wf](auto a) {
     return util::rsq_f32_simd(a, amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
   });
@@ -18806,6 +18850,9 @@ inline void execute_v_rsq_f32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
 template <typename Inst>
 inline void execute_v_rsq_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   fp_mode::ScopedEnvironment environment(0);
+  if (amdgpu::try_execute_transcendental_f32_simd<true>(inst, wf,
+                                                        amdgpu::transcendental::F32Operation::Rsq))
+    return;
   ROCJITSU_TRY_SIMD_VOP3_UNARY_FP(
       float32_t, float32_t,
       [&wf](auto a) {
@@ -19115,6 +19162,9 @@ inline void execute_v_sin_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
 
 template <typename Inst>
 inline void execute_v_sin_f32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  if (amdgpu::try_execute_transcendental_f32_simd<false>(inst, wf,
+                                                         amdgpu::transcendental::F32Operation::Sin))
+    return;
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -19129,6 +19179,9 @@ inline void execute_v_sin_f32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
 
 template <typename Inst>
 inline void execute_v_sin_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  if (amdgpu::try_execute_transcendental_f32_simd<true>(inst, wf,
+                                                        amdgpu::transcendental::F32Operation::Sin))
+    return;
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -19245,6 +19298,11 @@ inline void execute_v_sqrt_f32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]
   uint32_t alu_causes = classify_sqrt_f32_vop1(inst, wf);
   wf.set_trapsts(wf.trapsts() | alu_causes);
   if (!alu_exception_trap_enables(wf)) {
+    if (amdgpu::try_execute_transcendental_f32_simd<false>(
+            inst, wf, amdgpu::transcendental::F32Operation::Sqrt))
+      return;
+  }
+  if (!alu_exception_trap_enables(wf)) {
     ROCJITSU_TRY_SIMD_VOP1_UNARY(float32_t, float32_t, [&wf](auto a) {
       return util::sqrt_f32_simd(a, amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
     });
@@ -19266,6 +19324,11 @@ inline void execute_v_sqrt_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
   fp_mode::ScopedEnvironment environment(0);
   uint32_t alu_causes = classify_sqrt_f32_vop3(inst, wf);
   wf.set_trapsts(wf.trapsts() | alu_causes);
+  if (!alu_exception_trap_enables(wf)) {
+    if (amdgpu::try_execute_transcendental_f32_simd<true>(
+            inst, wf, amdgpu::transcendental::F32Operation::Sqrt))
+      return;
+  }
   if (!alu_exception_trap_enables(wf)) {
     ROCJITSU_TRY_SIMD_VOP3_UNARY_FP(
         float32_t, float32_t,

@@ -16,6 +16,8 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
+#include <exception>
 #include <functional>
 #include <queue>
 #include <utility>
@@ -64,6 +66,9 @@ public:
     Wavefront *wf;
     WaitCounterTokens counters;
     uint64_t wave_generation;
+    uint64_t issue_id = 0;
+    bool step_batch = false;
+    bool transfer_ready = false;
   };
 
   /// @brief Issue a memory instruction to this pipeline.
@@ -103,6 +108,8 @@ protected:
                                                  MemoryAccessDeferredCompletion complete) = 0;
 
   VmAccessOutcome issue_impl(Instruction *inst, Wavefront &wf, bool retain_unavailable);
+  VmAccessOutcome initiate_collected_access(Instruction &inst, Wavefront &wf,
+                                            bool retain_unavailable);
   [[nodiscard]] WaitCounterTokens issue_counters(const Instruction &inst) const;
   void acquire_wait_counters(Wavefront &wf, const WaitCounterTokens &counters);
   void release_wait_counters(Wavefront &wf, const WaitCounterTokens &counters);
@@ -120,8 +127,18 @@ protected:
     delete inst;
   }
 
+  void tick_impl(bool step_only);
+  uint64_t next_issue_id() {
+    if (next_issue_id_ == UINT64_MAX)
+      std::terminate();
+    return next_issue_id_++;
+  }
+  uint64_t next_issue_id_ = 1;
+  Instruction *deferable_instruction_ = nullptr;
+  Instruction *step_staged_instruction_ = nullptr;
+  bool collect_step_metadata_ = false;
   WaitCounterType counter_type_;
-  std::queue<PipelineEntry> issued_;
+  std::deque<PipelineEntry> issued_;
   std::queue<PipelineEntry> returned_;
   FaultHandler fault_handler_;
 };
@@ -153,12 +170,47 @@ public:
 
   void set_l2(L2Cache *l2) { l2_ = l2; }
 
+  /// A synchronous CU step may delay private-RAM metadata loads until its end.
+  /// The caller retains its WaveStateGuard through finish and destruction.
+  class StepBatch {
+  public:
+    StepBatch(GlobalMemPipeline &pipeline, bool enabled)
+        : pipeline_(pipeline), previous_(pipeline.collect_step_metadata_),
+          enabled_(enabled && !previous_) {
+      if (enabled_ || previous_)
+        pipeline_.collect_step_metadata_ = enabled_;
+    }
+    StepBatch(const StepBatch &) = delete;
+    ~StepBatch() {
+      if (!enabled_ && !previous_)
+        return;
+      pipeline_.collect_step_metadata_ = false;
+      if (enabled_ && !pipeline_.issued_.empty())
+        pipeline_.yield_unfinished_step();
+      pipeline_.collect_step_metadata_ = previous_;
+    }
+    void finish() {
+      if (pipeline_.collect_step_metadata_) {
+        pipeline_.collect_step_metadata_ = false;
+        if (!pipeline_.issued_.empty())
+          pipeline_.finish_step_batch();
+      }
+    }
+
+  private:
+    GlobalMemPipeline &pipeline_;
+    bool previous_;
+    bool enabled_;
+  };
+
 protected:
   VmAccessOutcome initiate_access(Instruction &inst, Wavefront &wf) override;
   MemoryAccessCompletion complete_access(Instruction &inst, Wavefront &wf,
                                          MemoryAccessDeferredCompletion complete) override;
 
 private:
+  void finish_step_batch();
+  void yield_unfinished_step() noexcept;
   L1VectorCache *l1_;
   L2Cache *l2_;
 };

@@ -102,7 +102,8 @@ ISA architecture family. When it is present, it must belong to `vm.arch`. If
 both the target binding and `vm.gpu.device.gfx_target_version` provide nonzero
 packed versions, they must match. CDNA5 currently defaults an omitted target to
 `gfx1250` for compatibility; new configs for an architecture with multiple
-concrete targets should specify the target explicitly.
+concrete targets should specify the target explicitly. RDNA3 has no default
+target: only an explicit `gfx1100` target selects gfx1100 behavior.
 
 `exec_mode` is matched literally: only the exact string `"clocked"` selects
 clocked mode. If the field is omitted, set to `"functional"`, or given any

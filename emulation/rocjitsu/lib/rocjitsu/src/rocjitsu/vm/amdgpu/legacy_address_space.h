@@ -9,6 +9,7 @@
 #include "rocjitsu/kmd/linux/host_access_guard.h"
 #include "rocjitsu/kmd/linux/host_mapping_lock.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/legacy_page_table.h"
 #include "simdojo/components/sparse_memory.h"
 #include "simdojo/sim/component.h"
@@ -150,6 +151,7 @@ public:
   const uint64_t *page_table_generation = nullptr;
   std::shared_ptr<util::DistributedSharedMutex> request_mutex;
   std::shared_ptr<const std::atomic<uint64_t>> mutation_epoch{};
+  std::shared_ptr<LegacyPageTableCacheState> page_table_cache_state{};
   pid_t client_pid = 0;
   int client_mem_fd = -1;
   bool passthrough = false;
@@ -172,6 +174,13 @@ enum class CopyOutcome : uint8_t {
   Complete,    ///< Every byte was copied.
   Unavailable, ///< An endpoint is not resolvable yet; the caller may retry.
   Faulted,     ///< An endpoint does not exist; retrying will never help.
+};
+
+/// @brief Progress and policy outcome for one ordinary compatibility transfer.
+struct LegacyTransferStep {
+  size_t completed_bytes = 0;
+  CopyOutcome outcome = CopyOutcome::Faulted;
+  bool policy_fault = false;
 };
 
 /// @brief AMDGPU address space with VMID-based per-process page table resolution.
@@ -249,7 +258,8 @@ public:
   ///        lookups. Omitting it disables cross-chunk MTYPE reuse.
   void register_process(uint32_t pid, LegacyPageTable *pt, util::DistributedSharedMutex *mu,
                         const uint64_t *generation = nullptr,
-                        std::shared_ptr<util::DistributedSharedMutex> request_mutex = {}) {
+                        std::shared_ptr<util::DistributedSharedMutex> request_mutex = {},
+                        std::shared_ptr<LegacyPageTableCacheState> page_table_cache_state = {}) {
     util::Logger::cp("VMID_REG pid=", pid, " mem=0x", std::hex, reinterpret_cast<uintptr_t>(this),
                      std::dec, " pt_size=", pt->size());
     update_vmid_registration(pid, [&](auto) {
@@ -260,6 +270,7 @@ public:
           .client_mem_fd = {},
           .generation = generation,
           .request_mutex = std::move(request_mutex),
+          .page_table_cache_state = std::move(page_table_cache_state),
           .passthrough = false,
           .fault_reporter = nullptr,
       };
@@ -271,9 +282,22 @@ public:
   /// @details Page-table mutations take the exclusive side of this lease before
   /// the ordinary page-table lock. Callers must release the lease before a
   /// backing-memory access, whose allocator metadata query may reenter KFD.
-  PageTableRequestGuard acquire_page_table_request(uint32_t vmid) const {
+  PageTableRequestGuard acquire_page_table_request(
+      uint32_t vmid, const std::shared_ptr<util::DistributedSharedMutex> &expected = {}) const {
     if (vmid == 0)
       return {};
+    if (expected) {
+      // The caller retains this owner beyond its outer operation lock. Refuse
+      // replacement rather than acquiring/destroying an unknown mutex owner.
+      PageTableRequestGuard guard(expected);
+      std::shared_lock lock(vmid_mutex_);
+      auto it = vmid_table_.find(vmid);
+      if (it == vmid_table_.end() || it->second.request_mutex != expected)
+        return {};
+      guard.bind(it->second.page_table, it->second.mutex, it->second.generation,
+                 vmid_registry_generation_);
+      return guard;
+    }
     while (true) {
       std::shared_ptr<util::DistributedSharedMutex> request_mutex;
       {
@@ -563,34 +587,50 @@ public:
     return pte != vmid_entry->second.page_table->end() ? pte->second.mtype : Mtype::RW;
   }
 
-  /// @brief Bound one compatibility translation to the current mapped extent.
+  struct TranslationPolicy {
+    std::size_t contiguous_bytes;
+    Mtype mtype = Mtype::RW;
+  };
+
+  /// @brief Read one compatibility translation's extent bound and page policy.
   /// @details A sub-page KFD mapping must be exposed as a separate translation
   /// span so GpuVm can report the exact prefix completed before a later gap or
   /// inaccessible extent faults. Unknown and passthrough mappings retain the
   /// ordinary page boundary; the backing access performs their live check.
-  std::size_t translation_contiguous_bytes(uint64_t addr, uint32_t vmid = 0) const {
+  TranslationPolicy translation_policy(uint64_t addr, uint32_t vmid = 0) const {
     const std::size_t page_offset = addr & PAGE_MASK;
     const std::size_t page_bytes = PAGE_SIZE - page_offset;
-    std::size_t contiguous_bytes = page_bytes;
-    (void)with_page_mapping(addr, vmid, [&](const LegacyPageTableEntry *pte, IdentityPage) {
-      if (pte != nullptr) {
-        const LegacyHostExtent *extent = host_extent_at(*pte, page_offset);
-        if (extent != nullptr) {
-          contiguous_bytes = std::min(page_bytes, extent->gpu_page_offset +
-                                                      extent->host_backed_bytes - page_offset);
-        }
-      }
-      return true;
-    });
-    return contiguous_bytes;
+    TranslationPolicy policy{.contiguous_bytes = page_bytes};
+    const bool resolved =
+        with_page_mapping(addr, vmid, [&](const LegacyPageTableEntry *pte, IdentityPage) {
+          if (pte != nullptr)
+            policy = mapped_translation_policy(addr, *pte);
+          return true;
+        });
+    // A PTE without a host extent still contributes page policy. Ordinary
+    // mapped accesses obtain both fields under the same page-table lease.
+    if (!resolved)
+      policy.mtype = pte_mtype(addr, vmid);
+    return policy;
   }
 
   /// @brief Look up PTE MTYPE through an already validated request lease.
-  Mtype pte_mtype(uint64_t addr, const PageTableRequestGuard &guard) const {
+  Mtype pte_mtype(uint64_t addr, const PageTableRequestGuard &guard,
+                  bool *may_batch_private_uc = nullptr,
+                  bool *may_batch_private_ram = nullptr) const {
     assert(guard.owns_lock());
     assert(guard.page_table_ != nullptr && guard.page_table_mutex_ != nullptr);
     std::shared_lock page_table_lock(*guard.page_table_mutex_);
     auto pte = guard.page_table_->find(addr >> PAGE_SHIFT);
+    if (may_batch_private_uc)
+      *may_batch_private_uc =
+          pte != guard.page_table_->end() && pte->second.mtype == Mtype::UC &&
+          pte->second.host_extents.size() == 1 &&
+          pte->second.host_extents.front().owner == LegacyHostExtentOwner::DriverSealedRam;
+    if (may_batch_private_ram)
+      *may_batch_private_ram =
+          pte != guard.page_table_->end() && pte->second.host_extents.size() == 1 &&
+          pte->second.host_extents.front().owner == LegacyHostExtentOwner::DriverSealedRam;
     return pte != guard.page_table_->end() ? pte->second.mtype : Mtype::RW;
   }
 
@@ -636,6 +676,139 @@ public:
         std::memcpy(bytes, staging.data(), size);
       return copied;
     });
+  }
+
+  /// Acquire only private, shrink-sealed driver RAM. Unlike ordinary accesses,
+  /// this path invokes no allocator query, passthrough transport or fault sink.
+  /// Request ownership prevents PTE removal before private backing teardown;
+  /// mapping ownership excludes interposed protection changes until all users join.
+  bool
+  try_acquire_sealed_ram(std::span<const VmRamRange> ranges, uint32_t vmid,
+                         PageTableRequestGuard &request,
+                         std::shared_lock<util::DistributedSharedMutex> &mapping,
+                         std::span<std::span<std::byte>> bytes,
+                         const std::shared_ptr<util::DistributedSharedMutex> &expected = {}) const {
+    if (ranges.empty() || ranges.size() > VmRamLease::kMaxRanges || bytes.size() != ranges.size())
+      return false;
+    for (const auto &[addr, size] : ranges)
+      if (!size || size - 1 > UINT64_MAX - addr)
+        return false;
+    request = acquire_page_table_request(vmid, expected);
+    if (!request.owns_lock())
+      return false;
+    std::shared_lock page_table_lock(*request.page_table_mutex_);
+    mapping = rocjitsu::host_mapping_lock().lock_shared();
+    for (size_t i = 0; i < ranges.size(); ++i) {
+      const auto [addr, size] = ranges[i];
+      uintptr_t first = 0;
+      for (size_t offset = 0; offset < size;) {
+        const uint64_t current = addr + offset;
+        auto it = request.page_table_->find(current >> PAGE_SHIFT);
+        // Ordinary transfers reject in-page extent boundaries and overlapping
+        // coverage. A contiguous host span alone does not prove those accesses safe.
+        if (it == request.page_table_->end() || it->second.host_extents.size() != 1)
+          return false;
+        const size_t page_offset = current & PAGE_MASK;
+        const auto *extent = host_extent_at(it->second, page_offset);
+        if (!extent || extent->owner != LegacyHostExtentOwner::DriverSealedRam)
+          return false;
+        const size_t extent_offset = page_offset - extent->gpu_page_offset;
+        const auto host = reinterpret_cast<uintptr_t>(extent->host_ptr) + extent_offset;
+        if (!offset)
+          first = host;
+        if (!first || size > UINTPTR_MAX - first || host != first + offset)
+          return false;
+        offset += std::min(
+            {size - offset, PAGE_SIZE - page_offset, extent->host_backed_bytes - extent_offset});
+      }
+      // Fresh private GEMs have one retained host mapping. Unlike PRIME imports,
+      // disjoint host intervals therefore establish disjoint underlying bytes.
+      for (size_t j = 0; j < i; ++j) {
+        const auto other = reinterpret_cast<uintptr_t>(bytes[j].data());
+        if (first < other + bytes[j].size() && other < first + size)
+          return false;
+      }
+      bytes[i] = {reinterpret_cast<std::byte *>(first), size};
+    }
+    return true;
+  }
+
+  /// Ordered private stores with one live admission and no effects on refusal.
+  /// The binding must retain expected beyond its enclosing VM-state lock.
+  bool
+  try_write_private_dwords(std::span<const VmRamDwordStore> stores, uint32_t vmid,
+                           Mtype instruction_mtype, Mtype expected_mtype,
+                           const std::shared_ptr<util::DistributedSharedMutex> &expected) const {
+    if (!expected || stores.size() < 2 || stores.size() > VmRamDwordStore::kMaxBatch)
+      return false;
+    const uint64_t line = stores.front().address >> 7;
+    for (const auto &[address, source] : stores)
+      if (!source || (address & 3) || (address >> 7) != line)
+        return false;
+    auto request = acquire_page_table_request(vmid, expected);
+    if (!request.owns_lock())
+      return false;
+    std::shared_lock page_table_lock(*request.page_table_mutex_);
+    const auto it = request.page_table_->find(stores.front().address >> PAGE_SHIFT);
+    if (it == request.page_table_->end() || it->second.host_extents.size() != 1 ||
+        effective_mtype(instruction_mtype, it->second.mtype) != expected_mtype)
+      return false;
+    const auto &extent = it->second.host_extents.front();
+    if (extent.owner != LegacyHostExtentOwner::DriverSealedRam || !extent.host_ptr)
+      return false;
+    const uintptr_t host = reinterpret_cast<uintptr_t>(extent.host_ptr);
+    if (extent.host_backed_bytes > UINTPTR_MAX - host)
+      return false;
+    uintptr_t first = UINTPTR_MAX, last = 0;
+    for (const auto &[address, source] : stores) {
+      const size_t page_offset = address & PAGE_MASK;
+      if (page_offset < extent.gpu_page_offset)
+        return false;
+      const size_t offset = page_offset - extent.gpu_page_offset;
+      if (offset > extent.host_backed_bytes || sizeof(uint32_t) > extent.host_backed_bytes - offset)
+        return false;
+      first = std::min(first, host + offset);
+      last = std::max(last, host + offset + sizeof(uint32_t));
+    }
+    // Keep subsequent cache copies equivalent too: a store must not change a
+    // source word that a later descriptor or cache update still needs to read.
+    for (const auto &store : stores) {
+      const uintptr_t source = reinterpret_cast<uintptr_t>(store.source);
+      if (source > UINTPTR_MAX - sizeof(uint32_t) ||
+          (source < last && first < source + sizeof(uint32_t)))
+        return false;
+    }
+    const auto mapping = rocjitsu::host_mapping_lock().lock_shared();
+    for (const auto &[address, source] : stores)
+      std::memcpy(extent.host_ptr + (address & PAGE_MASK) - extent.gpu_page_offset, source,
+                  sizeof(uint32_t));
+    return true;
+  }
+
+  /// The lifetime/protection proof of a sealed RAM lease without allocation.
+  /// Exactly one extent is required: adjacent or overlapping extents can change
+  /// original dword fault boundaries even when their host bytes are contiguous.
+  /// The binding must retain expected beyond its enclosing VM-state lock.
+  bool try_read_uncached_ram(uint64_t addr, std::span<std::byte> dst, uint32_t vmid,
+                             const std::shared_ptr<util::DistributedSharedMutex> &expected) const {
+    if (!expected || (addr & 3) || dst.empty() || (dst.size() & 3) || dst.size() > 64 - (addr & 63))
+      return false;
+    auto request = acquire_page_table_request(vmid, expected);
+    if (!request.owns_lock())
+      return false;
+    std::shared_lock page_table_lock(*request.page_table_mutex_);
+    auto it = request.page_table_->find(addr >> PAGE_SHIFT);
+    if (it == request.page_table_->end() || it->second.mtype != Mtype::UC ||
+        it->second.host_extents.size() != 1)
+      return false;
+    const size_t offset = addr & PAGE_MASK;
+    const auto *extent = host_extent_at(it->second, offset);
+    if (!extent || extent->owner != LegacyHostExtentOwner::DriverSealedRam ||
+        dst.size() > extent->host_backed_bytes - (offset - extent->gpu_page_offset))
+      return false;
+    const auto mapping = rocjitsu::host_mapping_lock().lock_shared();
+    std::memcpy(dst.data(), extent->host_ptr + offset - extent->gpu_page_offset, dst.size());
+    return true;
   }
 
   uint32_t fetch32(uint64_t addr, uint32_t vmid = 0) const { return read32(addr, vmid); }
@@ -792,26 +965,9 @@ public:
           auto out = std::span(staged).subspan(offset, chunk);
           if (copy_from_mapped(ea, out.data(), chunk, vmid))
             return true;
-          if (faults.observed()) {
-            outcome = CopyOutcome::Faulted;
-            return false;
-          }
-          if (vmid > 0 && has_client_backing(vmid)) {
-            if (read_client_memory(ea, out.data(), chunk, vmid))
-              return true;
-            std::ranges::fill(out, uint8_t{0});
-            note_rejected_identity_access(ea, vmid);
-            outcome = CopyOutcome::Faulted;
-            return false;
-          }
-          if (has_page_mapping(ea, vmid)) {
-            note_clipped_mapped_access("read", ea, chunk, vmid);
-            note_rejected_identity_access(ea, vmid);
-            outcome = CopyOutcome::Faulted;
-            return false;
-          }
-          outcome = CopyOutcome::Unavailable;
-          return false;
+          outcome = finish_strict_copy(ea, out.data(), chunk, vmid,
+                                       /*into_memory=*/false, faults);
+          return outcome == CopyOutcome::Complete;
         });
     if (!completed)
       return outcome;
@@ -839,27 +995,24 @@ public:
           auto in = src.subspan(offset, chunk);
           if (copy_to_mapped(ea, in.data(), chunk, vmid))
             return true;
-          if (faults.observed()) {
-            outcome = CopyOutcome::Faulted;
-            return false;
-          }
-          if (vmid > 0 && has_client_backing(vmid)) {
-            if (write_client_memory(ea, in.data(), chunk, vmid))
-              return true;
-            note_rejected_identity_access(ea, vmid, MemoryFaultCause::Indeterminate);
-            outcome = CopyOutcome::Faulted;
-            return false;
-          }
-          if (has_page_mapping(ea, vmid)) {
-            note_clipped_mapped_access("write", ea, chunk, vmid);
-            note_rejected_identity_access(ea, vmid);
-            outcome = CopyOutcome::Faulted;
-            return false;
-          }
-          outcome = CopyOutcome::Unavailable;
-          return false;
+          outcome = finish_strict_copy(ea, const_cast<uint8_t *>(in.data()), chunk, vmid,
+                                       /*into_memory=*/true, faults);
+          return outcome == CopyOutcome::Complete;
         });
     return completed ? CopyOutcome::Complete : outcome;
+  }
+
+  /// @brief Translate policy and read the next page span under one admission.
+  [[nodiscard]] LegacyTransferStep read_step(uint64_t addr, std::span<uint8_t> remaining,
+                                             uint32_t vmid = 0) const {
+    return transfer_step<false>(addr, remaining.data(), remaining.size(), vmid);
+  }
+
+  /// @brief Translate policy and write the next page span under one admission.
+  [[nodiscard]] LegacyTransferStep write_step(uint64_t addr, std::span<const uint8_t> remaining,
+                                              uint32_t vmid = 0) const {
+    return transfer_step<true>(addr, const_cast<uint8_t *>(remaining.data()), remaining.size(),
+                               vmid);
   }
 
   /// @brief Perform an atomic read-modify-write on resolved backing storage.
@@ -1458,7 +1611,8 @@ private:
     if (registration.page_table == nullptr || registration.page_table_mutex == nullptr)
       return false;
     register_process(vmid, registration.page_table, registration.page_table_mutex,
-                     registration.page_table_generation, std::move(registration.request_mutex));
+                     registration.page_table_generation, std::move(registration.request_mutex),
+                     std::move(registration.page_table_cache_state));
     set_process_client_pid(vmid, registration.client_pid);
     set_process_mem_fd(vmid, registration.client_mem_fd);
     set_process_passthrough(vmid, registration.passthrough);
@@ -2135,7 +2289,8 @@ private:
   [[nodiscard]] static bool extent_is_writable(const LegacyHostExtent &extent,
                                                const uint8_t *target, size_t size,
                                                MemoryFaultCause &cause) {
-    if (extent.owner == LegacyHostExtentOwner::Driver)
+    if (extent.owner == LegacyHostExtentOwner::Driver ||
+        extent.owner == LegacyHostExtentOwner::DriverSealedRam)
       return true;
     const auto writability = host_range_writability(target, size);
     if (writability == PageWritability::Writable)
@@ -2369,6 +2524,7 @@ private:
     util::UniqueHandle client_mem_fd;
     const uint64_t *generation = nullptr;
     std::shared_ptr<util::DistributedSharedMutex> request_mutex;
+    std::shared_ptr<LegacyPageTableCacheState> page_table_cache_state;
     bool passthrough = false;
     MemoryFaultReporter *fault_reporter = nullptr;
   };
@@ -2399,6 +2555,8 @@ private:
       if (current_request_mutex != request_mutex)
         continue;
 
+      if (it != vmid_table_.end() && it->second.page_table_cache_state)
+        it->second.page_table_cache_state->invalidate_and_wait();
       if (update(it))
         ++vmid_registry_generation_;
       return;
@@ -2418,6 +2576,15 @@ private:
     LegacyPageTable *page_table = nullptr;
     util::DistributedSharedMutex *mutex = nullptr;
     const uint64_t *generation_ptr = nullptr;
+    std::shared_ptr<LegacyPageTableCacheState> page_table_cache_state;
+    uint64_t page_table_cache_generation = 0;
+  };
+
+  class PteCacheSet {
+  public:
+    static constexpr size_t kEntryCount = 64;
+    static_assert((kEntryCount & (kEntryCount - 1)) == 0);
+    std::array<PteCache, kEntryCount> entries;
   };
 
 #if defined(RJ_GPU_MEMORY_WITH_ASAN)
@@ -2553,7 +2720,8 @@ private:
 
   /// @brief Walk a VMID page table with a generation-keyed thread-local cache.
   /// @details A mapped-PTE callback runs while both VMID registration and the
-  /// selected page table are shared-locked. Miss callbacks and ASan allocator
+  /// selected page table are shared-locked or a copied-PTE admission is held.
+  /// Each admission ends when its callback returns. Miss callbacks and ASan allocator
   /// queries run without either lock. After an unlocked query, the VMID binding
   /// and exact PTE contents are revalidated before the bounded copy is published.
   /// Addressability checks in the mapped-span helpers remain the final guard
@@ -2562,6 +2730,23 @@ private:
   auto cached_walk(uint64_t addr, uint32_t vmid, PteCache &cache,
                    F &&fn) const -> std::invoke_result_t<F, const LegacyPageTableEntry *> {
     const uint64_t page_key = addr >> PAGE_SHIFT;
+
+    // Cached PTEs are immutable copies. A two-check admission against the
+    // retained process state lets a hit avoid both page-table reader locks;
+    // mutation advances the generation before draining admitted readers. The
+    // admission covers only this callback, never the surrounding quantum.
+    if (cache.memory == this && cache.memory_instance == instance_id_ && cache.vmid == vmid &&
+        cache.page_key == page_key && cache.found && cache.page_table_cache_state) {
+      auto *state = cache.page_table_cache_state.get();
+      if (state->try_acquire(cache.page_table_cache_generation)) {
+        struct ReaderGuard {
+          LegacyPageTableCacheState *state;
+          ~ReaderGuard() { state->release(); }
+        } reader_guard{state};
+        return fn(&cache.pte);
+      }
+    }
+
 #if defined(RJ_GPU_MEMORY_WITH_ASAN)
     size_t metadata_retries = 0;
 #endif
@@ -2575,6 +2760,8 @@ private:
       LegacyPageTable *page_table = cache.page_table;
       util::DistributedSharedMutex *page_table_mutex = cache.mutex;
       const uint64_t *generation_ptr = cache.generation_ptr;
+      std::shared_ptr<LegacyPageTableCacheState> page_table_cache_state =
+          cache.page_table_cache_state;
       if (!cached_table) {
         auto vmid_entry = vmid_table_.find(vmid);
         if (vmid_entry == vmid_table_.end()) {
@@ -2585,6 +2772,7 @@ private:
         page_table = vmid_entry->second.page_table;
         page_table_mutex = vmid_entry->second.mutex;
         generation_ptr = vmid_entry->second.generation;
+        page_table_cache_state = vmid_entry->second.page_table_cache_state;
       }
 
       std::shared_lock page_table_lock(*page_table_mutex);
@@ -2602,6 +2790,9 @@ private:
             .page_table = page_table,
             .mutex = page_table_mutex,
             .generation_ptr = generation_ptr,
+            .page_table_cache_state = page_table_cache_state,
+            .page_table_cache_generation =
+                page_table_cache_state ? page_table_cache_state->generation() : 0,
         };
       };
       const bool cached_page = allow_cache_hit && cached_table && generation_ptr &&
@@ -2728,7 +2919,11 @@ private:
       return fn(nullptr, IdentityPage(page));
     }
 
-    static thread_local PteCache cache;
+    static thread_local PteCacheSet caches;
+    const uint64_t page = addr >> PAGE_SHIFT;
+    const uint64_t cache_key =
+        page ^ (page >> 6) ^ (page >> 12) ^ (static_cast<uint64_t>(vmid) * 0x9e3779b97f4a7c15ULL);
+    PteCache &cache = caches.entries[cache_key & (PteCacheSet::kEntryCount - 1)];
     return cached_walk(addr, vmid, cache, [&](const LegacyPageTableEntry *pte) {
       if (pte) {
         if (pte->host_extents.empty())
@@ -2829,6 +3024,79 @@ private:
     });
   }
 
+  static TranslationPolicy mapped_translation_policy(uint64_t addr,
+                                                     const LegacyPageTableEntry &pte) {
+    const size_t offset = addr & PAGE_MASK;
+    TranslationPolicy policy{.contiguous_bytes = PAGE_SIZE - offset, .mtype = pte.mtype};
+    if (const LegacyHostExtent *extent = host_extent_at(pte, offset))
+      policy.contiguous_bytes = std::min(
+          policy.contiguous_bytes, extent->gpu_page_offset + extent->host_backed_bytes - offset);
+    return policy;
+  }
+
+  CopyOutcome finish_strict_copy(uint64_t addr, void *bytes, size_t size, uint32_t vmid,
+                                 bool into_memory, const FaultScope &faults) const {
+    if (faults.observed())
+      return CopyOutcome::Faulted;
+    if (vmid > 0 && has_client_backing(vmid)) {
+      if (into_memory ? write_client_memory(addr, bytes, size, vmid)
+                      : read_client_memory(addr, bytes, size, vmid))
+        return CopyOutcome::Complete;
+      if (!into_memory)
+        std::memset(bytes, 0, size);
+      note_rejected_identity_access(
+          addr, vmid, into_memory ? MemoryFaultCause::Indeterminate : MemoryFaultCause::NotPresent);
+      return CopyOutcome::Faulted;
+    }
+    if (has_page_mapping(addr, vmid)) {
+      note_clipped_mapped_access(into_memory ? "write" : "read", addr, size, vmid);
+      note_rejected_identity_access(addr, vmid);
+      return CopyOutcome::Faulted;
+    }
+    return CopyOutcome::Unavailable;
+  }
+
+  template <bool IntoMemory>
+  LegacyTransferStep transfer_step(uint64_t addr, void *bytes, size_t remaining,
+                                   uint32_t vmid) const {
+    const FaultDispatch fault_dispatch(*this);
+    const FaultScope faults;
+    if (!range_within_address_space(addr, remaining)) {
+      note_rejected_identity_access(addr, vmid);
+      return {.outcome = CopyOutcome::Faulted};
+    }
+    if (remaining == 0)
+      return {.outcome = CopyOutcome::Complete};
+    const size_t chunk = std::min(remaining, PAGE_SIZE - (addr & PAGE_MASK));
+    // Allocate staging before any mapping admission. A failed physical read
+    // leaves its destination unchanged, including a guarded host-access fault.
+    std::vector<uint8_t> staged;
+    if constexpr (!IntoMemory)
+      staged.resize(chunk);
+    void *copy_bytes = IntoMemory ? bytes : staged.data();
+    bool policy_fault = false;
+    const bool copied =
+        with_page_mapping(addr, vmid, [&](const LegacyPageTableEntry *pte, IdentityPage page) {
+          // A sub-page extent is a hard translation boundary even when another
+          // adjacent extent could satisfy the strict transport's coverage test.
+          if (pte && mapped_translation_policy(addr, *pte).contiguous_bytes < chunk) {
+            policy_fault = true;
+            return false;
+          }
+          return copy_resolved_span(addr, copy_bytes, chunk, vmid, IntoMemory, pte, page);
+        });
+    if (policy_fault)
+      return {.outcome = CopyOutcome::Faulted, .policy_fault = true};
+    const CopyOutcome outcome =
+        copied ? CopyOutcome::Complete
+               : finish_strict_copy(addr, copy_bytes, chunk, vmid, IntoMemory, faults);
+    if (outcome != CopyOutcome::Complete)
+      return {.outcome = outcome};
+    if constexpr (!IntoMemory)
+      std::memcpy(bytes, staged.data(), chunk);
+    return {.completed_bytes = chunk, .outcome = CopyOutcome::Complete};
+  }
+
   /// @brief Copy a page-bounded span in or out without exposing a bare pointer.
   ///
   /// @details A page-table span is memcpy'd from its extent. An identity span is
@@ -2840,109 +3108,115 @@ private:
     if (size == 0 || (addr & PAGE_MASK) + size > PAGE_SIZE)
       return false;
     return with_page_mapping(addr, vmid, [&](const LegacyPageTableEntry *pte, IdentityPage page) {
-      const size_t page_offset = addr & PAGE_MASK;
-      if (pte) {
-        // Collect and validate every extent before copying. A strict write may
-        // span adjacent sub-page extents, but it must never publish the extents
-        // before discovering a gap or a read-only destination.
-        struct Span {
-          size_t value_offset = 0;
-          uint8_t *host_ptr = nullptr;
-          size_t size = 0;
-          const LegacyHostExtent *extent = nullptr;
-        };
-        std::vector<Span> spans;
-        const auto mapping_lease = rocjitsu::host_mapping_lock().lock_shared();
-        const size_t mapped_bytes =
-            for_each_mapped_span(*pte, page_offset, size,
-                                 [&](size_t value_offset, uint8_t *host_ptr, size_t span_size,
-                                     const LegacyHostExtent &extent) {
-                                   spans.push_back({value_offset, host_ptr, span_size, &extent});
-                                 });
-        std::ranges::sort(spans, {}, &Span::value_offset);
-        size_t covered = 0;
-        for (const Span &span : spans) {
-          if (span.value_offset != covered)
-            return false;
-          covered += span.size;
-        }
-        if (mapped_bytes != size || covered != size)
-          return false;
-        // A write wholly contained in one host page cannot partially cross a
-        // protection boundary: an unwritable page faults on its first store.
-        // Let the guarded copy take that exceptional fault instead of scanning
-        // /proc/self/maps before every ordinary GPU store. Multi-span and
-        // cross-page strict writes still validate every destination first,
-        // because a later fault there could otherwise leave an earlier span
-        // modified even though this operation reports failure.
-        bool write_can_fault_atomically = false;
-        if (into_memory && spans.size() == 1) {
-          const Span &span = spans.front();
-          const uintptr_t first_page =
-              reinterpret_cast<uintptr_t>(span.host_ptr) & ~static_cast<uintptr_t>(PAGE_MASK);
-          const uintptr_t last_page = reinterpret_cast<uintptr_t>(span.host_ptr + span.size - 1) &
-                                      ~static_cast<uintptr_t>(PAGE_MASK);
-          write_can_fault_atomically = first_page == last_page;
-          if (write_can_fault_atomically &&
-              addressable_prefix(span.host_ptr, span.size) != span.size) {
-            note_rejected_identity_access(addr, vmid, MemoryFaultCause::NotPresent);
-            return false;
-          }
-        }
-        if (into_memory && !write_can_fault_atomically) {
-          for (const Span &span : spans) {
-            MemoryFaultCause cause = MemoryFaultCause::NotPresent;
-            if (!extent_is_writable(*span.extent, span.host_ptr, span.size, cause)) {
-              note_rejected_identity_access(addr + span.value_offset, vmid, cause);
-              return false;
-            }
-          }
-        }
-        if (!rocjitsu::with_host_access_guard([&] {
-              for (const Span &span : spans) {
-#if defined(RJ_GPU_MEMORY_WITH_TSAN)
-                constexpr uintptr_t kHostPageMask = PAGE_SIZE - 1;
-                const uintptr_t begin = reinterpret_cast<uintptr_t>(span.host_ptr) &
-                                        ~static_cast<uintptr_t>(kHostPageMask);
-                const uintptr_t end = (reinterpret_cast<uintptr_t>(span.host_ptr) + span.size - 1) &
-                                      ~static_cast<uintptr_t>(kHostPageMask);
-                for (uintptr_t host_page = begin;; host_page += PAGE_SIZE) {
-                  __tsan_acquire(reinterpret_cast<void *>(host_page));
-                  if (host_page == end)
-                    break;
-                }
-#endif
-                if (into_memory) {
-                  std::memcpy(span.host_ptr,
-                              static_cast<const uint8_t *>(bytes) + span.value_offset, span.size);
-                } else {
-                  std::memcpy(static_cast<uint8_t *>(bytes) + span.value_offset, span.host_ptr,
-                              span.size);
-                }
-#if defined(RJ_GPU_MEMORY_WITH_TSAN)
-                for (uintptr_t host_page = begin;; host_page += PAGE_SIZE) {
-                  __tsan_release(reinterpret_cast<void *>(host_page));
-                  if (host_page == end)
-                    break;
-                }
-#endif
-              }
-            })) {
-          note_rejected_identity_access(addr, vmid, guarded_fault_cause());
-          return false;
-        }
-        return true;
-      }
-      if (addr >= kUserSpaceLimit || size > kUserSpaceLimit - addr)
-        return false;
-      MemoryFaultCause write_cause = MemoryFaultCause::NotPresent;
-      const bool moved = into_memory ? page.write_strict(page_offset, bytes, size, write_cause)
-                                     : page.read(page_offset, bytes, size);
-      if (!moved)
-        note_rejected_identity_access(addr, vmid,
-                                      into_memory ? write_cause : MemoryFaultCause::NotPresent);
-      return moved;
+      return copy_resolved_span(addr, bytes, size, vmid, into_memory, pte, page);
     });
+  }
+
+  // The caller owns the mapped-PTE admission. No pointer or guard escapes.
+  bool copy_resolved_span(uint64_t addr, void *bytes, size_t size, uint32_t vmid, bool into_memory,
+                          const LegacyPageTableEntry *pte, IdentityPage page) const {
+    const size_t page_offset = addr & PAGE_MASK;
+    if (pte) {
+      // Collect and validate every extent before copying. A strict write may
+      // span adjacent sub-page extents, but it must never publish the extents
+      // before discovering a gap or a read-only destination.
+      struct Span {
+        size_t value_offset = 0;
+        uint8_t *host_ptr = nullptr;
+        size_t size = 0;
+        const LegacyHostExtent *extent = nullptr;
+      };
+      std::vector<Span> spans;
+      const auto mapping_lease = rocjitsu::host_mapping_lock().lock_shared();
+      const size_t mapped_bytes =
+          for_each_mapped_span(*pte, page_offset, size,
+                               [&](size_t value_offset, uint8_t *host_ptr, size_t span_size,
+                                   const LegacyHostExtent &extent) {
+                                 spans.push_back({value_offset, host_ptr, span_size, &extent});
+                               });
+      std::ranges::sort(spans, {}, &Span::value_offset);
+      size_t covered = 0;
+      for (const Span &span : spans) {
+        if (span.value_offset != covered)
+          return false;
+        covered += span.size;
+      }
+      if (mapped_bytes != size || covered != size)
+        return false;
+      // A write wholly contained in one host page cannot partially cross a
+      // protection boundary: an unwritable page faults on its first store.
+      // Let the guarded copy take that exceptional fault instead of scanning
+      // /proc/self/maps before every ordinary GPU store. Multi-span and
+      // cross-page strict writes still validate every destination first,
+      // because a later fault there could otherwise leave an earlier span
+      // modified even though this operation reports failure.
+      bool write_can_fault_atomically = false;
+      if (into_memory && spans.size() == 1) {
+        const Span &span = spans.front();
+        const uintptr_t first_page =
+            reinterpret_cast<uintptr_t>(span.host_ptr) & ~static_cast<uintptr_t>(PAGE_MASK);
+        const uintptr_t last_page = reinterpret_cast<uintptr_t>(span.host_ptr + span.size - 1) &
+                                    ~static_cast<uintptr_t>(PAGE_MASK);
+        write_can_fault_atomically = first_page == last_page;
+        if (write_can_fault_atomically &&
+            addressable_prefix(span.host_ptr, span.size) != span.size) {
+          note_rejected_identity_access(addr, vmid, MemoryFaultCause::NotPresent);
+          return false;
+        }
+      }
+      if (into_memory && !write_can_fault_atomically) {
+        for (const Span &span : spans) {
+          MemoryFaultCause cause = MemoryFaultCause::NotPresent;
+          if (!extent_is_writable(*span.extent, span.host_ptr, span.size, cause)) {
+            note_rejected_identity_access(addr + span.value_offset, vmid, cause);
+            return false;
+          }
+        }
+      }
+      if (!rocjitsu::with_host_access_guard([&] {
+            for (const Span &span : spans) {
+#if defined(RJ_GPU_MEMORY_WITH_TSAN)
+              constexpr uintptr_t kHostPageMask = PAGE_SIZE - 1;
+              const uintptr_t begin = reinterpret_cast<uintptr_t>(span.host_ptr) &
+                                      ~static_cast<uintptr_t>(kHostPageMask);
+              const uintptr_t end = (reinterpret_cast<uintptr_t>(span.host_ptr) + span.size - 1) &
+                                    ~static_cast<uintptr_t>(kHostPageMask);
+              for (uintptr_t host_page = begin;; host_page += PAGE_SIZE) {
+                __tsan_acquire(reinterpret_cast<void *>(host_page));
+                if (host_page == end)
+                  break;
+              }
+#endif
+              if (into_memory) {
+                std::memcpy(span.host_ptr, static_cast<const uint8_t *>(bytes) + span.value_offset,
+                            span.size);
+              } else {
+                std::memcpy(static_cast<uint8_t *>(bytes) + span.value_offset, span.host_ptr,
+                            span.size);
+              }
+#if defined(RJ_GPU_MEMORY_WITH_TSAN)
+              for (uintptr_t host_page = begin;; host_page += PAGE_SIZE) {
+                __tsan_release(reinterpret_cast<void *>(host_page));
+                if (host_page == end)
+                  break;
+              }
+#endif
+            }
+          })) {
+        note_rejected_identity_access(addr, vmid, guarded_fault_cause());
+        return false;
+      }
+      return true;
+    }
+    if (addr >= kUserSpaceLimit || size > kUserSpaceLimit - addr)
+      return false;
+    MemoryFaultCause write_cause = MemoryFaultCause::NotPresent;
+    const bool moved = into_memory ? page.write_strict(page_offset, bytes, size, write_cause)
+                                   : page.read(page_offset, bytes, size);
+    if (!moved)
+      note_rejected_identity_access(addr, vmid,
+                                    into_memory ? write_cause : MemoryFaultCause::NotPresent);
+    return moved;
   }
 
   /// @brief Read a mapped span into @p dst without ever exposing a bare pointer.
@@ -3056,7 +3330,7 @@ private:
     return true;
   }
 
-  bool write_client_memory(uint64_t addr, const void *src, size_t len, uint32_t vmid) {
+  bool write_client_memory(uint64_t addr, const void *src, size_t len, uint32_t vmid) const {
     // See read_client_memory(): the authorized fd is the only path that works
     // for a debuggee the daemon did not ptrace-attach to itself.
     if (util::UniqueHandle mem_fd = duplicate_client_mem_fd(vmid); mem_fd.get() >= 0) {

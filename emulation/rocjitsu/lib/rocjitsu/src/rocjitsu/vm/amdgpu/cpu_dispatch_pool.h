@@ -20,6 +20,7 @@
 #include <span>
 #include <stdexcept>
 #include <thread>
+#include <type_traits>
 #include <vector>
 
 namespace rocjitsu {
@@ -78,6 +79,55 @@ public:
     const uint32_t worker_goal =
         std::min<uint32_t>(threads - 1, static_cast<uint32_t>(workers_.size()));
     Submission submission(tasks, results, worker_goal);
+    run_submission(submission);
+    FunctionalQuantumResult result;
+    for (const auto &task_result : results)
+      result.merge(task_result);
+    return result;
+  }
+
+  /// Execute independent CPU-only tasks using the existing shared workers.
+  /// The callable and its storage outlive this synchronous call. As with CU
+  /// batches, all claimed tasks join before an exception is rethrown.
+  template <typename F> void run_indexed(size_t count, uint32_t threads, F &&task) {
+    if (!count)
+      return;
+    threads = std::clamp<uint32_t>(threads, 1, std::min<size_t>(count, UINT32_MAX));
+    Submission submission({}, {}, std::min<uint32_t>(threads - 1, workers_.size()));
+    submission.task_count = count;
+    submission.context = const_cast<void *>(static_cast<const void *>(&task));
+    submission.callback = [](void *context, size_t i) {
+      (*static_cast<std::remove_reference_t<F> *>(context))(i);
+    };
+    run_submission(submission);
+  }
+
+private:
+  friend class CpuDispatchPoolTestAccess;
+
+  struct Submission {
+    Submission(std::span<ComputeUnitCore *> tasks, std::span<FunctionalQuantumResult> results,
+               uint32_t tickets)
+        : tasks(tasks), results(results), task_count(tasks.size()), worker_tickets(tickets) {}
+
+    const std::span<ComputeUnitCore *> tasks;
+    const std::span<FunctionalQuantumResult> results;
+    size_t task_count;
+    void *context = nullptr;
+    void (*callback)(void *, size_t) = nullptr;
+    std::atomic<size_t> next_task{0};
+    // Remaining fields are protected by the pool mutex.
+    std::condition_variable done_cv;
+    std::exception_ptr first_exception;
+    uint32_t worker_tickets;
+    uint32_t active_workers = 0;
+    Submission *previous = nullptr;
+    Submission *next = nullptr;
+    bool queued = false;
+  };
+
+  void run_submission(Submission &submission) {
+    const uint32_t worker_goal = submission.worker_tickets;
     if (worker_goal != 0) {
       {
         std::lock_guard lock(mutex_);
@@ -102,32 +152,7 @@ public:
     lock.unlock();
     if (first_exception)
       std::rethrow_exception(first_exception);
-    FunctionalQuantumResult result;
-    for (const auto &task_result : results)
-      result.merge(task_result);
-    return result;
   }
-
-private:
-  friend class CpuDispatchPoolTestAccess;
-
-  struct Submission {
-    Submission(std::span<ComputeUnitCore *> tasks, std::span<FunctionalQuantumResult> results,
-               uint32_t tickets)
-        : tasks(tasks), results(results), worker_tickets(tickets) {}
-
-    const std::span<ComputeUnitCore *> tasks;
-    const std::span<FunctionalQuantumResult> results;
-    std::atomic<size_t> next_task{0};
-    // Remaining fields are protected by the pool mutex.
-    std::condition_variable done_cv;
-    std::exception_ptr first_exception;
-    uint32_t worker_tickets;
-    uint32_t active_workers = 0;
-    Submission *previous = nullptr;
-    Submission *next = nullptr;
-    bool queued = false;
-  };
 
   CpuDispatchPool(uint32_t threads, std::optional<uint32_t> fail_after) {
     const uint32_t worker_count = std::max(threads, 1u) - 1;
@@ -170,10 +195,13 @@ private:
   void drain_tasks(Submission &submission) {
     while (true) {
       const size_t i = submission.next_task.fetch_add(1, std::memory_order_relaxed);
-      if (i >= submission.tasks.size())
+      if (i >= submission.task_count)
         return;
       try {
-        submission.results[i] = submission.tasks[i]->run_quantum();
+        if (submission.callback)
+          submission.callback(submission.context, i);
+        else
+          submission.results[i] = submission.tasks[i]->run_quantum();
       } catch (...) {
         std::lock_guard lock(mutex_);
         if (!submission.first_exception)

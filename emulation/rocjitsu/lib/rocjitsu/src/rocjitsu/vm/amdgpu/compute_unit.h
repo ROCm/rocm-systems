@@ -248,6 +248,7 @@ public:
   /// @brief Execute up to one functional quantum of step() iterations on this CU.
   /// @returns Whether wavefronts ran and whether one requested an event-loop yield.
   FunctionalQuantumResult run_quantum() {
+    const GpuVmAccessBatchGuard vm_access_batch;
     // Reuse instruction-fetch snapshots only within this execution quantum.
     // Restore the outer scope on exceptions and nested quantum execution too.
     InstructionVmSnapshot snapshot;
@@ -316,6 +317,8 @@ public:
   using SendmsgHandler = std::function<bool(Wavefront &wf, uint32_t message)>;
   void set_sendmsg_handler(SendmsgHandler cb) { sendmsg_handler_ = std::move(cb); }
   bool handle_sendmsg(Wavefront &wf, uint32_t message) {
+    if (message == 9 && wf.allocate_graphics_exports(wf.m0() & 0x3ff, (wf.m0() >> 12) & 0x7ff))
+      return true;
     return sendmsg_handler_ && sendmsg_handler_(wf, message);
   }
 
@@ -1431,6 +1434,9 @@ inline Lds &InstructionComputeUnitView::lds() { return raw_cu().lds(); }
 inline bool InstructionComputeUnitView::sram_ecc() const { return raw_cu().sram_ecc(); }
 inline bool InstructionComputeUnitView::setreg_vgpr_msb_fixup() const {
   return raw_cu().setreg_vgpr_msb_fixup();
+}
+inline rj_code_target_id_t InstructionComputeUnitView::target() const {
+  return raw_cu().config().target;
 }
 inline rj_code_arch_t InstructionComputeUnitView::arch() const { return raw_cu().arch(); }
 inline bool InstructionComputeUnitView::observes_register_access() const {

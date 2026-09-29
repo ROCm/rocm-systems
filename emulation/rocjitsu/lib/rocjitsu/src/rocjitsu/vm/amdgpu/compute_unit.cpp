@@ -68,6 +68,13 @@ void Wavefront::debug_write_vgpr(uint32_t reg, uint32_t lane, uint32_t value) {
   cu_.write_vgpr(vgpr_alloc_.base + reg, lane, value);
 }
 
+std::span<uint32_t> Wavefront::initialization_vgpr_lanes(uint32_t reg) {
+  if (reg >= vgpr_alloc_.count || !cu_.owns_vgpr_range(*this, vgpr_alloc_.base + reg, 1))
+    return {};
+  auto *lanes = reinterpret_cast<uint32_t *>(cu_.raw_vgpr_data(vgpr_alloc_.base + reg));
+  return lanes ? std::span<uint32_t>{lanes, wf_size_} : std::span<uint32_t>{};
+}
+
 void ComputeUnitCore::observe_scalar_register_read(const Wavefront &wf, RegisterRef reg) const {
   SuspendedMemoryWaitCheck observer_scope;
   plugin_group_->onAmdgpuReadScalarRegister(&wf, reg);
@@ -1210,6 +1217,8 @@ void ComputeUnitCore::report_routed_access(const Instruction &inst, Wavefront &w
                                            uint64_t flat_local_lane_mask,
                                            uint64_t flat_dds_lane_mask) {
   MemoryAccessObservation access;
+  std::array<MemoryAccessObservation::AddressSet, ImageSampleAccess::kMaxTaps - 1>
+      additional_address_sets{};
   access.mnemonic = inst.mnemonic();
   access.pc = wf.pc;
   access.compute_unit_id = id();
@@ -1269,6 +1278,20 @@ void ComputeUnitCore::report_routed_access(const Instruction &inst, Wavefront &w
     access.force_l1_bypass = state.request_force_l1_bypass;
     access.lds_destination = state.lds_dst;
     access.addresses = std::span<const uint64_t>(state.per_lane_addr.data(), wf_size);
+    if (state.image_sample) {
+      const auto &sample = *state.image_sample;
+      access.addresses = std::span<const uint64_t>(sample.taps[0].addresses.data(), wf_size);
+      access.request_lane_mask = sample.taps[0].lane_mask;
+      access.valid_lane_mask = sample.taps[0].lane_mask;
+      for (uint32_t tap = 1; tap < sample.tap_count; ++tap) {
+        const auto &request = sample.taps[tap];
+        additional_address_sets[tap - 1] = {
+            std::span<const uint64_t>(request.addresses.data(), wf_size), request.lane_mask};
+        access.valid_lane_mask |= request.lane_mask;
+      }
+      access.additional_address_sets =
+          std::span(additional_address_sets).first(sample.tap_count - 1);
+    }
     access.element_lane_masks = state.element_lane_masks.view();
     if (state.ds2_active)
       access.secondary_addresses =
@@ -1826,10 +1849,17 @@ template <bool EnableAsync>
       // atomic whose decoder left elem_size unset would fault on every lane of
       // a perfectly mapped buffer.
       dbg_bytes = std::max(1u, dbg_is_atomic ? d.elem_size : d.num_elems * d.elem_size);
-      dbg_addrs.reserve(d.wf_size);
-      for (uint32_t lane = 0; lane < d.wf_size; ++lane)
-        if (d.lane_mask & (1ULL << lane))
-          dbg_addrs.push_back(d.per_lane_addr[lane]);
+      const uint32_t requests = d.image_sample ? d.image_sample->tap_count : 1;
+      dbg_addrs.reserve(d.wf_size * requests);
+      for (uint32_t request = 0; request < requests; ++request) {
+        const auto &addresses =
+            d.image_sample ? d.image_sample->taps[request].addresses : d.per_lane_addr;
+        const uint64_t mask =
+            d.image_sample ? d.image_sample->taps[request].lane_mask : d.lane_mask;
+        for (uint32_t lane = 0; lane < d.wf_size; ++lane)
+          if (mask & (1ULL << lane))
+            dbg_addrs.push_back(addresses[lane]);
+      }
     }
   }
   // One predicate for the whole access, used both to decide that this
@@ -1986,6 +2016,12 @@ template <bool EnableAsync>
   WaveStateGuard wave_state_lock(*this);
   tick_pipelines();
   update_wf_states();
+  const bool metadata_batch =
+      !EnableAsync &&
+      (config_.arch == ROCJITSU_CODE_ARCH_RDNA3 || config_.arch == ROCJITSU_CODE_ARCH_RDNA3_5) &&
+      pool_driven() && !debug_active() && plugin_group().empty() &&
+      static_cast<uint32_t>(wave_activity_.load(std::memory_order_acquire)) > 1;
+  GlobalMemPipeline::StepBatch step_batch(global_mem_pipeline_, metadata_batch);
 
   for (auto &wf : wfs_) {
     if (!wf)
@@ -2016,6 +2052,7 @@ template <bool EnableAsync>
     }
   }
 
+  step_batch.finish();
   ++step_count_;
   if constexpr (util::Logger::group_enabled(util::Logger::GROUP_CP)) {
     if ((step_count_ & 0xFFFFF) == 0) {

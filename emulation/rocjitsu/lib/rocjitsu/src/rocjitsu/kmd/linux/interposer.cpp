@@ -2409,6 +2409,7 @@ public:
     uint64_t mmap_offset = 0;
     uint32_t alloc_flags = 0;
     void *cpu_ptr = nullptr;
+    bool sealed_ram = false;
     SimulatedKfd *owner = nullptr;
     std::vector<GemMapping> installed_vas;
   };
@@ -2449,7 +2450,7 @@ public:
         (request.domains & ~domains))
       return -EINVAL;
     uint64_t size = (request.bo_size + 4095) & ~uint64_t{4095};
-    int fd = real().memfd_create("rocjitsu_gem", MFD_CLOEXEC);
+    int fd = real().memfd_create("rocjitsu_gem", MFD_CLOEXEC | MFD_ALLOW_SEALING);
     if (fd < 0)
       return -errno;
     if (ftruncate(fd, static_cast<off_t>(size)) != 0) {
@@ -2457,6 +2458,7 @@ public:
       real().close(fd);
       return -error;
     }
+    const bool sealed_ram = real().fcntl(fd, F_ADD_SEALS, F_SEAL_SHRINK) == 0;
     auto backing = PrivateDrmFd::duplicate(fd);
     const int error = errno;
     real().close(fd);
@@ -2470,6 +2472,7 @@ public:
       candidate = next_gem_handle_++;
     GemEntry entry{};
     entry.dmabuf_fd = std::move(backing);
+    entry.sealed_ram = sealed_ram;
     entry.drm_file_id = file->id;
     entry.size = size;
     entry.mmap_offset = next_gem_mmap_offset_;
@@ -2487,15 +2490,12 @@ public:
     if (!driver)
       return -ENODEV;
     std::shared_ptr<SyncobjFence> finished;
-    // Keep queue identity stable through acceptance and exception cleanup.
-    std::lock_guard submission_lock(file->submission_mutex);
-    std::optional<uint64_t> pending_queue;
-    uint64_t sequence = 0;
     try {
       const auto request = argument->in;
       if (request.flags || request.bo_list_handle || !request.num_chunks ||
           request.num_chunks > 1024)
         return -EINVAL;
+      std::lock_guard submission_lock(file->submission_mutex);
       std::vector<uint64_t> pointers;
       if (int rc = snapshot_user_array(request.chunks, request.num_chunks, pointers); rc)
         return rc;
@@ -2598,7 +2598,7 @@ public:
       retained->handles.erase(std::ranges::unique(retained->handles).begin(),
                               retained->handles.end());
       std::shared_ptr<PrivateDrmFd> fence_fd;
-      uint64_t queue_key;
+      uint64_t sequence, queue_key;
       {
         std::lock_guard lock(fd_mutex_);
         if (!file->contexts.count(request.ctx_id))
@@ -2651,11 +2651,17 @@ public:
         if (inserted)
           queue.key = next_queue_key.fetch_add(1, std::memory_order_relaxed);
         queue_key = queue.key;
-        // Reserve storage before acceptance, but publish the sequence and
-        // retire history only after the command processor accepts the job.
-        sequence = queue.next_sequence;
+        sequence = queue.next_sequence++;
         queue.fences.emplace(sequence, finished);
-        pending_queue = key;
+        // Keep recent fence errors queryable without retaining every completed
+        // submission forever. Older retired sequences are already complete,
+        // as with the kernel's bounded per-entity fence history.
+        while (queue.fences.size() > 64) {
+          const auto &oldest = queue.fences.begin()->second;
+          if (!oldest->is_signaled() && !oldest->is_failed())
+            break;
+          queue.fences.erase(queue.fences.begin());
+        }
       }
       submission.ready = [this, dependencies = std::move(dependencies)]() mutable {
         std::lock_guard lock(fd_mutex_);
@@ -2685,26 +2691,6 @@ public:
         notify_syncobj_waiters(file);
       };
       int result = driver->submit_pm4(file->render_minor, queue_key, std::move(submission));
-      {
-        std::lock_guard lock(fd_mutex_);
-        // A concurrent final close may already have retired this file's queues.
-        auto it = file->pm4_queues.find(*pending_queue);
-        if (it != file->pm4_queues.end() && result) {
-          it->second.fences.erase(sequence);
-        } else if (it != file->pm4_queues.end()) {
-          auto &queue = it->second;
-          ++queue.next_sequence;
-          // Rejected submissions must not evict accepted fence errors from
-          // the bounded history or change WAIT_CS's latest sequence.
-          while (queue.fences.size() > 64) {
-            const auto &oldest = queue.fences.begin()->second;
-            if (!oldest->is_signaled() && !oldest->is_failed())
-              break;
-            queue.fences.erase(queue.fences.begin());
-          }
-        }
-        pending_queue.reset();
-      }
       if (result) {
         finished->failed.store(true, std::memory_order_release);
         notify_syncobj_waiters(file);
@@ -2714,11 +2700,6 @@ public:
       notify_syncobj_waiters(file);
       return 0;
     } catch (const std::exception &error) {
-      if (pending_queue) {
-        std::lock_guard lock(fd_mutex_);
-        if (auto it = file->pm4_queues.find(*pending_queue); it != file->pm4_queues.end())
-          it->second.fences.erase(sequence);
-      }
       if (finished) {
         finished->failed.store(true, std::memory_order_release);
         notify_syncobj_waiters(file);
@@ -2872,6 +2853,8 @@ public:
     GemEntry &gem = gem_entries_[handle];
     gem = {};
     gem.dmabuf_fd = std::move(backing_fd);
+    // Repeated imports can map the same file bytes at different host addresses.
+    // Only fresh GEM allocations qualify for disjoint parallel RAM accesses.
     gem.drm_file_id = drm_file->id;
     gem.size = size;
     gem.alloc_flags = alloc_flags;
@@ -2961,7 +2944,7 @@ public:
     // only returns false if the local process vanished mid-call; treat that as a
     // failed map (do not record the range) so GEM_VA reports the error rather than a
     // phantom success.
-    if (!prt && !drv->gem_va_map(va_address, host, map_size, gem.alloc_flags))
+    if (!prt && !drv->gem_va_map(va_address, host, map_size, gem.alloc_flags, gem.sealed_ram))
       return -EINVAL;
     gem.installed_vas.push_back(range);
     if (publish_timeline)
