@@ -787,12 +787,18 @@ foreach(_variant "" "-uncached" "-faultinj")
   endif()
   rccl_apply_hip_compile_only(${_init_tgt})
 
-  target_link_options(${_init_tgt} PRIVATE -no-hip-rt -Wl,--gc-sections)
-  target_link_libraries(${_init_tgt} PRIVATE
-    GTest::GTest
-    Threads::Threads
-    fmt::fmt-header-only
-  )
+  # GTest::GTest is a namespaced target that only exists in the standalone
+  # build (created by rccl_standalone_setup()); in-tree builds link via
+  # ${MICRO_TEST_LINK_LIBS} (raw paths) inside rccl_add_micro_binary, and
+  # rccl_apply_host_only_flags() already supplies -no-hip-rt/-Wl,--gc-sections.
+  if(NOT BUILD_TESTS)
+    target_link_options(${_init_tgt} PRIVATE -no-hip-rt -Wl,--gc-sections)
+    target_link_libraries(${_init_tgt} PRIVATE
+      GTest::GTest
+      Threads::Threads
+      fmt::fmt-header-only
+    )
+  endif()
 endforeach()
 
 # ---------------------------------------------------------------------------
