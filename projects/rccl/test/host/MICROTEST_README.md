@@ -140,7 +140,12 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
 - **`rccl-UnitTestsMicroInit`** (+ **`-uncached`**, **`-faultinj`**) — `init.cc` (via
   `INIT_CC_PATH`) and `gin/gin_host.cc` (via `GIN_HOST_CC_PATH`);
   suites `InitMicrotest.*`, `InitMicrotestIsolated.*`, `GinProxyAffinityTest.*`,
-  `GinProxyAffinitySetupTest.*`. The `-uncached` variant adds
+  `GinProxyAffinitySetupTest.*`. `fakes/gin_fakes.cc` stays in the target (init.cc
+  needs its doubles) and defines `ncclGinQueryLastError`, which `gin_host.cc` also
+  defines; likewise `fakes/nccl_stubs.cc`'s `ncclGinHostFinalize`. The GIN test
+  (`gin-proxy-affinity-test.cc`) renames `gin_host.cc`'s two definitions to
+  `*Uut` at include time so both survive without a duplicate symbol. The
+  `-uncached` variant adds
   `HIP_HOST_UNCACHED_MEMORY`/`HIP_UNCACHED_MEMORY` to cover the alternate host-alloc
   arm; the `-faultinj` variant adds `ENABLE_FAULT_INJECTION` to cover the fault-mask
   arm of `commAlloc`/`devCommSetup` (the arm that ships, since `FAULT_INJECTION`

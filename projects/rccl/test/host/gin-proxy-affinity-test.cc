@@ -139,6 +139,7 @@ protected:
   std::unique_ptr<ncclSharedResources> sr_ = std::make_unique<ncclSharedResources>();
   FakeGinBackend fakeBackend_;
   ncclGin_t vtable_{};
+  ncclDevComm devComm_{};
 
   void SetUp() override {
     ResetOsFakes();
@@ -168,6 +169,15 @@ protected:
     for (int t = 0; t < ginState.proxyNthreads; t++) {
       if (ginState.thread[t].joinable()) ginState.thread[t].join();
     }
+    // Release the ncclGinStateDevComm the setup path callocs and links into
+    // ginState->devComms; nothing else frees it (ncclSharedResources has no
+    // destructor), so the opt-in ASAN arm would flag the leak. Done here rather
+    // than in the test body so it runs even when an ASSERT above returns early.
+    // Also exercises FakeDestroyContext. Guarded on the list actually being
+    // populated, so a setup that failed before linking is not freed twice.
+    if (ginState.devComms != nullptr) {
+      EXPECT_EQ(ncclSuccess, ncclGinDevCommFree(comm_.get(), &devComm_));
+    }
     g_fakeGinBackend = nullptr;
     ResetOsFakes();
   }
@@ -176,21 +186,32 @@ protected:
 TEST_F(GinProxyAffinitySetupTest, StashesCommAffinityBeforeSpawningProxyThreads) {
   CPU_ZERO(&comm_->cpuAffinity);
   CPU_SET(5, &comm_->cpuAffinity);  // a distinctive mask to spot the copy
+  g_ncclOsCpuCountValue = 1;        // so the spawned worker takes the pin branch
 
   struct ncclGinState& ginState = sr_->ginState;
   ncclDevCommRequirements reqs{};
   reqs.ginContextCount = 1;
   reqs.ginConnectionType = NCCL_GIN_CONNECTION_NONE;      // requestedStride stays 1
   reqs.ginTrafficClass = NCCL_CONFIG_UNDEF_INT;
-  ncclDevComm devComm{};
 
   ncclResult_t ret =
-    ginDevCommSetupWithBackend(comm_.get(), &reqs, &devComm, /*deviceCodeVersion=*/0, &ginState.backends[0]);
+    ginDevCommSetupWithBackend(comm_.get(), &reqs, &devComm_, /*deviceCodeVersion=*/0, &ginState.backends[0]);
 
   ASSERT_EQ(ncclSuccess, ret);
   EXPECT_EQ(1, fakeBackend_.createContextCalls);         // the setup path really ran
   EXPECT_TRUE(ginState.proxyThreadsCreated);             // it took the spawn branch
   EXPECT_TRUE(CPU_EQUAL(&comm_->cpuAffinity, &ginState.cpuAffinity));  // comm mask stashed verbatim
+
+  // End-to-end: join the sole proxy thread and confirm the real worker pinned
+  // itself to the comm's mask, exercising the whole produce -> spawn -> consume
+  // handoff rather than just poking the field. The stash-before-spawn ordering
+  // is what gives the worker a happens-before view of the mask here; note this
+  // is not a deterministic guard against reordering the stash below the spawn
+  // loop -- that variant is a data race (UB), which only a thread sanitizer
+  // would reliably flag, not a value assertion.
+  ginState.thread[0].join();
+  ASSERT_EQ(1u, g_ncclOsSetAffinityMasks.size());
+  EXPECT_TRUE(CPU_EQUAL(&comm_->cpuAffinity, &g_ncclOsSetAffinityMasks[0]));
 }
 
 }  // namespace
