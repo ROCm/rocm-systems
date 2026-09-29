@@ -941,6 +941,38 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       test_name = "Tile Get Arbitrary Strides";
       testers.push_back(new TileRMATester(args));
       break;
+    case TilePutWaveRowMajorTestType:
+      test_name = "Tile Put Wave Row-Major";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TilePutWaveColumnMajorTestType:
+      test_name = "Tile Put Wave Column-Major";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TileGetWaveRowMajorTestType:
+      test_name = "Tile Get Wave Row-Major";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TileGetWaveColumnMajorTestType:
+      test_name = "Tile Get Wave Column-Major";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TilePutWGRowMajorTestType:
+      test_name = "Tile Put WG Row-Major";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TilePutWGColumnMajorTestType:
+      test_name = "Tile Put WG Column-Major";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TileGetWGRowMajorTestType:
+      test_name = "Tile Get WG Row-Major";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TileGetWGColumnMajorTestType:
+      test_name = "Tile Get WG Column-Major";
+      testers.push_back(new TileRMATester(args));
+      break;
     case HostTeamSyncBarrierTestType:
       test_name = "Host Team Sync/Barrier";
       testers.push_back(new HostTeamSyncBarrierTester(args));
@@ -983,15 +1015,64 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       break;
     case TileReduceTestType:
       test_name = "Tile Reduce";
-      testers.push_back(new TileReduceTester(args));
+      // float, short, int, long × SUM, MAX, MIN
+#define TILE_REDUCE_PUSH(T, OP, INIT_S, INIT_R, VERIFY)                     \
+      testers.push_back(new TileReduceTester<T, OP>(args,                    \
+          [](T &s, T &r) { s = INIT_S; r = INIT_R; },                       \
+          [](T v, int n_pes, [[maybe_unused]] int idx) { return VERIFY; }))
+      TILE_REDUCE_PUSH(float, ROCSHMEM_SUM,  1.0f, 0.0f, static_cast<int>(v) == n_pes);
+      TILE_REDUCE_PUSH(float, ROCSHMEM_MAX,  1.0f, 0.0f, static_cast<int>(v) == 1);
+      TILE_REDUCE_PUSH(float, ROCSHMEM_MIN,  1.0f, 2.0f, static_cast<int>(v) == 1);
+      TILE_REDUCE_PUSH(short, ROCSHMEM_SUM,  1,    0,    v == static_cast<short>(n_pes));
+      TILE_REDUCE_PUSH(short, ROCSHMEM_MAX,  1,    0,    v == static_cast<short>(1));
+      TILE_REDUCE_PUSH(short, ROCSHMEM_MIN,  1,    2,    v == static_cast<short>(1));
+      TILE_REDUCE_PUSH(int,   ROCSHMEM_SUM,  1,    0,    v == n_pes);
+      TILE_REDUCE_PUSH(int,   ROCSHMEM_MAX,  1,    0,    v == 1);
+      TILE_REDUCE_PUSH(int,   ROCSHMEM_MIN,  1,    2,    v == 1);
+      TILE_REDUCE_PUSH(long,  ROCSHMEM_SUM,  1L,   0L,   v == static_cast<long>(n_pes));
+      TILE_REDUCE_PUSH(long,  ROCSHMEM_MAX,  1L,   0L,   v == static_cast<long>(1));
+      TILE_REDUCE_PUSH(long,  ROCSHMEM_MIN,  1L,   2L,   v == static_cast<long>(1));
+#undef TILE_REDUCE_PUSH
       break;
     case TileReduceWaveTestType:
       test_name = "Tile Reduce Wave-Collective";
-      testers.push_back(new TileReduceTester(args));
+#define TILE_REDUCE_PUSH(T, OP, INIT_S, INIT_R, VERIFY)                     \
+      testers.push_back(new TileReduceTester<T, OP>(args,                    \
+          [](T &s, T &r) { s = INIT_S; r = INIT_R; },                       \
+          [](T v, int n_pes, [[maybe_unused]] int idx) { return VERIFY; }))
+      TILE_REDUCE_PUSH(float, ROCSHMEM_SUM,  1.0f, 0.0f, static_cast<int>(v) == n_pes);
+      TILE_REDUCE_PUSH(float, ROCSHMEM_MAX,  1.0f, 0.0f, static_cast<int>(v) == 1);
+      TILE_REDUCE_PUSH(float, ROCSHMEM_MIN,  1.0f, 2.0f, static_cast<int>(v) == 1);
+      TILE_REDUCE_PUSH(short, ROCSHMEM_SUM,  1,    0,    v == static_cast<short>(n_pes));
+      TILE_REDUCE_PUSH(short, ROCSHMEM_MAX,  1,    0,    v == static_cast<short>(1));
+      TILE_REDUCE_PUSH(short, ROCSHMEM_MIN,  1,    2,    v == static_cast<short>(1));
+      TILE_REDUCE_PUSH(int,   ROCSHMEM_SUM,  1,    0,    v == n_pes);
+      TILE_REDUCE_PUSH(int,   ROCSHMEM_MAX,  1,    0,    v == 1);
+      TILE_REDUCE_PUSH(int,   ROCSHMEM_MIN,  1,    2,    v == 1);
+      TILE_REDUCE_PUSH(long,  ROCSHMEM_SUM,  1L,   0L,   v == static_cast<long>(n_pes));
+      TILE_REDUCE_PUSH(long,  ROCSHMEM_MAX,  1L,   0L,   v == static_cast<long>(1));
+      TILE_REDUCE_PUSH(long,  ROCSHMEM_MIN,  1L,   2L,   v == static_cast<long>(1));
+#undef TILE_REDUCE_PUSH
       break;
     case TileReduceWGTestType:
       test_name = "Tile Reduce Workgroup-Collective";
-      testers.push_back(new TileReduceTester(args));
+#define TILE_REDUCE_PUSH(T, OP, INIT_S, INIT_R, VERIFY)                     \
+      testers.push_back(new TileReduceTester<T, OP>(args,                    \
+          [](T &s, T &r) { s = INIT_S; r = INIT_R; },                       \
+          [](T v, int n_pes, [[maybe_unused]] int idx) { return VERIFY; }))
+      TILE_REDUCE_PUSH(float, ROCSHMEM_SUM,  1.0f, 0.0f, static_cast<int>(v) == n_pes);
+      TILE_REDUCE_PUSH(float, ROCSHMEM_MAX,  1.0f, 0.0f, static_cast<int>(v) == 1);
+      TILE_REDUCE_PUSH(float, ROCSHMEM_MIN,  1.0f, 2.0f, static_cast<int>(v) == 1);
+      TILE_REDUCE_PUSH(short, ROCSHMEM_SUM,  1,    0,    v == static_cast<short>(n_pes));
+      TILE_REDUCE_PUSH(short, ROCSHMEM_MAX,  1,    0,    v == static_cast<short>(1));
+      TILE_REDUCE_PUSH(short, ROCSHMEM_MIN,  1,    2,    v == static_cast<short>(1));
+      TILE_REDUCE_PUSH(int,   ROCSHMEM_SUM,  1,    0,    v == n_pes);
+      TILE_REDUCE_PUSH(int,   ROCSHMEM_MAX,  1,    0,    v == 1);
+      TILE_REDUCE_PUSH(int,   ROCSHMEM_MIN,  1,    2,    v == 1);
+      TILE_REDUCE_PUSH(long,  ROCSHMEM_SUM,  1L,   0L,   v == static_cast<long>(n_pes));
+      TILE_REDUCE_PUSH(long,  ROCSHMEM_MAX,  1L,   0L,   v == static_cast<long>(1));
+      TILE_REDUCE_PUSH(long,  ROCSHMEM_MIN,  1L,   2L,   v == static_cast<long>(1));
+#undef TILE_REDUCE_PUSH
       break;
 #if defined(USE_GDA)
     case QpPingPongTestType:
