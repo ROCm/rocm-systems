@@ -12,7 +12,7 @@
 #include "ibvwrap.h"
 #include "graph/xml.h"
 
-#define MULTIPLANE_MAX_PIPS 16
+#define MULTIPLANE_MAX_PIPS 8
 
 struct ncclIbPipInfo {
   char ip[MAX_STR_LEN];

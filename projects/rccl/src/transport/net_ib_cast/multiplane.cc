@@ -6,6 +6,7 @@
  *************************************************************************/
 
 #include "multiplane.h"
+#include "net_ib_cast_inspect.h"
 #include "core.h"
 
 #include <arpa/inet.h>
@@ -235,4 +236,27 @@ ncclResult_t ibCastMultiplaneGetPipGids(const union ibv_gid* vipGid, union ibv_g
   *nPips = count;
   INFO(NCCL_NET, "Multiplane: GID %s resolved to %d PIPs", gidStr, count);
   return ncclSuccess;
+}
+
+// ── Test-only wrappers (exposed via net_ib_cast_inspect.h) ──────────────
+
+ncclResult_t ncclIbCastTestIpToGid(const char* ipStr, uint8_t gid[16]) {
+  union ibv_gid g;
+  ncclResult_t ret = ibCastIpToGid(ipStr, &g);
+  if (ret == ncclSuccess) memcpy(gid, g.raw, 16);
+  return ret;
+}
+
+void ncclIbCastTestGidToString(const uint8_t gid[16], char* buf, int bufLen) {
+  union ibv_gid g;
+  memcpy(g.raw, gid, 16);
+  ibCastGidToString(&g, buf, (size_t)bufLen);
+}
+
+void ncclIbCastTestMultiplaneReset(void) {
+  gidToPipMap.clear();
+  multiplaneLoaded = false;
+  loadOnceFlag.~once_flag();
+  new (&loadOnceFlag) std::once_flag();
+  loadResult = ncclSuccess;
 }

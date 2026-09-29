@@ -59,7 +59,7 @@ ncclResult_t wrap_ionicdv_pd_set_udma_mask(struct ibv_pd* ibpd, uint8_t udma_mas
                               ionicdv_internal_pd_set_udma_mask(ibpd, udma_mask), 0, "ionic_dv_pd_set_udma_mask");
 }
 
-ncclResult_t wrap_ionicdv_qp_set_puec_plane_route(struct ibv_qp* qp, int plane_idx, struct ionic_dv_puec_route* route) {
+ncclResult_t wrap_ionicdv_qp_set_puec_plane_route(struct ibv_qp* qp, uint8_t plane_idx, struct ionic_dv_puec_route* route) {
   if (ionicdvSymbols.ionicdv_internal_qp_set_puec_plane_route == NULL) {
     errno = EOPNOTSUPP;
     return ncclSystemError;
