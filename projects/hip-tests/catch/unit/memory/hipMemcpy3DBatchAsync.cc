@@ -4,8 +4,11 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include <algorithm>
+#include <array>
 #include <hip_test_common.hh>
 #include <hip_test_defgroups.hh>
+#include <cstring>
 #include <vector>
 /**
  * @addtogroup hipMemcpy3DBatchAsync hipMemcpy3DBatchAsync
@@ -181,6 +184,80 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy3DBatchAsync_Ptr2PtrBatchOps, char, int,
 /**
  * Test Description
  * ------------------------
+ * - Verify that pointer operands in the middle of pinned-host and device allocations retain
+ *   their allocation-relative byte offsets on the batched pointer fast path.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpy3DBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipMemcpy3DBatchAsync_Ptr2PtrInteriorOffsets) {
+  constexpr size_t kAllocationBytes = 1024;
+  constexpr size_t kCopyBytes = 64;
+  constexpr size_t kNumOps = 2;
+  constexpr unsigned char kHostGuard = 0xee;
+  constexpr unsigned char kDeviceGuard = 0xcc;
+  constexpr std::array<size_t, kNumOps> kSrcOffsets = {64, 320};
+  constexpr std::array<size_t, kNumOps> kDstOffsets = {128, 384};
+  constexpr std::array<unsigned char, kNumOps> kValues = {0x31, 0x72};
+
+  hipStream_t stream = nullptr;
+  void* hostAllocation = nullptr;
+  void* deviceAllocation = nullptr;
+  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipHostMalloc(&hostAllocation, kAllocationBytes));
+  HIP_CHECK(hipMalloc(&deviceAllocation, kAllocationBytes));
+
+  auto* hostBytes = static_cast<unsigned char*>(hostAllocation);
+  auto* deviceBytes = static_cast<unsigned char*>(deviceAllocation);
+  std::fill_n(hostBytes, kAllocationBytes, kHostGuard);
+  for (size_t i = 0; i < kNumOps; ++i) {
+    std::fill_n(hostBytes + kSrcOffsets[i], kCopyBytes, kValues[i]);
+  }
+  HIP_CHECK(hipMemsetAsync(deviceAllocation, kDeviceGuard, kAllocationBytes, stream));
+
+  std::array<hipMemcpy3DBatchOp, kNumOps> operations{};
+  for (size_t i = 0; i < kNumOps; ++i) {
+    operations[i].src.type = hipMemcpyOperandTypePointer;
+    operations[i].src.op.ptr.ptr = hostBytes + kSrcOffsets[i];
+    operations[i].src.op.ptr.rowLength = kCopyBytes;
+    operations[i].src.op.ptr.layerHeight = 1;
+    operations[i].src.op.ptr.locHint.type = hipMemLocationTypeHost;
+    operations[i].src.op.ptr.locHint.id = 0;
+    operations[i].dst.type = hipMemcpyOperandTypePointer;
+    operations[i].dst.op.ptr.ptr = deviceBytes + kDstOffsets[i];
+    operations[i].dst.op.ptr.rowLength = kCopyBytes;
+    operations[i].dst.op.ptr.layerHeight = 1;
+    operations[i].dst.op.ptr.locHint.type = hipMemLocationTypeDevice;
+    operations[i].dst.op.ptr.locHint.id = 0;
+    operations[i].extent = make_hipExtent(kCopyBytes, 1, 1);
+    operations[i].srcAccessOrder = hipMemcpySrcAccessOrderStream;
+    operations[i].flags = hipMemcpyFlagDefault;
+  }
+
+  size_t failIdx = SIZE_MAX;
+  HIP_CHECK(hipMemcpy3DBatchAsync(kNumOps, operations.data(), &failIdx, 0, stream));
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  std::vector<unsigned char> actual(kAllocationBytes);
+  std::vector<unsigned char> expected(kAllocationBytes, kDeviceGuard);
+  HIP_CHECK(hipMemcpy(actual.data(), deviceAllocation, kAllocationBytes, hipMemcpyDeviceToHost));
+  for (size_t i = 0; i < kNumOps; ++i) {
+    std::copy_n(hostBytes + kSrcOffsets[i], kCopyBytes, expected.data() + kDstOffsets[i]);
+  }
+
+  HIP_CHECK(hipFree(deviceAllocation));
+  HIP_CHECK(hipHostFree(hostAllocation));
+  HIP_CHECK(hipStreamDestroy(stream));
+
+  REQUIRE(failIdx == SIZE_MAX);
+  REQUIRE(actual == expected);
+}
+/**
+ * Test Description
+ * ------------------------
  * - Test case to verify the Asynchronus 3D batch memory copy.
  * 1. Test case verifies below batch mem copy operations.
  * 2. Op1: Host -> Array
@@ -336,6 +413,231 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy3DBatchAsync_ArrayMemCpyBatchOps, char,
   HIP_CHECK(hipFreeArray(array2));
   HIP_CHECK(hipFreeArray(array3));
   HIP_CHECK(hipStreamDestroy(stream));
+}
+
+// Padded layout shared by the pointer batch cases below. Only a
+// kBatchWidth x kBatchHeight x kBatchDepth rect of each buffer takes part in a copy, so every row
+// carries slack past kBatchWidth and every layer a gap of (kBatchLayerHeight - kBatchHeight) rows.
+// A stride mistake lands the payload in that slack and an over-copy overwrites it, so either shows
+// up as a byte difference. Widths are in bytes, which is how a pointer operand's rowLength is
+// interpreted.
+constexpr size_t kBatchWidth = 64;
+constexpr size_t kBatchHeight = 5;
+constexpr size_t kBatchDepth = 3;
+constexpr size_t kBatchLayerHeight = 7;
+// A batch is only ever coalesced into one submission when its pitches are DWORD aligned, so
+// kBatchUnalignedRow has to be copied operand by operand instead.
+constexpr size_t kBatchAlignedRow = 80;
+constexpr size_t kBatchUnalignedRow = 66;
+
+// Where the two operands of one copy live. Coalescing additionally requires every operand pair to
+// cross host<->device in the same direction, so a kD2D anywhere in a batch rules it out.
+enum class BatchDir { kH2D, kD2H, kD2D };
+
+// Full contents of one padded buffer: `poison` everywhere outside the copied rect and, when
+// `payload` is set, a pattern keyed on `tag` inside it. Used both to seed a source and to spell
+// out the exact bytes a destination must hold afterwards.
+static std::vector<unsigned char> batchImage(size_t rowLength, unsigned char poison,
+                                             unsigned char tag, bool payload) {
+  std::vector<unsigned char> image(rowLength * kBatchLayerHeight * kBatchDepth, poison);
+  if (payload) {
+    for (size_t z = 0; z < kBatchDepth; ++z) {
+      for (size_t y = 0; y < kBatchHeight; ++y) {
+        for (size_t x = 0; x < kBatchWidth; ++x) {
+          image[(z * kBatchLayerHeight + y) * rowLength + x] =
+              static_cast<unsigned char>(tag + 7 * z + 13 * y + x);
+        }
+      }
+    }
+  }
+  return image;
+}
+
+// Host buffers are pinned, so the operand resolves to a memory object. Pageable host memory is
+// already covered by Unit_hipMemcpy3DBatchAsync_Ptr2PtrBatchOps.
+static void allocBatchBuffer(void** ptr, bool isDevice, size_t bytes) {
+  if (isDevice) {
+    HIP_CHECK(hipMalloc(ptr, bytes));
+  } else {
+    HIP_CHECK(hipHostMalloc(ptr, bytes));
+  }
+}
+
+static void freeBatchBuffer(void* ptr, bool isDevice) {
+  if (isDevice) {
+    HIP_CHECK(hipFree(ptr));
+  } else {
+    HIP_CHECK(hipHostFree(ptr));
+  }
+}
+
+// Seeding and readback stay off hipMemcpy3D*: pinned host memory is addressable by the CPU and
+// device memory takes a linear copy, so the harness cannot hide a batch bug behind the same bug.
+static void writeBatchBuffer(void* ptr, bool isDevice, const std::vector<unsigned char>& image) {
+  if (isDevice) {
+    HIP_CHECK(hipMemcpy(ptr, image.data(), image.size(), hipMemcpyHostToDevice));
+  } else {
+    std::memcpy(ptr, image.data(), image.size());
+  }
+}
+
+static std::vector<unsigned char> readBatchBuffer(void* ptr, bool isDevice, size_t bytes) {
+  std::vector<unsigned char> image(bytes);
+  if (isDevice) {
+    HIP_CHECK(hipMemcpy(image.data(), ptr, bytes, hipMemcpyDeviceToHost));
+  } else {
+    std::memcpy(image.data(), ptr, bytes);
+  }
+  return image;
+}
+
+// Seeds an operand pair per entry of `dirs`, runs the batch and checks every destination byte for
+// byte. `rowLength` applies to both operands of every copy.
+static void runPtrBatch(const std::vector<BatchDir>& dirs, size_t rowLength) {
+  const size_t numOps = dirs.size();
+  const size_t bufBytes = rowLength * kBatchLayerHeight * kBatchDepth;
+  const hipExtent extent = make_hipExtent(kBatchWidth, kBatchHeight, kBatchDepth);
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  std::vector<void*> srcPtr(numOps, nullptr);
+  std::vector<void*> dstPtr(numOps, nullptr);
+  std::vector<hipMemcpy3DBatchOp> ops(numOps);
+  std::vector<std::vector<unsigned char>> expected;
+
+  for (size_t i = 0; i < numOps; ++i) {
+    const bool srcIsDevice = dirs[i] != BatchDir::kH2D;
+    const bool dstIsDevice = dirs[i] != BatchDir::kD2H;
+    allocBatchBuffer(&srcPtr[i], srcIsDevice, bufBytes);
+    allocBatchBuffer(&dstPtr[i], dstIsDevice, bufBytes);
+
+    // Payload and poison are per operand, so a batch that mixes its operands up fails just as a
+    // batch that gets one copy wrong does.
+    const unsigned char tag = static_cast<unsigned char>(0x11 * (i + 1));
+    const unsigned char srcPoison = static_cast<unsigned char>(0xa0 + i);
+    const unsigned char dstPoison = static_cast<unsigned char>(0x50 + i);
+    writeBatchBuffer(srcPtr[i], srcIsDevice, batchImage(rowLength, srcPoison, tag, true));
+    writeBatchBuffer(dstPtr[i], dstIsDevice, batchImage(rowLength, dstPoison, 0, false));
+    // The destination keeps its own poison everywhere the copy must not write.
+    expected.push_back(batchImage(rowLength, dstPoison, tag, true));
+
+    ops[i].src.type = hipMemcpyOperandTypePointer;
+    ops[i].src.op.ptr.ptr = srcPtr[i];
+    ops[i].src.op.ptr.rowLength = rowLength;
+    ops[i].src.op.ptr.layerHeight = kBatchLayerHeight;
+    ops[i].src.op.ptr.locHint.type =
+        srcIsDevice ? hipMemLocationTypeDevice : hipMemLocationTypeHost;
+    ops[i].src.op.ptr.locHint.id = 0;
+    ops[i].dst.type = hipMemcpyOperandTypePointer;
+    ops[i].dst.op.ptr.ptr = dstPtr[i];
+    ops[i].dst.op.ptr.rowLength = rowLength;
+    ops[i].dst.op.ptr.layerHeight = kBatchLayerHeight;
+    ops[i].dst.op.ptr.locHint.type =
+        dstIsDevice ? hipMemLocationTypeDevice : hipMemLocationTypeHost;
+    ops[i].dst.op.ptr.locHint.id = 0;
+    ops[i].extent = extent;
+    ops[i].srcAccessOrder = hipMemcpySrcAccessOrderStream;
+    ops[i].flags = hipMemcpyFlagDefault;
+  }
+
+  // Launch the batch
+  size_t failIdx;
+  unsigned long long flags = 0;
+  HIP_CHECK(hipMemcpy3DBatchAsync(numOps, ops.data(), &failIdx, flags, stream));
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  // Validation, padding and inter-layer gap included. Reporting the first differing offset
+  // beats stringifying two padded buffers, and it says which part of the layout went
+  // wrong: inside the copied rect, in a row's slack, or in the gap between layers.
+  for (size_t i = 0; i < numOps; ++i) {
+    const std::vector<unsigned char> actual =
+        readBatchBuffer(dstPtr[i], dirs[i] != BatchDir::kD2H, bufBytes);
+    size_t off = 0;
+    while (off < bufBytes && actual[off] == expected[i][off]) {
+      ++off;
+    }
+    const unsigned val = (off < bufBytes) ? actual[off] : 0;
+    const unsigned want = (off < bufBytes) ? expected[i][off] : 0;
+    INFO("Op " << i << " FAILURE at Offset: " << off << "\nval : " << val << " expected:" << want);
+    REQUIRE(off == bufBytes);
+  }
+
+  // Cleanup
+  for (size_t i = 0; i < numOps; ++i) {
+    freeBatchBuffer(srcPtr[i], dirs[i] != BatchDir::kH2D);
+    freeBatchBuffer(dstPtr[i], dirs[i] != BatchDir::kD2H);
+  }
+  HIP_CHECK(hipStreamDestroy(stream));
+}
+/**
+ * Test Description
+ * ------------------------
+ * - Test case to verify a batch whose every copy runs in the same direction between pinned host
+ *   memory and device memory, which is the shape the runtime is free to coalesce into a single
+ *   submission.
+ * 1. Allocate a padded buffer per operand, pinned on the host side, with a DWORD-aligned row
+ *    pitch and more rows per layer than the copy uses.
+ * 2. Seed every source with a per-operand payload inside the copied rect and poison outside it,
+ *    and poison every destination with a different value.
+ * 3. Create Stream.
+ * 4. Launch the hipMemcpy3DBatchAsync with every operand host -> device, then again with every
+ *    operand device -> host.
+ * 5. Validate every destination byte for byte, so the row padding and the gap between layers are
+ *    confirmed untouched alongside the copied rect.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpy3DBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipMemcpy3DBatchAsync_SameDirPtrBatchOps) {
+  SECTION("Host to device") {
+    runPtrBatch({BatchDir::kH2D, BatchDir::kH2D, BatchDir::kH2D}, kBatchAlignedRow);
+  }
+  SECTION("Device to host") {
+    runPtrBatch({BatchDir::kD2H, BatchDir::kD2H, BatchDir::kD2H}, kBatchAlignedRow);
+  }
+}
+/**
+ * Test Description
+ * ------------------------
+ * - Test case to verify that a batch holding an operand which cannot be coalesced is still copied
+ *   correctly, operand by operand.
+ * 1. Build the same padded pinned host -> device batch as above, except that the middle operand
+ *    is a device -> device copy, which on its own rules the batch out.
+ * 2. Create Stream.
+ * 3. Launch the hipMemcpy3DBatchAsync.
+ * 4. Validate every destination byte for byte, padding and inter-layer gap included.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpy3DBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipMemcpy3DBatchAsync_D2DOperandBatchOps) {
+  runPtrBatch({BatchDir::kH2D, BatchDir::kD2D, BatchDir::kH2D}, kBatchAlignedRow);
+}
+/**
+ * Test Description
+ * ------------------------
+ * - Test case to verify a same-direction batch whose row pitch is not DWORD aligned, which also
+ *   has to be copied operand by operand.
+ * 1. Build the same padded pinned host -> device batch as above with a row length that is not a
+ *    multiple of four bytes.
+ * 2. Create Stream.
+ * 3. Launch the hipMemcpy3DBatchAsync.
+ * 4. Validate every destination byte for byte, padding and inter-layer gap included.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpy3DBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipMemcpy3DBatchAsync_UnalignedPitchBatchOps) {
+  runPtrBatch({BatchDir::kH2D, BatchDir::kH2D, BatchDir::kH2D}, kBatchUnalignedRow);
 }
 /**
  * Test Description

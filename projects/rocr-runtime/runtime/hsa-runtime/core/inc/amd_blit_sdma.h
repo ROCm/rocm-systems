@@ -62,6 +62,19 @@ class BlitSdmaBase : public core::Blit {
   static const size_t kCopyPacketSize;
   static const size_t kMaxSingleCopySize;
   static const size_t kMaxSingleFillSize;
+
+  /// @brief Validate one rect copy without submitting work.
+  ///
+  /// This applies the same geometry, alignment, wide-pitch normalization, and
+  /// packet-field checks used while lowering the copy to SDMA packets.
+  static hsa_status_t ValidateCopyRect(const hsa_pitched_ptr_t* dst,
+                                       const hsa_dim3_t* dst_offset,
+                                       const hsa_pitched_ptr_t* src,
+                                       const hsa_dim3_t* src_offset,
+                                       const hsa_dim3_t* range,
+                                       bool is_gfx12_plus,
+                                       const char** error_message = nullptr) noexcept;
+
   virtual bool isSDMA() const override { return true; }
   virtual hsa_status_t Initialize(const core::Agent& agent, bool use_xgmi,
                                   size_t linear_copy_size_override, int rec_engine) = 0;
@@ -71,6 +84,11 @@ class BlitSdmaBase : public core::Blit {
                                              const hsa_dim3_t* src_offset, const hsa_dim3_t* range,
                                              std::vector<core::Signal*>& dep_signals,
                                              core::Signal& out_signal) = 0;
+
+  virtual hsa_status_t SubmitBatchCopyRectCommand(const hsa_amd_memory_copy_rect_entry_t* entries,
+                                                  size_t num_entries,
+                                                  std::vector<core::Signal*>& dep_signals,
+                                                  core::Signal& out_signal) = 0;
 
   virtual hsa_status_t SubmitCommand(const void* cmds, size_t cmd_size, uint64_t size,
                                      const std::vector<core::Signal*>& dep_signals,
@@ -253,6 +271,19 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
                                              std::vector<core::Signal*>& dep_signals,
                                              core::Signal& out_signal) override;
 
+  /// @brief Lower num_entries independent rect copies into one command buffer and issue a
+  /// single SubmitCommand, so the batch costs one ring reservation, one fence and one
+  /// completion signal instead of num_entries of each.
+  ///
+  /// @param entries Array of rect copy entries, lowered (and thus executed) in array order.
+  /// @param num_entries Number of entries.
+  /// @param dep_signals Signals waited on once, before the first entry.
+  /// @param out_signal Signal decremented once, after the last entry retires.
+  virtual hsa_status_t SubmitBatchCopyRectCommand(const hsa_amd_memory_copy_rect_entry_t* entries,
+                                                  size_t num_entries,
+                                                  std::vector<core::Signal*>& dep_signals,
+                                                  core::Signal& out_signal) override;
+
   /// @brief Submit a broadcast linear copy command. Copies from a single source
   /// to multiple destinations using SDMA broadcast packets (2 dsts per packet).
   /// If the destination count is odd, the last destination uses a regular
@@ -403,10 +434,19 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
   void BuildSwapCopyCommand(char* cmd_addr, uint32_t num_copy_command,
                             void* addr_a, void* addr_b, size_t size);
 
+  // Inputs must have passed BlitSdmaBase::ValidateCopyRect.
   void BuildCopyRectCommand(const std::function<void*(size_t)>& append,
                             const hsa_pitched_ptr_t* dst, const hsa_dim3_t* dst_offset,
                             const hsa_pitched_ptr_t* src, const hsa_dim3_t* src_offset,
                             const hsa_dim3_t* range);
+
+  /// @brief Validate one rect operand and append its packets via @p append.  Throws
+  /// AMD::hsa_exception on invalid geometry.  Factored out of SubmitCopyRectCommand so a
+  /// batch can lower many operands into one shared packet buffer.
+  void ValidateAndBuildCopyRect(const std::function<void*(size_t)>& append,
+                                const hsa_pitched_ptr_t* dst, const hsa_dim3_t* dst_offset,
+                                const hsa_pitched_ptr_t* src, const hsa_dim3_t* src_offset,
+                                const hsa_dim3_t* range);
 
   void BuildFillCommand(char* cmd_addr, uint32_t num_fill_command, void* ptr, uint32_t value,
                         size_t count);
