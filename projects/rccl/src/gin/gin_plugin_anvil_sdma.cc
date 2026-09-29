@@ -157,9 +157,9 @@ static ncclResult_t ginAnvilDevices(int* ndev) {
 }
 
 // v14 GIN plugins expose GIN capability flags via getGinProperties. The Anvil
-// SDMA backend uses intra-node LSA (flat) signals, which behave as both strong
-// and VA-addressable signals; report both as supported (matches the behavior
-// previously injected by the v13->v14 shim for internal plugins).
+// SDMA backend uses intra-node LSA (flat) signals, which are VA-addressable.
+// Strong signals are honoured on the device by draining every SDMA queue to
+// the peer before the signal (quietPeerQueues in gin_anvil_sdma.h).
 static ncclResult_t ginAnvilGetGinProperties(ncclGinProperties_t* ginProps) {
   ginProps->supportsStrongSignals = true;
   ginProps->supportsVASignals = true;
