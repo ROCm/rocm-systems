@@ -483,16 +483,6 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAvailableMemory(HSAuint32 Node,
   return HSAKMT_STATUS_SUCCESS;
 }
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtGetDefaultHostGpu(HSAuint32 *NodeId,
-                                                HSAuint32 *GpuId) {
-  CHECK_DXG_OPEN();
-
-  if (!NodeId || !GpuId)
-    return HSAKMT_STATUS_INVALID_PARAMETER;
-
-  return HSAKMT_STATUS_NOT_SUPPORTED;
-}
-
 HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterMemory(void *MemoryAddress,
                                              HSAuint64 MemorySizeInBytes) {
   CHECK_DXG_OPEN();
@@ -1001,6 +991,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtUnmapMemoryToGPU(void *MemoryAddress) {
 
   wsl::thunk::GpuMemory *gpu_mem = nullptr;
   uint64_t gpu_addr_to_remove = 0;
+  bool is_userptr = false;
   {
     std::lock_guard<std::mutex> gard(*allocation_map_lock_);
 
@@ -1027,6 +1018,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtUnmapMemoryToGPU(void *MemoryAddress) {
     }
 
     if (it->second.userptr) {
+      is_userptr = true;
       if (gpu_mem->DecMappingCount() == 0) {
         gpu_addr_to_remove = it->second.gpu_addr;
         allocation_map_->erase((void*)it->second.gpu_addr);
@@ -1036,10 +1028,13 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtUnmapMemoryToGPU(void *MemoryAddress) {
     }
   }
 
-  // Remove GPU VA → CPU VA translation after last unmap
-  if (gpu_addr_to_remove) {
-    std::lock_guard<std::shared_mutex> va_lock(g_va_translation_mutex);
-    g_va_translations.erase(gpu_addr_to_remove);
+  if (is_userptr) {
+    // Remove GPU VA → CPU VA translation after last unmap
+    if (gpu_addr_to_remove) {
+      std::lock_guard<std::shared_mutex> va_lock(g_va_translation_mutex);
+      g_va_translations.erase(gpu_addr_to_remove);
+    }
+    return HSAKMT_STATUS_SUCCESS;
   }
 
   return HSAKMT_STATUS_SUCCESS;

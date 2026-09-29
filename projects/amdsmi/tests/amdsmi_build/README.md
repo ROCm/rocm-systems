@@ -47,14 +47,13 @@ sudo python3 projects/amdsmi/tests/amdsmi_build/run_amdsmi_build.py \
 | `--package-manager apt\|dnf\|zypper` | Force package manager |
 | `--package-format deb\|rpm` | Force package format |
 | `--qa-rpaths` | RHEL 10 / AlmaLinux 8 RPM builds |
-| `--debian10-sources` | Rewrite apt sources for archived Debian 10 |
 | `--skip-setuptools-upgrade` | Skip pip/setuptools/wheel upgrade |
 | `--install-more-itertools` | Install `more_itertools` (AzureLinux 3) |
 | `summarize <results-dir>` | (subcommand) Render the CI step summary |
 
 ## Supported distros
 
-Ubuntu 20 / 22 / 24 · Debian 10 · RHEL 8 / 9 / 10 · AlmaLinux 8 ·
+Ubuntu 20 / 22 / 24 · Debian 12 / 13 · RHEL 8 / 9 / 10 · AlmaLinux 8 ·
 AzureLinux 3 · SLES 15.x
 
 Run with `--help` for the full flag list.

@@ -159,6 +159,9 @@ __CG_STATIC_QUALIFIER__ void dispatch_async_memcpy(const TyGroup& group, TyElem*
       details::accelerated_memcpy_global_to_lds(dst, src, bytes_copied, count - bytes_copied);
     }
   }
+
+  // Deliberately no wait here: the copies above are tracked by ASYNCcnt and the caller's group
+  // sync drains it before releasing the barrier, which is what keeps the copy overlappable.
 }
 #endif
 
@@ -195,8 +198,15 @@ __CG_STATIC_QUALIFIER__ void memcpy_async_bytes(const TyGroup& group, TyElem* __
     __has_builtin(__builtin_amdgcn_global_load_async_to_lds_b128)
   // Use the async path only when the builtins are actually invocable on the target, otherwise the
   // accelerated loop would advance offsets without issuing any load/store and silently drop data.
+  // It also only implements global<->LDS, so anything else (global->global,
+  // LDS->LDS) has to take the traditional copy or no data would be moved at all.
+  const bool src_is_shared =
+      __builtin_amdgcn_is_shared((const __attribute__((address_space(0))) void*)src);
+  const bool dst_is_shared =
+      __builtin_amdgcn_is_shared((const __attribute__((address_space(0))) void*)dst);
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_global_store_async_from_lds_b128) &&
-      __builtin_amdgcn_is_invocable(__builtin_amdgcn_global_load_async_to_lds_b128)) {
+      __builtin_amdgcn_is_invocable(__builtin_amdgcn_global_load_async_to_lds_b128) &&
+      src_is_shared != dst_is_shared) {
     details::dispatch_async_memcpy(group, dst, src, count);
   } else {
     traditional_memcpy_bytes(group, dst, src, count);
@@ -208,7 +218,10 @@ __CG_STATIC_QUALIFIER__ void memcpy_async_bytes(const TyGroup& group, TyElem* __
 }  // namespace details
 
 /*
- * Enqueue memcpy async of `count` bytes and await for completion
+ * Enqueue memcpy async of `count` bytes.
+ *
+ * The copy is not complete when this returns. Call `group.sync()` before reading `dst`; the sync
+ * both waits for the copy and makes it visible to the rest of the group.
  */
 template <class TyGroup, typename TyElem, typename TySizeT>
 __CG_STATIC_QUALIFIER__ void memcpy_async(const TyGroup& group, TyElem* __restrict__ dst,
@@ -217,7 +230,9 @@ __CG_STATIC_QUALIFIER__ void memcpy_async(const TyGroup& group, TyElem* __restri
 }
 
 /*
- * Enqueue memcpy async min(dstLayout, srcLayout) elements bytes and await for completion
+ * Enqueue memcpy async of min(dstLayout, srcLayout) elements.
+ *
+ * As above, the caller must `group.sync()` before reading `dst`.
  */
 template <class TyGroup, class TyElem, typename DstLayout, typename SrcLayout>
 __CG_STATIC_QUALIFIER__ void memcpy_async(const TyGroup& group, TyElem* __restrict__ dst,

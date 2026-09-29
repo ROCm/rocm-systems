@@ -192,7 +192,7 @@ void check_case(const FmaCase &c, uint64_t exec) {
     Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << c.label << ": decode failed";
     seeded = fx.seed_inputs(SEED, c.is_f16, exec, &nan_lane);
-    fx.cu->execute_instruction(inst, *fx.wf);
+    EXPECT_TRUE(fx.cu->execute_instruction(inst, *fx.wf).succeeded());
     auto out = fx.snapshot_dst();
     delete inst;
     return out;

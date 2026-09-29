@@ -25,6 +25,7 @@
 from __future__ import annotations
 
 import bisect
+import functools
 import logging
 import os
 import re
@@ -35,12 +36,32 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
+from .bindings import _therock_package_roots
 from .code_index import CodeIndex
 
 TOOL_VERSION = "snapshot_dwarf-1.1"
 HEADER = "ISA, _, LineNumber, Source, Codeobj, Vaddr, Hit, Latency, Stall, Idle"
 SEPARATOR = " -> "  # matches Instruction::separator in code_printing.hpp
 LOGGER = logging.getLogger(__name__)
+
+
+@functools.lru_cache(maxsize=1)
+def _elftools() -> tuple[object, object]:
+    """Return ``(exceptions, ELFFile)``, importing pyelftools on first use.
+
+    Imported lazily so this package remains importable without pyelftools,
+    which some distribution channels do not install.
+    """
+    try:
+        from elftools.common import exceptions
+        from elftools.elf.elffile import ELFFile
+    except ImportError as e:
+        raise ImportError(
+            "pyelftools is required to read symbol labels, marker metadata and "
+            "source ranges from code objects. Install it with "
+            "'pip install pyelftools'."
+        ) from e
+    return exceptions, ELFFile
 
 
 @dataclass(frozen=True)
@@ -97,6 +118,14 @@ def _rocm_roots() -> list[Path]:
             if root not in seen:
                 roots.append(root)
                 seen.add(root)
+
+    # ROCm installed as Python wheels: the tools live under the platform
+    # package, e.g. <site-packages>/_rocm_sdk_core/lib/llvm/bin.
+    for package_root in _therock_package_roots():
+        root = package_root / "lib"
+        if root not in seen:
+            roots.append(root)
+            seen.add(root)
 
     default = Path("/opt/rocm")
     if default not in seen:
@@ -233,8 +262,7 @@ def _parse_sqtt_funcmap(data: bytes) -> _SqttFuncmap:
 def _read_sqtt_funcmap(elf_path: str) -> _SqttFuncmap | None:
     """Return embedded marker metadata, or ``None`` when no section exists."""
 
-    from elftools.common import exceptions as elftools_exceptions
-    from elftools.elf.elffile import ELFFile
+    elftools_exceptions, ELFFile = _elftools()
 
     try:
         with Path(elf_path).open("rb") as file:
@@ -437,8 +465,7 @@ def _build_die_tree(die, dwarfinfo, cu, line_program) -> _Inlined:
 
 def build_address_ranges(elf_path: str) -> list[tuple[int, int, str]]:
     """Return sorted ``(begin, end, comment)`` source ranges."""
-    from elftools.common import exceptions as elftools_exceptions
-    from elftools.elf.elffile import ELFFile
+    elftools_exceptions, ELFFile = _elftools()
 
     expected_errors = (
         OSError,
@@ -592,7 +619,7 @@ def _normalize_branch_operand(inst: str, raw_words: str) -> str:
 
 def read_symbol_labels(elf_path: str) -> tuple[dict[int, tuple[str, str]], dict[int, list[str]]]:
     """Return (function labels, debug labels) keyed by virtual address."""
-    from elftools.elf.elffile import ELFFile
+    _, ELFFile = _elftools()
 
     functions: dict[int, tuple[str, str]] = {}
     labels: dict[int, list[str]] = {}

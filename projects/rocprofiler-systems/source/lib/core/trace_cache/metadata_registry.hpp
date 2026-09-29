@@ -23,14 +23,13 @@
 #include <set>
 #include <string.h>
 #include <string>
+#include <string_view>
 #include <sys/types.h>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace trace_cache
+namespace rocprofsys::trace_cache
 {
 namespace info
 {
@@ -116,6 +115,21 @@ format_track_name(std::optional<int> first_section  = std::nullopt,
                        second_section ? fmt::format("_{}", *second_section) : "");
 }
 
+/// PMC and track names for per-link metrics must be identical in the metadata
+/// registration and in the sample insertion paths, otherwise the rocpd writer rejects
+/// the event because no matching PMC info was registered.
+inline std::string
+format_link_pmc_name(std::string_view base_name, size_t link)
+{
+    return fmt::format("{}_link{}", base_name, link);
+}
+
+inline std::string
+format_link_track_name(std::string_view base_name, size_t link)
+{
+    return fmt::format("{} [Link {}]", base_name, link);
+}
+
 template <typename Category>
 inline std::string
 annotate_with_nic(const std::string& nic, std::optional<int> first_section = std::nullopt,
@@ -123,8 +137,14 @@ annotate_with_nic(const std::string& nic, std::optional<int> first_section = std
 {
     std::stringstream ss;
     ss << std::string(tim::trait::name<Category>::value) + " [" + nic + "]";
-    if(first_section) ss << "_" << std::to_string(*first_section);
-    if(second_section) ss << "_" << std::to_string(*second_section);
+    if(first_section)
+    {
+        ss << "_" << std::to_string(*first_section);
+    }
+    if(second_section)
+    {
+        ss << "_" << std::to_string(*second_section);
+    }
     return ss.str();
 }
 
@@ -273,5 +293,4 @@ private:
             rename_table);
 };
 
-}  // namespace trace_cache
-}  // namespace rocprofsys
+}  // namespace rocprofsys::trace_cache

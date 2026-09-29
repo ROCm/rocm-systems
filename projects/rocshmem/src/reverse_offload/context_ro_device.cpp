@@ -570,8 +570,8 @@ __device__ uint64_t broadcast(bool lowest_active, uint64_t value) {
 }
 
 __device__ int ROContext::broadcastmem_wave([[maybe_unused]] rocshmem_team_t team,
-                                        [[maybe_unused]] void *dest, 
-                                        [[maybe_unused]] const void* source, 
+                                        [[maybe_unused]] void *dest,
+                                        [[maybe_unused]] const void* source,
                                         [[maybe_unused]] int nelems,
                                         [[maybe_unused]] int PE_root) {
   LOGD_WARN("Broadcastmem Wave API not implemented for reverse offload backend");
@@ -795,9 +795,9 @@ __device__ void ROContext::alltoallmem_wg(rocshmem_team_t team, void *dest,
   __syncthreads();
 }
 
-__device__ int ROContext::alltoallmem_wave([[maybe_unused]] rocshmem_team_t team, 
-                                           [[maybe_unused]] void* dest, 
-                                           [[maybe_unused]] const void* source, 
+__device__ int ROContext::alltoallmem_wave([[maybe_unused]] rocshmem_team_t team,
+                                           [[maybe_unused]] void* dest,
+                                           [[maybe_unused]] const void* source,
                                            [[maybe_unused]] int nelems){
   LOGD_WARN("Alltoallmem_wave not implemented for reverse offload backend");
   return ROCSHMEM_ERROR;
@@ -846,7 +846,7 @@ __device__ void ROContext::fcollectmem_wg(rocshmem_team_t team, void *dest,
                         (intptr_t)team_obj->mpi_comm, ro_net_win_id, block_handle, true,
                         get_status_flag(), is_default_ctx, ROCSHMEM_SUM,
                         RO_NET_CHAR);
-  }  
+  }
 
   __syncthreads();
 }

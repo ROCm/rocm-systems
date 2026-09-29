@@ -10,9 +10,13 @@ Use the RCCL device API and GIN
 The experimental RCCL device API lets GPU kernels communicate through a
 device communicator (``ncclDevComm``). GPU-initiated networking (GIN) extends
 that API with one-sided puts, signals, counters, and barriers across nodes.
-RCCL 2.30.4 incorporates Device API and GIN enhancements from upstream
-NCCL 2.30.3. This page describes those APIs and the limits of the AMD
+RCCL 2.31 incorporates Device API and GIN enhancements from upstream
+NCCL 2.31.2. This page describes those APIs and the limits of the AMD
 host-proxy backend.
+
+``NCCL_GIN_TYPE`` values for AMD backends are **not compatible with 2.30.7**:
+rocSHMEM GDA moved from 5 to 6 and Anvil SDMA from 6 to 7 because NCCL 2.31
+placed EFA GDA at 5. The IB proxy remains ``NCCL_GIN_TYPE=2``.
 
 Requirements
 ============
@@ -137,10 +141,16 @@ without manually allocating a barrier handle:
 
    ncclResult_t result = barrier.sync(
        ncclCoopCta(), cuda::memory_order_acq_rel,
-       ncclGinFenceLevel::Relaxed, timeoutCycles);
+       ncclGinFenceLevel::None, timeoutCycles);
 
 The timeout overload returns ``ncclTimeout`` if all team members don't arrive
-within ``timeoutCycles``. Barrier resources for ``ncclGinBarrierSession``,
+within ``timeoutCycles``. ``ncclGinFenceLevel`` is a bitmask: ``None`` is arrival
+only, ``Put`` makes inbound (and self) puts visible, ``Get`` drains local gets,
+and omitting the fence argument is ``Put | Get``. ``Relaxed`` is a deprecated
+alias for ``None``. Pass ``ncclGinAllContexts(devComm)`` instead of a single
+``ncclGin`` when puts or gets were issued on more than one GIN context.
+
+Barrier resources for ``ncclGinBarrierSession``,
 ``ncclLsaBarrierSession``, and ``ncclBarrierSession`` are separate. Reserve
 ``barrierCount`` for generic ``ncclBarrierSession`` objects; use
 ``lsaBarrierCount``, ``railGinBarrierCount``, or ``worldGinBarrierCount`` for
@@ -166,9 +176,11 @@ Version and backend notes
 
 ``ncclDevComm`` is versioned. The upstream NCCL 2.30.3 and 2.30.4 release notes
 require applications using GIN APIs to be rebuilt with the matching release.
-RCCL accepts compatible layouts within the 2.30 family, but applications using
-pre-2.30 GIN device code must be rebuilt with compatible RCCL headers. The
-runtime rejects pre-2.30 requirements that request indexed GIN resources.
+The upstream NCCL 2.30.7 release notes add ``ncclGinFenceLevel`` semantics for
+GIN barriers (``None``, ``Put``, ``Get``, default ``Put | Get``). RCCL accepts
+compatible layouts within the 2.30 family, but applications using pre-2.30 GIN
+device code must be rebuilt with compatible RCCL headers. The runtime rejects
+pre-2.30 requirements that request indexed GIN resources.
 
 The 128-byte, versioned GIN proxy descriptor and per-context proxy progress are
 internal implementation details and require no application configuration.

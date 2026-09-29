@@ -219,11 +219,9 @@ class Flag {
     var = os::GetEnvVar("HSA_TOOLS_REPORT_REGISTER_FAILURE");
     report_tool_register_failures_ = (var == "1") ? true : false;
 
-    // Kill switch for the rocjitsu hotswap tool. Unlike most flags here it
-    // accepts the spelled-out negatives, because the scripts that set it were
-    // written against the retired hotswap implementation and pass "0"/"false"
-    // to mean "leave hotswap on".
-    hotswap_disable_ = IsEnvVarTruthy("HSA_HOTSWAP_DISABLE");
+    // Opt-in switch for the rocjitsu hotswap tool. Leave the tool disabled
+    // unless the user explicitly requests it with a truthy value.
+    hotswap_enable_ = IsEnvVarTruthy("HSA_HOTSWAP_ENABLE");
 
     var = os::GetEnvVar("HSA_DISABLE_FRAGMENT_ALLOCATOR");
     disable_fragment_alloc_ = (var == "1") ? true : false;
@@ -248,6 +246,12 @@ class Flag {
 
     var = os::GetEnvVar("HSA_DISABLE_PC_SAMPLING");
     disable_pc_sampling_ = (var == "1") ? true : false;
+
+    // Controls reporting of the "strict" ISA variant on A0 silicon. Disabled by
+    // default, so the agent keeps the base target. Set the variable to 0 to opt
+    // in and have the agent re-point to the strict variant.
+    var = os::GetEnvVar("HSA_DISABLE_GFX12_STRICT");
+    disable_gfx12_strict_ = (var == "0") ? false : true;
 
     var = os::GetEnvVar("HSA_LOADER_ENABLE_MMAP_URI");
     loader_enable_mmap_uri_ = (var == "1") ? true : false;
@@ -418,7 +422,7 @@ class Flag {
 
   bool report_tool_load_failures() const { return report_tool_load_failures_; }
 
-  bool hotswap_disable() const { return hotswap_disable_; }
+  bool hotswap_enable() const { return hotswap_enable_; }
 
   bool report_tool_register_failures() const { return report_tool_register_failures_; }
 
@@ -471,6 +475,8 @@ class Flag {
   void set_ipc_mode_legacy(bool enable) { enable_ipc_mode_legacy_ = enable; }
 
   bool disable_pc_sampling() const { return disable_pc_sampling_; }
+
+  bool disable_gfx12_strict() const { return disable_gfx12_strict_; }
 
   bool loader_enable_mmap_uri() const { return loader_enable_mmap_uri_; }
 
@@ -596,7 +602,7 @@ class Flag {
   bool poison_sigbus_delay_set_ = false;
   uint32_t poison_sigbus_delay_ms_ = 0;
   bool report_tool_load_failures_;
-  bool hotswap_disable_ = false;
+  bool hotswap_enable_ = false;
   bool report_tool_register_failures_ = false;
   bool disable_tool_register_ = false;
   bool disable_fragment_alloc_;
@@ -606,6 +612,7 @@ class Flag {
   bool no_scratch_thread_limit_;
   bool disable_image_;
   bool disable_pc_sampling_;
+  bool disable_gfx12_strict_ = true;
   bool loader_enable_mmap_uri_;
   bool check_sramecc_validity_;
   bool debug_;

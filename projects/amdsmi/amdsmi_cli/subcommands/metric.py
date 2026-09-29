@@ -308,8 +308,14 @@ class MetricCommands:
 
         # Detect APU system
         show_apu = bool(gpu_metric.get("is_apu", False))
-        if show_apu:
-            # APUs lack these discrete-GPU sensors, so their sections are omitted.
+        # APUs lack these discrete-GPU sensors. Drop them from the default dump only; a
+        # section the user named explicitly still reports N/A rather than nothing.
+        # Derive this AFTER arg defaulting (line 291-293) to avoid reading stale values
+        # from the shared args namespace across watch iterations and multi-GPU recursion.
+        apu_suppressed = show_apu and all(
+            getattr(args, arg) == True for arg in current_platform_args
+        )
+        if apu_suppressed:
             logging.debug(
                 "APU detected for gpu %s; omitting pcie, ecc_blocks, "
                 "voltage_curve, overdrive, xgmi_err, and energy sections",
@@ -341,7 +347,7 @@ class MetricCommands:
             values_dict["gpu"] = int(gpu_id)
         # Populate the pcie_dict first due to multiple gpu metrics calls incorrectly increasing bandwidth
         if "pcie" in current_platform_args:
-            if args.pcie and not show_apu:
+            if args.pcie and not apu_suppressed:
                 pcie_dict = {
                     "width": "N/A",
                     "speed": "N/A",
@@ -615,12 +621,10 @@ class MetricCommands:
                     for key, value in apu_usage_fields.items():
                         activity_unit = "%"
                         if value != "N/A":
-                            if "dram" in key:
+                            if "reads" in key or "writes" in key:
                                 values_dict["usage"][key] = self.helpers.unit_format(
                                     self.logger, value, "MB/s"
                                 )
-                            elif "reads" in key or "writes" in key:
-                                values_dict["usage"][key] = value
                             elif isinstance(value, list):
                                 if self.logger.is_human_readable_format():
                                     formatted = [
@@ -1641,7 +1645,7 @@ class MetricCommands:
 
         # Since pcie bw may increase based on frequent metrics calls, we add it to the output here, but the populate the values first
         if "pcie" in current_platform_args:
-            if args.pcie and not show_apu:
+            if args.pcie and not apu_suppressed:
                 values_dict["pcie"] = pcie_dict
 
         if "gpu_board" in current_platform_args:
@@ -1713,7 +1717,7 @@ class MetricCommands:
 
                 values_dict["ecc"] = ecc_count
         if "ecc_blocks" in current_platform_args:
-            if args.ecc_blocks and not show_apu:
+            if args.ecc_blocks and not apu_suppressed:
                 ecc_dict = {}
                 sysfs_blocks = ["UMC", "SDMA", "GFX", "MMHUB", "PCIE_BIF", "HDP", "XGMI_WAFL"]
                 try:
@@ -1794,15 +1798,17 @@ class MetricCommands:
                     )
 
                 values_dict["fan"] = fan_dict
-            elif args.fan and show_apu:
+            elif args.fan and show_apu and not apu_suppressed:
                 # fan_pwm reported as a duty-cycle percentage
                 apu_fan_pwm = gpu_metric.get("apu_metrics.fan_pwm", "N/A")
                 if apu_fan_pwm != "N/A":
                     values_dict["fan"] = {
                         "apu_fan_pwm": self.helpers.unit_format(self.logger, apu_fan_pwm, "%")
                     }
+                else:
+                    values_dict["fan"] = {"apu_fan_pwm": "N/A"}
         if "voltage_curve" in current_platform_args:
-            if args.voltage_curve and not show_apu:
+            if args.voltage_curve and not apu_suppressed:
                 # Populate N/A values per voltage point
                 voltage_point_dict = {}
                 for point in range(amdsmi_interface.AMDSMI_NUM_VOLTAGE_CURVE_POINTS):
@@ -1850,7 +1856,7 @@ class MetricCommands:
 
                 values_dict["voltage_curve"] = voltage_point_dict
         if "overdrive" in current_platform_args:
-            if args.overdrive and not show_apu:
+            if args.overdrive and not apu_suppressed:
                 try:
                     overdrive_level = amdsmi_interface.amdsmi_get_gpu_overdrive_level(args.gpu)
                     od_unit = "%"
@@ -1891,7 +1897,7 @@ class MetricCommands:
                         "Failed to get perf level for gpu %s | %s", gpu_id, e.get_error_info()
                     )
         if "xgmi_err" in current_platform_args:
-            if args.xgmi_err and not show_apu:
+            if args.xgmi_err and not apu_suppressed:
                 try:
                     xgmi_err_status = amdsmi_interface.amdsmi_gpu_xgmi_error_status(args.gpu)
                     values_dict["xgmi_err"] = (
@@ -1961,7 +1967,7 @@ class MetricCommands:
 
                 values_dict["voltage"] = voltage_dict
         if "energy" in current_platform_args:
-            if args.energy and not show_apu:
+            if args.energy and not apu_suppressed:
                 try:
                     energy_dict = amdsmi_interface.amdsmi_get_energy_count(args.gpu)
 
@@ -2319,12 +2325,14 @@ class MetricCommands:
 
         # On APU systems, drop only the N/A standard sensors from APU-relevant
         # sections; a standard field that reports a real value is preserved.
+        # Scope this to the default dump (apu_suppressed) so an explicitly named
+        # section (e.g. --temperature) keeps its keys even if they are N/A.
         if show_apu:
             apu_only_sections = {"usage", "power", "clock", "temperature", "voltage", "throttle"}
             for section_key in list(values_dict.keys()):
                 section_val = values_dict[section_key]
                 if isinstance(section_val, dict):
-                    if section_key in apu_only_sections:
+                    if section_key in apu_only_sections and apu_suppressed:
                         non_apu_keys = [
                             k
                             for k in section_val
@@ -2332,10 +2340,17 @@ class MetricCommands:
                         ]
                         for k in non_apu_keys:
                             del section_val[k]
+                    # An emptied section is dropped from the default dump, but reports
+                    # N/A when the user named it explicitly.
                     if not section_val:
-                        del values_dict[section_key]
+                        if apu_suppressed:
+                            del values_dict[section_key]
+                        else:
+                            values_dict[section_key] = "N/A"
                 elif section_val == "N/A":
-                    del values_dict[section_key]
+                    if apu_suppressed:
+                        del values_dict[section_key]
+                    # else: keep the N/A for explicitly named sections
 
         # Store timestamp first if watching_output is enabled
         if watching_output:

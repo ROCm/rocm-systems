@@ -188,6 +188,19 @@ public:
   /// Xnack functionality.
   static bool BindXnackMode();
 
+  /// @brief Take the one topology snapshot reference this driver owns.
+  hsa_status_t AcquireTopologySnapshot() const;
+
+  /// @brief Release this driver's topology snapshot reference, if held.
+  hsa_status_t ReleaseTopologySnapshot();
+
+  /// @brief Disable the KFD runtime if Init() enabled it.
+  hsa_status_t DisableRuntime();
+
+  mutable bool topology_snapshot_acquired_ = false;
+  bool runtime_enabled_ = false;
+  mutable HsaSystemProperties sys_props_{};
+
   // Minimum acceptable KFD version numbers.
   static const uint32_t kfd_version_major_min = 0;
   static const uint32_t kfd_version_minor_min = 99;

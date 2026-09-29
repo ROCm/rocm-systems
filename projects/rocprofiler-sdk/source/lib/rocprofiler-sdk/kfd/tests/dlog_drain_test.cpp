@@ -300,11 +300,54 @@ TEST(dlog_drain, pairing_core)
 TEST(dlog_drain, evict_stale_starts)
 {
     drain_state st;
-    st.pairing.pending_starts[1] = pair_state::pending_start{100, 1000};  // old
-    st.pairing.pending_starts[2] = pair_state::pending_start{200, 5000};  // fresh
+    // outstanding=1: a live pending_start always carries at least one outstanding
+    // START (the real emplace path seeds it 1). evict_stale returns the count of
+    // stranded STARTs, not keys, so a single-start stale key contributes 1.
+    st.pairing.pending_starts[1] = pair_state::pending_start{100, 1000, 1, false};  // old
+    st.pairing.pending_starts[2] = pair_state::pending_start{200, 5000, 1, false};  // fresh
     EXPECT_EQ(st.pairing.evict_stale(/*now_ns=*/6000, /*max_age_ns=*/2000), 1u);
     EXPECT_EQ(st.pairing.pending_starts.count(1), 0u);
     EXPECT_EQ(st.pairing.pending_starts.count(2), 1u);
+}
+
+// The hard size cap bounds pending_starts even when nothing ages out: past the
+// cap an insert evicts the OLDEST retained START (by seen_at_ns) and counts it.
+TEST(dlog_drain, pending_starts_size_cap_evicts_oldest)
+{
+    auto mk_start = [](uint32_t dispatch_id, uint64_t ts) {
+        auto c             = copied_record{};
+        c.rec.record_type  = kRecStart;
+        c.rec.doorbell_off = 4100;
+        c.rec.dispatch_id  = dispatch_id;
+        c.rec.ts_lo        = static_cast<uint32_t>(ts);
+        return c;
+    };
+
+    pair_state pairing;
+    pairing.max_pending_starts = 2;
+    recorder rec;
+
+    // Three distinct keys, each in its own batch so seen_at_ns strictly increases.
+    for(uint32_t i = 1; i <= 3; ++i)
+    {
+        auto batch = std::vector<copied_record>{mk_start(i, 10 * i)};
+        pair_records(batch.data(), batch.size(), pairing, /*now_ns=*/1000 * i, rec.on_record());
+    }
+
+    EXPECT_EQ(pairing.pending_starts.size(), 2u) << "the cap is a hard bound";
+    EXPECT_EQ(pairing.starts_cap_evicted, 1u);
+    const uint64_t k1 = (uint64_t{4100} << 32) | 1u;
+    EXPECT_EQ(pairing.pending_starts.count(k1), 0u) << "the oldest START is the victim";
+
+    // A recurring key is exempt: it cannot grow the map, and evicting there could
+    // pick the very key being touched and reset its ambiguity latch.
+    const uint64_t k3    = (uint64_t{4100} << 32) | 3u;
+    auto           again = std::vector<copied_record>{mk_start(3, 99)};
+    pair_records(again.data(), again.size(), pairing, /*now_ns=*/4000, rec.on_record());
+    EXPECT_EQ(pairing.pending_starts.size(), 2u);
+    EXPECT_EQ(pairing.starts_cap_evicted, 1u) << "no eviction for a recurring key";
+    ASSERT_EQ(pairing.pending_starts.count(k3), 1u);
+    EXPECT_TRUE(pairing.pending_starts[k3].ambiguous) << "the duplicate still latches ambiguous";
 }
 
 // Invalid geometry (0 regions, too many, or non-power-of-two rrc) is rejected.
@@ -785,7 +828,9 @@ TEST(dlog_drain, ambiguous_key_ages_from_first_start)
     pair_records(b2.data(), b2.size(), st, /*now_ns=*/2000, nop);
     ASSERT_EQ(st.pending_starts.size(), 1u);
     EXPECT_TRUE(st.pending_starts.begin()->second.ambiguous);
-    EXPECT_EQ(st.evict_stale(/*now_ns=*/2500, /*max_age_ns=*/2000), 1u);
+    // Three STARTs are outstanding on this one ambiguous key; evict_stale counts
+    // stranded STARTs, not keys, so aging the key out reports all three.
+    EXPECT_EQ(st.evict_stale(/*now_ns=*/2500, /*max_age_ns=*/2000), 3u);
     EXPECT_TRUE(st.pending_starts.empty());
 }
 
@@ -1108,4 +1153,187 @@ TEST(stream_geometry, rejection_reason_is_reported)
     bad_offset.records_offset = 64;
     EXPECT_EQ(validate_stream_geometry(bad_offset, buf, kPage).reason,
               geometry_reason::layout_mismatch);
+}
+
+// ---------------------------------------------------------------------------
+// D1 (F9) tick-ordered pairing. The pairer orders each batch by (tick, kind,
+// arrival_seq) with EOP-before-START at equal ticks, so temporal order -- not
+// region/copy position -- decides every pairing. These are the spec's
+// fails-without-fix cases (D1 180-199); they fail under the old all-STARTs-first
+// two-pass pairer.
+// ---------------------------------------------------------------------------
+
+// D1(a): {S_A, E_A, S_B, E_B} on one raw key in true temporal order -> BOTH pair.
+// The old two-pass installed S_A and S_B before any EOP, latching ambiguous and
+// dropping both; tick order runs S_A -> E_A(pair) -> S_B -> E_B(pair).
+TEST(dlog_drain, d1_same_key_in_order_reuse_both_pair)
+{
+    const uint32_t db = 4100;
+    env            e(1, 2048);
+    e.ring.put(0, 0, kRecStart, 7, db, 100);
+    e.ring.put(0, 1, kRecEop, 7, db, 200);
+    e.ring.put(0, 2, kRecStart, 7, db, 300);  // same raw key, reused after E_A
+    e.ring.put(0, 3, kRecEop, 7, db, 400);
+    e.ring.wptr[0] = 4;
+    EXPECT_EQ(e.drain(), 2u) << "both dispatches pair; key never holds 2 outstanding";
+    EXPECT_EQ(e.rec.pairs.size(), 1u);  // same key -> the map holds the last pair
+    EXPECT_EQ(e.st.pairing.ambiguous_pairs, 0u) << "no spurious ambiguity";
+    EXPECT_EQ(e.st.pairing.equal_tick_drops, 0u);
+    EXPECT_TRUE(e.st.pairing.pending_starts.empty());
+}
+
+// D1(i): reuse tie -- S_A(1) retained, then {E_A(5), S_B(5), E_B(9)} in one batch.
+// EOP-before-START at the equal tick 5 pairs E_A with the outstanding S_A first,
+// then installs S_B cleanly; both pair, no ambiguity.
+TEST(dlog_drain, d1_reuse_equal_tick_both_pair_no_ambiguous)
+{
+    const uint32_t db = 4100;
+    env            e(1, 2048);
+    e.ring.put(0, 0, kRecStart, 7, db, 1);
+    e.ring.wptr[0] = 1;
+    EXPECT_EQ(e.drain(), 0u);  // S_A retained
+    ASSERT_EQ(e.st.pairing.pending_starts.size(), 1u);
+    e.rec = recorder{};
+    e.ring.put(0, 1, kRecEop, 7, db, 5);    // E_A at tick 5
+    e.ring.put(0, 2, kRecStart, 7, db, 5);  // S_B at the same tick 5
+    e.ring.put(0, 3, kRecEop, 7, db, 9);    // E_B at tick 9
+    e.ring.wptr[0] = 4;
+    EXPECT_EQ(e.drain(), 2u) << "E_A pairs S_A (EOP-first at equal tick), then S_B/E_B pair";
+    EXPECT_EQ(e.st.pairing.ambiguous_pairs, 0u);
+    EXPECT_EQ(e.st.pairing.equal_tick_drops, 0u);
+    EXPECT_TRUE(e.st.pairing.pending_starts.empty());
+}
+
+// D1(d): a START retained from batch N pairs its EOP in batch N+1, and the
+// retained START does NOT latch ambiguous (it is not re-fed into N+1's sort).
+TEST(dlog_drain, d1_cross_batch_pair_no_ambiguous)
+{
+    const uint32_t db = 4100;
+    env            e(1, 2048);
+    e.ring.put(0, 0, kRecStart, 7, db, 100);
+    e.ring.wptr[0] = 1;
+    EXPECT_EQ(e.drain(), 0u);
+    ASSERT_EQ(e.st.pairing.pending_starts.size(), 1u);
+    e.rec = recorder{};
+    e.ring.put(0, 1, kRecEop, 7, db, 200);
+    e.ring.wptr[0] = 2;
+    EXPECT_EQ(e.drain(), 1u) << "the retained START pairs its cross-batch EOP";
+    EXPECT_EQ(e.st.pairing.ambiguous_pairs, 0u) << "retained START never latches ambiguous";
+    EXPECT_EQ(e.st.pairing.starts_overwritten, 0u);
+    ASSERT_EQ(e.rec.pairs.count(std::make_pair(db, 7u)), 1u);
+    EXPECT_EQ(e.rec.pairs[std::make_pair(db, 7u)].first, 100u);
+    EXPECT_EQ(e.rec.pairs[std::make_pair(db, 7u)].second, 200u);
+}
+
+// D1(e): a latched-ambiguous key drains one outstanding START per ambiguous EOP
+// to 0, then the NEXT START re-inserts a fresh non-ambiguous entry and pairs.
+TEST(dlog_drain, d1_sticky_ambiguous_drains_then_fresh_start_pairs)
+{
+    const uint32_t db = 4100;
+    env            e(1, 2048);
+    // Two outstanding STARTs latch ambiguous; two EOPs drain outstanding to 0.
+    e.ring.put(0, 0, kRecStart, 7, db, 100);
+    e.ring.put(0, 1, kRecStart, 7, db, 200);
+    e.ring.put(0, 2, kRecEop, 7, db, 300);
+    e.ring.put(0, 3, kRecEop, 7, db, 400);
+    e.ring.wptr[0] = 4;
+    EXPECT_EQ(e.drain(), 0u);
+    EXPECT_EQ(e.st.pairing.ambiguous_pairs, 2u);
+    ASSERT_TRUE(e.st.pairing.pending_starts.empty()) << "drained to 0";
+    // A fresh START/EOP on the same raw key now pairs normally.
+    e.rec = recorder{};
+    e.ring.put(0, 4, kRecStart, 7, db, 500);
+    e.ring.put(0, 5, kRecEop, 7, db, 600);
+    e.ring.wptr[0] = 6;
+    EXPECT_EQ(e.drain(), 1u) << "fresh entry after the ambiguous run pairs";
+    EXPECT_EQ(e.st.pairing.ambiguous_pairs, 2u) << "no new ambiguity";
+    ASSERT_EQ(e.rec.pairs.count(std::make_pair(db, 7u)), 1u);
+    EXPECT_EQ(e.rec.pairs[std::make_pair(db, 7u)].first, 500u);
+}
+
+// D1(g): cross-batch equal tick -- START(t) in batch N, EOP(t) in batch N+1.
+// No firmware guarantee that start<end for a real pair, so an equal-tick EOP is
+// dropped fail-closed (equal_tick_drops), the key drained and re-pairable.
+TEST(dlog_drain, d1_cross_batch_equal_tick_dropped)
+{
+    const uint32_t db = 4100;
+    env            e(1, 2048);
+    e.ring.put(0, 0, kRecStart, 7, db, 70);
+    e.ring.wptr[0] = 1;
+    EXPECT_EQ(e.drain(), 0u);
+    e.rec = recorder{};
+    e.ring.put(0, 1, kRecEop, 7, db, 70);  // equal tick
+    e.ring.wptr[0] = 2;
+    EXPECT_EQ(e.drain(), 0u) << "equal-tick EOP is not a valid pair";
+    EXPECT_EQ(e.st.pairing.equal_tick_drops, 1u);
+    EXPECT_TRUE(e.rec.pairs.empty());
+    EXPECT_TRUE(e.rec.eops_without_start.empty());
+    EXPECT_TRUE(e.st.pairing.pending_starts.empty()) << "key drained to 0, re-pairable";
+}
+
+// D1(h): cross-batch stale EOP -- START(100) retained from batch N, EOP(50) in
+// batch N+1 predates it (belongs to an earlier lost dispatch). The stale EOP is
+// dropped and the retained START is left UNTOUCHED, so its own EOP(120) in batch
+// N+2 still pairs.
+TEST(dlog_drain, d1_cross_batch_stale_eop_leaves_start_and_later_eop_pairs)
+{
+    const uint32_t db = 4100;
+    env            e(1, 2048);
+    e.ring.put(0, 0, kRecStart, 7, db, 100);
+    e.ring.wptr[0] = 1;
+    EXPECT_EQ(e.drain(), 0u);
+    ASSERT_EQ(e.st.pairing.pending_starts.size(), 1u);
+    // Batch N+1: EOP(50) < retained START(100) -> stale drop, START untouched.
+    e.rec = recorder{};
+    e.ring.put(0, 1, kRecEop, 7, db, 50);
+    e.ring.wptr[0] = 2;
+    EXPECT_EQ(e.drain(), 0u);
+    EXPECT_EQ(e.st.pairing.stale_eop_drops, 1u);
+    EXPECT_EQ(e.st.pairing.pending_starts.size(), 1u) << "retained START still outstanding";
+    EXPECT_TRUE(e.rec.eops_without_start.empty()) << "stale EOP NOT forwarded startless";
+    // Batch N+2: the START's own EOP(120) pairs.
+    e.rec = recorder{};
+    e.ring.put(0, 2, kRecEop, 7, db, 120);
+    e.ring.wptr[0] = 3;
+    EXPECT_EQ(e.drain(), 1u) << "the retained START pairs its true EOP";
+    ASSERT_EQ(e.rec.pairs.count(std::make_pair(db, 7u)), 1u);
+    EXPECT_EQ(e.rec.pairs[std::make_pair(db, 7u)].first, 100u);
+    EXPECT_EQ(e.rec.pairs[std::make_pair(db, 7u)].second, 120u);
+}
+
+// D1(f): same-batch {S(t), E(t)} on one key fed in BOTH arrival orders must give
+// a byte-identical outcome -- the EOP-before-START tie rule is a property of the
+// record multiset, not arrival order. Both orders: one startless EOP forwarded,
+// equal_tick_drops == 0, one retained START.
+TEST(dlog_drain, d1_same_batch_equal_tick_is_order_independent)
+{
+    const uint32_t db  = 4100;
+    auto           run = [&](bool eop_first) {
+        env e(1, 2048);
+        if(eop_first)
+        {
+            e.ring.put(0, 0, kRecEop, 7, db, 55);
+            e.ring.put(0, 1, kRecStart, 7, db, 55);
+        }
+        else
+        {
+            e.ring.put(0, 0, kRecStart, 7, db, 55);
+            e.ring.put(0, 1, kRecEop, 7, db, 55);
+        }
+        e.ring.wptr[0] = 2;
+        e.drain();
+        return e;
+    };
+    auto se = run(false);  // {S, E}
+    auto es = run(true);   // {E, S}
+    // Identical outcome: the EOP ran first against an empty key -> startless,
+    // the trailing START is retained; no equal-tick drop in either order.
+    EXPECT_EQ(se.rec.eops_without_start.size(), 1u);
+    EXPECT_EQ(es.rec.eops_without_start.size(), 1u);
+    EXPECT_EQ(se.st.pairing.equal_tick_drops, 0u);
+    EXPECT_EQ(es.st.pairing.equal_tick_drops, 0u);
+    EXPECT_EQ(se.st.pairing.pending_starts.size(), 1u);
+    EXPECT_EQ(es.st.pairing.pending_starts.size(), 1u);
+    EXPECT_TRUE(se.rec.pairs.empty());
+    EXPECT_TRUE(es.rec.pairs.empty());
 }

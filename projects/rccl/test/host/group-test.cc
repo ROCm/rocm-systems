@@ -31,6 +31,7 @@
 #include "group.h"
 
 #include "fakes/comm_fakes.h"    // controllable ncclCommSetAsyncError seam
+#include "fakes/recorder_fakes.h"  // g_recorderResult, shared with the other micro binaries
 #include "fakes/nccl_fakes.h"    // g_loadParam, used by param_redirect.h
 #include "ScopedHook.h"          // RAII install/restore for controllable seams
 
@@ -87,6 +88,7 @@ class GroupEndInternalTest : public ::testing::Test {
 
   void SetUp() override {
     ResetCommFakes();
+    ResetRecorderFakes();  // recorder_fakes.cc is linked here too; g_recorderResult is process state
 
     // Reset the thread-local group state group.cc reads. ncclGroupEndInternal
     // runs on this thread, so the thread-locals it inspects are these.
@@ -116,6 +118,7 @@ class GroupEndInternalTest : public ::testing::Test {
       comm_->groupJob = nullptr;
     }
     ResetCommFakes();
+    ResetRecorderFakes();  // recorder_fakes.cc is linked here too; g_recorderResult is process state
   }
 
   // Queue a single pending async job owned by comm_ and enter a group whose
@@ -185,6 +188,37 @@ TEST_F(GroupEndInternalTest, BlockingGroupWithPendingJob_RunsSynchronouslyAndRet
 
   EXPECT_EQ(ncclSuccess, ncclGroupEndInternal());
   EXPECT_EQ(nullptr, comm_->groupJob);
+}
+
+// Multi-rank symmetric task preparation must be deferred until every local
+// communicator has enqueued its job. Running the first communicator inline can
+// block in bootstrap consensus before its sibling communicators enter it.
+TEST_F(GroupEndInternalTest, MultiRankSymmetricCommEnqueuesAsyncJob) {
+  auto comm = std::make_unique<ncclComm>();  // value-initialised => zeroed
+  comm->intraRanks = 2;
+  comm->symmetricSupport = 1;
+  comm->p2pCrossClique = 0;
+
+  ncclIntruQueue<ncclAsyncJob, &ncclAsyncJob::next> asyncCollJobs;
+  ncclIntruQueueConstruct(&asyncCollJobs);
+  ncclSimInfo_t simInfo{};
+
+  ASSERT_EQ(ncclSuccess,
+            ncclPrepareTasksAndCollPreconnect(comm.get(), &simInfo, &asyncCollJobs));
+  ASSERT_FALSE(ncclIntruQueueEmpty(&asyncCollJobs));
+
+  ncclAsyncJob* queued = ncclIntruQueueDequeue(&asyncCollJobs);
+  ASSERT_NE(nullptr, queued);
+  EXPECT_EQ(ncclPrepareTasksAndCollPreconnectFunc, queued->func);
+  EXPECT_EQ(ncclGroupJobRunning, queued->state);
+
+  auto* prepareJob =
+    reinterpret_cast<ncclPrepareTasksAndCollPreconnectJob*>(queued);
+  EXPECT_EQ(comm.get(), prepareJob->comm);
+  EXPECT_EQ(&simInfo, prepareJob->simInfo);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&asyncCollJobs));
+
+  queued->destructor(queued);
 }
 
 }  // namespace

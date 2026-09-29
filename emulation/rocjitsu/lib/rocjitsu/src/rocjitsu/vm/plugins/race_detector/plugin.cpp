@@ -7,6 +7,7 @@
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/log.h"
 
@@ -16,9 +17,11 @@
 #include <cassert>
 #include <format>
 #include <mutex>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string_view>
+#include <vector>
 
 namespace rocjitsu::plugins::race_detector {
 
@@ -32,8 +35,16 @@ void warn_cluster_peer_writes_ignored_once() {
   });
 }
 
-uint8_t vector_memory_byte_mask(const amdgpu::VectorMemState &state,
-                                const amdgpu::Wavefront &wave) {
+uint8_t vector_memory_byte_mask(const amdgpu::VectorMemState &state, const amdgpu::Wavefront &wave,
+                                uint32_t register_offset = 0) {
+  if (state.buffer_components && state.buffer_d16) {
+    if (state.is_load && wave.cu().sram_ecc())
+      return ExecutionPlugin::kFullByteMask;
+    if (state.d16_hi)
+      return ExecutionPlugin::kHighHalfByteMask;
+    return register_offset * 2 + 1 < state.buffer_components ? ExecutionPlugin::kFullByteMask
+                                                             : ExecutionPlugin::kLowHalfByteMask;
+  }
   if (state.is_load && wave.cu().sram_ecc() && (state.d16_lo || state.d16_hi))
     return ExecutionPlugin::kFullByteMask;
   if (state.d16_lo)
@@ -41,6 +52,36 @@ uint8_t vector_memory_byte_mask(const amdgpu::VectorMemState &state,
   if (state.d16_hi)
     return ExecutionPlugin::kHighHalfByteMask;
   return ExecutionPlugin::kFullByteMask;
+}
+
+MemoryOrderClass memory_order_for(const Instruction &inst) {
+  const auto *info = inst.amdgpu_memory_issue_info();
+  assert(info && "memory instruction reached the race detector without completion metadata");
+  if (!info || info->empty())
+    return MemoryOrderClass::UNORDERED;
+  return memoryOrderForObligations(info->counter_obligations());
+}
+
+std::optional<std::vector<uint32_t>>
+validated_load_destinations(const amdgpu::VectorMemState &state, const amdgpu::Wavefront &wave) {
+  const uint32_t vgpr_count = state.destination_vgpr_count();
+  const uint32_t ds2_vgpr_count = state.ds2_active ? state.ds2_destination_vgpr_count() : 0;
+  const amdgpu::RegisterAccess registers_for(wave);
+  std::vector<uint32_t> registers;
+  registers.reserve(vgpr_count + ds2_vgpr_count);
+  auto append_range = [&](uint32_t physical_base, uint32_t count) {
+    if (!registers_for.owns_vgpr_range(physical_base, count))
+      return false;
+    const uint32_t logical_base = physical_base - wave.vgpr_alloc().base;
+    for (uint32_t i = 0; i < count; ++i)
+      registers.push_back(logical_base + i);
+    return true;
+  };
+
+  if (!append_range(state.dst_reg_base, vgpr_count) ||
+      (state.ds2_active && !append_range(state.ds2_dst_reg_base, ds2_vgpr_count)))
+    return std::nullopt;
+  return registers;
 }
 
 } // namespace
@@ -263,8 +304,9 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
   }
 }
 
-void RaceDetectorPlugin::onAmdgpuRouteMemoryInstruction(const Instruction &inst,
-                                                        amdgpu::Wavefront &wf) {
+void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(
+    const amdgpu::MemoryAccessObservation & /*access*/, const Instruction &inst,
+    amdgpu::Wavefront &wf) {
   auto *s = get_state(wf);
   assert(s && s->race_state);
   auto *rs = s->race_state;
@@ -273,39 +315,70 @@ void RaceDetectorPlugin::onAmdgpuRouteMemoryInstruction(const Instruction &inst,
 
   if (inst.data()->tag() == amdgpu::LOCAL_MEM) {
     auto &d = *inst.data_as<amdgpu::VectorMemState>();
+    const uint64_t execMask = d.exec_mask;
+    if (execMask == 0)
+      return;
     auto type = d.is_load ? MemoryEventType::LDS_TO_VGPR : MemoryEventType::VGPR_TO_LDS;
+    const MemoryOrderClass memoryOrder = memory_order_for(inst);
+    const auto *issue = inst.amdgpu_memory_issue_info();
+    assert(issue && "memory instruction reached the race detector without issue metadata");
+    const uint32_t perLaneBytes = d.num_elems * d.elem_size;
+
+    std::vector<uint32_t> registers;
+    if (d.is_load) {
+      auto destinations = validated_load_destinations(d, wf);
+      if (!destinations)
+        return;
+      registers = std::move(*destinations);
+    }
 
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-      if (!(wf.exec() & (1ULL << lane)))
+      if (!(execMask & (1ULL << lane)))
         continue;
       int addr = static_cast<int>(d.per_lane_addr[lane]);
-      int nBytes = static_cast<int>(d.elem_size);
       if (d.is_load)
-        detector->validateRead(addr, waveId, static_cast<int>(lane), nBytes);
+        detector->validateRead(addr, waveId, static_cast<int>(lane), perLaneBytes, memoryOrder);
       else
-        detector->validateWrite(addr, waveId, static_cast<int>(lane), nBytes);
+        detector->validateWrite(addr, waveId, static_cast<int>(lane), perLaneBytes, memoryOrder);
+      if (d.ds2_active) {
+        addr = static_cast<int>(d.ds2_per_lane_addr[lane]);
+        if (d.is_load)
+          detector->validateRead(addr, waveId, static_cast<int>(lane), perLaneBytes, memoryOrder);
+        else
+          detector->validateWrite(addr, waveId, static_cast<int>(lane), perLaneBytes, memoryOrder);
+      }
     }
     uint32_t laneAddrs[64];
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane)
       laneAddrs[lane] = static_cast<uint32_t>(d.per_lane_addr[lane]);
-    std::vector<uint32_t> registers;
-    if (d.is_load) {
-      uint32_t logicalBase = d.dst_reg_base - wf.vgpr_alloc().base;
-      registers.resize(d.num_elems);
-      for (uint32_t i = 0; i < d.num_elems; ++i)
-        registers[i] = logicalBase + i;
-    }
     uint8_t byte_mask = vector_memory_byte_mask(d, wf);
-    rs->registerLdsEvent(wf.pc, type, std::move(registers), wf.exec(), wf.wf_size(),
-                         std::span<const uint32_t>(laneAddrs, wf.wf_size()), d.elem_size, byte_mask,
-                         d.wait_counter_type);
+    if (d.is_load) {
+      for (uint32_t reg : registers)
+        rs->checkVgprWrite(static_cast<int>(reg), execMask, byte_mask, memoryOrder);
+    }
+    if (d.ds2_active) {
+      uint32_t secondLaneAddrs[64];
+      for (uint32_t lane = 0; lane < wf.wf_size(); ++lane)
+        secondLaneAddrs[lane] = static_cast<uint32_t>(d.ds2_per_lane_addr[lane]);
+      rs->registerLdsEvent(wf.pc, type, std::move(registers), execMask, wf.wf_size(),
+                           std::span<const uint32_t>(laneAddrs, wf.wf_size()),
+                           std::span<const uint32_t>(secondLaneAddrs, wf.wf_size()), perLaneBytes,
+                           byte_mask, issue->counter_obligations(), memoryOrder);
+    } else {
+      rs->registerLdsEvent(wf.pc, type, std::move(registers), execMask, wf.wf_size(),
+                           std::span<const uint32_t>(laneAddrs, wf.wf_size()), perLaneBytes,
+                           byte_mask, issue->counter_obligations(), memoryOrder);
+    }
   }
 
   if (inst.data()->tag() == amdgpu::GLOBAL_MEM) {
     auto &d = *inst.data_as<amdgpu::VectorMemState>();
     if (d.exec_mask == 0)
       return;
+    const auto *issue = inst.amdgpu_memory_issue_info();
+    assert(issue && "memory instruction reached the race detector without issue metadata");
     if (d.lds_dst) {
+      const MemoryOrderClass memoryOrder = memory_order_for(inst);
       uint32_t perLaneBytes = d.num_elems * d.elem_size;
       if (d.cluster_multicast && d.cluster_mcast_mask != 0) {
         uint32_t selfMask = amdgpu::cluster_multicast_rank_mask(wf.cluster_rank());
@@ -325,33 +398,41 @@ void RaceDetectorPlugin::onAmdgpuRouteMemoryInstruction(const Instruction &inst,
       }
       rs->registerLdsEvent(wf.pc, MemoryEventType::GLOBAL_TO_LDS, {}, validLaneMask, wf.wf_size(),
                            std::span<const uint32_t>(ldsAddrs, wf.wf_size()), perLaneBytes, 0xF,
-                           d.wait_counter_type);
-    } else if (d.is_load && d.dst_reg_base >= wf.vgpr_alloc().base) {
-      uint32_t logicalBase = d.dst_reg_base - wf.vgpr_alloc().base;
-      std::vector<uint32_t> registers(d.num_elems);
-      for (uint32_t i = 0; i < d.num_elems; ++i)
-        registers[i] = logicalBase + i;
-      uint8_t byte_mask = vector_memory_byte_mask(d, wf);
+                           issue->counter_obligations(), memoryOrder);
+    } else if (d.is_load) {
+      const MemoryOrderClass memoryOrder = memory_order_for(inst);
+      auto destinations = validated_load_destinations(d, wf);
+      if (!destinations)
+        return;
+      std::vector<uint32_t> registers = std::move(*destinations);
+      const uint8_t byte_mask = vector_memory_byte_mask(d, wf);
+      const uint8_t last_byte_mask = vector_memory_byte_mask(d, wf, registers.size() - 1);
+      for (uint32_t i = 0; i < registers.size(); ++i)
+        rs->checkVgprWrite(static_cast<int>(registers[i]), d.exec_mask,
+                           vector_memory_byte_mask(d, wf, i), memoryOrder);
       rs->registerEvent(wf.pc, MemoryEventType::GLOBAL_TO_VGPR, std::move(registers), d.exec_mask,
-                        byte_mask, d.wait_counter_type);
+                        byte_mask, issue->counter_obligations(), memoryOrder, last_byte_mask);
     } else if (!d.is_load) {
       rs->registerEvent(wf.pc, MemoryEventType::VGPR_TO_GLOBAL, {}, d.exec_mask, 0xF,
-                        d.wait_counter_type);
+                        issue->counter_obligations(), memory_order_for(inst));
     }
   }
 
   if (inst.data()->tag() == amdgpu::SCALAR_MEM) {
     auto &d = *inst.data_as<amdgpu::ScalarMemState>();
+    const MemoryOrderClass memoryOrder = memory_order_for(inst);
+    const auto *issue = inst.amdgpu_memory_issue_info();
+    assert(issue && "memory instruction reached the race detector without issue metadata");
     if (d.is_load) {
       if (const auto reg = d.dst_register.register_ref()) {
-        rs->registerScalarLoad(wf.pc, *reg, wf.exec(), d.wait_counter_type);
+        rs->registerScalarLoad(wf.pc, *reg, wf.exec(), issue->counter_obligations(), memoryOrder);
       } else {
         rs->registerEvent(wf.pc, MemoryEventType::GLOBAL_TO_SGPR, {}, wf.exec(), 0xF,
-                          d.wait_counter_type);
+                          issue->counter_obligations(), memoryOrder);
       }
     } else {
       rs->registerEvent(wf.pc, MemoryEventType::SCALAR_TO_GLOBAL, {}, wf.exec(), 0xF,
-                        d.wait_counter_type);
+                        issue->counter_obligations(), memoryOrder);
     }
   }
 }
@@ -378,10 +459,16 @@ void RaceDetectorPlugin::onAmdgpuReadScalarRegister(const amdgpu::Wavefront *wf,
   s->race_state->checkScalarRead(reg);
 }
 
+void RaceDetectorPlugin::onAmdgpuWriteScalarRegister(const amdgpu::Wavefront *wf, RegisterRef reg) {
+  auto *s = get_state(wf);
+  assert(s && s->race_state);
+  s->race_state->checkScalarWrite(reg);
+}
+
 void RaceDetectorPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
                                                           amdgpu::Wavefront &wf) {
   auto *s = get_state(wf);
-  assert(s);
+  assert(s && s->race_state);
   s->trace.push(pc);
   s->disasm->record(pc, inst);
 }

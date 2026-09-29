@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include "common/environment.hpp"
-#include "filesystem.hpp"
 
+#include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
 #include <string>
@@ -40,15 +40,18 @@ protected:
 
     void cleanup_temp_dir(const std::string& dir)
     {
-        if(dir.empty()) return;
+        if(dir.empty())
+        {
+            return;
+        }
         std::error_code ec;
-        test_common::fs::remove_all(dir, ec);
+        std::filesystem::remove_all(dir, ec);
     }
 
     void create_directory(const std::string& path)
     {
         std::error_code ec;
-        test_common::fs::create_directories(path, ec);
+        std::filesystem::create_directories(path, ec);
     }
 
     void create_libomptarget(const std::string& dir)
@@ -72,14 +75,22 @@ protected:
     void restore_env_vars()
     {
         if(m_saved_rocm_path.has_value())
+        {
             setenv("ROCM_PATH", m_saved_rocm_path->c_str(), 1);
+        }
         else
+        {
             unsetenv("ROCM_PATH");
+        }
 
         if(m_saved_rocmv_dir.has_value())
+        {
             setenv("ROCmVersion_DIR", m_saved_rocmv_dir->c_str(), 1);
+        }
         else
+        {
             unsetenv("ROCmVersion_DIR");
+        }
     }
 
     void set_rocm_path(const std::string& path) { setenv("ROCM_PATH", path.c_str(), 1); }
@@ -326,7 +337,7 @@ TEST_F(DiscoverLlvmLibdirTest, PathWithSpaces)
     const std::string llvm_lib  = rocm_path + "/llvm/lib";
 
     std::error_code ec;
-    test_common::fs::create_directories(llvm_lib, ec);
+    std::filesystem::create_directories(llvm_lib, ec);
 
     const std::string lib_path = llvm_lib + "/libomptarget.so";
     std::ofstream     ofs(lib_path);

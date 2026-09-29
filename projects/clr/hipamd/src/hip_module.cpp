@@ -112,6 +112,20 @@ hipError_t hipModuleGetFunctionCount(unsigned int* count, hipModule_t mod) {
   HIP_RETURN(PlatformState::Instance().GetFuncCount(count, mod));
 }
 
+hipError_t hipModuleEnumerateFunctions(hipFunction_t* functions, unsigned int numFunctions,
+                                       hipModule_t mod) {
+  HIP_INIT_API(hipModuleEnumerateFunctions, functions, numFunctions, mod);
+
+  if ((functions == nullptr) || (mod == nullptr)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (numFunctions == 0) {
+    HIP_RETURN(hipSuccess);
+  }
+
+  HIP_RETURN(PlatformState::Instance().EnumerateFunctions(functions, numFunctions, mod));
+}
+
 hipError_t hipModuleGetGlobal(hipDeviceptr_t* dptr, size_t* bytes, hipModule_t hmod,
                               const char* name) {
   HIP_INIT_API(hipModuleGetGlobal, dptr, bytes, hmod, name);
@@ -207,7 +221,7 @@ inline hipError_t GetDeviceKernel(const void* func, device::Kernel** d_kernel) {
 
   hipError_t err = PlatformState::Instance().StatCO().GetFunc(&h_func, func, ihipGetDevice());
   if (h_func == nullptr) {
-    if (PlatformState::Instance().IsValidDynFunc(func)) {
+    if (PlatformState::Instance().IsValidFuncHandle(func)) {
       h_func = reinterpret_cast<hipFunction_t>(const_cast<void*>(func));
     } else {
       return hipErrorInvalidDeviceFunction;
@@ -238,7 +252,7 @@ hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int valu
 
   hipError_t err = PlatformState::Instance().StatCO().GetFunc(&h_func, func, ihipGetDevice());
   if (h_func == nullptr) {
-    if (PlatformState::Instance().IsValidDynFunc((func))) {
+    if (PlatformState::Instance().IsValidFuncHandle((func))) {
       h_func = reinterpret_cast<hipFunction_t>(const_cast<void*>(func));
     } else {
       HIP_RETURN(hipErrorInvalidDeviceFunction);

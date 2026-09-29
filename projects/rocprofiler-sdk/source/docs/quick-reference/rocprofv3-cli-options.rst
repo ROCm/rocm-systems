@@ -87,7 +87,7 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
                     <td>Specifies the PC sample generation frequency. For more details, see <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-pc-sampling.html">PC sampling.</a></td>
                 </tr>
                 <tr>
-                    <th rowspan="12" id="basic-tracing">Basic tracing</th>
+                    <th rowspan="13" id="basic-tracing">Basic tracing</th>
                     <td>--hip-trace [BOOL]</td>
                     <td>Combination of --hip-runtime-trace and --hip-compiler-trace. This option enables only the HIP API tracing. Unlike previous iterations of rocprofv3, this option doesn’t enable kernel tracing, memory copy tracing, and so on. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#hip-trace">Read more...</a></td>
                 </tr>
@@ -129,6 +129,10 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
                 <tr>
                     <td>--rocdecode-trace [BOOL]</td>
                     <td>Collects traces for rocDecode APIs. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#rocdecode-trace">Read more...</a></td>
+                </tr>
+                <tr>
+                    <td>--hip-event-trace [BOOL]</td>
+                    <td>Traces GPU-side HIP event barriers produced by hipEventRecord and hipStreamWaitEvent. Automatically enabled by --hip-trace and --hip-runtime-trace. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#hip-event-trace">Read more...</a></td>
                 </tr>
                 <tr>
                     <td>--hipfile-trace [BOOL]</td>
@@ -180,9 +184,17 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
                     <td>Collects traces of KFD events dropped by the KFD device driver.</td>
                 </tr>
                 <tr>
-                    <th id="counter-collection">Counter collection</th>
+                    <th rowspan="2" id="counter-collection">Counter collection</th>
                     <td>--pmc [PMC …]</td>
                     <td>Specifies performance monitoring counters to be collected. Use comma or space to specify more than one counter. For multi-pass collection, use multiple --pmc flags where each flag defines a separate counter group. The job fails if a counter group can't be collected in a single pass. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#counter-collection-using-command-line">Read more...</a></td>
+                </tr>
+                <tr>
+                    <td>--replay-mode {kernel,application}</td>
+                    <td>(beta) Select the counter-collection replay strategy. 'kernel' collects all --pmc groups in a single application run by replaying each dispatch once per group with device-memory snapshot/restore between passes, instead of re-running the whole application per group. Requires --pmc and --kernel-replay-beta-enabled. 'application' (default) re-runs the whole application once per counter group. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-kernel-replay-rocprofv3.html">Read more...</a></td>
+                </tr>
+                <tr>
+                    <td>--kernel-replay-beta-enabled [BOOL]</td>
+                    <td>(beta) Acknowledge that --replay-mode kernel is a beta feature. Required when --replay-mode kernel is specified. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-kernel-replay-rocprofv3.html">Read more...</a></td>
                 </tr>
                 <tr>
                     <th rowspan="4">Post-processing tracing</th>

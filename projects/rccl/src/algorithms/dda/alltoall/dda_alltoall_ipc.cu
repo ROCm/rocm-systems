@@ -20,12 +20,20 @@
 #include <cstdlib>
 #include <memory>
 #include <new>
+#include <utility>
 
 namespace {
 
 using nccl_dda_detail::DdaIpcBarrierState;
 using nccl_dda_detail::ddaMaxNBlocksForScratch;
 using nccl_dda_detail::kDdaNranks;
+
+// Single source of the launch geometry: grid/block for a byte payload (the
+// kernel is instantiated for int8_t). The grid is sized from the per-rank-pair
+// chunk, not the whole message.
+static inline std::pair<dim3, dim3> ddaAllToAllIpcGeom(size_t bytes) {
+  return dda::common::getGridAndBlockDims(bytes, 1, ddaMaxNBlocksForScratch());
+}
 
 template <typename T>
 static ncclResult_t ncclAllToAllDdaIpcTyped(const void* sendbuff, void* recvbuff, size_t count, ncclComm* comm,
@@ -35,16 +43,14 @@ static ncclResult_t ncclAllToAllDdaIpcTyped(const void* sendbuff, void* recvbuff
     return ncclInvalidUsage;
   }
 
-  const size_t totalCount = count * comm->nRanks;
-  if (totalCount * sizeof(T) > comm->ddaScratchBytes) {
-    WARN("DDA IPC alltoall: total element count %zu needs %zu bytes; comm scratch is %zu bytes", totalCount,
-         totalCount * sizeof(T), comm->ddaScratchBytes);
+  const size_t totalBytes = count * comm->nRanks;
+  if (totalBytes > comm->ddaScratchBytes) {
+    WARN("DDA IPC alltoall: total %zu bytes exceeds comm scratch %zu bytes", totalBytes,
+         comm->ddaScratchBytes);
     return ncclInvalidArgument;
   }
 
-  const int nBlocksMax = ddaMaxNBlocksForScratch();
-  // For alltoall, we use count for grid calculation (data per rank pair)
-  auto gridBlock = dda::common::getGridAndBlockDims(count, sizeof(T), nBlocksMax);
+  auto gridBlock = ddaAllToAllIpcGeom(count);
   const auto& grid = gridBlock.first;
   const auto& block = gridBlock.second;
 
@@ -58,7 +64,7 @@ static ncclResult_t ncclAllToAllDdaIpcTyped(const void* sendbuff, void* recvbuff
     dda::common::ddaAllToAllIpc<T, kDdaNranks, false, true><<<grid, block, 0, stream>>>(
       d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, barrierHost);
   } else {
-    CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, totalCount * sizeof(T), cudaMemcpyDeviceToDevice, stream));
+    CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, totalBytes, cudaMemcpyDeviceToDevice, stream));
     dda::common::ddaAllToAllIpc<T, kDdaNranks, false, false><<<grid, block, 0, stream>>>(
       d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, barrierHost);
   }
@@ -103,6 +109,12 @@ bool ncclAllToAllDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* recv
   }
 
   return true;
+}
+
+uint32_t ncclAllToAllDdaIpcBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype) {
+  (void)comm;
+  const auto grid = ddaAllToAllIpcGeom(count * ncclTypeSize(datatype)).first;
+  return grid.x * grid.y;
 }
 
 ncclResult_t ncclAllToAllDdaIpc(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,

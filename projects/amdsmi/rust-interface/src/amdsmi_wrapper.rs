@@ -939,10 +939,11 @@ pub struct AmdsmiEnumerationInfoT {
     pub hip_id: u32,
     pub hip_uuid: [::std::os::raw::c_char; 256usize],
     pub oam_id: u32,
+    pub physical_acc_id: u32,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of AmdsmiEnumerationInfoT"][::std::mem::size_of::<AmdsmiEnumerationInfoT>() - 276usize];
+    ["Size of AmdsmiEnumerationInfoT"][::std::mem::size_of::<AmdsmiEnumerationInfoT>() - 280usize];
     ["Alignment of AmdsmiEnumerationInfoT"]
         [::std::mem::align_of::<AmdsmiEnumerationInfoT>() - 4usize];
     ["Offset of field: AmdsmiEnumerationInfoT::drm_render"]
@@ -957,6 +958,8 @@ const _: () = {
         [::std::mem::offset_of!(AmdsmiEnumerationInfoT, hip_uuid) - 16usize];
     ["Offset of field: AmdsmiEnumerationInfoT::oam_id"]
         [::std::mem::offset_of!(AmdsmiEnumerationInfoT, oam_id) - 272usize];
+    ["Offset of field: AmdsmiEnumerationInfoT::physical_acc_id"]
+        [::std::mem::offset_of!(AmdsmiEnumerationInfoT, physical_acc_id) - 276usize];
 };
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
@@ -1225,7 +1228,10 @@ pub struct AmdsmiAsicInfoT {
     pub target_graphics_version: u64,
     pub subsystem_id: u32,
     pub flags: u64,
-    pub reserved: [u32; 18usize],
+    pub physical_acc_id: u32,
+    pub chip_rev_id: u32,
+    pub external_rev_id: u32,
+    pub reserved: [u32; 15usize],
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
@@ -1255,8 +1261,14 @@ const _: () = {
         [::std::mem::offset_of!(AmdsmiAsicInfoT, subsystem_id) - 808usize];
     ["Offset of field: AmdsmiAsicInfoT::flags"]
         [::std::mem::offset_of!(AmdsmiAsicInfoT, flags) - 816usize];
+    ["Offset of field: AmdsmiAsicInfoT::physical_acc_id"]
+        [::std::mem::offset_of!(AmdsmiAsicInfoT, physical_acc_id) - 824usize];
+    ["Offset of field: AmdsmiAsicInfoT::chip_rev_id"]
+        [::std::mem::offset_of!(AmdsmiAsicInfoT, chip_rev_id) - 828usize];
+    ["Offset of field: AmdsmiAsicInfoT::external_rev_id"]
+        [::std::mem::offset_of!(AmdsmiAsicInfoT, external_rev_id) - 832usize];
     ["Offset of field: AmdsmiAsicInfoT::reserved"]
-        [::std::mem::offset_of!(AmdsmiAsicInfoT, reserved) - 824usize];
+        [::std::mem::offset_of!(AmdsmiAsicInfoT, reserved) - 836usize];
 };
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -3414,6 +3426,32 @@ const _: () = {
 };
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum AmdsmiComputeTrayTypeT {
+    AmdsmiComputeTrayTypeUnknown = 0,
+    AmdsmiComputeTrayTypeHeliosP = 1,
+    AmdsmiComputeTrayTypeHeliosR = 2,
+    AmdsmiComputeTrayTypeTitan = 3,
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct AmdsmiTrayInfoT {
+    pub max_acc_per_tray: u32,
+    pub tray_type: AmdsmiComputeTrayTypeT,
+    pub reserved: [u32; 14usize],
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of AmdsmiTrayInfoT"][::std::mem::size_of::<AmdsmiTrayInfoT>() - 64usize];
+    ["Alignment of AmdsmiTrayInfoT"][::std::mem::align_of::<AmdsmiTrayInfoT>() - 4usize];
+    ["Offset of field: AmdsmiTrayInfoT::max_acc_per_tray"]
+        [::std::mem::offset_of!(AmdsmiTrayInfoT, max_acc_per_tray) - 0usize];
+    ["Offset of field: AmdsmiTrayInfoT::tray_type"]
+        [::std::mem::offset_of!(AmdsmiTrayInfoT, tray_type) - 4usize];
+    ["Offset of field: AmdsmiTrayInfoT::reserved"]
+        [::std::mem::offset_of!(AmdsmiTrayInfoT, reserved) - 8usize];
+};
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub enum AmdsmiPtlDataFormatT {
     AmdsmiPtlDataFormatI8 = 0,
     AmdsmiPtlDataFormatF16 = 1,
@@ -5099,6 +5137,12 @@ extern "C" {
     pub fn amdsmi_get_npm_info(
         node_handle: AmdsmiNodeHandle,
         info: *mut AmdsmiNpmInfoT,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
+    pub fn amdsmi_get_tray_info(
+        node_handle: AmdsmiNodeHandle,
+        info: *mut AmdsmiTrayInfoT,
     ) -> AmdsmiStatusT;
 }
 extern "C" {

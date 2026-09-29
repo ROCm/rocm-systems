@@ -60,15 +60,18 @@ __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct 
     auto modRanks = [&] __device__(int r) -> int { return r - (r >= nranks ? nranks : 0); };
 
       // step 0: push data to next GPU
+    sqtt_marker_enter("ALL_REDUCE_RING_SEND");
     chunk = modRanks(ringIx + nranks - 1);
     chunkOffset = chunk * chunkCount;
     offset = gridOffset + elemOffset + chunkOffset;
     nelem = (int)min(chunkCount, remCount - chunkOffset);
 
     prims.directSend(offset, offset, nelem);
+    sqtt_marker_exit("ALL_REDUCE_RING_SEND");
 
       // k-2 steps: reduce and copy to next GPU
 
+    sqtt_marker_enter("ALL_REDUCE_RING_RECV_REDUCE_SEND");
     for (int j = 2; j < nranks; ++j) {
       chunk = modRanks(ringIx + nranks - j);
       chunkOffset = chunk * chunkCount;
@@ -76,17 +79,21 @@ __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct 
       nelem = (int)min(chunkCount, remCount - chunkOffset);
       prims.directRecvReduceDirectSend(offset, offset, nelem);
     }
+    sqtt_marker_exit("ALL_REDUCE_RING_RECV_REDUCE_SEND");
 
       // step k-1: reduce this buffer and data, which will produce the final
       // result that we store in this data and push to the next GPU
+    sqtt_marker_enter("ALL_REDUCE_RING_DIRECT_RECV_REDUCE_COPY_SEND");
     chunk = ringIx + 0;
     chunkOffset = chunk * chunkCount;
     offset = gridOffset + elemOffset + chunkOffset;
     nelem = (int)min(chunkCount, remCount - chunkOffset);
 
     prims.directRecvReduceCopyDirectSend(offset, offset, nelem, /*postOp=*/true);
+    sqtt_marker_exit("ALL_REDUCE_RING_DIRECT_RECV_REDUCE_COPY_SEND");
 
       // k-2 steps: copy to next GPU
+    sqtt_marker_enter("ALL_REDUCE_RING_DIRECT_RECV_COPY_SEND");
     for (int j = 1; j < nranks - 1; ++j) {
       chunk = modRanks(ringIx + nranks - j);
       chunkOffset = chunk * chunkCount;
@@ -94,14 +101,17 @@ __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct 
       nelem = (int)min(chunkCount, remCount - chunkOffset);
       prims.directRecvCopyDirectSend(offset, offset, nelem);
     }
+    sqtt_marker_exit("ALL_REDUCE_RING_DIRECT_RECV_COPY_SEND");
 
       // Make final copy from buffer to dest.
+    sqtt_marker_enter("ALL_REDUCE_RING_DIRECT_RECV");
     chunk = modRanks(ringIx + 1);
     chunkOffset = chunk * chunkCount;
     offset = gridOffset + elemOffset + chunkOffset;
     nelem = (int)min(chunkCount, remCount - chunkOffset);
 
     prims.directRecv(offset, nelem);
+    sqtt_marker_exit("ALL_REDUCE_RING_DIRECT_RECV");
   }
 }
 
@@ -121,6 +131,7 @@ __device__ __attribute__((noinline)) void runTreeUpDown(int tid, int nthreads, s
   int nelem;
 
   { // Reduce : max number of recv is 3, max number of send is 1 (binary tree + local)
+    sqtt_marker_enter("ALL_REDUCE_TREE_UPDOWN_REDUCE");
     Primitives<T, RedOp, FanAsymmetric<NCCL_MAX_DEV_ARITY, 1>, /*Direct=*/1, Proto, 0, false, 0, Pipeline, USE_ACC>
       prims(tid, nthreads, tree->down, &tree->up, work->sendbuff, work->recvbuff, work->redOpArg, 0, 0, 0, work);
 
@@ -143,9 +154,11 @@ __device__ __attribute__((noinline)) void runTreeUpDown(int tid, int nthreads, s
         prims.directRecvReduceDirectSend(offset, offset, nelem);
       }
     }
+    sqtt_marker_exit("ALL_REDUCE_TREE_UPDOWN_REDUCE");
   }
 
   { // Broadcast : max number of recv is 1, max number of send is 3 (binary tree + local)
+    sqtt_marker_enter("ALL_REDUCE_TREE_UPDOWN_BROADCAST");
     Primitives<T, RedOp, FanAsymmetric<1, NCCL_MAX_DEV_ARITY>, /*Direct=*/1, Proto, 0, false, 0, Pipeline, USE_ACC>
       prims(tid, nthreads, &tree->up, tree->down, work->sendbuff, work->recvbuff, work->redOpArg, 0, 0, 0, work);
 
@@ -168,6 +181,7 @@ __device__ __attribute__((noinline)) void runTreeUpDown(int tid, int nthreads, s
         prims.directRecvCopyDirectSend(offset, offset, nelem);
       }
     }
+    sqtt_marker_exit("ALL_REDUCE_TREE_UPDOWN_BROADCAST");
   }
 }
 
@@ -197,6 +211,7 @@ __device__ __attribute__((noinline)) void runTreeSplit(int tid, int nthreads, st
 
   if (tree->up == -1) {
       // Reduce and broadcast. Max number of recv is 2, max number of send is 2
+    sqtt_marker_enter("ALL_REDUCE_TREE_SPLIT_REDUCE_BROADCAST");
     Primitives<T, RedOp, FanSymmetric<NCCL_MAX_DEV_ARITY>, /*Direct=*/1, Proto, 0, false, 0, Pipeline, USE_ACC,
                UserRegMode>
       prims(tid, nthreads, tree->down, tree->down, work->sendbuff, work->recvbuff, work->redOpArg, 0, 0, 0, work);
@@ -206,6 +221,7 @@ __device__ __attribute__((noinline)) void runTreeSplit(int tid, int nthreads, st
       nelem = min(chunkCount, channelCount - elemOffset);
       prims.directRecvReduceCopyDirectSend(offset, offset, nelem, /*doPost=*/true);
     }
+    sqtt_marker_exit("ALL_REDUCE_TREE_SPLIT_REDUCE_BROADCAST");
 
   } else if (tid < nthreadsSplit) {
       /* Reduce up. Max number of recv is 3, max number of send is 1 (binary tree + local).
@@ -219,6 +235,7 @@ __device__ __attribute__((noinline)) void runTreeSplit(int tid, int nthreads, st
       // Coverity reports that the callee treats &tree->up as an array.  However, due to the use of
       // FanAsymmetric<n, 1>, only the first element is ever accessed, so it's fine.
       // coverity[callee_ptr_arith:FALSE]
+    sqtt_marker_enter("ALL_REDUCE_TREE_SPLIT_REDUCE");
     Primitives<T, RedOp, FanAsymmetric<NCCL_MAX_DEV_ARITY, 1>, /*Direct=*/1, Proto, 0, false, 0, Pipeline, USE_ACC,
                UserRegMode>
       prims(tid, nthreadsSplit, tree->down, &tree->up, work->sendbuff, work->recvbuff, work->redOpArg,
@@ -237,12 +254,14 @@ __device__ __attribute__((noinline)) void runTreeSplit(int tid, int nthreads, st
         prims.directRecvReduceDirectSend(offset, offset, nelem);
       }
     }
+    sqtt_marker_exit("ALL_REDUCE_TREE_SPLIT_REDUCE");
 
   } else {
       // Broadcast down. Max number of recv is 1, max number of send is 3 (binary tree + local)
       // Coverity reports that the callee treats &tree->up as an array.  However, due to the use of
       // FanAsymmetric<1, n>, only the first element is ever accessed, so it's fine.
       // coverity[callee_ptr_arith:FALSE]
+    sqtt_marker_enter("ALL_REDUCE_TREE_SPLIT_BROADCAST");
     Primitives<T, RedOp, FanAsymmetric<1, NCCL_MAX_DEV_ARITY>, /*Direct=*/1, Proto, 0, false, 0, Pipeline, USE_ACC,
                UserRegMode>
       prims(tid - nthreadsSplit, nthreads - nthreadsSplit, &tree->up, tree->down, work->sendbuff, work->recvbuff,
@@ -261,6 +280,7 @@ __device__ __attribute__((noinline)) void runTreeSplit(int tid, int nthreads, st
         prims.directRecvCopyDirectSend(offset, offset, nelem);
       }
     }
+    sqtt_marker_exit("ALL_REDUCE_TREE_SPLIT_BROADCAST");
   }
 }
 } // namespace

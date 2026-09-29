@@ -152,6 +152,29 @@ rocprofiler_add_unit_test(
         "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
+set(ROCPROFILER_LIB_KFD_DLOG_HUB_CAP_TEST_SOURCES dispatch_hub_cap_test.cpp)
+
+add_executable(kfd-dlog-hub-cap)
+
+target_sources(kfd-dlog-hub-cap PRIVATE ${ROCPROFILER_LIB_KFD_DLOG_HUB_CAP_TEST_SOURCES})
+
+target_link_libraries(
+    kfd-dlog-hub-cap
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest
+            GTest::gtest_main)
+
+# Pins the per-GPU hub cap to 1 for the whole binary so register_batch admit/refuse and
+# eligible-only eviction are exercised (the accessor caches its env read once).
+rocprofiler_add_unit_test(
+    TARGET kfd-dlog-hub-cap
+    SOURCES ${ROCPROFILER_LIB_KFD_DLOG_HUB_CAP_TEST_SOURCES}
+    TIMEOUT 45
+    LABELS "unittests;kfd-dlog"
+    ENVIRONMENT
+        "ROCPROFILER_KFD_DISPATCH_LOG_MAX_PENDING_PER_GPU=1;LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
 set(ROCPROFILER_LIB_KFD_FEATURE_OFF_TEST_SOURCES feature_off_test.cpp)
 
 add_executable(kfd-dlog-feature-off)

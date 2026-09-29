@@ -36,12 +36,8 @@ subtrees:
     title: Logging levels 
   - file: reference/rocjpeg-formats-and-architectures.rst
     title: Subsampling and hardware capabilities
-  - file: doxygen/html/files
-    title: API library
-  - file: doxygen/html/globals
-    title: Functions
-  - file: doxygen/html/annotated
-    title: Data structures
+  - file: reference/rocJPEG-api-reference.rst
+    title: API Reference
 
 - caption: About
   entries:
