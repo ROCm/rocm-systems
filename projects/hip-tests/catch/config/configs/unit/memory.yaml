@@ -838,11 +838,60 @@ memory:
   Unit_hipMemcpy2DArrayToArray_BasicPositive:
     <<: *level_2
     tags: [transfer, image]
-  Unit_hipMemcpy3DBatchAsync_Ptr2PtrBatchOps: *level_2
-  Unit_hipMemcpy3DBatchAsync_ArrayMemCpyBatchOps:
+  Unit_hipMemcpy3DBatchAsync_PointerToPointer_MatchesSourceAfterSync:
     <<: *level_2
-    tags: [image]
-  Unit_hipMemcpy3DBatchAsync_NegativeTests:
+    tags: [transfer]
+  Unit_hipMemcpy3DBatchAsync_PointerToArray_MatchesSourceAfterSync:
+    <<: *level_2
+    tags: [transfer, image]
+  Unit_hipMemcpy3DBatchAsync_ArrayToPointer_MatchesSourceAfterSync:
+    <<: *level_2
+    tags: [transfer, image]
+  Unit_hipMemcpy3DBatchAsync_ArrayToArray_MatchesSourceAfterSync:
+    <<: *level_2
+    tags: [transfer, image]
+  Unit_hipMemcpy3DBatchAsync_AllocationKinds_MatchesSourceAfterSync:
+    <<: *level_2
+    tags: [transfer]
+  Unit_hipMemcpy3DBatchAsync_PeerDeviceCopy_MatchesSourceAfterSync:
+    <<: *level_2
+    tags: [transfer, multigpu]
+  Unit_hipMemcpy3DBatchAsync_Stream_OrdersBatchBetweenPriorAndLaterWork:
+    <<: *level_2
+    tags: [transfer]
+  Unit_hipMemcpy3DBatchAsync_HostToHost_IsVisibleOnReturn:
+    <<: *level_2
+    tags: [transfer]
+  Unit_hipMemcpy3DBatchAsync_Any_MatchesSourceAfterSync:
+    <<: *level_2
+    tags: [transfer]
+  Unit_hipMemcpy3DBatchAsync_DuringApiCall_IgnoresSourceWritesAfterReturn:
+    <<: *level_2
+    # DuringApiCall on an ephemeral host source is not applied on the 3D batch path yet.
+    disabled: [amd_linux, amd_windows, amd_wsl]
+    tags: [transfer]
+  Unit_hipMemcpy3DBatchAsync_NonZeroFlags_SetsFailIdxToSizeMax:
+    <<: *level_2
+    tags: [transfer]
+  Unit_hipMemcpy3DBatchAsync_NullOpList_SetsFailIdxToSizeMax:
+    <<: *level_2
+    tags: [transfer]
+  Unit_hipMemcpy3DBatchAsync_InvalidSrcAccessOrder_ReportsThatOp:
+    <<: *level_2
+    tags: [transfer]
+  Unit_hipMemcpy3DBatchAsync_ZeroExtent_IsRejected:
+    <<: *level_2
+    tags: [transfer]
+  Unit_hipMemcpy3DBatchAsync_RowLengthShorterThanWidth_IsRejected:
+    <<: *level_2
+    tags: [transfer]
+  Unit_hipMemcpy3DBatchAsync_LayerHeightShorterThanHeight_IsRejected:
+    <<: *level_2
+    tags: [transfer]
+  Unit_hipMemcpy3DBatchAsync_MismatchedArrayElementSize_ReportsThatOp:
+    <<: *level_2
+    tags: [transfer, image]
+  Unit_hipMemcpy3DBatchAsync_PartiallyRegisteredHostSource_IsRejected:
     <<: *level_2
     tags: [transfer]
   Unit_hipMemcpyBatchAsync_D2D_Functional: *level_2

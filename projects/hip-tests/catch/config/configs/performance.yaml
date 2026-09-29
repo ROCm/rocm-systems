@@ -43,6 +43,9 @@ performance:
   Performance_hipMemcpyBatchAsync_H2D_Pinned: *level_2
   Performance_hipMemcpyBatchAsync_D2H_Pageable: *level_2
   Performance_hipMemcpyBatchAsync_D2H_Pinned: *level_2
+  Performance_hipMemcpy3DBatchAsync_H2D_Aligned: *level_2
+  Performance_hipMemcpy3DBatchAsync_D2H_Aligned: *level_2
+  Performance_hipMemcpy3DBatchAsync_P2P_Aligned: *level_2
   Performance_hipMemcpyDtoD_PeerAccessEnabled: *level_2
   Performance_hipMemcpyDtoD_PeerAccessDisabled: *level_2
   Performance_hipMemcpyDtoDAsync_PeerAccessEnabled: *level_2
