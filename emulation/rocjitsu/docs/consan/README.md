@@ -85,6 +85,9 @@ those campaigns or extend their results to a different source revision.
 
 ## Documents
 
+- [UPSTREAMING.md](UPSTREAMING.md): live plan for thematic PR chunks, DBI
+  compatibility discussions, and the rebased sanitizer stack.
+
 - [MODES.md](MODES.md): conceptual, phase-by-phase comparison of what the
   two modes do on the device, defer for later, and do on the host.
 - [TUTORIAL.md](TUTORIAL.md): getting started on your own program.
