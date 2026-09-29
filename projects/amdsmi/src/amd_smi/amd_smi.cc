@@ -5445,16 +5445,20 @@ amdsmi_status_t amdsmi_get_gpu_total_ecc_count(amdsmi_processor_handle processor
   // amdsmi_get_gpu_ras_block_features_enabled() per block re-reads ras/features from
   // sysfs on each call, which can trip host-side RAS read throttling on SR-IOV guests.
   //
-  // We do not need to reopen/re-read `ras/features` once per block.
-  // Reading once per block (that's active) is sufficient to get the total ecc count.
+  // The mask is read once for the entire call; only each enabled block's error-count
+  // fetch happens per block.
   uint64_t features_mask = 0;
   amdsmi_status_t mask_status = smi_amdgpu_get_enabled_blocks(gpu_device, &features_mask);
+  if (mask_status != AMDSMI_STATUS_SUCCESS) {
+    // Propagate the failure so callers can distinguish "couldn't read RAS state"
+    // from a genuine zero-error total.
+    return mask_status;
+  }
 
   // Iterate through the ecc blocks
   for (auto block = AMDSMI_GPU_BLOCK_FIRST; block <= AMDSMI_GPU_BLOCK_LAST;
        block = (amdsmi_gpu_block_t)(block * 2)) {
-    // Only read counts from features which are enabled, otherwise continue
-    if (mask_status != AMDSMI_STATUS_SUCCESS || !(features_mask & block)) {
+    if (!(features_mask & block)) {
       continue;
     }
     // Clear the previous ecc block counts
