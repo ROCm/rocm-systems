@@ -132,7 +132,7 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
-  # rccl-UnitTestsMicroInit(+-uncached,-faultinj) -- src/init.cc.
+  # rccl-UnitTestsMicroInit(+-uncached,-faultinj) -- src/init.cc and src/gin/gin_host.cc.
   set(TEST_MICRO_INIT_SOURCE_FILES
     init-test.cc
     gin-proxy-affinity-test.cc

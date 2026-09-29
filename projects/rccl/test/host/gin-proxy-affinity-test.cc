@@ -4,6 +4,10 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
+// Host-only microtests for the GIN proxy-thread NUMA affinity pin in
+// ncclGinProgress (src/gin/gin_host.cc:60-63). The unit under test is pulled in
+// via GIN_HOST_CC_PATH, the standard rccl-UnitTestsMicroInit pattern.
+
 #include <gtest/gtest.h>
 
 #include <sched.h>
@@ -18,16 +22,17 @@
 
 #include "fakes/param_redirect.h"
 
-// Rename the three gin_host.cc definitions that collide with the GIN fakes
+// init.cc needs the doubles for these two: fakes/nccl_stubs.cc:85 serves init.cc:586 and
+// fakes/gin_fakes.cc:18 serves init.cc:4877. Rename gin_host.cc's own definitions at
+// inclusion time so both survive in rccl-UnitTestsMicroInit. Nothing else gin_host.cc
+// defines is faked in this binary.
 #define ncclGinHostFinalize     ncclGinHostFinalizeUut
 #define ncclGinQueryLastError   ncclGinQueryLastErrorUut
-#define ncclGinSetDefaultBackend ncclGinSetDefaultBackendUut
 
 #include GIN_HOST_CC_PATH
 
 #undef ncclGinHostFinalize
 #undef ncclGinQueryLastError
-#undef ncclGinSetDefaultBackend
 
 namespace {
 
@@ -44,6 +49,8 @@ protected:
         ginState_.proxyThreadStopSignal.store(true);  // exit at the top of the loop
         ginState_.writePending.store(false);
     }
+
+    void TearDown() override { ResetOsFakes(); }
 
     // Run ncclGinProgress on a fresh thread (so the affinity apply, if the fake
     // were real, would land on a throwaway thread rather than the test runner)
@@ -73,6 +80,7 @@ TEST_F(GinProxyAffinityTest, EmptyAffinity_LeavesProxyThreadAffinityUnchanged) {
 
     RunProgressOnce();
 
+    EXPECT_EQ(1, g_ncclOsCpuCountCalls);  // positive anchor: the guard really ran
     EXPECT_TRUE(g_ncclOsSetAffinityMasks.empty());  // ncclOsSetAffinity not called
 }
 

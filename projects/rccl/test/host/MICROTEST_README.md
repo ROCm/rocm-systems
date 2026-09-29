@@ -138,8 +138,8 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   by these tests, so `-ffunction-sections`/`--gc-sections` drop it before any
   fake would be needed.
 - **`rccl-UnitTestsMicroInit`** (+ **`-uncached`**, **`-faultinj`**) — `init.cc` (via
-  `INIT_CC_PATH`);
-  suites `InitMicrotest.*`, `InitMicrotestIsolated.*`. The `-uncached` variant adds
+  `INIT_CC_PATH`) and `gin/gin_host.cc` (via `GIN_HOST_CC_PATH`);
+  suites `InitMicrotest.*`, `InitMicrotestIsolated.*`, `GinProxyAffinityTest.*`. The `-uncached` variant adds
   `HIP_HOST_UNCACHED_MEMORY`/`HIP_UNCACHED_MEMORY` to cover the alternate host-alloc
   arm; the `-faultinj` variant adds `ENABLE_FAULT_INJECTION` to cover the fault-mask
   arm of `commAlloc`/`devCommSetup` (the arm that ships, since `FAULT_INJECTION`
