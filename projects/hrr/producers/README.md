@@ -34,6 +34,11 @@ $HIP_HRR_CAPTURE_OUTPUT/pid-<pid>/regions/<producer-name>.hrrr
 Pick a name that identifies the producer, so several can run at once; the
 replayer merges every `*.hrrr` it finds and orders the records by timestamp.
 
+On Linux that directory is 0700 and belongs to the user running the capture, so
+a producer has to run as that user, as it does inside the captured process.
+Create `regions/` with mode 0700 and the files in it with 0600 so the archive
+stays private.
+
 **Checking whether capture is active** reduces to checking that directory
 exists. There is no symbol to resolve and nothing to `dlopen`:
 

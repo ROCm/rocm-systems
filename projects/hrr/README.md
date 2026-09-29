@@ -91,6 +91,8 @@ User-facing capture, replay, and validation knobs. Implementation details can be
 | `HIP_HRR_CAPTURE_OUTPUT` | *(unset)* | Enable capture; path to the `.hrr` archive directory |
 | `HIP_HRR_DEBUG_ARGS` | off | Dump every captured kernel arg to the log (debug / provenance) |
 
+On Linux the archive is readable only by the user who captured it (directories 0700, files 0600). If the archive cannot be set up, capture is disabled with a `[HRR capture] Capture disabled` message on stderr and the application runs normally.
+
 ### `hrr-playback` CLI options
 
 | Option | Purpose |

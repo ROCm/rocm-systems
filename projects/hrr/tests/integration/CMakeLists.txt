@@ -33,9 +33,9 @@
 # The workload translation units carry __global__ kernels, device built-ins
 # (blockIdx/blockDim/threadIdx), hipLaunchKernelGGL, and HIP_SYMBOL, so they must
 # be compiled with the HIP device toolchain rather than a plain C++ compiler.
-# hrr_roundtrip_test.cc and hrr_api_matrix_test.cc are host-only drivers
-# (subprocess orchestration + hipRTC host calls) and stay plain C++ translation
-# units.
+# hrr_roundtrip_test.cc, hrr_api_matrix_test.cc and hrr_capture_access_test.cc are
+# host-only drivers (subprocess orchestration + host-side HIP and hipRTC calls) and
+# stay plain C++ translation units.
 set(HRR_GPU_WORKLOAD_SOURCES
   hrr_workload_test.cc
   hrr_repro_workload_test.cc

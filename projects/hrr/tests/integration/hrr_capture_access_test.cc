@@ -12,13 +12,16 @@
  * records:
  *
  *   Unit_HRR_CaptureArchiveIsPrivate:
- *     every directory the capture creates is 0700 and every file 0600 (POSIX).
+ *     every archive directory the capture creates or reuses is 0700 and every
+ *     file 0600 even with the umask cleared, while a missing parent of the
+ *     archive gets the default mode (POSIX).
  *
  *   Unit_HRR_CaptureRefusesPlantedLinks:
  *     a symbolic link planted at pid-<pid>/events.bin, at pid-<pid> itself, or
- *     at pid-<pid>/blobs disables the capture, and a hard link planted at
- *     pid-<pid>/manifest.json is not written through, neither at exit nor from
- *     the crash callback (POSIX).
+ *     at pid-<pid>/blobs, or a hard link planted at pid-<pid>/events.bin,
+ *     disables the capture, and a hard link planted at pid-<pid>/manifest.json
+ *     is not written through, neither at exit nor from the crash callback
+ *     (POSIX).
  *
  *   Unit_HRR_CaptureDoesNotBlockOnPlantedFifo:
  *     a FIFO planted at pid-<pid>/manifest.json does not hold up the exit
@@ -35,6 +38,10 @@
 #include <string>
 #include <vector>
 
+#ifndef _WIN32
+#include <sys/stat.h>
+#endif
+
 namespace {
 
 #ifndef _WIN32
@@ -46,6 +53,13 @@ constexpr int kCaptureTimeoutSeconds = 120;
 fs::perms perms_of(const fs::path& p) {
   return fs::symlink_status(p).permissions() & fs::perms::all;
 }
+
+// Sets the umask for its lifetime; the workloads a test spawns inherit it.
+struct ScopedUmask {
+  mode_t saved;
+  explicit ScopedUmask(mode_t mask) : saved(::umask(mask)) {}
+  ~ScopedUmask() { ::umask(saved); }
+};
 
 void write_text(const fs::path& p, const std::string& text) {
   std::ofstream out(p, std::ios::binary);
@@ -108,21 +122,35 @@ TEST_CASE("Unit_HRR_CaptureAbort_Direct", "[.][hrr-direct]") {
 /**
  * Test Description
  * ----------------
- *   - Captures Unit_HRR_GpuWorkload_Direct into a directory that does not exist
- *     yet, so the capture creates the whole tree.
+ *   - With the umask cleared, captures Unit_HRR_GpuWorkload_Direct into a
+ *     directory whose parent does not exist yet, then captures it again into
+ *     the same directory after creating that run's pid-<pid> with mode 0755.
  *   - Every directory in the archive is 0700 and every regular file 0600: the
- *     archive holds host buffers, kernel arguments and code objects.
+ *     archive holds host buffers, kernel arguments and code objects. The parent
+ *     the capture had to create is not part of the archive and gets the
+ *     default mode.
  */
 HRR_TEST_CASE(Unit_HRR_CaptureArchiveIsPrivate) {
 #ifdef _WIN32
   HRR_SKIP("POSIX permission bits");
 #else
-  ScopedDir cap{fs::temp_directory_path() / "hrr_access_private"};
-  hrr_capture_direct("Unit_HRR_GpuWorkload_Direct", cap.path);
+  ScopedDir work{fs::temp_directory_path() / "hrr_access_private"};
+  // Owner-only, since the second capture runs a script from it.
+  REQUIRE(::mkdir(work.path.c_str(), 0700) == 0);
+  const fs::path parent = work.path / "parent";
+  const fs::path base = parent / "capture";
+  const ScopedUmask no_umask(0);
+  hrr_capture_direct("Unit_HRR_GpuWorkload_Direct", base);
+  const PlantedRun run = capture_after_planting(base, work.path / "plant.sh",
+                                                "mkdir -m 0755 \"$HRR_TEST_BASE/pid-$$\"\n");
+  INFO("Workload exit code: " << run.ret << "\n" << run.output);
+  REQUIRE(run.ret == 0);
+  REQUIRE(hrr_process_archives(base).size() == 2);
 
-  CHECK(perms_of(cap.path) == fs::perms::owner_all);
+  CHECK(perms_of(parent) == fs::perms::all);
+  CHECK(perms_of(base) == fs::perms::owner_all);
   size_t files = 0;
-  for (const auto& ent : fs::recursive_directory_iterator(cap.path)) {
+  for (const auto& ent : fs::recursive_directory_iterator(base)) {
     INFO("Path: " << ent.path().string());
     const fs::file_status st = fs::symlink_status(ent.path());
     if (fs::is_directory(st)) {
@@ -133,7 +161,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureArchiveIsPrivate) {
       ++files;
     }
   }
-  CHECK(files >= 3);  // events.bin, manifest.json, at least one blob
+  CHECK(files >= 6);  // events.bin, manifest.json and at least one blob in each archive
 #endif
 }
 
@@ -143,16 +171,17 @@ HRR_TEST_CASE(Unit_HRR_CaptureArchiveIsPrivate) {
  * ----------------
  *   - Plants a symbolic link at pid-<pid>/events.bin pointing at a file with
  *     known contents, at pid-<pid> pointing at an empty directory, or at
- *     pid-<pid>/blobs pointing at an empty directory; and a hard link at
+ *     pid-<pid>/blobs pointing at an empty directory; a hard link at
+ *     pid-<pid>/events.bin to a file with known contents; and a hard link at
  *     pid-<pid>/manifest.json pointing at a file with known contents, followed
  *     by a workload that exits cleanly or one that aborts and leaves the
  *     manifest to the crash callback.
  *   - Each target stays untouched: a resume would otherwise truncate and
  *     append to the file, and a fresh capture would fill the directory or
  *     overwrite the hard-linked manifest.
- *   - Each symbolic link disables the capture, which says so on stderr, and the
- *     workload still succeeds; with the hard link the capture runs and writes
- *     events.bin.
+ *   - Each symbolic link and the hard link at events.bin disable the capture,
+ *     which says so on stderr, and the workload still succeeds; with the hard
+ *     link at manifest.json the capture runs and writes events.bin.
  */
 HRR_TEST_CASE(Unit_HRR_CaptureRefusesPlantedLinks) {
 #ifdef _WIN32
@@ -200,6 +229,18 @@ HRR_TEST_CASE(Unit_HRR_CaptureRefusesPlantedLinks) {
     REQUIRE(run.ret == 0);
     CHECK(run.output.find(kCaptureDisabled) != std::string::npos);
     CHECK(fs::is_empty(victim_dir));
+    CHECK_FALSE(fs::exists(base / "manifest.json"));
+  }
+
+  SECTION("hard link at pid-<pid>/events.bin") {
+    const PlantedRun run = capture_after_planting(
+        base, script,
+        "mkdir -p \"$HRR_TEST_BASE/pid-$$\"\n"
+        "ln '" + victim_file.string() + "' \"$HRR_TEST_BASE/pid-$$/events.bin\"\n");
+    INFO("Workload exit code: " << run.ret << "\n" << run.output);
+    REQUIRE(run.ret == 0);
+    CHECK(run.output.find(kCaptureDisabled) != std::string::npos);
+    CHECK(read_text_file(victim_file) == contents);
     CHECK_FALSE(fs::exists(base / "manifest.json"));
   }
 
