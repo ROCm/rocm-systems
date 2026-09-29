@@ -24,6 +24,7 @@
 *.swp
 .vscode
 build*/
+!/lib/rocjitsu/src/rocjitsu/code/builders/
 third_party
 Testing
 tmp
