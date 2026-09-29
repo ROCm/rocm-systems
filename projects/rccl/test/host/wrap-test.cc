@@ -4488,7 +4488,7 @@ TEST(WrapMicrotestIsolated, SelectAllGather_HierCeWithoutHierarchicalSubComms) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllGather_HierCeWithoutHierarchicalSubComms",
       []() {
-        g_hierCeAvailable = true;
+        g_hierCeAvailableValue = true;
         ncclComm* comm = MakeCommWithArch("gfx942");
         comm->nNodes = 2;
         comm->nRanks = 16;
@@ -4505,7 +4505,7 @@ TEST(WrapMicrotestIsolated, SelectAllGather_HierCeWithoutHierarchicalSubComms) {
           EXPECT_EQ(0, decision.nMaxChannels) << "query=" << query;
         }
 
-        g_hierCeAvailable = false;
+        g_hierCeAvailableValue = false;
         rcclCollDecision control{};
         EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/1024, ncclFloat32,
                                                    /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
@@ -4520,7 +4520,7 @@ TEST(WrapMicrotestIsolated, SelectAlltoAll_HierCeWithoutHierarchicalSubComms) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectAlltoAll_HierCeWithoutHierarchicalSubComms",
       []() {
-        g_hierCeAvailable = true;
+        g_hierCeAvailableValue = true;
         ncclComm* comm = MakeCommWithArch("gfx942");
         comm->nNodes = 2;
         comm->nRanks = 16;
@@ -4537,7 +4537,7 @@ TEST(WrapMicrotestIsolated, SelectAlltoAll_HierCeWithoutHierarchicalSubComms) {
           EXPECT_EQ(0, decision.nMaxChannels) << "query=" << query;
         }
 
-        g_hierCeAvailable = false;
+        g_hierCeAvailableValue = false;
         rcclCollDecision control{};
         EXPECT_EQ(ncclSuccess, rcclSelectAlltoAll(comm, nullptr, nullptr, /*count=*/1024, ncclFloat32,
                                                   /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
