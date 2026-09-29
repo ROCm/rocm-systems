@@ -24,12 +24,8 @@ env:
   # Every arch a pool can hand out has to be listed, not one representative per
   # family: linux-gfx110X-gpu-rocm and linux-gfx120X-gpu-rocm are wildcard
   # pools, and a machine whose arch is missing from the binary fails every
-  # workload with hipErrorInvalidImage (200) rather than skipping.
-  # Every arch a pool can hand out, not one per family: a machine whose arch
-  # is missing from the fat binary fails every workload with
-  # hipErrorInvalidImage (200) instead of skipping. gfx1250 (MI455,
-  # linux-mi455-gpu-rocm) is carried here so the binary is ready the moment
-  # that pool is healthy -- see the note on the integration matrix below.
+  # workload with hipErrorInvalidImage (200) rather than skipping. gfx1250 is
+  # carried so the binary is ready once its runner is enabled below.
   HRR_ARCHS: "gfx90a;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1153;gfx1200;gfx1201;gfx1250"
   ROCM_INDEX_URL: "https://rocm.nightlies.amd.com/whl-multi-arch/"
 
@@ -333,21 +329,13 @@ jobs:
       matrix:
         include:
           - { family: gfx90a, runner: "${{ needs.ci_config.outputs.gfx90a_runner }}" }
-          # The T3 tier needs two visible devices. There is no 2-GPU pool, so
-          # gfx950 uses an 8-GPU machine and T3 uses devices 0 and 1 of what it
-          # exposes; every other family is 1-GPU only and skips T3.
-          #
-          # gfx94x does not join it there: linux-gfx942-8gpu-ossci-rocm exposes
-          # /dev/kfd and /dev/dri only to a job with a container spec (see the
-          # RCCL workflows), so a direct job on it finds no agent at all and
-          # every workload fails hipSetDevice with hipErrorNoDevice. Use the
-          # resolved 1-GPU runner and leave the two-device tier to gfx950.
+          # gfx94x uses the resolved 1-GPU runner: the 8-GPU gfx942 pool
+          # exposes /dev/kfd only to a job with a container spec.
           - { family: gfx94x, runner: "${{ needs.ci_config.outputs.gfx94x_runner }}" }
-          # gfx950 uses an 8-GPU machine so T3 (two devices) can run. Do not
-          # pin HIP_VISIBLE_DEVICES to 0,1: on the CCS pool those indices can
-          # be empty even though the job has GPUs, and every test then fails
-          # hipSetDevice with hipErrorNoDevice. Leave the job's devices as
-          # the runner exposed them.
+          # The T3 tier needs two visible devices and there is no 2-GPU pool,
+          # so gfx950 takes an 8-GPU machine; every other family skips T3.
+          # Do not pin HIP_VISIBLE_DEVICES: on the CCS pool fixed indices can
+          # be empty even though the job has GPUs.
           - { family: gfx950, runner: "linux-gfx950-8gpu-ccs-ossci-rocm" }
           - { family: gfx103x, runner: "${{ needs.ci_config.outputs.gfx103x_runner }}" }
           - { family: gfx110x, runner: "${{ needs.ci_config.outputs.gfx110x_runner }}" }
@@ -356,32 +344,11 @@ jobs:
           # Not exposed by resolve-ci-config; taken from TheRock's family matrix.
           - { family: gfx1150, runner: "linux-gfx1150-gpu-rocm" }
           - { family: gfx1153, runner: "linux-gfx1153-gpu-rocm" }
-          # gfx1250 (MI455) is WITHHELD, not forgotten. The binary already
-          # carries it via HRR_ARCHS, so enabling this is one line:
+          # gfx1250 (MI455) is withheld until linux-mi455-gpu-rocm is healthy.
+          # If it is wanted sooner, add it as a separate non-blocking job, as
+          # therock-ci.yml does, so the report job never waits on that queue:
           #
           #   - { family: gfx1250, runner: "linux-mi455-gpu-rocm" }
-          #
-          # The pool label is named for the product, not the arch, which is why
-          # searching for linux-gfx125X-* finds nothing. gfx125x is a real
-          # family key (therock-multi-arch-ci-nightly.yml) and hip-tests already
-          # reaches gfx1250 through therock-test-linux-mi455 in therock-ci.yml.
-          #
-          # It is withheld because the machines are unhealthy, not because the
-          # wiring is unknown. As of 2026-09-15: therock-multi-arch-ci.yml sets
-          # this family test-runs-on: "" with the note "MI455 machine is down";
-          # no MI455 *test* job has executed in the last 30 therock-ci runs, only
-          # builds; and the last one that did run (PR #10632, 2026-09-14) waited
-          # 79 minutes in queue, was picked up by
-          # linux-mi455-gpu-rocm-spur-196145-0017, then died in 9 seconds when
-          # its container vanished.
-          #
-          # Adding it to THIS matrix would make report wait out that queue on
-          # every run, which is the opposite of what this workflow needs, and
-          # then publish an infra failure. therock-ci.yml keeps MI455 in a
-          # separate non-blocking job excluded from the summary for the same
-          # reason; if gfx1250 is wanted before the pool is healthy, copy that
-          # posture rather than adding the line above, so nothing here waits on
-          # it. Re-check the three signals above before enabling.
     steps:
       # Only the test runner: this job compiles nothing and takes its binaries
       # from the build artifact. It has to come first, because checkout cleans
@@ -431,10 +398,7 @@ jobs:
       - name: Restore executable bits
         run: chmod +x build/hrr/playback/hrr-playback build/hrr/tests/*/hrr-*tests
 
-      # The binaries carry no RUNPATH, so the capture build is selected here:
-      # clr-prefix supplies the libamdhip64.so.7 carrying the HRR shims, and
-      # rocr-prefix the in-tree libhsa the capture path needs. Both must precede
-      # the SDK, which ships its own older copies under the same sonames.
+      # The binaries carry no RUNPATH, so the capture build is selected here.
       - name: Run integration suite
         run: |
           # hipamd/lib holds the amdhip64 carrying the capture shims and must
@@ -480,30 +444,6 @@ jobs:
           python3 projects/hrr/tests/run_catch2.py \
             --xml integration-${{ matrix.family }}.xml \
             -- ./build/hrr/tests/integration/hrr-integration-tests
-
-      # Unit_HRR_StreamWriteValueRoundtrip fails on every RDNA family:
-      # hipStreamWriteValue64 returns hipSuccess and the value never lands. The
-      # suite only ever runs that workload under capture, so it cannot say
-      # whether HRR is responsible. Run it twice more to find out, reporting
-      # rather than asserting so the suite's own verdict above is untouched:
-      #
-      #   stock SDK runtime  fails -> the part does this without HRR present
-      #   HRR runtime, no capture  fails -> the shims break it while idle
-      #   both pass                       -> capture itself is at fault
-      - name: Diagnose hipStreamWriteValue64
-        if: always()
-        continue-on-error: true
-        run: |
-          # HIP_HRR_CAPTURE_OUTPUT is deliberately unset in both runs.
-          for variant in "stock SDK runtime:${ROCM_SDK}/lib" \
-                         "HRR runtime, capture off:${PWD}/build/clr/hipamd/lib:${ROCM_SDK}/lib"; do
-            echo "::group::${variant%%:*}"
-            LD_LIBRARY_PATH="${variant#*:}" \
-              ./build/hrr/tests/integration/hrr-integration-tests \
-              "Unit_HRR_StreamWriteValue_Direct" && verdict=pass || verdict=FAIL
-            echo "${{ matrix.family }} / ${variant%%:*}: ${verdict}"
-            echo "::endgroup::"
-          done
 
       - name: Upload results
         if: always()
