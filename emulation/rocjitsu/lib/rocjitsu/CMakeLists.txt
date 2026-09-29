@@ -75,6 +75,24 @@ set_target_properties(
     PROPERTIES POSITION_INDEPENDENT_CODE ON
 )
 
+# The checker archive owns target policies and stream analysis, and leaves ISA
+# registry selection to its final consumer just like the analysis archive.
+add_library(
+    rocjitsu_waitcheck_internal
+    STATIC
+    $<TARGET_OBJECTS:rocjitsu_waitcheck_target>
+    $<TARGET_OBJECTS:rocjitsu_waitcheck_state>
+    $<TARGET_OBJECTS:rocjitsu_waitcheck_stream>
+)
+target_link_libraries(
+    rocjitsu_waitcheck_internal
+    PUBLIC rocjitsu_analysis_internal
+)
+set_target_properties(
+    rocjitsu_waitcheck_internal
+    PROPERTIES POSITION_INDEPENDENT_CODE ON
+)
+
 # Private base archive for code-object translation frontends. Architecture
 # models and decoder factories are supplied by each frontend, so this target
 # does not pull in the simulator implementation or the all-ISA registry.

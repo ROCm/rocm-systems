@@ -2451,6 +2451,8 @@ SSendmsgRtnB32Sop1::SSendmsgRtnB32Sop1(const MachineInst *inst)
   src_operands_[0] = &ssrc0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= XCNT_DRAIN;
 }
 
 namespace detail {
@@ -2474,6 +2476,8 @@ SSendmsgRtnB64Sop1::SSendmsgRtnB64Sop1(const MachineInst *inst)
   src_operands_[0] = &ssrc0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= XCNT_DRAIN;
 }
 
 namespace detail {
@@ -2496,6 +2500,7 @@ SBarrierSignalSop1::SBarrierSignalSop1(const MachineInst *inst)
   src_operands_[0] = &ssrc0;
   num_src_ = 1;
   num_dst_ = 0;
+  flags_ |= XCNT_DRAIN;
   flags_ |= BARRIER;
 }
 
@@ -2522,6 +2527,8 @@ SBarrierSignalIsfirstSop1::SBarrierSignalIsfirstSop1(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= XCNT_DRAIN;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -2547,6 +2554,7 @@ SGetBarrierStateSop1::SGetBarrierStateSop1(const MachineInst *inst)
   src_operands_[0] = &ssrc0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {

@@ -4628,9 +4628,11 @@ private:
     const std::vector<size_t> producer_block_indices =
         cfg_block_indices_containing(event.section_offset);
     if (before_target && current_cfg_view_index_ && *current_cfg_view_index_ < cfg_views_.size() &&
-        std::ranges::any_of(producer_block_indices, [&](size_t producer_block_index) {
-          return cfg_block_dominates(producer_block_index, *current_cfg_view_index_);
-        })) {
+        std::ranges::any_of(
+            producer_block_indices,
+            [&](size_t producer_block_index) {
+              return cfg_block_dominates(producer_block_index, *current_cfg_view_index_);
+            })) {
       feasible_path_cache_[cache_key] = true;
       return true;
     }
@@ -5505,40 +5507,6 @@ private:
 };
 
 } // namespace
-
-std::string_view wait_counter_name(WaitCounterKind counter) {
-  switch (counter) {
-  case WaitCounterKind::Load:
-    return "loadcnt";
-  case WaitCounterKind::Store:
-    return "storecnt";
-  case WaitCounterKind::Ds:
-    return "dscnt";
-  case WaitCounterKind::Km:
-    return "kmcnt";
-  case WaitCounterKind::Sample:
-    return "samplecnt";
-  case WaitCounterKind::Bvh:
-    return "bvhcnt";
-  case WaitCounterKind::Exp:
-    return "expcnt";
-  case WaitCounterKind::X:
-    return "xcnt";
-  case WaitCounterKind::Async:
-    return "asynccnt";
-  case WaitCounterKind::Tensor:
-    return "tensorcnt";
-  case WaitCounterKind::VmVsrc:
-    return "depctr_vm_vsrc";
-  case WaitCounterKind::VaVdst:
-    return "wait_va_vdst";
-  case WaitCounterKind::Depctr:
-    return "depctr";
-  case WaitCounterKind::Count:
-    break;
-  }
-  return "unknown";
-}
 
 rj_code_arch_t waitcheck_arch_for_target(rj_code_target_id_t target) {
   switch (target) {

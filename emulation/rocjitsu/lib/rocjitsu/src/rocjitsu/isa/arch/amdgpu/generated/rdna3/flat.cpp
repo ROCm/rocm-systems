@@ -45,6 +45,7 @@ FlatLoadU8Flat::FlatLoadU8Flat(const MachineInst *inst)
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}
                        : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -91,6 +92,7 @@ FlatLoadI8Flat::FlatLoadI8Flat(const MachineInst *inst)
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}
                        : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -137,6 +139,7 @@ FlatLoadU16Flat::FlatLoadU16Flat(const MachineInst *inst)
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}
                        : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -184,6 +187,7 @@ FlatLoadI16Flat::FlatLoadI16Flat(const MachineInst *inst)
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}
                        : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -231,6 +235,7 @@ FlatLoadB32Flat::FlatLoadB32Flat(const MachineInst *inst)
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}
                        : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -278,6 +283,7 @@ FlatLoadB64Flat::FlatLoadB64Flat(const MachineInst *inst)
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}
                        : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -325,6 +331,7 @@ FlatLoadB96Flat::FlatLoadB96Flat(const MachineInst *inst)
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}
                        : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -372,6 +379,7 @@ FlatLoadB128Flat::FlatLoadB128Flat(const MachineInst *inst)
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}
                        : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -421,6 +429,7 @@ FlatStoreB8Flat::FlatStoreB8Flat(const MachineInst *inst)
                        : amdgpu::MemoryCounterObligation{}),
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -470,6 +479,7 @@ FlatStoreB16Flat::FlatStoreB16Flat(const MachineInst *inst)
                        : amdgpu::MemoryCounterObligation{}),
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -519,6 +529,7 @@ FlatStoreB32Flat::FlatStoreB32Flat(const MachineInst *inst)
                        : amdgpu::MemoryCounterObligation{}),
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -568,6 +579,7 @@ FlatStoreB64Flat::FlatStoreB64Flat(const MachineInst *inst)
                        : amdgpu::MemoryCounterObligation{}),
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -617,6 +629,7 @@ FlatStoreB96Flat::FlatStoreB96Flat(const MachineInst *inst)
                        : amdgpu::MemoryCounterObligation{}),
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -666,6 +679,7 @@ FlatStoreB128Flat::FlatStoreB128Flat(const MachineInst *inst)
                        : amdgpu::MemoryCounterObligation{}),
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -713,6 +727,7 @@ FlatLoadD16U8Flat::FlatLoadD16U8Flat(const MachineInst *inst)
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}
                        : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -766,6 +781,7 @@ FlatLoadD16I8Flat::FlatLoadD16I8Flat(const MachineInst *inst)
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}
                        : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -819,6 +835,7 @@ FlatLoadD16B16Flat::FlatLoadD16B16Flat(const MachineInst *inst)
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}
                        : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -872,6 +889,7 @@ FlatLoadD16HiU8Flat::FlatLoadD16HiU8Flat(const MachineInst *inst)
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}
                        : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -925,6 +943,7 @@ FlatLoadD16HiI8Flat::FlatLoadD16HiI8Flat(const MachineInst *inst)
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}
                        : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -978,6 +997,7 @@ FlatLoadD16HiB16Flat::FlatLoadD16HiB16Flat(const MachineInst *inst)
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}
                        : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1033,6 +1053,7 @@ FlatStoreD16HiB8Flat::FlatStoreD16HiB8Flat(const MachineInst *inst)
                        : amdgpu::MemoryCounterObligation{}),
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1082,6 +1103,7 @@ FlatStoreD16HiB16Flat::FlatStoreD16HiB16Flat(const MachineInst *inst)
                        : amdgpu::MemoryCounterObligation{}),
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1139,6 +1161,7 @@ FlatAtomicSwapB32Flat::FlatAtomicSwapB32Flat(const MachineInst *inst)
                        : amdgpu::MemoryCounterObligation{}),
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1196,6 +1219,7 @@ FlatAtomicCmpswapB32Flat::FlatAtomicCmpswapB32Flat(const MachineInst *inst)
                        : amdgpu::MemoryCounterObligation{}),
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1253,6 +1277,7 @@ FlatAtomicAddU32Flat::FlatAtomicAddU32Flat(const MachineInst *inst)
                        : amdgpu::MemoryCounterObligation{}),
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1310,6 +1335,7 @@ FlatAtomicSubU32Flat::FlatAtomicSubU32Flat(const MachineInst *inst)
                        : amdgpu::MemoryCounterObligation{}),
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1367,6 +1393,7 @@ FlatAtomicMinI32Flat::FlatAtomicMinI32Flat(const MachineInst *inst)
                        : amdgpu::MemoryCounterObligation{}),
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1424,6 +1451,7 @@ FlatAtomicMinU32Flat::FlatAtomicMinU32Flat(const MachineInst *inst)
                        : amdgpu::MemoryCounterObligation{}),
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1481,6 +1509,7 @@ FlatAtomicMaxI32Flat::FlatAtomicMaxI32Flat(const MachineInst *inst)
                        : amdgpu::MemoryCounterObligation{}),
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1538,6 +1567,7 @@ FlatAtomicMaxU32Flat::FlatAtomicMaxU32Flat(const MachineInst *inst)
                        : amdgpu::MemoryCounterObligation{}),
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1595,6 +1625,7 @@ FlatAtomicAndB32Flat::FlatAtomicAndB32Flat(const MachineInst *inst)
                        : amdgpu::MemoryCounterObligation{}),
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1652,6 +1683,7 @@ FlatAtomicOrB32Flat::FlatAtomicOrB32Flat(const MachineInst *inst)
                        : amdgpu::MemoryCounterObligation{}),
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1709,6 +1741,7 @@ FlatAtomicXorB32Flat::FlatAtomicXorB32Flat(const MachineInst *inst)
                        : amdgpu::MemoryCounterObligation{}),
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1766,6 +1799,7 @@ FlatAtomicIncU32Flat::FlatAtomicIncU32Flat(const MachineInst *inst)
                        : amdgpu::MemoryCounterObligation{}),
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1823,6 +1857,7 @@ FlatAtomicDecU32Flat::FlatAtomicDecU32Flat(const MachineInst *inst)
                        : amdgpu::MemoryCounterObligation{}),
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1880,6 +1915,7 @@ FlatAtomicSwapB64Flat::FlatAtomicSwapB64Flat(const MachineInst *inst)
                        : amdgpu::MemoryCounterObligation{}),
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1937,6 +1973,7 @@ FlatAtomicCmpswapB64Flat::FlatAtomicCmpswapB64Flat(const MachineInst *inst)
                        : amdgpu::MemoryCounterObligation{}),
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1994,6 +2031,7 @@ FlatAtomicAddU64Flat::FlatAtomicAddU64Flat(const MachineInst *inst)
                        : amdgpu::MemoryCounterObligation{}),
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -2051,6 +2089,7 @@ FlatAtomicSubU64Flat::FlatAtomicSubU64Flat(const MachineInst *inst)
                        : amdgpu::MemoryCounterObligation{}),
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -2108,6 +2147,7 @@ FlatAtomicMinI64Flat::FlatAtomicMinI64Flat(const MachineInst *inst)
                        : amdgpu::MemoryCounterObligation{}),
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -2165,6 +2205,7 @@ FlatAtomicMinU64Flat::FlatAtomicMinU64Flat(const MachineInst *inst)
                        : amdgpu::MemoryCounterObligation{}),
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -2222,6 +2263,7 @@ FlatAtomicMaxI64Flat::FlatAtomicMaxI64Flat(const MachineInst *inst)
                        : amdgpu::MemoryCounterObligation{}),
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -2279,6 +2321,7 @@ FlatAtomicMaxU64Flat::FlatAtomicMaxU64Flat(const MachineInst *inst)
                        : amdgpu::MemoryCounterObligation{}),
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -2336,6 +2379,7 @@ FlatAtomicAndB64Flat::FlatAtomicAndB64Flat(const MachineInst *inst)
                        : amdgpu::MemoryCounterObligation{}),
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -2393,6 +2437,7 @@ FlatAtomicOrB64Flat::FlatAtomicOrB64Flat(const MachineInst *inst)
                        : amdgpu::MemoryCounterObligation{}),
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -2450,6 +2495,7 @@ FlatAtomicXorB64Flat::FlatAtomicXorB64Flat(const MachineInst *inst)
                        : amdgpu::MemoryCounterObligation{}),
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -2507,6 +2553,7 @@ FlatAtomicIncU64Flat::FlatAtomicIncU64Flat(const MachineInst *inst)
                        : amdgpu::MemoryCounterObligation{}),
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -2564,6 +2611,7 @@ FlatAtomicDecU64Flat::FlatAtomicDecU64Flat(const MachineInst *inst)
                        : amdgpu::MemoryCounterObligation{}),
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -2621,6 +2669,7 @@ FlatAtomicCmpswapF32Flat::FlatAtomicCmpswapF32Flat(const MachineInst *inst)
                        : amdgpu::MemoryCounterObligation{}),
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -2678,6 +2727,7 @@ FlatAtomicMinF32Flat::FlatAtomicMinF32Flat(const MachineInst *inst)
                        : amdgpu::MemoryCounterObligation{}),
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -2735,6 +2785,7 @@ FlatAtomicMaxF32Flat::FlatAtomicMaxF32Flat(const MachineInst *inst)
                        : amdgpu::MemoryCounterObligation{}),
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -2792,6 +2843,7 @@ FlatAtomicAddF32Flat::FlatAtomicAddF32Flat(const MachineInst *inst)
                        : amdgpu::MemoryCounterObligation{}),
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -2820,6 +2872,7 @@ GlobalLoadAddtidB32Flat::GlobalLoadAddtidB32Flat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2853,6 +2906,7 @@ GlobalStoreAddtidB32Flat::GlobalStoreAddtidB32Flat(const MachineInst *inst)
                                        amdgpu::MemoryCompletionClass::UNORDERED},
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2909,6 +2963,7 @@ GlobalAtomicCsubU32Flat::GlobalAtomicCsubU32Flat(const MachineInst *inst)
                        : amdgpu::MemoryCounterObligation{}),
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {

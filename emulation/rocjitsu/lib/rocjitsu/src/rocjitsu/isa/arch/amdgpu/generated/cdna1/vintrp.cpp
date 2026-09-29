@@ -25,6 +25,7 @@ VInterpP1F32Vintrp::VInterpP1F32Vintrp(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   m0.apply_fieldless_caps(false, false, false);
+  flags_ |= EMBEDDED_MEMORY_WAIT;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -53,6 +54,7 @@ VInterpP2F32Vintrp::VInterpP2F32Vintrp(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   m0.apply_fieldless_caps(false, false, false);
+  flags_ |= EMBEDDED_MEMORY_WAIT;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -81,6 +83,7 @@ VInterpMovF32Vintrp::VInterpMovF32Vintrp(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   m0.apply_fieldless_caps(false, false, false);
+  flags_ |= EMBEDDED_MEMORY_WAIT;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 

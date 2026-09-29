@@ -49,7 +49,8 @@ public:
       return failure_outcome_;
     if (address > bytes_.size() || bytes.size() > bytes_.size() - address)
       return VmAccessOutcome::Faulted;
-    std::copy_n(bytes_.begin() + static_cast<ptrdiff_t>(address), bytes.size(), bytes.begin());
+    std::ranges::copy_n(bytes_.begin() + static_cast<ptrdiff_t>(address), bytes.size(),
+                        bytes.begin());
     ++successful_reads_[address];
     return VmAccessOutcome::Complete;
   }
@@ -58,7 +59,7 @@ public:
                         std::span<const std::byte> bytes) override {
     if (address > bytes_.size() || bytes.size() > bytes_.size() - address)
       return VmAccessOutcome::Faulted;
-    std::copy(bytes.begin(), bytes.end(), bytes_.begin() + static_cast<ptrdiff_t>(address));
+    std::ranges::copy(bytes, bytes_.begin() + static_cast<ptrdiff_t>(address));
     return VmAccessOutcome::Complete;
   }
 

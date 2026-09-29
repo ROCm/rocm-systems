@@ -24,6 +24,7 @@ cmake --build build
 
 | Option | Default | Description |
 |---|---|---|
+| `ROCJITSU_HOST_CPU_BASELINE` | `x86-64-v3` on Linux x86-64 with GCC/Clang; `default` otherwise | Host CPU baseline: `default`, `x86-64`, `x86-64-v3`, or `x86-64-v4` |
 | `RJ_ENABLE_ASAN` | `OFF` | Enable AddressSanitizer |
 | `RJ_ENABLE_UBSAN` | `OFF` | Enable UndefinedBehaviorSanitizer |
 | `RJ_ENABLE_TSAN` | `OFF` | Enable ThreadSanitizer |
@@ -42,6 +43,19 @@ gate locally:
 ```bash
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DRJ_ENABLE_ASSERTIONS=1
 ```
+
+### Host CPU baseline
+
+By default, Linux x86-64 binaries built with GCC or Clang require x86-64-v3
+CPU and OS support. To build for older x86-64 hosts:
+
+```bash
+cmake -B build -G Ninja -DROCJITSU_HOST_CPU_BASELINE=x86-64
+```
+
+Use `ROCJITSU_HOST_CPU_BASELINE=default` to retain your compiler or toolchain's
+CPU settings. Explicit x86-64 baselines are supported only for Linux x86-64
+targets.
 
 ### Sanitizer builds
 

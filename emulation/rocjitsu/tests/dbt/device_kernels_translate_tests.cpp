@@ -192,8 +192,8 @@ TEST(BinaryTranslatorE2E, TranslateVectorAddCdna4ToCdna3) {
     const auto *host_words = reinterpret_cast<const uint32_t *>(translated_text->data() + host_pc);
     std::unique_ptr<rocjitsu::Instruction> guest_inst(decode_valid(*guest_decoder, guest_words));
     std::unique_ptr<rocjitsu::Instruction> host_inst(decode_valid(*host_decoder, host_words));
-    ASSERT_NE(guest_inst, nullptr) << "failed to decode gfx950 instruction at 0x" << std::hex
-                                   << guest_pc;
+    ASSERT_NE(guest_inst, nullptr)
+        << "failed to decode gfx950 instruction at 0x" << std::hex << guest_pc;
     ASSERT_NE(host_inst, nullptr) << "failed to decode gfx942 instruction at 0x" << std::hex
                                   << host_pc;
     ASSERT_EQ(host_inst->size(), guest_inst->size());
@@ -276,10 +276,10 @@ TEST(KernelDescriptorTranslator, Cdna4ToRdna4MaterializesWorkgroupIdsFromTtmpGri
 
   const auto translations = translator.translate_image(
       image, text->sectionOffset(), text->size(), rocjitsu::KernelDescriptorTranslationOptions{});
-  const auto translated = std::find_if(translations.begin(), translations.end(),
-                                       [kd_file_off](const auto &translation) {
-                                         return translation.descriptor_file_offset == kd_file_off;
-                                       });
+  const auto translated =
+      std::ranges::find_if(translations, [kd_file_off](const auto &translation) {
+        return translation.descriptor_file_offset == kd_file_off;
+      });
   ASSERT_NE(translated, translations.end());
 
   constexpr uint16_t ttmp_base = 108;
@@ -313,10 +313,9 @@ TEST(KernelDescriptorTranslator, Cdna4ToRdna4MaterializesXOnlyWorkgroupId) {
 
   const auto translations =
       translate_mutable_descriptor(fixture, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto translated =
-      std::find_if(translations.begin(), translations.end(), [&fixture](const auto &translation) {
-        return translation.descriptor_file_offset == fixture.kd_file_off;
-      });
+  const auto translated = std::ranges::find_if(translations, [&fixture](const auto &translation) {
+    return translation.descriptor_file_offset == fixture.kd_file_off;
+  });
   ASSERT_NE(translated, translations.end());
 
   constexpr uint16_t ttmp_base = 108;
@@ -340,10 +339,9 @@ TEST(KernelDescriptorTranslator, Cdna4ToRdna4SkipsPrologueWhenNoWorkgroupIdsAreE
 
   const auto translations =
       translate_mutable_descriptor(fixture, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto translated =
-      std::find_if(translations.begin(), translations.end(), [&fixture](const auto &translation) {
-        return translation.descriptor_file_offset == fixture.kd_file_off;
-      });
+  const auto translated = std::ranges::find_if(translations, [&fixture](const auto &translation) {
+    return translation.descriptor_file_offset == fixture.kd_file_off;
+  });
   ASSERT_NE(translated, translations.end());
   EXPECT_TRUE(translated->prologue_words.empty());
 
@@ -377,10 +375,9 @@ TEST(KernelDescriptorTranslator, CdnaAccVgprExpansionGrowsUnifiedVgprAllocationF
 
     const auto translations =
         translate_mutable_descriptor(fixture, guest_arch, ROCJITSU_CODE_ARCH_RDNA4);
-    const auto translated =
-        std::find_if(translations.begin(), translations.end(), [&fixture](const auto &translation) {
-          return translation.descriptor_file_offset == fixture.kd_file_off;
-        });
+    const auto translated = std::ranges::find_if(translations, [&fixture](const auto &translation) {
+      return translation.descriptor_file_offset == fixture.kd_file_off;
+    });
     ASSERT_NE(translated, translations.end());
     EXPECT_EQ(translated->accvgpr_base, 64u);
     // CDNA descriptors encode one unified VGPR allocation. ACCUM_OFFSET splits
@@ -409,10 +406,9 @@ TEST(KernelDescriptorTranslator, CdnaToCdnaMovesAccVgprBaseAboveSemanticScratch)
   options.minimum_vgprs = 128;
   const auto translations = translate_mutable_descriptor(fixture, ROCJITSU_CODE_ARCH_CDNA4,
                                                          ROCJITSU_CODE_ARCH_CDNA3, options);
-  const auto translated =
-      std::find_if(translations.begin(), translations.end(), [&fixture](const auto &translation) {
-        return translation.descriptor_file_offset == fixture.kd_file_off;
-      });
+  const auto translated = std::ranges::find_if(translations, [&fixture](const auto &translation) {
+    return translation.descriptor_file_offset == fixture.kd_file_off;
+  });
   ASSERT_NE(translated, translations.end());
   EXPECT_EQ(translated->accvgpr_base, 96u);
   EXPECT_EQ(translated->target_accvgpr_base, 128u);
@@ -452,10 +448,9 @@ TEST(KernelDescriptorTranslator, CdnaToCdnaMovesAccVgprBaseWithoutReportedAccVgp
   options.minimum_vgprs = 104;
   const auto translations = translate_mutable_descriptor(fixture, ROCJITSU_CODE_ARCH_CDNA4,
                                                          ROCJITSU_CODE_ARCH_CDNA3, options);
-  const auto translated =
-      std::find_if(translations.begin(), translations.end(), [&fixture](const auto &translation) {
-        return translation.descriptor_file_offset == fixture.kd_file_off;
-      });
+  const auto translated = std::ranges::find_if(translations, [&fixture](const auto &translation) {
+    return translation.descriptor_file_offset == fixture.kd_file_off;
+  });
   ASSERT_NE(translated, translations.end());
   EXPECT_EQ(translated->accvgpr_base, 96u);
   EXPECT_EQ(translated->target_accvgpr_base, 104u);
@@ -488,10 +483,9 @@ TEST(KernelDescriptorTranslator, CdnaToCdnaAllowsFullVgprAndAccVgprDescriptorAll
 
   const auto translations =
       translate_mutable_descriptor(fixture, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
-  const auto translated =
-      std::find_if(translations.begin(), translations.end(), [&fixture](const auto &translation) {
-        return translation.descriptor_file_offset == fixture.kd_file_off;
-      });
+  const auto translated = std::ranges::find_if(translations, [&fixture](const auto &translation) {
+    return translation.descriptor_file_offset == fixture.kd_file_off;
+  });
   ASSERT_NE(translated, translations.end());
   EXPECT_TRUE(translated->supported);
   EXPECT_EQ(translated->target_vgpr_count, 256u);
@@ -512,10 +506,9 @@ TEST(KernelDescriptorTranslator, CdnaDescriptorAllowsReservedSgprAllocationRound
 
   const auto translations =
       translate_mutable_descriptor(fixture, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
-  const auto translated =
-      std::find_if(translations.begin(), translations.end(), [&fixture](const auto &translation) {
-        return translation.descriptor_file_offset == fixture.kd_file_off;
-      });
+  const auto translated = std::ranges::find_if(translations, [&fixture](const auto &translation) {
+    return translation.descriptor_file_offset == fixture.kd_file_off;
+  });
   ASSERT_NE(translated, translations.end());
   EXPECT_TRUE(translated->supported);
   EXPECT_EQ(translated->guest_sgpr_count, 112u);
@@ -562,10 +555,10 @@ TEST(KernelDescriptorTranslator, RdnaWave64UsesAmdhsaDescriptorVgprEncoding) {
     rocjitsu::KernelDescriptorTranslator translator(ROCJITSU_CODE_ARCH_CDNA1, host_arch);
     const auto translations = translator.translate_image(
         image, text->sectionOffset(), text->size(), rocjitsu::KernelDescriptorTranslationOptions{});
-    const auto translated = std::find_if(translations.begin(), translations.end(),
-                                         [kd_file_off](const auto &translation) {
-                                           return translation.descriptor_file_offset == kd_file_off;
-                                         });
+    const auto translated =
+        std::ranges::find_if(translations, [kd_file_off](const auto &translation) {
+          return translation.descriptor_file_offset == kd_file_off;
+        });
     ASSERT_NE(translated, translations.end());
     EXPECT_EQ(translated->target_wave_size, 64);
     EXPECT_EQ(translated->target_vgpr_count, 128u);
@@ -608,7 +601,7 @@ TEST(BinaryTranslatorE2E, DescriptorPrologueBranchesToRelocatedBody) {
   const auto translated_infos = translated_parser.translate_image(
       {translated_image, translated_co.image_size()}, translated_text->sectionOffset(),
       translated_text->size(), rocjitsu::KernelDescriptorTranslationOptions{});
-  const auto translated_info = std::find_if(
+  const auto translated_info = std::ranges::find_if(
       translated_infos.begin(), translated_infos.end(),
       [kd_file_off](const auto &info) { return info.descriptor_file_offset == kd_file_off; });
   ASSERT_NE(translated_info, translated_infos.end());

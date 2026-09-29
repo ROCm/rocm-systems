@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include "rocjitsu/code/analysis/waitcheck/counter.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/register_set.h"
 
@@ -23,27 +24,6 @@ namespace rocjitsu {
 
 class CodeObject;
 struct WaitcheckKernelInfo;
-
-/// @brief Internal wait counters tracked by waitcheck.
-///
-/// @details GFX12 targets use the split counter names directly. Legacy gfx9
-/// style targets reuse Load for vmcnt, Ds for lgkmcnt, and Exp for expcnt.
-enum class WaitCounterKind : uint8_t {
-  Load = 0,
-  Store,
-  Ds,
-  Km,
-  Sample,
-  Bvh,
-  Exp,
-  X,
-  Async,
-  Tensor,
-  VmVsrc,
-  VaVdst,
-  Depctr,
-  Count,
-};
 
 /// @brief How a later instruction conflicts with an outstanding event.
 enum class WaitcheckAccessKind : uint8_t {
@@ -189,9 +169,6 @@ struct WaitcheckReport {
 
   [[nodiscard]] bool passed() const { return diagnostics_observed == 0; }
 };
-
-/// @brief Human-readable split counter name, e.g. "loadcnt".
-[[nodiscard]] std::string_view wait_counter_name(WaitCounterKind counter);
 
 /// @brief Return the RocJITsu ISA arch supported by waitcheck for @p target.
 ///

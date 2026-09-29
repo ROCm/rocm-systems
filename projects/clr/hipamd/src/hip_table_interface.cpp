@@ -3360,3 +3360,9 @@ HIP_PUBLIC_API hipError_t hipMemGetDefaultMemPool(hipMemPool_t* memPool, hipMemL
   return hip::GetHipDispatchTable()->hipMemGetDefaultMemPool_fn(memPool, location, type);
   CATCH;
 }
+hipError_t hipModuleEnumerateFunctions(hipFunction_t* functions, unsigned int numFunctions,
+                                       hipModule_t mod) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipModuleEnumerateFunctions_fn(functions, numFunctions, mod);
+  CATCH;
+}

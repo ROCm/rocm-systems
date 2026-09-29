@@ -202,6 +202,10 @@ VmTranslationResult IdentityAddressSpaceTranslator::translate(uint64_t address, 
                           .permissions = {.readable = true, .writable = true, .executable = true}}};
 }
 
+bool GpuVmAccess::is_current() const {
+  return access_state_ != nullptr && access_state_->valid.load(std::memory_order_acquire);
+}
+
 VmTranslationResult GpuVmAccess::translate(uint64_t address, std::size_t size,
                                            VmAccessKind access) const {
   if (access_state_ == nullptr)

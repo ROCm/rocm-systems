@@ -23,6 +23,8 @@
 
 #include <functional>
 
+#include <hip/hip_runtime_api.h>
+
 #include "nccl.h"
 
 struct ncclComm;
@@ -61,6 +63,16 @@ extern std::function<ncclResult_t(struct ncclComm* comm, struct ncclKernelPlan* 
 extern std::function<ncclResult_t(struct ncclComm* comm, struct ncclKernelPlan* plan,
                                   hipStream_t stream)>
     g_rmaCeWaitLaunch;
+
+// ncclCuStreamBatchMemOp, from rma_proxy_launch.cc.
+extern std::function<ncclResult_t(hipStream_t /*stream*/, unsigned int /*numOps*/,
+                                  hipStreamBatchMemOpParams* /*batchParams*/)>
+    g_cuStreamBatchMemOp;
+
+// ncclRmaInitialized (src/rma/rma.cc): default false, matching a comm that never ran RMA init.
+#ifndef RCCL_RMA_FAKES_OMIT_ncclRmaInitialized
+extern std::function<bool(struct ncclComm*)> g_rmaInitialized;
+#endif
 
 // Restore every hook in this file to its default. Call from fixture TearDown().
 void ResetRmaFakes();

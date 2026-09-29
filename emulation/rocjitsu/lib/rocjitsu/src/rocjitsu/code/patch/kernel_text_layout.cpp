@@ -299,10 +299,8 @@ struct BranchIslandChain {
   // Blocks are emitted in source order and are non-overlapping in source space
   // for the current scope; binary search preserves the prior semantics of the
   // linear scan while reducing lookup complexity to O(log N).
-  const auto it = std::upper_bound(layout.blocks.begin(), layout.blocks.end(), source_offset,
-                                   [](uint64_t source, const BlockPlacement &placement) {
-                                     return source < placement.source_start;
-                                   });
+  const auto it =
+      std::ranges::upper_bound(layout.blocks, source_offset, {}, &BlockPlacement::source_start);
   if (it == layout.blocks.begin())
     return std::nullopt;
 
@@ -1063,7 +1061,7 @@ TextRelocationResult patch_direct_branch_fixups(std::vector<uint8_t> &text,
 
     std::vector<uint32_t> window_words(fixup.target_window_bytes / sizeof(uint32_t),
                                        build_s_nop(0, arch));
-    std::copy(words.begin(), words.end(), window_words.begin());
+    std::ranges::copy(words, window_words.begin());
     window_patches.push_back(
         {.offset = fixup.target_inst_offset, .words = std::move(window_words)});
   }
@@ -1228,7 +1226,7 @@ TextRelocationResult patch_recovered_indirect_fixups(std::vector<uint8_t> &text,
 
     std::vector<uint32_t> window_words(fixup.target_window_bytes / sizeof(uint32_t),
                                        build_s_nop(0, arch));
-    std::copy(words.begin(), words.end(), window_words.begin());
+    std::ranges::copy(words, window_words.begin());
     window_patches.push_back(
         {.offset = fixup.target_window_offset, .words = std::move(window_words)});
   }

@@ -160,7 +160,7 @@ class cli_analysis(OmniAnalyze_Base):
                 pc_sampling_tool_data=pc_sampling_data,
             )
 
-            if getattr(args, "membw_analysis", False):
+            if self.membw_analysis_collected():
                 workload.membw_result = run_membw_analysis(workload.dfs, gpu_arch)
 
     @demarcate

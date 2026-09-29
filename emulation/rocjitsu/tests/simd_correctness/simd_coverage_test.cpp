@@ -494,6 +494,9 @@ const DecodedCase kDecodedCases[] = {
     {ROCJITSU_CODE_ARCH_RDNA4,
      "v_dual_add_f32 v6, v0, v1 :: v_dual_mul_f32 v7, v2, v3",
      {0xc9060300u, 0x06060702u}},
+    {ROCJITSU_CODE_ARCH_RDNA4,
+     "v_dual_cndmask_b32 v7, v7, v9 :: v_dual_cndmask_b32 v6, v6, v8",
+     {0xca521307u, 0x07061106u}},
     {ROCJITSU_CODE_ARCH_RDNA4, "v_pk_fmac_f16 v6, v0, v1", {0x780c0300u}},
     {ROCJITSU_CODE_ARCH_RDNA4, "v_cvt_f16_f32 v6.h, v0", {0x7f0c1500u}},
     {ROCJITSU_CODE_ARCH_RDNA4, "v_cmpx_lt_f16_e64 v0.h, v1.l", {0xd481087eu, 0x02020300u}},
@@ -591,21 +594,31 @@ TEST_F(SimdCoverage, MixedFmaUsesProfileSemanticsAndCompilerGuard) {
   WordInst inst;
   inst.inst_.opsel_hi = 0;
   inst.inst_.opsel_hi_2 = 0;
+  constexpr uint32_t exec = 0xa5a5f0f0u;
+  constexpr uint32_t sentinel = 0xdeadbeefu;
+  wf->set_exec(exec);
   const float a = std::bit_cast<float>(0x3f800001u);
   const float b = std::bit_cast<float>(0x3f7fffffu);
   for (uint32_t lane = 0; lane < 32; ++lane) {
     put(0, lane, 0x3f800001u);
     put(1, lane, 0x3f7fffffu);
     put(2, lane, 0xbf800000u);
+    put(3, lane, sentinel);
   }
-#if defined(__clang__) && defined(__FMA__)
+#if defined(__FMA__)
   ASSERT_FALSE((try_execute_vop3p_fma_mix_simd<FmaMixDst::F32, false>(inst, *wf)));
+  for (uint32_t lane = 0; lane < 32; ++lane)
+    EXPECT_EQ(get(3, lane), sentinel);
 #else
   ASSERT_TRUE((try_execute_vop3p_fma_mix_simd<FmaMixDst::F32, false>(inst, *wf)));
-  EXPECT_EQ(get(3, 0), std::bit_cast<uint32_t>(a * b - 1.0f));
+  for (uint32_t lane = 0; lane < 32; ++lane)
+    EXPECT_EQ(get(3, lane),
+              (exec & (1u << lane)) ? std::bit_cast<uint32_t>(a * b - 1.0f) : sentinel);
 #endif
   ASSERT_TRUE((try_execute_vop3p_fma_mix_simd<FmaMixDst::F32, true>(inst, *wf)));
-  EXPECT_EQ(get(3, 0), std::bit_cast<uint32_t>(std::fma(a, b, -1.0f)));
+  for (uint32_t lane = 0; lane < 32; ++lane)
+    EXPECT_EQ(get(3, lane),
+              (exec & (1u << lane)) ? std::bit_cast<uint32_t>(std::fma(a, b, -1.0f)) : sentinel);
 }
 
 // Opt-in simulator host timing. Alternate scalar/SIMD order with matched inputs

@@ -26,6 +26,7 @@ VInterpP1F32Vop3::VInterpP1F32Vop3(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   m0.apply_fieldless_caps(false, false, false);
+  flags_ |= EMBEDDED_MEMORY_WAIT;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -54,6 +55,7 @@ VInterpP2F32Vop3::VInterpP2F32Vop3(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   m0.apply_fieldless_caps(false, false, false);
+  flags_ |= EMBEDDED_MEMORY_WAIT;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -82,6 +84,7 @@ VInterpMovF32Vop3::VInterpMovF32Vop3(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   m0.apply_fieldless_caps(false, false, false);
+  flags_ |= EMBEDDED_MEMORY_WAIT;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -5942,6 +5945,7 @@ VInterpP1llF16Vop3::VInterpP1llF16Vop3(const MachineInst *inst)
   src_operands_[1] = &src0;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EMBEDDED_MEMORY_WAIT;
 }
 
 namespace detail {
@@ -5968,6 +5972,7 @@ VInterpP1lvF16Vop3::VInterpP1lvF16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EMBEDDED_MEMORY_WAIT;
 }
 
 namespace detail {
@@ -6604,6 +6609,7 @@ VInterpP2F16Vop3::VInterpP2F16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EMBEDDED_MEMORY_WAIT;
 }
 
 namespace detail {

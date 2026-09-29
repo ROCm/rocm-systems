@@ -135,6 +135,7 @@ SGetregB32Sopk::SGetregB32Sopk(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= XCNT_DRAIN;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -157,6 +158,7 @@ SSetregB32Sopk::SSetregB32Sopk(const MachineInst *inst)
   src_operands_[0] = &sdst;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= XCNT_DRAIN;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -193,6 +195,7 @@ SSetregImm32B32Sopk::SSetregImm32B32Sopk(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   literal = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(literal_));
+  flags_ |= XCNT_DRAIN;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
