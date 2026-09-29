@@ -125,6 +125,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - The WSL backend returned success with a zeroed structure, so `rev_id` read as `0x0`, and where it did report the not-supported value Python rendered it as the raw `0xffffffff`. Python and the CLI now render it as `N/A`.
   - `amdsmi_asic_info_t` is now reset through one shared initializer used by every backend, so a field a backend cannot supply keeps its not-supported value rather than a plausible zero.
 
+- **Fixed `amd-smi set --compute-partition` asking for `sudo` on GPUs without compute partitioning**.  
+  - Run as root on such GPUs (for example, AMD Instinct MI210), it now reports the option as not supported (error code -8) instead of requiring elevation (-11).
+
 ### Upcoming Changes
 
 - **UUIDs will be replaced by CUIDs in an upcoming version**.  

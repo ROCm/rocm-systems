@@ -1400,7 +1400,9 @@ class AMDSMIHelpers:
         return accelerator_partition_profiles
 
     def get_accelerator_choices_types_indices(self):
-        return_val = ("N/A", {"profile_indices": [], "profile_types": []})
+        # Choices are None when not root (profiles can only be read as root) and
+        # an empty list when root finds no profiles (partitioning not supported).
+        return_val = (None, {"profile_indices": [], "profile_types": []})
         if os.geteuid() != 0:
             logging.debug(
                 "AMDSMIHelpers.get_accelerator_choices_types_indices - Not root, unable to get accelerator partition profiles"
@@ -1412,13 +1414,11 @@ class AMDSMIHelpers:
                 "AMDSMIHelpers.get_accelerator_choices_types_indices - Root, getting accelerator partition profiles"
             )
         accelerator_partition_profiles = self.get_accelerator_partition_profile_config()
-        if len(accelerator_partition_profiles["profile_types"]) != 0:
-            compute_partitions_list = (
-                accelerator_partition_profiles["profile_types"]
-                + accelerator_partition_profiles["profile_indices"]
-            )
-            return_val = (compute_partitions_list, accelerator_partition_profiles)
-        return return_val
+        compute_partitions_list = (
+            accelerator_partition_profiles["profile_types"]
+            + accelerator_partition_profiles["profile_indices"]
+        )
+        return (compute_partitions_list, accelerator_partition_profiles)
 
     def get_memory_partition_types(self):
         memory_partitions_str = [
