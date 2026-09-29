@@ -5,12 +5,15 @@ reviewable changes based on **`origin/develop`**. Update it in place as decision
 and chunk boundaries change. It describes current thinking, not a history of
 previous plans or a collection of test results.
 
-The immediate preparation is to merge the fetched `origin/develop` into the
-existing sanitizer branch and qualify that integrated starting point. The
-subsequent decomposition will use `shared/rocjitsu/sanitizers2`, with a linear
-history and one commit per prospective PR at each checkpoint. Creating the
-stack does not imply submitting its contents for review. Keep all work local;
-do not push.
+The integrated reference for the first decomposition is the local tag
+`consan/upstreaming-baseline-20260929`. Its upstream base is `origin/develop`
+commit `952951abbf5c267f73497dc39351fd793128e7b5`; the reference includes the
+sanitizer branch and integration repairs.
+
+The next step is to construct `shared/rocjitsu/sanitizers2` in a separate
+worktree, with a linear history and one commit per prospective PR at each
+checkpoint. Creating the stack does not imply submitting its contents for
+review. Keep all work local; do not push.
 
 ## What makes a useful chunk
 
