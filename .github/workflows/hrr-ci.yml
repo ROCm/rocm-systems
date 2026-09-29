@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "projects/hrr/**"
+      - "!projects/hrr/skills/**"
       - "projects/clr/hipamd/src/hrr/**"
       - ".github/workflows/hrr-ci.yml"
       - ".github/actions/rocprofiler-sdk-util/resolve-ci-config/**"
@@ -333,8 +334,8 @@ jobs:
         include:
           - { family: gfx90a, runner: "${{ needs.ci_config.outputs.gfx90a_runner }}" }
           # The T3 tier needs two visible devices. There is no 2-GPU pool, so
-          # gfx950 uses an 8-GPU machine and selects two; every other family is
-          # 1-GPU only and skips T3.
+          # gfx950 uses an 8-GPU machine and T3 uses devices 0 and 1 of what it
+          # exposes; every other family is 1-GPU only and skips T3.
           #
           # gfx94x does not join it there: linux-gfx942-8gpu-ossci-rocm exposes
           # /dev/kfd and /dev/dri only to a job with a container spec (see the
@@ -435,10 +436,6 @@ jobs:
       # rocr-prefix the in-tree libhsa the capture path needs. Both must precede
       # the SDK, which ships its own older copies under the same sonames.
       - name: Run integration suite
-        env:
-          # Left unset on 1-GPU runners: an empty HIP_VISIBLE_DEVICES would hide
-          # every device rather than meaning "no restriction".
-          DEVICES: ${{ matrix.devices }}
         run: |
           # hipamd/lib holds the amdhip64 carrying the capture shims and must
           # precede the SDK, which ships a plain build under the same soname.
@@ -447,9 +444,6 @@ jobs:
           # Keep the runner's existing path: setup-python puts libpython there,
           # and replacing it makes python3 fail to start on some GPU machines.
           export LD_LIBRARY_PATH="${PWD}/build/clr/hipamd/lib:${ROCM_SDK}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-          if [ -n "${DEVICES}" ]; then
-            export HIP_VISIBLE_DEVICES="${DEVICES}"
-          fi
           # A GPU-labelled runner with no visible device is infrastructure
           # failure, not 67 unsupported capabilities. Still run the four
           # CPU-only integration checks and publish their JUnit, then fail the
@@ -499,12 +493,7 @@ jobs:
       - name: Diagnose hipStreamWriteValue64
         if: always()
         continue-on-error: true
-        env:
-          DEVICES: ${{ matrix.devices }}
         run: |
-          if [ -n "${DEVICES}" ]; then
-            export HIP_VISIBLE_DEVICES="${DEVICES}"
-          fi
           # HIP_HRR_CAPTURE_OUTPUT is deliberately unset in both runs.
           for variant in "stock SDK runtime:${ROCM_SDK}/lib" \
                          "HRR runtime, capture off:${PWD}/build/clr/hipamd/lib:${ROCM_SDK}/lib"; do

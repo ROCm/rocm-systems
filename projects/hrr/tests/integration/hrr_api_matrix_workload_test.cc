@@ -875,8 +875,8 @@ TEST_CASE("Unit_HRR_ApiMatrix_SilentFailure_Direct", "[.][hrr-direct]") {
 // Section 5: the multi-GPU delta is 42 APIs at roughly 31% faithful, and the
 // problem is structural rather than per-API — events carry no device ID and
 // alloc_map has no device field, so a replay cannot know which GPU an
-// allocation belonged to. Needs two visible devices; the runner supplies them
-// with HIP_VISIBLE_DEVICES=6,7.
+// allocation belonged to. Needs two visible devices and uses devices 0 and 1;
+// CI does not pin HIP_VISIBLE_DEVICES.
 //
 // Final blob: d1[i] == 0x5A5A5A5A, copied device-to-device across the pair.
 // ===========================================================================

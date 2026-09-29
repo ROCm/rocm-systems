@@ -522,8 +522,8 @@ TEST_CASE("Unit_HRR_ApiMatrix_T2_Roundtrip", "[hrr][api-matrix]") {
  *     and the problem is structural rather than per-API: events carry no
  *     device ID and alloc_map has no device field, so replay cannot know which
  *     GPU an allocation belonged to.
- *   - Requires two visible devices; run-api-matrix.sh supplies them with
- *     HIP_VISIBLE_DEVICES=6,7. Skips cleanly on a single-GPU host rather than
+ *   - Requires two visible devices and uses devices 0 and 1. CI does not pin
+ *     HIP_VISIBLE_DEVICES. Skips cleanly on a single-GPU host rather than
  *     failing, so the rest of the matrix stays runnable anywhere.
  */
 TEST_CASE("Unit_HRR_ApiMatrix_T3_Roundtrip", "[hrr][api-matrix]") {
