@@ -182,8 +182,9 @@ void runCftHierLsaMultiRankDefectTest() {
 
   for (int rank = 0; rank < kDualRank; ++rank) {
     SCOPED_TRACE("rank " + std::to_string(rank));
+    // Two GPUs on one node share one LSA domain, and lsaSelf is the local rank, so the whole team shape is known.
     const ncclTeam_t lsaTeam = ncclTeamLsa(resources.comms[rank]);
-    EXPECT_EQ(lsaTeam.nRanks, kDualRank) << "two GPUs on one node share one LSA domain";
+    expectTeamEquals(lsaTeam, kDualRank, rank, 1);
 
     // cftMcSize stays 1 while lsaSize is 2, so CftMultimem must stay a singleton and not track the LSA team.
     expectTeamEquals(ncclTeamCftMultimem(resources.comms[rank]), 1, 0, 1);
@@ -192,9 +193,12 @@ void runCftHierLsaMultiRankDefectTest() {
     expectTeamEquals(ncclTeamCft(resources.comms[rank], NCCL_CFT_TEAM_FLAT), 1, 0, 1);
     expectTeamEquals(ncclTeamCft(resources.comms[rank], NCCL_CFT_TEAM_HIER_MULTIMEM), 1, 0, 1);
 
-    // Only a rank-0 team leaves the base of base + (r - team.rank) * 1 exposed, so these pin lsaSelf and comm->rank.
-    EXPECT_EQ(ncclTeamRankToLsa(resources.comms[rank], ncclTeam_t{/*nRanks=*/2, /*rank=*/0, /*stride=*/1}, 0), rank);
-    EXPECT_EQ(ncclTeamRankToWorld(resources.comms[rank], ncclTeam_t{/*nRanks=*/2, /*rank=*/0, /*stride=*/1}, 0), rank);
+    // A rank-0 team leaves the base of base + (r - team.rank) * 1 exposed; assert each base against its own source.
+    int worldRank = -1;
+    ASSERT_EQ(ncclCommUserRank(resources.comms[rank], &worldRank), ncclSuccess);
+    const ncclTeam_t baseTeam{/*nRanks=*/kDualRank, /*rank=*/0, /*stride=*/1};
+    EXPECT_EQ(ncclTeamRankToLsa(resources.comms[rank], baseTeam, 0), lsaTeam.rank);
+    EXPECT_EQ(ncclTeamRankToWorld(resources.comms[rank], baseTeam, 0), worldRank);
 
     const ncclTeam_t hierLsa = ncclTeamCft(resources.comms[rank], NCCL_CFT_TEAM_HIER_LSA);
     EXPECT_EQ(hierLsa.nRanks, 0) << "A non-zero nRanks means the cftSize / lsaSize truncation in ncclTeamCft was "
