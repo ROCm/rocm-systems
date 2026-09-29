@@ -135,7 +135,7 @@ hipError_t ihipGraphAddKernelNode(hip::GraphNode** pGraphNode, hip::Graph* graph
       status != hipSuccess) {
     return status;
   }
-  LaunchConfig config = MakeLaunchConfigFromGrid(
+  const LaunchConfig config = MakeLaunchConfigFromGrid(
       pNodeParams->gridDim, pNodeParams->blockDim, pNodeParams->sharedMemBytes, *device, clusterDim,
       dim3(globalWorkSizeX_remainder, globalWorkSizeY_remainder, globalWorkSizeZ_remainder),
       clusterDimsSpecified);
