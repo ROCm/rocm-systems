@@ -369,6 +369,8 @@ public:
 
   /// @brief Set the device VM service shared by legacy and PCI/VFIO queues.
   void set_gpu_vm(GpuVm *gpu_vm) {
+    instruction_vm_access_.reset();
+    inst_cache_.invalidate_all();
     gpu_vm_ = gpu_vm;
     l1_vector_.set_gpu_vm(gpu_vm);
     l1_scalar_.set_gpu_vm(gpu_vm);
@@ -1232,6 +1234,12 @@ protected:
     WaveStateGuard &operator=(const WaveStateGuard &) = delete;
     ~WaveStateGuard() {
       const bool outermost = --cu_.wave_state_depth_ == 0;
+      if (outermost && std::exchange(cu_.instruction_access_cleanup_pending_, false) &&
+          !cu_.has_active_wfs()) {
+        // Instruction issue has returned. Empty the cache before releasing owners
+        // whose destructors can reenter the CU.
+        auto retired = std::exchange(cu_.instruction_vm_access_, std::nullopt);
+      }
       std::function<void()> notification_flush_hook;
       if (outermost)
         notification_flush_hook = std::exchange(cu_.notification_flush_hook_for_testing_, {});
@@ -1269,6 +1277,8 @@ protected:
   /// @details Only ever touched under @ref wave_state_mutex_, so the value
   /// belongs to whichever thread currently owns it.
   unsigned wave_state_depth_ = 0;
+  // The final wave retired inside a guard; keep its snapshot until issue returns.
+  bool instruction_access_cleanup_pending_ = false;
   /// @brief Workgroups that finished while the wave-state lock was held.
   /// @details Drained by @ref flush_cp_notifications once the lock is dropped.
   std::vector<std::pair<uint32_t, uint32_t>> pending_wg_completions_;
@@ -1323,6 +1333,10 @@ protected:
   std::atomic<bool> debug_active_{false};
   CommandProcessor *cp_ = nullptr;
   GpuVm *gpu_vm_ = nullptr;
+  // Keep the fetch snapshot across instructions, including ones that release their wavefront.
+  std::optional<GpuVmAccess> instruction_vm_access_;
+  AddressSpaceHandle instruction_address_space_;
+  uint32_t instruction_vmid_ = 0;
 
   std::unordered_map<uint64_t, uint32_t> active_wgs_;
 
