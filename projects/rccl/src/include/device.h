@@ -677,6 +677,7 @@ struct ncclKernelComm {
 #if ENABLE_TDM_SIMPLE
   int tdmSimpleEnable; // RCCL: route copy-shaped SIMPLE slices through the TDM mover
 #endif
+  int tdmLl128Enable; // RCCL: route LL128 user-buffer legs through the async-to-LDS engine
   int patSharedQps; // true if PAT ReduceScatter and AllGather share one connection set
   int p2pChannelShiftSize; // [RCCL] Modifies how parts are mapped to p2p channels
   int* collNetDenseToUserRank;

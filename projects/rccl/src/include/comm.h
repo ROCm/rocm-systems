@@ -735,6 +735,7 @@ struct ncclComm {
 #if ENABLE_TDM_SIMPLE
   int tdmSimpleEnable; // RCCL: route copy-shaped SIMPLE slices through the TDM mover
 #endif
+  int tdmLl128Enable; // RCCL: route LL128 user-buffer legs through the async-to-LDS engine
   int localRank;
   int localRanks;
   int maxLocalRanks;
