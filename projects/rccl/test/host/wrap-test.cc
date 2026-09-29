@@ -4685,14 +4685,15 @@ TEST(WrapMicrotestIsolated, SelectAllGather_PlainKernelFallbackReportsGetAlgoInf
 }
 
 // ===========================================================================
-// rcclSelectReduceScatter -- rccl_wrap.cc:1784-1934. Own priority order:
-// symmetric eligibility (op sum OR avg -- distinct from AllReduce's sum-only)
-// -> CE 2-shot -> DDA (gfx1250 fabric may preempt symmetric eligibility, IPC
-// stays strictly gated on !symEligible) -> Hierarchical -> Direct -> CE
-// registered -> symmetric (reported) -> plain kernel. The two CE steps have
-// their own section further down this file; every test below leaves
-// RCCL_CE_REDUCESCATTER at its 0 default, which is what keeps them out of
-// these cases.
+// rcclSelectReduceScatter in rccl_wrap.cc. Own priority order: symmetric
+// eligibility (op sum OR avg -- distinct from AllReduce's sum-only) -> CE
+// 2-shot once staging exists -> CE registered while staging is still null, so
+// enqueue allocates it -> DDA (gfx1250 fabric may preempt symmetric
+// eligibility, IPC stays strictly gated on !symEligible) -> Hierarchical ->
+// Direct -> CE registered -> symmetric (reported) -> plain kernel. The CE
+// steps have their own section further down this file; every test below
+// leaves RCCL_CE_REDUCESCATTER at its 0 default, which is what keeps them out
+// of these cases.
 // ===========================================================================
 
 TEST(WrapMicrotestIsolated, SelectReduceScatter_SymmetricGatedOnSumOrAvgOpOnly) {
@@ -5897,18 +5898,19 @@ TEST(WrapMicrotestIsolated, HierarchicalAlgoInfo_ReduceScatterIntraNeverUsesDire
 }
 
 // ===========================================================================
-// Back to rcclSelectReduceScatter (rccl_wrap.cc:1784-1934) for three cases
-// that need the sub-comm helpers defined in the section above, which is why
-// they sit here rather than with the rest of that function's tests.
+// Back to rcclSelectReduceScatter for three cases that need the sub-comm
+// helpers defined in the section above, which is why they sit here rather
+// than with the rest of that function's tests.
 // ===========================================================================
 
-// RCCL_CE_REDUCESCATTER at its 0 default keeps both CE arms out, even with
+// RCCL_CE_REDUCESCATTER at its 0 default keeps every CE arm out, even with
 // every CE-related seam forced true (the exact combination that WOULD produce
 // CE_REGISTERED in rcclSelectAllReduce/AllGather). The param, not the absence
 // of a call, is what does it: rcclSelectReduceScatter calls ncclCeAvailable
-// and rcclUseCeReduceScatter returns on its first guard, while the registered
-// arm clears ceAvailable on `!rcclParamCeReduceScatter()`. The CE-arms
-// section further up drives both arms with the param on.
+// and rcclUseCeReduceScatter returns on its first guard, which clears
+// ceReduceScatterAllowed for both early arms, while the late registered arm
+// clears ceAvailable on `!rcclParamCeReduceScatter()`. The CE-arms section
+// further up drives those arms with the param on.
 TEST(WrapMicrotestIsolated, SelectReduceScatter_DoesNotChooseCeWhenParamsDefaultOff) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectReduceScatter_DoesNotChooseCeWhenParamsDefaultOff",
@@ -5926,6 +5928,40 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_DoesNotChooseCeWhenParamsDefault
         EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
         EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
         EXPECT_EQ(NCCL_ALGO_RING, decision.algo); // fell all the way to the plain-kernel placeholder
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Opt-in path. Staging is allocated by the CE launch, so the first selection
+// (buffer still null) is RCCL_CE_REGISTERED, which enqueue can initialize.
+// Once ceARTmpBuf exists, the same call selects RCCL_CE_2SHOT.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_CeOptInSelectsRegisteredThenTwoShot) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_CeOptInSelectsRegisteredThenTwoShot",
+      []() {
+        g_loadParam = [](const char* env, int64_t defaultValue) {
+          if (std::strcmp(env, "RCCL_CE_REDUCESCATTER") == 0) return (int64_t)1;
+          if (std::strcmp(env, "RCCL_FORCE_CE_REDUCESCATTER") == 0) return (int64_t)1;
+          if (std::strcmp(env, "RCCL_CE_AR_MAX_MSG_BYTES") == 0) return (int64_t)268435456;
+          return defaultValue;
+        };
+        alignas(16) static uint8_t staging;
+        ncclComm* comm = MakeSelectComm();
+        comm->nRanks = 4;
+        comm->nNodes = 1;
+        comm->symmetricSupport = true;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        comm->ceColl.graphModeSeen = false;
+        comm->ceColl.ceARTmpBuf = nullptr;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                        ncclSum, /*query=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+
+        comm->ceColl.ceARTmpBuf = &staging;
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                        ncclSum, /*query=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
         DeleteCommWithArch(comm);
       });
 }

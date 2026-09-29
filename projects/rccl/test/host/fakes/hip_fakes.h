@@ -21,6 +21,7 @@
 #define RCCL_TEST_HOST_HIP_FAKES_H_
 
 #include <cstddef>
+#include <cstdint>
 #include <vector>
 #include <functional>
 
@@ -198,6 +199,17 @@ extern std::function<hipError_t(hipEvent_t /*event*/, hipStream_t /*stream*/)>
 extern std::function<hipError_t(hipStream_t /*stream*/, hipEvent_t /*event*/,
                                 unsigned int /*flags*/)>
     g_hipStreamWaitEvent;
+
+extern std::function<hipError_t(hipStream_t /*stream*/, unsigned int /*count*/,
+                                hipStreamBatchMemOpParams* /*params*/, unsigned int /*flags*/)>
+    g_hipStreamBatchMemOp;
+extern std::function<hipError_t(hipStream_t /*stream*/, void* /*ptr*/,
+                                std::uint64_t /*value*/, unsigned int /*flags*/)>
+    g_hipStreamWriteValue64;
+extern std::function<hipError_t(hipStream_t /*stream*/, void* /*ptr*/,
+                                std::uint64_t /*value*/, unsigned int /*flags*/,
+                                std::uint64_t /*mask*/)>
+    g_hipStreamWaitValue64;
 
 // Restore the HIP controllable seams above to their defaults. Called by
 // ResetP2pFakes(); exposed for tests that only touch HIP hooks.

@@ -1515,7 +1515,9 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
         struct ncclConnector* conn =
           dir ? &channelPeers[peerRank]->send[connIndex[dir]] : &channelPeers[peerRank]->recv[connIndex[dir]];
         void* regAddr = NULL;
-        if (conn->conn.flags & (NCCL_P2P_WRITE | NCCL_P2P_READ)) {
+        // CE/memcpy connections stage through proxy buffers and do not provide
+        // the pointer-exchange slot required by the direct registered path.
+        if ((conn->conn.flags & (NCCL_P2P_WRITE | NCCL_P2P_READ)) && conn->conn.ptrExchange != nullptr) {
           // We require users registering buffers on both sides
           NCCLCHECKGOTO(ncclRegisterP2pIpcBuffer(comm, addrs[dir], bytes[dir], peerRank, &regFlag, &regAddr,
                                                  &plan->cleanupQueue),
@@ -4182,10 +4184,6 @@ static ncclResult_t rmaTaskAppend(struct ncclComm* comm, struct ncclInfo* info) 
   return ncclSuccess;
 }
 
-RCCL_PARAM_DECLARE(ForceCeAllReduce);
-RCCL_PARAM_DECLARE(ForceCeReduceScatter);
-RCCL_PARAM_DECLARE(CeAllReduce);
-RCCL_PARAM_DECLARE(CeReduceScatter);
 RCCL_PARAM(ForceCe, "FORCE_CE", 1);
 // TODO(raw task): move this raw task capture implementation into raw_task.cc
 // once the remaining enqueue-local profiler and red-op dependencies are split.
@@ -4373,7 +4371,8 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       // DDA/symmetric/kernel paths.
       bool ceCapturing, ceArGraphAllowed;
       if (info->decisionValid) {
-        // Already computed by ncclAllReduce_impl() / ncclReduceScatter_impl() via rcclSelect*().
+        // Already computed by ncclAllReduce_impl(), ncclReduceScatter_impl(),
+        // ncclAllGather_impl(), or ncclAlltoAll_impl() via rcclSelect*().
         ceCapturing = info->decision.ceCapturing;
         ceArGraphAllowed = info->decision.ceArGraphAllowed;
       } else {
@@ -4407,7 +4406,11 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       // that arm behind the policy bit which actually selects hierarchical CE;
       // otherwise a default-policy collective initializes and registers CE
       // resources only to take the kernel path.
-      if (!ceCapturing && ncclCeImplemented(info->coll, info->op, info->datatype) && comm->symmetricSupport &&
+      // ReduceScatter is opt-in (RCCL_CE_REDUCESCATTER defaults to 0). The other
+      // collectives in ncclCeImplemented() already initialize CE today.
+      const bool ceInitForThisColl =
+          info->coll != ncclFuncReduceScatter || rcclParamCeReduceScatter();
+      if (ceInitForThisColl && !ceCapturing && ncclCeImplemented(info->coll, info->op, info->datatype) && comm->symmetricSupport &&
           (comm->nNodes == 1 ||
            (hierCeAvailable && (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO))) &&
           comm->ceColl.baseUCSymReadyPtr == NULL &&
@@ -4450,7 +4453,8 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
         } else if (ceReduceScatterOpSupported) {
           size_t totalBytes = (size_t)comm->nRanks * info->count * ncclTypeSize(info->datatype);
           const size_t twoShotMax = rcclCeAr2ShotMax(comm);
-          if (twoShotMax == 0 || totalBytes > twoShotMax || !rcclParamForceCeReduceScatter() ||
+          if (twoShotMax == 0 || totalBytes > twoShotMax || totalBytes > comm->ceColl.ceArMaxBytes ||
+              !rcclParamForceCeReduceScatter() ||
               !comm->symmetricSupport || comm->nNodes > 1) {
             ceReduceScatterFits = false;
           } else {
@@ -4655,10 +4659,7 @@ ncclResult_t ncclEnqueueCheck(struct ncclInfo* info) {
   // RCCL: a collective must not be issued on a suspended communicator. The queues cover a suspend or resume still
   // pending in this group, which the group drains before launching.
   if (info->comm->memManager) {
-    bool commIsSuspended = ncclIntruQueueEmpty(&info->comm->resumeTaskQueue) &&
-                           (!ncclIntruQueueEmpty(&info->comm->suspendTaskQueue) ||
-                            __atomic_load_n(&info->comm->memManager->released, __ATOMIC_ACQUIRE));
-    if (commIsSuspended) {
+    if (ncclCommIsSuspended(info->comm)) {
       WARN("%s: communicator %p is suspended; call ncclCommResume before issuing collectives", info->opName,
            info->comm);
       ret = ncclInvalidUsage;

@@ -236,7 +236,10 @@ bool rcclUseAlltoAllGda(struct ncclComm* comm);
 bool rcclUseCeAr2Shot(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op, const void* acc);
 // Opt-in CE ReduceScatter 2-shot gate (RCCL_CE_REDUCESCATTER=1). Size cap is the
 // same 2-shot window as CE AllReduce (rcclCeAr2ShotMax).
-bool rcclUseCeReduceScatter(struct ncclComm* comm, size_t recvcount, ncclDataType_t datatype, ncclRedOp_t op);
+// recvbuff may be nullptr when the caller has no buffer yet. A non-null buffer
+// must be 16-byte aligned: the reduce kernel stores through a 16-byte vector.
+bool rcclUseCeReduceScatter(struct ncclComm* comm, size_t recvcount, ncclDataType_t datatype, ncclRedOp_t op,
+                            const void* recvbuff);
 // Updates the CE AllReduce graph latch from this call's capture state.
 // Invoke once per collective (any type) at each CE AR decision point.
 void rcclCeAllReduceGraphLatchTick(struct ncclComm* comm, bool ceCapturing);
@@ -247,6 +250,8 @@ bool rcclCeArGraphSafe(struct ncclComm* comm);
 // params so an unset env var does not read as "disabled".
 RCCL_PARAM_DECLARE(CeAllReduce);
 RCCL_PARAM_DECLARE(ForceCeAllReduce);
+RCCL_PARAM_DECLARE(CeReduceScatter);
+RCCL_PARAM_DECLARE(ForceCeReduceScatter);
 // Is CE AllReduce enabled for this comm? RCCL_CE_ALLREDUCE wins when set;
 // otherwise CE AllReduce is on only for the arch it is tuned for (gfx1250) and
 // off elsewhere, independent of that arch table's ceNonRegMax/ceRegMax entries.
@@ -278,6 +283,13 @@ bool rcclAllReduceShouldTakeDdaPath(const struct ncclComm* comm, size_t count, n
 // symmetric kernel, so unlike AllGather it cannot gate DDA on !symEligible.
 // `ceAlltoAllAllowed` is single-node CE (ncclCeAvailable); hier CE does not yield DDA.
 bool rcclAlltoAllShouldTakeDdaPath(const struct ncclComm* comm, size_t totalBytes, bool ceAlltoAllAllowed);
+// True when DDA / CE 2-shot / GIN-SDMA early-returns must yield to ncclEnqueueCheck
+// so NCCL_CHECK_MODE pointer checks and the suspend guard still run.
+bool rcclCollectiveMustUseEnqueuePath(struct ncclComm* comm);
+// Suspend is in effect, or still queued, and no resume is pending. Shared by
+// the enqueue reject and the collective divert. mem_manager.cc's double-Suspend
+// check is separate: a queued suspend has not set released yet.
+bool ncclCommIsSuspended(struct ncclComm* comm);
 void rcclSetPxn(struct ncclComm* comm, int& rcclPxnDisable);
 void rcclSetP2pNetChunkSize(struct ncclComm* comm, int& rcclP2pNetChunkSize);
 ncclResult_t rcclFuncMaxSendRecvCount(ncclFunc_t func, int nRanks, size_t count, size_t& maxCount);

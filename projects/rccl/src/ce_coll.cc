@@ -2295,7 +2295,7 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
           waits[r].waitValue.address = basePeerSignalAddr[r];
         }
       }
-      CUCHECK(hipStreamBatchMemOp(ceStream, comm->nRanks, waits.data(), 0));
+      CUCHECKGOTO(hipStreamBatchMemOp(ceStream, comm->nRanks, waits.data(), 0), ret, fail);
     }
     // Batched doorbell: all peers' + local slot signals stream memop.
     const size_t dstSlotOffsetBytes = (size_t)slot * slotStrideBytes + (size_t)comm->rank * slotChunkBytes;
@@ -2324,7 +2324,7 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
           writes[r].writeValue.address = basePeerSignalAddr[r];
         }
       }
-      CUCHECK(hipStreamBatchMemOp(ceStream, comm->nRanks, writes.data(), 0));
+      CUCHECKGOTO(hipStreamBatchMemOp(ceStream, comm->nRanks, writes.data(), 0), ret, fail);
     }
     if (totalSteps == 1) {
       NCCLCHECKGOTO(ncclMemOpSync(comm, ceStream, &collArgs), ret, fail);
@@ -2352,7 +2352,7 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
           waits[r].waitValue.address = (uint32_t*)peerSig;
         }
       }
-      CUCHECK(hipStreamBatchMemOp(ceStream, comm->nRanks, waits.data(), 0));
+      CUCHECKGOTO(hipStreamBatchMemOp(ceStream, comm->nRanks, waits.data(), 0), ret, fail);
     }
   }
   if (fastPath) {
@@ -2425,12 +2425,21 @@ ncclResult_t ncclCeReduceScatter(struct ncclComm* comm, const void* sendbuff, vo
     return ncclInvalidUsage;
   }
 
+  if (((uintptr_t)recvbuff & 15) != 0) {
+    WARN("CE ReduceScatter: recvbuff %p is not 16-byte aligned", recvbuff);
+    return ncclInvalidArgument;
+  }
+
   const size_t eltSize = ncclTypeSize(datatype);
-  const size_t totalBytes = count * eltSize;
+  const size_t totalBytes = count * eltSize * (size_t)comm->nRanks;
   const size_t shardElems = count;
   const size_t shardBytes = shardElems * eltSize;
   const size_t NUM_SLOTS = NCCL_CE_NUM_SLOTS;
-  const size_t slotChunkBytes = ncclCeAllReduceSlotChunkBytes(ncclCeAllReduceMaxChunkBytes(comm->nRanks));
+  // Match the window ncclCeEnsureAllReduceStaging sized from ceArStagingBytes.
+  // ncclCeAllReduceMaxChunkBytes() is the compile-time default and overruns the
+  // window when RCCL_CE_AR_STAGING_BYTES is smaller.
+  const size_t slotChunkBytes =
+      ncclCeAllReduceSlotChunkBytes(comm->ceColl.ceArStagingBytes / (size_t)comm->nRanks);
   if (shardElems == 0 || slotChunkBytes < eltSize) {
     WARN("CE ReduceScatter: no valid chunk layout (count=%zu eltSize=%zu nRanks=%d)", count, eltSize, comm->nRanks);
     return ncclInvalidArgument;
@@ -2539,7 +2548,7 @@ ncclResult_t ncclCeReduceScatter(struct ncclComm* comm, const void* sendbuff, vo
           waits[r].waitValue.address = basePeerSignalAddr[r];
         }
       }
-      CUCHECK(hipStreamBatchMemOp(ceStream, comm->nRanks, waits.data(), 0));
+      CUCHECKGOTO(hipStreamBatchMemOp(ceStream, comm->nRanks, waits.data(), 0), ret, fail);
     }
     const size_t dstSlotOffsetBytes =
       ncclCeReduceScatterDstSlotOffsetBytes(slot, comm->rank, comm->nRanks, slotChunkBytes);
@@ -2567,7 +2576,7 @@ ncclResult_t ncclCeReduceScatter(struct ncclComm* comm, const void* sendbuff, vo
           writes[r].writeValue.address = basePeerSignalAddr[r];
         }
       }
-      CUCHECK(hipStreamBatchMemOp(ceStream, comm->nRanks, writes.data(), 0));
+      CUCHECKGOTO(hipStreamBatchMemOp(ceStream, comm->nRanks, writes.data(), 0), ret, fail);
     }
     if (totalSteps == 1) {
       NCCLCHECKGOTO(ncclMemOpSync(comm, ceStream, &collArgs), ret, fail);
@@ -2593,7 +2602,7 @@ ncclResult_t ncclCeReduceScatter(struct ncclComm* comm, const void* sendbuff, vo
           waits[r].waitValue.address = (uint32_t*)peerSig;
         }
       }
-      CUCHECK(hipStreamBatchMemOp(ceStream, comm->nRanks, waits.data(), 0));
+      CUCHECKGOTO(hipStreamBatchMemOp(ceStream, comm->nRanks, waits.data(), 0), ret, fail);
     }
     NCCLCHECKGOTO(ncclMemOpSync(comm, ceStream, &collArgs), ret, fail);
   }
