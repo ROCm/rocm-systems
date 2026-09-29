@@ -24,8 +24,8 @@ template <policies::domain_service::externals Externals>
 inline void
 on_kfd_page_migrate_configure()
 {
-    Externals::get_metadata_registry().add_string(
-        Externals::k_kfd_page_migrate_category_name);
+    auto& metadata_registry = Externals::get_metadata_registry();
+    metadata_registry.add_string(Externals::k_kfd_page_migrate_category_name);
 
     auto const& agent_mgr  = Externals::get_agent_manager();
     auto const  gpu_agents = agent_mgr.get_agents_by_type(Externals::k_agent_type_gpu);
@@ -46,7 +46,7 @@ on_kfd_page_migrate_configure()
     for(const auto& gpu : gpu_agents)
     {
         const auto dev_idx = static_cast<std::uint32_t>(gpu->device_type_index);
-        Externals::get_metadata_registry().add_pmc_info(typename Externals::pmc_info_t{
+        metadata_registry.add_pmc_info(typename Externals::pmc_info_t{
             .type             = Externals::k_agent_type_gpu,
             .agent_type_index = dev_idx,
             .target_arch      = "GPU",
@@ -71,7 +71,7 @@ on_kfd_page_migrate_configure()
     for(const auto& cpu : cpu_agents)
     {
         const auto dev_idx = static_cast<std::uint32_t>(cpu->device_type_index);
-        Externals::get_metadata_registry().add_pmc_info(typename Externals::pmc_info_t{
+        metadata_registry.add_pmc_info(typename Externals::pmc_info_t{
             .type             = Externals::k_agent_type_cpu,
             .agent_type_index = dev_idx,
             .target_arch      = "CPU",
@@ -97,9 +97,9 @@ on_kfd_page_migrate_configure()
 template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals>
 inline void
-on_kfd_page_migrate(typename SdkBackend::kfd_page_migrate_record* record, void* data)
+on_kfd_page_migrate(typename SdkBackend::kfd_page_migrate_record* record,
+                    [[maybe_unused]] void*                        data)
 {
-    (void) data;
     if(!record)
     {
         return;
@@ -153,7 +153,8 @@ on_kfd_page_migrate(typename SdkBackend::kfd_page_migrate_record* record, void* 
                   record->preferred_agent.handle, e.what());
     }
 
-    Externals::get_metadata_registry().add_thread_info(typename Externals::thread_info_t{
+    auto& metadata_registry = Externals::get_metadata_registry();
+    metadata_registry.add_thread_info(typename Externals::thread_info_t{
         Externals::get_ppid(), Externals::get_pid(), tid, 0, 0, "{}" });
 
     auto const agent_label = [](const auto* agent_ptr) {
@@ -170,8 +171,7 @@ on_kfd_page_migrate(typename SdkBackend::kfd_page_migrate_record* record, void* 
 
     auto const track_name = fmt::format("KFD Page Migrate [{}->{}]",
                                         agent_label(src_agent), agent_label(dst_agent));
-    Externals::get_metadata_registry().add_track(
-        typename Externals::track_t{ track_name, tid, "{}" });
+    metadata_registry.add_track(typename Externals::track_t{ track_name, tid, "{}" });
 
     auto const agent_node_id = [](const auto* agent_ptr) {
         return agent_ptr ? std::to_string(agent_ptr->node_id) : std::string{ "null" };

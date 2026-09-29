@@ -20,12 +20,17 @@ namespace rocprofsys::domains::callback
 template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals>
 inline void
-on_hip_stream_enter(typename SdkBackend::callback_tracing_record_t record,
-                    typename SdkBackend::user_data_t* /*user_data*/,
-                    void* /*callback_data*/)
+on_hip_stream_enter(typename SdkBackend::callback_tracing_record_t     record,
+                    [[maybe_unused]] typename SdkBackend::user_data_t* user_data,
+                    [[maybe_unused]] void*                             callback_data)
 {
-    auto* stream_handle_data =
-        static_cast<SdkBackend::tracing_hip_stream_data_t*>(record.payload);
+    const auto* stream_handle_data =
+        static_cast<const SdkBackend::tracing_hip_stream_data_t*>(record.payload);
+    if(stream_handle_data == nullptr)
+    {
+        return;
+    }
+
     auto stream_id = stream_handle_data->stream_id;
 
     if(record.operation == SdkBackend::HIP_STREAM_SET)
@@ -40,12 +45,17 @@ on_hip_stream_enter(typename SdkBackend::callback_tracing_record_t record,
 template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals>
 inline void
-on_hip_stream_exit(typename SdkBackend::callback_tracing_record_t record,
-                   typename SdkBackend::user_data_t* /*user_data*/,
-                   void* /*callback_data*/)
+on_hip_stream_exit(typename SdkBackend::callback_tracing_record_t     record,
+                   [[maybe_unused]] typename SdkBackend::user_data_t* user_data,
+                   [[maybe_unused]] void*                             callback_data)
 {
-    auto* stream_handle_data =
-        static_cast<SdkBackend::tracing_hip_stream_data_t*>(record.payload);
+    const auto* stream_handle_data =
+        static_cast<const SdkBackend::tracing_hip_stream_data_t*>(record.payload);
+    if(stream_handle_data == nullptr)
+    {
+        return;
+    }
+
     auto stream_id = stream_handle_data->stream_id;
 
     if(record.operation == SdkBackend::HIP_STREAM_SET)

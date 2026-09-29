@@ -31,14 +31,13 @@ on_memory_allocation_configure()
 template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals>
 inline void
-on_memory_allocation(typename SdkBackend::memory_allocation_record_t* record, void* data)
+on_memory_allocation(typename SdkBackend::memory_allocation_record_t* record,
+                     [[maybe_unused]] void*                           data)
 {
     if(record == nullptr)
     {
         return;
     }
-
-    (void) data;
 
     constexpr const char* k_empty_json           = "{}";
     constexpr auto        k_zero_start_timestamp = 0;
@@ -47,11 +46,12 @@ on_memory_allocation(typename SdkBackend::memory_allocation_record_t* record, vo
     const std::uint64_t stream_id =
         rocprofiler_sdk::stream_stack_service<SdkBackend>::get_stream_id(record).handle;
 
-    Externals::get_metadata_registry().add_thread_info(
-        { Externals::get_ppid(), Externals::get_pid(), record->thread_id,
-          k_zero_start_timestamp, k_zero_end_timestamp, k_empty_json });
+    auto& metadata_registry = Externals::get_metadata_registry();
+    metadata_registry.add_thread_info({ Externals::get_ppid(), Externals::get_pid(),
+                                        record->thread_id, k_zero_start_timestamp,
+                                        k_zero_end_timestamp, k_empty_json });
 
-    Externals::get_metadata_registry().add_stream(stream_id);
+    metadata_registry.add_stream(stream_id);
 
     Externals::get_buffer_storage().store(typename Externals::memory_allocation_sample_t{
         record->start_timestamp, record->end_timestamp, record->thread_id,

@@ -21,8 +21,8 @@ template <policies::domain_service::externals Externals>
 inline void
 on_kfd_event_dropped_events_configure()
 {
-    Externals::get_metadata_registry().add_string(
-        Externals::k_kfd_event_dropped_events_category_name);
+    auto& metadata_registry = Externals::get_metadata_registry();
+    metadata_registry.add_string(Externals::k_kfd_event_dropped_events_category_name);
 
     // Dropped events carry no agent of their own; pin metadata to the first
     // GPU agent as a placeholder so the post-processor can resolve one.
@@ -44,7 +44,7 @@ on_kfd_event_dropped_events_configure()
     constexpr auto*       k_expression  = "";
     const std::string     value_type_absolute{ Externals::k_pmc_value_type_absolute };
 
-    Externals::get_metadata_registry().add_pmc_info(typename Externals::pmc_info_t{
+    metadata_registry.add_pmc_info(typename Externals::pmc_info_t{
         .type             = Externals::k_agent_type_gpu,
         .agent_type_index = dev_idx,
         .target_arch      = "GPU",
@@ -70,9 +70,8 @@ template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals>
 inline void
 on_kfd_event_dropped_events(typename SdkBackend::kfd_event_dropped_record* record,
-                            void*                                          data)
+                            [[maybe_unused]] void*                         data)
 {
-    (void) data;
     if(!record)
     {
         return;
@@ -82,12 +81,12 @@ on_kfd_event_dropped_events(typename SdkBackend::kfd_event_dropped_record* recor
         SdkBackend::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS, record->operation) };
     const auto tid  = static_cast<std::uint64_t>(record->pid);
 
-    Externals::get_metadata_registry().add_thread_info(typename Externals::thread_info_t{
+    auto& metadata_registry = Externals::get_metadata_registry();
+    metadata_registry.add_thread_info(typename Externals::thread_info_t{
         Externals::get_ppid(), Externals::get_pid(), tid, 0, 0, "{}" });
 
     auto const track_name = std::string{ "KFD Dropped Events" };
-    Externals::get_metadata_registry().add_track(
-        typename Externals::track_t{ track_name, tid, "{}" });
+    metadata_registry.add_track(typename Externals::track_t{ track_name, tid, "{}" });
 
     constexpr auto k_empty_args           = "";
     constexpr auto k_empty_event_metadata = "{}";

@@ -31,14 +31,13 @@ on_scratch_memory_configure()
 template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals>
 inline void
-on_scratch_memory(typename SdkBackend::scratch_memory_record_t* record, void* data)
+on_scratch_memory(typename SdkBackend::scratch_memory_record_t* record,
+                  [[maybe_unused]] void*                        data)
 {
     if(record == nullptr)
     {
         return;
     }
-
-    (void) data;
 
     constexpr const char* k_empty_json           = "{}";
     constexpr auto        k_zero_start_timestamp = 0;
@@ -49,17 +48,17 @@ on_scratch_memory(typename SdkBackend::scratch_memory_record_t* record, void* da
     const auto& agent =
         Externals::get_agent_manager().get_agent_by_handle(record->agent_id.handle);
 
-    Externals::get_metadata_registry().add_thread_info(
-        { Externals::get_ppid(), Externals::get_pid(), record->thread_id,
-          k_zero_start_timestamp, k_zero_end_timestamp, k_empty_json });
+    auto& metadata_registry = Externals::get_metadata_registry();
+    metadata_registry.add_thread_info({ Externals::get_ppid(), Externals::get_pid(),
+                                        record->thread_id, k_zero_start_timestamp,
+                                        k_zero_end_timestamp, k_empty_json });
 
-    Externals::get_metadata_registry().add_track(
-        { fmt::format("GPU Scratch Memory [{}] Thread {}", agent.device_id,
-                      record->thread_id),
-          record->thread_id, k_empty_json });
+    metadata_registry.add_track({ fmt::format("GPU Scratch Memory [{}] Thread {}",
+                                              agent.device_id, record->thread_id),
+                                  record->thread_id, k_empty_json });
 
-    Externals::get_metadata_registry().add_queue(record->queue_id.handle);
-    Externals::get_metadata_registry().add_stream(stream_id);
+    metadata_registry.add_queue(record->queue_id.handle);
+    metadata_registry.add_stream(stream_id);
 
     Externals::get_buffer_storage().store(typename Externals::scratch_memory_sample_t{
         record->start_timestamp, record->end_timestamp, record->thread_id,
