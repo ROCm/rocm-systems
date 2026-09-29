@@ -4421,6 +4421,14 @@
           }
         },
         {
+          "name": "GIN_SignalReset_MultiContext",
+          "description": "resetSignal on one GIN context leaves the other contexts' reads and offsets intact (NCCL_GIN_NCONTEXTS=4)",
+          "test_filter": "GinMPIDeviceTests.SignalReset_IsPerContext_MultiContext",
+          "env_variables": {
+            "NCCL_GIN_NCONTEXTS": "4"
+          }
+        },
+        {
           "name": "GIN_RailConnection_Create",
           "description": "RAIL GIN connection type; requires rail-only mode (NCCL_CROSS_NIC=0)",
           "test_filter": "GinMPIDeviceTests.RailConnection_Create",
