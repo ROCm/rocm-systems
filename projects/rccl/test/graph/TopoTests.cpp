@@ -11,6 +11,8 @@
 #include "graph/xml.h"
 // rome_models.h relies on its includer for ncclResult_t and the topo types.
 #include "graph/rome_models.h"
+#include "comm.h"  // struct ncclComm, for the ncclTopoComputeP2pChannelsPerPeer case
+#include "graph.h" // ncclTopoComputeP2pChannelsPerPeer
 #include "gtest/gtest.h"
 
 #include "../common/ProcessIsolatedTestRunner.hpp"
@@ -20,6 +22,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 
 // busIdToInt64 is an internal helper (declared in utils.h).
 ncclResult_t busIdToInt64(const char* busId, int64_t* id);
@@ -925,6 +928,47 @@ TEST_F(TopoTest, MloPartSiblings_LeaveInterDeviceXgmiAtItsReportedWidth) {
   EXPECT_FLOAT_EQ(pSibling->bw, MLOPART_LOC_BW);
   EXPECT_EQ(pInterDevice->type, PATH_NVL);
   EXPECT_FLOAT_EQ(pInterDevice->bw, interDeviceBw);
+
+  ncclTopoFree(built);
+}
+
+// What a sibling peer resolves to in P2P channels per peer. ncclTopoGetNchannels() derives that
+// count for a real XGMI hop by dividing the path bw by one XGMI width, which an on-package hop has
+// no width to be read out of, so it states MLOPART_P2P_NCHANNELS instead. Without that branch the
+// division reads MLOPART_LOC_BW as a ~54-link stack and a sibling peer resolves to 4 * that, which
+// is what the width-derived figure below stands in for.
+TEST_F(TopoTest, MloPartSiblings_PerPeerChannelsComeFromTheMloPartCount) {
+  const uint64_t host = 0xc7;
+  struct ncclXmlNode* cpu = addSystemCpu(host);
+  struct ncclXmlNode* pci = addGpuPci(cpu, "0000:0c:00.0", "gfx942", /*rank=*/0, /*dev=*/0, /*mloPart=*/0);
+  struct ncclXmlNode* gpu0 = nullptr;
+  ASSERT_EQ(xmlGetSub(pci, "gpu", &gpu0), ncclSuccess);
+  ASSERT_NE(gpu0, nullptr);
+  struct ncclXmlNode* gpu1 = addGpuUnderPci(pci, "gfx942", /*rank=*/1, /*dev=*/1, /*mloPart=*/1);
+  addGpuLink(gpu0, "0000:0c:00.1", 4, PCI_ACCELERATOR_CLASS);
+  addGpuLink(gpu1, "0000:0c:00.0", 4, PCI_ACCELERATOR_CLASS);
+
+  struct ncclTopoSystem* built = nullptr;
+  ASSERT_EQ(ncclTopoGetSystemFromXml(xml, &built, host), ncclSuccess);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nodes[GPU].count, 2);
+  ASSERT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
+
+  // ncclComm is several MB (channels[MAXCHANNELS] and the planner's wip plan), so heap-allocate
+  // it rather than put it on the test thread's stack. Same reason as P2pChannelsComm.
+  std::unique_ptr<struct ncclComm> comm(new ncclComm());
+  memset(comm.get(), 0, sizeof(*comm));
+  comm->topo = built;
+  comm->rank = 0;
+  comm->nRanks = 2;
+  comm->nNodes = 1;
+  comm->config.maxP2pPeers = NCCL_CONFIG_UNDEF_INT;
+
+  ASSERT_EQ(ncclTopoComputeP2pChannelsPerPeer(comm.get()), ncclSuccess);
+  const int widthDerived = 4 * (int)(MLOPART_LOC_BW / ncclTopoXGMISpeed("gfx942"));
+  ASSERT_NE(widthDerived, MLOPART_P2P_NCHANNELS) << "the two ratings must be distinguishable";
+  EXPECT_EQ(comm->p2pnChannelsPerPeer, MLOPART_P2P_NCHANNELS);
+  EXPECT_EQ(comm->p2pMaxPeers, 2) << "an unset maxP2pPeers resolves to the rank count";
 
   ncclTopoFree(built);
 }
