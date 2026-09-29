@@ -1845,7 +1845,7 @@ foreach(_variant "" "-uncached" "-faultinj")
   elseif(_variant STREQUAL "-faultinj")
     target_compile_definitions(${_init_tgt} PRIVATE ENABLE_FAULT_INJECTION)
   endif()
-  rccl_apply_hip_requirements(${_init_tgt})
+  rccl_apply_hip_compile_only(${_init_tgt})
 
   target_link_options(${_init_tgt} PRIVATE -no-hip-rt -Wl,--gc-sections)
   target_link_libraries(${_init_tgt} PRIVATE

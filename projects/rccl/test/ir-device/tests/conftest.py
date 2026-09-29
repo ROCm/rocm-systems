@@ -280,7 +280,7 @@ def _build_gin_mpi_binary():
         "-o", GIN_MPI_TEST_EXE,
     ]
     env = os.environ.copy()
-    env.update({"OMPI_CXX": HIPCC, "MPICH_CXX": HIPCC})
+    env.update({"OMPI_CXX": AMDCLANGPP, "MPICH_CXX": AMDCLANGPP})
     build_log = os.path.join(LOGDIR, "ir_gin_mpi_build.log")
     with open(build_log, "w") as log:
         log.write("$ " + " ".join(args) + "\n\n")
