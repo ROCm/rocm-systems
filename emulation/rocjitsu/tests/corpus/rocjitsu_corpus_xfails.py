@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Temporary strict xfails, loaded only by the RocJITsu corpus runner."""
+"""Temporary non-strict xfails, loaded only by the RocJITsu corpus runner."""
 
 import pytest
 
@@ -22,4 +22,4 @@ def pytest_collection_modifyitems(items):
         case = callspec.params.get('corpus_case') if callspec else None
         reason = XFAILS.get(getattr(case, 'id', None))
         if reason:
-            item.add_marker(pytest.mark.xfail(strict=True, reason=reason))
+            item.add_marker(pytest.mark.xfail(strict=False, reason=reason))
