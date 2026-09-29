@@ -108,7 +108,8 @@ verify_loaded_library(const char* symbol_name, const fs::path& expected_library)
 int
 run_child(std::string_view mode,
           const fs::path&  register_library,
-          const fs::path&  expected_library)
+          const fs::path&  expected_library,
+          const fs::path&  expected_sdk_library)
 {
     if(!verify_loaded_library("rocprofiler_register_library_api_table", register_library))
         return 1;
@@ -120,7 +121,7 @@ run_child(std::string_view mode,
         if(!verify_loaded_library("rocprofiler_set_api_table", expected_library))
             return 1;
     }
-    else if(mode == "attach")
+    else if(mode == "attach" || mode == "attach-core")
     {
         if(!verify_loaded_library("rocprofiler_attach_set_api_table", expected_library))
             return 1;
@@ -129,6 +130,23 @@ run_child(std::string_view mode,
     {
         std::cerr << "Test FAILED: unknown child mode " << mode << '\n';
         return 1;
+    }
+
+    if(mode == "attach-core")
+    {
+        using register_attach_t = int (*)(const char*, const char*);
+        auto* register_attach   = reinterpret_cast<register_attach_t>(
+            dlsym(RTLD_DEFAULT, "rocprofiler_register_attach"));
+        if(register_attach == nullptr)
+        {
+            std::cerr << "Test FAILED: could not find rocprofiler_register_attach\n";
+            return 1;
+        }
+
+        // the SDK fixture has no rocprofiler_attach, so only the core selection matters
+        register_attach(nullptr, "runtime-soname-unused-tool");
+        if(!verify_loaded_library("rocprofiler_set_api_table", expected_sdk_library))
+            return 1;
     }
 
     return 0;
@@ -149,7 +167,8 @@ set_child_environment(const char*     mode,
     auto status = 0;
     if(std::string_view{ mode } == "sdk")
         status = setenv("ROCPROFILER_REGISTER_FORCE_LOAD", "1", 1);
-    else if(std::string_view{ mode } == "attach")
+    else if(std::string_view{ mode } == "attach" ||
+            std::string_view{ mode } == "attach-core")
         status = setenv("ROCP_TOOL_ATTACH", "1", 1);
     else
         return false;
@@ -181,7 +200,8 @@ execute_child(const fs::path& executable,
               const fs::path& expected_library,
               const fs::path& additional_library_directory = {},
               const fs::path& register_library_override    = {},
-              bool            expect_success               = true)
+              bool            expect_success               = true,
+              const fs::path& expected_sdk_library         = {})
 {
     auto child_pid = fork();
     if(child_pid < 0)
@@ -208,6 +228,7 @@ execute_child(const fs::path& executable,
               mode,
               register_library.c_str(),
               expected_library.c_str(),
+              expected_sdk_library.c_str(),
               nullptr);
         std::fprintf(stderr, "Test FAILED: exec failed: %s\n", std::strerror(errno));
         _exit(127);
@@ -243,8 +264,8 @@ execute_child(const fs::path& executable,
 int
 main(int argc, char** argv)
 {
-    if(argc == 5 && std::string_view{ argv[1] } == "--child")
-        return run_child(argv[2], argv[3], argv[4]);
+    if(argc == 6 && std::string_view{ argv[1] } == "--child")
+        return run_child(argv[2], argv[3], argv[4], argv[5]);
 
     if(argc != 12)
     {
@@ -289,6 +310,17 @@ main(int argc, char** argv)
     auto additional_library_directory = fs::path{};
     auto register_library_override    = fs::path{};
     auto expect_sdk_success           = true;
+    auto attach_mode                  = "attach";
+    auto attach_sdk_expected          = fs::path{};
+
+    auto create_additional_library_directory = [&]() {
+        additional_library_directory = runtime_directory / "global";
+        fs::create_directory(additional_library_directory, ec);
+        if(ec)
+            std::cerr << "Test FAILED: could not create conflicting library directory: "
+                      << ec.message() << '\n';
+        return !ec;
+    };
 
     if(layout == "soname-v1")
     {
@@ -360,6 +392,50 @@ main(int argc, char** argv)
            !copy_library(argv[4], sdk_expected))
             return 1;
     }
+    else if(layout == "attach-sdk-colocated-precedence")
+    {
+        // a stale SDK installation colocated with rocprofiler-register must not win over
+        // an SDK installation selected through LD_LIBRARY_PATH
+        run_attach = true;
+        if(!create_additional_library_directory()) return 1;
+        attach_expected = additional_library_directory / argv[10];
+        if(!copy_library(argv[9], runtime_directory / argv[10]) ||
+           !copy_library(argv[4], runtime_directory / argv[5]) ||
+           !copy_library(argv[9], attach_expected) ||
+           !copy_library(argv[4], additional_library_directory / argv[5]))
+            return 1;
+    }
+    else if(layout == "attach-no-sibling-sdk-prefers-register-dir")
+    {
+        run_attach = true;
+        if(!create_additional_library_directory()) return 1;
+        attach_expected = runtime_directory / argv[10];
+        if(!copy_library(argv[9], additional_library_directory / argv[10]) ||
+           !copy_library(argv[9], attach_expected) ||
+           !copy_library(argv[4], runtime_directory / argv[5]))
+            return 1;
+    }
+    else if(layout == "attach-register-dir-fallback")
+    {
+        run_attach = true;
+        if(!create_additional_library_directory()) return 1;
+        attach_expected = runtime_directory / argv[10];
+        if(!copy_library(argv[9], additional_library_directory / argv[10]) ||
+           !copy_library(argv[9], attach_expected))
+            return 1;
+    }
+    else if(layout == "attach-core-follows-attach-library")
+    {
+        run_attach  = true;
+        attach_mode = "attach-core";
+        if(!create_additional_library_directory()) return 1;
+        attach_expected     = additional_library_directory / argv[10];
+        attach_sdk_expected = additional_library_directory / argv[5];
+        if(!copy_library(argv[9], attach_expected) ||
+           !copy_library(argv[4], attach_sdk_expected) ||
+           !copy_library(argv[4], runtime_directory / argv[5]))
+            return 1;
+    }
     else
     {
         std::cerr << "Test FAILED: unknown layout " << layout << '\n';
@@ -383,9 +459,15 @@ main(int argc, char** argv)
                                  register_library_override,
                                  expect_sdk_success))
         return 1;
-    if(run_attach &&
-       !execute_child(
-           executable, "attach", runtime_directory, register_library, attach_expected))
+    if(run_attach && !execute_child(executable,
+                                    attach_mode,
+                                    runtime_directory,
+                                    register_library,
+                                    attach_expected,
+                                    additional_library_directory,
+                                    {},
+                                    true,
+                                    attach_sdk_expected))
         return 1;
 
     std::cout << "Test PASSED: " << layout << '\n';
