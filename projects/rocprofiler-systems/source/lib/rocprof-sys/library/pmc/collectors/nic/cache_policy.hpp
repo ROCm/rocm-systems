@@ -4,13 +4,12 @@
 #pragma once
 
 #include "core/agent.hpp"
-#include "core/config.hpp"
+#include "core/categories.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "library/pmc/collectors/nic/sample.hpp"
 #include "library/pmc/collectors/nic/types.hpp"
-#include "logger/debug.hpp"
 
 #include <cstddef>
 #include <cstdint>
