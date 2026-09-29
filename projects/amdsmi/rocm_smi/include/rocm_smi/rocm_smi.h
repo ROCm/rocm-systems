@@ -1321,7 +1321,8 @@ struct amdgpu_xcp_metrics_t {
  * `temperature_core` on v2.4) will contain 0xFFFF. However, uint32_t elements such as
  * 'throttle_status' will contain 0xFFFFFFFF and UINT64_MAX for uint64_t elements such
  * as 'indep_throttle_status'. Callers should check the version and treat maximum values
- * as invalid/not applicable.
+ * as invalid/not applicable. On v3.0, a `temperature_core` or `temperature_skin`
+ * reading of 0 (not measured) is also returned as 0xFFFF.
  *
  * @cond @tag{gpu_bm_linux} @endcond
  */
