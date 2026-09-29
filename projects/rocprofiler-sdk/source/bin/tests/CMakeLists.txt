@@ -22,16 +22,7 @@ endforeach()
 rocprofiler_sdk_pytest_discover_tests(
     rocprofv3-launcher-tests
     TEST_PATHS test_multipass_parsing.py test_att_resource_mode.py
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    PYTHON_EXECUTABLE ${Python3_EXECUTABLE}
-    EXTRA_ARGS --rocprofv3-path ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/rocprofv3
-    PROPERTIES
-    LABELS "unittests"
-    TIMEOUT 45)
-
-rocprofiler_sdk_pytest_discover_tests(
-    rocprofv3-preload-ordering-tests
-    TEST_PATHS test_preload_ordering.py
+               test_preload_ordering.py
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     PYTHON_EXECUTABLE ${Python3_EXECUTABLE}
     EXTRA_ARGS --rocprofv3-path ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/rocprofv3

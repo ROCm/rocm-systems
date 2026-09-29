@@ -124,8 +124,6 @@ def test_multiple_preloads_keep_order(launch, rocm_root):
 
 
 def test_preload_prepended_before_existing(launch, rocm_root):
-    # A pre-existing value is what distinguishes prepending from appending; without
-    # one both produce the same string.
     assert launch(
         "--preload", "/opt/libA.so", "--kernel-trace", env={"LD_PRELOAD": "/opt/libX.so"}
     ) == expected_preload(rocm_root, "/opt/libA.so", "/opt/libX.so"), (
