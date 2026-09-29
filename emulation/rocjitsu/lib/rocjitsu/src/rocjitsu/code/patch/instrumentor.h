@@ -442,6 +442,10 @@ public:
   /// Requires at least one queued InstrumentationPoint; queuing zero is a fatal
   /// error. Shares the single-attempt budget with patch_with_debug_summaries();
   /// see the class-level note.
+  ///
+  /// Refuses any point whose probe reads a `LogBufferPtr*` argument: the entry
+  /// prologue those need loads through a kernarg wrapper that no runtime builds
+  /// yet.
   [[nodiscard]] InstrumentedCodeObject patch();
 
   /// @brief Same as patch(), plus per-site InstrumentationPatch summaries.
