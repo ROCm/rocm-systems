@@ -3176,11 +3176,10 @@ hipError_t Graph::RunNodes(int32_t base_stream, const std::vector<hip::Stream*>*
 hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
   hipError_t status = hipSuccess;
 
-  {
-    std::shared_lock<std::shared_mutex> trim_guard(graphExecTrimLock_);
-    std::shared_lock<std::shared_mutex> update_guard(execUpdateLock_);
-    this->retain();
-  }
+  std::shared_lock<std::shared_mutex> trim_guard(graphExecTrimLock_);
+  std::shared_lock<std::shared_mutex> update_guard(execUpdateLock_);
+  this->retain();
+  trim_guard.unlock();
 
   // Get the first node
   Node firstNode = nullptr;
@@ -3258,8 +3257,9 @@ hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
     graph_launch_stream->vdev()->HiddenHeapInit();
   }
 
-  // Register before any captured packet is queued. Updates can replace the
-  // packet set while this asynchronous launch still references the old slots.
+  // GraphExecSegmented is the only exec type that owns captured kernarg slots.
+  // Recursively enqueued child graphs share this manager and top-level launch ID.
+  // Register before any captured packet is queued so updates retain old slots.
   const uint64_t kernarg_launch_id =
       (kernArgManager_ != nullptr) ? kernArgManager_->RegisterLaunch() : 0;
 
@@ -3301,6 +3301,10 @@ hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
       launch_done->release();
     }
   }
+
+  // Packet selection for this launch is complete. Updates can now replace the
+  // executable's packet set while the queued GPU work retains its old kernargs.
+  update_guard.unlock();
 
   if (status != hipSuccess) {
     // A later segment can fail after earlier segments were queued. Drain every
