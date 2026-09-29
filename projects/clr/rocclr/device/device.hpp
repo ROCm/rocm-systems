@@ -651,6 +651,8 @@ struct Info : public amd::EmbeddedObject {
   char cuid_[16];
   //! Max numbers of threads per CU
   uint32_t maxThreadsPerCU_;
+  //! Max numbers of wavegroups per CU
+  uint32_t maxWavesPerCU_;
 
   //! GPU device supports a launch of cooperative groups
   uint32_t cooperativeGroups_;
