@@ -134,10 +134,6 @@ static void ginAnvilFreeGinCtx(ginAnvilGinCtx* ctx) {
     if (ctx->signal_remote_addrs_dev && ctx->signal_remote_addrs_dev[contextId]) {
       CUDACHECKIGNORE(hipFree(ctx->signal_remote_addrs_dev[contextId]));
     }
-    if (ctx->gpuCtxHost) {
-      ctx->gpuCtxHost[contextId].signals = nullptr;
-      ctx->gpuCtxHost[contextId].signal_remote_addrs = nullptr;
-    }
   }
   ginAnvilSignalSpanRefDec(ctx->signalSpanLsaSelf);
   if (ctx->counters) CUDACHECKIGNORE(hipFree(ctx->counters));
@@ -767,6 +763,14 @@ static ncclResult_t ginAnvilRegisterSignalSpan(struct ncclComm* comm, void* span
   struct ncclDevrState* devr = &comm->devrState;
   const ptrdiff_t stride = (ptrdiff_t)devr->bigSize;
 
+  if (nRanks != devr->lsaSize) {
+    WARN("GIN anvil-sdma: signal nRanks=%d != devr->lsaSize=%d (rank %d)", nRanks, devr->lsaSize, ginRank);
+  }
+  if (ginRank != devr->lsaSelf) {
+    WARN("GIN anvil-sdma: ctx->rank=%d != devr->lsaSelf=%d (signal peer indexing may be wrong)", ginRank,
+         devr->lsaSelf);
+  }
+
   // signal_remote_addrs is indexed by GIN-team peer, matching resolveRemotePeerVa's
   // (peer - rsCtx->rank). lsaSelf is a different space under NCCL_GIN_CONNECTION_RAIL.
   uintptr_t* hostAddrs = (uintptr_t*)calloc((size_t)nRanks, sizeof(uintptr_t));
@@ -781,23 +785,29 @@ static ncclResult_t ginAnvilRegisterSignalSpan(struct ncclComm* comm, void* span
     WARN("GIN anvil-sdma: LSA signal span IPC table register failed for %p size %zu", spanLsaSelf, spanBytes);
     return ncclSystemError;
   }
+
+  // Probe the span base once. Every logical context's slot is a constant offset
+  // from it, so running this per context would cost one bootstrap round trip per
+  // context inside ncclDevCommCreate.
+  uintptr_t* gatheredLocalBases = (uintptr_t*)calloc((size_t)nRanks, sizeof(uintptr_t));
+  if (gatheredLocalBases) {
+    gatheredLocalBases[ginRank] = (uintptr_t)spanLsaSelf;
+    if (ginAnvilBootstrapAllgather(comm->bootstrap, gatheredLocalBases, sizeof(uintptr_t)) != 0) {
+      WARN("GIN anvil-sdma: signal local-base allgather failed");
+    } else if (gatheredLocalBases[ginRank] != (uintptr_t)spanLsaSelf) {
+      WARN("GIN anvil-sdma: signal local-base allgather mismatch rank=%d got=%#lx expect=%#lx", ginRank,
+           (unsigned long)gatheredLocalBases[ginRank], (unsigned long)spanLsaSelf);
+    }
+    free(gatheredLocalBases);
+  }
   return ncclSuccess;
 }
 
 static ncclResult_t ginAnvilBindContextSignals(ginAnvilGinCtx* ctx, int contextId, int signalSlot, void* lsaSelf,
                                                size_t bytes) {
   struct ncclDevrState* devr = &ctx->comm->devrState;
-  struct ncclComm* comm = ctx->comm;
   const ptrdiff_t stride = (ptrdiff_t)devr->bigSize;
   ncclGinAnvilSdmaGPUContext* gpuCtxHost = &ctx->gpuCtxHost[contextId];
-
-  if (ctx->nRanks != devr->lsaSize) {
-    WARN("GIN anvil-sdma: signal nRanks=%d != devr->lsaSize=%d (rank %d)", ctx->nRanks, devr->lsaSize, ctx->rank);
-  }
-  if (ctx->rank != devr->lsaSelf) {
-    WARN("GIN anvil-sdma: ctx->rank=%d != devr->lsaSelf=%d (signal peer indexing may be wrong)", ctx->rank,
-         devr->lsaSelf);
-  }
 
   gpuCtxHost->signals = (uint64_t*)lsaSelf;
 
@@ -814,18 +824,6 @@ static ncclResult_t ginAnvilBindContextSignals(ginAnvilGinCtx* ctx, int contextI
   if (hostAddrs[ctx->rank] != selfExpected) {
     WARN("GIN anvil-sdma: signal_remote_addrs[self=%d]=%#lx != signals=%#lx (lsaSelf=%#lx stride=%zd)", ctx->rank,
          (unsigned long)hostAddrs[ctx->rank], (unsigned long)selfExpected, (unsigned long)lsaSelf, (long)stride);
-  }
-
-  uintptr_t* gatheredLocalBases = (uintptr_t*)calloc((size_t)ctx->nRanks, sizeof(uintptr_t));
-  if (gatheredLocalBases) {
-    gatheredLocalBases[ctx->rank] = (uintptr_t)lsaSelf;
-    if (ginAnvilBootstrapAllgather(comm->bootstrap, gatheredLocalBases, sizeof(uintptr_t)) != 0) {
-      WARN("GIN anvil-sdma: signal local-base allgather failed");
-    } else if (gatheredLocalBases[ctx->rank] != (uintptr_t)lsaSelf) {
-      WARN("GIN anvil-sdma: signal local-base allgather mismatch rank=%d got=%#lx expect=%#lx", ctx->rank,
-           (unsigned long)gatheredLocalBases[ctx->rank], (unsigned long)lsaSelf);
-    }
-    free(gatheredLocalBases);
   }
 
   if (hipMalloc(&ctx->signal_remote_addrs_dev[contextId], sizeof(uintptr_t) * (size_t)ctx->nRanks) != hipSuccess ||
@@ -865,19 +863,6 @@ static ncclResult_t ginAnvilBindContextSignals(ginAnvilGinCtx* ctx, int contextI
        contextId, signalSlot, lsaSelf, bytes, ctx->rank, devr->lsaSelf, devr->lsaSize, (size_t)devr->bigSize,
        (unsigned long)remote0, (unsigned long)remoteSelf);
 
-  // [GIN-CONN-CHECK] Validate peer signal connectivity once per comm (on the first
-  // signal bind that is eligible for the gate). Detects the intermittent gfx950
-  // cuMem-VMM peer-map fault and fails loudly here instead of letting the first
-  // collective hang forever.
-  bool alreadyChecked = false;
-  {
-    std::lock_guard<std::mutex> lock(pluginMutex);
-    alreadyChecked = ginAnvilConnCheckedComms.count(comm) != 0;
-  }
-  if (!alreadyChecked) {
-    NCCLCHECK(ginAnvilCheckSignalConnectivity(ctx, lsaSelf, ctx->signal_remote_addrs_dev[contextId]));
-  }
-
   return ncclSuccess;
 }
 
@@ -914,6 +899,8 @@ ncclResult_t ncclGinAnvilBindResourceWindowSignals(struct ncclComm* comm, void* 
 
   ncclResult_t ret = ncclSuccess;
   int slot = 0;
+  ginAnvilGinCtx* connCheckCtx = nullptr;
+  void* connCheckLsaSelf = nullptr;
   NCCLCHECKGOTO(ginAnvilRegisterSignalSpan(comm, spanLsaSelf, spanBytes, spanRanks, spanGinRank), ret, fail);
   for (GinAnvilPendingEntry* e = g_pendingByComm[comm]; e != nullptr; e = e->next) {
     ginAnvilGinCtx* ctx = e->ctx;
@@ -930,7 +917,7 @@ ncclResult_t ncclGinAnvilBindResourceWindowSignals(struct ncclComm* comm, void* 
       size_t off = arenaByteOffset + (size_t)slot * (size_t)nSignalsPerContext * sizeof(uint64_t);
       void* localPtr = (char*)resourceUserPtr + off;
       void* lsaSelf = nullptr;
-      NCCLCHECK(ncclDevrGetLsaSelfAddr(&comm->devrState, localPtr, &lsaSelf));
+      NCCLCHECKGOTO(ncclDevrGetLsaSelfAddr(&comm->devrState, localPtr, &lsaSelf), ret, fail);
       if (lsaSelf == nullptr) {
         WARN("GIN anvil-sdma: could not resolve LSA flat addr for resource-window signals at %p", localPtr);
         ret = ncclSystemError;
@@ -939,20 +926,40 @@ ncclResult_t ncclGinAnvilBindResourceWindowSignals(struct ncclComm* comm, void* 
 
       size_t bytes = (size_t)ctx->nSignals * sizeof(uint64_t);
       NCCLCHECKGOTO(ginAnvilBindContextSignals(ctx, contextId, slot, lsaSelf, bytes), ret, fail);
+      if (connCheckCtx == nullptr) {
+        connCheckCtx = ctx;
+        connCheckLsaSelf = lsaSelf;
+      }
+    }
+  }
+
+  // [GIN-CONN-CHECK] Validate peer signal connectivity once per comm. Detects the
+  // intermittent gfx950 cuMem-VMM peer-map fault and fails loudly here instead of
+  // letting the first collective hang forever. This runs per span, not per logical
+  // context: its setup allgather is collective over the LSA team, and the bypass
+  // and skip paths return before the comm is marked, so a per-context call would
+  // repeat that allgather nContexts times.
+  if (connCheckCtx != nullptr) {
+    bool alreadyChecked = false;
+    {
+      std::lock_guard<std::mutex> lock(pluginMutex);
+      alreadyChecked = ginAnvilConnCheckedComms.count(comm) != 0;
+    }
+    if (!alreadyChecked) {
+      NCCLCHECKGOTO(
+        ginAnvilCheckSignalConnectivity(connCheckCtx, connCheckLsaSelf, connCheckCtx->signal_remote_addrs_dev[0]),
+        ret, fail);
     }
   }
 
 fail:
   if (ret != ncclSuccess) {
-    int spanRefs = 0;
     for (GinAnvilPendingEntry* e = g_pendingByComm[comm]; e != nullptr; e = e->next) {
       if (e->ctx->signalSpanLsaSelf == spanLsaSelf) {
         ginAnvilSignalSpanRefDec(spanLsaSelf);
         e->ctx->signalSpanLsaSelf = nullptr;
-        spanRefs++;
       }
     }
-    if (spanRefs == 0) (void)ncclGinAnvilIpcTableUnregister(spanLsaSelf);
   }
   ginAnvilPendingClear(comm);
   return ret;

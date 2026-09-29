@@ -41,6 +41,8 @@ struct State {
   int connCheckWriteCalls = 0;
   int connCheckVerifyCalls = 0;
   std::vector<unsigned long long> connCheckWriteStamps;
+  int bootstrapAllGatherCalls = 0;
+  int intraNodeAllGatherCalls = 0;
   void* lsaSelfAddr = reinterpret_cast<void*>(0x70001000ULL);
   uintptr_t lsaInputBase = 0;
 };
@@ -83,6 +85,8 @@ unsigned long long GetConnCheckWriteStamp(int call) {
 const std::vector<int>& GetLastIntraNodeAllGatherRanks() { return g.lastIntraNodeAllGather.ranks; }
 int GetLastIntraNodeAllGatherRank() { return g.lastIntraNodeAllGather.rank; }
 int GetLastIntraNodeAllGatherNranks() { return g.lastIntraNodeAllGather.nranks; }
+int GetBootstrapAllGatherCalls() { return g.bootstrapAllGatherCalls; }
+int GetIntraNodeAllGatherCalls() { return g.intraNodeAllGatherCalls; }
 const std::vector<int>& GetLastIntraNodeBarrierRanks() { return g.lastIntraNodeBarrier.ranks; }
 int GetLastIntraNodeBarrierRank() { return g.lastIntraNodeBarrier.rank; }
 int GetLastIntraNodeBarrierTag() { return g.lastIntraNodeBarrier.tag; }
@@ -133,6 +137,7 @@ static ncclResult_t stubIntAllGather(void* allData, int nranks, int size) {
 
 ncclResult_t bootstrapAllGather(void* commState, void* allData, int size) {
   (void)commState;
+  GinAnvilPluginStubs::g.bootstrapAllGatherCalls++;
   return stubIntAllGather(allData, GinAnvilPluginStubs::g.bootstrapNranks, size);
 }
 
@@ -151,6 +156,7 @@ ncclResult_t bootstrapIntraNodeAllGather(void* commState, int* ranks, int rank, 
   GinAnvilPluginStubs::g.lastIntraNodeAllGather.ranks.assign(ranks, ranks + nranks);
   GinAnvilPluginStubs::g.lastIntraNodeAllGather.rank = rank;
   GinAnvilPluginStubs::g.lastIntraNodeAllGather.nranks = nranks;
+  GinAnvilPluginStubs::g.intraNodeAllGatherCalls++;
   return stubIntAllGather(allData, nranks, size);
 }
 
