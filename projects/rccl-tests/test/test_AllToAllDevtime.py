@@ -29,6 +29,10 @@
 # Opt-in locally via RCCL_TESTS_GIN_SDMA_DEVTIME=1. The device-api CI job sets
 # that automatically (see projects/rccl/tools/ci/run-device-api-ci.sh).
 #
+# MPI launch, GPU detection, and the fixed-size -D 3 argv come from
+# gin_sdma_harness. Test names stay as they are: run-device-api-ci.sh runs this
+# file directly, and its pytest args are expanded unquoted.
+#
 # Environment (shared with test_AllToAll.py where noted):
 #   RCCL_TESTS_GIN_SDMA_DEVTIME  enable this module (default: off)
 #   RCCL_TESTS_A2A_NP            MPI ranks (default: detected GPU count)
@@ -43,10 +47,18 @@
 import os
 import re
 import shlex
-import signal
-import subprocess
 
 import pytest
+
+from .gin_sdma_harness import (
+    detect_ngpus,
+    env_int,
+    gin_env_xflags,
+    gin_hang_msg,
+    gin_perf_argv,
+    launch_mpi_shell,
+    mpi_launch_prefix,
+)
 
 KiB = 1024
 SMOKE_BYTES = 128 * KiB  # single-size smoke (128 KiB per rank)
@@ -62,23 +74,12 @@ DEVTIME_LINE_RE = re.compile(
     r"#\[a2a-devtime\].*?\bdevtime\s+([0-9]+(?:\.[0-9]+)?)\s+us")
 
 
-def _detect_ngpus():
-    if os.environ.get("ROCR_VISIBLE_DEVICES") is not None:
-        return len(os.environ["ROCR_VISIBLE_DEVICES"].split(","))
-    if os.environ.get("HIP_VISIBLE_DEVICES") is not None:
-        return len(os.environ["HIP_VISIBLE_DEVICES"].split(","))
-    try:
-        out = subprocess.check_output(
-            'rocminfo | grep "Device Type:.\\s*.GPU" | wc -l', shell=True)
-        return int(out)
-    except Exception:
-        return 0
-
-
-NP = int(os.environ.get("RCCL_TESTS_A2A_NP", "0")) or _detect_ngpus()
+# detect_ngpus() raises when rocminfo is missing. Only call it when this module
+# is enabled and RCCL_TESTS_A2A_NP is unset, so a GPU-free collection still works.
+NP = env_int("RCCL_TESTS_A2A_NP", 0) or (detect_ngpus() if _enabled else 0)
 LAUNCHER = os.environ.get("RCCL_TESTS_MPI_LAUNCHER", "mpirun")
 CTAS = os.environ.get("RCCL_TESTS_A2A_CTAS", "8")
-TIMEOUT_S = int(os.environ.get("RCCL_TESTS_A2A_TIMEOUT_S", "300"))
+TIMEOUT_S = env_int("RCCL_TESTS_A2A_TIMEOUT_S", 300)
 GIN_TYPE = os.environ.get("RCCL_TESTS_A2A_GIN_TYPE", "2")
 MPI_OPTS = shlex.split(os.environ.get("RCCL_TESTS_MPI_OPTS", ""))
 XENV = shlex.split(os.environ.get("RCCL_TESTS_A2A_XENV", ""))
@@ -109,61 +110,36 @@ def _run_devtime(request, device_timing_mode, devtime_check=False):
 
     size = str(SMOKE_BYTES)
     # Match device-api CI gin-d3 essentials; deployment extras via RCCL_TESTS_A2A_XENV.
-    gin_env = []
-    for kv in [
-        "NCCL_CUMEM_ENABLE=1",
-        "HSA_FORCE_FINE_GRAIN_PCIE=1",
-        "NCCL_DMABUF_ENABLE=1",
-        "NCCL_GIN_TYPE={}".format(GIN_TYPE),
-        "HSA_NO_SCRATCH_RECLAIM=1",
-        "NCCL_ENV_PLUGIN=none",
-        "RCCL_ENABLE_INTRANET=1",
-    ] + XENV:
-        gin_env += ["-x", kv]
-
-    hostfile = request.config.getoption("--hostfile")
-    launch = [LAUNCHER, "-np", str(NP)] + MPI_OPTS
-    if hostfile:
-        launch += ["-host", hostfile]
-
-    bench_args = [
-        executable,
-        "-b", size, "-e", size,
-        "-f", "2",
-        "-g", "1",
-        "-R", "2",
-        "-D", "3",
-        "-V", CTAS,
-        "-d", "int32",
-        "-c", "1",
-        "-w", "1",
-        "-n", "3",
-        "-B", str(device_timing_mode),
-        "-L", "5",
-        "-P", "2",
-    ]
+    gin_env = gin_env_xflags(
+        [
+            "NCCL_CUMEM_ENABLE=1",
+            "HSA_FORCE_FINE_GRAIN_PCIE=1",
+            "NCCL_DMABUF_ENABLE=1",
+            "NCCL_GIN_TYPE={}".format(GIN_TYPE),
+            "HSA_NO_SCRATCH_RECLAIM=1",
+            "NCCL_ENV_PLUGIN=none",
+            "RCCL_ENABLE_INTRANET=1",
+        ]
+        + XENV
+    )
+    timing = ["-B", str(device_timing_mode), "-L", "5", "-P", "2"]
     if devtime_check:
-        bench_args += ["-H", "1"]
-
-    args = launch + gin_env + bench_args
+        timing += ["-H", "1"]
+    args = (
+        mpi_launch_prefix(request, LAUNCHER, NP, MPI_OPTS)
+        + gin_env
+        + gin_perf_argv(executable, size, "int32", CTAS)
+        + timing
+    )
     cmd = " ".join(shlex.quote(a) for a in args)
-    print(cmd)
-    proc = subprocess.Popen(cmd, shell=True, universal_newlines=True,
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                            start_new_session=True)
-    try:
-        out, _ = proc.communicate(timeout=TIMEOUT_S)
-    except subprocess.TimeoutExpired:
-        try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        out, _ = proc.communicate()
-        pytest.fail(
-            "AllToAll devtime smoke HANG: no completion within {}s (mode -B {}). "
-            "Output tail:\n{}".format(TIMEOUT_S, device_timing_mode, (out or "")[-2000:]))
-    print(out)
-    return proc.returncode, out
+    hang_msg = gin_hang_msg(
+        "AllToAll devtime smoke",
+        TIMEOUT_S,
+        size,
+        "int32",
+        "mode -B {}".format(device_timing_mode),
+    )
+    return launch_mpi_shell(cmd, TIMEOUT_S, hang_msg)
 
 
 def test_AllToAllDevtimeMode1Augment(request):
