@@ -50,7 +50,6 @@ set(EXAMPLE_SOURCES
   rocshmem_user_mem_test.cc
   tile_distributed_gemm.cc
   tile_halo_exchange.cc
-  tile_rma_start_coord_test.cc
 )
 
 if (MPI_CXX_FOUND)
