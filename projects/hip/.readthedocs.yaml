@@ -20,5 +20,6 @@ build:
      post_checkout:
        - git sparse-checkout add projects/clr/hipamd/include
    apt_packages:
+     - "doxygen" # Ubuntu 24.04 ships doxygen 1.9.8, previously provided by conda
      - "gfortran" # For pre-processing fortran sources
      - "graphviz" # For dot graphs in doxygen
