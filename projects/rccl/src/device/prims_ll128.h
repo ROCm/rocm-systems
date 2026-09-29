@@ -11,10 +11,14 @@
 #define NCCL_LL128_FLAGTHREAD (NCCL_LL128_LINEELEMS - 1)
 
 // gfx1250 async-to-LDS path for the LL128 user-buffer legs. Implementation lives in
-// tdm/ll128Tdm.h; this file only carries the call sites. Build with -DTDM_LL128=0 to
-// compile it out.
+// tdm/ll128Tdm.h; this file only carries the call sites.
+//
+// Two gates, matching TDM_SIMPLE: -DTDM_LL128=1 to compile the path in, then
+// RCCL_TDM_LL128_ENABLE=1 to select it at runtime. The build gate is not cosmetic.
+// Leaving the code in the slice loop and predicating it off at runtime measured about
+// 5% down on AllGather at 1 GiB, because the path still perturbs codegen in storeRegs.
 #ifndef TDM_LL128
-#define TDM_LL128 1
+#define TDM_LL128 0
 #endif
 #define TDM_LL128_ON (ASYNC_COPY_SUPPORTED && TDM_LL128)
 

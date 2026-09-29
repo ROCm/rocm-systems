@@ -37,6 +37,10 @@ bool tdmLoadAllowed = false;
 bool tdmLoadPending = false;
 int tdmLoadEltN = 0;
 
+// Runtime opt-in, mirroring TDM_SIMPLE: RCCL_TDM_LL128_ENABLE=1, gfx1250 only.
+// Off by default, so a default build behaves exactly as before.
+__device__ __forceinline__ bool tdmEnabled() const { return ncclShmem.comm.tdmLl128Enable; }
+
 __device__ __forceinline__ uint8_t* tdmWindow() const {
   uintptr_t p = reinterpret_cast<uintptr_t>(ncclScratchForWarp(warpInBlock));
   return reinterpret_cast<uint8_t*>((p + TdmAlign - 1) & -uintptr_t(TdmAlign));
@@ -50,7 +54,7 @@ __device__ __forceinline__ bool tdmLoadBegin(T const* src, int eltN) {
   constexpr int DataBytes = WireBytes - WireBytes / NCCL_LL128_LINEELEMS;
   static_assert(ncclShmemScratchWarpSize() >= DataBytes + TdmAlign - 1,
                 "LL128 TDM needs one aligned data slice of per-warp scratch");
-  if (!tdmLoadAllowed) return false;
+  if (!tdmEnabled() || !tdmLoadAllowed) return false;
   if (reinterpret_cast<uintptr_t>(src) & (TdmAlign - 1)) return false;
 
   asyncWait<0>();  // previous slice's store may still be reading the window
@@ -90,6 +94,7 @@ __device__ __forceinline__ bool tdmLoadFinish(uint64_t (&regs)[WordPerThread]) {
  * Caller has already reversed the register permutation. Always takes the slice. */
 template <int WordPerThread>
 __device__ __forceinline__ bool tdmStoreRegs(T* dst, uint64_t (&regs)[WordPerThread], int eltN) {
+  if (!tdmEnabled()) return false;
   constexpr int LineElems = NCCL_LL128_LINEELEMS;
   constexpr int LineSkip = 2 * WARP_SIZE / LineElems;
   asyncWait<0>();  // drain the previous slice before overwriting the window
@@ -111,4 +116,6 @@ __device__ __forceinline__ bool tdmStoreRegs(T* dst, uint64_t (&regs)[WordPerThr
 }
 
 /* The last slice's store has to land before the barrier that publishes completion. */
-__device__ __forceinline__ void tdmDrain() { asyncWait<0>(); }
+__device__ __forceinline__ void tdmDrain() {
+  if (tdmEnabled()) asyncWait<0>();
+}
