@@ -6,6 +6,7 @@ on:
       - "projects/hrr/**"
       - "projects/clr/hipamd/src/hrr/**"
       - ".github/workflows/hrr-ci.yml"
+      - ".github/actions/rocprofiler-sdk-util/resolve-ci-config/**"
   workflow_dispatch:
 
 concurrency:
@@ -171,6 +172,7 @@ jobs:
   # ---------------------------------------------------------------------------
   build:
     name: "Build (multi-arch)"
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
     runs-on: azure-linux-scale-rocm
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
@@ -318,6 +320,7 @@ jobs:
   integration:
     name: "Integration (${{ matrix.family }})"
     needs: [ci_config, build]
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
     runs-on: ${{ matrix.runner }}
     # The suite runs in about 90 seconds. These are scarce single-GPU machines
     # and the default timeout is six hours, so a workload that deadlocks on one

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 """Assert that a Catch2 binary registers exactly the test cases we expect.
 
 A case behind an #if can leave a binary with no signal whatsoever -- not failed,

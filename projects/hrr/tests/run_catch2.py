@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 """Run Catch2 quietly while preserving console diagnostics and JUnit results."""
 
 from __future__ import annotations

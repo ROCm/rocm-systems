@@ -57,11 +57,12 @@
 #define HRR_TEST_CASE(name) TEST_CASE(#name, "[hrr]")
 
 // HRR_HIP_CHECK replaces the hip-tests HIP error check: fail the current Catch2 test if a HIP call
-// does not return hipSuccess, reporting the error code and string.
+// does not return hipSuccess, reporting the error code and string. hipErrorNoDevice skips the case
+// only when no device is visible at all; a device lost mid-case still fails.
 #define HRR_HIP_CHECK(expr)                                                     \
   do {                                                                          \
     hipError_t _hrr_err = (expr);                                              \
-    if (_hrr_err == hipErrorNoDevice) {                                        \
+    if (_hrr_err == hipErrorNoDevice && !hrr_gpu_available()) {                \
       HRR_SKIP_CASE("no ROCm-capable device is detected");                     \
     }                                                                          \
     INFO("HIP call failed: " #expr);                                           \

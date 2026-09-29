@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 """Build a platform/family table from Catch2 JUnit files.
 
 CI names the files unit-<os>.xml and integration-<family>.xml. Catch2 also
