@@ -746,30 +746,26 @@ class AMDSMILogger:
                 )
 
     def _format_event_human_readable(self, event):
-        message = event.get("message", {})
-        message_fields = []
-        if isinstance(message, dict):
-            message_fields = [f"{key}={value}" for key, value in message.items()]
-        elif message:
-            message_fields = [str(message)]
+        """Render one event as the classic indented multi-line block.
 
-        fields = [
-            str(event.get("timestamp", "unknown")),
-            f"GPU {event.get('gpu', 'unknown')}",
-            str(event.get("event", "unknown")),
-            *message_fields,
-        ]
-        return " ".join(field.replace("\n", " ") for field in fields)
+        Reuses the generic human-readable renderer so the block matches the rest
+        of the CLI (uppercased keys, GPU as the device header, nested MESSAGE),
+        while now including the ``TIMESTAMP`` line carried on the record. The
+        returned string keeps its single trailing newline so consecutive event
+        blocks are separated by a blank line.
+        """
+        return self._convert_json_to_human_readable(dict(event))
 
     def print_event_output(self):
         """Print a single event record in the configured format.
 
         The event command streams one record per call, once per event, from one
         listener thread per GPU. Each format emits a single well-formed record:
-        human-readable is one line, CSV writes the header once followed by a row
-        per event, and JSON emits one object per line (newline-delimited JSON so
-        every line is independently parseable). Printing is serialized so records
-        from concurrent GPU threads do not interleave.
+        human-readable is one indented block (including its TIMESTAMP), CSV writes
+        the header once followed by a row per event, and JSON emits one object per
+        line (newline-delimited JSON so every line is independently parseable).
+        Printing is serialized so records from concurrent GPU threads do not
+        interleave.
         """
         with self._event_lock:
             if self.is_human_readable_format():

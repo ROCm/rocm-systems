@@ -55,7 +55,7 @@ class TestEventTimestamp(unittest.TestCase):
         for rec in recs:
             self.assertIn("timestamp", rec)
 
-    def test_human_readable_event_is_one_line(self):
+    def test_human_readable_event_is_block_with_timestamp(self):
         logger = AMDSMILogger()
         event = {
             "gpu": 0,
@@ -68,9 +68,13 @@ class TestEventTimestamp(unittest.TestCase):
 
         self.assertEqual(
             output,
-            "1780000000 GPU 0 PROCESS_START pid=1234 process=started",
+            "GPU: 0\n"
+            "    TIMESTAMP: 1780000000\n"
+            "    EVENT: PROCESS_START\n"
+            "    MESSAGE:\n"
+            "        PID: 1234\n"
+            "        PROCESS: started\n",
         )
-        self.assertNotIn("\n", output)
 
 
 if __name__ == "__main__":
