@@ -14,6 +14,11 @@ extern __device__ unsigned long long g_sdmaStubQuietCount;
 // that rings its doorbell and marks dirty while Flush is draining.
 extern __device__ uint64_t* g_sdmaStubMarkDirtyOnQuiet;
 extern __device__ uint64_t g_sdmaStubMarkBitOnQuiet;
+// When non-null, quiet() accumulates the dirty word as it is on entry into
+// g_sdmaStubDirtyAtQuiet. Lets a test see whether Flush cleared a bit before or
+// after draining it, which is what a concurrently flushing CTA would observe.
+extern __device__ uint64_t* g_sdmaStubObserveDirtyOnQuiet;
+extern __device__ unsigned long long g_sdmaStubDirtyAtQuiet;
 
 struct SdmaQueueDeviceHandle {
   int tag;
@@ -45,6 +50,12 @@ __device__ __forceinline__ void putSignal(SdmaQueueDeviceHandle& handle, void* d
 __device__ __forceinline__ void quiet(SdmaQueueDeviceHandle& handle) {
   (void)handle;
   atomicAdd(&g_sdmaStubQuietCount, 1ULL);
+  uint64_t* observed = g_sdmaStubObserveDirtyOnQuiet;
+  if (observed != nullptr) {
+    atomicOr(&g_sdmaStubDirtyAtQuiet,
+             static_cast<unsigned long long>(__hip_atomic_load(observed, __ATOMIC_RELAXED,
+                                                               __HIP_MEMORY_SCOPE_AGENT)));
+  }
   uint64_t* dirty = g_sdmaStubMarkDirtyOnQuiet;
   if (dirty != nullptr) {
     atomicOr(reinterpret_cast<unsigned long long*>(dirty),

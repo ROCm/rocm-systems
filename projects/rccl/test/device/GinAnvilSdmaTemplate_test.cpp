@@ -541,8 +541,9 @@ TEST_F(GinAnvilSdmaTemplateTest, Flush_MultiDirtyBits) {
   EXPECT_EQ(d_dirty.download(), 0ULL);
 }
 
-// H12b: a multi-thread coop must still drain every dirty peer. The capture and
-// the drain both run on rank 0, so the extra 31 threads must not lose peer 1.
+// H12b: a multi-thread coop must still drain every dirty peer. Each thread owns
+// a strided slice of the peer list, so peer 1 belongs to exactly one of the 32
+// threads and must not be dropped by the other 31.
 __global__ void kernelFlushCoopAny(TemplateHarness* h, uint64_t* dirty) {
   h->ctx.sdmaDirty = dirty;
   ncclGinCtx ginCtx{};
@@ -595,6 +596,19 @@ static void setMarkDirtyOnQuiet(uint64_t* dirty, uint64_t bit) {
   HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(sdma_anvil::g_sdmaStubMarkBitOnQuiet), &bit, sizeof(bit)));
 }
 
+// Has the stub record the dirty word as seen on entry to each quiet().
+static void setObserveDirtyOnQuiet(uint64_t* dirty) {
+  unsigned long long z = 0;
+  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(sdma_anvil::g_sdmaStubObserveDirtyOnQuiet), &dirty, sizeof(dirty)));
+  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(sdma_anvil::g_sdmaStubDirtyAtQuiet), &z, sizeof(z)));
+}
+
+static unsigned long long readDirtyAtQuiet() {
+  unsigned long long c = 0;
+  HIP_EXPECT(hipMemcpyFromSymbol(&c, HIP_SYMBOL(sdma_anvil::g_sdmaStubDirtyAtQuiet), sizeof(c)));
+  return c;
+}
+
 TEST_F(GinAnvilSdmaTemplateTest, MarkSdmaDirty_SetsPeerBit) {
   DeviceBuffer<uint8_t> d_src(1);
   DeviceBuffer<uint8_t> d_dst(1);
@@ -632,8 +646,8 @@ TEST_F(GinAnvilSdmaTemplateTest, Flush_CapturesAndClearsDirty) {
   EXPECT_EQ(readQuietCount(), 1ULL);
 }
 
-// The capture-and-clear is one RMW, so a mark that lands while Flush is
-// draining is not swallowed: its bit survives for the next Flush.
+// Flush clears only the bits it captured, so a mark for a peer it did not
+// capture is not swallowed: its bit survives for the next Flush.
 TEST_F(GinAnvilSdmaTemplateTest, Flush_MarkDuringQuietSurvives) {
   DeviceBuffer<uint8_t> d_src(1);
   DeviceBuffer<uint8_t> d_dst(1);
@@ -653,6 +667,34 @@ TEST_F(GinAnvilSdmaTemplateTest, Flush_MarkDuringQuietSurvives) {
   setMarkDirtyOnQuiet(nullptr, 0);
   EXPECT_EQ(d_dirty.download(), 1ULL << 1);
   EXPECT_EQ(readQuietCount(), 1ULL);
+}
+
+// The clear has to follow the drain, not precede it. Several coops can flush
+// the same context and compute identical owned masks, so if Flush cleared
+// first, the coop that lost the RMW would read a clean mask and return while
+// the winner was still inside quiet(). Pinned by observing the mask from
+// inside quiet(): the bit being drained must still be set there.
+TEST_F(GinAnvilSdmaTemplateTest, Flush_ClearsOnlyAfterDraining) {
+  DeviceBuffer<uint8_t> d_src(1);
+  DeviceBuffer<uint8_t> d_dst(1);
+  DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(1);
+  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle> d_q(1);
+  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle*> d_row(2);
+  DeviceBuffer<TemplateHarness> d_h(1);
+  DeviceBuffer<uint64_t> d_dirty(1);
+  uint64_t one = 1;
+  d_dirty.copyFrom(&one, 1);
+  TemplateHarness host{};
+  uploadHarness(&d_h, &host, &d_src, &d_dst, &d_entry, &d_q, &d_row, 128);
+  resetQuietCount();
+  setObserveDirtyOnQuiet(d_dirty.ptr);
+  kernelFlushDirty<<<1, 1>>>(d_h.ptr, d_dirty.ptr);
+  syncAndCheck();
+  const unsigned long long duringQuiet = readDirtyAtQuiet();
+  setObserveDirtyOnQuiet(nullptr);
+  EXPECT_EQ(readQuietCount(), 1ULL);
+  EXPECT_EQ(duringQuiet & 1ULL, 1ULL) << "Flush cleared the bit before draining it";
+  EXPECT_EQ(d_dirty.download(), 0ULL);
 }
 
 using nccl::gin::anvil::detail::ncclGinAnvilSdmaRequest;
@@ -895,8 +937,8 @@ TEST_F(GinAnvilSdmaTemplateTest, Wait_NoFenceWhenIncomplete) {
   EXPECT_EQ(readThreadfenceCount(), 0ULL);
 }
 
-// H21/H22: a clean-queue IPC/standalone signal must not quiet(). A2A small
-// messages take this path. Quiet only when the peer/channel dirty bit is set.
+// H21/H22: a standalone signal that issued no SDMA of its own must not quiet(),
+// whatever the dirty bitmap says. A2A small messages take this path.
 __global__ void kernelPutSignalQuiesce(TemplateHarness* h, bool hasWins, size_t bytes) {
   if (threadIdx.x != 0) return;
   ncclGinCtx ginCtx{};
@@ -911,14 +953,14 @@ __global__ void kernelPutSignalQuiesce(TemplateHarness* h, bool hasWins, size_t 
       nullptr, cuda::thread_scope_system, cuda::thread_scope_system);
 }
 
-TEST_P(GinAnvilSdmaStandaloneSignalQuietTest, ReadsSignaledPeerDirtyBit) {
+TEST_P(GinAnvilSdmaStandaloneSignalQuietTest, SkipsQuietWhateverTheDirtyBitSays) {
   const StandaloneSignalQuietParam p = GetParam();
   DeviceBuffer<uint8_t> d_src(1);
   DeviceBuffer<uint8_t> d_dst(1);
   DeviceBuffer<uint64_t> d_signals(2);
   d_signals.zero();
-  // Production always allocates sdmaDirty, so both arms read a real mask rather
-  // than taking the nullptr early-out; the params pick which peer's bit is set.
+  // Production always allocates sdmaDirty, so both arms run against a real mask
+  // rather than the nullptr early-out; the params pick which peer's bit is set.
   DeviceBuffer<uint64_t> d_dirty(1);
   d_dirty.copyFrom(&p.dirtyBits, 1);
   DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(1);
@@ -941,12 +983,16 @@ TEST_P(GinAnvilSdmaStandaloneSignalQuietTest, ReadsSignaledPeerDirtyBit) {
   EXPECT_EQ(readThreadfenceCount(), p.expectFence);
 }
 
+// Both arms issue no SDMA (hasWins=false, bytes=0), so needSdmaQuietBeforeSignal
+// returns on !issuedSdmaThisCall without ever loading sdmaDirty. The signalled
+// peer's bit is therefore irrelevant: one system fence from signalPeer, no
+// quiet. The arms differ only in which bit is set, pinning that independence.
 INSTANTIATE_TEST_SUITE_P(CleanAndDirtyPeer, GinAnvilSdmaStandaloneSignalQuietTest,
                          ::testing::Values(
-                             // peer 0 dirty, signal peer 1: skip quiet; signalPeer system-fences once
+                             // some other peer dirty, signal peer 1
                              StandaloneSignalQuietParam{1ULL << 0, 0ULL, 1ULL},
-                             // peer 1 dirty: quiet + fenceBeforeSignal + signalPeer
-                             StandaloneSignalQuietParam{1ULL << 1, 1ULL, 2ULL}));
+                             // the signalled peer itself dirty: still no quiet
+                             StandaloneSignalQuietParam{1ULL << 1, 0ULL, 1ULL}));
 
 TEST_F(GinAnvilSdmaTemplateTest, Put_WindowedIpcPutStrongSignalSkipsQuietWhenClean) {
   constexpr int kN = 64;
@@ -1006,7 +1052,12 @@ __global__ void kernelPutSdmaThenIpcSignal(TemplateHarness* h, size_t sdmaBytes,
       false, nullptr, cuda::thread_scope_system, cuda::thread_scope_system);
 }
 
-TEST_F(GinAnvilSdmaTemplateTest, Put_WindowedIpcPutQuietsWhenPeerDirty) {
+// An earlier SDMA put leaves peer 1 dirty, then a sub-threshold IPC put signals
+// the same peer. The IPC put issues no SDMA, so it does not quiet: the dirty bit
+// is drained by Flush, not by the signal path. This is the weak signal semantic,
+// unchanged from develop. Put #1 carries SIGNAL_TYPE_NONE and so emits no fence
+// of its own; the single fence counted is signalPeer's on put #2.
+TEST_F(GinAnvilSdmaTemplateTest, Put_WindowedIpcPutDoesNotQuietEarlierSdmaToSamePeer) {
   constexpr int kSdma = 512;
   constexpr int kIpc = 64;
   DeviceBuffer<uint8_t> d_src(static_cast<size_t>(kSdma));
@@ -1033,8 +1084,10 @@ TEST_F(GinAnvilSdmaTemplateTest, Put_WindowedIpcPutQuietsWhenPeerDirty) {
   kernelPutSdmaThenIpcSignal<<<1, 1>>>(d_h.ptr, static_cast<size_t>(kSdma), static_cast<size_t>(kIpc));
   syncAndCheck();
   EXPECT_EQ(d_signals.download(), 1ULL);
-  EXPECT_EQ(readQuietCount(), 1ULL);
-  EXPECT_EQ(readThreadfenceCount(), 2ULL);
+  EXPECT_EQ(readQuietCount(), 0ULL);
+  EXPECT_EQ(readThreadfenceCount(), 1ULL);
+  // Put #1 marked the peer, and nothing has drained it yet.
+  EXPECT_EQ(d_dirty.download(), 1ULL << 1);
 }
 
 // H23: windowed PutValue with a strong signal also skips quiet on a clean queue.

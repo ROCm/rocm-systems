@@ -204,9 +204,19 @@ echo "    conn-check kernels present in ${librccl} .hip_fatbin"
 echo "==> [4/7] build fixtures, ConnCheck, GinSdmaBroadcastPolicy, GinAnvilSdmaFactory, and UnitTestsMPI (GIN_ANVIL_UNIT_TESTS=ON)"
 (
   cd "${rccl_build}"
-  cmake . \
+  # ENABLE_MPI_TESTS is what creates the rccl-UnitTestsMPI target (test/
+  # CMakeLists.txt gates add_executable on it) and it defaults OFF. It also
+  # switches librccl to -fvisibility=default, because the MPI tests link
+  # internal symbols, so turning it on here forces librccl to recompile.
+  # install.sh cannot carry it: --enable-mpi-tests is refused on a release
+  # build, and the visibility branch only applies once BUILD_TESTS is on,
+  # which first happens at this step. MPI_PATH is read from the environment
+  # by test/CMakeLists.txt.
+  MPI_PATH="${MPI_HOME}" cmake . \
     -DBUILD_TESTS=ON \
     -DGIN_ANVIL_UNIT_TESTS=ON \
+    -DENABLE_MPI_TESTS=ON \
+    -DMPI_PATH="${MPI_HOME}" \
     -DROCSHMEM_INSTALL_DIR="${ROCSHMEM_INSTALL_DIR}"
   make -j"${build_jobs}" \
     rccl-UnitTestsFixtures \

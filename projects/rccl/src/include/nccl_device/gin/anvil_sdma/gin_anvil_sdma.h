@@ -203,13 +203,27 @@ NCCL_DEVICE_INLINE uint64_t ownedSdmaDirtyMask(int nRanks, int numCh, int thread
   return owned;
 }
 
-// Each thread captures and clears only its own peers' bits, in one RMW over a
-// mask disjoint from every other thread's. That keeps the drain parallel --
-// quiet() is hardware-latency bound, and serializing it across 8 peers costs
-// far more than the extra atomics -- without needing to broadcast a snapshot,
-// which ncclCoopAny cannot do. Because markSdmaDirty runs after the doorbell, a
-// captured bit names a queue whose descriptor is already submitted, so quiet()
-// drains it; a mark landing after the RMW keeps its bit set for the next Flush.
+// Each thread drains the peers it owns, then clears exactly the bits it
+// drained. The owned mask is disjoint from every other thread's, so the drain
+// stays parallel -- quiet() is hardware-latency bound, and serializing it
+// across 8 peers costs far more than the extra atomic -- and no snapshot has to
+// be broadcast, which ncclCoopAny cannot do anyway.
+//
+// The clear must follow the drain, not precede it. Several coops can flush the
+// same context (a CTA-per-context binding gives them identical owned masks), so
+// clearing first would let one coop observe a clean mask and return from Flush
+// while another is still inside quiet(). Clearing afterwards keeps the
+// invariant "bit clear => that queue is drained": a racing coop either still
+// sees the bit and quiets the queue a second time, which is cheap and
+// harmless, or sees it clear and is entitled to proceed.
+//
+// Because markSdmaDirty runs after the doorbell, an observed bit names a queue
+// whose descriptor is already submitted, so quiet() drains it. A mark landing
+// after the fetch_and keeps its bit set for the next Flush. One case the mask
+// cannot express: a re-mark of the same peer/channel between the load and the
+// fetch_and is cleared here, and is only covered if its doorbell rang before
+// this quiet(). Distinguishing that needs a monotone per-queue submission
+// counter rather than one bit.
 NCCL_DEVICE_INLINE void quietOwnedSdmaDirtyBits(ncclGinAnvilSdmaGPUContext* rsCtx, uint64_t* sdmaDirty,
                                                 int nRanks, int threadRank, int stride) {
   if (sdmaDirty == nullptr) return;
@@ -219,13 +233,9 @@ NCCL_DEVICE_INLINE void quietOwnedSdmaDirtyBits(ncclGinAnvilSdmaGPUContext* rsCt
 
   const uint64_t owned = ownedSdmaDirtyMask(nRanks, numCh, threadRank, stride);
   if (owned == 0) return;
-  // Relaxed peek: a small-message A2A never marks, so the mask stays zero and
-  // Flush skips the atomic entirely. A mark missed here simply stays set, which
-  // is the same outcome as one landing just after the RMW below.
-  if ((__scoped_atomic_load_n(sdmaDirty, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE) & owned) == 0) return;
-
-  const uint64_t dirty =
-      __scoped_atomic_fetch_and(sdmaDirty, ~owned, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE) & owned;
+  // Plain load, not an RMW: a small-message A2A never marks, so the mask stays
+  // zero and Flush touches no atomic at all on the path this PR is about.
+  const uint64_t dirty = __scoped_atomic_load_n(sdmaDirty, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE) & owned;
   if (dirty == 0) return;
 #pragma unroll 1
   for (int p = threadRank; p < nRanks; p += stride) {
@@ -237,6 +247,7 @@ NCCL_DEVICE_INLINE void quietOwnedSdmaDirtyBits(ncclGinAnvilSdmaGPUContext* rsCt
       if (h != nullptr) ::sdma_anvil::quiet(*h);
     }
   }
+  __scoped_atomic_fetch_and(sdmaDirty, ~dirty, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
 }
 
 }  // namespace detail
