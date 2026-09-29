@@ -517,7 +517,7 @@
                 },
                 "enabled": {
                     "default": true,
-                    "description": "Enable trace output (Perfetto .proto file)",
+                    "description": "Enable trace output (Perfetto .pftrace file)",
                     "type": "boolean"
                 },
                 "fill_policy": {

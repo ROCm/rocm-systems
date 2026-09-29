@@ -595,12 +595,6 @@ hsa_status_t MemoryRegion::Lock(uint32_t num_agents, const hsa_agent_t* agents,
     local_mem_flag.ui32.ExtendedCoherent = 0;
   }
 
-  // This is a pin: the mapping must stay valid until Unlock. Under the KFD SVM
-  // API the registration is otherwise advisory, and KFD will unmap the range
-  // from the GPU on any MMU invalidation while XNACK is on -- including while a
-  // transfer is reading it.
-  local_mem_flag.ui32.AlwaysMapped = 1;
-
   // Call kernel driver to register and pin the memory.
   if (owner()->driver().RegisterMemory(host_ptr, size, local_mem_flag) ==
       HSA_STATUS_SUCCESS) {

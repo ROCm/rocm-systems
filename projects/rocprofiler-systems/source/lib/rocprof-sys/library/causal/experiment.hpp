@@ -24,9 +24,7 @@
 #include <cstdint>
 #include <unordered_map>
 
-namespace rocprofsys
-{
-namespace causal
+namespace rocprofsys::causal
 {
 using hash_value_t = ::tim::hash_value_t;
 
@@ -123,5 +121,4 @@ struct experiment
     progress_points_t init_progress   = {};   /// progress points at start
     progress_points_t fini_progress   = {};   /// progress points at end
 };
-}  // namespace causal
-}  // namespace rocprofsys
+}  // namespace rocprofsys::causal

@@ -28,6 +28,12 @@ void VCmpxLtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<uint32_t>(
+          inst, wf,
+          [](auto a, auto b) { return util::f16_to_f32_simd(a) < util::f16_to_f32_simd(b); },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -45,6 +51,7 @@ void VCmpxLtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxLtF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -60,20 +67,31 @@ RJ_NOINLINE void VCmpxLtF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_modifiers_, 0);
+  amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 32768ull, dpp_modifiers_, 1);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (s0 < s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<uint32_t>(
+            inst, wf,
+            [](auto a, auto b) { return util::f16_to_f32_simd(a) < util::f16_to_f32_simd(b); },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      float s0 =
+          util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
+      float s1 = util::f16_to_f32(
+          static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
+      if (s0 < s1)
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -89,6 +107,12 @@ void VCmpxEqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<uint32_t>(
+          inst, wf,
+          [](auto a, auto b) { return util::f16_to_f32_simd(a) == util::f16_to_f32_simd(b); },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -106,6 +130,7 @@ void VCmpxEqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxEqF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -121,20 +146,31 @@ RJ_NOINLINE void VCmpxEqF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_modifiers_, 0);
+  amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 32768ull, dpp_modifiers_, 1);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (s0 == s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<uint32_t>(
+            inst, wf,
+            [](auto a, auto b) { return util::f16_to_f32_simd(a) == util::f16_to_f32_simd(b); },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      float s0 =
+          util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
+      float s1 = util::f16_to_f32(
+          static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
+      if (s0 == s1)
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -150,6 +186,12 @@ void VCmpxLeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<uint32_t>(
+          inst, wf,
+          [](auto a, auto b) { return util::f16_to_f32_simd(a) <= util::f16_to_f32_simd(b); },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -167,6 +209,7 @@ void VCmpxLeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxLeF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -182,20 +225,31 @@ RJ_NOINLINE void VCmpxLeF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_modifiers_, 0);
+  amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 32768ull, dpp_modifiers_, 1);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (s0 <= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<uint32_t>(
+            inst, wf,
+            [](auto a, auto b) { return util::f16_to_f32_simd(a) <= util::f16_to_f32_simd(b); },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      float s0 =
+          util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
+      float s1 = util::f16_to_f32(
+          static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
+      if (s0 <= s1)
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -211,6 +265,12 @@ void VCmpxGtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<uint32_t>(
+          inst, wf,
+          [](auto a, auto b) { return util::f16_to_f32_simd(a) > util::f16_to_f32_simd(b); },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -228,6 +288,7 @@ void VCmpxGtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxGtF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -243,20 +304,31 @@ RJ_NOINLINE void VCmpxGtF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_modifiers_, 0);
+  amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 32768ull, dpp_modifiers_, 1);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (s0 > s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<uint32_t>(
+            inst, wf,
+            [](auto a, auto b) { return util::f16_to_f32_simd(a) > util::f16_to_f32_simd(b); },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      float s0 =
+          util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
+      float s1 = util::f16_to_f32(
+          static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
+      if (s0 > s1)
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -272,6 +344,15 @@ void VCmpxLgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<uint32_t>(
+          inst, wf,
+          [](auto a, auto b) {
+            return (util::f16_to_f32_simd(a) < util::f16_to_f32_simd(b)) ||
+                   (util::f16_to_f32_simd(a) > util::f16_to_f32_simd(b));
+          },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -289,6 +370,7 @@ void VCmpxLgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxLgF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -304,20 +386,34 @@ RJ_NOINLINE void VCmpxLgF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_modifiers_, 0);
+  amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 32768ull, dpp_modifiers_, 1);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (s0 < s1 || s0 > s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<uint32_t>(
+            inst, wf,
+            [](auto a, auto b) {
+              return (util::f16_to_f32_simd(a) < util::f16_to_f32_simd(b)) ||
+                     (util::f16_to_f32_simd(a) > util::f16_to_f32_simd(b));
+            },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      float s0 =
+          util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
+      float s1 = util::f16_to_f32(
+          static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
+      if (s0 < s1 || s0 > s1)
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -333,6 +429,12 @@ void VCmpxGeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<uint32_t>(
+          inst, wf,
+          [](auto a, auto b) { return util::f16_to_f32_simd(a) >= util::f16_to_f32_simd(b); },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -350,6 +452,7 @@ void VCmpxGeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxGeF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -365,20 +468,31 @@ RJ_NOINLINE void VCmpxGeF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_modifiers_, 0);
+  amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 32768ull, dpp_modifiers_, 1);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (s0 >= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<uint32_t>(
+            inst, wf,
+            [](auto a, auto b) { return util::f16_to_f32_simd(a) >= util::f16_to_f32_simd(b); },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      float s0 =
+          util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
+      float s1 = util::f16_to_f32(
+          static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
+      if (s0 >= s1)
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -394,6 +508,15 @@ void VCmpxOF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<uint32_t>(
+          inst, wf,
+          [](auto a, auto b) {
+            return !util::stdx::isnan(util::f16_to_f32_simd(a)) &&
+                   !util::stdx::isnan(util::f16_to_f32_simd(b));
+          },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -411,6 +534,7 @@ void VCmpxOF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxOF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -426,20 +550,34 @@ RJ_NOINLINE void VCmpxOF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_modifiers_, 0);
+  amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 32768ull, dpp_modifiers_, 1);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (!std::isnan(s0) && !std::isnan(s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<uint32_t>(
+            inst, wf,
+            [](auto a, auto b) {
+              return !util::stdx::isnan(util::f16_to_f32_simd(a)) &&
+                     !util::stdx::isnan(util::f16_to_f32_simd(b));
+            },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      float s0 =
+          util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
+      float s1 = util::f16_to_f32(
+          static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
+      if (!std::isnan(s0) && !std::isnan(s1))
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -455,6 +593,15 @@ void VCmpxUF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<uint32_t>(
+          inst, wf,
+          [](auto a, auto b) {
+            return util::stdx::isnan(util::f16_to_f32_simd(a)) ||
+                   util::stdx::isnan(util::f16_to_f32_simd(b));
+          },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -472,6 +619,7 @@ void VCmpxUF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxUF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -487,20 +635,34 @@ RJ_NOINLINE void VCmpxUF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_modifiers_, 0);
+  amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 32768ull, dpp_modifiers_, 1);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (std::isnan(s0) || std::isnan(s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<uint32_t>(
+            inst, wf,
+            [](auto a, auto b) {
+              return util::stdx::isnan(util::f16_to_f32_simd(a)) ||
+                     util::stdx::isnan(util::f16_to_f32_simd(b));
+            },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      float s0 =
+          util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
+      float s1 = util::f16_to_f32(
+          static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
+      if (std::isnan(s0) || std::isnan(s1))
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -516,6 +678,12 @@ void VCmpxNgeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<uint32_t>(
+          inst, wf,
+          [](auto a, auto b) { return !(util::f16_to_f32_simd(a) >= util::f16_to_f32_simd(b)); },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -533,6 +701,7 @@ void VCmpxNgeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxNgeF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -548,20 +717,31 @@ RJ_NOINLINE void VCmpxNgeF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_modifiers_, 0);
+  amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 32768ull, dpp_modifiers_, 1);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (!(s0 >= s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<uint32_t>(
+            inst, wf,
+            [](auto a, auto b) { return !(util::f16_to_f32_simd(a) >= util::f16_to_f32_simd(b)); },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      float s0 =
+          util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
+      float s1 = util::f16_to_f32(
+          static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
+      if (!(s0 >= s1))
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -577,6 +757,15 @@ void VCmpxNlgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<uint32_t>(
+          inst, wf,
+          [](auto a, auto b) {
+            return !((util::f16_to_f32_simd(a) < util::f16_to_f32_simd(b)) ||
+                     (util::f16_to_f32_simd(a) > util::f16_to_f32_simd(b)));
+          },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -594,6 +783,7 @@ void VCmpxNlgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxNlgF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -609,20 +799,34 @@ RJ_NOINLINE void VCmpxNlgF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_modifiers_, 0);
+  amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 32768ull, dpp_modifiers_, 1);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (!(s0 < s1 || s0 > s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<uint32_t>(
+            inst, wf,
+            [](auto a, auto b) {
+              return !((util::f16_to_f32_simd(a) < util::f16_to_f32_simd(b)) ||
+                       (util::f16_to_f32_simd(a) > util::f16_to_f32_simd(b)));
+            },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      float s0 =
+          util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
+      float s1 = util::f16_to_f32(
+          static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
+      if (!(s0 < s1 || s0 > s1))
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -638,6 +842,12 @@ void VCmpxNgtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<uint32_t>(
+          inst, wf,
+          [](auto a, auto b) { return !(util::f16_to_f32_simd(a) > util::f16_to_f32_simd(b)); },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -655,6 +865,7 @@ void VCmpxNgtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxNgtF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -670,20 +881,31 @@ RJ_NOINLINE void VCmpxNgtF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_modifiers_, 0);
+  amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 32768ull, dpp_modifiers_, 1);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (!(s0 > s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<uint32_t>(
+            inst, wf,
+            [](auto a, auto b) { return !(util::f16_to_f32_simd(a) > util::f16_to_f32_simd(b)); },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      float s0 =
+          util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
+      float s1 = util::f16_to_f32(
+          static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
+      if (!(s0 > s1))
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -699,6 +921,12 @@ void VCmpxNleF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<uint32_t>(
+          inst, wf,
+          [](auto a, auto b) { return !(util::f16_to_f32_simd(a) <= util::f16_to_f32_simd(b)); },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -716,6 +944,7 @@ void VCmpxNleF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxNleF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -731,20 +960,31 @@ RJ_NOINLINE void VCmpxNleF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_modifiers_, 0);
+  amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 32768ull, dpp_modifiers_, 1);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (!(s0 <= s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<uint32_t>(
+            inst, wf,
+            [](auto a, auto b) { return !(util::f16_to_f32_simd(a) <= util::f16_to_f32_simd(b)); },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      float s0 =
+          util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
+      float s1 = util::f16_to_f32(
+          static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
+      if (!(s0 <= s1))
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -760,6 +1000,12 @@ void VCmpxNeqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<uint32_t>(
+          inst, wf,
+          [](auto a, auto b) { return util::f16_to_f32_simd(a) != util::f16_to_f32_simd(b); },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -777,6 +1023,7 @@ void VCmpxNeqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxNeqF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -792,20 +1039,31 @@ RJ_NOINLINE void VCmpxNeqF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_modifiers_, 0);
+  amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 32768ull, dpp_modifiers_, 1);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (s0 != s1 || std::isnan(s0) || std::isnan(s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<uint32_t>(
+            inst, wf,
+            [](auto a, auto b) { return util::f16_to_f32_simd(a) != util::f16_to_f32_simd(b); },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      float s0 =
+          util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
+      float s1 = util::f16_to_f32(
+          static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
+      if (s0 != s1 || std::isnan(s0) || std::isnan(s1))
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -821,6 +1079,12 @@ void VCmpxNltF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<uint32_t>(
+          inst, wf,
+          [](auto a, auto b) { return !(util::f16_to_f32_simd(a) < util::f16_to_f32_simd(b)); },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -838,6 +1102,7 @@ void VCmpxNltF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxNltF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -853,20 +1118,31 @@ RJ_NOINLINE void VCmpxNltF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_modifiers_, 0);
+  amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 32768ull, dpp_modifiers_, 1);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (!(s0 < s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<uint32_t>(
+            inst, wf,
+            [](auto a, auto b) { return !(util::f16_to_f32_simd(a) < util::f16_to_f32_simd(b)); },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      float s0 =
+          util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
+      float s1 = util::f16_to_f32(
+          static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
+      if (!(s0 < s1))
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -882,6 +1158,11 @@ void VCmpxLtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<float>(
+          inst, wf, [](auto a, auto b) { return a < b; },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -897,6 +1178,7 @@ void VCmpxLtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxLtF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -912,18 +1194,28 @@ RJ_NOINLINE void VCmpxLtF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_modifiers_, 0);
+  amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 2147483648ull, dpp_modifiers_, 1);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 < s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<float>(
+            inst, wf, [](auto a, auto b) { return a < b; },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+      float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
+      if (s0 < s1)
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -939,6 +1231,11 @@ void VCmpxEqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<float>(
+          inst, wf, [](auto a, auto b) { return a == b; },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -954,6 +1251,7 @@ void VCmpxEqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxEqF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -969,18 +1267,28 @@ RJ_NOINLINE void VCmpxEqF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_modifiers_, 0);
+  amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 2147483648ull, dpp_modifiers_, 1);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 == s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<float>(
+            inst, wf, [](auto a, auto b) { return a == b; },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+      float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
+      if (s0 == s1)
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -996,6 +1304,11 @@ void VCmpxLeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<float>(
+          inst, wf, [](auto a, auto b) { return a <= b; },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1011,6 +1324,7 @@ void VCmpxLeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxLeF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -1026,18 +1340,28 @@ RJ_NOINLINE void VCmpxLeF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_modifiers_, 0);
+  amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 2147483648ull, dpp_modifiers_, 1);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 <= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<float>(
+            inst, wf, [](auto a, auto b) { return a <= b; },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+      float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
+      if (s0 <= s1)
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -1053,6 +1377,11 @@ void VCmpxGtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<float>(
+          inst, wf, [](auto a, auto b) { return a > b; },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1068,6 +1397,7 @@ void VCmpxGtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxGtF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -1083,18 +1413,28 @@ RJ_NOINLINE void VCmpxGtF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_modifiers_, 0);
+  amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 2147483648ull, dpp_modifiers_, 1);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 > s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<float>(
+            inst, wf, [](auto a, auto b) { return a > b; },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+      float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
+      if (s0 > s1)
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -1110,6 +1450,11 @@ void VCmpxLgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<float>(
+          inst, wf, [](auto a, auto b) { return (a < b) || (a > b); },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1125,6 +1470,7 @@ void VCmpxLgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxLgF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -1140,18 +1486,28 @@ RJ_NOINLINE void VCmpxLgF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_modifiers_, 0);
+  amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 2147483648ull, dpp_modifiers_, 1);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 < s1 || s0 > s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<float>(
+            inst, wf, [](auto a, auto b) { return (a < b) || (a > b); },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+      float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
+      if (s0 < s1 || s0 > s1)
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -1167,6 +1523,11 @@ void VCmpxGeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<float>(
+          inst, wf, [](auto a, auto b) { return a >= b; },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1182,6 +1543,7 @@ void VCmpxGeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxGeF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -1197,18 +1559,28 @@ RJ_NOINLINE void VCmpxGeF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_modifiers_, 0);
+  amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 2147483648ull, dpp_modifiers_, 1);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 >= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<float>(
+            inst, wf, [](auto a, auto b) { return a >= b; },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+      float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
+      if (s0 >= s1)
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -1224,6 +1596,11 @@ void VCmpxOF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<float>(
+          inst, wf, [](auto a, auto b) { return !util::stdx::isnan(a) && !util::stdx::isnan(b); },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1239,6 +1616,7 @@ void VCmpxOF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxOF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -1254,18 +1632,28 @@ RJ_NOINLINE void VCmpxOF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_modifiers_, 0);
+  amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 2147483648ull, dpp_modifiers_, 1);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (!std::isnan(s0) && !std::isnan(s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<float>(
+            inst, wf, [](auto a, auto b) { return !util::stdx::isnan(a) && !util::stdx::isnan(b); },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+      float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
+      if (!std::isnan(s0) && !std::isnan(s1))
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -1281,6 +1669,11 @@ void VCmpxUF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<float>(
+          inst, wf, [](auto a, auto b) { return util::stdx::isnan(a) || util::stdx::isnan(b); },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1296,6 +1689,7 @@ void VCmpxUF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxUF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -1311,18 +1705,28 @@ RJ_NOINLINE void VCmpxUF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_modifiers_, 0);
+  amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 2147483648ull, dpp_modifiers_, 1);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (std::isnan(s0) || std::isnan(s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<float>(
+            inst, wf, [](auto a, auto b) { return util::stdx::isnan(a) || util::stdx::isnan(b); },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+      float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
+      if (std::isnan(s0) || std::isnan(s1))
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -1338,6 +1742,11 @@ void VCmpxNgeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<float>(
+          inst, wf, [](auto a, auto b) { return !(a >= b); },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1353,6 +1762,7 @@ void VCmpxNgeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxNgeF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -1368,18 +1778,28 @@ RJ_NOINLINE void VCmpxNgeF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_modifiers_, 0);
+  amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 2147483648ull, dpp_modifiers_, 1);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (!(s0 >= s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<float>(
+            inst, wf, [](auto a, auto b) { return !(a >= b); },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+      float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
+      if (!(s0 >= s1))
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -1395,6 +1815,11 @@ void VCmpxNlgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<float>(
+          inst, wf, [](auto a, auto b) { return !((a < b) || (a > b)); },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1410,6 +1835,7 @@ void VCmpxNlgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxNlgF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -1425,18 +1851,28 @@ RJ_NOINLINE void VCmpxNlgF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_modifiers_, 0);
+  amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 2147483648ull, dpp_modifiers_, 1);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (!(s0 < s1 || s0 > s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<float>(
+            inst, wf, [](auto a, auto b) { return !((a < b) || (a > b)); },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+      float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
+      if (!(s0 < s1 || s0 > s1))
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -1452,6 +1888,11 @@ void VCmpxNgtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<float>(
+          inst, wf, [](auto a, auto b) { return !(a > b); },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1467,6 +1908,7 @@ void VCmpxNgtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxNgtF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -1482,18 +1924,28 @@ RJ_NOINLINE void VCmpxNgtF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_modifiers_, 0);
+  amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 2147483648ull, dpp_modifiers_, 1);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (!(s0 > s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<float>(
+            inst, wf, [](auto a, auto b) { return !(a > b); },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+      float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
+      if (!(s0 > s1))
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -1509,6 +1961,11 @@ void VCmpxNleF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<float>(
+          inst, wf, [](auto a, auto b) { return !(a <= b); },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1524,6 +1981,7 @@ void VCmpxNleF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxNleF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -1539,18 +1997,28 @@ RJ_NOINLINE void VCmpxNleF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_modifiers_, 0);
+  amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 2147483648ull, dpp_modifiers_, 1);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (!(s0 <= s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<float>(
+            inst, wf, [](auto a, auto b) { return !(a <= b); },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+      float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
+      if (!(s0 <= s1))
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -1566,6 +2034,11 @@ void VCmpxNeqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<float>(
+          inst, wf, [](auto a, auto b) { return a != b; },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1581,6 +2054,7 @@ void VCmpxNeqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxNeqF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -1596,18 +2070,28 @@ RJ_NOINLINE void VCmpxNeqF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_modifiers_, 0);
+  amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 2147483648ull, dpp_modifiers_, 1);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 != s1 || std::isnan(s0) || std::isnan(s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<float>(
+            inst, wf, [](auto a, auto b) { return a != b; },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+      float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
+      if (s0 != s1 || std::isnan(s0) || std::isnan(s1))
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -1623,6 +2107,11 @@ void VCmpxNltF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<float>(
+          inst, wf, [](auto a, auto b) { return !(a < b); },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1638,6 +2127,7 @@ void VCmpxNltF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxNltF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -1653,18 +2143,28 @@ RJ_NOINLINE void VCmpxNltF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_modifiers_, 0);
+  amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 2147483648ull, dpp_modifiers_, 1);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (!(s0 < s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<float>(
+            inst, wf, [](auto a, auto b) { return !(a < b); },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+      float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
+      if (!(s0 < s1))
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -1676,6 +2176,11 @@ RJ_NOINLINE void VCmpxNltF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCmpxLtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc64_simd<double>(
+          inst, wf, [](auto a, auto b) { return a < b; },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1690,6 +2195,11 @@ void VCmpxLtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCmpxEqF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc64_simd<double>(
+          inst, wf, [](auto a, auto b) { return a == b; },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1704,6 +2214,11 @@ void VCmpxEqF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCmpxLeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc64_simd<double>(
+          inst, wf, [](auto a, auto b) { return a <= b; },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1718,6 +2233,11 @@ void VCmpxLeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCmpxGtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc64_simd<double>(
+          inst, wf, [](auto a, auto b) { return a > b; },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1732,6 +2252,11 @@ void VCmpxGtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCmpxLgF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc64_simd<double>(
+          inst, wf, [](auto a, auto b) { return (a < b) || (a > b); },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1746,6 +2271,11 @@ void VCmpxLgF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCmpxGeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc64_simd<double>(
+          inst, wf, [](auto a, auto b) { return a >= b; },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1760,6 +2290,11 @@ void VCmpxGeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCmpxOF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc64_simd<double>(
+          inst, wf, [](auto a, auto b) { return !util::stdx::isnan(a) && !util::stdx::isnan(b); },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1774,6 +2309,11 @@ void VCmpxOF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCmpxUF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc64_simd<double>(
+          inst, wf, [](auto a, auto b) { return util::stdx::isnan(a) || util::stdx::isnan(b); },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1788,6 +2328,11 @@ void VCmpxUF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCmpxNgeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc64_simd<double>(
+          inst, wf, [](auto a, auto b) { return !(a >= b); },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1802,6 +2347,11 @@ void VCmpxNgeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCmpxNlgF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc64_simd<double>(
+          inst, wf, [](auto a, auto b) { return !((a < b) || (a > b)); },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1816,6 +2366,11 @@ void VCmpxNlgF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCmpxNgtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc64_simd<double>(
+          inst, wf, [](auto a, auto b) { return !(a > b); },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1830,6 +2385,11 @@ void VCmpxNgtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCmpxNleF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc64_simd<double>(
+          inst, wf, [](auto a, auto b) { return !(a <= b); },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1844,6 +2404,11 @@ void VCmpxNleF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCmpxNeqF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc64_simd<double>(
+          inst, wf, [](auto a, auto b) { return a != b; },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1858,6 +2423,11 @@ void VCmpxNeqF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCmpxNltF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc64_simd<double>(
+          inst, wf, [](auto a, auto b) { return !(a < b); },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1876,6 +2446,15 @@ void VCmpxLtI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<uint32_t>(
+          inst, wf,
+          [](auto a, auto b) {
+            return ((util::stdx::static_simd_cast<util::native<int32_t>>(a) << 16) >> 16) <
+                   ((util::stdx::static_simd_cast<util::native<int32_t>>(b) << 16) >> 16);
+          },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1907,17 +2486,28 @@ RJ_NOINLINE void VCmpxLtI16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int16_t s0 = static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane) & 0xFFFF);
-    int16_t s1 = static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane) & 0xFFFF);
-    if (s0 < s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<uint32_t>(
+            inst, wf,
+            [](auto a, auto b) {
+              return ((util::stdx::static_simd_cast<util::native<int32_t>>(a) << 16) >> 16) <
+                     ((util::stdx::static_simd_cast<util::native<int32_t>>(b) << 16) >> 16);
+            },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      int16_t s0 = static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane) & 0xFFFF);
+      int16_t s1 = static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane) & 0xFFFF);
+      if (s0 < s1)
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -1933,6 +2523,15 @@ void VCmpxEqI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<uint32_t>(
+          inst, wf,
+          [](auto a, auto b) {
+            return ((util::stdx::static_simd_cast<util::native<int32_t>>(a) << 16) >> 16) ==
+                   ((util::stdx::static_simd_cast<util::native<int32_t>>(b) << 16) >> 16);
+          },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1964,17 +2563,28 @@ RJ_NOINLINE void VCmpxEqI16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int16_t s0 = static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane) & 0xFFFF);
-    int16_t s1 = static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane) & 0xFFFF);
-    if (s0 == s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<uint32_t>(
+            inst, wf,
+            [](auto a, auto b) {
+              return ((util::stdx::static_simd_cast<util::native<int32_t>>(a) << 16) >> 16) ==
+                     ((util::stdx::static_simd_cast<util::native<int32_t>>(b) << 16) >> 16);
+            },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      int16_t s0 = static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane) & 0xFFFF);
+      int16_t s1 = static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane) & 0xFFFF);
+      if (s0 == s1)
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -1990,6 +2600,15 @@ void VCmpxLeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<uint32_t>(
+          inst, wf,
+          [](auto a, auto b) {
+            return ((util::stdx::static_simd_cast<util::native<int32_t>>(a) << 16) >> 16) <=
+                   ((util::stdx::static_simd_cast<util::native<int32_t>>(b) << 16) >> 16);
+          },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -2021,17 +2640,28 @@ RJ_NOINLINE void VCmpxLeI16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int16_t s0 = static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane) & 0xFFFF);
-    int16_t s1 = static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane) & 0xFFFF);
-    if (s0 <= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<uint32_t>(
+            inst, wf,
+            [](auto a, auto b) {
+              return ((util::stdx::static_simd_cast<util::native<int32_t>>(a) << 16) >> 16) <=
+                     ((util::stdx::static_simd_cast<util::native<int32_t>>(b) << 16) >> 16);
+            },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      int16_t s0 = static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane) & 0xFFFF);
+      int16_t s1 = static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane) & 0xFFFF);
+      if (s0 <= s1)
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -2047,6 +2677,15 @@ void VCmpxGtI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<uint32_t>(
+          inst, wf,
+          [](auto a, auto b) {
+            return ((util::stdx::static_simd_cast<util::native<int32_t>>(a) << 16) >> 16) >
+                   ((util::stdx::static_simd_cast<util::native<int32_t>>(b) << 16) >> 16);
+          },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -2078,17 +2717,28 @@ RJ_NOINLINE void VCmpxGtI16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int16_t s0 = static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane) & 0xFFFF);
-    int16_t s1 = static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane) & 0xFFFF);
-    if (s0 > s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<uint32_t>(
+            inst, wf,
+            [](auto a, auto b) {
+              return ((util::stdx::static_simd_cast<util::native<int32_t>>(a) << 16) >> 16) >
+                     ((util::stdx::static_simd_cast<util::native<int32_t>>(b) << 16) >> 16);
+            },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      int16_t s0 = static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane) & 0xFFFF);
+      int16_t s1 = static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane) & 0xFFFF);
+      if (s0 > s1)
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -2104,6 +2754,15 @@ void VCmpxNeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<uint32_t>(
+          inst, wf,
+          [](auto a, auto b) {
+            return ((util::stdx::static_simd_cast<util::native<int32_t>>(a) << 16) >> 16) !=
+                   ((util::stdx::static_simd_cast<util::native<int32_t>>(b) << 16) >> 16);
+          },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -2135,17 +2794,28 @@ RJ_NOINLINE void VCmpxNeI16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int16_t s0 = static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane) & 0xFFFF);
-    int16_t s1 = static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane) & 0xFFFF);
-    if (s0 != s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<uint32_t>(
+            inst, wf,
+            [](auto a, auto b) {
+              return ((util::stdx::static_simd_cast<util::native<int32_t>>(a) << 16) >> 16) !=
+                     ((util::stdx::static_simd_cast<util::native<int32_t>>(b) << 16) >> 16);
+            },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      int16_t s0 = static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane) & 0xFFFF);
+      int16_t s1 = static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane) & 0xFFFF);
+      if (s0 != s1)
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -2161,6 +2831,15 @@ void VCmpxGeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<uint32_t>(
+          inst, wf,
+          [](auto a, auto b) {
+            return ((util::stdx::static_simd_cast<util::native<int32_t>>(a) << 16) >> 16) >=
+                   ((util::stdx::static_simd_cast<util::native<int32_t>>(b) << 16) >> 16);
+          },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -2192,17 +2871,28 @@ RJ_NOINLINE void VCmpxGeI16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int16_t s0 = static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane) & 0xFFFF);
-    int16_t s1 = static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane) & 0xFFFF);
-    if (s0 >= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<uint32_t>(
+            inst, wf,
+            [](auto a, auto b) {
+              return ((util::stdx::static_simd_cast<util::native<int32_t>>(a) << 16) >> 16) >=
+                     ((util::stdx::static_simd_cast<util::native<int32_t>>(b) << 16) >> 16);
+            },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      int16_t s0 = static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane) & 0xFFFF);
+      int16_t s1 = static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane) & 0xFFFF);
+      if (s0 >= s1)
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -2218,6 +2908,11 @@ void VCmpxLtU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<uint32_t>(
+          inst, wf, [](auto a, auto b) { return (a & 0xFFFFu) < (b & 0xFFFFu); },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -2249,17 +2944,24 @@ RJ_NOINLINE void VCmpxLtU16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint16_t s0 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    uint16_t s1 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 < s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<uint32_t>(
+            inst, wf, [](auto a, auto b) { return (a & 0xFFFFu) < (b & 0xFFFFu); },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      uint16_t s0 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+      uint16_t s1 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
+      if (s0 < s1)
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -2275,6 +2977,11 @@ void VCmpxEqU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<uint32_t>(
+          inst, wf, [](auto a, auto b) { return (a & 0xFFFFu) == (b & 0xFFFFu); },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -2306,17 +3013,24 @@ RJ_NOINLINE void VCmpxEqU16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint16_t s0 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    uint16_t s1 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 == s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<uint32_t>(
+            inst, wf, [](auto a, auto b) { return (a & 0xFFFFu) == (b & 0xFFFFu); },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      uint16_t s0 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+      uint16_t s1 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
+      if (s0 == s1)
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -2332,6 +3046,11 @@ void VCmpxLeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<uint32_t>(
+          inst, wf, [](auto a, auto b) { return (a & 0xFFFFu) <= (b & 0xFFFFu); },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -2363,17 +3082,24 @@ RJ_NOINLINE void VCmpxLeU16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint16_t s0 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    uint16_t s1 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 <= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<uint32_t>(
+            inst, wf, [](auto a, auto b) { return (a & 0xFFFFu) <= (b & 0xFFFFu); },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      uint16_t s0 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+      uint16_t s1 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
+      if (s0 <= s1)
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -2389,6 +3115,11 @@ void VCmpxGtU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<uint32_t>(
+          inst, wf, [](auto a, auto b) { return (a & 0xFFFFu) > (b & 0xFFFFu); },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -2420,17 +3151,24 @@ RJ_NOINLINE void VCmpxGtU16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint16_t s0 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    uint16_t s1 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 > s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<uint32_t>(
+            inst, wf, [](auto a, auto b) { return (a & 0xFFFFu) > (b & 0xFFFFu); },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      uint16_t s0 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+      uint16_t s1 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
+      if (s0 > s1)
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -2446,6 +3184,11 @@ void VCmpxNeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<uint32_t>(
+          inst, wf, [](auto a, auto b) { return (a & 0xFFFFu) != (b & 0xFFFFu); },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -2477,17 +3220,24 @@ RJ_NOINLINE void VCmpxNeU16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint16_t s0 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    uint16_t s1 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 != s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<uint32_t>(
+            inst, wf, [](auto a, auto b) { return (a & 0xFFFFu) != (b & 0xFFFFu); },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      uint16_t s0 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+      uint16_t s1 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
+      if (s0 != s1)
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -2503,6 +3253,11 @@ void VCmpxGeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<uint32_t>(
+          inst, wf, [](auto a, auto b) { return (a & 0xFFFFu) >= (b & 0xFFFFu); },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -2534,17 +3289,24 @@ RJ_NOINLINE void VCmpxGeU16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint16_t s0 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    uint16_t s1 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 >= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<uint32_t>(
+            inst, wf, [](auto a, auto b) { return (a & 0xFFFFu) >= (b & 0xFFFFu); },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      uint16_t s0 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+      uint16_t s1 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
+      if (s0 >= s1)
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -2560,6 +3322,11 @@ void VCmpxLtI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<int32_t>(
+          inst, wf, [](auto a, auto b) { return a < b; },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -2591,17 +3358,24 @@ RJ_NOINLINE void VCmpxLtI32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int32_t s0 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    int32_t s1 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 < s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<int32_t>(
+            inst, wf, [](auto a, auto b) { return a < b; },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      int32_t s0 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+      int32_t s1 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
+      if (s0 < s1)
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -2617,6 +3391,11 @@ void VCmpxEqI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<int32_t>(
+          inst, wf, [](auto a, auto b) { return a == b; },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -2648,17 +3427,24 @@ RJ_NOINLINE void VCmpxEqI32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int32_t s0 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    int32_t s1 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 == s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<int32_t>(
+            inst, wf, [](auto a, auto b) { return a == b; },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      int32_t s0 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+      int32_t s1 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
+      if (s0 == s1)
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -2674,6 +3460,11 @@ void VCmpxLeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<int32_t>(
+          inst, wf, [](auto a, auto b) { return a <= b; },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -2705,17 +3496,24 @@ RJ_NOINLINE void VCmpxLeI32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int32_t s0 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    int32_t s1 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 <= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<int32_t>(
+            inst, wf, [](auto a, auto b) { return a <= b; },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      int32_t s0 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+      int32_t s1 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
+      if (s0 <= s1)
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -2731,6 +3529,11 @@ void VCmpxGtI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<int32_t>(
+          inst, wf, [](auto a, auto b) { return a > b; },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -2762,17 +3565,24 @@ RJ_NOINLINE void VCmpxGtI32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int32_t s0 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    int32_t s1 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 > s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<int32_t>(
+            inst, wf, [](auto a, auto b) { return a > b; },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      int32_t s0 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+      int32_t s1 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
+      if (s0 > s1)
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -2788,6 +3598,11 @@ void VCmpxNeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<int32_t>(
+          inst, wf, [](auto a, auto b) { return a != b; },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -2819,17 +3634,24 @@ RJ_NOINLINE void VCmpxNeI32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int32_t s0 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    int32_t s1 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 != s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<int32_t>(
+            inst, wf, [](auto a, auto b) { return a != b; },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      int32_t s0 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+      int32_t s1 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
+      if (s0 != s1)
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -2845,6 +3667,11 @@ void VCmpxGeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<int32_t>(
+          inst, wf, [](auto a, auto b) { return a >= b; },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -2876,17 +3703,24 @@ RJ_NOINLINE void VCmpxGeI32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int32_t s0 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    int32_t s1 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 >= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<int32_t>(
+            inst, wf, [](auto a, auto b) { return a >= b; },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      int32_t s0 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+      int32_t s1 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
+      if (s0 >= s1)
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -2902,6 +3736,11 @@ void VCmpxLtU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<uint32_t>(
+          inst, wf, [](auto a, auto b) { return a < b; },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -2933,17 +3772,24 @@ RJ_NOINLINE void VCmpxLtU32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    if (s0 < s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<uint32_t>(
+            inst, wf, [](auto a, auto b) { return a < b; },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+      uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+      if (s0 < s1)
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -2959,6 +3805,11 @@ void VCmpxEqU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<uint32_t>(
+          inst, wf, [](auto a, auto b) { return a == b; },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -2990,17 +3841,24 @@ RJ_NOINLINE void VCmpxEqU32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    if (s0 == s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<uint32_t>(
+            inst, wf, [](auto a, auto b) { return a == b; },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+      uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+      if (s0 == s1)
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -3016,6 +3874,11 @@ void VCmpxLeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<uint32_t>(
+          inst, wf, [](auto a, auto b) { return a <= b; },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -3047,17 +3910,24 @@ RJ_NOINLINE void VCmpxLeU32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    if (s0 <= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<uint32_t>(
+            inst, wf, [](auto a, auto b) { return a <= b; },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+      uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+      if (s0 <= s1)
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -3073,6 +3943,11 @@ void VCmpxGtU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<uint32_t>(
+          inst, wf, [](auto a, auto b) { return a > b; },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -3104,17 +3979,24 @@ RJ_NOINLINE void VCmpxGtU32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    if (s0 > s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<uint32_t>(
+            inst, wf, [](auto a, auto b) { return a > b; },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+      uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+      if (s0 > s1)
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -3130,6 +4012,11 @@ void VCmpxNeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<uint32_t>(
+          inst, wf, [](auto a, auto b) { return a != b; },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -3161,17 +4048,24 @@ RJ_NOINLINE void VCmpxNeU32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    if (s0 != s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<uint32_t>(
+            inst, wf, [](auto a, auto b) { return a != b; },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+      uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+      if (s0 != s1)
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -3187,6 +4081,11 @@ void VCmpxGeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<uint32_t>(
+          inst, wf, [](auto a, auto b) { return a >= b; },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -3218,17 +4117,24 @@ RJ_NOINLINE void VCmpxGeU32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    if (s0 >= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<uint32_t>(
+            inst, wf, [](auto a, auto b) { return a >= b; },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+      uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+      if (s0 >= s1)
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -3240,6 +4146,11 @@ RJ_NOINLINE void VCmpxGeU32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCmpxLtI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc64_simd<int64_t>(
+          inst, wf, [](auto a, auto b) { return a < b; },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -3254,6 +4165,11 @@ void VCmpxLtI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCmpxEqI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc64_simd<int64_t>(
+          inst, wf, [](auto a, auto b) { return a == b; },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -3268,6 +4184,11 @@ void VCmpxEqI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCmpxLeI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc64_simd<int64_t>(
+          inst, wf, [](auto a, auto b) { return a <= b; },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -3282,6 +4203,11 @@ void VCmpxLeI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCmpxGtI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc64_simd<int64_t>(
+          inst, wf, [](auto a, auto b) { return a > b; },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -3296,6 +4222,11 @@ void VCmpxGtI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCmpxNeI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc64_simd<int64_t>(
+          inst, wf, [](auto a, auto b) { return a != b; },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -3310,6 +4241,11 @@ void VCmpxNeI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCmpxGeI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc64_simd<int64_t>(
+          inst, wf, [](auto a, auto b) { return a >= b; },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -3324,6 +4260,11 @@ void VCmpxGeI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCmpxLtU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc64_simd<uint64_t>(
+          inst, wf, [](auto a, auto b) { return a < b; },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -3338,6 +4279,11 @@ void VCmpxLtU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCmpxEqU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc64_simd<uint64_t>(
+          inst, wf, [](auto a, auto b) { return a == b; },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -3352,6 +4298,11 @@ void VCmpxEqU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCmpxLeU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc64_simd<uint64_t>(
+          inst, wf, [](auto a, auto b) { return a <= b; },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -3366,6 +4317,11 @@ void VCmpxLeU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCmpxGtU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc64_simd<uint64_t>(
+          inst, wf, [](auto a, auto b) { return a > b; },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -3380,6 +4336,11 @@ void VCmpxGtU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCmpxNeU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc64_simd<uint64_t>(
+          inst, wf, [](auto a, auto b) { return a != b; },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -3394,6 +4355,11 @@ void VCmpxNeU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCmpxGeU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc64_simd<uint64_t>(
+          inst, wf, [](auto a, auto b) { return a >= b; },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -3412,6 +4378,36 @@ void VCmpxClassF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<uint32_t>(
+          inst, wf,
+          [](auto a, auto b) {
+            using U = util::native<uint32_t>;
+            U h = a & 0xFFFFu;
+            U exp = (h >> 10) & 0x1Fu;
+            U mant = h & 0x3FFu;
+            auto sgn = ((h >> 15) & 1u) != 0u;
+            auto qnan = ((h >> 9) & 1u) != 0u;
+            auto is_nan = (exp == 0x1Fu) && (mant != 0u);
+            auto is_inf = (exp == 0x1Fu) && (mant == 0u);
+            auto is_zero = (exp == 0u) && (mant == 0u);
+            auto is_den = (exp == 0u) && (mant != 0u);
+            auto is_norm = (exp >= 1u) && (exp <= 30u);
+            U cls(0u);
+            util::stdx::where(is_nan && !qnan, cls) = 0x001u;
+            util::stdx::where(is_nan && qnan, cls) = 0x002u;
+            util::stdx::where(is_inf && sgn, cls) = 0x004u;
+            util::stdx::where(is_norm && sgn, cls) = 0x008u;
+            util::stdx::where(is_den && sgn, cls) = 0x010u;
+            util::stdx::where(is_zero && sgn, cls) = 0x020u;
+            util::stdx::where(is_zero && !sgn, cls) = 0x040u;
+            util::stdx::where(is_den && !sgn, cls) = 0x080u;
+            util::stdx::where(is_norm && !sgn, cls) = 0x100u;
+            util::stdx::where(is_inf && !sgn, cls) = 0x200u;
+            return (cls & b) != 0u;
+          },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -3471,47 +4467,80 @@ RJ_NOINLINE void VCmpxClassF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_modifiers_, 0);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint16_t s0_raw = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    uint32_t mask = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    bool match = false;
-    uint16_t f16_exp = (s0_raw >> 10) & 0x1F;
-    uint16_t f16_mant = s0_raw & 0x3FF;
-    bool f16_sign = (s0_raw & 0x8000) != 0;
-    bool is_nan = (f16_exp == 0x1F) && (f16_mant != 0);
-    bool is_inf = (f16_exp == 0x1F) && (f16_mant == 0);
-    bool is_zero = (f16_exp == 0) && (f16_mant == 0);
-    bool is_denorm = (f16_exp == 0) && (f16_mant != 0);
-    bool is_normal = (f16_exp >= 1) && (f16_exp <= 30);
-    if ((mask & 0x001) && is_nan && (s0_raw & 0x0200) == 0)
-      match = true;
-    if ((mask & 0x002) && is_nan && (s0_raw & 0x0200) != 0)
-      match = true;
-    if ((mask & 0x004) && is_inf && f16_sign)
-      match = true;
-    if ((mask & 0x008) && is_normal && f16_sign)
-      match = true;
-    if ((mask & 0x010) && is_denorm && f16_sign)
-      match = true;
-    if ((mask & 0x020) && is_zero && f16_sign)
-      match = true;
-    if ((mask & 0x040) && is_zero && !f16_sign)
-      match = true;
-    if ((mask & 0x080) && is_denorm && !f16_sign)
-      match = true;
-    if ((mask & 0x100) && is_normal && !f16_sign)
-      match = true;
-    if ((mask & 0x200) && is_inf && !f16_sign)
-      match = true;
-    if (match)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<uint32_t>(
+            inst, wf,
+            [](auto a, auto b) {
+              using U = util::native<uint32_t>;
+              U h = a & 0xFFFFu;
+              U exp = (h >> 10) & 0x1Fu;
+              U mant = h & 0x3FFu;
+              auto sgn = ((h >> 15) & 1u) != 0u;
+              auto qnan = ((h >> 9) & 1u) != 0u;
+              auto is_nan = (exp == 0x1Fu) && (mant != 0u);
+              auto is_inf = (exp == 0x1Fu) && (mant == 0u);
+              auto is_zero = (exp == 0u) && (mant == 0u);
+              auto is_den = (exp == 0u) && (mant != 0u);
+              auto is_norm = (exp >= 1u) && (exp <= 30u);
+              U cls(0u);
+              util::stdx::where(is_nan && !qnan, cls) = 0x001u;
+              util::stdx::where(is_nan && qnan, cls) = 0x002u;
+              util::stdx::where(is_inf && sgn, cls) = 0x004u;
+              util::stdx::where(is_norm && sgn, cls) = 0x008u;
+              util::stdx::where(is_den && sgn, cls) = 0x010u;
+              util::stdx::where(is_zero && sgn, cls) = 0x020u;
+              util::stdx::where(is_zero && !sgn, cls) = 0x040u;
+              util::stdx::where(is_den && !sgn, cls) = 0x080u;
+              util::stdx::where(is_norm && !sgn, cls) = 0x100u;
+              util::stdx::where(is_inf && !sgn, cls) = 0x200u;
+              return (cls & b) != 0u;
+            },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      uint16_t s0_raw = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+      uint32_t mask = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+      bool match = false;
+      uint16_t f16_exp = (s0_raw >> 10) & 0x1F;
+      uint16_t f16_mant = s0_raw & 0x3FF;
+      bool f16_sign = (s0_raw & 0x8000) != 0;
+      bool is_nan = (f16_exp == 0x1F) && (f16_mant != 0);
+      bool is_inf = (f16_exp == 0x1F) && (f16_mant == 0);
+      bool is_zero = (f16_exp == 0) && (f16_mant == 0);
+      bool is_denorm = (f16_exp == 0) && (f16_mant != 0);
+      bool is_normal = (f16_exp >= 1) && (f16_exp <= 30);
+      if ((mask & 0x001) && is_nan && (s0_raw & 0x0200) == 0)
+        match = true;
+      if ((mask & 0x002) && is_nan && (s0_raw & 0x0200) != 0)
+        match = true;
+      if ((mask & 0x004) && is_inf && f16_sign)
+        match = true;
+      if ((mask & 0x008) && is_normal && f16_sign)
+        match = true;
+      if ((mask & 0x010) && is_denorm && f16_sign)
+        match = true;
+      if ((mask & 0x020) && is_zero && f16_sign)
+        match = true;
+      if ((mask & 0x040) && is_zero && !f16_sign)
+        match = true;
+      if ((mask & 0x080) && is_denorm && !f16_sign)
+        match = true;
+      if ((mask & 0x100) && is_normal && !f16_sign)
+        match = true;
+      if ((mask & 0x200) && is_inf && !f16_sign)
+        match = true;
+      if (match)
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -3527,6 +4556,35 @@ void VCmpxClassF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_simd<uint32_t>(
+          inst, wf,
+          [](auto a, auto b) {
+            using U = util::native<uint32_t>;
+            U exp = (a >> 23) & 0xFFu;
+            U mant = a & 0x7FFFFFu;
+            auto sgn = ((a >> 31) & 1u) != 0u;
+            auto qnan = ((a >> 22) & 1u) != 0u;
+            auto is_nan = (exp == 0xFFu) && (mant != 0u);
+            auto is_inf = (exp == 0xFFu) && (mant == 0u);
+            auto is_zero = (exp == 0u) && (mant == 0u);
+            auto is_den = (exp == 0u) && (mant != 0u);
+            auto is_norm = (exp >= 1u) && (exp <= 0xFEu);
+            U cls(0u);
+            util::stdx::where(is_nan && !qnan, cls) = 0x001u;
+            util::stdx::where(is_nan && qnan, cls) = 0x002u;
+            util::stdx::where(is_inf && sgn, cls) = 0x004u;
+            util::stdx::where(is_norm && sgn, cls) = 0x008u;
+            util::stdx::where(is_den && sgn, cls) = 0x010u;
+            util::stdx::where(is_zero && sgn, cls) = 0x020u;
+            util::stdx::where(is_zero && !sgn, cls) = 0x040u;
+            util::stdx::where(is_den && !sgn, cls) = 0x080u;
+            util::stdx::where(is_norm && !sgn, cls) = 0x100u;
+            util::stdx::where(is_inf && !sgn, cls) = 0x200u;
+            return (cls & b) != 0u;
+          },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -3580,41 +4638,73 @@ RJ_NOINLINE void VCmpxClassF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_modifiers_, 0);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    uint32_t mask = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    bool match = false;
-    if ((mask & 0x001) && std::isnan(s0) && (std::bit_cast<uint32_t>(s0) & 0x00400000) == 0)
-      match = true;
-    if ((mask & 0x002) && std::isnan(s0) && (std::bit_cast<uint32_t>(s0) & 0x00400000) != 0)
-      match = true;
-    if ((mask & 0x004) && std::isinf(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x008) && std::isnormal(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x010) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f &&
-        std::signbit(s0))
-      match = true;
-    if ((mask & 0x020) && s0 == 0.0f && std::signbit(s0))
-      match = true;
-    if ((mask & 0x040) && s0 == 0.0f && !std::signbit(s0))
-      match = true;
-    if ((mask & 0x080) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f &&
-        !std::signbit(s0))
-      match = true;
-    if ((mask & 0x100) && std::isnormal(s0) && s0 > 0)
-      match = true;
-    if ((mask & 0x200) && std::isinf(s0) && s0 > 0)
-      match = true;
-    if (match)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  [&]() -> void {
+    auto &inst = *this;
+    if (amdgpu::try_execute_vopc_simd<uint32_t>(
+            inst, wf,
+            [](auto a, auto b) {
+              using U = util::native<uint32_t>;
+              U exp = (a >> 23) & 0xFFu;
+              U mant = a & 0x7FFFFFu;
+              auto sgn = ((a >> 31) & 1u) != 0u;
+              auto qnan = ((a >> 22) & 1u) != 0u;
+              auto is_nan = (exp == 0xFFu) && (mant != 0u);
+              auto is_inf = (exp == 0xFFu) && (mant == 0u);
+              auto is_zero = (exp == 0u) && (mant == 0u);
+              auto is_den = (exp == 0u) && (mant != 0u);
+              auto is_norm = (exp >= 1u) && (exp <= 0xFEu);
+              U cls(0u);
+              util::stdx::where(is_nan && !qnan, cls) = 0x001u;
+              util::stdx::where(is_nan && qnan, cls) = 0x002u;
+              util::stdx::where(is_inf && sgn, cls) = 0x004u;
+              util::stdx::where(is_norm && sgn, cls) = 0x008u;
+              util::stdx::where(is_den && sgn, cls) = 0x010u;
+              util::stdx::where(is_zero && sgn, cls) = 0x020u;
+              util::stdx::where(is_zero && !sgn, cls) = 0x040u;
+              util::stdx::where(is_den && !sgn, cls) = 0x080u;
+              util::stdx::where(is_norm && !sgn, cls) = 0x100u;
+              util::stdx::where(is_inf && !sgn, cls) = 0x200u;
+              return (cls & b) != 0u;
+            },
+            [&](uint64_t value) { wf.set_exec(value); }))
+      return;
+    uint64_t exec = wf.exec();
+    uint64_t result = 0;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+      uint32_t mask = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+      bool match = false;
+      if ((mask & 0x001) && std::isnan(s0) && (std::bit_cast<uint32_t>(s0) & 0x00400000) == 0)
+        match = true;
+      if ((mask & 0x002) && std::isnan(s0) && (std::bit_cast<uint32_t>(s0) & 0x00400000) != 0)
+        match = true;
+      if ((mask & 0x004) && std::isinf(s0) && s0 < 0)
+        match = true;
+      if ((mask & 0x008) && std::isnormal(s0) && s0 < 0)
+        match = true;
+      if ((mask & 0x010) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) &&
+          s0 != 0.0f && std::signbit(s0))
+        match = true;
+      if ((mask & 0x020) && s0 == 0.0f && std::signbit(s0))
+        match = true;
+      if ((mask & 0x040) && s0 == 0.0f && !std::signbit(s0))
+        match = true;
+      if ((mask & 0x080) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) &&
+          s0 != 0.0f && !std::signbit(s0))
+        match = true;
+      if ((mask & 0x100) && std::isnormal(s0) && s0 > 0)
+        match = true;
+      if ((mask & 0x200) && std::isinf(s0) && s0 > 0)
+        match = true;
+      if (match)
+        result |= (1ULL << lane);
+    }
+    wf.set_exec(result);
+  }();
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -3626,6 +4716,37 @@ RJ_NOINLINE void VCmpxClassF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf)
 }
 
 void VCmpxClassF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
+  auto &inst = *this;
+  if (amdgpu::try_execute_vopc_class_f64_simd(
+          inst, wf,
+          [](auto s, auto m) {
+            using U = std::decay_t<decltype(s)>;
+            using M = std::decay_t<decltype(m)>;
+            U exp = (s >> 52) & 0x7FFu;
+            U mant = s & 0xFFFFFFFFFFFFFull;
+            auto sgn = ((s >> 63) & 1u) != 0u;
+            auto qnan = ((s >> 51) & 1u) != 0u;
+            auto is_nan = (exp == 0x7FFu) && (mant != 0u);
+            auto is_inf = (exp == 0x7FFu) && (mant == 0u);
+            auto is_zero = (exp == 0u) && (mant == 0u);
+            auto is_den = (exp == 0u) && (mant != 0u);
+            auto is_norm = (exp >= 1u) && (exp <= 0x7FEu);
+            U cls(0u);
+            util::stdx::where(is_nan && !qnan, cls) = 0x001u;
+            util::stdx::where(is_nan && qnan, cls) = 0x002u;
+            util::stdx::where(is_inf && sgn, cls) = 0x004u;
+            util::stdx::where(is_norm && sgn, cls) = 0x008u;
+            util::stdx::where(is_den && sgn, cls) = 0x010u;
+            util::stdx::where(is_zero && sgn, cls) = 0x020u;
+            util::stdx::where(is_zero && !sgn, cls) = 0x040u;
+            util::stdx::where(is_den && !sgn, cls) = 0x080u;
+            util::stdx::where(is_norm && !sgn, cls) = 0x100u;
+            util::stdx::where(is_inf && !sgn, cls) = 0x200u;
+            auto cls32 = util::stdx::static_simd_cast<M>(cls);
+            return (cls32 & m) != 0u;
+          },
+          [&](uint64_t value) { wf.set_exec(value); }))
+    return;
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {

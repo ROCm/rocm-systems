@@ -7,7 +7,8 @@
 #include "common/string_utility.hpp"
 #include "common/version.hpp"
 #include "logger/debug.hpp"
-#include "policies/rocprofiler-sdk/tracing-config.hpp"
+#include "policies/rocprofiler-sdk/tracing_config/backend.hpp"
+#include "policies/rocprofiler-sdk/tracing_config/externals.hpp"
 
 #include <algorithm>
 #include <concepts>
@@ -37,8 +38,8 @@ concept tracing_kind =
     std::same_as<TracingKind, typename SdkBackend::buffer_tracing_kind_t>;
 }  // namespace concepts
 
-template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
-          policies::rocprofiler_sdk::tracing_config_externals Externals>
+template <policies::tracing_config::backend   SdkBackend,
+          policies::tracing_config::externals Externals>
 class tracing_config
 {
 public:
@@ -166,8 +167,8 @@ private:
 };
 
 /// @brief Return the version of the rocprofiler-sdk
-template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
-          policies::rocprofiler_sdk::tracing_config_externals Externals>
+template <policies::tracing_config::backend   SdkBackend,
+          policies::tracing_config::externals Externals>
 common::version
 tracing_config<SdkBackend, Externals>::get_version()
 {
@@ -176,8 +177,8 @@ tracing_config<SdkBackend, Externals>::get_version()
     return version;
 }
 
-template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
-          policies::rocprofiler_sdk::tracing_config_externals Externals>
+template <policies::tracing_config::backend   SdkBackend,
+          policies::tracing_config::externals Externals>
 std::vector<std::string>
 tracing_config<SdkBackend, Externals>::get_domain_choices()
 {
@@ -217,8 +218,8 @@ tracing_config<SdkBackend, Externals>::get_domain_choices()
     return choices_vec;
 }
 
-template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
-          policies::rocprofiler_sdk::tracing_config_externals Externals>
+template <policies::tracing_config::backend   SdkBackend,
+          policies::tracing_config::externals Externals>
 std::string
 tracing_config<SdkBackend, Externals>::get_domain_defaults()
 {
@@ -233,8 +234,8 @@ tracing_config<SdkBackend, Externals>::get_domain_defaults()
     return defaults;
 }
 
-template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
-          policies::rocprofiler_sdk::tracing_config_externals Externals>
+template <policies::tracing_config::backend   SdkBackend,
+          policies::tracing_config::externals Externals>
 std::vector<typename tracing_config<SdkBackend, Externals>::operation_setting_spec>
 tracing_config<SdkBackend, Externals>::get_operation_settings()
 {
@@ -269,8 +270,8 @@ tracing_config<SdkBackend, Externals>::get_operation_settings()
     return result;
 }
 
-template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
-          policies::rocprofiler_sdk::tracing_config_externals Externals>
+template <policies::tracing_config::backend   SdkBackend,
+          policies::tracing_config::externals Externals>
 std::unordered_set<typename SdkBackend::callback_tracing_kind_t>
 tracing_config<SdkBackend, Externals>::get_callback_domains()
 {
@@ -333,8 +334,8 @@ tracing_config<SdkBackend, Externals>::get_callback_domains()
     return callback_domains;
 }
 
-template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
-          policies::rocprofiler_sdk::tracing_config_externals Externals>
+template <policies::tracing_config::backend   SdkBackend,
+          policies::tracing_config::externals Externals>
 std::unordered_set<typename SdkBackend::buffer_tracing_kind_t>
 tracing_config<SdkBackend, Externals>::get_buffered_domains()
 {
@@ -393,8 +394,8 @@ tracing_config<SdkBackend, Externals>::get_buffered_domains()
     return data;
 }
 
-template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
-          policies::rocprofiler_sdk::tracing_config_externals Externals>
+template <policies::tracing_config::backend   SdkBackend,
+          policies::tracing_config::externals Externals>
 template <concepts::tracing_kind<SdkBackend> TracingKind>
 std::vector<std::int32_t>
 tracing_config<SdkBackend, Externals>::get_operations(TracingKind kind)
@@ -444,8 +445,8 @@ tracing_config<SdkBackend, Externals>::get_operations(TracingKind kind)
     return operation_ids;
 }
 
-template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
-          policies::rocprofiler_sdk::tracing_config_externals Externals>
+template <policies::tracing_config::backend   SdkBackend,
+          policies::tracing_config::externals Externals>
 template <concepts::tracing_kind<SdkBackend> TracingKind>
 std::unordered_set<std::int32_t>
 tracing_config<SdkBackend, Externals>::get_backtrace_operations(TracingKind kind)
@@ -484,8 +485,8 @@ tracing_config<SdkBackend, Externals>::get_backtrace_operations(TracingKind kind
     return matched_operation_ids;
 }
 
-template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
-          policies::rocprofiler_sdk::tracing_config_externals Externals>
+template <policies::tracing_config::backend   SdkBackend,
+          policies::tracing_config::externals Externals>
 template <concepts::tracing_kind<SdkBackend> TracingKind>
 std::vector<std::pair<std::int32_t, std::string>>
 tracing_config<SdkBackend, Externals>::all_operation_items_for_kind(
@@ -516,8 +517,8 @@ tracing_config<SdkBackend, Externals>::all_operation_items_for_kind(
                                                               named_items.end() };
 }
 
-template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
-          policies::rocprofiler_sdk::tracing_config_externals Externals>
+template <policies::tracing_config::backend   SdkBackend,
+          policies::tracing_config::externals Externals>
 std::vector<std::pair<std::string, std::regex>>
 tracing_config<SdkBackend, Externals>::compile_operation_patterns(
     const std::string& operations_setting_env_name)
@@ -548,8 +549,8 @@ tracing_config<SdkBackend, Externals>::compile_operation_patterns(
                                                             compiled_patterns.end() };
 }
 
-template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
-          policies::rocprofiler_sdk::tracing_config_externals Externals>
+template <policies::tracing_config::backend   SdkBackend,
+          policies::tracing_config::externals Externals>
 bool
 tracing_config<SdkBackend, Externals>::matches_any_operation_pattern(
     std::string_view operations_setting_env_name, const std::string& operation_name,
@@ -567,8 +568,8 @@ tracing_config<SdkBackend, Externals>::matches_any_operation_pattern(
     });
 }
 
-template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
-          policies::rocprofiler_sdk::tracing_config_externals Externals>
+template <policies::tracing_config::backend   SdkBackend,
+          policies::tracing_config::externals Externals>
 void
 tracing_config<SdkBackend, Externals>::finalize_and_throw(
     std::string_view exception_message)
@@ -577,8 +578,8 @@ tracing_config<SdkBackend, Externals>::finalize_and_throw(
     throw std::runtime_error(std::string{ exception_message });
 }
 
-template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
-          policies::rocprofiler_sdk::tracing_config_externals Externals>
+template <policies::tracing_config::backend   SdkBackend,
+          policies::tracing_config::externals Externals>
 template <concepts::tracing_kind<SdkBackend> TracingKind>
 tracing_config<SdkBackend, Externals>::operation_options_env_names
 tracing_config<SdkBackend, Externals>::assemble_operation_env_names_for_kind(
@@ -611,8 +612,8 @@ tracing_config<SdkBackend, Externals>::assemble_operation_env_names_for_kind(
     return operation_options_env_names{ name };
 }
 
-template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
-          policies::rocprofiler_sdk::tracing_config_externals Externals>
+template <policies::tracing_config::backend   SdkBackend,
+          policies::tracing_config::externals Externals>
 std::unordered_set<typename SdkBackend::callback_tracing_kind_t>
 tracing_config<SdkBackend, Externals>::get_supported_callback_domains()
 {
@@ -649,8 +650,8 @@ tracing_config<SdkBackend, Externals>::get_supported_callback_domains()
     return supported;
 }
 
-template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
-          policies::rocprofiler_sdk::tracing_config_externals Externals>
+template <policies::tracing_config::backend   SdkBackend,
+          policies::tracing_config::externals Externals>
 std::unordered_set<typename SdkBackend::buffer_tracing_kind_t>
 tracing_config<SdkBackend, Externals>::get_supported_buffer_domains()
 {
@@ -678,6 +679,8 @@ tracing_config<SdkBackend, Externals>::get_supported_buffer_domains()
         supported.emplace(SdkBackend::BUFFER_TRACING_KFD_PAGE_FAULT);
         supported.emplace(SdkBackend::BUFFER_TRACING_KFD_PAGE_MIGRATE);
         supported.emplace(SdkBackend::BUFFER_TRACING_KFD_QUEUE);
+        supported.emplace(SdkBackend::BUFFER_TRACING_KFD_EVENT_PAGE_FAULT);
+        supported.emplace(SdkBackend::BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE);
         supported.emplace(SdkBackend::BUFFER_TRACING_KFD_EVENT_QUEUE);
         supported.emplace(SdkBackend::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU);
         supported.emplace(SdkBackend::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS);
@@ -686,8 +689,8 @@ tracing_config<SdkBackend, Externals>::get_supported_buffer_domains()
     return supported;
 }
 
-template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
-          policies::rocprofiler_sdk::tracing_config_externals Externals>
+template <policies::tracing_config::backend   SdkBackend,
+          policies::tracing_config::externals Externals>
 std::unordered_map<std::string, std::vector<typename SdkBackend::callback_tracing_kind_t>>
 tracing_config<SdkBackend, Externals>::get_callback_domain_map()
 {
@@ -739,8 +742,8 @@ tracing_config<SdkBackend, Externals>::get_callback_domain_map()
     return domain_map;
 }
 
-template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
-          policies::rocprofiler_sdk::tracing_config_externals Externals>
+template <policies::tracing_config::backend   SdkBackend,
+          policies::tracing_config::externals Externals>
 std::unordered_map<std::string, std::vector<typename SdkBackend::buffer_tracing_kind_t>>
 tracing_config<SdkBackend, Externals>::get_buffered_domain_map()
 {
@@ -810,8 +813,8 @@ tracing_config<SdkBackend, Externals>::get_buffered_domain_map()
     return domain_map;
 }
 
-template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
-          policies::rocprofiler_sdk::tracing_config_externals Externals>
+template <policies::tracing_config::backend   SdkBackend,
+          policies::tracing_config::externals Externals>
 std::unordered_map<std::string, std::vector<typename SdkBackend::buffer_tracing_kind_t>>
 tracing_config<SdkBackend, Externals>::get_kfd_buffered_domain_aliases()
 {
@@ -821,6 +824,8 @@ tracing_config<SdkBackend, Externals>::get_kfd_buffered_domain_aliases()
               SdkBackend::BUFFER_TRACING_KFD_PAGE_FAULT,
               SdkBackend::BUFFER_TRACING_KFD_PAGE_MIGRATE,
               SdkBackend::BUFFER_TRACING_KFD_QUEUE,
+              SdkBackend::BUFFER_TRACING_KFD_EVENT_PAGE_FAULT,
+              SdkBackend::BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE,
               SdkBackend::BUFFER_TRACING_KFD_EVENT_QUEUE,
               SdkBackend::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
               SdkBackend::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS,
@@ -838,6 +843,14 @@ tracing_config<SdkBackend, Externals>::get_kfd_buffered_domain_aliases()
             { SdkBackend::BUFFER_TRACING_KFD_QUEUE },
         },
         {
+            "kfd_event_page_fault",
+            { SdkBackend::BUFFER_TRACING_KFD_EVENT_PAGE_FAULT },
+        },
+        {
+            "kfd_event_page_migrate",
+            { SdkBackend::BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE },
+        },
+        {
             "kfd_event_queue",
             { SdkBackend::BUFFER_TRACING_KFD_EVENT_QUEUE },
         },
@@ -852,8 +865,8 @@ tracing_config<SdkBackend, Externals>::get_kfd_buffered_domain_aliases()
     };
 }
 
-template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
-          policies::rocprofiler_sdk::tracing_config_externals Externals>
+template <policies::tracing_config::backend   SdkBackend,
+          policies::tracing_config::externals Externals>
 const std::unordered_set<std::string_view>&
 tracing_config<SdkBackend, Externals>::get_domains_to_skip_for_operation_options()
 {
@@ -870,8 +883,8 @@ tracing_config<SdkBackend, Externals>::get_domains_to_skip_for_operation_options
     return s_domains;
 }
 
-template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
-          policies::rocprofiler_sdk::tracing_config_externals Externals>
+template <policies::tracing_config::backend   SdkBackend,
+          policies::tracing_config::externals Externals>
 const std::unordered_set<std::string_view>&
 tracing_config<SdkBackend, Externals>::get_domains_to_skip_for_domain_choices()
 {

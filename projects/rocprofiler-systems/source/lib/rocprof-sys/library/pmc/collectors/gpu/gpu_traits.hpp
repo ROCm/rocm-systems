@@ -187,7 +187,7 @@ struct gpu_traits
         std::vector<device_entry> entries;
         auto                      filter = get_device_filter<Settings>();
 
-        if(filter.mode == device_selection_mode::NONE)
+        if(filter.mode == device_selection_mode::none)
         {
             LOG_DEBUG("{} sampling disabled via configuration", device_name);
             return entries;
@@ -203,11 +203,14 @@ struct gpu_traits
         {
             auto index = device->get_index();
 
-            bool should_include = (filter.mode == device_selection_mode::ALL) ||
-                                  (filter.mode == device_selection_mode::SPECIFIC &&
+            bool should_include = (filter.mode == device_selection_mode::all) ||
+                                  (filter.mode == device_selection_mode::specific &&
                                    filter.indices.count(index) > 0);
 
-            if(should_include) ++selected_count;
+            if(should_include)
+            {
+                ++selected_count;
+            }
 
             if(should_include && visible_bdfs.has_value())
             {
@@ -244,7 +247,10 @@ struct gpu_traits
         const std::vector<std::pair<size_t, std::string>>& excluded)
     {
         static std::atomic<bool> s_reported{ false };
-        if(s_reported.exchange(true)) return;
+        if(s_reported.exchange(true))
+        {
+            return;
+        }
 
         // Visibility unknown (the ROCm runtime reported no GPU agents at all) is not the
         // same as "nothing is visible". Stay quiet when AMD SMI found no GPUs either,
@@ -262,7 +268,10 @@ struct gpu_traits
             return;
         }
 
-        if(excluded.empty()) return;
+        if(excluded.empty())
+        {
+            return;
+        }
 
         // Losing every selected device is either a deliberate mask or a failure to
         // correlate AMD SMI devices with ROCm agents. The runtime's own visible-BDF list
@@ -280,7 +289,9 @@ struct gpu_traits
         }
 
         for(const auto& [index, bdf] : excluded)
+        {
             log_visibility_exclusion(filter, index, bdf);
+        }
     }
 
     /**
@@ -299,7 +310,7 @@ struct gpu_traits
 
         const auto bdfid = ::rocprofsys::common::pci_bdfid_from_string(bdf);
 
-        if(filter.mode == device_selection_mode::SPECIFIC)
+        if(filter.mode == device_selection_mode::specific)
         {
             LOG_WARNING("{} device [{}] (BDF {}, rocminfo BDFID {}) was requested via "
                         "ROCPROFSYS_SAMPLING_GPUS but is not visible to the ROCm "
@@ -322,7 +333,7 @@ struct gpu_traits
      */
     static void warn_invalid_indices(const device_filter& filter, size_t max_index)
     {
-        if(filter.mode != device_selection_mode::SPECIFIC)
+        if(filter.mode != device_selection_mode::specific)
         {
             return;
         }

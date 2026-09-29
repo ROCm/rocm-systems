@@ -39,6 +39,7 @@
 #include "palImage.h"
 #include "palInlineFuncs.h"
 #include "palLib.h"
+#include "palMsaaState.h"
 #include "palPerfExperiment.h"
 #include "palPipeline.h"
 #include "palQueue.h"
@@ -101,7 +102,6 @@ struct GraphicsPipelineCreateInfo;
 struct ImageCreateInfo;
 struct IndirectCmdGeneratorCreateInfo;
 struct MsaaStateCreateInfo;
-struct MsaaQuadSamplePattern;
 struct PeerGpuMemoryOpenInfo;
 struct PeerImageOpenInfo;
 struct PerfExperimentCreateInfo;
@@ -677,11 +677,13 @@ struct PalPublicSettings
     /// Controls PWS enable mode: disabled, fully enabled or partially enabled. Only take effect if HW supports PWS.
     PwsMode pwsMode;
 
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1001
     /// Controls the MaxScratchRingSizeBaseline, which is really just the maximum size of the scratch ring
     gpusize maxScratchRingSizeBaseline;
 
     /// Controls the maximum size of the scratch ring allocation
     uint32 maxScratchRingSizeScalePct;
+#endif
 
 #if defined(__unix__)
     /// Whether enable vm-always-valid feature on Linux while allocating Bo
@@ -1832,7 +1834,14 @@ struct GpuMemoryHeapProperties
 
     gpusize logicalSize;                   ///< Size of the heap in bytes. If HBCC is enabled, certain heaps may be
                                            ///  virtualized and the logical size will exceed the physical size.
+                                           ///  If zero, this heap is not supported by this device.
     gpusize physicalSize;                  ///< Physical size of the heap in bytes
+};
+
+/// Wraps an array of @ref GpuMemoryHeapProperties with one entry for each @ref GpuHeap, see @ref GetGpuHeapProperties.
+struct GpuHeapProperties
+{
+    GpuMemoryHeapProperties heaps[GpuHeapCount];
 };
 
 /// Reports properties of a specific GPU block required for interpretting performance experiment data from that block.
@@ -3182,50 +3191,107 @@ public:
     /// Reports properties of all GPU memory heaps available to this device (e.g., size, whether it is CPU visible or
     /// not, performance characteristics, etc.).
     ///
-    /// @param [out] info Properties of each GPU heap available to this device, indexed by the GPU ID defined in
-    ///                   @ref GpuHeap.  If a particular heap is unavailable, its entry will report a size of 0.
+    /// The client may cache the returned reference; PAL guarantees it will remain valid for the lifetime of the device.
     ///
-    /// @returns Success if the heap properties were successfully queried and returned in info[].  Otherwise, one of the
-    ///          following errors may be returned:
-    ///          + ErrorUnknown if an unexpected internal error occured.
-    virtual Result GetGpuMemoryHeapProperties(
-        GpuMemoryHeapProperties info[GpuHeapCount]) const = 0;
+    /// @returns A reference to this device's internal @ref GpuHeapProperties struct.
+    virtual const GpuHeapProperties& GetGpuHeapProperties() const = 0;
+
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1002
+    Result GetGpuMemoryHeapProperties(
+        GpuMemoryHeapProperties info[GpuHeapCount]) const
+    {
+        if (info == nullptr)
+        {
+            return Result::ErrorInvalidPointer;
+        }
+
+        const GpuHeapProperties& props = GetGpuHeapProperties();
+
+        for (uint32 idx = 0; idx < GpuHeapCount; ++idx)
+        {
+            info[idx] = props.heaps[idx];
+        }
+
+        return Result::Success;
+    }
+#endif
 
     /// Reports all format and tiling mode related properties for this device.
     ///
-    /// @param [out] pInfo  Output properties.
+    /// The client may cache the returned reference; PAL guarantees it will remain valid for the lifetime of the device.
     ///
-    /// @returns Success if the properties were successfully queried and returned in pProperties.  Otherwise, one of the
-    ///          following errors may be returned:
-    ///          + ErrorInvalidPointer if pInfo is null.
-    virtual Result GetFormatProperties(
-        MergedFormatPropertiesTable* pInfo) const = 0;
+    /// @returns A reference to this device's internal @ref MergedFormatPropertiesTable struct.
+    virtual const MergedFormatPropertiesTable& GetFormatProperties() const = 0;
+
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1002
+    Result GetFormatProperties(
+        MergedFormatPropertiesTable* pInfo) const
+    {
+        if (pInfo == nullptr)
+        {
+            return Result::ErrorInvalidPointer;
+        }
+
+        *pInfo = GetFormatProperties();
+        return Result::Success;
+    }
+#endif
 
     /// Reports performance experiment related properties for this device.
     ///
     /// Enumerates the GPU family, blocks, capabilities, etc..
     ///
-    /// @param [out] pProperties Output properties.
+    /// The client may cache the returned reference; PAL guarantees it will remain valid for the lifetime of the device.
     ///
-    /// @returns Success if the properties were successfully queried and returned in pProperties.  Otherwise, one of the
-    ///          following errors may be returned:
-    ///          + ErrorInvalidPointer if pProperties is null.
-    virtual Result GetPerfExperimentProperties(
-        PerfExperimentProperties* pProperties) const = 0;
+    /// @returns A reference to this device's internal @ref PerfExperimentProperties struct.
+    virtual const PerfExperimentProperties& GetPerfExperimentProperties() const = 0;
 
-    /// Fills out the default MSAA quad sample pattern for the given sample count.
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1002
+    Result GetPerfExperimentProperties(
+        PerfExperimentProperties* pProperties) const
+    {
+        if (pProperties == nullptr)
+        {
+            return Result::ErrorInvalidPointer;
+        }
+
+        *pProperties = GetPerfExperimentProperties();
+        return Result::Success;
+    }
+#endif
+
+    /// Reports the default MSAA quad sample pattern for the given sample count.
     ///
-    /// @param [in]  samples             The number of valid samples in the sample pattern. Must be a power of two.
-    /// @param [out] pQuadSamplePattern  Fill this with the default pattern.
+    /// The client may cache the returned reference; PAL guarantees it will remain valid for the lifetime of the device.
     ///
-    /// @returns Success if @ref pQuadSamplePattern was filled with the default sample pattern.
-    ///          Otherwise, one of the following errors may be returned:
-    ///          + ErrorInvalidPointer if @ref pQuadSamplePattern is null.
-    ///          + ErrorInvalidValue if @ref samples is not a supported power of two.
-    ///          + ErrorUnavailable if this device lacks GfxIp support.
-    virtual Result GetDefaultSamplePattern(
+    /// @param [in] samples  The number of valid samples in the sample pattern. Must be a power of two.
+    ///
+    /// @returns Nullptr if "samples" is not a power of two or not supported by this device. Otherwise, any non-null
+    ///          pointer points to the default sample pattern for "samples".
+    virtual const MsaaQuadSamplePattern* GetDefaultSamplePattern(
+        uint32 samples) const = 0;
+
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1002
+    Result GetDefaultSamplePattern(
         uint32                 samples,
-        MsaaQuadSamplePattern* pQuadSamplePattern) const = 0;
+        MsaaQuadSamplePattern* pQuadSamplePattern) const
+    {
+        if (pQuadSamplePattern == nullptr)
+        {
+            return Result::ErrorInvalidPointer;
+        }
+
+        const MsaaQuadSamplePattern* pPattern = GetDefaultSamplePattern(samples);
+
+        if (pPattern == nullptr)
+        {
+            return Result::ErrorInvalidValue;
+        }
+
+        *pQuadSamplePattern = *pPattern;
+        return Result::Success;
+    }
+#endif
 
     /// Adds a list of per-device memory object references that persist across command buffer submissions. It is the
     /// responsibility of the client to make sure that all required memory references have been added before submitting
@@ -3277,17 +3343,13 @@ public:
         IQueue*           pQueue
         ) = 0;
 
-    /// Queries the Device for the total amount of referenced GPU memory for each heap type.  These totals include all
-    /// memory added to the Device or any Queue using @ref AddGpuMemoryReferences and not yet removed using @ref
-    /// RemoveGpuMemoryReferences.  Internal PAL allocations are included in these totals, but memory referenced using
-    /// the per-submit list in @ref IQueue::Submit is not included in these amounts.
-    ///
-    /// The intended use for this interface is for clients to be able to manage budgeting of resident GPU memory.
-    ///
-    /// @param [out] referencedGpuMemTotal Array containing the total amount of referenced GPU memory for each GPU
-    ///              memory heap.
-    virtual void GetReferencedMemoryTotals(
-        gpusize  referencedGpuMemTotal[GpuHeapCount]) const = 0;
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1002
+    void GetReferencedMemoryTotals(
+        gpusize referencedGpuMemTotal[GpuHeapCount]) const
+    {
+        // No client has called this function for many years so there's no need for functional backcompat.
+    }
+#endif
 
     /// Get primary surface MGPU support information based upon primary surface create info and input flags provided
     /// by client.

@@ -252,6 +252,21 @@ the ORM metadata for the schema diagram, and materializes the views in a
 throwaway database to read back their real columns for the views diagram, so
 neither diagram can drift from the code. Do not edit the PNGs by hand.
 
+## Instruction Execution Pipeline Table
+
+[`src/rocprof_compute_soc/analysis_configs/instruction_pipelines.yaml`](src/rocprof_compute_soc/analysis_configs/instruction_pipelines.yaml)
+is generated, not written by hand. Rerun the generator when a new GPU family
+needs support, or when an instruction shows up with an empty type in analyze,
+and commit the regenerated file as is:
+
+```bash
+./tools/instruction_pipeline_generator.py
+```
+
+This requires `llvm-tblgen` and `llvm-objdump` from ROCm (set `ROCM_PATH` if
+they are not under `/opt/rocm`) and network access. Do not edit the YAML by
+hand.
+
 ## Vendoring External Dependencies
 
 rocprofiler-compute vendors certain Python dependencies (via git submodules) to eliminate external dependencies in profile mode. This improves portability and reliability on HPC systems.
@@ -288,7 +303,7 @@ Profile mode uses only stdlib to:
 - CI uses Python 3.10+ to ensure full enforcement coverage
 
 Enforcement is automatically done for tests which execute profile pipeline using main
-function instead of subprocess (unlike tests using --call-binary and multi mpi rank tests).
+function instead of subprocess (unlike multi mpi rank tests).
 These tests are automatically protected by guards in `tests/conftest.py` when testing with Python 3.10 and above.
 The guard intercepts ALL imports (direct, nested, dynamic) and fails tests immediately if
 non-stdlib packages are imported.

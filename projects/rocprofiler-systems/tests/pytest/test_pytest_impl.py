@@ -135,26 +135,6 @@ class TestGPUInfo(RocprofsysTest):
         assert gpu_info.rocm_events_for_test == "SQ_WAVES"
         assert gpu_info.counter_names == ["SQ_WAVES"]
 
-    def test_unsupported_perf_counter_archs_flags_matches(self):
-        gpu_info = GPUInfo(
-            available=True,
-            architectures=["gfx1102", "gfx942"],
-            device_count=2,
-            categories={"radeon", "instinct"},
-        )
-
-        assert gpu_info.unsupported_perf_counter_archs == {"gfx1102"}
-
-    def test_unsupported_perf_counter_archs_empty_when_supported(self):
-        gpu_info = GPUInfo(
-            available=True,
-            architectures=["gfx942"],
-            device_count=1,
-            categories={"instinct"},
-        )
-
-        assert gpu_info.unsupported_perf_counter_archs == set()
-
 
 @pytest.mark.class_name("test-result")
 class TestTestResult(RocprofsysTest):

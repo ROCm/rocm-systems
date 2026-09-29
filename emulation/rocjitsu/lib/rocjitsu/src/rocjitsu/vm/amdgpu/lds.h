@@ -26,7 +26,7 @@ constexpr uint32_t kInvalidLdsAddress = UINT32_MAX;
 /// latter has the combined capacity of both physical CUs. Addresses are
 /// byte-granularity and local to the selected placement (not globally visible).
 /// Logical capacity is independent of host storage: unmaterialized bytes read
-/// as zero, while writes and workgroup reservations grow a contiguous,
+/// as zero, while writes and workgroup reservations grow a contiguous
 /// prefix in fixed 4 KiB backing granules. Clearing LDS retains the materialized
 /// prefix for reuse.
 class Lds : public simdojo::MemoryInterface {
@@ -40,7 +40,7 @@ public:
   /// @brief Return the bytes currently backed by host storage.
   ///
   /// @details The remaining logical capacity reads as zero and is materialized
-  /// on the first write or workgroup allocation that reaches it. This accessor
+  /// on the first write or workgroup reservation that reaches it. This accessor
   /// is intended for diagnostics and allocation tests.
   size_t materialized_size_bytes() const { return data_.size(); }
 
@@ -195,6 +195,14 @@ public:
   void clear() {
     if (!data_.empty())
       std::memset(data_.data(), 0, data_.size());
+  }
+
+  /// @brief Materialize a reservation without clearing previously written bytes.
+  void materialize_range(uint32_t offset, uint32_t len) {
+    const size_t begin = offset;
+    const size_t end = std::min(capacity_bytes_, begin + static_cast<size_t>(len));
+    if (begin < end)
+      ensure_materialized(end);
   }
 
   void zero_range(uint32_t offset, uint32_t len) {

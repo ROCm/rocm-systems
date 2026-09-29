@@ -900,10 +900,27 @@ static hsa_status_t GetAgentInfo(hsa_agent_t agent, void* data) {
 void MemoryAsyncCopy::FindTopology() {
   hsa_status_t err;
 
-  hwloc_topology_set_flags(topology_, HWLOC_TOPOLOGY_FLAG_WHOLE_SYSTEM |
-                                         HWLOC_TOPOLOGY_FLAG_IO_DEVICES);
+  hwloc_topology_set_flags(topology_, HWLOC_TOPOLOGY_FLAG_WHOLE_SYSTEM
+#if HWLOC_API_VERSION < 0x00020000
+                                          | HWLOC_TOPOLOGY_FLAG_IO_DEVICES
+#endif
+                                         );
 
-  hwloc_topology_load(topology_);
+  // hwloc 2.x removed the IO-device topology flags; PCI/IO devices are now
+  // controlled by a type filter that defaults to KEEP_NONE. Without this the
+  // topology contains no PCI devices and hwloc_get_pcidev_by_busid() below
+  // returns nullptr for every GPU, making topology discovery fail.
+#if HWLOC_API_VERSION >= 0x00020000
+  int io_filter_err =
+      hwloc_topology_set_io_types_filter(topology_, HWLOC_TYPE_FILTER_KEEP_ALL);
+  ASSERT_EQ(0, io_filter_err)
+      << "hwloc_topology_set_io_types_filter() failed; PCI/IO devices will not "
+         "be discovered and GPU-to-NUMA topology matching cannot succeed.";
+#endif
+
+  int topo_load_err = hwloc_topology_load(topology_);
+  ASSERT_EQ(0, topo_load_err)
+      << "hwloc_topology_load() failed; topology is unusable.";
 
   err = hsa_iterate_agents(GetAgentInfo, this);
 

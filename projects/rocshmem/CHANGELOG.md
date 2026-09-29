@@ -1,12 +1,26 @@
 # Changelog for rocSHMEM
 ## Unreleased - rocSHMEM 3.8.0 for ROCm 10.x
 
+### Added
+* GDA device code refactor (#7217)
+  * Core GDA device code is now header-only.
+  * Removed indirection and branching when compiled for a single GDA provider.
+  * Significantly reduced size of device code GDA Queue Pair management objects.
+  * Reduced latency of `rocshmem_quiet` for AMD Pensando IONIC provider.
+    This also reduces the latency of blocking communication calls.
+  * Communications using the GDA backend can now selectively choose at compilation time
+    to reduce the internal GDA Queue Pair object correctness and safety constraints,
+    improving application performance when such relaxations are known to be safe by the caller.
+    These relaxations can be applied independently at each call site.
+    This is currently an internal mechanism and is not exposed by the public rocSHMEM APIs.
+
 ## rocSHMEM 3.7.0 for ROCm 10.1
 
 ### Added
-* Added new APIs:
+* Added new APIs (#8350):
     * `rocshmem_tile_{min, max, sum}_reduce{_wave}{_wg}` variants for the IPC backend
     * `rocshmem_ctx_tile_{min, max, sum}_reduce{_wave}{_wg}` variants for the IPC backend
+* Added tile RMA and collectives support for GDA backend (#10056)
 * Added `--num_wf` argument to functional test harness for runtime wavefront size detection on architectures with wave size 32 (gfx1100, gfx1201, gfx1250) (#9312)
 * Added LTO inline-remarks comparison toolset and interactive resource-usage dashboards under `scripts/analysis/` (#10872)
 * Optimized device API wrappers to remove double-indirection in cross-TU calls, enabling more reliable LTO inlining (#9729)

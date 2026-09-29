@@ -3,9 +3,7 @@
 
 #pragma once
 
-namespace rocprofsys
-{
-namespace kokkosp
+namespace rocprofsys::kokkosp
 {
 
 void
@@ -14,5 +12,4 @@ pause();
 void
 resume();
 
-}  // namespace kokkosp
-}  // namespace rocprofsys
+}  // namespace rocprofsys::kokkosp

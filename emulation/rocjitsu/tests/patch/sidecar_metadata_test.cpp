@@ -48,7 +48,7 @@ TEST(SidecarMetadata, HeaderBytesPinMagicAndVersion) {
 
   ASSERT_GE(bytes.size(), 24u);
   constexpr std::array<uint8_t, 8> expected_magic = {'R', 'J', 'S', 'I', 'D', 'E', '1', '\0'};
-  EXPECT_TRUE(std::equal(expected_magic.begin(), expected_magic.end(), bytes.begin()));
+  EXPECT_TRUE(std::ranges::equal(expected_magic, std::span(bytes).first(expected_magic.size())));
   uint32_t version = 0;
   std::memcpy(&version, bytes.data() + 8, sizeof(version));
   EXPECT_EQ(version, 1u);

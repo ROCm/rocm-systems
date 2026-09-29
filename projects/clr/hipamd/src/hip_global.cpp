@@ -9,14 +9,15 @@
 #include "hip/hip_runtime.h"
 #include "hip_internal.hpp"
 #include "hip_code_object.hpp"
+#include "hip_platform.hpp"
 #include "platform/program.hpp"
 #include <hip/hip_version.h>
 
-const char* amd_dbgapi_get_build_name(void) { return HIP_VERSION_BUILD_NAME; }
+HIP_PUBLIC_API const char* amd_dbgapi_get_build_name(void) { return HIP_VERSION_BUILD_NAME; }
 
-const char* amd_dbgapi_get_git_hash() { return HIP_VERSION_GITHASH; }
+HIP_PUBLIC_API const char* amd_dbgapi_get_git_hash() { return HIP_VERSION_GITHASH; }
 
-size_t amd_dbgapi_get_build_id() { return HIP_VERSION_BUILD_ID; }
+HIP_PUBLIC_API size_t amd_dbgapi_get_build_id() { return HIP_VERSION_BUILD_ID; }
 
 #ifdef __HIP_ENABLE_PCH
 extern const char __hip_pch_wave32[];
@@ -52,6 +53,7 @@ Function::Function(const std::string& name, FatBinaryInfo** modules)
 Function::~Function() {
   for (auto& kernel : dFunc_) {
     if (kernel != nullptr) {
+      PlatformState::Instance().UnregisterFuncHandle(asHipFunction(kernel));
       kernel->release();
     }
   }
@@ -62,7 +64,9 @@ amd::Kernel* Function::BuildKernel(hipModule_t hmod) const {
   amd::Program* program = as_amd(reinterpret_cast<cl_program>(hmod));
   const amd::Symbol* symbol = program->findSymbol(name_.c_str());
   guarantee(symbol != nullptr, "Cannot find Symbol with name: %s", name_.c_str());
-  return new amd::Kernel(*program, *symbol, name_);
+  auto* kernel = new amd::Kernel(*program, *symbol, name_);
+  PlatformState::Instance().RegisterFuncHandle(asHipFunction(kernel));
+  return kernel;
 }
 
 // ================================================================================================
@@ -74,11 +78,6 @@ hipError_t Function::GetDynFunc(hipFunction_t* hfunc, hipModule_t hmod) {
   }
   *hfunc = asHipFunction(dFunc_[dev]);
   return hipSuccess;
-}
-
-// ================================================================================================
-bool Function::IsValidDynFunc(const void* hfunc) {
-  return (hfunc == asHipFunction(dFunc_[ihipGetDevice()]));
 }
 
 // ================================================================================================
@@ -196,23 +195,27 @@ hipError_t Var::GetDeviceVarPtr(amd::Memory** mem, int deviceId) {
 }
 
 // ================================================================================================
-static hipError_t createVarMem(amd::Memory** mem_out, const std::string& name,
-                               hipModule_t hmod, int deviceId) {
+static hipError_t createVarMem(amd::Memory** mem_out, const std::string& name, hipModule_t hmod,
+                               int deviceId) {
   amd::Program* program = as_amd(reinterpret_cast<cl_program>(hmod));
   device::Program* dev_program = program->getDeviceProgram(*g_devices.at(deviceId)->devices()[0]);
-  guarantee(dev_program != nullptr, "Cannot get Device Program for module: 0x%x", hmod);
+  if (dev_program == nullptr) {
+    LogPrintfError("Cannot find device program while querying for symbol: %s", name.c_str());
+    return hipErrorInvalidDeviceFunction;
+  }
 
   amd::Memory* mem = nullptr;
   void* device_ptr = nullptr;
   size_t size = 0;
   if (!dev_program->createGlobalVarObj(&mem, &device_ptr, &size, name.c_str())) {
-    guarantee(false, "Cannot create GlobalVar Obj for symbol: %s", name.c_str());
+    LogPrintfError("Cannot create memory for device Var: %s", name.c_str());
+    return hipErrorInvalidSymbol;
   }
   // Handle size 0 symbols
   if (size != 0) {
     if (mem == nullptr || device_ptr == nullptr) {
       LogPrintfError("Cannot get memory for creating device Var: %s", name.c_str());
-      guarantee(false, "Cannot get memory for creating device var");
+      return hipErrorInvalidSymbol;
     }
     amd::MemObjMap::AddMemObj(device_ptr, mem);
   }

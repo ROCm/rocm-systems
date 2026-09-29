@@ -15,6 +15,7 @@
 #include "stream.h"
 #endif
 
+#include "ais-capability.h"
 #include "hipfile-data-ops.h"
 #include "hipfile-literals.h"
 #include "hipfile-warnings.h"
@@ -24,6 +25,7 @@
 
 #include <array>
 #include <cassert>
+#include <cerrno>
 #include <cstdint>
 #include <cstddef>
 #include <cstring>
@@ -34,6 +36,7 @@
 #include <sstream>
 #include <string>
 #include <sys/types.h>
+#include <system_error>
 #include <tuple>
 #include <variant>
 #include <vector>
@@ -1028,6 +1031,116 @@ INSTANTIATE_TEST_SUITE_P(
     [](const testing::TestParamInfo<HipAsyncFallbackMultiChunkShrink::ParamType> &param_info) {
         return param_info.param.name;
     });
+
+// Overrides only the fastpath AIS entry points to throw, so a fastpath async IO that is otherwise
+// selected fails at stream-execution time. Every other HIP call inherits the real implementation, so
+// the fallback path runs for real.
+struct FaultInjectingHip : public Hip {
+    int errno_to_throw;
+    explicit FaultInjectingHip(int e) : errno_to_throw{e}
+    {
+    }
+    [[noreturn]] uint64_t hipAmdFileRead(hipAmdFileHandle_t, void *, uint64_t, int64_t) const override
+    {
+        throw std::system_error(errno_to_throw, std::generic_category());
+    }
+    [[noreturn]] uint64_t hipAmdFileWrite(hipAmdFileHandle_t, void *, uint64_t, int64_t) const override
+    {
+        throw std::system_error(errno_to_throw, std::generic_category());
+    }
+};
+
+// Exercises async backend failover end-to-end. Both backends are enabled so the fastpath is selected
+// (score 100) and the fallback is registered and eligible. A fault injected into the fastpath IO then
+// determines, at stream-execution time, whether the fallback engages. The AIS gate guarantees the
+// fastpath is actually the selected backend, so these results are attributable to failover.
+class HipAsyncFailover : public HipAsync, public ::testing::WithParamInterface<AsyncIoFunction> {
+public:
+    void SetUp() override
+    {
+        HipAsync::SetUp();
+        io_op = GetParam().function;
+        name  = GetParam().name;
+
+        Context<Configuration>::get()->fastpath(true);
+        Context<Configuration>::get()->fallback(true);
+
+        if (name == "hipFileReadAsync") {
+            HipFileDataOps::zeroMemoryRegion(dev_ptr, 0, buffer_size);
+            HipFileDataOps::randomizeFileRegion(tf.fd, file_size);
+        }
+        else {
+            HipFileDataOps::zeroFileRegion(tf.fd, file_size);
+            HipFileDataOps::randomizeMemoryRegion(dev_ptr, 0, buffer_size);
+        }
+
+        ASSERT_EQ(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking), hipSuccess);
+        ASSERT_EQ(hipFileStreamRegister(stream, 0xf), HIPFILE_SUCCESS);
+
+        // Failover is only meaningful where the fastpath is actually selected and functional. Gate last so
+        // TearDown's stream cleanup remains valid when the test is skipped.
+        hipFile::test::AisCapability ais_capability{test_env.allow_skip_fastpath};
+        switch (ais_capability.populate(fh, dev_ptr)) {
+            case hipFile::test::AisCapability::GateDecision::Run:
+                break;
+            case hipFile::test::AisCapability::GateDecision::Skip:
+                // Keep this marker synchronized with test/CMakeLists.txt SKIP_REGULAR_EXPRESSION.
+                GTEST_SKIP() << "fastpath not available in this environment\n" << ais_capability.report();
+            case hipFile::test::AisCapability::GateDecision::Fail:
+                FAIL() << "Fastpath Validation Failed!\n"
+                       << ais_capability.report() << "\n"
+                       << ais_capability.skipHint();
+            default:
+                break;
+        }
+    }
+    void TearDown() override
+    {
+        ASSERT_EQ(hipFileStreamDeregister(stream), HIPFILE_SUCCESS);
+        ASSERT_EQ(hipStreamDestroy(stream), hipSuccess);
+        Context<Configuration>::get()->fastpath(true);
+        Context<Configuration>::get()->fallback(true);
+        HipAsync::TearDown();
+    }
+    hipFileError_t (*io_op)(hipFileHandle_t, void *, size_t *, hoff_t *, hoff_t *, ssize_t *, hipStream_t);
+    std::string name;
+    hipStream_t stream;
+};
+
+// A fallback-eligible fastpath failure (ENODEV) diverts the IO to the fallback, which completes it.
+TEST_P(HipAsyncFailover, eligibleFaultEngagesFallback)
+{
+    FaultInjectingHip    fault{ENODEV};
+    ContextOverride<Hip> guard{&fault};
+    ASSERT_EQ(io_op(fh, dev_ptr, &io_size, &file_offset, &buffer_offset, &bytes_transferred, stream),
+              HIPFILE_SUCCESS);
+    ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
+    ASSERT_EQ(bytes_transferred, io_size);
+    HipFileDataOps::assertFileAndMemoryRegionsMatch(dev_ptr, buffer_offset, tf.fd, file_offset, io_size);
+}
+
+// A non-eligible fastpath failure (EIO) is not retried; the destination is left untouched and the
+// fastpath error surfaces through bytes_transferred.
+TEST_P(HipAsyncFailover, ineligibleFaultSkipsFallback)
+{
+    FaultInjectingHip    fault{EIO};
+    ContextOverride<Hip> guard{&fault};
+    ASSERT_EQ(io_op(fh, dev_ptr, &io_size, &file_offset, &buffer_offset, &bytes_transferred, stream),
+              HIPFILE_SUCCESS);
+    ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
+    ASSERT_EQ(bytes_transferred, -hipFileInternalError);
+    if (name == "hipFileReadAsync") {
+        HipFileDataOps::assertZeroedMemRegion(dev_ptr, 0, io_size);
+    }
+    else {
+        HipFileDataOps::assertZeroedFileRegion(tf.fd, 0, io_size);
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(HipAsyncFailoverSuite, HipAsyncFailover, ::testing::ValuesIn(asyncIOFns),
+                         [](const testing::TestParamInfo<HipAsyncFailover::ParamType> &param_info) {
+                             return param_info.param.name;
+                         });
 
 #endif
 

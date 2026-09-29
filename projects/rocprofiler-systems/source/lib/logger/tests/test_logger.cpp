@@ -31,7 +31,9 @@ read_fd(int fd)
     char        buf[4096];
     ssize_t     n;
     while((n = read(fd, buf, sizeof(buf))) > 0)
+    {
         result.append(buf, static_cast<size_t>(n));
+    }
     return result;
 }
 
@@ -124,33 +126,6 @@ TEST_F(logger_test, include_process_id_in_filename_hidden_file_with_extension)
     auto expected = ".hidden_" + pid + ".log";
 
     EXPECT_EQ(result, expected);
-}
-
-TEST_F(logger_test, parse_boolean_env_true_values)
-{
-    EXPECT_TRUE(rocprofsys::parse_boolean_env("1"));
-    EXPECT_TRUE(rocprofsys::parse_boolean_env("on"));
-    EXPECT_TRUE(rocprofsys::parse_boolean_env("true"));
-    EXPECT_TRUE(rocprofsys::parse_boolean_env("yes"));
-}
-
-TEST_F(logger_test, parse_boolean_env_false_values)
-{
-    EXPECT_FALSE(rocprofsys::parse_boolean_env("0"));
-    EXPECT_FALSE(rocprofsys::parse_boolean_env("off"));
-    EXPECT_FALSE(rocprofsys::parse_boolean_env("false"));
-    EXPECT_FALSE(rocprofsys::parse_boolean_env("no"));
-    EXPECT_FALSE(rocprofsys::parse_boolean_env("random"));
-    EXPECT_FALSE(rocprofsys::parse_boolean_env(nullptr));
-}
-
-TEST_F(logger_test, to_lower_conversion)
-{
-    EXPECT_EQ(rocprofsys::to_lower("HELLO"), "hello");
-    EXPECT_EQ(rocprofsys::to_lower("Hello World"), "hello world");
-    EXPECT_EQ(rocprofsys::to_lower("already_lower"), "already_lower");
-    EXPECT_EQ(rocprofsys::to_lower("MiXeD123"), "mixed123");
-    EXPECT_EQ(rocprofsys::to_lower(""), "");
 }
 
 TEST_F(logger_test, logger_settings_parse_level)
@@ -276,14 +251,12 @@ TEST_F(logger_test, fork_child_gets_different_pid_in_filename)
 
         _exit((pid_differs && filename_correct) ? 0 : 1);
     }
-    else
-    {
-        int status;
-        waitpid(child_pid, &status, 0);
-        const int child_exit_code = WEXITSTATUS(status);
 
-        EXPECT_EQ(child_exit_code, 0) << "Child should have different PID in filename";
-    }
+    int status;
+    waitpid(child_pid, &status, 0);
+    const int child_exit_code = WEXITSTATUS(status);
+
+    EXPECT_EQ(child_exit_code, 0) << "Child should have different PID in filename";
 }
 
 TEST_F(logger_test, fork_resets_logger_in_child)
@@ -409,15 +382,13 @@ TEST_F(logger_test, fork_child_creates_log_file_with_child_pid)
 
         _exit(child_log_exists && has_content ? 0 : 1);
     }
-    else
-    {
-        int status;
-        waitpid(child_pid, &status, 0);
-        const int child_exit_code = WEXITSTATUS(status);
 
-        EXPECT_EQ(child_exit_code, 0)
-            << "Child process failed to create its own log file with child PID";
-    }
+    int status;
+    waitpid(child_pid, &status, 0);
+    const int child_exit_code = WEXITSTATUS(status);
+
+    EXPECT_EQ(child_exit_code, 0)
+        << "Child process failed to create its own log file with child PID";
 }
 
 TEST_F(logger_test, concurrent_logging_during_fork_no_deadlock)
@@ -437,7 +408,10 @@ TEST_F(logger_test, concurrent_logging_during_fork_no_deadlock)
             while(keep_logging.load(std::memory_order_relaxed))
             {
                 logger.info("Thread {} iteration {}", i, iter++);
-                if(iter >= log_iterations) break;
+                if(iter >= log_iterations)
+                {
+                    break;
+                }
             }
         });
     }
@@ -466,7 +440,9 @@ TEST_F(logger_test, concurrent_logging_during_fork_no_deadlock)
 
     keep_logging.store(false, std::memory_order_relaxed);
     for(auto& t : threads)
+    {
         t.join();
+    }
 
     int         status;
     const pid_t waited = waitpid(child_pid, &status, 0);
@@ -685,7 +661,9 @@ TEST_F(logger_test, concurrent_logging_stress_with_fork)
     close(pipefd[0]);
 
     for(auto& t : threads)
+    {
         t.join();
+    }
 
     int         status;
     const pid_t waited = waitpid(child_pid, &status, 0);

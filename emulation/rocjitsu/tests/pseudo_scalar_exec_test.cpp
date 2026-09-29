@@ -711,7 +711,8 @@ TEST_P(PseudoScalarExecTest, ExecutesAtExecZeroWithDestinationOpselZeroAndUsesLo
   fixture.compute_unit->write_sgpr(fixture.sgpr_base() + kDestinationSgpr, kDestinationSentinel);
   fixture.wavefront->set_exec(0);
 
-  fixture.compute_unit->execute_instruction(instruction.get(), *fixture.wavefront);
+  EXPECT_TRUE(
+      fixture.compute_unit->execute_instruction(instruction.get(), *fixture.wavefront).succeeded());
 
   EXPECT_EQ(fixture.compute_unit->read_sgpr(fixture.sgpr_base() + kDestinationSgpr),
             test_case.expected);
@@ -741,7 +742,8 @@ TEST_P(PseudoScalarExecTest, ExecutesWithVccAsSourceAndDestination) {
                                   ? (uint64_t{kOtherHalfSentinel} << 32) | test_case.expected
                                   : (uint64_t{test_case.expected} << 32) | kOtherHalfSentinel;
     fixture.wavefront->set_vcc_raw(source);
-    fixture.compute_unit->execute_instruction(instruction.get(), *fixture.wavefront);
+    EXPECT_TRUE(fixture.compute_unit->execute_instruction(instruction.get(), *fixture.wavefront)
+                    .succeeded());
     EXPECT_EQ(fixture.wavefront->vcc(), expected);
   }
 }
@@ -838,6 +840,28 @@ TEST(PseudoScalarHelperTest, HandlesExplicitSpecialCasesWithoutHostInvalidOrDivi
   EXPECT_NE(f16_signaling_nan & 0x0200u, 0u);
 }
 
+TEST(PseudoScalarHelperTest, QuietsSignalingNanWithoutHostExceptions) {
+  using amdgpu::pseudo_scalar::Operation;
+  std::fenv_t saved_environment{};
+  ASSERT_EQ(std::fegetenv(&saved_environment), 0);
+  for (Operation operation :
+       {Operation::EXP2, Operation::LOG2, Operation::RCP, Operation::RSQ, Operation::SQRT})
+    for (uint32_t input : {0x7f800001u, 0xffbfffffu})
+      for (uint32_t omod = 0; omod < 4; ++omod)
+        for (bool clamp : {false, true}) {
+          // Keep the source dynamic so constant folding cannot hide an unsafe
+          // host floating-point comparison in the NaN classification.
+          volatile uint32_t source = input;
+          EXPECT_EQ(std::feclearexcept(FE_ALL_EXCEPT), 0);
+          const uint32_t result = amdgpu::pseudo_scalar::execute_f32(
+              operation, std::bit_cast<float>(uint32_t{source}), false, false, 0, 3, omod, clamp);
+          const int exceptions = std::fetestexcept(FE_INVALID | FE_DIVBYZERO);
+          EXPECT_EQ(std::fesetenv(&saved_environment), 0);
+          EXPECT_EQ(exceptions, 0) << "operation=" << static_cast<unsigned>(operation);
+          EXPECT_EQ(result, clamp ? 0u : (input | 0x00400000u));
+        }
+}
+
 TEST(PseudoScalarHelperTest, PreservesAndFlushesSignedDenormals) {
   using amdgpu::pseudo_scalar::Operation;
 
@@ -904,7 +928,8 @@ TEST_P(PseudoScalarSpecialExecTest, CoversLiteralModifierAndModeBehavior) {
   fixture.wavefront->set_mode_raw(test_case.mode);
   fixture.wavefront->set_exec(0);
 
-  fixture.compute_unit->execute_instruction(instruction.get(), *fixture.wavefront);
+  EXPECT_TRUE(
+      fixture.compute_unit->execute_instruction(instruction.get(), *fixture.wavefront).succeeded());
 
   EXPECT_EQ(fixture.compute_unit->read_sgpr(fixture.sgpr_base() + kDestinationSgpr),
             test_case.expected);
@@ -940,8 +965,10 @@ TEST(PseudoScalarModeIntegrationTest, SetregInstructionsUpdateModesConsumedByPse
     fixture.wavefront->set_mode_raw(0);
     fixture.compute_unit->write_sgpr(fixture.sgpr_base() + kModeSgpr, 1u);
     fixture.compute_unit->write_sgpr(fixture.sgpr_base() + kSourceSgpr, f32_bits(0.5f));
-    fixture.compute_unit->execute_instruction(set_round.get(), *fixture.wavefront);
-    fixture.compute_unit->execute_instruction(exp.get(), *fixture.wavefront);
+    EXPECT_TRUE(
+        fixture.compute_unit->execute_instruction(set_round.get(), *fixture.wavefront).succeeded());
+    EXPECT_TRUE(
+        fixture.compute_unit->execute_instruction(exp.get(), *fixture.wavefront).succeeded());
     EXPECT_EQ(fixture.wavefront->mode_raw(), 1u);
     EXPECT_EQ(fixture.compute_unit->read_sgpr(fixture.sgpr_base() + kDestinationSgpr), 0x3FB504F4u);
 
@@ -959,8 +986,10 @@ TEST(PseudoScalarModeIntegrationTest, SetregInstructionsUpdateModesConsumedByPse
 
     fixture.wavefront->set_mode_raw(0);
     fixture.compute_unit->write_sgpr(fixture.sgpr_base() + kSourceSgpr, 0xCAFE0001u);
-    fixture.compute_unit->execute_instruction(set_denorm.get(), *fixture.wavefront);
-    fixture.compute_unit->execute_instruction(log.get(), *fixture.wavefront);
+    EXPECT_TRUE(fixture.compute_unit->execute_instruction(set_denorm.get(), *fixture.wavefront)
+                    .succeeded());
+    EXPECT_TRUE(
+        fixture.compute_unit->execute_instruction(log.get(), *fixture.wavefront).succeeded());
     EXPECT_EQ(fixture.wavefront->mode_raw(), 1u << 6);
     EXPECT_EQ(fixture.compute_unit->read_sgpr(fixture.sgpr_base() + kDestinationSgpr), 0x0000CE00u);
   }
