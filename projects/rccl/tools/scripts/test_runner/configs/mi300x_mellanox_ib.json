@@ -1052,6 +1052,26 @@
       ]
     },
 
+    "gin_connect_leak": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-GinConnectLeakMPI",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 180,
+      "env_variables": {
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_DMABUF_ENABLE": "1",
+        "RCCL_GIN_EXAMPLE_COUNTER_FILE": "/tmp/rccl_gin_example_counters.txt"
+      },
+      "description": "ncclGinConnectOnce must release the comms it opened when a later connect fails",
+      "tests": [
+        {"name": "GinConnectLeak_FailedConnectReleasesOpenedComms", "description": "second connect is made to fail; the first GIN comm and the listen comm must be closed", "test_filter": "GinConnectLeakMPITest.FailedConnectReleasesOpenedComms"}
+      ]
+    },
+
     "rma_external_plugin_put_signal": {
       "extends": "default",
       "is_gtest": true,
@@ -5029,6 +5049,12 @@
       "name": "RMA External Plugin - Put Signal",
       "description": "Validate the EXTERNAL one-sided RMA plugin loader/assign path",
       "config": "rma_external_plugin_put_signal",
+      "enabled": true
+    },
+    {
+      "name": "GIN Connect Leak",
+      "description": "Resource release when GIN connection setup fails",
+      "config": "gin_connect_leak",
       "enabled": true
     }
   ]
