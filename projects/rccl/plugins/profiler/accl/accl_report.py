@@ -178,24 +178,42 @@ def print_drop_warnings(summaries: List[dict]):
     total_overflow_ops = sum(s.get('overflow_proxy_ops', 0) for s in summaries)
     total_outstanding_ops = sum(s.get('outstanding_proxy_ops', 0) for s in summaries)
     total_outstanding_steps = sum(s.get('outstanding_proxy_steps', 0) for s in summaries)
+    total_inflight = sum(s.get('inflight_collectives', 0) for s in summaries)
+    total_stale_steps = sum(s.get('stale_proxy_steps', 0) for s in summaries)
+    any_write_error = any(s.get('write_error', False) for s in summaries)
     # `complete` is the plugin's own verdict and covers every counter it tracks,
     # including any added later; trust it over the counters we happen to read.
     # Pre-`complete` files have no flag, so absence must not read as incomplete.
     any_incomplete = any(not s.get('complete', True) for s in summaries)
-    if not (any_incomplete or total_dropped or total_leaked
+    if not (any_incomplete or total_dropped or total_leaked or total_inflight
             or total_dropped_ops or total_dropped_steps or total_overflow_ops
-            or total_outstanding_ops or total_outstanding_steps):
+            or total_stale_steps or total_outstanding_ops
+            or total_outstanding_steps or any_write_error):
         return
     print(f"\n*** WARNING: profiling data is INCOMPLETE — {total_dropped} collectives "
           f"dropped (coll pool exhausted, "
           f"coll_pool_size={summaries[0].get('coll_pool_size', '?')}), "
           f"{total_leaked} slots leaked (teardown-skipped kernel events), "
+          f"{total_inflight} collectives in flight at finalize, "
           f"{total_dropped_ops} proxy ops dropped, "
           f"{total_dropped_steps} proxy steps dropped, "
           f"{total_overflow_ops} proxy ops discarded (per-collective limit), "
+          f"{total_stale_steps} proxy steps stale (parent slot reissued), "
           f"{total_outstanding_ops} proxy ops and {total_outstanding_steps} proxy "
-          f"steps still outstanding at finalize. "
+          f"steps still outstanding at finalize, "
+          f"write_error={any_write_error}. "
           f"Do not compare these numbers against a full run. ***\n", file=sys.stderr)
+
+
+def reject_legacy_summaries(summaries: List[dict], label: str):
+    # `pool_size` was renamed `coll_pool_size` in the same change that moved the
+    # proxy_* means onto per-op-class divisors, so a file still carrying the old
+    # key is on the old scale: every proxy_* field would read as a 2x regression.
+    if any('pool_size' in s and 'coll_pool_size' not in s for s in summaries):
+        print(f"ERROR: {label} was produced by a pre-rename profiler "
+              f"(summary has 'pool_size'). Its proxy_* fields use a different "
+              f"divisor and are not comparable; regenerate it.", file=sys.stderr)
+        sys.exit(1)
 
 
 def load_dir_or_file(path: str, warmup: int) -> List[Record]:
@@ -534,6 +552,8 @@ def main():
             cand = load_dir_or_file(args.candidate, args.warmup)
             base_summaries = load_summaries(args.baseline)
             cand_summaries = load_summaries(args.candidate)
+            reject_legacy_summaries(base_summaries, "baseline")
+            reject_legacy_summaries(cand_summaries, "candidate")
             print(f"Baseline: {len(base)} records, Candidate: {len(cand)} records")
             print_drop_warnings(base_summaries + cand_summaries)
             print_compare_report(base, cand, args.threshold)

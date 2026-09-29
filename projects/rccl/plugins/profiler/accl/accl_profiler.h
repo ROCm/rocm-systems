@@ -36,6 +36,10 @@ struct acclProxyStepInfo {
   void*    parentObj;    // points to acclProxyOpInfo
   void*    commCtx;      // owning acclCommContext (for pool free)
   int      step;
+  // Parent's tenancy of its pool slot, read at start. The slot can be freed and
+  // reissued before this step stops; comparing at stop is what keeps a stale
+  // step out of the new tenant's accumulators.
+  uint64_t parentGen;
   uint64_t tsStartUs;
   uint64_t tsStopUs;
   uint64_t lastStateTs;
@@ -63,6 +67,9 @@ struct acclProxyOpInfo {
   uint64_t tsStopUs;
   // Aggregated from steps (protected by mutex)
   pthread_mutex_t mutex;
+  // Tenancy counter, bumped under mutex on every alloc and never cleared.
+  // Outside the mutex bytes, so acclAllocProxyOp's clear steps over both.
+  uint64_t generation;
   uint64_t totalGpuWaitUs;
   uint64_t totalPeerWaitUs;
   uint64_t totalNetworkUs;   // sendWait + recvWait
@@ -182,12 +189,16 @@ struct acclCommContext {
   int         refCount;
   uint64_t    droppedCollectives;   // never allocated a slot: pool was full
   uint64_t    leakedCollectives;    // allocated but never finalized; freed by the drain
+  // Claimed by an owner mid-finalize, so its record may never have been written:
+  // the drain leaves it alone, but the file closes before the owner writes.
+  uint64_t    inflightCollectives;
   int         poolExhaustedWarned;  // one-shot guard for the pool-exhaustion WARN
   // Proxy-side loss. Written from the proxy thread under three different locks,
   // so these are atomic rather than adopting any one of them.
   uint64_t    droppedProxyOps;      // proxy-op pool was full: this op is unprofiled
   uint64_t    droppedProxySteps;    // proxy-step pool was full: this step is unprofiled
   uint64_t    overflowProxyOps;     // op completed but the coll already held ACCL_MAX_PROXY_OPS
+  uint64_t    staleProxySteps;      // stopped after its parent op's slot was reissued
   // Still held at finalize: their stop never arrived. Counted there, never
   // released there -- see acclPluginFinalize. Written only on that thread.
   uint64_t    outstandingProxyOps;
