@@ -2758,13 +2758,6 @@ hipError_t ihipMemcpy3D_validate(const hipMemcpy3DParms* p) {
   // not have the same element size.
   if ((p->srcArray != nullptr) && (p->dstArray != nullptr)) {
     if (hip::getElementSize(p->srcArray) != hip::getElementSize(p->dstArray)) {
-         return hipErrorInvalidValue;
-      }
-
-    // If both src and dst are arrays, verify they have the same extents
-    if (p->srcArray->width != p->dstArray->width ||
-        p->srcArray->height != p->dstArray->height ||
-        p->srcArray->depth != p->dstArray->depth) {
       return hipErrorInvalidValue;
     }
   }
