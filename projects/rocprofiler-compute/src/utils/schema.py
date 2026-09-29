@@ -53,7 +53,3 @@ class Workload:
     # Matched ML API trace rows keyed by backend, populated by operator filters.
     matched_ml_api_trace_dfs: dict[str, pd.DataFrame] = field(default_factory=dict)
     membw_result: Optional[MemBwAnalysisResult] = None
-
-
-# Stem of the merged counter intermediate; csv_compression owns the suffix.
-PMC_PERF_FILE_PREFIX = "pmc_perf"

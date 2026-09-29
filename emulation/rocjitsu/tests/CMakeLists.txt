@@ -361,6 +361,55 @@ set_tests_properties(
             "rocjitsu ${PROJECT_VERSION}[\r\n]+git revision: .+[\r\n]+git commit: .+"
 )
 
+# --cpu-thread-budget has to reach the allocation plan through the config copy the
+# launcher writes. gfx942_cdna3.json asks for 32, so a configured row of 1 can only
+# come from the flag -- once per accepted spelling, since wrappers forwarding a
+# single opaque token cannot split a flag from its value.
+set(_rj_cdna3_config "${CMAKE_SOURCE_DIR}/configs/gfx942_cdna3.json")
+add_test(
+    NAME RocjitsuCpuThreadBudget
+    COMMAND
+        $<TARGET_FILE:rocjitsu_bin> --config ${_rj_cdna3_config}
+        --cpu-thread-budget 1 --thread-budget-table
+)
+add_test(
+    NAME RocjitsuCpuThreadBudgetAssigned
+    COMMAND
+        $<TARGET_FILE:rocjitsu_bin> --config ${_rj_cdna3_config}
+        --cpu-thread-budget=1 --thread-budget-table
+)
+set_tests_properties(
+    RocjitsuCpuThreadBudget
+    RocjitsuCpuThreadBudgetAssigned
+    PROPERTIES PASS_REGULAR_EXPRESSION "Configured \\| 1 \\| 1 \\| 0 \\| 1"
+)
+
+add_test(
+    NAME RocjitsuCpuThreadBudgetRejectsNonNumeric
+    COMMAND
+        $<TARGET_FILE:rocjitsu_bin> --config ${_rj_cdna3_config}
+        --cpu-thread-budget four --thread-budget-table
+)
+set_tests_properties(
+    RocjitsuCpuThreadBudgetRejectsNonNumeric
+    PROPERTIES
+        PASS_REGULAR_EXPRESSION
+            "--cpu-thread-budget requires an unsigned integer"
+)
+
+add_test(
+    NAME RocjitsuCpuThreadBudgetRejectsAttach
+    COMMAND
+        $<TARGET_FILE:rocjitsu_bin> --config ${_rj_cdna3_config} --attach
+        --cpu-thread-budget 1 -- true
+)
+set_tests_properties(
+    RocjitsuCpuThreadBudgetRejectsAttach
+    PROPERTIES
+        PASS_REGULAR_EXPRESSION
+            "--cpu-thread-budget cannot be combined with --attach"
+)
+
 add_executable(rj_decode_fuzz_test fuzz/decode/decode_fuzz_test.cpp)
 target_link_libraries(
     rj_decode_fuzz_test
@@ -617,7 +666,9 @@ add_executable(
     v_add_simd_benchmark.cpp
     mfma_simd_benchmark.cpp
     wmma_simd_benchmark.cpp
+    swmmac_k64_simd_benchmark.cpp
     simd_correctness/simd_coverage_test.cpp
+    simd_correctness/swmmac_k64_simd_exact_test.cpp
     simd_correctness/vop1_cvt_f64_scalar_correctness_test.cpp
     simd_correctness/vopc_cmp_class_scalar_correctness_test.cpp
     simd_correctness/vop2_simd_correctness_test.cpp
@@ -785,7 +836,7 @@ endif()
 rj_add_gtest_tests(
     rocjitsu_tests
     TEST_FILTER
-        "-*Benchmark*:*RequestExitWakesAllPartitions*:*DispatchedWaitSurvivesAConcurrentFinalClose*"
+        "-*Benchmark*:*RequestExitWakesAllPartitions*:*DispatchedWaitSurvivesAConcurrentFinalClose*:*EffectiveConfigTest.ReadsNativeLaunchConfigHandoff"
 )
 
 # RequestExitWakesAllPartitions may require several runs to show regression
@@ -1282,6 +1333,30 @@ get_filename_component(
     NAME
 )
 set(RJ_CLI "$<TARGET_FILE:rocjitsu_bin>")
+
+rj_add_test(
+    NAME "EffectiveConfigTest.ReadsNativeLaunchConfigHandoff"
+    COMMAND
+        ${RJ_CLI}
+        --config
+        ${CMAKE_SOURCE_DIR}/configs/gfx942_cdna3.json
+        --cpu-thread-budget
+        4
+        --
+        $<TARGET_FILE:rocjitsu_tests>
+        --gtest_filter=EffectiveConfigTest.ReadsNativeLaunchConfigHandoff
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    TIMEOUT 60
+    INSTALL_COMMAND
+        "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+        "--config"
+        "\${RJ_INSTALLED_CONFIG_DIR}/gfx942_cdna3.json"
+        "--cpu-thread-budget"
+        "4"
+        "--"
+        "bin/rocjitsu_tests"
+        "--gtest_filter=EffectiveConfigTest.ReadsNativeLaunchConfigHandoff"
+)
 
 function(rj_detect_kfd_gfx_target_versions out_var)
     set(_versions)
