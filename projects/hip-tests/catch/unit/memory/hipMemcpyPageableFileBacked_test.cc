@@ -30,6 +30,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -51,12 +52,33 @@ struct ScopedFile {
   }
 };
 
+// Released on scope exit so a failing REQUIRE/HIP_CHECK doesn't leak them.
+struct ScopedMapping {
+  void* addr = MAP_FAILED;
+  size_t size = 0;
+  ~ScopedMapping() {
+    if (addr != MAP_FAILED) munmap(addr, size);
+  }
+};
+
+struct ScopedDevMem {
+  uint8_t* ptr = nullptr;
+  ~ScopedDevMem() {
+    if (ptr != nullptr) static_cast<void>(hipFree(ptr));
+  }
+};
+
 // Create a file of `size` bytes filled with a byte pattern derived from the
 // offset, and return it open (read-only) with the page cache for it dropped.
+// The file gets a unique name in $TMPDIR (or /tmp) so concurrent test
+// processes don't share it.
 bool makeEvictedFile(ScopedFile* sf, uint64_t size) {
-  sf->path = "hipMemcpyPageableFileBacked.bin";
-  int wfd = open(sf->path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0600);
+  const char* tmpdir = getenv("TMPDIR");
+  std::string tmpl = std::string(tmpdir && *tmpdir ? tmpdir : "/tmp") +
+                     "/hipMemcpyPageableFileBacked.XXXXXX";
+  int wfd = mkstemp(tmpl.data());
   if (wfd < 0) return false;
+  sf->path = tmpl;
 
   std::vector<uint8_t> buf(1 * kMiB);
   for (uint64_t off = 0; off < size;) {
@@ -101,15 +123,18 @@ HIP_TEST_CASE(Unit_hipMemcpy_PageableFileBackedSource_Evicted) {
     return;
   }
 
-  void* mapped = mmap(nullptr, size, PROT_READ, MAP_PRIVATE, sf.fd, 0);
-  REQUIRE(mapped != MAP_FAILED);
+  ScopedMapping mapping;
+  mapping.size = size;
+  mapping.addr = mmap(nullptr, size, PROT_READ, MAP_PRIVATE, sf.fd, 0);
+  REQUIRE(mapping.addr != MAP_FAILED);
   // Second best-effort eviction: drop any pages the write left behind.
-  madvise(mapped, size, MADV_DONTNEED);
+  madvise(mapping.addr, size, MADV_DONTNEED);
   posix_fadvise(sf.fd, 0, 0, POSIX_FADV_DONTNEED);
-  const auto* src = static_cast<const uint8_t*>(mapped);
+  const auto* src = static_cast<const uint8_t*>(mapping.addr);
 
-  uint8_t* devPtr = nullptr;
-  HIP_CHECK(hipMalloc(&devPtr, size));
+  ScopedDevMem dev;
+  HIP_CHECK(hipMalloc(&dev.ptr, size));
+  uint8_t* devPtr = dev.ptr;
 
   if (async) {
     hipStream_t stream = nullptr;
@@ -138,9 +163,6 @@ HIP_TEST_CASE(Unit_hipMemcpy_PageableFileBackedSource_Evicted) {
 
   INFO("first mismatching byte offset = " << firstBad);
   REQUIRE(firstBad == size);
-
-  HIP_CHECK(hipFree(devPtr));
-  munmap(mapped, size);
 }
 
 #else  // !__linux__

@@ -1106,7 +1106,9 @@ bool DmaBlitManager::hsaCopyStagedOrPinned(const_address hostSrc, address hostDs
   // can stall for tens of seconds. Kick off clustered readahead for the whole
   // range up front so later chunks are already in the page cache by the time
   // the loop reaches them. Best-effort and non-blocking. See ROCm/TheRock#7832.
-  if (hostToDev) {
+  // Only when the copy takes the pinned path and spans several pin chunks: a
+  // smaller copy has no later chunks to overlap with, so skip the syscall.
+  if (hostToDev && enablePin && size > std::max(MinSizeForPinnedXfer, PinXferSize)) {
     amd::Os::prefetchRange(hostSrc, size);
   }
   size_t copyOffset = 0;
