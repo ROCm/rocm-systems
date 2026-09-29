@@ -516,6 +516,50 @@ TEST_F(GinRocshmemGdaTemplateTest, ResetSignal_NoneIsNoOp) {
   EXPECT_EQ(sigs[0], 42ULL);  // untouched by non-indexed reset
 }
 
+// AICOMRCCL-2339: GDA device dispatch must select the GPU context indexed by
+// ncclGinCtx::contextId instead of always using array element zero.
+__global__ void kernelGdaSignalContextSelection(ncclGinRocshmemGdaGPUContext* contexts) {
+  if (threadIdx.x != 0) return;
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = contexts;
+
+  ginCtx.contextId = 0;
+  ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(ginCtx, 0).ptr[0] = 11;
+  ncclGinApi_GetCounterPtr<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(ginCtx, 0).ptr[0] = 101;
+
+  ginCtx.contextId = 1;
+  ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(ginCtx, 0).ptr[0] = 22;
+  ncclGinApi_ResetSignal<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(
+      ginCtx, ncclGinSignalDescriptor{NCCL_GIN_SIGNAL_TYPE_INDEXED, {.indexedSignal = {.signalId = 0}}});
+  ncclGinApi_ResetCounter<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(ginCtx, 0);
+  ncclGinApi_GetCounterPtr<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(ginCtx, 0).ptr[0] = 202;
+}
+
+TEST_F(GinRocshmemGdaTemplateTest, SignalApis_SelectLogicalContext) {
+  DeviceBuffer<uint64_t> d_signals(2);
+  DeviceBuffer<uint64_t> d_counters(2);
+  d_signals.zero();
+  d_counters.zero();
+  ncclGinRocshmemGdaGPUContext hostCtx[2]{};
+  for (int i = 0; i < 2; i++) {
+    hostCtx[i].signals = d_signals.ptr + i;
+    hostCtx[i].counters = d_counters.ptr + i;
+    hostCtx[i].nSignals = 1;
+    hostCtx[i].nCounters = 1;
+  }
+  DeviceBuffer<ncclGinRocshmemGdaGPUContext> d_contexts(2);
+  d_contexts.copyFrom(hostCtx, 2);
+
+  kernelGdaSignalContextSelection<<<1, 1>>>(d_contexts.ptr);
+  syncAndCheck();
+  auto signals = d_signals.copyTo();
+  auto counters = d_counters.copyTo();
+  EXPECT_EQ(signals[0], 11ULL) << "ResetSignal must not clear context 0 when invoked on contextId=1";
+  EXPECT_EQ(signals[1], 0ULL) << "ResetSignal on contextId=1 must clear context 1 signal cell";
+  EXPECT_EQ(counters[0], 101ULL);
+  EXPECT_EQ(counters[1], 202ULL);
+}
+
 }  // namespace RcclUnitTesting
 
 #endif  // NCCL_GIN_ROCSHMEM_GDA_ENABLE
