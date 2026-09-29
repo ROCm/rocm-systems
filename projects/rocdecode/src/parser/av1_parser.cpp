@@ -92,7 +92,14 @@ ParserResult Av1VideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
     pic_data_size_ = pic_data_size;
     curr_byte_offset_ = 0;
 
-    while (ReadObuHeaderAndSize() != PARSER_EOF) {
+    while (true) {
+        ret = ReadObuHeaderAndSize();
+        if (ret == PARSER_EOF) {
+            break;  // The picture data is exhausted.
+        } else if (ret != PARSER_OK) {
+            FunctionExitLog(g_rocdec_logger);
+            return ret;
+        }
         switch (obu_header_.obu_type) {
             case kObuTemporalDelimiter: {
                 seen_frame_header_ = 0;
@@ -765,26 +772,32 @@ ParserResult Av1VideoParser::ParseObuHeader(const uint8_t *p_stream, size_t size
 }
 
 ParserResult Av1VideoParser::ReadObuHeaderAndSize() {
+    ParserResult ret;
+    // PARSER_EOF is reserved for clean exhaustion of the picture data, which ends the OBU
+    // loop normally. Every other exit below reports the parse failure instead, so that a
+    // malformed packet is not handed back to the caller as a complete one.
     if (curr_byte_offset_ >= pic_data_size_) {
         return PARSER_EOF;
     }
     uint8_t *p_stream = pic_data_buffer_ptr_ + curr_byte_offset_;
     // Without a valid header there is no obu_size to step over, so the next OBU boundary is
     // unknown and obu_header_ may still hold the previous OBU's fields. Stop here.
-    if (ParseObuHeader(p_stream, pic_data_size_ - curr_byte_offset_) != PARSER_OK) {
+    if ((ret = ParseObuHeader(p_stream, pic_data_size_ - curr_byte_offset_)) != PARSER_OK) {
         ErrorLog(g_rocdec_logger, "Syntax error(s) found in OBU header.");
-        return PARSER_EOF;
+        return ret;
     }
+    // Backstop: ParseObuHeader() has already checked this for both header sizes.
     if (pic_data_size_ - curr_byte_offset_ < obu_header_.size) {
-        return PARSER_EOF;
+        ErrorLog(g_rocdec_logger, "OBU header extends past the end of the picture data.");
+        return PARSER_OUT_OF_RANGE;
     }
     curr_byte_offset_ += obu_header_.size;
     p_stream += obu_header_.size;
 
     uint32_t bytes_read;
-    if (ReadLeb128(p_stream, pic_data_size_ - curr_byte_offset_, &bytes_read, &obu_size_) != PARSER_OK) {
+    if ((ret = ReadLeb128(p_stream, pic_data_size_ - curr_byte_offset_, &bytes_read, &obu_size_)) != PARSER_OK) {
         ErrorLog(g_rocdec_logger, "Invalid or truncated obu_size field.");
-        return PARSER_EOF;
+        return ret;
     }
     obu_byte_offset_ = curr_byte_offset_ + bytes_read;
     // obu_size_ is bounded by the leb128 range, so sum in 64 bits before the comparison to
@@ -792,7 +805,7 @@ ParserResult Av1VideoParser::ReadObuHeaderAndSize() {
     uint64_t next_byte_offset = static_cast<uint64_t>(obu_byte_offset_) + obu_size_;
     if (next_byte_offset > pic_data_size_) {
         ErrorLog(g_rocdec_logger, "Invalid obu_size value.");
-        return PARSER_EOF;
+        return PARSER_OUT_OF_RANGE;
     } else {
         curr_byte_offset_ = static_cast<uint32_t>(next_byte_offset);
         return PARSER_OK;
