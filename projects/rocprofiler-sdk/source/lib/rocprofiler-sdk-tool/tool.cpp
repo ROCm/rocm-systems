@@ -374,18 +374,14 @@ struct pause_resume_session_state
 {
     void begin_attach()
     {
-        // The first attachment starts with the member initializers below. Reattachment follows
-        // registration's context stop and callback drain, so no callback from the prior session
-        // can update this state after it is reset.
-        if(!has_attached.exchange(true)) return;
-
+        // The SDK marker-control gate drains prior Pause/Resume calls and blocks new calls across
+        // tool_attach, so the state can be reset without a callback crossing this boundary.
         ref_count.store(0);
         first_callback.store(true);
     }
 
     std::atomic<int64_t> ref_count      = {0};
     std::atomic<bool>    first_callback = {true};
-    std::atomic<bool>    has_attached   = {false};
 };
 
 auto pause_resume_session = pause_resume_session_state{};

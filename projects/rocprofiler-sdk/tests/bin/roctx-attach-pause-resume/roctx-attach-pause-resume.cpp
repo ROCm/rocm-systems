@@ -36,10 +36,10 @@ namespace
 volatile std::sig_atomic_t sigint_received = 0;
 }
 
-// This target is used by the rocprofv3 attach test to keep the process alive
-// before issuing ROCTx profiler-control calls. The trigger file is created
-// after rocprofv3 attaches, so the Pause/Resume calls below are observed by
-// the attached tool instead of being lost before attachment.
+// This target is used by the rocprofv3 attach test to keep the process alive before issuing ROCTx
+// profiler-control calls. The target creates a readiness marker after initialization and any
+// intentional pre-attach call. The driver creates the trigger file after rocprofv3 attaches, so
+// the remaining Pause/Resume calls are observed by the attached tool.
 
 extern "C" void
 roctx_attach_pause_resume_signal_handler(int signum)
@@ -233,6 +233,7 @@ main(int argc, char** argv)
         roctxProfilerPause(0);
     }
 
+    signal_phase_complete(trigger_file + "-ready");
     std::cout << "ROCTx attach pause/resume target ready in mode: " << mode << "\n";
     if(mode == "selected-ref-count-reattach")
     {

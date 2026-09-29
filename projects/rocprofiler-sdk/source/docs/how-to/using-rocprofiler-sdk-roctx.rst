@@ -204,7 +204,7 @@ When running ``rocprofv3`` with the ``--selected-regions`` option, profiling is 
 
 .. note::
 
-   For process attachment, ROCTx profiler-control state is scoped to the active profiling session. Calls made before attachment or while the tool is detached don't affect a later attachment. Each attachment starts in the initial state described above, and ``--selected-regions-ref-count`` starts with a fresh reference count on reattachment.
+   For process attachment, ROCTx profiler-control state is scoped to the active profiling session. The SDK serializes ``roctxProfilerPause()`` and ``roctxProfilerResume()`` calls with attachment and detachment: an executing call completes before the session transition, while a call arriving during the transition waits and executes afterward. Calls completed while no profiling tool is attached don't establish state for a later session. Each attachment starts in the initial state described above, and ``--selected-regions-ref-count`` starts with a fresh reference count on reattachment.
 
 Using --selected-regions option
 ================================

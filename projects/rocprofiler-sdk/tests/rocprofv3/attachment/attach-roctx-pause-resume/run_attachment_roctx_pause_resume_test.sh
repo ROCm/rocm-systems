@@ -93,6 +93,7 @@ export ROCP_TOOL_ATTACH=1
 
 OUTPUT_SUBDIR="attachment-roctx-${MODE}-output"
 TRIGGER_FILE="${OUTPUT_DIR}/${OUTPUT_SUBDIR}/start-workload"
+READY_FILE="${TRIGGER_FILE}-ready"
 ROCPROF_LOG="${OUTPUT_DIR}/${OUTPUT_SUBDIR}/rocprofv3.log"
 APP_PID=""
 APP_OUTPUT_PID=""
@@ -143,6 +144,7 @@ APP_PID=$!
 APP_OUTPUT_PID=$APP_PID
 
 wait_for_attach_ready "${APP_PID}"
+wait_for_phase_complete "${READY_FILE}"
 
 if ! kill -0 "${APP_PID}" 2>/dev/null; then
     echo "Test application failed to start or exited early"

@@ -26,15 +26,25 @@
 #include <rocprofiler-sdk/callback_tracing.h>
 
 #include <cstdint>
+#include <mutex>
+#include <shared_mutex>
 #include <vector>
 
 namespace rocprofiler
 {
 namespace marker
 {
-using roctx_core_api_table_t = ::roctxCoreApiTable_t;
-using roctx_ctrl_api_table_t = ::roctxControlApiTable_t;
-using roctx_name_api_table_t = ::roctxNameApiTable_t;
+using roctx_core_api_table_t   = ::roctxCoreApiTable_t;
+using roctx_ctrl_api_table_t   = ::roctxControlApiTable_t;
+using roctx_name_api_table_t   = ::roctxNameApiTable_t;
+using control_api_read_lock_t  = std::shared_lock<std::shared_mutex>;
+using control_api_write_lock_t = std::unique_lock<std::shared_mutex>;
+
+control_api_read_lock_t
+acquire_control_api_read_lock();
+
+control_api_write_lock_t
+acquire_control_api_write_lock();
 
 template <typename Tp>
 Tp*

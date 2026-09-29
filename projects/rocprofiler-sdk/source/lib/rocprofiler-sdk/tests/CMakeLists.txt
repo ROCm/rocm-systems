@@ -20,6 +20,7 @@ set(rocprofiler_lib_sources
     enum_string.cpp
     hsa.cpp
     late_start.cpp
+    marker_control_gate.cpp
     naming.cpp
     queue_controller.cpp
     queue_interposition.cpp

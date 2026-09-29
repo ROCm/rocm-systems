@@ -39,9 +39,11 @@
 
 #include <rocprofiler-sdk-roctx/roctx.h>
 
+#include <unistd.h>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <type_traits>
 #include <utility>
 
@@ -89,7 +91,71 @@ get_table_impl()
 template <size_t TableIdx>
 auto*
 get_table();
+
+struct control_api_mutex_state
+{
+    explicit control_api_mutex_state(pid_t process_id)
+    : pid{process_id}
+    {}
+
+    pid_t             pid   = 0;
+    std::shared_mutex mutex = {};
+};
+
+std::shared_mutex&
+get_control_api_mutex()
+{
+    static auto value =
+        std::atomic<control_api_mutex_state*>{new control_api_mutex_state{getpid()}};
+
+    const auto process_id = getpid();
+    auto*      current    = value.load(std::memory_order_acquire);
+    while(current->pid != process_id)
+    {
+        // A fork child must not use the inherited mutex: another parent thread may have held it
+        // across fork. Publish a child-owned mutex and intentionally leave the inherited state
+        // allocated for the process lifetime.
+        auto* next = new control_api_mutex_state{process_id};
+        if(value.compare_exchange_weak(
+               current, next, std::memory_order_release, std::memory_order_acquire))
+            return next->mutex;
+        delete next;
+    }
+    return current->mutex;
+}
+
+thread_local auto control_api_depth = size_t{0};
+
+struct control_api_call_scope
+{
+    control_api_call_scope()
+    {
+        if(control_api_depth++ == 0) lock.emplace(get_control_api_mutex());
+    }
+
+    ~control_api_call_scope() { --control_api_depth; }
+
+    control_api_call_scope(const control_api_call_scope&) = delete;
+    control_api_call_scope(control_api_call_scope&&)      = delete;
+
+    control_api_call_scope& operator=(const control_api_call_scope&) = delete;
+    control_api_call_scope& operator=(control_api_call_scope&&) = delete;
+
+    std::optional<control_api_read_lock_t> lock = {};
+};
 }  // namespace
+
+control_api_read_lock_t
+acquire_control_api_read_lock()
+{
+    return control_api_read_lock_t{get_control_api_mutex()};
+}
+
+control_api_write_lock_t
+acquire_control_api_write_lock()
+{
+    return control_api_write_lock_t{get_control_api_mutex()};
+}
 
 template <size_t TableIdx, size_t OpIdx>
 template <typename DataArgsT, typename... Args>
@@ -137,6 +203,11 @@ template <typename RetT, typename... Args>
 RetT
 roctx_api_impl<TableIdx, OpIdx>::functor(Args... args)
 {
+    [[maybe_unused]] auto control_api_scope = std::optional<control_api_call_scope>{};
+    if constexpr(roctx_domain_info<TableIdx>::callback_domain_idx ==
+                 ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API)
+        control_api_scope.emplace();
+
     using info_type           = roctx_api_info<TableIdx, OpIdx>;
     using callback_api_data_t = typename roctx_domain_info<TableIdx>::callback_data_type;
     using buffered_api_data_t = typename roctx_domain_info<TableIdx>::buffer_data_type;
