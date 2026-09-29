@@ -29,14 +29,14 @@ constexpr int ncclSymkMaxBlocks = 64;
 constexpr int ncclSymkMaxThreads = 256;
 constexpr int ncclSymkLLMaxEltSize = 8;
 
-// [RCCL] Launch width for the non-LL symmetric kernels. LL sizes itself from ncclSymkMaxThreads.
+// [RCCL] Launch width for the GIN and Tma symmetric kernels. The rest default to ncclSymkMaxThreads.
 // This was tuned for TDM, so if you need to change it, please add a constexpr function that 
 // selects an appropriate value for the architecture and method of transfer (TDM or non-TDM).
 constexpr int ncclSymkWarpsPerBlock = 16;
 
 // Widest LL block the gfx950 reduce kernels launch, worth 5 to 10% at the sizes where it removes an
 // epoch, since an LL epoch carries one element per thread. This bounds the shared slot buffer the
-// host allocates; the kernels take both their pitch and their stride from blockDim.
+// host allocates; the kernels take their slot stride from blockDim.
 constexpr int ncclSymkGfx950LLThreads = 512;
 
 constexpr __host__ __device__ int ncclSymkLLMaxSlots(int eltSize = ncclSymkLLMaxEltSize) {
@@ -183,8 +183,8 @@ bool ncclSymkIsGfx950(struct ncclComm* comm);
 #endif
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-// Block width the gfx950 reduce kernels launch at, split out of ncclSymkPickKernel so the size
-// bands can be unit tested. Returns ncclSymkMaxThreads for any collective that is not tuned.
+// Block width the gfx950 reduce kernels launch at, split out of the symmetric tuning model so the
+// size bands can be unit tested. Returns ncclSymkMaxThreads for any collective that is not tuned.
 int ncclSymkGfx950BlockThreads(ncclFunc_t coll, bool isLL, int nRanks, size_t nBytes);
 #endif
 
@@ -212,6 +212,7 @@ int ncclSymkLLKernelMask();
 int ncclSymkDynamicSmemKernelMask();
 int ncclSymkTmaKernelMask();
 int ncclSymkGinKernelMask();
+int ncclSymkLsaKernelMask();
 int ncclSymkAGKernelMask();
 int ncclSymkARKernelMask();
 int ncclSymkRSKernelMask();

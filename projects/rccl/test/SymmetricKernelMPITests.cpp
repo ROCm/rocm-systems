@@ -515,24 +515,30 @@ TEST_F(SymmetricKernelCorruptionTest, GroupedOps_Sub8ByteAlignment)
 namespace
 {
 
+// Prime, so the period does not divide the 1024-float gfx950 chunk and a chunk-aligned
+// misplacement still changes the values.
+constexpr size_t kLdPatternPeriod = 1021;
+
 // Value a rank writes at a global index, small enough to be exact in float.
 inline float ldPatternValue(int rank, size_t globalIdx)
 {
-    return static_cast<float>(rank + 1) + static_cast<float>(globalIdx % 1024);
+    return static_cast<float>(rank + 1) + static_cast<float>(globalIdx % kLdPatternPeriod);
 }
 
 // Sum of ldPatternValue over all ranks at one global index.
 inline float ldPatternSum(int nRanks, size_t globalIdx)
 {
     return static_cast<float>(nRanks * (nRanks + 1)) / 2.0f
-           + static_cast<float>(nRanks) * static_cast<float>(globalIdx % 1024);
+           + static_cast<float>(nRanks) * static_cast<float>(globalIdx % kLdPatternPeriod);
 }
 
 } // namespace
 
 // gfx950 gates the deep path on a floor instead of trimming to a whole wave.
-// These counts are not multiples of the chunk size, so the last wave is partial.
-TEST_F(SymmetricKernelCorruptionTest, ChunkFloor_PartialFinalWave)
+// The large counts are not multiples of the chunk size, so the last wave is partial, while the
+// small ones stay on the LL kernels, where a stride disagreeing with the launch width would alias
+// one rank's slots onto another's.
+TEST_F(SymmetricKernelCorruptionTest, CountSweep_PartitioningAndSlots)
 {
     if(!validateTestPrerequisites(2))
         GTEST_SKIP() << "Need >= 2 MPI ranks";
@@ -543,10 +549,17 @@ TEST_F(SymmetricKernelCorruptionTest, ChunkFloor_PartialFinalWave)
     ncclCommUserRank(getActiveCommunicator(), &rank);
     ncclCommCount(getActiveCommunicator(), &nRanks);
 
-    const std::vector<size_t> counts = {128 * 1024 + 1,
-                                        256 * 1024 + 7,
-                                        512 * 1024 + 129,
-                                        1024 * 1024 + 1023};
+    // The first three land on the LL kernels: ReduceScatter runs wide at all of its LL sizes, and
+    // AllReduce runs narrow below 64 KB of message bytes and wide at 16K floats. The rest have an
+    // odd chunk count (count / 1024), which nRanks * nBlocks cannot divide for any block count the
+    // cost model picks, so the trim gfx950 drops would always have removed a partial wave.
+    const std::vector<size_t> counts = {2 * 1024,
+                                        8 * 1024,
+                                        16 * 1024,
+                                        129 * 1024 + 1,
+                                        257 * 1024 + 7,
+                                        513 * 1024 + 129,
+                                        1025 * 1024 + 1023};
 
     // Allocate once at the largest count. Registering a window per iteration
     // exhausts the symmetric pool well before the buffer bytes matter.
@@ -591,7 +604,7 @@ TEST_F(SymmetricKernelCorruptionTest, ChunkFloor_PartialFinalWave)
                     return ldPatternSum(nRanks, static_cast<size_t>(rank) * count + j);
                 },
                 0, 1e-3, &errIdx, &expVal, &actVal))
-                << "ReduceScatter chunk floor mismatch at count=" << count
+                << "ReduceScatter mismatch at count=" << count
                 << " index=" << errIdx
                 << " expected=" << expVal << " got=" << actVal;
         }
@@ -611,7 +624,7 @@ TEST_F(SymmetricKernelCorruptionTest, ChunkFloor_PartialFinalWave)
                 arRecv.ptr, count,
                 [nRanks](size_t i) { return ldPatternSum(nRanks, i); },
                 0, 1e-3, &errIdx, &expVal, &actVal))
-                << "AllReduce chunk floor mismatch at count=" << count
+                << "AllReduce mismatch at count=" << count
                 << " index=" << errIdx
                 << " expected=" << expVal << " got=" << actVal;
         }

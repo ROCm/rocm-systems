@@ -360,7 +360,7 @@ static void queryModel_lsa(struct ncclTuningInput_t* input, ncclSymkKernelId k, 
   bool isLL = ncclSymkLLKernelMask() >> k & 1;
   bool isAG = ncclSymkAGKernelMask() >> k & 1;
   bool isAR = ncclSymkARKernelMask() >> k & 1;
-  bool isRS = ncclSymkRSKernelMask() >> k & 1;
+  [[maybe_unused]] bool isRS = ncclSymkRSKernelMask() >> k & 1;
   constexpr double GBps = (1 << 30) / 1.e6;
   double baseLat, smBw, peakBw;
   double withinPeakFactor = 1.025;
@@ -526,15 +526,17 @@ ncclResult_t ncclTuningSymkModelSim(struct ncclTuningInput_t* const inputs, stru
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   // rcclSymKGetInfo reports this field and nothing set it after the 2.31 sync, so nchannels read -1.
   tuning->maxChannels = kBlocks;
-  // The width tuning is fitted to gfx950. GIN carves its pipeline roles out of blockDim.x and
-  // symCheckTmaLaunch() requires the full launch for Tma, so both keep it.
   struct ncclComm* comm = inputs->comm;
   bool isLL = (tuning_kmask & ncclSymkLLKernelMask()) != 0;
+  bool isLsa = (tuning_kmask & ncclSymkLsaKernelMask()) != 0;
+  // GIN carves its pipeline roles out of blockDim.x and symCheckTmaLaunch() requires the full launch
+  // for Tma, so both keep it.
   bool fullWidth = (ncclSymkGinKernelMask() | ncclSymkTmaKernelMask()) >> tuning->symKernelId & 1;
   int nThreads = ncclSymkMaxThreads;
   if (fullWidth) {
     nThreads = ncclSymkWarpsPerBlock * comm->WarpSize;
-  } else if (ncclSymkIsGfx950(comm)) {
+  } else if (ncclSymkIsGfx950(comm) && isLsa) {
+    // The width tuning is fitted to the gfx950 LSA kernels.
     nThreads = ncclSymkGfx950BlockThreads(inputs->func, isLL, comm->nRanks, inputs->nBytes);
   }
   tuning->nWarps = std::max(1, nThreads / comm->WarpSize);
