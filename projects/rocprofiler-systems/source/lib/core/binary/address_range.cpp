@@ -4,7 +4,10 @@
 #include "binary/address_range.hpp"
 #include <cstdint>
 
+#include "common/string_utility.hpp"
 #include "logger/debug.hpp"
+
+#include <fmt/format.h>
 
 namespace rocprofsys::binary
 {
@@ -34,24 +37,17 @@ std::string
 address_range::as_string(int _depth) const
 {
     std::stringstream _ss{};
-    _ss << std::hex;
     _ss << std::setw(2 * _depth) << "";
-    _ss.fill('0');
-    _ss << "0x" << std::setw(16) << low << "-" << "0x" << std::setw(16) << high;
+    _ss << utility::string::hex_padded(low) << "-" << utility::string::hex_padded(high);
     return _ss.str();
 }
 
 std::string
 address_range::as_hex() const
 {
-    const auto c_width      = 16;
-    const auto _as_hex_util = [](auto _v, size_t _width) {
-        return fmt::format("0x{:0{}x}", _v, _width);
-    };
-
-    return is_range() ? fmt::format("{}-{}", _as_hex_util(low, c_width),
-                                    _as_hex_util(high, c_width))
-                      : _as_hex_util(low, c_width);
+    return (is_range()) ? fmt::format("{}-{}", utility::string::hex_padded(low),
+                                      utility::string::hex_padded(high))
+                        : utility::string::hex_padded(low);
 }
 
 uintptr_t
