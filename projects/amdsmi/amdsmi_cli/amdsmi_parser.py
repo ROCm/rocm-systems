@@ -228,23 +228,9 @@ class AMDSMIParser(argparse.ArgumentParser):
             "fabric",
             "default",
         ]
-        # Subcommands and aliases whose parsers are skipped without amdgpu; error() uses this to
-        # tell "amdgpu not loaded" from "not supported" (a unit test flags drift)
-        self.amdgpu_required_commands = [
-            "list",
-            "firmware",
-            "ucode",
-            "bad-pages",
-            "process",
-            "event",
-            "topology",
-            "reset",
-            "monitor",
-            "dmon",
-            "xgmi",
-            "partition",
-            "fabric",
-        ]
+        # Subcommands and aliases whose parser the amdgpu gate skipped; error() uses this to
+        # tell "amdgpu not loaded" from "not supported"
+        self.amdgpu_skipped_commands = set()
 
         # Add all subparsers
         if sys_argv is not None:
@@ -306,6 +292,13 @@ class AMDSMIParser(argparse.ArgumentParser):
             else:
                 # If no subcommand is given, add the default parser
                 self._add_default_parser(self.subparsers, default)
+
+    def _skip_without_amdgpu(self, *commands: str) -> bool:
+        """Return True if amdgpu is not initialized, recording ``commands`` for error()."""
+        if self.helpers.is_amdgpu_initialized():
+            return False
+        self.amdgpu_skipped_commands.update(commands)
+        return True
 
     def _not_negative_int(self, int_value, sub_arg=None):
         # Argument type validator
@@ -1470,7 +1463,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         )
 
     def _add_list_parser(self, subparsers: argparse._SubParsersAction, func):
-        if not self.helpers.is_amdgpu_initialized():
+        if self._skip_without_amdgpu("list"):
             # The list subcommand is only applicable to systems with amdgpu initialized
             return
 
@@ -1665,7 +1658,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         self._add_command_modifiers(static_parser)
 
     def _add_firmware_parser(self, subparsers: argparse._SubParsersAction, func):
-        if not self.helpers.is_amdgpu_initialized():
+        if self._skip_without_amdgpu("firmware", "ucode"):
             # The firmware subcommand is only applicable to systems with amdgpu initialized
             return
 
@@ -1718,7 +1711,7 @@ class AMDSMIParser(argparse.ArgumentParser):
             # The bad_pages subcommand is only applicable to Linux Baremetal systems
             return
 
-        if not self.helpers.is_amdgpu_initialized():
+        if self._skip_without_amdgpu("bad-pages"):
             # The bad_pages subcommand is only applicable to systems with amdgpu initialized
             return
 
@@ -2207,7 +2200,7 @@ class AMDSMIParser(argparse.ArgumentParser):
             # This subparser is only available to Guest and Baremetal systems
             return
 
-        if not self.helpers.is_amdgpu_initialized():
+        if self._skip_without_amdgpu("process"):
             # The process subcommand is currently only applicable to systems with amdgpu initialized
             return
 
@@ -2296,7 +2289,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         self._add_command_modifiers(profile_parser)
 
     def _add_event_parser(self, subparsers: argparse._SubParsersAction, func):
-        if not self.helpers.is_amdgpu_initialized():
+        if self._skip_without_amdgpu("event"):
             # The event subcommand is only applicable to systems with amdgpu initialized
             return
 
@@ -2318,7 +2311,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         self._add_command_modifiers(event_parser)
 
     def _add_topology_parser(self, subparsers: argparse._SubParsersAction, func):
-        if not self.helpers.is_amdgpu_initialized():
+        if self._skip_without_amdgpu("topology"):
             # The topology subcommand is only applicable to systems with amdgpu initialized
             return
 
@@ -2891,7 +2884,7 @@ class AMDSMIParser(argparse.ArgumentParser):
             # This subparser is only applicable to Linux
             return
 
-        if not self.helpers.is_amdgpu_initialized():
+        if self._skip_without_amdgpu("reset"):
             # The reset subcommand is only applicable to systems with amdgpu initialized
             return
 
@@ -2980,7 +2973,7 @@ class AMDSMIParser(argparse.ArgumentParser):
             # This subparser is only applicable to Linux
             return
 
-        if not self.helpers.is_amdgpu_initialized():
+        if self._skip_without_amdgpu("monitor", "dmon"):
             # The monitor subcommand is only applicable to systems with amdgpu initialized
             return
 
@@ -3089,7 +3082,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         self._add_command_modifiers(monitor_parser)
 
     def _add_xgmi_parser(self, subparsers: argparse._SubParsersAction, func):
-        if not self.helpers.is_amdgpu_initialized():
+        if self._skip_without_amdgpu("xgmi"):
             # The xgmi subcommand is only applicable to systems with amdgpu initialized
             return
 
@@ -3132,7 +3125,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         self._add_command_modifiers(xgmi_parser)
 
     def _add_partition_parser(self, subparsers: argparse._SubParsersAction, func):
-        if not self.helpers.is_amdgpu_initialized():
+        if self._skip_without_amdgpu("partition"):
             # The partition subcommand is only applicable to systems with amdgpu initialized
             return
 
@@ -3291,7 +3284,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         self._add_command_modifiers(node_parser)
 
     def _add_fabric_parser(self, subparsers: argparse._SubParsersAction, func):
-        if not self.helpers.is_amdgpu_initialized():
+        if self._skip_without_amdgpu("fabric"):
             return
 
         # Subparser help text
@@ -3333,11 +3326,7 @@ class AMDSMIParser(argparse.ArgumentParser):
             message = message.split("'")[0]
             # Check if the command is possible in other system configurations and error accordingly
             if message in self.possible_commands:
-                if (
-                    message in self.amdgpu_required_commands
-                    and not self.helpers.is_amdgpu_initialized()
-                    and self.helpers.is_amd_gpu_present()
-                ):
+                if message in self.amdgpu_skipped_commands and self.helpers.is_amd_gpu_present():
                     raise amdsmi_cli_exceptions.AmdSmiGpuDriverNotLoadedException(
                         message, outputformat
                     )

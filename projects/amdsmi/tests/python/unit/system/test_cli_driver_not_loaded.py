@@ -45,11 +45,13 @@ class _FakeHelpers:
         amdgpu: bool = False,
         gpu_present: bool = True,
         baremetal: bool = True,
+        hypervisor: bool = False,
         output_format: str = "human_readable",
     ) -> None:
         self._amdgpu = amdgpu
         self._gpu_present = gpu_present
         self._baremetal = baremetal
+        self._hypervisor = hypervisor
         self._output_format = output_format
 
     def is_amdgpu_initialized(self) -> bool:
@@ -87,7 +89,7 @@ class _FakeHelpers:
         return False
 
     def is_hypervisor(self) -> bool:
-        return False
+        return self._hypervisor
 
     def is_baremetal(self) -> bool:
         return self._baremetal
@@ -174,19 +176,19 @@ class TestCliDriverNotLoaded(unittest.TestCase):
             parser.parse_args([command])
         return ctx.exception
 
-    def test_amdgpu_required_commands_match_parsers_skipped_without_amdgpu(self) -> None:
+    def test_every_parser_skipped_without_amdgpu_is_recorded(self) -> None:
         # -h builds every subparser; without amdgpu the gated ones return early.
         # profile is Windows-hypervisor only and default is not built for -h.
         parser = self._make_parser("-h")
         skipped = set(parser.possible_commands) - set(parser.subparsers.choices)
         self.assertEqual(
             skipped - {"profile", "default"},
-            set(parser.amdgpu_required_commands),
-            "update amdgpu_required_commands, or the exclusions here if a gate is not amdgpu",
+            parser.amdgpu_skipped_commands,
+            "gate the parser with _skip_without_amdgpu, or exclude a non-amdgpu gate here",
         )
 
-    def test_amdgpu_required_commands_report_driver_not_loaded(self) -> None:
-        for command in self._make_parser("list").amdgpu_required_commands:
+    def test_amdgpu_skipped_commands_report_driver_not_loaded(self) -> None:
+        for command in self._make_parser("-h").amdgpu_skipped_commands:
             with self.subTest(command=command):
                 exc = self._parse_error(command)
                 self.assertIsInstance(exc, self.exceptions.AmdSmiGpuDriverNotLoadedException)
@@ -217,13 +219,17 @@ class TestCliDriverNotLoaded(unittest.TestCase):
         self.assertIsInstance(exc, self.exceptions.AmdSmiCommandNotSupportedException)
         self.assertEqual(exc.value, -7)
 
-    def test_bad_pages_on_vm_depends_on_amdgpu(self) -> None:
-        # bad-pages is baremetal-only, but passthrough guests are detected through
-        # amdgpu, so without it the driver requirement is what the user can act on.
-        exc = self._parse_error("bad-pages", baremetal=False)
-        self.assertIsInstance(exc, self.exceptions.AmdSmiGpuDriverNotLoadedException)
-        exc = self._parse_error("bad-pages", amdgpu=True, baremetal=False)
-        self.assertIsInstance(exc, self.exceptions.AmdSmiCommandNotSupportedException)
+    def test_platform_gate_before_amdgpu_keeps_not_supported(self) -> None:
+        # A platform check skips these parsers before their amdgpu gate runs, so they
+        # report "not supported" rather than a missing driver.
+        for command, platform in (
+            ("process", {"hypervisor": True}),
+            ("bad-pages", {"baremetal": False}),
+        ):
+            with self.subTest(command=command):
+                exc = self._parse_error(command, **platform)
+                self.assertIsInstance(exc, self.exceptions.AmdSmiCommandNotSupportedException)
+                self.assertEqual(exc.value, -7)
 
 
 class TestAmdGpuPresence(unittest.TestCase):
