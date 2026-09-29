@@ -1264,7 +1264,7 @@ int rcclDdaFabricVmmBlocks(const ncclComm* comm) {
 // and is a no-op for all other collectives.
 inline size_t rcclDdaEntryThresholdTab(const rcclArchThresholds* table, ncclFunc_t func, int nRanks) {
   size_t cap = rcclDdaVmmThresholdTab(table, func, nRanks);
-  if (rcclParamDdaLL())    cap = std::max(cap, rcclDdaLLThresholdTab(table, func, nRanks));
+  cap = std::max(cap, rcclDdaLLThresholdTab(table, func, nRanks));
   cap = std::max(cap, rcclDdaLL128ThresholdTab(table, func, nRanks));
   if (table != nullptr)    cap = std::max(cap, funcThresholdFromTable(table->ddaVmmMaxGraph, func));
   return cap;
@@ -2464,7 +2464,7 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
     if (a2aFabricArch) {
       const size_t llThresh    = rcclDdaLLThresholdTab(archTable, ncclFuncAlltoAll, comm->nRanks);
       const size_t ll128Thresh = rcclDdaLL128ThresholdTab(archTable, ncclFuncAlltoAll, comm->nRanks);
-      if (rcclParamDdaLL() && llThresh > 0 && totalBytes <= llThresh &&
+      if (llThresh > 0 && totalBytes <= llThresh &&
           ncclAllToAllDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype)) {
         decision->algo = RCCL_DDA_FABRIC_LL;
         decision->protocol = NCCL_PROTO_LL;
