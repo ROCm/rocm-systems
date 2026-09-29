@@ -1391,17 +1391,18 @@ class AMDSMIHelpers:
                         f"AMDSMIHelpers.get_accelerator_partition_profile_config - Device {dev} does not support accelerator partition profiles"
                     )
                     return accelerator_partition_profiles
-                break
+                raise
             except Exception as e:
                 logging.debug(
                     f"AMDSMIHelpers.get_accelerator_partition_profile_config - Unexpected error occurred --> Unable to get accelerator partition profile config for device {dev}: {str(e)}"
                 )
-                break
+                raise
         return accelerator_partition_profiles
 
     def get_accelerator_choices_types_indices(self):
         # Choices are None when not root (profiles can only be read as root) and
-        # an empty list when root finds no profiles (partitioning not supported).
+        # an empty list when root finds no profiles (partitioning not supported);
+        # any other failed profile query raises.
         return_val = (None, {"profile_indices": [], "profile_types": []})
         if os.geteuid() != 0:
             logging.debug(

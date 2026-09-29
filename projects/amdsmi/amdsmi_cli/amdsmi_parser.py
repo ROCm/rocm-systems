@@ -349,9 +349,12 @@ class AMDSMIParser(argparse.ArgumentParser):
                 sys.argv[1], string_value, outputformat
             )
 
-    def _is_command_supported(self, user_input, acceptable_values, command_name):
-        # None: values need root to query; empty: the system does not support it
-        if acceptable_values is None:
+    def _is_command_supported(self, user_input, acceptable_values, command_name, query_error=None):
+        # None: values need root to query; empty: the system does not support it;
+        # query_error: reading the values failed, so report that error instead
+        if query_error is not None:
+            raise query_error
+        elif acceptable_values is None:
             outputformat = self.helpers.get_output_format()
             raise amdsmi_cli_exceptions.AmdSmiPermissionDeniedException(command_name, outputformat)
         elif not acceptable_values:
@@ -2413,7 +2416,15 @@ class AMDSMIParser(argparse.ArgumentParser):
                 set_perf_det_help = (
                     "Enable performance determinism mode and set GFXCLK softmax limit (in MHz)"
                 )
-                (accelerator_set_choices, _) = self.helpers.get_accelerator_choices_types_indices()
+                # Raise a failed profile query only if --compute-partition is used, so
+                # the other set options and this help still work
+                accelerator_query_error = None
+                try:
+                    (accelerator_set_choices, _) = (
+                        self.helpers.get_accelerator_choices_types_indices()
+                    )
+                except Exception as e:
+                    accelerator_set_choices, accelerator_query_error = None, e
                 memory_partition_choices_str = ", ".join(self.helpers.get_memory_partition_types())
                 accelerator_set_choices_str = ", ".join(accelerator_set_choices or ["N/A"])
                 set_compute_partition_help = f"Set one of the following accelerator TYPE or profile INDEX:\n\t{accelerator_set_choices_str}.\n\tUse `sudo amd-smi partition --accelerator` to find acceptable values."
@@ -2531,7 +2542,10 @@ class AMDSMIParser(argparse.ArgumentParser):
                     action="store",
                     choices=accelerator_set_choices,
                     type=lambda value: self._is_command_supported(
-                        value, accelerator_set_choices, "--compute-partition"
+                        value,
+                        accelerator_set_choices,
+                        "--compute-partition",
+                        accelerator_query_error,
                     ),
                     required=False,
                     help=set_compute_partition_help,
