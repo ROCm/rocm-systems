@@ -1164,6 +1164,33 @@ function(rj_add_consan_device_conformance_cases)
             # exceed the default during teardown under a broad -j16 gate.
             set(_baseline_workload_timeout 120)
         endif()
+        set(_baseline_run_serial_args)
+        if(
+            RJ_ENABLE_ASAN
+            AND (
+                (
+                    _device_TARGET STREQUAL "gfx1250"
+                    AND (
+                        _workload_name STREQUAL "LongRangeFullPressure"
+                        OR _workload_name STREQUAL "Gfx1250GlobalAsyncToLds"
+                    )
+                )
+                OR (
+                    _device_TARGET STREQUAL "gfx1201"
+                    AND (
+                        _workload_name STREQUAL "SparseSpillPressure"
+                        OR _workload_name STREQUAL "DenseBranchOnlyPressure"
+                    )
+                )
+            )
+        )
+            # The ASan lane has observed these baseline processes remain live
+            # after their subsecond assertions completed when the full suite
+            # ran with simulator fanout. Isolate process-wide runtime teardown
+            # instead of weakening leak checking or extending a timeout that
+            # the test body does not consume.
+            set(_baseline_run_serial_args RUN_SERIAL)
+        endif()
         foreach(_outcome IN ITEMS Correct Incorrect)
             string(TOLOWER "${_outcome}" _outcome_label)
             rj_add_consan_hip_case(
@@ -1174,6 +1201,7 @@ function(rj_add_consan_device_conformance_cases)
                 FILTER "${_workload_suite}.${_outcome}"
                 ${_config_args}
                 ${_resource_lock_args}
+                ${_baseline_run_serial_args}
                 TIMEOUT ${_baseline_workload_timeout}
                 LABELS ${_labels} baseline "${_outcome_label}"
             )
