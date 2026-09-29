@@ -1481,6 +1481,26 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
     }
   } else {
     comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, comm->p2pnChannels);
+    // Across compute partitions the on-package fabric is the bottleneck the network is above
+    // multi-node, and every peer of a plan puts its channels on it at once. Past the point where
+    // the peers fill the channel pool, more channels per peer only adds traffic that conflicts
+    // with the other peers', so fit the peers into a single round the way the branch above does
+    // for the NICs. On an 8x MI355X node in CPX, 1 GiB alltoall over 64 partitions runs 12.5 GB/s
+    // at 8 channels per peer, 15.0 at 4 and 29.6 at 1; over the 8 partitions of one device it
+    // runs 74.3 at 64 and 144.8 at 16.
+    //
+    // Gated on MLOPart because that is the configuration the contention was measured in: a
+    // whole-device (SPX) comm has its own per-peer counts and channel pool and is left as it was.
+    // Decided per communicator rather than per operation because the device recovers a work's
+    // part index with comm->p2pnChannelsPerPeer (see sendrecv.h), so the channel stride cannot
+    // vary between plans; a workload whose real peers are few declares them through
+    // config.maxP2pPeers and keeps its full per-peer count.
+    if (comm->hasMloPart) {
+      while (comm->p2pnChannelsPerPeer * divUp(maxP2pPeers, NCCL_MAX_DEV_WORK_P2P_PER_BATCH) >
+               comm->p2pnChannels &&
+             comm->p2pnChannelsPerPeer > 1)
+        comm->p2pnChannelsPerPeer /= 2;
+    }
   }
   // Final safety: arch-specific caps above and the halving loop may still
   // leave p2pnChannelsPerPeer > p2pnChannels (e.g. when the loop bottoms out
