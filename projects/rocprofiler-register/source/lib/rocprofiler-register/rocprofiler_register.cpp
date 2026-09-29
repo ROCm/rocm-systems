@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Advanced Micro Devices, Inc.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -446,7 +446,12 @@ struct opened_library
 opened_library open_library_local(std::string_view);
 
 loaded_library
-load_library(const std::vector<std::string>&, const char*, bool = false);
+load_library(const std::vector<std::string>&,
+             const char*,
+             const std::vector<std::string>& = {});
+
+// directory of the attach library loaded at HSA registration (empty if none)
+auto attach_library_directory = std::string{};
 
 rocp_set_api_table_data_t
 rocp_load_rocprofiler_lib(const std::string& _rocp_reg_lib);
@@ -568,10 +573,69 @@ format_library_candidates(const std::vector<std::string>& candidates)
     return fmt::format("{}", fmt::join(candidates.begin(), candidates.end(), ", "));
 }
 
+template <typename TraitT>
+bool
+has_library_candidate(const fs::path& directory)
+{
+    for(const auto& candidate : get_default_library_candidates<TraitT>())
+    {
+        auto ec = std::error_code{};
+        if(fs::exists(directory / candidate, ec) && !ec) return true;
+    }
+    return false;
+}
+
+std::string
+get_library_directory(void* symbol)
+{
+    auto info = Dl_info{};
+    if(symbol == nullptr || dladdr(symbol, &info) == 0 || info.dli_fname == nullptr)
+        return std::string{};
+    return fs::path{ info.dli_fname }.parent_path().string();
+}
+
+// Ordered directories to search for the attach library. The attach library must match
+// the rocprofiler-sdk core it will be paired with, so prefer directories which contain
+// (or already provided) that core over rocprofiler-register's own directory.
+std::vector<std::string>
+get_attach_library_anchors()
+{
+    auto anchors       = std::vector<std::string>{};
+    auto append_unique = [&anchors](std::string directory) {
+        if(!directory.empty() &&
+           std::find(anchors.begin(), anchors.end(), directory) == anchors.end())
+            anchors.emplace_back(std::move(directory));
+    };
+
+    // 1. a rocprofiler-sdk core that is already loaded in the process
+    append_unique(
+        get_library_directory(dlsym(RTLD_DEFAULT, rocprofiler_lib_register_entrypoint)));
+
+    // 2. loader search directories which provide both an attach and an SDK core library
+    auto ld_library_path = common::get_env("LD_LIBRARY_PATH", std::string{});
+    for(size_t pos = 0; pos <= ld_library_path.length();)
+    {
+        auto end = ld_library_path.find(':', pos);
+        if(end == std::string::npos) end = ld_library_path.length();
+        auto directory = fs::path{ ld_library_path.substr(pos, end - pos) };
+        pos            = end + 1;
+
+        if(!directory.empty() &&
+           has_library_candidate<rocprofiler_attach_load_trait>(directory) &&
+           has_library_candidate<rocprofiler_sdk_load_trait>(directory))
+            append_unique(directory.string());
+    }
+
+    // 3. this installation, for layouts without the loader search path configured
+    append_unique(get_this_library_path());
+
+    return anchors;
+}
+
 loaded_library
 load_library(const std::vector<std::string>& candidates,
              const char*                     required_entrypoint,
-             bool                            prefer_colocated)
+             const std::vector<std::string>& anchor_directories)
 {
     auto search_candidates = std::vector<std::string>{};
     auto append_unique     = [&search_candidates](std::string candidate) {
@@ -580,12 +644,12 @@ load_library(const std::vector<std::string>& candidates,
             search_candidates.emplace_back(std::move(candidate));
     };
 
-    if(prefer_colocated)
+    // Try every candidate from each anchor directory before searching globally.
+    // Otherwise a missing local unversioned name could select an unrelated system
+    // installation before reaching an anchored SONAME.
+    for(const auto& anchor : anchor_directories)
     {
-        // Try every candidate from this installation before searching globally. Otherwise
-        // a missing local unversioned name could select an unrelated system installation
-        // before reaching a co-located SONAME.
-        auto library_directory = fs::path{ get_this_library_path() };
+        auto library_directory = fs::path{ anchor };
         for(const auto& candidate : candidates)
         {
             auto path = fs::path{ candidate };
@@ -686,8 +750,15 @@ rocp_load_rocprofiler_lib(const std::string& _rocp_reg_lib)
     auto candidates             = (use_default_candidates)
                                       ? get_default_library_candidates<rocprofiler_sdk_load_trait>()
                                       : std::vector<std::string>{ _rocp_reg_lib };
-    auto loaded                 = load_library(
-        candidates, rocprofiler_lib_register_entrypoint, use_default_candidates);
+    auto anchors                = std::vector<std::string>{};
+    if(use_default_candidates)
+    {
+        // the core must match an already loaded attach library
+        if(!attach_library_directory.empty())
+            anchors.emplace_back(attach_library_directory);
+        anchors.emplace_back(get_this_library_path());
+    }
+    auto loaded = load_library(candidates, rocprofiler_lib_register_entrypoint, anchors);
     rocprofiler_lib_handle                 = loaded.handle;
     *(void**) (&rocprofiler_lib_config_fn) = loaded.entrypoint;
 
@@ -1018,10 +1089,26 @@ rocprofiler_register_library_api_table(
     if(!_activate_rocprofiler && _attachment_enabled &&
        _import_match->library_idx == ROCP_REG_HSA)
     {
+        auto attach_anchors = get_attach_library_anchors();
+        LOG(INFO) << "attach library search directories: "
+                  << format_library_candidates(attach_anchors);
+
         auto loaded_attach_library =
             load_library(get_default_library_candidates<rocprofiler_attach_load_trait>(),
                          rocprofiler_attach_lib_register_entrypoint,
-                         true);
+                         attach_anchors);
+        attach_library_directory =
+            get_library_directory(loaded_attach_library.entrypoint);
+        LOG_IF(INFO, !attach_library_directory.empty())
+            << "attach library directory: " << attach_library_directory;
+        LOG_IF(WARNING,
+               !attach_library_directory.empty() &&
+                   !has_library_candidate<rocprofiler_sdk_load_trait>(
+                       attach_library_directory))
+            << "the attach library loaded from " << attach_library_directory
+            << " has no rocprofiler-sdk library in the same directory. The "
+               "rocprofiler-sdk library loaded on attach may not match it.";
+
         if(!loaded_attach_library.handle)
         {
             LOG(ERROR)
