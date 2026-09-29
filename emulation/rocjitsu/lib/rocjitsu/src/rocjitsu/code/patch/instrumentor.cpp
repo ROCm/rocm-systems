@@ -19,6 +19,7 @@
 #include "rocjitsu/code/patch/probe_live_in.h"
 #include "rocjitsu/code/patch/probe_symbol.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
+#include "rocjitsu/code/scoped_cfg_edges.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/target_registry.h"
@@ -665,6 +666,53 @@ namespace {
   return names;
 }
 
+// Whether a transfer outside the CFG's edges could reach @p entry_block, which
+// the predecessor check cannot see. Calls are kept out of successors(), so a
+// call edge whose callee or continuation is the entry counts. An indirect
+// terminator passes only when its targets are known: a return validated against
+// an in-scope call, or a recovered setpc/swappc whose every target is a block.
+// Each such target became a successor or a call edge, which the predecessor
+// check or the call-edge check above already covers. A recovery marked
+// source_incomplete has a path that leaves the PC pair unconstrained, so its
+// targets are not known.
+[[nodiscard]] bool indirect_flow_may_reach_entry(const std::vector<BasicBlock *> &scope,
+                                                 const BasicBlock &entry_block,
+                                                 std::span<const uint8_t> text_bytes) {
+  using Issue = BasicBlock::SuccessorIssue;
+  const std::unordered_set<uint64_t> return_offsets =
+      scoped_call_return_offsets(KernelBlockScope(scope), text_bytes);
+  for (const BasicBlock *block : scope) {
+    if (block == nullptr)
+      continue;
+    if (std::any_of(block->call_edges().begin(), block->call_edges().end(),
+                    [&](const BasicBlock::CallEdge &edge) {
+                      return edge.callee == &entry_block || edge.continuation == &entry_block;
+                    }))
+      return true;
+
+    const Instruction *term = block->terminator();
+    if (term == nullptr || !(term->flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) ||
+        term->branch_offset_bytes())
+      continue;
+    const uint64_t term_offset = term->src_loc();
+    if (return_offsets.contains(term_offset))
+      continue;
+    const Issue issue = block->successor_issue();
+    const bool targets_complete = issue == Issue::None || issue == Issue::IndirectControlFlow;
+    bool recovered = false;
+    for (const IndirectCallFixup &fixup : block->static_indirect_call_fixups()) {
+      if (fixup.source_call_offset != term_offset)
+        continue;
+      if (fixup.source_incomplete)
+        return true;
+      recovered = true;
+    }
+    if (!targets_complete || !recovered)
+      return true;
+  }
+  return false;
+}
+
 } // namespace
 
 std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologue(
@@ -718,14 +766,22 @@ std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologu
   // alone, so any edge into the entry runs it again. A second run loads through
   // the guest's kernarg pointer, which the first run restored, and corrupts both
   // the storage and that pointer. Fail closed on any predecessor, including a
-  // fallthrough that leaves the entry mid-block. Unresolved indirect branches
-  // are not edges, so this cannot see them.
+  // fallthrough that leaves the entry mid-block. Calls and unresolved indirect
+  // transfers are not predecessor edges, so they are checked separately.
   const auto entry_block = std::find_if(scope.begin(), scope.end(), [&](const BasicBlock *block) {
     return block != nullptr && block->start_offset() == entry_offset;
   });
   if (entry_block == scope.end() || !(*entry_block)->predecessors().empty()) {
     report(error_out, "control flow reaches the kernel entry other than from dispatch, and the "
                       "entry prologue cannot run twice");
+    return std::nullopt;
+  }
+  if (indirect_flow_may_reach_entry(scope, **entry_block, text_bytes)) {
+    report(error_out, ("an indirect branch or call with unresolved targets may reach the kernel "
+                       "entry, and the entry prologue cannot run twice; the entry prologue is "
+                       "required by " +
+                       entry_storage_reader_list(probes))
+                          .c_str());
     return std::nullopt;
   }
 
@@ -1050,6 +1106,30 @@ Instrumentor::ValidationResult Instrumentor::validate_points() {
 }
 
 InstrumentedCodeObject Instrumentor::patch() {
+  // The entry prologue loads through a kernarg wrapper that only a dispatch-time
+  // runtime can build, and no runtime builds one for DBI. Without it both loads
+  // read past the kernarg allocation and the guest's kernarg pointer is
+  // overwritten, so patch() refuses any point that would need the prologue.
+  // patch_with_debug_summaries() still plans it, for callers that supply the
+  // wrapper themselves.
+  std::string readers;
+  for (const InstrumentationPoint &pt : points_) {
+    if (std::none_of(pt.probe_args.begin(), pt.probe_args.end(),
+                     [](const ProbeArgValue &arg) { return reads_entry_storage(arg.source); }))
+      continue;
+    if (!readers.empty())
+      readers += ", ";
+    readers += "'" + pt.probe_symbol + "'";
+  }
+  if (!patched_ && !readers.empty()) {
+    patched_ = true;
+    InstrumentedCodeObject result;
+    result.errors.emplace_back("a probe reads the framework's entry storage, which needs a kernarg "
+                               "wrapper that no runtime builds yet; requested by " +
+                               readers);
+    return result;
+  }
+
   // Slice off the debug summaries; move the base subobject into the return.
   auto debug = patch_with_debug_summaries();
   return std::move(static_cast<InstrumentedCodeObject &>(debug));
@@ -1151,13 +1231,8 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
 
   // The kernel-entry prologue, planned only for kernels whose probes ask for the
   // framework's entry storage. It runs before every site because it is anchored
-  // at the kernel entry.
-  //
-  // TODO: The prologue loads through a kernarg wrapper that only a dispatch-time
-  // runtime can build, and no runtime builds one for DBI. On an ordinary launch
-  // both prologue loads read past the kernarg allocation and the guest's kernarg
-  // pointer is overwritten. Loading such an object must be refused unless a
-  // runtime will build the wrapper.
+  // at the kernel entry. The prologue needs a kernarg wrapper that no runtime
+  // builds yet, which patch() enforces by refusing these probes.
   std::optional<EntryProloguePatch> entry_patch;
   std::optional<uint16_t> entry_storage_base;
   if (probes_read_entry_storage(resolved.probes)) {
