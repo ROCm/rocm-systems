@@ -14,11 +14,9 @@
 
 #include <cstdint>
 #include <optional>
-#include <set>
 #include <string>
 #include <string_view>
 #include <unordered_map>
-#include <vector>
 
 namespace rocprofsys::domains::callback::ompt
 {
@@ -26,8 +24,9 @@ namespace rocprofsys::domains::callback::ompt
 namespace detail
 {
 
+// Begin-side data of a region whose end has not been received yet.
 template <policies::domain_service::backend SdkBackend>
-struct rocprofsys_ompt_data_storage_t
+struct pending_region
 {
     SdkBackend::callback_tracing_record_t record;
     SdkBackend::timestamp_t               begin_timestamp;
@@ -35,8 +34,39 @@ struct rocprofsys_ompt_data_storage_t
 };
 
 template <policies::domain_service::backend SdkBackend>
+using pending_regions_t = std::unordered_map<std::uint64_t, pending_region<SdkBackend>>;
+
+template <policies::domain_service::backend SdkBackend>
+struct open_regions
+{
+    // Any OMPT callback that can be of phase ENTER or EXIT is a standard callback.
+    //  I.e. it has an ompt_scope_endpoint_t in its definition (excluding
+    //  ROCPROFILER_OMPT_ID_nest_lock as it is a mutex)
+    // Keyed by the internal id from rocprofiler_correlation_id_t.
+    static inline thread_local auto s_standard = pending_regions_t<SdkBackend>{};
+
+    // An OMPT parallel callback consists of ROCPROFILER_OMPT_ID_parallel_begin and
+    // ROCPROFILER_OMPT_ID_parallel_end
+    //  As the beginning and end can only occur on the same thread, they are connected
+    //  into a single track called "omp_parallel" for clarity. In this track, the
+    //  information contained within parallel_begin should be displayed as it contains all
+    //  the information that parallel_end has as well as the flags and number of
+    //  threads/teams that were requested.
+    // Keyed by the parallel_data address (see callback definition).
+    static inline thread_local auto s_parallel = pending_regions_t<SdkBackend>{};
+};
+
+// Map and key under which the begin and end records of one region meet.
+template <policies::domain_service::backend SdkBackend>
+struct region_slot
+{
+    pending_regions_t<SdkBackend>& regions;
+    std::uint64_t                  key;
+};
+
+template <policies::domain_service::backend SdkBackend>
 auto
-ompt_get_unified_name(const typename SdkBackend::callback_tracing_record_t& record)
+get_unified_name(const typename SdkBackend::callback_tracing_record_t& record)
 {
     std::string_view name =
         SdkBackend::get_callback_tracing_names().at(record.kind, record.operation);
@@ -52,10 +82,10 @@ ompt_get_unified_name(const typename SdkBackend::callback_tracing_record_t& reco
 }
 
 template <policies::domain_service::backend SdkBackend>
-void
-ompt_iterate_operation_args(const typename SdkBackend::callback_tracing_record_t& record,
-                            function_args_t&                                      args)
+function_args_t
+collect_args(const typename SdkBackend::callback_tracing_record_t& record)
 {
+    auto       args      = function_args_t{};
     const auto operation = static_cast<SdkBackend::ompt_operation_t>(record.operation);
 
     // ROCProfiler-SDK recommends one dereference on ENTER to avoid faults.
@@ -72,7 +102,7 @@ ompt_iterate_operation_args(const typename SdkBackend::callback_tracing_record_t
 
     if(!payload)
     {
-        return;
+        return args;
     }
 
     const auto representation =
@@ -80,7 +110,7 @@ ompt_iterate_operation_args(const typename SdkBackend::callback_tracing_record_t
 
     if(!representation)
     {
-        return;
+        return args;
     }
 
     for(auto& decoded : representation->decode())
@@ -92,6 +122,32 @@ ompt_iterate_operation_args(const typename SdkBackend::callback_tracing_record_t
             .arg_value  = std::move(decoded.value),
         });
     }
+
+    return args;
+}
+
+// Requires a non-null payload for parallel operations (guaranteed by should_skip).
+template <policies::domain_service::backend SdkBackend>
+region_slot<SdkBackend>
+find_slot(const typename SdkBackend::callback_tracing_record_t& record)
+{
+    if(record.operation != SdkBackend::OMPT_ID_parallel_begin &&
+       record.operation != SdkBackend::OMPT_ID_parallel_end)
+    {
+        return { open_regions<SdkBackend>::s_standard, record.correlation_id.internal };
+    }
+
+    const auto* payload =
+        static_cast<const SdkBackend::callback_tracing_ompt_data_t*>(record.payload);
+    const void* parallel_data_address =
+        (record.operation == SdkBackend::OMPT_ID_parallel_begin)
+            ? payload->args.parallel_begin.parallel_data
+            : payload->args.parallel_end.parallel_data;
+
+    static_assert(sizeof(std::uintptr_t) <= sizeof(std::uint64_t));
+    // The address is only compared for identity, never dereferenced.
+    return { open_regions<SdkBackend>::s_parallel,
+             reinterpret_cast<std::uintptr_t>(parallel_data_address) };
 }
 
 // Records a completed OMPT region (instant, standard, or parallel) into the trace
@@ -101,12 +157,12 @@ template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals,
           template <typename> class Category, typename BacktraceDataT>
 void
-ompt_emit_region(const typename SdkBackend::callback_tracing_record_t& record,
-                 typename SdkBackend::timestamp_t                      begin_timestamp,
-                 typename SdkBackend::timestamp_t                      end_timestamp,
-                 BacktraceDataT& backtrace_data, const function_args_t& args)
+emit_region(const typename SdkBackend::callback_tracing_record_t& record,
+            typename SdkBackend::timestamp_t                      begin_timestamp,
+            typename SdkBackend::timestamp_t                      end_timestamp,
+            BacktraceDataT& backtrace_data, const function_args_t& args)
 {
-    const std::string_view name = ompt_get_unified_name<SdkBackend>(record);
+    const std::string_view name = get_unified_name<SdkBackend>(record);
 
     auto call_stack = Externals::get_backtrace_json(backtrace_data);
 
@@ -122,211 +178,75 @@ ompt_emit_region(const typename SdkBackend::callback_tracing_record_t& record,
         end_timestamp, call_stack.dump(), args_str, Category<Externals>::k_name });
 }
 
-// An instant event is one that has its begin_timestamp = end_timestamp
-template <policies::domain_service::backend   SdkBackend,
-          policies::domain_service::externals Externals,
-          template <typename> class Category, typename BacktraceDataT>
-void
-ompt_cache_instant_event(typename SdkBackend::callback_tracing_record_t record,
-                         typename SdkBackend::timestamp_t               instant_timestamp,
-                         BacktraceDataT&                                backtrace_data)
-{
-    auto args = function_args_t{};
-    ompt_iterate_operation_args<SdkBackend>(record, args);
-
-    ompt_emit_region<SdkBackend, Externals, Category>(
-        record, instant_timestamp, instant_timestamp, backtrace_data, args);
-}
-
-// OMPT callbacks with no corresponding begin/end are treated as "instant"
-template <policies::domain_service::backend   SdkBackend,
-          policies::domain_service::externals Externals,
-          template <typename> class Category, typename BacktraceDataT>
-void
-ompt_cache_orphan_event(const rocprofsys_ompt_data_storage_t<SdkBackend>& stored_data,
-                        BacktraceDataT&                                   backtrace_data)
-{
-    ompt_emit_region<SdkBackend, Externals, Category>(
-        stored_data.record, stored_data.begin_timestamp, stored_data.begin_timestamp,
-        backtrace_data, stored_data.args);
-}
-
-template <policies::domain_service::backend SdkBackend>
-struct ompt_storage
-{
-    static auto& get_standard() { return s_standard_cb; }
-
-    static auto& get_parallel() { return s_parallel_cb; }
-
-    static void clear()
-    {
-        s_standard_cb.clear();
-        s_parallel_cb.clear();
-    }
-
-private:
-    // Any OMPT callback that can be of phase ENTER or EXIT is a standard callback.
-    //  I.e. it has an ompt_scope_endpoint_t in its definition (excluding
-    //  ROCPROFILER_OMPT_ID_nest_lock as it is a mutex)
-
-    // std::uint64_t -> internal id from rocprofiler_correlation_id_t
-    static inline thread_local auto s_standard_cb =
-        std::unordered_map<std::uint64_t, rocprofsys_ompt_data_storage_t<SdkBackend>>{};
-
-    // An OMPT parallel callback consists of ROCPROFILER_OMPT_ID_parallel_begin and
-    // ROCPROFILER_OMPT_ID_parallel_end
-    //  As the beginning and end can only occur on the same thread, they are connected
-    //  into a single track called "omp_parallel" for clarity. In this track, the
-    //  information contained within parallel_begin should be displayed as it contains all
-    //  the information that parallel_end has as well as the flags and number of
-    //  threads/teams that were requested.
-    // uintptr_t -> parallel_data (see callback definition)
-    static inline thread_local auto s_parallel_cb =
-        std::unordered_map<uintptr_t, rocprofsys_ompt_data_storage_t<SdkBackend>>{};
-};
-
-template <policies::domain_service::backend SdkBackend>
-void
-ompt_push_standard_callback(const typename SdkBackend::callback_tracing_record_t& record,
-                            const typename SdkBackend::timestamp_t& begin_timestamp)
-{
-    auto args = function_args_t{};
-    ompt_iterate_operation_args<SdkBackend>(record, args);
-    ompt_storage<SdkBackend>::get_standard().emplace(
-        record.correlation_id.internal,
-        rocprofsys_ompt_data_storage_t<SdkBackend>{ record, begin_timestamp, args });
-}
-
-template <policies::domain_service::backend   SdkBackend,
-          policies::domain_service::externals Externals,
-          template <typename> class Category, typename BacktraceDataT>
-void
-ompt_pop_standard_callback(const typename SdkBackend::callback_tracing_record_t& record,
-                           const typename SdkBackend::timestamp_t& end_timestamp,
-                           BacktraceDataT&                         backtrace_data)
-{
-    auto& storage = ompt_storage<SdkBackend>::get_standard();
-    auto  itr     = storage.find(record.correlation_id.internal);
-
-    if(itr == storage.end())
-    {
-        auto args = function_args_t{};
-        ompt_iterate_operation_args<SdkBackend>(record, args);
-        ompt_cache_orphan_event<SdkBackend, Externals, Category>(
-            rocprofsys_ompt_data_storage_t<SdkBackend>{ record, end_timestamp, args },
-            backtrace_data);
-        return;
-    }
-
-    auto stored_data = itr->second;
-    storage.erase(itr);
-
-    ompt_emit_region<SdkBackend, Externals, Category>(record, stored_data.begin_timestamp,
-                                                      end_timestamp, backtrace_data,
-                                                      stored_data.args);
-}
-
-template <policies::domain_service::backend SdkBackend>
-void
-ompt_push_parallel_callback(const typename SdkBackend::callback_tracing_record_t& record,
-                            const typename SdkBackend::timestamp_t& begin_timestamp)
-{
-    auto* payload_data =
-        static_cast<SdkBackend::callback_tracing_ompt_data_t*>(record.payload);
-    const void* parallel_data_address = payload_data->args.parallel_begin.parallel_data;
-
-    auto args = function_args_t{};
-    ompt_iterate_operation_args<SdkBackend>(record, args);
-    ompt_storage<SdkBackend>::get_parallel().emplace(
-        reinterpret_cast<uintptr_t>(parallel_data_address),
-        rocprofsys_ompt_data_storage_t<SdkBackend>{ record, begin_timestamp, args });
-}
-
-template <policies::domain_service::backend   SdkBackend,
-          policies::domain_service::externals Externals,
-          template <typename> class Category, typename BacktraceDataT>
-void
-ompt_pop_parallel_callback(const typename SdkBackend::callback_tracing_record_t& record,
-                           const typename SdkBackend::timestamp_t& end_timestamp,
-                           BacktraceDataT&                         backtrace_data)
-{
-    auto* payload_data =
-        static_cast<SdkBackend::callback_tracing_ompt_data_t*>(record.payload);
-    const void* parallel_data_address = payload_data->args.parallel_end.parallel_data;
-
-    auto& storage = ompt_storage<SdkBackend>::get_parallel();
-    auto  itr     = storage.find(reinterpret_cast<uintptr_t>(parallel_data_address));
-
-    if(itr == storage.end())
-    {
-        auto args = function_args_t{};
-        ompt_iterate_operation_args<SdkBackend>(record, args);
-        ompt_cache_orphan_event<SdkBackend, Externals, Category>(
-            rocprofsys_ompt_data_storage_t<SdkBackend>{ record, end_timestamp, args },
-            backtrace_data);
-        return;
-    }
-
-    auto stored_data = itr->second;
-    storage.erase(itr);
-
-    ompt_emit_region<SdkBackend, Externals, Category>(record, stored_data.begin_timestamp,
-                                                      end_timestamp, backtrace_data,
-                                                      stored_data.args);
-}
-
-template <policies::domain_service::backend   SdkBackend,
-          policies::domain_service::externals Externals,
-          template <typename> class Category>
-void
-ompt_finalize_orphan_events()
-{
-    auto empty_backtrace_data = Externals::get_backtrace_data(false);
-    for(const auto& [parallel_data, stored_data] :
-        ompt_storage<SdkBackend>::get_parallel())
-    {
-        ompt_cache_orphan_event<SdkBackend, Externals, Category>(stored_data,
-                                                                 empty_backtrace_data);
-    }
-
-    for(const auto& [correlation_id, stored_data] :
-        ompt_storage<SdkBackend>::get_standard())
-    {
-        ompt_cache_orphan_event<SdkBackend, Externals, Category>(stored_data,
-                                                                 empty_backtrace_data);
-    }
-
-    ompt_storage<SdkBackend>::clear();
-}
-
 // To handle events without finalization, perfetto push must occur in start
 // Allows capture of worker thread implicit tasks and sync regions
 template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals,
           template <typename> class Category>
 void
-timemory_store_start(typename SdkBackend::callback_tracing_record_t record)
+begin_region(const typename SdkBackend::callback_tracing_record_t& record,
+             typename SdkBackend::timestamp_t                      begin_timestamp)
 {
-    const std::string_view name = ompt_get_unified_name<SdkBackend>(record);
-
     if(Externals::get_use_timemory())
     {
-        Externals::tracing_push_timemory(typename Category<Externals>::type{}, name);
+        Externals::tracing_push_timemory(typename Category<Externals>::type{},
+                                         get_unified_name<SdkBackend>(record));
     }
+
+    auto slot = find_slot<SdkBackend>(record);
+    slot.regions.emplace(slot.key,
+                         pending_region<SdkBackend>{ record, begin_timestamp,
+                                                     collect_args<SdkBackend>(record) });
 }
 
+// Closes the region opened by the matching begin_region. An end without a matching
+// begin is emitted as an instant event.
 template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals,
-          template <typename> class Category>
+          template <typename> class Category, typename BacktraceDataT>
 void
-timemory_store_stop(typename SdkBackend::callback_tracing_record_t record)
+end_region(const typename SdkBackend::callback_tracing_record_t& record,
+           typename SdkBackend::timestamp_t end_timestamp, BacktraceDataT& backtrace_data)
 {
-    const std::string_view name = ompt_get_unified_name<SdkBackend>(record);
-
     if(Externals::get_use_timemory())
     {
+        Externals::tracing_pop_timemory(typename Category<Externals>::type{},
+                                        get_unified_name<SdkBackend>(record));
+    }
+
+    auto slot = find_slot<SdkBackend>(record);
+    auto node = slot.regions.extract(slot.key);
+
+    if(node.empty())
+    {
+        emit_region<SdkBackend, Externals, Category>(record, end_timestamp, end_timestamp,
+                                                     backtrace_data,
+                                                     collect_args<SdkBackend>(record));
+        return;
+    }
+
+    const auto& begin = node.mapped();
+    emit_region<SdkBackend, Externals, Category>(
+        record, begin.begin_timestamp, end_timestamp, backtrace_data, begin.args);
+}
+
+// An instant event is one that has its begin_timestamp = end_timestamp
+template <policies::domain_service::backend   SdkBackend,
+          policies::domain_service::externals Externals,
+          template <typename> class Category, typename BacktraceDataT>
+void
+instant_region(const typename SdkBackend::callback_tracing_record_t& record,
+               typename SdkBackend::timestamp_t timestamp, BacktraceDataT& backtrace_data)
+{
+    if(Externals::get_use_timemory())
+    {
+        const std::string_view name = get_unified_name<SdkBackend>(record);
+        Externals::tracing_push_timemory(typename Category<Externals>::type{}, name);
         Externals::tracing_pop_timemory(typename Category<Externals>::type{}, name);
     }
+
+    emit_region<SdkBackend, Externals, Category>(
+        record, timestamp, timestamp, backtrace_data, collect_args<SdkBackend>(record));
 }
 
 template <policies::domain_service::backend SdkBackend>
@@ -377,11 +297,6 @@ should_skip(const typename SdkBackend::callback_tracing_record_t& record)
 
 }  // namespace detail
 
-template <policies::domain_service::externals Externals>
-inline void
-on_ompt_configure()
-{}
-
 template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals,
           template <typename> class Category>
@@ -390,18 +305,12 @@ on_ompt_enter(typename SdkBackend::callback_tracing_record_t record,
               typename SdkBackend::user_data_t* /*user_data*/, void* /*callback_data*/,
               typename SdkBackend::timestamp_t timestamp = SdkBackend::get_timestamp())
 {
-    if(!Externals::is_active())
+    if(!Externals::is_active() || detail::should_skip<SdkBackend>(record))
     {
         return;
     }
 
-    if(detail::should_skip<SdkBackend>(record))
-    {
-        return;
-    }
-
-    detail::timemory_store_start<SdkBackend, Externals, Category>(record);
-    detail::ompt_push_standard_callback<SdkBackend>(record, timestamp);
+    detail::begin_region<SdkBackend, Externals, Category>(record, timestamp);
 }
 
 template <policies::domain_service::backend   SdkBackend,
@@ -412,12 +321,7 @@ on_ompt_exit(typename SdkBackend::callback_tracing_record_t record,
              typename SdkBackend::user_data_t* /*user_data*/, void* /*callback_data*/,
              typename SdkBackend::timestamp_t timestamp = SdkBackend::get_timestamp())
 {
-    if(!Externals::is_active())
-    {
-        return;
-    }
-
-    if(detail::should_skip<SdkBackend>(record))
+    if(!Externals::is_active() || detail::should_skip<SdkBackend>(record))
     {
         return;
     }
@@ -425,9 +329,8 @@ on_ompt_exit(typename SdkBackend::callback_tracing_record_t record,
     auto backtrace_data = Externals::get_backtrace_data(
         Externals::check_backtrace_operations(record.kind, record.operation));
 
-    detail::timemory_store_stop<SdkBackend, Externals, Category>(record);
-    detail::ompt_pop_standard_callback<SdkBackend, Externals, Category>(record, timestamp,
-                                                                        backtrace_data);
+    detail::end_region<SdkBackend, Externals, Category>(record, timestamp,
+                                                        backtrace_data);
 }
 
 template <policies::domain_service::backend   SdkBackend,
@@ -438,27 +341,17 @@ on_ompt_none(typename SdkBackend::callback_tracing_record_t record,
              typename SdkBackend::user_data_t* /*user_data*/, void* /*callback_data*/,
              typename SdkBackend::timestamp_t timestamp = SdkBackend::get_timestamp())
 {
-    if(!Externals::is_active())
+    if(!Externals::is_active() || detail::should_skip<SdkBackend>(record))
     {
         return;
     }
 
-    if(detail::should_skip<SdkBackend>(record))
-    {
-        return;
-    }
+    const auto operation = static_cast<SdkBackend::ompt_operation_t>(record.operation);
 
-    // Callbacks that are received but that we do not process
-    static const std::set<typename SdkBackend::ompt_operation_t> k_ompt_no_process = {
-        SdkBackend::OMPT_ID_callback_functions,  // "Fake" callback
-        // Not processed as these are received after our tool
-        // finalizes
-        SdkBackend::OMPT_ID_thread_end,
-    };
-
-    auto ompt_operation_type =
-        static_cast<SdkBackend::ompt_operation_t>(record.operation);
-    if(k_ompt_no_process.contains(ompt_operation_type))
+    // Received but not processed: callback_functions is a "fake" callback and
+    // thread_end arrives after our tool finalizes.
+    if(operation == SdkBackend::OMPT_ID_callback_functions ||
+       operation == SdkBackend::OMPT_ID_thread_end)
     {
         return;
     }
@@ -466,16 +359,14 @@ on_ompt_none(typename SdkBackend::callback_tracing_record_t record,
     auto backtrace_data = Externals::get_backtrace_data(
         Externals::check_backtrace_operations(record.kind, record.operation));
 
-    switch(ompt_operation_type)
+    switch(operation)
     {
         case SdkBackend::OMPT_ID_parallel_begin:
-            detail::timemory_store_start<SdkBackend, Externals, Category>(record);
-            detail::ompt_push_parallel_callback<SdkBackend>(record, timestamp);
+            detail::begin_region<SdkBackend, Externals, Category>(record, timestamp);
             break;
         case SdkBackend::OMPT_ID_parallel_end:
-            detail::timemory_store_stop<SdkBackend, Externals, Category>(record);
-            detail::ompt_pop_parallel_callback<SdkBackend, Externals, Category>(
-                record, timestamp, backtrace_data);
+            detail::end_region<SdkBackend, Externals, Category>(record, timestamp,
+                                                                backtrace_data);
             break;
         // Unlike parallel callbacks, we cannot receive the corresponding
         // end to thread_begin. Set thread_begin as "instant" so the user
@@ -501,30 +392,37 @@ on_ompt_none(typename SdkBackend::callback_tracing_record_t record,
         case SdkBackend::OMPT_ID_dependences:
         case SdkBackend::OMPT_ID_task_dependence:
         case SdkBackend::OMPT_ID_error:
-        {
-            // These callbacks are considered instant events and should
-            // start and immediately call stop as no corresponding "end"
-            // will be received
-            const auto instant_timestamp = timestamp;
-            detail::timemory_store_start<SdkBackend, Externals, Category>(record);
-            detail::timemory_store_stop<SdkBackend, Externals, Category>(record);
-            detail::ompt_cache_instant_event<SdkBackend, Externals, Category>(
-                record, instant_timestamp, backtrace_data);
+            // No corresponding "end" will be received for these callbacks
+            detail::instant_region<SdkBackend, Externals, Category>(record, timestamp,
+                                                                    backtrace_data);
             break;
-        }
         default:
             LOG_WARNING("tool_tracing_callback: unhandled PHASE_NONE "
                         "for OMPT callback record.");
     }
 }
 
+// Regions still open at finalization never received their end; they are emitted as
+// instant events at their begin timestamp.
 template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals,
           template <typename> class Category>
 void
 on_ompt_finalize()
 {
-    detail::ompt_finalize_orphan_events<SdkBackend, Externals, Category>();
+    auto empty_backtrace_data = Externals::get_backtrace_data(false);
+
+    for(auto* regions : { &detail::open_regions<SdkBackend>::s_parallel,
+                          &detail::open_regions<SdkBackend>::s_standard })
+    {
+        for(const auto& [key, pending] : *regions)
+        {
+            detail::emit_region<SdkBackend, Externals, Category>(
+                pending.record, pending.begin_timestamp, pending.begin_timestamp,
+                empty_backtrace_data, pending.args);
+        }
+        regions->clear();
+    }
 }
 
 template <typename Externals>
@@ -546,7 +444,7 @@ inline constexpr auto k_ompt_api = callback_domain_definition<SdkBackend>{
         SdkBackend, on_ompt_enter<SdkBackend, Externals, ompt_api_category>,
         on_ompt_exit<SdkBackend, Externals, ompt_api_category>,
         on_ompt_none<SdkBackend, Externals, ompt_api_category>>::callback,
-    .on_configure = on_ompt_configure<Externals>,
+    .on_configure = on_tracing_api_configure<Externals>,
     .on_finalize  = on_ompt_finalize<SdkBackend, Externals, ompt_api_category>
 };
 

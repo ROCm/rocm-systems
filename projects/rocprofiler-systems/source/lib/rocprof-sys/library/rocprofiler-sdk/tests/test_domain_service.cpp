@@ -695,10 +695,10 @@ TEST_F(domain_service_test,
     record.correlation_id.internal = 42U;
 
     auto& pending_standard_callbacks =
-        domains::callback::ompt::detail::ompt_storage<mock_sdk>::get_standard();
+        domains::callback::ompt::detail::open_regions<mock_sdk>::s_standard;
     pending_standard_callbacks.emplace(
         record.correlation_id.internal,
-        domains::callback::ompt::detail::rocprofsys_ompt_data_storage_t<mock_sdk>{
+        domains::callback::ompt::detail::pending_region<mock_sdk>{
             record, /*begin_timestamp=*/1, function_args_t{} });
 
     service.finalize();
