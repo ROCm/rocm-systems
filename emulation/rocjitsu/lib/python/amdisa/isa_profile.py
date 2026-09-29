@@ -443,6 +443,11 @@ class IsaProfile(ABC):
         """Older float-atomic rules preserve selected input bits and propagate SNaNs."""
         return True
 
+    @property
+    def atomic_source_nan_first(self) -> bool:
+        """L2 ADD NaN order; indexed LDS always prefers the incoming operand."""
+        return False
+
     def scalar_atomic_denorm_modes(
         self, operation: str, elem_size: int, *, ds: bool
     ) -> tuple[str, str]:
@@ -554,6 +559,11 @@ class IsaProfile(ABC):
     @property
     def renders_gfx11_image_syntax(self) -> bool:
         """Whether GFX11 image operands and modifiers use canonical syntax."""
+        return False
+
+    @property
+    def has_gfx11_image_address_extension(self) -> bool:
+        """Whether MIMG NSA appends one DWORD of address-register selectors."""
         return False
 
     @property
@@ -2197,6 +2207,19 @@ class Rdna3Profile(_AmdgpuProfileBase):
     _SKIP = frozenset({'VOPDXY', 'VOPDXY_INST_LITERAL'})
     _SOP1_BASE_COND = 'Nothas_lit_0_Nothas_lit_1'
 
+    def normalize_operand_type(
+        self, enc_name: str, field_name: str, operand_type: str
+    ) -> str:
+        # VINTERP uses the same 256..511 VGPR source selectors as VOP3.
+        # The GFX11 XML labels its nine-bit sources as unprefixed VGPR indices.
+        if enc_name.upper() == 'ENC_VINTERP' and field_name in ('src0', 'src1', 'src2'):
+            return 'OPR_SRC_VGPR'
+        return super().normalize_operand_type(enc_name, field_name, operand_type)
+
+    @property
+    def has_gfx11_image_address_extension(self) -> bool:
+        return True
+
     @property
     def vmem_writes_use_expcnt(self) -> bool:
         return True
@@ -2537,6 +2560,10 @@ class Rdna4Profile(_AmdgpuProfileBase):
         # RDNA4 chapter 13 / CDNA5 chapter 12 operate on flushed inputs.
         return False
 
+    @property
+    def atomic_source_nan_first(self) -> bool:
+        return True
+
     def scalar_atomic_denorm_modes(
         self, operation: str, elem_size: int, *, ds: bool
     ) -> tuple[str, str]:
@@ -2802,6 +2829,11 @@ class Cdna5Profile(Rdna4Profile):
     logical target used by parser/codegen rules while generated and handwritten
     C++ lives under ``amdgpu/cdna5`` in the ``cdna5`` namespace.
     """
+
+    @property
+    def atomic_source_nan_first(self) -> bool:
+        # Preserve the existing L2 policy until qualified on CDNA5 hardware.
+        return False
 
     @property
     def vmem_stores_complete_in_order(self) -> bool:

@@ -40,19 +40,6 @@ void TestParameterStore::initialize() {
                   params.block_sizes.size(), params.iterations);
     }
     
-    // Set defaults (use level_0 as fallback if available, otherwise hardcoded)
-    if (levelMemorySizes.count("level_0")) {
-        defaultMemorySizes = levelMemorySizes["level_0"];
-        defaultBlockSizes = levelBlockSizes["level_0"];
-        defaultIterations = levelIterations["level_0"];
-        defaultWarmups = levelWarmups["level_0"];
-    } else {
-        // Hardcoded fallback if no levels defined
-        defaultMemorySizes = {1024, 1048576, 10485760};  // 1K, 1M, 10M
-        defaultBlockSizes = {64, 256};
-        LogPrintf("[TestParameterStore] Warning: No level_0 defined, using hardcoded defaults\n%s", "");
-    }
-    
     LogPrintf("[TestParameterStore] Initialization complete - %zu levels loaded\n", allParams.size());
 }
 
@@ -93,14 +80,16 @@ const std::vector<size_t>& TestParameterStore::getMemorySizesForCurrentLevel() c
     if (!currentTestLevel.empty() && levelMemorySizes.count(currentTestLevel)) {
         return levelMemorySizes.at(currentTestLevel);
     }
-    return defaultMemorySizes;
+    static const std::vector<size_t> fallback(defaultMemorySizes.begin(), defaultMemorySizes.end());
+    return fallback;
 }
 
 const std::vector<int>& TestParameterStore::getBlockSizesForCurrentLevel() const {
     if (!currentTestLevel.empty() && levelBlockSizes.count(currentTestLevel)) {
         return levelBlockSizes.at(currentTestLevel);
     }
-    return defaultBlockSizes;
+    static const std::vector<int> fallback(defaultBlockSizes.begin(), defaultBlockSizes.end());
+    return fallback;
 }
 
 int TestParameterStore::getIterationsForCurrentLevel() const {
