@@ -95,15 +95,17 @@ ncclResult_t ncclTuningSymkModelSim(struct ncclTuningInput_t* const inputs, stru
   tuning->nChannels = kBlocks;
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   tuning->maxChannels = kBlocks;
-  // The width tuning is fitted to gfx950. GIN carves its pipeline roles out of blockDim.x and
-  // symCheckTmaLaunch() requires the full launch for Tma, so both keep it.
   struct ncclComm* comm = inputs->comm;
   bool isLL = (tuning_kmask & ncclSymkLLKernelMask()) != 0;
+  bool isLsa = (tuning_kmask & ncclSymkLsaKernelMask()) != 0;
+  // GIN carves its pipeline roles out of blockDim.x and symCheckTmaLaunch() requires the full launch
+  // for Tma, so both keep it.
   bool fullWidth = (ncclSymkGinKernelMask() | ncclSymkTmaKernelMask()) >> tuning->symKernelId & 1;
   int nThreads = ncclSymkMaxThreads;
   if (fullWidth) {
     nThreads = ncclSymkWarpsPerBlock * comm->WarpSize;
-  } else if (ncclSymkIsGfx950(comm)) {
+  } else if (ncclSymkIsGfx950(comm) && isLsa) {
+    // The width tuning is fitted to the gfx950 LSA kernels.
     nThreads = ncclSymkGfx950BlockThreads(inputs->func, isLL, comm->nRanks, inputs->nBytes);
   }
   tuning->nWarps = std::max(1, nThreads / comm->WarpSize);

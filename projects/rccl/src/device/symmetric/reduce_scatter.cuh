@@ -275,7 +275,7 @@ static __device__ void reduce(ncclSymkArgsHandler const& handler, int tn, int t,
 
 #if defined(__gfx950__)
   // Engage on a floor instead of trimming, so the partial final wave is kept rather than handed to
-  // the per-element tail. The floor still keeps iterations per warp worth reduceDeep's prologue.
+  // the per-element tail. The floor is the old trim modulus, so the deep path engages where it did.
   uint32_t const chunkFloor = uint32_t(nRanks * nBlocks);
 #else
   int const& nRanks_rcp32 = handler.nRanks_rcp32;

@@ -17,7 +17,6 @@
 #endif
 #include <cmath>
 #include <cfloat>
-#include <cstring>
 
 constexpr uint32_t kernelMask_STMC =
   1 << ncclSymkKernelId_AllGather_LLMC | 1 << ncclSymkKernelId_AllGather_STMC |
@@ -79,6 +78,10 @@ int ncclSymkTmaKernelMask() {
 
 int ncclSymkGinKernelMask() {
   return kernelMask_Gin;
+}
+
+int ncclSymkLsaKernelMask() {
+  return kernelMask_LSA;
 }
 
 int ncclSymkAGKernelMask() {
@@ -202,9 +205,11 @@ static void getRequirements_gin(struct ncclComm* comm, int* out_nBlocks, size_t*
 extern int64_t ncclParamSymCTAs();
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-// The block width tuning is fitted to gfx950 and must not reach other architectures.
+// The block width tuning is fitted to gfx950 and must not reach other architectures. It sizes the
+// shared LL slots and blockDim, which peers must agree on, so every rank has to share this arch.
 bool ncclSymkIsGfx950(struct ncclComm* comm) {
-  return comm->archName != nullptr && strncmp(comm->archName, "gfx950", 6) == 0;
+  return comm->minCompCap == comm->maxCompCap && comm->archName != nullptr &&
+         IsArchMatch(comm->archName, "gfx950");
 }
 #endif
 
@@ -404,8 +409,8 @@ bool ncclSymkAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedO
 }
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-// Thresholds bounding the block width of the gfx950 LD reduce kernels, measured on 8 ranks.
-// ReduceScatter's are bus bytes since its count is per-rank output; AllReduce's are message bytes.
+// Thresholds bounding the block width of the gfx950 LD reduce kernels, fitted on 8 ranks only.
+// ReduceScatter's are bus bytes since its count is per-rank output. AllReduce's are message bytes.
 static constexpr size_t ncclSymkRsWideBlockMinBusBytes = 1 << 20;
 static constexpr size_t ncclSymkRsNarrowBlockBusBytes = 16 << 20;
 static constexpr size_t ncclSymkArTailSaturatedBytes = 512 << 10;

@@ -6,8 +6,8 @@
 
 // Size bands for the gfx950 symmetric reduce kernel block widths.
 //
-// ncclSymkGfx950BlockThreads() is the width decision lifted out of
-// ncclSymkPickKernel(). It is a pure function of the collective, the kernel
+// ncclSymkGfx950BlockThreads() is the width decision lifted out of the
+// symmetric tuning model. It is a pure function of the collective, the kernel
 // class, the rank count and the message size, so these tests need no
 // communicator and no GPU.
 //
@@ -22,11 +22,9 @@
 
 #include "gtest/gtest.h"
 #include "nccl.h"
-
+#include <cstddef>
 #include "collectives.h"
 #include "sym_kernels.h"
-
-#include <cstddef>
 
 namespace RcclUnitTesting
 {
@@ -219,6 +217,11 @@ TEST(SymkBlockWidthTest, AllWidthsAreLaunchable)
                 EXPECT_GE(nThreads, kNarrow);
                 EXPECT_LE(nThreads, kWidest) << "exceeds the 1024 thread workgroup limit";
                 EXPECT_EQ(nThreads % 64, 0) << "not a multiple of a 64-wide wavefront";
+                if(isLL)
+                {
+                    EXPECT_LE(nThreads, ncclSymkGfx950LLThreads)
+                        << "LL width exceeds the slot pool sized in ncclSymkInitOnce";
+                }
             }
         }
     }

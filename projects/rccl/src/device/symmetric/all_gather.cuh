@@ -321,7 +321,8 @@ static __device__ void allgather_LL_body(ncclSymkDevWorkArgs const* args, ncclSy
   int const& rank = handler.comm.rank;
   int const& nRanks = handler.comm.nRanks;
   int t = threadIdx.x;
-  constexpr int tn = ncclSymkMaxThreads;
+  // The round-downs below mask with -(Unroll * tn), so the launch width must be a power of two.
+  int tn = blockDim.x;
 
   // LL fuses the peer sync into the first epoch, so AFTER_OPEN is stamped once, at the
   // first endEpoch below (see ncclDevProfilerPhases in device.h); BEGIN marks the start.
