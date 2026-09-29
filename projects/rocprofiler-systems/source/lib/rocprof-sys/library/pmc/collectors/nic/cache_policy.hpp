@@ -3,8 +3,10 @@
 
 #pragma once
 
+#include "core/agent.hpp"
 #include "core/config.hpp"
 #include "core/trace_cache/cache_manager.hpp"
+#include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "library/pmc/collectors/nic/sample.hpp"
 #include "library/pmc/collectors/nic/types.hpp"
@@ -82,83 +84,65 @@ struct cache_policy
         constexpr const char* k_expression       = "";
         constexpr const char* k_target_arch      = "NIC";
 
-        trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::nic, nic_id, k_target_arch, k_event_code, k_instance_id,
-              trait::name<category::amd_smi_nic_rx_ucast_pkts>::value,
-              "NIC RX UCast PKTS",
-              trait::name<category::amd_smi_nic_rx_ucast_pkts>::description,
-              k_long_description, k_component, "packets",
-              rocprofsys::trace_cache::ABSOLUTE, k_block, k_expression, 0, 0, "{}" });
+        const auto add_nic_pmc = [&](const char* name, const char* symbol,
+                                     const char* description, const char* units) {
+            trace_cache::get_metadata_registry().add_pmc_info(
+                { .type             = agent_type::nic,
+                  .agent_type_index = nic_id,
+                  .target_arch      = k_target_arch,
+                  .event_code       = k_event_code,
+                  .instance_id      = k_instance_id,
+                  .name             = name,
+                  .symbol           = symbol,
+                  .description      = description,
+                  .long_description = k_long_description,
+                  .component        = k_component,
+                  .units            = units,
+                  .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+                  .block            = k_block,
+                  .expression       = k_expression,
+                  .is_constant      = 0,
+                  .is_derived       = 0,
+                  .extdata          = "{}" });
+        };
 
-        trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::nic, nic_id, k_target_arch, k_event_code, k_instance_id,
-              trait::name<category::amd_smi_nic_tx_ucast_pkts>::value,
-              "NIC TX UCast PKTS",
-              trait::name<category::amd_smi_nic_tx_ucast_pkts>::description,
-              k_long_description, k_component, "packets",
-              rocprofsys::trace_cache::ABSOLUTE, k_block, k_expression, 0, 0, "{}" });
-
-        trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::nic, nic_id, k_target_arch, k_event_code, k_instance_id,
-              trait::name<category::amd_smi_nic_rx_cnp_pkts>::value, "NIC RX CNP PKTS",
-              trait::name<category::amd_smi_nic_rx_cnp_pkts>::description,
-              k_long_description, k_component, "packets",
-              rocprofsys::trace_cache::ABSOLUTE, k_block, k_expression, 0, 0, "{}" });
-
-        trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::nic, nic_id, k_target_arch, k_event_code, k_instance_id,
-              trait::name<category::amd_smi_nic_tx_cnp_pkts>::value, "NIC TX CNP PKTS",
-              trait::name<category::amd_smi_nic_tx_cnp_pkts>::description,
-              k_long_description, k_component, "packets",
-              rocprofsys::trace_cache::ABSOLUTE, k_block, k_expression, 0, 0, "{}" });
-
-        trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::nic, nic_id, k_target_arch, k_event_code, k_instance_id,
-              trait::name<category::amd_smi_nic_rx_ucast_bytes>::value,
-              "NIC RX UCast Bytes",
-              trait::name<category::amd_smi_nic_rx_ucast_bytes>::description,
-              k_long_description, k_component, "bytes", rocprofsys::trace_cache::ABSOLUTE,
-              k_block, k_expression, 0, 0, "{}" });
-
-        trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::nic, nic_id, k_target_arch, k_event_code, k_instance_id,
-              trait::name<category::amd_smi_nic_tx_ucast_bytes>::value,
-              "NIC TX UCast Bytes",
-              trait::name<category::amd_smi_nic_tx_ucast_bytes>::description,
-              k_long_description, k_component, "bytes", rocprofsys::trace_cache::ABSOLUTE,
-              k_block, k_expression, 0, 0, "{}" });
-
-        trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::nic, nic_id, k_target_arch, k_event_code, k_instance_id,
-              trait::name<category::amd_smi_nic_tx_rdma_ack_timeout>::value,
-              "NIC TX RDMA ACK Timeout",
-              trait::name<category::amd_smi_nic_tx_rdma_ack_timeout>::description,
-              k_long_description, k_component, "timeouts",
-              rocprofsys::trace_cache::ABSOLUTE, k_block, k_expression, 0, 0, "{}" });
-
-        trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::nic, nic_id, k_target_arch, k_event_code, k_instance_id,
-              trait::name<category::amd_smi_nic_resp_tx_pkt_seq_err>::value,
-              "NIC RESP TX PKT SEQ Error",
-              trait::name<category::amd_smi_nic_resp_tx_pkt_seq_err>::description,
-              k_long_description, k_component, "errors",
-              rocprofsys::trace_cache::ABSOLUTE, k_block, k_expression, 0, 0, "{}" });
-
-        trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::nic, nic_id, k_target_arch, k_event_code, k_instance_id,
-              trait::name<category::amd_smi_nic_req_rx_pkt_seq_err>::value,
-              "NIC REQ RX PKT SEQ Error",
-              trait::name<category::amd_smi_nic_req_rx_pkt_seq_err>::description,
-              k_long_description, k_component, "errors",
-              rocprofsys::trace_cache::ABSOLUTE, k_block, k_expression, 0, 0, "{}" });
-
-        trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::nic, nic_id, k_target_arch, k_event_code, k_instance_id,
-              trait::name<category::amd_smi_nic_req_rx_impl_nak_seq_err>::value,
-              "NIC REQ RX Impl NAK SEQ Error",
-              trait::name<category::amd_smi_nic_req_rx_impl_nak_seq_err>::description,
-              k_long_description, k_component, "errors",
-              rocprofsys::trace_cache::ABSOLUTE, k_block, k_expression, 0, 0, "{}" });
+        add_nic_pmc(
+            trait::name<category::amd_smi_nic_rx_ucast_pkts>::value, "NIC RX UCast PKTS",
+            trait::name<category::amd_smi_nic_rx_ucast_pkts>::description, "packets");
+        add_nic_pmc(
+            trait::name<category::amd_smi_nic_tx_ucast_pkts>::value, "NIC TX UCast PKTS",
+            trait::name<category::amd_smi_nic_tx_ucast_pkts>::description, "packets");
+        add_nic_pmc(
+            trait::name<category::amd_smi_nic_rx_cnp_pkts>::value, "NIC RX CNP PKTS",
+            trait::name<category::amd_smi_nic_rx_cnp_pkts>::description, "packets");
+        add_nic_pmc(
+            trait::name<category::amd_smi_nic_tx_cnp_pkts>::value, "NIC TX CNP PKTS",
+            trait::name<category::amd_smi_nic_tx_cnp_pkts>::description, "packets");
+        add_nic_pmc(trait::name<category::amd_smi_nic_rx_ucast_bytes>::value,
+                    "NIC RX UCast Bytes",
+                    trait::name<category::amd_smi_nic_rx_ucast_bytes>::description,
+                    "bytes");
+        add_nic_pmc(trait::name<category::amd_smi_nic_tx_ucast_bytes>::value,
+                    "NIC TX UCast Bytes",
+                    trait::name<category::amd_smi_nic_tx_ucast_bytes>::description,
+                    "bytes");
+        add_nic_pmc(trait::name<category::amd_smi_nic_tx_rdma_ack_timeout>::value,
+                    "NIC TX RDMA ACK Timeout",
+                    trait::name<category::amd_smi_nic_tx_rdma_ack_timeout>::description,
+                    "timeouts");
+        add_nic_pmc(trait::name<category::amd_smi_nic_resp_tx_pkt_seq_err>::value,
+                    "NIC RESP TX PKT SEQ Error",
+                    trait::name<category::amd_smi_nic_resp_tx_pkt_seq_err>::description,
+                    "errors");
+        add_nic_pmc(trait::name<category::amd_smi_nic_req_rx_pkt_seq_err>::value,
+                    "NIC REQ RX PKT SEQ Error",
+                    trait::name<category::amd_smi_nic_req_rx_pkt_seq_err>::description,
+                    "errors");
+        add_nic_pmc(
+            trait::name<category::amd_smi_nic_req_rx_impl_nak_seq_err>::value,
+            "NIC REQ RX Impl NAK SEQ Error",
+            trait::name<category::amd_smi_nic_req_rx_impl_nak_seq_err>::description,
+            "errors");
     }
 
     /**
