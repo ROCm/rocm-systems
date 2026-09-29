@@ -128,7 +128,7 @@ hipError_t ihipGraphAddKernelNode(hip::GraphNode** pGraphNode, hip::Graph* graph
   }
 
   const amd::Device* device = g_devices[deviceId]->devices()[0];
-  LaunchConfig config = MakeLaunchConfigFromGrid(
+  const LaunchConfig config = MakeLaunchConfigFromGrid(
       pNodeParams->gridDim, pNodeParams->blockDim, pNodeParams->sharedMemBytes, *device, clusterDim,
       dim3(globalWorkSizeX_remainder, globalWorkSizeY_remainder, globalWorkSizeZ_remainder));
   IHIP_RETURN_ONFAIL(config.Status(kUnlaunchableConfigRules));
