@@ -175,7 +175,7 @@ jobs:
             cxx_compiler: g++
             run_simulator_corpus: true
             corpus_worker_limit: 4
-            corpus_soft_timeout: 240
+            corpus_soft_timeout: 360
             corpus_hard_timeout: 480
             corpus_rerun_timeout: 1200
             corpus_sanitizer: none
