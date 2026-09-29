@@ -452,6 +452,7 @@ set(SRC_FILES
   misc/crypt.cc
   misc/gdr_peermem.cc
   misc/gdr_probe.cc
+  misc/gdrwrap_stub.cc
   misc/ibvsymbols.cc
   misc/ibvwrap.cc
   misc/ionicdvsymbols.cc
