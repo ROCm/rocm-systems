@@ -11,7 +11,6 @@
 #include <memory>
 #include <optional>
 #include <string>
-#include <utility>
 
 namespace rocprofsys::domains::callback
 {
@@ -57,34 +56,20 @@ protected:
     {
         g_tracing_backend_mock = std::make_unique<StrictMock<gmock_tracing_backend>>();
         g_externals_mock       = std::make_unique<StrictMock<gmock_externals>>();
-        detail::get_ompt_standard_cb_storage<sdk>().clear();
-        detail::get_ompt_parallel_cb_storage<sdk>().clear();
+        detail::ompt_storage<sdk>::get_standard().clear();
+        detail::ompt_storage<sdk>::get_parallel().clear();
     }
 
     void TearDown() override
     {
         g_tracing_backend_mock.reset();
         g_externals_mock.reset();
-        detail::get_ompt_standard_cb_storage<sdk>().clear();
-        detail::get_ompt_parallel_cb_storage<sdk>().clear();
+        detail::ompt_storage<sdk>::get_standard().clear();
+        detail::ompt_storage<sdk>::get_parallel().clear();
     }
 };
 
 }  // namespace
-
-// ─── save_args ───────────────────────────────────────────────────────────────
-
-TEST(ompt_save_args_test, appends_name_and_value_pair)
-{
-    detail::callback_arg_array_t args;
-    const int                    rc =
-        detail::save_args<sdk>(0, 0, 0, nullptr, 0, "int", "x", "42", 0, &args);
-
-    EXPECT_EQ(rc, 0);
-    ASSERT_EQ(args.size(), 1U);
-    EXPECT_EQ(args[0].first, "x");
-    EXPECT_EQ(args[0].second, "42");
-}
 
 // ─── ompt_get_unified_name ───────────────────────────────────────────────────
 
@@ -129,7 +114,7 @@ TEST(ompt_should_skip_test, implicit_task_with_initial_flag_skips)
 {
     auto payload = sdk::callback_tracing_ompt_data_t{};
     payload.args.implicit_task.flags =
-        static_cast<int>(detail::external_types::ompt_task_flag_t::ompt_task_initial);
+        static_cast<int>(ompt::ompt_task_flag_t::ompt_task_initial);
 
     auto record    = make_record(sdk::OMPT_ID_implicit_task);
     record.payload = &payload;
@@ -141,7 +126,7 @@ TEST(ompt_should_skip_test, implicit_task_without_initial_flag_does_not_skip)
 {
     auto payload = sdk::callback_tracing_ompt_data_t{};
     payload.args.implicit_task.flags =
-        static_cast<int>(detail::external_types::ompt_task_flag_t::ompt_task_implicit);
+        static_cast<int>(ompt::ompt_task_flag_t::ompt_task_implicit);
 
     auto record    = make_record(sdk::OMPT_ID_implicit_task);
     record.payload = &payload;
@@ -190,7 +175,7 @@ TEST_F(ompt_test, iterate_args_returns_early_for_operation_without_flags)
     auto record    = make_record(sdk::OMPT_ID_dispatch);
     record.payload = &payload;
 
-    detail::callback_arg_array_t args;
+    function_args_t args;
     detail::ompt_iterate_operation_args<sdk>(record, args);
 
     EXPECT_TRUE(args.empty());
@@ -203,7 +188,7 @@ TEST_F(ompt_test, iterate_args_returns_early_when_payload_null_for_flagged_opera
     auto record    = make_record(sdk::OMPT_ID_parallel_begin);
     record.payload = nullptr;
 
-    detail::callback_arg_array_t args;
+    function_args_t args;
     detail::ompt_iterate_operation_args<sdk>(record, args);
 
     EXPECT_TRUE(args.empty());
@@ -211,7 +196,7 @@ TEST_F(ompt_test, iterate_args_returns_early_when_payload_null_for_flagged_opera
 
 TEST_F(ompt_test, iterate_args_parallel_begin_program_invoker_and_league_cause)
 {
-    using detail::external_types::ompt_parallel_flag_t;
+    using ompt::ompt_parallel_flag_t;
     EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
 
     auto payload = sdk::callback_tracing_ompt_data_t{};
@@ -222,18 +207,19 @@ TEST_F(ompt_test, iterate_args_parallel_begin_program_invoker_and_league_cause)
     auto record    = make_record(sdk::OMPT_ID_parallel_begin);
     record.payload = &payload;
 
-    detail::callback_arg_array_t args;
+    function_args_t args;
     detail::ompt_iterate_operation_args<sdk>(record, args);
 
     ASSERT_EQ(args.size(), 2U);
-    EXPECT_EQ(args[0], (std::pair<std::string, std::string>{ "invoker", "program" }));
-    EXPECT_EQ(args[1], (std::pair<std::string, std::string>{ "invoker_cause",
-                                                             "teams_construct" }));
+    EXPECT_EQ(args[0].arg_name, "invoker");
+    EXPECT_EQ(args[0].arg_value, "program");
+    EXPECT_EQ(args[1].arg_name, "invoker_cause");
+    EXPECT_EQ(args[1].arg_value, "teams_construct");
 }
 
 TEST_F(ompt_test, iterate_args_parallel_end_runtime_invoker_and_team_cause)
 {
-    using detail::external_types::ompt_parallel_flag_t;
+    using ompt::ompt_parallel_flag_t;
     EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
 
     auto payload = sdk::callback_tracing_ompt_data_t{};
@@ -244,13 +230,14 @@ TEST_F(ompt_test, iterate_args_parallel_end_runtime_invoker_and_team_cause)
     auto record    = make_record(sdk::OMPT_ID_parallel_end);
     record.payload = &payload;
 
-    detail::callback_arg_array_t args;
+    function_args_t args;
     detail::ompt_iterate_operation_args<sdk>(record, args);
 
     ASSERT_EQ(args.size(), 2U);
-    EXPECT_EQ(args[0], (std::pair<std::string, std::string>{ "invoker", "runtime" }));
-    EXPECT_EQ(args[1], (std::pair<std::string, std::string>{ "invoker_cause",
-                                                             "parallel_construct" }));
+    EXPECT_EQ(args[0].arg_name, "invoker");
+    EXPECT_EQ(args[0].arg_value, "runtime");
+    EXPECT_EQ(args[1].arg_name, "invoker_cause");
+    EXPECT_EQ(args[1].arg_value, "parallel_construct");
 }
 
 TEST_F(ompt_test, iterate_args_parallel_begin_without_flags_appends_nothing)
@@ -261,7 +248,7 @@ TEST_F(ompt_test, iterate_args_parallel_begin_without_flags_appends_nothing)
     auto record    = make_record(sdk::OMPT_ID_parallel_begin);
     record.payload = &payload;
 
-    detail::callback_arg_array_t args;
+    function_args_t args;
     detail::ompt_iterate_operation_args<sdk>(record, args);
 
     EXPECT_TRUE(args.empty());
@@ -269,7 +256,7 @@ TEST_F(ompt_test, iterate_args_parallel_begin_without_flags_appends_nothing)
 
 TEST_F(ompt_test, iterate_args_task_create_initial_classification_with_untied_property)
 {
-    using detail::external_types::ompt_task_flag_t;
+    using ompt::ompt_task_flag_t;
     EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
 
     auto payload = sdk::callback_tracing_ompt_data_t{};
@@ -280,18 +267,19 @@ TEST_F(ompt_test, iterate_args_task_create_initial_classification_with_untied_pr
     auto record    = make_record(sdk::OMPT_ID_task_create);
     record.payload = &payload;
 
-    detail::callback_arg_array_t args;
+    function_args_t args;
     detail::ompt_iterate_operation_args<sdk>(record, args);
 
     ASSERT_EQ(args.size(), 2U);
-    EXPECT_EQ(args[0],
-              (std::pair<std::string, std::string>{ "classification", "initial" }));
-    EXPECT_EQ(args[1], (std::pair<std::string, std::string>{ "properties", "untied" }));
+    EXPECT_EQ(args[0].arg_name, "classification");
+    EXPECT_EQ(args[0].arg_value, "initial");
+    EXPECT_EQ(args[1].arg_name, "properties");
+    EXPECT_EQ(args[1].arg_value, "untied");
 }
 
 TEST_F(ompt_test, iterate_args_task_create_implicit_classification_no_properties)
 {
-    using detail::external_types::ompt_task_flag_t;
+    using ompt::ompt_task_flag_t;
     EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
 
     auto payload = sdk::callback_tracing_ompt_data_t{};
@@ -301,232 +289,19 @@ TEST_F(ompt_test, iterate_args_task_create_implicit_classification_no_properties
     auto record    = make_record(sdk::OMPT_ID_task_create);
     record.payload = &payload;
 
-    detail::callback_arg_array_t args;
+    function_args_t args;
     detail::ompt_iterate_operation_args<sdk>(record, args);
 
     ASSERT_EQ(args.size(), 2U);
-    EXPECT_EQ(args[0],
-              (std::pair<std::string, std::string>{ "classification", "implicit" }));
-    EXPECT_EQ(args[1], (std::pair<std::string, std::string>{ "properties", "none" }));
+    EXPECT_EQ(args[0].arg_name, "classification");
+    EXPECT_EQ(args[0].arg_value, "implicit");
+    EXPECT_EQ(args[1].arg_name, "properties");
+    EXPECT_EQ(args[1].arg_value, "none");
 }
 
 TEST_F(ompt_test, iterate_args_task_create_explicit_classification)
 {
-    using detail::external_types::ompt_task_flag_t;
-    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
-
-    auto payload = sdk::callback_tracing_ompt_data_t{};
-    payload.args.task_create.flags =
-        static_cast<int>(ompt_task_flag_t::ompt_task_explicit);
-
-    auto record    = make_record(sdk::OMPT_ID_task_create);
-    record.payload = &payload;
-
-    detail::callback_arg_array_t args;
-    detail::ompt_iterate_operation_args<sdk>(record, args);
-
-    ASSERT_EQ(args.size(), 2U);
-    EXPECT_EQ(args[0],
-              (std::pair<std::string, std::string>{ "classification", "explicit" }));
-}
-
-TEST_F(ompt_test, iterate_args_task_create_target_classification)
-{
-    using detail::external_types::ompt_task_flag_t;
-    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
-
-    auto payload                   = sdk::callback_tracing_ompt_data_t{};
-    payload.args.task_create.flags = static_cast<int>(ompt_task_flag_t::ompt_task_target);
-
-    auto record    = make_record(sdk::OMPT_ID_task_create);
-    record.payload = &payload;
-
-    detail::callback_arg_array_t args;
-    detail::ompt_iterate_operation_args<sdk>(record, args);
-
-    ASSERT_EQ(args.size(), 2U);
-    EXPECT_EQ(args[0],
-              (std::pair<std::string, std::string>{ "classification", "target" }));
-}
-
-TEST_F(ompt_test, iterate_args_task_create_all_properties_and_no_classification)
-{
-    using detail::external_types::ompt_task_flag_t;
-    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
-
-    auto payload = sdk::callback_tracing_ompt_data_t{};
-    payload.args.task_create.flags =
-        static_cast<int>(ompt_task_flag_t::ompt_task_undeferred) |
-        static_cast<int>(ompt_task_flag_t::ompt_task_untied) |
-        static_cast<int>(ompt_task_flag_t::ompt_task_final) |
-        static_cast<int>(ompt_task_flag_t::ompt_task_mergeable) |
-        static_cast<int>(ompt_task_flag_t::ompt_task_merged);
-
-    auto record    = make_record(sdk::OMPT_ID_task_create);
-    record.payload = &payload;
-
-    detail::callback_arg_array_t args;
-    detail::ompt_iterate_operation_args<sdk>(record, args);
-
-    // No classification bit set -> only the properties entry is appended.
-    ASSERT_EQ(args.size(), 1U);
-    EXPECT_EQ(args[0],
-              (std::pair<std::string, std::string>{
-                  "properties", "undeferred, untied, final, mergeable, merged" }));
-}
-
-TEST_F(ompt_test, iterate_args_implicit_task_initial_kind)
-{
-    using detail::external_types::ompt_task_flag_t;
-    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
-
-    auto payload = sdk::callback_tracing_ompt_data_t{};
-    payload.args.implicit_task.flags =
-        static_cast<int>(ompt_task_flag_t::ompt_task_initial);
-
-    auto record    = make_record(sdk::OMPT_ID_implicit_task);
-    record.payload = &payload;
-
-    detail::callback_arg_array_t args;
-    detail::ompt_iterate_operation_args<sdk>(record, args);
-
-    ASSERT_EQ(args.size(), 1U);
-    EXPECT_EQ(args[0], (std::pair<std::string, std::string>{ "kind", "initial" }));
-}
-
-TEST_F(ompt_test, iterate_args_implicit_task_implicit_kind)
-{
-    using detail::external_types::ompt_task_flag_t;
-    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
-
-    auto payload = sdk::callback_tracing_ompt_data_t{};
-    payload.args.implicit_task.flags =
-        static_cast<int>(ompt_task_flag_t::ompt_task_implicit);
-
-    auto record    = make_record(sdk::OMPT_ID_implicit_task);
-    record.payload = &payload;
-
-    detail::callback_arg_array_t args;
-    detail::ompt_iterate_operation_args<sdk>(record, args);
-
-    ASSERT_EQ(args.size(), 1U);
-    EXPECT_EQ(args[0], (std::pair<std::string, std::string>{ "kind", "implicit" }));
-}
-
-TEST_F(ompt_test, iterate_args_implicit_task_neither_kind_appends_nothing)
-{
-    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
-
-    auto payload   = sdk::callback_tracing_ompt_data_t{};
-    auto record    = make_record(sdk::OMPT_ID_implicit_task);
-    record.payload = &payload;
-
-    detail::callback_arg_array_t args;
-    detail::ompt_iterate_operation_args<sdk>(record, args);
-
-    EXPECT_TRUE(args.empty());
-}
-
-TEST_F(ompt_test, iterate_args_cancel_parallel_construct_and_activated_state)
-{
-    using detail::external_types::ompt_cancel_flag_t;
-    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
-
-    auto payload = sdk::callback_tracing_ompt_data_t{};
-    payload.args.cancel.flags =
-        static_cast<int>(ompt_cancel_flag_t::ompt_cancel_parallel) |
-        static_cast<int>(ompt_cancel_flag_t::ompt_cancel_activated);
-
-    auto record    = make_record(sdk::OMPT_ID_cancel);
-    record.payload = &payload;
-
-    detail::callback_arg_array_t args;
-    detail::ompt_iterate_operation_args<sdk>(record, args);
-
-    ASSERT_EQ(args.size(), 2U);
-    EXPECT_EQ(args[0], (std::pair<std::string, std::string>{ "construct", "parallel" }));
-    EXPECT_EQ(args[1], (std::pair<std::string, std::string>{ "state", "activated" }));
-}
-
-TEST_F(ompt_test, iterate_args_cancel_sections_construct_and_detected_state)
-{
-    using detail::external_types::ompt_cancel_flag_t;
-    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
-
-    auto payload = sdk::callback_tracing_ompt_data_t{};
-    payload.args.cancel.flags =
-        static_cast<int>(ompt_cancel_flag_t::ompt_cancel_sections) |
-        static_cast<int>(ompt_cancel_flag_t::ompt_cancel_detected);
-
-    auto record    = make_record(sdk::OMPT_ID_cancel);
-    record.payload = &payload;
-
-    detail::callback_arg_array_t args;
-    detail::ompt_iterate_operation_args<sdk>(record, args);
-
-    ASSERT_EQ(args.size(), 2U);
-    EXPECT_EQ(args[0], (std::pair<std::string, std::string>{ "construct", "sections" }));
-    EXPECT_EQ(args[1], (std::pair<std::string, std::string>{ "state", "detected" }));
-}
-
-TEST_F(ompt_test, iterate_args_cancel_loop_construct_and_discarded_task_state)
-{
-    using detail::external_types::ompt_cancel_flag_t;
-    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
-
-    auto payload = sdk::callback_tracing_ompt_data_t{};
-    payload.args.cancel.flags =
-        static_cast<int>(ompt_cancel_flag_t::ompt_cancel_loop) |
-        static_cast<int>(ompt_cancel_flag_t::ompt_cancel_discarded_task);
-
-    auto record    = make_record(sdk::OMPT_ID_cancel);
-    record.payload = &payload;
-
-    detail::callback_arg_array_t args;
-    detail::ompt_iterate_operation_args<sdk>(record, args);
-
-    ASSERT_EQ(args.size(), 2U);
-    EXPECT_EQ(args[0], (std::pair<std::string, std::string>{ "construct", "loop" }));
-    EXPECT_EQ(args[1],
-              (std::pair<std::string, std::string>{ "state", "discarded_task" }));
-}
-
-TEST_F(ompt_test, iterate_args_cancel_taskgroup_construct_without_state)
-{
-    using detail::external_types::ompt_cancel_flag_t;
-    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
-
-    auto payload = sdk::callback_tracing_ompt_data_t{};
-    payload.args.cancel.flags =
-        static_cast<int>(ompt_cancel_flag_t::ompt_cancel_taskgroup);
-
-    auto record    = make_record(sdk::OMPT_ID_cancel);
-    record.payload = &payload;
-
-    detail::callback_arg_array_t args;
-    detail::ompt_iterate_operation_args<sdk>(record, args);
-
-    ASSERT_EQ(args.size(), 1U);
-    EXPECT_EQ(args[0], (std::pair<std::string, std::string>{ "construct", "taskgroup" }));
-}
-
-TEST_F(ompt_test, iterate_args_cancel_without_flags_appends_nothing)
-{
-    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
-
-    auto payload   = sdk::callback_tracing_ompt_data_t{};
-    auto record    = make_record(sdk::OMPT_ID_cancel);
-    record.payload = &payload;
-
-    detail::callback_arg_array_t args;
-    detail::ompt_iterate_operation_args<sdk>(record, args);
-
-    EXPECT_TRUE(args.empty());
-}
-
-TEST_F(ompt_test, iterate_args_supports_function_args_t_container)
-{
-    using detail::external_types::ompt_task_flag_t;
+    using ompt::ompt_task_flag_t;
     EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
 
     auto payload = sdk::callback_tracing_ompt_data_t{};
@@ -542,8 +317,207 @@ TEST_F(ompt_test, iterate_args_supports_function_args_t_container)
     ASSERT_EQ(args.size(), 2U);
     EXPECT_EQ(args[0].arg_name, "classification");
     EXPECT_EQ(args[0].arg_value, "explicit");
-    EXPECT_EQ(args[1].arg_name, "properties");
-    EXPECT_EQ(args[1].arg_value, "none");
+}
+
+TEST_F(ompt_test, iterate_args_task_create_target_classification)
+{
+    using ompt::ompt_task_flag_t;
+    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
+
+    auto payload                   = sdk::callback_tracing_ompt_data_t{};
+    payload.args.task_create.flags = static_cast<int>(ompt_task_flag_t::ompt_task_target);
+
+    auto record    = make_record(sdk::OMPT_ID_task_create);
+    record.payload = &payload;
+
+    function_args_t args;
+    detail::ompt_iterate_operation_args<sdk>(record, args);
+
+    ASSERT_EQ(args.size(), 2U);
+    EXPECT_EQ(args[0].arg_name, "classification");
+    EXPECT_EQ(args[0].arg_value, "target");
+}
+
+TEST_F(ompt_test, iterate_args_task_create_all_properties_and_no_classification)
+{
+    using ompt::ompt_task_flag_t;
+    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
+
+    auto payload = sdk::callback_tracing_ompt_data_t{};
+    payload.args.task_create.flags =
+        static_cast<int>(ompt_task_flag_t::ompt_task_undeferred) |
+        static_cast<int>(ompt_task_flag_t::ompt_task_untied) |
+        static_cast<int>(ompt_task_flag_t::ompt_task_final) |
+        static_cast<int>(ompt_task_flag_t::ompt_task_mergeable) |
+        static_cast<int>(ompt_task_flag_t::ompt_task_merged);
+
+    auto record    = make_record(sdk::OMPT_ID_task_create);
+    record.payload = &payload;
+
+    function_args_t args;
+    detail::ompt_iterate_operation_args<sdk>(record, args);
+
+    // No classification bit set -> only the properties entry is appended.
+    ASSERT_EQ(args.size(), 1U);
+    EXPECT_EQ(args[0].arg_name, "properties");
+    EXPECT_EQ(args[0].arg_value, "undeferred, untied, final, mergeable, merged");
+}
+
+TEST_F(ompt_test, iterate_args_implicit_task_initial_kind)
+{
+    using ompt::ompt_task_flag_t;
+    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
+
+    auto payload = sdk::callback_tracing_ompt_data_t{};
+    payload.args.implicit_task.flags =
+        static_cast<int>(ompt_task_flag_t::ompt_task_initial);
+
+    auto record    = make_record(sdk::OMPT_ID_implicit_task);
+    record.payload = &payload;
+
+    function_args_t args;
+    detail::ompt_iterate_operation_args<sdk>(record, args);
+
+    ASSERT_EQ(args.size(), 1U);
+    EXPECT_EQ(args[0].arg_name, "kind");
+    EXPECT_EQ(args[0].arg_value, "initial");
+}
+
+TEST_F(ompt_test, iterate_args_implicit_task_implicit_kind)
+{
+    using ompt::ompt_task_flag_t;
+    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
+
+    auto payload = sdk::callback_tracing_ompt_data_t{};
+    payload.args.implicit_task.flags =
+        static_cast<int>(ompt_task_flag_t::ompt_task_implicit);
+
+    auto record    = make_record(sdk::OMPT_ID_implicit_task);
+    record.payload = &payload;
+
+    function_args_t args;
+    detail::ompt_iterate_operation_args<sdk>(record, args);
+
+    ASSERT_EQ(args.size(), 1U);
+    EXPECT_EQ(args[0].arg_name, "kind");
+    EXPECT_EQ(args[0].arg_value, "implicit");
+}
+
+TEST_F(ompt_test, iterate_args_implicit_task_neither_kind_appends_nothing)
+{
+    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
+
+    auto payload   = sdk::callback_tracing_ompt_data_t{};
+    auto record    = make_record(sdk::OMPT_ID_implicit_task);
+    record.payload = &payload;
+
+    function_args_t args;
+    detail::ompt_iterate_operation_args<sdk>(record, args);
+
+    EXPECT_TRUE(args.empty());
+}
+
+TEST_F(ompt_test, iterate_args_cancel_parallel_construct_and_activated_state)
+{
+    using ompt::ompt_cancel_flag_t;
+    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
+
+    auto payload = sdk::callback_tracing_ompt_data_t{};
+    payload.args.cancel.flags =
+        static_cast<int>(ompt_cancel_flag_t::ompt_cancel_parallel) |
+        static_cast<int>(ompt_cancel_flag_t::ompt_cancel_activated);
+
+    auto record    = make_record(sdk::OMPT_ID_cancel);
+    record.payload = &payload;
+
+    function_args_t args;
+    detail::ompt_iterate_operation_args<sdk>(record, args);
+
+    ASSERT_EQ(args.size(), 2U);
+    EXPECT_EQ(args[0].arg_name, "construct");
+    EXPECT_EQ(args[0].arg_value, "parallel");
+    EXPECT_EQ(args[1].arg_name, "state");
+    EXPECT_EQ(args[1].arg_value, "activated");
+}
+
+TEST_F(ompt_test, iterate_args_cancel_sections_construct_and_detected_state)
+{
+    using ompt::ompt_cancel_flag_t;
+    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
+
+    auto payload = sdk::callback_tracing_ompt_data_t{};
+    payload.args.cancel.flags =
+        static_cast<int>(ompt_cancel_flag_t::ompt_cancel_sections) |
+        static_cast<int>(ompt_cancel_flag_t::ompt_cancel_detected);
+
+    auto record    = make_record(sdk::OMPT_ID_cancel);
+    record.payload = &payload;
+
+    function_args_t args;
+    detail::ompt_iterate_operation_args<sdk>(record, args);
+
+    ASSERT_EQ(args.size(), 2U);
+    EXPECT_EQ(args[0].arg_name, "construct");
+    EXPECT_EQ(args[0].arg_value, "sections");
+    EXPECT_EQ(args[1].arg_name, "state");
+    EXPECT_EQ(args[1].arg_value, "detected");
+}
+
+TEST_F(ompt_test, iterate_args_cancel_loop_construct_and_discarded_task_state)
+{
+    using ompt::ompt_cancel_flag_t;
+    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
+
+    auto payload = sdk::callback_tracing_ompt_data_t{};
+    payload.args.cancel.flags =
+        static_cast<int>(ompt_cancel_flag_t::ompt_cancel_loop) |
+        static_cast<int>(ompt_cancel_flag_t::ompt_cancel_discarded_task);
+
+    auto record    = make_record(sdk::OMPT_ID_cancel);
+    record.payload = &payload;
+
+    function_args_t args;
+    detail::ompt_iterate_operation_args<sdk>(record, args);
+
+    ASSERT_EQ(args.size(), 2U);
+    EXPECT_EQ(args[0].arg_name, "construct");
+    EXPECT_EQ(args[0].arg_value, "loop");
+    EXPECT_EQ(args[1].arg_name, "state");
+    EXPECT_EQ(args[1].arg_value, "discarded_task");
+}
+
+TEST_F(ompt_test, iterate_args_cancel_taskgroup_construct_without_state)
+{
+    using ompt::ompt_cancel_flag_t;
+    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
+
+    auto payload = sdk::callback_tracing_ompt_data_t{};
+    payload.args.cancel.flags =
+        static_cast<int>(ompt_cancel_flag_t::ompt_cancel_taskgroup);
+
+    auto record    = make_record(sdk::OMPT_ID_cancel);
+    record.payload = &payload;
+
+    function_args_t args;
+    detail::ompt_iterate_operation_args<sdk>(record, args);
+
+    ASSERT_EQ(args.size(), 1U);
+    EXPECT_EQ(args[0].arg_name, "construct");
+    EXPECT_EQ(args[0].arg_value, "taskgroup");
+}
+
+TEST_F(ompt_test, iterate_args_cancel_without_flags_appends_nothing)
+{
+    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
+
+    auto payload   = sdk::callback_tracing_ompt_data_t{};
+    auto record    = make_record(sdk::OMPT_ID_cancel);
+    record.payload = &payload;
+
+    function_args_t args;
+    detail::ompt_iterate_operation_args<sdk>(record, args);
+
+    EXPECT_TRUE(args.empty());
 }
 
 // ─── ompt_emit_region ────────────────────────────────────────────────────────
@@ -640,7 +614,7 @@ TEST_F(ompt_test, push_then_pop_standard_callback_found_path_uses_stored_begin_t
     detail::ompt_pop_standard_callback<sdk, ext, ompt_api_category>(record, 200,
                                                                     backtrace_data);
 
-    EXPECT_TRUE(detail::get_ompt_standard_cb_storage<sdk>().empty());
+    EXPECT_TRUE(detail::ompt_storage<sdk>::get_standard().empty());
 }
 
 TEST_F(ompt_test, pop_standard_callback_without_matching_push_emits_orphan_instant_event)
@@ -701,7 +675,7 @@ TEST_F(ompt_test, push_then_pop_parallel_callback_found_path)
     detail::ompt_pop_parallel_callback<sdk, ext, ompt_api_category>(pop_record, 20,
                                                                     backtrace_data);
 
-    EXPECT_TRUE(detail::get_ompt_parallel_cb_storage<sdk>().empty());
+    EXPECT_TRUE(detail::ompt_storage<sdk>::get_parallel().empty());
 }
 
 TEST_F(ompt_test, pop_parallel_callback_without_matching_push_emits_orphan)
@@ -734,13 +708,13 @@ TEST_F(ompt_test, finalize_orphan_events_emits_and_clears_both_storages)
 {
     const auto record1 =
         make_record(sdk::OMPT_ID_task_create, sdk::CALLBACK_PHASE_ENTER, 1, 11);
-    detail::get_ompt_standard_cb_storage<sdk>().emplace(
+    detail::ompt_storage<sdk>::get_standard().emplace(
         11U,
         detail::rocprofsys_ompt_data_storage_t<sdk>{ record1, 5, function_args_t{} });
 
     const auto record2 =
         make_record(sdk::OMPT_ID_parallel_begin, sdk::CALLBACK_PHASE_NONE, 1, 1);
-    detail::get_ompt_parallel_cb_storage<sdk>().emplace(
+    detail::ompt_storage<sdk>::get_parallel().emplace(
         uintptr_t{ 0x1234 },
         detail::rocprofsys_ompt_data_storage_t<sdk>{ record2, 6, function_args_t{} });
 
@@ -762,8 +736,8 @@ TEST_F(ompt_test, finalize_orphan_events_emits_and_clears_both_storages)
 
     detail::ompt_finalize_orphan_events<sdk, ext, ompt_api_category>();
 
-    EXPECT_TRUE(detail::get_ompt_standard_cb_storage<sdk>().empty());
-    EXPECT_TRUE(detail::get_ompt_parallel_cb_storage<sdk>().empty());
+    EXPECT_TRUE(detail::ompt_storage<sdk>::get_standard().empty());
+    EXPECT_TRUE(detail::ompt_storage<sdk>::get_parallel().empty());
 }
 
 // ─── on_ompt_finalize ────────────────────────────────────────────────────────
@@ -772,7 +746,7 @@ TEST_F(ompt_test, on_ompt_finalize_flushes_orphan_standard_callback)
 {
     const auto record =
         make_record(sdk::OMPT_ID_task_create, sdk::CALLBACK_PHASE_ENTER, 1, 11);
-    detail::get_ompt_standard_cb_storage<sdk>().emplace(
+    detail::ompt_storage<sdk>::get_standard().emplace(
         11U, detail::rocprofsys_ompt_data_storage_t<sdk>{ record, 5, function_args_t{} });
 
     EXPECT_CALL(*g_externals_mock, get_backtrace_data(false))
@@ -789,8 +763,8 @@ TEST_F(ompt_test, on_ompt_finalize_flushes_orphan_standard_callback)
 
     on_ompt_finalize<sdk, ext, ompt_api_category>();
 
-    EXPECT_TRUE(detail::get_ompt_standard_cb_storage<sdk>().empty());
-    EXPECT_TRUE(detail::get_ompt_parallel_cb_storage<sdk>().empty());
+    EXPECT_TRUE(detail::ompt_storage<sdk>::get_standard().empty());
+    EXPECT_TRUE(detail::ompt_storage<sdk>::get_parallel().empty());
 }
 
 TEST_F(ompt_test, on_ompt_finalize_is_noop_when_no_pending_events)
@@ -800,8 +774,8 @@ TEST_F(ompt_test, on_ompt_finalize_is_noop_when_no_pending_events)
 
     on_ompt_finalize<sdk, ext, ompt_api_category>();
 
-    EXPECT_TRUE(detail::get_ompt_standard_cb_storage<sdk>().empty());
-    EXPECT_TRUE(detail::get_ompt_parallel_cb_storage<sdk>().empty());
+    EXPECT_TRUE(detail::ompt_storage<sdk>::get_standard().empty());
+    EXPECT_TRUE(detail::ompt_storage<sdk>::get_parallel().empty());
 }
 
 // ─── ompt_tracing_callback_start / ompt_tracing_callback_stop ───────────────
@@ -813,10 +787,8 @@ TEST_F(ompt_test, tracing_callback_start_pushes_timemory_when_enabled)
     EXPECT_CALL(*g_externals_mock, get_use_timemory()).WillOnce(Return(true));
     EXPECT_CALL(*g_externals_mock, tracing_push_timemory("operation"));
 
-    const auto       record = make_record(sdk::OMPT_ID_task_create);
-    sdk::user_data_t user_data{};
-    detail::ompt_tracing_callback_start<sdk, ext, ompt_api_category>(record, &user_data,
-                                                                     0);
+    const auto record = make_record(sdk::OMPT_ID_task_create);
+    detail::timemory_store_start<sdk, ext, ompt_api_category>(record);
 }
 
 TEST_F(ompt_test, tracing_callback_start_skips_timemory_when_disabled)
@@ -825,10 +797,8 @@ TEST_F(ompt_test, tracing_callback_start_skips_timemory_when_disabled)
         .WillOnce(Return(tracing_names_t{}));
     EXPECT_CALL(*g_externals_mock, get_use_timemory()).WillOnce(Return(false));
 
-    const auto       record = make_record(sdk::OMPT_ID_task_create);
-    sdk::user_data_t user_data{};
-    detail::ompt_tracing_callback_start<sdk, ext, ompt_api_category>(record, &user_data,
-                                                                     0);
+    const auto record = make_record(sdk::OMPT_ID_task_create);
+    detail::timemory_store_start<sdk, ext, ompt_api_category>(record);
 }
 
 TEST_F(ompt_test, tracing_callback_stop_pops_timemory_when_enabled)
@@ -838,10 +808,8 @@ TEST_F(ompt_test, tracing_callback_stop_pops_timemory_when_enabled)
     EXPECT_CALL(*g_externals_mock, get_use_timemory()).WillOnce(Return(true));
     EXPECT_CALL(*g_externals_mock, tracing_pop_timemory("operation"));
 
-    const auto       record = make_record(sdk::OMPT_ID_task_create);
-    sdk::user_data_t user_data{};
-    detail::ompt_tracing_callback_stop<sdk, ext, ompt_api_category>(record, &user_data,
-                                                                    0);
+    const auto record = make_record(sdk::OMPT_ID_task_create);
+    detail::timemory_store_stop<sdk, ext, ompt_api_category>(record);
 }
 
 TEST_F(ompt_test, tracing_callback_stop_skips_timemory_when_disabled)
@@ -850,10 +818,8 @@ TEST_F(ompt_test, tracing_callback_stop_skips_timemory_when_disabled)
         .WillOnce(Return(tracing_names_t{}));
     EXPECT_CALL(*g_externals_mock, get_use_timemory()).WillOnce(Return(false));
 
-    const auto       record = make_record(sdk::OMPT_ID_task_create);
-    sdk::user_data_t user_data{};
-    detail::ompt_tracing_callback_stop<sdk, ext, ompt_api_category>(record, &user_data,
-                                                                    0);
+    const auto record = make_record(sdk::OMPT_ID_task_create);
+    detail::timemory_store_stop<sdk, ext, ompt_api_category>(record);
 }
 
 // ─── on_ompt_configure ───────────────────────────────────────────────────────
@@ -868,7 +834,7 @@ TEST_F(ompt_test, enter_skips_when_should_skip_true)
 
     auto payload = sdk::callback_tracing_ompt_data_t{};
     payload.args.implicit_task.flags =
-        static_cast<int>(detail::external_types::ompt_task_flag_t::ompt_task_initial);
+        static_cast<int>(ompt::ompt_task_flag_t::ompt_task_initial);
     auto record    = make_record(sdk::OMPT_ID_implicit_task, sdk::CALLBACK_PHASE_ENTER);
     record.payload = &payload;
 
@@ -891,7 +857,7 @@ TEST_F(ompt_test, enter_starts_tracing_and_pushes_standard_callback_when_not_ski
     sdk::user_data_t user_data{};
     on_ompt_enter<sdk, ext, ompt_api_category>(record, &user_data, nullptr, 123);
 
-    EXPECT_TRUE(detail::get_ompt_standard_cb_storage<sdk>().contains(55U));
+    EXPECT_TRUE(detail::ompt_storage<sdk>::get_standard().contains(55U));
 }
 
 // ─── on_ompt_exit ────────────────────────────────────────────────────────────
@@ -902,7 +868,7 @@ TEST_F(ompt_test, exit_skips_when_should_skip_true)
 
     auto payload = sdk::callback_tracing_ompt_data_t{};
     payload.args.implicit_task.flags =
-        static_cast<int>(detail::external_types::ompt_task_flag_t::ompt_task_initial);
+        static_cast<int>(ompt::ompt_task_flag_t::ompt_task_initial);
     auto record    = make_record(sdk::OMPT_ID_implicit_task, sdk::CALLBACK_PHASE_EXIT);
     record.payload = &payload;
 
@@ -980,7 +946,7 @@ TEST_F(ompt_test, none_skips_when_should_skip_true)
 
     auto payload = sdk::callback_tracing_ompt_data_t{};
     payload.args.implicit_task.flags =
-        static_cast<int>(detail::external_types::ompt_task_flag_t::ompt_task_initial);
+        static_cast<int>(ompt::ompt_task_flag_t::ompt_task_initial);
     auto record    = make_record(sdk::OMPT_ID_implicit_task);
     record.payload = &payload;
 
@@ -1033,7 +999,7 @@ TEST_F(ompt_test, none_dispatches_parallel_begin_and_pushes_parallel_callback)
     sdk::user_data_t user_data{};
     on_ompt_none<sdk, ext, ompt_api_category>(record, &user_data, nullptr, 40);
 
-    EXPECT_TRUE(detail::get_ompt_parallel_cb_storage<sdk>().contains(
+    EXPECT_TRUE(detail::ompt_storage<sdk>::get_parallel().contains(
         reinterpret_cast<uintptr_t>(&fake_parallel_data)));
 }
 
