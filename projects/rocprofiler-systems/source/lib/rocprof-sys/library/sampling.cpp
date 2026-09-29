@@ -752,7 +752,7 @@ configure(bool _setup, std::int64_t _tid)
 
         if(_signal_types->contains(get_sampling_realtime_signal()))
         {
-            _sampler->configure(timer{ get_sampling_realtime_signal(), CLOCK_BOOTTIME,
+            _sampler->configure(timer{ get_sampling_realtime_signal(), CLOCK_REALTIME,
                                        SIGEV_THREAD_ID, get_sampling_realtime_freq(),
                                        get_sampling_realtime_delay(), _tid,
                                        threading::get_sys_tid() });
@@ -796,11 +796,11 @@ configure(bool _setup, std::int64_t _tid)
             _pe.disabled                 = 1;
             _pe.inherit                  = 0;
 
-            if(_pe.type == PERF_TYPE_SOFTWARE)
-            {
-                _pe.use_clockid = 1;
-                _pe.clockid     = CLOCK_BOOTTIME;
-            }
+            // Hardware events are the default overflow source. Their sample times
+            // otherwise stay on perf's CLOCK_MONOTONIC, and parse_overflow_data()
+            // freezes the monotonic-to-timeline offset from the first sample.
+            _pe.use_clockid = 1;
+            _pe.clockid     = CLOCK_BOOTTIME;
 
             auto _perf_open_error =
                 _perf_sampler->open(_pe, _info->index_data->system_value);
