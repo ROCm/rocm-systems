@@ -444,10 +444,19 @@ TEST_F(ReclaimPlannerStateTest, KnownBug_RmaTaskQueuesNotRestoredAfterReclaim) {
   comm_->config.numRmaCtx = 1;
   comm_->planner.rmaTaskQueues = rmaTaskQueues.get();
 
+  // planner.peers gets a real pointer too, so its survival (the contrast this test draws) is
+  // actually pinned rather than assumed: nRanks stays 0, so group.cc's post-memset peers-memset
+  // touches zero bytes and can't corrupt it.
+  auto peers = std::make_unique<ncclKernelPlanner::Peer[]>(1);
+  comm_->planner.peers = peers.get();
+
   reclaimPlannerState(comm_.get());
 
-  // The bug: this should equal rmaTaskQueues.get(), mirroring how planner.peers survives.
+  EXPECT_EQ(peers.get(), comm_->planner.peers) << "peers must survive the memset";
+  // The bug: this should equal rmaTaskQueues.get(), mirroring how planner.peers just did.
   EXPECT_EQ(nullptr, comm_->planner.rmaTaskQueues);
+
+  comm_->planner.peers = nullptr;  // outlive the local, as elsewhere in this fixture.
 }
 
 // ncclAsyncLaunch: the sync-vs-async dispatch gate every async job funnels through.
