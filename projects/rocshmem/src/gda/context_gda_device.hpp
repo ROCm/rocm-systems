@@ -469,11 +469,6 @@ class GDAContext : public Context {
 
   /**
    * @brief Post NBI puts for contiguous rows, striped across workers.
-   *
-   * Workers may diverge when num_rows is not a multiple of worker_count; each
-   * round posts as a collective over whichever lanes are still in the loop.
-   * Does not quiet; caller must quiet_single (or tile_finish_put) after a
-   * wave/block barrier.
    * Strides are in bytes between consecutive rows.
    */
   __device__ void tile_put_rows_nbi(char *dst_base, const char *src_base,
