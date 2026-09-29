@@ -135,6 +135,7 @@ function(rccl_define_micro_source_lists)
   # rccl-UnitTestsMicroInit(+-uncached,-faultinj) -- src/init.cc.
   set(TEST_MICRO_INIT_SOURCE_FILES
     init-test.cc
+    gin-proxy-affinity-test.cc
     fakes/init_fakes.cc
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
@@ -146,7 +147,7 @@ function(rccl_define_micro_source_lists)
     fakes/amdsmi_fakes.cc
     fakes/api_trace_fakes.cc
     fakes/dev_runtime_fakes.cc
-    fakes/enqueue_fakes.cc               # src/enqueue/enqueue.cc (rcclEffectiveP2pBatchEnable)
+    fakes/enqueue_fakes.cc
     fakes/env_fakes.cc
     fakes/env_plugin_fakes.cc
     fakes/gin_fakes.cc
@@ -787,7 +788,9 @@ foreach(_variant "" "-uncached" "-faultinj")
   rccl_add_micro_binary(${_init_tgt}
     SOURCES ${TEST_MICRO_INIT_SOURCE_FILES}
     REMOVE_DEFS ENABLE_FAULT_INJECTION HIP_HOST_UNCACHED_MEMORY HIP_UNCACHED_MEMORY
+    EXTRA_INCLUDES ${RCCL_HOST_HIPIFY_DIR}/src/include/nccl_device
     EXTRA_DEFS ${_MICRO_MODE_DEFS} ${_MICRO_AMDSMI_DEF} INIT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/init.cc"
+    GIN_HOST_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/gin/gin_host.cc"
     CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_init.yaml")
   if(_variant STREQUAL "-uncached")
     target_compile_definitions(${_init_tgt} PRIVATE HIP_HOST_UNCACHED_MEMORY HIP_UNCACHED_MEMORY)
