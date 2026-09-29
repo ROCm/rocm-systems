@@ -2189,6 +2189,36 @@
         }
       ]
     },
+    "gin_signal_reset": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 600,
+      "env_variables": {
+        "NCCL_GIN_TYPE": "2",
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_ENV_PLUGIN": "none"
+      },
+      "tests": [
+        {
+          "name": "GIN_SignalReset",
+          "description": "GIN proxy resetSignal/resetCounter semantics: reset snapshots the signal cell into an offset instead of zeroing it; read, wait, shadow and 32-bit wrap are relative to that offset",
+          "test_filter": "GinMPIDeviceTests.SignalReset_*:GinMPIDeviceTests.CounterReset_*-GinMPIDeviceTests.*_MultiContext"
+        },
+        {
+          "name": "GIN_SignalReset_MultiContext",
+          "description": "resetSignal on one GIN context leaves the other contexts' reads and offsets intact (NCCL_GIN_NCONTEXTS=4)",
+          "test_filter": "GinMPIDeviceTests.SignalReset_IsPerContext_MultiContext",
+          "env_variables": {
+            "NCCL_GIN_NCONTEXTS": "4"
+          }
+        }
+      ]
+    },
     "ubr_multi_node": {
       "extends": "default",
       "is_gtest": true,
@@ -3369,6 +3399,12 @@
       "name": "GIN Traffic Class - RoCE QP Precedence",
       "description": "GIN device, host, default, and explicit IB traffic-class precedence observed at RoCE QP RTR programming",
       "config": "gin_traffic_class",
+      "enabled": true
+    },
+    {
+      "name": "GIN Signal Reset - Proxy",
+      "description": "GIN proxy reset-without-zeroing for signals and counters over IB across two nodes",
+      "config": "gin_signal_reset",
       "enabled": true
     },
     {
