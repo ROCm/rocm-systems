@@ -3745,6 +3745,36 @@ set(RJ_HIP_RUNTIME_SUPPORTS_GFX1100 FALSE)
 set(RJ_HIP_RUNTIME_SUPPORTS_GFX1250 FALSE)
 
 if(HIP_RUNTIME64 AND CMAKE_DL_LIBS)
+    if(RJ_ENABLE_ASAN)
+        # AMD's ASan runtime resolves its optional HSA callbacks before a
+        # dlopen-only ROCr runtime exists, then calls the cached system-event
+        # callback unconditionally from its hsa_init interceptor. Keep stable
+        # forwarding entry points loaded without retaining ROCr itself.
+        add_library(
+            asan_hsa_runtime_forwarder
+            SHARED
+            asan_hsa_runtime_forwarder.cpp
+        )
+        target_link_libraries(
+            asan_hsa_runtime_forwarder
+            PRIVATE ${CMAKE_DL_LIBS}
+        )
+        target_include_directories(
+            asan_hsa_runtime_forwarder
+            SYSTEM
+            PRIVATE ${RJ_HSA_INCLUDE_DIR} ${HSA_INCLUDE_DIR}
+        )
+        target_compile_options(
+            asan_hsa_runtime_forwarder
+            PRIVATE -fno-sanitize=all
+        )
+        target_link_options(
+            asan_hsa_runtime_forwarder
+            PRIVATE -fno-sanitize=all
+        )
+        rj_configure_target(asan_hsa_runtime_forwarder WARNINGS)
+    endif()
+
     add_executable(hip_runtime_dlopen_test hip_runtime_dlopen_test.cpp)
     target_link_libraries(
         hip_runtime_dlopen_test
@@ -3756,6 +3786,16 @@ if(HIP_RUNTIME64 AND CMAKE_DL_LIBS)
         rocjitsu_shared
         rocjitsu_dbi_hooks
     )
+    if(RJ_ENABLE_ASAN)
+        target_link_libraries(
+            hip_runtime_dlopen_test
+            PRIVATE asan_hsa_runtime_forwarder
+        )
+        target_compile_definitions(
+            hip_runtime_dlopen_test
+            PRIVATE RJ_TEST_ASAN_HSA_RUNTIME_FORWARDER=1
+        )
+    endif()
     if(RJ_INSTALL_TESTS)
         rj_install_test_target(hip_runtime_dlopen_test)
     endif()

@@ -13,6 +13,10 @@ namespace {
 
 using HipInit = int (*)(unsigned int);
 
+#if defined(RJ_TEST_ASAN_HSA_RUNTIME_FORWARDER)
+extern "C" void rj_test_keep_asan_hsa_runtime_forwarder();
+#endif
+
 template <typename Function> Function resolve(void *library, const char *name) {
   static_assert(sizeof(Function) == sizeof(void *));
   void *symbol = dlsym(library, name);
@@ -24,6 +28,10 @@ template <typename Function> Function resolve(void *library, const char *name) {
 } // namespace
 
 int main(int argc, char **argv) {
+#if defined(RJ_TEST_ASAN_HSA_RUNTIME_FORWARDER)
+  rj_test_keep_asan_hsa_runtime_forwarder();
+#endif
+
   if (argc != 3) {
     std::fprintf(stderr, "usage: %s /path/to/libamdhip64.so /path/to/hsa-tool.so\n", argv[0]);
     return 2;
