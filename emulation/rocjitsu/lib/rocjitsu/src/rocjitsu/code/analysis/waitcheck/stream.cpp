@@ -138,10 +138,11 @@ std::optional<std::string_view> deferred_reason(const Instruction &inst,
     const auto ref = op->to_register_ref();
     if (ref && ref->cls == RegClass::TTMP)
       return "trap-temporary registers are not tracked";
-    // Selector-encoded VCC, FLAT_SCRATCH and XNACK_MASK destinations are
-    // not all represented by the ordinary-register operand projection.
+    // Scalar-memory event classification currently tracks ordinary SGPR
+    // destinations. Decoders can also expose VCC and FLAT_SCRATCH as explicit
+    // special-register refs; recognizing them must not silently drop the load.
     if (destination && inst.is_memory_op() && name.starts_with("s_") && !op->is_fieldless() &&
-        op->size_bits() > 0 && !ref)
+        op->size_bits() > 0 && (!ref || ref->cls != RegClass::SGPR))
       return "scalar-memory destination is not represented by register tracking";
   }
   if (is_control_flow_transfer(inst) && !is_program_path_terminator(inst))
