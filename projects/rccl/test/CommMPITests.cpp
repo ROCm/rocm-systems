@@ -11,14 +11,14 @@
 #include "TestChecks.hpp"
 #include "ResourceGuards.hpp"
 #include "SymmetricMemPrereq.hpp"
+// Owns the ROCm-version split behind hip_bfloat16, one of the datatype table's storage types.
+#include "DeviceBufferHelpers.hpp"
 
 #include "nccl_device.h"
 #include "comm.h"
-
-// Storage types the datatype table dispatches to. DeviceBufferHelpers.hpp owns the ROCm-version
-// split behind hip_bfloat16; ncclTypeSize arrives with comm.h -> collectives.h.
-#include "DeviceBufferHelpers.hpp"
+// ncclTypeSize arrives with comm.h -> collectives.h; this adds the two fp8 storage types.
 #include "rccl_float8.h"
+
 #include <hip/hip_fp16.h>
 
 #include <array>
@@ -678,9 +678,10 @@ namespace
      * @brief Size regime for one row of the datatype/size table.
      *
      * Short is the tier every config runs. Large pins the ReduceScatter shard at ~2MiB, which is
-     * only a real algorithm-eligibility boundary on a multi-node job (the PAT ceiling at <= 4
-     * nodes, the Direct-ReduceScatter ceiling at exactly 2), so those rows are registered against
-     * a 2-node config and left out of the single-node ones.
+     * the size regime AICOMRCCL-2275 reproduces in: the corruption is a cache-coherence defect
+     * below RCCL, so it needs payloads that outrun the cache, not a multi-node job. Both tiers are
+     * therefore registered single-node -- 2 ranks on 2 hosts would route the exchange through NET
+     * and lose the intra-node P2P path the defect lives on.
      */
     enum class SizeTier
     {
@@ -831,7 +832,7 @@ protected:
     // Two independent limits pin it, and raising it means rechecking both. Value: a reduced element
     // is a sum of at most nranks 0/1 contributions, and ncclFloat8e5m2 -- the narrowest exact-integer
     // range in the table -- is exact only to 8. Variance: contribution() collapses to a constant at
-    // nranks equal to its modulus, so the cap must stay strictly below that modulus, currently 9.
+    // nranks equal to kContributionModulus, so the cap must stay strictly below it.
     static constexpr int kMaxRanksAssumed = 8;
 
     static constexpr int    kSteps           = 64;
@@ -845,9 +846,14 @@ protected:
     // 1, 2, 4 or 8, all of which divide 2^21 evenly, so the element count is never rounded.
     static constexpr size_t kLargeShardBytes = 2 * 1024 * 1024;
 
-    // Puts the metric payload out of phase with every other buffer's fill, so a Reduce that lands
-    // on the wrong buffer cannot be masked by a coincidentally equal value.
-    static constexpr size_t kMetricIndexBase = 4099;
+    // Each upload buffer's fill starts from its own index, so no two hold the same bytes over
+    // their shared range and a collective that reads the wrong source buffer cannot still pass.
+    // Buckets start at 0 via bucketIndex(); the four below are pairwise distinct modulo
+    // kContributionModulus, and distinct from 0, which is what makes the patterns differ.
+    static constexpr size_t kParamIndexBase      = 1031;  // 1031 % 11 == 8
+    static constexpr size_t kGradIndexBase       = 2063;  // 2063 % 11 == 6
+    static constexpr size_t kActivationIndexBase = 3079;  // 3079 % 11 == 10
+    static constexpr size_t kMetricIndexBase     = 4099;  // 4099 % 11 == 7
 
     static size_t bucketCount(int bucket)
     {
@@ -861,28 +867,53 @@ protected:
         return static_cast<size_t>(bucket) * 31 + element;
     }
 
+    // Coprime to both 31 (the bucketIndex() stride) and 6 (the kBucketCounts period), so no two of
+    // the 24 buckets share a count and a phase: lcm(11, 6) = 66 > 24. At 9 the pairs (b, b+18) were
+    // identical in and out, 6 of the 24. It must also stay above kMaxRanksAssumed, see there.
+    static constexpr size_t kContributionModulus   = 11;
+    static constexpr size_t kContributionThreshold = 6;
+
     // One rank's contribution to one element: 0 or 1, with which ranks carry a 1 rotating by both
-    // step and element index. Five of every nine combinations contribute, which keeps the reduced
+    // step and element index. Six of every eleven combinations contribute, which keeps the reduced
     // sum varying across elements at every rank count from 2 to kMaxRanksAssumed instead of
     // collapsing to a constant, so a collective that silently does nothing leaves the previous
     // step's pattern and a reduction that drops one rank while double-counting another changes the
-    // sum. Ranks 0..M-1 cover every residue mod M once, so the modulus here is the first rank count
-    // at which that property dies; it must stay above kMaxRanksAssumed.
+    // sum. Ranks 0..M-1 cover every residue mod M once, so the modulus is the first rank count at
+    // which that property dies. Staying 0/1 is forced: ncclFloat8e5m2 is exact only to 8.
     static int contribution(int step, int rank, size_t index)
     {
-        return ((index + static_cast<size_t>(step) + static_cast<size_t>(rank)) % 9 < 5) ? 1 : 0;
+        return ((index + static_cast<size_t>(step) + static_cast<size_t>(rank))
+                    % kContributionModulus
+                < kContributionThreshold)
+                   ? 1
+                   : 0;
     }
 
-    // What contribution() sums to once every rank has contributed exactly once. Bounded by nranks,
-    // hence by kMaxRanksAssumed, which is what keeps every datatype's comparison exact.
-    static int reducedContribution(int step, int nranks, size_t index)
+    // What contribution() sums to once every rank has contributed exactly once, as a table over
+    // (index + step) % kContributionModulus, which is all the sum depends on once nranks is fixed.
+    // Built once per case: the loop it replaces ran per validated element, ~18.9M times per step on
+    // the 8-rank fp8e4m3_large row. Bounded by nranks, hence by kMaxRanksAssumed, which is what
+    // keeps every datatype's comparison exact.
+    using ReducedContributionTable = std::array<int, kContributionModulus>;
+
+    static ReducedContributionTable makeReducedContributionTable(int nranks)
     {
-        int sum = 0;
-        for(int r = 0; r < nranks; ++r)
+        ReducedContributionTable table{};
+        for(size_t phase = 0; phase < kContributionModulus; ++phase)
         {
-            sum += contribution(step, r, index);
+            int sum = 0;
+            for(int r = 0; r < nranks; ++r)
+            {
+                sum += contribution(/*step=*/0, r, phase);
+            }
+            table[phase] = sum;
         }
-        return sum;
+        return table;
+    }
+
+    static int reducedContribution(const ReducedContributionTable& table, int step, size_t index)
+    {
+        return table[(index + static_cast<size_t>(step)) % kContributionModulus];
     }
 
     template <typename T>
@@ -968,6 +999,9 @@ void PersistentCommunicatorMPITest::runPersistentCommunicatorCase(ncclDataType_t
     std::vector<T> host_activation(kActivationCount);
     std::vector<T> host_metric(kMetricCount);
 
+    // Depends only on nranks, so it is built once here rather than per validated element.
+    const ReducedContributionTable reduced_table = makeReducedContributionTable(nranks);
+
     // Only prints under NCCL_DEBUG=INFO; it is how a log can confirm the shape actually run.
     TEST_INFO("persistent communicator: %d steps, %d ranks, %d fused AllReduce buckets/step, "
               "%zu elements (%zu KiB) ReduceScatter+AllGather/step",
@@ -982,18 +1016,20 @@ void PersistentCommunicatorMPITest::runPersistentCommunicatorCase(ncclDataType_t
         SCOPED_TRACE("step " + std::to_string(step));
 
         // Refill every buffer so a collective that silently does nothing shows up as the previous
-        // step's values rather than as a coincidentally correct result.
+        // step's values rather than as a coincidentally correct result. Each fill starts from its
+        // own index base so no two buffers hold the same bytes; see the bases above.
         for(size_t i = 0; i < kParamCount; ++i)
         {
-            host_param[i] = makeStorageValue<T>(contribution(step, rank, i));
+            host_param[i] = makeStorageValue<T>(contribution(step, rank, kParamIndexBase + i));
         }
         for(size_t i = 0; i < total_grad; ++i)
         {
-            host_grad[i] = makeStorageValue<T>(contribution(step, rank, i));
+            host_grad[i] = makeStorageValue<T>(contribution(step, rank, kGradIndexBase + i));
         }
         for(size_t i = 0; i < kActivationCount; ++i)
         {
-            host_activation[i] = makeStorageValue<T>(contribution(step, rank, i));
+            host_activation[i]
+                = makeStorageValue<T>(contribution(step, rank, kActivationIndexBase + i));
         }
         for(size_t i = 0; i < kMetricCount; ++i)
         {
@@ -1080,6 +1116,14 @@ void PersistentCommunicatorMPITest::runPersistentCommunicatorCase(ncclDataType_t
         recordNccl(ncclReduce(
             metric_send, metric_recv, kMetricCount, dtype, ncclSum, /*root=*/0, comm, stream));
 
+        // Checked before the synchronize, not after: recordNccl only stores the code, so a rank
+        // whose ncclGroupEnd failed has nothing on its stream and would drain immediately and walk
+        // into the next step while its peers block forever on a collective it never joined. The
+        // row would then surface as a job timeout instead of a clean failure. ASSERT_MPI_EQ is
+        // collective, so every rank leaves together.
+        EXPECT_EQ(0, step_status) << "rank " << rank;
+        ASSERT_MPI_EQ(0, step_status);
+
         recordHip(hipStreamSynchronize(stream));
 
         recordHip(hipMemcpy(
@@ -1095,86 +1139,109 @@ void PersistentCommunicatorMPITest::runPersistentCommunicatorCase(ncclDataType_t
         recordHip(hipMemcpy(
             host_metric.data(), metric_recv, kMetricCount * sizeof(T), hipMemcpyDeviceToHost));
 
-        // Checked before any downloaded buffer is compared. A failed download would otherwise be
-        // scored as a pile of mismatches against stale data, burying the error that caused them.
-        // The EXPECT prints the code on the rank that saw it and costs no MPI.
-        EXPECT_EQ(0, step_status) << "rank " << rank;
-        ASSERT_MPI_EQ(0, step_status);
-
         // Counted rather than asserted per element, and accumulated across all five phases, so the
-        // step costs one MPI_Allreduce for validation instead of one per phase.
-        size_t mismatches = 0;
+        // step costs one MPI_Allreduce for validation instead of one per phase. The first offender
+        // is kept alongside: the defect this test hunts corrupts data silently, and a bare count
+        // tells nobody which phase produced it or by how much it was wrong. Recording it is local
+        // and costs no MPI, which is what the one-Allreduce argument above is protecting.
+        // The index recorded is the one the payload formula was evaluated at, the same for every
+        // phase, so it can be fed straight back into contribution() to reproduce the expectation.
+        size_t      mismatches     = 0;
+        const char* first_phase    = nullptr;
+        size_t      first_index    = 0;
+        float       first_expected = 0.0f;
+        float       first_actual   = 0.0f;
 
-        for(size_t i = 0; i < kParamCount; ++i)
-        {
-            if(storageValueAsFloat(host_param[i])
-               != static_cast<float>(contribution(step, /*rank=*/0, i)))
+        auto check = [&](const char* phase, size_t index, float expected, float actual) {
+            if(expected == actual)
             {
-                ++mismatches;
+                return;
             }
-        }
+            if(mismatches == 0)
+            {
+                first_phase    = phase;
+                first_index    = index;
+                first_expected = expected;
+                first_actual   = actual;
+            }
+            ++mismatches;
+        };
 
-        for(int b = 0; b < kGradientBuckets; ++b)
+        // Skipped outright when an enqueue or a download already failed: comparing the staging
+        // buffers then scores stale data and buries the error that actually caused it.
+        if(step_status == 0)
         {
-            const size_t     count         = bucketCount(b);
-            const hipError_t bucket_status = hipMemcpy(
-                host_bucket.data(), bucket_buffers[b], count * sizeof(T), hipMemcpyDeviceToHost);
-            recordHip(bucket_status);
-            if(bucket_status != hipSuccess)
+            for(size_t i = 0; i < kParamCount; ++i)
             {
-                // Same reason as above: comparing the staging buffer after a failed download
-                // scores stale data instead of reporting the download that actually broke.
-                continue;
+                check("broadcast_param",
+                      kParamIndexBase + i,
+                      static_cast<float>(contribution(step, /*rank=*/0, kParamIndexBase + i)),
+                      storageValueAsFloat(host_param[i]));
             }
-            for(size_t i = 0; i < count; ++i)
+
+            for(int b = 0; b < kGradientBuckets; ++b)
             {
-                if(storageValueAsFloat(host_bucket[i])
-                   != static_cast<float>(reducedContribution(step, nranks, bucketIndex(b, i))))
+                const size_t     count         = bucketCount(b);
+                const hipError_t bucket_status = hipMemcpy(host_bucket.data(),
+                                                           bucket_buffers[b],
+                                                           count * sizeof(T),
+                                                           hipMemcpyDeviceToHost);
+                recordHip(bucket_status);
+                if(bucket_status != hipSuccess)
                 {
-                    ++mismatches;
+                    // Same reason as above: comparing the staging buffer after a failed download
+                    // scores stale data instead of reporting the download that actually broke.
+                    continue;
+                }
+                for(size_t i = 0; i < count; ++i)
+                {
+                    const size_t index = bucketIndex(b, i);
+                    check("allreduce_bucket",
+                          index,
+                          static_cast<float>(reducedContribution(reduced_table, step, index)),
+                          storageValueAsFloat(host_bucket[i]));
                 }
             }
-        }
 
-        for(size_t i = 0; i < shard_count; ++i)
-        {
-            const size_t global_index = static_cast<size_t>(rank) * shard_count + i;
-            if(storageValueAsFloat(host_shard[i])
-               != static_cast<float>(reducedContribution(step, nranks, global_index)))
+            for(size_t i = 0; i < shard_count; ++i)
             {
-                ++mismatches;
+                const size_t index
+                    = kGradIndexBase + static_cast<size_t>(rank) * shard_count + i;
+                check("reducescatter_shard",
+                      index,
+                      static_cast<float>(reducedContribution(reduced_table, step, index)),
+                      storageValueAsFloat(host_shard[i]));
             }
-        }
 
-        for(size_t i = 0; i < total_grad; ++i)
-        {
-            if(storageValueAsFloat(host_full[i])
-               != static_cast<float>(reducedContribution(step, nranks, i)))
+            for(size_t i = 0; i < total_grad; ++i)
             {
-                ++mismatches;
+                const size_t index = kGradIndexBase + i;
+                check("allgather_grad_full",
+                      index,
+                      static_cast<float>(reducedContribution(reduced_table, step, index)),
+                      storageValueAsFloat(host_full[i]));
             }
-        }
 
-        for(size_t i = 0; i < kActivationCount; ++i)
-        {
-            if(storageValueAsFloat(host_activation[i])
-               != static_cast<float>(contribution(step, prev_rank, i)))
+            for(size_t i = 0; i < kActivationCount; ++i)
             {
-                ++mismatches;
+                check("p2p_activation",
+                      kActivationIndexBase + i,
+                      static_cast<float>(
+                          contribution(step, prev_rank, kActivationIndexBase + i)),
+                      storageValueAsFloat(host_activation[i]));
             }
-        }
 
-        // Only rank 0 receives the Reduce result; the others issued the call and have nothing to
-        // check, so validating their untouched recv buffer would fail for the wrong reason.
-        if(rank == 0)
-        {
-            for(size_t i = 0; i < kMetricCount; ++i)
+            // Only rank 0 receives the Reduce result; the others issued the call and have nothing
+            // to check, so validating their untouched recv buffer would fail for the wrong reason.
+            if(rank == 0)
             {
-                if(storageValueAsFloat(host_metric[i])
-                   != static_cast<float>(
-                       reducedContribution(step, nranks, kMetricIndexBase + i)))
+                for(size_t i = 0; i < kMetricCount; ++i)
                 {
-                    ++mismatches;
+                    const size_t index = kMetricIndexBase + i;
+                    check("reduce_metric",
+                          index,
+                          static_cast<float>(reducedContribution(reduced_table, step, index)),
+                          storageValueAsFloat(host_metric[i]));
                 }
             }
         }
@@ -1186,7 +1253,10 @@ void PersistentCommunicatorMPITest::runPersistentCommunicatorCase(ncclDataType_t
         recordNccl(ncclCommGetAsyncError(comm, &async_error));
         recordNccl(async_error);
 
-        EXPECT_EQ(size_t{0}, mismatches) << "rank " << rank;
+        EXPECT_EQ(size_t{0}, mismatches)
+            << "rank " << rank << ", first mismatch in phase "
+            << (first_phase != nullptr ? first_phase : "none") << " at payload index "
+            << first_index << ": expected " << first_expected << ", got " << first_actual;
         EXPECT_EQ(0, step_status) << "rank " << rank;
         ASSERT_MPI_TRUE(mismatches == 0 && step_status == 0);
     }
