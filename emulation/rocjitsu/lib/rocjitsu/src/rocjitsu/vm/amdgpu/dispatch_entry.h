@@ -377,6 +377,8 @@ struct DispatchEntry {
   uint16_t workgroup_size_y = 1;
   uint16_t workgroup_size_z = 1;
   uint64_t scratch_backing_addr = 0;
+  /// ROCr owns allocation and reclaim; never replace it with fallback backing.
+  bool runtime_managed_scratch = false;
   uint32_t private_segment_fixed_size = 0;
   /// Number of physical scratch scoreboard slots backed in each shader engine.
   /// Unlimited for dispatches that do not use the gfx1250 runtime scratch ABI.
