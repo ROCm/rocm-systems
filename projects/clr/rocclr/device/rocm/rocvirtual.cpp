@@ -3335,6 +3335,7 @@ void VirtualGPU::SubmitSvmDiscardBatchAsync(amd::SvmDiscardBatchAsyncCommand& co
   std::scoped_lock lock(execution());
   profilingBegin(command);
 
+  releaseGpuMemoryFence(kSkipCpuWait);
   auto wait_events = Barriers().WaitingSignal(HwQueueEngine::Unknown);
   hsa_signal_t active = Barriers().ActiveSignal(kInitSignalValueOne, timestamp_);
 

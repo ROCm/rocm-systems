@@ -2093,6 +2093,7 @@ memory:
   Unit_hipMemDiscardBatchAsync_LargeCount: *level_2
   Unit_hipMemDiscardBatchAsync_DiscardThenPrefetch: *level_2
   Unit_hipMemDiscardBatchAsync_StreamOrdering: *level_2
+  Unit_hipMemDiscardBatchAsync_Sync_Behavior: *level_2
   Unit_hipMemDiscardBatchAsync_SubrangeDiscard: *level_2
   Unit_hipMemDiscardBatchAsync_SamePointerTwice: *level_2
   Unit_hipMemDiscardBatchAsync_MinimalSize: *level_2

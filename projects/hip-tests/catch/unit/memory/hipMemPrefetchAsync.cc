@@ -62,11 +62,6 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsync_Basic_AllDevices) {
   ArrayFindIfNot(alloc1.ptr(), fill_value, count);
 }
 
-__global__ void WaitForHostRelease(volatile int* release) {
-  while (*release == 0) {
-  }
-}
-
 // The kernel spins until the host sets the release flag, so hipStreamQuery must report
 // hipErrorNotReady until that happens.
 HIP_TEST_CASE(Unit_hipMemPrefetchAsync_Sync_Behavior) {
@@ -86,10 +81,12 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsync_Sync_Behavior) {
 
   WaitForHostRelease<<<1, 1, 0, sg.stream()>>>(release.ptr());
   HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipMemPrefetchAsync(alloc.ptr(), kPageSize, hipCpuDeviceId, sg.stream()));
+
+  const auto prefetch_error =
+      hipMemPrefetchAsync(alloc.ptr(), kPageSize, hipCpuDeviceId, sg.stream());
 
   auto query_while_blocked = hipErrorNotReady;
-  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{1};
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds{100};
   while (query_while_blocked == hipErrorNotReady && std::chrono::steady_clock::now() < deadline) {
     query_while_blocked = hipStreamQuery(sg.stream());
   }
@@ -97,6 +94,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsync_Sync_Behavior) {
   __atomic_store_n(release.ptr(), 1, __ATOMIC_RELEASE);
   HIP_CHECK(hipStreamSynchronize(sg.stream()));
 
+  HIP_CHECK(prefetch_error);
   REQUIRE(query_while_blocked == hipErrorNotReady);
 }
 

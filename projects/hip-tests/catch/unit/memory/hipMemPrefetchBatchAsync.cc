@@ -44,11 +44,6 @@ __managed__ int g_managed_prefetch_data[kTestBufferElements];
     HIP_SKIP_TEST("Device does not support concurrent managed access");                            \
   }
 
-__global__ void WaitForHostRelease(volatile int* release) {
-  while (*release == 0) {
-  }
-}
-
 }  // namespace
 
 // Kernel to verify data integrity on device
@@ -324,12 +319,13 @@ HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_Sync_Behavior) {
 
   WaitForHostRelease<<<1, 1, 0, stream_guard.stream()>>>(release.ptr());
   HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipMemPrefetchBatchAsync(managed_ptrs.data(), buffer_sizes.data(), managed_ptrs.size(),
-                                     host_location.data(), location_indices.data(),
-                                     location_indices.size(), flags, stream_guard.stream()));
+
+  const auto prefetch_error = hipMemPrefetchBatchAsync(
+      managed_ptrs.data(), buffer_sizes.data(), managed_ptrs.size(), host_location.data(),
+      location_indices.data(), location_indices.size(), flags, stream_guard.stream());
 
   auto query_while_blocked = hipErrorNotReady;
-  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{1};
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds{100};
   while (query_while_blocked == hipErrorNotReady && std::chrono::steady_clock::now() < deadline) {
     query_while_blocked = hipStreamQuery(stream_guard.stream());
   }
@@ -337,6 +333,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_Sync_Behavior) {
   __atomic_store_n(release.ptr(), 1, __ATOMIC_RELEASE);
   HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
 
+  HIP_CHECK(prefetch_error);
   REQUIRE(query_while_blocked == hipErrorNotReady);
 }
 
