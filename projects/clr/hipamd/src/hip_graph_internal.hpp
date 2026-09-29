@@ -2186,7 +2186,7 @@ class GraphKernelNode : public GraphNode {
                                   hipFunction_t func, int devId) {
 
     const amd::Device* device = g_devices[devId]->devices()[0];
-    LaunchConfig config = MakeConfig(*pNodeParams, *device, clusterDim_);
+    const LaunchConfig config = MakeConfig(*pNodeParams, *device, clusterDim_);
     IHIP_RETURN_ONFAIL(config.Status(kUnlaunchableConfigRules));
 
     return ihipLaunchKernel_validate(func, config, pNodeParams->kernelParams, pNodeParams->extra,

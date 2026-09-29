@@ -326,7 +326,7 @@ hipError_t hipFuncSetSharedMemConfig(const void* func, hipSharedMemConfig config
 }
 
 hipError_t ihipLaunchKernel_validate(hipFunction_t f, const LaunchConfig& config,
-                                     void** kernelParams, void** extra, int deviceId,
+                                     void* const* kernelParams, void* const* extra, int deviceId,
                                      uint32_t params = 0) {
   if (f == nullptr) {
     LogPrintfError("%s", "Function passed is null");
@@ -377,7 +377,8 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const LaunchConfig& config
     int num_blocks = 0;
     int max_blocks_per_grid = 0;
     int best_block_size = 0;
-    int block_size = local.product();
+    // Safe to narrow: the launch bounds check above caps the workgroup at the kernel's max size.
+    const int block_size = static_cast<int>(local.product());
     hipError_t err = hip_impl::ihipOccupancyMaxActiveBlocksPerMultiprocessor(
         &num_blocks, &max_blocks_per_grid, &best_block_size, *device, f, block_size,
         config.sharedMemBytes32(), true);
@@ -449,7 +450,7 @@ hipError_t UpdateNumClustersFromKernel(const hip::Stream* stream, const amd::Ker
 
 // =================================================================================================
 hipError_t ihipLaunchKernelCommand(amd::Command*& command, hipFunction_t f, LaunchConfig& config,
-                                   hip::Stream* stream, void** kernelParams, void** extra,
+                                   hip::Stream* stream, void** kernelParams, void* const* extra,
                                    hipEvent_t startEvent = nullptr, hipEvent_t stopEvent = nullptr,
                                    uint32_t flags = 0, uint32_t params = 0, uint32_t gridId = 0,
                                    uint32_t numGrids = 0, uint64_t prevGridSum = 0,
@@ -512,7 +513,7 @@ hipError_t ihipLaunchKernelCommand(amd::Command*& command, hipFunction_t f, Laun
 }
 
 hipError_t ihipModuleLaunchKernel(hipFunction_t f, LaunchConfig& config, hipStream_t hStream,
-                                  void** kernelParams, void** extra,
+                                  void** kernelParams, void* const* extra,
                                   hipEvent_t startEvent, hipEvent_t stopEvent, uint32_t flags = 0,
                                   uint32_t params = 0, uint32_t gridId = 0, uint32_t numGrids = 0,
                                   uint64_t prevGridSum = 0, uint64_t allGridSum = 0,
