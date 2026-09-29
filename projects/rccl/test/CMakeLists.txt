@@ -714,7 +714,8 @@ if(BUILD_TESTS)
     add_executable(rccl-UnitTestsGinSdmaReduceScatterGpu gin/gin_sdma_reducescatter_gpu_test.cpp)
     set_source_files_properties(gin/gin_sdma_reducescatter_gpu_test.cpp PROPERTIES LANGUAGE CXX)
     target_include_directories(rccl-UnitTestsGinSdmaReduceScatterGpu PRIVATE
-      "${_gin_sdma_ag_hdr_dir}")
+      "${_gin_sdma_ag_hdr_dir}"
+      "${PROJECT_BINARY_DIR}/include") # generated rccl.h, for the gin_sdma_reduce.h types
     set(_gin_sdma_rs_gpu_offload "")
     foreach(_g IN LISTS GPU_TARGETS)
       if(_g)
