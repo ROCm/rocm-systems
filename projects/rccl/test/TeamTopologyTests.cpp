@@ -33,8 +33,11 @@ constexpr int kDualRank = 2;
 // Enumerators are 0..2, so 3 is the only non-enumerator still inside the type's [0,3] range; 99 would be UB.
 constexpr ncclCftTeamMode_t kInvalidCftMode = static_cast<ncclCftTeamMode_t>(3);
 
-// Non-zero rank and non-unit stride, so both terms of comm->rank + (rank - team.rank) * team.stride are exercised.
+// Non-zero rank and non-unit stride exercise the (rank - team.rank) * team.stride term; the base term is 0 at 1 rank.
 constexpr ncclTeam_t kOffsetTeam{/*nRanks=*/4, /*rank=*/2, /*stride=*/3};
+
+// Opt-in CI strictness: when set, a host with too few GPUs must fail the dual-rank test instead of silently skipping.
+constexpr const char* kRequireMultiGpuEnvVar = "UT_TEAM_TOPOLOGY_REQUIRE_MULTI_GPU";
 
 // Every slot is either nullptr or a comm that must be destroyed, so the destructor is safe on any exit path.
 struct CommResources {
@@ -210,6 +213,9 @@ void runCftHierLsaMultiRankDefectTest() {
     // cftMcSize stays 1 while lsaSize is 2, so CftMultimem must stay a singleton and not track the LSA team.
     expectTeamEquals(ncclTeamCftMultimem(resources.comms[rank]), 1, 0, 1);
 
+    // HIER_MULTIMEM must factor the flat team by cftMcSize, not lsaSize: at cftMcSize 1 that stays the identity.
+    expectTeamEquals(ncclTeamCft(resources.comms[rank], NCCL_CFT_TEAM_HIER_MULTIMEM), 1, 0, 1);
+
     // Only a rank-0 team leaves the base of base + (r - team.rank) * 1 exposed, so these pin lsaSelf and comm->rank.
     EXPECT_EQ(ncclTeamRankToLsa(resources.comms[rank], ncclTeam_t{/*nRanks=*/2, /*rank=*/0, /*stride=*/1}, 0), rank);
     EXPECT_EQ(ncclTeamRankToWorld(resources.comms[rank], ncclTeam_t{/*nRanks=*/2, /*rank=*/0, /*stride=*/1}, 0), rank);
@@ -269,6 +275,12 @@ TEST(TeamTopologyTests, RankToLsa_NoBoundsCheck_ExtrapolatesOutOfRange) {
 // Gate in the parent only: EnvVars reports 0 GPUs in a re-exec'd child, and a skipped child is scored as a pass.
 TEST(TeamTopologyTests, Cft_HierLsa_MultiRank_ReturnsEmptyTeam_PinsKnownDefect) {
   if (!isIsolatedChild() && getDetectedGpuCount() < kDualRank) {
+    // CI sets the strictness variable so this coverage cannot vanish into a green run on a 1-GPU node.
+    if (std::getenv(kRequireMultiGpuEnvVar) != nullptr) {
+      FAIL() << kRequireMultiGpuEnvVar << " is set, but this host reports " << getDetectedGpuCount()
+             << " visible GPU(s) and this test needs at least " << kDualRank << " to make lsaSize exceed 1. "
+             << "Run it on a multi-GPU node, or unset the variable to allow the skip.";
+    }
     GTEST_SKIP() << "This test requires at least 2 visible GPUs to make lsaSize exceed 1.";
   }
   // Only bites on the symmetric path: the ROCm non-symmetric path overwrites lsaSize with comm->localRanks anyway.
