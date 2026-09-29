@@ -383,22 +383,21 @@ inline int rcclComputeCheapPostSendFenceOff(int cudaArch, int64_t param, bool un
   return 1;
 }
 
-// gfx1250 SendRecv (ncclSend/ncclRecv only, not AlltoAll) LL128 message-size windows
-// for 4 GPU/node. 0 means this communicator has no auto window.
-// Inclusive: [rcclGfx1250SendRecvLl128MinBytes, max].
+// gfx1250 SendRecv (ncclSend/ncclRecv only, not AlltoAll) LL128 caps for
+// NCCL_P2P_LL128_ENABLE=1 on 4 GPU/node. 0 means this communicator has no window
+// (ENABLE=1 then uses NCCL_P2P_LL128_THRESHOLD). Inclusive: [0, max].
 // nNodes is unused: MNNVL folds multi-host gfx1250 into one NVL domain (comm->nNodes=1
 // and comm->localRanks=nRanks), so localRanks cannot tell 4 GPU/node hosts apart from
 // CPX or 1 GPU/node. Callers pass different nNodes meanings (physical hosts in init,
 // NVL domains in enqueue); key off nRanks 4 / 8 / 16 instead.
-constexpr ssize_t rcclGfx1250SendRecvLl128MinBytes = 4 << 10;
 inline ssize_t rcclGfx1250SendRecvLl128MaxBytes(int cudaArch, int nNodes, int nRanks) {
   if (cudaArch != 1250) return 0;
   // MNNVL folds multi-host gfx1250 into nNodes=1 (one NVL domain). 4 GPU/node
   // SendRecv windows are keyed off nRanks: 4 / 8 / 16.
   (void)nNodes;
-  if (nRanks == 4) return 1 << 20;     // 1 host, 4 KiB .. 1 MiB
-  if (nRanks == 8) return 512 << 10;   // 2 host, 4 KiB .. 512 KiB
-  if (nRanks == 16) return 256 << 10;  // 4 host, 4 KiB .. 256 KiB
+  if (nRanks == 4) return 1 << 20;     // 1 host, 0 .. 1 MiB
+  if (nRanks == 8) return 512 << 10;   // 2 host, 0 .. 512 KiB
+  if (nRanks == 16) return 256 << 10;  // 4 host, 0 .. 256 KiB
   return 0;
 }
 
@@ -406,30 +405,31 @@ inline ssize_t rcclGfx1250SendRecvLl128MaxBytes(int cudaArch, int nNodes, int nR
 #include "nccl_tuner.h"
 #endif
 
-// Protocol for one SendRecv dir on the gfx1250 auto window. bytes < 0 is a
+// Protocol for one SendRecv dir when ENABLE=1 and a window exists. bytes < 0 is a
 // no-op dir. Missing LL128 staging (hasLL128=false) falls back to SIMPLE, not
-// the other LL-family proto. hi <= 0 means no window (caller uses the threshold path).
-inline int rcclGfx1250SendRecvAutoProtocol(ssize_t bytes, ssize_t hi, bool hasLL, bool hasLL128) {
+// legacy LL. hi <= 0 means no window (caller uses the threshold path).
+inline int rcclGfx1250SendRecvEnableProtocol(ssize_t bytes, ssize_t hi, bool hasLL128) {
   if (bytes < 0 || hi <= 0) return NCCL_PROTO_SIMPLE;
-  if (bytes >= rcclGfx1250SendRecvLl128MinBytes && bytes <= hi && hasLL128) return NCCL_PROTO_LL128;
-  if (bytes < rcclGfx1250SendRecvLl128MinBytes && hasLL) return NCCL_PROTO_LL;
+  if (bytes <= hi && hasLL128) return NCCL_PROTO_LL128;
   return NCCL_PROTO_SIMPLE;
 }
 
 // One P2P kernel cannot mix LL and LL128 (ncclDevWorkP2p has no per-dir family).
-// SIMPLE + either latency proto is fine (sendProtoLL / recvProtoLL).
+// SIMPLE + either latency proto is fine (sendProtoLL / recvProtoLL). ENABLE=1
+// windows are [0, cap], so mixed sizes under the cap are both LL128.
 inline bool rcclP2pLlFamilyMix(int proto0, int proto1) {
   auto lat = [](int p) { return p == NCCL_PROTO_LL || p == NCCL_PROTO_LL128; };
   return lat(proto0) && lat(proto1) && proto0 != proto1;
 }
 
-// NET LL128 staging. ENABLE=1 is the all-P2P opt-in (any nRanks). ENABLE=-1 auto
-// windows need the buffers for internodal 8/16-rank 4 GPU/node. ENABLE=0 never
+// NET LL128 staging. ENABLE=1 needs the buffers for internodal gfx1250 (any nRanks).
+// Default ENABLE=-1 does not use LL128, so it does not auto-allocate. ENABLE=0 never
 // auto-allocates. allocEnv==1 is the explicit NCCL_ALLOC_P2P_NET_LL_BUFFERS=1.
 inline int rcclAllocP2pNetLLBuffers(int cudaArch, int nNodes, int nRanks, int64_t enable, int64_t allocEnv) {
+  (void)nNodes;
+  (void)nRanks;
   if (allocEnv == 1) return 1;
   if (cudaArch == 1250 && enable > 0) return 1;
-  if (enable < 0 && rcclGfx1250SendRecvLl128MaxBytes(cudaArch, nNodes, nRanks) > 0 && nRanks > 4) return 1;
   return 0;
 }
 #ifdef ENABLE_WARP_SPEED

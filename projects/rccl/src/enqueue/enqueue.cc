@@ -1274,10 +1274,11 @@ NCCL_PARAM(P2pLLThreshold, "P2P_LL_THRESHOLD", 4096);
 // warrants a higher threshold than legacy LL. 0 means no upper bound (use LL128 for all sizes
 // when the path is eligible).
 NCCL_PARAM(P2pLL128Threshold, "P2P_LL128_THRESHOLD", 16384);
-// gfx1250 P2P LL128 enablement. Default -1 = auto: SendRecv (not AlltoAll) uses LL128 in the
-// 4 GPU/node size windows in rcclGfx1250SendRecvLl128MaxBytes. 0 = off. 1 = opt-in for all P2P
-// send/recv (AlltoAll included) below NCCL_P2P_LL128_THRESHOLD, same as before. gfx942/gfx950
-// select LL128 via NCCL_ALLOC_P2P_NET_LL_BUFFERS and ignore this flag.
+// gfx1250 P2P LL128 enablement. Default -1: SendRecv stays on legacy LL up to
+// NCCL_P2P_LL_THRESHOLD (4 KiB/channel) then SIMPLE; no auto LL128. 0 = off.
+// 1 = SendRecv uses LL128 from 0 through rcclGfx1250SendRecvLl128MaxBytes
+// (4/8/16 ranks: 1 MiB / 512 KiB / 256 KiB); other rank counts and AlltoAll keep
+// the NCCL_P2P_LL128_THRESHOLD opt-in. gfx942/gfx950 ignore this flag.
 NCCL_PARAM(P2pLL128Enable, "P2P_LL128_ENABLE", -1);
 RCCL_PARAM(P2pNetThreshold, "P2P_NET_THRESHOLD", 131072);
 NCCL_PARAM(ChunkSize, "CHUNK_SIZE", 0);
@@ -1374,18 +1375,18 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   //     gfx1250 default-enables this in init).
   //   - gfx942/gfx950: NCCL_ALLOC_P2P_NET_LL_BUFFERS=1, which also stages the net LL128
   //     buffer for internodal P2P.
-  //   - gfx1250: NCCL_P2P_LL128_ENABLE=1 for all P2P below the threshold, or ENABLE=-1 (auto)
-  //     for SendRecv-only size windows (1-node 4 GPU: 4 KiB-1 MiB, 2-node 8 GPU: 4-512 KiB,
-  //     4-node 16 GPU: 4-256 KiB). Internodal still needs the LL128 staging buffer
-  //     (NCCL_ALLOC_P2P_NET_LL_BUFFERS=1, auto-set for those 2/4-node windows); if it is missing
-  //     the op falls back to SIMPLE.
+  //   - gfx1250: NCCL_P2P_LL128_ENABLE=1. SendRecv on 4/8/16 ranks uses LL128 from 0 through
+  //     rcclGfx1250SendRecvLl128MaxBytes (1 MiB / 512 KiB / 256 KiB). Other rank counts and
+  //     AlltoAll use NCCL_P2P_LL128_THRESHOLD. Default ENABLE=-1 stays on legacy LL then SIMPLE.
+  //     Internodal still needs the LL128 staging buffer (allocated when ENABLE=1); if it is
+  //     missing the op falls back to SIMPLE.
 #if defined(ENABLE_LL128)
   bool p2pLl128Gfx9 = (comm->cudaArch == 940 || comm->cudaArch == 950) && comm->allocP2pNetLLBuffers;
   bool p2pLl128Gfx1250 = (comm->cudaArch == 1250) && ncclParamP2pLL128Enable() > 0;
   bool useLL128OptIn = comm->topo->ll128Enabled && (p2pLl128Gfx9 || p2pLl128Gfx1250);
   ssize_t srLl128Hi[2] = {0, 0};
-  // Auto (ENABLE < 0) only. ENABLE=1 is the opt-in threshold path and must not take the window.
-  if (ncclParamP2pLL128Enable() < 0 && comm->topo->ll128Enabled) {
+  // ENABLE=1 SendRecv windows only. Default (ENABLE < 0) must not take LL128.
+  if (p2pLl128Gfx1250 && comm->topo->ll128Enabled) {
     for (int t = 0; t < 2; t++) {
       if (p2pTasks[t] && (p2pTasks[t]->collAPI == ncclFuncSend || p2pTasks[t]->collAPI == ncclFuncRecv ||
                           p2pTasks[t]->collAPI == ncclFuncSendRecv))
@@ -1462,45 +1463,21 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
       }
     }
 
-    // Select protocol. gfx1250 SendRecv on 4 GPU/node uses a message-size window (not per-channel):
-    // below 4 KiB legacy LL, 4 KiB through the topology max LL128, above that SIMPLE.
-    // Otherwise: at/below the latency threshold use LL128 (gfx9 + ALLOC, or gfx1250 ENABLE=1)
-    // or legacy LL, and SIMPLE above it. P2P_LL128_THRESHOLD=0 means no upper bound.
-    // Registered user buffers need SIMPLE for NET/IPC UBR (enqueue registers only then).
-    // ncclSend/ncclRecv stamp allowUB=true even when the pointer is not in the cache, so
-    // skip the auto window only when ncclRegFind hits. Otherwise every SendRecv would
-    // stay SIMPLE and the gfx1250 windows would never fire.
-    bool skipAutoLl128 = false;
-    if (p2pTasks[dir] && p2pTasks[dir]->allowUB && addrs[dir] && bytes[dir] > 0) {
-      struct ncclReg* reg = nullptr;
-      NCCLCHECKGOTO(ncclRegFind(comm, addrs[dir], bytes[dir], &reg), ret, cleanup);
-      skipAutoLl128 = reg != nullptr;
-    }
+    // Select protocol. gfx1250 ENABLE=1 SendRecv uses a message-size window (not per-channel):
+    // 0 through the topology max LL128, above that SIMPLE. Default ENABLE=-1 and ENABLE=0 stay
+    // on the threshold path: LL128 (gfx9 + ALLOC, or gfx1250 ENABLE=1 without a window) or
+    // legacy LL, then SIMPLE. P2P_LL128_THRESHOLD=0 means no upper bound. Protocol is
+    // f(bytes[dir]) so both ends of a link agree; do not key off this rank's register cache.
     if (bytes[dir] == -1) {
       protocol[dir] = NCCL_PROTO_SIMPLE;
-    } else if (srLl128Hi[dir] > 0 && !skipAutoLl128) {
-      protocol[dir] = rcclGfx1250SendRecvAutoProtocol(bytes[dir], srLl128Hi[dir], hasLL[dir], hasLL128[dir]);
+    } else if (srLl128Hi[dir] > 0) {
+      protocol[dir] = rcclGfx1250SendRecvEnableProtocol(bytes[dir], srLl128Hi[dir], hasLL128[dir]);
     } else {
       bool lat = useLL128OptIn ? hasLL128[dir] : hasLL[dir];
       ssize_t latencyThreshold = useLL128OptIn ? ncclParamP2pLL128Threshold() : ncclParamP2pLLThreshold();
       if (!(useLL128OptIn && latencyThreshold == 0)) lat &= bytes[dir] <= nChannels[dir] * latencyThreshold;
       protocol[dir] = lat ? (useLL128OptIn ? NCCL_PROTO_LL128 : NCCL_PROTO_LL) : NCCL_PROTO_SIMPLE;
     }
-  }
-
-  // One P2P kernel variant for both dirs (ncclDevWorkP2p has no per-dir LL vs LL128). Protocol
-  // stays f(bytes[dir]): send is to r+delta and recv is from r-delta, so this rank must not pick
-  // one link's framing from the other link's size. SIMPLE vs latency in one kernel is fine
-  // (sendProtoLL/recvProtoLL). Mixed LL and LL128 is not; split into two one-sided work items
-  // so each kernel is one family and each peer still sees the same bytes[dir].
-  if (bytes[0] != -1 && bytes[1] != -1 && rcclP2pLlFamilyMix(protocol[0], protocol[1])) {
-    struct ncclTaskP2p* recvOnly[2] = {p2pTasks[0], nullptr};
-    struct ncclTaskP2p* sendOnly[2] = {nullptr, p2pTasks[1]};
-    NCCLCHECK(addP2pToPlan(comm, plan, nChannelsMin, nChannelsMax, p2pRound, sendRank, nullptr, -1, recvRank,
-                           recvAddr, recvBytes, 0, recvOpCount, planTotalTasks, recvOnly));
-    NCCLCHECK(addP2pToPlan(comm, plan, nChannelsMin, nChannelsMax, p2pRound, sendRank, sendAddr, sendBytes, recvRank,
-                           nullptr, -1, sendOpCount, 0, planTotalTasks, sendOnly));
-    return ncclSuccess;
   }
 
   for (int dir = 0; dir < 2; dir++) { // 0=recv, 1=send

@@ -494,12 +494,11 @@ namespace RcclUnitTesting
   //     useLL128SendRecv = defined(ENABLE_LL128)
   //                        && comm->topo->ll128Enabled
   //                        && ( (cudaArch == 940 || 950) && allocP2pNetLLBuffers   // gfx942/gfx950
-  //                           || (cudaArch == 1250 && NCCL_P2P_LL128_ENABLE=1)     // gfx1250 opt-in
-  //                           || (cudaArch == 1250 && NCCL_P2P_LL128_ENABLE unset  // gfx1250 SendRecv auto
-  //                               && SendRecv 4ppn size window) );
+  //                           || (cudaArch == 1250 && NCCL_P2P_LL128_ENABLE=1) );  // gfx1250 opt-in
   //
-  // gfx1250 SendRecv auto windows (ENABLE default -1): 1-node 4 GPU 4 KiB-1 MiB, 2-node 8 GPU
-  // 4-512 KiB, 4-node 16 GPU 4-256 KiB. Tests that pin the legacy-LL path set ENABLE=0.
+  // gfx1250 default (ENABLE unset/-1): legacy LL then SIMPLE, no SendRecv LL128.
+  // ENABLE=1 SendRecv windows (4/8/16 ranks): 0 through 1 MiB / 512 KiB / 256 KiB.
+  // Tests that pin the legacy-LL path set ENABLE=0.
   //
   // ll128Enabled is required so P2P stays consistent with the comm's collective protocol choice: if
   // LL128 is not enabled for the comm, send/recv must not use it even with the opt-in flag set. For
@@ -536,7 +535,7 @@ namespace RcclUnitTesting
     // P2P and SHM left ENABLED so cross-GPU pairs use intranode connections, which always allocate
     // the LL staging buffer -> legacy LL is the deterministic below-threshold choice.
     setenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "0", 1); // force useLL128SendRecv=false even on gfx942/gfx950
-    setenv("NCCL_P2P_LL128_ENABLE", "0", 1);         // disable gfx1250 SendRecv auto windows
+    setenv("NCCL_P2P_LL128_ENABLE", "0", 1);         // disable gfx1250 LL128
     setenv("NCCL_MAX_P2P_NCHANNELS", "1", 1);        // single channel -> deterministic per-channel threshold
     setenv("NCCL_P2P_LL_THRESHOLD", "16384", 1);     // pin legacy-LL threshold to the 16 KiB boundary the sweep straddles
     std::string const debugGlob = "/tmp/rccl_legacy_ll_" + std::to_string(getpid()) + ".*";
@@ -568,7 +567,7 @@ namespace RcclUnitTesting
     setenv("NCCL_SHM_DISABLE", "1", 1);              // disable SHM so send/recv falls through to NET
     PinNetLoopbackTransport();
     setenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "0", 1); // disabled case
-    setenv("NCCL_P2P_LL128_ENABLE", "0", 1);         // disable gfx1250 SendRecv auto windows
+    setenv("NCCL_P2P_LL128_ENABLE", "0", 1);         // disable gfx1250 LL128
     setenv("NCCL_MAX_P2P_NCHANNELS", "1", 1);        // single channel -> deterministic per-channel threshold
     setenv("NCCL_P2P_LL_THRESHOLD", "16384", 1);     // legacy-LL threshold governs when the LL128 path is off
     // Capture the per-op protocol selection so we can assert LL128/SIMPLE were used (see helper).
@@ -607,7 +606,7 @@ namespace RcclUnitTesting
     PinNetLoopbackTransport();
     setenv("RCCL_LL128_FORCE_ENABLE", "1", 1);       // ll128Enabled=true (required by the P2P LL128 gate)
     setenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "1", 1); // enabled case
-    setenv("NCCL_P2P_LL128_ENABLE", "1", 1);         // gfx1250: opt-in, not the SendRecv auto window
+    setenv("NCCL_P2P_LL128_ENABLE", "1", 1);         // gfx1250: LL128 opt-in (2-GPU sweeps use the threshold path)
     setenv("NCCL_MAX_P2P_NCHANNELS", "1", 1);        // single channel -> deterministic per-channel threshold
     setenv("NCCL_P2P_LL128_THRESHOLD", "16384", 1);  // pin LL128 threshold to the 16 KiB boundary the sweep straddles
     // Capture the per-op protocol selection so we can assert LL128 was actually chosen (see helper).
@@ -651,7 +650,7 @@ namespace RcclUnitTesting
   {
     // ll128Enabled left at its gfx942/gfx950 default (off): RCCL_LL128_FORCE_ENABLE is NOT set.
     setenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "1", 1); // P2P opt-in ON, but ll128Enabled off -> no LL128
-    setenv("NCCL_P2P_LL128_ENABLE", "0", 1);         // disable gfx1250 SendRecv auto windows
+    setenv("NCCL_P2P_LL128_ENABLE", "0", 1);         // disable gfx1250 LL128
     setenv("NCCL_MAX_P2P_NCHANNELS", "1", 1);        // single channel -> deterministic per-channel threshold
     setenv("NCCL_P2P_LL_THRESHOLD", "16384", 1);     // legacy-LL threshold governs the fallback path
     std::string const debugGlob = "/tmp/rccl_ll128_disabled_gate_" + std::to_string(getpid()) + ".*";
@@ -686,7 +685,7 @@ namespace RcclUnitTesting
     // below off useLL128SendRecv stays false.
     setenv("RCCL_LL128_FORCE_ENABLE", "1", 1);       // force comm->topo->ll128Enabled = true
     setenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "0", 1); // P2P LL128 opt-in OFF -> useLL128SendRecv=false
-    setenv("NCCL_P2P_LL128_ENABLE", "0", 1);         // disable gfx1250 SendRecv auto windows
+    setenv("NCCL_P2P_LL128_ENABLE", "0", 1);         // disable gfx1250 LL128
     setenv("NCCL_MAX_P2P_NCHANNELS", "1", 1);        // single channel -> deterministic per-channel threshold
     setenv("NCCL_P2P_LL_THRESHOLD", "16384", 1);     // legacy-LL threshold governs the fallback path
     std::string const debugGlob = "/tmp/rccl_ll128_indep_" + std::to_string(getpid()) + ".*";
@@ -731,7 +730,7 @@ namespace RcclUnitTesting
     PinNetLoopbackTransport();
     setenv("RCCL_LL128_FORCE_ENABLE", "1", 1);       // ll128Enabled=true (required by the P2P LL128 gate)
     setenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "1", 1); // enable the LL128 staging buffer
-    setenv("NCCL_P2P_LL128_ENABLE", "1", 1);         // gfx1250: opt-in, not the SendRecv auto window
+    setenv("NCCL_P2P_LL128_ENABLE", "1", 1);         // gfx1250: LL128 opt-in (2-GPU sweeps use the threshold path)
     setenv("NCCL_MAX_P2P_NCHANNELS", "1", 1);        // single channel -> deterministic per-channel threshold
     setenv("NCCL_P2P_LL_THRESHOLD", "0", 1);         // legacy-LL knob at 0: must NOT affect the LL128 path
     setenv("NCCL_P2P_LL128_THRESHOLD", "16384", 1);  // LL128 knob governs -> LL128 below 16 KiB
@@ -770,7 +769,7 @@ namespace RcclUnitTesting
   TEST(SendRecv, SeparateThresholdLegacyLLUsesLLKnob)
   {
     setenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "0", 1); // force useLL128SendRecv=false even on gfx942/gfx950
-    setenv("NCCL_P2P_LL128_ENABLE", "0", 1);         // disable gfx1250 SendRecv auto windows
+    setenv("NCCL_P2P_LL128_ENABLE", "0", 1);         // disable gfx1250 LL128
     setenv("NCCL_MAX_P2P_NCHANNELS", "1", 1);        // single channel -> deterministic per-channel threshold
     setenv("NCCL_P2P_LL128_THRESHOLD", "0", 1);      // LL128 knob at 0: must NOT affect the legacy-LL path
     setenv("NCCL_P2P_LL_THRESHOLD", "16384", 1);     // legacy-LL knob governs -> legacy LL below 16 KiB
@@ -895,40 +894,64 @@ namespace RcclUnitTesting
     unsetenv("RCCL_ENABLE_INTRANET");
   }
 
-  // gfx1250 auto windows (ENABLE unset): 4/8/16 ranks pick LL below 4 KiB, LL128 in the
-  // window, SIMPLE above it. Host table tests cannot see enqueue selection; this scrapes
-  // NCCL_DEBUG COLL on a 4ppn-shaped comm.
-  TEST(SendRecv, Gfx1250AutoWindowSelectsLL128)
+  static bool RunGfx1250FourRankRing(TestBed& testBed, int const sendBytes[4], int const recvBytes[4])
+  {
+    int const numGpus = 4;
+    const std::vector<int>& gpuPriorityOrder = testBed.ev.GetGpuPriorityOrder();
+    testBed.InitComms(TestBed::GetDeviceIdsList(1, numGpus, 1, gpuPriorityOrder), {2},
+                      testBed.GetNumStreamsPerGroup(1, 2), 1);
+    if (::testing::Test::HasFatalFailure()) return false;
+    OptionalColArgs options;
+    bool isCorrect = true;
+    for (int r = 0; r < numGpus; ++r) {
+      options.root = (r + 1) % numGpus;
+      testBed.SetCollectiveArgs(ncclCollSend, ncclInt8, sendBytes[r], sendBytes[r], options, 0, 0, r);
+      testBed.AllocateMem(false, false, 0, 0, r);
+      testBed.PrepareData(0, 0, r);
+      options.root = (r + numGpus - 1) % numGpus;
+      testBed.SetCollectiveArgs(ncclCollRecv, ncclInt8, recvBytes[r], recvBytes[r], options, 1, 0, r);
+      testBed.AllocateMem(false, false, 0, 1, r);
+      testBed.PrepareData(0, 1, r);
+    }
+    testBed.ExecuteCollectives({0, 1, 2, 3}, 0);
+    for (int r = 0; r < numGpus && isCorrect; ++r) {
+      testBed.ValidateResults(isCorrect, 0, 0, r);
+      testBed.ValidateResults(isCorrect, 0, 1, r);
+    }
+    testBed.DestroyComms();
+    testBed.Finalize();
+    return isCorrect;
+  }
+
+  // Default ENABLE=-1: legacy LL below P2P_LL_THRESHOLD, SIMPLE above. No auto LL128.
+  TEST(SendRecv, Gfx1250DefaultStaysLlThenSimple)
   {
     if (!DeviceIsGfx1250()) {
-      GTEST_SKIP() << "Skipping... gfx1250 SendRecv auto windows are gfx1250-only.";
+      GTEST_SKIP() << "Skipping... gfx1250 SendRecv default path is gfx1250-only.";
     }
     unsetenv("NCCL_P2P_LL128_ENABLE");
-    std::string const debugGlob = "/tmp/rccl_gfx1250_auto_win_" + std::to_string(getpid()) + ".*";
+    std::string const debugGlob = "/tmp/rccl_gfx1250_default_" + std::to_string(getpid()) + ".*";
     RemoveGlobbedFiles(debugGlob);
     setenv("NCCL_DEBUG", "INFO", 1);
     setenv("NCCL_DEBUG_SUBSYS", "COLL", 1);
-    setenv("NCCL_DEBUG_FILE", ("/tmp/rccl_gfx1250_auto_win_" + std::to_string(getpid()) + ".%p").c_str(), 1);
+    setenv("NCCL_DEBUG_FILE", ("/tmp/rccl_gfx1250_default_" + std::to_string(getpid()) + ".%p").c_str(), 1);
     {
       TestBed testBed;
-      if (testBed.ev.maxGpus != 4 && testBed.ev.maxGpus != 8 && testBed.ev.maxGpus != 16) {
+      int numGpus = testBed.ev.maxGpus;
+      if (numGpus < 2) {
         testBed.Finalize();
         RemoveGlobbedFiles(debugGlob);
         unsetenv("NCCL_DEBUG_FILE");
         unsetenv("NCCL_DEBUG_SUBSYS");
         unsetenv("NCCL_DEBUG");
-        GTEST_SKIP() << "Skipping... auto windows key off nRanks 4/8/16 (detected "
-                     << testBed.ev.maxGpus << " GPUs).";
+        GTEST_SKIP() << "Skipping... default protocol scrape needs 2 GPUs (detected " << numGpus << ").";
       }
-      int numGpus = testBed.ev.maxGpus;
       const std::vector<int>& gpuPriorityOrder = testBed.ev.GetGpuPriorityOrder();
-      testBed.InitComms(TestBed::GetDeviceIdsList(1, numGpus, 1, gpuPriorityOrder), {1},
+      testBed.InitComms(TestBed::GetDeviceIdsList(1, 2, 1, gpuPriorityOrder), {1},
                         testBed.GetNumStreamsPerGroup(1, 1), 1);
       if (::testing::Test::HasFatalFailure()) return;
 
       OptionalColArgs options;
-      // int8 so element count is the byte size. 2 KiB = LL, 16 KiB = LL128 (in every window),
-      // 2 MiB = SIMPLE (above the 1 MiB / 512 KiB / 256 KiB caps).
       std::vector<int> const numElements = {2048, 16384, 1 << 21};
       bool isCorrect = true;
       for (int numIdx = 0; numIdx < (int)numElements.size() && isCorrect; ++numIdx) {
@@ -950,31 +973,95 @@ namespace RcclUnitTesting
       testBed.DestroyComms();
       testBed.Finalize();
     }
-    bool const sawLL     = DebugLogsContainProtocol(debugGlob, "LL");
-    bool const sawLL128  = DebugLogsContainProtocol(debugGlob, "LL128");
-    bool const sawSimple = DebugLogsContainProtocol(debugGlob, "Simple");
-    EXPECT_TRUE(sawLL) << "2 KiB should stay legacy LL below the 4 KiB floor";
-    EXPECT_TRUE(sawLL128) << "16 KiB should take the gfx1250 SendRecv auto LL128 window";
-    EXPECT_TRUE(sawSimple) << "2 MiB should be SIMPLE above the auto-window cap";
+    EXPECT_TRUE(DebugLogsContainProtocol(debugGlob, "LL")) << "2 KiB should stay legacy LL on default";
+    EXPECT_FALSE(DebugLogsContainProtocol(debugGlob, "LL128")) << "default ENABLE=-1 must not select LL128";
+    EXPECT_TRUE(DebugLogsContainProtocol(debugGlob, "Simple")) << "16 KiB and 2 MiB should be SIMPLE on default";
     RemoveGlobbedFiles(debugGlob);
     unsetenv("NCCL_DEBUG_FILE");
     unsetenv("NCCL_DEBUG_SUBSYS");
     unsetenv("NCCL_DEBUG");
   }
 
-  // Argus: 4 ranks, rank 0 recvs 2 KiB (LL) and sends 8 KiB (LL128) while rank 1's 8 KiB recv
-  // is not mixed. Demoting the mixed round made rank 0 write LL and rank 1 poll LL128.
-  TEST(SendRecv, Gfx1250MixedRoundKeepsPeerFraming)
+  // ENABLE=1: SendRecv LL128 from 0 through the nRanks cap, SIMPLE above it.
+  TEST(SendRecv, Gfx1250Enable1UsesLl128FromZeroToCap)
   {
     if (!DeviceIsGfx1250()) {
-      GTEST_SKIP() << "Skipping... gfx1250 SendRecv auto windows are gfx1250-only.";
+      GTEST_SKIP() << "Skipping... gfx1250 ENABLE=1 windows are gfx1250-only.";
     }
-    unsetenv("NCCL_P2P_LL128_ENABLE");
-    std::string const debugGlob = "/tmp/rccl_gfx1250_mixed_round_" + std::to_string(getpid()) + ".*";
+    setenv("NCCL_P2P_LL128_ENABLE", "1", 1);
+    std::string const debugGlob = "/tmp/rccl_gfx1250_enable1_win_" + std::to_string(getpid()) + ".*";
     RemoveGlobbedFiles(debugGlob);
     setenv("NCCL_DEBUG", "INFO", 1);
     setenv("NCCL_DEBUG_SUBSYS", "COLL", 1);
-    setenv("NCCL_DEBUG_FILE", ("/tmp/rccl_gfx1250_mixed_round_" + std::to_string(getpid()) + ".%p").c_str(), 1);
+    setenv("NCCL_DEBUG_FILE", ("/tmp/rccl_gfx1250_enable1_win_" + std::to_string(getpid()) + ".%p").c_str(), 1);
+    {
+      TestBed testBed;
+      if (testBed.ev.maxGpus != 4 && testBed.ev.maxGpus != 8 && testBed.ev.maxGpus != 16) {
+        testBed.Finalize();
+        RemoveGlobbedFiles(debugGlob);
+        unsetenv("NCCL_DEBUG_FILE");
+        unsetenv("NCCL_DEBUG_SUBSYS");
+        unsetenv("NCCL_DEBUG");
+        unsetenv("NCCL_P2P_LL128_ENABLE");
+        GTEST_SKIP() << "Skipping... ENABLE=1 windows key off nRanks 4/8/16 (detected "
+                     << testBed.ev.maxGpus << " GPUs).";
+      }
+      int numGpus = testBed.ev.maxGpus;
+      const std::vector<int>& gpuPriorityOrder = testBed.ev.GetGpuPriorityOrder();
+      testBed.InitComms(TestBed::GetDeviceIdsList(1, numGpus, 1, gpuPriorityOrder), {1},
+                        testBed.GetNumStreamsPerGroup(1, 1), 1);
+      if (::testing::Test::HasFatalFailure()) return;
+
+      OptionalColArgs options;
+      std::vector<int> const numElements = {2048, 16384, 1 << 21};
+      bool isCorrect = true;
+      for (int numIdx = 0; numIdx < (int)numElements.size() && isCorrect; ++numIdx) {
+        int n = numElements[numIdx];
+        options.root = 1;
+        testBed.SetCollectiveArgs(ncclCollSend, ncclInt8, n, n, options, 0, 0, 0);
+        testBed.AllocateMem(false, false, 0, 0, 0);
+        testBed.PrepareData(0, 0, 0);
+        options.root = 0;
+        testBed.SetCollectiveArgs(ncclCollRecv, ncclInt8, n, n, options, 0, 0, 1);
+        testBed.AllocateMem(false, false, 0, 0, 1);
+        testBed.PrepareData(0, 0, 1);
+        testBed.ExecuteCollectives({0, 1}, 0);
+        testBed.ValidateResults(isCorrect, 0, 0, 1);
+        testBed.DeallocateMem(0, 0, 1);
+        testBed.DeallocateMem(0, 0, 0);
+      }
+      EXPECT_TRUE(isCorrect);
+      testBed.DestroyComms();
+      testBed.Finalize();
+    }
+    EXPECT_TRUE(DebugLogsContainNeedle(debugGlob, "protocol=LL128 dir=send bytes=2048"))
+      << "ENABLE=1 2 KiB must be LL128 (window starts at 0, not 4 KiB)";
+    EXPECT_TRUE(DebugLogsContainNeedle(debugGlob, "protocol=LL128 dir=send bytes=16384"))
+      << "ENABLE=1 16 KiB is inside every 4/8/16-rank cap";
+    EXPECT_TRUE(DebugLogsContainProtocol(debugGlob, "Simple"))
+      << "2 MiB is above the 1 MiB / 512 KiB / 256 KiB caps";
+    EXPECT_FALSE(DebugLogsContainNeedle(debugGlob, "protocol=LL dir=send bytes=2048"))
+      << "a 4 KiB LL floor would leave 2 KiB on legacy LL";
+    RemoveGlobbedFiles(debugGlob);
+    unsetenv("NCCL_DEBUG_FILE");
+    unsetenv("NCCL_DEBUG_SUBSYS");
+    unsetenv("NCCL_DEBUG");
+    unsetenv("NCCL_P2P_LL128_ENABLE");
+  }
+
+  // Argus: fully mixed ring send {2KiB, 8KiB, 2KiB, 8KiB}. Splitting LL+LL128 into
+  // recv-then-send batches deadlocks. ENABLE=1 keeps both sizes LL128 in one kernel.
+  TEST(SendRecv, Gfx1250Enable1AlternatingRingDoesNotHang)
+  {
+    if (!DeviceIsGfx1250()) {
+      GTEST_SKIP() << "Skipping... gfx1250 ENABLE=1 mixed ring is gfx1250-only.";
+    }
+    setenv("NCCL_P2P_LL128_ENABLE", "1", 1);
+    std::string const debugGlob = "/tmp/rccl_gfx1250_alt_ring_" + std::to_string(getpid()) + ".*";
+    RemoveGlobbedFiles(debugGlob);
+    setenv("NCCL_DEBUG", "INFO", 1);
+    setenv("NCCL_DEBUG_SUBSYS", "COLL", 1);
+    setenv("NCCL_DEBUG_FILE", ("/tmp/rccl_gfx1250_alt_ring_" + std::to_string(getpid()) + ".%p").c_str(), 1);
     {
       TestBed testBed;
       if (testBed.ev.maxGpus < 4) {
@@ -983,109 +1070,42 @@ namespace RcclUnitTesting
         unsetenv("NCCL_DEBUG_FILE");
         unsetenv("NCCL_DEBUG_SUBSYS");
         unsetenv("NCCL_DEBUG");
-        GTEST_SKIP() << "Skipping... mixed-round ring needs 4 GPUs (detected " << testBed.ev.maxGpus << ").";
+        unsetenv("NCCL_P2P_LL128_ENABLE");
+        GTEST_SKIP() << "Skipping... Argus mixed ring needs 4 GPUs (detected " << testBed.ev.maxGpus << ").";
       }
-      int const numGpus = 4;
-      const std::vector<int>& gpuPriorityOrder = testBed.ev.GetGpuPriorityOrder();
-      testBed.InitComms(TestBed::GetDeviceIdsList(1, numGpus, 1, gpuPriorityOrder), {2},
-                        testBed.GetNumStreamsPerGroup(1, 2), 1);
-      if (::testing::Test::HasFatalFailure()) return;
-
-      // Ring send to +1, recv from -1. Rank 0 send 8 KiB recv 2 KiB; rank 3 send 2 KiB recv 8 KiB;
-      // ranks 1-2 send/recv 8 KiB.
-      int const sendBytes[4] = {8192, 8192, 8192, 2048};
-      int const recvBytes[4] = {2048, 8192, 8192, 8192};
-      OptionalColArgs options;
-      bool isCorrect = true;
-      for (int r = 0; r < numGpus; ++r) {
-        options.root = (r + 1) % numGpus;
-        testBed.SetCollectiveArgs(ncclCollSend, ncclInt8, sendBytes[r], sendBytes[r], options, 0, 0, r);
-        testBed.AllocateMem(false, false, 0, 0, r);
-        testBed.PrepareData(0, 0, r);
-        options.root = (r + numGpus - 1) % numGpus;
-        testBed.SetCollectiveArgs(ncclCollRecv, ncclInt8, recvBytes[r], recvBytes[r], options, 1, 0, r);
-        testBed.AllocateMem(false, false, 0, 1, r);
-        testBed.PrepareData(0, 1, r);
-      }
-      testBed.ExecuteCollectives({0, 1, 2, 3}, 0);
-      for (int r = 0; r < numGpus && isCorrect; ++r) {
-        testBed.ValidateResults(isCorrect, 0, 0, r);
-        testBed.ValidateResults(isCorrect, 0, 1, r);
-      }
-      EXPECT_TRUE(isCorrect);
-      testBed.DestroyComms();
-      testBed.Finalize();
+      int const sendBytes[4] = {2048, 8192, 2048, 8192};
+      int const recvBytes[4] = {8192, 2048, 8192, 2048};
+      EXPECT_TRUE(RunGfx1250FourRankRing(testBed, sendBytes, recvBytes));
     }
-    EXPECT_TRUE(DebugLogsContainNeedle(debugGlob, "protocol=LL128 dir=send bytes=8192"))
-      << "8 KiB send must stay LL128; demoting the mixed rank would write protocol=LL dir=send bytes=8192";
-    EXPECT_TRUE(DebugLogsContainNeedle(debugGlob, "protocol=LL128 dir=recv bytes=8192"))
-      << "peer 8 KiB recv must stay LL128 so it polls the same framing the sender writes";
-    EXPECT_TRUE(DebugLogsContainNeedle(debugGlob, "protocol=LL dir=recv bytes=2048"))
-      << "2 KiB recv must stay legacy LL";
-    EXPECT_TRUE(DebugLogsContainNeedle(debugGlob, "protocol=LL dir=send bytes=2048"))
-      << "2 KiB send must stay legacy LL";
-    EXPECT_FALSE(DebugLogsContainNeedle(debugGlob, "protocol=LL dir=send bytes=8192"))
-      << "demote would make the 8 KiB send LL while the peer still recvs LL128";
-    EXPECT_FALSE(DebugLogsContainNeedle(debugGlob, "protocol=LL128 dir=recv bytes=2048"))
-      << "promote would make the 2 KiB recv LL128 while the peer still sends LL";
+    EXPECT_TRUE(DebugLogsContainNeedle(debugGlob, "protocol=LL128 dir=send bytes=2048"));
+    EXPECT_TRUE(DebugLogsContainNeedle(debugGlob, "protocol=LL128 dir=send bytes=8192"));
+    EXPECT_TRUE(DebugLogsContainNeedle(debugGlob, "protocol=LL128 dir=recv bytes=2048"));
+    EXPECT_TRUE(DebugLogsContainNeedle(debugGlob, "protocol=LL128 dir=recv bytes=8192"));
+    EXPECT_FALSE(DebugLogsContainNeedle(debugGlob, "protocol=LL dir=send bytes=2048"));
+    EXPECT_FALSE(DebugLogsContainNeedle(debugGlob, "protocol=LL dir=recv bytes=2048"));
     RemoveGlobbedFiles(debugGlob);
     unsetenv("NCCL_DEBUG_FILE");
     unsetenv("NCCL_DEBUG_SUBSYS");
     unsetenv("NCCL_DEBUG");
+    unsetenv("NCCL_P2P_LL128_ENABLE");
   }
 
-  // Registered in-window SendRecv must skip the auto LL128 window so NET/IPC UBR
-  // can take SIMPLE. 512 KiB is LL128 on the 4-rank window, SIMPLE on the
-  // threshold path (above nChannels*P2P_LL_THRESHOLD for typical P2P channel counts).
-  TEST(SendRecv, Gfx1250RegisteredInWindowSkipsAutoLl128)
+  // Default mixed ring must complete: 2 KiB stays LL, 8 KiB is SIMPLE, which one kernel can mix.
+  TEST(SendRecv, Gfx1250DefaultAlternatingRingCompletes)
   {
     if (!DeviceIsGfx1250()) {
-      GTEST_SKIP() << "Skipping... gfx1250 SendRecv auto windows are gfx1250-only.";
+      GTEST_SKIP() << "Skipping... gfx1250 default mixed ring is gfx1250-only.";
     }
     unsetenv("NCCL_P2P_LL128_ENABLE");
-    std::string const debugGlob = "/tmp/rccl_gfx1250_ubr_skip_" + std::to_string(getpid()) + ".*";
-    RemoveGlobbedFiles(debugGlob);
-    setenv("NCCL_DEBUG", "INFO", 1);
-    setenv("NCCL_DEBUG_SUBSYS", "COLL", 1);
-    setenv("NCCL_DEBUG_FILE", ("/tmp/rccl_gfx1250_ubr_skip_" + std::to_string(getpid()) + ".%p").c_str(), 1);
     {
       TestBed testBed;
-      if (testBed.ev.maxGpus < 2) {
+      if (testBed.ev.maxGpus < 4) {
         testBed.Finalize();
-        RemoveGlobbedFiles(debugGlob);
-        unsetenv("NCCL_DEBUG_FILE");
-        unsetenv("NCCL_DEBUG_SUBSYS");
-        unsetenv("NCCL_DEBUG");
-        GTEST_SKIP() << "Skipping... registered skip needs 2 GPUs (detected " << testBed.ev.maxGpus << ").";
+        GTEST_SKIP() << "Skipping... mixed ring needs 4 GPUs (detected " << testBed.ev.maxGpus << ").";
       }
-      int const n = 512 << 10;
-      const std::vector<int>& gpuPriorityOrder = testBed.ev.GetGpuPriorityOrder();
-      testBed.InitComms(TestBed::GetDeviceIdsList(1, 2, 1, gpuPriorityOrder), {1},
-                        testBed.GetNumStreamsPerGroup(1, 1), 1);
-      if (::testing::Test::HasFatalFailure()) return;
-      OptionalColArgs options;
-      options.root = 1;
-      testBed.SetCollectiveArgs(ncclCollSend, ncclInt8, n, n, options, 0, 0, 0);
-      testBed.AllocateMem(false, false, 0, 0, 0, true);
-      testBed.PrepareData(0, 0, 0);
-      options.root = 0;
-      testBed.SetCollectiveArgs(ncclCollRecv, ncclInt8, n, n, options, 0, 0, 1);
-      testBed.AllocateMem(false, false, 0, 0, 1, true);
-      testBed.PrepareData(0, 0, 1);
-      testBed.ExecuteCollectives({0, 1}, 0);
-      bool isCorrect = true;
-      testBed.ValidateResults(isCorrect, 0, 0, 1);
-      EXPECT_TRUE(isCorrect);
-      testBed.DestroyComms();
-      testBed.Finalize();
+      int const sendBytes[4] = {2048, 8192, 2048, 8192};
+      int const recvBytes[4] = {8192, 2048, 8192, 2048};
+      EXPECT_TRUE(RunGfx1250FourRankRing(testBed, sendBytes, recvBytes));
     }
-    EXPECT_FALSE(DebugLogsContainNeedle(debugGlob, "protocol=LL128 dir=send bytes=524288"))
-      << "registered 512 KiB must skip the auto LL128 window";
-    EXPECT_FALSE(DebugLogsContainNeedle(debugGlob, "protocol=LL128 dir=recv bytes=524288"))
-      << "registered 512 KiB recv must skip the auto LL128 window";
-    RemoveGlobbedFiles(debugGlob);
-    unsetenv("NCCL_DEBUG_FILE");
-    unsetenv("NCCL_DEBUG_SUBSYS");
-    unsetenv("NCCL_DEBUG");
   }
 }

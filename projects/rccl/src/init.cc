@@ -1979,7 +1979,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   }
   // Initialize num P2P LL buffers for this communicator. gfx1250 internodal LL128 needs the
   // NET staging buffer even when NCCL_ALLOC_P2P_NET_LL_BUFFERS is unset: ENABLE=1 is the
-  // all-P2P opt-in (any nRanks), ENABLE=-1 auto-windows need it for 8/16-rank 4 GPU/node.
+  // opt-in (any nRanks). Default ENABLE=-1 does not use LL128, so it does not auto-allocate.
   comm->allocP2pNetLLBuffers =
     rcclAllocP2pNetLLBuffers(comm->cudaArch, nNodes, nranks, ncclParamP2pLL128Enable(),
                              ncclParamAllocP2pNetLLBuffers());

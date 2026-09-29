@@ -958,8 +958,8 @@ inline int ncclDevFuncId(int coll, int devRedOp, int type, int algo, int proto, 
 }
 
 // Selects the SendRecv kernel variant: useLL128 -> the LL128 latency kernel (reg=1,
-// gfx942/gfx950 via NCCL_ALLOC_P2P_NET_LL_BUFFERS, gfx1250 via NCCL_P2P_LL128_ENABLE
-// or the SendRecv 4 GPU/node size windows),
+// gfx942/gfx950 via NCCL_ALLOC_P2P_NET_LL_BUFFERS, gfx1250 via NCCL_P2P_LL128_ENABLE=1),
+// otherwise the legacy LL kernel (reg=0). Keep in sync with reg_values_of("SendRecv")
 // otherwise the legacy LL kernel (reg=0). Keep in sync with reg_values_of("SendRecv")
 // in the device codegen.
 inline int ncclDevFuncId_P2p(bool useLL128 = false) {
