@@ -2473,8 +2473,10 @@ uint64_t Device::hostVmemAlloc(size_t size, uint64_t flags, int numaNode) const 
 }
 
 bool Device::getVmmAllocInfo(uint64_t hsa_handle, amd::Device::VmmLocationType* location_type,
-                             size_t* size) const {
-  if (location_type == nullptr || size == nullptr || hsa_handle == 0) return false;
+                             int* device_id, size_t* size) const {
+  if (location_type == nullptr || device_id == nullptr || size == nullptr || hsa_handle == 0) {
+    return false;
+  }
 
   // Enhancement entry point: an older ROCr does not export it. Report failure so
   // the caller keeps its legacy device/size-zero behaviour.
@@ -2501,6 +2503,18 @@ bool Device::getVmmAllocInfo(uint64_t hsa_handle, amd::Device::VmmLocationType* 
   *size = info.alloc_size;
   *location_type = (dev_type == HSA_DEVICE_TYPE_CPU) ? amd::Device::VmmLocationType::kHost
                                                      : amd::Device::VmmLocationType::kDevice;
+
+  // Host memory is not device-indexed. For device memory report the owning GPU
+  // rather than whichever device the importing thread happens to have current.
+  *device_id = static_cast<int>(amd::InvalidDeviceId);
+  if (*location_type == amd::Device::VmmLocationType::kDevice) {
+    for (auto& device : devices()) {
+      if (static_cast<Device*>(device)->getBackendDevice().handle == info.agent.handle) {
+        *device_id = static_cast<int>(device->index());
+        break;
+      }
+    }
+  }
   return true;
 }
 
