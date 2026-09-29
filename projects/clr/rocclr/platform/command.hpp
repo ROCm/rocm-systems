@@ -1348,7 +1348,24 @@ class BatchCopyMemoryRectCommand : public Command {
   BatchCopyMemoryRectCommand(HostQueue& queue, cl_command_type cmd_type,
                              const EventWaitList& event_wait_list,
                              std::vector<BatchCopyRectOp>&& copy_ops)
-      : Command(queue, cmd_type, event_wait_list), copy_ops_(std::move(copy_ops)) {}
+      : Command(queue, cmd_type, event_wait_list), copy_ops_(std::move(copy_ops)) {
+    if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+      for (const BatchCopyRectOp& op : copy_ops_) {
+        op.src_memory->retain();
+        op.dst_memory->retain();
+      }
+    }
+  }
+
+  void releaseResources() override {
+    if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+      for (const BatchCopyRectOp& op : copy_ops_) {
+        op.src_memory->release();
+        op.dst_memory->release();
+      }
+    }
+    Command::releaseResources();
+  }
 
   void submit(device::VirtualDevice& device) override { device.SubmitBatchCopyMemoryRect(*this); }
 

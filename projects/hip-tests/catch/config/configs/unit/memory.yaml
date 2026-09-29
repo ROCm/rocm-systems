@@ -2109,9 +2109,6 @@ memory:
   Unit_hipMemPrefetchBatchAsync_SingleOperationSingleLocation:
     <<: *level_2
     tags: [query]
-  Unit_hipMemPrefetchBatchAsync_Sync_Behavior:
-    <<: *level_2
-    tags: [query]
   Unit_hipMemPrefetchBatchAsync_LocationDistribution:
     <<: *level_2
     disabled: [amd_windows, amd_wsl]

@@ -2140,8 +2140,16 @@ void VirtualGPU::SubmitBatchCopyMemoryRect(amd::BatchCopyMemoryRectCommand& cmd)
   device::Memory::SyncFlags sync_flags;
   sync_flags.skipEntire_ = false;
   for (const amd::BatchCopyRectOp& op : copy_ops) {
-    dev().getGpuMemory(op.dst_memory)->syncCacheFromHost(*this, sync_flags);
-    dev().getGpuMemory(op.src_memory)->syncCacheFromHost(*this);
+    Memory* src_dev_mem = dev().getGpuMemory(op.src_memory);
+    Memory* dst_dev_mem = dev().getGpuMemory(op.dst_memory);
+    if (src_dev_mem == nullptr || dst_dev_mem == nullptr) {
+      LogError("SubmitBatchCopyMemoryRect: Invalid memory objects!");
+      cmd.setStatus(CL_INVALID_MEM_OBJECT);
+      profilingEnd(cmd);
+      return;
+    }
+    dst_dev_mem->syncCacheFromHost(*this, sync_flags);
+    src_dev_mem->syncCacheFromHost(*this);
   }
 
   if (!blitMgr().CopyBufferRectBatch(copy_ops)) {
