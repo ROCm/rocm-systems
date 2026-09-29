@@ -9,13 +9,17 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "ci", "scripts"))
+import test_accl_profiler as accl_ci  # noqa: E402
 from test_accl_profiler import (  # noqa: E402
     ArtifactPaths,
     COLLECTIVES,
     RunConfig,
     parse_collective_status,
+    render_node_preflight_script,
     render_slurm_script,
+    submit_slurm_job,
     validate_collective_output,
+    wait_for_slurm_job,
 )
 
 
@@ -162,6 +166,15 @@ def test_rendered_slurm_script_has_valid_bash_syntax(tmp_path):
     )
     assert result.returncode == 0, result.stderr
 
+    result = subprocess.run(
+        ["bash", "-n"],
+        input=render_node_preflight_script(),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
 
 def test_slurm_script_does_not_inherit_runner_python_paths(tmp_path, monkeypatch):
     monkeypatch.setenv(
@@ -187,6 +200,14 @@ def test_slurm_script_does_not_inherit_runner_python_paths(tmp_path, monkeypatch
         "unset PYTHONHOME PYTHONPATH VIRTUAL_ENV "
         "ROCM_KPACK_PATH ROCM_KPACK_PATH_PREFIX" in script
     )
+    for variable in (
+        "ACTIONS_RUNTIME_TOKEN",
+        "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+        "ACTIONS_ID_TOKEN_REQUEST_URL",
+        "ACTIONS_RUNTIME_URL",
+        "ACTIONS_RESULTS_URL",
+    ):
+        assert variable in script
     assert '"$ROCM_PATH/bin/rocminfo"' in script
     assert '/usr/bin/python3 "$ROCM_PATH/bin/rocm_agent_enumerator"' in script
 
@@ -240,6 +261,23 @@ def test_validate_collective_output_requires_nested_kernel_events(tmp_path):
         validate_collective_output(tmp_path, "AllReduce", 2, warmup_iterations=2)
 
 
+@pytest.mark.parametrize("event_trace", [None, [], "invalid"])
+def test_validate_collective_output_rejects_invalid_event_trace(
+    tmp_path, event_trace
+):
+    for rank in range(2):
+        _write_rank_file(tmp_path, rank)
+    path = tmp_path / "rank0.jsonl"
+    objects = [json.loads(line) for line in path.read_text().splitlines()]
+    objects[0]["coll_perf"]["event_trace_ts"] = event_trace
+    path.write_text(
+        "\n".join(json.dumps(obj) for obj in objects) + "\n", encoding="utf-8"
+    )
+
+    with pytest.raises(ValueError, match="Missing kernel events"):
+        validate_collective_output(tmp_path, "AllReduce", 2, warmup_iterations=2)
+
+
 def test_validate_collective_output_rejects_incomplete_summary(tmp_path):
     _write_rank_file(tmp_path, 0, complete=False)
     _write_rank_file(tmp_path, 1)
@@ -263,3 +301,101 @@ def test_parse_collective_status_ignores_malformed_rows(tmp_path):
         "preflight": 0,
         "all_reduce_perf": 0,
     }
+
+
+def test_submit_slurm_job_persists_raw_output_before_parsing(tmp_path, monkeypatch):
+    work_dir = tmp_path / "work"
+    (work_dir / "slurm").mkdir(parents=True)
+    config = _run_config(tmp_path)
+
+    def fake_run(command, **_kwargs):
+        return subprocess.CompletedProcess(
+            command, 0, stdout="12345;ruby\n", stderr="scheduler notice\n"
+        )
+
+    monkeypatch.setattr(accl_ci.subprocess, "run", fake_run)
+    job_id = submit_slurm_job(tmp_path / "run.sbatch", work_dir, config)
+
+    assert job_id == "12345"
+    assert (work_dir / "slurm" / "sbatch.stdout").read_text() == "12345;ruby\n"
+    assert (work_dir / "slurm" / "sbatch.stderr").read_text() == "scheduler notice\n"
+    assert (work_dir / "slurm" / "job_id.txt").read_text() == "12345\n"
+
+
+def test_submit_slurm_job_preserves_unparseable_output(tmp_path, monkeypatch):
+    work_dir = tmp_path / "work"
+    (work_dir / "slurm").mkdir(parents=True)
+    config = _run_config(tmp_path)
+
+    def fake_run(command, **_kwargs):
+        return subprocess.CompletedProcess(
+            command, 0, stdout="unexpected response\n", stderr="scheduler notice\n"
+        )
+
+    monkeypatch.setattr(accl_ci.subprocess, "run", fake_run)
+    with pytest.raises(RuntimeError, match="Could not parse Slurm job ID"):
+        submit_slurm_job(tmp_path / "run.sbatch", work_dir, config)
+
+    assert (work_dir / "slurm" / "sbatch.stdout").read_text() == "unexpected response\n"
+    assert not (work_dir / "slurm" / "job_id.txt").exists()
+
+
+def test_wait_for_slurm_job_retries_and_waits_for_terminal_state(monkeypatch):
+    responses = iter(
+        [
+            subprocess.CompletedProcess([], 1, stdout="", stderr="controller busy"),
+            subprocess.CompletedProcess([], 0, stdout="RUNNING\n", stderr=""),
+            subprocess.CompletedProcess([], 0, stdout="", stderr=""),
+            subprocess.CompletedProcess([], 0, stdout="RUNNING|0:0\n", stderr=""),
+            subprocess.CompletedProcess([], 0, stdout="COMPLETING|0:0\n", stderr=""),
+            subprocess.CompletedProcess([], 0, stdout="COMPLETED|0:0\n", stderr=""),
+        ]
+    )
+
+    def fake_run(_command, **_kwargs):
+        return next(responses)
+
+    monkeypatch.setattr(accl_ci.subprocess, "run", fake_run)
+    monkeypatch.setattr(accl_ci.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(accl_ci.time, "monotonic", lambda: 0.0)
+
+    assert wait_for_slurm_job("12345", 90) == ("COMPLETED", "0:0")
+
+
+def test_wait_for_slurm_job_rejects_persistent_squeue_errors(monkeypatch):
+    def fake_run(command, **_kwargs):
+        return subprocess.CompletedProcess(
+            command, 1, stdout="", stderr="controller unavailable"
+        )
+
+    monkeypatch.setattr(accl_ci.subprocess, "run", fake_run)
+    monkeypatch.setattr(accl_ci.time, "sleep", lambda _seconds: None)
+
+    with pytest.raises(RuntimeError, match="squeue failed 6 consecutive times"):
+        wait_for_slurm_job("12345", 90)
+
+
+def test_wait_for_slurm_job_starts_timeout_at_running(monkeypatch):
+    squeue_states = iter(["PENDING\n", "RUNNING\n", "RUNNING\n"])
+    monotonic_values = iter([1000.0, 1061.0])
+    cancelled = []
+
+    def fake_run(command, **_kwargs):
+        if command[0] == "squeue":
+            return subprocess.CompletedProcess(
+                command, 0, stdout=next(squeue_states), stderr=""
+            )
+        if command[0] == "scancel":
+            cancelled.append(command[1])
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr(accl_ci.subprocess, "run", fake_run)
+    monkeypatch.setattr(accl_ci.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        accl_ci.time, "monotonic", lambda: next(monotonic_values)
+    )
+
+    with pytest.raises(TimeoutError, match="exceeded 1 running minutes"):
+        wait_for_slurm_job("12345", 1)
+    assert cancelled == ["12345"]
