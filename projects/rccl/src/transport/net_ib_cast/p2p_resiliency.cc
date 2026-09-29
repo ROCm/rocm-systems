@@ -598,7 +598,7 @@ static ncclResult_t IbCastResiliencyProbeProgress(struct ncclIbResiliencySend* s
 ncclResult_t IbCastResiliencyInit(struct ncclIbNetCommBase* baseComm, struct ncclIbResiliency** resCtx) {
   assert(baseComm != NULL);
   assert(resCtx != NULL);
-  if (ncclParamIbCastResiliencyPortFailover() == 0) {
+  if (IbCastByOrderRequested() || ncclParamIbCastResiliencyPortFailover() == 0) {
     INFO(NCCL_NET, "NET/IB: %s: Resiliency is disabled on the %s communicator (comm=%p)", __func__,
          baseComm->isSend ? "send" : "recv", baseComm);
     *resCtx = NULL;
