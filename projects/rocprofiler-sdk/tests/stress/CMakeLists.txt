@@ -4,9 +4,10 @@
 # Registered only when this tests project is built in-tree, which in CI is the run-ci.py step
 # that submits results to CDash. The standalone trees (Test Install Build, Test Installed
 # Packages, TheRock) already run close to their step timeouts and would lose all results if
-# this pushed them over.
+# this pushed them over. Coverage builds are excluded for the same reason: their in-tree step
+# already takes 22-27 of its 30 minutes, and instrumented code runs every repeat slower.
 #
-if(PROJECT_IS_TOP_LEVEL)
+if(PROJECT_IS_TOP_LEVEL OR ROCPROFILER_BUILD_CODECOV)
     return()
 endif()
 
