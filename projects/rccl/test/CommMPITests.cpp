@@ -687,33 +687,68 @@ namespace
     enum class SizeTier
     {
         Short,
-        Large
+        Large,
+        Count
     };
 
-    /// One row of the table: what to run, and what the generated test gets called.
+    // The generated case name is derived from the row's enums, never restated alongside them. A
+    // row that named its own tier could say "short" while allocating the 2MiB shard, and the
+    // "*_short" filter in test_categories_mpi.yaml, which exists to keep the large tier out of
+    // smoke and precheck, would pull it in anyway. The asserts make a new enumerator a compile
+    // error here rather than a row that generates the wrong suffix.
+    constexpr const char* kSizeTierNames[] = {"short", "large"};
+    static_assert(sizeof(kSizeTierNames) / sizeof(kSizeTierNames[0])
+                      == static_cast<size_t>(SizeTier::Count),
+                  "kSizeTierNames needs one entry per SizeTier");
+
+    constexpr const char* kDtypeNames[] = {"int8",
+                                           "uint8",
+                                           "int32",
+                                           "uint32",
+                                           "int64",
+                                           "uint64",
+                                           "fp16",
+                                           "fp32",
+                                           "fp64",
+                                           "bf16",
+                                           "fp8e4m3",
+                                           "fp8e5m2"};
+    static_assert(sizeof(kDtypeNames) / sizeof(kDtypeNames[0])
+                      == static_cast<size_t>(ncclNumTypes),
+                  "kDtypeNames needs one entry per ncclDataType_t");
+
+    constexpr const char* sizeTierName(SizeTier tier)
+    {
+        return kSizeTierNames[static_cast<size_t>(tier)];
+    }
+
+    constexpr const char* dtypeName(ncclDataType_t dtype)
+    {
+        return kDtypeNames[static_cast<size_t>(dtype)];
+    }
+
+    /// One row of the table: what to run. The generated name comes from these two, see above.
     struct DtypeSizeCase
     {
         ncclDataType_t dtype;
-        const char*    dtypeName;
         SizeTier       sizeTier;
-        const char*    sizeTierName;
     };
 
     // Every datatype RCCL actually has, in enum order (test/common/CollectiveArgs.hpp). All twelve
     // run at the short tier: a per-datatype reduction-kernel bug shows up at any size.
     constexpr DtypeSizeCase kShortTierCases[] = {
-        {ncclInt8, "int8", SizeTier::Short, "short"},
-        {ncclUint8, "uint8", SizeTier::Short, "short"},
-        {ncclInt32, "int32", SizeTier::Short, "short"},
-        {ncclUint32, "uint32", SizeTier::Short, "short"},
-        {ncclInt64, "int64", SizeTier::Short, "short"},
-        {ncclUint64, "uint64", SizeTier::Short, "short"},
-        {ncclFloat16, "fp16", SizeTier::Short, "short"},
-        {ncclFloat32, "fp32", SizeTier::Short, "short"},
-        {ncclFloat64, "fp64", SizeTier::Short, "short"},
-        {ncclBfloat16, "bf16", SizeTier::Short, "short"},
-        {ncclFloat8e4m3, "fp8e4m3", SizeTier::Short, "short"},
-        {ncclFloat8e5m2, "fp8e5m2", SizeTier::Short, "short"},
+        {ncclInt8, SizeTier::Short},
+        {ncclUint8, SizeTier::Short},
+        {ncclInt32, SizeTier::Short},
+        {ncclUint32, SizeTier::Short},
+        {ncclInt64, SizeTier::Short},
+        {ncclUint64, SizeTier::Short},
+        {ncclFloat16, SizeTier::Short},
+        {ncclFloat32, SizeTier::Short},
+        {ncclFloat64, SizeTier::Short},
+        {ncclBfloat16, SizeTier::Short},
+        {ncclFloat8e4m3, SizeTier::Short},
+        {ncclFloat8e5m2, SizeTier::Short},
     };
 
     // Three byte widths (4/2/1), enough to show the shard-element arithmetic divides exactly at
@@ -721,9 +756,9 @@ namespace
     // ncclFloat8e4m3 already covers the 1-byte width, and e5m2 has the narrowest exact-integer
     // range in the table, so it belongs in the cheap tier where it runs on every config.
     constexpr DtypeSizeCase kLargeTierCases[] = {
-        {ncclFloat32, "fp32", SizeTier::Large, "large"},
-        {ncclBfloat16, "bf16", SizeTier::Large, "large"},
-        {ncclFloat8e4m3, "fp8e4m3", SizeTier::Large, "large"},
+        {ncclFloat32, SizeTier::Large},
+        {ncclBfloat16, SizeTier::Large},
+        {ncclFloat8e4m3, SizeTier::Large},
     };
 
     std::vector<DtypeSizeCase> allDtypeSizeCases()
@@ -830,11 +865,11 @@ class PersistentCommunicatorMPITest
     , public ::testing::WithParamInterface<DtypeSizeCase>
 {
 protected:
-    // The rank-count ceiling every formula here is designed against, enforced in the test body.
-    // Two independent limits pin it, and raising it means rechecking both. Value: a reduced element
-    // is a sum of at most nranks 0/1 contributions, and ncclFloat8e5m2 -- the narrowest exact-integer
-    // range in the table -- is exact only to 8. Variance: contribution() collapses to a constant at
-    // nranks equal to kContributionModulus, so the cap must stay strictly below it.
+    // The rank-count ceiling every formula here is designed against, enforced in the test body. A
+    // reduced element is a sum of at most nranks 0/1 contributions, and ncclFloat8e5m2 has the
+    // narrowest exact-integer range in the table at 8. Raising the cap makes the fp8e5m2 rows
+    // compare rounded values. contribution() also needs it below kContributionModulus, where the
+    // reduced sum would stop varying, which is the slacker of the two bounds.
     static constexpr int kMaxRanksAssumed = 8;
 
     static constexpr int    kSteps           = 64;
@@ -848,47 +883,48 @@ protected:
     // 1, 2, 4 or 8, all of which divide 2^21 evenly, so the element count is never rounded.
     static constexpr size_t kLargeShardBytes = 2 * 1024 * 1024;
 
-    // Each upload buffer's fill starts from its own index, so the four non-bucket buffers hold
-    // different bytes over their shared range and a collective that reads the wrong one of them
-    // cannot still pass: they are pairwise distinct modulo kContributionModulus, which is what
-    // makes the patterns differ rather than merely start at different offsets.
-    //
-    // This does not extend to the buckets. bucketIndex() starts bucket b at 31 * b and 31 is 9 mod
-    // kContributionModulus, so the bucket starts run through every residue as b goes 0 to 23 and
-    // each base still collides with two of them -- param with buckets 7 and 18, grad with 8 and 19,
-    // activation with 6 and 17, metric with 2 and 13. bucketCount(7) is 128, so host_param[0..127]
-    // is byte-identical to bucket 7's fill on every rank and step. Separating those would need the
-    // buckets to carry a base of their own added to 31 * b.
-    static constexpr size_t kParamIndexBase      = 1031;  // 1031 % 11 == 8
-    static constexpr size_t kGradIndexBase       = 2063;  // 2063 % 11 == 6
-    static constexpr size_t kActivationIndexBase = 3079;  // 3079 % 11 == 10
-    static constexpr size_t kMetricIndexBase     = 4099;  // 4099 % 11 == 7
+    // contribution() reads its index only modulo this, so two fills differ exactly when their base
+    // residues differ, however far apart the bases sit in index space. Prime, and wide enough to
+    // give every fill in the step a residue of its own: 24 buckets plus the four payload buffers.
+    // The threshold is the balanced split, which puts the reduced sum over the whole 0..nranks
+    // range at every rank count from 2 to kMaxRanksAssumed.
+    static constexpr size_t kContributionModulus   = 29;
+    static constexpr size_t kContributionThreshold = 15;
+
+    static_assert(kGradientBuckets + 4 <= static_cast<int>(kContributionModulus),
+                  "kContributionModulus must leave a residue per bucket and payload buffer");
+
+    // One more than the modulus, so bucket b's fill starts at residue b exactly and the buckets
+    // own residues 0 to kGradientBuckets - 1. A burst that reduces the wrong bucket therefore
+    // cannot be masked by a neighbour holding the same payload.
+    static constexpr size_t kBucketStride = kContributionModulus + 1;
+
+    // The four residues the buckets do not take. Every buffer in the step holds at least
+    // kContributionModulus elements, the 64-element bucket and metric buffers being the shortest,
+    // and that is what makes distinct residues produce distinct fills rather than merely distinct
+    // starting offsets.
+    static constexpr size_t kParamIndexBase      = static_cast<size_t>(kGradientBuckets);
+    static constexpr size_t kGradIndexBase       = kParamIndexBase + 1;
+    static constexpr size_t kActivationIndexBase = kParamIndexBase + 2;
+    static constexpr size_t kMetricIndexBase     = kParamIndexBase + 3;
 
     static size_t bucketCount(int bucket)
     {
         return kBucketCounts[static_cast<size_t>(bucket) % kBucketCountsPeriod];
     }
 
-    // Spreads the buckets apart in index space so a burst that reduces the wrong bucket is not
-    // masked by a neighbour holding the same payload.
     static size_t bucketIndex(int bucket, size_t element)
     {
-        return static_cast<size_t>(bucket) * 31 + element;
+        return static_cast<size_t>(bucket) * kBucketStride + element;
     }
 
-    // Coprime to both 31 (the bucketIndex() stride) and 6 (the kBucketCounts period), so no two of
-    // the 24 buckets share a count and a phase: lcm(11, 6) = 66 > 24. At 9 the pairs (b, b+18) were
-    // identical in and out, 6 of the 24. It must also stay above kMaxRanksAssumed, see there.
-    static constexpr size_t kContributionModulus   = 11;
-    static constexpr size_t kContributionThreshold = 6;
-
     // One rank's contribution to one element: 0 or 1, with which ranks carry a 1 rotating by both
-    // step and element index. Six of every eleven combinations contribute, which keeps the reduced
-    // sum varying across elements at every rank count from 2 to kMaxRanksAssumed instead of
-    // collapsing to a constant, so a collective that silently does nothing leaves the previous
-    // step's pattern and a reduction that drops one rank while double-counting another changes the
-    // sum. Ranks 0..M-1 cover every residue mod M once, so the modulus is the first rank count at
-    // which that property dies. Staying 0/1 is forced: ncclFloat8e5m2 is exact only to 8.
+    // step and element index. That keeps the reduced sum varying across elements at every rank
+    // count from 2 to kMaxRanksAssumed instead of collapsing to a constant, so a collective that
+    // silently does nothing leaves the previous step's pattern and a reduction that drops one rank
+    // while double-counting another changes the sum. Ranks 0..M-1 cover every residue mod M once,
+    // so the modulus is the first rank count at which that property dies. Staying 0/1 is forced:
+    // ncclFloat8e5m2 is exact only to 8, which is also the largest sum kMaxRanksAssumed can make.
     static int contribution(int step, int rank, size_t index)
     {
         return ((index + static_cast<size_t>(step) + static_cast<size_t>(rank))
@@ -1289,7 +1325,8 @@ void PersistentCommunicatorMPITest::runPersistentCommunicatorCase(ncclDataType_t
 TEST_P(PersistentCommunicatorMPITest, HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator)
 {
     const DtypeSizeCase& test_case = GetParam();
-    SCOPED_TRACE(std::string("dtype=") + test_case.dtypeName + " tier=" + test_case.sizeTierName);
+    SCOPED_TRACE(std::string("dtype=") + dtypeName(test_case.dtype)
+                 + " tier=" + sizeTierName(test_case.sizeTier));
 
     // The maximum is the conservative bound the formulas are proved against, not an observed cliff:
     // a reduced element is a sum of at most nranks 0/1 contributions, so ncclFloat8e5m2's exact
@@ -1329,7 +1366,7 @@ TEST_P(PersistentCommunicatorMPITest, HeterogeneousCollectiveAndP2pSequenceOnOne
     case ncclBfloat16: runPersistentCommunicatorCase<hip_bfloat16>(test_case.dtype, shard_count); break;
     case ncclFloat8e4m3: runPersistentCommunicatorCase<rccl_float8>(test_case.dtype, shard_count); break;
     case ncclFloat8e5m2: runPersistentCommunicatorCase<rccl_bfloat8>(test_case.dtype, shard_count); break;
-    default: FAIL() << "no storage type mapped for datatype " << test_case.dtypeName;
+    default: FAIL() << "no storage type mapped for datatype " << static_cast<int>(test_case.dtype);
     }
 }
 
@@ -1337,8 +1374,8 @@ INSTANTIATE_TEST_SUITE_P(DtypeSizeCases,
                          PersistentCommunicatorMPITest,
                          ::testing::ValuesIn(allDtypeSizeCases()),
                          [](const ::testing::TestParamInfo<DtypeSizeCase>& info) {
-                             return std::string(info.param.dtypeName) + "_"
-                                    + info.param.sizeTierName;
+                             return std::string(dtypeName(info.param.dtype)) + "_"
+                                    + sizeTierName(info.param.sizeTier);
                          });
 
 /**
