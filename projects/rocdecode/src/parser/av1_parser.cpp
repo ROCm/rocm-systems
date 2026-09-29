@@ -726,9 +726,13 @@ void Av1VideoParser::CheckAndUpdateDecStatus() {
     }
 }
 
-ParserResult Av1VideoParser::ParseObuHeader(const uint8_t *p_stream) {
+ParserResult Av1VideoParser::ParseObuHeader(const uint8_t *p_stream, size_t size_in_bytes) {
     size_t offset = 0;
     obu_header_.size = 1;
+    if (size_in_bytes < obu_header_.size) {
+        ErrorLog(g_rocdec_logger, "OBU header extends past the end of the picture data.");
+        return PARSER_OUT_OF_RANGE;
+    }
     if (Parser::GetBit(p_stream, offset) != 0) {
         ErrorLog(g_rocdec_logger, "Syntax error: obu_forbidden_bit must be set to 0.");
         return PARSER_INVALID_ARG;
@@ -746,6 +750,10 @@ ParserResult Av1VideoParser::ParseObuHeader(const uint8_t *p_stream) {
     }
     if (obu_header_.obu_extension_flag) {
         obu_header_.size += 1;
+        if (size_in_bytes < obu_header_.size) {
+            ErrorLog(g_rocdec_logger, "OBU extension header extends past the end of the picture data.");
+            return PARSER_OUT_OF_RANGE;
+        }
         obu_header_.temporal_id = Parser::ReadBits(p_stream, offset, 3);
         obu_header_.spatial_id = Parser::ReadBits(p_stream, offset, 2);
         if (Parser::ReadBits(p_stream, offset, 3) != 0) {
@@ -761,20 +769,29 @@ ParserResult Av1VideoParser::ReadObuHeaderAndSize() {
         return PARSER_EOF;
     }
     uint8_t *p_stream = pic_data_buffer_ptr_ + curr_byte_offset_;
-    if (ParseObuHeader(p_stream) != PARSER_OK) {
+    if (ParseObuHeader(p_stream, pic_data_size_ - curr_byte_offset_) != PARSER_OK) {
         ErrorLog(g_rocdec_logger, "Syntax error(s) found in OBU header.");
+    }
+    if (pic_data_size_ - curr_byte_offset_ < obu_header_.size) {
+        return PARSER_EOF;
     }
     curr_byte_offset_ += obu_header_.size;
     p_stream += obu_header_.size;
 
     uint32_t bytes_read;
-    obu_size_ = ReadLeb128(p_stream, &bytes_read);
+    if (ReadLeb128(p_stream, pic_data_size_ - curr_byte_offset_, &bytes_read, &obu_size_) != PARSER_OK) {
+        ErrorLog(g_rocdec_logger, "Invalid or truncated obu_size field.");
+        return PARSER_EOF;
+    }
     obu_byte_offset_ = curr_byte_offset_ + bytes_read;
-    curr_byte_offset_ = obu_byte_offset_ + obu_size_;
-    if (curr_byte_offset_ > pic_data_size_) {
+    // obu_size_ is bounded by the leb128 range, so sum in 64 bits before the comparison to
+    // keep a large value from wrapping past the end of the picture data undetected.
+    uint64_t next_byte_offset = static_cast<uint64_t>(obu_byte_offset_) + obu_size_;
+    if (next_byte_offset > pic_data_size_) {
         ErrorLog(g_rocdec_logger, "Invalid obu_size value.");
         return PARSER_EOF;
     } else {
+        curr_byte_offset_ = static_cast<uint32_t>(next_byte_offset);
         return PARSER_OK;
     }
 }
