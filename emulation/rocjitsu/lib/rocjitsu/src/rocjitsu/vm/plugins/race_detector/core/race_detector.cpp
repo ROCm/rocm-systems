@@ -109,9 +109,8 @@ void RaceDetector::validateRead(int addr, WaveId wave, int lane, int nBytes,
       const MemoryOrderClass pendingMemoryOrder = events_.memoryOrder(eventId);
       const bool orderedWithCurrent = currentMemoryOrder != MemoryOrderClass::UNORDERED &&
                                       pendingMemoryOrder == currentMemoryOrder;
-      if (orderedWithCurrent || events_.status(eventId) == EventStatus::WAVE_COMPLETE) {
-      }
-      continue;
+      if (orderedWithCurrent || events_.status(eventId) == EventStatus::WAVE_COMPLETE)
+        continue;
     }
     if (events_.ldsIntervals(eventId).overlapsRange(addr, addr + nBytes)) {
       raceHandler({RaceViolation::Space::LDS, addr, wave.value, lane, false, workgroupId, eventId});
