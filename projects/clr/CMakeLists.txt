@@ -5,6 +5,7 @@
 cmake_minimum_required(VERSION 3.27)
 project(clr)
 
+
 ##########
 # Defaults
 ##########
@@ -44,6 +45,19 @@ option(CLR_BUILD_OCL "Build OCL" OFF)
 option(CLR_HRR_CODEGEN_CHECK "Generate and validate HRR generated sources during CLR builds" OFF)
 option(USE_NEW_HOSTCALL_IMPL
   "Use the new phase/occupancy-based hostcall implementation" OFF)
+option(CLR_ENABLE_CLANG_TIDY "Run clang-tidy static analysis during the build" ON)
+
+# clang-tidy: must be set before any targets are created (add_subdirectory below),
+# since CMAKE_CXX_CLANG_TIDY only seeds the CXX_CLANG_TIDY property at target-creation
+# time. clang-tidy itself auto-discovers this directory's .clang-tidy file.
+if(CLR_ENABLE_CLANG_TIDY)
+    find_program(CLR_CLANG_TIDY_EXE NAMES clang-tidy)
+    if(NOT CLR_CLANG_TIDY_EXE)
+        message(FATAL_ERROR "CLR_ENABLE_CLANG_TIDY is ON but clang-tidy was not found")
+    endif()
+    message(STATUS "clang-tidy found: ${CLR_CLANG_TIDY_EXE}")
+    set(CMAKE_CXX_CLANG_TIDY "${CLR_CLANG_TIDY_EXE}")
+endif()
 
 # Set default build type
 if(NOT CMAKE_BUILD_TYPE)
