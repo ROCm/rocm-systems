@@ -68,36 +68,20 @@ inline size_t ncclCeAllReduceChooseChunkBytes(size_t shardBytes, size_t slotChun
   return alignDown(targetChunkBytes, (size_t)16);
 }
 
-// ---------------------------------------------------------------------------
-// CE ReduceScatter staging layout.
-//
-// ReduceScatter reuses the CE AllReduce staging buffer: NCCL_CE_NUM_SLOTS
-// slots, each holding one slotChunkBytes region per rank, so a slot is
-// nRanks * slotChunkBytes wide. During the scatter phase every rank pushes the
-// chunk it owes peer r into peer r's staging buffer at an offset keyed by the
-// SENDER's rank, so the nRanks contributions a rank later reduces sit side by
-// side. Split out of ncclCeReduceScatter() so the offsets are unit-testable on
-// the host; ncclCeAllReduce() still open-codes the same three formulas.
-// ---------------------------------------------------------------------------
+// CE ReduceScatter staging offsets, split out of ncclCeReduceScatter() for host testability;
+// ncclCeAllReduce() still open-codes these same three formulas.
 
-// Byte offset of senderRank's region within slot `slot` of any rank's
-// ceARTmpBuf. Independent of the destination rank by construction: the same
-// offset is used for the local copy and for every peer.
+// Offset is keyed by senderRank, not dstRank: every peer reduces the same slot layout.
 inline size_t ncclCeReduceScatterDstSlotOffsetBytes(int slot, int senderRank, int nRanks, size_t slotChunkBytes) {
   return ((size_t)slot * (size_t)nRanks + (size_t)senderRank) * slotChunkBytes;
 }
 
-// Byte offset, within the sender's sendbuff, of chunk `chunk` of the shard
-// destined for rank dstRank. The sendbuff is nRanks shards of shardBytes
-// (shardBytes = recvcount * eltSize), each walked in chunkBytes steps.
+// Offset of chunk `chunk` within dstRank's shard in sendbuff (shardBytes = recvcount * eltSize).
 inline size_t ncclCeReduceScatterSrcOffsetBytes(int dstRank, size_t shardBytes, int chunk, size_t chunkBytes) {
   return (size_t)dstRank * shardBytes + (size_t)chunk * chunkBytes;
 }
 
-// Index into ceColl.signalBuffer of the [slot][rank] doorbell. The host
-// addresses that flag two ways: as an array index for its own copy, and as a
-// byte offset into signalWin for a peer's. Both must come from this one
-// formula, or the local and remote views name different flags.
+// [slot][rank] doorbell index; must match between the local array-index view and the peer byte-offset view.
 inline size_t ncclCeReduceScatterSignalIndex(int slot, int rank, int nRanks) {
   return (size_t)slot * (size_t)nRanks + (size_t)rank;
 }
