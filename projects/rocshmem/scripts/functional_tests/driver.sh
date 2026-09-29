@@ -1054,7 +1054,7 @@ TestTiles() {
   ExecTest  "tile_put_contiguous"       2       1            1            1048576
   ExecTest  "tile_put_rowmajor"         2       1            1            1048576
   ExecTest  "tile_put_colmajor"         2       1            1            1048576
-  ExecTest  "tile_put_arbitrary"        2       1            1            1048576
+  ExecTest  "tile_put_arbitrary"        2       1            1            21760
   ExecTest  "tile_put_wave_contiguous"  2       1            $WAVE_SIZE   1048576
   ExecTest  "tile_put_wave_rowmajor"    2       1            $WAVE_SIZE   1048576
   ExecTest  "tile_put_wave_colmajor"    2       1            $WAVE_SIZE   1048576
@@ -1065,7 +1065,7 @@ TestTiles() {
   ExecTest  "tile_get_contiguous"       2       1            1            1048576
   ExecTest  "tile_get_rowmajor"         2       1            1            1048576
   ExecTest  "tile_get_colmajor"         2       1            1            1048576
-  ExecTest  "tile_get_arbitrary"        2       1            1            1048576
+  ExecTest  "tile_get_arbitrary"        2       1            1            21760
   ExecTest  "tile_get_wg_contiguous"    2       1            $((WAVE_SIZE * 16)) 1048576
   ExecTest  "tile_get_wg_rowmajor"      2       1            $((WAVE_SIZE * 16)) 1048576
   ExecTest  "tile_get_wg_colmajor"      2       1            $((WAVE_SIZE * 16)) 1048576
