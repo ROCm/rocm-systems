@@ -42,7 +42,8 @@ if(CMAKE_HOST_WIN32)
         "[profiler-hub] Downloading SQLite3 amalgamation ${_sqlite3_version} from ${_sqlite3_download_url}"
     )
     file(
-        DOWNLOAD "${_sqlite3_download_url}" "${_sqlite3_zip}"
+        DOWNLOAD "${_sqlite3_download_url}"
+        "${_sqlite3_zip}"
         STATUS _sqlite3_download_status
     )
     list(GET _sqlite3_download_status 0 _sqlite3_download_rc)
@@ -64,7 +65,7 @@ if(CMAKE_HOST_WIN32)
     file(
         RENAME
             "${_sqlite3_external_dir}/sqlite-amalgamation-${_sqlite3_amalg_version}"
-            "${SQLITE3_SOURCE_DIR}"
+        "${SQLITE3_SOURCE_DIR}"
     )
     return()
 endif()
