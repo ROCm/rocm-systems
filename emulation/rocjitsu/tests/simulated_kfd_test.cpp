@@ -153,24 +153,28 @@ TEST_F(SimulatedKfdTest, ScratchBackingGrowthPreservesContentsAndZeroFillsExtens
 
   ASSERT_TRUE(rocjitsu::SimulatedKfdTestAccess::allocate_scratch_backing(
       *t.driver(), process_id, kScratchGpuVa, kInitialSize));
-  auto *initial = memory->resolve_host_ptr(kScratchGpuVa, process_id);
+  auto *initial = memory->resolve_host_ptr(kScratchGpuVa, process_id, kInitialSize);
   ASSERT_NE(initial, nullptr);
   initial[0] = 0x5a;
   initial[kInitialSize - 1] = 0xa5;
 
   ASSERT_TRUE(rocjitsu::SimulatedKfdTestAccess::allocate_scratch_backing(
       *t.driver(), process_id, kScratchGpuVa, kGrownSize));
-  auto *grown = memory->resolve_host_ptr(kScratchGpuVa, process_id);
-  ASSERT_NE(grown, nullptr);
+  auto *preserved = memory->resolve_host_ptr(kScratchGpuVa, process_id, kInitialSize);
+  auto *extension =
+      memory->resolve_host_ptr(kScratchGpuVa + kInitialSize, process_id, kGrownSize - kInitialSize);
+  ASSERT_NE(preserved, nullptr);
+  ASSERT_NE(extension, nullptr);
   unsigned char residency = 0;
   ASSERT_EQ(::mincore(initial, kInitialSize, &residency), 0)
       << "the prior view must remain valid for an in-flight translated access";
+  EXPECT_EQ(preserved, initial);
   EXPECT_EQ(initial[0], 0x5a);
   EXPECT_EQ(initial[kInitialSize - 1], 0xa5);
-  EXPECT_EQ(grown[0], 0x5a);
-  EXPECT_EQ(grown[kInitialSize - 1], 0xa5);
-  EXPECT_EQ(grown[kInitialSize], 0);
-  EXPECT_NE(memory->resolve_host_ptr(kScratchGpuVa + kGrownSize - 1, process_id), nullptr);
+  EXPECT_EQ(preserved[0], 0x5a);
+  EXPECT_EQ(preserved[kInitialSize - 1], 0xa5);
+  EXPECT_EQ(extension[0], 0);
+  EXPECT_EQ(extension[kGrownSize - kInitialSize - 1], 0);
 
   EXPECT_EQ(t.driver()->close(), 0);
 }

@@ -14,13 +14,14 @@
 namespace {
 
 constexpr uint32_t kStreams = 2u;
-constexpr uint32_t kReplays = 3u;
+constexpr uint32_t kConcurrentReplays = 3u;
+constexpr uint32_t kTotalReplays = kConcurrentReplays + 1u;
 constexpr uint32_t kMaximumThreads = 128u;
 
 struct StreamState {
   uint32_t launches;
-  uint32_t observed[kReplays];
-  uint32_t control[kReplays][kMaximumThreads];
+  uint32_t observed[kTotalReplays];
+  uint32_t control[kTotalReplays][kMaximumThreads];
 };
 
 template <bool Synchronize>
@@ -76,21 +77,31 @@ void run_graph_replay(bool synchronize) {
                                    nullptr, 0));
   }
 
-  for (uint32_t replay = 0u; replay < kReplays; ++replay) {
+  for (uint32_t replay = 0u; replay < kConcurrentReplays; ++replay) {
     for (CapturedGraph &graph : graphs)
       HIP_ASSERT(hipGraphLaunch(graph.executable, graph.stream));
     for (CapturedGraph &graph : graphs)
       HIP_ASSERT(hipStreamSynchronize(graph.stream));
   }
 
+  // Concurrent dispatches compete for ConSan's bounded causal windows. Keep
+  // the multi-stream coverage above, then replay one captured graph in
+  // isolation so the regression's required diagnostic has a deterministic
+  // same-dispatch store/read witness instead of depending on which stream's
+  // endpoint survives report-buffer saturation.
+  HIP_ASSERT(hipGraphLaunch(graphs[0].executable, graphs[0].stream));
+  HIP_ASSERT(hipStreamSynchronize(graphs[0].stream));
+
   std::array<StreamState, kStreams> results{};
   uint32_t completed_launches = 0u;
   for (uint32_t stream_id = 0u; stream_id < kStreams; ++stream_id) {
     HIP_ASSERT(hipMemcpy(&results[stream_id], device_states[stream_id], sizeof(StreamState),
                          hipMemcpyDeviceToHost));
-    EXPECT_EQ(results[stream_id].launches, kReplays) << "stream=" << stream_id;
+    const uint32_t expected_replays =
+        kConcurrentReplays + (stream_id == 0u ? 1u : 0u);
+    EXPECT_EQ(results[stream_id].launches, expected_replays) << "stream=" << stream_id;
     completed_launches += results[stream_id].launches;
-    for (uint32_t replay = 0u; replay < kReplays; ++replay) {
+    for (uint32_t replay = 0u; replay < expected_replays; ++replay) {
       for (uint32_t tid = 0u; tid < thread_count; ++tid) {
         EXPECT_EQ(results[stream_id].control[replay][tid],
                   0xc7000000u | (stream_id << 16u) | (replay << 8u) | tid)
