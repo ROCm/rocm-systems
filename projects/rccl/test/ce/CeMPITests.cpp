@@ -38,7 +38,7 @@ namespace CeMPITestConstants
 constexpr size_t kSmallCount      = 4096;   // elements per rank for fast tests
 constexpr size_t kMediumCount     = 65536;  // elements per rank for larger tests
 // Total AllReduce message size that forces the CE multi-chunk pipeline. A shard
-// spills past one staging slot once the message exceeds NCCL_CE_AR_MAX_MSG_BYTES
+// spills past one staging slot once the message exceeds RCCL_CE_AR_2SHOT_MAX_BYTES
 // (256 MiB); 512 MiB yields >= 4 chunks per shard at every rank count, plus a
 // partial tail chunk whenever nRanks is not a power of two. Costs a transient
 // host buffer of the same size per rank in fill/verify.
