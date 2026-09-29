@@ -188,7 +188,8 @@ void runCftHierLsaMultiRankDefectTest() {
     // cftMcSize stays 1 while lsaSize is 2, so CftMultimem must stay a singleton and not track the LSA team.
     expectTeamEquals(ncclTeamCftMultimem(resources.comms[rank]), 1, 0, 1);
 
-    // HIER_MULTIMEM must factor the flat team by cftMcSize, not lsaSize: at cftMcSize 1 that stays the identity.
+    // FLAT reads cftSize and HIER_MULTIMEM factors by cftMcSize, both 1 here, so neither may track lsaSize, which is 2.
+    expectTeamEquals(ncclTeamCft(resources.comms[rank], NCCL_CFT_TEAM_FLAT), 1, 0, 1);
     expectTeamEquals(ncclTeamCft(resources.comms[rank], NCCL_CFT_TEAM_HIER_MULTIMEM), 1, 0, 1);
 
     // Only a rank-0 team leaves the base of base + (r - team.rank) * 1 exposed, so these pin lsaSelf and comm->rank.
