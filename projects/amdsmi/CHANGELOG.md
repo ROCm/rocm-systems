@@ -243,6 +243,18 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - The WSL backend returned success with a zeroed structure, so `rev_id` read as `0x0`, and where it did report the not-supported value Python rendered it as the raw `0xffffffff`. Python and the CLI now render it as `N/A`.
   - `amdsmi_asic_info_t` is now reset through one shared initializer used by every backend, so a field a backend cannot supply keeps its not-supported value rather than a plausible zero.
 
+- **Fixed `amdsmi_get_gpu_total_ecc_count()` reading RAS state up to 39 times per call, and reporting `0` instead of an error when that read failed**.  
+  - RAS state is now read once per call instead of once per block, avoiding the repeated `.../ras/features` reads that could trip host-side RAS request throttling on SR-IOV guests with RAS enabled.
+  - A failed RAS state read is now reported as an error (`N/A` in the CLI) instead of a misleading `0`.
+  - Affects the default `amd-smi` output (`UEC` column), `amd-smi monitor --ecc`, and `amd-smi metric --ecc`.
+  - Example default output, one GPU where the read succeeds (`UEC: 0`) next to one where it fails (`UEC: N/A`), instead of both previously reading `0`:
+    ```
+    | 0000:0c:00.0            AMD Instinct MI...  | 12 %     45 °C   0       300/750 W    |
+    | 1     0       0       NA                    | 34 %     30 %    2048/196608 MB       |
+    | 0000:2f:00.0           AMD Radeon RX ...    | 8 %      41 °C   N/A     280/300 W    |
+    | 2     1       1       NA                    | 22 %     28 %    1024/32768 MB        |
+    ```
+
 ### Upcoming Changes
 
 - **UUIDs will be replaced by CUIDs in an upcoming version**.  
