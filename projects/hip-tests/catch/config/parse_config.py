@@ -42,9 +42,22 @@ def parse_args():
         "--asan",
         action="store_true",
         help="Target is an Address Sanitizer (ASAN) build. Test cases that "
-        "list 'asan' in their 'disabled' field are skipped.",
+        "list 'asan' in their 'disabled' or 'unsupported' field are skipped.",
     )
     return parser.parse_args()
+
+
+def _skip_targets(field):
+    """Return the platform/arch/config targets from a skip field.
+
+    A skip field is either a flat list of targets ([amd_windows]) or a mapping
+    with a 'targets' list plus an optional 'reason' scalar
+    ({targets: [...], reason: ...}). Only the targets drive tag generation; the
+    reason is metadata for other tooling and is ignored here.
+    """
+    if isinstance(field, dict):
+        return field.get("targets", [])
+    return field
 
 
 def create_test_definition(
@@ -53,6 +66,15 @@ def create_test_definition(
     level = case_config.get("level", 2)
     tags = case_config.get("tags", [])
     disabled = case_config.get("disabled", [])
+    unsupported = case_config.get("unsupported", [])
+    # Extract the targets from each skip field (list form or {targets, reason}
+    # mapping form) and merge into one ordered local (disabled first) so the
+    # match and promotion logic below is identical for either field. Do not
+    # mutate the source lists. "disabled" is temporary/regressions, "unsupported"
+    # is permanent; both produce the same [disabled] skip tag and
+    # [exclude_<entry>] promotions that CI and the compute-utils/WSL runners
+    # depend on.
+    skip_targets = _skip_targets(disabled) + _skip_targets(unsupported)
 
     tags_str = ""
 
@@ -62,9 +84,9 @@ def create_test_definition(
     tags_str += f"[{group}]"
 
     if (
-        f"{platform}_{os_name}" in disabled
-        or arch in disabled
-        or (asan and "asan" in disabled)
+        f"{platform}_{os_name}" in skip_targets
+        or arch in skip_targets
+        or (asan and "asan" in skip_targets)
     ):
         # Disabled on this platform (e.g. amd_linux) or arch (e.g. gfx1260).
         # Use the [disabled] tag (no leading dot) so it is visible in --list-tests
@@ -78,7 +100,7 @@ def create_test_definition(
     # specific labels a test is disabled for (incl. OS labels dropped above).
     # Prefix is "exclude_" (not "disabled_") so it does not substring-match a
     # ctest -LE disabled filter; consumers should match anchored ^exclude_<entry>$.
-    for entry in disabled:
+    for entry in skip_targets:
         tags_str += f"[exclude_{entry}]"
 
     return f'#define {case_name} "{case_name}", "{tags_str}"'
@@ -96,6 +118,7 @@ def generate_parameter_header(cmd_options, output_path):
         f.write("// DO NOT EDIT - This file is generated at build time\n")
         f.write("// Contains compile-time test parameters for each level\n\n")
         f.write("#pragma once\n\n")
+        f.write("#include <array>\n")
         f.write("#include <vector>\n")
         f.write("#include <cstddef>\n")
         f.write("#include <string>\n")
@@ -114,33 +137,33 @@ def generate_parameter_header(cmd_options, output_path):
             # Memory sizes
             if "memory_sizes" in options:
                 sizes = [parse_size_string(s) for s in options["memory_sizes"]]
-                f.write(f"inline const std::vector<size_t> {level_name}_memory_sizes = {{\n")
+                f.write(f"inline constexpr std::array<size_t, {len(sizes)}> {level_name}_memory_sizes = {{\n")
                 f.write("    " + ",\n    ".join(str(s) for s in sizes) + "\n")
                 f.write("};\n\n")
             
             # Block sizes
             if "block_sizes" in options:
                 sizes = options["block_sizes"]
-                f.write(f"inline const std::vector<int> {level_name}_block_sizes = {{\n")
+                f.write(f"inline constexpr std::array<int, {len(sizes)}> {level_name}_block_sizes = {{\n")
                 f.write("    " + ", ".join(str(s) for s in sizes) + "\n")
                 f.write("};\n\n")
             
             # Iterations
             if "iterations" in options:
-                f.write(f"inline const int {level_name}_iterations = {options['iterations']};\n\n")
+                f.write(f"inline constexpr int {level_name}_iterations = {options['iterations']};\n\n")
             
             # Warmups
             if "warmups" in options:
-                f.write(f"inline const int {level_name}_warmups = {options['warmups']};\n\n")
+                f.write(f"inline constexpr int {level_name}_warmups = {options['warmups']};\n\n")
             
             # Max memory
             if "max_memory" in options:
                 max_mem = parse_size_string(str(options["max_memory"]))
-                f.write(f"inline const size_t {level_name}_max_memory = {max_mem};\n\n")
+                f.write(f"inline constexpr size_t {level_name}_max_memory = {max_mem};\n\n")
             
             # Reduction factor
             if "reduction_factor" in options:
-                f.write(f"inline const double {level_name}_reduction_factor = {options['reduction_factor']};\n\n")
+                f.write(f"inline constexpr double {level_name}_reduction_factor = {options['reduction_factor']};\n\n")
         
         # Generate LevelParameters struct and initialization function
         f.write(f"// {'=' * 76}\n")
@@ -162,8 +185,10 @@ def generate_parameter_header(cmd_options, output_path):
         for level_name in levels_found:
             f.write(f"    // {level_name}\n")
             f.write(f"    params[\"{level_name}\"] = {{\n")
-            f.write(f"        {level_name}_memory_sizes,\n")
-            f.write(f"        {level_name}_block_sizes,\n")
+            f.write(f"        std::vector<size_t>({level_name}_memory_sizes.begin(), "
+                    f"{level_name}_memory_sizes.end()),\n")
+            f.write(f"        std::vector<int>({level_name}_block_sizes.begin(), "
+                    f"{level_name}_block_sizes.end()),\n")
             f.write(f"        {level_name}_iterations,\n")
             f.write(f"        {level_name}_warmups,\n")
             f.write(f"        {level_name}_max_memory,\n")

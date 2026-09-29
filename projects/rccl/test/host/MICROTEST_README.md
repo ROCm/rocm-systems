@@ -85,6 +85,11 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     integration-test territory. Since this binary uses section GC, validate
     completeness by checking that the linked coverage report still contains
     the same `ras.cc` function inventory as the compiled source.
+  - `ras/diagnostics_checks_common.cc` (`RAS_DIAGNOSTICS_COMMON_CC_PATH`, from
+    `ras-diagnostics-common-test.cc`); suite
+    `RasDiagnosticsCommonMicrotest.*`. Covers communicator snapshots and
+    filtering, aligned local-record collection, allocation and callback
+    failures, rank ordering and formatting, and reporter output.
   - `ras/client.cc` (`RAS_CLIENT_CC_PATH`, from `ras-client-test.cc`); suite
     `RasClientMicrotest.*`. With
     `NCCL_RAS_CLIENT` defined, `ras_internal.h` reduces to four macros, so this
@@ -100,6 +105,17 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     channel/warp-selection, and tuning-ID helpers without a GPU. This TU
     defines `ncclParamNthreads` and `ncclParamLl128Nthreads`; do not duplicate
     them in `fakes/tuning_fakes.cc`.
+  - `misc/gdr_probe.cc` (`GDR_PROBE_CC_PATH`, from `gdr-probe-test.cc`); suite
+    `GdrProbeTest.*`. Covers `ncclIbProbeGdrSupport`, the runtime GPU
+    memory-registration fallback behind the sysfs peer-memory scan: the result
+    for every failure point, the registration entry point and access flags per
+    relaxed-ordering setting, and that only acquired resources are released
+    (MR before its PD and buffer). `hipMalloc`/`hipFree` go through
+    `fakes/hip_fakes.cc`; the verbs PD/MR wrappers through
+    `fakes/ibvwrap_fakes.cc`. The expected flags are pinned to both
+    `transport/net_ib*/reg.cc` copies by configure-time `rccl_assert_source_line`
+    checks in `CMakeLists.txt`, so a flag change in `reg.cc` fails the configure
+    until the probe and the test are updated to match.
 - **`rccl-UnitTestsMicroEnqueue`** — `enqueue.cc` (via `ENQUEUE_CC_PATH`); suite
   `EnqueueMicrotest.*`. All tests live in `enqueue-test.cc`, grouped by unit under
   test; several fixtures are reused by later groups, so the order within the file
@@ -148,14 +164,25 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `test_categories_micro_scheduler.yaml`.
 
 - **`rccl-UnitTestsMicroTaskPrep`** — `src/enqueue/task_prep/task_prep.cc` (via
-  `TASK_PREP_CC_PATH`); suite `TaskPrepMicrotest.*`. Its own binary, not sharing
-  `rccl-UnitTestsMicro`: that target links `collective_stubs.cc`, whose fail-loud
-  `ncclTaskPrepare` would be a duplicate symbol against the real one, and
-  `group-test.cc` drives the path that stub stands in for. The remaining three
-  files in the directory are compiled as separate TUs so `task_prep.cc`'s sibling
-  externs resolve to real code; each moves into its own test TU as that unit comes
-  under test. `ENABLE_WARP_SPEED` is deliberately absent: all four files are free
-  of it. See `test_categories_micro_taskprep.yaml`.
+  `TASK_PREP_CC_PATH`, suite `TaskPrepMicrotest.*`),
+  `src/enqueue/task_prep/task_classify.cc` (via `TASK_CLASSIFY_CC_PATH`, suite
+  `TaskClassifyMicrotest.*`), `src/enqueue/task_prep/task_pretuning.cc` (via
+  `TASK_PRETUNING_CC_PATH`, suite `TaskPreTuningMicrotest.*`),
+  `src/enqueue/task_prep/task_posttuning.cc` (via `TASK_POSTTUNING_CC_PATH`, suite
+  `TaskPostTuningMicrotest.*`), and the seven `src/enqueue/task_sched/*.cc` files
+  (`task_sched.cc`, `sym_sched.cc`, `legacy_sched.cc`, `allgatherv_sched.cc`,
+  `p2p_sched.cc`, `rma_sched.cc`, `ce_sched.cc`, one `TASK_SCHED_*_CC_PATH` macro
+  each, all in one test TU, suite `TaskSchedMicrotest.*`). Its own binary, not
+  sharing `rccl-UnitTestsMicro`: that target links `collective_stubs.cc`, whose
+  fail-loud `ncclTaskPrepare` would be a duplicate symbol against the real one,
+  and `group-test.cc` drives the path that stub stands in for. The four
+  `task_prep/` files are separate test TUs, one per file, so `task_prep.cc`'s
+  sibling externs resolve to real code and no file is listed twice; the seven
+  `task_sched/` files share one TU instead, since none of them reference each
+  other and each defines exactly one distinct extern-linkage function. Shared
+  scene, vocabulary and fake-reset fixture live in `TaskPrepScene.h`.
+  `ENABLE_WARP_SPEED` is deliberately absent: all eleven files are free of it.
+  See `test_categories_micro_taskprep.yaml`.
 
 Everything below (seams, fakes, coverage) applies to both; the concrete examples
 use `p2p.cc`.
@@ -223,9 +250,10 @@ test:
    are in scope. A new unit generally warrants its own binary (see
    [Units under test](#units-under-test)) so its file-scope state stays isolated.
 2. **Register the source.** Add the test `.cc` to the target's source list in
-   `test/host/CMakeLists.txt` (`RCCL_MICRO_TEST_SOURCES` for
-   `rccl-UnitTestsMicro`). If you add a new gtest suite, add its pattern to the
-   target's `test/test_categories_micro*.yaml` so CTest runs it.
+   `rccl_define_micro_source_lists()` in `test/host/CMakeLists.txt`
+   (`TEST_MICRO_SOURCE_FILES` for `rccl-UnitTestsMicro`), which both build paths
+   share. If you add a new gtest suite, add its pattern to the target's
+   `test/test_categories_micro*.yaml` so CTest runs it.
 3. **Write the `TEST` / fixture.** Use a fixture whose `TearDown()` calls the
    unit's reset entry point (`ResetP2pFakes()`, `ResetInitFakes()`, ...) so
    hooks do not leak between tests. Install per-test behaviour by overwriting a
@@ -289,6 +317,7 @@ symbol.
 | `src/mem_manager.cc` | `fakes/mem_manager_fakes.cc` |
 | `src/misc/amdsmi_wrap.cc` | `fakes/amdsmi_fakes.cc` |
 | `src/misc/api_trace.cc` (`NCCL_API` dispatch) | `fakes/api_trace_fakes.cc` |
+| `src/misc/ibvwrap.cc` (PD / MR registration wrappers) | `fakes/ibvwrap_fakes.cc` |
 | `src/misc/kernel_config.cc` | `fakes/kernel_config_fakes.cc` |
 | `src/misc/param.cc` + `getenv` interposition | `fakes/env_fakes.cc` |
 | `src/misc/rocmwrap.cc` | `fakes/rocmwrap_fakes.cc` |
@@ -690,7 +719,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroEnqueue            # enqueue.cc tests
 ./build/rccl-UnitTestsMicroEnqueue-devlinker  # same, RCCL_DEVICE_LINKER arm
 ./build/rccl-UnitTestsMicroSymKernels         # sym_kernels.cc tests
-./build/rccl-UnitTestsMicroTaskPrep           # src/enqueue/task_prep/ tests
+./build/rccl-UnitTestsMicroTaskPrep           # src/enqueue/task_prep/ + task_sched/ tests
 ./build/rccl-HostUnitTests
 ```
 

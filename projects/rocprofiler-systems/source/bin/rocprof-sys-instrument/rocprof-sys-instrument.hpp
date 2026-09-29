@@ -79,8 +79,7 @@ struct rocprofsys_call_expr
 
     call_expr_pointer_t get(procedure_t* func)
     {
-        return call_expr_pointer_t((func) ? new call_expr_t(*func, get_params())
-                                          : nullptr);
+        return call_expr_pointer_t(func ? new call_expr_t(*func, get_params()) : nullptr);
     }
 
 private:

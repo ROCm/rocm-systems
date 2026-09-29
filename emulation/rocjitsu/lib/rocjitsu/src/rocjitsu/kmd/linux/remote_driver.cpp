@@ -170,10 +170,9 @@ PtracerGrantVerdict authorize_daemon_address_space_access(int socket) {
     return verdict;
   }
   if (verdict == PtracerGrantVerdict::GrantUnverifiedPeer) {
-    // Said out loud, every time. This is the grant that rests on nothing but the
-    // peer having answered this socket, so which process received it belongs in
-    // the log rather than only in the kernel's unreadable exception slot.
-    util::Logger::warn(
+    // Attach mode can legitimately lack a launcher-provided PID. Keep this
+    // accepted trust decision in opt-in tracing so normal launches stay quiet.
+    util::Logger::driver(
         std::format("daemon: authorizing pid {} to read this address space; no launcher named a "
                     "daemon for this client, so nothing here identifies it further",
                     peer.pid));
@@ -411,7 +410,7 @@ PtracerGrantVerdict ptracer_grant_verdict(std::optional<pid_t> launched_daemon_p
   // daemon. Nothing here can identify the peer, and no check could be added that
   // would: a secret shared with the daemon authenticates nothing against an
   // attacker of this UID, who reads whatever this client can. The peer is
-  // trusted, and every such grant says so.
+  // trusted, and each such grant is logged only when DRIVER tracing is enabled.
   return PtracerGrantVerdict::GrantUnverifiedPeer;
 }
 
