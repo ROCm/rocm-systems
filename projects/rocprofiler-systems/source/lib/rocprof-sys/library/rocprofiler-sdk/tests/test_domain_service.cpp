@@ -5,6 +5,7 @@
 #include "library/rocprofiler-sdk/buffered/kfd/page_fault.hpp"
 #include "library/rocprofiler-sdk/buffered/kfd/queue.hpp"
 #include "library/rocprofiler-sdk/callback/code_object.hpp"
+#include "library/rocprofiler-sdk/callback/ompt.hpp"
 #include "library/rocprofiler-sdk/domain_selection.hpp"
 #include "library/rocprofiler-sdk/domain_service.hpp"
 #include "library/rocprofiler-sdk/tests/mock_domain_service.hpp"
@@ -15,6 +16,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -612,6 +614,96 @@ TEST_F(domain_service_test, configure_throws_runtime_error_for_unknown_group)
                                   .operations = std::nullopt } });
         },
         std::runtime_error);
+}
+
+// ─── finalize ────────────────────────────────────────────────────────────────
+
+TEST_F(domain_service_test, finalize_is_a_noop_when_no_domains_are_configured)
+{
+    sut_t service;
+
+    service.finalize();
+}
+
+TEST_F(domain_service_test, finalize_does_not_invoke_domains_that_leave_on_finalize_unset)
+{
+    // on_code_object_finalize is not defined, so k_code_object.on_finalize is the
+    // default-initialized nullptr; finalize() must skip it rather than call through a
+    // null function pointer.
+    constexpr const auto& k_code_object_definition =
+        domains::callback::k_code_object<mock_sdk, externals>;
+    ASSERT_EQ(k_code_object_definition.on_finalize, nullptr);
+
+    g_callback_table = mock_sdk::tracing_names_t{
+        .entries = { { .name       = "code_object",
+                       .operations = {},
+                       .value      = mock_sdk::CALLBACK_TRACING_CODE_OBJECT } }
+    };
+
+    sut_t service;
+
+    const mock_sdk::context_id_t context{ 2 };
+
+    expect_create_context(context);
+    expect_configure_callback(context,
+                              static_cast<mock_sdk::callback_tracing_kind_t>(
+                                  mock_sdk::CALLBACK_TRACING_CODE_OBJECT),
+                              k_code_object_definition.on_record, {});
+    expect_start_context(context);
+
+    service.configure(std::vector<domain_selection>{ domain_selection{
+        .name = "code_object", .group = std::nullopt, .operations = std::nullopt } });
+
+    service.finalize();
+}
+
+TEST_F(domain_service_test,
+       finalize_invokes_on_finalize_for_configured_domain_that_defines_it)
+{
+    // ompt is currently the only domain that defines on_finalize (it flushes any OMPT
+    // region still open when the tool shuts down -- see ompt.hpp's
+    // ompt_finalize_orphan_events). Populating its pending-callback storage and
+    // asserting it drains after service.finalize() proves domain_service::finalize()
+    // actually reaches the domain's on_finalize hook end-to-end, rather than merely
+    // not crashing.
+    constexpr const auto& k_ompt_definition =
+        domains::callback::k_ompt_api<mock_sdk, externals>;
+    ASSERT_NE(k_ompt_definition.on_finalize, nullptr);
+
+    g_callback_table = mock_sdk::tracing_names_t{
+        .entries = { { .name       = "ompt",
+                       .operations = {},
+                       .value      = mock_sdk::CALLBACK_TRACING_OMPT } }
+    };
+
+    sut_t service;
+
+    const mock_sdk::context_id_t context{ 2 };
+
+    expect_create_context(context);
+    expect_configure_callback(
+        context,
+        static_cast<mock_sdk::callback_tracing_kind_t>(mock_sdk::CALLBACK_TRACING_OMPT),
+        k_ompt_definition.on_record, {});
+    expect_start_context(context);
+
+    service.configure(std::vector<domain_selection>{ domain_selection{
+        .name = "ompt", .group = std::nullopt, .operations = std::nullopt } });
+
+    mock_sdk::callback_tracing_record_t record{};
+    record.operation = static_cast<std::uint32_t>(mock_sdk::OMPT_ID_task_create);
+    record.correlation_id.internal = 42U;
+
+    auto& pending_standard_callbacks =
+        domains::callback::detail::get_ompt_standard_cb_storage<mock_sdk>();
+    pending_standard_callbacks.emplace(
+        record.correlation_id.internal,
+        domains::callback::detail::rocprofsys_ompt_data_storage_t<mock_sdk>{
+            record, /*begin_timestamp=*/1, function_args_t{} });
+
+    service.finalize();
+
+    EXPECT_TRUE(pending_standard_callbacks.empty());
 }
 
 }  // namespace

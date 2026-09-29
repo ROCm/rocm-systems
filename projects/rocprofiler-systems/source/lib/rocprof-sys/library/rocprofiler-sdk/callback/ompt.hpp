@@ -673,6 +673,11 @@ on_ompt_enter(typename SdkBackend::callback_tracing_record_t record,
               typename SdkBackend::user_data_t* user_data, void* /*callback_data*/,
               typename SdkBackend::timestamp_t  timestamp = SdkBackend::get_timestamp())
 {
+    if(!Externals::is_active())
+    {
+        return;
+    }
+
     if(detail::should_skip<SdkBackend>(record))
     {
         return;
@@ -691,6 +696,11 @@ on_ompt_exit(typename SdkBackend::callback_tracing_record_t record,
              typename SdkBackend::user_data_t* user_data, void* /*callback_data*/,
              typename SdkBackend::timestamp_t  timestamp = SdkBackend::get_timestamp())
 {
+    if(!Externals::is_active())
+    {
+        return;
+    }
+
     if(detail::should_skip<SdkBackend>(record))
     {
         return;
@@ -713,6 +723,11 @@ on_ompt_none(typename SdkBackend::callback_tracing_record_t record,
              typename SdkBackend::user_data_t* user_data, void* /*callback_data*/,
              typename SdkBackend::timestamp_t  timestamp = SdkBackend::get_timestamp())
 {
+    if(!Externals::is_active())
+    {
+        return;
+    }
+
     if(detail::should_skip<SdkBackend>(record))
     {
         return;
@@ -792,6 +807,15 @@ on_ompt_none(typename SdkBackend::callback_tracing_record_t record,
     }
 }
 
+template <policies::domain_service::backend   SdkBackend,
+          policies::domain_service::externals Externals,
+          template <typename> class Category>
+void
+on_ompt_finalize()
+{
+    detail::ompt_finalize_orphan_events<SdkBackend, Externals, Category>();
+}
+
 template <typename Externals>
 struct ompt_api_category
 {
@@ -811,7 +835,8 @@ inline constexpr auto k_ompt_api = callback_domain_definition<SdkBackend>{
         SdkBackend, on_ompt_enter<SdkBackend, Externals, ompt_api_category>,
         on_ompt_exit<SdkBackend, Externals, ompt_api_category>,
         on_ompt_none<SdkBackend, Externals, ompt_api_category>>::callback,
-    .on_configure = on_ompt_configure<Externals>
+    .on_configure = on_ompt_configure<Externals>,
+    .on_finalize  = on_ompt_finalize<SdkBackend, Externals, ompt_api_category>
 };
 
 }  // namespace rocprofsys::domains::callback
