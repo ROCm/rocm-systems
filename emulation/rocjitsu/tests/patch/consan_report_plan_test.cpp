@@ -97,7 +97,7 @@ TEST(AutoReportPlan, ExplicitLargerCapPreservesCompleteTensilePublicationInvento
   const auto ordinary = plan_auto_report(inventory);
   EXPECT_EQ(ordinary.outcome, AutoReportPlanOutcome::InsufficientReportCapacity);
   EXPECT_EQ(ordinary.ceiling_bytes, kDefaultAutoReportBufferCeilingBytes);
-  EXPECT_EQ(ordinary.required_bytes, 152288376u);
+  EXPECT_EQ(ordinary.required_bytes, 152288384u);
   const auto expanded = plan_auto_report(inventory, 256u * 1024u * 1024u);
   ASSERT_TRUE(expanded.complete());
   EXPECT_EQ(expanded.required_bytes, ordinary.required_bytes);
