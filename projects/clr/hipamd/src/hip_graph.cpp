@@ -182,6 +182,11 @@ hipError_t ihipGraphAddMemcpyNode(hip::GraphNode** pGraphNode, hip::Graph* graph
   if (status != hipSuccess) {
     return status;
   }
+  const HIP_MEMCPY3D desc = hip::getDrvMemcpy3DDesc(*pCopyParams);
+  status = ihipDrvMemcpy3D_validate(&desc);
+  if (status != hipSuccess) {
+    return status;
+  }
   *pGraphNode = new hip::GraphMemcpyNode(pCopyParams);
   status = ihipGraphAddNode(*pGraphNode, graph, pDependencies, numDependencies, capture);
   return status;
