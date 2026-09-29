@@ -28,7 +28,7 @@
 #include "library/rocprofiler-sdk/callback/hsa/core_api.hpp"
 #include "library/rocprofiler-sdk/callback/hsa/finalize_ext_api.hpp"
 #include "library/rocprofiler-sdk/callback/hsa/image_ext_api.hpp"
-#include "library/rocprofiler-sdk/callback/ompt.hpp"
+#include "library/rocprofiler-sdk/callback/ompt/ompt.hpp"
 #include "library/rocprofiler-sdk/callback/rccl/rccl.hpp"
 #include "library/rocprofiler-sdk/callback/rocdecode_api.hpp"
 #include "library/rocprofiler-sdk/callback/rocjpeg_api.hpp"
@@ -198,7 +198,7 @@ private:
                      k_rocdecode_min_version)
         {
             result.add(callback::k_rocdecode_api<SdkBackend, Externals>);
-            result.add(callback::k_ompt_api<SdkBackend, Externals>);
+            result.add(callback::ompt::k_ompt_api<SdkBackend, Externals>);
         }
 
         constexpr auto k_rocjpeg_min_version =

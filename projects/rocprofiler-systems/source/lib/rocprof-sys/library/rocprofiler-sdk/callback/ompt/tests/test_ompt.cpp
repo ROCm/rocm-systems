@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "library/rocprofiler-sdk/callback/ompt.hpp"
+#include "library/rocprofiler-sdk/callback/ompt/ompt.hpp"
 #include "library/rocprofiler-sdk/tests/mock_domain_service.hpp"
 
 #include <gmock/gmock.h>
@@ -12,7 +12,7 @@
 #include <optional>
 #include <string>
 
-namespace rocprofsys::domains::callback
+namespace rocprofsys::domains::callback::ompt
 {
 namespace
 {
@@ -114,7 +114,7 @@ TEST(ompt_should_skip_test, implicit_task_with_initial_flag_skips)
 {
     auto payload = sdk::callback_tracing_ompt_data_t{};
     payload.args.implicit_task.flags =
-        static_cast<int>(ompt::ompt_task_flag_t::ompt_task_initial);
+        static_cast<int>(ompt_task_flag_t::ompt_task_initial);
 
     auto record    = make_record(sdk::OMPT_ID_implicit_task);
     record.payload = &payload;
@@ -126,7 +126,7 @@ TEST(ompt_should_skip_test, implicit_task_without_initial_flag_does_not_skip)
 {
     auto payload = sdk::callback_tracing_ompt_data_t{};
     payload.args.implicit_task.flags =
-        static_cast<int>(ompt::ompt_task_flag_t::ompt_task_implicit);
+        static_cast<int>(ompt_task_flag_t::ompt_task_implicit);
 
     auto record    = make_record(sdk::OMPT_ID_implicit_task);
     record.payload = &payload;
@@ -196,7 +196,6 @@ TEST_F(ompt_test, iterate_args_returns_early_when_payload_null_for_flagged_opera
 
 TEST_F(ompt_test, iterate_args_parallel_begin_program_invoker_and_league_cause)
 {
-    using ompt::ompt_parallel_flag_t;
     EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
 
     auto payload = sdk::callback_tracing_ompt_data_t{};
@@ -219,7 +218,6 @@ TEST_F(ompt_test, iterate_args_parallel_begin_program_invoker_and_league_cause)
 
 TEST_F(ompt_test, iterate_args_parallel_end_runtime_invoker_and_team_cause)
 {
-    using ompt::ompt_parallel_flag_t;
     EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
 
     auto payload = sdk::callback_tracing_ompt_data_t{};
@@ -256,7 +254,6 @@ TEST_F(ompt_test, iterate_args_parallel_begin_without_flags_appends_nothing)
 
 TEST_F(ompt_test, iterate_args_task_create_initial_classification_with_untied_property)
 {
-    using ompt::ompt_task_flag_t;
     EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
 
     auto payload = sdk::callback_tracing_ompt_data_t{};
@@ -279,7 +276,6 @@ TEST_F(ompt_test, iterate_args_task_create_initial_classification_with_untied_pr
 
 TEST_F(ompt_test, iterate_args_task_create_implicit_classification_no_properties)
 {
-    using ompt::ompt_task_flag_t;
     EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
 
     auto payload = sdk::callback_tracing_ompt_data_t{};
@@ -301,7 +297,6 @@ TEST_F(ompt_test, iterate_args_task_create_implicit_classification_no_properties
 
 TEST_F(ompt_test, iterate_args_task_create_explicit_classification)
 {
-    using ompt::ompt_task_flag_t;
     EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
 
     auto payload = sdk::callback_tracing_ompt_data_t{};
@@ -321,7 +316,6 @@ TEST_F(ompt_test, iterate_args_task_create_explicit_classification)
 
 TEST_F(ompt_test, iterate_args_task_create_target_classification)
 {
-    using ompt::ompt_task_flag_t;
     EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
 
     auto payload                   = sdk::callback_tracing_ompt_data_t{};
@@ -340,7 +334,6 @@ TEST_F(ompt_test, iterate_args_task_create_target_classification)
 
 TEST_F(ompt_test, iterate_args_task_create_all_properties_and_no_classification)
 {
-    using ompt::ompt_task_flag_t;
     EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
 
     auto payload = sdk::callback_tracing_ompt_data_t{};
@@ -365,7 +358,6 @@ TEST_F(ompt_test, iterate_args_task_create_all_properties_and_no_classification)
 
 TEST_F(ompt_test, iterate_args_implicit_task_initial_kind)
 {
-    using ompt::ompt_task_flag_t;
     EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
 
     auto payload = sdk::callback_tracing_ompt_data_t{};
@@ -385,7 +377,6 @@ TEST_F(ompt_test, iterate_args_implicit_task_initial_kind)
 
 TEST_F(ompt_test, iterate_args_implicit_task_implicit_kind)
 {
-    using ompt::ompt_task_flag_t;
     EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
 
     auto payload = sdk::callback_tracing_ompt_data_t{};
@@ -419,7 +410,6 @@ TEST_F(ompt_test, iterate_args_implicit_task_neither_kind_appends_nothing)
 
 TEST_F(ompt_test, iterate_args_cancel_parallel_construct_and_activated_state)
 {
-    using ompt::ompt_cancel_flag_t;
     EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
 
     auto payload = sdk::callback_tracing_ompt_data_t{};
@@ -442,7 +432,6 @@ TEST_F(ompt_test, iterate_args_cancel_parallel_construct_and_activated_state)
 
 TEST_F(ompt_test, iterate_args_cancel_sections_construct_and_detected_state)
 {
-    using ompt::ompt_cancel_flag_t;
     EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
 
     auto payload = sdk::callback_tracing_ompt_data_t{};
@@ -465,7 +454,6 @@ TEST_F(ompt_test, iterate_args_cancel_sections_construct_and_detected_state)
 
 TEST_F(ompt_test, iterate_args_cancel_loop_construct_and_discarded_task_state)
 {
-    using ompt::ompt_cancel_flag_t;
     EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
 
     auto payload = sdk::callback_tracing_ompt_data_t{};
@@ -488,7 +476,6 @@ TEST_F(ompt_test, iterate_args_cancel_loop_construct_and_discarded_task_state)
 
 TEST_F(ompt_test, iterate_args_cancel_taskgroup_construct_without_state)
 {
-    using ompt::ompt_cancel_flag_t;
     EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
 
     auto payload = sdk::callback_tracing_ompt_data_t{};
@@ -834,7 +821,7 @@ TEST_F(ompt_test, enter_skips_when_should_skip_true)
 
     auto payload = sdk::callback_tracing_ompt_data_t{};
     payload.args.implicit_task.flags =
-        static_cast<int>(ompt::ompt_task_flag_t::ompt_task_initial);
+        static_cast<int>(ompt_task_flag_t::ompt_task_initial);
     auto record    = make_record(sdk::OMPT_ID_implicit_task, sdk::CALLBACK_PHASE_ENTER);
     record.payload = &payload;
 
@@ -868,7 +855,7 @@ TEST_F(ompt_test, exit_skips_when_should_skip_true)
 
     auto payload = sdk::callback_tracing_ompt_data_t{};
     payload.args.implicit_task.flags =
-        static_cast<int>(ompt::ompt_task_flag_t::ompt_task_initial);
+        static_cast<int>(ompt_task_flag_t::ompt_task_initial);
     auto record    = make_record(sdk::OMPT_ID_implicit_task, sdk::CALLBACK_PHASE_EXIT);
     record.payload = &payload;
 
@@ -946,7 +933,7 @@ TEST_F(ompt_test, none_skips_when_should_skip_true)
 
     auto payload = sdk::callback_tracing_ompt_data_t{};
     payload.args.implicit_task.flags =
-        static_cast<int>(ompt::ompt_task_flag_t::ompt_task_initial);
+        static_cast<int>(ompt_task_flag_t::ompt_task_initial);
     auto record    = make_record(sdk::OMPT_ID_implicit_task);
     record.payload = &payload;
 
@@ -1140,4 +1127,4 @@ TEST(ompt_domain_test, on_finalize_is_wired_to_orphan_event_flush)
     EXPECT_EQ(domain.on_finalize, expected_finalize);
 }
 
-}  // namespace rocprofsys::domains::callback
+}  // namespace rocprofsys::domains::callback::ompt

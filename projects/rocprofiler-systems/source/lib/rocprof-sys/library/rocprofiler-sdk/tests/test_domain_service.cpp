@@ -5,7 +5,7 @@
 #include "library/rocprofiler-sdk/buffered/kfd/page_fault.hpp"
 #include "library/rocprofiler-sdk/buffered/kfd/queue.hpp"
 #include "library/rocprofiler-sdk/callback/code_object.hpp"
-#include "library/rocprofiler-sdk/callback/ompt.hpp"
+#include "library/rocprofiler-sdk/callback/ompt/ompt.hpp"
 #include "library/rocprofiler-sdk/domain_selection.hpp"
 #include "library/rocprofiler-sdk/domain_service.hpp"
 #include "library/rocprofiler-sdk/tests/mock_domain_service.hpp"
@@ -667,7 +667,7 @@ TEST_F(domain_service_test,
     // actually reaches the domain's on_finalize hook end-to-end, rather than merely
     // not crashing.
     constexpr const auto& k_ompt_definition =
-        domains::callback::k_ompt_api<mock_sdk, externals>;
+        domains::callback::ompt::k_ompt_api<mock_sdk, externals>;
     ASSERT_NE(k_ompt_definition.on_finalize, nullptr);
 
     g_callback_table = mock_sdk::tracing_names_t{
@@ -695,10 +695,10 @@ TEST_F(domain_service_test,
     record.correlation_id.internal = 42U;
 
     auto& pending_standard_callbacks =
-        domains::callback::detail::ompt_storage<mock_sdk>::get_standard();
+        domains::callback::ompt::detail::ompt_storage<mock_sdk>::get_standard();
     pending_standard_callbacks.emplace(
         record.correlation_id.internal,
-        domains::callback::detail::rocprofsys_ompt_data_storage_t<mock_sdk>{
+        domains::callback::ompt::detail::rocprofsys_ompt_data_storage_t<mock_sdk>{
             record, /*begin_timestamp=*/1, function_args_t{} });
 
     service.finalize();
