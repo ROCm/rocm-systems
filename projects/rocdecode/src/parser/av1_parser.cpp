@@ -1842,6 +1842,9 @@ ParserResult Av1VideoParser::TileInfo(const uint8_t *p_stream, size_t &offset, A
         int widest_tile_sb = 0;
         start_sb = 0;
         for (i = 0; start_sb < sb_cols; i++) {
+            // i indexes width_in_sbs_minus_1[MAX_TILE_COLS] here, one entry tighter than the
+            // TileCols bound checked after the loop.
+            CHECK_ALLOWED_MAX("TileCols", i, MAX_TILE_COLS - 1);
             p_frame_header->tile_info.mi_col_starts[i] = start_sb << sb_shift;
             max_width = std::min(sb_cols - start_sb, max_tile_width_sb);
             p_frame_header->tile_info.width_in_sbs_minus_1[i] = ReadUnsignedNonSymmetic(p_stream, offset, max_width);
@@ -1863,6 +1866,9 @@ ParserResult Av1VideoParser::TileInfo(const uint8_t *p_stream, size_t &offset, A
 
         start_sb = 0;
         for (i = 0; start_sb < sb_rows; i++) {
+            // i indexes height_in_sbs_minus_1[MAX_TILE_ROWS] here, one entry tighter than the
+            // TileRows bound checked after the loop.
+            CHECK_ALLOWED_MAX("TileRows", i, MAX_TILE_ROWS - 1);
             p_frame_header->tile_info.mi_row_starts[i] = start_sb << sb_shift;
             max_height = std::min(sb_rows - start_sb, max_tile_height_sb);
             p_frame_header->tile_info.height_in_sbs_minus_1[i] = ReadUnsignedNonSymmetic(p_stream, offset, max_height);
