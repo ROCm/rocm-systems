@@ -161,15 +161,9 @@ function(add_rocshmem_targets)
             INSTALL_COMMAND ""
         )
 
-        # The build step is stamped on completion, not on BUILD_COMMAND text,
-        # so flipping ASAN would otherwise keep the previous librocshmem.a.
-        # file(GENERATE) rewrites only on a content change, so this re-runs the
-        # sub-build exactly then, unlike BUILD_ALWAYS.
-        #
-        # The stamp sits beside the install it describes, not in this build
-        # dir: ext/rocshmem is shared by the release and debug trees, so a
-        # per-config stamp goes unchanged while the other config overwrites
-        # the archive underneath it.
+        # Rebuild when the sub-build's options change (e.g. ASAN): its build
+        # stamp ignores BUILD_COMMAND. The stamp sits beside the shared install,
+        # so the other config tree overwriting librocshmem.a invalidates it too.
         set(_rocshmem_opts_stamp "${ROCSHMEM_INSTALL_DIR}/rccl_build_options.txt")
         file(GENERATE OUTPUT "${_rocshmem_opts_stamp}"
              CONTENT "${CMAKE_BUILD_TYPE} ${_rocshmem_gpu_targets} ${_rocshmem_sdma_opt} ${_rocshmem_asan_opt} ${_rocshmem_cmake_opts}\n")
