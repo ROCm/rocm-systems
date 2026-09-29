@@ -7,7 +7,11 @@ from pathlib import Path
 from typing import Optional
 
 from utils.logger import console_warning
-from utils.utils_common import METRIC_ID_RE, resolve_rocm_library_path
+from utils.utils_common import (
+    METRIC_ID_RE,
+    get_skills_dir,
+    resolve_rocm_library_path,
+)
 
 
 class ExperimentalAction(argparse.Action):
@@ -214,6 +218,9 @@ def omniarg_parser(
     )
     parser._positionals.title = "Modes"
     parser._optionals.title = "Help"
+    skills_note = _skills_note(rocprof_compute_home)
+    if skills_note is not None:
+        parser.description = f"{parser.description}\n\n{skills_note}"
 
     subparsers = parser.add_subparsers(
         dest="mode", help="Select mode of interaction with the target application:"
@@ -224,6 +231,7 @@ def omniarg_parser(
     profile_parser = subparsers.add_parser(
         "profile",
         help="Profile the target application",
+        description=skills_note,
         usage="""
 
 `rocprof-compute profile --name <workload_name> [profile options] [roofline options] -- <workload_cmd>`
@@ -639,6 +647,7 @@ Examples:
     analyze_parser = subparsers.add_parser(
         "analyze",
         help="Analyze existing profiling results at command line",
+        description=skills_note,
         usage="""
 rocprof-compute analyze --path <workload_path> [analyze options]
 
@@ -1065,3 +1074,11 @@ Examples:
         help="\t\tActivate a Textual User Interface (TUI) to "
         "interact with rocprofiler-compute metrics.",
     )
+
+
+def _skills_note(rocprof_compute_home: Path) -> Optional[str]:
+    """Return the help line that points to the Agent Skills README, if shipped."""
+    skills_dir = get_skills_dir(rocprof_compute_home)
+    if skills_dir is None:
+        return None
+    return f"Agent Skills: see {skills_dir / 'README.md'} to install them."

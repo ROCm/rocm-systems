@@ -20,7 +20,7 @@ These are user-facing skills. The contributor workflows under `.ai/skills/`
 
 A ROCm install ships these skills under
 `<rocm-path>/share/rocprofiler-compute/skills/`, matching the installed
-`rocprof-compute`. `rocprof-compute profile` and `analyze` print that path.
+`rocprof-compute`. `rocprof-compute --help` prints that path.
 Run the install script from there for your agent:
 
 ```bash
