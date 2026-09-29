@@ -50,15 +50,17 @@ jobs:
   test_accl_profiler:
     name: 'ACCL profiler (${{ inputs.nodes }}N)'
     runs-on: ${{ inputs.test_runs_on }}
-    timeout-minutes: 120
+    # Allow Slurm queue time in addition to the driver's 90-minute RUNNING limit.
+    timeout-minutes: 360
     defaults:
       run:
         shell: bash
     permissions:
       contents: read
-      id-token: write
     env:
       ARTIFACT_RUN_ID: '${{ inputs.artifact_run_id }}'
+      ACCL_AMDGPU_FAMILIES: '${{ inputs.amdgpu_families }}'
+      ACCL_NODES: '${{ inputs.nodes }}'
       WORK_DIR: '/apps/rccl-ci/accl-profiler/workdir/${{ github.run_id }}-${{ github.run_attempt }}'
       OUTPUT_ARTIFACTS_DIR: '/apps/rccl-ci/accl-profiler/workdir/${{ github.run_id }}-${{ github.run_attempt }}/rocm'
       VENV_DIR: '/apps/rccl-ci/accl-profiler/workdir/${{ github.run_id }}-${{ github.run_attempt }}/venv'
@@ -67,7 +69,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: 'ROCm/TheRock'
-          ref: eec5e9375e2d60fb4598108f7db2565b620ed5c5 # 2026-09-15 commit
+          ref: 697f0cbd7c19aed91d68c498932fa72a591af4f2 # 2026-09-22
 
       - name: Checkout rocm-systems scripts
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -77,11 +79,11 @@ jobs:
 
       - name: Validate Ruby configuration
         run: |
-          if [ '${{ inputs.amdgpu_families }}' != 'gfx950-dcgpu' ]; then
+          if [[ "${ACCL_AMDGPU_FAMILIES}" != 'gfx950-dcgpu' ]]; then
             echo '::error::ACCL profiler nightly currently supports only gfx950-dcgpu on Ruby'
             exit 1
           fi
-          if ! [[ '${{ inputs.nodes }}' =~ ^[1-9][0-9]*$ ]]; then
+          if ! [[ "${ACCL_NODES}" =~ ^[1-9][0-9]*$ ]]; then
             echo '::error::nodes must be a positive integer'
             exit 1
           fi
@@ -106,13 +108,14 @@ jobs:
           readelf -Ws "${OUTPUT_ARTIFACTS_DIR}/lib/librccl-profiler-accl.so" \
             | grep -q ' ncclProfiler_v5$'
 
-      - name: Run two-node decomposition sweep
-        timeout-minutes: 105
+      - name: Run ${{ inputs.nodes }}-node decomposition sweep
+        # Leave time for cancellation and artifact upload before the job limit.
+        timeout-minutes: 345
         run: |
           python3 rocm-systems/projects/rccl/ci/scripts/test_accl_profiler.py \
             --artifact-dir "${OUTPUT_ARTIFACTS_DIR}" \
             --work-dir "${WORK_DIR}" \
-            --nodes '${{ inputs.nodes }}' \
+            --nodes "${ACCL_NODES}" \
             --gpus-per-node 8 \
             --partition meta64 \
             --mpi-root /apps/sp/ompi-install \
@@ -122,6 +125,16 @@ jobs:
             --step-factor 2 \
             --iterations 20 \
             --warmup-iterations 5
+
+      - name: Cancel Slurm job
+        if: always()
+        run: |
+          if [ -f "${WORK_DIR}/slurm/job_id.txt" ]; then
+            job_id="$(< "${WORK_DIR}/slurm/job_id.txt")"
+            if [[ "${job_id}" =~ ^[0-9]+$ ]]; then
+              scancel "${job_id}" 2>/dev/null || true
+            fi
+          fi
 
       - name: Upload ACCL profiler summary
         if: always()
@@ -150,15 +163,9 @@ jobs:
           retention-days: 14
           compression-level: 6
 
-      - name: Cancel Slurm job and clean work directory
+      - name: Clean work directory
         if: always()
         run: |
-          if [ -f "${WORK_DIR}/slurm/job_id.txt" ]; then
-            job_id="$(< "${WORK_DIR}/slurm/job_id.txt")"
-            if [[ "${job_id}" =~ ^[0-9]+$ ]]; then
-              scancel "${job_id}" 2>/dev/null || true
-            fi
-          fi
           case "${WORK_DIR}" in
             /apps/rccl-ci/accl-profiler/workdir/*)
               rm -rf -- "${WORK_DIR}"

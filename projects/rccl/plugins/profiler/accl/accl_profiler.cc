@@ -17,6 +17,9 @@
 
 #define __hidden __attribute__((visibility("hidden")))
 
+static_assert(ACCL_MAX_CHANNELS >= 256,
+              "kernelCh[] must cover the full uint8_t channelId range");
+
 static ncclDebugLogger_t gLogFn;
 
 #define ACCL_INFO(...)  do { if (gLogFn) gLogFn(4, 0x4000, __func__, __LINE__, __VA_ARGS__); } while(0)

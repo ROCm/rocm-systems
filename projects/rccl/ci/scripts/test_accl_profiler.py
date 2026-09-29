@@ -104,6 +104,25 @@ MPI_FORWARDED_ENV = (
     "NCCL_DEBUG",
 )
 
+SLURM_TERMINAL_STATES = frozenset(
+    {
+        "BOOT_FAIL",
+        "CANCELLED",
+        "COMPLETED",
+        "DEADLINE",
+        "FAILED",
+        "NODE_FAIL",
+        "OUT_OF_MEMORY",
+        "PREEMPTED",
+        "REVOKED",
+        "TIMEOUT",
+    }
+)
+SQUEUE_MAX_CONSECUTIVE_ERRORS = 6
+SQUEUE_POLL_SECONDS = 10
+SACCT_POLL_SECONDS = 2
+SACCT_TIMEOUT_SECONDS = 300
+
 
 def _raise_keyboard_interrupt(signum, _frame) -> None:
     """Turn runner termination into the cancellation path for the Slurm job."""
@@ -236,6 +255,53 @@ def validate_kpack_layout(paths: ArtifactPaths) -> None:
         )
 
 
+def render_node_preflight_script() -> str:
+    """Render the compute-node payload passed to ``srun ... bash -c``."""
+    return r'''set -eu
+host=$(hostname -s)
+resolved_rccl=$(ldd "$ACCL_PREFLIGHT_BINARY" | awk '/librccl[.]so/{print $3; exit}')
+test -n "$resolved_rccl"
+test "$(readlink -f "$resolved_rccl")" = "$(readlink -f "$ACCL_RCCL_LIB")"
+resolved_hip=$(ldd "$ACCL_PREFLIGHT_BINARY" | awk '/libamdhip64[.]so/{print $3; exit}')
+test -n "$resolved_hip"
+case "$(readlink -f "$resolved_hip")" in "$ROCM_PATH"/*) ;; *) echo "unexpected HIP runtime: $resolved_hip" >&2; exit 1 ;; esac
+test "$(sha256sum "$ACCL_RCCL_LIB" | awk '{print $1}')" = "$ACCL_EXPECT_RCCL_SHA256"
+test "$(sha256sum "$ACCL_PLUGIN" | awk '{print $1}')" = "$ACCL_EXPECT_PLUGIN_SHA256"
+readelf -Ws "$ACCL_PLUGIN" | grep -q ' ncclProfiler_v5$'
+if [ "$ACCL_KPACK_COUNT" -gt 0 ]; then
+  for kpack in $ACCL_KPACK_FILES; do test -s "$kpack"; done
+  readelf -SW "$ACCL_RCCL_LIB" | grep -q '[.]rocm_kpack_ref'
+  for binary in $ACCL_TEST_BINARIES; do
+    readelf -SW "$binary" | grep -q '[.]rocm_kpack_ref'
+  done
+else
+  if readelf -SW "$ACCL_RCCL_LIB" | grep -q '[.]rocm_kpack_ref'; then
+    echo "librccl.so is kpack-stripped but no kpack archives were fetched" >&2
+    exit 1
+  fi
+  for binary in $ACCL_TEST_BINARIES; do
+    if readelf -SW "$binary" | grep -q '[.]rocm_kpack_ref'; then
+      echo "$binary is kpack-stripped but no kpack archives were fetched" >&2
+      exit 1
+    fi
+  done
+fi
+if [ -x "$ROCM_PATH/bin/rocminfo" ]; then
+  archs=$("$ROCM_PATH/bin/rocminfo" 2>/dev/null | sed -n 's/.*Name:[[:space:]]*\(gfx[0-9a-f]*\).*/\1/p' | sort -u | paste -sd, -)
+elif [ -x /usr/bin/python3 ] && [ -f "$ROCM_PATH/bin/rocm_agent_enumerator" ]; then
+  archs=$(/usr/bin/python3 "$ROCM_PATH/bin/rocm_agent_enumerator" | sort -u | paste -sd, -)
+elif [ -x /usr/local/bin/python3 ] && [ -f "$ROCM_PATH/bin/rocm_agent_enumerator" ]; then
+  archs=$(/usr/local/bin/python3 "$ROCM_PATH/bin/rocm_agent_enumerator" | sort -u | paste -sd, -)
+elif command -v rocminfo >/dev/null 2>&1; then
+  archs=$(rocminfo 2>/dev/null | sed -n 's/.*Name:[[:space:]]*\(gfx[0-9a-f]*\).*/\1/p' | sort -u | paste -sd, -)
+else
+  archs=
+fi
+case ",$archs," in *,gfx950,*) ;; *) echo "unexpected GPU architecture(s): $archs" >&2; exit 1 ;; esac
+printf 'host=%s arch=%s rccl=%s plugin=%s hip=%s kpacks=%s\n' "$host" "$archs" "$ACCL_EXPECT_RCCL_SHA256" "$ACCL_EXPECT_PLUGIN_SHA256" "$(readlink -f "$resolved_hip")" "$ACCL_KPACK_COUNT"
+'''
+
+
 def render_slurm_script(
     paths: ArtifactPaths,
     work_dir: Path,
@@ -283,7 +349,10 @@ def render_slurm_script(
         "set -uo pipefail",
         (
             "unset PYTHONHOME PYTHONPATH VIRTUAL_ENV "
-            "ROCM_KPACK_PATH ROCM_KPACK_PATH_PREFIX || true"
+            "ROCM_KPACK_PATH ROCM_KPACK_PATH_PREFIX "
+            "ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN "
+            "ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_RUNTIME_URL "
+            "ACTIONS_RESULTS_URL || true"
         ),
         _shell_export("PATH", ":".join(path_entries)),
         _shell_export("LD_LIBRARY_PATH", ":".join(ld_paths)),
@@ -354,71 +423,8 @@ def render_slurm_script(
             'if [ "$preflight_rc" -eq 0 ]; then',
             (
                 f"  srun --nodes={config.nodes} --ntasks={config.nodes} --ntasks-per-node=1 "
-                "--kill-on-bad-exit=1 bash -c '"
-            ),
-            "set -eu",
-            "host=$(hostname -s)",
-            "resolved_rccl=$(ldd \"$ACCL_PREFLIGHT_BINARY\" | awk '\"'\"'/librccl[.]so/{print $3; exit}'\"'\"')",
-            'test -n "$resolved_rccl"',
-            'test "$(readlink -f "$resolved_rccl")" = "$(readlink -f "$ACCL_RCCL_LIB")"',
-            "resolved_hip=$(ldd \"$ACCL_PREFLIGHT_BINARY\" | awk '\"'\"'/libamdhip64[.]so/{print $3; exit}'\"'\"')",
-            'test -n "$resolved_hip"',
-            (
-                'case "$(readlink -f "$resolved_hip")" in '
-                '"$ROCM_PATH"/*) ;; *) echo "unexpected HIP runtime: $resolved_hip" >&2; exit 1 ;; esac'
-            ),
-            'test "$(sha256sum "$ACCL_RCCL_LIB" | awk \'"\'"\'{print $1}\'"\'"\')" = "$ACCL_EXPECT_RCCL_SHA256"',
-            'test "$(sha256sum "$ACCL_PLUGIN" | awk \'"\'"\'{print $1}\'"\'"\')" = "$ACCL_EXPECT_PLUGIN_SHA256"',
-            "readelf -Ws \"$ACCL_PLUGIN\" | grep -q '\"'\"' ncclProfiler_v5$'\"'\"'",
-            'if [ "$ACCL_KPACK_COUNT" -gt 0 ]; then',
-            '  for kpack in $ACCL_KPACK_FILES; do test -s "$kpack"; done',
-            "  readelf -SW \"$ACCL_RCCL_LIB\" | grep -q '\"'\"'[.]rocm_kpack_ref'\"'\"'",
-            "  for binary in $ACCL_TEST_BINARIES; do",
-            "    readelf -SW \"$binary\" | grep -q '\"'\"'[.]rocm_kpack_ref'\"'\"'",
-            "  done",
-            "else",
-            "  if readelf -SW \"$ACCL_RCCL_LIB\" | grep -q '\"'\"'[.]rocm_kpack_ref'\"'\"'; then",
-            '    echo "librccl.so is kpack-stripped but no kpack archives were fetched" >&2',
-            "    exit 1",
-            "  fi",
-            "  for binary in $ACCL_TEST_BINARIES; do",
-            "    if readelf -SW \"$binary\" | grep -q '\"'\"'[.]rocm_kpack_ref'\"'\"'; then",
-            '      echo "$binary is kpack-stripped but no kpack archives were fetched" >&2',
-            "      exit 1",
-            "    fi",
-            "  done",
-            "fi",
-            # Prefer the native rocminfo executable. rocm_agent_enumerator is a
-            # Python script, so use an explicit node-local interpreter only as a
-            # fallback instead of its /usr/bin/env shebang.
-            'if [ -x "$ROCM_PATH/bin/rocminfo" ]; then',
-            (
-                '  archs=$("$ROCM_PATH/bin/rocminfo" 2>/dev/null | sed -n '
-                "'\"'\"'s/.*Name:[[:space:]]*\\(gfx[0-9a-f]*\\).*/\\1/p'\"'\"' "
-                "| sort -u | paste -sd, -)"
-            ),
-            'elif [ -x /usr/bin/python3 ] && [ -f "$ROCM_PATH/bin/rocm_agent_enumerator" ]; then',
-            '  archs=$(/usr/bin/python3 "$ROCM_PATH/bin/rocm_agent_enumerator" | sort -u | paste -sd, -)',
-            'elif [ -x /usr/local/bin/python3 ] && [ -f "$ROCM_PATH/bin/rocm_agent_enumerator" ]; then',
-            '  archs=$(/usr/local/bin/python3 "$ROCM_PATH/bin/rocm_agent_enumerator" | sort -u | paste -sd, -)',
-            "elif command -v rocminfo >/dev/null 2>&1; then",
-            (
-                "  archs=$(rocminfo 2>/dev/null | sed -n "
-                "'\"'\"'s/.*Name:[[:space:]]*\\(gfx[0-9a-f]*\\).*/\\1/p'\"'\"' "
-                "| sort -u | paste -sd, -)"
-            ),
-            "else",
-            "  archs=",
-            "fi",
-            'case ",$archs," in *,gfx950,*) ;; *) echo "unexpected GPU architecture(s): $archs" >&2; exit 1 ;; esac',
-            (
-                "printf '\"'\"'host=%s arch=%s rccl=%s plugin=%s hip=%s kpacks=%s\\n'\"'\"' "
-                '"$host" "$archs" "$ACCL_EXPECT_RCCL_SHA256" '
-                '"$ACCL_EXPECT_PLUGIN_SHA256" "$(readlink -f "$resolved_hip")" '
-                '"$ACCL_KPACK_COUNT"'
-            ),
-            (
-                "' "
+                "--kill-on-bad-exit=1 bash -c "
+                f"{shlex.quote(render_node_preflight_script())} "
                 f">> {shlex.quote(str(preflight_log))} 2>&1 || preflight_rc=$?"
             ),
             "fi",
@@ -513,11 +519,15 @@ def submit_slurm_job(script_path: Path, work_dir: Path, config: RunConfig) -> st
         command.append(f"--constraint={config.constraint}")
     command.append(str(script_path))
     log.info("Submitting: %s", shlex.join(command))
-    result = subprocess.run(command, capture_output=True, text=True, check=True)
+    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    slurm_dir = work_dir / "slurm"
+    (slurm_dir / "sbatch.stdout").write_text(result.stdout, encoding="utf-8")
+    (slurm_dir / "sbatch.stderr").write_text(result.stderr, encoding="utf-8")
+    result.check_returncode()
     job_id = result.stdout.strip().split(";", maxsplit=1)[0]
     if not job_id.isdigit():
         raise RuntimeError(f"Could not parse Slurm job ID from: {result.stdout!r}")
-    (work_dir / "slurm" / "job_id.txt").write_text(job_id + "\n", encoding="utf-8")
+    (slurm_dir / "job_id.txt").write_text(job_id + "\n", encoding="utf-8")
     return job_id
 
 
@@ -528,29 +538,62 @@ def cancel_slurm_job(job_id: str) -> None:
     subprocess.run(["scancel", job_id], check=False)
 
 
+def _normalize_slurm_state(state: str) -> str:
+    """Return the base Slurm state without reason text or a trailing '+' suffix."""
+    return state.strip().split(maxsplit=1)[0].rstrip("+") if state.strip() else ""
+
+
 def wait_for_slurm_job(job_id: str, timeout_minutes: int) -> tuple[str, str]:
-    deadline = time.monotonic() + timeout_minutes * 60
+    run_deadline = None
     previous_state = ""
-    while time.monotonic() < deadline:
+    consecutive_squeue_errors = 0
+    while True:
         result = subprocess.run(
             ["squeue", "--noheader", "--jobs", job_id, "--format=%T"],
             capture_output=True,
             text=True,
             check=False,
         )
+        if result.returncode != 0:
+            consecutive_squeue_errors += 1
+            log.warning(
+                "squeue failed for job %s (%d/%d): %s",
+                job_id,
+                consecutive_squeue_errors,
+                SQUEUE_MAX_CONSECUTIVE_ERRORS,
+                result.stderr.strip() or f"exit {result.returncode}",
+            )
+            if consecutive_squeue_errors >= SQUEUE_MAX_CONSECUTIVE_ERRORS:
+                raise RuntimeError(
+                    f"squeue failed {consecutive_squeue_errors} consecutive times "
+                    f"for Slurm job {job_id}"
+                )
+            time.sleep(SQUEUE_POLL_SECONDS)
+            continue
+
+        consecutive_squeue_errors = 0
         state = result.stdout.strip().splitlines()
         if not state:
             break
-        current_state = state[0]
+        current_state = _normalize_slurm_state(state[0])
         if current_state != previous_state:
             log.info("Slurm job %s state: %s", job_id, current_state)
             previous_state = current_state
-        time.sleep(10)
-    else:
-        cancel_slurm_job(job_id)
-        raise TimeoutError(f"Slurm job {job_id} exceeded {timeout_minutes} minutes")
+        if current_state in {"RUNNING", "COMPLETING", "STAGE_OUT"}:
+            now = time.monotonic()
+            if run_deadline is None:
+                run_deadline = now + timeout_minutes * 60
+            elif now >= run_deadline:
+                cancel_slurm_job(job_id)
+                raise TimeoutError(
+                    f"Slurm job {job_id} exceeded {timeout_minutes} running minutes"
+                )
+        time.sleep(SQUEUE_POLL_SECONDS)
 
-    for _ in range(6):
+    accounting_deadline = time.monotonic() + SACCT_TIMEOUT_SECONDS
+    last_state = ""
+    last_exit_code = ""
+    while time.monotonic() < accounting_deadline:
         result = subprocess.run(
             [
                 "sacct",
@@ -565,12 +608,27 @@ def wait_for_slurm_job(job_id: str, timeout_minutes: int) -> tuple[str, str]:
             text=True,
             check=False,
         )
+        if result.returncode != 0:
+            log.warning(
+                "sacct failed for job %s: %s",
+                job_id,
+                result.stderr.strip() or f"exit {result.returncode}",
+            )
+            time.sleep(SACCT_POLL_SECONDS)
+            continue
         rows = [line for line in result.stdout.splitlines() if line.strip()]
         if rows:
             fields = rows[0].split("|")
-            return fields[0], fields[1] if len(fields) > 1 else ""
-        time.sleep(2)
-    return "UNKNOWN", ""
+            last_state = _normalize_slurm_state(fields[0])
+            last_exit_code = fields[1] if len(fields) > 1 else ""
+            if last_state in SLURM_TERMINAL_STATES:
+                return last_state, last_exit_code
+        time.sleep(SACCT_POLL_SECONDS)
+    raise RuntimeError(
+        f"Slurm accounting did not report a terminal state for job {job_id} "
+        f"within {SACCT_TIMEOUT_SECONDS} seconds; "
+        f"last_state={last_state or 'UNKNOWN'}, exit_code={last_exit_code}"
+    )
 
 
 def parse_collective_status(status_file: Path) -> dict[str, int]:
@@ -662,7 +720,12 @@ def validate_collective_output(
                 raise ValueError(
                     f"Missing decomposition fields in {path}: {sorted(missing)}"
                 )
-            kernel_events = coll_perf.get("event_trace_ts", {}).get("kernel_events")
+            event_trace = coll_perf.get("event_trace_ts")
+            kernel_events = (
+                event_trace.get("kernel_events")
+                if isinstance(event_trace, dict)
+                else None
+            )
             if not isinstance(kernel_events, list) or not kernel_events:
                 raise ValueError(f"Missing kernel events in {path}")
 
@@ -873,7 +936,7 @@ def main() -> int:
     script_path.write_text(
         render_slurm_script(paths, work_dir, config), encoding="utf-8"
     )
-    script_path.chmod(0o755)
+    script_path.chmod(0o700)
     if args.dry_run:
         log.info("Dry run complete; Slurm script written to %s", script_path)
         return 0

@@ -91,14 +91,30 @@ def test_warmup_is_applied_per_message_size():
 
 
 def test_warmup_is_applied_per_rank():
-    lines = []
-    for sn in range(0, 3):
-        lines.append(_make_record(sn=sn, rank=0))
-        lines.append(_make_record(sn=sn, rank=1))
+    lines = [_make_record(sn=sn, rank=0) for sn in range(0, 3)]
+    lines += [_make_record(sn=sn, rank=1) for sn in range(2, 5)]
     path = _write_jsonl(lines)
     try:
         records = parse_jsonl(path, warmup=2)
-        assert [(r.rank, r.sn) for r in records] == [(0, 2), (1, 2)]
+        assert [(r.rank, r.sn) for r in records] == [(0, 2), (1, 4)]
+    finally:
+        os.unlink(path)
+
+
+def test_warmup_is_applied_per_collective():
+    lines = [
+        _make_record(sn=sn, coll="AllReduce") for sn in range(0, 3)
+    ]
+    lines += [
+        _make_record(sn=sn, coll="Broadcast") for sn in range(3, 6)
+    ]
+    path = _write_jsonl(lines)
+    try:
+        records = parse_jsonl(path, warmup=2)
+        assert [(r.coll, r.sn) for r in records] == [
+            ("AllReduce", 2),
+            ("Broadcast", 5),
+        ]
     finally:
         os.unlink(path)
 
