@@ -2943,7 +2943,7 @@
         {
           "name": "UBR_MultiSegment_All_Core",
           "description": "Single-node UBR multi-segment tests except jobs that need a dedicated env or two nodes",
-          "test_filter": "UBR_MultiSegment.*-UBR_MultiSegment.Generic:UBR_MultiSegment.Generic_Reuse:UBR_MultiSegment.Generic_Reuse_BeforeCePlanBypassesRegistrationCache:UBR_MultiSegment.Symmetric_Lsa:UBR_MultiSegment.Symmetric_Lsa_BeforeLegacyRecvOffsetCorruptsResult:UBR_MultiSegment.Symmetric_LsaGin:UBR_MultiSegment.Symmetric_Elastic_Gating:UBR_MultiSegment.DeepEP_Hybrid*:UBR_MultiSegment.NetProxyPartialFinalSegment:UBR_MultiSegment.DeepEP_ElasticWindowRegistration"
+          "test_filter": "UBR_MultiSegment.*-UBR_MultiSegment.Generic:UBR_MultiSegment.Generic_Reuse:UBR_MultiSegment.Symmetric_Lsa:UBR_MultiSegment.Symmetric_Lsa_BeforeLegacyRecvOffsetCorruptsResult:UBR_MultiSegment.Symmetric_LsaGin:UBR_MultiSegment.Symmetric_Elastic_Gating:UBR_MultiSegment.DeepEP_Hybrid*:UBR_MultiSegment.NetProxyPartialFinalSegment:UBR_MultiSegment.DeepEP_ElasticWindowRegistration"
         },
         {
           "name": "UBR_MultiSegment_Generic_Reuse",
@@ -2982,34 +2982,6 @@
           "env_variables": {
             "NCCL_ELASTIC_BUFFER_REGISTER": "0"
           }
-        }
-      ]
-    },
-    "ubr_multisegment_ce_before": {
-      "extends": "default",
-      "is_gtest": true,
-      "binary": "rccl-UnitTestsMPI",
-      "num_ranks": 2,
-      "num_nodes": 1,
-      "num_gpus": 2,
-      "timeout": 180,
-      "env_variables": {
-        "NCCL_DEBUG_SUBSYS": "REG",
-        "NCCL_LOCAL_REGISTER": "1",
-        "NCCL_CUMEM_ENABLE": "1",
-        "NCCL_MULTI_SEGMENT_REGISTER": "1",
-        "NCCL_WIN_ENABLE": "1",
-        "NCCL_ELASTIC_BUFFER_REGISTER": "1",
-        "RCCL_MPI_LOG_ALL_RANKS": "1",
-        "RCCL_CE_ALLREDUCE": "1",
-        "RCCL_FORCE_CE_ALLREDUCE": "1",
-        "NCCL_CTA_POLICY": "2"
-      },
-      "tests": [
-        {
-          "name": "UBR_MultiSegment_Generic_Reuse_BEFORE",
-          "description": "Forced-CE BEFORE control that must not complete IPC/NET registration",
-          "test_filter": "UBR_MultiSegment.Generic_Reuse_BeforeCePlanBypassesRegistrationCache"
         }
       ]
     },
@@ -3135,12 +3107,6 @@
       "name": "Multi-Segment - Registration and LSA",
       "description": "All single-node UBR, symmetric-window, elastic, and DeepEP registration tests",
       "config": "ubr_multisegment_comprehensive",
-      "enabled": true
-    },
-    {
-      "name": "Multi-Segment - CE BEFORE registration cache",
-      "description": "CE-forced process for Generic_Reuse_BeforeCePlanBypassesRegistrationCache",
-      "config": "ubr_multisegment_ce_before",
       "enabled": true
     },
     {
