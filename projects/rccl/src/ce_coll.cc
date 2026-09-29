@@ -42,7 +42,6 @@ ncclResult_t ncclCeLaunchPersistentReduce(const void* in, void* out, int nRanks,
 RCCL_PARAM(CeMultiStreams, "CE_MULTI_STREAMS", 0);
 RCCL_PARAM(CeBatchAsyncEnable, "CE_BATCH_ASYNC_ENABLE", -2);
 RCCL_PARAM(CeCoopLaunch, "CE_COOP_LAUNCH", 0);
-RCCL_PARAM_DECLARE(CeAllReduce);
 
 #ifdef CE_BATCH_ASYNC_SUPPORTED
 // Runtime detection: does the running driver actually implement hipMemcpyBatchAsync?
@@ -155,6 +154,12 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
   ncclWindow_vidmem* sigWinDevHost = nullptr;
   size_t ceDevBaseSize = alignUp(comm->nRanks * sizeof(uint32_t), 16) * 2;
   size_t sigBufferSize = NUM_SLOTS * comm->nRanks * sizeof(uint32_t);
+  static int64_t paramMax     = rcclParamCeArMaxMsgBytes();
+  static int64_t paramStaging = rcclParamCeArStagingBytes();
+  static constexpr size_t kCeArMaxDefault = 256ULL * 1024 * 1024;
+  comm->ceColl.ceArMaxBytes     = (paramMax >= 0) ? (size_t)paramMax
+      : (comm->archThresholds != nullptr ? comm->archThresholds->ceNonRegMax[ncclFuncAllReduce] : kCeArMaxDefault);
+  comm->ceColl.ceArStagingBytes = (paramStaging >= 0) ? (size_t)paramStaging : (size_t)NCCL_CE_AR_STAGING_BYTES;
   int i = 0;
   int targetStreams = 0;
   uint32_t graphSyncValue = GRAPH_SYNC_VALUE;
@@ -391,8 +396,29 @@ bool ncclCeScratchAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDe
     TRACE(NCCL_TUNING, "Skipping CE collective: comm is not a single node");
     return false;
   }
+  // The scratch routines address peers by LSA rank, so a team that does not
+  // cover the comm would touch only lsaSize slices, at the wrong indices.
+  // Reachable on a single node via NCCL_LSA_TEAM_SIZE. Prefer the initialized
+  // LSA team; calling ncclTeamLsa before device-runtime init (unit-test mocks,
+  // pre-init comms) can SIGSEGV on a null peerInfo.
+  int lsaRanks = comm->nRanks;
+  if (comm->devrState.bigSize != 0) {
+    lsaRanks = ncclTeamLsa(comm).nRanks;
+  } else if (comm->localRanks > 0) {
+    lsaRanks = comm->localRanks;
+  }
+  if (lsaRanks < comm->nRanks) {
+    TRACE(NCCL_TUNING, "Skipping CE collective: LSA team does not cover the comm");
+    return false;
+  }
   if (!comm->symmetricSupport) {
     TRACE(NCCL_TUNING, "Skipping CE collective: symmetric support is not enabled");
+    return false;
+  }
+  // Scratch path writes output to ddaScratch, not the user recv buffer.
+  // Reject if recv is already a registered symmetric window.
+  if (winRegType == ncclSymSendRegRecvReg || winRegType == ncclSymSendNonregRecvReg) {
+    TRACE(NCCL_TUNING, "Skipping CE scratch: recv buffer is registered");
     return false;
   }
   return true;
@@ -590,10 +616,16 @@ ncclResult_t ncclMemOpSync(struct ncclComm* comm, cudaStream_t stream, struct nc
   uint32_t* readyPtrs = (uint32_t*)comm->ceColl.baseUCSymReadyPtr;
   uint32_t* completePtrs = (uint32_t*)comm->ceColl.baseUCSymComplPtr;
 
+  // Multicast sync needs a multimem mapping over the LSA team, which a
+  // cross-clique (scale-up) comm does not have. hasLsaMultimem is the same
+  // signal the symmetric kernels and enqueue use, so the selection here, the
+  // op-count sizing below and the [Copy Engine] marker cannot disagree.
+  const bool useMCSync = comm->symkState.hasLsaMultimem;
+
   // Allocate enough slots for all possible ops. PrepUC/MC sync iterate the LSA
   // team (not comm->nRanks); size with nRanks so a stale lsaSize of 0 cannot
   // under-allocate, matching the nRanks-wide ready/complete arrays.
-  size_t batchSize = (comm->nvlsSupport ? NCCL_CE_SYNC_OPS_PER_RANK_MC : NCCL_CE_SYNC_OPS_PER_RANK_UC) * comm->nRanks;
+  size_t batchSize = (useMCSync ? NCCL_CE_SYNC_OPS_PER_RANK_MC : NCCL_CE_SYNC_OPS_PER_RANK_UC) * comm->nRanks;
   size_t opIdx = 0;
   hipStreamBatchMemOpParams* batchParams = nullptr;
 
@@ -602,7 +634,7 @@ ncclResult_t ncclMemOpSync(struct ncclComm* comm, cudaStream_t stream, struct nc
   // Prepare batch memory operations for synchronization
   NCCLCHECKGOTO(ncclCalloc(&batchParams, batchSize), ret, fail);
 
-  if (comm->nvlsSupport) {
+  if (useMCSync) {
     NCCLCHECKGOTO(ncclPrepMCSync(comm, comm->ceColl.useCompletePtr, batchParams, &opIdx, stream), ret, fail);
   } else {
     NCCLCHECKGOTO(ncclPrepUCSync(comm, comm->ceColl.useCompletePtr, batchParams, &opIdx, stream), ret, fail);
@@ -688,6 +720,12 @@ void ncclCeFreeBatchOpsParams(struct ncclCeBatchOpsParams* params) {
     free(params->sizes);
     params->sizes = nullptr;
   }
+  // Reset the counters and the sync flag too, not just the pointers. The
+  // hierarchical collectives release the same params twice (once per chunk
+  // batch, once at exit), and a stale numOps would make the second release look
+  // like it still describes a populated batch.
+  params->numOps = 0;
+  params->intraBatchSync = false;
 #ifdef CE_BATCH_ASYNC_SUPPORTED
   if (params->attrs) {
     free(params->attrs);
@@ -697,6 +735,7 @@ void ncclCeFreeBatchOpsParams(struct ncclCeBatchOpsParams* params) {
     free(params->attrIdxs);
     params->attrIdxs = nullptr;
   }
+  params->numAttrs = 0;
 #endif
 }
 
@@ -1219,13 +1258,22 @@ bool ncclHierCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRe
     TRACE(NCCL_TUNING, "Skipping hierarchical CE collective: not multi-node");
     return false;
   }
+  // Sub-comms are only built at nNodes >= 8; rcclHierarchicalAlgoInfo dereferences
+  // them unconditionally, so bail out here if they are not initialized.
+  if (!comm->hierarchicalCommsInitialized) {
+    TRACE(NCCL_TUNING, "Skipping hierarchical CE collective: hierarchical sub-comms not initialized");
+    return false;
+  }
   // If LSA already spans the whole comm, use CE path instead
   if (ncclDevrIsOneLsaTeam(comm)) {
     TRACE(NCCL_TUNING, "Skipping hierarchical CE collective: LSA spans the comm; use CE path instead");
     return false;
   }
-  // Intra-node CE scatter writes via LSA pointers
-  if (ncclTeamLsa(comm).nRanks < comm->localRanks) {
+  // Intra-node CE scatter writes via LSA pointers. Compare against the largest
+  // node rather than this rank's own node: lsaSize is a comm-wide gcd, so with
+  // unequal ranks per node comm->localRanks would clear this on the small nodes
+  // and not on the large ones, and the answer gates a group join in taskAppend.
+  if (ncclTeamLsa(comm).nRanks < comm->maxLocalRanks) {
     TRACE(NCCL_TUNING, "Skipping hierarchical CE collective: LSA team does not cover all local ranks");
     return false;
   }
@@ -1248,6 +1296,10 @@ bool ncclHierCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRe
     return false;
   }
   return true;
+}
+
+bool ncclHierCeDispatch(struct ncclComm* comm) {
+  return comm->nNodes > 1 && !ncclDevrIsOneLsaTeam(comm);
 }
 
 // Per-(peer, chunk) chunking plan in flat form. Peer p's chunks
@@ -2079,7 +2131,7 @@ static ncclResult_t ncclCeEnsureAllReduceStaging(struct ncclComm* comm) {
   if (comm->ceColl.ceARTmpBuf != nullptr) return ncclSuccess;
   if (!rcclParamCeAllReduce()) return ncclSuccess;
 
-  maxChunkBytes = ncclCeAllReduceMaxChunkBytes(comm->nRanks);
+  maxChunkBytes = comm->ceColl.ceArStagingBytes / (size_t)comm->nRanks;
   ceARTmpBufSize = alignUp(NUM_SLOTS * comm->nRanks * maxChunkBytes, 16);
   NCCLCHECKGOTO(ncclMemAlloc((void**)&ceARTmpBuf, ceARTmpBufSize), ret, fail);
   NCCLCHECKGOTO(ncclDevrWindowRegisterInGroup(comm, ceARTmpBuf, ceARTmpBufSize, NCCL_WIN_COLL_SYMMETRIC, &arWinDev),
@@ -2113,7 +2165,7 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
   const size_t shardElems = count / comm->nRanks;
   const size_t shardBytes = shardElems * eltSize;
   const size_t NUM_SLOTS = NCCL_CE_NUM_SLOTS;
-  const size_t slotChunkBytes = ncclCeAllReduceSlotChunkBytes(ncclCeAllReduceMaxChunkBytes(comm->nRanks));
+  const size_t slotChunkBytes = ncclCeAllReduceSlotChunkBytes(comm->ceColl.ceArStagingBytes / (size_t)comm->nRanks);
   if (shardElems == 0 || slotChunkBytes < eltSize) {
     WARN("CE AllReduce: no valid chunk layout (count=%zu eltSize=%zu nRanks=%d)", count, eltSize, comm->nRanks);
     return ncclInvalidArgument;
@@ -2369,48 +2421,57 @@ ncclResult_t ncclLaunchCeColl(struct ncclComm* comm, struct ncclKernelPlan* plan
   // Start CE collective profiling
   NCCLCHECKGOTO(ncclProfilerStartCeCollEvent(comm, args, stream), ret, fail);
 
-  switch (args->func) {
-  case ncclFuncAllGather:
-    // Multi-node CE AllGather is hierarchical (RMA rail + intra-node CE). The
-    // single-node ncclCeAllGather path treats every global rank as an LSA rank
-    // and fails ncclDevrGetLsaRankPtr once nRanks > lsaSize.
-    if (!ncclDevrIsOneLsaTeam(comm)) {
+  // Hierarchical path: inter-node RMA plus intra-node CE. This predicate must
+  // match the one ncclHierCeAvailable admitted the task under, otherwise a
+  // single-node comm with a reduced LSA team (NCCL_LSA_TEAM_SIZE) would be
+  // dispatched here without the RMA prerequisites having been checked. The
+  // single-node ncclCe* paths treat every global rank as an LSA rank and fail
+  // ncclDevrGetLsaRankPtr once nRanks > lsaSize.
+  if (ncclHierCeDispatch(comm)) {
+    switch (args->func) {
+    case ncclFuncAllGather:
       NCCLCHECKGOTO(ncclHierCeAllGather(comm, plan, stream), ret, fail);
-    } else {
-      NCCLCHECKGOTO(ncclCeAllGather(comm, args, stream), ret, fail);
-    }
-    break;
-  case ncclFuncAlltoAll:
-    if (!ncclDevrIsOneLsaTeam(comm)) {
-      NCCLCHECKGOTO(ncclHierCeAlltoAll(comm, plan, stream), ret, fail);
-    } else {
-      NCCLCHECKGOTO(ncclCeAlltoAll(comm, args, stream), ret, fail);
-    }
-    break;
-  case ncclFuncAlltoAllv:
-    NCCLCHECKGOTO(ncclCeAlltoAllv(comm, args, stream), ret, fail);
-    break;
-  case ncclFuncScatter:
-    NCCLCHECKGOTO(ncclCeScatter(comm, args, stream), ret, fail);
-    break;
-  case ncclFuncGather:
-    NCCLCHECKGOTO(ncclCeGather(comm, args, stream), ret, fail);
-    break;
-  case ncclFuncAllReduce:
-    NCCLCHECKGOTO(ncclCeEnsureAllReduceStaging(comm), ret, fail);
-    if (comm->ceColl.ceARTmpBuf == NULL) {
-      WARN("CE AllReduce invoked without staging buffer");
-      ret = ncclInvalidUsage;
       break;
+    case ncclFuncAlltoAll:
+      NCCLCHECKGOTO(ncclHierCeAlltoAll(comm, plan, stream), ret, fail);
+      break;
+    default:
+      WARN("Hierarchical CE collective not supported for %s", ncclFuncToString(args->func));
+      ret = ncclInvalidUsage;
     }
+  } else {
+    switch (args->func) {
+    case ncclFuncAllGather:
+      NCCLCHECKGOTO(ncclCeAllGather(comm, args, stream), ret, fail);
+      break;
+    case ncclFuncAlltoAll:
+      NCCLCHECKGOTO(ncclCeAlltoAll(comm, args, stream), ret, fail);
+      break;
+    case ncclFuncAlltoAllv:
+      NCCLCHECKGOTO(ncclCeAlltoAllv(comm, args, stream), ret, fail);
+      break;
+    case ncclFuncScatter:
+      NCCLCHECKGOTO(ncclCeScatter(comm, args, stream), ret, fail);
+      break;
+    case ncclFuncGather:
+      NCCLCHECKGOTO(ncclCeGather(comm, args, stream), ret, fail);
+      break;
+    case ncclFuncAllReduce:
+      NCCLCHECKGOTO(ncclCeEnsureAllReduceStaging(comm), ret, fail);
+      if (comm->ceColl.ceARTmpBuf == NULL) {
+        WARN("CE AllReduce invoked without staging buffer");
+        ret = ncclInvalidUsage;
+        break;
+      }
       // Pass args->recvWin so ncclCeAllReduce can take the fast path
       // (AG written directly into user recvbuff, no final D2D copy).
-    NCCLCHECKGOTO(ncclCeAllReduce(comm, args->sendBuff, args->recvBuff, args->nElts, args->datatype, args->redOp,
-                                  stream, args->recvWin, args),
-                  ret, fail);
-    break;
-  default:
-    ret = ncclInvalidUsage;
+      NCCLCHECKGOTO(ncclCeAllReduce(comm, args->sendBuff, args->recvBuff, args->nElts, args->datatype, args->redOp,
+                                    stream, args->recvWin, args),
+                    ret, fail);
+      break;
+    default:
+      ret = ncclInvalidUsage;
+    }
   }
   // DDA path: results were staged in scratch (args->recvBuff). Copy them back to
   // the user's recv buffer. Copy-back semantics are collective-specific:
@@ -2474,10 +2535,13 @@ ncclResult_t scheduleCeCollTaskToPlan(struct ncclComm* comm, struct ncclKernelPl
   plan->ceCollArgs->sizes = (task->func == ncclFuncAlltoAllv) ? task->sizes : nullptr;
 
   if (comm->rank == 0) {
-    if (!ncclDevrIsOneLsaTeam(comm)) {
-      INFO(NCCL_TUNING, "%s [Hierarchical CE]: %ld Bytes -> RMA proxy + CE", ncclFuncToString(task->func),
+    // Same predicate ncclLaunchCeColl dispatches on, so the marker cannot claim
+    // a path the launch did not take.
+    if (ncclHierCeDispatch(comm)) {
+      INFO(NCCL_TUNING, "%s " RCCL_CE_HIER_SELECTED_TAG ": %ld Bytes -> RMA proxy + CE", ncclFuncToString(task->func),
            task->count * ncclTypeSize(task->datatype));
     } else {
+      // Matches the useMCSync predicate in ncclMemOpSync.
       const char* nvlsSync = comm->symkState.hasLsaMultimem ? "; CE synchronization with NVLS" : "";
       INFO(NCCL_TUNING, "%s [Copy Engine]: %ld Bytes -> cudaMemcpy%s", ncclFuncToString(task->func),
            task->count * ncclTypeSize(task->datatype), nvlsSync);

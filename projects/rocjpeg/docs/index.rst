@@ -35,9 +35,7 @@ rocJPEG is delivered as part of `TheRock <https://github.com/ROCm/TheRock>`_. Th
     * :doc:`rocJPEG environment variables <./reference/rocJPEG-env-vars>`
     * :doc:`rocJPEG logging levels <./reference/rocJPEG-logging-controls>`
     * :doc:`rocJPEG subsampling and hardware capabilities <./reference/rocjpeg-formats-and-architectures>`
-    * :doc:`rocJPEG API library <../doxygen/html/files>`
-    * :doc:`rocJPEG Functions <../doxygen/html/globals>`
-    * :doc:`rocJPEG Data structures <../doxygen/html/annotated>`
+    * :doc:`rocJPEG API reference <./reference/rocJPEG-api-reference>`
 
 
 To contribute to the documentation, refer to

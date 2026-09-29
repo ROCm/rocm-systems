@@ -44,9 +44,7 @@
       ]
     }
   ],
-  "model_only_instructions": [
-    "V_WMMA_F64_16X16X4_F64"
-  ],
+  "model_only_instructions": [],
   "encodings": [
     {
       "feature": "dpp_64bit",

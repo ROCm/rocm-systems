@@ -90,7 +90,10 @@ struct cache_policy
                              const enabled_metrics& /*supported_metrics*/,
                              const metrics& metric_values, std::uint64_t timestamp)
     {
-        if(metric_values.empty()) return;
+        if(metric_values.empty())
+        {
+            return;
+        }
 
         trace_cache::get_buffer_storage().store(trace_cache::gpu_perf_counter_sample{
             static_cast<std::uint32_t>(device_id), timestamp, metric_values });

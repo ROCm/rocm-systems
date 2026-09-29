@@ -24,9 +24,7 @@
 
 #include <unistd.h>
 
-namespace rocprofsys
-{
-namespace trace_cache
+namespace rocprofsys::trace_cache
 {
 
 using ofs_t             = std::basic_ostream<char>;
@@ -256,5 +254,4 @@ private:
     std::unique_ptr<buffer_array_t> m_buffer{ std::make_unique<buffer_array_t>() };
 };
 
-}  // namespace trace_cache
-}  // namespace rocprofsys
+}  // namespace rocprofsys::trace_cache

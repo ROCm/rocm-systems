@@ -368,6 +368,9 @@ if(ROCJITSU_ENABLE_VFIO)
     include(rj_libvfio_user)
 endif()
 
+# Apply the host CPU policy to rocjitsu targets, after configuring dependencies.
+include(rj_host_cpu)
+
 # Libraries
 add_subdirectory(lib/util)
 add_subdirectory(lib/simdojo)
@@ -400,6 +403,7 @@ target_link_libraries(
         rocjitsu_vm_risc_v
         rocjitsu_config
         rocjitsu_dbt_config
+        rocjitsu_ip_discovery
         rocjitsu_drm_headers
         util
         flatbuffers
