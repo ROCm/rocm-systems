@@ -151,8 +151,10 @@ TEST_P(Gfx1251SimulatorInstructionTest, DispatchesCodeObjectAndVerifiesExactOutp
   append(cdna5::build_sopp(cdna5::kSEndpgmSopp));
 
   test_support::TestKernelDescriptor descriptor{};
+  // gfx1251 allocates VGPRs in blocks of 16. The synthetic CU and this kernel
+  // both use 32 registers (including the output address in v24).
   AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                  3);
+                  1);
   AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                   15);
   const std::vector<uint8_t> image =
@@ -334,8 +336,10 @@ TEST(Gfx1251SimulatorTest, DispatchesTargetSpecificSetregSemantics) {
   append(cdna5::build_sopp(cdna5::kSEndpgmSopp));
 
   test_support::TestKernelDescriptor descriptor{};
+  // gfx1251 allocates VGPRs in blocks of 16. The synthetic CU and this kernel
+  // both use 32 registers (including the output address in v24).
   AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                  3);
+                  1);
   AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                   15);
   const std::vector<uint8_t> image =
