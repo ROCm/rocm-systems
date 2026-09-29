@@ -1279,6 +1279,8 @@ function(ROCPROFILER_SYSTEMS_LOOKUP_GFX _TARGET _OUTPUT_LIST)
         "gfx90a"
         "gfx942"
         "gfx950"
+        "gfx1250"
+        "gfx1250-strict"
     )
 
     # Also includes PRO GPUs

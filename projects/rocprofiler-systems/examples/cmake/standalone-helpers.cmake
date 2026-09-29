@@ -167,6 +167,8 @@ function(ROCPROFILER_SYSTEMS_LOOKUP_GFX _TARGET _OUTPUT_LIST)
         "gfx90a"
         "gfx942"
         "gfx950"
+        "gfx1250"
+        "gfx1250-strict"
     )
     set(RADEON_LIST
         "gfx1012"
