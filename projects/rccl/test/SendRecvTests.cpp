@@ -87,6 +87,26 @@ namespace RcclUnitTesting
     return found;
   }
 
+  static bool DebugLogsContainNeedle(const std::string& globPattern, const char* needle)
+  {
+    glob_t g{};
+    bool found = false;
+    if (glob(globPattern.c_str(), 0, nullptr, &g) == 0)
+    {
+      for (size_t i = 0; i < g.gl_pathc && !found; ++i)
+      {
+        std::ifstream f(g.gl_pathv[i]);
+        std::string line;
+        while (std::getline(f, line))
+        {
+          if (line.find(needle) != std::string::npos) { found = true; break; }
+        }
+      }
+    }
+    globfree(&g);
+    return found;
+  }
+
   // Remove any log files left over from a previous run so scraping only sees the current run.
   static void RemoveGlobbedFiles(const std::string& globPattern)
   {
@@ -996,10 +1016,73 @@ namespace RcclUnitTesting
       testBed.DestroyComms();
       testBed.Finalize();
     }
-    bool const sawLl128Send8k = DebugLogsContainProtocol(debugGlob, "LL128");
-    bool const sawLlRecv2k = DebugLogsContainProtocol(debugGlob, "LL");
-    EXPECT_TRUE(sawLl128Send8k) << "8 KiB ring sends must stay LL128; demoting the mixed rank would drop them to LL";
-    EXPECT_TRUE(sawLlRecv2k) << "2 KiB ring recvs must stay legacy LL";
+    EXPECT_TRUE(DebugLogsContainNeedle(debugGlob, "protocol=LL128 dir=send bytes=8192"))
+      << "8 KiB send must stay LL128; demoting the mixed rank would write protocol=LL dir=send bytes=8192";
+    EXPECT_TRUE(DebugLogsContainNeedle(debugGlob, "protocol=LL128 dir=recv bytes=8192"))
+      << "peer 8 KiB recv must stay LL128 so it polls the same framing the sender writes";
+    EXPECT_TRUE(DebugLogsContainNeedle(debugGlob, "protocol=LL dir=recv bytes=2048"))
+      << "2 KiB recv must stay legacy LL";
+    EXPECT_TRUE(DebugLogsContainNeedle(debugGlob, "protocol=LL dir=send bytes=2048"))
+      << "2 KiB send must stay legacy LL";
+    EXPECT_FALSE(DebugLogsContainNeedle(debugGlob, "protocol=LL dir=send bytes=8192"))
+      << "demote would make the 8 KiB send LL while the peer still recvs LL128";
+    EXPECT_FALSE(DebugLogsContainNeedle(debugGlob, "protocol=LL128 dir=recv bytes=2048"))
+      << "promote would make the 2 KiB recv LL128 while the peer still sends LL";
+    RemoveGlobbedFiles(debugGlob);
+    unsetenv("NCCL_DEBUG_FILE");
+    unsetenv("NCCL_DEBUG_SUBSYS");
+    unsetenv("NCCL_DEBUG");
+  }
+
+  // Registered in-window SendRecv must skip the auto LL128 window so NET/IPC UBR
+  // can take SIMPLE. 512 KiB is LL128 on the 4-rank window, SIMPLE on the
+  // threshold path (above nChannels*P2P_LL_THRESHOLD for typical P2P channel counts).
+  TEST(SendRecv, Gfx1250RegisteredInWindowSkipsAutoLl128)
+  {
+    if (!DeviceIsGfx1250()) {
+      GTEST_SKIP() << "Skipping... gfx1250 SendRecv auto windows are gfx1250-only.";
+    }
+    unsetenv("NCCL_P2P_LL128_ENABLE");
+    std::string const debugGlob = "/tmp/rccl_gfx1250_ubr_skip_" + std::to_string(getpid()) + ".*";
+    RemoveGlobbedFiles(debugGlob);
+    setenv("NCCL_DEBUG", "INFO", 1);
+    setenv("NCCL_DEBUG_SUBSYS", "COLL", 1);
+    setenv("NCCL_DEBUG_FILE", ("/tmp/rccl_gfx1250_ubr_skip_" + std::to_string(getpid()) + ".%p").c_str(), 1);
+    {
+      TestBed testBed;
+      if (testBed.ev.maxGpus < 2) {
+        testBed.Finalize();
+        RemoveGlobbedFiles(debugGlob);
+        unsetenv("NCCL_DEBUG_FILE");
+        unsetenv("NCCL_DEBUG_SUBSYS");
+        unsetenv("NCCL_DEBUG");
+        GTEST_SKIP() << "Skipping... registered skip needs 2 GPUs (detected " << testBed.ev.maxGpus << ").";
+      }
+      int const n = 512 << 10;
+      const std::vector<int>& gpuPriorityOrder = testBed.ev.GetGpuPriorityOrder();
+      testBed.InitComms(TestBed::GetDeviceIdsList(1, 2, 1, gpuPriorityOrder), {1},
+                        testBed.GetNumStreamsPerGroup(1, 1), 1);
+      if (::testing::Test::HasFatalFailure()) return;
+      OptionalColArgs options;
+      options.root = 1;
+      testBed.SetCollectiveArgs(ncclCollSend, ncclInt8, n, n, options, 0, 0, 0);
+      testBed.AllocateMem(false, false, 0, 0, 0, true);
+      testBed.PrepareData(0, 0, 0);
+      options.root = 0;
+      testBed.SetCollectiveArgs(ncclCollRecv, ncclInt8, n, n, options, 0, 0, 1);
+      testBed.AllocateMem(false, false, 0, 0, 1, true);
+      testBed.PrepareData(0, 0, 1);
+      testBed.ExecuteCollectives({0, 1}, 0);
+      bool isCorrect = true;
+      testBed.ValidateResults(isCorrect, 0, 0, 1);
+      EXPECT_TRUE(isCorrect);
+      testBed.DestroyComms();
+      testBed.Finalize();
+    }
+    EXPECT_FALSE(DebugLogsContainNeedle(debugGlob, "protocol=LL128 dir=send bytes=524288"))
+      << "registered 512 KiB must skip the auto LL128 window";
+    EXPECT_FALSE(DebugLogsContainNeedle(debugGlob, "protocol=LL128 dir=recv bytes=524288"))
+      << "registered 512 KiB recv must skip the auto LL128 window";
     RemoveGlobbedFiles(debugGlob);
     unsetenv("NCCL_DEBUG_FILE");
     unsetenv("NCCL_DEBUG_SUBSYS");

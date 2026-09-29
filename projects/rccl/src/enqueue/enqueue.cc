@@ -1479,12 +1479,7 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
     if (bytes[dir] == -1) {
       protocol[dir] = NCCL_PROTO_SIMPLE;
     } else if (srLl128Hi[dir] > 0 && !skipAutoLl128) {
-      if (bytes[dir] >= rcclGfx1250SendRecvLl128MinBytes && bytes[dir] <= srLl128Hi[dir] && hasLL128[dir])
-        protocol[dir] = NCCL_PROTO_LL128;
-      else if (bytes[dir] < rcclGfx1250SendRecvLl128MinBytes && hasLL[dir])
-        protocol[dir] = NCCL_PROTO_LL;
-      else
-        protocol[dir] = NCCL_PROTO_SIMPLE;
+      protocol[dir] = rcclGfx1250SendRecvAutoProtocol(bytes[dir], srLl128Hi[dir], hasLL[dir], hasLL128[dir]);
     } else {
       bool lat = useLL128OptIn ? hasLL128[dir] : hasLL[dir];
       ssize_t latencyThreshold = useLL128OptIn ? ncclParamP2pLL128Threshold() : ncclParamP2pLLThreshold();
@@ -1498,18 +1493,14 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   // one link's framing from the other link's size. SIMPLE vs latency in one kernel is fine
   // (sendProtoLL/recvProtoLL). Mixed LL and LL128 is not; split into two one-sided work items
   // so each kernel is one family and each peer still sees the same bytes[dir].
-  if (bytes[0] != -1 && bytes[1] != -1) {
-    bool llFam0 = protocol[0] == NCCL_PROTO_LL || protocol[0] == NCCL_PROTO_LL128;
-    bool llFam1 = protocol[1] == NCCL_PROTO_LL || protocol[1] == NCCL_PROTO_LL128;
-    if (llFam0 && llFam1 && protocol[0] != protocol[1]) {
-      struct ncclTaskP2p* recvOnly[2] = {p2pTasks[0], nullptr};
-      struct ncclTaskP2p* sendOnly[2] = {nullptr, p2pTasks[1]};
-      NCCLCHECK(addP2pToPlan(comm, plan, nChannelsMin, nChannelsMax, p2pRound, sendRank, nullptr, -1, recvRank,
-                             recvAddr, recvBytes, 0, recvOpCount, planTotalTasks, recvOnly));
-      NCCLCHECK(addP2pToPlan(comm, plan, nChannelsMin, nChannelsMax, p2pRound, sendRank, sendAddr, sendBytes, recvRank,
-                             nullptr, -1, sendOpCount, 0, planTotalTasks, sendOnly));
-      return ncclSuccess;
-    }
+  if (bytes[0] != -1 && bytes[1] != -1 && rcclP2pLlFamilyMix(protocol[0], protocol[1])) {
+    struct ncclTaskP2p* recvOnly[2] = {p2pTasks[0], nullptr};
+    struct ncclTaskP2p* sendOnly[2] = {nullptr, p2pTasks[1]};
+    NCCLCHECK(addP2pToPlan(comm, plan, nChannelsMin, nChannelsMax, p2pRound, sendRank, nullptr, -1, recvRank,
+                           recvAddr, recvBytes, 0, recvOpCount, planTotalTasks, recvOnly));
+    NCCLCHECK(addP2pToPlan(comm, plan, nChannelsMin, nChannelsMax, p2pRound, sendRank, sendAddr, sendBytes, recvRank,
+                           nullptr, -1, sendOpCount, 0, planTotalTasks, sendOnly));
+    return ncclSuccess;
   }
 
   for (int dir = 0; dir < 2; dir++) { // 0=recv, 1=send

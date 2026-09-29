@@ -401,6 +401,37 @@ inline ssize_t rcclGfx1250SendRecvLl128MaxBytes(int cudaArch, int nNodes, int nR
   if (nRanks == 16) return 256 << 10;  // 4 host, 4 KiB .. 256 KiB
   return 0;
 }
+
+#ifndef NCCL_PROTO_LL
+#include "nccl_tuner.h"
+#endif
+
+// Protocol for one SendRecv dir on the gfx1250 auto window. bytes < 0 is a
+// no-op dir. Missing LL128 staging (hasLL128=false) falls back to SIMPLE, not
+// the other LL-family proto. hi <= 0 means no window (caller uses the threshold path).
+inline int rcclGfx1250SendRecvAutoProtocol(ssize_t bytes, ssize_t hi, bool hasLL, bool hasLL128) {
+  if (bytes < 0 || hi <= 0) return NCCL_PROTO_SIMPLE;
+  if (bytes >= rcclGfx1250SendRecvLl128MinBytes && bytes <= hi && hasLL128) return NCCL_PROTO_LL128;
+  if (bytes < rcclGfx1250SendRecvLl128MinBytes && hasLL) return NCCL_PROTO_LL;
+  return NCCL_PROTO_SIMPLE;
+}
+
+// One P2P kernel cannot mix LL and LL128 (ncclDevWorkP2p has no per-dir family).
+// SIMPLE + either latency proto is fine (sendProtoLL / recvProtoLL).
+inline bool rcclP2pLlFamilyMix(int proto0, int proto1) {
+  auto lat = [](int p) { return p == NCCL_PROTO_LL || p == NCCL_PROTO_LL128; };
+  return lat(proto0) && lat(proto1) && proto0 != proto1;
+}
+
+// NET LL128 staging. ENABLE=1 is the all-P2P opt-in (any nRanks). ENABLE=-1 auto
+// windows need the buffers for internodal 8/16-rank 4 GPU/node. ENABLE=0 never
+// auto-allocates. allocEnv==1 is the explicit NCCL_ALLOC_P2P_NET_LL_BUFFERS=1.
+inline int rcclAllocP2pNetLLBuffers(int cudaArch, int nNodes, int nRanks, int64_t enable, int64_t allocEnv) {
+  if (allocEnv == 1) return 1;
+  if (cudaArch == 1250 && enable > 0) return 1;
+  if (enable < 0 && rcclGfx1250SendRecvLl128MaxBytes(cudaArch, nNodes, nRanks) > 0 && nRanks > 4) return 1;
+  return 0;
+}
 #ifdef ENABLE_WARP_SPEED
 RCCL_PARAM_DECLARE(WarpSpeedARThreshold);
 RCCL_PARAM_DECLARE(WarpSpeedAutoMode);

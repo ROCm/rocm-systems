@@ -923,11 +923,9 @@ ncclResult_t initTransportsRank_1(struct ncclComm* comm, struct allGatherInfo *a
     else if (IsArchMatch(gcn, "gfx950")) comm->cudaArch = 950;
     else if (IsArchMatch(gcn, "gfx942")) comm->cudaArch = 942;
   }
-  comm->allocP2pNetLLBuffers = ncclParamAllocP2pNetLLBuffers() == 1 ||
-                               (comm->cudaArch == 1250 && ncclParamP2pLL128Enable() > 0) ||
-                               (ncclParamP2pLL128Enable() < 0 &&
-                                rcclGfx1250SendRecvLl128MaxBytes(comm->cudaArch, /*nNodes=*/1, nranks) > 0 &&
-                                nranks > 4);
+  comm->allocP2pNetLLBuffers =
+    rcclAllocP2pNetLLBuffers(comm->cudaArch, /*nNodes=*/1, nranks, ncclParamP2pLL128Enable(),
+                             ncclParamAllocP2pNetLLBuffers());
 
   if (comm->rank == ncclParamGraphDumpFileRank()) {
     struct ncclTopoGraph* dumpGraphs[4] = { &ringGraph, &treeGraph, &collNetGraph, &nvlsGraph };

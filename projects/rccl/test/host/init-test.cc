@@ -9142,6 +9142,66 @@ TEST_F(InitMicrotest, InitTransportsRank_Gfx1250_TakesTheFullChannelPool) {
   EXPECT_TRUE(c.get()->topo->ll128Enabled);  // :1944 default-enables LL128 on this arch
 }
 
+// Host-only coverage for the gfx1250 SendRecv helpers used by init.cc and enqueue.cc.
+// These catch mixed-round protocol mix, missing-staging fallback, and ALLOC formula
+// without a GPU. ncclParamP2pLL128Enable() is the enqueue-owned symbol whose missing
+// fake broke MicroInit linking (initTransportsRank).
+TEST_F(InitMicrotest, Gfx1250SendRecvHelpers_AutoProtocolAllocAndParamDefault) {
+  constexpr ssize_t hi4 = 1 << 20;
+  EXPECT_EQ(NCCL_PROTO_LL, rcclGfx1250SendRecvAutoProtocol(2048, hi4, true, true));
+  EXPECT_EQ(NCCL_PROTO_LL128, rcclGfx1250SendRecvAutoProtocol(8192, hi4, true, true));
+  EXPECT_EQ(NCCL_PROTO_SIMPLE, rcclGfx1250SendRecvAutoProtocol(hi4 + 1, hi4, true, true));
+  EXPECT_EQ(NCCL_PROTO_SIMPLE, rcclGfx1250SendRecvAutoProtocol(8192, hi4, true, false));
+  EXPECT_TRUE(rcclP2pLlFamilyMix(NCCL_PROTO_LL, NCCL_PROTO_LL128));
+  EXPECT_FALSE(rcclP2pLlFamilyMix(NCCL_PROTO_LL128, NCCL_PROTO_SIMPLE));
+  EXPECT_EQ(0, rcclAllocP2pNetLLBuffers(1250, 1, 4, -1, 0));
+  EXPECT_EQ(1, rcclAllocP2pNetLLBuffers(1250, 1, 8, -1, 0));
+  EXPECT_EQ(1, rcclAllocP2pNetLLBuffers(1250, 1, 16, -1, 0));
+  EXPECT_EQ(0, rcclAllocP2pNetLLBuffers(1250, 1, 8, 0, 0));
+  EXPECT_EQ(1, rcclAllocP2pNetLLBuffers(1250, 1, 2, 1, 0));
+  EXPECT_EQ(1, rcclAllocP2pNetLLBuffers(1250, 1, 4, 0, 1));
+  EXPECT_EQ(0, rcclAllocP2pNetLLBuffers(950, 1, 8, -1, 0));
+  EXPECT_EQ(-1, ncclParamP2pLL128Enable());
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Gfx1250FourRanksAuto_DoesNotAllocP2pNetLlBuffers) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  c.get()->cudaArch = 1250;
+  Tr_ReachAllGather3(c, "gfx1250");
+  const auto gathers = Tr_InstallGathers(c);
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(0, c.get()->allocP2pNetLLBuffers);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Gfx1250EightRanksAuto_AllocatesP2pNetLlBuffers) {
+  TransportsRankComm c(/*nRanks=*/8, /*rank=*/0);
+  c.get()->cudaArch = 1250;
+  Tr_ReachAllGather3(c, "gfx1250");
+  const auto gathers = Tr_InstallGathers(c);
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(1, c.get()->allocP2pNetLLBuffers);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Gfx1250EnableOff_DoesNotAllocEvenAtEightRanks) {
+  TransportsRankComm c(/*nRanks=*/8, /*rank=*/0);
+  c.get()->cudaArch = 1250;
+  Tr_ReachAllGather3(c, "gfx1250");
+  SetParams({{"P2P_LL128_ENABLE", 0}});
+  const auto gathers = Tr_InstallGathers(c);
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(0, c.get()->allocP2pNetLLBuffers);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Gfx1250EnableOn_AllocatesAtAnyRankCount) {
+  TransportsRankComm c(/*nRanks=*/2, /*rank=*/0);
+  c.get()->cudaArch = 1250;
+  Tr_ReachAllGather3(c, "gfx1250");
+  SetParams({{"P2P_LL128_ENABLE", 1}});
+  const auto gathers = Tr_InstallGathers(c);
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(1, c.get()->allocP2pNetLLBuffers);
+}
+
 TEST_F(InitMicrotest, InitTransportsRank_NonGfx1250_LeavesLl128Disabled) {
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx942");

@@ -1980,10 +1980,9 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   // Initialize num P2P LL buffers for this communicator. gfx1250 internodal LL128 needs the
   // NET staging buffer even when NCCL_ALLOC_P2P_NET_LL_BUFFERS is unset: ENABLE=1 is the
   // all-P2P opt-in (any nRanks), ENABLE=-1 auto-windows need it for 8/16-rank 4 GPU/node.
-  comm->allocP2pNetLLBuffers = ncclParamAllocP2pNetLLBuffers() == 1 ||
-                               (comm->cudaArch == 1250 && ncclParamP2pLL128Enable() > 0) ||
-                               (ncclParamP2pLL128Enable() < 0 &&
-                                rcclGfx1250SendRecvLl128MaxBytes(comm->cudaArch, nNodes, nranks) > 0 && nranks > 4);
+  comm->allocP2pNetLLBuffers =
+    rcclAllocP2pNetLLBuffers(comm->cudaArch, nNodes, nranks, ncclParamP2pLL128Enable(),
+                             ncclParamAllocP2pNetLLBuffers());
 
   if (comm->rank == ncclParamGraphDumpFileRank()) {
     struct ncclTopoGraph* dumpGraphs[5] = {ringGraph, treeGraph, collNetDirectGraph, collNetChainGraph, nvlsGraph};
