@@ -4260,17 +4260,17 @@ static ncclResult_t commDestroySync(struct ncclAsyncJob* job_) {
              comm->commHash, comm->rank);
       }
     }
-    if (COMPILER_ATOMIC_LOAD(comm->abortFlag, std::memory_order_acquire) == 0 && comm->childCount == 0 &&
-        comm->nNodes > 1) {
+    if (COMPILER_ATOMIC_LOAD(comm->abortFlag, std::memory_order_acquire) == 0 && comm->nNodes > 1 &&
+        !comm->hasExcludedLocalRank) {
       int* hostRanks;
       int hostRank = 0;
       int nHostRanks = 0;
       // Wait for all host-local ranks before stopping the proxy threads, to ensure that PXN connection establishment
-      // can complete if some ranks were to try destroying the communicator early.  Skip when childCount > 0 because
-      // after shrink/split some peers may have already aborted and will never reach this barrier.  Skip when
-      // nNodes == 1 because PXN is only used for multi-node communication, and on single-node configs the barrier
-      // can deadlock if processes reach destroy at different times.  As an optimization, filter comm->localRanks to
-      // the local host only, since on MNNVL systems it can include other hosts, while PXN is strictly host-local.
+      // can complete if some ranks were to try destroying the communicator early.  Skip when nNodes == 1 because PXN
+      // is only used for multi-node communication, and on single-node configs the barrier can deadlock if processes
+      // reach destroy at different times.  Skip when hasExcludedLocalRank is set because after shrink, a local peer
+      // may have aborted and will never reach this barrier.  As an optimization, filter comm->localRanks to the local
+      // host only, since on MNNVL systems it can include other hosts, while PXN is strictly host-local.
       NCCLCHECKGOTO(ncclCalloc(&hostRanks, comm->localRanks), ret, fail);
       for (int i = 0; i < comm->localRanks; i++) {
         if (comm->peerInfo[comm->localRankToRank[i]].hostHash == comm->peerInfo[comm->rank].hostHash) {
@@ -4770,6 +4770,12 @@ static ncclResult_t ncclCommInitChildComm(ncclComm_t comm, ncclComm_t* newcomm, 
     job->excludeRanksCount = excludeRanksCount;
     NCCLCHECKGOTO(ncclCalloc(&job->excludeRanksList, excludeRanksCount), res, fail);
     memcpy(job->excludeRanksList, excludeRanksList, excludeRanksCount * sizeof(int));
+    for (int i = 0; i < excludeRanksCount; i++) {
+      if (comm->peerInfo[excludeRanksList[i]].hostHash == comm->peerInfo[comm->rank].hostHash) {
+        comm->hasExcludedLocalRank = true;
+        break;
+      }
+    }
   } else {
     // each split has to lead to a unique comm, so increment the childCount
     job->childCount = ++comm->childCount;

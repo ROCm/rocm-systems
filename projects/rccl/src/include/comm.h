@@ -1054,6 +1054,7 @@ struct ncclComm {
   bool globalRmaProxySupport;
   bool hostRmaSupport;
   int childCount;
+  bool hasExcludedLocalRank;
 
   struct ncclDevrState devrState; // The symmetric runtime state
   struct ncclSymkState symkState; // The symmetric kernels state (built on previous)
