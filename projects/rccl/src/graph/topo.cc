@@ -1144,6 +1144,11 @@ ncclResult_t ncclTopoAddC2c(struct ncclXmlNode* node, struct ncclTopoSystem* sys
 // reported case has to be re-rated in place rather than topped up.
 static ncclResult_t ncclTopoConnectMloPartSibling(struct ncclTopoNode* dev, struct ncclTopoNode* sibDev, float bw) {
   for (int l = 0; l < dev->nlinks; l++) {
+    // No fixture can reach the LINK_NVL test: XGMI is the only link type any pass puts between two
+    // DEV nodes, so the remNode test already excludes everything else a DEV carries (LINK_PCI to its
+    // bridge, LINK_LOC to its GPU nodes, LINK_C2C to a CPU or C2C bridge). It stays because it picks
+    // which link gets re-rated -- a later DEV-to-DEV link of another type would otherwise take the
+    // on-package bw and leave the pair with no XGMI link, since the fallback below would not run.
     if (dev->links[l].remNode != sibDev || dev->links[l].type != LINK_NVL) continue;
     dev->links[l].bw = bw;
     return ncclSuccess;
