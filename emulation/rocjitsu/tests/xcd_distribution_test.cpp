@@ -1587,20 +1587,22 @@ TEST(XcdDistributionTest, Cdna5ScratchCapacityKeepsEveryCuAddressable) {
     EXPECT_EQ(cu->num_wf_slots(), 64u);
     EXPECT_EQ(cu->scratch_slots_per_cu(), kScratchSlotsPerCu);
     EXPECT_LT(cu->scratch_scoreboard_base(), kScratchSlotsPerShaderEngine);
-    EXPECT_TRUE(
-        cu->can_accept_workgroup(/*num_wfs=*/1, /*lds_bytes=*/0, kScratchSlotsPerShaderEngine));
+    EXPECT_TRUE(cu->can_accept_workgroup(/*num_wfs=*/1, /*num_sgprs=*/1, /*num_vgprs=*/1,
+                                         kCdna5WavefrontSize, /*lds_bytes=*/0,
+                                         kScratchSlotsPerShaderEngine));
   }
 
   auto *cu = cp->compute_units().front();
   std::vector<amdgpu::Wavefront *> scratch_waves;
   for (uint32_t slot = 0; slot < kScratchSlotsPerCu; ++slot) {
-    auto *wave = cu->dispatch_wf(slot, /*pc=*/0, /*num_sgprs=*/1, /*num_vgprs=*/1,
-                                 kCdna5WavefrontSize, kScratchSlotsPerShaderEngine);
+    auto *wave =
+        cu->dispatch_wf(slot, /*pc=*/0, /*num_sgprs=*/1, /*num_vgprs=*/1, kCdna5WavefrontSize,
+                        /*dispatch_id=*/0, kScratchSlotsPerShaderEngine);
     ASSERT_NE(wave, nullptr) << "scratch slot " << slot;
     scratch_waves.push_back(wave);
   }
   EXPECT_EQ(cu->dispatch_wf(kScratchSlotsPerCu, /*pc=*/0, /*num_sgprs=*/1, /*num_vgprs=*/1,
-                            kCdna5WavefrontSize, kScratchSlotsPerShaderEngine),
+                            kCdna5WavefrontSize, /*dispatch_id=*/0, kScratchSlotsPerShaderEngine),
             nullptr)
       << "scratch-backed residency exceeded the advertised per-CU capacity";
 

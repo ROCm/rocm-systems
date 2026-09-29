@@ -8219,8 +8219,8 @@ TEST(Pm4DispatchTest, OverlappingScratchQueuesSerializeAndPreserveContents) {
     std::span<uint8_t> bytes_;
     std::mutex mutex_;
   };
-  // A two-slot shared pool can hand a one-wave dispatch slot 1. Bounds must
-  // describe the pool, not that dispatch's wave count.
+  // Overlapping scratch address ranges must serialize even when each pool
+  // has room for more than one wave.
   for (uint32_t slots : {1u, 2u}) {
     SCOPED_TRACE(slots);
     for (bool overlap : {true, false}) {
@@ -8283,7 +8283,7 @@ TEST(Pm4DispatchTest, OverlappingScratchQueuesSerializeAndPreserveContents) {
       f.engine->run();
       EXPECT_EQ(completed, 2u);
       EXPECT_EQ(observed->halted, 2u);
-      EXPECT_EQ(observed->max_active, overlap && slots == 1 ? 1u : 2u);
+      EXPECT_EQ(observed->max_active, overlap ? 1u : 2u);
       f.cp()->unregister_drm_queues(pid);
       EXPECT_TRUE(adapter.unregister_address_space(address_space));
     }

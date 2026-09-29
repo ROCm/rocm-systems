@@ -861,7 +861,7 @@ TEST_F(ReachableCfg, FullSectionBuildPreservesExplicitTargetForTargetlessObject)
 
   const auto result = BasicBlock::build(
       object, *decoder, ROCJITSU_CODE_ARCH_CDNA5, error_.emitter(), {},
-      ExternalEntryPolicy::InferPredecessorless, {}, ROCJITSU_CODE_TARGET_GFX1251);
+      ExternalEntryPolicy::InferPredecessorless, {}, {}, ROCJITSU_CODE_TARGET_GFX1251);
 
   ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_EQ(static_fixup_count(result.value()), 1u)
