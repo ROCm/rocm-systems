@@ -177,6 +177,13 @@ if(BUILD_TESTS)
     list(APPEND RCCL_COMMON_INCLUDE_DIRS ${MPI_CXX_INCLUDE_DIRS})
   endif()
 
+  # Ahead of ${ROCM_PATH}/include, so the tests see the headers of the rocSHMEM
+  # librccl.so links rather than any rocSHMEM installed there.
+  if(ENABLE_ROCSHMEM AND ROCSHMEM_INCLUDE_DIR)
+    list(FIND RCCL_COMMON_INCLUDE_DIRS "${ROCM_PATH}/include" _rocm_inc_idx)
+    list(INSERT RCCL_COMMON_INCLUDE_DIRS ${_rocm_inc_idx} ${ROCSHMEM_INCLUDE_DIR})
+  endif()
+
   # Common compile definitions
   set(RCCL_COMMON_COMPILE_DEFS ROCM_PATH="${ROCM_PATH}")
   if(LL128_ENABLED)
@@ -1357,5 +1364,19 @@ if(BUILD_TESTS)
   # is dual-mode: under BUILD_TESTS it builds only the in-RCCL-build micro-test
   # target and returns; invoked standalone it builds rccl-HostUnitTests too.
   add_subdirectory(host)
+
+  # Those headers are installed by the rocSHMEM sub-build, and targets that do
+  # not link rccl are otherwise not ordered after it.
+  if(ENABLE_ROCSHMEM AND TARGET rocshmem_static)
+    foreach(_dir ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/host)
+      get_property(_tgts DIRECTORY ${_dir} PROPERTY BUILDSYSTEM_TARGETS)
+      foreach(_tgt IN LISTS _tgts)
+        get_target_property(_type ${_tgt} TYPE)
+        if(NOT _type MATCHES "^(INTERFACE_LIBRARY|UTILITY)$")
+          add_dependencies(${_tgt} rocshmem_static)
+        endif()
+      endforeach()
+    endforeach()
+  endif()
 
 endif()
