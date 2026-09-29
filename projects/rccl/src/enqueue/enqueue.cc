@@ -3444,6 +3444,17 @@ static ncclResult_t calcCollChunking(struct ncclComm* comm, struct ncclTaskColl*
   int chunkSize = stepSize * chunkSteps;
   if (info->protocol == NCCL_PROTO_LL) chunkSize /= 2;
   if (info->protocol == NCCL_PROTO_LL128) chunkSize = (chunkSize / comm->ll128LineElems) * comm->ll128DataElems;
+  if (info->protocol == NCCL_PROTO_NAN) {
+    // A large message cycles the whole receive FIFO, and the live working set is
+    // nChannels * chunkSize per direction. Past a few hundred MiB that stops
+    // fitting in last-level cache and throughput drops, so shorten the chunk
+    // rather than the FIFO -- shrinking the FIFO itself would also shorten the
+    // chunk in the mid range, where it costs 4-9%. Measured at 1 GiB float on 8
+    // ranks: 286 GB/s at a 48 KiB chunk against 252 at 256 KiB. The crossover
+    // is around 2 MiB per channel; below it the longer chunk is worth more than
+    // the cache residency, so 64 MiB and 128 MiB deliberately stay untouched.
+    while (chunkSize > 65536 && (size_t)nBytes / (size_t)nChannels > (2u << 20)) chunkSize /= 2;
+  }
   // Buffer-based ceiling; plugins may increase chunk size up to this limit.
   int bufferMaxChunkSize = chunkSize;
 

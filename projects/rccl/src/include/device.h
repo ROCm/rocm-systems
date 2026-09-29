@@ -257,8 +257,16 @@ static_assert(NCCL_LL_CLEAN_MASK % NCCL_STEPS == 0, "Invalid NCCL_LL_CLEAN_MASK 
 /* Wire words per thread the step slot is sized for. Deliberately decoupled from
  * the register count above, the same way LL128's buffer is: a step holds many
  * register-slices, so one credit round-trip covers many inner iterations rather
- * than one. 128 puts the step at 256 KiB, which measured best across the range;
- * going deeper starts losing at the top end to cache and TLB pressure. */
+ * than one.
+ *
+ * 128 puts the FIFO at 2 MiB (256 KiB per step), which is what the mid range
+ * wants. Very large messages want a much shorter chunk -- medians of 5 runs at
+ * 1 GiB float, 8 ranks: 48 KiB chunk 285, 64 KiB 284, 128 KiB 267, 256 KiB 254
+ * -- but shrinking the FIFO to get there costs 4-9% between 1 and 128 MiB. The
+ * two are decoupled instead: the buffer stays big and calcCollChunking() caps
+ * the chunk for large messages. Note an earlier upward-only sweep from 1 MiB
+ * read as flat and was reported as saturated; it was single-shot and inside the
+ * run-to-run spread, so re-measure with repeats before changing this. */
 #define NCCL_NAN_STEP_ELEMS_PER_THREAD 128
 #define NCCL_NAN_MAX_NTHREADS NCCL_LL128_MAX_NTHREADS
 #define NCCL_NAN_SENTINEL64 0xFFFFFFFFFFFFFFFFull
