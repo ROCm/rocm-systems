@@ -30,7 +30,7 @@
 #include "coll_net.h"
 #include "model.h"
 #include "topo_expl_impl.h"
-#include "rocm_smi/rocm_smi.h"
+#include "amdsmi_wrap.h"
 
 const char* ncclFuncStr[NCCL_NUM_FUNCTIONS+4] = { "AllGather", "AllReduce", "AlltoAllPivot", "AlltoAllGda", "AlltoAllvGda", "Broadcast", "Reduce", "ReduceScatter", "SendRecv" };
 const char* ncclAlgoStr[NCCL_NUM_ALGORITHMS] = { "Tree", "Ring", "CollNetDirect", "CollNetChain", "NVLS", "NVLSTree", "PAT" };
@@ -1327,23 +1327,34 @@ fail:
   goto exit;
 }
 
-ncclResult_t rocm_smi_init() {
+ncclResult_t amd_smi_init() {
   return ncclSuccess;
 }
 
-ncclResult_t rocm_smi_getNumDevice(uint32_t* num_devs) {
+ncclResult_t amd_smi_getNumDevice(uint32_t* num_devs) {
+  if (num_devs) *num_devs = 0;
   return ncclSuccess;
 }
 
-ncclResult_t rocm_smi_getDevicePciBusIdString(uint32_t deviceIndex, char* busId, size_t len) {
+ncclResult_t amd_smi_getDevicePciBusIdString(uint32_t deviceIndex, char* busId, size_t len) {
   return ncclSuccess;
 }
 
-ncclResult_t rocm_smi_getDeviceIndexByPciBusId(const char* pciBusId, uint32_t* deviceIndex) {
+ncclResult_t amd_smi_getDeviceIndexByPciBusId(const char* pciBusId, uint32_t* deviceIndex) {
   return ncclSuccess;
 }
 
-ncclResult_t rocm_smi_getLinkInfo(int srcIndex, int dstIndex, RSMI_IO_LINK_TYPE* rsmi_type, int *hops, int *count) {
+ncclResult_t amd_smi_getLinkInfo(int srcDev, int dstDev, amdsmi_link_type_t* type, int* hops, int* count) {
+  return ncclSuccess;
+}
+
+ncclResult_t amd_smi_getFabricDeviceInfo(uint32_t deviceIndex, struct amdsmiFabricDeviceInfo* info) {
+  if (info) *info = {};
+  return ncclSuccess;
+}
+
+ncclResult_t amd_smi_getFirmwareVersion(uint32_t deviceIndex, uint64_t* fwVersion) {
+  if (fwVersion) *fwVersion = 0;
   return ncclSuccess;
 }
 

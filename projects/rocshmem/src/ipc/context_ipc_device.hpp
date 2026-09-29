@@ -558,9 +558,6 @@ class IPCContext : public Context {
   //Temporary scratchpad memory used by internal barrier algorithms.
   int64_t *barrier_sync{nullptr};
 
-  //Struct defining memory ordering for atomic operations.
-  detail::atomic::rocshmem_memory_orders orders_{};
-
   //Buffer to perform Atomic store to enforce memory ordering
   int *fence_pool{nullptr};
 

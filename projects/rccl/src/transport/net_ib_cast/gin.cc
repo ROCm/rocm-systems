@@ -387,9 +387,10 @@ ncclResult_t IbCastRmaIbProxyCreateContext(void* collComm, ncclRmaConfig_t* conf
   // Make sure all QP we create use the provided traffic class.
   IbCastSetTrafficClass(cComm->ctx, config->trafficClass);
 
-  if (config->rankStride <= 0 || (cComm->nranks % config->rankStride) != 0) {
-    WARN("RMA_IB_PROXY create context: invalid rank stride %d, must be > 0 and nranks (%d) must be a multiple of it",
-         config->rankStride, cComm->nranks);
+  int rankStride = config->rankStride <= 0 ? 1 : config->rankStride;
+  if ((cComm->nranks % rankStride) != 0) {
+    WARN("RMA_IB_PROXY create context: invalid rank stride %d, nranks (%d) must be a multiple of it", rankStride,
+         cComm->nranks);
     return ncclInternalError;
   }
 
@@ -419,7 +420,7 @@ ncclResult_t IbCastRmaIbProxyCreateContext(void* collComm, ncclRmaConfig_t* conf
     NCCLCHECKGOTO(ncclIbMalloc((void**)&gc->fullRecvComm, sizeof(void*) * nranks), ret, end);
     gc->rank = cComm->rank;
 
-    for (int i = 0; i < nranks; i += config->rankStride) {
+    for (int i = 0; i < nranks; i += rankStride) {
       int connectPeer = (cComm->rank + i) % nranks;
       int acceptPeer = (cComm->rank - i + nranks) % nranks;
       do {
@@ -510,7 +511,9 @@ ncclResult_t IbCastRmaIbProxyCloseColl(void* collComm) {
 }
 
 ncclResult_t IbCastRmaIbProxyIPut(void* ginCtx, int context, uint64_t srcOff, void* srcMhandle, size_t size,
-                                  uint64_t dstOff, void* dstMhandle, uint32_t rank, void** request) {
+                                  uint64_t dstOff, void* dstMhandle, uint32_t rank, uint32_t optFlags,
+                                  void** request) {
+  (void)optFlags;
   struct IbCastRmaIbProxyCtx* ginProxyCtx = &((struct IbCastRmaIbProxyCtx*)ginCtx)[context];
 
   struct IbCastRmaProxyMrHandle* srcMrHandle = (struct IbCastRmaProxyMrHandle*)srcMhandle;
@@ -561,7 +564,9 @@ ncclResult_t IbCastRmaIbProxyIPut(void* ginCtx, int context, uint64_t srcOff, vo
 }
 
 ncclResult_t IbCastRmaIbProxyIGet(void* ginCtx, int context, uint64_t remoteOffset, void* remoteMhandle, size_t size,
-                                  uint64_t localOffset, void* localMhandle, uint32_t rank, void** request) {
+                                  uint64_t localOffset, void* localMhandle, uint32_t rank, uint32_t optFlags,
+                                  void** request) {
+  (void)optFlags;
   struct IbCastRmaIbProxyCtx* ginProxyCtx = &((struct IbCastRmaIbProxyCtx*)ginCtx)[context];
 
   struct IbCastRmaProxyMrHandle* remoteMrHandle = (struct IbCastRmaProxyMrHandle*)remoteMhandle;
@@ -614,8 +619,9 @@ ncclResult_t IbCastRmaIbProxyIGet(void* ginCtx, int context, uint64_t remoteOffs
 ncclResult_t IbCastRmaIbProxyIPutSignal(void* ginCtx, int context, uint64_t srcOff, void* srcMhandle, size_t size,
                                         uint64_t dstOff, void* dstMhandle, uint32_t rank, uint64_t signalOff,
                                         void* signalMhandle, uint64_t signalValue, uint32_t signalOp,
-                                        bool isStrongSignal, void** request) {
+                                        bool isStrongSignal, uint32_t optFlags, void** request) {
   (void)isStrongSignal;
+  (void)optFlags;
   if (signalOp != NCCL_NET_SIGNAL_OP_INC && signalOp != NCCL_NET_SIGNAL_OP_ADD) {
     WARN("IbCastRmaIbProxyIPutSignal: Unsupported signalOp %u", signalOp);
     return ncclInvalidArgument;

@@ -65,7 +65,6 @@ TEST_EXE = os.path.join(IR_OUTDIR, "IR_test.exe")
 # is gated independently and skipped (not failed) when those are absent.
 GIN_MPI_TEST_SRC = os.path.join(IR_DIR, "test", "IR_gin_mpi_test.cpp")
 GIN_MPI_TEST_EXE = os.path.join(IR_OUTDIR, "IR_gin_mpi_test.exe")
-MPI_INC = os.environ.get("MPI_INC", "/usr/include/x86_64-linux-gnu/mpich")
 NRANKS = int(os.environ.get("IR_GIN_NRANKS", "2"))
 # Devices the MPI run may use, one per rank. Defaults to the first NRANKS GPUs
 # (0,1,...) so each rank's in-binary hipSetDevice(localRank) lands on its own
@@ -107,6 +106,9 @@ def _missing_prerequisite():
         return f"IR_test.cpp not found at {IR_TEST_SRC}"
     if not os.path.isfile(HIPCC):
         return f"hipcc not found at {HIPCC} (set ROCM_PATH)"
+    llvm_dis = os.path.join(ROCM_PATH, "llvm", "bin", "llvm-dis")
+    if not os.path.isfile(llvm_dis):
+        return f"llvm-dis not found at {llvm_dis} (install ROCm llvm tools for IR device tests)"
     if not os.path.isdir(HIPIFY_INC):
         return (
             f"hipify staging dir not found at {HIPIFY_INC} "
@@ -175,6 +177,9 @@ def _build_test_binary():
         HIPCC,
         f"--offload-arch={ARCH}", "-O0",
         "-D__HIP_PLATFORM_AMD__=1",
+        # Source wrapper first: cmake -DEMIT_LLVM_IR=OFF does not restage
+        # build/include/nccl_device_wrapper.h, so a generated copy can be stale.
+        f"-I{IR_DIR}",
         f"-I{HIPIFY_INC}",
         f"-I{os.path.join(HIPIFY_INC, 'nccl_device')}",
         f"-I{GENERATED_INC}",
@@ -227,8 +232,6 @@ def _missing_mpi_prerequisite():
         return f"IR_gin_mpi_test.cpp not found at {GIN_MPI_TEST_SRC}"
     if shutil.which("mpirun") is None or shutil.which("mpicxx") is None:
         return "MPI not found (mpirun/mpicxx not in PATH)"
-    if not os.path.isfile(os.path.join(MPI_INC, "mpi.h")):
-        return f"mpi.h not found at {MPI_INC} (set MPI_INC)"
     if _find_rccl_libdir() is None:
         return (
             f"host librccl.so not found under {RCCL_BUILD} "
@@ -248,11 +251,12 @@ def _build_gin_mpi_binary():
     gtest_inc = os.path.join(GTEST_ROOT, "include")
     gtest_libdir = _find_gtest_libdir()
     rccl_libdir = _find_rccl_libdir()
+    mpi_cxx = shutil.which("mpicxx")
     args = [
-        HIPCC,
+        mpi_cxx,
         f"--offload-arch={ARCH}", "-O0",
         "-D__HIP_PLATFORM_AMD__=1",
-        f"-I{MPI_INC}",
+        f"-I{IR_DIR}",
         f"-I{HIPIFY_INC}",
         f"-I{os.path.join(HIPIFY_INC, 'nccl_device')}",
         f"-I{GENERATED_INC}",
@@ -260,17 +264,19 @@ def _build_gin_mpi_binary():
         GIN_MPI_TEST_SRC,
         "-Xoffload-linker", BITCODE,
         "-Xoffload-linker", "-plugin-opt=-amdgpu-internalize-symbols=false",
-        f"-L{rccl_libdir}", f"-Wl,-rpath,{rccl_libdir}", "-lrccl",
-        "-lmpichcxx", "-lmpich",
+        # Resolve main here before librccl exposes the RAS client's main symbol.
         f"-L{gtest_libdir}", "-lgtest_main", "-lgtest", "-lpthread",
+        f"-L{rccl_libdir}", f"-Wl,-rpath,{rccl_libdir}", "-lrccl",
         "-o", GIN_MPI_TEST_EXE,
     ]
+    env = os.environ.copy()
+    env.update({"OMPI_CXX": HIPCC, "MPICH_CXX": HIPCC})
     build_log = os.path.join(LOGDIR, "ir_gin_mpi_build.log")
     with open(build_log, "w") as log:
         log.write("$ " + " ".join(args) + "\n\n")
         log.flush()
         proc = subprocess.run(
-            args, env=os.environ.copy(), stdout=log,
+            args, env=env, stdout=log,
             stderr=subprocess.STDOUT, universal_newlines=True,
         )
     assert proc.returncode == 0, (
@@ -345,7 +351,7 @@ def run_gin_mpi_gtest(ir_gin_mpi_binary):
 
 @pytest.fixture(scope="session")
 def ir_test_binary():
-    """Build the bitcode if needed, then compile IR_test.cpp against it once.
+    """Update the bitcode, then compile IR_test.cpp against it once.
 
     Skips the entire suite if prerequisites are missing. Returns the path to
     the compiled GoogleTest executable.
@@ -354,15 +360,13 @@ def ir_test_binary():
     if reason:
         pytest.skip(f"IR device tests skipped: {reason}")
 
-    # Emit librccl_device.bc on demand (the EMIT_LLVM_IR step) when absent.
-    if os.path.isfile(BITCODE):
-        logger.info("librccl_device.bc PRESENT at %s — reusing it", BITCODE)
-    else:
-        logger.info(
-            "librccl_device.bc MISSING at %s — building it (EMIT_LLVM_IR step, "
-            "arch=%s)...", BITCODE, ARCH)
-        bc_log = _build_bitcode()
-        logger.info("librccl_device.bc BUILT at %s (log: %s)", BITCODE, bc_log)
+    # Always invoke make so dependency timestamps decide whether the artifact
+    # is current. Merely checking that BITCODE exists can reuse an artifact
+    # from before a wrapper/implementation edit when RCCL itself was rebuilt
+    # with EMIT_LLVM_IR=OFF.
+    logger.info("Updating librccl_device.bc at %s (arch=%s)...", BITCODE, ARCH)
+    bc_log = _build_bitcode()
+    logger.info("librccl_device.bc READY at %s (log: %s)", BITCODE, bc_log)
 
     logger.info(
         "Compiling IR_test.cpp -> %s (hipcc -O0, arch=%s)...", TEST_EXE, ARCH)

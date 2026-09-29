@@ -81,7 +81,7 @@ Command-line options
    Specifies the output format(s) for the profiling data. Multiple formats can be
    provided as a comma-separated list. Available formats are:
 
-   * ``perfetto`` - Generates a Perfetto trace file (``.proto``) that can be
+   * ``perfetto`` - Generates a Perfetto trace file (``.pftrace``) that can be
      visualized in the `Perfetto UI <https://ui.perfetto.dev>`_.
    * ``rocpd`` - Generates a RocPD SQLite database file (``.db``) for
      programmatic analysis.
@@ -120,7 +120,7 @@ Generate a Perfetto trace file for visualization:
    $ rocprof-sys-attach -p 12345 -F perfetto
 
 After detaching, the trace file will be available at:
-``rocprof-sys-output/<timestamp>/perfetto-trace-12345.proto``
+``rocprof-sys-output/<timestamp>/perfetto-trace-12345.pftrace``
 
 Attach with custom output path
 ----------------------------------------
@@ -142,7 +142,7 @@ Generate both Perfetto trace and RocPD database:
 
 This generates:
 
-* ``./profiling-results/<timestamp>/perfetto-trace-12345.proto``
+* ``./profiling-results/<timestamp>/perfetto-trace-12345.pftrace``
 * ``./profiling-results/<timestamp>/rocpd-12345.db``
 
 Using environment variables
@@ -181,12 +181,12 @@ Here is a complete workflow for attaching to a running GPU application:
 
    [rocprof-sys-attach] Detached from process 98765
    [rocprof-sys-attach] Output written to: ./results
-   [rocprof-sys-attach]   - Perfetto trace: perfetto-trace-98765.proto
+   [rocprof-sys-attach]   - Perfetto trace: perfetto-trace-98765.pftrace
    [rocprof-sys-attach]   - RocPD database: rocpd-98765.db
 
    # View the trace in Perfetto UI
    $ firefox https://ui.perfetto.dev
-   # Drag and drop the .proto file to visualize
+   # Drag and drop the .pftrace file to visualize
 
 Re-attaching to a process
 ========================================

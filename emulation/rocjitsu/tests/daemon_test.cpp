@@ -374,6 +374,11 @@ TEST_F(DaemonTest, HipMemcpyRoundTripPageableAbovePinThreshold) {
   EXPECT_EQ(r.exit_code, 0) << r.output;
 }
 
+TEST_F(DaemonTest, HipMaskedStreamLdsReuse) {
+  auto r = run_hip_test(hip_memcpy_bin(), "HipMemcpyTest.MaskedStreamLdsReuse");
+  EXPECT_EQ(r.exit_code, 0) << r.output;
+}
+
 TEST_F(DaemonTest, HipMemcpyDeviceToDevice) {
   auto r = run_hip_test(hip_memcpy_bin(), "HipMemcpyTest.DeviceToDevice");
   EXPECT_EQ(r.exit_code, 0) << r.output;

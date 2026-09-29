@@ -2854,6 +2854,19 @@ void VSwmmacF3216x16x64F16Vop3p::build_modifiers(std::string &out) const {
     out += " matrix_b_reuse";
 }
 
+void VSwmmacF3216x16x64F16Vop3p::implicit_uses(RegisterSet &uses) const {
+  Vop3p::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
+void VSwmmacF3216x16x64F16Vop3p::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop3p::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
+}
+
 VSwmmacF3216x16x64Bf16Vop3p::VSwmmacF3216x16x64Bf16Vop3p(const MachineInst *inst)
     : Vop3p("v_swmmac_f32_16x16x64_bf16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VSwmmacF3216x16x64Bf16Vop3p)),
@@ -2897,6 +2910,19 @@ void VSwmmacF3216x16x64Bf16Vop3p::build_modifiers(std::string &out) const {
     out += " matrix_a_reuse";
   if (inst_.opsel_hi_2)
     out += " matrix_b_reuse";
+}
+
+void VSwmmacF3216x16x64Bf16Vop3p::implicit_uses(RegisterSet &uses) const {
+  Vop3p::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
+void VSwmmacF3216x16x64Bf16Vop3p::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop3p::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
 }
 
 VSwmmacF1616x16x64F16Vop3p::VSwmmacF1616x16x64F16Vop3p(const MachineInst *inst)
@@ -2944,6 +2970,19 @@ void VSwmmacF1616x16x64F16Vop3p::build_modifiers(std::string &out) const {
     out += " matrix_b_reuse";
 }
 
+void VSwmmacF1616x16x64F16Vop3p::implicit_uses(RegisterSet &uses) const {
+  Vop3p::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
+void VSwmmacF1616x16x64F16Vop3p::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop3p::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
+}
+
 VSwmmacBf1616x16x64Bf16Vop3p::VSwmmacBf1616x16x64Bf16Vop3p(const MachineInst *inst)
     : Vop3p("v_swmmac_bf16_16x16x64_bf16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VSwmmacBf1616x16x64Bf16Vop3p)),
@@ -2989,20 +3028,35 @@ void VSwmmacBf1616x16x64Bf16Vop3p::build_modifiers(std::string &out) const {
     out += " matrix_b_reuse";
 }
 
+void VSwmmacBf1616x16x64Bf16Vop3p::implicit_uses(RegisterSet &uses) const {
+  Vop3p::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
+void VSwmmacBf1616x16x64Bf16Vop3p::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop3p::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
+}
+
 VSwmmacBf16f3216x16x64Bf16Vop3p::VSwmmacBf16f3216x16x64Bf16Vop3p(const MachineInst *inst)
     : Vop3p("v_swmmac_bf16f32_16x16x64_bf16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VSwmmacBf16f3216x16x64Bf16Vop3p)),
       vdst(256, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst_result(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(256, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(512, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
+  dst_operands_[0] = &vdst_result;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  vdst_result.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
@@ -3032,6 +3086,28 @@ void VSwmmacBf16f3216x16x64Bf16Vop3p::build_modifiers(std::string &out) const {
     out += " matrix_a_reuse";
   if (inst_.opsel_hi_2)
     out += " matrix_b_reuse";
+}
+
+void VSwmmacBf16f3216x16x64Bf16Vop3p::append_dst_operand(std::string &out,
+                                                         uint8_t operand_index) const {
+  if (operand_index == 0) {
+    out += vdst.name();
+    return;
+  }
+  Instruction::append_dst_operand(out, operand_index);
+}
+
+void VSwmmacBf16f3216x16x64Bf16Vop3p::implicit_uses(RegisterSet &uses) const {
+  Vop3p::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
+void VSwmmacBf16f3216x16x64Bf16Vop3p::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop3p::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
 }
 
 VWmmaF3216x16x64Fp8Fp8Vop3p::VWmmaF3216x16x64Fp8Fp8Vop3p(const MachineInst *inst)
@@ -3412,6 +3488,19 @@ void VSwmmacF3216x16x128Fp8Fp8Vop3p::build_modifiers(std::string &out) const {
     out += " matrix_b_reuse";
 }
 
+void VSwmmacF3216x16x128Fp8Fp8Vop3p::implicit_uses(RegisterSet &uses) const {
+  Vop3p::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
+void VSwmmacF3216x16x128Fp8Fp8Vop3p::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop3p::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
+}
+
 VSwmmacF3216x16x128Fp8Bf8Vop3p::VSwmmacF3216x16x128Fp8Bf8Vop3p(const MachineInst *inst)
     : Vop3p("v_swmmac_f32_16x16x128_fp8_bf8", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VSwmmacF3216x16x128Fp8Bf8Vop3p)),
@@ -3455,6 +3544,19 @@ void VSwmmacF3216x16x128Fp8Bf8Vop3p::build_modifiers(std::string &out) const {
     out += " matrix_a_reuse";
   if (inst_.opsel_hi_2)
     out += " matrix_b_reuse";
+}
+
+void VSwmmacF3216x16x128Fp8Bf8Vop3p::implicit_uses(RegisterSet &uses) const {
+  Vop3p::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
+void VSwmmacF3216x16x128Fp8Bf8Vop3p::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop3p::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
 }
 
 VSwmmacF3216x16x128Bf8Fp8Vop3p::VSwmmacF3216x16x128Bf8Fp8Vop3p(const MachineInst *inst)
@@ -3502,6 +3604,19 @@ void VSwmmacF3216x16x128Bf8Fp8Vop3p::build_modifiers(std::string &out) const {
     out += " matrix_b_reuse";
 }
 
+void VSwmmacF3216x16x128Bf8Fp8Vop3p::implicit_uses(RegisterSet &uses) const {
+  Vop3p::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
+void VSwmmacF3216x16x128Bf8Fp8Vop3p::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop3p::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
+}
+
 VSwmmacF3216x16x128Bf8Bf8Vop3p::VSwmmacF3216x16x128Bf8Bf8Vop3p(const MachineInst *inst)
     : Vop3p("v_swmmac_f32_16x16x128_bf8_bf8", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VSwmmacF3216x16x128Bf8Bf8Vop3p)),
@@ -3545,6 +3660,19 @@ void VSwmmacF3216x16x128Bf8Bf8Vop3p::build_modifiers(std::string &out) const {
     out += " matrix_a_reuse";
   if (inst_.opsel_hi_2)
     out += " matrix_b_reuse";
+}
+
+void VSwmmacF3216x16x128Bf8Bf8Vop3p::implicit_uses(RegisterSet &uses) const {
+  Vop3p::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
+void VSwmmacF3216x16x128Bf8Bf8Vop3p::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop3p::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
 }
 
 VSwmmacF1616x16x128Fp8Fp8Vop3p::VSwmmacF1616x16x128Fp8Fp8Vop3p(const MachineInst *inst)
@@ -3592,6 +3720,19 @@ void VSwmmacF1616x16x128Fp8Fp8Vop3p::build_modifiers(std::string &out) const {
     out += " matrix_b_reuse";
 }
 
+void VSwmmacF1616x16x128Fp8Fp8Vop3p::implicit_uses(RegisterSet &uses) const {
+  Vop3p::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
+void VSwmmacF1616x16x128Fp8Fp8Vop3p::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop3p::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
+}
+
 VSwmmacF1616x16x128Fp8Bf8Vop3p::VSwmmacF1616x16x128Fp8Bf8Vop3p(const MachineInst *inst)
     : Vop3p("v_swmmac_f16_16x16x128_fp8_bf8", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VSwmmacF1616x16x128Fp8Bf8Vop3p)),
@@ -3635,6 +3776,19 @@ void VSwmmacF1616x16x128Fp8Bf8Vop3p::build_modifiers(std::string &out) const {
     out += " matrix_a_reuse";
   if (inst_.opsel_hi_2)
     out += " matrix_b_reuse";
+}
+
+void VSwmmacF1616x16x128Fp8Bf8Vop3p::implicit_uses(RegisterSet &uses) const {
+  Vop3p::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
+void VSwmmacF1616x16x128Fp8Bf8Vop3p::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop3p::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
 }
 
 VSwmmacF1616x16x128Bf8Fp8Vop3p::VSwmmacF1616x16x128Bf8Fp8Vop3p(const MachineInst *inst)
@@ -3682,6 +3836,19 @@ void VSwmmacF1616x16x128Bf8Fp8Vop3p::build_modifiers(std::string &out) const {
     out += " matrix_b_reuse";
 }
 
+void VSwmmacF1616x16x128Bf8Fp8Vop3p::implicit_uses(RegisterSet &uses) const {
+  Vop3p::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
+void VSwmmacF1616x16x128Bf8Fp8Vop3p::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop3p::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
+}
+
 VSwmmacF1616x16x128Bf8Bf8Vop3p::VSwmmacF1616x16x128Bf8Bf8Vop3p(const MachineInst *inst)
     : Vop3p("v_swmmac_f16_16x16x128_bf8_bf8", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VSwmmacF1616x16x128Bf8Bf8Vop3p)),
@@ -3727,6 +3894,19 @@ void VSwmmacF1616x16x128Bf8Bf8Vop3p::build_modifiers(std::string &out) const {
     out += " matrix_b_reuse";
 }
 
+void VSwmmacF1616x16x128Bf8Bf8Vop3p::implicit_uses(RegisterSet &uses) const {
+  Vop3p::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
+void VSwmmacF1616x16x128Bf8Bf8Vop3p::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop3p::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
+}
+
 VSwmmacI3216x16x128Iu8Vop3p::VSwmmacI3216x16x128Iu8Vop3p(const MachineInst *inst)
     : Vop3p("v_swmmac_i32_16x16x128_iu8", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VSwmmacI3216x16x128Iu8Vop3p)),
@@ -3770,6 +3950,19 @@ void VSwmmacI3216x16x128Iu8Vop3p::build_modifiers(std::string &out) const {
     out += " matrix_a_reuse";
   if (inst_.opsel_hi_2)
     out += " matrix_b_reuse";
+}
+
+void VSwmmacI3216x16x128Iu8Vop3p::implicit_uses(RegisterSet &uses) const {
+  Vop3p::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
+void VSwmmacI3216x16x128Iu8Vop3p::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop3p::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
 }
 
 VWmmaF3216x16x128Fp8Fp8Vop3p::VWmmaF3216x16x128Fp8Fp8Vop3p(const MachineInst *inst)
@@ -4170,7 +4363,8 @@ DecodeResult decodeVWmmaF3232x16x128F4Vop3p(const MachineInst *opcode,
 } // namespace detail
 
 VPkFmaF64Vop3p::VPkFmaF64Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_fma_f64", reinterpret_cast<const OpEncoding *>(inst), nullptr),
+    : Vop3p("v_pk_fma_f64", reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::VPkFmaF64Vop3p)),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(128, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(128, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -4183,17 +4377,20 @@ VPkFmaF64Vop3p::VPkFmaF64Vop3p(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        128, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+    src0 = Operand::make_literal32(
+        128,
+        static_cast<uint32_t>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
-    src1 = Operand(
-        128, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+    src1 = Operand::make_literal32(
+        128,
+        static_cast<uint32_t>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
-    src2 = Operand(
-        128, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+    src2 = Operand::make_literal32(
+        128,
+        static_cast<uint32_t>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::F64HighBits);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -4208,6 +4405,99 @@ DecodeResult decodeVPkFmaF64Vop3p(const MachineInst *opcode, const DecodeErrorEm
                                emit_error, LiteralSupport::Literal32);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->opsel != 0u ||
+      reinterpret_cast<const Vop3p::OpEncoding *>(inst)->opsel_hi != 3u ||
+      reinterpret_cast<const Vop3p::OpEncoding *>(inst)->opsel_hi_2 != 1u) [[unlikely]]
+    return emit_error.emit() << "V_PK_FMA_F64 has an invalid packed F64 element layout";
+  if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->vdst & 1u) != 0u) [[unlikely]]
+    return emit_error.emit() << "V_PK_FMA_F64 has an invalid vdst register tuple alignment";
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 105u &&
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 > 102u &&
+       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 != 104u)) [[unlikely]]
+    return emit_error.emit()
+           << "V_PK_FMA_F64 has a src0 register tuple that exceeds the selector range";
+  if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 105u &&
+       (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 % 4u) != 0u) ||
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 >= 108u &&
+       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 123u &&
+       ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 - 108u) % 4u) != 0u) ||
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 >= 256u &&
+       (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 & 1u) != 0u)) [[unlikely]]
+    return emit_error.emit() << "V_PK_FMA_F64 has an invalid src0 register tuple alignment";
+  if (!((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 100u &&
+         (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 % 4u) == 0u) ||
+        reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == 104u ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 >= 108u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 120u &&
+         ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 - 108u) % 4u) == 0u) ||
+        reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == 124u ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 >= 128u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 208u) ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 >= 240u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 248u) ||
+        reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == 255u ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 >= 256u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 510u &&
+         (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 & 1u) == 0u))) [[unlikely]]
+    return emit_error.emit() << "V_PK_FMA_F64 has an invalid src0 packed F64 source selector";
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 105u &&
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 > 102u &&
+       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 != 104u)) [[unlikely]]
+    return emit_error.emit()
+           << "V_PK_FMA_F64 has a src1 register tuple that exceeds the selector range";
+  if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 105u &&
+       (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 % 4u) != 0u) ||
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 >= 108u &&
+       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 123u &&
+       ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 - 108u) % 4u) != 0u) ||
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 >= 256u &&
+       (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 & 1u) != 0u)) [[unlikely]]
+    return emit_error.emit() << "V_PK_FMA_F64 has an invalid src1 register tuple alignment";
+  if (!((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 100u &&
+         (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 % 4u) == 0u) ||
+        reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 == 104u ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 >= 108u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 120u &&
+         ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 - 108u) % 4u) == 0u) ||
+        reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 == 124u ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 >= 128u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 208u) ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 >= 240u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 248u) ||
+        reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 == 255u ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 >= 256u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 510u &&
+         (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 & 1u) == 0u))) [[unlikely]]
+    return emit_error.emit() << "V_PK_FMA_F64 has an invalid src1 packed F64 source selector";
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 <= 105u &&
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 > 102u &&
+       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 != 104u)) [[unlikely]]
+    return emit_error.emit()
+           << "V_PK_FMA_F64 has a src2 register tuple that exceeds the selector range";
+  if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 <= 105u &&
+       (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 % 4u) != 0u) ||
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 >= 108u &&
+       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 <= 123u &&
+       ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 - 108u) % 4u) != 0u) ||
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 >= 256u &&
+       (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 & 1u) != 0u)) [[unlikely]]
+    return emit_error.emit() << "V_PK_FMA_F64 has an invalid src2 register tuple alignment";
+  if (!((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 <= 100u &&
+         (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 % 4u) == 0u) ||
+        reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 == 104u ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 >= 108u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 <= 120u &&
+         ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 - 108u) % 4u) == 0u) ||
+        reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 == 124u ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 >= 128u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 <= 208u) ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 >= 240u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 <= 248u) ||
+        reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 == 255u ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 >= 256u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 <= 510u &&
+         (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 & 1u) == 0u))) [[unlikely]]
+    return emit_error.emit() << "V_PK_FMA_F64 has an invalid src2 packed F64 source selector";
   if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0))
       [[unlikely]]
@@ -4217,7 +4507,8 @@ DecodeResult decodeVPkFmaF64Vop3p(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VPkMulF64Vop3p::VPkMulF64Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_mul_f64", reinterpret_cast<const OpEncoding *>(inst), nullptr),
+    : Vop3p("v_pk_mul_f64", reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::VPkMulF64Vop3p)),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(128, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(128, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -4228,13 +4519,15 @@ VPkMulF64Vop3p::VPkMulF64Vop3p(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        128, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+    src0 = Operand::make_literal32(
+        128,
+        static_cast<uint32_t>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
-    src1 = Operand(
-        128, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+    src1 = Operand::make_literal32(
+        128,
+        static_cast<uint32_t>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::F64HighBits);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -4248,6 +4541,74 @@ DecodeResult decodeVPkMulF64Vop3p(const MachineInst *opcode, const DecodeErrorEm
                                emit_error, LiteralSupport::Literal32, 2);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->opsel != 0u ||
+      reinterpret_cast<const Vop3p::OpEncoding *>(inst)->opsel_hi != 3u ||
+      reinterpret_cast<const Vop3p::OpEncoding *>(inst)->opsel_hi_2 != 1u) [[unlikely]]
+    return emit_error.emit() << "V_PK_MUL_F64 has an invalid packed F64 element layout";
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 != 128u ||
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->neg & 4u) != 0u ||
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->neg_hi & 4u) != 0u) [[unlikely]]
+    return emit_error.emit() << "V_PK_MUL_F64 has an invalid unused src2 encoding";
+  if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->vdst & 1u) != 0u) [[unlikely]]
+    return emit_error.emit() << "V_PK_MUL_F64 has an invalid vdst register tuple alignment";
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 105u &&
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 > 102u &&
+       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 != 104u)) [[unlikely]]
+    return emit_error.emit()
+           << "V_PK_MUL_F64 has a src0 register tuple that exceeds the selector range";
+  if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 105u &&
+       (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 % 4u) != 0u) ||
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 >= 108u &&
+       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 123u &&
+       ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 - 108u) % 4u) != 0u) ||
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 >= 256u &&
+       (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 & 1u) != 0u)) [[unlikely]]
+    return emit_error.emit() << "V_PK_MUL_F64 has an invalid src0 register tuple alignment";
+  if (!((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 100u &&
+         (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 % 4u) == 0u) ||
+        reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == 104u ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 >= 108u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 120u &&
+         ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 - 108u) % 4u) == 0u) ||
+        reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == 124u ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 >= 128u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 208u) ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 >= 240u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 248u) ||
+        reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == 255u ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 >= 256u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 510u &&
+         (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 & 1u) == 0u))) [[unlikely]]
+    return emit_error.emit() << "V_PK_MUL_F64 has an invalid src0 packed F64 source selector";
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 105u &&
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 > 102u &&
+       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 != 104u)) [[unlikely]]
+    return emit_error.emit()
+           << "V_PK_MUL_F64 has a src1 register tuple that exceeds the selector range";
+  if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 105u &&
+       (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 % 4u) != 0u) ||
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 >= 108u &&
+       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 123u &&
+       ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 - 108u) % 4u) != 0u) ||
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 >= 256u &&
+       (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 & 1u) != 0u)) [[unlikely]]
+    return emit_error.emit() << "V_PK_MUL_F64 has an invalid src1 register tuple alignment";
+  if (!((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 100u &&
+         (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 % 4u) == 0u) ||
+        reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 == 104u ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 >= 108u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 120u &&
+         ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 - 108u) % 4u) == 0u) ||
+        reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 == 124u ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 >= 128u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 208u) ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 >= 240u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 248u) ||
+        reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 == 255u ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 >= 256u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 510u &&
+         (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 & 1u) == 0u))) [[unlikely]]
+    return emit_error.emit() << "V_PK_MUL_F64 has an invalid src1 packed F64 source selector";
   if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0))
       [[unlikely]]
@@ -4257,7 +4618,8 @@ DecodeResult decodeVPkMulF64Vop3p(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VPkAddF64Vop3p::VPkAddF64Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_add_f64", reinterpret_cast<const OpEncoding *>(inst), nullptr),
+    : Vop3p("v_pk_add_f64", reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::VPkAddF64Vop3p)),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(128, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(128, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -4268,13 +4630,15 @@ VPkAddF64Vop3p::VPkAddF64Vop3p(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        128, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+    src0 = Operand::make_literal32(
+        128,
+        static_cast<uint32_t>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
-    src1 = Operand(
-        128, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+    src1 = Operand::make_literal32(
+        128,
+        static_cast<uint32_t>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::F64HighBits);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -4288,6 +4652,74 @@ DecodeResult decodeVPkAddF64Vop3p(const MachineInst *opcode, const DecodeErrorEm
                                emit_error, LiteralSupport::Literal32, 2);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->opsel != 0u ||
+      reinterpret_cast<const Vop3p::OpEncoding *>(inst)->opsel_hi != 3u ||
+      reinterpret_cast<const Vop3p::OpEncoding *>(inst)->opsel_hi_2 != 1u) [[unlikely]]
+    return emit_error.emit() << "V_PK_ADD_F64 has an invalid packed F64 element layout";
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 != 128u ||
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->neg & 4u) != 0u ||
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->neg_hi & 4u) != 0u) [[unlikely]]
+    return emit_error.emit() << "V_PK_ADD_F64 has an invalid unused src2 encoding";
+  if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->vdst & 1u) != 0u) [[unlikely]]
+    return emit_error.emit() << "V_PK_ADD_F64 has an invalid vdst register tuple alignment";
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 105u &&
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 > 102u &&
+       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 != 104u)) [[unlikely]]
+    return emit_error.emit()
+           << "V_PK_ADD_F64 has a src0 register tuple that exceeds the selector range";
+  if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 105u &&
+       (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 % 4u) != 0u) ||
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 >= 108u &&
+       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 123u &&
+       ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 - 108u) % 4u) != 0u) ||
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 >= 256u &&
+       (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 & 1u) != 0u)) [[unlikely]]
+    return emit_error.emit() << "V_PK_ADD_F64 has an invalid src0 register tuple alignment";
+  if (!((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 100u &&
+         (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 % 4u) == 0u) ||
+        reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == 104u ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 >= 108u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 120u &&
+         ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 - 108u) % 4u) == 0u) ||
+        reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == 124u ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 >= 128u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 208u) ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 >= 240u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 248u) ||
+        reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == 255u ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 >= 256u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 510u &&
+         (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 & 1u) == 0u))) [[unlikely]]
+    return emit_error.emit() << "V_PK_ADD_F64 has an invalid src0 packed F64 source selector";
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 105u &&
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 > 102u &&
+       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 != 104u)) [[unlikely]]
+    return emit_error.emit()
+           << "V_PK_ADD_F64 has a src1 register tuple that exceeds the selector range";
+  if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 105u &&
+       (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 % 4u) != 0u) ||
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 >= 108u &&
+       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 123u &&
+       ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 - 108u) % 4u) != 0u) ||
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 >= 256u &&
+       (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 & 1u) != 0u)) [[unlikely]]
+    return emit_error.emit() << "V_PK_ADD_F64 has an invalid src1 register tuple alignment";
+  if (!((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 100u &&
+         (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 % 4u) == 0u) ||
+        reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 == 104u ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 >= 108u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 120u &&
+         ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 - 108u) % 4u) == 0u) ||
+        reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 == 124u ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 >= 128u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 208u) ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 >= 240u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 248u) ||
+        reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 == 255u ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 >= 256u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 510u &&
+         (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 & 1u) == 0u))) [[unlikely]]
+    return emit_error.emit() << "V_PK_ADD_F64 has an invalid src1 packed F64 source selector";
   if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0))
       [[unlikely]]
@@ -4338,16 +4770,11 @@ DecodeResult decodeVPkAddNcU64Vop3p(const MachineInst *opcode,
       (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->neg & 4u) != 0u ||
       (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->neg_hi & 4u) != 0u) [[unlikely]]
     return emit_error.emit() << "V_PK_ADD_NC_U64 has an invalid unused src2 encoding";
-  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->vdst > 252u) [[unlikely]]
-    return emit_error.emit()
-           << "V_PK_ADD_NC_U64 has a vdst register tuple that exceeds the selector range";
   if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->vdst & 1u) != 0u) [[unlikely]]
     return emit_error.emit() << "V_PK_ADD_NC_U64 has an invalid vdst register tuple alignment";
-  if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 105u &&
-       (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 > 102u &&
-        reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 != 104u)) ||
-      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 >= 256u &&
-       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 > 508u)) [[unlikely]]
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 105u &&
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 > 102u &&
+       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 != 104u)) [[unlikely]]
     return emit_error.emit()
            << "V_PK_ADD_NC_U64 has a src0 register tuple that exceeds the selector range";
   if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 105u &&
@@ -4371,14 +4798,12 @@ DecodeResult decodeVPkAddNcU64Vop3p(const MachineInst *opcode,
          reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 248u) ||
         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == 255u ||
         (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 >= 256u &&
-         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 508u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 510u &&
          (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 & 1u) == 0u))) [[unlikely]]
     return emit_error.emit() << "V_PK_ADD_NC_U64 has an invalid src0 packed U64 source selector";
-  if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 105u &&
-       (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 > 102u &&
-        reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 != 104u)) ||
-      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 >= 256u &&
-       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 > 508u)) [[unlikely]]
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 105u &&
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 > 102u &&
+       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 != 104u)) [[unlikely]]
     return emit_error.emit()
            << "V_PK_ADD_NC_U64 has a src1 register tuple that exceeds the selector range";
   if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 105u &&
@@ -4402,7 +4827,7 @@ DecodeResult decodeVPkAddNcU64Vop3p(const MachineInst *opcode,
          reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 248u) ||
         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 == 255u ||
         (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 >= 256u &&
-         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 508u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 510u &&
          (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 & 1u) == 0u))) [[unlikely]]
     return emit_error.emit() << "V_PK_ADD_NC_U64 has an invalid src1 packed U64 source selector";
   if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -4455,16 +4880,11 @@ DecodeResult decodeVPkSubNcU64Vop3p(const MachineInst *opcode,
       (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->neg & 4u) != 0u ||
       (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->neg_hi & 4u) != 0u) [[unlikely]]
     return emit_error.emit() << "V_PK_SUB_NC_U64 has an invalid unused src2 encoding";
-  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->vdst > 252u) [[unlikely]]
-    return emit_error.emit()
-           << "V_PK_SUB_NC_U64 has a vdst register tuple that exceeds the selector range";
   if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->vdst & 1u) != 0u) [[unlikely]]
     return emit_error.emit() << "V_PK_SUB_NC_U64 has an invalid vdst register tuple alignment";
-  if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 105u &&
-       (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 > 102u &&
-        reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 != 104u)) ||
-      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 >= 256u &&
-       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 > 508u)) [[unlikely]]
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 105u &&
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 > 102u &&
+       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 != 104u)) [[unlikely]]
     return emit_error.emit()
            << "V_PK_SUB_NC_U64 has a src0 register tuple that exceeds the selector range";
   if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 105u &&
@@ -4488,14 +4908,12 @@ DecodeResult decodeVPkSubNcU64Vop3p(const MachineInst *opcode,
          reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 248u) ||
         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == 255u ||
         (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 >= 256u &&
-         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 508u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 510u &&
          (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 & 1u) == 0u))) [[unlikely]]
     return emit_error.emit() << "V_PK_SUB_NC_U64 has an invalid src0 packed U64 source selector";
-  if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 105u &&
-       (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 > 102u &&
-        reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 != 104u)) ||
-      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 >= 256u &&
-       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 > 508u)) [[unlikely]]
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 105u &&
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 > 102u &&
+       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 != 104u)) [[unlikely]]
     return emit_error.emit()
            << "V_PK_SUB_NC_U64 has a src1 register tuple that exceeds the selector range";
   if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 105u &&
@@ -4519,7 +4937,7 @@ DecodeResult decodeVPkSubNcU64Vop3p(const MachineInst *opcode,
          reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 248u) ||
         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 == 255u ||
         (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 >= 256u &&
-         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 508u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 510u &&
          (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 & 1u) == 0u))) [[unlikely]]
     return emit_error.emit() << "V_PK_SUB_NC_U64 has an invalid src1 packed U64 source selector";
   if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -4531,7 +4949,8 @@ DecodeResult decodeVPkSubNcU64Vop3p(const MachineInst *opcode,
 } // namespace detail
 
 VPkMaxNumF64Vop3p::VPkMaxNumF64Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_max_num_f64", reinterpret_cast<const OpEncoding *>(inst), nullptr),
+    : Vop3p("v_pk_max_num_f64", reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::VPkMaxNumF64Vop3p)),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(128, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(128, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -4542,13 +4961,15 @@ VPkMaxNumF64Vop3p::VPkMaxNumF64Vop3p(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        128, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+    src0 = Operand::make_literal32(
+        128,
+        static_cast<uint32_t>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
-    src1 = Operand(
-        128, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+    src1 = Operand::make_literal32(
+        128,
+        static_cast<uint32_t>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::F64HighBits);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -4563,6 +4984,74 @@ DecodeResult decodeVPkMaxNumF64Vop3p(const MachineInst *opcode,
                                                emit_error, LiteralSupport::Literal32, 2);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->opsel != 0u ||
+      reinterpret_cast<const Vop3p::OpEncoding *>(inst)->opsel_hi != 3u ||
+      reinterpret_cast<const Vop3p::OpEncoding *>(inst)->opsel_hi_2 != 1u) [[unlikely]]
+    return emit_error.emit() << "V_PK_MAX_NUM_F64 has an invalid packed F64 element layout";
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 != 128u ||
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->neg & 4u) != 0u ||
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->neg_hi & 4u) != 0u) [[unlikely]]
+    return emit_error.emit() << "V_PK_MAX_NUM_F64 has an invalid unused src2 encoding";
+  if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->vdst & 1u) != 0u) [[unlikely]]
+    return emit_error.emit() << "V_PK_MAX_NUM_F64 has an invalid vdst register tuple alignment";
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 105u &&
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 > 102u &&
+       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 != 104u)) [[unlikely]]
+    return emit_error.emit()
+           << "V_PK_MAX_NUM_F64 has a src0 register tuple that exceeds the selector range";
+  if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 105u &&
+       (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 % 4u) != 0u) ||
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 >= 108u &&
+       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 123u &&
+       ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 - 108u) % 4u) != 0u) ||
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 >= 256u &&
+       (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 & 1u) != 0u)) [[unlikely]]
+    return emit_error.emit() << "V_PK_MAX_NUM_F64 has an invalid src0 register tuple alignment";
+  if (!((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 100u &&
+         (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 % 4u) == 0u) ||
+        reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == 104u ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 >= 108u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 120u &&
+         ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 - 108u) % 4u) == 0u) ||
+        reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == 124u ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 >= 128u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 208u) ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 >= 240u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 248u) ||
+        reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == 255u ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 >= 256u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 510u &&
+         (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 & 1u) == 0u))) [[unlikely]]
+    return emit_error.emit() << "V_PK_MAX_NUM_F64 has an invalid src0 packed F64 source selector";
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 105u &&
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 > 102u &&
+       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 != 104u)) [[unlikely]]
+    return emit_error.emit()
+           << "V_PK_MAX_NUM_F64 has a src1 register tuple that exceeds the selector range";
+  if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 105u &&
+       (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 % 4u) != 0u) ||
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 >= 108u &&
+       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 123u &&
+       ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 - 108u) % 4u) != 0u) ||
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 >= 256u &&
+       (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 & 1u) != 0u)) [[unlikely]]
+    return emit_error.emit() << "V_PK_MAX_NUM_F64 has an invalid src1 register tuple alignment";
+  if (!((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 100u &&
+         (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 % 4u) == 0u) ||
+        reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 == 104u ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 >= 108u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 120u &&
+         ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 - 108u) % 4u) == 0u) ||
+        reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 == 124u ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 >= 128u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 208u) ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 >= 240u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 248u) ||
+        reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 == 255u ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 >= 256u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 510u &&
+         (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 & 1u) == 0u))) [[unlikely]]
+    return emit_error.emit() << "V_PK_MAX_NUM_F64 has an invalid src1 packed F64 source selector";
   if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0))
       [[unlikely]]
@@ -4572,7 +5061,8 @@ DecodeResult decodeVPkMaxNumF64Vop3p(const MachineInst *opcode,
 } // namespace detail
 
 VPkMinNumF64Vop3p::VPkMinNumF64Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_min_num_f64", reinterpret_cast<const OpEncoding *>(inst), nullptr),
+    : Vop3p("v_pk_min_num_f64", reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::VPkMinNumF64Vop3p)),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(128, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(128, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -4583,13 +5073,15 @@ VPkMinNumF64Vop3p::VPkMinNumF64Vop3p(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        128, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+    src0 = Operand::make_literal32(
+        128,
+        static_cast<uint32_t>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
-    src1 = Operand(
-        128, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+    src1 = Operand::make_literal32(
+        128,
+        static_cast<uint32_t>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::F64HighBits);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -4604,6 +5096,74 @@ DecodeResult decodeVPkMinNumF64Vop3p(const MachineInst *opcode,
                                                emit_error, LiteralSupport::Literal32, 2);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->opsel != 0u ||
+      reinterpret_cast<const Vop3p::OpEncoding *>(inst)->opsel_hi != 3u ||
+      reinterpret_cast<const Vop3p::OpEncoding *>(inst)->opsel_hi_2 != 1u) [[unlikely]]
+    return emit_error.emit() << "V_PK_MIN_NUM_F64 has an invalid packed F64 element layout";
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 != 128u ||
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->neg & 4u) != 0u ||
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->neg_hi & 4u) != 0u) [[unlikely]]
+    return emit_error.emit() << "V_PK_MIN_NUM_F64 has an invalid unused src2 encoding";
+  if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->vdst & 1u) != 0u) [[unlikely]]
+    return emit_error.emit() << "V_PK_MIN_NUM_F64 has an invalid vdst register tuple alignment";
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 105u &&
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 > 102u &&
+       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 != 104u)) [[unlikely]]
+    return emit_error.emit()
+           << "V_PK_MIN_NUM_F64 has a src0 register tuple that exceeds the selector range";
+  if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 105u &&
+       (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 % 4u) != 0u) ||
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 >= 108u &&
+       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 123u &&
+       ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 - 108u) % 4u) != 0u) ||
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 >= 256u &&
+       (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 & 1u) != 0u)) [[unlikely]]
+    return emit_error.emit() << "V_PK_MIN_NUM_F64 has an invalid src0 register tuple alignment";
+  if (!((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 100u &&
+         (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 % 4u) == 0u) ||
+        reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == 104u ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 >= 108u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 120u &&
+         ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 - 108u) % 4u) == 0u) ||
+        reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == 124u ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 >= 128u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 208u) ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 >= 240u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 248u) ||
+        reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == 255u ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 >= 256u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 510u &&
+         (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 & 1u) == 0u))) [[unlikely]]
+    return emit_error.emit() << "V_PK_MIN_NUM_F64 has an invalid src0 packed F64 source selector";
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 105u &&
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 > 102u &&
+       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 != 104u)) [[unlikely]]
+    return emit_error.emit()
+           << "V_PK_MIN_NUM_F64 has a src1 register tuple that exceeds the selector range";
+  if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 105u &&
+       (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 % 4u) != 0u) ||
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 >= 108u &&
+       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 123u &&
+       ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 - 108u) % 4u) != 0u) ||
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 >= 256u &&
+       (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 & 1u) != 0u)) [[unlikely]]
+    return emit_error.emit() << "V_PK_MIN_NUM_F64 has an invalid src1 register tuple alignment";
+  if (!((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 100u &&
+         (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 % 4u) == 0u) ||
+        reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 == 104u ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 >= 108u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 120u &&
+         ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 - 108u) % 4u) == 0u) ||
+        reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 == 124u ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 >= 128u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 208u) ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 >= 240u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 248u) ||
+        reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 == 255u ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 >= 256u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 510u &&
+         (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 & 1u) == 0u))) [[unlikely]]
+    return emit_error.emit() << "V_PK_MIN_NUM_F64 has an invalid src1 packed F64 source selector";
   if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0))
       [[unlikely]]
@@ -4662,16 +5222,11 @@ DecodeResult decodeVPkLshlAddU64Vop3p(const MachineInst *opcode,
       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->neg != 0u ||
       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->neg_hi != 0u) [[unlikely]]
     return emit_error.emit() << "V_PK_LSHL_ADD_U64 does not support source modifiers or clamp";
-  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->vdst > 252u) [[unlikely]]
-    return emit_error.emit()
-           << "V_PK_LSHL_ADD_U64 has a vdst register tuple that exceeds the selector range";
   if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->vdst & 1u) != 0u) [[unlikely]]
     return emit_error.emit() << "V_PK_LSHL_ADD_U64 has an invalid vdst register tuple alignment";
-  if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 105u &&
-       (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 > 102u &&
-        reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 != 104u)) ||
-      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 >= 256u &&
-       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 > 508u)) [[unlikely]]
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 105u &&
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 > 102u &&
+       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 != 104u)) [[unlikely]]
     return emit_error.emit()
            << "V_PK_LSHL_ADD_U64 has a src0 register tuple that exceeds the selector range";
   if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 105u &&
@@ -4695,13 +5250,11 @@ DecodeResult decodeVPkLshlAddU64Vop3p(const MachineInst *opcode,
          reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 248u) ||
         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == 255u ||
         (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 >= 256u &&
-         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 508u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 <= 510u &&
          (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 & 1u) == 0u))) [[unlikely]]
     return emit_error.emit() << "V_PK_LSHL_ADD_U64 has an invalid src0 packed U64 source selector";
-  if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 105u &&
-       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 > 104u) ||
-      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 >= 256u &&
-       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 > 510u)) [[unlikely]]
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 105u &&
+      reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 > 104u) [[unlikely]]
     return emit_error.emit()
            << "V_PK_LSHL_ADD_U64 has a src1 register tuple that exceeds the selector range";
   if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 105u &&
@@ -4733,11 +5286,9 @@ DecodeResult decodeVPkLshlAddU64Vop3p(const MachineInst *opcode,
          reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 510u &&
          (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 & 1u) == 0u))) [[unlikely]]
     return emit_error.emit() << "V_PK_LSHL_ADD_U64 has an invalid src1 packed U64 source selector";
-  if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 <= 105u &&
-       (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 > 102u &&
-        reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 != 104u)) ||
-      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 >= 256u &&
-       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 > 508u)) [[unlikely]]
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 <= 105u &&
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 > 102u &&
+       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 != 104u)) [[unlikely]]
     return emit_error.emit()
            << "V_PK_LSHL_ADD_U64 has a src2 register tuple that exceeds the selector range";
   if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 <= 105u &&
@@ -4761,7 +5312,7 @@ DecodeResult decodeVPkLshlAddU64Vop3p(const MachineInst *opcode,
          reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 <= 248u) ||
         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 == 255u ||
         (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 >= 256u &&
-         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 <= 508u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 <= 510u &&
          (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 & 1u) == 0u))) [[unlikely]]
     return emit_error.emit() << "V_PK_LSHL_ADD_U64 has an invalid src2 packed U64 source selector";
   if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -4773,7 +5324,8 @@ DecodeResult decodeVPkLshlAddU64Vop3p(const MachineInst *opcode,
 } // namespace detail
 
 VWmmaF6416x16x4F64Vop3p::VWmmaF6416x16x4F64Vop3p(const MachineInst *inst)
-    : Vop3p("v_wmma_f64_16x16x4_f64", reinterpret_cast<const OpEncoding *>(inst), nullptr),
+    : Vop3p("v_wmma_f64_16x16x4_f64", reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::VWmmaF6416x16x4F64Vop3p)),
       vdst(512, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(128, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(128, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -4801,6 +5353,51 @@ DecodeResult decodeVWmmaF6416x16x4F64Vop3p(const MachineInst *opcode,
                                                emit_error, LiteralSupport::None);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->opsel & 0x3u) != 0u ||
+      reinterpret_cast<const Vop3p::OpEncoding *>(inst)->opsel_hi != 3u) [[unlikely]]
+    return emit_error.emit() << "V_WMMA_F64_16X16X4_F64 has an invalid F64 WMMA element layout";
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->clamp != 0u ||
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->neg_hi & 0x3u) != 0u) [[unlikely]]
+    return emit_error.emit() << "V_WMMA_F64_16X16X4_F64 has unsupported modifier bits";
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->vdst > 240u) [[unlikely]]
+    return emit_error.emit()
+           << "V_WMMA_F64_16X16X4_F64 has a vdst register tuple that exceeds the selector range";
+  if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->vdst & 1u) != 0u) [[unlikely]]
+    return emit_error.emit()
+           << "V_WMMA_F64_16X16X4_F64 has an invalid vdst register tuple alignment";
+  if (!(reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+        amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0)) &&
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 < 256u ||
+       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 > 508u)) [[unlikely]]
+    return emit_error.emit()
+           << "V_WMMA_F64_16X16X4_F64 has a src0 register tuple outside the selector range";
+  if (!(reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+        amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0)) &&
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 & 1u) != 0u) [[unlikely]]
+    return emit_error.emit()
+           << "V_WMMA_F64_16X16X4_F64 has an invalid src0 register tuple alignment";
+  if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 < 256u ||
+       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 > 508u)) [[unlikely]]
+    return emit_error.emit()
+           << "V_WMMA_F64_16X16X4_F64 has a src1 register tuple outside the selector range";
+  if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 & 1u) != 0u) [[unlikely]]
+    return emit_error.emit()
+           << "V_WMMA_F64_16X16X4_F64 has an invalid src1 register tuple alignment";
+  if (!((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 >= 128u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 <= 208u) ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 >= 240u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 <= 248u)) &&
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 < 256u ||
+       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 > 496u)) [[unlikely]]
+    return emit_error.emit() << "V_WMMA_F64_16X16X4_F64 requires a legal inline accumulator or "
+                                "16-register VGPR tuple";
+  if (!((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 >= 128u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 <= 208u) ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 >= 240u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 <= 248u)) &&
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 & 1u) != 0u) [[unlikely]]
+    return emit_error.emit()
+           << "V_WMMA_F64_16X16X4_F64 has an invalid src2 register tuple alignment";
   if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0))
       [[unlikely]]

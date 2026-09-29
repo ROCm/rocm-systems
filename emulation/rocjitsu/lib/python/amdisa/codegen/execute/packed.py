@@ -13,6 +13,8 @@ op_sel_hi fields, derived from the ISA profile at call time.
 
 from __future__ import annotations
 
+from amdisa.isa_profile import FloatDotAccumulation
+
 from .vop3_modifiers import vop3_dst_mod, vop3_src_mod
 
 
@@ -548,10 +550,15 @@ def gen_pk_fmac_vop2(dst: list[str], src: list[str]) -> str:
             '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {',
             '    if (!(exec & (1ULL << lane))) continue;',
             f'    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane({s0}, lane);',
+            f'    if (amdgpu::pk16_src_needs_narrowing(inst_.src0, {s0}.size_bits()))',
+            f'      raw0 = util::f32_to_f16(std::bit_cast<float>(raw0));',
+            f'    if (amdgpu::dot2_src_needs_half_replication(inst_.src0))',
+            f'      raw0 = (raw0 & 0xffffu) * 0x10001u;',
             f'    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane({s1}, lane);',
             f'    uint32_t rawd = amdgpu::RegisterAccess(wf).read_lane({d}, lane);',
-            '    uint32_t r0 = amdgpu::fp_mode::fma_f16(static_cast<uint16_t>(raw0), static_cast<uint16_t>(raw1), static_cast<uint16_t>(rawd), false, false, false, false, false, false, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), 0, false, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf));',
-            '    uint32_t r1 = amdgpu::fp_mode::fma_f16(static_cast<uint16_t>(raw0 >> 16), static_cast<uint16_t>(raw1 >> 16), static_cast<uint16_t>(rawd >> 16), false, false, false, false, false, false, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), 0, false, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf));',
+            '    const uint32_t omod = amdgpu::sdwa::output_modifier<amdgpu::sdwa::ResultFormat::PK_F16>(*this, wf);',
+            '    uint32_t r0 = amdgpu::fp_mode::fma_f16(static_cast<uint16_t>(raw0), static_cast<uint16_t>(raw1), static_cast<uint16_t>(rawd), false, false, false, false, false, false, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), omod, false, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf));',
+            '    uint32_t r1 = amdgpu::fp_mode::fma_f16(static_cast<uint16_t>(raw0 >> 16), static_cast<uint16_t>(raw1 >> 16), static_cast<uint16_t>(rawd >> 16), false, false, false, false, false, false, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), omod, false, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf));',
             f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, r0 | (r1 << 16));',
             '  }',
         ]
@@ -567,7 +574,15 @@ def gen_pk_fmac_vop3(dst: list[str], src: list[str]) -> str:
             '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {',
             '    if (!(exec & (1ULL << lane))) continue;',
             f'    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane({s0}, lane);',
+            f'    if (amdgpu::pk16_src_needs_narrowing(inst_.src0, {s0}.size_bits()))',
+            f'      raw0 = util::f32_to_f16(std::bit_cast<float>(raw0));',
+            f'    if (amdgpu::dot2_src_needs_half_replication(inst_.src0))',
+            f'      raw0 = (raw0 & 0xffffu) * 0x10001u;',
             f'    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane({s1}, lane);',
+            f'    if (amdgpu::pk16_src_needs_narrowing(inst_.src1, {s1}.size_bits()))',
+            f'      raw1 = util::f32_to_f16(std::bit_cast<float>(raw1));',
+            f'    if (amdgpu::dot2_src_needs_half_replication(inst_.src1))',
+            f'      raw1 = (raw1 & 0xffffu) * 0x10001u;',
             f'    uint32_t rawd = amdgpu::RegisterAccess(wf).read_lane({d}, lane);',
             '    uint32_t omod = amdgpu::fp_mode::effective_f16_omod(wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), true, inst_.omod);',
             '    uint32_t r0 = amdgpu::fp_mode::fma_f16(static_cast<uint16_t>(raw0), static_cast<uint16_t>(raw1), static_cast<uint16_t>(rawd), inst_.abs & 1u, inst_.abs & 2u, false, inst_.neg & 1u, inst_.neg & 2u, false, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), omod, inst_.clamp, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf));',
@@ -732,6 +747,90 @@ def gen_pk_binop_u64(dst: list[str], src: list[str], op: str) -> str:
         '  }',
     ]
     return '\n'.join(L)
+
+
+def gen_pk_binop_f64(dst: list[str], src: list[str], op: str) -> str:
+    """Generate two-element packed F64 add/mul/minNum/maxNum execution."""
+    operations = {
+        'add': 'Add',
+        'mul': 'Multiply',
+        'max_num': 'MaximumNumber',
+        'min_num': 'MinimumNumber',
+    }
+    try:
+        operation = operations[op]
+    except KeyError as exc:
+        raise ValueError(f'unsupported packed F64 binary operation: {op}') from exc
+
+    d, s0, s1 = dst[0], src[0], src[1]
+    return '\n'.join(
+        [
+            '  uint64_t exec = wf.exec();',
+            '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {',
+            '    if (!(exec & (1ULL << lane))) continue;',
+            f'    const auto lhs = read_pk_u64_pair({s0}, wf, lane);',
+            f'    const auto rhs = read_pk_u64_pair({s1}, wf, lane);',
+            '    constexpr uint64_t kSignBit = 0x8000000000000000ULL;',
+            '    const auto apply = [&](uint64_t lhs_bits, uint64_t rhs_bits,',
+            '                           bool negate_lhs, bool negate_rhs) {',
+            '      if (negate_lhs) lhs_bits ^= kSignBit;',
+            '      if (negate_rhs) rhs_bits ^= kSignBit;',
+            '      uint64_t result = amdgpu::fp_mode::binary_f64(',
+            f'          lhs_bits, rhs_bits, amdgpu::fp_mode::BinaryF64Op::{operation},',
+            '          wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64());',
+            '      return amdgpu::fp_mode::finish_f64(',
+            '          result, wf.fp_round_mode_f16_f64(), 0, inst_.clamp,',
+            '          amdgpu::floating_clamp_nan_to_zero(wf));',
+            '    };',
+            '    const uint64_t result_lo =',
+            '        apply(lhs.lo, rhs.lo, (inst_.neg & 1u) != 0, (inst_.neg & 2u) != 0);',
+            '    const uint64_t result_hi = apply(lhs.hi, rhs.hi,',
+            '                                     (inst_.neg_hi & 1u) != 0,',
+            '                                     (inst_.neg_hi & 2u) != 0);',
+            f'    write_pk_u64_pair({d}, wf, lane, {{result_lo, result_hi}});',
+            '  }',
+        ]
+    )
+
+
+def gen_pk_ternary_f64(dst: list[str], src: list[str], op: str) -> str:
+    """Generate two-element packed F64 fused multiply-add execution."""
+    if op != 'fma':
+        raise ValueError(f'unsupported packed F64 ternary operation: {op}')
+
+    d, s0, s1, s2 = dst[0], src[0], src[1], src[2]
+    return '\n'.join(
+        [
+            '  uint64_t exec = wf.exec();',
+            '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {',
+            '    if (!(exec & (1ULL << lane))) continue;',
+            f'    const auto multiplicand = read_pk_u64_pair({s0}, wf, lane);',
+            f'    const auto multiplier = read_pk_u64_pair({s1}, wf, lane);',
+            f'    const auto addend = read_pk_u64_pair({s2}, wf, lane);',
+            '    constexpr uint64_t kSignBit = 0x8000000000000000ULL;',
+            '    const auto apply = [&](uint64_t multiplicand_bits, uint64_t multiplier_bits,',
+            '                           uint64_t addend_bits, bool negate_multiplicand,',
+            '                           bool negate_multiplier, bool negate_addend) {',
+            '      if (negate_multiplicand) multiplicand_bits ^= kSignBit;',
+            '      if (negate_multiplier) multiplier_bits ^= kSignBit;',
+            '      if (negate_addend) addend_bits ^= kSignBit;',
+            '      uint64_t result = amdgpu::fp_mode::fma_f64(',
+            '          multiplicand_bits, multiplier_bits, addend_bits,',
+            '          wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64());',
+            '      return amdgpu::fp_mode::finish_f64(',
+            '          result, wf.fp_round_mode_f16_f64(), 0, inst_.clamp,',
+            '          amdgpu::floating_clamp_nan_to_zero(wf));',
+            '    };',
+            '    const uint64_t result_lo = apply(',
+            '        multiplicand.lo, multiplier.lo, addend.lo, (inst_.neg & 1u) != 0,',
+            '        (inst_.neg & 2u) != 0, (inst_.neg & 4u) != 0);',
+            '    const uint64_t result_hi = apply(',
+            '        multiplicand.hi, multiplier.hi, addend.hi, (inst_.neg_hi & 1u) != 0,',
+            '        (inst_.neg_hi & 2u) != 0, (inst_.neg_hi & 4u) != 0);',
+            f'    write_pk_u64_pair({d}, wf, lane, {{result_lo, result_hi}});',
+            '  }',
+        ]
+    )
 
 
 def gen_pk_lshl_add_u64(dst: list[str], src: list[str]) -> str:
@@ -1057,7 +1156,7 @@ def gen_dot2(
     src: list[str],
     cls: str,
     opsel_exprs: tuple[str, str] = ('', ''),
-    replicate_inline: bool = False,
+    dot_accumulation: FloatDotAccumulation = FloatDotAccumulation.HOST_F32,
 ) -> str:
     """Generate V_DOT2_F32_F16, V_DOT2_I32_I16, V_DOT2_U32_U16.
 
@@ -1074,17 +1173,62 @@ def gen_dot2(
     _append_pk16_src_reads(
         L, [s0, s1], {'dot2_f32_f16': 'f16', 'dot2_f32_bf16': 'bf16'}.get(cls)
     )
-    if replicate_inline and cls in ('dot2_f32_f16', 'dot2_f32_bf16'):
-        for index in range(2):
-            L.append(
-                f'    if (amdgpu::dot2_src_needs_half_replication(inst_.src{index}))'
-            )
-            L.append(f'      raw{index} = (raw{index} & 0xffffu) * 0x10001u;')
     L.append(f'    bool sel0_lo = ({opsel} >> 0) & 1;')
     L.append(f'    bool sel1_lo = ({opsel} >> 1) & 1;')
     L.append(f'    bool sel0_hi = ({opsel_hi} >> 0) & 1;')
     L.append(f'    bool sel1_hi = ({opsel_hi} >> 1) & 1;')
 
+    if cls in ('dot2_f32_f16', 'dot2_f32_bf16'):
+        dot_arch = (
+            'gfx12' if dot_accumulation is FloatDotAccumulation.GFX12 else 'gfx11'
+        )
+        if dot_accumulation is not FloatDotAccumulation.GFX12:
+            L.append(
+                '    if (isa_properties(wf.cu().arch()).float_dot_accumulation == FloatDotAccumulation::Gfx11) {'
+            )
+        if cls == 'dot2_f32_bf16':
+            # BF16 inline floats broadcast upper16(FP32), without rounding.
+            # GFX11 integers use that half too; GFX12 integers use low16.
+            for index, source in enumerate((s0, s1)):
+                L.append(
+                    f'      if (amdgpu::dot2_src_needs_half_replication(inst_.src{index}))'
+                )
+                if dot_accumulation is FloatDotAccumulation.GFX12:
+                    raw = f'amdgpu::RegisterAccess(wf).read_lane({source}, lane)'
+                    L.append(
+                        f'        raw{index} = (amdgpu::is_inline_float_src(inst_.src{index}) ? ({raw} >> 16) : ({raw} & 0xffffu)) * 0x10001u;'
+                    )
+                else:
+                    L.append(
+                        f'        raw{index} = (amdgpu::RegisterAccess(wf).read_lane({source}, lane) >> 16) * 0x10001u;'
+                    )
+        for name, raw, selection in (
+            ('a0', 'raw0', 'sel0_lo'),
+            ('a1', 'raw0', 'sel0_hi'),
+            ('b0', 'raw1', 'sel1_lo'),
+            ('b1', 'raw1', 'sel1_hi'),
+        ):
+            L.append(
+                f'    uint16_t {name} = static_cast<uint16_t>({selection} ? ({raw} >> 16) : {raw});'
+            )
+        L.append('    if (inst_.neg & 1) a0 ^= 0x8000u;')
+        L.append('    if (inst_.neg & 2) b0 ^= 0x8000u;')
+        L.append('    if (inst_.neg_hi & 1) a1 ^= 0x8000u;')
+        L.append('    if (inst_.neg_hi & 2) b1 ^= 0x8000u;')
+        L.append(
+            f'    uint32_t acc = amdgpu::RegisterAccess(wf).read_lane({s2}, lane);'
+        )
+        L.append('    if (inst_.neg & 4) acc ^= 0x80000000u;')
+        bf16 = str(cls == 'dot2_f32_bf16').lower()
+        L.append(
+            f'    uint32_t result = amdgpu::{dot_arch}_dot2_f32<{bf16}>(a0, b0, a1, b1, acc);'
+        )
+        L.append(f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, result);')
+        if dot_accumulation is FloatDotAccumulation.GFX12:
+            L.append('  }')
+            return '\n'.join(L)
+        L.append('      continue;')
+        L.append('    }')
     if cls in ('dot2_f32_f16', 'dot2_f32_bf16'):
         # F16 and BF16 share the dot2 structure but widen differently: BF16 has
         # an 8-bit exponent and no denormal renormalization, so it must use

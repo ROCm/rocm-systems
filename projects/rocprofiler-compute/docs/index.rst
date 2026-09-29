@@ -46,6 +46,8 @@ in practice.
 
       * :doc:`how-to/pc_sampling`
 
+      * :doc:`how-to/membw_analysis`
+
       * :doc:`how-to/live_attach_detach`
 
       * :doc:`how-to/profile/mode`

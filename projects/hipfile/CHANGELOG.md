@@ -1,6 +1,18 @@
 # Changelog for hipFile
 
-## (Unreleased) hipFile 0.5.0
+## (Unreleased) hipFile 0.6.0
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+### Known issues
+
+## hipFile 0.5.0 for ROCm 10.1.0
 
 ### Added
 
@@ -9,6 +21,7 @@
 * `hipFileReadAsync()` and `hipFileWriteAsync()` now support the AIS fastpath backend, enabling asynchronous GPU-direct I/O enqueued on a HIP stream. Transparent async backend failover to the slowpath is not currently supported for async fastpath operations.
 * Batch operations now execute on an internal thread pool, enabling batch API support on the AMD backend. Together with async fastpath support, this resolves the 0.3.0 limitation where batch and async API calls were unsupported on the AMD backend.
 * Added the `HIPFILE_ASYNC_BUFFER_SIZE` environment variable to control the size of the host bounce buffer used for asynchronous fallback I/O. The default size is 16 MiB; setting it to `0` uses the default.
+* `ais-check` now reports whether an LVM logical volume supports fastpath.
 
 ### Changed
 
