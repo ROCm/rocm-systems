@@ -29,6 +29,7 @@
 #include <map>
 #include <mutex>
 #include <set>
+#include <vector>
 
 static std::map<void*, int> bufferRegRefcount;
 static std::mutex pluginMutex;
@@ -792,10 +793,23 @@ ncclResult_t ncclGinAnvilBindResourceWindowSignals(struct ncclComm* comm, void* 
                                                    int nContexts, int nSignalsPerContext) {
   if (!comm || !resourceUserPtr || nContexts < 1 || nSignalsPerContext < 1) return ncclInvalidArgument;
 
+  // Snapshot under pluginMutex. ginAnvilRegisterLsaSignals and ginAnvilPendingClear
+  // take the same mutex, so the walk itself must not hold it. find() avoids
+  // default-inserting an empty list for a comm that has nothing pending.
+  std::vector<ginAnvilGinCtx*> pending;
+  {
+    std::lock_guard<std::mutex> lock(pluginMutex);
+    auto it = g_pendingByComm.find(comm);
+    if (it != g_pendingByComm.end()) {
+      for (GinAnvilPendingEntry* e = it->second; e != nullptr; e = e->next) {
+        if (e->ctx) pending.push_back(e->ctx);
+      }
+    }
+  }
+
   ncclResult_t ret = ncclSuccess;
   int slot = 0;
-  for (GinAnvilPendingEntry* e = g_pendingByComm[comm]; e != nullptr; e = e->next) {
-    ginAnvilGinCtx* ctx = e->ctx;
+  for (ginAnvilGinCtx* ctx : pending) {
     if (ctx->nSignals <= 0) continue;
     ctx->signalSlot = slot++;
     if (ctx->signalSlot >= nContexts) {
