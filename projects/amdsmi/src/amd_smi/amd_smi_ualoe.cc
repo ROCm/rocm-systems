@@ -909,7 +909,7 @@ static void synthesize_amdsmi_cper_header(const ualoe_cper_hdr_t* ualoe_hdr, uin
   // No platform_id or partition_id is synthesized, so only the timestamp is valid.
   amdsmi_hdr->cper_valid_bits.valid_bits.timestamp = 1;
 
-  amdsmi_hdr->record_length = sizeof(amdsmi_cper_hdr_t) + payload_size;
+  amdsmi_hdr->record_length = static_cast<uint32_t>(sizeof(amdsmi_cper_hdr_t) + payload_size);
   timespec_to_cper_timestamp(&ualoe_hdr->timestamp, &amdsmi_hdr->timestamp);
 
   // creator_id and notify_type are 16-byte fields; the memset above zero-pads them.
@@ -975,8 +975,14 @@ amdsmi_status_t amdsmi_get_fabric_cper_entries(amdsmi_processor_handle processor
     return convert_errno_to_amdsmi_status(ret);
   }
 
+  // Clamp ualoe_buf_size_var to prevent OOB read
+  if (ualoe_buf_size_var > ualoe_buf_size) {
+    ualoe_buf_size_var = ualoe_buf_size;
+  }
+
   uint64_t amdsmi_offset = 0;
   uint64_t transformed_entries = 0;
+  bool entries_dropped = false;
 
   for (uint64_t i = 0; i < ualoe_entry_count; i++) {
     const ualoe_cper_hdr_t* ualoe_hdr = ualoe_hdrs[i];
@@ -985,20 +991,24 @@ amdsmi_status_t amdsmi_get_fabric_cper_entries(amdsmi_processor_handle processor
     }
     const uint32_t ualoe_payload_size =
         static_cast<uint32_t>(ualoe_hdr->record_length - sizeof(ualoe_cper_hdr_t));
-    const uint32_t amdsmi_record_length = sizeof(amdsmi_cper_hdr_t) + ualoe_payload_size;
+    const uint32_t amdsmi_record_length =
+        static_cast<uint32_t>(sizeof(amdsmi_cper_hdr_t) + ualoe_payload_size);
 
     // The record must not claim to extend past the end of what UALoE filled in.
     const size_t ualoe_offset = reinterpret_cast<const char*>(ualoe_hdr) - ualoe_buf;
     if (ualoe_offset + ualoe_hdr->record_length > ualoe_buf_size_var) {
+      entries_dropped = true;
       break;
     }
 
     if (amdsmi_offset + amdsmi_record_length > *buf_size) {
-      break;  // Caller's buffer is full.
+      entries_dropped = true;
+      break;
     }
 
     if (transformed_entries >= max_ualoe_entries) {
-      break;  // Caller's cper_hdrs array is full.
+      entries_dropped = true;
+      break;
     }
 
     amdsmi_cper_hdr_t* amdsmi_hdr = reinterpret_cast<amdsmi_cper_hdr_t*>(cper_data + amdsmi_offset);
@@ -1021,6 +1031,10 @@ amdsmi_status_t amdsmi_get_fabric_cper_entries(amdsmi_processor_handle processor
 
   if (ret == ENOBUFS) {
     return AMDSMI_STATUS_MORE_DATA;
+  }
+
+  if (entries_dropped) {
+    return AMDSMI_STATUS_INSUFFICIENT_SIZE;
   }
 
   return AMDSMI_STATUS_SUCCESS;
