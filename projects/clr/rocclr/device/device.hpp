@@ -2192,10 +2192,11 @@ class Device : public RuntimeObject {
    *
    * @param handle backend allocation handle
    * @param location_type [out] where the allocation resides
+   * @param device_id [out] owning device for device memory, InvalidDeviceId otherwise
    * @param size [out] allocation size in bytes
-   * @return True when the backend reported both; false leaves the caller on its default.
+   * @return True when the backend reported them; false leaves the caller on its default.
    */
-  virtual bool getVmmAllocInfo(uint64_t handle, VmmLocationType* location_type,
+  virtual bool getVmmAllocInfo(uint64_t handle, VmmLocationType* location_type, int* device_id,
                                size_t* size) const {
     return false;
   }

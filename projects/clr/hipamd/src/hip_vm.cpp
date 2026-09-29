@@ -327,19 +327,21 @@ hipError_t hipMemImportFromShareableHandle(hipMemGenericAllocationHandle_t* hand
   // Recover the real location and size from ROCr. On failure keep the historical
   // device-memory assumption so existing callers do not regress.
   amd::Device::VmmLocationType location_type = amd::Device::VmmLocationType::kDevice;
+  int owner_device_id = static_cast<int>(amd::InvalidDeviceId);
   size_t alloc_size = 0;
   if (!device->getVmmAllocInfo(phys_mem_obj->getUserData().hsa_handle, &location_type,
-                               &alloc_size)) {
+                               &owner_device_id, &alloc_size)) {
     LogPrintfError("Could not recover allocation properties for imported handle %p, "
                    "reporting device memory", osHandle);
+    owner_device_id = dev->deviceId();
   }
 
   hipMemAllocationProp prop{};
   prop.type = hipMemAllocationTypePinned;
   prop.location.type = static_cast<hipMemLocationType>(location_type);
-  // location.id is a device index only for device memory; host memory has none.
+  // location.id names the owning device for device memory; host memory has none.
   prop.location.id =
-      (location_type == amd::Device::VmmLocationType::kDevice) ? dev->deviceId() : 0;
+      (location_type == amd::Device::VmmLocationType::kDevice) ? owner_device_id : 0;
   prop.requestedHandleTypes = shHandleType;
 
   phys_mem_obj->getUserData().deviceId = dev->deviceId();
