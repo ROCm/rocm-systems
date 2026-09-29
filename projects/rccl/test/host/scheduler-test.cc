@@ -989,6 +989,9 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TaskIsNull_SkipsDevrInitOnceAnd
   EXPECT_EQ(remainTasksHead, nullptr);
 }
 
+// The CE AllReduce fast path writes straight into peers' receive windows, so
+// every rank must take it or none. Rank 0's receive range fits its window but
+// rank 1 reports 0 in the bootstrap allgather, so the task falls back to staging.
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_CeAllReduceFastPathRequiresEveryRank) {
   MakeSymmetricTaskList_Scene scene;
   scene.comm->nRanks = 2;
@@ -1022,6 +1025,8 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_CeAllReduceFastPathRequiresEver
   EXPECT_FALSE(ceTask.ceAllReduceFastPath);
 }
 
+// Same setup, but both ranks report a contained receive range, so the agreed
+// fast-path bit is set on the task that launch preparation hands to CE.
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_CeAllReduceFastPathWhenEveryRankAgrees) {
   MakeSymmetricTaskList_Scene scene;
   scene.comm->nRanks = 2;
