@@ -18,6 +18,9 @@
  * its absence marks the archive as crash-truncated for the reader, which
  * recovers all complete records.
  *
+ * Disk space: capture stops, and the archive is marked incomplete, before the
+ * file system holding it falls below a reserve; see "Disk space" below.
+ *
  * Thread-safety: write_event_raw() and write_blob() acquire the file mutex.
  * open()/close()/flush() are called from a single thread (init/shutdown).
  */
@@ -638,7 +641,9 @@ static bool fs_space(const std::string& dir, uint64_t* avail, uint64_t* total,
   uint64_t bs = 0;
 #ifdef _WIN32
   ULARGE_INTEGER a{}, t{}, f{};
-  if (!GetDiskFreeSpaceExA(dir.c_str(), &a, &t, &f)) return false;
+  // A UNC path is only accepted with a trailing backslash.
+  const std::string d = dir.empty() || dir.back() == '\\' ? dir : dir + '\\';
+  if (!GetDiskFreeSpaceExA(d.c_str(), &a, &t, &f)) return false;
   *avail = a.QuadPart;
   *total = t.QuadPart;
 #else
@@ -791,6 +796,9 @@ bool open(const char* output_dir) {
     fprintf(stderr, "[HRR capture] Capture disabled: less than %llu MiB free on the file "
             "system holding %s.\n", static_cast<unsigned long long>(g_keep_free >> 20),
             g_output_dir.c_str());
+    // Only removes directories that are still empty.
+    std::error_code ec;
+    for (const char* dir : {"/blobs", "/code_objects", ""}) fs::remove(g_output_dir + dir, ec);
     clear_archive_paths();
     return false;
   }
@@ -979,7 +987,10 @@ static size_t append_lit(char* out, size_t off, const char* s) {
 }
 
 void emergency_finalize(bool clean_shutdown) {
-  if (g_events_fd < 0) return;
+  // A space stop has already closed events.bin, but a crash after it must still
+  // leave a manifest that says the archive is incomplete.
+  if (g_events_fd < 0 && (clean_shutdown || !g_out_of_space.load(std::memory_order_relaxed)))
+    return;
 
   // Flush the in-memory buffer only if no writer thread is mid-mutation.
   // We must NOT touch g_file_mu here: if the crash interrupts a writer mid-lock,
@@ -1002,7 +1013,9 @@ void emergency_finalize(bool clean_shutdown) {
     }
     g_buf_busy.clear(std::memory_order_release);
   }
-  HRR_FSYNC(g_events_fd);
+  // After a space stop there is no descriptor, and on Windows _commit(-1) calls
+  // the CRT invalid parameter handler, which ends the process by default.
+  if (g_events_fd >= 0) HRR_FSYNC(g_events_fd);
 
   // Best-effort manifest via raw open/write only. A clean shutdown writes
   // complete:true (the trailer is present); a crash writes complete:false — its
