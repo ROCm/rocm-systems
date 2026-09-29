@@ -2018,9 +2018,9 @@ class GraphKernelNode : public GraphNode {
     LaunchConfig config = MakeConfig(kernelParams_, *device, clusterDim_);
     IHIP_RETURN_ONFAIL(config.Status(kUnlaunchableConfigRules));
 
-    status = ihipLaunchKernelCommand(
-        command, func, config, stream, kernelParams_.kernelParams, kernelParams_.extra,
-        kernelEvents_.startEvent_, kernelEvents_.stopEvent_, flags, coopKernel_, 0, 0, 0, 0, 0);
+    status = ihipLaunchKernelCommand(command, func, config, stream, kernelParams_.kernelParams,
+                                     kernelParams_.extra, kernelEvents_.startEvent_,
+                                     kernelEvents_.stopEvent_, flags, coopKernel_, 0, 0, 0, 0, 0);
     if (signal_is_required_) {
       // Optimize the barriers by adding a signal into the dispatch packet directly
       command->SetProfiling();

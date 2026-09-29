@@ -157,14 +157,12 @@ struct __CudaFatBinaryWrapper {
 
 // Forward declarations
 hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align = 0, bool use_host_ptr = 0);
-hipError_t ihipModuleLaunchKernel(hipFunction_t f, LaunchConfig& config,
-                                  hipStream_t hStream, void** kernelParams, void* const* extra,
-                                  hipEvent_t startEvent, hipEvent_t stopEvent,
-                                  uint32_t flags = 0, uint32_t params = 0,
-                                  uint32_t gridId = 0, uint32_t numGrids = 0,
-                                  uint64_t prevGridSum = 0, uint64_t allGridSum = 0,
-                                  uint32_t firstDevice = 0,
-                                  const amd::DynDataPrefetchConfig* dynDataPrefetchConfig = nullptr);
+hipError_t ihipModuleLaunchKernel(
+    hipFunction_t f, LaunchConfig& config, hipStream_t hStream, void** kernelParams,
+    void* const* extra, hipEvent_t startEvent, hipEvent_t stopEvent, uint32_t flags = 0,
+    uint32_t params = 0, uint32_t gridId = 0, uint32_t numGrids = 0, uint64_t prevGridSum = 0,
+    uint64_t allGridSum = 0, uint32_t firstDevice = 0,
+    const amd::DynDataPrefetchConfig* dynDataPrefetchConfig = nullptr);
 
 // ================================================================================================
 static bool isCompatibleCodeObject(const std::string& codeobj_target_id, const char* device_name) {
@@ -432,8 +430,7 @@ hipError_t hipLaunchByPtr(const void* hostFunction) {
       MakeLaunchConfigFromGrid(exec.gridDim_, exec.blockDim_, exec.sharedMem_, *device);
   HIP_RETURN_ONFAIL(config.Status(kLaunchByPtrRules));
 
-  HIP_RETURN(
-      ihipModuleLaunchKernel(func, config, exec.hStream_, nullptr, extra, nullptr, nullptr));
+  HIP_RETURN(ihipModuleLaunchKernel(func, config, exec.hStream_, nullptr, extra, nullptr, nullptr));
 }
 
 // ================================================================================================
