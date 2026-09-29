@@ -294,6 +294,7 @@ nm -CD "${librccl}" 2>/dev/null | grep -E " U .*${sym}" || echo "  not undefined
   printf 'export RCCL_TESTS_BIN_DIR=%q\n' "${rccl_tests_build}"
   printf 'export RCCL_TESTS_DIR=%q\n' "${rccl_tests_src}"
   printf 'export RCCL_FIXTURES_BIN_DIR=%q\n' "$(dirname "${rccl_fixtures_bin}")"
+  printf 'export RCCL_ANVIL_PLUGIN_TEST=%q\n' "${rccl_conn_plugin_bin}"
 } > "${workdir}/.ci-out/rccl.env"
 ) > "${build_out}" 2> "${build_err}" || build_rc=$?
 echo "==> build phase logs: ${build_out} / ${build_err}"
@@ -330,6 +331,22 @@ if [[ -x "${sdma_factory_test}" ]]; then
     || echo "WARNING: SDMA factory unit tests failed (non-gating)" >&2
 else
   echo "  SKIP: ${sdma_factory_test} not found (BUILD_TESTS may be off)"
+fi
+
+# --- unit test: Anvil host plugin gtest (already built in step 4). ---
+# Covers bind-signals / logical-context stripe coverage that install.sh -t skips.
+echo "==> [6b/7] run Anvil plugin unit tests"
+anvil_plugin_test="${RCCL_ANVIL_PLUGIN_TEST:-${RCCL_FIXTURES_BIN_DIR}/rccl-UnitTestsGinAnvilPlugin}"
+if [[ -x "${anvil_plugin_test}" ]]; then
+  _sysdeps_lib=""
+  for _sp in "${ROCM_PATH}/lib/rocm_sysdeps/lib" "${ROCM_PATH}/core/lib/rocm_sysdeps/lib"; do
+    [[ -d "${_sp}" ]] && _sysdeps_lib="${_sp}"
+  done
+  export LD_LIBRARY_PATH="${RCCL_INSTALL_PREFIX}/lib:${ROCSHMEM_INSTALL_DIR}/lib:${ROCM_PATH}/lib${_sysdeps_lib:+:${_sysdeps_lib}}:${LD_LIBRARY_PATH:-}"
+  "${anvil_plugin_test}" --gtest_output="xml:${logs_dir}/anvil-plugin-test.xml" \
+    || echo "WARNING: Anvil plugin unit tests failed (non-gating)" >&2
+else
+  echo "  SKIP: ${anvil_plugin_test} not found (GIN_ANVIL_UNIT_TESTS may be off)"
 fi
 
 # --- test phase -> test-%j.{out,err}. Don't fail the sbatch on test failures
