@@ -65,10 +65,13 @@ def benchmarked_roofline(tmp_path: Path):
     row = "0,500,500,500,500,3000,10000,11000,12000"
     (tmp_path / "roofline.csv").write_text(f"{header}\n{row}\n", encoding="utf-8")
 
-    def build(datatypes: List[str]):
-        return make_roofline(
-            datatypes, workload_dir=str(tmp_path), matrix_ops_type="MFMA"
-        )
+    def build(datatypes: List[str], **run_parameters: object):
+        parameters = {
+            "workload_dir": str(tmp_path),
+            "matrix_ops_type": "MFMA",
+        }
+        parameters.update(run_parameters)
+        return make_roofline(datatypes, **parameters)
 
     return build
 
@@ -135,6 +138,23 @@ def test_generate_plot_draws_the_roofs_the_datatype_reaches(
     names = {trace.name for trace in fig.data}
     assert names.issuperset(drawn)
     assert names.isdisjoint(not_drawn)
+
+
+def test_generate_plot_filters_bandwidth_roofs_by_mem_level(
+    benchmarked_roofline,
+) -> None:
+    """The selected memory level reaches both the figure and client model."""
+    roofline = benchmarked_roofline(["FP64"], mem_level=["HBM"])
+    fig = roofline.generate_plot("FP64", fig=go.Figure())
+
+    bandwidth_levels = {"LDS", "L1", "L2", "HBM"}
+    drawn_bandwidth_levels = {
+        trace.name for trace in fig.data if trace.name in bandwidth_levels
+    }
+    assert drawn_bandwidth_levels == {"HBM"}
+
+    view_model = roofline._Roofline__view_models["FLOP"]
+    assert {roof["level"] for roof in view_model.roofline_traces} == {"HBM"}
 
 
 CEILING = {"hbm": [[0.01, 1.0], [1.0, 1500.0], 1500.0]}

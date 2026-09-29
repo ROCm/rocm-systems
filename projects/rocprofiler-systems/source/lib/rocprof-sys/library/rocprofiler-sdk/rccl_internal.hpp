@@ -22,9 +22,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
-namespace rocprofsys
-{
-namespace rocprofiler_sdk
+namespace rocprofsys::rocprofiler_sdk
 {
 
 /**
@@ -194,5 +192,4 @@ private:
     std::unordered_map<std::uint32_t, std::uint64_t> m_cumulative_bytes_per_device{};
 };
 
-}  // namespace rocprofiler_sdk
-}  // namespace rocprofsys
+}  // namespace rocprofsys::rocprofiler_sdk

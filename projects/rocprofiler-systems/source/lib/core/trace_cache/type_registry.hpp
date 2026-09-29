@@ -9,9 +9,7 @@
 #include <map>
 #include <optional>
 
-namespace rocprofsys
-{
-namespace trace_cache
+namespace rocprofsys::trace_cache
 {
 
 template <typename TypeIdentifierEnum, typename... SupportedTypes>
@@ -48,5 +46,4 @@ private:
     }
 };
 
-}  // namespace trace_cache
-}  // namespace rocprofsys
+}  // namespace rocprofsys::trace_cache

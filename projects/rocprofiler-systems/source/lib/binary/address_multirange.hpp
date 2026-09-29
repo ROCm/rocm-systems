@@ -45,7 +45,10 @@ template <typename Tp>
 ROCPROFSYS_INLINE bool
 address_multirange::contains(Tp&& _v) const
 {
-    if(!m_coarse_range.contains(_v)) return false;
+    if(!m_coarse_range.contains(_v))
+    {
+        return false;
+    }
     return std::any_of(m_fine_ranges.begin(), m_fine_ranges.end(),
                        [_v](auto&& itr) { return itr.contains(_v); });
 }

@@ -509,8 +509,9 @@ bool Program::load(const std::vector<Device*>& devices) {
   for (const auto& it : devicePrograms_) {
     const Device& device = *(it.first);
 
-    // If devices is specified, only load code object for those devices
-    if (std::find(devices.begin(), devices.end(), &device) != devices.end()) {
+    // Skip loading for unspecified devices. Empty devices means load for all devices
+    if (!devices.empty() &&
+        std::find(devices.begin(), devices.end(), &device) == devices.end()) {
       continue;
     }
 

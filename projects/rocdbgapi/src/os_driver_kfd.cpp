@@ -850,7 +850,7 @@ public:
   /* Read up to SIZE bytes into val from the note.  */
   template <typename T> void read (T &val, size_t size)
   {
-    if (!m_error && head + size <= end)
+    if (!m_error && head <= end - size)
       {
         std::memcpy (&val, head, std::min (size, sizeof (T)));
         head += size;
@@ -884,6 +884,13 @@ kfd_core_driver_t::kfd_core_driver_t (
       return;
     }
 
+  if (core_state.size
+      < (sizeof (amdgpu_core_note_version_t) + sizeof (kfd_note_header_t)))
+    {
+      warning ("Corefile note missing its header.");
+      return;
+    }
+
   note_reader reader{ core_state };
   [[maybe_unused]] const auto note_version
     = reader.read<amdgpu_core_note_version_t> ();
@@ -899,6 +906,22 @@ kfd_core_driver_t::kfd_core_driver_t (
       || header.queue_entry_size % 8 != 0)
     {
       warning ("Invalid alignment in corefile note.");
+      return;
+    }
+
+  size_t unparsed = (core_state.size - sizeof (amdgpu_core_note_version_t)
+                     - sizeof (kfd_note_header_t));
+  const size_t agents_size
+    = static_cast<size_t> (header.agent_entry_count) * header.agent_entry_size;
+  const size_t queues_size
+    = static_cast<size_t> (header.queue_entry_count) * header.queue_entry_size;
+
+  if (unparsed < header.runtime_info_size
+      || (unparsed -= header.runtime_info_size) < agents_size
+      || (unparsed -= agents_size) < queues_size
+      || (unparsed -= queues_size) != 0)
+    {
+      warning ("Malformed corefile note.");
       return;
     }
 

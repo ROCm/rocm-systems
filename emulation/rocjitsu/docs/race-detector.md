@@ -172,13 +172,20 @@ following lifecycle:
    same-wave DS read or write does not race solely because the earlier DS event
    is still active. Direct-to-LDS VMEM writes still require the owning wave to
    wait for `vmcnt` before reading the destination bytes.
-1. **WAVE_COMPLETE** — `s_waitcnt` has retired the event for the owning wave.
-   This means the event is no longer in flight from the perspective of the wave
-   that issued the operation, but is still in flight from the perspective of
-   other waves in the same workgroup.
+1. **WAVE_COMPLETE** — waits have satisfied every counter obligation for the
+   event. This means the event is no longer in flight from the perspective of
+   the wave that issued the operation, but is still in flight from the
+   perspective of other waves in the same workgroup.
 1. **RETIRED** — `s_barrier` has synchronized all waves. The event is fully
    retired and, from the perspective of all threads in all wavefronts, the
    operation is complete.
+
+Generic `FLAT_*` instructions have two independent completion obligations:
+the vector-memory counter and the LDS counter. A wait on only one domain does
+not complete the race-detector event; both domains must be satisfied. The
+resolved route still determines whether the event accesses global memory or
+LDS. This currently assumes that all active lanes select the same memory space;
+mixed LDS/global lanes are tracked separately in #11456.
 
 The plugin keeps track, for all registers and LDS memory bytes, of which memory
 operations are in flight. When an instruction in the emulator accesses an LDS

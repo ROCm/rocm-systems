@@ -42,9 +42,7 @@ make_unique(Args&&... args)
 }
 }  // namespace rocprofsys
 
-namespace tim
-{
-namespace concepts
+namespace tim::concepts
 {
 template <typename Tp>
 struct is_unique_pointer : std::false_type
@@ -87,5 +85,4 @@ struct tuple_element<N, std::tuple<Tp...>>
 
 template <size_t N, typename Tp>
 using tuple_element_t = tuple_element<N, Tp>::type;
-}  // namespace concepts
-}  // namespace tim
+}  // namespace tim::concepts

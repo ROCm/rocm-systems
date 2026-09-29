@@ -219,6 +219,14 @@ def _modern_rdna_dpp_opcode_rule(
     return DppOpcodeRule.ALLOW
 
 
+class FloatDotAccumulation(Enum):
+    """Numerical accumulation policy for F32-output floating DOT2."""
+
+    HOST_F32 = 'HostF32'
+    GFX11 = 'Gfx11'
+    GFX12 = 'Gfx12'
+
+
 class WaveStateLayout(Enum):
     """Architectural layout of wave status, exception, and trap-control state."""
 
@@ -874,6 +882,16 @@ class IsaProfile(ABC):
         return None
 
     @property
+    def tied_destination_prefixes(self) -> tuple[str, ...]:
+        """Mnemonic prefixes whose encoded destination is also an input."""
+        return ()
+
+    @property
+    def tied_destination_def_widths(self) -> dict[str, int]:
+        """True def widths for tied destinations whose encoded read is wider."""
+        return {}
+
+    @property
     def waitcnt_decode(self) -> str:
         """Return C++ code block that decodes a WAITCNT immediate into
         vmcnt, expcnt, and lgkmcnt local variables.
@@ -1411,6 +1429,11 @@ class _AmdgpuProfileBase(IsaProfile):
     def uses_cluster_ttmp_workgroup_ids(self) -> bool:
         """Whether the TTMP workgroup-ID payload uses cluster coordinates."""
         return False
+
+    @property
+    def float_dot_accumulation(self) -> FloatDotAccumulation:
+        """Select the scalar/SIMD arithmetic contract for floating DOT2."""
+        return FloatDotAccumulation.HOST_F32
 
     @property
     def wave_state_layout(self) -> WaveStateLayout:
@@ -2324,6 +2347,10 @@ class Rdna3Profile(_AmdgpuProfileBase):
         return True
 
     @property
+    def float_dot_accumulation(self) -> FloatDotAccumulation:
+        return FloatDotAccumulation.GFX11
+
+    @property
     def matrix_layout(self) -> MatrixLayout:
         return MatrixLayout.WMMA_REPLICATED_HALFWAVE
 
@@ -2613,6 +2640,10 @@ class Rdna4Profile(_AmdgpuProfileBase):
     @property
     def uses_ttmp_workgroup_ids(self) -> bool:
         return True
+
+    @property
+    def float_dot_accumulation(self) -> FloatDotAccumulation:
+        return FloatDotAccumulation.GFX12
 
     @property
     def wave_state_layout(self) -> WaveStateLayout:
@@ -2992,12 +3023,29 @@ class Cdna5Profile(Rdna4Profile):
         return 32
 
     @property
+    def tied_destination_prefixes(self) -> tuple[str, ...]:
+        # SWMMAC is a two-address operation: its encoded VDST supplies C as
+        # well as naming D. Keep the tied read implicit so disassembly prints
+        # the operand only once.
+        return ('V_SWMMAC_',)
+
+    @property
+    def tied_destination_def_widths(self) -> dict[str, int]:
+        # The MRISA encodes the largest (F32 accumulator) view. The BF16F32
+        # form actually writes a packed-BF16 matrix using half as many VGPRs.
+        return {'V_SWMMAC_BF16F32_16X16X64_BF16': 128}
+
+    @property
     def supports_wgp_mode(self) -> bool:
         return False
 
     @property
     def uses_cluster_ttmp_workgroup_ids(self) -> bool:
         return True
+
+    @property
+    def float_dot_accumulation(self) -> FloatDotAccumulation:
+        return FloatDotAccumulation.HOST_F32
 
     @property
     def wave_state_layout(self) -> WaveStateLayout:
