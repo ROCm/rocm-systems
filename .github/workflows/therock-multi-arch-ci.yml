@@ -108,6 +108,10 @@ jobs:
       skip_tests: ${{ steps.configure-pr.outputs.skip_tests || steps.configure-manual.outputs.skip_tests }}
       # Allowlist of build stages this PR needs (fed to TheRock's build_stages).
       build_stages: ${{ steps.build_stages.outputs.build_stages }}
+      # Whether to run MI455 tests (only when HIP/ROCR changes detected)
+      run_mi455_test: ${{ steps.mi455_check.outputs.run_mi455_test }}
+      # Pre-built external_repo JSON for setup job
+      external_repo: ${{ steps.mi455_check.outputs.external_repo }}
     steps:
       - name: Checkout repository config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -167,6 +171,46 @@ jobs:
             --run-all-tests "${{ steps.configure-pr.outputs.run_all_tests || steps.configure-manual.outputs.run_all_tests }}" \
             --therock-path "_therock"
 
+      # Check if MI455 tests should run (only for PRs with HIP/ROCR changes)
+      # This mirrors the logic in therock-ci.yml for consistency
+      - name: Check for HIP/ROCR changes and build external_repo config
+        id: mi455_check
+        env:
+          CHANGED: ${{ steps.configure-pr.outputs.changed_projects || '' }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          # Check if HIP/ROCR/CLR projects changed (only relevant for PRs)
+          RUN_MI455="false"
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            if [[ "$CHANGED" == *"projects/hip"* || "$CHANGED" == *"projects/rocr"* || "$CHANGED" == *"projects/clr"* ]]; then
+              RUN_MI455="true"
+            fi
+          fi
+          echo "run_mi455_test=${RUN_MI455}" >> "${GITHUB_OUTPUT}"
+
+          # Build external_repo JSON with jq
+          # TEMPORARY: Include gfx125x overrides only for HIP/ROCR PRs (MI455 bringup)
+          BASE_JSON=$(jq -nc --arg repo "$REPO" --arg ref "$SHA" '{repository: $repo, ref: $ref}')
+
+          if [[ "$RUN_MI455" == "true" ]]; then
+            EXTERNAL_REPO=$(echo "$BASE_JSON" | jq -c '. + {
+              family_overrides: {
+                gfx125x: {
+                  linux: {
+                    "test-runs-on": "",
+                    "test_labels_for_family": ["test:hip-tests", "test:rocrtst"],
+                    "fetch-gfx-targets": ["gfx1250"]
+                  }
+                }
+              }
+            }')
+          else
+            EXTERNAL_REPO="$BASE_JSON"
+          fi
+
+          echo "external_repo=${EXTERNAL_REPO}" >> "${GITHUB_OUTPUT}"
+
   setup:
     needs: configure
     uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@e0e238c0323f76aeabdd348cfd3798a653820fdc # 2026-09-23
@@ -198,21 +242,7 @@ jobs:
       ref: e0e238c0323f76aeabdd348cfd3798a653820fdc # 2026-09-23
       # TEMPORARY: MI455 bringup - pass family_overrides to configure test runner and limited tests
       # TODO(geomin12): Remove family_overrides once MI455 is in therock-ci-config
-      # NOTE: MI455 machine is down - test-runs-on set to "" until back online (was: linux-mi455-gpu-rocm)
-      external_repo: >-
-        {
-          "repository": "${{ github.repository }}",
-          "ref": "${{ github.sha }}",
-          "family_overrides": {
-            "gfx125x": {
-              "linux": {
-                "test-runs-on": "",
-                "test_labels_for_family": ["test:hip-tests", "test:rocrtst"],
-                "fetch-gfx-targets": ["gfx1250"]
-              }
-            }
-          }
-        }
+      external_repo: ${{ needs.configure.outputs.external_repo }}
 
   linux_build_and_test:
     name: Linux::${{ fromJSON(needs.setup.outputs.linux_build_config || '{}').build_variant_label || 'skip' }}
