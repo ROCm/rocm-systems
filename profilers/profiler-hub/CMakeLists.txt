@@ -176,6 +176,16 @@ set(SQL_SCHEMA_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/source/data_storage/)
 
 include(rocprofiler-sdk-rocpd)
 
+target_compile_definitions(
+    profiler-hub-objects
+    PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:PROFILER_HUB_SCHEMA_VERSION_MAJOR=${PROFILER_HUB_SCHEMA_VERSION_MAJOR}>
+    PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:PROFILER_HUB_SCHEMA_VERSION_MINOR=${PROFILER_HUB_SCHEMA_VERSION_MINOR}>
+    PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:PROFILER_HUB_SCHEMA_VERSION_PATCH=${PROFILER_HUB_SCHEMA_VERSION_PATCH}>
+)
+
 target_include_directories(
     profiler-hub-objects
     PRIVATE ${SQL_SCHEMA_BINARY_DIR}
