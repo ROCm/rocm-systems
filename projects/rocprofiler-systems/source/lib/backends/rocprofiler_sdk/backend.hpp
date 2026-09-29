@@ -73,6 +73,7 @@ struct backend
         Wrapper::external_correlation_id_request_cb_t;
     using internal_thread_library_cb_t = Wrapper::internal_thread_library_cb_t;
     using callback_tracing_record_t    = Wrapper::callback_tracing_record;
+    using callback_phase_t             = Wrapper::callback_phase_t;
     using callback_tracing_operation_args_cb_t =
         Wrapper::callback_tracing_operation_args_cb_t;
     using available_dimensions_cb_t      = Wrapper::available_dimensions_cb_t;
@@ -83,6 +84,7 @@ struct backend
     using callback_name_info_t           = Wrapper::callback_name_info_t;
     using buffer_name_info_t             = Wrapper::buffer_name_info_t;
     using record_header_t                = Wrapper::record_header_t;
+    using correlation_id_t               = Wrapper::correlation_id_t;
 
     static constexpr auto           compile_time_version = Wrapper::compile_time_version;
     static constexpr counter_flag_t flag_none            = Wrapper::COUNTER_FLAG_NONE;
@@ -94,6 +96,15 @@ struct backend
     // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr buffer_policy_t BUFFER_POLICY_LOSSLESS =
         Wrapper::BUFFER_POLICY_LOSSLESS;
+
+    // ─── Callback phase constants ────────────────────────────────────────────────
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr callback_phase_t CALLBACK_PHASE_ENTER =
+        Wrapper::CALLBACK_PHASE_ENTER;
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr callback_phase_t CALLBACK_PHASE_EXIT = Wrapper::CALLBACK_PHASE_EXIT;
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr callback_phase_t CALLBACK_PHASE_NONE = Wrapper::CALLBACK_PHASE_NONE;
 
     // ─── Callback tracing kind constants ─────────────────────────────────────────
     static constexpr callback_tracing_kind_t CALLBACK_TRACING_HSA_CORE_API =
@@ -255,7 +266,10 @@ struct backend
     {
         if constexpr(Wrapper::compile_time_version >= 10000)
         {
-            if(counter_id == nullptr) return Wrapper::STATUS_ERROR_INVALID_ARGUMENT;
+            if(counter_id == nullptr)
+            {
+                return Wrapper::STATUS_ERROR_INVALID_ARGUMENT;
+            }
             counter_id->handle = record.id;
             return status_success;
         }
@@ -280,7 +294,9 @@ struct backend
             if(Wrapper::query_counter_info(counter_id, Wrapper::COUNTER_INFO_VERSION_1,
                                            &info) != Wrapper::STATUS_SUCCESS ||
                info.name == nullptr)
+            {
                 return {};
+            }
 
             auto result   = std::vector<counter_metadata>{};
             auto name_str = std::string{ info.name };
@@ -312,7 +328,9 @@ struct backend
             if(Wrapper::query_counter_info(counter_id, Wrapper::COUNTER_INFO_VERSION_0,
                                            &info) != Wrapper::STATUS_SUCCESS ||
                info.name == nullptr)
+            {
                 return {};
+            }
 
             return { counter_metadata{ counter_id.handle,
                                        std::string{ info.name },
@@ -437,8 +455,16 @@ public:
         callback_tracing_record_t rec, callback_tracing_operation_args_cb_t cb,
         std::int32_t max_deref, void* user_data)
     {
-        sdk_check<Wrapper>(Wrapper::iterate_callback_tracing_kind_operation_args(
-            rec, cb, max_deref, user_data));
+        // Some callback-tracing kinds (e.g. ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API)
+        // declare a kind but do not implement argument iteration for it. Argument
+        // iteration only supplies best-effort debug-annotation data, so treat
+        // "not implemented" as "no args available" instead of a fatal error.
+        const auto status = Wrapper::iterate_callback_tracing_kind_operation_args(
+            rec, cb, max_deref, user_data);
+        if(status != Wrapper::STATUS_ERROR_NOT_IMPLEMENTED)
+        {
+            sdk_check<Wrapper>(status);
+        }
     }
 
     static void iterate_counter_dimensions(counter_id_t id, available_dimensions_cb_t cb,
@@ -516,6 +542,18 @@ public:
     static const char* get_status_string(status_t status) noexcept
     {
         return Wrapper::get_status_string(status);
+    }
+
+    static std::uint64_t get_parent_stack_id(const correlation_id_t& correlation_id)
+    {
+        if constexpr(requires { correlation_id.ancestor; })
+        {
+            return correlation_id.ancestor;
+        }
+        else
+        {
+            return 0;
+        }
     }
 };
 

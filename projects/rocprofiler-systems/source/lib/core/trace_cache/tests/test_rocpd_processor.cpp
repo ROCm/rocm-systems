@@ -479,7 +479,9 @@ TEST_F(rocpd_write_read_test, kernel_dispatch_values_persisted)
     {
         if(tl_event.unique_identifier.type !=
            profiler_hub::reader_types::event_type_t::kernel_dispatch)
+        {
             continue;
+        }
 
         auto detail = m_reader->get_kernel_dispatch_details(tl_event);
         ASSERT_TRUE(detail.has_value()) << "kernel dispatch detail should be readable";
@@ -540,7 +542,9 @@ TEST_F(rocpd_write_read_test, region_with_args_values_persisted)
     {
         if(tl_event.unique_identifier.type !=
            profiler_hub::reader_types::event_type_t::region)
+        {
             continue;
+        }
 
         auto detail = m_reader->get_region_details(tl_event);
         ASSERT_TRUE(detail.has_value());
@@ -614,7 +618,9 @@ TEST_F(rocpd_write_read_test, memory_copy_values_persisted)
     {
         if(tl_event.unique_identifier.type !=
            profiler_hub::reader_types::event_type_t::memory_copy)
+        {
             continue;
+        }
 
         auto detail = m_reader->get_memory_copy_details(tl_event);
         ASSERT_TRUE(detail.has_value());
@@ -669,7 +675,9 @@ TEST_F(rocpd_write_read_test, memory_alloc_values_persisted)
     {
         if(tl_event.unique_identifier.type !=
            profiler_hub::reader_types::event_type_t::memory_allocate)
+        {
             continue;
+        }
 
         auto detail = m_reader->get_memory_alloc_details(tl_event);
         ASSERT_TRUE(detail.has_value());
@@ -902,7 +910,9 @@ TEST_F(rocpd_write_read_test, handle_scratch_memory_pathway)
     {
         if(tl_event.unique_identifier.type !=
            profiler_hub::reader_types::event_type_t::memory_allocate)
+        {
             continue;
+        }
 
         auto detail = m_reader->get_memory_alloc_details(tl_event);
         ASSERT_TRUE(detail.has_value());
@@ -956,7 +966,9 @@ TEST_F(rocpd_write_read_test, handle_memory_allocate_pathway)
     {
         if(tl_event.unique_identifier.type !=
            profiler_hub::reader_types::event_type_t::memory_allocate)
+        {
             continue;
+        }
 
         auto detail = m_reader->get_memory_alloc_details(tl_event);
         ASSERT_TRUE(detail.has_value());
@@ -1013,7 +1025,9 @@ TEST_F(rocpd_write_read_test, handle_backtrace_region_pathway)
     {
         if(tl_event.unique_identifier.type !=
            profiler_hub::reader_types::event_type_t::region)
+        {
             continue;
+        }
 
         auto detail = m_reader->get_region_details(tl_event);
         ASSERT_TRUE(detail.has_value());
@@ -1202,9 +1216,18 @@ TEST_F(rocpd_write_read_test, handle_gpu_pmc_sample_pathway)
     bool found_gfx = false, found_umc = false, found_temp = false;
     for(const auto& pi : pmc_infos)
     {
-        if(pi->symbol == "gfx_busy") found_gfx = true;
-        if(pi->symbol == "umc_busy") found_umc = true;
-        if(pi->symbol == "gpu_temperature") found_temp = true;
+        if(pi->symbol == "gfx_busy")
+        {
+            found_gfx = true;
+        }
+        if(pi->symbol == "umc_busy")
+        {
+            found_umc = true;
+        }
+        if(pi->symbol == "gpu_temperature")
+        {
+            found_temp = true;
+        }
     }
     EXPECT_TRUE(found_gfx) << "gfx_busy PMC info not found";
     EXPECT_TRUE(found_umc) << "umc_busy PMC info not found";
@@ -1440,7 +1463,9 @@ TEST_F(rocpd_write_read_test, handle_kfd_sample_pathway)
     {
         if(tl_event.unique_identifier.type !=
            profiler_hub::reader_types::event_type_t::region)
+        {
             continue;
+        }
 
         auto detail = m_reader->get_region_details(tl_event);
         ASSERT_TRUE(detail.has_value());
@@ -1644,7 +1669,9 @@ TEST_F(rocpd_write_read_test, handle_region_with_call_stack_pathway)
     {
         if(tl_event.unique_identifier.type !=
            profiler_hub::reader_types::event_type_t::region)
+        {
             continue;
+        }
 
         auto detail = m_reader->get_region_details(tl_event);
         ASSERT_TRUE(detail.has_value());
@@ -1703,7 +1730,9 @@ TEST_F(rocpd_write_read_test, handle_kernel_dispatch_full_grid)
     {
         if(tl_event.unique_identifier.type !=
            profiler_hub::reader_types::event_type_t::kernel_dispatch)
+        {
             continue;
+        }
 
         auto detail = m_reader->get_kernel_dispatch_details(tl_event);
         ASSERT_TRUE(detail.has_value());
@@ -1775,7 +1804,9 @@ TEST_F(rocpd_write_read_test, handle_memory_copy_addresses_persisted)
     {
         if(tl_event.unique_identifier.type !=
            profiler_hub::reader_types::event_type_t::memory_copy)
+        {
             continue;
+        }
 
         auto detail = m_reader->get_memory_copy_details(tl_event);
         ASSERT_TRUE(detail.has_value());

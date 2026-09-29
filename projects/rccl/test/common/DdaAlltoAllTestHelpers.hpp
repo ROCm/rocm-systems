@@ -21,19 +21,22 @@ namespace RcclUnitTesting
 {
 
 // Use the production rcclDdaEnabled() from rccl_common.h directly.
-// Threshold constants kDdaAlltoAllGfx{942,950,1250}ThresholdBytes are also in rccl_common.h.
 
 inline size_t testAlltoAllTotalBytes(size_t count, int nRanks, ncclDataType_t datatype) {
   return static_cast<size_t>(nRanks) * count * static_cast<size_t>(ncclTypeSize(datatype));
 }
 
+inline size_t testDdaAlltoAllThreshold(const ncclComm* comm) {
+  return rcclDdaEntryThreshold(comm, ncclFuncAlltoAll);
+}
+
 // minRanks defaults to rcclDdaEnabled()'s own default (the full 8-rank clique),
 // matching every pre-existing caller's behavior unchanged. Pass a lower value
-// to exercise the relaxed floor rcclAlltoAllShouldTakeDdaPath() applies in
-// collectives.cc when RCCL_DDA_NRANKS_RELAX=1 -- otherwise this mirror always
-// tracked the unconditional 8-rank floor regardless of what that call site
-// actually passed. RcclAlltoAllDdaDecision.Gfx950_FourRanks_RelaxOn_TakesDda
-// (RcclWrapTests.cpp) additionally exercises that real call site directly.
+// to exercise the relaxed floor the AlltoAll DDA gates apply when
+// RCCL_DDA_NRANKS_RELAX=1 -- otherwise this mirror always tracked the
+// unconditional 8-rank floor regardless of what the call sites actually pass.
+// RcclAlltoAllDdaDecision.AlltoAll_Gfx950_FourRanks_RelaxOn_TakesDda
+// (RcclWrapTests.cpp) additionally exercises a real call site directly.
 inline bool testRcclDdaAlltoAllThresholdEnabled(
     const ncclComm* comm,
     size_t count,
@@ -42,9 +45,9 @@ inline bool testRcclDdaAlltoAllThresholdEnabled(
   return rcclDdaEnabled(
       comm,
       testAlltoAllTotalBytes(count, comm->nRanks, datatype),
-      kDdaAlltoAllGfx942ThresholdBytes,
-      kDdaAlltoAllGfx950ThresholdBytes,
-      kDdaAlltoAllGfx1250ThresholdBytes,
+      testDdaAlltoAllThreshold(comm),
+      /*query=*/false,
+      /*prefix=*/nullptr,
       minRanks);
 }
 
@@ -64,6 +67,9 @@ struct DdaAlltoAllMockComm
     ncclComm comm{};
     char archNameBuf[64]{};
 
+    DdaAlltoAllMockComm(const DdaAlltoAllMockComm&)            = delete;
+    DdaAlltoAllMockComm& operator=(const DdaAlltoAllMockComm&) = delete;
+
     DdaAlltoAllMockComm() { reset("gfx950:sramecc+:xnack-"); }
 
     void reset(const char* archName)
@@ -82,7 +88,12 @@ struct DdaAlltoAllMockComm
 
 // Largest float32 per-rank count whose 8-rank AlltoAll totals exactly 4 MiB.
 constexpr size_t kAlltoAllFloat32CountAt4MbThreshold =
-    kDdaAlltoAllGfx942ThresholdBytes /
+    4194304UL /
+    (static_cast<size_t>(nccl_dda_detail::kDdaNranks) * sizeof(float));
+
+// Per-rank float32 count whose 8-rank AlltoAll totals exactly 1 MiB (gfx1250 LL128 ceiling).
+constexpr size_t kAlltoAllFloat32CountAt1MbLL128Threshold =
+    1048576UL /
     (static_cast<size_t>(nccl_dda_detail::kDdaNranks) * sizeof(float));
 
 // 4 KiB/rank float32: single-block grid on 8-rank IPC launch (in-kernel copy path).

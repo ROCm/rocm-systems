@@ -67,10 +67,10 @@ TEST_F(DdaCollectivesNranksRelaxTest, RcclDdaEnabledHonoursTheRelaxedRankFloor)
     decisionComm.comm.nRanks = 4;
     const size_t totalBytes = 8ull * 1024 * 1024;
 
-    EXPECT_TRUE(rcclDdaEnabled(decisionComm.get(), totalBytes, 8388608, /*gfx950Default=*/0,
-                               /*gfx1250Default=*/0, /*minRanks=*/2));
-    EXPECT_FALSE(rcclDdaEnabled(decisionComm.get(), totalBytes, 8388608, /*gfx950Default=*/0,
-                                /*gfx1250Default=*/0, /*minRanks=*/8));
+    EXPECT_TRUE(rcclDdaEnabled(decisionComm.get(), totalBytes, /*threshold=*/8388608, /*query=*/false,
+                               /*prefix=*/nullptr, /*minRanks=*/2));
+    EXPECT_FALSE(rcclDdaEnabled(decisionComm.get(), totalBytes, /*threshold=*/8388608, /*query=*/false,
+                                /*prefix=*/nullptr, /*minRanks=*/8));
 }
 
 // nNodes != 1 is what keeps this feature off multi-node comms, and it is checked

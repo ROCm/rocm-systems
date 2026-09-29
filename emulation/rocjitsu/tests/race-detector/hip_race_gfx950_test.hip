@@ -83,6 +83,90 @@ TEST_F(Gfx950RaceTest, vgpr_waitcnt_race) {
   ExpectRace(kVgprWaitcntRaceExpectation);
 }
 
+// --- Generic FLAT dual-counter waits ---
+
+// Generic FLAT carries simultaneous VMCNT and LGKMCNT obligations, regardless
+// of whether the uniformly resolved address uses the global or LDS route. The
+// all-ones operands below leave one counter unchanged so each negative test
+// demonstrates that draining only the other counter is insufficient.
+static constexpr int kFlatVmcntNoWait = 63;
+static constexpr int kFlatLgkmcntNoWait = 15;
+
+template <int Vmcnt, int Lgkmcnt>
+__global__ void flat_global_wait_kernel(const float *src, float *dst) {
+  const int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  const uint64_t address = reinterpret_cast<uint64_t>(&src[tid]);
+  float value;
+  asm volatile("flat_load_dword %[value], %[address]\n"
+               "s_waitcnt vmcnt(%c[vmcnt]) lgkmcnt(%c[lgkmcnt])\n"
+               : [value] "=v"(value)
+               : [address] "v"(address), [vmcnt] "n"(Vmcnt), [lgkmcnt] "n"(Lgkmcnt)
+               : "memory");
+  dst[tid] = value;
+}
+
+template <int Vmcnt, int Lgkmcnt> __global__ void flat_lds_wait_kernel(int *dst) {
+  __shared__ int lds[64];
+  const int tid = static_cast<int>(threadIdx.x);
+  lds[tid] = tid + 1;
+  __syncthreads();
+
+  const uint64_t address = reinterpret_cast<uint64_t>(&lds[tid]);
+  int value;
+  asm volatile("flat_load_dword %[value], %[address]\n"
+               "s_waitcnt vmcnt(%c[vmcnt]) lgkmcnt(%c[lgkmcnt])\n"
+               : [value] "=v"(value)
+               : [address] "v"(address), [vmcnt] "n"(Vmcnt), [lgkmcnt] "n"(Lgkmcnt)
+               : "memory");
+  dst[tid] = value;
+}
+
+static constexpr RaceExpectation kFlatPartialWaitRaceExpectation{
+    .findings = FindingCount::OneOrMore,
+    .type = "VGPR",
+    .producer = "flat_load_dword",
+    .consumer = "global_store_dword",
+};
+
+TEST_F(Gfx950RaceTest, flat_global_wait_both) {
+  auto *src = allocWithData<float>(64), *dst = alloc<float>(64);
+  flat_global_wait_kernel<0, 0><<<1, 64>>>(src, dst);
+  sync();
+  ExpectNoRace();
+}
+
+TEST_F(Gfx950RaceTest, flat_global_vmcnt_only_race) {
+  auto *src = allocWithData<float>(64), *dst = alloc<float>(64);
+  flat_global_wait_kernel<0, kFlatLgkmcntNoWait><<<1, 64>>>(src, dst);
+  sync();
+  ExpectRace(kFlatPartialWaitRaceExpectation);
+}
+
+TEST_F(Gfx950RaceTest, flat_global_lgkmcnt_only_race) {
+  auto *src = allocWithData<float>(64), *dst = alloc<float>(64);
+  flat_global_wait_kernel<kFlatVmcntNoWait, 0><<<1, 64>>>(src, dst);
+  sync();
+  ExpectRace(kFlatPartialWaitRaceExpectation);
+}
+
+TEST_F(Gfx950RaceTest, flat_lds_wait_both) {
+  flat_lds_wait_kernel<0, 0><<<1, 64>>>(alloc<int>(64));
+  sync();
+  ExpectNoRace();
+}
+
+TEST_F(Gfx950RaceTest, flat_lds_vmcnt_only_race) {
+  flat_lds_wait_kernel<0, kFlatLgkmcntNoWait><<<1, 64>>>(alloc<int>(64));
+  sync();
+  ExpectRace(kFlatPartialWaitRaceExpectation);
+}
+
+TEST_F(Gfx950RaceTest, flat_lds_lgkmcnt_only_race) {
+  flat_lds_wait_kernel<kFlatVmcntNoWait, 0><<<1, 64>>>(alloc<int>(64));
+  sync();
+  ExpectRace(kFlatPartialWaitRaceExpectation);
+}
+
 // --- SGPR waitcnt ---
 
 __global__ void sgpr_no_race_kernel(const int *src, int *dst) {
@@ -1047,6 +1131,13 @@ TEST_F(Gfx950RaceTest, dual_offset_lds_race) {
 
 __global__ void scratch_vmcnt_safe_kernel(const float *src, float *dst) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  // Inline scratch instructions do not contribute to the compiler's private
+  // frame size. Materialize a small dynamic private access so the kernel
+  // descriptor requests real scratch backing, then drain that setup access
+  // before establishing the vmcnt sequence this test measures.
+  volatile unsigned char scratch_anchor[4];
+  scratch_anchor[tid & 3] = static_cast<unsigned char>(tid);
+  asm volatile("s_waitcnt vmcnt(0)" ::: "memory");
   float val;
   float tmp1 = 1.0f, tmp2 = 2.0f;
   asm volatile(
@@ -1068,6 +1159,11 @@ static constexpr RaceExpectation kScratchVmcntRaceExpectation{
 
 __global__ void scratch_vmcnt_race_kernel(const float *src, float *dst) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  // Keep this kernel's scratch provisioning identical to the safe case so the
+  // only difference observed by the race detector is the wait threshold below.
+  volatile unsigned char scratch_anchor[4];
+  scratch_anchor[tid & 3] = static_cast<unsigned char>(tid);
+  asm volatile("s_waitcnt vmcnt(0)" ::: "memory");
   float val;
   float tmp1 = 1.0f;
   asm volatile(
