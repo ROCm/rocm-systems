@@ -178,7 +178,8 @@ static size_t       g_metadata_json_len = 0;
 static uint8_t  g_buf[kBufCap];
 static size_t   g_buf_len            = 0;
 static uint64_t g_events_since_ckpt  = 0;
-static bool     g_trailer_written    = false;
+// Atomic because emergency_finalize() uses it without taking g_file_mu.
+static std::atomic<bool> g_trailer_written{false};
 
 // Set when an event could not be serialized losslessly and had to be dropped
 // (e.g. an oversized kernel launch). A capture with this flag set is finalized
@@ -955,7 +956,7 @@ static bool atomic_write_file(const std::string& path,
 Hash128 write_blob(const void* data, size_t len) {
   {
     std::lock_guard<std::mutex> lk(g_file_mu);
-    if (g_events_fd < 0) return {};  // writer not open — drop silently
+    if (g_events_fd < 0 || g_trailer_written) return {};  // not open, or past the trailer
   }
 
   Hash128 h = hash_buffer(data, len);
@@ -992,7 +993,7 @@ Hash128 write_blob(const void* data, size_t len) {
 Hash128 write_code_object(const void* image, size_t image_size) {
   {
     std::lock_guard<std::mutex> lk(g_file_mu);
-    if (g_events_fd < 0) return {};  // writer not open — drop silently
+    if (g_events_fd < 0 || g_trailer_written) return {};  // not open, or past the trailer
   }
 
   Hash128 h = hash_buffer(image, image_size);

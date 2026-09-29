@@ -1524,22 +1524,41 @@ namespace {
 
 // Other threads keep calling through the live dispatch tables while the shims go
 // in and out, so the tables are written one slot at a time with atomic operations
-// and never copied over as a whole. With GCC and Clang, function-pointer slots are
+// and never copied over as a whole. Outside Windows, function-pointer slots are
 // accessed through a may_alias view so the store is well-defined against the typed
-// table fields; MSVC does no type-based alias analysis.
+// table fields; MSVC does no type-based alias analysis and clang-cl disables it by
+// default.
 template <typename Table> constexpr size_t kDispatchSlots =
     (sizeof(Table) - sizeof(size_t)) / sizeof(void*);
 
-#if defined(__GNUC__) || defined(__clang__)
-struct DispatchSlot {
-  void* value;
-} __attribute__((__may_alias__));
-#elif IS_WINDOWS
+#if IS_WINDOWS
 struct DispatchSlot {
   void* value;
 };
+
+void store_slot(DispatchSlot* slot, void* value) {
+  std::atomic_ref<void*>(slot->value).store(value, std::memory_order_release);
+}
+
+void replace_slot(DispatchSlot* slot, void* expected, void* desired) {
+  std::atomic_ref<void*>(slot->value).compare_exchange_strong(
+      expected, desired, std::memory_order_release, std::memory_order_relaxed);
+}
+#elif defined(__GNUC__) || defined(__clang__)
+struct DispatchSlot {
+  void* value;
+} __attribute__((__may_alias__));
+
+void store_slot(DispatchSlot* slot, void* value) {
+  __atomic_store_n(&slot->value, value, __ATOMIC_RELEASE);
+}
+
+void replace_slot(DispatchSlot* slot, void* expected, void* desired) {
+  __atomic_compare_exchange_n(&slot->value, &expected, desired, false, __ATOMIC_RELEASE,
+                              __ATOMIC_RELAXED);
+}
 #else
-#error "HRR dispatch slots need GCC, Clang or MSVC"
+#error "Outside Windows, HRR dispatch slots need GCC or Clang"
 #endif
 
 template <typename Table> DispatchSlot* dispatch_slots(Table& table) {
@@ -1552,24 +1571,8 @@ template <typename Table> DispatchSlot* dispatch_slots(Table& table) {
   return reinterpret_cast<DispatchSlot*>(reinterpret_cast<char*>(&table) + sizeof(size_t));
 }
 
-void store_slot(DispatchSlot* slot, void* value) {
-#if IS_WINDOWS
-  std::atomic_ref<void*>(slot->value).store(value, std::memory_order_release);
-#elif defined(__GNUC__) || defined(__clang__)
-  __atomic_store_n(&slot->value, value, __ATOMIC_RELEASE);
-#endif
-}
-
-void replace_slot(DispatchSlot* slot, void* expected, void* desired) {
-#if IS_WINDOWS
-  std::atomic_ref<void*>(slot->value).compare_exchange_strong(
-      expected, desired, std::memory_order_release, std::memory_order_relaxed);
-#elif defined(__GNUC__) || defined(__clang__)
-  __atomic_compare_exchange_n(&slot->value, &expected, desired, false, __ATOMIC_RELEASE,
-                              __ATOMIC_RELAXED);
-#endif
-}
-
+// Unlike uninstall this does not compare first: a slot that changed since the
+// snapshot still gets its shim, or the archive would silently miss that API.
 template <typename Table>
 void install_shims(const Table* live, const Table& shims, const Table& real) {
   DispatchSlot* slot = dispatch_slots(*const_cast<Table*>(live));

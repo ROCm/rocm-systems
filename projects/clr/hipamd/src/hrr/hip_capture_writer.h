@@ -27,8 +27,9 @@ bool is_open();
 void set_capture_metadata_json(const std::string& metadata_json);
 
 // Flush events.bin, append the clean-shutdown trailer (hrr_eof_record), fsync,
-// and write manifest.json with "complete": true. Safe to call multiple times
-// (the trailer is written only once). Call on normal shutdown.
+// and write manifest.json with "complete": true. Call on normal shutdown: once the
+// trailer is written, events, blobs and code objects are dropped until close() and
+// the next open(). Use checkpoint() to flush while capture runs.
 void flush(const char* output_dir);
 
 // Force any buffered events to disk and fsync. Bounds how much capture data a

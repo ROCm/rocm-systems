@@ -1599,7 +1599,6 @@ _CPP_PREAMBLE = """\
 
 #include <atomic>
 #include <cstdint>
-#include <cstring>
 
 // These global tables are defined (non-static) in hip_capture.cpp
 extern HipDispatchTable         g_real_table;
