@@ -137,27 +137,20 @@ void runCftZeroTeamAliasesSelfTest() {
   const ncclTeam_t zeroTeam = ncclTeamCft(resources.comms[0], kInvalidCftMode);
   expectTeamEquals(zeroTeam, 0, 0, 0);
 
-  const std::vector<Case> aliasCases = {
-    {"first_member", 0, worldRank},
-    {"second_member", 1, worldRank},
-    {"far_member", 5, worldRank},
-    {"negative_member", -3, worldRank},
+  // Map is comm->rank + (rank - team.rank) * team.stride: zeroTeam aliases every input, kOffsetTeam only at team.rank.
+  const std::vector<TeamCase> cases = {
+    {"first_member", zeroTeam, 0, worldRank},
+    {"second_member", zeroTeam, 1, worldRank},
+    {"far_member", zeroTeam, 5, worldRank},
+    {"negative_member", zeroTeam, -3, worldRank},
+    {"offset_self", kOffsetTeam, 2, worldRank},
+    {"offset_next", kOffsetTeam, 3, worldRank + 3},
+    {"offset_far", kOffsetTeam, 5, worldRank + 9},
+    {"offset_below", kOffsetTeam, 0, worldRank - 6},
   };
-  for (const Case& c : aliasCases) {
+  for (const TeamCase& c : cases) {
     SCOPED_TRACE(c.name);
-    EXPECT_EQ(ncclTeamRankToWorld(resources.comms[0], zeroTeam, c.rank), c.expected);
-  }
-
-  // Contrast rows: the map is comm->rank + (rank - team.rank) * team.stride, so it stays on self only at team.rank.
-  const std::vector<Case> offsetCases = {
-    {"offset_self", 2, worldRank},
-    {"offset_next", 3, worldRank + 3},
-    {"offset_far", 5, worldRank + 9},
-    {"offset_below", 0, worldRank - 6},
-  };
-  for (const Case& c : offsetCases) {
-    SCOPED_TRACE(c.name);
-    EXPECT_EQ(ncclTeamRankToWorld(resources.comms[0], kOffsetTeam, c.rank), c.expected);
+    EXPECT_EQ(ncclTeamRankToWorld(resources.comms[0], c.team, c.rank), c.expected);
   }
 }
 
@@ -217,8 +210,9 @@ void runCftHierLsaMultiRankDefectTest() {
     // cftMcSize stays 1 while lsaSize is 2, so CftMultimem must stay a singleton and not track the LSA team.
     expectTeamEquals(ncclTeamCftMultimem(resources.comms[rank]), 1, 0, 1);
 
-    // The LSA team cancels lsaSelf out of lsaSelf + (r - lsaSelf) * 1, so only a rank-0 team exposes the lsaSelf term.
+    // Only a rank-0 team leaves the base of base + (r - team.rank) * 1 exposed, so these pin lsaSelf and comm->rank.
     EXPECT_EQ(ncclTeamRankToLsa(resources.comms[rank], ncclTeam_t{/*nRanks=*/2, /*rank=*/0, /*stride=*/1}, 0), rank);
+    EXPECT_EQ(ncclTeamRankToWorld(resources.comms[rank], ncclTeam_t{/*nRanks=*/2, /*rank=*/0, /*stride=*/1}, 0), rank);
 
     const ncclTeam_t hierLsa = ncclTeamCft(resources.comms[rank], NCCL_CFT_TEAM_HIER_LSA);
     EXPECT_EQ(hierLsa.nRanks, 0) << "A non-zero nRanks means the cftSize / lsaSize truncation in ncclTeamCft was "
