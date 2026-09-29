@@ -67,6 +67,7 @@ test_categories:
       - test_soc_base
       - test-pc-sampling-collector
       - test-compression
+      - test-csv
       - test-torch-trace-collector
     therock_ci_exclude:
       - test_profile_live_attach_detach
@@ -160,6 +161,7 @@ test_categories:
       - test_soc_base
       - test-pc-sampling-collector
       - test-compression
+      - test-csv
       - test-torch-trace-collector
       - test_profile_torch_trace
       - test_profile_triton_trace
@@ -257,6 +259,7 @@ test_categories:
       - test_soc_base
       - test-pc-sampling-collector
       - test-compression
+      - test-csv
       - test-torch-trace-collector
       - test_profile_torch_trace
       - test_profile_triton_trace
@@ -354,6 +357,7 @@ test_categories:
       - test_soc_base
       - test-pc-sampling-collector
       - test-compression
+      - test-csv
       - test-torch-trace-collector
       - test_profile_torch_trace
       - test_profile_triton_trace
@@ -374,6 +378,7 @@ test_categories:
       - test-rocprofiler-compute-tool
       - test-pc-sampling-collector
       - test-compression
+      - test-csv
     labels:
       - "sanitizer"
 
