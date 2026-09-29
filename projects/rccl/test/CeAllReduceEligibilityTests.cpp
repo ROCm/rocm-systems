@@ -201,6 +201,9 @@ TEST_F(CeAllReduceEligibilityTest, ChunkLayout_LargeMessagePipelined)
     EXPECT_EQ((chunksPerShard - 1) * chunkBytes + lastChunkElems * sizeof(float), shardBytes);
 }
 
+// The CE fast path writes the whole receive range through peer mappings, so a
+// receive pointer inside the window is not enough: the range must also end
+// inside it. Covers full-window, interior, overrunning, past-end and null inputs.
 TEST_F(CeAllReduceEligibilityTest, RecvRangeContainedInWindow_PointerInWindowIsNotEnough)
 {
     ncclDevrWindow win{};
@@ -220,6 +223,9 @@ TEST_F(CeAllReduceEligibilityTest, RecvRangeContainedInWindow_PointerInWindowIsN
     EXPECT_EQ(ncclCeRecvRangeContainedInWindow(&win, nullptr, 8), 0);
 }
 
+// Peers can register less memory than this rank. The range check must use the
+// smallest registration across the LSA team (lsaMinSize), not the local window
+// size: a range inside the local 128 B window but past the peers' 96 B is rejected.
 TEST_F(CeAllReduceEligibilityTest, RecvRangeContainedInWindow_UsesPeerMinimumSize)
 {
     ncclDevrMemory memory{};
@@ -236,6 +242,9 @@ TEST_F(CeAllReduceEligibilityTest, RecvRangeContainedInWindow_UsesPeerMinimumSiz
     EXPECT_EQ(ncclCeRecvRangeContainedInWindow(&win, storage + 64, 64), 0);
 }
 
+// A window registered at an offset inside a larger allocation only owns the tail
+// of lsaMinSize. Covers a window 32 B into the allocation, a window that starts
+// at the peers' end (nothing usable), and a local window smaller than the peers'.
 TEST_F(CeAllReduceEligibilityTest, RecvRangeContainedInWindow_SubtractsAllocationOffset)
 {
     ncclDevrMemory memory{};
@@ -264,6 +273,9 @@ TEST_F(CeAllReduceEligibilityTest, RecvRangeContainedInWindow_SubtractsAllocatio
     EXPECT_EQ(ncclCeRecvRangeContainedInWindow(&win, storage + 64, 80), 0);
 }
 
+// ncclCeAllReduceStagingBufBytes sizes ceARTmpBuf from the runtime staging
+// capacity. Checks it against the NUM_SLOTS * nRanks * per-rank-chunk formula for
+// the default and a non-default capacity, power-of-2 and odd rank counts, and nRanks <= 0.
 TEST_F(CeAllReduceEligibilityTest, StagingBufBytesMatchesInitFormula)
 {
     for (size_t stagingBytes :

@@ -2183,6 +2183,7 @@ TEST_F(SymMemoryObtainSetupTest, AsymmetricPeerSizes_TrackMinAndMax) {
   EXPECT_EQ(obtained->lsaMaxSize, 16384u);
   EXPECT_EQ(obtained->lsaNumSegments[1], 2);  // the peer's count, from its slice
   EXPECT_EQ(allocSize, 16384);                // reserved for the largest LSA rank
+  // CE sizes peer writes by the smallest LSA registration, not the local window.
   ncclDevrWindow win{};
   win.memory = obtained;
   win.size = 16384;
