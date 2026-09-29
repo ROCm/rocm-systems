@@ -106,9 +106,9 @@ protected:
     /*! \brief Function to detect a superframe and parse the frame sizes. Annex B.
      *  \param [in] p_stream Pointer to the frame data chunk
      *  \param [in] chunk_data_size Size of the frame data chunk
-     *  \return None
+     *  \return <tt>ParserResult</tt>
      */
-    void CheckSuperframe(const uint8_t *p_stream, uint32_t chunk_data_size);
+    ParserResult CheckSuperframe(const uint8_t *p_stream, uint32_t chunk_data_size);
 
     /*! \brief Function to notify decoder about new sequence format through callback
      * \return <tt>ParserResult</tt>

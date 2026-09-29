@@ -95,7 +95,10 @@ ParserResult Vp9VideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
     FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(p_stream) + ", " + ROCDEC_TOSTR(pic_data_size));
     ParserResult ret = PARSER_OK;
 
-    CheckSuperframe(p_stream, pic_data_size);
+    if ((ret = CheckSuperframe(p_stream, pic_data_size)) != PARSER_OK) {
+        FunctionExitLog(g_rocdec_logger);
+        return ret;
+    }
 
     uint8_t *pic_data_ptr = const_cast<uint8_t*>(p_stream);
     for (int frame_index = 0; frame_index < num_frames_in_chunck_; frame_index++) {
@@ -170,7 +173,7 @@ ParserResult Vp9VideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
     FunctionExitLog(g_rocdec_logger);
     return PARSER_OK;
 }
-void Vp9VideoParser::CheckSuperframe(const uint8_t *p_stream, uint32_t chunk_data_size) {
+ParserResult Vp9VideoParser::CheckSuperframe(const uint8_t *p_stream, uint32_t chunk_data_size) {
     const uint32_t superframe_marker = 6; // 0b110
     bool is_superframe = false;
     int num_frames = 1;
@@ -192,19 +195,30 @@ void Vp9VideoParser::CheckSuperframe(const uint8_t *p_stream, uint32_t chunk_dat
             frame_sizes_.resize(num_frames);
         }
         int offset = chunk_data_size - size_index + 1;
+        uint64_t total_frame_size = 0;
         for (int i = 0; i < num_frames; i++) {
-            int count = 0;
-            frame_sizes_[i] = 0;
-            do {
-                frame_sizes_[i] = (p_stream[offset++] << (8 * count)) + frame_sizes_[i];
-                count++;
-            } while (count < size_bytes);
+            uint32_t frame_size = 0;
+            for (int count = 0; count < size_bytes; count++) {
+                // Cast before the shift: the final byte is shifted by 24, which overflows the
+                // int that p_stream[offset] would otherwise promote to.
+                frame_size += static_cast<uint32_t>(p_stream[offset++]) << (8 * count);
+            }
+            frame_sizes_[i] = frame_size;
+            total_frame_size += frame_size;
+        }
+        // The coded frames occupy the chunk ahead of the index, so their sizes have to fit in
+        // it. Without this, the loop in ParsePictureData() advances pic_data_ptr past the end
+        // of the chunk by a distance taken from the bitstream.
+        if (total_frame_size > chunk_data_size - size_index) {
+            ErrorLog(g_rocdec_logger, "Superframe index frame sizes exceed the picture data chunk.");
+            return PARSER_OUT_OF_RANGE;
         }
         num_frames_in_chunck_ = num_frames;
     } else {
         num_frames_in_chunck_ = 1;
         frame_sizes_[0] = chunk_data_size;
     }
+    return PARSER_OK;
 }
 
 ParserResult Vp9VideoParser::NotifyNewSequence(Vp9UncompressedHeader *p_uncomp_header) {
