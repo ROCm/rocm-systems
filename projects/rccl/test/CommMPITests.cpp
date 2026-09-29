@@ -679,9 +679,10 @@ namespace
      *
      * Short is the tier every config runs. Large pins the ReduceScatter shard at ~2MiB, which is
      * the size regime AICOMRCCL-2275 reproduces in: the corruption is a cache-coherence defect
-     * below RCCL, so it needs payloads that outrun the cache, not a multi-node job. Both tiers are
-     * therefore registered single-node -- 2 ranks on 2 hosts would route the exchange through NET
-     * and lose the intra-node P2P path the defect lives on.
+     * below RCCL, so it needs payloads that outrun the cache, not a multi-node job. Both tiers
+     * therefore require a single node, enforced in the test body rather than by registration -- the
+     * categories this suite runs in also launch multi-node jobs, where 2 ranks on 2 hosts would
+     * route the exchange through NET and lose the intra-node P2P path the defect lives on.
      */
     enum class SizeTier
     {
@@ -735,14 +736,14 @@ namespace
     // Varied and cycled across the 24 buckets, because DDP fuses gradients into unequal buckets
     // and a uniform size would let a per-plan sizing bug cancel out across the whole burst.
     constexpr size_t kBucketCounts[] = {64, 128, 256, 512, 1024, 2048};
-    constexpr size_t kBucketSizes    = sizeof(kBucketCounts) / sizeof(kBucketCounts[0]);
+    constexpr size_t kBucketCountsPeriod = sizeof(kBucketCounts) / sizeof(kBucketCounts[0]);
 
     // Derived, never hardcoded: the host staging buffer is sized from this, so a larger entry added
     // to kBucketCounts next to a stale separate constant would be a silent heap overflow.
     constexpr size_t largestBucketCount()
     {
         size_t largest = 0;
-        for(size_t i = 0; i < kBucketSizes; ++i)
+        for(size_t i = 0; i < kBucketCountsPeriod; ++i)
         {
             if(kBucketCounts[i] > largest)
             {
@@ -820,8 +821,9 @@ namespace
  * same sequence and the three collective families that get the full datatype reduction-kernel
  * cross product (AllReduce, ReduceScatter, Reduce) are all exercised on all of them.
  *
- * No NCCL_ALGO or NCCL_PROTO forcing: the point is the sequence a real job runs under whatever
- * the tuner picks. The full_pow2_* tiers cover the forced-algorithm direction separately.
+ * No NCCL_ALGO or NCCL_PROTO forcing: the point is the sequence a real job runs under whatever the
+ * tuner picks. The forced-algorithm axis is out of scope here and is not picked up elsewhere either
+ * -- the full_pow2_* tiers all alias mpi_collective_patterns, which does not select this suite.
  */
 class PersistentCommunicatorMPITest
     : public MPITestBase
@@ -846,10 +848,17 @@ protected:
     // 1, 2, 4 or 8, all of which divide 2^21 evenly, so the element count is never rounded.
     static constexpr size_t kLargeShardBytes = 2 * 1024 * 1024;
 
-    // Each upload buffer's fill starts from its own index, so no two hold the same bytes over
-    // their shared range and a collective that reads the wrong source buffer cannot still pass.
-    // Buckets start at 0 via bucketIndex(); the four below are pairwise distinct modulo
-    // kContributionModulus, and distinct from 0, which is what makes the patterns differ.
+    // Each upload buffer's fill starts from its own index, so the four non-bucket buffers hold
+    // different bytes over their shared range and a collective that reads the wrong one of them
+    // cannot still pass: they are pairwise distinct modulo kContributionModulus, which is what
+    // makes the patterns differ rather than merely start at different offsets.
+    //
+    // This does not extend to the buckets. bucketIndex() starts bucket b at 31 * b and 31 is 9 mod
+    // kContributionModulus, so the bucket starts run through every residue as b goes 0 to 23 and
+    // each base still collides with two of them -- param with buckets 7 and 18, grad with 8 and 19,
+    // activation with 6 and 17, metric with 2 and 13. bucketCount(7) is 128, so host_param[0..127]
+    // is byte-identical to bucket 7's fill on every rank and step. Separating those would need the
+    // buckets to carry a base of their own added to 31 * b.
     static constexpr size_t kParamIndexBase      = 1031;  // 1031 % 11 == 8
     static constexpr size_t kGradIndexBase       = 2063;  // 2063 % 11 == 6
     static constexpr size_t kActivationIndexBase = 3079;  // 3079 % 11 == 10
@@ -857,7 +866,7 @@ protected:
 
     static size_t bucketCount(int bucket)
     {
-        return kBucketCounts[static_cast<size_t>(bucket) % kBucketSizes];
+        return kBucketCounts[static_cast<size_t>(bucket) % kBucketCountsPeriod];
     }
 
     // Spreads the buckets apart in index space so a burst that reduces the wrong bucket is not
@@ -1282,11 +1291,20 @@ TEST_P(PersistentCommunicatorMPITest, HeterogeneousCollectiveAndP2pSequenceOnOne
     const DtypeSizeCase& test_case = GetParam();
     SCOPED_TRACE(std::string("dtype=") + test_case.dtypeName + " tier=" + test_case.sizeTierName);
 
-    // The maximum is load-bearing, not decoration: above kMaxRanksAssumed both ncclFloat8e5m2's
-    // exact-integer range and contribution()'s across-element variance stop holding, so the run
-    // would either compare inexactly or stop being able to fail at all. A larger world size is an
-    // environment mismatch rather than a defect, so it skips rather than fails.
-    SKIP_UNLESS_MPI_PREREQS(/*min_processes=*/2, /*max_processes=*/kMaxRanksAssumed);
+    // The maximum is the conservative bound the formulas are proved against, not an observed cliff:
+    // a reduced element is a sum of at most nranks 0/1 contributions, so ncclFloat8e5m2's exact
+    // range of 8 caps it, and contribution() only collapses to a constant at kContributionModulus.
+    // A larger world size is an environment mismatch rather than a defect, so it skips.
+    //
+    // Single node is a requirement, not a preference: AICOMRCCL-2275 is a cache-coherence defect on
+    // the intra-node P2P path, and a job spread over two hosts routes the exchange through NET and
+    // cannot reproduce it. The categories this suite is registered in do launch multi-node jobs, so
+    // without the node bound here the rows would run and pass without ever touching that path.
+    SKIP_UNLESS_MPI_PREREQS(/*min_processes=*/2,
+                            /*max_processes=*/kMaxRanksAssumed,
+                            kNoPowerOfTwoRequired,
+                            /*min_nodes=*/1,
+                            kRequireSingleNode);
 
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
