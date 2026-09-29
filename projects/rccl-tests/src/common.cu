@@ -1937,6 +1937,136 @@ testResult_t AllocateBuffs(void **sendbuff, size_t sendBytes, void **recvbuff, s
 
 testResult_t run(); // Main function
 
+#ifdef MPI_SUPPORT
+#ifdef MPICH
+// Looks for a configure option in MPICH's version string. A delimiter has to
+// follow the option so that "--with-ze" does not match "--with-zelda", and
+// "--with-hip" is not found inside "--without-hip".
+static bool mpichConfiguredWith(const char* version, const char* option) {
+  size_t len = strlen(option);
+  for (const char* p = strstr(version, option); p; p = strstr(p + 1, option)) {
+    char next = p[len];
+    if (next == '\0' || next == '=' || isspace((unsigned char)next)) return true;
+  }
+  return false;
+}
+#endif
+
+// Returns a description of why the MPI implementation is GPU-aware, or NULL if
+// it is not. Open MPI's MPIX_Query_rocm_support() and MPIX_Query_cuda_support()
+// are deliberately not used: they also require the accelerator runtime to be
+// initialized, so they report no support for a GPU-aware library run with
+// --mca accelerator null. What matters here is whether the support is compiled
+// in at all.
+static const char* detectGpuAwareMpi() {
+  // The Open MPI these tests were built against.
+#if defined(MPIX_ROCM_AWARE_SUPPORT) && MPIX_ROCM_AWARE_SUPPORT
+  return "it was built against an Open MPI with ROCm-aware support compiled in";
+#elif defined(MPIX_CUDA_AWARE_SUPPORT) && MPIX_CUDA_AWARE_SUPPORT
+  return "it was built against an Open MPI with CUDA-aware support compiled in";
+#endif
+#if defined(OPEN_MPI) && defined(NCCL_OS_LINUX)
+  // The Open MPI actually loaded, which for a prebuilt binary need not be the
+  // one above. opal_built_with_rocm_support is not registered as an MCA
+  // parameter, so read the exported symbols rather than going through MPI_T.
+  {
+    const bool* builtWithRocm = (const bool*)dlsym(RTLD_DEFAULT, "opal_built_with_rocm_support");
+    if (builtWithRocm && *builtWithRocm)
+      return "the Open MPI it is running against has ROCm-aware support compiled in";
+    const bool* builtWithCuda = (const bool*)dlsym(RTLD_DEFAULT, "opal_built_with_cuda_support");
+    if (builtWithCuda && *builtWithCuda)
+      return "the Open MPI it is running against has CUDA-aware support compiled in";
+  }
+#endif
+#ifdef MPIX_GPU_SUPPORT_HIP
+  {
+    int supported = 0;
+    if (MPIX_GPU_query_support(MPIX_GPU_SUPPORT_HIP, &supported) == MPI_SUCCESS && supported)
+      return "MPIX_GPU_query_support() reports HIP-aware support";
+  }
+#endif
+#ifdef MPIX_GPU_SUPPORT_CUDA
+  {
+    int supported = 0;
+    if (MPIX_GPU_query_support(MPIX_GPU_SUPPORT_CUDA, &supported) == MPI_SUCCESS && supported)
+      return "MPIX_GPU_query_support() reports CUDA-aware support";
+  }
+#endif
+#ifdef MPICH
+  // MPIX_GPU_query_support() is gated on MPIR_CVAR_ENABLE_GPU, so it reports
+  // nothing when GPU support is only switched off at launch time. MPICH exposes
+  // no build-configuration flag for this, but its version string carries the
+  // configure line, which the switch does not affect. Derivatives such as
+  // MVAPICH or Cray MPICH need not report a configure line at all.
+  {
+    char version[MPI_MAX_LIBRARY_VERSION_STRING] = {0};
+    int len = 0;
+    if (MPI_Get_library_version(version, &len) == MPI_SUCCESS) {
+      version[sizeof(version) - 1] = '\0';
+      if (mpichConfiguredWith(version, "--with-hip"))
+        return "it is running against an MPICH configured --with-hip";
+      if (mpichConfiguredWith(version, "--with-cuda"))
+        return "it is running against an MPICH configured --with-cuda";
+      if (mpichConfiguredWith(version, "--with-ze"))
+        return "it is running against an MPICH configured --with-ze";
+    }
+  }
+#endif
+#if defined(NCCL_OS_LINUX)
+  // Open MPI 4.x exposes no ROCm-awareness API whatsoever: it inherits GPU
+  // support from UCX and reports nothing about it. UCX only installs its GPU
+  // transport modules when built with ROCm or CUDA, so finding one mapped into
+  // this process stands in for the query that does not exist. Unlike the checks
+  // above this describes the run rather than the build, and so sees nothing if
+  // the job never selected the UCX transport.
+  {
+    FILE* maps = fopen("/proc/self/maps", "r");
+    if (maps) {
+      char line[4096];
+      const char* reason = NULL;
+      while (reason == NULL && fgets(line, sizeof(line), maps)) {
+        if (strstr(line, "libuct_rocm"))
+          reason = "the UCX it is running against has the ROCm transport module built in";
+        else if (strstr(line, "libuct_cuda"))
+          reason = "the UCX it is running against has the CUDA transport module built in";
+      }
+      fclose(maps);
+      if (reason) return reason;
+    }
+  }
+#endif
+  return NULL;
+}
+
+// rccl-tests only hands host buffers to MPI; device buffers are exchanged
+// through RCCL. Must be called after MPI_Init, which MPI_Comm_rank and
+// MPI_Abort require.
+static void abortIfGpuAwareMpi() {
+  const char* reason = detectGpuAwareMpi();
+  if (reason == NULL) return;
+
+  int rank = 0;
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  if (rank == 0) {
+    fprintf(stderr,
+            "[FATAL] rccl-tests requires a non-GPU-aware MPI, but %s.\n"
+            "        Re-run with an MPI configured without GPU support (Open MPI: without\n"
+            "        --with-rocm/--with-cuda, MPICH: without --with-hip/--with-cuda).\n"
+            "        Turning GPU support off at launch time is not sufficient.\n",
+            reason);
+    fflush(stderr);
+  }
+  // Every rank detects this identically, so the barrier cannot deadlock. It
+  // keeps the other ranks from aborting, and taking the job down with them,
+  // before rank 0's message has made it out through the launcher.
+  MPI_Barrier(MPI_COMM_WORLD);
+  MPI_Abort(MPI_COMM_WORLD, 1);
+  // MPICH returns from MPI_Abort and keeps running until the launcher kills the
+  // process, which is long enough to reach the test body, so stop here too.
+  exit(EXIT_FAILURE);
+}
+#endif
+
 int main(int argc, char* argv[], char **envp) {
   // Make sure everyline is flushed so that we see the progress of the test
   ncclTestSetlinebuf(stdout);
@@ -2396,6 +2526,7 @@ int main(int argc, char* argv[], char **envp) {
 
 #ifdef MPI_SUPPORT
   MPI_Init(&argc, &argv);
+  abortIfGpuAwareMpi();
 #endif
 
   const output_file_type_t output_file_type = classifyOutputFile(output_file);
