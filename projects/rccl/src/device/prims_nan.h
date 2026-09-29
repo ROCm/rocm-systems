@@ -68,10 +68,18 @@ struct ncclNanBits<hip_bfloat16> {
   static constexpr Bits Mant = 0x007Fu;
 };
 
-// 128-bit FIFO load and store, one per lane. Both go out at system scope:
-// measured on gfx950 SPX, cache-bypassing accesses plus a compiler-only fence
-// beat LL128's model of cacheable accesses plus a __threadfence_system() per
-// chunk (166 vs 161 GB/s at 1 GiB, and 136 vs 122 at 16 MiB).
+// 128-bit FIFO load and store, one per lane. The store goes out at system scope
+// and the load at agent scope, which puts sc0/sc1 on the store and sc1 on the
+// load.
+//
+// These bits are load-bearing, and the failure mode if you drop them is nasty:
+// plain accesses still produce *correct* results, because the protocol is
+// tearing-tolerant and the receiver simply keeps spinning until it sees the
+// data. They just arrive whenever the writer's cache gets around to it, which
+// measured ~2 GB/s against ~290 at 1 GiB -- a 100x slowdown with a clean
+// correctness check. It is also intermittent: one early run of the plain
+// variant happened to come in at full speed. Do not "simplify" these away on
+// the strength of the FIFO being allocated uncached.
 inline __device__ void loadNanLine(const uint64_t* ptr, uint64_t& v0, uint64_t& v1) {
   union {
     v4u v;
@@ -237,40 +245,51 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
     }
   }
 
+  // Element <-> wire-word conversion is written with shifts and memcpy rather
+  // than a `union { uint64_t; T[] }`, because an *indexed* write into such a
+  // union makes it addressable and clang sinks the whole thing to scratch. With
+  // the union this loop alone emitted ~70 scratch ops and pushed the kernel to
+  // 260 VGPRs / 1 wave per SIMD; shifts keep it in registers.
+  //
+  // memcpy rather than a reinterpret_cast load: the user buffer is only
+  // guaranteed aligned to sizeof(T), so an 8-byte access off it can be
+  // misaligned. memcpy lets the compiler split it when it cannot prove
+  // alignment, instead of us emitting a wrong-but-fast access.
+
   // Gather the EltPerWord slice elements starting at eltBase into one wire word.
   // Slots past eltN are zero-filled rather than read from src: reading past the
   // caller's buffer could pull in a NaN, which would strand the receiver on a word
   // it can never see complete. Zero is finite in every supported dtype.
   __device__ __forceinline__ uint64_t packWord(T const* src, int eltBase, int eltN) {
-    union {
-      uint64_t word;
-      T elt[EltPerWord];
-    } u;
-    if (eltBase + EltPerWord <= eltN && (reinterpret_cast<uintptr_t>(src + eltBase) % sizeof(uint64_t)) == 0) {
-      return *reinterpret_cast<uint64_t const*>(src + eltBase);
+    uint64_t word;
+    if (eltBase + EltPerWord <= eltN) {
+      __builtin_memcpy(&word, src + eltBase, sizeof(uint64_t));
+      return word;
     }
-    u.word = 0;
+    word = 0;
 #pragma unroll
     for (int i = 0; i < EltPerWord; i++) {
-      if (eltBase + i < eltN) u.elt[i] = src[eltBase + i];
+      if (eltBase + i < eltN) {
+        uint64_t bits = 0;
+        __builtin_memcpy(&bits, src + eltBase + i, sizeof(T));
+        word |= bits << (i * 8 * sizeof(T));
+      }
     }
-    return u.word;
+    return word;
   }
 
   // Scatter one wire word back out to dst, dropping the zero-filled tail.
   __device__ __forceinline__ void unpackWord(T* dst, uint64_t word, int eltBase, int eltN) {
-    if (eltBase + EltPerWord <= eltN && (reinterpret_cast<uintptr_t>(dst + eltBase) % sizeof(uint64_t)) == 0) {
-      *reinterpret_cast<uint64_t*>(dst + eltBase) = word;
+    if (eltBase + EltPerWord <= eltN) {
+      __builtin_memcpy(dst + eltBase, &word, sizeof(uint64_t));
       return;
     }
-    union {
-      uint64_t w;
-      T elt[EltPerWord];
-    } u;
-    u.w = word;
 #pragma unroll
     for (int i = 0; i < EltPerWord; i++) {
-      if (eltBase + i < eltN) dst[eltBase + i] = u.elt[i];
+      if (eltBase + i < eltN) {
+        uint64_t bits = word >> (i * 8 * sizeof(T));
+        __builtin_memcpy(dst + eltBase + i, &bits, sizeof(T));
+      }
     }
   }
 
@@ -323,6 +342,13 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
 
     __syncwarp();
 
+    // Sparse readiness was tried here and removed. The sender drained with an
+    // s_waitcnt before writing a marker pair so the receiver could poll one line
+    // and then stream the rest open-loop, on the theory that the per-line
+    // load -> test -> branch dependency was what capped throughput. It measured
+    // 251.7 vs 251.8 GB/s at 1 GiB: the sender's drain costs exactly what the
+    // receiver's open-loop reads gain. Worth knowing before anyone tries it
+    // again -- the value dependency is not the ceiling.
     if (RECV) {
       for (int i = 0; i < MaxRecv && i < fan.nrecv(); i++) {
         uint64_t* ptr = recvPtr(i) + wireOffset;
@@ -331,27 +357,36 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
         // straggling line makes the whole warp re-fetch its entire slice on every
         // spin iteration. The warp still leaves the spin together -- letting lanes
         // exit independently was measurably worse below ~32 MiB.
-        bool pending[WordPerThread / 2];
+        //
+        // Held as a bitmask rather than a bool[]: an array indexed inside the
+        // loop is addressable, so clang keeps it in scratch and reloads it every
+        // spin iteration. A mask stays in one VGPR.
+        uint32_t pending = 0;
 #pragma unroll
-        for (int u = 0; u < WordPerThread; u += 2) pending[u / 2] = pairLive(u, nWords);
-        bool needReload;
+        for (int u = 0; u < WordPerThread; u += 2)
+          if (pairLive(u, nWords)) pending |= 1u << (u >> 1);
+        // Measured: an s_sleep backoff between re-reads makes no difference at
+        // 1 GiB, so the spin is not costing bandwidth through read
+        // amplification. Left as a tight loop.
         do {
-          needReload = false;
 #pragma unroll
           for (int u = 0; u < WordPerThread; u += 2) {
-            if (pending[u / 2]) {
+            if (pending & (1u << (u >> 1))) {
               loadNanLine(ptr + u * WARP_SIZE, vr[u], vr[u + 1]);
-              pending[u / 2] = anyNan(vr[u]) || anyNan(vr[u + 1]);
-              needReload |= pending[u / 2];
+              if (!(anyNan(vr[u]) || anyNan(vr[u + 1]))) pending &= ~(1u << (u >> 1));
             }
           }
-          needReload &= (0 == checkAbort(abort, 1, spins));
-        } while (__any(needReload));
+          if (checkAbort(abort, 1, spins)) break;
+        } while (__any(pending != 0));
 
         // Hand the slot back to the sentinel while the lines are still hot --
         // measurably better than deferring it past the forward store. The credit
         // published by postRecv() is what makes this safe here: the peer cannot
         // touch this slot again until it sees that credit.
+        //
+        // Every live pair is restored because every live pair is inspected. This
+        // costs nothing worth reclaiming: compiling the restore out entirely
+        // measures 289.8 against 291.0 GB/s at 1 GiB, medians of 4 runs.
 #pragma unroll
         for (int u = 0; u < WordPerThread; u += 2) {
           if (pairLive(u, nWords)) storeNanLine(ptr + u * WARP_SIZE, NCCL_NAN_SENTINEL64, NCCL_NAN_SENTINEL64);
