@@ -140,10 +140,12 @@ void GpuDiscoveryDeprecatedTest::Run() {
   // there are no nodes to scan (FFM, or other restricted container env).
   int num_nodes = CountKfdNodes();
   if (num_nodes == 0) {
-    // The gtest vendored under rocrtst/ predates GTEST_SKIP(); emit the standard
-    // [ SKIPPED ] marker and return instead.
-    std::cout << "[ SKIPPED ] GpuDiscoveryDeprecatedTest: No KFD topology nodes found "
-                 "(FFM model mode or restricted env)\n";
+    // No KFD topology to scan: FFM model mode exposes only supported GPUs (so
+    // the deprecated-skip path can't be exercised), or a restricted container
+    // env. Record the skip so it lands in the end-of-run summary instead of
+    // reporting as a passed test.
+    rocrtst::SkipCurrentTest(
+        "No KFD topology nodes found (FFM model mode or restricted env)");
     return;
   }
 
