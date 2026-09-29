@@ -195,16 +195,22 @@ static struct acclProxyOpInfo* acclAllocProxyOp(struct acclCommContext* ctx) {
     if (!ctx->proxyOpPoolUsed[i]) {
       ctx->proxyOpPoolUsed[i] = 1;
       __atomic_add_fetch(&ctx->refCount, 1, __ATOMIC_SEQ_CST);
-      // Clear around the mutex, never through it: a stale ProxyStep stop can be
-      // inside pthread_mutex_lock on it right now, and that path does not take
-      // proxyOpPoolMutex.
+      // Clear around the mutex, never through it, and hold it while clearing: a
+      // stale ProxyStep stop reads generation under this lock, so the clear
+      // must not run beside it. POSIX does not define copying a pthread_mutex_t.
       struct acclProxyOpInfo* slot = &ctx->proxyOpPool[i];
       const size_t muOff = offsetof(struct acclProxyOpInfo, mutex);
       const size_t muEnd = muOff + sizeof(slot->mutex);
+      pthread_mutex_lock(&slot->mutex);
+      uint64_t gen = slot->generation;
       memset(slot, 0, muOff);
       memset((char*)slot + muEnd, 0, sizeof(*slot) - muEnd);
+      // One tenancy per alloc. A step that outlived the previous tenant is
+      // rejected at stop rather than charged to this one.
+      slot->generation = gen + 1;
+      pthread_mutex_unlock(&slot->mutex);
       pthread_mutex_unlock(&ctx->proxyOpPoolMutex);
-      return &ctx->proxyOpPool[i];
+      return slot;
     }
   }
   pthread_mutex_unlock(&ctx->proxyOpPoolMutex);
@@ -656,7 +662,14 @@ __hidden ncclResult_t acclPluginFinalize(void* context) {
       int claimed = coll->finalized;
       coll->finalized = 1;
       pthread_mutex_unlock(&coll->mutex);
-      if (claimed) continue;
+      if (claimed) {
+        // Its owner is between acclShouldFinalize and acclWriteRecord, and the
+        // file closes below -- after which acclWriteRecord drops every write.
+        // That record may never reach disk, so count it rather than let a run
+        // that lost one still read as clean.
+        ctx->inflightCollectives++;
+        continue;
+      }
       // Never reached its completion predicate — teardown skipped one or more of
       // its kernel-channel events. Count it so the loss is visible; no record is
       // emitted for it.
@@ -711,42 +724,53 @@ __hidden ncclResult_t acclPluginFinalize(void* context) {
     uint64_t dOps   = __atomic_load_n(&ctx->droppedProxyOps, __ATOMIC_SEQ_CST);
     uint64_t dSteps = __atomic_load_n(&ctx->droppedProxySteps, __ATOMIC_SEQ_CST);
     uint64_t oOps   = __atomic_load_n(&ctx->overflowProxyOps, __ATOMIC_SEQ_CST);
+    uint64_t sSteps = __atomic_load_n(&ctx->staleProxySteps, __ATOMIC_SEQ_CST);
     // Complete only if nothing was lost anywhere. Proxy loss understates the
     // decomposition with no marker on the affected records, and ferror() is the
     // one place a discarded fprintf failure (ENOSPC, EIO) is still visible, so
     // both clear the flag.
     int writeError = ferror(ctx->outputFile) != 0;
     int complete = (ctx->droppedCollectives == 0 && ctx->leakedCollectives == 0 &&
-                    dOps == 0 && dSteps == 0 && oOps == 0 &&
+                    ctx->inflightCollectives == 0 &&
+                    dOps == 0 && dSteps == 0 && oOps == 0 && sSteps == 0 &&
                     ctx->outstandingProxyOps == 0 &&
                     ctx->outstandingProxySteps == 0 &&
                     !writeError);
     fprintf(ctx->outputFile,
       "{\"summary\":{\"dropped_collectives\":%lu,\"leaked_collectives\":%lu,"
+      "\"inflight_collectives\":%lu,"
       "\"dropped_proxy_ops\":%lu,\"dropped_proxy_steps\":%lu,"
-      "\"overflow_proxy_ops\":%lu,"
+      "\"overflow_proxy_ops\":%lu,\"stale_proxy_steps\":%lu,"
       "\"outstanding_proxy_ops\":%lu,\"outstanding_proxy_steps\":%lu,"
+      "\"write_error\":%s,"
       "\"coll_pool_size\":%d,\"proxy_op_pool_size\":%d,\"proxy_step_pool_size\":%d,"
       "\"max_proxy_ops_per_coll\":%d,\"complete\":%s}}\n",
       (unsigned long)ctx->droppedCollectives,
       (unsigned long)ctx->leakedCollectives,
+      (unsigned long)ctx->inflightCollectives,
       (unsigned long)dOps, (unsigned long)dSteps, (unsigned long)oOps,
+      (unsigned long)sSteps,
       (unsigned long)ctx->outstandingProxyOps,
       (unsigned long)ctx->outstandingProxySteps,
+      writeError ? "true" : "false",
       ACCL_COLL_POOL_SIZE, ACCL_PROXY_OP_POOL_SIZE, ACCL_PROXY_STEP_POOL_SIZE,
       ACCL_MAX_PROXY_OPS, complete ? "true" : "false");
     fflush(ctx->outputFile);
     if (!complete) {
       ACCL_WARN("ACCL Profiler: rank=%d output INCOMPLETE: %lu collectives dropped "
                 "(coll pool exhausted), %lu slots leaked (teardown-skipped kernel "
-                "events), %lu proxy ops dropped, %lu proxy steps dropped, %lu proxy "
-                "ops discarded (more than %d on one collective), %lu proxy ops and "
-                "%lu proxy steps still outstanding",
+                "events), %lu collectives in flight at finalize (record may be "
+                "missing), %lu proxy ops dropped, %lu proxy steps dropped, %lu proxy "
+                "ops discarded (more than %d on one collective), %lu proxy steps "
+                "stale (parent slot reissued), %lu proxy ops and %lu proxy steps "
+                "still outstanding, write_error=%d",
                 ctx->rank, (unsigned long)ctx->droppedCollectives,
                 (unsigned long)ctx->leakedCollectives,
+                (unsigned long)ctx->inflightCollectives,
                 (unsigned long)dOps, (unsigned long)dSteps, (unsigned long)oOps,
-                ACCL_MAX_PROXY_OPS, (unsigned long)ctx->outstandingProxyOps,
-                (unsigned long)ctx->outstandingProxySteps);
+                ACCL_MAX_PROXY_OPS, (unsigned long)sSteps,
+                (unsigned long)ctx->outstandingProxyOps,
+                (unsigned long)ctx->outstandingProxySteps, writeError);
     }
     if (writeError) {
       // Say it separately: when writes are failing the summary above may not
@@ -897,6 +921,14 @@ __hidden ncclResult_t acclPluginStartEvent(void* context, void** eHandle,
     step->type = ncclProfileProxyStep;
     step->parentObj = eDescr->parentObj;
     step->commCtx = ctx;
+    // Pin the parent's current tenancy: its slot can be freed and reissued
+    // before this step stops, and only the generation separates the two.
+    struct acclProxyOpInfo* parentOp = (struct acclProxyOpInfo*)eDescr->parentObj;
+    if (parentOp) {
+      pthread_mutex_lock(&parentOp->mutex);
+      step->parentGen = parentOp->generation;
+      pthread_mutex_unlock(&parentOp->mutex);
+    }
     step->step = eDescr->proxyStep.step;
     step->tsStartUs = acclGetTimeUs();
     step->lastStateTs = step->tsStartUs;
@@ -999,20 +1031,30 @@ __hidden ncclResult_t acclPluginStopEvent(void* eHandle) {
     acclProxyStepChargeState(step, step->prevState, step->tsStopUs - step->lastStateTs);
     step->prevState = -1;
 
-    // Accumulate step timing into parent proxy op under lock
+    // Accumulate step timing into parent proxy op under lock, but only while
+    // the op is still the tenant this step started under. The slot is freed
+    // from three paths a step knows nothing about, so it can be reissued
+    // first; charging a stale step to the new tenant is silent corruption of
+    // an unrelated collective's decomposition, so drop it and count it.
     struct acclProxyOpInfo* op = (struct acclProxyOpInfo*)step->parentObj;
+    int stale = 0;
     if (op) {
       pthread_mutex_lock(&op->mutex);
-      op->totalGpuWaitUs += step->gpuWaitUs;
-      op->totalPeerWaitUs += step->peerWaitUs;
-      op->totalNetworkUs += step->sendWaitUs + step->recvWaitUs;
-      op->totalFlushUs += step->flushWaitUs;
-      op->totalGpuRecvWaitUs += step->gpuRecvWaitUs;
-      op->stepsCompleted++;
+      if (op->generation == step->parentGen) {
+        op->totalGpuWaitUs += step->gpuWaitUs;
+        op->totalPeerWaitUs += step->peerWaitUs;
+        op->totalNetworkUs += step->sendWaitUs + step->recvWaitUs;
+        op->totalFlushUs += step->flushWaitUs;
+        op->totalGpuRecvWaitUs += step->gpuRecvWaitUs;
+        op->stepsCompleted++;
+      } else {
+        stale = 1;
+      }
       pthread_mutex_unlock(&op->mutex);
     }
 
     struct acclCommContext* ctx = (struct acclCommContext*)step->commCtx;
+    if (stale) __atomic_add_fetch(&ctx->staleProxySteps, 1, __ATOMIC_SEQ_CST);
     acclFreeProxyStep(ctx, step);
     return ncclSuccess;
   }
