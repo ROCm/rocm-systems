@@ -70,6 +70,14 @@
       "args": ""
     },
     {
+      "_comment": "GPU-labelled in ctest, but RCCL CI does not run ctest, so it needs its own entry to execute at all.",
+      "name": "rccl-gin-rs-gpu-ut",
+      "kind": "fixtures",
+      "bin": "rccl-UnitTestsGinSdmaReduceScatterGpu",
+      "env": [],
+      "args": ""
+    },
+    {
       "name": "rccl-gin-rs-pytest",
       "kind": "pytest",
       "bin": "test_ReduceScatterGinSdma.py",

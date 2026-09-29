@@ -63,7 +63,18 @@ path = os.path.dirname(os.path.abspath(__file__))
 
 _rs_enabled = os.environ.get("RCCL_TESTS_GIN_SDMA_RS", "") not in ("", "0", "false", "False")
 
-RS_NP = int(os.environ.get("RCCL_TESTS_RS_NP", "0"))
+def _env_int(name, default):
+    """Parse an integer env var; bad values fall back so collection stays usable."""
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+RS_NP = _env_int("RCCL_TESTS_RS_NP", 0)
 if RS_NP <= 0:
     if os.environ.get("ROCR_VISIBLE_DEVICES") is not None:
         RS_NP = len(os.environ["ROCR_VISIBLE_DEVICES"].split(","))
@@ -79,8 +90,8 @@ if RS_NP <= 0:
 RS_LAUNCHER = os.environ.get("RCCL_TESTS_MPI_LAUNCHER", "mpirun")
 RS_CTAS = os.environ.get("RCCL_TESTS_RS_CTAS", "8")
 RS_GIN_TYPE = os.environ.get("RCCL_TESTS_RS_GIN_TYPE", "7")
-RS_TIMEOUT_S = int(os.environ.get("RCCL_TESTS_RS_TIMEOUT_S", "900"))
-RS_CONN_RETRIES = int(os.environ.get("RCCL_TESTS_RS_CONN_RETRIES", "5"))
+RS_TIMEOUT_S = _env_int("RCCL_TESTS_RS_TIMEOUT_S", 900)
+RS_CONN_RETRIES = _env_int("RCCL_TESTS_RS_CONN_RETRIES", 5)
 RS_MPI_OPTS = shlex.split(os.environ.get("RCCL_TESTS_MPI_OPTS", ""))
 RS_XENV = shlex.split(os.environ.get("RCCL_TESTS_RS_XENV", ""))
 RS_EXE = os.environ.get(
@@ -189,6 +200,22 @@ def test_ReduceScatterGinSdmaCtaLadder(request, per_rank_mib, op, dtype):
     rc, _ = _run_rs_gin_sdma(request, per_rank_mib * MiB, dtype, op)
     assert rc == 0, "ReduceScatter datacheck failed at {} MiB/rank op={} dtype={}".format(
         per_rank_mib, op, dtype)
+
+
+# The narrowing types. gin_sdma_reduce.h carries a separate overload per op for
+# each of these because the pairwise fold has to narrow back to T on every step
+# rather than accumulate in float, so their result depends on the fold order the
+# -D 3 kernel uses and is not covered by the int32/float ladder above. 4 MiB/rank
+# is the mid-band 48-CTA probe, the same size the ladder runs sum and avg at.
+# prod is excluded for fp8 in SPECIALIZE_REDUCE_KERNEL, and min/max do not narrow,
+# so sum and avg are the ops that exercise the overloads.
+@_rs_skip
+@pytest.mark.parametrize("op", ["sum", "avg"])
+@pytest.mark.parametrize("dtype", ["bfloat16", "fp8_e4m3", "fp8_e5m2"])
+def test_ReduceScatterGinSdmaNarrowingDtypes(request, dtype, op):
+    rc, _ = _run_rs_gin_sdma(request, 4 * MiB, dtype, op)
+    assert rc == 0, "ReduceScatter datacheck failed at 4 MiB/rank op={} dtype={}".format(
+        op, dtype)
 
 
 @_rs_skip

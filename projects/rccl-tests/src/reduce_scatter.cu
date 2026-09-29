@@ -241,7 +241,14 @@ __device__ __forceinline__ void ginReduceScatterBody(ncclWindow_t sendwin, size_
 
   ncclTeam lsa = ncclTeamLsa(devComm);
   ncclLsaBarrierSession<ncclCoopCta> lsaBar { ncclCoopCta(), devComm, lsa, devComm.lsaBarrier, blockIdx.x };
-  lsaBar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
+  // Acquire, not relaxed: the peer sendbuff reads below go through
+  // ncclGetLsaPointer, so observing a peer's arrival has to order those reads
+  // after the writes that filled its sendbuff. acquireOrderOf(relaxed) is
+  // relaxed, which would leave them unordered. all_reduce.cu is the same
+  // read-reduce shape and acquires here; all_gather.cu can stay relaxed only
+  // because its LSA tier writes peers and publishes with a release on exit.
+  // releaseOrderOf(acquire) is relaxed, so the arrive side costs nothing.
+  lsaBar.sync(ncclCoopCta(), cuda::memory_order_acquire);
 
   // 128-bit packed read-reduce over the owned slice. In-place safe: each thread
   // reads its own input pack (source s == rank) into registers before writing the
@@ -455,17 +462,9 @@ testResult_t ReduceScatterDeviceTime(struct threadArgs* args, ncclDataType_t typ
 
   const int nRanksGlobalCta = args->nProcs * args->nThreads * args->nGpus;
   const size_t totalBytesCta = count * wordSize(type) * (size_t)nRanksGlobalCta;
-  int loop = devtimeLoop;
-  int skip = devtimeSkip < 0 ? 0 : devtimeSkip;
-  if (devtimeLoopLarge > 0 && totalBytesCta >= (size_t)64 * 1024 * 1024) {
-    loop = devtimeLoopLarge;
-    if (devtimeSkipLarge >= 0) skip = devtimeSkipLarge;
-    else skip = (skip < 1) ? skip : 1;
-  } else if (devtimeLoopMid > 0 && totalBytesCta >= (size_t)8 * 1024 * 1024) {
-    loop = devtimeLoopMid;
-    if (devtimeSkipMid >= 0) skip = devtimeSkipMid;
-    else skip = (skip < 2) ? skip : 2;
-  }
+  int loop = 0;
+  int skip = 0;
+  gin_devtime::resolveLoopSkip(totalBytesCta, loop, skip);
 
   auto kernel = SPECIALIZE_REDUCE_KERNEL(GinReduceScatterTimedKernel, type, op);
   if (kernel == nullptr) return testSuccess;
@@ -498,8 +497,8 @@ testResult_t ReduceScatterDeviceTime(struct threadArgs* args, ncclDataType_t typ
     int nRanksGlobal = args->nProcs * args->nThreads * args->nGpus;
     const size_t totalBytes = count * wordSize(type) * (size_t)nRanksGlobal;
     double sec = devUs * 1.0e-6;
-    double algBw = (double)totalBytes / 1.0e9 / sec;
-    double busBw = algBw * ((double)(nRanksGlobal - 1) / (double)nRanksGlobal);
+    double algBw = 0.0, busBw = 0.0;
+    gin_sdma_reducescatter::bandwidthGBps(count, (int)wordSize(type), sec, nRanksGlobal, &algBw, &busBw);
     snprintf(args->devtimeAugmentLine, sizeof(args->devtimeAugmentLine),
              "#[rs-devtime] size %12zu B  ctas %2d  loop %2d skip %2d  devtime %10.2f us  algbw %8.2f GB/s  busbw %8.2f GB/s\n",
              totalBytes, gridCtas, loop, skip, devUs, algBw, busBw);

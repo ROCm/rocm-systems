@@ -23,7 +23,7 @@
 #   GIN_PYTEST_RS_TIMEOUT Wall-clock cap for ReduceScatter pytest (default: 3600s)
 #   GIN_PYTEST_HW_CASES  Broadcast mpirun cases under -k GinSdma (default: 9).
 #                  Offline parser/tier guards do not launch and are not counted.
-#   GIN_PYTEST_RS_HW_CASES  ReduceScatter GinSdma mpirun cases (default: 15).
+#   GIN_PYTEST_RS_HW_CASES  ReduceScatter GinSdma mpirun cases (default: 21).
 #   RCCL_TESTS_BCAST_GIN_TYPE / RCCL_TESTS_RS_GIN_TYPE
 #                  NCCL_GIN_TYPE for Broadcast / ReduceScatter pytest (default: 7,
 #                  NCCL_GIN_TYPE_ANVIL_SDMA)
@@ -47,8 +47,9 @@ GIN_PYTEST_RS_TIMEOUT="${GIN_PYTEST_RS_TIMEOUT:-3600s}"
 # (2 sizes x 3 dtypes) + scatter-allgather + 2 hang guards.
 GIN_PYTEST_HW_CASES="${GIN_PYTEST_HW_CASES:-9}"
 # Hardware launches in test_ReduceScatterGinSdma.py: 12 CTA-ladder
-# (6 size/op pairs x 2 dtypes) + 3 hang-guard dtypes.
-GIN_PYTEST_RS_HW_CASES="${GIN_PYTEST_RS_HW_CASES:-15}"
+# (6 size/op pairs x 2 dtypes) + 6 narrowing-dtype (3 dtypes x sum/avg)
+# + 3 hang-guard dtypes.
+GIN_PYTEST_RS_HW_CASES="${GIN_PYTEST_RS_HW_CASES:-21}"
 
 script_dir="$(cd "$(dirname "$0")" && pwd)"
 WORKDIR="$(cd "${script_dir}/../../../.." && pwd)"
@@ -252,7 +253,6 @@ run_test() {
         pytest_prefix="RS"
         hw_cases="${GIN_PYTEST_RS_HW_CASES}"
         outer_timeout="${GIN_PYTEST_RS_TIMEOUT}"
-        bench_timeout="${outer_timeout}"
         ;;
       *)
         echo "  SKIP ${name}: unsupported pytest file '${bin}'"
@@ -261,6 +261,10 @@ run_test() {
         return
         ;;
     esac
+    # Bind once, after the esac, so every pytest file enforces the same cap it
+    # sizes its inner budget against. Per-file re-binding inside the case would
+    # silently pair one file's outer_timeout with another's `timeout`.
+    bench_timeout="${outer_timeout}"
     if [[ ! -x "${pytest_exe}" ]]; then
       echo "  SKIP ${name}: perf binary not found/executable: ${pytest_exe}"
       FAILED_RUNS+=("${name} (missing $(basename "${pytest_exe}"))")
