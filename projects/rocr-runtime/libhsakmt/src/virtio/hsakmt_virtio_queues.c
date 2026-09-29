@@ -186,7 +186,7 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtCreateQueueV2(HSAuint32 NodeId, HSA_QUEUE_TYPE Ty
                rsp->vqueue_res.host_doorbell);
       return r;
     }
-    vhsa_debug("%s: create doorbell: %p, size: 0x%x\n", __FUNCTION__, doorbell_bo->cpu_addr,
+    vhsa_debug("%s: create doorbell: %p, size: 0x%lx\n", __FUNCTION__, doorbell_bo->cpu_addr,
                doorbell_bo->size);
   }
 
