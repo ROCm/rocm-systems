@@ -2119,27 +2119,27 @@
         },
         {
           "name": "CommMPITests_PersistentCommunicator_fp32_large",
-          "description": "Persistent communicator reuse (fp32, large tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator. HSA_DISABLE_CACHE=1 works around AICOMRCCL-2275, silent data corruption on gfx950: 0 failures in 400 runs with it vs 10/10 stock on the same nodes",
+          "description": "Persistent communicator reuse (fp32, large tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator. HSA_DISABLE_CACHE=1 works around AICOMRCCL-2275, silent data corruption on gfx950: 0 failures in 400 runs with it vs 10/10 stock on the same nodes, measured at 2 ranks on one node. Added 2026-09-29; drop this env_variables entry once AICOMRCCL-2275 is fixed below RCCL",
           "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp32_large",
-          "timeout": 180,
+          "timeout": 120,
           "env_variables": {
             "HSA_DISABLE_CACHE": "1"
           }
         },
         {
           "name": "CommMPITests_PersistentCommunicator_bf16_large",
-          "description": "Persistent communicator reuse (bf16, large tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator. HSA_DISABLE_CACHE=1 works around AICOMRCCL-2275, silent data corruption on gfx950: 0 failures in 400 runs with it vs 10/10 stock on the same nodes",
+          "description": "Persistent communicator reuse (bf16, large tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator. HSA_DISABLE_CACHE=1 works around AICOMRCCL-2275, silent data corruption on gfx950: 0 failures in 400 runs with it vs 10/10 stock on the same nodes, measured at 2 ranks on one node. Added 2026-09-29; drop this env_variables entry once AICOMRCCL-2275 is fixed below RCCL",
           "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/bf16_large",
-          "timeout": 240,
+          "timeout": 120,
           "env_variables": {
             "HSA_DISABLE_CACHE": "1"
           }
         },
         {
           "name": "CommMPITests_PersistentCommunicator_fp8e4m3_large",
-          "description": "Persistent communicator reuse (fp8e4m3, large tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator. HSA_DISABLE_CACHE=1 works around AICOMRCCL-2275, silent data corruption on gfx950: 0 failures in 400 runs with it vs 10/10 stock on the same nodes",
+          "description": "Persistent communicator reuse (fp8e4m3, large tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator. HSA_DISABLE_CACHE=1 works around AICOMRCCL-2275, silent data corruption on gfx950: 0 failures in 400 runs with it vs 10/10 stock on the same nodes, measured at 2 ranks on one node. Added 2026-09-29; drop this env_variables entry once AICOMRCCL-2275 is fixed below RCCL",
           "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp8e4m3_large",
-          "timeout": 360,
+          "timeout": 120,
           "env_variables": {
             "HSA_DISABLE_CACHE": "1"
           }
@@ -2153,7 +2153,8 @@
       "num_ranks": 3,
       "num_nodes": 1,
       "num_gpus": 3,
-      "timeout": 180,
+      "timeout": 120,
+      "description": "Third rank count. At 3 the ring Send/Recv peers become distinct for the first time (at 2 the next and previous peer are the same rank) and the AllReduce ring loops at all_reduce.h:75 and :97 execute for the first time. Not a shard-remainder case: CommMPITests.cpp sets total_grad = shard_count * nranks and passes shard_count per rank, so the ReduceScatter/AllGather split is exact at every rank count and a non-dividing element count is still uncovered. Block timeout is the largest row budget here, the 120 s large tier.",
       "env_variables": {
         "NCCL_DEBUG": "INFO",
         "RCCL_MPI_LOG_ALL_RANKS": "1"
@@ -2163,97 +2164,97 @@
           "name": "CommMPITests_PersistentCommunicator_int8_short_3rank",
           "description": "Persistent communicator reuse (int8, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (3 ranks)",
           "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/int8_short",
-          "timeout": 90
+          "timeout": 60
         },
         {
           "name": "CommMPITests_PersistentCommunicator_uint8_short_3rank",
           "description": "Persistent communicator reuse (uint8, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (3 ranks)",
           "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/uint8_short",
-          "timeout": 90
+          "timeout": 60
         },
         {
           "name": "CommMPITests_PersistentCommunicator_int32_short_3rank",
           "description": "Persistent communicator reuse (int32, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (3 ranks)",
           "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/int32_short",
-          "timeout": 90
+          "timeout": 60
         },
         {
           "name": "CommMPITests_PersistentCommunicator_uint32_short_3rank",
           "description": "Persistent communicator reuse (uint32, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (3 ranks)",
           "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/uint32_short",
-          "timeout": 90
+          "timeout": 60
         },
         {
           "name": "CommMPITests_PersistentCommunicator_int64_short_3rank",
           "description": "Persistent communicator reuse (int64, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (3 ranks)",
           "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/int64_short",
-          "timeout": 90
+          "timeout": 60
         },
         {
           "name": "CommMPITests_PersistentCommunicator_uint64_short_3rank",
           "description": "Persistent communicator reuse (uint64, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (3 ranks)",
           "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/uint64_short",
-          "timeout": 90
+          "timeout": 60
         },
         {
           "name": "CommMPITests_PersistentCommunicator_fp16_short_3rank",
           "description": "Persistent communicator reuse (fp16, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (3 ranks)",
           "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp16_short",
-          "timeout": 90
+          "timeout": 60
         },
         {
           "name": "CommMPITests_PersistentCommunicator_fp32_short_3rank",
           "description": "Persistent communicator reuse (fp32, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (3 ranks)",
           "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp32_short",
-          "timeout": 90
+          "timeout": 60
         },
         {
           "name": "CommMPITests_PersistentCommunicator_fp64_short_3rank",
           "description": "Persistent communicator reuse (fp64, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (3 ranks)",
           "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp64_short",
-          "timeout": 90
+          "timeout": 60
         },
         {
           "name": "CommMPITests_PersistentCommunicator_bf16_short_3rank",
           "description": "Persistent communicator reuse (bf16, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (3 ranks)",
           "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/bf16_short",
-          "timeout": 90
+          "timeout": 60
         },
         {
           "name": "CommMPITests_PersistentCommunicator_fp8e4m3_short_3rank",
           "description": "Persistent communicator reuse (fp8e4m3, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (3 ranks)",
           "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp8e4m3_short",
-          "timeout": 90
+          "timeout": 60
         },
         {
           "name": "CommMPITests_PersistentCommunicator_fp8e5m2_short_3rank",
           "description": "Persistent communicator reuse (fp8e5m2, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (3 ranks)",
           "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp8e5m2_short",
-          "timeout": 90
+          "timeout": 60
         },
         {
           "name": "CommMPITests_PersistentCommunicator_fp32_large_3rank",
-          "description": "Persistent communicator reuse (fp32, large tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (3 ranks). HSA_DISABLE_CACHE=1 works around AICOMRCCL-2275, silent data corruption on gfx950: 0 failures in 400 runs with it vs 10/10 stock on the same nodes",
+          "description": "Persistent communicator reuse (fp32, large tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (3 ranks). HSA_DISABLE_CACHE=1 works around AICOMRCCL-2275, silent data corruption on gfx950: 0 failures in 400 runs with it vs 10/10 stock on the same nodes, measured at 2 ranks on one node. Added 2026-09-29; drop this env_variables entry once AICOMRCCL-2275 is fixed below RCCL",
           "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp32_large",
-          "timeout": 270,
+          "timeout": 120,
           "env_variables": {
             "HSA_DISABLE_CACHE": "1"
           }
         },
         {
           "name": "CommMPITests_PersistentCommunicator_bf16_large_3rank",
-          "description": "Persistent communicator reuse (bf16, large tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (3 ranks). HSA_DISABLE_CACHE=1 works around AICOMRCCL-2275, silent data corruption on gfx950: 0 failures in 400 runs with it vs 10/10 stock on the same nodes",
+          "description": "Persistent communicator reuse (bf16, large tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (3 ranks). HSA_DISABLE_CACHE=1 works around AICOMRCCL-2275, silent data corruption on gfx950: 0 failures in 400 runs with it vs 10/10 stock on the same nodes, measured at 2 ranks on one node. Added 2026-09-29; drop this env_variables entry once AICOMRCCL-2275 is fixed below RCCL",
           "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/bf16_large",
-          "timeout": 360,
+          "timeout": 120,
           "env_variables": {
             "HSA_DISABLE_CACHE": "1"
           }
         },
         {
           "name": "CommMPITests_PersistentCommunicator_fp8e4m3_large_3rank",
-          "description": "Persistent communicator reuse (fp8e4m3, large tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (3 ranks). HSA_DISABLE_CACHE=1 works around AICOMRCCL-2275, silent data corruption on gfx950: 0 failures in 400 runs with it vs 10/10 stock on the same nodes",
+          "description": "Persistent communicator reuse (fp8e4m3, large tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (3 ranks). HSA_DISABLE_CACHE=1 works around AICOMRCCL-2275, silent data corruption on gfx950: 0 failures in 400 runs with it vs 10/10 stock on the same nodes, measured at 2 ranks on one node. Added 2026-09-29; drop this env_variables entry once AICOMRCCL-2275 is fixed below RCCL",
           "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp8e4m3_large",
-          "timeout": 540,
+          "timeout": 120,
           "env_variables": {
             "HSA_DISABLE_CACHE": "1"
           }
