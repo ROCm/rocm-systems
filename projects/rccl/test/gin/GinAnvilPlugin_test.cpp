@@ -720,6 +720,85 @@ TEST_F(GinAnvilPluginTest, ConnCheck_HealthyConnectivitySucceeds) {
   plugin_.finalize(ictx);
 }
 
+// AICOMRCCL-2339: the comm-wide collectives in the bind path are per span, not
+// per logical context. Binding a context with nContexts=3 must still cost one
+// local-base allgather and one conn-check, or ncclDevCommCreate pays a bootstrap
+// round trip for every logical context.
+TEST_F(GinAnvilPluginTest, BindSignals_CommWideCollectivesRunOncePerSpan) {
+  void* rawDevLsa = nullptr;
+  ASSERT_EQ(hipMalloc(&rawDevLsa, sizeof(uint64_t) * 8), hipSuccess);
+  HipAllocation devLsa(rawDevLsa);
+  GinAnvilPluginStubs::SetLsaSelfAddr(devLsa.get());
+  GinAnvilPluginStubs::SetBootstrapNranks(2);
+  mockComm_.get()->devrState.lsaSize = 2;
+
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll, 2);
+  ncclGinConfig_t cfg{};
+  cfg.nContexts = 3;
+  cfg.nSignals = 2;
+  void* ginCtx = nullptr;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
+
+  // connectColl runs the factory allgather; only the bind path is under test.
+  const int allGathersBeforeBind = GinAnvilPluginStubs::GetBootstrapAllGatherCalls();
+  const int intraNodeBeforeBind = GinAnvilPluginStubs::GetIntraNodeAllGatherCalls();
+
+  char arena[8192] = {};
+  ASSERT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 3, 2), ncclSuccess);
+
+  EXPECT_EQ(GinAnvilPluginStubs::GetBootstrapAllGatherCalls() - allGathersBeforeBind, 1);
+  // One conn-check, which costs two LSA allgathers: the setup state exchange and
+  // the missing-count exchange of its single attempt.
+  EXPECT_EQ(GinAnvilPluginStubs::GetIntraNodeAllGatherCalls() - intraNodeBeforeBind, 2);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckWriteCalls(), 1);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 1);
+
+  // All three contexts are still bound to their own stripe.
+  ncclGinAnvilSdmaGPUContext hostCtx[3]{};
+  ASSERT_EQ(hipMemcpy(hostCtx, devHandle->handle, sizeof(hostCtx), hipMemcpyDeviceToHost), hipSuccess);
+  EXPECT_EQ(hostCtx[1].signals - hostCtx[0].signals, 2);
+  EXPECT_EQ(hostCtx[2].signals - hostCtx[1].signals, 2);
+
+  plugin_.destroyContext(ginCtx);
+  plugin_.closeColl(coll);
+  plugin_.finalize(ictx);
+}
+
+// The skip path returns before the comm is marked as checked, so a per-context
+// conn-check call would repeat its setup allgather nContexts times.
+TEST_F(GinAnvilPluginTest, BindSignals_SkippedConnCheckStillRunsOncePerSpan) {
+  GinAnvilPluginStubs::SetBootstrapNranks(2);
+  mockComm_.get()->devrState.lsaSize = 4;  // != nRanks, so the gate skips
+
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll, 2);
+  ncclGinConfig_t cfg{};
+  cfg.nContexts = 3;
+  cfg.nSignals = 2;
+  void* ginCtx = nullptr;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
+
+  const int intraNodeBeforeBind = GinAnvilPluginStubs::GetIntraNodeAllGatherCalls();
+
+  char arena[8192] = {};
+  ASSERT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 3, 2), ncclSuccess);
+
+  EXPECT_EQ(GinAnvilPluginStubs::GetIntraNodeAllGatherCalls() - intraNodeBeforeBind, 1);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckWriteCalls(), 0);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 0);
+
+  plugin_.destroyContext(ginCtx);
+  plugin_.closeColl(coll);
+  plugin_.finalize(ictx);
+}
+
 TEST_F(GinAnvilPluginTest, ConnCheck_NonNumericEnvValueKeepsGateEnabled) {
   ScopedEnv enabled("NCCL_GIN_ANVIL_SDMA_CONN_CHECK", "true");
   void* rawDevLsa = nullptr;
