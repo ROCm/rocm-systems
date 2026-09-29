@@ -85,8 +85,8 @@ to remove workgroup and cell sampling. Bounded retention still applies at
 A **ConSan** diagnostic identifies a conflict in selected evidence. A clean
 report does not prove race freedom: the execution may not manifest the race,
 or sampling and retention may omit a conflicting pair. Identity aliasing and
-bounded synchronization matching add independent model limitations, including
-the current 1023 barrier-epoch saturation limit. See the
+bounded synchronization matching add independent model limitations. The barrier
+epoch uses a 32-bit counter with [explicit exhaustion reporting](USAGE.md#barrier-epoch-limit). See the
 [heuristic design](DESIGN.md#heuristics-and-their-failure-directions).
 
 A **SuperCollider** diagnostic says a redundant observation changed. It does

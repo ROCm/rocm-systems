@@ -102,13 +102,18 @@ for override rules.
 
 ### Barrier epoch limit
 
-The default detector distinguishes epochs 0 through 1023 per wave. After the
-1024th instrumented workgroup barrier, that wave stops publishing memory-access
-evidence; its accesses can no longer yield race diagnoses. The report records
-`epoch_exhaustion`, marks `dynamic_complete=false` and `analysis_complete=false`,
-and prints an explicit warning. Earlier evidence remains usable, including real
-races within epoch 1023. `RJ_CONSAN_FORBID_OVERFLOW=1` makes exhaustion terminate
-with exit code 90. Increasing the sampling preset does not lift this limit.
+The default detector uses a 32-bit epoch per wave. Epochs 0 through
+4,294,967,294 are valid; `0xffffffff` is reserved for exhaustion. The packed
+watchpoint retains a 10-bit tag, validated against the full epoch in its causal
+window. Passing 1,023 barriers therefore does not exhaust coverage or alias old
+evidence onto a later epoch. Evidence retention remains bounded by the report
+capacity, independently of the epoch range.
+
+At the reserved exhaustion value, that wave stops publishing memory-access
+evidence. The report records `epoch_exhaustion`, marks `dynamic_complete=false`
+and `analysis_complete=false`, and prints a warning. Earlier evidence remains
+usable. `RJ_CONSAN_FORBID_OVERFLOW=1` makes exhaustion terminate with exit code 90.
+Increasing the sampling preset does not change this limit.
 
 ## Generate and use a kernel allowlist
 
@@ -192,8 +197,7 @@ ConSan conflict ... first_instruction=... second_instruction=...
 Normal launch-and-synchronize loops recycle reports automatically. You do not
 need checkpoint calls or report-buffer tuning for ordinary repeated workloads.
 Host checkpoints do not reset the per-wave barrier counter inside a dispatch:
-that counter currently saturates at 1023, which can merge later synchronization
-phases without making `analysis_complete` false. See
+that counter uses the full 32-bit range with an explicit exhausted sentinel. See
 [identity and barrier epochs](DESIGN.md#identity-and-barrier-epochs).
 
 On gfx1250, Default mode samples the LDS side of tensor-DMA loads and stores.

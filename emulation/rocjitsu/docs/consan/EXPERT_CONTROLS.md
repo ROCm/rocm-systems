@@ -461,8 +461,8 @@ conflicts, diagnostics, saturation, and evidence are neither forgotten nor
 counted twice.
 
 These host report epochs are distinct from the per-wave barrier epoch inside a
-dispatch. The latter currently saturates at 1023 without making the trust verdict
-incomplete; see [the design limitation](DESIGN.md#identity-and-barrier-epochs).
+dispatch. The latter uses a 32-bit counter with explicit exhaustion reporting;
+see [identity and barrier epochs](DESIGN.md#identity-and-barrier-epochs).
 Recycling completed dispatches does not repair exhaustion inside a long kernel.
 
 For a long repeated workload where analyzing every iteration is unnecessary,

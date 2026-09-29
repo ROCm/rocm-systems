@@ -469,64 +469,35 @@ function(rj_add_consan_device_conformance_cases)
     endif()
     set(_labels consan consan-device "${_device_TARGET}" "${_backend}")
 
-    foreach(
-        _epoch_case
-        IN
-        ITEMS
-            LastOrderedPair
-            LastEpochRace
-            LastEpochRaceThenExhaustion
-            ExhaustedOrderedPair
-            RepeatedExhaustion
-            OverflowPolicy
-    )
-        set(_epoch_filter "${_epoch_case}")
-        set(_epoch_exit 0)
-        set(_epoch_forbid_overflow 0)
-        set(_epoch_require_records 1)
-        if(_epoch_case STREQUAL "OverflowPolicy")
-            set(_epoch_filter RepeatedExhaustion)
-            set(_epoch_exit 90)
-            set(_epoch_forbid_overflow 1)
-        endif()
-        if(_epoch_filter STREQUAL "RepeatedExhaustion")
-            set(_epoch_require_records 0)
-        endif()
-        set(_epoch_complete true)
-        set(_epoch_exhaustion 0)
+    foreach(_epoch_case IN ITEMS BeforeTagWrapOrdered BeforeTagWrapRace
+            RaceRetainedAcrossTagWrap AcrossTagWrapOrdered AfterTagWrapOrdered
+            AfterTagWrapRace OldEvidenceAtMatchingTagIsOrdered Beyond16BitsOrdered
+            Beyond16BitsRace)
         set(_epoch_race 0)
-        if(_epoch_filter MATCHES "Exhausted|Repeated|ThenExhaustion")
-            set(_epoch_complete false)
-            if(_device_TARGET MATCHES "gfx942|gfx950")
-                set(_epoch_exhaustion 2)
-            else()
-                set(_epoch_exhaustion 4)
-            endif()
-        endif()
-        if(_epoch_case MATCHES "^LastEpochRace")
+        if(_epoch_case MATCHES "Race")
             set(_epoch_race 1)
         endif()
         rj_add_consan_hip_case(
             NAME "${_device_PREFIX}.Epoch.${_epoch_case}"
             TARGET hip_consan_device_epoch_exhaustion_${_device_TARGET}_test
-            FILTER "ConSanDeviceEpochTest.${_epoch_filter}"
-            EXPECTED_EXIT ${_epoch_exit}
+            FILTER "ConSanDeviceEpochTest.${_epoch_case}"
+            EXPECTED_EXIT 0
             ${_config_args}
             ${_resource_lock_args}
             TIMEOUT 120
-            PASS_REGEX "ConSan analysis verdict applicable=true analysis_complete=${_epoch_complete}.*dynamic_complete=${_epoch_complete}.*epoch_exhaustion=${_epoch_exhaustion}"
+            PASS_REGEX "ConSan analysis verdict applicable=true analysis_complete=true.*dynamic_complete=true.*epoch_exhaustion=0"
             ENVIRONMENT
                 "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                 "HSA_TOOLS_DISABLE_REGISTER=1"
                 "RJ_CONSAN_MODE=default"
                 "RJ_CONSAN_LOG=1"
                 "RJ_CONSAN_PRESET=max"
-                "RJ_CONSAN_REQUIRE_RECORDS=${_epoch_require_records}"
+                "RJ_CONSAN_REQUIRE_RECORDS=1"
                 "RJ_CONSAN_REQUIRE_DIAGNOSTICS=${_epoch_race}"
                 "RJ_CONSAN_FORBID_DIAGNOSTICS=$<IF:$<BOOL:${_epoch_race}>,0,1>"
-                "RJ_CONSAN_FORBID_OVERFLOW=${_epoch_forbid_overflow}"
+                "RJ_CONSAN_FORBID_OVERFLOW=1"
                 "RJ_CONSAN_TRACK_BARRIERS=1"
-            LABELS ${_labels} default epoch-exhaustion
+            LABELS ${_labels} default epoch-range
         )
     endforeach()
 

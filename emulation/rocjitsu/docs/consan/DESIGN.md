@@ -411,10 +411,18 @@ There are bounds on this identity scheme. The normal dispatch identity is a
 pressure fallback uses a weaker literal identity. The default wave identity is
 derived from entry work-item x and wave size, so waves distinguished only by
 y/z can alias. The expert hardware-owner path has narrower applicability.
-The packed barrier epoch saturates at 1023, after which later phases share an
-epoch. That saturation currently neither publishes an exhaustion counter nor
-invalidates the trust verdict; host checkpoints cannot repair it within a
-dispatch.
+The per-wave barrier epoch is a 32-bit logical identity. The packed watchpoint
+stores only its low 10 bits; a committed causal window carries the full epoch.
+Host decoding checks the tag and restores the full identity before conflict
+analysis. Device immediate checks and atomic attachments also validate the full
+window epoch, so retained evidence from earlier tag cycles cannot alias later
+phases. The 64-bit watchpoint publication and report record sizes are unchanged.
+Report ABI 20 distinguishes these semantics from older 10-bit-only producers.
+
+Epochs through `0xfffffffe` are valid. At the reserved `0xffffffff` sentinel,
+access evidence publication stops, `epoch_exhaustion` is reported, and analysis
+is incomplete. Earlier evidence remains usable. Host checkpoints cannot reset
+this per-dispatch counter; see the [epoch limit](USAGE.md#barrier-epoch-limit).
 
 #### Selection and retention
 
