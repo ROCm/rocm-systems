@@ -93,10 +93,12 @@ void ResetGroupThreadLocals() {
   ncclIntruQueueConstruct(&ncclAsyncJobs);
 }
 
-// ncclGroupJobComplete/ncclGroupJobAbort gate their ENTIRE body, join included, on
-// gj->nonBlockingInit. If that flag is ever left unset, both become silent no-ops and the meta
-// thread stays alive into TearDown's fake-reassignment/fixture-destruction. Call before handing
-// gj to the real API: a no-op when the flag is already true (the normal case).
+// Cannot fire today (thread create and nonBlockingInit=true are consecutive in group.cc, and the
+// create-failure path deletes groupJob before either runs): forward defence only. Even if it did
+// fire, it only half-mitigates: the follow-up ncclGroupJobComplete/Abort call gates its own body,
+// refcount decrement included, on this same flag, so it would join the thread here but still leak
+// groupJob rather than delete it. Call before handing gj to the real API: a no-op when the flag is
+// already true (the normal case).
 void ForceJoinIfNonBlockingInitGateIsBroken(struct ncclGroupJob* gj) {
   if (gj && !gj->nonBlockingInit && gj->base.thread.joinable()) {
     COMPILER_ATOMIC_STORE(&gj->abortFlag, true, std::memory_order_relaxed);
@@ -281,6 +283,16 @@ struct CountingCallback {
   struct ncclComm* lastComm = nullptr;
 };
 
+// Allocates a plan with proxyOpQueue constructed; does not enqueue it onto planner.planQueue or
+// attach any proxyOp, since callers vary on both.
+struct ncclKernelPlan* MakePlan(struct ncclComm* comm, bool persistent) {
+  struct ncclKernelPlan* plan =
+    ncclMemoryPoolAlloc<struct ncclKernelPlan>(&comm->memPool_ncclKernelPlan, &comm->memPermanent);
+  plan->persistent = persistent;
+  ncclIntruQueueConstruct(&plan->proxyOpQueue);
+  return plan;
+}
+
 TEST_F(ReclaimPlannerStateTest, DrainsCollCleanupQueueAndReclaimsNonPersistentPlan) {
   CountingCallback cb{};
   cb.base.fn = [](struct ncclComm* comm, struct ncclCommCallback* cbBase) -> ncclResult_t {
@@ -291,10 +303,7 @@ TEST_F(ReclaimPlannerStateTest, DrainsCollCleanupQueueAndReclaimsNonPersistentPl
   };
   ncclIntruQueueEnqueue(&comm_->planner.collCleanupQueue, &cb.base);
 
-  struct ncclKernelPlan* plan =
-    ncclMemoryPoolAlloc<struct ncclKernelPlan>(&comm_->memPool_ncclKernelPlan, &comm_->memPermanent);
-  plan->persistent = false;
-  ncclIntruQueueConstruct(&plan->proxyOpQueue);
+  struct ncclKernelPlan* plan = MakePlan(comm_.get(), /*persistent=*/false);
   struct ncclProxyOp* pxop =
     ncclMemoryPoolAlloc<struct ncclProxyOp>(&comm_->memPool_ncclProxyOp, &comm_->memPermanent);
   ncclIntruQueueEnqueue(&plan->proxyOpQueue, pxop);
@@ -321,17 +330,11 @@ TEST_F(ReclaimPlannerStateTest, DrainsCollCleanupQueueAndReclaimsNonPersistentPl
 // (planQueue itself isn't asserted empty: reclaimPlannerState memsets comm->planner afterward
 // regardless, so that check can't ever fail.)
 TEST_F(ReclaimPlannerStateTest, DequeuesButDoesNotFreeAPersistentPlan) {
-  struct ncclKernelPlan* persistentPlan =
-    ncclMemoryPoolAlloc<struct ncclKernelPlan>(&comm_->memPool_ncclKernelPlan, &comm_->memPermanent);
-  persistentPlan->persistent = true;
-  ncclIntruQueueConstruct(&persistentPlan->proxyOpQueue);
+  struct ncclKernelPlan* persistentPlan = MakePlan(comm_.get(), /*persistent=*/true);
   struct ncclProxyOp* persistentPxop =
     ncclMemoryPoolAlloc<struct ncclProxyOp>(&comm_->memPool_ncclProxyOp, &comm_->memPermanent);
   ncclIntruQueueEnqueue(&persistentPlan->proxyOpQueue, persistentPxop);
-  struct ncclKernelPlan* nonPersistentPlan =
-    ncclMemoryPoolAlloc<struct ncclKernelPlan>(&comm_->memPool_ncclKernelPlan, &comm_->memPermanent);
-  nonPersistentPlan->persistent = false;
-  ncclIntruQueueConstruct(&nonPersistentPlan->proxyOpQueue);
+  struct ncclKernelPlan* nonPersistentPlan = MakePlan(comm_.get(), /*persistent=*/false);
   ncclIntruQueueEnqueue(&comm_->planner.planQueue, persistentPlan);
   ncclIntruQueueEnqueue(&comm_->planner.planQueue, nonPersistentPlan);
 
@@ -666,6 +669,19 @@ TEST_F(GroupJobAbortTest, NotNonBlockingInit_ReturnsSuccessWithoutJoining) {
   EXPECT_EQ(7, groupJob.groupRefCount) << "the decrement lives inside the nonBlockingInit guard";
 }
 
+// Mirrors the case above against ncclGroupJobComplete, its structural twin: same nonBlockingInit
+// guard around the same joined-exchange and refcount decrement.
+TEST_F(GroupJobAbortTest, Complete_NotNonBlockingInit_ReturnsSuccessWithoutJoining) {
+  struct ncclGroupJob groupJob{};
+  groupJob.nonBlockingInit = false;
+  groupJob.groupRefCount = 7;
+
+  EXPECT_EQ(ncclSuccess, ncclGroupJobComplete(&groupJob));
+
+  EXPECT_FALSE(groupJob.joined) << "nothing to join, so the exchange must not fire";
+  EXPECT_EQ(7, groupJob.groupRefCount) << "the decrement lives inside the nonBlockingInit guard";
+}
+
 // A single-owner call can't distinguish "really joined" from "did nothing" (return is always
 // ncclSuccess, object deleted at refcount 0). Two comms sharing one groupJob keeps it alive after
 // the first abort, long enough to inspect it, and the second call exercises the joined-exchange
@@ -732,6 +748,11 @@ TEST_F(GroupJobAbortTest, NonBlockingInit_TwoOwners_FirstCallAbortsAndJoins_Seco
 }
 
 // The bodies behind the three NCCL_API entry points; ncclGroupStart/End enter via _impl.
+// Follow-up, out of scope here (ncclGroupEndInternal itself is deliberately not covered by this
+// PR): three of its guard returns are still untested -- the depth-zero ncclInvalidUsage at
+// group.cc:1140, the ncclGroupError early "goto fail" at group.cc:1155, and the invalid-
+// ncclGroupBlocking ncclInternalError at group.cc:1190. This fixture already resets exactly the
+// thread-locals each of those needs.
 class GroupApiWrapperTest : public ::testing::Test {
  protected:
   void SetUp() override {
