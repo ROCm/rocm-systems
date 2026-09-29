@@ -2919,6 +2919,7 @@
         "NCCL_GIN_TYPE": "2",
         "NCCL_GIN_ENABLE": "1",
         "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_DMABUF_ENABLE": "1",
         "NCCL_ENV_PLUGIN": "none"
       },
       "tests": [

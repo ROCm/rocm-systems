@@ -1915,7 +1915,8 @@ __global__ void getVisibilityKernel(
   ncclTeam team = ncclTeamWorld(devComm);
   const size_t sliceBase = (size_t)blockIdx.x * nChunks * chunkBytes;
 
-  // No get is outstanding yet, so this takes the path that skips the get flush.
+  // With one CTA no get is outstanding, so this skips the get flush. With
+  // several CTAs another may already have bumped the per-context lastIssuedGet.
   gin.flush(ncclCoopCta());
 
   for (int c = 0; c < nChunks; ++c) {
@@ -1930,7 +1931,10 @@ __global__ void getVisibilityKernel(
       gin.flushAsync(team, peer, &request, ncclCoopCta());
       gin.wait(request, ncclCoopCta());
     }
-    for (size_t i = threadIdx.x; i < chunkBytes; i += blockDim.x) {
+    // Walk from the tail of the chunk, the bytes most likely still in flight,
+    // so a visibility gap is read before it has time to close.
+    for (size_t j = threadIdx.x; j < chunkBytes; j += blockDim.x) {
+      const size_t i = chunkBytes - 1 - j;
       if (dst[off + i] != getVisibilityPattern(peer, salt, off + i)) {
         atomicCAS(&result[0], kNoGetMismatch, (unsigned long long)(off + i));
         atomicAdd(&result[1], 1ULL);
