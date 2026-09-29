@@ -2287,14 +2287,18 @@ __global__ void allContextsConsecutiveBarrierKernel(
   for (int ctx = 0; ctx < 2; ctx++) {
     ncclGin gin{devComm, ctx};
     observation->ctxPeerSignals[ctx] = gin.readSignal(sigIndex, 64, cuda::memory_order_relaxed);
+#if NCCL_GIN_ANVIL_SDMA_ENABLE
+    // Derive handle/contextId the same way ncclGinInitCommon does so
+    // NCCL_GIN_NCONNECTIONS!=1 does not read past ginHandles[0].
     ncclGinCtx ginCtx{};
-    ginCtx.handle = devComm.ginHandles[0];
-    ginCtx.contextId = ctx;
+    ginCtx.handle = gin._ginHandle;
+    ginCtx.contextId = gin.contextId;
     ginCtx.backend = NCCL_NET_DEVICE_GIN_ANVIL_SDMA;
     ginCtx.rank = devComm.rank;
     ginCtx.nRanks = devComm.nRanks;
     observation->ctxSignalPtrs[ctx] =
         ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, sigIndex).ptr;
+#endif
   }
 }
 
@@ -2345,8 +2349,10 @@ TEST_F(GinMPIDeviceTests, Barrier_AllContextsConsecutiveSignalsDoNotAlias_Single
         << "second AllContexts barrier returned before delayed peer arrival";
     EXPECT_EQ(observation.ctxPeerSignals[0], 2u);
     EXPECT_EQ(observation.ctxPeerSignals[1], 2u);
+#if NCCL_GIN_ANVIL_SDMA_ENABLE
     EXPECT_NE(observation.ctxSignalPtrs[0], observation.ctxSignalPtrs[1])
         << "logical contexts must not alias the same signal cell";
+#endif
   }
   MPI_Barrier(MPI_COMM_WORLD);
 }
