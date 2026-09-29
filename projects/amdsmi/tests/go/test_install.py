@@ -112,11 +112,15 @@ def verify_install(*, project: Path, build_dir: Path) -> None:
             'package main\nimport smi "' + module_path + '/amdsmi"\n'
             "var _ func(smi.InitFlags) error = smi.Init\n"
             "var _ func(uint32) (smi.ProcessorHandle, error) = smi.GetProcessorHandleFromIndex\n"
-            "var _ func(smi.ProcessorHandle) (smi.AsicInfo, error) = smi.GetGPUAsicInfo\n"
-            "var _ func(smi.ProcessorHandle) (smi.BDF, error) = smi.GetGPUDeviceBDF\n"
+            "var _ func(smi.ProcessorHandle) (smi.AsicInfo, error) = smi.GetGpuAsicInfo\n"
+            "var _ func(smi.ProcessorHandle) (smi.Bdf, error) = smi.GetGpuDeviceBdf\n"
             'var _ = smi.AsicInfo{RevID: 0, AsicSerial: "", OamID: 0, NumComputeUnits: 0}\n'
-            "var _ smi.InitFlags = smi.InitAMDGPUs\n"
-            "func main() { v, err := smi.GetLibraryVersion(); "
+            "var _ smi.InitFlags = smi.AMDSMI_INIT_AMD_GPUS\n"
+            "var _ func(smi.Status) (string, error) = smi.StatusCodeToString\n"
+            "var _ func(smi.ProcessorHandle) (smi.FwInfo, error) = smi.GetFwInfo\n"
+            "var _ func(smi.ProcessorHandle) (map[smi.GpuBlock]bool, error) = smi.GetGpuEccEnabled\n"
+            "var _ func(smi.ProcessorHandle) (smi.AcceleratorPartitionProfile, []uint32, error) = smi.GetGpuAcceleratorPartitionProfile\n"
+            "func main() { v, err := smi.GetLibVersion(); "
             "if err != nil { panic(err) }; "
             'if v.Major != 27 || v.Minor != 1 { panic("native version mismatch") } }\n'
         )

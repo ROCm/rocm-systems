@@ -34,7 +34,7 @@ func resetCoreFixture(t *testing.T) {
 func fixtureHandle(t *testing.T) ProcessorHandle {
 	t.Helper()
 	resetCoreFixture(t)
-	if err := Init(InitAMDGPUs); err != nil {
+	if err := Init(AMDSMI_INIT_AMD_GPUS); err != nil {
 		t.Fatal(err)
 	}
 	handles, err := GetProcessorHandles()
@@ -47,13 +47,13 @@ func fixtureHandle(t *testing.T) ProcessorHandle {
 	return handles[0]
 }
 
-func assertNativeError(t *testing.T, err error, op string, code StatusCode) {
+func assertNativeError(t *testing.T, err error, op string, code Status) {
 	t.Helper()
-	var native *Error
+	var native *StatusError
 	if !errors.Is(err, code) || !errors.As(err, &native) {
 		t.Fatalf("want native code %d, got %v", code, err)
 	}
-	if native.Op != op || native.Code != code {
+	if native.Op != op || native.Code != code || native.Name != statusName(code) {
 		t.Fatalf("want %s/%d, got %+v", op, code, native)
 	}
 }
@@ -74,9 +74,9 @@ func checkQuery[T any](t *testing.T, op string,
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("want %#v, got %#v, err=%v", want, got, err)
 	}
-	for _, code := range []StatusCode{AMDSMI_STATUS_NOT_SUPPORTED,
+	for _, code := range []Status{AMDSMI_STATUS_NOT_SUPPORTED,
 		AMDSMI_STATUS_NO_PERM, AMDSMI_STATUS_TIMEOUT, AMDSMI_STATUS_MORE_DATA,
-		AMDSMI_STATUS_UNKNOWN_ERROR, StatusCode(0x12345678)} {
+		AMDSMI_STATUS_UNKNOWN_ERROR, Status(0x12345678)} {
 		mockConfigure(op, code, 0)
 		got, err = query(h)
 		assertNativeError(t, err, op, code)
@@ -93,7 +93,7 @@ func checkQuery[T any](t *testing.T, op string,
 	got, err = query(h)
 	assertNativeError(t, err, op, AMDSMI_STATUS_NOT_INIT)
 	assertZero(t, got)
-	if err := Init(InitAMDGPUs); err != nil {
+	if err := Init(AMDSMI_INIT_AMD_GPUS); err != nil {
 		t.Fatal(err)
 	}
 	got, err = query(h)

@@ -24,8 +24,9 @@ import "github.com/ROCm/rocm-systems/projects/amdsmi/go/amdsmi"
 ```
 
 Production bindings live in [amdsmi/amdsmi_interface.go](amdsmi/amdsmi_interface.go).
-The public naming and interface layout follow the Host binding design. This is
-still a bare-metal implementation, not a combined BM/Host backend.
+The common read-only names, signatures, and fields follow the Host declarations.
+This is a bare-metal (BM) implementation, not a combined BM/Host backend. Shared
+source shape does not imply identical units, field availability, or runtime behavior.
 
 ## Build with a custom native prefix
 
@@ -80,8 +81,8 @@ GOTOOLCHAIN=local GOWORK=off GOPROXY=https://proxy.golang.org,direct GOSUMDB=sum
 
 | Contract | Behavior |
 | --- | --- |
-| Initialization | Each successful `Init(InitAMDGPUs)` acquires an AMD-GPU reference; balance it with `ShutDown()` |
-| Flags | `InitFlags` is `uint64`; only `InitAMDGPUs` is supported. Other values return `AMDSMI_STATUS_INVAL` before calling C |
+| Initialization | Each successful `Init(AMDSMI_INIT_AMD_GPUS)` acquires an AMD-GPU reference; balance it with `ShutDown()` |
+| Flags | `InitFlags` is `uint64`; only the C-bound `AMDSMI_INIT_AMD_GPUS` is exported and supported. Other values return `AMDSMI_STATUS_INVAL` before calling C |
 | Index lookup | `GetProcessorHandleFromIndex(uint32)` uses current filtered GPU discovery order; an out-of-range index returns `AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS` |
 | Final shutdown | All package handles expire, even on cleanup error; rediscover after reinitialization |
 | Concurrency | Calls are serialized; external lifecycle changes must not run concurrently |
@@ -89,8 +90,9 @@ GOTOOLCHAIN=local GOWORK=off GOPROXY=https://proxy.golang.org,direct GOSUMDB=sum
 | Topology changes | No driver reload, partition change, or hotplug recovery while initialized |
 | Uninitialized queries/shutdown | `AMDSMI_STATUS_NOT_INIT`; version and status-string lookup do not require initialization |
 | Zero/stale handle while initialized | `AMDSMI_STATUS_INVAL` |
-| Native failure | Zero Go result plus `*Error`; all numeric statuses survive, including unknown values |
-| Error inspection | `errors.Is` matches `StatusCode`; `errors.As` exposes `Op`, `Code`, and `Message`; message lookup can fall back to numeric status |
+| Query failure | Zero Go results plus `*StatusError`; slices/maps are `nil`; all native numeric statuses survive, including unknown values |
+| Error inspection | `errors.Is` matches `Status`; `errors.As` exposes `Code`, symbolic `Name`, and BM diagnostics `Op`/`Message` |
+| Status lookup | `StatusCodeToString(Status) (string, error)` propagates native lookup failure; success with a null string returns `AMDSMI_STATUS_UNEXPECTED_DATA`. Formatting a query error never replaces its original status |
 | Success | Does not imply every field is available or the GPU is healthy |
 
 This excerpt assumes a valid `handle` and imports `errors`, `fmt`, and `amdsmi`:
@@ -100,9 +102,9 @@ power, err := amdsmi.GetPowerInfo(handle)
 if errors.Is(err, amdsmi.AMDSMI_STATUS_NOT_SUPPORTED) {
     fmt.Println("power query is not supported")
 } else if err != nil {
-    var native *amdsmi.Error
+    var native *amdsmi.StatusError
     if errors.As(err, &native) {
-        fmt.Printf("%s failed with status %d\n", native.Op, native.Code)
+        fmt.Printf("%s failed with %s (status %d)\n", native.Op, native.Name, native.Code)
     }
 } else {
     fmt.Printf("raw power fields: %+v\n", power)
@@ -116,13 +118,14 @@ if errors.Is(err, amdsmi.AMDSMI_STATUS_NOT_SUPPORTED) {
 | Temperature | Signed degrees C |
 | Memory total/usage | Bytes |
 | VRAM | MB, bits, GB/s by member |
-| Clocks | `ClockInfo` in MHz; `Frequencies.Hertz` in Hz; range-check `CurrentIndex` before indexing |
-| Power | W, mV, or uW by member name; native unavailable values retain each member's width |
-| Power caps | Auxiliary zeros have no validity flag; `DPMLevel` is an index, not MHz |
-| Clock flags | `LockedRaw` is currently unpopulated; `DeepSleepRaw` is a narrowed native sleep-frequency value, not a Boolean |
-| Activity | Percent; `GFXPercent` can contain 65535 for unavailable data |
-| Current partitions | Empty resources/NUMA ranges may be unpopulated; partition count/index can be `UINT32_MAX`; current partition ID can remain zero after a subordinate lookup failure |
-| ECC/RAS | Total ECC may omit unavailable blocks while succeeding; `RASFeatureInfo` is metadata, not a health verdict |
+| Clocks | `ClkInfo` in MHz; BM `GetClockFrequencies` returns `Frequencies.Values` in Hz. Range-check `Current` against `NumSupported` and `len(Values)` |
+| Power | BM `SocketPower`, `CurrentSocketPower`, `AverageSocketPower`, `UbbPower` are W; `GfxVoltage`, `SocVoltage`, `MemVoltage` are mV; `PowerLimit` is uW. Host documents `SocketPower` in uW and voltages in V; no conversion is applied |
+| Power caps | `PowerCap`, `DefaultPowerCap`, `MinPowerCap`, `MaxPowerCap` are uW on BM; auxiliary zeros have no validity flag. `DpmCap` is a BM DPM level index, not MHz |
+| Clock flags | `ClkLocked` and `ClkDeepSleep` are always false/unavailable on BM, not measured false. `ClkLockedRaw` preserves the unpopulated native byte; `ClkDeepSleepRaw` preserves the narrowed sleep-frequency byte. Neither 255 nor 222 is interpreted as true |
+| Activity | Percent; `GfxActivity` can contain 65535 for unavailable data |
+| Current partitions | `GetGpuAcceleratorPartitionProfile` returns a profile and exactly one current ID on BM, not one ID per partition. Count/index can be `UINT32_MAX`; the ID can remain zero after a subordinate lookup failure |
+| Partition metadata | Empty resources or `NumNumaRanges == 0` can mean unpopulated data. Unknown `NumPartitions == UINT32_MAX` with zero resources is preserved without allocating that count |
+| ECC/RAS | `GetGpuEccEnabled` returns known-block Boolean entries plus unknown/reserved enabled bits as keys. Total ECC can omit unavailable blocks while succeeding; `RasFeatureInfo` is not a health verdict |
 
 There is no global unavailable-value conversion. Strings and slices are copied
 to Go-owned storage; reserved C fields are not exposed. Constants preserve the
@@ -132,19 +135,73 @@ public C enumerator names and values.
 
 ### Pre-release API migration
 
-These names replace the initial pre-release API directly, without compatibility aliases:
+Replace earlier pre-release names directly; no compatibility aliases are provided.
 
 | Previous API | Current API |
 | --- | --- |
-| `Init()` | `Init(InitAMDGPUs)` |
-| `GetASICInfo()` / `ASICInfo` | `GetGPUAsicInfo()` / `AsicInfo` |
-| `GetBDF()` | `GetGPUDeviceBDF()` |
-| `RevisionID`, `Serial`, `OAMID`, `ComputeUnits` | `RevID`, `AsicSerial`, `OamID`, `NumComputeUnits` |
+| `Init()` / `Init(InitAMDGPUs)` | `Init(AMDSMI_INIT_AMD_GPUS)` |
+| `StatusCode` / `Error` | `Status` / `StatusError` |
+| `StatusString(status)` | `StatusCodeToString(status)`; handle the additional `error` result |
+| `GetLibraryVersion` | `GetLibVersion` |
+| `GetBDF` / `GetGPUDeviceBDF` | `GetGpuDeviceBdf` |
+| `GetProcessorHandleFromBDF` | `GetProcessorHandleFromBdf` |
+| `GetUUID` | `GetGpuDeviceUuid` |
+| `GetASICInfo` / `GetGPUAsicInfo` | `GetGpuAsicInfo` |
+| `GetDriverInfo` / `GetBoardInfo` | `GetGpuDriverInfo` / `GetGpuBoardInfo` |
+| `GetFirmwareInfo` | `GetFwInfo`; returns `FwInfo`, not a slice |
+| `GetVBIOSInfo` | `GetGpuVbiosInfo` |
+| `GetActivity` / `GetTemperature` | `GetGpuActivity` / `GetTempMetric` |
+| `GetVRAMInfo` | `GetGpuVramInfo` |
+| `GetMemoryPartitionConfig` | `GetGpuMemoryPartitionConfig` |
+| `GetAcceleratorPartitionProfile` | `GetGpuAcceleratorPartitionProfile`; returns `(AcceleratorPartitionProfile, []uint32, error)` |
+| `GetECCEnabled` | `GetGpuEccEnabled`; returns `(map[GpuBlock]bool, error)`, not a mask |
+| `GetECCCount` / `GetTotalECCCount` | `GetGpuEccCount` / `GetGpuTotalEccCount` |
+| `GetRASFeatureInfo` | `GetGpuRasFeatureInfo` |
 
-`GetGPUDeviceBDF` still returns the typed `BDF`, with `String()` for display.
-`StatusCode`, `Error`, native enum names, units, and other query names are unchanged.
-The Host design does not fully specify those contracts; full cross-backend source
-compatibility is not claimed. Index lookup uses Go enumeration on BM, not a new C API.
+| Previous type or fields | Current type or fields |
+| --- | --- |
+| `BDF` struct | `Bdf uint64`; use `Domain()`, `Bus()`, `Device()`, `Function()`, and `String()` |
+| `ASICInfo` | `AsicInfo` |
+| ASIC `RevisionID`, `Serial`, `OAMID`, `ComputeUnits` | `RevID`, `AsicSerial`, `OamID`, `NumComputeUnits` |
+| ASIC `PhysicalAcceleratorID`, `ChipRevisionID`, `ExternalRevisionID` | `PhysicalAccId`, `ChipRevId`, `ExternalRevId` |
+| Driver `Version`, `Date`, `Name`; board `FRUID` | `DriverVersion`, `DriverDate`, `DriverName`; `FruID` |
+| `FirmwareBlock`; `FirmwareInfo.ID`, `.Version` | `FwBlock`; `FwInfoList.FwID`, `.FwVersion`. `FwInfo` carries `NumFwInfo` and `FwList` |
+| `VBIOSInfo` / `VRAMInfo` / `VRAMType` | `VbiosInfo` / `VramInfo` / `VramType` |
+| VRAM `Type`, `Vendor`, `SizeMB`, `BitWidth`, `MaxBandwidthGBPerSecond` | `VramType`, `VramVendor`, `VramSize`, `VramBitWidth`, `VramMaxBandwidth` |
+| `ClockType` / `ClockInfo` | `ClkType` / `ClkInfo` |
+| Clock `ClockMHz`, `MinClockMHz`, `MaxClockMHz`; `LockedRaw`, `DeepSleepRaw` | `Clk`, `MinClk`, `MaxClk`; BM `ClkLockedRaw`, `ClkDeepSleepRaw`. Common Boolean fields are unavailable on BM |
+| Frequencies `CurrentIndex`, `Hertz` | `Current`, `Values`; `NumSupported` carries the validated count |
+| `Activity.GFXPercent`, `.UMCPercent`, `.MMPercent` | `EngineUsage.GfxActivity`, `.UmcActivity`, `.MmActivity` |
+| Power `SocketPowerWatts`, `CurrentSocketPowerWatts`, `AverageSocketPowerWatts`, `UBBPowerWatts` | `SocketPower`, `CurrentSocketPower`, `AverageSocketPower`, `UbbPower` |
+| Power `GFXVoltageMillivolts`, `SOCVoltageMillivolts`, `MemoryVoltageMillivolts`, `PowerLimitMicrowatts` | `GfxVoltage`, `SocVoltage`, `MemVoltage`, `PowerLimit` |
+| Caps `PowerCapMicrowatts`, `DefaultPowerCapMicrowatts`, `MinPowerCapMicrowatts`, `MaxPowerCapMicrowatts`, `DPMLevel` | `PowerCap`, `DefaultPowerCap`, `MinPowerCap`, `MaxPowerCap`, `DpmCap` |
+| `MemoryCapabilities` | `NpsCaps` Boolean fields and `Supported()`/`String()`; BM `RawMask` retains all native bits |
+| `NUMARange`; config `Capabilities`, `NUMARanges` | `NumaRange`; `PartitionCaps`, fixed `NumaRanges` array with `NumNumaRanges` |
+| Profile `Type`, `MemoryCapabilities`, `PartitionID` | `ProfileType`, `MemoryCaps`; current ID moves to the separate one-element result slice on BM |
+| `GPUBlock`; `ECCCounts.Correctable`, `.Uncorrectable`, `.Deferred` | `GpuBlock`; `ErrorCount.CorrectableCount`, `.UncorrectableCount`, `.DeferredCount` |
+| `RASFeatureInfo.EEPROMVersion`, `.ECCCorrectionSchema` | `RasFeatureInfo.RasEepromVersion`, `.EccCorrectionSchemaFlag` |
+
+`FwBlock`, `ClkType`, `VramType`, `TemperatureType`, `TemperatureMetric`,
+`MemoryPartitionType`, and `AcceleratorPartitionType` use `int32`; `Status` uses
+`uint32`, and `GpuBlock` uses `uint64`. Constants remain bound to the BM C header.
+`Bdf` packs function/device/bus/domain into 3/5/8/48 bits; every `uint64` value is
+representable, including the full 48-bit domain.
+
+### BM extensions and compatibility limits
+
+| BM extension | Contract |
+| --- | --- |
+| `GetClockFrequencies`, `GetKFDInfo`, `GetMemoryTotal`, `GetMemoryUsage`, `GetRASBlockState` | BM-only getters; shared argument types use the new names |
+| `Version.Build` | Native build string |
+| `StatusError.Op`, `StatusError.Message`, `StatusError.Unwrap()`, `Status.Error()` | BM diagnostics and native status matching with `errors.Is` |
+| `ClkInfo.ClkLockedRaw`, `ClkInfo.ClkDeepSleepRaw` | Preserve native bytes; common Boolean fields remain false/unavailable |
+| `NpsCaps.RawMask` | Preserves unknown capability bits |
+
+Common source shape is not full backend equivalence. Units and availability remain
+platform-specific; no Host runtime parity is claimed. Index lookup uses Go
+enumeration on BM, not a new C API. The
+[API reference](https://rocm.docs.amd.com/projects/amdsmi/en/latest/reference/amdsmi-go-api.html)
+lists complete signatures, fields, and array bounds.
 
 The existing `goamdsmi` API and shim remain unchanged. This additive module is
 not their source-compatible replacement. CPU, NIC, set/reset, all-profile
@@ -168,7 +225,8 @@ python3 -B tests/go/run_tests.py --vet
 python3 -B tests/go/run_tests.py --build-example
 ```
 
-The external-package contract test compiles Host-style names, fields and initialization.
+The external-package contract test checks common names, types, fields, and
+initialization; it does not verify Host runtime behavior.
 `--cgocheck2` requires Go 1.21+. Native checks require a fresh matching build;
 only the version test executes native code, without initialization or GPU access.
 The example is linked, not run. The staging check uses temporary `DESTDIR`,

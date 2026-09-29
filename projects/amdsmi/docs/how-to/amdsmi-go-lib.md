@@ -66,36 +66,55 @@ The standalone guide gives the separate network-enabled acquisition command.
 
 ## Lifecycle and data handling
 
-Balance every successful `amdsmi.Init(amdsmi.InitAMDGPUs)` with `amdsmi.ShutDown()`. Final package
-shutdown invalidates handles even on cleanup failure; rediscover after
-reinitialization. Calls are serialized within this package, but other bindings
-must coordinate their native lifetime and first-initializer flags. Driver reload,
+Balance every successful `amdsmi.Init(amdsmi.AMDSMI_INIT_AMD_GPUS)` with
+`amdsmi.ShutDown()`. Final package shutdown invalidates handles even on cleanup
+failure; rediscover after reinitialization. Calls are serialized within this
+package, but other bindings must coordinate their native lifetime and
+first-initializer flags. Driver reload,
 partition changes, external concurrent lifecycle calls, and hotplug recovery are
 not supported while initialized.
 
 Use `errors.Is(err, amdsmi.AMDSMI_STATUS_NOT_SUPPORTED)` or `errors.As` with
-`*amdsmi.Error` to inspect failures. Success may still include unavailable values
-or partial native data. The API reference lists field types, units, and native
+`*amdsmi.StatusError` to inspect native failures. Failed queries return zero Go
+results, including `nil` slices/maps; success can still include unavailable values
+or partial native data. `StatusCodeToString` returns `(string, error)` and propagates
+lookup failures without replacing the original status of a query error.
+The API reference lists field types, units, and native
 limitations. The [telemetry example](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/go/examples/telemetry/main.go) balances
 shutdown and reports per-query failures without replacing them with zero readings.
 
-## Host-style API conventions
+## Shared read-only API shape
 
-The production bindings are kept in `go/amdsmi/amdsmi_interface.go`. Public examples
-use `GetGPUAsicInfo`, `AsicInfo`, `GetGPUDeviceBDF`, and explicit initialization flags.
+The common names, signatures, and fields follow the Host declarations; this module
+remains a bare-metal (BM) implementation, not a combined backend.
 `GetProcessorHandleFromIndex(uint32)` selects from the current GPU discovery order.
 It is not a persistent device identifier; use BDF lookup when selecting a known GPU.
 
 | Contract | Bare-metal behavior |
 | --- | --- |
-| `Init(InitAMDGPUs)` | GPU-only initialization; other flag values are rejected |
-| `GetGPUAsicInfo(handle)` | Returns `AsicInfo`, including `RevID`, `AsicSerial`, `OamID`, and `NumComputeUnits` |
-| `GetGPUDeviceBDF(handle)` | Returns a typed `BDF`; use `String()` to format it |
+| `Init(AMDSMI_INIT_AMD_GPUS)` | GPU-only initialization; no other initializer flags are exported or supported |
+| `GetGpuAsicInfo(handle)` | Returns `AsicInfo`, including `RevID`, `AsicSerial`, `OamID`, `PhysicalAccId`, `ChipRevId`, and `ExternalRevId` |
+| `GetGpuDeviceBdf(handle)` / `GetProcessorHandleFromBdf(bdf)` | Packed `Bdf uint64`; accessors retain the 48-bit domain and `String()` formats it |
 | `GetProcessorHandleFromIndex(index)` | Checked lookup; an invalid index returns `AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS` |
+| `GetFwInfo(handle)` | `FwInfo` has a validated `NumFwInfo` and fixed `FwList` array |
+| `GetGpuMemoryPartitionConfig(handle)` | `NpsCaps` capability fields, `NumNumaRanges`, and a fixed `NumaRanges` array |
+| `GetGpuAcceleratorPartitionProfile(handle)` | Returns `(AcceleratorPartitionProfile, []uint32, error)`; BM returns one current ID, not one per partition |
+| `GetGpuEccEnabled(handle)` | Returns `map[GpuBlock]bool`; unknown/reserved enabled bits remain map keys |
 
 This is a direct pre-release rename, not an alias layer. The module guide lists
-the migration mapping. Native errors, other query names, and units are unchanged;
-the Host design does not yet define a complete shared contract for them.
+the [migration mapping](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/go/README.md#pre-release-api-migration).
+Shared source shape does not imply runtime parity or unit conversion:
+
+| Area | Units or limit |
+| --- | --- |
+| Power | BM socket power is W and voltages are mV; Host documents uW and V respectively. BM `PowerLimit` and power-cap fields are uW; `DpmCap` is a DPM level index, not MHz |
+| Clocks | `ClkInfo` is MHz; BM `GetClockFrequencies` returns Hz. `ClkLocked` and `ClkDeepSleep` are false/unavailable, not measured false; BM `ClkLockedRaw`/`ClkDeepSleepRaw` preserve the native bytes |
+| Partitions | Empty resources/ranges can be unpopulated. Unknown `NumPartitions == UINT32_MAX` with zero resources is preserved without allocating that count; current ID can remain zero after a subordinate lookup failure |
+| BM-only getters | `GetClockFrequencies`, `GetKFDInfo`, `GetMemoryTotal`, `GetMemoryUsage`, `GetRASBlockState` |
+| BM-only fields | `Version.Build`, `StatusError.Op`/`Message`, raw clock bytes, and `NpsCaps.RawMask`; native `errors.Is` support is also retained |
+
+No Host runtime parity is claimed. Consult the API reference before interpreting
+unavailable values or moving consumers between backends.
 
 ## Legacy Go interface
 

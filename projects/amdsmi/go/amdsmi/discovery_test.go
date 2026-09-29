@@ -23,7 +23,7 @@ func TestCoreDiscovery(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			resetCoreFixture(t)
 			mockTopology(test.sockets, test.processors, test.stride)
-			if err := Init(InitAMDGPUs); err != nil {
+			if err := Init(AMDSMI_INIT_AMD_GPUS); err != nil {
 				t.Fatal(err)
 			}
 			got, err := GetProcessorHandles()
@@ -49,7 +49,7 @@ func TestCoreDiscoveryBounds(t *testing.T) {
 	for _, op := range []string{"amdsmi_get_socket_handles", "amdsmi_get_processor_handles"} {
 		t.Run(op, func(t *testing.T) {
 			resetCoreFixture(t)
-			if err := Init(InitAMDGPUs); err != nil {
+			if err := Init(AMDSMI_INIT_AMD_GPUS); err != nil {
 				t.Fatal(err)
 			}
 			mockConfigure(op, AMDSMI_STATUS_SUCCESS, 1)
@@ -74,7 +74,7 @@ func TestCoreDiscoveryShortFill(t *testing.T) {
 		t.Run(test.op, func(t *testing.T) {
 			resetCoreFixture(t)
 			mockTopology(2, 3, 0)
-			if err := Init(InitAMDGPUs); err != nil {
+			if err := Init(AMDSMI_INIT_AMD_GPUS); err != nil {
 				t.Fatal(err)
 			}
 			mockConfigure(test.op, AMDSMI_STATUS_SUCCESS, 3)
@@ -95,7 +95,7 @@ func TestCoreDiscoveryNullHandles(t *testing.T) {
 	} {
 		t.Run(test.op, func(t *testing.T) {
 			resetCoreFixture(t)
-			if err := Init(InitAMDGPUs); err != nil {
+			if err := Init(AMDSMI_INIT_AMD_GPUS); err != nil {
 				t.Fatal(err)
 			}
 			mockConfigure(test.op, AMDSMI_STATUS_SUCCESS, 2)
@@ -112,7 +112,7 @@ func TestCoreDiscoveryNullHandles(t *testing.T) {
 func TestCoreDiscoveryFailures(t *testing.T) {
 	for _, test := range []struct {
 		name, op string
-		code     StatusCode
+		code     Status
 		mode     uint32
 		calls    uint64
 	}{
@@ -124,7 +124,7 @@ func TestCoreDiscoveryFailures(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			resetCoreFixture(t)
-			if err := Init(InitAMDGPUs); err != nil {
+			if err := Init(AMDSMI_INIT_AMD_GPUS); err != nil {
 				t.Fatal(err)
 			}
 			code := test.code
@@ -145,7 +145,7 @@ func TestCoreDiscoveryFailures(t *testing.T) {
 func TestCoreDiscoveryEmptySocket(t *testing.T) {
 	resetCoreFixture(t)
 	mockTopology(2, 3, 0)
-	if err := Init(InitAMDGPUs); err != nil {
+	if err := Init(AMDSMI_INIT_AMD_GPUS); err != nil {
 		t.Fatal(err)
 	}
 	mockConfigure("amdsmi_get_processor_handles", AMDSMI_STATUS_SUCCESS, 4)
@@ -164,7 +164,7 @@ func TestCoreHandlesFixture(t *testing.T) {
 		if h.ptr == nil || h.generation == 0 || mockNativeRefs() != 1 {
 			t.Fatalf("invalid default fixture: %+v", h)
 		}
-		if err := Init(InitAMDGPUs); err != nil {
+		if err := Init(AMDSMI_INIT_AMD_GPUS); err != nil {
 			t.Fatal(err)
 		}
 		mockConfigure("amdsmi_shut_down", AMDSMI_STATUS_IO, 0)
@@ -190,7 +190,7 @@ func TestCoreIndex(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			resetCoreFixture(t)
 			mockTopology(test.sockets, test.processors, test.stride)
-			if err := Init(InitAMDGPUs); err != nil {
+			if err := Init(AMDSMI_INIT_AMD_GPUS); err != nil {
 				t.Fatal(err)
 			}
 			handles, err := GetProcessorHandles()
@@ -202,9 +202,8 @@ func TestCoreIndex(t *testing.T) {
 				if err != nil || got != handles[index] {
 					t.Fatalf("index %d: want %+v, got %+v, err=%v", index, handles[index], got, err)
 				}
-				bdf, err := GetGPUDeviceBDF(got)
-				want := BDF{Domain: 0xabcde1234567, Bus: uint8(physical / 32),
-					Device: uint8(physical % 32 / 8), Function: uint8(physical % 8)}
+				bdf, err := GetGpuDeviceBdf(got)
+				want := Bdf(0xabcde12345670000 | uint64(physical/32)<<8 | uint64(physical%32))
 				if err != nil || bdf != want {
 					t.Fatalf("index %d: want BDF %v, got %v, err=%v", index, want, bdf, err)
 				}
@@ -221,9 +220,9 @@ func TestCoreIndex(t *testing.T) {
 func TestCoreIndexFailures(t *testing.T) {
 	for _, test := range []struct {
 		name, op string
-		code     StatusCode
+		code     Status
 		mode     uint32
-		want     StatusCode
+		want     Status
 		calls    uint64
 	}{
 		{"SocketCount", "amdsmi_get_socket_handles", AMDSMI_STATUS_NO_PERM, 0, AMDSMI_STATUS_NO_PERM, 1},
@@ -238,7 +237,7 @@ func TestCoreIndexFailures(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			resetCoreFixture(t)
-			if err := Init(InitAMDGPUs); err != nil {
+			if err := Init(AMDSMI_INIT_AMD_GPUS); err != nil {
 				t.Fatal(err)
 			}
 			mockConfigure(test.op, test.code, test.mode)
@@ -262,7 +261,7 @@ func TestCoreIndexLifetime(t *testing.T) {
 	if mockCalls("amdsmi_get_socket_handles") != 0 {
 		t.Fatal("uninitialized index lookup reached native code")
 	}
-	if err := Init(InitAMDGPUs); err != nil {
+	if err := Init(AMDSMI_INIT_AMD_GPUS); err != nil {
 		t.Fatal(err)
 	}
 	old, err := GetProcessorHandleFromIndex(0)
@@ -279,11 +278,11 @@ func TestCoreIndexLifetime(t *testing.T) {
 	if mockCalls("amdsmi_get_socket_handles") != calls {
 		t.Fatal("shut-down index lookup reached native code")
 	}
-	if err := Init(InitAMDGPUs); err != nil {
+	if err := Init(AMDSMI_INIT_AMD_GPUS); err != nil {
 		t.Fatal(err)
 	}
 	queryCalls := mockCalls("amdsmi_get_gpu_device_bdf")
-	bdf, err := GetGPUDeviceBDF(old)
+	bdf, err := GetGpuDeviceBdf(old)
 	assertNativeError(t, err, "amdsmi_get_gpu_device_bdf", AMDSMI_STATUS_INVAL)
 	assertZero(t, bdf)
 	if mockCalls("amdsmi_get_gpu_device_bdf") != queryCalls {
@@ -293,22 +292,22 @@ func TestCoreIndexLifetime(t *testing.T) {
 	if err != nil || current.ptr != old.ptr || current.generation == old.generation {
 		t.Fatalf("index did not return a renewed handle: %+v, err=%v", current, err)
 	}
-	if _, err := GetGPUDeviceBDF(current); err != nil {
+	if _, err := GetGpuDeviceBdf(current); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestCoreBDF48Bit(t *testing.T) {
 	h := fixtureHandle(t)
-	bdf, err := GetGPUDeviceBDF(h)
+	bdf, err := GetGpuDeviceBdf(h)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bdf.Domain != 0xabcde1234567 || bdf.Bus != 0 || bdf.Device != 0 || bdf.Function != 0 ||
+	if bdf.Domain() != 0xabcde1234567 || bdf.Bus() != 0 || bdf.Device() != 0 || bdf.Function() != 0 ||
 		bdf.String() != "abcde1234567:00:00.0" {
 		t.Fatalf("BDF truncated or altered: %+v", bdf)
 	}
-	found, err := GetProcessorHandleFromBDF(bdf)
+	found, err := GetProcessorHandleFromBdf(bdf)
 	if err != nil || found != h {
 		t.Fatalf("BDF lookup mismatch: %+v, err=%v", found, err)
 	}
@@ -318,20 +317,20 @@ func TestCoreBDFBounds(t *testing.T) {
 	fixtureHandle(t)
 	const op = "amdsmi_get_processor_handle_from_bdf"
 	calls := mockCalls(op)
-	for _, bdf := range []BDF{{Domain: 1 << 48}, {Device: 32}, {Function: 8}} {
-		got, err := GetProcessorHandleFromBDF(bdf)
-		assertNativeError(t, err, op, AMDSMI_STATUS_INVAL)
+	for _, bdf := range []Bdf{0, 1 << 63, ^Bdf(0)} {
+		got, err := GetProcessorHandleFromBdf(bdf)
+		assertNativeError(t, err, op, AMDSMI_STATUS_NOT_FOUND)
 		assertZero(t, got)
 	}
-	if mockCalls(op) != calls {
-		t.Fatal("invalid BDF reached C")
+	if mockCalls(op) != calls+3 {
+		t.Fatal("representable BDF did not reach C")
 	}
 }
 
 func TestCoreBDFLookupResults(t *testing.T) {
 	for _, test := range []struct {
 		mode uint32
-		code StatusCode
+		code Status
 	}{
 		{1, AMDSMI_STATUS_UNEXPECTED_DATA},
 		{2, AMDSMI_STATUS_NOT_SUPPORTED},
@@ -341,12 +340,12 @@ func TestCoreBDFLookupResults(t *testing.T) {
 			if test.mode == 2 {
 				mockTopology(1, 1, 1)
 			}
-			if err := Init(InitAMDGPUs); err != nil {
+			if err := Init(AMDSMI_INIT_AMD_GPUS); err != nil {
 				t.Fatal(err)
 			}
 			const op = "amdsmi_get_processor_handle_from_bdf"
 			mockConfigure(op, AMDSMI_STATUS_SUCCESS, test.mode)
-			got, err := GetProcessorHandleFromBDF(BDF{Domain: 0xabcde1234567})
+			got, err := GetProcessorHandleFromBdf(Bdf(0xabcde12345670000))
 			assertNativeError(t, err, op, test.code)
 			assertZero(t, got)
 		})
@@ -354,12 +353,22 @@ func TestCoreBDFLookupResults(t *testing.T) {
 }
 
 func TestCoreBDFQuery(t *testing.T) {
-	checkQuery(t, "amdsmi_get_gpu_device_bdf", GetGPUDeviceBDF, BDF{Domain: 0xabcde1234567})
+	checkQuery(t, "amdsmi_get_gpu_device_bdf", GetGpuDeviceBdf, Bdf(0xabcde12345670000))
 }
 
 func TestCoreBDFFormatting(t *testing.T) {
-	bdf := BDF{Bus: 0xab, Device: 0x1f, Function: 7}
+	bdf := Bdf(0xabff)
 	if got := bdf.String(); got != "0000:ab:1f.7" {
 		t.Fatalf("unexpected BDF: %s", got)
+	}
+}
+
+func TestCorePackedBdf(t *testing.T) {
+	for _, raw := range []uint64{0, 0xabcde1234567abff, ^uint64(0)} {
+		bdf := Bdf(raw)
+		packed := bdf.Domain()<<16 | uint64(bdf.Bus())<<8 | uint64(bdf.Device())<<3 | uint64(bdf.Function())
+		if packed != raw {
+			t.Fatalf("BDF roundtrip: %x != %x", packed, raw)
+		}
 	}
 }

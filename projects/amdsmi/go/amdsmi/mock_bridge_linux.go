@@ -26,7 +26,7 @@ func mockReset() {
 	C.mock_reset()
 }
 
-func mockConfigure(op string, code StatusCode, mode uint32) {
+func mockConfigure(op string, code Status, mode uint32) {
 	nativeState.mu.Lock()
 	defer nativeState.mu.Unlock()
 	name := C.CString(op)

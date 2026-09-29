@@ -44,7 +44,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Changed
 
-- Aligned the pre-release Go interface with Host naming: `GetGPUAsicInfo`, `AsicInfo`, `GetGPUDeviceBDF`, and `Init(InitAMDGPUs)`. Added checked index lookup and consolidated production bindings into one interface file; previous names have no compatibility aliases.
+- Aligned the pre-release Go common read-only API with Host declarations, including `Init(AMDSMI_INIT_AMD_GPUS)`, `GetGpuAsicInfo`, packed `Bdf`, `StatusError`, fixed firmware/NUMA arrays, ECC maps, and the profile/IDs result tuple. Replace previous names using the [migration table](go/README.md#pre-release-api-migration); no compatibility aliases are provided. BM units and extensions remain explicit: clock Boolean fields are false/unavailable, and profile IDs contain only the current ID. This does not establish Host runtime parity.
 
 - **`amdsmi_get_clock_info()` now returns `AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS` for clock values that exceed `INT_MAX`**.  
   - Such values were previously narrowed to a negative number and returned as data.
@@ -147,7 +147,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - `amd-smi static --nic 999` and `--switch 999` failed while building the "device not found" error, so the command exited `1` with a traceback and no readable message. `--json` and `--csv` produced no parseable output.
   - Both now report `Can not find a device: NIC '999'` (or `SWITCH`) and exit `196`, matching `--gpu`, `--cpu`, and `--core`.
 
-- Allocated the full native partition-ID array in the Go profile getter while preserving the current partition ID result.
+- Allocated the full native partition-ID array in the Go profile getter; its returned IDs slice contains one current partition ID on BM, regardless of the partition count.
 
 - Fixed nearest-GPU topology ordering to sort by hop count, then link weight, with equal pairs treated as equivalent.
 

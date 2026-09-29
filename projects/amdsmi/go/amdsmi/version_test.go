@@ -8,7 +8,7 @@ package amdsmi
 import "testing"
 
 func TestNativeVersion(t *testing.T) {
-	got, err := GetLibraryVersion()
+	got, err := GetLibVersion()
 	if err != nil {
 		t.Fatal(err)
 	}

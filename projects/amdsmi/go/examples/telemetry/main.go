@@ -14,11 +14,11 @@ import (
 )
 
 func run() (err error) {
-	if err = amdsmi.Init(amdsmi.InitAMDGPUs); err != nil {
+	if err = amdsmi.Init(amdsmi.AMDSMI_INIT_AMD_GPUS); err != nil {
 		return err
 	}
 	defer func() { err = errors.Join(err, amdsmi.ShutDown()) }()
-	version, versionErr := amdsmi.GetLibraryVersion()
+	version, versionErr := amdsmi.GetLibVersion()
 	if versionErr != nil {
 		return versionErr
 	}
@@ -32,12 +32,12 @@ func run() (err error) {
 	}
 	for index, handle := range handles {
 		label := fmt.Sprintf("GPU %d", index)
-		if bdf, queryErr := amdsmi.GetGPUDeviceBDF(handle); queryErr != nil {
+		if bdf, queryErr := amdsmi.GetGpuDeviceBdf(handle); queryErr != nil {
 			fmt.Fprintf(os.Stderr, "%s BDF: %v\n", label, queryErr)
 		} else {
 			label = bdf.String()
 		}
-		if temperature, queryErr := amdsmi.GetTemperature(handle,
+		if temperature, queryErr := amdsmi.GetTempMetric(handle,
 			amdsmi.AMDSMI_TEMPERATURE_TYPE_HOTSPOT, amdsmi.AMDSMI_TEMP_CURRENT); queryErr != nil {
 			fmt.Fprintf(os.Stderr, "%s temperature: %v\n", label, queryErr)
 		} else {
@@ -45,10 +45,10 @@ func run() (err error) {
 		}
 		if power, queryErr := amdsmi.GetPowerInfo(handle); queryErr != nil {
 			fmt.Fprintf(os.Stderr, "%s power: %v\n", label, queryErr)
-		} else if power.SocketPowerWatts == ^uint64(0) {
+		} else if power.SocketPower == ^uint64(0) {
 			fmt.Printf("%s socket power: N/A\n", label)
 		} else {
-			fmt.Printf("%s socket power: %d W\n", label, power.SocketPowerWatts)
+			fmt.Printf("%s socket power: %d W\n", label, power.SocketPower)
 		}
 		if used, queryErr := amdsmi.GetMemoryUsage(handle, amdsmi.AMDSMI_MEM_TYPE_VRAM); queryErr != nil {
 			fmt.Fprintf(os.Stderr, "%s memory: %v\n", label, queryErr)

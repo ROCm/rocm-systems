@@ -29,6 +29,8 @@ amdsmi_status_t amdsmi_get_gpu_memory_partition_config(amdsmi_processor_handle h
     }
   } else if (mock_mode(__func__) == 2) {
     out->num_numa_ranges = AMDSMI_MAX_NUM_NUMA_NODES + 1;
+  } else if (mock_mode(__func__) == 3) {
+    out->partition_caps.nps_cap_mask = UINT32_C(0x80000005);
   }
   return mock_finish(AMDSMI_STATUS_SUCCESS);
 }
@@ -66,6 +68,8 @@ amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile(
   } else if (mock_mode(__func__) == 4) {
     out->num_partitions = UINT32_MAX;
     out->profile_index = UINT32_MAX;
+  } else if (mock_mode(__func__) == 6) {
+    out->num_partitions = AMDSMI_MAX_ACCELERATOR_PARTITIONS + 1;
   }
   return mock_finish(AMDSMI_STATUS_SUCCESS);
 }

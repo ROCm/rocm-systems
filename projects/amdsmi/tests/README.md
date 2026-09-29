@@ -201,7 +201,7 @@ bridge and fixtures are not installed with the module.
 | Check | What it verifies |
 | --- | --- |
 | Default runner | Go wrappers across the real CGO boundary into controlled native responses |
-| External-package contract | Host-style `Init(InitAMDGPUs)`, ASIC fields, BDF getter, and index-lookup signatures compile without private-package access |
+| External-package contract | Common Host names, signatures, fields, and `Init(AMDSMI_INIT_AMD_GPUS)` compile without private-package access; BM extensions are checked separately |
 | Index and flag cases | Filtered GPU discovery order, bounds and lifetime checks, rejection of unsupported initialization flags |
 | `--native --include-dir ... --library-dir ... --run '^TestNativeVersion$'` | Fresh matching 27.1 header/library linkage and runtime version, without initialization |
 | `--native --include-dir ... --library-dir ... --build-example` | Example links against the real library; it is not executed |

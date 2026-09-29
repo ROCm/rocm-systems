@@ -7,7 +7,9 @@ amdsmi_status_t amdsmi_get_gpu_ecc_enabled(amdsmi_processor_handle h, uint64_t* 
   amdsmi_status_t status = mock_begin(__func__, h);
   if (status != AMDSMI_STATUS_SUCCESS) return mock_finish(status);
   if (!out || !mock_is_zero(out, sizeof(*out))) return mock_finish(AMDSMI_STATUS_UNEXPECTED_DATA);
-  *out = AMDSMI_GPU_BLOCK_UMC | AMDSMI_GPU_BLOCK_UCIE_PCS | AMDSMI_GPU_BLOCK_RESERVED;
+  *out = AMDSMI_GPU_BLOCK_UMC | AMDSMI_GPU_BLOCK_UCIE_PCS | AMDSMI_GPU_BLOCK_RESERVED |
+         (UINT64_C(1) << 62);
+  if (mock_mode(__func__) == 1) *out = 0;
   return mock_finish(AMDSMI_STATUS_SUCCESS);
 }
 

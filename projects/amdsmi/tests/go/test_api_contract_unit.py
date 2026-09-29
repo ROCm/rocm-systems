@@ -21,16 +21,16 @@ MEMBERS = ["AMDSMI_TEST_FIRST", "AMDSMI_TEST_ALIAS", "AMDSMI_TEST_LAST"]
 MODULE = "module github.com/ROCm/rocm-systems/projects/amdsmi/go\n\ngo 1.20\n"
 ENUM_OWNERS = {
     "amdsmi_interface.go": (
-        ("amdsmi_status_t", "StatusCode"),
-        ("amdsmi_vram_type_t", "VRAMType"),
-        ("amdsmi_fw_block_t", "FirmwareBlock"),
+        ("amdsmi_status_t", "Status"),
+        ("amdsmi_vram_type_t", "VramType"),
+        ("amdsmi_fw_block_t", "FwBlock"),
         ("amdsmi_temperature_type_t", "TemperatureType"),
         ("amdsmi_temperature_metric_t", "TemperatureMetric"),
-        ("amdsmi_clk_type_t", "ClockType"),
+        ("amdsmi_clk_type_t", "ClkType"),
         ("amdsmi_memory_type_t", "MemoryType"),
         ("amdsmi_memory_partition_type_t", "MemoryPartitionType"),
         ("amdsmi_accelerator_partition_type_t", "AcceleratorPartitionType"),
-        ("amdsmi_gpu_block_t", "GPUBlock"),
+        ("amdsmi_gpu_block_t", "GpuBlock"),
         ("amdsmi_ras_err_state_t", "RASState"),
     )
 }

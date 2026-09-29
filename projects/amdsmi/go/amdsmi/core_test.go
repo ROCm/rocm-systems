@@ -17,14 +17,14 @@ import (
 func TestCoreStatuses(t *testing.T) {
 	mockReset()
 	t.Cleanup(mockReset)
-	codes := []StatusCode{AMDSMI_STATUS_MAP_ERROR, AMDSMI_STATUS_UNKNOWN_ERROR, StatusCode(0x12345678)}
+	codes := []Status{AMDSMI_STATUS_MAP_ERROR, AMDSMI_STATUS_UNKNOWN_ERROR, Status(0x12345678)}
 	for code := AMDSMI_STATUS_SUCCESS; code <= AMDSMI_STATUS_CORRUPTED_EEPROM; code++ {
 		codes = append(codes, code)
 	}
 	for _, code := range codes {
 		t.Run(fmt.Sprintf("%08x", uint32(code)), func(t *testing.T) {
 			mockConfigure("amdsmi_get_lib_version", code, 0)
-			got, err := GetLibraryVersion()
+			got, err := GetLibVersion()
 			if code == AMDSMI_STATUS_SUCCESS {
 				if err != nil || got.Major != compiledMajor {
 					t.Fatalf("success: %+v, %v", got, err)
@@ -33,7 +33,7 @@ func TestCoreStatuses(t *testing.T) {
 			}
 			assertNativeError(t, err, "amdsmi_get_lib_version", code)
 			assertZero(t, got)
-			var native *Error
+			var native *StatusError
 			if !errors.As(err, &native) {
 				t.Fatal(err)
 			}
@@ -46,7 +46,7 @@ func TestCoreStatuses(t *testing.T) {
 			if mockCalls("amdsmi_status_code_to_string") != calls {
 				t.Fatal("error formatting called native code")
 			}
-			if code == AMDSMI_STATUS_TIMEOUT || code == AMDSMI_STATUS_MORE_DATA || code == StatusCode(0x12345678) {
+			if code == AMDSMI_STATUS_TIMEOUT || code == AMDSMI_STATUS_MORE_DATA || code == Status(0x12345678) {
 				if native.Message != want {
 					t.Fatalf("failed lookup lost original status: %q", native.Message)
 				}
@@ -55,41 +55,74 @@ func TestCoreStatuses(t *testing.T) {
 	}
 }
 
+func TestCoreStatusLookupContract(t *testing.T) {
+	mockReset()
+	t.Cleanup(mockReset)
+	text, err := StatusCodeToString(AMDSMI_STATUS_NO_PERM)
+	if err != nil || text != "AMDSMI_STATUS_NO_PERM" {
+		t.Fatalf("lookup: %q, %v", text, err)
+	}
+	for _, test := range []struct {
+		code Status
+		mode uint32
+		want Status
+	}{
+		{AMDSMI_STATUS_IO, 0, AMDSMI_STATUS_IO},
+		{AMDSMI_STATUS_SUCCESS, 1, AMDSMI_STATUS_UNEXPECTED_DATA},
+	} {
+		mockConfigure("amdsmi_status_code_to_string", test.code, test.mode)
+		calls := mockCalls("amdsmi_status_code_to_string")
+		text, err = StatusCodeToString(AMDSMI_STATUS_NO_PERM)
+		assertNativeError(t, err, "amdsmi_status_code_to_string", test.want)
+		assertZero(t, text)
+		if mockCalls("amdsmi_status_code_to_string") != calls+1 {
+			t.Fatal("lookup failure recursively formatted its status")
+		}
+		mockConfigure("amdsmi_get_lib_version", AMDSMI_STATUS_NO_PERM, 0)
+		_, err = GetLibVersion()
+		var native *StatusError
+		if !errors.As(err, &native) || native.Name != "AMDSMI_STATUS_NO_PERM" {
+			t.Fatalf("lost symbolic name: %v", err)
+		}
+		assertNativeError(t, err, "amdsmi_get_lib_version", AMDSMI_STATUS_NO_PERM)
+	}
+}
+
 func TestCoreStatusesStrings(t *testing.T) {
 	mockReset()
 	t.Cleanup(mockReset)
-	for _, code := range []StatusCode{AMDSMI_STATUS_SUCCESS, AMDSMI_STATUS_NO_PERM} {
+	for _, code := range []Status{AMDSMI_STATUS_SUCCESS, AMDSMI_STATUS_NO_PERM} {
 		want := "AMDSMI_STATUS_SUCCESS"
 		if code == AMDSMI_STATUS_NO_PERM {
 			want = "AMDSMI_STATUS_NO_PERM"
 		}
-		if got := StatusString(code); got != want {
-			t.Fatalf("status %d: want %q, got %q", uint32(code), want, got)
+		if got, err := StatusCodeToString(code); err != nil || got != want {
+			t.Fatalf("status %d: want %q, got %q, %v", uint32(code), want, got, err)
 		}
 	}
-	for _, code := range []StatusCode{AMDSMI_STATUS_TIMEOUT, AMDSMI_STATUS_MORE_DATA, StatusCode(0x12345678)} {
-		if got := StatusString(code); got != code.Error() {
-			t.Fatalf("failed lookup: %q", got)
-		}
+	for _, code := range []Status{AMDSMI_STATUS_TIMEOUT, AMDSMI_STATUS_MORE_DATA, Status(0x12345678)} {
+		got, err := StatusCodeToString(code)
+		assertNativeError(t, err, "amdsmi_status_code_to_string", AMDSMI_STATUS_UNKNOWN_ERROR)
+		assertZero(t, got)
 	}
 	mockConfigure("amdsmi_status_code_to_string", AMDSMI_STATUS_IO, 0)
-	if got := StatusString(AMDSMI_STATUS_NO_PERM); got != AMDSMI_STATUS_NO_PERM.Error() {
-		t.Fatalf("injected lookup failure: %q", got)
-	}
+	got, err := StatusCodeToString(AMDSMI_STATUS_NO_PERM)
+	assertNativeError(t, err, "amdsmi_status_code_to_string", AMDSMI_STATUS_IO)
+	assertZero(t, got)
 }
 
 func TestCoreStatusesNullMessage(t *testing.T) {
 	mockReset()
 	t.Cleanup(mockReset)
 	mockConfigure("amdsmi_status_code_to_string", AMDSMI_STATUS_SUCCESS, 1)
-	if got := StatusString(AMDSMI_STATUS_NO_PERM); got != AMDSMI_STATUS_NO_PERM.Error() {
-		t.Fatalf("null-message fallback: %q", got)
-	}
+	text, lookupErr := StatusCodeToString(AMDSMI_STATUS_NO_PERM)
+	assertNativeError(t, lookupErr, "amdsmi_status_code_to_string", AMDSMI_STATUS_UNEXPECTED_DATA)
+	assertZero(t, text)
 	mockConfigure("amdsmi_get_lib_version", AMDSMI_STATUS_NO_PERM, 0)
-	got, err := GetLibraryVersion()
+	got, err := GetLibVersion()
 	assertNativeError(t, err, "amdsmi_get_lib_version", AMDSMI_STATUS_NO_PERM)
 	assertZero(t, got)
-	var native *Error
+	var native *StatusError
 	if !errors.As(err, &native) || native.Message != AMDSMI_STATUS_NO_PERM.Error() {
 		t.Fatalf("null error message: %v", err)
 	}
@@ -155,7 +188,7 @@ func TestCoreStatusesBoundedString(t *testing.T) {
 		mockReset()
 		t.Cleanup(mockReset)
 		mockConfigure("amdsmi_get_lib_version", AMDSMI_STATUS_SUCCESS, 1)
-		got, err := GetLibraryVersion()
+		got, err := GetLibVersion()
 		if err != nil || got.Build != "" || got.Major != compiledMajor {
 			t.Fatalf("null build string: %+v, %v", got, err)
 		}
@@ -164,8 +197,8 @@ func TestCoreStatusesBoundedString(t *testing.T) {
 
 func TestCoreLifecycleInitFlags(t *testing.T) {
 	resetCoreFixture(t)
-	if uint64(InitAMDGPUs) != 2 {
-		t.Fatalf("unexpected GPU flag: %d", InitAMDGPUs)
+	if uint64(AMDSMI_INIT_AMD_GPUS) != 2 {
+		t.Fatalf("unexpected GPU flag: %d", AMDSMI_INIT_AMD_GPUS)
 	}
 	for held := uint32(0); held < 2; held++ {
 		nativeState.mu.Lock()
@@ -185,7 +218,7 @@ func TestCoreLifecycleInitFlags(t *testing.T) {
 				t.Fatalf("invalid flags changed Go state: refs=%d generation=%d", refs, current)
 			}
 		}
-		if err := Init(InitAMDGPUs); err != nil {
+		if err := Init(AMDSMI_INIT_AMD_GPUS); err != nil {
 			t.Fatal(err)
 		}
 		if mockNativeRefs() != held+1 || mockCalls("amdsmi_init") != calls+1 {
@@ -208,7 +241,7 @@ func TestCoreLifecycleReferences(t *testing.T) {
 	generation := nativeState.generation
 	nativeState.mu.Unlock()
 	for want := uint32(1); want <= 2; want++ {
-		if err := Init(InitAMDGPUs); err != nil {
+		if err := Init(AMDSMI_INIT_AMD_GPUS); err != nil {
 			t.Fatal(err)
 		}
 		if refs := mockNativeRefs(); refs != want {
@@ -257,7 +290,7 @@ func TestCoreLifecycleInitFailure(t *testing.T) {
 	nativeState.mu.Unlock()
 	for held := uint32(0); held < 2; held++ {
 		mockConfigure("amdsmi_init", AMDSMI_STATUS_INIT_ERROR, 0)
-		assertNativeError(t, Init(InitAMDGPUs), "amdsmi_init", AMDSMI_STATUS_INIT_ERROR)
+		assertNativeError(t, Init(AMDSMI_INIT_AMD_GPUS), "amdsmi_init", AMDSMI_STATUS_INIT_ERROR)
 		if refs := mockNativeRefs(); refs != held {
 			t.Fatalf("failed Init acquired native reference: %d", refs)
 		}
@@ -268,7 +301,7 @@ func TestCoreLifecycleInitFailure(t *testing.T) {
 			t.Fatalf("failed Init changed Go state: refs=%d generation=%d", refs, current)
 		}
 		mockConfigure("amdsmi_init", AMDSMI_STATUS_SUCCESS, 0)
-		if err := Init(InitAMDGPUs); err != nil {
+		if err := Init(AMDSMI_INIT_AMD_GPUS); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -279,7 +312,7 @@ func TestCoreLifecycleInitFailure(t *testing.T) {
 
 func TestCoreLifecycleOverflow(t *testing.T) {
 	resetCoreFixture(t)
-	if err := Init(InitAMDGPUs); err != nil {
+	if err := Init(AMDSMI_INIT_AMD_GPUS); err != nil {
 		t.Fatal(err)
 	}
 	nativeState.mu.Lock()
@@ -292,7 +325,7 @@ func TestCoreLifecycleOverflow(t *testing.T) {
 		nativeState.mu.Unlock()
 	})
 	calls := mockCalls("amdsmi_init")
-	err := Init(InitAMDGPUs)
+	err := Init(AMDSMI_INIT_AMD_GPUS)
 	if err == nil {
 		if cleanupErr := ShutDown(); cleanupErr != nil {
 			t.Fatal(cleanupErr)
@@ -312,10 +345,10 @@ func TestCoreLifecycleOverflow(t *testing.T) {
 
 func TestCoreLifecycleCleanupFailure(t *testing.T) {
 	resetCoreFixture(t)
-	if err := Init(InitAMDGPUs); err != nil {
+	if err := Init(AMDSMI_INIT_AMD_GPUS); err != nil {
 		t.Fatal(err)
 	}
-	if err := Init(InitAMDGPUs); err != nil {
+	if err := Init(AMDSMI_INIT_AMD_GPUS); err != nil {
 		t.Fatal(err)
 	}
 	nativeState.mu.Lock()
@@ -342,7 +375,7 @@ func TestCoreLifecycleCleanupFailure(t *testing.T) {
 	if mockCalls("amdsmi_shut_down") != calls {
 		t.Fatal("cleanup error left a shutdown reference")
 	}
-	if err := Init(InitAMDGPUs); err != nil {
+	if err := Init(AMDSMI_INIT_AMD_GPUS); err != nil {
 		t.Fatal(err)
 	}
 	if refs := mockNativeRefs(); refs != 1 {
@@ -367,7 +400,7 @@ func TestCoreLifecycleWithLibrary(t *testing.T) {
 	if calls != 0 {
 		t.Fatal("uninitialized library called the callback")
 	}
-	if err := Init(InitAMDGPUs); err != nil {
+	if err := Init(AMDSMI_INIT_AMD_GPUS); err != nil {
 		t.Fatal(err)
 	}
 	got, err = withLibrary("library", query)
@@ -392,7 +425,7 @@ func TestCoreLifecycleWithLibrary(t *testing.T) {
 }
 
 func TestCoreLifecycleWithProcessor(t *testing.T) {
-	for _, code := range []StatusCode{AMDSMI_STATUS_SUCCESS, AMDSMI_STATUS_IO} {
+	for _, code := range []Status{AMDSMI_STATUS_SUCCESS, AMDSMI_STATUS_IO} {
 		t.Run(fmt.Sprintf("Shutdown%d", uint32(code)), func(t *testing.T) {
 			resetCoreFixture(t)
 			calls := 0
@@ -411,7 +444,7 @@ func TestCoreLifecycleWithProcessor(t *testing.T) {
 			got, err := mockWithProcessor(ProcessorHandle{}, "processor", query)
 			assertNativeError(t, err, "processor", AMDSMI_STATUS_NOT_INIT)
 			assertZero(t, got)
-			if err := Init(InitAMDGPUs); err != nil {
+			if err := Init(AMDSMI_INIT_AMD_GPUS); err != nil {
 				t.Fatal(err)
 			}
 			h := mockProcessorToken()
@@ -433,7 +466,7 @@ func TestCoreLifecycleWithProcessor(t *testing.T) {
 			got, err = mockWithProcessor(h, "processor", query)
 			assertNativeError(t, err, "processor", AMDSMI_STATUS_NOT_INIT)
 			assertZero(t, got)
-			if err := Init(InitAMDGPUs); err != nil {
+			if err := Init(AMDSMI_INIT_AMD_GPUS); err != nil {
 				t.Fatal(err)
 			}
 			got, err = mockWithProcessor(h, "processor", query)
@@ -453,7 +486,7 @@ func TestCoreLifecycleWithProcessor(t *testing.T) {
 
 func TestCoreLifecycleSerialization(t *testing.T) {
 	resetCoreFixture(t)
-	if err := Init(InitAMDGPUs); err != nil {
+	if err := Init(AMDSMI_INIT_AMD_GPUS); err != nil {
 		t.Fatal(err)
 	}
 	start := make(chan struct{})
@@ -465,11 +498,11 @@ func TestCoreLifecycleSerialization(t *testing.T) {
 			defer workers.Done()
 			<-start
 			for iteration := 0; iteration < 64; iteration++ {
-				if err := Init(InitAMDGPUs); err != nil {
+				if err := Init(AMDSMI_INIT_AMD_GPUS); err != nil {
 					failures <- err
 					return
 				}
-				_, queryErr := GetLibraryVersion()
+				_, queryErr := GetLibVersion()
 				shutdownErr := ShutDown()
 				if queryErr != nil {
 					failures <- queryErr
@@ -479,7 +512,7 @@ func TestCoreLifecycleSerialization(t *testing.T) {
 					failures <- shutdownErr
 					return
 				}
-				if got := StatusString(AMDSMI_STATUS_TIMEOUT); got != AMDSMI_STATUS_TIMEOUT.Error() {
+				if got, err := StatusCodeToString(AMDSMI_STATUS_TIMEOUT); got != "" || !errors.Is(err, AMDSMI_STATUS_UNKNOWN_ERROR) {
 					failures <- fmt.Errorf("concurrent status: %q", got)
 					return
 				}
