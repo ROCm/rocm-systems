@@ -3795,9 +3795,19 @@ if(HIP_RUNTIME64 AND CMAKE_DL_LIBS)
             hip_runtime_dlopen_test
             PRIVATE RJ_TEST_ASAN_HSA_RUNTIME_FORWARDER=1
         )
+        set_target_properties(
+            hip_runtime_dlopen_test
+            PROPERTIES INSTALL_RPATH "$ORIGIN"
+        )
     endif()
     if(RJ_INSTALL_TESTS)
         rj_install_test_target(hip_runtime_dlopen_test)
+        if(RJ_ENABLE_ASAN)
+            install(
+                TARGETS asan_hsa_runtime_forwarder
+                LIBRARY DESTINATION ${RJ_INSTALL_TEST_BIN_DIR}
+            )
+        endif()
     endif()
     rj_add_test(
         NAME ConSanHook.DynamicHipRuntimeUnload
