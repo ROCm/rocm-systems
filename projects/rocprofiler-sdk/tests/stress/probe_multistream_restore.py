@@ -39,8 +39,9 @@ dispatch:
   restore_without_inflation  SQ_WAVES == 1 but a wave was saved or restored  (refutes it)
   zero_waves                 SQ_WAVES == 0  (an undercount)
 
-It exits non-zero whenever anything other than `normal` is seen, so the evidence reaches the
-CI log; a clean pass means no event occurred in the runs it managed.
+It exits non-zero whenever anything other than `normal` is seen. Under --report-only, as
+registered in CI, it always exits 0 so it cannot fail the CI step and skip the steps after it;
+the verdict is read from the PROBE_RESULT_JSON line in the recorded output instead.
 
 Must stay Python 3.6 compatible: rhel-8.8 CI images ship 3.6 as python3.
 """
@@ -152,8 +153,18 @@ def main():
     parser.add_argument("--budget-seconds", type=float, default=240.0)
     parser.add_argument("--run-timeout", type=float, default=90.0)
     parser.add_argument("--max-events", type=int, default=40)
+    parser.add_argument(
+        "--report-only",
+        action="store_true",
+        help="always exit 0; a failing test makes ctest fail the CI step and skip the steps "
+        "after it, so findings are read from the recorded output (CDash) instead",
+    )
     args = parser.parse_args()
+    code = run(args)
+    return 0 if args.report_only else code
 
+
+def run(args):
     if not os.path.isdir(args.workdir):
         os.makedirs(args.workdir)
     start = time.monotonic()
