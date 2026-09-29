@@ -13,7 +13,11 @@
 #include "nccl.h"
 #include "rccl_common.h"
 
+#include <algorithm>
+#include <chrono>
+#include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace RcclUnitTesting
@@ -201,6 +205,243 @@ TEST_F(CeReduceScatterEligibilityTest, ChunkLayout_LargeMessagePipelined)
     // walks the last chunk past the end of the shard.
     EXPECT_EQ((chunksPerShard - 1) * baseChunkElems + lastChunkElems, shardElems);
     EXPECT_EQ((chunksPerShard - 1) * chunkBytes + lastChunkElems * sizeof(float), shardBytes);
+}
+
+// ---------------------------------------------------------------------------
+// Staging-offset arithmetic (ce_coll.h). Offsets are hand-computed, not re-derived, so an
+// off-by-one shows up as a wrong number instead of two wrong numbers agreeing. Nothing here calls
+// ncclCeReduceScatter(), so a call site passing a wrong index is out of reach.
+// ncclCeAllReduceMaxChunkBytes() stands in for the production ceArStagingBytes / nRanks, which is
+// also what ncclCeEnsureAllReduceStaging() sizes the buffer with, so the bounds are the allocated
+// extent rather than an assumption that could drift from it.
+// ---------------------------------------------------------------------------
+
+TEST_F(CeReduceScatterEligibilityTest, DstSlotOffset_HandComputedForEveryRankAndSlot)
+{
+    // Region numbering written out by hand, so no right-hand side re-derives slot * nRanks + sender,
+    // and scaled by slotChunkBytes so a staging retune cannot fail this for an unrelated reason.
+    // The static_assert turns a NCCL_CE_NUM_SLOTS bump into a build error, not unchecked slots.
+    static_assert(NCCL_CE_NUM_SLOTS == 2, "the slot tables below enumerate every slot by hand");
+    constexpr int nRanks         = 4;
+    const size_t  slotChunkBytes = ncclCeAllReduceSlotChunkBytes(ncclCeAllReduceMaxChunkBytes(nRanks));
+
+    // nRanks=4 divides the staging size exactly, so the 16B round-down is a no-op and consecutive
+    // regions really are one slotChunkBytes apart with no rounding gap.
+    ASSERT_EQ(slotChunkBytes, ncclCeAllReduceMaxChunkBytes(nRanks));
+
+    // Slot 0: the four senders' regions, back to back from the top of the buffer.
+    EXPECT_EQ(ncclCeReduceScatterDstSlotOffsetBytes(0, 0, nRanks, slotChunkBytes), 0 * slotChunkBytes);
+    EXPECT_EQ(ncclCeReduceScatterDstSlotOffsetBytes(0, 1, nRanks, slotChunkBytes), 1 * slotChunkBytes);
+    EXPECT_EQ(ncclCeReduceScatterDstSlotOffsetBytes(0, 2, nRanks, slotChunkBytes), 2 * slotChunkBytes);
+    EXPECT_EQ(ncclCeReduceScatterDstSlotOffsetBytes(0, 3, nRanks, slotChunkBytes), 3 * slotChunkBytes);
+
+    // Slot 1 starts one whole slot stride (nRanks * slotChunkBytes) later.
+    EXPECT_EQ(ncclCeReduceScatterDstSlotOffsetBytes(1, 0, nRanks, slotChunkBytes), 4 * slotChunkBytes);
+    EXPECT_EQ(ncclCeReduceScatterDstSlotOffsetBytes(1, 1, nRanks, slotChunkBytes), 5 * slotChunkBytes);
+    EXPECT_EQ(ncclCeReduceScatterDstSlotOffsetBytes(1, 2, nRanks, slotChunkBytes), 6 * slotChunkBytes);
+    EXPECT_EQ(ncclCeReduceScatterDstSlotOffsetBytes(1, 3, nRanks, slotChunkBytes), 7 * slotChunkBytes);
+
+    // The last region ends exactly at the staging extent, leaving no unused tail and no overrun.
+    EXPECT_EQ(ncclCeReduceScatterDstSlotOffsetBytes(
+                  NCCL_CE_NUM_SLOTS - 1, nRanks - 1, nRanks, slotChunkBytes) + slotChunkBytes,
+              static_cast<size_t>(NCCL_CE_NUM_SLOTS) * nRanks * ncclCeAllReduceMaxChunkBytes(nRanks));
+}
+
+TEST_F(CeReduceScatterEligibilityTest, DstSlotOffset_RegionsNeverOverlapAndStayInBounds)
+{
+    // Every (slot, sender) pair must own a private slotChunkBytes region; sharing one would have
+    // the reduce kernel read one rank's data twice and another's never. Sorted and checked as a
+    // real inequality over the computed offsets, not a restatement of the formula.
+    for(int nRanks : {2, 3, 4, 5, 6, 7, 8, 12, 16})
+    {
+        SCOPED_TRACE("nRanks=" + std::to_string(nRanks));
+        const size_t maxChunkBytes  = ncclCeAllReduceMaxChunkBytes(nRanks);
+        const size_t slotChunkBytes = ncclCeAllReduceSlotChunkBytes(maxChunkBytes);
+        const size_t bufferBytes    = static_cast<size_t>(NCCL_CE_NUM_SLOTS) * nRanks * maxChunkBytes;
+
+        std::vector<size_t> starts;
+        for(int slot = 0; slot < NCCL_CE_NUM_SLOTS; ++slot)
+        {
+            for(int sender = 0; sender < nRanks; ++sender)
+            {
+                starts.push_back(
+                    ncclCeReduceScatterDstSlotOffsetBytes(slot, sender, nRanks, slotChunkBytes));
+            }
+        }
+
+        ASSERT_EQ(starts.size(), static_cast<size_t>(NCCL_CE_NUM_SLOTS) * nRanks);
+        std::sort(starts.begin(), starts.end());
+        for(size_t i = 1; i < starts.size(); ++i)
+        {
+            EXPECT_GE(starts[i], starts[i - 1] + slotChunkBytes)
+                << "regions " << (i - 1) << " and " << i << " overlap";
+        }
+        EXPECT_LE(starts.back() + slotChunkBytes, bufferBytes);
+    }
+}
+
+TEST_F(CeReduceScatterEligibilityTest, SrcOffset_HandComputedWholeShardAndPipelined)
+{
+    // Four 4096B shards (1024 floats, 4 ranks) walked four chunks at a time. Rank 2 / chunk 2 lands
+    // at 10240 either way round, so the asymmetric cases (rank 1 / chunk 3, rank 3 / chunk 1) are
+    // the ones that separate the rank term from the chunk term.
+    constexpr int    nRanks     = 4;
+    constexpr size_t shardBytes = 4096;
+    constexpr size_t chunkBytes = 1024;
+
+    EXPECT_EQ(ncclCeReduceScatterSrcOffsetBytes(0, shardBytes, 0, chunkBytes), 0u);
+    EXPECT_EQ(ncclCeReduceScatterSrcOffsetBytes(0, shardBytes, 3, chunkBytes), 3072u);
+    EXPECT_EQ(ncclCeReduceScatterSrcOffsetBytes(1, shardBytes, 0, chunkBytes), 4096u);
+    EXPECT_EQ(ncclCeReduceScatterSrcOffsetBytes(1, shardBytes, 3, chunkBytes), 7168u);
+    EXPECT_EQ(ncclCeReduceScatterSrcOffsetBytes(2, shardBytes, 0, chunkBytes), 8192u);
+    EXPECT_EQ(ncclCeReduceScatterSrcOffsetBytes(2, shardBytes, 2, chunkBytes), 10240u);
+    EXPECT_EQ(ncclCeReduceScatterSrcOffsetBytes(3, shardBytes, 0, chunkBytes), 12288u);
+    EXPECT_EQ(ncclCeReduceScatterSrcOffsetBytes(3, shardBytes, 1, chunkBytes), 13312u);
+    EXPECT_EQ(ncclCeReduceScatterSrcOffsetBytes(3, shardBytes, 3, chunkBytes), 15360u);
+    EXPECT_EQ(ncclCeReduceScatterSrcOffsetBytes(3, shardBytes, 3, chunkBytes) + chunkBytes,
+              static_cast<size_t>(nRanks) * shardBytes);
+
+    // The other chunk size ncclCeReduceScatter() can pick: a shard that fits one slot travels
+    // whole, so chunkBytes is the shard and the chunk index stays 0. The rank offsets must be
+    // unchanged; any defect keyed on the two sizes being equal is invisible at 1024 vs 4096.
+    constexpr size_t wholeChunkBytes = shardBytes;
+
+    EXPECT_EQ(ncclCeReduceScatterSrcOffsetBytes(0, shardBytes, 0, wholeChunkBytes), 0u);
+    EXPECT_EQ(ncclCeReduceScatterSrcOffsetBytes(1, shardBytes, 0, wholeChunkBytes), 4096u);
+    EXPECT_EQ(ncclCeReduceScatterSrcOffsetBytes(2, shardBytes, 0, wholeChunkBytes), 8192u);
+    EXPECT_EQ(ncclCeReduceScatterSrcOffsetBytes(3, shardBytes, 0, wholeChunkBytes), 12288u);
+    EXPECT_EQ(ncclCeReduceScatterSrcOffsetBytes(nRanks - 1, shardBytes, 0, wholeChunkBytes) + wholeChunkBytes,
+              static_cast<size_t>(nRanks) * shardBytes);
+}
+
+TEST_F(CeReduceScatterEligibilityTest, SrcOffset_TilesTheSendBufferExactly)
+{
+    // The (dstRank, chunk) copies must tile [0, nRanks * shardBytes) exactly: a gap leaves stale data
+    // in the peer's slot, an overlap drops the bytes it skipped. 2500 elements over a 700-element
+    // chunk gives every shard a short tail. Sizes are synthetic; the property holds at any.
+    constexpr int    nRanks        = 3;
+    constexpr size_t eltSize       = sizeof(float);
+    constexpr size_t shardElems    = 2500;
+    constexpr size_t shardBytes    = shardElems * eltSize;
+    constexpr size_t chunkBytes    = 700 * eltSize;
+
+    // Mirrors ncclCeReduceScatter()'s own chunk bookkeeping.
+    const size_t baseChunkElems = chunkBytes / eltSize;
+    const size_t tailChunkElems = shardElems % baseChunkElems;
+    const size_t chunksPerShard = shardElems / baseChunkElems + (tailChunkElems != 0 ? 1 : 0);
+    ASSERT_EQ(baseChunkElems, 700u);
+    ASSERT_EQ(tailChunkElems, 400u); // 2500 = 3*700 + 400
+    ASSERT_EQ(chunksPerShard, 4u);
+
+    std::vector<std::pair<size_t, size_t>> spans; // [begin, end)
+    for(int dstRank = 0; dstRank < nRanks; ++dstRank)
+    {
+        for(int chunk = 0; chunk < static_cast<int>(chunksPerShard); ++chunk)
+        {
+            const bool   isTail = (chunk == static_cast<int>(chunksPerShard) - 1) && (tailChunkElems > 0);
+            const size_t bytes  = isTail ? tailChunkElems * eltSize : chunkBytes;
+            const size_t begin  = ncclCeReduceScatterSrcOffsetBytes(dstRank, shardBytes, chunk, chunkBytes);
+            spans.emplace_back(begin, begin + bytes);
+        }
+    }
+
+    std::sort(spans.begin(), spans.end());
+    ASSERT_EQ(spans.front().first, 0u);
+    for(size_t i = 1; i < spans.size(); ++i)
+    {
+        EXPECT_EQ(spans[i].first, spans[i - 1].second)
+            << "span " << i << " does not start where span " << (i - 1) << " ended";
+    }
+    EXPECT_EQ(spans.back().second, static_cast<size_t>(nRanks) * shardBytes);
+}
+
+TEST_F(CeReduceScatterEligibilityTest, SignalIndex_HandComputedBoundedAndUnique)
+{
+    // signalBuffer is [NCCL_CE_NUM_SLOTS][nRanks], read as an array index locally and as a byte
+    // offset into signalWin for peers. Both views now come from this helper, so comparing them
+    // would compare a value with itself; the indices and the two properties below are what is left.
+    EXPECT_EQ(ncclCeReduceScatterSignalIndex(0, 0, 4), 0u);
+    EXPECT_EQ(ncclCeReduceScatterSignalIndex(0, 3, 4), 3u);
+    EXPECT_EQ(ncclCeReduceScatterSignalIndex(1, 0, 4), 4u);
+    EXPECT_EQ(ncclCeReduceScatterSignalIndex(1, 3, 4), 7u);
+
+    // Every (slot, rank) pair gets its own flag, and no index runs past the NUM_SLOTS * nRanks
+    // words ncclCeInit() allocates. Swept over several rank counts because at nRanks 4 alone a
+    // formula that hardcoded 4, or XORed the two terms, is still bounded and collision-free.
+    for(int nRanks : {2, 3, 4, 5, 6, 7, 8, 12, 16})
+    {
+        SCOPED_TRACE("nRanks=" + std::to_string(nRanks));
+        std::vector<size_t> indices;
+        for(int slot = 0; slot < NCCL_CE_NUM_SLOTS; ++slot)
+        {
+            for(int rank = 0; rank < nRanks; ++rank)
+            {
+                const size_t index = ncclCeReduceScatterSignalIndex(slot, rank, nRanks);
+                EXPECT_LT(index, static_cast<size_t>(NCCL_CE_NUM_SLOTS) * nRanks);
+                indices.push_back(index);
+            }
+        }
+        std::sort(indices.begin(), indices.end());
+        EXPECT_EQ(std::adjacent_find(indices.begin(), indices.end()), indices.end())
+            << "two (slot, rank) pairs share one doorbell";
+    }
+}
+
+TEST_F(CeReduceScatterEligibilityTest, DstSlotOffset_ChunkNeverSpillsIntoTheNextSendersRegion)
+{
+    // Where the region formula and the chunk-size formula meet: a copy runs currentChunkBytes from
+    // its region start and must end no later than the next region begins, or one sender overwrites
+    // the next one's contribution. Each end is compared against the following start, the last
+    // against the staging extent. Driven at the awkward rank counts where slotChunkBytes is a
+    // truncated capacity, which split across the whole-shard and pipelined branches; which branch
+    // falls out of the 16B rounding, so the flags pin that both were really taken.
+    bool sawWholeShard = false;
+    bool sawPipelined  = false;
+
+    for(int nRanks : {3, 5, 6, 7, 12})
+    {
+        SCOPED_TRACE("nRanks=" + std::to_string(nRanks));
+        const size_t eltSize        = sizeof(float);
+        const size_t maxChunkBytes  = ncclCeAllReduceMaxChunkBytes(nRanks);
+        const size_t slotChunkBytes = ncclCeAllReduceSlotChunkBytes(maxChunkBytes);
+        const size_t shardElems     = kCeRsMaxMsgBytesDefault / (eltSize * static_cast<size_t>(nRanks));
+        const size_t shardBytes     = shardElems * eltSize;
+        const bool   wholeShard     = (shardBytes <= slotChunkBytes);
+        const size_t chunkBytes =
+            wholeShard ? shardBytes : ncclCeAllReduceChooseChunkBytes(shardBytes, slotChunkBytes);
+
+        // ncclCeReduceScatter()'s bookkeeping: every copy is chunkBytes except the shard's last,
+        // which carries any remainder. That remainder is always short, so the max can only pick
+        // chunkBytes; it names both copy sizes rather than choosing between them.
+        const size_t baseChunkElems = chunkBytes / eltSize;
+        ASSERT_GT(baseChunkElems, 0u); // guards the % baseChunkElems division below
+        const size_t tailChunkElems = shardElems % baseChunkElems;
+        const size_t tailChunkBytes = (tailChunkElems != 0) ? tailChunkElems * eltSize : chunkBytes;
+        const size_t maxCopyBytes   = std::max(chunkBytes, tailChunkBytes);
+
+        sawWholeShard = sawWholeShard || wholeShard;
+        sawPipelined  = sawPipelined || (!wholeShard && tailChunkElems != 0);
+
+        const size_t bufferBytes = static_cast<size_t>(NCCL_CE_NUM_SLOTS) * nRanks * maxChunkBytes;
+        for(int slot = 0; slot < NCCL_CE_NUM_SLOTS; ++slot)
+        {
+            for(int sender = 0; sender < nRanks; ++sender)
+            {
+                const bool   isLast     = (slot == NCCL_CE_NUM_SLOTS - 1) && (sender == nRanks - 1);
+                const int    nextSlot   = (sender + 1 == nRanks) ? slot + 1 : slot;
+                const int    nextSender = (sender + 1 == nRanks) ? 0 : sender + 1;
+                const size_t start      = ncclCeReduceScatterDstSlotOffsetBytes(slot, sender, nRanks, slotChunkBytes);
+                const size_t limit      =
+                    isLast ? bufferBytes
+                           : ncclCeReduceScatterDstSlotOffsetBytes(nextSlot, nextSender, nRanks, slotChunkBytes);
+                EXPECT_LE(start + maxCopyBytes, limit)
+                    << "slot=" << slot << " sender=" << sender << " overruns the next region";
+            }
+        }
+    }
+
+    EXPECT_TRUE(sawWholeShard) << "no rank count reached the whole-shard branch";
+    EXPECT_TRUE(sawPipelined) << "no rank count reached the pipelined short-tail branch";
 }
 
 TEST_F(CeReduceScatterEligibilityTest, MaxStagingBytesPerRank)

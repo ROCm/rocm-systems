@@ -4685,11 +4685,15 @@ TEST(WrapMicrotestIsolated, SelectAllGather_PlainKernelFallbackReportsGetAlgoInf
 }
 
 // ===========================================================================
-// rcclSelectReduceScatter in rccl_wrap.cc. Own priority order:
-// symmetric (op sum OR avg -- distinct from AllReduce's sum-only) -> CE 2-shot
-// when RCCL_CE_REDUCESCATTER=1 and staging exists -> enqueue CE while staging
-// is still null -> DDA -> Hierarchical -> Direct -> symmetric (reported)
-// -> plain kernel. With the flag at its default of 0, CE is not selected.
+// rcclSelectReduceScatter in rccl_wrap.cc. Own priority order: symmetric
+// eligibility (op sum OR avg -- distinct from AllReduce's sum-only) -> CE
+// 2-shot once staging exists -> CE registered while staging is still null, so
+// enqueue allocates it -> DDA (gfx1250 fabric may preempt symmetric
+// eligibility, IPC stays strictly gated on !symEligible) -> Hierarchical ->
+// Direct -> CE registered -> symmetric (reported) -> plain kernel. The CE
+// steps have their own section further down this file; every test below
+// leaves RCCL_CE_REDUCESCATTER at its 0 default, which is what keeps them out
+// of these cases.
 // ===========================================================================
 
 TEST(WrapMicrotestIsolated, SelectReduceScatter_SymmetricGatedOnSumOrAvgOpOnly) {
@@ -5023,6 +5027,638 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_AvgOpIsExcludedFromDirect) {
 }
 
 // ===========================================================================
+// rcclSelectReduceScatter's three CE returns: 2-shot once staging exists, RCCL_CE_REGISTERED while
+// it is still null so enqueue allocates it, and the late arm over registered windows. All off by
+// default (SelectReduceScatter_DoesNotChooseCeWhenParamsDefaultOff); every case here turns
+// RCCL_CE_REDUCESCATTER on, and runs isolated so its params do not leak into the next.
+// symSuppressedByMin/Max cannot fire: rccl_arch_thresholds_fakes.cc leaves the table null, so
+// symEligible is exactly what the g_isSymmetricKernelRequested seam says.
+// ===========================================================================
+
+namespace {
+// Both params on. rcclSelectReduceScatter reads the force one a second time, for `force || symReg`.
+int64_t ForcedCeReduceScatterParams(const char* env, int64_t deft) {
+  if (std::strcmp(env, "RCCL_CE_REDUCESCATTER") == 0) return int64_t(1);
+  if (std::strcmp(env, "RCCL_FORCE_CE_REDUCESCATTER") == 0) return int64_t(1);
+  return deft;
+}
+
+// The late arm only runs with ceReduceScatterAllowed false, and only the 2-shot size cap falsifies
+// it while leaving symReg, CTAPolicy, op and the param intact. Hence this cap, shared below.
+constexpr size_t kCeRsTwoShotCapBytes = 4096;
+constexpr int kCeRsRegisteredArmRanks = 4;
+// msgBytes is recvcount * sizeof(float) * nRanks; first count past the cap.
+constexpr size_t kCeRsPastCapRecvcount =
+  kCeRsTwoShotCapBytes / (sizeof(float) * (size_t)kCeRsRegisteredArmRanks) + 1;
+
+// Capped, force off: the registered arm's `CTAPolicy & NCCL_CTA_POLICY_ZERO` disjunct.
+int64_t RegisteredArmCeReduceScatterParams(const char* env, int64_t deft) {
+  if (std::strcmp(env, "RCCL_CE_AR_MAX_MSG_BYTES") == 0) return (int64_t)kCeRsTwoShotCapBytes;
+  if (std::strcmp(env, "RCCL_CE_REDUCESCATTER") == 0) return int64_t(1);
+  return deft;
+}
+
+// Capped, force on: the registered arm's `|| force` disjunct.
+int64_t ForcedRegisteredArmCeReduceScatterParams(const char* env, int64_t deft) {
+  if (std::strcmp(env, "RCCL_CE_AR_MAX_MSG_BYTES") == 0) return (int64_t)kCeRsTwoShotCapBytes;
+  return ForcedCeReduceScatterParams(env, deft);
+}
+}  // namespace
+
+// The `force` side of `force || symReg`: no registered window, and CTAPolicy left non-ZERO so
+// force must also bypass rcclUseCeReduceScatter's `!= ZERO && !force` guard.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_CeTwoShotChosenWhenForcedAndStagingBufferReady) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_CeTwoShotChosenWhenForcedAndStagingBufferReady",
+      []() {
+        g_loadParam = ForcedCeReduceScatterParams;
+        ScopedHook localBlocks(g_ceLocalReduceBlocks, [](ncclDataType_t, size_t) { return 19; });
+        ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT; // force must bypass this
+        uint8_t stagingBuf[16];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                       ncclSum, /*query=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, decision.protocol);
+        EXPECT_EQ(19, decision.nMaxChannels);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The `symReg` side: no force param, so CTAPolicy must be ZERO. Swapping the `||` for `&&` makes
+// this case stop selecting CE.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_CeTwoShotChosenViaSymRegWithoutForce) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_CeTwoShotChosenViaSymRegWithoutForce",
+      []() {
+        g_loadParam = ForceParam("RCCL_CE_REDUCESCATTER", int64_t(1));
+        ScopedHook ceAvailable(
+            g_ceAvailable,
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
+        ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        uint8_t stagingBuf[16];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                       ncclSum, /*query=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The block calculator gets recvcount itself, not recvcount/nRanks (AllReduce's argument) nor
+// recvcount*nRanks. nRanks 4 / recvcount 16 keeps all three distinct so the assertion can fail.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_CeTwoShotPassesShardCountToBlockCalculator) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_CeTwoShotPassesShardCountToBlockCalculator",
+      []() {
+        g_loadParam = ForcedCeReduceScatterParams;
+        ScopedHook localBlocks(g_ceLocalReduceBlocks, [](ncclDataType_t type, size_t chunkElems) {
+          EXPECT_EQ(ncclFloat32, type);
+          EXPECT_EQ(16u, chunkElems); // recvcount, not recvcount/nRanks (4) or recvcount*nRanks (64)
+          return 23;
+        });
+        ncclComm* comm = MakeSelectComm();
+        comm->nRanks = 4;
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        uint8_t stagingBuf[16];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/16, ncclFloat32,
+                                                       ncclSum, /*query=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        EXPECT_EQ(23, decision.nMaxChannels);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The arm's `ceARTmpBuf != NULL` conjunct is driven from both sides by
+// SelectReduceScatter_CeOptInSelectsRegisteredThenTwoShot further down.
+
+// `force || symReg` with both sides false: everything else is arranged for CE, staging included.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_CeTwoShotNotChosenWhenNeitherForceNorSymRegEligible) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_CeTwoShotNotChosenWhenNeitherForceNorSymRegEligible",
+      []() {
+        g_loadParam = ForceParam("RCCL_CE_REDUCESCATTER", int64_t(1));
+        ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO; // rcclUseCeReduceScatter itself still eligible
+        uint8_t stagingBuf[16];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                       ncclSum, /*query=*/false, &decision));
+        EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// RCCL_FORCE_CE_REDUCESCATTER is a modifier, not an on-switch: at RCCL_CE_REDUCESCATTER=0 the
+// first guard returns and the late arm's `!rcclParamCeReduceScatter()` clears ceAvailable.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_ForceParamAloneDoesNotEnableCe) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_ForceParamAloneDoesNotEnableCe",
+      []() {
+        g_loadParam = ForceParam("RCCL_FORCE_CE_REDUCESCATTER", int64_t(1));
+        ScopedHook ceAvailable(
+            g_ceAvailable,
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
+        ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        uint8_t stagingBuf[16];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                       ncclSum, /*query=*/false, &decision));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The 2-shot size cap from both sides. msgBytes is the whole send buffer, so nRanks is 4 to keep
+// its `* nRanks` term load-bearing, and the cap is a small literal rather than a value re-derived
+// from the (null) arch table. Only the force-specific guard names RCCL_FORCE_CE_REDUCESCATTER, so
+// the log assertion pins which one rejected the second call.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_CeTwoShotMessageSizeCapBoundary) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_CeTwoShotMessageSizeCapBoundary",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          if (std::strcmp(env, "RCCL_CE_AR_MAX_MSG_BYTES") == 0) return int64_t(4096);
+          return ForcedCeReduceScatterParams(env, deft);
+        };
+        ncclComm* comm = MakeSelectComm();
+        comm->nRanks = 4;
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        uint8_t stagingBuf[16];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
+        // Largest recvcount whose whole send buffer still fits the 4096B cap exactly.
+        const size_t atCap = 4096 / (sizeof(float) * 4);
+        rcclCollDecision atCapDecision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, atCap, ncclFloat32, ncclSum,
+                                                       /*query=*/false, &atCapDecision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, atCapDecision.algo);
+        rcclCollDecision pastCapDecision{};
+        std::string log = RcclUnitTesting::CaptureLog([&]() {
+          EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, atCap + 1, ncclFloat32, ncclSum,
+                                                         /*query=*/false, &pastCapDecision));
+        });
+        EXPECT_EQ(NCCL_ALGO_RING, pastCapDecision.algo);
+        EXPECT_NE(std::string::npos, log.find("despite RCCL_FORCE_CE_REDUCESCATTER=1"));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// CE 2-shot beats a DDA IPC candidate: SelectReduceScatter_DdaIpcChosenOnNonGfx1250Arch reaches
+// RCCL_DDA_IPC from this same comm, but the CE arm sits ahead of the DDA block.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_CeTwoShotPreemptsDdaIpc) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_CeTwoShotPreemptsDdaIpc",
+      []() {
+        g_loadParam = ForcedCeReduceScatterParams;
+        ScopedHook ipcEligible(g_reduceScatterDdaIpcEligible,
+                               [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
+                                 return true;
+                               });
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->nRanks = 8; // rcclDdaEnabled needs >=8 for gfx942
+        comm->nNodes = 1;
+        comm->symmetricSupport = 1;
+        uint8_t stagingBuf[16];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                       ncclSum, /*query=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// CE now outranks DDA even on the fabric arch, where DDA used to win. That also retires the
+// block's `(ddaFabricArch || !ceReduceScatterAllowed)`: reaching it needs
+// `symEligible || !ceReduceScatterAllowed`, and its own `!symEligible` leaves only the second
+// disjunct, so the conjunct is true whenever evaluated.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_CeRegisteredPreemptsDdaFabricOnGfx1250) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_CeRegisteredPreemptsDdaFabricOnGfx1250",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          if (std::strcmp(env, "RCCL_CE_REDUCESCATTER") == 0) return int64_t(1);
+          if (std::strcmp(env, "RCCL_DDA_LL") == 0) return int64_t(1);
+          return deft;
+        };
+        ScopedHook ceAvailable(
+            g_ceAvailable,
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
+        ScopedHook llEligible(g_reduceScatterDdaFabricLLEligible,
+                              [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
+                                return true;
+                              });
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->nRanks = 1;
+        comm->nNodes = 1;
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        // comm->ceColl.ceARTmpBuf left null, which is the arm under test.
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                       ncclSum, /*query=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Same preemption for the IPC tier, and via `force` alone: no g_ceAvailable hook, so symReg is
+// false. Same comm as CeTwoShotPreemptsDdaIpc minus the staging buffer.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_CeRegisteredPreemptsDdaIpcOnNonGfx1250) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_CeRegisteredPreemptsDdaIpcOnNonGfx1250",
+      []() {
+        g_loadParam = ForcedCeReduceScatterParams;
+        ScopedHook ipcEligible(g_reduceScatterDdaIpcEligible,
+                               [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
+                                 return true;
+                               });
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->nRanks = 8;
+        comm->nNodes = 1;
+        comm->symmetricSupport = 1;
+        // comm->ceColl.ceARTmpBuf left null, which is the arm under test.
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                       ncclSum, /*query=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_DDA_IPC, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The late arm: CE available, no sysmem segment, CTAPolicy ZERO, param on, and past the 2-shot cap
+// so neither early arm answers first. Its block calculator gets the plain recvcount.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_CeRegisteredChosenWhenAvailableAndPolicyZero) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_CeRegisteredChosenWhenAvailableAndPolicyZero",
+      []() {
+        g_loadParam = RegisteredArmCeReduceScatterParams;
+        ScopedHook ceAvailable(
+            g_ceAvailable,
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
+        ScopedHook localBlocks(g_ceLocalReduceBlocks, [](ncclDataType_t type, size_t chunkElems) {
+          EXPECT_EQ(ncclFloat32, type);
+          EXPECT_EQ(kCeRsPastCapRecvcount, chunkElems);
+          return 31;
+        });
+        ncclComm* comm = MakeSelectComm();
+        comm->nRanks = kCeRsRegisteredArmRanks;
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, kCeRsPastCapRecvcount,
+                                                       ncclFloat32, ncclSum, /*query=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, decision.protocol);
+        EXPECT_EQ(31, decision.nMaxChannels);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Second, independent way through that arm's `(CTAPolicy & NCCL_CTA_POLICY_ZERO) || force`: same
+// setup with CTAPolicy back at DEFAULT, the input the first disjunct rejects.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_ForcedCeRegisteredBypassesCtaPolicy) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_ForcedCeRegisteredBypassesCtaPolicy",
+      []() {
+        g_loadParam = ForcedRegisteredArmCeReduceScatterParams;
+        ScopedHook ceAvailable(
+            g_ceAvailable,
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
+        ncclComm* comm = MakeSelectComm();
+        comm->nRanks = kCeRsRegisteredArmRanks;
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, kCeRsPastCapRecvcount,
+                                                       ncclFloat32, ncclSum, /*query=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The rejecting side of that guard: the two tests above drive one disjunct true each, so deleting
+// the guard leaves both green. CTAPolicy DEFAULT and force off falsifies both.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_CeRegisteredDeclinedWithoutPolicyZeroOrForce) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_CeRegisteredDeclinedWithoutPolicyZeroOrForce",
+      []() {
+        g_loadParam = RegisteredArmCeReduceScatterParams;
+        ScopedHook ceAvailable(
+            g_ceAvailable,
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
+        ncclComm* comm = MakeSelectComm();
+        comm->nRanks = kCeRsRegisteredArmRanks;
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, kCeRsPastCapRecvcount,
+                                                       ncclFloat32, ncclSum, /*query=*/false, &decision));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// ceReduceScatterOpSupported's Sum||Prod||Min||Max on the late arm, previously driven through Sum
+// only; dropping any disjunct now fails one iteration. No other arm can claim these calls:
+// symEligible needs Sum or Avg, Hierarchical needs Sum, Direct is gfx950-only.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_CeRegisteredChosenWithNonSumOps) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_CeRegisteredChosenWithNonSumOps",
+      []() {
+        g_loadParam = RegisteredArmCeReduceScatterParams;
+        ScopedHook ceAvailable(
+            g_ceAvailable,
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
+        for (ncclRedOp_t op : {ncclProd, ncclMin, ncclMax}) {
+          SCOPED_TRACE("op=" + std::to_string((int)op));
+          ncclComm* comm = MakeSelectComm();
+          comm->nRanks = kCeRsRegisteredArmRanks;
+          comm->symmetricSupport = 1;
+          comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+          rcclCollDecision decision{};
+          EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, kCeRsPastCapRecvcount,
+                                                         ncclFloat32, op, /*query=*/false, &decision));
+          EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+          DeleteCommWithArch(comm);
+        }
+      });
+}
+
+// The second copy of that chain, rcclUseCeReduceScatter's rejecting `op != ...` gate, which the
+// test above cannot reach past its size guard. Staging ready, so 2-shot returns first.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_CeTwoShotChosenWithNonSumOps) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_CeTwoShotChosenWithNonSumOps",
+      []() {
+        g_loadParam = ForcedCeReduceScatterParams;
+        ScopedHook localBlocks(g_ceLocalReduceBlocks, [](ncclDataType_t, size_t) { return 19; });
+        for (ncclRedOp_t op : {ncclProd, ncclMin, ncclMax}) {
+          SCOPED_TRACE("op=" + std::to_string((int)op));
+          ncclComm* comm = MakeSelectComm();
+          comm->symmetricSupport = 1;
+          comm->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT; // force must bypass this
+          uint8_t stagingBuf[16];
+          comm->ceColl.ceARTmpBuf = stagingBuf;
+          rcclCollDecision decision{};
+          EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                         op, /*query=*/false, &decision));
+          EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+          EXPECT_EQ(19, decision.nMaxChannels);
+          DeleteCommWithArch(comm);
+        }
+      });
+}
+
+// The chain's "none match" case: ncclAvg is rejected by every disjunct, so ceAvailable goes false
+// whatever the probe said. Everything else is arranged for CE.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_CeNotChosenWithUnsupportedOp) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_CeNotChosenWithUnsupportedOp",
+      []() {
+        g_loadParam = ForcedCeReduceScatterParams;
+        ScopedHook ceAvailable(
+            g_ceAvailable,
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
+        ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        uint8_t stagingBuf[16];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                       ncclAvg, /*query=*/false, &decision));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The late arm's `!hasSysmemSegment`, send-window side: CeRegisteredChosenWhenAvailableAndPolicyZero
+// plus a window whose memory carries a sysmem segment. The early arms never consult it, so without
+// the cap one of them would answer and credit CE anyway.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_SysmemSegmentBlocksCeRegistered) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_SysmemSegmentBlocksCeRegistered",
+      []() {
+        int sendSentinel = 0, recvSentinel = 0;
+        g_loadParam = RegisteredArmCeReduceScatterParams;
+        ScopedHook ceAvailable(
+            g_ceAvailable,
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
+        ncclComm* comm = MakeSelectComm();
+        TestDevrWindows registered(comm, &sendSentinel, true, &recvSentinel, false);
+        comm->nRanks = kCeRsRegisteredArmRanks;
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, &sendSentinel, &recvSentinel,
+                                                       kCeRsPastCapRecvcount, ncclFloat32, ncclSum,
+                                                       /*query=*/false, &decision));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        EXPECT_EQ(NCCL_ALGO_RING, decision.algo); // fell all the way to the plain kernel
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The recv-window side of that `||`, whose second operand nothing else fires. Mirrors
+// SelectAllReduce_RecvWinSysmemSegmentBlocksCeRegistered.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_RecvWinSysmemSegmentBlocksCeRegistered) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_RecvWinSysmemSegmentBlocksCeRegistered",
+      []() {
+        int sendSentinel = 0, recvSentinel = 0;
+        g_loadParam = RegisteredArmCeReduceScatterParams;
+        ScopedHook ceAvailable(
+            g_ceAvailable,
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
+        ncclComm* comm = MakeSelectComm();
+        TestDevrWindows registered(comm, &sendSentinel, false, &recvSentinel, true);
+        comm->nRanks = kCeRsRegisteredArmRanks;
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, &sendSentinel, &recvSentinel,
+                                                       kCeRsPastCapRecvcount, ncclFloat32, ncclSum,
+                                                       /*query=*/false, &decision));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        EXPECT_EQ(NCCL_ALGO_RING, decision.algo); // fell all the way to the plain kernel
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The 2-shot arm's `!symEligible`: CeTwoShotChosenWhenForcedAndStagingBufferReady with the
+// symmetric seam saying "requested". Nothing else can intercept, DDA, Hierarchical and Direct all
+// carrying their own `!symEligible` and the late arm having no g_ceAvailable hook.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_SymmetricEligibleExcludesCeTwoShot) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_SymmetricEligibleExcludesCeTwoShot",
+      []() {
+        g_loadParam = ForcedCeReduceScatterParams;
+        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                                 size_t, const void*, void*, bool) { return true; });
+        ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT; // force bypasses this, as above
+        uint8_t stagingBuf[16];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                       ncclSum, /*query=*/false, &decision));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The same conjunct on the staging-allocation arm, unreachable above because a ready buffer sends
+// 2-shot first. Only the staging buffer differs.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_SymmetricEligibleExcludesCeRegistered) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_SymmetricEligibleExcludesCeRegistered",
+      []() {
+        g_loadParam = ForcedCeReduceScatterParams;
+        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                                 size_t, const void*, void*, bool) { return true; });
+        ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT; // force bypasses this, as above
+        // comm->ceColl.ceARTmpBuf left null, so the staging-allocation arm is the one in play.
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                       ncclSum, /*query=*/false, &decision));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// ceReduceScatterAllowed's `ncclGroupDepth == 0`, with the depth as the only difference from
+// CeTwoShotChosenWhenForcedAndStagingBufferReady. The late arm has no group gate, so g_ceAvailable
+// stays false and the claim is only about CE_2SHOT.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_InsideGroupExcludesCeTwoShot) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_InsideGroupExcludesCeTwoShot",
+      []() {
+        g_loadParam = ForcedCeReduceScatterParams;
+        ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT;
+        uint8_t stagingBuf[16];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
+        ncclGroupDepth = 1;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                       ncclSum, /*query=*/false, &decision));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The graph latch feeds ceArGraphAllowed, which gates every CE arm, so one latched comm shuts out
+// all of them; g_ceAvailable is hooked true so the late arm would otherwise answer. The latch is
+// ticked by ncclReduceScatter_impl, so the EXPECT_TRUE pins that the selector leaves it alone.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_LatchedGraphModeExcludesBothCeArms) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_LatchedGraphModeExcludesBothCeArms",
+      []() {
+        g_loadParam = ForcedCeReduceScatterParams;
+        ScopedHook ceAvailable(
+            g_ceAvailable,
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
+        ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        uint8_t stagingBuf[16];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
+        comm->ceColl.graphModeSeen = true;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                       ncclSum, /*query=*/false, &decision));
+        EXPECT_TRUE(comm->ceColl.graphModeSeen); // the selector must not tick the latch
+        EXPECT_FALSE(decision.ceArGraphAllowed);
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The other way into ceArGraphAllowed=false, `if (query && graphCapturingHint)`, which the test
+// above reaches through graphModeSeen instead. Run twice with the hint as the only difference, so
+// the second half cannot pass for a reason the first rules out. The selector never probes the
+// stream in either mode, so the probe counter must stay at 0.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_QueryModeCapturingHintExcludesBothCeArms) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_QueryModeCapturingHintExcludesBothCeArms",
+      []() {
+        g_loadParam = ForcedCeReduceScatterParams;
+        ScopedHook ceAvailable(
+            g_ceAvailable,
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
+        ScopedHook graphProbe(g_cudaGetCapturingGraph,
+                              [](struct ncclCudaGraph*, hipStream_t, int) { return ncclSuccess; });
+        ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        uint8_t stagingBuf[16];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
+
+        rcclCollDecision allowed{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                       ncclSum, /*query=*/true, &allowed,
+                                                       /*graphCapturingHint=*/false));
+        EXPECT_TRUE(allowed.ceArGraphAllowed);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, allowed.algo);
+
+        rcclCollDecision capturing{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                       ncclSum, /*query=*/true, &capturing,
+                                                       /*graphCapturingHint=*/true));
+        EXPECT_FALSE(capturing.ceArGraphAllowed);
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, capturing.algo);
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, capturing.algo);
+
+        EXPECT_EQ(0, graphProbe.calls);            // the selector never probes the stream
+        EXPECT_FALSE(comm->ceColl.graphModeSeen);  // and never ticks the latch
+        DeleteCommWithArch(comm);
+      });
+}
+
+// ===========================================================================
 // rcclHierarchicalAlgoInfo -- rccl_wrap.cc:394-445. Unconditionally
 // dereferences comm->hierarchicalInterComm/IntraComm (no query gate, unlike
 // the rcclSelectXxx callers' own inner Hierarchical branches) -- every test
@@ -5177,11 +5813,13 @@ TEST(WrapMicrotestIsolated, HierarchicalAlgoInfo_ReduceScatterIntraNeverUsesDire
 // than with the rest of that function's tests.
 // ===========================================================================
 
-// CE ReduceScatter is opt-in. With RCCL_CE_REDUCESCATTER left at 0, hooking
-// ncclCeAvailable / ncclCeScratchAvailable still does not select CE.
-TEST(WrapMicrotestIsolated, SelectReduceScatter_NeverChoosesCeRegardlessOfCeSeams) {
+// RCCL_CE_REDUCESCATTER at 0 keeps every CE arm out even with every CE seam forced true, the exact
+// combination that WOULD give CE_REGISTERED in rcclSelectAllReduce/AllGather. The param does it,
+// not an absent call: rcclUseCeReduceScatter returns on its first guard, clearing
+// ceReduceScatterAllowed, and the late arm clears ceAvailable on `!rcclParamCeReduceScatter()`.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_DoesNotChooseCeWhenParamsDefaultOff) {
   RUN_ISOLATED_TEST(
-      "Wrap_SelectReduceScatter_NeverChoosesCeRegardlessOfCeSeams",
+      "Wrap_SelectReduceScatter_DoesNotChooseCeWhenParamsDefaultOff",
       []() {
         ScopedHook ceAvailable(
             g_ceAvailable,

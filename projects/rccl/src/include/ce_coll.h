@@ -68,6 +68,24 @@ inline size_t ncclCeAllReduceChooseChunkBytes(size_t shardBytes, size_t slotChun
   return alignDown(targetChunkBytes, (size_t)16);
 }
 
+// CE ReduceScatter staging offsets, split out of ncclCeReduceScatter() for host testability;
+// ncclCeAllReduce() still open-codes these same three formulas.
+
+// Offset is keyed by senderRank, not dstRank: every peer reduces the same slot layout.
+inline size_t ncclCeReduceScatterDstSlotOffsetBytes(int slot, int senderRank, int nRanks, size_t slotChunkBytes) {
+  return ((size_t)slot * (size_t)nRanks + (size_t)senderRank) * slotChunkBytes;
+}
+
+// Offset of chunk `chunk` within dstRank's shard in sendbuff (shardBytes = recvcount * eltSize).
+inline size_t ncclCeReduceScatterSrcOffsetBytes(int dstRank, size_t shardBytes, int chunk, size_t chunkBytes) {
+  return (size_t)dstRank * shardBytes + (size_t)chunk * chunkBytes;
+}
+
+// [slot][rank] doorbell index; must match between the local array-index view and the peer byte-offset view.
+inline size_t ncclCeReduceScatterSignalIndex(int slot, int rank, int nRanks) {
+  return (size_t)slot * (size_t)nRanks + (size_t)rank;
+}
+
 enum ncclCeMethodId {
   ncclCeMethodId_AllGather_UC,
   ncclCeMethodId_AllGather_MC,

@@ -2454,8 +2454,8 @@ ncclResult_t ncclCeReduceScatter(struct ncclComm* comm, const void* sendbuff, vo
     chunksPerShard++;
   }
   size_t totalSteps = chunksPerShard;
-  // ceARTmpBuf slots are spaced by slotChunkBytes (<= maxChunkBytes at init).
-  const size_t slotStrideBytes = slotChunkBytes * (size_t)comm->nRanks;
+  // ceARTmpBuf slots are spaced by slotChunkBytes (<= maxChunkBytes at init);
+  // see the layout helpers in ce_coll.h for the offsets derived from it.
   int startCh = (int)chunksPerShard - (int)NUM_SLOTS;
   std::vector<uint32_t*> basePeerSignalAddr(comm->nRanks);
   INFO(NCCL_COLL,
@@ -2530,8 +2530,9 @@ ncclResult_t ncclCeReduceScatter(struct ncclComm* comm, const void* sendbuff, vo
     const int slot = (int)(ch % NUM_SLOTS);
     const bool isTail = (ch == chunksPerShard - 1) && (tailChunkElems > 0);
     const size_t currentChunkBytes = isTail ? tailChunkElems * eltSize : chunkBytes;
+    const size_t mySignalIndex = ncclCeReduceScatterSignalIndex(slot, comm->rank, comm->nRanks);
     if (totalSteps > 1) {
-      mySlotOffset = (slot * (size_t)comm->nRanks + comm->rank) * sizeof(uint32_t);
+      mySlotOffset = mySignalIndex * sizeof(uint32_t);
       for (int r = 0; r < comm->nRanks; r++) {
         if (r != comm->rank) {
           NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, ceColl->signalWin, mySlotOffset, r, &peerSig), ret, fail);
@@ -2542,19 +2543,20 @@ ncclResult_t ncclCeReduceScatter(struct ncclComm* comm, const void* sendbuff, vo
     if (ch >= NUM_SLOTS) {
       for (int r = 0; r < comm->nRanks; r++) {
         if (r == comm->rank) {
-          waits[r].waitValue.address = &signalBuffer[slot * comm->nRanks + comm->rank];
+          waits[r].waitValue.address = &signalBuffer[mySignalIndex];
         } else {
           waits[r].waitValue.address = basePeerSignalAddr[r];
         }
       }
       CUCHECKGOTO(hipStreamBatchMemOp(ceStream, comm->nRanks, waits.data(), 0), ret, fail);
     }
-    const size_t dstSlotOffsetBytes = (size_t)slot * slotStrideBytes + (size_t)comm->rank * slotChunkBytes;
-    const size_t srcChunkOffsetBytes = ch * chunkBytes;
+    const size_t dstSlotOffsetBytes =
+      ncclCeReduceScatterDstSlotOffsetBytes(slot, comm->rank, comm->nRanks, slotChunkBytes);
     batchOpsParams.numOps = 0;
     for (int r = 0; r < comm->nRanks; r++) {
       void* dstPtr;
-      const uint8_t* srcShard = (const uint8_t*)sendbuff + (r * shardBytes) + srcChunkOffsetBytes;
+      const uint8_t* srcShard =
+        (const uint8_t*)sendbuff + ncclCeReduceScatterSrcOffsetBytes(r, shardBytes, ch, chunkBytes);
       if (r == comm->rank) {
         dstPtr = tmpBuf + dstSlotOffsetBytes;
       } else {
@@ -2569,7 +2571,7 @@ ncclResult_t ncclCeReduceScatter(struct ncclComm* comm, const void* sendbuff, vo
     if (totalSteps > 1) {
       for (int r = 0; r < comm->nRanks; r++) {
         if (r == comm->rank) {
-          writes[r].writeValue.address = &signalBuffer[slot * comm->nRanks + comm->rank];
+          writes[r].writeValue.address = &signalBuffer[mySignalIndex];
         } else {
           writes[r].writeValue.address = basePeerSignalAddr[r];
         }
@@ -2590,10 +2592,11 @@ ncclResult_t ncclCeReduceScatter(struct ncclComm* comm, const void* sendbuff, vo
     }
     for (int chunkIndex = startCh; chunkIndex < (int)chunksPerShard; chunkIndex++) {
       const int drainSlot = chunkIndex % NUM_SLOTS;
-      const size_t slotOffset = (drainSlot * (size_t)comm->nRanks + comm->rank) * sizeof(uint32_t);
+      const size_t drainSignalIndex = ncclCeReduceScatterSignalIndex(drainSlot, comm->rank, comm->nRanks);
+      const size_t slotOffset = drainSignalIndex * sizeof(uint32_t);
       for (int r = 0; r < comm->nRanks; r++) {
         if (r == comm->rank) {
-          waits[r].waitValue.address = &signalBuffer[drainSlot * comm->nRanks + comm->rank];
+          waits[r].waitValue.address = &signalBuffer[drainSignalIndex];
         } else {
           NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, ceColl->signalWin, slotOffset, r, &peerSig), ret, fail);
           waits[r].waitValue.address = (uint32_t*)peerSig;
