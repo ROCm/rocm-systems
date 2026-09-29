@@ -447,6 +447,12 @@ add_test(
 )
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(
+        NAME CorpusRunnerUnitTest
+        COMMAND
+            ${Python3_EXECUTABLE} -B
+            ${CMAKE_CURRENT_SOURCE_DIR}/corpus/test-run-corpus-tests.py -v
+    )
+    add_test(
         NAME VfioGuestRunUnitTest
         COMMAND
             ${Python3_EXECUTABLE} -B
