@@ -769,8 +769,11 @@ ParserResult Av1VideoParser::ReadObuHeaderAndSize() {
         return PARSER_EOF;
     }
     uint8_t *p_stream = pic_data_buffer_ptr_ + curr_byte_offset_;
+    // Without a valid header there is no obu_size to step over, so the next OBU boundary is
+    // unknown and obu_header_ may still hold the previous OBU's fields. Stop here.
     if (ParseObuHeader(p_stream, pic_data_size_ - curr_byte_offset_) != PARSER_OK) {
         ErrorLog(g_rocdec_logger, "Syntax error(s) found in OBU header.");
+        return PARSER_EOF;
     }
     if (pic_data_size_ - curr_byte_offset_ < obu_header_.size) {
         return PARSER_EOF;
