@@ -20,11 +20,15 @@
 __device__ unsigned long long g_sdmaStubThreadfenceCount = 0;
 #undef NCCL_GIN_THREADFENCE_SYSTEM
 #define NCCL_GIN_THREADFENCE_SYSTEM() atomicAdd(&g_sdmaStubThreadfenceCount, 1ULL)
+// Count the agent-scope releases emitted on the ipcAgentFence!=0 arms.
+__device__ unsigned long long g_sdmaStubAgentReleaseCount = 0;
+#define NCCL_GIN_ANVIL_IPC_AGENT_RELEASE() atomicAdd(&g_sdmaStubAgentReleaseCount, 1ULL)
 #include "nccl_device/gin/anvil_sdma/gin_anvil_sdma.h"
 #endif
 
 #include <algorithm>
 #include <cstring>
+#include <string>
 #include <vector>
 
 namespace RcclUnitTesting
@@ -118,6 +122,17 @@ static void resetThreadfenceCount() {
 static unsigned long long readThreadfenceCount() {
   unsigned long long c = 0;
   HIP_EXPECT(hipMemcpyFromSymbol(&c, HIP_SYMBOL(g_sdmaStubThreadfenceCount), sizeof(c)));
+  return c;
+}
+
+static void resetAgentReleaseCount() {
+  unsigned long long z = 0;
+  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(g_sdmaStubAgentReleaseCount), &z, sizeof(z)));
+}
+
+static unsigned long long readAgentReleaseCount() {
+  unsigned long long c = 0;
+  HIP_EXPECT(hipMemcpyFromSymbol(&c, HIP_SYMBOL(g_sdmaStubAgentReleaseCount), sizeof(c)));
   return c;
 }
 
@@ -1409,6 +1424,85 @@ TEST_F(GinAnvilSdmaTemplateTest, PutValue_SdmaFusedSignalSkipsSignalPeer) {
   syncAndCheck();
   EXPECT_EQ(downloadU64(env.dst), kVal);
 }
+
+// H26: fence count and scope on each ipcAgentFence arm. On the clean-queue IPC
+// SignalInc path signalPeer is the only release, so these pin that the default
+// arm keeps it system scope and that the debug arm is the only way to lose it.
+enum class IpcAgentFencePath { kIpcSignal, kIpcCounterOnly, kSdmaThenSignal };
+
+struct IpcAgentFenceParam {
+  const char* name;
+  uint32_t ipcAgentFence;
+  IpcAgentFencePath path;
+  unsigned long long expectQuiet;
+  unsigned long long expectSystem;
+  unsigned long long expectAgent;
+};
+
+class GinAnvilSdmaIpcAgentFenceTest : public DeviceTestBase,
+                                      public ::testing::WithParamInterface<IpcAgentFenceParam> {};
+
+TEST_P(GinAnvilSdmaIpcAgentFenceTest, FenceCountAndScope) {
+  const IpcAgentFenceParam p = GetParam();
+  constexpr int kIpc = 64;
+  constexpr int kSdma = 512;
+  const bool sdma = p.path == IpcAgentFencePath::kSdmaThenSignal;
+  const size_t bytes = static_cast<size_t>(sdma ? kSdma : kIpc);
+  DeviceBuffer<uint8_t> d_src(bytes);
+  DeviceBuffer<uint8_t> d_dst(bytes);
+  d_src.zero();
+  d_dst.zero();
+  DeviceBuffer<uint64_t> d_signals(2);
+  d_signals.zero();
+  DeviceBuffer<uint64_t> d_counters(1);
+  d_counters.zero();
+  DeviceBuffer<uint64_t> d_dirty(1);
+  d_dirty.zero();
+  DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(2);
+  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle> d_q(1);
+  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle*> d_row(2);
+  DeviceBuffer<TemplateHarness> d_h(1);
+  TemplateHarness host{};
+  uploadHarness(&d_h, &host, &d_src, &d_dst, &d_entry, &d_q, &d_row, 128);
+  host.ctx.signals = d_signals.ptr;
+  host.ctx.nSignals = 2;
+  host.ctx.counters = d_counters.ptr;
+  host.ctx.nCounters = 1;
+  host.ctx.sdmaDirty = d_dirty.ptr;
+  host.ctx.ipcAgentFence = p.ipcAgentFence;
+  mapIpcToTwo(&host, &d_entry, &d_dst, bytes, &d_signals, 2 * sizeof(uint64_t));
+  d_h.upload(host);
+  resetQuietCount();
+  resetThreadfenceCount();
+  resetAgentReleaseCount();
+  if (p.path == IpcAgentFencePath::kIpcCounterOnly) {
+    kernelPutCounterOnlyIpcQuiesce<<<1, 1>>>(d_h.ptr, bytes);
+  } else {
+    kernelPutSignalQuiesce<<<1, 1>>>(d_h.ptr, /*hasWins=*/true, bytes);
+  }
+  syncAndCheck();
+  if (p.path == IpcAgentFencePath::kIpcCounterOnly) {
+    EXPECT_EQ(d_counters.download(), 1ULL);
+  } else {
+    EXPECT_EQ(d_signals.download(), 1ULL);
+  }
+  EXPECT_EQ(readQuietCount(), p.expectQuiet);
+  EXPECT_EQ(readThreadfenceCount(), p.expectSystem);
+  EXPECT_EQ(readAgentReleaseCount(), p.expectAgent);
+}
+
+// SdmaThenSignal is not fused (no signal_remote_addrs), so fenceBeforeSignal
+// quiets and system-fences regardless of the knob; only signalPeer changes.
+INSTANTIATE_TEST_SUITE_P(
+    BothArms, GinAnvilSdmaIpcAgentFenceTest,
+    ::testing::Values(
+        IpcAgentFenceParam{"IpcSignal_System", 0, IpcAgentFencePath::kIpcSignal, 0ULL, 1ULL, 0ULL},
+        IpcAgentFenceParam{"IpcSignal_Agent", 1, IpcAgentFencePath::kIpcSignal, 0ULL, 0ULL, 2ULL},
+        IpcAgentFenceParam{"IpcCounterOnly_System", 0, IpcAgentFencePath::kIpcCounterOnly, 0ULL, 1ULL, 0ULL},
+        IpcAgentFenceParam{"IpcCounterOnly_Agent", 1, IpcAgentFencePath::kIpcCounterOnly, 0ULL, 0ULL, 1ULL},
+        IpcAgentFenceParam{"SdmaThenSignal_System", 0, IpcAgentFencePath::kSdmaThenSignal, 1ULL, 2ULL, 0ULL},
+        IpcAgentFenceParam{"SdmaThenSignal_Agent", 1, IpcAgentFencePath::kSdmaThenSignal, 1ULL, 1ULL, 2ULL}),
+    [](const ::testing::TestParamInfo<IpcAgentFenceParam>& info) { return std::string(info.param.name); });
 
 #endif  // NCCL_GIN_ANVIL_SDMA_ENABLE
 

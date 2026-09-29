@@ -16,6 +16,13 @@
 #include "sdma/anvil_device.hpp"
 #include "sdma/sdma_opcodes.h"
 
+// Test seam for the agent-scope release on the ipcAgentFence!=0 arms, the
+// counterpart of NCCL_GIN_THREADFENCE_SYSTEM. Override before including this
+// header to observe which scope a signal path emitted.
+#ifndef NCCL_GIN_ANVIL_IPC_AGENT_RELEASE
+#define NCCL_GIN_ANVIL_IPC_AGENT_RELEASE() __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent")
+#endif
+
 namespace nccl {
 namespace gin {
 namespace anvil {
@@ -146,12 +153,18 @@ NCCL_DEVICE_INLINE void signalPeer(ncclGinAnvilSdmaGPUContext* rsCtx, int peer, 
   uint64_t* remoteSig = remoteSignalAddr(rsCtx, peer, signalId);
   if (remoteSig == nullptr) return;
   // The remote add is relaxed, so the release fence must run *before* it or
-  // ipcPut stores can pass the signal cell. ipcAgentFence!=0 keeps agent-scope
-  // on both sides; default 0 uses one system fence (counted seam for tests).
+  // ipcPut stores can pass the signal cell. Default ipcAgentFence==0 uses one
+  // system fence, which is the only release on the clean-queue IPC SignalInc
+  // path (skipFenceBeforeSignal drops the one in fenceBeforeSignal).
+  //
+  // ipcAgentFence!=0 is a debug/measurement knob only: agent scope does not
+  // make this GPU's stores visible to a peer GPU, so a peer can observe the
+  // signal before the payload. It exists to A/B the fence cost against the
+  // atomic cost and must not be enabled in production.
   if (rsCtx != nullptr && loadConst(&rsCtx->ipcAgentFence) != 0) {
-    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
+    NCCL_GIN_ANVIL_IPC_AGENT_RELEASE();
     ipcFlatAtomicAddSys64(remoteSig, value);
-    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
+    NCCL_GIN_ANVIL_IPC_AGENT_RELEASE();
   } else {
     NCCL_GIN_THREADFENCE_SYSTEM();
     ipcFlatAtomicAddSys64(remoteSig, value);
@@ -167,7 +180,7 @@ NCCL_DEVICE_INLINE void fenceBeforeSignal(ncclGinAnvilSdmaGPUContext* rsCtx, boo
     // on that queue, so a system fence still orders them ahead of the signal.
     NCCL_GIN_THREADFENCE_SYSTEM();
   } else if (rsCtx != nullptr && loadConst(&rsCtx->ipcAgentFence) != 0) {
-    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
+    NCCL_GIN_ANVIL_IPC_AGENT_RELEASE();
   } else {
     NCCL_GIN_THREADFENCE_SYSTEM();
   }
@@ -229,7 +242,7 @@ NCCL_DEVICE_INLINE void quietOwnedSdmaDirtyBits(ncclGinAnvilSdmaGPUContext* rsCt
   if (sdmaDirty == nullptr) return;
   auto** handles = (::sdma_anvil::SdmaQueueDeviceHandle**)loadConst(&rsCtx->queueHandles);
   int numCh = loadConst(&rsCtx->numChannels);
-  if (handles == nullptr || numCh <= 0) return;
+  if (numCh <= 0) return;
 
   const uint64_t owned = ownedSdmaDirtyMask(nRanks, numCh, threadRank, stride);
   if (owned == 0) return;
@@ -237,6 +250,12 @@ NCCL_DEVICE_INLINE void quietOwnedSdmaDirtyBits(ncclGinAnvilSdmaGPUContext* rsCt
   // zero and Flush touches no atomic at all on the path this PR is about.
   const uint64_t dirty = __scoped_atomic_load_n(sdmaDirty, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE) & owned;
   if (dirty == 0) return;
+  // Without a queue table there is nothing to drain, so drop every owned bit
+  // rather than leave the mask reporting work no quiet() can ever retire.
+  if (handles == nullptr) {
+    __scoped_atomic_fetch_and(sdmaDirty, ~owned, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+    return;
+  }
 #pragma unroll 1
   for (int p = threadRank; p < nRanks; p += stride) {
     for (int ch = 0; ch < numCh; ++ch) {

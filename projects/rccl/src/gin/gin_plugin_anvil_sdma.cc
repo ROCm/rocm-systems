@@ -225,6 +225,10 @@ static uint32_t ginAnvilFusedSignalFromEnv() {
   return atoi(e) != 0 ? 1u : 0u;
 }
 
+// Debug/measurement only. Nonzero downgrades the IPC signal release to agent
+// scope, which does not order this GPU's payload stores ahead of the signal as
+// seen by the peer GPU. Used to A/B fence cost vs atomic cost; never set in
+// production.
 static uint32_t ginAnvilIpcAgentFenceFromEnv() {
   const char* e = getenv("NCCL_GIN_ANVIL_SDMA_IPC_AGENT_FENCE");
   if (!e || !e[0]) return 0;
