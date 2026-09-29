@@ -723,14 +723,21 @@ static ncclResult_t ginAnvilRegisterLsaSignals(ginAnvilGinCtx* ctx, void* lsaSel
          (unsigned long)hostAddrs[ctx->rank], (unsigned long)selfExpected, (unsigned long)lsaSelf, (long)stride);
   }
 
-  uintptr_t* gatheredLocalBases = (uintptr_t*)calloc((size_t)ctx->nRanks, sizeof(uintptr_t));
+  // bootstrapAllGather writes one slot per world rank (bootstrap state->nranks).
+  // Under NCCL_GIN_CONNECTION_RAIL, ctx->nRanks/ctx->rank are the GIN team, so a
+  // team-sized buffer is overrun and the local VA must be published at comm->rank.
+  const int worldRanks = comm->nRanks;
+  uintptr_t* gatheredLocalBases =
+    (worldRanks > 0) ? (uintptr_t*)calloc((size_t)worldRanks, sizeof(uintptr_t)) : nullptr;
   if (gatheredLocalBases) {
-    gatheredLocalBases[ctx->rank] = (uintptr_t)lsaSelf;
-    if (ginAnvilBootstrapAllgather(comm->bootstrap, gatheredLocalBases, sizeof(uintptr_t)) != 0) {
-      WARN("GIN anvil-sdma: signal local-base allgather failed");
-    } else if (gatheredLocalBases[ctx->rank] != (uintptr_t)lsaSelf) {
-      WARN("GIN anvil-sdma: signal local-base allgather mismatch rank=%d got=%#lx expect=%#lx", ctx->rank,
-           (unsigned long)gatheredLocalBases[ctx->rank], (unsigned long)lsaSelf);
+    if (comm->rank >= 0 && comm->rank < worldRanks) {
+      gatheredLocalBases[comm->rank] = (uintptr_t)lsaSelf;
+      if (ginAnvilBootstrapAllgather(comm->bootstrap, gatheredLocalBases, sizeof(uintptr_t)) != 0) {
+        WARN("GIN anvil-sdma: signal local-base allgather failed");
+      } else if (gatheredLocalBases[comm->rank] != (uintptr_t)lsaSelf) {
+        WARN("GIN anvil-sdma: signal local-base allgather mismatch rank=%d got=%#lx expect=%#lx", comm->rank,
+             (unsigned long)gatheredLocalBases[comm->rank], (unsigned long)lsaSelf);
+      }
     }
     free(gatheredLocalBases);
   }
