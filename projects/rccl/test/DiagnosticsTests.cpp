@@ -405,4 +405,31 @@ TEST_F(Diagnostics, ReportOnStdoutOnly)
     }));
 }
 
+// One process driving several GPUs: the check enables peer access between them for its duration and
+// every rank prints one informational notice about it (src/diagnostics/p2p.cc). The notice is not a
+// failure: the summary still reports every edge as verified.
+TEST_F(Diagnostics, SingleProcessPeerAccessNotice)
+{
+    RUN_ISOLATED_TESTS(diagCase("SingleProcessPeerAccessNotice", []() {
+        clearDiagEnv();
+        setenv("NCCL_RUN_DIAGNOSTICS", "1", 1);
+        const int nGpus = usableGpus();
+        if(nGpus < 2)
+            GTEST_SKIP() << "Requires >= 2 GPUs";
+        std::vector<ncclComm_t> comms;
+        std::string out;
+        initAllCaptured(comms, nGpus, out);
+        const DiagReport report = parseDiagReport(out);
+
+        const std::string notice = "NCCL DIAG [INFO] p2p: temporarily enabled context-wide CUDA peer access rank=";
+        EXPECT_EQ(report.count(notice), nGpus) << report.dump();
+        for(int rank = 0; rank < nGpus; ++rank)
+            EXPECT_EQ(report.count(notice + std::to_string(rank) + " "), 1) << "rank " << rank << "\n"
+                                                                            << report.dump();
+        ASSERT_EQ(report.count(kDiagSummary), 1) << report.dump();
+        EXPECT_TRUE(report.failures().empty()) << report.dump();
+        destroyAll(comms);
+    }));
+}
+
 } // namespace RcclUnitTesting
