@@ -365,7 +365,9 @@ TEST_F(GinAnvilPluginTest, BindSignals_Success) {
 }
 
 // AICOMRCCL-2339: logical contexts on one Anvil connection share SDMA
-// queues, but each context must bind a distinct signal stripe.
+// queues, but each context must bind a distinct signal stripe. A second
+// pending context on the same comm makes slot and contextId diverge: the
+// first context's contextId 0 is not slot 0.
 TEST_F(GinAnvilPluginTest, BindSignals_LogicalContextsUseDistinctSignalStripes) {
   void* ictx = nullptr;
   initCtx(&ictx);
@@ -379,28 +381,44 @@ TEST_F(GinAnvilPluginTest, BindSignals_LogicalContextsUseDistinctSignalStripes) 
   ncclNetDeviceHandle_v11_t* devHandle = nullptr;
   ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
 
+  ncclGinConfig_t cfgB{};
+  cfgB.nContexts = 1;
+  cfgB.nSignals = 2;
+  cfgB.nCounters = 5;
+  void* ginCtxB = nullptr;
+  ncclNetDeviceHandle_v11_t* devHandleB = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfgB, &ginCtxB, &devHandleB), ncclSuccess);
+
   char arena[8192] = {};
-  ASSERT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 3, 4), ncclSuccess);
+  // Pending list is newest-first: ginCtxB takes slot 0, ginCtx takes slots 1..3.
+  ASSERT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 4, 4), ncclSuccess);
   ASSERT_EQ(devHandle->size, 3 * sizeof(ncclGinAnvilSdmaGPUContext));
+  ASSERT_EQ(devHandleB->size, sizeof(ncclGinAnvilSdmaGPUContext));
 
   ncclGinAnvilSdmaGPUContext hostCtx[3]{};
+  ncclGinAnvilSdmaGPUContext hostCtxB{};
   ASSERT_EQ(hipMemcpy(hostCtx, devHandle->handle, sizeof(hostCtx), hipMemcpyDeviceToHost), hipSuccess);
+  ASSERT_EQ(hipMemcpy(&hostCtxB, devHandleB->handle, sizeof(hostCtxB), hipMemcpyDeviceToHost), hipSuccess);
   ASSERT_NE(hostCtx[0].signals, nullptr);
   ASSERT_NE(hostCtx[1].signals, nullptr);
   ASSERT_NE(hostCtx[2].signals, nullptr);
+  ASSERT_NE(hostCtxB.signals, nullptr);
   EXPECT_EQ(hostCtx[1].signals - hostCtx[0].signals, 4);
   EXPECT_EQ(hostCtx[2].signals - hostCtx[1].signals, 4);
+  EXPECT_EQ(hostCtx[0].signals - hostCtxB.signals, 4);
   EXPECT_NE(hostCtx[0].signal_remote_addrs, hostCtx[1].signal_remote_addrs);
 
   // Queue ownership remains at the connection level by design.
   EXPECT_EQ(hostCtx[0].queueHandles, hostCtx[1].queueHandles);
   EXPECT_EQ(hostCtx[0].sdmaDirty, hostCtx[1].sdmaDirty);
+  EXPECT_EQ(hostCtx[0].queueHandles, hostCtxB.queueHandles);
   EXPECT_NE(hostCtx[0].counters, nullptr);
   EXPECT_NE(hostCtx[1].counters, nullptr);
   EXPECT_EQ(hostCtx[1].counters - hostCtx[0].counters, 5);
   EXPECT_EQ(hostCtx[2].counters - hostCtx[1].counters, 5);
 
   plugin_.destroyContext(ginCtx);
+  plugin_.destroyContext(ginCtxB);
   plugin_.closeColl(coll);
   plugin_.finalize(ictx);
 }
