@@ -145,6 +145,8 @@ public:
     MemoryWaitDiagnostics memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
     /// Opt in to gfx1250 replay-source overwrite diagnostics independently.
     MemoryWaitDiagnostics xcnt_diagnostics = MemoryWaitDiagnostics::Off;
+    /// Diagnostic CDNA4 HW_ID[5:4] value for every wave on this CU; no placement model.
+    std::optional<uint32_t> diagnostic_hw_id_simd = std::nullopt;
 
     /// @brief Whether gfx1250 replay-source diagnostics are enabled.
     bool xcnt_checks_enabled() const {
@@ -259,6 +261,9 @@ public:
     config_.memory_wait_diagnostics = memory;
     config_.xcnt_diagnostics = xcnt;
   }
+
+  /// @brief Select a diagnostic CDNA4 SIMD_ID (0-3), or leave HW_ID unsupported.
+  void set_diagnostic_hw_id_simd(std::optional<uint32_t> simd);
 
   /// @brief Select whether the CP continuation event owns functional execution.
   void set_pool_driven(bool value) { pool_driven_ = value; }
@@ -1462,6 +1467,9 @@ inline Lds &InstructionComputeUnitView::lds() { return raw_cu().lds(); }
 inline bool InstructionComputeUnitView::sram_ecc() const { return raw_cu().sram_ecc(); }
 inline bool InstructionComputeUnitView::setreg_vgpr_msb_fixup() const {
   return raw_cu().setreg_vgpr_msb_fixup();
+}
+inline std::optional<uint32_t> InstructionComputeUnitView::diagnostic_hw_id_simd() const {
+  return raw_cu().config().diagnostic_hw_id_simd;
 }
 inline rj_code_arch_t InstructionComputeUnitView::arch() const { return raw_cu().arch(); }
 inline bool InstructionComputeUnitView::observes_register_access() const {

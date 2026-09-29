@@ -23,6 +23,23 @@ Pre-built simulator configs are in `configs/`:
 | `gfx1151.json` | Single RDNA3.5 GPU (standalone simulation) |
 | `gfx1201_r9700.json` | Single RDNA4 GPU (standalone simulation) |
 
+### Diagnostic CDNA4 SIMD path selection
+
+For kernels that select a schedule using `s_getreg_b32` on `HW_ID[5:4]`, add
+`{"key": "diagnostic_hw_id_simd", "value": "1"}` to a `compute_unit` component's
+`config` array. Values 0 through 3 provide that SIMD_ID to every wave on the
+configured CU. Bitfield reads wholly within bits 5:4 are supported, including
+the single-bit selector `hwreg(HW_REG_HW_ID, 4, 1)`. Reads of other or wider
+HW_ID fields remain unsupported and keep their diagnostics. The setting is
+accepted only for CDNA4; omitting it preserves the unsupported HW_ID behavior.
+Checkpoints preserve each CU's setting, including omission and explicit zero.
+
+This is a functional path-selection control. It does not change where waves
+execute, model physical SIMD assignment, or establish hardware scheduling or
+timing. Runs with uniform values 0 and 1 can cover both sides of a bit-4 branch,
+but do not cover arbitrary mixtures of SIMD assignments among a CU's waves.
+Confirm the intended branches execute when using the control for coverage.
+
 ### PCI/VFIO guest compatibility
 
 The gfx1250 PCI profile intentionally advertises no UVD, VCN, or JPEG hardware.
