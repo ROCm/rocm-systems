@@ -8,6 +8,10 @@ The rules are split by topic so that each file is short enough to read in one
 sitting and specific enough to link to from a review comment. This page is the
 only index.
 
+The rules apply to new code and to existing code. No file is exempt. Do not
+rewrite untouched code to comply, and do not open a PR that only inventories
+violations. A review flags what the change introduces or moves.
+
 ## Rules
 
 | Topic | Rules |
@@ -24,8 +28,8 @@ only index.
 
 ## The short version
 
-- C++17 everywhere.
-- RAII for every resource. No raw `new` or `delete`.
+- C++17 for our code. `test-torch-trace-collector` compiles as C++20 only so it can include libtorch headers.
+- RAII for every resource. No raw `new` or `delete`, except the never-destroyed process-lifetime object in [`callback-boundaries.md`](.ai/rules/cpp/callback-boundaries.md).
 - Types are PascalCase.
 - Everything must be unit testable without a GPU. Dependencies come in through a
   virtual interface.
