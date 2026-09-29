@@ -66,7 +66,12 @@ void SetBootstrapIntResult(const int* values, int count) {
 void SetFactoryCreateFail(bool fail) { g.factoryCreateFail = fail; }
 void SetFactoryNullHandles(bool nullHandles) { g.factoryNullHandles = nullHandles; }
 void SetLsaAddrFail(bool fail) { g.lsaAddrFail = fail; }
-void SetLsaSelfAddr(void* addr) { g.lsaSelfAddr = addr; }
+void SetLsaSelfAddr(void* addr) {
+  g.lsaSelfAddr = addr;
+  // Drop the latched input base so the next resolve is relative to this address,
+  // not the first arena that happened to be resolved.
+  g.lsaInputBase = 0;
+}
 void SetConnCheckMissingCalls(int calls) { g.connCheckMissingCalls = calls; }
 int GetConnCheckWriteCalls() { return g.connCheckWriteCalls; }
 int GetConnCheckVerifyCalls() { return g.connCheckVerifyCalls; }
