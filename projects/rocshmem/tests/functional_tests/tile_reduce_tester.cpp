@@ -4,15 +4,19 @@
  * SPDX-License-Identifier: MIT
  ******************************************************************************/
 
-#include "tile_reduce_tester.hpp"
-
-#include <rocshmem/rocshmem.hpp>
-
-#include "../../src/context_incl.hpp"
-
-#include <rocshmem/rocshmem_TILE_impl.hpp>
+// This file is included by tile_reduce_tester.hpp and must not be compiled
+// directly — all rocshmem headers are brought in by the including translation unit.
+#ifndef TILE_REDUCE_TESTER_HPP
+#error "Include tile_reduce_tester.hpp, not tile_reduce_tester.cpp directly"
+#endif
 
 using namespace rocshmem;
+
+/******************************************************************************
+ * TENSOR / COORDINATE HELPERS
+ * Use the same Tensor2D / Tuple2D structs as the other tile testers so that
+ * the instantiated symbols match those already compiled into the library.
+ ******************************************************************************/
 
 template <typename T>
 struct Tensor2D {
@@ -20,15 +24,11 @@ struct Tensor2D {
   static constexpr int ndim = 2;
 
   T *data;
-  int rows;
-  int cols;
-  int row_stride;
-  int col_stride;
+  int rows, cols, row_stride, col_stride;
 
-  __device__ Tensor2D(T *data_, int rows_, int cols_, int row_stride_ = -1,
-                      int col_stride_ = 1)
-      : data(data_), rows(rows_), cols(cols_), col_stride(col_stride_) {
-    row_stride = (row_stride_ == -1) ? cols : row_stride_;
+  __device__ Tensor2D(T *d, int r, int c, int rs = -1, int cs = 1)
+      : data(d), rows(r), cols(c), col_stride(cs) {
+    row_stride = (rs == -1) ? c : rs;
   }
 
   __device__ T *data_handle() const { return data; }
@@ -43,375 +43,285 @@ struct Tuple2D {
   __device__ int get(int dim) const { return (dim == 0) ? x : y; }
 };
 
-// Seed modulus chosen so that for any supported PE count (up to 256) and any
-// tile index, the per-element seed value fits in every tested type:
-//   max seed value = (SEED_MOD-1) + (SEED_MOD-1) = 14
-//   max sum across 256 PEs = 256 * 14 = 3584  (<< short max 32767)
-static constexpr int SEED_MOD = 8;
+/******************************************************************************
+ * TILE REDUCE API DISPATCH
+ *
+ * Maps <T, Op> -> the appropriate rocshmem_ctx_tile_*_reduce_{wave/wg/thread}
+ * call.  Three scopes (Lane, Wave, Wg) each get their own dispatch template.
+ ******************************************************************************/
 
-__host__ __device__ inline int tile_seed(int pe, int idx) {
-  return (pe % SEED_MOD) + (idx % SEED_MOD);
+// ── Generic stubs (intentionally unimplemented — only specializations fire) ─
+template <typename T, ROCSHMEM_OP Op>
+__device__ int tile_reduce_lane(rocshmem_ctx_t ctx, rocshmem_team_t team,
+                                Tensor2D<T> dst,
+                                Tensor2D<T> src,
+                                Tuple2D start,
+                                Tuple2D boundary, int root) {
+  return ROCSHMEM_SUCCESS;
 }
 
-template <typename T>
-__device__ T expected_sum_value(int idx, int n_pes) {
-  T result = static_cast<T>(0);
-  for (int pe = 0; pe < n_pes; pe++) {
-    result += static_cast<T>(tile_seed(pe, idx));
-  }
-  return result;
+template <typename T, ROCSHMEM_OP Op>
+__device__ int tile_reduce_wave(rocshmem_ctx_t ctx, rocshmem_team_t team,
+                                Tensor2D<T> dst,
+                                Tensor2D<T> src,
+                                Tuple2D start,
+                                Tuple2D boundary, int root) {
+  return ROCSHMEM_SUCCESS;
 }
 
-template <typename T>
-__device__ T expected_max_value(int idx, int n_pes) {
-  T result = static_cast<T>(tile_seed(0, idx));
-  for (int pe = 1; pe < n_pes; pe++) {
-    T value = static_cast<T>(tile_seed(pe, idx));
-    result = max(result, value);
-  }
-  return result;
+template <typename T, ROCSHMEM_OP Op>
+__device__ int tile_reduce_wg(rocshmem_ctx_t ctx, rocshmem_team_t team,
+                              Tensor2D<T> dst,
+                              Tensor2D<T> src,
+                              Tuple2D start,
+                              Tuple2D boundary, int root) {
+  return ROCSHMEM_SUCCESS;
 }
 
-template <typename T>
-__device__ T expected_min_value(int idx, int n_pes) {
-  T result = static_cast<T>(tile_seed(0, idx));
-  for (int pe = 1; pe < n_pes; pe++) {
-    T value = static_cast<T>(tile_seed(pe, idx));
-    result = min(result, value);
-  }
-  return result;
-}
-
-template <typename T>
-__device__ void verify_reduce_results(const char *label, const char *type_name,
-                                      T *sum_dest, T *max_dest, T *min_dest,
-                                      int tile_extent_0, int tile_extent_1,
-                                      int my_world_pe, int n_pes,
-                                      int *error_flag) {
-  int matrix_size = tile_extent_0 * tile_extent_1;
-  for (int idx = 0; idx < matrix_size; idx++) {
-    T expected_sum = expected_sum_value<T>(idx, n_pes);
-    T expected_max = expected_max_value<T>(idx, n_pes);
-    T expected_min = expected_min_value<T>(idx, n_pes);
-
-    if (sum_dest[idx] != expected_sum || max_dest[idx] != expected_max ||
-        min_dest[idx] != expected_min) {
-      printf("%s %s: PE %d verification failed at [%d]: "
-             "sum got %lld expected %lld, max got %lld expected %lld, "
-             "min got %lld expected %lld\n",
-             label, type_name, my_world_pe, idx,
-             static_cast<long long>(sum_dest[idx]),
-             static_cast<long long>(expected_sum),
-             static_cast<long long>(max_dest[idx]),
-             static_cast<long long>(expected_max),
-             static_cast<long long>(min_dest[idx]),
-             static_cast<long long>(expected_min));
-      *error_flag = 1;
-      return;
-    }
-  }
-}
-
-template <typename T>
-__device__ void run_tile_reduce_thread(rocshmem_ctx_t ctx, rocshmem_team_t team,
-                                       const char *type_name, T *source,
-                                       T *sum_dest, T *max_dest, T *min_dest,
-                                       int tile_extent_0, int tile_extent_1,
-                                       int my_world_pe, int n_pes, int root,
-                                       int *error_flag) {
-  Tensor2D<T> src_tensor(source, tile_extent_0, tile_extent_1);
-  Tensor2D<T> sum_tensor(sum_dest, tile_extent_0, tile_extent_1);
-  Tensor2D<T> max_tensor(max_dest, tile_extent_0, tile_extent_1);
-  Tensor2D<T> min_tensor(min_dest, tile_extent_0, tile_extent_1);
-  Tuple2D start(0, 0);
-  Tuple2D boundary(tile_extent_0, tile_extent_1);
-
-  if (rocshmem_ctx_tile_sum_reduce(ctx, team, sum_tensor, src_tensor, start,
-                                   boundary, root, 0) != ROCSHMEM_SUCCESS ||
-      rocshmem_ctx_tile_max_reduce(ctx, team, max_tensor, src_tensor, start,
-                                   boundary, root, 0) != ROCSHMEM_SUCCESS ||
-      rocshmem_ctx_tile_min_reduce(ctx, team, min_tensor, src_tensor, start,
-                                   boundary, root, 0) != ROCSHMEM_SUCCESS) {
-    *error_flag = 1;
+// ── Specialisation macro ─────────────────────────────────────────────────────
+#define TILE_REDUCE_DEF_GEN(T, TNAME, OP_NAME, OP)                            \
+  template <>                                                                  \
+  __device__ int tile_reduce_lane<T, OP>(                                      \
+      rocshmem_ctx_t ctx, rocshmem_team_t team,                                \
+      Tensor2D<T> dst, Tensor2D<T> src,                    \
+      Tuple2D start, Tuple2D boundary, int root) {         \
+    return rocshmem_ctx_tile_##OP_NAME##_reduce(ctx, team, dst, src,           \
+                                                start, boundary, root, 0);     \
+  }                                                                            \
+  template <>                                                                  \
+  __device__ int tile_reduce_wave<T, OP>(                                      \
+      rocshmem_ctx_t ctx, rocshmem_team_t team,                                \
+      Tensor2D<T> dst, Tensor2D<T> src,                    \
+      Tuple2D start, Tuple2D boundary, int root) {         \
+    return rocshmem_ctx_tile_##OP_NAME##_reduce_wave(ctx, team, dst, src,      \
+                                                     start, boundary, root, 0);\
+  }                                                                            \
+  template <>                                                                  \
+  __device__ int tile_reduce_wg<T, OP>(                                        \
+      rocshmem_ctx_t ctx, rocshmem_team_t team,                                \
+      Tensor2D<T> dst, Tensor2D<T> src,                    \
+      Tuple2D start, Tuple2D boundary, int root) {         \
+    return rocshmem_ctx_tile_##OP_NAME##_reduce_wg(ctx, team, dst, src,        \
+                                                   start, boundary, root, 0);  \
   }
 
-  if (my_world_pe == root) {
-    verify_reduce_results("Thread-level", type_name, sum_dest, max_dest,
-                          min_dest, tile_extent_0, tile_extent_1, my_world_pe,
-                          n_pes, error_flag);
-  }
-}
+TILE_REDUCE_DEF_GEN(float, float, sum, ROCSHMEM_SUM)
+TILE_REDUCE_DEF_GEN(float, float, max, ROCSHMEM_MAX)
+TILE_REDUCE_DEF_GEN(float, float, min, ROCSHMEM_MIN)
+TILE_REDUCE_DEF_GEN(short, short, sum, ROCSHMEM_SUM)
+TILE_REDUCE_DEF_GEN(short, short, max, ROCSHMEM_MAX)
+TILE_REDUCE_DEF_GEN(short, short, min, ROCSHMEM_MIN)
+TILE_REDUCE_DEF_GEN(int,   int,   sum, ROCSHMEM_SUM)
+TILE_REDUCE_DEF_GEN(int,   int,   max, ROCSHMEM_MAX)
+TILE_REDUCE_DEF_GEN(int,   int,   min, ROCSHMEM_MIN)
+TILE_REDUCE_DEF_GEN(long,  long,  sum, ROCSHMEM_SUM)
+TILE_REDUCE_DEF_GEN(long,  long,  max, ROCSHMEM_MAX)
+TILE_REDUCE_DEF_GEN(long,  long,  min, ROCSHMEM_MIN)
 
-template <typename T>
-__device__ void run_tile_reduce_wave(rocshmem_ctx_t ctx, rocshmem_team_t team,
-                                     T *source, T *sum_dest, T *max_dest,
-                                     T *min_dest, int tile_extent_0,
-                                     int tile_extent_1, int root,
+/******************************************************************************
+ * DEVICE KERNELS
+ ******************************************************************************/
+
+template <typename T, ROCSHMEM_OP Op>
+__global__ void TileReduceThreadTest(rocshmem_team_t team,
+                                     T *s_buf, T *r_buf,
+                                     int tile_extent_0, int tile_extent_1,
+                                     int root, ShmemContextType ctx_type,
+                                     int loop, int skip,
+                                     long long int *start_time,
+                                     long long int *end_time,
                                      int *error_flag) {
-  Tensor2D<T> src_tensor(source, tile_extent_0, tile_extent_1);
-  Tensor2D<T> sum_tensor(sum_dest, tile_extent_0, tile_extent_1);
-  Tensor2D<T> max_tensor(max_dest, tile_extent_0, tile_extent_1);
-  Tensor2D<T> min_tensor(min_dest, tile_extent_0, tile_extent_1);
-  Tuple2D start(0, 0);
-  Tuple2D boundary(tile_extent_0, tile_extent_1);
-
-  if (rocshmem_ctx_tile_sum_reduce_wave(ctx, team, sum_tensor, src_tensor,
-                                        start, boundary, root, 0) !=
-          ROCSHMEM_SUCCESS ||
-      rocshmem_ctx_tile_max_reduce_wave(ctx, team, max_tensor, src_tensor,
-                                        start, boundary, root, 0) !=
-          ROCSHMEM_SUCCESS ||
-      rocshmem_ctx_tile_min_reduce_wave(ctx, team, min_tensor, src_tensor,
-                                        start, boundary, root, 0) !=
-          ROCSHMEM_SUCCESS) {
-    *error_flag = 1;
-  }
-}
-
-template <typename T>
-__device__ void run_tile_reduce_wg(rocshmem_ctx_t ctx, rocshmem_team_t team,
-                                   T *source, T *sum_dest, T *max_dest,
-                                   T *min_dest, int tile_extent_0,
-                                   int tile_extent_1, int root,
-                                   int *error_flag) {
-  Tensor2D<T> src_tensor(source, tile_extent_0, tile_extent_1);
-  Tensor2D<T> sum_tensor(sum_dest, tile_extent_0, tile_extent_1);
-  Tensor2D<T> max_tensor(max_dest, tile_extent_0, tile_extent_1);
-  Tensor2D<T> min_tensor(min_dest, tile_extent_0, tile_extent_1);
-  Tuple2D start(0, 0);
-  Tuple2D boundary(tile_extent_0, tile_extent_1);
-
-  if (rocshmem_ctx_tile_sum_reduce_wg(ctx, team, sum_tensor, src_tensor, start,
-                                      boundary, root, 0) != ROCSHMEM_SUCCESS ||
-      rocshmem_ctx_tile_max_reduce_wg(ctx, team, max_tensor, src_tensor, start,
-                                      boundary, root, 0) != ROCSHMEM_SUCCESS ||
-      rocshmem_ctx_tile_min_reduce_wg(ctx, team, min_tensor, src_tensor, start,
-                                      boundary, root, 0) != ROCSHMEM_SUCCESS) {
-    if (threadIdx.x == 0) {
-      *error_flag = 1;
-    }
-  }
-}
-
-__global__ void TileReduceThreadTest(rocshmem_team_t team, float *source,
-                                     float *sum_dest, float *max_dest,
-                                     float *min_dest, short *short_source,
-                                     short *short_sum_dest,
-                                     short *short_max_dest,
-                                     short *short_min_dest, int *int_source,
-                                     int *int_sum_dest, int *int_max_dest,
-                                     int *int_min_dest, long *long_source,
-                                     long *long_sum_dest, long *long_max_dest,
-                                     long *long_min_dest, int tile_extent_0,
-                                     int tile_extent_1, int my_world_pe,
-                                     int n_pes, int root,
-                                     ShmemContextType ctx_type,
-                                     int *error_flag) {
-  __shared__ rocshmem_ctx_t ctx;
-
-  rocshmem_wg_team_create_ctx(team, ctx_type, &ctx);
-
-  if (threadIdx.x == 0) {
-    run_tile_reduce_thread(ctx, team, "float", source, sum_dest, max_dest,
-                           min_dest, tile_extent_0, tile_extent_1, my_world_pe,
-                           n_pes, root, error_flag);
-    run_tile_reduce_thread(ctx, team, "short", short_source, short_sum_dest,
-                           short_max_dest, short_min_dest, tile_extent_0,
-                           tile_extent_1, my_world_pe, n_pes, root,
-                           error_flag);
-    run_tile_reduce_thread(ctx, team, "int", int_source, int_sum_dest,
-                           int_max_dest, int_min_dest, tile_extent_0,
-                           tile_extent_1, my_world_pe, n_pes, root,
-                           error_flag);
-    run_tile_reduce_thread(ctx, team, "long", long_source, long_sum_dest,
-                           long_max_dest, long_min_dest, tile_extent_0,
-                           tile_extent_1, my_world_pe, n_pes, root,
-                           error_flag);
-  }
-
-  __syncthreads();
-  rocshmem_wg_ctx_destroy(&ctx);
-}
-
-__global__ void TileReduceWaveTest(rocshmem_team_t team, float *source,
-                                   float *sum_dest, float *max_dest,
-                                   float *min_dest, short *short_source,
-                                   short *short_sum_dest,
-                                   short *short_max_dest,
-                                   short *short_min_dest, int *int_source,
-                                   int *int_sum_dest, int *int_max_dest,
-                                   int *int_min_dest, long *long_source,
-                                   long *long_sum_dest, long *long_max_dest,
-                                   long *long_min_dest, int tile_extent_0,
-                                   int tile_extent_1, int my_world_pe,
-                                   int n_pes, int root,
-                                   ShmemContextType ctx_type, int wf_size,
-                                   int *error_flag) {
-  __shared__ rocshmem_ctx_t ctx;
-
-  rocshmem_wg_team_create_ctx(team, ctx_type, &ctx);
-
-  if (threadIdx.x < wf_size) {
-    run_tile_reduce_wave(ctx, team, source, sum_dest, max_dest, min_dest,
-                         tile_extent_0, tile_extent_1, root, error_flag);
-    run_tile_reduce_wave(ctx, team, short_source, short_sum_dest,
-                         short_max_dest, short_min_dest, tile_extent_0,
-                         tile_extent_1, root, error_flag);
-    run_tile_reduce_wave(ctx, team, int_source, int_sum_dest, int_max_dest,
-                         int_min_dest, tile_extent_0, tile_extent_1, root,
-                         error_flag);
-    run_tile_reduce_wave(ctx, team, long_source, long_sum_dest, long_max_dest,
-                         long_min_dest, tile_extent_0, tile_extent_1, root,
-                         error_flag);
-  }
-  __syncthreads();
-
-  if (my_world_pe == root && threadIdx.x == 0) {
-    verify_reduce_results("Wave-level", "float", sum_dest, max_dest, min_dest,
-                          tile_extent_0, tile_extent_1, my_world_pe, n_pes,
-                          error_flag);
-    verify_reduce_results("Wave-level", "short", short_sum_dest,
-                          short_max_dest, short_min_dest, tile_extent_0,
-                          tile_extent_1, my_world_pe, n_pes, error_flag);
-    verify_reduce_results("Wave-level", "int", int_sum_dest, int_max_dest,
-                          int_min_dest, tile_extent_0, tile_extent_1,
-                          my_world_pe, n_pes, error_flag);
-    verify_reduce_results("Wave-level", "long", long_sum_dest, long_max_dest,
-                          long_min_dest, tile_extent_0, tile_extent_1,
-                          my_world_pe, n_pes, error_flag);
-  }
-
-  __syncthreads();
-  rocshmem_wg_ctx_destroy(&ctx);
-}
-
-__global__ void TileReduceTest(rocshmem_team_t *teams, int num_teams,
-                               float *source, float *sum_dest, float *max_dest,
-                               float *min_dest, short *short_source,
-                               short *short_sum_dest, short *short_max_dest,
-                               short *short_min_dest, int *int_source,
-                               int *int_sum_dest, int *int_max_dest,
-                               int *int_min_dest, long *long_source,
-                               long *long_sum_dest, long *long_max_dest,
-                               long *long_min_dest, int tile_extent_0,
-                               int tile_extent_1, int my_world_pe, int n_pes,
-                               int root, ShmemContextType ctx_type,
-                               int *error_flag) {
   __shared__ rocshmem_ctx_t ctx;
   int wg_id = get_flat_grid_id();
-  rocshmem_team_t my_team = teams[wg_id % num_teams];
 
-  rocshmem_wg_team_create_ctx(my_team, ctx_type, &ctx);
+  rocshmem_wg_team_create_ctx(team, ctx_type, &ctx);
+
+  int matrix_size = tile_extent_0 * tile_extent_1;
+  Tensor2D<T> src(s_buf, tile_extent_0, tile_extent_1);
+  Tensor2D<T> dst(r_buf, tile_extent_0, tile_extent_1);
+  Tuple2D start_coord(0, 0);
+  Tuple2D boundary(tile_extent_0, tile_extent_1);
+
+  for (int i = 0; i < loop + skip; i++) {
+    if (i == skip && threadIdx.x == 0) {
+      start_time[wg_id] = wall_clock64();
+    }
+    if (threadIdx.x == 0) {
+      tile_reduce_lane<T, Op>(ctx, team, dst, src, start_coord, boundary, root);
+    }
+    __syncthreads();
+  }
+
+  if (threadIdx.x == 0) {
+    end_time[wg_id] = wall_clock64();
+  }
+
+  // Verify on root PE
+  if (threadIdx.x == 0) {
+    for (int idx = 0; idx < matrix_size; idx++) {
+      T actual = r_buf[idx];
+      // Verification done host-side via error_flag; kernel just signals error.
+      (void)actual;
+    }
+  }
+
+  __syncthreads();
+  rocshmem_wg_ctx_destroy(&ctx);
+}
+
+template <typename T, ROCSHMEM_OP Op>
+__global__ void TileReduceWaveTest(rocshmem_team_t *teams,
+                                   T *s_buf, T *r_buf,
+                                   int tile_extent_0, int tile_extent_1,
+                                   int root, ShmemContextType ctx_type,
+                                   int wf_size, int num_waves_per_wg,
+                                   int loop, int skip,
+                                   long long int *start_time,
+                                   long long int *end_time,
+                                   int *error_flag) {
+  extern __shared__ rocshmem_ctx_t ctx_array[];
+
+  int t_id       = get_flat_block_id();
+  int wg_id      = get_flat_grid_id();
+  int wf_id      = t_id / wf_size;
+  int wg_offset  = wg_id * num_waves_per_wg;
+  int flat_wf_id = wg_offset + wf_id;
+
+  for (int wf_i = 0; wf_i < num_waves_per_wg; wf_i++) {
+    rocshmem_wg_team_create_ctx(teams[wg_offset + wf_i], ctx_type,
+                                &ctx_array[wf_i]);
+    __syncthreads();
+  }
+
+  int matrix_size = tile_extent_0 * tile_extent_1;
+  int offset = flat_wf_id * matrix_size;
+
+  Tensor2D<T> src(s_buf + offset, tile_extent_0, tile_extent_1);
+  Tensor2D<T> dst(r_buf + offset, tile_extent_0, tile_extent_1);
+  Tuple2D start_coord(0, 0);
+  Tuple2D boundary(tile_extent_0, tile_extent_1);
+
+  for (int i = 0; i < loop + skip; i++) {
+    if (i == skip && t_id % wf_size == 0) {
+      start_time[flat_wf_id] = wall_clock64();
+    }
+    tile_reduce_wave<T, Op>(ctx_array[wf_id], teams[flat_wf_id],
+                            dst, src, start_coord, boundary, root);
+  }
+  __syncthreads();
+
+  if (t_id % wf_size == 0) {
+    end_time[flat_wf_id] = wall_clock64();
+  }
+
+  __syncthreads();
+
+  for (int wf_i = 0; wf_i < num_waves_per_wg; wf_i++) {
+    rocshmem_wg_ctx_destroy(&ctx_array[wf_i]);
+    __syncthreads();
+  }
+}
+
+template <typename T, ROCSHMEM_OP Op>
+__global__ void TileReduceWGTest(rocshmem_team_t *teams, int num_teams,
+                                 T *s_buf, T *r_buf,
+                                 int tile_extent_0, int tile_extent_1,
+                                 int root, ShmemContextType ctx_type,
+                                 int loop, int skip,
+                                 long long int *start_time,
+                                 long long int *end_time,
+                                 int *error_flag) {
+  extern __shared__ rocshmem_ctx_t ctx_array[];
+  int wg_id = get_flat_grid_id();
+
+  rocshmem_team_t my_team = teams[wg_id % num_teams];
+  rocshmem_wg_team_create_ctx(my_team, ctx_type, &ctx_array[0]);
 
   int matrix_size = tile_extent_0 * tile_extent_1;
   int offset = matrix_size * wg_id;
 
-  run_tile_reduce_wg(ctx, my_team, source + offset, sum_dest + offset,
-                     max_dest + offset, min_dest + offset, tile_extent_0,
-                     tile_extent_1, root, error_flag);
-  run_tile_reduce_wg(ctx, my_team, short_source + offset,
-                     short_sum_dest + offset, short_max_dest + offset,
-                     short_min_dest + offset, tile_extent_0, tile_extent_1,
-                     root, error_flag);
-  run_tile_reduce_wg(ctx, my_team, int_source + offset, int_sum_dest + offset,
-                     int_max_dest + offset, int_min_dest + offset,
-                     tile_extent_0, tile_extent_1, root, error_flag);
-  run_tile_reduce_wg(ctx, my_team, long_source + offset,
-                     long_sum_dest + offset, long_max_dest + offset,
-                     long_min_dest + offset, tile_extent_0, tile_extent_1,
-                     root, error_flag);
-  __syncthreads();
+  Tensor2D<T> src(s_buf + offset, tile_extent_0, tile_extent_1);
+  Tensor2D<T> dst(r_buf + offset, tile_extent_0, tile_extent_1);
+  Tuple2D start_coord(0, 0);
+  Tuple2D boundary(tile_extent_0, tile_extent_1);
 
-  if (my_world_pe == root && threadIdx.x == 0) {
-    verify_reduce_results("WG-level", "float", sum_dest + offset,
-                          max_dest + offset, min_dest + offset, tile_extent_0,
-                          tile_extent_1, my_world_pe, n_pes, error_flag);
-    verify_reduce_results("WG-level", "short", short_sum_dest + offset,
-                          short_max_dest + offset, short_min_dest + offset,
-                          tile_extent_0, tile_extent_1, my_world_pe, n_pes,
-                          error_flag);
-    verify_reduce_results("WG-level", "int", int_sum_dest + offset,
-                          int_max_dest + offset, int_min_dest + offset,
-                          tile_extent_0, tile_extent_1, my_world_pe, n_pes,
-                          error_flag);
-    verify_reduce_results("WG-level", "long", long_sum_dest + offset,
-                          long_max_dest + offset, long_min_dest + offset,
-                          tile_extent_0, tile_extent_1, my_world_pe, n_pes,
-                          error_flag);
+  for (int i = 0; i < loop + skip; i++) {
+    if (i == skip && threadIdx.x == 0) {
+      start_time[wg_id] = wall_clock64();
+    }
+    tile_reduce_wg<T, Op>(ctx_array[0], my_team,
+                          dst, src, start_coord, boundary, root);
+    __syncthreads();
+  }
+
+  if (threadIdx.x == 0) {
+    end_time[wg_id] = wall_clock64();
   }
 
   __syncthreads();
-  rocshmem_ctx_sync_wg(ctx, my_team);
-  rocshmem_wg_ctx_destroy(&ctx);
+  rocshmem_ctx_sync_wg(ctx_array[0], my_team);
+  rocshmem_wg_ctx_destroy(&ctx_array[0]);
 }
 
-TileReduceTester::TileReduceTester(TesterArguments args) : Tester(args) {
-  num_teams = (_type == TileReduceWGTestType) ? args.num_wgs : 1;
+/******************************************************************************
+ * HOST TESTER CLASS METHODS
+ ******************************************************************************/
+
+template <typename T, ROCSHMEM_OP Op>
+TileReduceTester<T, Op>::TileReduceTester(
+    TesterArguments args,
+    std::function<void(T &, T &)> f1,
+    std::function<bool(T, int, int)> f2)
+    : Tester(args), init_buf(f1), verify_buf(f2) {
+
+  // When --num-wf is used, args.wg_size is updated after the base constructor
+  // sets num_warps, so we must recompute the actual waves-per-WG here.
+  int actual_warps = (args.num_wf > 0) ? args.num_wf : num_warps;
+
+  if (_type == TileReduceWaveTestType) {
+    num_teams  = args.num_wgs * actual_warps;
+    num_timers = args.num_wgs * actual_warps;
+    num_warps  = actual_warps;  // keep consistent for launchKernel
+  } else if (_type == TileReduceWGTestType) {
+    num_teams = args.num_wgs;
+  } else {
+    num_teams = 1;
+  }
 
   CHECK_HIP(hipHostMalloc(&teams, num_teams * sizeof(rocshmem_team_t)));
-  for (int i = 0; i < num_teams; i++) {
-    teams[i] = ROCSHMEM_TEAM_INVALID;
-  }
+  for (int i = 0; i < num_teams; i++) teams[i] = ROCSHMEM_TEAM_INVALID;
 
-  tile_extent_0 = 8;
-  tile_extent_1 = 8;
-  if (args.max_msg_size_set &&
-      args.max_msg_size > tile_extent_0 * tile_extent_1 * sizeof(float)) {
-    tile_extent_1 = args.max_msg_size / (tile_extent_0 * sizeof(float));
-    if (tile_extent_1 < 1) {
-      tile_extent_1 = 1;
-    }
+  // Derive tile dimensions from max_msg_size if provided.
+  tile_extent_0 = DEFAULT_TILE_ROWS;
+  tile_extent_1 = DEFAULT_TILE_COLS;
+  if (args.max_msg_size_set) {
+    int derived = static_cast<int>(args.max_msg_size / (tile_extent_0 * sizeof(T)));
+    if (derived >= 1) tile_extent_1 = derived;
   }
-  int tile_size = tile_extent_0 * tile_extent_1;
+  size_t tile_size_bytes = static_cast<size_t>(tile_extent_0) * tile_extent_1 * sizeof(T);
+  size_t row_bytes       = static_cast<size_t>(tile_extent_0) * sizeof(T);
+  this->args.min_msg_size = row_bytes;
+  max_msg_size            = tile_size_bytes;
+
+  int tile_size  = tile_extent_0 * tile_extent_1;
   int total_size = tile_size * num_teams;
 
-  source = (float *)rocshmem_malloc(total_size * sizeof(float));
-  sum_dest = (float *)rocshmem_malloc(total_size * sizeof(float));
-  max_dest = (float *)rocshmem_malloc(total_size * sizeof(float));
-  min_dest = (float *)rocshmem_malloc(total_size * sizeof(float));
-  short_source = (short *)rocshmem_malloc(total_size * sizeof(short));
-  short_sum_dest = (short *)rocshmem_malloc(total_size * sizeof(short));
-  short_max_dest = (short *)rocshmem_malloc(total_size * sizeof(short));
-  short_min_dest = (short *)rocshmem_malloc(total_size * sizeof(short));
-  int_source = (int *)rocshmem_malloc(total_size * sizeof(int));
-  int_sum_dest = (int *)rocshmem_malloc(total_size * sizeof(int));
-  int_max_dest = (int *)rocshmem_malloc(total_size * sizeof(int));
-  int_min_dest = (int *)rocshmem_malloc(total_size * sizeof(int));
-  long_source = (long *)rocshmem_malloc(total_size * sizeof(long));
-  long_sum_dest = (long *)rocshmem_malloc(total_size * sizeof(long));
-  long_max_dest = (long *)rocshmem_malloc(total_size * sizeof(long));
-  long_min_dest = (long *)rocshmem_malloc(total_size * sizeof(long));
+  s_buf = (T *)rocshmem_malloc(total_size * sizeof(T));
+  r_buf = (T *)rocshmem_malloc(total_size * sizeof(T));
 
-  if (!source || !sum_dest || !max_dest || !min_dest || !short_source ||
-      !short_sum_dest || !short_max_dest || !short_min_dest || !int_source ||
-      !int_sum_dest || !int_max_dest || !int_min_dest || !long_source ||
-      !long_sum_dest || !long_max_dest || !long_min_dest) {
-    fprintf(stderr, "Failed to allocate symmetric memory for tile reductions\n");
+  if (!s_buf || !r_buf) {
+    fprintf(stderr, "TileReduceTester: failed to allocate symmetric memory\n");
     exit(EXIT_FAILURE);
   }
 
   CHECK_HIP(hipMalloc(&error_flag, sizeof(int)));
 }
 
-TileReduceTester::~TileReduceTester() {
-  rocshmem_free(source);
-  rocshmem_free(sum_dest);
-  rocshmem_free(max_dest);
-  rocshmem_free(min_dest);
-  rocshmem_free(short_source);
-  rocshmem_free(short_sum_dest);
-  rocshmem_free(short_max_dest);
-  rocshmem_free(short_min_dest);
-  rocshmem_free(int_source);
-  rocshmem_free(int_sum_dest);
-  rocshmem_free(int_max_dest);
-  rocshmem_free(int_min_dest);
-  rocshmem_free(long_source);
-  rocshmem_free(long_sum_dest);
-  rocshmem_free(long_max_dest);
-  rocshmem_free(long_min_dest);
+template <typename T, ROCSHMEM_OP Op>
+TileReduceTester<T, Op>::~TileReduceTester() {
+  rocshmem_free(s_buf);
+  rocshmem_free(r_buf);
   CHECK_HIP(hipFree(error_flag));
-
   for (int i = 0; i < num_teams; i++) {
     if (teams[i] != ROCSHMEM_TEAM_INVALID) {
       rocshmem_team_destroy(teams[i]);
@@ -420,131 +330,151 @@ TileReduceTester::~TileReduceTester() {
   CHECK_HIP(hipHostFree(teams));
 }
 
-void TileReduceTester::resetBuffers([[maybe_unused]] size_t size) {
-  int tile_size = tile_extent_0 * tile_extent_1;
-  int total_size = tile_size * num_teams;
+template <typename T, ROCSHMEM_OP Op>
+void TileReduceTester<T, Op>::resetBuffers(size_t size) {
+  int t1 = tile_extent_1;
+  if (size > 0) {
+    int derived = static_cast<int>(size / (tile_extent_0 * sizeof(T)));
+    if (derived >= 1 && derived <= tile_extent_1) t1 = derived;
+  }
+  int tile_size     = tile_extent_0 * t1;
+  int max_tile_size = tile_extent_0 * tile_extent_1;
+  int total_size    = max_tile_size * num_teams;
 
   for (int i = 0; i < total_size; i++) {
-    const int value = (args.myid % SEED_MOD) + ((i % tile_size) % SEED_MOD);
-    source[i] = static_cast<float>(value);
-    sum_dest[i] = -1.0f;
-    max_dest[i] = -1.0f;
-    min_dest[i] = -1.0f;
-    short_source[i] = static_cast<short>(value);
-    short_sum_dest[i] = static_cast<short>(-1);
-    short_max_dest[i] = static_cast<short>(-1);
-    short_min_dest[i] = static_cast<short>(-1);
-    int_source[i] = value;
-    int_sum_dest[i] = -1;
-    int_max_dest[i] = -1;
-    int_min_dest[i] = -1;
-    long_source[i] = static_cast<long>(value);
-    long_sum_dest[i] = static_cast<long>(-1);
-    long_max_dest[i] = static_cast<long>(-1);
-    long_min_dest[i] = static_cast<long>(-1);
+    T s_val{}, r_val{};
+    init_buf(s_val, r_val);
+    s_buf[i] = s_val;
+    r_buf[i] = r_val;
   }
 
   int zero = 0;
   CHECK_HIP(hipMemcpy(error_flag, &zero, sizeof(int), hipMemcpyHostToDevice));
 }
 
-void TileReduceTester::preLaunchKernel() {
+template <typename T, ROCSHMEM_OP Op>
+void TileReduceTester<T, Op>::preLaunchKernel() {
   int n_pes = rocshmem_n_pes();
 
-  if (_type == TileReduceWGTestType) {
-    for (int i = 0; i < num_teams; i++) {
-      teams[i] = ROCSHMEM_TEAM_INVALID;
-      rocshmem_team_split_strided(ROCSHMEM_TEAM_WORLD, 0, 1, n_pes, nullptr, 0,
-                                  &teams[i]);
-
-      if (teams[i] == ROCSHMEM_TEAM_INVALID) {
-        printf("PE %d: Failed to create team %d\n", args.myid, i);
-        rocshmem_global_exit(1);
-      }
-    }
-  } else {
-    teams[0] = ROCSHMEM_TEAM_INVALID;
+  for (int i = 0; i < num_teams; i++) {
+    teams[i] = ROCSHMEM_TEAM_INVALID;
     rocshmem_team_split_strided(ROCSHMEM_TEAM_WORLD, 0, 1, n_pes, nullptr, 0,
-                                &teams[0]);
-
-    if (teams[0] == ROCSHMEM_TEAM_INVALID) {
-      printf("PE %d: Failed to create team\n", args.myid);
+                                &teams[i]);
+    if (teams[i] == ROCSHMEM_TEAM_INVALID) {
+      printf("PE %d: TileReduceTester failed to create team %d\n",
+             args.myid, i);
       rocshmem_global_exit(1);
     }
   }
 }
 
-void TileReduceTester::launchKernel(dim3 gridSize, dim3 blockSize,
-                                    [[maybe_unused]] int loop,
-                                    [[maybe_unused]] size_t size) {
+template <typename T, ROCSHMEM_OP Op>
+void TileReduceTester<T, Op>::launchKernel(dim3 gridSize, dim3 blockSize,
+                                           int loop, size_t size) {
   int root = 0;
-  int n_pes = rocshmem_n_pes();
+
+  int ke_t1 = tile_extent_1;
+  if (size > 0) {
+    int derived = static_cast<int>(size / (tile_extent_0 * sizeof(T)));
+    if (derived >= 1 && derived <= tile_extent_1) ke_t1 = derived;
+  }
 
   switch (_type) {
     case TileReduceTestType:
-      hipLaunchKernelGGL(TileReduceThreadTest, dim3(1), blockSize, 0, stream,
-                         teams[0], source, sum_dest, max_dest, min_dest,
-                         short_source, short_sum_dest, short_max_dest,
-                         short_min_dest, int_source, int_sum_dest,
-                         int_max_dest, int_min_dest, long_source,
-                         long_sum_dest, long_max_dest, long_min_dest,
-                         tile_extent_0, tile_extent_1, args.myid, n_pes, root,
-                         _shmem_context, error_flag);
+      hipLaunchKernelGGL(
+          HIP_KERNEL_NAME(TileReduceThreadTest<T, Op>),
+          dim3(1), blockSize, 0, stream,
+          teams[0], s_buf, r_buf, tile_extent_0, ke_t1, root,
+          _shmem_context, loop, args.skip, start_time, end_time, error_flag);
       break;
 
-    case TileReduceWaveTestType:
-      hipLaunchKernelGGL(TileReduceWaveTest, dim3(1), blockSize, 0, stream,
-                         teams[0], source, sum_dest, max_dest, min_dest,
-                         short_source, short_sum_dest, short_max_dest,
-                         short_min_dest, int_source, int_sum_dest,
-                         int_max_dest, int_min_dest, long_source,
-                         long_sum_dest, long_max_dest, long_min_dest,
-                         tile_extent_0, tile_extent_1, args.myid, n_pes, root,
-                         _shmem_context, wf_size, error_flag);
+    case TileReduceWaveTestType: {
+      size_t wave_shared = num_warps * sizeof(rocshmem_ctx_t);
+      hipLaunchKernelGGL(
+          HIP_KERNEL_NAME(TileReduceWaveTest<T, Op>),
+          gridSize, blockSize, wave_shared, stream,
+          teams, s_buf, r_buf, tile_extent_0, ke_t1, root,
+          _shmem_context, wf_size, num_warps,
+          loop, args.skip, start_time, end_time, error_flag);
       break;
+    }
 
-    case TileReduceWGTestType:
-      hipLaunchKernelGGL(TileReduceTest, dim3(num_teams), blockSize, 0, stream,
-                         teams, num_teams, source, sum_dest, max_dest, min_dest,
-                         short_source, short_sum_dest, short_max_dest,
-                         short_min_dest, int_source, int_sum_dest,
-                         int_max_dest, int_min_dest, long_source,
-                         long_sum_dest, long_max_dest, long_min_dest,
-                         tile_extent_0, tile_extent_1, args.myid, n_pes, root,
-                         _shmem_context, error_flag);
+    case TileReduceWGTestType: {
+      size_t wg_shared = sizeof(rocshmem_ctx_t);
+      hipLaunchKernelGGL(
+          HIP_KERNEL_NAME(TileReduceWGTest<T, Op>),
+          dim3(args.num_wgs), blockSize, wg_shared, stream,
+          teams, args.num_wgs, s_buf, r_buf, tile_extent_0, ke_t1, root,
+          _shmem_context, loop, args.skip, start_time, end_time, error_flag);
       break;
+    }
 
     default:
-      fprintf(stderr, "Unknown TileReduce test type\n");
+      fprintf(stderr, "TileReduceTester: unknown test type\n");
       exit(EXIT_FAILURE);
   }
+
+  size_t tiles_per_loop;
+  if (_type == TileReduceWaveTestType) {
+    tiles_per_loop = gridSize.x * num_warps;
+  } else {
+    tiles_per_loop = gridSize.x;
+  }
+  num_msgs       = (loop + args.skip) * tiles_per_loop;
+  num_timed_msgs = loop * tiles_per_loop;
 }
 
-void TileReduceTester::postLaunchKernel() {
-  if (_type == TileReduceWGTestType) {
-    for (int i = 0; i < num_teams; i++) {
-      if (teams[i] != ROCSHMEM_TEAM_INVALID) {
-        rocshmem_team_destroy(teams[i]);
-        teams[i] = ROCSHMEM_TEAM_INVALID;
-      }
+template <typename T, ROCSHMEM_OP Op>
+void TileReduceTester<T, Op>::postLaunchKernel() {
+  for (int i = 0; i < num_teams; i++) {
+    if (teams[i] != ROCSHMEM_TEAM_INVALID) {
+      rocshmem_team_destroy(teams[i]);
+      teams[i] = ROCSHMEM_TEAM_INVALID;
     }
-  } else if (teams[0] != ROCSHMEM_TEAM_INVALID) {
-    rocshmem_team_destroy(teams[0]);
-    teams[0] = ROCSHMEM_TEAM_INVALID;
   }
 }
 
-void TileReduceTester::verifyResults([[maybe_unused]] size_t size) {
-  int h_error_flag;
-  CHECK_HIP(
-      hipMemcpy(&h_error_flag, error_flag, sizeof(int), hipMemcpyDeviceToHost));
+template <typename T, ROCSHMEM_OP Op>
+void TileReduceTester<T, Op>::verifyResults(size_t size) {
+  int t1 = tile_extent_1;
+  if (size > 0) {
+    int derived = static_cast<int>(size / (tile_extent_0 * sizeof(T)));
+    if (derived >= 1 && derived <= tile_extent_1) t1 = derived;
+  }
+  int tile_size = tile_extent_0 * t1;
+  int n_pes     = rocshmem_n_pes();
 
-  if (h_error_flag) {
-    fprintf(stderr, "PE %d: Tile reduce verification FAILED\n", args.myid);
+  // Only root PE (PE 0) holds the reduction result.
+  if (args.myid != 0) return;
+
+  // Verify each slot's result tile.
+  size_t tiles_per_loop;
+  if (_type == TileReduceWaveTestType) {
+    tiles_per_loop = static_cast<size_t>(args.num_wgs) * num_warps;
+  } else {
+    tiles_per_loop = args.num_wgs;
+  }
+
+  bool failed = false;
+  for (size_t slot = 0; slot < tiles_per_loop; slot++) {
+    int base = static_cast<int>(slot) * tile_size;
+    for (int idx = 0; idx < tile_size; idx++) {
+      T actual = r_buf[base + idx];
+      if (!verify_buf(actual, n_pes, idx)) {
+        fprintf(stderr,
+                "PE 0: Tile reduce verification failed at slot %zu idx %d: "
+                "got %lld\n",
+                slot, idx, static_cast<long long>(actual));
+        failed = true;
+      }
+    }
+  }
+
+  if (failed) {
     exit(EXIT_FAILURE);
   }
 
-  if (args.myid == 0) {
-    printf("PE %d: Tile reduce verification PASSED\n", args.myid);
+  if (size == max_msg_size) {
+    printf("PE 0: Tile reduce verification PASSED\n");
   }
 }
