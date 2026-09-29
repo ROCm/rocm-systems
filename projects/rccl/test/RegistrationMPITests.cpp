@@ -73,8 +73,8 @@ static const char* ceRecvOffsetEnvSkipReason()
     if (ceAllReduce == nullptr || std::atoi(ceAllReduce) != 1) {
         return "CE receive-offset regression requires RCCL_CE_ALLREDUCE=1";
     }
-    // gfx942 symMaxR2[AllReduce] is unlimited, so CTA ZERO alone still selects
-    // the symmetric kernel. FORCE takes the staged CE arm.
+    // Registered CE needs CTA ZERO or FORCE. Where the symmetric kernel is also
+    // eligible it still wins, and the tests skip once CE is not selected.
     const char* force = std::getenv("RCCL_FORCE_CE_ALLREDUCE");
     if (force == nullptr || std::atoi(force) != 1) {
         return "CE receive-offset regression requires RCCL_FORCE_CE_ALLREDUCE=1";
@@ -926,6 +926,8 @@ protected:
         return mpiCoordinatedSkipReason(!allocated, msg);
     }
 
+    // True when the selector would run this AllReduce on CE. The receive-offset
+    // tests assert CE behavior, so they skip when another backend is chosen.
     bool ceAllReduceSelected(void* sendBuf, void* recvBuf, size_t count)
     {
         int algo = 0, proto = 0, nCh = 0;
@@ -1573,6 +1575,10 @@ TEST_F(UBR_MultiSegment, Symmetric_Lsa_RecvRangePastWindowFallsBack)
 /**
  * @brief Same past-window geometry as RecvRangePastWindowFallsBack, with a
  *        payload that requires multiple reusable staging chunks.
+ *
+ * The message is larger than one ceARTmpBuf slot, so the staging fallback must
+ * AllGather chunk by chunk through the reused slot and copy each chunk into its
+ * place in recvbuff. A single-shot AllGather here would overrun the staging buffer.
  */
 TEST_F(UBR_MultiSegment, Symmetric_Lsa_RecvRangePastWindowChunkedFallback)
 {
