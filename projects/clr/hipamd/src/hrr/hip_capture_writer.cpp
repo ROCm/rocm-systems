@@ -162,6 +162,8 @@ static constexpr size_t   kPathMax          = 4096;
 static constexpr size_t   kMetadataJsonMax  = 128u * 1024u;
 static constexpr size_t   kEmergencyManifestMax = kMetadataJsonMax + 1024u;
 
+// Lock order: g_blob_mu, then g_file_mu. atfork_prepare is the only path that
+// holds both.
 static std::mutex   g_file_mu;
 static int          g_events_fd = -1;
 // g_base_dir is the archive path requested via HIP_HRR_CAPTURE_OUTPUT.
@@ -196,7 +198,9 @@ static std::atomic_flag g_buf_busy = ATOMIC_FLAG_INIT;
 
 // Raise g_buf_busy for a thread that already holds g_file_mu. Writers are
 // serialized by the mutex, so the flag can only be up already because the crash
-// callback is flushing g_buf; wait for it rather than mutating under it.
+// callback is flushing g_buf; wait for it rather than mutating under it. The
+// callback holds the flag only for that flush and never takes g_file_mu, which
+// is what bounds this wait.
 static void claim_buf_locked() {
   while (g_buf_busy.test_and_set(std::memory_order_acquire)) std::this_thread::yield();
 }
