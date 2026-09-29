@@ -687,33 +687,68 @@ namespace
     enum class SizeTier
     {
         Short,
-        Large
+        Large,
+        Count
     };
 
-    /// One row of the table: what to run, and what the generated test gets called.
+    // The generated case name is derived from the row's enums, never restated alongside them. A
+    // row that named its own tier could say "short" while allocating the 2MiB shard, and the
+    // "*_short" filter in test_categories_mpi.yaml, which exists to keep the large tier out of
+    // smoke and precheck, would pull it in anyway. The asserts make a new enumerator a compile
+    // error here rather than a row that generates the wrong suffix.
+    constexpr const char* kSizeTierNames[] = {"short", "large"};
+    static_assert(sizeof(kSizeTierNames) / sizeof(kSizeTierNames[0])
+                      == static_cast<size_t>(SizeTier::Count),
+                  "kSizeTierNames needs one entry per SizeTier");
+
+    constexpr const char* kDtypeNames[] = {"int8",
+                                           "uint8",
+                                           "int32",
+                                           "uint32",
+                                           "int64",
+                                           "uint64",
+                                           "fp16",
+                                           "fp32",
+                                           "fp64",
+                                           "bf16",
+                                           "fp8e4m3",
+                                           "fp8e5m2"};
+    static_assert(sizeof(kDtypeNames) / sizeof(kDtypeNames[0])
+                      == static_cast<size_t>(ncclNumTypes),
+                  "kDtypeNames needs one entry per ncclDataType_t");
+
+    constexpr const char* sizeTierName(SizeTier tier)
+    {
+        return kSizeTierNames[static_cast<size_t>(tier)];
+    }
+
+    constexpr const char* dtypeName(ncclDataType_t dtype)
+    {
+        return kDtypeNames[static_cast<size_t>(dtype)];
+    }
+
+    /// One row of the table: what to run. The generated name comes from these two, see above.
     struct DtypeSizeCase
     {
         ncclDataType_t dtype;
-        const char*    dtypeName;
         SizeTier       sizeTier;
-        const char*    sizeTierName;
     };
 
     // Every datatype RCCL actually has, in enum order (test/common/CollectiveArgs.hpp). All twelve
     // run at the short tier: a per-datatype reduction-kernel bug shows up at any size.
     constexpr DtypeSizeCase kShortTierCases[] = {
-        {ncclInt8, "int8", SizeTier::Short, "short"},
-        {ncclUint8, "uint8", SizeTier::Short, "short"},
-        {ncclInt32, "int32", SizeTier::Short, "short"},
-        {ncclUint32, "uint32", SizeTier::Short, "short"},
-        {ncclInt64, "int64", SizeTier::Short, "short"},
-        {ncclUint64, "uint64", SizeTier::Short, "short"},
-        {ncclFloat16, "fp16", SizeTier::Short, "short"},
-        {ncclFloat32, "fp32", SizeTier::Short, "short"},
-        {ncclFloat64, "fp64", SizeTier::Short, "short"},
-        {ncclBfloat16, "bf16", SizeTier::Short, "short"},
-        {ncclFloat8e4m3, "fp8e4m3", SizeTier::Short, "short"},
-        {ncclFloat8e5m2, "fp8e5m2", SizeTier::Short, "short"},
+        {ncclInt8, SizeTier::Short},
+        {ncclUint8, SizeTier::Short},
+        {ncclInt32, SizeTier::Short},
+        {ncclUint32, SizeTier::Short},
+        {ncclInt64, SizeTier::Short},
+        {ncclUint64, SizeTier::Short},
+        {ncclFloat16, SizeTier::Short},
+        {ncclFloat32, SizeTier::Short},
+        {ncclFloat64, SizeTier::Short},
+        {ncclBfloat16, SizeTier::Short},
+        {ncclFloat8e4m3, SizeTier::Short},
+        {ncclFloat8e5m2, SizeTier::Short},
     };
 
     // Three byte widths (4/2/1), enough to show the shard-element arithmetic divides exactly at
@@ -721,9 +756,9 @@ namespace
     // ncclFloat8e4m3 already covers the 1-byte width, and e5m2 has the narrowest exact-integer
     // range in the table, so it belongs in the cheap tier where it runs on every config.
     constexpr DtypeSizeCase kLargeTierCases[] = {
-        {ncclFloat32, "fp32", SizeTier::Large, "large"},
-        {ncclBfloat16, "bf16", SizeTier::Large, "large"},
-        {ncclFloat8e4m3, "fp8e4m3", SizeTier::Large, "large"},
+        {ncclFloat32, SizeTier::Large},
+        {ncclBfloat16, SizeTier::Large},
+        {ncclFloat8e4m3, SizeTier::Large},
     };
 
     std::vector<DtypeSizeCase> allDtypeSizeCases()
@@ -1289,7 +1324,8 @@ void PersistentCommunicatorMPITest::runPersistentCommunicatorCase(ncclDataType_t
 TEST_P(PersistentCommunicatorMPITest, HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator)
 {
     const DtypeSizeCase& test_case = GetParam();
-    SCOPED_TRACE(std::string("dtype=") + test_case.dtypeName + " tier=" + test_case.sizeTierName);
+    SCOPED_TRACE(std::string("dtype=") + dtypeName(test_case.dtype)
+                 + " tier=" + sizeTierName(test_case.sizeTier));
 
     // The maximum is the conservative bound the formulas are proved against, not an observed cliff:
     // a reduced element is a sum of at most nranks 0/1 contributions, so ncclFloat8e5m2's exact
@@ -1329,7 +1365,7 @@ TEST_P(PersistentCommunicatorMPITest, HeterogeneousCollectiveAndP2pSequenceOnOne
     case ncclBfloat16: runPersistentCommunicatorCase<hip_bfloat16>(test_case.dtype, shard_count); break;
     case ncclFloat8e4m3: runPersistentCommunicatorCase<rccl_float8>(test_case.dtype, shard_count); break;
     case ncclFloat8e5m2: runPersistentCommunicatorCase<rccl_bfloat8>(test_case.dtype, shard_count); break;
-    default: FAIL() << "no storage type mapped for datatype " << test_case.dtypeName;
+    default: FAIL() << "no storage type mapped for datatype " << static_cast<int>(test_case.dtype);
     }
 }
 
@@ -1337,8 +1373,8 @@ INSTANTIATE_TEST_SUITE_P(DtypeSizeCases,
                          PersistentCommunicatorMPITest,
                          ::testing::ValuesIn(allDtypeSizeCases()),
                          [](const ::testing::TestParamInfo<DtypeSizeCase>& info) {
-                             return std::string(info.param.dtypeName) + "_"
-                                    + info.param.sizeTierName;
+                             return std::string(dtypeName(info.param.dtype)) + "_"
+                                    + sizeTierName(info.param.sizeTier);
                          });
 
 /**
