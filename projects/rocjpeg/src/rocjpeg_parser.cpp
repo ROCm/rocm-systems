@@ -90,10 +90,20 @@ bool RocJpegStreamParser::ParseJpegStream(const uint8_t *jpeg_stream, uint32_t j
     }
 
     while (!sos_marker_found && stream_ < stream_end_) {
-        // A marker may be preceded by any number of 0xFF fill bytes. Skip them
-        // without running off the end of the buffer.
+        // ISO/IEC 10918-1 B.1.1.3: every marker is a 0xFF byte followed by a code
+        // that is neither 0x00 nor 0xFF, and a marker may be preceded by any
+        // number of additional 0xFF fill bytes. Skip the fill without running off
+        // the end of the buffer.
+        const uint8_t *marker_prefix = stream_;
         while (stream_ < stream_end_ && *stream_ == 0xFF) {
             stream_++;
+        }
+        if (stream_ == marker_prefix) {
+            ErrorLog(g_rocjpeg_logger, "Invalid JPEG: marker at offset " +
+                ROCJPEG_TOSTR(static_cast<uint32_t>(stream_ - stream_start_)) +
+                " is not preceded by the 0xFF prefix byte!");
+            FunctionExitLog(g_rocjpeg_logger);
+            return false;
         }
         if (stream_ >= stream_end_) {
             ErrorLog(g_rocjpeg_logger, "Truncated JPEG: no marker found before the end of the stream!");
@@ -101,6 +111,14 @@ bool RocJpegStreamParser::ParseJpegStream(const uint8_t *jpeg_stream, uint32_t j
             return false;
         }
         marker = *stream_++;
+
+        // A 0x00 following the prefix is a stuffed byte belonging to entropy-coded
+        // data, not a marker, so it has no place in the header sequence.
+        if (marker == 0x00) {
+            ErrorLog(g_rocjpeg_logger, "Invalid JPEG: byte stuffing (0xFF00) found outside of entropy-coded data!");
+            FunctionExitLog(g_rocjpeg_logger);
+            return false;
+        }
 
         // EOI ends the image, so reaching it before the scan means the stream
         // carries no entropy-coded data at all.
