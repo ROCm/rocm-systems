@@ -208,24 +208,19 @@ TEST_F(CeReduceScatterEligibilityTest, ChunkLayout_LargeMessagePipelined)
 }
 
 // ---------------------------------------------------------------------------
-// Staging-offset arithmetic (ce_coll.h): the three formulas ncclCeReduceScatter() uses to place
-// every scatter copy. Offsets are hand-computed rather than re-derived, so an off-by-one shows up
-// as a wrong number instead of two wrong numbers agreeing. Scope is the helpers' arithmetic only:
-// nothing here calls ncclCeReduceScatter(), so a call site passing a wrong index is out of reach.
-//
-// slotChunkBytes is ncclCeAllReduceSlotChunkBytes(ceArStagingBytes / nRanks) in production and
-// ceArStagingBytes defaults to NCCL_CE_AR_STAGING_BYTES, which is what ncclCeAllReduceMaxChunkBytes()
-// stands in for below. The same expression sizes the buffer in ncclCeEnsureAllReduceStaging(), so
-// these bounds are the allocated extent, not an assumption that could drift from it.
+// Staging-offset arithmetic (ce_coll.h). Offsets are hand-computed, not re-derived, so an
+// off-by-one shows up as a wrong number instead of two wrong numbers agreeing. Nothing here calls
+// ncclCeReduceScatter(), so a call site passing a wrong index is out of reach.
+// ncclCeAllReduceMaxChunkBytes() stands in for the production ceArStagingBytes / nRanks, which is
+// also what ncclCeEnsureAllReduceStaging() sizes the buffer with, so the bounds are the allocated
+// extent rather than an assumption that could drift from it.
 // ---------------------------------------------------------------------------
 
 TEST_F(CeReduceScatterEligibilityTest, DstSlotOffset_HandComputedForEveryRankAndSlot)
 {
-    // Regions numbered 0..(NUM_SLOTS * nRanks - 1) in (slot, sender) order, that numbering written
-    // out by hand: the right-hand sides never re-derive slot * nRanks + sender. Multiples of
-    // slotChunkBytes, not byte literals, so a staging retune cannot fail this for an unrelated
-    // reason. The static_assert turns a NCCL_CE_NUM_SLOTS bump into a build error here rather than
-    // silently unchecked slots.
+    // Region numbering written out by hand, so no right-hand side re-derives slot * nRanks + sender,
+    // and scaled by slotChunkBytes so a staging retune cannot fail this for an unrelated reason.
+    // The static_assert turns a NCCL_CE_NUM_SLOTS bump into a build error, not unchecked slots.
     static_assert(NCCL_CE_NUM_SLOTS == 2, "the slot tables below enumerate every slot by hand");
     constexpr int nRanks         = 4;
     const size_t  slotChunkBytes = ncclCeAllReduceSlotChunkBytes(ncclCeAllReduceMaxChunkBytes(nRanks));
@@ -321,10 +316,9 @@ TEST_F(CeReduceScatterEligibilityTest, SrcOffset_HandComputedWholeShardAndPipeli
 
 TEST_F(CeReduceScatterEligibilityTest, SrcOffset_TilesTheSendBufferExactly)
 {
-    // The (dstRank, chunk) copies must tile [0, nRanks * shardBytes) with no gap and no overlap: a
-    // gap leaves stale data in the peer's slot, an overlap sends bytes twice and drops the skipped
-    // ones. 2500 elements over a 700-element base chunk gives every shard a short last chunk.
-    // Sizes are synthetic (2800B is far under the chooser's 4 MiB floor); the property holds at any.
+    // The (dstRank, chunk) copies must tile [0, nRanks * shardBytes) exactly: a gap leaves stale data
+    // in the peer's slot, an overlap drops the bytes it skipped. 2500 elements over a 700-element
+    // chunk gives every shard a short tail. Sizes are synthetic; the property holds at any.
     constexpr int    nRanks        = 3;
     constexpr size_t eltSize       = sizeof(float);
     constexpr size_t shardElems    = 2500;
@@ -363,10 +357,9 @@ TEST_F(CeReduceScatterEligibilityTest, SrcOffset_TilesTheSendBufferExactly)
 
 TEST_F(CeReduceScatterEligibilityTest, SignalIndex_HandComputedBoundedAndUnique)
 {
-    // signalBuffer is [NCCL_CE_NUM_SLOTS][nRanks], read as an array index locally and, scaled by
-    // sizeof(uint32_t), as a byte offset into signalWin for peers. Both views now come from this
-    // helper, so comparing them would compare a value with itself; the indices and the two
-    // properties below are what is left worth pinning.
+    // signalBuffer is [NCCL_CE_NUM_SLOTS][nRanks], read as an array index locally and as a byte
+    // offset into signalWin for peers. Both views now come from this helper, so comparing them
+    // would compare a value with itself; the indices and the two properties below are what is left.
     EXPECT_EQ(ncclCeReduceScatterSignalIndex(0, 0, 4), 0u);
     EXPECT_EQ(ncclCeReduceScatterSignalIndex(0, 3, 4), 3u);
     EXPECT_EQ(ncclCeReduceScatterSignalIndex(1, 0, 4), 4u);
@@ -396,16 +389,12 @@ TEST_F(CeReduceScatterEligibilityTest, SignalIndex_HandComputedBoundedAndUnique)
 
 TEST_F(CeReduceScatterEligibilityTest, DstSlotOffset_ChunkNeverSpillsIntoTheNextSendersRegion)
 {
-    // Where the region formula and the chunk-size formula meet: a copy starts at
-    // ncclCeReduceScatterDstSlotOffsetBytes(slot, sender) and runs currentChunkBytes, so it must
-    // end no later than the next region begins, or one sender overwrites the next one's
-    // contribution. Each region's end is compared against the following start (two computed
-    // offsets, not the chunk clamp alone), the last against the staging extent.
-    //
-    // Driven with the largest shard the eligibility gate allows, at the awkward rank counts where
-    // slotChunkBytes is a truncated capacity: some land on the whole-shard branch, others on the
-    // pipelined short-tail one. Which branch falls out of the 16B rounding, so the flags pin that
-    // both were really taken rather than letting a rounding change retire one silently.
+    // Where the region formula and the chunk-size formula meet: a copy runs currentChunkBytes from
+    // its region start and must end no later than the next region begins, or one sender overwrites
+    // the next one's contribution. Each end is compared against the following start, the last
+    // against the staging extent. Driven at the awkward rank counts where slotChunkBytes is a
+    // truncated capacity, which split across the whole-shard and pipelined branches; which branch
+    // falls out of the 16B rounding, so the flags pin that both were really taken.
     bool sawWholeShard = false;
     bool sawPipelined  = false;
 
