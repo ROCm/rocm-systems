@@ -44,6 +44,17 @@ extern "C" {
     if (slot < 0 || slot >= ACCL_PROXY_OP_POOL_SIZE) return -1;
     return ctx->proxyOpPool[slot].mutex.__data.__kind == -1 ? 1 : 0;
   }
+  // Descriptor behind the output FILE*, so a test can break writes on it.
+  int test_acclOutputFd(void* ctxv) {
+    struct acclCommContext* ctx = (struct acclCommContext*)ctxv;
+    return ctx->outputFile ? fileno(ctx->outputFile) : -1;
+  }
+  // Current tenancy of a proxy-op slot; a step pins this at start.
+  unsigned long test_acclProxyOpGeneration(void* ctxv, int slot) {
+    struct acclCommContext* ctx = (struct acclCommContext*)ctxv;
+    if (slot < 0 || slot >= ACCL_PROXY_OP_POOL_SIZE) return 0;
+    return (unsigned long)ctx->proxyOpPool[slot].generation;
+  }
   void test_acclWriteDummyRecord(void* ctx) {
     struct acclCompletedRecord rec;
     memset(&rec, 0, sizeof(rec));
