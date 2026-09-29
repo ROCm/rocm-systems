@@ -100,7 +100,7 @@ struct vhsakmt_node {
 
 struct vhsakmt_device {
   struct virtio_gpu_device* vgdev;
-  int refcount;
+  _Atomic int refcount;
   pthread_mutex_t bo_handles_mutex;
   rbtree_t bo_rbt;
   interval_tree_t userptr_tree;
@@ -108,7 +108,7 @@ struct vhsakmt_device {
   struct vhsakmt_bo* shmem_bo;
 
   uint32_t reqbuf_max;
-  uint32_t next_blob_id;
+  _Atomic uint32_t next_blob_id;
 
   uint64_t vm_start;
   uint64_t vm_size;
@@ -125,7 +125,7 @@ struct vhsakmt_bo {
   interval_tree_node_t itn;
   struct vhsakmt_device* dev;
 
-  int refcount;
+  _Atomic int refcount;
   unsigned size;
   void* cpu_addr;
   void* host_addr;
@@ -140,7 +140,7 @@ struct vhsakmt_bo {
       uint32_t res_id;
       uint64_t offset;
       uint64_t alloc_size;
-      int map_count;
+      _Atomic int map_count;
     } real;
   };
 
@@ -152,7 +152,7 @@ struct vhsakmt_bo {
     void* gl_meta_data;
     uint64_t import_size;
     bool imported : 1;
-    int refcount;
+    _Atomic int refcount;
     pthread_mutex_t lock;  /* protects imported, import_size and refcount operations */
   } amdgpu_bo;
 
