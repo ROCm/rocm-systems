@@ -269,6 +269,7 @@ if(BUILD_TESTS)
     ReduceTests.cpp
     RegisterTests.cpp
     ScatterTests.cpp
+    TeamTopologyTests.cpp
     P2pChannelScalingTests.cpp
     VersionGateTests.cpp
     SendRecvTests.cpp
