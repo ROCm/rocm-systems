@@ -367,9 +367,7 @@ resolve_host_link(hsa_agent_t agent)
 }
 
 // Resolves where a ring buffer lives and, for a device-memory ring, how its owning agent reaches
-// the host. Every failure leaves the corresponding field unknown, which fences. Runs once per
-// queue, during registration, which for a dynamically discovered queue happens beneath an
-// application enqueue on that thread
+// the host.
 ring_properties
 resolve_ring_properties(const void* ring_buf)
 {
@@ -471,12 +469,11 @@ wait_for_free_slot(QueueState* state, uint64_t submit_pos)
 void
 ring_buffer_writer(const void* pkts, uint64_t pkt_count)
 {
-    auto&       tls      = get_doorbell_tls();
-    auto*       state    = tls.state;
-    auto        pkt_size = tls.pkt_size;
-    const auto* src      = static_cast<const char*>(pkts);
-    // A ring buffer's placement is fixed for the lifetime of the queue.
-    const bool needs_fence = state->ring_needs_store_fence;
+    auto&       tls         = get_doorbell_tls();
+    auto*       state       = tls.state;
+    auto        pkt_size    = tls.pkt_size;
+    const auto* src         = static_cast<const char*>(pkts);
+    const bool  needs_fence = state->ring_needs_store_fence;
     for(uint64_t i = 0; i < pkt_count; i++)
     {
         wait_for_free_slot(state, tls.submit_pos);
@@ -1895,8 +1892,6 @@ create_queue_state(const hsa_queue_t* queue, bool overwrite)
     uint64_t           current_wdid = __atomic_load_n(wdid_addr, __ATOMIC_ACQUIRE);
     const auto         ring         = resolve_ring_properties(queue->base_address);
     state->ring_buf                 = queue->base_address;
-    // ROCr omits PCIe write ordering on an XGMI host link, so only a resolved XGMI link skips the
-    // fence; every link that does not resolve keeps it.
     state->ring_needs_store_fence =
         (ring.placement != ring_placement::system) && ring.host != host_link::xgmi;
     state->ring_size       = queue->size;
