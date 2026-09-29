@@ -693,8 +693,8 @@ class SvmBuffer : AllStatic {
   //! Allocate a shared buffer that is accessible by all devices in the context
   static void* malloc(Context& context, cl_svm_mem_flags flags, size_t size, size_t alignment,
                       const amd::Device* curDev = nullptr, void* hostptr = nullptr);
-  //! Release shared buffer
-  static void free(const Context& context, void* ptr);
+  //! Release shared buffer.  Returns false if ptr was not in the SVM map.
+  static bool free(const Context& context, void* ptr);
 
   //! Fill the destination buffer \a dst with the contents of the source
   //! buffer \a src \times times.
@@ -706,7 +706,7 @@ class SvmBuffer : AllStatic {
 
  private:
   static void Add(uintptr_t k, uintptr_t v);
-  static void Remove(uintptr_t k);
+  static bool Remove(uintptr_t k);
   static bool Contains(uintptr_t ptr);
 
   static std::map<uintptr_t, uintptr_t> Allocated_;  // !< Allocated buffers

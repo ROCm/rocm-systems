@@ -32,17 +32,40 @@ TEST(code_object_test, descriptor_reports_correct_metadata)
     EXPECT_EQ(k_domain.meta.id, mock_sdk::CALLBACK_TRACING_CODE_OBJECT);
     EXPECT_EQ(k_domain.meta.mode, collection_mode::callback);
     EXPECT_FALSE(k_domain.meta.group.has_value());
-
-    const auto expected_on_record = on_code_object<mock_sdk, externals>;
-    EXPECT_EQ(k_domain.on_record, expected_on_record);
 }
 
-TEST(code_object_test, on_code_object_handles_call_without_crashing)
+TEST(code_object_test, on_code_object_enter_handles_call_without_crashing)
 {
     const mock_sdk::callback_tracing_record_t record{};
     mock_sdk::user_data_t                     user_data{};
 
-    on_code_object<mock_sdk, externals>(record, &user_data, nullptr);
+    on_code_object_enter<mock_sdk, externals>(record, &user_data, nullptr);
+}
+
+TEST(code_object_test, on_code_object_exit_handles_call_without_crashing)
+{
+    const mock_sdk::callback_tracing_record_t record{};
+    mock_sdk::user_data_t                     user_data{};
+
+    on_code_object_exit<mock_sdk, externals>(record, &user_data, nullptr);
+}
+
+TEST(code_object_test, on_record_dispatches_by_phase_without_crashing)
+{
+    constexpr const auto& k_domain = k_code_object<mock_sdk, externals>;
+    mock_sdk::user_data_t user_data{};
+
+    auto enter_record  = mock_sdk::callback_tracing_record_t{};
+    enter_record.phase = mock_sdk::CALLBACK_PHASE_ENTER;
+    k_domain.on_record(enter_record, &user_data, nullptr);
+
+    auto exit_record  = mock_sdk::callback_tracing_record_t{};
+    exit_record.phase = mock_sdk::CALLBACK_PHASE_EXIT;
+    k_domain.on_record(exit_record, &user_data, nullptr);
+
+    auto none_record  = mock_sdk::callback_tracing_record_t{};
+    none_record.phase = mock_sdk::CALLBACK_PHASE_NONE;
+    k_domain.on_record(none_record, &user_data, nullptr);
 }
 
 // on_code_object_configure() is a no-op: it must not touch any Externals member.

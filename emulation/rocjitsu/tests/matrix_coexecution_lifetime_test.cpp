@@ -41,7 +41,7 @@ AdmissionCache::Words write_window(amdgpu::GpuMemory &memory, amdgpu::Instructio
   memory.write32(pc + 16, cdna5::build_sopp(cdna5::kSBranchSopp, {.simm16 = branch_immediate})[0]);
   icache.invalidate_all();
   AdmissionCache::Words first;
-  icache.fetch(memory, pc, 0, reinterpret_cast<uint8_t *>(first.data()));
+  icache.fetch(memory, pc, reinterpret_cast<uint8_t *>(first.data()));
   return first;
 }
 
@@ -120,7 +120,7 @@ TEST(MmaAdmissionCacheTest, RevalidatesAcceptedAndRejectedPlansBeyondTheInitialF
   memory.write32(pc + 12, 0xbf800000); // s_nop
   memory.write32(pc + 24, cdna5::build_sopp(cdna5::kSBranchSopp, {.simm16 = 0xffff})[0]);
   AdmissionCache::Words first;
-  icache.fetch(memory, pc, 0, reinterpret_cast<uint8_t *>(first.data()));
+  icache.fetch(memory, pc, reinterpret_cast<uint8_t *>(first.data()));
 
   for (unsigned version = 0; version != 12; ++version) {
     const bool dependent = version % 2;

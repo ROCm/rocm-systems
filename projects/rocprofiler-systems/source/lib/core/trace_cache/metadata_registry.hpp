@@ -29,9 +29,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace trace_cache
+namespace rocprofsys::trace_cache
 {
 namespace info
 {
@@ -139,8 +137,14 @@ annotate_with_nic(const std::string& nic, std::optional<int> first_section = std
 {
     std::stringstream ss;
     ss << std::string(tim::trait::name<Category>::value) + " [" + nic + "]";
-    if(first_section) ss << "_" << std::to_string(*first_section);
-    if(second_section) ss << "_" << std::to_string(*second_section);
+    if(first_section)
+    {
+        ss << "_" << std::to_string(*first_section);
+    }
+    if(second_section)
+    {
+        ss << "_" << std::to_string(*second_section);
+    }
     return ss.str();
 }
 
@@ -289,5 +293,4 @@ private:
             rename_table);
 };
 
-}  // namespace trace_cache
-}  // namespace rocprofsys
+}  // namespace rocprofsys::trace_cache

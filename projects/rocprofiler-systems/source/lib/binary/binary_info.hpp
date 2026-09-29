@@ -54,7 +54,10 @@ binary_info::find_section(uintptr_t _addr) const
 {
     for(const auto& sitr : sections)
     {
-        if(sitr.first.contains(_addr)) return static_cast<RetT*>(sitr.second);
+        if(sitr.first.contains(_addr))
+        {
+            return static_cast<RetT*>(sitr.second);
+        }
     }
     return nullptr;
 }

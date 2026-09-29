@@ -7,9 +7,7 @@
 
 #include <timemory/components/timing/backends.hpp>
 
-namespace rocprofsys
-{
-namespace component
+namespace rocprofsys::component
 {
 bool
 backtrace_timestamp::operator<(const backtrace_timestamp& rhs) const
@@ -21,7 +19,7 @@ bool
 backtrace_timestamp::is_valid() const
 {
     const auto& _info = thread_info::get(m_tid, SequentTID);
-    return (_info) ? _info->is_valid_time(m_real) : false;
+    return _info ? _info->is_valid_time(m_real) : false;
 }
 
 void
@@ -30,7 +28,6 @@ backtrace_timestamp::sample(int)
     m_tid  = tim::threading::get_id();
     m_real = tim::get_clock_real_now<std::uint64_t, std::nano>();
 }
-}  // namespace component
-}  // namespace rocprofsys
+}  // namespace rocprofsys::component
 
 TIMEMORY_INITIALIZE_STORAGE(rocprofsys::component::backtrace_timestamp)

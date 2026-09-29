@@ -63,7 +63,10 @@ struct perfetto_policy
                                      const std::vector<counter_metadata>& counter_meta)
     {
         auto it = detail::get_perfetto_data().find(device_index);
-        if(it == detail::get_perfetto_data().end()) return;
+        if(it == detail::get_perfetto_data().end())
+        {
+            return;
+        }
 
         for(const auto& meta : counter_meta)
         {
@@ -79,7 +82,10 @@ struct perfetto_policy
                              std::uint64_t timestamp)
     {
         auto it = detail::get_perfetto_data().find(device_index);
-        if(it == detail::get_perfetto_data().end()) return;
+        if(it == detail::get_perfetto_data().end())
+        {
+            return;
+        }
 
         it->second.samples->emplace_back(
             detail::gpu_perf_counter_perfetto_sample{ timestamp, metric_values });
@@ -88,25 +94,37 @@ struct perfetto_policy
     static void post_process(const enabled_metrics& /*enabled*/)
     {
         const auto& thread_info = thread_info::get(0, InternalTID);
-        if(!thread_info) return;
+        if(!thread_info)
+        {
+            return;
+        }
 
         for(const auto& entry : detail::get_perfetto_data())
         {
             const auto  device_index = entry.first;
             const auto& data         = entry.second;
-            if(!data.samples) continue;
+            if(!data.samples)
+            {
+                continue;
+            }
 
             LOG_DEBUG("Post-processing {} samples for device {}", data.samples->size(),
                       device_index);
 
             for(const auto& sample : *data.samples)
             {
-                if(!thread_info->is_valid_time(sample.timestamp)) continue;
+                if(!thread_info->is_valid_time(sample.timestamp))
+                {
+                    continue;
+                }
 
                 for(const auto& cv : sample.values)
                 {
                     auto track_it = data.counter_tracks.find(cv.counter_id);
-                    if(track_it == data.counter_tracks.end()) continue;
+                    if(track_it == data.counter_tracks.end())
+                    {
+                        continue;
+                    }
 
                     TRACE_COUNTER("rocm_counter_collection",
                                   counter_track::at(device_index, track_it->second),

@@ -18,8 +18,10 @@
 #endif
 
 #include "rocjitsu/base/rj_version.h"
+#include "rocjitsu/config/config_common.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/config/dbt_guest_config.h"
+#include "rocjitsu/config/effective_config.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 #include "rocjitsu/vm/amdgpu/partitioning.h"
@@ -33,6 +35,7 @@
 #include <cerrno>
 #include <charconv>
 #include <csignal>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
@@ -43,6 +46,7 @@
 #include <iterator>
 #include <optional>
 #include <poll.h>
+#include <string>
 #include <string_view>
 #include <sys/prctl.h>
 #include <sys/wait.h>
@@ -213,7 +217,7 @@ void reap_stale_runtime_dirs() {
     if (status_error || status.type() != std::filesystem::file_type::directory)
       continue;
     const std::string name = it->path().filename().string();
-    if (!std::all_of(name.begin(), name.end(), [](unsigned char c) { return std::isdigit(c); }))
+    if (!std::ranges::all_of(name, [](unsigned char c) { return std::isdigit(c); }))
       continue;
     pid_t pid = 0;
     auto [ptr, parse_error] = std::from_chars(name.data(), name.data() + name.size(), pid);
@@ -230,16 +234,6 @@ void reap_stale_runtime_dirs() {
 }
 
 using KfdGpuOrdinal = rocjitsu::cli::VisibleGpu;
-
-std::optional<uint32_t> parse_u32(std::string_view text) {
-  uint32_t value = 0;
-  auto *begin = text.data();
-  auto *end = text.data() + text.size();
-  auto [ptr, err] = std::from_chars(begin, end, value);
-  if (err != std::errc{} || ptr != end)
-    return std::nullopt;
-  return value;
-}
 
 std::optional<uint32_t> read_u32_file(const std::filesystem::path &path) {
   std::ifstream in(path);
@@ -290,7 +284,7 @@ std::vector<KfdGpuOrdinal> real_kfd_gpu_ordinals() {
       continue;
 
     std::string name = entry.path().filename().string();
-    auto node_id = parse_u32(name);
+    const std::optional<uint32_t> node_id = config::parse_uint32(name);
     if (!node_id)
       continue;
 
@@ -303,8 +297,7 @@ std::vector<KfdGpuOrdinal> real_kfd_gpu_ordinals() {
     }
   }
 
-  std::sort(nodes.begin(), nodes.end(),
-            [](const auto &lhs, const auto &rhs) { return lhs.node_id < rhs.node_id; });
+  std::ranges::sort(nodes, {}, &KfdNodeInfo::node_id);
 
   std::vector<KfdGpuOrdinal> gpus;
   gpus.reserve(nodes.size());
@@ -393,6 +386,10 @@ void print_usage() {
          "\n"
          "Options:\n"
          "  --config <path>   Simulation config JSON (required)\n"
+         "  --cpu-thread-budget <n>, --cpu-thread-budget=<n>\n"
+         "                    Replace cpu_thread_budget for this launch only; the\n"
+         "                    config file is left unchanged. Zero selects automatic\n"
+         "                    sizing. Not available with --attach.\n"
          "  --vfio-socket <path>\n"
          "                    Serve the configured GPU as a PCI function to a VMM over\n"
          "                    the vfio-user protocol on this AF_UNIX socket, instead of\n"
@@ -405,6 +402,7 @@ void print_usage() {
          "                    with -machine memory-backend=mem.\n"
          "  --thread-budget-table\n"
          "                    Print engine / dispatch allocations without running a VM\n"
+         "  --check-vfio-user Report whether this binary includes VFIO-user support\n"
          "  --version, -v     Print version and exit\n"
          "  --help, -h        Print this help and exit\n";
 }
@@ -417,6 +415,8 @@ int main(int argc, char *argv[]) {
   const char *config_path = nullptr;
   const char *vfio_socket = nullptr;
   bool thread_budget_table = false;
+  std::optional<uint32_t> cpu_thread_budget;
+  int vfio_ready_fd = -1;
   bool daemon_mode = false;
   bool attach_mode = false;
   int separator_idx = -1;
@@ -429,14 +429,48 @@ int main(int argc, char *argv[]) {
     }
     if (arg == "--config" && i + 1 < argc) {
       config_path = argv[++i];
+    } else if (arg == "--cpu-thread-budget" || arg.starts_with("--cpu-thread-budget=")) {
+      // Both spellings are accepted because wrappers that forward a single opaque
+      // token cannot pass a flag and its value as two arguments.
+      const size_t equals = arg.find('=');
+      std::string_view value;
+      if (equals != std::string_view::npos) {
+        value = arg.substr(equals + 1);
+      } else if (i + 1 < argc) {
+        value = argv[++i];
+      } else {
+        std::cerr << "rocjitsu: --cpu-thread-budget requires a value\n";
+        return 1;
+      }
+      cpu_thread_budget = config::parse_uint32(value);
+      if (!cpu_thread_budget) {
+        std::cerr << "rocjitsu: --cpu-thread-budget requires an unsigned integer\n";
+        return 1;
+      }
     } else if (arg == "--vfio-socket" && i + 1 < argc) {
       vfio_socket = argv[++i];
     } else if (arg == "--thread-budget-table") {
       thread_budget_table = true;
+    } else if (arg == "--vfio-ready-fd" && i + 1 < argc) {
+      std::string_view value(argv[++i]);
+      auto [ptr, error] = std::from_chars(value.data(), value.data() + value.size(), vfio_ready_fd);
+      if (error != std::errc{} || ptr != value.data() + value.size() || vfio_ready_fd < 0) {
+        std::cerr << "rocjitsu: --vfio-ready-fd requires a nonnegative descriptor\n";
+        return 1;
+      }
     } else if (arg == "--daemon") {
       daemon_mode = true;
     } else if (arg == "--attach") {
       attach_mode = true;
+    } else if (arg == "--check-vfio-user") {
+#if defined(RJ_ENABLE_VFIO_USER)
+      std::cout << "vfio-user support enabled\n";
+      return 0;
+#else
+      std::cerr << "rocjitsu: this build has no vfio-user support; reconfigure with "
+                   "-DROCJITSU_ENABLE_VFIO=ON\n";
+      return 1;
+#endif
     } else if (arg == "--help" || arg == "-h") {
       print_usage();
       return 0;
@@ -462,14 +496,31 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
+  // Attaching joins a daemon that already built its machine from its own config,
+  // so there is nothing left here for a budget to apply to.
+  if (cpu_thread_budget && attach_mode) {
+    std::cerr << "rocjitsu: --cpu-thread-budget cannot be combined with --attach\n";
+    return 1;
+  }
+
+  // Applying the budget to a copy keeps the override inside this launch: the
+  // config the user named is never rewritten, and simulations built from other
+  // configs in the same process tree keep the budgets their own configs ask for.
+  auto config_json_for_this_launch = [&]() {
+    std::string json = rocjitsu::config::read_config_file(abs_config);
+    if (cpu_thread_budget)
+      json = rocjitsu::config::json_with_cpu_thread_budget(json, *cpu_thread_budget);
+    return json;
+  };
+
   if (thread_budget_table) {
-    if (vfio_socket || daemon_mode || attach_mode || separator_idx >= 0) {
+    if (vfio_socket || vfio_ready_fd >= 0 || daemon_mode || attach_mode || separator_idx >= 0) {
       std::cerr << "rocjitsu: --thread-budget-table cannot be combined with a launch mode\n";
       return 1;
     }
     try {
-      auto settings =
-          rocjitsu::config::load_execution_thread_settings(abs_config, rocjitsu::kEmbeddedSchema);
+      auto settings = rocjitsu::config::load_execution_thread_settings_from_string(
+          config_json_for_this_launch(), rocjitsu::kEmbeddedSchema);
       const uint32_t host = rocjitsu::amdgpu::available_host_threads();
       std::cout
           << "Budget | num_threads | cpu_dispatch_threads per GPU | async_helper_threads | Total\n";
@@ -498,21 +549,51 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  // Serving a VMM needs the device's identity, not a simulated machine, so this
-  // is dispatched before the parse that builds one.
+  const pid_t my_pid = getpid();
+
+  // Reclaim per-PID runtime dirs orphaned by prior runs (execvp never returns, so
+  // those invocations could not clean up after themselves). Done for every launch
+  // mode, before this invocation creates its own directory.
+  reap_stale_runtime_dirs();
+
+  // The copy lives in this invocation's runtime directory, beside the config-path
+  // handoff an exec'd workload already reads, so the same cleanup reclaims it.
+  auto write_config_for_this_launch = [&]() {
+    if (!cpu_thread_budget)
+      return true;
+    try {
+      abs_config = rocjitsu::config::write_effective_config(abs_config, *cpu_thread_budget, my_pid);
+    } catch (const std::exception &e) {
+      std::cerr << std::format("rocjitsu: {}\n", e.what());
+      cleanup_runtime_files(my_pid);
+      return false;
+    }
+    return true;
+  };
+
+  // Serving a VMM builds its own machine, with the PCI function inside it, so
+  // this is dispatched before the parse that builds one here -- not because no
+  // machine is needed, but because the one it needs is assembled differently.
   if (vfio_socket != nullptr) {
     if (daemon_mode || attach_mode || (separator_idx >= 0 && separator_idx + 1 < argc)) {
       std::cerr << "rocjitsu: --vfio-socket serves a VMM and cannot be combined with "
                    "--daemon, --attach, or an application\n";
       return 1;
     }
+    if (!write_config_for_this_launch())
+      return 1;
 #if defined(RJ_ENABLE_VFIO_USER)
-    return rocjitsu::run_vfio_server(abs_config, vfio_socket);
+    return rocjitsu::run_vfio_server(abs_config, vfio_socket, vfio_ready_fd);
 #else
     std::cerr << "rocjitsu: this build has no vfio-user support; reconfigure with "
                  "-DROCJITSU_ENABLE_VFIO=ON\n";
     return 1;
 #endif
+  }
+
+  if (vfio_ready_fd >= 0) {
+    std::cerr << "rocjitsu: --vfio-ready-fd requires --vfio-socket\n";
+    return 1;
   }
 
   rocjitsu::config::DbtGuestConfig dbt_guest_config;
@@ -529,13 +610,20 @@ int main(int argc, char *argv[]) {
     std::cerr << "rocjitsu: dbt_guest mode currently supports local launch only\n";
     return 1;
   }
+  // A dbt_guest simulator_config is resolved relative to the config naming it, and
+  // it, not this config, is what the host VM is built from. Moving the budget onto
+  // a copy would therefore both break that path and miss the config it must reach.
+  if (dbt_guest_mode && cpu_thread_budget && !dbt_guest_config.host.simulator_config_path.empty()) {
+    std::cerr << std::format("rocjitsu: --cpu-thread-budget cannot be combined with a dbt_guest "
+                             "simulator_config; set cpu_thread_budget in {} instead\n",
+                             dbt_guest_config.host.simulator_config_path);
+    return 1;
+  }
+
+  if (!write_config_for_this_launch())
+    return 1;
 
   bool has_app = (separator_idx >= 0 && separator_idx + 1 < argc);
-
-  // Reclaim per-PID runtime dirs orphaned by prior runs (execvp never returns, so
-  // those invocations could not clean up after themselves). Done for every mode,
-  // including daemon-only, before this invocation creates its own directory.
-  reap_stale_runtime_dirs();
 
   if (daemon_mode && !has_app)
     return run_daemon_server(abs_config.c_str());
@@ -575,8 +663,6 @@ int main(int argc, char *argv[]) {
       return 1;
     }
   }
-
-  pid_t my_pid = getpid();
 
   // Set only where this process forked the daemon itself. A client authorizes
   // that process to reach into its address space, so which PID it is has to
@@ -662,11 +748,11 @@ int main(int argc, char *argv[]) {
                 dbt_execution_gpus, child_rocr_visible, environment_value("HIP_VISIBLE_DEVICES"),
                 environment_value("CUDA_VISIBLE_DEVICES"), dbt_guest_config.host.gpu_id))
       launch_environment.set(client_visible->name, client_visible->value);
-    // The HSA hook still uses the legacy tools callback path. Disable only the
+    // The HSA hook still uses the legacy tools callback path. Disable the
     // rocprofiler-register table-delivery path so it cannot validate an
-    // unshadowed table before rocjitsu installs guest-agent wrappers.
-    launch_environment.set("HSA_TOOLS_DISABLE_REGISTER", "1");
-    launch_environment.set("HSA_TOOLS_LIB", hooks_path);
+    // unshadowed table before rocjitsu installs guest-agent wrappers. Also
+    // exclude the overlapping automatic HotSwap hook across ROCr generations.
+    rocjitsu::cli::configure_dbt_guest_tool_environment(launch_environment, hooks_path);
   }
   // Export the invocation runtime dir so every descendant (including grandchild
   // processes spawned through wrappers like ctest) inherits the exact directory

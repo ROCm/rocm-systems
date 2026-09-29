@@ -9,13 +9,15 @@
 /// SimulatedKfd owns a process table mapping fds to KfdProcess instances,
 /// and delegates per-process ioctl operations through here.
 
-#ifndef ROCJITSU_KMD_LINUX_KFD_PROCESS_H_
-#define ROCJITSU_KMD_LINUX_KFD_PROCESS_H_
+#pragma once
 
 #include "rocjitsu/kmd/linux/events.h"
 #include "rocjitsu/kmd/linux/kfd_topology.h"
 #include "rocjitsu/kmd/linux/libc_passthrough.h"
+#include "rocjitsu/vm/amdgpu/gpu_handles.h"
+#include "rocjitsu/vm/amdgpu/legacy_page_table.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
+#include "util/distributed_shared_mutex.h"
 #include "util/unique_handle.h"
 
 #include <algorithm>
@@ -24,8 +26,8 @@
 #include <cassert>
 #include <cstdint>
 #include <memory>
+#include <memory_resource>
 #include <mutex>
-#include <shared_mutex>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -64,6 +66,7 @@ public:
     uint64_t scratch_backing_va = 0;
     uint64_t trap_tba_addr = 0;
     uint64_t trap_tma_addr = 0;
+    amdgpu::AddressSpaceHandle address_space;
   };
 
   /// @brief Construct a new KFD process with a unique process ID.
@@ -162,6 +165,11 @@ public:
   /// | @ref dbg_fd            | @c struct @c file* @c dbg_ev_file (flattened to fd) |
   /// | @ref debugger_pid      | @c struct @c kfd_process* @c debugger_process (stored as pid) |
   struct DebugSession {
+    /// @brief Monotonic identity for this ENABLE lifetime.
+    /// @details Async notification completion uses this to avoid mutating a
+    /// replacement session after DISABLE followed by another ENABLE.
+    uint64_t generation = 0;
+
     /// @brief Mirrors @c kfd_process::debug_trap_enabled.
     /// Set when the device process is debug-attached with a reserved VMID.
     bool enabled = false;
@@ -173,6 +181,59 @@ public:
     /// @brief Mirrors @c kfd_process::exception_enable_mask.
     /// Bitmask of exception classes that are forwarded to the debugger.
     uint64_t exception_enable_mask = 0;
+
+    struct NotificationClaim {
+      /// Complete exception event represented by an in-flight notifier write.
+      uint64_t exception_mask = 0;
+      /// False once a mask update leaves none of the event subscribed.
+      bool continuously_subscribed = true;
+      /// Bits consumed while this particular publication was in flight.
+      uint64_t consumed_mask = 0;
+    };
+
+    /// Active whole-event ownership decisions, keyed by a local monotonic id.
+    /// A SET_EXCEPTIONS_ENABLED transition invalidates a claim only when the
+    /// complete event becomes unsubscribed, preserving ownership while one
+    /// subscribed bit atomically replaces another.
+    uint64_t next_notification_claim_id = 1;
+    std::unordered_map<uint64_t, NotificationClaim> notification_claims;
+
+    /// Process/device exception bits already used to wake this session.
+    uint64_t notified_process_exception_mask = 0;
+    /// Process/device exception bits reserved by a notifier write in flight.
+    uint64_t pending_process_exception_mask = 0;
+    /// In-flight process/device notifier writes per exception bit.
+    std::array<uint32_t, 64> pending_process_exception_counts{};
+    /// A failed or superseded publication still requires a background retry.
+    bool notification_retry_needed = false;
+    /// QUERY consumed a wake while queue publication still hid its status.
+    bool notification_query_retry_needed = false;
+
+    void consume_process_notification(uint64_t mask) {
+      notified_process_exception_mask &= ~mask;
+      for (auto &[_, claim] : notification_claims)
+        claim.consumed_mask |= claim.exception_mask & mask;
+    }
+
+    void begin_process_notification(uint64_t mask) {
+      for (uint32_t bit = 0; bit < 64; ++bit) {
+        const uint64_t bit_mask = uint64_t{1} << bit;
+        if ((mask & bit_mask) == 0)
+          continue;
+        ++pending_process_exception_counts[bit];
+        pending_process_exception_mask |= bit_mask;
+      }
+    }
+
+    void finish_process_notification(uint64_t mask) {
+      for (uint32_t bit = 0; bit < 64; ++bit) {
+        const uint64_t bit_mask = uint64_t{1} << bit;
+        if ((mask & bit_mask) == 0 || pending_process_exception_counts[bit] == 0)
+          continue;
+        if (--pending_process_exception_counts[bit] == 0)
+          pending_process_exception_mask &= ~bit_mask;
+      }
+    }
 
     /// @brief Previously configured process debug flags.
     uint32_t flags = 0;
@@ -290,207 +351,12 @@ public:
     }
   };
 
-  // GPUVM uses the simulator's fixed 4 KiB translation granule. This models
-  // the GPU page table and is intentionally independent of the host page size.
-  static constexpr uint64_t kPageShift = 12;
-  static constexpr uint64_t kPageSize = 1ULL << kPageShift;
-
-  /// @brief Who owns the host memory behind an extent, and so who may revoke it.
-  ///
-  /// @details The two cannot be treated alike by anything that dereferences the
-  /// extent. Driver memory is a memfd this process mapped read-write and holds
-  /// open; nothing outside can change its protection or take it away, so its
-  /// pointer is valid by construction and checking it would be pure cost on the
-  /// path that moves the most bytes. Application memory is the caller's own
-  /// pages, registered through USERPTR or reached by identity; the application
-  /// may mprotect or munmap them at any time, and dereferencing one without
-  /// checking is how a GPU access becomes a host SIGSEGV.
-  enum class HostExtentOwner : uint8_t {
-    Driver,      ///< A memfd this driver created, mapped and keeps open.
-    Application, ///< The caller's pages; revocable, so validate before use.
-  };
-
-  /// @brief One host-backed interval within a GPU page.
-  struct HostExtent {
-    uint8_t *host_ptr = nullptr;
-    /// Number of host-allocation-backed bytes starting at host_ptr.
-    size_t host_backed_bytes = 0;
-    /// GPU-page offset that corresponds to host_ptr.
-    size_t gpu_page_offset = 0;
-    /// @brief Defaults to Application, which is the safe direction to be wrong
-    /// in: a driver extent mistaken for an application one is validated
-    /// needlessly, while the reverse is dereferenced without checking.
-    HostExtentOwner owner = HostExtentOwner::Application;
-
-    bool operator==(const HostExtent &) const = default;
-  };
-
-  /// @brief One inline host extent, spilling to dynamic storage only for split pages.
-  class HostExtentList {
-  public:
-    HostExtentList() = default;
-    HostExtentList(const HostExtentList &other) { copy_from(other); }
-    HostExtentList(HostExtentList &&other) noexcept { move_from(std::move(other)); }
-    HostExtentList(std::initializer_list<HostExtent> extents) {
-      for (const auto &extent : extents)
-        push_back(extent);
-    }
-
-    HostExtentList &operator=(const HostExtentList &other) {
-      if (this != &other)
-        copy_from(other);
-      return *this;
-    }
-    HostExtentList &operator=(HostExtentList &&other) noexcept {
-      if (this != &other)
-        move_from(std::move(other));
-      return *this;
-    }
-    bool operator==(const HostExtentList &) const = default;
-
-    [[nodiscard]] size_t size() const {
-      if (std::holds_alternative<std::monostate>(storage_))
-        return 0;
-      if (std::holds_alternative<HostExtent>(storage_))
-        return 1;
-      return std::get<std::vector<HostExtent>>(storage_).size();
-    }
-    [[nodiscard]] bool empty() const { return size() == 0; }
-
-    HostExtent *data() {
-      if (auto *single = std::get_if<HostExtent>(&storage_))
-        return single;
-      if (auto *many = std::get_if<std::vector<HostExtent>>(&storage_))
-        return many->data();
-      return nullptr;
-    }
-    const HostExtent *data() const {
-      if (const auto *single = std::get_if<HostExtent>(&storage_))
-        return single;
-      if (const auto *many = std::get_if<std::vector<HostExtent>>(&storage_))
-        return many->data();
-      return nullptr;
-    }
-    HostExtent *begin() { return data(); }
-    const HostExtent *begin() const { return data(); }
-    HostExtent *end() {
-      auto *first = data();
-      return first ? first + size() : nullptr;
-    }
-    const HostExtent *end() const {
-      const auto *first = data();
-      return first ? first + size() : nullptr;
-    }
-    HostExtent &front() { return (*this)[0]; }
-    const HostExtent &front() const { return (*this)[0]; }
-    HostExtent &back() { return (*this)[size() - 1]; }
-    const HostExtent &back() const { return (*this)[size() - 1]; }
-    HostExtent &operator[](size_t index) { return data()[index]; }
-    const HostExtent &operator[](size_t index) const { return data()[index]; }
-
-    void reserve(size_t capacity) {
-      if (capacity <= 1)
-        return;
-      if (auto *many = std::get_if<std::vector<HostExtent>>(&storage_)) {
-        many->reserve(capacity);
-        return;
-      }
-      std::vector<HostExtent> many;
-      many.reserve(capacity);
-      if (auto *single = std::get_if<HostExtent>(&storage_))
-        many.push_back(*single);
-      storage_.emplace<std::vector<HostExtent>>(std::move(many));
-    }
-
-    void push_back(const HostExtent &extent) {
-      if (std::holds_alternative<std::monostate>(storage_)) {
-        storage_.emplace<HostExtent>(extent);
-        return;
-      }
-      if (auto *single = std::get_if<HostExtent>(&storage_)) {
-        std::vector<HostExtent> many;
-        many.reserve(2);
-        many.push_back(*single);
-        many.push_back(extent);
-        storage_.emplace<std::vector<HostExtent>>(std::move(many));
-        return;
-      }
-      std::get<std::vector<HostExtent>>(storage_).push_back(extent);
-    }
-
-    void resize(size_t count) {
-      if (count == 0) {
-        storage_.emplace<std::monostate>();
-        return;
-      }
-      if (count == 1) {
-        if (auto *many = std::get_if<std::vector<HostExtent>>(&storage_)) {
-          HostExtent single = many->front();
-          storage_.emplace<HostExtent>(single);
-        }
-        return;
-      }
-      reserve(count);
-      std::get<std::vector<HostExtent>>(storage_).resize(count);
-    }
-
-    HostExtentList &operator=(std::vector<HostExtent> extents) {
-      if (extents.empty())
-        storage_.emplace<std::monostate>();
-      else if (extents.size() == 1)
-        storage_.emplace<HostExtent>(extents.front());
-      else
-        storage_.emplace<std::vector<HostExtent>>(std::move(extents));
-      return *this;
-    }
-
-  private:
-    void copy_from(const HostExtentList &other) {
-      if (const auto *single = std::get_if<HostExtent>(&other.storage_))
-        storage_.emplace<HostExtent>(*single);
-      else if (const auto *many = std::get_if<std::vector<HostExtent>>(&other.storage_))
-        storage_.emplace<std::vector<HostExtent>>(*many);
-      else
-        storage_.emplace<std::monostate>();
-    }
-
-    void move_from(HostExtentList &&other) {
-      if (auto *single = std::get_if<HostExtent>(&other.storage_))
-        storage_.emplace<HostExtent>(*single);
-      else if (auto *many = std::get_if<std::vector<HostExtent>>(&other.storage_))
-        storage_.emplace<std::vector<HostExtent>>(std::move(*many));
-      else
-        storage_.emplace<std::monostate>();
-    }
-
-    std::variant<std::monostate, HostExtent, std::vector<HostExtent>> storage_;
-  };
-
-  /// @brief Per-page translation entry, mirroring HW PTE fields.
-  /// @details A hardware PTE has one page-wide MTYPE, while local USERPTR
-  /// allocations can contribute several disjoint host-backed intervals to the
-  /// same GPU page. Keeping all intervals prevents a later sub-page mapping or
-  /// unmapping from silently replacing an unrelated sibling.
-  struct PageTableEntry {
-    PageTableEntry() = default;
-    PageTableEntry(uint8_t *host_ptr, amdgpu::Mtype page_mtype,
-                   HostExtentOwner owner = HostExtentOwner::Application)
-        : mtype(page_mtype), host_extents{{host_ptr, kPageSize, 0, owner}} {}
-    PageTableEntry(uint8_t *host_ptr, amdgpu::Mtype page_mtype, size_t host_backed_bytes,
-                   size_t gpu_page_offset, HostExtentOwner owner = HostExtentOwner::Application)
-        : mtype(page_mtype), host_extents{{host_ptr, host_backed_bytes, gpu_page_offset, owner}} {}
-
-    amdgpu::Mtype mtype = amdgpu::Mtype::RW;
-    HostExtentList host_extents;
-
-    bool operator==(const PageTableEntry &) const = default;
-  };
-
-  /// @brief Per-process GPU page table (GPU VA page number → PTE).
-  /// @details Managed by the driver's mmap/munmap handlers. GpuMemory holds a
-  ///          pointer to the active process's page table and resolves translations
-  ///          on each memory access (TLB-like role).
-  using PageTable = std::unordered_map<uint64_t, PageTableEntry>;
+  static constexpr uint64_t kPageShift = amdgpu::kLegacyPageShift;
+  static constexpr uint64_t kPageSize = amdgpu::kLegacyPageSize;
+  using HostExtentOwner = amdgpu::LegacyHostExtentOwner;
+  using HostExtent = amdgpu::LegacyHostExtent;
+  using PageTableEntry = amdgpu::LegacyPageTableEntry;
+  using PageTable = amdgpu::LegacyPageTable;
 
   /// @brief Map host pages into this process's GPU page table.
   /// @param mtype PTE MTYPE for these pages (derived from allocation flags).
@@ -502,7 +368,7 @@ public:
                  HostExtentOwner owner = HostExtentOwner::Application) {
     std::unique_lock request_lock(*page_table_request_mutex_);
     std::unique_lock lock(page_table_mutex_);
-    invalidate_fetchability_locked();
+    invalidate_page_policies_locked();
     auto *base = static_cast<uint8_t *>(host_ptr);
     uint64_t mapped_va = gpu_va;
     size_t host_offset = 0;
@@ -531,7 +397,7 @@ public:
   void unmap_pages(uint64_t gpu_va, size_t size) {
     std::unique_lock request_lock(*page_table_request_mutex_);
     std::unique_lock lock(page_table_mutex_);
-    invalidate_fetchability_locked();
+    invalidate_page_policies_locked();
     uint64_t mapped_va = gpu_va;
     size_t unmapped_bytes = 0;
     while (unmapped_bytes < size) {
@@ -539,8 +405,10 @@ public:
           std::min<size_t>(kPageSize - (mapped_va & (kPageSize - 1)), size - unmapped_bytes);
       auto page = page_table_.find(mapped_va >> kPageShift);
       if (page != page_table_.end()) {
-        erase_host_extent(page->second, mapped_va & (kPageSize - 1), chunk);
-        if (page->second.host_extents.empty())
+        // Avoid building a temporary extent vector for a page being discarded.
+        if (chunk != kPageSize)
+          erase_host_extent(page->second, mapped_va & (kPageSize - 1), chunk);
+        if (chunk == kPageSize || page->second.host_extents.empty())
           page_table_.erase(page);
       }
       mapped_va += chunk;
@@ -558,7 +426,7 @@ public:
   void remap_page_host_ptrs(uint64_t gpu_va, void *old_host_ptr, void *new_host_ptr, size_t size) {
     std::unique_lock request_lock(*page_table_request_mutex_);
     std::unique_lock lock(page_table_mutex_);
-    invalidate_fetchability_locked();
+    invalidate_page_policies_locked();
     auto *old_base = static_cast<uint8_t *>(old_host_ptr);
     auto *new_base = static_cast<uint8_t *>(new_host_ptr);
     bool changed = false;
@@ -593,7 +461,7 @@ public:
   void set_page_mtype(uint64_t gpu_va, size_t size, amdgpu::Mtype mtype) {
     std::unique_lock request_lock(*page_table_request_mutex_);
     std::unique_lock lock(page_table_mutex_);
-    invalidate_fetchability_locked();
+    invalidate_page_policies_locked();
     bool changed = false;
     uint64_t mapped_va = gpu_va;
     size_t updated_bytes = 0;
@@ -615,20 +483,23 @@ public:
   /// @brief Return the mutation counter used by GpuMemory translation caches.
   const uint64_t *page_table_generation() const { return &page_table_generation_; }
 
-  /// @brief Retained mutation token for positive instruction-fetch checks.
-  /// @details Unlike the translation generation, this token can be read without
-  /// holding the page-table lock and can outlive the process that owns the table.
-  std::shared_ptr<const std::atomic<uint64_t>> page_table_fetchability_epoch() const {
-    return page_table_fetchability_epoch_;
+  /// @brief Return the retained token invalidated before each page-policy mutation.
+  std::shared_ptr<const std::atomic<uint64_t>> page_table_mutation_epoch() const {
+    return page_table_mutation_epoch_;
   }
 
   /// @brief Return the lease shared by page-table readers and mutations.
-  std::shared_ptr<std::shared_mutex> page_table_request_mutex() const {
+  std::shared_ptr<util::DistributedSharedMutex> page_table_request_mutex() const {
     return page_table_request_mutex_;
   }
 
-  mutable std::shared_mutex page_table_mutex_;
-  PageTable page_table_;
+  mutable util::DistributedSharedMutex page_table_mutex_;
+  /// @brief Pool for page-table nodes and buckets.
+  /// @details Writers serialize allocation under page_table_mutex_. Declaration
+  /// order keeps the pool alive until the table is destroyed; capacity is
+  /// retained for reuse until this process is destroyed.
+  std::pmr::unsynchronized_pool_resource page_table_pool_;
+  PageTable page_table_{&page_table_pool_};
 
   // -- Per-process state --
 
@@ -668,6 +539,7 @@ public:
   struct QueueDoorbellInfo {
     uint32_t gpu_ordinal;
     uint32_t doorbell_offset;
+    amdgpu::QueueHandle queue_handle;
   };
   std::unordered_map<uint32_t, QueueDoorbellInfo> queue_doorbell_map_;
 
@@ -690,6 +562,185 @@ public:
     uint32_t gpu_id = 0;
     uint32_t xcc_id = 0;
     uint64_t exception_status = 0; ///< Raised exceptions on this queue (KFD_EC_MASK bits).
+    /// Exception bits whose ROCr ownership decision is still in flight.
+    uint64_t runtime_exception_pending_status = 0;
+    /// Runtime publications per bit; identical concurrent events may overlap.
+    std::array<uint32_t, 64> runtime_exception_pending_counts{};
+    /// Pending runtime bits for which at least one publication failed.
+    uint64_t runtime_exception_failed_status = 0;
+    /// Failed runtime-owned bits waiting for a debugger to resolve them.
+    uint64_t runtime_exception_retained_status = 0;
+    /// Runtime-owned bits already queried by the current debugger session.
+    uint64_t runtime_exception_queried_status = 0;
+    /// Session that owns the notification bookkeeping below.
+    uint64_t debug_notification_session_generation = 0;
+    /// Debugger notification writes currently in flight, counted per bit.
+    std::array<uint32_t, 64> debug_notification_pending_counts{};
+    /// Status hidden from QUERY until every corresponding write completes.
+    uint64_t debug_notification_pending_status = 0;
+    /// Status for which at least one notification write succeeded.
+    uint64_t debug_notification_delivered_status = 0;
+    /// Status retained for a later subscription even if notification fails.
+    uint64_t debug_notification_retained_status = 0;
+    /// Whole events represented by the flattened debugger status fields.
+    /// Retaining their boundaries lets a retry preserve ownership when one
+    /// subscribed bit in a combined event atomically replaces another.
+    std::vector<uint64_t> debug_notification_events;
+
+    void record_debug_notification_event(uint64_t mask) {
+      if (mask != 0 && std::find(debug_notification_events.begin(), debug_notification_events.end(),
+                                 mask) == debug_notification_events.end())
+        debug_notification_events.push_back(mask);
+    }
+
+    void clear_debug_notification_events(uint64_t mask) {
+      for (uint64_t &event : debug_notification_events)
+        event &= ~mask;
+      std::erase(debug_notification_events, uint64_t{0});
+    }
+
+    void prune_debug_notification_events() {
+      for (uint64_t &event : debug_notification_events)
+        event &= exception_status;
+      std::erase(debug_notification_events, uint64_t{0});
+    }
+
+    /// @brief Return exception status that the debugger may currently consume.
+    uint64_t debugger_visible_exception_status(uint64_t session_generation = 0) const {
+      const uint64_t pending_status =
+          session_generation == 0 || debug_notification_session_generation == session_generation
+              ? debug_notification_pending_status
+              : 0;
+      return exception_status & ~runtime_exception_pending_status &
+             ~runtime_exception_queried_status & ~pending_status;
+    }
+
+    /// @brief Reserve queue-exception bits for an in-flight ROCr decision.
+    void begin_runtime_exception(uint64_t mask) {
+      exception_status |= mask;
+      record_debug_notification_event(mask);
+      for (uint32_t bit = 0; bit < 64; ++bit) {
+        const uint64_t bit_mask = uint64_t{1} << bit;
+        if ((mask & bit_mask) == 0)
+          continue;
+        ++runtime_exception_pending_counts[bit];
+        runtime_exception_pending_status |= bit_mask;
+      }
+    }
+
+    /// @brief Resolve one in-flight ROCr decision without losing overlaps.
+    uint64_t finish_runtime_exception(uint64_t mask, bool delivered, bool retain_failure) {
+      uint64_t failed = 0;
+      if (!delivered && retain_failure)
+        runtime_exception_failed_status |= mask;
+      for (uint32_t bit = 0; bit < 64; ++bit) {
+        const uint64_t bit_mask = uint64_t{1} << bit;
+        if ((mask & bit_mask) == 0)
+          continue;
+        if (runtime_exception_pending_counts[bit] == 0) {
+          if (!delivered && retain_failure) {
+            exception_status |= bit_mask;
+            runtime_exception_retained_status |= bit_mask;
+            runtime_exception_queried_status &= ~bit_mask;
+            failed |= bit_mask;
+          }
+          continue;
+        }
+        if (--runtime_exception_pending_counts[bit] != 0)
+          continue;
+        runtime_exception_pending_status &= ~bit_mask;
+        if ((runtime_exception_failed_status & bit_mask) != 0) {
+          runtime_exception_retained_status |= bit_mask;
+          runtime_exception_queried_status &= ~bit_mask;
+          failed |= bit_mask;
+        } else if (((debug_notification_pending_status | debug_notification_delivered_status |
+                     debug_notification_retained_status | runtime_exception_retained_status) &
+                    bit_mask) == 0) {
+          exception_status &= ~bit_mask;
+        }
+        runtime_exception_failed_status &= ~bit_mask;
+      }
+      prune_debug_notification_events();
+      return failed;
+    }
+
+    /// @brief Hide an event while its debugger-notifier write is in flight.
+    void begin_debug_notification(uint64_t mask, uint64_t session_generation) {
+      if (debug_notification_session_generation != session_generation) {
+        debug_notification_session_generation = session_generation;
+        debug_notification_pending_counts.fill(0);
+        debug_notification_pending_status = 0;
+        debug_notification_delivered_status = 0;
+      }
+      exception_status |= mask;
+      for (uint32_t bit = 0; bit < 64; ++bit) {
+        const uint64_t bit_mask = uint64_t{1} << bit;
+        if ((mask & bit_mask) == 0)
+          continue;
+        ++debug_notification_pending_counts[bit];
+        debug_notification_pending_status |= bit_mask;
+      }
+    }
+
+    /// @brief Commit one debugger-notifier result without losing overlaps.
+    void finish_debug_notification(uint64_t mask, uint64_t delivered_mask) {
+      debug_notification_delivered_status |= mask & delivered_mask;
+      for (uint32_t bit = 0; bit < 64; ++bit) {
+        const uint64_t bit_mask = uint64_t{1} << bit;
+        if ((mask & bit_mask) == 0 || debug_notification_pending_counts[bit] == 0)
+          continue;
+        if (--debug_notification_pending_counts[bit] != 0)
+          continue;
+        debug_notification_pending_status &= ~bit_mask;
+        if ((debug_notification_delivered_status & bit_mask) == 0 &&
+            (debug_notification_retained_status & bit_mask) == 0 &&
+            (runtime_exception_pending_status & bit_mask) == 0 &&
+            (runtime_exception_retained_status & bit_mask) == 0)
+          exception_status &= ~bit_mask;
+      }
+      prune_debug_notification_events();
+    }
+
+    /// @brief Require another wake if this session later re-enables @p mask.
+    void reset_debug_notification_delivery(uint64_t mask, uint64_t session_generation) {
+      if (debug_notification_session_generation == session_generation)
+        debug_notification_delivered_status &= ~mask;
+    }
+
+    /// @brief Consume only status currently visible to the debugger.
+    void clear_debugger_exception_status(uint64_t mask) {
+      const uint64_t consumed = mask & debugger_visible_exception_status();
+      runtime_exception_queried_status |= consumed & runtime_exception_retained_status;
+      exception_status &= ~(consumed & ~runtime_exception_retained_status);
+      debug_notification_delivered_status &= ~consumed;
+      debug_notification_retained_status &= ~consumed;
+      clear_debug_notification_events(consumed & ~runtime_exception_retained_status);
+    }
+
+    /// @brief Resolve retained runtime ownership after a successful debugger resume.
+    void resolve_runtime_exceptions() {
+      const uint64_t resolved = runtime_exception_retained_status;
+      runtime_exception_retained_status = 0;
+      runtime_exception_queried_status &= ~resolved;
+      runtime_exception_failed_status &= ~resolved;
+      const uint64_t still_owned =
+          runtime_exception_pending_status | debug_notification_pending_status |
+          debug_notification_delivered_status | debug_notification_retained_status;
+      exception_status &= ~(resolved & ~still_owned);
+      prune_debug_notification_events();
+    }
+
+    /// @brief Clear every debugger-session-owned exception field.
+    void clear_debugger_exception_state() {
+      exception_status &= runtime_exception_pending_status | runtime_exception_retained_status;
+      runtime_exception_queried_status = 0;
+      debug_notification_session_generation = 0;
+      debug_notification_pending_counts.fill(0);
+      debug_notification_pending_status = 0;
+      debug_notification_delivered_status = 0;
+      debug_notification_retained_status = 0;
+      prune_debug_notification_events();
+    }
 
     /// @brief Area used by the XCC that owns this queue.
     uint64_t cwsr_xcc_address() const {
@@ -714,9 +765,7 @@ private:
   static void normalize_host_extents(PageTableEntry &page) {
     auto &extents = page.host_extents;
     if (extents.size() > 1)
-      std::sort(extents.begin(), extents.end(), [](const HostExtent &lhs, const HostExtent &rhs) {
-        return lhs.gpu_page_offset < rhs.gpu_page_offset;
-      });
+      std::ranges::sort(extents, {}, &HostExtent::gpu_page_offset);
     size_t out = 0;
     for (const auto &extent : extents) {
       if (extent.host_ptr == nullptr || extent.host_backed_bytes == 0)
@@ -782,27 +831,27 @@ private:
     normalize_host_extents(page);
   }
 
+  // Invalidate copied policies before mutation, including a partial update
+  // that throws before publishing the ordinary translation generation.
+  void invalidate_page_policies_locked() {
+    page_table_mutation_epoch_->fetch_add(1, std::memory_order_release);
+  }
+
   void publish_page_table_mutation_locked() { ++page_table_generation_; }
 
-  void invalidate_fetchability_locked() {
-    // Publish before touching the table, with its exclusive lock held. A cache
-    // miss cannot save the new epoch until the mutation releases that lock.
-    // Invalidating first also covers a partially completed mutation that throws.
-    page_table_fetchability_epoch_->fetch_add(1, std::memory_order_release);
-  }
+  std::shared_ptr<util::DistributedSharedMutex> page_table_request_mutex_ =
+      std::make_shared<util::DistributedSharedMutex>();
 
   /// @brief Page table version counter, bumped on every PTE mutation.
   /// @details GpuMemory keeps per-thread TLB-like translation caches keyed by
   ///          this generation. Mutations hold both page_table_request_mutex_
   ///          and page_table_mutex_; readers hold at least one of those locks,
   ///          so the counter itself does not need atomics.
-  std::shared_ptr<std::shared_mutex> page_table_request_mutex_ =
-      std::make_shared<std::shared_mutex>();
   uint64_t page_table_generation_{1};
-  std::shared_ptr<std::atomic<uint64_t>> page_table_fetchability_epoch_ =
+  /// @brief Retained atomic token for lockless copied-policy checks.
+  /// @details Invalidate before mutation, including partially throwing updates.
+  std::shared_ptr<std::atomic<uint64_t>> page_table_mutation_epoch_ =
       std::make_shared<std::atomic<uint64_t>>(1);
 };
 
 } // namespace rocjitsu
-
-#endif // ROCJITSU_KMD_LINUX_KFD_PROCESS_H_
