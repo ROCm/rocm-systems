@@ -329,10 +329,10 @@ function(rccl_add_micro_binary _name)
   endif()
 endfunction()
 
-# ==============================================================    $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
-    $<$<BOOL:${AMDSMI_HEADER_HAS_FABRIC_TELEMETRY}>:AMDSMI_HEADER_HAS_FABRIC_TELEMETRY>
-    $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
-  )
+# =====================================================================
+# Standalone project setup (only used when NOT in an in-RCCL-build).
+# =====================================================================
+function(rccl_standalone_setup)
   target_link_libraries(rccl-source-wrappers PRIVATE
     GTest::GTest
     fmt::fmt-header-only
@@ -611,7 +611,7 @@ foreach(_variant "" "-uncached" "-faultinj")
   elseif(_variant STREQUAL "-faultinj")
     target_compile_definitions(${_init_tgt} PRIVATE ENABLE_FAULT_INJECTION)
   endif()
-  rccl_apply_hip_requirements(${_init_tgt})
+  rccl_apply_hip_compile_only(${_init_tgt})
 
   target_link_options(${_init_tgt} PRIVATE -no-hip-rt -Wl,--gc-sections)
   target_link_libraries(${_init_tgt} PRIVATE
