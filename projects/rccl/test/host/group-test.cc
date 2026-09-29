@@ -141,6 +141,7 @@ class GroupEndInternalTest : public ::testing::Test {
     }
     ResetCommFakes();
     ResetRecorderFakes();  // recorder_fakes.cc is linked here too; g_recorderResult is process state
+    ResetGroupThreadLocals();  // a failed ASSERT_* before ncclGroupEndInternal would leak depth
   }
 
   // Queues one pending async job on comm_ and enters a group, mirroring the state
@@ -390,7 +391,7 @@ TEST_F(ReclaimPlannerStateTest, ClearsP2pOnlyOnlyForConnectionsWithNoTransportCo
   SetConn(peer10->recv[1], /*p2pOnly=*/1, /*transportComm=*/nullptr);  // disconnected AND p2pOnly -> cleared
 
   struct ncclChannelPeer* peersChan0[kRanks] = {peer00.get(), peer01.get()};
-  struct ncclChannelPeer* peersChan1[kRanks] = {peer10.get(), nullptr};  // rank 1 has no peer here
+  struct ncclChannelPeer* peersChan1[kRanks] = {nullptr, peer10.get()};  // rank 0 has no peer here
   comm_->channels[0].peers = peersChan0;
   comm_->channels[1].peers = peersChan1;
 
@@ -563,6 +564,17 @@ TEST_F(AsyncLaunchTest, PositiveDepth_FirstCommSetsGroupBlockingFromItsConfig) {
   EXPECT_EQ(1, ncclGroupBlocking);
 }
 
+// Mirrors the case above with config.blocking = 0: distinguishes "copies comm's config" from a
+// mutant that hardcodes ncclGroupBlocking = 1 (which the blocking=1 case above can't catch).
+TEST_F(AsyncLaunchTest, PositiveDepth_FirstCommSetsGroupBlockingFromItsConfig_NonBlocking) {
+  ncclGroupDepth = 1;
+  comm_->config.blocking = 0;
+
+  ASSERT_EQ(ncclSuccess, ncclAsyncLaunch(&job_, Func, Undo, Destructor, comm_.get()));
+
+  EXPECT_EQ(0, ncclGroupBlocking);
+}
+
 TEST_F(AsyncLaunchTest, PositiveDepth_MismatchedBlockingModeRejectsWithoutEnqueuing) {
   ncclGroupDepth = 1;
   ncclGroupBlocking = 1;  // an earlier comm in this group was blocking
@@ -593,7 +605,7 @@ TEST_F(AsyncLaunchTest, DestroyFlagForcesBlockingRegardlessOfConfig) {
 // from "after". The deadline unwinds a swapped-order mutant (self-reports via ncclSystemError)
 // instead of hanging; the happy path still returns in microseconds.
 ncclResult_t SpinUntilAbortFlagObserved(struct ncclAsyncJob* job) {
-  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
   while (std::chrono::steady_clock::now() < deadline) {
     if (job->abortFlag && COMPILER_ATOMIC_LOAD(job->abortFlag, std::memory_order_acquire) != 0) {
       return ncclSuccess;
@@ -719,7 +731,7 @@ TEST_F(GroupJobAbortTest, NonBlockingInit_TwoOwners_FirstCallAbortsAndJoins_Seco
   comm2_->groupJob = nullptr;
 }
 
-// The three NCCL_API entry points, not previously reached through this front door.
+// The bodies behind the three NCCL_API entry points; ncclGroupStart/End enter via _impl.
 class GroupApiWrapperTest : public ::testing::Test {
  protected:
   void SetUp() override {
