@@ -312,7 +312,7 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
                 </tr>
                 <tr>
                     <td>--selected-regions</td>
-                    <td>If set, rocprofv3 profiles only regions of code surrounded by roctxMark(name) and roctxMark(0). <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofiler-sdk-roctx.html#using-selected-regions-option">Read more...</a></td>
+                    <td>If set, rocprofv3 profiles only regions of code enclosed by roctxProfilerResume(0) and roctxProfilerPause(0). <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofiler-sdk-roctx.html#using-selected-regions-option">Read more...</a></td>
                 </tr>
             </tbody>
         </table>

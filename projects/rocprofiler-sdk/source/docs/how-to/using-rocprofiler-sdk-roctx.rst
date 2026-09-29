@@ -183,7 +183,7 @@ Two modes of operation
 
 **Mode 1: Default behavior (without --selected-regions)**
 
-When running ``rocprofv3`` without the ``--selected-regions`` option, profiling is **enabled** as soon as the application starts. The ``roctxProfilerPause()`` and ``roctxProfilerResume()`` APIs are used to temporarily hide specific sections of code from profiling.
+When running ``rocprofv3`` without the ``--selected-regions`` option, profiling is **enabled** when the profiling session begins, either at application startup or attachment. The ``roctxProfilerPause()`` and ``roctxProfilerResume()`` APIs are used to temporarily hide specific sections of code from profiling.
 
 - Use case: Profile everything excluding the specific regions.
 - Profiler starts: **Enabled**
@@ -201,6 +201,10 @@ When running ``rocprofv3`` with the ``--selected-regions`` option, profiling is 
 - ``roctxProfilerResume()``: Starts data collection.
 - ``roctxProfilerPause()``: Stops data collection.
 - All tracing and profiling options collect data **only** within the marked regions.
+
+.. note::
+
+   For process attachment, ROCTx profiler-control state is scoped to the active profiling session. Calls made before attachment or while the tool is detached don't affect a later attachment. Each attachment starts in the initial state described above, and ``--selected-regions-ref-count`` starts with a fresh reference count on reattachment.
 
 Using --selected-regions option
 ================================

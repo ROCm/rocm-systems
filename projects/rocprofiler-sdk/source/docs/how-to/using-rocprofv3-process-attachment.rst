@@ -141,6 +141,8 @@ Reattaching to the same process
 
 The dynamic process attachment functionality supports reattachment, allowing attaching multiple times to the same PID over a process's lifetime. You need to provide the same PID to ``rocprofv3`` to reattach.
 
+ROCTx profiler-control state is scoped to an active profiling session. Calls to ``roctxProfilerPause()`` or ``roctxProfilerResume()`` made before attachment or while the tool is detached don't affect a later attachment. Without ``--selected-regions``, each attachment begins with collection enabled. With ``--selected-regions``, each attachment begins with collection disabled until ``roctxProfilerResume()`` is called. The reference count used by ``--selected-regions-ref-count`` is reset for every reattachment. For more information, see :ref:`using-rocprofiler-sdk-roctx`.
+
 There are some restrictions on what the options are allowed to change when reattaching. Typically, tracing, PC sampling, ATT, counter collection, and other options that decide the data to be collected can't be changed. ``rocprofv3`` throws a ``RuntimeError`` if it detects a configuration change that isn't supported.
 
 By default, the output file generation runs asynchronously after detachment, allowing for faster tool detachment. This implies that the output files might not be immediately available when ``rocprofv3`` exits. If the output file generation from the previous attachment is still in progress, ``rocprofv3`` blocks reattachment until the ongoing output generation completes.
