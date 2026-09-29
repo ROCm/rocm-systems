@@ -62,7 +62,7 @@ storage_t::impl::get_uuid() const
 profiler_hub::version_t
 storage_t::impl::get_storage_version() const
 {
-    return m_version;
+    return m_schema_version;
 }
 
 std::shared_ptr<data_storage::sqlite_backend>

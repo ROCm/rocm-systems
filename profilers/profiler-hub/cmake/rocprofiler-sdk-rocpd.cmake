@@ -145,7 +145,19 @@ set(ROCPD_SCHEMA_SDK_SUBDIR
 rocpd_clone_rocpd_schema_files(_ROCPD_SCHEMA_DIR)
 
 get_filename_component(_ROCPD_SCHEMA_VERSION "${ROCPD_SCHEMA_SDK_SUBDIR}" NAME)
-message(STATUS "[profiler-hub] rocpd schema version: ${_ROCPD_SCHEMA_VERSION}")
+if(NOT _ROCPD_SCHEMA_VERSION MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)")
+    message(
+        FATAL_ERROR
+        "ROCPD_SCHEMA_SDK_SUBDIR must end in MAJOR.MINOR.PATCH (found '${_ROCPD_SCHEMA_VERSION}')"
+    )
+endif()
+set(PROFILER_HUB_SCHEMA_VERSION_MAJOR "${CMAKE_MATCH_1}")
+set(PROFILER_HUB_SCHEMA_VERSION_MINOR "${CMAKE_MATCH_2}")
+set(PROFILER_HUB_SCHEMA_VERSION_PATCH "${CMAKE_MATCH_3}")
+message(
+    STATUS
+    "[profiler-hub] rocpd schema version: ${PROFILER_HUB_SCHEMA_VERSION_MAJOR}.${PROFILER_HUB_SCHEMA_VERSION_MINOR}.${PROFILER_HUB_SCHEMA_VERSION_PATCH}"
+)
 
 rocpd_configure_rocpd_schema_files(
     ${_ROCPD_SCHEMA_DIR}
