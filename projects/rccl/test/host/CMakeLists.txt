@@ -333,6 +333,180 @@ endfunction()
 # Standalone project setup (only used when NOT in an in-RCCL-build).
 # =====================================================================
 function(rccl_standalone_setup)
+  find_package(Threads REQUIRED)
+  include(FetchContent)
+
+  # --- Resolve GTest: system -> RCCL-vendored -> FetchContent fallback ---
+  # Track whether we linked the RCCL-vendored non-PIC libgtest.a: only that path
+  # needs -no-pie on the micro binaries. System/FetchContent GTest is PIC, and
+  # forcing -no-pie there is unnecessary and breaks PIE-only toolchains.
+  set(_micro_link_no_pie FALSE)
+  find_package(GTest QUIET)
+  if(NOT GTest_FOUND)
+    set(_rccl_gtest_root "${CMAKE_CURRENT_SOURCE_DIR}/../../build/gtest")
+    if(EXISTS "${_rccl_gtest_root}/lib/libgtest.a" OR EXISTS "${_rccl_gtest_root}/lib64/libgtest.a")
+      message(STATUS "Using RCCL-vendored GTest: ${_rccl_gtest_root}")
+      find_package(GTest REQUIRED PATHS "${_rccl_gtest_root}" NO_DEFAULT_PATH)
+      set(_micro_link_no_pie TRUE)
+    else()
+      message(STATUS "Downloading GTest via FetchContent")
+      FetchContent_Declare(googletest
+        GIT_REPOSITORY https://github.com/google/googletest.git
+        GIT_TAG        v1.14.0
+        GIT_SHALLOW    TRUE
+      )
+      FetchContent_MakeAvailable(googletest)
+      add_library(GTest::GTest ALIAS gtest)
+    endif()
+  endif()
+
+  # Both find_package(GTest) code paths above (system and RCCL-vendored) export
+  # only the modern GTest::gtest target; GTest::GTest is a legacy alias CMake's
+  # own FindGTest module stopped providing. Add it once here instead of after
+  # every branch so target_link_libraries(... GTest::GTest) below works
+  # regardless of which resolution path was taken.
+  if(TARGET GTest::gtest AND NOT TARGET GTest::GTest)
+    set_target_properties(GTest::gtest PROPERTIES IMPORTED_GLOBAL TRUE)
+    add_library(GTest::GTest ALIAS GTest::gtest)
+  endif()
+
+  # --- fmt: the RCCL-vendored header-only copy (already defined for in-tree builds) ---
+  if(NOT TARGET fmt::fmt-header-only)
+    add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../external/fmt"
+                     "${CMAKE_BINARY_DIR}/external/fmt")
+  endif()
+
+  # --- Resolve RCCL build directory ---
+  set(RCCL_BUILD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../build" CACHE PATH
+      "RCCL build directory (auto-detects release/debug subdirs)")
+
+  if(NOT EXISTS "${RCCL_BUILD_DIR}/hipify")
+    foreach(_subdir release debug Release Debug RelWithDebInfo)
+      if(EXISTS "${RCCL_BUILD_DIR}/${_subdir}/hipify")
+        set(RCCL_BUILD_DIR "${RCCL_BUILD_DIR}/${_subdir}")
+        message(STATUS "Detected build subdir layout: ${RCCL_BUILD_DIR}")
+        break()
+      endif()
+    endforeach()
+  endif()
+
+  set(RCCL_HIPIFY_DIR "${RCCL_BUILD_DIR}/hipify")
+  set(RCCL_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/..")
+
+  if(NOT EXISTS "${RCCL_HIPIFY_DIR}/src/graph/search.cc")
+    message(FATAL_ERROR "Hipified sources not found at ${RCCL_HIPIFY_DIR}. Run the RCCL build first.")
+  endif()
+  message(STATUS "CXX compiler: ${CMAKE_CXX_COMPILER}")
+  message(STATUS "Hipified sources: ${RCCL_HIPIFY_DIR}")
+
+  # --- Detect whether the system amdsmi.h exposes the UALoE fabric struct ---
+  include(CheckCXXSourceCompiles)
+  unset(AMDSMI_FABRIC_API CACHE)
+  unset(AMDSMI_HEADER_HAS_FABRIC_TELEMETRY CACHE)
+  set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+  check_cxx_source_compiles("
+    #include <amd_smi/amdsmi.h>
+    int main() {
+      amdsmi_fabric_telemetry_category_t cat = AMDSMI_FABRIC_TELEMETRY_CATEGORY_UNKNOWN;
+      (void)cat;
+      return 0;
+    }
+  " AMDSMI_HEADER_HAS_FABRIC_TELEMETRY)
+  check_cxx_source_compiles("
+    #include <amd_smi/amdsmi.h>
+    #if !defined(AMDSMI_FABRIC_MAX_LOCAL_GPUS)
+    #error amdsmi.h has no UALoE fabric types
+    #endif
+    int main() {
+      amdsmi_fabric_info_t info{};
+      amdsmi_fabric_info_v1_t v1{};
+      (void)info;
+      (void)v1;
+      return 0;
+    }
+  " AMDSMI_FABRIC_API)
+  set(CMAKE_TRY_COMPILE_TARGET_TYPE EXECUTABLE)
+  if(AMDSMI_HEADER_HAS_FABRIC_TELEMETRY AND NOT AMDSMI_FABRIC_API)
+    set(AMDSMI_FABRIC_API TRUE)
+    message(STATUS "amdsmi fabric telemetry types found - enabling AMDSMI_FABRIC_DIRECT")
+  elseif(AMDSMI_FABRIC_API)
+    message(STATUS "amdsmi fabric API found - enabling AMDSMI_FABRIC_DIRECT")
+  else()
+    message(STATUS "amdsmi fabric API not found (AMDSMI_FABRIC_DIRECT disabled)")
+  endif()
+
+  # --- Detect HIP fabric API support ---
+  include(CheckSymbolExists)
+  set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+  check_symbol_exists("hipMemImportFromShareableHandle" "hip/hip_runtime_api.h" HIP_FABRIC_API_FUNC)
+  check_cxx_source_compiles("
+    #include <hip/hip_runtime_api.h>
+    int main() {
+      hipMemFabricHandle_t handle;
+      (void)handle;
+      return 0;
+    }
+  " HIP_FABRIC_HANDLE_TYPE)
+  set(CMAKE_TRY_COMPILE_TARGET_TYPE EXECUTABLE)
+  if(HIP_FABRIC_API_FUNC AND HIP_FABRIC_HANDLE_TYPE)
+    set(HIP_FABRIC_API ON)
+    message(STATUS "HIP Fabric API enabled (hipMemImportFromShareableHandle and hipMemFabricHandle_t found)")
+  else()
+    set(HIP_FABRIC_API OFF)
+  endif()
+
+  # --- Common include paths for hipified RCCL headers ---
+  set(RCCL_INCLUDE_DIRS
+    ${RCCL_HIPIFY_DIR}/src/include
+    ${RCCL_HIPIFY_DIR}/src/include/plugin
+    ${RCCL_HIPIFY_DIR}/src/include/plugin/tuner
+    ${RCCL_BUILD_DIR}/include
+    ${RCCL_HIPIFY_DIR}/src
+    ${RCCL_HIPIFY_DIR}/src/graph
+    ${RCCL_TEST_DIR}
+    ${RCCL_TEST_DIR}/common
+  )
+
+  # --- accl-profiler plugin directory ---
+  set(ACCL_PROFILER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../plugins/profiler/accl")
+  set(RCCL_SRC_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+
+  # --- Wrapper library for production .cc files that need link stubs ---
+  add_library(rccl-source-wrappers STATIC
+    mem_manager_src_wrapper.cc
+    mem_manager_wrapper_test.cc
+    bootstrap_wrapper.cc
+    init_stubs.cpp
+    wrapper_link_stubs.cpp
+    hip_prop_r0600_stub.cpp
+    accl_profiler_wrapper.cc
+  )
+  target_include_directories(rccl-source-wrappers PRIVATE
+    ${ACCL_PROFILER_DIR}
+    ${RCCL_INCLUDE_DIRS}
+  )
+  if(NOT TARGET hip::host)
+    find_package(hip QUIET)
+  endif()
+  foreach(_hip_tgt hip::host hip::device)
+    if(TARGET ${_hip_tgt})
+      target_include_directories(rccl-source-wrappers PRIVATE
+        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_INCLUDE_DIRECTORIES>)
+      target_compile_definitions(rccl-source-wrappers PRIVATE
+        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_DEFINITIONS>)
+    endif()
+  endforeach()
+  set_source_files_properties(accl_profiler_wrapper.cc PROPERTIES
+    COMPILE_FLAGS "-I${RCCL_SRC_ROOT}/src/include/plugin -I${RCCL_SRC_ROOT}/src/include"
+  )
+  target_compile_definitions(rccl-source-wrappers PRIVATE
+    __HIP_PLATFORM_AMD__
+    NCCL_OS_LINUX
+    ROCM_VERSION=70000
+    $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
+    $<$<BOOL:${AMDSMI_HEADER_HAS_FABRIC_TELEMETRY}>:AMDSMI_HEADER_HAS_FABRIC_TELEMETRY>
+    $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
+  )
   target_link_libraries(rccl-source-wrappers PRIVATE
     GTest::GTest
     fmt::fmt-header-only
