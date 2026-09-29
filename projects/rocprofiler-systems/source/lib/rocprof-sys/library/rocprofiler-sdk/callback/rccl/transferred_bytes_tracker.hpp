@@ -25,7 +25,7 @@ struct transferred_bytes_tracker
     [[nodiscard]] static add_bytes_result add_bytes(std::uint32_t rccl_device_idx,
                                                     size_t        bytes)
     {
-        auto thread_state_guard =
+        [[maybe_unused]] auto thread_state_guard =
             Externals::state_thread::scoped(Externals::state_thread::Internal);
 
         std::atomic<std::uint64_t>* counter  = nullptr;
