@@ -20,6 +20,11 @@ downstream consumer of the library.
 
 ## [Unreleased]
 
+### Added
+
+- Windows/MSVC build support. When SQLite is fetched, Windows downloads the
+  official amalgamation zip instead of running `./configure`.
+
 ## [0.2.0] - 2026-09-02
 
 ### Added

@@ -42,9 +42,18 @@ else()
         CACHE STRING
         "Upstream SQLite3 git tag to check out"
     )
+    set(SQLITE3_AMALGAMATION_YEAR
+        "2024"
+        CACHE STRING
+        "Release year folder on sqlite.org for the amalgamation download (Windows)"
+    )
 
-    find_package(Git REQUIRED)
-    find_program(MAKE_COMMAND NAMES make gmake REQUIRED)
+    # Windows downloads the official amalgamation zip. Linux clones and runs
+    # upstream autotools, which needs git and make.
+    if(NOT WIN32)
+        find_package(Git REQUIRED)
+        find_program(MAKE_COMMAND NAMES make gmake REQUIRED)
+    endif()
 
     set(SQLITE3_SOURCE_DIR "${PROJECT_BINARY_DIR}/external/sqlite3")
     set(SQLITE3_AMALG_C "${SQLITE3_SOURCE_DIR}/sqlite3.c")
@@ -59,6 +68,7 @@ else()
             ${CMAKE_COMMAND} -DGIT_EXECUTABLE=${GIT_EXECUTABLE}
             -DMAKE_COMMAND=${MAKE_COMMAND} -DSQLITE3_GIT_URL=${SQLITE3_GIT_URL}
             -DSQLITE3_GIT_TAG=${SQLITE3_GIT_TAG}
+            -DSQLITE3_AMALGAMATION_YEAR=${SQLITE3_AMALGAMATION_YEAR}
             -DSQLITE3_SOURCE_DIR=${SQLITE3_SOURCE_DIR} -P
             ${CMAKE_CURRENT_LIST_DIR}/fetch_sqlite3.cmake
         DEPENDS ${CMAKE_CURRENT_LIST_DIR}/fetch_sqlite3.cmake
@@ -90,7 +100,16 @@ else()
             SQLITE_OMIT_SHARED_CACHE=1
     )
 
-    target_compile_options(profiler-hub-sqlite3-shared PRIVATE -O2 -fPIC)
+    if(MSVC)
+        # A separate SQLite DLL must export its C API. MSVC does not export
+        # symbols from a SHARED library unless they are marked dllexport.
+        target_compile_definitions(
+            profiler-hub-sqlite3-shared
+            PRIVATE "SQLITE_API=__declspec(dllexport)"
+        )
+    else()
+        target_compile_options(profiler-hub-sqlite3-shared PRIVATE -O2 -fPIC)
+    endif()
 
     set_target_properties(
         profiler-hub-sqlite3-shared
