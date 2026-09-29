@@ -409,15 +409,18 @@ bool DmaBlitManager::CopyBufferRectBatch(const std::vector<amd::BatchCopyRectOp>
     hsa_dim3_t range = {static_cast<uint32_t>(op.size[0]), static_cast<uint32_t>(op.size[1]),
                         static_cast<uint32_t>(op.size[2])};
 
-    if (rect_groups.empty() || rect_groups.back().src_agent.handle != src_agent.handle ||
-        rect_groups.back().srcs.size() == kMaxEntries) {
+    auto group = std::find_if(rect_groups.rbegin(), rect_groups.rend(), [&](const RectGroup& g) {
+      return g.src_agent.handle == src_agent.handle;
+    });
+    if (group == rect_groups.rend() || group->srcs.size() == kMaxEntries) {
       rect_groups.push_back(RectGroup{src_agent, {}, {}, {}, {}});
+      group = rect_groups.rbegin();
     }
     hsa_dim3_t origin = {0, 0, 0};
-    rect_groups.back().srcs.push_back(hsa_amd_memory_copy_rect_ptr_t{src_pitched, origin});
-    rect_groups.back().dsts.push_back(hsa_amd_memory_copy_rect_ptr_t{dst_pitched, origin});
-    rect_groups.back().ranges.push_back(range);
-    rect_groups.back().dst_agents.push_back(dst_agent);
+    group->srcs.push_back(hsa_amd_memory_copy_rect_ptr_t{src_pitched, origin});
+    group->dsts.push_back(hsa_amd_memory_copy_rect_ptr_t{dst_pitched, origin});
+    group->ranges.push_back(range);
+    group->dst_agents.push_back(dst_agent);
   }
 
   std::vector<hsa_signal_t> wait_events = gpu().Barriers().WaitingSignal(HwQueueEngine::Unknown);
