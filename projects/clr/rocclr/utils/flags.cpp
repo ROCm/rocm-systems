@@ -13,6 +13,9 @@
 #include <string_view>
 #include <cstdlib>
 #include <cstring>
+#include <cctype>
+#include <cerrno>
+#include <limits>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -165,6 +168,39 @@ bool Flag::init() {
 bool Flag::setValue(const char* value) {
   if (value_ == NULL) {
     return false;  // flag is constant.
+  }
+
+  // AMD_LOG_MASK is documented as a hexadecimal mask. Keep the existing decimal
+  // parsing for this and other flags, including leading zeros and -1 sentinels.
+  if (type_ == Tuint && strcmp(name_, "AMD_LOG_MASK") == 0) {
+    const char* digits = value;
+    while (std::isspace(static_cast<unsigned char>(*digits))) {
+      ++digits;
+    }
+    const bool negative = *digits == '-';
+    if (*digits == '+' || negative) {
+      ++digits;
+    }
+    if (digits[0] == '0' && (digits[1] == 'x' || digits[1] == 'X')) {
+      if (negative) {
+        return false;
+      }
+      char* end = nullptr;
+      errno = 0;
+      const unsigned long mask = std::strtoul(digits, &end, 16);
+      if (errno == ERANGE || mask > std::numeric_limits<uint>::max()) {
+        return false;
+      }
+      while (std::isspace(static_cast<unsigned char>(*end))) {
+        ++end;
+      }
+      if (*end != '\0') {
+        return false;
+      }
+      *(uint*)value_ = static_cast<uint>(mask);
+      isDefault_ = false;
+      return true;
+    }
   }
 
   isDefault_ = false;
