@@ -34,6 +34,9 @@ namespace tool
 {
 namespace config_details
 {
+// get() returns an unowned reference, and some SDK callbacks retain pointers into a published
+// configuration. Keep every generation alive for the storage lifetime so publication never
+// invalidates an existing reader or callback userdata.
 template <typename Tp>
 class immutable_config_storage
 {
@@ -64,19 +67,6 @@ public:
         m_generations.emplace_back(std::move(next));
         m_current.store(ptr, std::memory_order_release);
         return *ptr;
-    }
-
-    // Readers must be quiescent before this function is called. Published generations remain
-    // alive until this explicit reclamation point so get() can return a reference without reader
-    // locks or reference-counting overhead.
-    void reclaim_retired()
-    {
-        auto lock = std::lock_guard<std::mutex>{m_mutex};
-        if(m_generations.size() < 2) return;
-
-        auto current = std::move(m_generations.back());
-        m_generations.clear();
-        m_generations.emplace_back(std::move(current));
     }
 
 private:

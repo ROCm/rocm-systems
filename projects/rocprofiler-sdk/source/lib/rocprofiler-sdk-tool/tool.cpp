@@ -4352,10 +4352,6 @@ tool_fini(void* /*tool_data*/)
 #if defined(CODECOV) && CODECOV > 0
     __gcov_dump();
 #endif
-
-    // Registration stops contexts and drains callback-capable services before invoking tool_fini.
-    // The output thread is joined above, so no reader can retain an older configuration now.
-    tool::reclaim_config_generations();
 }
 
 std::vector<rocprofiler_counter_record_dimension_info_t>

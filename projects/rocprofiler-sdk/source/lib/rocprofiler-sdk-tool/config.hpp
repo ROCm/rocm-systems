@@ -270,9 +270,6 @@ is_attach_invariant(const config& lhs, const config& rhs)
 
 const config& publish_config(config);
 
-void
-reclaim_config_generations();
-
 template <typename ArchiveT>
 void
 att_perfcounter::save(ArchiveT& ar) const

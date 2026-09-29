@@ -63,9 +63,9 @@ using config_storage_t = config_details::immutable_config_storage<config>;
 config_storage_t&
 get_config_storage()
 {
-    // The active generation remains valid for the process lifetime, matching the previous
-    // singleton lifetime. Retired generations are reclaimed explicitly after tool callbacks
-    // become quiescent.
+    // The storage and every published generation remain valid for the process lifetime. Readers
+    // receive unowned references, so retaining generations avoids requiring locks, reference
+    // counting, or a callback-quiescence guarantee.
     static auto* value = new config_storage_t{config{}};
     return *value;
 }
@@ -358,12 +358,6 @@ const config&
 publish_config(config value)
 {
     return get_config_storage().publish(std::move(value));
-}
-
-void
-reclaim_config_generations()
-{
-    get_config_storage().reclaim_retired();
 }
 
 std::string

@@ -55,22 +55,21 @@ is_consistent(const test_config& cfg)
 }
 }  // namespace
 
-TEST(config_storage, published_generations_remain_valid)
+TEST(config_storage, published_generations_remain_valid_for_storage_lifetime)
 {
     auto        storage = immutable_config_storage<test_config>{test_config{1}};
     const auto& first   = storage.get();
 
     const auto& second = storage.publish(test_config{2});
+    const auto& third  = storage.publish(test_config{3});
 
     EXPECT_EQ(first.generation, 1);
     EXPECT_TRUE(is_consistent(first));
     EXPECT_EQ(second.generation, 2);
-    EXPECT_EQ(&storage.get(), &second);
-
-    storage.reclaim_retired();
-
-    EXPECT_EQ(storage.get().generation, 2);
-    EXPECT_TRUE(is_consistent(storage.get()));
+    EXPECT_TRUE(is_consistent(second));
+    EXPECT_EQ(third.generation, 3);
+    EXPECT_TRUE(is_consistent(third));
+    EXPECT_EQ(&storage.get(), &third);
 }
 
 TEST(config_storage, readers_observe_complete_generations_during_publication)
