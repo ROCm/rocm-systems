@@ -16,7 +16,10 @@ container or IPC isolation problems before the application sends any traffic.
 A failing report names the exact GPU pair and path to investigate.
 
 This feature is inherited from NCCL 2.31 (active diagnostics). The only check
-available is the P2P check.
+available is the P2P check. The passive RAS diagnostics
+(``NCCL_RUN_RAS_DIAGNOSTICS``), which compare configuration across ranks
+without exercising data paths, are a separate feature and are not covered on
+this page.
 
 Enabling diagnostics
 ====================
@@ -178,9 +181,14 @@ The edge fields have the following meaning:
      - How the destination memory was shared: ``DIRECT`` (both GPUs in one
        process) or ``LEGACY_CUDA_IPC`` (HIP IPC handle between processes).
 
-The suggested next step at the end of each line comes from NCCL and refers to
-NVIDIA tools (``nvidia-smi``, ``nvidia-imex-ctl``). On AMD GPUs, use the
-following commands instead:
+.. note::
+
+   Known limitation: the suggested next step at the end of each line comes
+   from NCCL and still refers to NVIDIA tools and terms (``nvidia-smi``,
+   ``nvidia-imex-ctl``, NVLink, CUDA IPC). AMD-specific wording in the report
+   is tracked separately. Until then, use the commands in the following table.
+
+On AMD GPUs, use the following commands instead:
 
 .. list-table::
    :header-rows: 1
