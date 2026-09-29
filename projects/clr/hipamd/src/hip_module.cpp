@@ -378,7 +378,7 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const LaunchConfig& config
     if (work_group_info == nullptr) {
       return hipErrorInvalidDeviceFunction;
     }
-    if (sharedMemBytes > work_group_info->maxDynamicSharedSizeBytes_) {
+    if (config.sharedMemBytes32() > work_group_info->maxDynamicSharedSizeBytes_) {
       return hipErrorInvalidValue;
     }
   }
