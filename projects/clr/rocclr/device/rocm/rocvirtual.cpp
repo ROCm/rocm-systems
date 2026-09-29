@@ -3250,8 +3250,8 @@ void VirtualGPU::submitSvmPrefetchAsync(amd::SvmPrefetchAsyncCommand& cmd) {
   profilingBegin(cmd);
 
   if (dev().info().hmmSupported_) {
-    // ROCr executes prefetch outside of the AQL queue and orders it only by the wait signals,
-    // so earlier AQL packets must be covered by a signal
+    // ROCr orders the prefetch only by the wait signals, so a signal must cover all earlier
+    // work in the queue
     releaseGpuMemoryFence(kSkipCpuWait);
     // Initialize signal for the barrier
     auto wait_events = Barriers().WaitingSignal(HwQueueEngine::Unknown);
@@ -3292,8 +3292,8 @@ void VirtualGPU::SubmitSvmPrefetchBatchAsync(amd::SvmPrefetchBatchAsyncCommand& 
   std::scoped_lock lock(execution());
   profilingBegin(command);
 
-  // ROCr executes prefetch outside of the AQL queue and orders it only by the wait signals,
-  // so earlier AQL packets must be covered by a signal
+  // ROCr orders the prefetch only by the wait signals, so a signal must cover all earlier
+  // work in the queue
   releaseGpuMemoryFence(kSkipCpuWait);
   auto wait_events = Barriers().WaitingSignal(HwQueueEngine::Unknown);
   hsa_signal_t active = Barriers().ActiveSignal(command.Count(), timestamp_);
@@ -3335,6 +3335,8 @@ void VirtualGPU::SubmitSvmDiscardBatchAsync(amd::SvmDiscardBatchAsyncCommand& co
   std::scoped_lock lock(execution());
   profilingBegin(command);
 
+  // ROCr orders the discard only by the wait signals, so a signal must cover all earlier
+  // work in the queue
   releaseGpuMemoryFence(kSkipCpuWait);
   auto wait_events = Barriers().WaitingSignal(HwQueueEngine::Unknown);
   hsa_signal_t active = Barriers().ActiveSignal(kInitSignalValueOne, timestamp_);
