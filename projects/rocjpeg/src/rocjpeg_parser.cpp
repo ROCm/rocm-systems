@@ -102,9 +102,17 @@ bool RocJpegStreamParser::ParseJpegStream(const uint8_t *jpeg_stream, uint32_t j
         }
         marker = *stream_++;
 
-        // Standalone markers (TEM, RST0-RST7, SOI, EOI) carry neither a length
-        // field nor a payload, so there is nothing to skip past.
-        if (marker == 0x01 || (marker >= 0xD0 && marker <= EOI)) {
+        // EOI ends the image, so reaching it before the scan means the stream
+        // carries no entropy-coded data at all.
+        if (marker == EOI) {
+            ErrorLog(g_rocjpeg_logger, "Invalid JPEG: EOI encountered before the SOS marker!");
+            FunctionExitLog(g_rocjpeg_logger);
+            return false;
+        }
+
+        // The remaining standalone markers (TEM, RST0-RST7, SOI) carry neither a
+        // length field nor a payload, so there is nothing to skip past.
+        if (marker == 0x01 || (marker >= 0xD0 && marker <= SOI)) {
             continue;
         }
 
@@ -170,6 +178,14 @@ bool RocJpegStreamParser::ParseJpegStream(const uint8_t *jpeg_stream, uint32_t j
         stream_ = next_chunck;
     }
 
+    // The loop also exits when the buffer runs out, so an absent scan has to be
+    // rejected explicitly - otherwise the stream would be reported as parsed
+    // with an empty slice and no entropy-coded data to decode.
+    if (!sos_marker_found) {
+        ErrorLog(g_rocjpeg_logger, "Didn't find the SOS marker!");
+        FunctionExitLog(g_rocjpeg_logger);
+        return false;
+    }
     if (!dht_marker_found) {
         ErrorLog(g_rocjpeg_logger, "Didn't find any Huffman table!");
         FunctionExitLog(g_rocjpeg_logger);
