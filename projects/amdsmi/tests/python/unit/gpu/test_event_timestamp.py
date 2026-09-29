@@ -4,12 +4,53 @@
 
 """Hardware-free regression tests for event receipt timestamps."""
 
+import importlib.util
+import os
+import sys
 import time
+import types
 import unittest
 from unittest import mock
 
 from amdsmi import amdsmi_interface as ai
-from amdsmi_cli.amdsmi_logger import AMDSMILogger
+
+try:
+    from common.common import amdsmi_path
+except (ImportError, FileNotFoundError):  # pragma: no cover - harness/install unavailable
+    amdsmi_path = None
+
+_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+_SOURCE_CLI_DIR = os.path.normpath(os.path.join(_THIS_DIR, "..", "..", "..", "..", "amdsmi_cli"))
+_INSTALLED_CLI_DIR = (
+    os.path.join(os.path.dirname(os.path.dirname(amdsmi_path)), "libexec", "amdsmi_cli")
+    if amdsmi_path
+    else ""
+)
+
+
+def _load_amdsmi_logger_cls():
+    """Load ``AMDSMILogger`` directly from the amdsmi_logger source/install file.
+
+    ``amdsmi_cli`` is not an importable top-level package in the installed test
+    environment (it ships under ``libexec/amdsmi_cli``), so ``import
+    amdsmi_cli.amdsmi_logger`` raises ``ModuleNotFoundError`` on the CI distro
+    legs. Mirror ``test_event_output_format.py`` and load the module by path with
+    its only non-stdlib dependency (``amdsmi_helpers``) stubbed.
+    """
+    module = types.ModuleType("amdsmi_helpers")
+    module.AMDSMIHelpers = type("AMDSMIHelpers", (), {})
+    sys.modules["amdsmi_helpers"] = module
+    for cli_dir in (_SOURCE_CLI_DIR, _INSTALLED_CLI_DIR):
+        candidate = os.path.join(cli_dir, "amdsmi_logger.py") if cli_dir else ""
+        if candidate and os.path.isfile(candidate):
+            spec = importlib.util.spec_from_file_location("amdsmi_logger_under_test", candidate)
+            loaded = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(loaded)
+            return loaded.AMDSMILogger
+    return None
+
+
+AMDSMILogger = _load_amdsmi_logger_cls()
 
 
 class TestEventTimestamp(unittest.TestCase):
@@ -56,6 +97,8 @@ class TestEventTimestamp(unittest.TestCase):
             self.assertIn("timestamp", rec)
 
     def test_human_readable_event_is_block_with_timestamp(self):
+        if AMDSMILogger is None:
+            self.skipTest("amdsmi_logger.py not found in source or install")
         logger = AMDSMILogger()
         event = {
             "gpu": 0,

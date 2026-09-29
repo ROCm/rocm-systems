@@ -46,9 +46,12 @@ class AMDSMILogger:
         # once per event, from one listener thread per GPU. ``_event_csv_header``
         # is captured from the first event so the CSV header is written once
         # (subsequent events emit only a data row). ``_event_lock`` serializes
-        # printing so records from concurrent GPU threads do not interleave.
+        # printing so records from concurrent GPU threads do not interleave, and
+        # the caller also holds it across store_output()+print_event_output() so
+        # the shared ``self.output`` cannot be clobbered between store and print;
+        # it is re-entrant so the internal print acquisition still works.
         self._event_csv_header = None
-        self._event_lock = threading.Lock()
+        self._event_lock = threading.RLock()
 
     class LoggerFormat(Enum):
         """Enum for logger formats"""
