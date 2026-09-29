@@ -7,11 +7,7 @@ from pathlib import Path
 from typing import Optional
 
 from utils.logger import console_warning
-from utils.utils_common import (
-    METRIC_ID_RE,
-    get_skills_dir,
-    resolve_rocm_library_path,
-)
+from utils.utils_common import METRIC_ID_RE, resolve_rocm_library_path
 
 
 class ExperimentalAction(argparse.Action):
@@ -1078,7 +1074,12 @@ Examples:
 
 def _skills_note(rocprof_compute_home: Path) -> Optional[str]:
     """Return the help line that points to the Agent Skills README, if shipped."""
-    skills_dir = get_skills_dir(rocprof_compute_home)
-    if skills_dir is None:
-        return None
-    return f"Agent Skills: see {skills_dir / 'README.md'} to install them."
+    # Source checkout first, then the install's share directory.
+    for skills_dir in (
+        rocprof_compute_home.parent / "skills",
+        rocprof_compute_home.parent.parent / "share" / "rocprofiler-compute" / "skills",
+    ):
+        readme = skills_dir / "README.md"
+        if readme.is_file():
+            return f"Agent Skills: see {readme} to install them."
+    return None

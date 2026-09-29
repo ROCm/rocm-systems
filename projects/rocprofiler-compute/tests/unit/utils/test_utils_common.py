@@ -215,35 +215,6 @@ def test_get_version_git_and_sha_fail(tmp_path, monkeypatch):
 
 
 # =============================================================================
-# AGENT SKILLS TESTS
-# =============================================================================
-
-
-def test_get_skills_dir_in_source_checkout(tmp_path):
-    """Finds skills/ next to src/ in a source checkout."""
-    skills_dir = tmp_path / "skills"
-    skills_dir.mkdir()
-    (skills_dir / "README.md").write_text("skills")
-
-    assert utils_common.get_skills_dir(tmp_path / "src") == skills_dir
-
-
-def test_get_skills_dir_in_install(tmp_path):
-    """Finds share/rocprofiler-compute/skills under the install prefix."""
-    skills_dir = tmp_path / "share" / "rocprofiler-compute" / "skills"
-    skills_dir.mkdir(parents=True)
-    (skills_dir / "README.md").write_text("skills")
-
-    home = tmp_path / "libexec" / "rocprofiler-compute"
-    assert utils_common.get_skills_dir(home) == skills_dir
-
-
-def test_get_skills_dir_missing(tmp_path):
-    """Returns None when no skills are shipped."""
-    assert utils_common.get_skills_dir(tmp_path / "src") is None
-
-
-# =============================================================================
 # ROCPROF DETECTION TESTS
 # =============================================================================
 
