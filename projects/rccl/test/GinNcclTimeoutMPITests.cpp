@@ -24,7 +24,10 @@
  *   - BackToBackTimeouts: 4 sequential stuck barriers, each yields ncclTimeout
  *
  * GinBarrierTimeoutMPITest — real GIN device barrier timeout
- *                            (requires NCCL_GIN_TYPE=2, NCCL_CUMEM_ENABLE=1):
+ *                            (requires NCCL_GIN_TYPE=2, NCCL_CUMEM_ENABLE=1).
+ * AICOMRCCL-2017 / NVIDIA/nccl#2279: re-run this suite with
+ * NCCL_GIN_PROXY_NTHREADS=1, then 2, then 4 (same bodies; host progress
+ * threads only exist on PROXY).
  *   - HealthyBarrierReturnsSuccess
  *   - AbsentPeerProducesTimeout
  *   - ZeroBudgetAbsentPeerTimesOut

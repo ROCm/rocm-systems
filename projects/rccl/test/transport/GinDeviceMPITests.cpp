@@ -7,6 +7,11 @@
 // MPI tests for the device-side GIN proxy backend. Each test launches a real
 // gin.{put|putValue|waitSignal|...} kernel against a real proxy thread + IB,
 // and validates the wire-level result on the receiving rank.
+//
+// GIN_PROXY_NTHREADS (AICOMRCCL-2017 / NVIDIA/nccl#2279): re-run this file with
+// NCCL_GIN_TYPE=2 and NCCL_GIN_PROXY_NTHREADS=1, then 2, then 4. Recycle_* and
+// SplitShare_SecondDevCommPut cover the multi-thread lifecycle; they skip on
+// Anvil/rocSHMEM GDA where host progress threads are never spawned.
 
 #include "MPITestBase.hpp"
 #include "ResourceGuards.hpp"
@@ -143,6 +148,15 @@ std::string ginProxyTestSkipReason() {
                      anvilSingleNodeReason}) {
     if (auto reason = check(); !reason.empty()) return reason;
   }
+  return "";
+}
+
+// Host progress threads exist only on the PROXY backend.
+std::string proxyNthreadsSkipReason() {
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty()) return reason;
+  if (requestedGinType() != NCCL_NET_DEVICE_GIN_PROXY)
+    return "GIN_PROXY_NTHREADS is a host-proxy feature (NCCL_GIN_TYPE=" +
+           std::to_string(NCCL_NET_DEVICE_GIN_PROXY) + ")";
   return "";
 }
 
@@ -350,13 +364,7 @@ class GinMPIDeviceTests : public MPITestBase {
   // Minimal 64-byte put + waitSignal round-trip from rank 0 to rank 1.
   // Used by the Invalid_*Pool tests to confirm comm bring-up + the GIN
   // data path still work after the runtime clamps an oversized pool.
-  void runBasicPutSelfCheck() {
-    // Bring up the comm + stream from the fixture.
-    ASSERT_EQ(ncclSuccess, createTestCommunicator());
-    SKIP_IF_GIN_UNSUPPORTED();
-    ncclComm_t  comm   = getActiveCommunicator();
-    hipStream_t stream = getActiveStream();
-
+  void runPutWaitRoundTrip(ncclComm_t comm, hipStream_t stream) {
     int rank = -1, nRanks = -1;
     ncclCommUserRank(comm, &rank);
     ncclCommCount(comm, &nRanks);
@@ -437,6 +445,15 @@ class GinMPIDeviceTests : public MPITestBase {
         ASSERT_EQ(hostSrc[i], hostResult[i]) << "byte " << i << " mismatched";
       }
     }
+  }
+
+  // Minimal 64-byte put + waitSignal round-trip from rank 0 to rank 1.
+  // Used by the Invalid_*Pool tests to confirm comm bring-up + the GIN
+  // data path still work after the runtime clamps an oversized pool.
+  void runBasicPutSelfCheck() {
+    ASSERT_EQ(ncclSuccess, createTestCommunicator());
+    SKIP_IF_GIN_UNSUPPORTED();
+    runPutWaitRoundTrip(getActiveCommunicator(), getActiveStream());
   }
 
   // Tier-1 test bodies, parameterized by GIN context count. Each is defined
@@ -6027,6 +6044,120 @@ TEST_F(GinMPIDeviceTests, ReduceScatter_Symmetric_Avg) {
           << "rank=" << rank << " i=" << i;
     }
   }
+}
+
+// GIN_CONNECTION_NONE DevComm then PROXY put: must complete (no thread-start hang).
+TEST_F(GinMPIDeviceTests, Recycle_NonGinThenProxyPut) {
+  auto localSkip = proxyNthreadsSkipReason();
+  if (auto reason = mpiCoordinatedSkipReason(!localSkip.empty(), localSkip.c_str()); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (auto reason = mpiCoordinatedSkipReason(
+          !validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2),
+          "Requires exactly 2 ranks");
+      !reason.empty())
+    GTEST_SKIP() << reason;
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
+  ncclComm_t comm = getActiveCommunicator();
+
+  ncclDevCommRequirements none = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
+  none.ginConnectionType = NCCL_GIN_CONNECTION_NONE;
+  ncclDevComm skipped{};
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &none, &skipped));
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommDestroy(comm, &skipped));
+  MPI_Barrier(MPI_COMM_WORLD);
+
+  runPutWaitRoundTrip(comm, getActiveStream());
+}
+
+// Destroy a PROXY DevComm, create another: put/waitSignal still succeeds.
+TEST_F(GinMPIDeviceTests, Recycle_DestroyThenProxyPut) {
+  auto localSkip = proxyNthreadsSkipReason();
+  if (auto reason = mpiCoordinatedSkipReason(!localSkip.empty(), localSkip.c_str()); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (auto reason = mpiCoordinatedSkipReason(
+          !validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2),
+          "Requires exactly 2 ranks");
+      !reason.empty())
+    GTEST_SKIP() << reason;
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
+  ncclComm_t comm = getActiveCommunicator();
+
+  ncclDevCommRequirements reqs = defaultGinReqs();
+  reqs.railGinBarrierCount = 1;
+  reqs.ginSignalCount = 1;
+  ncclDevComm first{};
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &first));
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommDestroy(comm, &first));
+  MPI_Barrier(MPI_COMM_WORLD);
+
+  runPutWaitRoundTrip(comm, getActiveStream());
+}
+
+class GinProxyNthreadsSplitTests : public GinMPIDeviceTests {
+ protected:
+  ncclResult_t createTestCommunicator() override {
+    int world_rank = MPIEnvironment::world_rank;
+    int world_size = MPIEnvironment::world_size;
+    if (world_rank == 0) RCCL_TEST_CHECK(ncclGetUniqueId(&nccl_id_));
+    MPI_Bcast(&nccl_id_, sizeof(ncclUniqueId), MPI_BYTE, 0, MPI_COMM_WORLD);
+
+    ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
+    config.splitShare = 1;
+
+    RCCL_TEST_CHECK(ncclGroupStart());
+    auto group_guard = makeScopeGuard([]() { (void)ncclGroupEnd(); });
+    RCCL_TEST_CHECK(ncclCommInitRankConfig(&test_comm_, world_size, nccl_id_, world_rank, &config));
+    auto comm_guard = makeScopeGuard([this]() {
+      if (test_comm_) {
+        (void)ncclCommDestroy(test_comm_);
+        test_comm_ = nullptr;
+      }
+    });
+    RCCL_TEST_CHECK(ncclGroupEnd());
+    group_guard.dismiss();
+    HIP_TEST_CHECK(hipStreamCreate(&test_stream_));
+    comm_guard.dismiss();
+    MPI_Barrier(MPI_COMM_WORLD);
+    return ncclSuccess;
+  }
+};
+
+// splitShare=1 child shares ginState; put on the child's DevComm succeeds.
+TEST_F(GinProxyNthreadsSplitTests, SplitShare_SecondDevCommPut) {
+  auto localSkip = proxyNthreadsSkipReason();
+  if (auto reason = mpiCoordinatedSkipReason(!localSkip.empty(), localSkip.c_str()); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (auto reason = mpiCoordinatedSkipReason(
+          !validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2),
+          "Requires exactly 2 ranks");
+      !reason.empty())
+    GTEST_SKIP() << reason;
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
+  ncclComm_t parent = getActiveCommunicator();
+
+  ncclDevCommRequirements reqs = defaultGinReqs();
+  reqs.railGinBarrierCount = 1;
+  reqs.ginSignalCount = 1;
+  ncclDevComm parentDev{};
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(parent, &reqs, &parentDev));
+  auto parentDevCleanup = makeScopeGuard([&]() { (void)ncclDevCommDestroy(parent, &parentDev); });
+
+  ncclComm_t child = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess, ncclCommSplit(parent, 0, getTestMpiRank(), &child, nullptr));
+  ASSERT_MPI_TRUE(child != nullptr);
+  ASSERT_MPI_EQ(parent->sharedRes, child->sharedRes);
+  auto childCleanup = makeScopeGuard([&]() {
+    if (child) (void)ncclCommDestroy(child);
+  });
+
+  MPI_Barrier(MPI_COMM_WORLD);
+  runPutWaitRoundTrip(child, getActiveStream());
 }
 
 #endif  // MPI_TESTS_ENABLED

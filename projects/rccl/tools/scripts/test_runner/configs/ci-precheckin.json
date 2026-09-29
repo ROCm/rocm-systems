@@ -207,6 +207,17 @@
       "tests": [
         {"name": "SymKernelsMicrotests", "description": "Host-only sym_kernels.cc/sym_kernels_host.cc microtests (no GPU, no HIP/RCCL runtime); contributes sym_kernels coverage", "test_filter": "*"}
       ]
+    },
+    "unit_tests_micro_gin_host": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroGinHost",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "GinHostMicrotests", "description": "Host-only gin_host.cc GIN_PROXY_NTHREADS microtests (no GPU, no HIP/RCCL runtime); NVIDIA/nccl#2279 / AICOMRCCL-2017", "test_filter": "*"}
+      ]
     }
   },
   "test_suites": [
@@ -262,6 +273,12 @@
       "name": "RCCL Microtests - sym_kernels.cc",
       "description": "rccl-UnitTestsMicroSymKernels (host-only sym_kernels.cc microtests, no GPU/HIP/RCCL runtime)",
       "config": "unit_tests_micro_symkernels",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - gin_host.cc",
+      "description": "rccl-UnitTestsMicroGinHost (host-only gin_host.cc GIN_PROXY_NTHREADS microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_gin_host",
       "enabled": true
     }
   ]
