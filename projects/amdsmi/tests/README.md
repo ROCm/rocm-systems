@@ -91,6 +91,20 @@ Suite names are the only selection mechanism — `<Component><Type>[<Operation>]
                      WslFunctionalReadOnly   (gated)
 ```
 
+### Memory-partition coverage
+
+`GpuFunctionalReadWrite.TestMemoryPartitionReadWrite` checks getters, capabilities,
+invalid inputs, and setting only the current NPS mode. It never intentionally
+stages alternate NPS modes or sets compute profiles. Saved per-device memory and
+compute state is verified without repair; drift or unreadable saved state fails
+the test.
+
+Run with exclusive partition-management access: reads and same-mode requests are
+not atomic against another process changing the topology. Alternate NPS transitions
+require an isolated lifecycle harness; active-mode readback cannot prove a pending
+alternate request was canceled. This test does not certify state preservation by
+other tests in the full read/write suite.
+
 ## Python — three runners over one shared engine
 
 ```text
