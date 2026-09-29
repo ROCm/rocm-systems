@@ -3970,24 +3970,6 @@ TEST_F(NetIbMPITest, FaultInjectionShimsAbsentUnlessRequested) {
     constexpr size_t kMsgSize = 1024;
     std::vector<char> buf(kMsgSize, 0);
     void* comm    = (rank == 0) ? recvComm : sendComm;
-    // Checked, because SetupCastConnection reports a failed accept or connect
-    // without asserting fatally: this rank can come back holding a null
-    // communicator, and registering against one crashes inside the plugin
-    // (IbCastRegMrDmaBufInternal dereferences it), which then takes the rest of the
-    // suite down with it -- every later test in the same run could not connect. The
-    // helper leaves both ranks at the same point, so this agreement is reached on
-    // both of them and neither is left waiting at the barrier below.
-    int localUp = comm != nullptr ? 1 : 0;
-    int bothUp = 0;
-    if (MPI_Allreduce(&localUp, &bothUp, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD) != MPI_SUCCESS)
-        bothUp = 0;
-    if (!bothUp) {
-        ADD_FAILURE() << "connection setup did not produce a usable communicator on both ranks, "
-                         "so the shim probe cannot run";
-        TeardownConnection(recvComm, listenComm, sendComm, nullptr);
-        MPI_Barrier(MPI_COMM_WORLD);
-        return;
-    }
     void* mhandle = nullptr;
     ASSERT_EQ(RegisterMemory(comm, buf.data(), kMsgSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
 
