@@ -619,9 +619,13 @@ static void update_root_manifest() {
 
 static constexpr uint64_t kKeepFreeMax   = 4ull << 30;
 static constexpr uint64_t kSpaceCheckMax = 64ull << 20;
+static constexpr uint64_t kFileBlockDefault = 4096;
 // Set by open(); g_keep_free stays 0 when free space cannot be read at all.
 static uint64_t              g_keep_free = 0;
 static uint64_t              g_space_check_bytes = kSpaceCheckMax;
+// Every blob and code object is a file of its own and takes whole blocks, so they
+// are counted in blocks of the archive's file system.
+static std::atomic<uint64_t> g_file_block_bytes{kFileBlockDefault};
 // Events and blobs both count here. Protected by g_file_mu.
 static uint64_t g_bytes_since_space_check = 0;
 // Bytes already accepted by reserve_space and not yet finished writing. Concurrent
@@ -629,7 +633,9 @@ static uint64_t g_bytes_since_space_check = 0;
 static std::atomic<uint64_t> g_bytes_reserved{0};
 static std::atomic<bool>     g_out_of_space{false};
 
-static bool fs_space(const std::string& dir, uint64_t* avail, uint64_t* total) {
+static bool fs_space(const std::string& dir, uint64_t* avail, uint64_t* total,
+                     uint64_t* block = nullptr) {
+  uint64_t bs = 0;
 #ifdef _WIN32
   ULARGE_INTEGER a{}, t{}, f{};
   if (!GetDiskFreeSpaceExA(dir.c_str(), &a, &t, &f)) return false;
@@ -640,7 +646,9 @@ static bool fs_space(const std::string& dir, uint64_t* avail, uint64_t* total) {
   if (::statvfs(dir.c_str(), &sv) != 0) return false;
   *avail = static_cast<uint64_t>(sv.f_bavail) * sv.f_frsize;
   *total = static_cast<uint64_t>(sv.f_blocks) * sv.f_frsize;
+  bs = sv.f_frsize;
 #endif
+  if (block != nullptr && bs != 0) *block = bs;
   return true;
 }
 
@@ -673,8 +681,9 @@ static bool init_space_reserve() {
   g_keep_free = 0;
   g_bytes_since_space_check = 0;
   g_bytes_reserved.store(0, std::memory_order_relaxed);
-  uint64_t avail = 0, total = 0;
-  if (!fs_space(g_output_dir, &avail, &total)) return true;
+  uint64_t avail = 0, total = 0, block = kFileBlockDefault;
+  if (!fs_space(g_output_dir, &avail, &total, &block)) return true;
+  g_file_block_bytes.store(block, std::memory_order_relaxed);
   g_keep_free = std::min<uint64_t>(total / 100 * 15, kKeepFreeMax);
   g_space_check_bytes = std::max<uint64_t>(std::min<uint64_t>(kSpaceCheckMax, g_keep_free / 4), 1);
   return avail >= g_keep_free;
@@ -699,12 +708,18 @@ static bool check_space(uint64_t pending) {
   return false;
 }
 
-// Account for `len` bytes of archive data and return false, having stopped the
-// capture, if writing them would eat into the reserve. Must not be called with
+static uint64_t file_bytes(uint64_t len) {
+  const uint64_t block = g_file_block_bytes.load(std::memory_order_relaxed);
+  return (len + block - 1) / block * block;
+}
+
+// Account for a file of `len` bytes and return false, having stopped the
+// capture, if writing it would eat into the reserve. Must not be called with
 // g_file_mu held. On success the bytes stay reserved until release_space(len).
 static bool reserve_space(uint64_t len) {
   if (g_out_of_space.load(std::memory_order_relaxed)) return false;
   if (g_keep_free == 0) return true;
+  len = file_bytes(len);
   const uint64_t reserved =
       g_bytes_reserved.fetch_add(len, std::memory_order_acq_rel) + len;
   bool due;
@@ -719,7 +734,7 @@ static bool reserve_space(uint64_t len) {
 
 static void release_space(uint64_t len) {
   if (g_keep_free == 0 || len == 0) return;
-  g_bytes_reserved.fetch_sub(len, std::memory_order_acq_rel);
+  g_bytes_reserved.fetch_sub(file_bytes(len), std::memory_order_acq_rel);
 }
 
 // For open() refusing for lack of space. A forked child inherits these paths and
