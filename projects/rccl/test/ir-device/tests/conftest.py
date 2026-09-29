@@ -257,12 +257,15 @@ def _build_gin_mpi_binary():
     gtest_libdir = _find_gtest_libdir()
     rccl_libdir = _find_rccl_libdir()
     mpi_cxx = shutil.which("mpicxx")
+    # Use the mpicxx wrapper as the compiler so it automatically injects the
+    # correct MPI include paths and link flags for whichever MPI implementation
+    # (OpenMPI, MPICH, etc.) is installed.  OMPI_CXX / MPICH_CXX redirect the
+    # wrapper to amdclang++ so HIP device-code compilation works transparently.
     args = [
-        AMDCLANGPP,
+        mpi_cxx,
         "-x", "hip",
         f"--offload-arch={ARCH}", "-O0",
         "-D__HIP_PLATFORM_AMD__=1",
-        f"-I{MPI_INC}",
         f"-I{IR_DIR}",
         f"-I{HIPIFY_INC}",
         f"-I{os.path.join(HIPIFY_INC, 'nccl_device')}",
@@ -273,10 +276,8 @@ def _build_gin_mpi_binary():
         "-Xoffload-linker", BITCODE,
         "-Xoffload-linker", "-plugin-opt=-amdgpu-internalize-symbols=false",
         f"-L{rccl_libdir}", f"-Wl,-rpath,{rccl_libdir}", "-lrccl",
-        "-lmpichcxx", "-lmpich",
         f"-L{os.path.join(ROCM_PATH, 'lib')}", "-lamdhip64",
         f"-L{gtest_libdir}", "-lgtest_main", "-lgtest", "-lpthread",
-        f"-L{rccl_libdir}", f"-Wl,-rpath,{rccl_libdir}", "-lrccl",
         "-o", GIN_MPI_TEST_EXE,
     ]
     env = os.environ.copy()
