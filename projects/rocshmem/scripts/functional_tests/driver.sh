@@ -184,6 +184,12 @@ declare -A TEST_NUMBERS=(
   ["signaladd"]="171"
   ["signalset"]="172"
   ["signalwaituntil"]="173"
+  ["tile_put_rowmajor_start_coord"]="177"
+  ["tile_get_rowmajor_start_coord"]="178"
+  ["tile_put_wave_rowmajor_start_coord"]="179"
+  ["tile_get_wave_rowmajor_start_coord"]="180"
+  ["tile_put_wg_rowmajor_start_coord"]="181"
+  ["tile_get_wg_rowmajor_start_coord"]="182"
 )
 
 # Detect which runtime to use
@@ -1082,6 +1088,12 @@ TestTiles() {
   ExecTest  "tile_get_wave_contiguous"  2       1            $WAVE_SIZE   1048576
   ExecTest  "tile_get_wave_rowmajor"    2       1            $WAVE_SIZE   1048576
   ExecTest  "tile_get_wave_colmajor"    2       1            $WAVE_SIZE   1048576
+  ExecTest  "tile_put_rowmajor_start_coord"       2       1            1
+  ExecTest  "tile_get_rowmajor_start_coord"       2       1            1
+  ExecTest  "tile_put_wave_rowmajor_start_coord"  2       1            $WAVE_SIZE
+  ExecTest  "tile_get_wave_rowmajor_start_coord"  2       1            $WAVE_SIZE
+  ExecTest  "tile_put_wg_rowmajor_start_coord"    2       1            $((WAVE_SIZE * 16))
+  ExecTest  "tile_get_wg_rowmajor_start_coord"    2       1            $((WAVE_SIZE * 16))
   ExecTest  "tile_broadcast"            2       1            1            1048576
   ExecTest  "tile_broadcast"            4       1            1            1048576
   # tile_broadcast_wave: each wave uses its own context; set MAX_NUM_CONTEXTS = NUM_WGS * NUM_WF
