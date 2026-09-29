@@ -109,8 +109,10 @@ bool RocJpegStreamParser::ParseJpegStream(const uint8_t *jpeg_stream, uint32_t j
         }
 
         // Every other marker is followed by a 16-bit big-endian segment length
-        // that includes the two length bytes themselves.
-        if (stream_ + 2 > stream_end_) {
+        // that includes the two length bytes themselves. Compare the remaining
+        // distance rather than forming stream_ + 2, which would be undefined
+        // when fewer than two bytes are left.
+        if (stream_end_ - stream_ < 2) {
             ErrorLog(g_rocjpeg_logger, "Truncated JPEG: marker segment length runs past the end of the stream!");
             FunctionExitLog(g_rocjpeg_logger);
             return false;
@@ -200,10 +202,10 @@ bool RocJpegStreamParser::ParseSOI() {
         return false;
     }
     // stream_ + 1 must stay addressable, so stop one byte before the end.
-    while (stream_ + 1 < stream_end_ && !(*stream_ == 0xFF && *(stream_ + 1) == SOI)) {
+    while (stream_end_ - stream_ > 1 && !(*stream_ == 0xFF && *(stream_ + 1) == SOI)) {
         stream_++;
     }
-    if (stream_ + 1 >= stream_end_) {
+    if (stream_end_ - stream_ <= 1) {
         return false;
     }
     stream_ += 2;
@@ -418,7 +420,7 @@ bool RocJpegStreamParser::ParseDQT() {
     }
 
     uint16_t table_length = swap_bytes(stream_);
-    if (table_length < 2 || stream_ + table_length > stream_end_) {
+    if (table_length < 2 || table_length > stream_end_ - stream_) {
         ErrorLog(g_rocjpeg_logger, "Invalid DQT marker length!");
         return false;
     }
@@ -427,7 +429,7 @@ bool RocJpegStreamParser::ParseDQT() {
     stream_ += 2;
 
     while (stream_ < dqt_block_end) {
-        if (stream_ + 1 + 64 > dqt_block_end) {
+        if (dqt_block_end - stream_ < 1 + 64) {
             ErrorLog(g_rocjpeg_logger, "Truncated JPEG: DQT segment too small to contain a complete quantization table!");
             return false;
         }
@@ -534,7 +536,7 @@ bool RocJpegStreamParser::ParseDHT() {
 
     const uint8_t *dht_header = stream_;
     uint16_t segment_length = swap_bytes(stream_);
-    if (segment_length < 2 || stream_ + segment_length > stream_end_) {
+    if (segment_length < 2 || segment_length > stream_end_ - stream_) {
         ErrorLog(g_rocjpeg_logger, "Invalid DHT marker length!");
         return false;
     }
@@ -572,7 +574,7 @@ bool RocJpegStreamParser::ParseDHT() {
 
         // The value bytes must fit inside the remaining DHT segment.
         if (count > static_cast<uint32_t>(length - 17) ||
-            stream_ + count > dht_block_end) {
+            count > static_cast<uint32_t>(dht_block_end - stream_)) {
             ErrorLog(g_rocjpeg_logger, "Truncated JPEG: DHT code values run past the end of the segment!");
             return false;
         }
@@ -659,7 +661,7 @@ bool RocJpegStreamParser::ParseSOS() {
     uint16_t sos_length = swap_bytes(stream_);
     // Scan header: 2 length + 1 component count + 2 per component + 3 trailing
     // (Ss, Se, Ah/Al) bytes.
-    if (sos_length < 6 || stream_ + sos_length > stream_end_) {
+    if (sos_length < 6 || sos_length > stream_end_ - stream_) {
         ErrorLog(g_rocjpeg_logger, "Invalid SOS marker length!");
         return false;
     }
@@ -766,7 +768,7 @@ bool RocJpegStreamParser::ParseDRI() {
         ErrorLog(g_rocjpeg_logger,"invalid size for DRI marker");
         return false;
     }
-    if (stream_ + 4 > stream_end_) {
+    if (stream_end_ - stream_ < 4) {
         ErrorLog(g_rocjpeg_logger, "Truncated JPEG: DRI marker runs past the end of the stream!");
         return false;
     }
@@ -793,10 +795,10 @@ bool RocJpegStreamParser::ParseEOI() {
     // stream_temp + 1 must stay addressable, so stop one byte before the end. If
     // no EOI is present the entropy-coded data simply runs to the end of the buffer.
     const uint8_t *stream_temp = stream_;
-    while (stream_temp + 1 < stream_end_ && !(*stream_temp == 0xFF && *(stream_temp + 1) == EOI)) {
+    while (stream_end_ - stream_temp > 1 && !(*stream_temp == 0xFF && *(stream_temp + 1) == EOI)) {
         stream_temp++;
     }
-    if (stream_temp + 1 >= stream_end_) {
+    if (stream_end_ - stream_temp <= 1) {
         stream_temp = stream_end_;
     }
 
