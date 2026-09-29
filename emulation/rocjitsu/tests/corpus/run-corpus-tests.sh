@@ -234,7 +234,9 @@ run_pytest() {
   printf -v run_wrapper_command '%q ' "${run_wrapper[@]}"
 
   local pytest_cmd=(
+    env "PYTHONPATH=${ROCJITSU_SOURCE_DIR}/tests/corpus${PYTHONPATH:+:${PYTHONPATH}}"
     pytest tests/test_corpus.py
+    -p rocjitsu_corpus_xfails
     --target "${target_name}"
     --suite "iree,kernels,cts"
     --run-wrapper "${run_wrapper_command% }"

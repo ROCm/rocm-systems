@@ -467,6 +467,7 @@ jobs:
         run: |
           uv pip install --system -e lib/python
           python -m pytest lib/python/amdisa/tests
+          python -m pytest tests/corpus/test_corpus_xfails.py
 
       - name: Run corpus tests
         # Keep the HIP corpus signal even if an independent test step fails.
