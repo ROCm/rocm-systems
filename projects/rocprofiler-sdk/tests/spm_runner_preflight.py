@@ -28,7 +28,6 @@
 
 import sys
 from pathlib import Path
-from typing import Optional, Tuple
 
 # Minimum driver version for SPM CI. TheRock rocprofiler-sdk-spm runs this script
 # from the installed tests tree before ctest -L spm (see using-spm.rst).

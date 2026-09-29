@@ -49,28 +49,31 @@ Pm4RingStatus map(const Pm4PacketProcessResult &result) {
   return Pm4RingStatus::Malformed;
 }
 
-std::optional<uint64_t> normalize_producer_cursor(uint64_t producer_cursor,
-                                                  uint64_t consumer_cursor, uint64_t ring_dwords) {
-  if (producer_cursor >= consumer_cursor && producer_cursor - consumer_cursor <= ring_dwords)
+} // namespace
+
+std::optional<uint64_t> normalize_pm4_producer_cursor(uint64_t producer_cursor,
+                                                      uint64_t reference_cursor,
+                                                      uint64_t ring_dwords) noexcept {
+  if (ring_dwords == 0)
+    return std::nullopt;
+  if (producer_cursor >= reference_cursor && producer_cursor - reference_cursor <= ring_dwords)
     return producer_cursor;
   if (producer_cursor >= ring_dwords)
     return std::nullopt;
 
-  const uint64_t epoch = consumer_cursor - consumer_cursor % ring_dwords;
+  const uint64_t epoch = reference_cursor - reference_cursor % ring_dwords;
   if (producer_cursor > std::numeric_limits<uint64_t>::max() - epoch)
     return std::nullopt;
   uint64_t normalized = epoch + producer_cursor;
-  if (normalized < consumer_cursor) {
+  if (normalized < reference_cursor) {
     if (normalized > std::numeric_limits<uint64_t>::max() - ring_dwords)
       return std::nullopt;
     normalized += ring_dwords;
   }
-  if (normalized - consumer_cursor > ring_dwords)
+  if (normalized - reference_cursor > ring_dwords)
     return std::nullopt;
   return normalized;
 }
-
-} // namespace
 
 Pm4RingConsumer::Pm4RingConsumer(Pm4PacketProcessor &packet_processor, GpuVm &gpu_vm,
                                  AddressSpaceHandle address_space, uint64_t ring_base,
@@ -127,7 +130,7 @@ Pm4RingResult Pm4RingConsumer::consume(uint64_t producer_cursor, std::size_t pac
     return result;
   }
   if (!access_) {
-    access_ = gpu_vm_->snapshot(address_space_);
+    access_ = gpu_vm_->snapshot_pinned(address_space_);
     if (!access_) {
       result.status = Pm4RingStatus::Faulted;
       return result;
@@ -159,7 +162,7 @@ Pm4RingResult Pm4RingConsumer::consume(uint64_t producer_cursor, std::size_t pac
 
   const uint64_t ring_dwords = ring_bytes_ / sizeof(uint32_t);
   if (!producer_cursor_normalized_) {
-    const std::optional<uint64_t> normalized = normalize_producer_cursor(
+    const std::optional<uint64_t> normalized = normalize_pm4_producer_cursor(
         *transaction_producer_cursor_, cursor_journal_.cursor(), ring_dwords);
     if (!normalized) {
       result.status = Pm4RingStatus::Malformed;
