@@ -654,6 +654,21 @@ TEST_F(RasNetMicrotest, ConnectionCreateReusesLiveEntry) {
   EXPECT_EQ(0, g_socketInitCalls);
 }
 
+TEST_F(RasNetMicrotest, ConnectionCreateReopensSocketlessEntryPreservingRetryStart) {
+  rasConnection* conn = MakeConn(1001);
+  const int64_t startRetryTime = g_clockNano - RAS_CONNECT_RETRY;
+  conn->startRetryTime = startRetryTime;
+  ASSERT_EQ(nullptr, conn->sock);
+  rasConnection* result = nullptr;
+  ASSERT_EQ(ncclSuccess, rasConnCreate(&conn->addr, &result));
+  EXPECT_EQ(conn, result);
+  EXPECT_EQ(startRetryTime, conn->startRetryTime);
+  ASSERT_NE(nullptr, conn->sock);
+  EXPECT_EQ(RAS_SOCK_CONNECTING, conn->sock->status);
+  EXPECT_EQ(1, g_socketInitCalls);
+  EXPECT_EQ(g_clockNano, conn->lastRetryTime);
+}
+
 TEST_F(RasNetMicrotest, ConnectionCreateOpensAndTracksNewEntry) {
   ncclSocketAddress addr = MakeAddr(1002);
   rasConnection* conn = nullptr;
@@ -1157,6 +1172,7 @@ TEST_F(RasNetMicrotest, ConnectionTimeoutRetriesConnectingSocket) {
   g_socketReadyValue = 1;
   g_socketReadyState = ncclSocketStateReady;
   g_clockNano += RAS_CONNECT_RETRY + 1;
+  rasPfds[0].fd = POLL_FD_IGNORE;  // rasConnOpen parks a still-connecting socket here.
   rasConnsHandleTimeouts(g_clockNano, &nextWakeup);
   EXPECT_EQ(sock->sock.socketDescriptor, rasPfds[0].fd);
 }
@@ -1291,6 +1307,9 @@ TEST_F(RasNetMicrotest, ConnectionDisconnectDropsLinksAndTerminates) {
   AddLinkConn(&rasPrevLink, conn, 1);
   ncclSocketAddress addr = conn->addr;
   rasConnDisconnect(&addr);
+  ASSERT_EQ(2u, g_linkCalculateCalls.size());
+  EXPECT_EQ(&rasNextLink, g_linkCalculateCalls[0].link);
+  EXPECT_EQ(&rasPrevLink, g_linkCalculateCalls[1].link);
   EXPECT_EQ(nullptr, rasConnsHead);
   EXPECT_EQ(nullptr, rasSocketsHead);
   EXPECT_EQ(nullptr, rasNextLink.conns->conn);
@@ -1315,6 +1334,12 @@ TEST_F(RasNetMicrotest, NetworkTimeoutTerminatesUnlinkedIdleConnectionOnly) {
   EXPECT_TRUE(linked->linkFlag);
   EXPECT_FALSE(queued->linkFlag);
   EXPECT_FALSE(live->linkFlag);
+
+  rasLinkConnDrop(&rasNextLink, linked);
+  nextWakeup = INT64_MAX;
+  rasNetHandleTimeouts(g_clockNano, &nextWakeup);
+  EXPECT_EQ(live, queued->next);
+  EXPECT_EQ(live, rasConnsTail);
   (void)idle;
 }
 
@@ -1358,8 +1383,12 @@ TEST_F(RasNetMicrotest, LinkedConnectionWarnsThenTerminatesOnKeepAliveTimeout) {
   sock->lastSendTime = g_clockNano;
   sock->lastRecvTime = g_clockNano - RAS_KEEPALIVE_TIMEOUT_ERROR - 1;
   AddLinkConn(&rasNextLink, conn, 0);
+  AddLinkConn(&rasPrevLink, conn, 0);
   int64_t nextWakeup = INT64_MAX;
   rasNetHandleTimeouts(g_clockNano, &nextWakeup);
+  ASSERT_EQ(2u, g_linkCalculateCalls.size());
+  EXPECT_EQ(&rasNextLink, g_linkCalculateCalls[0].link);
+  EXPECT_EQ(&rasPrevLink, g_linkCalculateCalls[1].link);
   EXPECT_TRUE(conn->experiencingDelays);
   EXPECT_EQ(nullptr, conn->sock);
   EXPECT_EQ(g_clockNano, nextWakeup);
