@@ -41,7 +41,7 @@ Total metric rows loaded: **2,862** across 824 unique metric names.
 |---|---|---|
 | `header` | 2,862 | Always present — column name mapping |
 | `cli_style` | 735 | Render type for CLI output |
-| `tui_style` | 735 | Render type for TUI output |
+| `tui_style` | 735 | Render type for TUI output (removed with the TUI in #12220) |
 | `comparable` | 462 | Marks table as non-comparable across runs |
 | `style` | 12 | Variant of `cli_style` — rare |
 
