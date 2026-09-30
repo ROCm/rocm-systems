@@ -20,6 +20,8 @@
 #include <functional>
 #include <iterator>
 #include <limits>
+#include <list>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <shared_mutex>
@@ -75,11 +77,32 @@ static_assert(alignof(OperatorHandle) == torch_abi::kOperatorHandleAlignment);
 static_assert(offsetof(OperatorHandle, operator_def_) == torch_abi::kOperatorHandleDefinitionOff);
 static_assert(offsetof(OperatorHandle, operator_iterator_) == torch_abi::kOperatorHandleIteratorOff);
 
+class OpRegistrationListener
+{
+public:
+    virtual ~OpRegistrationListener();
+    virtual void onOperatorRegistered(const OperatorHandle&)   = 0;
+    virtual void onOperatorDeregistered(const OperatorHandle&) = 0;
+};
+
+// Return storage only; this handle is retained for the process lifetime.
+// std::function gives it the nontrivial return ABI expected by Dispatcher.
+class RegistrationHandleRAII final
+{
+    std::function<void()> callback_;
+};
+
+static_assert(sizeof(OpRegistrationListener) == torch_abi::kOpRegistrationListenerSize);
+static_assert(alignof(OpRegistrationListener) == torch_abi::kOpRegistrationListenerAlignment);
+static_assert(sizeof(RegistrationHandleRAII) == torch_abi::kRegistrationHandleSize);
+static_assert(alignof(RegistrationHandleRAII) == torch_abi::kRegistrationHandleAlignment);
+
 class Dispatcher
 {
 public:
     static Dispatcher& realSingleton();
     OperatorHandle     findSchemaOrThrow(const char* name, const char* overload_name);
+    RegistrationHandleRAII addRegistrationListener(std::unique_ptr<OpRegistrationListener> listener);
 };
 
 }  // namespace c10
@@ -139,8 +162,16 @@ static_assert(alignof(InputArrayView) == torch_abi::kInputArrayViewAlignment);
 std::atomic_flag g_capture_failure_warning = ATOMIC_FLAG_INIT;
 std::atomic_flag g_schema_failure_warning  = ATOMIC_FLAG_INIT;
 
-using SchemaNames     = std::vector<std::string>;
-using SchemaOverloads = std::unordered_map<std::string, SchemaNames>;
+using SchemaNames = std::vector<std::string>;
+
+struct SchemaCacheEntry
+{
+    std::atomic<const SchemaNames*> current{nullptr};
+    // Published snapshots stay valid for concurrent and reentrant captures.
+    std::list<SchemaNames> versions;
+};
+
+using SchemaOverloads = std::unordered_map<std::string, SchemaCacheEntry>;
 
 struct SchemaCacheShard
 {
@@ -153,14 +184,15 @@ struct SchemaCacheShard
 struct SchemaCache
 {
     std::array<SchemaCacheShard, kSchemaCacheShardCount> shards;
+    c10::RegistrationHandleRAII*                         registration = nullptr;
 };
 
 struct SchemaCacheLookup
 {
-    std::size_t        hash           = 0;
-    const std::string* operator_name  = nullptr;
-    const std::string* overload_name  = nullptr;
-    const SchemaNames* argument_names = nullptr;
+    std::size_t             hash          = 0;
+    const std::string*      operator_name = nullptr;
+    const std::string*      overload_name = nullptr;
+    const SchemaCacheEntry* entry         = nullptr;
 };
 
 thread_local std::array<SchemaCacheLookup, kThreadSchemaCacheCount> g_thread_schema_cache{};
@@ -524,16 +556,94 @@ std::vector<std::string> parse_schema_argument_names(std::string_view dump)
     return result;
 }
 
-const SchemaNames& load_schema_names(const c10::OperatorName& operator_name)
+std::optional<c10::OperatorName> parse_operator_name(std::string_view dump)
+{
+    constexpr std::string_view prefix = "name: ";
+    if (dump.substr(0, prefix.size()) != prefix)
+    {
+        return std::nullopt;
+    }
+    dump.remove_prefix(prefix.size());
+    const auto name = dump.substr(0, dump.find('\n'));
+    const auto dot  = name.find('.');
+    return c10::OperatorName{std::string{name.substr(0, dot)},
+                             dot == std::string_view::npos ? std::string{}
+                                                           : std::string{name.substr(dot + 1)}};
+}
+
+class SchemaRegistrationListener final : public c10::OpRegistrationListener
+{
+public:
+    explicit SchemaRegistrationListener(SchemaCache& cache)
+        : cache_(cache)
+    {
+    }
+
+    void onOperatorRegistered(const c10::OperatorHandle& handle) noexcept override
+    {
+        try
+        {
+            // Dispatcher serializes these callbacks while the schema is valid.
+            const auto dump = handle.entry()->dumpState();
+            const auto name = parse_operator_name(dump);
+            if (!name || c10::Dispatcher::realSingleton()
+                                 .findSchemaOrThrow(name->name.c_str(), name->overload_name.c_str())
+                                 .entry() != handle.entry())
+            {
+                warn_schema_failure_once();
+                return;
+            }
+            auto  names = parse_schema_argument_names(dump);
+            auto& shard = cache_.shards[schema_hash(*name) % kSchemaCacheShardCount];
+            const std::lock_guard<std::shared_mutex> lock{shard.mutex};
+            auto [operator_it, inserted] = shard.operators.try_emplace(name->name);
+            if (inserted)
+            {
+                operator_it->second.reserve(kExpectedOverloadsPerOperator);
+            }
+            auto& entry = operator_it->second.try_emplace(name->overload_name).first->second;
+            // Install removal tracking before publishing; removal must not allocate.
+            registrations_[handle.entry()] = &entry;
+            auto snapshot = std::find(entry.versions.begin(), entry.versions.end(), names);
+            if (snapshot == entry.versions.end())
+            {
+                snapshot = entry.versions.insert(entry.versions.end(), std::move(names));
+            }
+            entry.current.store(&*snapshot, std::memory_order_release);
+        }
+        catch (...)
+        {
+            onOperatorDeregistered(handle);
+            warn_schema_failure_once();
+        }
+    }
+
+    void onOperatorDeregistered(const c10::OperatorHandle& handle) noexcept override
+    {
+        const auto it = registrations_.find(handle.entry());
+        if (it != registrations_.end())
+        {
+            it->second->current.store(nullptr, std::memory_order_release);
+            registrations_.erase(it);
+        }
+    }
+
+private:
+    SchemaCache& cache_;
+    // Dispatcher owns synchronization and entry lifetime for listener callbacks.
+    std::unordered_map<const c10::impl::OperatorEntry*, SchemaCacheEntry*> registrations_;
+};
+
+const SchemaNames* load_schema_names(const c10::OperatorName& operator_name)
 {
     const std::size_t hash         = schema_hash(operator_name);
     auto&             thread_entry = g_thread_schema_cache[hash % g_thread_schema_cache.size()];
-    if (thread_entry.argument_names != nullptr && thread_entry.operator_name != nullptr &&
+    if (thread_entry.entry != nullptr && thread_entry.operator_name != nullptr &&
         thread_entry.overload_name != nullptr && thread_entry.hash == hash &&
         *thread_entry.operator_name == operator_name.name &&
         *thread_entry.overload_name == operator_name.overload_name)
     {
-        return *thread_entry.argument_names;
+        return thread_entry.entry->current.load(std::memory_order_acquire);
     }
 
     auto& shard = schema_cache().shards[hash % kSchemaCacheShardCount];
@@ -546,34 +656,12 @@ const SchemaNames& load_schema_names(const c10::OperatorName& operator_name)
                 overload_it != operator_it->second.end())
             {
                 thread_entry = {hash, &operator_it->first, &overload_it->first, &overload_it->second};
-                return overload_it->second;
+                return overload_it->second.current.load(std::memory_order_acquire);
             }
         }
     }
 
-    std::vector<std::string> names;
-    try
-    {
-        auto handle = c10::Dispatcher::realSingleton().findSchemaOrThrow(operator_name.name.c_str(),
-                                                                         operator_name.overload_name.c_str());
-
-        names = parse_schema_argument_names(handle.entry()->dumpState());
-    }
-    catch (...)
-    {
-        warn_schema_failure_once();
-    }
-
-    const std::lock_guard<std::shared_mutex> lock{shard.mutex};
-    auto [operator_it, operator_inserted] = shard.operators.try_emplace(operator_name.name);
-    if (operator_inserted)
-    {
-        operator_it->second.reserve(kExpectedOverloadsPerOperator);
-    }
-    auto overload_it =
-        operator_it->second.try_emplace(operator_name.overload_name, std::move(names)).first;
-    thread_entry = {hash, &operator_it->first, &overload_it->first, &overload_it->second};
-    return overload_it->second;
+    return nullptr;
 }
 
 struct DtypeName
@@ -888,7 +976,7 @@ std::size_t capture(const at::RecordFunction& record_function, char* output, std
         const SchemaNames* names = nullptr;
         if (const auto operator_name = record_function.operator_name(); operator_name.has_value())
         {
-            names = &load_schema_names(*operator_name);
+            names = load_schema_names(*operator_name);
         }
 
         BoundedArgumentBuffer arguments;
@@ -903,6 +991,31 @@ std::size_t capture(const at::RecordFunction& record_function, char* output, std
 }
 
 }  // namespace
+
+bool torch_trace_collector::detail::initialize_argument_capture() noexcept
+{
+    // Register before RecordFunction callbacks start. PyTorch synchronously
+    // replays existing schemas; both the listener and cache need process lifetime.
+    static const bool initialized = []
+    {
+        try
+        {
+            auto& cache        = schema_cache();
+            cache.registration = new c10::RegistrationHandleRAII(
+                c10::Dispatcher::realSingleton().addRegistrationListener(
+                    std::make_unique<SchemaRegistrationListener>(cache)));
+            return true;
+        }
+        catch (...)
+        {
+            // Dispatcher may retain a listener if returning its handle throws.
+            // Latch failure so later install attempts cannot register duplicates.
+            warn_schema_failure_once();
+            return false;
+        }
+    }();
+    return initialized;
+}
 
 std::size_t torch_trace_collector::detail::capture_args(const at::RecordFunction& record_function,
                                                         char*                     output,
