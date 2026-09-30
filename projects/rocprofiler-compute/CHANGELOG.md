@@ -9,7 +9,11 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
+* Updated the analysis database schema version from 2.3.0 to 3.0.0.
+
 ### Removed
+
+* Removed the unused `compute_workload_roofline_data` table from the analysis database.
 
 ### Optimized
 

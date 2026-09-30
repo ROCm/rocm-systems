@@ -46,7 +46,7 @@ from pc_sampling.source_snapshot_analysis import (
 from utils.logger import console_debug, console_error, console_warning
 
 PREFIX = "compute_"
-SCHEMA_VERSION = "2.3.0"
+SCHEMA_VERSION = "3.0.0"
 
 
 Base = declarative_base()
@@ -71,10 +71,6 @@ class Workload(Base):
     # Workload can have multiple workload-level metric values
     workload_metric_values = relationship(
         "WorkloadMetricValue", back_populates="workload"
-    )
-    # Workload can have multiple workload-level roofline data points
-    workload_roofline_data_points = relationship(
-        "WorkloadRooflineData", back_populates="workload"
     )
     # Workload can have multiple code objects
     code_object_stores = relationship("CodeObjectStore", back_populates="workload")
@@ -507,28 +503,6 @@ class WorkloadMetricValue(Base):
     # Relationships
     metric = relationship("MetricDefinition", back_populates="workload_metric_values")
     workload = relationship("Workload", back_populates="workload_metric_values")
-
-
-class WorkloadRooflineData(Base):
-    __tablename__ = f"{PREFIX}workload_roofline_data"
-
-    roofline_uuid = Column(Integer, primary_key=True)
-    # One roofline data point per workload.
-    workload_id = Column(
-        Integer,
-        ForeignKey(f"{PREFIX}workload.workload_id"),
-        nullable=False,
-        unique=True,
-    )
-    total_flops = Column(Float)
-    l0_cache_data = Column(Float)
-    l1_cache_data = Column(Float)
-    l2_cache_data = Column(Float)
-    hbm_cache_data = Column(Float)
-    lds_cache_data = Column(Float)
-
-    # Relationships
-    workload = relationship("Workload", back_populates="workload_roofline_data_points")
 
 
 class Metadata(Base):
