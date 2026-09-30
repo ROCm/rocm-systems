@@ -610,6 +610,70 @@ TEST(RaceDetector, LdsSameWave_ReadWriteCrossLaneOk) {
   EXPECT_FALSE(b.hasRace());
 }
 
+TEST(RaceDetector, LdsSameWave_LongHistoryRemainsVisibleToOtherWaves) {
+  RaceTestBuilder b(/*numWaves=*/2, /*vgprs=*/8, /*sgprs=*/8);
+  constexpr int iterations = 600;
+  for (int i = 0; i < iterations; ++i) {
+    for (int wave = 0; wave < 2; ++wave) {
+      // Each wave reuses its own region, crossing a 16-byte count boundary.
+      // Waits release the destination register; a barrier is still needed
+      // before another wave can reuse either region.
+      const int addr = wave * 64 + 12;
+      b.ldsWrite(wave, /*lane=*/0, addr, /*bytes=*/8);
+      b.ldsRead(wave, /*lane=*/0, addr, /*bytes=*/8, /*vgprDst=*/2);
+      b.waitcnt(wave, /*vmcnt=*/-1, /*lgkmcnt=*/0);
+    }
+  }
+  ASSERT_FALSE(b.hasRace());
+  b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/76, /*bytes=*/4);
+  b.checkLdsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/76, /*bytes=*/4);
+  EXPECT_EQ(b.raceCount(), 2 * iterations);
+
+  b.clearViolations();
+  b.barrier();
+  b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/76, /*bytes=*/4);
+  b.checkLdsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/76, /*bytes=*/4);
+  ASSERT_FALSE(b.hasRace());
+
+  // After retirement, the old owner's counts must not hide new accesses
+  // from the other wave at the same addresses.
+  b.ldsWrite(/*wave=*/1, /*lane=*/0, /*addr=*/12, /*bytes=*/8);
+  b.ldsRead(/*wave=*/1, /*lane=*/0, /*addr=*/12, /*bytes=*/8, /*vgprDst=*/2);
+  b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/12, /*bytes=*/4);
+  b.checkLdsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/12, /*bytes=*/4);
+  EXPECT_EQ(b.raceCount(), 2);
+}
+
+TEST(RaceDetector, LdsSameWave_SharedChunksKeepOtherWaveHazards) {
+  for (bool writes : {false, true}) {
+    SCOPED_TRACE(writes ? "RAW" : "WAR");
+    RaceTestBuilder b(/*numWaves=*/2, /*vgprs=*/8, /*sgprs=*/8);
+    auto issue = [&](int wave, int addr, int bytes) {
+      if (writes)
+        b.ldsWrite(wave, /*lane=*/0, addr, bytes);
+      else
+        b.ldsRead(wave, /*lane=*/0, addr, bytes, /*vgprDst=*/2);
+    };
+    auto check = [&](int addr, int bytes) {
+      if (writes)
+        b.checkLdsRead(/*wave=*/0, /*lane=*/0, addr, bytes);
+      else
+        b.checkLdsWrite(/*wave=*/0, /*lane=*/0, addr, bytes);
+    };
+    issue(/*wave=*/0, /*addr=*/0, /*bytes=*/4);
+    issue(/*wave=*/0, /*addr=*/12, /*bytes=*/8);
+    issue(/*wave=*/1, /*addr=*/4, /*bytes=*/2);
+    issue(/*wave=*/1, /*addr=*/16, /*bytes=*/2);
+    ASSERT_FALSE(b.hasRace());
+    check(/*addr=*/6, /*bytes=*/6); // Same chunk, no overlapping bytes.
+    ASSERT_FALSE(b.hasRace());
+    check(/*addr=*/4, /*bytes=*/4);
+    EXPECT_EQ(b.raceCount(), 1);
+    check(/*addr=*/12, /*bytes=*/6); // Spans two count chunks.
+    EXPECT_EQ(b.raceCount(), 2);
+  }
+}
+
 // ---- Same-wave VGPR via LDS load ----
 
 TEST(RaceDetector, SameWave_WriteReadRace) {
