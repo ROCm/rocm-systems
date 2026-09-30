@@ -77,7 +77,3 @@ class TestGpuIsApuReadOnly(unittest.TestCase):
                     wrapper.AMDSMI_STATUS_NOT_SUPPORTED,
                 )
                 self.assertIs(result.value, True)
-
-
-if __name__ == "__main__":
-    unittest.main()

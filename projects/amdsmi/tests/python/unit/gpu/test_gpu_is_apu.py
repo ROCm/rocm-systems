@@ -59,7 +59,3 @@ class TestGpuIsApu(unittest.TestCase):
                     with self.assertRaises(amdsmi.AmdSmiParameterException):
                         amdsmi.amdsmi_is_gpu_apu(handle)
             query.assert_not_called()
-
-
-if __name__ == "__main__":
-    unittest.main()

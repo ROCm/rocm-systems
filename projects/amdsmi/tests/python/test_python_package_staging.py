@@ -110,7 +110,3 @@ class TestPythonPackageStaging(unittest.TestCase):
                 self._edit(source, destination, changed)
                 self._build()
                 self.assertEqual(destination.read_text(encoding="utf-8"), changed)
-
-
-if __name__ == "__main__":
-    unittest.main()

@@ -102,7 +102,3 @@ class TestProcessorTypeFilter(unittest.TestCase):
                         socket, amdsmi.AmdSmiProcessorType.UNKNOWN
                     )
                 self.assertEqual(error.exception.get_error_code(), self.wrapper.AMDSMI_STATUS_INVAL)
-
-
-if __name__ == "__main__":
-    unittest.main()
