@@ -18,4 +18,3 @@ target_link_libraries(
         rocprofiler-systems::rocprofiler-systems-rocm
         rocprofiler-systems::rocprofiler-systems-compile-definitions
 )
-
