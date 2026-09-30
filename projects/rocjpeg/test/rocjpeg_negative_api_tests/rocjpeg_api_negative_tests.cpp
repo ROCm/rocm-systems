@@ -119,6 +119,16 @@ class FuzzRandom {
 };
 
 /**
+ * @brief Renders one byte as two uppercase hex digits, for naming a case after
+ *        the marker code it is built around.
+ */
+std::string ToHex(uint8_t value) {
+    std::ostringstream oss;
+    oss << std::uppercase << std::hex << std::setfill('0') << std::setw(2) << static_cast<int>(value);
+    return oss.str();
+}
+
+/**
  * @brief Renders a stream as hex so a failing fuzz case can be pasted back in.
  *
  * Long streams are elided in the middle; the head holds the marker structure
@@ -886,7 +896,9 @@ int RocJpegApiNegativeTests::TestStreamParseFuzz() {
     // Part 1: hand-written streams that reproduce previously fixed defects. Each
     // one is expected to be rejected; an acceptance here is a regression.
     struct RegressionCase {
-        const char *name;
+        // Owned rather than a pointer: some of the cases below name themselves
+        // after the marker code they are built around.
+        std::string name;
         std::vector<uint8_t> data;
     };
     // Streams that have to stay accepted. Every check that rejects something has
@@ -1123,6 +1135,59 @@ int RocJpegApiNegativeTests::TestStreamParseFuzz() {
         two_frames.insert(two_frames.end(), three_component_sof.begin(), three_component_sof.end());
         two_frames.insert(two_frames.end(), gray_seed.begin() + gray_sof_offset, gray_seed.end());
         regressions.push_back({"a second frame header behind the first", two_frames});
+    }
+
+    // The same duplicate frame, spelled with each of the other frame markers.
+    //
+    // A frame header is a range of marker codes, not one code: B.1.1.3 gives the
+    // whole of 0xC0 to 0xCF to frame headers except for DHT, JPG and DAC. Only
+    // SOF0 is baseline sequential DCT, but the rest still have to be recognised
+    // as frames, because a marker the parser does not know is skipped as an
+    // unknown segment - so a stream pairing a valid SOF0 with an SOF1 would
+    // carry two frame headers past both the duplicate check and the
+    // unsupported-process check, which is the state the case above exists to
+    // exclude.
+    {
+        const size_t sof_offset = FindMarker(color_seed, 0xC0);
+        if (sof_offset + 4 > color_seed.size()) {
+            std::cerr << "The color fuzzing seed no longer carries a parsable SOF segment." << std::endl;
+            return EXIT_FAILURE;
+        }
+        const size_t sof_end =
+            sof_offset + 2 + ((static_cast<size_t>(color_seed[sof_offset + 2]) << 8) | color_seed[sof_offset + 3]);
+        if (sof_end > color_seed.size()) {
+            std::cerr << "The color fuzzing seed no longer carries a parsable SOF segment." << std::endl;
+            return EXIT_FAILURE;
+        }
+        // A one-component frame, which is the payload that makes the duplicate
+        // harmful: it leaves the colour frame's chroma factors in the slots it
+        // does not write.
+        std::vector<uint8_t> second_frame = {0xFF, 0xC0, 0x00, 0x0B, 0x08, 0x00, 0x10, 0x00, 0x10, 0x01,
+                                             0x01, 0x11, 0x00};
+        for (uint8_t frame_marker = 0xC0; frame_marker <= 0xCF; frame_marker++) {
+            // The three codes the standard reserves for other uses are not frame
+            // headers and are covered by their own cases elsewhere.
+            if (frame_marker == 0xC4 || frame_marker == 0xC8 || frame_marker == 0xCC) {
+                continue;
+            }
+            second_frame[1] = frame_marker;
+            const std::string name = "a second frame header spelled 0xFF" + ToHex(frame_marker);
+
+            std::vector<uint8_t> duplicate_frame(color_seed.begin(), color_seed.begin() + sof_end);
+            duplicate_frame.insert(duplicate_frame.end(), second_frame.begin(), second_frame.end());
+            duplicate_frame.insert(duplicate_frame.end(), color_seed.begin() + sof_end, color_seed.end());
+            regressions.push_back({name, duplicate_frame});
+
+            // The same marker as the stream's only frame header. Every code but
+            // SOF0 names a coding process this library does not decode, so these
+            // have to be rejected on the marker alone rather than only when a
+            // frame has already been seen.
+            if (frame_marker != 0xC0) {
+                std::vector<uint8_t> lone_frame = color_seed;
+                lone_frame[sof_offset + 1] = frame_marker;
+                regressions.push_back({"a lone frame header spelled 0xFF" + ToHex(frame_marker), lone_frame});
+            }
+        }
     }
 
     for (const RegressionCase &regression : regressions) {
