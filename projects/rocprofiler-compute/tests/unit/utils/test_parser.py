@@ -724,11 +724,11 @@ class TestApplyFilters:
         )
         workload = _filter_workload()
         workload.filter_gpu_ids = "0"
-        workload.filter_kernel_ids = ["vecCopy"]
+        workload.filter_kernel_ids = [0]
         workload.filter_dispatch_ids = [dispatch_id]
 
         with pytest.raises(SystemExit):
-            apply_filters(workload, "/tmp", False, False)
+            apply_filters(workload, "/tmp", False)
 
         assert error_calls == [
             (
@@ -770,21 +770,21 @@ class TestApplyFilters:
             (
                 None,
                 None,
-                ["vecCopy"],
+                [0],
                 [(0, "vecCopy", 1), (1, "vecCopy", 3)],
                 [0, 2],
             ),
             (
                 "0",
                 ["1"],
-                ["vecCopy"],
+                [0],
                 [(0, "vecCopy", 1)],
                 [0],
             ),
             (
                 [0, 1],
                 ["1", "3"],
-                ["vecCopy"],
+                [0],
                 [(0, "vecCopy", 1), (1, "vecCopy", 3)],
                 [0, 2],
             ),
@@ -803,7 +803,7 @@ class TestApplyFilters:
         workload.filter_dispatch_ids = dispatch_ids
         workload.filter_kernel_ids = kernel_ids
 
-        filtered = apply_filters(workload, "/tmp", False, False)
+        filtered = apply_filters(workload, "/tmp", False)
         columns = ["GPU_ID", "Kernel_Name", "Dispatch_ID"]
         expected = pd.DataFrame(
             expected_rows,
@@ -818,7 +818,7 @@ class TestApplyFilters:
         workload = _filter_workload()
         workload.filter_gpu_ids = "0"
         workload.filter_dispatch_ids = ["2"]
-        workload.filter_kernel_ids = ["vecCopy"]
+        workload.filter_kernel_ids = [0]
 
         filtered = apply_non_kernel_filters(workload)
 
