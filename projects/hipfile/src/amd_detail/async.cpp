@@ -58,7 +58,15 @@ AsyncMonitor::~AsyncMonitor()
 static void
 signalOffloadComplete(AsyncOp *op)
 {
-    std::atomic_ref<uint64_t>{*op->stream->signalSlot()}.fetch_add(1, std::memory_order_release);
+    if (uint64_t *slot = op->stream->signalSlot()) {
+        std::atomic_ref<uint64_t>{*slot}.fetch_add(1, std::memory_order_release);
+    }
+    try {
+        Context<AsyncMonitor>::get()->completeOp(op);
+    }
+    catch (...) {
+        Context<Sys>::get()->syslog(LOG_CRIT, "Unable to complete async op. This will leak memory.");
+    }
 }
 
 void
@@ -126,7 +134,7 @@ AsyncOp::AsyncOp(IoType _io_type, std::shared_ptr<IFile> _file, std::shared_ptr<
                                             : std::variant<const hoff_t, hoff_t *>{_file_offset}},
       buffer_offset{stream->fixedBufferOffset() ? std::variant<const hoff_t, hoff_t *>{*_buffer_offset}
                                                 : std::variant<const hoff_t, hoff_t *>{_buffer_offset}},
-      bytes_transferred{_bytes_transferred}, bytes_transferred_internal{0}
+      bytes_transferred{_bytes_transferred}
 {
 }
 
@@ -142,15 +150,16 @@ async_run_io(void *userargs)
     const hoff_t fo   = *get_variant_ptr(op->file_offset);
     const hoff_t bo   = *get_variant_ptr(op->buffer_offset);
     if (!paramsValid(op->buffer, size, fo, bo)) {
-        op->bytes_transferred_internal = -hipFileInvalidValue;
-        return;
+        *op->bytes_transferred = -hipFileInvalidValue;
     }
-    try {
-        op->bytes_transferred_internal =
-            op->backend->io(op->io_type, op->file, op->buffer, size, fo, bo, op->stream->copyStream());
-    }
-    catch (...) {
-        op->bytes_transferred_internal = -hipFileInternalError;
+    else {
+        try {
+            *op->bytes_transferred =
+                op->backend->io(op->io_type, op->file, op->buffer, size, fo, bo, op->stream->copyStream());
+        }
+        catch (...) {
+            *op->bytes_transferred = -hipFileInternalError;
+        }
     }
 }
 
@@ -175,36 +184,37 @@ enqueueAsync(std::shared_ptr<Backend> backend, IoType type, std::shared_ptr<IFil
     op->io_fn   = async_run_io;
     Context<AsyncMonitor>::get()->addOp(op);
 
-    auto        stream_lock = stream->getLock();
-    hipStream_t hip_stream  = stream->getHipStream();
-    bool        wait_value  = stream->canUseStreamWaitValue();
-    bool        dispatched  = false;
-    bool        targeted    = false;
+    auto        stream_lock     = stream->getLock();
+    hipStream_t hip_stream      = stream->getHipStream();
+    bool        wait_value      = stream->canUseStreamWaitValue();
+    bool        targeted        = false;
+    bool        runner_enqueued = false;
 
     try {
         if (wait_value) {
             op->wait_target = stream->nextSignalTarget();
             targeted        = true;
             Context<Hip>::get()->hipLaunchHostFunc(hip_stream, async_dispatch, op.get());
-            dispatched = true;
+            runner_enqueued = true;
             Context<Hip>::get()->hipStreamWaitValue64(hip_stream, stream->signalSlot(), op->wait_target,
                                                       hipStreamWaitValueGte, ~uint64_t{0});
         }
         else {
-            Context<Hip>::get()->hipLaunchHostFunc(hip_stream, async_run_io, op.get());
+            Context<Hip>::get()->hipLaunchHostFunc(hip_stream, async_run_inline, op.get());
+            runner_enqueued = true;
         }
-        Context<Hip>::get()->hipLaunchHostFunc(hip_stream, async_io_cleanup, op.get());
     }
     catch (...) {
-        if (targeted && !dispatched) {
-            std::atomic_ref<uint64_t>{*stream->signalSlot()}.fetch_add(1, std::memory_order_release);
-        }
-        try {
-            Context<Hip>::get()->hipLaunchHostFunc(hip_stream, async_io_cleanup, op.get());
-        }
-        catch (...) {
-            Context<Sys>::get()->syslog(LOG_CRIT,
-                                        "Unable to enqueue async cleanup function. This will leak memory.");
+        if (!runner_enqueued) {
+            if (targeted) {
+                std::atomic_ref<uint64_t>{*stream->signalSlot()}.fetch_add(1, std::memory_order_release);
+            }
+            try {
+                Context<AsyncMonitor>::get()->completeOp(op.get());
+            }
+            catch (...) {
+                Context<Sys>::get()->syslog(LOG_CRIT, "Unable to complete async op. This will leak memory.");
+            }
         }
         throw;
     }
@@ -223,29 +233,16 @@ async_dispatch(void *userargs)
     }
     catch (...) {
         op->io_fn(op);
-        std::atomic_ref<uint64_t>{*op->stream->signalSlot()}.fetch_add(1, std::memory_order_release);
+        signalOffloadComplete(op);
     }
 }
 
 void
-async_io_cleanup(void *userargs)
+async_run_inline(void *userargs)
 {
     using namespace hipFile;
-    auto     op                         = static_cast<AsyncOp *>(userargs);
-    ssize_t *bytes_transferred          = op->bytes_transferred;
-    ssize_t  bytes_transferred_internal = op->bytes_transferred_internal;
-    bool     publish                    = op->write_result && op->committed;
-    try {
-        Context<AsyncMonitor>::get()->completeOp(op);
-    }
-    catch (const std::invalid_argument &) {
-        if (publish) {
-            *bytes_transferred = -hipFileInternalError;
-        }
-        return;
-    }
-    if (publish) {
-        *bytes_transferred = bytes_transferred_internal;
-    }
+    auto op = static_cast<AsyncOp *>(userargs);
+    async_run_io(op);
+    signalOffloadComplete(op);
 }
 }
