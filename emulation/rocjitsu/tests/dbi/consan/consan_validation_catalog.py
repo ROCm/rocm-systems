@@ -1355,17 +1355,23 @@ def _validate_workload_manifest() -> None:
 _validate_workload_manifest()
 
 
+def _target_admits_workload(target: str, workload: Workload) -> bool:
+    if workload.targets is not None and target not in workload.targets:
+        return False
+    # Native gtests are architecture-specific even when their canonical row is
+    # shared. Admit them only when the target has a complete command registry.
+    return workload.kind != "gtest" or target in NATIVE_GTEST_TARGETS
+
+
 def _workloads_for_target(target: str) -> tuple[Workload, ...]:
     return tuple(
-        workload
-        for workload in WORKLOADS
-        if workload.targets is None or target in workload.targets
+        workload for workload in WORKLOADS if _target_admits_workload(target, workload)
     )
 
 
 def _workload_for_target(target: str, workload_id: str) -> Workload:
     workload = WORKLOAD_BY_ID[workload_id]
-    if workload.targets is not None and target not in workload.targets:
+    if not _target_admits_workload(target, workload):
         raise ValidationError(f"{target} manifest excludes workload: {workload_id}")
     return workload
 
@@ -1428,6 +1434,16 @@ def _cdna_gtest_target(
 
 
 NATIVE_GTEST_TARGETS = {
+    "gfx1100": _NativeGtestTarget(
+        id="gfx1100",
+        build_dir="hip-moi-build-gfx1100-tests",
+        executable_family="gfx1100",
+        matrix_executable_family="gfx1100_wmma",
+        suite_family="Gfx1100",
+        matrix_suite_family="Gfx1100Wmma",
+        matrix_operation="Wmma",
+        d128_block_oracle="ExactContextMatchesHostReference",
+    ),
     "gfx1201": _NativeGtestTarget(
         id="gfx1201",
         build_dir="hip-moi-build",
@@ -1958,13 +1974,16 @@ def _resolved_workload(target: str, workload: Workload) -> Workload:
     override = dict(TARGET_WORKLOAD_OVERRIDES.get(target, {}).get(workload.id, {}))
     if workload.kind == "gtest":
         native_overrides = NATIVE_GTEST_WORKLOAD_OVERRIDES.get(target)
-        if native_overrides is not None:
-            native_override = native_overrides.get(workload.id)
-            if native_override is None:
-                raise ValidationError(
-                    f"{target} gtest workload has no target-specific registry entry: {workload.id}"
-                )
-            override.update(native_override)
+        if native_overrides is None:
+            raise ValidationError(
+                f"{target} gtest workload has no target-specific registry"
+            )
+        native_override = native_overrides.get(workload.id)
+        if native_override is None:
+            raise ValidationError(
+                f"{target} gtest workload has no target-specific registry entry: {workload.id}"
+            )
+        override.update(native_override)
     resolved = replace(workload, **override) if override else workload
     _validate_tensile_sharding(resolved)
     return resolved
