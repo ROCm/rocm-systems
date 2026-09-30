@@ -23,7 +23,10 @@ outside global registry locks.
 
 On Linux, Cargo builds `target/{profile}/libhsa_runtime64.so` with the ROCr
 `libhsa-runtime64.so.1` SONAME and `ROCR_1` default versions on its public HSA
-symbols. Cargo does not install the conventional SONAME symlinks. Binary
+symbols. Cargo does not install the conventional SONAME symlinks. CMake stages
+the native artifact as `lib/libhsa-runtime64.so.1.21.0`, with the conventional
+`libhsa-runtime64.so.1` and `libhsa-runtime64.so` symlink chain matching ROCr.
+This native version is independent of the Rust package version. Binary
 compatibility still requires ABI and workload qualification.
 Linux builds require an LLD linker to combine Rust's export map with the
 `ROCR_1` symbol versions, including on the declared Rust 1.85 minimum version.
@@ -44,7 +47,7 @@ calls for memory and loader operations go through the rocddi provider.
 
 ## Build and test
 
-From `runtimes/rocddi`:
+From `runtimes`:
 
 ```sh
 cargo build --package libhsa --locked
