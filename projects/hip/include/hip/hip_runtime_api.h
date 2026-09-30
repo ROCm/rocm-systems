@@ -6312,7 +6312,7 @@ hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t c
  * @brief Perform Batch of 1D copies with extended operation support.
  *
  * Extended version of hipMemcpyBatchAsync. The operation for each copy (linear,
- * swap, indirect src/dst, PreferCE, PreferCU) is selected through attrs[i].flags,
+ * swap, indirect src/dst, PreferCE, PreferComputeEngine) is selected through attrs[i].flags,
  * the same hipMemcpyFlags used by hipMemcpyBatchAsync, range-mapped by attrsIdxs.
  * GPU-side wait/signal parameters are reserved for future use and must be NULL.
  *

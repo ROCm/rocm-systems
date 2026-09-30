@@ -2948,9 +2948,9 @@ static amd::CopyMetadata buildCopyMetadataFromAttrs(hipExtMemcpyAttributes* attr
   if (flags & hipMemcpyFlagExtPreferCE) {
     // CE means Copy Engine here, so keep these copies on SDMA instead of shader blits.
     metadata.copyEnginePreference_ = amd::CopyMetadata::CopyEnginePreference::SDMA;
-  } else if (flags & hipMemcpyFlagExtPreferCU) {
-    // CU means Compute engine here, so route these copies onto the shader blit path
-    // instead of SDMA. PreferCE and PreferCU are mutually exclusive (validated earlier).
+  } else if (flags & hipMemcpyFlagExtPreferComputeEngine) {
+    // Route these copies onto the shader blit path instead of SDMA. PreferCE and
+    // PreferComputeEngine are mutually exclusive (validated earlier).
     metadata.copyEnginePreference_ = amd::CopyMetadata::CopyEnginePreference::BLIT;
   }
   if (flags & hipMemcpyFlagExtOpSwap) {
@@ -3061,8 +3061,8 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
     }
     constexpr unsigned int kValidFlagMask =
         hipMemcpyFlagPreferOverlapWithCompute | hipMemcpyFlagExtPreferCE |
-        hipMemcpyFlagExtPreferCU | hipMemcpyFlagExtOpSwap | hipMemcpyFlagExtOpIndirectSrc |
-        hipMemcpyFlagExtOpIndirectDst;
+        hipMemcpyFlagExtPreferComputeEngine | hipMemcpyFlagExtOpSwap |
+        hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst;
     for (size_t i = 0; i < numAttrs; ++i) {
       if (attrs[i].srcAccessOrder < hipMemcpySrcAccessOrderStream ||
           attrs[i].srcAccessOrder > hipMemcpySrcAccessOrderAny) {
@@ -3078,13 +3078,13 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
           (f & (hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst))) {
         return hipErrorInvalidValue;
       }
-      // PreferCE (SDMA) and PreferCU (shader) select opposite engines.
-      if ((f & hipMemcpyFlagExtPreferCE) && (f & hipMemcpyFlagExtPreferCU)) {
+      // PreferCE (SDMA) and PreferComputeEngine (shader) select opposite engines.
+      if ((f & hipMemcpyFlagExtPreferCE) && (f & hipMemcpyFlagExtPreferComputeEngine)) {
         return hipErrorInvalidValue;
       }
-      // The shader copy path only handles linear copies, so PreferCU cannot be
+      // The shader copy path only handles linear copies, so PreferComputeEngine cannot be
       // combined with a swap or indirect operation.
-      if ((f & hipMemcpyFlagExtPreferCU) &&
+      if ((f & hipMemcpyFlagExtPreferComputeEngine) &&
           (f & (hipMemcpyFlagExtOpSwap | hipMemcpyFlagExtOpIndirectSrc |
                 hipMemcpyFlagExtOpIndirectDst))) {
         return hipErrorInvalidValue;

@@ -1783,22 +1783,22 @@ HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_AttrValidation_Negative) {
     REQUIRE(err == hipErrorInvalidValue);
   }
 
-  SECTION("PreferCE combined with PreferCU") {
-    attr.flags = hipMemcpyFlagExtPreferCE | hipMemcpyFlagExtPreferCU;
+  SECTION("PreferCE combined with PreferComputeEngine") {
+    attr.flags = hipMemcpyFlagExtPreferCE | hipMemcpyFlagExtPreferComputeEngine;
     hipError_t err = hipExtMemcpyBatchAsync(dsts, srcs, sizes, nullptr, nullptr, nullptr,
                                             1, &attr, attrsIdxs, 1, stream);
     REQUIRE(err == hipErrorInvalidValue);
   }
 
-  SECTION("PreferCU combined with swap") {
-    attr.flags = hipMemcpyFlagExtPreferCU | hipMemcpyFlagExtOpSwap;
+  SECTION("PreferComputeEngine combined with swap") {
+    attr.flags = hipMemcpyFlagExtPreferComputeEngine | hipMemcpyFlagExtOpSwap;
     hipError_t err = hipExtMemcpyBatchAsync(dsts, srcs, sizes, nullptr, nullptr, nullptr,
                                             1, &attr, attrsIdxs, 1, stream);
     REQUIRE(err == hipErrorInvalidValue);
   }
 
-  SECTION("PreferCU combined with indirect") {
-    attr.flags = hipMemcpyFlagExtPreferCU | hipMemcpyFlagExtOpIndirectSrc;
+  SECTION("PreferComputeEngine combined with indirect") {
+    attr.flags = hipMemcpyFlagExtPreferComputeEngine | hipMemcpyFlagExtOpIndirectSrc;
     hipError_t err = hipExtMemcpyBatchAsync(dsts, srcs, sizes, nullptr, nullptr, nullptr,
                                             1, &attr, attrsIdxs, 1, stream);
     REQUIRE(err == hipErrorInvalidValue);
@@ -1812,13 +1812,13 @@ HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_AttrValidation_Negative) {
 /**
  * Test Description
  * ------------------------
- * - hipMemcpyFlagExtPreferCU routes a linear device-to-device batch onto the shader
+ * - hipMemcpyFlagExtPreferComputeEngine routes a linear device-to-device batch onto the shader
  *   copy path (compute engine) instead of SDMA. The copied bytes must be correct.
  * Test source
  * ------------------------
  * - catch/unit/memory/hipMemcpyBatchAsync.cc
  */
-HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_PreferCU_D2D) {
+HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_PreferComputeEngine_D2D) {
   constexpr size_t kNumElements = 4096;
   constexpr size_t kSizeBytes = kNumElements * sizeof(int);
   constexpr int kValA = 21;
@@ -1848,7 +1848,7 @@ HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_PreferCU_D2D) {
 
   hipExtMemcpyAttributes attr{};
   attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
-  attr.flags = hipMemcpyFlagExtPreferCU;
+  attr.flags = hipMemcpyFlagExtPreferComputeEngine;
 
   hipError_t err = hipExtMemcpyBatchAsync(dsts, srcs, sizes, nullptr, nullptr, nullptr,
                                           2, &attr, attrsIdxs, 1, stream);
