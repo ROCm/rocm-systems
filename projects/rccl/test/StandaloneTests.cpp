@@ -9,52 +9,16 @@
 
 #include "TestBed.hpp"
 #include "StandaloneUtils.hpp"
+#include "VerifiableFp8.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
 
 namespace RcclUnitTesting
 {
-  // FP8 reductions can round after every operation or accumulate in FP32 and round once on store.
-  // Verify both modeled results are accepted exactly, while values admitted only by the high tolerance are rejected.
-  TEST(Fp8Validation, AcceptsOnlyModeledAccumulationResults)
+  // Non-reduce FP8 collectives (e.g. AllToAll) compare against one reference, bit-exactly:
+  // values one FP8 step apart, inside the former absolute bound (< 9e-2), must not match.
+  TEST(Fp8Validation, HostCompareIsExact)
   {
-    auto matchesEither = [](ncclDataType_t const dataType, float const actualValue,
-                            float const stepwiseValue, float const fp32Value)
-    {
-      uint8_t actualStorage = 0;
-      uint8_t stepwiseStorage = 0;
-      uint8_t fp32Storage = 0;
-      PtrUnion actual;
-      PtrUnion stepwise;
-      PtrUnion fp32;
-      EXPECT_EQ(actual.Attach(&actualStorage), TEST_SUCCESS);
-      EXPECT_EQ(stepwise.Attach(&stepwiseStorage), TEST_SUCCESS);
-      EXPECT_EQ(fp32.Attach(&fp32Storage), TEST_SUCCESS);
-      EXPECT_EQ(actual.Set(dataType, 0, 0, actualValue), TEST_SUCCESS);
-      EXPECT_EQ(stepwise.Set(dataType, 0, 0, stepwiseValue), TEST_SUCCESS);
-      EXPECT_EQ(fp32.Set(dataType, 0, 0, fp32Value), TEST_SUCCESS);
-
-      bool isMatch = false;
-      EXPECT_EQ(actual.IsEqual(dataType, 1, stepwise, &fp32, false, isMatch), TEST_SUCCESS);
-      return isMatch;
-    };
-
-    // Both accumulation models are valid.
-    EXPECT_TRUE(matchesEither(ncclFloat8e4m3, 1.75f, 1.75f, 1.625f));
-    EXPECT_TRUE(matchesEither(ncclFloat8e4m3, 1.625f, 1.75f, 1.625f));
-    EXPECT_TRUE(matchesEither(ncclFloat8e5m2, 1.75f, 1.75f, 1.5f));
-    EXPECT_TRUE(matchesEither(ncclFloat8e5m2, 1.5f, 1.75f, 1.5f));
-
-    // Missing-rank examples are rejected.
-    EXPECT_FALSE(matchesEither(ncclFloat8e4m3, 6.0f, 8.0f, 8.0f));
-    EXPECT_FALSE(matchesEither(ncclFloat8e5m2, 4.0f, 8.0f, 8.0f));
-
-    // One FP8 step apart and inside the former absolute bound (< 9e-2), yet not equal.
-    EXPECT_FALSE(matchesEither(ncclFloat8e4m3, 0.5f, 0.5625f, 0.5625f));
-    EXPECT_FALSE(matchesEither(ncclFloat8e5m2, 0.25f, 0.3125f, 0.3125f));
-
-    // Non-reduce FP8 collectives pass no alternative reference: only the primary matches.
-    auto matchesPrimaryOnly = [](ncclDataType_t const dataType, float const actualValue,
-                                 float const expectedValue)
+    auto matches = [](ncclDataType_t const dataType, float const actualValue, float const expectedValue)
     {
       uint8_t actualStorage = 0;
       uint8_t expectedStorage = 0;
@@ -66,62 +30,101 @@ namespace RcclUnitTesting
       EXPECT_EQ(expected.Set(dataType, 0, 0, expectedValue), TEST_SUCCESS);
 
       bool isMatch = false;
-      EXPECT_EQ(actual.IsEqual(dataType, 1, expected, nullptr, false, isMatch), TEST_SUCCESS);
+      EXPECT_EQ(actual.IsEqual(dataType, 1, expected, false, isMatch), TEST_SUCCESS);
       return isMatch;
     };
     for (ncclDataType_t const dataType : {ncclFloat8e4m3, ncclFloat8e5m2})
     {
-      EXPECT_TRUE(matchesPrimaryOnly(dataType, 1.5f, 1.5f));
-      EXPECT_FALSE(matchesPrimaryOnly(dataType, 1.75f, 1.5f));
+      EXPECT_TRUE(matches(dataType, 1.5f, 1.5f));
+      EXPECT_FALSE(matches(dataType, 1.75f, 1.5f));
     }
+    EXPECT_FALSE(matches(ncclFloat8e4m3, 0.5f, 0.5625f));
+    EXPECT_FALSE(matches(ncclFloat8e5m2, 0.25f, 0.3125f));
   }
 
-  // GPU validation compares output against stepwise-FP8 and FP32-accumulation references.
-  // Verify one intact reference is accepted, but corrupting both produces a mismatch.
-  TEST(Fp8Validation, DeviceCorruptionMustAffectBothReferences)
+  TEST(Fp8Validation, DeviceCompareIsExact)
   {
     for (ncclDataType_t const dataType : {ncclFloat8e4m3, ncclFloat8e5m2})
     {
       PtrUnion actual;
-      PtrUnion stepwise;
-      PtrUnion fp32;
+      PtrUnion expected;
       ASSERT_EQ(actual.AllocateGpuMem(1), TEST_SUCCESS);
-      ASSERT_EQ(stepwise.AllocateGpuMem(1), TEST_SUCCESS);
-      ASSERT_EQ(fp32.AllocateGpuMem(1), TEST_SUCCESS);
+      ASSERT_EQ(expected.AllocateGpuMem(1), TEST_SUCCESS);
       ASSERT_EQ(actual.ClearGpuMem(1), TEST_SUCCESS);
-      ASSERT_EQ(fp32.ClearGpuMem(1), TEST_SUCCESS);
-      ASSERT_EQ(hipMemset(stepwise.ptr, 0xFF, 1), hipSuccess);
+      ASSERT_EQ(expected.ClearGpuMem(1), TEST_SUCCESS);
 
-      // A damaged primary reference must not reject a valid alternative.
       size_t mismatches = 0;
-      ASSERT_EQ(PtrUnion::IsEqualDevice(dataType, 1, actual.ptr, stepwise.ptr,
-                                        fp32.ptr, mismatches, false),
+      ASSERT_EQ(PtrUnion::IsEqualDevice(dataType, 1, actual.ptr, expected.ptr, mismatches, false),
                 TEST_SUCCESS);
       EXPECT_EQ(mismatches, 0);
 
-      // UT_DEVICE_DATA_FAULT corrupts both references, so neither can mask the fault.
-      ASSERT_EQ(hipMemset(fp32.ptr, 0xFF, 1), hipSuccess);
-      ASSERT_EQ(PtrUnion::IsEqualDevice(dataType, 1, actual.ptr, stepwise.ptr,
-                                        fp32.ptr, mismatches, false),
-                TEST_SUCCESS);
-      EXPECT_EQ(mismatches, 1);
-
-      // Non-reduce FP8 collectives pass no alternative reference.
-      ASSERT_EQ(stepwise.ClearGpuMem(1), TEST_SUCCESS);
-      ASSERT_EQ(PtrUnion::IsEqualDevice(dataType, 1, actual.ptr, stepwise.ptr,
-                                        nullptr, mismatches, false),
-                TEST_SUCCESS);
-      EXPECT_EQ(mismatches, 0);
-      ASSERT_EQ(hipMemset(stepwise.ptr, 0xFF, 1), hipSuccess);
-      ASSERT_EQ(PtrUnion::IsEqualDevice(dataType, 1, actual.ptr, stepwise.ptr,
-                                        nullptr, mismatches, false),
+      ASSERT_EQ(hipMemset(expected.ptr, 0xFF, 1), hipSuccess);
+      ASSERT_EQ(PtrUnion::IsEqualDevice(dataType, 1, actual.ptr, expected.ptr, mismatches, false),
                 TEST_SUCCESS);
       EXPECT_EQ(mismatches, 1);
 
       EXPECT_EQ(actual.FreeGpuMem(), TEST_SUCCESS);
-      EXPECT_EQ(stepwise.FreeGpuMem(), TEST_SUCCESS);
-      EXPECT_EQ(fp32.FreeGpuMem(), TEST_SUCCESS);
+      EXPECT_EQ(expected.FreeGpuMem(), TEST_SUCCESS);
     }
+  }
+
+  // FP8 reductions validate against the verifiable generator's single reference. It must accept
+  // its own expected values, report each corrupted element, and give every rank distinct inputs
+  // so that a missing or duplicated rank changes the result (for Min/Max too).
+  TEST(Fp8Validation, VerifiableReferenceDetectsErrors)
+  {
+    ASSERT_EQ(hipSetDevice(0), hipSuccess);
+
+    size_t const numElements = 4096;
+    int    const rankCounts[] = {3, 8};
+    uint64_t const seed = 0x5eed;
+    uint8_t* bufGpu = nullptr;
+    uint8_t* otherGpu = nullptr;
+    int64_t* badEltN = nullptr;
+    ASSERT_EQ(hipMalloc(&bufGpu, numElements), hipSuccess);
+    ASSERT_EQ(hipMalloc(&otherGpu, numElements), hipSuccess);
+    ASSERT_EQ(hipHostMalloc((void**)&badEltN, sizeof(int64_t)), hipSuccess);
+    std::vector<uint8_t> rank0(numElements), rank1(numElements);
+
+    for (ncclDataType_t const dataType : {ncclFloat8e4m3, ncclFloat8e5m2})
+    for (ncclRedOp_t const redOp : {ncclSum, ncclProd, ncclMax, ncclMin})
+    for (int const rankN : rankCounts)
+    {
+      SCOPED_TRACE(std::string(ncclDataTypeNames[dataType]) + " " + ncclRedOpNames[redOp] +
+                   " ranks=" + std::to_string(rankN));
+      auto verify = [&]() {
+        *badEltN = -1;
+        EXPECT_EQ(VerifiableFp8Verify(bufGpu, numElements, dataType, redOp, rankN,
+                                      seed, 0, badEltN, nullptr), hipSuccess);
+        EXPECT_EQ(hipStreamSynchronize(nullptr), hipSuccess);
+        return *badEltN;
+      };
+
+      ASSERT_EQ(VerifiableFp8PrepareExpected(bufGpu, numElements, dataType, redOp, rankN,
+                                             seed, 0, nullptr), hipSuccess);
+      EXPECT_EQ(verify(), 0);
+
+      // Flip an exponent bit: the value changes by far more than any tolerance
+      uint8_t byte = 0;
+      ASSERT_EQ(hipMemcpy(&byte, bufGpu + 17, 1, hipMemcpyDeviceToHost), hipSuccess);
+      byte ^= 0x08;
+      ASSERT_EQ(hipMemcpy(bufGpu + 17, &byte, 1, hipMemcpyHostToDevice), hipSuccess);
+      EXPECT_EQ(verify(), 1);
+
+      ASSERT_EQ(VerifiableFp8PrepareInput(bufGpu, numElements, dataType, redOp, rankN, 0,
+                                          seed, 0, nullptr), hipSuccess);
+      ASSERT_EQ(VerifiableFp8PrepareInput(otherGpu, numElements, dataType, redOp, rankN, 1,
+                                          seed, 0, nullptr), hipSuccess);
+      ASSERT_EQ(hipMemcpy(rank0.data(), bufGpu, numElements, hipMemcpyDeviceToHost), hipSuccess);
+      ASSERT_EQ(hipMemcpy(rank1.data(), otherGpu, numElements, hipMemcpyDeviceToHost), hipSuccess);
+      size_t differing = 0;
+      for (size_t i = 0; i < numElements; ++i) differing += (rank0[i] != rank1[i]);
+      EXPECT_GT(differing, numElements / 2);
+    }
+
+    EXPECT_EQ(hipFree(bufGpu), hipSuccess);
+    EXPECT_EQ(hipFree(otherGpu), hipSuccess);
+    EXPECT_EQ(hipHostFree(badEltN), hipSuccess);
   }
 
   /**

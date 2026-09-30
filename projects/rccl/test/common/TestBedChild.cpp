@@ -6,6 +6,7 @@
 
 #include "TestBedChild.hpp"
 #include "PipeUtils.hpp"
+#include "comm.h"
 
 #include <algorithm>
 #include <functional>
@@ -150,6 +151,7 @@ namespace RcclUnitTesting
       case CHILD_DEALLOCATE_MEM  : status = DeallocateMem();        break;
       case CHILD_DESTROY_COMMS   : status = DestroyComms();         break;
       case CHILD_DESTROY_GRAPHS  : status = DestroyGraphs();        break;
+      case CHILD_QUERY_SYMMETRIC : status = QuerySymmetricSupport(retValBuf); break;
       case CHILD_STOP            : goto stop;
       default:
         TEST_ERROR("Child %d received unknown command ID: %d", this->childId, command);
@@ -197,6 +199,29 @@ namespace RcclUnitTesting
     memcpy(retValBuf.data(), &id, sizeof(id));
 
     if (this->verbose) TEST_INFO("Child %d finishes GetUniqueId()", this->childId);
+    return TEST_SUCCESS;
+  }
+
+  ErrCode TestBedChild::QuerySymmetricSupport(std::vector<char>& retValBuf)
+  {
+    if (this->comms.empty())
+    {
+      TEST_ERROR("Child %d: QuerySymmetricSupport requires initialized comms", this->childId);
+      return TEST_FAIL;
+    }
+
+    int supported = 1;
+    for (ncclComm_t const comm : this->comms)
+    {
+      if (comm == nullptr)
+      {
+        TEST_ERROR("Child %d: QuerySymmetricSupport found a null comm", this->childId);
+        return TEST_FAIL;
+      }
+      if (!comm->symmetricSupport) supported = 0;
+    }
+    retValBuf.resize(sizeof(supported));
+    memcpy(retValBuf.data(), &supported, sizeof(supported));
     return TEST_SUCCESS;
   }
 

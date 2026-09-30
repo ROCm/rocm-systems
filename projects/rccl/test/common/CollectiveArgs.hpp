@@ -151,10 +151,8 @@ namespace RcclUnitTesting
     PtrUnion       outputCpu;
     PtrUnion       expected;
     PtrUnion       expectedGpu;        // Device-built expected (UT_DEVICE_DATA mode)
-    PtrUnion       fp8AlternativeExpected;    // FP32-accumulate, one-final-round reference
-    PtrUnion       fp8AlternativeExpectedGpu; // Device equivalent of fp8AlternativeExpected
     bool           expectedOnDevice = false; // True once a prep func fills expectedGpu
-    bool           hasFp8AlternativeExpected = false;
+    bool           usesVerifiableData = false; // Input and expected come from the verifiable generator
     bool           inPlace;
     bool           useManagedMem;
     bool           userRegistered;
