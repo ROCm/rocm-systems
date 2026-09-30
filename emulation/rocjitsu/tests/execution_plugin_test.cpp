@@ -5634,7 +5634,7 @@ TEST(RaceDetectorPluginTest, NamedVmcntWaitRetiresMonolithicAndSplitLoadEvents) 
   EXPECT_TRUE(run(WaitCounterType::LOADCNT));
 }
 
-TEST(RaceDetectorPluginTest, UnresolvedOrMixedFlatLoadRequiresBothWaitCounterDomains) {
+TEST(RaceDetectorPluginTest, UnresolvedOrMixedFlatWholeResultRequiresBothWaitCounterDomains) {
   auto reports_race_after_wait = [](MemoryRoute route, uint8_t vmcnt, uint8_t lgkmcnt) {
     PluginFixture f(/*num_wf_slots=*/1);
     PluginSinkConfig sink_config;
@@ -5687,6 +5687,109 @@ TEST(RaceDetectorPluginTest, UnresolvedOrMixedFlatLoadRequiresBothWaitCounterDom
     EXPECT_TRUE(reports_race_after_wait(route, /*vmcnt=*/0, /*lgkmcnt=*/15));
     EXPECT_TRUE(reports_race_after_wait(route, /*vmcnt=*/63, /*lgkmcnt=*/0));
     EXPECT_FALSE(reports_race_after_wait(route, /*vmcnt=*/0, /*lgkmcnt=*/0));
+  }
+}
+
+TEST(RaceDetectorPluginTest, FlatLoadReadyLanesKnownFalsePositives) {
+  enum class Wait { None, Result, Both };
+  for (const bool is_rdna4 : {false, true}) {
+    for (const uint64_t shared_lanes : {0u, 1u, 2u, 3u}) {
+      for (const bool wait_lds : {false, true}) {
+        const uint64_t consumer_lanes = wait_lds ? shared_lanes : 3 & ~shared_lanes;
+        if (!consumer_lanes)
+          continue;
+        for (const auto waited : {Wait::None, Wait::Result, Wait::Both}) {
+          SCOPED_TRACE(is_rdna4 ? "rdna4" : "cdna4");
+          SCOPED_TRACE(shared_lanes);
+          SCOPED_TRACE(consumer_lanes);
+          SCOPED_TRACE(static_cast<unsigned>(waited));
+          const uint32_t wave_size = is_rdna4 ? 32 : 64;
+          const uint32_t sgprs = is_rdna4 ? 128 : 104;
+          PluginFixture f(1, is_rdna4 ? "rdna4" : "cdna4", wave_size, sgprs);
+          PluginSinkConfig sink_config;
+          auto &sink = sink_config.emplace<StringSink>();
+          f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+          ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+          f.soc->set_plugin_group(f.plugin_group_);
+          f.plugin_group_->onInit();
+          auto *cu = f.cu();
+          auto *wf = cu->dispatch_wf(0, 0x100, sgprs, 256, wave_size);
+          ASSERT_NE(wf, nullptr);
+          wf->set_exec(3);
+          std::array<amdgpu::Wavefront *, 1> waves{wf};
+          f.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 256, sgprs, waves);
+
+          auto decoder = Decoder::create(cu->arch());
+          std::unique_ptr<Instruction> load;
+          if (is_rdna4) {
+            const auto words = rdna4::build_vflat(
+                rdna4::kFlatLoadB32Vflat, {.saddr = amdgpu::kModernNullSelector, .vdst = 8});
+            load.reset(decode_valid(*decoder, words.data()));
+          } else {
+            const auto words =
+                cdna4::build_flat(cdna4::kFlatLoadDwordFlat, {.saddr = 0x7F, .vdst = 8});
+            load.reset(decode_valid(*decoder, words.data()));
+          }
+          ASSERT_NE(load, nullptr);
+
+          // Feed the decoded load and resolved masks into both checkers without
+          // executing the unsupported mixed LDS/global memory path (#11456).
+          // The first requesting lane still selects the whole instruction's route.
+          const bool local_route = shared_lanes & 1;
+          auto data = std::make_unique<VectorMemState>(local_route ? LOCAL_MEM : GLOBAL_MEM);
+          data->is_load = true;
+          data->exec_mask = data->lane_mask = 3;
+          data->wf_size = wave_size;
+          data->num_elems = 1;
+          data->dst_reg_base = wf->vgpr_alloc().base + 8;
+          load->set_data(std::move(data));
+          MemoryAccessObservation access;
+          access.route = local_route ? MemoryRoute::LOCAL : MemoryRoute::GLOBAL;
+          access.decoded_space = DecodedMemorySpace::FLAT;
+          access.request_lane_mask = access.active_lane_mask = 3;
+          access.flat_local_lane_mask = shared_lanes;
+          f.plugin_group_->onAmdgpuMemoryAccessRouted(access, *load, *wf);
+          cu->track_memory_wait(*load, *wf, shared_lanes);
+          auto &core = wf->ensure_memory_wait_scoreboard();
+          unsigned core_reports = 0;
+          core.bind(0x200, &core_reports,
+                    [](void *p, const auto &) { ++*static_cast<unsigned *>(p); });
+
+          const auto wait_zero = [&](bool lds) {
+            if (is_rdna4) {
+              if (lds)
+                wf->set_wait_target_dscnt(0);
+              else
+                wf->set_wait_target_loadcnt(0);
+              TestWaitcntInstruction wait(lds ? "s_wait_dscnt" : "s_wait_loadcnt");
+              f.plugin_group_->onAmdgpuAfterExecuteInstruction(0x200, wait, *wf);
+            } else {
+              wf->set_wait_target(lds ? 63 : 0, lds ? 0 : 15, 7);
+              TestWaitcntInstruction wait;
+              f.plugin_group_->onAmdgpuAfterExecuteInstruction(0x200, wait, *wf);
+            }
+            core.wait(lds ? WaitCounterKind::Ds : WaitCounterKind::Load, 0);
+          };
+          if (waited != Wait::None)
+            wait_zero(wait_lds);
+          if (waited == Wait::Both)
+            wait_zero(!wait_lds);
+          core.access({RegClass::VGPR, 8, 1}, consumer_lanes, 0xF, false);
+          f.plugin_group_->onAmdgpuReadVgprLanes(wf, wf->vgpr_alloc().base + 8, consumer_lanes);
+
+          const bool missing_wait = waited == Wait::None;
+          EXPECT_EQ(core_reports != 0, missing_wait);
+          // TODO(newling): #12237: expect only missing_wait here. A zero wait
+          // suffices for the consumed lane group, but the plugin still reports
+          // ready lanes for mixed CDNA4 loads and uniform or mixed RDNA4 loads.
+          // Split their result dependencies while retaining both counter entries.
+          const bool known_false_positive =
+              waited == Wait::Result && (is_rdna4 || (shared_lanes != 0 && shared_lanes != 3));
+          EXPECT_EQ(sink.str().find("RACE ") != std::string::npos,
+                    missing_wait || known_false_positive);
+        }
+      }
+    }
   }
 }
 
