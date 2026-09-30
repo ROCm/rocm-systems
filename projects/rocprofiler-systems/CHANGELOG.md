@@ -18,6 +18,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - Perfetto trace output now defaults to the `.pftrace` extension instead of
   `.proto`, and `--output-format pftrace` is the canonical token for
   requesting it (`proto` is kept as a permanent backward-compatible alias).
+- `--detach-after <seconds>` flag on `rocprof-sys-attach` for non-interactive use; the binary sleeps for the given duration after attach instead of waiting for `ENTER` on stdin.
 
 ### Resolved issues
 
