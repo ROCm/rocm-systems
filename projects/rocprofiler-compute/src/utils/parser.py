@@ -397,6 +397,14 @@ def _apply_gpu_filter(workload: schema.Workload) -> pd.DataFrame:
     return filtered_df
 
 
+def apply_non_kernel_filters(workload: schema.Workload) -> pd.DataFrame:
+    """Apply GPU and dispatch filters without limiting the kernel list."""
+    filtered_df = _apply_gpu_filter(workload)
+    if workload.filter_dispatch_ids:
+        filtered_df = apply_dispatch_filter(filtered_df, workload)
+    return filtered_df
+
+
 def _build_pc_sampling_partial_frame(
     method: str,
     tool_data: dict[str, Any],
