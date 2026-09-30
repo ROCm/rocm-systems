@@ -5201,6 +5201,14 @@ extern "C" {
     ) -> AmdsmiStatusT;
 }
 extern "C" {
+    pub fn amdsmi_get_cper_json(
+        cper_buffer: *mut ::std::os::raw::c_char,
+        buf_size: u32,
+        json_buffer: *mut ::std::os::raw::c_char,
+        json_buffer_size: *mut u32,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
     pub fn amdsmi_get_gpu_ras_feature_info(
         processor_handle: AmdsmiProcessorHandle,
         ras_feature: *mut AmdsmiRasFeatureT,
