@@ -40,6 +40,10 @@ ISA_WORKLOAD_SUB_NAME = "run"
 VIEW_CSV_FILENAMES = frozenset({
     "kernel.csv",
     "kernel_metric.csv",
+    "roofline_ceiling.csv",
+    "roofline_roof.csv",
+    "kernel_roofline.csv",
+    "kernel_roofline_metric.csv",
     "pc_sampling_summary.csv",
     "source_lines.csv",
     "workload_metric.csv",

@@ -14,9 +14,6 @@ from utils.analysis_orm import Database
 @pytest.fixture
 def db_session():
     """An initialized in-memory analysis database, torn down after the test."""
-    Database.init(":memory:")
+    Database.init()
     yield Database.get_session()
-    Database._session.close()
-    Database._engine.dispose()
-    Database._session = None
-    Database._engine = None
+    Database.close()

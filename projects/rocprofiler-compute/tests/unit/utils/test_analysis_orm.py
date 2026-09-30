@@ -13,6 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from pc_sampling.source_snapshot_analysis import parse_source_frames
+from utils import analysis_orm as orm
 from utils.analysis_orm import (
     PER_KERNEL_ISA_FILE_KEY_COLUMN_COUNT,
     CodeObjectStore,
@@ -1071,3 +1072,414 @@ def test_per_kernel_isa_select_leads_with_the_file_key_columns():
         "code_object_id",
         "pid",
     ]
+
+
+@pytest.mark.parametrize(
+    ("table_name", "columns"),
+    [
+        (
+            "roofline_bandwidth_ceiling",
+            {
+                "ceiling_uuid",
+                "workload_id",
+                "device_id",
+                "mem_level",
+                "benchmark_column",
+                "bandwidth",
+            },
+        ),
+        (
+            "roofline_compute_ceiling",
+            {
+                "ceiling_uuid",
+                "workload_id",
+                "device_id",
+                "benchmark_column",
+                "datatype",
+                "pipe",
+                "pipe_label",
+                "peak",
+                "unit",
+            },
+        ),
+        (
+            "kernel_roofline_point",
+            {
+                "point_uuid",
+                "kernel_uuid",
+                "envelope",
+                "mem_level",
+                "arithmetic_intensity",
+                "performance",
+                "roof_performance",
+                "percent_of_roof",
+            },
+        ),
+        (
+            "kernel_roofline_limiter",
+            {
+                "limiter_uuid",
+                "kernel_uuid",
+                "envelope",
+                "limiter",
+                "compute_ceiling",
+                "compute_ceiling_label",
+            },
+        ),
+        (
+            "kernel_roofline_metric",
+            {
+                "metric_row_uuid",
+                "kernel_uuid",
+                "table_id",
+                "metric_id",
+                "metric",
+                "unit",
+                "value",
+                "peak",
+                "percent_of_peak",
+            },
+        ),
+    ],
+)
+def test_roofline_table_columns(table_name, columns):
+    """The additive roofline schema exposes the specified stored values."""
+    table = orm.Base.metadata.tables[f"compute_{table_name}"]
+    assert set(table.columns.keys()) == columns
+
+
+def test_kernel_roofline_statistics_columns():
+    """Kernel roofline rows hold filtered dispatch statistics alongside rates."""
+    columns = orm.KernelRooflineData.__table__.columns
+    assert {
+        "kernel_rank",
+        "dispatch_count",
+        "total_duration_ns",
+        "percent_runtime",
+    } <= set(columns.keys())
+
+
+def test_database_in_memory_lifecycle():
+    """An unnamed database can be closed repeatedly and initialized again."""
+    try:
+        assert Database.init() is None
+        assert Database.get_session() is not None
+        Database.close()
+        Database.close()
+        assert Database._session is None
+        assert Database._engine is None
+        assert Database._db_name is None
+        assert Database._view_sql_cache is None
+        assert Database._type_cache is None
+        Database.init()
+        assert Database.get_session().execute(text("SELECT 1")).scalar_one() == 1
+    finally:
+        Database.close()
+
+
+def test_database_init_replaces_previous_database(db_session):
+    """Reinitialization creates fresh rows and clears lookup/view caches."""
+    db_session.add(Workload(name="old", sub_name="s"))
+    Database.get_or_create_type(InstructionTypeLookup, "VALU")
+    db_session.commit()
+    Database.init()
+    assert Database.get_session().query(Workload).count() == 0
+    assert Database._type_cache == {}
+    assert Database.get_view_sql()
+
+
+def test_database_write_requires_destination(db_session):
+    """Writing an unnamed in-memory database rejects the missing destination."""
+    Database._db_name = None
+    with pytest.raises(ValueError, match="destination"):
+        Database.write()
+    assert Database.get_session() is db_session
+
+
+def test_roofline_ceiling_query_is_device_and_workload_scoped(db_session):
+    """All numeric ceilings, including unmapped compute types, can be queried."""
+    workload = Workload(name="w", sub_name="s")
+    other = Workload(name="other", sub_name="s")
+    db_session.add_all([workload, other])
+    db_session.add_all([
+        orm.RooflineBandwidthCeiling(
+            workload=workload,
+            device_id=1,
+            mem_level="HBM",
+            benchmark_column="HBMBw",
+            bandwidth=100,
+        ),
+        orm.RooflineBandwidthCeiling(
+            workload=workload,
+            device_id=0,
+            mem_level="HBM",
+            benchmark_column="HBMBw",
+            bandwidth=200,
+        ),
+        orm.RooflineBandwidthCeiling(
+            workload=other,
+            device_id=1,
+            mem_level="HBM",
+            benchmark_column="HBMBw",
+            bandwidth=300,
+        ),
+        orm.RooflineComputeCeiling(
+            workload=workload,
+            device_id=1,
+            benchmark_column="MFMAF6F4Flops",
+            peak=400,
+            unit="GFLOP/s",
+        ),
+    ])
+    db_session.commit()
+
+    rows = Database.get_roofline_ceilings(workload.workload_id, 1)
+
+    assert {(row["benchmark_column"], row["value"]) for row in rows} == {
+        ("HBMBw", 100),
+        ("MFMAF6F4Flops", 400),
+    }
+    compute = next(row for row in rows if row["ceiling_kind"] == "compute")
+    assert compute["datatype"] is None
+    assert compute["pipe"] is None
+    assert compute["pipe_label"] is None
+    assert {row["workload_sub_name"] for row in rows} == {"s"}
+    Database.create_views()
+    view_rows = db_session.execute(
+        text(
+            "SELECT * FROM compute_roofline_ceiling_view "
+            "WHERE workload_id = :workload_id AND device_id = 1 "
+            "ORDER BY ceiling_kind, benchmark_column"
+        ),
+        {"workload_id": workload.workload_id},
+    ).mappings()
+    assert [dict(row) for row in view_rows] == rows
+
+
+def test_roofline_kernel_query_preserves_envelopes_and_all_kernels(db_session):
+    """Queries retain zero-performance kernels and match limiter envelopes."""
+    workload = Workload(name="w", sub_name="s")
+    kernel = Kernel(workload=workload, kernel_name="k", short_name="short")
+    zero_kernel = Kernel(workload=workload, kernel_name="zero")
+    empty_kernel = Kernel(workload=workload, kernel_name="empty")
+    plain_kernel = Kernel(workload=workload, kernel_name="plain")
+    other_kernel = Kernel(
+        workload=Workload(name="other", sub_name="s"), kernel_name="other"
+    )
+    db_session.add_all([kernel, zero_kernel, empty_kernel, plain_kernel, other_kernel])
+    db_session.add(
+        orm.KernelRooflineData(
+            kernel=kernel,
+            kernel_rank=2,
+            dispatch_count=3,
+            total_duration_ns=40,
+            percent_runtime=25,
+        )
+    )
+    for envelope, performance, limiter in [
+        ("FP32", 5, "FP32 MFMA"),
+        ("MEMORY", 5, "HBM"),
+    ]:
+        db_session.add(
+            orm.KernelRooflinePoint(
+                kernel=kernel,
+                envelope=envelope,
+                mem_level="HBM",
+                arithmetic_intensity=2,
+                performance=performance,
+                roof_performance=20,
+                percent_of_roof=25,
+            )
+        )
+        db_session.add(
+            orm.KernelRooflineLimiter(
+                kernel=kernel,
+                envelope=envelope,
+                limiter=limiter,
+                compute_ceiling=20 if envelope == "FP32" else None,
+                compute_ceiling_label="FP32 MFMA" if envelope == "FP32" else None,
+            )
+        )
+    db_session.add(
+        orm.KernelRooflinePoint(
+            kernel=zero_kernel,
+            envelope="MEMORY",
+            mem_level="HBM",
+            arithmetic_intensity=0,
+            performance=0,
+        )
+    )
+    db_session.add(
+        orm.KernelRooflineLimiter(kernel=empty_kernel, envelope="MEMORY", limiter="N/A")
+    )
+    db_session.commit()
+
+    rows = Database.get_kernel_roofline_rows(workload.workload_id)
+
+    assert len(rows) == 5
+    assert {row["kernel_name"] for row in rows} == {"k", "zero", "empty", "plain"}
+    kernel_rows = [row for row in rows if row["kernel_name"] == "k"]
+    assert {(row["envelope"], row["limiter"]) for row in kernel_rows} == {
+        ("FP32", "FP32 MFMA"),
+        ("MEMORY", "HBM"),
+    }
+    assert {
+        (
+            row["kernel_rank"],
+            row["dispatch_count"],
+            row["total_duration_ns"],
+            row["percent_runtime"],
+            row["short_name"],
+        )
+        for row in kernel_rows
+    } == {(2, 3, 40, 25, "short")}
+    assert next(row for row in rows if row["kernel_name"] == "zero")["performance"] == 0
+    assert (
+        next(row for row in rows if row["kernel_name"] == "empty")["mem_level"] is None
+    )
+    assert (
+        next(row for row in rows if row["kernel_name"] == "plain")["envelope"] is None
+    )
+    Database.create_views()
+    view_rows = db_session.execute(
+        text(
+            "SELECT * FROM compute_kernel_roofline_view "
+            "WHERE workload_id = :workload_id"
+        ),
+        {"workload_id": workload.workload_id},
+    ).mappings()
+    assert sorted((dict(row) for row in view_rows), key=str) == sorted(rows, key=str)
+
+
+def test_roofline_metric_query_preserves_null_and_workload_scope(db_session):
+    """TTY rows expose raw NULL values and stay within their workload."""
+    workload = Workload(name="w", sub_name="s")
+    kernel = Kernel(workload=workload, kernel_name="k")
+    other_kernel = Kernel(
+        workload=Workload(name="other", sub_name="s"), kernel_name="other"
+    )
+    db_session.add_all([kernel, other_kernel])
+    for owner in [kernel, other_kernel]:
+        db_session.add(
+            orm.KernelRooflineMetric(
+                kernel=owner,
+                table_id=401,
+                metric_id="4.1.1",
+                metric="VALU",
+                unit="GFLOP/s",
+                value=None,
+                peak=10,
+                percent_of_peak=None,
+            )
+        )
+    db_session.commit()
+
+    rows = Database.get_kernel_roofline_metrics(workload.workload_id)
+
+    assert len(rows) == 1
+    assert rows[0]["value"] is None
+    assert rows[0]["percent_of_peak"] is None
+    assert rows[0]["peak"] == 10
+    assert rows[0]["table_id"] == 401
+    assert rows[0]["kernel_name"] == "k"
+    Database.create_views()
+    view_rows = db_session.execute(
+        text(
+            "SELECT * FROM compute_kernel_roofline_metric_view "
+            "WHERE workload_id = :workload_id"
+        ),
+        {"workload_id": workload.workload_id},
+    ).mappings()
+    assert [dict(row) for row in view_rows] == rows
+
+
+def test_roofline_roof_view_groups_device_datatype_and_pipeline(db_session):
+    """Roof geometry combines pipeline peaks only within one device/type."""
+    workload = Workload(name="w", sub_name="s")
+    db_session.add(workload)
+    for device, datatype, pipe, peak in [
+        (0, "FP32", "VALU", 100),
+        (0, "FP32", "MATRIX", 300),
+        (0, "FP64", "VALU", 50),
+        (1, "FP32", "VALU", 900),
+    ]:
+        db_session.add(
+            orm.RooflineComputeCeiling(
+                workload=workload,
+                device_id=device,
+                datatype=datatype,
+                pipe=pipe,
+                pipe_label="MFMA" if pipe == "MATRIX" else pipe,
+                benchmark_column=f"{pipe}{datatype}Flops",
+                peak=peak,
+                unit="GFLOP/s",
+            )
+        )
+    for device in [0, 1]:
+        db_session.add(
+            orm.RooflineBandwidthCeiling(
+                workload=workload,
+                device_id=device,
+                mem_level="HBM",
+                benchmark_column="HBMBw",
+                bandwidth=10,
+            )
+        )
+    Database.create_views()
+    db_session.commit()
+
+    rows = db_session.execute(
+        text(
+            "SELECT device_id, datatype, valu_peak, matrix_peak, roof_peak, knee_ai "
+            "FROM compute_roofline_roof_view ORDER BY device_id, datatype"
+        )
+    ).all()
+
+    assert rows == [
+        (0, "FP32", 100, 300, 300, 30),
+        (0, "FP64", 50, None, 50, 5),
+        (1, "FP32", 900, None, 900, 90),
+    ]
+
+
+@pytest.mark.parametrize(
+    "view_name",
+    ["roofline_ceiling", "roofline_roof", "kernel_roofline", "kernel_roofline_metric"],
+)
+def test_roofline_views_are_registered_and_csv_exported(
+    db_session, tmp_path, view_name
+):
+    """Every new view is part of the standard CSV export."""
+    assert view_name in Database.get_view_sql()
+    Database.commit()
+    Database.write_csv_dir(tmp_path)
+    assert (tmp_path / f"{view_name}.csv").read_text().strip()
+    assert Database.get_session() is None
+
+
+@pytest.mark.parametrize(
+    ("model_name", "keys"),
+    [
+        (
+            "RooflineBandwidthCeiling",
+            {"workload_id": 1, "device_id": 0, "mem_level": "HBM"},
+        ),
+        (
+            "RooflineComputeCeiling",
+            {"workload_id": 1, "device_id": 0, "benchmark_column": "FP32Flops"},
+        ),
+        (
+            "KernelRooflinePoint",
+            {"kernel_uuid": 1, "envelope": "FP32", "mem_level": "HBM"},
+        ),
+        ("KernelRooflineLimiter", {"kernel_uuid": 1, "envelope": "FP32"}),
+        ("KernelRooflineMetric", {"kernel_uuid": 1, "metric_id": "4.1.1"}),
+    ],
+)
+def test_roofline_rows_enforce_unique_identity(db_session, model_name, keys):
+    """A ceiling, point, limiter or metric has one row per logical identity."""
+    model = getattr(orm, model_name)
+    db_session.add_all([model(**keys), model(**keys)])
+    with pytest.raises(IntegrityError):
+        db_session.commit()
+    db_session.rollback()

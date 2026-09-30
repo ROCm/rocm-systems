@@ -29,6 +29,7 @@ from sqlalchemy import (
     cast,
     create_engine,
     func,
+    literal,
     select,
     text,
 )
@@ -36,7 +37,7 @@ from sqlalchemy.dialects import sqlite
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, declarative_base, relationship, sessionmaker
 from sqlalchemy.pool import StaticPool
-from sqlalchemy.sql import Select
+from sqlalchemy.sql import CompoundSelect, Select
 from sqlalchemy.sql.expression import Subquery
 
 from pc_sampling.source_snapshot_analysis import (
@@ -74,6 +75,12 @@ class Workload(Base):
     )
     # Workload can have multiple code objects
     code_object_stores = relationship("CodeObjectStore", back_populates="workload")
+    roofline_bandwidth_ceilings = relationship(
+        "RooflineBandwidthCeiling", back_populates="workload"
+    )
+    roofline_compute_ceilings = relationship(
+        "RooflineComputeCeiling", back_populates="workload"
+    )
     # Workload can have multiple source files
     source_files = relationship("SourceFile", back_populates="workload")
 
@@ -119,8 +126,106 @@ class KernelRooflineData(Base):
     hbm_cache_data = Column(Float)
     lds_cache_data = Column(Float)
 
+    kernel_rank = Column(Integer)
+    dispatch_count = Column(Integer)
+    total_duration_ns = Column(Float)
+    percent_runtime = Column(Float)
+
     # Roofline data point can have one kernel
     kernel = relationship("Kernel", back_populates="roofline_data_points")
+
+
+class RooflineBandwidthCeiling(Base):
+    __tablename__ = f"{PREFIX}roofline_bandwidth_ceiling"
+    # One measured bandwidth per memory level on a workload's device.
+    __table_args__ = (UniqueConstraint("workload_id", "device_id", "mem_level"),)
+
+    ceiling_uuid = Column(Integer, primary_key=True)
+    workload_id = Column(
+        Integer, ForeignKey(f"{PREFIX}workload.workload_id"), nullable=False
+    )
+    device_id = Column(Integer)
+    mem_level = Column(String)
+    benchmark_column = Column(String)
+    bandwidth = Column(Float)
+
+    workload = relationship("Workload", back_populates="roofline_bandwidth_ceilings")
+
+
+class RooflineComputeCeiling(Base):
+    __tablename__ = f"{PREFIX}roofline_compute_ceiling"
+    # One measured compute rate per benchmark column on a workload's device.
+    __table_args__ = (UniqueConstraint("workload_id", "device_id", "benchmark_column"),)
+
+    ceiling_uuid = Column(Integer, primary_key=True)
+    workload_id = Column(
+        Integer, ForeignKey(f"{PREFIX}workload.workload_id"), nullable=False
+    )
+    device_id = Column(Integer)
+    benchmark_column = Column(String)
+    datatype = Column(String, nullable=True)
+    pipe = Column(String, nullable=True)
+    pipe_label = Column(String, nullable=True)
+    peak = Column(Float)
+    unit = Column(String)
+
+    workload = relationship("Workload", back_populates="roofline_compute_ceilings")
+
+
+class KernelRooflinePoint(Base):
+    __tablename__ = f"{PREFIX}kernel_roofline_point"
+    # One point per memory level in each kernel's performance envelope.
+    __table_args__ = (UniqueConstraint("kernel_uuid", "envelope", "mem_level"),)
+
+    point_uuid = Column(Integer, primary_key=True)
+    kernel_uuid = Column(
+        Integer, ForeignKey(f"{PREFIX}kernel.kernel_uuid"), nullable=False
+    )
+    envelope = Column(String)
+    mem_level = Column(String)
+    arithmetic_intensity = Column(Float)
+    performance = Column(Float)
+    roof_performance = Column(Float, nullable=True)
+    percent_of_roof = Column(Float, nullable=True)
+
+    kernel = relationship("Kernel", back_populates="roofline_points")
+
+
+class KernelRooflineLimiter(Base):
+    __tablename__ = f"{PREFIX}kernel_roofline_limiter"
+    # One bottleneck and compute cap per kernel's performance envelope.
+    __table_args__ = (UniqueConstraint("kernel_uuid", "envelope"),)
+
+    limiter_uuid = Column(Integer, primary_key=True)
+    kernel_uuid = Column(
+        Integer, ForeignKey(f"{PREFIX}kernel.kernel_uuid"), nullable=False
+    )
+    envelope = Column(String)
+    limiter = Column(String)
+    compute_ceiling = Column(Float, nullable=True)
+    compute_ceiling_label = Column(String, nullable=True)
+
+    kernel = relationship("Kernel", back_populates="roofline_limiters")
+
+
+class KernelRooflineMetric(Base):
+    __tablename__ = f"{PREFIX}kernel_roofline_metric"
+    # One evaluated 401/402 metric per kernel, independent of its envelopes.
+    __table_args__ = (UniqueConstraint("kernel_uuid", "metric_id"),)
+
+    metric_row_uuid = Column(Integer, primary_key=True)
+    kernel_uuid = Column(
+        Integer, ForeignKey(f"{PREFIX}kernel.kernel_uuid"), nullable=False
+    )
+    table_id = Column(Integer)
+    metric_id = Column(String)
+    metric = Column(String)
+    unit = Column(String)
+    value = Column(Float, nullable=True)
+    peak = Column(Float, nullable=True)
+    percent_of_peak = Column(Float, nullable=True)
+
+    kernel = relationship("Kernel", back_populates="roofline_metrics")
 
 
 class Dispatch(Base):
@@ -163,6 +268,9 @@ class Kernel(Base):
     metric_values = relationship("KernelMetricValue", back_populates="kernel")
     # Kernel can have multiple roofline data points
     roofline_data_points = relationship("KernelRooflineData", back_populates="kernel")
+    roofline_points = relationship("KernelRooflinePoint", back_populates="kernel")
+    roofline_limiters = relationship("KernelRooflineLimiter", back_populates="kernel")
+    roofline_metrics = relationship("KernelRooflineMetric", back_populates="kernel")
     # Kernel is compiled into one symbol per code object that holds it
     kernel_symbols = relationship("KernelSymbol", back_populates="kernel")
 
@@ -542,7 +650,8 @@ class Database:
     _type_cache: Optional[dict[tuple[type[Base], str], Base]] = None
 
     @classmethod
-    def init(cls, db_name: str) -> str:
+    def init(cls, db_name: Optional[str] = None) -> Optional[str]:
+        cls.close()
         # StaticPool pins the engine to a single sqlite3 connection so the
         # session and the backup in write() share the same in-memory DB.
         cls._engine = create_engine(
@@ -561,6 +670,19 @@ class Database:
         cls._view_sql_cache = cls._compile_view_sql()
         console_debug("SQLite database initialized in memory")
         return db_name
+
+    @classmethod
+    def close(cls) -> None:
+        """Release the in-memory database and reset all process-wide state."""
+        if cls._session is not None:
+            cls._session.close()
+        if cls._engine is not None:
+            cls._engine.dispose()
+        cls._session = None
+        cls._engine = None
+        cls._db_name = None
+        cls._view_sql_cache = None
+        cls._type_cache = None
 
     @classmethod
     def get_session(cls) -> Optional[Session]:
@@ -593,6 +715,8 @@ class Database:
     @classmethod
     def write(cls) -> None:
         """Back up the in-memory database to disk at the configured path."""
+        if cls._db_name is None:
+            raise ValueError("No destination configured for the analysis database")
         if cls._session is None:
             console_error("No active database session")
         try:
@@ -634,6 +758,49 @@ class Database:
         finally:
             cls._session.close()
             cls._session = None
+
+    @classmethod
+    def get_roofline_ceilings(
+        cls, workload_id: int, device_id: int
+    ) -> list[dict[str, Any]]:
+        """Return one workload/device's bandwidth and compute benchmark rows."""
+        ceilings = cls._roofline_ceiling_statement().subquery("roofline_ceilings")
+        statement = (
+            select(ceilings)
+            .where(
+                (ceilings.c.workload_id == workload_id)
+                & (ceilings.c.device_id == device_id)
+            )
+            .order_by(ceilings.c.ceiling_kind, ceilings.c.benchmark_column)
+        )
+        return [dict(row) for row in cls._session.execute(statement).mappings()]
+
+    @classmethod
+    def get_kernel_roofline_rows(cls, workload_id: int) -> list[dict[str, Any]]:
+        """Return all kernels with their statistics, envelope points and limiters."""
+        statement = (
+            cls
+            ._kernel_roofline_statement()
+            .where(Kernel.workload_id == workload_id)
+            .order_by(
+                KernelRooflineData.kernel_rank,
+                Kernel.kernel_uuid,
+                KernelRooflinePoint.envelope,
+                KernelRooflinePoint.mem_level,
+            )
+        )
+        return [dict(row) for row in cls._session.execute(statement).mappings()]
+
+    @classmethod
+    def get_kernel_roofline_metrics(cls, workload_id: int) -> list[dict[str, Any]]:
+        """Return evaluated 401/402 rows, preserving raw NULL metric values."""
+        statement = (
+            cls
+            ._kernel_roofline_metric_statement()
+            .where(Kernel.workload_id == workload_id)
+            .order_by(Kernel.kernel_uuid, KernelRooflineMetric.metric_id)
+        )
+        return [dict(row) for row in cls._session.execute(statement).mappings()]
 
     @classmethod
     def get_stall_reasons_by_workload(cls) -> dict[int, list[str]]:
@@ -699,6 +866,182 @@ class Database:
         if isinstance(value, float) and not math.isfinite(value):
             return None
         return value
+
+    @staticmethod
+    def _roofline_ceiling_statement() -> CompoundSelect[Any]:
+        """Union benchmark rows while keeping their original column names."""
+        bandwidths = (
+            select(
+                Workload.workload_id,
+                Workload.name.label("workload_name"),
+                Workload.sub_name.label("workload_sub_name"),
+                RooflineBandwidthCeiling.device_id,
+                literal("bandwidth").label("ceiling_kind"),
+                RooflineBandwidthCeiling.mem_level,
+                literal(None).label("datatype"),
+                literal(None).label("pipe"),
+                literal(None).label("pipe_label"),
+                RooflineBandwidthCeiling.benchmark_column,
+                RooflineBandwidthCeiling.bandwidth.label("value"),
+                literal("GB/s").label("unit"),
+            )
+            .select_from(RooflineBandwidthCeiling)
+            .join(
+                Workload, RooflineBandwidthCeiling.workload_id == Workload.workload_id
+            )
+        )
+        compute_peaks = (
+            select(
+                Workload.workload_id,
+                Workload.name.label("workload_name"),
+                Workload.sub_name.label("workload_sub_name"),
+                RooflineComputeCeiling.device_id,
+                literal("compute").label("ceiling_kind"),
+                literal(None).label("mem_level"),
+                RooflineComputeCeiling.datatype,
+                RooflineComputeCeiling.pipe,
+                RooflineComputeCeiling.pipe_label,
+                RooflineComputeCeiling.benchmark_column,
+                RooflineComputeCeiling.peak.label("value"),
+                RooflineComputeCeiling.unit,
+            )
+            .select_from(RooflineComputeCeiling)
+            .join(Workload, RooflineComputeCeiling.workload_id == Workload.workload_id)
+        )
+        return bandwidths.union_all(compute_peaks)
+
+    @staticmethod
+    def _roofline_roof_statement() -> Select[Any]:
+        """Combine device/type compute peaks with each device's bandwidth roofs."""
+        compute_peaks = (
+            select(
+                RooflineComputeCeiling.workload_id,
+                RooflineComputeCeiling.device_id,
+                RooflineComputeCeiling.datatype,
+                func.max(
+                    case((
+                        RooflineComputeCeiling.pipe == "VALU",
+                        RooflineComputeCeiling.peak,
+                    ))
+                ).label("valu_peak"),
+                func.max(
+                    case((
+                        RooflineComputeCeiling.pipe == "MATRIX",
+                        RooflineComputeCeiling.peak,
+                    ))
+                ).label("matrix_peak"),
+            )
+            .where(RooflineComputeCeiling.datatype.is_not(None))
+            .group_by(
+                RooflineComputeCeiling.workload_id,
+                RooflineComputeCeiling.device_id,
+                RooflineComputeCeiling.datatype,
+            )
+        ).subquery("compute_peaks")
+        roof_peak = func.max(
+            func.coalesce(compute_peaks.c.valu_peak, 0),
+            func.coalesce(compute_peaks.c.matrix_peak, 0),
+        )
+        return (
+            select(
+                Workload.workload_id,
+                Workload.name.label("workload_name"),
+                Workload.sub_name.label("workload_sub_name"),
+                RooflineBandwidthCeiling.device_id,
+                compute_peaks.c.datatype,
+                RooflineBandwidthCeiling.mem_level,
+                RooflineBandwidthCeiling.bandwidth,
+                compute_peaks.c.valu_peak,
+                compute_peaks.c.matrix_peak,
+                roof_peak.label("roof_peak"),
+                (roof_peak / RooflineBandwidthCeiling.bandwidth).label("knee_ai"),
+            )
+            .select_from(RooflineBandwidthCeiling)
+            .join(
+                Workload, RooflineBandwidthCeiling.workload_id == Workload.workload_id
+            )
+            .join(
+                compute_peaks,
+                (compute_peaks.c.workload_id == RooflineBandwidthCeiling.workload_id)
+                & (compute_peaks.c.device_id == RooflineBandwidthCeiling.device_id),
+            )
+        )
+
+    @staticmethod
+    def _kernel_roofline_statement() -> Select[Any]:
+        """Keep every kernel and join point/limiter rows within each envelope."""
+        envelopes = (
+            select(KernelRooflinePoint.kernel_uuid, KernelRooflinePoint.envelope)
+            .union(
+                select(
+                    KernelRooflineLimiter.kernel_uuid, KernelRooflineLimiter.envelope
+                )
+            )
+            .subquery("kernel_envelopes")
+        )
+        return (
+            select(
+                Workload.workload_id,
+                Workload.name.label("workload_name"),
+                Workload.sub_name.label("workload_sub_name"),
+                Kernel.kernel_uuid,
+                Kernel.kernel_name,
+                Kernel.short_name,
+                KernelRooflineData.kernel_rank,
+                KernelRooflineData.dispatch_count,
+                KernelRooflineData.total_duration_ns,
+                KernelRooflineData.percent_runtime,
+                envelopes.c.envelope,
+                KernelRooflineLimiter.limiter,
+                KernelRooflineLimiter.compute_ceiling,
+                KernelRooflineLimiter.compute_ceiling_label,
+                KernelRooflinePoint.mem_level,
+                KernelRooflinePoint.arithmetic_intensity,
+                KernelRooflinePoint.performance,
+                KernelRooflinePoint.roof_performance,
+                KernelRooflinePoint.percent_of_roof,
+            )
+            .select_from(Kernel)
+            .join(Workload, Kernel.workload_id == Workload.workload_id)
+            .outerjoin(
+                KernelRooflineData, KernelRooflineData.kernel_uuid == Kernel.kernel_uuid
+            )
+            .outerjoin(envelopes, envelopes.c.kernel_uuid == Kernel.kernel_uuid)
+            .outerjoin(
+                KernelRooflinePoint,
+                (KernelRooflinePoint.kernel_uuid == Kernel.kernel_uuid)
+                & (KernelRooflinePoint.envelope == envelopes.c.envelope),
+            )
+            .outerjoin(
+                KernelRooflineLimiter,
+                (KernelRooflineLimiter.kernel_uuid == Kernel.kernel_uuid)
+                & (KernelRooflineLimiter.envelope == envelopes.c.envelope),
+            )
+        )
+
+    @staticmethod
+    def _kernel_roofline_metric_statement() -> Select[Any]:
+        """Select raw metrics separately from the point/envelope join."""
+        return (
+            select(
+                Workload.workload_id,
+                Workload.name.label("workload_name"),
+                Workload.sub_name.label("workload_sub_name"),
+                Kernel.kernel_uuid,
+                Kernel.kernel_name,
+                Kernel.short_name,
+                KernelRooflineMetric.table_id,
+                KernelRooflineMetric.metric_id,
+                KernelRooflineMetric.metric,
+                KernelRooflineMetric.value,
+                KernelRooflineMetric.unit,
+                KernelRooflineMetric.peak,
+                KernelRooflineMetric.percent_of_peak,
+            )
+            .select_from(KernelRooflineMetric)
+            .join(Kernel, KernelRooflineMetric.kernel_uuid == Kernel.kernel_uuid)
+            .join(Workload, Kernel.workload_id == Workload.workload_id)
+        )
 
     @staticmethod
     def _source_chain_subquery() -> Subquery:
@@ -938,7 +1281,11 @@ class Database:
 
         source_chain_subquery = Database._source_chain_subquery()
 
-        definitions: dict[str, Select[Any]] = {
+        definitions: dict[str, Select[Any] | CompoundSelect[Any]] = {
+            "roofline_ceiling": Database._roofline_ceiling_statement(),
+            "roofline_roof": Database._roofline_roof_statement(),
+            "kernel_roofline": Database._kernel_roofline_statement(),
+            "kernel_roofline_metric": Database._kernel_roofline_metric_statement(),
             "kernel": select(
                 Kernel.kernel_uuid.label("kernel_uuid"),
                 Kernel.workload_id.label("workload_id"),
