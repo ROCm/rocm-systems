@@ -5667,6 +5667,7 @@ TEST(RaceDetectorPluginTest, UnresolvedOrMixedFlatWholeResultRequiresBothWaitCou
     auto state =
         std::make_unique<VectorMemState>(route == MemoryRoute::LOCAL ? LOCAL_MEM : GLOBAL_MEM);
     state->is_load = true;
+    state->elem_size = 4;
     state->num_elems = 1;
     state->dst_reg_base = wf->vgpr_alloc().base;
     state->exec_mask = state->lane_mask = 3;
@@ -5751,6 +5752,7 @@ TEST(RaceDetectorPluginTest, FlatLoadReadyLanesKnownFalsePositives) {
           data->is_load = true;
           data->exec_mask = data->lane_mask = 3;
           data->wf_size = wave_size;
+          data->elem_size = 4;
           data->num_elems = 1;
           data->dst_reg_base = wf->vgpr_alloc().base + 8;
           load->set_data(std::move(data));
@@ -5996,6 +5998,7 @@ TEST(RaceDetectorPluginTest, Gfx950FlatEmptyPortionDoesNotOrderAnOlderResult) {
                          lds ? MemoryOrderClass::VMEM : MemoryOrderClass::LDS);
       auto state = std::make_unique<VectorMemState>(lds ? LOCAL_MEM : GLOBAL_MEM);
       state->is_load = true;
+      state->elem_size = 4;
       state->num_elems = 1;
       state->dst_reg_base = wf->vgpr_alloc().base + 8;
       state->exec_mask = state->lane_mask = 1;
