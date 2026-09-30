@@ -102,6 +102,31 @@ rocprofiler_add_unit_test(
         "Running non-intercept test(.*)could not be locked for profiling due to lack of permissions.*|\\[  SKIPPED \\]"
     )
 
+set(ROCPROFILER_LIB_COUNTER_METRICS_LOADER_TEST_SOURCES metrics_loader_test.cpp)
+
+add_executable(counter-metrics-loader-tests)
+target_sources(counter-metrics-loader-tests
+               PRIVATE ${ROCPROFILER_LIB_COUNTER_METRICS_LOADER_TEST_SOURCES})
+target_link_libraries(
+    counter-metrics-loader-tests
+    PRIVATE rocprofiler-sdk::counter-test-constants
+            rocprofiler-sdk::rocprofiler-sdk-hsa-runtime
+            rocprofiler-sdk::rocprofiler-sdk-hip
+            rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-amd-comgr
+            rocprofiler-sdk::rocprofiler-sdk-static-library
+            GTest::gtest
+            GTest::gtest_main)
+
+rocprofiler_add_unit_test(
+    TARGET counter-metrics-loader-tests
+    SOURCES ${ROCPROFILER_LIB_COUNTER_METRICS_LOADER_TEST_SOURCES}
+    TIMEOUT 45
+    ENVIRONMENT
+        "ROCPROFILER_METRICS_PATH=${_ROCPROFILER_SHARE_DIR}"
+        "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
 set(ROCPROFILER_LIB_CONSUMER_TEST_SOURCES consumer_test.cpp)
 
 add_executable(consumer-test)

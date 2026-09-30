@@ -16,11 +16,30 @@ If the number of files is lesser than the number of threads requested by the use
 
 ## Build
 
+**Linux:**
+
 ```shell
 mkdir video_decode_batch && cd video_decode_batch
 cmake ../
 make -j
 ```
+
+**Windows:**
+
+```bat
+mkdir video_decode_batch && cd video_decode_batch
+cmake .. -DROCM_PATH=<path-to-TheRock-build>
+cmake --build . --config Release
+```
+
+> [!NOTE]
+> Add the rocDecode and FFmpeg DLL directories to your PATH before configuring — CMake
+> locates FFmpeg by probing PATH — and keep them there when running:
+> ```bat
+> set PATH=%ROCM_PATH%\bin;<path-to-ffmpeg>\bin;%PATH%
+> ```
+> If FFmpeg is installed somewhere CMake cannot discover, pass
+> `-DFFMPEG_ROOT=<path-to-ffmpeg>` to the configure step.
 
 ## Run
 

@@ -182,6 +182,7 @@ class TestEnvironment:
             "LD_LIBRARY_PATH",
             "LD_PRELOAD",
             "ROCPROFSYS_OUTPUT_PATH",
+            "ROCPROFSYS_TMPDIR",
             "ROCPROFSYS_CONFIG_FILE",
         )
         self.user.update({k: v for k, v in os.environ.items() if k not in owned})

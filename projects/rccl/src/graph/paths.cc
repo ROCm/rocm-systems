@@ -864,24 +864,36 @@ static bool rcclPathOverride(struct ncclTopoSystem* system, uint64_t distance) {
   }
 }
 
-// Rewrite GPU<->NIC paths of type `fromType` to `toType` when the two devices share a PCI domain.
+// Rewrite DEV/GPU <-> NET paths of type `fromType` to `toType` when the two devices share a PCI domain.
+// Keyed on the physical device (DEV node), not on the GPU partitions layered on top of it: reaching a
+// NIC is a property of the PCI function, and ncclTopoGdrDistance reads the DEV path for partitioned
+// GPUs. Rewriting only the partitions leaves that decision on the original distance, and the no-GDR
+// diversion in ncclTopoComputePaths then undoes the rewrite. Partitions mirror their parent so the
+// graph search and the GDR decision see the same distance.
 static void rcclRewriteSameDomainNetPaths(struct ncclTopoSystem* system, int fromType, int toType) {
-  for (int g = 0; g < system->nodes[GPU].count; g++) {
-    struct ncclTopoNode* gpu = system->nodes[GPU].nodes + g;
-    int64_t gpuBusId = NCCL_TOPO_ID_LOCAL_ID(gpu->id);
-    int64_t gpuDomain = NCCL_BUSID_DOMAIN(gpuBusId);
+  for (int d = 0; d < system->nodes[DEV].count; d++) {
+    struct ncclTopoNode* dev = system->nodes[DEV].nodes + d;
+    // MLOPart splitting overlays the partition index on the DEV id; strip it to recover the busId.
+    int64_t devBusId = NCCL_TOPO_ID_LOCAL_ID(dev->id) & ~NCCL_TOPO_MLOPART_MASK;
+    int64_t devDomain = NCCL_BUSID_DOMAIN(devBusId);
     for (int n = 0; n < system->nodes[NET].count; n++) {
       struct ncclTopoNode* net = system->nodes[NET].nodes + n;
       // Skip uninitialized/invalid busIds (raw id 0), but allow domain 0000:
       // it is a valid PCI domain and must still match.
-      if (gpuBusId == 0 || net->net.busId == 0) continue;
-      if (gpuDomain != NCCL_BUSID_DOMAIN(net->net.busId)) continue;
-      if (gpu->paths[NET] && gpu->paths[NET][n].type == fromType) {
-        gpu->paths[NET][n].type = toType;
-        INFO(NCCL_GRAPH, "Rewrote same-domain GPU %d -> NET %d path %d->%d (domain 0x%04lx)", g, n, fromType, toType,
-             (unsigned long)gpuDomain);
+      if (devBusId == 0 || net->net.busId == 0) continue;
+      if (devDomain != NCCL_BUSID_DOMAIN(net->net.busId)) continue;
+      if (dev->paths[NET] && dev->paths[NET][n].type == fromType) {
+        dev->paths[NET][n].type = toType;
+        INFO(NCCL_GRAPH, "Rewrote same-domain DEV %d -> NET %d path %d->%d (domain 0x%04lx)", d, n, fromType, toType,
+             (unsigned long)devDomain);
       }
-      if (net->paths[GPU] && net->paths[GPU][g].type == fromType) net->paths[GPU][g].type = toType;
+      if (net->paths[DEV] && net->paths[DEV][d].type == fromType) net->paths[DEV][d].type = toType;
+      for (int g = 0; g < system->nodes[GPU].count; g++) {
+        struct ncclTopoNode* gpu = system->nodes[GPU].nodes + g;
+        if (gpu->gpu.parent != dev) continue;
+        if (gpu->paths[NET] && gpu->paths[NET][n].type == fromType) gpu->paths[NET][n].type = toType;
+        if (net->paths[GPU] && net->paths[GPU][g].type == fromType) net->paths[GPU][g].type = toType;
+      }
     }
   }
 }

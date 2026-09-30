@@ -578,6 +578,10 @@ hsa_status_t BlitKernel::Initialize(const core::Agent& agent) {
     KernelCode& kernel = kernels_[kernel_name.first];
     gpuAgent->AssembleShader(kernel_name.second, AMD::GpuAgent::AssembleTarget::AQL, kernel.code_buf_,
                             kernel.code_buf_size_);
+    // Publish the code object the same way RegionMemory::Freeze() does.
+    gpuAgent->PcieWcFlush(kernel.code_buf_, kernel.code_buf_size_);
+    const_cast<AMD::GpuAgent*>(gpuAgent)->InvalidateCodeCaches(kernel.code_buf_,
+                                                               kernel.code_buf_size_);
   }
 
   if (agent_->profiling_enabled()) {
