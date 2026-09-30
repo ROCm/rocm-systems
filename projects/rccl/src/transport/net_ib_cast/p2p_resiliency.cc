@@ -917,7 +917,6 @@ ncclResult_t IbCastResiliencyReceiverQpsCreateToRts(struct ncclIbResiliency* res
     qpCreateAttrs.cq = resCtx->devs[localDevIndex].probingCq;
     qpCreateAttrs.pd = recvCommDev->base.pd;
     qpCreateAttrs.qpContext = qpContext;
-    qpCreateAttrs.qpContext = qpContext;
     NCCLCHECK(IbCastQpCreate(localQp, &qpCreateAttrs));
     localQp->devIndex = localDevIndex;
     localResiliencyInfo->probingQpsInfo[localQpIndex].qpn = localQp->qp->qp_num;
@@ -1023,7 +1022,8 @@ ncclResult_t IbCastResiliencyQpsReconfigure(struct ncclIbResiliency* resCtx, int
 
   IbCastGidInfoSnapshot(devBase, &IbCastDevs[devBase->ibDevN]);
 
-  // AINIC cannot modify a QP to RESET, so its probing QPs keep their connect-time GID.
+  // AINIC cannot modify a QP to RESET, so its probing QPs keep their connect-time GID after a
+  // GID change. Data and flush QPs are recreated with the refreshed GID in IbCastPortRecoveryQpsToRtsAinic.
   for (int i = 0; !IbCastAinicRoce && i < resCtx->nProbingQps; i++) {
     struct ncclIbQp* qp = &resCtx->probingQps[i];
     if (qp->qp == NULL || qp->devIndex != devIndex) continue;

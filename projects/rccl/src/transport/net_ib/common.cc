@@ -342,6 +342,7 @@ extern "C" ncclResult_t ncclIbGidGetQpState(void* comm, struct ncclIbGidQpState*
   for (int i = 0; i < out->nqps; i++) {
     struct ncclIbQp* qp = &base->qps[i];
     out->devIndex[i] = qp->devIndex;
+    out->rtrGidIndex[i] = qp->rtrAttr.localGidIndex;
     if (qp->qp == NULL) continue;
     struct ibv_qp_attr attr;
     struct ibv_qp_init_attr initAttr;
@@ -361,6 +362,18 @@ extern "C" ncclResult_t ncclIbGidGetDevState(void* comm, int devIndex, int* stat
   if (devIndex < 0 || devIndex >= base->resiliency->ndevs) return ncclInvalidArgument;
   *state = (int)base->resiliency->devs[devIndex].state.load(std::memory_order_acquire);
   return ncclSuccess;
+}
+
+extern "C" ncclResult_t ncclIbGidGetRecoveryGidIndex(void* comm, int devIndex, int* gidIndex) {
+  struct ncclIbNetCommBase* base = ncclIbGidCommBase(comm);
+  if (base == NULL || gidIndex == NULL || base->resiliency == NULL) return ncclInvalidArgument;
+  for (int i = 0; i < base->resiliency->nPortRecoveryQps; i++) {
+    struct ncclIbQp* qp = &base->resiliency->portRecoveryQps[i];
+    if (qp->qp == NULL || qp->devIndex != devIndex) continue;
+    *gidIndex = qp->rtrAttr.localGidIndex;
+    return ncclSuccess;
+  }
+  return ncclInvalidArgument;
 }
 
 extern "C" ncclResult_t ncclIbGidDriveQpToError(void* comm, int qpIdx) {

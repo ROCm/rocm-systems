@@ -8,17 +8,20 @@
 
 #if defined(MPI_TESTS_ENABLED) && defined(ENABLE_FAULT_INJECTION)
 
+#include <fstream>
+
 #include "ibvcore.h"
 #include "net_ib_gid_inspect.h"
 
 namespace {
 
-constexpr int kDevStateOk = 0;
-constexpr int kDevStateRecovered = 4;
+constexpr int kDevStateOk = 0;         // ncclIbResiliencyDevStateOk
+constexpr int kDevStateRecovered = 4;  // ncclIbResiliencyDevStateRecovered
 constexpr int kRecoveryPollIters = 4000;
 constexpr int kRecoveryPollUs = 10000;
 constexpr int kPostRecoveryMsgs = 20;
 constexpr size_t kMsgSize = 8192;
+constexpr int kMaxGidTableEntries = 256;
 
 struct GidTransport {
     const char* name;
@@ -30,17 +33,20 @@ struct GidTransport {
     ncclResult_t (*changeEvent)(int);
     ncclResult_t (*getQpState)(void*, ncclIbGidQpState*);
     ncclResult_t (*getDevState)(void*, int, int*);
+    ncclResult_t (*getRecoveryGidIndex)(void*, int, int*);
     ncclResult_t (*driveQpToError)(void*, int);
 };
 
 const GidTransport kNetIb = {
     "NetIb", &ncclNetIb, ncclIbGidGetDev, ncclIbGidSetDev, ncclIbGidGetComm, ncclIbGidSetComm,
-    ncclIbGidChangeEvent, ncclIbGidGetQpState, ncclIbGidGetDevState, ncclIbGidDriveQpToError,
+    ncclIbGidChangeEvent, ncclIbGidGetQpState, ncclIbGidGetDevState, ncclIbGidGetRecoveryGidIndex,
+    ncclIbGidDriveQpToError,
 };
 
 const GidTransport kNetIbCast = {
     "NetIbCast", &netIbCast, ncclIbCastGidGetDev, ncclIbCastGidSetDev, ncclIbCastGidGetComm, ncclIbCastGidSetComm,
-    ncclIbCastGidChangeEvent, ncclIbCastGidGetQpState, ncclIbCastGidGetDevState, ncclIbCastGidDriveQpToError,
+    ncclIbCastGidChangeEvent, ncclIbCastGidGetQpState, ncclIbCastGidGetDevState, ncclIbCastGidGetRecoveryGidIndex,
+    ncclIbCastGidDriveQpToError,
 };
 
 bool SameGid(const ncclIbGidState& a, const ncclIbGidState& b) {
@@ -64,6 +70,25 @@ bool AllRanks(bool ok) {
     MPI_Allreduce(&local, &all, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
     return all == 1;
 }
+
+bool ReadSysfsLine(const std::string& path, std::string* out) {
+    std::ifstream f(path);
+    return static_cast<bool>(std::getline(f, *out));
+}
+
+// Restores a device's process-global GID cache entry when the test leaves scope.
+class DevGidGuard {
+public:
+    DevGidGuard(const GidTransport& t, int ibDev, const ncclIbGidState& saved) : t_(t), ibDev_(ibDev), saved_(saved) {}
+    ~DevGidGuard() { t_.setDev(ibDev_, &saved_); }
+    DevGidGuard(const DevGidGuard&) = delete;
+    DevGidGuard& operator=(const DevGidGuard&) = delete;
+
+private:
+    const GidTransport& t_;
+    int ibDev_;
+    ncclIbGidState saved_;
+};
 
 }  // namespace
 
@@ -90,18 +115,48 @@ protected:
         return minDev < 0 ? -1 : mergedDev;
     }
 
-    bool QpsUseGidIndex(void* comm, int devIndex, int gidIndex, int* checked) {
+    // Another valid entry of the same port carrying the same address under a different RoCE type
+    // (the v1/v2 twin), i.e. a GID reindex that keeps the port reachable.
+    bool FindTwinGid(const ncclIbGidState& real, ncclIbGidState* twin) {
+        if (real.linkLayer != IBV_LINK_LAYER_ETHERNET) return false;
+        ncclNetProperties_t props = {};
+        if (GetDeviceProperties(real.ibDev, &props) != ncclSuccess || props.name == nullptr) return false;
+        const std::string port = std::string("/sys/class/infiniband/") + props.name + "/ports/" +
+                                 std::to_string(props.port);
+        std::string realType;
+        if (!ReadSysfsLine(port + "/gid_attrs/types/" + std::to_string(real.gidIndex), &realType)) return false;
+        for (int i = 0; i < kMaxGidTableEntries; i++) {
+            if (i == real.gidIndex) continue;
+            std::string text, type;
+            uint8_t gid[16];
+            if (!ReadSysfsLine(port + "/gids/" + std::to_string(i), &text)) break;
+            if (!ParseGidText(text.c_str(), gid) || memcmp(gid, real.gid, sizeof(gid)) != 0) continue;
+            if (!ReadSysfsLine(port + "/gid_attrs/types/" + std::to_string(i), &type) || type.empty() ||
+                type == realType)
+                continue;
+            *twin = real;
+            twin->gidIndex = i;
+            return true;
+        }
+        return false;
+    }
+
+    bool QpsUseGidIndex(void* comm, int devIndex, int gidIndex) {
         ncclIbGidQpState qps = {};
         EXPECT_EQ(T().getQpState(comm, &qps), ncclSuccess);
         bool ok = true;
-        *checked = 0;
+        int checked = 0;
         for (int i = 0; i < qps.nqps; i++) {
-            if (qps.devIndex[i] != devIndex || !qps.queryOk[i]) continue;
-            (*checked)++;
+            if (qps.devIndex[i] != devIndex) continue;
+            checked++;
+            EXPECT_EQ(qps.rtrGidIndex[i], gidIndex) << "qp " << i << " devIndex " << devIndex;
+            ok = ok && qps.rtrGidIndex[i] == gidIndex;
+            if (!qps.queryOk[i]) continue;
             EXPECT_EQ(qps.sgidIndex[i], gidIndex) << "qp " << i << " devIndex " << devIndex;
             ok = ok && qps.sgidIndex[i] == gidIndex;
         }
-        return ok;
+        EXPECT_GT(checked, 0) << "no QP on devIndex " << devIndex;
+        return ok && checked > 0;
     }
 };
 
@@ -114,7 +169,7 @@ TEST_P(NetIbGidChangeTest, DeviceCacheInitializedAtDiscovery) {
     bool ok = true;
     for (int dev = 0; dev < nPhys; dev++) {
         ncclIbGidState s = {};
-        ASSERT_EQ(T().getDev(dev, &s), ncclSuccess);
+        EXPECT_EQ(T().getDev(dev, &s), ncclSuccess);
         EXPECT_GE(s.gidIndex, 0) << "dev " << dev;
         ok = ok && s.gidIndex >= 0;
         if (s.linkLayer == IBV_LINK_LAYER_ETHERNET) {
@@ -136,19 +191,18 @@ TEST_P(NetIbGidChangeTest, GidChangeEventRefreshesDeviceCache) {
     bool ok = true;
     for (int dev = 0; dev < nPhys; dev++) {
         ncclIbGidState real = {}, after = {};
-        ASSERT_EQ(T().getDev(dev, &real), ncclSuccess);
+        EXPECT_EQ(T().getDev(dev, &real), ncclSuccess);
+        DevGidGuard guard(T(), dev, real);
         const ncclIbGidState stale = MakeStale(real);
-        ASSERT_EQ(T().setDev(dev, &stale), ncclSuccess);
+        EXPECT_EQ(T().setDev(dev, &stale), ncclSuccess);
 
         EXPECT_EQ(T().changeEvent(dev), ncclSuccess) << "dev " << dev;
-        ASSERT_EQ(T().getDev(dev, &after), ncclSuccess);
+        EXPECT_EQ(T().getDev(dev, &after), ncclSuccess);
         const bool expectRefresh = real.linkLayer == IBV_LINK_LAYER_ETHERNET;
         const bool devOk = SameGid(after, expectRefresh ? real : stale);
         EXPECT_TRUE(devOk) << "dev " << dev << " linkLayer " << real.linkLayer << " gidIndex " << after.gidIndex
                            << " expected " << (expectRefresh ? real.gidIndex : stale.gidIndex);
         ok = ok && devOk;
-
-        ASSERT_EQ(T().setDev(dev, &real), ncclSuccess);
     }
     EXPECT_TRUE(AllRanks(ok));
 }
@@ -157,6 +211,17 @@ TEST_P(NetIbGidChangeTest, ConnectSnapshotsDeviceCache) {
     SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses, false, kMinGpusPerNode, kNoNodeLimit);
     const int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
+
+    ncclIbGidState real = {}, expected = {};
+    ASSERT_EQ(T().getDev(0, &real), ncclSuccess);
+    real.ibDev = 0;
+    DevGidGuard guard(T(), 0, real);
+    const bool useTwin = AllRanks(FindTwinGid(real, &expected));
+    if (useTwin) {
+        EXPECT_EQ(T().setDev(0, &expected), ncclSuccess);
+    } else {
+        expected = real;
+    }
 
     void* listenComm = nullptr;
     void* sendComm = nullptr;
@@ -167,20 +232,14 @@ TEST_P(NetIbGidChangeTest, ConnectSnapshotsDeviceCache) {
     void* comm = (rank == 0) ? recvComm : sendComm;
     void* mhandle = nullptr;
     ASSERT_EQ(RegisterMemory(comm, buf.data(), buf.size(), NCCL_PTR_HOST, &mhandle), ncclSuccess);
-    CastDoSendRecv(rank, sendComm, recvComm, buf.data(), kMsgSize, /*tag=*/2201, mhandle);
 
-    ncclIbGidState snap = {}, dev = {};
-    ASSERT_EQ(T().getComm(comm, 0, &snap), ncclSuccess);
-    ASSERT_EQ(T().getDev(snap.ibDev, &dev), ncclSuccess);
-    bool ok = SameGid(snap, dev);
-    EXPECT_TRUE(ok) << "comm gidIndex " << snap.gidIndex << " device gidIndex " << dev.gidIndex;
-
-    if (dev.linkLayer == IBV_LINK_LAYER_ETHERNET) {
-        int checked = 0;
-        ok = QpsUseGidIndex(comm, 0, dev.gidIndex, &checked) && ok;
-        EXPECT_GT(checked, 0);
-        ok = ok && checked > 0;
-    }
+    ncclIbGidState snap = {};
+    EXPECT_EQ(T().getComm(comm, 0, &snap), ncclSuccess);
+    snap.ibDev = 0;
+    bool ok = SameGid(snap, expected);
+    EXPECT_TRUE(ok) << "comm gidIndex " << snap.gidIndex << " expected " << expected.gidIndex
+                    << (useTwin ? " (device cache moved to twin)" : "");
+    if (expected.linkLayer == IBV_LINK_LAYER_ETHERNET) ok = QpsUseGidIndex(comm, 0, expected.gidIndex) && ok;
     EXPECT_TRUE(AllRanks(ok));
 
     TeardownConnection(recvComm, listenComm, sendComm, mhandle);
@@ -192,6 +251,8 @@ TEST_P(NetIbGidChangeTest, PortRecoveryRefreshesStaleCommGid) {
     const char* recoveryEnv = getenv("NCCL_IB_RESILIENCY_PORT_RECOVERY");
     if (!failoverEnv || strcmp(failoverEnv, "1") != 0) GTEST_SKIP() << "Requires NCCL_IB_RESILIENCY_PORT_FAILOVER=1";
     if (!recoveryEnv || strcmp(recoveryEnv, "1") != 0) GTEST_SKIP() << "Requires NCCL_IB_RESILIENCY_PORT_RECOVERY=1";
+    if (T().net == &ncclNetIb && !AllRanks(!rcclUseAinic()))
+        GTEST_SKIP() << "net_ib port recovery resets QPs, which AINIC does not support";
 
     const int rank = MPIEnvironment::world_rank;
     int totalDevs = 0;
@@ -219,25 +280,38 @@ TEST_P(NetIbGidChangeTest, PortRecoveryRefreshesStaleCommGid) {
     const int failDev = qps.devIndex[0];
     ASSERT_GE(failDev, 0);
 
-    ncclIbGidState real = {};
+    // With a twin, the device cache is reindexed so recovery has to move every QP and the recovery
+    // path of failDev off their connect-time index. Without one, only the comm snapshot is stale.
+    ncclIbGidState real = {}, expected = {};
     ASSERT_EQ(T().getComm(comm, failDev, &real), ncclSuccess);
-    const ncclIbGidState stale = MakeStale(real);
-    ASSERT_EQ(T().setComm(comm, failDev, &stale), ncclSuccess);
-    ASSERT_EQ(T().changeEvent(real.ibDev), ncclSuccess);
-    ncclIbGidState devAfterEvent = {};
-    ASSERT_EQ(T().getDev(real.ibDev, &devAfterEvent), ncclSuccess);
-    ASSERT_TRUE(SameGid(devAfterEvent, real));
+    DevGidGuard guard(T(), real.ibDev, real);
+    const bool useTwin = AllRanks(FindTwinGid(real, &expected));
+    if (useTwin) {
+        EXPECT_EQ(T().setDev(real.ibDev, &expected), ncclSuccess);
+    } else {
+        expected = real;
+        const ncclIbGidState stale = MakeStale(real);
+        EXPECT_EQ(T().setComm(comm, failDev, &stale), ncclSuccess);
+        EXPECT_EQ(T().changeEvent(real.ibDev), ncclSuccess);
+    }
+    ncclIbGidState devBeforeRecovery = {};
+    EXPECT_EQ(T().getDev(real.ibDev, &devBeforeRecovery), ncclSuccess);
+    devBeforeRecovery.ibDev = real.ibDev;
+    EXPECT_TRUE(SameGid(devBeforeRecovery, expected));
 
+    bool ok = true;
     void* recvReq = nullptr;
     if (rank == 0) {
         void* bufs[1] = {regBuf};
         size_t sizes[1] = {kMsgSize};
         int tags[1] = {2301};
         void* handles[1] = {mhandle};
-        ASSERT_EQ(PostRecv(recvComm, 1, bufs, sizes, tags, handles, &recvReq), ncclSuccess);
+        const bool posted = PostRecv(recvComm, 1, bufs, sizes, tags, handles, &recvReq) == ncclSuccess;
+        EXPECT_TRUE(posted);
+        ok = ok && posted;
     }
     MPI_Barrier(MPI_COMM_WORLD);
-    ASSERT_EQ(T().driveQpToError(comm, 0), ncclSuccess);
+    EXPECT_EQ(T().driveQpToError(comm, 0), ncclSuccess);
     MPI_Barrier(MPI_COMM_WORLD);
 
     if (rank == 1) {
@@ -254,7 +328,7 @@ TEST_P(NetIbGidChangeTest, PortRecoveryRefreshesStaleCommGid) {
 
     int state = -1;
     for (int poll = 0; poll < kRecoveryPollIters; poll++) {
-        ASSERT_EQ(T().getDevState(comm, failDev, &state), ncclSuccess);
+        if (T().getDevState(comm, failDev, &state) != ncclSuccess) break;
         if (state == kDevStateOk || state == kDevStateRecovered) break;
         usleep(kRecoveryPollUs);
     }
@@ -267,15 +341,20 @@ TEST_P(NetIbGidChangeTest, PortRecoveryRefreshesStaleCommGid) {
     }
 
     ncclIbGidState snap = {};
-    ASSERT_EQ(T().getComm(comm, failDev, &snap), ncclSuccess);
-    bool ok = SameGid(snap, real);
-    EXPECT_TRUE(ok) << "comm gidIndex after recovery " << snap.gidIndex << " expected " << real.gidIndex;
-    if (real.linkLayer == IBV_LINK_LAYER_ETHERNET) {
-        int checked = 0;
-        ok = QpsUseGidIndex(comm, failDev, real.gidIndex, &checked) && ok;
+    EXPECT_EQ(T().getComm(comm, failDev, &snap), ncclSuccess);
+    const bool snapOk = SameGid(snap, expected);
+    EXPECT_TRUE(snapOk) << "comm gidIndex after recovery " << snap.gidIndex << " expected " << expected.gidIndex;
+    ok = ok && snapOk;
+    if (expected.linkLayer == IBV_LINK_LAYER_ETHERNET) {
+        ok = QpsUseGidIndex(comm, failDev, expected.gidIndex) && ok;
+        int recoveryGidIndex = -1;
+        EXPECT_EQ(T().getRecoveryGidIndex(comm, failDev, &recoveryGidIndex), ncclSuccess);
+        EXPECT_EQ(recoveryGidIndex, expected.gidIndex) << "port recovery path of devIndex " << failDev;
+        ok = ok && recoveryGidIndex == expected.gidIndex;
     }
 
-    for (int m = 0; m < kPostRecoveryMsgs; m++) {
+    bool trafficOk = true;
+    for (int m = 0; m < kPostRecoveryMsgs && trafficOk; m++) {
         const size_t off = (m + 1) * kMsgSize;
         void* req = nullptr;
         int sz = 0;
@@ -284,15 +363,17 @@ TEST_P(NetIbGidChangeTest, PortRecoveryRefreshesStaleCommGid) {
             size_t sizes[1] = {kMsgSize};
             int tags[1] = {2310 + m};
             void* handles[1] = {mhandle};
-            ASSERT_EQ(PostRecv(recvComm, 1, bufs, sizes, tags, handles, &req), ncclSuccess);
-            ASSERT_EQ(WaitForCompletion(req, &sz, 10000), ncclSuccess) << "recv " << m;
+            trafficOk = PostRecv(recvComm, 1, bufs, sizes, tags, handles, &req) == ncclSuccess &&
+                        WaitForCompletion(req, &sz, 10000) == ncclSuccess;
         } else {
             PostSendWithRetry(sendComm, sendBuf.data() + off, kMsgSize, 2310 + m, mhandle, &req);
-            ASSERT_EQ(WaitForCompletion(req, &sz, 10000), ncclSuccess) << "send " << m;
+            trafficOk = req != nullptr && WaitForCompletion(req, &sz, 10000) == ncclSuccess;
         }
+        EXPECT_TRUE(trafficOk) << "post-recovery message " << m;
     }
+    ok = ok && trafficOk;
     MPI_Barrier(MPI_COMM_WORLD);
-    if (rank == 0) {
+    if (rank == 0 && trafficOk) {
         for (int m = 0; m < kPostRecoveryMsgs; m++) {
             const size_t off = (m + 1) * kMsgSize;
             const bool same = memcmp(recvBuf.data() + off, sendBuf.data() + off, kMsgSize) == 0;

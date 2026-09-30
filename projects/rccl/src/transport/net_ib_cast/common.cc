@@ -305,6 +305,7 @@ extern "C" ncclResult_t ncclIbCastGidGetQpState(void* comm, struct ncclIbGidQpSt
   for (int i = 0; i < out->nqps; i++) {
     struct ncclIbQp* qp = &base->qps[i];
     out->devIndex[i] = qp->devIndex;
+    out->rtrGidIndex[i] = qp->rtrAttr.localGidIndex;
     if (qp->qp == NULL) continue;
     struct ibv_qp_attr attr;
     struct ibv_qp_init_attr initAttr;
@@ -323,6 +324,16 @@ extern "C" ncclResult_t ncclIbCastGidGetDevState(void* comm, int devIndex, int* 
   if (base == NULL || state == NULL || base->resiliency == NULL) return ncclInvalidArgument;
   if (devIndex < 0 || devIndex >= base->resiliency->ndevs) return ncclInvalidArgument;
   *state = (int)base->resiliency->devs[devIndex].state.load(std::memory_order_acquire);
+  return ncclSuccess;
+}
+
+extern "C" ncclResult_t ncclIbCastGidGetRecoveryGidIndex(void* comm, int devIndex, int* gidIndex) {
+  struct ncclIbNetCommBase* base = IbCastGidCommBase(comm);
+  if (base == NULL || gidIndex == NULL || base->resiliency == NULL) return ncclInvalidArgument;
+  if (devIndex < 0 || devIndex >= NCCL_IB_MAX_DEVS_PER_NIC) return ncclInvalidArgument;
+  if (base->resiliency->portRecoveryAh[devIndex] == NULL || !base->resiliency->portRecoveryAhAttr[devIndex].is_global)
+    return ncclInvalidArgument;
+  *gidIndex = base->resiliency->portRecoveryAhAttr[devIndex].grh.sgid_index;
   return ncclSuccess;
 }
 
