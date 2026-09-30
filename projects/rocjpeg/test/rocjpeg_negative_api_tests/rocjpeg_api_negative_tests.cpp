@@ -1061,6 +1061,25 @@ int RocJpegApiNegativeTests::TestStreamParseFuzz() {
         accepted_cases.push_back({"SOF whose MCU holds six blocks", largest_mcu});
     }
 
+    // A single-component frame is not interleaved, so A.2.2 does not apply to it
+    // and its MCU is one data unit whatever the sampling factors say. 4x4 is one
+    // of the two layouts GetChromaSubsampling maps to 4:0:0, and summing the
+    // products there would read it as a 16-block MCU and reject a grayscale
+    // image the decoder supports.
+    {
+        const size_t gray_sof_offset = FindMarker(gray_seed, 0xC0);
+        if (gray_sof_offset + 12 > gray_seed.size()) {
+            std::cerr << "[seed/gray] the grayscale seed has no usable SOF0 segment" << std::endl;
+            return EXIT_FAILURE;
+        }
+        for (uint8_t factors : {static_cast<uint8_t>(0x11), static_cast<uint8_t>(0x44)}) {
+            std::vector<uint8_t> gray_frame = gray_seed;
+            gray_frame[gray_sof_offset + 11] = factors;
+            accepted_cases.push_back({factors == 0x11 ? "grayscale SOF sampling 1x1" : "grayscale SOF sampling 4x4",
+                                      gray_frame});
+        }
+    }
+
     for (const RegressionCase &regression : regressions) {
         RocJpegStatus rocjpeg_status = ParseExactBuffer(regression.data);
         if (rocjpeg_status == ROCJPEG_STATUS_SUCCESS) {

@@ -358,12 +358,19 @@ bool RocJpegStreamParser::ParseSOF() {
     // 48-block MCU, which GetChromaSubsampling happily classifies as 4:4:4. The
     // components of a baseline frame are all carried in one interleaved scan, so
     // the frame is where the limit can be applied.
+    //
+    // Only when the frame has more than one component, though. A.2.2 is the
+    // interleaved case; a single-component scan is non-interleaved and A.2.1
+    // gives it an MCU of exactly one data unit whatever H and V say. Summing the
+    // products there would reject 4x4 grayscale, which is one of the two
+    // layouts GetChromaSubsampling maps to 4:0:0.
     uint32_t blocks_per_mcu = 0;
     for (int32_t i = 0; i < jpeg_stream_parameters_.picture_parameter_buffer.num_components; i++) {
         blocks_per_mcu += jpeg_stream_parameters_.picture_parameter_buffer.components[i].h_sampling_factor *
                           jpeg_stream_parameters_.picture_parameter_buffer.components[i].v_sampling_factor;
     }
-    if (blocks_per_mcu > MAX_BLOCKS_PER_MCU) {
+    if (jpeg_stream_parameters_.picture_parameter_buffer.num_components > 1 &&
+        blocks_per_mcu > MAX_BLOCKS_PER_MCU) {
         ErrorLog(g_rocjpeg_logger, "Invalid JPEG: the frame header describes an MCU of " +
             ROCJPEG_TOSTR(static_cast<int>(blocks_per_mcu)) + " blocks; at most " +
             ROCJPEG_TOSTR(static_cast<int>(MAX_BLOCKS_PER_MCU)) + " are allowed!");
