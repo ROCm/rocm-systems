@@ -19,6 +19,8 @@
 #include <cstdlib>
 #include <regex>
 #include <string>
+#include <sys/syscall.h>
+#include <unistd.h>
 #include <vector>
 
 using namespace MPITestConstants;
@@ -741,6 +743,7 @@ constexpr int kHostCommTrafficClass   = 3;   // ncclConfig_t::trafficClass
 constexpr int kDeviceCommTrafficClass = 7;   // ncclDevCommRequirements::ginTrafficClass
 constexpr int kEnvServiceLevel        = 5;   // NCCL_IB_SL
 constexpr int kEnvTrafficClass        = 96;  // NCCL_IB_TC
+constexpr int kEnvGinTrafficClass     = 104; // NCCL_GIN_IB_TC
 
 // ibv_link_layer::IBV_LINK_LAYER_ETHERNET. On native InfiniBand the generic
 // traffic-class value programs SL while the GRH traffic-class field stays zero;
@@ -759,9 +762,10 @@ constexpr int kTrafficClassNodes = 2;
 
 struct GinQpTrafficClass
 {
-    int link_layer;
-    int service_level;
-    int traffic_class;
+    int  link_layer;
+    int  service_level;
+    int  traffic_class;
+    long tid;  // thread that programmed the QP
 };
 
 struct GinTrafficClassCapture
@@ -801,6 +805,59 @@ protected:
         return {minimum, maximum};
     }
 
+    static std::string appendedLog(const std::string& before, const std::string& after)
+    {
+        return after.size() >= before.size() ? after.substr(before.size()) : after;
+    }
+
+    // Both IB network plugins print the same QP RTR TRACE line, prefixed with
+    // host:pid:tid; IB-CAST prints it from IbCastQpRtr.
+    static std::vector<GinQpTrafficClass> parseQpRtrTrace(const std::string& log)
+    {
+        const std::regex qp_pattern(
+            R"(:[0-9]+:([0-9]+) \[[0-9]+\] .*(?:ncclIbQpRtr|IbCastQpRtr):.*ll=([0-9]+).*sl: ([0-9]+) tc: ([0-9]+))");
+        std::vector<GinQpTrafficClass> qps;
+        for(std::sregex_iterator it(log.begin(), log.end(), qp_pattern), end; it != end; ++it)
+        {
+            qps.push_back({std::stoi((*it)[2].str()),
+                           std::stoi((*it)[3].str()),
+                           std::stoi((*it)[4].str()),
+                           std::stol((*it)[1].str())});
+        }
+        return qps;
+    }
+
+    // The proxy thread connects the collective network transport. GIN and the
+    // host RMA proxy connect on the calling thread, including the GIN contexts
+    // that communicator init creates for its own device communicator.
+    static std::vector<GinQpTrafficClass> proxyThreadQps(
+        const std::vector<GinQpTrafficClass>& qps)
+    {
+        const long caller = static_cast<long>(syscall(SYS_gettid));
+        std::vector<GinQpTrafficClass> transport;
+        for(const auto& qp : qps)
+            if(qp.tid != caller) transport.push_back(qp);
+        return transport;
+    }
+
+    // RCCL connects the collective network transport during communicator init
+    // unless NCCL_RUNTIME_CONNECT=1 defers it to the first collective, so one
+    // small AllReduce guarantees those QPs exist in either mode. A failure on one
+    // rank skips the others out of this helper only, so callers must return on
+    // HasFatalFailure() || IsSkipped() before the next collective.
+    void runConnectingAllReduce()
+    {
+        constexpr size_t kCount = 1024;
+        void* buf = nullptr;
+        ASSERT_MPI_EQ(hipSuccess, hipMalloc(&buf, kCount * sizeof(float)));
+        auto buf_guard = makeDeviceBufferAutoGuard(buf);
+        ASSERT_MPI_EQ(hipSuccess, hipMemset(buf, 0, kCount * sizeof(float)));
+        ASSERT_MPI_EQ(ncclSuccess,
+                      ncclAllReduce(buf, buf, kCount, ncclFloat, ncclSum,
+                                    getActiveCommunicator(), getActiveStream()));
+        ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+    }
+
     GinTrafficClassCapture captureGinQpTrafficClass(
         int requested_traffic_class,
         const MPIHelpers::TestLogAssertionContext& log_ctx)
@@ -830,26 +887,13 @@ protected:
         // The log is sampled immediately before and after ncclDevCommCreate, so
         // the appended text covers only this device communicator. The existing
         // devCommCreate marker narrows it further to the last GIN setup.
-        const std::string after = log_ctx.readNcclDebugLog();
-        const std::string appended =
-            after.size() >= before.size() ? after.substr(before.size()) : after;
+        const std::string appended = appendedLog(before, log_ctx.readNcclDebugLog());
         const std::string marker = "devCommCreate: creating";
         const size_t marker_pos = appended.rfind(marker);
         capture.saw_create_marker = marker_pos != std::string::npos;
         const std::string qp_log =
             capture.saw_create_marker ? appended.substr(marker_pos) : appended;
-
-        const std::regex qp_pattern(
-            R"(ncclIbQpRtr:.*ll=([0-9]+).*sl: ([0-9]+) tc: ([0-9]+))");
-        for(std::sregex_iterator it(qp_log.begin(), qp_log.end(), qp_pattern), end;
-            it != end;
-            ++it)
-        {
-            capture.qps.push_back(
-                {std::stoi((*it)[1].str()),
-                 std::stoi((*it)[2].str()),
-                 std::stoi((*it)[3].str())});
-        }
+        capture.qps = parseQpRtrTrace(qp_log);
 
         capture.destroy_result =
             ncclDevCommDestroy(getActiveCommunicator(), &dev_comm);
@@ -859,15 +903,17 @@ protected:
     static bool qpsMatch(
         const std::vector<GinQpTrafficClass>& qps,
         int expected_service_level,
-        int expected_roce_traffic_class)
+        int expected_roce_traffic_class,
+        const char* kind = "GIN")
     {
         for(const auto& qp : qps)
         {
             if(qp.service_level != expected_service_level)
             {
                 fprintf(stderr,
-                        "Unexpected GIN QP traffic class: ll=%d sl=%d tc=%d; "
+                        "Unexpected %s QP traffic class: ll=%d sl=%d tc=%d; "
                         "expected sl=%d\n",
+                        kind,
                         qp.link_layer,
                         qp.service_level,
                         qp.traffic_class,
@@ -880,8 +926,9 @@ protected:
             if(qp.traffic_class != expected_tc)
             {
                 fprintf(stderr,
-                        "Unexpected GIN QP traffic class: ll=%d sl=%d tc=%d; "
+                        "Unexpected %s QP traffic class: ll=%d sl=%d tc=%d; "
                         "expected tc=%d\n",
+                        kind,
                         qp.link_layer,
                         qp.service_level,
                         qp.traffic_class,
@@ -900,9 +947,10 @@ protected:
     }
 
     // The GIN contexts are created first inside ncclDevCommCreate, so their queue
-    // pairs lead the captured window. The ordinary transport connections that
-    // follow in the same call always carry the host communicator value, so
-    // compare only the leading run sharing one SL/TC pair.
+    // pairs lead the captured window. Connections set up later in the same call,
+    // such as the host RMA proxy when init has not already connected it, can
+    // carry a different value, so compare only the leading run sharing one SL/TC
+    // pair.
     static std::vector<GinQpTrafficClass> leadingGinQps(
         const std::vector<GinQpTrafficClass>& qps)
     {
@@ -919,10 +967,10 @@ protected:
     }
 };
 
-// Run this case in a fresh process with NCCL_IB_SL/NCCL_IB_TC unset. It
-// observes the QP RTR attributes submitted to ibv_modify_qp, proving that a
-// device-communicator traffic class overrides the host communicator value and
-// that an unset device value falls back to it.
+// Run this case in a fresh process with NCCL_IB_SL, NCCL_IB_TC and
+// NCCL_GIN_IB_TC unset. It observes the QP RTR attributes submitted to
+// ibv_modify_qp, proving that a device-communicator traffic class overrides the
+// host communicator value and that an unset device value falls back to it.
 TEST_F(GinTrafficClassMPITest, DeviceHostPrecedence)
 {
     const auto proxy_prerequisites = collectiveBoolSummary(proxyPrerequisitesMet());
@@ -930,11 +978,11 @@ TEST_F(GinTrafficClassMPITest, DeviceHostPrecedence)
         GTEST_SKIP() << "Requires NCCL_GIN_TYPE=2 and runtime-supported cuMem";
     ASSERT_MPI_TRUE(proxy_prerequisites[0] == 1 && proxy_prerequisites[1] == 1);
 
-    const bool local_ib_env_unset =
-        envParamIsUnset("NCCL_IB_SL") && envParamIsUnset("NCCL_IB_TC");
+    const bool local_ib_env_unset = envParamIsUnset("NCCL_IB_SL") && envParamIsUnset("NCCL_IB_TC")
+                                    && envParamIsUnset("NCCL_GIN_IB_TC");
     const auto ib_env_unset = collectiveBoolSummary(local_ib_env_unset);
     if(ib_env_unset[0] == 0 && ib_env_unset[1] == 0)
-        GTEST_SKIP() << "Run with NCCL_IB_SL and NCCL_IB_TC unset";
+        GTEST_SKIP() << "Run with NCCL_IB_SL, NCCL_IB_TC and NCCL_GIN_IB_TC unset";
     ASSERT_MPI_TRUE(ib_env_unset[0] == 1 && ib_env_unset[1] == 1);
 
     if(!validateTestPrerequisites(/*min_processes=*/kTrafficClassRanks,
@@ -967,7 +1015,7 @@ TEST_F(GinTrafficClassMPITest, DeviceHostPrecedence)
         device.saw_create_marker && device.qps.empty();
     const auto trace_unavailable = collectiveBoolSummary(local_trace_unavailable);
     if(trace_unavailable[0] == 1 && trace_unavailable[1] == 1)
-        GTEST_SKIP() << "RCCL was built without TRACE=ON; QP RTR attributes are unavailable";
+        GTEST_SKIP() << "No QP RTR traces parsed: RCCL built without TRACE=ON, or the trace format changed";
     const bool local_trace_ready = device.saw_create_marker && !device.qps.empty();
     const auto trace_ready = collectiveBoolSummary(local_trace_ready);
     ASSERT_MPI_TRUE(trace_ready[0] == 1 && trace_ready[1] == 1);
@@ -989,9 +1037,9 @@ TEST_F(GinTrafficClassMPITest, DeviceHostPrecedence)
                              /*expected_roce_traffic_class=*/kHostCommTrafficClass));
 }
 
-// Run in a separate process with NCCL_IB_SL=5 and NCCL_IB_TC=96. Distinct
-// values prove the two explicit IB settings independently override both the
-// device-communicator value and the host communicator value.
+// Run in a separate process with NCCL_IB_SL=5, NCCL_IB_TC=96 and NCCL_GIN_IB_TC
+// unset. Distinct values prove the two explicit IB settings independently
+// override both the device-communicator value and the host communicator value.
 TEST_F(GinTrafficClassMPITest, ExplicitIbEnvironmentOverrides)
 {
     const auto proxy_prerequisites = collectiveBoolSummary(proxyPrerequisitesMet());
@@ -1001,11 +1049,12 @@ TEST_F(GinTrafficClassMPITest, ExplicitIbEnvironmentOverrides)
 
     const bool local_env_matches =
         MPIHelpers::getEnvParam<int>("NCCL_IB_SL", kEnvParamUnset) == kEnvServiceLevel
-        && MPIHelpers::getEnvParam<int>("NCCL_IB_TC", kEnvParamUnset) == kEnvTrafficClass;
+        && MPIHelpers::getEnvParam<int>("NCCL_IB_TC", kEnvParamUnset) == kEnvTrafficClass
+        && envParamIsUnset("NCCL_GIN_IB_TC");
     const auto env_matches = collectiveBoolSummary(local_env_matches);
     if(env_matches[0] == 0 && env_matches[1] == 0)
         GTEST_SKIP() << "Run in a fresh process with NCCL_IB_SL=" << kEnvServiceLevel
-                     << " and NCCL_IB_TC=" << kEnvTrafficClass;
+                     << ", NCCL_IB_TC=" << kEnvTrafficClass << " and NCCL_GIN_IB_TC unset";
     ASSERT_MPI_TRUE(env_matches[0] == 1 && env_matches[1] == 1);
 
     if(!validateTestPrerequisites(/*min_processes=*/kTrafficClassRanks,
@@ -1037,7 +1086,7 @@ TEST_F(GinTrafficClassMPITest, ExplicitIbEnvironmentOverrides)
         capture.saw_create_marker && capture.qps.empty();
     const auto trace_unavailable = collectiveBoolSummary(local_trace_unavailable);
     if(trace_unavailable[0] == 1 && trace_unavailable[1] == 1)
-        GTEST_SKIP() << "RCCL was built without TRACE=ON; QP RTR attributes are unavailable";
+        GTEST_SKIP() << "No QP RTR traces parsed: RCCL built without TRACE=ON, or the trace format changed";
     const bool local_trace_ready = capture.saw_create_marker && !capture.qps.empty();
     const auto trace_ready = collectiveBoolSummary(local_trace_ready);
     ASSERT_MPI_TRUE(trace_ready[0] == 1 && trace_ready[1] == 1);
@@ -1046,6 +1095,167 @@ TEST_F(GinTrafficClassMPITest, ExplicitIbEnvironmentOverrides)
     ASSERT_MPI_TRUE(qpsMatch(gin_qps,
                              /*expected_service_level=*/kEnvServiceLevel,
                              /*expected_roce_traffic_class=*/kEnvTrafficClass));
+}
+
+// Run in a separate process with NCCL_IB_SL=5, NCCL_IB_TC=96 and
+// NCCL_GIN_IB_TC=104. NCCL_GIN_IB_TC must win on the GIN queue pairs while the
+// collective network-transport queue pairs keep NCCL_IB_TC, and neither may
+// disturb the NCCL_IB_SL service level.
+TEST_F(GinTrafficClassMPITest, GinIbTcOverridesIbTc)
+{
+    const auto proxy_prerequisites = collectiveBoolSummary(proxyPrerequisitesMet());
+    if(proxy_prerequisites[0] == 0 && proxy_prerequisites[1] == 0)
+        GTEST_SKIP() << "Requires NCCL_GIN_TYPE=2 and NCCL_CUMEM_ENABLE=1";
+    ASSERT_MPI_TRUE(proxy_prerequisites[0] == 1 && proxy_prerequisites[1] == 1);
+
+    const bool local_env_matches =
+        MPIHelpers::getEnvParam<int>("NCCL_IB_SL", kEnvParamUnset) == kEnvServiceLevel
+        && MPIHelpers::getEnvParam<int>("NCCL_IB_TC", kEnvParamUnset) == kEnvTrafficClass
+        && MPIHelpers::getEnvParam<int>("NCCL_GIN_IB_TC", kEnvParamUnset) == kEnvGinTrafficClass;
+    const auto env_matches = collectiveBoolSummary(local_env_matches);
+    if(env_matches[0] == 0 && env_matches[1] == 0)
+        GTEST_SKIP() << "Run in a fresh process with NCCL_IB_SL=" << kEnvServiceLevel
+                     << ", NCCL_IB_TC=" << kEnvTrafficClass
+                     << " and NCCL_GIN_IB_TC=" << kEnvGinTrafficClass;
+    ASSERT_MPI_TRUE(env_matches[0] == 1 && env_matches[1] == 1);
+
+    if(!validateTestPrerequisites(/*min_processes=*/kTrafficClassRanks,
+                                  /*max_processes=*/kTrafficClassRanks,
+                                  /*require_power_of_two=*/false,
+                                  /*min_nodes=*/kTrafficClassNodes,
+                                  /*max_nodes=*/kTrafficClassNodes))
+        GTEST_SKIP() << "Requires exactly " << kTrafficClassRanks << " ranks on "
+                     << kTrafficClassNodes << " nodes";
+
+    auto reset_debug =
+        makeScopeGuard([]() { MPIHelpers::resetNcclDebugState(); });
+    MPIHelpers::MpiEnvGuard debug("NCCL_DEBUG", "TRACE");
+    MPIHelpers::MpiEnvGuard debug_subsys("NCCL_DEBUG_SUBSYS", "INIT,NET");
+    MPIHelpers::resetNcclDebugState();
+    MPIHelpers::TestLogAssertionContext log_ctx(
+        MPIHelpers::makeNcclDebugFileAssertionOptions(getTestMpiRank()));
+
+    const std::string before_init = log_ctx.readNcclDebugLog();
+    configured_traffic_class_ = kHostCommTrafficClass;
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    SKIP_IF_GIN_UNSUPPORTED();
+    runConnectingAllReduce();
+    if(HasFatalFailure() || IsSkipped())
+        return;
+    const std::vector<GinQpTrafficClass> transport_qps =
+        proxyThreadQps(parseQpRtrTrace(appendedLog(before_init, log_ctx.readNcclDebugLog())));
+
+    GinTrafficClassCapture capture =
+        captureGinQpTrafficClass(kDeviceCommTrafficClass, log_ctx);
+    ASSERT_MPI_EQ(ncclSuccess, capture.create_result);
+    ASSERT_MPI_EQ(ncclSuccess, capture.destroy_result);
+    ASSERT_MPI_GT(capture.connection_count, 0);
+    ASSERT_MPI_TRUE(capture.proxy_handles);
+    const bool local_trace_unavailable =
+        capture.saw_create_marker && capture.qps.empty();
+    const auto trace_unavailable = collectiveBoolSummary(local_trace_unavailable);
+    if(trace_unavailable[0] == 1 && trace_unavailable[1] == 1)
+        GTEST_SKIP() << "No QP RTR traces parsed: RCCL built without TRACE=ON, or the trace format changed";
+    const bool local_trace_ready = capture.saw_create_marker && !capture.qps.empty();
+    const auto trace_ready = collectiveBoolSummary(local_trace_ready);
+    ASSERT_MPI_TRUE(trace_ready[0] == 1 && trace_ready[1] == 1);
+    const std::vector<GinQpTrafficClass> gin_qps = leadingGinQps(capture.qps);
+    ASSERT_MPI_TRUE(containsEthernetQp(gin_qps));
+    ASSERT_MPI_TRUE(qpsMatch(gin_qps,
+                             /*expected_service_level=*/kEnvServiceLevel,
+                             /*expected_roce_traffic_class=*/kEnvGinTrafficClass));
+    ASSERT_MPI_TRUE(containsEthernetQp(transport_qps));
+    ASSERT_MPI_TRUE(qpsMatch(transport_qps,
+                             /*expected_service_level=*/kEnvServiceLevel,
+                             /*expected_roce_traffic_class=*/kEnvTrafficClass,
+                             "transport"));
+}
+
+// Run in a separate process with NCCL_IB_SL and NCCL_IB_TC unset and
+// NCCL_GIN_IB_TC=104. The GIN traffic class then overrides both the
+// device-communicator and host values on the GIN queue pairs, the service level
+// still follows that device/host precedence, and the collective
+// network-transport queue pairs keep the host value.
+TEST_F(GinTrafficClassMPITest, GinIbTcOverridesDeviceAndHost)
+{
+    const auto proxy_prerequisites = collectiveBoolSummary(proxyPrerequisitesMet());
+    if(proxy_prerequisites[0] == 0 && proxy_prerequisites[1] == 0)
+        GTEST_SKIP() << "Requires NCCL_GIN_TYPE=2 and NCCL_CUMEM_ENABLE=1";
+    ASSERT_MPI_TRUE(proxy_prerequisites[0] == 1 && proxy_prerequisites[1] == 1);
+
+    const bool local_env_matches =
+        envParamIsUnset("NCCL_IB_SL") && envParamIsUnset("NCCL_IB_TC")
+        && MPIHelpers::getEnvParam<int>("NCCL_GIN_IB_TC", kEnvParamUnset) == kEnvGinTrafficClass;
+    const auto env_matches = collectiveBoolSummary(local_env_matches);
+    if(env_matches[0] == 0 && env_matches[1] == 0)
+        GTEST_SKIP() << "Run in a fresh process with NCCL_IB_SL and NCCL_IB_TC unset and "
+                     << "NCCL_GIN_IB_TC=" << kEnvGinTrafficClass;
+    ASSERT_MPI_TRUE(env_matches[0] == 1 && env_matches[1] == 1);
+
+    if(!validateTestPrerequisites(/*min_processes=*/kTrafficClassRanks,
+                                  /*max_processes=*/kTrafficClassRanks,
+                                  /*require_power_of_two=*/false,
+                                  /*min_nodes=*/kTrafficClassNodes,
+                                  /*max_nodes=*/kTrafficClassNodes))
+        GTEST_SKIP() << "Requires exactly " << kTrafficClassRanks << " ranks on "
+                     << kTrafficClassNodes << " nodes";
+
+    auto reset_debug =
+        makeScopeGuard([]() { MPIHelpers::resetNcclDebugState(); });
+    MPIHelpers::MpiEnvGuard debug("NCCL_DEBUG", "TRACE");
+    MPIHelpers::MpiEnvGuard debug_subsys("NCCL_DEBUG_SUBSYS", "INIT,NET");
+    MPIHelpers::resetNcclDebugState();
+    MPIHelpers::TestLogAssertionContext log_ctx(
+        MPIHelpers::makeNcclDebugFileAssertionOptions(getTestMpiRank()));
+
+    const std::string before_init = log_ctx.readNcclDebugLog();
+    configured_traffic_class_ = kHostCommTrafficClass;
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    SKIP_IF_GIN_UNSUPPORTED();
+    runConnectingAllReduce();
+    if(HasFatalFailure() || IsSkipped())
+        return;
+    const std::vector<GinQpTrafficClass> transport_qps =
+        proxyThreadQps(parseQpRtrTrace(appendedLog(before_init, log_ctx.readNcclDebugLog())));
+
+    GinTrafficClassCapture device =
+        captureGinQpTrafficClass(kDeviceCommTrafficClass, log_ctx);
+    ASSERT_MPI_EQ(ncclSuccess, device.create_result);
+    ASSERT_MPI_EQ(ncclSuccess, device.destroy_result);
+    ASSERT_MPI_GT(device.connection_count, 0);
+    ASSERT_MPI_TRUE(device.proxy_handles);
+    const bool local_trace_unavailable =
+        device.saw_create_marker && device.qps.empty();
+    const auto trace_unavailable = collectiveBoolSummary(local_trace_unavailable);
+    if(trace_unavailable[0] == 1 && trace_unavailable[1] == 1)
+        GTEST_SKIP() << "No QP RTR traces parsed: RCCL built without TRACE=ON, or the trace format changed";
+    const bool local_trace_ready = device.saw_create_marker && !device.qps.empty();
+    const auto trace_ready = collectiveBoolSummary(local_trace_ready);
+    ASSERT_MPI_TRUE(trace_ready[0] == 1 && trace_ready[1] == 1);
+    const std::vector<GinQpTrafficClass> device_qps = leadingGinQps(device.qps);
+    ASSERT_MPI_TRUE(containsEthernetQp(device_qps));
+    ASSERT_MPI_TRUE(qpsMatch(device_qps,
+                             /*expected_service_level=*/kDeviceCommTrafficClass,
+                             /*expected_roce_traffic_class=*/kEnvGinTrafficClass));
+
+    GinTrafficClassCapture host =
+        captureGinQpTrafficClass(NCCL_CONFIG_UNDEF_INT, log_ctx);
+    ASSERT_MPI_EQ(ncclSuccess, host.create_result);
+    ASSERT_MPI_EQ(ncclSuccess, host.destroy_result);
+    ASSERT_MPI_GT(host.connection_count, 0);
+    ASSERT_MPI_TRUE(host.proxy_handles);
+    ASSERT_MPI_TRUE(host.saw_create_marker);
+    const std::vector<GinQpTrafficClass> host_qps = leadingGinQps(host.qps);
+    ASSERT_MPI_TRUE(containsEthernetQp(host_qps));
+    ASSERT_MPI_TRUE(qpsMatch(host_qps,
+                             /*expected_service_level=*/kHostCommTrafficClass,
+                             /*expected_roce_traffic_class=*/kEnvGinTrafficClass));
+
+    ASSERT_MPI_TRUE(containsEthernetQp(transport_qps));
+    ASSERT_MPI_TRUE(qpsMatch(transport_qps,
+                             /*expected_service_level=*/kHostCommTrafficClass,
+                             /*expected_roce_traffic_class=*/kHostCommTrafficClass,
+                             "transport"));
 }
 
 /**

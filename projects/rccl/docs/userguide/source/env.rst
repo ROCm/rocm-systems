@@ -406,6 +406,25 @@ Values accepted
 ^^^^^^^^^^^^^^^
 The default value is the traffic class set by NCCL_IB_TC, which defaults to 0 if not set.
 
+NCCL_GIN_IB_TC
+--------------
+(since 2.30.7)
+
+Defines the InfiniBand traffic class for GPU-initiated networking (GIN)
+connections, independently of NCCL_IB_TC. GIN traffic can then use a different
+RoCE traffic class from the collective and point-to-point connections, which
+keep using NCCL_IB_TC. The one-sided host RMA operations run on the same IB
+proxy backend and therefore also use this traffic class.
+
+In RCCL, only the IB proxy GIN backend (``NCCL_GIN_TYPE=2``) reads this variable.
+The RCCL device API and GIN how-to describes the other backends.
+
+Values accepted
+^^^^^^^^^^^^^^^
+The default value is the traffic class set by NCCL_IB_TC. If neither is set, GIN
+uses the device communicator ``ginTrafficClass``, then the communicator traffic
+class, and 0 if none is set.
+
 NCCL_IB_RETURN_ASYNC_EVENTS
 ---------------------------
 (since 2.23)
