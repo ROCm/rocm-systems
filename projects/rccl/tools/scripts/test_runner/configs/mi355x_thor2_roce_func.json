@@ -2668,6 +2668,42 @@
         }
       ]
     },
+    "ce_allreduce_recv_offset": {
+      "extends": "ce_base",
+      "num_ranks": 2,
+      "num_gpus": 2,
+      "timeout": 180,
+      "env_variables": {
+        "NCCL_DEBUG_SUBSYS": "INIT,COLL,REG",
+        "NCCL_LOCAL_REGISTER": "1",
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
+        "NCCL_WIN_ENABLE": "1",
+        "RCCL_CE_ALLREDUCE": "1",
+        "RCCL_FORCE_CE_ALLREDUCE": "1"
+      },
+      "tests": [
+        {
+          "name": "CE_RecvOffset_Symmetric_Lsa",
+          "description": "Registered CE AllReduce into a multi-segment symmetric window at a non-zero receive offset uses the window-relative offset",
+          "test_filter": "UBR_MultiSegment.Symmetric_Lsa"
+        },
+        {
+          "name": "CE_RecvOffset_BeforeLegacyRecvOffsetCorruptsResult",
+          "description": "BEFORE control: fault injection restores the legacy base-relative offset and the result must be corrupted (ENABLE_FAULT_INJECTION build)",
+          "test_filter": "UBR_MultiSegment.Symmetric_Lsa_BeforeLegacyRecvOffsetCorruptsResult"
+        },
+        {
+          "name": "CE_RecvOffset_RecvRangePastWindowFallsBack",
+          "description": "Receive range past the window tail disables the registered CE fast path and falls back to staging",
+          "test_filter": "UBR_MultiSegment.Symmetric_Lsa_RecvRangePastWindowFallsBack"
+        },
+        {
+          "name": "CE_RecvOffset_RecvRangePastWindowChunkedFallback",
+          "description": "Chunked registered CE AllReduce whose receive range runs past the window tail falls back to staging for every chunk",
+          "test_filter": "UBR_MultiSegment.Symmetric_Lsa_RecvRangePastWindowChunkedFallback"
+        }
+      ]
+    },
     "ce_fault_injection": {
       "extends": "ce_base",
       "num_ranks": 2,
@@ -3424,6 +3460,12 @@
       "name": "CE AllReduce LSA Guard (multi-node)",
       "description": "ncclCeAllReduce must reject a comm spanning two nodes before staging or any launch; forced CE AllReduce must never be selected.",
       "config": "ce_allreduce_lsa_guard_multinode",
+      "enabled": true
+    },
+    {
+      "name": "CE AllReduce Receive Offset (registered CE, single node)",
+      "description": "Registered CE AllReduce into multi-segment symmetric windows: receive-offset AFTER/BEFORE regression and past-window staging fallback.",
+      "config": "ce_allreduce_recv_offset",
       "enabled": true
     },
     {
