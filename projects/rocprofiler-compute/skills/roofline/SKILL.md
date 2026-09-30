@@ -33,12 +33,13 @@ Speed-of-Light and the `memory` skill instead. Confirm support for a new
 architecture against
 [compatible-accelerators.rst](../../docs/reference/compatible-accelerators.rst).
 
-`--device` selects the GPU for the roofline microbenchmarks. It does not
+`--roofline-device` selects the GPU for the roofline microbenchmarks. It does not
 choose which GPU the application runs on; use `HIP_VISIBLE_DEVICES` for that.
 
-See [standalone roofline](../../docs/how-to/profile/mode.rst) for `--roof-only`
-and `--bench-only`, which run the microbenchmarks without profiling an
-application.
+See [standalone roofline](../../docs/how-to/profile/mode.rst) for two more options:
+
+- `--roofline` collects only roofline data.
+- `--roofline-bench-only` runs only the microbenchmarks, without an application.
 
 ## 2. Read the table
 
@@ -84,11 +85,11 @@ the hierarchy.
 ```bash
 # Ceilings for the precision the kernel actually uses
 rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b roof \
-    -R FP16 BF16
+    -R FP16,BF16
 
 # Ceilings for a specific level
 rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b roof \
-    -m HBM L2
+    -m HBM,L2
 ```
 
 `-R` defaults to FP32. A mixed-precision or matrix kernel compared against the

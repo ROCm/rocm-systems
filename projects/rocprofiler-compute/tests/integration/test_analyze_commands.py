@@ -298,6 +298,32 @@ def test_filter_block_6(binary_handler_analyze_rocprof_compute, capsys):
         common.clean_output_dir(config["cleanup"], workload_dir)
 
 
+@pytest.mark.filter_block
+def test_filter_panel_shortcuts(binary_handler_analyze_rocprof_compute, capsys):
+    """--speed-of-light/--memory-chart/--roofline show the same panels as -b."""
+    shortcuts = ["--speed-of-light", "--memory-chart", "-b", "5"]
+    for dir in ("tests/workloads/vcopy/MI200", "tests/workloads/vcopy/MI350"):
+        workload_dir = integration_common.setup_workload_dir(
+            dir, param_id=Path(dir).name
+        )
+        outputs = []
+        for options in (shortcuts, ["--block", "5,2,3"]):
+            capsys.readouterr()
+            code = binary_handler_analyze_rocprof_compute([
+                "analyze",
+                "--path",
+                workload_dir,
+                *options,
+            ])
+            assert code == 0
+            # Compare the report only; the log lines before it can differ
+            out = capsys.readouterr().out
+            outputs.append(out[out.index("0. Top Stats") :])
+        assert outputs[0] == outputs[1]
+
+        common.clean_output_dir(config["cleanup"], workload_dir)
+
+
 @pytest.mark.serial
 def test_filter_kernel_1(binary_handler_analyze_rocprof_compute):
     for dir in indirs:

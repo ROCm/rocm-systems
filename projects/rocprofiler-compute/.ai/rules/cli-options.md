@@ -12,6 +12,7 @@ Glob covers most filtering cases and is much easier for users to write.
 
 ```console
 rocprof-compute --select-kernel '*my-kernel*'
+```
 
 Regex may be offered **in addition** to glob where it is genuinely needed, never
 as the replacement.
@@ -30,17 +31,55 @@ single dash, such as `-v`.
 
 User-facing options are named for what they enable, not what they disable: use
 `--roofline`, not `--no-roofline`. Debug and developer options may use disabling
-names since customers rarely touch them.
+names since customers rarely touch them. `--no-roof` and `--no-native-tool` are
+such exceptions; mark them as "(advanced)" in their help.
+
+## Renaming and Deprecation
+
+A renamed option must keep its old name working for now.
+
+To do this, add the old name with `add_deprecated_alias`:
+
+```python
+new_option = group.add_argument("--roofline-device", dest="device", ...)
+add_deprecated_alias(group, "--device", new_option)
+```
+
+The old name then:
+
+- still works the same as the new name
+- does not show up in `--help`
+- prints a warning that tells the user to use the new name
+
+Keep the same `dest` as before, so the rest of the code does not need to change.
+
+Every rename also needs these updates:
+
+- add the new name to `CHANGELOG.md` under "Changed"
+- add the old name to `CHANGELOG.md` under "Upcoming changes", since it will be removed later
+- use the new name in the docs, tests, and `skills/`
 
 ## Arguments
 
-A list of values is passed as one comma-separated argument.
+A list of values is passed as one comma-separated argument. Use
+`action=CommaListAction` (with `item_type` / `item_choices` for per-value
+conversion and validation); it also accepts space-separated values.
 
 ```console
 --roofline-data-types FP16,FP32,FP64
 ```
 
 ## Help Messages
+
+Always set `metavar` so the help shows what the option takes. Never leave it
+empty (`metavar=""`).
+
+- If the value is required, use `metavar="<arg>"`.
+- If the value is optional (`nargs="?"` or `nargs="*"`), use `metavar="arg"`.
+  The help adds the `[]` automatically.
+
+`CliHelpFormatter` adds `...` to options that take a list, so `<args>` shows as
+`<args>...` and `args` shows as `[args]...`.
 
 For an option that takes an argument, the help message follows these rules:
 

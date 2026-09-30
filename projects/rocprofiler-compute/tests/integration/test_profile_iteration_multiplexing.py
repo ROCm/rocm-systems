@@ -396,7 +396,7 @@ def test_iteration_multiplexing_data_types(
         "analyze",
         "--path",
         workload_dir,
-        "--roofline-data-type",
+        "--roofline-data-types",
         "FP32",
     ])
     assert code_fp32 == 0
@@ -405,7 +405,7 @@ def test_iteration_multiplexing_data_types(
         "analyze",
         "--path",
         workload_dir,
-        "--roofline-data-type",
+        "--roofline-data-types",
         "FP16",
     ])
     assert code_fp16 == 0

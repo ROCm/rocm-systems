@@ -11,6 +11,7 @@ from abc import abstractmethod
 from pathlib import Path
 from typing import Any, Optional, Union
 
+from argparser import PROFILE_SELECTION_CONFLICT
 from pc_sampling.pc_sampling_profile import PCSamplingProfile
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
@@ -250,18 +251,8 @@ class RocProfCompute_Base:
             )
         self._selected_frameworks: set[str] = selected_frameworks
 
-        if (
-            sum((
-                bool(args.filter_blocks),
-                bool(args.set_selected),
-                bool(args.roof_only),
-            ))
-            > 1
-        ):
-            console_error(
-                "--block, --set, and --roof-only are mutually exclusive options. "
-                "Please use only one of them."
-            )
+        if args.filter_blocks and args.set_selected:
+            console_error(PROFILE_SELECTION_CONFLICT)
 
         if args.no_native_tool and args.iteration_multiplexing is not None:
             console_error(
@@ -367,7 +358,7 @@ class RocProfCompute_Base:
             args.remaining = ""
 
         self._filter_blocks = self._soc.profiling_setup()
-        # --set and --roof-only resolve to block ids here, so store them back on
+        # --set resolves to block ids here, so store them back on
         # the args every later stage reads.
         self.__args.filter_blocks = self._filter_blocks
 

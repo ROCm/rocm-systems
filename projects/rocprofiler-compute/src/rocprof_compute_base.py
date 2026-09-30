@@ -12,7 +12,12 @@ from pathlib import Path
 from typing import Any, Optional
 
 import config
-from argparser import omniarg_parser
+from argparser import (
+    PROFILE_SELECTION_CONFLICT,
+    CliHelpFormatter,
+    apply_panel_shortcuts,
+    omniarg_parser,
+)
 from pc_sampling.pc_sampling_profile import (
     PC_SAMPLING_DEFAULT_INTERVALS,
     pc_sampling_interval_limits,
@@ -291,9 +296,7 @@ class RocProfCompute:
                 "Command line interface for AMD's GPU profiler, ROCm Compute Profiler"
             ),
             prog="tool",
-            formatter_class=lambda prog: argparse.RawTextHelpFormatter(
-                prog, max_help_position=30
-            ),
+            formatter_class=lambda prog: CliHelpFormatter(prog, max_help_position=30),
             usage="rocprof-compute [mode] [options]",
         )
         omniarg_parser(
@@ -311,6 +314,9 @@ class RocProfCompute:
             self.handle_analyze_args()
 
     def handle_profile_args(self) -> None:
+        apply_panel_shortcuts(self.__args, "filter_blocks")
+        # --roofline and -b 4 both profile roofline data only
+        self.__args.roof_only = self.__args.filter_blocks == ["4"]
         # Handle list operations first - these are independent and exit immediately
         if getattr(self.__args, "list_sets", False):
             return
@@ -320,6 +326,7 @@ class RocProfCompute:
     def handle_analyze_args(self) -> None:
         """Handle analyze-specific argument processing"""
         args = self.__args
+        apply_panel_shortcuts(args, "filter_metrics")
         operator_filter = (
             args.torch_operator is not None or args.triton_operator is not None
         )
@@ -601,28 +608,21 @@ class RocProfCompute:
     def _validate_profile_mode_arguments(self) -> None:
         """Validate that the profile-mode invocation is internally consistent.
 
-        Covers the mutual exclusion among action-selection flags
-        (--block, --set, --roof-only, --bench-only) and the
-        --bench-only / --no-roof conflict.
+        Covers the mutual exclusion among action-selection flags.
         """
         args = self.__args
         if (
             sum((
                 bool(getattr(args, "filter_blocks", None)),
                 bool(getattr(args, "set_selected", None)),
-                bool(getattr(args, "roof_only", False)),
                 bool(getattr(args, "bench_only", False)),
             ))
             > 1
         ):
-            console_error(
-                "--block, --set, --roof-only, and --bench-only"
-                " are mutually exclusive options."
-                " Please use only one of them."
-            )
+            console_error(PROFILE_SELECTION_CONFLICT)
 
         if getattr(args, "bench_only", False) and getattr(args, "no_roof", False):
-            console_error("--bench-only cannot be used with --no-roof.")
+            console_error("--roofline-bench-only cannot be used with --no-roof.")
 
     def _resolve_pc_sampling_interval(self) -> None:
         """Apply the method-aware default for --pc-sampling-interval and

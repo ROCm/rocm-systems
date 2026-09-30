@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Integration tests for the profile --sort option."""
+"""Integration tests for the analyze --roofline-sort option."""
 
 import inspect
 from pathlib import Path
@@ -22,10 +22,10 @@ def test_roof_sort_dispatches(
     binary_handler_profile_rocprof_compute,
     binary_handler_analyze_rocprof_compute,
 ):
-    """Profile creates CSV; analyze with --sort dispatches generates output."""
+    """Profile creates CSV; analyze with --roofline-sort dispatches generates output."""
     skip_unsupported_roofline_soc()
 
-    profile_options = ["--device", "0", "--roof-only"]
+    profile_options = ["--roofline-device", "0", "--roofline"]
     workload_dir = common.get_output_dir()
     returncode = binary_handler_profile_rocprof_compute(
         config, workload_dir, profile_options, check_success=False, roof=True
@@ -39,7 +39,7 @@ def test_roof_sort_dispatches(
         "analyze",
         "--path",
         workload_dir,
-        "--sort",
+        "--roofline-sort",
         "dispatches",
     ])
     assert code == 0
@@ -55,10 +55,10 @@ def test_roof_sort_kernels(
     binary_handler_profile_rocprof_compute,
     binary_handler_analyze_rocprof_compute,
 ):
-    """Profile creates CSV; analyze with --sort kernels generates output."""
+    """Profile creates CSV; analyze with --roofline-sort kernels generates output."""
     skip_unsupported_roofline_soc()
 
-    profile_options = ["--device", "0", "--roof-only"]
+    profile_options = ["--roofline-device", "0", "--roofline"]
     workload_dir = common.get_output_dir()
     returncode = binary_handler_profile_rocprof_compute(
         config, workload_dir, profile_options, check_success=False, roof=True
@@ -72,7 +72,7 @@ def test_roof_sort_kernels(
         "analyze",
         "--path",
         workload_dir,
-        "--sort",
+        "--roofline-sort",
         "kernels",
     ])
     assert code == 0
