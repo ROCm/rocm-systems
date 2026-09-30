@@ -865,14 +865,8 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
 
     // --- Emit SWAP batch ---
     if (!swapPending.srcs.empty()) {
-      // Check if any swap entry is asymmetric
-      bool has_asymmetric = false;
-      for (size_t i = 0; i < swapPending.sizes.size(); ++i) {
-        if (swapPending.sizes[i] != swapPending.dst_sizes[i]) {
-          has_asymmetric = true;
-          break;
-        }
-      }
+      // Any swap entry with differing src/dst sizes is asymmetric.
+      const bool has_asymmetric = swapPending.sizes != swapPending.dst_sizes;
 
       if (has_asymmetric) {
         // Emit individual single-entry ops (num_entries=0) with separate
