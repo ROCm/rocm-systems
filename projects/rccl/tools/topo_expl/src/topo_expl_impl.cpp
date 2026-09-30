@@ -46,7 +46,9 @@ NCCL_PARAM(GraphDumpFileRank, "GRAPH_DUMP_FILE_RANK", 0);
 NCCL_PARAM(CollNetNodeThreshold, "COLLNET_NODE_THRESHOLD", 2);
 NCCL_PARAM(NvbPreconnect, "NVB_PRECONNECT", 0);
 NCCL_PARAM(AllocP2pNetLLBuffers, "ALLOC_P2P_NET_LL_BUFFERS", 0);
-NCCL_PARAM(P2pLL128Enable, "P2P_LL128_ENABLE", -1);
+// Defined in enqueue.cc. topo_expl also compiles hipify_rccl/enqueue.cc, so a
+// second NCCL_PARAM here is a duplicate-symbol link error (extra gfx90a CI).
+extern int64_t ncclParamP2pLL128Enable();
 
 thread_local int ncclDebugNoWarn = 0;
 // Flag to suppress verbose rank/host output (used by test suite)

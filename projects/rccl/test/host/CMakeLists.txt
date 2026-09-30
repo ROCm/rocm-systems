@@ -818,6 +818,10 @@ set(_enq_common_args
     # supplies both, so neither needs a replacement definition.
     RCCL_STUBS_OMIT_ncclInitKernelsForDevice
     RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering
+    # Production librccl always builds this arm (CMakeLists.txt LL128_ENABLED=ON).
+    # Standalone host CI otherwise compiles enqueue.cc without it, so addP2pToPlan's
+    # gfx1250 ENABLE=1 window is unreachable there.
+    ENABLE_LL128
     ENQUEUE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/enqueue/enqueue.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_enqueue.yaml")
 
