@@ -1,0 +1,121 @@
+{
+  "system_configurations": {
+    "name": "RCCL-Validate-MI455X-TDM-LL128",
+    "description": "Functional validation of the gfx1250 TDM LL128 user-buffer path. Builds with --enable-tdm-prim-ll128 and runs the unit suite under forced LL128 on Ring and Tree, mirroring the full_pow2_ring_ll128 and full_pow2_tree_ll128 categories in test/test_categories.yaml."
+  },
+  "paths": {
+    "workdir": "${WORKDIR:-$PWD}",
+    "rocm_path": "${ROCM_PATH:-/opt/rocm}",
+    "mpi_path": "${MPI_PATH:-$HOME/ompi}"
+  },
+  "env_variables": {
+    "NCCL_DEBUG": "INFO",
+    "RCCL_USE_AMD_SMI_LIB": "0",
+    "HSA_NO_SCRATCH_RECLAIM": "1"
+  },
+  "mpi_args": [
+    "--mca pml ob1",
+    "--mca btl ^openib",
+    "--mca rmaps_base_oversubscribe 1",
+    "--bind-to none"
+  ],
+  "build_configuration": {
+    "install_flags": ["-l", "-t", "--enable-tdm-prim-ll128"],
+    "cmake_options": "-DBITCODE_LIB_ARCH=gfx1250",
+    "parallel_jobs": 64
+  },
+  "test_configurations": {
+    "default": {
+      "env_variables": {},
+      "rerun_env_variables": { "NCCL_DEBUG": "INFO" }
+    },
+    "tdm_ll128_ring": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTests",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 7200,
+      "env_variables": {
+        "RCCL_LOG_ROCTX": "1",
+        "UT_MIN_GPUS": "1",
+        "UT_MAX_GPUS": "8",
+        "UT_POW2_GPUS": "1",
+        "UT_DATATYPES": "all",
+        "UT_REDOPS": "all",
+        "RCCL_LL128_FORCE_ENABLE": "1",
+        "NCCL_PROTO": "LL128",
+        "NCCL_ALGO": "Ring"
+      },
+      "tests": [
+        {
+          "name": "TDM_LL128_Ring_AllReduce",
+          "description": "AllReduce under forced Ring + LL128 with the TDM user-buffer path built in",
+          "test_filter": "AllReduce.*:-AllReduce.UserBufferRegistration:-AllReduce.ManagedMemUserBufferRegistration:-AllReduce.ROCTX"
+        },
+        {
+          "name": "TDM_LL128_Ring_AllGather",
+          "description": "AllGather under forced Ring + LL128",
+          "test_filter": "AllGather.*:-AllGather.UserBufferRegistration:-AllGather.ManagedMemUserBufferRegistration"
+        },
+        {
+          "name": "TDM_LL128_Ring_ReduceScatter",
+          "description": "ReduceScatter under forced Ring + LL128",
+          "test_filter": "ReduceScatter.*:-ReduceScatter.UserBufferRegistration:-ReduceScatter.ManagedMemUserBufferRegistration"
+        },
+        {
+          "name": "TDM_LL128_Ring_Broadcast",
+          "description": "Broadcast under forced Ring + LL128",
+          "test_filter": "Broadcast.*"
+        }
+      ]
+    },
+    "tdm_ll128_tree": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTests",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 7200,
+      "env_variables": {
+        "RCCL_LOG_ROCTX": "1",
+        "UT_MIN_GPUS": "1",
+        "UT_MAX_GPUS": "8",
+        "UT_POW2_GPUS": "1",
+        "UT_DATATYPES": "all",
+        "UT_REDOPS": "all",
+        "RCCL_LL128_FORCE_ENABLE": "1",
+        "NCCL_PROTO": "LL128",
+        "NCCL_ALGO": "Tree"
+      },
+      "tests": [
+        {
+          "name": "TDM_LL128_Tree_AllReduce",
+          "description": "AllReduce under forced Tree + LL128 with the TDM user-buffer path built in",
+          "test_filter": "AllReduce.*:-AllReduce.UserBufferRegistration:-AllReduce.ManagedMemUserBufferRegistration:-AllReduce.ROCTX"
+        },
+        {
+          "name": "TDM_LL128_Tree_Broadcast",
+          "description": "Broadcast under forced Tree + LL128",
+          "test_filter": "Broadcast.*"
+        }
+      ]
+    }
+  },
+  "test_suites": [
+    {
+      "name": "TDM LL128 - Ring",
+      "description": "Unit suite under forced Ring + LL128 on a TDM-enabled build",
+      "config": "tdm_ll128_ring",
+      "enabled": true
+    },
+    {
+      "name": "TDM LL128 - Tree",
+      "description": "Unit suite under forced Tree + LL128 on a TDM-enabled build",
+      "config": "tdm_ll128_tree",
+      "enabled": true
+    }
+  ]
+}
