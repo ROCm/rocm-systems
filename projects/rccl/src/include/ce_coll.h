@@ -33,11 +33,19 @@
 #endif
 
 #ifndef NCCL_CE_REDUCE_MAX_BLOCKS
-#define NCCL_CE_REDUCE_MAX_BLOCKS 46
+#define NCCL_CE_REDUCE_MAX_BLOCKS 92
+#endif
+
+#ifndef NCCL_CE_REDUCE_DEFAULT_BLOCKS
+#define NCCL_CE_REDUCE_DEFAULT_BLOCKS 46
 #endif
 
 #ifndef NCCL_CE_NUM_SLOTS
 #define NCCL_CE_NUM_SLOTS 2
+#endif
+
+#ifndef NCCL_CE_REDUCE_PER_CHUNK_SLOTS
+#define NCCL_CE_REDUCE_PER_CHUNK_SLOTS 12
 #endif
 
 // Per-rank staging capacity in ceARTmpBuf (fixed default; use ceArStagingBytes for runtime value).
@@ -116,13 +124,15 @@ struct ncclCeColl {
   uint32_t ceFaults;  // bitmask of CE_FAULT_* bits; see ce_fault_inject.h
 #endif
 
-  // CE AllReduce staging buffer (symmetric), double-buffered scatter staging:
-  // Layout: [slot 0: nRanks chunks][slot 1: nRanks chunks], slot stride = nRanks*chunkBytes.
+  // CE AllReduce/ReduceScatter staging buffer (symmetric). The default path is
+  // double-buffered; opt-in per-chunk ReduceScatter reserves additional slots
+  // so more staged chunks can use fresh slots before reuse.
   // The reduced result is written straight into the user recvbuff (no scratch).
   uint8_t* ceARTmpBuf;
   struct ncclDevrWindow* ceARTmpWin;
   size_t ceArMaxBytes;     // 2-shot staging cap, resolved at init: env RCCL_CE_AR_MAX_MSG_BYTES > arch ceArMax
   size_t ceArStagingBytes; // resolved at init: env var RCCL_CE_AR_STAGING_BYTES > NCCL_CE_AR_STAGING_BYTES
+  size_t numStagingSlots;  // NCCL_CE_NUM_SLOTS, or the per-chunk RS slot count when that mode is enabled
   uint32_t* signalBuffer;
   struct ncclDevrWindow* signalWin;
   // Global counter barrier for regular launch: [0]=arrival, [1]=completed generation.
@@ -164,7 +174,7 @@ struct alignas(16) ncclCeCollArgs {
   void*
     ddaUserRecvBuff; // user recvbuff (using DDA staging) or NULL otherwise (if recvbuffer is using symmetric windows)
   size_t ddaCopyBackBytes; // bytes to copy scratch -> user recvbuff
-  ncclRedOp_t redOp; // Only used for AllReduce
+  ncclRedOp_t redOp; // Used for AllReduce and ReduceScatter
 };
 
 struct ncclCeBatchOpsParams {

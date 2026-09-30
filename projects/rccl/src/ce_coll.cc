@@ -43,6 +43,7 @@ ncclResult_t ncclCeLaunchPersistentReduce(const void* in, void* out, int nRanks,
 RCCL_PARAM(CeMultiStreams, "CE_MULTI_STREAMS", 0);
 RCCL_PARAM(CeBatchAsyncEnable, "CE_BATCH_ASYNC_ENABLE", -2);
 RCCL_PARAM(CeCoopLaunch, "CE_COOP_LAUNCH", 0);
+RCCL_PARAM(CeReducePerChunk, "CE_REDUCE_PER_CHUNK", 0);
 RCCL_PARAM_DECLARE(CeReduceScatter);
 
 #ifdef CE_BATCH_ASYNC_SUPPORTED
@@ -169,7 +170,10 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
 #ifdef ENABLE_FAULT_INJECTION
   NCCLCHECK(ceFaultCheck(comm, CE_FAULT_INIT, "ncclCeInit"));
 #endif
-  const size_t NUM_SLOTS = NCCL_CE_NUM_SLOTS;
+  const size_t NUM_SLOTS = rcclParamCeReduceScatter() && rcclParamCeReducePerChunk() > 0
+      ? std::max((size_t)NCCL_CE_NUM_SLOTS, (size_t)NCCL_CE_REDUCE_PER_CHUNK_SLOTS)
+      : (size_t)NCCL_CE_NUM_SLOTS;
+  comm->ceColl.numStagingSlots = NUM_SLOTS;
 
   // Declare every variable that is live at a goto-target label up-front, so no
   // NCCLCHECKGOTO jumps over a variable initialization (ill-formed in C++).
@@ -2848,14 +2852,14 @@ fail:
   goto exit;
 }
 
-// Allocate CE AllReduce scatter staging on first AllReduce, not during generic
-// CE init. AlltoAll/AllGather should not reserve two staging slots of VMM.
+// Allocate CE AllReduce/ReduceScatter staging on first use, not during generic
+// CE init. Other CE collectives should not reserve this VMM allocation.
 static ncclResult_t ncclCeEnsureAllReduceStaging(struct ncclComm* comm) {
   ncclResult_t ret = ncclSuccess;
   uint8_t* ceARTmpBuf = nullptr;
   ncclWindow_vidmem* arWinDev = nullptr;
   ncclWindow_vidmem* arWinDevHost = nullptr;
-  const size_t NUM_SLOTS = NCCL_CE_NUM_SLOTS;
+  const size_t NUM_SLOTS = comm->ceColl.numStagingSlots;
   size_t maxChunkBytes = 0;
   size_t ceARTmpBufSize = 0;
 
@@ -2870,8 +2874,8 @@ static ncclResult_t ncclCeEnsureAllReduceStaging(struct ncclComm* comm) {
   NCCLCHECKGOTO(ncclShadowPoolToHost(&comm->devrState.shadows, arWinDev, &arWinDevHost), ret, fail);
   comm->ceColl.ceARTmpWin = (struct ncclDevrWindow*)arWinDevHost->winHost;
   comm->ceColl.ceARTmpBuf = (uint8_t*)comm->ceColl.ceARTmpWin->userPtr;
-  INFO(NCCL_INIT, "Init CE AllReduce staging, rank %d ceARTmpBuf %p size %zu", comm->rank, comm->ceColl.ceARTmpBuf,
-       ceARTmpBufSize);
+  INFO(NCCL_INIT, "Init CE AllReduce staging, rank %d ceARTmpBuf %p size %zu slots %zu", comm->rank,
+       comm->ceColl.ceARTmpBuf, ceARTmpBufSize, NUM_SLOTS);
   return ncclSuccess;
 fail:
   if (arWinDev != nullptr) ncclCommWindowDeregister(comm, arWinDev);
@@ -3153,12 +3157,12 @@ ncclResult_t ncclCeReduceScatter(struct ncclComm* comm, const void* sendbuff, vo
     WARN("CE ReduceScatter staging is not available");
     return ncclInvalidUsage;
   }
+  struct ncclCeColl* ceColl = &comm->ceColl;
 
   const size_t eltSize = ncclTypeSize(datatype);
   const size_t totalBytes = count * eltSize * (size_t)comm->nRanks;
   const size_t shardElems = count;
   const size_t shardBytes = shardElems * eltSize;
-  const size_t NUM_SLOTS = NCCL_CE_NUM_SLOTS;
   // Match the window ncclCeEnsureAllReduceStaging sized from ceArStagingBytes.
   // ncclCeAllReduceMaxChunkBytes() is the compile-time default and overruns the
   // window when RCCL_CE_AR_STAGING_BYTES is smaller.
@@ -3178,8 +3182,11 @@ ncclResult_t ncclCeReduceScatter(struct ncclComm* comm, const void* sendbuff, vo
     chunksPerShard++;
   }
   size_t totalSteps = chunksPerShard;
+  const bool perChunkReduce = totalSteps > 1 && rcclParamCeReducePerChunk() > 0;
+  const size_t NUM_SLOTS = perChunkReduce ? ceColl->numStagingSlots : (size_t)NCCL_CE_NUM_SLOTS;
   // ceARTmpBuf slots are spaced by slotChunkBytes (<= maxChunkBytes at init);
   // see the layout helpers in ce_coll.h for the offsets derived from it.
+  const size_t slotStrideBytes = slotChunkBytes * (size_t)comm->nRanks;
   int startCh = (int)chunksPerShard - (int)NUM_SLOTS;
   std::vector<uint32_t*> basePeerSignalAddr(comm->nRanks);
   INFO(NCCL_COLL,
@@ -3188,6 +3195,8 @@ ncclResult_t ncclCeReduceScatter(struct ncclComm* comm, const void* sendbuff, vo
        comm->rank, totalBytes, chunkBytes, baseChunkElems, tailChunkElems, chunksPerShard);
   std::vector<hipStreamBatchMemOpParams> waits(comm->nRanks);
   std::vector<hipStreamBatchMemOpParams> writes(comm->nRanks);
+  std::vector<hipStreamBatchMemOpParams> readyWaits(comm->nRanks);
+  std::vector<hipStreamBatchMemOpParams> clears(comm->nRanks);
   for (int r = 0; r < comm->nRanks; r++) {
     waits[r] = {};
     waits[r].operation = CU_STREAM_MEM_OP_WAIT_VALUE_32;
@@ -3198,9 +3207,18 @@ ncclResult_t ncclCeReduceScatter(struct ncclComm* comm, const void* sendbuff, vo
     writes[r].operation = CU_STREAM_MEM_OP_WRITE_VALUE_32;
     writes[r].writeValue.value = 1;
     writes[r].writeValue.flags = CU_STREAM_WRITE_VALUE_DEFAULT;
+
+    readyWaits[r] = {};
+    readyWaits[r].operation = CU_STREAM_MEM_OP_WAIT_VALUE_32;
+    readyWaits[r].waitValue.value = 1;
+    readyWaits[r].waitValue.flags = CU_STREAM_WAIT_VALUE_EQ;
+
+    clears[r] = {};
+    clears[r].operation = CU_STREAM_MEM_OP_WRITE_VALUE_32;
+    clears[r].writeValue.value = 0;
+    clears[r].writeValue.flags = CU_STREAM_WRITE_VALUE_DEFAULT;
   }
 
-  struct ncclCeColl* ceColl = &comm->ceColl;
   uint8_t* tmpBuf = ceColl->ceARTmpBuf;
   uint8_t* outShard = (uint8_t*)recvbuff;
   uint32_t* signalBuffer = ceColl->signalBuffer;
@@ -3228,6 +3246,10 @@ ncclResult_t ncclCeReduceScatter(struct ncclComm* comm, const void* sendbuff, vo
   } else {
     ceStream = stream;
   }
+  cudaStream_t reduceStream = stream;
+
+  INFO(NCCL_COLL, "CE ReduceScatter: rank %d reducer=%s slots=%zu", comm->rank,
+       perChunkReduce ? "per-chunk" : "persistent", NUM_SLOTS);
 
   NCCLCHECKGOTO(ncclCeInitBatchOpsParams(&batchOpsParams, comm->nRanks), ret, fail);
 
@@ -3241,11 +3263,13 @@ ncclResult_t ncclCeReduceScatter(struct ncclComm* comm, const void* sendbuff, vo
   NCCLCHECKGOTO(ncclMemOpSync(comm, ceStream, &collArgs), ret, fail);
 
   if (totalSteps > 1) {
-    CUDACHECKGOTO(cudaMemsetAsync(ceColl->d_barrierSync, 0, 2 * sizeof(uint32_t), stream), ret, fail);
-    NCCLCHECKGOTO(ncclCeLaunchPersistentReduce(tmpBuf, outShard, comm->nRanks, baseChunkElems, tailChunkElems,
-                                               chunksPerShard, slotChunkElems, signalBuffer, totalSteps,
-                                               ceColl->d_barrierSync, datatype, op, stream, coopLaunch),
-                  ret, fail);
+    if (!perChunkReduce) {
+      CUDACHECKGOTO(cudaMemsetAsync(ceColl->d_barrierSync, 0, 2 * sizeof(uint32_t), reduceStream), ret, fail);
+      NCCLCHECKGOTO(ncclCeLaunchPersistentReduce(tmpBuf, outShard, comm->nRanks, baseChunkElems, tailChunkElems,
+                                                 chunksPerShard, slotChunkElems, signalBuffer, totalSteps,
+                                                 ceColl->d_barrierSync, datatype, op, reduceStream, coopLaunch),
+                    ret, fail);
+    }
   }
 
   for (int ch = 0; ch < chunksPerShard; ch++) {
@@ -3276,6 +3300,7 @@ ncclResult_t ncclCeReduceScatter(struct ncclComm* comm, const void* sendbuff, vo
     }
     const size_t dstSlotOffsetBytes =
       ncclCeReduceScatterDstSlotOffsetBytes(slot, comm->rank, comm->nRanks, slotChunkBytes);
+    const size_t chunkOffsetBytes = (size_t)ch * chunkBytes;
     batchOpsParams.numOps = 0;
     for (int r = 0; r < comm->nRanks; r++) {
       void* dstPtr;
@@ -3302,6 +3327,25 @@ ncclResult_t ncclCeReduceScatter(struct ncclComm* comm, const void* sendbuff, vo
       }
       CUCHECKGOTO(hipStreamBatchMemOp(ceStream, comm->nRanks, writes.data(), 0), ret, fail);
     }
+    if (perChunkReduce) {
+      // Gate each finite reducer with stream memory operations so no reducer
+      // blocks are resident while SDMA is still staging the chunk.
+      for (int r = 0; r < comm->nRanks; r++) {
+        uint32_t* localSignal = &signalBuffer[slot * comm->nRanks + r];
+        readyWaits[r].waitValue.address = localSignal;
+        clears[r].writeValue.address = localSignal;
+      }
+      CUCHECKGOTO(hipStreamBatchMemOp(reduceStream, comm->nRanks, readyWaits.data(), 0), ret, fail);
+
+      const size_t currentChunkElems = currentChunkBytes / eltSize;
+      const void* chunkIn = tmpBuf + (size_t)slot * slotStrideBytes;
+      void* chunkOut = outShard + chunkOffsetBytes;
+      NCCLCHECKGOTO(ncclCeLaunchPersistentReduce(chunkIn, chunkOut, comm->nRanks, currentChunkElems, 0, 1,
+                                                 slotChunkElems, signalBuffer + slot * comm->nRanks, 1,
+                                                 ceColl->d_barrierSync, datatype, op, reduceStream, 0),
+                    ret, fail);
+      CUCHECKGOTO(hipStreamBatchMemOp(reduceStream, comm->nRanks, clears.data(), 0), ret, fail);
+    }
     if (totalSteps == 1) {
       NCCLCHECKGOTO(ncclMemOpSync(comm, ceStream, &collArgs), ret, fail);
       NCCLCHECKGOTO(ncclCeLaunchPersistentReduce(tmpBuf, outShard, comm->nRanks, baseChunkElems, tailChunkElems,
@@ -3310,7 +3354,7 @@ ncclResult_t ncclCeReduceScatter(struct ncclComm* comm, const void* sendbuff, vo
                     ret, fail);
     }
   }
-  if (totalSteps > 1) {
+  if (totalSteps > (size_t)NUM_SLOTS) {
     if (startCh < 0) {
       startCh = 0;
     }
@@ -3328,12 +3372,23 @@ ncclResult_t ncclCeReduceScatter(struct ncclComm* comm, const void* sendbuff, vo
       }
       CUCHECKGOTO(hipStreamBatchMemOp(ceStream, comm->nRanks, waits.data(), 0), ret, fail);
     }
+  }
+  if (totalSteps > 1) {
     NCCLCHECKGOTO(ncclMemOpSync(comm, ceStream, &collArgs), ret, fail);
   }
 
   if (totalSteps > 1) {
     CUDACHECKGOTO(cudaEventRecord(ceColl->synceEvent, ceStream), ret, fail);
     CUDACHECKGOTO(cudaStreamWaitEvent(stream, ceColl->synceEvent, 0), ret, fail);
+    if (!perChunkReduce && totalSteps <= (size_t)NUM_SLOTS) {
+      // No-reuse kernels deliberately leave readiness at 1 so every block can
+      // advance independently. Reset only after both the reduction kernel and
+      // scatter stream have completed; the next collective is ordered behind
+      // this memset on the caller stream.
+      CUDACHECKGOTO(cudaMemsetAsync(signalBuffer, 0,
+                                    NUM_SLOTS * (size_t)comm->nRanks * sizeof(uint32_t), stream),
+                    ret, fail);
+    }
   }
 exit:
   ncclCeFreeBatchOpsParams(&batchOpsParams);

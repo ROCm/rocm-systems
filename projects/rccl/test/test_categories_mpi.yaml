@@ -75,6 +75,46 @@ test_categories:
       - "NCCL_CUMEM_ENABLE=1"
       - "NCCL_LOCAL_REGISTER=0"
       - "RCCL_CE_ALLREDUCE=1"
+  quick_env_ce_reducescatter:
+    description: "CE ReduceScatter MPI correctness, including rank-varying in-place output alignment."
+    test_patterns:
+      - "CeMPI_ReduceScatter.*"
+    exclude_windows: *mpi_exclude_windows
+    labels:
+      - "rccl"
+      - "quick"
+      - "smoke"
+      - "precheck"
+      - "mpi"
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "NCCL_DEBUG_SUBSYS=ALL"
+      - "NCCL_CTA_POLICY=2"
+      - "NCCL_CUMEM_ENABLE=1"
+      - "NCCL_LOCAL_REGISTER=0"
+      - "RCCL_CE_REDUCESCATTER=1"
+      - "RCCL_FORCE_CE_REDUCESCATTER=1"
+  quick_env_ce_reducescatter_per_chunk:
+    description: "CE ReduceScatter finite per-chunk reducer correctness on a multi-chunk BF16 Avg workload."
+    test_patterns:
+      - "CeMPI_ReduceScatter.GroupedPipelinedBfloat16Average"
+    exclude_windows: *mpi_exclude_windows
+    labels:
+      - "rccl"
+      - "quick"
+      - "smoke"
+      - "precheck"
+      - "mpi"
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "NCCL_DEBUG_SUBSYS=ALL"
+      - "NCCL_CTA_POLICY=2"
+      - "NCCL_CUMEM_ENABLE=1"
+      - "NCCL_LOCAL_REGISTER=0"
+      - "RCCL_CE_REDUCESCATTER=1"
+      - "RCCL_FORCE_CE_REDUCESCATTER=1"
+      - "RCCL_CE_REDUCE_PER_CHUNK=1"
+      - "RCCL_CE_REDUCE_MAX_BLOCKS=92"
   quick_env_ce_alltoall:
     description: "CE AlltoAll MPI smoke under CE dispatch env. DDA is disabled because
       ncclAlltoAll_impl takes the DDA IPC path before CE is considered, so CE never
@@ -414,6 +454,8 @@ execution_settings:
   category_timeouts:
     quick: 1200
     quick_env_ce_allreduce: 1200
+    quick_env_ce_reducescatter: 1200
+    quick_env_ce_reducescatter_per_chunk: 1200
     quick_env_ce_alltoall: 1200
     quick_env_shm_ce_memcpy_send: 1200
     quick_env_shm_ce_memcpy_recv: 1200
