@@ -2514,6 +2514,7 @@ bool Device::getVmmAllocInfo(uint64_t hsa_handle, amd::Device::VmmLocationType* 
         break;
       }
     }
+    if (*device_id == static_cast<int>(amd::InvalidDeviceId)) return false;
   }
   return true;
 }
