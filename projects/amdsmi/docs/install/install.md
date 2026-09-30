@@ -257,66 +257,57 @@ CLI builds carrying the `PYTHON_ARGCOMPLETE_OK` marker.
 (install-manual-py-lib)=
 ### Install the Python library for multiple ROCm instances
 
-Installing multiple versions of ROCm on the same system can cause
-`import amdsmi` to load a different AMD SMI version than the `amd-smi` CLI or
-the library you expect. Make sure only one copy of the `amdsmi` Python package
-is visible to your Python interpreter.
+Multiple ROCm installations can cause `import amdsmi` to load a different
+version than the CLI. Choose a matching wrapper and native library without
+removing packages that other ROCm tools depend on.
 
-The `amdsmi` Python package reaches your interpreter in one of these ways:
-
-- The `amd-smi-lib` rpm/deb package installs it into the system Python's
-  `site-packages`. Before ROCm 7.14, the package ran `pip install` during
-  installation instead, which leaves a pip-registered copy to uninstall
-  manually.
-- The `amdrocm-amdsmi` package and ROCm pip installs from TheRock install it
-  only under `share/amd_smi`, which Python uses only when it is on
-  `PYTHONPATH`.
-- `python3 -m pip install amdsmi` installs the pip wheel.
-
-1. Remove other AMD SMI Python installations.
+1. Check which Python copy is selected:
 
    ```shell
-   # Legacy: pre-7.14 amd-smi-lib packages and any user pip install
-   python3 -m pip list | grep amd
+   python3 -c "import amdsmi; print(amdsmi.__file__)"
+   python3 -m pip show amdsmi
+   ```
+
+   If an unwanted pip-installed copy shadows your intended installation,
+   uninstall only that copy with the interpreter that installed it:
+
+   ```shell
    python3 -m pip uninstall amdsmi
-
-   # 7.14+ amd-smi-lib package: remove it with your package manager
-   sudo apt remove amd-smi-lib   # or: sudo dnf remove amd-smi-lib
    ```
 
-   Also check that `PYTHONPATH` does not point at the `share/amd_smi`
-   directory of another ROCm installation.
+   Do not use pip to remove files owned by the system package manager, or
+   remove `amd-smi-lib` just to switch Python versions; other ROCm tools can
+   depend on it.
 
-2. Install the AMD SMI Python library. Pick **one** of these paths:
+2. Select the wrapper shipped with the ROCm instance you intend to use.
+   Replace `<root>` with its installation directory:
 
-   - **`amd-smi-lib`**: install or reinstall `amd-smi-lib` from your target
-     ROCm instance with `sudo`.
-   - **`amdrocm-amdsmi`**: set `PYTHONPATH` to the `share/amd_smi` directory
-     of your target ROCm instance, as described in {ref}`install_without_rocm`.
-   - **Pip wheel** (recommended for venvs, containers, or when ROCm is not
-     installed on the host but the amdgpu kernel driver is present):
-
-     ```shell
-     python3 -m pip install amdsmi
-     ```
-
-     The wheel ships its own SONAME-renamed `libamd_smi_python.so` next to
-     the wrapper, so it does not depend on `/opt/rocm` being present.
-
-   See `py-interface/README.md` in the source tree, or
-   [Packaging and install paths](../packaging.md) for the full install-paths
-   matrix, coexistence rules, and the `AMDSMI_LIB_OVERRIDE` override.
-
-   For pip, use `--break-system-packages` only if installing into a non-venv
-   Python that PEP 668 has marked externally managed.
-
-3. You should now have the AMD SMI Python library in your Python path:
-
-   ```shell-session
-   ~$ python3
-   Python 3.8.10 (default, May 26 2023, 14:05:08)
-   [GCC 9.4.0] on linux
-   Type "help", "copyright", "credits" or "license" for more information.
-   >>> import amdsmi
-   >>>
+   ```shell
+   export PYTHONPATH="<root>/share/amd_smi${PYTHONPATH:+:${PYTHONPATH}}"
+   python3 -c "import amdsmi; print(amdsmi.__file__); print(amdsmi.amdsmi_get_lib_version())"
    ```
+
+   For native SDK packages, see {ref}`install_without_rocm`; for pip SDK
+   installations, use the directory discovered in {ref}`install_nightly`.
+   Set this after activating the target virtual environment. Current wrappers
+   load their native library relative to their ROCm tree. Wrappers shipped
+   before ROCm 7.14 use the legacy loader: also set `export ROCM_PATH=<root>`
+   and `unset ROCM_HOME` to select the same native library. Check that
+   `AMDSMI_LIB_OVERRIDE` is unset unless you deliberately want another library.
+
+The CLI selects `$ROCM_PATH/share/amd_smi` (or `$ROCM_HOME` when `ROCM_PATH`
+is unset) before its own installation's wrapper. Unset stale overrides when
+you want `amd-smi` to use its own copy.
+
+:::{warning}
+The community-built `amdsmi` PyPI releases through 7.0.2 bundle no native
+library and require the corresponding older ROCm library. They cannot be
+used with arbitrary newer ROCm releases; import can fail with missing
+symbols, or changed data layouts can produce incorrect results. Their
+legacy loader checks `ROCM_HOME` before `ROCM_PATH`, unlike the CLI, and
+does not implement `AMDSMI_LIB_OVERRIDE`. Prefer the wrapper shipped with
+your ROCm installation.
+:::
+
+See [Packaging and install paths](../packaging.md) for delivery paths,
+coexistence rules, and the `AMDSMI_LIB_OVERRIDE` override.
