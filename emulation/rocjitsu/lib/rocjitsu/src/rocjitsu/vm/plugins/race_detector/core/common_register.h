@@ -33,6 +33,7 @@ enum class MemoryEventType {
   GLOBAL_TO_SGPR,   ///< Scalar load to an SGPR; the event stores its counter family separately.
   GLOBAL_TO_TTMP,   ///< Scalar load to a TTMP; the event stores its counter family separately.
   SCALAR_TO_GLOBAL, ///< Scalar store; retained to preserve partial-wait ordering.
+  COUNTER_ONLY,     ///< Counter participation without a register or LDS access.
 
   N
 };
@@ -98,6 +99,7 @@ inline amdgpu::WaitCounterType defaultWaitCounterType(MemoryEventType t) {
   case MemoryEventType::GLOBAL_TO_TTMP:
   case MemoryEventType::SCALAR_TO_GLOBAL:
     return amdgpu::WaitCounterType::LGKMCNT;
+  case MemoryEventType::COUNTER_ONLY:
   case MemoryEventType::N:
     break;
   }
@@ -120,6 +122,7 @@ inline MemoryOrderClass defaultMemoryOrder(MemoryEventType t) {
   case MemoryEventType::GLOBAL_TO_TTMP:
   case MemoryEventType::SCALAR_TO_GLOBAL:
     return MemoryOrderClass::UNORDERED;
+  case MemoryEventType::COUNTER_ONLY:
   case MemoryEventType::N:
     break;
   }
