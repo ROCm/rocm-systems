@@ -24,6 +24,7 @@
 
 #include <rocprofiler-sdk/agent.h>
 
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -31,9 +32,13 @@ namespace rocprofiler
 {
 namespace platform
 {
-// Owning handle for a rocprofiler_agent_t produced by a platform enumerator.
-// The custom deleter is responsible for freeing the mem_banks/caches/io_links
-// arrays in addition to the struct itself.
-using unique_agent_t = std::unique_ptr<rocprofiler_agent_t, void (*)(rocprofiler_agent_t*)>;
+struct agent_info
+{
+    rocprofiler_agent_t public_info{};
+    uint32_t            cwsr_size{};
+    uint32_t            ctl_stack_size{};
+};
+
+using unique_agent_t = std::unique_ptr<agent_info, void (*)(agent_info*)>;
 }  // namespace platform
 }  // namespace rocprofiler

@@ -66,33 +66,6 @@ TEST_F(backend_test, make_agent_id_constructs_from_handle)
 
 // ─── Pure SDK delegations (return status_t) ────────────────────────────────────
 
-TEST_F(backend_test, create_context_returns_sdk_status)
-{
-    context_id ctx{};
-    EXPECT_CALL(*g_mock_sdk, create_context(&ctx))
-        .WillOnce(gm::Return(mock_sdk::STATUS_SUCCESS));
-
-    EXPECT_EQ(sut::create_context(&ctx), mock_sdk::STATUS_SUCCESS);
-}
-
-TEST_F(backend_test, start_context_returns_sdk_status)
-{
-    const context_id ctx{ 3 };
-    EXPECT_CALL(*g_mock_sdk, start_context(ctx))
-        .WillOnce(gm::Return(mock_sdk::STATUS_SUCCESS));
-
-    EXPECT_EQ(sut::start_context(ctx), mock_sdk::STATUS_SUCCESS);
-}
-
-TEST_F(backend_test, stop_context_returns_sdk_status)
-{
-    const context_id ctx{ 3 };
-    EXPECT_CALL(*g_mock_sdk, stop_context(ctx))
-        .WillOnce(gm::Return(mock_sdk::STATUS_SUCCESS));
-
-    EXPECT_EQ(sut::stop_context(ctx), mock_sdk::STATUS_SUCCESS);
-}
-
 TEST_F(backend_test, sample_device_counting_service_returns_sdk_status)
 {
     const context_id ctx{ 1 };
@@ -144,7 +117,7 @@ TEST_F(backend_test, query_record_counter_id_extracts_instance_id_from_record)
 {
     // For SDK v1+ (compile_time_version >= 10000), backend.hpp directly writes
     // record.id into counter_id->handle without making an SDK call.
-    const counter_record rec{ counter_instance_id{ 42 }, 0.0 };
+    const counter_record rec{ .id = counter_instance_id{ 42 }, .counter_value = 0.0 };
     counter_id           out_id{};
 
     EXPECT_EQ(sut::query_record_counter_id(rec, &out_id), sut::status_success);
@@ -153,7 +126,7 @@ TEST_F(backend_test, query_record_counter_id_extracts_instance_id_from_record)
 
 TEST_F(backend_test, query_record_counter_id_returns_error_for_null_output)
 {
-    const counter_record rec{ counter_instance_id{ 42 }, 0.0 };
+    const counter_record rec{ .id = counter_instance_id{ 42 }, .counter_value = 0.0 };
 
     EXPECT_EQ(sut::query_record_counter_id(rec, nullptr),
               mock_sdk::STATUS_ERROR_INVALID_ARGUMENT);
@@ -186,11 +159,18 @@ TEST_F(backend_test, query_counter_details_returns_metadata_with_one_instance_an
 {
     const counter_id cid{ 7 };
 
-    dim_info          dim{ "index", 0 };
-    dim_info*         dims_arr[] = { &dim };
-    dim_instance      inst{ 1, 1, dims_arr };
-    dim_instance*     insts_arr[] = { &inst };
-    counter_info_v1_t fill{ "SQ_WAVES", "Wave count", "SQ", "", 0, 1, 1, insts_arr };
+    dim_info      dim{ .dimension_name = "index", .index = 0 };
+    dim_info*     dims_arr[] = { &dim };
+    dim_instance  inst{ .instance_id = 1, .dimensions_count = 1, .dimensions = dims_arr };
+    dim_instance* insts_arr[] = { &inst };
+    counter_info_v1_t fill{ .name                       = "SQ_WAVES",
+                            .description                = "Wave count",
+                            .block                      = "SQ",
+                            .expression                 = "",
+                            .is_constant                = 0,
+                            .is_derived                 = 1,
+                            .dimensions_instances_count = 1,
+                            .dimensions_instances       = insts_arr };
 
     EXPECT_CALL(*g_mock_sdk,
                 query_counter_info(cid, mock_sdk::COUNTER_INFO_VERSION_1, gm::_))
@@ -214,9 +194,16 @@ TEST_F(backend_test, query_counter_details_returns_empty_dims_when_instance_has_
 {
     const counter_id cid{ 8 };
 
-    dim_instance      inst{ 2, 0, nullptr };
-    dim_instance*     insts_arr[] = { &inst };
-    counter_info_v1_t fill{ "SQ_BUSY", nullptr, nullptr, nullptr, 0, 0, 1, insts_arr };
+    dim_instance  inst{ .instance_id = 2, .dimensions_count = 0, .dimensions = nullptr };
+    dim_instance* insts_arr[] = { &inst };
+    counter_info_v1_t fill{ .name                       = "SQ_BUSY",
+                            .description                = nullptr,
+                            .block                      = nullptr,
+                            .expression                 = nullptr,
+                            .is_constant                = 0,
+                            .is_derived                 = 0,
+                            .dimensions_instances_count = 1,
+                            .dimensions_instances       = insts_arr };
 
     EXPECT_CALL(*g_mock_sdk,
                 query_counter_info(cid, mock_sdk::COUNTER_INFO_VERSION_1, gm::_))
@@ -370,6 +357,33 @@ TEST_F(backend_test, get_status_string_delegates_to_sdk)
 }
 
 // ─── Void forwarders — success path ──────────────────────────────────────────
+
+TEST_F(backend_test, create_context_succeeds)
+{
+    context_id ctx{};
+    EXPECT_CALL(*g_mock_sdk, create_context(&ctx))
+        .WillOnce(gm::Return(mock_sdk::STATUS_SUCCESS));
+
+    EXPECT_NO_THROW(sut::create_context(&ctx));
+}
+
+TEST_F(backend_test, start_context_succeeds)
+{
+    const context_id ctx{ 3 };
+    EXPECT_CALL(*g_mock_sdk, start_context(ctx))
+        .WillOnce(gm::Return(mock_sdk::STATUS_SUCCESS));
+
+    EXPECT_NO_THROW(sut::start_context(ctx));
+}
+
+TEST_F(backend_test, stop_context_succeeds)
+{
+    const context_id ctx{ 3 };
+    EXPECT_CALL(*g_mock_sdk, stop_context(ctx))
+        .WillOnce(gm::Return(mock_sdk::STATUS_SUCCESS));
+
+    EXPECT_NO_THROW(sut::stop_context(ctx));
+}
 
 TEST_F(backend_test, create_buffer_succeeds)
 {
@@ -528,6 +542,20 @@ TEST_F(backend_test, iterate_callback_tracing_kind_operation_args_throws_on_erro
         std::runtime_error);
 }
 
+// Some callback-tracing kinds (e.g. ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API)
+// declare a kind but do not implement argument iteration for it. Argument
+// iteration only supplies best-effort debug-annotation data, so this must not
+// be fatal.
+TEST_F(backend_test, iterate_callback_tracing_kind_operation_args_ignores_not_implemented)
+{
+    EXPECT_CALL(*g_mock_sdk,
+                iterate_callback_tracing_kind_operation_args(gm::_, gm::_, gm::_, gm::_))
+        .WillOnce(gm::Return(mock_sdk::STATUS_ERROR_NOT_IMPLEMENTED));
+
+    EXPECT_NO_THROW(
+        sut::iterate_callback_tracing_kind_operation_args({}, nullptr, 0, nullptr));
+}
+
 TEST_F(backend_test, iterate_counter_dimensions_succeeds)
 {
     const counter_id cid{ 5 };
@@ -558,6 +586,39 @@ TEST_F(backend_test, query_counter_info_throws_on_sdk_error)
 }
 
 // ─── Void forwarders — error path ────────────────────────────────────────────
+
+TEST_F(backend_test, create_context_throws_on_sdk_error)
+{
+    EXPECT_CALL(*g_mock_sdk, create_context(gm::_))
+        .WillOnce(gm::Return(mock_sdk::STATUS_ERROR));
+    EXPECT_CALL(*g_mock_sdk, get_status_string(mock_sdk::STATUS_ERROR))
+        .WillOnce(gm::Return("create_context failed"));
+
+    context_id ctx{};
+    EXPECT_THROW(sut::create_context(&ctx), std::runtime_error);
+}
+
+TEST_F(backend_test, start_context_throws_on_sdk_error)
+{
+    const context_id ctx{ 3 };
+    EXPECT_CALL(*g_mock_sdk, start_context(ctx))
+        .WillOnce(gm::Return(mock_sdk::STATUS_ERROR));
+    EXPECT_CALL(*g_mock_sdk, get_status_string(mock_sdk::STATUS_ERROR))
+        .WillOnce(gm::Return("start_context failed"));
+
+    EXPECT_THROW(sut::start_context(ctx), std::runtime_error);
+}
+
+TEST_F(backend_test, stop_context_throws_on_sdk_error)
+{
+    const context_id ctx{ 3 };
+    EXPECT_CALL(*g_mock_sdk, stop_context(ctx))
+        .WillOnce(gm::Return(mock_sdk::STATUS_ERROR));
+    EXPECT_CALL(*g_mock_sdk, get_status_string(mock_sdk::STATUS_ERROR))
+        .WillOnce(gm::Return("stop_context failed"));
+
+    EXPECT_THROW(sut::stop_context(ctx), std::runtime_error);
+}
 
 TEST_F(backend_test, create_buffer_throws_on_sdk_error)
 {

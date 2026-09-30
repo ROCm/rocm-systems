@@ -1,6 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+import io
 import json
 import re
 from collections import OrderedDict
@@ -11,8 +12,7 @@ import pandas as pd
 import yaml
 
 import config
-from utils import schema, utils_analysis
-from utils.kernel_name_shortener import kernel_name_shortener
+from utils import csv_compression, utils_analysis
 from utils.logger import (
     console_debug,
     console_error,
@@ -24,6 +24,8 @@ from utils.utils_common import (
     canonical_config_arch,
     normalize_filter_to_str_list,
 )
+
+KERNEL_SYMBOLS_CSV_GLOB = f"kernel_symbols_*.csv{csv_compression.GZIP_SUFFIX}"
 
 # TODO: use pandas chunksize or dask to read really large csv file
 # from dask import dataframe as dd
@@ -68,6 +70,38 @@ def load_profiling_config(config_dir: str) -> dict[str, Any]:
     return {}
 
 
+def rank_kernels_by_total_duration(dispatch_frame: pd.DataFrame) -> list[str]:
+    """Return kernel names ordered by total dispatch duration, longest first.
+
+    A kernel's position in this list is the id that ``-k`` selects.
+    """
+    durations = dispatch_frame["End_Timestamp"] - dispatch_frame["Start_Timestamp"]
+    return (
+        durations
+        .groupby(dispatch_frame["Kernel_Name"])
+        .sum()
+        .sort_values(ascending=False)
+        .index.to_list()
+    )
+
+
+def validate_kernel_filter_ids(
+    filter_kernel_ids: list[int],
+    kernel_count: int,
+) -> None:
+    """Exit with a readable message when a ``-k`` id names no kernel."""
+    if kernel_count == 0:
+        console_error("analysis", "No kernels found in this workload.")
+
+    for kernel_id in filter_kernel_ids:
+        if not 0 <= kernel_id < kernel_count:
+            console_error(
+                "analysis",
+                f"{kernel_id} is an invalid kernel id. "
+                f"Please enter an id between 0-{kernel_count - 1}",
+            )
+
+
 @demarcate
 def create_df_kernel_top_stats(
     df_in: pd.DataFrame,
@@ -75,8 +109,6 @@ def create_df_kernel_top_stats(
     filter_gpu_ids: Optional[list[str]],
     filter_dispatch_ids: Optional[list[str]],
     time_unit: str,
-    kernel_verbose: int,
-    sortby: str = "sum",
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Create top stats info by grouping kernels with user's filters.
@@ -110,59 +142,27 @@ def create_df_kernel_top_stats(
             df = df.loc[df["Dispatch_ID"].astype(str).isin(filter_strings)]
 
     # First, create a dispatches file used to populate global vars
-    dispatch_columns = ["Kernel_Name", "GPU_ID"]
+    dispatch_columns = ["Dispatch_ID", "Kernel_Name", "GPU_ID"]
     if "PID" in df.columns:
-        dispatch_columns.insert(0, "PID")
-    if "Dispatch_ID" in df.columns:
-        dispatch_columns.insert(0, "Dispatch_ID")
+        dispatch_columns.insert(1, "PID")
 
     dispatch_info = df[dispatch_columns]
     dispatch_output_path = Path(raw_data_dir) / "pmc_dispatch_info.csv"
     dispatch_info.to_csv(dispatch_output_path, index=False)
 
-    if "Dispatch_ID" in df.columns:
-        # Calculate execution times
-        execution_times = df["End_Timestamp"] - df["Start_Timestamp"]
-        time_stats = pd.DataFrame({
-            "Kernel_Name": df["Kernel_Name"],
-            "ExeTime": execution_times,
-        })
+    # Calculate execution times
+    execution_times = df["End_Timestamp"] - df["Start_Timestamp"]
+    time_stats = pd.DataFrame({
+        "Kernel_Name": df["Kernel_Name"],
+        "ExeTime": execution_times,
+    })
 
-        grouped = time_stats.groupby("Kernel_Name")["ExeTime"].agg([
-            "count",
-            "sum",
-            "mean",
-            "median",
-        ])
-    else:
-        time_stats = pd.DataFrame({
-            "Kernel_Name": df["Kernel_Name"],
-            "count": df["Count"],
-            "sum": df["Mean_Time"] * df["Count"],
-            "mean": df["Mean_Time"],
-            "median": df["Median_Time"],
-        })
-
-        result_data: list[dict[str, Any]] = []
-        for _, group in time_stats.groupby("Kernel_Name"):
-            row: dict[str, Any] = {}
-
-            row["Kernel_Name"] = group["Kernel_Name"].iloc[0]
-            row["count"] = group["count"].sum()
-            row["sum"] = group["sum"].sum()
-            row["mean"] = row["sum"] / row["count"]
-
-            sorted_data_by_mean = group.sort_values("mean")
-            sorted_data_by_mean["count_cumsum"] = sorted_data_by_mean["count"].cumsum()
-            median_threshold = row["count"] / 2
-            median_value = sorted_data_by_mean.loc[
-                sorted_data_by_mean["count_cumsum"] >= median_threshold, "median"
-            ].iloc[0]
-            row["median"] = median_value
-
-            result_data.append(row)
-
-        grouped = pd.DataFrame(result_data)
+    grouped = time_stats.groupby("Kernel_Name")["ExeTime"].agg([
+        "count",
+        "sum",
+        "mean",
+        "median",
+    ])
 
     # Rename columns with time unit
     time_unit_suffix = f"({time_unit})"
@@ -183,20 +183,15 @@ def create_df_kernel_top_stats(
     ]:
         grouped[col] = grouped[col] / time_divisor
 
-    if "Dispatch_ID" in df.columns:
-        grouped = grouped.reset_index()
+    grouped = grouped.reset_index()
 
     # Calculate percent
     sum_column = f"Sum{time_unit_suffix}"
     grouped["Percent"] = grouped[sum_column] / grouped[sum_column].sum() * 100
 
-    #   Sort by total time as default.
-    if sortby == "sum":
-        grouped = grouped.sort_values(sum_column, ascending=False)
-        grouped.to_csv(str(Path(raw_data_dir) / "pmc_kernel_top.csv"), index=False)
-    elif sortby == "kernel":
-        grouped = grouped.sort_values("Kernel_Name")
-        grouped.to_csv(str(Path(raw_data_dir) / "pmc_kernel_top.csv"), index=False)
+    kernel_order = rank_kernels_by_total_duration(df)
+    grouped = grouped.set_index("Kernel_Name").loc[kernel_order].reset_index()
+    grouped.to_csv(str(Path(raw_data_dir) / "pmc_kernel_top.csv"), index=False)
 
     return grouped.reset_index(drop=True), dispatch_info.reset_index(drop=True)
 
@@ -238,6 +233,49 @@ def load_pc_sampling_results(workload_path: str) -> list[dict[str, Any]]:
         tool_records.append(tool_record)
     _validate_pc_sampling_process_ids(tool_records)
     return tool_records
+
+
+def load_kernel_short_names(
+    workload_path: str,
+    tool_data_records: list[dict[str, Any]],
+) -> dict[str, str]:
+    """Map a workload's kernel names to the short names profiling captured."""
+    symbol_frames = _read_kernel_symbol_csvs(workload_path)
+
+    # A PC-sampling-only run has no rocpd database to write the CSV from, so
+    # read the same pair out of its results JSON instead.
+    if not symbol_frames:
+        return {
+            symbol["formatted_kernel_name"]: symbol["truncated_kernel_name"]
+            for tool_data in tool_data_records
+            for symbol in tool_data.get("kernel_symbols", [])
+        }
+
+    # A symbol is written once per process and once per run. The repeats all
+    # say the same thing, so keeping the last one is enough.
+    symbols = pd.concat(symbol_frames, ignore_index=True).dropna(
+        subset=["Kernel_Name", "Kernel_Short_Name"]
+    )
+    return dict(zip(symbols["Kernel_Name"], symbols["Kernel_Short_Name"]))
+
+
+def _read_kernel_symbol_csvs(workload_path: str) -> list[pd.DataFrame]:
+    """Return the workload's symbol CSVs that hold symbols to read.
+
+    The conversion opens each file before it runs its query, so an extract that
+    failed leaves an empty file behind rather than no file.
+    """
+    symbol_frames = []
+    for symbol_csv_path in sorted(Path(workload_path).glob(KERNEL_SYMBOLS_CSV_GLOB)):
+        try:
+            symbols = pd.read_csv(symbol_csv_path)
+        except (pd.errors.EmptyDataError, pd.errors.ParserError):
+            continue
+        if not symbols.empty and {"Kernel_Name", "Kernel_Short_Name"}.issubset(
+            symbols.columns
+        ):
+            symbol_frames.append(symbols)
+    return symbol_frames
 
 
 def process_pc_sampling_kernel_traces(
@@ -312,37 +350,68 @@ def process_pc_sampling_kernel_trace(
 @demarcate
 def create_df_pmc(
     raw_data_dir: str,
-    kernel_verbose: int,
     verbose: int,
 ) -> pd.DataFrame:
     """
-    Load all raw pmc counters and join into one df.
+    Read all raw pmc counters into one analysis df.
+
+    Counter data is read straight from the rocpd result artifacts. Bad profiling
+    output stops the run instead of producing a partial frame.
     """
-    pmc_perf_path = Path(raw_data_dir) / f"{schema.PMC_PERF_FILE_PREFIX}.csv"
-    if not pmc_perf_path.is_file():
+    result_files = sorted(
+        Path(raw_data_dir).glob(f"results_*.csv{csv_compression.GZIP_SUFFIX}")
+    )
+    if not result_files:
         return pd.DataFrame()
 
-    df = pd.read_csv(pmc_perf_path)
-
-    # rocpd pmc_perf.csv is long: one row per counter per dispatch. Anything
-    # else was written by a removed backend and is no longer supported.
-    if not {"Counter_Name", "Counter_Value"}.issubset(df.columns):
-        console_error(
-            "analysis",
-            f"{pmc_perf_path} is not in the supported rocpd format. "
-            "Please re-profile this workload with a current release.",
-        )
-    df = utils_analysis.process_rocpd_csv(df)
-
-    # Demangle original KernelNames
-    # Skip for Standalone Roofline with -1 to keep full kernel names
-    if kernel_verbose >= 0:
-        kernel_name_shortener(df, kernel_verbose)
+    frames = [_read_counter_results(result_file) for result_file in result_files]
+    df = utils_analysis.process_rocpd_csv(pd.concat(frames, ignore_index=True))
 
     utils_analysis.add_unit_counter(df)
 
     if verbose >= 2:
-        console_debug(f"pmc_raw_data final_single_df {df.info}")
+        frame_info = io.StringIO()
+        df.info(buf=frame_info)
+        console_debug(f"pmc_raw_data final_single_df\n{frame_info.getvalue()}")
+    return df
+
+
+def _read_counter_results(result_file: Path) -> pd.DataFrame:
+    """Read one rocpd result artifact and check it carries counter rows."""
+    try:
+        df = pd.read_csv(result_file)
+    except pd.errors.EmptyDataError:
+        console_error(
+            "profiling",
+            f"No counter data in {result_file}.\n"
+            "Please re-run 'rocprof-compute profile'.",
+        )
+        return pd.DataFrame()
+    except csv_compression.CORRUPT_CSV_ERRORS as error:
+        console_error(
+            "profiling",
+            f"{result_file} is truncated or corrupt: {error}\n"
+            "A profile run killed mid-write leaves this behind; "
+            "re-run 'rocprof-compute profile' to regenerate the "
+            "workload.",
+        )
+        return pd.DataFrame()
+
+    if df.empty:
+        console_error(
+            "profiling",
+            f"No counter data in {result_file}.\n"
+            "Please re-run 'rocprof-compute profile'.",
+        )
+
+    # The rocpd counter CSV is long: one row per counter per dispatch.
+    if not {"Counter_Name", "Counter_Value"}.issubset(df.columns):
+        console_error(
+            "analysis",
+            f"{result_file} is not in the supported rocpd format. "
+            "Please re-profile this workload with a current release.",
+        )
+
     return df
 
 
@@ -423,7 +492,7 @@ def _renumber_dispatch_ids_across_processes(
         return combined_trace
 
     renumbered_trace = combined_trace.copy()
-    renumbered_trace["Dispatch_Id"] = range(len(renumbered_trace))
+    renumbered_trace["Dispatch_Id"] = range(1, len(renumbered_trace) + 1)
     return renumbered_trace
 
 

@@ -157,8 +157,6 @@ class ThunkLoader {
                                       HSAuint64 SizeInBytes);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtAvailableMemory))(HSAuint32 Node, \
                                       HSAuint64 *AvailableBytes);
-    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtGetDefaultHostGpu))(HSAuint32 *NodeId, \
-                                      HSAuint32 *GpuId);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtRegisterMemory))(void* MemoryAddress, \
                                       HSAuint64 MemorySizeInBytes);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtRegisterMemoryToNodes))(void *MemoryAddress, \
@@ -397,6 +395,8 @@ class ThunkLoader {
                                       uint64_t* Frequency);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtGetAmdGPUDeviceFd))(HsaAMDGPUDeviceHandle DeviceHandle, \
                                       HSAint32* fd);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtSetPersistingCacheSize))(HSAuint32 NodeId, \
+                                      HSAuint64 CacheSize);
     /* drm API */
     typedef int (DRM_DEF(amdgpu_device_initialize))(int fd, \
                                       uint32_t *major_version, \
@@ -481,7 +481,6 @@ class ThunkLoader {
     HSAKMT_DEF(hsaKmtAllocMemoryAlign)* HSAKMT_PFN(hsaKmtAllocMemoryAlign);
     HSAKMT_DEF(hsaKmtFreeMemory)* HSAKMT_PFN(hsaKmtFreeMemory);
     HSAKMT_DEF(hsaKmtAvailableMemory)* HSAKMT_PFN(hsaKmtAvailableMemory);
-    HSAKMT_DEF(hsaKmtGetDefaultHostGpu)* HSAKMT_PFN(hsaKmtGetDefaultHostGpu);
     HSAKMT_DEF(hsaKmtRegisterMemory)* HSAKMT_PFN(hsaKmtRegisterMemory);
     HSAKMT_DEF(hsaKmtRegisterMemoryToNodes)* HSAKMT_PFN(hsaKmtRegisterMemoryToNodes);
     HSAKMT_DEF(hsaKmtRegisterMemoryWithFlags)* HSAKMT_PFN(hsaKmtRegisterMemoryWithFlags);
@@ -568,6 +567,7 @@ class ThunkLoader {
     HSAKMT_DEF(hsaKmtMemHandleFreePreserveMetadata)* HSAKMT_PFN(hsaKmtMemHandleFreePreserveMetadata);
     HSAKMT_DEF(hsaKmtMemoryGetCpuAddr)* HSAKMT_PFN(hsaKmtMemoryGetCpuAddr);
     HSAKMT_DEF(hsaKmtGetAmdGPUDeviceFd)* HSAKMT_PFN(hsaKmtGetAmdGPUDeviceFd);
+    HSAKMT_DEF(hsaKmtSetPersistingCacheSize)* HSAKMT_PFN(hsaKmtSetPersistingCacheSize);
     HSAKMT_DEF(hsaKmtMemoryCpuMap)* HSAKMT_PFN(hsaKmtMemoryCpuMap);
     HSAKMT_DEF(hsaKmtGetNodeWallclockFrequency)* HSAKMT_PFN(hsaKmtGetNodeWallclockFrequency);
 

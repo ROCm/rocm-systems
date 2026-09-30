@@ -16,11 +16,14 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
+import getpass
 import os
 from pathlib import Path
 import shutil
 import subprocess
+import tempfile
 from typing import Optional
+from .cache import resolve_username
 from .config import RocprofsysConfig
 from .environment import TestEnvironment, TestEnvKind
 
@@ -80,15 +83,18 @@ class TestResult:
 
     @property
     def perfetto_file(self) -> Optional[Path]:
-        candidates = [
-            self.output_dir / "perfetto-trace.proto",
-            self.output_dir / "perfetto-trace-0.proto",
-        ]
-        for candidate in candidates:
-            if candidate.exists():
-                return candidate
-        protos = list(self.output_dir.glob("perfetto-trace*.proto"))
-        return protos[0] if protos else None
+        for ext in ("pftrace", "proto"):
+            candidates = [
+                self.output_dir / f"perfetto-trace.{ext}",
+                self.output_dir / f"perfetto-trace-0.{ext}",
+            ]
+            for candidate in candidates:
+                if candidate.exists():
+                    return candidate
+            traces = sorted(self.output_dir.glob(f"perfetto-trace*.{ext}"))
+            if traces:
+                return traces[0]
+        return None
 
     @property
     def rocpd_files(self) -> list[Path]:
@@ -215,9 +221,17 @@ class BaseRunner(ABC):
             self.environment.set_test_environment({"LD_PRELOAD": preload})
         if env:
             self.environment.set_test_environment(env)
-        # ROCPROFSYS_OUTPUT_PATH is framework-controlled
+        # ROCPROFSYS_OUTPUT_PATH and ROCPROFSYS_TMPDIR are framework-controlled.
+        # Use a user-scoped tmpdir to prevent cross-user permission collisions on
+        # shared machines where multiple users run the same test as different OS
+        # users: the second user cannot write into a /tmp/<test-name>/ directory
+        # that was created (and is owned) by the first user.
+        tmpdir = Path(tempfile.gettempdir()) / resolve_username()
         self.environment.set_test_environment(
-            {"ROCPROFSYS_OUTPUT_PATH": str(self.output_dir)}
+            {
+                "ROCPROFSYS_OUTPUT_PATH": str(self.output_dir),
+                "ROCPROFSYS_TMPDIR": str(tmpdir),
+            }
         )
         self.environment.set_user_environment()
 

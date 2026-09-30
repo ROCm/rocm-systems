@@ -83,6 +83,7 @@
 #include "suites/functional/reference_count.h"
 #include "suites/functional/signal_concurrent.h"
 #include "suites/functional/signal_allocation_validation.h"
+#include "suites/functional/signal_wait_multi.h"
 #include "suites/functional/metadata_prefetch.h"
 #include "suites/functional/aql_barrier_bit.h"
 #include "suites/functional/signal_kernel.h"
@@ -91,6 +92,7 @@
 #include "suites/functional/fp_exception_shutdown.h"
 #include "suites/functional/gpu_coredump.h"
 #include "suites/functional/gpu_discovery_deprecated.h"
+#include "suites/functional/gl2_cache_test.h"
 #include "amd_smi/amdsmi.h"
 #include "common/common.h"
 #include "suites/functional/counted_queues.h"
@@ -275,6 +277,27 @@ TEST(rocrtstFunc, Signal_Allocation_Validation) {
   RunCustomTestEpilog(&sav);
 }
 
+TEST(rocrtstFunc, Signal_Wait_Any_Nonzero_Index) {
+  SignalWaitMultiTest swm;
+  if (!RunCustomTestProlog(&swm)) return;
+  swm.TestWaitAnyNonzeroSatisfyingIndex();
+  RunCustomTestEpilog(&swm);
+}
+
+TEST(rocrtstFunc, Signal_Wait_Any_Compacted_Conds_Values) {
+  SignalWaitMultiTest swm;
+  if (!RunCustomTestProlog(&swm)) return;
+  swm.TestWaitAnyCompactsConditionsAndValues();
+  RunCustomTestEpilog(&swm);
+}
+
+TEST(rocrtstFunc, Signal_Wait_All_Satisfying_Values) {
+  SignalWaitMultiTest swm;
+  if (!RunCustomTestProlog(&swm)) return;
+  swm.TestWaitAllReportsSatisfyingValues();
+  RunCustomTestEpilog(&swm);
+}
+
 /* Temporary: Disable CU Masking until it is fixed */
 TEST(rocrtstFunc, DISABLED_CU_Masking) {
   CU_Masking sd;
@@ -422,6 +445,47 @@ TEST(rocrtstFunc, FP_Exception_Shutdown) {
     RunCustomTestEpilog(&fpx);
 }
 
+TEST(rocrtstFunc, GL2_PersistingCache_QueryMax) {
+    GL2CacheTest gl2;
+    if (!RunCustomTestProlog(&gl2)) return;
+    gl2.QueryMaxPersistingCacheSize();
+    RunCustomTestEpilog(&gl2);
+}
+
+TEST(rocrtstFunc, GL2_PersistingCache_QueryRequest) {
+    GL2CacheTest gl2;
+    if (!RunCustomTestProlog(&gl2)) return;
+    gl2.QueryRequestPersistingCacheSize();
+    RunCustomTestEpilog(&gl2);
+}
+
+TEST(rocrtstFunc, GL2_PersistingCache_Set) {
+    GL2CacheTest gl2;
+    if (!RunCustomTestProlog(&gl2)) return;
+    gl2.SetPersistingCacheSize();
+    RunCustomTestEpilog(&gl2);
+}
+
+TEST(rocrtstFunc, GL2_PersistingCache_SetAndReadBack) {
+    GL2CacheTest gl2;
+    if (!RunCustomTestProlog(&gl2)) return;
+    gl2.SetAndReadBackPersistingCacheSize();
+    RunCustomTestEpilog(&gl2);
+}
+
+TEST(rocrtstFunc, GL2_PersistingCache_NegativeInvalidSize) {
+    GL2CacheTest gl2;
+    if (!RunCustomTestProlog(&gl2)) return;
+    gl2.NegativeInvalidSize();
+    RunCustomTestEpilog(&gl2);
+}
+
+TEST(rocrtstFunc, GL2_PersistingCache_NegativeCPUAgent) {
+    GL2CacheTest gl2;
+    if (!RunCustomTestProlog(&gl2)) return;
+    gl2.NegativeCPUAgent();
+    RunCustomTestEpilog(&gl2);
+}
 
 TEST(rocrtstFunc, Memory_Atomic_Add_Test) {
     MemoryAtomic ma(ADD);
@@ -714,6 +778,13 @@ TEST(rocrtstFunc, VirtMemory_FabricExport_Readiness_Test) {
   VirtMemoryTestBasic vmt;
   if (!RunCustomTestProlog(&vmt)) return;
   vmt.TestFabricExportAcceleratorReadiness();
+  RunCustomTestEpilog(&vmt);
+}
+
+TEST(rocrtstFunc, VirtMemory_Imported_Handle_Pointer_Info_Test) {
+  VirtMemoryTestBasic vmt;
+  if (!RunCustomTestProlog(&vmt)) return;
+  vmt.TestImportedHandlePointerInfo();
   RunCustomTestEpilog(&vmt);
 }
 

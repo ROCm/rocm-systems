@@ -104,7 +104,7 @@ struct Fixture {
     if (decoded.failed())
       return {};
     std::unique_ptr<Instruction> inst = std::move(decoded).value();
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
     std::array<uint32_t, WF_SIZE> out{};
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
       out[lane] = cu->read_vgpr(vb + kDstVgpr, lane);

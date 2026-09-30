@@ -226,7 +226,7 @@ public:
     ASSERT_NE(cmov, nullptr) << profile.name;
     EXPECT_EQ(wf->read_scc(), expected_scc) << profile.name << " " << context;
     cu->write_sgpr(sgpr_base() + 8, kCmovSentinel);
-    cu->execute_instruction(cmov.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(cmov.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_sgpr(sgpr_base() + 8), expected_scc ? 0x1234u : kCmovSentinel)
         << profile.name << " " << context;
   }
@@ -368,7 +368,7 @@ void run_wrexec_scc_cases(const ScalarSccProfile &profile, const WrexecPair &pai
     fixture.wf->set_exec_raw(raw_exec);
     const bool expected_scc = test_case.expected != 0;
     fixture.wf->write_scc(!expected_scc);
-    fixture.cu->execute_instruction(inst.get(), *fixture.wf);
+    EXPECT_TRUE(fixture.cu->execute_instruction(inst.get(), *fixture.wf).succeeded());
 
     uint64_t actual = fixture.cu->read_sgpr(sb + kDestSgpr);
     if (pair.is_b64) {
@@ -521,7 +521,7 @@ void run_saveexec_case(ScalarSccFixture &fixture, const ScalarSccProfile &profil
       is_b64 ? old_exec : (static_cast<uint64_t>(kHighSentinel) << 32) | old_exec;
   fixture.wf->set_exec_raw(initial_raw_exec);
   fixture.wf->write_scc(expected == 0);
-  fixture.cu->execute_instruction(inst.get(), *fixture.wf);
+  EXPECT_TRUE(fixture.cu->execute_instruction(inst.get(), *fixture.wf).succeeded());
 
   if (is_b64) {
     const uint64_t saved = fixture.cu->read_sgpr(sb + sdst) |
@@ -641,7 +641,7 @@ void run_addk_scc_cases(const ScalarSccProfile &profile) {
 
     fixture.cu->write_sgpr(sb + 4, test_case.initial);
     fixture.wf->write_scc(!test_case.expected_scc);
-    fixture.cu->execute_instruction(inst.get(), *fixture.wf);
+    EXPECT_TRUE(fixture.cu->execute_instruction(inst.get(), *fixture.wf).succeeded());
     EXPECT_EQ(fixture.cu->read_sgpr(sb + 4), test_case.expected) << profile.name;
     fixture.expect_scc_consumer(test_case.expected_scc, mnemonic);
   }
@@ -678,7 +678,7 @@ void run_mulk_cases(const ScalarSccProfile &profile) {
     for (const bool initial_scc : {false, true}) {
       fixture.cu->write_sgpr(sb + 4, test_case.initial);
       fixture.wf->write_scc(initial_scc);
-      fixture.cu->execute_instruction(inst.get(), *fixture.wf);
+      EXPECT_TRUE(fixture.cu->execute_instruction(inst.get(), *fixture.wf).succeeded());
       EXPECT_EQ(fixture.cu->read_sgpr(sb + 4), test_case.expected) << profile.name;
       fixture.expect_scc_consumer(initial_scc, "s_mulk_i32");
     }
@@ -788,7 +788,7 @@ void run_sop2_scc_cases(const ScalarSccProfile &profile) {
     fixture.cu->write_sgpr(sb, test_case.lhs);
     fixture.cu->write_sgpr(sb + 1, test_case.rhs);
     fixture.wf->write_scc(!test_case.expected_scc);
-    fixture.cu->execute_instruction(inst.get(), *fixture.wf);
+    EXPECT_TRUE(fixture.cu->execute_instruction(inst.get(), *fixture.wf).succeeded());
     EXPECT_EQ(fixture.cu->read_sgpr(sb + 2), test_case.expected_result)
         << profile.name << " " << test_case.mnemonic;
     fixture.expect_scc_consumer(test_case.expected_scc, test_case.mnemonic);
@@ -841,7 +841,7 @@ void run_sop2_carry_input_cases(const ScalarSccProfile &profile) {
     fixture.cu->write_sgpr(sb, test_case.lhs);
     fixture.cu->write_sgpr(sb + 1, test_case.rhs);
     fixture.wf->write_scc(test_case.input_scc);
-    fixture.cu->execute_instruction(inst.get(), *fixture.wf);
+    EXPECT_TRUE(fixture.cu->execute_instruction(inst.get(), *fixture.wf).succeeded());
     EXPECT_EQ(fixture.cu->read_sgpr(sb + 2), test_case.expected_result)
         << profile.name << " " << test_case.mnemonic;
     fixture.expect_scc_consumer(test_case.expected_scc, test_case.mnemonic);
@@ -880,7 +880,7 @@ void run_sopc_sopk_compare_scc_cases(const ScalarSccProfile &profile) {
     fixture.cu->write_sgpr(sb, test_case.lhs);
     fixture.cu->write_sgpr(sb + 1, test_case.rhs);
     fixture.wf->write_scc(!test_case.expected_scc);
-    fixture.cu->execute_instruction(inst.get(), *fixture.wf);
+    EXPECT_TRUE(fixture.cu->execute_instruction(inst.get(), *fixture.wf).succeeded());
     fixture.expect_scc_consumer(test_case.expected_scc, test_case.mnemonic);
   }
 
@@ -904,7 +904,7 @@ void run_sopc_sopk_compare_scc_cases(const ScalarSccProfile &profile) {
 
     fixture.cu->write_sgpr(sb + 4, test_case.src);
     fixture.wf->write_scc(!test_case.expected_scc);
-    fixture.cu->execute_instruction(inst.get(), *fixture.wf);
+    EXPECT_TRUE(fixture.cu->execute_instruction(inst.get(), *fixture.wf).succeeded());
     fixture.expect_scc_consumer(test_case.expected_scc, "s_cmpk_eq_i32");
   }
 }
@@ -950,7 +950,7 @@ void run_scalar_unary_preserves_scc(const ScalarSccProfile &profile,
       fixture.cu->write_sgpr(sb + 2, 0u);
       fixture.cu->write_sgpr(sb + 3, kHighDestinationSentinel);
       fixture.wf->write_scc(initial_scc);
-      fixture.cu->execute_instruction(inst.get(), *fixture.wf);
+      EXPECT_TRUE(fixture.cu->execute_instruction(inst.get(), *fixture.wf).succeeded());
 
       uint64_t actual = fixture.cu->read_sgpr(sb + 2);
       if (test_case.result_is_64_bit) {
@@ -1070,15 +1070,15 @@ void run_scalar_scan_carry_chain(const ScalarSccProfile &profile) {
   fixture.cu->write_sgpr(sb + 12, 1u);
   fixture.wf->write_scc(false);
 
-  fixture.cu->execute_instruction(add.get(), *fixture.wf);
+  EXPECT_TRUE(fixture.cu->execute_instruction(add.get(), *fixture.wf).succeeded());
   ASSERT_EQ(fixture.cu->read_sgpr(sb), 0u);
   ASSERT_TRUE(fixture.wf->read_scc());
 
-  fixture.cu->execute_instruction(scan.get(), *fixture.wf);
+  EXPECT_TRUE(fixture.cu->execute_instruction(scan.get(), *fixture.wf).succeeded());
   ASSERT_EQ(fixture.cu->read_sgpr(sb + 10), 0u);
   ASSERT_TRUE(fixture.wf->read_scc());
 
-  fixture.cu->execute_instruction(addc.get(), *fixture.wf);
+  EXPECT_TRUE(fixture.cu->execute_instruction(addc.get(), *fixture.wf).succeeded());
   EXPECT_EQ(fixture.cu->read_sgpr(sb + 1), 0x55u);
   EXPECT_FALSE(fixture.wf->read_scc());
 }
