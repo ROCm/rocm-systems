@@ -45,7 +45,8 @@ int EthtoolNetlinkClient::init() {
   return 0;
 }
 
-int EthtoolNetlinkClient::build_header(NLMessage& msg, const std::string& iface, int header_attr) {
+int EthtoolNetlinkClient::build_header(NLMessage& msg, const std::string& iface, int header_attr,
+                                       uint32_t flags) {
   NLAttributes attrs(msg);
 
   /**
@@ -61,6 +62,13 @@ int EthtoolNetlinkClient::build_header(NLMessage& msg, const std::string& iface,
   int ret = attrs.put_string(ETHTOOL_A_HEADER_DEV_NAME, iface);
   if (ret < 0) {
     return ret;
+  }
+
+  if (flags != 0) {
+    ret = attrs.put_u32(ETHTOOL_A_HEADER_FLAGS, flags);
+    if (ret < 0) {
+      return ret;
+    }
   }
 
   attrs.nest_end(header);
@@ -216,6 +224,97 @@ transport::Result<transport::DriverInfo> EthtoolNetlinkClient::get_driver_info(
 transport::Result<transport::VendorStatistics> EthtoolNetlinkClient::get_statistics(
     const std::string& /* iface */) {
   return {false, {}, ENOTSUP};
+}
+
+/**
+ * FEC Statistics
+ *
+ * ETHTOOL_A_FEC_STAT_CORRECTED/_UNCORR/_CORR_BITS are each a packed array of
+ * u64 (index 0 is the port total; further elements are per-lane, only present
+ * on some drivers/kernels). This slice reads index 0 only. The 16-entry
+ * per-lane symbol-error histogram (fec_symbols_err_0..15, kernel 6.18+) has no
+ * netlink attribute in headers available to build against here
+ * (verified: absent from /usr/include/linux/ethtool_netlink.h on this host,
+ * kernel 6.8) — the ionic StatTable_t lists those 16 names so they will
+ * surface automatically once a future change adds the histogram attribute and
+ * this kernel floor moves; until then they are silently absent, same as any
+ * other table entry the driver does not expose.
+ */
+static int fec_stats_handler(struct nl_msg* msg, void* arg) {
+  auto* ctx = static_cast<QueryContext<transport::FecStatistics_t>*>(arg);
+  if (!ctx || !ctx->result) {
+    return NL_SKIP;
+  }
+
+  struct nlmsghdr* nlh = nlmsg_hdr(msg);
+  struct nlattr* tb[ETHTOOL_A_FEC_MAX + 1];
+
+  if (NLAttributes::parse(nlh, GENL_HDRLEN, tb, ETHTOOL_A_FEC_MAX, nullptr) < 0) {
+    ctx->result->success = false;
+    ctx->result->error_code = EINVAL;
+    return NL_SKIP;
+  }
+
+  if (!NLAttributes::is_present(tb[ETHTOOL_A_FEC_STATS])) {
+    ctx->result->success = false;
+    ctx->result->error_code = ENODATA;
+    return NL_SKIP;
+  }
+
+  struct nlattr* stat_tb[ETHTOOL_A_FEC_STAT_MAX + 1];
+  if (NLAttributes::parse_nested(tb[ETHTOOL_A_FEC_STATS], stat_tb, ETHTOOL_A_FEC_STAT_MAX,
+                                 nullptr) < 0) {
+    ctx->result->success = false;
+    ctx->result->error_code = EINVAL;
+    return NL_SKIP;
+  }
+
+  transport::FecStatistics_t stats;
+  auto add_stat = [&](int attr_id, const char* name) {
+    if (!NLAttributes::is_present(stat_tb[attr_id])) {
+      return;
+    }
+    auto values = NLAttributes::get_u64_array(stat_tb[attr_id]);
+    if (values.empty()) {
+      return;
+    }
+    stats.names.emplace_back(name);
+    stats.values.push_back(values[0]);
+  };
+
+  add_stat(ETHTOOL_A_FEC_STAT_CORRECTED, "corrected_blocks");
+  add_stat(ETHTOOL_A_FEC_STAT_UNCORR, "uncorrectable_blocks");
+  add_stat(ETHTOOL_A_FEC_STAT_CORR_BITS, "corrected_bits");
+
+  ctx->result->success = true;
+  ctx->result->value = stats;
+  ctx->result->error_code = 0;
+
+  return NL_OK;
+}
+
+transport::Result<transport::FecStatistics_t> EthtoolNetlinkClient::get_fec_statistics(
+    const std::string& iface) {
+  transport::Result<transport::FecStatistics_t> result{false, {}, ENOTSUP};
+
+  if (!initialized_) {
+    result.error_code = ENOTCONN;
+    return result;
+  }
+
+  QueryContext<transport::FecStatistics_t> ctx{&result, iface};
+
+  auto build_fn = [this, &iface](NLMessage& msg) -> int {
+    return build_header(msg, iface, ETHTOOL_A_FEC_HEADER, ETHTOOL_FLAG_STATS);
+  };
+
+  int ret = client_.query(family_id_, ETHTOOL_MSG_FEC_GET, 1, build_fn, fec_stats_handler, &ctx);
+
+  if (ret < 0 && !result.success) {
+    result.error_code = -ret;
+  }
+
+  return result;
 }
 
 }  // namespace amd::nic::netlink
