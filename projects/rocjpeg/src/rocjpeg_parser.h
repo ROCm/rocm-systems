@@ -33,6 +33,8 @@ THE SOFTWARE.
 #pragma once
 
 #define NUM_COMPONENTS 4
+/** ISO/IEC 10918-1 A.2.2: an interleaved MCU holds at most 10 blocks. */
+#define MAX_BLOCKS_PER_MCU 10
 #define HUFFMAN_TABLES 2
 #define AC_HUFFMAN_TABLE_VALUES_SIZE 162
 #define DC_HUFFMAN_TABLE_VALUES_SIZE 12

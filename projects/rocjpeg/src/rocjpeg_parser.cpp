@@ -351,6 +351,25 @@ bool RocJpegStreamParser::ParseSOF() {
         }
     }
 
+    // ISO/IEC 10918-1 A.2.2: an interleaved MCU holds sum(H_i * V_i) blocks and
+    // that total shall not exceed 10. The per-component range check above is not
+    // enough on its own, because every factor can sit inside 1 to 4 while the
+    // products still add up past the limit: three 4x4 components describe a
+    // 48-block MCU, which GetChromaSubsampling happily classifies as 4:4:4. The
+    // components of a baseline frame are all carried in one interleaved scan, so
+    // the frame is where the limit can be applied.
+    uint32_t blocks_per_mcu = 0;
+    for (int32_t i = 0; i < jpeg_stream_parameters_.picture_parameter_buffer.num_components; i++) {
+        blocks_per_mcu += jpeg_stream_parameters_.picture_parameter_buffer.components[i].h_sampling_factor *
+                          jpeg_stream_parameters_.picture_parameter_buffer.components[i].v_sampling_factor;
+    }
+    if (blocks_per_mcu > MAX_BLOCKS_PER_MCU) {
+        ErrorLog(g_rocjpeg_logger, "Invalid JPEG: the frame header describes an MCU of " +
+            ROCJPEG_TOSTR(static_cast<int>(blocks_per_mcu)) + " blocks; at most " +
+            ROCJPEG_TOSTR(static_cast<int>(MAX_BLOCKS_PER_MCU)) + " are allowed!");
+        return false;
+    }
+
     uint8_t max_h_factor = jpeg_stream_parameters_.picture_parameter_buffer.components[0].h_sampling_factor;
     uint8_t max_v_factor = jpeg_stream_parameters_.picture_parameter_buffer.components[0].v_sampling_factor;
 
