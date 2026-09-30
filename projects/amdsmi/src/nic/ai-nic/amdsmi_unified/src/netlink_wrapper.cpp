@@ -206,4 +206,23 @@ const char* NLAttributes::get_string(struct nlattr* attr) {
 
 bool NLAttributes::is_present(struct nlattr* attr) { return attr != nullptr; }
 
+int NLAttributes::parse_nested(struct nlattr* nested, struct nlattr** tb, int maxtype,
+                               struct nla_policy* policy) {
+  return nla_parse_nested(tb, maxtype, nested, policy);
+}
+
+std::vector<uint64_t> NLAttributes::get_u64_array(struct nlattr* attr) {
+  const size_t count = static_cast<size_t>(nla_len(attr)) / sizeof(uint64_t);
+  const auto* raw = static_cast<const uint8_t*>(nla_data(attr));
+
+  // Netlink attributes are only NLA_ALIGNTO (4-byte) aligned; nla_data() can
+  // return an address not 8-byte aligned, so read via memcpy rather than
+  // dereferencing a uint64_t* (same workaround nla_get_u64() uses).
+  std::vector<uint64_t> result(count);
+  for (size_t i = 0; i < count; ++i) {
+    std::memcpy(&result[i], raw + (i * sizeof(uint64_t)), sizeof(uint64_t));
+  }
+  return result;
+}
+
 }  // namespace amd::nic::netlink

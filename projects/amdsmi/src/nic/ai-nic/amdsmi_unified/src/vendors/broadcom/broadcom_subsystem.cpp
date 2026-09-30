@@ -5,6 +5,8 @@
 
 #include <filesystem>
 
+#include "broadcom_stats.h"
+
 namespace fs = std::filesystem;
 
 NicVendor SmiNicSubsystemBroadcom::vendor() const { return NicVendor::Broadcom; }
@@ -54,10 +56,9 @@ void SmiNicSubsystemBroadcom::discover(
 
     auto nic = std::make_unique<SmiNic>(iface, bdf, NicType::Ethernet, it->path().string(),
                                         sysfs_bus_path, NicVendor::Broadcom, NicProduct::Unknown);
-    SmiNicPort port(iface, bdf, it->path().string(), sysfs_bus_path, transport);
+    SmiNicPort port(iface, bdf, it->path().string(), sysfs_bus_path, transport,
+                    &kBroadcomStatTable);
     port.discover_infiniband();
-    port.collect_vendor_statistics();
-    port.collect_standard_statistics();
     nic->add_nic_port(port);
     nics_.push_back(std::move(nic));
   }

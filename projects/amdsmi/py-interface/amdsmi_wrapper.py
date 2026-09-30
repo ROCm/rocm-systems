@@ -5337,10 +5337,19 @@ try:
     amdsmi_get_nic_port_statistics.argtypes = [amdsmi_processor_handle, uint32_t, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(struct_amdsmi_nic_stat_t)]
 except AttributeError:
     pass
+
+# values for enumeration 'amdsmi_nic_stat_scope_t'
+amdsmi_nic_stat_scope_t__enumvalues = {
+    0: 'AMDSMI_NIC_STAT_SCOPE_DEFAULT',
+    1: 'AMDSMI_NIC_STAT_SCOPE_EXTENDED',
+}
+AMDSMI_NIC_STAT_SCOPE_DEFAULT = 0
+AMDSMI_NIC_STAT_SCOPE_EXTENDED = 1
+amdsmi_nic_stat_scope_t = ctypes.c_uint32 # enum
 try:
     amdsmi_get_nic_vendor_statistics = _libraries['libamd_smi.so'].amdsmi_get_nic_vendor_statistics
     amdsmi_get_nic_vendor_statistics.restype = amdsmi_status_t
-    amdsmi_get_nic_vendor_statistics.argtypes = [amdsmi_processor_handle, uint32_t, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(struct_amdsmi_nic_stat_t)]
+    amdsmi_get_nic_vendor_statistics.argtypes = [amdsmi_processor_handle, uint32_t, amdsmi_nic_stat_scope_t, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(struct_amdsmi_nic_stat_t)]
 except AttributeError:
     pass
 class struct_amdsmi_ampp_field_t(Structure):
@@ -5691,7 +5700,8 @@ __all__ = \
     'AMDSMI_NIC_FILTER_AINIC_ONLY', 'AMDSMI_NIC_FILTER_ALL',
     'AMDSMI_NIC_HEALTH_ERROR', 'AMDSMI_NIC_HEALTH_HEALTHY',
     'AMDSMI_NIC_HEALTH_UNKNOWN', 'AMDSMI_NIC_HEALTH_UNSUPPORTED',
-    'AMDSMI_NIC_HEALTH_WARNING',
+    'AMDSMI_NIC_HEALTH_WARNING', 'AMDSMI_NIC_STAT_SCOPE_DEFAULT',
+    'AMDSMI_NIC_STAT_SCOPE_EXTENDED',
     'AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING',
     'AMDSMI_NPM_BALANCING_MODE_INVALID',
     'AMDSMI_NPM_BALANCING_MODE_MAX',
@@ -5969,9 +5979,10 @@ __all__ = \
     'amdsmi_nic_numa_info_t', 'amdsmi_nic_port_info_t',
     'amdsmi_nic_port_split_t', 'amdsmi_nic_port_t',
     'amdsmi_nic_rdma_dev_info_t', 'amdsmi_nic_rdma_devices_info_t',
-    'amdsmi_nic_rdma_port_info_t', 'amdsmi_nic_stat_t',
-    'amdsmi_nic_telemetry_t', 'amdsmi_nic_temperature_t',
-    'amdsmi_node_handle', 'amdsmi_npm_balancing_mode_t',
+    'amdsmi_nic_rdma_port_info_t', 'amdsmi_nic_stat_scope_t',
+    'amdsmi_nic_stat_t', 'amdsmi_nic_telemetry_t',
+    'amdsmi_nic_temperature_t', 'amdsmi_node_handle',
+    'amdsmi_npm_balancing_mode_t',
     'amdsmi_npm_info_t', 'amdsmi_npm_status_t', 'amdsmi_nps_caps_t',
     'amdsmi_od_vddc_point_t', 'amdsmi_od_volt_curve_t',
     'amdsmi_od_volt_freq_data_t', 'amdsmi_p2p_capability_t',

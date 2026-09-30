@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <filesystem>
 
+#include "pensando_stats.h"
+
 namespace fs = std::filesystem;
 
 NicVendor SmiNicSubsystemPensando::vendor() const { return NicVendor::AMD; }
@@ -85,10 +87,9 @@ void SmiNicSubsystemPensando::discover_ports(
 
         if (port_vendor_id == VENDOR_ID && port_device_id == PORT_ID) {
           if (is_downstream_port(port_bdf, bridge_bdf, pci_path)) {
-            SmiNicPort port(iface_name, port_bdf, sysfs_class_path, port_sysfs_bus_path, transport);
+            SmiNicPort port(iface_name, port_bdf, sysfs_class_path, port_sysfs_bus_path, transport,
+                            &kPensandoStatTable);
             port.discover_infiniband();
-            port.collect_vendor_statistics();
-            port.collect_standard_statistics();
             nic.add_nic_port(port);
           }
         }

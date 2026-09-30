@@ -201,6 +201,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **`amdsmi_get_npm_info()` and `amdsmi_set_npm_limit()` now reject `amdsmi_node_handle` values not vended by `amdsmi_get_node_handle()`**.  
   - Previously any non-null handle was dereferenced directly; an unregistered/garbage handle now returns `AMDSMI_STATUS_INVAL` instead.
 
+- **`amdsmi_get_nic_port_statistics()` and `amdsmi_get_nic_vendor_statistics()` are now implemented**.  
+  - Both previously always returned `AMDSMI_STATUS_NOT_YET_IMPLEMENTED`. They now report per-port standard and vendor driver counters.
+  - `amdsmi_get_nic_vendor_statistics()` gains a new `amdsmi_nic_stat_scope_t scope` parameter (`DEFAULT` or `EXTENDED`), inserted before `num_stats`. This is a breaking signature change, but no released caller could have depended on the old signature actually returning data.
+  - `amd-smi metric --nic --port [--extended]` now shows per-port vendor and standard statistics.
+
 - **NPM sysfs numeric reads (e.g. `cur_node_power_limit`, `max_node_power_limit`) now reject negative or malformed content**.  
   - Previously a leading `-` (e.g. `"-1"`) parsed successfully as `UINT64_MAX`; such content now fails with `RSMI_STATUS_UNEXPECTED_DATA`.
 
