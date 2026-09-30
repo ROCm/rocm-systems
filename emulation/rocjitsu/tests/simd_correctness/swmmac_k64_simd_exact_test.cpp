@@ -552,11 +552,12 @@ TEST(SwmmacK64SimdExact, F16NaNPayloadPriorityIsBitExact) {
   };
   constexpr std::array CASES{
       NanCase{"A qNaN wins over B and C", 0x7E01u, 0x7E03u, 0x7E05u, 0x7FC02000u, 0x7E01u},
+      NanCase{"A qNaN keeps an even payload", 0x7E02u, 0x3C00u, 0, 0x7FC04000u, 0x7E02u},
       NanCase{"B qNaN wins over C", 0x3C00u, 0x7E03u, 0x7E05u, 0x7FC06000u, 0x7E03u},
       NanCase{"C qNaN is retained", 0, 0, 0x7E05u, 0x7FC0A000u, 0x7E05u},
       NanCase{"A sNaN is quieted", 0x7C01u, 0x3C00u, 0, 0x7FC02000u, 0x7E01u},
       NanCase{"signed B qNaN is retained", 0x3C00u, 0xFE07u, 0, 0xFFC0E000u, 0xFE07u},
-      NanCase{"Inf times zero is canonical", 0x7C00u, 0, 0, 0xFFC00000u, 0xFE01u},
+      NanCase{"Inf times zero is canonical", 0x7C00u, 0, 0, 0xFFC00000u, 0xFE00u},
   };
 
   for (const auto &nan : CASES) {

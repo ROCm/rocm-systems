@@ -97,8 +97,8 @@ struct perfetto_policy
     {
         if(detail::get_cpu_samples())
         {
-            detail::get_cpu_samples()->emplace_back(
-                detail::cpu_perfetto_sample{ timestamp, metric_values });
+            detail::get_cpu_samples()->emplace_back(detail::cpu_perfetto_sample{
+                .timestamp = timestamp, .metric_values = metric_values });
         }
     }
 

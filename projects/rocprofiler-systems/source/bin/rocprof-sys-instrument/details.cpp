@@ -433,27 +433,30 @@ get_basic_block_file_line_info(module_t* module, procedure_t* func)
 
                 _data.emplace(
                     itr, basic_block_signature{
-                             _base_addr, _last_addr,
-                             function_signature(_return_type, _func_name, _file_name,
-                                                _param_types, { _row1, _row2 },
-                                                { _col1, _col2 }, true, true, true) });
+                             .start_address = _base_addr,
+                             .last_address  = _last_addr,
+                             .signature     = function_signature(
+                                 _return_type, _func_name, _file_name, _param_types,
+                                 { _row1, _row2 }, { _col1, _col2 }, true, true, true) });
             }
             else
             {
                 _data.emplace(itr,
                               basic_block_signature{
-                                  _base_addr, _last_addr,
-                                  function_signature(_return_type, _func_name, _file_name,
-                                                     _param_types, { _row1, 0 },
-                                                     { _col1, 0 }, true, true, false) });
+                                  .start_address = _base_addr,
+                                  .last_address  = _last_addr,
+                                  .signature     = function_signature(
+                                      _return_type, _func_name, _file_name, _param_types,
+                                      { _row1, 0 }, { _col1, 0 }, true, true, false) });
             }
         }
         else
         {
-            _data.emplace(itr, basic_block_signature{
-                                   _base_addr, _last_addr,
-                                   function_signature(_return_type, _func_name,
-                                                      _file_name, _param_types) });
+            _data.emplace(itr, basic_block_signature{ .start_address = _base_addr,
+                                                      .last_address  = _last_addr,
+                                                      .signature     = function_signature(
+                                                          _return_type, _func_name,
+                                                          _file_name, _param_types) });
         }
     }
 

@@ -293,9 +293,9 @@ public:
 template <typename EnvType = posix_env>
 struct ROCPROFSYS_INTERNAL_API env_config
 {
-    std::string m_env_name  = {};
-    std::string m_env_value = {};
-    int         m_override  = 0;
+    std::string m_env_name;
+    std::string m_env_value;
+    int         m_override = 0;
 
     /// @brief Apply the stored setenv command.
     /// @return The backend setenv result, or -1 when @c m_env_name is empty.

@@ -303,8 +303,12 @@ rocprofsys_register_source_hidden(const char* file, const char* func, size_t lin
               line, source);
 
     coverage::get_coverage_data().emplace_back(
-        coverage_data{ size_t{ 0 }, address, line, file, func,
-                       (source && strlen(source) > 0) ? source : func });
+        coverage_data{ .count    = size_t{ 0 },
+                       .address  = address,
+                       .line     = line,
+                       .module   = file,
+                       .function = func,
+                       .source   = (source && strlen(source) > 0) ? source : func });
 
     coverage::get_code_coverage().size += 1;
     coverage::get_code_coverage().possible.modules.emplace(file);

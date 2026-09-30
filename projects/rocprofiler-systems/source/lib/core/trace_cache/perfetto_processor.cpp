@@ -384,7 +384,8 @@ write_sampling_track_data(const struct backtrace_region_sample& _sample,
         }
 
         std::vector<annotation_entry> annotations = {
-            { "begin_ns", _sample.start_timestamp }, { "end_ns", _sample.end_timestamp }
+            { .key = "begin_ns", .value = _sample.start_timestamp },
+            { .key = "end_ns", .value = _sample.end_timestamp }
         };
 
         auto _call_stack = _sample.call_stack;
@@ -395,7 +396,8 @@ write_sampling_track_data(const struct backtrace_region_sample& _sample,
                 auto backtrace = nlohmann::json::parse(_call_stack);
                 for(const auto& [key, val] : backtrace.items())
                 {
-                    annotations.push_back({ key, val.template get<std::string>() });
+                    annotations.push_back(
+                        { .key = key, .value = val.template get<std::string>() });
                 }
             } catch(const std::exception& e)
             {
@@ -433,9 +435,9 @@ write_in_time_sample_data(CategoryT, const in_time_sample& _sample, bool use_ann
             return;
         }
 
-        annotate_perfetto(ctx, { { "timestamp_ns", timestamp },
-                                 { "event_type", _event_type },
-                                 { "target", _target } });
+        annotate_perfetto(ctx, { { .key = "timestamp_ns", .value = timestamp },
+                                 { .key = "event_type", .value = _event_type },
+                                 { .key = "target", .value = _target } });
     };
 
     TRACE_EVENT_INSTANT(trait::name<CategoryT>::value, ::perfetto::DynamicString{ _name },
@@ -639,20 +641,21 @@ perfetto_processor_t::handle(const kernel_dispatch_sample& _kds)
         }
 
         annotate_perfetto(
-            ctx, { { "begin_ns", _beg_ts },
-                   { "end_ns", _end_ts },
-                   { "corr_id", _corr_id },
-                   { "stream_id", _stream_handle },
-                   { "queue", _queue_id_handle },
-                   { "dispatch_id", _kds.dispatch_id },
-                   { "kernel_id", _kds.kernel_id },
-                   { "private_segment_size", _kds.private_segment_size },
-                   { "group_segment_size", _kds.group_segment_size },
-                   { "workgroup_size",
-                     fmt::format("({},{},{})", _kds.workgroup_size_x,
-                                 _kds.workgroup_size_y, _kds.workgroup_size_z) },
-                   { "grid_size", fmt::format("({},{},{})", _kds.grid_size_x,
-                                              _kds.grid_size_y, _kds.grid_size_z) } });
+            ctx, { { .key = "begin_ns", .value = _beg_ts },
+                   { .key = "end_ns", .value = _end_ts },
+                   { .key = "corr_id", .value = _corr_id },
+                   { .key = "stream_id", .value = _stream_handle },
+                   { .key = "queue", .value = _queue_id_handle },
+                   { .key = "dispatch_id", .value = _kds.dispatch_id },
+                   { .key = "kernel_id", .value = _kds.kernel_id },
+                   { .key = "private_segment_size", .value = _kds.private_segment_size },
+                   { .key = "group_segment_size", .value = _kds.group_segment_size },
+                   { .key   = "workgroup_size",
+                     .value = fmt::format("({},{},{})", _kds.workgroup_size_x,
+                                          _kds.workgroup_size_y, _kds.workgroup_size_z) },
+                   { .key   = "grid_size",
+                     .value = fmt::format("({},{},{})", _kds.grid_size_x,
+                                          _kds.grid_size_y, _kds.grid_size_z) } });
     };
 
     auto _make_queue_track = [&] {
@@ -714,15 +717,16 @@ perfetto_processor_t::handle(const scratch_memory_sample& _sms)
             return;
         }
 
-        annotate_perfetto(ctx, { { "begin_ns", _beg_ts },
-                                 { "end_ns", _end_ts },
-                                 { "corr_id", _corr_id },
-                                 { "stream_id", _stream_id },
-                                 { "queue", _queue_id_handle },
-                                 { "allocation_size", _sms.allocation_size },
-                                 { "agent_id", _agent_device_id },
-                                 { "operation", _name },
-                                 { "flags", _sms.flags } });
+        annotate_perfetto(ctx,
+                          { { .key = "begin_ns", .value = _beg_ts },
+                            { .key = "end_ns", .value = _end_ts },
+                            { .key = "corr_id", .value = _corr_id },
+                            { .key = "stream_id", .value = _stream_id },
+                            { .key = "queue", .value = _queue_id_handle },
+                            { .key = "allocation_size", .value = _sms.allocation_size },
+                            { .key = "agent_id", .value = _agent_device_id },
+                            { .key = "operation", .value = _name },
+                            { .key = "flags", .value = _sms.flags } });
     };
 
     auto _make_queue_track = [&] {
@@ -765,16 +769,17 @@ perfetto_processor_t::handle(const memory_copy_sample& _mcs)
             return;
         }
 
-        annotate_perfetto(ctx, { { "begin_ns", _beg_ts },
-                                 { "end_ns", _end_ts },
-                                 { "corr_id", _corr_id },
-                                 { "stream_id", _stream_id },
-                                 { "bytes", _mcs.bytes },
-                                 { "src_agent_id", _src_agent_log_node_id },
-                                 { "dst_agent_id", _dst_agent_log_node_id },
-                                 { "operation", _name },
-                                 { "src_address", _mcs.src_address_value },
-                                 { "dst_address", _mcs.dst_address_value } });
+        annotate_perfetto(ctx,
+                          { { .key = "begin_ns", .value = _beg_ts },
+                            { .key = "end_ns", .value = _end_ts },
+                            { .key = "corr_id", .value = _corr_id },
+                            { .key = "stream_id", .value = _stream_id },
+                            { .key = "bytes", .value = _mcs.bytes },
+                            { .key = "src_agent_id", .value = _src_agent_log_node_id },
+                            { .key = "dst_agent_id", .value = _dst_agent_log_node_id },
+                            { .key = "operation", .value = _name },
+                            { .key = "src_address", .value = _mcs.src_address_value },
+                            { .key = "dst_address", .value = _mcs.dst_address_value } });
     };
 
     auto _make_queue_track = [&] {
@@ -836,13 +841,14 @@ perfetto_processor_t::handle([[maybe_unused]] const memory_allocate_sample& _mas
                 return;
             }
 
-            annotate_perfetto(ctx, { { "begin_ns", _beg_ts },
-                                     { "end_ns", _end_ts },
-                                     { "corr_id", _corr_id },
-                                     { "stream_id", _stream_id },
-                                     { "bytes", _alloc_size },
-                                     { "agent_id", _agent_logical_node_id },
-                                     { "address", _addr_val } });
+            annotate_perfetto(ctx,
+                              { { .key = "begin_ns", .value = _beg_ts },
+                                { .key = "end_ns", .value = _end_ts },
+                                { .key = "corr_id", .value = _corr_id },
+                                { .key = "stream_id", .value = _stream_id },
+                                { .key = "bytes", .value = _alloc_size },
+                                { .key = "agent_id", .value = _agent_logical_node_id },
+                                { .key = "address", .value = _addr_val } });
         };
 
         core::perfetto::push_perfetto(category::rocm_memory_allocate{}, operation, _track,
@@ -871,11 +877,13 @@ perfetto_processor_t::handle(const region_sample& _rs)
             return;
         }
 
-        std::vector<annotation_entry> annotations = { { "begin_ns", _beg_ts },
-                                                      { "corr_id", _corr_id } };
+        std::vector<annotation_entry> annotations = {
+            { .key = "begin_ns", .value = _beg_ts },
+            { .key = "corr_id", .value = _corr_id }
+        };
         for(const auto& arg : args)
         {
-            annotations.push_back({ arg.arg_name, arg.arg_value });
+            annotations.push_back({ .key = arg.arg_name, .value = arg.arg_value });
         }
 
         if(!_rs.call_stack.empty())
@@ -885,7 +893,8 @@ perfetto_processor_t::handle(const region_sample& _rs)
                 auto backtrace = nlohmann::json::parse(_rs.call_stack);
                 for(const auto& [key, val] : backtrace.items())
                 {
-                    annotations.push_back({ key, val.template get<std::string>() });
+                    annotations.push_back(
+                        { .key = key, .value = val.template get<std::string>() });
                 }
             } catch(const std::exception& e)
             {
@@ -1198,81 +1207,105 @@ perfetto_processor_t::handle([[maybe_unused]] const pmc_event_with_sample& _pmc)
 
     static const std::unordered_map<size_t, pmc_track_info> PMC_TRACK_MAP = {
         { ROCPROFSYS_CATEGORY_ROCM_COUNTER_COLLECTION,
-          { ROCM_COUNTER_UNIT,
-            [](auto id) { return counter_collection_track::exists(id); },
-            [](auto id, auto& n, auto& u) {
-                counter_collection_track::emplace(id, n, u.c_str());
-            },
-            [](auto id, auto idx, auto ts, auto val) {
-                TRACE_COUNTER(trait::name<category::rocm_counter_collection>::value,
-                              counter_collection_track::at(id, idx), ts, val);
-            } } },
+          { .default_units = ROCM_COUNTER_UNIT,
+            .exists_fn     = [](auto id) { return counter_collection_track::exists(id); },
+            .emplace_fn =
+                [](auto id, auto& n, auto& u) {
+                    counter_collection_track::emplace(id, n, u.c_str());
+                },
+            .trace_fn =
+                [](auto id, auto idx, auto ts, auto val) {
+                    TRACE_COUNTER(trait::name<category::rocm_counter_collection>::value,
+                                  counter_collection_track::at(id, idx), ts, val);
+                } } },
 
         { ROCPROFSYS_CATEGORY_THREAD_CPU_TIME,
-          { "sec", [](auto id) { return thread_cpu_time_track::exists(id); },
-            [](auto id, auto& n, auto& u) {
-                thread_cpu_time_track::emplace(id, n, u.c_str());
-            },
-            [](auto id, auto idx, auto ts, auto val) {
-                TRACE_COUNTER(trait::name<category::thread_cpu_time>::value,
-                              thread_cpu_time_track::at(id, idx), ts, val);
-            } } },
+          { .default_units = "sec",
+            .exists_fn     = [](auto id) { return thread_cpu_time_track::exists(id); },
+            .emplace_fn =
+                [](auto id, auto& n, auto& u) {
+                    thread_cpu_time_track::emplace(id, n, u.c_str());
+                },
+            .trace_fn =
+                [](auto id, auto idx, auto ts, auto val) {
+                    TRACE_COUNTER(trait::name<category::thread_cpu_time>::value,
+                                  thread_cpu_time_track::at(id, idx), ts, val);
+                } } },
 
         { ROCPROFSYS_CATEGORY_THREAD_PEAK_MEMORY,
-          { "MB", [](auto id) { return thread_peak_memory_track::exists(id); },
-            [](auto id, auto& n, auto& u) {
-                thread_peak_memory_track::emplace(id, n, u.c_str());
-            },
-            [](auto id, auto idx, auto ts, auto val) {
-                TRACE_COUNTER(trait::name<category::thread_peak_memory>::value,
-                              thread_peak_memory_track::at(id, idx), ts, val);
-            } } },
+          { .default_units = "MB",
+            .exists_fn     = [](auto id) { return thread_peak_memory_track::exists(id); },
+            .emplace_fn =
+                [](auto id, auto& n, auto& u) {
+                    thread_peak_memory_track::emplace(id, n, u.c_str());
+                },
+            .trace_fn =
+                [](auto id, auto idx, auto ts, auto val) {
+                    TRACE_COUNTER(trait::name<category::thread_peak_memory>::value,
+                                  thread_peak_memory_track::at(id, idx), ts, val);
+                } } },
 
         { ROCPROFSYS_CATEGORY_THREAD_CONTEXT_SWITCH,
-          { "", [](auto id) { return thread_context_switch_track::exists(id); },
-            [](auto id, auto& n, auto& u) {
-                thread_context_switch_track::emplace(id, n, u.c_str());
-            },
-            [](auto id, auto idx, auto ts, auto val) {
-                TRACE_COUNTER(trait::name<category::thread_context_switch>::value,
-                              thread_context_switch_track::at(id, idx), ts, val);
-            } } },
+          { .default_units = "",
+            .exists_fn = [](auto id) { return thread_context_switch_track::exists(id); },
+            .emplace_fn =
+                [](auto id, auto& n, auto& u) {
+                    thread_context_switch_track::emplace(id, n, u.c_str());
+                },
+            .trace_fn =
+                [](auto id, auto idx, auto ts, auto val) {
+                    TRACE_COUNTER(trait::name<category::thread_context_switch>::value,
+                                  thread_context_switch_track::at(id, idx), ts, val);
+                } } },
 
         { ROCPROFSYS_CATEGORY_THREAD_PAGE_FAULT,
-          { "", [](auto id) { return thread_page_fault_track::exists(id); },
-            [](auto id, auto& n, auto& u) {
-                thread_page_fault_track::emplace(id, n, u.c_str());
-            },
-            [](auto id, auto idx, auto ts, auto val) {
-                TRACE_COUNTER(trait::name<category::thread_page_fault>::value,
-                              thread_page_fault_track::at(id, idx), ts, val);
-            } } },
+          { .default_units = "",
+            .exists_fn     = [](auto id) { return thread_page_fault_track::exists(id); },
+            .emplace_fn =
+                [](auto id, auto& n, auto& u) {
+                    thread_page_fault_track::emplace(id, n, u.c_str());
+                },
+            .trace_fn =
+                [](auto id, auto idx, auto ts, auto val) {
+                    TRACE_COUNTER(trait::name<category::thread_page_fault>::value,
+                                  thread_page_fault_track::at(id, idx), ts, val);
+                } } },
 
         { ROCPROFSYS_CATEGORY_THREAD_HARDWARE_COUNTER,
-          { "", [](auto id) { return thread_hardware_counter_track::exists(id); },
-            [](auto id, auto& n, auto& u) {
-                thread_hardware_counter_track::emplace(id, n, u.c_str());
-            },
-            [](auto id, auto idx, auto ts, auto val) {
-                TRACE_COUNTER(trait::name<category::thread_hardware_counter>::value,
-                              thread_hardware_counter_track::at(id, idx), ts, val);
-            } } },
+          { .default_units = "",
+            .exists_fn =
+                [](auto id) { return thread_hardware_counter_track::exists(id); },
+            .emplace_fn =
+                [](auto id, auto& n, auto& u) {
+                    thread_hardware_counter_track::emplace(id, n, u.c_str());
+                },
+            .trace_fn =
+                [](auto id, auto idx, auto ts, auto val) {
+                    TRACE_COUNTER(trait::name<category::thread_hardware_counter>::value,
+                                  thread_hardware_counter_track::at(id, idx), ts, val);
+                } } },
 
         { ROCPROFSYS_CATEGORY_COMM_DATA,
-          { "bytes", [](auto id) { return comm_data_track::exists(id); },
-            [](auto id, auto& n, auto& u) { comm_data_track::emplace(id, n, u.c_str()); },
-            [](auto id, auto idx, auto ts, auto val) {
-                TRACE_COUNTER(trait::name<category::comm_data>::value,
-                              comm_data_track::at(id, idx), ts, val);
-            } } },
+          { .default_units = "bytes",
+            .exists_fn     = [](auto id) { return comm_data_track::exists(id); },
+            .emplace_fn                                                   = [](auto id, auto& n,
+                             auto& u) { comm_data_track::emplace(id, n, u.c_str()); },
+            .trace_fn =
+                [](auto id, auto idx, auto ts, auto val) {
+                    TRACE_COUNTER(trait::name<category::comm_data>::value,
+                                  comm_data_track::at(id, idx), ts, val);
+                } } },
 
         { ROCPROFSYS_CATEGORY_MPI,
-          { "bytes", [](auto id) { return comm_data_track::exists(id); },
-            [](auto id, auto& n, auto& u) { comm_data_track::emplace(id, n, u.c_str()); },
-            [](auto id, auto idx, auto ts, auto val) {
-                TRACE_COUNTER(trait::name<category::comm_data>::value,
-                              comm_data_track::at(id, idx), ts, val);
-            } } }
+          { .default_units = "bytes",
+            .exists_fn     = [](auto id) { return comm_data_track::exists(id); },
+            .emplace_fn                                                   = [](auto id, auto& n,
+                             auto& u) { comm_data_track::emplace(id, n, u.c_str()); },
+            .trace_fn =
+                [](auto id, auto idx, auto ts, auto val) {
+                    TRACE_COUNTER(trait::name<category::comm_data>::value,
+                                  comm_data_track::at(id, idx), ts, val);
+                } } }
     };
 
     const auto track_name = std::string(_pmc.track_name);
@@ -1560,14 +1593,14 @@ perfetto_processor_t::emit_kfd_event(const kfd_sample& sample)
         }
 
         std::vector<annotation_entry> annotations = {
-            { "begin_ns", sample.start_timestamp },
-            { "end_ns", sample.end_timestamp },
+            { .key = "begin_ns", .value = sample.start_timestamp },
+            { .key = "end_ns", .value = sample.end_timestamp },
         };
 
         auto args = process_arguments_string(sample.args_str);
         for(const auto& arg : args)
         {
-            annotations.push_back({ arg.arg_name, arg.arg_value });
+            annotations.push_back({ .key = arg.arg_name, .value = arg.arg_value });
         }
 
         annotate_perfetto(ctx, annotations);
