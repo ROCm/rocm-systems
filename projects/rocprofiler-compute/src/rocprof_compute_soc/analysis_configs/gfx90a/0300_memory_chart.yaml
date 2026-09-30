@@ -13,24 +13,6 @@ Panel Config:
         Wavefront Occupancy:
           value: ROUND(SUM(SQ_LEVEL_WAVES_ACCUM) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $numActiveCUs),
             0)
-        Wave Life:
-          value: ROUND(4 * SUM(SQ_WAVE_CYCLES) / SUM(SQ_WAVES), 0)
-        SALU:
-          value: ROUND(SUM(SQ_INSTS_SALU) / SUM($denom), 0)
-        SMEM:
-          value: ROUND(SUM(SQ_INSTS_SMEM) / SUM($denom), 0)
-        VALU:
-          value: ROUND(SUM(SQ_INSTS_VALU) / SUM($denom), 0)
-        Matrix Ops:
-          value: ROUND(SUM(SQ_INSTS_MFMA) / SUM($denom), 0)
-        VMEM:
-          value: ROUND(SUM(SQ_INSTS_VMEM) / SUM($denom), 0)
-        LDS:
-          value: ROUND(SUM(SQ_INSTS_LDS) / SUM($denom), 0)
-        GWS:
-          value: ROUND(SUM(SQ_INSTS_GDS) / SUM($denom), 0)
-        BR:
-          value: ROUND(SUM(SQ_INSTS_BRANCH) / SUM($denom), 0)
         VGPR:
           value: ROUND(AVG(Arch_VGPR), 0)
         SGPR:
@@ -39,8 +21,6 @@ Panel Config:
           value: ROUND(AVG(LDS_Per_Workgroup), 0)
         Scratch Allocation:
           value: ROUND(AVG(Scratch_Per_Workitem), 0)
-        Wavefronts:
-          value: ROUND(AVG(SPI_CSN_WAVE), 0)
         Workgroups:
           value: ROUND(AVG(SPI_CSN_NUM_THREADGROUPS), 0)
         Flat Read:
@@ -59,28 +39,10 @@ Panel Config:
           value: ROUND(SUM(SQ_INSTS_LDS) / SUM($denom), 0)
         LDS Util:
           value: ROUND(100 * SUM(SQ_LDS_IDX_ACTIVE) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu), 0)
-        LDS Latency:
-          value: ROUND(SUM(SQ_INST_LEVEL_LDS_ACCUM) / SUM(SQ_INSTS_LDS),0)
-        VL1 Rd:
-          value: ROUND(SUM(TCP_TOTAL_READ_sum) / SUM($denom), 0)
-        VL1 Wr:
-          value: ROUND(SUM(TCP_TOTAL_WRITE_sum) / SUM($denom), 0)
-        VL1 Atomic:
-          value: ROUND(SUM(TCP_TOTAL_ATOMIC_WITH_RET_sum + TCP_TOTAL_ATOMIC_WITHOUT_RET_sum) / SUM($denom), 0)
         VL1 Hit:
           value: ROUND(100 - 100 * SUM(TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum), 0)
-        VL1 Lat:
-          value: ROUND(SUM(TCP_TCP_LATENCY_sum) / SUM(TCP_TA_TCP_STATE_READ_sum), 0)
         VL1 Coalesce:
           value: ROUND(100 * 64 * SUM(TA_TOTAL_WAVEFRONTS_sum) / (4 * SUM(TCP_TOTAL_ACCESSES_sum)), 0)
-        VL1 Stall:
-          value: ROUND(100 * SUM(TCP_TCR_TCP_STALL_CYCLES_sum) / SUM(TCP_GATE_EN1_sum), 0)
-        VL1_L2 Rd:
-          value: ROUND(SUM(TCP_TCC_READ_REQ_sum) / SUM($denom), 0)
-        VL1_L2 Wr:
-          value: ROUND(SUM(TCP_TCC_WRITE_REQ_sum) / SUM($denom), 0)
-        VL1_L2 Atomic:
-          value: ROUND(SUM(TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) / SUM($denom), 0)
         VL1_L2 Read BW:
           value: 128 * SUM(TCP_TCC_READ_REQ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
@@ -94,14 +56,6 @@ Panel Config:
           value: ROUND(SUM(SQC_DCACHE_REQ) / SUM($denom), 0)
         sL1D Hit:
           value: ROUND(100 * SUM(SQC_DCACHE_HITS) / SUM(SQC_DCACHE_REQ), 0)
-        sL1D Lat:
-          value: ROUND(100 * SUM(SQC_DCACHE_INFLIGHT_LEVEL_ACCUM) / SUM(SQC_DCACHE_REQ), 0)
-        sL1D_L2 Rd:
-          value: ROUND(SUM(SQC_TC_DATA_READ_REQ) / SUM($denom), 0)
-        sL1D_L2 Wr:
-          value: ROUND(SUM(SQC_TC_DATA_WRITE_REQ) / SUM($denom), 0)
-        sL1D_L2 Atomic:
-          value: ROUND(SUM(SQC_TC_DATA_ATOMIC_REQ) / SUM($denom), 0)
         sL1D_L2 Read BW:
           value: 64 * SUM(SQC_TC_DATA_READ_REQ) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
@@ -109,79 +63,22 @@ Panel Config:
           value: ROUND(SUM(SQC_ICACHE_REQ) / SUM($denom), 0)
         IL1 Hit:
           value: ROUND(100 * SUM(SQC_ICACHE_HITS) / SUM(SQC_ICACHE_REQ), 0)
-        IL1 Lat:
-          value: ROUND(100 * SUM(SQC_ICACHE_INFLIGHT_LEVEL_ACCUM) / SUM(SQC_ICACHE_REQ), 0)
-        IL1_L2 Rd:
-          value: ROUND(SUM(SQC_TC_INST_REQ) / SUM($denom), 0)
         IL1_L2 Read BW:
           value: 64 * SUM(SQC_TC_INST_REQ) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
-        L2 Rd:
-          value: ROUND(SUM(TCC_READ_sum) / SUM($denom), 0)
-        L2 Wr:
-          value: ROUND(SUM(TCC_WRITE_sum) / SUM($denom), 0)
-        L2 Atomic:
-          value: ROUND(SUM(TCC_ATOMIC_sum) / SUM($denom), 0)
         L2 Hit:
           value: ROUND(100 * SUM(TCC_HIT_sum) / SUM(TCC_HIT_sum + TCC_MISS_sum), 0)
-        L2 Rd Lat:
-          value: ROUND(SUM(TCP_TCC_READ_REQ_LATENCY_sum) / SUM(TCP_TCC_READ_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum), 0)
-        L2 Wr Lat:
-          value: ROUND(SUM(TCP_TCC_WRITE_REQ_LATENCY_sum) / SUM(TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum), 0)
-        Fabric_L2 Rd:
-          value: ROUND(SUM(TCC_EA_RDREQ_sum) / SUM($denom), 0)
-        Fabric_L2 Wr:
-          value: ROUND(SUM(TCC_EA_WRREQ_sum) / SUM($denom), 0)
-        Fabric_L2 Atomic:
-          value: ROUND(SUM(TCC_EA_ATOMIC_sum) / SUM($denom), 0)
         L2-Fabric Read BW:
           value: SUM(TCC_EA_RDREQ_32B_sum * 32 + (TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum) * 64) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
         L2-Fabric Write and Atomic BW:
           value: SUM(TCC_EA_WRREQ_64B_sum * 64 + (TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) * 32) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
-        Fabric Rd Lat:
-          value: ROUND(SUM(TCC_EA_RDREQ_LEVEL_sum) / SUM(TCC_EA_RDREQ_sum), 0)
-        Fabric Wr Lat:
-          value: ROUND(SUM(TCC_EA_WRREQ_LEVEL_sum) / SUM(TCC_EA_WRREQ_sum), 0)
-        Fabric Atomic Lat:
-          value: ROUND(SUM(TCC_EA_ATOMIC_LEVEL_sum) / SUM(TCC_EA_ATOMIC_sum), 0)
-        HBM Rd:
-          value: ROUND(SUM(TCC_EA_RDREQ_DRAM_sum) / SUM($denom), 0)
-        HBM Wr:
-          value: ROUND(SUM(TCC_EA_WRREQ_DRAM_sum) / SUM($denom), 0)
-        HBM Read Traffic:
-          value: ROUND(100 * SUM(TCC_EA_RDREQ_DRAM_sum) / SUM(TCC_EA_RDREQ_sum), 0)
-          unit: Percent
-        HBM Write and Atomic Traffic:
-          value: ROUND(100 * SUM(TCC_EA_WRREQ_DRAM_sum) / SUM(TCC_EA_WRREQ_sum), 0)
-          unit: Percent
-        Remote Read Traffic:
-          value: ROUND(100 * SUM(NOISE_CLAMP(TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum, TCC_EA_RDREQ_sum)) / SUM(TCC_EA_RDREQ_sum), 0)
-          unit: Percent
-        Remote Write and Atomic Traffic:
-          value: ROUND(100 * SUM(NOISE_CLAMP(TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum, TCC_EA_WRREQ_sum)) / SUM(TCC_EA_WRREQ_sum), 0)
-          unit: Percent
       comparable: false
       cli_style: mem_chart
       tui_style: mem_chart
   metrics_description:
     Wavefront Occupancy: Wavefronts per active CU.
-    Wave Life: Average number of cycles executing a wave.
-    SALU: Total Number of SALU (Scalar ALU) instructions issued per normalization
-      unit.
-    SMEM: Total number of SMEM (Scalar Memory Read) instructions issued normalization
-      unit.
-    VALU: The number of VALU (Vector ALU) instructions issued per normalization unit.
-    Matrix Ops: Total number of MFMA (Matrix-Fused-Multiply-Add) instructions issued per
-      normalization unit.
-    VMEM: The number of VMEM (GPU Memory) read instructions issued (including FLAT/scratch
-      memory) per normalization unit.
-    LDS: The total number of LDS instructions (including, but not limited to, read/write/atomics
-      and HIP's __shfl instructions) executed per normalization unit.
-    GWS: Total number of GDS (global data sync) instructions issued per normalization
-      unit.
-    BR: Total number of BRANCH instructions issued per normalization unit.
     VGPR: >-
       The number of architected vector general-purpose registers allocated
       for the kernel, see VALU. Note: this may not exactly match the number of VGPRs
@@ -197,8 +94,6 @@ Panel Config:
     Scratch Allocation: The number of bytes of scratch memory requested per work-item
       for this kernel. Scratch memory is used for stack memory on the accelerator,
       as well as for register spills and restores.
-    Wavefronts: The total number of wavefronts, summed over all workgroups, forming
-      this kernel launch.
     Workgroups: The total number of workgroups forming this kernel launch.
     Flat Read: The total number of flat read wavefronts per normalization unit.
     Flat Write: The total number of flat write wavefronts per normalization unit.
@@ -213,33 +108,12 @@ Panel Config:
       executing instructions (including, but not limited to, load, store, atomic and
       HIP's __shfl operations). Calculated as the ratio of the total number of cycles
       LDS was active over the total CU cycles.
-    LDS Latency: The average number of round-trip cycles (i.e., from issue to data-return
-      / acknowledgment) required for an LDS instruction to complete.
-    VL1 Rd: The total number of incoming read requests from the address processing
-      unit after coalescing per normalization unit
-    VL1 Wr: The total number of incoming write requests from the address processing
-      unit after coalescing per normalization unit
-    VL1 Atomic: The total number of incoming atomic requests from the address processing
-      unit after coalescing per normalization unit
     VL1 Hit: The ratio of the number of vL1D cache line requests that hit in vL1D
       cache over the total number of cache line requests to the vL1D Cache RAM.
-    VL1 Lat: Calculated as the average number of cycles that a vL1D cache line request
-      spent in the vL1D cache pipeline.
     VL1 Coalesce: Indicates how well memory instructions were coalesced by the address
       processing unit, ranging from uncoalesced (25%) to fully coalesced (100%). Calculated
       as the average number of thread-requests generated per instruction divided by
       the ideal number of thread-requests per instruction.
-    VL1 Stall: The ratio of the number of cycles where the vL1D is stalled waiting
-      to issue a request for data to the L2 cache divided by the number of cycles
-      where the vL1D is active.
-    VL1_L2 Rd: The number of read requests for a vL1D cache line that were not satisfied
-      by the vL1D and must be retrieved from the to the L2 Cache per normalization
-      unit.
-    VL1_L2 Wr: The number of write requests to a vL1D cache line that were sent through
-      the vL1D to the L2 cache, per normalization unit.
-    VL1_L2 Atomic: The number of atomic requests that are sent through the vL1D to
-      the L2 cache, per normalization unit. This includes requests for atomics with,
-      and without return.
     VL1_L2 Read BW: Bandwidth of read requests from the vL1D cache to the L2
       cache per unit time.
     VL1_L2 Write BW: Bandwidth of write requests from the vL1D cache to the L2
@@ -250,63 +124,17 @@ Panel Config:
       normalization unit.
     sL1D Hit: The total number of sL1D requests that hit on a previously loaded cache
       line, per normalization unit.
-    sL1D_L2 Rd: The total number of read requests from sL1D to the L2, per normalization
-      unit.
-    sL1D_L2 Wr: The total number of write requests from sL1D to the L2, per normalization
-      unit. Typically unused on current CDNA accelerators.
-    sL1D_L2 Atomic: The total number of atomic requests from sL1D to the L2, per normalization
-      unit. Typically unused on current CDNA accelerators.
     sL1D_L2 Read BW: Bandwidth of read requests from the sL1D cache to the L2
       cache per unit time.
     IL1 Fetch: The total number of requests made to the L1I per normalization-unit.
     IL1 Hit: The percent of L1I requests that hit on a previously loaded line the
       cache. Calculated as the ratio of the number of L1I requests that hit over the
       number of all L1I requests.
-    IL1 Lat: The average number of cycles spent to fetch instructions to a CU.
-    IL1_L2 Rd: The total number of requests across the L1I - L2 interface per normalization-unit.
     IL1_L2 Read BW: Bandwidth of read requests from the instruction L1 cache to
       the L2 cache per unit time.
-    L2 Rd: The total number of read requests to the L2 from all clients.
-    L2 Wr: The total number of write requests to the L2 from all clients.
-    L2 Atomic: The total number of atomic requests (with and without return) to the
-      L2 from all clients.
     L2 Hit: The ratio of the number of L2 cache line requests that hit in the L2 cache
       over the total number of incoming cache line requests to the L2 cache.
-    L2 Rd Lat: Calculated as the average number of cycles that the vL1D cache took
-      to issue and receive read requests from the L2 Cache. This number also includes
-      requests for atomics with return values.
-    L2 Wr Lat: Calculated as the average number of cycles that the vL1D cache took
-      to issue and receive acknowledgement of a write request to the L2 Cache. This
-      number also includes requests for atomics without return values.
-    Fabric_L2 Rd: Number of L2 cache - Infinity Fabric read requests (either 32-byte
-      or 64-byte) summed over TCC instances per normalization unit.
-    Fabric_L2 Wr: Number of L2 cache - Infinity Fabric write requests (either 32-byte
-      or 64-byte) summed over TCC instances per normalization unit.
-    Fabric_L2 Atomic: Number of L2 cache - Infinity Fabric write requests (either
-      32-byte or 64-byte) that are actually atomic requests summed over TCC instances
-      per normalization unit.
     L2-Fabric Read BW: The number of bytes read by the L2 over the Infinity Fabric
       interface per unit time.
     L2-Fabric Write and Atomic BW: The number of bytes sent by the L2 over the Infinity
       Fabric interface by write and atomic operations per unit time.
-    Fabric Rd Lat: The time-averaged number of cycles read requests spent in Infinity
-      Fabric before data was returned to the L2.
-    Fabric Wr Lat: The time-averaged number of cycles write requests spent in Infinity
-      Fabric before a completion acknowledgement was returned to the L2.
-    Fabric Atomic Lat: The time-averaged number of cycles atomic requests spent in
-      Infinity Fabric before a completion acknowledgement (atomic without return value)
-      or data (atomic with return value) was returned to the L2.
-    HBM Rd: The total number of L2 requests to Infinity Fabric to read 32B or 64B
-      of data from the accelerator's local HBM, per normalization unit.
-    HBM Wr: >-
-      The total number of L2 requests to Infinity Fabric to write or atomically
-      update 32B or 64B of data in the accelerator's local HBM, per normalization
-      unit.
-    HBM Read Traffic: The percent of Fabric read requests routed to the accelerator's
-      local HBM.
-    HBM Write and Atomic Traffic: The percent of Fabric write and atomic requests
-      routed to the accelerator's local HBM.
-    Remote Read Traffic: The percent of Fabric read requests routed to a remote
-      destination (e.g., CPU DRAM or remote GPU HBM).
-    Remote Write and Atomic Traffic: The percent of Fabric write and atomic requests
-      routed to a remote destination (e.g., CPU DRAM or remote GPU HBM).
