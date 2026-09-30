@@ -675,6 +675,41 @@ TEST(ConSanPipeline, EmptyPlansNeedNoRuntimeBindingForAnyMode) {
   }
 }
 
+TEST(ConSanPipeline, AutomaticEmptyDefaultPlansPreserveTheCompletedInventory) {
+  constexpr std::array<uint32_t, 1> kRdnaEnd = {0xBFB00000u};
+  constexpr std::array<uint32_t, 1> kCdnaEnd = {0xBF810000u};
+  const std::array images = {
+      make_rdna3_lds_code_object(kRdnaEnd), make_rdna4_lds_code_object(kRdnaEnd),
+      make_cdna3_lds_code_object(kCdnaEnd), make_cdna4_lds_code_object(kCdnaEnd),
+      make_gfx1250_code_object(kRdnaEnd),   make_rdna4_supported_lds_code_object(),
+  };
+  for (size_t index = 0; index < images.size(); ++index) {
+    SCOPED_TRACE(index);
+    Request request = make_request();
+    // Also cover a real access excluded by an exact production allowlist.
+    if (index + 1 == images.size())
+      request.kernel_name_allowlist = {"another_kernel"};
+    const auto &bytes = images[index];
+    const auto expected = transform(bytes, request, TransformPolicy{}, enabled_runtime_policy(),
+                                    DebugOverrides{}, complete_runtime_capabilities(), {});
+    auto preparation = prepare_automatic_transform(
+        bytes, request, TransformPolicy{}, enabled_runtime_policy(), DebugOverrides{},
+        MutationRequest{}, complete_runtime_capabilities());
+    ASSERT_TRUE(std::holds_alternative<TransformResult>(preparation));
+    const auto &actual = std::get<TransformResult>(preparation);
+    ASSERT_TRUE(actual.well_formed()) << testing::PrintToString(actual.errors);
+    EXPECT_EQ(actual.outcome, TransformOutcome::Unchanged);
+    EXPECT_TRUE(actual.replacement.empty());
+    EXPECT_TRUE(actual.observation_plan().probe_intents.empty());
+    EXPECT_EQ(actual.code_object, expected.code_object);
+    EXPECT_EQ(actual.observation_plan(), expected.observation_plan());
+    EXPECT_EQ(actual.evidence_requirements, expected.evidence_requirements);
+    EXPECT_EQ(actual.errors, expected.errors);
+    EXPECT_EQ(actual.mutation, expected.mutation);
+    EXPECT_EQ(actual.dispatch_requirements, expected.dispatch_requirements);
+  }
+}
+
 TEST(ConSanPipeline, ConcreteBindingChecksRuntimeFactsAndLifetimeScope) {
   const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
   const Request request = make_request();

@@ -627,6 +627,18 @@ prepare_automatic_transform(std::span<const uint8_t> code_object_bytes, const Re
                                 std::nullopt, LoweringExtent::ThroughProgramInventory);
   const bool inventory_acceptable =
       executor != nullptr ? inventory.code_object.valid() : inventory.well_formed();
+  // A complete, empty Default observation plan is already a terminal no-op.
+  // Re-entering transform would build the inventory twice more and construct
+  // register/liveness plans despite having no probes to lower. Keep injected
+  // executors, debug overrides, and mutation requests on their existing paths.
+  if (executor == nullptr && mode == Mode::Default && debug == DebugOverrides{} &&
+      mutation == MutationRequest{} && inventory_acceptable &&
+      inventory.outcome == TransformOutcome::Unchanged && inventory.observation_plan().valid() &&
+      inventory.observation_plan().probe_intents.empty() && inventory.evidence_requirements &&
+      evidence_is_complete(*inventory.evidence_requirements) &&
+      !evidence_requires_binding(*inventory.evidence_requirements)) {
+    return inventory;
+  }
   if (!inventory_acceptable || !inventory.evidence_requirements ||
       !evidence_requires_binding(*inventory.evidence_requirements)) {
     if (inventory_acceptable && (executor == nullptr || inventory_mutation != mutation) &&
