@@ -40,6 +40,19 @@ See the [build and test guide](docs/build-and-test.md) for local development wit
 dummy data or a local data directory (`npm run dev:data -- <data-directory>`),
 browser setup, verification commands, and the production build.
 
+## Publishing to GitHub Pages
+
+The [rocjitsu-publish-website workflow](../../../../.github/workflows/rocjitsu-publish-website.yml)
+compares each site's sources on `develop` with its last published revision and
+builds only sites with pending changes. Manual runs and shared workflow changes
+rebuild both. Manual publishing also requires `develop`.
+The dashboard is published to `gh-pages/rocjitsu-dashboard/`, and the handbook
+to `gh-pages/rocjitsu/`; other Pages files are preserved. Benchmark data
+continues to come from `gh-pages-rocjitsu`.
+
+See the [handbook publishing setup](../handbook/README.md#verification-and-publishing)
+for GitHub App secrets, permissions, and Pages configuration.
+
 ## Source layout
 
 | Path | Purpose |

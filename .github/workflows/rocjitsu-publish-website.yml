@@ -1,5 +1,5 @@
-# Publish the Rocjitsu dashboard from develop.
-# A change under emulation/rocjitsu/website/dashboard/ replaces gh-pages/rocjitsu-dashboard/.
+# Publish the Rocjitsu handbook and dashboard from develop.
+# Replace only gh-pages/rocjitsu/ and gh-pages/rocjitsu-dashboard/.
 
 name: "rocjitsu-publish-website"
 
@@ -9,6 +9,10 @@ on:
       - develop
     paths:
       - "emulation/rocjitsu/website/dashboard/**"
+      - "emulation/rocjitsu/website/handbook/**"
+      - "emulation/rocjitsu/docs/**"
+      - "emulation/rocjitsu/README.md"
+      - "!emulation/rocjitsu/docs/sphinx/**"
       - ".github/workflows/rocjitsu-publish-website.yml"
   workflow_dispatch:
 
@@ -21,7 +25,7 @@ concurrency:
 
 jobs:
   publish:
-    name: Publish rocjitsu dashboard
+    name: Publish rocjitsu websites
     if: github.ref == 'refs/heads/develop'
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -29,23 +33,105 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          # A delayed run must publish current develop, not roll back to its event SHA.
+          ref: develop
           persist-credentials: false
 
+      - name: Read published source revisions
+        id: published
+        shell: bash
+        run: |
+          echo "head=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          if git ls-remote --exit-code origin refs/heads/gh-pages > /dev/null; then
+            git fetch --no-tags --depth=1 origin gh-pages
+            for entry in dashboard:rocjitsu-dashboard handbook:rocjitsu; do
+              name=${entry%%:*}
+              destination=${entry#*:}
+              revision=$(git show "FETCH_HEAD:$destination/.source-revision" 2>/dev/null || true)
+              if [[ -n "$revision" && ! "$revision" =~ ^[0-9a-f]{40}$ ]]; then
+                echo "Invalid source revision for $name" >&2
+                exit 1
+              fi
+              echo "$name=$revision" >> "$GITHUB_OUTPUT"
+            done
+          else
+            status=$?
+            # No Pages branch means neither site has been published yet.
+            if [[ "$status" -ne 2 ]]; then exit "$status"; fi
+          fi
+
+      - name: Detect dashboard changes since publication
+        id: dashboard
+        if: github.event_name == 'push' && steps.published.outputs.dashboard != ''
+        uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3.0.4
+        with:
+          base: ${{ steps.published.outputs.dashboard }}
+          ref: ${{ steps.published.outputs.head }}
+          filters: |
+            changed:
+              - 'emulation/rocjitsu/website/dashboard/**'
+              - '.github/workflows/rocjitsu-publish-website.yml'
+
+      - name: Detect handbook changes since publication
+        id: handbook
+        if: github.event_name == 'push' && steps.published.outputs.handbook != ''
+        uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3.0.4
+        with:
+          base: ${{ steps.published.outputs.handbook }}
+          ref: ${{ steps.published.outputs.head }}
+          predicate-quantifier: every
+          filters: |
+            changed:
+              - '{emulation/rocjitsu/website/handbook/**,emulation/rocjitsu/docs/**,emulation/rocjitsu/README.md,.github/workflows/rocjitsu-publish-website.yml}'
+              - '!emulation/rocjitsu/docs/sphinx/**'
+
+      - name: Select websites to publish
+        id: changes
+        env:
+          DASHBOARD: ${{ github.event_name == 'workflow_dispatch' || steps.published.outputs.dashboard == '' || steps.dashboard.outputs.changed == 'true' }}
+          HANDBOOK: ${{ github.event_name == 'workflow_dispatch' || steps.published.outputs.handbook == '' || steps.handbook.outputs.changed == 'true' }}
+        run: |
+          echo "dashboard=$DASHBOARD" >> "$GITHUB_OUTPUT"
+          echo "handbook=$HANDBOOK" >> "$GITHUB_OUTPUT"
+
       - name: Set up Node.js
+        if: steps.changes.outputs.dashboard == 'true' || steps.changes.outputs.handbook == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "22.13.0"
-          cache: npm
+          cache: ${{ (steps.changes.outputs.dashboard == 'true') && 'npm' || '' }}
           cache-dependency-path: emulation/rocjitsu/website/dashboard/package-lock.json
 
       - name: Verify and build rocjitsu dashboard
+        if: steps.changes.outputs.dashboard == 'true'
         working-directory: emulation/rocjitsu/website/dashboard
         run: |
           npm ci
           npm run test:e2e:install
           npm run verify
+          git rev-parse HEAD > dist/.source-revision
+
+      - name: Set up Python
+        if: steps.changes.outputs.handbook == 'true'
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: emulation/rocjitsu/website/handbook/requirements.txt
+
+      - name: Build rocjitsu handbook
+        if: steps.changes.outputs.handbook == 'true'
+        working-directory: emulation/rocjitsu/website/handbook
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install -r requirements.txt
+          .venv/bin/python -m mkdocs build --strict -f mkdocs.yml
+          .venv/bin/python -m unittest discover -s tests
+          node --test tests/repository-stats.test.cjs
+          git rev-parse HEAD > site/.source-revision
 
       - name: Generate publishing token
+        if: steps.changes.outputs.dashboard == 'true' || steps.changes.outputs.handbook == 'true'
         id: app-token
         uses: actions/create-github-app-token@df432ceedc7162793a195dd1713ff69aefc7379e # v2.0.6
         with:
@@ -54,6 +140,7 @@ jobs:
           permission-contents: write
 
       - name: Publish rocjitsu dashboard
+        if: steps.changes.outputs.dashboard == 'true'
         uses: peaceiris/actions-gh-pages@84c30a85c19949d7eee79c4ff27748b70285e453 # v4.1.0
         with:
           # GITHUB_TOKEN pushes do not trigger branch-based Pages builds.
@@ -62,5 +149,19 @@ jobs:
           publish_dir: ./emulation/rocjitsu/website/dashboard/dist
           destination_dir: rocjitsu-dashboard
           commit_message: "Publish rocjitsu dashboard"
-          # Skip the default root .nojekyll file so only rocjitsu-dashboard changes.
+          # Delete stale files only within this destination.
+          keep_files: false
+          # Preserve the existing Pages root, including its Jekyll configuration.
+          enable_jekyll: true
+
+      - name: Publish rocjitsu handbook
+        if: steps.changes.outputs.handbook == 'true'
+        uses: peaceiris/actions-gh-pages@84c30a85c19949d7eee79c4ff27748b70285e453 # v4.1.0
+        with:
+          github_token: ${{ steps.app-token.outputs.token }}
+          publish_branch: gh-pages
+          publish_dir: ./emulation/rocjitsu/website/handbook/site
+          destination_dir: rocjitsu
+          commit_message: "Publish rocjitsu handbook"
+          keep_files: false
           enable_jekyll: true
