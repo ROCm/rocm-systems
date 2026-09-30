@@ -462,7 +462,10 @@ kpack_error_t kpack_load_code_object(kpack_cache_t cache,
     // present in the base/generic kpack). Continue to the next candidate
     // rather than returning immediately — a less-specific but still ISA-
     // compatible archive (e.g. bare gfx90a.kpack) may contain the kernel.
-    KPACK_DEBUG(cache, "  kernel not found in this archive (error %d), trying next candidate", err);
+    KPACK_DEBUG(
+        cache,
+        "  kernel not found in this archive (error %d), trying next candidate",
+        err);
     last_err = err;
   }
 
@@ -470,7 +473,9 @@ kpack_error_t kpack_load_code_object(kpack_cache_t cache,
     // If we found matching archives but none contained the kernel, report
     // KERNEL_NOT_FOUND rather than ARCH_NOT_FOUND for accurate diagnostics.
     if (last_err != KPACK_SUCCESS) {
-      KPACK_DEBUG(cache, "kernel not found in any compatible archive (last error %d)", last_err);
+      KPACK_DEBUG(cache,
+                  "kernel not found in any compatible archive (last error %d)",
+                  last_err);
       return last_err;
     }
     KPACK_DEBUG(cache, "no archive with compatible architecture found");

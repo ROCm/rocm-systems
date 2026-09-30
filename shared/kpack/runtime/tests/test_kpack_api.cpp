@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: MIT
 
 #include <gtest/gtest.h>
-#include <msgpack.hpp>
 
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <msgpack.hpp>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -158,8 +158,7 @@ INSTANTIATE_TEST_SUITE_P(
     InvalidType, InvalidNumericTocFieldTest,
     testing::Values(NumericTocField::Offset, NumericTocField::Size,
                     NumericTocField::ZstdOffset, NumericTocField::ZstdSize,
-                    NumericTocField::Ordinal,
-                    NumericTocField::OriginalSize));
+                    NumericTocField::Ordinal, NumericTocField::OriginalSize));
 
 // Test that library links and basic error handling works
 TEST(KpackAPITest, NullArguments) {

@@ -44,8 +44,7 @@ kpack_error_t parse_toc(FILE* file, uint64_t toc_offset, uint64_t file_size,
   }
 
   // Unpack MessagePack
-  msgpack::object_handle oh =
-      msgpack::unpack(toc_buf.data(), toc_buf.size());
+  msgpack::object_handle oh = msgpack::unpack(toc_buf.data(), toc_buf.size());
 
   msgpack::object obj = oh.get();
   if (obj.type != msgpack::type::MAP) {
