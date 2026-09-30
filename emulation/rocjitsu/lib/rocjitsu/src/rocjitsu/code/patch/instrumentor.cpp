@@ -19,7 +19,6 @@
 #include "rocjitsu/code/patch/probe_live_in.h"
 #include "rocjitsu/code/patch/probe_symbol.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
-#include "rocjitsu/code/scoped_cfg_edges.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/target_registry.h"
@@ -666,53 +665,6 @@ namespace {
   return names;
 }
 
-// Whether a transfer outside the CFG's edges could reach @p entry_block, which
-// the predecessor check cannot see. Calls are kept out of successors(), so a
-// call edge whose callee or continuation is the entry counts. An indirect
-// terminator passes only when its targets are known: a return validated against
-// an in-scope call, or a recovered setpc/swappc whose every target is a block.
-// Each such target became a successor or a call edge, which the predecessor
-// check or the call-edge check above already covers. A recovery marked
-// source_incomplete has a path that leaves the PC pair unconstrained, so its
-// targets are not known.
-[[nodiscard]] bool indirect_flow_may_reach_entry(const std::vector<BasicBlock *> &scope,
-                                                 const BasicBlock &entry_block,
-                                                 std::span<const uint8_t> text_bytes) {
-  using Issue = BasicBlock::SuccessorIssue;
-  const std::unordered_set<uint64_t> return_offsets =
-      scoped_call_return_offsets(KernelBlockScope(scope), text_bytes);
-  for (const BasicBlock *block : scope) {
-    if (block == nullptr)
-      continue;
-    if (std::any_of(block->call_edges().begin(), block->call_edges().end(),
-                    [&](const BasicBlock::CallEdge &edge) {
-                      return edge.callee == &entry_block || edge.continuation == &entry_block;
-                    }))
-      return true;
-
-    const Instruction *term = block->terminator();
-    if (term == nullptr || !(term->flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) ||
-        term->branch_offset_bytes())
-      continue;
-    const uint64_t term_offset = term->src_loc();
-    if (return_offsets.contains(term_offset))
-      continue;
-    const Issue issue = block->successor_issue();
-    const bool targets_complete = issue == Issue::None || issue == Issue::IndirectControlFlow;
-    bool recovered = false;
-    for (const IndirectCallFixup &fixup : block->static_indirect_call_fixups()) {
-      if (fixup.source_call_offset != term_offset)
-        continue;
-      if (fixup.source_incomplete)
-        return true;
-      recovered = true;
-    }
-    if (!targets_complete || !recovered)
-      return true;
-  }
-  return false;
-}
-
 } // namespace
 
 std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologue(
@@ -759,29 +711,6 @@ std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologu
   if (clause_blocked_offsets_.contains(entry_offset)) {
     report(error_out, "the kernel entry is inside an s_clause run, so it cannot anchor the entry "
                       "prologue");
-    return std::nullopt;
-  }
-
-  // The prologue is spliced over the entry rather than reached from dispatch
-  // alone, so any edge into the entry runs it again. A second run loads through
-  // the guest's kernarg pointer, which the first run restored, and corrupts both
-  // the storage and that pointer. Fail closed on any predecessor, including a
-  // fallthrough that leaves the entry mid-block. Calls and unresolved indirect
-  // transfers are not predecessor edges, so they are checked separately.
-  const auto entry_block = std::find_if(scope.begin(), scope.end(), [&](const BasicBlock *block) {
-    return block != nullptr && block->start_offset() == entry_offset;
-  });
-  if (entry_block == scope.end() || !(*entry_block)->predecessors().empty()) {
-    report(error_out, "control flow reaches the kernel entry other than from dispatch, and the "
-                      "entry prologue cannot run twice");
-    return std::nullopt;
-  }
-  if (indirect_flow_may_reach_entry(scope, **entry_block, text_bytes)) {
-    report(error_out, ("an indirect branch or call with unresolved targets may reach the kernel "
-                       "entry, and the entry prologue cannot run twice; the entry prologue is "
-                       "required by " +
-                       entry_storage_reader_list(probes))
-                          .c_str());
     return std::nullopt;
   }
 
