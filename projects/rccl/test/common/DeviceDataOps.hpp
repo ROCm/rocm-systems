@@ -191,36 +191,17 @@ namespace RcclUnitTesting
     else        { rccl_float8  v = MakeVal<rccl_float8> (vi, vf); p[j] = *reinterpret_cast<uint8_t*>(&v); }
   }
 
-  __global__ void MismatchReduceFp8(const uint8_t* a, const uint8_t* b,
-                                    const uint8_t* alternative, size_t n,
+  __global__ void MismatchReduceFp8(const uint8_t* a, const uint8_t* b, size_t n,
                                     unsigned long long* mismatches, unsigned long long* firstIdx,
                                     bool isE5m2)
   {
     size_t j = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
     if (j >= n) return;
-    bool m;
-    if (isE5m2)
-    {
-      rccl_bfloat8 av = *reinterpret_cast<const rccl_bfloat8*>(a + j);
-      rccl_bfloat8 bv = *reinterpret_cast<const rccl_bfloat8*>(b + j);
-      m = Matches<rccl_bfloat8>(av, bv);
-      if (!m && alternative != nullptr)
-      {
-        rccl_bfloat8 cv = *reinterpret_cast<const rccl_bfloat8*>(alternative + j);
-        m = Matches<rccl_bfloat8>(av, cv);
-      }
-    }
-    else
-    {
-      rccl_float8 av = *reinterpret_cast<const rccl_float8*>(a + j);
-      rccl_float8 bv = *reinterpret_cast<const rccl_float8*>(b + j);
-      m = Matches<rccl_float8>(av, bv);
-      if (!m && alternative != nullptr)
-      {
-        rccl_float8 cv = *reinterpret_cast<const rccl_float8*>(alternative + j);
-        m = Matches<rccl_float8>(av, cv);
-      }
-    }
+    bool const m = isE5m2
+      ? Matches<rccl_bfloat8>(*reinterpret_cast<const rccl_bfloat8*>(a + j),
+                              *reinterpret_cast<const rccl_bfloat8*>(b + j))
+      : Matches<rccl_float8>(*reinterpret_cast<const rccl_float8*>(a + j),
+                             *reinterpret_cast<const rccl_float8*>(b + j));
     if (!m)
     {
       atomicAdd(mismatches, 1ULL);
@@ -228,8 +209,7 @@ namespace RcclUnitTesting
     }
   }
 
-  __global__ void CaptureElemFp8(const uint8_t* actual, const uint8_t* expected,
-                                 const uint8_t* alternative, size_t idx,
+  __global__ void CaptureElemFp8(const uint8_t* actual, const uint8_t* expected, size_t idx,
                                  double* out, bool isE5m2)
   {
     if (blockIdx.x == 0 && threadIdx.x == 0)
@@ -238,68 +218,12 @@ namespace RcclUnitTesting
       {
         out[0] = ToDoubleVal<rccl_bfloat8>(*reinterpret_cast<const rccl_bfloat8*>(expected + idx));
         out[1] = ToDoubleVal<rccl_bfloat8>(*reinterpret_cast<const rccl_bfloat8*>(actual   + idx));
-        if (alternative != nullptr)
-          out[2] = ToDoubleVal<rccl_bfloat8>(*reinterpret_cast<const rccl_bfloat8*>(alternative + idx));
       }
       else
       {
         out[0] = ToDoubleVal<rccl_float8>(*reinterpret_cast<const rccl_float8*>(expected + idx));
         out[1] = ToDoubleVal<rccl_float8>(*reinterpret_cast<const rccl_float8*>(actual   + idx));
-        if (alternative != nullptr)
-          out[2] = ToDoubleVal<rccl_float8>(*reinterpret_cast<const rccl_float8*>(alternative + idx));
       }
-    }
-  }
-
-  __global__ void ExpectedReduceFp8(uint8_t* out, uint8_t* alternative, size_t n,
-                                    int totalRanks, int op, bool isAvg,
-                                    bool isE5m2, size_t startIdx)
-  {
-    size_t idx = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= n) return;
-    size_t gidx = startIdx + idx;
-    int vi = PatternValueI(true, 0, gidx);
-    if (isE5m2)
-    {
-      rccl_bfloat8 input = MakeVal<rccl_bfloat8>(vi, PatternValueF(vi));
-      rccl_bfloat8 acc = input;
-      float wide = (float)input;
-      for (int r = 1; r < totalRanks; ++r)
-      {
-        int v = PatternValueI(true, r, gidx);
-        input = MakeVal<rccl_bfloat8>(v, PatternValueF(v));
-        acc = AccStep<rccl_bfloat8>(op, acc, input);
-        wide = DevReduceF(op, wide, (float)input);
-      }
-      if (isAvg)
-      {
-        acc = DivStep<rccl_bfloat8>(acc, totalRanks);
-        wide /= totalRanks;
-      }
-      out[idx] = *reinterpret_cast<uint8_t*>(&acc);
-      rccl_bfloat8 wideRounded = rccl_bfloat8(wide);
-      alternative[idx] = *reinterpret_cast<uint8_t*>(&wideRounded);
-    }
-    else
-    {
-      rccl_float8 input = MakeVal<rccl_float8>(vi, PatternValueF(vi));
-      rccl_float8 acc = input;
-      float wide = (float)input;
-      for (int r = 1; r < totalRanks; ++r)
-      {
-        int v = PatternValueI(true, r, gidx);
-        input = MakeVal<rccl_float8>(v, PatternValueF(v));
-        acc = AccStep<rccl_float8>(op, acc, input);
-        wide = DevReduceF(op, wide, (float)input);
-      }
-      if (isAvg)
-      {
-        acc = DivStep<rccl_float8>(acc, totalRanks);
-        wide /= totalRanks;
-      }
-      out[idx] = *reinterpret_cast<uint8_t*>(&acc);
-      rccl_float8 wideRounded = rccl_float8(wide);
-      alternative[idx] = *reinterpret_cast<uint8_t*>(&wideRounded);
     }
   }
 }

@@ -123,6 +123,9 @@ namespace RcclUnitTesting
     // Release the RCCL comms
     void DestroyComms();
 
+    // Query whether every active rank's comm supports symmetric kernels (requires InitComms)
+    void QuerySymmetricSupport(bool& isSupported);
+
     // Release created graphs
     void DestroyGraphs();
 

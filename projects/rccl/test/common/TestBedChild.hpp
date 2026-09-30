@@ -34,7 +34,8 @@ namespace RcclUnitTesting
       CHILD_DESTROY_GRAPHS   = 10, // DestroyGraphs()
       CHILD_STOP             = 11, // Stop()
       CHILD_REGISTER_MEM     = 12, // RegisterMem()
-      NUM_CHILD_COMMANDS     = 13
+      CHILD_QUERY_SYMMETRIC  = 13, // QuerySymmetricSupport()
+      NUM_CHILD_COMMANDS     = 14
     };
 
     char const ChildCommandNames[NUM_CHILD_COMMANDS][20] =
@@ -51,7 +52,8 @@ namespace RcclUnitTesting
       "DESTROY_COMMS",
       "DESTROY_GRAPHS",
       "STOP",
-      "REGISTER_MEM"
+      "REGISTER_MEM",
+      "QUERY_SYMMETRIC"
     };
 
     // These variables remain constant for life of TestBedChild
@@ -127,6 +129,9 @@ namespace RcclUnitTesting
     ErrCode DestroyGraphs();
 
     ErrCode RegisterMem();
+
+    // Returns (as int) whether every local comm reports symmetric kernel support
+    ErrCode QuerySymmetricSupport(std::vector<char>& retValBuf);
 
   private:
     // Per-collective registration bodies for RegisterMem(): symmetric windows

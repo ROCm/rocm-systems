@@ -815,6 +815,22 @@ namespace RcclUnitTesting
     InteractiveWait("Finishing DeallocateMem");
   }
 
+  void TestBed::QuerySymmetricSupport(bool& isSupported)
+  {
+    isSupported = false;
+    int const cmd = TestBedChild::CHILD_QUERY_SYMMETRIC;
+    bool allSupported = true;
+    for (int childId = 0; childId < this->numActiveChildren; ++childId)
+    {
+      PIPE_WRITE(childId, cmd);
+      PIPE_CHECK(childId);
+      int childSupported = 0;
+      PIPE_READ(childId, childSupported);
+      if (!childSupported) allSupported = false;
+    }
+    isSupported = allSupported && this->numActiveChildren > 0;
+  }
+
   void TestBed::DestroyComms()
   {
     InteractiveWait("Starting DestroyComms");
@@ -1171,6 +1187,8 @@ namespace RcclUnitTesting
     }
 
     bool isCorrect = true;
+    int numSymmetricConfigsRun = 0;
+    int numSymmetricConfigsSkipped = 0;
 
     // Sweep over the number of ranks
     for (int numGpus : ev.GetNumGpusList())
@@ -1190,6 +1208,29 @@ namespace RcclUnitTesting
         isCorrect = false;
         this->DestroyComms();
         continue;
+      }
+
+      // Symmetric sweeps only cover configurations where RCCL can select symmetric kernels
+      if (memAllocType == MEM_ALLOC_SYMMETRIC_WIN)
+      {
+        bool isSymmetricSupported = false;
+        this->QuerySymmetricSupport(isSymmetricSupported);
+        if (testing::Test::HasFailure())
+        {
+          isCorrect = false;
+          this->DestroyComms();
+          continue;
+        }
+        if (!isSymmetricSupported)
+        {
+          if (ev.verbose)
+            TEST_INFO("Skipping %d ranks (%s): symmetric kernels unsupported on this comm",
+                      numRanks, isMultiProcess ? "multi-process" : "single-process");
+          ++numSymmetricConfigsSkipped;
+          this->DestroyComms();
+          continue;
+        }
+        ++numSymmetricConfigsRun;
       }
 
       for (int ftIdx = 0; ftIdx < funcTypes.size()      && isCorrect; ++ftIdx)
@@ -1297,6 +1338,17 @@ namespace RcclUnitTesting
       }
     }
       this->DestroyComms();
+    }
+
+    if (numSymmetricConfigsSkipped > 0 && !testing::Test::HasFailure())
+    {
+      if (numSymmetricConfigsRun == 0)
+      {
+        GTEST_SKIP() << "Skipping... symmetric kernels unsupported for all "
+                     << numSymmetricConfigsSkipped << " rank configurations (comm->symmetricSupport == 0).";
+      }
+      TEST_INFO("Symmetric sweep ran %d rank configurations, skipped %d without symmetric kernel support",
+                numSymmetricConfigsRun, numSymmetricConfigsSkipped);
     }
   }
 

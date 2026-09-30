@@ -309,6 +309,9 @@ if(BUILD_TESTS)
     common/TestBed.cpp
     common/TestBedChild.cpp
     common/StandaloneUtils.cpp
+    common/VerifiableData.cpp
+    common/VerifiableFp8.cpp
+    Fp8VerifiableTests.cpp
     proxy_trace/ProxyTraceUnitTests.cpp
     ../src/misc/proxy_trace/proxy_trace.cc
     latency_profiler/LatencyProfilerUnitTest.cpp
