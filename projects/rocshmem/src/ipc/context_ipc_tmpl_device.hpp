@@ -272,9 +272,13 @@ __device__ int IPCContext::reduce_wave(rocshmem_team_t team, T *dest,
 
   int PE_size = team_obj->tinfo_wrt_world->size;
 
+  // See the matching comment in reduce_wg: constmem.reduce_ring_wrkdata_bytes
+  // is the runtime-configured pWrk capacity in bytes; convert to a T-element
+  // count so narrower T aren't needlessly restricted.
+  size_t pWrk_elems = constmem.reduce_ring_wrkdata_bytes / sizeof(T);
   size_t direct_pWrk = PE_size * nreduce;
   size_t direct_pSync = PE_size;
-  size_t provided_pWrk = max(nreduce / 2 + 1, ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE);
+  size_t provided_pWrk = max(nreduce / 2 + 1, pWrk_elems);
   size_t provided_pSync = ROCSHMEM_REDUCE_SYNC_SIZE;
 
   size_t ring_pSync = 2 * PE_size;
@@ -283,7 +287,7 @@ __device__ int IPCContext::reduce_wave(rocshmem_team_t team, T *dest,
     internal_direct_allreduce_wave<T, Op>(dest, source, nreduce, team_obj);
   } else {
     if (ring_pSync <= ROCSHMEM_REDUCE_SYNC_SIZE) {
-      size_t ring_pWrk = ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE;
+      size_t ring_pWrk = pWrk_elems;
       int chunk_size = ring_pWrk / PE_size;
       int seg_size = chunk_size * PE_size;
 
@@ -537,17 +541,22 @@ __device__ int IPCContext::reduce_wg(rocshmem_team_t team, T *dest,
 
   int PE_size = team_obj->tinfo_wrt_world->size;
 
+  // constmem.reduce_ring_wrkdata_bytes is the runtime-configured pWrk capacity
+  // in bytes (ROCSHMEM_REDUCE_RING_WRKDATA_BYTES); convert to a T-element
+  // count so narrower T don't under-use the physically available buffer
+  // (matches reduce_scatter_wg's pWrk_elems formula).
+  size_t pWrk_elems = constmem.reduce_ring_wrkdata_bytes / sizeof(T);
   size_t direct_pWrk = PE_size * nreduce;
   size_t direct_pSync = PE_size;
   size_t ring_pSync = 2 * PE_size;
-  size_t provided_pWrk = max(nreduce / 2 + 1, ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE);
+  size_t provided_pWrk = max(nreduce / 2 + 1, pWrk_elems);
   size_t provided_pSync = ROCSHMEM_REDUCE_SYNC_SIZE;
 
   if (provided_pWrk >= direct_pWrk && provided_pSync >= direct_pSync) {
     internal_direct_allreduce_wg<T, Op>(dest, source, nreduce, team_obj);
   } else {
     if (ring_pSync <= ROCSHMEM_REDUCE_SYNC_SIZE) {
-      size_t ring_pWrk = ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE;
+      size_t ring_pWrk = pWrk_elems;
       // integer division truncating value
       int chunk_size = ring_pWrk / PE_size;
       int seg_size = chunk_size * PE_size;

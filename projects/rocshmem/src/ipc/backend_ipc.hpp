@@ -170,6 +170,13 @@ class IPCBackend : public Backend {
   void *pWrk_pool{nullptr};
 
   /**
+   * @brief Per-team pWrk byte stride, validated once in
+   * setup_wrk_sync_buffers() and reused by teams_init()/IPCTeam so the pool
+   * size and the per-team carve stride can never drift apart.
+   */
+  size_t reduce_ring_wrkdata_bytes_{};
+
+  /**
    * @brief Handle for raw memory for alltoall
    */
   void *pAta_pool{nullptr};

@@ -469,11 +469,26 @@ void IPCBackend::setup_wrk_sync_buffers() {
                             ROCSHMEM_ALLTOALL_SYNC_SIZE);
 
   /**
-   * Size of work arrays for the teams
-   * Accommodate largest possible data type for pWrk
+   * Size of work arrays for the teams (ring-allreduce pWrk scratch).
+   * ROCSHMEM_REDUCE_RING_WRKDATA_BYTES bytes per team; must be enough to
+   * give reduce_wg/reduce_wave at least 1 element per PE at the largest
+   * supported team size (PE_size <= ROCSHMEM_REDUCE_SYNC_SIZE/2) for the
+   * widest reduction type (double).
    */
-  wrk_sync_pool_size_ += sizeof(double) * max_num_teams *
-                           ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE;
+  reduce_ring_wrkdata_bytes_ = envvar::reduce::ring_wrkdata_bytes;
+  size_t min_ring_wrkdata_bytes = (ROCSHMEM_REDUCE_SYNC_SIZE / 2) * sizeof(double);
+  if (reduce_ring_wrkdata_bytes_ < min_ring_wrkdata_bytes) {
+    LOG_ERROR_ABORT(
+        "ROCSHMEM_REDUCE_RING_WRKDATA_BYTES=%zu is too small; must be at least "
+        "%zu bytes to support the largest allowed reduce team size with a "
+        "double-precision reduction.",
+        reduce_ring_wrkdata_bytes_, min_ring_wrkdata_bytes);
+  }
+  LOG_INFO(
+      "IPC ring-allreduce pWrk: %zu bytes/team, %zu teams => %zu bytes/PE reserved",
+      reduce_ring_wrkdata_bytes_, static_cast<size_t>(max_num_teams),
+      reduce_ring_wrkdata_bytes_ * max_num_teams);
+  wrk_sync_pool_size_ += max_num_teams * reduce_ring_wrkdata_bytes_;
 
   /**
    * Size of fence array
@@ -717,10 +732,9 @@ void IPCBackend::teams_init() {
   wrk_sync_pool_top_ += sizeof(long) * ROCSHMEM_ALLTOALL_SYNC_SIZE *
                         max_num_teams;
 
-  /* Accommodating for largest possible data type for pWrk */
+  /* Ring-allreduce pWrk scratch; size validated in setup_wrk_sync_buffers(). */
   pWrk_pool = reinterpret_cast<void *>(wrk_sync_pool_top_);
-  wrk_sync_pool_top_ += sizeof(double) * ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE
-                            * max_num_teams;
+  wrk_sync_pool_top_ += reduce_ring_wrkdata_bytes_ * max_num_teams;
 
   /**
    * Initialize the sync arrays in the pool with default values.

@@ -241,6 +241,15 @@ namespace envvar {
         "auto-sets the tile to use all LDS available per block", 0);
   }  // namespace tdm
 
+  namespace reduce {
+    const var<size_t> ring_wrkdata_bytes("RING_WRKDATA_BYTES",
+        "Per-team pWrk scratch capacity (bytes) for the IPC ring-allreduce "
+        "used by reduce_wg/reduce_wave on large reductions. Larger values "
+        "mean fewer, bigger ring segments (fewer network round trips) at "
+        "the cost of size * (max teams) bytes reserved per PE for the "
+        "process lifetime.", 256 * 1024);
+  }  // namespace reduce
+
   namespace _detail {
     std::tuple<var_map_t&, std::mutex&> get_var_map() {
       // construct on first use idiom

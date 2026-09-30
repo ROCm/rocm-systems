@@ -131,6 +131,7 @@ namespace envvar {
       GDA,
       SDMA,
       TDM,
+      REDUCE,
     };
 
     // env var string prefixes
@@ -143,6 +144,7 @@ namespace envvar {
     template <> inline constexpr const char* prefix<tag::GDA> = "ROCSHMEM_GDA";
     template <> inline constexpr const char* prefix<tag::SDMA> = "ROCSHMEM_SDMA";
     template <> inline constexpr const char* prefix<tag::TDM> = "ROCSHMEM_TDM";
+    template <> inline constexpr const char* prefix<tag::REDUCE> = "ROCSHMEM_REDUCE";
   }  // namespace category
 
   namespace parser {
@@ -586,6 +588,12 @@ namespace envvar {
     template <typename T> using var = var<T, category::tag::TDM>;
     extern const var<uint32_t> tile_bytes;
   }  // namespace tdm
+
+  namespace reduce {
+    template <typename T> using var = var<T, category::tag::REDUCE>;
+    // Per-team ring-allreduce scratch (pWrk) capacity in bytes.
+    extern const var<size_t> ring_wrkdata_bytes;
+  }  // namespace reduce
 
   /**
    * @brief Print mode for environment variables

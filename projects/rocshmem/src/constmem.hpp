@@ -46,6 +46,7 @@ struct constmem_t {
   uintptr_t heap_base;  // Local symmetric heap base
   size_t heap_size;     // Local symmetric heap size in bytes
   uint32_t tdm_tile_bytes;
+  uint32_t reduce_ring_wrkdata_bytes;
 } __attribute__ ((aligned (16)));
 
 extern __constant__ constmem_t constmem;

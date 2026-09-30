@@ -45,7 +45,7 @@ IPCTeam::IPCTeam(Backend *backend, const TeamInfo& team_info_parent,
   bcast_pSync = &(b->bcast_pSync_pool[pool_index * ROCSHMEM_BCAST_SYNC_SIZE]);
   alltoall_pSync = &(b->alltoall_pSync_pool[pool_index * ROCSHMEM_ALLTOALL_SYNC_SIZE]);
 
-  pWrk = reinterpret_cast<char *>(b->pWrk_pool) + ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double) * pool_index;
+  pWrk = reinterpret_cast<char *>(b->pWrk_pool) + b->reduce_ring_wrkdata_bytes_ * pool_index;
 }
 
 IPCTeam::~IPCTeam() {}

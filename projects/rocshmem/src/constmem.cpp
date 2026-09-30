@@ -5,6 +5,9 @@
 #if defined(USE_GDA)
 #include "gda/backend_gda.hpp"
 #endif
+#if defined(USE_IPC)
+#include "ipc/backend_ipc.hpp"
+#endif
 
 /**
  * @file constmem.cpp
@@ -101,6 +104,15 @@ void init_constant_memory(void) {
 #if defined(USE_GDA)
   if (constmem_values.backend_type == BackendType::GDA_BACKEND) {
     constmem_values.gda_provider = static_cast<GDABackend*>(backend)->get_gda_provider();
+  }
+#endif
+#if defined(USE_IPC)
+  if (constmem_values.backend_type == BackendType::IPC_BACKEND) {
+    // Mirrors the value IPCBackend::setup_wrk_sync_buffers() already
+    // validated and used to size/stride the pWrk pool -- read from there
+    // instead of re-deriving it, so device and host code can never disagree.
+    constmem_values.reduce_ring_wrkdata_bytes = static_cast<uint32_t>(
+        static_cast<IPCBackend*>(backend)->reduce_ring_wrkdata_bytes_);
   }
 #endif
 

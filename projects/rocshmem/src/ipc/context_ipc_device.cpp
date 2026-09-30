@@ -161,7 +161,7 @@ __device__ void IPCContext::internal_getmem(void *dest, const void *source,
 __device__ void IPCContext::internal_putmem_wg(void *dest, const void *source,
                                      size_t nelems, int pe) {
   uint64_t L_offset = reinterpret_cast<char *>(dest) - wrk_sync_pool_bases_[constmem.my_pe];
-  memcpy_wg<MemcpyKind::Put>(wrk_sync_pool_bases_[pe] + L_offset, const_cast<void *>(source), nelems);
+  memcpy_wg_tdm<MemcpyKind::Put>(wrk_sync_pool_bases_[pe] + L_offset, const_cast<void *>(source), nelems);
   __builtin_amdgcn_s_barrier();
 }
 
