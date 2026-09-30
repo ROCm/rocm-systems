@@ -217,6 +217,7 @@ not built and the full-ELF tests skip themselves. `aiebu-asm` exits 0 on an unre
 `aiecc` does not check that the ELF appeared, so the build probes for the capability and guards the
 rule rather than trusting the exit status.
 
-Note that four `Memory.VMemSetAccess*` tests hang and two `VMemUnmapRemap*` tests fail on current
-hardware, independently of this work, so a bare `ctest` does not terminate. Excluding those six,
-the suite passes 59/59 in about five seconds.
+Note that four `MemoryTest.VMemSetAccess*` tests (`VMemSetAccessFrom{GPU,NPU}` and
+`VMemSetUnsetAccessFrom{GPU,NPU}`) hang on current hardware, independently of this work, so a bare
+`ctest` does not terminate. Excluding them with
+`ctest -E 'VMemSetAccessFrom|VMemSetUnsetAccessFrom'`, the suite passes 81/81 in about 15 seconds.
