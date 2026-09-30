@@ -19,6 +19,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/rpc.h"
+#include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 #include "rocjitsu/vm/amdgpu/partitioning.h"
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device_spec.h"
@@ -358,6 +359,34 @@ TEST(ConfigLoaderTest, LoadFourGpuMi455xKmdConfig) {
 
   for (const auto &build : loaded.extra_gpu_builds)
     EXPECT_NE(dynamic_cast<SoC *>(build.root.get()), nullptr);
+}
+
+TEST(ConfigLoaderTest, Gfx1250WgpIdsAreLocalToShaderArray) {
+  auto loaded = config::load_config(CONFIG_DIR_PATH + "/gfx1250_mi455x_kmd_4gpu.json",
+                                    rocjitsu::kEmbeddedSchema);
+  auto check_build = [](const config::TopologyBuildResult &build) {
+    for (auto *xcd : build.xcds) {
+      for (uint32_t se_id = 0; se_id < xcd->num_shader_engines(); ++se_id) {
+        auto *se = xcd->shader_engine(se_id);
+        for (uint32_t cu_id : {0u, 5u, 7u, 8u, 13u, 15u}) {
+          auto *cu = se->compute_unit(cu_id);
+          auto *wf = cu->dispatch_wf(0, 0, 32, 8);
+          ASSERT_NE(wf, nullptr);
+          uint32_t value = 0;
+          constexpr uint16_t kWgpId = 23 | (10 << 6) | (3 << 11);
+          EXPECT_EQ(amdgpu::read_hwreg_field(*wf, kWgpId, value),
+                    amdgpu::HwregAccessResult::Success);
+          EXPECT_EQ(value, cu_id % 8);
+          EXPECT_EQ(cu->shader_engine_id(), se_id);
+          EXPECT_EQ(cu->scratch_scoreboard_base(), cu_id * cu->scratch_slots_per_cu());
+          wf->halt();
+        }
+      }
+    }
+  };
+  check_build(loaded.build_result);
+  for (const auto &build : loaded.extra_gpu_builds)
+    check_build(build);
 }
 
 TEST(ConfigLoaderTest, DispatchPoolBudgetIsSharedAcrossProductionTopology) {

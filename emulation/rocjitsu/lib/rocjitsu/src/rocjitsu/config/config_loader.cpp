@@ -616,7 +616,7 @@ void build_children(simdojo::CompositeComponent *parent,
   }
 }
 
-void do_wire_cps(simdojo::CompositeComponent *root) {
+void do_wire_cps(simdojo::CompositeComponent *root, uint32_t cus_per_shader_array) {
   std::vector<simdojo::Component *> all;
   root->collect_components(all);
   for (auto *comp : all) {
@@ -642,7 +642,7 @@ void do_wire_cps(simdojo::CompositeComponent *root) {
         auto *cu = dynamic_cast<amdgpu::ComputeUnitCore *>(se_child.get());
         if (!cu)
           continue;
-        cu->set_shader_engine_location(shader_engine_id, cu_index++);
+        cu->set_shader_engine_location(shader_engine_id, cu_index++, cus_per_shader_array);
         cp->add_compute_unit(cu);
       }
       ++shader_engine_id;
@@ -656,7 +656,7 @@ void do_wire_cps(simdojo::CompositeComponent *root) {
         auto *cu = dynamic_cast<amdgpu::ComputeUnitCore *>(child.get());
         if (!cu)
           continue;
-        cu->set_shader_engine_location(0, cu_index++);
+        cu->set_shader_engine_location(0, cu_index++, cus_per_shader_array);
         cp->add_compute_unit(cu);
       }
     }
@@ -708,7 +708,7 @@ void set_cu_l2(simdojo::CompositeComponent *root) {
 
 TopologyBuildResult build_topology(const fb::TopologyDef *topology_def, simdojo::ExecMode mode,
                                    rj_code_arch_t arch, rj_code_target_id_t target,
-                                   const AsyncResources &resources) {
+                                   const AsyncResources &resources, uint32_t cus_per_shader_array) {
   if (!topology_def || !topology_def->root())
     throw std::runtime_error("TopologyDef missing root ComponentDef");
 
@@ -759,7 +759,7 @@ TopologyBuildResult build_topology(const fb::TopologyDef *topology_def, simdojo:
   }
 
   set_cu_l2(root);
-  do_wire_cps(root);
+  do_wire_cps(root, cus_per_shader_array);
 
   if (topology_def->links())
     for (auto *ld : *topology_def->links())
@@ -967,8 +967,8 @@ LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint
   if (!result.engine_config.num_threads)
     result.engine_config.num_threads = result.execution_threads.engines;
   result.async_resources = make_async_execution_resources(result.execution_threads.helpers);
-  result.build_result =
-      build_topology(topo_def, result.exec_mode, arch, result.target, result.async_resources);
+  result.build_result = build_topology(topo_def, result.exec_mode, arch, result.target,
+                                       result.async_resources, result.device.num_cu_per_sh);
   if (result.device.present)
     if (SoC *soc = result.soc())
       soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
@@ -993,8 +993,9 @@ LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint
       result.devices[i].unique_id = result.device.unique_id + i;
     }
     for (uint32_t i = 1; i < result.num_gpus; ++i) {
-      result.extra_gpu_builds.push_back(
-          build_topology(topo_def, result.exec_mode, arch, result.target, result.async_resources));
+      result.extra_gpu_builds.push_back(build_topology(topo_def, result.exec_mode, arch,
+                                                       result.target, result.async_resources,
+                                                       result.device.num_cu_per_sh));
       if (auto *soc = dynamic_cast<SoC *>(result.extra_gpu_builds.back().root.get()))
         soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
           cp->set_scratch_slots_per_cu(result.device.max_slots_scratch_cu);
