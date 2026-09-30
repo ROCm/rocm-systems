@@ -52,11 +52,7 @@ hipError_t ihipLaunchKernelCommand(amd::Command*& command, hipFunction_t f,
 hipError_t ihipMemcpy3DCommand(amd::Command*& command, const hipMemcpy3DParms* p,
                                hip::Stream* stream);
 
-// Validates `desc` and builds its copy command. `src` and `dst` must be the operands that
-// ResolveCopyOperand returned while rewriting `desc`. A host-to-host copy runs on the CPU during
-// this call and leaves `command` unset.
-hipError_t ihipGetMemcpyParam3DCommand(amd::Command*& command, const HIP_MEMCPY3D& desc,
-                                       const CopyOperand& src, const CopyOperand& dst,
+hipError_t ihipGetMemcpyParam3DCommand(amd::Command*& command, const HIP_MEMCPY3D* pCopy,
                                        hip::Stream* stream);
 
 hipError_t ihipMemsetCommand(amd::Command*& command, amd::Memory* dstMemory, int64_t value,
