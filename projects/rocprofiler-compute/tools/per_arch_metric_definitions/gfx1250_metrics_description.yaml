@@ -151,21 +151,27 @@ Memory chart - Instruction Cache:
   Wavefront Occupancy:
     plain: Wavefronts per active CU.
     rst: Wavefronts per active CU.
+    unit: Wavefronts per CU
   VGPR:
     plain: 'The number of architected vector general-purpose registers allocated for the kernel. Note: this may not exactly match the number of VGPRs requested by the compiler due to allocation granularity.'
     rst: 'The number of architected vector general-purpose registers allocated for the kernel. Note: this may not exactly match the number of VGPRs requested by the compiler due to allocation granularity.'
+    unit: Registers
   SGPR:
     plain: 'The number of scalar general-purpose registers allocated for the kernel. Note: this may not exactly match the number of SGPRs requested by the compiler due to allocation granularity.'
     rst: 'The number of scalar general-purpose registers allocated for the kernel. Note: this may not exactly match the number of SGPRs requested by the compiler due to allocation granularity.'
+    unit: Registers
   LDS Allocation:
     plain: The number of bytes of LDS memory allocated for this kernel.
     rst: The number of bytes of LDS memory allocated for this kernel.
+    unit: Bytes
   Scratch Allocation:
     plain: The number of bytes of scratch memory requested per work-item for this kernel.
     rst: The number of bytes of scratch memory requested per work-item for this kernel.
+    unit: Bytes per Work-item
   Workgroups:
     plain: The total number of workgroups forming this kernel launch.
     rst: The total number of workgroups forming this kernel launch.
+    unit: Workgroups
   ICache Requests:
     plain: Total Instruction Cache fetch requests.
     rst: Total Instruction Cache fetch requests.

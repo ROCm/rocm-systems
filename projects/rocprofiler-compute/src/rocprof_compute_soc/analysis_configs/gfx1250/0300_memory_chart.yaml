@@ -26,16 +26,22 @@ Panel Config:
       metric:
         Wavefront Occupancy:
           value: ROUND(SUM(SQG_WAVE_CYCLES_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu), 0)
+          unit: Wavefronts per CU
         VGPR:
           value: ROUND(AVG(Arch_VGPR), 0)
+          unit: Registers
         SGPR:
           value: ROUND(AVG(SGPR), 0)
+          unit: Registers
         LDS Allocation:
           value: ROUND(AVG(LDS_Per_Workgroup), 0)
+          unit: Bytes
         Scratch Allocation:
           value: ROUND(AVG(Scratch_Per_Workitem), 0)
+          unit: Bytes per Work-item
         Workgroups:
           value: ROUND(AVG(Grid_Size / Workgroup_Size), 0)
+          unit: Workgroups
         ICache Requests:
           value: ROUND(SUM(SQC_ICACHE_REQ_sum) / SUM($denom), 0)
           unit: (Requests + $normUnit)
