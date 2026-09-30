@@ -23,6 +23,7 @@ THE SOFTWARE.
 
 #include "rocjpeg_api_negative_tests.h"
 
+#include <cctype>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -286,9 +287,12 @@ uint32_t EnvOrDefault(const char *name, uint32_t fallback) {
         return fallback;
     }
     // strtoull negates a leading minus into the unsigned range, so "-18446744073709551615"
-    // would come back as 1. Reject the sign before parsing instead.
+    // would come back as 1. Reject the sign before parsing instead. That means
+    // skipping exactly the leading whitespace strtoull skips: looking at a
+    // narrower set would leave the sign behind a character the loop stops on but
+    // strtoull steps over, and "\n-18446744073709551615" would parse as 1 again.
     const char *digits = value;
-    while (*digits == ' ' || *digits == '\t') {
+    while (std::isspace(static_cast<unsigned char>(*digits))) {
         digits++;
     }
     char *end = nullptr;
