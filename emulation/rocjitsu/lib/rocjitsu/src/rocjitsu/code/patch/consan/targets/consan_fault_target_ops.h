@@ -18,6 +18,7 @@ namespace rocjitsu::consan {
 enum class AtomicFaultEncoding : uint8_t {
   Unsupported,
   CdnaFlat,
+  Rdna3Flat,
   FlatLike,
   Buffer,
   Ds,

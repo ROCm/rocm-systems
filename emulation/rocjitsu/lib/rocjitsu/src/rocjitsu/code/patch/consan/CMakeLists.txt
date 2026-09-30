@@ -28,6 +28,7 @@ rj_add_object_library(
         targets/consan_supercollider_target_ops.cpp
         targets/consan_target_profiles.cpp
         targets/consan_validation_target_ops.cpp
+        targets/rdna3/consan_fault_rdna3_target_ops.cpp
         targets/rdna3/consan_program_analysis_rdna3_target_ops.cpp
         targets/rdna3/consan_supercollider_rdna3_target_ops.cpp
         targets/rdna4/consan_program_analysis_rdna4_target_ops.cpp
@@ -55,10 +56,7 @@ rj_add_object_library(
         consan_sync_analysis.cpp
         consan_uniform_address.cpp
 )
-target_link_libraries(
-    rocjitsu_consan_analysis
-    PRIVATE rocjitsu_consan_targets
-)
+target_link_libraries(rocjitsu_consan_analysis PRIVATE rocjitsu_consan_targets)
 
 rj_add_object_library(
     rocjitsu_consan_transform
@@ -132,8 +130,7 @@ target_link_libraries(
     PRIVATE rocjitsu_consan_transform rocjitsu_consan_validation
 )
 
-set(
-    ROCJITSU_CONSAN_OBJECT_LIBS
+set(ROCJITSU_CONSAN_OBJECT_LIBS
     rocjitsu_consan_contracts
     rocjitsu_consan_targets
     rocjitsu_consan_analysis

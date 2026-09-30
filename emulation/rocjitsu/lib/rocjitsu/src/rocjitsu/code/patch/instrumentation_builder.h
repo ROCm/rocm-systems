@@ -441,6 +441,8 @@ build_s_wait_global_load0(rj_code_arch_t arch) {
 
 [[nodiscard]] inline constexpr std::optional<uint32_t>
 build_s_wait_global_store0(rj_code_arch_t arch) {
+  if (arch == ROCJITSU_CODE_ARCH_RDNA3)
+    return build_rdna3_s_wait_vscnt0(arch);
   return build_s_wait_memory0<true, false>(arch);
 }
 

@@ -19,6 +19,7 @@
 
 #include "rocjitsu/code/patch/consan/targets/cdna4/consan_atomic_observation.h"
 #include "rocjitsu/code/patch/consan/targets/cdna5/consan_atomic_observation.h"
+#include "rocjitsu/code/patch/consan/targets/rdna3/consan_atomic_observation.h"
 #include "rocjitsu/code/patch/consan/targets/rdna4/consan_atomic_observation.h"
 
 #include <algorithm>
@@ -199,7 +200,11 @@ std::optional<SyncRole> atomic_role(AtomicEventKind kind, bool is_rmw) {
       return true;
     };
     const auto instruction = bytes.subspan(site.file_offset, site.size);
-    if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+    if (arch == ROCJITSU_CODE_ARCH_RDNA3) {
+      if (!append_rewrite(
+              build_rdna3_publication_observation(instruction, *observation_vgpr, !is_rmw)))
+        return false;
+    } else if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
       if (!append_rewrite(
               build_cdna4_publication_observation(instruction, *observation_vgpr, !is_rmw)))
         return false;
@@ -770,7 +775,7 @@ std::optional<std::vector<uint32_t>> build_publication_cave_words(
               instrumentation::build_v_mbcnt_hi_u32_b32(ticket, 0xc1u, vector_source_vgpr(ticket),
                                                         arch))
       .require(record.store_vgpr(offsetof(PublicationRecord, lane_id), ticket))
-      .append(instrumentation::build_s_wait_flat_store0(arch))
+      .append(instrumentation::build_s_wait_global_store0(arch))
       .require(record.store_literal(offsetof(PublicationRecord, state), kPublicationReady));
   // Overflow is sticky even if an extremely long execution wraps the slot
   // counter. No out-of-range lane may address the bounded record allocation.
@@ -802,16 +807,25 @@ std::optional<std::vector<uint32_t>> build_publication_cave_words(
         .require(append_global_atomic_wait(words, arch))
         .append(instrumentation::build_s_mov_b64(kAmdGpuExecLo, saved_exec, arch));
   }
-  sequence.require(record.materialize_address(report + offsetof(ReportHeader, publication_flags)))
-      .append(instrumentation::build_v_mov_b32_literal(
-                  ticket,
-                  kPublicationTraceEnabled |
-                      (plan.publication_modifications_complete ? kPublicationTraceComplete : 0u),
-                  arch),
-              instrumentation::build_flat_atomic_or_u32(base, ticket, ticket, false,
-                                                        kAmdGpuScopeDevice, arch))
-      .require(append_global_atomic_wait(words, arch))
-      .require(append_restore_special_state(words, plan.special_state, arch));
+  const uint32_t publication_flags =
+      kPublicationTraceEnabled |
+      (plan.publication_modifications_complete ? kPublicationTraceComplete : 0u);
+  sequence.require(record.materialize_address(report + offsetof(ReportHeader, publication_flags)));
+  if (arch == ROCJITSU_CODE_ARCH_RDNA3) {
+    // GFX11 does not make the injected FLAT atomic OR visible through the
+    // fine-grained host report allocation, even with GLC and completion waits.
+    // Every site in this code object publishes the same plan-wide value, so an
+    // aligned store preserves the monotone header contract without a lost update.
+    sequence.require(record.store_literal(0u, publication_flags))
+        .append(instrumentation::build_s_wait_global_store0(arch));
+  } else {
+    sequence
+        .append(instrumentation::build_v_mov_b32_literal(ticket, publication_flags, arch),
+                instrumentation::build_flat_atomic_or_u32(base, ticket, ticket, false,
+                                                          kAmdGpuScopeDevice, arch))
+        .require(append_global_atomic_wait(words, arch));
+  }
+  sequence.require(append_restore_special_state(words, plan.special_state, arch));
   if (scalar_spill)
     words.insert(words.end(), scalar_spill->restore_words.begin(),
                  scalar_spill->restore_words.end());

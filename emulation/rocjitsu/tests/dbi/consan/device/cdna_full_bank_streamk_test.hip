@@ -41,6 +41,9 @@ __device__ __forceinline__ uint32_t fetch_add_acq_rel(uint32_t *address) {
 #if defined(__gfx1201__) || defined(__gfx1250__)
   // The noinline producer hides its pending LDS writes from this caller.
   asm volatile("s_wait_dscnt 0\n\t" : : "v"(address) : "memory");
+#elif defined(__gfx1100__)
+  // The noinline producer hides its pending LDS writes from this caller.
+  asm volatile("s_waitcnt lgkmcnt(0)\n\t" : : "v"(address) : "memory");
 #endif
   return __hip_atomic_fetch_add(address, 1u, __ATOMIC_ACQ_REL, __HIP_MEMORY_SCOPE_AGENT);
 #else

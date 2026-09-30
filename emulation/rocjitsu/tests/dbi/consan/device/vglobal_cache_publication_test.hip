@@ -56,7 +56,8 @@ __device__ __forceinline__ void release_vglobal(uint32_t *flag) {
                : "v"(flag), "v"(one)
                : "memory");
 #elif defined(__gfx1100__)
-  asm volatile("s_waitcnt_vscnt null, 0\n\t"
+  asm volatile("s_waitcnt lgkmcnt(0)\n\t"
+               "s_waitcnt_vscnt null, 0\n\t"
                "global_atomic_add_u32 %0, %1, off\n\t"
                "s_waitcnt vmcnt(0)\n\t" RJ_CONSAN_DEVICE_LARGE_CAVE
                :

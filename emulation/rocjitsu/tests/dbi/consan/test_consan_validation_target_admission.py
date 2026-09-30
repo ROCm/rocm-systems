@@ -30,13 +30,13 @@ class ConSanValidationTargetAdmissionTest(unittest.TestCase):
                 "hip-moi-build-gfx1100-tests/tests/"
                 "hip_moi_instrumented_gfx1100_wmma_streamk_arrival_counter_test",
                 "HipMoiGfx1100WmmaStreamKArrivalCounter."
-                "AcqRelFetchAddOrdersWmmaPartials",
+                "ConSanOracleAcqRelFetchAddOrdersWmmaPartials",
             ),
             "tree-atomic-or": (
                 "hip-moi-build-gfx1100-tests/tests/"
                 "hip_moi_instrumented_gfx1100_wmma_streamk_tree_atomic_or_test",
                 "HipMoiGfx1100WmmaStreamKTreeAtomicOr."
-                "AcqRelBitmaskOrdersWmmaPartials",
+                "ConSanOracleAcqRelBitmaskOrdersWmmaPartials",
             ),
             "jakub-attention": (
                 "hip-moi-build-gfx1100-tests/tests/"
@@ -56,6 +56,13 @@ class ConSanValidationTargetAdmissionTest(unittest.TestCase):
                 resolved = validation._resolved_workload("gfx1100", workload)
                 self.assertEqual(resolved.relative_path, relative_path)
                 self.assertEqual(resolved.clean_filter, clean_filter)
+        for workload_id in ("streamk-arrival", "tree-atomic-or"):
+            with self.subTest(workload=workload_id):
+                workload = validation._workload_for_target("gfx1100", workload_id)
+                self.assertEqual(
+                    validation._fault_families("gfx1100", workload),
+                    ("atomic-weaken-order",),
+                )
 
     def test_gfx1100_fails_closed_without_native_registry(self) -> None:
         with (

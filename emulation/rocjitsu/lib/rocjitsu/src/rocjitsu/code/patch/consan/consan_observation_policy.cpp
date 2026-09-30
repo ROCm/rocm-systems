@@ -221,7 +221,8 @@ ObservationProduct assemble_observation_product(const ProgramInventory &inventor
     }
     AtomicFencePolicyResult atomic_fence = plan_atomic_fence_observation(
         inventory,
-        {.publication_modifications_enabled = (inventory.arch() == ROCJITSU_CODE_ARCH_RDNA4 ||
+        {.publication_modifications_enabled = (inventory.arch() == ROCJITSU_CODE_ARCH_RDNA3 ||
+                                               inventory.arch() == ROCJITSU_CODE_ARCH_RDNA4 ||
                                                inventory.arch() == ROCJITSU_CODE_ARCH_CDNA4 ||
                                                inventory.arch() == ROCJITSU_CODE_ARCH_CDNA5) &&
                                               request.mode == Mode::Default,

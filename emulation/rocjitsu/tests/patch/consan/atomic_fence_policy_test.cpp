@@ -458,13 +458,13 @@ TEST(ConSanAtomicFencePolicy, ExcludesReleaseWithoutOwnerLocalWriteWindow) {
 }
 
 TEST(ConSanAtomicFencePolicy, AssembledPolicyDerivesDirectionalOwnerLocalWindows) {
-  const auto assemble = [](LdsAccessKind access_kind) {
+  const auto assemble = [](LdsAccessKind access_kind, const AtomicPolicyTarget &target = {}) {
     std::vector events{make_ordinary_store_event(), make_fence_event()};
     std::vector sequences{make_atomic_sequence(events.front())};
     std::vector fences{make_fence_candidate(events[0], events[1], sequences[0])};
     ProgramInventoryBuilder builder(build_atomic_inventory(
-        std::move(events), std::move(sequences), {}, {make_global_store_site({})},
-        std::move(fences), {}, {}, {make_lds_access(access_kind)}));
+        std::move(events), std::move(sequences), {}, {make_global_store_site(target)},
+        std::move(fences), target, {}, {make_lds_access(access_kind)}));
     for (ProgramSite &site : builder.program_sites()) {
       site.execution_owners.clear();
       site.execution_owners.push_back({.kernel = builder.kernels().front().id});
@@ -512,6 +512,37 @@ TEST(ConSanAtomicFencePolicy, AssembledPolicyDerivesDirectionalOwnerLocalWindows
   ASSERT_EQ(write.plan().fence_site_decisions.size(), 1u);
   EXPECT_EQ(write.plan().fence_site_decisions.front().kind, SiteDecisionKind::Admitted);
   EXPECT_EQ(write.plan().probe_intents.size(), 3u);
+}
+
+TEST(ConSanAtomicFencePolicy, Gfx1100AssembledPolicyEnablesPublicationModificationJournal) {
+  constexpr AtomicPolicyTarget target{ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_TARGET_GFX1100};
+  std::vector events{make_atomic_event()};
+  std::vector sequences{make_atomic_sequence(events.front())};
+  ProgramInventoryBuilder builder(build_atomic_inventory(
+      std::move(events), std::move(sequences), {make_global_atomic_site(target)},
+      {make_global_store_site(target, 64)}, {}, target, {},
+      {make_lds_access(LdsAccessKind::Write)}));
+  for (ProgramSite &site : builder.program_sites()) {
+    site.execution_owners.clear();
+    site.execution_owners.push_back({.kernel = builder.kernels().front().id});
+  }
+
+  const ObservationProduct product = assemble_observation_product(
+      builder.view(), {.mode = Mode::Default,
+                       .native_lds_enabled = true,
+                       .group_flat_enabled = true,
+                       .flat_provenance_mode = FlatProvenanceMode::Likely,
+                       .barrier_tracking_enabled = true,
+                       .include_atomic_fence_policy = true,
+                       .atomic_fence_tracking_enabled = true,
+                       .container_filter = {},
+                       .kernel_name_allowlist = {},
+                       .reserved_for_synchronization = {}});
+
+  ASSERT_TRUE(product.valid());
+  EXPECT_EQ(std::ranges::count(product.plan().probe_intents,
+                               ProbeIntentKind::PublicationModification, &ProbeIntent::kind),
+            1);
 }
 
 TEST(ConSanAtomicFencePolicy, GlobalAtomicContractTransportsAcrossEverySupportedArchitecture) {
@@ -1037,6 +1068,7 @@ TEST(ConSanAtomicFencePolicy, NoPublicationModificationLogWithoutPublicationObse
 TEST(ConSanAtomicFencePolicy, PublicationModificationsDoNotRequireSynchronizationSequences) {
   for (const AtomicPolicyTarget target :
        {AtomicPolicyTarget{},
+        AtomicPolicyTarget{ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_TARGET_GFX1100},
         AtomicPolicyTarget{ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_TARGET_GFX950}}) {
     const std::string mnemonic =
         target.arch == ROCJITSU_CODE_ARCH_CDNA4 ? "global_atomic_add" : "global_atomic_add_u32";
@@ -1108,6 +1140,7 @@ TEST(ConSanAtomicFencePolicy, PublicationModificationsDoNotRequireSynchronizatio
 TEST(ConSanAtomicFencePolicy, PublicationCompletenessIncludesUnclassifiableStores) {
   for (const AtomicPolicyTarget target :
        {AtomicPolicyTarget{},
+        AtomicPolicyTarget{ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_TARGET_GFX1100},
         AtomicPolicyTarget{ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_TARGET_GFX950}}) {
     const std::string mnemonic =
         target.arch == ROCJITSU_CODE_ARCH_CDNA4 ? "global_atomic_add" : "global_atomic_add_u32";
@@ -1154,6 +1187,7 @@ namespace rocjitsu::consan {
 TEST(ConSanAtomicFencePolicy, RelaxedPublicationTransitionNeedsNoOrderingSequence) {
   for (const auto target :
        {AtomicPolicyTarget{},
+        AtomicPolicyTarget{ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_TARGET_GFX1100},
         AtomicPolicyTarget{ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_TARGET_GFX1250}}) {
     detail::AtomicEvidenceSourceView source{
         .site =

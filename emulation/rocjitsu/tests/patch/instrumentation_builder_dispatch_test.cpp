@@ -65,7 +65,7 @@ TEST(InstrumentationBuilderDispatch, VectorAndWaitSemanticsSelectTargetBackend) 
   EXPECT_EQ(ib::build_s_wait_lds0(ROCJITSU_CODE_ARCH_CDNA3), 0xbf8cc07fu);
   EXPECT_EQ(ib::build_s_wait_flat_load0(ROCJITSU_CODE_ARCH_RDNA3), 0xbf890007u);
   EXPECT_EQ(ib::build_s_wait_global_load0(ROCJITSU_CODE_ARCH_RDNA3), 0xbf8903f7u);
-  EXPECT_EQ(ib::build_s_wait_global_store0(ROCJITSU_CODE_ARCH_RDNA3), 0xbf8903f7u);
+  EXPECT_EQ(ib::build_s_wait_global_store0(ROCJITSU_CODE_ARCH_RDNA3), 0xbc7c0000u);
   EXPECT_EQ(ib::build_s_wait_lds0(ROCJITSU_CODE_ARCH_RDNA3), 0xbf89fc07u);
   EXPECT_EQ(ib::build_s_wait_scalar_load0(ROCJITSU_CODE_ARCH_RDNA3), 0xbf89fc07u);
   EXPECT_EQ(ib::build_s_wait_flat_load0(ROCJITSU_CODE_ARCH_RDNA4), 0xbfc80000u);

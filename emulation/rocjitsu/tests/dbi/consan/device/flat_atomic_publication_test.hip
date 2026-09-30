@@ -32,7 +32,8 @@ __device__ __forceinline__ void release_flat_atomic(uint32_t *counter) {
                : "v"(counter), "v"(one)
                : "memory");
 #elif defined(__gfx1100__)
-  asm volatile("s_waitcnt_vscnt null, 0\n\t"
+  asm volatile("s_waitcnt lgkmcnt(0)\n\t"
+               "s_waitcnt_vscnt null, 0\n\t"
                "flat_atomic_add_u32 %0, %1\n\t"
                "s_waitcnt vmcnt(0)\n\t" RJ_CONSAN_DEVICE_LARGE_CAVE
                :
