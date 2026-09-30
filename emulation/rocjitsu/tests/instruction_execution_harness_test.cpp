@@ -7847,7 +7847,7 @@ TEST(HwregTest, Gfx1250GetregReadsWgpId) {
   cfg.lds_size_kb = 64;
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
-  cu->set_shader_engine_location(1, 13);
+  cu->set_shader_engine_location(1, 13, 8);
 
   auto decoder = Decoder::create(cfg.arch);
   ASSERT_NE(decoder, nullptr);
@@ -7861,10 +7861,10 @@ TEST(HwregTest, Gfx1250GetregReadsWgpId) {
     auto *wf = cu->dispatch_wf(0, slot, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
     ASSERT_NE(wf, nullptr);
     EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
-    EXPECT_EQ(cu->read_sgpr(wf->sgpr_alloc().base + 4), 13u);
+    EXPECT_EQ(cu->read_sgpr(wf->sgpr_alloc().base + 4), 5u);
     uint32_t value = 0;
     EXPECT_EQ(amdgpu::read_hwreg_field(*wf, kWgpId, value), amdgpu::HwregAccessResult::Success);
-    EXPECT_EQ(value, 13u);
+    EXPECT_EQ(value, 5u);
     EXPECT_EQ(amdgpu::read_hwreg_field(*wf, encode_hwreg(23, 11, 2), value),
               amdgpu::HwregAccessResult::Success);
     EXPECT_EQ(value, 2u);

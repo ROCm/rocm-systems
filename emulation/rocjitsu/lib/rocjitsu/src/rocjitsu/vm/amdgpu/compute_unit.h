@@ -488,19 +488,23 @@ public:
   /// @brief Record this CU's physical location within its XCC.
   /// @param shader_engine_id Zero-based shader-engine index within the XCC.
   /// @param cu_index Zero-based CU index within the shader engine.
-  /// @param cus_per_shader_array Zero means the SE has a single shader array.
+  /// @param cus_per_shader_array Width of each shader array in CU order; zero means unknown.
   void set_shader_engine_location(uint32_t shader_engine_id, uint32_t cu_index,
-                                  uint32_t cus_per_shader_array = 0) {
+                                  uint32_t cus_per_shader_array) {
     shader_engine_id_ = shader_engine_id;
     shader_engine_cu_index_ = cu_index;
     scratch_scoreboard_base_ = shader_engine_cu_index_ * scratch_slots_per_cu_;
-    shader_array_cu_id_ = cus_per_shader_array ? cu_index % cus_per_shader_array : cu_index;
+    cus_per_shader_array_ = cus_per_shader_array;
+    shader_array_cu_id_ = cus_per_shader_array ? cu_index % cus_per_shader_array : 0;
   }
 
   /// @brief Return this CU's physical shader-engine index.
   uint32_t shader_engine_id() const { return shader_engine_id_; }
 
-  /// @brief Return this CU's index within its shader array.
+  /// @brief Return the shader-array width, or zero when the geometry is unknown.
+  uint32_t cus_per_shader_array() const { return cus_per_shader_array_; }
+
+  /// @brief Return this CU's index within its shader array when the width is known.
   uint32_t shader_array_cu_id() const { return shader_array_cu_id_; }
 
   /// @brief Return the first scratch scoreboard slot owned by this CU.
@@ -1216,6 +1220,7 @@ protected:
   uint32_t shader_engine_id_ = 0;
   uint32_t shader_engine_cu_index_ = 0;
   uint32_t scratch_slots_per_cu_ = 1;
+  uint32_t cus_per_shader_array_ = 0;
   uint32_t shader_array_cu_id_ = 0;
   uint32_t scratch_scoreboard_base_ = 0;
   bool sram_ecc_ = false;
@@ -1432,6 +1437,9 @@ inline bool InstructionComputeUnitView::observes_register_access() const {
   return raw_cu().observes_register_access();
 }
 inline bool InstructionComputeUnitView::debug_active() const { return raw_cu().debug_active(); }
+inline uint32_t InstructionComputeUnitView::cus_per_shader_array() const {
+  return raw_cu().cus_per_shader_array();
+}
 inline uint32_t InstructionComputeUnitView::shader_array_cu_id() const {
   return raw_cu().shader_array_cu_id();
 }

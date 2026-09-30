@@ -28,6 +28,7 @@ table CommandProcessorConfig {
 table ShaderEngineConfig {
   num_compute_units: uint32;       // Number of CUs in this shader engine.
   compute_unit: ComputeUnitConfig; // Shared CU configuration for all CUs.
+  cus_per_shader_array: uint32;    // Shader-array width; absent/zero means unknown.
 }
 
 /// Configuration for an Accelerator Complex Die (XCD).

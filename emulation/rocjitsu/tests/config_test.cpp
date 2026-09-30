@@ -1781,6 +1781,90 @@ TEST(CheckpointTest, RoundTripsCdna5ScratchCapacity) {
   }
 }
 
+TEST(CheckpointTest, RoundTripsCdna5WgpIds) {
+  auto source =
+      config::load_config(CONFIG_DIR_PATH + "/gfx1250_mi455x.json", rocjitsu::kEmbeddedSchema);
+  ASSERT_EQ(source.device.num_cu_per_sh, 8u);
+  constexpr uint16_t kWgpId = 23 | (10 << 6) | ((4 - 1) << 11);
+  constexpr std::array<uint32_t, 6> kCuIndices{0, 5, 7, 8, 13, 15};
+  auto *source_xcd = source.soc()->xcd(0);
+  for (auto *se : source_xcd->shader_engines()) {
+    for (uint32_t cu_index : kCuIndices) {
+      auto *cu = se->compute_unit(cu_index);
+      auto *wf = cu->dispatch_wf(0, 0, 32, 8);
+      ASSERT_NE(wf, nullptr);
+      uint32_t value = 0;
+      ASSERT_EQ(amdgpu::read_hwreg_field(*wf, kWgpId, value), amdgpu::HwregAccessResult::Success);
+      ASSERT_EQ(value, cu_index % 8);
+    }
+  }
+
+  test::ScopedTempFile checkpoint_file("rocjitsu-cdna5-wgp-checkpoint-");
+  config::save_checkpoint(checkpoint_file.path(), *source.soc(), 0, source.engine_config,
+                          source.cpu_dispatch_threads);
+  auto restored = config::restore_checkpoint(checkpoint_file.path());
+  auto *restored_xcd = restored.soc()->xcd(0);
+  ASSERT_EQ(restored_xcd->num_shader_engines(), source_xcd->num_shader_engines());
+  for (auto *se : restored_xcd->shader_engines()) {
+    for (uint32_t cu_index : kCuIndices) {
+      SCOPED_TRACE(se->full_path() + ".cu" + std::to_string(cu_index));
+      auto *cu = se->compute_unit(cu_index);
+      auto *wf = cu->wf(0);
+      ASSERT_NE(wf, nullptr);
+      ASSERT_FALSE(wf->is_halted());
+      uint32_t value = 0;
+      EXPECT_EQ(amdgpu::read_hwreg_field(*wf, kWgpId, value), amdgpu::HwregAccessResult::Success);
+      EXPECT_EQ(value, cu_index % 8);
+      wf->halt();
+    }
+  }
+}
+
+TEST(CheckpointTest, LegacyAbsentShaderArrayWidthKeepsWgpIdUnsupportedAcrossResaves) {
+  flatbuffers::FlatBufferBuilder builder;
+  auto arch = builder.CreateString("cdna5");
+  auto cu_config = fb::CreateComputeUnitConfig(builder, 1, 128, 256, 64);
+  // Use only the fields in the legacy schema, which cannot distinguish two
+  // arrays of eight WGPs from one array of sixteen.
+  auto se_config = fb::CreateShaderEngineConfig(builder, 16, cu_config);
+  auto xcd_config = fb::CreateXcdConfig(builder, 1, se_config);
+  auto gpu_config = fb::CreateAmdgpuConfig(builder, 1, 0, xcd_config);
+  auto vm_config = fb::CreateVirtualMachineConfig(builder, arch, gpu_config);
+  auto simulation_config = fb::CreateSimulationConfig(builder, 0, 1, 0, vm_config);
+  auto checkpoint = fb::CreateSimulationCheckpoint(builder, 0, simulation_config);
+  builder.Finish(checkpoint);
+  const auto *stored_se = fb::GetSimulationCheckpoint(builder.GetBufferPointer())
+                              ->config()
+                              ->vm()
+                              ->gpu()
+                              ->xcd()
+                              ->shader_engine();
+  EXPECT_FALSE(
+      flatbuffers::IsFieldPresent(stored_se, fb::ShaderEngineConfig::VT_CUS_PER_SHADER_ARRAY));
+
+  test::ScopedTempFile checkpoint_file("rocjitsu-legacy-wgp-checkpoint-");
+  checkpoint_file.write(std::string_view(reinterpret_cast<const char *>(builder.GetBufferPointer()),
+                                         builder.GetSize()));
+  auto restored = config::restore_checkpoint(checkpoint_file.path());
+  auto *cu = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(13);
+  auto *wf = cu->dispatch_wf(0, 0, 32, 8);
+  ASSERT_NE(wf, nullptr);
+  constexpr uint16_t kWgpId = 23 | (10 << 6) | ((4 - 1) << 11);
+  uint32_t value = 0xFFFFFFFFu;
+  EXPECT_EQ(amdgpu::read_hwreg_field(*wf, kWgpId, value), amdgpu::HwregAccessResult::Unsupported);
+  EXPECT_EQ(value, 0u);
+  config::save_checkpoint(checkpoint_file.path(), *restored.soc(), 0, restored.engine_config,
+                          restored.cpu_dispatch_threads);
+  auto resaved = config::restore_checkpoint(checkpoint_file.path());
+  auto *resaved_wf = resaved.soc()->xcd(0)->shader_engine(0)->compute_unit(13)->wf(0);
+  ASSERT_NE(resaved_wf, nullptr);
+  ASSERT_FALSE(resaved_wf->is_halted());
+  value = 0xFFFFFFFFu;
+  EXPECT_EQ(amdgpu::read_hwreg_field(*resaved_wf, kWgpId, value),
+            amdgpu::HwregAccessResult::Unsupported);
+  EXPECT_EQ(value, 0u);
+}
+
 TEST(CheckpointTest, LegacyAbsentCpuDispatchThreadsStaysSerial) {
   auto checkpoint_file = write_legacy_quantum_checkpoint();
   auto bytes = read_binary_file(checkpoint_file.path());

@@ -472,6 +472,8 @@ HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_
     raw_value = gfx1250_ib_sts2_raw(wf);
     return HwregAccessResult::Success;
   case HwregState::WgpIdGfx1250:
+    if (!wf.cu().cus_per_shader_array())
+      return HwregAccessResult::Unsupported;
     // Each gfx1250 ComputeUnit models one WGP, including its shared LDS.
     raw_value = field_value(wf.cu().shader_array_cu_id(), 10, 4);
     return HwregAccessResult::Success;

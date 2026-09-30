@@ -311,6 +311,12 @@ The JSON config is validated against FlatBuffers schemas in `schemas/`:
 - `simulation_config.fbs` — topology and simulation parameters
 - `checkpoint.fbs` — simulation state checkpointing
 
+Checkpoints preserve the shader-array width used by gfx1250 `WAVE_HW_ID1.WGP_ID`
+reads. Older checkpoints lack this geometry, so WGP-ID reads after restoring
+them return `Unsupported`; the simulator cannot infer a shader-array-local ID
+from the shader-engine CU count alone. Saving such a restored checkpoint again
+preserves that unknown geometry.
+
 ## Multi-GPU
 
 Multi-GPU configs define multiple SoCs with distinct GPU IDs and
