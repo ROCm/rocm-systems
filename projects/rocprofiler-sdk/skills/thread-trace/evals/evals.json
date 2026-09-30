@@ -1,0 +1,60 @@
+{
+  "evaluations": [
+    {
+      "id": "thread-trace-diagnose-row-sums-latency",
+      "skill_should_trigger": true,
+      "workspace": "evals/files/row-sums-latency",
+      "prompt": "row_sums.hip in this directory runs on an AMD MI300X. Build it as its header comment says. Use thread trace to find out why it is slow: which instruction and source line hold the time, and what behavior causes it. Do not change the code.",
+      "expected_behavior": [
+        "Captures the kernel with rocprofv3 --att and reads the stats CSV or the skill's att_mine.py output",
+        "Identifies that the s_waitcnt right after the global load in the loop holds most of the time and that WAIT is the largest wave state: each iteration waits for its own load before anything else can issue",
+        "Names the responsible source line (the planted defect is at row_sums.hip:29)"
+      ],
+      "unexpected_behavior": [
+        "Blames a cause without evidence from the trace",
+        "Modifies the kernel file"
+      ],
+      "logs_contain": [
+        "--att"
+      ]
+    },
+    {
+      "id": "thread-trace-mfma-stalls",
+      "skill_should_trigger": true,
+      "prompt": "A bf16 GEMM kernel on MI300X only reaches a third of peak. How do I see, instruction by instruction, why its matrix cores sit idle?"
+    },
+    {
+      "id": "thread-trace-analyze-att-capture",
+      "skill_should_trigger": true,
+      "prompt": "I captured my HIP kernel with rocprofv3 --att and got a stats CSV, .att files, and code objects. How do I work out from them what the kernel is stalling on?"
+    },
+    {
+      "id": "thread-trace-barrier-imbalance",
+      "skill_should_trigger": true,
+      "prompt": "The waves of a workgroup in a HIP reduction kernel seem to wait for each other at __syncthreads. How do I find where and why?"
+    },
+    {
+      "id": "thread-trace-decoder-api",
+      "skill_should_trigger": true,
+      "prompt": "How do I decode the .att files and code objects rocprofv3 writes with the rocprof-trace-decoder Python API, and find the slowest instructions?"
+    },
+    {
+      "id": "thread-trace-near-miss-counters",
+      "skill_should_trigger": false,
+      "note": "Device-wide counters and roofline, not an instruction trace.",
+      "prompt": "Collect L2 hit rate and HBM bandwidth counters for my kernel and plot it on a roofline with rocprof-compute."
+    },
+    {
+      "id": "thread-trace-near-miss-cuda",
+      "skill_should_trigger": false,
+      "note": "NVIDIA tooling.",
+      "prompt": "Profile my CUDA kernel with Nsight Compute and tell me why its warps stall."
+    },
+    {
+      "id": "thread-trace-near-miss-api-timeline",
+      "skill_should_trigger": false,
+      "note": "Host-side API and launch timeline, not per-instruction behavior.",
+      "prompt": "Show me a timeline of the HIP API calls, memory copies, and kernel launches in my application."
+    }
+  ]
+}

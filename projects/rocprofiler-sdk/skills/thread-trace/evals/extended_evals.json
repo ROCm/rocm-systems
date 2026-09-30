@@ -1,0 +1,59 @@
+{
+  "evaluations": [
+    {
+      "id": "thread-trace-diagnose-gather-chain-latency",
+      "skill_should_trigger": true,
+      "workspace": "evals/files/gather-chain-latency",
+      "prompt": "gather_chain.hip in this directory runs on an AMD MI300X. Build it as its header comment says. Use thread trace to find out why it is slow: which instruction and source line hold the time, and what behavior causes it. Do not change the code.",
+      "expected_behavior": [
+        "Captures the kernel with rocprofv3 --att and reads the stats CSV or the skill's att_mine.py output",
+        "Identifies that the loop's s_waitcnt instructions hold the time, and from the disassembly that each data load needs the index loaded just before it, so the waits happen one after another",
+        "Names the responsible source line (the planted defect is at gather_chain.hip:14)"
+      ],
+      "unexpected_behavior": [
+        "Blames a cause without evidence from the trace",
+        "Modifies the kernel file"
+      ],
+      "logs_contain": [
+        "--att"
+      ]
+    },
+    {
+      "id": "thread-trace-diagnose-soft-clip-compute",
+      "skill_should_trigger": true,
+      "workspace": "evals/files/soft-clip-compute",
+      "prompt": "soft_clip.hip in this directory runs on an AMD MI300X. Build it as its header comment says. Use thread trace to find out why it is slow: which instruction and source line hold the time, and what behavior causes it. Do not change the code.",
+      "expected_behavior": [
+        "Captures the kernel with rocprofv3 --att and reads the stats CSV or the skill's att_mine.py output",
+        "Identifies that the precise exponential and division sequence holds most of the loop's cycles",
+        "Reads resources/compute.md, which the att_mine.py next: line points to, or runs att_mine.py pipes and reports that transcendental instructions hold most of the stall",
+        "Names the responsible source line (the planted defect is at soft_clip.hip:29)"
+      ],
+      "unexpected_behavior": [
+        "Blames a cause without evidence from the trace",
+        "Modifies the kernel file"
+      ],
+      "logs_contain": [
+        "--att"
+      ]
+    },
+    {
+      "id": "thread-trace-diagnose-leader-scale-sync",
+      "skill_should_trigger": true,
+      "workspace": "evals/files/leader-scale-sync",
+      "prompt": "leader_scale.hip in this directory runs on an AMD MI300X. Build it as its header comment says. Use thread trace to find out why it is slow: which instruction and source line hold the time, and what behavior causes it. Do not change the code.",
+      "expected_behavior": [
+        "Captures the kernel with rocprofv3 --att and reads the stats CSV or the skill's att_mine.py output",
+        "Identifies that the s_barrier holds most of the time for most waves, while the first wave of each workgroup runs the per-round series before reaching it",
+        "Names the responsible source line (the planted defect is at leader_scale.hip:23)"
+      ],
+      "unexpected_behavior": [
+        "Blames a cause without evidence from the trace",
+        "Modifies the kernel file"
+      ],
+      "logs_contain": [
+        "--att"
+      ]
+    }
+  ]
+}
