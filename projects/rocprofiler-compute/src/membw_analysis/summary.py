@@ -3,9 +3,11 @@
 
 """Terminal-independent summaries of memory bandwidth analysis results."""
 
-from typing import Tuple
+from typing import List, Tuple
 
 from membw_analysis.models import BottleneckNode, MemBwAnalysisResult
+
+STALL_BLOCK_LEVELS = {"vl1d": "GL1", "l2": "GL2", "data_fabric": "EA"}
 
 ACTIVE_FALLBACK_TEXT = (
     "Memory Bandwidth Analysis: Bottlenecks detected (see chart annotations)."
@@ -18,6 +20,32 @@ def has_active_nodes(nodes: Tuple[BottleneckNode, ...]) -> bool:
         if node.state == "active" or has_active_nodes(node.children):
             return True
     return False
+
+
+def active_stall_leaves(
+    result: MemBwAnalysisResult, block_id: str
+) -> Tuple[BottleneckNode, ...]:
+    """Return the active terminal bottlenecks annotated on a chart block."""
+    level = STALL_BLOCK_LEVELS.get(block_id)
+    if level is None:
+        return ()
+    leaves: List[BottleneckNode] = []
+    for node in result.nodes:
+        _append_active_leaves(node, level, leaves)
+    return tuple(leaves)
+
+
+def _append_active_leaves(
+    node: BottleneckNode, level: str, leaves: List[BottleneckNode]
+) -> None:
+    if node.state != "active":
+        return
+    if node.level == level and not any(
+        child.state == "active" for child in node.children
+    ):
+        leaves.append(node)
+    for child in node.children:
+        _append_active_leaves(child, level, leaves)
 
 
 def status_text(membw_result: MemBwAnalysisResult) -> str:

@@ -18,6 +18,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from membw_analysis.summary import active_stall_leaves
 from memory_chart.loader import load_layout
 
 # ---------------------------------------------------------------------------
@@ -840,12 +841,6 @@ def _build_io_section(
 # Membw stall annotations
 # ---------------------------------------------------------------------------
 
-_STALL_LEVEL_MAP: dict[str, str] = {
-    "vl1d": "GL1",
-    "l2": "GL2",
-    "data_fabric": "EA",
-}
-
 
 def _collect_stall_rows(
     membw: Any,  # noqa: ANN401
@@ -854,39 +849,17 @@ def _collect_stall_rows(
     """Extract active stall rows for a block."""
     if membw is None:
         return []
-    level = _STALL_LEVEL_MAP.get(block_id)
-    if level is None:
-        return []
     rows: list[CachePanelRow] = []
-    for node in getattr(membw, "nodes", []):
-        _collect_active_leaves(node, level, rows)
-    return rows
-
-
-def _collect_active_leaves(
-    node: Any,  # noqa: ANN401
-    level: str,
-    rows: list[CachePanelRow],
-) -> None:
-    """Recursively collect active leaf nodes at level."""
-    if getattr(node, "state", None) != "active":
-        return
-    is_leaf = not any(
-        getattr(c, "state", None) == "active" for c in getattr(node, "children", [])
-    )
-    if getattr(node, "level", None) == level and is_leaf:
-        supporting = getattr(node, "supporting", ())
-        value = getattr(supporting[0], "value", None) if supporting else None
-        label = getattr(node, "label", "stall")
+    for node in active_stall_leaves(membw, block_id):
+        value = node.supporting[0].value if node.supporting else None
         rows.append((
-            f"[!] {label}",
+            f"[!] {node.label}",
             value,
             "%",
             COLORS["stall"],
             False,
         ))
-    for child in getattr(node, "children", []):
-        _collect_active_leaves(child, level, rows)
+    return rows
 
 
 # ---------------------------------------------------------------------------

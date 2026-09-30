@@ -615,21 +615,22 @@ add_test(
     NAME test_mem_chart_gfx11
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_mem_chart_gfx11.xml
-        ${COV_OPTION} tests/unit/utils/test_mem_chart_gfx11.py ${WORKING_DIR_OPTION}
+        ${COV_OPTION} tests/unit/memory_chart/test_renderer_gfx11.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
     NAME test_mem_chart_gfx9
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_mem_chart_gfx9.xml
-        ${COV_OPTION} tests/unit/utils/test_mem_chart_gfx9.py ${WORKING_DIR_OPTION}
+        ${COV_OPTION} tests/unit/memory_chart/test_renderer_gfx9.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
     NAME test_mem_chart_gfx1250
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_mem_chart_gfx1250.xml
-        ${COV_OPTION} tests/unit/utils/test_mem_chart_gfx1250.py ${WORKING_DIR_OPTION}
+        ${COV_OPTION} tests/unit/memory_chart/test_renderer_gfx1250.py
+        ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -665,6 +666,13 @@ add_test(
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_html_diagram.xml
         ${COV_OPTION} tests/unit/memory_chart/test_html_diagram.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_html_views
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_html_views.xml
+        ${COV_OPTION} tests/unit/memory_chart/test_html_views.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -1152,6 +1160,7 @@ if(${ENABLE_COVERAGE})
         test_roofline_main
         test_html_report
         test_html_diagram
+        test_html_views
         test_mem_chart_html_report
         test_instant_button
         test_menu_bar

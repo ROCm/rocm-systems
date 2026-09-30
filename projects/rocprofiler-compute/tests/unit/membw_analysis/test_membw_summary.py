@@ -8,6 +8,8 @@ import pytest
 from membw_analysis.models import BottleneckNode, MemBwAnalysisResult
 from membw_analysis.summary import (
     ACTIVE_FALLBACK_TEXT,
+    STALL_BLOCK_LEVELS,
+    active_stall_leaves,
     has_active_nodes,
     status_text,
 )
@@ -81,3 +83,21 @@ def test_active_fallback_text_has_no_newline() -> None:
     assert ACTIVE_FALLBACK_TEXT == (
         "Memory Bandwidth Analysis: Bottlenecks detected (see chart annotations)."
     )
+
+
+def test_active_stall_leaves_select_terminal_nodes_by_block() -> None:
+    child = make_node("active")
+    parent = make_node("active", (child, make_node("inactive")))
+    l2 = BottleneckNode(
+        id="l2",
+        label="L2",
+        level="GL2",
+        state="active",
+        supporting=(),
+        children=(),
+    )
+    result = make_result(nodes=(parent, l2, make_node("inactive")))
+    assert STALL_BLOCK_LEVELS == {"vl1d": "GL1", "l2": "GL2", "data_fabric": "EA"}
+    assert active_stall_leaves(result, "vl1d") == (child,)
+    assert active_stall_leaves(result, "l2") == (l2,)
+    assert active_stall_leaves(result, "unknown") == ()
