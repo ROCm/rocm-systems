@@ -46,10 +46,31 @@
 namespace {
 
 #ifndef _WIN32
-constexpr const char* kCaptureDisabled = "[HRR capture] Capture disabled";
+constexpr const char* kCaptureDisabled = "[HRR capture] Capture disabled: ";
 // Far above what one small workload needs; a capture blocked on a planted FIFO
 // never finishes.
 constexpr int kCaptureTimeoutSeconds = 120;
+
+// True when a line of the output says capture is disabled for this reason: `what`
+// right after the prefix and `then` later on the same line, so the path and the
+// errno text between them don't matter. Other refusals share the prefix.
+bool disabled_because(const std::string& output, const std::string& what, const std::string& then) {
+  const std::string head = kCaptureDisabled + what;
+  for (size_t at = output.find(head); at != std::string::npos; at = output.find(head, at + 1)) {
+    const size_t eol = output.find('\n', at);
+    const std::string line = output.substr(at, eol == std::string::npos ? eol : eol - at);
+    if (line.find(then, head.size()) != std::string::npos) return true;
+  }
+  return false;
+}
+
+bool refused_archive_dir(const std::string& output) {
+  return disabled_because(output, "cannot use ", " as a private archive directory (");
+}
+
+bool refused_events_file(const std::string& output) {
+  return disabled_because(output, "cannot open ", "/events.bin (");
+}
 
 fs::perms perms_of(const fs::path& p) {
   return fs::symlink_status(p).permissions() & fs::perms::all;
@@ -227,7 +248,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureRefusesPlantedLinks) {
         "ln -s '" + victim_file.string() + "' \"$HRR_TEST_BASE/pid-$$/events.bin\"\n");
     INFO("Workload exit code: " << run.ret << "\n" << run.output);
     REQUIRE(run.ret == 0);
-    CHECK(run.output.find(kCaptureDisabled) != std::string::npos);
+    CHECK(refused_events_file(run.output));
     CHECK(read_text_file(victim_file) == contents);
     CHECK_FALSE(fs::exists(base / "manifest.json"));
   }
@@ -238,7 +259,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureRefusesPlantedLinks) {
         "ln -s '" + victim_dir.string() + "' \"$HRR_TEST_BASE/pid-$$\"\n");
     INFO("Workload exit code: " << run.ret << "\n" << run.output);
     REQUIRE(run.ret == 0);
-    CHECK(run.output.find(kCaptureDisabled) != std::string::npos);
+    CHECK(refused_archive_dir(run.output));
     CHECK(fs::is_empty(victim_dir));
     CHECK_FALSE(fs::exists(base / "manifest.json"));
   }
@@ -250,7 +271,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureRefusesPlantedLinks) {
         "ln -s '" + victim_dir.string() + "' \"$HRR_TEST_BASE/pid-$$/blobs\"\n");
     INFO("Workload exit code: " << run.ret << "\n" << run.output);
     REQUIRE(run.ret == 0);
-    CHECK(run.output.find(kCaptureDisabled) != std::string::npos);
+    CHECK(refused_archive_dir(run.output));
     CHECK(fs::is_empty(victim_dir));
     CHECK_FALSE(fs::exists(base / "manifest.json"));
   }
@@ -262,7 +283,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureRefusesPlantedLinks) {
         "ln '" + victim_file.string() + "' \"$HRR_TEST_BASE/pid-$$/events.bin\"\n");
     INFO("Workload exit code: " << run.ret << "\n" << run.output);
     REQUIRE(run.ret == 0);
-    CHECK(run.output.find(kCaptureDisabled) != std::string::npos);
+    CHECK(refused_events_file(run.output));
     CHECK(read_text_file(victim_file) == contents);
     CHECK_FALSE(fs::exists(base / "manifest.json"));
   }
