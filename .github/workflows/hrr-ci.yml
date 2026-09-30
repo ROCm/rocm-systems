@@ -170,6 +170,10 @@ jobs:
   build:
     name: "Build (multi-arch)"
     if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+    # The integration binaries embed absolute paths into this workspace, so a
+    # containerised GPU job has to recreate it (see "Recreate build path").
+    outputs:
+      workspace: ${{ github.workspace }}
     runs-on: azure-linux-scale-rocm
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
@@ -324,11 +328,32 @@ jobs:
     # part would hold a runner for the rest of the day and publish no log to
     # say why. Fail instead, while the log still gets uploaded.
     timeout-minutes: 30
+    # The OSSCI pod pools (gfx90a, gfx950) expose /dev/kfd only to a job with
+    # a container spec: run bare there and hipGetDeviceCount returns 100 with
+    # no devices. Every other pool is a bare machine and gets no container,
+    # since a null image runs the job directly on the runner.
+    container:
+      image: ${{ matrix.container && 'ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98' || null }}
+      options: >-
+        --ipc host
+        --group-add video
+        --device /dev/kfd
+        --device /dev/dri
+        --group-add 110
+        --group-add 993
+        --group-add 992
+        --ulimit memlock=-1:-1
+        --security-opt seccomp=unconfined
+        --env-file /etc/podinfo/gha-gpu-isolation-settings
+        --user 0:0
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { family: gfx90a, runner: "${{ needs.ci_config.outputs.gfx90a_runner }}" }
+          - { family: gfx90a, container: true, runner: "${{ needs.ci_config.outputs.gfx90a_runner }}" }
           # gfx94x uses the resolved 1-GPU runner: the 8-GPU gfx942 pool
           # exposes /dev/kfd only to a job with a container spec.
           - { family: gfx94x, runner: "${{ needs.ci_config.outputs.gfx94x_runner }}" }
@@ -336,7 +361,7 @@ jobs:
           # so gfx950 takes an 8-GPU machine; every other family skips T3.
           # Do not pin HIP_VISIBLE_DEVICES: on the CCS pool fixed indices can
           # be empty even though the job has GPUs.
-          - { family: gfx950, runner: "linux-gfx950-8gpu-ccs-ossci-rocm" }
+          - { family: gfx950, container: true, runner: "linux-gfx950-8gpu-ccs-ossci-rocm" }
           - { family: gfx103x, runner: "${{ needs.ci_config.outputs.gfx103x_runner }}" }
           - { family: gfx110x, runner: "${{ needs.ci_config.outputs.gfx110x_runner }}" }
           - { family: gfx120x, runner: "${{ needs.ci_config.outputs.gfx120x_runner }}" }
@@ -394,6 +419,17 @@ jobs:
         with:
           name: hrr-build
           path: build
+
+      # In a container the workspace moves (/__w/...), which would leave the
+      # baked-in HRR_TEST_EXE and HRR_PLAYBACK_EXE pointing nowhere.
+      - name: Recreate build path
+        env:
+          BUILD_WORKSPACE: ${{ needs.build.outputs.workspace }}
+        run: |
+          if [ -n "${BUILD_WORKSPACE}" ] && [ "${BUILD_WORKSPACE}" != "${PWD}" ]; then
+            mkdir -p "$(dirname "${BUILD_WORKSPACE}")"
+            ln -sfn "${PWD}" "${BUILD_WORKSPACE}"
+          fi
 
       - name: Restore executable bits
         run: chmod +x build/hrr/playback/hrr-playback build/hrr/tests/*/hrr-*tests
