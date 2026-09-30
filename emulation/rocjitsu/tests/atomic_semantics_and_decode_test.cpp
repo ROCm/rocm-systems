@@ -712,6 +712,21 @@ TEST_P(AtomicPolicyExecutionTest, DsScalarDenormalModesAndRounding) {
   }
 }
 
+TEST_P(AtomicPolicyExecutionTest, DsAddSelectsAndQuietsSourceNan) {
+  // Match the gfx1250 corpus witness: DATA0 wins over an LDS NaN, while the
+  // returning form preserves the original LDS bits in its destination.
+  for (uint16_t opcode : {uint16_t{21}, ds_add_return_opcode()}) {
+    for (uint32_t old_bits : {0x7f812345u, 0x7fc12345u}) {
+      for (uint32_t source_bits : {0x7f854321u, 0x7fc54321u}) {
+        SCOPED_TRACE(testing::Message()
+                     << "opcode=" << opcode << " old=" << old_bits << " source=" << source_bits);
+        EXPECT_EQ(execute_ds(opcode, old_bits, source_bits, 0, 0xf0), 0x7fc54321u);
+      }
+      EXPECT_EQ(execute_ds(opcode, old_bits, 0x3f800000u, 0, 0xf0), 0x7fc12345u);
+    }
+  }
+}
+
 TEST_P(AtomicPolicyExecutionTest, DsMinMaxIgnoreOutputDenormalControl) {
   for (uint16_t opcode : {18, 19, 82, 83}) {
     const bool wide = opcode >= 64;
