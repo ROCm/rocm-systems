@@ -17,7 +17,7 @@
 namespace rocjitsu::plugins::race_detector {
 
 /// Workgroup-level race detection state. Owns the event registry, live LDS
-/// event lists, per-byte counters, and per-wave WaveRaceStates.
+/// event lists, per-chunk byte counts, and per-wave WaveRaceStates.
 ///
 /// Event lifecycle:
 ///   1. allocateEventId() — registers a new event (ACTIVE).
@@ -29,10 +29,10 @@ namespace rocjitsu::plugins::race_detector {
 ///      flushBarrierPendingEvents).
 ///
 /// LDS race validation uses a two-level approach:
-///   - Fast path: per-byte counters (byteWriteCounts / byteReadCounts)
+///   - Fast path: per-chunk byte counts (byteWriteCounts / byteReadCounts)
 ///     skip empty chunks and chunks owned by the accessing wave's
 ///     ordered LDS events.
-///   - Slow path: when counts are non-zero, scans live event intervals
+///   - Slow path: when a chunk may contain a conflict, scans live event intervals
 ///     with binary search (IntervalSet::overlapsRange).
 class RaceDetector {
   friend class Workgroup;
@@ -105,8 +105,10 @@ private:
 
   struct LdsChunkCounts {
     int bytes = 0;
-    /// A sole ordinary-LDS owner, or -1 for mixed waves/ordering classes.
-    /// Once mixed, a chunk stays conservative until its count drains.
+    /// When bytes > 0, a nonnegative owner proves that every counted event
+    /// is an ordinary LDS access from this wave. -1 makes no ownership claim.
+    /// Removing events preserves a known owner; a mixed chunk stays
+    /// conservative until its count drains, even if only one wave remains.
     WaveId orderedWave{-1};
   };
 
