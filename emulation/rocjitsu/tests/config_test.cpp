@@ -2463,7 +2463,7 @@ TEST(CheckpointTest, PreservesCdna4SimdIdsWithSparseWaveSlots) {
     auto *wf = cu->dispatch_wf_at(slot, cu_id * 10 + slot, 0x1000, cu->config().sgprs_per_wf,
                                   cu->config().vgprs_per_wf);
     ASSERT_NE(wf, nullptr);
-    uint32_t value = 0xDEADBEEFu;
+    uint32_t value = UINT32_MAX;
     ASSERT_EQ(amdgpu::read_hwreg_field(*wf, hw_id_simd, value), amdgpu::HwregAccessResult::Success);
     EXPECT_EQ(value, simd);
   }
@@ -2480,7 +2480,7 @@ TEST(CheckpointTest, PreservesCdna4SimdIdsWithSparseWaveSlots) {
     ASSERT_NE(wf, nullptr);
     ASSERT_FALSE(wf->is_halted());
     EXPECT_EQ(wf->wf_id(), slot);
-    uint32_t value = 0xDEADBEEFu;
+    uint32_t value = UINT32_MAX;
     EXPECT_EQ(amdgpu::read_hwreg_field(*wf, hw_id_simd, value), amdgpu::HwregAccessResult::Success);
     EXPECT_EQ(value, simd);
   }

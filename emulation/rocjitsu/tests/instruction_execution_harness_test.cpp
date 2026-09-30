@@ -7854,7 +7854,8 @@ TEST(HwregTest, Cdna4SimdIdsFollowResidentWaveSlots) {
   for (uint32_t slot = 0; slot < expected_ids.size(); ++slot) {
     SCOPED_TRACE(slot);
     auto *wf = cu->wf(slot);
-    uint32_t value = 0xDEADBEEFu;
+    // An unchanged destination must fail even when the expected result is zero.
+    uint32_t value = UINT32_MAX;
     for (const auto &[offset, width] :
          std::array<std::pair<uint32_t, uint32_t>, 3>{{{4, 1}, {5, 1}, {4, 2}}}) {
       SCOPED_TRACE(offset);
@@ -7869,7 +7870,7 @@ TEST(HwregTest, Cdna4SimdIdsFollowResidentWaveSlots) {
       ASSERT_EQ(std::string_view(inst->mnemonic()), "s_getreg_b32");
       // Scalar register reads also execute when all vector lanes are inactive.
       wf->set_exec(0);
-      cu->write_sgpr(wf->sgpr_alloc().base + 4, 0xDEADBEEFu);
+      cu->write_sgpr(wf->sgpr_alloc().base + 4, UINT32_MAX);
       ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
       EXPECT_EQ(cu->read_sgpr(wf->sgpr_alloc().base + 4), expected);
     }
@@ -7877,7 +7878,7 @@ TEST(HwregTest, Cdna4SimdIdsFollowResidentWaveSlots) {
     for (const auto field :
          {encode_hwreg(4), encode_hwreg(4, 0, 4), encode_hwreg(4, 3, 2), encode_hwreg(4, 5, 2),
           encode_hwreg(4, 6, 1), encode_hwreg(4, 31, 32), encode_hwreg(63, 4, 1)}) {
-      value = 0xDEADBEEFu;
+      value = UINT32_MAX;
       EXPECT_EQ(amdgpu::read_hwreg_field(*wf, field, value),
                 amdgpu::HwregAccessResult::Unsupported);
       EXPECT_EQ(value, 0u);
@@ -7895,7 +7896,7 @@ TEST(HwregTest, Cdna4SimdIdsFollowResidentWaveSlots) {
   auto *reused = cu->dispatch_wf(42, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
   ASSERT_EQ(reused, retired);
   for (uint32_t slot = 0; slot < expected_ids.size(); ++slot) {
-    uint32_t value = 0xDEADBEEFu;
+    uint32_t value = UINT32_MAX;
     EXPECT_EQ(amdgpu::read_hwreg_field(*cu->wf(slot), encode_hwreg(4, 4, 2), value),
               amdgpu::HwregAccessResult::Success);
     EXPECT_EQ(value, expected_ids[slot]);
@@ -7916,7 +7917,7 @@ TEST(HwregTest, Cdna3HwIdRemainsUnsupported) {
   ASSERT_NE(cu, nullptr);
   auto *wf = cu->dispatch_wf_at(1, 0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
   ASSERT_NE(wf, nullptr);
-  uint32_t value = 0xDEADBEEFu;
+  uint32_t value = UINT32_MAX;
   EXPECT_EQ(amdgpu::read_hwreg_field(*wf, encode_hwreg(4, 4, 2), value),
             amdgpu::HwregAccessResult::Unsupported);
   EXPECT_EQ(value, 0u);
