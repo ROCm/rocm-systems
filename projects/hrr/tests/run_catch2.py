@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 import argparse
+import os
+import signal
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
@@ -15,6 +17,11 @@ from pathlib import Path
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--xml", required=True, type=Path)
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        help="seconds before the suite and its workloads are killed",
+    )
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     if args.command[:1] == ["--"]:
@@ -34,18 +41,45 @@ def test_result(case: ET.Element) -> str:
 
 def main() -> int:
     args = parse_args()
+    # Durations name every case as it finishes, so the transcript of a hung
+    # suite ends just before the case that hung.
     command = args.command + [
+        "--durations",
+        "yes",
         "--reporter",
         "console",
         "--reporter",
         f"junit::out={args.xml}",
     ]
-    completed = subprocess.run(
+    # A session of its own, so a timeout also kills the workloads the suite
+    # spawned: they hold the pipe open and would block the read forever.
+    with subprocess.Popen(
         command,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
-    )
+        start_new_session=True,
+    ) as process:
+        try:
+            stdout, _ = process.communicate(timeout=args.timeout)
+        except subprocess.TimeoutExpired:
+            # SIGTERM first: Catch2's fatal-signal handler names the running
+            # case and flushes the console reporter, which SIGKILL would lose.
+            stdout = ""
+            for sig, grace in ((signal.SIGTERM, 10), (signal.SIGKILL, None)):
+                try:
+                    os.killpg(process.pid, sig)
+                except ProcessLookupError:
+                    pass
+                try:
+                    stdout, _ = process.communicate(timeout=grace)
+                    break
+                except subprocess.TimeoutExpired:
+                    continue
+            print(f"Catch2 timed out after {args.timeout:g} s; it hung after:")
+            print(stdout, end="")
+            return 1
+    completed = subprocess.CompletedProcess(command, process.returncode, stdout)
 
     try:
         cases = [

@@ -477,8 +477,10 @@ jobs:
           fi
           # Keep passing logs to one result line per case. The wrapper captures
           # Catch2 and subprocess output, and only emits it when the suite fails.
+          # Time out inside the job's 30 minutes, so a hang prints the cases
+          # that finished instead of being cancelled with no output.
           python3 projects/hrr/tests/run_catch2.py \
-            --xml integration-${{ matrix.family }}.xml \
+            --xml integration-${{ matrix.family }}.xml --timeout 1200 \
             -- ./build/hrr/tests/integration/hrr-integration-tests
 
       - name: Upload results
