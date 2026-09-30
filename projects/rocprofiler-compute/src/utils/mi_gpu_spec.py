@@ -395,10 +395,6 @@ class MIGPUSpecs:
         return cls._num_xcds_dict
 
     @classmethod
-    def get_gpu_arch_to_compute_partition_dict(cls) -> dict[str, dict[str, int]]:
-        return cls._gpu_arch_to_compute_partition_dict
-
-    @classmethod
     def get_all_gpu_models(cls) -> list:
         return cls._all_gpu_models
 
