@@ -27,7 +27,7 @@ from rocprof_compute_analyze.analysis_db import (
     db_analysis,
     filter_dispatch_frame,
 )
-from roofline.roofline_analysis import KernelRoofline, RooflineResult
+from roofline.roofline_analysis import KernelRoofline, RooflineMetricRow, RooflineResult
 from utils import analysis_orm as orm
 from utils import schema
 from utils.file_io import create_df_kernel_top_stats
@@ -1498,7 +1498,17 @@ def test_run_analysis_keeps_mixed_counter_and_pc_sampling_ownership(
                     total_duration_ns=10,
                     percent_runtime=100,
                     longest_dispatch_ns=10,
-                    metrics=[],
+                    metrics=[
+                        RooflineMetricRow(
+                            "4.2.4",
+                            "Performance (GFLOPs)",
+                            402,
+                            "GFLOP/s",
+                            64.0,
+                            None,
+                            None,
+                        )
+                    ],
                     level_ai={},
                     performance=64.0,
                     envelopes={},

@@ -389,10 +389,14 @@ def persist_roofline(
 def _persist_kernel(result: KernelRoofline, kernel: orm.Kernel) -> None:
     """Persist one kernel without a workload-level aggregate."""
     session = orm.Database.get_session()
+    has_performance_row = any(
+        metric.table_id == 402 and metric.metric == "Performance (GFLOPs)"
+        for metric in result.metrics
+    )
     session.add(
         orm.KernelRooflineData(
             kernel=kernel,
-            total_flops=result.performance,
+            total_flops=result.performance if has_performance_row else None,
             kernel_rank=result.kernel_rank,
             dispatch_count=result.dispatch_count,
             total_duration_ns=result.total_duration_ns,

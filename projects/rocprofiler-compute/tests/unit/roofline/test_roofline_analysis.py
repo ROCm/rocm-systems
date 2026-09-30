@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pandas as pd
 import pytest
 
+from roofline.roofline_analysis import load_roofline_view, persist_roofline
 from utils import analysis_orm as orm
 from utils.roofline_calc import RooflineBenchmark
 
@@ -120,8 +121,6 @@ def test_missing_points_table_returns_ceilings_without_kernels(points):
 
 
 def test_compute_persist_view_round_trip_keeps_nulls_and_render_stats(db_session):
-    from roofline.roofline_analysis import load_roofline_view, persist_roofline
-
     result = compute()
     assert [kernel.kernel_name for kernel in result.kernels] == [
         "long",
@@ -169,8 +168,6 @@ def test_compute_persist_view_round_trip_keeps_nulls_and_render_stats(db_session
 
 
 def test_positive_kernel_with_no_mapped_levels_survives_round_trip(db_session):
-    from roofline.roofline_analysis import load_roofline_view, persist_roofline
-
     arch = make_arch_config()
     arch.dfs[402] = arch.dfs[402].loc[["4.2.2"]]
     result = compute(arch_config=arch)
@@ -280,3 +277,40 @@ def test_view_loads_only_query_rows_and_keeps_templates(monkeypatch):
     assert view.tty_tables(arch, [4])[4]["ai_table"].loc["4.1.0", "Value"] == "N/A"
     for key, frame in originals.items():
         pd.testing.assert_frame_equal(arch.dfs[key], frame)
+
+
+@pytest.mark.parametrize("performance_row_present", [False, True])
+def test_persist_distinguishes_absent_performance_row_from_invalid_value(
+    db_session, performance_row_present
+):
+    """Absent performance stores NULL; a present invalid evaluation stores zero."""
+    arch = make_arch_config()
+    metric_ids = ["4.2.0", "4.2.2"] if performance_row_present else ["4.2.0"]
+    arch.dfs[402] = arch.dfs[402].loc[metric_ids]
+    frame = make_frames().iloc[[0]].copy()
+    frame["performance"] = None
+    result = compute(frame, frame, arch)
+    assert result.kernels[0].performance == 0
+    workload = orm.Workload(
+        name="workload", sub_name="run", sys_info_extdata={"gpu_arch": "gfx90a"}
+    )
+    kernels = {
+        kernel.kernel_name: orm.Kernel(
+            kernel_name=kernel.kernel_name, workload=workload
+        )
+        for kernel in result.kernels
+    }
+    db_session.add(workload)
+    persist_roofline(result, workload, kernels)
+    orm.Database.commit()
+    stored = db_session.query(orm.KernelRooflineData).one()
+    if performance_row_present:
+        assert stored.total_flops == 0
+    else:
+        assert stored.total_flops is None
+    assert stored.hbm_cache_data == 2
+    assert stored.l2_cache_data is None
+    assert (
+        load_roofline_view(workload.workload_id, 2, "ns").plot_points["kernelNames"]
+        == []
+    )
