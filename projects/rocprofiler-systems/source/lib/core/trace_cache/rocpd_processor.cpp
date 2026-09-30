@@ -675,10 +675,20 @@ rocpd_processor_t::handle(const hipfile_pmc_sample& hipfile_sample)
 
     const auto* name         = trait::name<category::hipfile>::value;
     const auto& process_info = m_metadata->get_process_info();
-    const auto& agent_ref    = m_agent_manager->get_agent_by_type_index(
-        hipfile_sample.device_id, agent_type::gpu);
-
-    const auto agent_uid = make_agent_uid(agent_ref);
+    const agent* agent_ptr = nullptr;
+    try
+    {
+        agent_ptr = &m_agent_manager->get_agent_by_type_index(hipfile_sample.device_id,
+                                                              agent_type::gpu);
+    } catch(const std::out_of_range& e)
+    {
+        LOG_WARNING(
+            "hipFile PMC sample skipped: agent lookup failed for device_id={}: {}",
+            hipfile_sample.device_id, e.what());
+        return;
+    }
+    
+    const auto agent_uid = make_agent_uid(*agent_ptr);
     const auto event     = make_event(0, 0, 0, name);
 
     const auto enabled = hipfile_sample.enabled_metric.value;
