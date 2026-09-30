@@ -703,9 +703,8 @@ Examples:
         experimental_enabled=experimental_enabled,
         feature_label="List torch operators",
         help=(
-            "\t\tList PyTorch operators as a unified call tree grouped by "
-            "source location with kernel launch stats. "
-            "Recreates ml_api_trace output directory."
+            "\t\tList PyTorch operators as a unified call tree with kernel "
+            "launch stats."
         ),
     )
     analyze_group.add_argument(
@@ -746,9 +745,7 @@ Examples:
         experimental_enabled=experimental_enabled,
         feature_label="List triton operators",
         help=(
-            "\t\tList Triton kernels as a unified call tree grouped by "
-            "source location with kernel launch stats. "
-            "Recreates ml_api_trace output directory."
+            "\t\tList Triton kernels as a unified call tree with kernel launch stats."
         ),
     )
     analyze_group.add_argument(
