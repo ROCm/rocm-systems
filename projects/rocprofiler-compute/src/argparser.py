@@ -270,9 +270,6 @@ Examples:
         ),
     )
     profile_group.add_argument(
-        "--target", type=str, default=None, help=argparse.SUPPRESS
-    )
-    profile_group.add_argument(
         "--attach-pid",
         type=str,
         dest="attach_pid",
