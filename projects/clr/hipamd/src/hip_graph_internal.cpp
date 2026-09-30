@@ -1309,8 +1309,6 @@ hipError_t GraphExecSegmented::FindStreamsReqPerDevForSegments() {
   return hipSuccess;
 }
 
-
-
 // ================================================================================================
 void GraphExecSegmented::RoundRobinStreamAssignment() {
   // max_streams_dev_ represents the total stream-slot count uniformly per device;

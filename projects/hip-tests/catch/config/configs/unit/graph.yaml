@@ -1589,6 +1589,10 @@ graph:
     <<: *level_2
     tags: [node]
     disabled: [amd_windows]
+  Unit_hipGraphKernelNodePriority_ChildGraphWithFlag:
+    <<: *level_2
+    tags: [node]
+    disabled: [amd_windows]
   Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional:
     <<: *level_2
     tags: [query]

@@ -1970,15 +1970,12 @@ class GraphKernelNode : public GraphNode {
     return true;
   }
 
-
   int GetDeclaredPriority() const { return priority_; }
 
   void SetCapturedPriority(int priority) override {
     priority_ = std::clamp(priority, static_cast<int>(hip::Stream::Priority::High),
                            static_cast<int>(hip::Stream::Priority::Low));
   }
-
-
 
   hipError_t CreateCommand(hip::Stream* stream) override {
     // Clear commands_ first, even if node is disabled
@@ -4117,10 +4114,14 @@ class hipGraphBatchMemOpNode : public GraphNode {
 
 // Defined here so hip::GraphNode is complete.
 inline void hip::Stream::SetLastCapturedNode(hip::GraphNode* graphNode) {
+  if (graphNode == nullptr) {
+    return;
+  }
   lastCapturedNodes_ = {graphNode};
-  // Only stamp priority on kernel nodes: this setter is also invoked for
-  // fork/join dependency propagation and event-wait fixups, where we must
-  // not overwrite the priority recorded when the node was created.
+  // Every caller passes a node freshly created on this stream during capture,
+  // so this is the point where a captured kernel inherits the stream priority.
+  // Fork/join propagation goes through AddCrossCapturedNode, which never
+  // re-stamps an existing node.
   if (graphNode->GetType() == hipGraphNodeTypeKernel) {
     graphNode->SetCapturedPriority(priority_);
   }
