@@ -18,6 +18,8 @@
 #include <hip/hip_runtime.h>
 #include <comm.h>
 #include <ce_coll.h>
+#include <dev_runtime.h>
+#include <rccl_common.h>
 
 #include <cstdint>
 #include <vector>
@@ -680,6 +682,186 @@ TEST_F(CeInternalMPITest, AlltoAllvMissingSizesReturnsInvalidUsage)
     ncclCeCollArgs args{};
     args.sizes = nullptr;
     EXPECT_EQ(ncclCeAlltoAllv(ceComm, &args, getActiveStream()), ncclInvalidUsage);
+}
+
+// ===========================================================================
+// CeAllReduceLsaGuard – ncclCeAllReduce addresses peers by world rank, which is
+// only the LSA rank when one LSA team spans the comm. These run on comms where
+// it does not: 2+ nodes, or one node with NCCL_LSA_TEAM_SIZE below the rank
+// count. CE init is not a precondition (it never happens on these comms).
+// ===========================================================================
+
+class CeAllReduceLsaGuardTest : public MPITestBase
+{
+protected:
+    ncclComm* comm_ = nullptr;
+
+    void SetUp() override
+    {
+        MPITestBase::SetUp();
+        if(::testing::Test::IsSkipped() || ::testing::Test::HasFatalFailure())
+            return;
+        if(!validateTestPrerequisites(/*min_processes=*/2))
+            GTEST_SKIP() << "Requires 2+ ranks";
+
+        ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+        comm_ = static_cast<ncclComm*>(getActiveCommunicator());
+        ASSERT_NE(comm_, nullptr);
+
+        // The LSA size is comm-wide (NCCL_LSA_TEAM_SIZE and node layout), so
+        // every rank takes the same branch.
+        if(ncclDevrIsOneLsaTeam(comm_))
+            GTEST_SKIP() << "One LSA team spans the comm; run on 2+ nodes or set "
+                            "NCCL_LSA_TEAM_SIZE below the rank count";
+    }
+
+    void TearDown() override
+    {
+        comm_ = nullptr;
+        MPITestBase::TearDown();
+    }
+
+    // Rank-unique send data (rank + 1) and a sentinel in recv, so a partial
+    // write or a stale result is visible.
+    void fillBuffers(void* send, void* recv, size_t count)
+    {
+        ASSERT_EQ(hipSuccess, ceFillRankScalarFloat(send, count, comm_->rank));
+        ASSERT_EQ(hipSuccess, hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(recv), kSentinelBits, count));
+    }
+
+    bool recvStillSentinel(void* recv, size_t count)
+    {
+        std::vector<uint32_t> host(count);
+        if(hipMemcpy(host.data(), recv, count * sizeof(uint32_t), hipMemcpyDeviceToHost) != hipSuccess)
+            return false;
+        for(uint32_t v : host)
+            if(v != kSentinelBits)
+                return false;
+        return true;
+    }
+
+    bool allReduceSumCorrect(void* recv, size_t count)
+    {
+        const int nRanks = comm_->nRanks;
+        const float expected = static_cast<float>(nRanks) * static_cast<float>(nRanks + 1) / 2.0f;
+        size_t errIdx; float errExp, errAct;
+        return RCCLTestHelpers::verifyBufferData<float>(
+            recv, count, [expected](size_t) { return expected; }, 0, 1e-3, &errIdx, &errExp, &errAct);
+    }
+
+    bool ceAllReduceSelected(const void* send, void* recv, size_t count)
+    {
+        int algo = 0, proto = 0, nCh = 0;
+        ncclResult_t res = rcclGetCollImplInfo(comm_, ncclFuncAllReduce, count, ncclFloat32, ncclSum,
+                                               send, recv, /*graphCapturing=*/0, &algo, &proto, &nCh);
+        return res == ncclSuccess && (algo == RCCL_CE_REGISTERED || algo == RCCL_CE_2SHOT);
+    }
+
+    static constexpr uint32_t kSentinelBits = 0x7fc0dead; // a NaN float, never an AllReduce sum
+    // One staging-slot chunk: a single-step call.
+    static constexpr size_t kSingleStepBytes = 64 * 1024;
+    // 256 MiB total gives every shard several chunks, so totalSteps > 1 and the
+    // persistent reduce kernel would be queued before Phase 1.
+    static constexpr size_t kPipelinedBytes = 256ull * 1024 * 1024;
+};
+
+// LSA-01: a direct ncclCeAllReduce on a comm whose LSA team does not span it
+// returns ncclInvalidUsage on every rank before staging or any launch, for both
+// the single-step and the pipelined geometry. Without the guard the pipelined
+// call leaves a persistent reduce kernel waiting on the stream.
+TEST_F(CeAllReduceLsaGuardTest, RejectsBeforeStagingOrLaunch)
+{
+    using namespace RCCLTestGuards;
+    for(size_t bytes : {kSingleStepBytes, kPipelinedBytes})
+    {
+        SCOPED_TRACE(testing::Message() << "bytes=" << bytes);
+        const size_t count = ceAllReduceAlignedCount(bytes / sizeof(float), comm_->nRanks);
+        ASSERT_GT(count, 0u);
+
+        void* send = nullptr;
+        void* recv = nullptr;
+        ASSERT_EQ(hipSuccess, hipMalloc(&send, count * sizeof(float)));
+        DeviceBufferAutoGuard sendGuard(send);
+        ASSERT_EQ(hipSuccess, hipMalloc(&recv, count * sizeof(float)));
+        DeviceBufferAutoGuard recvGuard(recv);
+        ASSERT_NO_FATAL_FAILURE(fillBuffers(send, recv, count));
+        ASSERT_EQ(hipSuccess, hipDeviceSynchronize());
+
+        const ncclResult_t ret = ncclCeAllReduce(comm_, send, recv, count, ncclFloat32, ncclSum,
+                                                 getActiveStream(), /*recvWin=*/nullptr,
+                                                 /*profilerArgs=*/nullptr);
+        EXPECT_TRUE(MPIHelpers::allRanksTrue(ret == ncclInvalidUsage))
+            << "rank " << comm_->rank << " got " << ncclGetErrorString(ret)
+            << "; every rank must reject a split LSA team";
+        EXPECT_EQ(comm_->ceColl.ceARTmpBuf, nullptr) << "guard must run before staging is allocated";
+        EXPECT_EQ(hipSuccess, hipStreamQuery(getActiveStream())) << "guard must run before any launch";
+        EXPECT_TRUE(recvStillSentinel(recv, count)) << "rejected call wrote into recvbuff";
+    }
+}
+
+// LSA-02: after the rejection the comm and stream are still usable. A public
+// AllReduce on the same stream completes with the correct sum, which would
+// hang behind a leftover persistent reduce kernel.
+TEST_F(CeAllReduceLsaGuardTest, CommUsableAfterRejection)
+{
+    using namespace RCCLTestGuards;
+    const size_t count = ceAllReduceAlignedCount(kPipelinedBytes / sizeof(float), comm_->nRanks);
+
+    void* send = nullptr;
+    void* recv = nullptr;
+    ASSERT_EQ(hipSuccess, hipMalloc(&send, count * sizeof(float)));
+    DeviceBufferAutoGuard sendGuard(send);
+    ASSERT_EQ(hipSuccess, hipMalloc(&recv, count * sizeof(float)));
+    DeviceBufferAutoGuard recvGuard(recv);
+    ASSERT_NO_FATAL_FAILURE(fillBuffers(send, recv, count));
+
+    ASSERT_TRUE(MPIHelpers::allRanksTrue(
+        ncclCeAllReduce(comm_, send, recv, count, ncclFloat32, ncclSum, getActiveStream(), nullptr, nullptr) ==
+        ncclInvalidUsage));
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(send, recv, count, ncclFloat32, ncclSum, getActiveCommunicator(),
+                                             getActiveStream()));
+    ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+    EXPECT_TRUE(MPIHelpers::allRanksTrue(allReduceSumCorrect(recv, count)))
+        << "AllReduce after the rejected CE call produced a wrong result";
+}
+
+// LSA-03: the public API never reaches CE AllReduce on a split LSA team, even
+// with CE forced. Registered CE is rejected by ncclCeAvailable, and 2-shot needs
+// a staging buffer that only a CE AllReduce allocates, so it must stay null.
+// Each size is called twice so the second call would see staging from the first.
+TEST_F(CeAllReduceLsaGuardTest, PublicAllReduceNeverSelectsCe)
+{
+    using namespace RCCLTestGuards;
+    if(!isCeAllReduceDispatchConfigured() ||
+       MPIHelpers::getEnvParam("RCCL_FORCE_CE_ALLREDUCE", 0) != 1)
+        GTEST_SKIP() << "Needs the forced CE AllReduce env: NCCL_CTA_POLICY=2, NCCL_LOCAL_REGISTER=0, "
+                        "NCCL_CUMEM_ENABLE=1, RCCL_CE_ALLREDUCE=1, RCCL_FORCE_CE_ALLREDUCE=1";
+
+    for(size_t bytes : {kSingleStepBytes, size_t(8) * 1024 * 1024, kPipelinedBytes})
+    {
+        SCOPED_TRACE(testing::Message() << "bytes=" << bytes);
+        const size_t count = ceAllReduceAlignedCount(bytes / sizeof(float), comm_->nRanks);
+
+        void* send = nullptr;
+        void* recv = nullptr;
+        ASSERT_EQ(hipSuccess, hipMalloc(&send, count * sizeof(float)));
+        DeviceBufferAutoGuard sendGuard(send);
+        ASSERT_EQ(hipSuccess, hipMalloc(&recv, count * sizeof(float)));
+        DeviceBufferAutoGuard recvGuard(recv);
+
+        EXPECT_FALSE(MPIHelpers::anyRankTrue(ceAllReduceSelected(send, recv, count)))
+            << "selector reports CE AllReduce on a split LSA team";
+        for(int call = 0; call < 2; ++call)
+        {
+            ASSERT_NO_FATAL_FAILURE(fillBuffers(send, recv, count));
+            ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(send, recv, count, ncclFloat32, ncclSum,
+                                                     getActiveCommunicator(), getActiveStream()));
+            ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+            EXPECT_TRUE(MPIHelpers::allRanksTrue(allReduceSumCorrect(recv, count))) << "call " << call;
+        }
+    }
+    EXPECT_EQ(comm_->ceColl.ceARTmpBuf, nullptr) << "a CE AllReduce ran and allocated staging";
 }
 
 // ===========================================================================
