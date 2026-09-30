@@ -14,6 +14,11 @@
 #include <resource_guards.hh>
 #include <hip/driver_types.h>
 
+inline bool RuntimeSerializesEnqueues() {
+  const std::string value = TestContext::getEnvVar("AMD_OCL_WAIT_COMMAND");
+  return value == "true" || std::atoi(value.c_str()) != 0;
+}
+
 template <bool should_synchronize, bool unaligned = false, typename F>
 void Memcpy2DDeviceToHostShell(F memcpy_func, const hipStream_t kernel_stream = nullptr) {
   const auto kind =
@@ -169,7 +174,11 @@ void MemcpySyncBehaviorCheck(F memcpy_func, const bool should_sync,
                              const hipStream_t kernel_stream) {
   LaunchDelayKernel(std::chrono::milliseconds{300}, kernel_stream);
   HIP_CHECK(memcpy_func());
-  if (should_sync) {
+  if (RuntimeSerializesEnqueues()) {
+    // The stream is idle regardless of how the copy behaves, so assert the
+    // serialization instead of asynchrony.
+    HIP_CHECK(hipStreamQuery(kernel_stream));
+  } else if (should_sync) {
     HIP_CHECK(hipStreamSynchronize(kernel_stream));
     HIP_CHECK(hipStreamQuery(kernel_stream));
   } else {
