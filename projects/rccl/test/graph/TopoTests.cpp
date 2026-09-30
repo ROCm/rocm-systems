@@ -347,6 +347,9 @@ TEST_F(TopoTest, IntelCpu_GnrSrfMapToErpAndUseErpUpiBandwidth) {
     {"GraniteRapids", 0xAD, NCCL_TOPO_CPU_MODEL_INTEL_ERP, ERP_QPI_BW},
     {"GraniteRapidsD", 0xAE, NCCL_TOPO_CPU_MODEL_INTEL_ERP, ERP_QPI_BW},
     {"SierraForest", 0xAF, NCCL_TOPO_CPU_MODEL_INTEL_ERP, ERP_QPI_BW},
+    // Pins the hole between 0xAF and 0xCF. A rewrite to `modelId >= 0xAD` would
+    // still pass GNR/SRF/ERP while promoting this id (and 0xB0..0xCE) to ERP.
+    {"RaptorLake", 0xB7, NCCL_TOPO_CPU_MODEL_INTEL_SRP, SRP_QPI_BW},
     {"EmeraldRapids", 0xCF, NCCL_TOPO_CPU_MODEL_INTEL_ERP, ERP_QPI_BW},
     {"SapphireRapids", 0x8F, NCCL_TOPO_CPU_MODEL_INTEL_SRP, SRP_QPI_BW},
     {"Skylake", 0x55, NCCL_TOPO_CPU_MODEL_INTEL_SKL, SKL_QPI_BW},
@@ -355,7 +358,7 @@ TEST_F(TopoTest, IntelCpu_GnrSrfMapToErpAndUseErpUpiBandwidth) {
 
   for (const Case& c : cases) {
     SCOPED_TRACE(c.name);
-    resetXml();
+    ASSERT_NO_FATAL_FAILURE(resetXml());
     const uint64_t host = 0x2e31;
     addSystemCpu(host, /*numaId=*/0, "GenuineIntel", /*familyId=*/6, c.modelId);
     addSystemCpu(host, /*numaId=*/1, "GenuineIntel", /*familyId=*/6, c.modelId);
