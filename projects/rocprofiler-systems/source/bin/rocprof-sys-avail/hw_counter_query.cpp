@@ -28,9 +28,9 @@ namespace
 // Local counter info struct - avoids depending on library/rocprofiler-sdk/fwd.hpp
 struct counter_info
 {
-    rocprofiler_agent_id_t                           agent_id       = {};
-    rocprofiler_counter_info_v0_t                    info           = {};
-    std::vector<rocprofiler_record_dimension_info_t> dimension_info = {};
+    rocprofiler_agent_id_t                           agent_id = {};
+    rocprofiler_counter_info_v0_t                    info     = {};
+    std::vector<rocprofiler_record_dimension_info_t> dimension_info;
 };
 
 using counter_info_map_t =

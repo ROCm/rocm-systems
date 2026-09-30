@@ -124,9 +124,11 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
     // exclude internal libraries used by rocprof-sys
     if(_scopes.count(sf::BINARY_FILTER) > 0)
     {
-        _filters.emplace_back(sf{ sf::FILTER_EXCLUDE, sf::BINARY_FILTER,
-                                  "lib(rocprof-sys[-\\.]|dyninst|"
-                                  "tbbmalloc|gotcha\\.|unwind\\.so\\.99)" });
+        _filters.emplace_back(sf{ .mode  = sf::FILTER_EXCLUDE,
+                                  .scope = sf::BINARY_FILTER,
+                                  .expression =
+                                      "lib(rocprof-sys[-\\.]|dyninst|"
+                                      "tbbmalloc|gotcha\\.|unwind\\.so\\.99)" });
     }
 
     // in function mode, it generally doesn't help to experiment on main function since
@@ -135,8 +137,9 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
     if(config::get_causal_mode() == state::process::CausalMode::function &&
        _scopes.count(sf::FUNCTION_FILTER) > 0)
     {
-        _filters.emplace_back(sf{ sf::FILTER_EXCLUDE, sf::FUNCTION_FILTER,
-                                  "( main\\(|^main$|^main\\.cold$)" });
+        _filters.emplace_back(sf{ .mode       = sf::FILTER_EXCLUDE,
+                                  .scope      = sf::FUNCTION_FILTER,
+                                  .expression = "( main\\(|^main$|^main\\.cold$)" });
     }
 
     const bool _use_default_excludes =
@@ -147,12 +150,16 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
     if(_use_default_excludes && _scopes.count(sf::FUNCTION_FILTER) > 0)
     {
         // symbols starting with leading underscore are generally system functions
-        _filters.emplace_back(sf{ sf::FILTER_EXCLUDE, sf::FUNCTION_FILTER, "^_" });
+        _filters.emplace_back(sf{ .mode       = sf::FILTER_EXCLUDE,
+                                  .scope      = sf::FUNCTION_FILTER,
+                                  .expression = "^_" });
 
         if(config::get_causal_mode() == state::process::CausalMode::function)
         {
             // exclude STL implementation functions
-            _filters.emplace_back(sf{ sf::FILTER_EXCLUDE, sf::FUNCTION_FILTER, "::_M" });
+            _filters.emplace_back(sf{ .mode       = sf::FILTER_EXCLUDE,
+                                      .scope      = sf::FUNCTION_FILTER,
+                                      .expression = "::_M" });
         }
     }
 
@@ -162,8 +169,9 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
     if(config::get_causal_mode() == state::process::CausalMode::function &&
        _scopes.count(sf::FUNCTION_FILTER) > 0)
     {
-        _filters.emplace_back(sf{ sf::FILTER_EXCLUDE, sf::FUNCTION_FILTER,
-                                  "(^main$|^main.cold$|int main\\()" });
+        _filters.emplace_back(sf{ .mode       = sf::FILTER_EXCLUDE,
+                                  .scope      = sf::FUNCTION_FILTER,
+                                  .expression = "(^main$|^main.cold$|int main\\()" });
     }
 
     using utility::get_regex_or;
@@ -200,20 +208,23 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
 
         if(!_binary_include.empty() && _scopes.count(sf::BINARY_FILTER) > 0)
         {
-            _filters.emplace_back(
-                sf{ sf::FILTER_INCLUDE, sf::BINARY_FILTER, _binary_include });
+            _filters.emplace_back(sf{ .mode       = sf::FILTER_INCLUDE,
+                                      .scope      = sf::BINARY_FILTER,
+                                      .expression = _binary_include });
         }
 
         if(!_source_include.empty() && _scopes.count(sf::SOURCE_FILTER) > 0)
         {
-            _filters.emplace_back(
-                sf{ sf::FILTER_INCLUDE, sf::SOURCE_FILTER, _source_include });
+            _filters.emplace_back(sf{ .mode       = sf::FILTER_INCLUDE,
+                                      .scope      = sf::SOURCE_FILTER,
+                                      .expression = _source_include });
         }
 
         if(!_function_include.empty() && _scopes.count(sf::FUNCTION_FILTER) > 0)
         {
-            _filters.emplace_back(
-                sf{ sf::FILTER_INCLUDE, sf::FUNCTION_FILTER, _function_include });
+            _filters.emplace_back(sf{ .mode       = sf::FILTER_INCLUDE,
+                                      .scope      = sf::FUNCTION_FILTER,
+                                      .expression = _function_include });
         }
     }
 
@@ -247,20 +258,23 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
 
         if(!_binary_exclude.empty() && _scopes.count(sf::BINARY_FILTER) > 0)
         {
-            _filters.emplace_back(
-                sf{ sf::FILTER_EXCLUDE, sf::BINARY_FILTER, _binary_exclude });
+            _filters.emplace_back(sf{ .mode       = sf::FILTER_EXCLUDE,
+                                      .scope      = sf::BINARY_FILTER,
+                                      .expression = _binary_exclude });
         }
 
         if(!_source_exclude.empty() && _scopes.count(sf::SOURCE_FILTER) > 0)
         {
-            _filters.emplace_back(
-                sf{ sf::FILTER_EXCLUDE, sf::SOURCE_FILTER, _source_exclude });
+            _filters.emplace_back(sf{ .mode       = sf::FILTER_EXCLUDE,
+                                      .scope      = sf::SOURCE_FILTER,
+                                      .expression = _source_exclude });
         }
 
         if(!_function_exclude.empty() && _scopes.count(sf::FUNCTION_FILTER) > 0)
         {
-            _filters.emplace_back(
-                sf{ sf::FILTER_EXCLUDE, sf::FUNCTION_FILTER, _function_exclude });
+            _filters.emplace_back(sf{ .mode       = sf::FILTER_EXCLUDE,
+                                      .scope      = sf::FUNCTION_FILTER,
+                                      .expression = _function_exclude });
         }
     }
 
@@ -912,7 +926,9 @@ sample_selection(size_t _nitr, size_t _wait_ns)
                 (config::get_causal_mode() == state::process::CausalMode::function)
                     ? linfo.front()
                     : linfo.back();
-            return selected_entry{ _addr, _sym_addr, _linfo_v };
+            return selected_entry{ .address        = _addr,
+                                   .symbol_address = _sym_addr,
+                                   .symbol         = _linfo_v };
         }
         return selected_entry{};
     };

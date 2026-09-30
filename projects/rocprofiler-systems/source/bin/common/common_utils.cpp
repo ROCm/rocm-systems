@@ -583,41 +583,51 @@ struct group_topic_desc
     const char*                   name;
     const char*                   blurb;
     help_group_names              sections;
-    std::vector<std::string_view> tools{};  // empty => shown for all tools
+    std::vector<std::string_view> tools;  // empty => shown for all tools
 };
 
 const std::vector<group_topic_desc>&
 group_topic_table()
 {
     static const std::vector<group_topic_desc> table = {
-        { "preset",
-          "Preset, domain, and export options",
-          { "[PRESET OPTIONS]", "[DOMAIN OPTIONS]", "[EXPORT OPTIONS]" } },
-        { "general",
-          "General options (output, trace, profile)",
-          { "[GENERAL OPTIONS]" } },
-        { "tracing", "Tracing-specific options", { "[TRACING OPTIONS]" } },
-        { "profiling", "Profile output format options", { "[PROFILE OPTIONS]" } },
-        { "output",
-          "Output format selection (pftrace/rocpd/json/text)",
-          { "[OUTPUT FORMAT OPTIONS]" } },
-        { "sampling",
-          "Sampling frequency and timer options",
-          { "[GENERAL SAMPLING OPTIONS]", "[SAMPLING TIMER OPTIONS]",
-            "[ADVANCED SAMPLING OPTIONS]" } },
-        { "process",
-          "Host/device process sampling options",
-          { "[HOST/DEVICE (PROCESS SAMPLING) OPTIONS]" } },
-        { "counters",
-          "Hardware counter options (CPU/GPU events)",
-          { "[HARDWARE COUNTER OPTIONS]" } },
-        { "backend", "Backend options (include/exclude)", { "[BACKEND OPTIONS]" } },
-        { "execution",
-          "Execution control options (e.g., --fork)",
-          { "[EXECUTION OPTIONS]" },
-          { "run" } },
-        { "debug", "Debug, logging, and verbosity options", { "[DEBUG OPTIONS]" } },
-        { "misc", "Miscellaneous options", { "[MISCELLANEOUS OPTIONS]" } },
+        { .name     = "preset",
+          .blurb    = "Preset, domain, and export options",
+          .sections = { "[PRESET OPTIONS]", "[DOMAIN OPTIONS]", "[EXPORT OPTIONS]" } },
+        { .name     = "general",
+          .blurb    = "General options (output, trace, profile)",
+          .sections = { "[GENERAL OPTIONS]" } },
+        { .name     = "tracing",
+          .blurb    = "Tracing-specific options",
+          .sections = { "[TRACING OPTIONS]" } },
+        { .name     = "profiling",
+          .blurb    = "Profile output format options",
+          .sections = { "[PROFILE OPTIONS]" } },
+        { .name     = "output",
+          .blurb    = "Output format selection (pftrace/rocpd/json/text)",
+          .sections = { "[OUTPUT FORMAT OPTIONS]" } },
+        { .name     = "sampling",
+          .blurb    = "Sampling frequency and timer options",
+          .sections = { "[GENERAL SAMPLING OPTIONS]", "[SAMPLING TIMER OPTIONS]",
+                        "[ADVANCED SAMPLING OPTIONS]" } },
+        { .name     = "process",
+          .blurb    = "Host/device process sampling options",
+          .sections = { "[HOST/DEVICE (PROCESS SAMPLING) OPTIONS]" } },
+        { .name     = "counters",
+          .blurb    = "Hardware counter options (CPU/GPU events)",
+          .sections = { "[HARDWARE COUNTER OPTIONS]" } },
+        { .name     = "backend",
+          .blurb    = "Backend options (include/exclude)",
+          .sections = { "[BACKEND OPTIONS]" } },
+        { .name     = "execution",
+          .blurb    = "Execution control options (e.g., --fork)",
+          .sections = { "[EXECUTION OPTIONS]" },
+          .tools    = { "run" } },
+        { .name     = "debug",
+          .blurb    = "Debug, logging, and verbosity options",
+          .sections = { "[DEBUG OPTIONS]" } },
+        { .name     = "misc",
+          .blurb    = "Miscellaneous options",
+          .sections = { "[MISCELLANEOUS OPTIONS]" } },
     };
     return table;
 }
@@ -632,24 +642,29 @@ const std::vector<domain_topic_desc>&
 domain_topic_table()
 {
     static const std::vector<domain_topic_desc> table = {
-        { "gpu",
-          { "GPU metrics, device sampling, GPU counters",
-            { "--gpu", "-D", "--device", "--gpus", "--process-freq", "--process-wait",
-              "--process-duration", "-G", "--gpu-events", "--ai-nics", "--use-amd-smi",
-              "--amd-smi-metrics" } } },
-        { "cpu",
-          { "CPU sampling, timers, CPU counters",
-            { "--cpu", "-H", "--host", "-S", "--sample", "--sampling-freq",
-              "--sampling-wait", "--sampling-duration", "-t", "--tids",
-              "--sample-cputime", "--sample-realtime", "--sample-overflow", "-C",
-              "--cpu-events" } } },
-        { "rocm",
-          { "ROCm API tracing options",
-            { "--rocm", "-T", "--trace", "--hsa-interrupt", "--selected-regions",
-              "--use-amd-smi", "--gpus", "--ai-nics" } } },
-        { "parallel",
-          { "MPI, OpenMP, Kokkos, RCCL options",
-            { "--parallel", "-I", "--include", "-E", "--exclude" } } },
+        { .name = "gpu",
+          .info = { .description   = "GPU metrics, device sampling, GPU counters",
+                    .flag_patterns = { "--gpu", "-D", "--device", "--gpus",
+                                       "--process-freq", "--process-wait",
+                                       "--process-duration", "-G", "--gpu-events",
+                                       "--ai-nics", "--use-amd-smi",
+                                       "--amd-smi-metrics" } } },
+        { .name = "cpu",
+          .info = { .description   = "CPU sampling, timers, CPU counters",
+                    .flag_patterns = { "--cpu", "-H", "--host", "-S", "--sample",
+                                       "--sampling-freq", "--sampling-wait",
+                                       "--sampling-duration", "-t", "--tids",
+                                       "--sample-cputime", "--sample-realtime",
+                                       "--sample-overflow", "-C", "--cpu-events" } } },
+        { .name = "rocm",
+          .info = { .description   = "ROCm API tracing options",
+                    .flag_patterns = { "--rocm", "-T", "--trace", "--hsa-interrupt",
+                                       "--selected-regions", "--use-amd-smi", "--gpus",
+                                       "--ai-nics" } } },
+        { .name = "parallel",
+          .info = { .description   = "MPI, OpenMP, Kokkos, RCCL options",
+                    .flag_patterns = { "--parallel", "-I", "--include", "-E",
+                                       "--exclude" } } },
     };
     return table;
 }
@@ -860,7 +875,8 @@ print_help_for_topic(const std::string& captured, std::string_view topic,
             {
                 sections.back().end = line_idx;
             }
-            sections.push_back({ line_idx, lines.size(), bracket_name });
+            sections.push_back(
+                { .start = line_idx, .end = lines.size(), .header = bracket_name });
         }
     }
 

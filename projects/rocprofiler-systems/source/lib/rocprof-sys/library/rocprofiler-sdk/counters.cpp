@@ -28,7 +28,8 @@ metadata_initialize_counter_category()
 void
 metadata_initialize_counter_track(const char* name)
 {
-    trace_cache::get_metadata_registry().add_track({ name, std::nullopt, "{}" });
+    trace_cache::get_metadata_registry().add_track(
+        { .track_name = name, .thread_id = std::nullopt, .extdata = "{}" });
 }
 
 void

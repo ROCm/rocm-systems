@@ -66,7 +66,7 @@ using timestamp_t = std::uint64_t;
 struct pending_cache_entry
 {
     timestamp_t start_ts = 0;
-    std::string args     = {};
+    std::string args;
 };
 
 // A type qualifies as a trace-cache argument "name" slot when it is string-like
@@ -121,7 +121,12 @@ struct thread_metadata_source
             constexpr size_t UNKNOWN_TIME = 0;
             thread_id                     = extended_info->index_data->system_value;
             rocprofsys::trace_cache::get_metadata_registry().add_thread_info(
-                { getppid(), getpid(), thread_id, UNKNOWN_TIME, UNKNOWN_TIME, "{}" });
+                { .parent_process_id = getppid(),
+                  .process_id        = getpid(),
+                  .thread_id         = thread_id,
+                  .start             = UNKNOWN_TIME,
+                  .end               = UNKNOWN_TIME,
+                  .extdata           = "{}" });
         }
         return thread_id;
     }
@@ -361,8 +366,8 @@ struct category_region
                      std::string args_str = {})
     {
         const auto start_ts = clock_.now();
-        map_name_to_args[entry_key{ name, std::string{ category } }].push_back(
-            pending_cache_entry{ start_ts, std::move(args_str) });
+        map_name_to_args[entry_key{ .name = name, .category = std::string{ category } }]
+            .push_back(pending_cache_entry{ start_ts, std::move(args_str) });
     }
 
     void append_cache_args(const char* name, std::string_view category,
@@ -373,7 +378,7 @@ struct category_region
             return;
         }
 
-        auto key = entry_key{ name, std::string{ category } };
+        auto key = entry_key{ .name = name, .category = std::string{ category } };
         auto itr = map_name_to_args.find(key);
         if(itr != map_name_to_args.end() && !itr->second.empty())
         {
@@ -392,14 +397,14 @@ struct category_region
                 }
 
                 renumber_serialized_args(args_str, *next_idx);
-                entry.args += std::move(args_str);
+                entry.args += args_str;
             }
         }
     }
 
     void cache_stop(const char* name, std::string_view category)
     {
-        const entry_key key{ name, std::string{ category } };
+        const entry_key key{ .name = name, .category = std::string{ category } };
         auto            x = map_name_to_args.find(key);
         if(x != map_name_to_args.end() && !x->second.empty())
         {
@@ -451,7 +456,7 @@ private:
     Policy::clock_type                                    clock_{};
     Policy::region_sink_type                              sink_{};
     Policy::thread_metadata_type                          thread_meta_{};
-    std::map<entry_key, std::vector<pending_cache_entry>> map_name_to_args{};
+    std::map<entry_key, std::vector<pending_cache_entry>> map_name_to_args;
 };
 
 }  // namespace rocprofsys::utility
@@ -993,6 +998,6 @@ struct local_category_region : comp::base<local_category_region<CategoryT>, void
     void set_prefix(std::string_view _v) { m_prefix = _v; }
 
 private:
-    std::string_view m_prefix = {};
+    std::string_view m_prefix;
 };
 }  // namespace rocprofsys::component
