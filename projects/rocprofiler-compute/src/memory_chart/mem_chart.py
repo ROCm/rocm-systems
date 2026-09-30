@@ -58,6 +58,10 @@ _LEGEND_ENTRIES: tuple[tuple[str, str, str], ...] = (
 
 _STALL_ENTRY: tuple[str, str, str] = ("█", "Stall", "stall")
 
+# Render-width cap. Output lines are only as wide as the chart itself, so this
+# just needs to exceed every layout's natural width; a smaller value squeezes panels.
+_MAX_CONSOLE_WIDTH = 400
+
 _DIRECTION_TO_ARROW: dict[str, str] = {
     "backward": "left",
     "forward": "right",
@@ -83,12 +87,11 @@ def plot_mem_chart(
     layout = load_layout(gpu_arch)
     metrics = _normalize_metrics(metric_dict, layout)
 
-    console_width = _estimate_console_width(layout)
     buf = StringIO()
     console = Console(
         file=buf,
         force_terminal=True,
-        width=console_width,
+        width=_MAX_CONSOLE_WIDTH,
         height=80,
     )
 
@@ -304,21 +307,27 @@ def _build_cu_panel(
     height: int,
 ) -> Panel:
     """Build Compute Units panel with stats list."""
+    # Borders and padding leave width - 4 columns for text
+    text_width = width - 4
     lines: list[str] = []
     for item in block.get("content", []):
         name = item["metric"]
         title = item.get("title", name)
-        raw = metrics.get(name)
+        value = metrics.get(name)
         unit = item.get("unit", "")
         if name in ("Scratch Allocation", "LDS Allocation"):
-            val = safe_float(raw)
-            val = val / 1024 if val is not None else None
-            lines.append(metric_line(title, val, " KB"))
+            value = safe_float(value)
+            value = value / 1024 if value is not None else None
+            unit = " KB"
         elif name == "Wavefront Occupancy":
-            lines.append(metric_line(title, raw, ""))
-            lines.append(colored("waves/CU", COLORS["util"]))
+            unit = " waves/CU"
+        # A stat that does not fit breaks after its label, so the value keeps its unit
+        rendered = format_value(value, unit)
+        if len(title) + 1 + len(rendered) > text_width:
+            lines.append(title)
+            lines.append(colored(rendered, COLORS["util"]))
         else:
-            lines.append(metric_line(title, raw, unit))
+            lines.append(metric_line(title, value, unit))
     color = COLORS["kernel"]
     return Panel(
         "\n".join(lines),
@@ -583,13 +592,6 @@ def _build_padded_bw_edges(
 def _is_bw_arrow(arrow: dict[str, Any]) -> bool:
     name = arrow.get("metric", "").lower()
     return "bw" in name or "bandwidth" in name
-
-
-def _estimate_console_width(layout: dict[str, Any]) -> int:
-    columns = {
-        b["column"] for b in layout["blocks"] if b.get("position", "grid") == "grid"
-    }
-    return max(200, len(columns) * 30 + 40)
 
 
 def _compute_panel_width(
@@ -917,9 +919,11 @@ def _create_diagram(
     block_to_col = _build_block_col_map(grid_blocks)
     arrows_between = _group_arrows_by_columns(layout, block_to_col)
 
-    # Compute dimensions
-    all_effective = _collect_effective_blocks(grid_blocks, blocks_by_id)
-    panel_w = _compute_panel_width(all_effective, blocks_by_id)
+    # Compute dimensions; each column is only as wide as its own blocks need
+    col_widths = {
+        col: _compute_panel_width(blocks, blocks_by_id)
+        for col, blocks in col_groups.items()
+    }
     height_map, total_h = _compute_height_map(col_groups, arrows_between, blocks_by_id)
 
     # Build grid
@@ -929,7 +933,7 @@ def _create_diagram(
         arrows_between,
         blocks_by_id,
         metrics,
-        panel_w,
+        col_widths,
         total_h,
         membw,
         height_map,
@@ -1060,26 +1064,13 @@ def _group_arrows_by_columns(
     return result
 
 
-def _collect_effective_blocks(
-    grid_blocks: list[dict[str, Any]],
-    blocks_by_id: dict[str, dict[str, Any]],
-) -> list[dict[str, Any]]:
-    effective = list(grid_blocks)
-    for block in grid_blocks:
-        for cid in block.get("children", []):
-            child = blocks_by_id.get(cid)
-            if child:
-                effective.append(child)
-    return effective
-
-
 def _build_grid_items(
     sorted_columns: list[int],
     col_groups: dict[int, list[dict[str, Any]]],
     arrows_between: dict[tuple[int, int], list[dict[str, Any]]],
     blocks_by_id: dict[str, dict[str, Any]],
     metrics: dict[str, Any],
-    panel_w: int,
+    col_widths: dict[int, int],
     total_h: int,
     membw: Optional[Any],  # noqa: ANN401
     height_map: Optional[dict[str, int]] = None,
@@ -1148,6 +1139,7 @@ def _build_grid_items(
 
         # Block column — record index, use unified height_map
         col_grid_indices[col_idx] = len(grid_items)
+        panel_w = col_widths[col_idx]
         panels: list[RenderableType] = []
         for block in blocks_in_col:
             block_h = height_map.get(block["id"], 4) if height_map else total_h

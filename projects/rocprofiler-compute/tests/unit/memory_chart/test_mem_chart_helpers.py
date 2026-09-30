@@ -3,7 +3,10 @@
 
 """Unit tests for memory_chart/mem_chart.py."""
 
+from io import StringIO
+
 import pytest
+from rich.console import Console
 
 from memory_chart import mem_chart
 from utils.utils_analysis import format_bw_human_readable
@@ -172,3 +175,45 @@ class TestPadTo:
 
     def test_truncates_long_list(self):
         assert mem_chart.pad_to(["a", "b", "c"], 2) == ["a", "b"]
+
+
+class TestBuildCuPanel:
+    CU_BLOCK = {
+        "id": "cu",
+        "content": [
+            {"metric": "Wavefront Occupancy", "title": "Wave Occ"},
+            {"metric": "LDS Allocation", "title": "LDS Alloc"},
+        ],
+    }
+    METRICS = {"Wavefront Occupancy": 24.0, "LDS Allocation": 2048}
+
+    def _render(self, width):
+        panel = mem_chart._build_cu_panel(self.CU_BLOCK, self.METRICS, width, 10)
+        console = Console(file=StringIO(), width=width, force_terminal=False)
+        console.print(panel)
+        return [line.strip("│ ") for line in console.file.getvalue().splitlines()]
+
+    def test_wide_panel_keeps_stat_on_one_line(self):
+        lines = self._render(40)
+        assert "Wave Occ 24.0 waves/CU" in lines
+        assert "LDS Alloc 2.0 KB" in lines
+
+    def test_narrow_panel_breaks_after_label(self):
+        lines = self._render(20)
+        wave_idx = lines.index("Wave Occ")
+        assert lines[wave_idx + 1] == "24.0 waves/CU"
+        assert "LDS Alloc 2.0 KB" in lines
+
+
+@pytest.mark.parametrize(
+    "gpu_arch", ["gfx908", "gfx942", "gfx950", "gfx1151", "gfx1250"]
+)
+def test_rendered_chart_is_not_squeezed(gpu_arch):
+    output = mem_chart.strip_ansi(
+        mem_chart.plot_mem_chart(
+            {"Wavefront Occupancy": 24.0}, chart_title="t", gpu_arch=gpu_arch
+        )
+    )
+    # A chart that reaches the cap has been squeezed and its panels wrap
+    assert max(map(len, output.splitlines())) < mem_chart._MAX_CONSOLE_WIDTH
+    assert "24.0 waves/CU" in output
