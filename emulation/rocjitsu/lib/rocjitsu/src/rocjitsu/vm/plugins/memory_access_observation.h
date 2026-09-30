@@ -23,7 +23,7 @@ namespace rocjitsu::amdgpu {
 enum class MemoryRoute : uint8_t {
   UNKNOWN, ///< Not issued to any pipeline; reported so it is not silently lost.
   SCALAR,  ///< Scalar (constant) memory.
-  GLOBAL,  ///< Global, buffer, or scratch.
+  GLOBAL,  ///< Global, buffer, scratch, or mixed-aperture FLAT.
   LOCAL,   ///< Local data share.
 };
 
@@ -76,11 +76,11 @@ constexpr const char *decoded_memory_space_name(DecodedMemorySpace space) {
 /// @brief One memory instruction as the memory system will see it.
 ///
 /// @details Reported after routing rather than before, which is the whole
-/// point. A FLAT access to the shared aperture is decoded as a global
-/// instruction and issued to the local pipeline with its addresses rewritten
-/// into the workgroup's LDS allocation; an observer that looked before routing
-/// would see a global access to an address the memory system never uses, and
-/// would charge it against the wrong cache with the wrong hit rate.
+/// point. A uniform FLAT access to the shared aperture is issued to the local
+/// pipeline with its addresses rewritten into the workgroup's LDS allocation.
+/// Mixed-aperture FLAT uses the global pipeline, which separates the lanes for
+/// access to each backing store. Its observation retains shared-aperture
+/// addresses and identifies those lanes with the flat_local/flat_dds masks.
 ///
 /// Everything here is a fact, not an estimate. Where a fact is missing --
 /// a lane whose address could not be resolved, a route with no pipeline --
@@ -115,10 +115,9 @@ struct MemoryAccessObservation {
   DecodedMemorySpace decoded_space = DecodedMemorySpace::UNKNOWN;
   /// @brief Whether a FLAT access was rewritten from global into LDS.
   ///
-  /// @details True only for the aperture case: the instruction decoded as
-  /// global, and both its route and its addresses were changed. A consumer
-  /// counting "how much of this kernel is really LDS traffic" needs to
-  /// separate these from instructions that were LDS to begin with.
+  /// @details True only when all requesting FLAT lanes use the shared aperture
+  /// and both the route and addresses were changed. Mixed-aperture requests
+  /// leave this false; use the per-lane aperture masks to count LDS traffic.
   bool normalized_to_local = false;
 
   /// @brief Whether the access returns a value to registers.
@@ -182,9 +181,8 @@ struct MemoryAccessObservation {
   /// @brief Requesting FLAT lanes whose original addresses resolve to LDS.
   ///
   /// @details Computed before routing rewrites any address. This remains
-  /// meaningful when a FLAT wave mixes LDS and non-LDS lanes even though the
-  /// simulator currently selects one pipeline for the whole instruction. It
-  /// is a subset of @ref request_lane_mask, disjoint from
+  /// meaningful when a FLAT wave mixes LDS and non-LDS lanes on the global
+  /// pipeline. It is a subset of @ref request_lane_mask, disjoint from
   /// @ref scratch_lane_mask and @ref flat_dds_lane_mask, and always zero for
   /// non-FLAT instructions.
   uint64_t flat_local_lane_mask = 0;
@@ -193,8 +191,8 @@ struct MemoryAccessObservation {
   /// @details GFX1250 splits its 4-GiB shared aperture at offset bit 31: the
   /// lower half is LDS and the upper half is direct data share (DDS). FFM
   /// reports both as LDS resources, but rejects DDS stores and atomics. This
-  /// mask preserves that distinction after RocJITsu routes both halves to the
-  /// local pipeline. It is a subset of @ref request_lane_mask, disjoint from
+  /// mask preserves that distinction on either functional route.
+  /// It is a subset of @ref request_lane_mask, disjoint from
   /// @ref scratch_lane_mask and @ref flat_local_lane_mask, and always zero for
   /// non-FLAT instructions.
   uint64_t flat_dds_lane_mask = 0;
@@ -220,6 +218,8 @@ struct MemoryAccessObservation {
   /// @brief Address each lane accesses, @ref wavefront_size entries.
   ///
   /// @details Only entries selected by @ref valid_lane_mask are meaningful.
+  /// Mixed-aperture FLAT retains shared-aperture addresses here; uniform shared
+  /// requests report effective LDS allocation addresses instead.
   std::span<const uint64_t> addresses;
   /// @brief Addresses before routing changed them, when it did.
   ///
