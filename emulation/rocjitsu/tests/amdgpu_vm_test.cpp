@@ -3765,7 +3765,7 @@ TEST(CommandProcessorTest, KfdQueueRequestsResizesAndReclaimsDynamicScratchBefor
     fixture.mem()->write64(kQueueSignal + kSignalValueOffset, 0);
   });
 
-  amdgpu::AqlQueueConfig queue{};
+  amdgpu::ComputeQueueConfig queue{};
   queue.interrupt_sink = subscription.sink();
   queue.process_id = kProcessId;
   queue.queue_id = kQueueId;
@@ -3869,7 +3869,7 @@ TEST(CommandProcessorTest, DynamicScratchRequestBlocksRemovalOnlyUntilDelivery) 
     // metadata untouched, then suspend and destroy the queue below.
   });
 
-  amdgpu::AqlQueueConfig queue{};
+  amdgpu::ComputeQueueConfig queue{};
   queue.interrupt_sink = subscription.sink();
   queue.process_id = kProcessId;
   queue.queue_id = kQueueId;
@@ -4019,7 +4019,7 @@ TEST(CommandProcessorTest, KfdQueueHonorsAsyncScratchCutoffsAndTracksPerXccUse) 
     fixture.mem()->write64(kQueueSignal + kSignalValueOffset, 0);
   });
 
-  amdgpu::AqlQueueConfig queue{};
+  amdgpu::ComputeQueueConfig queue{};
   queue.interrupt_sink = subscription.sink();
   queue.process_id = kProcessId;
   queue.queue_id = kQueueId;
@@ -7359,9 +7359,9 @@ private:
   bool released_ = false;
 };
 
-amdgpu::AqlQueueConfig make_inert_aql_queue(uint32_t queue_id, uint64_t ring_base,
-                                            bool host_accessible = false) {
-  amdgpu::AqlQueueConfig queue{};
+amdgpu::ComputeQueueConfig make_inert_aql_queue(uint32_t queue_id, uint64_t ring_base,
+                                                bool host_accessible = false) {
+  amdgpu::ComputeQueueConfig queue{};
   queue.queue_id = queue_id;
   queue.ring_base_va = ring_base;
   queue.ring_size = amdgpu::kAqlPacketBytes;
@@ -7509,7 +7509,7 @@ TEST(AqlDispatchTest, QueueMutationWaitsForDispatchWorkerWindow) {
   const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
   uint64_t kernel = f.write_kernel(0x1000, code, sizeof(code));
   test::AqlQueue dispatch_queue(f.mem(), f.cp());
-  amdgpu::AqlQueueConfig removable_queue = make_inert_aql_queue(42, 0xF1000000);
+  amdgpu::ComputeQueueConfig removable_queue = make_inert_aql_queue(42, 0xF1000000);
   const uint64_t removable_registration = f.cp()->register_queue(removable_queue);
   ASSERT_NE(removable_registration, 0u);
   dispatch_queue.dispatch(kernel, /*grid_size=*/128, /*workgroup_size=*/64);
@@ -7523,7 +7523,7 @@ TEST(AqlDispatchTest, QueueMutationWaitsForDispatchWorkerWindow) {
     return;
   }
 
-  amdgpu::AqlQueueConfig added_queue = make_inert_aql_queue(43, 0xF2000000);
+  amdgpu::ComputeQueueConfig added_queue = make_inert_aql_queue(43, 0xF2000000);
   std::promise<void> registration_started_promise;
   auto registration_started = registration_started_promise.get_future();
   auto registration =
@@ -7576,7 +7576,7 @@ TEST(DoorbellMonitorLifecycle, RetiresAfterLastQueueAndRestartsOnNewQueue) {
   EXPECT_FALSE(cp->doorbell_monitor_running_for_test())
       << "no monitor should run before any host-accessible queue is registered";
 
-  amdgpu::AqlQueueConfig queue = make_inert_aql_queue(7, 0xF1000000, true);
+  amdgpu::ComputeQueueConfig queue = make_inert_aql_queue(7, 0xF1000000, true);
   const uint64_t registration = cp->register_queue(queue);
   ASSERT_NE(registration, 0u);
   EXPECT_TRUE(wait_for_monitor(true)) << "registering a KFD queue must start the monitor";
@@ -7588,7 +7588,7 @@ TEST(DoorbellMonitorLifecycle, RetiresAfterLastQueueAndRestartsOnNewQueue) {
       << "the stopped monitor must be joined before queue teardown returns";
 
   // A new queue landing on a CP whose monitor retired must get polling back.
-  amdgpu::AqlQueueConfig queue2 = make_inert_aql_queue(8, 0xF2000000, true);
+  amdgpu::ComputeQueueConfig queue2 = make_inert_aql_queue(8, 0xF2000000, true);
   const uint64_t registration2 = cp->register_queue(queue2);
   ASSERT_NE(registration2, 0u);
   EXPECT_TRUE(wait_for_monitor(true)) << "a new KFD queue must restart a retired monitor";
@@ -7605,11 +7605,13 @@ TEST(DoorbellMonitorLifecycle, ConcurrentLastQueueRemovalAndRegistrationKeepsMon
   amdgpu::CommandProcessor *cp = f.cp();
 
   for (uint32_t iteration = 0; iteration < 50; ++iteration) {
-    amdgpu::AqlQueueConfig old_queue = make_inert_aql_queue(iteration * 2 + 1, 0xF1000000, true);
+    amdgpu::ComputeQueueConfig old_queue =
+        make_inert_aql_queue(iteration * 2 + 1, 0xF1000000, true);
     const uint64_t old_registration = cp->register_queue(old_queue);
     ASSERT_NE(old_registration, 0u);
 
-    amdgpu::AqlQueueConfig new_queue = make_inert_aql_queue(iteration * 2 + 2, 0xF2000000, true);
+    amdgpu::ComputeQueueConfig new_queue =
+        make_inert_aql_queue(iteration * 2 + 2, 0xF2000000, true);
 
     std::barrier start(3);
     std::thread remove_last([&] {
@@ -7642,9 +7644,8 @@ TEST(Pm4DispatchTest, BaseCoordinatesThreadgroupInfoAndIndirectZeroOrigin) {
       for (bool graphics_engine : {false, true}) {
         VmFixture f(arch, 1, 8, 64, 106, 256, /*num_shader_engines=*/1, /*max_ticks=*/0);
         auto *snapshots = f.capture_halts();
-        amdgpu::Pm4SubmitQueue queue;
+        amdgpu::ComputeQueueConfig queue;
         queue.queue_id = 71;
-        queue.pm4 = std::make_shared<amdgpu::Pm4QueueState>();
         ASSERT_TRUE(f.cp()->register_drm_queue(std::move(queue)));
         constexpr uint64_t code = 0x8000, ib = 0x4000, indirect = 0x6010;
         const bool unpacked_ids =
@@ -7822,11 +7823,10 @@ TEST(Pm4DispatchTest, CancellationFailsPendingSubmissionAndReleasesVmBinding) {
                                          .request_mutex = process.page_table_request_mutex(),
                                          .mutation_epoch = process.page_table_mutation_epoch()});
   ASSERT_TRUE(address_space);
-  amdgpu::Pm4SubmitQueue queue;
+  amdgpu::ComputeQueueConfig queue;
   queue.address_space = address_space;
   queue.queue_id = 71;
   queue.process_id = 7;
-  queue.pm4 = std::make_shared<amdgpu::Pm4QueueState>();
   ASSERT_TRUE(f.cp()->register_drm_queue(std::move(queue)));
   EXPECT_FALSE(adapter.unregister_address_space(address_space));
   amdgpu::Pm4Submission submission;
@@ -7856,11 +7856,10 @@ TEST(Pm4DispatchTest, ExactQueueRetirementPreservesOtherQueuesAndReleasesBinding
   ASSERT_TRUE(address_space);
   std::array<uint32_t, 2> callbacks{};
   for (uint32_t i = 0; i < 2; ++i) {
-    amdgpu::Pm4SubmitQueue queue;
+    amdgpu::ComputeQueueConfig queue;
     queue.address_space = address_space;
     queue.queue_id = 71 + i;
     queue.process_id = 7;
-    queue.pm4 = std::make_shared<amdgpu::Pm4QueueState>();
     ASSERT_TRUE(f.cp()->register_drm_queue(std::move(queue)));
     amdgpu::Pm4Submission submission;
     submission.ready = [] { return false; };
@@ -7938,11 +7937,10 @@ TEST(Pm4DispatchTest, OverlappingScratchQueuesSerializeAndPreserveContents) {
     std::memcpy(code_backing.data(), &end_program, sizeof(end_program));
     uint32_t completed = 0;
     for (uint32_t index = 0; index < 2; ++index) {
-      amdgpu::Pm4SubmitQueue queue;
+      amdgpu::ComputeQueueConfig queue;
       queue.address_space = address_space;
       queue.queue_id = 71 + index;
       queue.process_id = pid;
-      queue.pm4 = std::make_shared<amdgpu::Pm4QueueState>();
       ASSERT_TRUE(f.cp()->register_drm_queue(std::move(queue)));
       std::vector<uint32_t> words;
       auto packet = [&](amdgpu::Pm4Opcode op, std::initializer_list<uint32_t> payload) {
@@ -8006,11 +8004,10 @@ TEST(Pm4DispatchTest, ScratchUsesTargetRegisterLayout) {
                   .mutation_epoch = process.page_table_mutation_epoch()});
         ASSERT_TRUE(address_space);
         auto *snapshots = f.capture_halts();
-        amdgpu::Pm4SubmitQueue queue;
+        amdgpu::ComputeQueueConfig queue;
         queue.address_space = address_space;
         queue.queue_id = 71;
         queue.process_id = pid;
-        queue.pm4 = std::make_shared<amdgpu::Pm4QueueState>();
         ASSERT_TRUE(f.cp()->register_drm_queue(std::move(queue)));
         const uint32_t end_program = legacy ? 0xbf810000 : 0xbfb00000;
         std::memcpy(code_backing.data(), &end_program, sizeof(end_program));

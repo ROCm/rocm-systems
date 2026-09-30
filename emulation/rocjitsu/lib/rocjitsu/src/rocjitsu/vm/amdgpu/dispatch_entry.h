@@ -14,7 +14,10 @@
 #include "rocjitsu/vm/amdgpu/aql/aql_packet_types.h"
 #include "rocjitsu/vm/amdgpu/consumer_cursor_journal.h"
 #include "rocjitsu/vm/amdgpu/gpu_handles.h"
+#include "rocjitsu/vm/amdgpu/gpu_queue_registry.h"
 #include "rocjitsu/vm/amdgpu/interrupt_sink.h"
+#include "rocjitsu/vm/amdgpu/pm4.h"
+#include "rocjitsu/vm/amdgpu/pm4/pm4_packet_processor.h"
 #include "rocjitsu/vm/amdgpu/queue_doorbell.h"
 #include "rocjitsu/vm/amdgpu/xcd_shard.h"
 
@@ -57,8 +60,8 @@ class GpuVmAccess;
          (producer_pointer_address % alignof(uint64_t)) == 0;
 }
 
-/// @brief Configuration supplied when registering an AQL queue with the CP.
-struct AqlQueueConfig {
+/// @brief Initial hardware state and root ring contract of one compute queue.
+struct ComputeQueueConfig {
   AddressSpaceHandle address_space;
   InterruptSink interrupt_sink{};
   uint32_t process_id = 0;
@@ -82,6 +85,12 @@ struct AqlQueueConfig {
   /// creation path that models such a device; registering the queue replicates it
   /// onto the peer XCDs.
   bool xcd_fanout = false;
+  /// Root ring format stays fixed while an indirect stream changes the active decoder.
+  QueuePacketFormat packet_format = QueuePacketFormat::Aql;
+  std::optional<uint64_t> initial_consumer_cursor = std::nullopt;
+  Pm4PacketCallbacks packet_callbacks{};
+  /// DRM supplies command buffers directly rather than a user-mode ring.
+  bool submission_queue = false;
 };
 
 struct WorkgroupCoord {
@@ -669,16 +678,31 @@ inline constexpr uint32_t kPackedTidZShift = 20;
   return mask;
 }
 
-/// @brief Configuration and runtime state for one CP-registered AQL queue.
+/// @brief Shader dispatches currently executing within a PM4 command stream.
+struct Pm4DispatchState {
+  std::deque<DispatchEntry> entries;
+  void push_entry(DispatchEntry entry) { entries.push_back(std::move(entry)); }
+};
+
+/// @brief One compute queue owns its ring, CP execution state and all nested streams.
 ///
 /// @details Keeping the registration configuration and dispatch runtime in one
 /// record prevents queue mutation and teardown from desynchronizing parallel
 /// containers. Entries complete in submission order (in-order retirement per
 /// queue).
-struct AqlQueueRecord : AqlQueueConfig {
-  AqlQueueRecord() : read_pointer_journal(read_ptr_va) {}
-  explicit AqlQueueRecord(AqlQueueConfig config)
-      : AqlQueueConfig(std::move(config)), read_pointer_journal(read_ptr_va) {}
+struct ComputeQueueRecord : ComputeQueueConfig {
+  ComputeQueueRecord() : read_pointer_journal(read_ptr_va) {}
+  explicit ComputeQueueRecord(ComputeQueueConfig config)
+      : ComputeQueueConfig(std::move(config)),
+        read_pointer_journal(read_ptr_va, initial_consumer_cursor,
+                             packet_format == QueuePacketFormat::Pm4 ? sizeof(uint32_t)
+                                                                     : sizeof(uint64_t)) {}
+
+  /// Registers survive IB return; command frames retain their own fetch positions.
+  ComputeCommandState commands;
+  Pm4DispatchState dispatches;
+  /// Exact VM snapshot used for a root PM4 ring batch and its cursor writeback.
+  std::optional<GpuVmAccess> command_access;
 
   enum class Status { Idle, Active, Blocked };
 

@@ -8,8 +8,8 @@
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
 #include "rocjitsu/kmd/linux/kfd_topology.h"
 #include "rocjitsu/kmd/linux/libc_passthrough.h"
-#include "rocjitsu/vm/amdgpu/aql/aql_queue_binding_factory.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
+#include "rocjitsu/vm/amdgpu/compute_queue_binding_factory.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
@@ -198,9 +198,8 @@ int SimulatedKfd::submit_pm4(uint32_t render_minor, uint64_t queue_key,
     auto *cp = gpus_[ordinal].soc->assign_queue_owner_cp(0);
     if (!cp)
       return -ENODEV;
-    amdgpu::Pm4SubmitQueue queue;
+    amdgpu::ComputeQueueConfig queue;
     queue.address_space = process->gpu(ordinal).address_space;
-    queue.pm4 = std::make_shared<amdgpu::Pm4QueueState>();
     queue.process_id = local_process_id_;
     queue.queue_id = next_pm4_queue_id_++;
     const uint32_t queue_id = queue.queue_id;
@@ -2703,9 +2702,7 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
   const bool is_sdma = args->queue_type == KFD_IOC_QUEUE_TYPE_SDMA ||
                        args->queue_type == KFD_IOC_QUEUE_TYPE_SDMA_XGMI ||
                        args->queue_type == KFD_IOC_QUEUE_TYPE_SDMA_BY_ENG_ID;
-  if (is_pm4_compute)
-    return -ENOTSUP;
-  if (!is_aql_compute && !is_sdma)
+  if (!is_aql_compute && !is_pm4_compute && !is_sdma)
     return -ENOTSUP;
 
   const std::optional<uint32_t> ring_size = normalize_queue_ring_size(args->ring_size);
@@ -2717,12 +2714,18 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
   // different processes therefore share XCD resources while each process still
   // distributes additional queues across the device.
   const uint32_t queue_ordinal = proc.next_queue_id_ - 1;
+  // KFD reserves percentage bits 8..15 for a native PM4 queue's target XCC.
+  // An AQL vendor IB inherits the AQL queue's replicas instead of this placement.
+  const uint32_t owner_ordinal =
+      is_pm4_compute ? (args->queue_percentage >> 8) & 0xff : queue_ordinal;
+  if (is_pm4_compute && owner_ordinal >= gpu->soc->num_xcds())
+    return -EINVAL;
   amdgpu::CommandProcessor *target_cp =
-      is_sdma ? nullptr : gpu->soc->assign_queue_owner_cp(queue_ordinal);
+      is_sdma ? nullptr : gpu->soc->assign_queue_owner_cp(owner_ordinal);
   if (!is_sdma && target_cp == nullptr)
     return -EINVAL;
   const uint32_t target_xcc_id =
-      is_sdma ? args->sdma_engine_id : gpu->soc->queue_xcd_id(queue_ordinal);
+      is_sdma ? args->sdma_engine_id : gpu->soc->queue_xcd_id(owner_ordinal);
 
   // Build the HW queue and reserve all per-process state under alloc_mutex_, then
   // register it with the CommandProcessor with the lock RELEASED. The CP thread
@@ -2796,7 +2799,7 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
                           .producer_pointer_address = args->write_pointer_address};
     queue_request.binding_factory =
         is_sdma ? amdgpu::make_sdma_queue_binding_factory(gpu->soc->sdma_queue_scheduler())
-                : amdgpu::make_aql_queue_binding_factory(*target_cp);
+                : amdgpu::make_compute_queue_binding_factory(*target_cp);
     queue_request.engine_id = args->sdma_engine_id;
     // doorbell_base is captured here under alloc_mutex_ but register_queue() runs
     // after the lock is released. This is stable because ROCr maps the doorbell
@@ -2809,9 +2812,10 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
                               .host_base = gs.doorbell_monitor_page,
                               .last_value = ~uint64_t(0)};
     queue_request.type = is_sdma ? amdgpu::QueueType::Sdma : amdgpu::QueueType::Compute;
-    queue_request.packet_format =
-        is_sdma ? amdgpu::QueuePacketFormat::Sdma : amdgpu::QueuePacketFormat::Aql;
-    queue_request.abi = is_sdma ? amdgpu::QueueAbi::Generic : amdgpu::QueueAbi::KfdAql;
+    queue_request.packet_format = is_sdma          ? amdgpu::QueuePacketFormat::Sdma
+                                  : is_pm4_compute ? amdgpu::QueuePacketFormat::Pm4
+                                                   : amdgpu::QueuePacketFormat::Aql;
+    queue_request.abi = is_aql_compute ? amdgpu::QueueAbi::KfdAql : amdgpu::QueueAbi::Generic;
     // Queue creation initializes both SDMA pointers to zero below. Preserve that
     // device-side cursor explicitly so execution does not depend on reading the
     // writeback destination before the first packet can retire.
@@ -2828,7 +2832,7 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
     // unsupported value silently acquires.
     queue_request.xcd_fanout = is_aql_compute;
     // amd_queue_t base: write_pointer_address points to write_dispatch_id.
-    if (!is_sdma)
+    if (is_aql_compute)
       queue_request.queue_descriptor_address =
           args->write_pointer_address - offsetof(amd_queue_t, write_dispatch_id);
     if (!is_sdma && args->ctx_save_restore_address != 0) {

@@ -573,7 +573,7 @@ TEST_F(Pm4QueueControllerTest, TerminalQueueCanBeDisabledAndReconfigured) {
   EXPECT_EQ(controller.prepare_detach(registration), QueuePrepareCloseStatus::Ready);
 }
 
-TEST(Pm4QueueBindingTest, RejectsPollingModesWithoutPollingSupport) {
+TEST(Pm4QueueBindingTest, SupportsPollingModesThroughTheComputeQueueBinding) {
   constexpr uint64_t kRing = 0x100;
   constexpr uint64_t kReadPointer = 0x200;
   constexpr uint64_t kWritePointer = 0x208;
@@ -601,9 +601,11 @@ TEST(Pm4QueueBindingTest, RejectsPollingModesWithoutPollingSupport) {
         .type = QueueType::Compute,
         .packet_format = QueuePacketFormat::Pm4,
     });
-    EXPECT_FALSE(queue);
-    EXPECT_EQ(registry.active_queues(), 0u);
-    EXPECT_EQ(command_processor.registered_pm4_queue_count_for_test(), 0u);
+    ASSERT_TRUE(queue);
+    EXPECT_EQ(registry.active_queues(), 1u);
+    EXPECT_EQ(command_processor.registered_pm4_queue_count_for_test(), 1u);
+    EXPECT_TRUE(registry.unregister_queue(queue));
+    EXPECT_EQ(command_processor.registered_queue_count_for_test(), 0u);
   }
 
   EXPECT_TRUE(gpu_vm.unregister_address_space(address_space));
@@ -659,4 +661,120 @@ TEST(Pm4QueueBindingTest, GracefulRegistryRemovalKeepsHandleUntilPublicationComp
 }
 
 } // namespace
+TEST_F(Pm4QueueControllerTest, ComputeQueueRetainsCursorPublicationWithoutReplayingEffects) {
+  CommandProcessor cp("compute");
+  cp.set_gpu_vm(&gpu_vm, address_space);
+  memory->store<uint32_t>(kRing, 0xc0017900);
+  memory->store<uint32_t>(kRing + 4, 0x40);
+  memory->store<uint32_t>(kRing + 8, 0xdeadbeef);
+  uint32_t effects = 0;
+  const auto id = cp.register_pm4_queue(
+      {.address_space = address_space,
+       .ring_base = kRing,
+       .ring_size_bytes = kRingBytes,
+       .consumer_pointer_address = kReadPointer,
+       .initial_consumer_cursor = std::nullopt,
+       .packet_callbacks = {.write_uconfig_register = [&](uint64_t, uint32_t) {
+         ++effects;
+         return Pm4RegisterWriteStatus::Complete;
+       }}});
+  ASSERT_NE(id, 0u);
+  memory->make_store_unavailable(kReadPointer);
+  EXPECT_EQ(cp.notify_pm4_queue_doorbell(id, 3), QueueSubmissionStatus::Retry);
+  EXPECT_EQ(effects, 1u);
+  EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 0u);
+  EXPECT_EQ(cp.prepare_unregister_queue_registration(id), QueuePrepareCloseStatus::Busy);
+  memory->make_available();
+  EXPECT_EQ(cp.notify_pm4_queue_doorbell(id, 3), QueueSubmissionStatus::Accepted);
+  EXPECT_EQ(effects, 1u);
+  EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 3u);
+  EXPECT_EQ(cp.prepare_unregister_queue_registration(id), QueuePrepareCloseStatus::Ready);
+}
+
+TEST_F(Pm4QueueControllerTest, ComputeQueueUsesDwordCursorsAcrossRingWrap) {
+  CommandProcessor cp("compute");
+  cp.set_gpu_vm(&gpu_vm, address_space);
+  memory->store<uint32_t>(kReadPointer, 15);
+  memory->store<uint32_t>(kRing + 60, 0xc0017900);
+  memory->store<uint32_t>(kRing, 0x40);
+  memory->store<uint32_t>(kRing + 4, 0x1234);
+  uint32_t effects = 0;
+  const auto id = cp.register_pm4_queue(
+      {.address_space = address_space,
+       .ring_base = kRing,
+       .ring_size_bytes = kRingBytes,
+       .consumer_pointer_address = kReadPointer,
+       .initial_consumer_cursor = std::nullopt,
+       .packet_callbacks = {.write_uconfig_register = [&](uint64_t reg, uint32_t value) {
+         EXPECT_EQ(reg, 0xc040u);
+         EXPECT_EQ(value, 0x1234u);
+         ++effects;
+         return Pm4RegisterWriteStatus::Complete;
+       }}});
+  ASSERT_NE(id, 0u);
+  EXPECT_EQ(cp.notify_pm4_queue_doorbell(id, 2), QueueSubmissionStatus::Accepted);
+  EXPECT_EQ(effects, 1u);
+  EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 2u);
+  EXPECT_TRUE(cp.unregister_queue_registration(id));
+}
+
+TEST_F(Pm4QueueControllerTest, ComputeQueueRetainsItsSnapshotWhilePacketFetchIsBlocked) {
+  CommandProcessor cp("compute");
+  cp.set_gpu_vm(&gpu_vm, address_space);
+  memory->store<uint32_t>(kRing, 0xc0017900);
+  memory->store<uint32_t>(kRing + 4, 0x40);
+  memory->store<uint32_t>(kRing + 8, 0xdeadbeef);
+  uint32_t written = 0;
+  const auto id = cp.register_pm4_queue(
+      {.address_space = address_space,
+       .ring_base = kRing,
+       .ring_size_bytes = kRingBytes,
+       .consumer_pointer_address = kReadPointer,
+       .initial_consumer_cursor = std::nullopt,
+       .packet_callbacks = {.write_uconfig_register = [&](uint64_t, uint32_t value) {
+         written = value;
+         return Pm4RegisterWriteStatus::Complete;
+       }}});
+  ASSERT_NE(id, 0u);
+  memory->make_read_unavailable(kRing);
+  EXPECT_EQ(cp.notify_pm4_queue_doorbell(id, 3), QueueSubmissionStatus::Retry);
+  auto replacement = std::make_shared<Pm4QueueMemory>();
+  replacement->store<uint32_t>(kRing, 0xc0017900);
+  replacement->store<uint32_t>(kRing + 4, 0x40);
+  replacement->store<uint32_t>(kRing + 8, 0x1234);
+  replacement->store<uint32_t>(kReadPointer, 99);
+  ASSERT_TRUE(gpu_vm.replace_translated(address_space, replacement, replacement));
+  memory->make_available();
+  EXPECT_EQ(cp.notify_pm4_queue_doorbell(id, 3), QueueSubmissionStatus::Accepted);
+  EXPECT_EQ(written, 0xdeadbeefu);
+  EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 3u);
+  EXPECT_EQ(replacement->load<uint32_t>(kReadPointer), 99u);
+  EXPECT_TRUE(cp.unregister_queue_registration(id));
+}
+
+TEST_F(Pm4QueueControllerTest, ComputeQueueCancellationDropsItsNestedStreamAndVmLease) {
+  CommandProcessor cp("compute");
+  cp.set_gpu_vm(&gpu_vm, address_space);
+  constexpr uint64_t child = 0x400, gate = 0x700;
+  const std::array<uint32_t, 4> root{0xc0023f00, uint32_t(child), 0, (1u << 23) | 7};
+  const std::array<uint32_t, 7> wait{0xc0053c00, 0x13, uint32_t(gate), 0, 1, 0xffffffff, 4};
+  for (uint32_t i = 0; i < root.size(); ++i)
+    memory->store<uint32_t>(kRing + i * 4, root[i]);
+  for (uint32_t i = 0; i < wait.size(); ++i)
+    memory->store<uint32_t>(child + i * 4, wait[i]);
+  const auto id = cp.register_pm4_queue({.address_space = address_space,
+                                         .ring_base = kRing,
+                                         .ring_size_bytes = kRingBytes,
+                                         .consumer_pointer_address = kReadPointer,
+                                         .initial_consumer_cursor = std::nullopt,
+                                         .packet_callbacks = {}});
+  ASSERT_NE(id, 0u);
+  EXPECT_EQ(cp.notify_pm4_queue_doorbell(id, root.size()), QueueSubmissionStatus::Retry);
+  EXPECT_FALSE(gpu_vm.unregister_address_space(address_space));
+  EXPECT_EQ(cp.prepare_unregister_queue_registration(id), QueuePrepareCloseStatus::Busy);
+  EXPECT_TRUE(cp.unregister_queue_registration(id));
+  EXPECT_EQ(cp.registered_queue_count_for_test(), 0u);
+  EXPECT_TRUE(gpu_vm.unregister_address_space(address_space));
+}
+
 } // namespace rocjitsu::amdgpu
