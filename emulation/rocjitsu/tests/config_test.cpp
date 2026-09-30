@@ -1900,46 +1900,51 @@ TEST(CheckpointTest, RoundTripsHeterogeneousFunctionalQuantum) {
   EXPECT_EQ(restored_se->compute_unit(1)->config().functional_quantum, 37u);
 }
 
-TEST(CheckpointTest, PreservesCdna4SimdIdsWithSparseWaveSlots) {
-  std::string json = functional_quantum_checkpoint_config(7, 37);
-  json.replace(json.find("cdna3"), 5, "cdna4");
-  auto source = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
-  auto *source_se = source.soc()->xcd(0)->shader_engine(0);
-  struct Resident {
-    uint32_t cu, slot, simd;
-  };
-  constexpr std::array<Resident, 5> residents{
-      {{0, 1, 1}, {0, 4, 0}, {0, 7, 3}, {1, 2, 2}, {1, 5, 1}}};
-  constexpr uint16_t hw_id_simd = 4u | (4u << 6) | (1u << 11); // HW_ID[5:4].
-  for (const auto &[cu_id, slot, simd] : residents) {
-    auto *cu = source_se->compute_unit(cu_id);
-    auto *wf = cu->dispatch_wf_at(slot, cu_id * 10 + slot, 0x1000, cu->config().sgprs_per_wf,
-                                  cu->config().vgprs_per_wf);
-    ASSERT_NE(wf, nullptr);
-    uint32_t value = UINT32_MAX;
-    ASSERT_EQ(amdgpu::read_hwreg_field(*wf, hw_id_simd, value), amdgpu::HwregAccessResult::Success);
-    EXPECT_EQ(value, simd);
-  }
+TEST(CheckpointTest, PreservesCdnaSimdIdsWithSparseWaveSlots) {
+  for (const char *arch : {"cdna2", "cdna3", "cdna4"}) {
+    SCOPED_TRACE(arch);
+    std::string json = functional_quantum_checkpoint_config(7, 37);
+    json.replace(json.find("cdna3"), 5, arch);
+    auto source = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+    auto *source_se = source.soc()->xcd(0)->shader_engine(0);
+    struct Resident {
+      uint32_t cu, slot, simd;
+    };
+    constexpr std::array<Resident, 5> residents{
+        {{0, 1, 1}, {0, 4, 0}, {0, 7, 3}, {1, 2, 2}, {1, 5, 1}}};
+    constexpr uint16_t hw_id_simd = 4u | (4u << 6) | (1u << 11); // HW_ID[5:4].
+    for (const auto &[cu_id, slot, simd] : residents) {
+      auto *cu = source_se->compute_unit(cu_id);
+      auto *wf = cu->dispatch_wf_at(slot, cu_id * 10 + slot, 0x1000, cu->config().sgprs_per_wf,
+                                    cu->config().vgprs_per_wf);
+      ASSERT_NE(wf, nullptr);
+      uint32_t value = UINT32_MAX;
+      ASSERT_EQ(amdgpu::read_hwreg_field(*wf, hw_id_simd, value),
+                amdgpu::HwregAccessResult::Success);
+      EXPECT_EQ(value, simd);
+    }
 
-  test::ScopedTempFile checkpoint_file("rocjitsu-simd-identity-");
-  config::save_checkpoint(checkpoint_file.path(), *source.soc(), 0, source.engine_config,
-                          source.cpu_dispatch_threads);
-  auto restored = config::restore_checkpoint(checkpoint_file.path());
-  auto *restored_se = restored.soc()->xcd(0)->shader_engine(0);
-  for (const auto &[cu_id, slot, simd] : residents) {
-    SCOPED_TRACE(cu_id);
-    SCOPED_TRACE(slot);
-    auto *wf = restored_se->compute_unit(cu_id)->wf(slot);
-    ASSERT_NE(wf, nullptr);
-    ASSERT_FALSE(wf->is_halted());
-    EXPECT_EQ(wf->wf_id(), slot);
-    uint32_t value = UINT32_MAX;
-    EXPECT_EQ(amdgpu::read_hwreg_field(*wf, hw_id_simd, value), amdgpu::HwregAccessResult::Success);
-    EXPECT_EQ(value, simd);
+    test::ScopedTempFile checkpoint_file("rocjitsu-simd-identity-");
+    config::save_checkpoint(checkpoint_file.path(), *source.soc(), 0, source.engine_config,
+                            source.cpu_dispatch_threads);
+    auto restored = config::restore_checkpoint(checkpoint_file.path());
+    auto *restored_se = restored.soc()->xcd(0)->shader_engine(0);
+    for (const auto &[cu_id, slot, simd] : residents) {
+      SCOPED_TRACE(cu_id);
+      SCOPED_TRACE(slot);
+      auto *wf = restored_se->compute_unit(cu_id)->wf(slot);
+      ASSERT_NE(wf, nullptr);
+      ASSERT_FALSE(wf->is_halted());
+      EXPECT_EQ(wf->wf_id(), slot);
+      uint32_t value = UINT32_MAX;
+      EXPECT_EQ(amdgpu::read_hwreg_field(*wf, hw_id_simd, value),
+                amdgpu::HwregAccessResult::Success);
+      EXPECT_EQ(value, simd);
+    }
+    // Restoration must not compact the resident waves into different slots.
+    EXPECT_EQ(restored_se->compute_unit(0)->wf(0), nullptr);
+    EXPECT_EQ(restored_se->compute_unit(1)->wf(0), nullptr);
   }
-  // Restoration must not compact the resident waves into different slots.
-  EXPECT_EQ(restored_se->compute_unit(0)->wf(0), nullptr);
-  EXPECT_EQ(restored_se->compute_unit(1)->wf(0), nullptr);
 }
 
 TEST(CheckpointTest, SaveAndRestoreMemory) {
