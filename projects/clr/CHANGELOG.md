@@ -9,6 +9,10 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
     - Module Management: support for API parity with corresponding CUDA API.
       * `hipModuleEnumerateFunctions` returns the function handles defined in a loaded module.
 * Disable HRR capture feature
+* Fortran bindings for the HIP runtime API, generated from the HIP headers and shipped as a single self-contained module. A Fortran program writes one `use hip` to reach the interfaces, the enumerators, the derived types and the `hipCheck` status helper, and links the static archive through the `hip::hip_fortran` CMake target.
+    - `find_package(hip-fortran)` locates the bindings in an installed ROCm. The package sets `hip_FORTRAN_FOUND`, and reports a named diagnostic when the consumer's Fortran compiler differs from the one the bindings were built with.
+    - A Fortran `.mod` file is not portable across compilers, so the archive and the module files install under a per-compiler subdirectory of the library and include directories (for example `fortran/amdflang`), which lets bindings for several compilers share one prefix. The generated source is installed under the data directory as well, so that a site using a compiler ROCm ships no module file for can rebuild the bindings from the installed tree.
+    - `BUILD_FORTRAN_BINDINGS` (`ON` by default) controls whether the bindings are built, and is a no-op when no Fortran compiler is available. `FORTRAN_ARRAY_INTERFACES` selects the array-argument overloads: `assumed-shape` (the default) exposes the per-rank overloads, and `assumed-rank` replaces them with a single Fortran 2018 `dimension(..)` overload per routine. `BUILD_FORTRAN_CLIENTS` controls the binding test suite, which requires a GPU to pass and is built only when testing is enabled.
 
 ### Resolved issues
 * A registered `__device__` global that is absent from the loaded code object no longer aborts the process. Symbol lookup now returns `hipErrorInvalidSymbol` from the runtime's variable materialization path (`hipGetSymbolAddress`, `hipLibraryGetGlobal`, and related entry points). `hipModuleGetGlobal` still reports `hipErrorNotFound` for a missing name.

@@ -65,6 +65,22 @@ endif()
 #   assumed-shape  + the per-rank array overloads (Fortran 2008), the default,
 #                  and what the bindings shipped in ROCm are built with
 #   assumed-rank   + the single dimension(..) overload per routine (Fortran 2018)
+#
+# For HIP, none and assumed-shape select the SAME module. The typed memory
+# families (hipMalloc, hipMemcpy and their variants) are the only routines here
+# that take array arguments, and hipfort has always shipped their per-rank
+# overloads unguarded, so the generator emits them as the plain #else of
+# USE_ASSUMED_RANK with no macro to switch them off. The per-rank set is
+# therefore what a build defining nothing at all gets, which is why the module
+# tests USE_ASSUMED_RANK and nothing else. Verified by preprocessing hip.F90
+# four ways with amdflang -cpp -E: no macro and USE_ASSUMED_SHAPE=1 hash
+# identically, USE_ASSUMED_RANK=1 and both-defined hash identically to each
+# other, and the two groups differ.
+#
+# none is still accepted rather than rejected, because this cache entry is
+# shared with every other Fortran binding in ROCm, where the three tiers really
+# are distinct; a monorepo-wide -DFORTRAN_ARRAY_INTERFACES=none must not turn
+# into a fatal error here.
 set(FORTRAN_ARRAY_INTERFACES "assumed-shape" CACHE STRING
     "Array-argument overloads to expose: none, assumed-shape, or assumed-rank")
 set_property(CACHE FORTRAN_ARRAY_INTERFACES PROPERTY STRINGS
@@ -209,6 +225,13 @@ endif()
 
 enable_language(Fortran)
 
+# Pulled in here rather than beside the install() rules below because the install
+# layout is also baked into the target's INSTALL_INTERFACE include directory,
+# which is set well before them. Nothing must hardcode lib/ or include/: a distro
+# that installs to lib64 gets CMAKE_INSTALL_LIBDIR=lib64, and a literal
+# lib/fortran then names a directory that does not exist.
+include(GNUInstallDirs)
+
 if(NOT FORTRAN_ARRAY_INTERFACES MATCHES "^(none|assumed-shape|assumed-rank)$")
   message(FATAL_ERROR
     "FORTRAN_ARRAY_INTERFACES must be none, assumed-shape or assumed-rank, "
@@ -271,24 +294,24 @@ set_target_properties(hip_fortran PROPERTIES
   Fortran_FORMAT FREE
   POSITION_INDEPENDENT_CODE ON)
 
-# Translate the tri-state into the two macros the generated source is guarded
-# with. assumed-rank implies the F2008 tier: in the source the assumed-rank
-# specific is nested inside USE_ASSUMED_SHAPE, and selects itself over the
-# per-rank ones.
-if(FORTRAN_ARRAY_INTERFACES STREQUAL "assumed-shape")
-  target_compile_definitions(hip_fortran PRIVATE USE_ASSUMED_SHAPE=1)
-elseif(FORTRAN_ARRAY_INTERFACES STREQUAL "assumed-rank")
-  target_compile_definitions(hip_fortran PRIVATE
-    USE_ASSUMED_SHAPE=1 USE_ASSUMED_RANK=1)
+# Translate the tri-state into the one macro the generated source is guarded
+# with. hip.F90 contains five bare #ifdef USE_ASSUMED_RANK regions and no
+# USE_ASSUMED_SHAPE at all, for the reason given beside the option above, so
+# defining USE_ASSUMED_SHAPE here would name a macro the source never tests: a
+# reader would take it for the switch that selects the F2008 tier, and changing
+# it would change nothing. The lower two tiers therefore define nothing, and
+# assumed-rank defines the one macro that does select a different module.
+if(FORTRAN_ARRAY_INTERFACES STREQUAL "assumed-rank")
+  target_compile_definitions(hip_fortran PRIVATE USE_ASSUMED_RANK=1)
 endif()
 
-# No line-length flag: the generator wraps the emitted source at 112 columns,
-# inside the 132 that free-form Fortran guarantees, so every compiler reads it
-# without a vendor-specific option.
+# No line-length flag: every emitted line fits inside the 132 columns free-form
+# Fortran guarantees, so no compiler needs a vendor-specific option to read this
+# source. Measured on the committed hip.F90, the longest line is 131 columns.
 
 target_include_directories(hip_fortran PUBLIC
   "$<BUILD_INTERFACE:${_moddir}>"
-  "$<INSTALL_INTERFACE:include/fortran/${HIP_FORTRAN_COMPILER_DIR}>")
+  "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/fortran/${HIP_FORTRAN_COMPILER_DIR}>")
 
 # Link interface only: needed to link an executable, not to build this archive.
 # Three cases, and the order matters.
@@ -318,8 +341,16 @@ if(NOT TARGET hip::host AND NOT TARGET amdhip64)
   find_package(hip QUIET)
 endif()
 
+# Whether the INSTALLED link interface ends up naming hip::host is also what the
+# config package has to know, and it cannot work that out for itself: it sees
+# only the targets file. So record it here and interpolate it into the template.
+# The consumer-side find_dependency(hip) exists solely to make hip::host exist
+# before the targets file names it, so a binding built with no runtime in sight,
+# which names nothing, must not make its consumers find a package the artifact
+# does not depend on.
 if(TARGET hip::host)
   target_link_libraries(hip_fortran INTERFACE hip::host)
+  set(HIP_FORTRAN_NEEDS_C_PACKAGE TRUE)
 elseif(TARGET amdhip64)
   # In-tree the runtime is a real target, and clr already exports it from TWO
   # sets (hip-targets and hip-lang-targets). CMake refuses to export a target
@@ -335,7 +366,9 @@ elseif(TARGET amdhip64)
   target_link_libraries(hip_fortran INTERFACE
     $<BUILD_INTERFACE:amdhip64>
     $<INSTALL_INTERFACE:hip::host>)
+  set(HIP_FORTRAN_NEEDS_C_PACKAGE TRUE)
 else()
+  set(HIP_FORTRAN_NEEDS_C_PACKAGE FALSE)
   message(STATUS
     "HIP: the runtime was not found, so the Fortran bindings carry no link "
     "interface; a consumer will have to link it (-lamdhip64) itself.")
@@ -343,6 +376,46 @@ endif()
 
 if(NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   set(HIP_HAVE_FORTRAN_BINDINGS TRUE PARENT_SCOPE)
+endif()
+
+# The binding tests below are GPU runtime executables, so in-tree they belong to
+# the client/test track and must not come along with a plain library build: 26
+# test binaries linking a GPU runtime is not what -DCLR_BUILD_HIP=ON asked for,
+# and test/CMakeLists.txt additionally shells out to rocm_agent_enumerator AT
+# CONFIGURE TIME to pick an offload arch, which a library build has no business
+# doing. Every other ROCm Fortran binding gates its tests on its own project's
+# client switch; clr has none -- its options are CLR_BUILD_HIP, CLR_BUILD_OCL,
+# CLR_HRR_CODEGEN_CHECK, USE_NEW_HOSTCALL_IMPL and BUILD_SHARED_LIBS, and the
+# BUILD_TESTS it does carry is declared inside opencl/ and scoped there.
+#
+# So the condition is BUILD_TESTING, the name CMake's own include(CTest) defines
+# and the fallback every sibling's gate already ends in. clr never includes
+# CTest, so in-tree it is simply undefined and the tests stay off until someone
+# asks for them with -DBUILD_TESTING=ON, while a super-project that has turned
+# testing on for the whole build gets them without a HIP-specific flag.
+#
+# HIP_BUILD_FORTRAN_CLIENTS still wins, because the option block above promises
+# that a per-library name overrides the shared one; ignoring it here would make
+# that promise false for the one library where it is the only escape hatch.
+#
+# Standalone, this directory IS the build and the tests are the point, so none
+# of this applies. Setting BUILD_FORTRAN_CLIENTS as a plain variable is
+# deliberate: the cache entry is one switch shared by every library in the
+# monorepo, so turning it off here has to be scoped to this directory and must
+# not be written back.
+#
+# Placed here, immediately before the switch is read, rather than beside the
+# option() above: everything between the two can return early -- a
+# -DBUILD_FORTRAN_BINDINGS=OFF configure, or a host with no Fortran compiler --
+# and a message about skipping tests would then be printed for a directory that
+# configures nothing at all, blaming a reason that is not the one that applied.
+if(NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR
+   AND BUILD_FORTRAN_CLIENTS
+   AND NOT (BUILD_TESTING OR HIP_BUILD_FORTRAN_CLIENTS))
+  message(STATUS
+    "HIP: testing is not enabled, skipping the Fortran binding tests. Pass "
+    "-DBUILD_TESTING=ON or -DHIP_BUILD_FORTRAN_CLIENTS=ON to build them.")
+  set(BUILD_FORTRAN_CLIENTS OFF)
 endif()
 
 if(BUILD_FORTRAN_CLIENTS)
@@ -367,30 +440,72 @@ if(BUILD_FORTRAN_CLIENTS)
   add_subdirectory(test)
 endif()
 
-include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
+# The config package goes in lib/cmake/hip-fortran, the directory
+# find_package(hip-fortran) searches natively, so that the documented spelling
+# resolves with nothing standing in for it.
+#
+# The alternative, putting it beside the C package in lib/cmake/hip, only pays
+# off if hip-config.cmake grows an include() of it, and that include does not
+# exist: hip-config.cmake.in mentions Fortran nowhere. Adding one would mean
+# editing the file EVERY HIP consumer loads, and it would have to run after the
+# C targets are defined or the Fortran targets file would name hip::host before
+# it exists -- rocm_export_targets' INCLUDE hook emits its entries before the
+# targets file, so it is not that hook, and growing one belongs in rocm-cmake
+# rather than here. rocRAND is the cautionary precedent: its installed
+# rocrand-config.cmake carries exactly such an include with no OPTIONAL, so
+# find_package(rocrand) fails outright on a prefix where the bindings are not
+# installed.
+set(_fortran_pkgdir "${CMAKE_INSTALL_LIBDIR}/cmake/hip-fortran")
+
+# COMPONENT devel on every rule below, because everything this directory
+# installs -- a static archive, a set of .mod files, the generated source and
+# the CMake package -- is a development artifact: nothing here is needed to RUN
+# a program, only to build one against the bindings. devel is also what
+# rocm-cmake would have chosen, since rocm_install_targets and rocm_install
+# default to it. Without it these files land in the runtime component instead,
+# so a user who installs only the runtime package gets an archive and a set of
+# .mod files they cannot use, while the one who installs devel to build against
+# HIP does not get them at all.
+#
+# Plain install(), not rocm_install(): this directory must also configure
+# standalone, where rocm-cmake was never loaded and those commands do not exist.
 install(TARGETS hip_fortran
         EXPORT hip-fortran-targets
-        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}/fortran/${HIP_FORTRAN_COMPILER_DIR}")
+        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}/fortran/${HIP_FORTRAN_COMPILER_DIR}"
+                COMPONENT devel)
 install(DIRECTORY "${_moddir}/"
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/fortran/${HIP_FORTRAN_COMPILER_DIR}"
+        COMPONENT devel
         FILES_MATCHING PATTERN "*.mod")
 install(EXPORT hip-fortran-targets
         FILE hip-fortran-targets.cmake
         NAMESPACE hip::
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hip")
+        DESTINATION "${_fortran_pkgdir}"
+        COMPONENT devel)
+
+# The two directories the config package has to name, kept out of the template
+# so that neither side spells lib/ or include/ literally. A literal lib/fortran
+# is wrong the moment CMAKE_INSTALL_LIBDIR is lib64, and the config then hands
+# the consumer an IMPORTED_LOCATION that does not exist.
+set(HIP_FORTRAN_LIBDIR     "${CMAKE_INSTALL_LIBDIR}/fortran")
+set(HIP_FORTRAN_INCLUDEDIR "${CMAKE_INSTALL_INCLUDEDIR}/fortran")
 
 configure_package_config_file(
   "${CMAKE_CURRENT_SOURCE_DIR}/hip-fortran-config.cmake.in"
   "${CMAKE_CURRENT_BINARY_DIR}/hip-fortran-config.cmake"
-  INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hip")
-# No PATH_VARS: it only creates PACKAGE_<var>, and the template interpolates
-# @HIP_FORTRAN_COMPILER_DIR@ directly. Passing it was a dead argument, and worse
-# than dead if anyone later switched the template to the PACKAGE_ form, since
-# PATH_VARS would then resolve this relative value as a path under the prefix.
+  INSTALL_DESTINATION "${_fortran_pkgdir}"
+  # PATH_VARS is exactly what these two want: @PACKAGE_INIT@ rewrites each into
+  # an absolute path computed from where the config file was FOUND, so the
+  # package survives being relocated and gets lib64 right without the template
+  # knowing which layout it was built for. HIP_FORTRAN_COMPILER_DIR stays a
+  # plain @-substitution on purpose -- it is a bare directory NAME, not a path,
+  # and PATH_VARS would resolve it as one, under the install prefix.
+  PATH_VARS HIP_FORTRAN_LIBDIR HIP_FORTRAN_INCLUDEDIR)
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/hip-fortran-config.cmake"
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hip")
+        DESTINATION "${_fortran_pkgdir}"
+        COMPONENT devel)
 
 # Version read from the VERSION file in the source tree, the same one hipamd
 # parses, and NOT from hip_VERSION: that is set by find_package(hip) above and
@@ -413,14 +528,16 @@ if(_fortran_version)
     "${CMAKE_CURRENT_BINARY_DIR}/hip-fortran-config-version.cmake"
     VERSION "${_fortran_version}"
     COMPATIBILITY SameMajorVersion)
-  # Installed in BOTH package directories, and it has to be: CMake looks for
-  # <pkg>-config-version.cmake NEXT TO the <pkg>-config.cmake it actually
-  # resolved, and find_package(hip-fortran 7.17) resolves the FORWARDER.
+  # Beside the config it belongs to, and only there: CMake looks for
+  # <pkg>-config-version.cmake NEXT TO the <pkg>-config.cmake it resolved, and
+  # with the package in one directory there is only one place to look.
   install(FILES "${CMAKE_CURRENT_BINARY_DIR}/hip-fortran-config-version.cmake"
-          DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hip")
-  install(FILES "${CMAKE_CURRENT_BINARY_DIR}/hip-fortran-config-version.cmake"
-          DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hip-fortran")
+          DESTINATION "${_fortran_pkgdir}"
+          COMPONENT devel)
 else()
+  # Better no version file than a wrong one: without it an unversioned
+  # find_package still succeeds, whereas a version file claiming the wrong
+  # number makes a versioned one succeed and link the wrong .mod.
   message(STATUS
     "HIP: could not determine the version from the VERSION file, so no "
     "hip-fortran-config-version.cmake is installed and a versioned "
@@ -433,29 +550,5 @@ endif()
 # compiler and the config enumerates that directory to report which compilers
 # are installed; a source file there would be listed as one.
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/hip.F90"
-        DESTINATION "${CMAKE_INSTALL_DATADIR}/hip/fortran")
-
-# The config lands in lib/cmake/hip, BESIDE the C package, because that is what
-# lets hip-config.cmake pick it up with a bare
-# include(hip-fortran-config.cmake OPTIONAL): a Fortran binding installed after
-# the C library is then found at find_package(hip) time, and ignored when absent.
-#
-# But find_package(hip-fortran), the other documented spelling, searches
-# lib/cmake/hip-fortran*, which lib/cmake/hip does not match, so on its own that
-# placement makes the direct spelling fail with "could not find a package
-# configuration file". A forwarder gives the search somewhere to land without
-# duplicating the real config, which would also need its own copy of the targets
-# file and would then be a second thing to keep in step.
-#
-# It is written under forward/ because the real config, configured above,
-# already occupies ${CMAKE_CURRENT_BINARY_DIR}/hip-fortran-config.cmake: same
-# basename, so the forwarder needs a directory of its own. file(WRITE) creates
-# that directory.
-file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/forward/hip-fortran-config.cmake"
-"# Generated forwarder. The real config lives beside the HIP C package, in
-# lib/cmake/hip, so that hip-config.cmake can include it as a sibling. This file
-# only exists so that find_package(hip-fortran) resolves to the same place.
-include(\"\${CMAKE_CURRENT_LIST_DIR}/../hip/hip-fortran-config.cmake\")
-")
-install(FILES "${CMAKE_CURRENT_BINARY_DIR}/forward/hip-fortran-config.cmake"
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hip-fortran")
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/hip/fortran"
+        COMPONENT devel)
