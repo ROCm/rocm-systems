@@ -24,7 +24,6 @@ class ProfileModeImportGuard:
         "rocprof_compute_profile",
         "rocprof_compute_analyze",
         "rocprof_compute_soc",
-        "rocprof_compute_tui",
         "pc_sampling",
         "utils",
         "vendored",

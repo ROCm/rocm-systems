@@ -140,7 +140,6 @@ class Analyzer(OmniAnalyze_Base):
                     parser.load_table_data(
                         workload=workload,
                         dir_path=path_info[0],
-                        is_gui=False,
                         args=args,
                         skip_kernel_top=False,
                     )
