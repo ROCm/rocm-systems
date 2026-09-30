@@ -4,6 +4,7 @@
 import csv
 import os
 import shutil
+import sqlite3
 import tempfile
 from pathlib import Path
 
@@ -429,19 +430,40 @@ def test_dispatch_5(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.misc
-def test_gpu_ids(binary_handler_analyze_rocprof_compute):
-    for dir in indirs:
-        gpu_id = "0"
-        workload_dir = integration_common.setup_workload_dir(dir)
+def test_gpu_ids(binary_handler_analyze_rocprof_compute, tmp_path):
+    for directory in indirs:
+        workload_dir = integration_common.setup_workload_dir(directory)
+        output_dir = tmp_path / "analysis" / Path(directory).name / "gpu_0"
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
+            "--output-directory",
+            str(output_dir),
             "--path",
             workload_dir,
             "--gpu-id",
-            gpu_id,
+            "0",
+            "--output-format",
+            "db",
+            "--output-name",
+            "gpu_filter",
         ])
         assert code == 0
-
+        db_path = output_dir / "gpu_filter.db"
+        assert db_path.is_file()
+        with sqlite3.connect(db_path) as connection:
+            dispatches = connection.execute(
+                "SELECT gpu_id, dispatch_id FROM compute_dispatch"
+            ).fetchall()
+            kernels = connection.execute(
+                "SELECT kernel_name FROM compute_kernel"
+            ).fetchall()
+        assert len(dispatches) == 3
+        assert {gpu for gpu, _ in dispatches} == {0}
+        assert {dispatch for _, dispatch in dispatches} == {1, 2, 3}
+        expected_kernel = "vecCopy(double*, double*, double*, int, int)"
+        if Path(directory).name in {"MI300A_A1", "MI300X_A1"}:
+            expected_kernel += " (.kd)"
+        assert kernels == [(expected_kernel,)]
         common.clean_output_dir(config["cleanup"], workload_dir)
 
 

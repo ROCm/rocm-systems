@@ -72,6 +72,18 @@ def make_dual_issue_arch_config(metric_name: str, peak_col: str = "Peak"):
     return arch_config
 
 
+def make_multi_gpu_dispatch_frame():
+    """Use distinct row values and change kernel ranking after each filter."""
+    return pd.DataFrame({
+        "Kernel_Name": ["kernel_a", "kernel_a", "kernel_b", "kernel_c", "kernel_c"],
+        "GPU_ID": [0, 1, 1, 1, 0],
+        "Dispatch_ID": [0, 1, 2, 3, 4],
+        "Start_Timestamp": [0, 10000, 20000, 30000, 40000],
+        "End_Timestamp": [9000, 14000, 21000, 30200, 40100],
+        "Counter_Value": [11, 22, 33, 44, 55],
+    })
+
+
 def make_roofline_calc_analyzer(workload_path, pmc_df, roofline_df):
     """Build a SimpleNamespace analyzer for calc_roofline_data tests."""
     sys_info_df = pd.DataFrame([{"gpu_arch": "gfx90a"}])
@@ -907,6 +919,39 @@ def test_calc_metrics_data_exports_qualified_per_channel_names():
 # =============================================================================
 # filter_dispatch_frame tests
 # =============================================================================
+
+
+@pytest.mark.parametrize(
+    "gpu_ids,dispatch_ids,expected_rows",
+    [
+        pytest.param(["0"], None, [0, 4], id="single-gpu"),
+        pytest.param(["0", "1"], None, [0, 1, 2, 3, 4], id="multiple-gpus"),
+        pytest.param(["2"], None, [], id="unmatched-gpu"),
+        pytest.param(None, ["1", "3"], [1, 3], id="dispatch-subset"),
+        pytest.param(None, [">2"], [3, 4], id="strict-dispatch-bound"),
+        pytest.param(None, [">0"], [1, 2, 3, 4], id="exclude-boundary-zero"),
+        pytest.param(["1"], ["2", "3", "4"], [2, 3], id="gpu-and-dispatch"),
+    ],
+)
+def test_filter_dispatch_frame_retains_selected_rows(
+    gpu_ids, dispatch_ids, expected_rows
+):
+    frame = make_multi_gpu_dispatch_frame()
+    filtered = filter_dispatch_frame(frame, gpu_ids, None, dispatch_ids)
+    pd.testing.assert_frame_equal(filtered, frame.iloc[expected_rows])
+
+
+def test_filter_dispatch_frame_ranks_kernels_after_gpu_and_dispatch_filters():
+    """The global winner differs from the winner after both filters are applied."""
+    frame = make_multi_gpu_dispatch_frame()
+    assert filter_dispatch_frame(frame, None, [0], None)[
+        "Kernel_Name"
+    ].unique().tolist() == ["kernel_a"]
+    filtered = filter_dispatch_frame(frame, ["1"], [0], [">1"])
+    pd.testing.assert_frame_equal(filtered, frame.iloc[[2]])
+    assert filtered[["GPU_ID", "Dispatch_ID", "Counter_Value"]].values.tolist() == [
+        [1, 2, 33]
+    ]
 
 
 def make_repeated_dispatch_frame():
