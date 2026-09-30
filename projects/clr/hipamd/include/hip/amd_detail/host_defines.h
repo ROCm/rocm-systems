@@ -413,7 +413,10 @@ typedef __hip_internal::int64_t __hip_int64_t;
 
 #define __global__
 
-#define __noinline__
+// __noinline__ is deliberately not defined for host compilers. It is a
+// reserved identifier that standard libraries use as an attribute name, e.g.
+// [[__gnu__::__noinline__]] in libstdc++, which an empty macro turns into
+// invalid code.
 #define __forceinline__ inline
 
 #define __shared__
