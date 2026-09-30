@@ -1,0 +1,50 @@
+name: runtimes Formatting
+
+on:
+  pull_request:
+    branches:
+      - develop
+    paths:
+      - 'runtimes/**'
+      - '.github/workflows/runtimes-formatting.yml'
+      - '.pre-commit-config.yaml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  # The systems PR bot requires a check run with this exact name.
+  pre-commit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout formatting inputs
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # pre-commit needs both sides of the pull-request merge base.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Find pull-request merge base
+        id: merge_base
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: echo "sha=$(git merge-base "$BASE_SHA" "$HEAD_SHA")" >> "$GITHUB_OUTPUT"
+
+      - name: Run root pre-commit hooks on the pull-request diff
+        uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
+        with:
+          extra_args: >-
+            --show-diff-on-failure
+            --from-ref ${{ steps.merge_base.outputs.sha }}
+            --to-ref ${{ github.event.pull_request.head.sha }}

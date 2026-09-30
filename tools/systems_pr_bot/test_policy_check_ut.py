@@ -7,9 +7,9 @@ These let us iterate on policies WITHOUT pushing branches or running workflows:
                    the higher-level ensure_* functions.
 
 Run locally:
-    python -m unittest .github/therock_pr_bot/test_policy_check_ut.py -v
+    python tools/systems_pr_bot/test_policy_check_ut.py -v
     # or
-    pytest .github/therock_pr_bot/test_policy_check_ut.py
+    pytest tools/systems_pr_bot/test_policy_check_ut.py
 """
 
 import re
@@ -17,13 +17,13 @@ import sys
 import unittest
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from unittest import mock
 
 # Make `policy_check` importable regardless of the working directory.
 THIS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(THIS_DIR))
 
 import policy_check as pc  # noqa: E402
-
 
 # ----------------------------- helpers ---------------------------------------
 
@@ -92,6 +92,12 @@ def make_file(
         "deletions": deletions,
         "changes": changes if changes is not None else additions + deletions,
     }
+
+
+def make_check_run(
+    conclusion: Optional[str], name: str = "pre-commit"
+) -> Dict[str, Any]:
+    return {"name": name, "conclusion": conclusion}
 
 
 # ----------------------------- PR description --------------------------------
@@ -430,6 +436,100 @@ class SkipTagTests(unittest.TestCase):
     def test_skip_tag_ignored_inside_comment(self) -> None:
         # Tags inside HTML comments (e.g. a PR template) do not trigger a skip.
         self.assertFalse(pc.pr_wants_skip("<!-- @skip-pr-bot -->"))
+
+
+# ----------------------------- required checks ------------------------------
+
+
+class RequiredCheckRunTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.policy = make_policy()
+
+    def test_missing_required_check(self) -> None:
+        missing, failing, conclusions = pc.summarize_required_checks(self.policy, [])
+        self.assertEqual(missing, ["pre-commit"])
+        self.assertEqual(failing, [])
+        self.assertEqual(conclusions, {})
+
+        result = pc.build_check_results(self.policy, [])[0]
+        self.assertFalse(result.passed)
+        self.assertTrue(result.pending)
+
+    def test_all_same_name_successes_pass(self) -> None:
+        runs = [make_check_run("success"), make_check_run("success")]
+        missing, failing, conclusions = pc.summarize_required_checks(self.policy, runs)
+        self.assertEqual(missing, [])
+        self.assertEqual(failing, [])
+        self.assertEqual(conclusions, {"pre-commit": "success, success"})
+
+        result = pc.build_check_results(self.policy, runs)[0]
+        self.assertTrue(result.passed)
+        self.assertFalse(result.pending)
+
+    def test_pending_same_name_run_keeps_combined_check_pending(self) -> None:
+        runs = [make_check_run("success"), make_check_run(None)]
+        missing, failing, conclusions = pc.summarize_required_checks(self.policy, runs)
+        self.assertEqual(missing, [])
+        self.assertEqual(failing, [])
+        self.assertEqual(conclusions, {"pre-commit": "null, success"})
+
+        result = pc.build_check_results(self.policy, runs)[0]
+        self.assertFalse(result.passed)
+        self.assertTrue(result.pending)
+
+    def test_failure_wins_in_either_input_order(self) -> None:
+        for runs in (
+            [make_check_run("success"), make_check_run("failure")],
+            [make_check_run("failure"), make_check_run("success")],
+        ):
+            with self.subTest(runs=runs):
+                missing, failing, _ = pc.summarize_required_checks(self.policy, runs)
+                self.assertEqual(missing, [])
+                self.assertEqual(failing, ["pre-commit=failure"])
+
+                result = pc.build_check_results(self.policy, runs)[0]
+                self.assertFalse(result.passed)
+                self.assertFalse(result.pending)
+                self.assertIn("failure", result.details[0])
+
+    def test_failure_is_reported_while_same_name_run_is_pending(self) -> None:
+        runs = [make_check_run(None), make_check_run("failure")]
+        missing, failing, _ = pc.summarize_required_checks(self.policy, runs)
+        self.assertEqual(missing, [])
+        self.assertEqual(failing, ["pre-commit=failure"])
+
+        result = pc.build_check_results(self.policy, runs)[0]
+        self.assertFalse(result.passed)
+        self.assertFalse(result.pending)
+
+    def test_every_accepted_conclusion_passes(self) -> None:
+        runs = [
+            make_check_run("success"),
+            make_check_run("neutral"),
+            make_check_run("skipped"),
+        ]
+        missing, failing, _ = pc.summarize_required_checks(self.policy, runs)
+        self.assertEqual(missing, [])
+        self.assertEqual(failing, [])
+        self.assertTrue(pc.build_check_results(self.policy, runs)[0].passed)
+
+    def test_failure_comment_checks_every_same_name_run(self) -> None:
+        policy = make_policy(
+            precommit_failure_comment=pc.FailureComment(
+                title="Formatting failed", body="Run pre-commit locally."
+            )
+        )
+        for runs in (
+            [make_check_run("success"), make_check_run("failure")],
+            [make_check_run("failure"), make_check_run("success")],
+        ):
+            with self.subTest(runs=runs), mock.patch.object(
+                pc, "upsert_comment"
+            ) as upsert_comment:
+                pc.maybe_comment_precommit_failure(
+                    "owner", "repo", 7, "token", policy, runs
+                )
+                upsert_comment.assert_called_once()
 
 
 # ----------------------------- integration -----------------------------------
