@@ -9,10 +9,13 @@
 #include "policies/rocprofiler-sdk/domain_service/backend.hpp"
 #include "policies/rocprofiler-sdk/domain_service/externals.hpp"
 
+#include "logger/debug.hpp"
+
 #include <fmt/format.h>
 
 #include <cstdint>
 #include <optional>
+#include <stdexcept>
 
 namespace rocprofsys::domains::buffered
 {
@@ -40,10 +43,20 @@ on_scratch_memory(typename SdkBackend::scratch_memory_record_t* record,
     constexpr auto        k_zero_start_timestamp = 0;
     constexpr auto        k_zero_end_timestamp   = 0;
 
+    const typename Externals::agent_t* agent = nullptr;
+    try
+    {
+        agent =
+            &Externals::get_agent_manager().get_agent_by_handle(record->agent_id.handle);
+    } catch(const std::out_of_range& e)
+    {
+        LOG_WARNING("dropping record: agent lookup failed for handle {} ({})",
+                    record->agent_id.handle, e.what());
+        return;
+    }
+
     const std::uint64_t stream_id =
         rocprofiler_sdk::stream_stack_service<SdkBackend>::get_stream_id(record).handle;
-    const auto& agent =
-        Externals::get_agent_manager().get_agent_by_handle(record->agent_id.handle);
 
     auto& metadata_registry = Externals::get_metadata_registry();
     metadata_registry.add_thread_info({ Externals::get_ppid(), Externals::get_pid(),
@@ -51,7 +64,7 @@ on_scratch_memory(typename SdkBackend::scratch_memory_record_t* record,
                                         k_zero_end_timestamp, k_empty_json });
 
     metadata_registry.add_track({ fmt::format("GPU Scratch Memory [{}] Thread {}",
-                                              agent.device_id, record->thread_id),
+                                              agent->device_id, record->thread_id),
                                   record->thread_id, k_empty_json });
 
     metadata_registry.add_queue(record->queue_id.handle);
@@ -66,6 +79,19 @@ on_scratch_memory(typename SdkBackend::scratch_memory_record_t* record,
         SdkBackend::get_scratch_memory_allocation_size(*record),
         record->correlation_id.internal,
         SdkBackend::get_parent_stack_id(record->correlation_id), stream_id });
+
+    if(Externals::get_use_timemory())
+    {
+        if(const auto sequent_tid =
+               Externals::get_thread_info_sequent_tid(record->thread_id))
+        {
+            const auto name = SdkBackend::get_buffer_tracing_names().at(
+                SdkBackend::BUFFER_TRACING_SCRATCH_MEMORY, record->operation);
+
+            Externals::write_timemory_bundle(
+                name, *sequent_tid, record->end_timestamp - record->start_timestamp);
+        }
+    }
 }
 
 template <policies::domain_service::backend   SdkBackend,

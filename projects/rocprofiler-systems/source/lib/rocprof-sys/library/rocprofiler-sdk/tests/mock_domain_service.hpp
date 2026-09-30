@@ -1281,7 +1281,12 @@ struct externals
         return {};
     }
 
-    static std::uint64_t get_thread_info_sequent_tid(std::uint64_t /*tid*/) { return 0; }
+    static constexpr std::uint64_t k_unknown_tid = 0xABCDABCD;
+
+    static std::optional<std::uint64_t> get_thread_info_sequent_tid(std::uint64_t tid)
+    {
+        return tid == k_unknown_tid ? std::nullopt : std::optional<std::uint64_t>{ 0 };
+    }
 
     static bool get_use_timemory() { return g_buffer_storage_mock->get_use_timemory(); }
 

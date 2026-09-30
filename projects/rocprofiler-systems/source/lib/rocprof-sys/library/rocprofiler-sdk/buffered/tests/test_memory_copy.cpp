@@ -176,4 +176,48 @@ TEST(memory_copy_test, on_memory_copy_writes_timemory_bundle_when_enabled)
     g_buffer_storage_mock.reset();
 }
 
+class memory_copy_unknown_agent_test : public ::testing::TestWithParam<bool>
+{};
+
+TEST_P(memory_copy_unknown_agent_test, drops_record)
+{
+    const bool is_dst_unknown = GetParam();
+    SCOPED_TRACE(is_dst_unknown ? "dst agent unknown" : "src agent unknown");
+
+    g_metadata_registry_mock = std::make_unique<StrictMock<gmock_metadata_registry>>();
+    g_buffer_storage_mock    = std::make_unique<StrictMock<gmock_buffer_storage>>();
+
+    mock_sdk::memory_copy_record_t record{};
+    auto& unknown_agent  = is_dst_unknown ? record.dst_agent_id : record.src_agent_id;
+    unknown_agent.handle = externals::agent_manager_t::k_unknown_agent_handle;
+
+    EXPECT_NO_THROW((on_memory_copy<mock_sdk, externals>(&record, nullptr)));
+
+    g_metadata_registry_mock.reset();
+    g_buffer_storage_mock.reset();
+}
+
+INSTANTIATE_TEST_SUITE_P(memory_copy_test, memory_copy_unknown_agent_test,
+                         ::testing::Bool());
+
+TEST(memory_copy_test, on_memory_copy_skips_timemory_bundle_for_unknown_thread)
+{
+    g_metadata_registry_mock = std::make_unique<StrictMock<gmock_metadata_registry>>();
+    g_buffer_storage_mock    = std::make_unique<StrictMock<gmock_buffer_storage>>();
+
+    mock_sdk::memory_copy_record_t record{};
+    record.thread_id = externals::k_unknown_tid;
+
+    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info).Times(1);
+    EXPECT_CALL(*g_metadata_registry_mock, add_track).Times(1);
+    EXPECT_CALL(*g_metadata_registry_mock, add_stream).Times(1);
+    EXPECT_CALL(*g_buffer_storage_mock, store_memory_copy).Times(1);
+    EXPECT_CALL(*g_buffer_storage_mock, get_use_timemory).WillOnce(Return(true));
+
+    EXPECT_NO_THROW((on_memory_copy<mock_sdk, externals>(&record, nullptr)));
+
+    g_metadata_registry_mock.reset();
+    g_buffer_storage_mock.reset();
+}
+
 }  // namespace rocprofsys::domains::buffered

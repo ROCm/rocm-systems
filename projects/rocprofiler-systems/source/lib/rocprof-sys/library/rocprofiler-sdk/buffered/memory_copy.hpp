@@ -9,10 +9,13 @@
 #include "policies/rocprofiler-sdk/domain_service/backend.hpp"
 #include "policies/rocprofiler-sdk/domain_service/externals.hpp"
 
+#include "logger/debug.hpp"
+
 #include <fmt/format.h>
 
 #include <cstdint>
 #include <optional>
+#include <stdexcept>
 
 namespace rocprofsys::domains::buffered
 {
@@ -39,12 +42,32 @@ on_memory_copy(typename SdkBackend::memory_copy_record_t* record,
     constexpr auto        k_zero_start_timestamp = 0;
     constexpr auto        k_zero_end_timestamp   = 0;
 
-    const auto  beg_timestamp_ns = record->start_timestamp;
-    const auto  end_timestamp_ns = record->end_timestamp;
-    const auto& dst_agent =
-        Externals::get_agent_manager().get_agent_by_handle(record->dst_agent_id.handle);
-    const auto& src_agent =
-        Externals::get_agent_manager().get_agent_by_handle(record->src_agent_id.handle);
+    const typename Externals::agent_t* dst_agent = nullptr;
+    try
+    {
+        dst_agent = &Externals::get_agent_manager().get_agent_by_handle(
+            record->dst_agent_id.handle);
+    } catch(const std::out_of_range& e)
+    {
+        LOG_WARNING("dropping record: dst_agent lookup failed for handle {} ({})",
+                    record->dst_agent_id.handle, e.what());
+        return;
+    }
+
+    const typename Externals::agent_t* src_agent = nullptr;
+    try
+    {
+        src_agent = &Externals::get_agent_manager().get_agent_by_handle(
+            record->src_agent_id.handle);
+    } catch(const std::out_of_range& e)
+    {
+        LOG_WARNING("dropping record: src_agent lookup failed for handle {} ({})",
+                    record->src_agent_id.handle, e.what());
+        return;
+    }
+
+    const auto beg_timestamp_ns = record->start_timestamp;
+    const auto end_timestamp_ns = record->end_timestamp;
 
     const std::uint64_t stream_id =
         rocprofiler_sdk::stream_stack_service<SdkBackend>::get_stream_id(record).handle;
@@ -56,7 +79,7 @@ on_memory_copy(typename SdkBackend::memory_copy_record_t* record,
 
     metadata_registry.add_track(
         { fmt::format("GPU Memory Copy to Agent [{}] Thread {}",
-                      dst_agent.logical_node_id, record->thread_id),
+                      dst_agent->logical_node_id, record->thread_id),
           record->thread_id, k_empty_json });
 
     metadata_registry.add_stream(stream_id);
@@ -73,13 +96,16 @@ on_memory_copy(typename SdkBackend::memory_copy_record_t* record,
 
     if(Externals::get_use_timemory())
     {
-        const auto sequent_tid =
-            Externals::get_thread_info_sequent_tid(record->thread_id);
-        auto name = fmt::format("memory_copy: {} -> {}", src_agent.logical_node_id,
-                                dst_agent.logical_node_id);
+        if(const auto sequent_tid =
+               Externals::get_thread_info_sequent_tid(record->thread_id))
+        {
+            const auto name =
+                fmt::format("memory_copy: {} -> {}", src_agent->logical_node_id,
+                            dst_agent->logical_node_id);
 
-        Externals::write_timemory_bundle(name, sequent_tid,
-                                         end_timestamp_ns - beg_timestamp_ns);
+            Externals::write_timemory_bundle(name, *sequent_tid,
+                                             end_timestamp_ns - beg_timestamp_ns);
+        }
     }
 }
 

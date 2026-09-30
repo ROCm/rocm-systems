@@ -368,13 +368,13 @@ struct external_dependencies
                                   : std::string_view{};
     }
 
-    static std::uint64_t get_thread_info_sequent_tid(std::uint64_t tid)
+    static std::optional<std::uint64_t> get_thread_info_sequent_tid(std::uint64_t tid)
     {
         const auto& thread_info_data =
             thread_info::get(static_cast<std::int64_t>(tid), SystemTID);
         if(!thread_info_data.has_value() || !thread_info_data->index_data.has_value())
         {
-            throw std::runtime_error("No valid thread info.");
+            return std::nullopt;
         }
 
         return thread_info_data->index_data->sequent_value;

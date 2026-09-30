@@ -186,4 +186,40 @@ TEST(kernel_dispatch_test, on_kernel_dispatch_writes_timemory_bundle_when_enable
     g_buffer_storage_mock.reset();
 }
 
+TEST(kernel_dispatch_test, on_kernel_dispatch_drops_record_with_unknown_agent)
+{
+    g_metadata_registry_mock = std::make_unique<StrictMock<gmock_metadata_registry>>();
+    g_buffer_storage_mock    = std::make_unique<StrictMock<gmock_buffer_storage>>();
+
+    mock_sdk::kernel_dispatch_record_t record{};
+    record.dispatch_info.agent_id.handle =
+        externals::agent_manager_t::k_unknown_agent_handle;
+
+    EXPECT_NO_THROW((on_kernel_dispatch<mock_sdk, externals>(&record, nullptr)));
+
+    g_metadata_registry_mock.reset();
+    g_buffer_storage_mock.reset();
+}
+
+TEST(kernel_dispatch_test, on_kernel_dispatch_skips_timemory_bundle_for_unknown_thread)
+{
+    g_metadata_registry_mock = std::make_unique<StrictMock<gmock_metadata_registry>>();
+    g_buffer_storage_mock    = std::make_unique<StrictMock<gmock_buffer_storage>>();
+
+    mock_sdk::kernel_dispatch_record_t record{};
+    record.thread_id = externals::k_unknown_tid;
+
+    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info).Times(1);
+    EXPECT_CALL(*g_metadata_registry_mock, add_track).Times(1);
+    EXPECT_CALL(*g_metadata_registry_mock, add_queue).Times(1);
+    EXPECT_CALL(*g_metadata_registry_mock, add_stream).Times(1);
+    EXPECT_CALL(*g_buffer_storage_mock, store).Times(1);
+    EXPECT_CALL(*g_buffer_storage_mock, get_use_timemory).WillOnce(Return(true));
+
+    EXPECT_NO_THROW((on_kernel_dispatch<mock_sdk, externals>(&record, nullptr)));
+
+    g_metadata_registry_mock.reset();
+    g_buffer_storage_mock.reset();
+}
+
 }  // namespace rocprofsys::domains::buffered

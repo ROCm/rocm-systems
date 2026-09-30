@@ -11,10 +11,13 @@
 #include "policies/rocprofiler-sdk/domain_service/backend.hpp"
 #include "policies/rocprofiler-sdk/domain_service/externals.hpp"
 
+#include "logger/debug.hpp"
+
 #include <fmt/format.h>
 
 #include <cstdint>
 #include <optional>
+#include <stdexcept>
 
 namespace rocprofsys::domains::buffered
 {
@@ -42,13 +45,23 @@ on_kernel_dispatch(typename SdkBackend::kernel_dispatch_record_t* record,
     constexpr auto        k_zero_start_timestamp = 0;
     constexpr auto        k_zero_end_timestamp   = 0;
 
+    const typename Externals::agent_t* agent = nullptr;
+    try
+    {
+        agent = &Externals::get_agent_manager().get_agent_by_handle(
+            record->dispatch_info.agent_id.handle);
+    } catch(const std::out_of_range& e)
+    {
+        LOG_WARNING("dropping record: agent lookup failed for handle {} ({})",
+                    record->dispatch_info.agent_id.handle, e.what());
+        return;
+    }
+
     auto name = rocprofsys::utility::demangle(
         Externals::get_kernel_symbol_name(record->dispatch_info.kernel_id));
-    auto        beg_timestamp_ns = record->start_timestamp;
-    auto        end_timestamp_ns = record->end_timestamp;
-    auto        queue_id         = record->dispatch_info.queue_id;
-    const auto& agent            = Externals::get_agent_manager().get_agent_by_handle(
-        record->dispatch_info.agent_id.handle);
+    auto beg_timestamp_ns = record->start_timestamp;
+    auto end_timestamp_ns = record->end_timestamp;
+    auto queue_id         = record->dispatch_info.queue_id;
 
     std::uint64_t stream_id =
         rocprofiler_sdk::stream_stack_service<SdkBackend>::get_stream_id(record).handle;
@@ -60,7 +73,7 @@ on_kernel_dispatch(typename SdkBackend::kernel_dispatch_record_t* record,
                                             k_zero_end_timestamp, k_empty_json });
 
         metadata_registry.add_track({ fmt::format("GPU Kernel Dispatch [{}] Queue {}",
-                                                  agent.device_id, queue_id.handle),
+                                                  agent->device_id, queue_id.handle),
                                       record->thread_id, k_empty_json });
 
         metadata_registry.add_queue(queue_id.handle);
@@ -84,11 +97,12 @@ on_kernel_dispatch(typename SdkBackend::kernel_dispatch_record_t* record,
 
     if(Externals::get_use_timemory())
     {
-        const auto sequent_tid =
-            Externals::get_thread_info_sequent_tid(record->thread_id);
-
-        Externals::write_timemory_bundle(name, sequent_tid,
-                                         end_timestamp_ns - beg_timestamp_ns);
+        if(const auto sequent_tid =
+               Externals::get_thread_info_sequent_tid(record->thread_id))
+        {
+            Externals::write_timemory_bundle(name, *sequent_tid,
+                                             end_timestamp_ns - beg_timestamp_ns);
+        }
     }
 }
 

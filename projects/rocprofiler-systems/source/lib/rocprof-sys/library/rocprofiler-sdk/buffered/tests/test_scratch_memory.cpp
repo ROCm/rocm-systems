@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 
 #include <memory>
+#include <string_view>
 
 namespace rocprofsys::domains::buffered
 {
@@ -19,6 +20,7 @@ namespace
 {
 
 using ::testing::Eq;
+using ::testing::Return;
 using ::testing::StrictMock;
 
 using test_support::externals;
@@ -131,8 +133,78 @@ TEST(scratch_memory_test, on_scratch_memory_forwards_record_fields_to_dependenci
     EXPECT_CALL(*g_metadata_registry_mock, add_stream(Eq(k_mock_stream_id))).Times(1);
     EXPECT_CALL(*g_buffer_storage_mock, store_scratch_memory(Eq(expected_sample)))
         .Times(1);
+    EXPECT_CALL(*g_buffer_storage_mock, get_use_timemory).WillOnce(Return(false));
 
     on_scratch_memory<mock_sdk, externals>(&record, nullptr);
+
+    g_metadata_registry_mock.reset();
+    g_buffer_storage_mock.reset();
+}
+
+TEST(scratch_memory_test, on_scratch_memory_drops_record_with_unknown_agent)
+{
+    g_metadata_registry_mock = std::make_unique<StrictMock<gmock_metadata_registry>>();
+    g_buffer_storage_mock    = std::make_unique<StrictMock<gmock_buffer_storage>>();
+
+    mock_sdk::scratch_memory_record_t record{};
+    record.agent_id.handle = externals::agent_manager_t::k_unknown_agent_handle;
+
+    EXPECT_NO_THROW((on_scratch_memory<mock_sdk, externals>(&record, nullptr)));
+
+    g_metadata_registry_mock.reset();
+    g_buffer_storage_mock.reset();
+}
+
+TEST(scratch_memory_test, on_scratch_memory_writes_timemory_bundle_when_enabled)
+{
+    g_metadata_registry_mock = std::make_unique<StrictMock<gmock_metadata_registry>>();
+    g_buffer_storage_mock    = std::make_unique<StrictMock<gmock_buffer_storage>>();
+
+    mock_sdk::scratch_memory_record_t record{};
+    record.thread_id       = 111;
+    record.start_timestamp = 1000;
+    record.end_timestamp   = 2500;
+
+    // The tracing-name table and get_thread_info_sequent_tid are fixed by the test
+    // doubles: see tracing_names_t::at and externals::get_thread_info_sequent_tid.
+    constexpr std::string_view k_mock_name        = "operation";
+    constexpr std::uint64_t    k_mock_sequent_tid = 0;
+    const std::uint64_t        expected_elapsed_ns =
+        record.end_timestamp - record.start_timestamp;
+
+    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info).Times(1);
+    EXPECT_CALL(*g_metadata_registry_mock, add_track).Times(1);
+    EXPECT_CALL(*g_metadata_registry_mock, add_queue).Times(1);
+    EXPECT_CALL(*g_metadata_registry_mock, add_stream).Times(1);
+    EXPECT_CALL(*g_buffer_storage_mock, store_scratch_memory).Times(1);
+    EXPECT_CALL(*g_buffer_storage_mock, get_use_timemory).WillOnce(Return(true));
+    EXPECT_CALL(*g_buffer_storage_mock,
+                write_timemory_bundle(Eq(k_mock_name), Eq(k_mock_sequent_tid),
+                                      Eq(expected_elapsed_ns)))
+        .Times(1);
+
+    on_scratch_memory<mock_sdk, externals>(&record, nullptr);
+
+    g_metadata_registry_mock.reset();
+    g_buffer_storage_mock.reset();
+}
+
+TEST(scratch_memory_test, on_scratch_memory_skips_timemory_bundle_for_unknown_thread)
+{
+    g_metadata_registry_mock = std::make_unique<StrictMock<gmock_metadata_registry>>();
+    g_buffer_storage_mock    = std::make_unique<StrictMock<gmock_buffer_storage>>();
+
+    mock_sdk::scratch_memory_record_t record{};
+    record.thread_id = externals::k_unknown_tid;
+
+    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info).Times(1);
+    EXPECT_CALL(*g_metadata_registry_mock, add_track).Times(1);
+    EXPECT_CALL(*g_metadata_registry_mock, add_queue).Times(1);
+    EXPECT_CALL(*g_metadata_registry_mock, add_stream).Times(1);
+    EXPECT_CALL(*g_buffer_storage_mock, store_scratch_memory).Times(1);
+    EXPECT_CALL(*g_buffer_storage_mock, get_use_timemory).WillOnce(Return(true));
+
+    EXPECT_NO_THROW((on_scratch_memory<mock_sdk, externals>(&record, nullptr)));
 
     g_metadata_registry_mock.reset();
     g_buffer_storage_mock.reset();
