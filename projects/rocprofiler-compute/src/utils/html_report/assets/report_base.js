@@ -6,7 +6,14 @@
   var DARK_THEME_CLASS = "report-theme-dark";
 
   function readModel(modelId) {
-    var modelEl = document.getElementById(modelId);
+    var modelEl = null;
+    var elements = document.querySelectorAll("[id]");
+    for (var i = 0; i < elements.length; i += 1) {
+      if (elements[i].id === modelId) {
+        modelEl = elements[i];
+        break;
+      }
+    }
     if (!modelEl) {
       return null;
     }
@@ -200,6 +207,15 @@
         if (item.title) {
           action.setAttribute("aria-label", item.title);
           kernelNameTooltip.attachTooltipToKernelRow(action, label, item.title);
+        }
+        if (item.pct != null) {
+          var pct = document.createElement("span");
+          pct.className = "report-kernel-pct";
+          pct.textContent = item.pct.toFixed(1) + "%";
+          if (options.pctTitle) {
+            pct.title = options.pctTitle;
+          }
+          action.appendChild(pct);
         }
         action.addEventListener("click", function (event) {
           kernelNameTooltip.hide();

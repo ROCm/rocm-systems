@@ -318,6 +318,15 @@ body {
   visibility: visible;
 }
 
+.report-kernel-pct {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding-left: 8px;
+  color: var(--report-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 @media (max-width: 900px) {
   .report-body {
     flex-direction: column;

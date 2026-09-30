@@ -1442,6 +1442,7 @@
         label: kernel.label,
         title: kernel.name,
         color: kernel.color,
+        pct: kernelHasRuntime(kernel) ? kernel.pctRuntime : null,
       };
     });
     kernelPanel = window.HtmlReport.createKernelList({
@@ -1450,17 +1451,12 @@
       countElement: kernelCountEl,
       items: items,
       mode: "multi",
+      pctTitle: "Percent of GPU resident time",
       decorateRow: function (row, item) {
-        var kernel = kernels[item.key];
         row.querySelector(".report-panel-name").classList.add(
           "roofline-kernel-name"
         );
-        if (kernelHasRuntime(kernel)) {
-          row.querySelector(".report-panel-action").appendChild(
-            buildRuntimePct(kernel)
-          );
-        }
-        row.appendChild(buildOffPlotBadge(kernel));
+        row.appendChild(buildOffPlotBadge(kernels[item.key]));
       },
       onChange: function (keys) {
         selectedKernelKeys = keys;
