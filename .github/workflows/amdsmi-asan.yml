@@ -165,6 +165,13 @@ jobs:
         id: build
         run: cmake --build "$BUILD_DIR" --parallel "$(nproc)"
 
+      - name: Install
+        id: install
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          cmake --install "$BUILD_DIR" --prefix "$AMDSMI_PREFIX"
+          echo "$AMDSMI_PREFIX/bin" >> "$GITHUB_PATH"
+
       - name: Run full test suite under ASAN
         run: |
           set -euo pipefail
@@ -178,10 +185,6 @@ jobs:
 
       # The CLI sweep still runs when the test suite fails, so one run
       # reports both.
-      - name: Install
-        id: install
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
-        run: cmake --install "$BUILD_DIR" --prefix "$AMDSMI_PREFIX"
 
       # Python is not instrumented: preload ASAN (with libstdc++, so it can
       # intercept the library's C++ throws) and use PYTHONMALLOC=malloc so it
