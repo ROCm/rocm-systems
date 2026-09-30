@@ -12,6 +12,7 @@
 #include "collectives.h"
 #include "core.h"
 #include "utils.h"
+#include "rccl_decision.h"
 
 // Used to pass NCCL call information between functions
 struct ncclInfo {
@@ -30,6 +31,30 @@ struct ncclInfo {
   int chunkSteps;
   int sliceSteps;
   const void* acc;
+
+  // Optional per-operation metadata (e.g., rocSHMEM collectives, CE AlltoAllv).
+  size_t* sizes;
+
+  bool useDirect;
+  // One-sided ops
+  size_t peerWinOffset;
+  ncclWindow_t peerWin;
+  int sigIdx;
+  int ctx;
+  unsigned int flags;
+  int nDesc;
+  ncclWaitSignalDesc_t* signalDescs;
+  // A config copied from config passed by user so older user config can be safely accessed
+  // during synchronous host scheduling (never at launch/replay).
+  ncclCollConfig_t collConfig;
+  // Implementation decision precomputed by ncclAllReduce_impl() /
+  // ncclAllGather_impl() / ncclReduceScatter_impl() / ncclAlltoAll_impl() via
+  // the matching rcclSelect*() and consumed by taskAppend() so it does not
+  // recompute CE-vs-kernel, graph-capture, or symmetric-vs-ring. Valid only
+  // when decisionValid is true (false for collectives that have not been wired
+  // yet, and the AllReduce WithBias path).
+  struct rcclCollDecision decision;
+  bool decisionValid;
 };
 
 #endif

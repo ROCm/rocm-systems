@@ -157,7 +157,7 @@ hsa_status_t BlitKernel::Cleanup() {
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t BlitKernel::BuildBlitCode(
+hsa_status_t BlitKernel::BuildImageBlitCode(
     hsa_agent_t agent, std::vector<BlitCodeInfo>& blit_code_catalog) {
   // Find existing kernels in the list that have compatible ISA.
   hsa_isa_t agent_isa = {0};
@@ -165,6 +165,14 @@ hsa_status_t BlitKernel::BuildBlitCode(
   if (HSA_STATUS_SUCCESS != status) {
     return status;
   }
+
+  bool image_support = true;
+  HSA::hsa_agent_get_info(agent, (hsa_agent_info_t)HSA_EXT_AGENT_INFO_IMAGE_SUPPORT, &image_support);
+  if (HSA_STATUS_SUCCESS != status)
+    return status;
+
+  if (!image_support)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   std::lock_guard<std::mutex> lock(lock_);
 
@@ -887,8 +895,8 @@ hsa_status_t BlitKernel::ConvertImage(const Image& original_image,
   }
 
   hsa_ext_image_format_t new_format = {
-      static_cast<hsa_ext_image_channel_type_t>(converted_type),
-      static_cast<hsa_ext_image_channel_order_t>(converted_order)};
+      static_cast<hsa_ext_image_channel_type32_t>(converted_type),
+      static_cast<hsa_ext_image_channel_order32_t>(converted_order)};
 
   Image* new_image_handle = Image::Create(original_image.component);
   *new_image_handle=original_image;

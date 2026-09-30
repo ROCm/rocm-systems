@@ -206,8 +206,8 @@ rdc_status_t rdc_group_field_create(rdc_handle_t p_rdc_handle, uint32_t num_fiel
       ->rdc_group_field_create(num_field_ids, field_ids, field_group_name, rdc_field_group_id);
 }
 
-rdc_status_t rdc_group_field_add_field(rdc_handle_t p_rdc_handle, rdc_field_grp_t rdc_field_group_id,
-                                       rdc_field_t field_id) {
+rdc_status_t rdc_group_field_add_field(rdc_handle_t p_rdc_handle,
+                                       rdc_field_grp_t rdc_field_group_id, rdc_field_t field_id) {
   if (!p_rdc_handle) {
     return RDC_ST_INVALID_HANDLER;
   }

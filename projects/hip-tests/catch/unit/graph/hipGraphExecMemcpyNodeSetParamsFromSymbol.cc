@@ -1,23 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <functional>
 #include <vector>
@@ -98,7 +83,7 @@ void GraphExecMemcpyFromSymbolSetParamsShell(const void* symbol, const void* alt
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParamsFromSymbol_Positive_Basic") {
+HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParamsFromSymbol_Positive_Basic) {
   SECTION("char") {
     HIP_GRAPH_MEMCPY_NODE_SET_PARAMS_TO_FROM_SYMBOL_TEST(GraphExecMemcpyFromSymbolSetParamsShell, 1,
                                                          char);
@@ -142,7 +127,7 @@ TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParamsFromSymbol_Positive_Basic") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParamsFromSymbol_Negative_Parameters") {
+HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParamsFromSymbol_Negative_Parameters) {
   using namespace std::placeholders;
   hipGraph_t graph = nullptr;
   HIP_CHECK(hipGraphCreate(&graph, 0));
@@ -185,6 +170,46 @@ TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParamsFromSymbol_Negative_Parameters") 
 #endif
 
   HIP_CHECK(hipGraphExecDestroy(graph_exec));
+  HIP_CHECK(hipGraphDestroy(graph));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Verify that a symbol node instantiated in generic capture mode can return to symbol mode.
+ * Test source
+ * ------------------------
+ *  - unit/graph/hipGraphExecMemcpyNodeSetParamsFromSymbol.cc
+ */
+HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParamsFromSymbol_CaptureDemotion) {
+  LinearAllocGuard<int> src(LinearAllocs::hipMalloc, sizeof(int));
+  LinearAllocGuard<int> dst(LinearAllocs::hipMalloc, sizeof(int));
+  int symbol_value = 81;
+  int generic_value = 82;
+  int zero = 0;
+  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(int_device_var), &symbol_value, sizeof(int)));
+  HIP_CHECK(hipMemcpy(src.ptr(), &generic_value, sizeof(int), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(dst.ptr(), &zero, sizeof(int), hipMemcpyHostToDevice));
+
+  hipGraph_t graph = nullptr;
+  hipGraphNode_t node = nullptr;
+  hipGraphExec_t exec = nullptr;
+  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphAddMemcpyNodeFromSymbol(&node, graph, nullptr, 0, dst.ptr(),
+                                            SYMBOL(int_device_var), sizeof(int), 0,
+                                            hipMemcpyDefault));
+  HIP_CHECK(
+      hipGraphMemcpyNodeSetParams1D(node, dst.ptr(), src.ptr(), sizeof(int), hipMemcpyDefault));
+  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphExecMemcpyNodeSetParamsFromSymbol(exec, node, dst.ptr(), SYMBOL(int_device_var),
+                                                      sizeof(int), 0, hipMemcpyDefault));
+  HIP_CHECK(hipGraphLaunch(exec, hipStreamPerThread));
+  HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+
+  int actual = 0;
+  HIP_CHECK(hipMemcpy(&actual, dst.ptr(), sizeof(int), hipMemcpyDeviceToHost));
+  REQUIRE(actual == symbol_value);
+  HIP_CHECK(hipGraphExecDestroy(exec));
   HIP_CHECK(hipGraphDestroy(graph));
 }
 

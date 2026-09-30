@@ -15,6 +15,17 @@
 
 #include "rocm_kpack/kpack.h"
 
+// Cross-platform packed struct support
+#ifdef _MSC_VER
+#define PACKED_STRUCT_BEGIN __pragma(pack(push, 1))
+#define PACKED_STRUCT_END __pragma(pack(pop))
+#define PACKED_ATTR
+#else
+#define PACKED_STRUCT_BEGIN
+#define PACKED_STRUCT_END
+#define PACKED_ATTR __attribute__((packed))
+#endif
+
 // Helper to create a temp file with specific content
 // Uses mkstemp() on POSIX for race-free temp file creation
 class TempFile {
@@ -242,12 +253,14 @@ TEST(KpackAPITest, InvalidArchive_EmptyFile) {
 TEST(KpackAPITest, InvalidArchive_WrongMagic) {
   // Create a file with wrong magic bytes
   // Header format: magic (4), version (4), compression (4), toc_offset (8)
-  struct __attribute__((packed)) FakeHeader {
+  PACKED_STRUCT_BEGIN
+  struct FakeHeader {
     char magic[4] = {'X', 'X', 'X', 'X'};  // Wrong magic
     uint32_t version = 1;
     uint32_t compression = 0;
     uint64_t toc_offset = 20;
-  };
+  } PACKED_ATTR;
+  PACKED_STRUCT_END
   FakeHeader header;
 
   TempFile bad_magic(&header, sizeof(header));
@@ -259,12 +272,14 @@ TEST(KpackAPITest, InvalidArchive_WrongMagic) {
 
 TEST(KpackAPITest, InvalidArchive_UnsupportedVersion) {
   // Create a file with correct magic but wrong version
-  struct __attribute__((packed)) FakeHeader {
+  PACKED_STRUCT_BEGIN
+  struct FakeHeader {
     char magic[4] = {'K', 'P', 'A', 'K'};  // Correct magic
     uint32_t version = 999;                // Unsupported version
     uint32_t compression = 0;
     uint64_t toc_offset = 20;
-  };
+  } PACKED_ATTR;
+  PACKED_STRUCT_END
   FakeHeader header;
 
   TempFile bad_version(&header, sizeof(header));
@@ -288,12 +303,14 @@ TEST(KpackAPITest, InvalidArchive_TruncatedHeader) {
 
 TEST(KpackAPITest, InvalidArchive_TOCOffsetBeyondFile) {
   // Create a file with valid header but TOC offset beyond file size
-  struct __attribute__((packed)) FakeHeader {
+  PACKED_STRUCT_BEGIN
+  struct FakeHeader {
     char magic[4] = {'K', 'P', 'A', 'K'};
     uint32_t version = 1;
     uint32_t compression = 0;
     uint64_t toc_offset = 999999;  // Way beyond file size
-  };
+  } PACKED_ATTR;
+  PACKED_STRUCT_END
   FakeHeader header;
 
   TempFile bad_offset(&header, sizeof(header));

@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
 project(opencl)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -11,12 +15,6 @@ option(BUILD_TESTS "Enable building OpenCL tests" OFF)
 option(BUILD_ICD "Enable building OpenCL ICD Loader" OFF)
 option(EMU_ENV "Enable building for emulation environment" OFF)
 option(ENABLE_ADDRESS_SANITIZER "Option to enable ASAN build" OFF)
-
-# Add flags to generate PDB files with full symbolic information
-if(MSVC)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zi")
-  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} /DEBUG:FULL")
-endif()
 
 # Address sanitizer options
 if(ENABLE_ADDRESS_SANITIZER)
@@ -36,11 +34,27 @@ set(OPENCL_ICD_LOADER_HEADERS_DIR "${CMAKE_CURRENT_LIST_DIR}/khronos/headers/ope
 if(BUILD_ICD)
   add_subdirectory(khronos/icd)
 endif()
+
+# Resolve OpenCL ICD link library once for tools and tests.
+# If OPENCL_ICD_LIB is empty, targets that need the ICD loader are skipped.
+if(TARGET OpenCL)
+  set(OPENCL_ICD_LIB OpenCL)
+else()
+  list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+  find_package(AMD_ICD QUIET)
+  find_library(OPENCL_ICD_LIB OpenCL HINTS "${AMD_ICD_LIBRARY_DIR}")
+  if(NOT OPENCL_ICD_LIB)
+    message(WARNING "OpenCL ICD loader not found. clinfo and ocltst will not be built.")
+  endif()
+endif()
+
 add_subdirectory(amdocl)
-add_subdirectory(tools/clinfo)
 add_subdirectory(tools/cltrace)
-if(BUILD_TESTS)
-  add_subdirectory(tests/ocltst)
+if(OPENCL_ICD_LIB)
+  add_subdirectory(tools/clinfo)
+  if(BUILD_TESTS)
+    add_subdirectory(tests/ocltst)
+  endif()
 endif()
 
 ###--- Packaging ------------------------------------------------------------###
@@ -60,7 +74,7 @@ install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/khronos/headers/opencl2.2/CL"
 # Packaging steps
 #############################
 if(NOT WIN32)
-find_package(ROCM QUIET CONFIG PATHS /opt/rocm)
+find_package(ROCM QUIET CONFIG PATHS ${ROCM_PATH})
 if(ROCM_FOUND)
   include(ROCMSetupVersion)
   rocm_setup_version( VERSION "2.0.0" )
@@ -99,13 +113,14 @@ if(DEFINED ENV{ROCM_LIBPATCH_VERSION})
   message("Using CPACK_PACKAGE_VERSION ${CPACK_PACKAGE_VERSION}")
 endif()
 
-set(CPACK_PACKAGING_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Package Installation path for OpenCL")
+set(CPACK_PACKAGING_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Package Installation path for OpenCL")
 
 configure_file(
   packaging/amdocl64.icd
   ${CMAKE_BINARY_DIR}/opencl/packages/opencl/${OPENCL_AMD_ICD_FILE}
   COPYONLY
 )
+# support legacy rocm-ci
 install(
   FILES ${CMAKE_BINARY_DIR}/opencl/packages/opencl/${OPENCL_AMD_ICD_FILE}
   DESTINATION /${CMAKE_INSTALL_SYSCONFDIR}/OpenCL/vendors
@@ -118,6 +133,8 @@ configure_file(
   ${CMAKE_BINARY_DIR}/opencl/packages/opencl/10-rocm-opencl.conf
   COPYONLY
 )
+
+# support legacy rocm-ci
 install(
   FILES ${CMAKE_BINARY_DIR}/opencl/packages/opencl/10-rocm-opencl.conf
   DESTINATION /${CMAKE_INSTALL_SYSCONFDIR}/ld.so.conf.d

@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2015 - 2021 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 // This file is a port from hiprocclrtests (hipMultiThreadStreams2)
 
@@ -50,7 +34,7 @@ void run1(size_t size, hipStream_t stream) {
   HIPCHECK(hipMemcpyAsync(Bh, Ah, size, hipMemcpyHostToHost, stream));
   HIPCHECK(hipMemcpyAsync(Cd, Bh, size, hipMemcpyHostToDevice, stream));
   hipLaunchKernelGGL(HIP_KERNEL_NAME(Inc), dim3(N / 500), dim3(500), 0, stream, Cd);
-  HIP_CHECK(hipGetLastError());
+  HIPCHECK(hipGetLastError());
   HIPCHECK(hipMemcpyAsync(Dd, Cd, size, hipMemcpyDeviceToDevice, stream));
   HIPCHECK(hipMemcpyAsync(Eh, Dd, size, hipMemcpyDeviceToHost, stream));
   HIPCHECK(hipDeviceSynchronize());
@@ -92,9 +76,9 @@ void run(size_t size, hipStream_t stream1, hipStream_t stream2) {
   HIPCHECK(hipMemcpyAsync(Cd, Bh, size, hipMemcpyHostToDevice, stream1));
   HIPCHECK(hipMemcpyAsync(Cdd, Bhh, size, hipMemcpyHostToDevice, stream2));
   hipLaunchKernelGGL(HIP_KERNEL_NAME(Inc), dim3(N / 500), dim3(500), 0, stream1, Cd);
-  HIP_CHECK(hipGetLastError());
+  HIPCHECK(hipGetLastError());
   hipLaunchKernelGGL(HIP_KERNEL_NAME(Inc), dim3(N / 500), dim3(500), 0, stream2, Cdd);
-  HIP_CHECK(hipGetLastError());
+  HIPCHECK(hipGetLastError());
   HIPCHECK(hipMemcpyAsync(Dd, Cd, size, hipMemcpyDeviceToDevice, stream1));
   HIPCHECK(hipMemcpyAsync(Ddd, Cdd, size, hipMemcpyDeviceToDevice, stream2));
   HIPCHECK(hipMemcpyAsync(Eh, Dd, size, hipMemcpyDeviceToHost, stream1));
@@ -121,8 +105,8 @@ void run(size_t size, hipStream_t stream1, hipStream_t stream2) {
   HIPCHECK(hipFree(Cdd));
   HIPCHECK(hipFree(Ddd));
 }
-TEST_CASE("Unit_hipMultiThreadStreams2") {
-  int iterations = 100;
+HIP_TEST_CASE(Unit_hipMultiThreadStreams2) {
+  int iterations = isQuickLevel() ? 5 : 100;
 
   hipStream_t stream[3];
   for (int i = 0; i < 3; i++) {

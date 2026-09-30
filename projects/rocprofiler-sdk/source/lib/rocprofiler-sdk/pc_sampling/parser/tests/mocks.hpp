@@ -280,7 +280,7 @@ private:
 
 /**
  * Lightweight class to represent a wave in the particular dispatch.
- * Capable of generating PC samples and submiting them to the buffer.
+ * Capable of generating PC samples and submitting them to the buffer.
  * Instead of generating a valid program counter, this class uses the snapshot.pc field to
  * store the original dispatch's unique_id for later correctness verification.
  */

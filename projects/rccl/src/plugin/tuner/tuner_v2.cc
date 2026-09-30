@@ -1,11 +1,12 @@
 /*************************************************************************
- * Copyright (c) 2023, NVIDIA CORPORATION. All rights reserved.
- * Copyright (c) 2023, Meta Platforms, Inc. and affiliates.
+ * SPDX-FileCopyrightText: Copyright (c) 2023 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2023, Meta Platforms, Inc. and affiliates.
+ * SPDX-License-Identifier: Apache-2.0 and BSD-3
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
-#include <dlfcn.h>
+#include "os.h"
 #include "debug.h"
 #include "checks.h"
 #include "nccl_tuner.h"
@@ -24,7 +25,10 @@ static int hasNvlsSupport(float** collCostTable) {
   //
   // nvlsSupport = 1 if either NVLS or NVLS_TREE entries in the cost table are not -1
   float (*table)[NCCL_NUM_PROTOCOLS] = (float (*)[NCCL_NUM_PROTOCOLS])collCostTable;
-  return (table[NCCL_ALGO_NVLS][NCCL_PROTO_SIMPLE] != NCCL_ALGO_PROTO_IGNORE || table[NCCL_ALGO_NVLS_TREE][NCCL_PROTO_SIMPLE] != NCCL_ALGO_PROTO_IGNORE) ? 1 : 0;
+  return (table[NCCL_ALGO_NVLS][NCCL_PROTO_SIMPLE] != NCCL_ALGO_PROTO_IGNORE ||
+          table[NCCL_ALGO_NVLS_TREE][NCCL_PROTO_SIMPLE] != NCCL_ALGO_PROTO_IGNORE) ?
+           1 :
+           0;
 }
 
 static int hasCollNetSupport(float** collCostTable) {
@@ -32,12 +36,16 @@ static int hasCollNetSupport(float** collCostTable) {
   return (table[NCCL_ALGO_COLLNET_CHAIN][NCCL_PROTO_SIMPLE] == NCCL_ALGO_PROTO_IGNORE) ? 0 : 1;
 }
 
-static ncclResult_t ncclTuner_getCollInfo(void* context, ncclFunc_t collType, size_t nBytes, int numPipeOps, float** collCostTable, int numAlgo __attribute__((unused)), int numProto __attribute__((unused)), int regBuff __attribute__((unused)), int* nChannels) {
+static ncclResult_t ncclTuner_getCollInfo(void* context, ncclFunc_t collType, size_t nBytes, int numPipeOps,
+                                          float** collCostTable, int numAlgo __attribute__((unused)),
+                                          int numProto __attribute__((unused)), int regBuff __attribute__((unused)),
+                                          int* nChannels) {
   int algorithm = NCCL_ALGO_UNDEF;
   int protocol = NCCL_PROTO_UNDEF;
   int nvlsSupport = hasNvlsSupport(collCostTable);
   int collNetSupport = hasCollNetSupport(collCostTable);
-  NCCLCHECK(ncclTuner_v2->getCollInfo(context, collType, nBytes, collNetSupport, nvlsSupport, numPipeOps, &algorithm, &protocol, nChannels));
+  NCCLCHECK(ncclTuner_v2->getCollInfo(context, collType, nBytes, collNetSupport, nvlsSupport, numPipeOps, &algorithm,
+                                      &protocol, nChannels));
   // set time to 0 below to make sure this algorithm/protocol is selected later on
   if (algorithm >= 0 && algorithm < NCCL_NUM_ALGORITHMS && protocol >= 0 && protocol < NCCL_NUM_PROTOCOLS) {
     float (*table)[NCCL_NUM_PROTOCOLS] = (float (*)[NCCL_NUM_PROTOCOLS])collCostTable;
@@ -54,16 +62,17 @@ static ncclResult_t ncclTuner_init(void** ctx, uint64_t commId, size_t nRanks, s
                                    ncclNvlDomainInfo_v5_t* nvlDomainInfo, ncclTunerConstants_t* /*constants*/) {
   NCCLCHECK(ncclTuner_v2->init(nRanks, nNodes, logfn, ctx));
   ncclTuner.getCollInfo = ncclTuner_getCollInfo;
+  ncclTuner.getChunkSize = NULL;
   ncclTuner.finalize = ncclTuner_finalize;
   return ncclSuccess;
 }
 
 ncclTuner_t* getNcclTuner_v2(void* lib) {
-  ncclTuner_v2 = (ncclTuner_v2_t*)dlsym(lib, "ncclTunerPlugin_v2");
+  ncclTuner_v2 = (ncclTuner_v2_t*)ncclOsDlsym(lib, "ncclTunerPlugin_v2");
   if (ncclTuner_v2) {
     ncclTuner.name = ncclTuner_v2->name;
     ncclTuner.init = ncclTuner_init;
-    INFO(NCCL_INIT|NCCL_TUNING, "TUNER/Plugin: Using %s (v2)", ncclTuner_v2->name);
+    INFO(NCCL_INIT | NCCL_TUNING, "TUNER/Plugin: Using %s (v2)", ncclTuner_v2->name);
     return &ncclTuner;
   }
   return NULL;

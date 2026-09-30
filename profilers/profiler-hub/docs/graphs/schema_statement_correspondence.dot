@@ -1,0 +1,72 @@
+digraph schema_statements {
+    rankdir=LR;
+    fontname="Helvetica";
+    node [fontname="Helvetica", fontsize=10, style=filled, shape=box];
+    edge [fontname="Helvetica", fontsize=9];
+
+    label="Statements and Schema: One-to-One Correspondence";
+    labelloc=t;
+    fontsize=14;
+
+    subgraph cluster_schema_v3 {
+        label="Schema v3";
+        style=filled;
+        color="#dce8f5";
+        fillcolor="#f0f6ff";
+
+        subgraph cluster_v3_insert {
+            label="insert_statements\<Backend\>";
+            style=filled;
+            color="#d0e0f0";
+            fillcolor="#e8f0ff";
+
+            v3_string_ins [label="string_statement()", fillcolor="#c8ddf0"];
+            v3_node_ins [label="node_info_statement()", fillcolor="#c8ddf0"];
+            v3_process_ins [label="process_info_statement()", fillcolor="#c8ddf0"];
+            v3_event_ins [label="event_statement()", fillcolor="#c8ddf0"];
+            v3_region_ins [label="region_statement()", fillcolor="#c8ddf0"];
+            v3_kd_ins [label="kernel_dispatch_statement()", fillcolor="#c8ddf0"];
+            v3_dots_ins [label="... (one per table)", fillcolor="#c8ddf0"];
+        }
+
+        subgraph cluster_v3_read {
+            label="read_statements";
+            style=filled;
+            color="#d0e0f0";
+            fillcolor="#e8f0ff";
+
+            v3_string_read [label="string_statement()", fillcolor="#c8ddf0"];
+            v3_node_read [label="node_info_statement()", fillcolor="#c8ddf0"];
+            v3_region_read [label="region_statements\n(base, time, track, combined)", fillcolor="#c8ddf0"];
+            v3_detail_read [label="region_detail()\nkernel_dispatch_detail()\n...", fillcolor="#c8ddf0"];
+            v3_dots_read [label="... (one set per table)", fillcolor="#c8ddf0"];
+        }
+    }
+
+    subgraph cluster_db_tables {
+        label="Database Tables (schema v3)";
+        style=filled;
+        color="#f5e0c0";
+        fillcolor="#fff8f0";
+
+        t_string [label="rocpd_string_{uuid}", shape=box3d, fillcolor="#f0dcc0"];
+        t_node [label="rocpd_info_node_{uuid}", shape=box3d, fillcolor="#f0dcc0"];
+        t_process [label="rocpd_info_process_{uuid}", shape=box3d, fillcolor="#f0dcc0"];
+        t_event [label="rocpd_event_{uuid}", shape=box3d, fillcolor="#f0dcc0"];
+        t_region [label="rocpd_region_{uuid}", shape=box3d, fillcolor="#f0dcc0"];
+        t_kd [label="rocpd_kernel_dispatch_{uuid}", shape=box3d, fillcolor="#f0dcc0"];
+        t_dots [label="...", shape=box3d, fillcolor="#f0dcc0"];
+    }
+
+    v3_string_ins -> t_string [label=" INSERT ", color="#2060a0", fontcolor="#2060a0"];
+    v3_node_ins -> t_node [label=" INSERT ", color="#2060a0", fontcolor="#2060a0"];
+    v3_process_ins -> t_process [label=" INSERT ", color="#2060a0", fontcolor="#2060a0"];
+    v3_event_ins -> t_event [label=" INSERT ", color="#2060a0", fontcolor="#2060a0"];
+    v3_region_ins -> t_region [label=" INSERT ", color="#2060a0", fontcolor="#2060a0"];
+    v3_kd_ins -> t_kd [label=" INSERT ", color="#2060a0", fontcolor="#2060a0"];
+
+    t_string -> v3_string_read [label=" SELECT ", color="#a06020", fontcolor="#a06020"];
+    t_node -> v3_node_read [label=" SELECT ", color="#a06020", fontcolor="#a06020"];
+    t_region -> v3_region_read [label=" SELECT ", color="#a06020", fontcolor="#a06020"];
+    t_region -> v3_detail_read [label=" SELECT by id ", color="#a06020", fontcolor="#a06020"];
+}

@@ -39,7 +39,6 @@
 #include "profiler.hpp"
 #include "queue.hpp"
 #include "ro_team_proxy.hpp"
-#include "team_info_proxy.hpp"
 #include "window_proxy.hpp"
 
 namespace rocshmem {
@@ -57,9 +56,8 @@ class ROHostContext;
  * the host (which is an inversion of the normal behavior).
  */
 class ROBackend : public Backend {
-  using RetBufferProxyT = DeviceProxy<HIPAllocator, uint64_t>;
-  using StatusProxyT =
-          DeviceProxy<HIPDefaultFinegrainedAllocator, char>;
+  using RetBufferProxyT = DeviceProxy<uint64_t>;
+  using StatusProxyT = DeviceProxy<char>;
 
  public:
   /**
@@ -94,9 +92,10 @@ class ROBackend : public Backend {
   /**
    * @copydoc Backend::create_new_team
    */
-  void create_new_team(Team *parent_team, TeamInfo *team_info_wrt_parent,
-                       TeamInfo *team_info_wrt_world, int num_pes,
-                       int my_pe_in_new_team, MPI_Comm team_comm,
+  void create_new_team(Team *parent_team,
+                       const TeamInfo& team_info_wrt_parent,
+                       const TeamInfo& team_info_wrt_world, int num_pes,
+                       int my_pe_in_new_team, MPI_Comm new_team_comm,
                        rocshmem_team_t *new_team) override;
 
   /**
@@ -123,6 +122,24 @@ class ROBackend : public Backend {
   void ctx_destroy(Context *ctx) override;
 
   /**
+   * @copydoc Backend::buffer_register_symmetric
+   *
+   * Not supported by the RO backend: symmetric user-buffer registration is
+   * only implemented for the IPC and GDA backends. Always returns
+   * ROCSHMEM_ERROR without registering anything.
+   */
+  int buffer_register_symmetric(void *addr, size_t length,
+                                void **registered_addr) override;
+
+  /**
+   * @copydoc Backend::buffer_unregister_symmetric
+   *
+   * Not supported by the RO backend (see buffer_register_symmetric). Always
+   * returns ROCSHMEM_ERROR.
+   */
+  int buffer_unregister_symmetric(void *addr) override;
+
+  /**
    * @brief Free all resources associated with the backend.
    *
    * The memory allocated to the handle param is deallocated during this
@@ -146,19 +163,28 @@ class ROBackend : public Backend {
   /**
    * @brief Handle to device memory fields.
    */
-  BackendProxyT backend_proxy{};
+  BackendProxy backend_proxy{};
 
   /**
    * @brief Handle to block resources
    */
-  BlockHandleProxyT block_handle_proxy_;
+  BlockHandleProxy block_handle_proxy_;
 
   /**
    * @brief Handle to block resources
    */
-  DefaultBlockHandleProxyT default_block_handle_proxy_;
+  DefaultBlockHandleProxy default_block_handle_proxy_;
 
  protected:
+  /**
+   * @copydoc Backend::accumulate_ctx_device_stats()
+   */
+  void accumulate_ctx_device_stats() override;
+  /**
+   * @copydoc Backend::accumulate_default_host_ctx_stats()
+   */
+  void accumulate_default_host_ctx_stats() override;
+
   /**
    * @copydoc Backend::dump_backend_stats()
    */
@@ -205,7 +231,19 @@ class ROBackend : public Backend {
    *
    * See the transport class for more details.
    */
-  ROTeamProxyT *team_world_proxy_;
+  ROTeamProxy *team_world_proxy_;
+
+  /**
+   * @brief Allocate and initialize team shared.
+   *
+   * TEAM_SHARED contains the PEs that share a common memory domain
+   * (same node). Must be called after initIPC() since membership
+   * is determined from ipcImpl.pes_with_ipc_avail. Computes real
+   * pe_start/stride from the PE list; set to ROCSHMEM_TEAM_INVALID
+   * when IPC is disabled or when node-local ranks are not uniformly
+   * strided.
+   */
+  void setup_team_shared();
 
   /**
    * @brief Workers used to poll on the device network request queues.
@@ -221,7 +259,7 @@ class ROBackend : public Backend {
   /**
    * @brief Pool of contexts for RO_NET
    */
-  WindowProxyT *ro_window_proxy_;
+  WindowProxy *ro_window_proxy_;
 
  protected:
   /**
@@ -229,14 +267,14 @@ class ROBackend : public Backend {
    *
    * @note Internal data ownership is managed by the proxy
    */
-  HdpProxy<HIPHostAllocator> hdp_proxy_{};
+  HdpProxy hdp_proxy_{};
 
   /**
    * @brief Handle to device profiler memory
    *
    * @note Internal data ownership is managed by the proxy
    */
-  ProfilerProxyT profiler_proxy_;  // init handled in constructor
+  ProfilerProxy profiler_proxy_;  // init handled in constructor
 
  public:
   /**
@@ -250,7 +288,7 @@ class ROBackend : public Backend {
    *
    * @note Internal data ownership is managed by the proxy
    */
-  DefaultContextProxyT default_context_proxy_;  // init handled in constructor
+  DefaultContextProxy default_context_proxy_;  // init handled in constructor
 
   /**
    * @brief Controls how many thread blocks are monitored by polling thread.
@@ -266,24 +304,24 @@ class ROBackend : public Backend {
   /**
    * @brief A free-list containing contexts.
    */
-  FreeListProxy<HIPAllocator, ROContext *> ctx_free_list{};
+  FreeListProxy<ROContext *> ctx_free_list{};
 
   /**
    * @brief AtomicWFQueue containing status flag buffers for default context
    */
-  AtomicWFQueueProxy<HIPAllocator, volatile char*> default_ctx_status_{};
+  AtomicWFQueueProxy<volatile char*> default_ctx_status_{};
 
   /**
    * @brief AtomicWFQueue containing rocshmem_g return buffers for default
    * context
    */
-  AtomicWFQueueProxy<HIPAllocator, uint64_t*> default_ctx_g_ret_buffer_{};
+  AtomicWFQueueProxy<uint64_t*> default_ctx_g_ret_buffer_{};
 
   /**
    * @brief AtomicWFQueue containing rocshmem return buffers for default
    * context
    */
-  AtomicWFQueueProxy<HIPAllocator, uint64_t*> default_ctx_atomic_ret_buffer_{};
+  AtomicWFQueueProxy<uint64_t*> default_ctx_atomic_ret_buffer_{};
 
   /**
    * @brief Holds maximum threads per work-group
@@ -308,6 +346,7 @@ class ROBackend : public Backend {
   /**
    * @brief Return buffer for rocshmem_g API
    */
+  HIPAllocator ret_buffer_alloc_{};
   RetBufferProxyT g_ret_buffer_;
   RetBufferProxyT g_ret_buffer_default_ctx_;
 
@@ -324,6 +363,7 @@ class ROBackend : public Backend {
    * operation completes. The GPU then resets status back to zero. There is
    * a separate status variable for each work-item in a RO Context
    */
+  HIPAllocatorFinegrained status_alloc_{};
   StatusProxyT status_;
   StatusProxyT status_default_ctx_;
 };

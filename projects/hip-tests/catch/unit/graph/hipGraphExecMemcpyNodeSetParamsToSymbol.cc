@@ -1,23 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
@@ -98,7 +83,7 @@ void GraphExecMemcpyToSymbolSetParamsShell(const void* symbol, const void* alt_s
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParamsToSymbol_Positive_Basic") {
+HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParamsToSymbol_Positive_Basic) {
   SECTION("char") {
     HIP_GRAPH_MEMCPY_NODE_SET_PARAMS_TO_FROM_SYMBOL_TEST(GraphExecMemcpyToSymbolSetParamsShell, 10,
                                                          char);
@@ -142,8 +127,7 @@ TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParamsToSymbol_Positive_Basic") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParamsToSymbol_Negative_Parameters",
-          "[multigpu]") {
+HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParamsToSymbol_Negative_Parameters) {
   using namespace std::placeholders;
   hipGraph_t graph = nullptr;
   HIP_CHECK(hipGraphCreate(&graph, 0));
@@ -183,7 +167,7 @@ TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParamsToSymbol_Negative_Parameters",
 
   SECTION("Changing src allocation device") {
     if (HipTest::getDeviceCount() < 2) {
-      HipTest::HIP_SKIP_TEST("Test requires two connected GPUs");
+      WARN("Skipping section: fewer than two GPUs (second device required for this negative case).");
     } else {
       HIP_CHECK(hipSetDevice(1));
       LinearAllocGuard<int> new_var(LinearAllocs::hipMalloc, sizeof(int));
@@ -195,6 +179,49 @@ TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParamsToSymbol_Negative_Parameters",
   }
 
   HIP_CHECK(hipGraphExecDestroy(graph_exec));
+  HIP_CHECK(hipGraphDestroy(graph));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Verify that hipGraphExecUpdate propagates updated to-symbol parameters.
+ * Test source
+ * ------------------------
+ *  - unit/graph/hipGraphExecMemcpyNodeSetParamsToSymbol.cc
+ */
+HIP_TEST_CASE(Unit_hipGraphExecUpdate_MemcpyNodeToSymbol) {
+  LinearAllocGuard<int> first_src(LinearAllocs::hipMalloc, sizeof(int));
+  LinearAllocGuard<int> second_src(LinearAllocs::hipMalloc, sizeof(int));
+  int first = 91;
+  int second = 92;
+  int zero = 0;
+  HIP_CHECK(hipMemcpy(first_src.ptr(), &first, sizeof(int), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(second_src.ptr(), &second, sizeof(int), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(int_device_var), &zero, sizeof(int)));
+
+  hipGraph_t graph = nullptr;
+  hipGraphNode_t node = nullptr;
+  hipGraphExec_t exec = nullptr;
+  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphAddMemcpyNodeToSymbol(&node, graph, nullptr, 0, SYMBOL(int_device_var),
+                                          first_src.ptr(), sizeof(int), 0,
+                                          hipMemcpyDeviceToDevice));
+  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphMemcpyNodeSetParamsToSymbol(node, SYMBOL(int_device_var), second_src.ptr(),
+                                                sizeof(int), 0, hipMemcpyDeviceToDevice));
+
+  hipGraphNode_t error_node = nullptr;
+  hipGraphExecUpdateResult result = hipGraphExecUpdateError;
+  HIP_CHECK(hipGraphExecUpdate(exec, graph, &error_node, &result));
+  REQUIRE(result == hipGraphExecUpdateSuccess);
+  HIP_CHECK(hipGraphLaunch(exec, hipStreamPerThread));
+  HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+
+  int actual = 0;
+  HIP_CHECK(hipMemcpyFromSymbol(&actual, HIP_SYMBOL(int_device_var), sizeof(int)));
+  REQUIRE(actual == second);
+  HIP_CHECK(hipGraphExecDestroy(exec));
   HIP_CHECK(hipGraphDestroy(graph));
 }
 

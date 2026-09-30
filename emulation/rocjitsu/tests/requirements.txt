@@ -1,0 +1,3 @@
+--index-url https://repo.amd.com/rocm/whl/gfx950-dcgpu/
+rocm[libraries,devel]
+torch

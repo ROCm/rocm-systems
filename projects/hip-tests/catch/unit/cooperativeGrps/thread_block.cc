@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "cooperative_groups_common.hh"
 #include "cg_common_kernels.hh"
@@ -49,11 +36,13 @@ static __global__ void thread_block_thread_rank_getter(unsigned int* thread_rank
   thread_ranks[thread_rank_in_grid()] = group.thread_rank();
 }
 
+#if HT_AMD
 template <typename BaseType = cg::thread_block>
 static __global__ void thread_block_block_rank_getter(unsigned int* block_ranks) {
   const BaseType group = cg::this_thread_block();
   block_ranks[thread_rank_in_grid()] = group.block_rank();
 }
+#endif
 
 static __global__ void thread_block_group_indices_getter(dim3* group_indices) {
   group_indices[thread_rank_in_grid()] = cg::this_thread_block().group_index();
@@ -85,7 +74,7 @@ static __global__ void thread_block_non_member_thread_rank_getter(unsigned int* 
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Thread_Block_Getters_Positive_Basic") {
+HIP_TEST_CASE(Unit_Thread_Block_Getters_Positive_Basic) {
   const auto blocks = GenerateBlockDimensions();
   const auto threads = GenerateThreadDimensions();
   if (blocks.x <= 0 || blocks.y <= 0 || blocks.z <= 0 || threads.x <= 0 || threads.y <= 0 ||
@@ -117,8 +106,10 @@ TEST_CASE("Unit_Thread_Block_Getters_Positive_Basic") {
     HIP_CHECK(hipMemcpy(uint_arr.ptr(), uint_arr_dev.ptr(),
                         grid.thread_count_ * sizeof(*uint_arr.ptr()), hipMemcpyDeviceToHost));
     HIP_CHECK(hipDeviceSynchronize());
+#if HT_AMD
     thread_block_block_rank_getter<<<blocks, threads>>>(uint_arr_dev.ptr());
     HIP_CHECK(hipGetLastError());
+#endif
 
     // Validate thread_block.thread_rank() values
     ArrayAllOf(uint_arr.ptr(), grid.thread_count_,
@@ -173,7 +164,7 @@ TEST_CASE("Unit_Thread_Block_Getters_Positive_Basic") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Thread_Block_Getters_Via_Base_Type_Positive_Basic") {
+HIP_TEST_CASE(Unit_Thread_Block_Getters_Via_Base_Type_Positive_Basic) {
   const auto blocks = GenerateBlockDimensions();
   const auto threads = GenerateThreadDimensions();
   if (blocks.x <= 0 || blocks.y <= 0 || blocks.z <= 0 || threads.x <= 0 || threads.y <= 0 ||
@@ -224,7 +215,7 @@ TEST_CASE("Unit_Thread_Block_Getters_Via_Base_Type_Positive_Basic") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Thread_Block_Getters_Via_Non_Member_Functions_Positive_Basic") {
+HIP_TEST_CASE(Unit_Thread_Block_Getters_Via_Non_Member_Functions_Positive_Basic) {
   const auto blocks = GenerateBlockDimensions();
   const auto threads = GenerateThreadDimensions();
   if (blocks.x <= 0 || blocks.y <= 0 || blocks.z <= 0 || threads.x <= 0 || threads.y <= 0 ||
@@ -374,7 +365,7 @@ template <bool global_memory, typename T> void ThreadBlockSyncTest() {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_Thread_Block_Sync_Positive_Basic", "", uint8_t, uint16_t, uint32_t) {
+HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Sync_Positive_Basic, uint8_t, uint16_t, uint32_t) {
   SECTION("Global memory") { ThreadBlockSyncTest<true, TestType>(); }
   SECTION("Shared memory") { ThreadBlockSyncTest<false, TestType>(); }
 }

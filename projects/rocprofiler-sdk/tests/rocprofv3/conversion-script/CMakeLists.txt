@@ -21,7 +21,7 @@
 # SOFTWARE.
 
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 project(
     rocprofiler-sdk-tests-rocprofv3-conversion-script
@@ -107,6 +107,5 @@ foreach(i RANGE 0 ${convert_test_length})
         ARGS --input ${output} ${validate_args}
         TIMEOUT 45
         LABELS "integration-tests"
-        FIXTURES_REQUIRED ${test_name}
-        UNSTABLE)
+        FIXTURES_REQUIRED ${test_name})
 endforeach()

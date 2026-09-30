@@ -30,10 +30,10 @@
  */
 typedef struct {
   uint32_t id;
-  const char *error_category;
-  const char *error_type;
-  const char *method;
-  const char *error_severity;
+  const char* error_category;
+  const char* error_type;
+  const char* method;
+  const char* error_severity;
 } error_map_entry_t;
 
 /**
@@ -43,6 +43,6 @@ typedef struct {
  * @param[in] error_severity Error severity string
  * @return Error ID if found, -1 if not found
  */
-int get_error_id(const char *error_category, const char *error_type, const char *error_severity);
+int get_error_id(const char* error_category, const char* error_type, const char* error_severity);
 
 #endif /* ERROR_MAP_H */

@@ -1,25 +1,5 @@
-/*
- * Copyright (C) 2014-2018 Advanced Micro Devices, Inc. All Rights Reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
- * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
- * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
- * OTHER DEALINGS IN THE SOFTWARE.
- *
- */
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
 
 #include <sys/time.h>
 #include <sys/mman.h>
@@ -87,7 +67,7 @@ void KFDQMTest::SubmitNopCpQueue(int gpuNode) {
 
     queue.Wait4PacketConsumption(event);
 
-    hsaKmtDestroyEvent(event);
+    HSAKMT_CALL(hsaKmtDestroyEvent, m_hsakmt_current_ctx, event);
     EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
 
 }
@@ -119,7 +99,7 @@ void KFDQMTest::SubmitPacketCpQueue(int gpuNode) {
 
     EXPECT_TRUE_GPU(WaitOnValue(destBuf.As<unsigned int*>(), 0), gpuNode);
 
-    hsaKmtDestroyEvent(event);
+    HSAKMT_CALL(hsaKmtDestroyEvent, m_hsakmt_current_ctx, event);
     EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
 }
 
@@ -485,9 +465,9 @@ void KFDQMTest::SdmaConcurrentCopies(int gpuNode) {
         }
 
         for (unsigned j = 0; j < NPACKETS; j++)
-            queue.PlacePacket(
+            ASSERT_NO_FATAL_FAILURE(queue.PlacePacket(
                 SDMACopyDataPacket(queue.GetFamilyId(), dstBuf.As<char *>()+COPY_SIZE*j,
-                                   srcBuf.As<char *>()+COPY_SIZE*j, COPY_SIZE));
+                                   srcBuf.As<char *>()+COPY_SIZE*j, COPY_SIZE)));
         queue.SubmitPacket();
 
         /* Waste a variable amount of time. Submission timing
@@ -501,12 +481,12 @@ void KFDQMTest::SdmaConcurrentCopies(int gpuNode) {
          * run concurrently for a bit without getting too far ahead
          */
         if ((i & 0x7) == 0)
-            queue.Wait4PacketConsumption();
+            ASSERT_NO_FATAL_FAILURE(queue.Wait4PacketConsumption());
     }
     log << "Done." << std::endl;
 
-    queue.PlaceAndSubmitPacket(SDMAWriteDataPacket(queue.GetFamilyId(), srcBuf.As<unsigned *>(), 0x02020202));
-    queue.Wait4PacketConsumption();
+    ASSERT_NO_FATAL_FAILURE(queue.PlaceAndSubmitPacket(SDMAWriteDataPacket(queue.GetFamilyId(), srcBuf.As<unsigned *>(), 0x02020202)));
+    ASSERT_NO_FATAL_FAILURE(queue.Wait4PacketConsumption());
     EXPECT_TRUE_GPU(WaitOnValue(srcBuf.As<unsigned int*>(), 0x02020202), gpuNode);
 
     EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
@@ -559,7 +539,7 @@ void KFDQMTest::DisableCpQueueByUpdateWithNullAddress(int gpuNode) {
 
     WaitOnValue(destBuf.As<unsigned int*>(), 1);
 
-    hsaKmtDestroyEvent(event);
+    HSAKMT_CALL(hsaKmtDestroyEvent, m_hsakmt_current_ctx, event);
     EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
 
 }
@@ -658,7 +638,7 @@ void KFDQMTest::DisableCpQueueByUpdateWithZeroPercentage(int gpuNode) {
     queue.Wait4PacketConsumption(event);
 
     WaitOnValue(destBuf.As<unsigned int*>(), 1);
-    hsaKmtDestroyEvent(event);
+    HSAKMT_CALL(hsaKmtDestroyEvent, m_hsakmt_current_ctx, event);
 
     EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
 
@@ -759,8 +739,14 @@ void KFDQMTest::OverSubscribeCpQueues(int gpuNode) {
     for (unsigned int qidx = 0; qidx < MAX_CP_QUEUES; ++qidx)
         queues[qidx].SubmitPacket();
 
-    // Delaying for 5 seconds in order to get all the results
-    Delay(5000);
+    // Delaying in order to get all the results
+    if(g_IsEmuMode) {
+        LOG() << "Emulation mode detected, delaying for 1 min to allow all packets to be processed." << std::endl;
+        Delay(60000);
+    } else {
+        LOG() << "Delaying for 5 seconds to allow all packets to be processed." << std::endl;
+        Delay(5000);
+    }
 
     for (unsigned int qidx = 0; qidx < MAX_CP_QUEUES; ++qidx)
         EXPECT_TRUE_GPU(queues[qidx].AllPacketsSubmitted(), gpuNode)<< "QueueId=" << qidx;;
@@ -845,19 +831,59 @@ void KFDQMTest::BasicCuMaskingLinear(int gpuNode) {
         const HsaNodeProperties *pNodeProperties = Get_NodeInfo()->GetNodeProperties(gpuNode);
         uint32_t ActiveCU = (pNodeProperties->NumFComputeCores / pNodeProperties->NumSIMDPerCU);
         uint32_t numSEs = pNodeProperties->NumShaderBanks;
+        /*
+         * On a multi-XCC node the driver distributes the linear CU mask across
+         * all XCCs: bit i of the mask is applied to XCC (i % NumXcc). A PM4
+         * dispatch (as used by this test), however, only executes on a single
+         * XCC (pm4_target_xcc defaults to 0). If we set mask bits contiguously,
+         * bits 1..NumXcc-1 land on XCCs that never run the dispatch, so the CU
+         * count on the executing XCC never grows and no speedup is observed.
+         *
+         * To measure scaling on the XCC that actually runs the work, stride the
+         * mask by NumXcc so every enabled CU maps onto XCC0. For single-XCC
+         * parts NumXcc == 1 and this reduces to the original contiguous mask.
+         */
+        uint32_t numXcc = pNodeProperties->NumXcc ? pNodeProperties->NumXcc : 1;
+        uint32_t CUsPerXcc = ActiveCU / numXcc;
+        /*
+         * On gfx12.1 the multi-XCC CU mask ABI is one bit per WGP (the driver
+         * interleaves one WGP bit per XCC), so only CUsPerXcc/2 mask units
+         * address real WGPs on the executing XCC. Sweeping past that point
+         * keeps growing the expected CU count while the measured time has
+         * already saturated (all WGPs on), driving the ratio below tolerance
+         * and failing. Cap the sweep at the WGP count for that case. On other
+         * parts one mask bit maps to one CU, so sweep all CUsPerXcc.
+         */
+        bool oneBitPerWgp = (m_FamilyId >= FAMILY_GFX12) && (numXcc > 1);
+        uint32_t unitsPerXcc = oneBitPerWgp ? CUsPerXcc / 2 : CUsPerXcc;
+        /*
+         * The driver enables the (strided) CU mask round-robin across the
+         * shader engines of the executing XCC, and the dispatch spreads its
+         * workgroups evenly across those engines. The usable parallelism is
+         * therefore bounded by the least-populated engine, so it only grows in
+         * steps of SEsPerXcc: enabling an odd extra CU adds a WGP to one engine
+         * without a matching WGP on the other, yielding no speedup. Compare the
+         * measured time against this SE-balanced effective CU count instead of
+         * the raw CU count so the expectation matches what the HW can deliver.
+         */
+        uint32_t SEsPerXcc = (numXcc > 1 && numSEs >= numXcc) ? numSEs / numXcc : 1;
         LOG() << std::dec << "# Compute cores: " << pNodeProperties->NumFComputeCores << std::endl;
         LOG() << std::dec << "# SIMDs per CU: " << pNodeProperties->NumSIMDPerCU << std::endl;
         LOG() << std::dec << "# Shader engines: " << numSEs << std::endl;
         LOG() << std::dec << "# Active CUs: " << ActiveCU << std::endl;
+        LOG() << std::dec << "# XCCs: " << numXcc << std::endl;
+        LOG() << std::dec << "# Active CUs per XCC: " << CUsPerXcc << std::endl;
+        LOG() << std::dec << "# Mask units per XCC: " << unitsPerXcc << std::endl;
+        LOG() << std::dec << "# Shader engines per XCC: " << SEsPerXcc << std::endl;
         HSAint64 TimewithCU1, TimewithCU;
         uint32_t maskNumDwords = (ActiveCU + 31) / 32; /* Round up to the nearest multiple of 32 */
         uint32_t maskNumBits = maskNumDwords * 32;
         uint32_t mask[maskNumDwords];
         double ratio;
 
-        mask[0] = 0x1;
-        for (int i = 1; i < maskNumDwords; i++)
+        for (uint32_t i = 0; i < maskNumDwords; i++)
             mask[i] = 0x0;
+        mask[0] = 0x1;
 
         /* Execute once to get any HW optimizations out of the way */
         TimeConsumedwithCUMask(gpuNode, mask, maskNumBits);
@@ -865,14 +891,22 @@ void KFDQMTest::BasicCuMaskingLinear(int gpuNode) {
         LOG() << "Getting baseline performance numbers (CU Mask: 0x1)" << std::endl;
         TimewithCU1 = GetAverageTimeConsumedwithCUMask(gpuNode, mask, maskNumBits, 3);
 
-        for (int nCUs = 2; nCUs <= ActiveCU; nCUs++) {
-            int maskIndex = (nCUs - 1) / 32;
-            mask[maskIndex] |= 1 << ((nCUs - 1) % 32);
+        for (uint32_t nCUs = 2; nCUs <= unitsPerXcc; nCUs++) {
+            uint32_t maskBit = (nCUs - 1) * numXcc;
+            uint32_t maskIndex = maskBit / 32;
+            mask[maskIndex] |= 1U << (maskBit % 32);
+
+            /* SE-balanced effective CU count (see comment above). Reduces to
+             * nCUs on single-XCC parts (SEsPerXcc handling is a no-op there).
+             */
+            uint32_t effCUs = (SEsPerXcc > 1 && nCUs >= SEsPerXcc) ?
+                              SEsPerXcc * (nCUs / SEsPerXcc) : nCUs;
 
             TimewithCU = TimeConsumedwithCUMask(gpuNode, mask, maskNumBits);
-            ratio = (double)(TimewithCU1) / ((double)(TimewithCU) * nCUs);
+            ratio = (double)(TimewithCU1) / ((double)(TimewithCU) * effCUs);
 
-            LOG() << "Expected performance of " << nCUs << " CUs vs 1 CU:" << std::endl;
+            LOG() << "Expected performance of " << nCUs << " CUs (effective "
+                  << effCUs << ") vs 1 CU:" << std::endl;
             LOG() << std::setprecision(2) << CuNegVariance << " <= " << std::fixed << std::setprecision(8)
                   << ratio << " <= " << std::setprecision(2) << CuPosVariance << std::endl;
 
@@ -899,7 +933,7 @@ TEST_F(KFDQMTest, BasicCuMaskingLinear) {
 // ====== ExtendedCuMasking Helper Functions ====== //
 
 
-#define CUMASK_DEBUG 0   // Enable extra output for debugging issues
+#define CUMASK_DEBUG 0           // Enable extra output for debugging issues
 
 #if CUMASK_DEBUG
 #define DBG_PRINT printf
@@ -943,6 +977,31 @@ static void printMask(const char *pHeader, uint32_t *pMask, uint32_t numDwords) 
  *   Special value: -1 (specifies ALL)
  *
  */
+/*
+ * Linear index of a WGP within an XCC: unit = se + sa*numSEs + wgp*numSEs*numSAperSE.
+ * (numSEs is SEs-per-XCC on gfx12.1, global otherwise.)
+ */
+static inline uint32_t cuMaskUnitIndex(const mask_config_t &c, uint32_t se, uint32_t sa, uint32_t wgp) {
+    return se + sa * c.numSEs + wgp * (c.numSEs * c.numSAperSE);
+}
+
+/*
+ * Set the mask bit(s) for one WGP unit, honouring the encoding described by
+ * maskConfig:
+ *   - gfx12.1 (numXcc > 1): one bit per WGP, interleaved across XCCs, so the
+ *     bit lives at (targetXcc + unit * numXcc).
+ *   - legacy (numXcc <= 1): two contiguous bits per WGP at (unit * 2).
+ */
+static inline void cuMaskSetUnit(uint32_t *pMask, const mask_config_t &c, uint32_t unit) {
+    if (c.numXcc > 1) {
+        uint32_t bit = c.targetXcc + unit * c.numXcc;
+        pMask[bit / 32] |= 1U << (bit % 32);
+    } else {
+        uint32_t insLoc = unit * 2;
+        pMask[insLoc / 32] |= 0x3U << (insLoc % 32);
+    }
+}
+
 static bool setCUMask(uint32_t *pMask, mask_config_t maskConfig, uint32_t seMask, uint32_t saMask, uint32_t wgpMask) {
 
     bool result = true;
@@ -955,8 +1014,7 @@ static bool setCUMask(uint32_t *pMask, mask_config_t maskConfig, uint32_t seMask
                         if (((saMask >> j) & 1)) {
                             for (int k = 0; k < maskConfig.numSEs; k++) {
                                 if (((seMask >> k) & 1)) {
-                                    uint32_t insLoc = k * 2 + j * (2 * maskConfig.numSEs) + i * (2 * maskConfig.numSEs * maskConfig.numSAperSE);
-                                    pMask[insLoc / 32] |= (0x3 << (insLoc % 32));
+                                    cuMaskSetUnit(pMask, maskConfig, cuMaskUnitIndex(maskConfig, k, j, i));
                                 }
                             }
                         }
@@ -994,10 +1052,89 @@ static bool setCUMask(uint32_t *pMask, mask_config_t maskConfig, uint32_t seMask
  * When false is returned, we should skipped the specific test scenario.
  *
  */
+/*
+ * gfx12.1 variant of adjustMask.
+ *
+ * This must mirror KFD's mqd_symmetrically_map_cu_mask_v12_1() exactly. That
+ * routine walks physical WGP slots in (wgp, sa, se) order, skipping any (se, sa)
+ * whose active-WGP count is not greater than the current WGP level, and consumes
+ * one interleaved user-mask bit (targetXcc + k*numXcc) per surviving slot -- a
+ * single *global* interleaved compaction across all (se, sa) of the XCC.
+ *
+ * Compacting each (se, sa) column independently is only equivalent when every
+ * column has the same active-WGP count. When counts differ (inactive WGPs),
+ * the surviving high-level slots of later columns shift, so a per-column
+ * model writes bits at the wrong indices. Replicate KFD's enumeration instead:
+ * for each surviving physical slot (se, sa, wgp) at global index k, request it
+ * (set bit targetXcc + k*numXcc) iff the user asked for that (se, sa, wgp).
+ *
+ * An inactive WGP can sit at any position within a column, not just the top:
+ * waves report the *physical* WGP index, so a mid-column gap shows up as a
+ * gap (e.g. physical WGPs 0-5,7 active with 6 missing). We therefore record the
+ * ordered list of surviving physical WGPs per column and map KFD's compacted
+ * slot k to the actual surviving physical WGP before consulting the user mask.
+ */
+static bool adjustMaskXcc(uint32_t *pAdjMask, uint32_t *pMask, mask_config_t c) {
+    bool nonZero = false;
+
+    memset(pAdjMask, 0, sizeof(uint32_t) * c.numDwords);
+
+    const uint32_t nCols = c.numSEs * c.numSAperSE;
+    uint32_t activeCount[nCols];
+    uint32_t survivor[nCols * c.numWGPperSA];
+
+    for (uint32_t se = 0; se < c.numSEs; se++) {
+        for (uint32_t sa = 0; sa < c.numSAperSE; sa++) {
+            const uint32_t col = se * c.numSAperSE + sa;
+            uint32_t active = 0;
+            for (uint32_t wgp = 0; wgp < c.numWGPperSA; wgp++) {
+                uint32_t unit = cuMaskUnitIndex(c, se, sa, wgp);
+                uint32_t bit = c.targetXcc + unit * c.numXcc;
+                if (!(c.pInactiveMask[bit / 32] & (1U << (bit % 32))))
+                    survivor[col * c.numWGPperSA + active++] = wgp;
+            }
+            activeCount[col] = active;
+        }
+    }
+
+    uint32_t k = 0;
+    for (uint32_t slot = 0; slot < c.numWGPperSA; slot++) {
+        for (uint32_t sa = 0; sa < c.numSAperSE; sa++) {
+            for (uint32_t se = 0; se < c.numSEs; se++) {
+                const uint32_t col = se * c.numSAperSE + sa;
+                if (activeCount[col] > slot) {
+                    uint32_t physWgp = survivor[col * c.numWGPperSA + slot];
+                    uint32_t reqUnit = cuMaskUnitIndex(c, se, sa, physWgp);
+                    uint32_t reqBit = c.targetXcc + reqUnit * c.numXcc;
+                    if (pMask[reqBit / 32] & (1U << (reqBit % 32))) {
+                        uint32_t adjBit = c.targetXcc + k * c.numXcc;
+                        pAdjMask[adjBit / 32] |= 1U << (adjBit % 32);
+                        nonZero = true;
+                    }
+                    k++;
+                }
+            }
+        }
+    }
+
+#if CUMASK_DEBUG
+    printf("\nAdjusting mask (Xcc %u, survivors=%u):\n", c.targetXcc, k);
+    printMask("         mask: ", pMask, c.numDwords);
+    printMask("     inactive: ", c.pInactiveMask, c.numDwords);
+    printMask("     adjusted: ", pAdjMask, c.numDwords);
+    printf("\n");
+#endif //CUMASK_DEBUG
+
+    return nonZero;
+}
+
 bool adjustMask(uint32_t *pAdjMask, uint32_t *pMask, mask_config_t maskConfig) {
     int wi = 0;
     int totalBits = maskConfig.numBits;
     bool nonZero = false;
+
+    if (maskConfig.numXcc > 1)
+        return adjustMaskXcc(pAdjMask, pMask, maskConfig);
 
     uint32_t *tempInactiveMask = new uint32_t[maskConfig.numDwords]{};
     uint32_t *tempAdjustMask = new uint32_t[maskConfig.numDwords]{};
@@ -1195,7 +1332,13 @@ static bool testCUMask(int gpuNode, uint32_t *pMask, mask_config_t maskConfig, H
     dispatch.SetArgs(NULL, pOutput);
     dispatch.SetDim(numWorkItems, 1, 1);
 
-    EXPECT_SUCCESS_GPU(queue.Create(gpuNode), gpuNode);
+    /* On gfx12.1 run the dispatch on the XCC this mask targets (pm4_target_xcc
+     * is encoded in bits 8-15 of the queue percentage). */
+    unsigned int queuePercentage = BaseQueue::DEFAULT_QUEUE_PERCENTAGE;
+    if (maskConfig.numXcc > 1)
+        queuePercentage |= (maskConfig.targetXcc << 8);
+
+    EXPECT_SUCCESS_GPU(queue.Create(gpuNode, BaseQueue::DEFAULT_QUEUE_SIZE, NULL, queuePercentage), gpuNode);
 
     EXPECT_SUCCESS_GPU(queue.SetCUMask(pAdjMask, maskConfig.numBits), gpuNode);
 
@@ -1204,6 +1347,121 @@ static bool testCUMask(int gpuNode, uint32_t *pMask, mask_config_t maskConfig, H
     EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
 
     return validateTest(pMask, maskConfig, numWorkItems, pOutput, pResultMask);
+}
+
+
+/*
+ * gfx12.1 multi-XCC variant of the ExtendedCuMasking sub-tests.
+ *
+ * On gfx12.1 the CU mask ABI is one bit per WGP, interleaved across XCCs (the
+ * bit for unit u of XCC x is at x + u*numXcc), and a PM4 dispatch only runs on
+ * the single XCC selected by pm4_target_xcc. The HW_ID1 register the shader
+ * samples reports SE/SA/WGP local to the executing XCC, so we drive each XCC in
+ * turn with per-XCC topology (SEsPerXcc SEs) and validate its WGPs in isolation.
+ *
+ * The same correctness sub-tests as the single-XCC path are run per XCC: full
+ * mask / inactive detection, all SE / SA / WGP combinations, a linear sweep, and
+ * random asymmetric subsets.
+ */
+static void extendedCuMaskingXcc(int gpuNode, const std::string &nodeStr,
+                                 uint32_t numXcc, uint32_t SEsPerXcc,
+                                 uint32_t numSAperSE, uint32_t numWGPperSA,
+                                 uint32_t maskNumDwords, uint32_t maskNumBits,
+                                 HsaMemoryBuffer &programBuffer,
+                                 uint32_t numWorkItems, out_data_t *pOutput) {
+    uint32_t mask[maskNumDwords];
+    uint32_t inactiveMask[maskNumDwords];
+    uint32_t totalConfigTested = 0;
+    const uint32_t randomCount = 250;   // per XCC
+    /*
+     * gridWgpPerXcc is the addressing grid the mask is built on. numWGPperSA is
+     * the per-SA maximum applied uniformly to every SA, so the grid is
+     * SEsPerXcc * numSAperSE * numWGPperSA. This is what the ABI bit layout is
+     * sized to. Grid slots that do not map to real hardware are discovered as
+     * inactive by the full-mask probe below.
+     */
+    const uint32_t gridWgpPerXcc = SEsPerXcc * numSAperSE * numWGPperSA;
+
+    LOG() << nodeStr << " gfx12.1 multi-XCC CU masking: " << numXcc
+          << " XCCs, " << gridWgpPerXcc
+          << " grid WGPs/XCC (1 bit/WGP interleaved)\n";
+
+    for (uint32_t xcc = 0; xcc < numXcc; xcc++) {
+        mask_config_t cfg = { maskNumDwords, maskNumBits, SEsPerXcc,
+                              numSAperSE, numWGPperSA, NULL, numXcc, xcc };
+
+        LOG() << nodeStr << " === XCC " << xcc << " ===\n";
+
+        /* Detect inactive WGPs on this XCC (full mask, then requested & ~result). */
+        memset(mask, 0, sizeof(uint32_t) * maskNumDwords);
+        memset(inactiveMask, 0, sizeof(uint32_t) * maskNumDwords);
+        setCUMask(mask, cfg, -1, -1, -1);
+        uint32_t inactiveCount = 0;
+        if (!testCUMask(gpuNode, mask, cfg, programBuffer, numWorkItems, pOutput, inactiveMask)) {
+            for (uint32_t i = 0; i < maskNumDwords; i++) {
+                inactiveMask[i] = mask[i] & ~inactiveMask[i];
+                inactiveCount += __builtin_popcount(inactiveMask[i]);
+            }
+            cfg.pInactiveMask = inactiveMask;
+        }
+        /*
+         * The full-mask probe drives every grid slot, so the slots that report
+         * active are the WGPs that physically exist and are enabled. Anything in
+         * the grid that stays inactive is a non-existent SA1+ top slot.
+         */
+        const uint32_t activeWgp = gridWgpPerXcc - inactiveCount;
+        LOG() << nodeStr << " XCC " << xcc << " active WGPs: " << activeWgp
+              << " (of " << gridWgpPerXcc << " grid)\n";
+
+        // All SE combinations (0 not allowed).
+        for (uint32_t i = 1; i < (1u << SEsPerXcc); i++) {
+            memset(mask, 0, sizeof(uint32_t) * maskNumDwords);
+            setCUMask(mask, cfg, i, -1, -1);
+            EXPECT_TRUE_GPU(testCUMask(gpuNode, mask, cfg, programBuffer, numWorkItems, pOutput), gpuNode);
+            totalConfigTested++;
+        }
+
+        // All SA combinations (0 not allowed).
+        for (uint32_t i = 1; i < (1u << numSAperSE); i++) {
+            memset(mask, 0, sizeof(uint32_t) * maskNumDwords);
+            setCUMask(mask, cfg, -1, i, -1);
+            EXPECT_TRUE_GPU(testCUMask(gpuNode, mask, cfg, programBuffer, numWorkItems, pOutput), gpuNode);
+            totalConfigTested++;
+        }
+
+        // All WGP combinations (0 not allowed).
+        for (uint32_t i = 1; i < (1u << numWGPperSA); i++) {
+            memset(mask, 0, sizeof(uint32_t) * maskNumDwords);
+            setCUMask(mask, cfg, -1, -1, i);
+            EXPECT_TRUE_GPU(testCUMask(gpuNode, mask, cfg, programBuffer, numWorkItems, pOutput), gpuNode);
+            totalConfigTested++;
+        }
+
+        // Linear: enable one WGP unit at a time until all are on.
+        memset(mask, 0, sizeof(uint32_t) * maskNumDwords);
+        for (uint32_t u = 0; u < gridWgpPerXcc; u++) {
+            cuMaskSetUnit(mask, cfg, u);
+            EXPECT_TRUE_GPU(testCUMask(gpuNode, mask, cfg, programBuffer, numWorkItems, pOutput), gpuNode);
+            totalConfigTested++;
+        }
+
+        // Random asymmetric subsets of this XCC's WGPs.
+        srand(1 + xcc);
+        for (uint32_t r = 0; r < randomCount; r++) {
+            memset(mask, 0, sizeof(uint32_t) * maskNumDwords);
+            uint32_t wgpMask = (rand() % ((1ULL << gridWgpPerXcc) - 1)) + 1;
+            for (uint32_t u = 0; u < gridWgpPerXcc; u++) {
+                if (wgpMask & (1u << u))
+                    cuMaskSetUnit(mask, cfg, u);
+            }
+            EXPECT_TRUE_GPU(testCUMask(gpuNode, mask, cfg, programBuffer, numWorkItems, pOutput), gpuNode);
+            totalConfigTested++;
+        }
+    }
+
+    LOG() << std::endl;
+    LOG() << nodeStr << " Total config tested: " << totalConfigTested << std::endl;
+    LOG() << std::endl;
 }
 
 
@@ -1249,8 +1507,28 @@ void KFDQMTest::extendedCuMasking(int gpuNode) {
         const uint32_t activeCU = (pProps->NumFComputeCores / pProps->NumSIMDPerCU);
         const uint32_t numSEs = pProps->NumShaderBanks;
         const uint32_t numSAperSE = pProps->NumArrays;
-        const uint32_t numWGPperSA = pProps->NumCUPerArray / 2;
-        const uint32_t maxCU = numSEs * numSAperSE * numWGPperSA * 2;
+        const uint32_t numXcc = pProps->NumXcc ? pProps->NumXcc : 1;
+        const uint32_t SEsPerXcc = (numXcc > 1 && numSEs >= numXcc) ? numSEs / numXcc : numSEs;
+        /*
+         * gfx12.1 (multi-XCC): KFD topology is WGP-granular and the CU mask ABI
+         * is one bit per WGP. The physical WGP-per-SA count is NOT uniform on
+         * these parts: SA0 can hold 9 WGPs and SA1 up to 8 (e.g. gfx1250/MI450 is
+         * 9/8 on SA0 and 8/7 on SA1, 34 physical slots per XCC). KFD's per-XCC
+         * CU-mask ABI walks WGP levels (cu, sh, se) and a
+         * 9th WGP of SA0 (cu == 8, sh == 0) is even mapped to a special hardware
+         * slot. We therefore size the model to the per-SA *maximum* (NumCUPerArray,
+         * which is WGP-granular here, e.g. 9) rather than the average
+         * activeCU/(numSEs*numSAperSE) (which is 8 and truncates SA0's 9th WGP,
+         * shifting every later ABI bit and dropping the last WGP). Shorter columns
+         * (SA1) are discovered as inactive by the full-mask probe.
+         * Pre-gfx12.1 topology is CU-granular (two CUs per WGP), so convert.
+         */
+        const bool wgpGranular = (numXcc > 1);
+        const uint32_t numWGPperSA = wgpGranular
+            ? pProps->NumCUPerArray
+            : (pProps->NumCUPerArray / 2);
+        const uint32_t totalWGP = numSEs * numSAperSE * numWGPperSA;
+        const uint32_t maxCU = totalWGP * 2;
 
         std::ostringstream nodeStream;
         nodeStream << "(Node " << gpuNode << ")";
@@ -1265,18 +1543,25 @@ void KFDQMTest::extendedCuMasking(int gpuNode) {
         LOG() << std::dec << "               Max CUs: " << std::setw(3) << maxCU << std::endl;
         LOG() << std::dec << "        Shader Engines: " << std::setw(3) << numSEs << std::endl;
         LOG() << std::dec << "            SAs per SE: " << std::setw(3) << numSAperSE << std::endl;
-        LOG() << std::dec << "           WGPs per SA: " << std::setw(3) << numWGPperSA << std::endl;
+        LOG() << std::dec << "     WGPs per SA (max): " << std::setw(3) << numWGPperSA << std::endl;
+        LOG() << std::dec << "                  XCCs: " << std::setw(3) << numXcc << std::endl;
+        LOG() << std::dec << "            SEs per XCC: " << std::setw(3) << SEsPerXcc << std::endl;
         LOG() << std::dec << "****************************************" << std::endl;
         logMutex.unlock();
 
-        const uint32_t maskNumDwords = (maxCU + 31) / 32; /* Round up to the nearest multiple of 32 */
+        /*
+         * CU-mask array holds one bit per WGP on gfx12.1 (multi-XCC) and two
+         * bits per WGP (== maxCU) on earlier parts.
+         */
+        const uint32_t maskNumBitsNeeded = wgpGranular ? totalWGP : maxCU;
+        const uint32_t maskNumDwords = (maskNumBitsNeeded + 31) / 32; /* Round up to the nearest multiple of 32 */
         const uint32_t maskNumBits = maskNumDwords * 32;
 
 
         uint32_t mask[maskNumDwords];
         uint32_t inactiveMask[maskNumDwords];
 
-        mask_config_t maskConfig = { maskNumDwords, maskNumBits, numSEs, numSAperSE, numWGPperSA, NULL };
+        mask_config_t maskConfig = { maskNumDwords, maskNumBits, numSEs, numSAperSE, numWGPperSA, NULL, 1, 0 };
 
         /*
          * Note: On system with WGPs, CU bits in the same WGP must be either both set or both unset
@@ -1324,6 +1609,18 @@ void KFDQMTest::extendedCuMasking(int gpuNode) {
         ASSERT_NOTNULL_GPU(pAsm, gpuNode);
         ASSERT_SUCCESS_GPU(pAsm->RunAssembleBuf(CheckCuMaskIsa, programBuffer.As<char*>()), gpuNode);
 
+        /*
+         * gfx12.1 (multi-XCC): the CU mask ABI is one bit per WGP interleaved
+         * across XCCs and a PM4 dispatch runs on a single XCC, so validate each
+         * XCC in turn with a dedicated per-XCC path. The single-XCC flat-SE
+         * flow below is unchanged for all other parts.
+         */
+        if (numXcc > 1) {
+            extendedCuMaskingXcc(gpuNode, nodeStr, numXcc, SEsPerXcc, numSAperSE,
+                                 numWGPperSA, maskNumDwords, maskNumBits,
+                                 programBuffer, numWorkItems, pOutput);
+            return;
+        }
 
        /*
         * Check and record any inactive WPGs.
@@ -1348,7 +1645,7 @@ void KFDQMTest::extendedCuMasking(int gpuNode) {
             }
 
             // Check if what we detected is consistent with info from KFD
-            EXPECT_TRUE_GPU((activeCU + inactiveCount) == maxCU, gpuNode);
+            EXPECT_TRUE_GPU(g_IsEmuMode || (activeCU + inactiveCount) == maxCU, gpuNode);
 
             maskConfig.pInactiveMask = inactiveMask;
 
@@ -1664,7 +1961,7 @@ void KFDQMTest::testQueuePriority(int gpuNode, bool isSamePipe)
         dispatch[i].Submit(queue[i]);
 
     while (activeTaskBitmap > 0) {
-        hsaKmtWaitOnMultipleEvents(pHsaEvent, numEvent, false, g_TestTimeOut);
+        HSAKMT_CALL(hsaKmtWaitOnMultipleEvents, m_hsakmt_current_ctx, pHsaEvent, numEvent, false, g_TestTimeOut);
         for (i = 0; i < 2; i++) {
             if ((activeTaskBitmap & (1 << i)) && (syncBuffer[i] == pHsaEvent[i]->EventId)) {
                 endTime[i] = GetSystemTickCountInMicroSec();
@@ -1949,7 +2246,7 @@ void KFDQMTest::CpuWriteCoherence(int gpuNode) {
 
     WaitOnValue(destBuf.As<unsigned int*>(), 0x42);
 
-    hsaKmtDestroyEvent(event);
+    HSAKMT_CALL(hsaKmtDestroyEvent, m_hsakmt_current_ctx, event);
 }
 
 TEST_F(KFDQMTest, CpuWriteCoherence) {
@@ -1966,7 +2263,7 @@ void KFDQMTest::CreateAqlCpQueue(int gpuNode) {
 
     AqlQueue queue;
 
-    HsaMemoryBuffer pointers(PAGE_SIZE, gpuNode, /*zero*/true, /*local*/false, /*exec*/false, /*isScratch */false, /* isReadOnly */false, /* isUncached */false, /* NonPaged */g_baseTest->NeedNonPagedWptr(gpuNode));
+    HsaMemoryBuffer pointers(PAGE_SIZE, gpuNode, /*zero*/true, /*local*/false, /*exec*/false, /*isScratch */false, /* isReadOnly */false, /* isUncached */false, /* NonPaged */NeedNonPagedWptr(gpuNode));
 
     ASSERT_SUCCESS_GPU(queue.Create(gpuNode, PAGE_SIZE, pointers.As<HSAuint64 *>()), gpuNode);
 
@@ -2071,7 +2368,7 @@ void KFDQMTest::QueueLatency(int gpuNode) {
     queue.SubmitPacket();
     queue.Wait4PacketConsumption(event);
 
-    hsaKmtDestroyEvent(event);
+    HSAKMT_CALL(hsaKmtDestroyEvent, m_hsakmt_current_ctx, event);
     /* qts[i] records the timestamp of the end of packet[i] which is
      * approximate that of the beginging of packet[i+1].
      * The workload total is [0, skip], [skip+1, slots-1].
@@ -2146,7 +2443,7 @@ void KFDQMTest::CpQueueWraparound(int gpuNode) {
         WaitOnValue(destBuf.As<unsigned int*>(), pktIdx);
     }
 
-    hsaKmtDestroyEvent(event);
+    HSAKMT_CALL(hsaKmtDestroyEvent, m_hsakmt_current_ctx, event);
     EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
 
 }
@@ -2247,7 +2544,7 @@ void KFDQMTest::Atomics(int gpuNode) {
     dispatch.SetArgs(destBuf.As<void*>(), NULL);
     dispatch.SetDim(1024, 1, 1);
 
-    hsaKmtSetMemoryPolicy(gpuNode, HSA_CACHING_CACHED, HSA_CACHING_CACHED, NULL, 0);
+    HSAKMT_CALL(hsaKmtSetMemoryPolicy, m_hsakmt_current_ctx, gpuNode, HSA_CACHING_CACHED, HSA_CACHING_CACHED, NULL, 0);
 
     ASSERT_SUCCESS_GPU(queue.Create(gpuNode), gpuNode);
 
@@ -2292,43 +2589,6 @@ TEST_F(KFDQMTest, Atomics) {
     TEST_END
 }
 
-TEST_F(KFDQMTest, mGPUShareBO) {
-    TEST_START(TESTPROFILE_RUNALL);
-
-    unsigned int src_node = 2;
-    unsigned int dst_node = 1;
-
-    if (g_TestDstNodeId != -1 && g_TestNodeId != -1) {
-        src_node = g_TestNodeId;
-        dst_node = g_TestDstNodeId;
-    }
-
-    HsaMemoryBuffer shared_addr(PAGE_SIZE, dst_node, true, false, false, false);
-
-    HsaMemoryBuffer srcNodeMem(PAGE_SIZE, src_node);
-    HsaMemoryBuffer dstNodeMem(PAGE_SIZE, dst_node);
-
-    /* Handle ISA to write to local memory BO */
-    HsaMemoryBuffer isaBufferSrc(PAGE_SIZE, src_node, true/*zero*/, false/*local*/, true/*exec*/);
-    HsaMemoryBuffer isaBufferDst(PAGE_SIZE, dst_node, true/*zero*/, false/*local*/, true/*exec*/);
-
-    srcNodeMem.Fill(0x05050505);
-
-    ASSERT_SUCCESS(m_pAsm->RunAssemble(CopyDwordIsa));
-
-    m_pAsm->CopyInstrStream(isaBufferSrc.As<char*>());
-    SyncDispatch(isaBufferSrc, srcNodeMem.As<void*>(), shared_addr.As<void *>(), src_node);
-
-    m_pAsm->CopyInstrStream(isaBufferDst.As<char*>());
-    SyncDispatch(isaBufferDst, shared_addr.As<void *>(), dstNodeMem.As<void*>(), dst_node);
-
-    EXPECT_EQ(dstNodeMem.As<unsigned int*>()[0], 0x05050505);
-
-    EXPECT_SUCCESS(shared_addr.UnmapMemToNodes(&dst_node, 1));
-
-    TEST_END
-}
-
 static void
 sdma_copy(HSAuint32 node, void *src, void *const dst[], int n, HSAuint64 size) {
     SDMAQueue sdmaQueue;
@@ -2338,7 +2598,7 @@ sdma_copy(HSAuint32 node, void *src, void *const dst[], int n, HSAuint64 size) {
     sdmaQueue.PlaceAndSubmitPacket(SDMACopyDataPacket(sdmaQueue.GetFamilyId(), dst, src, n, size));
     sdmaQueue.Wait4PacketConsumption(event);
     EXPECT_SUCCESS(sdmaQueue.Destroy());
-    hsaKmtDestroyEvent(event);
+    HSAKMT_CALL(hsaKmtDestroyEvent, g_baseTest->m_hsakmt_current_ctx, event);
 }
 
 static void
@@ -2350,7 +2610,70 @@ sdma_fill(HSAint32 node, void *dst, unsigned int data, HSAuint64 size) {
     sdmaQueue.PlaceAndSubmitPacket(SDMAFillDataPacket(sdmaQueue.GetFamilyId(), dst, data, size));
     sdmaQueue.Wait4PacketConsumption(event);
     EXPECT_SUCCESS(sdmaQueue.Destroy());
-    hsaKmtDestroyEvent(event);
+    HSAKMT_CALL(hsaKmtDestroyEvent, g_baseTest->m_hsakmt_current_ctx, event);
+}
+
+TEST_F(KFDQMTest, mGPUShareBO) {
+    TEST_START(TESTPROFILE_RUNALL);
+
+    const std::vector<int> gpuNodes = m_NodeInfo.GetNodesWithGPU();
+    if (gpuNodes.size() < 2) {
+        LOG() << "Skipping test: Test requires at least two GPUs." << std::endl;
+        return;
+    }
+
+    unsigned int src_node = gpuNodes[0];
+    unsigned int dst_node = gpuNodes[1];
+
+    if (g_TestDstNodeId != -1 && g_TestNodeId != -1) {
+        src_node = g_TestNodeId;
+        dst_node = g_TestDstNodeId;
+    }
+
+    LOG() << "Testing VRAM → System BO → VRAM transfer" << std::endl;
+
+    // Shared System BO (intermediary) - GTT
+    HsaMemoryBuffer shared_addr(PAGE_SIZE, dst_node, true, false/*GTT*/, false, false);
+    unsigned int nodes[2] = {src_node, dst_node};
+    ASSERT_SUCCESS(shared_addr.MapMemToNodes(nodes, 2));
+
+    // Source and destination in VRAM
+    HsaMemoryBuffer srcNodeMem(PAGE_SIZE, src_node, false/*no zero*/, true/*VRAM*/);
+    HsaMemoryBuffer dstNodeMem(PAGE_SIZE, dst_node, false/*no zero*/, true/*VRAM*/);
+
+    // ISA buffers for shaders
+    HsaMemoryBuffer isaBufferSrc(PAGE_SIZE, src_node, true, false, true);
+    HsaMemoryBuffer isaBufferDst(PAGE_SIZE, dst_node, true, false, true);
+
+    // Step 1: Fill srcNodeMem VRAM with test pattern using SDMA
+    sdma_fill(src_node, srcNodeMem.As<void*>(), 0x05050505, PAGE_SIZE);
+
+    // Step 2 & 3: GPU shader transfers
+    Assembler* pAsmSrc = GetAssemblerFromNodeId(src_node);
+    Assembler* pAsmDst = GetAssemblerFromNodeId(dst_node);
+    ASSERT_NOTNULL(pAsmSrc);
+    ASSERT_NOTNULL(pAsmDst);
+
+    // GPU1: srcNodeMem (VRAM) → shared_addr (System BO)
+    ASSERT_SUCCESS(pAsmSrc->RunAssemble(CopyDwordIsa));
+    pAsmSrc->CopyInstrStream(isaBufferSrc.As<char*>());
+    SyncDispatch(isaBufferSrc, srcNodeMem.As<void*>(), shared_addr.As<void*>(), src_node);
+
+    // GPU2: shared_addr (System BO) → dstNodeMem (VRAM)
+    ASSERT_SUCCESS(pAsmDst->RunAssemble(CopyDwordIsa));
+    pAsmDst->CopyInstrStream(isaBufferDst.As<char*>());
+    SyncDispatch(isaBufferDst, shared_addr.As<void*>(), dstNodeMem.As<void*>(), dst_node);
+
+    // Step 4: Verify dstNodeMem VRAM - copy to GTT and read
+    HsaMemoryBuffer verifyBuffer(PAGE_SIZE, dst_node, true, false/*GTT*/);
+    void* dst_array[1] = {verifyBuffer.As<void*>()};
+    sdma_copy(dst_node, dstNodeMem.As<void*>(), dst_array, 1, PAGE_SIZE);
+
+    EXPECT_EQ(verifyBuffer.As<unsigned int*>()[0], 0x05050505);
+
+    EXPECT_SUCCESS(shared_addr.UnmapMemToNodes(nodes, 2));
+
+    TEST_END
 }
 
 TEST_F(KFDQMTest, P2PTest) {
@@ -2407,7 +2730,6 @@ TEST_F(KFDQMTest, P2PTest) {
     HSAuint32 *sysBuf;
     HSAuint32 size = 16ULL<<20;  // bigger than 16MB to test non-contiguous memory
     HsaMemFlags memFlags = {0};
-    HsaMemMapFlags mapFlags = {0};
     memFlags.ui32.PageSize = HSA_PAGE_SIZE_4KB;
     memFlags.ui32.HostAccess = 0;
     memFlags.ui32.NonPaged = 1;
@@ -2415,17 +2737,17 @@ TEST_F(KFDQMTest, P2PTest) {
     unsigned int end = size / sizeof(HSAuint32) - 1;
 
     /* 1. Allocate a system buffer and allow the access to GPUs */
-    EXPECT_SUCCESS(hsaKmtAllocMemory(0, size, m_MemoryFlags,
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtAllocMemory, g_baseTest->m_hsakmt_current_ctx, 0, size, m_MemoryFlags,
                                      reinterpret_cast<void **>(&sysBuf)));
-    EXPECT_SUCCESS(hsaKmtMapMemoryToGPUNodes(sysBuf, size, NULL,
-                                             mapFlags, nodes.size(), (HSAuint32 *)&nodes[0]));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, g_baseTest->m_hsakmt_current_ctx, sysBuf, size, NULL,
+                                             memFlags, nodes.size(), (HSAuint32 *)&nodes[0]));
 #define MAGIC_NUM 0xdeadbeaf
 
     /* First GPU fills mem with MAGIC_NUM */
     void *src, *dst;
     HSAuint32 cur = nodes[0], next;
-    ASSERT_SUCCESS(hsaKmtAllocMemory(cur, size, memFlags, reinterpret_cast<void**>(&src)));
-    ASSERT_SUCCESS(hsaKmtMapMemoryToGPU(src, size, NULL));
+    ASSERT_SUCCESS(HSAKMT_CALL(hsaKmtAllocMemory, g_baseTest->m_hsakmt_current_ctx, cur, size, memFlags, reinterpret_cast<void**>(&src)));
+    ASSERT_SUCCESS(HSAKMT_CALL(hsaKmtMapMemoryToGPU, g_baseTest->m_hsakmt_current_ctx, src, size, NULL));
     sdma_fill(cur, src, MAGIC_NUM, size);
 
     for (unsigned i = 1; i <= nodes.size(); i++) {
@@ -2445,8 +2767,8 @@ TEST_F(KFDQMTest, P2PTest) {
             if (!m_NodeInfo.IsPeerAccessibleByNode(next, cur))
                 continue;
 
-            ASSERT_SUCCESS(hsaKmtAllocMemory(next, size, memFlags, reinterpret_cast<void**>(&dst)));
-            ASSERT_SUCCESS(hsaKmtMapMemoryToGPU(dst, size, NULL));
+            ASSERT_SUCCESS(HSAKMT_CALL(hsaKmtAllocMemory, g_baseTest->m_hsakmt_current_ctx, next, size, memFlags, reinterpret_cast<void**>(&dst)));
+            ASSERT_SUCCESS(HSAKMT_CALL(hsaKmtMapMemoryToGPU, g_baseTest->m_hsakmt_current_ctx, dst, size, NULL));
         }
 
         LOG() << "Test " << cur << " -> " << next << std::endl;
@@ -2460,15 +2782,15 @@ TEST_F(KFDQMTest, P2PTest) {
 
         LOG() << "PASS " << cur << " -> " << next << std::endl;
 
-        EXPECT_SUCCESS(hsaKmtUnmapMemoryToGPU(src));
-        EXPECT_SUCCESS(hsaKmtFreeMemory(src, size));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, g_baseTest->m_hsakmt_current_ctx, src));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtFreeMemory, g_baseTest->m_hsakmt_current_ctx, src, size));
 
         cur = next;
         src = dst;
     }
 
-    EXPECT_SUCCESS(hsaKmtUnmapMemoryToGPU(sysBuf));
-    EXPECT_SUCCESS(hsaKmtFreeMemory(sysBuf, size));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, g_baseTest->m_hsakmt_current_ctx, sysBuf));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtFreeMemory, g_baseTest->m_hsakmt_current_ctx, sysBuf, size));
 
     TEST_END
 }
@@ -2519,7 +2841,7 @@ void KFDQMTest::PM4EventInterrupt(int gpuNode) {
             queue[i].SubmitPacket();
 
         for (int i = 0; i < numPM4Queue; i++) {
-            EXPECT_SUCCESS_GPU(hsaKmtWaitOnEvent(event[i], g_TestTimeOut), gpuNode);
+            EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtWaitOnEvent, m_hsakmt_current_ctx, event[i], g_TestTimeOut), gpuNode);
             EXPECT_EQ_GPU(buf[i][0], 0xdeadbeaf, gpuNode);
             EXPECT_EQ_GPU(buf[i][packetCount - 1], 0xdeadbeaf, gpuNode);
             memset(buf[i], 0, bufSize);
@@ -2527,7 +2849,7 @@ void KFDQMTest::PM4EventInterrupt(int gpuNode) {
 
         for (int i = 0; i < numPM4Queue; i++) {
             EXPECT_SUCCESS_GPU(queue[i].Destroy(), gpuNode);
-            EXPECT_SUCCESS_GPU(hsaKmtDestroyEvent(event[i]), gpuNode);
+            EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtDestroyEvent, m_hsakmt_current_ctx, event[i]), gpuNode);
         }
     }
 
@@ -2603,7 +2925,7 @@ void KFDQMTest::SdmaEventInterrupt(int gpuNode) {
 
             for (int i = 0; i < testSDMAQueue; i++) {
                 TimeStamp *ts = tsbuf + i * 32;
-                HSAKMT_STATUS ret = hsaKmtWaitOnEvent(event[i], g_TestTimeOut);
+                HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtWaitOnEvent, m_hsakmt_current_ctx, event[i], g_TestTimeOut);
 
                 if (dst[i][0] != src[0])
                     WARN() << "SDMACopyData FAIL! " << std::dec
@@ -2620,7 +2942,7 @@ void KFDQMTest::SdmaEventInterrupt(int gpuNode) {
 
                     queue[i].SubmitPacket();
 
-                    if (hsaKmtWaitOnEvent(event[i], g_TestTimeOut) == HSAKMT_STATUS_SUCCESS)
+                    if (HSAKMT_CALL(hsaKmtWaitOnEvent, m_hsakmt_current_ctx, event[i], g_TestTimeOut) == HSAKMT_STATUS_SUCCESS)
                         WARN() << "The timeout event is signaled!" << std::endl;
                     else
                         WARN() << "The timeout event is lost after resubmit!" << std::endl;
@@ -2636,7 +2958,7 @@ void KFDQMTest::SdmaEventInterrupt(int gpuNode) {
 
             for (int i = 0; i < testSDMAQueue; i++) {
                 EXPECT_SUCCESS_GPU(queue[i].Destroy(), gpuNode);
-                EXPECT_SUCCESS_GPU(hsaKmtDestroyEvent(event[i]), gpuNode);
+                EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtDestroyEvent, m_hsakmt_current_ctx, event[i]), gpuNode);
             }
         }
 
@@ -2765,7 +3087,8 @@ TEST_F(KFDQMTest, UserQueueBufValidation) {
     // System memory mapping on GPU
     QueueBuf = new HsaMemoryBuffer(PAGE_SIZE, defaultGPUNode);
 
-    EXPECT_SUCCESS(hsaKmtCreateQueue(defaultGPUNode,
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtCreateQueue, g_baseTest->m_hsakmt_current_ctx,
+                               defaultGPUNode,
                                HSA_QUEUE_COMPUTE,
                                100,
                                HSA_QUEUE_PRIORITY_NORMAL,
@@ -2773,10 +3096,11 @@ TEST_F(KFDQMTest, UserQueueBufValidation) {
                                PAGE_SIZE,
                                NULL,
                                &QueueResources));
-    EXPECT_SUCCESS(hsaKmtDestroyQueue(QueueResources.QueueId));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtDestroyQueue, g_baseTest->m_hsakmt_current_ctx, QueueResources.QueueId));
 
     // CP Queue creation should fail using wrong ring buffer size
-    EXPECT_SUCCESS(!hsaKmtCreateQueue(defaultGPUNode,
+    EXPECT_SUCCESS(!HSAKMT_CALL(hsaKmtCreateQueue, g_baseTest->m_hsakmt_current_ctx,
+                               defaultGPUNode,
                                HSA_QUEUE_COMPUTE,
                                100,
                                HSA_QUEUE_PRIORITY_NORMAL,
@@ -2786,7 +3110,8 @@ TEST_F(KFDQMTest, UserQueueBufValidation) {
                                &QueueResources));
 
     // SDMA queue create should fail using wrong ring buffer size
-    EXPECT_SUCCESS(!hsaKmtCreateQueue(defaultGPUNode,
+    EXPECT_SUCCESS(!HSAKMT_CALL(hsaKmtCreateQueue, g_baseTest->m_hsakmt_current_ctx,
+                               defaultGPUNode,
                                HSA_QUEUE_SDMA,
                                100,
                                HSA_QUEUE_PRIORITY_NORMAL,
@@ -2796,7 +3121,8 @@ TEST_F(KFDQMTest, UserQueueBufValidation) {
                                &QueueResources));
 
     // CP queue create should fail using NULL ring buffer
-    EXPECT_SUCCESS(!hsaKmtCreateQueue(defaultGPUNode,
+    EXPECT_SUCCESS(!HSAKMT_CALL(hsaKmtCreateQueue, g_baseTest->m_hsakmt_current_ctx,
+                               defaultGPUNode,
                                HSA_QUEUE_COMPUTE,
                                100,
                                HSA_QUEUE_PRIORITY_NORMAL,
@@ -2806,7 +3132,8 @@ TEST_F(KFDQMTest, UserQueueBufValidation) {
                                &QueueResources));
 
     // SDMA queue create should fail using NULL ring buffer
-    EXPECT_SUCCESS(!hsaKmtCreateQueue(defaultGPUNode,
+    EXPECT_SUCCESS(!HSAKMT_CALL(hsaKmtCreateQueue, g_baseTest->m_hsakmt_current_ctx,
+                               defaultGPUNode,
                                HSA_QUEUE_SDMA,
                                100,
                                HSA_QUEUE_PRIORITY_NORMAL,
@@ -2815,8 +3142,8 @@ TEST_F(KFDQMTest, UserQueueBufValidation) {
                                NULL,
                                &QueueResources));
 
-    EXPECT_SUCCESS(hsaKmtUnmapMemoryToGPU(QueueBuf->As<unsigned int*>()));
-    EXPECT_SUCCESS(hsaKmtFreeMemory(QueueBuf->As<unsigned int*>(), PAGE_SIZE));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, g_baseTest->m_hsakmt_current_ctx, QueueBuf->As<unsigned int*>()));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtFreeMemory, g_baseTest->m_hsakmt_current_ctx, QueueBuf->As<unsigned int*>(), PAGE_SIZE));
 
     //
     // This following negative test will evict user queues, must execute in child process,
@@ -2835,7 +3162,8 @@ TEST_F(KFDQMTest, UserQueueBufValidation) {
         QueueBuf = new HsaMemoryBuffer(PAGE_SIZE, defaultGPUNode);
         memset(&QueueResources, 0, sizeof(QueueResources));
 
-        status = hsaKmtCreateQueue(defaultGPUNode,
+        status = HSAKMT_CALL(hsaKmtCreateQueue, g_baseTest->m_hsakmt_current_ctx,
+                               defaultGPUNode,
                                HSA_QUEUE_COMPUTE,
                                100,
                                HSA_QUEUE_PRIORITY_NORMAL,
@@ -2849,7 +3177,7 @@ TEST_F(KFDQMTest, UserQueueBufValidation) {
         }
 
         // Update queue percentage 0 to set queue inactive in order to get queue info CWSR area
-        status = hsaKmtUpdateQueue(QueueResources.QueueId, 0, HSA_QUEUE_PRIORITY_NORMAL,
+        status = HSAKMT_CALL(hsaKmtUpdateQueue, g_baseTest->m_hsakmt_current_ctx, QueueResources.QueueId, 0, HSA_QUEUE_PRIORITY_NORMAL,
                                      QueueBuf->As<unsigned int*>(), PAGE_SIZE, NULL);
         if (status != HSAKMT_STATUS_SUCCESS) {
             LOG() << "update queue failed." << std::endl;
@@ -2857,7 +3185,7 @@ TEST_F(KFDQMTest, UserQueueBufValidation) {
         }
 
         HsaQueueInfo QueueInfo;
-        status = hsaKmtGetQueueInfo(QueueResources.QueueId, &QueueInfo);
+        status = HSAKMT_CALL(hsaKmtGetQueueInfo, g_baseTest->m_hsakmt_current_ctx, QueueResources.QueueId, &QueueInfo);
         if (status != HSAKMT_STATUS_SUCCESS) {
             LOG() << "get queue info failed." << std::endl;
             goto err_exit;
@@ -2868,13 +3196,13 @@ TEST_F(KFDQMTest, UserQueueBufValidation) {
         munmap(cwsr_addr, PAGE_SIZE);
 
         // unmap and free queue ring buffer should fail before the queue is destroyed
-        status = hsaKmtFreeMemory(QueueBuf->As<unsigned int*>(), PAGE_SIZE);
+        status = HSAKMT_CALL(hsaKmtFreeMemory, g_baseTest->m_hsakmt_current_ctx, QueueBuf->As<unsigned int*>(), PAGE_SIZE);
         if (status == HSAKMT_STATUS_SUCCESS) {
             LOG() << "free queue buf should fail." << std::endl;
             goto err_exit;
         }
 
-        status = hsaKmtUnmapMemoryToGPU(QueueBuf->As<unsigned int*>());
+        status = HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, g_baseTest->m_hsakmt_current_ctx, QueueBuf->As<unsigned int*>());
         if (status == HSAKMT_STATUS_SUCCESS) {
             LOG() << "unmap queue buf should fail." << std::endl;
             goto err_exit;
@@ -2883,19 +3211,19 @@ TEST_F(KFDQMTest, UserQueueBufValidation) {
         exit_code = 0;
 
 err_exit:
-        status = hsaKmtDestroyQueue(QueueResources.QueueId);
+        status = HSAKMT_CALL(hsaKmtDestroyQueue, g_baseTest->m_hsakmt_current_ctx, QueueResources.QueueId);
         if (status != HSAKMT_STATUS_SUCCESS) {
             LOG() << "destroy queue failed." << std::endl;
             exit_code = 1;
         }
 free_exit:
-        status = hsaKmtUnmapMemoryToGPU(QueueBuf->As<unsigned int*>());
+        status = HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, g_baseTest->m_hsakmt_current_ctx, QueueBuf->As<unsigned int*>());
         if (status != HSAKMT_STATUS_SUCCESS) {
             LOG() << "unmap queue buf failed." << std::endl;
             exit_code = 1;
         }
 
-        status = hsaKmtFreeMemory(QueueBuf->As<unsigned int*>(), PAGE_SIZE);
+        status = HSAKMT_CALL(hsaKmtFreeMemory, g_baseTest->m_hsakmt_current_ctx, QueueBuf->As<unsigned int*>(), PAGE_SIZE);
         if (status != HSAKMT_STATUS_SUCCESS) {
             LOG() << "free queue buf failed." << std::endl;
             exit_code = 1;

@@ -5,29 +5,107 @@
 .. _process_attachment_implementation:
 
 ********************************************************************************
-Implementing Process Attachment Tools
+Implementing process attachment tools
 ********************************************************************************
 
 Overview
 ========
 
-This document provides the technical details needed to implement a process attachment tool similar to ``rocprofv3 --attach``. Process attachment allows profiling tools to dynamically attach to running GPU applications without requiring application restart. The implementation can use either the provided python or exported C functions.
+This topic provides the technical details needed to implement a process attachment tool similar to ``rocprofv3 --attach``. Process attachment allows profiling tools to dynamically attach to running GPU applications without requiring application restart. The implementation can use either the provided Python or exported C functions.
 
-Direct Python Execution
+Prerequisites
+=============
+
+Complete the following steps before attaching to a running process.
+
+.. _process_attachment_enable:
+
+Enable attachment support in the target process
+-----------------------------------------------
+
+A process only accepts an attachment if ``rocprofiler-register`` loaded the attachment library when the process started. Otherwise, attachment fails. Enable attachment support in one of these two ways:
+
+- Set ``ROCP_TOOL_ATTACH=1`` in the environment of the target process before it starts. This is the recommended approach. It applies only to processes you launch after setting the variable.
+
+  .. code-block:: shell
+
+     $ export ROCP_TOOL_ATTACH=1
+     $ ./myapp &
+
+- Build and install ``rocprofiler-register`` with ``ROCPROFILER_REGISTER_BUILD_DEFAULT_ATTACHMENT=ON``. This makes attachment the default for every process that loads the resulting library, so no environment variable is needed.
+
+  .. code-block:: shell
+
+     $ cmake -B build-rocp-reg /path/to/rocprofiler-register \
+           -DROCPROFILER_REGISTER_BUILD_DEFAULT_ATTACHMENT=ON \
+           -DCMAKE_INSTALL_PREFIX=/opt/rocm
+     $ cmake --build build-rocp-reg --target all --parallel $(nproc)
+     $ cmake --build build-rocp-reg --target install
+
+  Because this behavior is compiled into ``librocprofiler-register.so``, the target process must load the rebuilt library for the change to take effect. For the full build and install procedure, see the `rocprofiler-register README <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-register#build-and-installation>`_.
+
+.. _process_attachment_permissions:
+
+Obtain permission to trace the target process
+---------------------------------------------
+
+Attachment requires permission to trace the target process. Run the attaching tool as the user owning the target process or as root. To confirm you have the required access, check whether you can open the ``/proc/<PID>/mem`` file of the target process.
+
+.. code-block:: shell
+
+   $ PID=12345
+   $ { : < /proc/$PID/mem; } 2>/dev/null && echo "ptrace allowed" || echo "ptrace denied"
+
+The kernel guards this file with the same permission check it applies to a ``ptrace`` attach. A successful open confirms user ownership and the correct Yama ptrace scope, but not container restrictions or the other mechanisms described below. If the open is denied, or if attachment fails despite a successful open, review the restrictions that follow.
+
+**Yama ptrace scope**
+
+Some Linux distributions, including recent Ubuntu releases, use the Yama security module to restrict which processes can be traced. Set the scope to ``0`` to permit attachment. The value reverts to the distribution default on reboot. To persist the change, write the setting to a ``.conf`` file under ``/etc/sysctl.d/``.
+
+.. code-block:: shell
+
+   # Check current setting
+   $ cat /proc/sys/kernel/yama/ptrace_scope
+
+   # Temporarily allow attachment (requires root)
+   $ sudo sysctl kernel.yama.ptrace_scope=0
+
+.. warning::
+
+   ``kernel.yama.ptrace_scope`` is a system-wide security setting. Setting it to ``0`` allows every process on the system to ``ptrace`` any other process running under the same user, not just the attaching tool.
+
+**Docker containers**
+
+To attach to a process running in a Docker container, start the container with the ``SYS_PTRACE`` capability.
+
+.. code-block:: shell
+
+   $ docker run --cap-add SYS_PTRACE ...
+
+**Other security modules**
+
+Linux security modules such as SELinux and AppArmor, container runtimes, and sandboxing policies can each deny ``ptrace``. If attachment still fails, consult the documentation for the security software in use on your system.
+
+Direct Python execution
 ===================================
 
-The python file ``rocprof-attach`` can be called directly to attach to a specific PID and use custom tools within the attachment target.
+The Python file ``rocprof-attach`` can be directly called to attach to a specific Process ID (PID) and use custom tools within the attachment target.
 
 .. code-block:: bash
 
    $ rocprof-attach -p 12345 -t path/to/your-tool-library.so -d 5000
 
-In this example, the process with PID 12345 will be attached to and the library path/to/your-tool-library.so will be loaded by rocprofiler-sdk from within that process. After 5000 milliseconds have passed, detach will be called and ``rocprof-attach`` will exit when detachment is complete.
+In the preceding example, the ``rocprof-attach`` will attach to the process with PID 12345 and the library ``path/to/your-tool-library.so`` will be loaded by ROCprofiler-SDK from within that process. ``detach`` will be called after 5000 milliseconds and ``rocprof-attach`` will exit when detachment is complete.
+
+By default, ``rocprof-attach`` attaches to the target process and all of its descendant processes. To attach only to the specified PID, pass ``--attach-children=false``:
+
+.. code-block:: bash
+
+   $ rocprof-attach -p 12345 -t path/to/your-tool-library.so --attach-children=false
 
 More information can be found by invoking ``rocprof-attach -h``
 
-
-Python Functions
+Python functions
 ===================================
 
 The python file ``rocprof-attach`` defines an attach function that can be used for attachment:
@@ -39,57 +117,74 @@ The python file ``rocprof-attach`` defines an attach function that can be used f
      attach_tool_library,
      attach_duration_msec,
      attach_library=ROCPROF_ATTACH_LIBRARY,
+     attach_children=True,
    ):
 
-**Function Details**
+**Function details**
 
-The attach function performs the entire attachment process, including attaching and detaching, and provides the ability to use custom tools via the tool_libraries parameter. It also has simple control flow intended for direct calling from python. For more complex control, it is recommended to instead use the explicit attach and detach functions provided by the ``librocprofiler-sdk-rocattach.so`` binary.
+The attach function performs the entire attachment process, including attachment and detachment, and provides the ability to use custom tools via the ``tool_libraries`` parameter. It also has a simple control flow intended for direct calling from Python. For more complex control, it's recommended to use the explicit attach and detach functions provided by the ``librocprofiler-sdk-rocattach.so`` binary instead.
 
 **Parameters**
 
-- **pid**: Required - PID of process to attach to
-   - Defaults to environment variable ROCPROF_ATTACH_PID
-- **attach_tool_library**: Colon delimited list of tool libraries to use
-   - Defaults to environment variable ROCPROF_ATTACH_TOOL_LIBRARY
-- **attach_duration_msec**: Optional - Length of time in milliseconds to profile for
-   - Defaults to environment variable ROCPROF_ATTACH_DURATION
-   - If unspecified, attachment will run until Enter is pressed or SIGINT (Ctrl+C) is received
-- **attach_library**: Optional - Tool library to use for attachment and detachment
-   - Default will work for nearly all applications
-   - Defaults to environment variable ROCPROF_ATTACH_LIBRARY
-   - If unspecified, defaults to the absolute path of librocprofiler-sdk-rocattach.so
+- **pid**: Required - PID of process to attach to.
+- **attach_tool_library**: Colon delimited list of tool libraries to use.
+- **attach_duration_msec**: Optional - Profiling duration in milliseconds.
+   - If unspecified, attachment runs until Enter is pressed or SIGINT (Ctrl+C) is received.
+- **attach_library**: Optional - Tool library to use for attachment and detachment.
+   - Default works for nearly all applications.
+   - If unspecified, defaults to the absolute path of ``librocprofiler-sdk-rocattach.so``.
+- **attach_children**: Optional - Specifies whether to attach to the target process and all of its descendant processes.
+   - Defaults to ``True``; pass ``False`` to attach only to the specified PID.
 
 C Functions
 ===================================
 
-The C library ``librocprofiler-sdk-rocattach.so`` defines an attach and detach function that can be used for attachment:
+The C library ``librocprofiler-sdk-rocattach.so`` defines attach and detach functions that can be used for attachment:
 
 .. code-block:: cpp
 
    extern "C" {
-       // Start attachment to a target process
+       // Attach to a process and all of its descendant processes
+       rocattach_status_t rocattach_attach_tree(int pid) ROCATTACH_API;
+
+       // Attach to a single process only
        rocattach_status_t rocattach_attach(int pid) ROCATTACH_API;
 
-       // Detach from target process and cleanup
+       // Detach from a process and all of its descendant processes
+       rocattach_status_t rocattach_detach_tree(int pid) ROCATTACH_API;
+
+       // Detach from a single process (or all sessions when pid=0)
        rocattach_status_t rocattach_detach(int pid) ROCATTACH_API;
    }
 
 **Function Details:**
 
-- **rocattach_attach(int pid)**: Main entry point for starting attachment to a process
-   - Takes the target process ID as parameter
-   - Initiates ptrace-based attachment sequence
-   - Custom tool libraries can be specified in a colon delimited list with the environment variable ROCPROF_ATTACH_TOOL_LIBRARY
+- **rocattach_attach_tree(int pid)**: Attaches to a process and all of its descendants.
+   - Enumerates the full process tree rooted at ``pid`` via ``/proc`` before attaching.
+   - Attachment proceeds in breadth-first order from the root.
+   - If attachment to an individual child process fails, the error is logged and attachment continues with the remaining processes; the return status reflects the last error seen.
+   - The process tree is snapshotted at the time of the call; processes spawned after this point are not included.
 
-- **rocattach_detach(int pid)**: Entry point for detaching from the target process
-   - Takes the target process ID as a parameter
-   - Cleans up attachment resources and terminates profiling
-   - A PID of 0 can be specified to detach from all processes
+- **rocattach_attach(int pid)**: Attaches to a single process only.
+   - Takes the target process ID as parameter.
+   - Doesn't attach to child processes.
+   - When profiling applications that spawn child processes, use ``rocattach_attach_tree`` instead.
 
-Function Call Sequence
+- **rocattach_detach_tree(int pid)**: Detaches from a process and all of its descendants.
+   - Enumerates the process tree rooted at ``pid`` via ``/proc`` at the time of the call.
+   - Only processes with an active attachment session are detached; others are silently skipped.
+   - Symmetric counterpart to ``rocattach_attach_tree``; use these two together.
+   - Reentrant: the sessions lock is acquired and released per-process and isn't held across the ``/proc`` traversal, so concurrent calls from multiple threads are safe.
+
+- **rocattach_detach(int pid)**: Detaches from a single process.
+   - Takes the target process ID as a parameter.
+   - Cleans up attachment resources and terminates profiling.
+   - A PID of 0 can be specified to detach from all the current sessions.
+
+Function call sequence
 ======================
 
-Initial Attachment Sequence
+Initial attachment sequence
 ---------------------------
 
 The initial attachment process roughly follows this sequence:
@@ -104,11 +199,11 @@ The initial attachment process roughly follows this sequence:
 8. rocattach_detach(pid) ← Your tool calls this
 9. ptrace calls rocprofiler_register_detach()
 10. tool_library::tool_detach(...)
-11. [Program ends]   
+11. [Program ends]
 12. tool_library::tool_fini(...)
 
-Reattachment Sequence
----------------------
+Reattachment sequence
+----------------------
 
 For reattachment to a previously attached process:
 
@@ -120,23 +215,8 @@ For reattachment to a previously attached process:
 6. ptrace calls rocprofiler_register_detach()
 7. tool_library::tool_detach(...)
 
-
-Environment Variable Configuration
-==================================
-
-The target process must have ``ROCP_TOOL_ATTACH=1`` set, or be using a version of ``rocprofiler-register`` configured with the CMake flag ``ROCPROFILER_REGISTER_BUILD_DEFAULT_ATTACHMENT=ON``
-
-Required Variables
-------------------
-
-.. code-block:: text
-
-   export ROCP_TOOL_ATTACH=1
-   OR
-   cmake /path/to/rocprofiler-register -DROCPROFILER_REGISTER_BUILD_DEFAULT_ATTACHMENT=ON
-
-Tool Library Configuration
---------------------------
+Tool library configuration
+==========================
 
 The attachment system can use any tool library. ``librocprofiler-sdk-tool.so`` is used when the environment variable is not set.
 
@@ -145,12 +225,12 @@ The attachment system can use any tool library. ``librocprofiler-sdk-tool.so`` i
    // Attachment libraries to be used
    setenv("ROCPROF_ATTACH_TOOL_LIBRARY", "example-tool-1.so:example-tool-2.so", 1);
 
-Using the Attachment Functions
-==============================
+Using the attachment functions
+===============================
 
 This is a simplified example of how to use these functions in your own attachment tool:
 
-Basic Attachment Implementation
+Basic attachment implementation
 -------------------------------
 
 .. code-block:: cpp
@@ -177,9 +257,11 @@ Basic Attachment Implementation
                return false;
            }
 
-           // Get the attachment function pointers
-           attach_func = (rocattach_status_t(*)(int))dlsym(attach_lib_handle, "rocattach_attach");
-           detach_func = (rocattach_status_t(*)(int))dlsym(attach_lib_handle, "rocattach_detach");
+           // Get the attachment function pointers.
+           // Use rocattach_attach_tree/rocattach_detach_tree to attach to the process and all
+           // its descendants, or rocattach_attach/rocattach_detach for a single process only.
+           attach_func = (rocattach_status_t(*)(int))dlsym(attach_lib_handle, "rocattach_attach_tree");
+           detach_func = (rocattach_status_t(*)(int))dlsym(attach_lib_handle, "rocattach_detach_tree");
 
            if (!attach_func || !detach_func) {
                std::cerr << "Failed to find attachment functions" << std::endl;
@@ -225,8 +307,8 @@ Basic Attachment Implementation
        }
    };
 
-Main Implementation
--------------------
+Main implementation
+--------------------
 
 .. code-block:: cpp
 

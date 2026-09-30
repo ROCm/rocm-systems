@@ -1,22 +1,8 @@
-/* Copyright (c) 2009 - 2025 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #ifndef FLAGS_HPP_
 #define FLAGS_HPP_
@@ -32,10 +18,10 @@ release(cstring, AMD_LOG_LEVEL_FILE, "",                                      \
         "Set output file for AMD_LOG_LEVEL, Default is stderr")               \
 release(size_t, AMD_LOG_LEVEL_SIZE, 2048,                                     \
         "The max size of AMD_LOG generated in MB if printed to a file")       \
+release(bool, AMD_LOG_ASYNC, true,                                            \
+        "Async logging with in-memory buffer and background thread (set 0 to disable)")\
 debug(uint, DEBUG_GPU_FLAGS, 0,                                               \
         "The debug options for GPU device")                                   \
-release(size_t, CQ_THREAD_STACK_SIZE, 256*Ki, /* @todo: that much! */         \
-        "The default command queue thread stack size")                        \
 release(int, GPU_MAX_WORKGROUP_SIZE, 0,                                       \
         "Maximum number of workitems in a workgroup for GPU, 0 -use default") \
 debug(bool, CPU_MEMORY_GUARD_PAGES, false,                                    \
@@ -112,6 +98,8 @@ release(bool, HSA_LOCAL_MEMORY_ENABLE, true,                                  \
         "Enable HSA device local memory usage")                               \
 release(uint, HSA_KERNARG_POOL_SIZE, 4 * 1024 * 1024,                         \
         "Kernarg pool size")                                                  \
+release(bool, HSA_ENABLE_DTIF_FAST_COPY, false,                               \
+        "Flag plain device allocations as HostMemoryDirectAccess")            \
 release(bool, GPU_MIPMAP, true,                                               \
         "Enables GPU mipmap extension")                                       \
 release(uint, GPU_ENABLE_PAL, 2,                                              \
@@ -120,8 +108,8 @@ release(bool, DISABLE_DEFERRED_ALLOC, false,                                  \
         "Disables deferred memory allocation on device")                      \
 release(int, AMD_GPU_FORCE_SINGLE_FP_DENORM, -1,                              \
         "Force denorm for single precision: -1 - don't force, 0 - disable, 1 - enable") \
-release(uint, OCL_SET_SVM_SIZE, 256*1024,                                     \
-        "set SVM space size for discrete GPU")                                \
+release(uint, OCL_SET_SVM_SIZE, 4 * 1024 * 1024,                              \
+        "Set SVM space size for discrete GPU (MiB)")                          \
 release(uint, GPU_WAVES_PER_SIMD, 0,                                          \
         "Force the number of waves per SIMD (1-10)")                          \
 release(bool, OCL_STUB_PROGRAMS, false,                                       \
@@ -151,6 +139,8 @@ release(uint, GPU_MAX_COMMAND_BUFFERS, 8,                                     \
          "The maximum number of command buffers allocated per queue")         \
 release(uint, GPU_MAX_HW_QUEUES, 4,                                           \
          "The maximum number of HW queues allocated per device")              \
+release(bool, DEBUG_CLR_AQL_BARRIER_OPT, true,                                \
+        "Enable per-stream AQL barrier-bit optimization on shared HW queues") \
 release(bool, GPU_IMAGE_BUFFER_WAR, true,                                     \
         "Enables image buffer workaround")                                    \
 release(cstring, HIP_VISIBLE_DEVICES, "",                                     \
@@ -192,7 +182,7 @@ release(uint, ROC_ACTIVE_WAIT_TIMEOUT, 0,                                     \
         "Forces active wait of GPU interrup for the timeout(us)")             \
 release(bool, ROC_ENABLE_LARGE_BAR, true,                                     \
         "Enable Large Bar if supported by the device")                        \
-release(bool, ROC_CPU_WAIT_FOR_SIGNAL, true,                                  \
+release(bool, ROC_CPU_WAIT_FOR_SIGNAL, false,                                 \
         "Enable CPU wait for dependent HSA signals.")                         \
 release(bool, ROC_SYSTEM_SCOPE_SIGNAL, true,                                  \
         "Enable system scope for signals (uses interrupts).")                 \
@@ -215,8 +205,8 @@ release(cstring, ROC_GLOBAL_CU_MASK, "",                                      \
         "Each active bit represents using one CU (e.g., 0xf enables only 4 CUs)") \
 release(size_t, PAL_PREPINNED_MEMORY_SIZE, 64,                                \
         "Size in KBytes of prepinned memory")                                 \
-release(bool, AMD_CPU_AFFINITY, false,                                        \
-        "Reset CPU affinity of any runtime threads")                          \
+release(bool, AMD_CPU_AFFINITY, false,                                         \
+        "Prefer GPU-local NUMA CPU affinity when the application has not set a CPU mask") \
 release(bool, ROC_USE_FGS_KERNARG, true,                                      \
         "Use fine grain kernel args segment for supported asics")             \
 release(uint, ROC_P2P_SDMA_SIZE, 1024,                                        \
@@ -233,8 +223,6 @@ release(bool, ROC_SKIP_KERNEL_ARG_COPY, false,                                \
         "If true, then runtime can skip kernel arg copy")                     \
 release(bool, GPU_STREAMOPS_CP_WAIT, false,                                   \
         "Force the stream wait memory operation to wait on CP.")              \
-release(bool, HIPRTC_USE_RUNTIME_UNBUNDLER, false,                            \
-        "Set this to true to force runtime unbundler in hiprtc.")             \
 release(size_t, HIP_INITIAL_DM_SIZE, 8 * Mi,                                  \
         "Set initial heap size for device malloc.")                           \
 release(bool, HIP_FORCE_DEV_KERNARG, true,                                    \
@@ -245,39 +233,65 @@ release(cstring, HIPRTC_COMPILE_OPTIONS_APPEND, "",                           \
         "Set compile options needed for hiprtc compilation")                  \
 release(cstring, HIPRTC_LINK_OPTIONS_APPEND, "",                              \
         "Set link options needed for hiprtc compilation")                     \
+release(cstring, GPU_CLR_PROFILE_OUTPUT, "",                                  \
+        "Enable built-in HIP profiling and write Chrome trace JSON to this path on exit") \
 release(bool, HIP_VMEM_MANAGE_SUPPORT, true,                                  \
         "Virtual Memory Management Support")                                  \
 release(uint, DEBUG_HIP_GRAPH_DOT_PRINT, 0,                               \
         "0 = Disable, 1 = Print during Graph Inst, 2 = Print during Graph Launch") \
-release(bool, DEBUG_HIP_FORCE_ASYNC_QUEUE, false,                             \
-        "Forces grpahs into async queue mode. DEBUG_HIP_FORCE_GRAPH_QUEUES must be 1") \
 release(uint, DEBUG_HIP_FORCE_GRAPH_QUEUES, 4,                                \
         "Forces the number of streams for the graph parallel execution")      \
 release(uint, DEBUG_HIP_GRAPH_BATCH_SIZE, 256,                                \
         "Number of graph nodes to batch at a time")                           \
-release(uint, DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING, 1,                          \
-        "0 = Disable, 1 = Enable, 2 = Force")                                 \
+release(uint, DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING, 0,                          \
+        "Segment scheduling mode (segmented path only): "                      \
+        "0=Hybrid/auto, 1=Round-robin, 2=DFS")                                \
+release(uint, DEBUG_HIP_GRAPH_MIN_OVERLAP, 2,                                 \
+        "Min overlappable work (in occupancy passes) per unit of cross-stream "\
+        "sync (barrier packets + completion signals) to keep a graph "         \
+        "multi-stream; below this ratio it collapses to a single stream. "     \
+        "0 = off.")                                                            \
+release(bool, DEBUG_HIP_GRAPH_CLASSIC_PATH, false,                            \
+        "Force GraphExecClassic (classic topological path) regardless of "    \
+        "GPU_ENABLE_PAL, for testing on Linux")                                \
 release(uint, DEBUG_HIP_BLOCK_SYNC, 50,                                       \
         "Blocks synchronization on CPU until the callback processing is done")\
 release(uint, DEBUG_CLR_MAX_BATCH_SIZE, 1000,                                 \
         "Forces the callback to clean-up CPU submission queue")               \
 release(bool, DEBUG_CLR_SYSMEM_POOL, false,                                   \
         "Use sysmem pool implementation in runtime for amd commands")         \
-release(bool, DEBUG_HIP_KERNARG_COPY_OPT, true,                               \
-        "Enable/Disable multiple kern arg copies")                            \
-release(bool, DEBUG_CLR_KERNARG_HDP_FLUSH_WA, false,                          \
-        "Toggle kernel arg copy workaround")                                  \
-release(uint, DEBUG_HIP_DYNAMIC_QUEUES, 2,                                    \
-        "Dynamic queue management: 0=off, 1=Queue depth heuristic,"           \
-        "2= Queue Depth + Pipe distribution")                                 \
-release(bool, DEBUG_HIP_IGNORE_STREAM_PRIORITY, false,                        \
-        "Ignore priority streams")                                            \
+release(uint, DEBUG_HIP_DYNAMIC_QUEUES, 1,                                    \
+        "Dynamic queue management: 0=off, 1=Depth heuristic,"                 \
+        " 2=1 + dedicated null-stream queue")                                 \
+release(bool, DEBUG_HIP_IGNORE_STREAM_PRIORITY, true,                         \
+        "Treat all streams as normal priority")                               \
 release(uint, HIP_SKIP_ABORT_ON_GPU_ERROR, true,                              \
         "Set this to true, to avoid host side abort for GPU errors")          \
 release(bool, HIP_FORCE_SPIRV_CODEOBJECT, false,                              \
         "Force use of SPIRV instead of device specific code object.")         \
-release(uint, DEBUG_CLR_BATCH_CPU_SYNC_SIZE, 8,                               \
-        "Forces the minimum batch size for CPU sync")  // clang-format on
+release(uint, DEBUG_CLR_BATCH_CPU_SYNC_SIZE, 16,                              \
+        "Forces the minimum batch size for CPU sync")                         \
+release(bool, DEBUG_CLR_DISABLE_IMAGE, false,                                 \
+        "1 = Disable Image support for ROC path")                             \
+release(cstring, HIP_HRR_CAPTURE_OUTPUT, "",                                  \
+        "Set to a directory path to enable HRR capture; archive written there") \
+release(bool, HIP_HRR_DEBUG_ARGS, false,                                      \
+        "Enable HRR capture argument-provenance tracing (per-arg dumps and "  \
+        "H2D destination logging) at LOG_INFO level")                         \
+release(uint, DEBUG_CLR_DOORBELL_SKIP, 16,                                    \
+        "Number of consecutive dispatches that may skip the doorbell flush.") \
+release(bool, DEBUG_CLR_DISABLE_FALLBACK, false,                              \
+        "Disables certain fallback paths")                                    \
+release(bool, DEBUG_CLR_DIRECT_DOORBELL, false,                               \
+        "Write the hardware doorbell directly from CLR")                      \
+release(uint, DEBUG_CLR_AQL_DEV_QUEUE, 0,                                     \
+        "Device-memory AQL ring buffer for supported asics "                  \
+        "(1=enabled, 0=force system mem (default))")                          \
+release(uint, DEBUG_CLR_USE_MOVDIR64B, 1,                                     \
+        "Use MOVDIR64B full-packet writes for AQL + metadata rings"           \
+        "(1=enabled (default), 0=non-temporal store path)")                   \
+release(bool, DEBUG_CLR_ENABLE_KDQ, true,                                     \
+        "Kernel dispatch metadata (prefetch) queue, 0 = disable")             \
 
 namespace amd {
 

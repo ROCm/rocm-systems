@@ -43,25 +43,25 @@
  *
  */
 
+#include "rocm_smi_test/functional/init_shutdown_refcount.h"
+
 #include <pthread.h>
 
 #include <algorithm>
-#include <iostream>
-#include <thread>  // NOLINT
-#include <random>
 #include <chrono>  // NOLINT
+#include <iostream>
+#include <random>
+#include <thread>  // NOLINT
 
-#include "rocm_smi_test/functional/init_shutdown_refcount.h"
 #include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi_test/test_common.h"
 
-extern int32_t
-rsmi_test_refcount(uint64_t refcnt_type);
+extern int32_t rsmi_test_refcount(uint64_t refcnt_type);
 
 static void rand_sleep_mod(int msec) {
   assert(msec > 10);
-  unsigned int seed = time(NULL);
+  auto seed = static_cast<unsigned int>(time(NULL));
   std::mt19937_64 eng{seed};
   std::uniform_int_distribution<> dist{10, msec};
   std::this_thread::sleep_for(std::chrono::milliseconds{dist(eng)});
@@ -89,7 +89,7 @@ static void* RSMIShutDownFunction(void* args) {
   return nullptr;
 }
 
-static void *RSMIInitShutDownFunction(void* args) {
+static void* RSMIInitShutDownFunction(void* args) {
   rsmi_status_t status;
 
   (void)args;
@@ -109,12 +109,12 @@ static const int NumOfThreads = 100;
 
 TestConcurrentInit::TestConcurrentInit(void) : TestBase() {
   set_title("RSMI Concurrent Init Test");
-  set_description("This test initializes RSMI concurrently to verify "
-                                         "reference counting functionality.");
+  set_description(
+      "This test initializes RSMI concurrently to verify "
+      "reference counting functionality.");
 }
 
-TestConcurrentInit::~TestConcurrentInit(void) {
-}
+TestConcurrentInit::~TestConcurrentInit(void) {}
 
 void TestConcurrentInit::SetUp(void) {
   // TestBase::SetUp();  // Skip usual SetUp to avoid doing the usual rsmi_init
@@ -124,16 +124,12 @@ void TestConcurrentInit::SetUp(void) {
 // Compare required profile for this test case with what we're actually
 // running on
 void TestConcurrentInit::DisplayTestInfo(void) {
-  IF_VERB(STANDARD) {
-    TestBase::DisplayTestInfo();
-  }
+  IF_VERB(STANDARD) { TestBase::DisplayTestInfo(); }
   return;
 }
 
 void TestConcurrentInit::DisplayResults(void) const {
-  IF_VERB(STANDARD) {
-    TestBase::DisplayResults();
-  }
+  IF_VERB(STANDARD) { TestBase::DisplayResults(); }
   return;
 }
 
@@ -147,9 +143,7 @@ void TestConcurrentInit::Close() {
 // running on
 void TestConcurrentInit::Run(void) {
   if (setup_failed_) {
-    IF_VERB(STANDARD) {
-      std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
-    }
+    IF_VERB(STANDARD) { std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl; }
     return;
   }
 
@@ -158,12 +152,9 @@ void TestConcurrentInit::Run(void) {
   pthread_attr_init(&attr);
   pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
 
-  IF_VERB(STANDARD) {
-    std::cout << "Testing concurrent rsmi_init()..." << std::endl;
-  }
+  IF_VERB(STANDARD) { std::cout << "Testing concurrent rsmi_init()..." << std::endl; }
   for (int Id = 0; Id < NumOfThreads; ++Id) {
-    int ThreadStatus = pthread_create(&ThreadId[Id], &attr,
-                                                   RSMIInitFunction, nullptr);
+    int ThreadStatus = pthread_create(&ThreadId[Id], &attr, RSMIInitFunction, nullptr);
     ASSERT_EQ(0, ThreadStatus) << "pthead_create failed.";
   }
 
@@ -180,15 +171,13 @@ void TestConcurrentInit::Run(void) {
   }
 
   rsmi_status_t err = rsmi_shut_down();
-  ASSERT_EQ(RSMI_INITIALIZATION_ERROR, err) <<
-                "rsmi_init reference count was too high.";
+  ASSERT_EQ(RSMI_INITIALIZATION_ERROR, err) << "rsmi_init reference count was too high.";
 
   int32_t refcnt = rsmi_test_refcount(0);
   ASSERT_EQ(0, refcnt);
 
   IF_VERB(STANDARD) {
-    std::cout << "Concurrent rsmi_init() test passed." <<
-                                                std::endl << std::endl;
+    std::cout << "Concurrent rsmi_init() test passed." << std::endl << std::endl;
     std::cout << "Testing concurrent rsmi_shut_down()..." << std::endl;
   }
   // Invoke hsa_shut_down and verify that all the hsa_init's were counted.
@@ -199,8 +188,7 @@ void TestConcurrentInit::Run(void) {
   }
 
   for (int Id = 0; Id < NumOfThreads; ++Id) {
-    int ThreadStatus =
-         pthread_create(&ThreadId[Id], &attr, RSMIShutDownFunction, nullptr);
+    int ThreadStatus = pthread_create(&ThreadId[Id], &attr, RSMIShutDownFunction, nullptr);
     ASSERT_EQ(0, ThreadStatus) << "pthead_create failed.";
   }
 
@@ -214,13 +202,10 @@ void TestConcurrentInit::Run(void) {
 
   IF_VERB(STANDARD) {
     std::cout << "Concurrent rsmi_shut_down() passed." << std::endl;
-    std::cout <<
-      "Testing concurrent rsmi_init() followed by rsmi_shut_down()..." <<
-                                                                    std::endl;
+    std::cout << "Testing concurrent rsmi_init() followed by rsmi_shut_down()..." << std::endl;
   }
   for (int Id = 0; Id < NumOfThreads; ++Id) {
-    int ThreadStatus =
-      pthread_create(&ThreadId[Id], &attr, RSMIInitShutDownFunction, nullptr);
+    int ThreadStatus = pthread_create(&ThreadId[Id], &attr, RSMIInitShutDownFunction, nullptr);
     ASSERT_EQ(0, ThreadStatus) << "pthead_create failed.";
   }
 
@@ -233,8 +218,6 @@ void TestConcurrentInit::Run(void) {
   ASSERT_EQ(0, refcnt);
 
   IF_VERB(STANDARD) {
-    std::cout <<
-      "Concurrent rsmi_init() followed by rsmi_shut_down() passed." <<
-                                                                    std::endl;
+    std::cout << "Concurrent rsmi_init() followed by rsmi_shut_down() passed." << std::endl;
   }
 }

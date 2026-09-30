@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 
@@ -186,6 +173,36 @@ class VulkanTest {
                     VkBuffer& buffer, VkDeviceMemory& buffer_memory, bool external = false);
 
   void CopyBuffer(VkBuffer src_buffer, VkBuffer dst_buffer, VkDeviceSize size);
+
+  // ── Vulkan image helpers ──────────────────────────────────────────────────────────────────────
+
+  /// Create a DEVICE_LOCAL VkImage with external memory export support.
+  /// @param format      VkFormat (e.g. VK_FORMAT_R8G8B8A8_UINT)
+  /// @param num_levels  Number of mip levels.
+  /// @param external    If true, allocate with exportable memory.
+  void CreateImage(uint32_t width, uint32_t height, uint32_t num_levels, VkFormat format,
+                   VkImage& image, VkDeviceMemory& image_memory, VkDeviceSize& image_size,
+                   bool external = true, VkImageTiling tiling = VK_IMAGE_TILING_OPTIMAL);
+
+  /// Create a VkImageView for a single mip level of an image.
+  VkImageView CreateImageView(VkImage image, VkFormat format, uint32_t base_mip_level,
+                               uint32_t level_count = 1);
+
+  /// Copy from a host-visible VkBuffer into a single mip level of a VkImage.
+  /// Handles UNDEFINED→TRANSFER_DST_OPTIMAL→GENERAL layout transitions.
+  void CopyBufferToImage(VkBuffer src_buf, VkImage dst_image, uint32_t mip_level,
+                          uint32_t mip_width, uint32_t mip_height);
+
+  /// Copy a single mip level of a VkImage into a host-visible VkBuffer.
+  /// Handles GENERAL→TRANSFER_SRC_OPTIMAL→GENERAL layout transitions.
+  void CopyImageToBuffer(VkImage src_image, uint32_t mip_level, uint32_t mip_width,
+                          uint32_t mip_height, VkBuffer dst_buf);
+
+  /// Transition image layout for all mip levels (UNDEFINED → target_layout).
+  void TransitionImageLayout(VkImage image, uint32_t num_levels,
+                              VkImageLayout old_layout, VkImageLayout new_layout);
+
+  VkExternalMemoryHandleTypeFlagBits GetMemHandleType() const { return _mem_handle_type; }
 
  private:
   void CreateInstance();

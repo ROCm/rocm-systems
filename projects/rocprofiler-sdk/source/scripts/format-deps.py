@@ -24,8 +24,11 @@
 
 
 import argparse
+import io
 import os
-import sys
+from pathlib import Path
+
+from ruamel.yaml import YAML
 
 
 class FormatSource(argparse.Action):
@@ -39,7 +42,7 @@ class FormatSource(argparse.Action):
             + os.path.dirname(__file__)
             + '/../../tests -type f -not -path "'
             + os.path.dirname(__file__)
-            + "/../../build/*\" | egrep '\.(h|hpp|hh|c|cc|cpp)(|\.in)$')"
+            + r"""/../../build/*" | egrep '\.(h|hpp|hh|c|cc|cpp)(|\.in)$')"""
         )
         exit(0)
 
@@ -53,7 +56,7 @@ class FormatCMake(argparse.Action):
             + os.path.dirname(__file__)
             + '/../../build/*" -not -path "'
             + os.path.dirname(__file__)
-            + "/../../external/*\" | egrep 'CMakeLists.txt|\.cmake$')"
+            + r"""/../../external/*" | egrep 'CMakeLists.txt|\.cmake$')"""
         )
         exit(0)
 
@@ -61,6 +64,23 @@ class FormatCMake(argparse.Action):
 class FormatPython(argparse.Action):
     def __call__(self, parser, namespace, values, option_string=None):
         os.system("black " + os.path.dirname(__file__) + "/../..")
+        exit(0)
+
+
+class FormatYAML(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        yaml = YAML()
+        yaml.preserve_quotes = True
+        yaml.width = 100
+        yaml.indent(mapping=2, sequence=4, offset=2)
+        config = (
+            Path(os.path.dirname(__file__))
+            / "../../source/share/rocprofiler-sdk/config.yaml"
+        ).resolve()
+        data = yaml.load(config.read_text())
+        stream = io.StringIO()
+        yaml.dump(data, stream)
+        config.write_text(stream.getvalue())
         exit(0)
 
 
@@ -75,7 +95,7 @@ class FormatAll(argparse.Action):
             + os.path.dirname(__file__)
             + '/../../tests -type f -not -path "'
             + os.path.dirname(__file__)
-            + "/../../build/*\" | egrep '\.(h|hpp|hh|c|cc|cpp)(|\.in)$')"
+            + r"""/../../build/*" | egrep '\.(h|hpp|hh|c|cc|cpp)(|\.in)$')"""
         )
         os.system(
             "cmake-format -i $(find "
@@ -84,9 +104,10 @@ class FormatAll(argparse.Action):
             + os.path.dirname(__file__)
             + '/../../build/*" -not -path "'
             + os.path.dirname(__file__)
-            + "/../../external/*\" | egrep 'CMakeLists.txt|\.cmake$')"
+            + r"""/../../external/*" | egrep 'CMakeLists.txt|\.cmake$')"""
         )
         os.system("black " + os.path.dirname(__file__) + "/../..")
+        FormatYAML.__call__(FormatYAML, parser, namespace, values, option_string)
         exit(0)
 
 
@@ -118,6 +139,13 @@ parser.add_argument(
     "-p", "--python", nargs=0, help="format python files", action=FormatPython
 )
 parser.add_argument(
-    "-a", "--all", nargs=0, help="format cmake, source and python files", action=FormatAll
+    "-cc", "--counter-config", nargs=0, help="format config.yaml", action=FormatYAML
+)
+parser.add_argument(
+    "-a",
+    "--all",
+    nargs=0,
+    help="format cmake, source, python, and yaml files",
+    action=FormatAll,
 )
 parser.parse_args()

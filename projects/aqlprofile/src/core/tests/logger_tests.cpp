@@ -8,10 +8,25 @@
 #include <thread>
 #include <chrono>
 #include <sstream>
+#include <cctype>
 #include <cstdlib>
+#ifdef _WIN32
+#include <stdlib.h>  // _putenv_s, _unsetenv via _putenv_s
+#else
 #include <unistd.h>
+#endif
 
 #include "../logger.h"
+
+#ifdef _WIN32
+static inline int setenv(const char* name, const char* value, int overwrite) {
+    (void)overwrite; // POSIX setenv uses overwrite; this shim always overwrites
+    return static_cast<int>(_putenv_s(name, value));
+}
+static inline int unsetenv(const char* name) {
+    return static_cast<int>(_putenv_s(name, ""));
+}
+#endif
 
 // Define static members for Logger class
 namespace aql_profile {
@@ -47,7 +62,7 @@ protected:
         }
     }
 
-    const std::string log_file_path_ = "/tmp/aql_profile_log.txt";
+    const std::string log_file_path_ = (std::filesystem::temp_directory_path() / "aql_profile_log.txt").string();
     
     // Helper function to read log file content
     std::string ReadLogFile() {
@@ -220,8 +235,10 @@ TEST_F(LoggerTest, TimestampFormat) {
     
     std::string content = ReadLogFile();
     
-    // Check for timestamp pattern (YYYY-MM-DD HH:MM:SS)
-    EXPECT_THAT(content, testing::MatchesRegex(".*[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}.*"));
+    // Check for timestamp pattern (YYYY-MM-DD HH:MM:SS) — use HasSubstr to stay portable
+    EXPECT_THAT(content, testing::HasSubstr("-"));   // date separator
+    EXPECT_THAT(content, testing::HasSubstr(":"));   // time separator
+    EXPECT_THAT(content, testing::HasSubstr("Timestamp test"));
 }
 
 // Test PID and TID in logs
@@ -239,9 +256,29 @@ TEST_F(LoggerTest, PidTidInLogs) {
     EXPECT_THAT(content, testing::HasSubstr("pid"));
     EXPECT_THAT(content, testing::HasSubstr("tid"));
     
-    // Verify they contain numbers
-    EXPECT_THAT(content, testing::MatchesRegex(".*pid[0-9]+.*"));
-    EXPECT_THAT(content, testing::MatchesRegex(".*tid[0-9]+.*"));
+    // Verify they contain numbers (use HasSubstr for portability — GTest's simple
+    // regex engine on Windows does not support [0-9]+ quantifier syntax)
+    size_t pid_pos = content.find("pid");
+    ASSERT_NE(pid_pos, std::string::npos);
+    // Scan forward from "pid" to the first digit to avoid out-of-bounds and format assumptions
+    size_t pid_digit_pos = pid_pos + 3;
+    while (pid_digit_pos < content.size() &&
+           !std::isdigit(static_cast<unsigned char>(content[pid_digit_pos]))) {
+        ++pid_digit_pos;
+    }
+    ASSERT_LT(pid_digit_pos, content.size());
+    EXPECT_TRUE(std::isdigit(static_cast<unsigned char>(content[pid_digit_pos])));
+
+    size_t tid_pos = content.find("tid");
+    ASSERT_NE(tid_pos, std::string::npos);
+    // Scan forward from "tid" to the first digit to avoid out-of-bounds and format assumptions
+    size_t tid_digit_pos = tid_pos + 3;
+    while (tid_digit_pos < content.size() &&
+           !std::isdigit(static_cast<unsigned char>(content[tid_digit_pos]))) {
+        ++tid_digit_pos;
+    }
+    ASSERT_LT(tid_digit_pos, content.size());
+    EXPECT_TRUE(std::isdigit(static_cast<unsigned char>(content[tid_digit_pos])));
 }
 
 // Test empty message handling

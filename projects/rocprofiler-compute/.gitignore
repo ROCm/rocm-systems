@@ -17,9 +17,16 @@ __pycache__
 saved_analysis
 pmc_kernel_top.csv
 VERSION.sha
+**/_build
+**/out
 
 # temp files
 /tests/Testing
+
+# sample workloads copied by tests/CMakeLists.txt
+/tests/simple_net.py
+/tests/torch_compile_triton.py
+/tests/triton_ffn.py
 
 # documentation artifacts
 /_build

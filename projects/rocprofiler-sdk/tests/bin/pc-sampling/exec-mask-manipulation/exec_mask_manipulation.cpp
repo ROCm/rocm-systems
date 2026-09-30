@@ -28,6 +28,14 @@ THE SOFTWARE.
 #define ITER_NUM   16 * 1024
 #define BLOCK_SIZE 1024
 
+// In some cases, there might be a skid between exec-mask and the PC.
+// Thus we inject some nops around branches in our testing kernels.
+#define EXEC_MASK_SKID                                                                             \
+    asm volatile("s_nop 1\n");                                                                     \
+    asm volatile("s_nop 1\n");                                                                     \
+    asm volatile("s_nop 1\n");                                                                     \
+    asm volatile("s_nop 1\n");
+
 #define HIP_API_CALL(CALL)                                                                         \
     {                                                                                              \
         hipError_t error_ = (CALL);                                                                \
@@ -54,12 +62,13 @@ check_hip_error(void);
 
 // ======================================================
 __global__ void
-kernel1(const int c)
+kernel1(const int c, const int iter_num)
 {
     int a = 0;
 #pragma nounroll
-    for(int i = 0; i < ITER_NUM; i++)
+    for(int i = 0; i < iter_num; i++)
     {
+        EXEC_MASK_SKID;
         asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
         asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
         asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
@@ -160,16 +169,18 @@ kernel1(const int c)
         asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
         asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
         asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
+        EXEC_MASK_SKID;
     }
 }
 
 __global__ void
-kernel2(const int c)
+kernel2(const int c, const int iter_num)
 {
     int a = 0;
 #pragma nounroll
-    for(int i = 0; i < ITER_NUM; i++)
+    for(int i = 0; i < iter_num; i++)
     {
+        EXEC_MASK_SKID;
         asm volatile("s_mov_b32 %0 %1\n" : "=s"(a) : "s"(c));
         asm volatile("s_mov_b32 %0 %1\n" : "=s"(a) : "s"(c));
         asm volatile("s_mov_b32 %0 %1\n" : "=s"(a) : "s"(c));
@@ -270,21 +281,23 @@ kernel2(const int c)
         asm volatile("s_mov_b32 %0 %1\n" : "=s"(a) : "s"(c));
         asm volatile("s_mov_b32 %0 %1\n" : "=s"(a) : "s"(c));
         asm volatile("s_mov_b32 %0 %1\n" : "=s"(a) : "s"(c));
+        EXEC_MASK_SKID;
     }
 }
 
 __global__ void
-kernel3(const float c)
+kernel3(const float c, const int iter_num)
 {
     double a        = threadIdx.x;
     float  i        = 0;
     float  d        = threadIdx.x;
     float  e        = 0;
     int    tid_even = threadIdx.x % 2;
-    for(int j = 0; j < ITER_NUM; j++)
+    for(int j = 0; j < iter_num; j++)
     {
         if(tid_even == 0)
         {
+            EXEC_MASK_SKID;
             asm volatile("v_rcp_f64 %0, %0\n" : "+v"(a), "=s"(i) : "s"(c));
             asm volatile("v_rcp_f64 %0, %0\n" : "+v"(a), "=s"(i) : "s"(c));
             asm volatile("v_rcp_f64 %0, %0\n" : "+v"(a), "=s"(i) : "s"(c));
@@ -385,9 +398,11 @@ kernel3(const float c)
             asm volatile("v_rcp_f64 %0, %0\n" : "+v"(a), "=s"(i) : "s"(c));
             asm volatile("v_rcp_f64 %0, %0\n" : "+v"(a), "=s"(i) : "s"(c));
             asm volatile("v_rcp_f64 %0, %0\n" : "+v"(a), "=s"(i) : "s"(c));
+            EXEC_MASK_SKID;
         }
         else
         {
+            EXEC_MASK_SKID;
             asm volatile("v_rcp_f32 %0, %0\n" : "+v"(d), "=s"(e) : "s"(c));
             asm volatile("v_rcp_f32 %0, %0\n" : "+v"(d), "=s"(e) : "s"(c));
             asm volatile("v_rcp_f32 %0, %0\n" : "+v"(d), "=s"(e) : "s"(c));
@@ -488,6 +503,7 @@ kernel3(const float c)
             asm volatile("v_rcp_f32 %0, %0\n" : "+v"(d), "=s"(e) : "s"(c));
             asm volatile("v_rcp_f32 %0, %0\n" : "+v"(d), "=s"(e) : "s"(c));
             asm volatile("v_rcp_f32 %0, %0\n" : "+v"(d), "=s"(e) : "s"(c));
+            EXEC_MASK_SKID;
         }
     }
 }
@@ -501,21 +517,22 @@ run_kernel()
     HIP_API_CALL(hipDeviceGetAttribute(&wave_size, hipDeviceAttributeWarpSize, 0));
 
     // Get device properties to retrieve GFXIP version
-    uint32_t num_blocks = BLOCK_SIZE;
+    size_t num_blocks = BLOCK_SIZE;
+    size_t num_iters  = ITER_NUM;
 
     for(int i = 1; i <= wave_size; i++)
     {
         if(i % 2 == 1)
-            kernel1<<<num_blocks, i>>>(i);
+            kernel1<<<num_blocks, i>>>(i, num_iters);
         else
-            kernel2<<<num_blocks, i>>>(i);
+            kernel2<<<num_blocks, i>>>(i, num_iters);
 
         check_hip_error();
         HIP_API_CALL(hipDeviceSynchronize());
     }
 
     float arg = 0;
-    kernel3<<<num_blocks, 4 * wave_size>>>(arg);
+    kernel3<<<num_blocks, 4 * wave_size>>>(arg, num_iters);
     check_hip_error();
     HIP_API_CALL(hipDeviceSynchronize());
 }

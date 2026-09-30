@@ -23,7 +23,6 @@ set(RDC_LIB_SRC_LIST
     "${SRC_DIR}/RdcTopologyLinkImpl.cc"
     "${SRC_DIR}/RdcRocpLib.cc"
     "${SRC_DIR}/RdcRocrLib.cc"
-    "${SRC_DIR}/RdcRVSLib.cc"
     "${SRC_DIR}/RdcSmiDiagnosticImpl.cc"
     "${SRC_DIR}/RdcSmiLib.cc"
     "${SRC_DIR}/RdcConfigSettingsImpl.cc"
@@ -59,7 +58,6 @@ set(RDC_LIB_INC_LIST
     "${INC_DIR}/impl/RdcNotificationImpl.h"
     "${INC_DIR}/impl/RdcRocpLib.h"
     "${INC_DIR}/impl/RdcRocrLib.h"
-    "${INC_DIR}/impl/RdcRVSLib.h"
     "${INC_DIR}/impl/RdcSmiDiagnosticImpl.h"
     "${INC_DIR}/impl/RdcSmiLib.h"
     "${INC_DIR}/impl/RdcTelemetryModule.h"
@@ -81,11 +79,6 @@ target_include_directories(
 set_property(TARGET ${RDC_LIB} PROPERTY SOVERSION "${VERSION_MAJOR}")
 set_property(TARGET ${RDC_LIB} PROPERTY VERSION "${SO_VERSION_STRING}")
 set_target_properties(${RDC_LIB} PROPERTIES INSTALL_RPATH "\$ORIGIN")
-
-# If the library is a release, strip the target library
-if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
-    add_custom_command(TARGET ${RDC_LIB} POST_BUILD COMMAND ${CMAKE_STRIP} ${RDC_LIB_COMPONENT}.so)
-endif()
 
 # pass ROCM_DIR to compiler
 target_compile_definitions(${RDC_LIB} PRIVATE ROCM_DIR="${ROCM_DIR}")

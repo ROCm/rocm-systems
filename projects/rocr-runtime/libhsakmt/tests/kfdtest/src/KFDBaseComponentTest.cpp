@@ -40,17 +40,32 @@ void KFDBaseComponentTest::TearDownTestCase() {
 void KFDBaseComponentTest::SetUp() {
     ROUTINE_START
 
-    ASSERT_SUCCESS(hsaKmtOpenKFD());
-    EXPECT_SUCCESS(hsaKmtGetVersion(&m_VersionInfo));
-    memset( &m_SystemProperties, 0, sizeof(m_SystemProperties) );
+    memset(&m_SystemProperties, 0, sizeof(m_SystemProperties));
     memset(m_RenderNodes, 0, sizeof(m_RenderNodes));
 
+#ifdef HSAKMT_CTX
+    ASSERT_SUCCESS(hsaKmtOpenKFDCtx(&m_hsakmt_primary_ctx));
+    ASSERT_SUCCESS(HSAKMT_CALL(hsaKmtAcquireSystemProperties, m_hsakmt_primary_ctx, &m_SystemProperties));
+    m_hsakmt_current_ctx = m_hsakmt_primary_ctx;
+
+    #ifdef HSAKMT_SECONDARY_CTX
+        ASSERT_SUCCESS(hsaKmtOpenSecondaryKFDCtx(&m_hsakmt_secondary_ctx));
+        ASSERT_SUCCESS(HSAKMT_CALL(hsaKmtAcquireSystemProperties, m_hsakmt_secondary_ctx, &m_SystemProperties));
+        m_hsakmt_current_ctx = m_hsakmt_secondary_ctx;
+    #endif
+#else
+    ASSERT_SUCCESS(hsaKmtOpenKFD());
+    ASSERT_SUCCESS(hsaKmtAcquireSystemProperties(&m_SystemProperties));
+#endif
+
+    EXPECT_SUCCESS(hsaKmtGetVersion(&m_VersionInfo));
+
+    g_baseTest = this;
     /** In order to be correctly testing the KFD interfaces and ensure
      *  that the KFD acknowledges relevant node parameters
      *  for the rest of the tests and used for more specific topology tests,
      *  call to GetSystemProperties for a system snapshot of the topology here
      */
-    ASSERT_SUCCESS(hsaKmtAcquireSystemProperties(&m_SystemProperties));
     ASSERT_GT(m_SystemProperties.NumNodes, HSAuint32(0)) << "HSA has no nodes.";
 
     m_NodeInfo.Init(m_SystemProperties.NumNodes);
@@ -72,11 +87,13 @@ void KFDBaseComponentTest::SetUp() {
     /* m_FamilyId is default gpu family id, keep it to support old test method */
     m_FamilyId = FamilyIdFromNode(nodeProperties);
 
+    /* Check if XNACK is supported on the ASIC */
+    m_is_xnack_supported = m_FamilyId < FAMILY_AL ? false : true;
+
     /* these values are for default gpu, keep them to support old test method */
     GetHwQueueInfo(nodeProperties, &m_numCpQueues, &m_numSdmaEngines,
                     &m_numSdmaXgmiEngines, &m_numSdmaQueuesPerEngine);
 
-    g_baseTest = this;
 
     /* m_pAsm is default gpu assembler, keep it to support old test method */
     m_pAsm = new Assembler(GetGfxVersion(nodeProperties));
@@ -98,7 +115,7 @@ void KFDBaseComponentTest::SetUp() {
         while ((end = g_ConcurrentNodes.find(',', start)) != std::string::npos) {
             std::string token = g_ConcurrentNodes.substr(start, end - start);
             if (!token.empty()) {
-                int node = std::stoi(token); 
+                int node = std::stoi(token);
             
                 if (std::find(gpuNodes.begin(), gpuNodes.end(), node) != gpuNodes.end()) 
                     uniqueIndices.insert(node);
@@ -162,8 +179,17 @@ void KFDBaseComponentTest::TearDown() {
         drmClose(m_RenderNodes[i].fd);
     }
 
-    EXPECT_SUCCESS(hsaKmtReleaseSystemProperties());
+#ifdef HSAKMT_CTX
+    #ifdef HSAKMT_SECONDARY_CTX
+        EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtReleaseSystemProperties, m_hsakmt_secondary_ctx));
+        EXPECT_SUCCESS(hsaKmtCloseSecondaryKFDCtx(m_hsakmt_secondary_ctx));
+    #endif
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtReleaseSystemProperties, m_hsakmt_primary_ctx));
+    EXPECT_SUCCESS(hsaKmtCloseKFDCtx());
+#else
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtReleaseSystemProperties, m_hsakmt_current_ctx));
     EXPECT_SUCCESS(hsaKmtCloseKFD());
+#endif
     g_baseTest = NULL;
 
     if (m_pAsm)
@@ -226,7 +252,7 @@ HSAuint64 KFDBaseComponentTest::GetSysMemSize() {
              * Compute total system memory size. KFD driver also computes
              * the system memory (si_meminfo) similarly
              */
-            EXPECT_SUCCESS(hsaKmtGetNodeMemoryProperties(node, 1, &cpuMemoryProps));
+            EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtGetNodeMemoryProperties, m_hsakmt_current_ctx, node, 1, &cpuMemoryProps));
             systemMemSize += cpuMemoryProps.SizeInBytes;
         }
     }
@@ -242,7 +268,7 @@ HSAuint64 KFDBaseComponentTest::GetVramSize(int gpuNode) {
     EXPECT_NE((const HsaNodeProperties *)NULL, nodeProps);
     HSAuint32 numBanks = nodeProps->NumMemoryBanks;
     HsaMemoryProperties memoryProps[numBanks];
-    EXPECT_SUCCESS(hsaKmtGetNodeMemoryProperties(gpuNode, numBanks, memoryProps));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtGetNodeMemoryProperties, m_hsakmt_current_ctx, gpuNode, numBanks, memoryProps));
     unsigned bank;
     for (bank = 0; bank < numBanks; bank++) {
         if (memoryProps[bank].HeapType == HSA_HEAPTYPE_FRAME_BUFFER_PRIVATE
@@ -279,7 +305,6 @@ bool KFDBaseComponentTest::SVMAPISupported_GPU(unsigned int gpuNode) {
     return supported;
 }
 
-
 /*
  * Some asics need CWSR workround for DEGFX11_12113
  */
@@ -310,7 +335,7 @@ int KFDBaseComponentTest::FindDRMRenderNode(int gpuNode) {
 
     nodeProperties = new HsaNodeProperties();
 
-    status = hsaKmtGetNodeProperties(gpuNode, nodeProperties);
+    status = HSAKMT_CALL(hsaKmtGetNodeProperties, m_hsakmt_current_ctx, gpuNode, nodeProperties);
     EXPECT_SUCCESS(status) << "Node index: " << gpuNode << "hsaKmtGetNodeProperties returned status " << status;
 
     if (status != HSAKMT_STATUS_SUCCESS) {
@@ -359,6 +384,8 @@ HsaNodeInfo* KFDBaseComponentTest::Get_NodeInfo() {
 HsaMemFlags& KFDBaseComponentTest::GetHsaMemFlags() {
     return m_MemoryFlags;
 }
+
+bool KFDBaseComponentTest::XNACKSupported() { return m_is_xnack_supported; }
 
 static void* KFDTest_GPU(void* ptr) {
 

@@ -19,7 +19,8 @@ Refer to the [Python library API reference](../reference/amdsmi-py-api.md).
 Before get started, make sure your environment satisfies the following prerequisites.
 See the [requirements](#install_reqs) section for more information.
 
-1. Ensure `amdgpu` drivers are installed properly for initialization.
+1. Ensure `amdgpu` drivers are installed properly for initialization. CPU APIs
+   require the `amd_hsmp` kernel module. See {ref}`install_amdgpu_driver`.
 
 2. Export `LD_LIBRARY_PATH` to the `amdsmi` installation directory.
 
@@ -132,7 +133,7 @@ Exceptions that can be thrown by AMD SMI are:
 
 
 * `AmdSmiParameterException`: Derives base `AmdSmiException` class and
-  represents errors related to invaild parameters passed to functions. When this
+  represents errors related to invalid parameters passed to functions. When this
   exception is thrown, `err_msg` is set and it explains what is the actual and
   expected type of the parameters.
 
@@ -140,8 +141,10 @@ Exceptions that can be thrown by AMD SMI are:
 
    ```python
    try:
-       processor_handles = amdsmi_get_cpusocket_handles()
-       if len(processor_handles) == 0:
+       cpu_handles = amdsmi_get_cpu_handles()
+       cpu_count = cpu_handles["cpu_count"]
+       processor_handles = cpu_handles["processor_handles"]
+       if cpu_count == 0:
            print("No CPU sockets on machine")
        else:
            for processor in processor_handles:

@@ -89,16 +89,20 @@ struct static_object
 
     static constexpr bool is_trivial_standard_layout();
 
+    template <typename... FuncArgs, typename... Args>
+    static Tp*& construct_via_function(Tp* (*func)(void*, FuncArgs...), Args&&... args);
+
 private:
-    static Tp*                                             m_object;
-    static std::array<std::byte, static_buffer_size<Tp>()> m_buffer;
+    static Tp* m_object;
+    alignas(Tp) static std::array<std::byte, static_buffer_size<Tp>()> m_buffer;
 };
 
 template <typename Tp, typename ContextT>
 Tp* static_object<Tp, ContextT>::m_object = nullptr;
 
 template <typename Tp, typename ContextT>
-std::array<std::byte, static_buffer_size<Tp>()> static_object<Tp, ContextT>::m_buffer = {};
+alignas(
+    Tp) std::array<std::byte, static_buffer_size<Tp>()> static_object<Tp, ContextT>::m_buffer = {};
 
 template <typename Tp, typename ContextT>
 constexpr bool
@@ -130,6 +134,33 @@ static_object<Tp, ContextT>::construct(Args&&... args)
         << "reconstructing static object. Use get() function to retrieve pointer";
 
     m_object = new(m_buffer.data()) Tp{std::forward<Args>(args)...};
+    return m_object;
+}
+
+template <typename Tp, typename ContextT>
+template <typename... FuncArgs, typename... Args>
+Tp*&
+static_object<Tp, ContextT>::construct_via_function(Tp* (*func)(void*, FuncArgs...), Args&&... args)
+{
+    if constexpr(!is_trivial_standard_layout())
+    {
+        static auto _once = std::once_flag{};
+        std::call_once(_once, []() {
+            register_static_dtor([]() {
+                if(static_object<Tp, ContextT>::m_object)
+                {
+                    static_object<Tp, ContextT>::m_object->~Tp();
+                    static_object<Tp, ContextT>::m_object = nullptr;
+                }
+            });
+        });
+    }
+
+    ROCP_FATAL_IF(m_object)
+        << "reconstructing static object. Use get() function to retrieve pointer";
+
+    if(func) m_object = func(static_cast<void*>(m_buffer.data()), std::forward<Args>(args)...);
+
     return m_object;
 }
 }  // namespace common

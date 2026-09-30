@@ -24,6 +24,7 @@
  */
 
 #include <cinttypes>
+#include <mutex>
 #include "impl/wddm/device.h"
 #include "impl/wddm/queue.h"
 #include "hsa-runtime/inc/amd_hsa_signal.h"
@@ -56,22 +57,52 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueue(HSAuint32 NodeId,
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueExt(HSAuint32 NodeId,
+  HSA_QUEUE_TYPE Type,
+  HSAuint32 QueuePercentage,
+  HSA_QUEUE_PRIORITY Priority,
+  HSAuint32 SdmaEngineId,
+  void *QueueAddress,
+  HSAuint64 QueueSizeInBytes,
+  HsaEvent *Event,
+  HsaQueueResource *QueueResource) {
+
+  return hsaKmtCreateQueueV2(NodeId, Type, QueuePercentage, Priority, 0,
+    QueueAddress, QueueSizeInBytes, 0, Event,
+    QueueResource);
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueV2(HSAuint32 NodeId,
 					     HSA_QUEUE_TYPE Type,
 					     HSAuint32 QueuePercentage,
 					     HSA_QUEUE_PRIORITY Priority,
 					     HSAuint32 SdmaEngineId,
 					     void *QueueAddress,
 					     HSAuint64 QueueSizeInBytes,
+					     HSAuint64 MetaDataPrefetchSizeInBytes,
 					     HsaEvent *Event,
 					     HsaQueueResource *QueueResource) {
   HSAKMT_STATUS result;
 
   CHECK_DXG_OPEN();
-  assert(Event == nullptr);
+
+#if defined(__linux__)
+  // Defer resolving libhsa-runtime64 symbols until a queue is actually needed.
+  // call_once latches success/failure; a failed resolve fails every subsequent
+  // queue create too (retrying can't help if the library isn't resident).
+  static std::once_flag loader_once;
+  static bool loader_ok = false;
+  std::call_once(loader_once, [] { loader_ok = hsakmt_hsa_loader_init(); });
+  if (!loader_ok)
+    return HSAKMT_STATUS_ERROR;
+#endif
 
   if (Priority < HSA_QUEUE_PRIORITY_MINIMUM ||
       Priority > HSA_QUEUE_PRIORITY_MAXIMUM)
     return HSAKMT_STATUS_INVALID_PARAMETER;
+
+  if (MetaDataPrefetchSizeInBytes) {
+    return HSAKMT_STATUS_INVALID_PARAMETER;
+  }
 
   wsl::thunk::WDDMDevice *device_ = get_wddmdev(NodeId);
   assert(device_);
@@ -81,18 +112,18 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueExt(HSAuint32 NodeId,
 
   switch (Type) {
   case HSA_QUEUE_COMPUTE_AQL: {
-    assert(QueueResource->ErrorReason == nullptr);
     uint64_t pkg_num = QueueSizeInBytes / 64;
     uint32_t cmdbuf_size = device_->GetCmdbufSize();
     uint32_t queue_engine = device_->GetComputeEngine();
     bool use_hws = device_->IsHwsEnabled(queue_engine);
+    HSAuint32 event_id = Event ? Event->EventId : 0;
     auto queue_ = new wsl::thunk::ComputeQueue(
         device_, QueueAddress, pkg_num,
         reinterpret_cast<std::atomic<uint64_t> *>(
             QueueResource->Queue_write_ptr_aql),
         reinterpret_cast<std::atomic<uint64_t> *>(
             QueueResource->Queue_read_ptr_aql),
-        QueueResource->ErrorReason, cmdbuf_size, queue_engine, use_hws);
+        QueueResource->ErrorReason, cmdbuf_size, queue_engine, use_hws, event_id);
 
     QueueResource->QueueId = reinterpret_cast<HSA_QUEUEID>(queue_);
     // for doorbell_signal.hardware_doorbell_ptr
@@ -151,23 +182,26 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtDestroyQueue(HSA_QUEUEID QueueId) {
   return HSAKMT_STATUS_SUCCESS;
 }
 
+// ================================================================================================
 HSAKMT_STATUS HSAKMTAPI hsaKmtSetQueueCUMask(HSA_QUEUEID QueueId,
                                              HSAuint32 CUMaskCount,
                                              HSAuint32 *QueueCUMask) {
   CHECK_DXG_OPEN();
 
-  auto queue_ = reinterpret_cast<wsl::thunk::ComputeQueue *>(QueueId);
-  if (!queue_)
+  auto queue = reinterpret_cast<wsl::thunk::ComputeQueue *>(QueueId);
+  if (!queue)
     return HSAKMT_STATUS_INVALID_PARAMETER;
 
   if (CUMaskCount == 0 || !QueueCUMask || ((CUMaskCount % 32) != 0))
     return HSAKMT_STATUS_INVALID_PARAMETER;
 
-  pr_warn_once("not implemented\n");
+  if (queue->SetCuMask(CUMaskCount, QueueCUMask) != HSA_STATUS_SUCCESS)
+    return HSAKMT_STATUS_ERROR;
 
   return HSAKMT_STATUS_SUCCESS;
 }
 
+// ================================================================================================
 HSAKMT_STATUS HSAKMTAPI hsaKmtGetQueueInfo(HSA_QUEUEID QueueId,
                                            HsaQueueInfo *QueueInfo) {
   CHECK_DXG_OPEN();
@@ -180,13 +214,30 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetQueueInfo(HSA_QUEUEID QueueId,
   return HSAKMT_STATUS_SUCCESS;
 }
 
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetKernelQueueId(HSA_QUEUEID QueueId,
+                                               HSAuint32 *KernelInternalQueueId) {
+  CHECK_DXG_OPEN();
+  pr_warn_once("not supported\n");
+  return HSAKMT_STATUS_NOT_SUPPORTED;
+}
+
 HSAKMT_STATUS HSAKMTAPI hsaKmtSetTrapHandler(HSAuint32 Node,
                                              void *TrapHandlerBaseAddress,
                                              HSAuint64 TrapHandlerSizeInBytes,
                                              void *TrapBufferBaseAddress,
                                              HSAuint64 TrapBufferSizeInBytes) {
   CHECK_DXG_OPEN();
-  pr_warn_once("not implemented\n");
+
+  wsl::thunk::WDDMDevice* device = get_wddmdev(Node);
+  if (device == NULL) {
+    return HSAKMT_STATUS_INVALID_PARAMETER;
+  }
+
+  if (!device->SetTrapHandler(reinterpret_cast<uint64_t>(TrapHandlerBaseAddress),
+                              reinterpret_cast<uint64_t>(TrapBufferBaseAddress))) {
+    return HSAKMT_STATUS_ERROR;
+  }
+
   return HSAKMT_STATUS_SUCCESS;
 }
 
@@ -211,4 +262,9 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtQueueRingDoorbell(HSA_QUEUEID QueueId, uint64_t va
 
   queue_->RingDoorbell(value);
   return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtSetSigbusDelay(HSAuint32 /*NodeId*/,
+                                             HSAuint32 /*DelayMs*/) {
+  return HSAKMT_STATUS_NOT_SUPPORTED;
 }

@@ -1,0 +1,89 @@
+digraph system_layers {
+    rankdir=TB;
+    fontname="Helvetica";
+    node [fontname="Helvetica", fontsize=11, style=filled, shape=box];
+    edge [fontname="Helvetica", fontsize=9];
+
+    label="Rocstorage: System Layer Overview";
+    labelloc=t;
+    fontsize=14;
+
+    subgraph cluster_api {
+        label="Layer 1: Public API";
+        style=filled;
+        color="#dce8f5";
+        fillcolor="#f0f6ff";
+        rank=same;
+
+        storage_t [label="storage_t", fillcolor="#c8ddf0"];
+        writer_t [label="writer_t", fillcolor="#c8ddf0"];
+        reader_t [label="reader_t", fillcolor="#c8ddf0"];
+        types [label="writer_types\nreader_types\nshared_types", fillcolor="#c8ddf0"];
+    }
+
+    subgraph cluster_impl {
+        label="Layer 2: Implementation (policy dispatch + CRTP interfaces)";
+        style=filled;
+        color="#d5e8d5";
+        fillcolor="#f0fff0";
+        rank=same;
+
+        writer_impl_core [label="writer_impl_core<Policy>", fillcolor="#c0e0c0"];
+        reader_impl_core [label="reader_impl_core<Policy>\n(planned)", fillcolor="#c0e0c0", style="filled,dashed"];
+        writer_interfaces [label="CRTP Writer Interfaces\n(region, kernel_dispatch, ...)", fillcolor="#c0e0c0"];
+        reader_interfaces [label="CRTP Reader Interfaces\n(planned)", fillcolor="#c0e0c0", style="filled,dashed"];
+        writer_context_l [label="writer_context", fillcolor="#c0e0c0"];
+    }
+
+    subgraph cluster_schema {
+        label="Layer 3: Schema Implementations (one set per version)";
+        style=filled;
+        color="#f5e0c0";
+        fillcolor="#fff8f0";
+        rank=same;
+
+        v3_writers [label="Schema v3 Writers\n(info, region, kernel_dispatch,\nmemory_copy, memory_alloc, pmc)", fillcolor="#f0dcc0"];
+        v3_readers [label="Schema v3 Reader\n(current: monolithic)", fillcolor="#f0dcc0"];
+        v3_common [label="common_insert_operations\n<schema_v3_tag>", fillcolor="#f0dcc0"];
+    }
+
+    subgraph cluster_data {
+        label="Layer 4: Data Storage (statements + backend)";
+        style=filled;
+        color="#e5ddf0";
+        fillcolor="#f5f0ff";
+        rank=same;
+
+        insert_stmts [label="insert_statements\n<Backend>", fillcolor="#ddd0f0"];
+        read_stmts [label="read_statements", fillcolor="#ddd0f0"];
+        query_builders [label="Query Builders\n(insert + select)", fillcolor="#ddd0f0"];
+        sqlite_backend [label="sqlite_backend\n(prepared statements,\ntransactions,\ntype-safe binding)", fillcolor="#ddd0f0"];
+    }
+
+    subgraph cluster_db {
+        label="";
+        style=invis;
+
+        database [label="SQLite Database", shape=cylinder, fillcolor="#e0e0e0"];
+    }
+
+    writer_t -> writer_impl_core [style=bold];
+    reader_t -> reader_impl_core [style="bold,dashed"];
+    writer_impl_core -> writer_interfaces;
+    writer_interfaces -> v3_writers;
+    writer_impl_core -> writer_context_l [style=dashed];
+    reader_impl_core -> reader_interfaces [style=dashed];
+    reader_interfaces -> v3_readers [style=dashed];
+
+    v3_writers -> v3_common;
+    v3_writers -> insert_stmts;
+    v3_readers -> read_stmts;
+    v3_common -> insert_stmts;
+
+    insert_stmts -> query_builders [style=dashed, label="  builds SQL  "];
+    read_stmts -> query_builders [style=dashed];
+    insert_stmts -> sqlite_backend;
+    read_stmts -> sqlite_backend;
+
+    sqlite_backend -> database;
+}

@@ -25,9 +25,14 @@
 #include "lib/rocprofiler-sdk/counters/sample_processing.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 
+#include <array>
+#include <atomic>
 #include <condition_variable>
+#include <cstddef>
+#include <functional>
 #include <mutex>
 #include <thread>
+#include <utility>
 
 namespace rocprofiler
 {
@@ -68,18 +73,19 @@ public:
 
     void add(DataType&& params)
     {
-        std::unique_lock<std::mutex> lk(mut);
-
-        if(read_ptr + buffer.size() <= write_ptr || !valid)
+        bool selfconsume = true;
         {
-            // If not possible to use consumer thread, proccess with this thread
-            consume_fn(std::move(params));
-            return;
+            auto lk = std::unique_lock{mut};
+            if(valid && read_ptr + buffer.size() > write_ptr)
+            {
+                buffer.at(write_ptr.fetch_add(1) % buffer.size()) = std::move(params);
+                selfconsume                                       = false;
+            }
         }
-
-        buffer.at(write_ptr % buffer.size()) = std::move(params);
-        write_ptr.fetch_add(1);
-        cv.notify_all();
+        if(selfconsume)
+            consume_fn(std::move(params));
+        else
+            cv.notify_all();
     }
 
 protected:
@@ -87,11 +93,10 @@ protected:
     {
         while(true)
         {
-            while(read_ptr == write_ptr)
             {
-                std::unique_lock<std::mutex> lk(mut);
+                auto lk = std::unique_lock{mut};
                 cv.wait(lk, [&] { return read_ptr != write_ptr || !valid; });
-                if(!valid && read_ptr == write_ptr)
+                if(read_ptr == write_ptr)
                 {
                     exited.store(true);
                     cv.notify_all();

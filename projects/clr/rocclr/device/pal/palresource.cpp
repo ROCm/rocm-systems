@@ -1,22 +1,8 @@
-/* Copyright (c) 2015 - 2023 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "platform/program.hpp"
 #include "platform/kernel.hpp"
@@ -265,13 +251,13 @@ GpuMemoryReference::~GpuMemoryReference() {
         device_.vgpus()[idx]->releaseMemory(this);
       }
     } else {
-      amd::ScopedLock l(gpu_->execution());
+      std::scoped_lock l(gpu_->execution());
       gpu_->releaseMemory(this);
     }
     if (device_.vgpus().size() != 0) {
       assert(device_.vgpus()[0] == device_.xferQueue() && "Wrong transfer queue!");
       // Lock the transfer queue, since it's not handled by ScopedLockVgpus
-      amd::ScopedLock k(device_.xferMgr().lockXfer());
+      std::scoped_lock k(*(device_.xferMgr().lockXfer()));
       device_.vgpus()[0]->releaseMemory(this);
     }
   }
@@ -515,6 +501,46 @@ void Resource::memTypeToHeap(Pal::GpuMemoryCreateInfo* createInfo) {
 }
 
 // ================================================================================================
+// Vulkan/D3D image interop: an image created on an imported external buffer whose parent retained a
+// shared handle is reopened as a shared image, so PAL reads the real tiling (swizzle) from the
+// surface descriptor instead of assuming Optimal (which lets addrlib pick a mismatching swizzle ->
+// garbage reads). Reopening creates image_ + memRef_ with the correct tiling bound to the shared
+// allocation, then builds the SRD. viewInfo arrives with viewType/possibleLayouts already set.
+bool Resource::CreateImageFromExternalBuffer(Pal::ChNumFormat format, Pal::ChannelMapping channels,
+                                             Pal::ImageViewInfo viewInfo,
+                                             const Pal::SubresRange& subresRange) {
+  Pal::ExternalImageOpenInfo imgOpenInfo = {};
+  imgOpenInfo.resourceInfo.hExternalResource = viewOwner_->sharedHandle();
+  imgOpenInfo.resourceInfo.flags.ntHandle = viewOwner_->sharedNtHandle();
+  imgOpenInfo.swizzledFormat.format = format;
+  imgOpenInfo.swizzledFormat.swizzle = channels;
+  imgOpenInfo.usage.shaderRead = true;
+  imgOpenInfo.usage.shaderWrite = true;
+
+  Pal::ImageCreateInfo sharedImgCreateInfo = {};
+  memRef_ = GpuMemoryReference::Create(dev(), imgOpenInfo, &sharedImgCreateInfo, &image_);
+  if (memRef_ == nullptr) {
+    return false;
+  }
+
+  hwSrd_ = dev().srds().allocSrdSlot(reinterpret_cast<address*>(&hwState_));
+  if (0 == hwSrd_) {
+    return false;
+  }
+  viewInfo.pImage = image_;
+  viewInfo.swizzledFormat.format = format;
+  viewInfo.swizzledFormat.swizzle = channels;
+  viewInfo.subresRange = subresRange;
+  dev().iDev()->CreateImageViewSrds(1, &viewInfo, hwState_);
+
+  hwState_[8] = GetHSAImageFormatType(desc().format_);
+  hwState_[9] = GetHSAImageOrderType(desc().format_);
+  hwState_[10] = static_cast<uint32_t>(desc().width_);
+  hwState_[11] = 0;  // one extra reserved field in the argument
+  return true;
+}
+
+// ================================================================================================
 bool Resource::CreateImage(CreateParams* params, bool forceLinear) {
   Pal::Result result;
   Pal::SubresId ImgSubresId = {0, 0, 0};
@@ -625,6 +651,12 @@ bool Resource::CreateImage(CreateParams* params, bool forceLinear) {
   }
   ImgSubresRange.numMips = desc().mipLevels_;
 
+  // Vulkan/D3D12 image interop imported via an external buffer: reopen as a shared image so PAL uses
+  // the driver's real tiling. See CreateImageFromExternalBuffer.
+  if (memoryType() == ImageExternalBuffer) {
+    return CreateImageFromExternalBuffer(format, channels, viewInfo, ImgSubresRange);
+  }
+
   if ((memoryType() != ImageView) ||
       //! @todo PAL doesn't allow an SRD view creation with different pixel size
       (elementSize() != viewOwner_->elementSize())) {
@@ -635,20 +667,14 @@ bool Resource::CreateImage(CreateParams* params, bool forceLinear) {
     imgCreateInfo.swizzledFormat.swizzle = channels;
     imgCreateInfo.mipLevels = (desc_.mipLevels_) ? desc_.mipLevels_ : 1;
     imgCreateInfo.samples = 1;
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 961
     imgCreateInfo.fragments = 1;
+#endif
     Pal::ImageTiling tiling = forceLinear ? Pal::ImageTiling::Linear : Pal::ImageTiling::Optimal;
     uint32_t rowPitch = 0;
 
     if (memoryType() == ImageBuffer) {
       tiling = Pal::ImageTiling::Linear;
-    } else if (memoryType() == ImageExternalBuffer) {
-      // We cannot get tiling info from vulkan/d3d driver now. So assume it to be optimal.
-      // When we get tiling info, we can easily update here
-      tiling = Pal::ImageTiling::Optimal;
-      // Pal will infer row pitch. If rowPitch != 0 and Pal inferred row picth isn't equal to
-      // rowPitch, assert(false) will be called
-      rowPitch = 0;
-      offset_ += params->owner_->getOrigin();
     } else if (memoryType() == ImageView) {
       tiling = viewOwner_->image_->GetImageCreateInfo().tiling;
       // Find the new pitch in pixels for the new format
@@ -834,6 +860,11 @@ bool Resource::CreateInterop(CreateParams* params) {
     mipLevel = d3dRes->mipLevel_;
   }
 #endif
+  // Retain the external handle so an image later created on this imported buffer (ImageExternalBuffer)
+  // can be reopened as a shared image, letting PAL apply the driver's real tiling (swizzle) from the
+  // surface descriptor instead of assuming Optimal (which lets addrlib pick a mismatching swizzle).
+  sharedHandle_ = openInfo.hExternalResource;
+  sharedNtHandle_ = openInfo.flags.ntHandle;
   //! @todo PAL query for image/buffer object doesn't work properly!
 #if 0
   bool    isImage = false;
@@ -877,7 +908,9 @@ bool Resource::CreateInterop(CreateParams* params) {
       imgCreateInfo.swizzledFormat.swizzle = channels;
       imgCreateInfo.mipLevels = 1;
       imgCreateInfo.samples = 1;
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 961
       imgCreateInfo.fragments = 1;
+#endif
       imgCreateInfo.tiling = Pal::ImageTiling::Linear;
       imgCreateInfo.depthPitch = desc().height_ * imgCreateInfo.rowPitch;
 
@@ -1143,6 +1176,12 @@ bool Resource::CreatePinned(CreateParams* params) {
   createInfo.pSysMem = pinAddress;
   createInfo.size = allocSize;
   createInfo.vaRange = Pal::VaRange::Default;
+  // Fine-grain pinning requires bypassing GPU L2 for CPU-GPU coherency.
+  // Coarse-grain (hipExtHostRegisterCoarseGrained, no CL_MEM_SVM_ATOMICS) leaves gl2Uncached=0,
+  // so the GPU can cache in L2; explicit sync is the caller's responsibility.
+  if ((params->owner_ != nullptr) && (params->owner_->getMemFlags() & CL_MEM_SVM_ATOMICS)) {
+    createInfo.flags.gl2Uncached = 1;
+  }
   memRef_ = GpuMemoryReference::Create(dev(), createInfo);
   if (nullptr == memRef_) {
     LogError("Failed PAL memory allocation!");
@@ -1393,7 +1432,7 @@ void Resource::free() {
   // and resource can be reused on another async queue without a wait on a busy operation
   if (wait) {
     if (memRef_->gpu_ == nullptr) {
-      amd::ScopedLock l(dev().vgpusAccess());
+      std::scoped_lock l(dev().vgpusAccess());
       // Release all memory objects on all virtual GPUs
       for (uint idx = 1; idx < dev().vgpus().size(); ++idx) {
         dev().vgpus()[idx]->waitForEvent(&events_[idx]);
@@ -1832,7 +1871,7 @@ void* Resource::gpuMemoryMap(size_t* pitch, uint flags, Pal::IGpuMemory* resourc
     return nullptr;
     //        return const_cast<Device&>(dev()).resMapLocal(*pitch, resource, flags);
   } else {
-    amd::ScopedLock lk(dev().lockPAL());
+    std::scoped_lock lk(dev().lockPAL());
     void* address;
     if (image_ != nullptr) {
       constexpr Pal::SubresId ImgSubresId = {0, 0, 0};
@@ -1923,7 +1962,7 @@ bool Resource::isModified(VirtualGPU& gpu) const {
 // ================================================================================================
 void Resource::palFree() const {
   if (desc().type_ == OGLInterop) {
-    amd::ScopedLock lk(dev().lockPAL());
+    std::scoped_lock lk(dev().lockPAL());
     dev().resGLFree(glPlatformContext_, glInteropMbRes_, glType_);
   }
   memRef_->release();
@@ -2209,10 +2248,11 @@ GpuMemoryReference* MemorySubAllocator::Allocate(Pal::gpusize size, Pal::gpusize
 }
 
 // ================================================================================================
-bool MemorySubAllocator::Free(amd::Monitor* monitor, GpuMemoryReference* ref, Pal::gpusize offset) {
+bool MemorySubAllocator::Free(std::recursive_mutex& monitor, GpuMemoryReference* ref,
+                              Pal::gpusize offset) {
   bool release_mem = false;
   {
-    amd::ScopedLock l(monitor);
+    std::scoped_lock l(monitor);
     // Find if current memory reference is a chunk allocation
     auto it = heaps_.find(ref);
     if (it == heaps_.end()) {
@@ -2249,14 +2289,14 @@ bool ResourceCache::addGpuMemory(Resource::Descriptor* desc, GpuMemoryReference*
     // We do no sub allocate VA Range.
     result = false;
   } else if ((desc->type_ == Resource::Local) && !desc->SVMRes_) {
-    result = mem_sub_alloc_local_.Free(&lockCacheOps_, ref, offset);
+    result = mem_sub_alloc_local_.Free(lockCacheOps_, ref, offset);
   } else if ((desc->type_ == Resource::Local) && desc->SVMRes_) {
-    result = mem_sub_alloc_coarse_.Free(&lockCacheOps_, ref, offset);
+    result = mem_sub_alloc_coarse_.Free(lockCacheOps_, ref, offset);
   } else if (desc->SVMRes_) {
     if (desc->gl2CacheDisabled_) {
-      result = mem_sub_alloc_fine_uncached_.Free(&lockCacheOps_, ref, offset);
+      result = mem_sub_alloc_fine_uncached_.Free(lockCacheOps_, ref, offset);
     } else {
-      result = mem_sub_alloc_fine_.Free(&lockCacheOps_, ref, offset);
+      result = mem_sub_alloc_fine_.Free(lockCacheOps_, ref, offset);
     }
   }
 
@@ -2279,7 +2319,7 @@ bool ResourceCache::addGpuMemory(Resource::Descriptor* desc, GpuMemoryReference*
       // Copy the original desc to the cached version
       memcpy(descCached, desc, sizeof(Resource::Descriptor));
 
-      amd::ScopedLock l(&lockCacheOps_);
+      std::scoped_lock l(lockCacheOps_);
       // Add the current resource to the cache
       resCache_.push_front({descCached, ref});
       ref->gpu_ = nullptr;
@@ -2301,7 +2341,7 @@ GpuMemoryReference* ResourceCache::findGpuMemory(Resource::Descriptor* desc, Pal
                                                  Pal::gpusize alignment,
                                                  const Pal::IGpuMemory* reserved_va,
                                                  Pal::gpusize* offset) {
-  amd::ScopedLock l(&lockCacheOps_);
+  std::scoped_lock l(lockCacheOps_);
   GpuMemoryReference* ref = nullptr;
 
   // Check if the runtime can suballocate memory
@@ -2376,7 +2416,7 @@ void ResourceCache::removeLast() {
   std::pair<Resource::Descriptor*, GpuMemoryReference*> entry;
   {
     // Protect access to the global data
-    amd::ScopedLock l(&lockCacheOps_);
+    std::scoped_lock l(lockCacheOps_);
     if (resCache_.size() > 0) {
       entry = resCache_.back();
       resCache_.pop_back();

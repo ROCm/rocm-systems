@@ -22,6 +22,7 @@
 
 #include "metrics_test.h"
 
+#include "hsa_tables.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
@@ -32,14 +33,28 @@
 #include <rocprofiler-sdk/rocprofiler.h>
 
 #include <gtest/gtest.h>
+#include <hsa/hsa.h>
+#include <yaml-cpp/yaml.h>
 
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <string_view>
 
 namespace
 {
 namespace counters = ::rocprofiler::counters;
+
+namespace tc = rocprofiler::counters::test_constants;
+
+void
+test_init()
+{
+    HsaApiTable table;
+    table.amd_ext_ = &tc::get_ext_table();
+    table.core_    = &tc::get_api_table();
+    rocprofiler::agent::construct_agent_cache(&table);
+}
 
 auto
 loadTestData(const std::unordered_map<std::string, std::vector<std::vector<std::string>>>& map)
@@ -118,7 +133,7 @@ TEST(metrics, derived_load)
 {
     auto loaded_metrics = counters::loadMetrics();
     auto rocp_data      = [&]() {
-        // get only derrived metrics
+        // get only derived metrics
         std::unordered_map<std::string, std::vector<counters::Metric>> ret;
         for(const auto& [gfx, metrics] : loaded_metrics->arch_to_metric)
         {
@@ -316,4 +331,379 @@ TEST(metrics, check_public_api_query)
             ASSERT_EQ(index_to_count.rbegin()->first + 1, current_dimension_size);
         }
     }
+}
+
+TEST(metrics, has_spm_support)
+{
+    // Empty event always returns false — no HSA needed
+    counters::Metric       empty_evt("gfx9", "test_empty", "SQ", "", "desc", "", "", 99999);
+    rocprofiler_agent_id_t dummy_agent{.handle = 0};
+    EXPECT_FALSE(counters::has_spm_support(empty_evt, dummy_agent));
+
+    // With real agents
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    auto agents = rocprofiler::agent::get_agents();
+    for(const auto* agent : agents)
+    {
+        if(agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
+
+        auto metrics = counters::getMetricsForAgent(agent);
+        for(const auto& metric : metrics)
+        {
+            bool first  = counters::has_spm_support(metric, agent->id);
+            bool second = counters::has_spm_support(metric, agent->id);
+            EXPECT_EQ(first, second) << "Cache returned different results for " << metric.name();
+        }
+    }
+}
+
+TEST(metrics, counter_info_v1_size_field)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    auto agents = rocprofiler::agent::get_agents();
+    for(const auto* agent : agents)
+    {
+        if(agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
+
+        auto gpu_counters = std::vector<rocprofiler_counter_id_t>{};
+        auto status       = rocprofiler_iterate_agent_supported_counters(
+            agent->id,
+            [](rocprofiler_agent_id_t,
+               rocprofiler_counter_id_t* counters,
+               size_t                    num_counters,
+               void*                     user_data) {
+                auto* vec = static_cast<std::vector<rocprofiler_counter_id_t>*>(user_data);
+                for(size_t i = 0; i < num_counters; i++)
+                    vec->push_back(counters[i]);
+                return ROCPROFILER_STATUS_SUCCESS;
+            },
+            static_cast<void*>(&gpu_counters));
+        ASSERT_EQ(status, ROCPROFILER_STATUS_SUCCESS)
+            << "Failed to iterate counters for agent " << agent->id.handle;
+
+        ASSERT_FALSE(gpu_counters.empty())
+            << "No counters found for GPU agent " << agent->id.handle;
+
+        for(const auto& counter : gpu_counters)
+        {
+            auto info = rocprofiler_counter_info_v1_t{};
+            status    = rocprofiler_query_counter_info(
+                counter, ROCPROFILER_COUNTER_INFO_VERSION_1, static_cast<void*>(&info));
+
+            if(status == ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND ||
+               status == ROCPROFILER_STATUS_ERROR_DIM_NOT_FOUND)
+                continue;
+
+            ASSERT_EQ(status, ROCPROFILER_STATUS_SUCCESS)
+                << "Failed to query counter info for counter " << counter.handle;
+
+            EXPECT_EQ(info.size, offsetof(rocprofiler_counter_info_v1_t, reserved_padding))
+                << "size field must equal offsetof(rocprofiler_counter_info_v1_t, "
+                   "reserved_padding) for counter "
+                << (info.name ? info.name : "<null>") << " (handle=" << counter.handle << ")";
+
+            EXPECT_LT(info.size, sizeof(rocprofiler_counter_info_v1_t))
+                << "size field must be less than sizeof(rocprofiler_counter_info_v1_t) for counter "
+                << (info.name ? info.name : "<null>") << " (handle=" << counter.handle << ")";
+        }
+    }
+}
+
+namespace
+{
+void
+expect_validation_error(std::string_view yaml, std::string_view expected)
+{
+    auto error = counters::validate_extra_counter_yaml(YAML::Load(std::string{yaml}));
+    ASSERT_TRUE(error.has_value()) << yaml;
+    EXPECT_NE(error->find(expected), std::string::npos) << *error;
+}
+}  // namespace
+
+TEST(metrics, validate_top_level_type)
+{
+    expect_validation_error("- invalid", "Top-level YAML node must be a map");
+}
+
+TEST(metrics, validate_missing_top_key)
+{
+    expect_validation_error("wrong-key:\n  counters: []", "Missing top-level");
+}
+
+TEST(metrics, validate_top_key_type)
+{
+    expect_validation_error("rocprofiler-sdk: invalid", "'rocprofiler-sdk' must be a map");
+}
+
+TEST(metrics, validate_schema_version_type)
+{
+    expect_validation_error("rocprofiler-sdk:\n  counters-schema-version: [1]\n  counters: []",
+                            "Unsupported 'counters-schema-version'; expected 1");
+}
+
+TEST(metrics, validate_unsupported_schema_version)
+{
+    expect_validation_error("rocprofiler-sdk:\n  counters-schema-version: 2\n  counters: []",
+                            "Unsupported 'counters-schema-version'; expected 1");
+}
+
+TEST(metrics, validate_missing_counters)
+{
+    expect_validation_error("rocprofiler-sdk:\n  schema: 1", "Missing 'counters' array");
+}
+
+TEST(metrics, validate_counters_type)
+{
+    expect_validation_error("rocprofiler-sdk:\n  counters: invalid",
+                            "'counters' must be a sequence");
+}
+
+TEST(metrics, validate_counter_type)
+{
+    expect_validation_error("rocprofiler-sdk:\n  counters: [invalid]", "counter must be a map");
+}
+
+TEST(metrics, validate_missing_name)
+{
+    expect_validation_error(
+        "rocprofiler-sdk:\n  counters:\n  - description: test\n    definitions:\n    - "
+        "architectures: [gfx942]",
+        "missing 'name' field");
+}
+
+TEST(metrics, validate_name_type)
+{
+    expect_validation_error(
+        "rocprofiler-sdk:\n  counters:\n  - name: [T]\n    description: test\n    "
+        "definitions:\n    - "
+        "architectures: [gfx942]\n      expression: test",
+        "'name' must be a string");
+}
+
+TEST(metrics, validate_empty_name)
+{
+    expect_validation_error(
+        "rocprofiler-sdk:\n  counters:\n  - name: ''\n    description: test\n    "
+        "definitions:\n    - architectures: [gfx942]\n      expression: test",
+        "'name' must not be empty");
+}
+
+TEST(metrics, validate_missing_description)
+{
+    expect_validation_error(
+        "rocprofiler-sdk:\n  counters:\n  - name: T\n    definitions:\n    - architectures: "
+        "[gfx942]\n      expression: test",
+        "missing 'description'");
+}
+
+TEST(metrics, validate_description_type)
+{
+    expect_validation_error(
+        "rocprofiler-sdk:\n  counters:\n  - name: T\n    description: [invalid]\n    "
+        "definitions:\n    - architectures: [gfx942]\n      expression: test",
+        "'description' must be a string");
+}
+
+TEST(metrics, validate_missing_definitions)
+{
+    expect_validation_error("rocprofiler-sdk:\n  counters:\n  - name: T\n    description: test",
+                            "missing 'definitions'");
+}
+
+TEST(metrics, validate_definitions_type)
+{
+    expect_validation_error(
+        "rocprofiler-sdk:\n  counters:\n  - name: T\n    description: test\n    "
+        "definitions: invalid",
+        "'definitions' must be a sequence");
+}
+
+TEST(metrics, validate_empty_definitions)
+{
+    expect_validation_error(
+        "rocprofiler-sdk:\n  counters:\n  - name: T\n    description: test\n    "
+        "definitions: []",
+        "'definitions' is empty");
+}
+
+TEST(metrics, validate_definition_type)
+{
+    expect_validation_error(
+        "rocprofiler-sdk:\n  counters:\n  - name: T\n    description: test\n    definitions: "
+        "[invalid]",
+        "definition must be a map");
+}
+
+TEST(metrics, validate_empty_architectures)
+{
+    expect_validation_error(
+        "rocprofiler-sdk:\n  counters:\n  - name: T\n    description: test\n    "
+        "definitions:\n    - architectures: []",
+        "'architectures' is empty");
+}
+
+TEST(metrics, validate_architectures_type)
+{
+    expect_validation_error(
+        "rocprofiler-sdk:\n  counters:\n  - name: T\n    description: test\n    "
+        "definitions:\n    - architectures: gfx942",
+        "'architectures' must be a sequence");
+}
+
+TEST(metrics, validate_architecture_type)
+{
+    expect_validation_error(
+        "rocprofiler-sdk:\n  counters:\n  - name: T\n    description: test\n    "
+        "definitions:\n    - architectures: [[gfx942]]",
+        "architecture must be a string");
+}
+
+TEST(metrics, validate_empty_architecture)
+{
+    expect_validation_error(
+        "rocprofiler-sdk:\n  counters:\n  - name: T\n    description: test\n    "
+        "definitions:\n    - architectures: ['']\n      expression: test",
+        "architecture must not be empty");
+}
+
+TEST(metrics, validate_no_event_or_expr)
+{
+    expect_validation_error(
+        "rocprofiler-sdk:\n  counters:\n  - name: T\n    description: test\n    "
+        "definitions:\n    - architectures: [gfx942]",
+        "must have 'expression' or");
+}
+
+TEST(metrics, validate_event_needs_block)
+{
+    expect_validation_error(
+        "rocprofiler-sdk:\n  counters:\n  - name: T\n    description: test\n    "
+        "definitions:\n    - architectures: [gfx942]\n      event: 1",
+        "'event' requires 'block'");
+}
+
+TEST(metrics, validate_block_needs_event)
+{
+    expect_validation_error(
+        "rocprofiler-sdk:\n  counters:\n  - name: T\n    description: test\n    "
+        "definitions:\n    - architectures: [gfx942]\n      block: B",
+        "'block' requires 'event'");
+}
+
+TEST(metrics, validate_expression_type)
+{
+    expect_validation_error(
+        "rocprofiler-sdk:\n  counters:\n  - name: T\n    description: test\n    "
+        "definitions:\n    - architectures: [gfx942]\n      expression: [test]",
+        "'expression' must be a string");
+}
+
+TEST(metrics, validate_event_type)
+{
+    expect_validation_error(
+        "rocprofiler-sdk:\n  counters:\n  - name: T\n    description: test\n    "
+        "definitions:\n    - architectures: [gfx942]\n      event: [1]\n      "
+        "block: SQ",
+        "'event' must be an unsigned integer");
+}
+
+TEST(metrics, validate_block_type)
+{
+    expect_validation_error(
+        "rocprofiler-sdk:\n  counters:\n  - name: T\n    description: test\n    "
+        "definitions:\n    - architectures: [gfx942]\n      expression: test\n  "
+        "    block: [SQ]",
+        "'block' must be a string");
+}
+
+TEST(metrics, validate_event_value)
+{
+    expect_validation_error(
+        "rocprofiler-sdk:\n  counters:\n  - name: T\n    description: test\n    "
+        "definitions:\n    - architectures: [gfx942]\n      event: invalid\n    "
+        "  block: SQ",
+        "'event' must be an unsigned integer");
+}
+
+TEST(metrics, validate_empty_expression)
+{
+    expect_validation_error(
+        "rocprofiler-sdk:\n  counters:\n  - name: T\n    description: test\n    "
+        "definitions:\n    - architectures: [gfx942]\n      expression: ''",
+        "'expression' must not be empty");
+}
+
+TEST(metrics, validate_empty_block)
+{
+    expect_validation_error(
+        "rocprofiler-sdk:\n  counters:\n  - name: T\n    description: test\n    "
+        "definitions:\n    - architectures: [gfx942]\n      event: 1\n      "
+        "block: ''",
+        "'block' must not be empty");
+}
+
+TEST(metrics, validate_expression_cannot_have_event_or_block)
+{
+    expect_validation_error(
+        "rocprofiler-sdk:\n  counters:\n  - name: T\n    description: test\n    "
+        "definitions:\n    - architectures: [gfx942]\n      expression: SQ_WAVES\n      block: "
+        "SQ\n      event: 1",
+        "'expression' cannot be combined with 'event' or 'block'");
+}
+
+TEST(metrics, validate_canonical_documented_yaml)
+{
+    auto error = counters::validate_extra_counter_yaml(YAML::Load(R"(
+rocprofiler-sdk:
+  counters-schema-version: 1
+  counters:
+    - name: DERIVED_TEST
+      description: Test derived counter
+      properties: []
+      definitions:
+        - architectures: [gfx942]
+          expression: SQ_WAVES
+    - name: HW_TEST
+      description: Test hardware counter
+      properties: []
+      definitions:
+        - architectures: [gfx942]
+          block: SQ
+          event: 1
+)"));
+    EXPECT_FALSE(error.has_value());
+}
+
+TEST(metrics, validate_backward_compatible_omissions)
+{
+    auto error = counters::validate_extra_counter_yaml(YAML::Load(R"(
+rocprofiler-sdk:
+  counters:
+    - name: T
+      description: test
+      definitions:
+        - architectures: [gfx942]
+          expression: SQ_WAVES
+)"));
+    EXPECT_FALSE(error.has_value());
+}
+
+TEST(metrics, validate_architecture_specific_definitions)
+{
+    auto error = counters::validate_extra_counter_yaml(YAML::Load(R"(
+rocprofiler-sdk:
+  counters:
+    - name: MULTI
+      description: Architecture-specific counter
+      definitions:
+        - architectures: [gfx906]
+          expression: expr1
+        - architectures: [gfx942]
+          expression: expr2
+)"));
+    EXPECT_FALSE(error.has_value());
 }

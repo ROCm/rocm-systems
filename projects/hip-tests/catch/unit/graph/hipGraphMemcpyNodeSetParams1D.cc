@@ -1,23 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <functional>
 
@@ -26,6 +11,9 @@ THE SOFTWARE.
 #include <memcpy1d_tests_common.hh>
 
 #include "graph_tests_common.hh"
+
+__device__ int graph_memcpy_1d_from_symbol[1];
+__device__ int graph_memcpy_1d_to_symbol[1];
 
 static inline hipMemcpyKind ReverseMemcpyDirection(const hipMemcpyKind direction) {
   switch (direction) {
@@ -61,7 +49,7 @@ static inline hipMemcpyKind ReverseMemcpyDirection(const hipMemcpyKind direction
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphMemcpyNodeSetParams1D_Positive_Basic") {
+HIP_TEST_CASE(Unit_hipGraphMemcpyNodeSetParams1D_Positive_Basic) {
   constexpr auto f = [](void* dst, void* src, size_t count, hipMemcpyKind direction) {
     hipGraph_t graph = nullptr;
     HIP_CHECK(hipGraphCreate(&graph, 0));
@@ -154,7 +142,7 @@ TEST_CASE("Unit_hipGraphMemcpyNodeSetParams1D_Positive_Basic") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphMemcpyNodeSetParams1D_Negative_Parameters") {
+HIP_TEST_CASE(Unit_hipGraphMemcpyNodeSetParams1D_Negative_Parameters) {
   using namespace std::placeholders;
   hipGraph_t graph = nullptr;
   HIP_CHECK(hipGraphCreate(&graph, 0));
@@ -195,6 +183,76 @@ TEST_CASE("Unit_hipGraphMemcpyNodeSetParams1D_Negative_Parameters") {
   }
 
   HIP_CHECK(hipGraphDestroy(graph));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Verify that the generic 1D setter retargets from-symbol and to-symbol nodes.
+ * Test source
+ * ------------------------
+ *  - unit/graph/hipGraphMemcpyNodeSetParams1D.cc
+ */
+HIP_TEST_CASE(Unit_hipGraphMemcpyNodeSetParams1D_SymbolRetarget) {
+  SECTION("from-symbol node") {
+    LinearAllocGuard<int> src(LinearAllocs::hipMalloc, sizeof(int));
+    int symbol_value = 61;
+    int device_value = 62;
+    int result = 0;
+    HIP_CHECK(
+        hipMemcpyToSymbol(HIP_SYMBOL(graph_memcpy_1d_from_symbol), &symbol_value, sizeof(int)));
+    HIP_CHECK(hipMemcpy(src.ptr(), &device_value, sizeof(int), hipMemcpyHostToDevice));
+
+    hipGraph_t graph = nullptr;
+    hipGraphNode_t node = nullptr;
+    hipGraphExec_t exec = nullptr;
+    HIP_CHECK(hipGraphCreate(&graph, 0));
+    HIP_CHECK(hipGraphAddMemcpyNodeFromSymbol(&node, graph, nullptr, 0, &result,
+                                              HIP_SYMBOL(graph_memcpy_1d_from_symbol), sizeof(int),
+                                              0, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipGraphMemcpyNodeSetParams1D(node, &result, src.ptr(), sizeof(int),
+                                            hipMemcpyDeviceToHost));
+    HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphLaunch(exec, hipStreamPerThread));
+    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+    REQUIRE(result == device_value);
+
+    HIP_CHECK(hipGraphExecDestroy(exec));
+    HIP_CHECK(hipGraphDestroy(graph));
+  }
+
+  SECTION("to-symbol node") {
+    LinearAllocGuard<int> src(LinearAllocs::hipMalloc, sizeof(int));
+    LinearAllocGuard<int> dst(LinearAllocs::hipMalloc, sizeof(int));
+    int value = 71;
+    int zero = 0;
+    HIP_CHECK(hipMemcpy(src.ptr(), &value, sizeof(int), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dst.ptr(), &zero, sizeof(int), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(graph_memcpy_1d_to_symbol), &zero, sizeof(int)));
+
+    hipGraph_t graph = nullptr;
+    hipGraphNode_t node = nullptr;
+    hipGraphExec_t exec = nullptr;
+    HIP_CHECK(hipGraphCreate(&graph, 0));
+    HIP_CHECK(hipGraphAddMemcpyNodeToSymbol(&node, graph, nullptr, 0,
+                                            HIP_SYMBOL(graph_memcpy_1d_to_symbol), src.ptr(),
+                                            sizeof(int), 0, hipMemcpyDeviceToDevice));
+    HIP_CHECK(hipGraphMemcpyNodeSetParams1D(node, dst.ptr(), src.ptr(), sizeof(int),
+                                            hipMemcpyDeviceToDevice));
+    HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphLaunch(exec, hipStreamPerThread));
+    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+
+    int actual = 0;
+    HIP_CHECK(hipMemcpy(&actual, dst.ptr(), sizeof(int), hipMemcpyDeviceToHost));
+    REQUIRE(actual == value);
+    int symbol_actual = -1;
+    HIP_CHECK(hipMemcpyFromSymbol(&symbol_actual, HIP_SYMBOL(graph_memcpy_1d_to_symbol),
+                                  sizeof(int)));
+    REQUIRE(symbol_actual == zero);
+    HIP_CHECK(hipGraphExecDestroy(exec));
+    HIP_CHECK(hipGraphDestroy(graph));
+  }
 }
 
 /**

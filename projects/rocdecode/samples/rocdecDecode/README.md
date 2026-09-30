@@ -8,25 +8,40 @@ The rocdec decode sample illustrates decoding of individual frames of video elem
 
 ## Prerequisites:
 
-* Install [rocDecode](../../README.md#build-and-install-instructions)
+* Install [rocDecode](https://rocm.docs.amd.com/projects/rocDecode/en/latest/install/rocDecode-build-and-install.html)
 
 * [FFMPEG](https://ffmpeg.org/about.html) for rocDecodeHost
-
-    * On `Ubuntu`
 
   ```shell
   sudo apt install libavcodec-dev libavformat-dev libavutil-dev
   ```
-  
-    * On `RHEL`/`SLES` - install ffmpeg development packages manually or use [rocDecode-setup.py](../../rocDecode-setup.py) script
 
 ## Build
+
+**Linux:**
 
 ```shell
 mkdir rocdec_decode_sample && cd rocdec_decode_sample
 cmake ../
 make -j
 ```
+
+**Windows:**
+
+```bat
+mkdir rocdec_decode_sample && cd rocdec_decode_sample
+cmake .. -DROCM_PATH=<path-to-TheRock-build>
+cmake --build . --config Release
+```
+
+> [!NOTE]
+> Add the rocDecode and FFmpeg DLL directories to your PATH before configuring — CMake
+> locates FFmpeg by probing PATH — and keep them there when running:
+> ```bat
+> set PATH=%ROCM_PATH%\bin;<path-to-ffmpeg>\bin;%PATH%
+> ```
+> If FFmpeg is installed somewhere CMake cannot discover, pass
+> `-DFFMPEG_ROOT=<path-to-ffmpeg>` to the configure step.
 
 ## Run
 
@@ -40,5 +55,5 @@ make -j
               -m <output_surface_memory_type - decoded surface memory [optional - default: 0][0 : OUT_SURFACE_MEM_DEV_INTERNAL/ 1 : OUT_SURFACE_MEM_DEV_COPIED/ 2 : OUT_SURFACE_MEM_HOST_COPIED/3 : OUT_SURFACE_MEM_NOT_MAPPED]>
 ```
 ```shell
-"./rocdecdecode -i ROCDECODE_DATA_FOLDER/frames -o <output.yuv> -b 0".
+./rocdecdecode -i ROCDECODE_DATA_FOLDER/frames -o output.yuv -b 0
 ```

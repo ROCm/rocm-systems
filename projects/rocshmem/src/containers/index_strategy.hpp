@@ -432,7 +432,7 @@ class Matrix_Private {
    *
    * @return
    */
-  __device__ size_t next(size_t current_index) {
+  __device__ size_t next([[maybe_unused]] size_t current_index) {
     assert(false);
     return 0;
   }
@@ -472,7 +472,7 @@ class Matrix_Block {
    *
    * @return
    */
-  __device__ size_t next(size_t current_index) {
+  __device__ size_t next([[maybe_unused]] size_t current_index) {
     assert(false);
     return 0;
   }
@@ -512,7 +512,7 @@ class Matrix_Device {
    *
    * @return
    */
-  __device__ size_t next(size_t current_index) {
+  __device__ size_t next([[maybe_unused]] size_t current_index) {
     assert(false);
     return 0;
   }

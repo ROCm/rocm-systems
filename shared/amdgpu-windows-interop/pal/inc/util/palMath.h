@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) 2014-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+ *  Copyright (c) Advanced Micro Devices, Inc., or its affiliates. All rights reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -221,6 +221,18 @@ constexpr int32 SFixedRoundToInt32(int32 value, uint8 n)
 {
     PAL_CONSTEXPR_ASSERT((0 < n) && (n < 30));
     return ((value + (((1 << n) >> 1))) >> n);
+}
+
+/// @brief Multiplies two 32-bit unsigned integers as 64-bit unsigned integers and returns the result
+///        as a 64-bit unsigned integer.
+///
+/// @param [in] a   First 32-bit unsigned integer.
+/// @param [in] b   Second 32-bit unsigned integer.
+///
+/// @return 64-bit unsigned integer result of the multiplication.
+constexpr uint64 MulU32AsU64(uint32 a, uint32 b)
+{
+    return static_cast<uint64>(a) * static_cast<uint64>(b);
 }
 
 } // Math

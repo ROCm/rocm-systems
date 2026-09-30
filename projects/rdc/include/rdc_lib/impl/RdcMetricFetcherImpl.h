@@ -36,12 +36,20 @@ THE SOFTWARE.
 namespace amd {
 namespace rdc {
 
-//!< Some metrics, like PCIe throughput may take a second to retreive. The
-//!< MetricValue will cache those metrics for async retreive.
+//!< Some metrics, like PCIe throughput may take a second to retrieve. The
+//!< MetricValue will cache those metrics for async retrieve.
 struct MetricValue {
   uint64_t cache_ttl;
   uint64_t last_time;
   rdc_field_value value;
+};
+
+//!< Cached memory-activity accumulator sample. Used to derive current memory
+//!< bandwidth from the change in mem_activity_acc over firmware time, which
+//!< also reflects DMA/copy traffic that instantaneous UMC activity misses.
+struct MemActivitySample {
+  uint64_t mem_activity_acc;
+  uint64_t firmware_timestamp;
 };
 
 // This union represents any SMI handles require initialization and/or
@@ -85,7 +93,10 @@ class RdcMetricFetcherImpl final : public RdcMetricFetcher {
 
   uint64_t now();
   void get_ecc(uint32_t gpu_index, rdc_field_t field_id, rdc_field_value* value);
+  void get_afid(uint32_t gpu_index, rdc_field_value* value);
   void get_ecc_total(uint32_t gpu_index, rdc_field_t field_id, rdc_field_value* value);
+  void get_ecc_deferred(uint32_t gpu_index, rdc_field_t field_id, rdc_field_value* value);
+  void get_ecc_deferred_total(uint32_t gpu_index, rdc_field_value* value);
 
   //!< return true if starting async_get
   bool async_get_pcie_throughput(uint32_t gpu_index, rdc_field_t field_id, rdc_field_value* value);
@@ -95,11 +106,13 @@ class RdcMetricFetcherImpl final : public RdcMetricFetcher {
                                 amdsmi_processor_handle& processor_handle);
   rdc_status_t fetch_gpu_partition_field_(uint32_t gpu_index, rdc_field_t field_id,
                                           rdc_field_value* value);
+#ifdef ENABLE_ESMI_LIB
   rdc_status_t fetch_cpu_field_(uint32_t gpu_index, rdc_field_t field_id, rdc_field_value* value);
+#endif
 
   bool async_fetching = false;
 
-  //!< Async metric retreive
+  //!< Async metric retrieve
   std::map<RdcFieldKey, MetricValue> async_metrics_;
   std::map<RdcFieldKey, std::shared_ptr<FieldSMIData>> smi_data_;
   std::queue<MetricTask> updated_tasks_;
@@ -107,6 +120,11 @@ class RdcMetricFetcherImpl final : public RdcMetricFetcher {
   std::future<void> updater_;  // keep the future of updater
   std::condition_variable cv_;
   std::atomic<bool> task_started_;
+
+  //!< Previous memory-activity accumulator sample per GPU index, used to derive
+  //!< current memory bandwidth (guarded by mem_activity_mutex_).
+  std::map<uint32_t, MemActivitySample> mem_activity_cache_;
+  std::mutex mem_activity_mutex_;
 };
 
 }  // namespace rdc

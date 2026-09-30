@@ -5,8 +5,9 @@
 
 .. _using-rocprofv3-with-mpi:
 
+=========================
 Using rocprofv3 with MPI
-+++++++++++++++++++++++++++++
+=========================
 
 Message Passing Interface (MPI) is a standardized and portable message-passing system designed to function on a wide variety of parallel computing architectures. MPI is widely used for developing parallel applications and is considered the de facto standard for communication in high-performance computing (HPC) environments.
 MPI applications are parallel programs that run across multiple processes, which can be distributed over one or more nodes.
@@ -128,7 +129,7 @@ For an MPI application, you can use ROCTx annotations to mark the start and end 
         roctxRangeStop(roctx_run_id);
     }
 
-This preceding sample generates output similar to the following:
+The preceding sample program generates output similar to the following:
 
 .. code-block:: shell
 
@@ -152,7 +153,7 @@ This preceding sample generates output similar to the following:
 Output format features
 =======================
 
-To collect the profiles of the individual MPI processes, use ``rocprofv3`` with output directory option to send output to unique files.
+To collect the profiles of the individual MPI processes, use ``rocprofv3`` with output directory option which sends output to unique files.
 
 .. code-block:: bash
 
@@ -168,3 +169,86 @@ Assuming the hostname as `ubuntu-latest`, the process IDs as 3000020 and 3000019
     ubuntu-latest.3000019.0/ubuntu-latest/3000019_agent_info.csv
     ubuntu-latest.3000020.1/ubuntu-latest/3000020_hip_api_trace.csv
     ubuntu-latest.3000019.0/ubuntu-latest/3000019_hip_api_trace.csv
+
+Selective rank profiling
+==========================
+
+When running large-scale MPI jobs, collecting profiling data from all the ranks can generate excessive unnecessary output. The ``--profile-mpi-ranks`` option lets you specify the MPI ranks for providing profile and trace output, while the tool still runs on all the ranks to maintain program correctness.
+
+Specifying ranks to profile
+-----------------------------
+
+To specify the ranks for profiling, use the ``--profile-mpi-ranks`` option with a comma-separated list of ranks and ranges:
+
+.. code-block:: bash
+
+    # Profiles only rank 0
+    mpirun -n 16 rocprofv3 --hip-trace --profile-mpi-ranks 0 -- <application_path>
+
+    # Profiles ranks 0-3 and rank 8
+    mpirun -n 16 rocprofv3 --hip-trace --profile-mpi-ranks 0-3,8 -- <application_path>
+
+    # Profiles ranks 0, 4, 8, and 12
+    mpirun -n 16 rocprofv3 --hip-trace --profile-mpi-ranks 0,4,8,12 -- <application_path>
+
+    # Profiles a range of ranks (10 through 15)
+    srun -n 32 rocprofv3 --kernel-trace --profile-mpi-ranks 10-15 -- <application_path>
+
+The rank specification syntax supports:
+
+- **Individual ranks**: Comma-separated integers, such as ``0,1,2,8``.
+- **Ranges**: Hyphen-separated start and end values, such as ``0-7`` for ranks 0 through 7.
+- **Combined**: Mix of individual ranks and ranges, such as ``0-3,8,10-15``.
+
+Behavior
+---------
+
+When using ``--profile-mpi-ranks``:
+
+- The ``rocprofv3`` tool runs on **all** MPI ranks to avoid disrupting the application's execution.
+- Only the specified ranks collect and output profiling or trace data.
+- Non-selected ranks execute the application without profiling overhead or output generation.
+- This reduces output file count and storage requirements for large-scale runs.
+
+Default behavior
+-----------------
+
+If ``--profile-mpi-ranks`` is not specified, all ranks provide output by default, which is equivalent to running without rank filtering.
+
+Supported MPI implementations
+-------------------------------
+
+The rank and world size detection automatically support the following MPI implementations and job launchers. When multiple MPI-related environment variables are present, the tool uses the following priority order (from highest to lowest priority):
+
+1. **PBS** (``PBS_NODENUM``, ``PBS_O_TASKNUM``)
+2. **SLURM** (``SLURM_PROCID``, ``SLURM_NTASKS``)
+3. **PMI** (``PMI_RANK``, ``PMI_SIZE``)
+4. **MVAPICH2** (``MV2_COMM_WORLD_RANK``, ``MV2_COMM_WORLD_SIZE``)
+5. **OpenMPI** (``OMPI_COMM_WORLD_RANK``, ``OMPI_COMM_WORLD_SIZE``)
+6. **Generic MPI** variables:
+
+   - ``MPI_RANKID``, ``MPI_NRANKS``
+   - ``MPI_LOCALRANKID``, ``MPI_LOCALNRANKS``
+   - ``MPI_RANK``, ``MPI_SIZE``
+
+The tool checks these environment variables in the listed order and uses the first matching pair found. This priority order ensures that runtime-specific variables (PBS, SLURM) take precedence over implementation-specific variables (MVAPICH2, OpenMPI), which in turn take precedence over generic MPI variables.
+
+Custom MPI environment variables
+----------------------------------
+
+For mixed environments or non-standard MPI configurations (such as interactive SLURM jobs using ``mpirun``), you can specify custom environment variables for rank and world size detection:
+
+.. code-block:: bash
+
+    # Uses custom environment variables for rank and world size detection
+    mpirun -n 16 rocprofv3 --hip-trace --profile-mpi-ranks 0-3 \
+        --mpi-world-rank-variable MY_CUSTOM_RANK \
+        --mpi-world-size-variable MY_CUSTOM_SIZE -- <application_path>
+
+When ``--mpi-world-rank-variable`` and ``--mpi-world-size-variable`` are specified, they take precedence over automatic detection. These options are useful when:
+
+- The MPI implementation uses non-standard environment variable names.
+- You want to ensure specific environment variables are used instead of relying on auto-detection.
+- Working in mixed MPI environments where multiple MPI-related variables might be present.
+
+The ``--mpi-world-size-variable`` option is particularly useful when using ``--profile-mpi-ranks`` to ensure that the specified rank ranges are validated against the actual MPI world size, preventing out-of-range errors.

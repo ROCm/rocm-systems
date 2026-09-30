@@ -11,7 +11,7 @@ import logging
 
 from lib.test_parser import ArgumentParserInterface
 from lib.test_config import TestConfigProcessor
-from lib.test_executor import TestExecutor
+from lib.test_executor import TestExecutor, suite_disposition
 
 # Configure logging
 logging.basicConfig(
@@ -26,12 +26,19 @@ def main():
     parser_interface = ArgumentParserInterface()
     args = parser_interface.process_arguments()
 
+    # Validate flag combinations
+    if args.stop_on_rerun_failure and not args.rerun_failed:
+        print("ERROR: --stop-on-rerun-failure requires --rerun-failed to be set")
+        if args.verbose:
+            print("Exiting: Invalid flag combination")
+        sys.exit(1)
+
     # Validate config file exists
     if not os.path.exists(args.config):
         print(f"ERROR: Configuration file not found: {args.config}")
         if args.verbose:
             print("Exiting: Missing configuration file")
-        return
+        sys.exit(1)
 
     try:
         # Load and validate configuration
@@ -39,6 +46,7 @@ def main():
             print("Loading configuration...")
         config_processor = TestConfigProcessor(args.config)
         config_processor.validate_config()
+        print("Configuration loaded and validated")
 
         # Create test executor
         executor = TestExecutor(config_processor, args)
@@ -47,7 +55,7 @@ def main():
         if not executor.check_environment():
             if args.verbose:
                 print("Exiting: Environment check failed")
-            return
+            sys.exit(1)
 
         # Build RCCL (if not --no-build)
         if not args.no_build:
@@ -55,9 +63,20 @@ def main():
                 print("ERROR: Build failed")
                 if args.verbose:
                     print("Exiting: RCCL build failed")
-                return
+                sys.exit(1)
+            # Build rccl-tests (perf binaries) if the config provides a
+            # rccl_tests_build_configuration section; no-op otherwise.
+            if not executor.build_rccl_tests():
+                print("ERROR: rccl-tests build failed")
+                if args.verbose:
+                    print("Exiting: rccl-tests build failed")
+                sys.exit(1)
+        else:
+                print("SKIP: Build step skipped (--no-build)")
 
         # Parse and run test suites
+        if args.skip_tests:
+            print("SKIP: Test execution skipped (--skip-tests)")
         if not args.skip_tests:
             if args.verbose:
                 print("\nParsing test suites...")
@@ -69,54 +88,111 @@ def main():
                 print()
                 print(f"Found {len(test_suites)} test suite(s)")
 
-            # Print skip messages for disabled test suites upfront
+            # Print skip messages for disabled or filtered-out test suites upfront.
+            # --suite-name uses gtest-style glob filtering (see glob_filter_matches).
+            # --scope smoke restricts the run to suites marked "smoke": true in
+            # the config; 'all' (the default) or 'nightly' run all enabled suites.
+            smoke_only = args.scope == 'smoke'
+
             print()
             for suite in test_suites:
                 suite_name = suite["suite_details"]["name"]
-                enabled = suite["suite_details"].get("enabled", True)
-                if not enabled:
-                    print(f"SKIP: Test suite '{suite_name}' is disabled")
+                disposition = suite_disposition(
+                    suite, smoke_only, args.suite_name
+                )
+                if disposition == "disabled":
+                    print(f"DISABLED: Test suite '{suite_name}' is disabled")
+                elif disposition == "skip_scope":
+                    print(f"SKIP: Test suite '{suite_name}' (not in --scope smoke)")
+                elif disposition == "skip_name":
+                    print(f"SKIP: Test suite '{suite_name}' (does not match --suite-name '{args.suite_name}')")
 
-            # Run only enabled test suites
-            all_results = []
+            # Run enabled (scope- and name-matched) suites; record disabled ones
+            # in the summary so Config entries / Total / Unique include them.
+            # Note: Reruns happen immediately within run_test_suite() if --rerun-failed is set
             for suite in test_suites:
-                enabled = suite["suite_details"].get("enabled", True)
-                if enabled:
-                    results = executor.run_test_suite(suite)
-                    all_results.extend(results)
+                disposition = suite_disposition(
+                    suite, smoke_only, args.suite_name
+                )
+                if disposition in ("skip_scope", "skip_name"):
+                    continue
+                if disposition == "disabled":
+                    executor.record_disabled_suite(suite)
+                    continue
+                executor.run_test_suite(suite)
 
             # Print summary once at the end
             executor.print_summary()
 
-        # Generate coverage report
-        executor.generate_coverage_report()
+        # Generate coverage report. A failure here must NOT short-circuit
+        # emit_results() below: a run whose tests all passed but whose coverage
+        # report failed should still publish its dashboard JSON/tarball. We
+        # record the failure and fold it into the final exit code instead.
+        if not args.coverage_report:
+            print("\nSKIP: Coverage report not requested (use --coverage-report to enable)")
+        coverage_failed = not executor.generate_coverage_report()
+        if coverage_failed:
+            print("ERROR: Coverage report generation failed")
 
-        # Return based on results
+        # Emit structured results for the dashboard (no-op unless
+        # --emit-results / --db-push was passed). Coverage is emitted too when a
+        # report was generated above.
+        executor.emit_results()
+
+        # Determine whether the test run itself failed.
+        tests_failed = False
         if executor.test_results:
             from lib.test_executor import TestResult
+
+            # Count failures from original run
             failed = executor.test_results.count(TestResult.RESULT_FAILED.value)
             timeout = executor.test_results.count(TestResult.RESULT_TIMEOUT.value)
-            if failed > 0 or timeout > 0:
+
+            # Also check rerun results if any
+            if executor.rerun_results:
+                rerun_failed = executor.rerun_results.count(TestResult.RESULT_FAILED.value)
+                rerun_timeout = executor.rerun_results.count(TestResult.RESULT_TIMEOUT.value)
+
+                if rerun_failed > 0 or rerun_timeout > 0:
+                    tests_failed = True
+                    if args.verbose:
+                        print(f"Tests failed after rerun (original: failed={failed}, timeout={timeout}; rerun: failed={rerun_failed}, timeout={rerun_timeout})")
+                else:
+                    # All reruns passed, but original tests failed - this is a success with caveat
+                    if args.verbose:
+                        print(f"All rerun tests passed (original had {failed} failures and {timeout} timeouts, but reruns succeeded)")
+            elif failed > 0 or timeout > 0:
+                # No reruns, but original tests failed
+                tests_failed = True
                 if args.verbose:
-                    print(f"Exiting: Tests failed (failed={failed}, timeout={timeout})")
-                return
+                    print(f"Tests failed (failed={failed}, timeout={timeout})")
+
+        if tests_failed or coverage_failed:
+            if args.verbose:
+                reasons = []
+                if tests_failed:
+                    reasons.append("test failures")
+                if coverage_failed:
+                    reasons.append("coverage report generation failure")
+                print(f"Exiting non-zero due to: {', '.join(reasons)}")
+            sys.exit(1)
 
         if args.verbose:
             print("Exiting: Test run completed successfully")
-        return
+        sys.exit(0)
 
     except KeyboardInterrupt:
         print("\n\nInterrupted by user")
         if args.verbose:
             print("Exiting: User interrupted execution")
-        return
+        sys.exit(130)  # Standard exit code for SIGINT
     except Exception as e:
         print(f"\nERROR: {e}")
         if args.verbose:
             import traceback
             traceback.print_exc()
             print("Exiting: Unhandled exception occurred")
-        return
+        sys.exit(1)
 
 
 if __name__ == "__main__":

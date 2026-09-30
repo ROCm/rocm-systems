@@ -82,13 +82,28 @@ rocattach_status_t
 rocattach_get_version_triplet(rocattach_version_triplet_t* info) ROCATTACH_API ROCATTACH_NONNULL(1);
 
 /**
+ * @brief Attach to a process ID and all of its descendant processes
+ *
+ * Enumerates the full process tree rooted at `pid` (via /proc) and attaches to each process.
+ * Attachment proceeds breadth-first from the root. If any individual attach fails, the error is
+ * logged and attachment continues with the remaining processes; the return status reflects the
+ * last error seen.
+ *
+ * @param [in] pid Root process ID to attach to
+ * @return ::rocattach_status_t
+ * @retval ::ROCATTACH_STATUS_SUCCESS All processes attached successfully
+ */
+rocattach_status_t
+rocattach_attach_tree(int pid) ROCATTACH_API;
+
+/**
  * @brief Attach to a process ID
  *
  * Attempts to attach to a rocm process at the given process identifier (PID). If successful, the
  * target process will then load rocprofiler-sdk, which will subsequently load any tool libraries
  * given in the environment variable ROCPROF_ATTACH_TOOL_LIBRARY. This environment variable should
  * be set for the attacher process before calling rocattach_attach(). It does not need to be set
- * for the attachee.
+ * for the attachee. To attach to a process and all of its descendants, use rocattach_attach_tree().
  *
  * @param [in] pid Process ID to attach to
  * @return ::rocattach_status_t
@@ -96,6 +111,23 @@ rocattach_get_version_triplet(rocattach_version_triplet_t* info) ROCATTACH_API R
  */
 rocattach_status_t
 rocattach_attach(int pid) ROCATTACH_API;
+
+/**
+ * @brief Detach from the process tree previously attached via rocattach_attach_tree()
+ *
+ * Detaches from exactly the set of processes that were successfully attached by the corresponding
+ * rocattach_attach_tree() call for the same `pid`. The PID list is recorded at attach time and
+ * consumed here, so this function does not re-enumerate /proc. If any individual detach fails,
+ * the error is logged and detachment continues with the remaining processes; the return status
+ * reflects the last error seen. Returns ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT if no tree
+ * attachment session exists for `pid`.
+ *
+ * @param [in] pid Root process ID passed to the corresponding rocattach_attach_tree() call
+ * @return ::rocattach_status_t
+ * @retval ::ROCATTACH_STATUS_SUCCESS All attached processes detached successfully
+ */
+rocattach_status_t
+rocattach_detach_tree(int pid) ROCATTACH_API;
 
 /**
  * @brief Detach from a process ID

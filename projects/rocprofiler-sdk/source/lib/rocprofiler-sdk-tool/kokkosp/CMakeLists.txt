@@ -14,8 +14,9 @@ target_link_libraries(
     rocprofiler-sdk-tool-kokkosp
     PRIVATE rocprofiler-sdk-roctx::rocprofiler-sdk-roctx-shared-library
             rocprofiler-sdk::rocprofiler-sdk-headers
+            rocprofiler-sdk::rocprofiler-sdk-memcheck
             rocprofiler-sdk::rocprofiler-sdk-common-library
-            rocprofiler-sdk::rocprofiler-sdk-glog)
+            rocprofiler-sdk::rocprofiler-sdk-abseil)
 
 set_target_properties(
     rocprofiler-sdk-tool-kokkosp

@@ -28,6 +28,7 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hsa.h>
 
+#include <atomic>
 #include <cstddef>
 
 namespace rocprofiler
@@ -63,6 +64,7 @@ struct agent_callback_data
     rocprofiler_buffer_id_t                                buffer          = {.handle = 0};
     bool                                                   set_profile     = false;
     std::vector<rocprofiler_counter_record_t>*             cached_counters = nullptr;
+    std::atomic<bool>                                      sample_in_flight{false};
 
     agent_callback_data() = default;
     agent_callback_data(agent_callback_data&& rhs) noexcept
@@ -76,9 +78,11 @@ struct agent_callback_data
     , agent_id(rhs.agent_id)
     , cb(rhs.cb)
     , buffer(rhs.buffer)
+    , sample_in_flight(rhs.sample_in_flight.load(std::memory_order_acquire))
     {
         rhs.completion.handle   = 0;
         rhs.start_signal.handle = 0;
+        rhs.sample_in_flight.store(false, std::memory_order_release);
     }
 
     agent_callback_data& operator=(const agent_callback_data&) = delete;
@@ -122,6 +126,9 @@ read_agent_ctx(const context::context*                    ctx,
                rocprofiler_user_data_t                    user_data,
                rocprofiler_counter_flag_t                 flags,
                std::vector<rocprofiler_counter_record_t>* out_counters);
+
+uint64_t
+submitPackets(hsa_queue_t* queue, const void** packets, size_t num_packets);
 
 uint64_t
 submitPacket(hsa_queue_t* queue, const void* packet);

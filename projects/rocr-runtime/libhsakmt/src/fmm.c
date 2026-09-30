@@ -27,7 +27,7 @@
 #include "libhsakmt.h"
 #include "fmm.h"
 #include "hsakmt/hsakmtmodel.h"
-#include "hsakmt/linux/kfd_ioctl.h"
+#include "kfd_ioctl.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -37,15 +37,14 @@
 #include <inttypes.h>
 #include <sys/mman.h>
 #include <sys/time.h>
-#include <errno.h>
 #include <assert.h>
 
 #include <numa.h>
 #include <numaif.h>
 #include "rbtree.h"
 #include <amdgpu.h>
+#include "xf86drm.h"
 
-#include <fcntl.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include "hsakmt/linux/udmabuf.h"
@@ -85,8 +84,11 @@
 #define vm_object_tree(app, is_userptr)				\
 		((is_userptr) ? &(app)->user_tree : &(app)->tree)
 
-#define START_NON_CANONICAL_ADDR (1ULL << 47)
-#define END_NON_CANONICAL_ADDR (~0UL - (1UL << 47))
+/*
+ * support up to 57bit VA and 48bit VA
+ */
+#define START_NON_CANONICAL_ADDR (1ULL << 56)
+#define END_NON_CANONICAL_ADDR (~0ULL - (1ULL << 56))
 
 struct vm_object {
 	void *start;
@@ -117,6 +119,8 @@ struct vm_object {
 	void *user_data;
 	/* Flag to indicate imported KFD buffer */
 	bool is_imported_kfd_bo;
+	/* Paged host memory backed by SVM, no BO behind it */
+	bool is_svm_paged;
 #ifdef SANITIZER_AMDGPU
 	int mmap_flags;
 	int mmap_fd;
@@ -205,11 +209,15 @@ typedef struct {
 						 * dgpu_aperture. When requested by RT, each
 						 * GPU will get a differnt range
 						 */
-	manageable_aperture_t gpuvm_aperture;   /* used for GPUVM on APU, outsidethe canonical address range */
+	manageable_aperture_t gpuvm_aperture;   /* used for GPUVM on APU, outside the canonical address range */
+	aperture_t gpuvm_range;                 /* raw gpuvm base/limit from kernel, always valid */
 	int drm_render_fd;
 	uint32_t usable_peer_id_num;
 	uint32_t *usable_peer_id_array;
 	int drm_render_minor;
+	uint32_t drm_vm_timeline_syncobj;   /* per GPU global timeline syncobj */
+	uint64_t drm_vm_timeline_seqnum;    /* per GPU global sequence number */
+	bool stall_on_retry_fault;          /* node runs in recoverable-fault mode */
 } gpu_mem_t;
 
 enum svm_aperture_type {
@@ -231,6 +239,7 @@ typedef struct {
 
 	/* whether to use userptr for paged memory */
 	bool userptr_for_paged_mem;
+	bool svm_for_paged_mem;
 
 	/* whether to check userptrs on registration */
 	bool check_userptr;
@@ -243,7 +252,49 @@ typedef struct {
 
 	/* specifies the alignment size as PAGE_SIZE * 2^alignment_order */
 	uint32_t alignment_order;
+
+	/* DEBUG/TEMPORARY: whether to perform the SVM host unregister. Off by
+	 * default, so deregistration stays the no-op it was until the path has
+	 * more mileage; HSA_SVM_HOST_UNREGISTER_DEBUG opts in.
+	 */
+	bool svm_host_unregister;
 } svm_t;
+
+/*
+ * Tracks host memory ranges registered with KFD through the SVM API. The
+ * reference is taken by fmm_register_mem_svm_api() alone; the map that follows
+ * grants access but holds no reference. These registrations only set
+ * SVM attributes on the VA range and do not create a vm_object, so there is no
+ * way to discover the range size at deregistration time. We keep the aligned
+ * base and size here, refcounted to mirror the registration_count handling of
+ * regular userptr vm_objects, so that deregistration can issue the inverse SVM
+ * SET_ATTR (NO_ACCESS + clear coherency flags) instead of being a silent no-op.
+ *
+ * Keyed by the exact user pointer, not by the page-aligned base. Distinct
+ * sub-page buffers routinely share a page-aligned base and round to different
+ * spans, and register/deregister both carry the user pointer, so it is the only
+ * key that identifies one registration. Keying by base instead conflates those
+ * registrations and forces one shared extent, which then has to cover the
+ * largest of them - so deregistering a small buffer revokes GPU access across a
+ * span it never owned.
+ */
+struct svm_api_range {
+	void *start;			/* page-aligned base, rounded out */
+	uint64_t size;			/* page-aligned size, rounded out */
+	void *revoke_start;		/* pages this registration owns outright */
+	uint64_t revoke_size;		/* 0 if it fills no whole page */
+	uint32_t refcount;		/* registrations of this same user pointer */
+	/* GPUs this range was actually mapped to, as a bitmask of indices into
+	 * all_gpu_id_array. Only these are revoked, since only these were ever
+	 * granted. gpu_all covers the case of more GPUs than the mask holds.
+	 */
+	uint64_t gpu_mask;
+	bool gpu_all;
+	rbtree_node_t node;		/* svm_api_range_tree, key user VA (size field 0) */
+};
+
+#define SVM_API_GPU_MASK_BITS (sizeof(uint64_t) * 8)
+typedef struct svm_api_range svm_api_range_t;
 
 struct hsa_kfd_fmm_context
 {
@@ -262,6 +313,15 @@ struct hsa_kfd_fmm_context
 	void *dgpu_shared_aperture_limit;
 
 	svm_t svm;
+
+	/* RB tree of host ranges registered via the SVM API (see svm_api_range).
+	 * Protected by svm_api_mutex. Keys use the user VA only (LKP_ADDR).
+	 * svm_api_max_extent is the largest tracked extent, used to bound the leftward
+	 * scan for registrations that overlap a range being revoked.
+	 */
+	rbtree_t svm_api_range_tree;
+	pthread_mutex_t svm_api_mutex;
+	uint64_t svm_api_max_extent;
 
 	/* On APU, for memory allocated on the system memory that GPU doesn't
 	 * access via GPU driver, they are not managed by GPUVM. cpuvm_aperture
@@ -288,35 +348,42 @@ struct hsa_kfd_fmm_context
 
 	/* amdgpu device handle for each gpu that libdrm uses */
 	struct amdgpu_device *amdgpu_handle[DRM_LAST_RENDER_NODE + 1 - DRM_FIRST_RENDER_NODE];
-};
+} fmm_kfd_context_t;
 
-struct hsa_kfd_fmm_context *hsakmt_kfdcontext_get_fmm_context(HsaKFDContext *ctx)
+int hsakmt_kfdcontext_init_fmm_context(HsaKFDContext *ctx)
 {
-	assert(ctx);
+	CHECK_CTX(ctx, -1);
 
 	if (ctx->fmm_context)
-		return ctx->fmm_context;
+		return 0;
 
 	ctx->fmm_context = calloc(1, sizeof(struct hsa_kfd_fmm_context));
 	if (!ctx->fmm_context) {
 		pr_err("Alloc memory failed for struct hsa_kfd_fmm_context size %zu\n",
 				 sizeof(struct hsa_kfd_fmm_context));
-		return NULL;
+		return -1;
 	}
 
 	/* Initialize svm members */
 	manageable_aperture_t init_aperture = INIT_MANAGEABLE_APERTURE(0, 0);
-	manageable_aperture_t mem_handle_init = INIT_MANAGEABLE_APERTURE(START_NON_CANONICAL_ADDR, (START_NON_CANONICAL_ADDR + (1ULL << 47)));
+	manageable_aperture_t mem_handle_init =
+		INIT_MANAGEABLE_APERTURE(START_NON_CANONICAL_ADDR, (START_NON_CANONICAL_ADDR + (1ULL << 47)));
 
 	ctx->fmm_context->svm.apertures[SVM_DEFAULT] = init_aperture;
 	ctx->fmm_context->svm.apertures[SVM_COHERENT] = init_aperture;
 	ctx->fmm_context->svm.dgpu_aperture = NULL;
 	ctx->fmm_context->svm.dgpu_alt_aperture = NULL;
 	ctx->fmm_context->svm.userptr_for_paged_mem = false;
+	ctx->fmm_context->svm.svm_for_paged_mem = true;
 	ctx->fmm_context->svm.check_userptr = false;
 	ctx->fmm_context->svm.reserve_svm = false;
 	ctx->fmm_context->svm.disable_cache = false;
 	ctx->fmm_context->svm.alignment_order = 0;
+	ctx->fmm_context->svm.svm_host_unregister = false;
+
+	rbtree_init(&ctx->fmm_context->svm_api_range_tree);
+	pthread_mutex_init(&ctx->fmm_context->svm_api_mutex, NULL);
+	ctx->fmm_context->svm_api_max_extent = 0;
 
 	/* Initialize cpuvm_aperture */
 	ctx->fmm_context->cpuvm_aperture = init_aperture;
@@ -324,7 +391,7 @@ struct hsa_kfd_fmm_context *hsakmt_kfdcontext_get_fmm_context(HsaKFDContext *ctx
 	/* Initialize mem_handle_aperture */
 	ctx->fmm_context->mem_handle_aperture = mem_handle_init;
 
-	return ctx->fmm_context;
+	return 0;
 }
 
 /* IPC structures and helper functions */
@@ -420,6 +487,7 @@ static vm_object_t *vm_create_and_init_object(void *start, uint64_t size,
 		object->metadata = NULL;
 		object->user_data = NULL;
 		object->is_imported_kfd_bo = false;
+		object->is_svm_paged = false;
 		object->node.key = rbtree_key((unsigned long)start, size);
 		object->user_node.key = rbtree_key(0, 0);
 #ifdef SANITIZER_AMDGPU
@@ -706,30 +774,19 @@ static void reserved_aperture_release(manageable_aperture_t *app,
 		/* Reset NUMA policy */
 		mbind(address, MemorySizeInBytes, MPOL_DEFAULT, NULL, 0, 0);
 
-		/* Remove any CPU mapping, but keep the address range reserved */
+		/*
+		 * Drop the CPU mapping to release shmem pages for MAP_SHARED
+		 * allocations, then re-reserve the VA range as PROT_NONE.
+		 * Callers hold fmm_mutex (see contract above), which serializes
+		 * this against aperture allocations, so no allocation can claim
+		 * the VA in the window between munmap() and mmap().
+		 */
+		munmap(address, MemorySizeInBytes);
 		mmap_ret = mmap(address, MemorySizeInBytes, PROT_NONE,
 			MAP_ANONYMOUS | MAP_NORESERVE | MAP_PRIVATE | MAP_FIXED,
 			-1, 0);
-		if (mmap_ret == MAP_FAILED && errno == ENOMEM) {
-			/* When mmap count reaches max_map_count, any mmap will
-			 * fail. Reduce the count with munmap then map it as
-			 * NORESERVE immediately.
-			 */
-			if (munmap(address, MemorySizeInBytes) == 0) {
-				/* After unmapping, try mmap again and handle failure
-				 * */
-				mmap_ret = mmap(address, MemorySizeInBytes, PROT_NONE,
-						MAP_ANONYMOUS | MAP_NORESERVE | MAP_PRIVATE | MAP_FIXED,
-						-1, 0);
-				if (mmap_ret == MAP_FAILED) {
-					/* Handle mmap failure gracefully, log if needed */
-					pr_err("Failed to remap memory after unmap\n");
-				}
-			} else {
-				/* Handle munmap failure if needed */
-				pr_err("Failed to unmap memory\n");
-			}
-		}
+		if (mmap_ret == MAP_FAILED)
+			pr_err("Failed to reserve VA range %p: %s\n", address, strerror(errno));
 	}
 }
 
@@ -1107,6 +1164,387 @@ static HsaMemFlags fmm_translate_ioc_to_hsa_flags(uint32_t ioc_flags)
 	return mflags;
 }
 
+/*
+ * SVM-API range tracking helpers. These mirror the registration_count handling
+ * of regular userptr vm_objects so that SVM-API registrations can be torn down
+ * symmetrically on deregistration.
+ *
+ * Every helper here runs with svm_api_mutex held, and the callers keep it held
+ * across the SET_ATTR ioctl that grants or revokes access. The tree update and
+ * the ioctl it implies must be one critical section: otherwise a NO_ACCESS
+ * decided when a refcount reached zero can reach the kernel after a later
+ * ACCESS_IN_PLACE grant for the same pages, which strands a live registration
+ * without GPU access and faults whatever copy is in flight on it.
+ */
+static svm_api_range_t *svm_api_range_find(struct hsa_kfd_fmm_context *fmm_ctx,
+					   void *user_addr)
+{
+	rbtree_key_t key = rbtree_key((unsigned long)user_addr, 0);
+	rbtree_node_t *n = rbtree_lookup(&fmm_ctx->svm_api_range_tree, &key, LKP_ADDR);
+
+	if (!n)
+		return NULL;
+	return rb_entry(n, svm_api_range_t, node);
+}
+
+/*
+ * Track one SVM-API registration of @user_addr covering the page-rounded range
+ * [@aligned_addr, @aligned_addr + @aligned_size).
+ *
+ * Each registration keeps its own extent, so buffers that merely share a page
+ * no longer share a revoke extent. Repeat registrations of the same pointer are
+ * refcounted, and only there can the extent grow to the largest span seen - an
+ * allocator cannot hand out the same address twice while the first registration
+ * is still live, so in practice that is the same buffer being re-registered.
+ * Sub-ranges still owned by another registration are preserved by the interval
+ * subtraction in svm_api_range_put_locked.
+ *
+ * Called before the grant ioctl so a concurrent deregister of a neighbor sees
+ * this range and leaves the pages it covers alone. Returns whether the range is
+ * now tracked, so a failed grant can drop the reference again.
+ */
+static bool svm_api_range_get_locked(struct hsa_kfd_fmm_context *fmm_ctx,
+				     void *user_addr, void *aligned_addr,
+				     uint64_t aligned_size, uint64_t user_size)
+{
+	svm_api_range_t *r;
+	/* Register rounds out to map whole pages, revoke rounds in. The bytes
+	 * past either end belong to whatever else shares those pages.
+	 */
+	HSAuint64 in_start = PAGE_ALIGN_UP((HSAuint64)user_addr);
+	HSAuint64 in_end = ((HSAuint64)user_addr + user_size) & ~(HSAuint64)(PAGE_SIZE - 1);
+	HSAuint64 in_size = in_end > in_start ? in_end - in_start : 0;
+
+	r = svm_api_range_find(fmm_ctx, user_addr);
+	if (r) {
+		++r->refcount;
+		if (aligned_size > r->size)
+			r->size = aligned_size;
+		if (in_size > r->revoke_size) {
+			r->revoke_start = (void *)in_start;
+			r->revoke_size = in_size;
+		}
+		if (r->size > fmm_ctx->svm_api_max_extent)
+			fmm_ctx->svm_api_max_extent = r->size;
+		return true;
+	}
+
+	r = calloc(1, sizeof(*r));
+	if (!r) {
+		/* Tracking is best-effort; failure only means deregistration
+		 * falls back to the previous no-op behavior for this range.
+		 */
+		pr_warn("Failed to track SVM-API range %p, deregister will be a no-op\n",
+			user_addr);
+		return false;
+	}
+	r->start = aligned_addr;
+	r->size = aligned_size;
+	r->revoke_start = (void *)in_start;
+	r->revoke_size = in_size;
+	r->refcount = 1;
+	r->node.key = rbtree_key((unsigned long)user_addr, 0);
+	hsakmt_rbtree_insert(&fmm_ctx->svm_api_range_tree, &r->node);
+	if (aligned_size > fmm_ctx->svm_api_max_extent)
+		fmm_ctx->svm_api_max_extent = aligned_size;
+	return true;
+}
+
+/*
+ * Find the tracked range whose page-rounded extent covers @addr, for callers
+ * that hand back an address inside a registered buffer rather than the pointer
+ * it was registered with. Scans from base - svm_api_max_extent for the same
+ * reason svm_api_range_put_locked does: a longer range further left can still
+ * reach @addr.
+ */
+static svm_api_range_t *svm_api_range_find_containing(struct hsa_kfd_fmm_context *fmm_ctx,
+						      void *addr)
+{
+	HSAuint64 a = (HSAuint64)addr;
+	HSAuint64 scan = a > fmm_ctx->svm_api_max_extent ? a - fmm_ctx->svm_api_max_extent : 0;
+	rbtree_key_t key = rbtree_key(scan, 0);
+	rbtree_node_t *node = rbtree_lookup_nearest(&fmm_ctx->svm_api_range_tree, &key,
+						    LKP_ADDR, RIGHT);
+
+	while (node) {
+		svm_api_range_t *r = rb_entry(node, svm_api_range_t, node);
+		HSAuint64 start = (HSAuint64)r->start;
+
+		if (start > a)
+			break;
+		if (a < start + r->size)
+			return r;
+		node = hsakmt_rbtree_next(&fmm_ctx->svm_api_range_tree, node);
+	}
+	return NULL;
+}
+
+/*
+ * Record the GPUs a range was just mapped to, so deregistration revokes only
+ * those. The grant happens in fmm_map_mem_svm_api(), which is the only place
+ * that knows which GPUs the caller asked for; register sees no node list at
+ * all. Repeated maps of the same pointer accumulate, so the revoke covers
+ * every GPU that was ever granted.
+ *
+ * A map can arrive for a range that is not tracked under @user_addr:
+ * hsa_amd_agents_allow_access() maps without registering first and may pass an
+ * address inside the buffer, and tracking at register time is best-effort and
+ * skipped if it could not allocate. The containing-range lookup handles the
+ * first case. If nothing tracked covers the address there is nothing to attach
+ * the GPUs to, so the grant is simply left in place - the same direction as a
+ * range that fills no whole page, and it cannot produce the stale NO_ACCESS
+ * this path exists to avoid.
+ */
+static void svm_api_range_add_gpus_locked(struct hsa_kfd_fmm_context *fmm_ctx,
+					  void *user_addr, const uint32_t *gpu_ids,
+					  uint32_t num_gpu_ids)
+{
+	uint32_t num_gpus = fmm_ctx->all_gpu_id_array_size / sizeof(uint32_t);
+	svm_api_range_t *r = svm_api_range_find(fmm_ctx, user_addr);
+	uint32_t i, j;
+
+	if (!r)
+		r = svm_api_range_find_containing(fmm_ctx, user_addr);
+	if (!r)
+		return;
+
+	for (i = 0; i < num_gpu_ids; i++) {
+		for (j = 0; j < num_gpus; j++) {
+			if (fmm_ctx->all_gpu_id_array[j] != gpu_ids[i])
+				continue;
+			if (j < SVM_API_GPU_MASK_BITS)
+				r->gpu_mask |= 1ULL << j;
+			else
+				r->gpu_all = true;
+			break;
+		}
+	}
+}
+
+/*
+ * Undo one svm_api_range_get_locked() whose grant then failed. Nothing reached
+ * the kernel, so unlike svm_api_range_put_locked there is no revoke to work out
+ * and this stays allocation-free on an error path that may itself be an
+ * out-of-memory one.
+ */
+static void svm_api_range_unget_locked(struct hsa_kfd_fmm_context *fmm_ctx,
+				       void *user_addr)
+{
+	svm_api_range_t *r = svm_api_range_find(fmm_ctx, user_addr);
+
+	if (!r || --r->refcount > 0)
+		return;
+
+	hsakmt_rbtree_delete(&fmm_ctx->svm_api_range_tree, &r->node);
+	free(r);
+
+	/* Kept in step with svm_api_range_put_locked: a stale bound only
+	 * widens later scans, but there is no reason to leave one behind.
+	 */
+	if (fmm_ctx->svm_api_range_tree.root == &fmm_ctx->svm_api_range_tree.sentinel)
+		fmm_ctx->svm_api_max_extent = 0;
+}
+
+/* A page range whose GPU access must be revoked on deregister. */
+struct svm_revoke_range {
+	void *addr;
+	uint64_t size;
+};
+
+/* Append [a, b) to a growable array. Best-effort: on OOM returns false and the
+ * caller stops collecting (the unrevoked tail just keeps its GPU mapping). */
+static bool svm_revoke_add(struct svm_revoke_range **arr, int *n, int *cap,
+			   HSAuint64 a, HSAuint64 b)
+{
+	if (a >= b)
+		return true;
+	if (*n == *cap) {
+		int nc = *cap ? *cap * 2 : 4;
+		struct svm_revoke_range *t = realloc(*arr, nc * sizeof(**arr));
+
+		if (!t)
+			return false;
+		*arr = t;
+		*cap = nc;
+	}
+	(*arr)[*n].addr = (void *)a;
+	(*arr)[*n].size = b - a;
+	(*n)++;
+	return true;
+}
+
+/*
+ * Drop a reference on the SVM-API registration of @addr. If this was the last
+ * reference, remove it and compute which sub-ranges of [base, base+size) no
+ * *other* surviving registration still covers - those are the only ranges whose
+ * GPU access must be revoked. Overlapping or page-rounded-neighbor
+ * registrations keep coverage of the parts they still own, so a shared region
+ * survives until its last owner is dropped.
+ *
+ * On return *out points to a malloc'd array of ranges (caller frees) and the
+ * function returns the count (0 if nothing to revoke). The caller issues
+ * NO_ACCESS per range while still holding svm_api_mutex.
+ */
+static int svm_api_range_put_locked(struct hsa_kfd_fmm_context *fmm_ctx, void *addr,
+				    struct svm_revoke_range **out,
+				    uint64_t *gpu_mask, bool *gpu_all)
+{
+	struct svm_revoke_range *ranges = NULL;
+	int n = 0, cap = 0;
+	HSAuint64 base, end, cur, scan;
+	rbtree_key_t key;
+	rbtree_node_t *node;
+	svm_api_range_t *r;
+
+	*out = NULL;
+	*gpu_mask = 0;
+	*gpu_all = false;
+
+	r = svm_api_range_find(fmm_ctx, addr);
+	if (!r || --r->refcount > 0)
+		return 0;
+
+	base = (HSAuint64)r->revoke_start;
+	end = base + r->revoke_size;
+	*gpu_mask = r->gpu_mask;
+	*gpu_all = r->gpu_all;
+	hsakmt_rbtree_delete(&fmm_ctx->svm_api_range_tree, &r->node);
+	free(r);
+
+	/* Never mapped, so nothing was ever granted to revoke. */
+	if (!*gpu_mask && !*gpu_all)
+		return 0;
+
+	/* Fills no whole page, so nothing here is ours alone. */
+	if (end <= base)
+		return 0;
+
+	/* Emit the gaps in [base, end) not covered by any surviving registration.
+	 *
+	 * Any registration that can reach into [base, end) must start after
+	 * base - svm_api_max_extent, so the sweep starts at the first range from
+	 * there on. Starting at the immediate predecessor of base is not enough:
+	 * a longer range further left still covers base, and skipping it revokes
+	 * GPU access to memory that registration still owns.
+	 */
+	cur = base;
+	scan = base > fmm_ctx->svm_api_max_extent ? base - fmm_ctx->svm_api_max_extent : 0;
+	key = rbtree_key(scan, 0);
+	node = rbtree_lookup_nearest(&fmm_ctx->svm_api_range_tree, &key, LKP_ADDR, RIGHT);
+
+	while (node && cur < end) {
+		svm_api_range_t *o = rb_entry(node, svm_api_range_t, node);
+		HSAuint64 ostart = (HSAuint64)o->start;
+		HSAuint64 oend = ostart + o->size;
+
+		if (oend <= cur) {		/* entirely before cur */
+			node = hsakmt_rbtree_next(&fmm_ctx->svm_api_range_tree, node);
+			continue;
+		}
+		if (ostart >= end)		/* past our range */
+			break;
+		if (ostart > cur) {		/* uncovered gap [cur, ostart) */
+			if (!svm_revoke_add(&ranges, &n, &cap, cur,
+					    ostart < end ? ostart : end))
+				break;
+			cur = ostart < end ? ostart : end;
+		}
+		if (oend > cur)			/* covered up to oend */
+			cur = oend < end ? oend : end;
+		node = hsakmt_rbtree_next(&fmm_ctx->svm_api_range_tree, node);
+	}
+	if (cur < end)				/* uncovered tail */
+		svm_revoke_add(&ranges, &n, &cap, cur, end);
+
+	/* svm_api_max_extent only ever grows, which just widens the scan above.
+	 * Reset it once nothing is tracked so a single large registration does
+	 * not keep widening every later scan for the life of the process.
+	 */
+	if (fmm_ctx->svm_api_range_tree.root == &fmm_ctx->svm_api_range_tree.sentinel)
+		fmm_ctx->svm_api_max_extent = 0;
+
+	*out = ranges;
+	return n;
+}
+
+/*
+ * Inverse of fmm_map_mem_svm_api(): revoke GPU access to the range. Only the
+ * GPUs in @gpu_mask (indices into all_gpu_id_array) are revoked, or all of them
+ * when @gpu_all is set, because only those were ever granted. Called with
+ * svm_api_mutex held, when the last SVM-API registration of a range is removed.
+ */
+static HSAKMT_STATUS fmm_unregister_mem_svm_api(HsaKFDContext *ctx,
+						void *aligned_addr,
+						uint64_t aligned_size,
+						uint64_t gpu_mask, bool gpu_all)
+{
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
+	uint32_t num_gpus = fmm_ctx->all_gpu_id_array_size / sizeof(uint32_t);
+	struct kfd_ioctl_svm_args *args;
+	size_t s_attr;
+	uint32_t nattr, i;
+	HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
+
+	if (!fmm_ctx->first_gpu_mem)
+		return HSAKMT_STATUS_ERROR;
+
+	/* NO_ACCESS only. The coherency flags are page granular and COHERENT is
+	 * the kernel default, so clearing them drops whatever else shares those
+	 * pages below default; on gfx942/950 that also turns a live mapping
+	 * cached. NO_ACCESS is what the unmap and eviction skip key off.
+	 */
+	/* @gpu_all deliberately over-revokes: the mask holds one bit per GPU
+	 * and anything beyond it sets @gpu_all instead, which then revokes
+	 * every GPU rather than tracking which. NO_ACCESS for a GPU that was
+	 * never granted is a no-op, and the ranges reaching here are only the
+	 * ones no surviving registration covers, so it costs attributes and
+	 * nothing else.
+	 */
+	nattr = 0;
+	for (i = 0; i < num_gpus; i++)
+		if (gpu_all || (i < SVM_API_GPU_MASK_BITS && (gpu_mask & (1ULL << i))))
+			nattr++;
+	if (!nattr)
+		return HSAKMT_STATUS_SUCCESS;
+
+	if (sizeof(*args) + nattr * sizeof(struct kfd_ioctl_svm_attribute) >
+	    ((1UL << _IOC_SIZEBITS) - 1))
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+
+	s_attr = nattr * sizeof(struct kfd_ioctl_svm_attribute);
+	args = malloc(sizeof(*args) + s_attr);
+	if (!args)
+		return HSAKMT_STATUS_NO_MEMORY;
+
+	args->start_addr = (HSAuint64)aligned_addr;
+	args->size = aligned_size;
+	args->op = KFD_IOCTL_SVM_OP_SET_ATTR;
+	args->nattr = nattr;
+	nattr = 0;
+	for (i = 0; i < num_gpus; i++) {
+		if (!gpu_all && (i >= SVM_API_GPU_MASK_BITS || !(gpu_mask & (1ULL << i))))
+			continue;
+		args->attrs[nattr].type = HSA_SVM_ATTR_NO_ACCESS;
+		args->attrs[nattr].value = fmm_ctx->all_gpu_id_array[i];
+		nattr++;
+	}
+
+	pr_debug("Deregistering from SVM %p size: %" PRIu64 "\n", aligned_addr,
+		 aligned_size);
+	/* Driver does one copy_from_user, with extra attrs size */
+	if (hsakmt_ioctl(ctx->fd, AMDKFD_IOC_SVM + (s_attr << _IOC_SIZESHIFT), args)) {
+		/* The VA may already be gone (e.g. the application unmapped it
+		 * before deregistering); the kernel reclaims the SVM range via
+		 * its MMU notifier in that case, so this is not fatal.
+		 */
+		pr_debug("op clear range attrs failed %s\n", strerror(errno));
+		ret = HSAKMT_STATUS_ERROR;
+	}
+
+	free(args);
+	return ret;
+}
+
 static HSAKMT_STATUS fmm_register_mem_svm_api(HsaKFDContext *ctx,
 						  void *address,
 					      uint64_t size, HsaMemFlags flags)
@@ -1116,13 +1554,19 @@ static HSAKMT_STATUS fmm_register_mem_svm_api(HsaKFDContext *ctx,
 	HSAuint32 page_offset = (HSAuint64)address & (PAGE_SIZE-1);
 	HSAuint64 aligned_addr = (HSAuint64)address - page_offset;
 	HSAuint64 aligned_size = PAGE_ALIGN_UP(page_offset + size);
-	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
+	bool tracked = false;
+	HSAKMT_STATUS ret;
 
 	if (!fmm_ctx->first_gpu_mem)
 		return HSAKMT_STATUS_ERROR;
 
+	/* s_attr is a compile-time constant (16 bytes); no overflow possible */
 	s_attr = 2 * sizeof(struct kfd_ioctl_svm_attribute);
-	args = alloca(sizeof(*args) + s_attr);
+	args = malloc(sizeof(*args) + s_attr);
+	if (!args)
+		return HSAKMT_STATUS_NO_MEMORY;
+
 	args->start_addr = aligned_addr;
 	args->size = aligned_size;
 	args->op = KFD_IOCTL_SVM_OP_SET_ATTR;
@@ -1135,13 +1579,42 @@ static HSAKMT_STATUS fmm_register_mem_svm_api(HsaKFDContext *ctx,
 	args->attrs[1].value = HSA_SVM_FLAG_EXT_COHERENT;
 	pr_debug("Registering to SVM %p size: %ld\n", (void*)aligned_addr,
 		 aligned_size);
+
+	/* Start tracking before the ioctl so a concurrent deregister of a
+	 * neighbor already sees this range and spares the pages it covers.
+	 *
+	 * No ACCESS_IN_PLACE here: register carries no node list, so granting
+	 * from here could only mean every GPU in the system. The map that
+	 * follows knows the caller's GPUs and grants exactly those, which is
+	 * also what clears any NO_ACCESS a previous deregister left behind on a
+	 * reused VA. The coherency-flag attributes below never conflict with a
+	 * concurrent NO_ACCESS, so the mutex does not span this ioctl.
+	 */
+	if (fmm_ctx->svm.svm_host_unregister) {
+		pthread_mutex_lock(&fmm_ctx->svm_api_mutex);
+		tracked = svm_api_range_get_locked(fmm_ctx, address, (void *)aligned_addr,
+						   aligned_size, size);
+		pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
+	}
+
 	/* Driver does one copy_from_user, with extra attrs size */
 	if (hsakmt_ioctl(ctx->fd, AMDKFD_IOC_SVM + (s_attr << _IOC_SIZESHIFT), args)) {
 		pr_debug("op set range attrs failed %s\n", strerror(errno));
-		return HSAKMT_STATUS_ERROR;
+		if (tracked) {
+			/* Give the reference back; nothing was granted. */
+			pthread_mutex_lock(&fmm_ctx->svm_api_mutex);
+			svm_api_range_unget_locked(fmm_ctx, address);
+			pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
+		}
+		ret = HSAKMT_STATUS_ERROR;
+		goto out;
 	}
 
-	return HSAKMT_STATUS_SUCCESS;
+	ret = HSAKMT_STATUS_SUCCESS;
+
+out:
+	free(args);
+	return ret;
 }
 
 static HSAKMT_STATUS fmm_map_mem_svm_api(HsaKFDContext *ctx,
@@ -1153,14 +1626,22 @@ static HSAKMT_STATUS fmm_map_mem_svm_api(HsaKFDContext *ctx,
 	struct kfd_ioctl_svm_args *args;
 	size_t s_attr;
 	uint32_t i, nattr;
-	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
+	HSAKMT_STATUS ret;
 
 	if (!fmm_ctx->first_gpu_mem)
 		return HSAKMT_STATUS_ERROR;
 
 	nattr = nodes_array_size;
+
+	/* Check ioctl size-field limit (14 bits = 16383 bytes max, ~2044 attrs) */
+	if (sizeof(*args) + nattr * sizeof(struct kfd_ioctl_svm_attribute) > ((1UL << _IOC_SIZEBITS) - 1))
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+
 	s_attr = sizeof(struct kfd_ioctl_svm_attribute) * nattr;
-	args = alloca(sizeof(*args) + s_attr);
+	args = malloc(sizeof(*args) + s_attr);
+	if (!args)
+		return HSAKMT_STATUS_NO_MEMORY;
 
 	args->start_addr = (uint64_t)address;
 	args->size = size;
@@ -1173,10 +1654,60 @@ static HSAKMT_STATUS fmm_map_mem_svm_api(HsaKFDContext *ctx,
 	/* Driver does one copy_from_user, with extra attrs size */
 	if (hsakmt_ioctl(ctx->fd, AMDKFD_IOC_SVM + (s_attr << _IOC_SIZESHIFT), args)) {
 		pr_debug("op set range attrs failed %s\n", strerror(errno));
-		return HSAKMT_STATUS_ERROR;
+		ret = HSAKMT_STATUS_ERROR;
+		goto out;
 	}
 
-	return HSAKMT_STATUS_SUCCESS;
+	ret = HSAKMT_STATUS_SUCCESS;
+
+out:
+	free(args);
+	return ret;
+}
+
+static HSAKMT_STATUS fmm_unmap_mem_svm_api(HsaKFDContext *ctx,
+					   void *address,
+					   uint64_t size,
+					   uint32_t *nodes_to_unmap,
+					   uint32_t num_of_nodes)
+{
+	struct kfd_ioctl_svm_args *args;
+	size_t s_attr;
+	uint32_t i;
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
+	HSAKMT_STATUS ret;
+
+	if (!fmm_ctx->first_gpu_mem)
+		return HSAKMT_STATUS_ERROR;
+
+	/* Check ioctl size-field limit (14 bits = 16383 bytes max, ~2044 attrs) */
+	if (sizeof(*args) + num_of_nodes * sizeof(struct kfd_ioctl_svm_attribute) > ((1UL << _IOC_SIZEBITS) - 1))
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+
+	s_attr = sizeof(struct kfd_ioctl_svm_attribute) * num_of_nodes;
+	args = malloc(sizeof(*args) + s_attr);
+	if (!args)
+		return HSAKMT_STATUS_NO_MEMORY;
+
+	args->start_addr = (uint64_t)address;
+	args->size = size;
+	args->op = KFD_IOCTL_SVM_OP_SET_ATTR;
+	args->nattr = num_of_nodes;
+	for (i = 0; i < num_of_nodes; i++) {
+		args->attrs[i].type = HSA_SVM_ATTR_NO_ACCESS;
+		args->attrs[i].value = nodes_to_unmap[i];
+	}
+	/* Driver does one copy_from_user, with extra attrs size */
+	if (hsakmt_ioctl(ctx->fd, AMDKFD_IOC_SVM + (s_attr << _IOC_SIZESHIFT), args)) {
+		pr_debug("op set range attrs failed %s\n", strerror(errno));
+		ret = HSAKMT_STATUS_ERROR;
+		goto out;
+	}
+
+	ret = HSAKMT_STATUS_SUCCESS;
+out:
+	free(args);
+	return ret;
 }
 
 /* After allocating the memory, return the vm_object created for this memory.
@@ -1194,7 +1725,7 @@ static vm_object_t *fmm_allocate_memory_object(HsaKFDContext *ctx,
 	vm_object_t *vm_obj = NULL;
 	HsaMemFlags mflags;
 	uint64_t offset = 0, total_size, size;
-	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 
 	if (!mem)
 		return NULL;
@@ -1313,7 +1844,7 @@ static void manageable_aperture_print(manageable_aperture_t *app)
 
 void hsakmt_fmm_print(HsaKFDContext *ctx, uint32_t gpu_id)
 {
-	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 	int32_t gpu_mem_id = gpu_mem_find_by_gpu_id(fmm_ctx, gpu_id);
 
 	if (gpu_mem_id >= 0) { /* Found */
@@ -1471,7 +2002,7 @@ static void fmm_release_scratch(HsaKFDContext *ctx, uint32_t gpu_id)
 	vm_object_t *obj;
 	manageable_aperture_t *aperture;
 	rbtree_node_t *n;
-	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 
 	gpu_mem_id = gpu_mem_find_by_gpu_id(fmm_ctx, gpu_id);
 	if (gpu_mem_id < 0)
@@ -1535,7 +2066,7 @@ void *hsakmt_fmm_allocate_scratch(HsaKFDContext *ctx,
 	int32_t gpu_mem_id;
 	void *mem = NULL;
 	uint64_t aligned_size = ALIGN_UP(MemorySizeInBytes, SCRATCH_ALIGN);
-	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 
 	/* Retrieve gpu_mem id according to gpu_id */
 	gpu_mem_id = gpu_mem_find_by_gpu_id(fmm_ctx, gpu_id);
@@ -1563,6 +2094,13 @@ void *hsakmt_fmm_allocate_scratch(HsaKFDContext *ctx,
 					    aligned_size, SCRATCH_ALIGN, 0,
 					    0, (void *)LONG_MAX, -1);
 	}
+
+	/* A partially initialized aperture (base NULL, limit derived from the
+	 * requested size) would claim every low VA in the process, so leave the
+	 * aperture untouched and let the caller see the failure instead.
+	 */
+	if (!mem)
+		return NULL;
 
 	/* Remember scratch backing aperture for later */
 	aperture_phy->base = mem;
@@ -1686,7 +2224,7 @@ static void* udmabuf_allocation(HsaKFDContext *ctx,
 	uint64_t guard_size;
 	void *mem;
 	int ret;
-	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 
 	dmabuf_fd = -1;
 	memfd = -1;
@@ -1803,7 +2341,7 @@ void *hsakmt_fmm_allocate_device(HsaKFDContext *ctx,
 	uint64_t size, mmap_offset;
 	void *mem;
 	vm_object_t *vm_obj = NULL;
-	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 
 	/* Retrieve gpu_mem id according to gpu_id */
 	gpu_mem_id = gpu_mem_find_by_gpu_id(fmm_ctx, gpu_id);
@@ -1846,13 +2384,17 @@ void *hsakmt_fmm_allocate_device(HsaKFDContext *ctx,
 		ioc_flags |= KFD_IOC_ALLOC_MEM_FLAGS_CONTIGUOUS_BEST_EFFORT;
 
 	mem = NULL;
-	if (hsakmt_udmabuf_dev_fd > 0 && aperture == fmm_ctx->svm.dgpu_aperture && !hsakmt_is_dgpu
+	if (hsakmt_udmabuf_dev_fd > 0 && aperture == fmm_ctx->svm.dgpu_aperture
+		 && hsakmt_device_is_apu_by_node_id(ctx, node_id)
 		 && aperture->ops == &mmap_aperture_ops) {
+
 		mem  = udmabuf_allocation(ctx, gpu_id, node_id, size, aperture, alignment,
                                         mflags, &vm_obj);
 		pr_debug("udmabuf_allocation mem %p\n", mem);
-		if (!mem)
-			pr_debug("udmabuf_allocation allocation fail\n");
+		if (!mem) {
+			pr_err("udmabuf_allocation allocation fail size %lu\n", size);
+			return NULL;
+		}
 	}
 
 	/* env HSA_USE_UDMABUF not set, or not apu, or cannot use udmabuf,
@@ -1905,7 +2447,7 @@ void *hsakmt_fmm_allocate_doorbell(HsaKFDContext *ctx,
 	uint32_t ioc_flags;
 	void *mem;
 	vm_object_t *vm_obj = NULL;
-	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 
 	/* Retrieve gpu_mem id according to gpu_id */
 	gpu_mem_id = gpu_mem_find_by_gpu_id(fmm_ctx, gpu_id);
@@ -1955,7 +2497,7 @@ static void *fmm_allocate_host_cpu(HsaKFDContext *ctx, void *address, uint64_t M
 	void *mem = NULL;
 	vm_object_t *vm_obj;
 	int mmap_prot = PROT_READ;
-	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 
 	if (address)
 		return NULL;
@@ -2072,7 +2614,7 @@ static void *fmm_allocate_host_gpu(HsaKFDContext *ctx,
 	uint64_t size;
 	void *mem;
 
-	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 	if (!fmm_ctx->first_gpu_mem)
 		return NULL;
 
@@ -2110,10 +2652,19 @@ static void *fmm_allocate_host_gpu(HsaKFDContext *ctx,
 	if (mflags.ui32.OnlyAddress)
 		return fmm_allocate_va(gpu_id, address, size, aperture, alignment, mflags);
 
+	/* KFD refuses userptr on a node in recoverable-fault mode: evicting a
+	 * userptr BO invalidates its PTEs instead of preempting the queues,
+	 * which the mmu-notifier path cannot do for a stalled wave.
+	 */
+	bool use_userptr = fmm_ctx->svm.userptr_for_paged_mem &&
+			   !fmm_ctx->gpu_mem[gpu_mem_id].stall_on_retry_fault;
+
 	/* Paged memory is allocated as a userptr mapping, non-paged
 	 * memory is allocated from KFD
 	 */
-	if (!mflags.ui32.NonPaged && fmm_ctx->svm.userptr_for_paged_mem) {
+	if (!mflags.ui32.NonPaged &&
+	    (use_userptr ||
+	     (fmm_ctx->svm.svm_for_paged_mem && ctx->hsakmt_is_svm_api_supported))) {
 		int advice = MADV_NORMAL;
 
 		/* set madvise flags to HUGEPAGE always for 2MB pages */
@@ -2129,7 +2680,7 @@ static void *fmm_allocate_host_gpu(HsaKFDContext *ctx,
 
 		/* Map anonymous pages */
 		if (mmap(mem, MemorySizeInBytes, PROT_READ | PROT_WRITE,
-			 MAP_ANONYMOUS | MAP_PRIVATE | MAP_FIXED, -1, 0)
+			 MAP_ANONYMOUS | MAP_SHARED | MAP_FIXED, -1, 0)
 		    == MAP_FAILED)
 			goto out_release_area;
 
@@ -2139,27 +2690,56 @@ static void *fmm_allocate_host_gpu(HsaKFDContext *ctx,
 
 		madvise(mem, MemorySizeInBytes, advice);
 
-		/* Create userptr BO */
-		mmap_offset = (uint64_t)mem;
-		ioc_flags |= KFD_IOC_ALLOC_MEM_FLAGS_USERPTR;
-		vm_obj = fmm_allocate_memory_object(ctx, preferred_gpu_id, mem, size,
-						       aperture, &mmap_offset,
-						       ioc_flags);
-		if (!vm_obj)
-			goto out_release_area;
+		if (!use_userptr) {
+			/* No BO. The pages are served by SVM, but keep the
+			 * object so map, unmap and release still find the range.
+			 */
+			pthread_mutex_lock(&aperture->fmm_mutex);
+			vm_obj = aperture_allocate_object(aperture, mem, 0, size, mflags);
+			if (vm_obj)
+				vm_obj->is_svm_paged = true;
+			pthread_mutex_unlock(&aperture->fmm_mutex);
+
+			if (vm_obj &&
+			    fmm_register_mem_svm_api(ctx, mem, size, mflags)
+					!= HSAKMT_STATUS_SUCCESS) {
+				pthread_mutex_lock(&aperture->fmm_mutex);
+				vm_remove_object(aperture, vm_obj);
+				pthread_mutex_unlock(&aperture->fmm_mutex);
+				vm_obj = NULL;
+			}
+			if (!vm_obj)
+				goto out_release_area;
+		} else {
+			/* Create userptr BO */
+			mmap_offset = (uint64_t)mem;
+			ioc_flags |= KFD_IOC_ALLOC_MEM_FLAGS_USERPTR;
+			vm_obj = fmm_allocate_memory_object(ctx, preferred_gpu_id, mem, size,
+							       aperture, &mmap_offset,
+							       ioc_flags);
+			if (!vm_obj)
+				goto out_release_area;
+		}
 	} else {
 		ioc_flags |= KFD_IOC_ALLOC_MEM_FLAGS_GTT;
 		mem =  __fmm_allocate_device(ctx, preferred_gpu_id, address, size, aperture,
 					     &mmap_offset, ioc_flags, alignment, &vm_obj);
 
-		if (mem && mflags.ui32.HostAccess) {
-			void *ret = fmm_map_to_cpu(mem, MemorySizeInBytes,
-						   mflags.ui32.HostAccess,
-						   gpu_drm_fd, mmap_offset);
+		if (mflags.ui32.NoAddress) {
+			aperture = &fmm_ctx->mem_handle_aperture;
+		}
 
-			if (ret == MAP_FAILED) {
-				__fmm_release(ctx, vm_obj, aperture);
-				return NULL;
+		if (mem && mflags.ui32.HostAccess) {
+			/* GTT system memory from mem_handle_aperture has no VA, so skip CPU mapping */
+			if (!mflags.ui32.NoAddress) {
+				void *ret = fmm_map_to_cpu(mem, MemorySizeInBytes,
+							   mflags.ui32.HostAccess,
+							   gpu_drm_fd, mmap_offset);
+
+				if (ret == MAP_FAILED) {
+					__fmm_release(ctx, vm_obj, aperture);
+					return NULL;
+				}
 			}
 		}
     }
@@ -2244,6 +2824,34 @@ static int __fmm_release(HsaKFDContext *ctx,
 	if (ret)
 		goto err_free_mem_failed;
 
+	if (object->is_svm_paged) {
+		/* Paged host memory backed by SVM is registered through
+		 * fmm_register_mem_svm_api() when it is allocated, which takes
+		 * a reference on the tracking range. Nothing deregisters it -
+		 * the object is released, not deregistered - so drop that
+		 * reference here, or the range outlives the VA and a later
+		 * registration that reuses it inherits the stale entry.
+		 */
+		if (ctx->fmm_context->svm.svm_host_unregister) {
+			struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
+			struct svm_revoke_range *rr = NULL;
+			uint64_t gpu_mask;
+			bool gpu_all;
+			int nr, j;
+
+			pthread_mutex_lock(&fmm_ctx->svm_api_mutex);
+			nr = svm_api_range_put_locked(fmm_ctx, object->start, &rr,
+						      &gpu_mask, &gpu_all);
+			for (j = 0; j < nr; j++)
+				fmm_unregister_mem_svm_api(ctx, rr[j].addr, rr[j].size,
+							   gpu_mask, gpu_all);
+			pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
+			free(rr);
+		}
+
+		munmap(object->start, object->size);
+	}
+
 	aperture_release_area(aperture, object->start, object->size);
 	vm_remove_object(aperture, object);
 
@@ -2257,7 +2865,7 @@ HSAKMT_STATUS hsakmt_fmm_release(HsaKFDContext *ctx, void *address)
 	manageable_aperture_t *aperture = NULL;
 	vm_object_t *object = NULL;
 	gpu_mem_t *gpu_mem_ptr = NULL;
-	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 
 	/* Special handling for scratch memory */
 	gpu_mem_ptr = fmm_is_scratch_aperture(fmm_ctx, address);
@@ -2269,7 +2877,7 @@ HSAKMT_STATUS hsakmt_fmm_release(HsaKFDContext *ctx, void *address)
 	object = vm_find_object(fmm_ctx, address, 0, &aperture);
 
 	if (!object)
-		return hsakmt_is_svm_api_supported ?
+		return ctx->hsakmt_is_svm_api_supported ?
 			HSAKMT_STATUS_SUCCESS :
 			HSAKMT_STATUS_MEMORY_NOT_REGISTERED;
 
@@ -2354,16 +2962,10 @@ static HSAKMT_STATUS get_process_apertures(HsaKFDContext *ctx,
 
 int hsakmt_open_drm_render_device(HsaKFDContext *ctx, int minor)
 {
-	char path[128];
-	int index, fd;
+	int index, fd, dev_init_ret;
 	uint32_t major_drm, minor_drm;
 	struct amdgpu_device **device_handle;
-	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
-
-	/* Bypass amdgpu if we're running a model. Return ctx->fd, which is the
-	 * backing for all our "GPU" memory. */
-	if (hsakmt_use_model)
-		return ctx->fd;
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 
 	if (minor < DRM_FIRST_RENDER_NODE || minor > DRM_LAST_RENDER_NODE) {
 		pr_err("DRM render minor %d out of range [%d, %d]\n", minor,
@@ -2376,11 +2978,10 @@ int hsakmt_open_drm_render_device(HsaKFDContext *ctx, int minor)
 	if (fmm_ctx->drm_render_fds[index])
 		return fmm_ctx->drm_render_fds[index];
 
-	sprintf(path, "/dev/dri/renderD%d", minor);
-	fd = open(path, O_RDWR | O_CLOEXEC);
+	fd = hsakmt_drm_open_render(minor);
 	if (fd < 0) {
 		if (errno != ENOENT && errno != EPERM) {
-			pr_err("Failed to open %s: %s\n", path, strerror(errno));
+			pr_err("Failed to open render node %d: %s\n", minor, strerror(errno));
 			if (errno == EACCES)
 				pr_info("Check user is in \"video\" group\n");
 		}
@@ -2389,20 +2990,40 @@ int hsakmt_open_drm_render_device(HsaKFDContext *ctx, int minor)
 	fmm_ctx->drm_render_fds[index] = fd;
 
 	device_handle = &fmm_ctx->amdgpu_handle[index];
-	if (!amdgpu_device_initialize(fd, &major_drm, &minor_drm, device_handle)) {
+	/* -Primary context: amdgpu_device_initialize()
+	 *    Enables device deduplication for some resources sharing.
+	 * -Secondary context: amdgpu_device_initialize2(fd, false, ...)
+	 *    Disables device deduplication.
+	 *    The goal is to get a different drm_file for each application
+	 *    inside the guest so we get inter-application implicit synchronisation
+	 *    handled for us by the kernel.
+	 *    This also makes the application completely separate (e.g.: each one gets
+	 *    its own VM space).
+	*/
+	if (ctx->hsakmt_is_primary_ctx) {
+		dev_init_ret = hsakmt_amdgpu_device_initialize(fd, &major_drm, &minor_drm, device_handle);
+	} else if (hsakmt_fn_amdgpu_device_initialize2) {
+		dev_init_ret = hsakmt_fn_amdgpu_device_initialize2(fd, false, &major_drm, &minor_drm,
+						    (HsaAMDGPUDeviceHandle *)device_handle);
+	} else {
+		pr_err("Secondary context amdgpu device init failed: libdrm version < 2.4.121\n");
+		dev_init_ret = -1;
+		*device_handle = 0;
+	}
+
+	if (!dev_init_ret) {
 		/* if amdgpu_device_get_fd available query render fd that libdrm uses,
 		 * then close drm_render_fds above, replace it by fd libdrm uses.
 		 */
-		if (hsakmt_fn_amdgpu_device_get_fd) {
-			fd = hsakmt_fn_amdgpu_device_get_fd(*device_handle);
-			if (fd > 0) {
-				close(fmm_ctx->drm_render_fds[index]);
-				fmm_ctx->drm_render_fds[index] = fd;
-			} else {
-				pr_err("amdgpu_device_get_fd failed: %d\n", fd);
-				amdgpu_device_deinitialize(*device_handle);
-				*device_handle = 0;
-			}
+		int libdrm_fd = hsakmt_amdgpu_device_get_fd(*device_handle);
+		if (libdrm_fd > 0) {
+			close(fmm_ctx->drm_render_fds[index]);
+			fmm_ctx->drm_render_fds[index] = libdrm_fd;
+			fd = libdrm_fd;
+		} else {
+			pr_err("amdgpu_device_get_fd failed: %d\n", libdrm_fd);
+			hsakmt_amdgpu_device_deinitialize(*device_handle);
+			*device_handle = 0;
 		}
 	}
 
@@ -2491,7 +3112,12 @@ static void *reserve_address(void *addr, unsigned long long int len)
  */
 #define SVM_RESERVATION_LIMIT ((1ULL << 40) - 1)
 #define SVM_MIN_VM_SIZE (4ULL << 30)
-#define IS_CANONICAL_ADDR(a) ((a) < (1ULL << 47))
+
+/*
+ * Support up to 57bit VA, 56bit user space and 48bit VA, 47bit user space
+ */
+#define CANONICAL_ADDRESS_LIMIT	((1ULL << 56) - 1)
+#define IS_CANONICAL_ADDR(a)	((a) <= CANONICAL_ADDRESS_LIMIT)
 
 static HSAKMT_STATUS init_svm_apertures(struct hsa_kfd_fmm_context *fmm_ctx,
 					HSAuint64 base, HSAuint64 limit,
@@ -2660,7 +3286,7 @@ static void *map_mmio(HsaKFDContext *ctx,
 				uint32_t node_id, uint32_t gpu_id, int mmap_fd)
 {
 	void *mem;
-	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 	manageable_aperture_t *aperture = fmm_ctx->svm.dgpu_alt_aperture;
 	uint32_t ioc_flags;
 	vm_object_t *vm_obj = NULL;
@@ -2688,7 +3314,7 @@ static void *map_mmio(HsaKFDContext *ctx,
 	pthread_mutex_unlock(&aperture->fmm_mutex);
 
 	if (hsakmt_use_model) {
-		model_set_mmio_page(mem);
+		/* FFM handles MMIO internally */
 		return mem;
 	}
 
@@ -2714,7 +3340,7 @@ static void *map_mmio(HsaKFDContext *ctx,
 static void release_mmio(HsaKFDContext *ctx)
 {
 	uint32_t gpu_mem_id;
-	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 
 	for (gpu_mem_id = 0; gpu_mem_id < fmm_ctx->gpu_mem_count; gpu_mem_id++) {
 		if (!fmm_ctx->gpu_mem[gpu_mem_id].mmio_aperture.base)
@@ -2729,7 +3355,7 @@ HSAKMT_STATUS hsakmt_fmm_get_amdgpu_device_handle(HsaKFDContext *ctx,
 						uint32_t node_id,
 						HsaAMDGPUDeviceHandle *DeviceHandle)
 {
-	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 	int32_t i = gpu_mem_find_by_node_id(fmm_ctx, node_id);
 	int index;
 
@@ -2797,9 +3423,9 @@ static bool init_mem_handle_aperture(struct hsa_kfd_fmm_context *fmm_ctx, HSAuin
 					mem_handle_aper->base, mem_handle_aper->limit);
 			return true;
 		} else {
-			/* increase base by 1UL<<47 to check next hole */
-			mem_handle_aper->base =  VOID_PTR_ADD(mem_handle_aper->base, (1UL << 47));
-			mem_handle_aper->limit = VOID_PTR_ADD(mem_handle_aper->base, (1ULL << 47));
+			/* increase base by 1UL<<56 to check next hole */
+			mem_handle_aper->base =  VOID_PTR_ADD(mem_handle_aper->base, (1ULL << 56));
+			mem_handle_aper->limit = VOID_PTR_ADD(mem_handle_aper->base, (1ULL << 56));
 		}
 	}
 
@@ -2820,12 +3446,12 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 	struct kfd_process_device_apertures *process_apertures;
 	uint32_t num_of_sysfs_nodes;
 	HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
-	char *disableCache, *pagedUserptr, *checkUserptr, *guardPagesStr, *reserveSvm;
-	char *maxVaAlignStr, *mfmaHighPrecisionModeStr;
+	char *disableCache, *pagedUserptr, *pagedSvm, *checkUserptr, *guardPagesStr, *reserveSvm;
+	char *maxVaAlignStr, *mfmaHighPrecisionModeStr, *svmHostUnregisterStr;
 	unsigned int guardPages = 1;
 	uint64_t svm_base = 0, svm_limit = 0;
 	uint32_t svm_alignment = 0, mfma_high_precision_mode = 0;
-	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 
 	/* If HSA_DISABLE_CACHE is set to a non-0 value, disable caching */
 	disableCache = getenv("HSA_DISABLE_CACHE");
@@ -2837,7 +3463,13 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 	pagedUserptr = getenv("HSA_USERPTR_FOR_PAGED_MEM");
 	fmm_ctx->svm.userptr_for_paged_mem = (!pagedUserptr || strcmp(pagedUserptr, "0"));
 
-	if (hsakmt_use_model)
+	/* Back paged memory with SVM when userptr is off. GTT is capped well
+	 * below system memory, so keep it for NonPaged allocations only.
+	 */
+	pagedSvm = getenv("HSA_SVM_FOR_PAGED_MEM");
+	fmm_ctx->svm.svm_for_paged_mem = (!pagedSvm || strcmp(pagedSvm, "0"));
+
+	if (hsakmt_use_model || !ctx->hsakmt_is_primary_ctx)
 		fmm_ctx->svm.userptr_for_paged_mem = false;
 	/* If HSA_CHECK_USERPTR is set to a non-0 value, check all userptrs
 	 * when they are registered
@@ -2855,6 +3487,16 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 	guardPagesStr = getenv("HSA_SVM_GUARD_PAGES");
 	if (!guardPagesStr || sscanf(guardPagesStr, "%u", &guardPages) != 1)
 		guardPages = 1;
+
+	/*
+	 * DEBUG/TEMPORARY: the SVM host unregister is off unless
+	 * HSA_SVM_HOST_UNREGISTER_DEBUG is set to a non-0 value. Left off,
+	 * deregistering an SVM-API host range stays the no-op it has always
+	 * been and register only sets the coherency flags.
+	 */
+	svmHostUnregisterStr = getenv("HSA_SVM_HOST_UNREGISTER_DEBUG");
+	fmm_ctx->svm.svm_host_unregister =
+		(svmHostUnregisterStr && strcmp(svmHostUnregisterStr, "0"));
 
 	mfmaHighPrecisionModeStr = getenv("HSA_HIGH_PRECISION_MODE");
 	mfma_high_precision_mode = (mfmaHighPrecisionModeStr &&
@@ -2929,7 +3571,9 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 			gpu_mem[gpu_mem_count].local_mem_size = props.LocalMemSize;
 			gpu_mem[gpu_mem_count].device_id = props.DeviceId;
 			gpu_mem[gpu_mem_count].node_id = i;
-			hsakmt_is_svm_api_supported &= props.Capability.ui32.SVMAPISupported;
+			gpu_mem[gpu_mem_count].stall_on_retry_fault =
+				props.Capability2.ui32.StallOnRetryFault;
+			ctx->hsakmt_is_svm_api_supported &= props.Capability.ui32.SVMAPISupported;
 
 			gpu_mem[gpu_mem_count].scratch_physical.align = PAGE_SIZE;
 			gpu_mem[gpu_mem_count].scratch_physical.ops = &reserved_aperture_ops;
@@ -2940,6 +3584,13 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 			gpu_mem[gpu_mem_count].gpuvm_aperture.guard_pages = guardPages;
 			gpu_mem[gpu_mem_count].gpuvm_aperture.ops = &reserved_aperture_ops;
 			pthread_mutex_init(&gpu_mem[gpu_mem_count].gpuvm_aperture.fmm_mutex, NULL);
+
+			/* Create timeline syncobj for this GPU device */
+			gpu_mem[gpu_mem_count].drm_vm_timeline_syncobj = 0;
+			gpu_mem[gpu_mem_count].drm_vm_timeline_seqnum = 0;
+			if (drmSyncobjCreate(fd, 0, &gpu_mem[gpu_mem_count].drm_vm_timeline_syncobj))
+                pr_warn("Failed to create VM timeline syncobj for GPU 0x%x\n",
+                    props.KFDGpuID);
 
 			gpu_mem_count++;
 		}
@@ -3040,6 +3691,11 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 		gpu_mem[gpu_mem_id].scratch_aperture.limit =
 			PORT_UINT64_TO_VPTR(process_apertures[i].scratch_limit);
 
+		gpu_mem[gpu_mem_id].gpuvm_range.base =
+			PORT_UINT64_TO_VPTR(process_apertures[i].gpuvm_base);
+		gpu_mem[gpu_mem_id].gpuvm_range.limit =
+			PORT_UINT64_TO_VPTR(process_apertures[i].gpuvm_limit);
+
 		if (IS_CANONICAL_ADDR(process_apertures[i].gpuvm_limit)) {
 			uint64_t vm_alignment = get_vm_alignment(
 				gpu_mem[gpu_mem_id].device_id);
@@ -3125,7 +3781,7 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 	}
 
 	fmm_ctx->cpuvm_aperture.align = PAGE_SIZE;
-	fmm_ctx->cpuvm_aperture.limit = (void *)0x7FFFFFFFFFFF; /* 2^47 - 1 */
+	fmm_ctx->cpuvm_aperture.limit = (void *)CANONICAL_ADDRESS_LIMIT;
 
 	fmm_init_rbtree(fmm_ctx);
 
@@ -3166,9 +3822,26 @@ gpu_mem_init_failed:
 
 void hsakmt_fmm_destroy_process_apertures(HsaKFDContext *ctx)
 {
-	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
+	svm_api_range_t *r;
+	rbtree_node_t *n;
 
 	release_mmio(ctx);
+
+	/* Free any SVM-API ranges that were never explicitly deregistered.
+	 * The kernel reclaims the underlying SVM ranges on process teardown,
+	 * so we only release our bookkeeping here.
+	 */
+	pthread_mutex_lock(&fmm_ctx->svm_api_mutex);
+	while (fmm_ctx->svm_api_range_tree.root != &fmm_ctx->svm_api_range_tree.sentinel) {
+		n = rbtree_min(fmm_ctx->svm_api_range_tree.root,
+			       &fmm_ctx->svm_api_range_tree.sentinel);
+		r = rb_entry(n, svm_api_range_t, node);
+		hsakmt_rbtree_delete(&fmm_ctx->svm_api_range_tree, n);
+		free(r);
+	}
+	fmm_ctx->svm_api_max_extent = 0;
+	pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
 
 	if (fmm_ctx->all_gpu_id_array) {
 		free(fmm_ctx->all_gpu_id_array);
@@ -3177,8 +3850,15 @@ void hsakmt_fmm_destroy_process_apertures(HsaKFDContext *ctx)
 	fmm_ctx->all_gpu_id_array_size = 0;
 
 	if (fmm_ctx->gpu_mem) {
-		while (fmm_ctx->gpu_mem_count-- > 0)
+		while (fmm_ctx->gpu_mem_count-- > 0) {
+			/* Destroy timeline syncobj for this GPU */
+			if (fmm_ctx->gpu_mem[fmm_ctx->gpu_mem_count].drm_vm_timeline_syncobj)
+                drmSyncobjDestroy(
+                    fmm_ctx->gpu_mem[fmm_ctx->gpu_mem_count].drm_render_fd,
+                    fmm_ctx->gpu_mem[fmm_ctx->gpu_mem_count].drm_vm_timeline_syncobj);
+
 			free(fmm_ctx->gpu_mem[fmm_ctx->gpu_mem_count].usable_peer_id_array);
+		}
 		free(fmm_ctx->gpu_mem);
 		fmm_ctx->gpu_mem = NULL;
 		fmm_ctx->first_gpu_mem = NULL;
@@ -3186,12 +3866,46 @@ void hsakmt_fmm_destroy_process_apertures(HsaKFDContext *ctx)
 	fmm_ctx->gpu_mem_count = 0;
 }
 
+HSAKMT_STATUS hsakmt_fmm_advance_vm_timeline(HsaKFDContext *ctx,
+			HSAuint32 node_id, int *drm_render_fd,
+			uint32_t *vm_timeline_syncobj, uint64_t *vm_timeline_point)
+{
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
+	int32_t index = gpu_mem_find_by_node_id(fmm_ctx, node_id);
+
+	if (index < 0)
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+
+	if (drm_render_fd)
+		*drm_render_fd = fmm_ctx->gpu_mem[index].drm_render_fd;
+	if (vm_timeline_syncobj)
+		*vm_timeline_syncobj = fmm_ctx->gpu_mem[index].drm_vm_timeline_syncobj;
+	
+	if (vm_timeline_point)
+		*vm_timeline_point = __atomic_add_fetch(
+			&fmm_ctx->gpu_mem[index].drm_vm_timeline_seqnum, 1,
+			__ATOMIC_SEQ_CST);
+
+	return HSAKMT_STATUS_SUCCESS;
+}
+
+int hsakmt_fmm_get_drm_render_fd(HsaKFDContext *ctx, HSAuint32 node_id)
+{
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
+	int32_t index = gpu_mem_find_by_node_id(fmm_ctx, node_id);
+
+	if (index < 0)
+		return -1;
+
+	return fmm_ctx->gpu_mem[index].drm_render_fd;
+}
+
 HSAKMT_STATUS hsakmt_fmm_get_aperture_base_and_limit(HsaKFDContext *ctx,
 			aperture_type_e aperture_type, HSAuint32 gpu_id,
 			HSAuint64 *aperture_base, HSAuint64 *aperture_limit)
 {
 	HSAKMT_STATUS err = HSAKMT_STATUS_ERROR;
-	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 	int32_t slot = gpu_mem_find_by_gpu_id(fmm_ctx, gpu_id);
 
 	if (slot < 0)
@@ -3199,10 +3913,10 @@ HSAKMT_STATUS hsakmt_fmm_get_aperture_base_and_limit(HsaKFDContext *ctx,
 
 	switch (aperture_type) {
 	case FMM_GPUVM:
-		if (aperture_is_valid(fmm_ctx->gpu_mem[slot].gpuvm_aperture.base,
-			fmm_ctx->gpu_mem[slot].gpuvm_aperture.limit)) {
-			*aperture_base = PORT_VPTR_TO_UINT64(fmm_ctx->gpu_mem[slot].gpuvm_aperture.base);
-			*aperture_limit = PORT_VPTR_TO_UINT64(fmm_ctx->gpu_mem[slot].gpuvm_aperture.limit);
+		if (aperture_is_valid(fmm_ctx->gpu_mem[slot].gpuvm_range.base,
+			fmm_ctx->gpu_mem[slot].gpuvm_range.limit)) {
+			*aperture_base = PORT_VPTR_TO_UINT64(fmm_ctx->gpu_mem[slot].gpuvm_range.base);
+			*aperture_limit = PORT_VPTR_TO_UINT64(fmm_ctx->gpu_mem[slot].gpuvm_range.limit);
 			err = HSAKMT_STATUS_SUCCESS;
 		}
 		break;
@@ -3333,7 +4047,7 @@ static HSAKMT_STATUS _fmm_map_to_gpu(HsaKFDContext *ctx,
 	HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
 	int ret_ioctl;
 	uint32_t i;
-	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 
 	if (!obj)
 		pthread_mutex_lock(&aperture->fmm_mutex);
@@ -3434,7 +4148,7 @@ static HSAKMT_STATUS _fmm_map_to_gpu_scratch(HsaKFDContext *ctx,
 	void *mmap_ret = NULL;
 	uint64_t mmap_offset = 0;
 	vm_object_t *obj;
-	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 
 	/* Retrieve gpu_mem id according to gpu_id */
 	gpu_mem_id = gpu_mem_find_by_gpu_id(fmm_ctx, gpu_id);
@@ -3485,14 +4199,14 @@ static HSAKMT_STATUS _fmm_map_to_gpu_userptr(HsaKFDContext *ctx,
 	void *svm_addr;
 	HSAuint32 page_offset = (HSAuint64)addr & (PAGE_SIZE-1);
 	HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
-	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 
 	aperture = fmm_ctx->svm.dgpu_aperture;
 
 	/* Map and return the GPUVM address adjusted by the offset
 	 * from the start of the page
 	 */
-	if (!object && hsakmt_is_svm_api_supported) {
+	if ((!object || object->is_svm_paged) && ctx->hsakmt_is_svm_api_supported) {
 		svm_addr = (void*)((HSAuint64)addr - page_offset);
 		if (!nodes_to_map) {
 			nodes_to_map = fmm_ctx->all_gpu_id_array;
@@ -3500,10 +4214,26 @@ static HSAKMT_STATUS _fmm_map_to_gpu_userptr(HsaKFDContext *ctx,
 		}
 		pr_debug("%s Mapping Address %p size aligned: %ld offset: %x\n",
 			__func__, svm_addr, PAGE_ALIGN_UP(page_offset + size), page_offset);
-		ret = fmm_map_mem_svm_api(ctx, svm_addr,
+		if (fmm_ctx->svm.svm_host_unregister) {
+			/* This grant is what a concurrent deregister's NO_ACCESS
+			 * races with, so the two are serialized on svm_api_mutex
+			 * and the GPUs granted here are recorded for the revoke.
+			 */
+			pthread_mutex_lock(&fmm_ctx->svm_api_mutex);
+			ret = fmm_map_mem_svm_api(ctx, svm_addr,
 						  PAGE_ALIGN_UP(page_offset + size),
 						  nodes_to_map,
 						  nodes_array_size / sizeof(uint32_t));
+			if (ret == HSAKMT_STATUS_SUCCESS)
+				svm_api_range_add_gpus_locked(fmm_ctx, addr, nodes_to_map,
+							      nodes_array_size / sizeof(uint32_t));
+			pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
+		} else {
+			ret = fmm_map_mem_svm_api(ctx, svm_addr,
+						  PAGE_ALIGN_UP(page_offset + size),
+						  nodes_to_map,
+						  nodes_array_size / sizeof(uint32_t));
+		}
 
 	} else if (object) {
 		svm_addr = object->start;
@@ -3525,7 +4255,7 @@ HSAKMT_STATUS hsakmt_fmm_map_to_gpu(HsaKFDContext *ctx,
 	vm_object_t *object;
 	HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
 	gpu_mem_t *gpu_mem_ptr = NULL;
-	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 
 	/* Special handling for scratch memory */
 	gpu_mem_ptr = fmm_is_scratch_aperture(fmm_ctx, address);
@@ -3536,7 +4266,7 @@ HSAKMT_STATUS hsakmt_fmm_map_to_gpu(HsaKFDContext *ctx,
 	}
 
 	object = vm_find_object(fmm_ctx, address, size, &aperture);
-	if (!object && !hsakmt_is_svm_api_supported) {
+	if (!object && !ctx->hsakmt_is_svm_api_supported) {
 		if (!hsakmt_is_dgpu) {
 			/* Prefetch memory on APUs with dummy-reads */
 			fmm_check_user_memory(address, size);
@@ -3548,7 +4278,7 @@ HSAKMT_STATUS hsakmt_fmm_map_to_gpu(HsaKFDContext *ctx,
 	/* Successful vm_find_object returns with the aperture locked */
 
 	/* allocate VA only */
-	if (object && object->handles[0] == 0) {
+	if (object && object->handles[0] == 0 && !object->is_svm_paged) {
 		pthread_mutex_unlock(&aperture->fmm_mutex);
 		return HSAKMT_STATUS_INVALID_PARAMETER;
 	}
@@ -3563,7 +4293,8 @@ HSAKMT_STATUS hsakmt_fmm_map_to_gpu(HsaKFDContext *ctx,
 		/* Prefetch memory on APUs with dummy-reads */
 		fmm_check_user_memory(address, size);
 		ret = HSAKMT_STATUS_SUCCESS;
-	} else if ((hsakmt_is_svm_api_supported && !object) || (object && (object->userptr))) {
+	} else if ((ctx->hsakmt_is_svm_api_supported && !object) ||
+		   (object && (object->userptr || object->is_svm_paged))) {
 		ret = _fmm_map_to_gpu_userptr(ctx, address, size, gpuvm_address, object, NULL, 0);
 	} else if (aperture) {
 		ret = _fmm_map_to_gpu(ctx, aperture, address, size, object, NULL, 0);
@@ -3675,7 +4406,7 @@ static int _fmm_unmap_from_gpu_scratch(HsaKFDContext *ctx,
 	vm_object_t *object;
 	struct kfd_ioctl_unmap_memory_from_gpu_args args = {0};
 	int ret;
-	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 
 	/* Retrieve gpu_mem id according to gpu_id */
 	gpu_mem_id = gpu_mem_find_by_gpu_id(fmm_ctx, gpu_id);
@@ -3739,7 +4470,7 @@ int hsakmt_fmm_unmap_from_gpu(HsaKFDContext *ctx, void *address)
 	vm_object_t *object;
 	int ret;
 	gpu_mem_t *gpu_mem_ptr = NULL;
-	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 
 	/* Special handling for scratch memory */
 	gpu_mem_ptr = fmm_is_scratch_aperture(fmm_ctx, address);
@@ -3753,12 +4484,17 @@ int hsakmt_fmm_unmap_from_gpu(HsaKFDContext *ctx, void *address)
 	object = vm_find_object(fmm_ctx, address, 0, &aperture);
 	if (!object)
 		/* On APUs GPU unmapping of system memory is a no-op */
-		return (!hsakmt_is_dgpu || hsakmt_is_svm_api_supported) ? 0 : -EINVAL;
+		return (!hsakmt_is_dgpu || ctx->hsakmt_is_svm_api_supported) ? 0 : -EINVAL;
 	/* Successful vm_find_object returns with the aperture locked */
 
 	if (aperture == &fmm_ctx->cpuvm_aperture)
 		/* On APUs GPU unmapping of system memory is a no-op */
 		ret = 0;
+	else if (object->is_svm_paged)
+		ret = fmm_unmap_mem_svm_api(ctx, object->start, object->size,
+					    fmm_ctx->all_gpu_id_array,
+					    fmm_ctx->all_gpu_id_array_size / sizeof(uint32_t))
+			== HSAKMT_STATUS_SUCCESS ? 0 : -EINVAL;
 	else
 		ret = _fmm_unmap_from_gpu(ctx, aperture, address, NULL, 0, object);
 
@@ -3784,7 +4520,7 @@ bool hsakmt_fmm_get_handle(HsaKFDContext *ctx,
 	manageable_aperture_t *aperture = NULL;
 	vm_object_t *object;
 	bool found = false;
-	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 
 	/* Find the aperture the requested address belongs to */
 	for (i = 0; i < fmm_ctx->gpu_mem_count; i++) {
@@ -3851,7 +4587,7 @@ static HSAKMT_STATUS fmm_register_user_memory(HsaKFDContext *ctx,
 	void *svm_addr;
 	HSAuint32 gpu_id;
 	vm_object_t *obj, *exist_obj;
-	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 	manageable_aperture_t *aperture = fmm_ctx->svm.dgpu_aperture;
 	/* Find first GPU for creating the userptr BO */
 	if (!fmm_ctx->first_gpu_mem)
@@ -3914,7 +4650,7 @@ HSAKMT_STATUS hsakmt_fmm_register_memory(HsaKFDContext *ctx,
 	manageable_aperture_t *aperture = NULL;
 	vm_object_t *object = NULL;
 	HSAKMT_STATUS ret;
-	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 
 	if (gpu_id_array_size > 0 && !gpu_id_array)
 		return HSAKMT_STATUS_INVALID_PARAMETER;
@@ -3929,7 +4665,7 @@ HSAKMT_STATUS hsakmt_fmm_register_memory(HsaKFDContext *ctx,
 			return HSAKMT_STATUS_SUCCESS;
 
 		/* Register a new user ptr */
-		if (hsakmt_is_svm_api_supported) {
+		if (ctx->hsakmt_is_svm_api_supported) {
 			ret = fmm_register_mem_svm_api(ctx, address, size_in_bytes, flags);
 			if (ret == HSAKMT_STATUS_SUCCESS)
 				return ret;
@@ -4009,7 +4745,7 @@ HSAKMT_STATUS hsakmt_fmm_register_graphics_handle(HsaKFDContext *ctx,
 	int r;
 	HSAKMT_STATUS status = HSAKMT_STATUS_ERROR;
 	static const uint64_t IMAGE_ALIGN = 256*1024;
-	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 
 	if (gpu_id_array_size > 0 && !gpu_id_array)
 		return HSAKMT_STATUS_INVALID_PARAMETER;
@@ -4121,7 +4857,7 @@ HSAKMT_STATUS hsakmt_fmm_export_dma_buf_fd(HsaKFDContext *ctx,
 	vm_object_t *obj;
 	HSAuint64 offset;
 	int r;
-	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 
 	aperture = fmm_find_aperture(fmm_ctx, MemoryAddress, &ApeInfo);
 	if (!aperture)
@@ -4166,7 +4902,7 @@ HSAKMT_STATUS hsakmt_fmm_share_memory(HsaKFDContext *ctx,
 	HsaApertureInfo ApeInfo;
 	HsaSharedMemoryStruct *SharedMemoryStruct =
 		to_hsa_shared_memory_struct(SharedMemoryHandle);
-	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 
 	if (SizeInBytes >= (1ULL << ((sizeof(HSAuint32) * 8) + PAGE_SHIFT)))
 		return HSAKMT_STATUS_INVALID_PARAMETER;
@@ -4227,8 +4963,16 @@ HSAKMT_STATUS hsakmt_fmm_register_shared_memory(HsaKFDContext *ctx,
 	const HsaSharedMemoryStruct *SharedMemoryStruct =
 		to_const_hsa_shared_memory_struct(SharedMemoryHandle);
 	HSAuint64 SizeInPages = SharedMemoryStruct->SizeInPages;
+	HSAuint64 SizeInBytesCalc;
 	HsaMemFlags mflags;
-	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
+
+	SizeInBytesCalc = SizeInPages << PAGE_SHIFT;
+
+	if (SizeInPages == 0) {
+		pr_err("IPC import: size cannot be zero\n");
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+	}
 
 	if (gpu_id_array_size > 0 && !gpu_id_array)
 		return HSAKMT_STATUS_INVALID_PARAMETER;
@@ -4240,6 +4984,14 @@ HSAKMT_STATUS hsakmt_fmm_register_shared_memory(HsaKFDContext *ctx,
 	aperture = fmm_get_aperture(fmm_ctx, SharedMemoryStruct->ApeInfo);
 	if (!aperture)
 		return HSAKMT_STATUS_INVALID_PARAMETER;
+
+	HSAuint64 aperture_size = VOID_PTRS_SUB(aperture->limit, aperture->base) + 1;
+	if (SizeInBytesCalc > aperture_size) {
+		pr_err("IPC import: size 0x%llx exceeds aperture range 0x%llx\n",
+				(unsigned long long)SizeInBytesCalc,
+		(unsigned long long)aperture_size);
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+	}
 
 	pthread_mutex_lock(&aperture->fmm_mutex);
 	reservedMem = aperture_allocate_area(aperture, NULL,
@@ -4320,16 +5072,50 @@ HSAKMT_STATUS hsakmt_fmm_deregister_memory(HsaKFDContext *ctx, void *address)
 {
 	manageable_aperture_t *aperture;
 	vm_object_t *object;
-	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 
 	object = vm_find_object(fmm_ctx, address, 0, &aperture);
-	if (!object)
+	if (!object) {
+		/* No vm_object: either a random system memory address (APU
+		 * no-op) or a host range registered via the SVM API, which
+		 * does not create a vm_object. For the latter, drop a
+		 * reference and, when the last one is gone, issue the inverse
+		 * SET_ATTR to revoke GPU access.
+		 */
+		if (ctx->hsakmt_is_svm_api_supported) {
+			struct svm_revoke_range *rr = NULL;
+			uint64_t gpu_mask;
+			bool gpu_all;
+			int nr, i;
+
+			if (!fmm_ctx->svm.svm_host_unregister)
+				return HSAKMT_STATUS_SUCCESS;
+
+			/* Revoke only the sub-ranges no surviving registration
+			 * still covers, and within those only the GPUs this
+			 * range was mapped to. svm_api_mutex is held across the
+			 * ioctls so a concurrent map cannot land a grant
+			 * between the refcount reaching zero and the NO_ACCESS
+			 * below.
+			 */
+			pthread_mutex_lock(&fmm_ctx->svm_api_mutex);
+			nr = svm_api_range_put_locked(fmm_ctx, address, &rr,
+						      &gpu_mask, &gpu_all);
+			for (i = 0; i < nr; i++)
+				fmm_unregister_mem_svm_api(ctx, rr[i].addr,
+							   rr[i].size,
+							   gpu_mask, gpu_all);
+			pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
+			free(rr);
+			return HSAKMT_STATUS_SUCCESS;
+		}
 		/* On APUs we assume it's a random system memory address
 		 * where registration and dergistration is a no-op
 		 */
-		return (!hsakmt_is_dgpu || hsakmt_is_svm_api_supported) ?
+		return !hsakmt_is_dgpu ?
 			HSAKMT_STATUS_SUCCESS :
 			HSAKMT_STATUS_MEMORY_NOT_REGISTERED;
+	}
 	/* Successful vm_find_object returns with aperture locked */
 
 	if (aperture == &fmm_ctx->cpuvm_aperture) {
@@ -4387,18 +5173,18 @@ HSAKMT_STATUS hsakmt_fmm_map_to_gpu_nodes(HsaKFDContext *ctx,
 	uint32_t *registered_node_id_array, registered_node_id_array_size;
 	HSAKMT_STATUS ret;
 	int retcode = 0;
-	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 
 	if (!num_of_nodes || !nodes_to_map || !address)
 		return HSAKMT_STATUS_INVALID_PARAMETER;
 
 	object = vm_find_object(fmm_ctx, address, size, &aperture);
-	if (!object && !hsakmt_is_svm_api_supported)
+	if (!object && !ctx->hsakmt_is_svm_api_supported)
 		return HSAKMT_STATUS_ERROR;
 	/* Successful vm_find_object returns with aperture locked */
 
 	/* allocates VA only */
-	if (object && object->handles[0] == 0) {
+	if (object && object->handles[0] == 0 && !object->is_svm_paged) {
 		pthread_mutex_unlock(&aperture->fmm_mutex);
 		return HSAKMT_STATUS_INVALID_PARAMETER;
 	}
@@ -4416,7 +5202,8 @@ HSAKMT_STATUS hsakmt_fmm_map_to_gpu_nodes(HsaKFDContext *ctx,
 		return HSAKMT_STATUS_ERROR;
 	}
 
-	if ((hsakmt_is_svm_api_supported && !object) || object->userptr) {
+	if ((ctx->hsakmt_is_svm_api_supported && !object) ||
+	    object->userptr || object->is_svm_paged) {
 		retcode = _fmm_map_to_gpu_userptr(ctx, address, size, gpuvm_address,
 				object, nodes_to_map, num_of_nodes * sizeof(uint32_t));
 		if (object)
@@ -4500,7 +5287,7 @@ HSAKMT_STATUS hsakmt_fmm_get_mem_info(HsaKFDContext *ctx,
 	uint32_t i;
 	manageable_aperture_t *aperture;
 	vm_object_t *vm_obj;
-	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 
 	memset(info, 0, sizeof(HsaPointerInfo));
 
@@ -4585,7 +5372,7 @@ HSAKMT_STATUS hsakmt_fmm_replace_asan_header_page(HsaKFDContext *ctx, void* addr
 	HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
 	manageable_aperture_t* aperture;
 	vm_object_t* vm_obj;
-	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 
 	vm_obj = vm_find_object(fmm_ctx, address, UINT64_MAX, &aperture);
 	if (!vm_obj)
@@ -4613,7 +5400,7 @@ HSAKMT_STATUS hsakmt_fmm_return_asan_header_page(HsaKFDContext *ctx, void* addre
 	HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
 	manageable_aperture_t* aperture;
 	vm_object_t* vm_obj;
-	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 
 	vm_obj = vm_find_object(fmm_ctx, address, UINT64_MAX, &aperture);
 	if (!vm_obj)
@@ -4644,7 +5431,7 @@ HSAKMT_STATUS hsakmt_fmm_set_mem_user_data(HsaKFDContext *ctx,
 {
 	manageable_aperture_t *aperture;
 	vm_object_t *vm_obj;
-	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 
 	vm_obj = vm_find_object(fmm_ctx, mem, 0, &aperture);
 	if (!vm_obj)
@@ -4680,12 +5467,12 @@ void hsakmt_fmm_clear_all_mem(HsaKFDContext *ctx)
 {
 	uint32_t i;
 	
-	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 	/* Close render node FDs. The child process needs to open new ones */
 	for (i = 0; i <= DRM_LAST_RENDER_NODE - DRM_FIRST_RENDER_NODE; i++) {
 
 		if (fmm_ctx->amdgpu_handle[i]) {
-			amdgpu_device_deinitialize(fmm_ctx->amdgpu_handle[i]);
+			hsakmt_amdgpu_device_deinitialize(fmm_ctx->amdgpu_handle[i]);
 			fmm_ctx->amdgpu_handle[i] = NULL;
 		} else if (fmm_ctx->drm_render_fds[i]) {
 			close(fmm_ctx->drm_render_fds[i]);
@@ -4701,7 +5488,7 @@ void hsakmt_fmm_clear_all_aperture(HsaKFDContext *ctx)
 	uint32_t i;
 	void *map_addr;
 	
-	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 
 	fmm_clear_aperture(&fmm_ctx->mem_handle_aperture);
 	fmm_clear_aperture(&fmm_ctx->cpuvm_aperture);
@@ -4709,22 +5496,35 @@ void hsakmt_fmm_clear_all_aperture(HsaKFDContext *ctx)
 	fmm_clear_aperture(&fmm_ctx->svm.apertures[SVM_COHERENT]);
 
 	if (fmm_ctx->dgpu_shared_aperture_limit) {
-		/* Use the same dgpu range as the parent. If failed, then set
-		 * hsakmt_is_dgpu_mem_init to false. Later on dgpu_mem_init will try
-		 * to get a new range
-		 */
-		map_addr = mmap(fmm_ctx->dgpu_shared_aperture_base,
-			(HSAuint64)(fmm_ctx->dgpu_shared_aperture_limit)-
-			(HSAuint64)(fmm_ctx->dgpu_shared_aperture_base) + 1, PROT_NONE,
-			MAP_ANONYMOUS | MAP_NORESERVE | MAP_PRIVATE | MAP_FIXED, -1, 0);
+		HSAuint64 dgpu_size =
+			(HSAuint64)(fmm_ctx->dgpu_shared_aperture_limit) -
+			(HSAuint64)(fmm_ctx->dgpu_shared_aperture_base) + 1;
 
-		if (map_addr == MAP_FAILED) {
-			munmap(fmm_ctx->dgpu_shared_aperture_base,
-				   (HSAuint64)(fmm_ctx->dgpu_shared_aperture_limit) -
-				   (HSAuint64)(fmm_ctx->dgpu_shared_aperture_base) + 1);
-
+		if (hsakmt_use_model) {
+			/* In model mode, hsaKmtCloseKFDCtx frees the fmm context
+			 * after this call, so the "remap-and-keep" path used for
+			 * fork() inheritance would leak the SVM reservation and
+			 * make the next hsa_init in the same process fail to
+			 * reserve SVM address space. Release it instead.
+			 */
+			munmap(fmm_ctx->dgpu_shared_aperture_base, dgpu_size);
 			fmm_ctx->dgpu_shared_aperture_base = NULL;
 			fmm_ctx->dgpu_shared_aperture_limit = NULL;
+		} else {
+			/* Use the same dgpu range as the parent. If failed, then set
+			 * hsakmt_is_dgpu_mem_init to false. Later on dgpu_mem_init will try
+			 * to get a new range
+			 */
+			map_addr = mmap(fmm_ctx->dgpu_shared_aperture_base,
+				dgpu_size, PROT_NONE,
+				MAP_ANONYMOUS | MAP_NORESERVE | MAP_PRIVATE | MAP_FIXED, -1, 0);
+
+			if (map_addr == MAP_FAILED) {
+				munmap(fmm_ctx->dgpu_shared_aperture_base, dgpu_size);
+
+				fmm_ctx->dgpu_shared_aperture_base = NULL;
+				fmm_ctx->dgpu_shared_aperture_limit = NULL;
+			}
 		}
 	}
 

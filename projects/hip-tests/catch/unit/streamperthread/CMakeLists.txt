@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
 # Common Tests - Test independent of all platforms
 set(TEST_SRC
   hipStreamPerThread_Basic.cc
@@ -9,16 +13,11 @@ set(TEST_SRC
 )
 
 if(HIP_PLATFORM MATCHES "amd")
-   set(TEST_SRC ${TEST_SRC}
+  set(TEST_SRC ${TEST_SRC}
        hipGetProcAddressSptApis.cc)
-endif()
-
-if(HIP_PLATFORM MATCHES "amd")
-        set_source_files_properties(hipStreamPerThrdCompilerOptn.cc PROPERTIES COMPILE_OPTIONS "-fgpu-default-stream=per-thread")
-endif()
-
-if(HIP_PLATFORM MATCHES "nvidia")
-        set_source_files_properties(hipStreamPerThrdCompilerOptn.cc PROPERTIES COMPILE_OPTIONS "--default-stream=per-thread")
+  set_source_files_properties(hipStreamPerThrdCompilerOptn.cc PROPERTIES COMPILE_OPTIONS "-fgpu-default-stream=per-thread")
+else()
+  set_source_files_properties(hipStreamPerThrdCompilerOptn.cc PROPERTIES COMPILE_OPTIONS "--default-stream=per-thread")
 endif()
 
 hip_add_exe_to_target(NAME StreamPerThreadTest

@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
 Testcase Scenarios :
@@ -229,7 +216,7 @@ static void hipGraphClone_Test_hipGraphKernelNodeSetParams() {
   HIP_CHECK(hipGraphDestroy(clonedGraph));
 }
 
-TEST_CASE("Unit_hipGraphClone_Test_hipGraphKernelNodeSetParams") {
+HIP_TEST_CASE(Unit_hipGraphClone_Test_hipGraphKernelNodeSetParams) {
   hipGraphClone_Test_hipGraphKernelNodeSetParams();
 }
 
@@ -276,7 +263,7 @@ static void hipGraphClone_Test_hipGraphExecKernelNodeSetParams() {
   HIP_CHECK(hipGraphDestroy(clonedGraph));
 }
 
-TEST_CASE("Unit_hipGraphClone_Test_hipGraphExecKernelNodeSetParams") {
+HIP_TEST_CASE(Unit_hipGraphClone_Test_hipGraphExecKernelNodeSetParams) {
   hipGraphClone_Test_hipGraphExecKernelNodeSetParams();
 }
 
@@ -339,7 +326,7 @@ static void hipGraphClone_Test_hipGraphAddMemcpy_and_memset() {
   HIP_CHECK(hipGraphDestroy(clonedGraph));
 }
 
-TEST_CASE("Unit_hipGraphClone_Test_hipGraphAddMemcpy_and_memset") {
+HIP_TEST_CASE(Unit_hipGraphClone_Test_hipGraphAddMemcpy_and_memset) {
   hipGraphClone_Test_hipGraphAddMemcpy_and_memset();
 }
 
@@ -449,7 +436,7 @@ static void hipGraphClone_Test_hipGraphMemcpyNodeSetParams() {
   HipTest::freeArrays<int>(nullptr, nullptr, nullptr, hData, hDataTemp, hOutputData, false);
 }
 
-TEST_CASE("Unit_hipGraphClone_Test_hipGraphMemcpyNodeSetParams") {
+HIP_TEST_CASE(Unit_hipGraphClone_Test_hipGraphMemcpyNodeSetParams) {
   CHECK_IMAGE_SUPPORT
 
   hipGraphClone_Test_hipGraphMemcpyNodeSetParams();
@@ -564,7 +551,7 @@ static void hipGraphClone_Test_hipGraphExecMemcpyNodeSetParams() {
   HIP_CHECK(hipFreeArray(devArray3));
 }
 
-TEST_CASE("Unit_hipGraphClone_Test_hipGraphExecMemcpyNodeSetParams") {
+HIP_TEST_CASE(Unit_hipGraphClone_Test_hipGraphExecMemcpyNodeSetParams) {
   CHECK_IMAGE_SUPPORT
 
   hipGraphClone_Test_hipGraphExecMemcpyNodeSetParams();
@@ -645,7 +632,7 @@ static void hipGraphClone_Test_hipGraphMemcpyNodeSetParams1D_and_exec() {
   HIP_CHECK(hipGraphDestroy(clonedGraph_2));
 }
 
-TEST_CASE("Unit_hipGraphClone_Test_hipGraphMemcpyNodeSetParams1D_and_exec") {
+HIP_TEST_CASE(Unit_hipGraphClone_Test_hipGraphMemcpyNodeSetParams1D_and_exec) {
   hipGraphClone_Test_hipGraphMemcpyNodeSetParams1D_and_exec();
 }
 
@@ -739,7 +726,7 @@ static void hipGraphClone_hipGraphMemcpyNodeSetParamsFromSymbol_exec() {
   HIP_CHECK(hipGraphDestroy(clonedGraph_2));
 }
 
-TEST_CASE("Unit_hipGraphClone_hipGraphMemcpyNodeSetParamsFromSymbol_exec") {
+HIP_TEST_CASE(Unit_hipGraphClone_hipGraphMemcpyNodeSetParamsFromSymbol_exec) {
   hipGraphClone_hipGraphMemcpyNodeSetParamsFromSymbol_exec();
 }
 
@@ -832,7 +819,7 @@ static void hipGraphClone_hipGraphMemcpyNodeSetParamsToSymbol_exec() {
   HIP_CHECK(hipGraphDestroy(clonedGraph_2));
 }
 
-TEST_CASE("Unit_hipGraphClone_hipGraphMemcpyNodeSetParamsToSymbol_exec") {
+HIP_TEST_CASE(Unit_hipGraphClone_hipGraphMemcpyNodeSetParamsToSymbol_exec) {
   hipGraphClone_hipGraphMemcpyNodeSetParamsToSymbol_exec();
 }
 
@@ -944,7 +931,7 @@ static void hipGraphClone_Test_hipGraphMemsetNodeSetParams_exec() {
   HIP_CHECK(hipGraphDestroy(clonedGraph_2));
 }
 
-TEST_CASE("Unit_hipGraphClone_Test_hipGraphMemsetNodeSetParams_exec") {
+HIP_TEST_CASE(Unit_hipGraphClone_Test_hipGraphMemsetNodeSetParams_exec) {
   hipGraphClone_Test_hipGraphMemsetNodeSetParams_exec();
 }
 
@@ -1013,7 +1000,7 @@ static void hipGraphClone_Test_hipGraphRemoveDependencies() {
   HIP_CHECK(hipGraphDestroy(clonedGraph));
 }
 
-TEST_CASE("Unit_hipGraphClone_Test_hipGraphRemoveDependencies") {
+HIP_TEST_CASE(Unit_hipGraphClone_Test_hipGraphRemoveDependencies) {
   hipGraphClone_Test_hipGraphRemoveDependencies();
 }
 #endif
@@ -1112,7 +1099,7 @@ static void hipGraphClone_Test_hipGraphExecChildGraphNodeSetParams() {
   HIP_CHECK(hipGraphDestroy(childgraph2));
 }
 
-TEST_CASE("Unit_hipGraphClone_Test_hipGraphExecChildGraphNodeSetParams") {
+HIP_TEST_CASE(Unit_hipGraphClone_Test_hipGraphExecChildGraphNodeSetParams) {
   hipGraphClone_Test_hipGraphExecChildGraphNodeSetParams();
 }
 
@@ -1306,7 +1293,7 @@ static void hipGraphClone_Test_hipGraphEventRecordNodeSetEvent_and_Exec() {
   HIP_CHECK(hipEventDestroy(event_end));
 }
 
-TEST_CASE("Unit_hipGraphClone_Test_hipGraphEventRecordNodeSetEvent_and_Exec") {
+HIP_TEST_CASE(Unit_hipGraphClone_Test_hipGraphEventRecordNodeSetEvent_and_Exec) {
   hipGraphClone_Test_hipGraphEventRecordNodeSetEvent_and_Exec();
 }
 
@@ -1480,7 +1467,7 @@ static void hipGraphClone_Test_hipGraphEventWaitNodeSetEvent_and_Exec() {
   HIP_CHECK(hipEventDestroy(event_1));
 }
 
-TEST_CASE("Unit_hipGraphClone_Test_hipGraphEventWaitNodeSetEvent_and_Exec") {
+HIP_TEST_CASE(Unit_hipGraphClone_Test_hipGraphEventWaitNodeSetEvent_and_Exec) {
   hipGraphClone_Test_hipGraphEventWaitNodeSetEvent_and_Exec();
 }
 
@@ -1490,7 +1477,7 @@ TEST_CASE("Unit_hipGraphClone_Test_hipGraphEventWaitNodeSetEvent_and_Exec") {
  Execute both original graph and cloned graph in loop: with multiple device.
  Loop: Update input data -> Launch Graph -> Validate output data -> Goto Loop */
 
-TEST_CASE("Unit_hipGraphClone_address_change_in_loop", "[multigpu]") {
+HIP_TEST_CASE(Unit_hipGraphClone_address_change_in_loop) {
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
   constexpr auto threadsPerBlock = 256;
@@ -1587,7 +1574,7 @@ static void hipGraphClone_address_change_in_thread(hipGraph_t* graph, hipGraphNo
                                                    hipGraphNode_t* memcpyH2D_B,
                                                    hipGraphNode_t* memcpyD2H_C,
                                                    hipGraphNode_t* kVecAdd, int dev) {
-  HIP_CHECK(hipSetDevice(dev));
+  HIP_CHECK_THREAD(hipSetDevice(dev));
 
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
@@ -1603,16 +1590,16 @@ static void hipGraphClone_address_change_in_thread(hipGraph_t* graph, hipGraphNo
   HipTest::initArrays(&D_d, &E_d, &F_d, &D_h, &E_h, &F_h, N, false);
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
 
-  HIP_CHECK(hipStreamCreate(&stream));
-  HIP_CHECK(hipGraphClone(&graph_C, *graph));
-  HIP_CHECK(hipGraphNodeFindInClone(&memcpyH2D_AC, *memcpyH2D_A, graph_C));
-  HIP_CHECK(hipGraphNodeFindInClone(&memcpyH2D_BC, *memcpyH2D_B, graph_C));
-  HIP_CHECK(hipGraphNodeFindInClone(&memcpyD2H_CC, *memcpyD2H_C, graph_C));
-  HIP_CHECK(hipGraphNodeFindInClone(&kVecAddC, *kVecAdd, graph_C));
+  HIP_CHECK_THREAD(hipStreamCreate(&stream));
+  HIP_CHECK_THREAD(hipGraphClone(&graph_C, *graph));
+  HIP_CHECK_THREAD(hipGraphNodeFindInClone(&memcpyH2D_AC, *memcpyH2D_A, graph_C));
+  HIP_CHECK_THREAD(hipGraphNodeFindInClone(&memcpyH2D_BC, *memcpyH2D_B, graph_C));
+  HIP_CHECK_THREAD(hipGraphNodeFindInClone(&memcpyD2H_CC, *memcpyD2H_C, graph_C));
+  HIP_CHECK_THREAD(hipGraphNodeFindInClone(&kVecAddC, *kVecAdd, graph_C));
 
-  HIP_CHECK(hipGraphMemcpyNodeSetParams1D(memcpyH2D_AC, D_d, D_h, Nbytes, hipMemcpyHostToDevice));
-  HIP_CHECK(hipGraphMemcpyNodeSetParams1D(memcpyH2D_BC, E_d, E_h, Nbytes, hipMemcpyHostToDevice));
-  HIP_CHECK(hipGraphMemcpyNodeSetParams1D(memcpyD2H_CC, F_h, F_d, Nbytes, hipMemcpyDeviceToHost));
+  HIP_CHECK_THREAD(hipGraphMemcpyNodeSetParams1D(memcpyH2D_AC, D_d, D_h, Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK_THREAD(hipGraphMemcpyNodeSetParams1D(memcpyH2D_BC, E_d, E_h, Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK_THREAD(hipGraphMemcpyNodeSetParams1D(memcpyD2H_CC, F_h, F_d, Nbytes, hipMemcpyDeviceToHost));
 
   void* kernelArgs1[] = {&D_d, &E_d, &F_d, reinterpret_cast<void*>(&NElem)};
   kNodeParams1.func = reinterpret_cast<void*>(HipTest::vectorSUB<int>);
@@ -1621,20 +1608,20 @@ static void hipGraphClone_address_change_in_thread(hipGraph_t* graph, hipGraphNo
   kNodeParams1.sharedMemBytes = 0;
   kNodeParams1.kernelParams = reinterpret_cast<void**>(kernelArgs1);
   kNodeParams1.extra = nullptr;
-  HIP_CHECK(hipGraphKernelNodeSetParams(kVecAddC, &kNodeParams1));
+  HIP_CHECK_THREAD(hipGraphKernelNodeSetParams(kVecAddC, &kNodeParams1));
 
   // Instantiate and launch the graph
-  HIP_CHECK(hipGraphInstantiate(&graphExecC, graph_C, NULL, NULL, 0));
-  HIP_CHECK(hipGraphLaunch(graphExecC, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK_THREAD(hipGraphInstantiate(&graphExecC, graph_C, NULL, NULL, 0));
+  HIP_CHECK_THREAD(hipGraphLaunch(graphExecC, stream));
+  HIP_CHECK_THREAD(hipStreamSynchronize(stream));
 
   // Verify graph execution result
   HipTest::checkVectorSUB<int>(D_h, E_h, F_h, N);
 
   HipTest::freeArrays(D_d, E_d, F_d, D_h, E_h, F_h, false);
-  HIP_CHECK(hipGraphExecDestroy(graphExecC));
-  HIP_CHECK(hipGraphDestroy(graph_C));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK_THREAD(hipGraphExecDestroy(graphExecC));
+  HIP_CHECK_THREAD(hipGraphDestroy(graph_C));
+  HIP_CHECK_THREAD(hipStreamDestroy(stream));
 }
 
 /* Scenarios - 22
@@ -1644,7 +1631,7 @@ static void hipGraphClone_address_change_in_thread(hipGraph_t* graph, hipGraphNo
  memory addresses in each Node and create executable graphs.
  Launch the graphs in their respective GPUs. Validate the outputs. */
 
-TEST_CASE("Unit_hipGraphClone_address_change_in_thread", "[multigpu]") {
+HIP_TEST_CASE(Unit_hipGraphClone_address_change_in_thread) {
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
   constexpr auto threadsPerBlock = 256;
@@ -1705,6 +1692,8 @@ TEST_CASE("Unit_hipGraphClone_address_change_in_thread", "[multigpu]") {
     t.join();
   }
 
+  HIP_CHECK_THREAD_FINALIZE();
+
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
   HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipGraphDestroy(graph));
@@ -1735,7 +1724,7 @@ static void hipGraphClone_Test_All_API(int dev) {
  Create a graph with Memcpy and Kernel nodes. and its cloned graph.
  Run all the above writen test cases for multiple GPU scenarios */
 
-TEST_CASE("Unit_hipGraphClone_multi_GPU_test", "[multigpu]") {
+HIP_TEST_CASE(Unit_hipGraphClone_multi_GPU_test) {
   // FIXME: This test tests 3D as well, decouple it
   CHECK_IMAGE_SUPPORT
 
@@ -1743,8 +1732,7 @@ TEST_CASE("Unit_hipGraphClone_multi_GPU_test", "[multigpu]") {
   HIP_CHECK(hipGetDeviceCount(&devcount));
   // If only single GPU is detected then return
   if (devcount < 2) {
-    SUCCEED("Skipping the test-cases as number of Devices found less than 2");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
   for (int dev = 0; dev < devcount; dev++) {
@@ -1768,7 +1756,7 @@ static void destroyFloatObj(void* ptr) {
  Launch the graphs. Validate the outputs. Release the reference by calling
  hipGraphReleaseUserObject with count. */
 
-TEST_CASE("Unit_hipGraphClone_hipUserObject_hipGraphUserObject") {
+HIP_TEST_CASE(Unit_hipGraphClone_hipUserObject_hipGraphUserObject) {
   ComplexGrph cg;  // This will create skeleton of Graph and ClonedGraph
 
   int* object_i = new int();
@@ -1805,7 +1793,7 @@ TEST_CASE("Unit_hipGraphClone_hipUserObject_hipGraphUserObject") {
  (Negative - Check this should give error and reference was created for
  Oroginal graph and releasing it for other graph)*/
 
-TEST_CASE("Unit_hipGraphClone_hipUserObject_hipGraphUserObject_Negative") {
+HIP_TEST_CASE(Unit_hipGraphClone_hipUserObject_hipGraphUserObject_Negative) {
   ComplexGrph cg;  // This will create skeleton of Graph and ClonedGraph
 
   int* object_i = new int();
@@ -1847,7 +1835,7 @@ TEST_CASE("Unit_hipGraphClone_hipUserObject_hipGraphUserObject_Negative") {
  (Negative - Check this should give error and reference was created for
  Oroginal graph and releasing it for other graph) */
 
-TEST_CASE("Unit_hipGraphChild_hipUserObject_hipGraphUserObject") {
+HIP_TEST_CASE(Unit_hipGraphChild_hipUserObject_hipGraphUserObject) {
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
   constexpr auto threadsPerBlock = 256;

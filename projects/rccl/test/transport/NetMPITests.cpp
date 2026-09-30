@@ -8,6 +8,8 @@
 #include "TestChecks.hpp"
 #include "TransportMPIBase.hpp"
 
+#include <cstring>
+
 #ifdef MPI_TESTS_ENABLED
 
 // Import MPI test constants
@@ -153,8 +155,8 @@ namespace
 inline constexpr size_t kTestBufferSize = 16384;
 
 // NET transport test requirements
-inline constexpr int kMinNodesForNET   = 2; // NET transport requires at least 2 nodes
-inline constexpr int kExactRanksForNET = 2; // NET transport tests use exactly 2 ranks (1 per node)
+inline constexpr int kMinNodesForNET = 2; // NET transport requires at least 2 nodes
+inline constexpr int kMinRanksForNET = 2; // NET transport needs at least 2 ranks (>=1 cross-node pair)
 
 // Test pattern generation constants
 inline constexpr int kDefaultPatternMultiplier = 100; // For NET transport patterns
@@ -304,8 +306,118 @@ public:
         }
     }
 
+    // Pair each rank with the same local rank on a partner node so every transfer
+    // crosses the network (real NET path), regardless of how many ranks run per node.
+    // This requires symmetric 1:1 matches, so we additionally require an even number of
+    // nodes and a uniform ranks-per-node layout.
+    //
+    // Use hostname Allgather instead of MPI_Comm_split_type: a second TYPE_SHARED split
+    // (validateTestPrerequisites already split once) hangs on this cluster, and any
+    // MPI_Comm_split after ncclCommInitRank deadlocks against NET/Socket progress threads.
+    void findCrossNodePeerRank(int* peer_rank_out)
+    {
+        if(config.world_rank == 0)
+        {
+            TEST_INFO("Computing cross-node SendRecv peers from hostnames");
+        }
+
+        char hostname[MPI_MAX_PROCESSOR_NAME] = {};
+        int  hostname_len = 0;
+        ASSERT_MPI_SUCCESS(MPI_Get_processor_name(hostname, &hostname_len));
+
+        std::vector<char> all_names(
+            static_cast<size_t>(config.world_size) * MPI_MAX_PROCESSOR_NAME, '\0');
+        ASSERT_MPI_SUCCESS(MPI_Allgather(hostname,
+                                         MPI_MAX_PROCESSOR_NAME,
+                                         MPI_CHAR,
+                                         all_names.data(),
+                                         MPI_MAX_PROCESSOR_NAME,
+                                         MPI_CHAR,
+                                         MPI_COMM_WORLD));
+
+        auto hostOf = [&](int rank) -> const char* {
+            return all_names.data() + static_cast<size_t>(rank) * MPI_MAX_PROCESSOR_NAME;
+        };
+
+        std::vector<int> node_of_rank(config.world_size, -1);
+        std::vector<int> local_of_rank(config.world_size, 0);
+        std::vector<int> node_first_rank;
+        std::vector<int> node_rank_count;
+
+        for(int r = 0; r < config.world_size; ++r)
+        {
+            int node = -1;
+            for(size_t i = 0; i < node_first_rank.size(); ++i)
+            {
+                if(std::strcmp(hostOf(r), hostOf(node_first_rank[i])) == 0)
+                {
+                    node = static_cast<int>(i);
+                    break;
+                }
+            }
+            if(node < 0)
+            {
+                node = static_cast<int>(node_first_rank.size());
+                node_first_rank.push_back(r);
+                node_rank_count.push_back(0);
+            }
+            node_of_rank[r]   = node;
+            local_of_rank[r]  = node_rank_count[node];
+            node_rank_count[node]++;
+        }
+
+        const int num_nodes = static_cast<int>(node_first_rank.size());
+        int       min_ranks_per_node = node_rank_count.empty() ? 0 : node_rank_count[0];
+        int       max_ranks_per_node = min_ranks_per_node;
+        for(int count : node_rank_count)
+        {
+            min_ranks_per_node = std::min(min_ranks_per_node, count);
+            max_ranks_per_node = std::max(max_ranks_per_node, count);
+        }
+
+        if((num_nodes % 2) != 0 || min_ranks_per_node != max_ranks_per_node)
+        {
+            if(config.world_rank == 0)
+            {
+                TEST_WARN("Skipping: MultipleBufferSizesTest requires an even number of "
+                          "nodes and a uniform ranks-per-node layout (nodes=%d, "
+                          "min_ranks_per_node=%d, max_ranks_per_node=%d)",
+                          num_nodes,
+                          min_ranks_per_node,
+                          max_ranks_per_node);
+            }
+            GTEST_SKIP() << "MultipleBufferSizesTest requires even node count and uniform ranks-per-node";
+            return;
+        }
+
+        const int my_node      = node_of_rank[config.world_rank];
+        const int my_local     = local_of_rank[config.world_rank];
+        const int partner_node = my_node ^ 1;
+
+        int peer_rank = -1;
+        for(int r = 0; r < config.world_size; ++r)
+        {
+            if(node_of_rank[r] == partner_node && local_of_rank[r] == my_local)
+            {
+                peer_rank = r;
+                break;
+            }
+        }
+        ASSERT_MPI_TRUE(peer_rank >= 0);
+
+        if(config.world_rank == 0)
+        {
+            TEST_INFO("Cross-node peer pairing ready (rank 0 -> rank %d, nodes=%d, ranks/node=%d)",
+                      peer_rank,
+                      num_nodes,
+                      min_ranks_per_node);
+        }
+
+        *peer_rank_out = peer_rank;
+    }
+
     // Test multiple buffer sizes with actual data transfer
-    void testMultipleBufferSizes()
+    void testMultipleBufferSizes(int peer_rank)
     {
         if(config.world_rank == 0)
         {
@@ -348,8 +460,7 @@ public:
             4 * 1024 * 1024 + 1 // 4MB + 1 (unaligned)
         };
 
-        int         peer_rank = (config.world_rank == 0) ? 1 : 0;
-        hipStream_t stream    = getActiveStream();
+        hipStream_t stream = getActiveStream();
         ASSERT_NE(stream, nullptr) << "Rank " << config.world_rank << ": Stream is null";
 
         for(size_t size : sizes)
@@ -359,7 +470,8 @@ public:
                 TEST_INFO("  Testing size: %zu bytes with data transfer", size);
             }
 
-            // Allocate buffers with local guards (per-iteration cleanup)
+            // Allocate buffers with local guards (per-iteration cleanup).
+            // allocateAndInitBuffers already hipMemcpy's the rank/size send pattern.
             void* send_buffer = nullptr;
             void* recv_buffer = nullptr;
             auto [sendGuard, recvGuard]
@@ -370,20 +482,8 @@ public:
             ASSERT_NE(recv_buffer, nullptr) << "Rank " << config.world_rank
                                             << ": Recv buffer allocation failed for size " << size;
 
-            // Initialize send buffer with rank and size-specific pattern
-            uint8_t* send_data = static_cast<uint8_t*>(send_buffer);
-            for(size_t i = 0; i < size; i++)
-            {
-                send_data[i] = static_cast<uint8_t>(
-                    (config.world_rank * kDefaultPatternMultiplier + i) % kByteValueModulo);
-            }
-
-            // Initialize recv buffer with invalid pattern
-            uint8_t* recv_data = static_cast<uint8_t*>(recv_buffer);
-            for(size_t i = 0; i < size; i++)
-            {
-                recv_data[i] = 0xFF; // Invalid pattern to detect transfer
-            }
+            // Recv is device memory; poison it through HIP rather than host stores.
+            ASSERT_MPI_EQ(hipSuccess, hipMemset(recv_buffer, 0xFF, size));
 
             // Perform actual data transfer using NCCL Send/Recv
             // Use ASSERT_MPI_SUCCESS to ensure both ranks synchronize on NCCL errors
@@ -401,6 +501,11 @@ public:
             // Use ASSERT_MPI_EQ to ensure both ranks synchronize on HIP errors
             ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
 
+            std::vector<uint8_t> recv_host(size);
+            ASSERT_MPI_EQ(
+                hipSuccess,
+                hipMemcpy(recv_host.data(), recv_buffer, size, hipMemcpyDeviceToHost));
+
             // Verify received data matches peer's send pattern
             int       errors              = 0;
             const int max_errors_to_print = 5;
@@ -408,13 +513,13 @@ public:
             {
                 uint8_t expected = static_cast<uint8_t>((peer_rank * kDefaultPatternMultiplier + i)
                                                         % kByteValueModulo);
-                if(recv_data[i] != expected)
+                if(recv_host[i] != expected)
                 {
                     TEST_WARN("Size %zu - Data mismatch at index %zu: expected %u, got %u",
                               size,
                               i,
                               expected,
-                              recv_data[i]);
+                              recv_host[i]);
                     errors++;
                 }
             }
@@ -435,15 +540,16 @@ public:
 // Test cases
 TEST_F(NetTransportMPITest, NetGraphRegisterBufferTest)
 {
-    // NET transport tests require exactly 2 ranks on 2 nodes (1 rank per node)
-    if(!validateTestPrerequisites(kExactRanksForNET,
-                                  kExactRanksForNET,
+    // NET transport tests require at least 2 ranks spread across at least 2 nodes so that
+    // communication crosses the network. Any ranks-per-node layout is supported.
+    if(!validateTestPrerequisites(kMinRanksForNET,
+                                  kNoProcessLimit,
                                   kNoPowerOfTwoRequired,
                                   kMinNodesForNET,
-                                  kMinNodesForNET))
+                                  kNoNodeLimit))
     {
-        GTEST_SKIP() << "NET transport test requires exactly " << kExactRanksForNET << " ranks on "
-                     << kMinNodesForNET << " nodes (1 rank per node)";
+        GTEST_SKIP() << "NET transport test requires at least " << kMinRanksForNET
+                     << " ranks across at least " << kMinNodesForNET << " nodes";
     }
 
     // Create test-specific communicator
@@ -464,15 +570,16 @@ TEST_F(NetTransportMPITest, NetGraphRegisterBufferTest)
 
 TEST_F(NetTransportMPITest, NetLocalRegisterBufferTest)
 {
-    // NET transport tests require exactly 2 ranks on 2 nodes (1 rank per node)
-    if(!validateTestPrerequisites(kExactRanksForNET,
-                                  kExactRanksForNET,
+    // NET transport tests require at least 2 ranks spread across at least 2 nodes so that
+    // communication crosses the network. Any ranks-per-node layout is supported.
+    if(!validateTestPrerequisites(kMinRanksForNET,
+                                  kNoProcessLimit,
                                   kNoPowerOfTwoRequired,
                                   kMinNodesForNET,
-                                  kMinNodesForNET))
+                                  kNoNodeLimit))
     {
-        GTEST_SKIP() << "NET transport test requires exactly " << kExactRanksForNET << " ranks on "
-                     << kMinNodesForNET << " nodes (1 rank per node)";
+        GTEST_SKIP() << "NET transport test requires at least " << kMinRanksForNET
+                     << " ranks across at least " << kMinNodesForNET << " nodes";
     }
 
     // Create test-specific communicator
@@ -493,25 +600,34 @@ TEST_F(NetTransportMPITest, NetLocalRegisterBufferTest)
 
 TEST_F(NetTransportMPITest, MultipleBufferSizesTest)
 {
-    // NET transport tests require exactly 2 ranks on 2 nodes (1 rank per node)
-    if(!validateTestPrerequisites(kExactRanksForNET,
-                                  kExactRanksForNET,
+    // NET transport tests require at least 2 ranks spread across at least 2 nodes so that
+    // communication crosses the network. MultipleBufferSizesTest additionally requires an even
+    // number of nodes and a uniform ranks-per-node layout for symmetric 1:1 peer pairing.
+    if(!validateTestPrerequisites(kMinRanksForNET,
+                                  kNoProcessLimit,
                                   kNoPowerOfTwoRequired,
                                   kMinNodesForNET,
-                                  kMinNodesForNET))
+                                  kNoNodeLimit))
     {
-        GTEST_SKIP() << "NET transport test requires exactly " << kExactRanksForNET << " ranks on "
-                     << kMinNodesForNET << " nodes (1 rank per node)";
+        GTEST_SKIP() << "NET transport test requires at least " << kMinRanksForNET
+                     << " ranks across at least " << kMinNodesForNET << " nodes";
+    }
+
+    int peer_rank = -1;
+    findCrossNodePeerRank(&peer_rank);
+    if(HasFatalFailure() || IsSkipped())
+    {
+        return;
     }
 
     ASSERT_MPI_SUCCESS(createTestCommunicator());
 
     if(config.world_rank == 0)
     {
-        TEST_INFO("Starting multiple buffer sizes test (multi-node)");
+        TEST_INFO("Starting multiple buffer sizes test (multi-node), peer rank %d", peer_rank);
     }
 
-    testMultipleBufferSizes();
+    testMultipleBufferSizes(peer_rank);
 
     if(config.world_rank == 0)
     {

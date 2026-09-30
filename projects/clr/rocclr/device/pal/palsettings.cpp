@@ -1,22 +1,8 @@
-/* Copyright (c) 2015 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "top.hpp"
 #include "os/os.hpp"
@@ -131,7 +117,7 @@ Settings::Settings() {
                                                           : HIP_FORCE_DEV_KERNARG;
 
   limit_blit_wg_ = 16;
-  DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING = 0;  // disable graph performance optimizations for PAL
+  // PAL now uses GraphExecClassic which has no segment scheduling — flag is irrelevant.
 }
 
 bool Settings::create(const Pal::DeviceProperties& palProp,
@@ -178,14 +164,6 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
     case Pal::AsicRevision::Navi23:
     case Pal::AsicRevision::Navi22:
     case Pal::AsicRevision::Navi21:
-      // set wavefront 64 for Geekbench 5
-      {
-        if (appName == "Geekbench 5.exe" || appName == "geekbench_x86_64.exe" ||
-            appName == "geekbench5.exe") {
-          useWavefront64 = true;
-        }
-      }
-    // Fall through for Navi1x ...
     case Pal::AsicRevision::Navi14:
     case Pal::AsicRevision::Navi12:
     case Pal::AsicRevision::Navi10:
@@ -198,7 +176,7 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
         enableWave32Mode_ = 0;
       }
       lcWavefrontSize64_ = !enableWave32Mode_;
-      if (palProp.gfxLevel == Pal::GfxIpLevel::GfxIp10_1) {
+      if (palProp.gfxTriple.major == 10 && palProp.gfxTriple.minor == 1) {
         // GFX10.1 HW doesn't support custom pitch. Enable double copy workaround
         imageBufferWar_ = GPU_IMAGE_BUFFER_WAR;
       }
@@ -231,7 +209,9 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
         supportDepthsRGB_ = true;
       }
       if (use64BitPtr_) {
-        maxAllocSize_ = 64ULL * Gi;
+        // Unified memory APUs address the carve-out and the aperture as one pool, which
+        // already exceeds 64 GiB on shipping parts.
+        maxAllocSize_ = 256ULL * Gi;
       } else {
         maxAllocSize_ = 3ULL * Gi;
       }

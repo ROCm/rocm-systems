@@ -1,22 +1,8 @@
-/* Copyright (c) 2015 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 
@@ -144,8 +130,7 @@ class DmaBlitManager : public device::HostBlitManager {
 
   //! Copies multiple buffer objects in a batch
   virtual bool copyBufferBatch(
-      std::vector<amd::BatchCopyOp>& copyOps,  //!< Batch of copy operations
-      bool entire = false                      //!< Entire buffers will be updated
+      const std::vector<amd::BatchCopyOp>& copyOps  //!< Batch of copy operations
   ) const;
 
   //! Copies an image object to a buffer object
@@ -188,6 +173,20 @@ class DmaBlitManager : public device::HostBlitManager {
   //! Stream memory write operation - Write a 'value' at 'memory'.
   virtual bool streamOpsWrite(device::Memory& memory,  //!< Memory to write the 'value'
                               uint64_t value, size_t offset, size_t sizeBytes) const {
+    assert(!"Unimplemented");
+    return false;
+  }
+
+  //! Stream memory increment operation - Increment memory by a 'value'.
+  virtual bool streamOpsIncrement(device::Memory& memory, uint64_t value, size_t offset,
+                                  size_t sizeBytes) const {
+    assert(!"Unimplemented");
+    return false;
+  }
+
+  //! Stream memory decrement operation - Decrement memory by a 'value'.
+  virtual bool streamOpsDecrement(device::Memory& memory, uint64_t value, size_t offset,
+                                  size_t sizeBytes) const {
     assert(!"Unimplemented");
     return false;
   }
@@ -239,6 +238,17 @@ class DmaBlitManager : public device::HostBlitManager {
                              hsa_agent_t& srcAgent, size_t size,
                              amd::CopyMetadata& copyMetadata) const;
 
+  //! Batch version of hsaCopy - resolves multiple Memory objects to addresses/agents
+  bool hsaCopyBatch(const std::vector<amd::BatchCopyOp>& copyOps,
+                    const std::vector<hsa_signal_t>* externalWaitEvents = nullptr,
+                    std::vector<ProfilingSignal*>* outBatchSignals = nullptr) const;
+
+  //! Batch version of rocrCopyBuffer
+  bool rocrCopyBufferBatch(
+      const std::vector<hsa_amd_memory_copy_op_t>& copyOps,
+      const std::vector<hsa_signal_t>* externalWaitEvents = nullptr,
+      std::vector<ProfilingSignal*>* outBatchSignals = nullptr) const;
+
   // Get Pinned Host Memory or Staging Buffer
   void getBuffer(const_address hostMem,  //!< Host Mem Address
                  size_t size,            //!< Transfer Size
@@ -278,7 +288,7 @@ class DmaBlitManager : public device::HostBlitManager {
 class KernelBlitManager : public DmaBlitManager {
  public:
   enum {
-    FillBufferAligned = 0,
+    FillBufferUnAligned = 0,
     FillBufferAligned2D,
     BlitCopyBuffer,
     BlitCopyBufferAligned,
@@ -290,6 +300,9 @@ class KernelBlitManager : public DmaBlitManager {
     GwsInit,
     InitHeap,
     BatchMemOp,
+    StreamOpsIncrement,
+    StreamOpsDecrement,
+    BlitCopyBufferBatch,
     BlitLinearTotal,
     FillImage = BlitLinearTotal,
     BlitCopyImage,
@@ -362,6 +375,21 @@ class KernelBlitManager : public DmaBlitManager {
       bool entire = false,                                  //!< Entire buffer will be updated
       amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
   ) const;
+
+  //! Copies multiple buffer objects in a batch
+  virtual bool copyBufferBatch(
+      const std::vector<amd::BatchCopyOp>& copyOps  //!< Batch of copy operations
+  ) const;
+
+  //! Copies pageable host-to-device operations in a batch
+  bool WriteBufferBatch(
+      const std::vector<amd::BatchWriteMemoryOp>& write_ops  //!< Batch of write operations
+  ) const override;
+
+  //! Copies device-to-pageable-host operations in a batch
+  bool ReadBufferBatch(
+      const std::vector<amd::BatchReadMemoryOp>& read_ops  //!< Batch of read operations
+  ) const override;
 
   //! Copies a buffer object to an image object
   virtual bool copyBuffer(
@@ -498,6 +526,14 @@ class KernelBlitManager : public DmaBlitManager {
   virtual bool streamOpsWrite(device::Memory& memory,  //!< Memory to write the 'value'
                               uint64_t value, size_t offset, size_t sizeBytes) const;
 
+  //! Stream memory increment operation - Increment memory by a 'value'.
+  virtual bool streamOpsIncrement(device::Memory& memory, uint64_t value, size_t offset,
+                                  size_t sizeBytes) const;
+
+  //! Stream memory decrement operation - Decrement memory by a 'value'.
+  virtual bool streamOpsDecrement(device::Memory& memory, uint64_t value, size_t offset,
+                                  size_t sizeBytes) const;
+
   //! Stream memory ops- Waits for a 'value' at 'memory' and wait is released based on compare op.
   virtual bool streamOpsWait(
       device::Memory& memory,  //!< Memory contents to compare the 'value' against
@@ -506,7 +542,7 @@ class KernelBlitManager : public DmaBlitManager {
   //! Batch memory ops- Submits batch of streamWaits and streamWrite operations.
   virtual bool batchMemOps(const void* paramArray, size_t paramSize, uint32_t count) const;
 
-  virtual amd::Monitor* lockXfer() const { return &lockXferOps_; }
+  virtual std::recursive_mutex* lockXfer() const { return &lockXferOps_; }
 
   virtual bool initHeap(device::Memory* heap_to_initialize, device::Memory* initial_blocks,
                         uint heap_size, uint number_of_initial_blocks) const;
@@ -515,6 +551,15 @@ class KernelBlitManager : public DmaBlitManager {
   static constexpr size_t MaxXferBuffers = 2;
   static constexpr uint TransferSplitSize = 1;
   static constexpr uint MaxNumIssuedTransfers = 3;
+
+  struct BatchRawCopyOp {
+    address src;
+    address dst;
+    size_t size;
+    amd::CopyMetadata metadata;
+    bool needs_system_scope;
+    bool attach_signal;
+  };
 
   //! Copies a buffer object to an image object
   bool copyBufferToImageKernel(
@@ -572,6 +617,21 @@ class KernelBlitManager : public DmaBlitManager {
                         const uint32_t blitWg, amd::CopyMetadata copyMetadata,
                         bool attachSignal = false) const;
 
+  //! Returns true if a linear buffer copy should use the shader path.
+  bool useShaderCopyBufferPath(const Memory& srcMemory, const Memory& dstMemory, size_t size,
+                               amd::CopyMetadata copyMetadata,
+                               bool* useLimitedP2pBlitWg = nullptr) const;
+
+  //! Copies a batch of buffers using a single/multiple shader dispatch
+  bool ShaderCopyBufferBatch(const std::vector<amd::BatchCopyOp>& copy_ops) const;
+
+  //! Copies a batch of raw virtual-address ranges using the shader path
+  bool ShaderCopyBufferBatchRaw(const std::vector<BatchRawCopyOp>& copy_ops) const;
+
+  //! Atomically updates a memory location (i.e. writes, increments or decrements the memory).
+  bool streamOpsUpdate(uint blitType, device::Memory& memory, uint64_t value, size_t offset,
+                       size_t sizeBytes) const;
+
   //! Disable copy constructor
   KernelBlitManager(const KernelBlitManager&);
 
@@ -581,18 +641,20 @@ class KernelBlitManager : public DmaBlitManager {
   amd::Program* program_;             //!< GPU program object
   amd::Kernel* kernels_[BlitTotal];   //!< GPU kernels for blit
   size_t xferBufferSize_;             //!< Transfer buffer size
-  mutable amd::Monitor lockXferOps_;  //!< Lock transfer operation
+  mutable std::recursive_mutex lockXferOps_;  //!< Lock transfer operation
 };
 
 static const char* BlitName[KernelBlitManager::BlitTotal] = {
-    "__amd_rocclr_fillBufferAligned", "__amd_rocclr_fillBufferAligned2D",
-    "__amd_rocclr_copyBuffer",        "__amd_rocclr_copyBufferAligned",
-    "__amd_rocclr_copyBufferRect",    "__amd_rocclr_copyBufferRectAligned",
-    "__amd_rocclr_streamOpsWrite",    "__amd_rocclr_streamOpsWait",
-    "__amd_rocclr_scheduler",         "__amd_rocclr_gwsInit",
-    "__amd_rocclr_initHeap",          "__amd_rocclr_batchMemOp",
-    "__amd_rocclr_fillImage",         "__amd_rocclr_copyImage",
-    "__amd_rocclr_copyImage1DA",      "__amd_rocclr_copyImageToBuffer",
+    "__amd_rocclr_fillBufferUnAligned",  "__amd_rocclr_fillBufferAligned2D",
+    "__amd_rocclr_copyBuffer",         "__amd_rocclr_copyBufferAligned",
+    "__amd_rocclr_copyBufferRect",     "__amd_rocclr_copyBufferRectAligned",
+    "__amd_rocclr_streamOpsWrite",     "__amd_rocclr_streamOpsWait",
+    "__amd_rocclr_scheduler",          "__amd_rocclr_gwsInit",
+    "__amd_rocclr_initHeap",           "__amd_rocclr_batchMemOp",
+    "__amd_rocclr_streamOpsIncrement", "__amd_rocclr_streamOpsDecrement",
+    "__amd_rocclr_copyBufferBatch",
+    "__amd_rocclr_fillImage",          "__amd_rocclr_copyImage",
+    "__amd_rocclr_copyImage1DA",       "__amd_rocclr_copyImageToBuffer",
     "__amd_rocclr_copyBufferToImage"};
 
 inline void KernelBlitManager::setArgument(amd::Kernel* kernel, size_t index, size_t size,

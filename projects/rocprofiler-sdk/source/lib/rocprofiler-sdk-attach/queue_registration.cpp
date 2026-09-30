@@ -39,13 +39,20 @@ struct queue_entry_t
     void*               user_write_interceptor_data = nullptr;
 };
 
+struct queue_cb_entry_t
+{
+    rocprofiler_attach_queue_cb_t cb   = nullptr;
+    void*                         data = nullptr;
+};
+
 using queue_collection_t = std::unordered_map<hsa_queue_t*, queue_entry_t>;
 
 struct queue_registration_t
 {
-    // guards access to both queues collection
-    std::mutex         queues_mutex;
-    queue_collection_t queues;
+    // guards access to both queues and cb_list
+    std::mutex                    mutex;
+    queue_collection_t            queues;
+    std::vector<queue_cb_entry_t> cb_list;
 
     decltype(AmdExtTable::hsa_amd_queue_intercept_create_fn) hsa_amd_queue_intercept_create_fn =
         nullptr;
@@ -53,6 +60,11 @@ struct queue_registration_t
         hsa_amd_profiling_set_profiler_enabled_fn = nullptr;
     decltype(AmdExtTable::hsa_amd_queue_intercept_register_fn) hsa_amd_queue_intercept_register_fn =
         nullptr;
+#if defined(HSA_AMD_EXT_API_TABLE_STEP_VERSION) && HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x10
+    // Real ROCr hsa_amd_queue_create, used to forward non-compute (e.g. SDMA) queue requests that
+    // cannot be wrapped in an InterceptQueue.
+    decltype(AmdExtTable::hsa_amd_queue_create_fn) hsa_amd_queue_create_fn = nullptr;
+#endif
     decltype(CoreApiTable::hsa_status_string_fn) hsa_status_string_fn = nullptr;
 };
 
@@ -98,17 +110,72 @@ write_interceptor(const void*                             packets,
                   hsa_amd_queue_intercept_packet_writer_t writer)
 {
     ROCP_FATAL_IF(data == nullptr) << "WriteInterceptor was not passed a valid pointer";
-    const auto* entry = static_cast<const queue_entry_t*>(data);
+    auto*       registration = CHECK_NOTNULL(get_queue_registration());
+    const auto* entry        = static_cast<const queue_entry_t*>(data);
 
-    if(entry->user_write_interceptor_func)
+    write_interceptor_t func  = nullptr;
+    void*               udata = nullptr;
     {
-        entry->user_write_interceptor_func(
-            packets, pkt_count, unused, entry->user_write_interceptor_data, writer);
+        std::lock_guard lg(registration->mutex);
+        func  = entry->user_write_interceptor_func;
+        udata = entry->user_write_interceptor_data;
+    }
+
+    if(func)
+    {
+        func(packets, pkt_count, unused, udata, writer);
     }
     else
     {
         writer(packets, pkt_count);
     }
+}
+
+// Shared finalization for a freshly created InterceptQueue: enable profiling, register the write
+// interceptor shim, record the queue, and notify queue-created callbacks. Used by both the classic
+// (hsa_queue_create) and descriptor-based (hsa_amd_queue_create) intercept paths.
+hsa_status_t
+finalize_intercept_queue(hsa_agent_t agent, hsa_queue_t* new_queue)
+{
+    auto* registration = CHECK_NOTNULL(get_queue_registration());
+
+    ROCP_ATTACH_HSA_TABLE_CALL(
+        FATAL, registration->hsa_amd_profiling_set_profiler_enabled_fn(new_queue, true))
+        << "Could not setup intercept profiler";
+
+    // Create and insert our queue's data entry now, as we need to provide a reference to it for the
+    // write_interceptor
+    queue_entry_t entry{};
+    entry.agent = agent;
+
+    queue_entry_t* write_interceptor_data = nullptr;
+    auto           snapshot               = std::vector<queue_cb_entry_t>{};
+    {
+        std::lock_guard lg(registration->mutex);
+        ROCP_FATAL_IF(registration->queues.count(new_queue) > 0)
+            << "Queue registration already contains an entry for new queue handle " << new_queue;
+        registration->queues.insert({new_queue, entry});
+        write_interceptor_data = &(registration->queues.at(new_queue));
+        snapshot               = std::vector<queue_cb_entry_t>{registration->cb_list};
+    }
+
+    // Pass queue_entry_t* as user data, used to directly call the user's write interceptor
+    ROCP_ATTACH_HSA_TABLE_CALL(FATAL,
+                               registration->hsa_amd_queue_intercept_register_fn(
+                                   new_queue, write_interceptor, write_interceptor_data))
+        << "Could not register interceptor";
+
+    ROCP_INFO << "created attach queue for HSA agent handle " << agent.handle;
+
+    for(auto& cb_entry : snapshot)
+    {
+        if(cb_entry.cb)
+        {
+            cb_entry.cb(new_queue, agent, ROCPROFILER_ATTACH_QUEUE_CREATED, cb_entry.data);
+        }
+    }
+
+    return HSA_STATUS_SUCCESS;
 }
 
 // HSA Intercept Functions (create_queue/destroy_queue)
@@ -143,41 +210,83 @@ create_queue(hsa_agent_t        agent,
                                                                                &new_queue))
         << "Could not create intercept queue";
 
-    ROCP_ATTACH_HSA_TABLE_CALL(
-        FATAL, registration->hsa_amd_profiling_set_profiler_enabled_fn(new_queue, true))
-        << "Could not setup intercept profiler";
-
-    // Create and insert our queue's data entry now, as we need to provide a reference to it for the
-    // write_interceptor
-    queue_entry_t entry{};
-    entry.agent = agent;
-
-    {
-        std::lock_guard lg(registration->queues_mutex);
-        ROCP_FATAL_IF(registration->queues.count(new_queue) > 0)
-            << "Queue registration already contains an entry for new queue handle " << new_queue;
-        registration->queues.insert({new_queue, entry});
-    }
-    auto* write_interceptor_data = &(registration->queues.at(new_queue));
-
-    // Pass queue_entry_t* as user data, used to directly call the user's write interceptor
-    ROCP_ATTACH_HSA_TABLE_CALL(FATAL,
-                               registration->hsa_amd_queue_intercept_register_fn(
-                                   new_queue, write_interceptor, write_interceptor_data))
-        << "Could not register interceptor";
+    auto status = finalize_intercept_queue(agent, new_queue);
+    if(status != HSA_STATUS_SUCCESS) return status;
 
     *queue = new_queue;
+    return HSA_STATUS_SUCCESS;
+}
 
-    ROCP_INFO << "created attach queue for HSA agent handle " << agent.handle;
+#if defined(HSA_AMD_EXT_API_TABLE_STEP_VERSION) && HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x10
+// Descriptor-based queue creation (hsa_amd_queue_create). A queue created by this API is a plain
+// queue that cannot carry a ROCr packet interceptor, so for compute queues we build an
+// InterceptQueue that mirrors the descriptor's compute parameters instead (the InterceptQueue is
+// what allows kernel-dispatch tracing under attachment). Non-compute queues (e.g. SDMA) do not
+// dispatch kernels and are forwarded to the real implementation unchanged.
+//
+// NOTE: the InterceptQueue is created via the classic hsa_queue_create path, so the descriptor's
+// device-memory ring-buffer flag is not honored while the queue is being profiled; the queue falls
+// back to a system-memory ring.
+//
+// KNOWN LIMITATION (late attach): This wrapper bypasses the real hsa_amd_queue_create
+// implementation for compute descriptors, so the runtime's descriptor validation (version,
+// reserved fields, size, priority, CU-mask constraints) and partial-batch-success semantics are
+// not applied.  Late attach is excluded from the supported configuration for this PR; a
+// descriptor-aware attach implementation that delegates to the real runtime for validation and
+// then intercepts the resulting queue is needed before late attach can be re-enabled with the new
+// queue creation API.
+hsa_status_t
+create_amd_queue(hsa_agent_t agent, hsa_amd_queue_create_desc_t* descs, uint32_t num_descs)
+{
+    auto* registration = CHECK_NOTNULL(get_queue_registration());
 
-    auto* attach_table = rocprofiler::attach::get_dispatch_table();
-    if(attach_table->rocprofiler_attach_notify_new_queue)
+    ROCP_FATAL_IF(!registration->hsa_amd_queue_intercept_create_fn ||
+                  !registration->hsa_amd_profiling_set_profiler_enabled_fn ||
+                  !registration->hsa_amd_queue_intercept_register_fn ||
+                  !registration->hsa_amd_queue_create_fn || !registration->hsa_status_string_fn)
+        << "Queue registration was not initialized before create queue was called!";
+
+    for(uint32_t desc_idx = 0; desc_idx < num_descs; ++desc_idx)
     {
-        attach_table->rocprofiler_attach_notify_new_queue(new_queue, agent, nullptr);
+        if(descs[desc_idx].engine_type != HSA_AMD_QUEUE_ENGINE_COMPUTE)
+        {
+            // Non-compute queues cannot dispatch kernels; forward to the real implementation so the
+            // queue is still created (just not intercepted).
+            ROCP_ATTACH_HSA_TABLE_CALL(
+                FATAL, registration->hsa_amd_queue_create_fn(agent, &descs[desc_idx], 1))
+                << "Could not create non-compute amd queue";
+            continue;
+        }
+
+        const auto&    compute_params = descs[desc_idx].engine.compute;
+        const uint32_t ring_packets   = static_cast<uint32_t>(descs[desc_idx].queue_size_bytes /
+                                                            sizeof(hsa_kernel_dispatch_packet_t));
+
+        hsa_queue_t* new_queue = nullptr;
+        ROCP_ATTACH_HSA_TABLE_CALL(
+            FATAL,
+            registration->hsa_amd_queue_intercept_create_fn(
+                agent,
+                ring_packets,
+                compute_params.type,
+                descs[desc_idx].callback,
+                descs[desc_idx].callback_data,
+                compute_params.private_segment_size,
+                // Descriptor v1 does not expose group_segment_size; UINT32_MAX requests the runtime
+                // default, matching the classic hsa_queue_create behavior.
+                UINT32_MAX,
+                &new_queue))
+            << "Could not create intercept queue";
+
+        auto status = finalize_intercept_queue(agent, new_queue);
+        if(status != HSA_STATUS_SUCCESS) return status;
+
+        descs[desc_idx].queue = new_queue;
     }
 
     return HSA_STATUS_SUCCESS;
 }
+#endif
 
 hsa_status_t
 destroy_queue(hsa_queue_t* hsa_queue)
@@ -185,10 +294,36 @@ destroy_queue(hsa_queue_t* hsa_queue)
     auto* registration = get_queue_registration();
     if(registration)
     {
-        std::lock_guard lg(registration->queues_mutex);
-        size_t          erase_count = registration->queues.erase(hsa_queue);
-        ROCP_WARNING_IF(erase_count == 0)
-            << "Destroy queue was called for a handle that was not in queues: " << hsa_queue;
+        auto node     = queue_collection_t::node_type{};
+        auto snapshot = std::vector<queue_cb_entry_t>{};
+        {
+            std::lock_guard lg(registration->mutex);
+            node = registration->queues.extract(hsa_queue);
+            if(!node.empty())
+            {
+                snapshot = std::vector<queue_cb_entry_t>{registration->cb_list};
+            }
+            else
+            {
+                ROCP_WARNING << "Destroy queue was called for a handle that was not in queues: "
+                             << hsa_queue;
+            }
+        }
+        if(!node.empty())
+        {
+            for(auto& cb_entry : snapshot)
+            {
+                if(cb_entry.cb)
+                {
+                    cb_entry.cb(hsa_queue,
+                                node.mapped().agent,
+                                ROCPROFILER_ATTACH_QUEUE_DESTROYED,
+                                cb_entry.data);
+                }
+            }
+        }
+        // node goes out of scope here: queue_entry_t is destroyed after callbacks (and
+        // any sync() called within them) have completed
     }
     return HSA_STATUS_SUCCESS;
 }
@@ -198,7 +333,7 @@ iterate_all_queues(rocprof_attach_queue_iterator_t func, void* user_data)
 {
     auto* registration = CHECK_NOTNULL(get_queue_registration());
 
-    std::lock_guard lg(registration->queues_mutex);
+    std::lock_guard lg(registration->mutex);
     for(const auto& qr_pair : registration->queues)
     {
         func(qr_pair.first, qr_pair.second.agent, user_data);
@@ -211,6 +346,7 @@ int
 set_write_interceptor(hsa_queue_t* queue, write_interceptor_t func, void* data)
 {
     auto* registration = CHECK_NOTNULL(get_queue_registration());
+    auto  lg           = std::lock_guard{registration->mutex};
     auto  qr_pair      = registration->queues.find(queue);
     if(qr_pair == registration->queues.end())
     {
@@ -220,6 +356,47 @@ set_write_interceptor(hsa_queue_t* queue, write_interceptor_t func, void* data)
     qr_pair->second.user_write_interceptor_func = func;
     qr_pair->second.user_write_interceptor_data = data;
     return 0;
+}
+
+int
+add_queue_cb(rocprofiler_attach_queue_cb_t cb, void* data)
+{
+    if(!cb)
+    {
+        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+    auto* registration = CHECK_NOTNULL(get_queue_registration());
+    auto  snapshot     = std::vector<std::pair<hsa_queue_t*, hsa_agent_t>>{};
+    {
+        auto lg = std::lock_guard{registration->mutex};
+        registration->cb_list.push_back({cb, data});
+        for(const auto& qr_pair : registration->queues)
+        {
+            snapshot.emplace_back(qr_pair.first, qr_pair.second.agent);
+        }
+    }
+    for(const auto& [queue, agent] : snapshot)
+    {
+        cb(queue, agent, ROCPROFILER_ATTACH_QUEUE_CREATED, data);
+    }
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
+int
+remove_queue_cb(rocprofiler_attach_queue_cb_t cb)
+{
+    if(!cb)
+    {
+        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+    auto* registration = CHECK_NOTNULL(get_queue_registration());
+    auto  lg           = std::lock_guard{registration->mutex};
+    auto  pred         = [cb](const queue_cb_entry_t& e) { return e.cb == cb; };
+    registration->cb_list.erase(
+        std::remove_if(registration->cb_list.begin(), registration->cb_list.end(), pred),
+        registration->cb_list.end());
+    // Returns SUCCESS whether or not cb was found, to simplify cleanup paths.
+    return ROCPROFILER_STATUS_SUCCESS;
 }
 
 }  // namespace
@@ -238,6 +415,13 @@ queue_registration_init(HsaApiTable* table)
 
     core_table.hsa_queue_create_fn  = create_queue;
     core_table.hsa_queue_destroy_fn = destroy_queue;
+
+#if defined(HSA_AMD_EXT_API_TABLE_STEP_VERSION) && HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x10
+    // Save the real hsa_amd_queue_create before overwriting it, so non-compute queue requests can
+    // be forwarded, then intercept descriptor-based queue creation.
+    registration->hsa_amd_queue_create_fn    = *table->amd_ext_->hsa_amd_queue_create_fn;
+    table->amd_ext_->hsa_amd_queue_create_fn = create_amd_queue;
+#endif
 
     registration->hsa_amd_queue_intercept_create_fn =
         *table->amd_ext_->hsa_amd_queue_intercept_create_fn;
@@ -263,6 +447,18 @@ int
 rocprofiler_attach_set_write_interceptor(hsa_queue_t* queue, write_interceptor_t func, void* data)
 {
     return set_write_interceptor(queue, func, data);
+}
+
+int
+rocprofiler_attach_add_queue_cb(rocprofiler_attach_queue_cb_t cb, void* data)
+{
+    return add_queue_cb(cb, data);
+}
+
+int
+rocprofiler_attach_remove_queue_cb(rocprofiler_attach_queue_cb_t cb)
+{
+    return remove_queue_cb(cb);
 }
 
 ROCPROFILER_EXTERN_C_FINI

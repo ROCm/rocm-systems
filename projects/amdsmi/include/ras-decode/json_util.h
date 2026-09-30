@@ -42,9 +42,9 @@ typedef struct JsonPair JsonPair;
  * @brief JSON key-value pair structure for objects
  */
 struct JsonPair {
-  char *key;
-  JsonValue *value;
-  JsonPair *next;
+  char* key;
+  JsonValue* value;
+  JsonPair* next;
 };
 
 /**
@@ -55,10 +55,10 @@ struct JsonValue {
   union {
     bool boolean;
     double number;
-    char *string;
-    JsonPair *object;  // Linked list of key-value pairs
+    char* string;
+    JsonPair* object;  // Linked list of key-value pairs
     struct {
-      JsonValue **items;
+      JsonValue** items;
       size_t count;
       size_t capacity;
     } array;
@@ -69,40 +69,40 @@ struct JsonValue {
  * @brief Create a null JSON value
  * @return Pointer to new JsonValue or NULL on failure
  */
-JsonValue *json_create_null(void);
+JsonValue* json_create_null(void);
 
 /**
  * @brief Create a boolean JSON value
  * @param b Boolean value
  * @return Pointer to new JsonValue or NULL on failure
  */
-JsonValue *json_create_bool(bool b);
+JsonValue* json_create_bool(bool b);
 
 /**
  * @brief Create a number JSON value
  * @param num Numeric value
  * @return Pointer to new JsonValue or NULL on failure
  */
-JsonValue *json_create_number(double num);
+JsonValue* json_create_number(double num);
 
 /**
  * @brief Create a string JSON value
  * @param str String value (will be copied)
  * @return Pointer to new JsonValue or NULL on failure
  */
-JsonValue *json_create_string(const char *str);
+JsonValue* json_create_string(const char* str);
 
 /**
  * @brief Create an empty JSON object
  * @return Pointer to new JsonValue or NULL on failure
  */
-JsonValue *json_create_object(void);
+JsonValue* json_create_object(void);
 
 /**
  * @brief Create an empty JSON array
  * @return Pointer to new JsonValue or NULL on failure
  */
-JsonValue *json_create_array(void);
+JsonValue* json_create_array(void);
 
 /**
  * @brief Add a key-value pair to a JSON object
@@ -110,7 +110,7 @@ JsonValue *json_create_array(void);
  * @param key Key string (will be copied)
  * @param value Value to add
  */
-void json_object_set(JsonValue *obj, const char *key, JsonValue *value);
+void json_object_set(JsonValue* obj, const char* key, JsonValue* value);
 
 /**
  * @brief Get a value by key from a JSON object
@@ -118,7 +118,7 @@ void json_object_set(JsonValue *obj, const char *key, JsonValue *value);
  * @param key Key to search for
  * @return Pointer to JsonValue or NULL if not found
  */
-JsonValue *json_object_get(JsonValue *obj, const char *key);
+JsonValue* json_object_get(JsonValue* obj, const char* key);
 
 /**
  * @brief Check if a key exists in a JSON object
@@ -126,7 +126,7 @@ JsonValue *json_object_get(JsonValue *obj, const char *key);
  * @param key Key to check for
  * @return true if key exists, false otherwise
  */
-bool json_object_has_key(JsonValue *obj, const char *key);
+bool json_object_has_key(JsonValue* obj, const char* key);
 
 /**
  * @brief Add a value to a JSON array
@@ -134,7 +134,7 @@ bool json_object_has_key(JsonValue *obj, const char *key);
  * @param value Value to add
  * @return true on success, false on failure
  */
-bool json_array_push(JsonValue *arr, JsonValue *value);
+bool json_array_push(JsonValue* arr, JsonValue* value);
 
 /**
  * @brief Get a value by index from a JSON array
@@ -142,20 +142,20 @@ bool json_array_push(JsonValue *arr, JsonValue *value);
  * @param index Array index
  * @return Pointer to JsonValue or NULL if index out of bounds
  */
-JsonValue *json_array_get(JsonValue *arr, size_t index);
+JsonValue* json_array_get(JsonValue* arr, size_t index);
 
 /**
  * @brief Get the size of a JSON array
  * @param arr JSON array
  * @return Number of elements in array, or 0 if not an array
  */
-size_t json_array_size(JsonValue *arr);
+size_t json_array_size(JsonValue* arr);
 
 /**
  * @brief Free a JSON value and all its contents
  * @param val JSON value to free
  */
-void json_free(JsonValue *val);
+void json_free(JsonValue* val);
 
 #ifdef __cplusplus
 }

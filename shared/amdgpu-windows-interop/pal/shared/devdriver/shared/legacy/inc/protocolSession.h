@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) 2021-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+ *  Copyright (c) 2021-2026 Advanced Micro Devices, Inc. All Rights Reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -144,19 +144,12 @@ namespace DevDriver
         virtual Protocol GetProtocol() const = 0;
 
         // Helper functions for working with SizedPayloadContainers and managing back-compat.
-        Result SendPayload(const SizedPayloadContainer& payload, uint32 timeoutInMs)
-        {
-            return Send(payload.payloadSize, payload.payload, timeoutInMs);
-        }
+        Result SendPayload(const SizedPayloadContainer& payload, uint32 timeoutInMs);
 
-        Result ReceivePayload(SizedPayloadContainer* pPayload, uint32 timeoutInMs)
-        {
-            DD_ASSERT(pPayload != nullptr);
-            return Receive(sizeof(pPayload->payload), pPayload->payload, &pPayload->payloadSize, timeoutInMs);
-        }
+        Result ReceivePayload(SizedPayloadContainer* pPayload, uint32 timeoutInMs);
 
     protected:
-        ISession() {}
+        ISession();
     };
 
     class IProtocolSession

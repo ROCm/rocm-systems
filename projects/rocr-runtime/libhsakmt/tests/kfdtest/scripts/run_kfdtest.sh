@@ -80,7 +80,6 @@ GDB=""
 NODE=""
 CONCURRENTNODES=""
 TESTNODENUM=""
-FORCE_HIGH=""
 RUN_IN_DOCKER=""
 ADDITIONAL_EXCLUDE=""
 
@@ -106,7 +105,7 @@ printUsage() {
                                "Takes an integer as argument"\
                                "(e.g. -t 2 or --testnodenum 2)"
     echo "  -l            , --list                   List available nodes"
-    echo "  --high                                   Force clocks to high for test execution"
+    echo "  --high                                   Force clocks to high for test execution (non-functional)"
     echo "  -d            , --docker                 Run in docker container"
     echo "  -e <list>     , --exclude <list>         Additional tests to exclude, in addition to kfdtest.exclude."\
                                "Takes a colon-separated string as an argument"\
@@ -142,11 +141,22 @@ getFilter() {
     # Check if the loaded driver is upstream (in-box) or DKMS
     rdma_get_pages_func=$(cat /proc/kallsyms | grep rdma_get_pages || true)
     if [ -z "$rdma_get_pages_func" ]; then
-	    gtestFilter="$gtestFilter:${FILTER[upstream]}"
+        # If the filter is a blacklist (test list starts with -), we want to add to the list
+        # If the filter is a whitelist (test list starts with the test name), we don't want to add
+        # known-unsupported tests to the list, so don't add anything
+        if [[ "$gtestFilter" == --gtest_filter=-* ]]; then
+            gtestFilter="$gtestFilter:${FILTER[upstream]}"
+        fi
     fi
 
     if [ -n "$ADDITIONAL_EXCLUDE" ]; then
-	    gtestFilter="$gtestFilter:$ADDITIONAL_EXCLUDE"
+        # If the filter is a blacklist (test list starts with -), we want to add to the list
+	# If the filter is a whitelist (test list starts with the test name), we don't want to add
+	# excluded tests to the list, so don't add anything
+	# TODO: Add parsing so we can use --gtest_filter and -e together.
+        if [[ "$gtestFilter" == --gtest_filter=-* ]]; then
+            gtestFilter="$gtestFilter:$ADDITIONAL_EXCLUDE"
+        fi
     fi
 }
 
@@ -191,6 +201,14 @@ getNodeName() {
     echo "$gpuName"
 }
 
+printGpuNodelist() {
+    local hsaNodes=$(getHsaNodes)
+    for node in $hsaNodes; do
+        local name=$(getNodeName $node)
+        echo "Node $node: $name"
+    done
+}
+
 # Run KfdTest independently. Two global variables set by command-line
 # will influence the tests as indicated below
 #   PLATFORM - If set all tests will run with this platform filter
@@ -221,6 +239,7 @@ runKfdTest() {
         hsaNodes=$NODE
     fi
 
+    local aggregate_fail=0
     for hsaNode in $hsaNodes; do
         nodeName=$(getNodeName $hsaNode)
         if [ "$PLATFORM" != "" ] && [ "$PLATFORM" != "$nodeName" ]; then
@@ -248,31 +267,43 @@ runKfdTest() {
                 echo "Finished node $hsaNode ($nodeName) successfully in docker container"
             else
                 echo "Testing failed for node $hsaNode ($nodeName) in docker container"
+                ((aggregate_fail+=1))
             fi
             sudo docker rm kfdtest_docker
         else
             if [ -n "$CONCURRENTNODES" ]; then
                 echo "++++ Starting parallel testing on node(s) $CONCURRENTNODES  ++++"
                 $GDB $KFDTEST "--concurrentnodes=$CONCURRENTNODES" $gtestFilter $GTEST_ARGS
+                if [ "$?" != "0" ]; then
+                    ((aggregate_fail+=1))
+                fi
                 echo "++++ Finished parallel testing on node(s) $CONCURRENTNODES  ++++"
-                exit 0;
+                exit $aggregate_fail;
             elif [ -n "$TESTNODENUM" ]; then
                 echo "++++ Starting parallel testing on $TESTNODENUM node(s) ++++"
                 $GDB $KFDTEST "--testnodenum=$TESTNODENUM" $gtestFilter $GTEST_ARGS
+                if [ "$?" != "0" ]; then
+                    ((aggregate_fail+=1))
+                fi
                 echo "++++ Finished parallel testing on $TESTNODENUM node(s) ++++"
-                exit 0;
+                exit $aggregate_fail;
             else
                 echo ""
                 echo "++++ Starting testing node $hsaNode ($nodeName) ++++"
                 $GDB $KFDTEST "--node=$hsaNode" $gtestFilter $GTEST_ARGS
+                if [ "$?" != "0" ]; then
+                    ((aggregate_fail+=1))
+                fi
                 echo "---- Finished testing node $hsaNode ($nodeName) ----"
             fi
-
         fi
 
 
     done
-
+    if [ $aggregate_fail -ne 0 ]; then
+        echo "NOTE: $aggregate_fail nodes failed at least one test"
+    fi
+    exit $aggregate_fail
 }
 
 # Prints number of GPUs present in the system
@@ -298,7 +329,7 @@ while [ "$1" != "" ]; do
         -t  | --testnodenum )
             shift 1; TESTNODENUM="$1" ;;
         --high)
-            FORCE_HIGH="true" ;;
+            echo "--high flag is no longer functional. Flag kept for backwards-compatibility" ;;
         -d  | --docker )
             RUN_IN_DOCKER="true" ;;
         -e  | --exclude )
@@ -328,34 +359,6 @@ else
     done
 fi
 
-# If the SMI is missing, try to find it
-SMI="$(find /opt/rocm* -type l -name rocm-smi 2>/dev/null | tail -1)"
-if [ -z ${SMI} ]; then
-    if [ -x ${BIN_DIR}/rocm-smi ]; then
-	SMI=${BIN_DIR}/rocm-smi
-    else
-	SMI=`which rocm-smi`
-    fi
-fi
-# If the SMI is still missing, just report and continue
-if [ "$FORCE_HIGH" == "true" ]; then
-    if [ -e "$SMI" ]; then
-        OLDPERF=$($SMI -p | awk '/Performance Level:/ {print $NF; exit}')
-	$($SMI --setperflevel high &> /dev/null)
-	if [ $? != 0 ]; then
-            echo "SMI failed to set perf level"
-	    OLDPERF=""
-        fi
-    else
-        echo "Unable to set clocks to high, cannot find rocm-smi"
-    fi
-fi
-
 # Set HSA_DEBUG env to run KFDMemoryTest.PtraceAccessInvisibleVram
 export HSA_DEBUG=1
 runKfdTest
-
-# OLDPERF is only set if FORCE_HIGH and SMI both exist
-if [ -n "$OLDPERF" ]; then
-    $SMI --setperflevel $OLDPERF &> /dev/null
-fi

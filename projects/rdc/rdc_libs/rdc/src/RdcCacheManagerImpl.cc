@@ -375,12 +375,17 @@ rdc_status_t RdcCacheManagerImpl::rdc_job_get_stats(const char jobId[64],
     }
 
     if (is_job_stopped) {
-      gpu_info.pcie_lc_perf_other_end_recovery_count = gpus->second.pcie_lc_perf_other_end_recovery_count_init;
-      summary_info.pcie_lc_perf_other_end_recovery_count += gpu_info.pcie_lc_perf_other_end_recovery_count;
-    } else if (gpu_gauges.find({gpus->first, RDC_FI_PCIE_LC_PERF_OTHER_END_RECOVERY}) != gpu_gauges.end()) {
-      gpu_info.pcie_lc_perf_other_end_recovery_count = gpu_gauges.at({gpus->first, RDC_FI_PCIE_LC_PERF_OTHER_END_RECOVERY}) -
-                               gpus->second.pcie_lc_perf_other_end_recovery_count_init;
-      summary_info.pcie_lc_perf_other_end_recovery_count += gpu_info.pcie_lc_perf_other_end_recovery_count;
+      gpu_info.pcie_lc_perf_other_end_recovery_count =
+          gpus->second.pcie_lc_perf_other_end_recovery_count_init;
+      summary_info.pcie_lc_perf_other_end_recovery_count +=
+          gpu_info.pcie_lc_perf_other_end_recovery_count;
+    } else if (gpu_gauges.find({gpus->first, RDC_FI_PCIE_LC_PERF_OTHER_END_RECOVERY}) !=
+               gpu_gauges.end()) {
+      gpu_info.pcie_lc_perf_other_end_recovery_count =
+          gpu_gauges.at({gpus->first, RDC_FI_PCIE_LC_PERF_OTHER_END_RECOVERY}) -
+          gpus->second.pcie_lc_perf_other_end_recovery_count_init;
+      summary_info.pcie_lc_perf_other_end_recovery_count +=
+          gpu_info.pcie_lc_perf_other_end_recovery_count;
     } else {
       gpu_info.pcie_lc_perf_other_end_recovery_count = 0;
     }
@@ -389,8 +394,9 @@ rdc_status_t RdcCacheManagerImpl::rdc_job_get_stats(const char jobId[64],
       gpu_info.pcie_nak_sent_count_acc = gpus->second.pcie_nak_sent_count_acc_init;
       summary_info.pcie_nak_sent_count_acc += gpu_info.pcie_nak_sent_count_acc;
     } else if (gpu_gauges.find({gpus->first, RDC_FI_PCIE_NAK_SENT_COUNT_ACC}) != gpu_gauges.end()) {
-      gpu_info.pcie_nak_sent_count_acc = gpu_gauges.at({gpus->first, RDC_FI_PCIE_NAK_SENT_COUNT_ACC}) -
-                               gpus->second.pcie_nak_sent_count_acc_init;
+      gpu_info.pcie_nak_sent_count_acc =
+          gpu_gauges.at({gpus->first, RDC_FI_PCIE_NAK_SENT_COUNT_ACC}) -
+          gpus->second.pcie_nak_sent_count_acc_init;
       summary_info.pcie_nak_sent_count_acc += gpu_info.pcie_nak_sent_count_acc;
     } else {
       gpu_info.pcie_nak_sent_count_acc = 0;
@@ -400,8 +406,9 @@ rdc_status_t RdcCacheManagerImpl::rdc_job_get_stats(const char jobId[64],
       gpu_info.pcie_nak_rcvd_count_acc = gpus->second.pcie_nak_rcvd_count_acc_init;
       summary_info.pcie_nak_rcvd_count_acc += gpu_info.pcie_nak_rcvd_count_acc;
     } else if (gpu_gauges.find({gpus->first, RDC_FI_PCIE_NAK_RCVD_COUNT_ACC}) != gpu_gauges.end()) {
-      gpu_info.pcie_nak_rcvd_count_acc = gpu_gauges.at({gpus->first, RDC_FI_PCIE_NAK_RCVD_COUNT_ACC}) -
-                               gpus->second.pcie_nak_rcvd_count_acc_init;
+      gpu_info.pcie_nak_rcvd_count_acc =
+          gpu_gauges.at({gpus->first, RDC_FI_PCIE_NAK_RCVD_COUNT_ACC}) -
+          gpus->second.pcie_nak_rcvd_count_acc_init;
       summary_info.pcie_nak_rcvd_count_acc += gpu_info.pcie_nak_rcvd_count_acc;
     } else {
       gpu_info.pcie_nak_rcvd_count_acc = 0;
@@ -438,27 +445,26 @@ rdc_status_t RdcCacheManagerImpl::rdc_job_get_stats(const char jobId[64],
       } else if (ite->first == RDC_FI_PCIE_BANDWIDTH) {
         set_summary(ite->second, gpu_info.pcie_total, summary_info.pcie_total, 1);
       }
+    }
+    // Set the average of the summary
+    set_average_summary(summary_info.power_usage, p_job_info->num_gpus);
+    set_average_summary(summary_info.gpu_clock, p_job_info->num_gpus);
+    set_average_summary(summary_info.gpu_utilization, p_job_info->num_gpus);
+    set_average_summary(summary_info.memory_utilization, p_job_info->num_gpus);
+    set_average_summary(summary_info.pcie_tx, p_job_info->num_gpus);
+    set_average_summary(summary_info.pcie_rx, p_job_info->num_gpus);
+    set_average_summary(summary_info.gpu_temperature, p_job_info->num_gpus);
+    set_average_summary(summary_info.memory_clock, p_job_info->num_gpus);
+
+    // Set process start/stop info
+    auto& je = cache_jobs_[jobId];
+    p_job_info->num_processes = je.num_processes;
+    for (uint32_t i = 0; i < je.num_processes; ++i) {
+      p_job_info->processes[i] = je.processes[i];
+    }
+
+    return RDC_ST_OK;
   }
-  // Set the average of the summary
-  set_average_summary(summary_info.power_usage, p_job_info->num_gpus);
-  set_average_summary(summary_info.gpu_clock, p_job_info->num_gpus);
-  set_average_summary(summary_info.gpu_utilization, p_job_info->num_gpus);
-  set_average_summary(summary_info.memory_utilization, p_job_info->num_gpus);
-  set_average_summary(summary_info.pcie_tx, p_job_info->num_gpus);
-  set_average_summary(summary_info.pcie_rx, p_job_info->num_gpus);
-  set_average_summary(summary_info.gpu_temperature, p_job_info->num_gpus);
-  set_average_summary(summary_info.memory_clock, p_job_info->num_gpus);
-
-  // Set process start/stop info
-  auto& je = cache_jobs_[jobId];
-  p_job_info->num_processes = je.num_processes;
-  for (uint32_t i = 0; i < je.num_processes; ++i) {
-    p_job_info->processes[i] = je.processes[i];
-  }
-
-  return RDC_ST_OK;
-}
-
 }
 
 void RdcCacheManagerImpl::set_average_summary(rdc_stats_summary_t& summary, uint32_t num_gpus) {
@@ -498,20 +504,25 @@ rdc_status_t RdcCacheManagerImpl::rdc_job_start_stats(const char job_id[64],
     }
 
     gstats.pcie_lc_perf_other_end_recovery_count_init = 0;
-    if (gpu_gauges.find({ginfo.entity_ids[i], RDC_FI_PCIE_LC_PERF_OTHER_END_RECOVERY}) != gpu_gauges.end()) {
-      gstats.pcie_lc_perf_other_end_recovery_count_init = gpu_gauges.at({ginfo.entity_ids[i], RDC_FI_PCIE_LC_PERF_OTHER_END_RECOVERY});
+    if (gpu_gauges.find({ginfo.entity_ids[i], RDC_FI_PCIE_LC_PERF_OTHER_END_RECOVERY}) !=
+        gpu_gauges.end()) {
+      gstats.pcie_lc_perf_other_end_recovery_count_init =
+          gpu_gauges.at({ginfo.entity_ids[i], RDC_FI_PCIE_LC_PERF_OTHER_END_RECOVERY});
     }
 
     gstats.pcie_nak_sent_count_acc_init = 0;
-    if (gpu_gauges.find({ginfo.entity_ids[i], RDC_FI_PCIE_NAK_SENT_COUNT_ACC}) != gpu_gauges.end()) {
-      gstats.pcie_nak_sent_count_acc_init = gpu_gauges.at({ginfo.entity_ids[i], RDC_FI_PCIE_NAK_SENT_COUNT_ACC});
+    if (gpu_gauges.find({ginfo.entity_ids[i], RDC_FI_PCIE_NAK_SENT_COUNT_ACC}) !=
+        gpu_gauges.end()) {
+      gstats.pcie_nak_sent_count_acc_init =
+          gpu_gauges.at({ginfo.entity_ids[i], RDC_FI_PCIE_NAK_SENT_COUNT_ACC});
     }
 
     gstats.pcie_nak_rcvd_count_acc_init = 0;
-    if (gpu_gauges.find({ginfo.entity_ids[i], RDC_FI_PCIE_NAK_RCVD_COUNT_ACC}) != gpu_gauges.end()) {
-      gstats.pcie_nak_rcvd_count_acc_init = gpu_gauges.at({ginfo.entity_ids[i], RDC_FI_PCIE_NAK_RCVD_COUNT_ACC});
+    if (gpu_gauges.find({ginfo.entity_ids[i], RDC_FI_PCIE_NAK_RCVD_COUNT_ACC}) !=
+        gpu_gauges.end()) {
+      gstats.pcie_nak_rcvd_count_acc_init =
+          gpu_gauges.at({ginfo.entity_ids[i], RDC_FI_PCIE_NAK_RCVD_COUNT_ACC});
     }
-
 
     cacheEntry.gpu_stats.insert({ginfo.entity_ids[i], gstats});
   }
@@ -547,19 +558,23 @@ rdc_status_t RdcCacheManagerImpl::rdc_job_stop_stats(const char job_id[64],
                                         gpus->second.ecc_uncorrect_init;
     }
 
-    if (gpu_gauges.find({gpus->first, RDC_FI_PCIE_LC_PERF_OTHER_END_RECOVERY}) != gpu_gauges.end()) {
-      gpus->second.pcie_lc_perf_other_end_recovery_count_init = gpu_gauges.at({gpus->first, RDC_FI_PCIE_LC_PERF_OTHER_END_RECOVERY}) -
-                                        gpus->second.pcie_lc_perf_other_end_recovery_count_init;
+    if (gpu_gauges.find({gpus->first, RDC_FI_PCIE_LC_PERF_OTHER_END_RECOVERY}) !=
+        gpu_gauges.end()) {
+      gpus->second.pcie_lc_perf_other_end_recovery_count_init =
+          gpu_gauges.at({gpus->first, RDC_FI_PCIE_LC_PERF_OTHER_END_RECOVERY}) -
+          gpus->second.pcie_lc_perf_other_end_recovery_count_init;
     }
 
     if (gpu_gauges.find({gpus->first, RDC_FI_PCIE_NAK_SENT_COUNT_ACC}) != gpu_gauges.end()) {
-      gpus->second.pcie_nak_sent_count_acc_init = gpu_gauges.at({gpus->first, RDC_FI_PCIE_NAK_SENT_COUNT_ACC}) -
-                                        gpus->second.pcie_nak_sent_count_acc_init;
+      gpus->second.pcie_nak_sent_count_acc_init =
+          gpu_gauges.at({gpus->first, RDC_FI_PCIE_NAK_SENT_COUNT_ACC}) -
+          gpus->second.pcie_nak_sent_count_acc_init;
     }
 
     if (gpu_gauges.find({gpus->first, RDC_FI_PCIE_NAK_RCVD_COUNT_ACC}) != gpu_gauges.end()) {
-      gpus->second.pcie_nak_rcvd_count_acc_init = gpu_gauges.at({gpus->first, RDC_FI_PCIE_NAK_RCVD_COUNT_ACC}) -
-                                        gpus->second.pcie_nak_rcvd_count_acc_init;
+      gpus->second.pcie_nak_rcvd_count_acc_init =
+          gpu_gauges.at({gpus->first, RDC_FI_PCIE_NAK_RCVD_COUNT_ACC}) -
+          gpus->second.pcie_nak_rcvd_count_acc_init;
     }
   }
 
@@ -633,7 +648,7 @@ rdc_status_t RdcCacheManagerImpl::rdc_health_get_values(
         break;
       }
     }  // end for
-  }    // end if
+  }  // end if
 
   if ((RDC_ST_OK == result) && (end_value != nullptr)) {
     // get end value
@@ -651,7 +666,7 @@ rdc_status_t RdcCacheManagerImpl::rdc_health_get_values(
         break;
       }
     }  // end for
-  }    // end if
+  }  // end if
 
   return result;
 }

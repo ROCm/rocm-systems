@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) 2014-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+ *  Copyright (c) Advanced Micro Devices, Inc., or its affiliates. All rights reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -94,6 +94,18 @@ enum class SubmitOptMode : uint32
     Count
 };
 
+/// Bitflags for @ref RemapVirtualMemoryPages and @ref CopyVirtualMemoryPageMappings
+///
+/// @note The "wait" flags are ignored on platforms which do not support them.
+enum RemapFlags : uint32
+{
+    RemapWaitNone              = 0x0, ///< Do not wait.
+    RemapWaitBefore            = 0x1, ///< Wait for prior queue operations to complete before executing paging ops.
+    RemapWaitAfter             = 0x2, ///< Wait for paging operations to complete before executing subsequent queue ops.
+    RemapForceConsecutiveWaits = 0x4, ///< Disallow an optimization where we skip syncs for consecutive paging calls.
+    RemapAllFlags              = 0x7, ///< Clients should NOT use it, for internal static_assert purpose only.
+};
+
 /// Enumerates vcn instance affinity statuses
 enum MmAffinityStatus : uint32
 {
@@ -154,6 +166,10 @@ typedef void (PAL_STDCALL* CmdDumpCallback)(
     uint32                        numChunks,
     void*                         pUserData);
 
+/// Defines callback function to allow client to modify WaveSize value.
+/// waveSize is defined as scratch allocated per wave, in units of bytes.
+typedef gpusize (PAL_STDCALL *CalcWaveSizeFunc)(gpusize waveSize);
+
 /// Specifies properties for @ref IQueue creation.  Input structure to IDevice::CreateQueue().
 struct QueueCreateInfo
 {
@@ -196,19 +212,15 @@ struct QueueCreateInfo
     };
 
     uint32 numReservedCu;           ///< The number of reserved compute units for RT CU queue
-
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 914
-    uint32 persistentCeRamOffset;   ///< Byte offset to the beginning of the region of CE RAM which this Queue should
-                                    ///  preserve across consecutive submissions.  Must be a multiple of 32.  It is an
-                                    ///  error to specify a nonzero value here if the the Device does not support
-                                    ///  @ref supportPersistentCeRam for the Engine this Queue will attach to.
-    uint32 persistentCeRamSize;     ///< Amount of CE RAM space which this Queue should preserve across consecutive
-                                    ///  submissions.  Units are in DWORDs, and this must be a multiple of 8.  It is an
-                                    ///  error to specify a nonzero value here if the the Device does not support
-                                    ///  @ref supportPersistentCeRam for the Engine this Queue will attach to.
-#endif
-
     uintptr_t aqlPacketList;        ///< Location of the HIP runtime's info about this queue
+};
+
+/// Contains general information about a living IQueue which the client might want to query.
+///
+/// @note Anything added here must be constant for the life of the queue.
+struct QueueProperties
+{
+    uint32 deviceIndex; ///< This queue is owned by the device at this position in the platform's IDevice array.
 };
 
 /// Specifies the portion of @ref SubmitInfo that is specific to each sub-queue in a multi-queue object (@see
@@ -224,6 +236,9 @@ struct PerSubQueueSubmitInfo
     const CmdBufInfo* pCmdBufInfoList;  ///< Null, or an array of cmdBufferCount structs providing additional
                                         ///  info about the command buffers being submitted.  If non-null,
                                         ///  elements are ignored if their isValid flag is false.
+    gpusize**         ppWaveSizes;      ///< Array of pointers that PAL will write the calculated wave size into
+    uint32            numWaveSizes;     ///< Number of entries in ppWaveSizes
+    CalcWaveSizeFunc  pfnCalcWaveSize;  ///< Optional callback used to modify wave size
 };
 
 /// Specifies all information needed to execute a set of command buffers.  Input structure to IQueue::Submit().
@@ -255,6 +270,11 @@ struct MultiSubmitInfo
     const GpuMemoryRef*     pGpuMemoryRefs;       ///< Array of gpuMemRefCount GPU memory references.  Can be null if
                                                   ///  gpuMemRefCount is zero.  The GPU memory objects will be made
                                                   ///  resident for the duration of this submit.
+#if PAL_AMDGPU_BUILD
+    bool                    perSubmitPinnedRefs;  ///< If true, pinned memory Refs(known as host memory, this kind of memory
+                                                  ///  owned by CPU, such as malloc, mmap, etc) are provided in pGpuMemoryRefs
+                                                  ///  m_globalPinnedRefMap will be skipped while m_globalRefMap still merged
+#endif
     uint32                  doppRefCount;         ///< Number of DOPP desktop texture references for this submit.
     const DoppRef*          pDoppRefs;            ///< Array of doppRefCount DOPP texture references.  Can be null if
                                                   ///  doppRefCount is zero.
@@ -376,13 +396,9 @@ struct PresentSwapChainInfo
     {
         struct
         {
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 941
-            uint32 notifyOnly           :  1; ///< True if it is a notify-only present
-#else
             uint32 notifyOnly           :  1; ///< Indicates that a present occurred outside of PAL. PAL must not
                                               ///  execute a present if this is true but may update internal
                                               ///  tracking state.
-#endif
             uint32 isTemporaryMono      :  1; ///< True if WS Stereo is enabled, but 3D display mode turned off.
             uint32 turboSyncEnabled     :  1; ///< Whether TurboSync is enabled.
             uint32 syncIntervalOverride :  1; ///< Override default syncInterval with the value in syncInterval
@@ -464,6 +480,13 @@ struct KernelContextInfo
 class IQueue : public IDestroyable
 {
 public:
+    /// Gets this queue's QueueProperties constants. The returned reference is guaranteed to:
+    ///   1. Be valid until this queue is destroyed.
+    ///   2. Refer to the same address on every call to this queue.
+    ///
+    /// @returns A reference to this queue's QueueProperties.
+    virtual const QueueProperties& Properties() const = 0;
+
     /// Submits a group of root command buffers for execution on this queue.
     ///
     /// @param [in] submitInfo Specifies all command buffers to execute along with other residency and synchronization
@@ -642,9 +665,7 @@ public:
     /// @param [in] rangeCount  Number of ranges to remap (i.e., size of the pRanges array).
     /// @param [in] pRanges     Defines the set of remappings from virtual GPU memory object pages to real GPU
     ///                         memory object pages.
-    /// @param [in] doNotWait   If true, then this paging operation will be executed on the Queue immediately, without
-    ///                         waiting for any previous rendering to finish first. On platforms that don't support
-    ///                         this, the flag will be ignored.
+    /// @param [in] remapFlags  Bitflags which control the paging operations, see @ref RemapFlags.
     /// @param [in] pFence      Optional. Pointer to an IFence, which will be signaled after the VA remapping.
     ///
     /// @returns Success if the remappings were executed successfully.  It is assumed that the following conditions are
@@ -657,16 +678,30 @@ public:
     virtual Result RemapVirtualMemoryPages(
         uint32                         rangeCount,
         const VirtualMemoryRemapRange* pRanges,
-        bool                           doNotWait,
+        uint32                         remapFlags,
         IFence*                        pFence) = 0;
+
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 998
+    /// Backwards compatible API
+    Result RemapVirtualMemoryPages(
+        uint32                         rangeCount,
+        const VirtualMemoryRemapRange* pRanges,
+        bool                           doNotWait,
+        IFence*                        pFence)
+    {
+        uint32 flags = doNotWait ? RemapWaitNone : RemapWaitBefore;
+        return RemapVirtualMemoryPages(rangeCount,
+                                       pRanges,
+                                       flags,
+                                       pFence);
+    }
+#endif
 
     /// Copies page mappings from one virtual GPU memory object to another.
     ///
     /// @param [in] rangeCount  Number of ranges to copy (i.e., size of the pRanges array).
     /// @param [in] pRanges     Defines the set of page mappings to copy between virtual GPU memory objects.
-    /// @param [in] doNotWait   If true, then this paging operation will be executed on the Queue immediately, without
-    ///                         waiting for any previous rendering to finish first. On platforms that don't support
-    ///                         this, the flag will be ignored.
+    /// @param [in] remapFlags  Bitflags which control the paging operations, see @ref RemapFlags.
     ///
     /// @returns Success if the mappings were copied successfully.  It is assumed that the following conditions are
     ///          met for the input to this function:
@@ -678,7 +713,21 @@ public:
     virtual Result CopyVirtualMemoryPageMappings(
         uint32                                    rangeCount,
         const VirtualMemoryCopyPageMappingsRange* pRanges,
-        bool                                      doNotWait) = 0;
+        uint32                                    remapFlags) = 0;
+
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 998
+    /// Backwards compatible API
+    Result CopyVirtualMemoryPageMappings(
+        uint32                                    rangeCount,
+        const VirtualMemoryCopyPageMappingsRange* pRanges,
+        bool                                      doNotWait)
+    {
+        uint32 flags = doNotWait ? RemapWaitNone : RemapWaitBefore;
+        return CopyVirtualMemoryPageMappings(rangeCount,
+                                             pRanges,
+                                             flags);
+    }
+#endif
 
     /// Associates the provided Fence object with the last submission on this queue object. The Fence can be used via
     /// GetStatus() to get the status of the last Submit, however no event will be created/set for the Fence so

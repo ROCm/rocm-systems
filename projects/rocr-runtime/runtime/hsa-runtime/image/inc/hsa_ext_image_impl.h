@@ -123,9 +123,16 @@ hsa_status_t hsa_amd_image_create(hsa_agent_t agent,
                                   const void* image_data, hsa_access_permission_t access_permission,
                                   hsa_ext_image_t* image);
 
+hsa_status_t hsa_amd_image_create_v2(hsa_agent_t agent,
+                                  const hsa_ext_image_descriptor_v2_t* image_descriptor,
+                                  const hsa_amd_image_descriptor_t* image_layout,
+                                  const void* image_data, hsa_access_permission_t access_permission,
+                                  hsa_ext_image_t* image);
+
 // Update Api table with func pointers that implement functionality
 void LoadImage(core::ImageExtTableInternal* image_api,
-               decltype(::hsa_amd_image_create)** interface_api);
+               decltype(::hsa_amd_image_create)** interface_api,
+               decltype(::hsa_amd_image_create_v2)** interface_v2_api);
 
 // Release resources acquired by Image implementation
 void ReleaseImageRsrcs();

@@ -1,26 +1,8 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "dwarf_entry.hpp"
+#include "common/path.hpp"
 #include "core/binary/fwd.hpp"
 #include "core/timemory.hpp"
 #include "core/utility.hpp"
@@ -42,7 +24,9 @@ get_dwarf_address_ranges(Dwarf_Die* _die)
     auto _ranges = std::vector<address_range>{};
 
     if(dwarf_tag(_die) != DW_TAG_compile_unit && dwarf_tag(_die) != DW_TAG_subprogram)
+    {
         return _ranges;
+    }
 
     Dwarf_Addr _low_pc;
     Dwarf_Addr _high_pc;
@@ -53,10 +37,16 @@ get_dwarf_address_ranges(Dwarf_Die* _die)
     {
         Dwarf_Addr _entry_pc;
         dwarf_entrypc(_die, &_entry_pc);
-        if(_entry_pc < _low_pc) _low_pc = _entry_pc;
+        if(_entry_pc < _low_pc)
+        {
+            _low_pc = _entry_pc;
+        }
     }
 
-    if(_low_pc < _high_pc) _ranges.emplace_back(_low_pc, _high_pc);
+    if(_low_pc < _high_pc)
+    {
+        _ranges.emplace_back(_low_pc, _high_pc);
+    }
 
     Dwarf_Addr _base_addr;
     ptrdiff_t  _offset = 0;
@@ -65,7 +55,10 @@ get_dwarf_address_ranges(Dwarf_Die* _die)
         uintptr_t _low  = 0;
         uintptr_t _high = 0;
         _offset         = dwarf_ranges(_die, _offset, &_base_addr, &_low, &_high);
-        if(_low < _high) _ranges.emplace_back(_low, _high);
+        if(_low < _high)
+        {
+            _ranges.emplace_back(_low, _high);
+        }
     } while(_offset > 0);
 
     return _ranges;
@@ -76,12 +69,18 @@ get_dwarf_breakpoints(Dwarf_Die* _die)
 {
     auto _bkpts = std::vector<uintptr_t>{};
 
-    if(dwarf_tag(_die) != DW_TAG_subprogram) return _bkpts;
+    if(dwarf_tag(_die) != DW_TAG_subprogram)
+    {
+        return _bkpts;
+    }
 
     Dwarf_Addr* _pts  = nullptr;
     auto        _npts = dwarf_entry_breakpoints(_die, &_pts);
 
-    if(_npts > 0 && _pts) _bkpts.assign(_pts, _pts + _npts);
+    if(_npts > 0 && _pts)
+    {
+        _bkpts.assign(_pts, _pts + _npts);
+    }
 
     return _bkpts;
 }
@@ -91,7 +90,10 @@ get_dwarf_entry(Dwarf_Die* _die)
 {
     auto _line_info = std::deque<dwarf_entry>{};
 
-    if(dwarf_tag(_die) != DW_TAG_compile_unit) return _line_info;
+    if(dwarf_tag(_die) != DW_TAG_compile_unit)
+    {
+        return _line_info;
+    }
 
     Dwarf_Lines* _lines     = nullptr;
     size_t       _num_lines = 0;
@@ -117,10 +119,16 @@ get_dwarf_entry(Dwarf_Die* _die)
                 dwarf_linediscriminator(_line, &itr.discriminator);
                 dwarf_lineaddr(_line, &_address);
                 itr.address = address_range{ _address };
-                if(_lineno > 0) itr.line = _lineno;
+                if(_lineno > 0)
+                {
+                    itr.line = _lineno;
+                }
                 const auto* _file = dwarf_linesrc(_line, nullptr, nullptr);
-                if(!_file) _file = dwarf_diename(_die);
-                itr.file = filepath::realpath(_file, nullptr, false);
+                if(!_file)
+                {
+                    _file = dwarf_diename(_die);
+                }
+                itr.file = path::realpath(_file);
             }
         }
     }
@@ -168,9 +176,11 @@ dwarf_entry::process_dwarf(int _fd)
         auto& _ranges  = std::get<1>(_data_v);
         auto& _bkpts   = std::get<2>(_data_v);
 
+        // NOLINTBEGIN(misc-const-correctness)
         size_t    cu_header_size = 0;
         Dwarf_Off cu_off         = 0;
         Dwarf_Off next_cu_off    = 0;
+        // NOLINTEND(misc-const-correctness)
         for(; dwarf_nextcu(_dwarf_v, cu_off, &next_cu_off, &cu_header_size, nullptr,
                            nullptr, nullptr) == 0;
             cu_off = next_cu_off)

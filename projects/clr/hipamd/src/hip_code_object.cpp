@@ -1,24 +1,9 @@
 /*
-Copyright (c) 2015 - 2021 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
 #include "hip_code_object.hpp"
 #include "amd_hsa_elf.hpp"
 
@@ -40,7 +25,7 @@ hipError_t ihipFree(void* ptr);
 hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align = 0, bool use_host_ptr = 0);
 
 hipError_t DynCO::loadCodeObject(const char* fname, const void* image) {
-  amd::ScopedLock lock(dclock_);
+  std::scoped_lock lock(dclock_);
 
   // Number of devices = 1 in dynamic code object
   fb_info_ = new FatBinaryInfo(fname, image);
@@ -63,26 +48,14 @@ hipError_t DynCO::loadCodeObject(const char* fname, const void* image) {
 
 // Dynamic Code Object
 DynCO::~DynCO() {
-  amd::ScopedLock lock(dclock_);
+  std::scoped_lock lock(dclock_);
 
   for (auto& elem : vars_) {
-    if (elem.second->getVarKind() == Var::DVK_Managed) {
-      hipError_t err = ihipFree(elem.second->getManagedVarPtr());
+    if (elem.second->GetVarKind() == Var::DVK_Managed) {
+      hipError_t err = ihipFree(elem.second->GetManagedVarPtr());
       assert(err == hipSuccess);
     }
 
-    if (elem.second->getVarKind() == Var::DVK_Variable) {
-      for (auto dev : g_devices) {
-        DeviceVar* dvar = nullptr;
-        hipError_t err = elem.second->getDeviceVarPtr(&dvar, dev->deviceId());
-        assert(err == hipSuccess);
-        if (dvar != nullptr) {
-          // free also deletes the device ptr
-          err = ihipFree(dvar->device_ptr());
-          assert(err == hipSuccess);
-        }
-      }
-    }
     delete elem.second;
   }
   vars_.clear();
@@ -95,8 +68,8 @@ DynCO::~DynCO() {
   delete fb_info_;
 }
 
-hipError_t DynCO::getDeviceVar(DeviceVar** dvar, std::string var_name) {
-  amd::ScopedLock lock(dclock_);
+hipError_t DynCO::GetDeviceVar(amd::Memory** mem, const std::string& var_name) {
+  std::scoped_lock lock(dclock_);
 
   auto it = vars_.find(var_name);
   if (it == vars_.end()) {
@@ -104,12 +77,61 @@ hipError_t DynCO::getDeviceVar(DeviceVar** dvar, std::string var_name) {
     return hipErrorNotFound;
   }
 
-  hipError_t err = it->second->getDeviceVar(dvar, device_id_, module_);
-  return err;
+  return it->second->GetDeviceVar(mem, device_id_, module_);
 }
 
-hipError_t DynCO::getDynFunc(hipFunction_t* hfunc, std::string func_name) {
-  amd::ScopedLock lock(dclock_);
+hip::Var* DynCO::getVar(const std::string& var_name) {
+  std::scoped_lock lock(dclock_);
+  auto it = vars_.find(var_name);
+  return (it != vars_.end()) ? it->second : nullptr;
+}
+
+hipError_t DynCO::GetGlobal(const std::string& name, void** dptr, size_t* bytes) {
+  std::scoped_lock lock(dclock_);
+  if (dptr != nullptr) {
+    *dptr = nullptr;
+  }
+  IHIP_RETURN_ONFAIL(getManagedVarPointer(name, dptr, bytes));
+  if ((dptr != nullptr && *dptr == nullptr) || (bytes != nullptr && *bytes == 0)) {
+    amd::Memory* mem = nullptr;
+    IHIP_RETURN_ONFAIL(GetDeviceVar(&mem, name));
+    if (dptr != nullptr) {
+      *dptr = memDevPtr(mem);
+    }
+    if (bytes != nullptr) {
+      *bytes = mem->getSize();
+    }
+  }
+  return hipSuccess;
+}
+
+hipError_t DynCO::GetManaged(const std::string& name, void** dptr, size_t* bytes) {
+  std::scoped_lock lock(dclock_);
+  auto it = vars_.find(name);
+  if (it == vars_.end() || it->second->GetVarKind() != Var::DVK_Managed) {
+    return hipErrorNotFound;
+  }
+  if (dptr != nullptr) {
+    *dptr = it->second->GetManagedVarPtr();
+  }
+  if (bytes != nullptr) {
+    *bytes = it->second->GetSize();
+  }
+  return hipSuccess;
+}
+
+std::vector<std::string> DynCO::getFunctionNames() {
+  std::scoped_lock lock(dclock_);
+  std::vector<std::string> names;
+  names.reserve(functions_.size());
+  for (const auto& kv : functions_) {
+    names.push_back(kv.first);
+  }
+  return names;
+}
+
+hipError_t DynCO::getDynFunc(hipFunction_t* hfunc, const std::string& func_name) {
+  std::scoped_lock lock(dclock_);
 
   if (hfunc == nullptr) {
     return hipErrorInvalidValue;
@@ -117,16 +139,16 @@ hipError_t DynCO::getDynFunc(hipFunction_t* hfunc, std::string func_name) {
 
   auto it = functions_.find(func_name);
   if (it == functions_.end()) {
-    LogPrintfError("Cannot find the function: %s ", func_name.c_str());
+    LogPrintfInfo("Cannot find the function: %s", func_name.c_str());
     return hipErrorNotFound;
   }
 
   /* See if this could be solved */
-  return it->second->getDynFunc(hfunc, module_);
+  return it->second->GetDynFunc(hfunc, module_);
 }
 
 hipError_t DynCO::getFuncCount(unsigned int* count) {
-  amd::ScopedLock lock(dclock_);
+  std::scoped_lock lock(dclock_);
   if (count == nullptr) {
     return hipErrorInvalidValue;
   }
@@ -134,36 +156,49 @@ hipError_t DynCO::getFuncCount(unsigned int* count) {
   return hipSuccess;
 }
 
-bool DynCO::isValidDynFunc(const void* hfunc) {
-  amd::ScopedLock lock(dclock_);
-  return std::any_of(functions_.begin(), functions_.end(),
-                     [&](auto& it) { return it.second->isValidDynFunc(hfunc); });
+hipError_t DynCO::enumerateFunctions(hipFunction_t* functions, unsigned int numFunctions) {
+  std::scoped_lock lock(dclock_);
+
+  assert(functions != nullptr);
+  unsigned int count = 0;
+  for (const auto& kv : functions_) {
+    if (count >= numFunctions) {
+      break;
+    }
+    hipFunction_t hfunc = nullptr;
+    auto ret = kv.second->GetDynFunc(&hfunc, module_);
+    if (ret != hipSuccess) {
+      return ret;
+    }
+    functions[count++] = hfunc;
+  }
+  return hipSuccess;
 }
 
 hipError_t DynCO::initDynManagedVars(const std::string& managedVar) {
-  amd::ScopedLock lock(dclock_);
-  DeviceVar* dvar;
+  std::scoped_lock lock(dclock_);
+  amd::Memory* mem = nullptr;
   void* pointer = nullptr;
   hipError_t status = hipSuccess;
   // To get size of the managed variable
-  status = getDeviceVar(&dvar, managedVar + ".managed");
+  status = GetDeviceVar(&mem, managedVar + ".managed");
   if (status != hipSuccess) {
     ClPrint(amd::LOG_ERROR, amd::LOG_API, "Status %d, failed to get .managed device variable:%s",
             status, managedVar.c_str());
     return status;
   }
   // Allocate managed memory for these symbols
-  status = ihipMallocManaged(&pointer, dvar->size(), 0, 0);
+  status = ihipMallocManaged(&pointer, mem->getSize(), 0, 0);
   guarantee(status == hipSuccess, "Status %d, failed to allocate managed memory", status);
 
   // update as manager variable and set managed memory pointer and size
   auto it = vars_.find(managedVar);
-  it->second->setManagedVarInfo(pointer, dvar->size());
+  it->second->SetManagedVarInfo(pointer, mem->getSize());
 
   // copy initial value to the managed variable to the managed memory allocated
   hip::Stream* stream = hip::getNullStream();
   if (stream != nullptr) {
-    status = ihipMemcpy(pointer, reinterpret_cast<address>(dvar->device_ptr()), dvar->size(),
+    status = ihipMemcpy(pointer, reinterpret_cast<address>(memDevPtr(mem)), mem->getSize(),
                         hipMemcpyDeviceToDevice, *stream);
     if (status != hipSuccess) {
       ClPrint(amd::LOG_ERROR, amd::LOG_API, "Status %d, failed to copy device ptr:%s", status,
@@ -175,15 +210,15 @@ hipError_t DynCO::initDynManagedVars(const std::string& managedVar) {
     return hipErrorInvalidResourceHandle;
   }
 
-  // Get deivce ptr to initialize with managed memory pointer
-  status = getDeviceVar(&dvar, managedVar);
+  // Get device ptr to initialize with managed memory pointer
+  status = GetDeviceVar(&mem, managedVar);
   if (status != hipSuccess) {
     ClPrint(amd::LOG_ERROR, amd::LOG_API, "Status %d, failed to get managed device variable:%s",
             status, managedVar.c_str());
     return status;
   }
   // copy managed memory pointer to the managed device variable
-  status = ihipMemcpy(reinterpret_cast<address>(dvar->device_ptr()), &pointer, dvar->size(),
+  status = ihipMemcpy(reinterpret_cast<address>(memDevPtr(mem)), &pointer, mem->getSize(),
                       hipMemcpyHostToDevice, *stream);
   if (status != hipSuccess) {
     ClPrint(amd::LOG_ERROR, amd::LOG_API, "Status %d, failed to copy device ptr:%s", status,
@@ -194,7 +229,7 @@ hipError_t DynCO::initDynManagedVars(const std::string& managedVar) {
 }
 
 hipError_t DynCO::populateDynGlobalVars() {
-  amd::ScopedLock lock(dclock_);
+  std::scoped_lock lock(dclock_);
   hipError_t err = hipSuccess;
   std::vector<std::string> var_names;
   std::string managedVarExt = ".managed";
@@ -223,7 +258,7 @@ hipError_t DynCO::populateDynGlobalVars() {
 }
 
 hipError_t DynCO::populateDynGlobalFuncs() {
-  amd::ScopedLock lock(dclock_);
+  std::scoped_lock lock(dclock_);
 
   std::vector<std::string> func_names;
   device::Program* dev_program = fb_info_->GetProgram(ihipGetDevice())
@@ -235,7 +270,24 @@ hipError_t DynCO::populateDynGlobalFuncs() {
     return hipErrorSharedObjectSymbolNotFound;
   }
 
+  // COMGR returns every AMD_COMGR_SYMBOL_TYPE_FUNC entry in the ELF, which
+  // includes C++ ABI helpers like __cxa_deleted_virtual that have no HSA
+  // kernel symbol. Filter to user-callable kernels — anything else would
+  // SIGABRT inside Function::BuildKernel's findSymbol guarantee when later
+  // resolved via hipLibraryEnumerateKernels / hipLibraryGetKernel.
+  amd::Program* amd_program = as_amd(reinterpret_cast<cl_program>(module_));
   for (auto& elem : func_names) {
+    if (amd_program == nullptr || amd_program->findSymbol(elem.c_str()) == nullptr) continue;
+    // if symbols are init/fini, we trim them out
+    // These are ASAN specific symbols and we do not bubble them up to the user
+    // This means something like count of kernels in code object remains the same.
+#if defined(__clang__)
+#if __has_feature(address_sanitizer)
+    if (elem == "amdgcn.device.init" || elem == "amdgcn.device.fini") {
+      continue;
+    }
+#endif
+#endif
     functions_.insert(std::make_pair(elem, new Function(elem)));
   }
 
@@ -246,7 +298,7 @@ hipError_t DynCO::populateDynGlobalFuncs() {
 StatCO::StatCO(const PlatformState& owner) : owner_(owner) {}
 
 StatCO::~StatCO() {
-  amd::ScopedLock lock(sclock_);
+  std::scoped_lock lock(sclock_);
 
   for (auto& elem : functions_) {
     delete elem.second;
@@ -260,7 +312,7 @@ StatCO::~StatCO() {
 }
 
 hipError_t StatCO::DigestFatBinary(const void* data, FatBinaryInfo*& programs) {
-  amd::ScopedLock lock(sclock_);
+  std::scoped_lock lock(sclock_);
 
   if (programs != nullptr) {
     return hipSuccess;
@@ -307,7 +359,7 @@ hipError_t StatCO::DigestFatBinary(const void* data, FatBinaryInfo*& programs) {
 }
 
 FatBinaryInfo** StatCO::AddFatBinary(const void* data, bool& success) {
-  amd::ScopedLock lock(sclock_);
+  std::scoped_lock lock(sclock_);
   module_to_hostModule_.insert(std::make_pair(&modules_[data], data));
 
   if (!owner_.IsInitialized()) {
@@ -323,7 +375,7 @@ FatBinaryInfo** StatCO::AddFatBinary(const void* data, bool& success) {
 
 FatBinaryInfo** StatCO::AddKpackBinary(const void* hipk_metadata, const void* wrapper_addr,
                                        bool& success) {
-  amd::ScopedLock lock(sclock_);
+  std::scoped_lock lock(sclock_);
 
   // Use wrapper_addr as the key (same as data pointer for normal path)
   // This allows DigestFatBinary to access the wrapper and detect HIPK magic
@@ -342,7 +394,7 @@ FatBinaryInfo** StatCO::AddKpackBinary(const void* hipk_metadata, const void* wr
 }
 
 hipError_t StatCO::RemoveFatBinary(FatBinaryInfo** module) {
-  amd::ScopedLock lock(sclock_);
+  std::scoped_lock lock(sclock_);
 
   auto hostVarsIter = module_to_hostVars_.find(module);
   if (hostVarsIter != module_to_hostVars_.end()) {
@@ -362,20 +414,11 @@ hipError_t StatCO::RemoveFatBinary(FatBinaryInfo** module) {
   if (managedVarsIter != managedVars_.end()) {
     for (auto& managedVar : managedVarsIter->second) {
       hipError_t err = hipSuccess;
-      for (auto dev : g_devices) {
-        DeviceVar* dvar = nullptr;
-        IHIP_RETURN_ONFAIL(managedVar->getDeviceVarPtr(&dvar, dev->deviceId()));
-        if (dvar != nullptr) {
-          // free also deletes the device ptr
-          err = ihipFree(dvar->device_ptr());
-          assert(err == hipSuccess);
-        }
-      }
-      if (managedVar->getAllocFlag()) {  // check if it is a managed or host alloc
-        err = ihipFree(*(static_cast<void**>(managedVar->getManagedVarPtr())));
+      if (managedVar->GetAllocFlag()) {  // check if it is a managed or host alloc
+        err = ihipFree(*(static_cast<void**>(managedVar->GetManagedVarPtr())));
       } else {
-        void** pointer = static_cast<void**>(managedVar->getManagedVarPtr());
-        amd::Os::releaseMemory(*pointer, managedVar->getSize());
+        void** pointer = static_cast<void**>(managedVar->GetManagedVarPtr());
+        amd::Os::releaseMemory(*pointer, managedVar->GetSize());
       }
       assert(err == hipSuccess);
       delete managedVar;
@@ -417,7 +460,7 @@ hipError_t StatCO::RemoveFatBinary(FatBinaryInfo** module) {
 
 // =================================================================================================
 void StatCO::RemoveAllFatBinaries() {
-  amd::ScopedLock lock(sclock_);
+  std::scoped_lock lock(sclock_);
 
   // Clear mapping tables that associate modules with host-side constructs
   module_to_hostModule_.clear();
@@ -435,23 +478,23 @@ void StatCO::RemoveAllFatBinaries() {
     for (auto& managed_var : managed_vars) {
       // Free device-specific allocations across all devices
       for (auto dev : g_devices) {
-        DeviceVar* dvar = nullptr;
-        if (managed_var->getDeviceVarPtr(&dvar, dev->deviceId()) == hipSuccess && dvar) {
+        amd::Memory* mem = nullptr;
+        if (managed_var->GetDeviceVarPtr(&mem, dev->deviceId()) == hipSuccess && mem) {
           // Free device memory (also deletes the device ptr)
-          [[maybe_unused]] hipError_t err = ihipFree(dvar->device_ptr());
+          [[maybe_unused]] hipError_t err = ihipFree(memDevPtr(mem));
           assert(err == hipSuccess);
         }
       }
 
       // Free the managed memory allocation itself
-      void** managed_ptr = static_cast<void**>(managed_var->getManagedVarPtr());
-      if (managed_var->getAllocFlag()) {
+      void** managed_ptr = static_cast<void**>(managed_var->GetManagedVarPtr());
+      if (managed_var->GetAllocFlag()) {
         // Memory was allocated with ihipMallocManaged - use ihipFree
         [[maybe_unused]] hipError_t err = ihipFree(*managed_ptr);
         assert(err == hipSuccess);
       } else {
         // Memory was allocated with OS-level allocator - use OS release
-        amd::Os::releaseMemory(*managed_ptr, managed_var->getSize());
+        amd::Os::releaseMemory(*managed_ptr, managed_var->GetSize());
       }
       delete managed_var;
     }
@@ -472,7 +515,7 @@ void StatCO::RemoveAllFatBinaries() {
 }
 
 hipError_t StatCO::RegisterFunction(const void* hostFunction, Function* func) {
-  amd::ScopedLock lock(sclock_);
+  std::scoped_lock lock(sclock_);
 
   if (functions_.find(hostFunction) != functions_.end()) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_API,
@@ -480,20 +523,20 @@ hipError_t StatCO::RegisterFunction(const void* hostFunction, Function* func) {
     delete func;
   } else {
     functions_.insert(std::make_pair(hostFunction, func));
-    module_to_hostFunctions_[func->moduleInfo()].push_back(hostFunction);
+    module_to_hostFunctions_[func->ModuleInfo()].push_back(hostFunction);
   }
 
   return hipSuccess;
 }
 
 const char* StatCO::GetFuncName(const void* hostFunction) {
-  amd::ScopedLock lock(sclock_);
+  std::scoped_lock lock(sclock_);
 
   const auto it = functions_.find(hostFunction);
   if (it == functions_.end()) {
     return nullptr;
   }
-  return it->second->name().c_str();
+  return it->second->GetName().c_str();
 }
 
 hipError_t StatCO::GetFunc(hipFunction_t* hfunc, const void* hostFunction, int deviceId) {
@@ -503,27 +546,26 @@ hipError_t StatCO::GetFunc(hipFunction_t* hfunc, const void* hostFunction, int d
   }
 
   // Lazy load
-  FatBinaryInfo** module = it->second->moduleInfo();
-  if (module != nullptr) {
-    amd::ScopedLock lock(sclock_);
-    if (*(module) == nullptr) {
-      hipError_t err = DigestFatBinary(module_to_hostModule_[module], *module);
-
-      if (err != hipSuccess) {
-        return err;
-      }
-    }
-  } else {
-    // Module was nullptr
+  FatBinaryInfo** module = it->second->ModuleInfo();
+  if (module == nullptr) {
     return hipErrorInvalidDeviceFunction;
   }
 
-  return it->second->getStatFunc(hfunc, deviceId);
+  // Only take sclock_ when the module has not been loaded yet. Once loaded the
+  // fast path avoids the lock entirely.
+  if (*(module) == nullptr) {
+    std::scoped_lock lock(sclock_);
+    if (*(module) == nullptr) {
+     IHIP_RETURN_ONFAIL(DigestFatBinary(module_to_hostModule_[module], *module));
+    }
+  }
+
+  return it->second->GetStatFunc(hfunc, deviceId);
 }
 
 hipError_t StatCO::GetFuncAttr(hipFuncAttributes* func_attr, const void* hostFunction,
                                int deviceId) {
-  amd::ScopedLock lock(sclock_);
+  std::scoped_lock lock(sclock_);
 
   const auto it = functions_.find(hostFunction);
   if (it == functions_.end()) {
@@ -531,30 +573,30 @@ hipError_t StatCO::GetFuncAttr(hipFuncAttributes* func_attr, const void* hostFun
   }
 
   // Lazy load
-  FatBinaryInfo** module = it->second->moduleInfo();
+  FatBinaryInfo** module = it->second->ModuleInfo();
   if (*(module) == nullptr) {
-    std::ignore = DigestFatBinary(module_to_hostModule_[module], *module);
+    IHIP_RETURN_ONFAIL(DigestFatBinary(module_to_hostModule_[module], *module));
   }
 
-  return it->second->getStatFuncAttr(func_attr, deviceId);
+  return it->second->GetStatFuncAttr(func_attr, deviceId);
 }
 
 hipError_t StatCO::RegisterGlobalVar(const void* hostVar, Var* var) {
-  amd::ScopedLock lock(sclock_);
+  std::scoped_lock lock(sclock_);
 
   auto var_it = vars_.find(hostVar);
-  if ((var_it != vars_.end()) && (var_it->second->getName() != var->getName())) {
+  if ((var_it != vars_.end()) && (var_it->second->GetName() != var->GetName())) {
     return hipErrorInvalidSymbol;
   }
 
   vars_.insert(std::make_pair(hostVar, var));
-  module_to_hostVars_[var->moduleInfo()].push_back(hostVar);
+  module_to_hostVars_[var->ModuleInfo()].push_back(hostVar);
   return hipSuccess;
 }
 
 hipError_t StatCO::GetGlobalVar(const void* hostVar, int deviceId, hipDeviceptr_t* dev_ptr,
                                 size_t* size_ptr) {
-  amd::ScopedLock lock(sclock_);
+  std::scoped_lock lock(sclock_);
 
   const auto it = vars_.find(hostVar);
   if (it == vars_.end()) {
@@ -562,52 +604,71 @@ hipError_t StatCO::GetGlobalVar(const void* hostVar, int deviceId, hipDeviceptr_
   }
 
   // Lazy load
-  FatBinaryInfo** module = it->second->moduleInfo();
+  FatBinaryInfo** module = it->second->ModuleInfo();
   if (*(module) == nullptr) {
-    std::ignore = DigestFatBinary(module_to_hostModule_[module], *module);
+    IHIP_RETURN_ONFAIL(DigestFatBinary(module_to_hostModule_[module], *module));
   }
 
-  DeviceVar* dvar = nullptr;
-  IHIP_RETURN_ONFAIL(it->second->getStatDeviceVar(&dvar, deviceId));
+  amd::Memory* mem = nullptr;
+  IHIP_RETURN_ONFAIL(it->second->GetStatDeviceVar(&mem, deviceId));
 
-  *dev_ptr = dvar->device_ptr();
-  *size_ptr = dvar->size();
+  if (mem == nullptr) {
+    // Handle size-0 globals: return null device pointer and size 0.
+    *dev_ptr = 0;
+    *size_ptr = 0;
+    return hipSuccess;
+  }
+  *dev_ptr = memDevPtr(mem);
+  *size_ptr = mem->getSize();
   return hipSuccess;
 }
 
 hipError_t StatCO::RegisterManagedVar(Var* var) {
-  managedVars_[var->moduleInfo()].push_back(var);
+  managedVars_[var->ModuleInfo()].push_back(var);
   return hipSuccess;
 }
 
 // ================================================================================================
 void StatCO::ResizeForDevices(size_t device_count) {
-  amd::ScopedLock lock(sclock_);
+  std::scoped_lock lock(sclock_);
+  managedVarsDevicePtrInitialized_ = std::make_unique<std::atomic<bool>[]>(device_count);
+  // Explicitly initialize each per-device flag to false before it can be read by
+  // the lock-free fast path in InitManagedVarDevicePtr.
+  for (size_t i = 0; i < device_count; ++i) {
+    managedVarsDevicePtrInitialized_[i].store(false, std::memory_order_relaxed);
+  }
+  managedVarsDevicePtrInitializedSize_ = device_count;
   for (const auto& it : vars_) {
-    it.second->resize_dVar(device_count);
+    it.second->ResizeDVar(device_count);
   }
   for (const auto& it : managedVars_) {
     for (const auto& var : it.second) {
-      var->resize_dVar(device_count);
+      var->ResizeDVar(device_count);
     }
   }
   for (const auto& it : functions_) {
-    it.second->resize_dFunc(device_count);
+    it.second->ResizeDFunc(device_count);
   }
 }
 
 // ================================================================================================
 hipError_t StatCO::InitManagedVarDevicePtr(int deviceId) {
-  amd::ScopedLock lock(sclock_);
+  // Fast lock free path
+  if (deviceId >= 0 && static_cast<size_t>(deviceId) < managedVarsDevicePtrInitializedSize_ &&
+      managedVarsDevicePtrInitialized_[deviceId].load(std::memory_order_acquire)) {
+    return hipSuccess;
+  }
+
+  std::scoped_lock lock(sclock_);
   hipError_t err = hipSuccess;
-  if (managedVarsDevicePtrInitalized_.find(deviceId) == managedVarsDevicePtrInitalized_.end() ||
-      !managedVarsDevicePtrInitalized_[deviceId]) {
+  // Re-check under the lock in case another thread initialized this device while we waited.
+  if (!managedVarsDevicePtrInitialized_[deviceId].load(std::memory_order_relaxed)) {
     for (auto& vecIter : managedVars_) {
       for (auto& var : vecIter.second) {
         // Lazy load
-        FatBinaryInfo** module = var->moduleInfo();
+        FatBinaryInfo** module = var->ModuleInfo();
         if (*(module) == nullptr) {
-          std::ignore = DigestFatBinary(module_to_hostModule_[module], *module);
+          IHIP_RETURN_ONFAIL(DigestFatBinary(module_to_hostModule_[module], *module));
         }
         hip::Stream* stream = g_devices.at(deviceId)->NullStream();
         if (stream == nullptr) {
@@ -615,16 +676,63 @@ hipError_t StatCO::InitManagedVarDevicePtr(int deviceId) {
           return hipErrorInvalidResourceHandle;
         }
         // Allocate managed var for deferred loading
-        IHIP_RETURN_ONFAIL(var->allocateManagedVarPtr());
+        IHIP_RETURN_ONFAIL(var->AllocateManagedVarPtr());
         // Copy from managed var host to device ptr
-        DeviceVar* dvar = nullptr;
-        IHIP_RETURN_ONFAIL(var->getStatDeviceVar(&dvar, deviceId));
-        err = ihipMemcpy(reinterpret_cast<address>(dvar->device_ptr()), var->getManagedVarPtr(),
-                         dvar->size(), hipMemcpyHostToDevice, *stream);
+        amd::Memory* mem = nullptr;
+        IHIP_RETURN_ONFAIL(var->GetStatDeviceVar(&mem, deviceId));
+        err = ihipMemcpy(reinterpret_cast<address>(memDevPtr(mem)), var->GetManagedVarPtr(),
+                         mem->getSize(), hipMemcpyHostToDevice, *stream);
       }
     }
-    managedVarsDevicePtrInitalized_[deviceId] = true;
+    managedVarsDevicePtrInitialized_[deviceId].store(true, std::memory_order_release);
   }
   return err;
+}
+
+// ================================================================================================
+Var* StatCO::FindDeferredManagedVar(const void* ptr) {
+  std::scoped_lock lock(sclock_);
+  for (const auto& [_, vars] : managedVars_) {
+    for (auto* var : vars) {
+      void* base = *static_cast<void**>(var->GetManagedVarPtr());
+      if (base != nullptr && base == ptr) return var;
+    }
+  }
+  return nullptr;
+}
+
+// ================================================================================================
+void StatCO::ForEachFatBinaryBlob(void (*cb)(const void*)) const {
+  std::scoped_lock lock(sclock_);
+  for (const auto& [data, _] : modules_) {
+    cb(data);
+  }
+}
+
+// ================================================================================================
+void StatCO::ForEachGlobalVar(void (*cb)(const void*, const char*, size_t,
+                                         const void*)) {
+  std::scoped_lock lock(sclock_);
+  // Resolved here rather than by the caller: this sweep runs from HRR's
+  // capture init, which is inside hip::init(), and re-entering the runtime
+  // through hipGetSymbolAddress from there deadlocks on the init once-flag.
+  // No device is current that early, and GetGlobalVar asserts rather than
+  // erroring on a negative device id, so the address is reported as
+  // unresolved instead.
+  // No device is current this early in init, and GetGlobalVar asserts rather
+  // than erroring on a negative id, so fall back to device 0 — which is the
+  // device a recording resolves its globals on anyway.
+  int device_id = ihipGetDevice();
+  if (device_id < 0) device_id = 0;
+  const bool resolvable = static_cast<size_t>(device_id) < g_devices.size();
+  for (const auto& [host_var, var] : vars_) {
+    if (var == nullptr) continue;
+    hipDeviceptr_t dev_ptr = nullptr;
+    size_t sym_size = 0;
+    if (resolvable &&
+        GetGlobalVar(host_var, device_id, &dev_ptr, &sym_size) != hipSuccess)
+      dev_ptr = nullptr;
+    cb(host_var, var->GetName().c_str(), var->GetSize(), dev_ptr);
+  }
 }
 }  // namespace hip

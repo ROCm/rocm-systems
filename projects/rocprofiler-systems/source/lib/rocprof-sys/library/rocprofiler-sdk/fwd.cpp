@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "library/rocprofiler-sdk/fwd.hpp"
 #include "core/state.hpp"
@@ -31,14 +12,12 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
-#include <spdlog/fmt/ranges.h>
+#include <fmt/ranges.h>
 
 #include <algorithm>
 #include <utility>
 
-namespace rocprofsys
-{
-namespace rocprofiler_sdk
+namespace rocprofsys::rocprofiler_sdk
 {
 namespace
 {
@@ -53,7 +32,9 @@ dimensions_info_callback(rocprofiler_counter_id_t /*id*/,
         static_cast<std::vector<rocprofiler_record_dimension_info_t>*>(user_data);
     dimensions_info->reserve(num_dims);
     for(size_t j = 0; j < num_dims; j++)
+    {
         dimensions_info->emplace_back(dim_info[j]);
+    }
 
     return ROCPROFILER_STATUS_SUCCESS;
 }
@@ -63,7 +44,7 @@ counters_supported_callback(rocprofiler_agent_id_t    agent_id,
                             rocprofiler_counter_id_t* counters, size_t num_counters,
                             void* user_data)
 {
-    using value_type = typename agent_counter_info_map_t::mapped_type;
+    using value_type = agent_counter_info_map_t::mapped_type;
 
     auto* data_v = static_cast<agent_counter_info_map_t*>(user_data);
     data_v->emplace(agent_id, value_type{});
@@ -80,7 +61,9 @@ counters_supported_callback(rocprofiler_agent_id_t    agent_id,
             counters[i], dimensions_info_callback, &_dim_info));
 
         if(!_info.is_constant)
+        {
             data_v->at(agent_id).emplace_back(agent_id, _info, std::move(_dim_info));
+        }
     }
     return ROCPROFILER_STATUS_SUCCESS;
 }
@@ -160,7 +143,9 @@ client_data::initialize_event_info()
     }
 
     if(agent_counter_info.size() != gpu_agents.size())
+    {
         agent_counter_info = get_agent_counter_info(gpu_agents);
+    }
 
     try
     {
@@ -192,18 +177,30 @@ client_data::initialize_event_info()
                       [](const rocprofiler_tool_counter_info_t& lhs,
                          const rocprofiler_tool_counter_info_t& rhs) {
                           if(lhs.is_constant && rhs.is_constant)
+                          {
                               return lhs.id < rhs.id;
-                          else if(lhs.is_constant)
+                          }
+                          if(lhs.is_constant)
+                          {
                               return true;
-                          else if(rhs.is_constant)
+                          }
+                          if(rhs.is_constant)
+                          {
                               return false;
+                          }
 
                           if(!lhs.is_derived && !rhs.is_derived)
+                          {
                               return lhs.id < rhs.id;
-                          else if(!lhs.is_derived)
+                          }
+                          if(!lhs.is_derived)
+                          {
                               return true;
-                          else if(!rhs.is_derived)
+                          }
+                          if(!rhs.is_derived)
+                          {
                               return false;
+                          }
 
                           return lhs.id < rhs.id;
                       });
@@ -217,7 +214,7 @@ client_data::initialize_event_info()
                 {
                     continue;
                 }
-                else if(ditr.is_derived)
+                if(ditr.is_derived)
                 {
                     auto _sym = fmt::format("{}:device={}", ditr.name, _dev_index);
                     auto _short_desc =
@@ -237,7 +234,10 @@ client_data::initialize_event_info()
                             (itr.instance_size > 1)
                                 ? fmt::format("{}[0:{}]", itr.name, itr.instance_size - 1)
                                 : std::string{};
-                        if(!_info.empty()) _dim_info.emplace_back(_info);
+                        if(!_info.empty())
+                        {
+                            _dim_info.emplace_back(_info);
+                        }
                     }
 
                     auto _sym = fmt::format("{}:device={}", ditr.name, _dev_index);
@@ -269,12 +269,12 @@ client_data::set_agents()
         const auto& _agents = agent_mngr.get_agents_by_type(type);
         for(const auto& agent : _agents)
         {
-            out.emplace_back(tool_agent{ agent->device_type_index, agent.get() });
+            out.emplace_back(tool_agent{ .device_id = agent->device_type_index,
+                                         .agent     = agent.get() });
         }
     };
 
-    fill_agents(agent_type::GPU, gpu_agents);
-    fill_agents(agent_type::CPU, cpu_agents);
+    fill_agents(agent_type::gpu, gpu_agents);
+    fill_agents(agent_type::cpu, cpu_agents);
 }
-}  // namespace rocprofiler_sdk
-}  // namespace rocprofsys
+}  // namespace rocprofsys::rocprofiler_sdk

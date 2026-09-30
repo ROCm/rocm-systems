@@ -1,0 +1,73 @@
+cmake_minimum_required(VERSION 3.16)
+project(perf_dkms_test_suite LANGUAGES CXX)
+
+# Find HIP
+if(NOT DEFINED HIP_PATH)
+    if(NOT DEFINED ENV{HIP_PATH})
+        if(DEFINED ENV{ROCM_PATH})
+            set(HIP_PATH "$ENV{ROCM_PATH}" CACHE PATH "Path to HIP installation")
+        else()
+            set(HIP_PATH "/opt/rocm" CACHE PATH "Path to HIP installation")
+        endif()
+    else()
+        set(HIP_PATH $ENV{HIP_PATH} CACHE PATH "Path to HIP installation")
+    endif()
+endif()
+
+list(APPEND CMAKE_PREFIX_PATH ${HIP_PATH})
+find_package(hip REQUIRED)
+
+# Enable HIP language
+enable_language(HIP)
+
+# Set C++ standard
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+# Add common infrastructure
+add_subdirectory(common)
+
+# Add all test applications
+add_subdirectory(valu_heavy)
+add_subdirectory(salu_heavy)
+add_subdirectory(lds_basic)
+add_subdirectory(lds_conflicts)
+add_subdirectory(smem)
+add_subdirectory(buffer_read)
+add_subdirectory(buffer_write)
+add_subdirectory(flat_memory)
+add_subdirectory(mem_sizes)
+add_subdirectory(cache_hit)
+add_subdirectory(cache_miss)
+add_subdirectory(wave_modes)
+add_subdirectory(waits_stalls)
+add_subdirectory(basic_activity)
+
+# Print summary
+message(STATUS "")
+message(STATUS "=============================================================")
+message(STATUS "Perf-DKMS Test Suite Configuration Summary")
+message(STATUS "=============================================================")
+message(STATUS "HIP Path: ${HIP_PATH}")
+message(STATUS "CXX Compiler: ${CMAKE_CXX_COMPILER}")
+message(STATUS "HIP Compiler: ${CMAKE_HIP_COMPILER}")
+message(STATUS "Build Type: ${CMAKE_BUILD_TYPE}")
+message(STATUS "")
+message(STATUS "Test Applications:")
+message(STATUS "  1. valu_heavy      - VALU compute intensive")
+message(STATUS "  2. salu_heavy      - SALU operations")
+message(STATUS "  3. lds_basic       - Basic LDS operations")
+message(STATUS "  4. lds_conflicts   - LDS bank conflicts")
+message(STATUS "  5. smem            - Scalar memory operations")
+message(STATUS "  6. buffer_read     - Buffer read operations")
+message(STATUS "  7. buffer_write    - Buffer write operations")
+message(STATUS "  8. flat_memory     - FLAT addressing")
+message(STATUS "  9. mem_sizes       - Various memory transaction sizes")
+message(STATUS " 10. cache_hit       - L2 cache hits")
+message(STATUS " 11. cache_miss      - L2 cache misses")
+message(STATUS " 12. wave_modes      - Wave32/Wave64 tests")
+message(STATUS " 13. waits_stalls    - Wait states and stalls")
+message(STATUS " 14. basic_activity  - Basic GPU activity")
+message(STATUS "=============================================================")
+message(STATUS "")

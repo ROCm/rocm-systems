@@ -77,6 +77,7 @@ install(TARGETS rocm_kpack
     EXPORT rocm-kpack-targets
     LIBRARY DESTINATION lib
     ARCHIVE DESTINATION lib
+    RUNTIME DESTINATION bin
     PUBLIC_HEADER DESTINATION include/rocm_kpack
 )
 

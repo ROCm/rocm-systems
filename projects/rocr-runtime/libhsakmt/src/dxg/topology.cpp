@@ -88,16 +88,28 @@ HSAKMT_STATUS topology_sysfs_get_iolink_props(uint32_t node_id,
   assert(device);
 
   std::memset(&props, 0, sizeof(props));
-  props.IoLinkType = HSA_IOLINKTYPE_PCIEXPRESS;
   props.VersionMajor = props.VersionMinor = 0;
   props.NodeFrom = node_id;
   props.NodeTo = 0;
-  props.Weight = 20;
   props.Flags.ui32.Override = 1;
-  props.Flags.ui32.NonCoherent = 1;
-  props.Flags.ui32.NoAtomics32bit = !(device->SupportPlatformAtomic());
-  props.Flags.ui32.NoAtomics64bit = !(device->SupportPlatformAtomic());
   props.RecSdmaEngIdMask = 0;
+
+  // Differentiate between discrete GPU (dGPU) and integrated GPU (APU)
+  if (device->IsDgpu()) {
+    // Discrete GPU - PCIe link to CPU
+    props.IoLinkType = HSA_IOLINKTYPE_PCIEXPRESS;
+    props.Weight = 20;  // Higher latency for PCIe
+    props.Flags.ui32.NonCoherent = 1;
+    props.Flags.ui32.NoAtomics32bit = !(device->SupportPlatformAtomic());
+    props.Flags.ui32.NoAtomics64bit = !(device->SupportPlatformAtomic());
+  } else {
+    // APU/Integrated GPU - XGMI (Infinity Fabric) or direct coherent link
+    props.IoLinkType = HSA_IOLINK_TYPE_XGMI;
+    props.Weight = 10;  // Lower latency for direct fabric connection
+    props.Flags.ui32.NonCoherent = 0;  // APU has coherent memory access
+    props.Flags.ui32.NoAtomics32bit = 0;  // APU supports 32-bit atomics
+    props.Flags.ui32.NoAtomics64bit = 0;  // APU supports 64-bit atomics
+  }
 
   return HSAKMT_STATUS_SUCCESS;
 }
@@ -164,7 +176,7 @@ static int32_t gpu_get_direct_link_cpu(uint32_t gpu_node,
     return -1;
 
   for (i = 0; i < node_props[gpu_node].node.NumIOLinks; i++)
-    if (props[i].IoLinkType == HSA_IOLINKTYPE_PCIEXPRESS &&
+    if ((props[i].IoLinkType == HSA_IOLINKTYPE_PCIEXPRESS || props[i].IoLinkType == HSA_IOLINK_TYPE_XGMI) &&
         props[i].Weight <= 20) /* >20 is GPU->CPU->GPU */
       return props[i].NodeTo;
 
@@ -314,10 +326,20 @@ void topology_create_indirect_gpu_links(const HsaSystemProperties& sys_props,
   }
 }
 
-/* Drop the Snashot of the HSA topology information. Assume lock is held. */
-void topology_drop_snapshot(void) {
-  if (!!dxg_topology->g_system != !!dxg_topology->g_props.size())
-    pr_warn("Probably inconsistency?\n");
+/* Return the topology to the state hsaKmtAcquireSystemProperties() finds on a
+ * cold process. Assume lock is held.
+ *
+ * Both the last release and the unwind of a snapshot that never became visible
+ * land here, so this must not assume g_system was ever populated:
+ * topology_take_snapshot() can fail after it has already resized g_props and
+ * created WDDMDevices. Leaving those behind makes the next acquire resize a
+ * dirty vector and re-enumerate on top of live device objects.
+ */
+static void topology_reset_snapshot_state(void) {
+  /* Whatever brought us here, no caller holds a reference once the snapshot is
+   * gone.
+   */
+  dxg_topology->snapshot_refs_.store(0, std::memory_order_relaxed);
 
   // Free heap GPU VA BEFORE deleting adapters
   // The GPU VA free requires adapters to be alive
@@ -332,7 +354,67 @@ void topology_drop_snapshot(void) {
   for (auto device : dxg_topology->wdevices_)
     delete device;
   dxg_topology->wdevices_.clear();
+  dxg_topology->wdevice_num_ = 0;
 }
+
+/* Drop the Snapshot of the HSA topology information. Assume lock is held. */
+void topology_drop_snapshot(void) {
+  if (!!dxg_topology->g_system != !!dxg_topology->g_props.size())
+    pr_warn("Probably inconsistency?\n");
+
+  topology_reset_snapshot_state();
+}
+
+bool topology_snapshot_is_live(void) {
+  return dxg_topology->g_system != NULL && !dxg_topology->g_props.empty();
+}
+
+/* Drop whatever snapshot is still standing as the last hsaKmtCloseKFD() shuts
+ * the thunk down. Assume lock is held.
+ *
+ * Without this, closing to zero tears down DXCore but leaves g_system
+ * published, still naming WDDMDevice objects belonging to the dxcore session
+ * that just went away. A later reopen would then find a snapshot that looks
+ * live and hand those pointers straight back out. The snapshot cannot outlive
+ * the session it describes, so it goes here - and it has to go before that
+ * shutdown, because the teardown it runs still calls into the session.
+ *
+ * A snapshot surviving to this point means a caller closed without releasing,
+ * so say so: it is not fatal, but it is the caller getting the order wrong.
+ */
+void topology_drop_snapshot_at_last_close(void) {
+  /* A forked child can arrive here without ever having opened anything:
+   * dxg_open_count is inherited, so the decrement in hsaKmtCloseKFD() reaches
+   * zero on the child's first close. hsa_shut_down() in the child, or ROCr's
+   * destructor at child exit, is enough. What it would drop is the parent's
+   * snapshot, naming the parent's WDDMDevice objects, and the teardown below
+   * deletes them - running ~WDDMDevice() and so issuing D3DKMT calls against
+   * another process's handles.
+   *
+   * So disown here exactly as the open path does, and for the same reason. The
+   * child keeps nothing either way; the difference is only whether the parent's
+   * objects are destroyed on the way out.
+   */
+  if (is_forked_child()) {
+    topology_abandon_after_fork();
+    return;
+  }
+
+  if (!topology_snapshot_is_live()) return;
+
+  pr_warn(
+      "hsaKmtCloseKFD with %u topology snapshot reference(s) outstanding; "
+      "dropping the snapshot\n",
+      dxg_topology->snapshot_refs_.load(std::memory_order_relaxed));
+
+  topology_reset_snapshot_state();
+}
+
+/* Unwind a snapshot that failed to build. Unlike topology_drop_snapshot() this
+ * expects the inconsistent state a partial build leaves behind, so it does not
+ * warn about it. Assume lock is held.
+ */
+static void topology_discard_partial_snapshot(void) { topology_reset_snapshot_state(); }
 
 HSAKMT_STATUS validate_nodeid(uint32_t nodeid, uint32_t *gpu_id) {
   if (dxg_topology->g_props.empty() || !dxg_topology->g_system || dxg_topology->g_system->NumNodes <= nodeid)
@@ -368,16 +450,24 @@ hsaKmtAcquireSystemProperties(HsaSystemProperties *SystemProperties) {
   std::lock_guard<std::recursive_mutex> lck(dxg_runtime->hsakmt_mutex);
 
   /* We already have a valid snapshot. Avoid double initialization that
-   * would leak memory.
+   * would leak memory. Still take a reference: the snapshot outlives this
+   * caller only until the last holder releases it.
    */
   if (dxg_topology->g_system) {
+    dxg_topology->snapshot_refs_.fetch_add(1, std::memory_order_relaxed);
     *SystemProperties = *dxg_topology->g_system;
     goto out;
   }
 
   err = topology_take_snapshot();
-  if (err != HSAKMT_STATUS_SUCCESS)
+  if (err != HSAKMT_STATUS_SUCCESS) {
+    /* The build bails out early on the first failure, after it may already
+     * have sized g_props and created WDDMDevices. Discard those so a retry
+     * starts from the same state this call did.
+     */
+    topology_discard_partial_snapshot();
     goto out;
+  }
 
   assert(dxg_topology->g_system);
 
@@ -389,6 +479,12 @@ hsaKmtAcquireSystemProperties(HsaSystemProperties *SystemProperties) {
   if (err != HSAKMT_STATUS_SUCCESS)
     goto init_doorbells_failed;
 
+  /* First successful acquisition of this snapshot. The count is assigned, not
+   * incremented: nothing can hold a reference to a snapshot that did not exist
+   * a moment ago, and an acquire that failed part way never gets here, so it
+   * never leaves a reference behind.
+   */
+  dxg_topology->snapshot_refs_.store(1, std::memory_order_relaxed);
   *SystemProperties = *dxg_topology->g_system;
 
   goto out;
@@ -403,11 +499,68 @@ out:
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtReleaseSystemProperties(void) {
+  /* Mirrors hsaKmtAcquireSystemProperties(). Without this a fork child could
+   * release a reference it never took - the snapshot and its refcount are
+   * inherited across fork() - and tear down WDDMDevice objects that belong to
+   * the parent process.
+   */
+  CHECK_DXG_OPEN();
+
   std::lock_guard<std::recursive_mutex> lck(dxg_runtime->hsakmt_mutex);
 
-  topology_drop_snapshot();
+  /* Reject an unmatched release the way hsaKmtCloseKFD() rejects an unmatched
+   * close, rather than tearing down a snapshot another component still owns.
+   * The check also keeps the decrement below from wrapping to UINT32_MAX, which
+   * would strand the snapshot for the life of the process.
+   */
+  if (dxg_topology->snapshot_refs_.load(std::memory_order_relaxed) == 0) {
+    pr_err("hsaKmtReleaseSystemProperties with no reference held. Most likely an HSA "
+           "runtime older than this thunk, whose release-before-acquire reset predates "
+           "this reference count. Rejecting is deliberate: such a runtime also disagrees "
+           "about sizeof(HsaNodeProperties), so tolerating it would corrupt the heap.\n");
+    return HSAKMT_STATUS_INVALID_PARAMETER;
+  }
+
+  /* Only the last reference tears the snapshot down; the others just go away. */
+  if (dxg_topology->snapshot_refs_.fetch_sub(1, std::memory_order_relaxed) == 1) {
+    topology_drop_snapshot();
+  }
 
   return HSAKMT_STATUS_SUCCESS;
+}
+
+/* Called from the pthread_atfork child handler, so it must stay
+ * async-signal-safe: a single relaxed store, no allocation and no locking -
+ * only the forking thread survives into the child, so there is nothing left to
+ * race with. It only severs the child's claim on the inherited references; the
+ * objects behind them are dealt with later by topology_abandon_after_fork().
+ */
+void topology_clear_snapshot_refs(void) {
+  dxg_topology->snapshot_refs_.store(0, std::memory_order_relaxed);
+}
+
+/* Called from the fork child once it is back in normal context.
+ *
+ * The inherited snapshot describes the parent's DXCore objects. The
+ * WDDMDevice instances wrap handles owned by a process this one is no longer
+ * part of, so they can be neither reused nor destroyed here - running
+ * ~WDDMDevice() would issue D3DKMT calls against another process's handles.
+ * Drop every reference to them without deleting them and let the child rebuild
+ * the topology on its next acquire; the abandoned objects go away with the
+ * child's address space. g_system is ordinary heap memory, so that one is
+ * genuinely ours to free.
+ */
+void topology_abandon_after_fork(void) {
+  dxg_topology->snapshot_refs_.store(0, std::memory_order_relaxed);
+  dxg_topology->g_props.clear();
+
+  free(dxg_topology->g_system);
+  dxg_topology->g_system = NULL;
+
+  dxg_topology->wdevices_.clear();  // deliberately not deleting - see above
+  dxg_topology->wdevice_num_ = 0;
+  dxg_topology->num_sysfs_nodes = 0;
+  dxg_topology->numa_node_count_ = 0;
 }
 
 HSAKMT_STATUS topology_get_node_props(HSAuint32 NodeId,
@@ -589,7 +742,7 @@ hsaKmtGetNodeWallclockFrequency(HSAuint32 NodeId, uint64_t* Frequency) {
   HsaNodeProperties *NodeProperties = &(dxg_topology->g_props[NodeId].node);
   *Frequency = NodeProperties->WallClockKHz * 1000ull;
 
-  return HSAKMT_STATUS_NOT_IMPLEMENTED;
+  return HSAKMT_STATUS_SUCCESS;
 }
 
 uint16_t get_device_id_by_node_id(HSAuint32 node_id) {
@@ -729,23 +882,48 @@ HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id, HsaNodeProperties&
   props.CComputeIdLo = 0;
   props.FComputeIdLo = 0;
   props.Capability.ui32.ASICRevision = device->AsicRevision();
-  props.Capability.ui32.WatchPointsTotalBits = std::log2(device->WatchPointsNum());
-  props.MaxWavesPerSIMD = device->WavePerCu() / device->SimdPerCu();
+  uint32_t watch_points_num = device->WatchPointsNum();
+  if (watch_points_num == 0) {
+    pr_warn(
+        "WatchPointsNum is 0 for node %u, forcing WatchPointsTotalBits to 0\n",
+        node_id);
+    props.Capability.ui32.WatchPointsTotalBits = 0;
+  } else {
+    props.Capability.ui32.WatchPointsTotalBits = std::log2(watch_points_num);
+  }
+  uint32_t simd_per_cu = device->SimdPerCu();
+  if (simd_per_cu == 0){
+    pr_err("SimdPerCU is 0 for node %u\n", node_id);
+    return HSAKMT_STATUS_ERROR;
+  }
   props.LDSSizeInKB = device->LdsSize() / 1024;
   props.GDSSizeInKB = 0;
   props.WaveFrontSize = device->WavefrontSize();
   props.NumShaderBanks = device->NumShaderEngine();
   props.NumArrays = device->ShaderArrayPerShaderEngine();
-  props.NumCUPerArray = device->ComputeUnitCount() / props.NumArrays;
-  props.NumSIMDPerCU = device->SimdPerCu();
+  if (props.NumArrays == 0) {
+    pr_warn("NumArrays is 0 for node %u, forcing NumCUPerArray to 0\n",
+            node_id);
+    props.NumCUPerArray = 0;
+  } else {
+    props.NumCUPerArray = device->ComputeUnitCount() / props.NumArrays;
+  }
+  props.NumSIMDPerCU = simd_per_cu;
   props.MaxSlotsScratchCU = device->MaxScratchSlotsPerCu();
+
+  // MaxWavesPerSIMD = (waves per CU) / (SIMDs per CU)
+  // WKMI provides wave_per_cu which is the total waves per CU.
+  // We need to divide by NumSIMDPerCU to get waves per SIMD.
+  props.MaxWavesPerSIMD = device->WavePerCu() / simd_per_cu;
+
   props.VendorId = 0x1002;
   props.DeviceId = device->DeviceId();
   props.LocationId = device->PciBusAddr();
   props.LocalMemSize = 0;
   props.MaxEngineClockMhzFCompute = device->MaxEngineClockMhz();
   props.DrmRenderMinor = node_id;
-  props.Capability2.ui32.AqlEmulationPm4_ = device->IsAqlSupported() ? 0 : 1;
+  props.Capability2.ui32.AqlEmulationPm4_ =
+      (device->IsAqlSupported() && device->DeviceInfo().hwsInfo.hwsMask.computeHwsEnabled) ? 0 : 1;
 
   {
     const char* name = device->ProductName();
@@ -765,11 +943,10 @@ HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id, HsaNodeProperties&
   props.NumGws = 0;
   /*
    * In Native Linux, if the asic is APU, this value will be set to 1,
-   * if the asic is dGPU, this value will be set to 0. clr use this info
-   * to set hostUnifiedMemory_, but for now wsl does not support this feature.
-   * Therefore, force vaule to 0 temporarily.
+   * if the asic is dGPU, this value will be set to 0. clr uses this info
+   * to set hostUnifiedMemory_.
    */
-  props.Integrated = 0;
+  props.Integrated = !device->IsDgpu();
   props.Domain = device->Domain();
   props.UniqueID = device->Uuid();
   props.NumXcc = device->NumXcc();
@@ -813,6 +990,8 @@ HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id, HsaNodeProperties&
     assert(props.EngineId.ui32.Major && "HSA_OVERRIDE_GFX_VERSION may be needed");
   }
 
+  props.WallClockKHz = device->GPUCounterFrequency() / 1000ull;
+
   return HSAKMT_STATUS_SUCCESS;
 }
 
@@ -838,7 +1017,7 @@ HSAKMT_STATUS topology_sysfs_get_mem_props(uint32_t node_id, uint32_t mem_id,
   assert(device);
 
   props.HeapType = HSA_HEAPTYPE_FRAME_BUFFER_PRIVATE;
-  props.SizeInBytes = device->LocalHeapSize();
+  props.SizeInBytes = device->VramTotal();
   props.Width = device->MemoryBusWidth();
   props.MemoryClockMax = device->MaxMemoryClockMhz();
 

@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) 2014-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+ *  Copyright (c) Advanced Micro Devices, Inc., or its affiliates. All rights reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -122,6 +122,13 @@ public:
     ///          + ErrorFenceNeverSubmitted if the fence hasn't been submitted yet and the fence is not created with
     ///            initialSignaled set to true.
     virtual Result GetStatus() const = 0;
+
+    /// Resets the fence.
+    ///
+    /// All fences must be reset before passing them to a submission command.
+    ///
+    /// @returns Success if the fence has been successfully reset.
+    virtual Result Reset() = 0;
 
     /// Export the event handle or sync object handle of the fence for external usage.
     /// If @ref FenceExportInfo::isReference is not set, then this also performs an implicit reset operation on

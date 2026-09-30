@@ -1,0 +1,20 @@
+[package]
+name = "mirage_hotswap"
+version.workspace = true
+edition = "2024"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+mirage_core = { workspace = true }
+inventory = { workspace = true }
+
+# Tests only: this backend takes no configuration of its own, but it has
+# to prove it refuses a profile that hands it some, and a profile is
+# JSON.
+[dev-dependencies]
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

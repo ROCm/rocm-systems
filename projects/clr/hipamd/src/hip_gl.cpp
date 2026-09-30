@@ -1,22 +1,8 @@
-/* Copyright (c) 2010 - 2026 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "top.hpp"
 #include "hip/hip_runtime.h"
@@ -447,6 +433,7 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
   }
 
   GLint miplevel = 0;
+  GLint miplevels = 1;
   amd::Context& amdContext = *(hip::getCurrentDevice()->asContext());
 
   amd::GLFunctions::SetIntEnv ie(amdContext.glenv());
@@ -575,7 +562,7 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
       LogWarning("\"miplevel\" is not a valid mipmap level of the GL \"texture\" object");
       HIP_RETURN(hipErrorInvalidValue);
     }
-
+    miplevels = gliTexMaxLevel + 1;
     clearGLErrors(amdContext);
     amdContext.glenv()->glGetTexLevelParameteriv_(target, miplevel, GL_TEXTURE_INTERNAL_FORMAT,
                                                   (GLint*)&glInternalFormat);
@@ -684,7 +671,7 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
   pImageGL = new (amdContext)
       amd::ImageGL(amdContext, clType, cl_flags, clImageFormat, static_cast<size_t>(gliTexWidth),
                    static_cast<size_t>(gliTexHeight), static_cast<size_t>(gliTexDepth), glTarget,
-                   image, 0, glInternalFormat, clGLType, numSamples, target);
+                   image, miplevel, glInternalFormat, clGLType, numSamples, miplevels, target);
   if (!pImageGL->create()) {
     pImageGL->release();
     HIP_RETURN(hipErrorUnknown);
@@ -713,7 +700,7 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
 
   hip::Device* device = hip::getCurrentDevice();
   if (device == nullptr) {
-    return hipErrorNoDevice;
+    HIP_RETURN(hipErrorNoDevice);
   }
 
   if (!device->registeredGraphics().add(*resource)) {
@@ -823,7 +810,7 @@ hipError_t hipGraphicsGLRegisterBuffer(hipGraphicsResource** resource, GLuint bu
 
   hip::Device* device = hip::getCurrentDevice();
   if (device == nullptr) {
-    return hipErrorNoDevice;
+    HIP_RETURN(hipErrorNoDevice);
   }
 
   if (!device->registeredGraphics().add(*resource)) {
@@ -903,7 +890,7 @@ hipError_t hipGraphicsMapResources(int count, hipGraphicsResource_t* resources,
   // Track mapping status
   hip::Device* device = hip::getCurrentDevice();
   if (device == nullptr) {
-    return hipErrorNoDevice;
+    HIP_RETURN(hipErrorNoDevice);
   }
   for (int i = 0; i < count; i++) {
     if (!device->mappedGraphics().add(resources[i])) {

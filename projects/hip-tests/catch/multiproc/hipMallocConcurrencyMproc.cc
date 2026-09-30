@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
 Testcase Scenarios :
@@ -157,7 +144,7 @@ static bool validateMemoryOnGPU(int gpu, bool concurOnOneGPU = false) {
 /**
  * Parallel execution of parent and child on gpu0
  */
-TEST_CASE("Unit_hipMalloc_ChildConcurrencyDefaultGpu") {
+HIP_TEST_CASE(Unit_hipMalloc_ChildConcurrencyDefaultGpu) {
   int devCnt = 0, pid = 0;
   constexpr auto resSuccess = 1, resFailure = 2;
   bool TestPassed = true;
@@ -200,7 +187,7 @@ TEST_CASE("Unit_hipMalloc_ChildConcurrencyDefaultGpu") {
  * Parallel execution of api on multiple gpus from
  * different child processes.
  */
-TEST_CASE("Unit_hipMalloc_ChildConcurrencyMultiGpu") {
+HIP_TEST_CASE(Unit_hipMalloc_ChildConcurrencyMultiGpu) {
   int devCnt = 0, pid = 0;
   constexpr auto resSuccess = 1, resFailure = 2;
 

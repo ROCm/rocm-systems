@@ -1,7 +1,7 @@
 #
 #
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 if(NOT CMAKE_HIP_COMPILER)
     find_program(
@@ -55,17 +55,58 @@ rocprofiler_samples_get_ld_library_path_env(LIBRARY_PATH_ENV)
 
 set(external-correlation-id-request-env ${PRELOAD_ENV} ${LIBRARY_PATH_ENV})
 
+# WSL2/DXG has no /dev/kfd and schedules GPU work through the dxg path. Under WSL2/DXG
+# these workloads run slower in practice and need more timeout headroom (root cause TBD),
+# so scale the timeout only there. Non-WSL keeps the develop baseline (45); WSL scales it
+# up.
+rocprofiler_sdk_wsl_timeout_scale(_EXTERNAL_CORRELATION_ID_TIMEOUT BASE 45)
+
 add_test(NAME external-correlation-id-request
          COMMAND $<TARGET_FILE:external-correlation-id-request>)
 
 set_tests_properties(
     external-correlation-id-request
     PROPERTIES TIMEOUT
-               45
+               ${_EXTERNAL_CORRELATION_ID_TIMEOUT}
                LABELS
                "samples"
                ENVIRONMENT
                "${external-correlation-id-request-env}"
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               DISABLED
+               "${IS_DISABLED}")
+
+set(external-correlation-id-request-inline-stress-env
+    ${external-correlation-id-request-env} "ROCPROFILER_QUEUE_INTERPOSITION=1")
+
+add_test(NAME external-correlation-id-request-inline-stress
+         COMMAND $<TARGET_FILE:external-correlation-id-request> 2 500 10)
+
+set_tests_properties(
+    external-correlation-id-request-inline-stress
+    PROPERTIES TIMEOUT
+               120
+               LABELS
+               "samples;repro"
+               ENVIRONMENT
+               "${external-correlation-id-request-inline-stress-env}"
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               DISABLED
+               "${IS_DISABLED}")
+
+add_test(NAME external-correlation-id-request-kernel-map-unload-race
+         COMMAND $<TARGET_FILE:external-correlation-id-request> 2 500 500)
+
+set_tests_properties(
+    external-correlation-id-request-kernel-map-unload-race
+    PROPERTIES TIMEOUT
+               180
+               LABELS
+               "samples;repro"
+               ENVIRONMENT
+               "${external-correlation-id-request-inline-stress-env}"
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                DISABLED

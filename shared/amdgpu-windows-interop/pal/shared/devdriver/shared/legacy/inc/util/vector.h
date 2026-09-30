@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) 2021-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+ *  Copyright (c) 2021-2026 Advanced Micro Devices, Inc. All Rights Reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -30,7 +30,6 @@
 #if !DD_PLATFORM_WINDOWS_KM
 #include <type_traits>
 #endif
-#include <cstring>
 
 namespace DevDriver
 {
@@ -80,9 +79,10 @@ namespace DevDriver
             Clear();
         }
 
-        void operator=(Vector&& rhs)
+        Vector& operator=(Vector&& rhs)
         {
             Swap(rhs);
+            return *this;
         }
 
         // Convenience methods
@@ -142,7 +142,7 @@ namespace DevDriver
             // Instead of letting the compiler guess, we dictate when dealing with Pods.
             if (Platform::IsPod<T>::Value)
             {
-                memcpy(&m_pData[oldSize], pTs, (sizeof(T) * countOfTs));
+                Platform::Memcpy_s(&m_pData[oldSize], (sizeof(T) * countOfTs), pTs, (sizeof(T) * countOfTs));
             }
             else
             {
@@ -362,7 +362,7 @@ namespace DevDriver
                     // Need to use reinterpret_cast here because gcc can't seem to evaluate
                     // `is_trivial_v` at compile-time, thus generating a no-class-memaccess warning.
                     // `if constexpr` fixes the issue, but AMDLOG's toolchain doesn't support c++17.
-                    std::memcpy(reinterpret_cast<void*>(pData), m_pData, m_size * sizeof(T));
+                    Platform::Memcpy_s(reinterpret_cast<void*>(pData), newCapacity * sizeof(T), m_pData, m_size * sizeof(T));
                 }
 
                 if (m_pData != m_data)
@@ -477,7 +477,8 @@ namespace DevDriver
 
     private:
         // Disallow copy construct.
-        Vector(Vector& rhs) = delete;
+        Vector(const Vector& rhs) = delete;
+        Vector& operator=(const Vector& rhs) = delete;
 
         // This indirection fixes the warning comparision of a constant with another constant. This should be
         // replace with `if constexpr` once AMDLog upgrades to support C++17.
@@ -590,16 +591,13 @@ namespace DevDriver
 
     // Specialized functions for using Vector<> like a String
     template <>
-    inline bool Vector<char>::Append(const char* pStr)
-    {
-        return Append(pStr, strlen(pStr));
-    }
+    bool Vector<char>::Append(const char* pStr);
 
     template <>
     template <size_t Len>
     inline bool Vector<char>::Append(const char (&str)[Len])
     {
-        return Append(str, strlen(str));
+        return Append(str, Platform::Strlen_s(str, Len));
     }
 
 } // DevDriver

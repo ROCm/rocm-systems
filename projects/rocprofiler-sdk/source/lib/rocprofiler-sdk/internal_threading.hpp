@@ -31,6 +31,7 @@
 #include <PTL/TaskManager.hh>
 #include <PTL/ThreadPool.hh>
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -49,7 +50,7 @@ public:
     using parent_type   = PTL::TaskManager;
     using task_type     = PTL::PackagedTask<void>;
 
-    TaskGroup();
+    TaskGroup(size_t pool_size = 1);
     ~TaskGroup() override;
 
     TaskGroup(const TaskGroup&)     = delete;
@@ -58,17 +59,29 @@ public:
     TaskGroup& operator=(TaskGroup&&) noexcept = delete;
 
     void exec(std::function<void()>&&);
-    void wait();
-    void join();
+    void async(std::function<void()>&&);
+    void wait(bool async_only = false);
+    void join(bool async_only = false);
 
 private:
     std::mutex                             m_mutex           = {};
+    std::atomic<uint64_t>                  m_tasks_count     = 0;
     thread_pool_t*                         m_pool            = nullptr;
     std::deque<std::shared_ptr<task_type>> m_tasks           = {};
     std::deque<std::shared_ptr<task_type>> m_completed_tasks = {};
+    std::atomic<bool>                      m_async_only      = true;
+    // Fork generation the pool was constructed in. ~TaskGroup() leaks m_pool
+    // rather than joining vanished workers when this is stale (see fork_stale).
+    uint64_t m_fork_generation = 0;
 };
 
 using task_group_t = TaskGroup;
+
+// True in a fork child: g_fork_generation != 0. The inline interposition pool
+// and its gate are never legitimately recreated in a child, so a nonzero
+// generation is conclusive (see D4/D6).
+bool
+fork_stale();
 
 void notify_pre_internal_thread_create(rocprofiler_runtime_library_t);
 void notify_post_internal_thread_create(rocprofiler_runtime_library_t);
@@ -87,5 +100,12 @@ create_callback_thread();
 
 // returns the task group for the given callback thread identifier
 task_group_t* get_task_group(rocprofiler_callback_thread_t);
+
+// returns a task group with the given pool size
+std::unique_ptr<task_group_t>
+create_task_group(size_t pool_size = 1);
+
+task_group_t*
+create_task_group(void* addr, size_t pool_size = 1);
 }  // namespace internal_threading
 }  // namespace rocprofiler

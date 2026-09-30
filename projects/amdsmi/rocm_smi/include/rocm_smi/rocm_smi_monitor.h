@@ -1,40 +1,21 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #ifndef INCLUDE_ROCM_SMI_ROCM_SMI_MONITOR_H_
 #define INCLUDE_ROCM_SMI_ROCM_SMI_MONITOR_H_
 
-#include <string>
 #include <cstdint>
 #include <map>
+#include <string>
 
-#include "rocm_smi/rocm_smi_common.h"
 #include "rocm_smi/rocm_smi.h"
+#include "rocm_smi/rocm_smi_common.h"
 
 namespace amd::smi {
 
 enum MonitorTypes {
   kMonName,
-  kMonTemp,     // Temperature in millidegrees
+  kMonTemp,  // Temperature in millidegrees
   kMonFanSpeed,
   kMonMaxFanSpeed,
   kMonFanRPMs,
@@ -94,8 +75,7 @@ const std::map<MonitorTypes, std::string> monitorTypesToString{
     {MonitorTypes::kMonTempCritical, "MonitorTypes::kMonTempCritical"},
     {MonitorTypes::kMonTempCriticalHyst, "MonitorTypes::kMonTempCriticalHyst"},
     {MonitorTypes::kMonTempEmergency, "MonitorTypes::kMonTempEmergency"},
-    {MonitorTypes::kMonTempEmergencyHyst,
-                                        "MonitorTypes::kMonTempEmergencyHyst"},
+    {MonitorTypes::kMonTempEmergencyHyst, "MonitorTypes::kMonTempEmergencyHyst"},
     {MonitorTypes::kMonTempCritMin, "MonitorTypes::kMonTempCritMin"},
     {MonitorTypes::kMonTempCritMinHyst, "MonitorTypes::kMonTempCritMinHyst"},
     {MonitorTypes::kMonTempOffset, "MonitorTypes::kMonTempOffset"},
@@ -116,37 +96,37 @@ const std::map<MonitorTypes, std::string> monitorTypesToString{
 
 class Monitor {
  public:
-    explicit Monitor(std::string path, RocmSMI_env_vars const *e);
-    ~Monitor(void);
-    const std::string path(void) const {return path_;}
-    int readMonitor(MonitorTypes type, uint32_t sensor_ind, std::string *val);
-    int writeMonitor(MonitorTypes type, uint32_t sensor_ind, std::string val);
-    int32_t setTempSensorLabelMap(void);
-    uint32_t getTempSensorIndex(rsmi_temperature_type_t type);
-    rsmi_temperature_type_t getTempSensorEnum(uint64_t ind);
-    int32_t setVoltSensorLabelMap(void);
-    uint32_t getVoltSensorIndex(rsmi_voltage_type_t type);
-    rsmi_voltage_type_t getVoltSensorEnum(uint64_t ind);
-    void fillSupportedFuncs(SupportedFuncMap *supported_funcs);
+  explicit Monitor(std::string path, RocmSMI_env_vars const* e);
+  ~Monitor(void);
+  const std::string path(void) const { return path_; }
+  int readMonitor(MonitorTypes type, uint32_t sensor_ind, std::string* val);
+  int writeMonitor(MonitorTypes type, uint32_t sensor_ind, std::string val);
+  int32_t setTempSensorLabelMap(void);
+  uint32_t getTempSensorIndex(rsmi_temperature_type_t type);
+  rsmi_temperature_type_t getTempSensorEnum(uint64_t ind);
+  int32_t setVoltSensorLabelMap(void);
+  uint32_t getVoltSensorIndex(rsmi_voltage_type_t type);
+  rsmi_voltage_type_t getVoltSensorEnum(uint64_t ind);
+  void fillSupportedFuncs(SupportedFuncMap* supported_funcs);
 
  private:
-    std::string MakeMonitorPath(MonitorTypes type, uint32_t sensor_id);
-    std::string path_;
-    const RocmSMI_env_vars *env_;
-    std::map<rsmi_temperature_type_t, uint32_t> temp_type_index_map_;
-    std::map<rsmi_voltage_type_t, uint32_t> volt_type_index_map_;
+  std::string MakeMonitorPath(MonitorTypes type, uint32_t sensor_id);
+  std::string path_;
+  const RocmSMI_env_vars* env_;
+  std::map<rsmi_temperature_type_t, uint32_t> temp_type_index_map_;
+  std::map<rsmi_voltage_type_t, uint32_t> volt_type_index_map_;
 
-    // This map uses a 64b index instead of 32b (unlike temp_type_index_map_)
-    // for flexibility and simplicity. Currently, some parts of the
-    // implementation store both the RSMI api index and the file index into a
-    // single value. 32 bits is enough to store both, but we are using 64
-    // bits for simpler integration with existing implementation, which uses
-    // a 64b value. Also, if we need to encode anything else, 64b will give
-    // us more room to do so, without excessive changes.
-    std::map<uint64_t, rsmi_temperature_type_t> index_temp_type_map_;
-    std::map<uint64_t, rsmi_voltage_type_t> index_volt_type_map_;
+  // This map uses a 64b index instead of 32b (unlike temp_type_index_map_)
+  // for flexibility and simplicity. Currently, some parts of the
+  // implementation store both the RSMI api index and the file index into a
+  // single value. 32 bits is enough to store both, but we are using 64
+  // bits for simpler integration with existing implementation, which uses
+  // a 64b value. Also, if we need to encode anything else, 64b will give
+  // us more room to do so, without excessive changes.
+  std::map<uint64_t, rsmi_temperature_type_t> index_temp_type_map_;
+  std::map<uint64_t, rsmi_voltage_type_t> index_volt_type_map_;
 };
 
-} // namespace amd::smi
+}  // namespace amd::smi
 
 #endif  // INCLUDE_ROCM_SMI_ROCM_SMI_MONITOR_H_

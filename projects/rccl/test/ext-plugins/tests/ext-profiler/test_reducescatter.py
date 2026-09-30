@@ -29,6 +29,8 @@ def test_profiler_initialization(paths):
         "PATH": f"{paths.OMPI_INSTALL_DIR}/bin:{env.get('PATH', '')}",
         "LD_LIBRARY_PATH": f"{paths.RCCL_INSTALL_DIR}:{paths.OMPI_INSTALL_DIR}/lib:{paths.PROFILER_DIR}:{env.get('LD_LIBRARY_PATH', '')}",
         "HSA_NO_SCRATCH_RECLAIM": "1",
+        # DDA claims ReduceScatter on 8 ranks and is not profiler-traced.
+        "RCCL_DDA_ENABLE": "0",
         "NCCL_PROFILER_PLUGIN": paths.PROFILER_SO,
         "NCCL_PROFILE_EVENT_MASK": "3",  # Group (1) + Coll (2) = 3
         "NCCL_PROFILE_DUMP_FILE": dump_file_base,
@@ -75,9 +77,9 @@ def test_profiler_initialization(paths):
         is_valid, message = paths.validate_json_trace(trace_file)
         assert is_valid, f"Trace file {trace_file} validation failed: {message}"
         
-        # Check for Group events
-        group_events = paths.count_events_in_trace(trace_file, category="GROUP")
-        assert group_events > 0, f"Should have Group events in {trace_file}"
+        # Check for Group API events
+        group_events = paths.count_events_in_trace(trace_file, category="GROUP_API")
+        assert group_events > 0, f"Should have Group API events in {trace_file}"
         
         # Check for ReduceScatter collective events
         reducescatter_events = paths.count_events_in_trace(trace_file, event_name="ReduceScatter")
@@ -104,6 +106,8 @@ def test_invalid_mask_value(paths):
         "PATH": f"{paths.OMPI_INSTALL_DIR}/bin:{env.get('PATH', '')}",
         "LD_LIBRARY_PATH": f"{paths.RCCL_INSTALL_DIR}:{paths.OMPI_INSTALL_DIR}/lib:{paths.PROFILER_DIR}:{env.get('LD_LIBRARY_PATH', '')}",
         "HSA_NO_SCRATCH_RECLAIM": "1",
+        # DDA claims ReduceScatter on 8 ranks and is not profiler-traced.
+        "RCCL_DDA_ENABLE": "0",
         "NCCL_PROFILER_PLUGIN": paths.PROFILER_SO,
         "NCCL_PROFILE_EVENT_MASK": "0",  # Invalid: no events enabled
         "NCCL_PROFILE_DUMP_FILE": dump_file_base,
@@ -152,8 +156,8 @@ def test_invalid_mask_value(paths):
         assert is_valid, f"Trace file {trace_file} should still be valid JSON: {message}"
         
         # With mask=0, there should be no Group or Collective events
-        group_events = paths.count_events_in_trace(trace_file, category="GROUP")
-        assert group_events == 0, f"Should have no Group events with mask=0 in {trace_file}, found {group_events}"
+        group_events = paths.count_events_in_trace(trace_file, category="GROUP_API")
+        assert group_events == 0, f"Should have no Group API events with mask=0 in {trace_file}, found {group_events}"
         
         reducescatter_events = paths.count_events_in_trace(trace_file, event_name="ReduceScatter")
         assert reducescatter_events == 0, f"Should have no ReduceScatter events with mask=0 in {trace_file}, found {reducescatter_events}"
@@ -179,6 +183,8 @@ def test_single_node_detailed_profiling(paths):
         "PATH": f"{paths.OMPI_INSTALL_DIR}/bin:{env.get('PATH', '')}",
         "LD_LIBRARY_PATH": f"{paths.RCCL_INSTALL_DIR}:{paths.OMPI_INSTALL_DIR}/lib:{paths.PROFILER_DIR}:{env.get('LD_LIBRARY_PATH', '')}",
         "HSA_NO_SCRATCH_RECLAIM": "1",
+        # DDA claims ReduceScatter on 8 ranks and is not profiler-traced.
+        "RCCL_DDA_ENABLE": "0",
         "NCCL_PROFILER_PLUGIN": paths.PROFILER_SO,
         "NCCL_PROFILE_EVENT_MASK": "255",  # All events: Group (1) + Coll (2) + P2P (4) + ProxyOp (8) + ProxyStep (16) + ProxyCtrl (32) + KernelCh (64) + NetPlugin (128) = 255
         "NCCL_PROFILE_DUMP_FILE": dump_file_base,
@@ -229,10 +235,10 @@ def test_single_node_detailed_profiling(paths):
         # With NCCL_PROFILE_EVENT_MASK=255, we capture all event types
         # However, single-node behavior differs significantly from multi-node
         
-        # Check for Group events
-        group_events = paths.count_events_in_trace(trace_file, category="GROUP")
+        # Check for Group API events
+        group_events = paths.count_events_in_trace(trace_file, category="GROUP_API")
         assert group_events > 0, \
-            f"Should have Group events in {trace_file}, found {group_events}"
+            f"Should have Group API events in {trace_file}, found {group_events}"
         
         # Check for ReduceScatter events
         reducescatter_events = paths.count_events_in_trace(trace_file, event_name="ReduceScatter")
@@ -313,6 +319,8 @@ def test_multinode_detailed_profiling(paths):
         "PATH": f"{paths.OMPI_INSTALL_DIR}/bin:{env.get('PATH', '')}",
         "LD_LIBRARY_PATH": f"{paths.RCCL_INSTALL_DIR}:{paths.OMPI_INSTALL_DIR}/lib:{paths.PROFILER_DIR}:{env.get('LD_LIBRARY_PATH', '')}",
         "HSA_NO_SCRATCH_RECLAIM": "1",
+        # DDA claims ReduceScatter on 8 ranks and is not profiler-traced.
+        "RCCL_DDA_ENABLE": "0",
         "NCCL_IGNORE_CPU_AFFINITY": "1",
         "NCCL_PROFILER_PLUGIN": paths.PROFILER_SO,
         "NCCL_PROFILE_EVENT_MASK": "255",  # All events: Group (1) + Coll (2) + P2P (4) + ProxyOp (8) + ProxyStep (16) + ProxyCtrl (32) + KernelCh (64) + NetPlugin (128) = 255
@@ -365,9 +373,9 @@ def test_multinode_detailed_profiling(paths):
         
         # With NCCL_PROFILE_EVENT_MASK=255, we should capture all event types
         
-        # Check for Group events (one per ReduceScatter call)
-        group_events = paths.count_events_in_trace(trace_file, category="GROUP")
-        assert group_events > 0, f"Should have Group events in {trace_file}, found {group_events}"
+        # Check for Group API events (one per ReduceScatter call)
+        group_events = paths.count_events_in_trace(trace_file, category="GROUP_API")
+        assert group_events > 0, f"Should have Group API events in {trace_file}, found {group_events}"
         
         # Check for ReduceScatter events
         reducescatter_events = paths.count_events_in_trace(trace_file, event_name="ReduceScatter")

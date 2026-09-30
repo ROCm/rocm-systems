@@ -22,7 +22,8 @@ Refer to the [Go library API reference](../reference/amdsmi-go-api.md).
 Before get started, make sure your environment satisfies the following prerequisites.
 See the [requirements](#install_reqs) section for more information.
 
-1. Ensure `amdgpu` drivers are installed properly for initialization.
+1. Ensure `amdgpu` drivers are installed properly for initialization. CPU APIs
+   require the `amd_hsmp` kernel module. See {ref}`install_amdgpu_driver`.
 
 2. Export `LD_LIBRARY_PATH` to the `amdsmi` installation directory.
 
@@ -78,7 +79,14 @@ To include the AMD SMI Go API in your project, update your Makefile or Go module
 to fetch the appropriate version of the AMD SMI library.
 
 ```shell
-go get github.com/ROCm/amdsmi@amd-staging
+# Add to go.mod
+go get github.com/ROCm/rocm-systems/projects/amdsmi@develop
+```
+
+Then import it:
+
+```go
+import "github.com/ROCm/rocm-systems/projects/amdsmi"
 ```
 
 When using a Makefile, ensure you're fetching the latest AMD SMI repository

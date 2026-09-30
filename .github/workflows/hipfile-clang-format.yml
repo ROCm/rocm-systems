@@ -1,0 +1,50 @@
+name: "hipFile clang-format"
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'projects/hipfile/**/*.c'
+      - 'projects/hipfile/**/*.cpp'
+      - 'projects/hipfile/**/*.h'
+      - 'projects/hipfile/.clang-format'
+      - '.github/workflows/hipfile-clang-format.yml'
+  pull_request:
+    paths:
+      - 'projects/hipfile/**/*.c'
+      - 'projects/hipfile/**/*.cpp'
+      - 'projects/hipfile/**/*.h'
+      - 'projects/hipfile/.clang-format'
+      - '.github/workflows/hipfile-clang-format.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  hipfile-clang-format:
+    name: Formatting Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          sparse-checkout: |
+            projects/hipfile
+            .github/workflows
+
+      - name: Install clang-format
+        shell: bash
+        run: |
+          sudo apt update
+          sudo apt install -y clang-format-18
+
+      - name: Run clang-format style check for C/C++ code
+        uses: DoozyX/clang-format-lint-action@bcb4eb2cb0d707ee4f3e5cc3b456eb075f12cf73 # v0.20
+        with:
+          source: 'projects/hipfile'
+          extensions: 'c,h,cpp'
+          clangFormatVersion: 18
+          style: file

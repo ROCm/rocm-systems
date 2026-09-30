@@ -3,6 +3,7 @@
 
 from rdc_bootstrap import *
 
+
 class RdcUtil:
     def __init__(self):
         pass
@@ -35,35 +36,38 @@ class RdcUtil:
 
         return all_groups
 
-
     # Create gpu group if not exists
     # Return <gpu_group_id, is_created>
     def create_gpu_group(self, rdc_handle, gpu_group_name, gpu_indexes):
         # Can we reuse the exists one?
         all_groups = self.get_all_gpu_groups(rdc_handle)
-        for id,group_info in all_groups.items():
-            group_name = group_info.group_name.decode('utf-8')
-            list_gpu_indexes = list(group_info.entity_ids[:group_info.count])
+        for id, group_info in all_groups.items():
+            group_name = group_info.group_name.decode("utf-8")
+            list_gpu_indexes = list(group_info.entity_ids[: group_info.count])
             if group_name == gpu_group_name:
                 # Reuse existing group
                 if list_gpu_indexes == gpu_indexes:
                     return id, False
-                else: # delete old group
+                else:  # delete old group
                     result = rdc.rdc_group_gpu_destroy(rdc_handle, id)
                     if rdc_status_t(result) != rdc_status_t.RDC_ST_OK:
                         raise Exception("Fail to delete the GPU group")
 
-        #Create new gpu group
+        # Create new gpu group
         gpu_group_id = c_uint32()
-        result = rdc.rdc_group_gpu_create(rdc_handle, rdc_group_type_t.RDC_GROUP_EMPTY, gpu_group_name, gpu_group_id)
+        result = rdc.rdc_group_gpu_create(
+            rdc_handle, rdc_group_type_t.RDC_GROUP_EMPTY, gpu_group_name, gpu_group_id
+        )
         if rdc_status_t(result) != rdc_status_t.RDC_ST_OK:
             raise Exception("Fail to create the GPU group " + group_name)
 
-        #Add GPU index to the group
+        # Add GPU index to the group
         for gpu in gpu_indexes:
             result = rdc.rdc_group_gpu_add(rdc_handle, gpu_group_id, gpu)
             if rdc_status_t(result) != rdc_status_t.RDC_ST_OK:
-                raise Exception("Fail to add GPU index " + str(gpu) + " to group " + str(gpu_group_id))
+                raise Exception(
+                    "Fail to add GPU index " + str(gpu) + " to group " + str(gpu_group_id)
+                )
 
         return gpu_group_id, True
 
@@ -76,29 +80,42 @@ class RdcUtil:
             raise Exception("Fail to get all field group")
         for index in range(field_group_count.value):
             group_info = rdc_field_group_info_t()
-            result = rdc.rdc_group_field_get_info(rdc_handle, field_group_id_list[index], pointer(group_info))
+            result = rdc.rdc_group_field_get_info(
+                rdc_handle, field_group_id_list[index], pointer(group_info)
+            )
             if rdc_status_t(result) != rdc_status_t.RDC_ST_OK:
-                raise Exception("Fail to get field group " + str(field_group_id_list[index]) + " info")
+                raise Exception(
+                    "Fail to get field group " + str(field_group_id_list[index]) + " info"
+                )
             if group_info.group_name.decode("utf-8") == field_group_name:
-                field_ids_ori = [ e.value for  e in group_info.field_ids[:group_info.count] ]
+                field_ids_ori = [e.value for e in group_info.field_ids[: group_info.count]]
                 # reuse the old field group
-                if (field_ids == field_ids_ori):
+                if field_ids == field_ids_ori:
                     return field_group_id_list[index], False
                 else:
                     result = rdc.rdc_group_field_destroy(rdc_handle, field_group_id_list[index])
                     if rdc_status_t(result) != rdc_status_t.RDC_ST_OK:
-                        raise Exception("Fail to delete field group " + str(field_group_id_list[index]))
+                        raise Exception(
+                            "Fail to delete field group " + str(field_group_id_list[index])
+                        )
 
-        #Create new field group
+        # Create new field group
         fields_c_ids = []
         for f in field_ids:
             fields_c_ids.append(rdc_field_t(f))
-        c_ids = ( rdc_field_t * len(field_ids))(*fields_c_ids)
+        c_ids = (rdc_field_t * len(field_ids))(*fields_c_ids)
 
         field_group_id = c_uint32()
-        result = rdc.rdc_group_field_create(rdc_handle, len(field_ids), c_ids, field_group_name, field_group_id)
+        result = rdc.rdc_group_field_create(
+            rdc_handle, len(field_ids), c_ids, field_group_name, field_group_id
+        )
         if rdc_status_t(result) != rdc_status_t.RDC_ST_OK:
-            raise Exception("Fail to create field group " + field_group_name.decode("utf-8") +": " + str(result))
+            raise Exception(
+                "Fail to create field group "
+                + field_group_name.decode("utf-8")
+                + ": "
+                + str(result)
+            )
 
         return field_group_id, True
 
@@ -107,8 +124,8 @@ class RdcUtil:
 
     def read_file(self, file_name):
         try:
-            with open(file_name, 'r') as file:
-              return file.read().encode('utf-8')
+            with open(file_name, "r") as file:
+                return file.read().encode("utf-8")
         except Exception as e:
             print("Fail to read " + file_name + ":" + str(e))
 

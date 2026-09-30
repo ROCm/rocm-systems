@@ -1,0 +1,7 @@
+---
+description: Python coding style rules for rocprofiler-compute. Apply when generating or modifying Python files.
+globs: ["**/*.py"]
+alwaysApply: true
+---
+
+Follow **[`AGENTS.md`](../../AGENTS.md)** and the full redirect chain it references.

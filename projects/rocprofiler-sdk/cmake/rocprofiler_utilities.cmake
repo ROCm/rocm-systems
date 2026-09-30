@@ -229,8 +229,15 @@ function(ROCPROFILER_CHECKOUT_GIT_SUBMODULE)
         if(RET GREATER 0)
             set(_CMD "${GIT_EXECUTABLE} submodule update --init ${_RECURSE}
                 ${CHECKOUT_ADDITIONAL_CMDS} ${CHECKOUT_RELATIVE_PATH}")
-            message(STATUS "function(rocprofiler_checkout_git_submodule) failed.")
-            message(FATAL_ERROR "Command: \"${_CMD}\"")
+            if(_HAS_REPO_URL)
+                message(
+                    WARNING
+                        "Command failed: \"${_CMD}\". Falling back to cloning ${CHECKOUT_REPO_URL}."
+                    )
+            else()
+                message(STATUS "function(rocprofiler_checkout_git_submodule) failed.")
+                message(FATAL_ERROR "Command: \"${_CMD}\"")
+            endif()
         else()
             set(_TEST_FILE_EXISTS ON)
         endif()
@@ -1053,12 +1060,13 @@ function(rocprofiler_add_unit_test)
         "TEST_LIST"
         "TEST_PREFIX"
         "TIMEOUT"
-        "LABELS"
         "DISABLED"
         "PASS_REGULAR_EXPRESSION"
         "FAIL_REGULAR_EXPRESSION"
-        "SKIP_REGULAR_EXPRESSION")
-    set(_MULTI_OPTS "SOURCES" "ENVIRONMENT" "DISABLE_TESTS")
+        "SKIP_REGULAR_EXPRESSION"
+        "RESOURCE_LOCK")
+    set(_MULTI_OPTS "SOURCES" "LABELS" "ENVIRONMENT" "DISABLE_TESTS" "DATA"
+                    "CONFIGURE_FILES" "SPM_TESTS")
 
     cmake_parse_arguments(RAUT "${_FLAG_OPTS}" "${_SINGLE_OPTS}" "${_MULTI_OPTS}" ${ARGN})
 
@@ -1084,6 +1092,15 @@ function(rocprofiler_add_unit_test)
     set_arg_if_empty(RAUT_FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
     set_arg_if_empty(RAUT_DISABLED "OFF")
     set_arg_if_empty(RAUT_TEST_PREFIX "unit.")
+
+    # Ensure test prefix starts with 'unit.' and ends with '.'
+    if(NOT RAUT_TEST_PREFIX MATCHES "^unit\\.")
+        set(RAUT_TEST_PREFIX "unit.${RAUT_TEST_PREFIX}")
+    endif()
+
+    if(NOT RAUT_TEST_PREFIX MATCHES "\\.$")
+        set(RAUT_TEST_PREFIX "${RAUT_TEST_PREFIX}.")
+    endif()
 
     set(_DISABLE_TESTS_SOURCE "")
     if(RAUT_DISABLE_TESTS)
@@ -1116,17 +1133,42 @@ function(rocprofiler_add_unit_test)
                    SKIP_REGULAR_EXPRESSION
                    "${RAUT_SKIP_REGULAR_EXPRESSION}"
                    ENVIRONMENT
-                   "${RAUT_ENVIRONMENT}"
-                   DISABLED
-                   ${RAUT_DISABLED})
+                   "${RAUT_ENVIRONMENT}")
+
+    if(${RAUT_DISABLED})
+        set_tests_properties(${${RAUT_TEST_LIST}} PROPERTIES DISABLED ${RAUT_DISABLED})
+    endif()
+
+    if(RAUT_RESOURCE_LOCK)
+        set_tests_properties(${${RAUT_TEST_LIST}} PROPERTIES RESOURCE_LOCK
+                                                             "${RAUT_RESOURCE_LOCK}")
+    endif()
 
     if(_DISABLE_TESTS_SOURCE)
         set_tests_properties(${_DISABLE_TESTS_SOURCE} PROPERTIES DISABLED ON)
     endif()
 
+    if(RAUT_SPM_TESTS)
+        foreach(_TEST ${RAUT_SPM_TESTS})
+            set(_spm_test "${RAUT_TEST_PREFIX}${_TEST}")
+            get_property(
+                _labels
+                TEST ${_spm_test}
+                PROPERTY LABELS)
+            if(NOT "spm" IN_LIST _labels)
+                list(APPEND _labels "spm")
+                set_tests_properties(${_spm_test} PROPERTIES LABELS "${_labels}")
+            endif()
+        endforeach()
+    endif()
+
+    set(_INSTALL_RUNTIME_OUTPUT_DIRECTORY
+        ${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}/tests/unit-tests/bin)
+    set(_BUILD_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
+
     install(
         TARGETS ${RAUT_TARGET}
-        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}/tests/unit-tests/bin
+        DESTINATION ${_INSTALL_RUNTIME_OUTPUT_DIRECTORY}
         COMPONENT tests
         EXPORT rocprofiler-sdk-tests-targets)
 
@@ -1157,6 +1199,14 @@ function(rocprofiler_add_unit_test)
     endif()
     set(RAUT_DISABLE_TESTS "${_DISABLE_TESTS_INSTALLED}")
 
+    set(_SPM_TESTS_INSTALLED "")
+    if(RAUT_SPM_TESTS)
+        foreach(_TEST ${RAUT_SPM_TESTS})
+            list(APPEND _SPM_TESTS_INSTALLED "${RAUT_TEST_PREFIX}${_TEST}")
+        endforeach()
+    endif()
+    set(RAUT_SPM_TESTS "${_SPM_TESTS_INSTALLED}")
+
     configure_file(
         ${CMAKE_SOURCE_DIR}/cmake/Templates/unit-test.cmake.in
         ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}/tests/unit-tests/${RAUT_TARGET}.cmake
@@ -1168,11 +1218,53 @@ function(rocprofiler_add_unit_test)
             ${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}/tests/unit-tests/${RAUT_TARGET}
         COMPONENT tests)
 
+    foreach(_DATA ${RAUT_DATA})
+        if(IS_ABSOLUTE "${_DATA}")
+            file(RELATIVE_PATH _DATA ${CMAKE_CURRENT_LIST_DIR} ${_DATA})
+        endif()
+
+        if(IS_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/${_DATA})
+            file(COPY ${CMAKE_CURRENT_LIST_DIR}/${_DATA}/
+                 DESTINATION ${_BUILD_RUNTIME_OUTPUT_DIRECTORY}/${_DATA}/)
+            install(
+                DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/${_DATA}/
+                DESTINATION ${_INSTALL_RUNTIME_OUTPUT_DIRECTORY}/${_DATA}/
+                COMPONENT tests)
+        else()
+            configure_file(${CMAKE_CURRENT_LIST_DIR}/${_DATA}
+                           ${_BUILD_RUNTIME_OUTPUT_DIRECTORY}/${_DATA} COPYONLY)
+            install(
+                FILES ${CMAKE_CURRENT_LIST_DIR}/${_DATA}
+                DESTINATION ${_INSTALL_RUNTIME_OUTPUT_DIRECTORY}/${_DATA}
+                COMPONENT tests)
+        endif()
+    endforeach()
+
+    foreach(_DATA ${RAUT_CONFIGURE_FILES})
+        if(IS_ABSOLUTE "${_DATA}")
+            file(RELATIVE_PATH _DATA ${CMAKE_CURRENT_LIST_DIR} ${_DATA})
+        endif()
+
+        if(IS_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/${_DATA})
+            message(
+                SEND_ERROR
+                    "CONFIGURE_FILES cannot be directories: ${CMAKE_CURRENT_LIST_DIR}/${_DATA}. Use DATA instead."
+                )
+        else()
+            configure_file(${CMAKE_CURRENT_LIST_DIR}/${_DATA}
+                           ${_BUILD_RUNTIME_OUTPUT_DIRECTORY}/${_DATA} COPYONLY)
+        endif()
+    endforeach()
+
     install(
         FILES
             ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}/tests/unit-tests/${RAUT_TARGET}.cmake
         DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}/tests/unit-tests
         COMPONENT tests)
+
+    set(${RAUT_TEST_LIST}
+        "${${RAUT_TEST_LIST}}"
+        PARENT_SCOPE)
 
     cmake_policy(POP)
 endfunction()

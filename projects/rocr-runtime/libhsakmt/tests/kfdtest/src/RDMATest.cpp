@@ -61,12 +61,8 @@ TEST_F(RDMATest, GPUDirect) {
     HsaMemoryBuffer srcSysBuffer(BufferSize, defaultGPUNode, false);
     HsaMemoryBuffer srcLocalBuffer(BufferSize, defaultGPUNode, false, true);
 
-    ASSERT_SUCCESS(hsaKmtMapMemoryToGPU(srcSysBuffer.As<void*>(),
-                                        srcSysBuffer.Size(),
-                                        &AlternateVAGPU));
-    ASSERT_SUCCESS(hsaKmtMapMemoryToGPU(srcLocalBuffer.As<void*>(),
-                                        srcLocalBuffer.Size(),
-                                        &AlternateVAGPU));
+    ASSERT_SUCCESS(HSAKMT_CALL(hsaKmtMapMemoryToGPU, g_baseTest->m_hsakmt_current_ctx, srcSysBuffer.As<void*>(), srcSysBuffer.Size(), &AlternateVAGPU));
+    ASSERT_SUCCESS(HSAKMT_CALL(hsaKmtMapMemoryToGPU, g_baseTest->m_hsakmt_current_ctx, srcLocalBuffer.As<void*>(), srcLocalBuffer.Size(), &AlternateVAGPU));
 
     /* Fill up srcSysBuffer */
     srcSysBuffer.Fill(0xfe);
@@ -138,16 +134,14 @@ TEST_F(RDMATest, ContiguousVRAMAllocation) {
 
     memFlags.ui32.NonPaged = 1;
     memFlags.ui32.Contiguous = 1;
-    ret = hsaKmtAllocMemory(defaultGPUNode, BufferSize, memFlags, &LocalBuffer);
+    ret = HSAKMT_CALL(hsaKmtAllocMemory, g_baseTest->m_hsakmt_current_ctx, defaultGPUNode, BufferSize, memFlags, &LocalBuffer);
     if (ret == HSAKMT_STATUS_NOT_SUPPORTED) {
         LOG() << "KFD does not support contiguous memory, skipping the test" << std::endl;
         return;
     }
 
-    ASSERT_SUCCESS(hsaKmtMapMemoryToGPU(srcSysBuffer.As<void*>(),
-                                        srcSysBuffer.Size(),
-                                        &AlternateVAGPU));
-    ASSERT_SUCCESS(hsaKmtMapMemoryToGPU(LocalBuffer, BufferSize, &AlternateVAGPU));
+    ASSERT_SUCCESS(HSAKMT_CALL(hsaKmtMapMemoryToGPU, g_baseTest->m_hsakmt_current_ctx, srcSysBuffer.As<void*>(), srcSysBuffer.Size(), &AlternateVAGPU));
+    ASSERT_SUCCESS(HSAKMT_CALL(hsaKmtMapMemoryToGPU, g_baseTest->m_hsakmt_current_ctx, LocalBuffer, BufferSize, &AlternateVAGPU));
 
     /* Fill up srcSysBuffer */
     srcSysBuffer.Fill(0xfe);
@@ -200,9 +194,9 @@ TEST_F(RDMATest, ContiguousVRAMAllocation) {
     Rdma.Close();
 
 exit:
-    EXPECT_SUCCESS(hsaKmtUnmapMemoryToGPU(srcSysBuffer.As<void*>()));
-    EXPECT_SUCCESS(hsaKmtUnmapMemoryToGPU(LocalBuffer));
-    EXPECT_SUCCESS(hsaKmtFreeMemory(LocalBuffer, BufferSize));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, g_baseTest->m_hsakmt_current_ctx, srcSysBuffer.As<void*>()));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, g_baseTest->m_hsakmt_current_ctx, LocalBuffer));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtFreeMemory, g_baseTest->m_hsakmt_current_ctx, LocalBuffer, BufferSize));
 
     TEST_END
 }

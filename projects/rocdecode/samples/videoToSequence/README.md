@@ -4,25 +4,40 @@ The VideoToSequence sample illustrates decoding a single packetized video stream
 
 ## Prerequisites:
 
-* Install [rocDecode](../../README.md#build-and-install-instructions)
+* Install [rocDecode](https://rocm.docs.amd.com/projects/rocDecode/en/latest/install/rocDecode-build-and-install.html)
 
 * [FFMPEG](https://ffmpeg.org/about.html)
-
-    * On `Ubuntu`
 
   ```shell
   sudo apt install libavcodec-dev libavformat-dev libavutil-dev
   ```
-  
-    * On `RHEL`/`SLES` - install ffmpeg development packages manually or use [rocDecode-setup.py](../../rocDecode-setup.py) script
 
 ## Build
+
+**Linux:**
 
 ```shell
 mkdir video_decode_sample && cd video_decode_sample
 cmake ../
 make -j
 ```
+
+**Windows:**
+
+```bat
+mkdir video_decode_sample && cd video_decode_sample
+cmake .. -DROCM_PATH=<path-to-TheRock-build>
+cmake --build . --config Release
+```
+
+> [!NOTE]
+> Add the rocDecode and FFmpeg DLL directories to your PATH before configuring — CMake
+> locates FFmpeg by probing PATH — and keep them there when running:
+> ```bat
+> set PATH=%ROCM_PATH%\bin;<path-to-ffmpeg>\bin;%PATH%
+> ```
+> If FFmpeg is installed somewhere CMake cannot discover, pass
+> `-DFFMPEG_ROOT=<path-to-ffmpeg>` to the configure step.
 
 ## Run
 
@@ -32,7 +47,7 @@ make -j
               -d <GPU device ID - 0:device 0 / 1:device 1/ ... [optional - default:0]>
               -b <batch_size - specify the number of sequences to be decoded [optional - default:1]>
               -step <frame interval between each sequence [optional - default:1]> 
-              -stride <distance between consective frames in a sequence [optional - default:1]>
+              -stride <distance between consecutive frames in a sequence [optional - default:1]>
               -l <Number of frames in each sequence [optional - default:1]>
               -crop <crop rectangle for output (not used when using interopped decoded frame) [optional - default:1]>
               -seek_mode <option for seeking (0: no seek 1: seek to prev key frame) [optional - default: 0]>

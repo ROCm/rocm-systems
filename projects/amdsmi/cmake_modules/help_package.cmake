@@ -1,3 +1,6 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 # This module provides common functions used for building
 # and packaging ROCm projects
 
@@ -34,7 +37,7 @@ function(generic_package)
 
     # Add address sanitizer
     # derived from:
-    # https://github.com/RadeonOpenCompute/ROCm-OpenCL-Runtime/blob/e176056061bf11fdd98b58dd57deb4ac5625844d/amdocl/CMakeLists.txt#L27
+    # https://github.com/ROCm/ROCm-OpenCL-Runtime/blob/e176056061bf11fdd98b58dd57deb4ac5625844d/amdocl/CMakeLists.txt#L27
     if(${ADDRESS_SANITIZER})
         set(ASAN_COMPILER_FLAGS "-fno-omit-frame-pointer -fsanitize=address")
         set(ASAN_LINKER_FLAGS "-fsanitize=address")
@@ -65,6 +68,10 @@ function(generic_package)
         if(CXX_SUPPORTS_WTRAMPOLINES)
             set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wtrampolines" PARENT_SCOPE)
         endif()
+        check_cxx_compiler_flag("-Werror=stringop-overflow" CXX_SUPPORTS_STRINGOP_OVERFLOW)
+        if(CXX_SUPPORTS_STRINGOP_OVERFLOW)
+            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror=stringop-overflow" PARENT_SCOPE)
+        endif()
     endif()
 
     # Clang does not set the build-id
@@ -85,8 +92,14 @@ function(generic_package)
     set(CPACK_VERBATIM_VARIABLES ON CACHE BOOL "Escape strings passed to CPACK.")
     set(CPACK_DEB_COMPONENT_INSTALL ON PARENT_SCOPE)
     set(CPACK_RPM_COMPONENT_INSTALL ON PARENT_SCOPE)
-    mark_as_advanced(CPACK_PACKAGE_NAME CPACK_PACKAGE_VENDOR CPACK_PACKAGE_CONTACT CPACK_RESOURCE_FILE_LICENSE
-                     CPACK_RPM_PACKAGE_LICENSE CPACK_GENERATOR)
+    mark_as_advanced(
+        CPACK_PACKAGE_NAME
+        CPACK_PACKAGE_VENDOR
+        CPACK_PACKAGE_CONTACT
+        CPACK_RESOURCE_FILE_LICENSE
+        CPACK_RPM_PACKAGE_LICENSE
+        CPACK_GENERATOR
+    )
 
     # Debian package specific variables
     if(DEFINED ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
@@ -108,14 +121,14 @@ function(generic_package)
     set(CPACK_RPM_PACKAGE_AUTOREQ 0 PARENT_SCOPE)
     set(CPACK_RPM_PACKAGE_AUTOPROV 1 PARENT_SCOPE)
     list(
-        APPEND
-        CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
+        APPEND CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
         "/lib"
         "/usr/sbin"
         "/lib/systemd"
         "/lib/systemd/system"
         "/usr"
-        "/opt")
+        "/opt"
+    )
 
     # PACKAGE-tests need PACKAGE
     set(CPACK_DEBIAN_TESTS_PACKAGE_DEPENDS "${CPACK_PACKAGE_NAME}" PARENT_SCOPE)

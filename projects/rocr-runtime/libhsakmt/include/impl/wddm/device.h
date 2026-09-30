@@ -58,12 +58,13 @@
 #include <bitset>
 
 #include "impl/wddm/types.h"
-#include "wkmi/wkmi.h"
+#include "wkmi.h"
 #include "impl/wddm/va_mgr.h"
 #include "impl/wddm/status.h"
 #include "impl/wddm/types.h"
 #include "impl/wddm/gpu_memory.h"
 #include "impl/wddm/cmd_util.h"
+#include "hsakmt/hsakmttypes.h"
 
 namespace wsl {
 namespace thunk {
@@ -78,16 +79,26 @@ class WDDMQueue;
 #define IS_OVERLAPPING(start1, size1, start2, size2) \
   ((start1 < (start2 + size2)) && (start2 < (start1 + size1)))
 
+enum class SegmentKind {
+  kUnknown = 0,
+  kAperture,
+  kLocalMemory,
+  kSystemMemory,
+};
+
 struct SegmentInfo {
   uint32_t segment_id;
-  uint32_t segment_type;    // 0=aperture, 1=gpu memory, 2=system memory
-  bool aperture;
-  bool system_memory;
-  uint64_t commit_limit;
+  SegmentKind kind;
+  // Raw segment flags — kind collapses aperture+system_memory into kAperture,
+  // so preserve the source bits to identify non-local-heap segments later.
+  bool is_aperture;
+  bool is_system_memory;
 
   SegmentInfo()
-      : segment_id(0), segment_type(0), aperture(false),
-        system_memory(false), commit_limit(0) {}
+      : segment_id(0),
+        kind(SegmentKind::kUnknown),
+        is_aperture(false),
+        is_system_memory(false) {}
 };
 
 class WDDMDevice {
@@ -101,6 +112,9 @@ public:
   static constexpr size_t GpuMemoryChunkSize = 2 * (1ULL << 30);   // 2 GB
   static constexpr uint32_t kNumberOfHsaEvents = 1024;   //!< Note: may change in the future to 8K, KMD should define it
   static constexpr uint32_t kAqlPayloadId = 1 << 24;
+  // DXUMD_SCHEDULERIDENTIFIER_COMPUTE0 from the KMD scheduler enum (kdx_umd.h,
+  // not on this include path). The PM4 path must run on COMPUTE0.
+  static constexpr uint32_t kSchedulerIdCompute0 = 5;
 
   WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_id);
   ~WDDMDevice();
@@ -158,21 +172,27 @@ public:
   }
   uint32_t GetComputeEngine() { return device_info_.compute_schedid; }
 
-  uint64_t VramAvail();
+  uint64_t VramTotal();
+  hsa_status_t VramAvail(uint64_t* available_bytes);
 
   void GetClockCounters(uint64_t *gpu, uint64_t *cpu);
   uint32_t GetNumCpQueues() { return device_info_.num_cp_queues; }
   uint32_t NumXcc() const { return device_info_.num_xcc; }
 
   bool CreateSyncobj(D3DKMT_HANDLE *handle, uint64_t **addr);
-  void DestroySyncobj(D3DKMT_HANDLE handle);
+  // Returns true on STATUS_SUCCESS. Internal cleanup callers (queue
+  // teardown / rollback) intentionally ignore the result; the external
+  // semaphore close path propagates it so silent leaks become visible.
+  bool DestroySyncobj(D3DKMT_HANDLE handle);
+  bool OpenSyncobjFromNtHandle(void *nt_handle, D3DKMT_HANDLE *out_handle);
 
-  bool CreateQueue(WDDMQueue *queue);
+  bool CreateQueue(WDDMQueue *queue, uint64_t debugger_data = 0);
   void DestroyQueue(WDDMQueue *queue);
   bool CreateHwQueue(WDDMQueue *queue);
   bool DestroyHwQueue(WDDMQueue *queue);
   bool SubmitToSwQueue(WDDMQueue *queue, uint64_t command_addr,
                       uint64_t command_size, uint64_t fence_value);
+  bool SetCuMask(uint32_t doorbell, uint32_t cu_mask_count, const uint32_t* queue_cu_mask);
   bool SubmitToHwQueue(WDDMQueue *queue, uint64_t command_addr,
                       uint64_t command_size, uint64_t fence_value);
   bool SubmitToAqlQueue(WDDMQueue* queue, uint64_t command_addr, uint64_t command_size,
@@ -199,7 +219,8 @@ public:
   uint32_t LdsBlocks(const hsa_kernel_dispatch_packet_t *pkt);
   uint32_t GetCmdbufSize(void) const { return cmdbuf_size_; }
   uint32_t GetAqlFrameSize(void) const { return cmdbuf_aql_frame_size_; }
-  static uint32_t GetAqlFrameNum(void) { return cmdbuf_aql_frame_num_; }
+  uint32_t GetAqlFrameNum(void) const { return cmdbuf_aql_frame_num_; }
+  uint32_t GetAqlMergeLimit(void) const { return cmdbuf_aql_merge_limit_; }
 
   bool AllocUserQueueMemFromUMD(void) const {
     // stage 1 HWS queue memory is allocated by KMD.
@@ -228,9 +249,18 @@ public:
   device_init_result InitStatus() const { return init_status_; }
   uint32_t GbAddrConfig() const { return device_info_.gb_addr_config; }
 
+  // Debugger support
+  bool GetKmdDbgVersion(struct Wkmi::KmdDbgVersion *version) const;
+  bool RegisterRuntimeState(uint32_t runtime_state, const void* r_debug, bool ttmp_setup_hint) const;
+  bool SetTrapHandler(uint64_t tba, uint64_t tma) const;
+
 private:
-  bool Escape(void* priv_data, uint32_t priv_size, bool hw_access);
+  bool Escape(void* priv_data, uint32_t priv_size, bool hw_access) const;
   NTSTATUS ParseDeviceInfo(void);
+  uint64_t AllocateCwsrSize(uint64_t* out_ctx_size = nullptr, uint64_t* out_debug_size = nullptr) const;
+  void FillCwsrHeader(void* cpu_addr, uint64_t ctx_save_restore_size,
+                      uint64_t debug_memory_size, uint32_t num_xcc,
+                      volatile HSAint64* error_reason, HSAuint32 error_event_id);
   void DestroyDeviceInfo(void);
   bool CreateDevice(void);
   bool DestroyDevice(void);
@@ -238,14 +268,21 @@ private:
   bool DestroyPagingQueue(void);
   void *Lock(D3DKMT_HANDLE handle);
   bool Unlock(D3DKMT_HANDLE handle);
-  bool CreateContext(int engine, D3DKMT_HANDLE *handle);
+  bool CreateContext(int engine, D3DKMT_HANDLE *handle, uint64_t debugger_data = 0);
   bool DestroyContext(D3DKMT_HANDLE handle);
 
   void SetPowerOptimization(bool restore);
   void InitCmdbufInfo(void);
 
   bool QuerySegmentInfo();
-  bool GetSegmentId(D3DKMT_QUERYSTATISTICS_SEGMENT_TYPE segment_type, uint32_t &segment_id);
+  bool FindSegmentId(SegmentKind segment_kind, uint32_t *segment_id);
+  hsa_status_t QuerySegmentBytesResident(uint32_t segment_id,
+                                         uint64_t *bytes_resident) const;
+  hsa_status_t QuerySegmentGroupUsage(uint32_t segment_group,
+                                      uint64_t *bytes_allocated) const;
+  hsa_status_t QueryLocalVramUsage(uint64_t *usage_bytes);
+  hsa_status_t QueryNonLocalVramUsage(uint64_t *usage_bytes) const;
+  hsa_status_t QueryVramUsage(uint64_t *usage_bytes);
 
   D3DKMT_HANDLE adapter_;
   LUID adapter_luid_;
@@ -258,7 +295,12 @@ private:
 
   uint32_t cmdbuf_size_;
   uint32_t cmdbuf_aql_frame_size_;
-  static const uint32_t cmdbuf_aql_frame_num_;
+  // Both narrowed by InitCmdbufInfo(): the ring so it keeps fitting in a fixed
+  // byte budget as the frame size grows, the merge limit so a run of merged
+  // AQL packets stays inside one frame.
+  static constexpr uint32_t kMaxAqlFrameNum = 0x1000;
+  uint32_t cmdbuf_aql_frame_num_ = kMaxAqlFrameNum;
+  uint32_t cmdbuf_aql_merge_limit_ = kMaxAqlFrameNum;
   uint32_t node_id_;
   // device info
   Wkmi::DeviceInfo device_info_;

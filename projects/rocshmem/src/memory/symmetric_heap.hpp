@@ -43,6 +43,7 @@
  */
 #include <hip/hip_runtime_api.h>
 
+#include "std_allocator.hpp"
 #include "remote_heap_info.hpp"
 #include "single_heap.hpp"
 #include "bootstrap/bootstrap.hpp"
@@ -51,6 +52,7 @@ namespace rocshmem {
 
 class RemoteHeapInfoAbstract {
 public:
+  virtual ~RemoteHeapInfoAbstract() = default;
   virtual WindowInfo* get_window_info() = 0;
   __host__ virtual const std::vector<char*, StdAllocatorHIP<char*>>& get_heap_bases() = 0;
   __device__ char** get_heap_bases() { return nullptr; }
@@ -93,6 +95,10 @@ class SymmetricHeap {
                                                 single_heap_.get_size(), bootstrap);
     }
   }
+
+  ~SymmetricHeap() {
+    delete remote_heap_info_;
+  }
   /**
    * @brief Allocates heap memory and returns ptr to caller
    *
@@ -100,6 +106,17 @@ class SymmetricHeap {
    * @param[in] Number of bytes of requested
    */
   void malloc(void** ptr, size_t size) { single_heap_.malloc(ptr, size); }
+
+  /**
+   * @brief Allocates aligned heap memory and returns ptr to caller
+   *
+   * @param[in,out] ptr        A pointer to memory handle
+   * @param[in]     alignment  Required pointer alignment in bytes (power of 2)
+   * @param[in]     size       Number of bytes requested
+   */
+  void malign(void** ptr, size_t alignment, size_t size) {
+    single_heap_.malign(ptr, alignment, size);
+  }
 
   /**
    * @brief Frees previously allocated network visible memory
@@ -121,11 +138,29 @@ class SymmetricHeap {
   auto get_size() { return single_heap_.get_size(); }
 
   /**
-   * @brief Returns is the heap is allocated with managed memory
-   *
-   * @return bool
+   * @brief Accessor for the allocator type backing the symmetric heap
    */
-  bool is_managed() { return single_heap_.is_managed(); }
+  AllocatorType get_type() { return single_heap_.get_type(); }
+
+  /**
+   * @brief Accessor for the allocation granularity of the symmetric heap
+   */
+  size_t get_granularity() { return single_heap_.get_granularity(); }
+
+  /**
+   * @brief Accessor for the allocator used to back the symmetric heap
+   */
+  HIPAllocator *get_allocator() { return single_heap_.get_allocator(); }
+
+  /**
+   * @brief Whether the symmetric heap is backed by HIP VMM memory
+   *
+   * @return true if the heap allocator is a VMM allocator (POSIX fd or fabric)
+   */
+  bool is_vmm() {
+    auto type = single_heap_.get_type();
+    return type == AllocatorTypeVMMPosix || type == AllocatorTypeVMMFabric;
+  }
 
   /**
    * @brief Accessor method for heap_window_info_

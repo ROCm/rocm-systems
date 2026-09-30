@@ -1,22 +1,6 @@
-# Copyright (c) 2020 - 2023 Advanced Micro Devices, Inc. All Rights Reserved.
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 
 cmake_minimum_required(VERSION 3.21)
 
@@ -54,7 +38,7 @@ add_executable(runKernel1.hip.out ${EXCLUDE_OPTION} runKernel.cpp)
 # Note: Build for all detected architectures to support multiple GPUs (like hipcc does)
 add_custom_command(
   OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/vcpy_kernel.code
-  COMMAND ${CMAKE_HIP_COMPILER} -x hip --cuda-device-only ${OFFLOAD_ARCH_FLAGS} ${CMAKE_CURRENT_SOURCE_DIR}/vcpy_kernel.cpp -o ${CMAKE_CURRENT_BINARY_DIR}/vcpy_kernel.code
+  COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} -x hip --cuda-device-only ${OFFLOAD_ARCH_FLAGS} ${CMAKE_CURRENT_SOURCE_DIR}/vcpy_kernel.cpp -o ${CMAKE_CURRENT_BINARY_DIR}/vcpy_kernel.code
   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/vcpy_kernel.cpp
   COMMENT "Generating code object vcpy_kernel.code for ${CMAKE_HIP_ARCHITECTURES}"
   VERBATIM

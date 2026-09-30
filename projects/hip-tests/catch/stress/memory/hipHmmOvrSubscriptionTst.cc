@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2021-Present Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /* Test Case Description: This test case tests the working of OverSubscription
    feature which is part of HMM.*/
@@ -34,9 +18,8 @@ __global__ void floatx2(float* ptr, size_t size) {
   }
 }
 
-TEST_CASE("Stress_HMM_OverSubscriptionTst") {
-  int hmm = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&hmm, hipDeviceAttributeManagedMemory, 0));
+HIP_TEST_CASE(Stress_HMM_OverSubscriptionTst) {
+  const bool hmm = HipTest::isManagedMemorySupportedOnDevice(0);
 
   bool shouldRun = []() -> bool {
 #if HT_AMD  // For AMD this gcn arch needs to have xnack+
@@ -51,14 +34,14 @@ TEST_CASE("Stress_HMM_OverSubscriptionTst") {
 #endif
   }();
 
-  if (hmm == 1 && shouldRun) {
+  if (hmm && shouldRun) {
     hip::SpawnProc proc("hold_memory", true);
     proc.run_async();
     size_t freeMem, totalMem;
     HIP_CHECK(hipMemGetInfo(&freeMem, &totalMem));
 
     constexpr float oversub_factor = 1.2f;
-    auto system_ram = HipTest::getMemoryAmount();  // In MB
+    auto system_ram = HipTest::getAvailableSystemMemoryInMB();  // In MB
 
     // Take in account of system memory
     size_t max_memory = std::min(freeMem / (1024 * 1024), system_ram);
@@ -109,6 +92,6 @@ TEST_CASE("Stress_HMM_OverSubscriptionTst") {
     HIP_CHECK_THREAD_FINALIZE();
     REQUIRE(proc.wait() == 0);
   } else {
-    HipTest::HIP_SKIP_TEST("Tests only supposed to run on xnack+ devices");
+    HIP_SKIP_TEST(HipTest::SkipReason::kGpuXnackNotEnabled);
   }
 }

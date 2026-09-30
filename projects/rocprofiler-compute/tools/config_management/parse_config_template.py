@@ -1,28 +1,6 @@
 #!/usr/bin/env python3
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 """
 parse_config_template.py
@@ -37,8 +15,7 @@ Generate a template from an architecture directory:
 
     python tools/config_management/parse_config_template.py \
         analysis_configs/gfx950 \
-        analysis_configs/config_template.yaml \
-        --latest-arch gfx950
+        analysis_configs/config_template.yaml
 
 Inspect an architecture (no template written):
 
@@ -205,13 +182,6 @@ def main() -> None:
         nargs="?",
         help="Output YAML file (optional). If omitted, only a summary is printed.",
     )
-    parser.add_argument(
-        "--latest-arch",
-        help=(
-            "Specify this architecture as latest (adds 'latest_arch' metadata "
-            "to the generated template). Only used when an output file is given."
-        ),
-    )
     args = parser.parse_args()
 
     directory = Path(args.directory)
@@ -253,10 +223,7 @@ def main() -> None:
 
     # Optionally write a template YAML.
     if args.output:
-        output_data: Any = {"panels": panels}
-        if args.latest_arch:
-            output_data = {"latest_arch": args.latest_arch, "panels": panels}
-        cm_utils.save_yaml(output_data, Path(args.output))
+        cm_utils.save_yaml({"panels": panels}, Path(args.output))
         print(f"\nTemplate saved to: {args.output}")
 
 

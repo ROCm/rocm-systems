@@ -44,6 +44,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/auxv.h>
 #include <sys/syscall.h> /* SYS_xxx definitions */
 #include <sys/types.h>
 #include <unistd.h> /* usleep */
@@ -693,7 +694,13 @@ ROCTRACER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
   }
 
   // Load output plugin
-  const char* plugin_name = getenv("ROCTRACER_PLUGIN_LIB");
+  const char* plugin_name = nullptr;
+  if (getauxval(AT_SECURE) == 0)
+    plugin_name = getenv("ROCTRACER_PLUGIN_LIB");
+  if (plugin_name != nullptr && strchr(plugin_name, '/') != nullptr) {
+    warning("ROCTRACER_PLUGIN_LIB must be a filename, not a path; ignoring");
+    plugin_name = nullptr;
+  }
   if (plugin_name == nullptr) plugin_name = "libfile_plugin.so";
   if (Dl_info dl_info; dladdr((void*)tool_load, &dl_info) != 0) {
     if (!plugin.emplace(fs::path(dl_info.dli_fname).replace_filename(plugin_name)).is_valid())

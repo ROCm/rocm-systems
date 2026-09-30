@@ -26,16 +26,9 @@
 #define LIBRARY_SRC_MEMORY_SINGLE_HEAP_HPP_
 
 #include "envvar.hpp"
+#include "constants.hpp"
 #include "heap_memory.hpp"
-#include "heap_type.hpp"
-#if defined USE_ALLOC_DLMALLOC
-#include "dlmalloc.hpp"
-#elif defined USE_ALLOC_POW2BINS
-#include "address_record.hpp"
-#include "pow2_bins.hpp"
-#else
-#error "You need to have one of USE_ALLOC_DLMALLOC, USE_ALLOC_POW2BINS set to ON"
-#endif
+#include "shmem_allocator_strategy.hpp"
 
 /**
  * @file single_heap.hpp
@@ -49,27 +42,13 @@
 namespace rocshmem {
 
 class SingleHeap {
-#if defined USE_ALLOC_DLMALLOC
-  /**
-   * @brief Helper type for allocation strategy
-   */
-  using STRAT_T = DLAllocatorStrategy<HEAP_T>;
-#elif defined USE_ALLOC_POW2BINS
-  /**
-   * @brief Helper type for address records
-   */
-  using AR_T = AddressRecord;
-  /**
-   * @brief Helper type for allocation strategy
-   */
-  using STRAT_T = Pow2Bins<AR_T, HEAP_T>;
-#endif // defined USE_ALLOC_POW2BINS
 
  public:
   /**
-   * @brief Primary constructor
+   * @brief Primary constructor and destructor
    */
   SingleHeap();
+  ~SingleHeap();
 
   /**
    * @brief Allocates memory from the heap
@@ -116,14 +95,13 @@ class SingleHeap {
   void* realloc(void* ptr, size_t size);
 
   /**
-   * @brief
+   * @brief Allocates aligned memory from the heap
    *
-   * @param[in]
-   * @param[in]
-   *
-   * @return
+   * @param[in,out] ptr        Address of raw pointer (&pointer_to_void)
+   * @param[in]     alignment  Required pointer alignment in bytes (power of 2)
+   * @param[in]     size       Size in bytes of memory allocation
    */
-  void* malign(size_t alignment, size_t size);
+  void malign(void** ptr, size_t alignment, size_t size);
 
   /**
    * @brief Accessor for heap base ptr
@@ -154,22 +132,39 @@ class SingleHeap {
   size_t get_avail();
 
   /**
-   * @brief Returns is the heap is allocated with managed memory
+   * @brief Accessor for the allocator type backing the heap
    *
-   * @return bool
+   * @return AllocatorType used to allocate the heap memory
    */
-  bool is_managed() { return heap_mem_.is_managed(); }
+  AllocatorType get_type();
+
+  /**
+   * @brief Accessor for the allocation granularity of the heap allocator
+   *
+   * @return Allocation granularity in bytes
+   */
+  size_t get_granularity();
+
+  /**
+   * @brief Accessor for the allocator used to back the heap memory
+   *
+   * @return Pointer to the HIPAllocator that allocated the heap
+   */
+  HIPAllocator *get_allocator();
 
  private:
   /**
    * @brief Heap memory object
    */
-  HEAP_T heap_mem_{envvar::heap_size};
-
+  HeapMemory *heap_mem_{nullptr};
   /**
    * @brief Allocation strategy object
    */
-  STRAT_T strat_{&heap_mem_};
+  ShmemAllocatorStrategy *strat_{nullptr};
+  /**
+   * @brief Allocator used to back the heap memory
+   */
+  HIPAllocator *allocator_{nullptr};
 };
 
 }  // namespace rocshmem

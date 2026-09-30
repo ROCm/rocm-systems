@@ -1,22 +1,8 @@
-/* Copyright (c) 2010 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /*******************************************************************************
  * Kernel Throughput
@@ -31,21 +17,14 @@
 #ifndef _OCL_KernelThroughput_H_
 #define _OCL_KernelThroughput_H_
 
-#ifdef WIN32
-#include "xmmintrin.h"
-#endif
 
 #include "OCLTestImp.h"
 // #include <sstream>
-// #define WIN32_LEAN_AND_MEAN //Restricts windows.h to include only the core
-// API. #include "windows.h" #undef Yield #include <process.h> #include
-//<xmmintrin.h> #include <emmintrin.h> #include <pmmintrin.h>
 
 #define LARGE_INT long long
 #define UNSIGNED_LARGE_INT unsigned long long
 #define MAX_LOOP_ITER 10
 typedef cl_float4 float4;
-typedef void (*CPUKernel)(__m128*, __m128*, unsigned int);
 
 class OCLPerfKernelThroughput : public OCLTestImp {
  public:

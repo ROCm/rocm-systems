@@ -23,6 +23,9 @@ copyright = "Copyright (c) 2024 - 2026 Advanced Micro Devices, Inc. All rights r
 version = version_number
 release = version_number
 
+setting_all_article_info = True
+all_article_info_os = ["linux"]
+
 external_toc_path = "./sphinx/_toc.yml"
 
 docs_core = ROCmDocs(left_nav_title)
@@ -34,3 +37,16 @@ external_projects_current_project = "rocjpeg"
 
 for sphinx_var in ROCmDocs.SPHINX_VARS:
     globals()[sphinx_var] = getattr(docs_core, sphinx_var)
+
+# Theme-related settings
+html_theme = "rocm_docs_theme"
+html_theme_options = {
+    "flavor": "rocm",
+    "repository_url": "https://github.com/ROCm/rocm-systems",
+    "path_to_docs": "projects/rocjpeg/docs",
+    "use_repository_button": True,
+    "use_issues_button": True,
+    "use_download_button": True,
+}
+# Generate llms.txt and llms-full.txt
+rocm_docs_generate_llms = True

@@ -1,11 +1,15 @@
 
 name: rocprofiler-sdk Formatting
 
+permissions:
+  contents: read
+
 on:
   workflow_dispatch:
   pull_request:
     paths:
       - 'projects/rocprofiler-sdk/**'
+      - 'shared/sha256/**'
       - '!**/*.md'
       - '!**/*.rtf'
       - '!**/*.rst'
@@ -28,9 +32,11 @@ jobs:
       ACCESS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
-        sparse-checkout: projects/rocprofiler-sdk
+        sparse-checkout: |
+          projects/rocprofiler-sdk
+          shared/sha256
 
     - name: Extract branch name
       shell: bash
@@ -68,9 +74,11 @@ jobs:
       ACCESS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
-        sparse-checkout: projects/rocprofiler-sdk
+        sparse-checkout: |
+          projects/rocprofiler-sdk
+          shared/sha256
 
     - name: Extract branch name
       shell: bash
@@ -89,7 +97,7 @@ jobs:
     - name: Run clang-format
       working-directory: projects/rocprofiler-sdk
       run: |
-        FORMAT_FILES=$(find samples source tests benchmark -type f | egrep '\.(h|hpp|hh|c|cc|cpp)(|\.in)$')
+        FORMAT_FILES=$(find samples source tests benchmark ../../shared/sha256 -type f | egrep '\.(h|hpp|hh|c|cc|cpp)(|\.in)$')
         command -v git
         command -v clang-format
         git --version
@@ -115,9 +123,10 @@ jobs:
       ACCESS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
-        sparse-checkout: projects/rocprofiler-sdk
+        sparse-checkout: |
+          projects/rocprofiler-sdk
 
     - name: Extract branch name
       shell: bash
@@ -139,7 +148,8 @@ jobs:
     - name: black format
       working-directory: projects/rocprofiler-sdk
       run: |
-        black .
+        # Version number is also enforced in cmake/rocprofiler_formatting.cmake
+        black --required-version 26 .
         if [ $(git diff | wc -l) -ne 0 ]; then
           echo -e "\nError! Python code not formatted. Run black...\n"
           echo -e "\nFiles:\n"
@@ -153,9 +163,11 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
-        sparse-checkout: projects/rocprofiler-sdk
+        sparse-checkout: |
+          projects/rocprofiler-sdk
+          shared/sha256
 
     - name: Extract branch name
       shell: bash
@@ -168,10 +180,43 @@ jobs:
       working-directory: projects/rocprofiler-sdk
       run: |
         OUTFILE=missing_newline.txt
-        for i in $(find source tests samples benchmark docker cmake -type f | egrep -v '\.(bin|png|csv)$|source/docs/_(build|doxygen)'); do VAL=$(tail -c 1 ${i}); if [ -n "${VAL}" ]; then echo "- ${i}" >> ${OUTFILE}; fi; done
+        for i in $(find source tests samples benchmark docker cmake ../../shared/sha256 -type f | egrep -v '\.(bin|png|csv)$|source/docs/_(build|doxygen)'); do VAL=$(tail -c 1 ${i}); if [ -n "${VAL}" ]; then echo "- ${i}" >> ${OUTFILE}; fi; done
         if [[ -f ${OUTFILE} && $(cat ${OUTFILE} | wc -l) -gt 0 ]]; then
           echo -e "\nError! Source code missing new line at end of file...\n"
           echo -e "\nFiles:\n"
           cat ${OUTFILE}
+          exit 1
+        fi
+
+  config_yaml:
+    runs-on: ubuntu-22.04
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        sparse-checkout: |
+          projects/rocprofiler-sdk
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install ruamel.yaml
+
+    - name: Ensure config.yaml is formatted
+      working-directory: projects/rocprofiler-sdk
+      run: |
+        python source/scripts/format-deps.py --counter-config
+        if [ $(git diff -- source/share/rocprofiler-sdk/config.yaml | wc -l) -ne 0 ]; then
+          echo ""
+          echo "::error::YAML file is not properly formatted. Run the following command to fix:"
+          echo ""
+          echo "  cd projects/rocprofiler-sdk && python source/scripts/format-deps.py --counter-config"
+          echo ""
+          git diff -- source/share/rocprofiler-sdk/config.yaml
           exit 1
         fi

@@ -1,22 +1,8 @@
-/* Copyright (c) 2015 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip/hip_runtime.h>
 
@@ -187,6 +173,15 @@ hipError_t hipDeviceEnablePeerAccess(int peerDeviceId, unsigned int flags) {
   HIP_RETURN(hip::getCurrentDevice()->EnablePeerAccess(peerDeviceId));
 }
 
+// Serialize copyStream against all pending work on peer device's blocking streams.
+static void waitForPeerDevices(hip::Device* peerDevice, hip::Stream* copyStream) {
+  if (peerDevice == nullptr || peerDevice == copyStream->GetDevice()) {
+    // Same device as the copy stream, no need to wait on peer device's streams.
+    return;
+  }
+  peerDevice->WaitActiveStreams(copyStream);
+}
+
 hipError_t hipMemcpyPeer(void* dst, int dstDevice, const void* src, int srcDevice,
                          size_t sizeBytes) {
   HIP_INIT_API(hipMemcpyPeer, dst, dstDevice, src, srcDevice, sizeBytes);
@@ -196,8 +191,14 @@ hipError_t hipMemcpyPeer(void* dst, int dstDevice, const void* src, int srcDevic
     HIP_RETURN(hipErrorInvalidDevice);
   }
 
+  // Unlike hipMemcpyPeerAsync, hipMemcpyPeer is serialized with respect to all the pending
+  // work on the current device, srcDevice and dstDevice.
+  hip::Stream* copyStream = hip::getNullStream();
+  waitForPeerDevices(g_devices[srcDevice], copyStream);
+  waitForPeerDevices(g_devices[dstDevice], copyStream);
+
   HIP_RETURN(
-      ihipMemcpy(dst, src, sizeBytes, hipMemcpyDeviceToDevice, *hip::getNullStream(), true, false));
+      ihipMemcpy(dst, src, sizeBytes, hipMemcpyDeviceToDevice, *copyStream, true, false));
 }
 
 hipError_t hipMemcpyPeerAsync(void* dst, int dstDevice, const void* src, int srcDevice,
@@ -211,7 +212,7 @@ hipError_t hipMemcpyPeerAsync(void* dst, int dstDevice, const void* src, int src
   getStreamPerThread(stream);
   hip::Stream* hip_stream = hip::getStream(stream);
   if (hip_stream == nullptr) {
-    return hipErrorInvalidValue;
+    HIP_RETURN(hipErrorInvalidValue);
   }
   HIP_RETURN(ihipMemcpy(dst, src, sizeBytes, hipMemcpyDeviceToDevice, *hip_stream, true, true));
 }
@@ -242,11 +243,11 @@ hipError_t hipMemcpy3DPeerAsync(hipMemcpy3DPeerParms* p, hipStream_t stream) {
   getStreamPerThread(stream);
   hip::Stream* hip_stream = hip::getStream(stream);
   if (hip_stream == nullptr) {
-    return hipErrorInvalidValue;
+    HIP_RETURN(hipErrorInvalidValue);
   }
 
   hipMemcpy3DParms copyParms = getMemcpy3DParms(*p);
-  HIP_RETURN(ihipMemcpy3D(&copyParms), stream, true);
+  HIP_RETURN(ihipMemcpy3D(&copyParms, stream, true));
 }
 
 hipError_t hipCtxEnablePeerAccess(hipCtx_t peerCtx, unsigned int flags) {

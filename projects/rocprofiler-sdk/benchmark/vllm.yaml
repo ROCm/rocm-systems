@@ -1,0 +1,36 @@
+defaults:
+  rocprofv3:
+    # keys can be used with --filter-rocprofv3 option
+    full: [--hsa-trace, --hip-trace, --kernel-trace, --memory-copy-trace, --rccl-trace, --memory-allocation-trace]
+    kernel: [--kernel-trace]
+    hip: [--hip-trace]
+    hsa: [--hsa-trace]
+    memcpy: [--memory-copy-trace]
+    malloc: [--memory-allocation-trace]
+    rccl: [--rccl-trace]
+  benchmark:
+    - baseline
+    - disabled-sdk-contexts
+    - sdk-buffer-overhead
+    - sdk-callback-overhead
+    - tool-runtime-overhead
+  group:
+    - vllm
+
+jobs:
+  # vLLM throughput benchmark with Qwen3-30B-A3B model
+  - name: vllm-qwen3-30b
+    group: [vllm, inference, llm]
+    command: [vllm, bench, throughput,
+              --model, /model/Qwen/Qwen3-30B-A3B,
+              --num-prompts=100,
+              --input-len, "256",
+              --output-len, "256",
+              --tensor-parallel-size, "4",
+              --dtype, float16]
+    rocprofv3:
+      - [--hsa-trace, --hip-trace, --kernel-trace, --memory-copy-trace, --rccl-trace, --memory-allocation-trace]
+    benchmark:
+      - baseline
+      - disabled-sdk-contexts
+      - tool-runtime-overhead

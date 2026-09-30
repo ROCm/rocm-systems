@@ -195,8 +195,10 @@ size_t CmdUtil::BuildDispatch(
   dispatch.dimension_regs.compute_num_thread_y = pInfo->pPacket->workgroup_size_y;
   dispatch.dimension_regs.compute_num_thread_z = pInfo->pPacket->workgroup_size_z;
 
-  // TODO: Add AQL packet index for debugger
-  // Debugger requires AQL packet index in COMPUTE_DISPATCH_PKT_ADDR_LO
+  GenerateSetShRegHeader(&dispatch.pkt_addr_regs, mmCOMPUTE_DISPATCH_PKT_ADDR_LO);
+  dispatch.pkt_addr_regs.compute_pkt_addr_lo = pInfo->packetIndex;
+  dispatch.pkt_addr_regs.compute_pkt_addr_hi = 0x0;
+
   GenerateSetShRegHeader(&dispatch.program_regs, mmCOMPUTE_PGM_LO);
   dispatch.program_regs.compute_pgm_lo = Ptr48Low32(pInfo->pEntry);
   dispatch.program_regs.compute_pgm_hi = Ptr48High8(pInfo->pEntry);

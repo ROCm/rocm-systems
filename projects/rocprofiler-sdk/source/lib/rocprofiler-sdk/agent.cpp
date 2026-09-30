@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,34 +21,50 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/agent.hpp"
+#include "lib/aqlprofile/aqlprofile.hpp"
 #include "lib/common/environment.hpp"
-#include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/scope_destructor.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/common/string_entry.hpp"
 #include "lib/common/utility.hpp"
+#include "lib/rocprofiler-sdk/agent_mapping.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "lib/rocprofiler-sdk/platform/agent.hpp"
+#ifdef _WIN32
+#    include "lib/rocprofiler-sdk/platform/windows/agent.hpp"
+#else
+#    include "lib/rocprofiler-sdk/platform/gnulinux/agent.hpp"
+#    include "lib/rocprofiler-sdk/platform/wsl/agent.hpp"
+#endif
 
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/cxx/details/tokenize.hpp>
 
-#include <fmt/core.h>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 #include <hsa/hsa.h>
 #include <hsa/hsa_api_trace.h>
 #include <libdrm/amdgpu.h>
 #include <xf86drm.h>
+// amdgpu_drm.h provides AMDGPU_INFO_DEV_INFO / drm_amdgpu_info_device for the
+// V2 cu_bitmap path below; only needed in internal-aqlprofile builds.
+#if !ROCPROFILER_EXTERNAL_AQLPROFILE
+#    include <libdrm/amdgpu_drm.h>
+#endif
 
-#include <fstream>
+#ifndef _WIN32
+#    include <fcntl.h>
+#    include <unistd.h>
+#endif
+
+#include <algorithm>
+#include <atomic>
 #include <iomanip>
 #include <limits>
-#include <random>
 #include <set>
 #include <shared_mutex>
-#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -62,342 +78,21 @@ namespace agent
 {
 namespace
 {
-namespace fs = ::rocprofiler::common::filesystem;
-
-uint64_t
-get_agent_offset()
+struct bdf_info
 {
-    static uint64_t _v = []() {
-        auto gen = std::mt19937{std::random_device{}()};
-        auto rng = std::uniform_int_distribution<uint64_t>{std::numeric_limits<uint8_t>::max(),
-                                                           std::numeric_limits<uint16_t>::max()};
-        return rng(gen);
-    }();
-    return _v;
-}
-
-struct cpu_info
-{
-    long        processor   = -1;
-    long        family      = -1;
-    long        model       = -1;
-    long        physical_id = -1;
-    long        core_id     = -1;
-    long        apicid      = -1;
-    std::string vendor_id   = {};
-    std::string model_name  = {};
-
-    bool is_valid() const
-    {
-        return !(processor < 0 || family < 0 || model < 0 || physical_id < 0 || core_id < 0 ||
-                 apicid < 0 || vendor_id.empty() || model_name.empty());
-    }
+    uint32_t domain{};
+    uint8_t  bus{};
+    uint8_t  device{};
+    uint8_t  function{};
 };
 
-auto
-parse_cpu_info()
-{
-    auto ifs  = std::ifstream{"/proc/cpuinfo"};
-    auto data = std::vector<cpu_info>{};
-    if(!ifs) return data;
-
-    auto read_blocks = [&ifs]() {
-        auto blocks        = std::vector<std::vector<std::string>>{};
-        auto current_block = std::vector<std::string>{};
-        auto line          = std::string{};
-        while(std::getline(ifs, line))
-        {
-            if(ifs.eof())
-            {
-                if(!current_block.empty()) blocks.emplace_back(std::move(current_block));
-                break;
-            }
-
-            line = sdk::parse::strip(std::move(line), " \t\n\v\f\r");
-            if(line.empty())
-            {
-                if(!current_block.empty()) blocks.emplace_back(std::move(current_block));
-                current_block.clear();
-            }
-            else
-            {
-                current_block.emplace_back(line);
-            }
-        }
-        return blocks;
-    };
-
-    auto processor_blocks = read_blocks();
-    auto processor_info   = std::vector<cpu_info>{};
-    processor_info.reserve(processor_blocks.size());
-
-    for(const auto& bitr : processor_blocks)
-    {
-        auto info_v = cpu_info{};
-        for(const auto& itr : bitr)
-        {
-            auto match = sdk::parse::tokenize(itr, std::vector<std::string_view>{": "});
-            if(match.size() >= 2)
-            {
-                auto get_stol = [_label = std::string_view{itr}](const auto& _value) -> long {
-                    try
-                    {
-                        return std::stol(_value);
-                    } catch(std::exception& e)
-                    {
-                        ROCP_CI_LOG(WARNING) << fmt::format("rocprofiler-sdk agent encountered "
-                                                            "error while parsing CPU info '{}': {}",
-                                                            _label,
-                                                            e.what());
-                    }
-                    return 0;
-                };
-
-                // For cases with multiple colons, join all tokens after the first one
-                // e.g. "model name : AMD EPYC : 100-000000248" split into
-                // ["model name", "AMD EPYC", "100-000000248"] with the last two tokens joined
-                // back together with ": "
-                std::string value;
-                if(match.size() == 2)
-                {
-                    value = match.back();
-                }
-                else
-                {
-                    // Join all tokens after the first one with ": " separator
-                    for(size_t i = 1; i < match.size(); ++i)
-                    {
-                        if(i > 1) value += ": ";
-                        value += match[i];
-                    }
-                }
-
-                if(itr.find("vendor_id") == 0)
-                    info_v.vendor_id = value;
-                else if(itr.find("model name") == 0)
-                {
-                    info_v.model_name = value;
-                    // Remove leading and trailing whitespaces
-                    info_v.model_name =
-                        sdk::parse::strip(std::string{info_v.model_name}, " \t\n\v\f\r");
-                }
-                else if(itr.find("processor") == 0)
-                    info_v.processor = get_stol(value);
-                else if(itr.find("cpu family") == 0)
-                    info_v.family = get_stol(value);
-                else if(itr.find("model") == 0 && itr.find("model name") != 0)
-                    info_v.model = get_stol(value);
-                else if(itr.find("physical id") == 0)
-                    info_v.physical_id = get_stol(value);
-                else if(itr.find("core id") == 0)
-                    info_v.core_id = get_stol(value);
-                else if(itr.find("apicid") == 0)
-                    info_v.apicid = get_stol(value);
-            }
-            else
-            {
-                // Each processor_block is grouped by the presence of an empty line in /proc/cpuinfo
-                // so no checks for empty lines are performed inside this loop. If an empty line is
-                // found, that should be considered an error. Entries like "power management:" with
-                // no info (i.e. where the ":" is the last character on the line) can be ignored
-                auto last_colon_pos = itr.find_last_of(':');
-                ROCP_CI_LOG_IF(
-                    INFO, last_colon_pos < itr.length() && (last_colon_pos + 1) != itr.length())
-                    << fmt::format("Encountered unexpected /proc/cpuinfo line format: '{}'", itr);
-            }
-        }
-
-        if(info_v.is_valid())
-            processor_info.emplace_back(info_v);
-        else
-        {
-            ROCP_ERROR << "Invalid processor info: "
-                       << fmt::format("processor={}, vendor={}, family={}, model={}, name={}, "
-                                      "physical id={}, core id={}, apicid={}",
-                                      info_v.processor,
-                                      info_v.vendor_id,
-                                      info_v.family,
-                                      info_v.model,
-                                      info_v.model_name,
-                                      info_v.physical_id,
-                                      info_v.core_id,
-                                      info_v.apicid);
-        }
-    }
-
-    return processor_info;
-}
-
-auto&
-get_cpu_info()
-{
-    static auto _v = parse_cpu_info();
-    return _v;
-}
-
-// check to see if the file is readable
-bool
-is_readable(const fs::path& fpath)
-{
-    auto ec    = std::error_code{};
-    auto perms = fs::status(fpath, ec).permissions();
-    ROCP_ERROR_IF(ec) << fmt::format(
-        "Error getting status for file '{}': {}", fpath.string(), ec.message());
-    return (!ec && (perms & fs::perms::owner_read) != fs::perms::none);
-}
-
-auto
-read_file(const std::string& fname)
-{
-    auto data = std::vector<std::string>{};
-
-    if(!is_readable(fs::path{fname}))
-    {
-        ROCP_CI_LOG(WARNING) << fmt::format("file '{}' cannot be read", fname);
-        return data;
-    }
-
-    auto ifs = std::ifstream{fname};
-    if(!ifs || !ifs.good())
-    {
-        ROCP_CI_LOG(WARNING) << fmt::format("file '{}' cannot be read", fname);
-        return data;
-    }
-
-    while(true)
-    {
-        auto value = std::string{};
-        ifs >> value;
-        if(ifs.eof() || value.empty()) break;
-
-        data.emplace_back(value);
-    }
-
-    return data;
-}
-
-auto
-read_map(const std::string& fname)
-{
-    auto data = std::unordered_map<std::string, std::string>{};
-
-    if(!is_readable(fs::path{fname}))
-    {
-        ROCP_CI_LOG(WARNING) << fmt::format("file '{}' cannot be read", fname);
-        return data;
-    }
-
-    auto ifs = std::ifstream(fname);
-
-    if(!ifs || !ifs.good())
-    {
-        ROCP_CI_LOG(WARNING) << fmt::format("file '{}' cannot be read", fname);
-        return data;
-    }
-    auto last_label = std::string{};
-    while(ifs && ifs.good())
-    {
-        auto label = std::string{};
-        ifs >> label;
-        if(ifs.fail() || ifs.eof() || label.empty()) break;
-
-        auto entry = std::string{};
-        ifs >> entry;
-        if(ifs.fail() || ifs.eof())
-        {
-            ROCP_CI_LOG(WARNING) << fmt::format(
-                "unexpected file format in '{}' at {}", fname, label);
-            continue;
-        }
-
-        auto ret = data.emplace(label, entry);
-        if(!ret.second)
-        {
-            ROCP_CI_LOG(WARNING) << fmt::format(
-                "duplicate entry in '{}': '{}' (='{}'). last label was '{}'",
-                fname,
-                label,
-                entry,
-                last_label);
-            continue;
-        }
-
-        if(!label.empty()) last_label = std::move(label);
-    }
-
-    return data;
-}
-
-template <typename MapT, typename Tp>
-void
-read_property(const MapT& data, const std::string& label, Tp& value)
-{
-    using mutable_type = std::remove_const_t<Tp>;
-
-    get_agent_available_properties().insert(label);
-    if constexpr(std::is_enum<Tp>::value)
-    {
-        using value_type = std::underlying_type_t<mutable_type>;
-        // never expect this to be true but it does guard against infinite recursion
-        static_assert(!std::is_enum<value_type>::value, "Expected non-enum type");
-
-        auto value_v = static_cast<value_type>(value);
-        read_property(data, label, value_v);
-        if constexpr(std::is_const<Tp>::value)
-            const_cast<mutable_type&>(value) = static_cast<mutable_type>(value_v);
-        else
-            value = static_cast<Tp>(value_v);
-    }
-    else
-    {
-        static_assert(std::is_integral<Tp>::value, "Expected integral type");
-        using value_type = std::conditional_t<std::is_signed<Tp>::value, intmax_t, uintmax_t>;
-
-        if(data.find(label) == data.end())
-        {
-            ROCP_ERROR << "agent properties map missing " << label << " entry";
-            return;
-        }
-
-        auto       iss = std::istringstream{data.at(label)};
-        value_type local_value;
-        iss >> local_value;
-
-        // verify that we have used the correct data sizes
-        constexpr auto min_value = std::numeric_limits<Tp>::min();
-        constexpr auto max_value = std::numeric_limits<Tp>::max();
-        if(local_value < min_value)
-        {
-            ROCP_CI_LOG(WARNING) << fmt::format(
-                "data with label {} has a value (={}) which is less "
-                "than the min value for the type (={})",
-                label,
-                local_value,
-                min_value);
-            return;
-        }
-        else if(local_value > max_value)
-        {
-            ROCP_CI_LOG(WARNING) << fmt::format("data with label {} has a value (={}) which is "
-                                                "greater than the max value for the type (={})",
-                                                label,
-                                                local_value,
-                                                max_value);
-            return;
-        }
-
-        if constexpr(std::is_const<Tp>::value)
-            const_cast<mutable_type&>(value) = static_cast<mutable_type>(local_value);
-        else
-            value = static_cast<Tp>(local_value);
-    }
-}
+}  // namespace
 
 void
 update_agent_runtime_visibility(rocprofiler_agent_t& agent_info)
 {
     //
-    //      https://rocm.docs.amd.com/en/latest/conceptual/gpu-isolation.html
+    //      https://rocm.docs.amd.com/en/latest/reference/system-optimization/gpu-isolation.html
     //
     //
     // ROCR_VISIBLE_DEVICES
@@ -467,9 +162,10 @@ update_agent_runtime_visibility(rocprofiler_agent_t& agent_info)
         auto set_hip_visibility = [&agent_info](bool is_hip_visible) {
             if(is_hip_visible && agent_info.runtime_visibility.hsa == 0)
             {
-                ROCP_WARNING << fmt::format("Attempt to enable hip visiblity for agent-{} which is "
-                                            "not visible to HSA (ROCR)",
-                                            agent_info.node_id);
+                ROCP_WARNING << fmt::format(
+                    "Attempt to enable hip visibility for agent-{} which is "
+                    "not visible to HSA (ROCR)",
+                    agent_info.node_id);
                 return;
             }
 
@@ -529,7 +225,7 @@ update_agent_runtime_visibility(rocprofiler_agent_t& agent_info)
         };
 
         static_assert(
-            ROCPROFILER_LIBRARY_LAST == ROCPROFILER_ROCJPEG_LIBRARY,
+            ROCPROFILER_LIBRARY_LAST == ROCPROFILER_HIPFILE_LIBRARY,
             "Since a new library was added to rocprofiler_runtime_library_t, please make sure "
             "rocprofiler_agent_runtime_visiblity_t has an entry for this library (if "
             "necessary) and make the necessary updates to the logic below has been updated");
@@ -560,13 +256,13 @@ update_agent_runtime_visibility(rocprofiler_agent_t& agent_info)
             }
             else if(secondary_visible && hip_visible && *secondary_visible != *hip_visible)
             {
-                ROCP_CI_LOG(WARNING) << fmt::format("Conflicting visibility of agent-{} between "
-                                                    "{} and {}. Assuming {} supersedes {}",
-                                                    agent_info.node_id,
-                                                    env_primary,
-                                                    env_secondary,
-                                                    env_primary,
-                                                    env_secondary);
+                ROCP_WARNING << fmt::format("Conflicting visibility of agent-{} between "
+                                            "{} and {}. Assuming {} supersedes {}",
+                                            agent_info.node_id,
+                                            env_primary,
+                                            env_secondary,
+                                            env_primary,
+                                            env_secondary);
             }
             return env_primary;
         };
@@ -604,319 +300,97 @@ update_agent_runtime_visibility(rocprofiler_agent_t& agent_info)
     }
 }
 
-using unique_agent_t = std::unique_ptr<rocprofiler_agent_t, void (*)(rocprofiler_agent_t*)>;
-
-auto
-read_topology()
+namespace
 {
-    auto data = std::vector<unique_agent_t>{};
+using unique_agent_t = ::rocprofiler::platform::unique_agent_t;
 
-    const auto sysfs_nodes_path = fs::path{"/sys/class/kfd/kfd/topology/nodes"};
-    if(!fs::exists(sysfs_nodes_path))
+// Selects the platform enumerator at runtime.
+//
+// Linux builds compile only gnulinux/ and wsl/ (the WIN32 branch of
+// platform/CMakeLists.txt swaps in windows/), so only the enumerators built
+// into this binary are candidates here.
+//
+// Precedence on Linux:
+//   1. ROCPROFILER_FORCE_PLATFORM={gnulinux|wsl} overrides autodetect.
+//      Values not built into this binary are logged and ignored.
+//   2. gnulinux::is_available() (KFD sysfs present) - the common bare-metal
+//      Linux case, kept first to preserve existing behaviour byte-for-byte.
+//   3. wsl::is_available() (/dev/dxg + libdxcore.so) - WSL guest with the
+//      DXCore driver shimmed in.
+//   4. Fallback: gnulinux enumerator (will log and return an empty vector).
+//
+// Windows builds collapse to a single candidate (platform::windows).
+
+enum class platform_kind
+{
+    gnulinux = 0,
+    wsl,
+    windows,
+};
+
+// The selection above, as a value. Split out from the dispatch below so that
+// construct_agent_cache() can ask which enumerator produced the agent list
+// without a global recording the answer. It depends only on the environment,
+// which does not change between the two calls, so the two cannot disagree.
+platform_kind
+select_platform()
+{
+    const auto forced = common::get_env("ROCPROFILER_FORCE_PLATFORM", std::string{});
+    if(!forced.empty())
     {
-        ROCP_CI_LOG(WARNING) << fmt::format("sysfs nodes path '{}' does not exist",
-                                            sysfs_nodes_path.string());
-        return data;
+#ifndef _WIN32
+        if(forced == "gnulinux") return platform_kind::gnulinux;
+        if(forced == "wsl") return platform_kind::wsl;
+#endif
+#ifdef _WIN32
+        if(forced == "windows") return platform_kind::windows;
+#endif
+        ROCP_WARNING << fmt::format(
+            "agent topology: ROCPROFILER_FORCE_PLATFORM='{}' is not built into this binary "
+            "(expected gnulinux|wsl on Linux, windows on Windows); falling back to autodetect",
+            forced);
     }
 
-    const auto& cpu_info_v = get_cpu_info();
-    uint64_t    idcount    = 0;
-    uint64_t    nodecount  = 0;
-    uint64_t    cpucount   = 0;
-    uint64_t    gpucount   = 0;
-    uint64_t    unkcount   = 0;
+#ifndef _WIN32
+    if(platform::gnulinux::is_available()) return platform_kind::gnulinux;
+    if(platform::wsl::is_available()) return platform_kind::wsl;
+    return platform_kind::gnulinux;
+#else
+    return platform_kind::windows;
+#endif
+}
 
-    while(true)
+std::vector<unique_agent_t>
+enumerate_platform_agents()
+{
+#ifndef _WIN32
+    switch(select_platform())
     {
-        auto node_id   = nodecount++;
-        auto node_path = sysfs_nodes_path / std::to_string(node_id);
-        // assumes that nodes are monotonically increasing and thus once we are missing a node
-        // folder for a number, there are no more nodes
-        if(!fs::exists(node_path)) break;
-        // skip if we don't have permission to read the file
-        if(!is_readable(node_path)) continue;
-
-        auto properties  = std::unordered_map<std::string, std::string>{};
-        auto name_prop   = std::vector<std::string>{};
-        auto gpu_id_prop = std::vector<std::string>{};
-        try
-        {
-            properties  = read_map(node_path / "properties");
-            name_prop   = read_file(node_path / "name");
-            gpu_id_prop = read_file(node_path / "gpu_id");
-        } catch(std::runtime_error& e)
-        {
-            ROCP_ERROR << "Error reading '" << (node_path / "properties").string()
-                       << "' :: " << e.what();
-            continue;
-        }
-
-        // we may have been able to open the properties file but if it was empty, we ignore it
-        if(properties.empty()) continue;
-
-        auto agent_info                 = common::init_public_api_struct(rocprofiler_agent_t{});
-        agent_info.type                 = ROCPROFILER_AGENT_TYPE_NONE;
-        agent_info.logical_node_id      = idcount++;
-        agent_info.node_id              = node_id;
-        agent_info.id.handle            = (agent_info.logical_node_id) + get_agent_offset();
-        agent_info.logical_node_type_id = -1;
-
-        if(!name_prop.empty())
-            agent_info.model_name =
-                common::get_string_entry(fmt::format("{}", fmt::join(name_prop, " ")))->c_str();
-        else
-            agent_info.model_name = "";
-
-        if(!gpu_id_prop.empty())
-        {
-            try
-            {
-                agent_info.gpu_id = std::stoull(gpu_id_prop.front());
-            } catch(std::exception& e)
-            {
-                ROCP_CI_LOG(WARNING) << fmt::format("rocprofiler-sdk agent encountered error while "
-                                                    "parsing gpu id property '{}': {}",
-                                                    gpu_id_prop.front(),
-                                                    e.what());
-            }
-        }
-
-        read_property(properties, "cpu_cores_count", agent_info.cpu_cores_count);
-        read_property(properties, "simd_count", agent_info.simd_count);
-
-        if(agent_info.cpu_cores_count > 0)
-            agent_info.type = ROCPROFILER_AGENT_TYPE_CPU;
-        else if(agent_info.simd_count > 0)
-            agent_info.type = ROCPROFILER_AGENT_TYPE_GPU;
-        else
-            ROCP_WARNING << "agent " << agent_info.node_id << " is neither a CPU nor a GPU";
-
-        if(agent_info.type == ROCPROFILER_AGENT_TYPE_CPU)
-            agent_info.logical_node_type_id = cpucount++;
-        else if(agent_info.type == ROCPROFILER_AGENT_TYPE_GPU)
-            agent_info.logical_node_type_id = gpucount++;
-        else
-            agent_info.logical_node_type_id = unkcount++;
-
-        read_property(properties, "mem_banks_count", agent_info.mem_banks_count);
-        read_property(properties, "caches_count", agent_info.caches_count);
-        read_property(properties, "io_links_count", agent_info.io_links_count);
-        read_property(properties, "cpu_core_id_base", agent_info.cpu_core_id_base);
-        read_property(properties, "simd_id_base", agent_info.simd_id_base);
-        read_property(properties, "max_waves_per_simd", agent_info.max_waves_per_simd);
-        read_property(properties, "lds_size_in_kb", agent_info.lds_size_in_kb);
-        read_property(properties, "gds_size_in_kb", agent_info.gds_size_in_kb);
-        read_property(properties, "num_gws", agent_info.num_gws);
-        read_property(properties, "wave_front_size", agent_info.wave_front_size);
-        read_property(properties, "array_count", agent_info.array_count);
-        read_property(properties, "simd_arrays_per_engine", agent_info.simd_arrays_per_engine);
-        read_property(properties, "cu_per_simd_array", agent_info.cu_per_simd_array);
-        read_property(properties, "simd_per_cu", agent_info.simd_per_cu);
-        read_property(properties, "max_slots_scratch_cu", agent_info.max_slots_scratch_cu);
-        read_property(properties, "gfx_target_version", agent_info.gfx_target_version);
-        read_property(properties, "vendor_id", agent_info.vendor_id);
-        read_property(properties, "device_id", agent_info.device_id);
-        read_property(properties, "location_id", agent_info.location_id);
-        read_property(properties, "domain", agent_info.domain);
-        read_property(properties, "drm_render_minor", agent_info.drm_render_minor);
-        read_property(properties, "hive_id", agent_info.hive_id);
-        read_property(properties, "num_sdma_engines", agent_info.num_sdma_engines);
-        read_property(properties, "num_sdma_xgmi_engines", agent_info.num_sdma_xgmi_engines);
-        read_property(
-            properties, "num_sdma_queues_per_engine", agent_info.num_sdma_queues_per_engine);
-        read_property(properties, "num_cp_queues", agent_info.num_cp_queues);
-        read_property(properties, "max_engine_clk_ccompute", agent_info.max_engine_clk_ccompute);
-
-        agent_info.name         = "";
-        agent_info.product_name = "";
-        agent_info.vendor_name  = "";
-        memset(&agent_info.uuid.bytes, 0, sizeof(agent_info.uuid.bytes));
-        if(agent_info.type == ROCPROFILER_AGENT_TYPE_GPU)
-        {
-            constexpr auto workgrp_max = 1024;
-            constexpr auto grid_max    = std::numeric_limits<uint32_t>::max();
-            constexpr auto grid_max_x  = std::numeric_limits<int32_t>::max();
-            constexpr auto grid_max_y  = std::numeric_limits<uint16_t>::max();
-            constexpr auto grid_max_z  = std::numeric_limits<uint16_t>::max();
-
-            auto     _uuid    = uuid_view_t{};
-            uint64_t uuid_val = 0;
-            read_property(properties, "unique_id", uuid_val);
-            _uuid.value64[0] = uuid_val;
-            read_property(
-                properties, "max_engine_clk_fcompute", agent_info.max_engine_clk_fcompute);
-            read_property(properties, "local_mem_size", agent_info.local_mem_size);
-            read_property(properties, "fw_version", agent_info.fw_version.Value);
-            read_property(properties, "capability", agent_info.capability.Value);
-            read_property(properties, "sdma_fw_version", agent_info.sdma_fw_version.Value);
-            agent_info.fw_version.Value &= 0x3ff;
-            agent_info.sdma_fw_version.Value &= 0x3ff;
-            agent_info.workgroup_max_size = workgrp_max;  // hardcoded in hsa-runtime
-            agent_info.workgroup_max_dim  = {workgrp_max, workgrp_max, workgrp_max};
-            agent_info.grid_max_size      = grid_max;  // hardcoded in hsa-runtime
-            agent_info.grid_max_dim       = {grid_max_x, grid_max_y, grid_max_z};
-            agent_info.cu_count           = agent_info.simd_count / agent_info.simd_per_cu;
-
-            agent_info.uuid = static_cast<rocprofiler_uuid_t>(_uuid);
-            if(int drm_fd = 0; (drm_fd = drmOpenRender(agent_info.drm_render_minor)) >= 0)
-            {
-                uint32_t major_version = 0;
-                uint32_t minor_version = 0;
-                auto*    device_handle = amdgpu_device_handle{};
-                if(amdgpu_device_initialize(
-                       drm_fd, &major_version, &minor_version, &device_handle) == 0)
-                {
-                    auto major = (agent_info.gfx_target_version / 10000) % 100;
-                    auto minor = (agent_info.gfx_target_version / 100) % 100;
-                    auto step  = (agent_info.gfx_target_version % 100);
-
-                    agent_info.name =
-                        common::get_string_entry(fmt::format("gfx{}{}{:x}", major, minor, step))
-                            ->c_str();
-
-                    const char* marketing_name = amdgpu_get_marketing_name(device_handle);
-                    if(marketing_name == nullptr) marketing_name = "unknown";
-
-                    agent_info.product_name = common::get_string_entry(marketing_name)->c_str();
-                    agent_info.vendor_name  = common::get_string_entry("AMD")->c_str();
-
-                    amdgpu_gpu_info gpu_info = {};
-                    if(amdgpu_query_gpu_info(device_handle, &gpu_info) == 0)
-                    {
-                        agent_info.family_id = gpu_info.family_id;
-                    }
-                    amdgpu_device_deinitialize(device_handle);
-                }
-                drmClose(drm_fd);
-            }
-        }
-        else if(agent_info.type == ROCPROFILER_AGENT_TYPE_CPU)
-        {
-            agent_info.cu_count    = agent_info.cpu_cores_count;
-            agent_info.vendor_name = common::get_string_entry("CPU")->c_str();
-            for(const auto& itr : cpu_info_v)
-            {
-                if(agent_info.cpu_core_id_base == itr.apicid)
-                {
-                    agent_info.name         = common::get_string_entry(itr.model_name)->c_str();
-                    agent_info.product_name = common::get_string_entry(agent_info.name)->c_str();
-                    agent_info.family_id    = itr.family;
-                    break;
-                }
-            }
-        }
-
-        if(properties.count("num_xcc") > 0)
-            read_property(properties, "num_xcc", agent_info.num_xcc);
-        else
-            agent_info.num_xcc = 1;
-
-        agent_info.max_waves_per_cu = agent_info.simd_per_cu * agent_info.max_waves_per_simd;
-
-        if(agent_info.simd_arrays_per_engine > 0)
-        {
-            agent_info.num_shader_banks =
-                agent_info.array_count / agent_info.simd_arrays_per_engine;
-
-            // depends on above
-            if(agent_info.num_shader_banks > 0)
-            {
-                agent_info.cu_per_engine = (agent_info.simd_count / agent_info.simd_per_cu) /
-                                           (agent_info.num_shader_banks);
-            }
-        }
-
-        agent_info.mem_banks = nullptr;
-        agent_info.caches    = nullptr;
-        agent_info.io_links  = nullptr;
-
-        if(agent_info.mem_banks_count > 0)
-        {
-            agent_info.mem_banks = new rocprofiler_agent_mem_bank_t[agent_info.mem_banks_count];
-
-            for(uint32_t i = 0; i < agent_info.mem_banks_count; ++i)
-            {
-                auto subproperties =
-                    read_map(node_path / "mem_banks" / std::to_string(i) / "properties");
-
-                read_property(subproperties, "heap_type", agent_info.mem_banks[i].heap_type);
-                read_property(
-                    subproperties, "size_in_bytes", agent_info.mem_banks[i].size_in_bytes);
-                read_property(subproperties, "flags", agent_info.mem_banks[i].flags.MemoryProperty);
-                read_property(subproperties, "width", agent_info.mem_banks[i].width);
-                read_property(subproperties, "mem_clk_max", agent_info.mem_banks[i].mem_clk_max);
-            }
-        }
-
-        if(agent_info.caches_count > 0)
-        {
-            agent_info.caches = new rocprofiler_agent_cache_t[agent_info.caches_count];
-
-            for(uint32_t i = 0; i < agent_info.caches_count; ++i)
-            {
-                auto subproperties =
-                    read_map(node_path / "caches" / std::to_string(i) / "properties");
-
-                read_property(
-                    subproperties, "processor_id_low", agent_info.caches[i].processor_id_low);
-                read_property(subproperties, "level", agent_info.caches[i].level);
-                read_property(subproperties, "size", agent_info.caches[i].size);
-                read_property(
-                    subproperties, "cache_line_size", agent_info.caches[i].cache_line_size);
-                read_property(
-                    subproperties, "cache_lines_per_tag", agent_info.caches[i].cache_lines_per_tag);
-                read_property(subproperties, "association", agent_info.caches[i].association);
-                read_property(subproperties, "latency", agent_info.caches[i].latency);
-                read_property(subproperties, "type", agent_info.caches[i].type.Value);
-            }
-        }
-
-        if(agent_info.io_links_count > 0)
-        {
-            agent_info.io_links = new rocprofiler_agent_io_link_t[agent_info.io_links_count];
-
-            for(uint32_t i = 0; i < agent_info.io_links_count; ++i)
-            {
-                auto subproperties =
-                    read_map(node_path / "io_links" / std::to_string(i) / "properties");
-
-                read_property(subproperties, "type", agent_info.io_links[i].type);
-                read_property(subproperties, "version_major", agent_info.io_links[i].version_major);
-                read_property(subproperties, "version_minor", agent_info.io_links[i].version_minor);
-                read_property(subproperties, "node_from", agent_info.io_links[i].node_from);
-                read_property(subproperties, "node_to", agent_info.io_links[i].node_to);
-                read_property(subproperties, "weight", agent_info.io_links[i].weight);
-                read_property(subproperties, "min_latency", agent_info.io_links[i].min_latency);
-                read_property(subproperties, "max_latency", agent_info.io_links[i].max_latency);
-                read_property(subproperties, "min_bandwidth", agent_info.io_links[i].min_bandwidth);
-                read_property(subproperties, "max_bandwidth", agent_info.io_links[i].max_bandwidth);
-                read_property(subproperties,
-                              "recommended_transfer_size",
-                              agent_info.io_links[i].recommended_transfer_size);
-                read_property(subproperties, "flags", agent_info.io_links[i].flags.LinkProperty);
-            }
-        }
-
-        update_agent_runtime_visibility(agent_info);
-
-        data.emplace_back(new rocprofiler_agent_t{agent_info}, [](rocprofiler_agent_t* ptr) {
-            if(ptr)
-            {
-                delete[] ptr->mem_banks;
-                delete[] ptr->caches;
-                delete[] ptr->io_links;
-            }
-            delete ptr;
-        });
+        case platform_kind::wsl:
+            ROCP_INFO << "agent topology: selected " << platform::wsl::name;
+            return platform::wsl::enumerate();
+        case platform_kind::gnulinux:
+        case platform_kind::windows: break;
     }
-    return data;
+    ROCP_INFO << "agent topology: selected " << platform::gnulinux::name;
+    return platform::gnulinux::enumerate();
+#else
+    if(platform::windows::is_available())
+    {
+        ROCP_INFO << "agent topology: selected " << platform::windows::name;
+        return platform::windows::enumerate();
+    }
+    ROCP_WARNING << "agent topology: no platform matched; falling back to "
+                 << platform::windows::name << " (will return empty)";
+    return platform::windows::enumerate();
+#endif
 }
 
 auto&
 get_agent_topology()
 {
     static auto*& _v =
-        common::static_object<std::vector<unique_agent_t>>::construct(read_topology());
+        common::static_object<std::vector<unique_agent_t>>::construct(enumerate_platform_agents());
     return *CHECK_NOTNULL(_v);
 }
 
@@ -940,30 +414,173 @@ get_agent_mapping()
     return *CHECK_NOTNULL(_v);
 }
 
+bdf_info
+get_bdf_info(const rocprofiler_agent_t* agent)
+{
+    // location_id encodes PCI Bus/Device/Function (BDF) as a 16-bit value:
+    //   bits [15:8] = bus number
+    //   bits  [7:3] = device number
+    //   bits  [2:0] = function number
+    return {.domain   = agent->domain,
+            .bus      = static_cast<uint8_t>((agent->location_id >> 8) & 0xFF),
+            .device   = static_cast<uint8_t>((agent->location_id >> 3) & 0x1F),
+            .function = static_cast<uint8_t>(agent->location_id & 0x07)};
+}
+
+// Attempt V2 agent registration with cu_bitmap from DRM for WGP harvesting support.
+// Returns true on success, false if any step fails (caller should fall back to V1).
+//
+// V2 is gated to GFX11+ because the cu_bitmap is only consumed by the SQ-counter
+// WGP iteration path in source/lib/aqlprofile/pm4/pmc_builder.h (bIsWGPcounter11);
+// on GFX9 (MI100/200/300) and GFX10 the bitmap is unused, and a per-process
+// drmOpenRender + amdgpu_device_initialize on the shared /dev/dri/renderD* node
+// serializes on the kernel DRM mutex, inflating CI runtime under parallel loads.
+// gfx_target_version is the KFD-populated numeric encoding
+// (major*10000 + minor*100 + patch) already used elsewhere in this file
+// (see _set_default_agent_names) and across the SDK (pc_sampling, evaluate_ast),
+// so the >= 110000 threshold cleanly selects GFX11 / GFX12 / future families.
+//
+// Only compiled for internal-aqlprofile builds. External-aqlprofile builds
+// (ROCPROFILER_BUILD_AQLPROFILE=OFF) link against the ROCm-release-shipped
+// libhsa-amd-aqlprofile64.so which neither exposes aqlprofile_register_agent_info
+// nor the AQLPROFILE_AGENT_VERSION_V2 enum value, so this function is omitted
+// there and the caller's #if branch takes the legacy aqlprofile_register_agent path.
+#if !ROCPROFILER_EXTERNAL_AQLPROFILE
+bool
+try_register_agent_v2(const rocprofiler_agent_t* agent, aqlprofile_agent_handle_t* handle)
+{
+    if(agent->gfx_target_version < 110000) return false;
+
+    int drm_fd = drmOpenRender(agent->drm_render_minor);
+    if(drm_fd < 0) return false;
+
+    uint32_t             major_ver  = 0;
+    uint32_t             minor_ver  = 0;
+    amdgpu_device_handle dev_handle = nullptr;
+    bool                 success    = false;
+
+    if(amdgpu_device_initialize(drm_fd, &major_ver, &minor_ver, &dev_handle) == 0)
+    {
+        drm_amdgpu_info_device dev_info = {};
+        if(amdgpu_query_info(dev_handle, AMDGPU_INFO_DEV_INFO, sizeof(dev_info), &dev_info) == 0)
+        {
+            aqlprofile_agent_info_v2_t info_v2 = {};
+            info_v2.agent_gfxip                = agent->name;
+            info_v2.xcc_num                    = agent->num_xcc;
+            info_v2.se_num                     = agent->num_shader_banks;
+            info_v2.cu_num                     = agent->cu_count;
+            info_v2.shader_arrays_per_se       = agent->simd_arrays_per_engine;
+            info_v2.domain                     = agent->domain;
+            info_v2.location_id                = agent->location_id;
+            // Size from the (smaller, fixed) kernel uAPI side so this cannot
+            // over-read dev_info if the V2 cu_bitmap layout ever grows.
+            static_assert(sizeof(info_v2.cu_bitmap.bits) >= sizeof(dev_info.cu_bitmap),
+                          "drm_amdgpu_info_device.cu_bitmap larger than "
+                          "aqlprofile_cu_bitmap_t::bits; bump "
+                          "AQLPROFILE_DRM_CU_BITMAP_NUM_SE / "
+                          "AQLPROFILE_DRM_CU_BITMAP_NUM_SA_PER_SE in aql_profile_v2.h to "
+                          "match the kernel uAPI and bump the V2 ABI version");
+            memcpy(info_v2.cu_bitmap.bits, dev_info.cu_bitmap, sizeof(dev_info.cu_bitmap));
+
+            success = (aqlprofile_register_agent_info(
+                           handle, &info_v2, AQLPROFILE_AGENT_VERSION_V2) == HSA_STATUS_SUCCESS);
+        }
+        amdgpu_device_deinitialize(dev_handle);
+    }
+
+    drmClose(drm_fd);
+    return success;
+}
+#endif  // !ROCPROFILER_EXTERNAL_AQLPROFILE
+
+// Registers every agent with aqlprofile and returns the handles.
+// aqlprofile's RegisterAgent caches cu_num/se_num/shader_arrays_per_se at
+// registration time and never updates an existing entry, so this must observe
+// the final agent topology. It does: every platform enumerator publishes fully
+// populated, immutable agent records, so whenever the lazy registration below
+// first runs it already sees the values profiling will use.
+std::vector<aqlprofile_agent_handle_t>
+register_aql_handles()
+{
+    auto agent_handles = std::vector<aqlprofile_agent_handle_t>{};
+    agent_handles.reserve(get_agents().size());
+
+    for(auto& agent : get_agents())
+    {
+        aqlprofile_agent_handle_t handle = {.handle = 0};
+
+        const auto bdf = get_bdf_info(agent);
+        common::consume_args(bdf);
+
+#if ROCPROFILER_EXTERNAL_AQLPROFILE
+        ROCP_TRACE << fmt::format(
+            "Registering agent {} with external aqlprofile (libhsa-amd-aqlprofile64.so)",
+            agent->name);
+
+        aqlprofile_agent_info_t agent_info = {
+            .agent_gfxip          = agent->name,
+            .xcc_num              = agent->num_xcc,
+            .se_num               = agent->num_shader_banks,
+            .cu_num               = agent->cu_count,
+            .shader_arrays_per_se = agent->simd_arrays_per_engine};
+
+        if(aqlprofile_register_agent(&handle, &agent_info) != HSA_STATUS_SUCCESS)
+        {
+            ROCP_WARNING << "Failed to register agent " << agent->name;
+        }
+#else
+
+        ROCP_TRACE << fmt::format(
+            "Registering agent {:04x}:{:02x}:{:02x}.{:x} :: {} with IP discovery",
+            bdf.domain,
+            bdf.bus,
+            bdf.device,
+            bdf.function,
+            agent->name);
+
+        // Try V2 registration with cu_bitmap from DRM for WGP harvesting support.
+        bool registered_v2 = false;
+        if(agent->type == ROCPROFILER_AGENT_TYPE_GPU && agent->drm_render_minor > 0)
+        {
+            registered_v2 = try_register_agent_v2(agent, &handle);
+        }
+
+        // Fallback to V1 if V2 was unavailable or failed
+        if(!registered_v2)
+        {
+            aqlprofile_agent_info_v1_t agent_info = {
+                .agent_gfxip          = agent->name,
+                .xcc_num              = agent->num_xcc,
+                .se_num               = agent->num_shader_banks,
+                .cu_num               = agent->cu_count,
+                .shader_arrays_per_se = agent->simd_arrays_per_engine,
+                .domain               = agent->domain,
+                .location_id          = agent->location_id,
+            };
+
+            if(aqlprofile_register_agent_info(&handle, &agent_info, AQLPROFILE_AGENT_VERSION_V1) !=
+               HSA_STATUS_SUCCESS)
+            {
+                ROCP_WARNING << fmt::format(
+                    "Failed to register agent {:04x}:{:02x}:{:02x}.{:x} :: {}",
+                    bdf.domain,
+                    bdf.bus,
+                    bdf.device,
+                    bdf.function,
+                    agent->name);
+            }
+        }
+#endif
+        agent_handles.push_back(handle);
+    }
+    return agent_handles;
+}
+
 const std::vector<aqlprofile_agent_handle_t>&
 get_aql_handles()
 {
-    static auto*& _v =
-        common::static_object<std::vector<aqlprofile_agent_handle_t>>::construct([]() {
-            std::vector<aqlprofile_agent_handle_t> agent_handles;
-            for(auto& agent : get_agents())
-            {
-                aqlprofile_agent_info_t agent_info = {
-                    .agent_gfxip          = agent->name,
-                    .xcc_num              = agent->num_xcc,
-                    .se_num               = agent->num_shader_banks,
-                    .cu_num               = agent->cu_count,
-                    .shader_arrays_per_se = agent->simd_arrays_per_engine};
-                aqlprofile_agent_handle_t handle = {.handle = 0};
-                if(aqlprofile_register_agent(&handle, &agent_info) != HSA_STATUS_SUCCESS)
-                {
-                    ROCP_WARNING << "Failed to register agent " << agent->name;
-                }
-                agent_handles.push_back(handle);
-            }
-            return agent_handles;
-        }());
-
+    static auto*& _v = common::static_object<std::vector<aqlprofile_agent_handle_t>>::construct(
+        register_aql_handles());
     return *CHECK_NOTNULL(_v);
 }
 }  // namespace
@@ -976,7 +593,7 @@ get_agents()
     pointers.reserve(agents.size());
     for(auto& agent : agents)
     {
-        pointers.emplace_back(agent.get());
+        pointers.emplace_back(&agent->public_info);
     }
     return pointers;
 }
@@ -988,6 +605,14 @@ get_agent(rocprofiler_agent_id_t id)
     {
         if(itr && itr->id.handle == id.handle) return itr;
     }
+    return nullptr;
+}
+
+const platform::agent_info*
+get_agent_info(rocprofiler_agent_id_t id)
+{
+    for(const auto& itr : get_agent_topology())
+        if(itr && itr->public_info.id.handle == id.handle) return itr.get();
     return nullptr;
 }
 
@@ -1061,97 +686,132 @@ construct_agent_cache(::HsaApiTable* table)
 
     ROCP_CI_LOG_IF(ERROR, hsa_agents.empty()) << fmt::format("Did not detect any HSA agents");
 
-    auto rocp_hsa_agent_node_ids = std::set<uint32_t>{};
-    if(rocp_agents.size() != hsa_agents.size())
+    // rocprofiler and the HSA runtime enumerate the topology independently, so
+    // the two agent lists have to be paired before anything can be profiled.
+    // Both the key to pair on and the meaning of an unpaired HSA agent are
+    // platform-specific; compute_agent_mapping() holds those rules and the code
+    // below only acts on its verdict. The platform is re-derived rather than
+    // recorded because select_platform() reads nothing but the environment,
+    // which cannot have changed since enumerate_platform_agents() asked.
+    const auto mapping_policy = (select_platform() == platform_kind::wsl)
+                                    ? agent::mapping_policy::wsl
+                                    : agent::mapping_policy::strict;
+
+    auto rocp_views = std::vector<agent::mapping_agent_view>{};
+    rocp_views.reserve(rocp_agents.size());
+    for(const auto* ritr : rocp_agents)
     {
-        for(auto hitr : hsa_agents)
-        {
-            auto internal_node_id = std::numeric_limits<uint32_t>::max();
-            auto ret              = table->core_->hsa_agent_get_info_fn(
-                hitr,
-                static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID),
-                &internal_node_id);
-
-            ROCP_ERROR_IF(ret != HSA_STATUS_SUCCESS)
-                << "hsa_agent_get_info(hsa_agent_t=" << hitr.handle
-                << ", HSA_AMD_AGENT_INFO_DRIVER_NODE_ID, ...) returned " << ret
-                << " :: " << get_hsa_status_string(ret);
-
-            if(ret == HSA_STATUS_SUCCESS)
-            {
-                {
-                    auto ret_emplace = rocp_hsa_agent_node_ids.emplace(internal_node_id).second;
-                    ROCP_WARNING_IF(!ret_emplace)
-                        << "duplicate internal node id " << internal_node_id;
-                }
-
-                for(const auto* ritr : rocp_agents)
-                {
-                    // TODO(aelwazir): To be changed back to use node id once ROCR fixes
-                    // the hsa_agents to use the real node id
-                    if(ritr->logical_node_id == static_cast<int64_t>(internal_node_id))
-                    {
-                        rocp_hsa_agent_node_ids.erase(internal_node_id);
-                        break;
-                    }
-                }
-            }
-        }
+        rocp_views.emplace_back(agent::mapping_agent_view{
+            ritr->logical_node_id, ritr->node_id, ritr->type == ROCPROFILER_AGENT_TYPE_GPU});
     }
 
-    ROCP_FATAL_IF(!rocp_hsa_agent_node_ids.empty())
-        << "Found " << rocp_agents.size() << " rocprofiler agents and " << hsa_agents.size()
-        << " HSA agents. HSA agents contained " << rocp_hsa_agent_node_ids.size()
-        << " internal node ids not found by rocprofiler: "
-        << fmt::format(
-               "{}",
-               fmt::join(rocp_hsa_agent_node_ids.begin(), rocp_hsa_agent_node_ids.end(), ", "));
+    auto hsa_views = std::vector<agent::mapping_hsa_view>{};
+    hsa_views.reserve(hsa_agents.size());
+    for(auto hitr : hsa_agents)
+    {
+        auto view    = agent::mapping_hsa_view{};
+        auto node_id = uint32_t{0};
+        auto ret     = table->core_->hsa_agent_get_info_fn(
+            hitr, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID), &node_id);
+
+        ROCP_ERROR_IF(ret != HSA_STATUS_SUCCESS)
+            << "hsa_agent_get_info(hsa_agent_t=" << hitr.handle
+            << ", HSA_AMD_AGENT_INFO_DRIVER_NODE_ID, ...) returned " << ret
+            << " :: " << get_hsa_status_string(ret);
+
+        if(ret == HSA_STATUS_SUCCESS)
+        {
+            view.has_node_id    = true;
+            view.driver_node_id = node_id;
+        }
+
+        if(auto agent_type = hsa_device_type_t{};
+           table->core_->hsa_agent_get_info_fn(
+               hitr, hsa_agent_info_t{HSA_AGENT_INFO_DEVICE}, &agent_type) == HSA_STATUS_SUCCESS)
+        {
+            view.is_gpu = (agent_type == HSA_DEVICE_TYPE_GPU);
+        }
+
+        hsa_views.emplace_back(view);
+    }
+
+    const auto mapping = agent::compute_agent_mapping(rocp_views, hsa_views, mapping_policy);
+
+    if(!mapping.complete())
+    {
+        auto unmatched = std::vector<uint32_t>{};
+        unmatched.insert(unmatched.end(),
+                         mapping.unmatched_gpu_node_ids.begin(),
+                         mapping.unmatched_gpu_node_ids.end());
+        unmatched.insert(unmatched.end(),
+                         mapping.unmatched_other_node_ids.begin(),
+                         mapping.unmatched_other_node_ids.end());
+
+        // Bare metal: rocprofiler and HSA read the same KFD sysfs tree, so a
+        // disagreement is an internal inconsistency and still aborts.
+        ROCP_FATAL_IF(mapping_policy == agent::mapping_policy::strict)
+            << "Found " << rocp_agents.size() << " rocprofiler agents and " << hsa_agents.size()
+            << " HSA agents. HSA agents contained " << unmatched.size()
+            << " internal node ids not found by rocprofiler: "
+            << fmt::format("{}", fmt::join(unmatched.begin(), unmatched.end(), ", "))
+            << (mapping.unqueryable_count > 0
+                    ? fmt::format(" ({} HSA agents did not report a driver node id at all)",
+                                  mapping.unqueryable_count)
+                    : std::string{});
+
+        // WSL: rocprofiler drops adapters the DXG thunk cannot fully describe
+        // while HSA keeps reporting them. Profiling those GPUs is unsupported;
+        // aborting the application the user asked us to profile is not the
+        // right response, and the GPUs that did pair stay usable.
+        if(mapping_policy == agent::mapping_policy::wsl && !mapping.unmatched_gpu_node_ids.empty())
+        {
+            ROCP_ERROR << fmt::format(
+                "rocprofiler-sdk could not read the WSL topology for {} of the {} GPUs the HSA "
+                "runtime reports (KMT node ids: {}). Profiling is unavailable on those GPUs; the "
+                "application continues and the {} GPU(s) that were mapped remain profilable. See "
+                "the earlier 'wsl topology:' diagnostics for the exact symbol or adapter that was "
+                "rejected, and update the WSL ROCm runtime package to a version matching this "
+                "rocprofiler-sdk.",
+                mapping.unmatched_gpu_node_ids.size(),
+                std::count_if(
+                    hsa_views.begin(), hsa_views.end(), [](const auto& itr) { return itr.is_gpu; }),
+                fmt::format("{}",
+                            fmt::join(mapping.unmatched_gpu_node_ids.begin(),
+                                      mapping.unmatched_gpu_node_ids.end(),
+                                      ", ")),
+                std::count_if(mapping.pairs.begin(), mapping.pairs.end(), [&](const auto& itr) {
+                    return rocp_views.at(itr.rocp_index).is_gpu;
+                }));
+        }
+
+        ROCP_WARNING_IF(!mapping.unmatched_other_node_ids.empty())
+            << fmt::format("rocprofiler-sdk has no agent record for {} non-GPU HSA agent(s) (KMT "
+                           "node ids: {})",
+                           mapping.unmatched_other_node_ids.size(),
+                           fmt::join(mapping.unmatched_other_node_ids.begin(),
+                                     mapping.unmatched_other_node_ids.end(),
+                                     ", "));
+
+        ROCP_WARNING_IF(mapping.unqueryable_count > 0)
+            << mapping.unqueryable_count
+            << " HSA agents did not report a driver node id and cannot be mapped";
+    }
 
     get_agent_caches().clear();
     get_agent_mapping().clear();
     get_agent_mapping().reserve(get_agent_mapping().size() + rocp_agents.size());
 
-    auto hsa_agent_node_map = std::unordered_map<uint32_t, hsa_agent_t>{};
-    for(const auto& itr : hsa_agents)
-    {
-        if(uint32_t node_id = 0;
-           table->core_->hsa_agent_get_info_fn(
-               itr, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID), &node_id) ==
-           HSA_STATUS_SUCCESS)
-        {
-            hsa_agent_node_map[node_id] = itr;
-        }
-    }
-
     auto agent_map =
         std::unordered_map<uint32_t, std::tuple<const rocprofiler_agent_t*, hsa_agent_t>>{};
-    for(const auto* ritr : rocp_agents)
+    for(const auto& itr : mapping.pairs)
     {
-        for(auto hitr : hsa_agents)
-        {
-            if(uint32_t node_id = 0;
-               table->core_->hsa_agent_get_info_fn(
-                   hitr,
-                   static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID),
-                   &node_id) == HSA_STATUS_SUCCESS)
-            {
-                // TODO(aelwazir): To be changed back to use node id once ROCR fixes
-                // the hsa_agents to use the real node id
-                if(ritr->logical_node_id == static_cast<int64_t>(node_id))
-                {
-                    agent_map.emplace(ritr->logical_node_id, std::make_tuple(ritr, hitr));
-                    get_agent_mapping().emplace_back(agent_pair{ritr, hitr});
-                    break;
-                }
-            }
-        }
+        const auto* rocp_agent = rocp_agents.at(itr.rocp_index);
+        auto        hsa_agent  = hsa_agents.at(itr.hsa_index);
+        agent_map.emplace(itr.key, std::make_tuple(rocp_agent, hsa_agent));
+        get_agent_mapping().emplace_back(agent_pair{rocp_agent, hsa_agent});
     }
 
-    ROCP_INFO << "# agent node maps: " << hsa_agent_node_map.size();
-
-    ROCP_FATAL_IF(agent_map.size() != hsa_agents.size())
-        << "rocprofiler was only able to map " << agent_map.size()
-        << " rocprofiler agents to HSA agents, expected " << hsa_agents.size();
+    ROCP_INFO << "# agent node maps: " << agent_map.size();
 
 // For Pre-ROCm 6.0 releases
 #if ROCPROFILER_HSA_RUNTIME_VERSION <= 100900
@@ -1297,8 +957,70 @@ get_agent_available_properties()
 void
 internal_refresh_topology()
 {
-    auto _updated_topology = read_topology();
+    auto _updated_topology = enumerate_platform_agents();
     std::swap(get_agent_topology(), _updated_topology);
+}
+
+std::optional<uint32_t>
+parse_gfx_target_version(std::string_view gfx_name)
+{
+    if(gfx_name.substr(0, 3) != "gfx") return std::nullopt;
+    auto digits = gfx_name.substr(3);
+    if(digits.size() < 3) return std::nullopt;
+    // Only the step is hexadecimal: steps 10-15 are spelled a-f (gfx90a), since
+    // spelling them in decimal would be ambiguous - "gfx9010" already reads as
+    // major 90, minor 1, step 0.
+    for(size_t k = 0; k + 1 < digits.size(); ++k)
+        if(digits[k] < '0' || digits[k] > '9') return std::nullopt;
+
+    const char step_digit = digits[digits.size() - 1];
+    uint32_t   stp        = 0;
+    if(step_digit >= '0' && step_digit <= '9')
+        stp = static_cast<uint32_t>(step_digit - '0');
+    else if(step_digit >= 'a' && step_digit <= 'f')
+        stp = 10 + static_cast<uint32_t>(step_digit - 'a');
+    else
+        return std::nullopt;
+
+    constexpr auto max_packed_version = std::numeric_limits<uint32_t>::max();
+    constexpr auto major_scale        = uint32_t{10000};
+    constexpr auto minor_scale        = uint32_t{100};
+    constexpr auto max_major          = max_packed_version / major_scale;
+
+    const uint32_t min = static_cast<uint32_t>(digits[digits.size() - 2] - '0');
+    uint32_t       maj = 0;
+    for(size_t k = 0; k + 2 < digits.size(); ++k)
+    {
+        const auto digit = static_cast<uint32_t>(digits[k] - '0');
+        if(maj > (max_major - digit) / 10) return std::nullopt;
+        maj = maj * 10 + digit;
+    }
+
+    const auto minor_component = min * minor_scale;
+    if(maj > (max_packed_version - minor_component - stp) / major_scale) return std::nullopt;
+    return maj * major_scale + minor_component + stp;
+}
+
+bool
+kfd_device_available()
+{
+#ifdef _WIN32
+    // Native Windows has no KFD at all - GPU work is scheduled through D3DKMT - so the
+    // answer is fixed and there is no device node to probe for.
+    return false;
+#else
+    // Open-probe the KFD device node once. On a real KFD platform this succeeds;
+    // on WSL2/DXG (which exposes /dev/dxg but not /dev/kfd) it fails, letting
+    // callers gracefully degrade (e.g. disable KFD event tracing) instead of
+    // aborting. Cached so repeated queries from different subsystems are cheap.
+    static const bool _available = []() {
+        int probe_fd = ::open("/dev/kfd", O_RDWR | O_CLOEXEC);
+        if(probe_fd == -1) return false;
+        ::close(probe_fd);
+        return true;
+    }();
+    return _available;
+#endif
 }
 }  // namespace agent
 }  // namespace rocprofiler

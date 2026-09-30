@@ -49,7 +49,7 @@
 
 class TestIdInfoRead : public TestBase {
  public:
-    TestIdInfoRead();
+  TestIdInfoRead();
 
   // @Brief: Destructor for test case of TestIdInfoRead
   virtual ~TestIdInfoRead();
@@ -60,7 +60,7 @@ class TestIdInfoRead : public TestBase {
   // @Brief: Core measurement execution
   virtual void Run();
 
-  // @Brief: Clean up and retrive the resource
+  // @Brief: Clean up and retrieve the resource
   virtual void Close();
 
   // @Brief: Display  results

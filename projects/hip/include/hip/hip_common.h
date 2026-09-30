@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2015 - 2023 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #ifndef HIP_INCLUDE_HIP_HIP_COMMON_H
 #define HIP_INCLUDE_HIP_HIP_COMMON_H
@@ -54,14 +38,6 @@ THE SOFTWARE.
 #define __HIP_DEVICE_COMPILE__ 1
 #endif
 
-#ifdef __GNUC__
-#define HIP_PUBLIC_API __attribute__((visibility("default")))
-#define HIP_INTERNAL_EXPORTED_API __attribute__((visibility("default")))
-#else
-#define HIP_PUBLIC_API
-#define HIP_INTERNAL_EXPORTED_API
-#endif
-
 #if __HIP_DEVICE_COMPILE__ == 0
 // 32-bit Atomics
 #define __HIP_ARCH_HAS_GLOBAL_INT32_ATOMICS__ (0)
@@ -95,6 +71,12 @@ THE SOFTWARE.
 
 #if defined(__clang__)
 #pragma clang diagnostic pop
+#endif
+
+#define HIP_API_VERSION (HIP_VERSION_MAJOR * 100 + HIP_VERSION_MINOR)
+
+#ifndef HIP_FORCE_API_VERSION
+#  define HIP_FORCE_API_VERSION HIP_API_VERSION
 #endif
 
 #endif

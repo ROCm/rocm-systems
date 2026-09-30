@@ -1,31 +1,11 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
 #include "concepts.hpp"
 
 #include <timemory/mpl/concepts.hpp>
-#include <timemory/utility/delimit.hpp>
 
 #include <algorithm>
 #include <array>
@@ -35,19 +15,18 @@
 #include <set>
 #include <sstream>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace utility
+namespace rocprofsys::utility
 {
 /// provides an alternative thread index for when using threading::get_id() is not
 /// desirable
 inline auto
 get_thread_index()
 {
-    static std::atomic<int64_t> _c{ 0 };
-    static thread_local int64_t _v = _c++;
+    static std::atomic<std::int64_t>       _c{ 0 };
+    static thread_local const std::int64_t _v = _c++;
     return _v;
 }
 
@@ -59,7 +38,9 @@ get_filled_array(FuncT&& _func)
     using Tp = std::decay_t<decltype(_func())>;
     std::array<Tp, N> _v{};
     for(auto& itr : _v)
+    {
         itr = std::move(_func());
+    }
     return _v;
 }
 
@@ -103,8 +84,7 @@ using make_offset_index_sequence =
 
 template <size_t StartN, size_t EndN>
 using make_index_sequence_range =
-    typename offset_index_sequence<std::make_index_sequence<(EndN - StartN)>,
-                                   StartN>::type;
+    offset_index_sequence<std::make_index_sequence<(EndN - StartN)>, StartN>::type;
 
 template <typename Tp>
 struct generate
@@ -116,12 +96,13 @@ struct generate
     {
         if constexpr(concepts::is_unique_pointer<Tp>::value)
         {
-            using value_type = typename type::element_type;
+            using value_type = type::element_type;
 
             if constexpr(use_placement_new_when_generating_unique_ptr<value_type>::value)
             {
-                // create a thread-local buffer for placement-new
-                static thread_local auto _buffer = std::array<char, sizeof(value_type)>{};
+                // create a thread-local buffer for placement-new with proper alignment
+                alignas(value_type) static thread_local auto _buffer =
+                    std::array<char, sizeof(value_type)>{};
                 if constexpr(std::is_constructible<value_type, Args...>::value)
                 {
                     return type{ new(_buffer.data())
@@ -160,9 +141,8 @@ struct generate
 
 private:
     template <typename Up>
-    static auto invoke(Up&& _v, int,
-                       std::enable_if_t<std::is_invocable<Up>::value, int> = 0)
-        -> decltype(std::forward<Up>(_v)())
+        requires std::invocable<Up>
+    static auto invoke(Up&& _v, int) -> decltype(std::forward<Up>(_v)())
     {
         return std::forward<Up>(_v)();
     }
@@ -192,7 +172,10 @@ filter_sort_unique(
     std::sort(_v.begin(), _v.end());
 
     auto _last = std::unique(_v.begin(), _v.end());
-    if(std::distance(_v.begin(), _last) > 0) _v.erase(_last, _v.end());
+    if(std::distance(_v.begin(), _last) > 0)
+    {
+        _v.erase(_last, _v.end());
+    }
     return _v;
 }
 
@@ -201,44 +184,52 @@ inline LhsT&
 combine(LhsT& _lhs, RhsT&& _rhs)
 {
     for(auto&& itr : _rhs)
+    {
         _lhs.emplace_back(itr);
+    }
     return _lhs;
 }
 
 template <template <typename, typename...> class ContainerT, typename Tp,
           typename... TailT>
+    requires tim::concepts::is_string_type<Tp>::value
 std::string
 get_regex_or(const ContainerT<Tp, TailT...>& _container, const std::string& _fallback)
 {
-    static_assert(tim::concepts::is_string_type<Tp>::value,
-                  "get_regex_or requires a container of string types");
-
-    if(_container.empty()) return _fallback;
+    if(_container.empty())
+    {
+        return _fallback;
+    }
 
     auto _ss  = std::stringstream{};
     auto _idx = size_t{ 0 };
     _ss << "(";
     for(const auto& itr : _container)
+    {
         _ss << (_idx++ > 0 ? "|" : "") << itr;
+    }
     _ss << ")";
     return _ss.str();
 }
 
 template <template <typename, typename...> class ContainerT, typename Tp,
           typename... TailT, typename PredicateT>
+    requires tim::concepts::is_string_type<Tp>::value
 std::string
 get_regex_or(const ContainerT<Tp, TailT...>& _container, PredicateT&& _predicate,
              const std::string& _fallback)
 {
-    static_assert(tim::concepts::is_string_type<Tp>::value,
-                  "get_regex_or requires a container of string types");
-
-    if(_container.empty()) return _fallback;
+    if(_container.empty())
+    {
+        return _fallback;
+    }
 
     auto _dest = std::vector<std::string>{};
     _dest.reserve(_container.size());
     for(const auto& itr : _container)
+    {
         _dest.emplace_back(_predicate(itr));
+    }
 
     return get_regex_or(_dest, _fallback);
 }
@@ -254,16 +245,20 @@ convert(std::string_view _inp)
     return _ret;
 }
 
-template <typename Tp = int64_t, typename ContainerT = std::set<Tp>, typename Up = Tp>
+template <typename Tp = std::int64_t, typename ContainerT = std::set<Tp>,
+          typename Up = Tp>
 ContainerT
 parse_numeric_range(std::string _input_string, const std::string& _label, Up _incr);
 
-extern template std::set<int64_t>
-parse_numeric_range<int64_t, std::set<int64_t>>(std::string, const std::string&, long);
-extern template std::vector<int64_t>
-parse_numeric_range<int64_t, std::vector<int64_t>>(std::string, const std::string&, long);
-extern template std::unordered_set<int64_t>
-parse_numeric_range<int64_t, std::unordered_set<int64_t>>(std::string, const std::string&,
+extern template std::set<std::int64_t>
+parse_numeric_range<std::int64_t, std::set<std::int64_t>>(std::string, const std::string&,
                                                           long);
-}  // namespace utility
-}  // namespace rocprofsys
+extern template std::vector<std::int64_t>
+parse_numeric_range<std::int64_t, std::vector<std::int64_t>>(std::string,
+                                                             const std::string&, long);
+extern template std::unordered_set<std::int64_t>
+parse_numeric_range<std::int64_t, std::unordered_set<std::int64_t>>(std::string,
+                                                                    const std::string&,
+                                                                    long);
+
+}  // namespace rocprofsys::utility

@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "hsa/hsa_ext_amd.h"
+#include "hsa_includes.h"
 
 #include <thread>
 #include <condition_variable>

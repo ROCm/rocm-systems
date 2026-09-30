@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
 include(Catch)
 
 ###############################################################################
@@ -24,8 +28,8 @@ function(hip_add_exe_to_target)
     PROPERTY ${_PROPERTY}
     STANDALONE_FLAG 0
   )
-  # If STANDALONE_TESTS==1, also generate per-file targets
-  if(STANDALONE_TESTS EQUAL "1")
+  if(STANDALONE_TESTS)
+    # Generate per-file targets
     hip_gen_exe_target(
       NAME ${_NAME}
       TEST_TARGET_NAME ${_TEST_TARGET_NAME}
@@ -51,11 +55,11 @@ function(hip_gen_exe_target)
     "${args}"
     "${list_args}"
   )
-  foreach(SRC_NAME ${TEST_SRC})
+  foreach(SRC_NAME ${_TEST_SRC})
 
     if(NOT _STANDALONE_FLAG EQUAL "1")
       set(_EXE_NAME ${_NAME})
-      set(SRC_NAME ${TEST_SRC})
+      set(SRC_NAME ${_TEST_SRC})
     else()
       # strip extension of src and use exe name as src name
       get_filename_component(_EXE_NAME ${SRC_NAME} NAME_WLE)
@@ -66,8 +70,8 @@ function(hip_gen_exe_target)
     endif()
 
     # Create shared lib of all tests
-    set_source_files_properties(${SRC_NAME} PROPERTIES LANGUAGE HIP)
-    set_source_files_properties(${COMMON_SHARED_SRC} PROPERTIES LANGUAGE HIP)
+    set_source_files_properties(${SRC_NAME} PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
+    set_source_files_properties(${COMMON_SHARED_SRC} PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
     if(NOT RTC_TESTING)
       add_executable(${_EXE_NAME} EXCLUDE_FROM_ALL ${SRC_NAME} ${COMMON_SHARED_SRC} $<TARGET_OBJECTS:Main_Object> $<TARGET_OBJECTS:KERNELS>)
     else ()
@@ -78,7 +82,7 @@ function(hip_gen_exe_target)
         target_link_libraries(${_EXE_NAME} nvrtc)
       endif()
     endif()
-    set_target_properties(${_EXE_NAME} PROPERTIES LINKER_LANGUAGE HIP)
+    set_target_properties(${_EXE_NAME} PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
 
     if (DEFINED _PROPERTY)
       set_property(TARGET ${_EXE_NAME} PROPERTY ${_PROPERTY})
@@ -104,21 +108,59 @@ function(hip_gen_exe_target)
 
     # Add dependency on build_tests to build it on this custom target
     add_dependencies(${_TEST_TARGET_NAME} ${_EXE_NAME})
+    # Test deprecated functions too. We would like to stay on the
+    # latest API, so define HIP_ABI_IMPL to access deprecated
+    # APIs. The cost of this is that we lose access to wrapper
+    # functions.
+    target_compile_definitions(${_EXE_NAME} PRIVATE HIP_ABI_IMPL)
 
     if (DEFINED _COMPILE_OPTIONS)
       target_compile_options(${_EXE_NAME} PUBLIC ${_COMPILE_OPTIONS})
     endif()
-    target_link_libraries(${_EXE_NAME} Catch2::Catch2)
-    target_link_libraries(${_EXE_NAME} hip::host hip::device)
+    target_link_libraries(${_EXE_NAME} Catch2::Catch2 ${GPGPU_LINKER_LIBRARIES})
 
     foreach(arg IN LISTS _UNPARSED_ARGUMENTS)
-        message(WARNING "Unparsed arguments: ${arg}")
+      message(WARNING "Unparsed arguments: ${arg}")
     endforeach()
     # add binary to global list of binaries to install
     set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS ${_EXE_NAME})
-    catch_discover_tests("${_EXE_NAME}" DISCOVERY_MODE PRE_TEST PROPERTIES SKIP_REGULAR_EXPRESSION "HIP_SKIP_THIS_TEST")
+    # Catch2 already defaults discovered tests to SKIP_RETURN_CODE 4
+    # (extras/Catch.cmake) unless SKIP_IS_FAILURE is passed. Restated
+    # here because main() deliberately returns 4 when the active level
+    # matches none of the requested tests - this is the contract that
+    # makes those entries report as skipped rather than failed.
+    set(_DISCOVER_PROPERTIES SKIP_RETURN_CODE 4)
+    if (DEFINED HIP_TEST_LABELS)
+      list(APPEND _DISCOVER_PROPERTIES LABELS "${HIP_TEST_LABELS}")
+    endif()
+    if(HIP_TESTS_RUN_DISABLED)
+      # ON: register all tests (including [disabled]-tagged ones) as enabled in ctest.
+      # Binary tags are unchanged; ctest just does not set DISABLED TRUE for them.
+      catch_discover_tests("${_EXE_NAME}"
+        DISCOVERY_MODE PRE_TEST
+        ADD_TAGS_AS_LABELS
+        PROPERTIES ${_DISCOVER_PROPERTIES}
+      )
+    else()
+      # Default: exclude [disabled] from enabled set, register separately as DISABLED TRUE.
+      catch_discover_tests("${_EXE_NAME}"
+        TEST_SPEC "~[disabled]"
+        DISCOVERY_MODE PRE_TEST
+        ADD_TAGS_AS_LABELS
+        PROPERTIES ${_DISCOVER_PROPERTIES}
+      )
+      catch_discover_tests("${_EXE_NAME}"
+        TEST_SPEC "[disabled]"
+        TEST_LIST "${_EXE_NAME}_DISABLED_TESTS"
+        DISCOVERY_MODE PRE_TEST
+        ADD_TAGS_AS_LABELS
+        PROPERTIES ${_DISCOVER_PROPERTIES} DISABLED TRUE
+      )
+    endif()
     file(GLOB CTEST_INC_FILES "${CMAKE_CURRENT_BINARY_DIR}/${_EXE_NAME}-*_include.cmake")
     set_property(GLOBAL APPEND PROPERTY G_INSTALL_CTEST_INCLUDE_FILES ${CTEST_INC_FILES})
+
+    add_dependencies(${_EXE_NAME} hip_tests_config)
 
     if(NOT _STANDALONE_FLAG EQUAL "1")
       break()

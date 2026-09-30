@@ -1,54 +1,39 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
+#include "common/path.hpp"
 #include "fwd.hpp"
 #include "module_function.hpp"
 
+#include <fmt/format.h>
 #include <timemory/log/color.hpp>
 #include <timemory/mpl/policy.hpp>
 #include <timemory/settings.hpp>
 #include <timemory/settings/types.hpp>
 #include <timemory/tpls/cereal/cereal.hpp>
-#include <timemory/utility/delimit.hpp>
-#include <timemory/utility/filepath.hpp>
 
 static inline void
 dump_info(std::ostream& _os, const fmodset_t& _data)
 {
     module_function::reset_width();
     for(const auto& itr : _data)
+    {
         module_function::update_width(itr);
+    }
 
     module_function::write_header(_os);
     for(const auto& itr : _data)
+    {
         _os << itr << '\n';
+    }
 
     module_function::reset_width();
 }
 //
-template <typename ArchiveT,
-          std::enable_if_t<tim::concepts::is_archive<ArchiveT>::value, int> = 0>
+template <typename ArchiveT>
+    requires tim::concepts::is_archive<ArchiveT>::value
 static inline void
 dump_info(ArchiveT& _ar, const fmodset_t& _data)
 {
@@ -70,16 +55,23 @@ dump_info(const string_t& _label, string_t _oname, const string_t& _ext,
         _msg << "[dump_info] Error opening '" << _oname << " for output";
         verbprintf(_level, "%s\n", _msg.str().c_str());
         if(_fail)
+        {
             throw std::runtime_error(std::string{ "[rocprof-sys][exe]" } + _msg.str());
+        }
     };
 
-    if(!debug_print && verbose_level < _level) return;
+    if(!debug_print && verbose_level < _level)
+    {
+        return;
+    }
 
     if(_ext == "txt")
     {
         std::ofstream ofs{};
-        if(!tim::filepath::open(ofs, _oname))
+        if(!rocprofsys::path::create_parent_dirs_and_open_ofstream(ofs, _oname))
+        {
             _handle_error();
+        }
         else
         {
             verbprintf_bare(_level, "%s", ::tim::log::color::source());
@@ -107,8 +99,10 @@ dump_info(const string_t& _label, string_t _oname, const string_t& _ext,
         }
 
         std::ofstream ofs{};
-        if(!tim::filepath::open(ofs, _oname))
+        if(!rocprofsys::path::create_parent_dirs_and_open_ofstream(ofs, _oname))
+        {
             _handle_error();
+        }
         else
         {
             verbprintf_bare(_level, "%s", ::tim::log::color::source());
@@ -135,8 +129,10 @@ dump_info(const string_t& _label, string_t _oname, const string_t& _ext,
         }
 
         std::ofstream ofs{};
-        if(!tim::filepath::open(ofs, _oname))
+        if(!rocprofsys::path::create_parent_dirs_and_open_ofstream(ofs, _oname))
+        {
             _handle_error();
+        }
         else
         {
             verbprintf_bare(_level, "%s", ::tim::log::color::source());
@@ -148,9 +144,10 @@ dump_info(const string_t& _label, string_t _oname, const string_t& _ext,
     }
     else
     {
-        throw std::runtime_error(TIMEMORY_JOIN(
-            "", "[rocprof-sys][exe] Error in ", __FUNCTION__, " :: filename '", _oname,
-            "' does not have one of recognized file extensions: txt, json, xml"));
+        throw std::runtime_error(
+            fmt::format("[rocprof-sys][exe] Error in {} :: filename '{}' does not have "
+                        "one of recognized file extensions: txt, json, xml",
+                        __FUNCTION__, _oname));
     }
 }
 //
@@ -159,7 +156,9 @@ dump_info(const string_t& _oname, const fmodset_t& _data, int _level, bool _fail
           const string_t& _type, const strset_t& _ext)
 {
     for(const auto& itr : _ext)
+    {
         dump_info(_type, _oname, itr, _data, _level, _fail);
+    }
 }
 //
 static inline void
@@ -170,7 +169,10 @@ load_info(const string_t& _label, const string_t& _iname, fmodset_t& _data, int 
 
     auto        _pos = _iname.find_last_of('.');
     std::string _ext = {};
-    if(_pos != std::string::npos) _ext = _iname.substr(_pos + 1);
+    if(_pos != std::string::npos)
+    {
+        _ext = _iname.substr(_pos + 1);
+    }
 
     auto _handle_error = [&]() {
         std::stringstream _msg{};
@@ -184,7 +186,9 @@ load_info(const string_t& _label, const string_t& _iname, fmodset_t& _data, int 
         verbprintf(_level, "Reading '%s'... ", _iname.c_str());
         std::ifstream ifs{ _iname };
         if(!ifs)
+        {
             _handle_error();
+        }
         else
         {
             using input_policy = policy::input_archive<cereal::XMLInputArchive>;
@@ -206,7 +210,9 @@ load_info(const string_t& _label, const string_t& _iname, fmodset_t& _data, int 
         verbprintf(_level, "Reading '%s'... ", _iname.c_str());
         std::ifstream ifs{ _iname };
         if(!ifs)
+        {
             _handle_error();
+        }
         else
         {
             using input_policy = policy::input_archive<cereal::JSONInputArchive>;
@@ -225,9 +231,10 @@ load_info(const string_t& _label, const string_t& _iname, fmodset_t& _data, int 
     }
     else
     {
-        throw std::runtime_error(TIMEMORY_JOIN(
-            "", "[rocprof-sys][exe] Error in ", __FUNCTION__, " :: filename '", _iname,
-            "' does not have one of recognized extentions: txt, json, xml :: ", _ext));
+        throw std::runtime_error(
+            fmt::format("[rocprof-sys][exe] Error in {} :: filename '{}' does not have "
+                        "one of recognized extentions: txt, json, xml :: {}",
+                        __FUNCTION__, _iname, _ext));
     }
 }
 //

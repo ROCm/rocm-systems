@@ -31,10 +31,10 @@ namespace rocshmem {
 Queue::Queue() { }
 
 Queue::Queue(size_t max_queues, size_t queue_size)
-    : max_queues_{max_queues},
-      queue_size_{queue_size},
-      queue_proxy_{max_queues, queue_size},
-      queue_desc_proxy_{max_queues} { }
+    : queue_proxy_{max_queues, queue_size},
+      queue_desc_proxy_{max_queues},
+      max_queues_{max_queues},
+      queue_size_{queue_size} { }
 
 uint64_t Queue::get_read_index(uint64_t queue_index) {
   return descriptor(queue_index)->read_index % queue_size_;
@@ -85,7 +85,13 @@ void Queue::flush_hdp() {
 
 void Queue::sfence_flush_hdp() {
   if (envvar::ro::net_cpu_queue) {
+#if defined(__x86_64__) || defined(_M_X64)
     asm volatile("sfence" ::: "memory");
+#elif defined(__powerpc__)
+    asm volatile("lwsync" ::: "memory");
+#else
+#error "Unsupported architecture: add a store fence for this platform"
+#endif
     hdp_proxy_.get()->hdp_flush();
   }
 }

@@ -6,7 +6,7 @@ set-user-defaults()
     : ${ROCM_VERSIONS:="6.3"}
     : ${DISTRO:=ubuntu}
     : ${VERSIONS:=22.04}
-    : ${PYTHON_VERSIONS:="6 7 8 9 10 11 12 13"}
+    : ${PYTHON_VERSIONS:="8 9 10 11 12 13"}
     : ${BUILD_CI:=""}
     : ${PUSH:=0}
     : ${PULL:=--pull}
@@ -105,8 +105,6 @@ show-matrix()
     done
 
     echo ""
-    echo "ROCm '0.0' means no ROCm installation (CPU-only build)"
-    echo ""
     echo "Note: Patch versions are also supported (See: https://repo.radeon.com/amdgpu-install/)"
     echo ""
 }
@@ -140,16 +138,14 @@ validate-combinations()
             ROCM_MAJOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $1}')
             ROCM_MINOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $2}')
             ROCM_MAJOR_MINOR="${ROCM_MAJOR}.${ROCM_MINOR}"
-            if ! ([ "${ROCM_MAJOR_MINOR}" == "0.0" ] && [ "${ROCM_VERSION}" != "0.0" ]); then
-                for i in "${!MATRIX_DISTROS[@]}"; do
-                    if [[ "${MATRIX_DISTROS[i]}" == "${DISTRO}" && \
-                        "${MATRIX_VERSIONS[i]}" == "${VERSION}" && \
-                        "${MATRIX_ROCM_VERSIONS[i]}" == "${ROCM_MAJOR_MINOR}" ]]; then
-                        valid=1
-                        break
-                    fi
-                done
-            fi
+            for i in "${!MATRIX_DISTROS[@]}"; do
+                if [[ "${MATRIX_DISTROS[i]}" == "${DISTRO}" && \
+                    "${MATRIX_VERSIONS[i]}" == "${VERSION}" && \
+                    "${MATRIX_ROCM_VERSIONS[i]}" == "${ROCM_MAJOR_MINOR}" ]]; then
+                    valid=1
+                    break
+                fi
+            done
 
             if [ ${valid} -eq 0 ]; then
                 send-error "Unsupported combination :: ${DISTRO}-${VERSION} + ROCm ${ROCM_VERSION}. See compatibility matrix for supported versions."
@@ -310,8 +306,9 @@ if [ "${RETRY}" -lt 1 ]; then
 fi
 
 if [ -n "${BUILD_CI}" ]; then DOCKER_FILE="${DOCKER_FILE}.ci"; fi
-cd docker # Forced since PWD is parent dir
-if [ ! -f ${DOCKER_FILE} ]; then send-error "File \"${DOCKER_FILE}\" not found"; fi
+# Build context is projects/rocprofiler-systems/ so that
+# requirements.txt is reachable.
+if [ ! -f docker/${DOCKER_FILE} ]; then send-error "File \"docker/${DOCKER_FILE}\" not found"; fi
 
 for VERSION in ${VERSIONS}
 do
@@ -353,11 +350,11 @@ do
                 *)
                     ;;
             esac
-            verbose-build docker build . ${PULL} --progress plain -f ${DOCKER_FILE} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO} --build-arg VERSION=${VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg ROCM_MAJOR=${ROCM_MAJOR} --build-arg ROCM_MINOR=${ROCM_MINOR} --build-arg ROCM_PATCH=${ROCM_PATCH} --build-arg ROCM_VERSION_URL=${ROCM_VERSION_URL} --build-arg ROCM_VERSN=${ROCM_VERSN} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
+            verbose-build docker build . ${PULL} --progress plain -f docker/${DOCKER_FILE} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO} --build-arg VERSION=${VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg ROCM_MAJOR=${ROCM_MAJOR} --build-arg ROCM_MINOR=${ROCM_MINOR} --build-arg ROCM_PATCH=${ROCM_PATCH} --build-arg ROCM_VERSION_URL=${ROCM_VERSION_URL} --build-arg ROCM_VERSN=${ROCM_VERSN} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
         elif [ "${DISTRO}" = "rhel" ]; then
             # use Rocky Linux as a base image for RHEL builds
             DISTRO_BASE_IMAGE=rockylinux/rockylinux
-            verbose-build docker build . ${PULL} --progress plain -f ${DOCKER_FILE} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO_BASE_IMAGE} --build-arg VERSION=${VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg ROCM_MAJOR=${ROCM_MAJOR} --build-arg ROCM_MINOR=${ROCM_MINOR} --build-arg ROCM_PATCH=${ROCM_PATCH} --build-arg ROCM_VERSION_URL=${ROCM_VERSION_URL} --build-arg ROCM_VERSN=${ROCM_VERSN} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
+            verbose-build docker build . ${PULL} --progress plain -f docker/${DOCKER_FILE} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO_BASE_IMAGE} --build-arg VERSION=${VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg ROCM_MAJOR=${ROCM_MAJOR} --build-arg ROCM_MINOR=${ROCM_MINOR} --build-arg ROCM_PATCH=${ROCM_PATCH} --build-arg ROCM_VERSION_URL=${ROCM_VERSION_URL} --build-arg ROCM_VERSN=${ROCM_VERSN} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
         elif [ "${DISTRO}" = "opensuse" ]; then
             DISTRO_IMAGE="opensuse/leap"
             if [[ "${VERSION_MAJOR}" -le 15 && "${VERSION_MINOR}" -le 5 ]]; then
@@ -365,7 +362,7 @@ do
             else
                 PERL_REPO="${VERSION_MAJOR}.${VERSION_MINOR}"
             fi
-            verbose-build docker build . ${PULL} --progress plain -f ${DOCKER_FILE} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO_IMAGE} --build-arg VERSION=${VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg ROCM_MAJOR=${ROCM_MAJOR} --build-arg ROCM_MINOR=${ROCM_MINOR} --build-arg ROCM_PATCH=${ROCM_PATCH} --build-arg ROCM_VERSION_URL=${ROCM_VERSION_URL} --build-arg ROCM_VERSN=${ROCM_VERSN} --build-arg PERL_REPO=${PERL_REPO} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
+            verbose-build docker build . ${PULL} --progress plain -f docker/${DOCKER_FILE} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO_IMAGE} --build-arg VERSION=${VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg ROCM_MAJOR=${ROCM_MAJOR} --build-arg ROCM_MINOR=${ROCM_MINOR} --build-arg ROCM_PATCH=${ROCM_PATCH} --build-arg ROCM_VERSION_URL=${ROCM_VERSION_URL} --build-arg ROCM_VERSN=${ROCM_VERSN} --build-arg PERL_REPO=${PERL_REPO} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
         fi
         if [ "${PUSH}" -ne 0 ]; then
             docker push ${CONTAINER}

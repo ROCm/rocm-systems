@@ -23,7 +23,7 @@
 #ifndef VHSAKMT_VIRTIO_PROTO_H
 #define VHSAKMT_VIRTIO_PROTO_H
 
-#include "hsakmt/linux/kfd_ioctl.h"
+#include "kfd_ioctl.h"
 
 // Forward declaration for HsaKFDContext to avoid dependency issues
 typedef struct _HsaKFDContext HsaKFDContext;
@@ -397,7 +397,6 @@ typedef struct _memory_req_map_to_GPU_nodes_args {
   uint64_t MemoryAddress;
   uint64_t MemorySizeInBytes;
   uint64_t AlternateVAGPU;
-  HsaMemMapFlags MemMapFlags;
   uint32_t pad;
   uint64_t NumberOfNodes;
   uint32_t* NodeArray;

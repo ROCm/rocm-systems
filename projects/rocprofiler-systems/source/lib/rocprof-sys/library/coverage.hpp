@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -35,9 +16,7 @@
         ar(::tim::cereal::make_nvp(#MEMBER_VARIABLE, MEMBER_VARIABLE))
 #endif
 
-namespace rocprofsys
-{
-namespace coverage
+namespace rocprofsys::coverage
 {
 #if !defined(ROCPROFSYS_PYBIND11_SOURCE) || ROCPROFSYS_PYBIND11_SOURCE == 0
 void
@@ -66,9 +45,9 @@ struct code_coverage
 
     struct data
     {
-        int_set_t addresses = {};
-        str_set_t modules   = {};
-        str_set_t functions = {};
+        int_set_t addresses;
+        str_set_t modules;
+        str_set_t functions;
 
         data& operator+=(const data& rhs);
         data  operator+(const data& rhs) const;
@@ -148,12 +127,12 @@ struct coverage_data
     bool           operator>(const coverage_data& rhs) const;
     bool           operator>=(const coverage_data& rhs) const;
 
-    size_t      count    = 0;
-    size_t      address  = 0;
-    size_t      line     = 0;
-    std::string module   = {};
-    std::string function = {};
-    std::string source   = {};
+    size_t      count   = 0;
+    size_t      address = 0;
+    size_t      line    = 0;
+    std::string module;
+    std::string function;
+    std::string source;
 };
 //
 template <typename ArchiveT>
@@ -169,5 +148,4 @@ coverage_data::serialize(ArchiveT& ar, const unsigned version)
     (void) version;
 }
 //
-}  // namespace coverage
-}  // namespace rocprofsys
+}  // namespace rocprofsys::coverage

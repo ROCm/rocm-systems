@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 #include <hip_array_common.hh>
@@ -27,7 +14,7 @@ __global__ void add_vectors(int* a, int* b, int* result, int size) {
   }
 }
 
-TEST_CASE("Unit_hipSetupArgument_Simple") {
+HIP_TEST_CASE(Unit_hipSetupArgument_Simple) {
   dim3 grid_dim(1, 1, 1);
   dim3 block_dim(1, 1, 1);
 
@@ -48,7 +35,7 @@ TEST_CASE("Unit_hipSetupArgument_Simple") {
  * ------------------------
  *  - unit/kernel/hipSetupArgument.cc
  */
-TEST_CASE("Unit_hipSetupArgument_Execute_Kernel_And_Check_Result") {
+HIP_TEST_CASE(Unit_hipSetupArgument_Execute_Kernel_And_Check_Result) {
   constexpr auto block_size = 32;
   auto vec_size = 256;
   size_t block_num = static_cast<size_t>(std::ceil(static_cast<float>(vec_size) / block_size));

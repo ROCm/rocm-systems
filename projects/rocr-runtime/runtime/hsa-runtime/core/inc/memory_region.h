@@ -54,6 +54,7 @@
 namespace rocr {
 namespace core {
 class Agent;
+struct DriverMemoryHandle;
 
 class MemoryRegion : public Checked<0x9C961F19EE175BB3> {
  public:
@@ -110,13 +111,15 @@ class MemoryRegion : public Checked<0x9C961F19EE175BB3> {
     // allocations in AQL to PM4 conversion.
     AllocateExecutableBlitKernelObject = (1 << 12),
     AllocateQueueObject = (1 << 13),  // Allocates AQL queue object, KMD requires physical access for the fence update
+    AllocateCodeObject = (1 << 14),
   };
 
   typedef uint32_t AllocateFlags;
 
-  virtual hsa_status_t Allocate(size_t& size, AllocateFlags alloc_flags, void** address, int agent_node_id) const = 0;
+  virtual hsa_status_t Allocate(size_t& size, AllocateFlags alloc_flags, uint32_t agent_node_id,
+                                DriverMemoryHandle* handle) const = 0;
 
-  virtual hsa_status_t Free(void* address, size_t size) const = 0;
+  virtual hsa_status_t Free(const DriverMemoryHandle& handle) const = 0;
 
   // Prepares suballocated memory for IPC export.
   virtual hsa_status_t IPCFragmentExport(void* address) const = 0;

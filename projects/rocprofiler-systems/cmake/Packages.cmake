@@ -1,5 +1,5 @@
 # Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier:  MIT
+# SPDX-License-Identifier: MIT
 
 # include guard
 include_guard(DIRECTORY)
@@ -20,9 +20,6 @@ rocprofiler_systems_add_interface_library(rocprofiler-systems-threading
 rocprofiler_systems_add_interface_library(
     rocprofiler-systems-dyninst
     "Provides flags and libraries for Dyninst (dynamic instrumentation)"
-)
-rocprofiler_systems_add_interface_library(rocprofiler-systems-boost
-    "Boost interface library (for Dyninst)"
 )
 rocprofiler_systems_add_interface_library(rocprofiler-systems-elfutils
     "ElfUtils interface library (for Dyninst)"
@@ -48,9 +45,6 @@ rocprofiler_systems_add_interface_library(rocprofiler-systems-ucx
 rocprofiler_systems_add_interface_library(rocprofiler-systems-bfd
     "Provides Binary File Descriptor (BFD)"
 )
-rocprofiler_systems_add_interface_library(rocprofiler-systems-ptl
-    "Enables PTL support (tasking)"
-)
 rocprofiler_systems_add_interface_library(rocprofiler-systems-papi "Enable PAPI support")
 rocprofiler_systems_add_interface_library(rocprofiler-systems-ompt "Enable OMPT support")
 rocprofiler_systems_add_interface_library(rocprofiler-systems-python
@@ -59,14 +53,14 @@ rocprofiler_systems_add_interface_library(rocprofiler-systems-python
 rocprofiler_systems_add_interface_library(rocprofiler-systems-perfetto
     "Enables Perfetto support"
 )
-rocprofiler_systems_add_interface_library(rocprofiler-systems-sqlite3
-    "Use SQLite3 for rocpd data storage"
-)
 rocprofiler_systems_add_interface_library(rocprofiler-systems-json
     "Use nlohmann/json for json data handling"
 )
+rocprofiler_systems_add_interface_library(rocprofiler-systems-fmt
+    "Provides fmt library"
+)
 rocprofiler_systems_add_interface_library(rocprofiler-systems-spdlog
-                                          "Provides spdlog library"
+    "Provides spdlog library"
 )
 rocprofiler_systems_add_interface_library(rocprofiler-systems-timemory
     "Provides timemory libraries"
@@ -84,7 +78,6 @@ set(ROCPROFSYS_EXTENSION_LIBRARIES
     rocprofiler-systems::rocprofiler-systems-rocm
     rocprofiler-systems::rocprofiler-systems-bfd
     rocprofiler-systems::rocprofiler-systems-mpi
-    rocprofiler-systems::rocprofiler-systems-ptl
     rocprofiler-systems::rocprofiler-systems-ompt
     rocprofiler-systems::rocprofiler-systems-papi
     rocprofiler-systems::rocprofiler-systems-perfetto
@@ -98,13 +91,19 @@ target_include_directories(
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/source/lib>
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys>
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys-dl>
-        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys-user>
+        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys-causal-api>
 )
 
 # include threading because of rooflines
+#
+# the common-api target is defined later by add_subdirectory(source); linking it
+# by name here is resolved at generate time and carries its include directory,
+# so this file no longer hard-codes source/lib/rocprof-sys-common-api
 target_link_libraries(
     rocprofiler-systems-headers
-    INTERFACE rocprofiler-systems::rocprofiler-systems-threading
+    INTERFACE
+        rocprofiler-systems::rocprofiler-systems-threading
+        rocprofiler-systems::rocprofiler-systems-common-api-library
 )
 
 # ensure the env overrides the appending /opt/rocm later
@@ -167,52 +166,21 @@ endforeach()
 #
 # ----------------------------------------------------------------------------------------#
 
-if(ROCPROFSYS_USE_ROCM)
-    find_package(ROCmVersion)
+find_package(ROCmVersion ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
 
-    if(NOT ROCmVersion_FOUND)
-        find_package(
-            hip
-            ${rocprofiler_systems_FIND_QUIETLY}
-            REQUIRED
-            HINTS ${ROCPROFSYS_DEFAULT_ROCM_PATH}
-            PATHS ${ROCPROFSYS_DEFAULT_ROCM_PATH}
-        )
-        find_package(ROCmVersion HINTS ${ROCM_PATH} PATHS ${ROCM_PATH})
-    endif()
-
-    if(NOT ROCmVersion_FOUND)
-        rocm_version_compute("${hip_VERSION}" _local)
-
-        foreach(_V ${ROCmVersion_VARIABLES})
-            set(_CACHE_VAR ROCmVersion_${_V}_VERSION)
-            set(_LOCAL_VAR _local_${_V}_VERSION)
-            set(ROCmVersion_${_V}_VERSION
-                "${${_LOCAL_VAR}}"
-                CACHE STRING
-                "ROCm ${_V} version"
-            )
-            rocm_version_watch_for_change(${_CACHE_VAR})
-        endforeach()
-    else()
-        list(APPEND CMAKE_PREFIX_PATH ${ROCmVersion_DIR})
-    endif()
-
-    set(ROCPROFSYS_ROCM_VERSION_FULL ${ROCmVersion_FULL_VERSION})
-    set(ROCPROFSYS_ROCM_VERSION_MAJOR ${ROCmVersion_MAJOR_VERSION})
-    set(ROCPROFSYS_ROCM_VERSION_MINOR ${ROCmVersion_MINOR_VERSION})
-    set(ROCPROFSYS_ROCM_VERSION_PATCH ${ROCmVersion_PATCH_VERSION})
-    set(ROCPROFSYS_ROCM_VERSION ${ROCmVersion_TRIPLE_VERSION})
-
-    rocprofiler_systems_add_feature(ROCPROFSYS_ROCM_VERSION
-        "ROCm version used by rocprofiler-systems"
-    )
-else()
-    set(ROCPROFSYS_ROCM_VERSION "0.0.0")
-    set(ROCPROFSYS_ROCM_VERSION_MAJOR 0)
-    set(ROCPROFSYS_ROCM_VERSION_MINOR 0)
-    set(ROCPROFSYS_ROCM_VERSION_PATCH 0)
+if(ROCmVersion_DIR)
+    list(APPEND CMAKE_PREFIX_PATH ${ROCmVersion_DIR})
 endif()
+
+set(ROCPROFSYS_ROCM_VERSION_FULL ${ROCmVersion_FULL_VERSION})
+set(ROCPROFSYS_ROCM_VERSION_MAJOR ${ROCmVersion_MAJOR_VERSION})
+set(ROCPROFSYS_ROCM_VERSION_MINOR ${ROCmVersion_MINOR_VERSION})
+set(ROCPROFSYS_ROCM_VERSION_PATCH ${ROCmVersion_PATCH_VERSION})
+set(ROCPROFSYS_ROCM_VERSION ${ROCmVersion_TRIPLE_VERSION})
+
+rocprofiler_systems_add_feature(ROCPROFSYS_ROCM_VERSION
+    "ROCm version used by rocprofiler-systems"
+)
 
 # ----------------------------------------------------------------------------------------#
 #
@@ -220,163 +188,103 @@ endif()
 #
 # ----------------------------------------------------------------------------------------#
 
-if(ROCPROFSYS_USE_ROCM)
-    # ROCProfiler SDK
-    find_package(rocprofiler-sdk ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
-    rocprofiler_systems_target_compile_definitions(rocprofiler-systems-rocm
-        INTERFACE ROCPROFSYS_USE_ROCM
-    )
-    target_link_libraries(
-        rocprofiler-systems-rocm
-        INTERFACE rocprofiler-sdk::rocprofiler-sdk
-    )
+# ROCProfiler SDK
+find_package(rocprofiler-sdk ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
+target_link_libraries(rocprofiler-systems-rocm INTERFACE rocprofiler-sdk::rocprofiler-sdk)
 
-    # AMD SMI
-    find_package(
-        amd_smi
-        ${rocprofiler_systems_FIND_QUIETLY}
+# AMD SMI
+find_package(
+    amd_smi
+    ${rocprofiler_systems_FIND_QUIETLY}
+    HINTS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
+    PATHS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
+    REQUIRED
+)
+
+# amd_smi in ROCm 6.4 requires both drm and drm_amdgpu libraries to be explicitly linked.
+# This is no longer the case in ROCm 7.0.
+if(ROCPROFSYS_ROCM_VERSION_MAJOR EQUAL 6 AND ROCPROFSYS_ROCM_VERSION_MINOR EQUAL 4)
+    # Find drm library
+    find_library(
+        drm_LIBRARY
+        NAMES drm
         HINTS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
         PATHS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
+        PATH_SUFFIXES lib lib64
+        REQUIRED
+    )
+    # Find drm_amdgpu library
+    find_library(
+        drm_amdgpu_LIBRARY
+        NAMES drm_amdgpu
+        HINTS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
+        PATHS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
+        PATH_SUFFIXES lib lib64
         REQUIRED
     )
 
-    # amd_smi in ROCm 6.4 requires both drm and drm_amdgpu libraries to be explicitly linked.
-    # This is no longer the case in ROCm 7.0.
-    if(ROCPROFSYS_ROCM_VERSION_MAJOR EQUAL 6 AND ROCPROFSYS_ROCM_VERSION_MINOR EQUAL 4)
-        # Find drm library
-        find_library(
-            drm_LIBRARY
-            NAMES drm
-            HINTS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
-            PATHS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
-            PATH_SUFFIXES lib lib64
-            REQUIRED
-        )
-        # Find drm_amdgpu library
-        find_library(
-            drm_amdgpu_LIBRARY
-            NAMES drm_amdgpu
-            HINTS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
-            PATHS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
-            PATH_SUFFIXES lib lib64
-            REQUIRED
-        )
+    get_filename_component(_drm_LIBRARY_DIR "${drm_LIBRARY}" DIRECTORY)
+    get_filename_component(_drm_amdgpu_LIBRARY_DIR "${drm_amdgpu_LIBRARY}" DIRECTORY)
 
-        get_filename_component(_drm_LIBRARY_DIR "${drm_LIBRARY}" DIRECTORY)
-        get_filename_component(_drm_amdgpu_LIBRARY_DIR "${drm_amdgpu_LIBRARY}" DIRECTORY)
+    set(_drm_LIBRARY_DIRS "${_drm_LIBRARY_DIR};${_drm_amdgpu_LIBRARY_DIR}")
+    list(REMOVE_DUPLICATES _drm_LIBRARY_DIRS)
 
-        set(_drm_LIBRARY_DIRS "${_drm_LIBRARY_DIR};${_drm_amdgpu_LIBRARY_DIR}")
-        list(REMOVE_DUPLICATES _drm_LIBRARY_DIRS)
-
-        target_link_directories(amd_smi INTERFACE ${_drm_LIBRARY_DIRS})
-    endif()
-
-    # When AI NIC profiling is enabled and ROCm version is 7.0+, define ENABLE_ESMI_LIB so AMD SMI headers
-    # expose NIC APIs (e.g. amdsmi_get_nic_rdma_port_statistics, AMDSMI_INIT_AMD_NICS).
-    if(ROCPROFSYS_USE_AINIC)
-        if(ROCPROFSYS_ROCM_VERSION_MAJOR GREATER 6)
-            target_compile_definitions(
-                rocprofiler-systems-compile-definitions
-                INTERFACE ROCPROFSYS_USE_AINIC ENABLE_ESMI_LIB
-            )
-        endif()
-    endif()
-
-    target_link_libraries(rocprofiler-systems-rocm INTERFACE amd_smi)
+    target_link_directories(amd_smi INTERFACE ${_drm_LIBRARY_DIRS})
 endif()
 
-# ----------------------------------------------------------------------------------------#
-#
-# ROCpd
-#
-# ----------------------------------------------------------------------------------------#
-
-function(ROCPROFSYS_CONFIGURE_ROCPD_SCHEMA_FILES)
-    rocprofiler_systems_target_compile_definitions(
-        rocprofiler-systems-rocm INTERFACE ROCPROFSYS_USE_ROCPD_LIBRARY=0
-    )
-
-    set(SCHEMA_FILES
-        "rocpd_tables.sql"
-        "rocpd_views.sql"
-        "data_views.sql"
-        "marker_views.sql"
-        "summary_views.sql"
-    )
-
-    set(SCHEMA_SOURCE_DIR
-        "${PROJECT_SOURCE_DIR}/source/lib/core/rocpd/data_storage/schema"
-    )
-    set(SCHEMA_BINARY_DIR
-        "${PROJECT_BINARY_DIR}/source/lib/core/rocpd/data_storage/schema"
-    )
-    set(TEMPLATE_FILE "${PROJECT_SOURCE_DIR}/cmake/Templates/rocpd_schema.in")
-
-    file(MAKE_DIRECTORY ${SCHEMA_BINARY_DIR})
-
-    foreach(SCHEMA_FILE ${SCHEMA_FILES})
-        file(READ "${SCHEMA_SOURCE_DIR}/${SCHEMA_FILE}" SQL_CONTENT)
-
-        string(REPLACE "\\" "\\\\" SQL_CONTENT "${SQL_CONTENT}")
-        string(REPLACE "\"" "\\\"" SQL_CONTENT "${SQL_CONTENT}")
-        string(REPLACE "\n" "\\n\"\n\"" SQL_CONTENT "${SQL_CONTENT}")
-
-        get_filename_component(SCHEMA_NAME ${SCHEMA_FILE} NAME_WE)
-        string(TOUPPER ${SCHEMA_NAME} SCHEMA_NAME_UPPER)
-
-        configure_file("${TEMPLATE_FILE}" "${SCHEMA_BINARY_DIR}/${SCHEMA_NAME}.hpp" @ONLY)
-    endforeach()
-
-    target_include_directories(
-        rocprofiler-systems-headers
-        INTERFACE
-            $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/source/lib/core/rocpd/data_storage>
-    )
-endfunction()
-
-set(ROCPROFSYS_USE_ROCPD_LIBRARY OFF CACHE BOOL "Use rocpd library" FORCE)
-find_package(rocprofiler-sdk-rocpd ${rocprofiler_systems_FIND_QUIETLY})
-
-if(rocprofiler-sdk-rocpd_FOUND)
-    set(ROCPROFSYS_ROCPD_HAS_SQL_H FALSE)
-
-    if(rocprofiler-sdk-rocpd_INCLUDE_DIR)
-        set(_INCLUDE_PATH "${rocprofiler-sdk-rocpd_INCLUDE_DIR}/rocprofiler-sdk-rocpd")
-        message(STATUS "${_INCLUDE_PATH}/sql.h")
-        if(EXISTS "${_INCLUDE_PATH}/sql.h")
-            set(ROCPROFSYS_ROCPD_HAS_SQL_H TRUE)
-        endif()
+# When AI NIC profiling is enabled and ROCm version is 7.0+, define ENABLE_ESMI_LIB so AMD SMI headers
+# expose NIC APIs (e.g. amdsmi_get_nic_rdma_port_statistics, AMDSMI_INIT_AMD_NICS).
+if(ROCPROFSYS_USE_AINIC)
+    if(ROCPROFSYS_ROCM_VERSION_MAJOR GREATER 6)
+        target_compile_definitions(
+            rocprofiler-systems-compile-definitions
+            INTERFACE ROCPROFSYS_USE_AINIC ENABLE_ESMI_LIB
+        )
     endif()
+endif()
 
-    if(ROCPROFSYS_ROCPD_HAS_SQL_H)
-        set(ROCPROFSYS_USE_ROCPD_LIBRARY ON CACHE BOOL "Use rocpd library" FORCE)
+target_link_libraries(rocprofiler-systems-rocm INTERFACE amd_smi)
 
-        rocprofiler_systems_target_compile_definitions(
-            rocprofiler-systems-rocm INTERFACE ROCPROFSYS_USE_ROCPD_LIBRARY=1
-        )
+# AMD SMI version is provided by config-mode find_package(amd_smi) above.
+# If the package does not report a version, treat it as 0.0 (AI NIC unsupported).
+if(amd_smi_VERSION)
+    message(STATUS "AMD SMI version detected: ${amd_smi_VERSION}")
+else()
+    set(amd_smi_VERSION "0.0")
+    message(
+        STATUS
+        "AMD SMI version not reported by find_package; assuming ${amd_smi_VERSION}"
+    )
+endif()
 
-        target_link_libraries(
-            rocprofiler-systems-rocm
-            INTERFACE rocprofiler-sdk-rocpd::rocprofiler-sdk-rocpd
-        )
-
-        message(
-            STATUS
-            "rocprofiler-sdk-rocpd found with sql.h - using latest schema files"
-        )
+# AINIC requires AMD SMI >= 26.3 AND ROCPROFSYS_USE_AINIC option
+set(ROCPROFSYS_BUILD_AINIC OFF CACHE INTERNAL "Build AINIC support" FORCE)
+if(ROCPROFSYS_USE_AINIC)
+    if(amd_smi_VERSION VERSION_GREATER_EQUAL 26.3)
+        set(ROCPROFSYS_BUILD_AINIC ON CACHE INTERNAL "Build AINIC support" FORCE)
+        message(STATUS "AINIC support enabled (AMD SMI >= 26.3)")
     else()
-        message(
-            STATUS
-            "rocprofiler-sdk-rocpd found but sql.h missing - using local schema files"
-        )
+        message(STATUS "AINIC disabled: AMD SMI ${amd_smi_VERSION} < 26.3")
     endif()
 else()
-    message(STATUS "rocprofiler-sdk-rocpd not found - using local schema files")
+    message(STATUS "AINIC disabled: ROCPROFSYS_USE_AINIC is OFF")
 endif()
 
-if(NOT ROCPROFSYS_USE_ROCPD_LIBRARY)
-    rocprofsys_configure_rocpd_schema_files()
+# Expose ROCPROFSYS_BUILD_AINIC as a global compile definition.
+if(ROCPROFSYS_BUILD_AINIC)
+    target_compile_definitions(
+        rocprofiler-systems-compile-definitions
+        INTERFACE ROCPROFSYS_BUILD_AINIC=1
+    )
 endif()
+
+# ----------------------------------------------------------------------------------------#
+#
+# Profiler Hub
+#
+# ----------------------------------------------------------------------------------------#
+
+include(ProfilerHub)
 
 # ----------------------------------------------------------------------------------------#
 #
@@ -530,17 +438,6 @@ if(ROCPROFSYS_BUILD_DYNINST)
 
     target_link_libraries(rocprofiler-systems-dyninst INTERFACE Dyninst::Dyninst)
 else()
-    # Find Boost before finding Dyninst
-    find_package(Boost)
-    if(NOT TARGET Dyninst::Boost_headers)
-        add_library(Dyninst::Boost_headers INTERFACE IMPORTED)
-        target_include_directories(
-            Dyninst::Boost_headers
-            SYSTEM
-            INTERFACE ${Boost_INCLUDE_DIRS}
-        )
-    endif()
-
     find_package(
         Dyninst
         ${rocprofiler_systems_FIND_QUIETLY}
@@ -548,9 +445,22 @@ else()
         COMPONENTS dyninstAPI parseAPI instructionAPI symtabAPI
     )
 
-    if(TARGET Dyninst::Dyninst) # updated Dyninst CMake system was found
+    if(TARGET Dyninst::Dyninst) # CMake package exports aggregated target (no-Boost OK)
         target_link_libraries(rocprofiler-systems-dyninst INTERFACE Dyninst::Dyninst)
-    else() # updated Dyninst CMake system was not found
+        rocprofiler_systems_target_compile_definitions(rocprofiler-systems-dyninst
+            INTERFACE ROCPROFSYS_USE_DYNINST
+        )
+    else() # legacy Dyninst install: Boost component libraries
+        find_package(Boost)
+        if(NOT TARGET Dyninst::Boost_headers)
+            add_library(Dyninst::Boost_headers INTERFACE IMPORTED)
+            target_include_directories(
+                Dyninst::Boost_headers
+                SYSTEM
+                INTERFACE ${Boost_INCLUDE_DIRS}
+            )
+        endif()
+
         set(_BOOST_COMPONENTS atomic system thread date_time)
         set(rocprofiler_systems_BOOST_COMPONENTS
             "${_BOOST_COMPONENTS}"
@@ -639,6 +549,12 @@ else()
     endif()
 endif()
 
+# Dyninst's Annotatable.h triggers GCC 14's -Wcalloc-transposed-args; suppress it
+# for any TU that pulls in dyninst headers since the project builds with -Werror.
+add_target_cxx_flag_if_avail(
+    rocprofiler-systems-dyninst "-Wno-calloc-transposed-args"
+)
+
 # ----------------------------------------------------------------------------------------#
 #
 # Modify CMAKE_C_FLAGS and CMAKE_CXX_FLAGS with -static-libgcc and -static-libstdc++
@@ -686,11 +602,11 @@ include(Perfetto)
 
 # ----------------------------------------------------------------------------------------#
 #
-# SQLite3
+# Fmt
 #
 # ----------------------------------------------------------------------------------------#
 
-include(SQLite3)
+include(FmtLib)
 
 # ----------------------------------------------------------------------------------------#
 #
@@ -716,24 +632,6 @@ include(NlohmannJson)
 
 if(ROCPROFSYS_BUILD_TESTING)
     include(GTest)
-    include(GhcFilesystem)
-endif()
-
-# ----------------------------------------------------------------------------------------#
-#
-# ELFIO
-#
-# ----------------------------------------------------------------------------------------#
-
-if(ROCPROFSYS_BUILD_DEVICETRACE)
-    rocprofiler_systems_checkout_git_submodule(
-        RELATIVE_PATH external/elfio
-        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-        REPO_URL https://github.com/jrmadsen/ELFIO.git
-        REPO_BRANCH set-offset-support
-    )
-
-    add_subdirectory(external/elfio)
 endif()
 
 # ----------------------------------------------------------------------------------------#
@@ -821,18 +719,6 @@ set(TIMEMORY_USE_BFD
 )
 set(TIMEMORY_USE_LIBUNWIND ON CACHE BOOL "Enable libunwind support in timemory")
 set(TIMEMORY_USE_VISIBILITY OFF CACHE BOOL "Enable/disable using visibility decorations")
-set(TIMEMORY_USE_SANITIZER
-    ${ROCPROFSYS_USE_SANITIZER}
-    CACHE BOOL
-    "Build with -fsanitze=\${ROCPROFSYS_SANITIZER_TYPE}"
-    FORCE
-)
-set(TIMEMORY_SANITIZER_TYPE
-    ${ROCPROFSYS_SANITIZER_TYPE}
-    CACHE STRING
-    "Sanitizer type, e.g. leak, thread, address, memory, etc."
-    FORCE
-)
 
 if(DEFINED TIMEMORY_BUILD_GOTCHA AND NOT TIMEMORY_BUILD_GOTCHA)
     rocprofiler_systems_message(
@@ -895,7 +781,7 @@ rocprofiler_systems_checkout_git_submodule(
     RELATIVE_PATH external/timemory
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
     REPO_URL https://github.com/ROCm/timemory.git
-    REPO_BRANCH omnitrace
+    REPO_BRANCH rocprofiler-systems
 )
 
 rocprofiler_systems_save_variables(
@@ -915,7 +801,30 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(TIMEMORY_BUILD_HIDDEN_VISIBILITY OFF CACHE BOOL "" FORCE)
 endif()
 
+# Under sanitizer builds, ASan's globals-dead-stripping optimization converts
+# timemory's explicit template instantiations (STB_GLOBAL) into COMDAT groups
+# with STB_GLOBAL leaders. Rocprofiler-systems TUs that include timemory headers
+# produce COMDAT groups with STB_WEAK leaders for the same symbols (implicit
+# instantiation). lld rejects the resulting mix of STB_WEAK and STB_GLOBAL
+# COMDAT group leaders for the same symbol.
+#
+# -fno-sanitize-address-globals-dead-stripping disables this COMDAT conversion
+# for timemory's compilation, keeping explicit instantiations as regular
+# STB_GLOBAL symbols (as they are without sanitizers). lld then applies its
+# normal STB_GLOBAL-overrides-COMDAT-STB_WEAK rule, which is the same
+# behaviour as non-sanitizer builds and what GNU ld always does.
+string(FIND "${CMAKE_CXX_FLAGS}" "-fsanitize" _timemory_sanitizer_flag_pos)
+if(_timemory_sanitizer_flag_pos GREATER -1)
+    set(TIMEMORY_BUILD_HIDDEN_VISIBILITY OFF CACHE BOOL "" FORCE)
+    set(_timemory_saved_cxx_flags "${CMAKE_CXX_FLAGS}")
+    string(APPEND CMAKE_CXX_FLAGS " -fno-sanitize-address-globals-dead-stripping")
+endif()
+
 add_subdirectory(external/timemory EXCLUDE_FROM_ALL)
+
+if(_timemory_sanitizer_flag_pos GREATER -1)
+    set(CMAKE_CXX_FLAGS "${_timemory_saved_cxx_flags}")
+endif()
 
 install(
     TARGETS gotcha
@@ -987,64 +896,6 @@ target_include_directories(rocprofiler-systems-ucx INTERFACE ${UCX_HEADERS_INCLU
 
 # ----------------------------------------------------------------------------------------#
 #
-# PTL (Parallel Tasking Library) submodule
-#
-# ----------------------------------------------------------------------------------------#
-
-# timemory might provide PTL::ptl-shared
-if(NOT TARGET PTL::ptl-shared)
-    rocprofiler_systems_checkout_git_submodule(
-        RELATIVE_PATH external/PTL
-        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-        REPO_URL https://github.com/jrmadsen/PTL.git
-        REPO_BRANCH omnitrace
-    )
-
-    set(PTL_BUILD_EXAMPLES OFF)
-    set(PTL_USE_TBB OFF)
-    set(PTL_USE_GPU OFF)
-    set(PTL_DEVELOPER_INSTALL OFF)
-
-    if(NOT DEFINED BUILD_OBJECT_LIBS)
-        set(BUILD_OBJECT_LIBS OFF)
-    endif()
-    rocprofiler_systems_save_variables(
-        BUILD_CONFIG
-        VARIABLES BUILD_SHARED_LIBS BUILD_STATIC_LIBS BUILD_OBJECT_LIBS
-        CMAKE_POSITION_INDEPENDENT_CODE CMAKE_CXX_VISIBILITY_PRESET
-        CMAKE_VISIBILITY_INLINES_HIDDEN
-    )
-
-    set(BUILD_SHARED_LIBS OFF)
-    set(BUILD_STATIC_LIBS OFF)
-    set(BUILD_OBJECT_LIBS ON)
-    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-    set(CMAKE_CXX_VISIBILITY_PRESET "hidden")
-    set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
-
-    add_subdirectory(external/PTL EXCLUDE_FROM_ALL)
-
-    rocprofiler_systems_restore_variables(
-        BUILD_CONFIG
-        VARIABLES BUILD_SHARED_LIBS BUILD_STATIC_LIBS BUILD_OBJECT_LIBS
-        CMAKE_POSITION_INDEPENDENT_CODE CMAKE_CXX_VISIBILITY_PRESET
-        CMAKE_VISIBILITY_INLINES_HIDDEN
-    )
-endif()
-
-target_sources(
-    rocprofiler-systems-ptl
-    INTERFACE $<BUILD_INTERFACE:$<TARGET_OBJECTS:PTL::ptl-object>>
-)
-target_include_directories(
-    rocprofiler-systems-ptl
-    INTERFACE
-        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/external/PTL/source>
-        $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/external/PTL/source>
-)
-
-# ----------------------------------------------------------------------------------------#
-#
 # Restore the CMAKE_C_FLAGS and CMAKE_CXX_FLAGS in the inverse order
 #
 # ----------------------------------------------------------------------------------------#
@@ -1087,10 +938,18 @@ if(ROCPROFSYS_USE_PYTHON)
     include(PyBind11Tools)
 
     rocprofiler_systems_watch_for_change(ROCPROFSYS_PYTHON_ROOT_DIRS _PYTHON_DIRS_CHANGED)
+    rocprofiler_systems_watch_for_change(ROCPROFSYS_PYTHON_VERSIONS _PYTHON_VERS_CHANGED)
 
     if(_PYTHON_DIRS_CHANGED)
         unset(ROCPROFSYS_PYTHON_VERSION CACHE)
-        unset(ROCPROFSYS_PYTHON_VERSIONS CACHE)
+        # Only discard cached versions if the user did not explicitly
+        # provide/change them on this configure run. This prevents a fresh
+        # build (where watch_for_change treats all new values as "changed")
+        # from discarding user-supplied versions while still allowing
+        # re-discovery when only root dirs change between reconfigures.
+        if(NOT _PYTHON_VERS_CHANGED OR NOT ROCPROFSYS_PYTHON_VERSIONS)
+            unset(ROCPROFSYS_PYTHON_VERSIONS CACHE)
+        endif()
         unset(ROCPROFSYS_INSTALL_PYTHONDIR CACHE)
     else()
         foreach(_VAR PREFIX ENVS)
@@ -1123,7 +982,9 @@ if(ROCPROFSYS_USE_PYTHON)
         set(ROCPROFSYS_PYTHON_VERSIONS "${ROCPROFSYS_PYTHON_VERSION}")
 
         if(NOT ROCPROFSYS_PYTHON_ROOT_DIRS)
-            rocprofiler_systems_find_python(_PY VERSION ${ROCPROFSYS_PYTHON_VERSION})
+            rocprofiler_systems_find_python(_PY VERSION ${ROCPROFSYS_PYTHON_VERSION}
+                COMPONENTS Interpreter
+            )
             set(ROCPROFSYS_PYTHON_ROOT_DIRS "${_PY_ROOT_DIR}" CACHE INTERNAL "" FORCE)
         endif()
 
@@ -1137,7 +998,9 @@ if(ROCPROFSYS_USE_PYTHON)
         set(_PY_VERSIONS)
 
         foreach(_DIR ${ROCPROFSYS_PYTHON_ROOT_DIRS})
-            rocprofiler_systems_find_python(_PY ROOT_DIR ${_DIR})
+            rocprofiler_systems_find_python(_PY ROOT_DIR ${_DIR}
+                COMPONENTS Interpreter
+            )
 
             if(NOT _PY_FOUND)
                 continue()
@@ -1154,7 +1017,7 @@ if(ROCPROFSYS_USE_PYTHON)
         AND NOT ROCPROFSYS_PYTHON_VERSION
         AND NOT ROCPROFSYS_PYTHON_ROOT_DIRS
     )
-        rocprofiler_systems_find_python(_PY REQUIRED)
+        rocprofiler_systems_find_python(_PY REQUIRED COMPONENTS Interpreter)
         set(ROCPROFSYS_PYTHON_ROOT_DIRS "${_PY_ROOT_DIR}" CACHE INTERNAL "" FORCE)
         set(ROCPROFSYS_PYTHON_VERSIONS "${_PY_VERSION}" CACHE INTERNAL "" FORCE)
     endif()

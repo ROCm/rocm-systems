@@ -1,32 +1,15 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "binary/address_range.hpp"
+#include <cstdint>
 
+#include "common/string_utility.hpp"
 #include "logger/debug.hpp"
 
-namespace rocprofsys
-{
-namespace binary
+#include <fmt/format.h>
+
+namespace rocprofsys::binary
 {
 address_range::address_range(uintptr_t _v)
 : low{ _v }
@@ -54,24 +37,17 @@ std::string
 address_range::as_string(int _depth) const
 {
     std::stringstream _ss{};
-    _ss << std::hex;
     _ss << std::setw(2 * _depth) << "";
-    _ss.fill('0');
-    _ss << "0x" << std::setw(16) << low << "-" << "0x" << std::setw(16) << high;
+    _ss << utility::string::hex_padded(low) << "-" << utility::string::hex_padded(high);
     return _ss.str();
 }
 
 std::string
 address_range::as_hex() const
 {
-    const auto c_width      = 16;
-    const auto _as_hex_util = [](auto _v, size_t _width) {
-        return fmt::format("0x{:0{}x}", _v, _width);
-    };
-
-    return (is_range()) ? fmt::format("{}-{}", _as_hex_util(low, c_width),
-                                      _as_hex_util(high, c_width))
-                        : _as_hex_util(low, c_width);
+    return (is_range()) ? fmt::format("{}-{}", utility::string::hex_padded(low),
+                                      utility::string::hex_padded(high))
+                        : utility::string::hex_padded(low);
 }
 
 uintptr_t
@@ -89,7 +65,7 @@ address_range::is_valid() const
 bool
 address_range::contains(uintptr_t _v) const
 {
-    return (is_range()) ? (low <= _v && high > _v) : (_v == low);
+    return is_range() ? (low <= _v && high > _v) : (_v == low);
 }
 
 bool
@@ -101,10 +77,13 @@ address_range::contains(address_range _v) const
 bool
 address_range::overlaps(address_range _v) const
 {
-    if(contains(_v)) return false;
-    int64_t _lhs_diff = (high - low);
-    int64_t _rhs_diff = (_v.high - _v.low);
-    int64_t _diff     = (std::max(high, _v.high) - std::min(low, _v.low));
+    if(contains(_v))
+    {
+        return false;
+    }
+    const std::int64_t _lhs_diff = (high - low);
+    const std::int64_t _rhs_diff = (_v.high - _v.low);
+    const std::int64_t _diff     = (std::max(high, _v.high) - std::min(low, _v.low));
     return (_diff < (_lhs_diff + _rhs_diff));
 }
 
@@ -132,7 +111,7 @@ address_range::operator<(address_range _v) const
     {
         return (low == _v.low) ? true : (low < _v.low);
     }
-    else if(!is_range() && _v.is_range())
+    if(!is_range() && _v.is_range())
     {
         return (low == _v.low) ? false : (low < _v.low);
     }
@@ -200,8 +179,6 @@ address_range::operator+=(address_range _v)
 hash_value_t
 address_range::hash() const
 {
-    return (is_range()) ? tim::get_hash_id(hash_value_t{ low }, high)
-                        : hash_value_t{ low };
+    return is_range() ? tim::get_hash_id(hash_value_t{ low }, high) : hash_value_t{ low };
 }
-}  // namespace binary
-}  // namespace rocprofsys
+}  // namespace rocprofsys::binary

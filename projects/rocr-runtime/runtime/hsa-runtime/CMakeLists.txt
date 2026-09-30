@@ -93,8 +93,36 @@ if(NOT LibElf_FOUND)
   find_package(LibElf REQUIRED)
 endif()
 
+## Find AMD CUID library.
+set(AMDCUID_ROOT "/opt/amdcuid" CACHE PATH "Path to AMDCUID installation")
+find_library(AMDCUID_LIB
+  NAMES amdcuid_shared
+  PATHS ${AMDCUID_ROOT}/lib
+  NO_DEFAULT_PATH
+)
+find_path(AMDCUID_INCLUDE_DIR
+  NAMES amd_cuid.h
+  PATHS ${AMDCUID_ROOT}/include
+  NO_DEFAULT_PATH
+)
+if (AMDCUID_LIB AND AMDCUID_INCLUDE_DIR) 
+  message(STATUS "Found AMDCUID lib: ${AMDCUID_LIB}")
+  message(STATUS "Found AMDCUID header: ${AMDCUID_INCLUDE_DIR}")
+  set(AMDCUID_FOUND TRUE)
+else()
+  message(WARNING "AMDCUID Library not found")
+  set(AMDCUID_FOUND FALSE)
+endif()
+
 ## Create the rocr target.
 add_library( ${CORE_RUNTIME_TARGET} "" )
+
+## Enable parallel compilation on MSVC.
+if(MSVC)
+  if(DEFINED ENV{CMAKE_BUILD_PARALLEL_LEVEL})
+    target_compile_options(${CORE_RUNTIME_TARGET} PRIVATE /MP$ENV{CMAKE_BUILD_PARALLEL_LEVEL})
+  endif()
+endif()
 
 if (UNIX)
   pkg_check_modules(drm REQUIRED IMPORTED_TARGET libdrm)
@@ -170,13 +198,19 @@ if ( CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   endif()
 endif()
 
+## UndefinedBehaviorSanitizer flags
+if ( UNDEFINED_SANITIZER OR THEROCK_SANITIZER STREQUAL "UBSAN" OR DEFINED ENV{UNDEFINED_SANITIZER} OR "$ENV{THEROCK_SANITIZER}" STREQUAL "UBSAN" )
+  set ( HSA_CXX_FLAGS ${HSA_CXX_FLAGS} -fsanitize=undefined -fsanitize-recover=undefined -g )
+  set ( HSA_SHARED_LINK_FLAGS "${HSA_SHARED_LINK_FLAGS} -fsanitize=undefined" )
+  message(STATUS "hsa-runtime64: UndefinedBehaviorSanitizer (UBSAN) enabled")
+endif()
+
 if (UNIX)
   set ( LNKSCR "hsacore.so.link" )
   set ( DRVDEF "${CMAKE_CURRENT_SOURCE_DIR}/hsacore.so.def" )
-  set(HSA_SHARED_LINK_FLAGS "-Wl,-Bdynamic -Wl,-z,noexecstack -Wl,${CMAKE_CURRENT_SOURCE_DIR}/${LNKSCR} -Wl,--version-script=${DRVDEF} -Wl,--enable-new-dtags")
+  set(HSA_SHARED_LINK_FLAGS "-Wl,-Bdynamic -Wl,-z,noexecstack -Wl,${CMAKE_CURRENT_SOURCE_DIR}/${LNKSCR} -Wl,--version-script=${DRVDEF} -Wl,--enable-new-dtags ${HSA_SHARED_LINK_FLAGS}")
 else()
   target_sources(${CORE_RUNTIME_TARGET} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/hsacore.dll.def")
-  set(HSA_SHARED_LINK_FLAGS "")
 endif()
 
 target_compile_options(${CORE_RUNTIME_TARGET} PRIVATE ${HSA_CXX_FLAGS})
@@ -196,6 +230,7 @@ set ( SRCS core/driver/driver.cpp
            core/runtime/amd_gpu_agent.cpp
            core/runtime/amd_hsa_loader.cpp
            core/runtime/amd_aql_queue.cpp
+           core/runtime/amd_sdma_queue.cpp
            core/runtime/amd_loader_context.cpp
            core/runtime/hsa_ven_amd_loader.cpp
            core/runtime/amd_memory_region.cpp
@@ -228,6 +263,7 @@ set ( SRCS core/driver/driver.cpp
 
 if(UNIX)
   set(SRC_OS core/util/lnx/os_linux.cpp
+	     core/runtime/thunk_loader_linux.cpp
 	     libamdhsacode/lnx/amd_core_dump.cpp)
   set(SRC_XDNA core/driver/xdna/amd_xdna_driver.cpp
                core/runtime/amd_aie_agent.cpp
@@ -235,6 +271,7 @@ if(UNIX)
 else()
   target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE NOMINMAX)
   set(SRC_OS core/util/win/os_win.cpp
+	     core/runtime/thunk_loader_win.cpp
 	     libamdhsacode/win32/amd_core_dump.cpp)
 endif()
 
@@ -261,6 +298,15 @@ if (${PC_SAMPLING_SUPPORT})
   set( PCS_SRCS pcs/hsa_ven_amd_pc_sampling.cpp pcs/pcs_runtime.cpp )
 
   target_sources( ${CORE_RUNTIME_TARGET} PRIVATE ${PCS_SRCS} )
+endif()
+
+if (${AMDCUID_FOUND})
+  target_include_directories(${CORE_RUNTIME_TARGET} PRIVATE ${AMDCUID_INCLUDE_DIR})
+  target_link_libraries(${CORE_RUNTIME_TARGET} PRIVATE ${AMDCUID_LIB})
+  set_target_properties(${CORE_RUNTIME_TARGET} PROPERTIES
+              BUILD_RPATH "${AMDCUID_ROOT}/lib"
+              INSTALL_RPATH "${AMDCUID_ROOT}/lib")
+  target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE HSA_ENABLE_AMDCUID_SUPPORT)
 endif()
 
 if (NOT DEFINED IMAGE_SUPPORT AND CMAKE_SYSTEM_PROCESSOR MATCHES "i?86|x86_64|amd64|AMD64|loongarch64")
@@ -410,11 +456,18 @@ endif()
 
 ## Set install information
 # Installs binaries and exports the library usage data to ${HSAKMT_TARGET}Targets
-install ( TARGETS ${CORE_RUNTIME_TARGET} EXPORT ${CORE_RUNTIME_NAME}Targets
-  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary
-  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary )
-install ( TARGETS ${CORE_RUNTIME_TARGET}
-  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT asan )
+if (WIN32)
+  install ( TARGETS ${CORE_RUNTIME_TARGET} EXPORT ${CORE_RUNTIME_NAME}Targets
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dev
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT binary )
+else()
+  install ( TARGETS ${CORE_RUNTIME_TARGET} EXPORT ${CORE_RUNTIME_NAME}Targets
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary )
+
+  install ( TARGETS ${CORE_RUNTIME_TARGET}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT asan )
+endif()
 
 # Install license
 if(ENABLE_ASAN_PACKAGING)

@@ -1,24 +1,8 @@
-# Copyright (c) 2022 - 2023 Advanced Micro Devices, Inc. All Rights Reserved.
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 
-cmake_minimum_required(VERSION 3.16.8)
+cmake_minimum_required(VERSION 3.27)
 project(clr)
 
 ##########
@@ -27,11 +11,20 @@ project(clr)
 if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC"
     OR CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
     add_compile_options("/wd4267" "/wd4244" "/wd4996")
+    # Enable parallel compilation on MSVC.
+    if(DEFINED ENV{CMAKE_BUILD_PARALLEL_LEVEL})
+        add_compile_options("/MP$ENV{CMAKE_BUILD_PARALLEL_LEVEL}")
+    endif()
     string(REPLACE "/GR" "" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
     string(REPLACE "/W3" "" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
-    if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-        add_compile_options(/MTd)
-        add_compile_options(-D_ALLOW_ITERATOR_DEBUG_LEVEL_MISMATCH)
+    if (AMD_COMPUTE_WIN)
+        # shared prebuilt libs are release, allows hip to be debug
+        set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded")
+        add_compile_options("$<$<CONFIG:Debug>:-D_ITERATOR_DEBUG_LEVEL=0>")
+        add_compile_options("$<$<CONFIG:Debug>:-D_ALLOW_ITERATOR_DEBUG_LEVEL_MISMATCH>")
+    else()
+        set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+        add_compile_options("$<$<CONFIG:Debug>:-D_ALLOW_ITERATOR_DEBUG_LEVEL_MISMATCH>")
     endif()
     if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         # Unlike when targeting MSFT's MSVC, when targeting clang-cl,
@@ -41,7 +34,6 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC"
 endif()
 
 if (AMD_COMPUTE_WIN)
-    add_compile_options("/MT")
     set(AMD_LIBELF_PATH "${AMD_COMPUTE_WIN}/hsail-compiler/lib/loaders/elf/utils/libelf")
     set(AMD_SC_PATH "${AMD_COMPUTE_WIN}/sc")
     message("Public Compute Windows build path: ${AMD_COMPUTE_WIN}, SC: ${AMD_SC_PATH}, LibElf: ${AMD_LIBELF_PATH}")
@@ -49,15 +41,33 @@ endif()
 
 option(CLR_BUILD_HIP "Build HIP" OFF)
 option(CLR_BUILD_OCL "Build OCL" OFF)
+option(CLR_HRR_CODEGEN_CHECK "Generate and validate HRR generated sources during CLR builds" OFF)
+option(USE_NEW_HOSTCALL_IMPL
+  "Use the new phase/occupancy-based hostcall implementation" OFF)
 
 # Set default build type
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Release")
 endif()
 
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/CLRHardening.cmake")
+
 #############
 # Build steps
 #############
+
+if(NOT DEFINED ROCM_PATH)
+  if(DEFINED ENV{ROCM_PATH})
+    set(ROCM_PATH "$ENV{ROCM_PATH}" CACHE STRING "ROCm installation directory.")
+  elseif(CMAKE_PREFIX_PATH)
+    list(GET CMAKE_PREFIX_PATH 0 _first_prefix_path)
+    set(ROCM_PATH "${_first_prefix_path}" CACHE STRING "ROCm installation directory.")
+    unset(_first_prefix_path)
+  else()
+    set(ROCM_PATH "${CMAKE_INSTALL_PREFIX}" CACHE STRING "ROCm installation directory.")
+  endif()
+endif()
+message(STATUS "ROCM_PATH: ${ROCM_PATH}")
 
 # Attempt to auto-detect HIP_PLATFORM by interrogating hipconfig. This is kept
 # for compatibility: users are advised to pass HIP_PLATFORM explicitly.
@@ -71,9 +81,9 @@ function(_hip_clr_auto_detect_hip_platform)
       set(HIPCONFIG_EXECUTABLE "hipconfig.exe")
     endif()
 
-    # Set default HIPCC_BIN_DIR to /opt/rocm/bin
+    # Set default HIPCC_BIN_DIR to ${ROCM_PATH}/bin
     if(NOT DEFINED HIPCC_BIN_DIR AND UNIX)
-        set(HIPCC_BIN_DIR "/opt/rocm/bin")
+        set(HIPCC_BIN_DIR "${ROCM_PATH}/bin")
     endif()
     message(STATUS "Auto-detect HIP_PLATFORM from HIPCC Binary Directory: ${HIPCC_BIN_DIR}")
 
@@ -131,7 +141,7 @@ endif()
 # Code formatting
 #############################
 # Target: clangformat
-find_program(CLANGFORMAT_EXE clang-format PATHS "/opt/rocm/lib/llvm/bin")
+find_program(CLANGFORMAT_EXE clang-format PATHS "${ROCM_PATH}/lib/llvm/bin")
 if(CLANGFORMAT_EXE)
     file(GLOB_RECURSE FORMAT_SOURCE_FILE_LIST *.cpp *.hpp *.hh *.h *.cc *.c)
     add_custom_target(clangformat COMMAND ${CLANGFORMAT_EXE} -style=file -i ${FORMAT_SOURCE_FILE_LIST}

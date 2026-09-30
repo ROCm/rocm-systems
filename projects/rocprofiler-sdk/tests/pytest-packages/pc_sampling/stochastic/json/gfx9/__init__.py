@@ -23,8 +23,6 @@
 
 from __future__ import absolute_import
 
-import numpy as np
-import pandas as pd
 from collections import defaultdict
 from .arbiter_state import validate_arbiter_state
 from .other_instructions import (
@@ -41,7 +39,7 @@ from .s_instructions import (
 )
 
 # Using Prefix Tree to classify the instruction type
-# I did this instead of the regex becuase I wanted to try if we could
+# I did this instead of the regex because I wanted to try if we could
 # generalize this approach for other types of instructions.
 # The dream scenario: We have a giant list of all instructions and their
 # types. Then we parse the list and dynamically determine the checks
@@ -93,14 +91,14 @@ instructions_with_types = [
     ("s_", "SCALAR"),  # Scalar instructions (general category)
     ("s_waitcnt", "WAITCNT"),  # WAITCNT (specific)
     ("s_sendmsg", "MESSAGE"),  # MESSAGE (specific)
-    ("s_barrier", "BARRIER"),  # BARRIER (specifix)
+    ("s_barrier", "BARRIER"),  # BARRIER (specific)
     ("s_swappc", "JUMP"),  # JUMP (specific)
     ("s_setpc", "JUMP"),  # JUMP
     ("s_setpc", "JUMP"),  # JUMP
     ("s_sleep", "JUMP"),  # JUMP
     ("s_branch", "BRANCH"),  # BRANCH
     ("s_cbranch", "BRANCH"),  # BRANCH (conditional)
-    ("s_wakeup", "OTHER"),  # OHTER
+    ("s_wakeup", "OTHER"),  # OTHER
     ("s_nop", "INTERNAL"),  # INTERNAL
     ("s_sleep", "INTERNAL"),  # INTERNAL
     ("v_", "VALU"),  # VALU
@@ -134,7 +132,7 @@ def validate_stochastic_samples_json(data_json):
         prefix_tree.insert(prefix, instruction_type)
 
     instructions = data_json["strings"]["pc_sample_instructions"]
-    comments = data_json["strings"]["pc_sample_comments"]
+    # comments = data_json["strings"]["pc_sample_comments"]
 
     insts_per_prefix_type = defaultdict(list)
 

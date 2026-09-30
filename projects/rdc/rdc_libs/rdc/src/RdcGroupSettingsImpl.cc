@@ -35,11 +35,18 @@ namespace rdc {
 RdcGroupSettingsImpl::RdcGroupSettingsImpl(const RdcPartitionPtr& partition)
     : partition_(partition) {
   // Add the default job stats fields
-  rdc_field_t job_fields[] = {RDC_FI_GPU_MEMORY_USAGE, RDC_FI_POWER_USAGE, RDC_FI_GPU_CLOCK,
-                              RDC_FI_GPU_UTIL,         RDC_FI_PCIE_TX,     RDC_FI_PCIE_RX,
-                              RDC_FI_PCIE_BANDWIDTH,   RDC_FI_PCIE_LC_PERF_OTHER_END_RECOVERY,  
-                              RDC_FI_PCIE_NAK_RCVD_COUNT_ACC, RDC_FI_PCIE_NAK_SENT_COUNT_ACC, 
-                              RDC_FI_MEM_CLOCK,        RDC_FI_GPU_TEMP};
+  rdc_field_t job_fields[] = {RDC_FI_GPU_MEMORY_USAGE,
+                              RDC_FI_POWER_USAGE,
+                              RDC_FI_GPU_CLOCK,
+                              RDC_FI_GPU_UTIL,
+                              RDC_FI_PCIE_TX,
+                              RDC_FI_PCIE_RX,
+                              RDC_FI_PCIE_BANDWIDTH,
+                              RDC_FI_PCIE_LC_PERF_OTHER_END_RECOVERY,
+                              RDC_FI_PCIE_NAK_RCVD_COUNT_ACC,
+                              RDC_FI_PCIE_NAK_SENT_COUNT_ACC,
+                              RDC_FI_MEM_CLOCK,
+                              RDC_FI_GPU_TEMP};
   char job_field_group[] = "JobStatsFields";
   rdc_field_grp_t fgid = JOB_FIELD_ID;
 
@@ -80,11 +87,20 @@ rdc_status_t RdcGroupSettingsImpl::rdc_group_gpu_add(rdc_gpu_group_t groupId, ui
   rdc_entity_info_t entity_info = rdc_get_info_from_entity_index(gpu_index);
 
   uint16_t num_partitions = 0;
-  rdc_status_t status =
-      partition_->rdc_get_num_partition_impl(entity_info.device_index, &num_partitions);
+  // Pass the full entity index so the partition helper resolves the correct socket for
+  // CPX partition instances (entity_info.device_index alone is only the socket index).
+  rdc_status_t status = partition_->rdc_get_num_partition_impl(gpu_index, &num_partitions);
   if (status != RDC_ST_OK) {
+    RDC_LOG(RDC_ERROR, "rdc_group_gpu_add: get_num_partition failed for gpu_index="
+                           << gpu_index << " device_index=" << entity_info.device_index
+                           << " instance_index=" << entity_info.instance_index
+                           << " role=" << entity_info.entity_role << " status=" << status);
     return status;
   }
+  RDC_LOG(RDC_DEBUG, "rdc_group_gpu_add: gpu_index=" << gpu_index
+                                                     << " device_index=" << entity_info.device_index
+                                                     << " num_partitions=" << num_partitions
+                                                     << " role=" << entity_info.entity_role);
 
   if (num_partitions != UINT16_MAX && num_partitions > 1) {
     if (entity_info.entity_role == RDC_DEVICE_ROLE_PARTITION_INSTANCE) {

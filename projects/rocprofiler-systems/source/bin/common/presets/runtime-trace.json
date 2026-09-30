@@ -1,0 +1,40 @@
+{
+    "domains": {
+        "rocm": {
+            "api_domains": {
+                "hip_runtime_api": {
+                    "enabled": true
+                },
+                "kernel_dispatch": {
+                    "enabled": true
+                },
+                "marker_api": {
+                    "enabled": true
+                },
+                "memory_copy": {
+                    "enabled": true
+                },
+                "rccl_api": {
+                    "enabled": true
+                },
+                "scratch_memory": {
+                    "enabled": true
+                }
+            },
+            "enabled": true
+        }
+    },
+    "metadata": {
+        "category": "tracing",
+        "cli_flag": "--runtime-trace",
+        "description": "Runtime API tracing: HIP runtime API, ROCTx, RCCL, memory operations, and kernel dispatches",
+        "name": "runtime-trace",
+        "use_case": "Runtime-level API tracing without low-level HSA/compiler noise"
+    },
+    "profiling": {
+        "enabled": true
+    },
+    "tracing": {
+        "enabled": true
+    }
+}

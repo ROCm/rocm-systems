@@ -45,6 +45,7 @@
 #include <utility>
 
 #include "core/inc/runtime.h"
+#include "core/util/os.h"
 #include "core/inc/exceptions.h"
 
 namespace rocr {
@@ -72,7 +73,7 @@ void IPCSignal::CreateHandle(Signal* signal, hsa_amd_ipc_signal_t* ipc_handle) {
   if (!signal->isIPC())
     throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ARGUMENT, "Signal must be IPC enabled.");
   SharedSignal* shared = SharedSignal::Convert(Convert(signal));
-  hsa_status_t err = Runtime::runtime_singleton_->IPCCreate(shared, 4096, ipc_handle);
+  hsa_status_t err = Runtime::runtime_singleton_->IPCCreate(shared, AlignUp(sizeof(SharedSignal), os::PageSize()), ipc_handle);
   if (err != HSA_STATUS_SUCCESS) throw AMD::hsa_exception(err, "IPC memory create failed.");
 }
 

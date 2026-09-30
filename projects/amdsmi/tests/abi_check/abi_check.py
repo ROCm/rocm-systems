@@ -1,3 +1,6 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 import argparse
 import re
 import subprocess
@@ -46,10 +49,14 @@ def prepare_headers(base_ref, project_path):
 def run_abi_checker(strict=False):
     cmd = [
         "abi-compliance-checker",
-        "-lib", "amdsmi",
-        "-old", OLD_HEADER,
-        "-new", NEW_HEADER,
-        "-report-path", REPORT_FILE
+        "-lib",
+        "amdsmi",
+        "-old",
+        OLD_HEADER,
+        "-new",
+        NEW_HEADER,
+        "-report-path",
+        REPORT_FILE,
     ]
 
     if strict:
@@ -70,19 +77,19 @@ def check_report_content(report_path):
         print(f"Error: Report file {report_path} not generated.")
         return False
 
-    with open(report_path, 'r', encoding='utf-8', errors='ignore') as f:
+    with open(report_path, "r", encoding="utf-8", errors="ignore") as f:
         content = f.read()
 
     found_failure = False
 
-    removed_symbols_pattern = re.search(r'Removed Symbols.*?\((\d+)\)', content)
+    removed_symbols_pattern = re.search(r"Removed Symbols.*?\((\d+)\)", content)
     if removed_symbols_pattern:
         count = int(removed_symbols_pattern.group(1))
         if count > 0:
             print(f"  [FAIL] Removed Symbols detected: {count}")
             found_failure = True
 
-    data_type_problems_pattern = re.search(r'Problems with Data Types.*?\((\d+)\)', content)
+    data_type_problems_pattern = re.search(r"Problems with Data Types.*?\((\d+)\)", content)
     if data_type_problems_pattern:
         count = int(data_type_problems_pattern.group(1))
         if count > 0:
@@ -98,10 +105,14 @@ def check_report_content(report_path):
 
 def main():
     parser = argparse.ArgumentParser(description="Run ABI Compliance Checker for AMDSMI")
-    parser.add_argument("--base-ref", required=True, help="Git reference to compare against (e.g. origin/develop)")
+    parser.add_argument(
+        "--base-ref", required=True, help="Git reference to compare against (e.g. origin/develop)"
+    )
     parser.add_argument("--head-ref", default="current local workspace", help="Feature branch name")
-    parser.add_argument("--project-path", default="projects/amdsmi", help="Path to sub-project from repo root")
-    parser.add_argument("--mode", choices=['major', 'minor'], default='major', help="Check mode")
+    parser.add_argument(
+        "--project-path", default="projects/amdsmi", help="Path to sub-project from repo root"
+    )
+    parser.add_argument("--mode", choices=["major", "minor"], default="major", help="Check mode")
 
     args = parser.parse_args()
 
@@ -114,7 +125,7 @@ def main():
         print("Failed to prepare headers.")
         sys.exit(1)
 
-    is_strict = (args.mode == 'minor')
+    is_strict = args.mode == "minor"
     tool_success = run_abi_checker(strict=is_strict)
     report_clean = check_report_content(REPORT_FILE)
 

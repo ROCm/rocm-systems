@@ -26,6 +26,7 @@
 #include "format_printf.h"
 #include "utils.h"
 
+#include <chrono>
 #include <cinttypes>
 #include <cstdarg>
 #include <cstddef>
@@ -36,6 +37,7 @@
 #include <tuple>
 #include <type_traits>
 #include <utility>
+#include <variant>
 
 #define dbgapi_log(level, format, ...)                                        \
   do                                                                          \
@@ -53,6 +55,8 @@
 #elif defined (_WIN32)
 #define PROCESS_ID_FORMAT "%lu"
 #endif
+
+#define TRACER_TOOK_MS_FORMAT " (took %.6f ms)"
 
 namespace amd::dbgapi
 {
@@ -79,8 +83,19 @@ to_string (T v)
     if (v == nullptr)
       return "nullptr";
 
+  /* Handle function pointers explicitly to avoid
+
+       error: implicit conversion between pointer-to-function and
+       pointer-to-object is a Microsoft extension
+       [-Werror,-Wmicrosoft-cast]
+
+     with clang++.
+  */
   std::ostringstream ss;
-  ss << v;
+  if constexpr (std::is_function_v<std::remove_pointer_t<T>>)
+    ss << reinterpret_cast<const void *> (v);
+  else
+    ss << v;
   return ss.str ();
 }
 
@@ -91,6 +106,13 @@ to_string (std::optional<T> v)
   if (v.has_value ())
     return std::string ("{") + to_string (*v) + "}";
   return "{}";
+}
+
+template <typename... Ts>
+inline std::string
+to_string (std::variant<Ts...> var)
+{
+  return std::visit ([] (auto &&v) { return to_string (v); }, var);
 }
 
 template <>
@@ -487,6 +509,7 @@ to_string (detail::parameter_t<detail::query_ref<T>, name, kind> param)
   F (amd_dbgapi_breakpoint_info_t)                                            \
   F (amd_dbgapi_changed_t)                                                    \
   F (amd_dbgapi_client_process_info_t)                                        \
+  F (amd_dbgapi_cluster_id_t)                                                 \
   F (amd_dbgapi_code_object_id_t)                                             \
   F (amd_dbgapi_code_object_info_t)                                           \
   F (amd_dbgapi_core_state_data_t)                                            \
@@ -541,6 +564,7 @@ to_string (detail::parameter_t<detail::query_ref<T>, name, kind> param)
   F (detail::query_ref<amd_dbgapi_architecture_info_t>)                       \
   F (detail::query_ref<amd_dbgapi_breakpoint_info_t>)                         \
   F (detail::query_ref<amd_dbgapi_client_process_info_t>)                     \
+  F (detail::query_ref<amd_dbgapi_cluster_info_t>)                            \
   F (detail::query_ref<amd_dbgapi_code_object_info_t>)                        \
   F (detail::query_ref<amd_dbgapi_dispatch_info_t>)                           \
   F (detail::query_ref<amd_dbgapi_displaced_stepping_info_t>)                 \
@@ -614,9 +638,19 @@ to_cstring (T &&value, std::string &&tmp = {})
 namespace detail
 {
 
+/* Floating-point duration representing milliseconds.  */
+using fmilliseconds = std::chrono::duration<double, std::milli>;
+
+/* Common data for tracer_closure and its specializations.  */
+struct tracer_closure_base
+{
+  /* How long the call took.  */
+  fmilliseconds elapsed;
+};
+
 template <typename Functor,
           typename Result = decltype (std::declval<Functor> () ())>
-struct tracer_closure
+struct tracer_closure : tracer_closure_base
 {
   Result m_result;
 
@@ -629,7 +663,8 @@ struct tracer_closure
   std::string str () const { return to_string (m_result); }
 };
 
-template <typename Functor> struct tracer_closure<Functor, void>
+template <typename Functor>
+struct tracer_closure<Functor, void> : tracer_closure_base
 {
   tracer_closure (Functor &&f) { std::forward<Functor> (f) (); }
   void operator() () && {}
@@ -676,14 +711,28 @@ tracer<LogLevel>::enter (std::tuple<Args...> &&in_args, Functor &&func)
                to_cstring (std::move (in_args)));
   ++detail::log_indent_depth;
 
+  using clock = std::chrono::steady_clock;
+
+  auto start = clock::now ();
+
   try
     {
-      return detail::tracer_closure (std::forward<Functor> (func));
+      auto res = detail::tracer_closure (std::forward<Functor> (func));
+
+      auto end = clock::now ();
+
+      res.elapsed = end - start;
+      return res;
     }
   catch (...)
     {
+      auto end = clock::now ();
+      detail::fmilliseconds elapsed = end - start;
+
       --detail::log_indent_depth;
-      dbgapi_log (LogLevel, "%s} throw", m_prefix);
+
+      dbgapi_log (LogLevel, "%s} %s throw" TRACER_TOOK_MS_FORMAT, m_prefix,
+                  m_function, elapsed.count ());
       throw;
     }
 }
@@ -711,7 +760,9 @@ tracer<LogLevel>::leave (std::tuple<Args...> &&out_args,
           results_str += ", " + out_args_str;
 
       --detail::log_indent_depth;
-      detail::log (LogLevel, "%s} = %s", m_prefix, results_str.c_str ());
+
+      detail::log (LogLevel, "%s} %s = %s" TRACER_TOOK_MS_FORMAT, m_prefix,
+                   m_function, results_str.c_str (), result.elapsed.count ());
     }
 
   return std::move (result) ();

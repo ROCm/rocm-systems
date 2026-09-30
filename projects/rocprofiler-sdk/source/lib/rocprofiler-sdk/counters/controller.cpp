@@ -22,9 +22,11 @@
 
 #include "lib/rocprofiler-sdk/counters/controller.hpp"
 #include "lib/common/environment.hpp"
+#include "lib/common/logging.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/counters/firmware_restrictions.hpp"
 #include "lib/rocprofiler-sdk/counters/ioctl.hpp"
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
 
@@ -38,8 +40,9 @@ namespace counters
 {
 CounterController::CounterController()
 {
-    // Pre-read metrics map file to catch faliures during initial setup.
+    // Pre-read metrics map file to catch failures during initial setup.
     rocprofiler::counters::loadMetrics();
+    rocprofiler::counters::check_installed_firmware_restrictions();
 }
 
 // Adds a counter collection profile to our global cache.
@@ -77,11 +80,13 @@ CounterController::configure_agent_collection(rocprofiler_context_id_t          
 
     auto& ctx = *ctx_p;
 
-    if(ctx.counter_collection) return ROCPROFILER_STATUS_ERROR_AGENT_DISPATCH_CONFLICT;
+    if(ctx.dispatch_counter_collection) return ROCPROFILER_STATUS_ERROR_AGENT_DISPATCH_CONFLICT;
 
     // FIXME: Due to the clock gating issue, counter collection and PC sampling service
     // cannot coexist in the same context for now.
     if(ctx.pc_sampler) return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
+
+    if(ctx.dispatch_spm) return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
 
     if(!rocprofiler::buffer::get_buffer(buffer_id) &&
        buffer_id != rocprofiler_buffer_id_t{.handle = 0})
@@ -143,7 +148,9 @@ CounterController::configure_dispatch(rocprofiler_context_id_t                  
     // cannot coexist in the same context for now.
     if(ctx.pc_sampler) return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
 
-    if(!ctx.counter_collection)
+    if(ctx.dispatch_spm) return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
+
+    if(!ctx.dispatch_counter_collection)
     {
         // Disable PTL for all GPUs for dispatch counter collection
         for(const auto& agent : agent::get_agents())
@@ -158,12 +165,28 @@ CounterController::configure_dispatch(rocprofiler_context_id_t                  
             }
         }
 
-        ctx.counter_collection =
+        ctx.dispatch_counter_collection =
             std::make_unique<rocprofiler::context::dispatch_counter_collection_service>();
+
+        // On WSL2/DXG the KFD device node is absent (/dev/dxg is exposed but not
+        // /dev/kfd), so hardware counters are not armed through the KFD profiler
+        // ioctl; instead aqlprofile's vendor-specific PM4 IB is submitted through
+        // the dxg path in libhsakmt, gated by WSLKMT_VENDOR_PACKET (enabled by
+        // default by the WSL platform layer). Both single- and multi-counter
+        // collection are supported this way (the per-queue PM4 command-buffer
+        // frame size is computed from the device geometry). The /dev/kfd
+        // capability probe is shared at the topology level (rocprofiler::agent)
+        // so this stays consistent with KFD event tracing rather than being an
+        // ad-hoc check here.
+        LOG_IF_FIRST_N(WARNING, !::rocprofiler::agent::kfd_device_available(), 1)
+            << "/dev/kfd is not available (expected under WSL/DXG). Hardware performance "
+               "counters are collected via the dxg vendor-packet path in libhsakmt (requires "
+               "WSLKMT_VENDOR_PACKET=1, enabled automatically by the WSL platform layer). "
+               "Single- and multi-counter collection are supported.";
     }
 
-    auto& cb =
-        *ctx.counter_collection->callbacks.emplace_back(std::make_shared<counter_callback_info>());
+    auto& cb = *ctx.dispatch_counter_collection->callbacks.emplace_back(
+        std::make_shared<counter_callback_info>());
 
     cb.user_cb       = callback;
     cb.callback_args = callback_args;

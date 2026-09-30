@@ -1,46 +1,34 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
 #include "common.hpp"
-#include "defines.hpp"
+#include "common/defines.h"
+#include "common/environment.hpp"
 #include "state.hpp"
 #include "timemory.hpp"
+#include <cstdint>
 
 #include <timemory/backends/threading.hpp>
-#include <timemory/macros/language.hpp>
 
 #include <fstream>
+#include <optional>
 #include <string>
 #include <string_view>
-#include <unordered_set>
+#include <vector>
 
-namespace rocprofsys
-{
+#if(defined(ROCPROFSYS_USE_MPI_HEADERS) && ROCPROFSYS_USE_MPI_HEADERS > 0) ||            \
+    (defined(ROCPROFSYS_USE_MPI) && ROCPROFSYS_USE_MPI > 0)
+#    define ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED 1
+#else
+#    define ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED 0
+#endif
+
 //
 //      Initialization routines
 //
-inline namespace config
+namespace rocprofsys::inline config
 {
 using signal_handler_t = void (*)(void);
 
@@ -73,7 +61,7 @@ int
 get_sampling_cputime_signal();
 
 std::set<int>
-get_sampling_signals(int64_t _tid = 0);
+get_sampling_signals(std::int64_t _tid = 0);
 
 void
 finalize();
@@ -91,6 +79,9 @@ print_settings(
     std::function<bool(const std::string_view&, const std::set<std::string>&)>&& _filter);
 
 void
+print_settings_json(std::ostream& _output_stream);
+
+void
 print_settings(bool include_env = true);
 
 std::string&
@@ -105,17 +96,29 @@ set_setting_value(const std::string& _name, Tp&& _v,
                   settings::update_type _upd = settings::update_type::user)
 {
     auto* _instance = tim::settings::instance();
-    if(!_instance) return false;
+    if(!_instance)
+    {
+        return false;
+    }
 
     auto _setting = _instance->find(_name);
-    if(_setting == _instance->end()) return false;
-    if(!_setting->second) return false;
+    if(_setting == _instance->end())
+    {
+        return false;
+    }
+    if(!_setting->second)
+    {
+        return false;
+    }
 
     auto& itr      = _setting->second;
     auto  _old_upd = itr->get_updated_type();
 
     auto _success = itr->set(std::forward<Tp>(_v), _upd);
-    if(!_success) itr->set_updated(_old_upd);
+    if(!_success)
+    {
+        itr->set_updated(_old_upd);
+    }
 
     return _success;
 }
@@ -125,14 +128,25 @@ bool
 set_default_setting_value(const std::string& _name, Tp&& _v)
 {
     auto* _instance = tim::settings::instance();
-    if(!_instance) return false;
+    if(!_instance)
+    {
+        return false;
+    }
 
     auto _setting = _instance->find(_name);
-    if(_setting == _instance->end()) return false;
-    if(!_setting->second) return false;
+    if(_setting == _instance->end())
+    {
+        return false;
+    }
+    if(!_setting->second)
+    {
+        return false;
+    }
 
     if(_setting->second->get_config_updated() || _setting->second->get_environ_updated())
+    {
         return false;
+    }
     return _setting->second->set(std::forward<Tp>(_v));
 }
 
@@ -141,13 +155,19 @@ std::optional<Tp>
 get_setting_value(const std::string& _name)
 {
     auto* _instance = tim::settings::instance();
-    if(!_instance) return std::nullopt;
+    if(!_instance)
+    {
+        return std::nullopt;
+    }
 
     auto _setting = _instance->find(_name);
-    if(_setting == _instance->end() || !_setting->second) return std::optional<Tp>{};
+    if(_setting == _instance->end() || !_setting->second)
+    {
+        return std::optional<Tp>{};
+    }
 
     auto&& _ret = _setting->second->get<Tp>();
-    return (_ret.first) ? std::optional<Tp>{ _ret.second } : std::optional<Tp>{};
+    return _ret.first ? std::optional<Tp>{ _ret.second } : std::optional<Tp>{};
 }
 
 //
@@ -156,17 +176,11 @@ get_setting_value(const std::string& _name)
 std::string
 get_config_file();
 
-Mode
+state::process::Mode
 get_mode();
 
 bool&
-is_attached();
-
-bool&
 is_binary_rewrite();
-
-bool
-get_is_continuous_integration() ROCPROFSYS_HOT;
 
 bool
 get_debug_env() ROCPROFSYS_HOT;
@@ -205,9 +219,6 @@ bool&
 get_use_causal() ROCPROFSYS_HOT;
 
 bool
-get_use_rocm() ROCPROFSYS_HOT;
-
-bool
 get_use_amd_smi() ROCPROFSYS_HOT;
 
 bool&
@@ -244,6 +255,9 @@ bool
 get_use_ompt();
 
 bool
+get_group_by_queue();
+
+bool
 get_use_code_coverage();
 
 bool
@@ -258,7 +272,7 @@ get_perfetto_shmem_size_hint();
 size_t
 get_perfetto_buffer_size();
 
-uint32_t
+std::uint32_t
 get_perfetto_flush_period();
 
 bool
@@ -276,7 +290,7 @@ get_disabled_categories();
 bool
 get_perfetto_annotations() ROCPROFSYS_HOT;
 
-uint64_t
+std::uint64_t
 get_thread_pool_size();
 
 std::string&
@@ -286,11 +300,8 @@ get_perfetto_backend();
 std::string
 get_perfetto_output_filename();
 
-double
-get_trace_delay();
-
-double
-get_trace_duration();
+std::string
+get_trace_region();
 
 double
 get_sampling_freq();
@@ -319,13 +330,16 @@ get_sampling_duration();
 std::string
 get_sampling_cpus();
 
-std::set<int64_t>
+std::string
+get_cpu_metrics();
+
+std::set<std::int64_t>
 get_sampling_cputime_tids();
 
-std::set<int64_t>
+std::set<std::int64_t>
 get_sampling_realtime_tids();
 
-std::set<int64_t>
+std::set<std::int64_t>
 get_sampling_overflow_tids();
 
 bool
@@ -347,7 +361,16 @@ std::string
 get_sampling_gpus();
 
 std::string
+get_gpu_perf_counters();
+
+std::vector<std::string>
+get_rocm_counter_events();
+
+std::string
 get_sampling_ainics();
+
+bool
+get_ainic_supported();
 
 bool
 get_trace_thread_locks();
@@ -370,17 +393,48 @@ get_use_tmp_files();
 int
 get_kill_delay();
 
+namespace output_filtering
+{
+bool
+is_file_output_enabled_for_current_mpi_rank();
+
+bool
+is_log_output_enabled_for_current_mpi_rank();
+
+#if ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED
+// Pure decision core for MPI rank-based output filtering, exposed for unit
+// testing. See full documentation at the definition in config.cpp.
+bool
+rank_passes_filter(std::optional<std::uint64_t> current_rank,
+                   std::optional<std::uint64_t> world_size,
+                   std::string                  enabled_ranks_str);
+#endif
+}  // namespace output_filtering
+
 std::string
 get_tmpdir();
 
 std::string
 get_database_absolute_path(std::string_view database_name, std::string_view tag);
 
+void
+reset_database_path_memo();
+
+std::string
+get_output_absolute_path(std::string_view basename, std::string_view extension,
+                         std::string_view tag, std::string_view dir);
+
 std::string
 get_perfetto_output_filename_with_suffix(std::string_view suffix = "");
 
+std::string
+get_ump_absolute_path();
+
 bool&
 get_use_rocpd() ROCPROFSYS_HOT;
+
+bool&
+get_use_unified_memory_profiling() ROCPROFSYS_HOT;
 
 bool&
 get_caching_perfetto() ROCPROFSYS_HOT;
@@ -395,17 +449,15 @@ struct tmp_file
 
     bool open(int, int);
     bool open(std::ios::openmode = std::ios::binary | std::ios::in | std::ios::out);
-    bool fopen(const char* = "r+");
     bool flush();
     bool close();
     bool remove();
 
     explicit operator bool() const;
 
-    std::string  filename = {};
-    std::fstream stream   = {};
-    FILE*        file     = nullptr;
-    int          fd       = -1;
+    std::string  filename;
+    std::fstream stream;
+    int          fd = -1;
 
 private:
     void touch() const;
@@ -417,20 +469,23 @@ private:
 std::shared_ptr<tmp_file>
 get_tmp_file(std::string _basename, std::string _ext = "dat");
 
-CausalBackend
+state::process::CausalBackend
 get_causal_backend();
 
-CausalMode
+state::process::CausalMode
 get_causal_mode();
 
 bool
 get_causal_end_to_end();
 
-std::vector<int64_t>
+std::vector<std::int64_t>
 get_causal_fixed_speedup();
 
 std::string
 get_causal_output_filename();
+
+void
+print_output_summary();
 
 std::vector<std::string>
 get_causal_binary_scope();
@@ -449,5 +504,4 @@ get_causal_source_exclude();
 
 std::vector<std::string>
 get_causal_function_exclude();
-}  // namespace config
-}  // namespace rocprofsys
+}  // namespace rocprofsys::inline config

@@ -518,6 +518,19 @@ def extract_code_objects_by_target(
 CCOB_MAGIC = b"CCOB"
 
 
+def _find_next_magic(data: bytes, start: int) -> int:
+    """Find the next CCOB or uncompressed bundle magic starting at `start`.
+
+    Returns the offset, or -1 if neither is found.
+    """
+    next_ccob = data.find(CCOB_MAGIC, start)
+    next_uncompressed = data.find(UNCOMPRESSED_BUNDLE_MAGIC, start)
+    candidates = [c for c in [next_ccob, next_uncompressed] if c != -1]
+    if candidates:
+        return min(candidates)
+    return -1
+
+
 def parse_fatbin_data(data: bytes) -> list[UncompressedBundle]:
     """Parse fatbin data in any supported format.
 
@@ -531,6 +544,11 @@ def parse_fatbin_data(data: bytes) -> list[UncompressedBundle]:
     "__CLANG_OFFLOAD_BUNDLE__") to find bundle boundaries, advancing past
     each bundle to find the next. We replicate that here.
 
+    Note: All reads use index slicing with explicit offsets rather than
+    ``data[offset:]`` to avoid O(n) copies of the remaining buffer on
+    every iteration. For multi-MB fatbins with inter-block padding this
+    is the difference between seconds and hours.
+
     Args:
         data: Raw fatbin data bytes
 
@@ -541,41 +559,40 @@ def parse_fatbin_data(data: bytes) -> list[UncompressedBundle]:
         ValueError: If data format is not recognized
     """
     bundles: list[UncompressedBundle] = []
-    offset = 0
+    data_len = len(data)
+    offset = _find_next_magic(data, 0)
+    if offset == -1:
+        raise ValueError(f"Unrecognized fatbin format: first 4 bytes are {data[:4]!r}")
 
-    while offset < len(data):
-        remaining = data[offset:]
-
-        if remaining[:4] == CCOB_MAGIC:
-            # Compressed bundle. Use the totalSize field from the CCOB
-            # header to determine boundaries — this is more precise than
-            # magic scanning since compressed data can contain false
-            # positives. LLVM's extractOffloadBundle() scans for magic
-            # but doesn't parse the header in the outer loop; we can do
-            # better since decompress_ccob() already reads totalSize.
-            header = CCOBHeader.parse(remaining)
-            decompressed = decompress_ccob(remaining)
+    while 0 <= offset < data_len:
+        if data[offset : offset + 4] == CCOB_MAGIC:
+            # Compressed bundle. Parse header at offset (small slice)
+            # to get totalSize, then decompress just that range.
+            header = CCOBHeader.parse(data[offset : offset + 32])
+            decompressed = decompress_ccob(data[offset : offset + header.total_size])
             bundles.extend(parse_concatenated_bundles(decompressed))
             offset += header.total_size
 
-        elif remaining[:24] == UNCOMPRESSED_BUNDLE_MAGIC:
+        elif data[offset : offset + 24] == UNCOMPRESSED_BUNDLE_MAGIC:
             # Uncompressed bundle. Find next magic of either type.
-            # Matches LLVM: both CCOB and uncompressed can be interleaved.
-            next_uncompressed = remaining.find(UNCOMPRESSED_BUNDLE_MAGIC, 24)
-            next_ccob = remaining.find(CCOB_MAGIC, 24)
-
-            candidates = [c for c in [next_uncompressed, next_ccob] if c != -1]
-            if candidates:
-                chunk = remaining[: min(candidates)]
+            next_magic = _find_next_magic(data, offset + 24)
+            if next_magic != -1:
+                chunk = data[offset:next_magic]
             else:
-                chunk = remaining
+                chunk = data[offset:]
 
             bundles.extend(parse_concatenated_bundles(chunk))
             offset += len(chunk)
 
         else:
-            # Skip padding between page-aligned bundles.
+            # Should not happen since we always seek to next magic,
+            # but guard against it.
             offset += 1
+            continue
+
+        # Skip padding to next magic in one shot.
+        if offset < data_len:
+            offset = _find_next_magic(data, offset)
 
     if not bundles:
         raise ValueError(f"Unrecognized fatbin format: first 4 bytes are {data[:4]!r}")

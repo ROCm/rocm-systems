@@ -1,23 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <functional>
 
@@ -26,6 +11,8 @@ THE SOFTWARE.
 #include <memcpy1d_tests_common.hh>
 
 #include "graph_tests_common.hh"
+
+__device__ int exec_memcpy_1d_symbol[1];
 
 /**
  * @addtogroup hipGraphExecMemcpyNodeSetParams1D hipGraphExecMemcpyNodeSetParams1D
@@ -50,7 +37,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams1D_Positive_Basic") {
+HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams1D_Positive_Basic) {
   constexpr auto f = [](void* dst, void* src, size_t count, hipMemcpyKind direction) {
     hipGraph_t graph = nullptr;
     HIP_CHECK(hipGraphCreate(&graph, 0));
@@ -151,7 +138,7 @@ TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams1D_Positive_Basic") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams1D_Negative_Parameters") {
+HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams1D_Negative_Parameters) {
   using namespace std::placeholders;
   hipGraph_t graph = nullptr;
   HIP_CHECK(hipGraphCreate(&graph, 0));
@@ -217,7 +204,7 @@ TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams1D_Negative_Parameters") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams1D_Negative_Changing_Memcpy_Direction") {
+HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams1D_Negative_Changing_Memcpy_Direction) {
   int *host1, *host2, *dev1, *dev2;
   HIP_CHECK(hipHostMalloc(&host1, sizeof(int)));
   HIP_CHECK(hipHostMalloc(&host2, sizeof(int)));
@@ -253,6 +240,147 @@ TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams1D_Negative_Changing_Memcpy_Direc
   HIP_CHECK(hipHostFree(host2));
   HIP_CHECK(hipFree(dev1));
   HIP_CHECK(hipFree(dev2));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Verify updates that change packet-capture eligibility and retarget a symbol node through the
+ *    generic 1D setter.
+ * Test source
+ * ------------------------
+ *  - unit/graph/hipGraphExecMemcpyNodeSetParams1D.cc
+ */
+HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams1D_CaptureTransitions) {
+  SECTION("captured device copy to host copy") {
+    LinearAllocGuard<int> src(LinearAllocs::hipMalloc, sizeof(int));
+    LinearAllocGuard<int> old_dst(LinearAllocs::hipMalloc, sizeof(int));
+    LinearAllocGuard<int> new_dst(LinearAllocs::hipMalloc, sizeof(int));
+    int old_value = 11;
+    int new_value = 22;
+    int zero = 0;
+    HIP_CHECK(hipMemcpy(src.ptr(), &old_value, sizeof(int), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(old_dst.ptr(), &zero, sizeof(int), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(new_dst.ptr(), &zero, sizeof(int), hipMemcpyHostToDevice));
+
+    hipGraph_t graph = nullptr;
+    hipGraphNode_t node = nullptr;
+    hipGraphExec_t exec = nullptr;
+    HIP_CHECK(hipGraphCreate(&graph, 0));
+    HIP_CHECK(hipGraphAddMemcpyNode1D(&node, graph, nullptr, 0, old_dst.ptr(), src.ptr(),
+                                      sizeof(int), hipMemcpyDefault));
+    HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphExecMemcpyNodeSetParams1D(exec, node, new_dst.ptr(), &new_value, sizeof(int),
+                                                hipMemcpyDefault));
+    HIP_CHECK(hipGraphLaunch(exec, hipStreamPerThread));
+    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+
+    int actual = 0;
+    HIP_CHECK(hipMemcpy(&actual, new_dst.ptr(), sizeof(int), hipMemcpyDeviceToHost));
+    REQUIRE(actual == new_value);
+    int old_actual = -1;
+    HIP_CHECK(hipMemcpy(&old_actual, old_dst.ptr(), sizeof(int), hipMemcpyDeviceToHost));
+    REQUIRE(old_actual == zero);
+    HIP_CHECK(hipGraphExecDestroy(exec));
+    HIP_CHECK(hipGraphDestroy(graph));
+  }
+
+  SECTION("disabled node remains disabled across transition") {
+    LinearAllocGuard<int> src(LinearAllocs::hipMalloc, sizeof(int));
+    LinearAllocGuard<int> old_dst(LinearAllocs::hipMalloc, sizeof(int));
+    LinearAllocGuard<int> new_dst(LinearAllocs::hipMalloc, sizeof(int));
+    int old_value = 31;
+    int new_value = 32;
+    int zero = 0;
+    HIP_CHECK(hipMemcpy(src.ptr(), &old_value, sizeof(int), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(old_dst.ptr(), &zero, sizeof(int), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(new_dst.ptr(), &zero, sizeof(int), hipMemcpyHostToDevice));
+
+    hipGraph_t graph = nullptr;
+    hipGraphNode_t node = nullptr;
+    hipGraphExec_t exec = nullptr;
+    HIP_CHECK(hipGraphCreate(&graph, 0));
+    HIP_CHECK(hipGraphAddMemcpyNode1D(&node, graph, nullptr, 0, old_dst.ptr(), src.ptr(),
+                                      sizeof(int), hipMemcpyDefault));
+    HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphNodeSetEnabled(exec, node, 0));
+    HIP_CHECK(hipGraphExecMemcpyNodeSetParams1D(exec, node, new_dst.ptr(), &new_value, sizeof(int),
+                                                hipMemcpyDefault));
+    HIP_CHECK(hipGraphLaunch(exec, hipStreamPerThread));
+    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+
+    int actual = -1;
+    HIP_CHECK(hipMemcpy(&actual, new_dst.ptr(), sizeof(int), hipMemcpyDeviceToHost));
+    REQUIRE(actual == zero);
+    HIP_CHECK(hipGraphNodeSetEnabled(exec, node, 1));
+    HIP_CHECK(hipGraphLaunch(exec, hipStreamPerThread));
+    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+    HIP_CHECK(hipMemcpy(&actual, new_dst.ptr(), sizeof(int), hipMemcpyDeviceToHost));
+    REQUIRE(actual == new_value);
+    int old_actual = -1;
+    HIP_CHECK(hipMemcpy(&old_actual, old_dst.ptr(), sizeof(int), hipMemcpyDeviceToHost));
+    REQUIRE(old_actual == zero);
+    HIP_CHECK(hipGraphExecDestroy(exec));
+    HIP_CHECK(hipGraphDestroy(graph));
+  }
+
+  SECTION("uncaptured host copy to device copy") {
+    LinearAllocGuard<int> src(LinearAllocs::hipMalloc, sizeof(int));
+    LinearAllocGuard<int> dst(LinearAllocs::hipMalloc, sizeof(int));
+    int host_value = 41;
+    int device_value = 42;
+    int zero = 0;
+    HIP_CHECK(hipMemcpy(src.ptr(), &device_value, sizeof(int), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dst.ptr(), &zero, sizeof(int), hipMemcpyHostToDevice));
+
+    hipGraph_t graph = nullptr;
+    hipGraphNode_t node = nullptr;
+    hipGraphExec_t exec = nullptr;
+    HIP_CHECK(hipGraphCreate(&graph, 0));
+    HIP_CHECK(hipGraphAddMemcpyNode1D(&node, graph, nullptr, 0, dst.ptr(), &host_value, sizeof(int),
+                                      hipMemcpyDefault));
+    HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphExecMemcpyNodeSetParams1D(exec, node, dst.ptr(), src.ptr(), sizeof(int),
+                                                hipMemcpyDefault));
+    HIP_CHECK(hipGraphLaunch(exec, hipStreamPerThread));
+    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+
+    int actual = 0;
+    HIP_CHECK(hipMemcpy(&actual, dst.ptr(), sizeof(int), hipMemcpyDeviceToHost));
+    REQUIRE(actual == device_value);
+    HIP_CHECK(hipGraphExecDestroy(exec));
+    HIP_CHECK(hipGraphDestroy(graph));
+  }
+
+  SECTION("from-symbol node to generic copy") {
+    LinearAllocGuard<int> src(LinearAllocs::hipMalloc, sizeof(int));
+    LinearAllocGuard<int> dst(LinearAllocs::hipMalloc, sizeof(int));
+    int symbol_value = 51;
+    int device_value = 52;
+    int zero = 0;
+    HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(exec_memcpy_1d_symbol), &symbol_value, sizeof(int)));
+    HIP_CHECK(hipMemcpy(src.ptr(), &device_value, sizeof(int), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dst.ptr(), &zero, sizeof(int), hipMemcpyHostToDevice));
+
+    hipGraph_t graph = nullptr;
+    hipGraphNode_t node = nullptr;
+    hipGraphExec_t exec = nullptr;
+    HIP_CHECK(hipGraphCreate(&graph, 0));
+    HIP_CHECK(hipGraphAddMemcpyNodeFromSymbol(&node, graph, nullptr, 0, dst.ptr(),
+                                              HIP_SYMBOL(exec_memcpy_1d_symbol), sizeof(int), 0,
+                                              hipMemcpyDefault));
+    HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphExecMemcpyNodeSetParams1D(exec, node, dst.ptr(), src.ptr(), sizeof(int),
+                                                hipMemcpyDefault));
+    HIP_CHECK(hipGraphLaunch(exec, hipStreamPerThread));
+    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+
+    int actual = 0;
+    HIP_CHECK(hipMemcpy(&actual, dst.ptr(), sizeof(int), hipMemcpyDeviceToHost));
+    REQUIRE(actual == device_value);
+    HIP_CHECK(hipGraphExecDestroy(exec));
+    HIP_CHECK(hipGraphDestroy(graph));
+  }
 }
 
 /**

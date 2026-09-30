@@ -45,6 +45,7 @@ class WaveFrontPrimitiveTester : public Tester {
 
   char *source = nullptr;
   char *dest = nullptr;
+  int *grid_psync = nullptr;
 };
 
 #endif

@@ -1,25 +1,7 @@
+// Copyright Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+
+#include <stdint.h>
 
 #include "goamdsmi.h"
 ////////////////////////////////////////////////------------CPU------------////////////////////////////////////////////////
@@ -256,7 +238,7 @@ uint64_t goamdsmi_gpu_dev_pci_id_get(uint32_t dv_ind);
  *  function to write the VBIOS char array (up to len characters)
  *  for device dv_ind and return a char pointer. This value is then
  *  passed as char pointer to the Go routine that called it. The caller
- *  of this funcion must free the allocated buffer for the vbios
+ *  of this function must free the allocated buffer for the vbios
  *  identifier
  *
  *  @param[in] ::uint32_t device index
@@ -275,7 +257,7 @@ char* goamdsmi_gpu_dev_vbios_version_get(uint32_t dv_ind);
  *  function to write the name of the vendor char array (up to len
  *  characters) for a device dv_ind and return a char pointer. This
  *  value is then passed as a char pointer to the Go routine that
- *  called it. The caller of this funcion must free the allocated
+ *  called it. The caller of this function must free the allocated
  *  buffer for the vbios identifier
  *
  *  @param[in] ::uint32_t device index
@@ -418,13 +400,13 @@ uint64_t goamdsmi_gpu_dev_gpu_clk_freq_get_mclk(uint32_t dv_ind);
  *  @brief Go language stub to get the minimum supported SCLK frequency
  *
  *  @details This function will call the rsmi_od_volt_freq_data_get()
- *  function to return the minium supported SCLK frequency.
+ *  function to return the minimum supported SCLK frequency.
  *  This value is then passed as a uint64_t val to the Go routine that
  *  called it.
  *
  *  @param[in] ::uint32_t device index
  *
- *  @retval ::uint64_t mimimum supported sclk frequency
+ *  @retval ::uint64_t minimum supported sclk frequency
  *  @retval -1 is returned upon failure.
  *
  */
@@ -434,13 +416,13 @@ uint64_t goamdsmi_gpu_od_volt_freq_range_min_get_sclk(uint32_t dv_ind);
  *  @brief Go language stub to get the minimum supported MCLK frequency
  *
  *  @details This function will call the rsmi_od_volt_freq_data_get()
- *  function to return the minium supported MCLK frequency.
+ *  function to return the minimum supported MCLK frequency.
  *  This value is then passed as a uint64_t val to the Go routine that
  *  called it.
  *
  *  @param[in] ::uint32_t device index
  *
- *  @retval ::uint64_t mimimum supported mclk sfrequency
+ *  @retval ::uint64_t minimum supported mclk frequency
  *  @retval -1 is returned upon failure.
  *
  */
@@ -450,7 +432,7 @@ uint64_t goamdsmi_gpu_od_volt_freq_range_min_get_mclk(uint32_t dv_ind);
  *  @brief Go language stub to get the maximum supported SCLK frequency
  *
  *  @details This function will call the rsmi_od_volt_freq_data_get()
- *  function to return the maxium supported SCLK frequency.
+ *  function to return the maximum supported SCLK frequency.
  *  This value is then passed as a uint64_t val to the Go routine that
  *  called it.
  *
@@ -466,13 +448,13 @@ uint64_t goamdsmi_gpu_od_volt_freq_range_max_get_sclk(uint32_t dv_ind);
  *  @brief Go language stub to get the maximum supported MCLK frequency
  *
  *  @details This function will call the rsmi_od_volt_freq_data_get()
- *  function to return the maxium supported MCLK frequency.
+ *  function to return the maximum supported MCLK frequency.
  *  This value is then passed as a uint64_t val to the Go routine that
  *  called it.
  *
  *  @param[in] ::uint32_t device index
  *
- *  @retval ::uint64_t maximum supported mclk sfrequency
+ *  @retval ::uint64_t maximum supported mclk frequency
  *  @retval -1 is returned upon failure.
  *
  */
@@ -557,3 +539,75 @@ uint64_t goamdsmi_gpu_dev_gpu_memory_usage_get(uint32_t dv_ind);
  *
  */
 uint64_t goamdsmi_gpu_dev_gpu_memory_total_get(uint32_t dv_ind);
+
+/**
+ *  @brief Go language stub to get UMA carveout information
+ *
+ *  @details This function will call the amdsmi_get_gpu_uma_carveout_info()
+ *  function to get the current UMA carveout configuration and available options.
+ *
+ *  @param[in] dv_ind is the device index
+ *  @param[out] current_index current carveout option index
+ *  @param[out] num_options number of available carveout options
+ *  @param[out] options array of option descriptions (up to 16 options, 256 chars each)
+ *
+ *  @retval ::int32_t 0 on success, -1 on failure
+ *
+ */
+int32_t goamdsmi_gpu_uma_carveout_info_get(uint32_t dv_ind, uint32_t* current_index,
+                                           uint32_t* num_options, char options[][256]);
+
+/**
+ *  @brief Go language stub to set UMA carveout size
+ *
+ *  @details This function will call the amdsmi_set_gpu_uma_carveout()
+ *  function to set the UMA carveout size by option index.
+ *  Requires system reboot to take effect.
+ *
+ *  @param[in] dv_ind is the device index
+ *  @param[in] option_index the carveout option index to set
+ *
+ *  @retval ::int32_t 0 on success, -1 on failure
+ *
+ */
+int32_t goamdsmi_gpu_uma_carveout_set(uint32_t dv_ind, uint32_t option_index);
+
+/**
+ *  @brief Go language stub to get TTM (shared GPU memory) information
+ *
+ *  @details This function will call the amdsmi_get_ttm_info()
+ *  function to get the current TTM pages limit. This is system-wide,
+ *  not per-GPU.
+ *
+ *  @param[out] current_pages current TTM pages limit
+ *
+ *  @retval ::int32_t 0 on success, -1 on failure
+ *
+ */
+int32_t goamdsmi_ttm_info_get(uint64_t* current_pages);
+
+/**
+ *  @brief Go language stub to set TTM (shared GPU memory) pages limit
+ *
+ *  @details This function will call the amdsmi_set_ttm_pages_limit()
+ *  function to set the TTM pages limit. This is system-wide, not per-GPU.
+ *  Requires system reboot to take effect.
+ *
+ *  @param[in] pages the pages limit to set
+ *
+ *  @retval ::int32_t 0 on success, -1 on failure
+ *
+ */
+int32_t goamdsmi_ttm_pages_limit_set(uint64_t pages);
+
+/**
+ *  @brief Go language stub to reset TTM pages limit to system default
+ *
+ *  @details This function will call the amdsmi_reset_ttm_pages_limit()
+ *  function to reset the TTM pages limit to system default. This is
+ *  system-wide, not per-GPU. Requires system reboot to take effect.
+ *
+ *  @retval ::int32_t 0 on success, -1 on failure
+ *
+ */
+int32_t goamdsmi_ttm_pages_limit_reset(void);

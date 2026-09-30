@@ -79,7 +79,7 @@ TEST_F(KFDTopologyTest , BasicTest) {
 TEST_F(KFDTopologyTest, GetNodePropertiesInvalidParams) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    EXPECT_EQ(HSAKMT_STATUS_INVALID_PARAMETER, hsaKmtGetNodeProperties(0, NULL));
+    EXPECT_EQ(HSAKMT_STATUS_INVALID_PARAMETER, HSAKMT_CALL(hsaKmtGetNodeProperties, g_baseTest->m_hsakmt_current_ctx, 0, NULL));
 
     TEST_END
 }
@@ -90,7 +90,7 @@ TEST_F(KFDTopologyTest, GetNodePropertiesInvalidNodeNum) {
 
     HsaNodeProperties nodeProperties;
     memset(&nodeProperties, 0, sizeof(nodeProperties));
-    EXPECT_EQ(HSAKMT_STATUS_INVALID_NODE_UNIT, hsaKmtGetNodeProperties(m_SystemProperties.NumNodes, &nodeProperties));
+    EXPECT_EQ(HSAKMT_STATUS_INVALID_NODE_UNIT, HSAKMT_CALL(hsaKmtGetNodeProperties, g_baseTest->m_hsakmt_current_ctx, m_SystemProperties.NumNodes, &nodeProperties));
 
     TEST_END
 }
@@ -106,7 +106,7 @@ TEST_F(KFDTopologyTest, GetNodeMemoryProperties) {
 
         if (pNodeProperties != NULL) {
             HsaMemoryProperties *memoryProperties = new HsaMemoryProperties[pNodeProperties->NumMemoryBanks];
-            EXPECT_SUCCESS(hsaKmtGetNodeMemoryProperties(node, pNodeProperties->NumMemoryBanks, memoryProperties));
+            EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtGetNodeMemoryProperties, g_baseTest->m_hsakmt_current_ctx, node, pNodeProperties->NumMemoryBanks, memoryProperties));
             delete [] memoryProperties;
         }
     }
@@ -131,7 +131,7 @@ TEST_F(KFDTopologyTest, GpuvmApertureValidate) {
                 return;
             }
             HsaMemoryProperties *memoryProperties =  new HsaMemoryProperties[pNodeProperties->NumMemoryBanks];
-            EXPECT_SUCCESS(hsaKmtGetNodeMemoryProperties(GpuNodes.at(i), pNodeProperties->NumMemoryBanks,
+            EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtGetNodeMemoryProperties, g_baseTest->m_hsakmt_current_ctx, GpuNodes.at(i), pNodeProperties->NumMemoryBanks,
                                                          memoryProperties));
             bool GpuVMHeapFound = false;
             for (unsigned int bank = 0 ; bank  < pNodeProperties->NumMemoryBanks ; bank++) {
@@ -159,7 +159,8 @@ TEST_F(KFDTopologyTest, GetNodeCacheProperties) {
         pNodeProperties = m_NodeInfo.GetNodeProperties(node);
         if (pNodeProperties != NULL) {
             HsaCacheProperties *cacheProperties = new HsaCacheProperties[pNodeProperties->NumCaches];
-            EXPECT_SUCCESS(hsaKmtGetNodeCacheProperties(node, pNodeProperties->CComputeIdLo,
+            EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtGetNodeCacheProperties, g_baseTest->m_hsakmt_current_ctx,
+                           node, pNodeProperties->CComputeIdLo,
                            pNodeProperties->NumCaches, cacheProperties));
             if (pNodeProperties->NumCPUCores > 0) {  // this is a CPU node
                 LOG() << "CPU Node " << std::dec << node << ": " << pNodeProperties->NumCaches << " caches"
@@ -172,11 +173,14 @@ TEST_F(KFDTopologyTest, GetNodeCacheProperties) {
                     " LineSize " << cacheProperties[n].CacheLineSize <<
                     " LinesPerTag " << cacheProperties[n].CacheLinesPerTag << std::endl;
                     char string[1024] = "";
-                    char sibling[5] = "";
+                    size_t offset = 0;
                     for (unsigned i = 0; i < 256; i++) {
                         if (cacheProperties[n].SiblingMap[i]) {
-                            sprintf(sibling, "%d,", i);
-                            strcat(string, sibling);
+                            int written = snprintf(string + offset, sizeof(string) - offset, "%d,", i);
+                            if (written <= 0 || offset + (size_t)written >= sizeof(string)) {
+                                break;
+                            }
+                            offset += written;
                         }
                     }
                     LOG() << "     ProcIdLow " << cacheProperties[n].ProcessorIdLow <<
@@ -193,11 +197,14 @@ TEST_F(KFDTopologyTest, GetNodeCacheProperties) {
                     " LineSize " << cacheProperties[n].CacheLineSize <<
                     " LinesPerTag " << cacheProperties[n].CacheLinesPerTag << std::endl;
                     char string[1024] = "";
-                    char sibling[5] = "";
+                    size_t offset = 0;
                     for (unsigned i = 0; i < 256; i++) {
                         if (cacheProperties[n].SiblingMap[i]) {
-                            snprintf(sibling, 5, "%d,", i);
-                            strcat(string, sibling);
+                            int written = snprintf(string + offset, sizeof(string) - offset, "%d,", i);
+                            if (written <= 0 || offset + (size_t)written >= sizeof(string)) {
+                                break;
+                            }
+                            offset += written;
                         }
                     }
                     LOG() << "     ProcIdLow " << cacheProperties[n].ProcessorIdLow <<
@@ -206,6 +213,73 @@ TEST_F(KFDTopologyTest, GetNodeCacheProperties) {
             }
             delete [] cacheProperties;
         }
+    }
+
+    TEST_END
+}
+
+// Test that L2 cache line size is reported with a valid value
+// This is critical for newer ASICs which have 128 or 256 byte cache lines.
+// Cache line size affects alignment requirements for kernargs and other data structures.
+TEST_F(KFDTopologyTest, ValidateL2CacheLineSize) {
+    TEST_START(TESTPROFILE_RUNALL)
+
+    const HsaNodeProperties *pNodeProperties;
+    bool foundGpuWithL2 = false;
+
+    for (unsigned node = 0; node < m_SystemProperties.NumNodes; node++) {
+        pNodeProperties = m_NodeInfo.GetNodeProperties(node);
+        ASSERT_NE(pNodeProperties, nullptr) << "Failed to get properties for node " << node;
+
+        if (pNodeProperties->NumFComputeCores > 0) {  // GPU node
+            HsaCacheProperties *cacheProperties = new HsaCacheProperties[pNodeProperties->NumCaches];
+            auto status = HSAKMT_CALL(hsaKmtGetNodeCacheProperties, g_baseTest->m_hsakmt_current_ctx,
+                           node, pNodeProperties->CComputeIdLo,
+                           pNodeProperties->NumCaches, cacheProperties);
+            EXPECT_SUCCESS(status);
+            if (status != HSAKMT_STATUS_SUCCESS) {
+                delete [] cacheProperties;
+                continue;
+            }
+
+            for (unsigned n = 0; n < pNodeProperties->NumCaches; n++) {
+                if (cacheProperties[n].CacheLevel == 2) {
+                    foundGpuWithL2 = true;
+                    HSAuint32 size = cacheProperties[n].CacheLineSize;
+
+                    LOG() << "GPU Node " << node << " L2 cache line size: "
+                          << size << " bytes" << std::endl;
+
+                    // Cache line size must not be zero - it is not valid
+                    EXPECT_NE(size, 0UL)
+                        << "GPU Node " << node << " L2 cache line size is 0. "
+                        << "This is not valid - KFD topology must be correctly configured. "
+                        << "Newer ASICs typically have 128 or 256 byte cache lines.";
+
+                    // For non-zero values, validate they are reasonable
+                    if (size != 0) {
+                        // Must be a power of 2
+                        EXPECT_EQ(size & (size - 1), 0UL)
+                            << "GPU Node " << node << " L2 cache line size " << size
+                            << " is not a power of 2";
+
+                        // Should be in reasonable range for modern GPUs
+                        // Typical values: 64, 128, 256 bytes
+                        EXPECT_GE(size, 64UL)
+                            << "GPU Node " << node << " L2 cache line size " << size
+                            << " is unexpectedly small (< 64 bytes)";
+                        EXPECT_LE(size, 256UL)
+                            << "GPU Node " << node << " L2 cache line size " << size
+                            << " is unexpectedly large (> 256 bytes)";
+                    }
+                }
+            }
+            delete [] cacheProperties;
+        }
+    }
+
+    if (!foundGpuWithL2) {
+        LOG() << "No GPU nodes with L2 cache found, skipping validation" << std::endl;
     }
 
     TEST_END
@@ -227,7 +301,8 @@ TEST_F(KFDTopologyTest, GetNodeIoLinkProperties) {
 
         if (pNodeProperties != NULL) {
             HsaIoLinkProperties  *IolinkProperties =  new HsaIoLinkProperties[pNodeProperties->NumIOLinks];
-            EXPECT_SUCCESS(hsaKmtGetNodeIoLinkProperties(node, pNodeProperties->NumIOLinks, IolinkProperties));
+            EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtGetNodeIoLinkProperties, g_baseTest->m_hsakmt_current_ctx,
+                           node, pNodeProperties->NumIOLinks, IolinkProperties));
             if (pNodeProperties->NumIOLinks == 0) {
                 // No io_links. Just print the node
                 LOG() << "[" << node << "]" << std::endl;

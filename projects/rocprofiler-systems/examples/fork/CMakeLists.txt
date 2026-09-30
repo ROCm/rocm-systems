@@ -1,23 +1,24 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
 
 project(rocprofiler-systems-fork LANGUAGES CXX)
+
+# Support standalone builds
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+    include(${CMAKE_CURRENT_LIST_DIR}/../cmake/standalone-helpers.cmake OPTIONAL)
+endif()
 
 set(CMAKE_BUILD_TYPE "RelWithDebInfo")
 string(REPLACE " " ";" _FLAGS "${CMAKE_CXX_FLAGS_DEBUG}")
 list(APPEND _FLAGS -fno-inline)
 
 find_package(Threads REQUIRED)
-find_package(rocprofiler-systems REQUIRED COMPONENTS user)
 
 # Basic fork example
 add_executable(fork-example fork.cpp)
-target_link_libraries(
-    fork-example
-    PRIVATE Threads::Threads rocprofiler-systems::rocprofiler-systems
-)
+target_link_libraries(fork-example PRIVATE Threads::Threads pthread)
 target_compile_options(fork-example PRIVATE ${_FLAGS})
 
 if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET fork-example)
@@ -72,7 +73,7 @@ if(HIPCC_EXECUTABLE)
                 hipMallocConcurrencyMproc
                 PRIVATE --offload-arch=${arch}
             )
-            target_link_options(hipMallocConcurrencyMproc PUBLIC --offload-arch=${arch})
+            target_link_options(hipMallocConcurrencyMproc PRIVATE --offload-arch=${arch})
         endforeach()
 
         if(
@@ -96,7 +97,6 @@ if(HIPCC_EXECUTABLE)
         endif()
 
         if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
-            # defined in MacroUtilities.cmake
             rocprofiler_systems_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET hipMallocConcurrencyMproc)
         endif()
 

@@ -1,32 +1,20 @@
 /*
-Copyright (c) 2015 - 2021 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #ifndef HIP_CODE_OBJECT_HPP
 #define HIP_CODE_OBJECT_HPP
 
 #include "hip_global.hpp"
 
+#include <atomic>
 #include <cstring>
+#include <memory>
+#include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "hip/hip_runtime.h"
 #include "hip/hip_runtime_api.h"
@@ -103,7 +91,7 @@ class CodeObject {
 // Dynamic Code Object
 class DynCO : public CodeObject {
   // Guards Dynamic Code object
-  amd::Monitor dclock_{true};
+  std::recursive_mutex dclock_;
 
  public:
   DynCO() : device_id_(ihipGetDevice()), fb_info_(nullptr), module_(nullptr) {}
@@ -113,24 +101,43 @@ class DynCO : public CodeObject {
   hipError_t loadCodeObject(const char* fname, const void* image = nullptr);
   hipModule_t getModule() const { return module_; };
 
+  // Device the code object was loaded for at construction. Callers that key
+  // per-device caches (e.g., LibraryContainer::kernels_) must use this and
+  // not ihipGetDevice(): the active device may differ at use time, but the
+  // loaded module is single-device.
+  int getDeviceId() const { return device_id_; }
+
   // Gets GlobalVar/Functions from a dynamically loaded code object
-  hipError_t getDynFunc(hipFunction_t* hfunc, std::string func_name);
+  hipError_t getDynFunc(hipFunction_t* hfunc, const std::string& func_name);
   hipError_t getFuncCount(unsigned int* count);
-  bool isValidDynFunc(const void* hfunc);
-  hipError_t getDeviceVar(DeviceVar** dvar, std::string var_name);
+  hipError_t enumerateFunctions(hipFunction_t* functions, unsigned int numFunctions);
+  hipError_t GetDeviceVar(amd::Memory** mem, const std::string& var_name);
+  hip::Var* getVar(const std::string& var_name);
 
   hipError_t getManagedVarPointer(std::string name, void** pointer, size_t* size_ptr) const {
     auto it = vars_.find(name);
-    if (it != vars_.end() && it->second->getVarKind() == Var::DVK_Managed) {
+    if (it != vars_.end() && it->second->GetVarKind() == Var::DVK_Managed) {
       if (pointer != nullptr) {
-        *pointer = it->second->getManagedVarPtr();
+        *pointer = it->second->GetManagedVarPtr();
       }
       if (size_ptr != nullptr) {
-        *size_ptr = it->second->getSize();
+        *size_ptr = it->second->GetSize();
       }
     }
     return hipSuccess;
   }
+
+  // Common entry point used by both hipModuleGetGlobal and hipLibraryGetGlobal.
+  // Returns the managed host pointer if name is a __managed__ var, otherwise the
+  // device pointer of the __device__ global. hipErrorNotFound if name is missing.
+  hipError_t GetGlobal(const std::string& name, void** dptr, size_t* bytes);
+
+  // Strict managed-only lookup used by hipLibraryGetManaged.
+  // hipErrorNotFound if name is missing or not DVK_Managed.
+  hipError_t GetManaged(const std::string& name, void** dptr, size_t* bytes);
+
+  // Names of all loaded kernel functions; used by LibraryContainer::EnumerateKernels.
+  std::vector<std::string> getFunctionNames();
 
  private:
   int device_id_;
@@ -177,11 +184,23 @@ class StatCO : public CodeObject {
   // pointer to the alocated managed memory has to be copied to the address of symbol
   hipError_t InitManagedVarDevicePtr(int deviceId);
 
+  // Find a deferred managed var whose mmap address equals ptr
+  Var* FindDeferredManagedVar(const void* ptr);
+
   // Resize device-specific data structures for all registered functions and variables
   void ResizeForDevices(size_t device_count);
 
+  // Iterate all registered fat binary data pointers — for HRR capture post-registration sweep.
+  void ForEachFatBinaryBlob(void (*cb)(const void*)) const;
+
+  // Iterate all registered __device__ globals as (host shadow address, symbol
+  // name, size, device address) — the same post-registration sweep for HRR,
+  // which otherwise never sees __hipRegisterVar because it fires at
+  // static-init time. The device address is null if it cannot be resolved yet.
+  void ForEachGlobalVar(void (*cb)(const void*, const char*, size_t, const void*));
+
  private:
-  amd::Monitor sclock_{true};              //!< Guards Static Code object
+  mutable std::recursive_mutex sclock_;    //!< Guards Static Code object
   const PlatformState& owner_;             //!< Reference to owning PlatformState
   //! Populated during __hipRegisterFatBinary
   std::unordered_map<const void*, FatBinaryInfo*> modules_;
@@ -197,7 +216,9 @@ class StatCO : public CodeObject {
   //! Reverse mapping of vars
   std::unordered_map<FatBinaryInfo**, std::vector<const void*> > module_to_hostVars_;
   //! Tracks managed var initialization per device
-  std::unordered_map<int, bool> managedVarsDevicePtrInitalized_;
+  std::unique_ptr<std::atomic<bool>[]> managedVarsDevicePtrInitialized_;
+  //! Number of entries in managedVarsDevicePtrInitialized_
+  size_t managedVarsDevicePtrInitializedSize_ = 0;
 };
 
 };  // namespace hip

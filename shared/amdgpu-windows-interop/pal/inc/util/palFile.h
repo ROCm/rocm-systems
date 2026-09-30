@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) 2014-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+ *  Copyright (c) Advanced Micro Devices, Inc., or its affiliates. All rights reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -93,15 +93,9 @@ public:
     struct Stat
     {
         uint64                                size;  // Size of the file in bytes.
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 922
-        uint64                                ctime; // Time of creation of the file (not valid on FAT).
-        uint64                                atime; // Time of last access to the file (not valid on FAT).
-        uint64                                mtime; // Time of last modification to the file.
-#else
         std::chrono::system_clock::time_point ctime; // Time of creation of the file (not valid on FAT).
         std::chrono::system_clock::time_point atime; // Time of last access to the file (not valid on FAT).
         std::chrono::system_clock::time_point mtime; // Time of last modification to the file.
-#endif
         uint32                                nlink; // Number of hard links (always 1 on FAT on Windows).
         uint32                                mode;  // Bitmask for the file-mode information.
         uint32                                dev;   // Drive number of the disk containing the file.

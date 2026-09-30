@@ -1,5 +1,0 @@
-pmc:  TD_SPI_STALL_sum TD_LOAD_WAVEFRONT_sum
-
-gpu:
-range:
-kernel:

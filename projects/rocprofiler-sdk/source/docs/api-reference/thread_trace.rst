@@ -5,7 +5,7 @@
 .. _thread-trace:
 
 ROCprof Trace Decoder and thread trace APIs
-======================================================
+============================================
 
 Thread trace is a profiling method that provides fine-grained insight into GPU kernel execution by collecting detailed traces of shader instructions executed by the GPU. This feature captures GPU occupancy, instruction execution times, fast performance counters, and other detailed performance data. Thread trace utilizes GPU hardware instrumentation to record events as they happen, resulting in precise timing information about wave (threads) execution behavior.
 
@@ -15,12 +15,8 @@ ROCprofiler-SDK provides wrapper APIs for the ROCprof Trace Decoder, a library t
 
     Thread trace can generate large amounts of data, especially when profiling complex applications or longer execution runs. This might require handling potentially high volumes of trace data, so it’s recommended to implement appropriate filtering strategies to focus on the specific parts of interest in your application.
 
-.. note::
-
-    ROCprof Trace Decoder is a binary-only library and can be found `here <https://github.com/ROCm/rocprof-trace-decoder/releases>`_.
-
 Thread trace service API
-------------------------------------
+--------------------------
 
 This section describes how to use the ROCprofiler-SDK thread trace API to configure and use the thread trace service. For fully functional examples, see `Samples <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-sdk/samples/thread_trace>`_.
 
@@ -93,8 +89,32 @@ The configuration parameters are described here:
 
 - ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE: Configures the buffer size. This buffer is shared among all SEs specified in ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK. There is a minimal side effect to specifying a larger buffer size, except for increased VRAM usage.
 
+- ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE: Controls when the profiler allocates thread trace queues, signals, and memory for each configured GPU. See `Resource initialization modes`_ below.
+
 
 The thread trace can be configured in two primary modes: device-wide or per-dispatch, as described in the following sections.
+
+Resource initialization modes
++++++++++++++++++++++++++++++
+
+``ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE`` applies to both device and dispatch thread trace services. The following modes are currently supported:
+
+- ``ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_DEFAULT``: Currently equivalent to ``ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_CODE_OBJECT``. Omitting the parameter has the same behavior.
+
+- ``ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_HSA``: Allocates resources during HSA initialization for configured GPUs visible to ROCr, respecting ``ROCR_VISIBLE_DEVICES``.
+
+- ``ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_CODE_OBJECT``: Defers allocation until the first code object is registered for each configured GPU visible to ROCr. GPUs that never load a code object do not allocate thread trace resources, even when ``ROCR_VISIBLE_DEVICES`` is unset. Code objects already loaded when the service initializes also trigger allocation.
+
+The ``HIP``, ``ALL``, and ``DISPATCH`` resource modes currently return ``ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED`` from either configuration API. Invalid resource mode values return ``ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT``.
+
+To defer resource allocation until a GPU loads a code object, add:
+
+.. code-block:: cpp
+
+    params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE,
+                      {ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_CODE_OBJECT}});
+
+In code-object mode, starting a device thread trace context before a GPU has loaded a code object records a pending start without allocating GPU resources. Tracing starts for that GPU when its first code object is registered, provided the context is still active. Stopping the context before that load cancels the pending start. Once allocated, resources are reused across subsequent code-object loads and context starts; unloading code objects does not release them.
 
 Device thread trace
 +++++++++++++++++++
@@ -160,7 +180,7 @@ To enable selective thread trace based on specific kernel dispatches, use the di
             "thread trace service configure");
     }
 
-For device-wide thread trace, starting the context automatically begins data capture. Some application warmup is recommended before starting the device thread trace. For the dispatch thread trace, this step is not necessary as tracing doesn't start automatically.
+For device-wide thread trace, starting the context begins data capture once resources are initialized. Some application warmup is recommended before starting the device thread trace. For the dispatch thread trace, this step is not necessary as tracing doesn't start automatically.
 
 To start the context after all services are configured, use:
 
@@ -179,10 +199,14 @@ To stop the context to end data collection for device-wide thread trace, use:
 ROCprof Trace Decoder API
 --------------------------------
 
-The thread trace functionality requires you to install the ROCprof Trace Decoder package separately. This package provides the necessary decoder library for processing thread trace data. Ensure to install this package on your system before using the thread trace feature.
+The ROCProf Trace Decoder is a dedicated library for processing thread trace data.
+
+.. note::
+
+    For ROCm releases earlier than 7.13, using the thread trace functionality requires you to install the ROCprof Trace Decoder package separately.
 
 Trace Decoder setup
-++++++++++++++
+++++++++++++++++++++
 
 To decode the raw thread trace data, create and initialize a Trace Decoder:
 
@@ -254,17 +278,14 @@ The thread trace service asynchronously delivers raw trace data via a dedicated 
 .. code-block:: cpp
 
     void
-    shader_data_callback(rocprofiler_agent_id_t agent,
-                         int64_t shader_engine_id,
-                         void* data,
-                         size_t data_size,
+    shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
                          rocprofiler_user_data_t userdata)
     {
         // Process shader callback data using the Trace Decoder.
         auto status = rocprofiler_trace_decode(decoder_handle,
                                                trace_decoder_callback,
-                                               data,
-                                               data_size,
+                                               shader_data.data,
+                                               shader_data.data_size,
                                                userdata);
     }
 
@@ -300,7 +321,7 @@ The trace decoder provides decoded information through a callback:
     }
 
 Trace Decoder info events
-++++++++++++++++++
++++++++++++++++++++++++++++
 
 The Trace Decoder provides important information about the quality and comprehensiveness of the trace data through ``ROCPROFILER_THREAD_TRACE_DECODER_RECORD_INFO`` events. It is important to handle these events to understand potential issues with your trace data:
 

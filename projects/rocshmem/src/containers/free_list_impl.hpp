@@ -33,11 +33,11 @@ namespace rocshmem {
  ******************************* FREE LIST ***********************************
  *****************************************************************************/
 
-template <typename TYPE, typename ALLOC>
-FreeList<TYPE, ALLOC>::~FreeList() {}
+template <typename TYPE>
+FreeList<TYPE>::~FreeList() {}
 
-template <typename TYPE, typename ALLOC>
-void FreeList<TYPE, ALLOC>::deallocate_all_nodes() {
+template <typename TYPE>
+void FreeList<TYPE>::deallocate_all_nodes() {
   // Deallocate any existing nodes
   while (head_ != nullptr) {
     auto temp = head_;
@@ -56,16 +56,17 @@ void FreeList<TYPE, ALLOC>::deallocate_all_nodes() {
   }
 }
 
-template <typename TYPE, typename ALLOC>
-FreeList<TYPE, ALLOC>::FreeList(const ALLOC& alloc)
+template <typename TYPE>
+FreeList<TYPE>::FreeList(const MemoryAllocator& alloc)
     : allocator_{alloc},
       head_{nullptr},
       tail_{nullptr},
-      deallocated_nodes_{nullptr} {}
+      deallocated_nodes_{nullptr},
+      mutex_{alloc} {}
 
-template <typename TYPE, typename ALLOC>
+template <typename TYPE>
 template <class InputIt>
-bool FreeList<TYPE, ALLOC>::push_back_range(InputIt first, InputIt last) {
+bool FreeList<TYPE>::push_back_range(InputIt first, InputIt last) {
   for (auto iter = first; iter != last; iter++) {
     auto key = *iter;
     const bool result = push_back(key);
@@ -76,8 +77,8 @@ bool FreeList<TYPE, ALLOC>::push_back_range(InputIt first, InputIt last) {
   return true;
 }
 
-template <typename TYPE, typename ALLOC>
-__device__ bool FreeList<TYPE, ALLOC>::push_back(const TYPE& val) {
+template <typename TYPE>
+__device__ bool FreeList<TYPE>::push_back(const TYPE& val) {
   TicketLockGuard<MutexType> guard(*mutex_.get());
   auto node = allocate_node();
   if (node == nullptr) {
@@ -92,13 +93,13 @@ __device__ bool FreeList<TYPE, ALLOC>::push_back(const TYPE& val) {
   return true;
 }
 
-template <typename TYPE, typename ALLOC>
-__device__ bool FreeList<TYPE, ALLOC>::push_back(TYPE&& val) {
+template <typename TYPE>
+__device__ bool FreeList<TYPE>::push_back(TYPE&& val) {
   return push_back(std::forward<const TYPE>(val));
 }
 
-template <typename TYPE, typename ALLOC>
-__host__ bool FreeList<TYPE, ALLOC>::push_back(const TYPE& val) {
+template <typename TYPE>
+__host__ bool FreeList<TYPE>::push_back(const TYPE& val) {
   auto node = allocate_node();
   if (node == nullptr) {
     return false;
@@ -110,14 +111,14 @@ __host__ bool FreeList<TYPE, ALLOC>::push_back(const TYPE& val) {
 
   return true;
 }
-template <typename TYPE, typename ALLOC>
-__host__ bool FreeList<TYPE, ALLOC>::push_back(TYPE&& val) {
+template <typename TYPE>
+__host__ bool FreeList<TYPE>::push_back(TYPE&& val) {
   return push_back(std::forward<const TYPE>(val));
 }
 
-template <typename TYPE, typename ALLOC>
-__device__ typename FreeList<TYPE, ALLOC>::PopBackResult
-FreeList<TYPE, ALLOC>::pop_front() {
+template <typename TYPE>
+__device__ typename FreeList<TYPE>::PopBackResult
+FreeList<TYPE>::pop_front() {
   TicketLockGuard<MutexType> guard(*mutex_.get());
 
   if (head_ == nullptr) {

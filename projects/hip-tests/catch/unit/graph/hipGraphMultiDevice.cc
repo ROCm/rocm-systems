@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2022-25 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <functional>
 
@@ -64,13 +48,20 @@ static void init_input(int* a, size_t size) {
 }
 
 
-TEST_CASE("Unit_hipGraphMultiDevice") {
+HIP_TEST_CASE(Unit_hipGraphMultiDevice) {
   int nGpus = 0;
   HIP_CHECK(hipGetDeviceCount(&nGpus));
   if (nGpus < 2) {
-    fprintf(stderr, "Need at least 2 GPUs, skipped!\n");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
+  int can_access_peer = 0;
+  HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, 1, 0));
+  if (!can_access_peer) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+  }
+  HIP_CHECK(hipSetDevice(1));
+  HIP_CHECK(hipDeviceEnablePeerAccess(0, 0));
+
   hipStream_t streamdev1, streamdev2;
   hipEvent_t eventdev1, eventdev2;
   hipGraph_t graph = nullptr;
@@ -106,14 +97,15 @@ TEST_CASE("Unit_hipGraphMultiDevice") {
   HipTest::vector_square<int>
       <<<grid_size, block_size, 0, streamdev1>>>(buf_d1, buf_d1, buffer_size);
   HIP_CHECK(hipEventRecord(eventdev1, streamdev1));
-  HIP_CHECK(hipStreamWaitEvent(streamdev2, eventdev1));
+  HIP_CHECK(hipStreamWaitEvent(streamdev2, eventdev1, 0));
 
   HIP_CHECK(hipSetDevice(1));
-  HIP_CHECK(hipMemcpyDtoDAsync(buf_d2, buf_d1, sizeof(int) * buffer_size, streamdev2));
+  HIP_CHECK(
+      hipMemcpyAsync(buf_d2, buf_d1, sizeof(int) * buffer_size, hipMemcpyDeviceToDevice, streamdev2));
   HipTest::vector_square<int>
       <<<grid_size, block_size, 0, streamdev2>>>(buf_d2, buf_d2, buffer_size);
   HIP_CHECK(hipEventRecord(eventdev2, streamdev2));
-  HIP_CHECK(hipStreamWaitEvent(streamdev1, eventdev2));
+  HIP_CHECK(hipStreamWaitEvent(streamdev1, eventdev2, 0));
 
   HIP_CHECK(hipStreamEndCapture(streamdev1, &graph));
 
@@ -123,7 +115,7 @@ TEST_CASE("Unit_hipGraphMultiDevice") {
   HIP_CHECK(hipStreamSynchronize(streamdev1));
 
   HIP_CHECK(hipSetDevice(1));
-  HIP_CHECK(hipMemcpy(outbuf_h, buf_d2, sizeof(int) * buffer_size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(outbuf_h, buf_d2, sizeof(int) * buffer_size, hipMemcpyDeviceToHost));
   check_output(ibuf_h, outbuf_h, buffer_size);
 
   HIP_CHECK(hipGraphExecDestroy(graph_exec));

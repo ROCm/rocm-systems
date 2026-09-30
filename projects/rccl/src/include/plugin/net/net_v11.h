@@ -1,13 +1,18 @@
-/*
- * Copyright (c) 2017-2022, NVIDIA CORPORATION. All rights reserved.
- */
+/*************************************************************************
+ * SPDX-FileCopyrightText: Copyright (c) 2017-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef NET_V11_H_
 #define NET_V11_H_
 
+#define NCCL_NET_MAX_DEVS_PER_NIC_V11 4
+
 typedef struct {
   int ndevs;
-  int devs[NCCL_NET_MAX_DEVS_PER_NIC];
+  int devs[NCCL_NET_MAX_DEVS_PER_NIC_V11];
 } ncclNetVDeviceProps_v11_t;
 
 #define NCCL_NET_TRAFFIC_CLASS_UNDEF -1
@@ -16,7 +21,6 @@ typedef struct {
   // Plugin-specific TC value
   int trafficClass;
 } ncclNetCommConfig_v11_t;
-
 
 typedef struct {
   char* name;                      // Used mostly for logging.
@@ -41,13 +45,14 @@ typedef struct {
 
 #define NCCL_NET_ATTR_UNDEF -1
 
-#define NCCL_NET_ATTR_INIT { \
-  { NCCL_NET_ATTR_UNDEF, NCCL_NET_ATTR_UNDEF, NCCL_NET_ATTR_UNDEF, NCCL_NET_ATTR_UNDEF }, /* sendCommAttr */ \
-  { NCCL_NET_ATTR_UNDEF, NCCL_NET_ATTR_UNDEF, NCCL_NET_ATTR_UNDEF, NCCL_NET_ATTR_UNDEF }, /* recvCommAttr */ \
-  (uint32_t)NCCL_NET_ATTR_UNDEF, /* op */ \
-  (uint32_t)NCCL_NET_ATTR_UNDEF, /* algo */ \
-  (uint32_t)NCCL_NET_ATTR_UNDEF, /* proto */ \
-}
+#define NCCL_NET_ATTR_INIT \
+  { \
+    {NCCL_NET_ATTR_UNDEF, NCCL_NET_ATTR_UNDEF, NCCL_NET_ATTR_UNDEF, NCCL_NET_ATTR_UNDEF}, /* sendCommAttr */ \
+    {NCCL_NET_ATTR_UNDEF, NCCL_NET_ATTR_UNDEF, NCCL_NET_ATTR_UNDEF, NCCL_NET_ATTR_UNDEF}, /* recvCommAttr */ \
+    (uint32_t)NCCL_NET_ATTR_UNDEF, /* op */ \
+    (uint32_t)NCCL_NET_ATTR_UNDEF, /* algo */ \
+    (uint32_t)NCCL_NET_ATTR_UNDEF, /* proto */ \
+  }
 
 typedef struct {
   int32_t maxConcurrentPeers;
@@ -68,7 +73,8 @@ typedef struct {
   // Name of the network (mainly for logs)
   const char* name;
   // Initialize the network.
-  ncclResult_t (*init)(void** ctx, uint64_t commId, ncclNetCommConfig_v11_t* config, ncclDebugLogger_t logFunction, ncclProfilerCallback_t profFunction);
+  ncclResult_t (*init)(void** ctx, uint64_t commId, ncclNetCommConfig_v11_t* config, ncclDebugLogger_t logFunction,
+                       ncclProfilerCallback_t profFunction);
   // Return the number of adapters.
   ncclResult_t (*devices)(int* ndev);
   // Get various device properties.
@@ -100,7 +106,8 @@ typedef struct {
   ncclResult_t (*isend)(void* sendComm, void* data, size_t size, int tag, void* mhandle, void* phandle, void** request);
   // Asynchronous recv from a peer.
   // May return request == NULL if the call cannot be performed (or would block)
-  ncclResult_t (*irecv)(void* recvComm, int n, void** data, size_t* sizes, int* tags, void** mhandles, void** phandles, void** request);
+  ncclResult_t (*irecv)(void* recvComm, int n, void** data, size_t* sizes, int* tags, void** mhandles, void** phandles,
+                        void** request);
   // Perform a flush/fence to make sure all data received with NCCL_PTR_CUDA is
   // visible to the GPU
   ncclResult_t (*iflush)(void* recvComm, int n, void** data, int* sizes, void** mhandles, void** request);
@@ -156,19 +163,19 @@ typedef struct {
   // Register/Deregister memory. Type is either NCCL_PTR_HOST or NCCL_PTR_CUDA.
   ncclResult_t (*regMr)(void* collComm, void* data, size_t size, int type, void** mhandle);
   /* DMA-BUF support */
-  ncclResult_t (*regMrDmaBuf)(void* collComm, void* data, size_t size, int type, uint64_t offset, int fd, void** mhandle);
+  ncclResult_t (*regMrDmaBuf)(void* collComm, void* data, size_t size, int type, uint64_t offset, int fd,
+                              void** mhandle);
   ncclResult_t (*deregMr)(void* collComm, void* mhandle);
   // Performs an asynchronous allreduce operation on the collective group.
   // May return request == NULL if the call cannot be performed (or would block).
-  ncclResult_t (*iallreduce)(void* collComm, void* sendData, void* recvData, size_t count,
-      ncclDataType_t dataType, ncclRedOp_t redOp, void* sendMhandle, void* recvMhandle, void** request);
+  ncclResult_t (*iallreduce)(void* collComm, void* sendData, void* recvData, size_t count, ncclDataType_t dataType,
+                             ncclRedOp_t redOp, void* sendMhandle, void* recvMhandle, void** request);
   ncclResult_t (*iallgather)(void* collComm, void* sendData, int nRecvParts, ncclNetSGE_v11_t* recvParts,
-                             size_t bytesPerRank, size_t windowOffset, size_t windowBytes,
-                             void* sendMhandle, void** request);
+                             size_t bytesPerRank, size_t windowOffset, size_t windowBytes, void* sendMhandle,
+                             void** request);
   ncclResult_t (*ireducescatter)(void* collComm, int nSendParts, ncclNetSGE_v11_t* sendParts, void* recvData,
-                                 size_t bytesPerRank, size_t windowOffset, size_t windowBytes,
-                                 ncclDataType_t dataType, ncclRedOp_t redOp,
-                                 void* recvMhandle, void** request);
+                                 size_t bytesPerRank, size_t windowOffset, size_t windowBytes, ncclDataType_t dataType,
+                                 ncclRedOp_t redOp, void* recvMhandle, void** request);
   // Perform a flush/fence to make sure all data received with NCCL_PTR_CUDA is
   // visible to the GPU
   ncclResult_t (*iflush)(void* collComm, void* data, int size, void* mhandle, void** request);
@@ -184,5 +191,4 @@ typedef struct {
   // Finalize the collective network.
   ncclResult_t (*finalize)(void* ctx);
 } ncclCollNet_v11_t;
-
 #endif // end include guard

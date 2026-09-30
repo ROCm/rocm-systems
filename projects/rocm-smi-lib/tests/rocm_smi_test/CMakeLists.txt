@@ -28,20 +28,17 @@ set(RSMITST "rsmitst")
 # Hack to find libraries after installation
 # $ORIGIN is needed for libgtest.so
 # /opt/rocm/share/rocm-smi/rsmitst_tests/../../../ = /opt/rocm
-set(RSMITST_RPATH
-    "\$ORIGIN/../../../lib"
-    "\$ORIGIN")
+set(RSMITST_RPATH "\$ORIGIN/../../../lib" "\$ORIGIN")
 # combine lists
-set(CMAKE_INSTALL_RPATH
-    ${CMAKE_INSTALL_RPATH}
-    ${RSMITST_RPATH})
+set(CMAKE_INSTALL_RPATH ${CMAKE_INSTALL_RPATH} ${RSMITST_RPATH})
 
 # Download and compile googletest
 include(FetchContent)
 FetchContent_Declare(
     googletest
     GIT_REPOSITORY https://github.com/google/googletest.git
-    GIT_TAG v1.14.0)
+    GIT_TAG v1.14.0
+)
 FetchContent_MakeAvailable(googletest)
 
 # Other source directories
@@ -63,19 +60,25 @@ target_link_libraries(
     PUBLIC c
     PUBLIC stdc++
     PUBLIC pthread
-    PUBLIC dl)
+    PUBLIC dl
+)
 
 # install tests
-install(TARGETS ${RSMITST}
+install(
+    TARGETS ${RSMITST}
     DESTINATION ${SHARE_INSTALL_PREFIX}/rsmitst_tests
-    COMPONENT ${TESTS_COMPONENT})
+    COMPONENT ${TESTS_COMPONENT}
+)
 
-install(FILES rsmitst.exclude
+install(
+    FILES rsmitst.exclude
     DESTINATION ${SHARE_INSTALL_PREFIX}/rsmitst_tests
-    COMPONENT ${TESTS_COMPONENT})
+    COMPONENT ${TESTS_COMPONENT}
+)
 
 # install googletest libraries with tests
-install(TARGETS gtest gtest_main
+install(
+    TARGETS gtest gtest_main
     DESTINATION ${SHARE_INSTALL_PREFIX}/rsmitst_tests
-    COMPONENT ${TESTS_COMPONENT})
-
+    COMPONENT ${TESTS_COMPONENT}
+)

@@ -1,22 +1,6 @@
-# Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
+# SPDX-License-Identifier: MIT
 
 # Common Tests - Test independent of all platforms
 set(TEST_SRC
@@ -35,79 +19,163 @@ set(TEST_SRC
     hipGetFuncBySymbol.cc
     hipDrvLaunchKernelEx.cc
     hipModuleGetFunctionCount.cc
+    hipModuleEnumerateFunctions.cc
     hipModuleLoadFatBinary.cc
+    test_fatbin_mixed_arch.cc
 )
 
-add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/get_function_module.code
-                   COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
+if (HIP_PLATFORM MATCHES "amd")
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/get_function_module.code
+                   COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
                    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/get_function_module.cc
                     -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
                    -o get_function_module.code
                    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/get_function_module.cc)
-add_custom_target(get_function_module ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/get_function_module.code)
-#target_link_libraries(get_function_module.code hip::host hip::device)
+else()
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/get_function_module.code
+                   COMMAND ${CMAKE_HIP_COMPILER} --fatbin ${OFFLOAD_ARCH_LIST}
+                   -x cu ${CMAKE_CURRENT_SOURCE_DIR}/get_function_module.cc
+                    -I${HIP_INCLUDE_DIR}
+                   -o get_function_module.code
+                   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/get_function_module.cc)
+endif()
+add_custom_target(get_function_module DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/get_function_module.code)
+
+# Deliberately-mismatched fat binary for Unit_FatBin_NoCompatibleCodeObject_*:
+# built for gfx900+gfx906 only (fixed archs, NOT ${OFFLOAD_ARCH_LIST}) so it
+# never matches a modern (non-Vega) runner and drives ExtractFatBinaryUsingCOMGR
+# into its "no compatible code object" path.
+if (HIP_PLATFORM MATCHES "amd")
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/fatbin_mismatch_module.code
+                   COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH}
+                   --offload-arch=gfx900 --offload-arch=gfx906 --cuda-device-only
+                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/fatbin_mismatch_module.cc
+                   -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
+                   -o fatbin_mismatch_module.code
+                   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/fatbin_mismatch_module.cc)
+  add_custom_target(fatbin_mismatch_module
+                    DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/fatbin_mismatch_module.code)
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
+               ${CMAKE_CURRENT_BINARY_DIR}/fatbin_mismatch_module.code)
+endif()
 
 if (NOT WIN32)
-  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/launch_kernel_module.code
-                     COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
+  if (HIP_PLATFORM MATCHES "amd")
+    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/launch_kernel_module.code
+                     COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
                      -x hip ${CMAKE_CURRENT_SOURCE_DIR}/launch_kernel_module.cc
                      -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
                      -o launch_kernel_module.code
                      DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/launch_kernel_module.cc)
-  #target_link_libraries(launch_kernel_module.code hip::host hip::device)
-  add_custom_target(launch_kernel_module ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/launch_kernel_module.code)
-
-  add_custom_target(coopKernel.code
-                    COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
+    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/coopKernel.code
+                    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
                     -x hip ${CMAKE_CURRENT_SOURCE_DIR}/coopKernel.cpp
-                    -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/coopKernel.code
+                    -o ${CMAKE_CURRENT_BINARY_DIR}/coopKernel.code
                     -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
-                    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-  #target_link_libraries(coopKernel.code hip::host hip::device)
-  set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS 
+                    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+                    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/coopKernel.cpp
+                    COMMENT "Compiling coopKernel.code")
+  else()
+    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/launch_kernel_module.code
+                     COMMAND ${CMAKE_HIP_COMPILER} --fatbin ${OFFLOAD_ARCH_LIST}
+                     -x cu ${CMAKE_CURRENT_SOURCE_DIR}/launch_kernel_module.cc
+                     -I${HIP_INCLUDE_DIR}
+                     -o launch_kernel_module.code
+                     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/launch_kernel_module.cc)
+    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/coopKernel.code
+                    COMMAND ${CMAKE_HIP_COMPILER} --fatbin ${OFFLOAD_ARCH_LIST}
+                    -x cu ${CMAKE_CURRENT_SOURCE_DIR}/coopKernel.cpp
+                    -o ${CMAKE_CURRENT_BINARY_DIR}/coopKernel.code
+                    -I${HIP_INCLUDE_DIR}
+                    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+                    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/coopKernel.cpp
+                    COMMENT "Compiling coopKernel.code")
+  endif()
+  add_custom_target(launch_kernel_module DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/launch_kernel_module.code)
+  add_custom_target(coopKernel_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/coopKernel.code)
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
   ${CMAKE_CURRENT_BINARY_DIR}/launch_kernel_module.code
   ${CMAKE_CURRENT_BINARY_DIR}/coopKernel.code)
 endif()
 
 
-
-add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/get_global_test_module.code
-                   COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
+if (HIP_PLATFORM MATCHES "amd")
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/get_global_test_module.code
+                   COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
                    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/get_global_test_module.cc
                    -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
                    -o get_global_test_module.code
                    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/get_global_test_module.cc)
-add_custom_target(get_global_test_module ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/get_global_test_module.code)
-#target_link_libraries(get_global_test_module.code hip::host hip::device)
+  add_custom_target(get_global_test_module DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/get_global_test_module.code)
 
-add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/get_tex_ref_module.code
-                   COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/get_tex_ref_module.code
+                   COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
                    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/get_tex_ref_module.cc
                    -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
                    -o get_tex_ref_module.code
                    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/get_tex_ref_module.cc)
-add_custom_target(get_tex_ref_module ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/get_tex_ref_module.code)
-#target_link_libraries(get_tex_ref_module.code hip::host hip::device)
+  add_custom_target(get_tex_ref_module DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/get_tex_ref_module.code)
 
-add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/not_a_module.txt
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/not_a_module.txt
                    COMMAND ${CMAKE_COMMAND} -E copy
                    ${CMAKE_CURRENT_SOURCE_DIR}/not_a_module.txt
                    ${CMAKE_CURRENT_BINARY_DIR}/not_a_module.txt
                    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/not_a_module.txt)
-add_custom_target(not_a_module ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/not_a_module.txt)
-add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/empty_file.txt
+  add_custom_target(not_a_module DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/not_a_module.txt)
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/empty_file.txt
                    COMMAND ${CMAKE_COMMAND} -E copy
                    ${CMAKE_CURRENT_SOURCE_DIR}/empty_file.txt
                    ${CMAKE_CURRENT_BINARY_DIR}/empty_file.txt
                    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/empty_file.txt)
-add_custom_target(empty_file ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/empty_file.txt)
+  add_custom_target(empty_file DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/empty_file.txt)
 
-add_custom_target(empty_module
-                  COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/empty_module.code
+                  COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/empty_module.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/empty_module.code
-                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT})
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT}
+                  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/empty_module.cc
+                  COMMENT "Compiling empty_module.code")
+  add_custom_target(empty_module DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/empty_module.code)
+else()
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/get_global_test_module.code
+                   COMMAND ${CMAKE_HIP_COMPILER} --fatbin ${OFFLOAD_ARCH_LIST}
+                   -x cu ${CMAKE_CURRENT_SOURCE_DIR}/get_global_test_module.cc
+                   -I${HIP_INCLUDE_DIR}
+                   -o get_global_test_module.code
+                   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/get_global_test_module.cc)
+  add_custom_target(get_global_test_module DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/get_global_test_module.code)
 
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/get_tex_ref_module.code
+                   COMMAND ${CMAKE_HIP_COMPILER} --fatbin ${OFFLOAD_ARCH_LIST}
+                   -x cu ${CMAKE_CURRENT_SOURCE_DIR}/get_tex_ref_module.cc
+                   -I${HIP_INCLUDE_DIR}
+                   -o get_tex_ref_module.code
+                   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/get_tex_ref_module.cc)
+  add_custom_target(get_tex_ref_module DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/get_tex_ref_module.code)
+
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/not_a_module.txt
+                   COMMAND ${CMAKE_COMMAND} -E copy
+                   ${CMAKE_CURRENT_SOURCE_DIR}/not_a_module.txt
+                   ${CMAKE_CURRENT_BINARY_DIR}/not_a_module.txt
+                   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/not_a_module.txt)
+  add_custom_target(not_a_module DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/not_a_module.txt)
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/empty_file.txt
+                   COMMAND ${CMAKE_COMMAND} -E copy
+                   ${CMAKE_CURRENT_SOURCE_DIR}/empty_file.txt
+                   ${CMAKE_CURRENT_BINARY_DIR}/empty_file.txt
+                   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/empty_file.txt)
+  add_custom_target(empty_file DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/empty_file.txt)
+
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/empty_module.code
+                  COMMAND ${CMAKE_HIP_COMPILER} --fatbin ${OFFLOAD_ARCH_LIST}
+                  -x cu ${CMAKE_CURRENT_SOURCE_DIR}/empty_module.cc
+                  -o ${CMAKE_CURRENT_BINARY_DIR}/empty_module.code
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+                  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/empty_module.cc
+                  COMMENT "Compiling empty_module.code")
+  add_custom_target(empty_module DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/empty_module.code)
+endif()
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
   ${CMAKE_CURRENT_BINARY_DIR}/get_function_module.code
   ${CMAKE_CURRENT_BINARY_DIR}/get_global_test_module.code
@@ -120,74 +188,96 @@ set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
 # having space at the start/end of OFFLOAD_ARCH_STR can cause build failures
 
 if(HIP_PLATFORM MATCHES "amd")
-set(TEST_SRC
+  set(TEST_SRC
     ${TEST_SRC}
     hipExtModuleLaunchKernel.cc
     hipHccModuleLaunchKernel.cc
-    hipLinkCreate.cc)
+    hipLinkCreate.cc
+    hipModuleLoadMalformedFatBinary.cc)
 
-if(BUILD_SHARED_LIBS)
-  set(TEST_SRC
+  if(BUILD_SHARED_LIBS)
+    set(TEST_SRC
       ${TEST_SRC}
       hipGetProcAddressModuleApis.cc)
-endif()
+  endif()
 
-add_custom_target(copyKernel.code
-                  COMMAND ${CMAKE_HIP_COMPILER} -mcode-object-version=5 --cuda-device-only
-                  ${OFFLOAD_ARCH_LIST} -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copyKernel.cc
-                  -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copyKernel.code
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.code
+                  COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} -mcode-object-version=5 --cuda-device-only
+                  -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copyKernel.cc
+                  -o ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.code
                   -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
-                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-#target_link_libraries(copyKernel.code hip::host hip::device)
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+                  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/copyKernel.cc
+                  COMMENT "Compiling copyKernel.code")
+  add_custom_target(copyKernel_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.code)
 
-add_custom_target(copyKernel.s
-                  COMMAND ${CMAKE_HIP_COMPILER} -mcode-object-version=5 -S -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copyKernel.cc
-                  -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copyKernel.s
+  # copyKernel.s must be real GPU (GCN) assembly so the CheckCodeObjAttr test can
+  # find the .uniform_work_group_size metadata. That requires --cuda-device-only
+  # plus a single offload arch; without --cuda-device-only clang emits a host/IR
+  # bundle, and -S rejects -o when more than one arch is given. The metadata is
+  # arch-independent, so the first offload arch is sufficient.
+  set(COPYKERNEL_S_OFFLOAD_ARCH)
+  if(OFFLOAD_ARCH_LIST)
+    list(GET OFFLOAD_ARCH_LIST 0 COPYKERNEL_S_OFFLOAD_ARCH)
+  endif()
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.s
+                  COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${COPYKERNEL_S_OFFLOAD_ARCH} -mcode-object-version=5 --cuda-device-only -S -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copyKernel.cc
+                  -o ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.s
                   -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
-                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-#target_link_libraries(copyKernel.s hip::host hip::device)
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+                  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/copyKernel.cc
+                  COMMENT "Compiling copyKernel.s")
+  add_custom_target(copyKernel_s DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.s)
 
-add_custom_target(addKernel.code
-                  COMMAND ${CMAKE_HIP_COMPILER} -mcode-object-version=5 --cuda-device-only -x hip ${OFFLOAD_ARCH_LIST}
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/addKernel.code
+                  COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} -mcode-object-version=5 --cuda-device-only -x hip
                   ${CMAKE_CURRENT_SOURCE_DIR}/addKernel.cc
-                  -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/addKernel.code
+                  -o ${CMAKE_CURRENT_BINARY_DIR}/addKernel.code
                   -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
-                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-#target_link_libraries(addKernel.code hip::host hip::device)  
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+                  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/addKernel.cc
+                  COMMENT "Compiling addKernel.code")
+  add_custom_target(addKernel_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/addKernel.code)
 
-# TODO - Rock build failure from clang
-if(NOT WIN32)
-  add_custom_target(addKernel.spv
-                    COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only --offload-arch=amdgcnspirv
+  # TODO - Rock build failure from clang
+  if(NOT WIN32)
+    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/addKernel.spv
+                    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH_SPIRV} --cuda-device-only --offload-arch=amdgcnspirv
                     --no-gpu-bundle-output
                     -x hip ${CMAKE_CURRENT_SOURCE_DIR}/addKernel.cc
                     -o ${CMAKE_CURRENT_BINARY_DIR}/addKernel.spv
                     -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
-                    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-  #target_link_libraries(addKernel.spv hip::host hip::device)
+                    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+                    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/addKernel.cc
+                    COMMENT "Compiling addKernel.spv")
+    add_custom_target(addKernel_spv DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/addKernel.spv)
 
-  add_custom_target(addKernel-bundle.spv
-                    COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only --offload-arch=amdgcnspirv
+    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/addKernel-bundle.spv
+                    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH_SPIRV} --cuda-device-only --offload-arch=amdgcnspirv
                     -x hip ${CMAKE_CURRENT_SOURCE_DIR}/addKernel.cc
                     -o ${CMAKE_CURRENT_BINARY_DIR}/addKernel-bundle.spv
                     -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
-                    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-  #target_link_libraries(addKernel-bundle.spv hip::host hip::device)
-  set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
+                    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+                    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/addKernel.cc
+                    COMMENT "Compiling addKernel-bundle.spv")
+    add_custom_target(addKernel-bundle_spv DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/addKernel-bundle.spv)
+    set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
     ${CMAKE_CURRENT_BINARY_DIR}/addKernel.spv
     ${CMAKE_CURRENT_BINARY_DIR}/addKernel-bundle.spv)
-endif()
+  endif()
 
 
-add_custom_target(copyKernelCompressed.code
-                  COMMAND ${CMAKE_HIP_COMPILER} -mcode-object-version=5 --offload-compress --cuda-device-only ${OFFLOAD_ARCH_LIST}
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/copyKernelCompressed.code
+                  COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} -mcode-object-version=5 --offload-compress --cuda-device-only
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copyKernel.cc
-                  -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copyKernelCompressed.code
+                  -o ${CMAKE_CURRENT_BINARY_DIR}/copyKernelCompressed.code
                   -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
-                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-#target_link_libraries(copyKernelCompressed.code hip::host hip::device)
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+                  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/copyKernel.cc
+                  COMMENT "Compiling copyKernelCompressed.code")
+  add_custom_target(copyKernelCompressed_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copyKernelCompressed.code)
 
-set(OFFLOAD_ARCH_GENERIC_STR
+  set(OFFLOAD_ARCH_GENERIC_STR
   --offload-arch=gfx9-generic
   --offload-arch=gfx9-4-generic:sramecc+:xnack-
   --offload-arch=gfx9-4-generic:sramecc-:xnack-
@@ -196,94 +286,124 @@ set(OFFLOAD_ARCH_GENERIC_STR
   --offload-arch=gfx10-3-generic
   --offload-arch=gfx11-generic
   --offload-arch=gfx12-generic
+  --offload-arch=gfx12-5-generic
 )
-#set(OFFLOAD_ARCH_GENERIC_STR "--offload-arch=gfx9-generic --offload-arch=gfx9-4-generic:sramecc+:xnack- --offload-arch=gfx9-4-generic:sramecc-:xnack- --offload-arch=gfx9-4-generic:xnack+ --offload-arch=gfx10-1-generic --offload-arch=gfx10-3-generic --offload-arch=gfx11-generic --offload-arch=gfx12-generic")
-add_custom_target(copyKernelGenericTarget.code
-                  COMMAND ${CMAKE_HIP_COMPILER} -mcode-object-version=6 --cuda-device-only ${OFFLOAD_ARCH_GENERIC_STR}
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/copyKernelGenericTarget.code
+                  COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} -mcode-object-version=6 --cuda-device-only ${OFFLOAD_ARCH_GENERIC_STR}
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copyKernel.cc
-                  -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copyKernelGenericTarget.code
+                  -o ${CMAKE_CURRENT_BINARY_DIR}/copyKernelGenericTarget.code
                   -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
-                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-#target_link_libraries(copyKernelGenericTarget.code hip::host hip::device)
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+                  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/copyKernel.cc
+                  COMMENT "Compiling copyKernelGenericTarget.code")
+  add_custom_target(copyKernelGenericTarget_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copyKernelGenericTarget.code)
 
-add_custom_target(copyKernelGenericTargetCompressed.code
-                  COMMAND ${CMAKE_HIP_COMPILER} -mcode-object-version=6 --offload-compress --cuda-device-only
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/copyKernelGenericTargetCompressed.code
+                  COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} -mcode-object-version=6 --offload-compress --cuda-device-only
                   ${OFFLOAD_ARCH_GENERIC_STR}
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copyKernel.cc
-                  -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copyKernelGenericTargetCompressed.code
+                  -o ${CMAKE_CURRENT_BINARY_DIR}/copyKernelGenericTargetCompressed.code
                   -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
-                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-#target_link_libraries(copyKernelGenericTargetCompressed.code hip::host hip::device)
-set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+                  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/copyKernel.cc
+                  COMMENT "Compiling copyKernelGenericTargetCompressed.code")
+  add_custom_target(copyKernelGenericTargetCompressed_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copyKernelGenericTargetCompressed.code)
+
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/anyOrderLaunch.code
+                  COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} -mcode-object-version=5 --cuda-device-only
+                  -x hip ${CMAKE_CURRENT_SOURCE_DIR}/anyOrderLaunch.cc
+                  -o ${CMAKE_CURRENT_BINARY_DIR}/anyOrderLaunch.code
+                  -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+                  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/anyOrderLaunch.cc
+                  COMMENT "Compiling anyOrderLaunch.code")
+  add_custom_target(anyOrderLaunch_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/anyOrderLaunch.code)
+
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.code
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.s
   ${CMAKE_CURRENT_BINARY_DIR}/addKernel.code
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernelCompressed.code
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernelGenericTarget.code
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernelGenericTargetCompressed.code
+  ${CMAKE_CURRENT_BINARY_DIR}/anyOrderLaunch.code
 )
 
-if(UNIX)
-set(TEST_SRC
+  if(UNIX)
+    set(TEST_SRC
     ${TEST_SRC}
     hipKerArgOptimization.cc)
 
-add_custom_target(copiousArgKernel.code
-                  COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
+    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel.code
+                  COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
-                  -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copiousArgKernel.code
-                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT})
-#target_link_libraries(copiousArgKernel.code hip::host hip::device)
+                  -o ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel.code
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT}
+                  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
+                  COMMENT "Compiling copiousArgKernel.code")
+    add_custom_target(copiousArgKernel_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel.code)
 
-add_custom_target(copiousArgKernel0.code
-                  COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
+    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel0.code
+                  COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
                   -mllvm -amdgpu-kernarg-preload-count=0
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
-                  -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copiousArgKernel0.code
-                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT})
-#target_link_libraries(copiousArgKernel0.code hip::host hip::device)
+                  -o ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel0.code
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT}
+                  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
+                  COMMENT "Compiling copiousArgKernel0.code")
+    add_custom_target(copiousArgKernel0_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel0.code)
 
-add_custom_target(copiousArgKernel1.code
-                  COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
+    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel1.code
+                  COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
                   -mllvm -amdgpu-kernarg-preload-count=1
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
-                  -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copiousArgKernel1.code
-                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT})
-#target_link_libraries(copiousArgKernel1.code hip::host hip::device)
+                  -o ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel1.code
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT}
+                  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
+                  COMMENT "Compiling copiousArgKernel1.code")
+    add_custom_target(copiousArgKernel1_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel1.code)
 
-add_custom_target(copiousArgKernel2.code
-                  COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
+    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel2.code
+                  COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
                   -mllvm -amdgpu-kernarg-preload-count=2
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
-                  -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copiousArgKernel2.code
-                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT})
-#target_link_libraries(copiousArgKernel2.code hip::host hip::device)
+                  -o ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel2.code
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT}
+                  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
+                  COMMENT "Compiling copiousArgKernel2.code")
+    add_custom_target(copiousArgKernel2_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel2.code)
 
-add_custom_target(copiousArgKernel3.code
-                  COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
+    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel3.code
+                  COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
                   -mllvm -amdgpu-kernarg-preload-count=3
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
-                  -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copiousArgKernel3.code
-                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT})
-#target_link_libraries(copiousArgKernel3.code hip::host hip::device)
+                  -o ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel3.code
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT}
+                  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
+                  COMMENT "Compiling copiousArgKernel3.code")
+    add_custom_target(copiousArgKernel3_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel3.code)
 
-add_custom_target(copiousArgKernel16.code
-                  COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
+    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel16.code
+                  COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
                   -mllvm -amdgpu-kernarg-preload-count=16
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
-                  -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copiousArgKernel16.code
-                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT})
-#target_link_libraries(copiousArgKernel16.code hip::host hip::device)
+                  -o ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel16.code
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT}
+                  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
+                  COMMENT "Compiling copiousArgKernel16.code")
+    add_custom_target(copiousArgKernel16_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel16.code)
 
-add_custom_target(copiousArgKernel17.code
-                  COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
+    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel17.code
+                  COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
                   -mllvm -amdgpu-kernarg-preload-count=17
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
-                  -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copiousArgKernel17.code
-                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT})
-#target_link_libraries(copiousArgKernel17.code hip::host hip::device)
+                  -o ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel17.code
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT}
+                  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
+                  COMMENT "Compiling copiousArgKernel17.code")
+    add_custom_target(copiousArgKernel17_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel17.code)
 
-set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
+    set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
   ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel.code
   ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel0.code
   ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel1.code
@@ -292,13 +412,13 @@ set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
   ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel16.code
   ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel17.code
 )
-endif()
+  endif()
 endif()
 
 if(HIP_PLATFORM MATCHES "amd")
-    set(RTCLIB "hiprtc::hiprtc")
+  set(RTCLIB "hiprtc::hiprtc")
 else()
-    set(RTCLIB "nvrtc")
+  set(RTCLIB "nvrtc")
 endif()
 
 hip_add_exe_to_target(NAME ModuleTest
@@ -308,7 +428,7 @@ hip_add_exe_to_target(NAME ModuleTest
   COMMON_SHARED_SRC ${COMMON_SHARED_SRC})
 
 if(NOT WIN32)
-  add_dependencies(ModuleTest coopKernel.code)
+  add_dependencies(ModuleTest coopKernel_code)
   add_dependencies(ModuleTest launch_kernel_module)
 endif()
 
@@ -320,28 +440,40 @@ add_dependencies(ModuleTest empty_file)
 add_dependencies(ModuleTest empty_module)
 
 if(HIP_PLATFORM MATCHES "amd")
-add_dependencies(build_tests copyKernel.code copyKernel.s)
-add_dependencies(build_tests addKernel.code)
-# TODO - Rock build failure from clang
-if(NOT WIN32)
-  add_dependencies(build_tests addKernel.spv)
-  add_dependencies(build_tests addKernel-bundle.spv)
-endif()
-add_dependencies(build_tests copyKernelCompressed.code)
-add_dependencies(build_tests copyKernelGenericTarget.code)
-add_dependencies(build_tests copyKernelGenericTargetCompressed.code)
+  # SPIR-V builds compile copyKernel.s for --offload-arch=amdgcnspirv, which emits
+  # SPIR-V rather than GCN assembly, so it has no AMDGPU .uniform_work_group_size
+  # metadata. Signal the CheckCodeObjAttr test to skip itself in that case. Set the
+  # define on the source file rather than the ModuleTest target so it also reaches
+  # the per-file executable created when STANDALONE_TESTS=ON.
+  if(ENABLE_SPIRV)
+    set_source_files_properties(hipExtModuleLaunchKernel.cc PROPERTIES
+      COMPILE_DEFINITIONS HIP_TESTS_SPIRV_BUILD)
+  endif()
+  # Wire kernel artifacts to ModuleTest so `make ModuleTest` builds them.
+  # These are loaded at runtime by tests in the ModuleTest binary.
+  add_dependencies(ModuleTest copyKernel_code copyKernel_s)
+  add_dependencies(ModuleTest addKernel_code)
+  add_dependencies(ModuleTest fatbin_mismatch_module)
+  # TODO - Rock build failure from clang
+  if(NOT WIN32)
+    add_dependencies(ModuleTest addKernel_spv)
+    add_dependencies(ModuleTest addKernel-bundle_spv)
+  endif()
+  add_dependencies(ModuleTest copyKernelCompressed_code)
+  add_dependencies(ModuleTest copyKernelGenericTarget_code)
+  add_dependencies(ModuleTest copyKernelGenericTargetCompressed_code)
+  add_dependencies(ModuleTest anyOrderLaunch_code)
 
-if(UNIX)
-add_dependencies(build_tests copiousArgKernel.code copiousArgKernel0.code copiousArgKernel1.code copiousArgKernel2.code
-copiousArgKernel3.code copiousArgKernel16.code copiousArgKernel17.code)
-endif()
+  if(UNIX)
+    add_dependencies(ModuleTest copiousArgKernel_code copiousArgKernel0_code copiousArgKernel1_code copiousArgKernel2_code
+copiousArgKernel3_code copiousArgKernel16_code copiousArgKernel17_code)
+  endif()
 endif()
 
 add_executable(hipGetFuncBySymbol_exe EXCLUDE_FROM_ALL hipGetFuncBySymbol_exe.cc)
-set_source_files_properties(hipGetFuncBySymbol_exe.cc PROPERTIES LANGUAGE HIP)
-set_target_properties(hipGetFuncBySymbol_exe PROPERTIES LINKER_LANGUAGE HIP)
+set_source_files_properties(hipGetFuncBySymbol_exe.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
+target_link_libraries(hipGetFuncBySymbol_exe ${GPGPU_LINKER_LIBRARIES})
 add_dependencies(build_tests hipGetFuncBySymbol_exe)
-target_link_libraries(hipGetFuncBySymbol_exe hip::host hip::device)
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipGetFuncBySymbol_exe)
 
 # Common Tests - Test independent of all platforms
@@ -361,50 +493,127 @@ set(AMD_TEST_SRC
 if(HIP_PLATFORM MATCHES "amd")
   set(TEST_SRC ${TEST_SRC} ${AMD_TEST_SRC})
 endif()
+
 hip_add_exe_to_target(NAME module
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
-add_custom_target(managed_kernel.code COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only
-  ${OFFLOAD_ARCH_LIST} -x hip ${CMAKE_CURRENT_SOURCE_DIR}/managed_kernel.cpp
-  -o ${CMAKE_CURRENT_BINARY_DIR}/../module/managed_kernel.code
-  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT})
-#target_link_libraries(managed_kernel.code hip::host hip::device)
 
-add_custom_target(vcpy_kernel.code COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only
-  ${OFFLOAD_ARCH_LIST} -x hip ${CMAKE_CURRENT_SOURCE_DIR}/vcpy_kernel.cpp
-  -o ${CMAKE_CURRENT_BINARY_DIR}/../module/vcpy_kernel.code
-  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT})
-#target_link_libraries(vcpy_kernel.code hip::host hip::device)
+if (HIP_PLATFORM MATCHES "amd")
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/managed_kernel.code
+    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
+    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/managed_kernel.cpp
+    -o ${CMAKE_CURRENT_BINARY_DIR}/managed_kernel.code
+    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT}
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/managed_kernel.cpp
+    COMMENT "Compiling managed_kernel.code")
+  add_custom_target(managed_kernel_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/managed_kernel.code)
 
-add_custom_target(matmul.code COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only
-  -x hip ${OFFLOAD_ARCH_LIST} ${CMAKE_CURRENT_SOURCE_DIR}/matmul.cpp -o
-  ${CMAKE_CURRENT_BINARY_DIR}/../module/matmul.code
-  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT})
-#target_link_libraries(matmul.code hip::host hip::device)
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/vcpy_kernel.code
+    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
+    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/vcpy_kernel.cpp
+    -o ${CMAKE_CURRENT_BINARY_DIR}/vcpy_kernel.code
+    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT}
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/vcpy_kernel.cpp
+    COMMENT "Compiling vcpy_kernel.code")
+  add_custom_target(vcpy_kernel_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/vcpy_kernel.code)
 
-add_custom_target(kernel_count.code COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only
-  ${OFFLOAD_ARCH_LIST} -x hip ${CMAKE_CURRENT_SOURCE_DIR}/kernel_count.cpp -o
-  ${CMAKE_CURRENT_BINARY_DIR}/../module/kernel_count.code
-  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT})
-#target_link_libraries(kernel_count.code hip::host hip::device)
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/matmul.code
+    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
+    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/matmul.cpp
+    -o ${CMAKE_CURRENT_BINARY_DIR}/matmul.code
+    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT}
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/matmul.cpp
+    COMMENT "Compiling matmul.code")
+  add_custom_target(matmul_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/matmul.code)
 
-add_custom_target(emptyModuleCount.code COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only
-  ${OFFLOAD_ARCH_LIST} -x hip ${CMAKE_CURRENT_SOURCE_DIR}/emptyModuleCount.cpp -o
-  ${CMAKE_CURRENT_BINARY_DIR}/../module/emptyModuleCount.code
-  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT})
-#target_link_libraries(emptyModuleCount.code hip::host hip::device)
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/kernel_count.code
+    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
+    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/kernel_count.cpp
+    -o ${CMAKE_CURRENT_BINARY_DIR}/kernel_count.code
+    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT}
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/kernel_count.cpp
+    COMMENT "Compiling kernel_count.code")
+  add_custom_target(kernel_count_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/kernel_count.code)
 
-add_dependencies(ModuleTest managed_kernel.code)
-add_dependencies(ModuleTest vcpy_kernel.code)
-add_dependencies(ModuleTest matmul.code)
-add_dependencies(ModuleTest kernel_count.code)
-add_dependencies(ModuleTest emptyModuleCount.code)
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/emptyModuleCount.code
+    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
+    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/emptyModuleCount.cpp
+    -o ${CMAKE_CURRENT_BINARY_DIR}/emptyModuleCount.code
+    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT}
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/emptyModuleCount.cpp
+    COMMENT "Compiling emptyModuleCount.code")
+  add_custom_target(emptyModuleCount_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/emptyModuleCount.code)
+else()
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/managed_kernel.code
+    COMMAND ${CMAKE_HIP_COMPILER} --fatbin
+    ${OFFLOAD_ARCH_LIST} -x cu ${CMAKE_CURRENT_SOURCE_DIR}/managed_kernel.cpp
+    -o ${CMAKE_CURRENT_BINARY_DIR}/managed_kernel.code
+    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include -I${HIP_INCLUDE_DIR}
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/managed_kernel.cpp
+    COMMENT "Compiling managed_kernel.code")
+  add_custom_target(managed_kernel_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/managed_kernel.code)
 
-add_custom_target(kernel_composite_test.code COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only
-  ${OFFLOAD_ARCH_LIST} -x hip ${CMAKE_CURRENT_SOURCE_DIR}/kernel_composite_test.cpp -o
-  ${CMAKE_CURRENT_BINARY_DIR}/../module/kernel_composite_test.code
-  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT})
-#target_link_libraries(kernel_composite_test.code hip::host hip::device)
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/vcpy_kernel.code
+    COMMAND ${CMAKE_HIP_COMPILER} --fatbin
+    ${OFFLOAD_ARCH_LIST} -x cu ${CMAKE_CURRENT_SOURCE_DIR}/vcpy_kernel.cpp
+    -o ${CMAKE_CURRENT_BINARY_DIR}/vcpy_kernel.code
+    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include -I${HIP_INCLUDE_DIR}
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/vcpy_kernel.cpp
+    COMMENT "Compiling vcpy_kernel.code")
+  add_custom_target(vcpy_kernel_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/vcpy_kernel.code)
+
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/matmul.code
+    COMMAND ${CMAKE_HIP_COMPILER} --fatbin
+    -x cu ${OFFLOAD_ARCH_LIST} ${CMAKE_CURRENT_SOURCE_DIR}/matmul.cpp
+    -o ${CMAKE_CURRENT_BINARY_DIR}/matmul.code
+    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include -I${HIP_INCLUDE_DIR}
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/matmul.cpp
+    COMMENT "Compiling matmul.code")
+  add_custom_target(matmul_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/matmul.code)
+
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/kernel_count.code
+    COMMAND ${CMAKE_HIP_COMPILER} --fatbin
+    ${OFFLOAD_ARCH_LIST} -x cu ${CMAKE_CURRENT_SOURCE_DIR}/kernel_count.cpp
+    -o ${CMAKE_CURRENT_BINARY_DIR}/kernel_count.code
+    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include -I${HIP_INCLUDE_DIR}
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/kernel_count.cpp
+    COMMENT "Compiling kernel_count.code")
+  add_custom_target(kernel_count_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/kernel_count.code)
+
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/emptyModuleCount.code
+    COMMAND ${CMAKE_HIP_COMPILER} --fatbin
+    ${OFFLOAD_ARCH_LIST} -x cu ${CMAKE_CURRENT_SOURCE_DIR}/emptyModuleCount.cpp
+    -o ${CMAKE_CURRENT_BINARY_DIR}/emptyModuleCount.code
+    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include -I${HIP_INCLUDE_DIR}
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/emptyModuleCount.cpp
+    COMMENT "Compiling emptyModuleCount.code")
+  add_custom_target(emptyModuleCount_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/emptyModuleCount.code)
+endif()
+
+add_dependencies(ModuleTest managed_kernel_code)
+add_dependencies(ModuleTest vcpy_kernel_code)
+add_dependencies(ModuleTest matmul_code)
+add_dependencies(ModuleTest kernel_count_code)
+add_dependencies(ModuleTest emptyModuleCount_code)
+
+if (HIP_PLATFORM MATCHES "amd")
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/kernel_composite_test.code
+    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
+    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/kernel_composite_test.cpp
+    -o ${CMAKE_CURRENT_BINARY_DIR}/kernel_composite_test.code
+    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT}
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/kernel_composite_test.cpp
+    COMMENT "Compiling kernel_composite_test.code")
+else()
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/kernel_composite_test.code
+    COMMAND ${CMAKE_HIP_COMPILER} --fatbin
+    ${OFFLOAD_ARCH_LIST} -x cu ${CMAKE_CURRENT_SOURCE_DIR}/kernel_composite_test.cpp
+    -o ${CMAKE_CURRENT_BINARY_DIR}/kernel_composite_test.code
+    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include -I${HIP_INCLUDE_DIR}
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/kernel_composite_test.cpp
+    COMMENT "Compiling kernel_composite_test.code")
+endif()
+add_custom_target(kernel_composite_test_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/kernel_composite_test.code)
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
   ${CMAKE_CURRENT_BINARY_DIR}/kernel_composite_test.code
   ${CMAKE_CURRENT_BINARY_DIR}/matmul.code
@@ -414,10 +623,9 @@ set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
   ${CMAKE_CURRENT_BINARY_DIR}/emptyModuleCount.code
 )
 add_executable(testhipModuleLoadUnloadFunc_exe EXCLUDE_FROM_ALL testhipModuleLoadUnloadFunc_exe.cc)
-set_source_files_properties(testhipModuleLoadUnloadFunc_exe.cc PROPERTIES LANGUAGE HIP)
-set_target_properties(testhipModuleLoadUnloadFunc_exe PROPERTIES LINKER_LANGUAGE HIP)
+set_source_files_properties(testhipModuleLoadUnloadFunc_exe.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
+target_link_libraries(testhipModuleLoadUnloadFunc_exe ${GPGPU_LINKER_LIBRARIES})
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS testhipModuleLoadUnloadFunc_exe)
-target_link_libraries(testhipModuleLoadUnloadFunc_exe hip::host hip::device)
 
-add_dependencies(module managed_kernel.code vcpy_kernel.code matmul.code kernel_composite_test.code
+add_dependencies(module managed_kernel_code vcpy_kernel_code matmul_code kernel_composite_test_code
 testhipModuleLoadUnloadFunc_exe)

@@ -67,10 +67,12 @@ enum amd_hw_ip_block_type {
   DCI_HWIP,
   PCIE_HWIP,
   ISP_HWIP,
+  ATU_HWIP,
+  AIGC_HWIP,
   MAX_HWIP
 };
 
-#define HWIP_MAX_INSTANCE 44
+#define HWIP_MAX_INSTANCE 48
 #define HWIP_MAX_SEGMENT 32
 
 struct Register {

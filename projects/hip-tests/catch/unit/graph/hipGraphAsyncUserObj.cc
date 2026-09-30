@@ -1,21 +1,9 @@
 /*
-Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_defgroups.hh>
@@ -35,9 +23,9 @@ std::condition_variable cv;
  *                                 unsigned int flags);`
  * - Create an instance of userObject to manage lifetime of a resource.
  */
-template <typename T> __global__ void KernelFn(T* Ad, int clockrate, int WaitSecs) {
+template <typename T> __global__ void KernelFn(T* Ad, int clockrate, int WaitMs) {
   uint64_t num_cycles = (uint64_t)clockrate;
-  num_cycles = num_cycles * 1000 * WaitSecs;
+  num_cycles = num_cycles * WaitMs;
   uint64_t start = clock64(), cycles = 0;
   while (cycles < num_cycles) {
     cycles = clock64() - start;
@@ -53,10 +41,12 @@ template <typename T> __global__ void KernelFn(T* Ad, int clockrate, int WaitSec
 void threadFunc_dltMemory() {
   std::unique_lock lk(m);
   cv.wait(lk, [] { return setVar; });
-  REQUIRE(globalPtr != nullptr);
-  HIP_CHECK(hipHostFree(globalPtr));
+  REQUIRE_THREAD(globalPtr != nullptr);
+  HIP_CHECK_THREAD(hipHostFree(globalPtr));
   setVar = false;
 }
+static int kernelDelayMs() { return isQuickLevel() ? 500 : 5000; }
+
 void destroyPinnedObj(void* ptr) {
   globalPtr = ptr;
   setVar = true;
@@ -71,7 +61,7 @@ void hipUserObjectCreate_int_float_Objects(T* hostArr, T* devArr, void destroyOb
   HIP_CHECK(hipStreamCreate(&stream));
   HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
   HIP_CHECK(hipMemcpyAsync(devArr, hostArr, sizeof(int), hipMemcpyHostToDevice, stream));
-  KernelFn<<<1, 1, 0, stream>>>(devArr, clockrate, 5);
+  KernelFn<<<1, 1, 0, stream>>>(devArr, clockrate, kernelDelayMs());
   HIP_CHECK(hipMemcpyAsync(hostArr, devArr, sizeof(int), hipMemcpyDeviceToHost, stream));
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
   REQUIRE(graph != nullptr);
@@ -114,7 +104,7 @@ void hipUserObjectCreate_int_float_Objects(T* hostArr, T* devArr, void destroyOb
  * ------------------------
  * - HIP_VERSION >= 6.3
  */
-TEST_CASE("Unit_hipGraphUserObj_Int_float_Objects") {
+HIP_TEST_CASE(Unit_hipGraphUserObj_Int_float_Objects) {
   SECTION("Called with Int Obj") {
     std::thread t1(threadFunc_dltMemory);
     int* hostArr = nullptr;
@@ -127,6 +117,7 @@ TEST_CASE("Unit_hipGraphUserObj_Int_float_Objects") {
     hipUserObjectCreate_int_float_Objects(hostArr, devArr, destroyPinnedObj);
     HIP_CHECK(hipFree(devArr));
     t1.join();
+    HIP_CHECK_THREAD_FINALIZE();
   }
   SECTION("Called with float Obj") {
     std::thread t1(threadFunc_dltMemory);
@@ -140,6 +131,7 @@ TEST_CASE("Unit_hipGraphUserObj_Int_float_Objects") {
     hipUserObjectCreate_int_float_Objects(hostArr, devArr, destroyPinnedObj);
     HIP_CHECK(hipFree(devArr));
     t1.join();
+    HIP_CHECK_THREAD_FINALIZE();
   }
 }
 void destroyHostRegObj(void* ptr) {
@@ -162,7 +154,7 @@ void destroyHostRegObj(void* ptr) {
  * ------------------------
  * - HIP_VERSION >= 6.3
  */
-TEST_CASE("Unit_hipGraphUserObj_HostRegister") {
+HIP_TEST_CASE(Unit_hipGraphUserObj_HostRegister) {
   int clockrate = 0;
   HIP_CHECK(hipDeviceGetAttribute(&clockrate, hipDeviceAttributeMemoryClockRate, 0));
   int* A_h = new int();
@@ -176,7 +168,7 @@ TEST_CASE("Unit_hipGraphUserObj_HostRegister") {
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
   HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
-  KernelFn<<<1, 1, 0, stream>>>(A_d, clockrate, 5);
+  KernelFn<<<1, 1, 0, stream>>>(A_d, clockrate, kernelDelayMs());
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
   REQUIRE(graph != nullptr);
   hipUserObject_t Uobj;
@@ -195,9 +187,9 @@ TEST_CASE("Unit_hipGraphUserObj_HostRegister") {
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipHostUnregister(A_h));
 }
-template <typename T> __global__ void StructClassKernelFn(T* Obj, int clockrate, int WaitSecs) {
+template <typename T> __global__ void StructClassKernelFn(T* Obj, int clockrate, int WaitMs) {
   uint64_t num_cycles = (uint64_t)clockrate;
-  num_cycles = num_cycles * 1000 * WaitSecs;
+  num_cycles = num_cycles * WaitMs;
   uint64_t start = clock64(), cycles = 0;
   while (cycles < num_cycles) {
     cycles = clock64() - start;
@@ -212,7 +204,7 @@ template <typename T> void hipUserObjectCreate_Struct_Class_Objects(T* Obj_h, T*
   HIP_CHECK(hipStreamCreate(&stream));
   HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
   HIP_CHECK(hipMemcpyAsync(Obj_d, Obj_h, sizeof(BoxStruct), hipMemcpyHostToDevice, stream));
-  StructClassKernelFn<<<1, 1, 0, stream>>>(Obj_d, clockrate, 5);
+  StructClassKernelFn<<<1, 1, 0, stream>>>(Obj_d, clockrate, kernelDelayMs());
   HIP_CHECK(hipMemcpyAsync(Obj_h, Obj_d, sizeof(BoxStruct), hipMemcpyDeviceToHost, stream));
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
   REQUIRE(graph != nullptr);
@@ -249,7 +241,7 @@ template <typename T> void hipUserObjectCreate_Struct_Class_Objects(T* Obj_h, T*
  * ------------------------
  * - HIP_VERSION >= 6.3
  */
-TEST_CASE("Unit_hipGraphUserObj_Struct_Class_Ojects") {
+HIP_TEST_CASE(Unit_hipGraphUserObj_Struct_Class_Ojects) {
   SECTION("Called with Struct Object") {
     std::thread t1(threadFunc_dltMemory);
     BoxStruct* structObj_h;
@@ -261,6 +253,7 @@ TEST_CASE("Unit_hipGraphUserObj_Struct_Class_Ojects") {
     REQUIRE(structObj_d != nullptr);
     hipUserObjectCreate_Struct_Class_Objects<BoxStruct>(structObj_h, structObj_d);
     t1.join();
+    HIP_CHECK_THREAD_FINALIZE();
   }
   SECTION("Called with Class Object") {
     std::thread t1(threadFunc_dltMemory);
@@ -273,6 +266,7 @@ TEST_CASE("Unit_hipGraphUserObj_Struct_Class_Ojects") {
     REQUIRE(classObj_d != nullptr);
     hipUserObjectCreate_Struct_Class_Objects<BoxClass>(classObj_h, classObj_d);
     t1.join();
+    HIP_CHECK_THREAD_FINALIZE();
   }
 }
 /**
@@ -291,7 +285,7 @@ TEST_CASE("Unit_hipGraphUserObj_Struct_Class_Ojects") {
  * ------------------------
  * - HIP_VERSION >= 6.3
  */
-TEST_CASE("Unit_hipGraphUserObj_ClonedGraph") {
+HIP_TEST_CASE(Unit_hipGraphUserObj_ClonedGraph) {
   int clockrate = 0;
   HIP_CHECK(hipDeviceGetAttribute(&clockrate, hipDeviceAttributeMemoryClockRate, 0));
   std::thread t1(threadFunc_dltMemory);
@@ -307,7 +301,7 @@ TEST_CASE("Unit_hipGraphUserObj_ClonedGraph") {
   HIP_CHECK(hipStreamCreate(&stream));
   HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
   HIP_CHECK(hipMemcpyAsync(devArr, hostArr, sizeof(int), hipMemcpyHostToDevice, stream));
-  KernelFn<<<1, 1, 0, stream>>>(devArr, clockrate, 5);
+  KernelFn<<<1, 1, 0, stream>>>(devArr, clockrate, kernelDelayMs());
   HIP_CHECK(hipMemcpyAsync(hostArr, devArr, sizeof(int), hipMemcpyDeviceToHost, stream));
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
   REQUIRE(graph != nullptr);
@@ -334,12 +328,13 @@ TEST_CASE("Unit_hipGraphUserObj_ClonedGraph") {
   REQUIRE(*hostArr == 9999);
   HIP_CHECK(hipUserObjectRelease(Uobj, 1));
   t1.join();
+  HIP_CHECK_THREAD_FINALIZE();
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipFree(devArr));
 }
-__global__ void ManualGraphKernelFn(int* Ad, int clockrate, int WaitSecs) {
+__global__ void ManualGraphKernelFn(int* Ad, int clockrate, int WaitMs) {
   uint64_t num_cycles = (uint64_t)clockrate;
-  num_cycles = num_cycles * 1000 * WaitSecs;
+  num_cycles = num_cycles * WaitMs;
   uint64_t start = clock64(), cycles = 0;
   while (cycles < num_cycles) {
     cycles = clock64() - start;
@@ -362,7 +357,7 @@ __global__ void ManualGraphKernelFn(int* Ad, int clockrate, int WaitSecs) {
  * ------------------------
  * - HIP_VERSION >= 6.3
  */
-TEST_CASE("Unit_hipGraphUserObj_ManualGraph") {
+HIP_TEST_CASE(Unit_hipGraphUserObj_ManualGraph) {
   int clockrate = 0;
   HIP_CHECK(hipDeviceGetAttribute(&clockrate, hipDeviceAttributeMemoryClockRate, 0));
   std::thread t1(threadFunc_dltMemory);
@@ -384,7 +379,7 @@ TEST_CASE("Unit_hipGraphUserObj_ManualGraph") {
                                     hipMemcpyHostToDevice));
   dependencies.push_back(memcpyNode);
   kNodeParams.func = reinterpret_cast<void*>(ManualGraphKernelFn);
-  int delay = 5;
+  int delay = kernelDelayMs();
   void* kernelArgs[] = {reinterpret_cast<void*>(&devArr), &clockrate, &delay};
   kNodeParams.gridDim = dim3(1);
   kNodeParams.blockDim = dim3(1);
@@ -410,6 +405,7 @@ TEST_CASE("Unit_hipGraphUserObj_ManualGraph") {
   REQUIRE(*hostArr == 9999);
   HIP_CHECK(hipUserObjectRelease(Uobj, 1));
   t1.join();
+  HIP_CHECK_THREAD_FINALIZE();
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipFree(devArr));
 }

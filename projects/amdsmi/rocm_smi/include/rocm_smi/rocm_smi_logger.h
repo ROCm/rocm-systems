@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 /*
  * Detail Description:
@@ -49,13 +30,12 @@
 // C++ Header File(s)
 #include <fstream>
 #include <iostream>
+#include <memory>
+#include <mutex>
 #include <sstream>
 #include <string>
-#include <mutex>
-#include <memory>
 
 // Code Specific Header Files(s)
-
 
 namespace ROCmLogging {
 // Direct Interface for logging into log file or console using MACRO(s)
@@ -80,18 +60,13 @@ typedef enum LOG_LEVEL {
 } LogLevel;
 
 // enum for LOG_TYPE
-typedef enum LOG_TYPE {
-  NO_LOG = 1,
-  CONSOLE = 2,
-  FILE_LOG = 3,
-  BOTH_FILE_AND_CONSOLE = 4
-} LogType;
+typedef enum LOG_TYPE { NO_LOG = 1, CONSOLE = 2, FILE_LOG = 3, BOTH_FILE_AND_CONSOLE = 4 } LogType;
 
 class Logger {
  public:
   static Logger* getInstance() noexcept;
 
-  Logger& operator<<(std::string &s) {
+  Logger& operator<<(std::string& s) {
     switch (this->m_LogLevel) {
       case DISABLE_LOG:
         break;
@@ -119,11 +94,10 @@ class Logger {
     return *getInstance();
   }
 
-  Logger &operator<<(const char* s) {
-    return operator<<(std::string(s));
-  }
+  Logger& operator<<(const char* s) { return operator<<(std::string(s)); }
 
-  template <class T> Logger &operator<<(const T &v) {
+  template <class T>
+  Logger& operator<<(const T& v) {
     std::ostringstream s;
     s << v;
     std::string str = s.str();
@@ -175,8 +149,8 @@ class Logger {
 
   // Interfaces to control log levels
   void updateLogLevel(LogLevel logLevel);
-  void enableAllLogLevels();    // Enable all log levels
-  void disableLog();  // Disable all log levels, except error and alarm
+  void enableAllLogLevels();  // Enable all log levels
+  void disableLog();          // Disable all log levels, except error and alarm
 
   // Interfaces to control log Types
   void updateLogType(LogType logType);
@@ -204,7 +178,7 @@ class Logger {
   std::mutex m_Mutex;
   std::unique_lock<std::mutex> m_Lock{m_Mutex, std::defer_lock};
 
-  void logIntoFile(std::string& data);  // NOLINT
+  void logIntoFile(std::string& data);   // NOLINT
   void logOnConsole(std::string& data);  // NOLINT
   void operator=(const Logger&) {}
   void initialize_resources();

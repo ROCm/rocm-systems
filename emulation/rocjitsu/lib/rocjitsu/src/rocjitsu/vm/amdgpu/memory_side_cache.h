@@ -1,0 +1,205 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm.h"
+#include "simdojo/components/cache.h"
+#include "simdojo/sim/component.h"
+#include "simdojo/sim/message.h"
+
+#include <array>
+#include <condition_variable>
+#include <cstdint>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace rocjitsu {
+namespace amdgpu {
+
+class GpuMemory;
+class MemorySideCacheTestAccess;
+class WriterPreferredAccessGateTestAccess;
+
+/// @brief Shared access gate that gives queued exclusive owners priority.
+///
+/// @details This type is internal to the memory-side cache implementation but
+/// is kept separate so its writer-preference invariant can be tested directly.
+class WriterPreferredAccessGate {
+public:
+  void lock_shared();
+  bool try_lock_shared();
+  void unlock_shared();
+  void lock();
+  void unlock();
+
+private:
+  friend class WriterPreferredAccessGateTestAccess;
+
+  std::mutex mutex_;
+  std::condition_variable cv_;
+  uint32_t active_readers_ = 0;
+  uint32_t waiting_writers_ = 0;
+  bool writer_active_ = false;
+};
+
+/// @brief Memory-side cache component sitting between L2 and HBM on each IOD.
+///
+/// @details Write-through, write-allocate cache, and no mtype awareness. All traffic from
+/// L2 is already filtered (UC bypasses L2, so it never reaches the MSC).
+/// On miss, fetches from the backing store via the requester port (typically HbmController).
+/// Stores are pushed straight to the backing store and the line is left clean
+/// (EXCLUSIVE), so the daemon's process_vm_readv bridge sees writes immediately;
+/// the for_each_dirty writeback in flush_all() is retained as a safety net.
+///
+/// Provides structural ports for the topology graph. The backing store is reached
+/// through the requester port (req), which is connected to the HBM controller via a link.
+///
+/// @par Thread safety
+/// @c read(), @c write(), and @c flush_all() are thread-safe. Reads and writes
+/// acquire the writer-preference access gate in shared mode before acquiring a
+/// stripe mutex by cache set index. A waiting flush blocks new shared entrants,
+/// then acquires the gate exclusively after active accesses finish. This
+/// guarantees flush progress while preserving concurrent access to different
+/// cache sets. The required lock order is access gate before stripe; no path
+/// may acquire them in the opposite order.
+class MemorySideCache : public simdojo::Component {
+public:
+  static constexpr uint32_t LINE_SIZE_BITS = 7; // 128 bytes
+  static constexpr uint32_t NUM_SETS = 65536;   // 65536 sets x 16-way x 128B = 128MB
+  static constexpr uint32_t ASSOCIATIVITY = 16;
+
+  using CacheStore = simdojo::Cache<LINE_SIZE_BITS, NUM_SETS, ASSOCIATIVITY>;
+  static constexpr uint32_t LINE_SIZE = CacheStore::LINE_SIZE;
+
+  /// @brief Number of lock stripes. Power of 2 for fast masking.
+  /// 256 stripes covers 65536 sets (256 sets per stripe).
+  static constexpr uint32_t STRIPE_COUNT = 256;
+
+  explicit MemorySideCache(
+      std::string name,
+      std::shared_ptr<DeviceCacheCoherence> coherence = std::make_shared<DeviceCacheCoherence>(),
+      GpuMemory *legacy_maintenance_memory = nullptr);
+  ~MemorySideCache() override;
+
+  /// @brief Rebind this cache to a device-local coherence domain before use.
+  void set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coherence);
+  const std::shared_ptr<DeviceCacheCoherence> &coherence_domain() const { return coherence_; }
+  /// @brief Set the raw VMID-0 backing used by out-of-band maintenance.
+  void set_legacy_maintenance_memory(GpuMemory *memory) { legacy_maintenance_memory_ = memory; }
+  /// @brief Set the VM service used by maintenance for nonzero VMIDs.
+  /// @details Ordinary MSC traffic continues through its requester port; this
+  /// pointer exists only for a quiesced maintenance operation.
+  void set_legacy_maintenance_vm(GpuVm *gpu_vm) { legacy_maintenance_vm_ = gpu_vm; }
+  /// @brief Set the VM service used to validate speculative line fills.
+  void set_gpu_vm(GpuVm *gpu_vm) { gpu_vm_ = gpu_vm; }
+
+  VmAccessOutcome read(uint64_t addr, uint8_t *dst, uint32_t size, uint32_t vmid = 0);
+  VmAccessOutcome write(uint64_t addr, const uint8_t *src, uint32_t size, uint32_t vmid = 0);
+  VmAccessOutcome atomic_modify(uint64_t addr, uint32_t size,
+                                const simdojo::MemoryAtomicMutation &mutation, uint32_t vmid = 0);
+
+  /// @brief Flush all dirty lines to the backing store and invalidate.
+  VmAccessOutcome flush_all();
+
+  void initialize() override {
+    for (const std::unique_ptr<simdojo::Port> &port : ports()) {
+      if (port->direction() == simdojo::PortDirection::IN && !port->recv_event()->has_handler()) {
+        port->recv_event()->set_handler([this](simdojo::Tick, simdojo::Message *message) {
+          simdojo::MessageHeader &header = message->header();
+          auto *data = reinterpret_cast<uint8_t *>(message->payload());
+          VmAccessOutcome outcome = VmAccessOutcome::Malformed;
+          if (header.op == simdojo::MessageOp::READ)
+            outcome = read(header.addr, data, header.size_bytes, header.vmid);
+          else if (header.op == simdojo::MessageOp::WRITE)
+            outcome = write(header.addr, data, header.size_bytes, header.vmid);
+          else if (header.op == simdojo::MessageOp::ATOMIC) {
+            auto *mutation = reinterpret_cast<simdojo::MemoryAtomicMutation *>(message->payload());
+            outcome = mutation != nullptr
+                          ? atomic_modify(header.addr, header.size_bytes, *mutation, header.vmid)
+                          : VmAccessOutcome::Malformed;
+          }
+          if (header.completion_status != nullptr)
+            *header.completion_status = message_status(outcome);
+          header.op = simdojo::MessageOp::RESPONSE;
+        });
+      }
+    }
+  }
+
+  simdojo::Port *req_port() { return req_; }
+
+  simdojo::Port *create_cpl_port(const std::string &src_name) {
+    simdojo::PortID port_id = static_cast<simdojo::PortID>(cpl_ports_.size() + 1);
+    auto port =
+        std::make_unique<simdojo::Port>("cpl_" + src_name, port_id, this,
+                                        simdojo::PortDirection::IN, simdojo::PortProtocol::MEMORY);
+    simdojo::Port *raw = add_port(std::move(port));
+    raw->recv_event()->set_handler([this](simdojo::Tick, simdojo::Message *message) {
+      simdojo::MessageHeader &header = message->header();
+      auto *data = reinterpret_cast<uint8_t *>(message->payload());
+      VmAccessOutcome outcome = VmAccessOutcome::Malformed;
+      if (header.op == simdojo::MessageOp::READ)
+        outcome = read(header.addr, data, header.size_bytes, header.vmid);
+      else if (header.op == simdojo::MessageOp::WRITE)
+        outcome = write(header.addr, data, header.size_bytes, header.vmid);
+      else if (header.op == simdojo::MessageOp::ATOMIC) {
+        auto *mutation = reinterpret_cast<simdojo::MemoryAtomicMutation *>(message->payload());
+        outcome = mutation != nullptr
+                      ? atomic_modify(header.addr, header.size_bytes, *mutation, header.vmid)
+                      : VmAccessOutcome::Malformed;
+      }
+      if (header.completion_status != nullptr)
+        *header.completion_status = message_status(outcome);
+      header.op = simdojo::MessageOp::RESPONSE;
+    });
+    cpl_ports_.push_back(raw);
+    return raw;
+  }
+
+private:
+  friend class DeviceCacheCoherence;
+  friend class MemorySideCacheTestAccess;
+
+  [[nodiscard]] VmAccessOutcome cache_partial_bytes(uint64_t addr, const uint8_t *src,
+                                                    uint32_t size, uint32_t vmid);
+  [[nodiscard]] VmAccessOutcome ensure_line(uint64_t addr, uint32_t vmid,
+                                            bool fetch_on_miss = true);
+  [[nodiscard]] bool can_fetch_line(uint64_t addr, uint32_t vmid) const;
+  [[nodiscard]] VmAccessOutcome flush_dirty_locked();
+  [[nodiscard]] VmAccessOutcome flush_dirty_to_legacy_backing_locked();
+  bool has_legacy_maintenance_backing() const {
+    return legacy_maintenance_memory_ != nullptr && legacy_maintenance_vm_ != nullptr;
+  }
+
+  /// @brief Send a read or write request to the backing store via the req port.
+  [[nodiscard]] VmAccessOutcome send_backing(uint64_t addr, uint8_t *data, uint32_t size,
+                                             simdojo::MessageOp op, uint32_t vmid);
+  [[nodiscard]] VmAccessOutcome send_atomic_backing(uint64_t addr, uint32_t size,
+                                                    const simdojo::MemoryAtomicMutation &mutation,
+                                                    uint32_t vmid);
+  [[nodiscard]] static simdojo::MessageStatus message_status(VmAccessOutcome outcome);
+  [[nodiscard]] static VmAccessOutcome access_outcome(simdojo::MessageStatus status);
+
+  /// @brief Return the stripe index for a given address.
+  uint32_t stripe_index(uint64_t addr) const {
+    return CacheStore::set_index(addr) & (STRIPE_COUNT - 1);
+  }
+
+  mutable std::array<std::mutex, STRIPE_COUNT> stripes_;
+  WriterPreferredAccessGate access_gate_;
+  CacheStore cache_;
+  std::shared_ptr<DeviceCacheCoherence> coherence_;
+  GpuMemory *legacy_maintenance_memory_ = nullptr;
+  GpuVm *legacy_maintenance_vm_ = nullptr;
+  GpuVm *gpu_vm_ = nullptr;
+  simdojo::Port *req_ = nullptr;
+  std::vector<simdojo::Port *> cpl_ports_;
+};
+
+} // namespace amdgpu
+} // namespace rocjitsu

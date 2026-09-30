@@ -1,31 +1,19 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 
 #include <algorithm>
 #include <chrono>
+#include <functional>
+#include <iomanip>
 #include <memory>
 #include <numeric>
+#include <sstream>
+#include <string>
 #include <type_traits>
 #include <vector>
 
@@ -44,6 +32,19 @@ typedef __int64 ssize_t;
 typedef __int32 ssize_t;
 #endif  // !_WIN64
 #endif  /*_WIN32*/
+
+inline double GetGigabytesPerSecond(size_t bytes, float time_ms) {
+  constexpr double kBytesPerGigabyte = 1'000'000'000.0;
+  return (static_cast<double>(bytes) / kBytesPerGigabyte) /
+         (static_cast<double>(time_ms) / 1000.0);
+}
+
+inline std::string FormatGigabytesPerSecond(size_t bytes, float time_ms) {
+  std::ostringstream out;
+  out << std::fixed << std::setprecision(2)
+      << GetGigabytesPerSecond(bytes, time_ms);
+  return out.str();
+}
 
 class Timer {
  public:
@@ -135,6 +136,15 @@ template <typename Derived> class Benchmark {
   using ModifierSignature = std::function<float(float)>;
   void RegisterModifier(const ModifierSignature& modifier) { modifier_ = modifier; }
 
+  using StatsSuffixSignature = std::function<std::string(float)>;
+  void RegisterStatsSuffix(const StatsSuffixSignature& stats_suffix) {
+    stats_suffix_ = stats_suffix;
+  }
+
+  void RegisterBandwidth(size_t bytes) { bandwidth_bytes_ = bytes; }
+
+  void SetDisplayOutput(bool display_output) { display_output_ = display_output; }
+
   template <typename... Args> std::tuple<float, float, float, float> Run(Args&&... args) {
     AddSectionName(std::to_string(iterations_));
     AddSectionName(std::to_string(warmups_));
@@ -200,8 +210,10 @@ template <typename Derived> class Benchmark {
   ssize_t current_;
   bool display_output_;
   bool progress_bar_;
+  size_t bandwidth_bytes_ = 0;
 
   ModifierSignature modifier_;
+  StatsSuffixSignature stats_suffix_;
 
   void Print(const std::string& out = "") {
     if (!display_output_) return;
@@ -216,9 +228,17 @@ template <typename Derived> class Benchmark {
 
   void PrintStats(float mean, float deviation, float best, float worst) {
     if (!display_output_) return;
-    Print("Average time: " + std::to_string(mean) + " ms, Standard deviation: " +
-          std::to_string(deviation) + " ms, Fastest: " + std::to_string(best) +
-          " ms, Slowest: " + std::to_string(worst) + " ms\n");
+    std::string stats = "Average time: " + std::to_string(mean) +
+                        " ms, Standard deviation: " + std::to_string(deviation) +
+                        " ms, Fastest: " + std::to_string(best) +
+                        " ms, Slowest: " + std::to_string(worst) + " ms";
+    if (bandwidth_bytes_ != 0) {
+      stats += ", Bandwidth: " + FormatGigabytesPerSecond(bandwidth_bytes_, mean) + " GB/s";
+    }
+    if (stats_suffix_) {
+      stats += stats_suffix_(mean);
+    }
+    Print(stats + "\n");
   }
 };
 

@@ -14,8 +14,12 @@ jobs:
     scratch_memory_trace: False
     rccl_trace: False
     kokkos_trace: False
+    ompt_trace: False
     rocdecode_trace: False
     rocjpeg_trace: False
+    hipfile_trace: False
+    hip_event_trace: False
+    rocshmem_trace: False
     hip_runtime_trace: False
     hip_compiler_trace: False
     hsa_core_trace: False
@@ -23,4 +27,9 @@ jobs:
     hsa_image_trace: False
     hsa_finalizer_trace: False
     advanced_thread_trace: False
+    kfd_trace: False
+    kfd_page_migration_trace: False
+    kfd_page_mapping_trace: False
+    kfd_queue_trace: False
+    kfd_dropped_events_trace: False
     kernel_rename: False

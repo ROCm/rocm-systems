@@ -1,20 +1,7 @@
 /*
-   Copyright (c) 2021 - 2022 Advanced Micro Devices, Inc. All rights reserved.
-   Permission is hereby granted, free of charge, to any person obtaining a copy
-   of this software and associated documentation files (the "Software"), to deal
-   in the Software without restriction, including without limitation the rights
-   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-   copies of the Software, and to permit persons to whom the Software is
-   furnished to do so, subject to the following conditions:
-   The above copyright notice and this permission notice shall be included in
-   all copies or substantial portions of the Software.
-   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-   THE SOFTWARE.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
  */
 
 /* Test Case Description:
@@ -101,28 +88,23 @@ bool static TstCoherency(int* Ptr, bool HmmMem) {
    behavior is observed or not with memory allocated using malloc()*/
 // The following test is failing on Nvidia platform hence disabled it for now
 #if HT_AMD
-TEST_CASE("Unit_malloc_CoherentTst") {
+HIP_TEST_CASE(Unit_malloc_CoherentTst) {
   CHECK_PCIE_ATOMIC_SUPPORT
+  CHECK_MANAGED_MEMORY_SUPPORT
   hipDeviceProp_t prop;
   HIPCHECK(hipGetDeviceProperties(&prop, 0));
   char* p = NULL;
   p = strstr(prop.gcnArchName, "xnack+");
   if (p) {
-    // Test Case execution begins from here
-    int managed = 0;
-    HIPCHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeManagedMemory, 0));
-    if (managed == 1) {
-      int *Ptr = nullptr, SIZE = sizeof(int);
-      bool HmmMem = true;
+    int *Ptr = nullptr, SIZE = sizeof(int);
+    bool HmmMem = true;
 
-      // Allocating hipMallocManaged() memory
-      Ptr = reinterpret_cast<int*>(malloc(SIZE));
-      auto ret = TstCoherency(Ptr, HmmMem);
-      free(Ptr);
-      REQUIRE(ret);
-    }
+    // Allocating hipMallocManaged() memory
+    Ptr = reinterpret_cast<int*>(malloc(SIZE));
+    REQUIRE(TstCoherency(Ptr, HmmMem));
+    free(Ptr);
   } else {
-    HipTest::HIP_SKIP_TEST("GPU is not xnack enabled hence skipping the test...\n");
+    HIP_SKIP_TEST(HipTest::SkipReason::kGpuXnackNotEnabled);
   }
 }
 #endif
@@ -132,29 +114,27 @@ TEST_CASE("Unit_malloc_CoherentTst") {
    behavior is observed or not with memory allocated using malloc()*/
 // The following test is failing on Nvidia platform hence disabling it for now
 #if HT_AMD
-TEST_CASE("Unit_malloc_CoherentTstWthAdvise") {
+HIP_TEST_CASE(Unit_malloc_CoherentTstWthAdvise) {
+  CHECK_MANAGED_MEMORY_SUPPORT
   hipDeviceProp_t prop;
   HIPCHECK(hipGetDeviceProperties(&prop, 0));
   char* p = NULL;
   p = strstr(prop.gcnArchName, "xnack+");
   if (p) {
-    int managed = 0;
-    HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeManagedMemory, 0));
-    if (managed == 1) {
-      int *Ptr = nullptr, SIZE = sizeof(int);
+    int *Ptr = nullptr, SIZE = sizeof(int);
 
-      // Allocating hipMallocManaged() memory
-      Ptr = reinterpret_cast<int*>(malloc(SIZE));
-      *Ptr = 4;
-      hipStream_t strm;
-      HIP_CHECK(hipStreamCreate(&strm));
-      SquareKrnl<<<1, 1, 0, strm>>>(Ptr);
-      HIP_CHECK(hipStreamSynchronize(strm));
-      HIP_CHECK(hipStreamDestroy(strm));
-      REQUIRE(*Ptr == 16);
-    }
+    // Allocating hipMallocManaged() memory
+    Ptr = reinterpret_cast<int*>(malloc(SIZE));
+    *Ptr = 4;
+    hipStream_t strm;
+    HIP_CHECK(hipStreamCreate(&strm));
+    SquareKrnl<<<1, 1, 0, strm>>>(Ptr);
+    HIP_CHECK(hipStreamSynchronize(strm));
+    HIP_CHECK(hipStreamDestroy(strm));
+    REQUIRE(*Ptr == 16);
+    free(Ptr);
   } else {
-    HipTest::HIP_SKIP_TEST("GPU is not xnack enabled hence skipping the test...\n");
+    HIP_SKIP_TEST(HipTest::SkipReason::kGpuXnackNotEnabled);
   }
 }
 #endif
@@ -163,32 +143,23 @@ TEST_CASE("Unit_malloc_CoherentTstWthAdvise") {
    behavior is observed or not with memory allocated using mmap()*/
 // The following test is failing on Nvidia platform hence disabling it for now
 #if HT_AMD
-TEST_CASE("Unit_mmap_CoherentTst") {
+HIP_TEST_CASE(Unit_mmap_CoherentTst) {
   CHECK_PCIE_ATOMIC_SUPPORT
+  CHECK_MANAGED_MEMORY_SUPPORT
   hipDeviceProp_t prop;
   HIPCHECK(hipGetDeviceProperties(&prop, 0));
-  char* p = NULL;
+  char *p = NULL;
   p = strstr(prop.gcnArchName, "xnack+");
   if (p) {
-    int managed = 0;
-    HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeManagedMemory, 0));
-    if (managed == 1) {
-      bool HmmMem = true;
-      int* Ptr = reinterpret_cast<int*>(
-          mmap(NULL, sizeof(int), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, 0, 0));
-      if (Ptr == MAP_FAILED) {
-        WARN("Mapping Failed\n");
-        REQUIRE(false);
-      }
-      auto ret = TstCoherency(Ptr, HmmMem);
-      int err = munmap(Ptr, sizeof(int));
-      if (err != 0) {
-        WARN("munmap failed\n");
-      }
-      REQUIRE(ret);
-    }
+    bool HmmMem = true;
+    int *Ptr =
+        reinterpret_cast<int *>(mmap(NULL, sizeof(int), PROT_READ | PROT_WRITE,
+                                     MAP_PRIVATE | MAP_ANONYMOUS, 0, 0));
+    REQUIRE(Ptr != MAP_FAILED);
+    REQUIRE(TstCoherency(Ptr, HmmMem));
+    REQUIRE(munmap(Ptr, sizeof(int)) == 0);
   } else {
-    HipTest::HIP_SKIP_TEST("GPU is not xnack enabled hence skipping the test...\n");
+    HIP_SKIP_TEST(HipTest::SkipReason::kGpuXnackNotEnabled);
   }
 }
 #endif
@@ -197,41 +168,31 @@ TEST_CASE("Unit_mmap_CoherentTst") {
    behavior is observed or not with memory allocated using mmap()*/
 // The following test is failing on Nvidia platform hence disabling it for now
 #if HT_AMD
-TEST_CASE("Unit_mmap_CoherentTstWthAdvise") {
+HIP_TEST_CASE(Unit_mmap_CoherentTstWthAdvise) {
+  CHECK_MANAGED_MEMORY_SUPPORT
   hipDeviceProp_t prop;
   HIPCHECK(hipGetDeviceProperties(&prop, 0));
-  char* p = NULL;
+  char *p = NULL;
   p = strstr(prop.gcnArchName, "xnack+");
   if (p) {
-    int managed = 0;
-    HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeManagedMemory, 0));
-    if (managed == 1) {
-      int SIZE = sizeof(int);
-      int* Ptr = reinterpret_cast<int*>(
-          mmap(NULL, SIZE, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, 0, 0));
-      if (Ptr == MAP_FAILED) {
-        WARN("Mapping Failed\n");
-        REQUIRE(false);
-      }
-      HIP_CHECK(hipMemAdvise(Ptr, SIZE, hipMemAdviseSetCoarseGrain, 0));
-      // Initializing the value with 9
-      *Ptr = 9;
-      hipStream_t strm;
-      HIP_CHECK(hipStreamCreate(&strm));
-      SquareKrnl<<<1, 1, 0, strm>>>(Ptr);
-      HIP_CHECK(hipStreamSynchronize(strm));
-      bool IfTstPassed = false;
-      if (*Ptr == 81) {
-        IfTstPassed = true;
-      }
-      int err = munmap(Ptr, SIZE);
-      if (err != 0) {
-        WARN("munmap failed\n");
-      }
-      REQUIRE(IfTstPassed);
-    }
+    int SIZE = sizeof(int);
+    int *Ptr = reinterpret_cast<int *>(mmap(NULL, SIZE, PROT_READ | PROT_WRITE,
+                                            MAP_PRIVATE | MAP_ANONYMOUS, 0, 0));
+    REQUIRE(Ptr != MAP_FAILED);
+    HIP_CHECK(hipMemAdvise(Ptr, SIZE, hipMemAdviseSetCoarseGrain, 0));
+    // Initializing the value with 9
+    *Ptr = 9;
+    hipStream_t strm;
+    HIP_CHECK(hipStreamCreate(&strm));
+    SquareKrnl<<<1, 1, 0, strm>>>(Ptr);
+    HIP_CHECK(hipStreamSynchronize(strm));
+
+    REQUIRE(*Ptr == 81);
+    REQUIRE(munmap(Ptr, SIZE) == 0);
+
+    HIP_CHECK(hipStreamDestroy(strm));
   } else {
-    HipTest::HIP_SKIP_TEST("GPU is not xnack enabled hence skipping the test...\n");
+    HIP_SKIP_TEST(HipTest::SkipReason::kGpuXnackNotEnabled);
   }
 }
 #endif
@@ -240,7 +201,7 @@ TEST_CASE("Unit_mmap_CoherentTstWthAdvise") {
    accessible when HIP_HOST_COHERENT is set to 0*/
 // The following test is AMD specific test hence skipping for Nvidia
 #if HT_AMD
-TEST_CASE("Unit_hipHostMalloc_WthEnv0Flg1") {
+HIP_TEST_CASE(Unit_hipHostMalloc_WthEnv0Flg1) {
   if ((setenv("HIP_HOST_COHERENT", "0", 1)) != 0) {
     WARN("Unable to turn on HIP_HOST_COHERENT, hence terminating the Test case!");
     REQUIRE(false);
@@ -280,7 +241,7 @@ TEST_CASE("Unit_hipHostMalloc_WthEnv0Flg1") {
    accessible when HIP_HOST_COHERENT is set to 0*/
 // The following test is AMD specific test hence skipping for Nvidia
 #if HT_AMD
-TEST_CASE("Unit_hipHostMalloc_WthEnv0Flg2") {
+HIP_TEST_CASE(Unit_hipHostMalloc_WthEnv0Flg2) {
   if ((setenv("HIP_HOST_COHERENT", "0", 1)) != 0) {
     WARN("Unable to turn on HIP_HOST_COHERENT, hence terminating the Test case!");
     REQUIRE(false);
@@ -320,7 +281,7 @@ TEST_CASE("Unit_hipHostMalloc_WthEnv0Flg2") {
    accessible when HIP_HOST_COHERENT is set to 0*/
 // The following test is AMD specific test hence skipping for Nvidia
 #if HT_AMD
-TEST_CASE("Unit_hipHostMalloc_WthEnv0Flg3") {
+HIP_TEST_CASE(Unit_hipHostMalloc_WthEnv0Flg3) {
   if ((setenv("HIP_HOST_COHERENT", "0", 1)) != 0) {
     WARN("Unable to turn on HIP_HOST_COHERENT, hence terminating the Test case!");
     REQUIRE(false);
@@ -360,7 +321,7 @@ TEST_CASE("Unit_hipHostMalloc_WthEnv0Flg3") {
    accessible when HIP_HOST_COHERENT is set to 0*/
 // The following test is AMD specific test hence skipping for Nvidia
 #if HT_AMD
-TEST_CASE("Unit_hipHostMalloc_WthEnv0Flg4") {
+HIP_TEST_CASE(Unit_hipHostMalloc_WthEnv0Flg4) {
   if ((setenv("HIP_HOST_COHERENT", "0", 1)) != 0) {
     WARN("Unable to turn on HIP_HOST_COHERENT, hence terminating the Test case!");
     REQUIRE(false);
@@ -401,7 +362,7 @@ TEST_CASE("Unit_hipHostMalloc_WthEnv0Flg4") {
    fine grain behavior when HIP_HOST_COHERENT is set to 1*/
 // The following test is AMD specific test hence skipping for Nvidia
 #if HT_AMD
-TEST_CASE("Unit_hipHostMalloc_WthEnv1") {
+HIP_TEST_CASE(Unit_hipHostMalloc_WthEnv1) {
   if ((setenv("HIP_HOST_COHERENT", "1", 1)) != 0) {
     WARN("Unable to turn on HIP_HOST_COHERENT, hence terminating the Test case!");
     REQUIRE(false);
@@ -430,7 +391,7 @@ TEST_CASE("Unit_hipHostMalloc_WthEnv1") {
    fine grain behavior when HIP_HOST_COHERENT is set to 1*/
 // The following test is AMD specific test hence skipping for Nvidia
 #if HT_AMD
-TEST_CASE("Unit_hipHostMalloc_WthEnv1Flg1") {
+HIP_TEST_CASE(Unit_hipHostMalloc_WthEnv1Flg1) {
   if ((setenv("HIP_HOST_COHERENT", "1", 1)) != 0) {
     WARN("Unable to turn on HIP_HOST_COHERENT, hence terminating the Test case!");
     REQUIRE(false);
@@ -458,7 +419,7 @@ TEST_CASE("Unit_hipHostMalloc_WthEnv1Flg1") {
    fine grain behavior when HIP_HOST_COHERENT is set to 1*/
 // The following test is AMD specific test hence skipping for Nvidia
 #if HT_AMD
-TEST_CASE("Unit_hipHostMalloc_WthEnv1Flg2") {
+HIP_TEST_CASE(Unit_hipHostMalloc_WthEnv1Flg2) {
   if ((setenv("HIP_HOST_COHERENT", "1", 1)) != 0) {
     WARN("Unable to turn on HIP_HOST_COHERENT, hence terminating the Test case!");
     REQUIRE(false);
@@ -486,7 +447,7 @@ TEST_CASE("Unit_hipHostMalloc_WthEnv1Flg2") {
    fine grain behavior when HIP_HOST_COHERENT is set to 1*/
 // The following test is AMD specific test hence skipping for Nvidia
 #if HT_AMD
-TEST_CASE("Unit_hipHostMalloc_WthEnv1Flg3") {
+HIP_TEST_CASE(Unit_hipHostMalloc_WthEnv1Flg3) {
   if ((setenv("HIP_HOST_COHERENT", "1", 1)) != 0) {
     WARN("Unable to turn on HIP_HOST_COHERENT, hence terminating the Test case!");
     REQUIRE(false);

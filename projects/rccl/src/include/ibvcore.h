@@ -1,3 +1,41 @@
+/*
+ * Copyright (c) 2004, 2005 Topspin Communications.  All rights reserved.
+ * Copyright (c) 2004, 2011-2012 Intel Corporation.  All rights reserved.
+ * Copyright (c) 2005, 2006, 2007 Cisco Systems, Inc.  All rights reserved.
+ * Copyright (c) 2005 PathScale, Inc.  All rights reserved.
+ *
+ * This software is available to you under the OpenIB.org BSD license below:
+ *
+ *     Redistribution and use in source and binary forms, with or
+ *     without modification, are permitted provided that the following
+ *     conditions are met:
+ *
+ *      - Redistributions of source code must retain the above
+ *        copyright notice, this list of conditions and the following
+ *        disclaimer.
+ *
+ *      - Redistributions in binary form must reproduce the above
+ *        copyright notice, this list of conditions and the following
+ *        disclaimer in the documentation and/or other materials
+ *        provided with the distribution.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+ * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+ * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+/*************************************************************************
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0 and BSD-3
+ *
+ * See LICENSE.txt for more license information
+ *************************************************************************/
+
 #ifndef NCCL_IBV_CORE_H_
 #define NCCL_IBV_CORE_H_
 
@@ -23,6 +61,20 @@ union ibv_gid {
 		uint64_t	subnet_prefix;
 		uint64_t	interface_id;
 	} global;
+};
+
+enum ibv_gid_type {
+	IBV_GID_TYPE_IB,
+	IBV_GID_TYPE_ROCE_V1,
+	IBV_GID_TYPE_ROCE_V2,
+};
+
+struct ibv_gid_entry {
+	union ibv_gid gid;
+	uint32_t gid_index;
+	uint32_t port_num;
+	uint32_t gid_type; /* enum ibv_gid_type */
+	uint32_t ndev_ifindex;
 };
 
 #ifndef container_of
@@ -188,6 +240,10 @@ enum ibv_port_cap_flags {
 	IBV_PORT_IP_BASED_GIDS			= 1 << 26,
 };
 
+enum ibv_query_port_flags {
+	IBV_QPF_GRH_REQUIRED = 1 << 0,
+};
+
 struct ibv_port_attr {
 	enum ibv_port_state	state;
 	enum ibv_mtu		max_mtu;
@@ -234,6 +290,8 @@ enum ibv_event_type {
 	IBV_EVENT_QP_LAST_WQE_REACHED,
 	IBV_EVENT_CLIENT_REREGISTER,
 	IBV_EVENT_GID_CHANGE,
+	IBV_EVENT_WQ_FATAL,
+	IBV_EVENT_DEVICE_SPEED_CHANGE,
 
 	/* new experimental events start here leaving enough
 	 * room for 14 events which should be enough
@@ -324,6 +382,7 @@ enum ibv_access_flags {
 	IBV_ACCESS_REMOTE_READ		= (1<<2),
 	IBV_ACCESS_REMOTE_ATOMIC	= (1<<3),
 	IBV_ACCESS_MW_BIND		= (1<<4),
+	IBV_ACCESS_ZERO_BASED		= (1<<5),
 	IBV_ACCESS_RELAXED_ORDERING     = (1<<20),
 };
 
@@ -491,6 +550,20 @@ struct ibv_srq_init_attr_ex {
 	struct ibv_cq	       *cq;
 };
 
+/*
+ * Receive Work Queue Indirection Table.
+ * It's used in order to distribute incoming packets between different
+ * Receive Work Queues. Associating Receive WQs with different CPU cores
+ * allows one to distribute the traffic load across different CPU cores.
+ * The Indirection Table can contain only WQs of type IBV_WQT_RQ.
+*/
+struct ibv_rwq_ind_table {
+	struct ibv_context *context;
+	int ind_tbl_handle;
+	int ind_tbl_num;
+	uint32_t comp_mask;
+};
+
 enum ibv_qp_type {
 	IBV_QPT_RC = 2,
 	IBV_QPT_UC,
@@ -535,6 +608,15 @@ enum ibv_qp_init_attr_mask {
 	IBV_QP_INIT_ATTR_RESERVED	= 1 << 2
 };
 
+struct ibv_rx_hash_conf {
+	/* enum ibv_rx_hash_function_flags */
+	uint8_t    rx_hash_function;
+	uint8_t    rx_hash_key_len;
+	uint8_t    *rx_hash_key;
+	/* enum ibv_rx_hash_fields */
+	uint64_t   rx_hash_fields_mask;
+};
+
 struct ibv_qp_init_attr_ex {
 	void		       *qp_context;
 	struct ibv_cq	       *send_cq;
@@ -547,6 +629,13 @@ struct ibv_qp_init_attr_ex {
 	uint32_t		comp_mask;
 	struct ibv_pd	       *pd;
 	struct ibv_xrcd	       *xrcd;
+	uint32_t    create_flags;
+	uint16_t		max_tso_header;
+	struct ibv_rwq_ind_table       *rwq_ind_tbl;
+	struct ibv_rx_hash_conf	rx_hash_conf;
+	uint32_t		source_qpn;
+	/* See enum ibv_qp_create_send_ops_flags */
+	uint64_t send_ops_flags;
 };
 
 enum ibv_qp_open_attr_mask {
@@ -984,6 +1073,58 @@ struct ibv_context {
 	int			num_comp_vectors;
 	pthread_mutex_t		mutex;
 	void		       *abi_compat;
+};
+
+enum ibv_cq_init_attr_mask {
+	IBV_CQ_INIT_ATTR_MASK_FLAGS	= 1 << 0,
+	IBV_CQ_INIT_ATTR_MASK_PD	= 1 << 1,
+};
+
+enum ibv_create_cq_attr_flags {
+	IBV_CREATE_CQ_ATTR_SINGLE_THREADED = 1 << 0,
+	IBV_CREATE_CQ_ATTR_IGNORE_OVERRUN  = 1 << 1,
+};
+
+struct ibv_cq_init_attr_ex {
+	/* Minimum number of entries required for CQ */
+	uint32_t			cqe;
+	/* Consumer-supplied context returned for completion events */
+	void			*cq_context;
+	/* Completion channel where completion events will be queued.
+	 * May be NULL if completion events will not be used.
+	 */
+	struct ibv_comp_channel *channel;
+	/* Completion vector used to signal completion events.
+	 *  Must be < context->num_comp_vectors.
+	 */
+	uint32_t			comp_vector;
+	 /* Or'ed bit of enum ibv_create_cq_wc_flags. */
+	uint64_t		wc_flags;
+	/* compatibility mask (extended verb). Or'd flags of
+	 * enum ibv_cq_init_attr_mask
+	 */
+	uint32_t		comp_mask;
+	/* create cq attr flags - one or more flags from
+	 * enum ibv_create_cq_attr_flags
+	 */
+	uint32_t		flags;
+	struct ibv_pd		*parent_domain;
+};
+
+enum ibv_parent_domain_init_attr_mask {
+	IBV_PARENT_DOMAIN_INIT_ATTR_ALLOCATORS = 1 << 0,
+	IBV_PARENT_DOMAIN_INIT_ATTR_PD_CONTEXT = 1 << 1,
+};
+
+struct ibv_parent_domain_init_attr {
+	struct ibv_pd *pd; /* reference to a protection domain object, can't be NULL */
+	struct ibv_td *td; /* reference to a thread domain object, or NULL */
+	uint32_t comp_mask;
+	void *(*alloc)(struct ibv_pd *pd, void *pd_context, size_t size,
+		       size_t alignment, uint64_t resource_type);
+	void (*free)(struct ibv_pd *pd, void *pd_context, void *ptr,
+		     uint64_t resource_type);
+	void *pd_context;
 };
 
 enum verbs_context_mask {

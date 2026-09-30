@@ -1,0 +1,101 @@
+---
+name: amdsmi-test-runner
+description: "Run C++ and Python tests for amd-smi. Use when: running tests, verifying test results, checking test coverage, pre-review test validation."
+---
+
+# Test Runner — amd-smi
+
+How to build and run all test suites for amd-smi. Assumes the `amdsmi-build-install` skill has already been executed (build exists and is installed).
+
+## Prerequisites
+
+- amd-smi built and installed (run `amdsmi-build-install` skill first)
+- AMD GPU hardware available for integration tests
+- `build/` directory exists with compiled test binaries
+
+## C++ Tests (GTest)
+
+### Build Test Binary
+
+If not already built (the build skill builds with `-DBUILD_TESTS=ON`):
+
+```bash
+cd build && make -j$(nproc) amdsmitst
+```
+
+### Run Tests
+
+```bash
+cd build/tests
+source ../../tests/amd_smi_test/amdsmitst.exclude
+source ../../tests/amd_smi_test/detect_asic_filter.sh
+./amdsmitst --gtest_filter="-${GTEST_EXCLUDE}"
+```
+
+### Interpret Results
+
+| Output | Meaning | Severity |
+|--------|---------|----------|
+| `[  PASSED  ]` | Test passed | — |
+| `[  FAILED  ]` | Test failed | ❌ BLOCKING |
+| `[  SKIPPED ]` | Test skipped (blacklisted) | — |
+| Binary not found | Build didn't produce test binary | ⚠️ IMPORTANT |
+
+## Python Tests
+
+### Unit / Integration / CLI
+
+Run the suite files directly (each `sys.exit(0/1)`):
+
+```bash
+cd tests/python
+python3 unit_tests.py -v
+python3 integration_test.py -v
+python3 cli_unit_test.py -v
+```
+
+### Import Verification
+
+```bash
+# System install
+python3 -c "import amdsmi; print(amdsmi.__version__)"
+
+# Verify CLI works
+amd-smi version
+amd-smi static
+```
+
+## Test Contexts
+
+Tests must work in **both** install contexts:
+
+| Context | How to Verify |
+|---------|--------------|
+| System install (RPM/DEB) | Default after `amdsmi-build-install` |
+
+## Running All Tests to Logs (One-Shot)
+
+`run-all-tests.sh` (this skill's directory) runs the C++ GTest, Python unit,
+integration, and CLI suites, tees each to a timestamped log dir, and prints a
+pass/fail summary. It derives the project root, so run it from anywhere in the tree:
+
+```bash
+.claude/skills/amdsmi-test-runner/run-all-tests.sh          # logs under $TMPDIR/amdsmi-tests-<stamp>/
+.claude/skills/amdsmi-test-runner/run-all-tests.sh -o ./ci-logs
+```
+
+Each suite's full output is in `<logdir>/<suite>.log`; the exit code is non-zero
+if any suite failed.
+
+## Output
+
+On success, report:
+- **C++ tests:** X passed, Y failed, Z skipped
+- **Python tests:** X passed, Y failed
+- **Any new test failures** compared to baseline
+
+On failure:
+- **Which suite failed** (C++ GTest, Python unit, CLI)
+- **Specific test names** that failed
+- **Test output** for failed tests
+- Test failures are **❌ BLOCKING** for the review

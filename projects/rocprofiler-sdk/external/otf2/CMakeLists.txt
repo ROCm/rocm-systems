@@ -27,9 +27,15 @@ endif()
 
 set(FETCHCONTENT_BASE_DIR ${ROCPROFILER_BINARY_DIR}/external/packages)
 
+# Only OTF2 3.0.3 is uploaded to S3. If another otf2 release is added, update the URL,
+# OTF2_VERSION, and OTF2_URL_HASH
+if(NOT ${OTF2_VERSION} STREQUAL "3.0.3")
+    message(FATAL_ERROR "Unsupported OTF2 version: ${OTF2_VERSION}")
+endif()
+
 fetchcontent_declare(
     otf2-source
-    URL https://perftools.pages.jsc.fz-juelich.de/cicd/otf2/tags/otf2-${OTF2_VERSION}/otf2-${OTF2_VERSION}.tar.gz
+    URL https://rocm-third-party-deps.s3.us-east-2.amazonaws.com/otf2-${OTF2_VERSION}.tar.gz
     URL_HASH ${OTF2_URL_HASH})
 
 fetchcontent_makeavailable(otf2-source)

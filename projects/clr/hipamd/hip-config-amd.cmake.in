@@ -1,22 +1,6 @@
-# Copyright (c) 2023 Advanced Micro Devices, Inc. All Rights Reserved.
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 
 # Number of parallel jobs by default is 1
 if(NOT DEFINED HIP_CLANG_NUM_PARALLEL_JOBS)
@@ -168,15 +152,16 @@ foreach(GPU_TARGET ${GPU_BUILD_TARGETS})
     hip_add_interface_link_flags(hip::device --offload-arch=${GPU_TARGET})
 endforeach()
 #Add support for parallel build and link
+# Although we now use the `--offload-jobs`, we still call it parallel jobs for compatibility.
 if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
-  check_cxx_compiler_flag("-parallel-jobs=1" HIP_CLANG_SUPPORTS_PARALLEL_JOBS)
+  check_cxx_compiler_flag("--offload-jobs=1" HIP_CLANG_SUPPORTS_PARALLEL_JOBS)
 endif()
 if(HIP_CLANG_NUM_PARALLEL_JOBS GREATER 1)
   if(${HIP_CLANG_SUPPORTS_PARALLEL_JOBS} )
     if (NOT compilePropIsSet)
-      hip_add_interface_compile_flags(hip::device -parallel-jobs=${HIP_CLANG_NUM_PARALLEL_JOBS} -Wno-format-nonliteral)
+      hip_add_interface_compile_flags(hip::device --offload-jobs=${HIP_CLANG_NUM_PARALLEL_JOBS} -Wno-format-nonliteral)
     endif()
-    hip_add_interface_link_flags(hip::device -parallel-jobs=${HIP_CLANG_NUM_PARALLEL_JOBS})
+    hip_add_interface_link_flags(hip::device --offload-jobs=${HIP_CLANG_NUM_PARALLEL_JOBS})
   else()
     message(AUTHOR_WARNING "clang compiler doesn't support parallel jobs")
   endif()

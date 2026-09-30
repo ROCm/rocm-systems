@@ -1,26 +1,12 @@
 /*
-Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 #include <hip_test_helper.hh>
 #include <utils.hh>
-#include "hipMallocManagedCommon.hh"
 #include "../device/hipGetProcAddressHelpers.hh"
 
 /**
@@ -37,7 +23,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_MemoryApisMallocFree") {
+HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMallocFree) {
   void* hipMalloc_ptr = nullptr;
   void* hipFree_ptr = nullptr;
   void* hipExtMallocWithFlags_ptr = nullptr;
@@ -97,11 +83,6 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMallocFree") {
   hipError_t (*dyn_hipMemAllocPitch_ptr)(hipDeviceptr_t*, size_t*, size_t, size_t, unsigned int) =
       reinterpret_cast<hipError_t (*)(hipDeviceptr_t*, size_t*, size_t, size_t, unsigned int)>(
           hipMemAllocPitch_ptr);
-  hipError_t (*dyn_hipFreeHost_ptr)(void*) =
-      reinterpret_cast<hipError_t (*)(void*)>(hipFreeHost_ptr);
-  hipError_t (*dyn_hipHostFree_ptr)(void*) =
-      reinterpret_cast<hipError_t (*)(void*)>(hipHostFree_ptr);
-
   // Validating hipMalloc and hipFree APIs
   {
     void* d_ptr = nullptr;
@@ -313,6 +294,11 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMallocFree") {
 
   // Skip these if we have address sanitizer enable because free might not actually free it
 #if !defined(ENABLE_ADDRESS_SANITIZER)
+  hipError_t (*dyn_hipFreeHost_ptr)(void*) =
+      reinterpret_cast<hipError_t (*)(void*)>(hipFreeHost_ptr);
+  hipError_t (*dyn_hipHostFree_ptr)(void*) =
+      reinterpret_cast<hipError_t (*)(void*)>(hipHostFree_ptr);
+
   // Validating hipFreeHost API
   {
     void* h_ptr = nullptr;
@@ -353,7 +339,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMallocFree") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_MemoryApisRegisterUnReg") {
+HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisRegisterUnReg) {
   void* hipHostRegister_ptr = nullptr;
   void* hipHostUnregister_ptr = nullptr;
 
@@ -408,7 +394,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisRegisterUnReg") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_MemoryApisArrayRelated") {
+HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisArrayRelated) {
   CHECK_IMAGE_SUPPORT
 
   void* hipMallocArray_ptr = nullptr;
@@ -830,7 +816,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisArrayRelated") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_MemoryApisSetAndGetAttributes") {
+HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisSetAndGetAttributes) {
   void* hipPointerGetAttribute_ptr = nullptr;
   void* hipPointerGetAttributes_ptr = nullptr;
   void* hipDrvPointerGetAttributes_ptr = nullptr;
@@ -1184,7 +1170,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisSetAndGetAttributes") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemCopy") {
+HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopy) {
   void* hipMemcpyHtoD_ptr = nullptr;
   void* hipMemcpyDtoH_ptr = nullptr;
   void* hipMemcpyDtoD_ptr = nullptr;
@@ -1414,7 +1400,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemCopy") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams") {
+HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
   void* hipMemcpyHtoDAsync_ptr = nullptr;
   void* hipMemcpyDtoHAsync_ptr = nullptr;
   void* hipMemcpyDtoDAsync_ptr = nullptr;
@@ -1452,7 +1438,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams") {
       reinterpret_cast<hipError_t (*)(void*, const void*, size_t, hipMemcpyKind, hipStream_t)>(
           hipMemcpyWithStream_ptr);
   int N = 4096;
-  const int Ns = 4;
+  const int Ns = isQuickLevel() ? 2 : 4;
   int Nbytes = N * sizeof(int);
   int value = 2;
   // Validating hipMemcpyHtoDAsync API
@@ -1461,7 +1447,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams") {
     REQUIRE(hostMem != nullptr);
     fillHostArray(hostMem, N, value);
 
-    hipStream_t stream[Ns];
+    std::vector<hipStream_t> stream(Ns);
     for (int s = 0; s < Ns; s++) {
       HIP_CHECK(hipStreamCreate(&stream[s]));
     }
@@ -1495,7 +1481,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams") {
     REQUIRE(devMem != nullptr);
     fillDeviceArray(devMem, N, value);
 
-    hipStream_t stream[Ns];
+    std::vector<hipStream_t> stream(Ns);
     for (int s = 0; s < Ns; s++) {
       HIP_CHECK(hipStreamCreate(&stream[s]));
     }
@@ -1529,7 +1515,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams") {
     REQUIRE(devMem != nullptr);
     fillDeviceArray(devMem, N, value);
 
-    hipStream_t stream[Ns];
+    std::vector<hipStream_t> stream(Ns);
     for (int s = 0; s < Ns; s++) {
       HIP_CHECK(hipStreamCreate(&stream[s]));
     }
@@ -1566,7 +1552,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams") {
       REQUIRE(hostMem != nullptr);
       fillHostArray(hostMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -1599,7 +1585,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams") {
       REQUIRE(hostMem != nullptr);
       fillHostArray(hostMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -1633,7 +1619,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams") {
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -1667,7 +1653,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams") {
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -1702,7 +1688,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams") {
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -1736,7 +1722,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams") {
       REQUIRE(hostMem != nullptr);
       fillHostArray(hostMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -1769,7 +1755,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams") {
       REQUIRE(hostMem != nullptr);
       fillHostArray(hostMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -1803,7 +1789,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams") {
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -1837,7 +1823,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams") {
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -1875,7 +1861,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams") {
       REQUIRE(hostMem != nullptr);
       fillHostArray(hostMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -1908,7 +1894,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams") {
       REQUIRE(hostMem != nullptr);
       fillHostArray(hostMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -1942,7 +1928,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams") {
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -1976,7 +1962,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams") {
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -2011,7 +1997,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams") {
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -2046,7 +2032,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams") {
       REQUIRE(hostMem != nullptr);
       fillHostArray(hostMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -2079,7 +2065,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams") {
       REQUIRE(hostMem != nullptr);
       fillHostArray(hostMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -2113,7 +2099,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams") {
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -2147,7 +2133,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams") {
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -2192,7 +2178,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemset") {
+HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemset) {
   void* hipMemsetD8_ptr = nullptr;
   void* hipMemsetD16_ptr = nullptr;
   void* hipMemsetD32_ptr = nullptr;
@@ -2308,7 +2294,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemset") {
     HIP_CHECK(hipMalloc(&devMem, Nbytes));
     REQUIRE(devMem != nullptr);
 
-    hipStream_t stream[Ns];
+    std::vector<hipStream_t> stream(Ns);
     for (int s = 0; s < Ns; s++) {
       HIP_CHECK(hipStreamCreate(&stream[s]));
     }
@@ -2346,7 +2332,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemset") {
     HIP_CHECK(hipMalloc(&devMem, Nbytes));
     REQUIRE(devMem != nullptr);
 
-    hipStream_t stream[Ns];
+    std::vector<hipStream_t> stream(Ns);
     for (int s = 0; s < Ns; s++) {
       HIP_CHECK(hipStreamCreate(&stream[s]));
     }
@@ -2384,7 +2370,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemset") {
     HIP_CHECK(hipMalloc(&devMem, Nbytes));
     REQUIRE(devMem != nullptr);
 
-    hipStream_t stream[Ns];
+    std::vector<hipStream_t> stream(Ns);
     for (int s = 0; s < Ns; s++) {
       HIP_CHECK(hipStreamCreate(&stream[s]));
     }
@@ -2443,7 +2429,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemset") {
     HIP_CHECK(hipMalloc(&devMem, Nbytes));
     REQUIRE(devMem != nullptr);
 
-    hipStream_t stream[Ns];
+    std::vector<hipStream_t> stream(Ns);
     for (int s = 0; s < Ns; s++) {
       HIP_CHECK(hipStreamCreate(&stream[s]));
     }
@@ -2485,9 +2471,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemset") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemset2D3D") {
-  CHECK_IMAGE_SUPPORT
-
+HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemset2D3D) {
   void* hipMemset2D_ptr = nullptr;
   void* hipMemset2DAsync_ptr = nullptr;
   void* hipMemset3D_ptr = nullptr;
@@ -2557,7 +2541,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemset2D3D") {
     HIP_CHECK(dyn_hipMemset2DAsync_ptr(devMem, pitch, 5, width, height, 0));
     HIP_CHECK(hipStreamSynchronize(0));
 
-    hipStream_t stream[Ns];
+    std::vector<hipStream_t> stream(Ns);
     for (int s = 0; s < Ns; s++) {
       HIP_CHECK(hipStreamCreate(&stream[s]));
     }
@@ -2663,7 +2647,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemset2D3D") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_MemoryApisGetMemInfoRelated") {
+HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisGetMemInfoRelated) {
   void* hipMemGetInfo_ptr = nullptr;
   void* hipMemPtrGetInfo_ptr = nullptr;
 
@@ -2714,21 +2698,11 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisGetMemInfoRelated") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated", "[multigpu]") {
-  CHECK_IMAGE_SUPPORT
-
+HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
   void* hipMemcpy2D_ptr = nullptr;
   void* hipMemcpy2DAsync_ptr = nullptr;
   void* hipMemcpyParam2D_ptr = nullptr;
   void* hipMemcpyParam2DAsync_ptr = nullptr;
-  void* hipMemcpy2DToArray_ptr = nullptr;
-  void* hipMemcpy2DToArrayAsync_ptr = nullptr;
-  void* hipMemcpy2DFromArray_ptr = nullptr;
-  void* hipMemcpy2DFromArrayAsync_ptr = nullptr;
-  void* hipMemcpyToArray_ptr = nullptr;
-  void* hipMemcpyFromArray_ptr = nullptr;
-  void* hipMemcpyAtoH_ptr = nullptr;
-  void* hipMemcpyHtoA_ptr = nullptr;
 
   int currentHipVersion = 0;
   HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
@@ -2740,20 +2714,6 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated", "[multigpu]") {
       hipGetProcAddress("hipMemcpyParam2D", &hipMemcpyParam2D_ptr, currentHipVersion, 0, nullptr));
   HIP_CHECK(hipGetProcAddress("hipMemcpyParam2DAsync", &hipMemcpyParam2DAsync_ptr,
                               currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipMemcpy2DToArray", &hipMemcpy2DToArray_ptr, currentHipVersion, 0,
-                              nullptr));
-  HIP_CHECK(hipGetProcAddress("hipMemcpy2DToArrayAsync", &hipMemcpy2DToArrayAsync_ptr,
-                              currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipMemcpy2DFromArray", &hipMemcpy2DFromArray_ptr, currentHipVersion,
-                              0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipMemcpy2DFromArrayAsync", &hipMemcpy2DFromArrayAsync_ptr,
-                              currentHipVersion, 0, nullptr));
-  HIP_CHECK(
-      hipGetProcAddress("hipMemcpyToArray", &hipMemcpyToArray_ptr, currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipMemcpyFromArray", &hipMemcpyFromArray_ptr, currentHipVersion, 0,
-                              nullptr));
-  HIP_CHECK(hipGetProcAddress("hipMemcpyAtoH", &hipMemcpyAtoH_ptr, currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipMemcpyHtoA", &hipMemcpyHtoA_ptr, currentHipVersion, 0, nullptr));
 
   hipError_t (*dyn_hipMemcpy2D_ptr)(void*, size_t, const void*, size_t, size_t, size_t,
                                     hipMemcpyKind) =
@@ -2767,36 +2727,6 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated", "[multigpu]") {
       reinterpret_cast<hipError_t (*)(const hip_Memcpy2D*)>(hipMemcpyParam2D_ptr);
   hipError_t (*dyn_hipMemcpyParam2DAsync_ptr)(const hip_Memcpy2D*, hipStream_t) =
       reinterpret_cast<hipError_t (*)(const hip_Memcpy2D*, hipStream_t)>(hipMemcpyParam2DAsync_ptr);
-  hipError_t (*dyn_hipMemcpy2DToArray_ptr)(hipArray_t, size_t, size_t, const void* src, size_t,
-                                           size_t, size_t, hipMemcpyKind) =
-      reinterpret_cast<hipError_t (*)(hipArray_t, size_t, size_t, const void* src, size_t, size_t,
-                                      size_t, hipMemcpyKind)>(hipMemcpy2DToArray_ptr);
-  hipError_t (*dyn_hipMemcpy2DToArrayAsync_ptr)(hipArray_t, size_t, size_t, const void* src, size_t,
-                                                size_t, size_t, hipMemcpyKind, hipStream_t) =
-      reinterpret_cast<hipError_t (*)(hipArray_t, size_t, size_t, const void* src, size_t, size_t,
-                                      size_t, hipMemcpyKind, hipStream_t)>(
-          hipMemcpy2DToArrayAsync_ptr);
-  hipError_t (*dyn_hipMemcpy2DFromArray_ptr)(void*, size_t, hipArray_const_t, size_t, size_t,
-                                             size_t, size_t, hipMemcpyKind) =
-      reinterpret_cast<hipError_t (*)(void*, size_t, hipArray_const_t, size_t, size_t, size_t,
-                                      size_t, hipMemcpyKind)>(hipMemcpy2DFromArray_ptr);
-  hipError_t (*dyn_hipMemcpy2DFromArrayAsync_ptr)(void*, size_t, hipArray_const_t, size_t, size_t,
-                                                  size_t, size_t, hipMemcpyKind, hipStream_t) =
-      reinterpret_cast<hipError_t (*)(void*, size_t, hipArray_const_t, size_t, size_t, size_t,
-                                      size_t, hipMemcpyKind, hipStream_t)>(
-          hipMemcpy2DFromArrayAsync_ptr);
-  hipError_t (*dyn_hipMemcpyToArray_ptr)(hipArray_t, size_t, size_t, const void*, size_t,
-                                         hipMemcpyKind) =
-      reinterpret_cast<hipError_t (*)(hipArray_t, size_t, size_t, const void*, size_t,
-                                      hipMemcpyKind)>(hipMemcpyToArray_ptr);
-  hipError_t (*dyn_hipMemcpyFromArray_ptr)(void*, hipArray_const_t, size_t, size_t, size_t,
-                                           hipMemcpyKind) =
-      reinterpret_cast<hipError_t (*)(void*, hipArray_const_t, size_t, size_t, size_t,
-                                      hipMemcpyKind)>(hipMemcpyFromArray_ptr);
-  hipError_t (*dyn_hipMemcpyAtoH_ptr)(void*, hipArray_t, size_t, size_t) =
-      reinterpret_cast<hipError_t (*)(void*, hipArray_t, size_t, size_t)>(hipMemcpyAtoH_ptr);
-  hipError_t (*dyn_hipMemcpyHtoA_ptr)(hipArray_t, size_t, const void*, size_t) =
-      reinterpret_cast<hipError_t (*)(hipArray_t, size_t, const void*, size_t)>(hipMemcpyHtoA_ptr);
 
   // Validating hipMemcpy2D API
   {
@@ -3525,6 +3455,68 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated", "[multigpu]") {
       }
     }
   }
+
+}
+
+HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
+  CHECK_IMAGE_SUPPORT
+  void* hipMemcpy2DToArray_ptr = nullptr;
+  void* hipMemcpy2DToArrayAsync_ptr = nullptr;
+  void* hipMemcpy2DFromArray_ptr = nullptr;
+  void* hipMemcpy2DFromArrayAsync_ptr = nullptr;
+  void* hipMemcpyToArray_ptr = nullptr;
+  void* hipMemcpyFromArray_ptr = nullptr;
+  void* hipMemcpyAtoH_ptr = nullptr;
+  void* hipMemcpyHtoA_ptr = nullptr;
+
+  int currentHipVersion = 0;
+  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+
+  HIP_CHECK(hipGetProcAddress("hipMemcpy2DToArray", &hipMemcpy2DToArray_ptr, currentHipVersion, 0,
+                              nullptr));
+  HIP_CHECK(hipGetProcAddress("hipMemcpy2DToArrayAsync", &hipMemcpy2DToArrayAsync_ptr,
+                              currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipMemcpy2DFromArray", &hipMemcpy2DFromArray_ptr, currentHipVersion,
+                              0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipMemcpy2DFromArrayAsync", &hipMemcpy2DFromArrayAsync_ptr,
+                              currentHipVersion, 0, nullptr));
+  HIP_CHECK(
+      hipGetProcAddress("hipMemcpyToArray", &hipMemcpyToArray_ptr, currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipMemcpyFromArray", &hipMemcpyFromArray_ptr, currentHipVersion, 0,
+                              nullptr));
+  HIP_CHECK(hipGetProcAddress("hipMemcpyAtoH", &hipMemcpyAtoH_ptr, currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipMemcpyHtoA", &hipMemcpyHtoA_ptr, currentHipVersion, 0, nullptr));
+
+  hipError_t (*dyn_hipMemcpy2DToArray_ptr)(hipArray_t, size_t, size_t, const void* src, size_t,
+                                           size_t, size_t, hipMemcpyKind) =
+      reinterpret_cast<hipError_t (*)(hipArray_t, size_t, size_t, const void* src, size_t, size_t,
+                                      size_t, hipMemcpyKind)>(hipMemcpy2DToArray_ptr);
+  hipError_t (*dyn_hipMemcpy2DToArrayAsync_ptr)(hipArray_t, size_t, size_t, const void* src, size_t,
+                                                size_t, size_t, hipMemcpyKind, hipStream_t) =
+      reinterpret_cast<hipError_t (*)(hipArray_t, size_t, size_t, const void* src, size_t, size_t,
+                                      size_t, hipMemcpyKind, hipStream_t)>(
+          hipMemcpy2DToArrayAsync_ptr);
+  hipError_t (*dyn_hipMemcpy2DFromArray_ptr)(void*, size_t, hipArray_const_t, size_t, size_t,
+                                             size_t, size_t, hipMemcpyKind) =
+      reinterpret_cast<hipError_t (*)(void*, size_t, hipArray_const_t, size_t, size_t, size_t,
+                                      size_t, hipMemcpyKind)>(hipMemcpy2DFromArray_ptr);
+  hipError_t (*dyn_hipMemcpy2DFromArrayAsync_ptr)(void*, size_t, hipArray_const_t, size_t, size_t,
+                                                  size_t, size_t, hipMemcpyKind, hipStream_t) =
+      reinterpret_cast<hipError_t (*)(void*, size_t, hipArray_const_t, size_t, size_t, size_t,
+                                      size_t, hipMemcpyKind, hipStream_t)>(
+          hipMemcpy2DFromArrayAsync_ptr);
+  hipError_t (*dyn_hipMemcpyToArray_ptr)(hipArray_t, size_t, size_t, const void*, size_t,
+                                         hipMemcpyKind) =
+      reinterpret_cast<hipError_t (*)(hipArray_t, size_t, size_t, const void*, size_t,
+                                      hipMemcpyKind)>(hipMemcpyToArray_ptr);
+  hipError_t (*dyn_hipMemcpyFromArray_ptr)(void*, hipArray_const_t, size_t, size_t, size_t,
+                                           hipMemcpyKind) =
+      reinterpret_cast<hipError_t (*)(void*, hipArray_const_t, size_t, size_t, size_t,
+                                      hipMemcpyKind)>(hipMemcpyFromArray_ptr);
+  hipError_t (*dyn_hipMemcpyAtoH_ptr)(void*, hipArray_t, size_t, size_t) =
+      reinterpret_cast<hipError_t (*)(void*, hipArray_t, size_t, size_t)>(hipMemcpyAtoH_ptr);
+  hipError_t (*dyn_hipMemcpyHtoA_ptr)(hipArray_t, size_t, const void*, size_t) =
+      reinterpret_cast<hipError_t (*)(hipArray_t, size_t, const void*, size_t)>(hipMemcpyHtoA_ptr);
 
   // Validating hipMemcpy2DToArray API
   {
@@ -4491,9 +4483,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated", "[multigpu]") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated") {
-  CHECK_IMAGE_SUPPORT
-
+HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated) {
   void* hipMemcpy3D_ptr = nullptr;
   void* hipMemcpy3DAsync_ptr = nullptr;
   void* hipDrvMemcpy3D_ptr = nullptr;
@@ -5347,7 +5337,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_MemoryApisAddressRelated") {
+HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisAddressRelated) {
   int currentHipVersion = 0;
   HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
 
@@ -5389,11 +5379,8 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisAddressRelated") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_MemoryApisManagedMemory") {
-  if (HmmAttrPrint() != 1) {
-    HipTest::HIP_SKIP_TEST("Skipping test since managed memory not supported");
-    return;
-  }
+HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisManagedMemory) {
+  CHECK_MANAGED_MEMORY_SUPPORT
 
   void* hipMallocManaged_ptr = nullptr;
   void* hipMemPrefetchAsync_ptr = nullptr;
@@ -5678,15 +5665,14 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisManagedMemory") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_MemoryApisStreamOrderedMemory") {
+HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisStreamOrderedMemory) {
   HIP_CHECK(hipSetDevice(0));
   int mem_pool_support = 0;
 
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
 
   if (mem_pool_support != 1) {
-    HipTest::HIP_SKIP_TEST("Skipping test since Memory Pool is not supported");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
   }
 
   void* hipMallocAsync_ptr = nullptr;
@@ -6024,13 +6010,12 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisStreamOrderedMemory") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_MemoryApisPeerToPeer", "[multigpu]") {
+HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisPeerToPeer) {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
 
   if (deviceCount < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping because this machine has total GPUs < 2");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
   void* hipMemGetAddressRange_ptr = nullptr;
@@ -6061,10 +6046,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisPeerToPeer", "[multigpu]") {
   int canAccessPeer = 0;
   HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, deviceId, peerDeviceId));
   if (!canAccessPeer) {
-    std::string msg = "Skipped as peer access cannot be enabled between devices " +
-                      std::to_string(deviceId) + " " + std::to_string(peerDeviceId);
-    HipTest::HIP_SKIP_TEST(msg.c_str());
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
   }
 
   const int N = 16;
@@ -6084,6 +6066,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisPeerToPeer", "[multigpu]") {
 
     REQUIRE(basePtr == devPtr);
     REQUIRE(size == (4 * sizeof(int)));
+    HIP_CHECK(hipFree(devPtr));
   }
 
   // Validating hipMemcpyPeer API
@@ -6103,9 +6086,11 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisPeerToPeer", "[multigpu]") {
 
     HIP_CHECK(dyn_hipMemcpyPeer_ptr(dstDevPtr, peerDeviceId, srcDevPtr, deviceId, Nbytes));
 
-    validateHostArray(dstDevPtr, N, value);
+    REQUIRE(validateDeviceArray(dstDevPtr, N, value) == true);
 
+    HIP_CHECK(hipSetDevice(deviceId));
     HIP_CHECK(hipFree(srcDevPtr));
+    HIP_CHECK(hipSetDevice(peerDeviceId));
     HIP_CHECK(hipFree(dstDevPtr));
   }
 
@@ -6117,6 +6102,11 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisPeerToPeer", "[multigpu]") {
     HIP_CHECK(hipMalloc(&srcDevPtr, Nbytes));
     REQUIRE(srcDevPtr != nullptr);
     fillDeviceArray(srcDevPtr, N, value);
+    // srcDevPtr is filled by a kernel on srcDevice's null stream, but the copy below is
+    // on a user stream created on the peer device. hipMemcpyPeerAsync is not serialized
+    // against pending work on srcDevice, so the fill could still be running when the copy
+    // reads srcDevPtr. Synchronize the fill first.
+    HIP_CHECK(hipDeviceSynchronize());
 
     HIP_CHECK(hipSetDevice(peerDeviceId));
 
@@ -6131,7 +6121,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisPeerToPeer", "[multigpu]") {
         dyn_hipMemcpyPeerAsync_ptr(dstDevPtr, peerDeviceId, srcDevPtr, deviceId, Nbytes, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
 
-    validateHostArray(dstDevPtr, N, value);
+    REQUIRE(validateDeviceArray(dstDevPtr, N, value) == true);
 
     HIP_CHECK(hipStreamDestroy(stream));
     HIP_CHECK(hipFree(srcDevPtr));

@@ -192,7 +192,7 @@ class WaveIssueAndErrorTestGFX12
                 genPCSample(valid, issued);
     }
 
-    // Could be reused with assumption that the num_combinations will be overriden
+    // Could be reused with assumption that the num_combinations will be overridden
     void CheckBuffers() override
     {
         const int num_combinations = 4;
@@ -256,7 +256,7 @@ class WaveIssueAndErrorTestGFX12
 template <typename PcSamplingRecordT>
 class HwIdTest : public WaveSnapTest<GFX12, PcSamplingRecordT>
 {
-    // The combined hw_id1 and hw_id2 encoded by ROCr's 2nd level trap hadler
+    // The combined hw_id1 and hw_id2 encoded by ROCr's 2nd level trap handler
     union gfx12_hw_id_t
     {
         uint32_t raw;
@@ -351,7 +351,7 @@ class HwIdTest : public WaveSnapTest<GFX12, PcSamplingRecordT>
         ::memset(&sample, 0, sizeof(sample));
 
         // Unpacking individual fields
-        // NOTE: chiplet is tested in a WaveOtherFieldsTest test, becuase it's not
+        // NOTE: chiplet is tested in a WaveOtherFieldsTest test, because it's not
         // transferred via hw_id, but chiplet_and_wave_id field.
         sample.hw_id.wave_id          = hw_id.wave_id;
         sample.hw_id.simd_id          = hw_id.simd_id;

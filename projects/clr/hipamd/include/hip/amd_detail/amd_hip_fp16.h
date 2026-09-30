@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2015 - 2025 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 #ifndef HIP_INCLUDE_HIP_AMD_DETAIL_HIP_FP16_H
@@ -158,10 +142,10 @@ struct __half {
   }
 #endif
 
-// MANIPULATORS - DEVICE ONLY
+// MANIPULATORS - INTEGRAL
 #if !defined(__HIP_NO_HALF_CONVERSIONS__)
   template <typename T, Enable_if_t<__hip_internal::is_integral<T>{}>* = nullptr>
-  __device__ __half& operator=(T x) {
+  __HOST_DEVICE__ __half& operator=(T x) {
     data = static_cast<_Float16>(x);
     return *this;
   }
@@ -633,7 +617,8 @@ inline __HOST_DEVICE__ bool __heq(__half x, __half y) {
   return static_cast<__half_raw>(x).data == static_cast<__half_raw>(y).data;
 }
 inline __HOST_DEVICE__ bool __hne(__half x, __half y) {
-  return static_cast<__half_raw>(x).data != static_cast<__half_raw>(y).data;
+  return (static_cast<__half_raw>(x).data < static_cast<__half_raw>(y).data) ||
+         (static_cast<__half_raw>(x).data > static_cast<__half_raw>(y).data);
 }
 inline __HOST_DEVICE__ bool __hle(__half x, __half y) {
   return static_cast<__half_raw>(x).data <= static_cast<__half_raw>(y).data;
@@ -672,7 +657,8 @@ inline __HOST_DEVICE__ __half2 __heq2(__half2 x, __half2 y) {
   return __builtin_convertvector(-r, _Float16_2);
 }
 inline __HOST_DEVICE__ __half2 __hne2(__half2 x, __half2 y) {
-  auto r = static_cast<__half2_raw>(x).data != static_cast<__half2_raw>(y).data;
+  auto r = (static_cast<__half2_raw>(x).data < static_cast<__half2_raw>(y).data) |
+           (static_cast<__half2_raw>(x).data > static_cast<__half2_raw>(y).data);
   return __builtin_convertvector(-r, _Float16_2);
 }
 inline __HOST_DEVICE__ __half2 __hle2(__half2 x, __half2 y) {
@@ -741,12 +727,30 @@ inline __HOST_DEVICE__ bool __hbgt2(__half2 x, __half2 y) {
   auto r = static_cast<__half2_raw>(__hgt2(x, y));
   return r.data.x != 0 && r.data.y != 0;
 }
-inline __HOST_DEVICE__ bool __hbequ2(__half2 x, __half2 y) { return __hbeq2(x, y); }
-inline __HOST_DEVICE__ bool __hbneu2(__half2 x, __half2 y) { return __hbne2(x, y); }
-inline __HOST_DEVICE__ bool __hbleu2(__half2 x, __half2 y) { return __hble2(x, y); }
-inline __HOST_DEVICE__ bool __hbgeu2(__half2 x, __half2 y) { return __hbge2(x, y); }
-inline __HOST_DEVICE__ bool __hbltu2(__half2 x, __half2 y) { return __hblt2(x, y); }
-inline __HOST_DEVICE__ bool __hbgtu2(__half2 x, __half2 y) { return __hbgt2(x, y); }
+inline __HOST_DEVICE__ bool __hbequ2(__half2 x, __half2 y) {
+  auto r = static_cast<__half2_raw>(__hequ2(x, y));
+  return r.data.x != 0 && r.data.y != 0;
+}
+inline __HOST_DEVICE__ bool __hbneu2(__half2 x, __half2 y) {
+  auto r = static_cast<__half2_raw>(__hneu2(x, y));
+  return r.data.x != 0 && r.data.y != 0;
+}
+inline __HOST_DEVICE__ bool __hbleu2(__half2 x, __half2 y) {
+  auto r = static_cast<__half2_raw>(__hleu2(x, y));
+  return r.data.x != 0 && r.data.y != 0;
+}
+inline __HOST_DEVICE__ bool __hbgeu2(__half2 x, __half2 y) {
+  auto r = static_cast<__half2_raw>(__hgeu2(x, y));
+  return r.data.x != 0 && r.data.y != 0;
+}
+inline __HOST_DEVICE__ bool __hbltu2(__half2 x, __half2 y) {
+  auto r = static_cast<__half2_raw>(__hltu2(x, y));
+  return r.data.x != 0 && r.data.y != 0;
+}
+inline __HOST_DEVICE__ bool __hbgtu2(__half2 x, __half2 y) {
+  auto r = static_cast<__half2_raw>(__hgtu2(x, y));
+  return r.data.x != 0 && r.data.y != 0;
+}
 inline __HOST_DEVICE__ bool __hisnan(__half x) {
   __half_raw hr = x;
   return (hr.x & 0x7FFFU) > 0x7C00u;
@@ -880,8 +884,32 @@ inline __HOST_DEVICE__ __half2 __h2div(__half2 x, __half2 y) {
   return __half2{static_cast<__half2_raw>(x).data / static_cast<__half2_raw>(y).data};
 }
 
-// Atomic
+// Device specific functions
 #if defined(__clang__) && defined(__HIP__)
+inline __device__ __half atomicAdd(__half* const address, const __half value) {
+  return __half_raw{__scoped_atomic_fetch_add((_Float16*)address,
+                                              static_cast<__half_raw>(value).data,
+                                              __ATOMIC_ACQ_REL, __MEMORY_SCOPE_DEVICE)};
+}
+
+inline __device__ __half2 atomicAdd(__half2* const address, const __half2 value) {
+  static_assert(sizeof(_Float16_2) == sizeof(unsigned int));
+  union {
+    _Float16_2 vec;
+    unsigned int u32;
+  } expected, desired;
+
+  unsigned int* atomic_ptr = (unsigned int*)address;
+  expected.u32 = __scoped_atomic_load_n(atomic_ptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+
+  do {
+    desired.vec = expected.vec + static_cast<_Float16_2>(value);
+  } while (!__scoped_atomic_compare_exchange_n(atomic_ptr, &expected.u32, desired.u32, 0,
+                                               __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE,
+                                               __MEMORY_SCOPE_DEVICE));
+  return static_cast<__half2>(expected.vec);
+}
+
 inline __device__ __half2 unsafeAtomicAdd(__half2* address, __half2 value) {
 #if __has_builtin(__builtin_amdgcn_flat_atomic_fadd_v2f16)
   // The api expects an ext_vector_type of half
@@ -891,7 +919,8 @@ inline __device__ __half2 unsafeAtomicAdd(__half2* address, __half2 value) {
     __half2_raw h2r;
     vec_fp162 fp16;
   } u{static_cast<__half2_raw>(value)};
-  u.fp16 = __builtin_amdgcn_flat_atomic_fadd_v2f16((vec_fp162*)address, u.fp16);
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_flat_atomic_fadd_v2f16))
+    u.fp16 = __builtin_amdgcn_flat_atomic_fadd_v2f16((vec_fp162*)address, u.fp16);
   return static_cast<__half2>(u.h2r);
 #else
   static_assert(sizeof(__half2_raw) == sizeof(unsigned int));
@@ -901,15 +930,16 @@ inline __device__ __half2 unsafeAtomicAdd(__half2* address, __half2 value) {
   };
   u_hold old_val, new_val;
   old_val.u32 =
-      __hip_atomic_load((unsigned int*)address, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+      __scoped_atomic_load_n((unsigned int*)address, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
   do {
     new_val.h2r = __hadd2(old_val.h2r, value);
-  } while (!__hip_atomic_compare_exchange_strong((unsigned int*)address, &old_val.u32, new_val.u32,
-                                                 __ATOMIC_RELAXED, __ATOMIC_RELAXED,
-                                                 __HIP_MEMORY_SCOPE_AGENT));
+  } while (!__scoped_atomic_compare_exchange_n((unsigned int*)address, &old_val.u32, new_val.u32, 0,
+                                               __ATOMIC_RELAXED, __ATOMIC_RELAXED,
+                                               __MEMORY_SCOPE_DEVICE));
   return old_val.h2r;
 #endif
 }
+
 inline __device__ __half unsafeAtomicAdd(__half* address, __half value) {
   static_assert(sizeof(unsigned short int) == sizeof(__half_raw));
   unsigned short int* address_as_short = reinterpret_cast<unsigned short int*>(address);
@@ -931,6 +961,20 @@ inline __device__ __half unsafeAtomicAdd(__half* address, __half value) {
   if (is_lower) return __low2half(out);
   return __high2half(out);
 }
+
+namespace __hip_internal {
+template <>
+struct NumericLimits<__half> {
+    static constexpr __half maximum() {
+      __half_raw raw { .x = 0x7C00U };
+      return __half(raw);
+    }
+    static constexpr __half minimum() {
+      __half_raw raw { .x = 0xFC00U };
+      return __half(raw);
+    }
+};
+}  // namespace __hip_internal
 #endif  // defined(__clang__) && defined(__HIP__)
 
 // Math functions
@@ -965,7 +1009,7 @@ inline __device__ __half hexp2(__half x) {
   return __half_raw{__builtin_elementwise_exp2(static_cast<__half_raw>(x).data)};
 }
 inline __device__ __half hexp10(__half x) {
-  return __half_raw{__ocml_exp10_f16(static_cast<__half_raw>(x).data)};
+  return __half_raw{__builtin_elementwise_exp10(static_cast<__half_raw>(x).data)};
 }
 inline __device__ __half hlog2(__half x) {
   return __half_raw{__builtin_elementwise_log2(static_cast<__half_raw>(x).data)};
@@ -1014,7 +1058,10 @@ inline __device__ __half2 h2exp(__half2 x) {
 inline __device__ __half2 h2exp2(__half2 x) {
   return __half2{__builtin_elementwise_exp2(static_cast<__half2_raw>(x).data)};
 }
-inline __device__ __half2 h2exp10(__half2 x) { return __half2{__ocml_exp10_2f16(x)}; }
+inline __device__ __half2 h2exp10(__half2 x) {
+  return __half2{__builtin_elementwise_exp10(static_cast<__half2_raw>(x).data)};
+}
+
 inline __device__ __half2 h2log2(__half2 x) {
   return __half2{__builtin_elementwise_log2(static_cast<__half2_raw>(x).data)};
 }
@@ -1151,8 +1198,17 @@ template <typename MaskT> __device__ inline __half __reduce_max_sync(MaskT mask,
 
   return __reduce_op_sync(mask, val, op, wfReduce);
 }
+#endif
 
-#endif  // __HIP_NO_HALF_OPERATORS__
+#if !defined(__HIP_NO_HALF_OPERATORS__)
+namespace cooperative_groups {
+namespace impl {
+HIP_IMPL_GENERATE_SCAN_FUNC(add, f16, __half);
+HIP_IMPL_GENERATE_SCAN_FUNC(min, f16, __half);
+HIP_IMPL_GENERATE_SCAN_FUNC(max, f16, __half);
+}
+}
+#endif
 
 #endif  // defined(__cplusplus)
 #elif defined(__GNUC__) || defined(_MSC_VER)

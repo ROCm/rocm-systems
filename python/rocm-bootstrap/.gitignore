@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+*.whl
+dist/
+build/
+.eggs/
+*.so
+.pytest_cache/
+/wheelhouse/

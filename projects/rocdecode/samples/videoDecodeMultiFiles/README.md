@@ -6,25 +6,40 @@ The reconfigure option can be disabled by the user if needed. The input file is 
 
 ## Prerequisites:
 
-* Install [rocDecode](../../README.md#build-and-install-instructions)
+* Install [rocDecode](https://rocm.docs.amd.com/projects/rocDecode/en/latest/install/rocDecode-build-and-install.html)
 
 * [FFMPEG](https://ffmpeg.org/about.html)
-
-    * On `Ubuntu`
 
   ```shell
   sudo apt install libavcodec-dev libavformat-dev libavutil-dev
   ```
-  
-    * On `RHEL`/`SLES` - install ffmpeg development packages manually or use [rocDecode-setup.py](../../rocDecode-setup.py) script
 
 ## Build
+
+**Linux:**
 
 ```shell
 mkdir video_decode_multi_files_sample && cd video_decode_multi_files_sample
 cmake ../
 make -j
 ```
+
+**Windows:**
+
+```bat
+mkdir video_decode_multi_files_sample && cd video_decode_multi_files_sample
+cmake .. -DROCM_PATH=<path-to-TheRock-build>
+cmake --build . --config Release
+```
+
+> [!NOTE]
+> Add the rocDecode and FFmpeg DLL directories to your PATH before configuring — CMake
+> locates FFmpeg by probing PATH — and keep them there when running:
+> ```bat
+> set PATH=%ROCM_PATH%\bin;<path-to-ffmpeg>\bin;%PATH%
+> ```
+> If FFmpeg is installed somewhere CMake cannot discover, pass
+> `-DFFMPEG_ROOT=<path-to-ffmpeg>` to the configure step.
 
 ## Run
 

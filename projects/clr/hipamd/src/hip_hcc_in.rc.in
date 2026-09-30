@@ -61,7 +61,7 @@ VALUE "CompanyName", "Advanced Micro Devices Inc.\0"
 VALUE "FileDescription", AMD_PLATFORM_NAME " amdhip64 " XSTR(VERSION_PREFIX_MAJOR) "." XSTR(VERSION_PREFIX_MINOR) " Runtime\0"
 VALUE "FileVersion", "10.0." XSTR(AMD_PLATFORM_BUILD_NUMBER) "." XSTR(AMD_PLATFORM_REVISION_NUMBER)
 VALUE "InternalName", "amdhip64"
-VALUE "LegalCopyright", "Copyright (C) 2011 Advanced Micro Devices Inc.\0"
+VALUE "LegalCopyright", "Copyright (C) 2026 Advanced Micro Devices Inc.\0"
 VALUE "OriginalFilename", "amdhip64.dll"
 VALUE "ProductName", "amdhip64 " XSTR(VERSION_PREFIX_MAJOR) "." XSTR(VERSION_PREFIX_MINOR) " " AMD_PLATFORM_INFO "\0"
 VALUE "ProductVersion", "10.0." XSTR(AMD_PLATFORM_BUILD_NUMBER) "." XSTR(AMD_PLATFORM_REVISION_NUMBER)

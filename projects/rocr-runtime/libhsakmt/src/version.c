@@ -24,9 +24,7 @@
  */
 
 #include "libhsakmt.h"
-#include <stdlib.h>
-#include <string.h>
-#include "hsakmt/linux/kfd_ioctl.h"
+#include "kfd_ioctl.h"
 
 HsaVersionInfo hsakmt_kfd_version_info;
 

@@ -101,7 +101,7 @@ TEST_F(EnvVarTestFixture, parse_integer_negative) {
   const envvar::var<int64_t> var_{this->var_name_, this->var_doc_};
   EXPECT_FALSE(var_.is_default());
   EXPECT_EQ(var_.get_default(), 0);
-  EXPECT_EQ(var_.get_value(), -1L << 30);
+  EXPECT_EQ(var_.get_value(), -(1L << 30));
 }
 
 TEST_F(EnvVarTestFixture, parse_integer_negative_large) {
@@ -149,7 +149,7 @@ TEST_F(EnvVarTestFixture, parse_integer_hex_negative) {
   const envvar::var<int64_t> var_{this->var_name_, this->var_doc_};
   EXPECT_FALSE(var_.is_default());
   EXPECT_EQ(var_.get_default(), 0);
-  EXPECT_EQ(var_.get_value(), -1L << 30);
+  EXPECT_EQ(var_.get_value(), -(1L << 30));
 }
 
 TEST_F(EnvVarTestFixture, parse_integer_hex_negative_large) {

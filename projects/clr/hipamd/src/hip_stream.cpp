@@ -1,25 +1,12 @@
-/* Copyright (c) 2015 - 2022 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip/hip_runtime.h>
 #include "hip_internal.hpp"
+#include "hip_executionctx.hpp"
 #include "hip_graph_internal.hpp"
 #include "hip_event.hpp"
 #include "thread/monitor.hpp"
@@ -28,44 +15,143 @@
 
 namespace hip {
 
+namespace {
+template <typename Container, typename Value>
+void EraseIfPresent(Container& container, const Value& value) {
+  const auto it = std::find(container.begin(), container.end(), value);
+  if (it != container.end()) {
+    container.erase(it);
+  }
+}
+
+void EraseCaptureTracking(Stream* stream) {
+  if (stream->GetCaptureMode() == hipStreamCaptureModeGlobal) {
+    amd::ScopedLock lock(g_captureStreamsLock);
+    EraseIfPresent(g_captureStreams, stream);
+  }
+  {
+    amd::ScopedLock lock(g_streamSetLock);
+    EraseIfPresent(g_allCapturingStreams, stream);
+  }
+  EraseIfPresent(tls.capture_streams_, stream);
+}
+}  // namespace
+
 // ================================================================================================
 Stream::Stream(hip::Device* dev, Priority p, unsigned int f, bool null_stream,
-               const std::vector<uint32_t>& cuMask, hipStreamCaptureStatus captureStatus)
+               const std::vector<uint32_t>& cuMask)
     : amd::HostQueue(*dev->asContext(), *dev->devices()[0], 0, amd::CommandQueue::RealTimeDisabled,
                      convertToQueuePriority(p), cuMask, null_stream),
-      lock_("Stream Callback lock"),
       device_(dev),
       priority_(p),
       flags_(f),
       null_(null_stream),
       cuMask_(cuMask),
-      captureStatus_(captureStatus),
-      originStream_(false),
-      captureID_(0) {
+      stream_id_(GenerateStreamId()) {
   device_->AddStream(this);
-  stream_id_ = GenerateStreamId();
 }
 
 // ================================================================================================
-hipError_t Stream::EndCapture() {
-  for (auto event : captureEvents_) {
-    hip::Event* e = reinterpret_cast<hip::Event*>(event);
-    e->SetCaptureStream(nullptr);
-  }
-  for (auto stream : parallelCaptureStreams_) {
-    hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
-    hipError_t err = s->EndCapture();
-    assert(err == hipSuccess);
-  }
-  captureStatus_ = hipStreamCaptureStatusNone;
-  pCaptureGraph_ = nullptr;
-  originStream_ = false;
-  parentStream_ = nullptr;
-  lastCapturedNodes_.clear();
-  parallelCaptureStreams_.clear();
-  captureEvents_.clear();
+// Out of line so that captureGraph_'s deleter is instantiated where hip::Graph is complete.
+Stream::~Stream() = default;
 
-  return hipSuccess;
+// ================================================================================================
+void Stream::InvalidateCapture() {
+  hip::Stream* owner = captureOwner_;
+  if (owner == nullptr) {
+    return;
+  }
+
+  owner->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+  std::scoped_lock lock(owner->lock_);
+  for (auto* participant : owner->captureStreams_) {
+    participant->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+  }
+}
+
+// ================================================================================================
+void Stream::ResetCaptureStateLocked(bool preserveInvalidated) {
+  for (auto event : captureEvents_) {
+    reinterpret_cast<hip::Event*>(event)->SetCaptureStream(nullptr);
+  }
+  captureEvents_.clear();
+  captureStreams_.clear();
+  originStream_ = false;
+  captureOwner_ = nullptr;
+  lastCapturedNodes_.clear();
+  removedDependencies_.clear();
+
+  SetCaptureStatus(preserveInvalidated ? hipStreamCaptureStatusInvalidated
+                                       : hipStreamCaptureStatusNone);
+}
+
+// ================================================================================================
+void Stream::StartCapture(std::unique_ptr<hip::Graph> graph, hipStreamCaptureMode mode) {
+  assert(GetCaptureStatus() == hipStreamCaptureStatusNone &&
+         "a stream already in a capture cannot start another");
+
+  std::scoped_lock lock(lock_);
+  captureOwner_ = this;
+  captureGraph_ = std::move(graph);
+  captureMode_ = mode;
+  captureID_ = GenerateCaptureID();
+  originStream_ = true;
+  SetCaptureStatus(hipStreamCaptureStatusActive);
+}
+
+// ================================================================================================
+void Stream::JoinCapture(hip::Stream* member) {
+  assert(GetCaptureStatus() == hipStreamCaptureStatusNone &&
+         "a stream already in a capture cannot join another");
+
+  // Enroll against the capture's origin, not the stream that happened to record the event, so
+  // every participant is a direct member of one flat set.
+  auto* owner = member->captureOwner_;
+  assert(owner != nullptr && "a stream mid-capture always has a capture owner");
+
+  std::scoped_lock lock(owner->lock_, lock_);
+  owner->captureStreams_.insert(this);
+  captureOwner_ = owner;
+  captureMode_ = owner->captureMode_;
+  captureID_ = owner->captureID_;
+
+  // Inherits the capture's status instead of assuming Active. This protects against the
+  // scenario where InvalidateCapture() runs concurrently on the owner.
+  SetCaptureStatus(owner->GetCaptureStatus());
+}
+
+// ================================================================================================
+hip::Graph* Stream::EndCapture(bool preserveInvalidated) {
+  if (!originStream_ && captureOwner_ != nullptr) {
+    // A participant leaving the capture on its own, via hipStreamDestroy or Detach.
+    std::scoped_lock ownerLock(captureOwner_->lock_);
+    captureOwner_->captureStreams_.erase(this);
+  }
+
+  // Only the origin holds the graph, so only the origin disposes of it. An invalidated capture
+  // can no longer produce a graph, so it is destroyed instead of handed back.
+  hip::Graph* graph = nullptr;
+  if (originStream_) {
+    if (GetCaptureStatus() == hipStreamCaptureStatusInvalidated) {
+      captureGraph_.reset();
+    } else {
+      graph = captureGraph_.release();
+    }
+  }
+
+  {
+    // This lock keeps captureStreams_ stable, because both JoinCapture and a participant's own
+    // departure take the origin's lock to touch that set.
+    std::scoped_lock lock(lock_);
+    if (originStream_) {
+      for (auto* participant : captureStreams_) {
+        std::scoped_lock participantLock(participant->lock_);
+        participant->ResetCaptureStateLocked(preserveInvalidated);
+      }
+    }
+    ResetCaptureStateLocked(preserveInvalidated);
+  }
+  return graph;
 }
 
 // ================================================================================================
@@ -80,13 +166,34 @@ void Stream::Destroy(hip::Stream* stream, bool forceDestroy) {
 }
 
 // ================================================================================================
+void Stream::Detach() {
+  // Invoked by ~ExecutionCtx() on every stream the destroyed ctx still owns.
+  // If this stream still participates in a capture, hipStreamEndCapture's
+  // invalidated cleanup is about to become unreachable through the API.
+  const hipStreamCaptureStatus captureStatus = GetCaptureStatus();
+  if (captureStatus == hipStreamCaptureStatusActive ||
+      captureStatus == hipStreamCaptureStatusInvalidated) {
+    SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+
+    if (originStream_) {
+      EraseCaptureTracking(this);
+    }
+
+    // Keep the invalidated status visible on the detached origin and every participant while
+    // clearing all graph, event and membership bookkeeping.
+    (void)EndCapture(/*preserveInvalidated=*/true);
+  }
+  detached_.store(true, std::memory_order_release);
+}
+
+// ================================================================================================
 bool Stream::terminate() {
   HostQueue::terminate();
   return true;
 }
+
 // ================================================================================================
 bool isValid(hipStream_t& stream) {
-  // NULL stream is always valid
   if (stream == nullptr || stream == hipStreamLegacy) {
     return true;
   }
@@ -95,85 +202,99 @@ bool isValid(hipStream_t& stream) {
     getStreamPerThread(stream);
   }
 
-  hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
-  for (auto& device : g_devices) {
-    if (device->StreamExists(s)) {
-      return true;
-    }
-  }
-  return false;
+  const auto* s = reinterpret_cast<hip::Stream*>(stream);
+  return std::any_of(g_devices.begin(), g_devices.end(),
+                     [s](const auto& device) { return device->StreamExists(s); });
 }
 
-void Stream::ReleaseCaptureGraph() {
-  if (pCaptureGraph_ != nullptr) {
-    delete pCaptureGraph_;
-    pCaptureGraph_ = nullptr;
+// ================================================================================================
+hipError_t Stream::AddCrossCapturedNode(const std::vector<hip::GraphNode*>& graphNodes,
+                                        bool replace) {
+  std::scoped_lock lock(lock_);
+  const auto captureStatus = GetCaptureStatus();
+  if (captureStatus != hipStreamCaptureStatusActive) {
+    return captureStatus == hipStreamCaptureStatusInvalidated
+               ? hipErrorStreamCaptureInvalidated
+               : hipErrorIllegalState;
   }
+
+  // Replace dependencies as per flag hipStreamSetCaptureDependencies.
+  if (replace) {
+    removedDependencies_.insert(removedDependencies_.end(),
+                                lastCapturedNodes_.begin(), lastCapturedNodes_.end());
+    lastCapturedNodes_.clear();
+  }
+  for (auto* node : graphNodes) {
+    if (std::find(lastCapturedNodes_.begin(), lastCapturedNodes_.end(), node) ==
+        lastCapturedNodes_.end()) {
+      lastCapturedNodes_.push_back(node);
+    }
+  }
+  return hipSuccess;
 }
 
 // ================================================================================================
 int Stream::DeviceId() const { return device_->deviceId(); }
 
 // ================================================================================================
-int Stream::DeviceId(const hipStream_t hStream) {
-  // Copying locally into non-const variable just to get const away
-  hipStream_t inputStream = hStream;
-  if (!hip::isValid(inputStream)) {
-    // return invalid device id
-    return -1;
+int Stream::DeviceId(hipStream_t hStream) {
+  assert(hip::isValid(hStream) && "Stream must be valid to get deviceId");
+
+  // Legacy or null stream case
+  if (hStream == nullptr || hStream == hipStreamLegacy) {
+    return ihipGetDevice();
   }
-  bool isNullOrLegacyStream = (hStream == nullptr || hStream == hipStreamLegacy);
-  hip::Stream* s = reinterpret_cast<hip::Stream*>(inputStream);
-  int deviceId = isNullOrLegacyStream ? ihipGetDevice() : s->DeviceId();
-  assert(deviceId >= 0 && deviceId < static_cast<int>(g_devices.size()));
+  const int deviceId = reinterpret_cast<hip::Stream*>(hStream)->DeviceId();
+  assert(deviceId >= 0 && deviceId < static_cast<int>(g_devices.size()) && "Invalid deviceId has been returned");
   return deviceId;
 }
 
 // ================================================================================================
-
-// ================================================================================================
 bool Stream::StreamCaptureBlocking() {
-  for (auto& device : g_devices) {
-    if (device->StreamCaptureBlocking()) {
-      return true;
-    }
-  }
-  return false;
+  return std::any_of(g_devices.begin(), g_devices.end(),
+                     [](const auto& device) { return device->StreamCaptureBlocking(); });
 }
 
+// ================================================================================================
 bool Stream::StreamCaptureOngoing(hipStream_t hStream) {
   if (hStream == nullptr || hStream == hipStreamLegacy) {
     return false;
   }
 
-  hip::Stream* s = reinterpret_cast<hip::Stream*>(hStream);
-  if (s->GetCaptureStatus() == hipStreamCaptureStatusNone) {
-    // If current thread is capturing in relaxed mode
-    if (hip::tls.stream_capture_mode_ == hipStreamCaptureModeRelaxed) {
-      return false;
-    }
-    // If any stream in current/concurrent thread is capturing in global mode
-    if (hip::tls.stream_capture_mode_ == hipStreamCaptureModeGlobal) {
-      amd::ScopedLock lock(g_captureStreamsLock);
-      if (!g_captureStreams.empty()) {
-        for (auto stream : hip::g_captureStreams) {
-          stream->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
-        }
-        return true;
-      }
-    }
-    // If any stream in current thread is capturing in ThreadLocal mode
-    if (!hip::tls.capture_streams_.empty()) {
-      for (auto stream : hip::tls.capture_streams_) {
-        stream->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+  auto* s = reinterpret_cast<hip::Stream*>(hStream);
+  const auto captureStatus = s->GetCaptureStatus();
+
+  if (captureStatus == hipStreamCaptureStatusActive) {
+    s->InvalidateCapture();
+    return true;
+  }
+  if (captureStatus == hipStreamCaptureStatusInvalidated) {
+    return true;
+  }
+  if (captureStatus != hipStreamCaptureStatusNone) {
+    // Defensive: unknown future enum value — treat as not ongoing.
+    return false;
+  }
+
+  // Relaxed mode — no cross-stream interference.
+  if (hip::tls.stream_capture_mode_ == hipStreamCaptureModeRelaxed) {
+    return false;
+  }
+  // Global mode — invalidate all capturing streams in any thread.
+  if (hip::tls.stream_capture_mode_ == hipStreamCaptureModeGlobal) {
+    amd::ScopedLock lock(g_captureStreamsLock);
+    if (!g_captureStreams.empty()) {
+      for (auto stream : hip::g_captureStreams) {
+        stream->InvalidateCapture();
       }
       return true;
     }
-    return false;
-  } else if (s->GetCaptureStatus() == hipStreamCaptureStatusActive) {
-    s->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
-    return true;
-  } else if (s->GetCaptureStatus() == hipStreamCaptureStatusInvalidated) {
+  }
+  // ThreadLocal mode — invalidate all capturing streams in current thread.
+  if (!hip::tls.capture_streams_.empty()) {
+    for (auto stream : hip::tls.capture_streams_) {
+      stream->InvalidateCapture();
+    }
     return true;
   }
   return false;
@@ -181,7 +302,7 @@ bool Stream::StreamCaptureOngoing(hipStream_t hStream) {
 
 // ================================================================================================
 void CL_CALLBACK ihipStreamCallback(cl_event event, cl_int command_exec_status, void* user_data) {
-  StreamCallback* cbo = reinterpret_cast<StreamCallback*>(user_data);
+  auto* cbo = reinterpret_cast<StreamCallback*>(user_data);
   cbo->callback();
   delete cbo;
 }
@@ -193,28 +314,22 @@ static hipError_t ihipStreamCreate(hipStream_t* stream, unsigned int flags,
   if (flags != hipStreamDefault && flags != hipStreamNonBlocking) {
     return hipErrorInvalidValue;
   }
-  hip::Stream* hStream = new hip::Stream(hip::getCurrentDevice(), priority, flags, false, cuMask);
+  auto* hStream = new hip::Stream(hip::getCurrentDevice(), priority, flags, false, cuMask);
   if (!hStream->Create()) {
     hip::Stream::Destroy(hStream);
     return hipErrorOutOfMemory;
   }
 
   *stream = reinterpret_cast<hipStream_t>(hStream);
-
   return hipSuccess;
 }
 
 // ================================================================================================
-stream_per_thread::stream_per_thread() {
-  m_streams.resize(g_devices.size());
-  for (auto& stream : m_streams) {
-    stream = nullptr;
-  }
-}
+StreamPerThread::StreamPerThread() : streams_(g_devices.size()) {}
 
 // ================================================================================================
-stream_per_thread::~stream_per_thread() {
-  for (auto& stream : m_streams) {
+StreamPerThread::~StreamPerThread() {
+  for (auto& stream : streams_) {
     if (stream != nullptr && hip::isValid(stream)) {
       // @note: Global variables in hip runtime will be destroyed after ROCR's global variables.
       // Any calls to rocr may cause invalid object access. Hence, avoid the stream destruction.
@@ -227,39 +342,34 @@ stream_per_thread::~stream_per_thread() {
 }
 
 // ================================================================================================
-hipStream_t stream_per_thread::get() {
-  hip::Device* device = hip::getCurrentDevice();
-  int currDev = device->deviceId();
-  // This is to make sure m_streams is not empty
-  if (m_streams.empty()) {
-    m_streams.resize(g_devices.size());
-    for (auto& stream : m_streams) {
-      stream = nullptr;
-    }
+hipStream_t StreamPerThread::Get() {
+  const int currDev = hip::getCurrentDevice()->deviceId();
+  // Defensive re-init: streams_ may have been cleared by hipDeviceReset.
+  if (streams_.empty()) {
+    streams_.resize(g_devices.size());
   }
-  // There is a scenario where hipResetDevice destroys stream per thread
-  // hence isValid check is required to make sure only valid stream is used
-  if (m_streams[currDev] == nullptr || !hip::isValid(m_streams[currDev])) {
+  // hipDeviceReset may also destroy individual entries, so revalidate.
+  if (streams_[currDev] == nullptr || !hip::isValid(streams_[currDev])) {
     hipError_t status =
-        ihipStreamCreate(&m_streams[currDev], hipStreamDefault, hip::Stream::Priority::Normal);
+        ihipStreamCreate(&streams_[currDev], hipStreamDefault, hip::Stream::Priority::Normal);
     if (status != hipSuccess) {
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE, "Stream creation failed");
     }
   }
-  return m_streams[currDev];
+  return streams_[currDev];
 }
 
 // ================================================================================================
-void stream_per_thread::clear_spt() {
-  if (!m_streams.empty()) {
-    m_streams[getCurrentDevice()->deviceId()] = nullptr;
+void StreamPerThread::Clear() {
+  if (!streams_.empty()) {
+    streams_[getCurrentDevice()->deviceId()] = nullptr;
   }
 }
 
 // ================================================================================================
 void getStreamPerThread(hipStream_t& stream) {
   if (stream == hipStreamPerThread) {
-    stream = hip::tls.stream_per_thread_obj_.get();
+    stream = hip::tls.stream_per_thread_obj_.Get();
   }
 }
 
@@ -302,14 +412,9 @@ hipError_t hipStreamCreateWithPriority(hipStream_t* stream, unsigned int flags, 
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  hip::Stream::Priority streamPriority;
-  if (priority <= hip::Stream::Priority::High) {
-    streamPriority = hip::Stream::Priority::High;
-  } else if (priority >= hip::Stream::Priority::Low) {
-    streamPriority = hip::Stream::Priority::Low;
-  } else {
-    streamPriority = hip::Stream::Priority::Normal;
-  }
+  auto streamPriority = static_cast<hip::Stream::Priority>(
+      std::clamp(priority, static_cast<int>(hip::Stream::Priority::High),
+                           static_cast<int>(hip::Stream::Priority::Low)));
 
   HIP_RETURN(ihipStreamCreate(stream, flags, streamPriority), *stream);
 }
@@ -329,13 +434,11 @@ hipError_t hipDeviceGetStreamPriorityRange(int* leastPriority, int* greatestPrio
 
 // ================================================================================================
 hipError_t hipStreamGetFlags_common(hipStream_t stream, unsigned int* flags) {
-  if ((flags != nullptr) && (stream != nullptr)) {
-    getStreamPerThread(stream);
-    *flags = reinterpret_cast<hip::Stream*>(stream)->Flags();
-  } else {
+  if (flags == nullptr || stream == nullptr) {
     return hipErrorInvalidValue;
   }
-
+  getStreamPerThread(stream);
+  *flags = reinterpret_cast<hip::Stream*>(stream)->Flags();
   return hipSuccess;
 }
 
@@ -364,8 +467,7 @@ hipError_t hipStreamGetId_common(hipStream_t stream, unsigned long long* streamI
 
   getStreamPerThread(stream);
   constexpr bool wait = false;
-  hip::Stream* hip_stream = hip::getStream(stream, wait);
-  *streamId = hip_stream->GetStreamId();
+  *streamId = hip::getStream(stream, wait)->GetStreamId();
   HIP_RETURN(hipSuccess);
 }
 
@@ -378,27 +480,26 @@ hipError_t hipStreamGetId(hipStream_t stream, unsigned long long* streamId) {
 // ================================================================================================
 hipError_t hipStreamSynchronize_common(hipStream_t stream) {
   getStreamPerThread(stream);
-  if (stream != nullptr && stream != hipStreamLegacy) {
-    // If still capturing return error
-    if (hip::Stream::StreamCaptureOngoing(stream) == true) {
-      HIP_RETURN(hipErrorStreamCaptureUnsupported);
-    }
-  }
 
   if (stream == nullptr) {
-    // Do cpu wait on null stream and only on blocking streams
-    constexpr bool WaitblockingStreamOnly = true;
-    getCurrentDevice()->SyncAllStreams(false, WaitblockingStreamOnly);
-  } else {
-    constexpr bool wait = false;
-    auto hip_stream = hip::getStream(stream, wait);
-
-    // Wait for the current host queue
-    hip_stream->finish();
-    // Release freed memory for all memory pools on the device
-    hip_stream->GetDevice()->ReleaseFreedMemory();
+    // Sync blocking streams only on the null stream
+    constexpr bool kBlockingOnly = true;
+    auto* device = getCurrentDevice();
+    device->SyncAllStreams(false, kBlockingOnly);
+    return device->GetAndClearBlockingStreamsAsyncError();
   }
-  return hipSuccess;
+
+  CHECK_STREAM_DETACHED(stream);
+
+  if (stream != hipStreamLegacy && hip::Stream::StreamCaptureOngoing(stream)) {
+    HIP_RETURN(hipErrorStreamCaptureUnsupported);
+  }
+
+  constexpr bool wait = false;
+  auto hip_stream = hip::getStream(stream, wait);
+  hip_stream->finish();
+  hip_stream->GetDevice()->ReleaseFreedMemory();
+  return hip_stream->GetAndClearAsyncError();
 }
 
 // ================================================================================================
@@ -426,46 +527,32 @@ hipError_t hipStreamDestroy(hipStream_t stream) {
   }
   hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
   if (s->GetCaptureStatus() != hipStreamCaptureStatusNone) {
-    if (s->GetParentStream() != nullptr) {
-      reinterpret_cast<hip::Stream*>(s->GetParentStream())->EraseParallelCaptureStream(stream);
+    if (s->IsOriginStream()) {
+      s->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
     }
-    auto error = s->EndCapture();
+    // EndCapture removes a participant from its owner's set itself.
+    (void)s->EndCapture();
   }
   s->GetDevice()->RemoveStreamFromPools(s);
 
+  // Remove the stream from all capture-tracking lists.
+  auto erase_from = [s](auto& container) {
+    auto it = std::find(container.begin(), container.end(), s);
+    if (it != container.end()) container.erase(it);
+  };
   {
     amd::ScopedLock lock(g_captureStreamsLock);
-    const auto& g_it = std::find(g_captureStreams.begin(), g_captureStreams.end(), s);
-    if (g_it != g_captureStreams.end()) {
-      g_captureStreams.erase(g_it);
-    }
+    erase_from(g_captureStreams);
   }
   {
     amd::ScopedLock lock(g_streamSetLock);
-    const auto& g_it = std::find(g_allCapturingStreams.begin(), g_allCapturingStreams.end(), s);
-    if (g_it != g_allCapturingStreams.end()) {
-      g_allCapturingStreams.erase(g_it);
-    }
+    erase_from(g_allCapturingStreams);
   }
-  const auto& l_it =
-      std::find(hip::tls.capture_streams_.begin(), hip::tls.capture_streams_.end(), s);
-  if (l_it != hip::tls.capture_streams_.end()) {
-    hip::tls.capture_streams_.erase(l_it);
-  }
+  erase_from(hip::tls.capture_streams_);
+
   hip::Stream::Destroy(s);
 
   HIP_RETURN(hipSuccess);
-}
-
-// ================================================================================================
-void WaitThenDecrementSignal(hipStream_t stream, hipError_t status, void* user_data) {
-  CallbackData* data = reinterpret_cast<CallbackData*>(user_data);
-  int offset = data->previous_read_index % IPC_SIGNALS_PER_EVENT;
-  while (data->shmem->read_index < data->previous_read_index + IPC_SIGNALS_PER_EVENT &&
-         data->shmem->signal[offset] != 0) {
-    amd::Os::sleep(1);
-  }
-  delete data;
 }
 
 // ================================================================================================
@@ -473,23 +560,28 @@ hipError_t hipStreamWaitEvent_common(hipStream_t stream, hipEvent_t event, unsig
   if (flags != hipEventWaitDefault && flags != hipEventWaitExternal) {
     return hipErrorInvalidValue;
   }
-  hipError_t status = hipSuccess;
   if (event == nullptr) {
     return hipErrorInvalidHandle;
   }
   getStreamPerThread(stream);
+  CHECK_STREAM_DETACHED(stream);
   hip::Stream* waitStream = hip::getStream(stream);
   hip::Event* e = reinterpret_cast<hip::Event*>(event);
   auto eventStreamHandle = reinterpret_cast<hipStream_t>(e->GetCaptureStream());
-  // the stream associated with the device might have been destroyed
+  // The stream associated with the device might have been destroyed.
+  // If so, the event has already completed and we can resume the current stream.
   if (!hip::isValid(eventStreamHandle)) {
-    // Stream associated with the event has been released
-    // meaning the event has been completed and we can resume the current stream
     return hipSuccess;
   }
 
   hip::Stream* eventStream = reinterpret_cast<hip::Stream*>(eventStreamHandle);
+
+  // External-event wait: add a graph node and return immediately.
   if (flags == hipEventWaitExternal) {
+    // Ensure the wait stream is actively capturing and has a capture graph.
+    if (waitStream == nullptr || waitStream->GetCaptureGraph() == nullptr) {
+      return hipErrorInvalidHandle;
+    }
     auto lastCapturedNodes = waitStream->GetLastCapturedNodes();
     hip::GraphNode* pGraphNode = waitStream->GetCaptureGraph()->AddExternalEventWaitNode(
                                       reinterpret_cast<hip::GraphNode*>(lastCapturedNodes.data()),
@@ -498,37 +590,53 @@ hipError_t hipStreamWaitEvent_common(hipStream_t stream, hipEvent_t event, unsig
     waitStream->SetLastCapturedNode(pGraphNode);
     return hipSuccess;
   }
-  else if (eventStream != nullptr && eventStream->IsEventCaptured(event) == true) {
+
+  // Event is being captured on eventStream: wire up the capture graph.
+  if (eventStream != nullptr && eventStream->IsEventCaptured(event)) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_API,
             "[hipGraph] Current capture node StreamWaitEvent on stream : %p, Event %p", stream,
             event);
     if (waitStream == nullptr) {
       return hipErrorInvalidHandle;
     }
-    // Dont set when forked stream joins back to the parent
-    if (!waitStream->IsOriginStream() &&
-        waitStream != reinterpret_cast<hip::Stream*>(eventStream->GetParentStream())) {
-      waitStream->SetCaptureGraph((eventStream)->GetCaptureGraph());
-      waitStream->SetCaptureId((eventStream)->GetCaptureID());
-      waitStream->SetCaptureMode((eventStream)->GetCaptureMode());
-      waitStream->SetParentStream(reinterpret_cast<hipStream_t>(eventStream));
-      eventStream->SetParallelCaptureStream(stream);
+
+    if (waitStream->GetCaptureStatus() == hipStreamCaptureStatusInvalidated) {
+      return hipErrorStreamCaptureInvalidated;
     }
-    waitStream->AddCrossCapturedNode(e->GetNodesPrevToRecorded());
-  } else {
-    if (eventStream != nullptr) {
-      if (eventStream->GetCaptureStatus() == hipStreamCaptureStatusActive) {
-        // If stream is capturing but event is not recorded on event's stream.
-        return hipErrorStreamCaptureIsolation;
+
+    // Waiting on an event recorded in a different capture would splice two independent
+    // graphs together. Reject it rather than merging them.
+    if (waitStream->GetCaptureStatus() == hipStreamCaptureStatusActive &&
+        waitStream->GetCaptureID() != eventStream->GetCaptureID()) {
+      waitStream->InvalidateCapture();
+      if (eventStream->GetCaptureStatus() != hipStreamCaptureStatusInvalidated) {
+        eventStream->InvalidateCapture();
       }
-      if ((waitStream != nullptr && stream != hipStreamLegacy) &&
-          (eventStream->DeviceId() == waitStream->DeviceId())) {
-        eventStream->GetDevice()->AddSafeStream(eventStream, waitStream);
-      }
+      return hipErrorStreamCaptureMerge;
     }
-    status = e->streamWait(waitStream, flags);
+
+    if (eventStream->GetCaptureStatus() == hipStreamCaptureStatusInvalidated) {
+      return hipErrorInvalidValue;
+    }
+
+    if (waitStream->GetCaptureStatus() == hipStreamCaptureStatusNone) {
+      waitStream->JoinCapture(eventStream);
+    }
+    return waitStream->AddCrossCapturedNode(e->GetNodesPrevToRecorded());
   }
-  return status;
+
+  // Non-capture path: validate isolation, register safe-stream, and wait.
+  if (eventStream != nullptr) {
+    if (eventStream->GetCaptureStatus() == hipStreamCaptureStatusActive) {
+      // Stream is capturing but event is not recorded on event's stream.
+      return hipErrorStreamCaptureIsolation;
+    }
+    if (waitStream != nullptr && stream != hipStreamLegacy &&
+        eventStream->DeviceId() == waitStream->DeviceId()) {
+      eventStream->GetDevice()->AddSafeStream(eventStream, waitStream);
+    }
+  }
+  return e->streamWait(waitStream, flags);
 }
 
 // ================================================================================================
@@ -547,13 +655,15 @@ hipError_t hipStreamWaitEvent_spt(hipStream_t stream, hipEvent_t event, unsigned
 // ================================================================================================
 hipError_t hipStreamQuery_common(hipStream_t stream) {
   getStreamPerThread(stream);
-  if (stream != nullptr) {
-    // If still capturing return error
-    if (hip::Stream::StreamCaptureOngoing(stream) == true) {
-      return hipErrorStreamCaptureUnsupported;
-    }
+
+  CHECK_STREAM_DETACHED(stream);
+
+  // If still capturing, return error.
+  if (stream != nullptr && hip::Stream::StreamCaptureOngoing(stream)) {
+    return hipErrorStreamCaptureUnsupported;
   }
-  bool wait = (stream == nullptr) ? true : false;
+
+  const bool wait = (stream == nullptr);
   hip::Stream* hip_stream = hip::getStream(stream, wait);
 
   if (hip_stream->vdev()->isFenceDirty()) {
@@ -564,8 +674,8 @@ hipError_t hipStreamQuery_common(hipStream_t stream) {
 
   amd::Command* command = hip_stream->getLastQueuedCommand(true);
   if (command == nullptr) {
-    // Nothing was submitted to the queue
-    return hipSuccess;
+    // Nothing was submitted to the queue.
+    return hip_stream->GetAndClearAsyncError();
   }
 
   amd::Event& event = command->event();
@@ -573,20 +683,20 @@ hipError_t hipStreamQuery_common(hipStream_t stream) {
     event.notifyCmdQueue();
   }
 
-  // Check HW status of the ROCcrl event. Note: not all ROCclr modes support HW status
+  // Check HW status of the ROCclr event. Note: not all ROCclr modes support HW status.
   bool ready = command->queue()->device().IsHwEventReady(event);
   if (!ready) {
     ready = (command->status() == CL_COMPLETE);
   }
-  hipError_t status = ready ? hipSuccess : hipErrorNotReady;
   command->release();
 
-  // Stream is complete - opportunistically release its HW queue if idle
-  if (ready) {
-    hip_stream->vdev()->ReleaseHwQueue();
+  if (!ready) {
+    return hipErrorNotReady;
   }
 
-  return status;
+  // Stream is complete — opportunistically release its HW queue if idle.
+  hip_stream->vdev()->ReleaseHwQueue();
+  return hip_stream->GetAndClearAsyncError();
 }
 
 // ================================================================================================
@@ -602,17 +712,24 @@ hipError_t hipStreamQuery_spt(hipStream_t stream) {
   HIP_RETURN(hipStreamQuery_common(stream));
 }
 
+// ================================================================================================
 hipError_t streamCallback_common(hipStream_t stream, StreamCallback* cbo, void* userData) {
-  getStreamPerThread(stream);
+  if (cbo == nullptr) {
+    return hipErrorInvalidHandle;
+  }
 
+  getStreamPerThread(stream);
   hip::Stream* hip_stream = hip::getStream(stream);
   amd::Command* last_command = hip_stream->getLastQueuedCommand(true);
+
   amd::Command::EventWaitList eventWaitList;
   if (last_command != nullptr) {
     eventWaitList.push_back(last_command);
   }
+
+  // Callback marker — released after the HIP callback fires, not here.
   amd::Command* command = new amd::Marker(*hip_stream, !kMarkerDisableFlush, eventWaitList);
-  if ((cbo == nullptr) || !command->setCallback(CL_COMPLETE, ihipStreamCallback, cbo)) {
+  if (!command->setCallback(CL_COMPLETE, ihipStreamCallback, cbo)) {
     command->release();
     if (last_command != nullptr) {
       last_command->release();
@@ -620,47 +737,45 @@ hipError_t streamCallback_common(hipStream_t stream, StreamCallback* cbo, void* 
     return hipErrorInvalidHandle;
   }
   command->enqueue();
-  // @note: don't release the command here, because it will be released after HIP callback
   if (last_command != nullptr) {
     last_command->release();
   }
-  // Extra marker is required for HW event check, which is done before the callback is finished.
-  // Add the new barrier to stall the stream, until the callback is done
-  eventWaitList.clear();
-  eventWaitList.push_back(command);
+
+  // Blocking marker — stalls the stream until the callback completes.
+  // Required because HW event checks may occur before the callback finishes.
+  eventWaitList = {command};
   amd::Command* block_command = new amd::Marker(*hip_stream, !kMarkerDisableFlush, eventWaitList);
   block_command->enqueue();
 
-  // Release the callback marker
   command->release();
-  // Notify the command queue about a possible waiter for the calback
   block_command->notifyCmdQueue();
-
   block_command->release();
+
   return hipSuccess;
 }
 
 // ================================================================================================
 hipError_t hipStreamAddCallback_common(hipStream_t stream, hipStreamCallback_t callback,
                                        void* userData, unsigned int flags) {
-  // flags - Reserved for future use, must be 0
+  // flags is reserved for future use and must be 0.
   if (callback == nullptr || flags != 0) {
     return hipErrorInvalidValue;
   }
 
+  CHECK_STREAM_DETACHED(stream);
+
   if (stream != nullptr && stream != hipStreamLegacy && hip::isValid(stream)) {
     hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
     if (s->GetCaptureStatus() != hipStreamCaptureStatusNone) {
-      s->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+      s->InvalidateCapture();
       return hipErrorStreamCaptureUnsupported;
     }
-  } else if (Stream::StreamCaptureBlocking() == true) {
-    // If any of the blocking streams is capturing, return error for implicit capture and
-    // invalidate capture for all capturing streams
+  } else if (Stream::StreamCaptureBlocking()) {
+    // A blocking stream is capturing — return error and invalidate all capturing streams.
     CHECK_STREAM_CAPTURING();
   }
 
-  StreamCallback* cbo = new StreamAddCallback(stream, callback, userData);
+  auto* cbo = new StreamAddCallback(stream, callback, userData);
   return streamCallback_common(stream, cbo, userData);
 }
 
@@ -681,11 +796,12 @@ hipError_t hipStreamAddCallback_spt(hipStream_t stream, hipStreamCallback_t call
 
 // ================================================================================================
 hipError_t hipLaunchHostFunc_common(hipStream_t stream, hipHostFn_t fn, void* userData) {
+  CHECK_STREAM_DETACHED(stream);
   STREAM_CAPTURE(hipLaunchHostFunc, stream, fn, userData);
   if (fn == nullptr) {
     return hipErrorInvalidValue;
   }
-  StreamCallback* cbo = new LaunchHostFuncCallback(fn, userData);
+  auto* cbo = new LaunchHostFuncCallback(fn, userData);
   return streamCallback_common(stream, cbo, userData);
 }
 
@@ -699,7 +815,7 @@ hipError_t hipLaunchHostFunc_spt(hipStream_t stream, hipHostFn_t fn, void* userD
 // ================================================================================================
 hipError_t hipLaunchHostFunc(hipStream_t stream, hipHostFn_t fn, void* userData) {
   HIP_INIT_API(hipLaunchHostFunc, stream, fn, userData);
-  if (stream == nullptr && (hip::Stream::StreamCaptureOngoing(stream) == true)) {
+  if (stream == nullptr && hip::Stream::StreamCaptureOngoing(stream)) {
     HIP_RETURN(hipErrorStreamCaptureImplicit);
   }
   HIP_RETURN(hipLaunchHostFunc_common(stream, fn, userData));
@@ -725,18 +841,17 @@ hipError_t hipExtStreamCreateWithCUMask(hipStream_t* stream, uint32_t cuMaskSize
 
 // ================================================================================================
 hipError_t hipStreamGetPriority_common(hipStream_t stream, int* priority) {
-  if ((priority != nullptr) && (stream == nullptr)) {
+  if (priority == nullptr) {
+    return hipErrorInvalidValue;
+  }
+
+  if (stream == nullptr) {
     *priority = 0;
     return hipSuccess;
   }
 
-  if ((priority != nullptr) && (stream != nullptr)) {
-    getStreamPerThread(stream);
-    *priority = static_cast<int>(reinterpret_cast<hip::Stream*>(stream)->GetPriority());
-  } else {
-    return hipErrorInvalidValue;
-  }
-
+  getStreamPerThread(stream);
+  *priority = static_cast<int>(reinterpret_cast<hip::Stream*>(stream)->GetPriority());
   return hipSuccess;
 }
 
@@ -761,78 +876,49 @@ hipError_t hipExtStreamGetCUMask(hipStream_t stream, uint32_t cuMaskSize, uint32
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  int deviceId = hip::getCurrentDevice()->deviceId();
+  const int deviceId = hip::getCurrentDevice()->deviceId();
   auto* deviceHandle = g_devices[deviceId]->devices()[0];
   const auto& info = deviceHandle->info();
 
-  // find the minimum cuMaskSize required to present the CU mask bit-array in a patch of 32 bits
-  // and return error if the cuMaskSize argument is less than cuMaskSizeRequired
-  uint32_t cuMaskSizeRequired = info.maxComputeUnits_ / 32 + ((info.maxComputeUnits_ % 32) ? 1 : 0);
-
+  // Minimum number of uint32_t words needed to represent all CU bits.
+  const uint32_t cuMaskSizeRequired = (info.maxComputeUnits_ + 31) / 32;
   if (cuMaskSize < cuMaskSizeRequired) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  // make a default CU mask bit-array where all CUs are active
-  // this default mask will be returned when there is no
-  // custom or global CU mask defined
-  std::vector<uint32_t> defaultCUMask;
-  uint32_t temp = 0;
-  uint32_t bit_index = 0;
-  for (uint32_t i = 0; i < info.maxComputeUnits_; i++) {
-    temp |= 1UL << bit_index;
-    if (bit_index >= 32) {
-      defaultCUMask.push_back(temp);
-      temp = 0;
-      bit_index = 0;
-      temp |= 1UL << bit_index;
-    }
-    bit_index += 1;
-  }
-  if (bit_index != 0) {
-    defaultCUMask.push_back(temp);
+  // Build a default CU mask with all CUs active (one bit per CU).
+  const uint32_t fullWords = info.maxComputeUnits_ / 32;
+  const uint32_t remainingBits = info.maxComputeUnits_ % 32;
+  std::vector<uint32_t> defaultCUMask(fullWords, 0xFFFFFFFF);
+  if (remainingBits > 0) {
+    defaultCUMask.push_back((1u << remainingBits) - 1);
   }
 
-  // if the stream is null then either return globalCUMask_ (if it is defined)
-  // or return defaultCUMask
+  // Null/per-thread stream: return globalCUMask if defined, otherwise the default.
   if (stream == nullptr || stream == hipStreamPerThread) {
-    if (info.globalCUMask_.size() != 0) {
-      std::copy(info.globalCUMask_.begin(), info.globalCUMask_.end(), cuMask);
-    } else {
-      std::copy(defaultCUMask.begin(), defaultCUMask.end(), cuMask);
-    }
-  } else {
-    // if the stream is not null then get the stream's CU mask and return one of the below cases
-    // case1 if globalCUMask_ is defined then return the AND of globalCUMask_ and stream's CU mask
-    // case2 if globalCUMask_ is not defined then retuen AND of defaultCUMask and stream's CU mask
-    // in both cases above if stream's CU mask is empty then either globalCUMask_ (for case1)
-    // or defaultCUMask(for case2) will be returned
-    std::vector<uint32_t> streamCUMask;
-    streamCUMask = reinterpret_cast<hip::Stream*>(stream)->GetCUMask();
-    std::vector<uint32_t> mask = {};
-    if (info.globalCUMask_.size() != 0) {
-      for (uint32_t i = 0; i < std::min(streamCUMask.size(), info.globalCUMask_.size()); i++) {
-        mask.push_back(streamCUMask[i] & info.globalCUMask_[i]);
-      }
-    } else {
-      for (uint32_t i = 0; i < std::min(streamCUMask.size(), defaultCUMask.size()); i++) {
-        mask.push_back(streamCUMask[i] & defaultCUMask[i]);
-      }
-      // check to make sure after ANDing streamCUMask (custom-defined) with global CU mask,
-      // we have non-zero mask, oterwise just return either globalCUMask_ or defaultCUMask
-      bool zeroCUMask = true;
-      for (auto m : mask) {
-        if (m != 0) {
-          zeroCUMask = false;
-          break;
-        }
-      }
-      if (zeroCUMask) {
-        mask = (info.globalCUMask_.size() != 0) ? info.globalCUMask_ : defaultCUMask;
-      }
-      std::copy(mask.begin(), mask.end(), cuMask);
-    }
+    const auto& src = !info.globalCUMask_.empty() ? info.globalCUMask_ : defaultCUMask;
+    std::copy(src.begin(), src.end(), cuMask);
+    HIP_RETURN(hipSuccess);
   }
+
+  // Non-null stream: AND the stream's CU mask with the base mask (global or default).
+  const auto& baseMask = !info.globalCUMask_.empty() ? info.globalCUMask_ : defaultCUMask;
+  auto streamCUMask = reinterpret_cast<hip::Stream*>(stream)->GetCUMask();
+
+  std::vector<uint32_t> mask;
+  mask.reserve(std::min(streamCUMask.size(), baseMask.size()));
+  for (uint32_t i = 0; i < std::min(streamCUMask.size(), baseMask.size()); ++i) {
+    mask.push_back(streamCUMask[i] & baseMask[i]);
+  }
+
+  // If the AND result is all zeros, fall back to the base mask.
+  const bool allZero = std::all_of(mask.begin(), mask.end(),
+                                    [](uint32_t m) { return m == 0; });
+  if (allZero) {
+    mask = baseMask;
+  }
+  std::copy(mask.begin(), mask.end(), cuMask);
+
   HIP_RETURN(hipSuccess);
 }
 
@@ -848,22 +934,21 @@ hipError_t hipStreamGetDevice(hipStream_t stream, hipDevice_t* device) {
     HIP_RETURN(hipErrorContextIsDestroyed);
   }
 
-  if (stream == nullptr) {  // handle null stream
-    // null stream is associated with current device, return the device id associated with the
-    // current device
+  if (stream == nullptr) {
     *device = hip::getCurrentDevice()->deviceId();
-  } else {
-    getStreamPerThread(stream);
-    *device = reinterpret_cast<hip::Stream*>(stream)->DeviceId();
+    HIP_RETURN(hipSuccess);
   }
 
+  getStreamPerThread(stream);
+  *device = reinterpret_cast<hip::Stream*>(stream)->DeviceId();
   HIP_RETURN(hipSuccess);
 }
+
 // ================================================================================================
 hipError_t hipStreamSetAttribute(hipStream_t stream, hipStreamAttrID attr,
                                  const hipStreamAttrValue* value) {
   HIP_INIT_API(hipStreamSetAttribute, stream, attr, value);
-  hipError_t status = hipSuccess;
+
   if (value == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
@@ -874,8 +959,8 @@ hipError_t hipStreamSetAttribute(hipStream_t stream, hipStreamAttrID attr,
 
   getStreamPerThread(stream);
 
-  // if stream is capturing, don't allow changing stream attributes
-  if (hip::Stream::StreamCaptureOngoing(stream) == true) {
+  // If stream is capturing, don't allow changing stream attributes.
+  if (hip::Stream::StreamCaptureOngoing(stream)) {
     HIP_RETURN(hipErrorStreamCaptureUnsupported);
   }
 
@@ -884,8 +969,7 @@ hipError_t hipStreamSetAttribute(hipStream_t stream, hipStreamAttrID attr,
 
   switch (attr) {
     case hipStreamAttributeSynchronizationPolicy: {
-      hipSynchronizationPolicy syncPolicy = value->syncPolicy;
-      // validate sync policy
+      const auto syncPolicy = value->syncPolicy;
       if (syncPolicy < hipSyncPolicyAuto || syncPolicy > hipSyncPolicyBlockingSync) {
         HIP_RETURN(hipErrorInvalidValue);
       }
@@ -900,12 +984,13 @@ hipError_t hipStreamSetAttribute(hipStream_t stream, hipStreamAttrID attr,
   HIP_RETURN(hipSuccess);
 }
 
+// ================================================================================================
 hipError_t hipStreamGetAttribute(hipStream_t stream, hipStreamAttrID attr,
                                  hipStreamAttrValue* value_out) {
   HIP_INIT_API(hipStreamGetAttribute, stream, attr, value_out);
 
   if (value_out == nullptr) {
-    return hipErrorInvalidValue;
+    HIP_RETURN(hipErrorInvalidValue);
   }
 
   if (!hip::isValid(stream)) {
@@ -915,7 +1000,7 @@ hipError_t hipStreamGetAttribute(hipStream_t stream, hipStreamAttrID attr,
   getStreamPerThread(stream);
 
   constexpr bool wait = false;
-  hip::Stream* s = hip::getStream(stream, wait);
+  const auto* s = hip::getStream(stream, wait);
 
   switch (attr) {
     case hipStreamAttributeSynchronizationPolicy: {
@@ -934,6 +1019,7 @@ hipError_t hipStreamGetAttribute(hipStream_t stream, hipStreamAttrID attr,
   HIP_RETURN(hipSuccess);
 }
 
+// ================================================================================================
 hipError_t hipStreamCopyAttributes(hipStream_t dst, hipStream_t src) {
   HIP_INIT_API(hipStreamCopyAttributes, dst, src);
 
@@ -945,9 +1031,9 @@ hipError_t hipStreamCopyAttributes(hipStream_t dst, hipStream_t src) {
   getStreamPerThread(dst);
 
   constexpr bool wait = false;
-  hip::Stream* src_stream = hip::getStream(src, wait);
-  hip::Stream* dst_stream = hip::getStream(dst, wait);
-  // Currently, SyncPolicy is the only stream attribute we can set during runtime
+  auto* src_stream = hip::getStream(src, wait);
+  auto* dst_stream = hip::getStream(dst, wait);
+  // Currently, SyncPolicy is the only stream attribute we can set during runtime.
   dst_stream->SetSyncPolicy(src_stream->GetSyncPolicy());
   HIP_RETURN(hipSuccess);
 }

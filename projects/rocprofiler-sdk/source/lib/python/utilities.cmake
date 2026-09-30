@@ -39,8 +39,51 @@ if(ROCPROFILER_MEMCHECK)
     set(ROCPROFILER_BUILD_Find_Python3_COMPONENTS "Interpreter" "Development")
 endif()
 
+# sets _VAR to "<MAJOR>.<MINOR>" of the python executable _EXE, or empty on failure
+function(rocprofiler_get_python_executable_version _EXE _VAR)
+    execute_process(
+        COMMAND "${_EXE}" -c
+                "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
+        OUTPUT_VARIABLE _EXE_VER
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE _EXE_RESULT
+        ERROR_QUIET)
+
+    if(NOT _EXE_RESULT EQUAL 0)
+        set(_EXE_VER "")
+    endif()
+
+    set(${_VAR}
+        "${_EXE_VER}"
+        PARENT_SCOPE)
+endfunction()
+
 macro(rocprofiler_find_python3 _VERSION)
     rocprofiler_reset_python3_cache()
+
+    # If an explicit executable list was provided (e.g. from TheRock via
+    # -DROCPROFILER_PYTHON_EXECUTABLES), pre-seed Python3_EXECUTABLE for this version
+    # before calling find_package. This is necessary for Python versions that CMake's
+    # FindPython3 does not auto-discover (e.g. Python 3.14+ on manylinux where an older
+    # CMake has no knowledge of the new install path).
+    if(DEFINED ROCPROFILER_PYTHON_EXECUTABLES)
+        string(REGEX MATCH "^[0-9]+\\.[0-9]+" _rocprofiler_requested_major_minor
+                     "${_VERSION}")
+        foreach(_rocprofiler_candidate_exe IN LISTS ROCPROFILER_PYTHON_EXECUTABLES)
+            rocprofiler_get_python_executable_version("${_rocprofiler_candidate_exe}"
+                                                      _rocprofiler_candidate_ver)
+            if(_rocprofiler_candidate_ver AND "${_rocprofiler_candidate_ver}" STREQUAL
+                                              "${_rocprofiler_requested_major_minor}")
+                set(Python3_EXECUTABLE
+                    "${_rocprofiler_candidate_exe}"
+                    CACHE FILEPATH "" FORCE)
+                break()
+            endif()
+        endforeach()
+        unset(_rocprofiler_candidate_exe)
+        unset(_rocprofiler_candidate_ver)
+        unset(_rocprofiler_requested_major_minor)
+    endif()
 
     if("${_VERSION}" MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)$")
         find_package(Python3 ${_VERSION} EXACT ${ARGN} REQUIRED MODULE
@@ -74,6 +117,19 @@ function(get_default_python_versions _VAR)
                  "${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}")
         endif()
     endforeach()
+
+    # If find package doesn't find the version, but PYTHON_EXECUTABLES is passed in, add
+    # it to version list
+    if(DEFINED ROCPROFILER_PYTHON_EXECUTABLES)
+        foreach(_EXE IN LISTS ROCPROFILER_PYTHON_EXECUTABLES)
+            rocprofiler_get_python_executable_version("${_EXE}" _EXE_VER)
+            if(_EXE_VER AND NOT "${_EXE_VER}" IN_LIST _PYTHON_FOUND_VERSIONS)
+                list(APPEND _PYTHON_FOUND_VERSIONS "${_EXE_VER}")
+            endif()
+        endforeach()
+        unset(_EXE)
+        unset(_EXE_VER)
+    endif()
 
     # If none found, do one last check for 3.6 (no EXACT)
     if(NOT _PYTHON_FOUND_VERSIONS)
@@ -167,6 +223,7 @@ function(rocprofiler_rocpd_python_bindings _VERSION)
         ${PROJECT_BINARY_DIR}/${rocpd_PYTHON_INSTALL_DIRECTORY})
     set(rocpd_PYTHON_SOURCES
         csv.py
+        features.py
         importer.py
         __init__.py
         __main__.py
@@ -196,22 +253,28 @@ function(rocprofiler_rocpd_python_bindings _VERSION)
                 $<TARGET_OBJECTS:rocprofiler-sdk::rocprofiler-sdk-object-library>)
     target_include_directories(rocprofiler-sdk-rocpd-python-bindings-${_VERSION} SYSTEM
                                PRIVATE ${Python3_INCLUDE_DIRS})
+
+    # do not link to sqlite3 library here. Python will import the _sqlite3 extension
+    # module which links to sqlite3, and we want to avoid mixed-lib symbol collisions by
+    # ensuring Python and librocpd use the same sqlite3 library. Use the sanitizer-only
+    # target because this Python MODULE intentionally leaves SQLite symbols unresolved
+    # until Python loads _sqlite3.
     target_link_libraries(
         rocprofiler-sdk-rocpd-python-bindings-${_VERSION}
         PRIVATE rocprofiler-sdk::rocprofiler-sdk-headers
                 rocprofiler-sdk::rocprofiler-sdk-build-flags
-                rocprofiler-sdk::rocprofiler-sdk-memcheck
+                rocprofiler-sdk::rocprofiler-sdk-sanitizer
                 rocprofiler-sdk::rocprofiler-sdk-common-library
                 rocprofiler-sdk::rocprofiler-sdk-output-library
                 rocprofiler-sdk::rocprofiler-sdk-cereal
                 rocprofiler-sdk::rocprofiler-sdk-perfetto
                 rocprofiler-sdk::rocprofiler-sdk-otf2
-                rocprofiler-sdk::rocprofiler-sdk-sqlite3
                 rocprofiler-sdk::rocprofiler-sdk-pybind11
                 rocprofiler-sdk::rocprofiler-sdk-gotcha
                 rocprofiler-sdk::rocprofiler-sdk-dw
                 rocprofiler-sdk::rocprofiler-sdk-static-library
-                rocprofiler-sdk::rocprofiler-sdk-rocpd-library)
+                rocprofiler-sdk::rocprofiler-sdk-rocpd-library
+                rocprofiler-sdk::rocprofiler-sdk-amd-comgr)
 
     # if "Development" is specified instead of "Development.Module", we need to link to
     # python libraries

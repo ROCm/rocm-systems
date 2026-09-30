@@ -42,7 +42,7 @@ if (NOT DEFINED CACHE{ROCM_MAJOR_VERSION})
   if(EXPLICIT_ROCM_VERSION)
     set(rocm_version_string "${EXPLICIT_ROCM_VERSION}")
   else()
-    find_file(rocm_version_file "version" PATH_SUFFIXES ".info"
+    find_file(rocm_version_file "version" PATH_SUFFIXES ".info" "core/.info"
       HINTS ${ROCM_PATH} ENV ROCM_PATH ${ROCM_ROOT} ENV ROCM_ROOT ${hip_ROOT} ENV hip_ROOT ${HIP_ROOT} ENV HIP_ROOT
       PATHS /opt/rocm
       REQUIRED)
@@ -69,15 +69,15 @@ list(PREPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
 
 # Use hipcc from our rocm install
 if (NOT DEFINED CMAKE_CXX_COMPILER)
-  find_program(CMAKE_CXX_COMPILER hipcc PATHS /opt/rocm)
+  find_program(CMAKE_CXX_COMPILER hipcc)
 endif()
 
 ###############################################################################
 # GLOBAL COMPILE FLAGS
 ###############################################################################
 set(CMAKE_CXX_EXTENSIONS OFF)
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_FLAGS_DEBUG "-Og -ggdb")
+set(CMAKE_CXX_FLAGS_DEBUG "-O0 -ggdb")
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)

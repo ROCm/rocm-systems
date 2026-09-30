@@ -1,23 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 
@@ -46,7 +31,7 @@ constexpr std::array<hipFuncCache_t, 4> kCacheConfigs{
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipDeviceSetCacheConfig_Positive_Basic") {
+HIP_TEST_CASE(Unit_hipDeviceSetCacheConfig_Positive_Basic) {
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
   HIP_CHECK(hipSetDevice(device));
   INFO("Current device is: " << device);
@@ -54,6 +39,31 @@ TEST_CASE("Unit_hipDeviceSetCacheConfig_Positive_Basic") {
   const auto cache_config =
       GENERATE(from_range(std::begin(kCacheConfigs), std::end(kCacheConfigs)));
   HIP_CHECK(hipDeviceSetCacheConfig(cache_config));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Verifies that hipDeviceSetCacheConfig with each cache config hint
+ *    succeeds on carveout-capable devices and that a subsequent kernel
+ *    launch (without per-function carveout) uses the device-level default
+ *    without error.
+ * Test source
+ * ------------------------
+ *  - unit/device/hipDeviceSetGetCacheConfig.cc
+ */
+__global__ void empty_kernel() {}
+
+HIP_TEST_CASE(Unit_hipDeviceSetCacheConfig_Positive_Carveout) {
+  const auto cache_config =
+      GENERATE(from_range(std::begin(kCacheConfigs), std::end(kCacheConfigs)));
+
+  HIP_CHECK(hipDeviceSetCacheConfig(cache_config));
+
+  // Launch a kernel without per-function carveout to exercise the
+  // device-level carveout fallback path in the dispatch packet.
+  empty_kernel<<<1, 1>>>();
+  HIP_CHECK(hipDeviceSynchronize());
 }
 
 /**
@@ -81,7 +91,7 @@ TEST_CASE("Unit_hipDeviceSetCacheConfig_Positive_Basic") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipDeviceGetCacheConfig_Positive_Default") {
+HIP_TEST_CASE(Unit_hipDeviceGetCacheConfig_Positive_Default) {
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
   HIP_CHECK(hipSetDevice(device));
   INFO("Current device is: " << device);

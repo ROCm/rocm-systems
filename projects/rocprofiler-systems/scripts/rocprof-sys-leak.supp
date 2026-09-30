@@ -1,6 +1,7 @@
 leak:Dyninst::
 leak:dyninst
 leak:tbb::
+leak:libtbb
 leak:boost::
 leak:libdw
 leak:libamd_comgr
@@ -14,4 +15,25 @@ leak:tim::timemory_argparse
 leak:tim::argparse::argument_parser::parse_known_args
 leak:std::shared_ptr<std::promise<void> >
 leak:realloc
+leak:orte_iof_base_write_output
+leak:orte_init
+leak:orte_submit_init
+leak:orte_state_base_activate_job_state
+leak:orte_rmaps_base_print_mapping
+leak:orte_rmaps_base_setup_proc
+leak:orte_daemon_recv
+leak:orte_rml_base_process_msg
+leak:orte_odls_base_default_construct_child_list
+leak:orte_pmix_server_register_nspace
+leak:opal_dss_buffer_extend
+leak:opal_dss_pack
+leak:opal_pointer_array_init
+leak:pmix_server_init
+leak:hwloc_alloc_setup_object
+leak:hwloc_bitmap_alloc
+leak:hwloc_bitmap_dup
+leak:hwloc_topology_load
+leak:event_base_loop
+leak:allocate_native_event
+leak:_dl_catch_exception
 leak:Kokkos::

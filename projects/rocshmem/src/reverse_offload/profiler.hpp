@@ -51,15 +51,15 @@ typedef Stats<RO_NUM_STATS> ROStats;
 typedef NullStats<RO_NUM_STATS> ROStats;
 #endif
 
-template <typename ALLOCATOR>
 class ProfilerProxy {
-  using ProxyT = DeviceProxy<ALLOCATOR, ROStats>;
+  using ProxyT = DeviceProxy<ROStats>;
 
  public:
   ProfilerProxy() = default;
 
-  explicit ProfilerProxy(size_t num_blocks)
-    : num_elem_{num_blocks}, proxy_{num_blocks} {
+  explicit ProfilerProxy(size_t num_blocks,
+                         const HIPAllocator& alloc = HIPAllocator())
+    : alloc_{alloc}, proxy_{num_blocks, alloc_}, num_elem_{num_blocks} {
 
     auto *stat{proxy_.get()};
     assert(stat);
@@ -93,12 +93,11 @@ class ProfilerProxy {
   }
 
  private:
+  HIPAllocator alloc_{};
   ProxyT proxy_{};
 
   size_t num_elem_{0};
 };
-
-using ProfilerProxyT = ProfilerProxy<HIPAllocator>;
 
 }  // namespace rocshmem
 

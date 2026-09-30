@@ -43,26 +43,26 @@
  *
  */
 
-#include <stdint.h>
+#include "rocm_smi_test/functional/perf_level_read_write.h"
+
 #include <stddef.h>
+#include <stdint.h>
 
 #include <iostream>
 #include <map>
 
 #include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
-#include "rocm_smi_test/functional/perf_level_read_write.h"
 #include "rocm_smi_test/test_common.h"
-
 
 TestPerfLevelReadWrite::TestPerfLevelReadWrite() : TestBase() {
   set_title("RSMI Performance Level Read/Write Test");
-  set_description("The Performance Level tests verify that the performance "
-                       "level settings can be read and controlled properly.");
+  set_description(
+      "The Performance Level tests verify that the performance "
+      "level settings can be read and controlled properly.");
 }
 
-TestPerfLevelReadWrite::~TestPerfLevelReadWrite(void) {
-}
+TestPerfLevelReadWrite::~TestPerfLevelReadWrite(void) {}
 
 void TestPerfLevelReadWrite::SetUp(void) {
   TestBase::SetUp();
@@ -70,9 +70,7 @@ void TestPerfLevelReadWrite::SetUp(void) {
   return;
 }
 
-void TestPerfLevelReadWrite::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void TestPerfLevelReadWrite::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void TestPerfLevelReadWrite::DisplayResults(void) const {
   TestBase::DisplayResults();
@@ -85,16 +83,13 @@ void TestPerfLevelReadWrite::Close() {
   TestBase::Close();
 }
 
-
 void TestPerfLevelReadWrite::Run(void) {
   rsmi_status_t ret;
   rsmi_dev_perf_level_t pfl, orig_pfl;
 
   TestBase::Run();
   if (setup_failed_) {
-    IF_VERB(STANDARD) {
-      std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
-    }
+    IF_VERB(STANDARD) { std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl; }
     return;
   }
 
@@ -110,48 +105,41 @@ void TestPerfLevelReadWrite::Run(void) {
     }
 
     IF_VERB(STANDARD) {
-      std::cout << "\t**Original Perf Level:"
-                << GetPerfLevelStr(orig_pfl) << std::endl;
+      std::cout << "\t**Original Perf Level:" << GetPerfLevelStr(orig_pfl) << std::endl;
     }
 
     uint32_t pfl_i = static_cast<uint32_t>(RSMI_DEV_PERF_LEVEL_FIRST);
-    for (; pfl_i <=  static_cast<uint32_t>(RSMI_DEV_PERF_LEVEL_LAST); pfl_i++) {
+    for (; pfl_i <= static_cast<uint32_t>(RSMI_DEV_PERF_LEVEL_LAST); pfl_i++) {
       if (pfl_i == static_cast<uint32_t>(orig_pfl)) {
         continue;
       }
 
       IF_VERB(STANDARD) {
-        std::cout << "Set Performance Level to " <<
-            GetPerfLevelStr(static_cast<rsmi_dev_perf_level_t>(pfl_i)) <<
-                                                            " ..." << std::endl;
+        std::cout << "Set Performance Level to "
+                  << GetPerfLevelStr(static_cast<rsmi_dev_perf_level_t>(pfl_i)) << " ..."
+                  << std::endl;
       }
-      ret = rsmi_dev_perf_level_set(dv_ind,
-                                     static_cast<rsmi_dev_perf_level_t>(pfl_i));
+      ret = rsmi_dev_perf_level_set(dv_ind, static_cast<rsmi_dev_perf_level_t>(pfl_i));
       if (ret == RSMI_STATUS_NOT_SUPPORTED || ret == RSMI_STATUS_UNEXPECTED_DATA) {
-          std::cout << "\t**" << GetPerfLevelStr(static_cast<rsmi_dev_perf_level_t>(pfl_i))
-                  << " returned RSMI_STATUS_NOT_SUPPORTED"  << std::endl;
+        std::cout << "\t**" << GetPerfLevelStr(static_cast<rsmi_dev_perf_level_t>(pfl_i))
+                  << " returned RSMI_STATUS_NOT_SUPPORTED" << std::endl;
       } else {
-          CHK_ERR_ASRT(ret)
-          ret = rsmi_dev_perf_level_get(dv_ind, &pfl);
-          CHK_ERR_ASRT(ret)
-          IF_VERB(STANDARD) {
-              std::cout << "\t**New Perf Level:" << GetPerfLevelStr(pfl) <<
-                                                                    std::endl;
+        CHK_ERR_ASRT(ret)
+        ret = rsmi_dev_perf_level_get(dv_ind, &pfl);
+        CHK_ERR_ASRT(ret)
+        IF_VERB(STANDARD) {
+          std::cout << "\t**New Perf Level:" << GetPerfLevelStr(pfl) << std::endl;
         }
       }
     }
     IF_VERB(STANDARD) {
-      std::cout << "Reset Perf level to " << GetPerfLevelStr(orig_pfl) <<
-                                                            " ..." << std::endl;
+      std::cout << "Reset Perf level to " << GetPerfLevelStr(orig_pfl) << " ..." << std::endl;
     }
     ret = rsmi_dev_perf_level_set(dv_ind, orig_pfl);
     CHK_ERR_ASRT(ret)
     ret = rsmi_dev_perf_level_get(dv_ind, &pfl);
     CHK_ERR_ASRT(ret)
 
-    IF_VERB(STANDARD) {
-      std::cout << "\t**New Perf Level:" << GetPerfLevelStr(pfl) <<
-                                                                      std::endl;
-    }
+    IF_VERB(STANDARD) { std::cout << "\t**New Perf Level:" << GetPerfLevelStr(pfl) << std::endl; }
   }
 }

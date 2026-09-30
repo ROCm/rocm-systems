@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "library/causal/components/unblocking_gotcha.hpp"
 #include "core/config.hpp"
@@ -33,6 +14,7 @@
 #include <timemory/hash/types.hpp>
 #include <timemory/utility/types.hpp>
 
+#include <atomic>
 #include <csignal>
 #include <cstdint>
 #include <pthread.h>
@@ -47,11 +29,7 @@
 #pragma weak pthread_barrier_wait
 #pragma weak kill
 
-namespace rocprofsys
-{
-namespace causal
-{
-namespace component
+namespace rocprofsys::causal::component
 {
 std::string
 unblocking_gotcha::label()
@@ -76,7 +54,10 @@ void
 unblocking_gotcha::configure()
 {
     unblocking_gotcha_t::get_initializer() = []() {
-        if(!config::get_use_causal()) return;
+        if(!config::get_use_causal())
+        {
+            return;
+        }
 
         TIMEMORY_C_GOTCHA(unblocking_gotcha_t, 0, pthread_mutex_unlock);
         TIMEMORY_C_GOTCHA(unblocking_gotcha_t, 1, pthread_spin_unlock);
@@ -90,18 +71,29 @@ unblocking_gotcha::configure()
     };
 }
 
+// Same fast_gotcha gap as blocking_gotcha: disable() does not uninstall the GOT
+// hook. delay::process() can sleep_for accumulated credits; skip it after shutdown.
+static std::atomic<bool> g_shutdown{ false };
+
 void
 unblocking_gotcha::shutdown()
 {
+    g_shutdown.store(true, std::memory_order_release);
     unblocking_gotcha_t::disable();
 }
 
 template <size_t Idx, typename Ret, typename... Args>
-std::enable_if_t<(Idx < unblocking_gotcha::indexes::kill_idx), Ret>
+    requires(Idx < unblocking_gotcha::indexes::kill_idx)
+Ret
 unblocking_gotcha::operator()(gotcha_index<Idx>, Ret (*_func)(Args...),
                               Args... _args) const noexcept
 {
-    auto _active = get_thread_state() < ::rocprofsys::ThreadState::Internal;
+    if(g_shutdown.load(std::memory_order_relaxed))
+    {
+        return (*_func)(_args...);
+    }
+
+    auto _active = state::thread::get() < ::rocprofsys::state::thread::Internal;
 
     if(_active)
     {
@@ -109,7 +101,8 @@ unblocking_gotcha::operator()(gotcha_index<Idx>, Ret (*_func)(Args...),
 
         if constexpr(Idx == pthread_barrier_wait_idx)
         {
-            int64_t _delay_value = (_active) ? causal::delay::get_global().load() : 0;
+            const std::int64_t _delay_value =
+                _active ? causal::delay::get_global().load() : 0;
 
             causal::sampling::block_backtrace_samples();
             auto _ret = (*_func)(_args...);
@@ -127,9 +120,17 @@ int
 unblocking_gotcha::operator()(gotcha_index<kill_idx>, int (*_func)(pid_t, int),
                               pid_t _pid, int _sig) const noexcept
 {
-    auto _active = get_thread_state() < ::rocprofsys::ThreadState::Internal;
+    if(g_shutdown.load(std::memory_order_relaxed))
+    {
+        return (*_func)(_pid, _sig);
+    }
 
-    if(_active && _pid == process::get_id()) causal::delay::process();
+    auto _active = state::thread::get() < ::rocprofsys::state::thread::Internal;
+
+    if(_active && _pid == process::get_id())
+    {
+        causal::delay::process();
+    }
 
     causal::sampling::block_backtrace_samples();
     auto _ret = (*_func)(_pid, _sig);
@@ -137,8 +138,6 @@ unblocking_gotcha::operator()(gotcha_index<kill_idx>, int (*_func)(pid_t, int),
 
     return _ret;
 }
-}  // namespace component
-}  // namespace causal
-}  // namespace rocprofsys
+}  // namespace rocprofsys::causal::component
 
 TIMEMORY_INVOKE_PREINIT(rocprofsys::causal::component::unblocking_gotcha)

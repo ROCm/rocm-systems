@@ -1,0 +1,227 @@
+rocprofiler-sdk:
+  counters-schema-version: 1
+  counters:
+  - name: TCC_TOO_MANY_EA_WRREQS_STALL[0]
+    description: TCC_TOO_MANY_EA_WRREQS_STALL on 0th XCC and 0th channel
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      expression: select(TCC_TOO_MANY_EA_WRREQS_STALL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[0]])
+  - name: TCC_TOO_MANY_EA_WRREQS_STALL[10]
+    description: TCC_TOO_MANY_EA_WRREQS_STALL on 0th XCC and 10th channel
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      expression: select(TCC_TOO_MANY_EA_WRREQS_STALL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[10]])
+  - name: TCC_TOO_MANY_EA_WRREQS_STALL[11]
+    description: TCC_TOO_MANY_EA_WRREQS_STALL on 0th XCC and 11th channel
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      expression: select(TCC_TOO_MANY_EA_WRREQS_STALL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[11]])
+  - name: TCC_TOO_MANY_EA_WRREQS_STALL[12]
+    description: TCC_TOO_MANY_EA_WRREQS_STALL on 0th XCC and 12th channel
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      expression: select(TCC_TOO_MANY_EA_WRREQS_STALL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[12]])
+  - name: TCC_TOO_MANY_EA_WRREQS_STALL[13]
+    description: TCC_TOO_MANY_EA_WRREQS_STALL on 0th XCC and 13th channel
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      expression: select(TCC_TOO_MANY_EA_WRREQS_STALL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[13]])
+  - name: TCC_TOO_MANY_EA_WRREQS_STALL[14]
+    description: TCC_TOO_MANY_EA_WRREQS_STALL on 0th XCC and 14th channel
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      expression: select(TCC_TOO_MANY_EA_WRREQS_STALL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[14]])
+  - name: TCC_TOO_MANY_EA_WRREQS_STALL[15]
+    description: TCC_TOO_MANY_EA_WRREQS_STALL on 0th XCC and 15th channel
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      expression: select(TCC_TOO_MANY_EA_WRREQS_STALL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[15]])
+  - name: TCC_TOO_MANY_EA_WRREQS_STALL[16]
+    description: TCC_TOO_MANY_EA_WRREQS_STALL on 0th XCC and 16th channel
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      expression: select(TCC_TOO_MANY_EA_WRREQS_STALL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[16]])
+  - name: TCC_TOO_MANY_EA_WRREQS_STALL[17]
+    description: TCC_TOO_MANY_EA_WRREQS_STALL on 0th XCC and 17th channel
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      expression: select(TCC_TOO_MANY_EA_WRREQS_STALL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[17]])
+  - name: TCC_TOO_MANY_EA_WRREQS_STALL[18]
+    description: TCC_TOO_MANY_EA_WRREQS_STALL on 0th XCC and 18th channel
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      expression: select(TCC_TOO_MANY_EA_WRREQS_STALL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[18]])
+  - name: TCC_TOO_MANY_EA_WRREQS_STALL[19]
+    description: TCC_TOO_MANY_EA_WRREQS_STALL on 0th XCC and 19th channel
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      expression: select(TCC_TOO_MANY_EA_WRREQS_STALL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[19]])
+  - name: TCC_TOO_MANY_EA_WRREQS_STALL[1]
+    description: TCC_TOO_MANY_EA_WRREQS_STALL on 0th XCC and 1th channel
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      expression: select(TCC_TOO_MANY_EA_WRREQS_STALL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[1]])
+  - name: TCC_TOO_MANY_EA_WRREQS_STALL[20]
+    description: TCC_TOO_MANY_EA_WRREQS_STALL on 0th XCC and 20th channel
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      expression: select(TCC_TOO_MANY_EA_WRREQS_STALL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[20]])
+  - name: TCC_TOO_MANY_EA_WRREQS_STALL[21]
+    description: TCC_TOO_MANY_EA_WRREQS_STALL on 0th XCC and 21th channel
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      expression: select(TCC_TOO_MANY_EA_WRREQS_STALL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[21]])
+  - name: TCC_TOO_MANY_EA_WRREQS_STALL[22]
+    description: TCC_TOO_MANY_EA_WRREQS_STALL on 0th XCC and 22th channel
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      expression: select(TCC_TOO_MANY_EA_WRREQS_STALL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[22]])
+  - name: TCC_TOO_MANY_EA_WRREQS_STALL[23]
+    description: TCC_TOO_MANY_EA_WRREQS_STALL on 0th XCC and 23th channel
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      expression: select(TCC_TOO_MANY_EA_WRREQS_STALL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[23]])
+  - name: TCC_TOO_MANY_EA_WRREQS_STALL[24]
+    description: TCC_TOO_MANY_EA_WRREQS_STALL on 0th XCC and 24th channel
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      expression: select(TCC_TOO_MANY_EA_WRREQS_STALL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[24]])
+  - name: TCC_TOO_MANY_EA_WRREQS_STALL[25]
+    description: TCC_TOO_MANY_EA_WRREQS_STALL on 0th XCC and 25th channel
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      expression: select(TCC_TOO_MANY_EA_WRREQS_STALL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[25]])
+  - name: TCC_TOO_MANY_EA_WRREQS_STALL[26]
+    description: TCC_TOO_MANY_EA_WRREQS_STALL on 0th XCC and 26th channel
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      expression: select(TCC_TOO_MANY_EA_WRREQS_STALL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[26]])
+  - name: TCC_TOO_MANY_EA_WRREQS_STALL[27]
+    description: TCC_TOO_MANY_EA_WRREQS_STALL on 0th XCC and 27th channel
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      expression: select(TCC_TOO_MANY_EA_WRREQS_STALL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[27]])
+  - name: TCC_TOO_MANY_EA_WRREQS_STALL[28]
+    description: TCC_TOO_MANY_EA_WRREQS_STALL on 0th XCC and 28th channel
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      expression: select(TCC_TOO_MANY_EA_WRREQS_STALL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[28]])
+  - name: TCC_TOO_MANY_EA_WRREQS_STALL[29]
+    description: TCC_TOO_MANY_EA_WRREQS_STALL on 0th XCC and 29th channel
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      expression: select(TCC_TOO_MANY_EA_WRREQS_STALL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[29]])
+  - name: TCC_TOO_MANY_EA_WRREQS_STALL[2]
+    description: TCC_TOO_MANY_EA_WRREQS_STALL on 0th XCC and 2th channel
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      expression: select(TCC_TOO_MANY_EA_WRREQS_STALL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[2]])
+  - name: TCC_TOO_MANY_EA_WRREQS_STALL[30]
+    description: TCC_TOO_MANY_EA_WRREQS_STALL on 0th XCC and 30th channel
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      expression: select(TCC_TOO_MANY_EA_WRREQS_STALL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[30]])
+  - name: TCC_TOO_MANY_EA_WRREQS_STALL[31]
+    description: TCC_TOO_MANY_EA_WRREQS_STALL on 0th XCC and 31th channel
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      expression: select(TCC_TOO_MANY_EA_WRREQS_STALL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[31]])
+  - name: TCC_TOO_MANY_EA_WRREQS_STALL[3]
+    description: TCC_TOO_MANY_EA_WRREQS_STALL on 0th XCC and 3th channel
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      expression: select(TCC_TOO_MANY_EA_WRREQS_STALL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[3]])
+  - name: TCC_TOO_MANY_EA_WRREQS_STALL[4]
+    description: TCC_TOO_MANY_EA_WRREQS_STALL on 0th XCC and 4th channel
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      expression: select(TCC_TOO_MANY_EA_WRREQS_STALL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[4]])
+  - name: TCC_TOO_MANY_EA_WRREQS_STALL[5]
+    description: TCC_TOO_MANY_EA_WRREQS_STALL on 0th XCC and 5th channel
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      expression: select(TCC_TOO_MANY_EA_WRREQS_STALL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[5]])
+  - name: TCC_TOO_MANY_EA_WRREQS_STALL[6]
+    description: TCC_TOO_MANY_EA_WRREQS_STALL on 0th XCC and 6th channel
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      expression: select(TCC_TOO_MANY_EA_WRREQS_STALL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[6]])
+  - name: TCC_TOO_MANY_EA_WRREQS_STALL[7]
+    description: TCC_TOO_MANY_EA_WRREQS_STALL on 0th XCC and 7th channel
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      expression: select(TCC_TOO_MANY_EA_WRREQS_STALL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[7]])
+  - name: TCC_TOO_MANY_EA_WRREQS_STALL[8]
+    description: TCC_TOO_MANY_EA_WRREQS_STALL on 0th XCC and 8th channel
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      expression: select(TCC_TOO_MANY_EA_WRREQS_STALL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[8]])
+  - name: TCC_TOO_MANY_EA_WRREQS_STALL[9]
+    description: TCC_TOO_MANY_EA_WRREQS_STALL on 0th XCC and 9th channel
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      expression: select(TCC_TOO_MANY_EA_WRREQS_STALL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[9]])

@@ -1,22 +1,6 @@
-# Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 
 # FIXME: cjatin
 # This is a temp hack to pass it on windows since it has a char limit for
@@ -26,13 +10,11 @@
 set(TEST_SRC
   hipGraphAddEmptyNode.cc
   hipGraphAddDependencies.cc
-  hipGraphAddDependencies_old.cc
   hipGraphAddEventRecordNode.cc
   hipGraphAddEventWaitNode.cc
   hipGraph.cc
   hipSimpleGraphWithKernel.cc
   hipGraphAddMemcpyNode.cc
-  hipGraphAddMemcpyNode_old.cc
   hipGraphClone.cc
   hipGraphInstantiateWithFlags.cc
   hipGraphInstantiateWithParams.cc
@@ -45,11 +27,9 @@ set(TEST_SRC
   hipGraphAddMemcpyNodeToSymbol_old.cc
   hipGraphAddMemcpyNodeToSymbol.cc
   hipGraphExecMemsetNodeSetParams.cc
-  hipGraphMemcpyNodeSetParamsToSymbol_old.cc
   hipGraphMemcpyNodeSetParamsToSymbol.cc
   hipGraphDestroyNode.cc
   hipGraphGetNodes.cc
-  hipGraphGetNodes_old.cc
   hipGraphGetRootNodes.cc
   hipGraphGetRootNodes_old.cc
   hipGraphHostNodeSetParams.cc
@@ -59,15 +39,14 @@ set(TEST_SRC
   hipGraphExecMemcpyNodeSetParams1D_old.cc
   hipGraphExecMemcpyNodeSetParams1D.cc
   hipGraphGetEdges.cc
-  hipGraphGetEdges_old.cc
   hipGraphRemoveDependencies.cc
-  hipGraphRemoveDependencies_old.cc
   hipGraphInstantiate.cc
   hipGraphExecUpdate.cc
   hipGraphExecEventRecordNodeSetEvent.cc
   hipGraphEventWaitNodeSetEvent.cc
   hipGraphMemsetNodeGetParams.cc
   hipGraphMemsetNodeSetParams.cc
+  hipGraphMemsetNodeFlatAlloc.cc
   hipGraphExecMemcpyNodeSetParamsFromSymbol_old.cc
   hipGraphExecMemcpyNodeSetParamsFromSymbol.cc
   hipGraphEventRecordNodeGetEvent.cc
@@ -85,18 +64,25 @@ set(TEST_SRC
   hipGraphExecBatchMemOpNodeSetParams.cc
   hipGraphAddBatchMemOpNode.cc
   hipGraphBatchMemOpNodeSetParams.cc
+  hipGraphBatchMemOpNodeCapture.cc
   hipDrvGraphExecMemcpyNodeSetParams.cc
-  hipDrvGraphAddMemFreeNode.cc)
+  hipDrvGraphAddMemFreeNode.cc
+  hipGraphAddNodeConcurrent.cc)
 
 if(HIP_PLATFORM MATCHES "amd")
   set(AMD_SRC
     hipStreamCaptureExtModuleLaunchKernel.cc
     hipStreamBeginCaptureToGraph.cc
     hipGetProcAddressGraphApis.cc
-    # Below files are disbled in NVIDIA as PSDB builds are failing due to lower CUDA version.
+    # Below files are disabled in NVIDIA as PSDB builds are failing due to lower CUDA version.
     hipGraphExecNodeSetParams.cc
     hipGraphNodeSetParams.cc
     hipGraphExecGetFlags.cc
+    # this files are disabled for NVIDIA due to lacking corresponding hipStreamGetCaptureInfo_v3 implementation
+    hipStreamGetCaptureInfo_old.cc
+    hipStreamGetCaptureInfo_v2.cc
+    hipStreamUpdateCaptureDependencies.cc
+    hipGraphAddNodeBeginCapture.cc
   )
   set(TEST_SRC ${TEST_SRC} ${AMD_SRC})
 endif()
@@ -105,9 +91,42 @@ hip_add_exe_to_target(NAME GraphsTest1
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
 
+# Collapse tests need scheduling flags set before HIP init.  They live in
+# their own binary built directly (bypassing hip_add_exe_to_target) so that
+# catch_discover_tests is NOT called — avoiding duplicate env-less entries
+# that would fail.  Env vars are wired via cmake -E env in add_test instead.
+set_source_files_properties(hipGraphCollapseSmallKernels.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
+add_executable(GraphsCollapseTest EXCLUDE_FROM_ALL
+  hipGraphCollapseSmallKernels.cc
+  $<TARGET_OBJECTS:Main_Object>
+  $<TARGET_OBJECTS:KERNELS>)
+set_target_properties(GraphsCollapseTest PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
+target_link_libraries(GraphsCollapseTest Catch2::Catch2 ${GPGPU_LINKER_LIBRARIES})
+if(UNIX)
+  target_link_libraries(GraphsCollapseTest stdc++fs -ldl pthread rt)
+endif()
+add_dependencies(build_tests GraphsCollapseTest)
+add_dependencies(GraphsCollapseTest hip_tests_config)
+set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS GraphsCollapseTest)
+
+add_test(NAME Unit_hipGraph_CollapseSmallKernels_SingleStream
+  COMMAND ${CMAKE_COMMAND} -E env
+    "DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING=0"
+    "DEBUG_HIP_GRAPH_MIN_OVERLAP=2"
+    "DEBUG_HIP_GRAPH_DOT_PRINT=2"
+    $<TARGET_FILE:GraphsCollapseTest>
+    "Unit_hipGraph_CollapseSmallKernels_SingleStream")
+
+add_test(NAME Unit_hipGraph_CollapseSmallKernels_MultiStream_Mode2
+  COMMAND ${CMAKE_COMMAND} -E env
+    "DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING=2"
+    "DEBUG_HIP_GRAPH_MIN_OVERLAP=2"
+    "DEBUG_HIP_GRAPH_DOT_PRINT=2"
+    $<TARGET_FILE:GraphsCollapseTest>
+    "Unit_hipGraph_CollapseSmallKernels_MultiStream_Mode2")
+
 set(TEST_SRC
   hipStreamGetCaptureInfo.cc
-  hipStreamGetCaptureInfo_old.cc
   hipStreamEndCapture.cc
   hipStreamEndCapture_old.cc
   hipGraphMemcpyNodeSetParamsFromSymbol_old.cc
@@ -118,7 +137,6 @@ set(TEST_SRC
   hipGraphMemcpyNodeGetParams.cc
   hipGraphMemcpyNodeGetParams_old.cc
   hipGraphMemcpyNodeSetParams.cc
-  hipGraphMemcpyNodeSetParams_old.cc
   hipGraphKernelNodeGetParams.cc
   hipGraphKernelNodeSetParams.cc
   hipGraphExecKernelNodeSetParams.cc
@@ -129,18 +147,13 @@ set(TEST_SRC
   hipGraphExecMemcpyNodeSetParamsToSymbol_old.cc
   hipGraphExecMemcpyNodeSetParamsToSymbol.cc
   hipGraphNodeGetDependentNodes.cc
-  hipGraphNodeGetDependentNodes_old.cc
   hipGraphNodeGetDependencies.cc
-  hipGraphNodeGetDependencies_old.cc
   hipGraphHostNodeGetParams.cc
   hipGraphExecChildGraphNodeSetParams.cc
-  hipStreamGetCaptureInfo_v2.cc
   hipGraphCreate.cc
   hipGraphDestroy.cc
-  hipStreamUpdateCaptureDependencies.cc
   hipThreadExchangeStreamCaptureMode.cc
   hipLaunchHostFuncWithGraph.cc
-  hipStreamGetCaptureInfo_v2_old.cc
   hipUserObjectCreate.cc
   hipUserObjectRelease.cc
   hipUserObjectRetain.cc
@@ -152,8 +165,9 @@ set(TEST_SRC
   hipGraphNodeGetEnabled.cc
   hipGraphExecDestroy.cc
   hipGraphUpload.cc
+  hipGraphCrossDeviceLaunch.cc
+  hipGraphStreamPoolFootprint.cc
   hipGraphKernelNodeCopyAttributes.cc
-  hipGraphAddNodeBeginCapture.cc
   hipGraphCycle.cc
   hipGraphPerf.cc
   hipGraphKernelNodeGetAttribute.cc
@@ -161,16 +175,20 @@ set(TEST_SRC
   hipGraphMemAllocNodeGetParams.cc
   hipGraphAddMemAllocNode.cc
   hipGraphAddMemFreeNode.cc
+  hipGraphAllocNodeMemReuse.cc
   hipDrvGraphMemcpyNodeGetParams.cc
   hipDrvGraphMemcpyNodeSetParams.cc
   hipDeviceSetGraphMemAttribute.cc
   hipDeviceGetGraphMemAttribute.cc
   hipDeviceGraphMemTrim.cc
   hipDrvGraphExecMemsetNodeSetParams.cc
+  hipGraphMultiDevice.cc
 )
 
 if(HIP_PLATFORM MATCHES "amd")
   set(AMD_SRC
+    # hipLaunchAttributePriority not available on older CUDA versions
+    hipGraphKernelNodePriority.cc
     # hipGraphAddNode, hipGraphNodeParams, hipMemcpyNodeParams are not mapped to Nvidia
     hipGraphAddNode.cc
     # hipDrvGraphAddMemsetNode, HIP_MEMSET_NODE_PARAMS are not mapped to Nvidia
@@ -179,31 +197,63 @@ if(HIP_PLATFORM MATCHES "amd")
     hipDrvGraphAddMemcpyNode.cc
   )
   set(TEST_SRC ${TEST_SRC} ${AMD_SRC})
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/add_Kernel.code
+    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST}
+    --cuda-device-only -x hip ${CMAKE_CURRENT_SOURCE_DIR}/add_Kernel.cpp
+    -o ${CMAKE_CURRENT_BINARY_DIR}/add_Kernel.code
+    -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
+    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/add_Kernel.cpp
+    COMMENT "Compiling add_Kernel.code")
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/hipMatMul.code
+    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST}
+    --cuda-device-only
+    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/hipMatMul.cc
+    -o ${CMAKE_CURRENT_BINARY_DIR}/hipMatMul.code
+    -I${CMAKE_CURRENT_SOURCE_DIR}/../../../../include/
+    -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
+    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/hipMatMul.cc
+    COMMENT "Compiling hipMatMul.code")
+  add_custom_target(hipMatMul DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/hipMatMul.code)
+  set_property(GLOBAL APPEND PROPERTY
+               G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/hipMatMul.code)
+  if(UNIX)
+    set(TEST_KERNEL_ARG_PREFETCH_SRC hipSimpleGraphWithKernel.cc)
+    hip_add_exe_to_target(NAME GraphsKernelArgPrefetchTest
+                          TEST_SRC ${TEST_KERNEL_ARG_PREFETCH_SRC}
+                          TEST_TARGET_NAME build_tests)
+    set_target_properties(GraphsKernelArgPrefetchTest PROPERTIES COMPILE_FLAGS "-DKERNEL_ARG_PREFETCH -mllvm -amdgpu-kernarg-preload-count=16")
+  endif()
+else()
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/add_Kernel.code
+    COMMAND ${CMAKE_HIP_COMPILER}
+    --fatbin ${OFFLOAD_ARCH_LIST} -x cu ${CMAKE_CURRENT_SOURCE_DIR}/add_Kernel.cpp
+    -o ${CMAKE_CURRENT_BINARY_DIR}/add_Kernel.code
+    -I${HIP_INCLUDE_DIR}
+    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/add_Kernel.cpp
+    COMMENT "Compiling add_Kernel.code")
 endif()
+add_custom_target(add_Kernel DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/add_Kernel.code)
 
-add_custom_target(add_Kernel.code COMMAND ${CMAKE_HIP_COMPILER}
-  --cuda-device-only ${OFFLOAD_ARCH_LIST} -x hip ${CMAKE_CURRENT_SOURCE_DIR}/add_Kernel.cpp
-  -o ${CMAKE_CURRENT_BINARY_DIR}/../graph/add_Kernel.code
-  -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
-  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 set_property(GLOBAL APPEND PROPERTY
-             G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/add_Kernel.code)
+               G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/add_Kernel.code)
+
 
 hip_add_exe_to_target(NAME GraphsTest2
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
 
+# Wire kernel artifacts to the consuming test exes so `make GraphsTest1` /
+# `make GraphsTest2` builds all their dependencies. The kernels are loaded at
+# runtime by tests in either binary, so wire to both.
+add_dependencies(GraphsTest1 add_Kernel)
+add_dependencies(GraphsTest2 add_Kernel)
 if(HIP_PLATFORM MATCHES "amd")
-  add_custom_target(hipMatMul COMMAND ${CMAKE_HIP_COMPILER}
-    --cuda-device-only ${OFFLOAD_ARCH_LIST}
-    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/hipMatMul.cc
-    -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/graph/hipMatMul.code
-    -I${CMAKE_CURRENT_SOURCE_DIR}/../../../../include/
-    -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
-    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-  add_dependencies(build_tests hipMatMul)
-  set_property(GLOBAL APPEND PROPERTY
-               G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/hipMatMul.code)
+  add_dependencies(GraphsTest1 hipMatMul)
+  add_dependencies(GraphsTest2 hipMatMul)
+  if(UNIX)
+    add_dependencies(GraphsKernelArgPrefetchTest add_Kernel)
+  endif()
 endif()
-
-add_dependencies(build_tests add_Kernel.code)

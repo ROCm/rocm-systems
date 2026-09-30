@@ -3,9 +3,52 @@
 Documentation for rocJPEG is available at
 [https://rocm.docs.amd.com/projects/rocJPEG/en/latest/](https://rocm.docs.amd.com/projects/rocJPEG/en/latest/)
 
+## (unreleased) rocJPEG 1.10.0
+
+### Changed
+
+* Changed the HIP YUV-to-RGB color conversion kernels from the BT.709 standard to BT.601 for color space conversion.
+
+## rocJPEG 1.9.0
+
+### Added
+
+* Added rocJpegDecodeBatchedAsync and rocJpegDecodeBatchedSync APIs to support asynchronous batched JPEG decoding.
+* Added support for explicitly loading librocm_sysdeps_va via dlopen, ensuring complete isolation from the system libva library.
+
+## rocJPEG 1.7.0
+
+### Added
+
+* Added rocJpegDecodeAsync and rocJpegDecodeSync APIs to support asynchronous single-image JPEG decoding, allowing decode submission and completion to be separated across threads for improved pipeline throughput.
+
+## (unreleased) rocJPEG 1.6.1
+
+### Changed
+
+* Improved VAAPI batch grouping by using reusable surface bucket dimensions to reduce decode batch fragmentation.
+
+## rocJPEG 1.6.0 for ROCm 7.14
+
+### Added
+
+* Added a logging mechanism for core APIs that can be controlled by setting the `ROCJPEG_LOG_LEVEL` environment variable.
+
+## rocJPEG 1.5.0 for ROCm 7.13
+
+### Changed
+
+* rocJPEG is now delivered as part of [TheRock](https://github.com/ROCm/TheRock). All core dependencies are provided by the TheRock build.
+* Removed CPack packaging (DEB/RPM/NSIS/TGZ/ZIP generation and all related CPACK variables).
+* Removed `rocJPEG-setup.py` dependency installer script.
+* Removed Docker files.
+* Removed package install documentation; updated all documentation to reference TheRock for installation.
+* Simplified libva version check (single `>= 1.22` requirement).
+* Cleaned up CMake error messages.
+
 ## rocJPEG 1.4.0 for ROCm 7.2.1
  
-## Changed
+### Changed
 
 * Bug fixes and performance improvements
 * GitHub repository moved to [https://github.com/ROCm/rocm-systems/tree/develop/projects/rocjpeg](https://github.com/ROCm/rocm-systems/tree/develop/projects/rocjpeg)

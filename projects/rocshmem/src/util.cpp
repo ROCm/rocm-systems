@@ -22,8 +22,6 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#include "util.hpp"
-
 #include <cstdio>
 #include <cstdlib>
 #include <cctype>
@@ -32,9 +30,10 @@
 
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
 
-namespace rocshmem {
+#include "util.hpp"
+#include "log.hpp"
 
-__constant__ int* print_lock;
+namespace rocshmem {
 
 typedef struct device_agent {
   hsa_agent_t agent;
@@ -64,8 +63,8 @@ static void device_properties_init(void) {
     CHECK_HIP(hipDeviceGetAttribute (&has_large_bar, hipDeviceAttributeIsLargeBar, i));
     if (has_large_bar == 0) {
       // Large BAR required for IPC operations
-      printf("Warning: Large BAR support is not enabled on device %d. "
-             "This will impact IPC functionality on some systems.\n", i);
+      LOG_WARN("Large BAR support is not enabled on device %d. "
+               "This will impact IPC functionality on some systems.", i);
     }
   }
 }
@@ -77,7 +76,7 @@ hsa_status_t rocm_hsa_amd_memory_pool_callback(
       memory_pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &pool_flag)};
 
   if (status != HSA_STATUS_SUCCESS) {
-    printf("Failure to get pool info: 0x%x", status);
+    LOG_ERROR("Failure to get pool info: 0x%x", status);
     return status;
   }
 
@@ -97,7 +96,7 @@ hsa_status_t rocm_hsa_agent_callback(hsa_agent_t agent,
       hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &device_type)};
 
   if (status != HSA_STATUS_SUCCESS) {
-    printf("Failure to get device type: 0x%x", status);
+    LOG_ERROR("Failure to get device type: 0x%x", status);
     return status;
   }
 
@@ -122,14 +121,14 @@ int rocm_init() {
   hsa_status_t status{hsa_init()};
 
   if (status != HSA_STATUS_SUCCESS) {
-    printf("Failure to open HSA connection: 0x%x", status);
+    LOG_ERROR("Failure to open HSA connection: 0x%x", status);
     return 1;
   }
 
   status = hsa_iterate_agents(rocm_hsa_agent_callback, nullptr);
 
   if (status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK) {
-    printf("Failure to iterate HSA agents: 0x%x", status);
+    LOG_ERROR("Failure to iterate HSA agents: 0x%x", status);
     return 1;
   }
 
@@ -145,8 +144,7 @@ void rocm_memory_lock_to_fine_grain(void* ptr, size_t size, void** gpu_ptr,
                                   cpu_agents[0].pool, 0, gpu_ptr)};
 
   if (status != HSA_STATUS_SUCCESS) {
-    printf("Failed to lock memory pool (%p): 0x%x\n", ptr, status);
-    exit(-1);
+    LOG_ERROR_EXIT("Failed to lock memory pool (%p): 0x%x", ptr, status);
   }
 }
 

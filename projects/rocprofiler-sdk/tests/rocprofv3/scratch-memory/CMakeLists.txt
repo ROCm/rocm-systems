@@ -1,7 +1,7 @@
 #
 # rocprofv3 tool test
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 project(
     rocprofiler-sdk-tests-rocprofv3-scratch-memory-tracing
@@ -26,8 +26,8 @@ foreach(_OUTPUT_FORMAT csv json)
         TIMEOUT 45
         LABELS "integration-tests"
         PRELOAD "${PRELOAD_ENV}"
-        FIXTURES_SETUP rocprofv3-test-scratch-memory-tracing-${_OUTPUT_FORMAT}
-        DISABLED "${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}")
+        DISABLED_NO_KFD
+        FIXTURES_SETUP rocprofv3-test-scratch-memory-tracing-${_OUTPUT_FORMAT})
 endforeach()
 
 rocprofiler_add_integration_validate_test(
@@ -40,6 +40,6 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/scratch-memory-trace/out_scratch_memory_trace.csv
     TIMEOUT 45
     LABELS "integration-tests"
+    DISABLED_NO_KFD
     FIXTURES_REQUIRED rocprofv3-test-scratch-memory-tracing-csv
-                      rocprofv3-test-scratch-memory-tracing-json
-    DISABLED "${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}")
+                      rocprofv3-test-scratch-memory-tracing-json)

@@ -12,6 +12,9 @@ the :doc:`ROCm Systems Profiler glossary <../reference/rocprof-sys-glossary>`.
 * Use ``rocprof-sys-avail`` to look up configuration settings, hardware counters, and data collection components
 
   * Use the ``-d`` flag for descriptions
+  * Use ``--list-domains`` to see the available ROCm domains that expose operation lists
+  * Use ``--list-operations <domain>`` to see the operations available for a specific domain
+    (for example, ``rocprof-sys-avail --list-operations ompt``)
 
 * Generate a default configuration with ``rocprof-sys-avail -G ${HOME}/.rocprof-sys.cfg`` and adjust it
   to the desired default behavior
@@ -24,8 +27,9 @@ the :doc:`ROCm Systems Profiler glossary <../reference/rocprof-sys-glossary>`.
 * **Use binary instrumentation for characterizing the performance of every invocation of specific functions**
 * **Use statistical sampling to characterize the performance of the entire application while minimizing overhead**
 * Enable statistical sampling after binary instrumentation to help "fill in the gaps" between instrumented regions
-* Use the user API to create custom regions and enable/disable User API ROCm Systems Profiler for specific processes, threads, and regions
-* Dynamic symbol interception, callback APIs, and the user API are always available with binary instrumentation and sampling
+* Use `ROCTx <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofiler-sdk-roctx.html>`_
+  to create custom regions and to pause and resume data collection for specific processes, threads, and regions
+* Dynamic symbol interception and callback APIs are always available with binary instrumentation and sampling
 
   * Dynamic symbol interception and callback APIs are (generally) controlled through ``ROCPROFSYS_USE_<API>``
     options, for example, ``ROCPROFSYS_USE_KOKKOSP`` and ``ROCPROFSYS_USE_OMPT`` enable Kokkos-Tools and OpenMP-Tools

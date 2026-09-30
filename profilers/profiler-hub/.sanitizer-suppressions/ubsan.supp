@@ -1,0 +1,3 @@
+# UBSan suppressions for profiler-hub.
+# Format: <category>:<symbol-or-file>  (e.g. signed-integer-overflow:foo)
+# See https://clang.llvm.org/docs/UndefinedBehaviorSanitizer.html#suppressing-errors-in-recompiled-code-blacklist

@@ -35,8 +35,19 @@
 enum TeamSplitType {
   ROCSHMEM_TEST_TEAM_DUP = 0,    // Dup parent team
   ROCSHMEM_TEST_TEAM_SINGLE,     // each PE will be its own team
-  ROCSHMEM_TEST_TEAM_BLOCK,      // split parent into two halfs
+  ROCSHMEM_TEST_TEAM_BLOCK,      // split parent into two halves
   ROCSHMEM_TEST_TEAM_ODDEVEN,    // odd-even splitting
+  ROCSHMEM_TEST_TEAM_SHARED,     // predefined ROCSHMEM_TEAM_SHARED
+  ROCSHMEM_TEST_TEAM_SUBSET_PARENT, // split a subset parent team (not TEAM_WORLD)
+};
+
+enum UserBufType {
+  USER_BUF_TYPE_HOST,
+  USER_BUF_TYPE_DEVICE,
+  USER_BUF_TYPE_FINE,
+  USER_BUF_TYPE_UNCACHED,
+  USER_BUF_TYPE_MANAGED,
+  USER_BUF_TYPE_HEAP,
 };
 
 /*-----------------------------------------
@@ -65,6 +76,11 @@ class TesterArguments {
 
 public:
   /**
+   * Program name (argv[0]) for path resolution, e.g. finding HSACO next to binary
+   */
+  std::string executable_name;
+
+  /**
    * Arguments obtained from command line
    */
   unsigned num_wgs = 1;
@@ -72,6 +88,7 @@ public:
   unsigned algorithm = 0;
   size_t min_msg_size = 1;
   size_t max_msg_size = 1 << 20;
+  bool max_msg_size_set = false;
   size_t max_volume_size = 0;
   unsigned wg_size = 64;
   unsigned thread_access = 64;
@@ -79,6 +96,7 @@ public:
   unsigned op_type = 0;
   unsigned shmem_context = rocshmem::ROCSHMEM_CTX_WG_PRIVATE;
   AddrMode addr_mode = AddrMode::PerBlock;
+  enum UserBufType local_buf_type = USER_BUF_TYPE_HEAP;
 
   /**
    * Arguments obtained from rocshmem
@@ -92,7 +110,9 @@ public:
   int loop = 10;
   int skip = 10;
   int loop_large = 10;
+  int batch = 0;
   bool verif = true;
+  int num_wf = 0;
   size_t large_message_size = 32768;
 
   TeamSplitType team_type = ROCSHMEM_TEST_TEAM_DUP;

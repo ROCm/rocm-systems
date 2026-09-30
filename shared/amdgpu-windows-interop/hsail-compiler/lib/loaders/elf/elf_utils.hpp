@@ -26,7 +26,7 @@ namespace amd {
 class OclElfErr
 {
 public:
-    // Temperary buffer for copying from file to file
+    // Temporary buffer for copying from file to file
     uint8_t* _copyBuffer;   // Initialized first time it is used
 
 private:

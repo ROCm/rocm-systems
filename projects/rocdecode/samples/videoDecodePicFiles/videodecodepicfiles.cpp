@@ -25,12 +25,14 @@ THE SOFTWARE.
 #include <cstring>
 #include <string>
 #include <iomanip>
-#include <unistd.h>
 #include <vector>
 #include <string>
 #include <chrono>
+#ifndef _WIN32
+#include <unistd.h>
 #include <sys/stat.h>
 #include <libgen.h>
+#endif
 #include "video_demuxer.h"
 #include "rocdecode/roc_bitstream_reader.h"
 #include "roc_video_dec.h"
@@ -73,6 +75,7 @@ int main(int argc, char **argv) {
     bool b_extract_sei_messages = false;
     bool b_generate_md5 = false;
     bool b_md5_check = false;
+    bool b_md5_check_failed = false;
     bool b_flush_frames_during_reconfig = true;
     Rect crop_rect = {};
     Rect *p_crop_rect = nullptr;
@@ -233,13 +236,17 @@ int main(int argc, char **argv) {
         if (!backend)   // gpu backend
             viddec = new RocVideoDecoder(device_id, mem_type, rocdec_codec_id, b_force_zero_latency, p_crop_rect, b_extract_sei_messages, disp_delay);
         else {
+        #if ENABLE_HOST_DECODE
             std::cout << "info: RocDecode is using CPU backend!" << std::endl;
-            bool use_threading = false;
             if (mem_type == OUT_SURFACE_MEM_DEV_INTERNAL) mem_type = OUT_SURFACE_MEM_DEV_COPIED;    // mem_type internal is not supported in this mode
             if (backend == 1) {
                 viddec = new FFMpegVideoDecoder(device_id, mem_type, rocdec_codec_id, b_force_zero_latency, p_crop_rect, b_extract_sei_messages, disp_delay);
             } else
                 viddec = new FFMpegVideoDecoder(device_id, mem_type, rocdec_codec_id, b_force_zero_latency, p_crop_rect, b_extract_sei_messages, disp_delay, true);
+        #else
+            std::cout << "Error: RocDecode HOST library is not found and backend is not supported!" << std::endl;
+            return 0;
+        #endif
         }
 
         std::string device_name, gcn_arch_name;
@@ -251,14 +258,14 @@ int main(int argc, char **argv) {
         std::right << std::hex << pci_domain_id << "." << pci_device_id << std::dec << std::endl;
         std::cout << "info: decoding started, please wait!" << std::endl;
 
-        int n_video_bytes = 0, n_frame_returned = 0, n_frame = 0;
+        int n_video_bytes = 0, n_frame_returned = 0;
+        uint32_t n_frame = 0;
         int n_pic_decoded = 0, decoded_pics = 0;
         std::vector<uint8_t> bitstream(5 * 1024 * 1024);
         int pkg_flags = 0;
         uint8_t *pframe = nullptr;
         int64_t pts = 0;
         OutputSurfaceInfo *surf_info;
-        uint32_t width, height;
         double total_dec_time = 0;
         bool first_frame = true;
         MD5Generator *md5_generator = nullptr;
@@ -293,7 +300,7 @@ int main(int argc, char **argv) {
                     exit(1);
                 }
                 in_file.seekg(0, std::ios::end);
-                n_video_bytes = in_file.tellg();
+                n_video_bytes = static_cast<int>(in_file.tellg());
                 if (n_video_bytes > bitstream.size()) {
                     bitstream.resize(n_video_bytes);
                 }
@@ -341,6 +348,10 @@ int main(int argc, char **argv) {
 
         std::cout << "info: Total pictures decoded: " << n_pic_decoded << std::endl;
         std::cout << "info: Total frames output/displayed: " << n_frame << std::endl;
+        if (n_frame == 0) {
+            std::cerr << "Error: No frames were decoded!" << std::endl;
+            return 1;
+        }
         if (!dump_output_frames) {
             std::cout << "info: avg decoding time per picture: " << total_dec_time / n_pic_decoded << " ms" <<std::endl;
             std::cout << "info: avg decode FPS: " << (n_pic_decoded / total_dec_time) * 1000 << std::endl;
@@ -382,6 +393,7 @@ int main(int argc, char **argv) {
                     std::cout << "MD5 digest matches the reference MD5 digest: ";
                 } else {
                     std::cout << "MD5 digest does not match the reference MD5 digest: ";
+                    b_md5_check_failed = true;
                 }
                 std::cout << ref_md5_string.c_str() << std::endl;
                 ref_md5_file.close();
@@ -397,5 +409,5 @@ int main(int argc, char **argv) {
         exit(1);
     }
 
-    return 0;
+    return b_md5_check_failed ? 1 : 0;
 }

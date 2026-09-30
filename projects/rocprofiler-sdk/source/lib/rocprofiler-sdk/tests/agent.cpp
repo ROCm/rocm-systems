@@ -21,22 +21,31 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/agent.hpp"
+#include "lib/common/defines.hpp"
 #include "lib/common/environment.hpp"
+#include "lib/common/filesystem.hpp"
+#include "lib/common/utility.hpp"
+#include "lib/rocprofiler-sdk/platform/agent.hpp"
+#include "lib/rocprofiler-sdk/platform/gnulinux/agent.hpp"
+#include "lib/rocprofiler-sdk/platform/wsl/agent.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tests/details/agent.hpp"
 
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
+#include <rocprofiler-sdk/cxx/enum_string.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
 #include <rocprofiler-sdk/cxx/utility.hpp>
 
-#include <fmt/core.h>
+#include <fmt/format.h>
 #include <gtest/gtest.h>
 #include <hsa/hsa.h>
 #include <hsa/hsa_api_trace.h>
 
 #include <pthread.h>
+#include <unistd.h>
+#include <array>
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
@@ -44,6 +53,8 @@
 #include <sstream>
 #include <type_traits>
 #include <typeinfo>
+
+namespace sdk = ::rocprofiler::sdk;
 
 TEST(rocprofiler_lib, agent_abi)
 {
@@ -195,7 +206,29 @@ TEST(rocprofiler_lib, agent)
 
     auto& hsa_agents_v = _rocm_info.agents;
 
-    EXPECT_GE(agents.size(), hsa_agents_v.size());
+    // rocprofiler and the HSA runtime enumerate the topology independently. On
+    // bare metal both read the same KFD tree, so rocprofiler's list is a superset
+    // of HSA's. On WSL rocprofiler drops every GPU the DXG topology thunk cannot
+    // fully describe while HSA keeps reporting it, so there the list may
+    // legitimately be a strict subset.
+    //
+    // select_platform() in agent.cpp has internal linkage, so its precedence has
+    // to be restated here: an explicit ROCPROFILER_FORCE_PLATFORM decides, a
+    // value it does not recognize is ignored in favour of autodetect, and
+    // autodetect prefers gnulinux over wsl.
+    const bool wsl_topology = []() {
+        const auto forced =
+            ::rocprofiler::common::get_env("ROCPROFILER_FORCE_PLATFORM", std::string{});
+        if(forced == "wsl") return true;
+        if(forced == "gnulinux") return false;
+        return !::rocprofiler::platform::gnulinux::is_available() &&
+               ::rocprofiler::platform::wsl::is_available();
+    }();
+
+    if(!wsl_topology)
+    {
+        EXPECT_GE(agents.size(), hsa_agents_v.size());
+    }
 
     uint64_t skipped = 0;
     for(const auto* agent : agents)
@@ -207,7 +240,7 @@ TEST(rocprofiler_lib, agent)
                                agent->model_name,
                                agent->gfx_target_version,
                                agent->node_id,
-                               agent->type == ROCPROFILER_AGENT_TYPE_CPU ? "CPU" : "GPU");
+                               sdk::get_enum_label(agent->type));
 
         rocprofiler::test::agent_info_t* hsa_agent = nullptr;
         {
@@ -288,11 +321,166 @@ TEST(rocprofiler_lib, agent)
         }
     }
 
-    EXPECT_EQ(skipped, (agents.size() - hsa_agents_v.size()));
+    // Every rocprofiler agent either paired with a distinct HSA agent or was
+    // counted in 'skipped'. Phrased as a subtraction from agents.size() (never
+    // less than 'skipped') rather than 'skipped == agents.size() -
+    // hsa_agents_v.size()' so it cannot underflow when rocprofiler published
+    // fewer agents than HSA reports.
+    if(wsl_topology)
+    {
+        EXPECT_LE(agents.size() - skipped, hsa_agents_v.size());
+    }
+    else
+    {
+        EXPECT_EQ(agents.size() - skipped, hsa_agents_v.size());
+    }
 
     // clean up memory leak
     for(auto& itr : _rocm_info.isas)
         delete[] itr.name_str;
+}
+
+namespace
+{
+// Expected agent values when using local topology data/topology/nodes (7 nodes).
+// Used to verify that rocprofiler_query_available_agents returns agents matching the topology.
+struct LocalTopologyExpectedAgent
+{
+    rocprofiler_agent_type_t type;
+    uint32_t                 cpu_cores_count;
+    uint32_t                 simd_count;
+    uint32_t                 gfx_target_version;
+    uint32_t                 max_waves_per_simd;
+    uint32_t                 cu_per_simd_array;
+    uint32_t                 cwsr_size;
+    uint32_t                 ctl_stack_size;
+    // uint32_t                 mem_banks_count;
+    // uint32_t                 io_links_count;
+    // uint32_t                 wave_front_size;
+    // uint32_t                 array_count;
+    // uint32_t                 simd_arrays_per_engine;
+    // uint32_t                 simd_per_cu;
+    // uint32_t                 cu_count;
+    // uint32_t                 num_shader_banks;
+    // uint32_t                 num_sdma_engines;
+};
+
+// Specifying the expected number of agents/nodes when using local topology
+const int ExpectedAgentsCount{7};
+
+const std::array<LocalTopologyExpectedAgent, ExpectedAgentsCount> kLocalTopologyExpectedAgents = {{
+    // Node 0: CPU (from data/topology/nodes/0/properties)
+    {ROCPROFILER_AGENT_TYPE_CPU, 24, 0, 0, 0, 0, 0, 0},
+    // Node 1: GPU gfx906 (simd_count/simd_per_cu=60, array_count/simd_arrays_per_engine=4)
+    {ROCPROFILER_AGENT_TYPE_GPU, 0, 240, 90006, 10, 16, 0, 0},
+    // Node 2: GPU gfx1102
+    {ROCPROFILER_AGENT_TYPE_GPU, 0, 56, 110002, 16, 8, 0, 0},
+    // Node 3: GPU gfx1032
+    {ROCPROFILER_AGENT_TYPE_GPU, 0, 64, 100302, 16, 8, 0, 0},
+    // Node 4: GPU gfx942 (num_shader_banks = array_count/simd_arrays_per_engine = 32/1)
+    {ROCPROFILER_AGENT_TYPE_GPU, 0, 1216, 90402, 8, 10, 23203840, 12288},
+    // Node 5: GPU gfx950
+    {ROCPROFILER_AGENT_TYPE_GPU, 0, 1024, 90500, 8, 9, 22687744, 12288},
+    // Node 6: GPU gfx1201 (num_shader_banks = 8/2 = 4)
+    {ROCPROFILER_AGENT_TYPE_GPU, 0, 128, 120001, 16, 8, 30699520, 28672},
+}};
+
+void
+expect_agent_matches_local_topology(const rocprofiler_agent_t*        actual,
+                                    const LocalTopologyExpectedAgent& expected,
+                                    size_t                            node_index)
+{
+    ASSERT_NE(actual, nullptr);
+    auto msg = [&](const char* field) {
+        return fmt::format("node_index={} field={}", node_index, field);
+    };
+    EXPECT_EQ(actual->type, expected.type) << msg("type");
+    EXPECT_EQ(actual->cpu_cores_count, expected.cpu_cores_count) << msg("cpu_cores_count");
+    EXPECT_EQ(actual->simd_count, expected.simd_count) << msg("simd_count");
+    EXPECT_EQ(actual->gfx_target_version, expected.gfx_target_version) << msg("gfx_target_version");
+    EXPECT_EQ(actual->max_waves_per_simd, expected.max_waves_per_simd) << msg("max_waves_per_simd");
+    EXPECT_EQ(actual->cu_per_simd_array, expected.cu_per_simd_array) << msg("cu_per_simd_array");
+    const auto* internal = rocprofiler::agent::get_agent_info(actual->id);
+    ASSERT_NE(internal, nullptr);
+    EXPECT_EQ(internal->cwsr_size, expected.cwsr_size) << msg("cwsr_size");
+    EXPECT_EQ(internal->ctl_stack_size, expected.ctl_stack_size) << msg("ctl_stack_size");
+    // EXPECT_EQ(actual->mem_banks_count, expected.mem_banks_count) << msg("mem_banks_count");
+    // EXPECT_EQ(actual->io_links_count, expected.io_links_count) << msg("io_links_count");
+    // EXPECT_EQ(actual->wave_front_size, expected.wave_front_size) << msg("wave_front_size");
+    // EXPECT_EQ(actual->array_count, expected.array_count) << msg("array_count");
+    // EXPECT_EQ(actual->simd_arrays_per_engine, expected.simd_arrays_per_engine)
+    //     << msg("simd_arrays_per_engine");
+    // EXPECT_EQ(actual->simd_per_cu, expected.simd_per_cu) << msg("simd_per_cu");
+    // EXPECT_EQ(actual->cu_count, expected.cu_count) << msg("cu_count");
+    // EXPECT_EQ(actual->num_shader_banks, expected.num_shader_banks) << msg("num_shader_banks");
+    // EXPECT_EQ(actual->num_sdma_engines, expected.num_sdma_engines) << msg("num_sdma_engines");
+}
+}  // namespace
+
+TEST(rocprofiler_lib, agent_local_topology)
+{
+    namespace fs = rocprofiler::common::filesystem;
+
+    rocprofiler::registration::init_logging();
+
+    auto cmdline = rocprofiler::common::read_command_line(getpid());
+    ASSERT_TRUE(!cmdline.empty());
+    auto exe = fs::path{cmdline.at(0)};
+    ASSERT_TRUE(fs::exists(exe));
+    ASSERT_TRUE(fs::is_regular_file(exe));
+    auto exec_path = fs::canonical(exe).parent_path();
+    ASSERT_TRUE(fs::exists(exec_path));
+    ASSERT_TRUE(fs::is_directory(exec_path));
+    auto topology_path = exec_path / "data" / "topology" / "nodes";
+    ASSERT_TRUE(fs::exists(topology_path));
+    ASSERT_TRUE(fs::is_directory(topology_path));
+
+    ROCP_WARNING << "Using local topology path: " << topology_path.string();
+
+    for(std::string_view itr : {
+            "ROCPROFILER_KFD_TOPOLOGY",
+            "AMD_KFD_TOPOLOGY",
+        })
+    {
+        rocprofiler::common::set_env(itr, topology_path.string(), 1);
+    }
+
+    static_assert(std::is_same<rocprofiler_agent_t, rocprofiler_agent_v0_t>::value,
+                  "update test to support new agent struct version");
+
+    auto                                    agents     = std::vector<const rocprofiler_agent_t*>{};
+    rocprofiler_query_available_agents_cb_t iterate_cb = [](rocprofiler_agent_version_t agents_ver,
+                                                            const void**                agents_arr,
+                                                            size_t                      num_agents,
+                                                            void*                       user_data) {
+        EXPECT_EQ(agents_ver, ROCPROFILER_AGENT_INFO_VERSION_0);
+        if(agents_ver != ROCPROFILER_AGENT_INFO_VERSION_0) return ROCPROFILER_STATUS_ERROR;
+
+        auto* agents_v = static_cast<std::vector<const rocprofiler_agent_t*>*>(user_data);
+        for(size_t i = 0; i < num_agents; ++i)
+        {
+            const auto* agent = static_cast<const rocprofiler_agent_t*>(agents_arr[i]);
+            agents_v->emplace_back(agent);
+        }
+        return ROCPROFILER_STATUS_SUCCESS;
+    };
+
+    ROCP_INFO << "# querying available agents...";
+    auto status =
+        rocprofiler_query_available_agents(ROCPROFILER_AGENT_INFO_VERSION_0,
+                                           iterate_cb,
+                                           sizeof(rocprofiler_agent_t),
+                                           const_cast<void*>(static_cast<const void*>(&agents)));
+
+    EXPECT_EQ(status, ROCPROFILER_STATUS_SUCCESS);
+
+    EXPECT_EQ(agents.size(), ExpectedAgentsCount)
+        << "Expected " << ExpectedAgentsCount << " agents when using local topology!";
+
+    for(size_t i = 0; i < ExpectedAgentsCount; ++i)
+    {
+        expect_agent_matches_local_topology(agents.at(i), kLocalTopologyExpectedAgents.at(i), i);
+    }
 }
 
 namespace
@@ -480,15 +668,18 @@ TEST(rocprofiler_lib, agent_visibility_multigpu)
 
     ASSERT_EQ(in_half.size(), num_gpu_agents);
 
-    auto strngpus = std::to_string(num_gpu_agents);
-    all_ordinals  = all_ordinals.substr(1);
-    all_uuids     = all_uuids.substr(1);
-    all_mixed     = all_mixed.substr(1);
-
+    // Must precede the substr() calls below: the accumulators are only non-empty
+    // once the loop above has appended at least one ",<device>" pair, so with no
+    // gpu agents at all trimming the leading separator would throw.
     if(num_gpu_agents < 2)
     {
         GTEST_SKIP() << "requires multiple gpu agents";
     }
+
+    auto strngpus = std::to_string(num_gpu_agents);
+    all_ordinals  = all_ordinals.substr(1);
+    all_uuids     = all_uuids.substr(1);
+    all_mixed     = all_mixed.substr(1);
 
     common::set_env("ROCR_VISIBLE_DEVICES", all_ordinals, 1);
     common::set_env("HIP_VISIBLE_DEVICES", noval, 1);

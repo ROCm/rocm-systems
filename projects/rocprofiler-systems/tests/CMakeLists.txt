@@ -1,89 +1,144 @@
 # Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier:  MIT
+# SPDX-License-Identifier: MIT
 
 #
 # rocprofiler-systems tests
 #
 include_guard(GLOBAL)
 
-if(ROCPROFSYS_USE_PYTESTS)
-    set(_capchk_dir ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests)
-    set(_capchk_exe ${_capchk_dir}/rocprof-sys-capchk)
-    file(MAKE_DIRECTORY ${_capchk_dir})
-    execute_process(
-        COMMAND
-            ${CMAKE_CXX_COMPILER} -O2 -g -std=c++17
-            ${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-capchk.cpp -o rocprof-sys-capchk
-        WORKING_DIRECTORY ${_capchk_dir}
-        OUTPUT_QUIET
-        ERROR_QUIET
-        RESULT_VARIABLE _capchk_result
-    )
-    if(NOT _capchk_result EQUAL 0)
-        message(
+include(${CMAKE_CURRENT_LIST_DIR}/pytest/CMakeLists.txt)
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-pytest.cmake)
+
+# ------------------------------------------------------------------------------#
+#
+# Perfetto trace_processor_shell
+#
+# To be used only by the build tree, not installed
+#
+# ------------------------------------------------------------------------------#
+
+rocprofiler_systems_add_option(
+    ROCPROFSYS_DOWNLOAD_TRACE_PROCESSOR_SHELL
+    "Download a pinned perfetto trace_processor_shell for the test suite"
+    ON
+    NO_FEATURE
+)
+rocprofiler_systems_add_cache_option(
+    ROCPROFSYS_TRACE_PROCESSOR_SHELL_URL
+    "URL of the prebuilt perfetto trace_processor_shell used by the test suite"
+    STRING
+    "https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v47.0/linux-amd64/trace_processor_shell"
+    NO_FEATURE
+)
+rocprofiler_systems_add_cache_option(
+    ROCPROFSYS_TRACE_PROCESSOR_SHELL_SHA256
+    "Expected SHA256 of ROCPROFSYS_TRACE_PROCESSOR_SHELL_URL"
+    STRING
+    "832425c3c7934904d1e0ec1721beb51423de7dbcf399a899973f2b6b464603fa"
+    NO_FEATURE
+)
+rocprofiler_systems_add_cache_option(
+    ROCPROFSYS_TRACE_PROCESSOR_SHELL
+    "Existing trace_processor_shell to stage instead of downloading one"
+    FILEPATH
+    ""
+    NO_FEATURE
+)
+
+set(_trace_processor_shell
+    "${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests/trace_processor_shell"
+)
+set(_trace_processor_shell_permissions
+    OWNER_READ
+    OWNER_WRITE
+    OWNER_EXECUTE
+    GROUP_READ
+    GROUP_EXECUTE
+    WORLD_READ
+    WORLD_EXECUTE
+)
+
+# the pinned binary is x86-64; other architectures need their own URL and checksum
+set(_download_trace_processor_shell ${ROCPROFSYS_DOWNLOAD_TRACE_PROCESSOR_SHELL})
+if(
+    "${ROCPROFSYS_TRACE_PROCESSOR_SHELL_URL}" MATCHES "linux-amd64"
+    AND NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$"
+)
+    set(_download_trace_processor_shell OFF)
+endif()
+
+file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests")
+
+if(ROCPROFSYS_TRACE_PROCESSOR_SHELL)
+    if(EXISTS "${ROCPROFSYS_TRACE_PROCESSOR_SHELL}")
+        file(
+            COPY_FILE "${ROCPROFSYS_TRACE_PROCESSOR_SHELL}"
+            "${_trace_processor_shell}"
+            ONLY_IF_DIFFERENT
+        )
+        file(
+            CHMOD
+            "${_trace_processor_shell}"
+            PERMISSIONS ${_trace_processor_shell_permissions}
+        )
+    else()
+        rocprofiler_systems_message(
             WARNING
-            "rocprof-sys-capchk build failed (result ${_capchk_result}); install of capability checker will be skipped."
+            "ROCPROFSYS_TRACE_PROCESSOR_SHELL does not exist: ${ROCPROFSYS_TRACE_PROCESSOR_SHELL}. Perfetto validation will download a trace_processor_shell on demand."
         )
     endif()
-    include(${CMAKE_CURRENT_LIST_DIR}/pytest/CMakeLists.txt)
-else()
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-testing.cmake)
+elseif(_download_trace_processor_shell)
+    # a previously staged binary is reused only when its contents still match
+    if(EXISTS "${_trace_processor_shell}")
+        file(SHA256 "${_trace_processor_shell}" _sha256)
+        if(NOT "${_sha256}" STREQUAL "${ROCPROFSYS_TRACE_PROCESSOR_SHELL_SHA256}")
+            file(REMOVE "${_trace_processor_shell}")
+        endif()
+    endif()
 
-    # test groups
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-unit-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-config-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-instrument-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-preset-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-pthread-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-rocm-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-user-api-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-mpi-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-ucx-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-shmem-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-kokkos-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-openmp-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-code-coverage-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-fork-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-time-window-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-attach-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-rccl-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-overflow-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-annotate-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-causal-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-python-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-decode-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-gpu-connect-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-nic-perf.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-roctx-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-rocm-hip-stream.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-binary-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-thread-limit-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-scratch-memory-tests.cmake)
+    if(NOT EXISTS "${_trace_processor_shell}")
+        rocprofiler_systems_message(
+            STATUS
+            "Downloading ${ROCPROFSYS_TRACE_PROCESSOR_SHELL_URL}"
+        )
+        file(
+            DOWNLOAD "${ROCPROFSYS_TRACE_PROCESSOR_SHELL_URL}"
+            "${_trace_processor_shell}.tmp"
+            STATUS _download_status
+            TLS_VERIFY ON
+            INACTIVITY_TIMEOUT 10
+            TIMEOUT 40
+        )
+        list(GET _download_status 0 _download_code)
+        list(GET _download_status 1 _download_message)
 
-    # -------------------------------------------------------------------------------------- #
-    #
-    # Global cleanup test for temporary files
-    # This runs once after ALL tests complete to clean up trace cache temporary files
-    # Uses FIXTURES_CLEANUP to ensure it runs after all tests requiring the fixture
-    #
-    # -------------------------------------------------------------------------------------- #
+        set(_download_error "")
+        if(NOT _download_code EQUAL 0)
+            set(_download_error "${_download_message}")
+        else()
+            file(SHA256 "${_trace_processor_shell}.tmp" _sha256)
+            if("${_sha256}" STREQUAL "${ROCPROFSYS_TRACE_PROCESSOR_SHELL_SHA256}")
+                file(RENAME "${_trace_processor_shell}.tmp" "${_trace_processor_shell}")
+                file(
+                    CHMOD
+                    "${_trace_processor_shell}"
+                    PERMISSIONS ${_trace_processor_shell_permissions}
+                )
+            else()
+                set(_download_error
+                    "expected SHA256 ${ROCPROFSYS_TRACE_PROCESSOR_SHELL_SHA256}, got ${_sha256}"
+                )
+            endif()
+        endif()
 
-    #delete temp files created by rocprofiler-sys tests in /tmp owned by the current user. Always return success.
-    add_test(
-        NAME rocprofsys-cleanup-tmp-files
-        COMMAND
-            sh -c
-            "find /tmp -maxdepth 1 -user $(whoami) \\( -name 'buffered_storage*.bin' -o -name 'metadata*.json' \\) -delete 2>/dev/null || true"
-        WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
-    )
-
-    set_tests_properties(
-        rocprofsys-cleanup-tmp-files
-        PROPERTIES
-            FIXTURES_CLEANUP rocprofsys-global-tmp-files
-            LABELS "cleanup;global"
-            TIMEOUT 30
-    )
+        if(_download_error)
+            file(REMOVE "${_trace_processor_shell}.tmp")
+            rocprofiler_systems_message(
+                WARNING
+                "Could not stage a trace_processor_shell from ${ROCPROFSYS_TRACE_PROCESSOR_SHELL_URL} (${_download_error}). Perfetto validation will download one on demand, which is slower and can fail on hosts without network access."
+            )
+        endif()
+    endif()
 endif()
 
 # ------------------------------------------------------------------------------#
@@ -93,17 +148,38 @@ endif()
 # ------------------------------------------------------------------------------#
 
 set(ROCPROFSYS_PYTHON_VALIDATION_FILES
+    ${CMAKE_CURRENT_LIST_DIR}/check_amd_smi_metrics.py
     ${CMAKE_CURRENT_LIST_DIR}/validate-causal-json.py
     ${CMAKE_CURRENT_LIST_DIR}/validate-perfetto-proto.py
     ${CMAKE_CURRENT_LIST_DIR}/validate-rocpd.py
     ${CMAKE_CURRENT_LIST_DIR}/validate-timemory-json.py
+    ${CMAKE_CURRENT_LIST_DIR}/validate-unified-memory.py
 )
 
 set(ROCPROFSYS_TEST_SCRIPTS
-    ${CMAKE_CURRENT_LIST_DIR}/run-rocprof-sys-pid.sh
     ${CMAKE_CURRENT_LIST_DIR}/get_default_nic.sh
     ${CMAKE_CURRENT_LIST_DIR}/generate_papi_nic_events.sh
+    ${CMAKE_CURRENT_LIST_DIR}/run_rocprofiler_systems.py
 )
+
+set(_capchk_dir ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests)
+add_executable(
+    rocprof-sys-capchk
+    EXCLUDE_FROM_ALL
+    ${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-capchk.cpp
+)
+set_target_properties(
+    rocprof-sys-capchk
+    PROPERTIES
+        CXX_STANDARD 17
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+        RUNTIME_OUTPUT_DIRECTORY "${_capchk_dir}"
+)
+
+# test_categories.yaml drives tier (quick/standard/comprehensive/full) label
+# injection at CTest-generate time (see conftest.py:_load_test_categories).
+set(ROCPROFSYS_TEST_CATEGORIES_YAML ${CMAKE_CURRENT_LIST_DIR}/test_categories.yaml)
 
 add_custom_target(
     copy-test-files
@@ -114,7 +190,12 @@ add_custom_target(
     COMMAND
         ${CMAKE_COMMAND} -E copy_if_different ${ROCPROFSYS_PYTHON_VALIDATION_FILES}
         ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests
-    # copy_directory for directories (copy_if_different only works for files)
+    COMMAND
+        ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_LIST_DIR}/README.md
+        ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests
+    COMMAND
+        ${CMAKE_COMMAND} -E copy_if_different ${ROCPROFSYS_TEST_CATEGORIES_YAML}
+        ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests
     COMMAND
         ${CMAKE_COMMAND} -E copy_directory
         ${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules
@@ -123,6 +204,8 @@ add_custom_target(
         ${CMAKE_COMMAND} -E copy_if_different ${ROCPROFSYS_TEST_SCRIPTS}
         ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests
 )
+add_dependencies(copy-test-files rocprof-sys-capchk)
+add_dependencies(generate-pytest-ctests copy-test-files)
 
 # ------------------------------------------------------------------------------#
 #
@@ -149,11 +232,16 @@ if(ROCPROFSYS_INSTALL_TESTING)
         COMPONENT rocprofiler-systems-tests
     )
     # Capability check binary
-    if(ROCPROFSYS_USE_PYTESTS AND EXISTS "${_capchk_exe}")
-        install(
-            PROGRAMS ${_capchk_exe}
+    install(
+        TARGETS rocprof-sys-capchk
+        RUNTIME
             DESTINATION share/rocprofiler-systems/tests
             COMPONENT rocprofiler-systems-tests
-        )
-    endif()
+    )
+    # Test categories policy
+    install(
+        FILES ${ROCPROFSYS_TEST_CATEGORIES_YAML}
+        DESTINATION share/rocprofiler-systems/tests
+        COMPONENT rocprofiler-systems-tests
+    )
 endif()

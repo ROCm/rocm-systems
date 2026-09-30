@@ -12,11 +12,30 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Optional, List
 
-
 # Compile regex patterns once at module level
-# TODO: Verify this pattern handles xnack (asan) kernels correctly
-# These have special syntax like gfx942:xnack+ or gfx90a:sramecc+:xnack-
-_GFX_ARCH_PATTERN = re.compile(r"gfx(\d+[a-z]*)")
+# Matches architecture IDs like gfx908, gfx90a, gfx942-xnack+, gfx90a-xnack-
+# Note: Tensile filenames use hyphens (gfx90a-xnack+), not colons (gfx90a:xnack+)
+_GFX_ARCH_PATTERN = re.compile(r"gfx\d+[a-z]*(?:-strict)?(?:-xnack[+-])?")
+
+# MIOpen-specific arch pattern. MIOpen filenames concatenate arch ID + CU count
+# without a separator (e.g., gfx90878 = gfx908 + 78 CUs, gfx942130 = gfx942 + 130).
+# Standard _GFX_ARCH_PATTERN would greedily consume too many digits, so we
+# enumerate known arch IDs explicitly. This list must be updated when new
+# architectures are added to ROCm. Ordered longest-first so alternation
+# matches correctly (e.g., gfx1151 before gfx1150 doesn't matter but
+# gfx90a before gfx900 ensures the letter variant is tried first).
+_MIOPEN_ARCH_PATTERN = re.compile(
+    r"gfx(?:"
+    r"90a|900|906|908|940|941|942|950"
+    r"|1010|1030|1100|1101|1102|1150|1151|1200|1201|1250(?:-strict)?"
+    r")"
+)
+
+# MIOpen CK per-arch shared library pattern.
+# Matches libMIOpenCK<name>_<arch>.so (Linux) and MIOpenCK<name>_<arch>.dll (Windows).
+_MIOPEN_CK_SO_PATTERN = re.compile(
+    r"^(?:lib)?MIOpenCK\w+_(" + _GFX_ARCH_PATTERN.pattern + r")\.(?:so|dll)"
+)
 
 
 class DatabaseHandler(ABC):
@@ -35,16 +54,31 @@ class DatabaseHandler(ABC):
     @abstractmethod
     def detect(self, path: Path, prefix_root: Path) -> Optional[str]:
         """
-        Detect if a file belongs to this database type and extract architecture.
+        Detect if a file belongs to this database type and extract bundle key.
 
         Args:
-            path: Path to the file
+            path: Path to the file (must be under prefix_root)
             prefix_root: Root of the prefix for relative path computation
 
         Returns:
-            Architecture string (e.g., 'gfx1100') if file matches, None otherwise
+            Bundle key (e.g., 'gfx1100', 'gfx11', 'gfx12_0') if file matches,
+            None otherwise. Bundle keys correspond to entries in the
+            rocm-bootstrap hierarchy.
+
+        Raises:
+            ValueError: If path is not under prefix_root (caller bug).
         """
         pass
+
+    def _relative_path(self, path: Path, prefix_root: Path) -> str:
+        """Compute forward-slash relative path, raising on bad input."""
+        try:
+            return path.relative_to(prefix_root).as_posix()
+        except ValueError:
+            raise ValueError(
+                f"{self.name()} handler: path {path} is not under "
+                f"prefix_root {prefix_root}"
+            ) from None
 
     def should_move(self, path: Path) -> bool:
         """
@@ -60,123 +94,148 @@ class DatabaseHandler(ABC):
         return True
 
 
-class RocBLASHandler(DatabaseHandler):
+# Regex matching a library/<arch>/ path component (for per-arch subdirectory layout).
+_LIBRARY_ARCH_DIR_PATTERN = re.compile(
+    r"/library/(" + _GFX_ARCH_PATTERN.pattern + r")/"
+)
+
+
+class _TensileHandler(DatabaseHandler):
+    """Base class for Tensile-based library handlers (rocBLAS, hipBLASLt, hipSPARSELt).
+
+    Supports two directory layouts:
+
+    Flat (current):
+        lib/<lib>/library/TensileLibrary_gfx942.co
+        lib/<lib>/library/TensileLibrary_..._fallback.dat  (no arch → generic)
+
+    Per-arch subdirectory (rocm-libraries#5976):
+        lib/<lib>/library/gfx942/TensileLibrary_....co
+        lib/<lib>/library/gfx942/TensileLibrary_..._fallback.dat
+        lib/<lib>/library/gfx942/TensileManifest.txt
+
+    In the flat layout, architecture is extracted from the filename and only
+    known Tensile extensions are accepted. In the per-arch layout, the
+    architecture comes from the directory name and any file underneath is
+    accepted (manifests, fallback .dat files, etc.).
+    """
+
+    # Subclasses set this to the directory marker (e.g. "rocblas/library")
+    _library_dir: str
+
+    def detect(self, path: Path, prefix_root: Path) -> Optional[str]:
+        path_str = self._relative_path(path, prefix_root)
+
+        if self._library_dir not in path_str:
+            return None
+
+        # Try filename-based detection (flat layout, known extensions)
+        if path.suffix in (".co", ".hsaco", ".dat"):
+            match = _GFX_ARCH_PATTERN.search(path.name)
+            if match:
+                return match.group(0)
+
+        # Try directory-based detection (per-arch subdirectory layout):
+        # .../library/<arch>/anything
+        dir_match = _LIBRARY_ARCH_DIR_PATTERN.search(path_str)
+        if dir_match:
+            return dir_match.group(1)
+
+        return None
+
+
+class RocBLASHandler(_TensileHandler):
     """Handler for rocBLAS Tensile library files."""
+
+    _library_dir = "rocblas/library"
 
     def name(self) -> str:
         return "rocblas"
 
-    def detect(self, path: Path, prefix_root: Path) -> Optional[str]:
-        """
-        Detect rocBLAS kernel database files.
 
-        Pattern: lib/rocblas/library/*_gfx*.{co,hsaco,dat}
-        """
-        try:
-            rel_path = path.relative_to(prefix_root)
-            # Use as_posix() for consistent forward-slash paths on all platforms
-            path_str = rel_path.as_posix()
-
-            # Check if it's in rocblas/library directory
-            if "rocblas/library" not in path_str:
-                return None
-
-            # Check file extension
-            if path.suffix not in [".co", ".hsaco", ".dat"]:
-                return None
-
-            # Extract architecture from filename
-            # Look for patterns like _gfx1100, _gfx1101, gfx1102, etc.
-            match = _GFX_ARCH_PATTERN.search(path.name)
-            if match:
-                return f"gfx{match.group(1)}"
-
-            # Some .dat files don't have architecture suffix but are generic
-            # We don't move those
-            return None
-
-        except (ValueError, AttributeError):
-            return None
-
-
-class HipBLASLtHandler(DatabaseHandler):
+class HipBLASLtHandler(_TensileHandler):
     """Handler for hipBLASLt kernel files."""
+
+    _library_dir = "hipblaslt/library"
 
     def name(self) -> str:
         return "hipblaslt"
 
-    def detect(self, path: Path, prefix_root: Path) -> Optional[str]:
-        """
-        Detect hipBLASLt kernel database files.
 
-        Pattern: lib/hipblaslt/library/*_gfx*.{co,hsaco,dat}
-        """
-        try:
-            rel_path = path.relative_to(prefix_root)
-            # Use as_posix() for consistent forward-slash paths on all platforms
-            path_str = rel_path.as_posix()
+class HipSparseLtHandler(_TensileHandler):
+    """Handler for hipSPARSELt Tensile kernel files."""
 
-            # Check if it's in hipblaslt/library directory
-            if "hipblaslt/library" not in path_str:
-                return None
+    _library_dir = "hipsparselt/library"
 
-            # Check file extension
-            if path.suffix not in [".co", ".hsaco", ".dat"]:
-                return None
-
-            # Extract architecture from filename
-            match = _GFX_ARCH_PATTERN.search(path.name)
-            if match:
-                return f"gfx{match.group(1)}"
-
-            return None
-
-        except (ValueError, AttributeError):
-            return None
+    def name(self) -> str:
+        return "hipsparselt"
 
 
 class AotritonHandler(DatabaseHandler):
-    """Handler for AOTriton kernel directories."""
+    """Handler for AOTriton kernel image directories.
+
+    AOTriton ships precompiled kernel images in per-architecture directories:
+        lib/aotriton.images/amd-gfx942/flash/attn_fwd/kernel.aks2
+        lib/aotriton.images/amd-gfx11xx/flash/bwd_kernel_dk_dv/kernel.aks2
+        lib/aotriton.images/amd-gfx110x/flash/bwd_kernel_dk_dv/kernel.aks2
+
+    Architecture directories use family/sub-family names (gfx11xx, gfx110x,
+    gfx115x, gfx120x) for shared ISA assets, and specific chip names
+    (gfx942, gfx90a, gfx950) for others.
+
+    Returns bundle keys from the rocm-bootstrap hierarchy:
+        gfx11xx → gfx11 (family), gfx110x → gfx110x (sub-family),
+        gfx120x → gfx12_0 (sub-family), gfx942 → gfx942 (target), etc.
+    """
+
+    # Mapping from aotriton directory suffixes to rocm-bootstrap bundle keys.
+    # Entries are only needed for patterns that differ from the raw directory
+    # name. Already-valid keys (gfx110x, gfx942, gfx90a, etc.) pass through
+    # unchanged.
+    _BUNDLE_MAP = {
+        "gfx11xx": "gfx11",
+        "gfx120x": "gfx12_0",
+    }
 
     def name(self) -> str:
         return "aotriton"
 
     def detect(self, path: Path, prefix_root: Path) -> Optional[str]:
         """
-        Detect AOTriton kernel files.
+        Detect AOTriton kernel image files.
 
-        Pattern: */aotriton/kernels/gfx*/
+        Pattern: */aotriton.images/amd-gfx*/...
+
+        Returns:
+            Bundle key (e.g., 'gfx11', 'gfx110x', 'gfx12_0', 'gfx942') or None.
         """
-        try:
-            rel_path = path.relative_to(prefix_root)
-            path_parts = rel_path.parts
+        path_str = self._relative_path(path, prefix_root)
+        path_parts = Path(path_str).parts
 
-            # Look for aotriton/kernels in the path
-            for i, part in enumerate(path_parts[:-1]):
-                if (
-                    part == "aotriton"
-                    and i + 1 < len(path_parts)
-                    and path_parts[i + 1] == "kernels"
-                ):
-                    # Check if next part is an architecture
-                    if i + 2 < len(path_parts):
-                        arch_part = path_parts[i + 2]
-                        if arch_part.startswith("gfx"):
-                            return arch_part
-                    break
+        for i, part in enumerate(path_parts[:-1]):
+            if part == "aotriton.images" and i + 1 < len(path_parts):
+                arch_dir = path_parts[i + 1]
+                if arch_dir.startswith("amd-gfx"):
+                    raw_name = arch_dir[4:]  # strip "amd-" prefix
+                    return self._BUNDLE_MAP.get(raw_name, raw_name)
+                break
 
-            return None
-
-        except (ValueError, AttributeError, IndexError):
-            return None
+        return None
 
 
 class MIOpenHandler(DatabaseHandler):
-    """Handler for MIOpen performance database/model files.
+    """Handler for MIOpen performance database and model files.
 
-    MIOpen installs tuning model files to share/miopen/db/ with filenames
-    prefixed by the target architecture (e.g., gfx942.tn.model,
-    gfx908_ConvAsm1x1U_decoder.ktn.model).
+    MIOpen installs files to share/miopen/db/ with filenames prefixed by
+    the target architecture:
+        gfx942130.db.txt          (gfx942 + 130 CUs)
+        gfx90878.HIP.fdb.txt      (gfx908 + 78 CUs)
+        gfx1030_36.db.txt         (gfx1030 + 36 CUs, underscore separator)
+        gfx908_ConvAsm1x1U_decoder.ktn.model
+        gfx908.tn.model
+
+    The arch + CU-count concatenation (no separator) requires a specific
+    regex that knows ROCm arch ID lengths — see _MIOPEN_ARCH_PATTERN.
     """
 
     def name(self) -> str:
@@ -184,36 +243,152 @@ class MIOpenHandler(DatabaseHandler):
 
     def detect(self, path: Path, prefix_root: Path) -> Optional[str]:
         """
-        Detect MIOpen tuning database files.
+        Detect MIOpen tuning database files and CK per-arch shared libraries.
 
-        Pattern: share/miopen/db/gfx*.{tn.model,ktn.model}
+        Patterns:
+        - share/miopen/db/gfx*.{db.txt,fdb.txt,model,kdb}
+        - CK per-arch shared libraries matching _MIOPEN_CK_SO_PATTERN
         """
-        try:
-            rel_path = path.relative_to(prefix_root)
-            path_str = rel_path.as_posix()
+        path_str = self._relative_path(path, prefix_root)
+        filename = Path(path_str).name
 
-            if "miopen/db" not in path_str:
-                return None
+        # MIOpen CK per-arch shared libraries (dlopen'd at runtime).
+        ck_match = _MIOPEN_CK_SO_PATTERN.match(filename)
+        if ck_match:
+            return ck_match.group(1)
 
-            if not path.name.endswith(".model"):
-                return None
-
-            match = _GFX_ARCH_PATTERN.search(path.name)
-            if match:
-                return f"gfx{match.group(1)}"
-
+        if "miopen/db" not in path_str:
             return None
 
-        except (ValueError, AttributeError):
+        if not path.is_file():
             return None
+
+        # Match .kdb, .model, .db.txt, .fdb.txt, .OpenCL.fdb.txt, .HIP.fdb.txt
+        name = path.name
+        if not (
+            name.endswith(".kdb")
+            or name.endswith(".model")
+            or name.endswith(".db.txt")
+            or name.endswith(".fdb.txt")
+        ):
+            return None
+
+        match = _MIOPEN_ARCH_PATTERN.search(name)
+        if match:
+            return match.group(0)
+
+        return None
+
+
+class HipKernelProviderArchContentHandler(DatabaseHandler):
+    """Handler for hipKernelProvider per-architecture kernel content.
+
+    Content lives under a container in the plugin engines dir: ``arch_content``
+    for runtime, ``test_arch_content`` for the test component. The container is
+    the anchor -- the bundle key is the first arch directory at any depth beneath
+    it, and the producer segment in between is a convention this handler does not
+    inspect, so a new producer needs no handler change. Example paths:
+        .../engines/arch_content/hip-kernel-provider/<arch>/...
+        .../engines/arch_content/rocke/<arch>/...
+        .../engines/test_arch_content/hip-kernel-provider/unit/shared/<arch>/...
+        .../engines/arch_content/<arch>/...
+
+    Both containers split per arch. Content that is not detected here stays generic,
+    where the last per-arch build to upload overwrites same-named content from
+    the others.
+    """
+
+    #: Containers under ``engines/`` whose arch subdirectories are split per arch.
+    _ARCH_CONTAINERS = ("arch_content", "test_arch_content")
+
+    def name(self) -> str:
+        return "hipkernelprovider"
+
+    def detect(self, path: Path, prefix_root: Path) -> Optional[str]:
+        """
+        Detect per-arch content by its arch directory.
+
+        Pattern: */engines/<container>/[.../]<arch>/... for each container in
+        ``_ARCH_CONTAINERS``.  In an installed tree that dir is hipDNN's plugin
+        engine dir, ``lib/hipdnn_plugins/engines/``, but only the immediate
+        ``engines`` parent is required -- ``hipdnn_plugins`` is not matched, so
+        any engines dir qualifies. TheRock's ``**/engines/arch_content/**`` and
+        ``**/engines/test_arch_content/**`` includes are anchored the same way.
+
+        Returns:
+            Bundle key (the gfx arch directory, e.g. 'gfx942') or None.
+        """
+        parts = Path(self._relative_path(path, prefix_root)).parts
+        root = next(
+            (
+                i
+                for i in range(1, len(parts))
+                if parts[i] in self._ARCH_CONTAINERS and parts[i - 1] == "engines"
+            ),
+            None,
+        )
+        if root is None:
+            return None
+        # First arch dir under the container with a file beneath it is the key.
+        for i in range(root + 1, len(parts) - 1):
+            if _GFX_ARCH_PATTERN.fullmatch(parts[i]):
+                return parts[i]
+        return None
+
+
+class HotswapCacheHandler(DatabaseHandler):
+    """Handler for packaged RocJitsu ahead-of-time translations.
+
+    RocJitsu owns the directory-domain spelling. Keep the mapping explicit so
+    a new translator profile cannot accidentally be assigned to an architecture
+    merely because its directory happens to contain a gfx-looking substring.
+    """
+
+    _DOMAIN_TO_BUNDLE = {
+        "gfx1250-b0-a0": "gfx1250",
+    }
+    _ENTRY_PATTERN = re.compile(r"^[0-9a-f]{64}\.(?:man|obj)$")
+
+    def name(self) -> str:
+        return "hotswap_cache"
+
+    def detect(self, path: Path, prefix_root: Path) -> Optional[str]:
+        parts = Path(self._relative_path(path, prefix_root)).parts
+        if len(parts) != 6 or parts[:3] != (
+            "share",
+            "rocjitsu",
+            "translations",
+        ):
+            return None
+
+        domain, schema, filename = parts[3:]
+        if schema != "v1" or not self._ENTRY_PATTERN.fullmatch(filename):
+            return None
+        return self._DOMAIN_TO_BUNDLE.get(domain)
 
 
 # Registry of available handlers
 AVAILABLE_HANDLERS = {
     "rocblas": RocBLASHandler,
     "hipblaslt": HipBLASLtHandler,
+    "hipsparselt": HipSparseLtHandler,
     "aotriton": AotritonHandler,
     "miopen": MIOpenHandler,
+    "hipkernelprovider": HipKernelProviderArchContentHandler,
+    "hotswap_cache": HotswapCacheHandler,
+}
+
+
+# Wheel-type presets: each maps to the list of database handlers relevant
+# for that kind of wheel.
+WHEEL_TYPE_PRESETS = {
+    "torch-fat": [
+        "rocblas",
+        "hipblaslt",
+        "hipsparselt",
+        "aotriton",
+        "miopen",
+    ],
 }
 
 

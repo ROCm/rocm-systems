@@ -1,6 +1,8 @@
 find_package(MPI COMPONENTS CXX)
 
-set(CMAKE_HIP_COMPILER "amdclang++" CACHE STRING "desired c++ compiler" FORCE)
+if(NOT CMAKE_HIP_COMPILER)
+    set(CMAKE_HIP_COMPILER "amdclang++" CACHE STRING "desired c++ compiler")
+endif()
 if(CMAKE_HIP_COMPILER_ID STREQUAL "Clang" OR CMAKE_HIP_COMPILER_ID STREQUAL "ROCMClang")
     message(STATUS "Using ${CMAKE_HIP_COMPILER} to build for amdgpu backend")
 else()
@@ -53,6 +55,8 @@ set_target_properties(
     PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/tests
 )
 
+add_subdirectory(../sample/conjugate_gradient conjugate_gradient)
+
 set(DYNAMIC_SHARED_SOURCES ../sample/dynamic_shared/dynamic_shared.hip)
 set_source_files_properties(${DYNAMIC_SHARED_SOURCES} PROPERTIES LANGUAGE HIP)
 add_executable(hip_dynamic_shared ${DYNAMIC_SHARED_SOURCES})
@@ -97,4 +101,31 @@ add_executable(memcopy ${MEMCOPY_SOURCES})
 set_target_properties(
     memcopy
     PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/tests
+)
+
+add_custom_target(
+    simple_net
+    ALL
+    COMMAND
+        ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/sample/simple_net.py
+        ${CMAKE_SOURCE_DIR}/tests/simple_net.py
+    COMMENT "Copying simple_net.py to tests directory"
+)
+
+add_custom_target(
+    triton_ffn
+    ALL
+    COMMAND
+        ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/sample/triton_ffn.py
+        ${CMAKE_SOURCE_DIR}/tests/triton_ffn.py
+    COMMENT "Copying triton_ffn.py to tests directory"
+)
+
+add_custom_target(
+    torch_compile_triton
+    ALL
+    COMMAND
+        ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/sample/torch_compile_triton.py
+        ${CMAKE_SOURCE_DIR}/tests/torch_compile_triton.py
+    COMMENT "Copying torch_compile_triton.py to tests directory"
 )

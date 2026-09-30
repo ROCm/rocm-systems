@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "callchain.hpp"
 #include "binary/analysis.hpp"
@@ -29,7 +10,6 @@
 #include "core/state.hpp"
 #include "library/components/ensure_storage.hpp"
 #include "library/perf.hpp"
-#include "library/ptl.hpp"
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"
 #include "library/thread_info.hpp"
@@ -52,9 +32,7 @@
 #include <timemory/mpl/type_traits.hpp>
 #include <timemory/operations.hpp>
 #include <timemory/storage.hpp>
-#include <timemory/units.hpp>
 #include <timemory/unwind/entry.hpp>
-#include <timemory/utility/demangle.hpp>
 #include <timemory/utility/types.hpp>
 #include <timemory/variadic.hpp>
 
@@ -73,9 +51,7 @@
 #include <pthread.h>
 #include <signal.h>
 
-namespace rocprofsys
-{
-namespace component
+namespace rocprofsys::component
 {
 bool
 callchain::record::operator<(const record& rhs) const
@@ -87,7 +63,10 @@ std::vector<callchain::ts_entry_vec_t>
 callchain::get() const
 {
     std::vector<ts_entry_vec_t> _v = {};
-    if(size() == 0) return _v;
+    if(empty())
+    {
+        return _v;
+    }
 
     _v.reserve(size());
     auto _data = m_data;
@@ -98,7 +77,10 @@ callchain::get() const
         for(auto iitr : itr.data)
         {
             auto _entry = binary::lookup_ipaddr_entry<true>(iitr);
-            if(_entry) _v2.second.emplace_back(*_entry);
+            if(_entry)
+            {
+                _v2.second.emplace_back(*_entry);
+            }
         }
 
         if(!_v2.second.empty())
@@ -116,7 +98,9 @@ callchain::get() const
     {
         while(!itr.second.empty() &&
               _known_excludes.find(itr.second.back().name) != _known_excludes.end())
+        {
             itr.second.pop_back();
+        }
     }
 
     std::sort(_v.begin(), _v.end(),
@@ -145,7 +129,10 @@ callchain::filter_and_patch(const std::vector<ts_entry_vec_t>& _data)
     for(const auto& itr : _data)
     {
         auto _v = backtrace::filter_and_patch(itr.second);
-        if(!_v.empty()) _ret.emplace_back(ts_entry_vec_t{ itr.first, std::move(_v) });
+        if(!_v.empty())
+        {
+            _ret.emplace_back(ts_entry_vec_t{ itr.first, std::move(_v) });
+        }
     }
 
     return _ret;
@@ -174,16 +161,22 @@ callchain::size() const
 void
 callchain::sample(int signo)
 {
-    if(signo != get_sampling_overflow_signal()) return;
+    if(signo != get_sampling_overflow_signal())
+    {
+        return;
+    }
 
     // on RedHat, the unw_step within get_unw_stack involves a mutex lock
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     static thread_local const auto& _tinfo      = thread_info::get();
     auto                            _tid        = _tinfo->index_data->sequent_value;
     auto&                           _perf_event = perf::get_instance(_tid);
 
-    if(!_perf_event) return;
+    if(!_perf_event)
+    {
+        return;
+    }
 
     _perf_event->stop();
 
@@ -201,18 +194,27 @@ callchain::sample(int signo)
                 // skip the first instance of current IP but allow after that since this
                 // might be a recursive call
                 if(ditr == _ip && _skip_ip)
+                {
                     _skip_ip = false;
+                }
                 else
+                {
                     _data.data.emplace_back(ditr);
-                if(_data.data.size() == _data.data.capacity()) break;
+                }
+                if(_data.data.size() == _data.data.capacity())
+                {
+                    break;
+                }
             }
-            if(!_data.data.empty()) m_data.emplace_back(_data);
+            if(!_data.data.empty())
+            {
+                m_data.emplace_back(_data);
+            }
         }
     }
 
     _perf_event->start();
 }
-}  // namespace component
-}  // namespace rocprofsys
+}  // namespace rocprofsys::component
 
 TIMEMORY_INITIALIZE_STORAGE(rocprofsys::component::callchain)

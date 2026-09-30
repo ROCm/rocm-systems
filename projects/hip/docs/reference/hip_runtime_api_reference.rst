@@ -34,6 +34,7 @@ The API is organized into modules based on functionality.
   * :ref:`surface_object_reference`
 
 * :ref:`peer_to_peer_device_memory_access_reference`
+* :ref:`execution_context_management_reference`
 * :ref:`context_management_reference`
 * :ref:`module_management_reference`
 * :ref:`occupancy_reference`
@@ -51,7 +52,7 @@ Global defines, enums, structs and files
 
 The structs, define macros, enums and files in the HIP runtime API.
 
-* :ref:`global_enum_defines_reference`
-* :ref:`driver_types_reference`
+* :doc:`Global enum and defines <../../doxygen/html/group___global_defs>`
+* :doc:`Driver types <../../doxygen/html/group___driver_types>`
 * :doc:`../../doxygen/html/annotated`
 * :doc:`../../doxygen/html/files`

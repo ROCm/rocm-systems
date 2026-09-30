@@ -65,6 +65,9 @@ extern void
 rocprofsys_push_trace(const char* name);
 
 extern void
+rocprofsys_push_trace_with_args(const char* name, const char* args);
+
+extern void
 rocprofsys_pop_trace(const char* name);
 
 extern void
@@ -72,9 +75,6 @@ rocprofsys_init_tooling(void);
 
 extern void
 rocprofsys_init(const char*, bool, const char*);
-
-extern char*
-basename(const char*);
 
 extern void rocprofsys_set_main(main_func_t) ROCPROFSYS_INTERNAL_API;
 
@@ -96,7 +96,10 @@ rocprofsys_libc_start_main(int (*_main)(int, char**, char**), int _argc, char** 
 
     // prevent re-entry
     static int _reentry = 0;
-    if(_reentry > 0) return -1;
+    if(_reentry > 0)
+    {
+        return -1;
+    }
     _reentry = 1;
 
     // get the address of this function
@@ -119,16 +122,14 @@ rocprofsys_libc_start_main(int (*_main)(int, char**, char**), int _argc, char** 
             // call original main
             return user_main(_main, _argc, _argv, _init, _fini, _rtld_fini, _stack_end);
         }
-        else
-        {
-            // return user_main(rocprofsys_main, _argc, _argv,
-            //                  rocprofsys_main_init, _fini,
-            //                  _rtld_fini, _stack_end);
 
-            // call rocprof-sys main function wrapper
-            return user_main(rocprofsys_main, _argc, _argv, _init, _fini, _rtld_fini,
-                             _stack_end);
-        }
+        // return user_main(rocprofsys_main, _argc, _argv,
+        //                  rocprofsys_main_init, _fini,
+        //                  _rtld_fini, _stack_end);
+
+        // call rocprof-sys main function wrapper
+        return user_main(rocprofsys_main, _argc, _argv, _init, _fini, _rtld_fini,
+                         _stack_end);
     }
     else
     {

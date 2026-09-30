@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 
@@ -153,6 +140,16 @@ static __global__ void Delay(uint32_t interval, const uint32_t ticks_per_ms) {
   }
 }
 
+// Spins until the host stores a nonzero value to `release`, which keeps the stream busy for as
+// long as the host decides, independent of any timing. `release` must point to host memory that
+// is coherent with the device, such as hipHostMalloc memory allocated with default flags. The
+// host must set the flag before any check that can throw, otherwise the cleanup that follows
+// waits forever for the kernel.
+[[maybe_unused]] static __global__ void WaitForHostRelease(volatile int* release) {
+  while (*release == 0) {
+  }
+}
+
 template <typename T>
 __global__ void Iota(T* const out, size_t pitch, size_t w, size_t h, size_t d) {
   const auto x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -178,6 +175,22 @@ inline void LaunchDelayKernel(const std::chrono::milliseconds interval, const hi
   HIPCHECK(hipDeviceGetAttribute(&ticks_per_ms, hipDeviceAttributeClockRate, 0));
   #endif
   Delay<<<1, 1, 0, stream>>>(interval.count(), ticks_per_ms);
+}
+
+// Keeps a stream busy for at least `interval` by enqueuing a host callback that
+// sleeps on the host. The duration is measured with the host clock, so it does
+// not depend on hipDeviceAttributeWallClockRate being accurate the way the
+// GPU-side Delay kernel does. Prefer this in synchronization tests that only
+// need the stream to stay un-drained for a controlled time.
+inline void DelayHostCallback(void* user_data) {
+  const auto ms = reinterpret_cast<int64_t>(user_data);
+  std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+}
+
+inline void LaunchDelayHostFunc(const std::chrono::milliseconds interval,
+                                const hipStream_t stream = nullptr) {
+  HIPCHECK(hipLaunchHostFunc(stream, DelayHostCallback,
+                             reinterpret_cast<void*>(interval.count())));
 }
 
 template <typename... Attributes>

@@ -7,16 +7,156 @@ Test Executor Module
 Handles test execution, build processes, and result tracking
 """
 
+import glob
+import hashlib
+import json
 import os
+import re
+import shlex
+import shutil
+import signal
+import socket
 import subprocess
 import sys
+import tempfile
 import time
 import datetime
+import copy
+import xml.etree.ElementTree as ET
 from enum import IntEnum, Enum
 from pathlib import Path
 
+# Bash-style env-var expander (supports ${VAR:-default}); shared with the config
+# processor so binary/path resolution honors the same syntax used elsewhere.
+try:
+    from lib.test_config import expand_env_vars
+except ImportError:
+    from test_config import expand_env_vars
+
 # Make stdout unbuffered to prevent output ordering issues with subprocesses
 sys.stdout.reconfigure(line_buffering=True)
+
+
+def wrap_mpi_program(program, gtest_json_path=None):
+    """bash -c wrapper for one MPI rank: ulimit, glob-safe exec, JSON on rank 0.
+
+    Every rank used to get ``--gtest_output=json:<same file>``. Google Test
+    truncates that path at start-up, so N ranks racing on it leave an empty or
+    corrupt report even when the test passed (Grow_ConfigInheritance).
+    Rank 0 alone sets GTEST_OUTPUT; other ranks exec the same binary without it.
+    Rank 0 is the first host in the SLURM list or hostfile, which is not
+    necessarily the process that reads the file. The path has to be one that
+    host can write and this process can read; a node-local /tmp file is not.
+    """
+    preamble = "ulimit -l unlimited 2>/dev/null; set -f; "
+    if gtest_json_path:
+        json_env = f"GTEST_OUTPUT=json:{shlex.quote(gtest_json_path)}"
+        inner = (
+            preamble
+            + 'rank="${OMPI_COMM_WORLD_RANK:-${PMIX_RANK:-${PMI_RANK:-0}}}"; '
+            + f'if [ "$rank" = "0" ]; then exec env {json_env} {program}; '
+            + f"else exec {program}; fi"
+        )
+    else:
+        inner = preamble + f"exec {program}"
+    return f"bash -c {shlex.quote(inner)}"
+
+
+def glob_filter_matches(name: str, pattern_str: str) -> bool:
+    """Return True if *name* matches the gtest-style glob filter *pattern_str*.
+
+    Syntax (same as GTest's --gtest_filter):
+      *     matches any substring
+      ?     matches any single character
+      :     separates patterns (OR)
+      -     prefix on a token negates it (exclude)
+
+    Matching is anchored to the full name and is case-sensitive.
+
+    Examples:
+      glob_filter_matches("P2P_AllTests", "P2P_*")          → True
+      glob_filter_matches("SHM_Basic",    "P2P_*")          → False
+      glob_filter_matches("P2P_AllTests", "*:-P2P*")        → False  (excluded)
+      glob_filter_matches("SHM_Basic",    "P2P_*:SHM_*")   → True   (OR)
+    """
+    def _to_re(pat: str) -> re.Pattern:
+        escaped = re.sub(r'([.+^${}()|\\])', r'\\\1', pat)
+        return re.compile('^' + escaped.replace('*', '.*').replace('?', '.') + '$')
+
+    pos, neg = [], []
+    for token in pattern_str.split(':'):
+        (neg if token.startswith('-') else pos).append(_to_re(token.lstrip('-')))
+
+    if neg and any(p.match(name) for p in neg):
+        return False
+    return (not pos) or any(p.match(name) for p in pos)
+
+
+def suite_disposition(suite, smoke_only, suite_name_filter=None):
+    """Classify a parsed suite for the banner and the run/record loop.
+
+    Order is scope, then --suite-name, then enabled. A disabled suite outside
+    smoke or off the name filter is skip, not disabled, so the banner and the
+    summary stay in agreement.
+    """
+    details = suite["suite_details"]
+    if smoke_only and not details.get("smoke", False):
+        return "skip_scope"
+    name = details["name"]
+    if suite_name_filter and not glob_filter_matches(name, suite_name_filter):
+        return "skip_name"
+    if not details.get("enabled", True):
+        return "disabled"
+    return "run"
+
+
+def configure_coverage_build(install_flags, cmake_options, coverage_report):
+    """Return build options for the requested coverage mode."""
+    install_flags = list(install_flags)
+
+    def remove_flag(flag):
+        while flag in install_flags:
+            install_flags.remove(flag)
+
+    # Drop any pre-existing (e.g. cached-config) coverage -D options so the
+    # authoritative values appended below are the only ones present, rather than
+    # leaning on CMake's last-wins to override a contradictory earlier token.
+    cmake_options = " ".join(
+        tok for tok in cmake_options.split()
+        if not tok.startswith("-DENABLE_CODE_COVERAGE=")
+        and not tok.startswith("-DENABLE_FULL_COVERAGE=")
+    )
+
+    def append_cmake_option(option):
+        nonlocal cmake_options
+        cmake_options = f"{cmake_options} {option}".strip()
+
+    if not coverage_report:
+        remove_flag("--enable-code-coverage")
+        remove_flag("--enable-full-coverage")
+        append_cmake_option("-DENABLE_CODE_COVERAGE=OFF")
+        append_cmake_option("-DENABLE_FULL_COVERAGE=OFF")
+    else:
+        remove_flag("--enable-full-coverage")
+        if "--debug" not in install_flags and "--debug-fast" not in install_flags:
+            install_flags.append("--debug")
+        if "--enable-code-coverage" not in install_flags:
+            install_flags.append("--enable-code-coverage")
+        append_cmake_option("-DENABLE_CODE_COVERAGE=ON")
+        append_cmake_option("-DENABLE_FULL_COVERAGE=AUTO")
+
+    return install_flags, cmake_options
+
+
+def rccl_build_type(build_config, args, using_custom_lib=False):
+    """Return the RCCL build type selected by the runner."""
+    if using_custom_lib:
+        return "custom"
+    install_flags = build_config.get("install_flags", [])
+    if (any(flag in install_flags for flag in ("--debug", "--debug-fast"))
+            or getattr(args, "coverage_report", False)):
+        return "debug"
+    return "release"
 
 
 class ExitCode(IntEnum):
@@ -32,12 +172,878 @@ class TestResult(str, Enum):
     RESULT_FAILED = "FAILED"
     RESULT_TIMEOUT = "TIMEOUT"
     RESULT_SKIPPED = "SKIPPED"
+    RESULT_DISABLED = "DISABLED"
+
+
+# Google Test's own "nothing was selected" banner, e.g. a --gtest_filter that
+# matches no test. Exit status is 0 and no per-test line is printed, so this is
+# the only positive evidence that the run executed nothing.
+_GTEST_RAN_NOTHING_RE = re.compile(
+    r"Running 0 tests from 0 test (?:suites|cases)|0 tests from 0 test (?:suites|cases) ran"
+)
+
+
+def infer_gtest_result_from_output(captured_output: str, returncode: int) -> str:
+    """
+    Map gtest process exit + stdout/stderr to a TestResult string.
+
+    Google Test returns exit 0 when failures are absent, including when all
+    selected tests are SKIPPED and when the filter selected nothing at all.
+    A filter that matches no test must not report PASSED -- that turns a typo'd
+    or renamed test_filter into a silent green result. Report it SKIPPED, which
+    is what the pytest path already does for "no tests collected".
+
+    Prefer ``infer_gtest_result_from_json_file`` when ``--gtest_output=json:…``
+    is used; this function is the stdout fallback (e.g. ``[  SKIPPED ]`` /
+    ``[  OK ]`` patterns).
+    """
+    if returncode == ExitCode.EXIT_TIMEOUT:
+        return TestResult.RESULT_TIMEOUT.value
+    if returncode != ExitCode.EXIT_SUCCESS:
+        return TestResult.RESULT_FAILED.value
+
+    out = captured_output or ""
+    if re.search(r"\[\s+FAILED\s+\]", out):
+        return TestResult.RESULT_FAILED.value
+    has_ok = re.search(r"\[\s+OK\s+\]", out) is not None
+    has_skipped = re.search(r"\[\s+SKIPPED\s+\]", out) is not None
+    if has_ok:
+        return TestResult.RESULT_PASSED.value
+    if has_skipped:
+        return TestResult.RESULT_SKIPPED.value
+    if _GTEST_RAN_NOTHING_RE.search(out):
+        return TestResult.RESULT_SKIPPED.value
+    return TestResult.RESULT_PASSED.value
+
+
+def _result_from_gtest_details(details):
+    """Map executed leaf statuses to an entry TestResult.
+
+    Same walk as collect_gtest_case_details: FAILED beats PASSED beats SKIPPED.
+    An empty leaf list is SKIPPED (filter matched nothing).
+    """
+    failed = passed = skipped = False
+    for item in details or []:
+        status = item.get("status")
+        if status == "FAILED":
+            failed = True
+        elif status == "PASSED":
+            passed = True
+        elif status == "SKIPPED":
+            skipped = True
+    if failed:
+        return TestResult.RESULT_FAILED.value
+    if passed:
+        return TestResult.RESULT_PASSED.value
+    return TestResult.RESULT_SKIPPED.value
+
+
+def _gtest_leaf_not_run(case):
+    """True for DISABLED tests listed in JSON but never executed (SUPPRESSED)."""
+    result = case.get("result")
+    if result in ("SUPPRESSED", "NOT_RUN"):
+        return True
+    disabled = case.get("disabled")
+    if disabled in (True, 1, "1", "true", "True") and result not in (
+        "COMPLETED",
+        "SKIPPED",
+    ):
+        return True
+    return False
+
+
+def _leaf_case_status(case):
+    """Map one executed gtest JSON leaf to PASSED / FAILED / SKIPPED / UNKNOWN.
+
+    Returns None for leaves that were not run (DISABLED / SUPPRESSED). Those
+    must not inflate "test cases executed" or the unique-case counts.
+
+    A missing or empty ``result`` is not PASSED. Google Test writes COMPLETED
+    or SKIPPED on a finished leaf. If the case was started (``status`` is RUN,
+    or status is omitted on a truncated abort report) the missing result is
+    FAILED. If it was never started (NOTRUN), it is SKIPPED. The entry verdict
+    uses this same walk, so infer and the issue tree cannot disagree.
+    """
+    if _gtest_leaf_not_run(case):
+        return None
+    fails = case.get("failures")
+    if isinstance(fails, list) and fails:
+        return "FAILED"
+    result = case.get("result")
+    if result == "SKIPPED":
+        return "SKIPPED"
+    if result == "COMPLETED":
+        return "PASSED"
+    run_status = case.get("status")
+    if result in (None, "") and run_status in ("NOTRUN", "NOT_RUN"):
+        return "SKIPPED"
+    if result in (None, ""):
+        return "FAILED"
+    return str(result)
+
+
+def collect_gtest_case_details(obj):
+    """Leaf cases from a gtest JSON object (suite, case, full_name, status).
+
+    DISABLED / SUPPRESSED entries are omitted; they were not executed.
+    """
+    details = []
+    if not isinstance(obj, dict):
+        return details
+    for suite in obj.get("testsuites") or []:
+        if not isinstance(suite, dict):
+            continue
+        suite_name = suite.get("name") or ""
+        for case in suite.get("testsuite") or []:
+            if not isinstance(case, dict) or not isinstance(case.get("name"), str):
+                continue
+            status = _leaf_case_status(case)
+            if status is None:
+                continue
+            name = case["name"]
+            details.append({
+                "suite": suite_name,
+                "case": name,
+                "full_name": f"{suite_name}.{name}" if suite_name else name,
+                "status": status,
+            })
+    return details
+
+
+def _counts_from_details(details):
+    counts = {
+        "cases": 0, "passed": 0, "failed": 0, "skipped": 0, "timeout": 0,
+        "disabled": 0,
+    }
+    for item in details or []:
+        counts["cases"] += 1
+        status = item.get("status")
+        if status == "PASSED":
+            counts["passed"] += 1
+        elif status == "FAILED":
+            counts["failed"] += 1
+        elif status == "SKIPPED":
+            counts["skipped"] += 1
+        elif status == "TIMEOUT":
+            counts["timeout"] += 1
+        elif status == "DISABLED":
+            counts["disabled"] += 1
+    return counts
+
+
+def _issues_only(details):
+    return [d for d in details or [] if d.get("status") in ("FAILED", "SKIPPED", "TIMEOUT")]
+
+
+def synthetic_case_detail(test_name, test_filter=None, status="FAILED"):
+    """One leaf when the gtest/pytest report was missing or unreadable.
+
+    MPI abort and multi-rank races on ``--gtest_output=json`` often leave no
+    parseable report even though the config entry ran. Count that as one case
+    using the gtest filter when it names a single test.
+    """
+    full_name = test_name or "(test)"
+    if (
+        test_filter
+        and test_filter not in ("*", "ALL")
+        and "*" not in test_filter
+        and "?" not in test_filter
+        and "-" not in test_filter
+        and ":" not in test_filter
+    ):
+        full_name = test_filter
+    suite, _, case = full_name.partition(".")
+    if not case:
+        suite = test_name or full_name
+        case = full_name
+    return {
+        "suite": suite,
+        "case": case,
+        "full_name": full_name,
+        "status": status,
+    }
+
+
+def merge_process_failure_details(details, test_name, test_filter=None,
+                                  reason="process exited non-zero"):
+    """Add a process-level failure missing from rank 0's gtest report.
+
+    MPI gtest JSON is intentionally written by rank 0 only. If another rank
+    fails, mpirun returns non-zero while that report can contain only passing
+    or skipped leaves. Keep those leaves, but add an explicit failure so case
+    totals and the issue tree agree with the entry verdict.
+    """
+    if any(item.get("status") == "FAILED" for item in details or []):
+        return details
+    merged = list(details or [])
+    label = f"{test_name or '(test)'} ({reason})"
+    merged.append({
+        "suite": test_name or "(test)",
+        "case": label,
+        "full_name": label,
+        "status": "FAILED",
+    })
+    return merged
+
+
+def timeout_placeholder_detail(test_name, test_filter=None, timeout_s=None):
+    """Synthetic leaf used when the process dies before gtest/pytest finishes."""
+    label = test_filter if test_filter and test_filter not in ("*", "ALL") else (test_name or "(test)")
+    if timeout_s is not None:
+        full_name = f"{label} (timed out after {timeout_s}s)"
+    else:
+        full_name = f"{label} (timed out)"
+    return {
+        "suite": test_name or label,
+        "case": label,
+        "full_name": full_name,
+        "status": "TIMEOUT",
+    }
+
+
+def merge_timeout_details(details, test_name, test_filter=None, timeout_s=None):
+    """Keep any parsed leaves and add a TIMEOUT leaf if the run itself timed out."""
+    merged = list(details or [])
+    if not any(item.get("status") == "TIMEOUT" for item in merged):
+        merged.append(timeout_placeholder_detail(test_name, test_filter, timeout_s))
+    return merged
+
+
+def collect_gtest_case_details_from_file(json_path):
+    """Return leaf-case details from a gtest JSON report, or None if unreadable."""
+    if not json_path or not os.path.isfile(json_path):
+        return None
+    try:
+        with open(json_path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    return collect_gtest_case_details(data)
+
+
+def collect_pytest_case_details_from_junit(junit_path):
+    """Return leaf-case details from a pytest JUnit XML report, or None."""
+    if not junit_path or not os.path.isfile(junit_path):
+        return None
+    try:
+        root = ET.parse(junit_path).getroot()
+    except (OSError, ET.ParseError):
+        return None
+    details = []
+    for tc in root.iter("testcase"):
+        classname = tc.get("classname") or ""
+        name = tc.get("name") or ""
+        kinds = {child.tag for child in tc}
+        if kinds & {"failure", "error"}:
+            status = "FAILED"
+        elif "skipped" in kinds:
+            status = "SKIPPED"
+        else:
+            status = "PASSED"
+        details.append({
+            "suite": classname,
+            "case": name,
+            "full_name": f"{classname}::{name}" if classname else name,
+            "status": status,
+        })
+    return details
+
+
+_ISSUE_STATUSES = ("FAILED", "SKIPPED", "TIMEOUT")
+_UNIQUE_STATUS_RANK = {
+    "FAILED": 0,
+    "TIMEOUT": 1,
+    "SKIPPED": 2,
+    "PASSED": 3,
+    "DISABLED": 4,
+}
+_IDENTITY_ENV_IGNORE = frozenset({
+    "LD_LIBRARY_PATH",
+    "LLVM_PROFILE_FILE",
+    "RCCL_BUILD",
+})
+
+
+def make_run_identity_key(
+    binary="",
+    num_ranks=0,
+    num_nodes=0,
+    num_gpus=0,
+    custom_args="",
+    env_vars=None,
+    extra="",
+):
+    """Stable identity for "same env, same test setup" duplicate detection.
+
+    JSON-merged test env is used (not the full process environment).
+    LD_LIBRARY_PATH / LLVM_PROFILE_FILE / RCCL_BUILD are omitted because the
+    runner always rewrites those. ``extra`` holds mpi_args or pytest test_dir.
+
+    The returned value is a hash of that payload. The same inputs still match,
+    and tests.jsonl does not store the env plaintext.
+    """
+    env_norm = {
+        str(k): str(v)
+        for k, v in sorted((env_vars or {}).items())
+        if k not in _IDENTITY_ENV_IGNORE
+    }
+    try:
+        gpus = int(num_gpus or 0)
+    except (TypeError, ValueError):
+        gpus = 0
+    payload = {
+        "args": " ".join(str(custom_args or "").split()),
+        "binary": os.path.basename(str(binary or "")),
+        "env": env_norm,
+        "extra": str(extra or ""),
+        "gpus": gpus,
+        "nodes": int(num_nodes or 0),
+        "ranks": int(num_ranks or 0),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def relocate_rma_reload_counter(env, workspace_dir):
+    """Replace RCCL_RMA_RELOAD_COUNTER_FILE with a file in a private directory.
+
+    A fixed path under /tmp can be pre-created as a symlink by another user on
+    the node. The directory is mode 0700 under the run workspace, and the file
+    is created with O_EXCL so the test does not follow a planted link. Call
+    this after make_run_identity_key so duplicate detection still sees the
+    configured env.
+    """
+    key = "RCCL_RMA_RELOAD_COUNTER_FILE"
+    if not env or key not in env:
+        return
+    base = workspace_dir or os.getcwd()
+    parent = os.path.join(base, "rma_reload_counters")
+    os.makedirs(parent, mode=0o700, exist_ok=True)
+    os.chmod(parent, 0o700)
+    counter_dir = tempfile.mkdtemp(prefix="counter-", dir=parent)
+    os.chmod(counter_dir, 0o700)
+    path = os.path.join(counter_dir, "counter.txt")
+    fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    os.close(fd)
+    env[key] = path
+
+
+def finish_run_result(result, identity, executed=True):
+    """Attach the run identity and whether this entry actually executed."""
+    result["run_identity"] = identity
+    result["executed"] = executed
+    if result.get("case_details"):
+        result["case_details"] = stamp_run_identity(result["case_details"], identity)
+    return result
+
+
+def stamp_run_identity(details, identity):
+    """Copy leaf dicts and attach ``run_identity`` for unique/duplicate accounting."""
+    if not details:
+        return details
+    stamped = []
+    for item in details:
+        copied = dict(item)
+        copied["run_identity"] = identity
+        stamped.append(copied)
+    return stamped
+
+
+def format_issue_leaves(details, indent="    "):
+    """ASCII tree of FAILED/SKIPPED/TIMEOUT leaves for one config entry."""
+    issues = _issues_only(details)
+    if not issues:
+        return ""
+    lines = []
+    for i, item in enumerate(issues):
+        branch = "`- " if i == len(issues) - 1 else "+- "
+        lines.append(f"{indent}{branch}{item['status']:<7} {item['full_name']}")
+    return "\n".join(lines)
+
+
+def format_status_tree(entries, title, statuses=None, status_width=7):
+    """ASCII tree of selected leaves grouped by config suite and entry.
+
+    ``entries`` is a list of dicts with keys config_suite, config_entry, details.
+    When ``statuses`` is None every leaf is included.
+    """
+    grouped = {}
+    for entry in entries or []:
+        details = entry.get("details") or []
+        if statuses is None:
+            selected = list(details)
+        else:
+            selected = [d for d in details if d.get("status") in statuses]
+        if not selected:
+            continue
+        suite = entry.get("config_suite") or "(suite)"
+        name = entry.get("config_entry") or "(test)"
+        grouped.setdefault(suite, []).append((name, selected))
+    if not grouped:
+        return ""
+
+    lines = [title]
+    suite_items = list(grouped.items())
+    for si, (suite, named_issues) in enumerate(suite_items):
+        last_suite = si == len(suite_items) - 1
+        s_branch, s_pipe = ("`- ", "   ") if last_suite else ("+- ", "|  ")
+        lines.append(f"  {s_branch}{suite}")
+        for ei, (name, issues) in enumerate(named_issues):
+            last_entry = ei == len(named_issues) - 1
+            e_branch, e_pipe = ("`- ", "   ") if last_entry else ("+- ", "|  ")
+            lines.append(f"  {s_pipe}{e_branch}{name}")
+            by_gtest = {}
+            for item in issues:
+                by_gtest.setdefault(item.get("suite") or name, []).append(item)
+            show_inner = len(by_gtest) > 1
+            def _append_leaves(prefix, items):
+                for ci, item in enumerate(items):
+                    c_branch = "`- " if ci == len(items) - 1 else "+- "
+                    label = item.get("label") or item.get("case") or item.get("full_name")
+                    lines.append(
+                        f"{prefix}{c_branch}{item['status']:<{status_width}} {label}"
+                    )
+
+            if show_inner:
+                inner_items = list(by_gtest.items())
+                for gi, (gtest_suite, cases) in enumerate(inner_items):
+                    last_g = gi == len(inner_items) - 1
+                    g_branch, g_pipe = ("`- ", "   ") if last_g else ("+- ", "|  ")
+                    lines.append(f"  {s_pipe}{e_pipe}{g_branch}{gtest_suite}")
+                    _append_leaves(f"  {s_pipe}{e_pipe}{g_pipe}", cases)
+            else:
+                _append_leaves(f"  {s_pipe}{e_pipe}", issues)
+    return "\n".join(lines)
+
+
+def format_issue_tree(entries):
+    """ASCII tree of FAILED/SKIPPED/TIMEOUT cases grouped by config suite and entry.
+
+    Uses the same leaf walk as uniqueness accounting so a config entry that ran
+    (including MPI abort with no gtest JSON) still appears.
+    """
+    loc_map = {}
+    for record in iter_case_records(entries):
+        if record.get("status") not in _ISSUE_STATUSES:
+            continue
+        loc = (record["config_suite"], record["config_entry"])
+        loc_map.setdefault(loc, []).append({
+            "suite": record["suite"],
+            "case": record["case"],
+            "full_name": record["full_name"],
+            "label": record.get("label") or record.get("full_name"),
+            "status": record["status"],
+        })
+    rebuilt = _entries_from_location_map(loc_map, entries)
+    return format_status_tree(
+        rebuilt,
+        "Failed/skipped/timeout cases:",
+        statuses=_ISSUE_STATUSES,
+        status_width=7,
+    )
+
+
+def format_duplicate_tree(entries, title=None):
+    """ASCII tree of leaves that ran more than once with the same env/setup."""
+    return format_status_tree(
+        entries,
+        title or "Duplicate cases:",
+        statuses=("DUPLICATE",),
+        status_width=9,
+    )
+
+
+def _case_record_key(record):
+    return (record.get("full_name") or "", record.get("run_identity") or "")
+
+
+def _worst_case_status(statuses):
+    return min(
+        statuses,
+        key=lambda status: _UNIQUE_STATUS_RANK.get(status, 99),
+        default="UNKNOWN",
+    )
+
+
+def _duplicate_run_suffix(records):
+    """e.g. '(2 runs)' or '(2 runs: PASSED, SKIPPED)'."""
+    n = len(records)
+    seen = []
+    for record in records:
+        status = record.get("status") or "UNKNOWN"
+        if status not in seen:
+            seen.append(status)
+    if len(seen) == 1:
+        return f"({n} runs)"
+    return f"({n} runs: {', '.join(seen)})"
+
+
+def iter_case_records(entries):
+    """Yield one record per executed gtest/pytest leaf (and synthetic non-gtest runs)."""
+    for entry in entries or []:
+        suite = entry.get("config_suite") or "(suite)"
+        name = entry.get("config_entry") or "(test)"
+        identity = entry.get("run_identity") or ""
+        details = entry.get("details")
+        if details:
+            for item in details:
+                yield {
+                    "config_suite": suite,
+                    "config_entry": name,
+                    "run_identity": item.get("run_identity") or identity,
+                    "suite": item.get("suite") or name,
+                    "case": item.get("case") or item.get("full_name") or name,
+                    "full_name": item.get("full_name") or item.get("case") or name,
+                    "status": item.get("status") or "UNKNOWN",
+                }
+            continue
+        if not entry.get("executed"):
+            continue
+        result = entry.get("config_result") or "UNKNOWN"
+        if result == "SKIPPED":
+            # Pre-launch skip (missing binary, too few GPUs, etc.) did not run a case.
+            continue
+        yield {
+            "config_suite": suite,
+            "config_entry": name,
+            "run_identity": identity,
+            "suite": name,
+            "case": name,
+            "full_name": name,
+            "status": result,
+        }
+
+
+def _entries_from_location_map(loc_map, original_entries):
+    """Preserve first-seen config suite/entry order when rebuilding tree entries."""
+    rebuilt = []
+    seen = set()
+    for entry in original_entries or []:
+        loc = (
+            entry.get("config_suite") or "(suite)",
+            entry.get("config_entry") or "(test)",
+        )
+        if loc in loc_map and loc not in seen:
+            seen.add(loc)
+            rebuilt.append({
+                "config_suite": loc[0],
+                "config_entry": loc[1],
+                "details": loc_map[loc],
+            })
+    return rebuilt
+
+
+def _tally_status(counts, prefix, status):
+    key = {
+        "PASSED": f"{prefix}passed",
+        "FAILED": f"{prefix}failed",
+        "SKIPPED": f"{prefix}skipped",
+        "TIMEOUT": f"{prefix}timeout",
+        "DISABLED": f"{prefix}disabled",
+    }.get(status, f"{prefix}other")
+    counts[key] += 1
+
+
+def summarize_case_uniqueness(entries):
+    """Count unique leaves and build unique/duplicate trees.
+
+    A duplicate is the same leaf name with the same run identity (env, ranks,
+    binary, args). Duplicate runs are not removed; they are reported so a human
+    can decide whether the extra execution is intentional.
+
+    Invariants:
+      unique + duplicate_extra == total
+      total_{passed,failed,skipped,timeout,disabled,other} sum to total
+      unique_{passed,failed,skipped,timeout,disabled,other} sum to unique
+    When duplicate_cases == 0 the total and unique status buckets match.
+    Disabled config entries (enabled: false) are included in total and unique
+    so those two still add up after the Disabled metric is printed.
+    """
+    groups = {}
+    order = []
+    for record in iter_case_records(entries):
+        key = _case_record_key(record)
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(record)
+
+    unique_counts = {
+        "total": 0,
+        "unique": 0,
+        "duplicate_extra": 0,
+        "duplicate_cases": 0,
+        "total_passed": 0,
+        "total_failed": 0,
+        "total_skipped": 0,
+        "total_timeout": 0,
+        "total_disabled": 0,
+        "total_other": 0,
+        "unique_passed": 0,
+        "unique_failed": 0,
+        "unique_skipped": 0,
+        "unique_timeout": 0,
+        "unique_disabled": 0,
+        "unique_other": 0,
+    }
+    duplicate_loc = {}
+
+    for key in order:
+        records = groups[key]
+        unique_counts["total"] += len(records)
+        unique_counts["unique"] += 1
+        for record in records:
+            _tally_status(unique_counts, "total_", record.get("status"))
+        extra = len(records) - 1
+        if extra:
+            unique_counts["duplicate_extra"] += extra
+            unique_counts["duplicate_cases"] += 1
+        worst = _worst_case_status([r.get("status") for r in records])
+        _tally_status(unique_counts, "unique_", worst)
+
+        if extra:
+            suffix = _duplicate_run_suffix(records)
+            seen_loc_leaf = set()
+            for record in records:
+                loc = (record["config_suite"], record["config_entry"])
+                loc_leaf = loc + (record["full_name"],)
+                if loc_leaf in seen_loc_leaf:
+                    continue
+                seen_loc_leaf.add(loc_leaf)
+                duplicate_loc.setdefault(loc, []).append({
+                    "suite": record["suite"],
+                    "case": record["case"],
+                    "full_name": record["full_name"],
+                    "label": f"{record['full_name']} {suffix}",
+                    "status": "DUPLICATE",
+                })
+
+    unique_counts["duplicate_entries"] = _entries_from_location_map(duplicate_loc, entries)
+    return unique_counts
+
+
+def format_case_counts(counts):
+    """One-line expansion of a config entry into counted gtest/pytest cases."""
+    if not counts:
+        return ""
+    cases = counts.get("cases", 0)
+    details = []
+    for key, label in (
+        ("passed", "passed"),
+        ("failed", "failed"),
+        ("skipped", "skipped"),
+        ("timeout", "timed out"),
+        ("disabled", "disabled"),
+    ):
+        n = counts.get(key, 0)
+        if n:
+            details.append(f"{n} {label}")
+    if details:
+        return f"{cases} cases ({', '.join(details)})"
+    return f"{cases} cases"
+
+
+def print_case_result(result, case_counts, case_details, trailer):
+    """Print the Result line and any FAILED/SKIPPED/TIMEOUT leaves.
+
+    ``trailer`` is the text after the optional case counts, for example
+    ``"(1.250 seconds)"`` or ``"after 30 seconds"``.
+    """
+    cases_suffix = format_case_counts(case_counts)
+    if cases_suffix:
+        print(f"\n  Result: {result} [{cases_suffix}] {trailer}")
+    else:
+        print(f"\n  Result: {result} {trailer}")
+    issue_tree = format_issue_leaves(case_details)
+    if issue_tree:
+        print(issue_tree)
+
+
+def infer_gtest_result_from_json_file(json_path: str, returncode: int, details=None) -> str:
+    """
+    Map gtest exit code + JSON report to TestResult.
+
+    When returncode is 0, scores the same leaf list collect_gtest_case_details
+    uses. Pass *details* to avoid a second json.load of the same report.
+    Falls back to infer_gtest_result_from_output(\"\", rc) if the file is missing
+    or invalid JSON.
+    """
+    if returncode == ExitCode.EXIT_TIMEOUT:
+        return TestResult.RESULT_TIMEOUT.value
+    if returncode != ExitCode.EXIT_SUCCESS:
+        return TestResult.RESULT_FAILED.value
+    if details is None:
+        details = collect_gtest_case_details_from_file(json_path)
+    if details is None:
+        # The runner does not capture stdout, so the "0 tests" banner in
+        # infer_gtest_result_from_output cannot match on this path. A present
+        # report with no leaves is SKIPPED via _result_from_gtest_details.
+        # A missing report stays on the exit code.
+        return infer_gtest_result_from_output("", returncode)
+    return _result_from_gtest_details(details)
+
+
+def infer_pytest_result_from_junit(junit_path: str, returncode: int, details=None) -> str:
+    """Map a pytest run (JUnit XML + exit code) to a TestResult, preferring the
+    report so a fully-skipped harness reports SKIPPED rather than PASSED.
+
+    Pass *details* from collect_pytest_case_details_from_junit to avoid a
+    second parse of the same report.
+    """
+    if returncode == ExitCode.EXIT_TIMEOUT:
+        return TestResult.RESULT_TIMEOUT.value
+    # pytest exit 5 = no tests collected.
+    if returncode == 5:
+        return TestResult.RESULT_SKIPPED.value
+    if details is None:
+        details = collect_pytest_case_details_from_junit(junit_path)
+    if details is None:
+        return (TestResult.RESULT_PASSED.value if returncode == ExitCode.EXIT_SUCCESS
+                else TestResult.RESULT_FAILED.value)
+
+    passed = skipped = failed = 0
+    for item in details:
+        status = item.get("status")
+        if status == "FAILED":
+            failed += 1
+        elif status == "SKIPPED":
+            skipped += 1
+        else:
+            passed += 1
+    total = passed + skipped + failed
+
+    if failed:
+        return TestResult.RESULT_FAILED.value
+    # Non-clean exit with no per-test failure (collection/internal error).
+    if returncode not in (0,):
+        return TestResult.RESULT_FAILED.value
+    if total == 0 or (passed == 0 and skipped > 0):
+        return TestResult.RESULT_SKIPPED.value
+    return TestResult.RESULT_PASSED.value
+
+
+# Job ids for allocators whose host list this runner does not parse. An empty
+# mpi_hosts under one of these is "topology unknown", not "this one machine".
+_UNRESOLVED_ALLOCATION_ENV = (
+    "SLURM_JOB_ID",
+    "PBS_JOBID",
+    "LSB_JOBID",
+    "FLUX_JOB_ID",
+    "COBALT_JOBID",
+)
+
+
+def _first_scheduled_host(mpi_hosts):
+    """Host that receives MPI rank 0, or None when that host cannot be named.
+
+    Open MPI gives rank 0 to the first SLURM host or the first hostfile entry.
+    An empty dict means mpirun keeps every rank on this machine.
+    """
+    if not mpi_hosts:
+        return None
+    if "host_list" in mpi_hosts:
+        for part in str(mpi_hosts["host_list"]).split(","):
+            host = part.strip().split(":")[0].strip()
+            if host:
+                return host
+        return None
+    if "hostfile" in mpi_hosts:
+        try:
+            with open(mpi_hosts["hostfile"], encoding="utf-8", errors="replace") as hf:
+                for line in hf:
+                    line = line.split("#")[0].strip()
+                    if not line:
+                        continue
+                    host = line.split()[0].strip()
+                    if host:
+                        return host
+        except OSError:
+            return None
+    return None
+
+
+def _rank0_is_local(mpi_hosts):
+    """True when rank 0 runs on this machine.
+
+    No host list means every rank is local. A declared host source that cannot
+    be read is not treated as local: the report must not assume /tmp is shared.
+    """
+    if not mpi_hosts:
+        return True
+    host = _first_scheduled_host(mpi_hosts)
+    if not host:
+        return False
+    local = socket.gethostname().split(".")[0]
+    return host.split(".")[0] == local
+
+
+def _test_needs_mpi(test, suite_config):
+    """True for an entry --skip-mpi-check drops (auto ranks, or more than one)."""
+    test_ranks = test.get("num_ranks", (suite_config or {}).get("num_ranks", 1))
+    if isinstance(test_ranks, str):
+        return test_ranks.strip().lower() == "auto"
+    return test_ranks > 1
+
+
+def _distinct_host_count(mpi_hosts: dict) -> int:
+    """
+    Count distinct hosts from SLURM host_list or Open MPI hostfile.
+
+    An empty dict with no batch job means mpirun places every rank on the local
+    host, so the count is 1 and a multi-node entry is skipped. An active
+    allocation whose hosts were not detected stays 0: the caller then does not
+    skip, because 0 means the topology is unknown.
+
+    Returns 0 when an active allocation cannot be resolved or a declared host
+    source cannot be read.
+    """
+    if not mpi_hosts:
+        if any(os.environ.get(name) for name in _UNRESOLVED_ALLOCATION_ENV):
+            return 0
+        return 1
+    if "host_list" in mpi_hosts:
+        seen = set()
+        for part in mpi_hosts["host_list"].split(","):
+            part = part.strip()
+            if not part:
+                continue
+            host = part.split(":")[0].strip()
+            if host:
+                seen.add(host)
+        return len(seen)
+    if "hostfile" in mpi_hosts:
+        path = mpi_hosts["hostfile"]
+        seen = set()
+        try:
+            with open(path, encoding="utf-8", errors="replace") as hf:
+                for line in hf:
+                    line = line.split("#")[0].strip()
+                    if not line:
+                        continue
+                    host = line.split()[0].strip()
+                    if host:
+                        seen.add(host)
+        except OSError:
+            return 0
+        return len(seen)
+    return 0
 
 
 class TestExecutor:
     """
     Executes tests and manages build/test workflows
     """
+
+    MPI_IMPL_CONFIG = {
+        "openmpi": {
+            "env_format": "-x {key}='{value}'",
+            "default_args": "--mca btl ^vader,openib --bind-to none",
+        },
+        "mpich": {
+            "env_format": "-env {key} '{value}'",
+            "default_args": "-bind-to none",
+        },
+    }
 
     def __init__(self, config_processor, args):
         """
@@ -51,79 +1057,195 @@ class TestExecutor:
         self.args = args
         self.system_config = config_processor.get_system_config()
         self.paths = config_processor.get_paths()
-        self.global_env = config_processor.get_env_variables()
+        self.global_env = dict(config_processor.get_env_variables())
+
+        # Merge system-specific env overrides if --system is specified
+        system = getattr(args, 'system', '') or ''
+        if system:
+            system_env = config_processor.config.get("system_env_variables", {})
+            if isinstance(system_env, dict) and system in system_env:
+                self.global_env.update(system_env[system])
+            elif system_env and system not in system_env:
+                available = list(system_env.keys()) if isinstance(system_env, dict) else []
+                print(f"WARNING: No system_env_variables for '{system}'. Available: {available}")
         self.build_config = config_processor.get_build_config()
+        self.rccl_tests_build_config = config_processor.get_rccl_tests_build_config()
 
         # Setup directories
         self.setup_directories()
 
-        # Detect MPI hostfile once during initialization
-        self.mpi_hostfile = self._detect_mpi_hostfile()
+        # MPI hostfile is detected lazily on first MPI test
+        self._mpi_hostfile = None
+        self._mpi_hostfile_detected = False
+
+        # MPI implementation: openmpi (default) or mpich (via --mpich flag)
+        self.mpi_impl = "mpich" if getattr(args, 'mpich', False) else "openmpi"
+        self.mpi_config = self.MPI_IMPL_CONFIG[self.mpi_impl]
+
+        # Detect MPI hosts: auto-detect from SLURM if "auto_detect_hosts" is true in config, otherwise use hostfile
+        self.mpi_hosts = self._detect_mpi_hosts()
+
+        # GPUs-per-node is detected lazily on first use (see gpus_per_node property)
+        self._gpus_per_node = 0
+        self._gpus_per_node_detected = False
 
         # Test tracking
         self.test_results = []
         self.test_names = []
         self.test_durations = []
         self.test_suites = []
+        # Per config-entry gtest/pytest leaf counts (wildcards expanded).
+        self.test_case_counts = []
+        self.test_case_details = []
+        self.test_run_identities = []
+        self.test_executed = []
+
+        # Structured result emission (dashboard). Enabling either --emit-results or
+        # --db-push turns on per-test log capture so perf output can be parsed.
+        self.emit_enabled = bool(
+            getattr(args, "emit_results", False) or getattr(args, "db_push", False)
+        )
+        self.test_records = []       # rich per-test records for the emitter
+        self._emit_log_counter = 0   # keeps captured-log filenames unique
+
+        # Rerun tracking
+        self.failed_test_info = []  # Store info needed to rerun failed tests
+        self.rerun_results = []
+        self.rerun_names = []
+        self.rerun_durations = []
 
     def setup_directories(self):
         """Setup build and log directories"""
         workdir = self.paths.get("workdir", os.getcwd())
 
-        # Determine workspace name (with or without timestamp)
-        suffix_part = f"_{self.args.report_suffix}" if self.args.report_suffix else ""
-        if self.args.overwrite:
-            workspace_name = f"rccl_test_artifacts{suffix_part}"
-            timestamp_suffix = ""
+        output_dir = getattr(self.args, "output", None)
+        if output_dir:
+            # --output takes the workspace path verbatim, so --report-suffix (only
+            # consumed by the timestamped-name branch below) would be silently
+            # dropped. Warn rather than ignore it without a trace.
+            if getattr(self.args, "report_suffix", ""):
+                print("NOTE: --report-suffix is ignored when --output is given "
+                      "(the workspace directory is taken verbatim from --output)")
+            self.workspace_dir = os.path.abspath(
+                os.path.expanduser(os.path.expandvars(output_dir))
+            )
         else:
+            suffix_part = f"_{self.args.report_suffix}" if self.args.report_suffix else ""
             timestamp = datetime.datetime.now().strftime("%Y_%m_%d_%H%M%S")
             workspace_name = f"rccl_test_artifacts{suffix_part}_{timestamp}"
-            timestamp_suffix = f"_{timestamp}"
+            self.workspace_dir = os.path.join(workdir, workspace_name)
 
-        # Create workspace directory path
-        self.workspace_dir = os.path.join(workdir, workspace_name)
-
-        # Check for custom RCCL library path from environment variable
+        # Determine build directory (priority: --build-dir > env var > default)
         custom_rccl_path = os.environ.get('RCCL_LIB_PATH') or os.environ.get('RCCL_BUILD_DIR')
 
-        if custom_rccl_path:
+        if self.args.build_dir:
+            # Use custom build directory from command line
+            self.build_dir = os.path.abspath(os.path.expanduser(os.path.expandvars(self.args.build_dir)))
+            self.using_custom_lib = True
+            if self.args.verbose:
+                print(f"Using custom build directory from --build-dir: {self.build_dir}")
+        elif custom_rccl_path:
             # Use custom library path from environment variable
-            self.build_dir = os.path.expanduser(os.path.expandvars(custom_rccl_path))
+            self.build_dir = os.path.abspath(os.path.expanduser(os.path.expandvars(custom_rccl_path)))
             self.using_custom_lib = True
             if self.args.verbose:
                 print(f"Using custom RCCL library path from environment: {self.build_dir}")
         else:
-            # Use default build directory
+            # Use default build directory matching install.sh convention.
+            # --coverage-report forces a Debug build (configure_coverage_build
+            # appends --debug), so mirror that here or the runner would look for
+            # librccl.so / device-*.elf under build/release while install.sh
+            # built them into build/debug.
             self.using_custom_lib = False
-            self.build_dir = os.path.join(
-                workdir,
-                f"build_debug_cov_on_tests_on{timestamp_suffix}"
-            )
+            build_type = rccl_build_type(self.build_config, self.args)
+            self.build_dir = os.path.join(workdir, "build", build_type)
 
         # Set log and report directories under workspace
         self.log_dir = os.path.join(self.workspace_dir, "logs")
         self.report_dir = os.path.join(self.workspace_dir, "report")
+        self.rawfiles_dir = os.path.join(self.log_dir, "rawfiles")
 
         # Create directories (skip build_dir if using custom lib)
         if not self.using_custom_lib:
             os.makedirs(self.build_dir, exist_ok=True)
         os.makedirs(self.log_dir, exist_ok=True)
         os.makedirs(self.report_dir, exist_ok=True)
+        os.makedirs(self.rawfiles_dir, exist_ok=True)
+        if self.args.coverage_report and not getattr(self.args, "skip_tests", False):
+            for profile in Path(self.rawfiles_dir).glob("*.profraw"):
+                profile.unlink()
 
         if self.args.verbose:
             print(f"Work directory:   {workdir}")
             print(f"Workspace directory: {self.workspace_dir}")
             print(f"Build directory:  {self.build_dir}")
             if self.using_custom_lib:
-                print(f"  (Using custom library from RCCL_LIB_PATH/RCCL_BUILD_DIR)")
+                print(f"  (Custom path via {'--build-dir' if self.args.build_dir else 'RCCL_LIB_PATH/RCCL_BUILD_DIR'})")
             print(f"Log directory:    {self.log_dir}")
             print(f"Report directory: {self.report_dir}")
 
+    def _coverage_profile_pattern(self):
+        """Absolute per-host/process profile path for the current workspace."""
+        return os.path.join(
+            self.rawfiles_dir,
+            "rccl_tests_%h_%p_%m.profraw",
+        )
+
+    def _apply_coverage_profile_env(self, env):
+        """Export LLVM_PROFILE_FILE when this run is collecting coverage.
+
+        Returns the absolute pattern, or None when coverage is off, so the MPI
+        argv can forward the same value to remote ranks.
+        """
+        if not self.args.coverage_report:
+            return None
+        pattern = self._coverage_profile_pattern()
+        env["LLVM_PROFILE_FILE"] = pattern
+        return pattern
+
+    def _cmake_cache_value(self, name):
+        """Return the CMake cache VALUE for <name>, or None if absent."""
+        cache_path = os.path.join(self.build_dir, "CMakeCache.txt")
+        prefix = name + ":"
+        try:
+            with open(cache_path, encoding="utf-8") as cache:
+                for line in cache:
+                    if line.startswith(prefix):
+                        return line.rstrip("\n").split("=", 1)[-1]
+        except OSError:
+            return None
+        return None
+
+    def _full_coverage_resolved(self):
+        """True when this build's CMakeCache resolved ENABLE_FULL_COVERAGE to ON.
+
+        AUTO is FORCEd to ON or OFF in the cache, so the cache holds the answer.
+        device-*.elf is produced for every device-linker build, including the
+        host-only AUTO fallback, and llvm-cov fails on objects with no
+        __llvm_covmap.
+        """
+        value = self._cmake_cache_value("ENABLE_FULL_COVERAGE")
+        return value is not None and value.upper() == "ON"
+
+    def _emit_log_path(self, test_name):
+        """Unique per-test captured-log path under log_dir (used when result
+        emission is enabled)."""
+        self._emit_log_counter += 1
+        safe = re.sub(r'[^A-Za-z0-9_.-]+', '_', str(test_name or "test"))
+        return os.path.join(self.log_dir, f"{self._emit_log_counter:04d}_{safe}.log")
+
+    @property
+    def mpi_hostfile(self):
+        """Lazy MPI hostfile detection -- only runs on first access."""
+        if not self._mpi_hostfile_detected:
+            self._mpi_hostfile = self._detect_mpi_hostfile()
+            self._mpi_hostfile_detected = True
+        return self._mpi_hostfile
+
     def _detect_mpi_hostfile(self):
         """
-        Detect MPI hostfile once during initialization.
+        Detect MPI hostfile.
         Checks RCCL_TEST_MPI_HOSTFILE env var, then ~/.mpi_hostfile default.
-        Prints detection message only once.
 
         Returns:
             str: Path to hostfile, or None if not found
@@ -139,8 +1261,107 @@ class TestExecutor:
             print(f"Using default MPI hostfile: {default_hostfile}")
             return default_hostfile
 
-        # No hostfile found
+        if self.args.verbose:
+            print("No MPI hostfile found (checked RCCL_TEST_MPI_HOSTFILE env var and ~/.mpi_hostfile)")
         return None
+
+    def _detect_mpi_hosts(self):
+        """
+        Detect MPI host list once during initialization.
+
+        If "auto_detect_hosts" is true in the system profile (or top-level config)
+        and a SLURM allocation is active, uses scontrol to get the host list.
+        Otherwise falls back to the hostfile detected by mpi_hostfile property.
+
+        Returns:
+            dict with 'host_list', 'hostfile', or empty dict
+        """
+        system = getattr(self.args, 'system', '') or ''
+        auto_detect = self.config_processor.config.get("auto_detect_hosts", False)
+
+        if auto_detect and os.environ.get('SLURM_JOB_ID'):
+            try:
+                result = subprocess.run(
+                    ['scontrol', 'show', 'hostnames'],
+                    capture_output=True, text=True, timeout=5
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    hosts = ','.join(result.stdout.strip().split('\n'))
+                    print(f"Using SLURM hosts: {hosts}")
+                    return {'host_list': hosts}
+            except (subprocess.TimeoutExpired, FileNotFoundError):
+                pass
+
+        hostfile = self.mpi_hostfile
+        if hostfile:
+            return {'hostfile': hostfile}
+
+        return {}
+
+    @property
+    def gpus_per_node(self):
+        """
+        Number of GPUs available on a node (lazy, detected once).
+
+        Returns 0 when the count cannot be determined, in which case "auto"
+        sizing falls back to 8 GPUs/node and GPU-count-based skipping is disabled.
+        """
+        if not self._gpus_per_node_detected:
+            self._gpus_per_node = self._detect_gpus_per_node()
+            self._gpus_per_node_detected = True
+            if self._gpus_per_node:
+                if self.args.verbose:
+                    print(f"Detected GPUs per node: {self._gpus_per_node}")
+            else:
+                # Unconditional: silent fallback to 8 ranks on a smaller node is
+                # very hard to debug, so always surface the detection failure.
+                print("WARNING: could not detect GPU count; 'auto' sizing falls "
+                      "back to 8 GPUs/node and GPU-count skipping is disabled")
+        return self._gpus_per_node
+
+    def _detect_gpus_per_node(self):
+        """
+        Detect the number of GPUs usable on a node.
+
+        Priority:
+          1. RCCL_TEST_GPUS_PER_NODE env override
+          2. Visible-device masks (HIP/ROCR/CUDA_VISIBLE_DEVICES)
+          3. rocminfo GPU agent count
+
+        Returns:
+            int: GPU count, or 0 if it cannot be determined.
+        """
+        override = os.environ.get('RCCL_TEST_GPUS_PER_NODE', '').strip()
+        if override.isdigit() and int(override) > 0:
+            return int(override)
+
+        for var in ('HIP_VISIBLE_DEVICES', 'ROCR_VISIBLE_DEVICES', 'CUDA_VISIBLE_DEVICES'):
+            mask = os.environ.get(var)
+            if mask:
+                ids = [tok for tok in mask.split(',') if tok.strip() != '']
+                if ids:
+                    return len(ids)
+
+        rocm_path = self.paths.get('rocm_path', '/opt/rocm')
+        rocminfo = os.path.join(rocm_path, 'bin', 'rocminfo')
+        if not os.path.isfile(rocminfo):
+            rocminfo = shutil.which('rocminfo')
+        if rocminfo:
+            try:
+                result = subprocess.run(
+                    [rocminfo], capture_output=True, text=True, timeout=15
+                )
+                if result.returncode == 0:
+                    count = sum(
+                        1 for line in result.stdout.splitlines()
+                        if 'Device Type:' in line and 'GPU' in line
+                    )
+                    if count > 0:
+                        return count
+            except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+                pass
+
+        return 0
 
     def check_environment(self):
         """
@@ -152,25 +1373,34 @@ class TestExecutor:
         errors = []
 
         # Check ROCm
-        rocm_path = self.paths.get("rocm_path", "/opt/rocm")
+        rocm_path = self._rocm_root()
         if not os.path.isdir(rocm_path):
             errors.append(f"ROCm not found at {rocm_path}")
 
-        # Check MPI
-        mpi_path = self.paths.get("mpi_path")
-        if mpi_path:
-            if not os.path.isdir(mpi_path):
-                print(f"WARNING: MPI path not found: {mpi_path}")
-            elif not os.path.isfile(os.path.join(mpi_path, "bin", "mpirun")):
-                print(f"WARNING: mpirun not found in {mpi_path}/bin/")
+        # Check MPI (unless --skip-mpi-check is set)
+        if not self.args.skip_mpi_check:
+            mpi_path = self.paths.get("mpi_path")
+            if mpi_path:
+                if not os.path.isdir(mpi_path):
+                    print(f"WARNING: MPI path not found: {mpi_path}")
+                elif not os.path.isfile(os.path.join(mpi_path, "bin", "mpirun")):
+                    print(f"WARNING: mpirun not found in {mpi_path}/bin/")
+        elif self.args.verbose:
+            print("SKIP: MPI check skipped (--skip-mpi-check)")
 
         # Check RCCL library (if not building or using custom lib)
         if self.args.no_build or self.using_custom_lib:
             lib_path = os.path.join(self.build_dir, "librccl.so")
             if not os.path.isfile(lib_path):
                 errors.append(f"RCCL library not found: {lib_path}")
-            elif self.args.verbose:
-                print(f"Found RCCL library: {lib_path}")
+            else:
+                if self.args.verbose:
+                    print(f"Found RCCL library: {lib_path}")
+                # Fail fast: --coverage-report requires an instrumented library,
+                # but with --no-build / custom lib we cannot rebuild it ourselves.
+                if self.args.coverage_report and not self._check_coverage_instrumentation(lib_path):
+                    self._print_coverage_missing_error(lib_path)
+                    return False
 
         if errors:
             print("ERROR: Environment check failed:")
@@ -182,9 +1412,62 @@ class TestExecutor:
             print("Environment validation passed")
         return True
 
+    def _check_coverage_instrumentation(self, lib_path):
+        """
+        Verify librccl.so was built with LLVM source-based code coverage
+        instrumentation by looking for the ``__llvm_prf_*`` ELF sections that
+        clang adds when ``-fprofile-instr-generate -fcoverage-mapping`` is in
+        effect (i.e. when RCCL was built with -DENABLE_CODE_COVERAGE=ON).
+
+        Returns:
+            bool: True if instrumented; True (with warning) if the check could
+                not be performed (e.g. readelf missing); False if confirmed
+                non-instrumented.
+        """
+        try:
+            result = subprocess.run(
+                ['readelf', '-S', lib_path],
+                capture_output=True, text=True, timeout=30
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired) as e:
+            print(f"WARNING: Could not run 'readelf -S {lib_path}' to verify "
+                  f"coverage instrumentation: {e}")
+            print("         Proceeding under the assumption it is instrumented.")
+            return True
+        if result.returncode != 0:
+            print(f"WARNING: 'readelf -S {lib_path}' exited with "
+                  f"{result.returncode}; skipping coverage instrumentation check.")
+            return True
+        return '__llvm_prf_' in result.stdout
+
+    def _print_coverage_missing_error(self, lib_path):
+        """Emit a clear, actionable message when --coverage-report is requested
+        but the RCCL library lacks LLVM coverage instrumentation."""
+        print("=" * 80)
+        print("ERROR: --coverage-report was requested, but the RCCL library is")
+        print("       not instrumented for LLVM source-based code coverage:")
+        print(f"           {lib_path}")
+        print()
+        print("Rebuild RCCL with coverage instrumentation, then retry. Options:")
+        print("  - Use install.sh directly:")
+        print("        ./install.sh --enable-code-coverage <other flags...>")
+        print("  - Or have the runner build it by adding the flag to your")
+        print("    config's 'build_configuration.install_flags':")
+        print('        "--enable-code-coverage"')
+        print("  - Or pass the CMake option through install.sh:")
+        print('        ./install.sh --cmake-options "-DENABLE_CODE_COVERAGE=ON" ...')
+        print("=" * 80)
+
     def build_rccl(self):
         """
-        Build RCCL with test support using configurable build settings
+        Build RCCL using install.sh with configurable build settings.
+
+        The build_configuration in the JSON config specifies:
+        - install_flags: List of install.sh command-line flags
+        - cmake_options: Optional CMake options, either a string (e.g. "-DFOO=BAR") or a
+          dict (e.g. {"FOO": "BAR"}); dicts are converted to "-DKEY=VAL" form (passed via --cmake-options)
+        - env_variables: Environment variables to set during the build
+        - parallel_jobs: Number of parallel compilation jobs (passed via -j)
 
         Returns:
             bool: True if build succeeded
@@ -200,124 +1483,264 @@ class TestExecutor:
                 print("SKIP: Build step skipped (--no-build)")
             return True
 
+        if not self.build_config.get("enabled", True):
+            if self.args.verbose:
+                print("SKIP: librccl build disabled (build_configuration.enabled=false)")
+            return True
+
         print("="*80)
         print("BUILDING RCCL")
         print("="*80)
 
         workdir = self.paths.get("workdir", os.getcwd())
-        rocm_path = self.paths.get("rocm_path", "/opt/rocm")
+        rocm_path = self._rocm_root()
         mpi_path = self.paths.get("mpi_path", "")
 
-        # Get build configuration (with defaults)
-        cmake_options = self.build_config.get("cmake_options", {})
+        # Expand env vars / ~ (e.g. ${WORKDIR}, ${ROCM_SYSTEMS:-...}) so build
+        # paths need not be hardcoded. Mirrors build_rccl_tests(); a no-op for
+        # flags/options that contain no ${VAR} references.
+        def _expand(p):
+            return os.path.expanduser(expand_env_vars(str(p)))
+
+        install_flags = [_expand(f) for f in self.build_config.get("install_flags", [])]
+        cmake_options = self.build_config.get("cmake_options", "")
+        if isinstance(cmake_options, dict):
+            cmake_options = " ".join(f"-D{k}={_expand(v)}" for k, v in cmake_options.items())
+        else:
+            cmake_options = _expand(cmake_options)
         build_env_vars = self.build_config.get("env_variables", {})
-        parallel_jobs = self.build_config.get("parallel_jobs", 64)
-        generator = self.build_config.get("generator", "Unix Makefiles")
+        parallel_jobs = self.build_config.get("parallel_jobs")
+
+        if self.args.skip_mpi_check:
+            if "--enable-mpi-tests" in install_flags:
+                install_flags.remove("--enable-mpi-tests")
+            # Explicitly disable to override any cached CMake value from prior builds
+            if cmake_options:
+                cmake_options += " -DENABLE_MPI_TESTS=OFF"
+            else:
+                cmake_options = "-DENABLE_MPI_TESTS=OFF"
+            print("NOTE: MPI tests disabled in build (--skip-mpi-check)")
+
+        install_flags, cmake_options = configure_coverage_build(
+            install_flags,
+            cmake_options,
+            self.args.coverage_report,
+        )
+        if not self.args.coverage_report:
+            print("NOTE: Code coverage instrumentation disabled "
+                  "(use --coverage-report to enable)")
+        else:
+            print("NOTE: Coverage instrumentation enabled; CMake will use device "
+                  "coverage when supported and otherwise fall back to host-only")
+
+        # Build install.sh command
+        install_script = os.path.join(workdir, "install.sh")
+        cmd = [install_script] + install_flags
+
+        if parallel_jobs:
+            cmd.extend(["-j", str(parallel_jobs)])
+
+        if cmake_options:
+            cmd.extend(["--cmake-options", cmake_options])
+
+        # Setup environment
+        env = os.environ.copy()
+        env['ROCM_PATH'] = rocm_path
+        if mpi_path:
+            env['MPI_PATH'] = mpi_path
+
+        for key, value in build_env_vars.items():
+            env[key] = str(value)
 
         if self.args.verbose:
             print(f"Work directory:  {workdir}")
             print(f"ROCm path:       {rocm_path}")
             print(f"MPI path:        {mpi_path}")
             print(f"Build directory: {self.build_dir}")
-            print(f"Parallel jobs:   {parallel_jobs}")
-            print(f"Generator:       {generator}")
-
-        # Setup environment for build
-        env = os.environ.copy()
-
-        # Apply default environment variables for code coverage
-        default_env = {
-            'HIPCC_COMPILE_FLAGS_APPEND': (
-                "-g -Wno-format-nonliteral -Xarch_host -fprofile-instr-generate "
-                "-Xarch_host -fcoverage-mapping -parallel-jobs=16"
-            ),
-            'HIPCC_LINK_FLAGS_APPEND': (
-                "-fprofile-instr-generate -fcoverage-mapping -parallel-jobs=16"
-            ),
-            'LLVM_PROFILE_FILE': "rccl_tests_%p_%m.profraw",
-            'CXX': f"{rocm_path}/bin/amdclang++"
-        }
-
-        # Merge with user-provided build environment variables (user values override defaults)
-        for key, value in default_env.items():
-            env[key] = value
-        for key, value in build_env_vars.items():
-            env[key] = str(value)
-
-        # Build CMake configuration command with defaults
-        default_cmake_options = {
-            "CMAKE_CXX_FLAGS": "-Wl,--build-id=sha1",
-            "CMAKE_EXE_LINKER_FLAGS": "-Wl,--build-id=sha1",
-            "CMAKE_BUILD_TYPE": "Debug",
-            "ENABLE_CODE_COVERAGE": "ON",
-            "BUILD_TESTS": "ON",
-            "BUILD_LOCAL_GPU_TARGET_ONLY": "ON",
-            "TRACE": "ON",
-            "COLLTRACE": "ON",
-            "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-            "CMAKE_VERBOSE_MAKEFILE": "1",
-            "ENABLE_MPI_TESTS": "ON",
-            "MPI_PATH": mpi_path
-        }
-
-        # Merge with user-provided CMake options (user values override defaults)
-        merged_cmake_options = {**default_cmake_options, **cmake_options}
-
-        # Build CMake command
-        cmake_cmd = [
-            "cmake",
-            "-S", workdir,
-            "-B", self.build_dir
-        ]
-
-        # Add CMake options as -D flags
-        for key, value in merged_cmake_options.items():
-            cmake_cmd.append(f"-D{key}={value}")
-
-        # Add generator
-        cmake_cmd.append(f"-G{generator}")
-
-        try:
-            print("Running CMake configuration...")
-            if self.args.verbose:
-                print(f"CMake command: {' '.join(cmake_cmd)}")
-                print(f"Build environment variables:")
+            print(f"Install script:  {install_script}")
+            print(f"Install flags:   {' '.join(install_flags)}")
+            if cmake_options:
+                print(f"CMake options:   {cmake_options}")
+            if parallel_jobs:
+                print(f"Parallel jobs:   {parallel_jobs}")
+            print(f"Command: {' '.join(cmd)}")
+            if build_env_vars:
+                print("Build environment variables:")
                 for key, value in build_env_vars.items():
                     print(f"  {key}={value}")
 
+        try:
             result = subprocess.run(
-                cmake_cmd,
+                cmd,
                 cwd=workdir,
                 env=env,
                 capture_output=False
             )
 
             if result.returncode != 0:
-                print(f"ERROR: CMake configuration failed")
-                return False
-
-            print("\nRunning CMake build...")
-            build_cmd = f"cmake --build {self.build_dir} --parallel {parallel_jobs}"
-            if self.args.verbose:
-                print(f"Build command: {build_cmd}")
-
-            result = subprocess.run(
-                build_cmd,
-                shell=True,
-                cwd=workdir,
-                env=env,
-                capture_output=False
-            )
-
-            if result.returncode != 0:
-                print(f"ERROR: CMake build failed")
+                print("ERROR: install.sh build failed")
                 return False
 
             print("Build completed successfully")
+
+            # If --coverage-report was requested, verify the freshly built library
+            # actually contains coverage instrumentation. The user's build_configuration
+            # in the JSON config may not include --enable-code-coverage, in which
+            # case we must abort before running tests (otherwise no profraw files
+            # would be produced and the coverage step would silently produce nothing).
+            if self.args.coverage_report:
+                lib_path = os.path.join(self.build_dir, "librccl.so")
+                if os.path.isfile(lib_path) and not self._check_coverage_instrumentation(lib_path):
+                    self._print_coverage_missing_error(lib_path)
+                    return False
+
             return True
 
         except Exception as e:
             print(f"ERROR: Build failed with exception: {e}")
+            return False
+
+    def build_rccl_tests(self):
+        """
+        Build rccl-tests (the perf binaries: all_reduce_perf, all_gather_perf, ...)
+        using its own build system, mirroring build_rccl().
+
+        The rccl_tests_build_configuration in the JSON config specifies:
+        - enabled:        Set to false to skip this step entirely (default true if the
+                          section is present; absent section => skipped).
+        - source_dir:     Path to the rccl-tests checkout (env vars/~ expanded).
+        - install_script: Build script relative to source_dir (default "install.sh").
+        - install_flags:  List of flags passed to the build script (e.g. ["--mpi"]).
+        - build_command:  Optional full shell command that overrides install_script/
+                          install_flags (run with cwd=source_dir).
+        - rccl_home:      Path to the RCCL install/build to link against. Defaults to
+                          the RCCL build_dir produced by build_rccl(). Exported as both
+                          NCCL_HOME and RCCL_HOME for the build.
+        - env_variables:  Extra environment variables to set during the build.
+
+        Returns:
+            bool: True if the build succeeded or was intentionally skipped.
+        """
+        cfg = self.rccl_tests_build_config
+
+        # No section => nothing to build (backward compatible with existing configs).
+        if not cfg:
+            return True
+
+        if not cfg.get("enabled", True):
+            if self.args.verbose:
+                print("SKIP: rccl-tests build disabled (rccl_tests_build_configuration.enabled=false)")
+            return True
+
+        if self.args.no_build:
+            if self.args.verbose:
+                print("SKIP: rccl-tests build skipped (--no-build)")
+            return True
+
+        print("="*80)
+        print("BUILDING rccl-tests")
+        print("="*80)
+
+        workdir = self.paths.get("workdir", os.getcwd())
+        rocm_path = self._rocm_root()
+        mpi_path = self.paths.get("mpi_path", "")
+
+        # Use the bash-aware expander so ${VAR:-default} (e.g. the computed
+        # RCCL_TESTS_DIR with a fallback) resolves; os.path.expandvars cannot
+        # handle the ":-" default syntax and would leave the path literal.
+        def _expand(p):
+            return os.path.expanduser(expand_env_vars(str(p)))
+
+        source_dir = _expand(cfg.get("source_dir", os.path.join(workdir, "rccl-tests")))
+        if not os.path.isdir(source_dir):
+            print(f"ERROR: rccl-tests source directory not found: {source_dir}")
+            print("       Set rccl_tests_build_configuration.source_dir or the "
+                  "RCCL_TESTS_DIR environment variable.")
+            return False
+
+        # RCCL to link against: explicit rccl_home, else the RCCL build_dir we built.
+        rccl_home = _expand(cfg.get("rccl_home", self.build_dir))
+
+        # Expand env vars / ~ in each flag so values like
+        # "--hip_compiler ${HIP_COMPILER:-$HOME/.local/llvm/bin/amdclang++}"
+        # resolve before being passed to install.sh (argv is not shell-expanded).
+        install_flags = [_expand(f) for f in cfg.get("install_flags", [])]
+        build_env_vars = cfg.get("env_variables", {})
+
+        # Build the command: explicit build_command wins, otherwise install.sh + flags.
+        # build_command may be a shell string or an argv array (per schema). An argv
+        # array must run without a shell; a string runs through the shell. In both
+        # forms expand env vars / ~ for consistency with the other resolved paths.
+        build_command = cfg.get("build_command")
+        if build_command:
+            if isinstance(build_command, (list, tuple)):
+                cmd = [_expand(arg) for arg in build_command]
+                use_shell = False
+            else:
+                cmd = _expand(build_command)
+                use_shell = True
+        else:
+            install_script = os.path.join(source_dir, cfg.get("install_script", "install.sh"))
+            if not os.path.isfile(install_script):
+                print(f"ERROR: rccl-tests build script not found: {install_script}")
+                print("       Provide rccl_tests_build_configuration.build_command or "
+                      "install_script.")
+                return False
+            # rccl-tests/install.sh parses args with getopt (short opts: hmt) and
+            # parallelizes internally with -j$(nproc); it does NOT accept a -j flag.
+            # It also ignores NCCL_HOME/RCCL_HOME/MPI_HOME from the environment, so
+            # the RCCL and MPI locations must be passed as explicit flags (it does
+            # read ROCM_PATH and HIP_COMPILER from the env, but not those homes).
+            if rccl_home and "--rccl_home" not in install_flags:
+                install_flags += ["--rccl_home", rccl_home]
+            if rocm_path and "--rocm_home" not in install_flags:
+                install_flags += ["--rocm_home", rocm_path]
+            mpi_requested = any(f in ("--mpi", "-m") for f in install_flags)
+            if mpi_requested and mpi_path and "--mpi_home" not in install_flags:
+                install_flags += ["--mpi_home", mpi_path]
+            cmd = [install_script] + install_flags
+            use_shell = False
+
+        # Setup environment: point rccl-tests at the RCCL we just built.
+        env = os.environ.copy()
+        env['ROCM_PATH'] = rocm_path
+        if mpi_path:
+            env['MPI_PATH'] = mpi_path
+            env['MPI_HOME'] = mpi_path
+        env['NCCL_HOME'] = rccl_home
+        env['RCCL_HOME'] = rccl_home
+        for key, value in build_env_vars.items():
+            env[key] = str(value)
+
+        if self.args.verbose:
+            print(f"Source directory: {source_dir}")
+            print(f"ROCm path:        {rocm_path}")
+            print(f"MPI path:         {mpi_path}")
+            print(f"RCCL home:        {rccl_home}")
+            print(f"Command:          {cmd if use_shell else ' '.join(cmd)}")
+            if build_env_vars:
+                print("Build environment variables:")
+                for key, value in build_env_vars.items():
+                    print(f"  {key}={value}")
+
+        try:
+            result = subprocess.run(
+                cmd,
+                cwd=source_dir,
+                env=env,
+                shell=use_shell,
+                capture_output=False
+            )
+
+            if result.returncode != 0:
+                print("ERROR: rccl-tests build failed")
+                return False
+
+            print("rccl-tests build completed successfully")
+            return True
+
+        except Exception as e:
+            print(f"ERROR: rccl-tests build failed with exception: {e}")
             return False
 
     def _resolve_binary_path(self, binary, test_config):
@@ -337,15 +1760,20 @@ class TestExecutor:
         """
         # Strategy 1: Check if binary is already an absolute path
         if os.path.isabs(binary):
-            expanded_path = os.path.expandvars(binary)
-            return os.path.expanduser(expanded_path)
+            expanded_path = expand_env_vars(binary)
+            resolved = os.path.expanduser(expanded_path)
+            if self.args.verbose:
+                print(f"  Binary resolved via absolute path: {resolved}")
+            return resolved
 
         # Strategy 2: Expand environment variables in binary path
         if '$' in binary or '~' in binary:
-            expanded_path = os.path.expandvars(binary)
+            expanded_path = expand_env_vars(binary)
             expanded_path = os.path.expanduser(expanded_path)
             # If after expansion it becomes absolute, use it
             if os.path.isabs(expanded_path):
+                if self.args.verbose:
+                    print(f"  Binary resolved via env expansion: {expanded_path}")
                 return expanded_path
             # Otherwise treat as relative to test_binary_dir or build_dir
             binary = expanded_path
@@ -354,20 +1782,87 @@ class TestExecutor:
         test_binary_dir = test_config.get("test_binary_dir", "")
         if test_binary_dir:
             # Expand environment variables in test_binary_dir
-            test_binary_dir = os.path.expandvars(test_binary_dir)
+            test_binary_dir = expand_env_vars(test_binary_dir)
             test_binary_dir = os.path.expanduser(test_binary_dir)
-            return os.path.join(test_binary_dir, binary)
+            resolved = os.path.join(test_binary_dir, binary)
+            if self.args.verbose:
+                print(f"  Binary resolved via test config test_binary_dir: {resolved}")
+            return resolved
 
         # Strategy 4: Check for test_binary_dir in paths config
         if "test_binary_dir" in self.paths:
             test_binary_dir = self.paths["test_binary_dir"]
             # Expand environment variables in test_binary_dir
-            test_binary_dir = os.path.expandvars(test_binary_dir)
+            test_binary_dir = expand_env_vars(test_binary_dir)
             test_binary_dir = os.path.expanduser(test_binary_dir)
-            return os.path.join(test_binary_dir, binary)
+            resolved = os.path.join(test_binary_dir, binary)
+            if self.args.verbose:
+                print(f"  Binary resolved via paths config test_binary_dir: {resolved}")
+            return resolved
 
         # Strategy 5: Default - use build_dir/test/binary
-        return os.path.join(self.build_dir, "test", binary)
+        resolved = os.path.join(self.build_dir, "test", binary)
+        if self.args.verbose:
+            print(f"  Binary resolved via default build_dir/test: {resolved}")
+        return resolved
+
+    def _terminate_process_group(self, proc):
+        """Tear down the entire process group of ``proc`` (SIGTERM, then SIGKILL).
+
+        Tests are launched with ``start_new_session=True`` so the shell, mpirun,
+        orted and all spawned ranks share one process group (pgid == proc.pid).
+        Signalling the group -- rather than just ``proc`` -- guarantees a timed-out
+        or interrupted MPI job does not leave orphaned ranks holding the GPUs.
+        """
+        try:
+            pgid = os.getpgid(proc.pid)
+        except (ProcessLookupError, OSError):
+            return  # already gone
+
+        for sig in (signal.SIGTERM, signal.SIGKILL):
+            try:
+                os.killpg(pgid, sig)
+            except (ProcessLookupError, OSError):
+                return  # group already gone
+            try:
+                # Give the group a short grace period to exit on SIGTERM before
+                # escalating to SIGKILL.
+                proc.wait(timeout=10)
+                return
+            except subprocess.TimeoutExpired:
+                continue
+        # Reap to avoid a zombie even if it ignored SIGKILL (should not happen).
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+
+    @staticmethod
+    def _normalize_mpi_args(value):
+        """
+        Normalize an "mpi_args" config value into a single argument string.
+
+        Accepts a string (returned trimmed) or a list of strings (joined with
+        spaces). Returns "" for None/empty values so callers can skip it.
+        """
+        if value is None:
+            return ""
+        if isinstance(value, (list, tuple)):
+            return " ".join(str(item).strip() for item in value if str(item).strip())
+        return str(value).strip()
+
+    @staticmethod
+    def _resolve_gpu_count(value, detected):
+        """
+        Resolve a num_gpus value into a concrete integer.
+
+        "auto" (or None) resolves to the detected GPU count, or 8 when detection
+        failed (detected == 0), preserving the historical default. Numeric values
+        are returned as-is.
+        """
+        if value is None or (isinstance(value, str) and value.strip().lower() == "auto"):
+            return detected if detected else 8
+        return int(value)
 
     def run_test(self, test_config, suite_config):
         """
@@ -388,14 +1883,67 @@ class TestExecutor:
         # Use test_filter for all test types
         test_filter = test_config.get("test_filter", "*")
 
-        num_ranks = test_config.get("num_ranks", 1)
-        num_nodes = test_config.get("num_nodes", 1)
-        num_gpus = test_config.get("num_gpus", 8)  # GPUs per node (default: 8)
+        # num_gpus / num_ranks support the literal "auto" (and num_gpus defaults to
+        # "auto" when omitted): "auto" resolves to the detected GPUs per node so
+        # tests adapt to whatever hardware they run on. Bad/overridden values that
+        # bypass schema validation fail this single test rather than aborting the
+        # whole run.
+        detected_gpus = self.gpus_per_node
+        try:
+            num_nodes = int(test_config.get("num_nodes", 1))
+            num_gpus = self._resolve_gpu_count(test_config.get("num_gpus", "auto"), detected_gpus)
+            raw_ranks = test_config.get("num_ranks", 1)
+            if isinstance(raw_ranks, str) and raw_ranks.strip().lower() == "auto":
+                # All GPUs across all nodes
+                num_ranks = num_gpus * num_nodes
+            else:
+                num_ranks = int(raw_ranks)
+        except (ValueError, TypeError) as e:
+            msg = f"Invalid num_nodes/num_gpus/num_ranks for test '{test_name}': {e}"
+            print(f"ERROR: {msg}")
+            return {
+                "name": test_name,
+                "result": TestResult.RESULT_FAILED.value,
+                "duration": 0,
+                "error": msg,
+            }
+
+        # num_gpus of 0 declares a test that needs no GPU, which only makes sense
+        # on one node: multi-node placement builds "host:{num_gpus}" and
+        # "--map-by ppr:{num_gpus}:node" from it, and zero there would launch
+        # nothing. The same goes for the resolved rank count, which "auto" derives
+        # from num_gpus, so zero GPUs would ask mpirun for -np 0. Fail the test
+        # rather than launch nothing and call it a pass.
+        if num_ranks < 1 or num_nodes < 1 or num_gpus < 0 or (num_nodes > 1 and num_gpus < 1):
+            msg = (f"Invalid placement for test '{test_name}': {num_ranks} rank(s) over "
+                   f"{num_nodes} node(s) at {num_gpus} GPU(s)/node")
+            print(f"ERROR: {msg}")
+            return {
+                "name": test_name,
+                "result": TestResult.RESULT_FAILED.value,
+                "duration": 0,
+                "error": msg,
+            }
         timeout = test_config.get("timeout", 0)
         env_vars = test_config.get("env_variables", {})
 
-        # Support custom command arguments for non-gtest or specialized tests
-        custom_args = test_config.get("command_args", "")
+        # Support custom command arguments for non-gtest or specialized tests.
+        # The suite-level "command_args" is a shared base; a test's own
+        # "command_args" is appended to it, so a test can add flags
+        # (e.g. "-R 1 -G 2") without restating the shared base args.
+        base_args = suite_config.get("command_args", "")
+        test_args = test_config.get("command_args", "")
+        custom_args = f"{base_args} {test_args}".strip()
+
+        # rccl-tests dtype flag (-d <type>) for result emission; None for gtests.
+        _dtype_match = re.search(r'(?:^|\s)-d\s+(\S+)', custom_args)
+        perf_dtype = _dtype_match.group(1) if _dtype_match else None
+
+        # Execution mode: MPI (>1 rank -> mpirun) vs single-process multithreaded
+        # (-t N) vs single. Recorded per test so results are attributable.
+        _t_match = re.search(r'(?:^|\s)-t\s+(\d+)', custom_args)
+        perf_nthreads = int(_t_match.group(1)) if _t_match else 1
+        exec_mode = "mpi" if num_ranks > 1 else ("threaded" if perf_nthreads > 1 else "single")
 
         # Merge environment variables
         merged_env = {
@@ -404,19 +1952,54 @@ class TestExecutor:
             **env_vars
         }
 
+        mpi_extra = " ".join(
+            p for p in (
+                self._normalize_mpi_args(suite_config.get("mpi_args")),
+                self._normalize_mpi_args(test_config.get("mpi_args")),
+            ) if p
+        )
+        run_identity = make_run_identity_key(
+            binary=binary,
+            num_ranks=num_ranks,
+            num_nodes=num_nodes,
+            num_gpus=num_gpus,
+            custom_args=custom_args,
+            env_vars=merged_env,
+            extra=mpi_extra,
+        )
+
+        def _done(result, executed=True):
+            return finish_run_result(result, run_identity, executed)
+
+        print(f"\n{'='*80}")
+        print(f"Test: {test_name}")
+        print(f"{'='*80}")
+
+        # Pytest-harness suites use a dedicated runner; the gtest/MPI path below
+        # is left untouched.
+        if test_config.get("is_pytest", False):
+            return self._run_pytest_test(test_config, merged_env)
+
+        # Identity was hashed from the configured env. The live counter file is
+        # a private path so a fixed /tmp name is not what the test opens.
+        relocate_rma_reload_counter(merged_env, getattr(self, "workspace_dir", None))
+
         if self.args.verbose:
-            print(f"\n{'='*80}")
-            print(f"Test: {test_name}")
-            print(f"{'='*80}")
             if description:
                 print(f"  Description: {description}")
             print(f"  Type:    {'gtest' if is_gtest else 'non-gtest'}")
-            print(f"  Binary:  {binary}")
+            print(f"  Binary:  {os.path.expanduser(expand_env_vars(str(binary)))}")
             print(f"  Filter:  {test_filter}")
             print(f"  Ranks:   {num_ranks}")
             print(f"  Nodes:   {num_nodes}")
             print(f"  GPUs/node: {num_gpus}")
             print(f"  Timeout: {timeout if timeout > 0 else 'unlimited'}")
+            if custom_args:
+                print(f"  Custom args: {custom_args}")
+            if merged_env:
+                print(f"  Environment variables ({len(merged_env)}):")
+                for key, value in merged_env.items():
+                    print(f"    {key}={value}")
             print(f"  Started: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
         # Resolve binary path using flexible strategies
@@ -426,182 +2009,730 @@ class TestExecutor:
             print(f"  Binary path: {test_binary_path}")
 
         if not os.path.isfile(test_binary_path):
+            if num_ranks > 1:
+                print(f"SKIP: MPI test binary not found: {test_binary_path} (build may not have --enable-mpi-tests)")
+                return {
+                    "name": test_name,
+                    "result": TestResult.RESULT_SKIPPED.value,
+                    "duration": 0,
+                    "error": f"MPI binary not found: {test_binary_path}"
+                }
+            # CMake omits some single-rank targets unless an optional dependency
+            # is present (GIN-SDMA AllGather/Broadcast need sibling rccl-tests
+            # headers). Those configurations set skip_if_missing so a standalone
+            # RCCL build reports SKIPPED instead of failing before any test runs.
+            if suite_config.get("skip_if_missing"):
+                print(f"SKIP: optional test binary not found: {test_binary_path}")
+                return {
+                    "name": test_name,
+                    "result": TestResult.RESULT_SKIPPED.value,
+                    "duration": 0,
+                    "error": f"Optional binary not found: {test_binary_path}"
+                }
             print(f"ERROR: Test binary not found: {test_binary_path}")
-            return {
+            missing_details = [synthetic_case_detail(
+                test_name, test_filter, TestResult.RESULT_FAILED.value
+            )]
+            return _done({
                 "name": test_name,
                 "result": TestResult.RESULT_FAILED.value,
                 "duration": 0,
-                "error": f"Binary not found: {test_binary_path}"
-            }
+                "error": f"Binary not found: {test_binary_path}",
+                "case_details": missing_details,
+                "case_counts": _counts_from_details(missing_details),
+            })
+
+        # For MPI tests, verify mpirun is available
+        if num_ranks > 1:
+            mpi_path = self.paths.get("mpi_path", "")
+            mpirun = os.path.join(mpi_path, "bin", "mpirun") if mpi_path else shutil.which("mpirun")
+            if mpi_path and not os.path.isfile(os.path.join(mpi_path, "bin", "mpirun")):
+                mpirun = None
+            if not mpirun:
+                print(f"SKIP: mpirun not found, cannot run MPI test '{test_name}'")
+                return {
+                    "name": test_name,
+                    "result": TestResult.RESULT_SKIPPED.value,
+                    "duration": 0,
+                    "error": "mpirun not available"
+                }
+
+        # GPU-count skip: when the per-node GPU count is known, a test that needs
+        # more GPUs than the node provides is SKIPPED (not failed) so fixed-size
+        # tests can live in a shared config and self-skip on smaller nodes. For
+        # single-node tests the requirement is num_ranks; for multi-node it is the
+        # per-node rank count (num_gpus). Detection failure (detected_gpus == 0)
+        # disables this check. See README "Automatic skipping on insufficient GPUs".
+        if detected_gpus > 0:
+            # A test that declares num_gpus of 0 needs none, so the node's GPU count
+            # cannot be a reason to skip it -- otherwise a CPU-only test with more
+            # ranks than the node has GPUs is skipped for a resource it never asked
+            # for. Zero here is always explicit: "auto" resolves to the detected
+            # count, or 8 when detection failed, and this branch only runs when
+            # detection succeeded.
+            gpus_needed = 0 if num_gpus == 0 else (num_ranks if num_nodes <= 1 else num_gpus)
+            if gpus_needed > detected_gpus:
+                msg = (
+                    f"SKIP: test needs {gpus_needed} GPU(s)/node, "
+                    f"node has {detected_gpus}"
+                )
+                print(msg)
+                return {
+                    "name": test_name,
+                    "result": TestResult.RESULT_SKIPPED.value,
+                    "duration": 0,
+                    "error": msg,
+                }
+
+        # Multi-node tests: skip if hostfile / SLURM provides fewer hosts than required
+        if num_ranks > 1 and num_nodes > 1:
+            avail = _distinct_host_count(self.mpi_hosts)
+            if avail > 0 and avail < num_nodes:
+                msg = (
+                    f"SKIP: test needs {num_nodes} distinct host(s), "
+                    f"hostfile/SLURM has {avail}"
+                )
+                print(msg)
+                return {
+                    "name": test_name,
+                    "result": TestResult.RESULT_SKIPPED.value,
+                    "duration": 0,
+                    "error": msg,
+                }
 
         # Setup environment
         env = os.environ.copy()
 
-        # Build LD_LIBRARY_PATH with build dir and MPI lib (if available)
-        mpi_path = self.paths.get("mpi_path", "")
+        # Build LD_LIBRARY_PATH.  Priority order (highest → lowest):
+        #   1. build_dir          – always first so the test-built librccl.so wins
+        #   2. test JSON value    – per-test custom lib dir (e.g. a backport HIP stack)
+        #   3. caller environment – LD_LIBRARY_PATH already set in the shell lets
+        #                           users point at a custom libamdhip64.so.7 without
+        #                           any special variable:
+        #                             LD_LIBRARY_PATH=/path/to/hip python3 test_runner.py ...
+        #   4. {rocm_path}/lib    – default ROCm/HIP fallback
+        #   5. mpi_path/lib       – MPI runtime
+        #
+        # LD_LIBRARY_PATH from the JSON config is consumed here (not in the
+        # merged_env loop below) so that build_dir always stays first.
+        mpi_path  = self.paths.get("mpi_path", "")
+        rocm_path = self._rocm_root()
+
         ld_library_path_parts = [self.build_dir]
+        test_ld = merged_env.get('LD_LIBRARY_PATH')
+        if test_ld:
+            ld_library_path_parts.append(str(test_ld))
+        if env.get('LD_LIBRARY_PATH'):
+            ld_library_path_parts.append(env['LD_LIBRARY_PATH'])
+        ld_library_path_parts.append(os.path.join(rocm_path, "lib"))
         if mpi_path:
             ld_library_path_parts.append(os.path.join(mpi_path, "lib"))
-        if env.get('LD_LIBRARY_PATH'):
-            ld_library_path_parts.append(env.get('LD_LIBRARY_PATH'))
         env['LD_LIBRARY_PATH'] = ":".join(ld_library_path_parts)
 
-        # Set LLVM_PROFILE_FILE for code coverage (prevents default.profraw collision)
-        env['LLVM_PROFILE_FILE'] = "rccl_tests_%p_%m.profraw"
+        # Set LLVM_PROFILE_FILE for code coverage (prevents default.profraw
+        # collision). Only do this when coverage reporting is requested -- with
+        # an instrumented binary, writing per-PID profraw files on every process
+        # exit is a significant overhead when many short-lived test processes
+        # are spawned.
+        #
+        # %h  — unique per host when MPI ranks write to shared storage.
+        # %p  — unique per child PID (ProcessIsolatedTestRunner re-execs each
+        #        test as a separate process, so each gets its own file).
+        # %m  — binary/module signature (keeps test-binary and librccl.so
+        #        profiles in separate files since each has its own runtime).
+        profile_pattern = self._apply_coverage_profile_env(env)
 
-        # Add test-specific env vars
+        # Add test-specific env vars.  LD_LIBRARY_PATH is already merged above.
         for key, value in merged_env.items():
-            env[key] = str(value)
+            if key != 'LD_LIBRARY_PATH':
+                env[key] = str(value)
+
+        # Executable to invoke. Use the fully-resolved absolute path (not
+        # "./<binary>") so out-of-tree binaries work: gtest binaries live in
+        # cwd=<build_dir>/test, but rccl-tests perf binaries live under the
+        # rccl-tests build dir. test_binary_path was resolved above and verified
+        # to exist; shlex.quote handles any spaces.
+        exe = shlex.quote(test_binary_path)
+
+        # Create the gtest JSON output file up front so the command builders
+        # below can embed it directly into the program string (rather than
+        # re-parsing the assembled command). Removed in the finally block.
+        gtest_json_path = None
+        gtest_out_arg = ""
+        if is_gtest:
+            # Rank 0 writes this file. When that rank is another host, /tmp on
+            # this process stays empty and an exit 0 would be scored PASSED.
+            report_dir = tempfile.gettempdir()
+            if num_ranks > 1 and not _rank0_is_local(getattr(self, "mpi_hosts", None)):
+                report_dir = getattr(self, "workspace_dir", None) or report_dir
+                os.makedirs(report_dir, exist_ok=True)
+            fd, gtest_json_path = tempfile.mkstemp(
+                prefix="rccl_gtest_", suffix=".json", dir=report_dir
+            )
+            os.close(fd)
+            gtest_out_arg = f" --gtest_output=json:{shlex.quote(gtest_json_path)}"
 
         # Build command based on test type
         if num_ranks == 1:
-            # Non-MPI test - prepend environment variables to the command
+            # Non-MPI test - prepend environment variables to the command.
+            # LD_LIBRARY_PATH is already merged with correct priority order above,
+            # so skip it in the merged_env loop and use the final env value instead.
             env_prefix = ""
             for key, value in merged_env.items():
-                env_prefix += f"{key}={value} "
+                if key != 'LD_LIBRARY_PATH':
+                    env_prefix += f"{key}={value} "
+            env_prefix += f"LD_LIBRARY_PATH={env['LD_LIBRARY_PATH']} "
 
-            if is_gtest:
-                # GTest-based test - use --gtest_filter syntax
-                if test_filter == "ALL" or test_filter == "*":
-                    cmd = f"{env_prefix}./{binary}"
-                else:
-                    cmd = f"{env_prefix}./{binary} --gtest_filter={test_filter}"
-
-                # Add custom arguments if provided
-                if custom_args:
-                    cmd += f" {custom_args}"
+            # Build the program (binary + args) as one string so the same
+            # locked-memory wrapper used on the MPI path applies here too.
+            if is_gtest and not (test_filter == "ALL" or test_filter == "*"):
+                program = f"{exe} --gtest_filter={test_filter}"
             else:
-                # Non-gtest test (perf, custom, etc.) - run binary with args
-                cmd = f"{env_prefix}./{binary}"
-                if custom_args:
-                    cmd += f" {custom_args}"
+                program = exe
+            if custom_args:
+                program += f" {custom_args}"
+            program += gtest_out_arg
+
+            # RDMA QP/CQ creation pins memory and fails with "Cannot allocate
+            # memory" under SLURM's low inherited locked-memory soft limit, so
+            # raise it before exec. `set -f` keeps gtest filter globs literal.
+            # The env_prefix stays in front so bash inherits the test env vars.
+            inner = f"ulimit -l unlimited 2>/dev/null; set -f; exec {program}"
+            cmd = f"{env_prefix}bash -c {shlex.quote(inner)}"
 
         else:
             # MPI test
             mpi_path = self.paths.get("mpi_path", "")
             mpi_cmd = f"{mpi_path}/bin/mpirun" if mpi_path else "mpirun"
 
-            # Use cached hostfile detected during initialization
-            hostfile = self.mpi_hostfile
+            # Allow running as root (common in Docker containers)
+            if os.getuid() == 0:
+                mpi_cmd += " --allow-run-as-root"
 
-            # Warn if multi-node test without hostfile
-            if hostfile is None and num_nodes > 1:
-                print("WARNING: Multi-node test without hostfile")
-
-            hostfile_arg = f"--hostfile {hostfile} " if hostfile else ""
-
-            # Determine mapping strategy based on num_gpus and num_nodes
-            # Use PPR (processes per resource) to place num_gpus ranks per node
-            # This ignores the slots specification in the hostfile
-            if num_nodes > 1:
-                # Multi-node test: use ppr to control ranks per node
-                map_by_arg = f"--map-by ppr:{num_gpus}:node "
-            else:
-                # Single node: use default mapping (no need for ppr)
+            # Use cached host detection from initialization
+            if 'host_list' in self.mpi_hosts:
+                # SLURM mode: use --host with slot counts instead of --map-by ppr
+                # Repeat each host num_gpus times to place that many ranks per node
+                hosts = self.mpi_hosts['host_list'].split(',')
+                # Slots, not GPUs: a CPU-only test declares num_gpus of 0, and
+                # "host:0" leaves mpirun with nothing to launch into ("not enough
+                # slots"). Fall back to the ranks the test actually needs per node.
+                slots = num_gpus if num_gpus > 0 else -(-num_ranks // num_nodes)
+                expanded = ','.join(f"{h}:{slots}" for h in hosts)
+                host_arg = f"--host {expanded} "
                 map_by_arg = ""
+            elif 'hostfile' in self.mpi_hosts:
+                host_arg = f"--hostfile {self.mpi_hosts['hostfile']} "
+                # Same fallback as the SLURM branch above: a CPU-only test
+                # declares num_gpus of 0, and ppr:0:node places nothing. Without
+                # an explicit ppr the hostfile's own slot counts govern
+                # placement instead of what this test asked for, which is how a
+                # single-node CPU-only test spilled onto -- or was refused by --
+                # a second host entry in the file. Applied for every node
+                # count, not only num_nodes > 1: a single declared node is a
+                # placement request in its own right, and the hostfile can list
+                # more hosts than that.
+                slots = num_gpus if num_gpus > 0 else -(-num_ranks // num_nodes)
+                map_by_arg = f"--map-by ppr:{slots}:node "
+            else:
+                if num_nodes > 1:
+                    print("WARNING: Multi-node test without hostfile or SLURM allocation")
+                host_arg = ""
+                map_by_arg = ""
+
+            # Resolve the mpirun/MCA arguments. Each "mpi_args" value may be a
+            # string or a list of strings (lists are joined with spaces).
+            #
+            # The BASE set replaces the built-in defaults, with this priority:
+            #   1. top-level "mpi_args" dict entry for the active --system
+            #   2. top-level "mpi_args" string/list (applies to all systems)
+            #   3. built-in default_args
+            #
+            # Suite-level and test-level "mpi_args" are then APPENDED on top of
+            # the base, so they add flags regardless of --system.
+            default_mca = self.mpi_config["default_args"]
+            system = getattr(self.args, 'system', '') or ''
+            top_level_config = self.config_processor.config.get("mpi_args", "")
+
+            if isinstance(top_level_config, dict):
+                base_args = self._normalize_mpi_args(top_level_config.get(system)) if system else ""
+            else:
+                base_args = self._normalize_mpi_args(top_level_config)
+
+            if not base_args:
+                base_args = default_mca
+
+            suite_args = self._normalize_mpi_args(suite_config.get("mpi_args"))
+            test_args = self._normalize_mpi_args(test_config.get("mpi_args"))
+
+            # User-supplied extra mpi args, appended last so they override/extend
+            # whatever the config provides. Both the --mpi-args CLI flag and the
+            # RCCL_TEST_MPI_ARGS env var are honored (CLI first, then env).
+            cli_extra_args = self._normalize_mpi_args(getattr(self.args, 'mpi_args', ''))
+            env_extra_args = self._normalize_mpi_args(os.environ.get('RCCL_TEST_MPI_ARGS', ''))
+
+            mca_params = " ".join(
+                p for p in (base_args, suite_args, test_args, cli_extra_args, env_extra_args) if p
+            )
 
             mpi_args = (
                 f"-np {num_ranks} "
-                f"{hostfile_arg}"
+                f"{host_arg}"
                 f"{map_by_arg}"
-                f"--mca btl ^vader,openib "
-                f"--mca pml ucx "
-                f"--bind-to none"
+                f"{mca_params}"
             )
 
-            # Add environment variables for MPI
+            # Add environment variables for MPI (quote values to handle shell metacharacters like ;)
+            env_fmt = self.mpi_config["env_format"]
             for key, value in merged_env.items():
-                mpi_args += f" -x {key}={value}"
+                mpi_args += " " + env_fmt.format(key=key, value=value)
 
-            # Pass the LD_LIBRARY_PATH
-            mpi_args += f" -x LD_LIBRARY_PATH={env['LD_LIBRARY_PATH']}"
+            mpi_args += " " + env_fmt.format(key="LD_LIBRARY_PATH", value=env['LD_LIBRARY_PATH'])
+            if profile_pattern:
+                mpi_args += " " + env_fmt.format(
+                    key="LLVM_PROFILE_FILE", value=profile_pattern
+                )
 
-            # Pass LLVM_PROFILE_FILE to MPI ranks for code coverage (prevents default.profraw collision)
-            mpi_args += f" -x LLVM_PROFILE_FILE=rccl_tests_%p_%m.profraw"
+            # Forward LD_PRELOAD so UCX core libraries are preloaded with
+            # global visibility on remote ranks (required for UCX PML)
+            ld_preload = os.environ.get("LD_PRELOAD", "")
+            if ld_preload:
+                mpi_args += " " + env_fmt.format(key="LD_PRELOAD", value=ld_preload)
 
-            # Build test command based on type
-            if is_gtest:
-                # GTest-based test - use --gtest_filter syntax
-                if test_filter == "ALL" or test_filter == "*":
-                    cmd = f"{mpi_cmd} {mpi_args} ./{binary}"
-                else:
-                    cmd = f"{mpi_cmd} {mpi_args} ./{binary} --gtest_filter={test_filter}"
-
-                if custom_args:
-                    cmd += f" {custom_args}"
+            # Build the program (test binary + its arguments) that mpirun will
+            # launch as a single string, so the locked-memory wrapper below can be
+            # applied directly instead of re-parsing the assembled command.
+            # Do not pass --gtest_output to every rank: they would race on one file.
+            if is_gtest and not (test_filter == "ALL" or test_filter == "*"):
+                program = f"{exe} --gtest_filter={test_filter}"
             else:
-                # Non-gtest test (perf, custom, etc.) - run binary with args
-                cmd = f"{mpi_cmd} {mpi_args} ./{binary}"
-                if custom_args:
-                    cmd += f" {custom_args}"
+                program = exe
+            if custom_args:
+                program += f" {custom_args}"
+            wrapped_program = wrap_mpi_program(
+                program, gtest_json_path if is_gtest else None
+            )
+            cmd = f"{mpi_cmd} {mpi_args} {wrapped_program}"
 
+        # Working directory: gtest binaries live in <build_dir>/test, but a
+        # prebuilt/custom lib dir (RCCL_BUILD_DIR / test_binary_dir override) may
+        # have no "test" subdir. cwd only needs to exist (perf binaries are invoked
+        # by absolute path), so fall back gracefully to keep prebuilt runs working.
+        run_cwd = os.path.join(self.build_dir, "test")
+        if not os.path.isdir(run_cwd):
+            if os.path.isdir(self.build_dir):
+                run_cwd = self.build_dir
+            else:
+                run_cwd = os.path.dirname(test_binary_path) or os.getcwd()
 
         if self.args.verbose:
             print(f"\n  Command: {cmd}")
-            print(f"  Working directory: {os.path.join(self.build_dir, 'test')}")
+            print(f"  Working directory: {run_cwd}")
             print(f"  LD_LIBRARY_PATH: {env.get('LD_LIBRARY_PATH', '')}")
             print(f"  LLVM_PROFILE_FILE: {env.get('LLVM_PROFILE_FILE', 'Not set')}\n")
 
-        # Execute test
+        # Inherit stdout/stderr (no PIPE capture). For gtest, --gtest_output=json:…
+        # (temp file, removed in finally) supplies reliable SKIPPED vs PASSED on exit 0.
+        #
+        # Launch the test in its own session (start_new_session=True) so the
+        # shell AND every descendant -- mpirun, orted, and the spawned ranks /
+        # perf binaries -- share a single process group we can signal as a unit.
+        # subprocess.run(timeout=...) only SIGKILLs the immediate /bin/sh child,
+        # leaving mpirun and all of its ranks running (and holding the GPUs),
+        # which is exactly the orphaned-process behaviour seen on timeout.
+        # When result emission is enabled, tee output to a per-test log so perf
+        # (busbw/algbw) numbers can be parsed afterwards, while still streaming to
+        # the console. ``set -o pipefail`` keeps the pipeline's exit status equal to
+        # the test's (not tee's). Default behaviour (inherited stdout, no capture)
+        # is unchanged when emission is off.
+        emit_log_path = None
         start_time = time.time()
+        if self.emit_enabled:
+            emit_log_path = self._emit_log_path(test_name)
+            wrapped = f"set -o pipefail; ({cmd}) 2>&1 | tee {shlex.quote(emit_log_path)}"
+            proc = subprocess.Popen(
+                ["bash", "-c", wrapped],
+                cwd=run_cwd,
+                env=env,
+                start_new_session=True,
+            )
+        else:
+            proc = subprocess.Popen(
+                cmd,
+                shell=True,
+                cwd=run_cwd,
+                env=env,
+                start_new_session=True,
+            )
         try:
-            if timeout > 0:
-                result = subprocess.run(
-                    cmd,
-                    shell=True,
-                    cwd=os.path.join(self.build_dir, "test"),
-                    env=env,
-                    capture_output=False,
-                    timeout=timeout
+            try:
+                returncode = proc.wait(timeout=timeout if timeout > 0 else None)
+            except subprocess.TimeoutExpired:
+                duration = time.time() - start_time
+                print("  Killing process group (mpirun and all ranks)...")
+                self._terminate_process_group(proc)
+                # Read only after every possible gtest JSON writer has exited.
+                parsed = collect_gtest_case_details_from_file(gtest_json_path or "") if is_gtest else None
+                case_details = merge_timeout_details(
+                    parsed, test_name, test_filter, timeout
                 )
-            else:
-                result = subprocess.run(
-                    cmd,
-                    shell=True,
-                    cwd=os.path.join(self.build_dir, "test"),
-                    env=env,
-                    capture_output=False
+                case_counts = _counts_from_details(case_details)
+                print_case_result(
+                    TestResult.RESULT_TIMEOUT.value,
+                    case_counts,
+                    case_details,
+                    f"after {timeout} seconds",
                 )
+                return _done({
+                    "name": test_name,
+                    "result": TestResult.RESULT_TIMEOUT.value,
+                    "duration": duration,
+                    "error": f"Test timed out after {timeout} seconds",
+                    "binary": binary, "is_gtest": is_gtest, "dtype": perf_dtype,
+                    "num_nodes": num_nodes, "num_gpus": num_gpus,
+                    "num_ranks": num_ranks, "log_file": emit_log_path,
+                    "exec_mode": exec_mode, "nthreads": perf_nthreads,
+                    "case_counts": case_counts,
+                    "case_details": case_details,
+                })
+            except KeyboardInterrupt:
+                # Make sure Ctrl-C tears down the whole MPI job, not just the shell.
+                print("\n  Interrupted -- killing process group (mpirun and all ranks)...")
+                self._terminate_process_group(proc)
+                raise
+            except Exception as e:
+                duration = time.time() - start_time
+                self._terminate_process_group(proc)
+                print(f"\n  ERROR: {e}")
+                return _done({
+                    "name": test_name,
+                    "result": TestResult.RESULT_FAILED.value,
+                    "duration": duration,
+                    "error": str(e)
+                })
 
             duration = time.time() - start_time
 
-            # Determine result
-            if result.returncode == ExitCode.EXIT_SUCCESS:
-                test_result = TestResult.RESULT_PASSED.value
-            elif result.returncode == ExitCode.EXIT_TIMEOUT:
-                test_result = TestResult.RESULT_TIMEOUT.value
+            case_counts = None
+            case_details = None
+            if is_gtest:
+                rc = returncode if returncode is not None else -1
+                report_missing = (
+                    num_ranks > 1
+                    and not _rank0_is_local(getattr(self, "mpi_hosts", None))
+                    and (
+                        not gtest_json_path
+                        or not os.path.isfile(gtest_json_path)
+                        or os.path.getsize(gtest_json_path) == 0
+                    )
+                )
+                if report_missing and rc == ExitCode.EXIT_SUCCESS:
+                    # The workspace path was not visible to rank 0. Do not
+                    # score the empty local file as a pass.
+                    test_result = TestResult.RESULT_FAILED.value
+                    case_details = merge_process_failure_details(
+                        None, test_name, test_filter,
+                        reason="rank 0 gtest report was not visible on this host",
+                    )
+                else:
+                    case_details = collect_gtest_case_details_from_file(gtest_json_path or "")
+                    test_result = infer_gtest_result_from_json_file(
+                        gtest_json_path or "", rc, details=case_details
+                    )
+                # MPI abort / JSON races leave no report; still count the entry.
+                if case_details is None and test_result == TestResult.RESULT_PASSED.value:
+                    case_details = [
+                        synthetic_case_detail(test_name, test_filter, test_result)
+                    ]
+                elif test_result == TestResult.RESULT_FAILED.value:
+                    case_details = merge_process_failure_details(
+                        case_details, test_name, test_filter
+                    )
+                elif test_result == TestResult.RESULT_TIMEOUT.value:
+                    case_details = merge_timeout_details(
+                        case_details, test_name, test_filter, timeout
+                    )
+                if case_details is not None:
+                    case_counts = _counts_from_details(case_details)
             else:
-                test_result = TestResult.RESULT_FAILED.value
+                if returncode == ExitCode.EXIT_SUCCESS:
+                    test_result = TestResult.RESULT_PASSED.value
+                elif returncode == ExitCode.EXIT_TIMEOUT:
+                    test_result = TestResult.RESULT_TIMEOUT.value
+                else:
+                    test_result = TestResult.RESULT_FAILED.value
 
-            if self.args.verbose:
-                print(f"\n  Result: {test_result} ({duration:.3f} seconds)")
+            print_case_result(
+                test_result,
+                case_counts,
+                case_details,
+                f"({duration:.3f} seconds)",
+            )
 
-            return {
+            result = {
                 "name": test_name,
                 "result": test_result,
                 "duration": duration,
-                "exit_code": result.returncode
+                "exit_code": int(returncode) if returncode is not None else -1,
+                "binary": binary, "is_gtest": is_gtest, "dtype": perf_dtype,
+                "num_nodes": num_nodes, "num_gpus": num_gpus,
+                "num_ranks": num_ranks, "log_file": emit_log_path,
+                "exec_mode": exec_mode, "nthreads": perf_nthreads,
+            }
+            if case_counts is not None:
+                result["case_counts"] = case_counts
+            if case_details is not None:
+                result["case_details"] = case_details
+            return _done(result)
+        finally:
+            if gtest_json_path:
+                try:
+                    os.unlink(gtest_json_path)
+                except OSError:
+                    pass
+
+    def _setup_pytest_venv(self, test_dir, test_config):
+        """Create/reuse a venv and install ONLY the given requirements file into
+        it (opt-in via setup_venv); nothing is installed outside the venv. Keys:
+        venv_dir (default <test_dir>/venv), requirements (default
+        <test_dir>/requirements.txt), python_bin (base interpreter).
+        Returns (venv_python, error) where error is "" on success."""
+        venv_dir = test_config.get("venv_dir", "") or os.path.join(test_dir, "venv")
+        venv_dir = os.path.expanduser(os.path.expandvars(venv_dir))
+        if not os.path.isabs(venv_dir):
+            venv_dir = os.path.join(test_dir, venv_dir)
+        venv_py = os.path.join(venv_dir, "bin", "python")
+        base_python = test_config.get("python_bin", "") or "python3"
+
+        req = test_config.get("requirements", "") or os.path.join(test_dir, "requirements.txt")
+        req = os.path.expanduser(os.path.expandvars(req))
+        if not os.path.isabs(req):
+            req = os.path.join(test_dir, req)
+        if not os.path.isfile(req):
+            return venv_py, f"requirements file not found: {req}"
+
+        def _run(argv, label):
+            print(f"  [setup_venv] {label}: {' '.join(argv)}")
+            r = subprocess.run(argv, cwd=test_dir, capture_output=True, text=True)
+            if r.returncode != 0:
+                return f"{label} failed (rc={r.returncode}): {(r.stderr or r.stdout).strip()[:500]}"
+            return ""
+
+        if not os.path.isfile(venv_py):
+            err = _run([base_python, "-m", "venv", venv_dir], "create venv")
+            if err:
+                return venv_py, err
+
+        # Install ONLY the requirements file, into the venv (no extra packages).
+        err = _run([venv_py, "-m", "pip", "install", "-r", req], "install requirements")
+        return venv_py, err
+
+    def _run_pytest_test(self, test_config, merged_env):
+        """Run a pytest-harness test in its source dir (no mpirun); result is
+        derived from a JUnit XML report. Keys: test_dir (required), test_filter
+        (leading '-' = raw pytest args, else -k expr; '*'/'ALL'/empty = all),
+        python_bin (default <test_dir>/venv else python3), timeout."""
+        test_name = test_config.get("name")
+        timeout = test_config.get("timeout", 0)
+        test_filter = test_config.get("test_filter", "*")
+
+        # Identity and _done are created before the pre-launch failures so a
+        # missing harness still shows up in the issue tree.
+        test_dir = test_config.get("test_dir", "")
+        run_identity = make_run_identity_key(
+            binary="pytest",
+            num_ranks=1,
+            num_nodes=1,
+            env_vars=merged_env,
+            extra=f"pytest:{os.path.normpath(test_dir) if test_dir else ''}",
+        )
+
+        def _done(result, executed=True):
+            return finish_run_result(result, run_identity, executed)
+
+        def _failed(error):
+            details = [synthetic_case_detail(
+                test_name, test_filter, TestResult.RESULT_FAILED.value
+            )]
+            return _done({
+                "name": test_name,
+                "result": TestResult.RESULT_FAILED.value,
+                "duration": 0,
+                "error": error,
+                "case_details": details,
+                "case_counts": _counts_from_details(details),
+            })
+
+        # Resolve harness dir (absolute, or relative to workdir).
+        if not test_dir:
+            print(f"ERROR: pytest test '{test_name}' is missing required 'test_dir'")
+            return _failed("pytest test missing 'test_dir'")
+        test_dir = os.path.expanduser(os.path.expandvars(test_dir))
+        if not os.path.isabs(test_dir):
+            workdir = self.paths.get("workdir", os.getcwd())
+            test_dir = os.path.join(workdir, test_dir)
+
+        if not os.path.isdir(test_dir):
+            print(f"SKIP: pytest directory not found: {test_dir}")
+            return {
+                "name": test_name,
+                "result": TestResult.RESULT_SKIPPED.value,
+                "duration": 0,
+                "error": f"pytest directory not found: {test_dir}",
             }
 
+        # Interpreter selection. With setup_venv, create/reuse a managed venv and
+        # install requirements; otherwise: explicit override > local venv > python3.
+        if test_config.get("setup_venv", False):
+            python_bin, setup_err = self._setup_pytest_venv(test_dir, test_config)
+            if setup_err:
+                print(f"\n  Result: {TestResult.RESULT_FAILED.value} ({setup_err})")
+                return _failed(setup_err)
+        else:
+            python_bin = test_config.get("python_bin", "")
+            if not python_bin:
+                venv_py = os.path.join(test_dir, "venv", "bin", "python")
+                python_bin = venv_py if os.path.isfile(venv_py) else "python3"
+
+        # test_filter -> pytest selection args (raw args if leading '-', else -k expr).
+        select_args = []
+        if test_filter and test_filter not in ("*", "ALL"):
+            if test_filter.lstrip().startswith("-"):
+                select_args = shlex.split(test_filter)
+            else:
+                select_args = ["-k", test_filter]
+
+        # Resolved directory replaces the pre-launch identity. _done looks the
+        # name up when it runs, so later returns see this value.
+        run_identity = make_run_identity_key(
+            binary="pytest",
+            num_ranks=1,
+            num_nodes=1,
+            env_vars=merged_env,
+            extra=f"pytest:{os.path.normpath(test_dir)}",
+        )
+
+        # Env: build_dir first on LD_LIBRARY_PATH, then a per-test LD_LIBRARY_PATH
+        # from the JSON env (mirrors the gtest/MPI path), then rocm/mpi libs.
+        # RCCL_BUILD defaults to build_dir; remaining config env is applied as-is.
+        env = os.environ.copy()
+        rocm_path = self._rocm_root()
+        mpi_path = self.paths.get("mpi_path", "")
+        test_ld = merged_env.get("LD_LIBRARY_PATH")
+        ld_parts = [self.build_dir]
+        if test_ld:
+            ld_parts.append(str(test_ld))
+        if env.get("LD_LIBRARY_PATH"):
+            ld_parts.append(env["LD_LIBRARY_PATH"])
+        ld_parts.append(os.path.join(rocm_path, "lib"))
+        if mpi_path:
+            ld_parts.append(os.path.join(mpi_path, "lib"))
+        env["LD_LIBRARY_PATH"] = ":".join(ld_parts)
+        env.setdefault("RCCL_BUILD", self.build_dir)
+        self._apply_coverage_profile_env(env)
+        for key, value in merged_env.items():
+            if key != "LD_LIBRARY_PATH":
+                env[key] = str(value)
+
+        # Keep the JUnit report as an artifact under the runner's log dir (it is
+        # the only structured record of the pytest run), one file per test.
+        safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", test_name or "pytest")
+        junit_path = os.path.join(self.log_dir, f"pytest_{safe_name}.xml")
+        cmd = [
+            python_bin, "-m", "pytest", "-v", "-p", "no:cacheprovider",
+            f"--junitxml={junit_path}",
+        ] + select_args
+
+        if self.args.verbose:
+            print(f"  Description: {test_config.get('description', '')}")
+            print(f"  Type:    pytest")
+            print(f"  Dir:     {test_dir}")
+            print(f"  Filter:  {test_filter}")
+            print(f"  Timeout: {timeout if timeout > 0 else 'unlimited'}")
+            print(f"\n  Command: {' '.join(cmd)}")
+            print(f"  Working directory: {test_dir}")
+            print(f"  LD_LIBRARY_PATH: {env.get('LD_LIBRARY_PATH', '')}\n")
+
+        start_time = time.time()
+        run_kwargs = {
+            "cwd": test_dir,
+            "env": env,
+            "capture_output": False,
+        }
+        if timeout > 0:
+            run_kwargs["timeout"] = timeout
+
+        try:
+            result = subprocess.run(cmd, **run_kwargs)
         except subprocess.TimeoutExpired:
             duration = time.time() - start_time
-            if self.args.verbose:
-                print(f"\n  Result: {TestResult.RESULT_TIMEOUT.value} after {timeout} seconds")
-            return {
+            parsed = collect_pytest_case_details_from_junit(junit_path)
+            case_details = merge_timeout_details(
+                parsed, test_name, test_filter, timeout
+            )
+            case_counts = _counts_from_details(case_details)
+            print_case_result(
+                TestResult.RESULT_TIMEOUT.value,
+                case_counts,
+                case_details,
+                f"after {timeout} seconds",
+            )
+            return _done({
                 "name": test_name,
                 "result": TestResult.RESULT_TIMEOUT.value,
                 "duration": duration,
-                "error": f"Test timed out after {timeout} seconds"
-            }
+                "error": f"Test timed out after {timeout} seconds",
+                "case_counts": case_counts,
+                "case_details": case_details,
+            })
         except Exception as e:
             duration = time.time() - start_time
             print(f"\n  ERROR: {e}")
-            return {
+            return _done({
                 "name": test_name,
                 "result": TestResult.RESULT_FAILED.value,
                 "duration": duration,
-                "error": str(e)
-            }
+                "error": str(e),
+            })
+
+        duration = time.time() - start_time
+        rc = result.returncode if result.returncode is not None else -1
+        case_details = collect_pytest_case_details_from_junit(junit_path)
+        test_result = infer_pytest_result_from_junit(junit_path, rc, details=case_details)
+        if case_details is None and test_result in (
+            TestResult.RESULT_PASSED.value,
+            TestResult.RESULT_FAILED.value,
+            TestResult.RESULT_TIMEOUT.value,
+        ):
+            case_details = [synthetic_case_detail(test_name, test_filter, test_result)]
+        elif test_result == TestResult.RESULT_FAILED.value:
+            case_details = merge_process_failure_details(
+                case_details, test_name, test_filter
+            )
+        elif test_result == TestResult.RESULT_TIMEOUT.value:
+            case_details = merge_timeout_details(
+                case_details, test_name, test_filter, timeout
+            )
+        case_counts = _counts_from_details(case_details) if case_details is not None else None
+        print_case_result(
+            test_result,
+            case_counts,
+            case_details,
+            f"({duration:.3f} seconds)",
+        )
+        if self.args.verbose:
+            print(f"  JUnit report: {junit_path}")
+        out = {
+            "name": test_name,
+            "result": test_result,
+            "duration": duration,
+            "exit_code": int(rc),
+        }
+        if case_counts is not None:
+            out["case_counts"] = case_counts
+        if case_details is not None:
+            out["case_details"] = case_details
+        return _done(out)
 
     def run_test_suite(self, suite_config):
         """
@@ -622,26 +2753,203 @@ class TestExecutor:
 
         tests = suite_config.get("tests", [])
         if not tests:
-            if self.args.verbose:
-                print(f"WARNING: No tests defined for test suite '{suite_name}'")
+            print(f"WARNING: No tests defined for test suite '{suite_name}'")
             return []
 
         results = []
+        skipped_count = 0
+        should_stop = False  # Track if we should stop due to rerun failure
+
         for test in tests:
-            # Filter by test name if specified
+            # Check if we should stop due to previous rerun failure
+            if should_stop:
+                if self.args.verbose:
+                    print(f"\nStopping test suite execution due to rerun failure (--stop-on-rerun-failure)")
+                break
+
+            # Filter by test name if specified (gtest-style glob; see glob_filter_matches).
             test_name = test.get("name")
-            if self.args.test_name and test_name != self.args.test_name:
+            if self.args.test_name and not glob_filter_matches(test_name, self.args.test_name):
+                skipped_count += 1
+                continue
+
+            # Skip MPI tests when --skip-mpi-check is set ("auto" implies multi-rank)
+            test_ranks = test.get("num_ranks", suite_config.get("num_ranks", 1))
+            is_mpi_test = _test_needs_mpi(test, suite_config)
+            if self.args.skip_mpi_check and is_mpi_test:
+                skipped_count += 1
+                if self.args.verbose:
+                    print(f"  SKIP: '{test_name}' requires {test_ranks} ranks (--skip-mpi-check)")
                 continue
 
             result = self.run_test(test, suite_config)
             results.append(result)
+            self._record_result(suite_name, test_name, result)
 
-            self.test_names.append(test_name)
-            self.test_results.append(result["result"])
-            self.test_durations.append(result["duration"])
-            self.test_suites.append(suite_name)  # Track suite name
+            # If test failed and rerun flag is set, rerun immediately
+            if self.args.rerun_failed and result["result"] in [TestResult.RESULT_FAILED.value, TestResult.RESULT_TIMEOUT.value]:
+                # Get rerun_env_variables from suite config or test config
+                rerun_env = suite_config.get("rerun_env_variables", {})
+                test_rerun_env = test.get("rerun_env_variables", {})
+
+                # Merge rerun environments (test-level overrides suite-level)
+                merged_rerun_env = {**rerun_env, **test_rerun_env}
+
+                if merged_rerun_env:
+                    print(f"\n{'='*80}")
+                    print(f"RERUNNING FAILED TEST IMMEDIATELY")
+                    print(f"{'='*80}")
+
+                    # Create a modified test config with merged environment variables
+                    rerun_test_config = copy.deepcopy(test)
+
+                    # Merge original env_variables with rerun_env_variables
+                    original_env = test.get("env_variables", {})
+                    rerun_test_config["env_variables"] = {**original_env, **merged_rerun_env}
+
+                    print(f"\nRerunning test: {test_name}")
+                    print(f"  Original result: {result['result']}")
+                    print(f"  Additional env variables:")
+                    for key, value in merged_rerun_env.items():
+                        print(f"    {key}={value}")
+                    if self.args.verbose:
+                        print(f"  Final merged env_variables for rerun:")
+                        for key, value in rerun_test_config["env_variables"].items():
+                            print(f"    {key}={value}")
+
+                    # Run the test with merged environment
+                    rerun_result = self.run_test(rerun_test_config, suite_config)
+
+                    # Track rerun results
+                    self.rerun_names.append(test_name)
+                    self.rerun_results.append(rerun_result["result"])
+                    self.rerun_durations.append(rerun_result["duration"])
+
+                    print(f"  Rerun result: {rerun_result['result']}")
+                    if "exit_code" in rerun_result:
+                        print(f"  Rerun exit code: {rerun_result['exit_code']}")
+                    print(f"{'='*80}\n")
+
+                    # Check if rerun also failed and we should stop
+                    if self.args.stop_on_rerun_failure and rerun_result["result"] in [TestResult.RESULT_FAILED.value, TestResult.RESULT_TIMEOUT.value]:
+                        print(f"\nERROR: Rerun failed for test '{test_name}'")
+                        print(f"Stopping test execution (--stop-on-rerun-failure)")
+                        should_stop = True
+                    # Otherwise continue to next test regardless of rerun result
+                else:
+                    if self.args.verbose:
+                        print(f"SKIP: No rerun_env_variables defined for failed test '{test_name}'")
+
+        if self.args.verbose and skipped_count > 0:
+            print(f"  Skipped {skipped_count} test(s) due to filters")
 
         return results
+
+    def _record_result(self, suite_name, test_name, result):
+        """Append one config-entry result to the summary lists and emit records.
+
+        Used by both launched runs and enabled:false DISABLED rows so a later
+        list or emit field cannot update one site and miss the other.
+        """
+        duration = float(result.get("duration") or 0)
+        self.test_names.append(test_name)
+        self.test_results.append(result["result"])
+        self.test_durations.append(duration)
+        self.test_suites.append(suite_name)
+        self.test_case_counts.append(result.get("case_counts"))
+        self.test_case_details.append(result.get("case_details"))
+        self.test_run_identities.append(result.get("run_identity", ""))
+        self.test_executed.append(bool(result.get("executed")))
+        if self.emit_enabled:
+            record = dict(result)
+            record["suite"] = suite_name
+            record["test_name"] = test_name
+            record["duration"] = duration
+            self.test_records.append(record)
+
+    def record_disabled_suite(self, suite_config):
+        """Record each config test as DISABLED without launching it.
+
+        ``enabled: false`` suites are omitted from the run, so they never
+        appear in the summary table or the Total/Unique case counts. Recording
+        them as DISABLED rows makes Config entries = Passed+Failed+Skipped+
+        Timeout+Disabled. The same leaves are included in Total and Unique so
+        those two still add up.
+        """
+        suite_name = suite_config["suite_details"]["name"]
+        tests = suite_config.get("tests") or []
+        for test in tests:
+            test_name = test.get("name") or "(test)"
+            if self.args.test_name and not glob_filter_matches(
+                test_name, self.args.test_name
+            ):
+                continue
+            # Same drop as run_test_suite: a disabled multi-rank entry must not
+            # emit DISABLED rows when --skip-mpi-check drops the enabled twin.
+            if getattr(self.args, "skip_mpi_check", False) and _test_needs_mpi(
+                test, suite_config
+            ):
+                continue
+            test_filter = test.get("test_filter", "*")
+            detail = synthetic_case_detail(
+                test_name, test_filter, status=TestResult.RESULT_DISABLED.value
+            )
+            identity = make_run_identity_key(
+                extra=f"disabled:{suite_name}:{test_name}",
+            )
+            details = stamp_run_identity([detail], identity)
+            counts = _counts_from_details(details)
+            self._record_result(suite_name, test_name, {
+                "name": test_name,
+                "result": TestResult.RESULT_DISABLED.value,
+                "duration": 0.0,
+                "executed": False,
+                "case_counts": counts,
+                "case_details": details,
+                "run_identity": identity,
+            })
+
+    def _format_duration(self, seconds):
+        """
+        Format duration in a human-readable format
+
+        Args:
+            seconds: Duration in seconds
+
+        Returns:
+            str: Formatted duration string
+        """
+        if seconds < 60:
+            return f"{seconds:.2f} seconds"
+        elif seconds < 3600:
+            minutes = int(seconds // 60)
+            secs = seconds % 60
+            return f"{minutes} min {secs:.2f} sec"
+        else:
+            hours = int(seconds // 3600)
+            minutes = int((seconds % 3600) // 60)
+            secs = seconds % 60
+            return f"{hours} hr {minutes} min {secs:.2f} sec"
+
+    def _summary_case_entries(self):
+        """Config-entry records used for unique/duplicate case accounting."""
+        entries = []
+        for i in range(len(self.test_results)):
+            entries.append({
+                "config_suite": self.test_suites[i],
+                "config_entry": self.test_names[i],
+                "details": self.test_case_details[i] if i < len(self.test_case_details) else None,
+                "run_identity": (
+                    self.test_run_identities[i]
+                    if i < len(self.test_run_identities) else ""
+                ),
+                "executed": (
+                    self.test_executed[i]
+                    if i < len(self.test_executed) else False
+                ),
+                "config_result": self.test_results[i],
+            })
+        return entries
 
     def print_summary(self):
         """Print test execution summary"""
@@ -649,6 +2957,11 @@ class TestExecutor:
         passed = self.test_results.count(TestResult.RESULT_PASSED.value)
         failed = self.test_results.count(TestResult.RESULT_FAILED.value)
         timeout = self.test_results.count(TestResult.RESULT_TIMEOUT.value)
+        skipped = self.test_results.count(TestResult.RESULT_SKIPPED.value)
+        disabled = self.test_results.count(TestResult.RESULT_DISABLED.value)
+
+        # Calculate total test time
+        total_time_seconds = sum(self.test_durations) if self.test_durations else 0
 
         # Get unique test suites that were run
         unique_suites = sorted(set(self.test_suites)) if self.test_suites else []
@@ -656,64 +2969,263 @@ class TestExecutor:
         if total_tests > 0:
             print("\nDetailed Results:")
             print("-"*120)
-            print(f"{'Test Suite':<40} {'Test Name':<40} {'Result':<10} {'Duration'}")
+            print(f"{'Test Suite':<40} {'Test Name':<32} {'Result':<10} {'Cases':<8} {'Duration'}")
             print("-"*120)
             for i in range(total_tests):
+                counts = self.test_case_counts[i] if i < len(self.test_case_counts) else None
+                cases_cell = str(counts["cases"]) if counts else "-"
                 print(
                     f"{self.test_suites[i]:<40} "
-                    f"{self.test_names[i]:<40} "
+                    f"{self.test_names[i]:<32} "
                     f"{self.test_results[i]:<10} "
+                    f"{cases_cell:<8} "
                     f"{self.test_durations[i]:.3f} seconds"
                 )
             print("-"*120)
-            print(f"Total Tests:   {total_tests}")
-            print(f"Passed:        {passed}")
-            print(f"Failed:        {failed}")
-            print(f"Timeout:       {timeout}")
+            issue_entries = self._summary_case_entries()
+            uniqueness = summarize_case_uniqueness(issue_entries)
+            issue_tree = format_issue_tree(issue_entries)
+            if issue_tree:
+                print(issue_tree)
+            else:
+                print("Failed/skipped/timeout cases: (none)")
+            dup_tree = format_duplicate_tree(
+                uniqueness["duplicate_entries"],
+                title=(
+                    f"Duplicate cases ({uniqueness['duplicate_cases']} cases, "
+                    f"{uniqueness['duplicate_extra']} extra runs):"
+                ),
+            )
+            if dup_tree:
+                print(dup_tree)
+            else:
+                print("Duplicate cases: (none)")
+            # Counts last so they are visible at EOF after the issue and duplicate trees.
+            print(f"Config entries: {total_tests}")
+            print(f"Passed:         {passed}")
+            print(f"Failed:         {failed}")
+            print(f"Skipped:        {skipped}")
+            print(f"Timeout:        {timeout}")
+            print(f"Disabled:       {disabled}")
+            print("Test cases (gtest/pytest; wildcards expanded):")
+            print(f"  Total:        {uniqueness['total']}")
+            print(f"  Unique:       {uniqueness['unique']}")
+            if uniqueness["duplicate_cases"]:
+                print(
+                    f"  Duplicate:    {uniqueness['duplicate_extra']} extra "
+                    f"({uniqueness['duplicate_cases']} cases ran more than once)"
+                )
+            else:
+                print("  Duplicate:    none")
+            print(f"  Passed:       {uniqueness['total_passed']}")
+            print(f"  Failed:       {uniqueness['total_failed']}")
+            print(f"  Skipped:      {uniqueness['total_skipped']}")
+            print(f"  Timeout:      {uniqueness['total_timeout']}")
+            print(f"  Disabled:     {uniqueness['total_disabled']}")
+            if uniqueness["total_other"]:
+                print(f"  Other:        {uniqueness['total_other']}")
+            print(f"Total Time:     {self._format_duration(total_time_seconds)}")
             print("="*120)
 
+        # Print rerun results if any
+        if self.rerun_results:
+            total_reruns = len(self.rerun_results)
+            rerun_passed = self.rerun_results.count(TestResult.RESULT_PASSED.value)
+            rerun_failed = self.rerun_results.count(TestResult.RESULT_FAILED.value)
+            rerun_timeout = self.rerun_results.count(TestResult.RESULT_TIMEOUT.value)
+            rerun_time_seconds = sum(self.rerun_durations) if self.rerun_durations else 0
+
+            print("\nRerun Results (with additional environment variables):")
+            print("-"*120)
+            print(f"{'Test Name':<60} {'Result':<10} {'Duration'}")
+            print("-"*120)
+            for i in range(total_reruns):
+                print(
+                    f"{self.rerun_names[i]:<60} "
+                    f"{self.rerun_results[i]:<10} "
+                    f"{self.rerun_durations[i]:.3f} seconds"
+                )
+            print("-"*120)
+            print(f"Total Reruns:  {total_reruns}")
+            print(f"Passed:        {rerun_passed}")
+            print(f"Failed:        {rerun_failed}")
+            print(f"Timeout:       {rerun_timeout}")
+            print(f"Total Time:    {self._format_duration(rerun_time_seconds)}")
+            print("="*120)
+
+    def _rccl_tests_build_dir(self):
+        """Resolve the rccl-tests build directory (``<source_dir>/build``).
+
+        Mirrors the path logic in ``build_rccl_tests`` so coverage discovery and
+        the build use the same location. Env vars and ``~`` are expanded with the
+        bash-aware expander (``${VAR:-default}`` support). Returns None when
+        rccl-tests is not configured.
+        """
+        cfg = self.rccl_tests_build_config
+        if not cfg:
+            return None
+        workdir = self.paths.get("workdir", os.getcwd())
+        source_dir = cfg.get("source_dir", os.path.join(workdir, "rccl-tests"))
+        source_dir = os.path.expanduser(expand_env_vars(str(source_dir)))
+        return os.path.join(source_dir, "build")
+
+    # LLVM tool layout under a ROCm root, most-specific first.
+    _LLVM_BIN_SUBDIRS = (("lib", "llvm", "bin"), ("llvm", "bin"), ("bin",))
+
+    def _candidate_rocm_roots(self):
+        """Ordered, de-duplicated list of ROCm roots to consider, most-trusted first.
+
+        A `module load rocm/...` sets ROCM_PATH/HIP_PATH to a versioned tree
+        (e.g. /cluster/.../rocm-7.13.0...) and puts its compiler on PATH, while the
+        configured rocm_path may still be the bare ${ROCM_PATH:-/opt/rocm} default.
+        """
+        roots = []
+
+        def add(root):
+            if root:
+                root = os.path.normpath(root)
+                if root not in roots:
+                    roots.append(root)
+
+        # 1. Explicitly configured rocm_path (paths.rocm_path / --rocm_home).
+        add(self.paths.get("rocm_path"))
+        # 2. The loaded module's environment.
+        for env_var in ("ROCM_PATH", "ROCM_HOME", "HIP_PATH"):
+            add(os.environ.get(env_var))
+        # 3. The root inferred from a ROCm compiler/tool on PATH. The module may add
+        #    <root>/bin or <root>/lib/llvm/bin to PATH; map either back to <root>.
+        for binname in ("amdclang++", "hipcc", "rocminfo", "rocm_agent_enumerator"):
+            binpath = shutil.which(binname)
+            if not binpath:
+                continue
+            bindir = os.path.dirname(os.path.realpath(binpath))
+            add(os.path.dirname(bindir))  # <root>/bin -> <root>
+            add(os.path.dirname(os.path.dirname(os.path.dirname(bindir))))  # <root>/lib/llvm/bin -> <root>
+        # 4. Last-resort default.
+        add("/opt/rocm")
+        return roots
+
+    def _rocm_root(self):
+        """Single source of truth for the ROCm toolchain root, shared by build, test,
+        and coverage so all three phases use an identical toolchain.
+
+        The build compiles RCCL with <root>/.../amdclang++ and coverage MUST read the
+        profraw files with the matching <root>/lib/llvm/bin/llvm-profdata, so the same
+        root has to drive every phase. A root is preferred only if it actually contains
+        the LLVM toolchain (llvm-profdata present); this lets a stale `/opt/rocm`
+        default yield to the loaded module. Cached after first resolution.
+        """
+        cached = getattr(self, "_rocm_root_cache", None)
+        if cached:
+            return cached
+
+        candidates = self._candidate_rocm_roots()
+
+        def has_llvm_toolchain(root):
+            return any(os.path.isfile(os.path.join(root, *sub, "llvm-profdata"))
+                       for sub in self._LLVM_BIN_SUBDIRS)
+
+        # Prefer the first root with a complete LLVM toolchain (matches the compiler
+        # and provides the coverage tools); otherwise the first existing directory.
+        chosen = next((r for r in candidates if has_llvm_toolchain(r)), None)
+        if chosen is None:
+            chosen = next((r for r in candidates if os.path.isdir(r)), None)
+        if chosen is None:
+            chosen = self.paths.get("rocm_path") or "/opt/rocm"
+
+        self._rocm_root_cache = chosen
+        if getattr(self.args, "verbose", False):
+            print(f"Resolved ROCm toolchain root: {chosen}")
+        return chosen
+
+    def _resolve_llvm_tool(self, name):
+        """Resolve an LLVM tool (e.g. llvm-profdata, llvm-cov) from the SAME ROCm root
+        used to build and run, so the profile format matches the compiler.
+
+        Order:
+          1. Explicit config override in self.paths (key == tool name).
+          2. The resolved ROCm root (_rocm_root) — preferred over a bare PATH hit so a
+             different LLVM on PATH cannot shadow the build's toolchain.
+          3. PATH lookup via shutil.which as a final fallback.
+        Raises FileNotFoundError with a clear, searched-path message if not found.
+        """
+        override = self.paths.get(name)
+        if override and os.path.isfile(override):
+            return override
+
+        searched = []
+        rocm_root = self._rocm_root()
+        for sub in self._LLVM_BIN_SUBDIRS:
+            candidate = os.path.join(rocm_root, *sub, name)
+            searched.append(candidate)
+            if os.path.isfile(candidate):
+                return candidate
+
+        found = shutil.which(name)
+        if found:
+            return found
+
+        raise FileNotFoundError(
+            f"{name} not found under the resolved ROCm root ({rocm_root}) or on PATH. "
+            f"Searched: {', '.join(searched)}. "
+            f"Load a ROCm module or set rocm_path/--rocm_home."
+        )
+
     def generate_coverage_report(self):
-        """Generate code coverage report"""
+        """Generate code coverage report.
+
+        Profiles are isolated under the current workspace. For report-only use,
+        pass ``--output`` with the workspace from the original coverage run.
+        """
         if not self.args.coverage_report:
-            return
+            return True
 
         print(f"\n{'='*80}")
         print("GENERATING COVERAGE REPORT")
         print(f"{'='*80}")
 
-        # Check for profraw files
-        import glob
-        import shutil
-
-        profraw_files = glob.glob(os.path.join(self.build_dir, "**/*.profraw"), recursive=True)
+        rccl_tests_build_dir = self._rccl_tests_build_dir()
+        profraw_files = sorted(glob.glob(os.path.join(self.rawfiles_dir, "*.profraw")))
 
         if not profraw_files:
-            print("WARNING: No profraw files found. Cannot generate coverage report.")
-            return
+            print(f"ERROR: No .profraw files found in {self.rawfiles_dir}")
+            if self.args.skip_tests:
+                print()
+                print("--coverage-report --skip-tests was requested, so this run did")
+                print("not execute any tests. Re-run with --output pointing to the")
+                print("workspace from a previous coverage run, or execute tests first.")
+            else:
+                print()
+                print("Tests ran but produced no coverage data. Confirm that the RCCL")
+                print("library and test binaries were built with coverage instrumentation")
+                print("(--enable-code-coverage / -DENABLE_CODE_COVERAGE=ON) and that the")
+                print("test processes terminated cleanly so the runtime could flush the")
+                print("profraw files.")
+            return False
 
         print(f"Found {len(profraw_files)} profraw files")
 
         os.makedirs(self.report_dir, exist_ok=True)
 
-        # Create rawfiles directory
-        rawfiles_dir = os.path.join(self.log_dir, "rawfiles")
-        os.makedirs(rawfiles_dir, exist_ok=True)
-
-        # Move all profraw files into a single location
-        print("Copying profraw files...")
-        for profraw in profraw_files:
-            shutil.copy(profraw, rawfiles_dir)
-
         # Create a list of raw files to merge
         rawprofiles_list = os.path.join(self.log_dir, "rawprofiles.list")
         with open(rawprofiles_list, 'w') as f:
-            for profraw in glob.glob(os.path.join(rawfiles_dir, "*.profraw")):
+            for profraw in profraw_files:
                 f.write(f"{profraw}\n")
 
-        # Get ROCm path for LLVM tools
-        rocm_path = self.paths.get("rocm_path", "/opt/rocm")
-        llvm_profdata = os.path.join(rocm_path, "lib", "llvm", "bin", "llvm-profdata")
-        llvm_cov = os.path.join(rocm_path, "lib", "llvm", "bin", "llvm-cov")
+        rocm_path = self._rocm_root()
+        try:
+            llvm_profdata = self._resolve_llvm_tool("llvm-profdata")
+            llvm_cov = self._resolve_llvm_tool("llvm-cov")
+        except FileNotFoundError as error:
+            print(f"ERROR: {error}")
+            return False
+
+        if self.args.verbose:
+            print(f"ROCm path:      {rocm_path}")
+            print(f"llvm-profdata:  {llvm_profdata}")
+            print(f"llvm-cov:       {llvm_cov}")
+            print(f"Rawfiles dir:   {self.rawfiles_dir}")
 
         # Create the merged profdata
         print("Merging profraw files...")
@@ -733,7 +3245,7 @@ class TestExecutor:
         try:
             result = subprocess.run(
                 merge_cmd,
-                capture_output=True,
+                capture_output=False,
                 text=True,
                 check=True
             )
@@ -744,7 +3256,7 @@ class TestExecutor:
             print(f"ERROR: Failed to merge profraw files")
             print(f"Command: {' '.join(merge_cmd)}")
             print(f"Error: {e.stderr}")
-            return
+            return False
 
         # Build list of object files
         object_files = []
@@ -764,9 +3276,52 @@ class TestExecutor:
                 if self.args.verbose:
                     print(f"Found binary: {binary_path}")
 
+        # Add host-only microtest binaries (test/host). Unlike the binaries above
+        # they don't link librccl.so -- they compile their unit-under-test
+        # (p2p.cc/init.cc + oracle TUs from the hipify tree) directly, so their
+        # counters live in the binary itself and must be listed as --object for
+        # llvm-cov to attribute that coverage.
+        host_test_dir = os.path.join(test_dir, "host")
+        for binary in ["rccl-UnitTestsMicro", "rccl-UnitTestsMicroInit",
+                       "rccl-UnitTestsMicroInit-uncached",
+                       "rccl-UnitTestsMicroInit-faultinj",
+                       "rccl-UnitTestsMicroEnqueue",
+                       "rccl-UnitTestsMicroSymKernels"]:
+            binary_path = os.path.join(host_test_dir, binary)
+            if os.path.isfile(binary_path):
+                object_files.extend(["--object", binary_path])
+                if self.args.verbose:
+                    print(f"Found microtest binary: {binary_path}")
+
+        # Add rccl-tests perf binaries so their host coverage mapping is attributed.
+        if rccl_tests_build_dir and os.path.isdir(rccl_tests_build_dir):
+            perf_binaries = sorted(glob.glob(os.path.join(rccl_tests_build_dir, "*_perf")))
+            for perf_binary in perf_binaries:
+                if os.path.isfile(perf_binary):
+                    object_files.extend(["--object", perf_binary])
+                    if self.args.verbose:
+                        print(f"Found perf binary: {perf_binary}")
+
+        # Add device code objects only when the build actually resolved full
+        # coverage. DeviceLinker.cmake creates device-*.elf for every
+        # device-linker build, including AUTO's host-only fallback, and those
+        # uninstrumented ELFs make llvm-cov show fail.
+        if self._full_coverage_resolved():
+            device_elfs = sorted(glob.glob(os.path.join(self.build_dir, "device-*.elf")))
+            for device_elf in device_elfs:
+                object_files.extend(["--object", device_elf])
+                if self.args.verbose:
+                    print(f"Found device object: {device_elf}")
+            if not device_elfs and self.args.verbose:
+                print("NOTE: no device-*.elf found next to librccl.so; device-side "
+                      "coverage will not appear")
+        elif self.args.verbose:
+            print("NOTE: skipping device-*.elf; CMakeCache ENABLE_FULL_COVERAGE "
+                  "did not resolve to ON (host-only coverage)")
+
         if not object_files:
             print("WARNING: No object files found for coverage report")
-            return
+            return False
 
         if self.args.verbose:
             print(f"Total object files for coverage: {len(object_files) // 2}")
@@ -774,8 +3329,12 @@ class TestExecutor:
         # Ignore patterns for non-relevant files
         ignore_regex = (
             ".*tuner_v.*|.*profiler_v.*|.*net_v.*|.*_deps.*|ext.*|"
-            ".*coll_net.*|.*nvls.*|.*nvml.*|.*nvtx.*|test/|.*gtest.*"
+            ".*coll_net.*|.*nvls.*|.*nvml.*|.*nvtx.*|test/|.*gtest.*|"
+            ".*gensrc.*|.*rccl-tests.*"
         )
+
+        if self.args.verbose:
+            print(f"Ignore regex: {ignore_regex}")
 
         # Create the HTML report
         print("Generating HTML coverage report...")
@@ -797,7 +3356,7 @@ class TestExecutor:
         try:
             result = subprocess.run(
                 html_cmd,
-                capture_output=True,
+                capture_output=False,
                 text=True,
                 check=True
             )
@@ -807,6 +3366,7 @@ class TestExecutor:
             print(f"Error: {e.stderr}")
             if self.args.verbose:
                 print(f"Command was: {' '.join(html_cmd)}")
+            return False
 
         # Generate function coverage summary (text report)
         print("Generating text coverage report...")
@@ -848,6 +3408,43 @@ class TestExecutor:
             print(f"Error: {e.stderr}")
             if self.args.verbose:
                 print(f"Command was: {' '.join(text_cmd)}")
+            return False
+
+        # Generate a plain (no --show-functions) llvm-cov report. Unlike the
+        # per-file --show-functions report above, a plain report ends in a single
+        # grand-TOTAL line, so it is a valid overall summary. This is the fallback
+        # the emitter parses when index.html is unavailable.
+        print("Generating plain coverage summary report...")
+        summary_report = os.path.join(self.report_dir, "coverage_summary.txt")
+        summary_cmd = [
+            llvm_cov,
+            "report",
+            f"--instr-profile={merged_profdata}",
+            "--Xdemangler=c++filt"
+        ]
+        summary_cmd.extend(object_files)
+        summary_cmd.extend([
+            f"--ignore-filename-regex={ignore_regex}",
+            "--sources",
+            self.build_dir
+        ])
+
+        try:
+            with open(summary_report, 'w') as f:
+                subprocess.run(
+                    summary_cmd,
+                    stdout=f,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    check=True
+                )
+            print(f"Coverage summary report generated: {summary_report}")
+        except subprocess.CalledProcessError as e:
+            print("ERROR: Failed to generate plain coverage summary report")
+            print(f"Error: {e.stderr}")
+            if self.args.verbose:
+                print(f"Command was: {' '.join(summary_cmd)}")
+            return False
 
         print(f"\n{'='*80}")
         print("COVERAGE REPORT GENERATION COMPLETE")
@@ -855,4 +3452,247 @@ class TestExecutor:
         print(f"Report directory: {self.report_dir}")
         print(f"HTML report: {self.report_dir}/index.html")
         print(f"Text report: {text_report}")
+        if os.path.isfile(summary_report):
+            print(f"Summary report: {summary_report}")
+        return True
 
+    def _resolve_rccl_lib(self):
+        """Best-effort: identify the librccl.so the tests actually loaded, and --
+        if it came from a ROCm install rather than a fresh build -- which one.
+
+        Resolution mirrors the loader search order the runner sets in
+        LD_LIBRARY_PATH: the (test) build_dir first, then the caller's
+        LD_LIBRARY_PATH, then <rocm_root>/lib, then the system ldconfig cache.
+        Returns a dict describing the chosen lib (or {"resolved": False, ...}).
+        Never raises -- provenance metadata must not break a run."""
+        try:
+            from lib import results_emitter as re_mod
+
+            cand_dirs = []
+            build_dir = getattr(self, "build_dir", None)
+            if build_dir:
+                cand_dirs.append(build_dir)
+            for d in (os.environ.get("LD_LIBRARY_PATH", "") or "").split(":"):
+                if d:
+                    cand_dirs.append(d)
+            rocm_root = None
+            try:
+                rocm_root = self._rocm_root()
+            except Exception:
+                rocm_root = None
+            if rocm_root:
+                cand_dirs.append(os.path.join(rocm_root, "lib"))
+
+            found = None
+            for d in cand_dirs:
+                if not d:
+                    continue
+                for name in ("librccl.so", "librccl.so.1"):
+                    p = os.path.join(d, name)
+                    if os.path.isfile(p) or os.path.islink(p):
+                        found = p
+                        break
+                if not found:
+                    hits = sorted(glob.glob(os.path.join(d, "librccl.so*")))
+                    if hits:
+                        found = hits[0]
+                if found:
+                    break
+
+            if not found:  # system loader cache
+                try:
+                    out = subprocess.run(["ldconfig", "-p"], capture_output=True, text=True, timeout=10)
+                    m = re.search(r"librccl\.so\S*\s+.*=>\s+(\S+)", out.stdout or "")
+                    if m:
+                        found = m.group(1)
+                except (OSError, subprocess.SubprocessError):
+                    pass
+
+            if not found:
+                return {"resolved": False,
+                        "note": "librccl.so not found on the test LD_LIBRARY_PATH or in ldconfig"}
+
+            real = os.path.realpath(found)
+            info = {"resolved": True, "path": found, "realpath": real}
+            try:
+                st = os.stat(real)
+                info["size"] = st.st_size
+                info["mtime"] = datetime.datetime.fromtimestamp(
+                    st.st_mtime, datetime.timezone.utc).isoformat()
+            except OSError:
+                pass
+
+            sm = re.search(r"librccl\.so\.([0-9][0-9.]*)$", real)
+            if sm:
+                info["soname_version"] = sm.group(1)
+
+            bd = os.path.realpath(build_dir) if build_dir else None
+            if bd and real.startswith(bd + os.sep):
+                info["source"] = "custom" if getattr(self, "using_custom_lib", False) else "test-build"
+            else:
+                # Walk up to the ROCm root (the dir holding .info/version).
+                root = None
+                d = os.path.dirname(real)
+                for _ in range(6):
+                    if os.path.isfile(os.path.join(d, ".info", "version")):
+                        root = d
+                        break
+                    nd = os.path.dirname(d)
+                    if nd == d:
+                        break
+                    d = nd
+                if root:
+                    info["source"] = "rocm-install"
+                    info["rocm_root"] = root
+                    rv = re_mod._rocm_version(root)
+                    if rv:
+                        info["rocm_version"] = rv
+                else:
+                    info["source"] = "system"
+            return info
+        except Exception as e:  # provenance is best-effort
+            return {"resolved": False, "note": f"rccl lib resolution failed: {e}"}
+
+    def emit_results(self):
+        """Emit structured results for the results dashboard.
+
+        Always writes local JSON/JSONL + a .tar.gz snapshot (the durable source of
+        truth). When --db-push is set, additionally pushes to PostgreSQL on a best
+        effort basis -- a DB failure/timeout is logged but never fails the run.
+
+        No-op unless --emit-results or --db-push was passed.
+        """
+        if not self.emit_enabled:
+            return
+
+        import socket
+        import uuid
+        from lib import results_emitter as re_mod
+        from lib import host_metadata
+
+        print(f"\n{'='*80}")
+        print("EMITTING RESULTS")
+        print(f"{'='*80}")
+
+        stamp = datetime.datetime.now(datetime.timezone.utc)
+        run_id = f"{stamp.strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:8]}"
+
+        sha, branch = re_mod.git_info(os.path.dirname(os.path.abspath(__file__)))
+
+        # num_nodes: largest node count seen across recorded tests (falls back to 1).
+        node_counts = [r.get("num_nodes") for r in self.test_records
+                       if isinstance(r.get("num_nodes"), int)]
+        num_nodes = max(node_counts) if node_counts else 1
+
+        sys_cfg = {}
+        try:
+            sys_cfg = self.config_processor.config.get("system_configurations", {}) or {}
+        except AttributeError:
+            sys_cfg = {}
+
+        def _redact_sensitive_env(env):
+            # Persist env for debugging, but mask values of secret-like keys so
+            # tokens/passwords/DSNs never land in the tarball or DB.
+            if not env:
+                return None
+            sensitive = re.compile(r"(?i)(pass|secret|token|api[_-]?key|access[_-]?key|credential|dsn)")
+            return {k: ("***redacted***" if sensitive.search(k) else v) for k, v in env.items()}
+
+        # Run tags (from --tag / --tags), de-duplicated in order.
+        run_tags = list(getattr(self.args, "tag", []) or [])
+        for _t in (getattr(self.args, "tags", "") or "").split(","):
+            _t = _t.strip()
+            if _t and _t not in run_tags:
+                run_tags.append(_t)
+
+        manifest = {
+            "run_id": run_id,
+            "created_at": stamp.isoformat(),
+            "started_at": stamp.isoformat(),
+            "rccl_sha": sha,
+            "rccl_branch": branch,
+            "rocm_version": re_mod._rocm_version(self._rocm_root()),
+            "host": socket.gethostname(),
+            "hosts": self.mpi_hosts or None,
+            "gpu_arch": re_mod.gpu_arch(),
+            "node_names": re_mod.node_names_from_mpi_hosts(self.mpi_hosts) or [socket.gethostname()],
+            "num_nodes": num_nodes,
+            "gpus_per_node": self.gpus_per_node or None,
+            "config_name": sys_cfg.get("name"),
+            "config_description": sys_cfg.get("description"),
+            "label": getattr(self.args, "run_label", "") or None,
+            "tags": run_tags or None,
+            "env": _redact_sensitive_env(self.global_env),
+        }
+
+        # Rich host/telemetry snapshot (best-effort; scale-up fabric gated on capability).
+        try:
+            md = host_metadata.collect(rocm_version=re_mod._rocm_version(self._rocm_root()))
+
+            # RCCL build type (perf configs should use a Release build).
+            build_config = self.build_config if isinstance(self.build_config, dict) else {}
+            build_type = rccl_build_type(
+                build_config,
+                self.args,
+                getattr(self, "using_custom_lib", False),
+            )
+            md["rccl_build_type"] = build_type
+            md["mpi_impl"] = self.mpi_impl
+            # Which librccl.so the tests actually loaded (and, if it came from a
+            # ROCm install rather than a fresh build, which install). rccl_sha/
+            # rccl_branch describe the *source* checkout, which may differ from
+            # the loaded lib on --no-build / system-RCCL runs.
+            md["rccl_lib"] = self._resolve_rccl_lib()
+            md.setdefault("checks", {})["release_build"] = {
+                "status": "OK" if build_type == "release" else ("SKIP" if build_type == "custom" else "WARN"),
+                "value": build_type + (" (perf should use release)" if build_type == "debug" else ""),
+            }
+            manifest["metadata"] = md
+        except Exception as e:
+            print(f"WARNING: host metadata collection failed: {e}")
+
+        results_dir = (getattr(self.args, "results_dir", "") or
+                       os.path.join(self.workspace_dir, "results"))
+
+        emitter = re_mod.ResultsEmitter(manifest, results_dir)
+        for record in self.test_records:
+            emitter.add_test(record)
+
+        # Attach coverage if a report was generated this run. The authoritative
+        # overall summary is llvm-cov's index.html Totals row. The fallback is the
+        # plain (no --show-functions) report, whose single grand-TOTAL line is a
+        # valid overall summary; the --show-functions function_coverage_report.txt
+        # is deliberately NOT used here (it has only per-file totals).
+        cov = re_mod.parse_coverage_index_html(
+            os.path.join(self.report_dir, "index.html")
+        )
+        if not cov:
+            cov = re_mod.parse_coverage_report(
+                os.path.join(self.report_dir, "coverage_summary.txt")
+            )
+        emitter.set_coverage(cov)
+
+        uniqueness = summarize_case_uniqueness(self._summary_case_entries())
+        summary = {
+            "total": len(self.test_results),
+            "passed": self.test_results.count(TestResult.RESULT_PASSED.value),
+            "failed": self.test_results.count(TestResult.RESULT_FAILED.value),
+            "timeout": self.test_results.count(TestResult.RESULT_TIMEOUT.value),
+            "skipped": self.test_results.count(TestResult.RESULT_SKIPPED.value),
+            "disabled": self.test_results.count(TestResult.RESULT_DISABLED.value),
+            "duration_s": sum(self.test_durations) if self.test_durations else 0,
+            "cases_total": uniqueness["total"],
+            "cases_unique": uniqueness["unique"],
+            "cases_passed": uniqueness["total_passed"],
+            "cases_failed": uniqueness["total_failed"],
+            "cases_skipped": uniqueness["total_skipped"],
+            "cases_timeout": uniqueness["total_timeout"],
+            "cases_disabled": uniqueness["total_disabled"],
+            "cases_other": uniqueness["total_other"],
+        }
+        emitter.finalize_summary(summary)
+
+        emitter.write_local(log_dir=self.log_dir, report_dir=self.report_dir)
+
+        if getattr(self.args, "db_push", False):
+            emitter.push_postgres(timeout=getattr(self.args, "db_timeout", 10))

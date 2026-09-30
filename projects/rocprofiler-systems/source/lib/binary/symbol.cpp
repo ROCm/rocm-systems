@@ -1,28 +1,9 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "core/config.hpp"
 
-#include <spdlog/fmt/fmt.h>
+#include <fmt/format.h>
 
 #if !defined(TIMEMORY_USE_BFD)
 #    error "BFD support not enabled"
@@ -30,6 +11,15 @@
 
 #define PACKAGE     "rocprofiler-systems"
 #define L_LNNO_SIZE 4
+
+#include <elf.h>
+// The RELR (relative-relocation) types were added to glibc's <elf.h> in glibc 2.36.
+// Older glibc versions (e.g. RHEL 8/9) lack them, but they are referenced by the
+// binutils headers below, so define the typedefs here to avoid compile errors.
+#ifndef SHT_RELR
+typedef Elf32_Word  Elf32_Relr;
+typedef Elf64_Xword Elf64_Relr;
+#endif
 
 #include <bfd.h>
 #include <coff/external.h>
@@ -41,6 +31,7 @@
 #include <elfutils/libdw.h>
 #include <libcoff.h>
 
+#include "common/path.hpp"
 #include "core/binary/fwd.hpp"
 #include "core/demangler.hpp"
 #include "core/timemory.hpp"
@@ -69,8 +60,9 @@ read_inliner_info(bfd* _inp)
         if(bfd_find_inliner_info(_inp, &_file, &_func, &_line) != 0)
         {
             if(_file && _func && _line > 0)
-                _data.emplace_back(inlined_symbol{
-                    _line, filepath::realpath(_file, nullptr, false), _func });
+            {
+                _data.emplace_back(inlined_symbol{ _line, path::realpath(_file), _func });
+            }
         }
         else
         {
@@ -101,11 +93,15 @@ symbol::operator<(const symbol& _rhs) const
     // if both have non-zero load addresses that are not equal, compare based on load
     // addresses
     if(load_address > 0 && _rhs.load_address > 0 && load_address != _rhs.load_address)
+    {
         return (load_address < _rhs.load_address);
+    }
 
     // if address is same and name is same, return true if load_address is higher
     if(address == _rhs.address && base_type::name == _rhs.base_type::name)
+    {
         return load_address > _rhs.load_address;
+    }
 
     return std::tie(address, base_type::binding, base_type::visibility, base_type::name) <
            std::tie(_rhs.address, _rhs.base_type::binding, base_type::visibility,
@@ -135,10 +131,18 @@ symbol::operator+=(const symbol& _rhs)
         address += _rhs.address;
         utility::combine(inlines, _rhs.inlines);
         utility::combine(dwarf_info, _rhs.dwarf_info);
-        if(_rhs.binding < binding) binding = _rhs.binding;
-        if(_rhs.visibility < visibility) visibility = _rhs.visibility;
+        if(_rhs.binding < binding)
+        {
+            binding = _rhs.binding;
+        }
+        if(_rhs.visibility < visibility)
+        {
+            visibility = _rhs.visibility;
+        }
         if(load_address == 0 && _rhs.load_address > load_address)
+        {
             load_address = _rhs.load_address;
+        }
     }
     else
     {
@@ -158,7 +162,10 @@ symbol::read_dwarf_entries(const std::deque<dwarf_entry>& _info)
 {
     for(const auto& itr : _info)
     {
-        if(address.contains(itr.address)) dwarf_info.emplace_back(itr);
+        if(address.contains(itr.address))
+        {
+            dwarf_info.emplace_back(itr);
+        }
     }
 
     // make sure the dwarf info is sorted by address (low to high)
@@ -184,8 +191,10 @@ symbol::read_dwarf_entries(const std::deque<dwarf_entry>& _info)
     {
         // if address is already a range, do not update it
         if(!itr->address.is_range())
+        {
             itr->address = address_range{ itr->address.low,
                                           _get_next_address(itr, itr->address.low) };
+        }
     }
 
     std::sort(dwarf_info.begin(), dwarf_info.end(),
@@ -210,7 +219,10 @@ symbol::read_dwarf_breakpoints(const std::vector<uintptr_t>& _bkpts)
 {
     for(const auto& itr : _bkpts)
     {
-        if(address.contains(itr)) breakpoints.emplace_back(itr);
+        if(address.contains(itr))
+        {
+            breakpoints.emplace_back(itr);
+        }
     }
 
     // make sure the breakpoints are sorted low to high
@@ -222,16 +234,22 @@ symbol::read_dwarf_breakpoints(const std::vector<uintptr_t>& _bkpts)
 bool
 symbol::read_bfd_line_info(bfd_file& _bfd)
 {
-    auto*         _section = static_cast<asection*>(section);
-    bfd_vma       _vma     = bfd_section_vma(_section);
-    bfd_size_type _size    = bfd_section_size(_section);
+    auto*               _section = static_cast<asection*>(section);
+    const bfd_vma       _vma     = bfd_section_vma(_section);
+    const bfd_size_type _size    = bfd_section_size(_section);
 
     auto& _pc     = address.low;
     auto& _pc_end = address.high;
 
-    if(_pc < _vma || _pc >= _vma + _size) return false;
+    if(_pc < _vma || _pc >= _vma + _size)
+    {
+        return false;
+    }
     // add one to vma + size because address range is exclusive of last address
-    if(_pc_end > _vma + _size) _pc_end = (_vma + _size);
+    if(_pc_end > _vma + _size)
+    {
+        _pc_end = (_vma + _size);
+    }
 
     auto* _inp  = static_cast<bfd*>(_bfd.data);
     auto* _syms = reinterpret_cast<asymbol**>(_bfd.syms);
@@ -244,15 +262,25 @@ symbol::read_bfd_line_info(bfd_file& _bfd)
         if(bfd_find_nearest_line(_inp, _section, _syms, _pc - _vma, &_file, &_func,
                                  &_line) != 0)
         {
-            if(_file) file = _file;
-            if(_func) func = _func;
-            if(_file && strnlen(_file, 1) > 0)
+            if(_file)
+            {
                 file = _file;
+            }
+            if(_func)
+            {
+                func = _func;
+            }
+            if(_file && strnlen(_file, 1) > 0)
+            {
+                file = _file;
+            }
             else if(!_file || strnlen(_file, 1) == 0)
+            {
                 file = bfd_get_filename(_inp);
+            }
             if(!func.empty())
             {
-                file    = filepath::realpath(file, nullptr, false);
+                file    = path::realpath(file);
                 line    = _line;
                 inlines = read_inliner_info(_inp);
                 return true;
@@ -367,7 +395,9 @@ symbol::serialize(ArchiveT& ar, const unsigned int)
        make_nvp("line", line), make_nvp("func", func), make_nvp("file", file),
        make_nvp("inlines", inlines), make_nvp("dwarf_info", dwarf_info));
     if constexpr(concepts::is_output_archive<ArchiveT>::value)
+    {
         ar(cereal::make_nvp("dfunc", rocprofsys::utility::demangle(func)));
+    }
 }
 
 template void

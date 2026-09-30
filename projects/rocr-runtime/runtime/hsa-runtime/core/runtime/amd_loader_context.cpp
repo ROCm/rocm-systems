@@ -301,8 +301,8 @@ bool RegionMemory::Allocate(size_t size, size_t align, bool zero) {
   assert(!this->Allocated());
   assert(0 < size);
   assert(0 < align && 0 == (align & (align - 1)));
-  core::MemoryRegion::AllocateFlags flags = core::MemoryRegion::AllocateNoFlags;
-  if (is_code_) flags = core::MemoryRegion::AllocateExecutable;
+  core::MemoryRegion::AllocateFlags flags = core::MemoryRegion::AllocateCodeObject;
+  if (is_code_) flags |= core::MemoryRegion::AllocateExecutable;
   if (HSA_STATUS_SUCCESS !=
       core::Runtime::runtime_singleton_->AllocateMemory(region_, size, flags, &ptr_)) {
     ptr_ = nullptr;

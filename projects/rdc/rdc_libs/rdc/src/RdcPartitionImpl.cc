@@ -45,8 +45,9 @@ rdc_status_t RdcPartitionImpl::rdc_instance_profile_get_impl(
   rdc_entity_info_t info = rdc_get_info_from_entity_index(entity_index);
 
   amdsmi_processor_handle proc_handle;
-  // Get processor handle of socket
-  amdsmi_status_t ret = get_processor_handle_from_id(info.device_index, &proc_handle);
+  // Pass the full entity index (not info.device_index) to keep the flat/socket dispatch
+  // correct for partition instances in CPX.
+  amdsmi_status_t ret = get_processor_handle_from_id(entity_index, &proc_handle);
   if (ret != AMDSMI_STATUS_SUCCESS) {
     return RDC_ST_UNKNOWN_ERROR;
   }
@@ -62,7 +63,7 @@ rdc_status_t RdcPartitionImpl::rdc_instance_profile_get_impl(
 
   amdsmi_accelerator_partition_profile_t active_profile;
   memset(&active_profile, 0, sizeof(active_profile));
-  uint32_t num = 0;  // This is unused
+  uint32_t num = 0;
   ret = amdsmi_get_gpu_accelerator_partition_profile(proc_handle, &active_profile, &num);
   if (ret != AMDSMI_STATUS_SUCCESS) {
     return RDC_ST_UNKNOWN_ERROR;

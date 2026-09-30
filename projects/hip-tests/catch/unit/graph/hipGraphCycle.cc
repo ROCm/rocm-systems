@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
 Testcase Scenarios :
@@ -34,7 +21,7 @@ Testcase Scenarios :
  * Adding manual empty nodes
  * Cyclic graph, cycle formation first, then adding more nodes
  */
-TEST_CASE("Unit_hipGraph_BasicCyclic1") {
+HIP_TEST_CASE(Unit_hipGraph_BasicCyclic1) {
   hipGraph_t graph;
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
@@ -64,7 +51,7 @@ TEST_CASE("Unit_hipGraph_BasicCyclic1") {
  * Adding manual empty nodes
  * Cyclic graph, cycle formation first, Remove edge to resolve cycle
  */
-TEST_CASE("Unit_hipGraph_BasicCyclic2") {
+HIP_TEST_CASE(Unit_hipGraph_BasicCyclic2) {
   hipGraph_t graph;
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
@@ -95,7 +82,7 @@ TEST_CASE("Unit_hipGraph_BasicCyclic2") {
  * Cyclic graph, cycle formation first, Remove edge causes disconnected graph which is still
  * cyclic
  */
-TEST_CASE("Unit_hipGraph_BasicCyclic3") {
+HIP_TEST_CASE(Unit_hipGraph_BasicCyclic3) {
   hipGraph_t graph;
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
@@ -126,7 +113,7 @@ TEST_CASE("Unit_hipGraph_BasicCyclic3") {
  * Adding manual empty nodes
  * Uncyclic graph, removing edge from middle of linear graph
  */
-TEST_CASE("Unit_hipGraph_BasicCyclic4") {
+HIP_TEST_CASE(Unit_hipGraph_BasicCyclic4) {
   int N = 1024 * 1024;
   int Nbytes = N * sizeof(int);
   hipGraph_t graph;
@@ -185,7 +172,7 @@ TEST_CASE("Unit_hipGraph_BasicCyclic4") {
  * Adding manual empty nodes
  * cyclic graph, removing edge to resolve cycle and remove edge from middle of graph
  */
-TEST_CASE("Unit_hipGraph_BasicCyclic5") {
+HIP_TEST_CASE(Unit_hipGraph_BasicCyclic5) {
   int N = 1024 * 1024;
   int Nbytes = N * sizeof(int);
   hipGraph_t graph;
@@ -243,4 +230,28 @@ TEST_CASE("Unit_hipGraph_BasicCyclic5") {
   HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipStreamDestroy(stream));
+}
+
+HIP_TEST_CASE(Unit_hipGraph_CyclicChildInstantiation) {
+  hipGraph_t parent_graph = nullptr;
+  hipGraph_t child_graph = nullptr;
+  hipGraphExec_t graph_exec = nullptr;
+  hipGraphNode_t child_node = nullptr;
+  hipGraphNode_t first_node = nullptr;
+  hipGraphNode_t second_node = nullptr;
+  hipGraphNode_t third_node = nullptr;
+
+  HIP_CHECK(hipGraphCreate(&parent_graph, 0));
+  HIP_CHECK(hipGraphCreate(&child_graph, 0));
+  HIP_CHECK(hipGraphAddEmptyNode(&first_node, child_graph, nullptr, 0));
+  HIP_CHECK(hipGraphAddEmptyNode(&second_node, child_graph, &first_node, 1));
+  HIP_CHECK(hipGraphAddEmptyNode(&third_node, child_graph, &second_node, 1));
+  HIP_CHECK(hipGraphAddDependencies(child_graph, &third_node, &second_node, 1));
+  HIP_CHECK(hipGraphAddChildGraphNode(&child_node, parent_graph, nullptr, 0, child_graph));
+
+  REQUIRE(hipGraphInstantiate(&graph_exec, parent_graph, nullptr, nullptr, 0) ==
+          hipErrorInvalidValue);
+
+  HIP_CHECK(hipGraphDestroy(parent_graph));
+  HIP_CHECK(hipGraphDestroy(child_graph));
 }

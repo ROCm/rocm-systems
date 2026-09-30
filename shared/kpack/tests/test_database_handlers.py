@@ -7,11 +7,62 @@ import pytest
 from rocm_kpack.database_handlers import (
     RocBLASHandler,
     HipBLASLtHandler,
+    HipSparseLtHandler,
     AotritonHandler,
     MIOpenHandler,
+    HipKernelProviderArchContentHandler,
+    HotswapCacheHandler,
+    WHEEL_TYPE_PRESETS,
     get_database_handlers,
     list_available_handlers,
 )
+
+
+class TestHotswapCacheHandler:
+    @pytest.fixture
+    def handler(self):
+        return HotswapCacheHandler()
+
+    @pytest.fixture
+    def prefix_root(self, tmp_path):
+        root = tmp_path / "prefix"
+        root.mkdir()
+        return root
+
+    def test_name(self, handler):
+        assert handler.name() == "hotswap_cache"
+
+    @pytest.mark.parametrize("extension", ["obj", "man"])
+    def test_detect_gfx1250_entry(self, handler, prefix_root, extension):
+        digest = "0123456789abcdef" * 4
+        file_path = (
+            prefix_root
+            / f"share/rocjitsu/translations/gfx1250-b0-a0/v1/{digest}.{extension}"
+        )
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+        assert handler.detect(file_path, prefix_root) == "gfx1250"
+
+    @pytest.mark.parametrize(
+        "relative_path",
+        [
+            "share/rocjitsu/translations/gfx1250-b0-a0/v2/" + "a" * 64 + ".obj",
+            "share/rocjitsu/translations/gfx1250-b0-a1/v1/" + "a" * 64 + ".obj",
+            "share/rocjitsu/translations/gfx1250-b0-a0/v1/not-a-digest.obj",
+            "share/rocjitsu/translations/gfx1250-b0-a0/v1/" + "a" * 64 + ".txt",
+            "share/rocjitsu/translations/gfx1250-b0-a0/v1/nested/" + "a" * 64 + ".obj",
+            "share/other/translations/gfx1250-b0-a0/v1/" + "a" * 64 + ".obj",
+        ],
+    )
+    def test_reject_unowned_layout(self, handler, prefix_root, relative_path):
+        file_path = prefix_root / relative_path
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.touch()
+        assert handler.detect(file_path, prefix_root) is None
+
+    def test_reject_file_outside_prefix(self, handler, prefix_root):
+        with pytest.raises(ValueError, match="is not under prefix_root"):
+            handler.detect(Path("/tmp/outside.obj"), prefix_root)
 
 
 class TestRocBLASHandler:
@@ -65,6 +116,8 @@ class TestRocBLASHandler:
             ("TensileLibrary_gfx90a.dat", "gfx90a"),
             ("TensileLibrary_gfx942.dat", "gfx942"),
             ("kernels_gfx1030.co", "gfx1030"),
+            ("TensileLibrary_lazy_gfx90a-xnack+.hsaco", "gfx90a-xnack+"),
+            ("Kernels.so-000-gfx942-xnack-.hsaco", "gfx942-xnack-"),
         ]
 
         for filename, expected_arch in test_cases:
@@ -74,6 +127,70 @@ class TestRocBLASHandler:
 
             result = handler.detect(file_path, prefix_root)
             assert result == expected_arch, f"Failed for {filename}"
+
+    def test_detect_xnack_plus(self, handler, prefix_root):
+        """Test detection of xnack+ suffix in filename."""
+        file_path = (
+            prefix_root
+            / "lib/rocblas/library/TensileLibrary_Type_HH_gfx90a-xnack+.hsaco"
+        )
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx90a-xnack+"
+
+    def test_detect_xnack_minus(self, handler, prefix_root):
+        """Test detection of xnack- suffix in filename."""
+        file_path = (
+            prefix_root / "lib/rocblas/library/Kernels.so-000-gfx942-xnack-.hsaco"
+        )
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx942-xnack-"
+
+    def test_detect_arch_subdir_co(self, handler, prefix_root):
+        """Per-arch subdirectory layout: .co file under library/<arch>/."""
+        file_path = (
+            prefix_root / "lib/rocblas/library/gfx942/TensileLibrary_Type_HH_gfx942.co"
+        )
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx942"
+
+    def test_detect_arch_subdir_fallback_dat(self, handler, prefix_root):
+        """Per-arch subdirectory layout: fallback .dat with no arch in filename."""
+        file_path = (
+            prefix_root
+            / "lib/rocblas/library/gfx1100/TensileLibrary_Type_HH_fallback.dat"
+        )
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx1100"
+
+    def test_detect_arch_subdir_manifest(self, handler, prefix_root):
+        """Per-arch subdirectory layout: TensileManifest.txt under library/<arch>/."""
+        file_path = prefix_root / "lib/rocblas/library/gfx90a/TensileManifest.txt"
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx90a"
+
+    def test_detect_arch_subdir_xnack(self, handler, prefix_root):
+        """Per-arch subdirectory layout with xnack variant."""
+        file_path = prefix_root / "lib/rocblas/library/gfx942-xnack+/TensileLibrary.co"
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx942-xnack+"
 
     def test_reject_wrong_directory(self, handler, prefix_root):
         """Test that files not in rocblas/library are rejected."""
@@ -85,7 +202,7 @@ class TestRocBLASHandler:
         assert result is None
 
     def test_reject_wrong_extension(self, handler, prefix_root):
-        """Test that files with unsupported extensions are rejected."""
+        """Flat layout: unknown extensions without arch subdir are rejected."""
         file_path = prefix_root / "lib/rocblas/library/TensileLibrary_gfx1100.txt"
         file_path.parent.mkdir(parents=True)
         file_path.touch()
@@ -103,11 +220,11 @@ class TestRocBLASHandler:
         assert result is None
 
     def test_reject_file_outside_prefix(self, handler, prefix_root):
-        """Test that files outside prefix root are rejected."""
+        """Files outside prefix root are a caller bug — must raise."""
         file_path = Path("/tmp/rocblas/library/TensileLibrary_gfx1100.dat")
 
-        result = handler.detect(file_path, prefix_root)
-        assert result is None
+        with pytest.raises(ValueError, match="is not under prefix_root"):
+            handler.detect(file_path, prefix_root)
 
 
 class TestHipBLASLtHandler:
@@ -161,6 +278,8 @@ class TestHipBLASLtHandler:
             ("TensileLibrary_gfx90a.dat", "gfx90a"),
             ("TensileLibrary_gfx942.dat", "gfx942"),
             ("kernels_gfx1030.co", "gfx1030"),
+            ("TensileLibrary_lazy_gfx90a-xnack+.hsaco", "gfx90a-xnack+"),
+            ("Kernels.so-000-gfx942-xnack-.hsaco", "gfx942-xnack-"),
         ]
 
         for filename, expected_arch in test_cases:
@@ -170,6 +289,50 @@ class TestHipBLASLtHandler:
 
             result = handler.detect(file_path, prefix_root)
             assert result == expected_arch, f"Failed for {filename}"
+
+    def test_detect_xnack_plus(self, handler, prefix_root):
+        """Test detection of xnack+ suffix in filename."""
+        file_path = (
+            prefix_root
+            / "lib/hipblaslt/library/TensileLibrary_Type_HH_gfx90a-xnack+.hsaco"
+        )
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx90a-xnack+"
+
+    def test_detect_xnack_minus(self, handler, prefix_root):
+        """Test detection of xnack- suffix in filename."""
+        file_path = (
+            prefix_root / "lib/hipblaslt/library/Kernels.so-000-gfx942-xnack-.hsaco"
+        )
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx942-xnack-"
+
+    def test_detect_arch_subdir_fallback_dat(self, handler, prefix_root):
+        """Per-arch subdirectory layout: fallback .dat with no arch in filename."""
+        file_path = (
+            prefix_root
+            / "lib/hipblaslt/library/gfx942/TensileLibrary_Type_SS_fallback.dat"
+        )
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx942"
+
+    def test_detect_arch_subdir_manifest(self, handler, prefix_root):
+        """Per-arch subdirectory layout: manifest .txt under library/<arch>/."""
+        file_path = prefix_root / "lib/hipblaslt/library/gfx1100/TensileManifest.txt"
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx1100"
 
     def test_reject_wrong_directory(self, handler, prefix_root):
         """Test that files not in hipblaslt/library are rejected."""
@@ -181,7 +344,7 @@ class TestHipBLASLtHandler:
         assert result is None
 
     def test_reject_wrong_extension(self, handler, prefix_root):
-        """Test that files with unsupported extensions are rejected."""
+        """Flat layout: unknown extensions without arch subdir are rejected."""
         file_path = prefix_root / "lib/hipblaslt/library/TensileLibrary_gfx1100.json"
         file_path.parent.mkdir(parents=True)
         file_path.touch()
@@ -199,8 +362,79 @@ class TestHipBLASLtHandler:
         assert result is None
 
     def test_reject_file_outside_prefix(self, handler, prefix_root):
-        """Test that files outside prefix root are rejected."""
+        """Files outside prefix root are a caller bug — must raise."""
         file_path = Path("/tmp/hipblaslt/library/TensileLibrary_gfx1100.dat")
+
+        with pytest.raises(ValueError, match="is not under prefix_root"):
+            handler.detect(file_path, prefix_root)
+
+
+class TestHipSparseLtHandler:
+    """Tests for HipSparseLtHandler detection logic."""
+
+    @pytest.fixture
+    def handler(self):
+        return HipSparseLtHandler()
+
+    @pytest.fixture
+    def prefix_root(self, tmp_path):
+        root = tmp_path / "prefix"
+        root.mkdir()
+        return root
+
+    def test_name(self, handler):
+        assert handler.name() == "hipsparselt"
+
+    def test_detect_co_file(self, handler, prefix_root):
+        file_path = prefix_root / "lib/hipsparselt/library/extop_gfx942.co"
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx942"
+
+    def test_detect_hsaco_file(self, handler, prefix_root):
+        file_path = prefix_root / "lib/hipsparselt/library/Kernels.so-000-gfx950.hsaco"
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx950"
+
+    def test_detect_dat_file(self, handler, prefix_root):
+        file_path = (
+            prefix_root / "lib/hipsparselt/library/TensileLibrary_BB_BB_A_gfx942.dat"
+        )
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx942"
+
+    def test_detect_arch_subdir_dat(self, handler, prefix_root):
+        """Per-arch subdirectory layout: .dat file under library/<arch>/."""
+        file_path = (
+            prefix_root
+            / "lib/hipsparselt/library/gfx950/TensileLibrary_BB_BB_A_fallback.dat"
+        )
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx950"
+
+    def test_reject_wrong_directory(self, handler, prefix_root):
+        file_path = prefix_root / "lib/rocblas/library/something_gfx942.co"
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result is None
+
+    def test_reject_wrong_extension(self, handler, prefix_root):
+        file_path = prefix_root / "lib/hipsparselt/library/something_gfx942.so"
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
 
         result = handler.detect(file_path, prefix_root)
         assert result is None
@@ -224,53 +458,81 @@ class TestAotritonHandler:
         """Test handler name."""
         assert handler.name() == "aotriton"
 
-    def test_detect_file_in_gfx_directory(self, handler, prefix_root):
-        """Test detection of file in aotriton/kernels/gfx* directory."""
-        file_path = prefix_root / "lib/aotriton/kernels/gfx1100/kernel.hsaco"
-        file_path.parent.mkdir(parents=True)
-        file_path.touch()
-
-        result = handler.detect(file_path, prefix_root)
-        assert result == "gfx1100"
-
-    def test_detect_different_architecture(self, handler, prefix_root):
-        """Test detection of different gfx architecture."""
-        file_path = prefix_root / "share/aotriton/kernels/gfx1101/kernel.co"
-        file_path.parent.mkdir(parents=True)
-        file_path.touch()
-
-        result = handler.detect(file_path, prefix_root)
-        assert result == "gfx1101"
-
-    def test_detect_nested_path(self, handler, prefix_root):
-        """Test detection with nested path before aotriton."""
-        file_path = prefix_root / "lib/foo/bar/aotriton/kernels/gfx942/kernel.dat"
+    def test_detect_aks2_file(self, handler, prefix_root):
+        """Test detection of .aks2 file in aotriton.images layout."""
+        file_path = (
+            prefix_root / "lib/aotriton.images/amd-gfx942/flash/attn_fwd/kernel.aks2"
+        )
         file_path.parent.mkdir(parents=True)
         file_path.touch()
 
         result = handler.detect(file_path, prefix_root)
         assert result == "gfx942"
 
+    def test_detect_family_arch(self, handler, prefix_root):
+        """Test that family architecture names are mapped to bundle keys."""
+        file_path = (
+            prefix_root / "lib/aotriton.images/amd-gfx11xx/flash/attn_fwd/kernel.aks2"
+        )
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx11"
+
     def test_detect_various_architectures(self, handler, prefix_root):
-        """Test detection of various gfx architecture formats."""
+        """Test detection of all real aotriton.images architecture directories.
+
+        Family/sub-family patterns are mapped to bundle keys:
+            gfx11xx → gfx11, gfx120x → gfx12_0.
+            gfx110x and gfx115x are already valid sub-family bundle keys.
+        Target names pass through unchanged.
+        """
         test_cases = [
-            ("gfx90a", "gfx90a"),
-            ("gfx942", "gfx942"),
-            ("gfx1030", "gfx1030"),
-            ("gfx1102", "gfx1102"),
+            ("amd-gfx90a", "gfx90a"),
+            ("amd-gfx942", "gfx942"),
+            ("amd-gfx950", "gfx950"),
+            ("amd-gfx11xx", "gfx11"),
+            ("amd-gfx110x", "gfx110x"),
+            ("amd-gfx115x", "gfx115x"),
+            ("amd-gfx120x", "gfx12_0"),
         ]
 
-        for arch_dir, expected_arch in test_cases:
-            file_path = prefix_root / f"lib/aotriton/kernels/{arch_dir}/kernel.hsaco"
+        for arch_dir, expected_bundle_key in test_cases:
+            file_path = (
+                prefix_root
+                / f"lib/aotriton.images/{arch_dir}/flash/attn_fwd/kernel.aks2"
+            )
             file_path.parent.mkdir(parents=True, exist_ok=True)
             file_path.touch()
 
             result = handler.detect(file_path, prefix_root)
-            assert result == expected_arch, f"Failed for {arch_dir}"
+            assert result == expected_bundle_key, f"Failed for {arch_dir}"
 
-    def test_reject_wrong_directory_structure(self, handler, prefix_root):
-        """Test that files not in aotriton/kernels are rejected."""
-        file_path = prefix_root / "lib/aotriton/other/gfx1100/kernel.hsaco"
+    def test_detect_signature_file(self, handler, prefix_root):
+        """Test that __signature__ file under arch dir is detected."""
+        file_path = prefix_root / "lib/aotriton.images/amd-gfx942/__signature__"
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx942"
+
+    def test_detect_deeply_nested_file(self, handler, prefix_root):
+        """Test detection of file nested deep under architecture directory."""
+        file_path = (
+            prefix_root
+            / "lib/aotriton.images/amd-gfx950/flash/bwd_kernel_dk_dv/kernel.aks2"
+        )
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx950"
+
+    def test_reject_no_amd_prefix(self, handler, prefix_root):
+        """Test that directories without amd- prefix are rejected."""
+        file_path = prefix_root / "lib/aotriton.images/gfx942/flash/kernel.aks2"
         file_path.parent.mkdir(parents=True)
         file_path.touch()
 
@@ -278,17 +540,8 @@ class TestAotritonHandler:
         assert result is None
 
     def test_reject_non_gfx_directory(self, handler, prefix_root):
-        """Test that files in non-gfx subdirectory are rejected."""
-        file_path = prefix_root / "lib/aotriton/kernels/common/kernel.hsaco"
-        file_path.parent.mkdir(parents=True)
-        file_path.touch()
-
-        result = handler.detect(file_path, prefix_root)
-        assert result is None
-
-    def test_reject_missing_kernels_directory(self, handler, prefix_root):
-        """Test that files not under kernels subdirectory are rejected."""
-        file_path = prefix_root / "lib/aotriton/gfx1100/kernel.hsaco"
+        """Test that non-gfx directories under aotriton.images are rejected."""
+        file_path = prefix_root / "lib/aotriton.images/amd-common/flash/kernel.aks2"
         file_path.parent.mkdir(parents=True)
         file_path.touch()
 
@@ -296,22 +549,20 @@ class TestAotritonHandler:
         assert result is None
 
     def test_reject_file_outside_prefix(self, handler, prefix_root):
-        """Test that files outside prefix root are rejected."""
-        file_path = Path("/tmp/aotriton/kernels/gfx1100/kernel.hsaco")
+        """Files outside prefix root are a caller bug — must raise."""
+        file_path = Path("/tmp/aotriton.images/amd-gfx942/kernel.aks2")
 
-        result = handler.detect(file_path, prefix_root)
-        assert result is None
+        with pytest.raises(ValueError, match="is not under prefix_root"):
+            handler.detect(file_path, prefix_root)
 
-    def test_detect_deeply_nested_file(self, handler, prefix_root):
-        """Test detection of file nested multiple levels under architecture directory."""
-        file_path = (
-            prefix_root / "lib/aotriton/kernels/gfx1100/subdir/deep/kernel.hsaco"
-        )
+    def test_reject_wrong_parent_directory(self, handler, prefix_root):
+        """Test that aotriton without .images suffix is rejected."""
+        file_path = prefix_root / "lib/aotriton/amd-gfx942/flash/kernel.aks2"
         file_path.parent.mkdir(parents=True)
         file_path.touch()
 
         result = handler.detect(file_path, prefix_root)
-        assert result == "gfx1100"
+        assert result is None
 
 
 class TestMIOpenHandler:
@@ -330,6 +581,32 @@ class TestMIOpenHandler:
 
     def test_name(self, handler):
         assert handler.name() == "miopen"
+
+    def test_detect_kdb(self, handler, prefix_root):
+        """MIOpen .kdb files (SQLite compiled kernel databases)."""
+        file_path = prefix_root / "share/miopen/db/gfx942.kdb"
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx942"
+
+    def test_detect_kdb_various_arches(self, handler, prefix_root):
+        """MIOpen .kdb files across multiple architectures."""
+        test_cases = [
+            ("gfx90a.kdb", "gfx90a"),
+            ("gfx908.kdb", "gfx908"),
+            ("gfx1100.kdb", "gfx1100"),
+            ("gfx950.kdb", "gfx950"),
+        ]
+
+        for filename, expected_arch in test_cases:
+            file_path = prefix_root / f"share/miopen/db/{filename}"
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.touch()
+
+            result = handler.detect(file_path, prefix_root)
+            assert result == expected_arch, f"Failed for {filename}"
 
     def test_detect_tn_model(self, handler, prefix_root):
         file_path = prefix_root / "share/miopen/db/gfx908.tn.model"
@@ -366,12 +643,45 @@ class TestMIOpenHandler:
         result = handler.detect(file_path, prefix_root)
         assert result == "gfx950"
 
+    def test_detect_db_txt(self, handler, prefix_root):
+        """MIOpen .db.txt files with concatenated arch+CU count."""
+        file_path = prefix_root / "share/miopen/db/gfx90878.db.txt"
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx908"
+
+    def test_detect_fdb_txt(self, handler, prefix_root):
+        """MIOpen .HIP.fdb.txt files."""
+        file_path = prefix_root / "share/miopen/db/gfx942130.HIP.fdb.txt"
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx942"
+
+    def test_detect_opencl_fdb_txt(self, handler, prefix_root):
+        file_path = prefix_root / "share/miopen/db/gfx900_56.OpenCL.fdb.txt"
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx900"
+
     def test_detect_various_architectures(self, handler, prefix_root):
         test_cases = [
             ("gfx908.tn.model", "gfx908"),
             ("gfx90a_ConvHipIgemmGroupXdlops_encoder.ktn.model", "gfx90a"),
             ("gfx942_3d_metadata.tn.model", "gfx942"),
             ("gfx950_ConvHipImplicitGemm3DGroupFwdXdlops_metadata.tn.model", "gfx950"),
+            ("gfx90878.db.txt", "gfx908"),
+            ("gfx90a68.db.txt", "gfx90a"),
+            ("gfx942130.HIP.fdb.txt", "gfx942"),
+            ("gfx1030_36.db.txt", "gfx1030"),
+            ("gfx906_60.OpenCL.fdb.txt", "gfx906"),
+            ("gfx90a6e.HIP.fdb.txt", "gfx90a"),
+            ("gfx942e4.db.txt", "gfx942"),
         ]
 
         for filename, expected_arch in test_cases:
@@ -391,7 +701,7 @@ class TestMIOpenHandler:
         assert result is None
 
     def test_reject_wrong_extension(self, handler, prefix_root):
-        file_path = prefix_root / "share/miopen/db/gfx908.txt"
+        file_path = prefix_root / "share/miopen/db/gfx908.json"
         file_path.parent.mkdir(parents=True)
         file_path.touch()
 
@@ -407,10 +717,336 @@ class TestMIOpenHandler:
         assert result is None
 
     def test_reject_file_outside_prefix(self, handler, prefix_root):
+        """Files outside prefix root are a caller bug — must raise."""
         file_path = Path("/tmp/share/miopen/db/gfx908.tn.model")
+
+        with pytest.raises(ValueError, match="is not under prefix_root"):
+            handler.detect(file_path, prefix_root)
+
+    def test_detect_ck_so_gfx942(self, handler, prefix_root):
+        """MIOpen CK per-arch shared library for gfx942."""
+        file_path = prefix_root / "lib/libMIOpenCKGroupedConv_gfx942.so"
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx942"
+
+    def test_detect_ck_so_gfx90a(self, handler, prefix_root):
+        """MIOpen CK per-arch shared library for gfx90a."""
+        file_path = prefix_root / "lib/libMIOpenCKGroupedConv_gfx90a.so"
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx90a"
+
+    def test_detect_ck_so_xnack(self, handler, prefix_root):
+        """MIOpen CK per-arch shared library with xnack variant."""
+        file_path = prefix_root / "lib/libMIOpenCKGroupedConv_gfx942-xnack+.so"
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx942-xnack+"
+
+    def test_reject_libMIOpen_so(self, handler, prefix_root):
+        """libMIOpen.so (the main library) should not match the CK pattern."""
+        file_path = prefix_root / "lib/libMIOpen.so"
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.touch()
 
         result = handler.detect(file_path, prefix_root)
         assert result is None
+
+    def test_reject_ck_so_no_arch(self, handler, prefix_root):
+        """CK shared library without architecture suffix should be rejected."""
+        file_path = prefix_root / "lib/libMIOpenCKGroupedConv.so"
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result is None
+
+    def test_detect_ck_dll_gfx942(self, handler, prefix_root):
+        """Windows CK per-arch DLL (no lib prefix) should be detected."""
+        file_path = prefix_root / "lib/MIOpenCKGroupedConv_gfx942.dll"
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx942"
+
+    def test_detect_ck_dll_xnack(self, handler, prefix_root):
+        """Windows CK per-arch DLL with xnack variant."""
+        file_path = prefix_root / "lib/MIOpenCKGroupedConv_gfx942-xnack+.dll"
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx942-xnack+"
+
+    def test_reject_MIOpen_dll(self, handler, prefix_root):
+        """MIOpen.dll (the main library, no lib prefix) should not match the CK pattern."""
+        file_path = prefix_root / "lib/MIOpen.dll"
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result is None
+
+
+class TestHipKernelProviderArchContentHandler:
+    """Tests for HipKernelProviderArchContentHandler detection logic."""
+
+    _ARCH_CONTENT_DIR = "lib/hipdnn_plugins/engines/arch_content/some-producer"
+    _TEST_ARCH_CONTENT_DIR = (
+        "lib/hipdnn_plugins/engines/test_arch_content/some-producer"
+    )
+
+    @pytest.fixture
+    def handler(self):
+        return HipKernelProviderArchContentHandler()
+
+    @pytest.fixture
+    def prefix_root(self, tmp_path):
+        """Create a temporary prefix root directory."""
+        root = tmp_path / "prefix"
+        root.mkdir()
+        return root
+
+    def test_name(self, handler):
+        assert handler.name() == "hipkernelprovider"
+
+    def test_detect_arch_content_kpack(self, handler, prefix_root):
+        """A per-arch kpack archive routes to its arch."""
+        file_path = (
+            prefix_root / f"{self._ARCH_CONTENT_DIR}/gfx942/kernels_gfx942.kpack"
+        )
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx942"
+
+    def test_detect_arch_content_manifest_json(self, handler, prefix_root):
+        """The bundle manifest beside the kpack routes to the same arch."""
+        file_path = prefix_root / f"{self._ARCH_CONTENT_DIR}/gfx942/kernels_gfx942.json"
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx942"
+
+    def test_detect_arch_content_deeply_nested_file(self, handler, prefix_root):
+        """Any file nested below the arch dir routes to that arch."""
+        file_path = prefix_root / f"{self._ARCH_CONTENT_DIR}/gfx942/sub/extra/blob.bin"
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx942"
+
+    def test_detect_arch_content_various_arches(self, handler, prefix_root):
+        test_cases = ["gfx90a", "gfx942", "gfx950", "gfx1151", "gfx1201"]
+        for arch in test_cases:
+            file_path = (
+                prefix_root / f"{self._ARCH_CONTENT_DIR}/{arch}/kernels_{arch}.kpack"
+            )
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.touch()
+
+            result = handler.detect(file_path, prefix_root)
+            assert result == arch, f"Failed for {arch}"
+
+    def test_detect_arch_content_xnack(self, handler, prefix_root):
+        """xnack arch variant is preserved as the bundle key."""
+        file_path = (
+            prefix_root
+            / f"{self._ARCH_CONTENT_DIR}/gfx942-xnack+/kernels_gfx942-xnack+.kpack"
+        )
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx942-xnack+"
+
+    def test_detect_arch_content_second_producer(self, handler, prefix_root):
+        """A different engine's per-arch content under arch_content/ routes with
+        no handler change (the anchor is the container, not the engine name)."""
+        file_path = (
+            prefix_root
+            / "lib/hipdnn_plugins/engines/arch_content/aiter/gfx942/kernels.kpack"
+        )
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx942"
+
+    def test_detect_without_producer_segment(self, handler, prefix_root):
+        """The producer segment is a naming convention, not part of the match:
+        an arch directory sitting straight under either container still routes."""
+        engines = "lib/hipdnn_plugins/engines"
+        for rel, expected in (
+            (f"{engines}/arch_content/gfx942/kernels.kpack", "gfx942"),
+            (f"{engines}/test_arch_content/gfx1101/kernels.kpack", "gfx1101"),
+        ):
+            file_path = prefix_root / rel
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.touch()
+            assert handler.detect(file_path, prefix_root) == expected, rel
+
+    def test_detect_arch_content_rocke_placements(self, handler, prefix_root):
+        """rocKE has no shipping content yet and its final home is undecided: it
+        may keep its own producer segment, fold in beside the descriptors, or
+        nest under them. Each candidate resolves, because the container is the
+        anchor and the arch directory is found at any depth beneath it."""
+        engines = "lib/hipdnn_plugins/engines"
+        for rel in (
+            f"{engines}/arch_content/rocke/gfx942/kernels.kpack",
+            f"{engines}/arch_content/hip-kernel-provider/gfx942/kernels.kpack",
+            f"{engines}/arch_content/hip-kernel-provider/rocke/gfx942/kernels.kpack",
+        ):
+            file_path = prefix_root / rel
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.touch()
+            assert handler.detect(file_path, prefix_root) == "gfx942", rel
+
+    def test_detect_test_arch_content(self, handler, prefix_root):
+        """Test content splits per arch like the runtime container. Unsplit, the
+        per-arch builds each emit one artifact of the same name holding only
+        their own arches, and the last to upload overwrites the others.
+
+        The second path is the shipping layout verbatim, so this keeps one
+        assertion anchored to a real tree rather than only to the arbitrary
+        producer segment the other fixtures use.
+        """
+        for rel in (
+            f"{self._TEST_ARCH_CONTENT_DIR}/unit/shared/gfx1101/kernels.kpack",
+            "lib/hipdnn_plugins/engines/test_arch_content/hip-kernel-provider"
+            "/unit/shared/gfx1101/kernels.kpack",
+        ):
+            file_path = prefix_root / rel
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.touch()
+            assert handler.detect(file_path, prefix_root) == "gfx1101", rel
+
+    def test_detect_test_arch_content_various_arches(self, handler, prefix_root):
+        for arch in ("gfx942", "gfx1100", "gfx1101", "gfx1201"):
+            file_path = (
+                prefix_root
+                / f"{self._TEST_ARCH_CONTENT_DIR}/unit/shared/{arch}/descriptor.json"
+            )
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.touch()
+
+            result = handler.detect(file_path, prefix_root)
+            assert result == arch, f"Failed for {arch}"
+
+    def test_reject_test_arch_content_without_arch_dir(self, handler, prefix_root):
+        """An arch-independent asset under test_arch_content stays generic, so
+        every arch's test artifact keeps a copy of it."""
+        file_path = (
+            prefix_root
+            / f"{self._TEST_ARCH_CONTENT_DIR}/test_kpack_binary/test_zstd.kpack"
+        )
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result is None
+
+    def test_reject_test_arch_content_not_under_engines(self, handler, prefix_root):
+        """A test_arch_content dir not directly under engines/ stays generic."""
+        file_path = (
+            prefix_root / "share/some_component/test_arch_content/gfx942/data.bin"
+        )
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result is None
+
+    def test_reject_arch_content_no_arch_dir(self, handler, prefix_root):
+        """arch_content content with no arch directory stays generic (None)."""
+        file_path = prefix_root / f"{self._ARCH_CONTENT_DIR}/config/settings.json"
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result is None
+
+    def test_reject_arch_dir_without_arch_content_parent(self, handler, prefix_root):
+        """An <arch>/ path not under an arch_content/ container stays generic,
+        including the rocKE authoring SDK tree (bin/hip_kernel_provider/rocke/)."""
+        for rel in (
+            "lib/hipdnn_plugins/engines/other/gfx942/blob.bin",
+            "bin/hip_kernel_provider/rocke/instances/gfx942/wmma_gemm.py",
+        ):
+            file_path = prefix_root / rel
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.touch()
+            assert handler.detect(file_path, prefix_root) is None, rel
+
+    def test_reject_arch_content_not_under_engines(self, handler, prefix_root):
+        """An arch_content dir not directly under engines/ stays generic, so an
+        unrelated component's arch_content tree is never captured."""
+        for rel in (
+            "share/some_component/arch_content/gfx942/data.bin",
+            "lib/arch_content/gfx942/kernels_gfx942.kpack",
+        ):
+            file_path = prefix_root / rel
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.touch()
+            assert handler.detect(file_path, prefix_root) is None, rel
+
+    def test_reject_arch_content_non_arch_dir(self, handler, prefix_root):
+        """A non-gfx directory name is not a bundle key."""
+        file_path = prefix_root / f"{self._ARCH_CONTENT_DIR}/common/shared.json"
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result is None
+
+    def test_reject_unrecognized_arch_dir_shape(self, handler, prefix_root):
+        """A directory that looks like an architecture but is not a bare concrete
+        gfx name is not a bundle key, so its content stays generic -- and generic
+        content of the same name is overwritten by whichever per-arch build
+        uploads last. The descriptor packer normalizes GPU_TARGETS to bare gfx
+        names and drops anything else, so these shapes do not reach the ingestor
+        tree today; this pins the boundary for a producer that does not go
+        through that normalization.
+
+        Paths are not created on disk: detect() is a pure path predicate, and a
+        colon is not a legal path character on Windows.
+        """
+        for arch_dir in (
+            "gfx11-generic",
+            "gfx10-3-generic",
+            "gfx950:sramecc+:xnack-",
+            "gfx1250-b0-a0",
+        ):
+            rel = f"{self._ARCH_CONTENT_DIR}/{arch_dir}/kernels.kpack"
+            assert handler.detect(prefix_root / rel, prefix_root) is None, arch_dir
+
+    def test_reject_empty_arch_content_arch_dir_itself(self, handler, prefix_root):
+        """The arch directory with no file underneath does not match."""
+        dir_path = prefix_root / f"{self._ARCH_CONTENT_DIR}/gfx942"
+        dir_path.mkdir(parents=True)
+
+        result = handler.detect(dir_path, prefix_root)
+        assert result is None
+
+    def test_reject_file_outside_prefix(self, handler, prefix_root):
+        """Files outside prefix root are a caller bug -- must raise."""
+        file_path = Path(
+            "/tmp/lib/hip_kernel_provider/rocke/gfx942/kernels_gfx942.kpack"
+        )
+
+        with pytest.raises(ValueError, match="is not under prefix_root"):
+            handler.detect(file_path, prefix_root)
 
 
 class TestDatabaseHandlerRegistry:
@@ -422,9 +1058,12 @@ class TestDatabaseHandlerRegistry:
         assert isinstance(handlers, list)
         assert "rocblas" in handlers
         assert "hipblaslt" in handlers
+        assert "hipsparselt" in handlers
         assert "aotriton" in handlers
         assert "miopen" in handlers
-        assert len(handlers) == 4
+        assert "hipkernelprovider" in handlers
+        assert "hotswap_cache" in handlers
+        assert len(handlers) == 7
 
     def test_get_database_handlers_single(self):
         """Test getting a single handler by name."""
@@ -441,12 +1080,31 @@ class TestDatabaseHandlerRegistry:
 
     def test_get_database_handlers_all(self):
         """Test getting all handlers."""
-        handlers = get_database_handlers(["rocblas", "hipblaslt", "aotriton", "miopen"])
-        assert len(handlers) == 4
+        handlers = get_database_handlers(
+            [
+                "rocblas",
+                "hipblaslt",
+                "hipsparselt",
+                "aotriton",
+                "miopen",
+                "hipkernelprovider",
+                "hotswap_cache",
+            ]
+        )
+        assert len(handlers) == 7
         assert isinstance(handlers[0], RocBLASHandler)
         assert isinstance(handlers[1], HipBLASLtHandler)
-        assert isinstance(handlers[2], AotritonHandler)
-        assert isinstance(handlers[3], MIOpenHandler)
+        assert isinstance(handlers[2], HipSparseLtHandler)
+        assert isinstance(handlers[3], AotritonHandler)
+        assert isinstance(handlers[4], MIOpenHandler)
+        assert isinstance(handlers[5], HipKernelProviderArchContentHandler)
+        assert isinstance(handlers[6], HotswapCacheHandler)
+
+    def test_wheel_type_preset(self):
+        """Test that wheel type presets resolve to valid handlers."""
+        names = WHEEL_TYPE_PRESETS["torch-fat"]
+        handlers = get_database_handlers(names)
+        assert len(handlers) == 5
 
     def test_get_database_handlers_unknown(self):
         """Test that unknown handler name raises ValueError."""

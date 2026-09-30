@@ -1,25 +1,7 @@
-/**
- * MIT License
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
  *
- * Copyright (c) 2019 - 2025 Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * SPDX-License-Identifier: MIT
  */
 
 /**
@@ -144,6 +126,7 @@
 #define HIPRT_NAN_BF16 __ushort_as_bfloat16((unsigned short)0x7FFFU)
 #define HIPRT_NEG_ZERO_BF16 __ushort_as_bfloat16((unsigned short)0x8000U)
 
+#if defined(__clang__)
 // Since we are using unsigned short to represent data in bfloat16, it can be of different sizes on
 // different machines. These naive checks should prevent some undefined behavior on systems which
 // have different sizes for basic types.
@@ -1306,7 +1289,7 @@ __BF16_HOST_DEVICE_STATIC__ bool __hgeu(const __hip_bfloat16 a, const __hip_bflo
  * \brief Compare two bfloat162 values - not equal
  */
 __BF16_HOST_DEVICE_STATIC__ bool __hne(const __hip_bfloat16 a, const __hip_bfloat16 b) {
-  return (__bf16)a != (__bf16)b;
+  return ((__bf16)a < (__bf16)b) || ((__bf16)a > (__bf16)b);
 }
 
 /**
@@ -1580,7 +1563,7 @@ __BF16_HOST_DEVICE_STATIC__ bool operator==(const __hip_bfloat16& l, const __hip
  * \brief Operator to perform a not equal on two __hip_bfloat16 numbers
  */
 __BF16_HOST_DEVICE_STATIC__ bool operator!=(const __hip_bfloat16& l, const __hip_bfloat16& r) {
-  return __hne(l, r);
+  return __hneu(l, r);
 }
 
 /**
@@ -1699,7 +1682,7 @@ __BF16_DEVICE_STATIC__ __hip_bfloat16 hexp(const __hip_bfloat16 h) {
  * \brief Calculate exponential 10 of bfloat16
  */
 __BF16_DEVICE_STATIC__ __hip_bfloat16 hexp10(const __hip_bfloat16 h) {
-  return __float2bfloat16(__ocml_exp10_f32(__bfloat162float(h)));
+  return __float2bfloat16(__builtin_elementwise_exp10(__bfloat162float(h)));
 }
 
 /**
@@ -1914,8 +1897,41 @@ __BF16_DEVICE_STATIC__ __hip_bfloat162 h2trunc(const __hip_bfloat162 h) {
 }
 
 /**
+ * \ingroup HIP_INTRINSIC_BFLOAT16_MATH
+ * \brief Atomic add bfloat16
+ */
+inline __device__ __hip_bfloat16 atomicAdd(__hip_bfloat16* address, __hip_bfloat16 value) {
+  return static_cast<__hip_bfloat16>(__scoped_atomic_fetch_add(
+      (__bf16*)address, static_cast<__bf16>(value), __ATOMIC_ACQ_REL, __MEMORY_SCOPE_DEVICE));
+}
+
+/**
  * \ingroup HIP_INTRINSIC_BFLOAT162_MATH
  * \brief Atomic add bfloat162
+ */
+__BF16_DEVICE_STATIC__ __hip_bfloat162 atomicAdd(__hip_bfloat162* address, __hip_bfloat162 value) {
+  typedef __bf16 __bf16_2 __attribute__((ext_vector_type(2)));
+  static_assert(sizeof(__bf16_2) == sizeof(unsigned int));
+
+  union {
+    __bf16_2 vec;
+    unsigned int u32;
+  } expected, desired;
+
+  unsigned int* atomic_ptr = (unsigned int*)address;
+  expected.u32 = __scoped_atomic_load_n(atomic_ptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+
+  do {
+    desired.vec = expected.vec + static_cast<__bf16_2>(value);
+  } while (!__scoped_atomic_compare_exchange_n(atomic_ptr, &expected.u32, desired.u32, 0,
+                                               __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE,
+                                               __MEMORY_SCOPE_DEVICE));
+  return static_cast<__hip_bfloat162>(expected.vec);
+}
+
+/**
+ * \ingroup HIP_INTRINSIC_BFLOAT162_MATH
+ * \brief Unsafe Atomic add bfloat162
  */
 __BF16_DEVICE_STATIC__ __hip_bfloat162 unsafeAtomicAdd(__hip_bfloat162* address,
                                                        __hip_bfloat162 value) {
@@ -1926,7 +1942,8 @@ __BF16_DEVICE_STATIC__ __hip_bfloat162 unsafeAtomicAdd(__hip_bfloat162* address,
     __hip_bfloat162_raw bf162_raw;
     vec_short2 vs2;
   } u{static_cast<__hip_bfloat162_raw>(value)};
-  u.vs2 = __builtin_amdgcn_flat_atomic_fadd_v2bf16((vec_short2*)address, u.vs2);
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_flat_atomic_fadd_v2bf16))
+    u.vs2 = __builtin_amdgcn_flat_atomic_fadd_v2bf16((vec_short2*)address, u.vs2);
   return static_cast<__hip_bfloat162>(u.bf162_raw);
 #else
   static_assert(sizeof(unsigned int) == sizeof(__hip_bfloat162_raw));
@@ -1936,12 +1953,12 @@ __BF16_DEVICE_STATIC__ __hip_bfloat162 unsafeAtomicAdd(__hip_bfloat162* address,
   };
   u_hold old_val, new_val;
   old_val.u32 =
-      __hip_atomic_load((unsigned int*)address, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+      __scoped_atomic_load_n((unsigned int*)address, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
   do {
     new_val.h2r = __hadd2(old_val.h2r, value);
-  } while (!__hip_atomic_compare_exchange_strong((unsigned int*)address, &old_val.u32, new_val.u32,
-                                                 __ATOMIC_RELAXED, __ATOMIC_RELAXED,
-                                                 __HIP_MEMORY_SCOPE_AGENT));
+  } while (!__scoped_atomic_compare_exchange_n((unsigned int*)address, &old_val.u32, new_val.u32, 0,
+                                               __ATOMIC_RELAXED, __ATOMIC_RELAXED,
+                                               __MEMORY_SCOPE_DEVICE));
   return old_val.h2r;
 #endif
 }
@@ -1969,5 +1986,10 @@ __BF16_DEVICE_STATIC__ __hip_bfloat16 unsafeAtomicAdd(__hip_bfloat16* address,
   return __high2bfloat16(out);
 }
 #endif  // defined(__clang__) && defined(__HIP__)
+#elif defined(__GNUC__) || defined(_MSC_VER)
+#if !defined(__HIPCC_RTC__)
+#include "amd_hip_bf16_gcc.h"
+#endif
+#endif
 #pragma pop_macro("MAYBE_UNDEF")
 #endif

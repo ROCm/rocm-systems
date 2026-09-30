@@ -82,7 +82,7 @@ class RdcWatchTableImpl : public RdcWatchTable {
 
   rdc_status_t rdc_health_set(rdc_gpu_group_t group_id, unsigned int components) override;
   rdc_status_t rdc_health_get(rdc_gpu_group_t group_id, unsigned int* components) override;
-  rdc_status_t rdc_health_check(rdc_gpu_group_t group_id, rdc_health_response_t *response) override;
+  rdc_status_t rdc_health_check(rdc_gpu_group_t group_id, rdc_health_response_t* response) override;
   rdc_status_t rdc_health_clear(rdc_gpu_group_t group_id) override;
 
   //!< When the RDC is running as RDC_OPERATION_MODE_MANUAL, the user will
@@ -124,34 +124,26 @@ class RdcWatchTableImpl : public RdcWatchTable {
   static rdc_status_t handle_fields(rdc_gpu_field_value_t* values, uint32_t num_values,
                                     void* user_data);
 
-  rdc_status_t create_health_field_group(unsigned int components,
-                                         rdc_field_grp_t* field_group_id);
+  rdc_status_t create_health_field_group(unsigned int components, rdc_field_grp_t* field_group_id);
   //!< output: Whether health incidents are full
-  bool add_health_incident(uint32_t gpu_index,
-                           rdc_health_system_t component,
-                           rdc_health_result_t  health,
-                           uint32_t err_code,
-                           std::string err_msg,
-                           rdc_health_incidents_t* incident,
+  bool add_health_incident(uint32_t gpu_index, rdc_health_system_t component,
+                           rdc_health_result_t health, uint32_t err_code, std::string err_msg,
+                           rdc_health_incidents_t* incident, rdc_health_response_t* response);
+  rdc_status_t get_start_end_values(rdc_gpu_group_t group_id, uint32_t gpu_index, rdc_field_t field,
+                                    uint64_t start_timestamp, rdc_field_value* start_value,
+                                    rdc_field_value* end_value);
+  rdc_status_t pcie_check(rdc_gpu_group_t group_id, uint32_t gpu_index,
+                          rdc_health_response_t* response);
+  rdc_status_t xgmi_check(rdc_gpu_group_t group_id, uint32_t gpu_index,
+                          rdc_health_response_t* response);
+  rdc_status_t memory_check(rdc_gpu_group_t group_id, uint32_t gpu_index,
+                            rdc_health_response_t* response);
+  rdc_status_t eeprom_check(rdc_gpu_group_t group_id, uint32_t gpu_index,
+                            rdc_health_response_t* response);
+  rdc_status_t thermal_check(rdc_gpu_group_t group_id, uint32_t gpu_index,
+                             rdc_health_response_t* response);
+  rdc_status_t power_check(rdc_gpu_group_t group_id, uint32_t gpu_index,
                            rdc_health_response_t* response);
-  rdc_status_t get_start_end_values(rdc_gpu_group_t group_id,
-                                    uint32_t gpu_index,
-                                    rdc_field_t field,
-                                    uint64_t start_timestamp,
-                                    rdc_field_value *start_value,
-                                    rdc_field_value *end_value);
-  rdc_status_t pcie_check(rdc_gpu_group_t group_id,
-                          uint32_t gpu_index, rdc_health_response_t* response);
-  rdc_status_t xgmi_check(rdc_gpu_group_t group_id,
-                          uint32_t gpu_index, rdc_health_response_t* response);
-  rdc_status_t memory_check(rdc_gpu_group_t group_id,
-                          uint32_t gpu_index, rdc_health_response_t* response);
-  rdc_status_t eeprom_check(rdc_gpu_group_t group_id,
-                          uint32_t gpu_index, rdc_health_response_t* response);
-  rdc_status_t thermal_check(rdc_gpu_group_t group_id,
-                          uint32_t gpu_index, rdc_health_response_t* response);
-  rdc_status_t power_check(rdc_gpu_group_t group_id,
-                          uint32_t gpu_index, rdc_health_response_t* response);
 
   RdcGroupSettingsPtr group_settings_;
   RdcCacheManagerPtr cache_mgr_;

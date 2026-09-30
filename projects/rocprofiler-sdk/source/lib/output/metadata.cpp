@@ -37,11 +37,11 @@
 #include "lib/output/kernel_symbol_info.hpp"
 #include "lib/output/node_info.hpp"
 
+#include <rocprofiler-sdk/experimental/spm.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 #include <rocprofiler-sdk/cxx/details/tokenize.hpp>
 
-#include <fmt/core.h>
 #include <fmt/format.h>
 
 #include <dlfcn.h>
@@ -59,6 +59,20 @@ namespace tool
 namespace
 {
 namespace fs = ::rocprofiler::common::filesystem;
+
+rocprofiler_status_t
+query_spm_configuration(const rocprofiler_spm_available_configuration_t** configs,
+                        long unsigned int                                 num_config,
+                        void*                                             user_data)
+{
+    auto* avail_configs =
+        static_cast<std::vector<rocprofiler_spm_available_configuration_t>*>(user_data);
+    for(size_t i = 0; i < num_config; i++)
+    {
+        avail_configs->emplace_back(*configs[i]);
+    }
+    return ROCPROFILER_STATUS_SUCCESS;
+}
 
 rocprofiler_status_t
 query_pc_sampling_configuration(const rocprofiler_pc_sampling_configuration_t* configs,
@@ -207,6 +221,10 @@ metadata::metadata(inprocess)
                 rocprofiler_query_pc_sampling_agent_configurations(
                     itr.id, query_pc_sampling_configuration, &pc_configs);
                 agent_pc_sample_config_info.emplace(itr.id, pc_configs);
+                auto spm_configs = std::vector<rocprofiler_spm_available_configuration_t>{};
+                rocprofiler_spm_query_agent_configurations(
+                    itr.id, query_spm_configuration, &spm_configs);
+                agent_spm_config_info.emplace(itr.id, spm_configs);
             }
         }
 
@@ -353,6 +371,17 @@ metadata::get_code_object(uint64_t code_obj_id) const
     });
 }
 
+std::optional<rocprofiler_agent_id_t>
+metadata::get_code_object_agent(uint64_t code_obj_id) const
+{
+    return code_objects.rlock(
+        [code_obj_id](const auto& _data) -> std::optional<rocprofiler_agent_id_t> {
+            auto itr = _data.find(code_obj_id);
+            if(itr == _data.end()) return std::nullopt;
+            return itr->second.agent_id;
+        });
+}
+
 code_object_load_info_vec_t
 metadata::get_code_object_load_info() const
 {
@@ -384,9 +413,9 @@ std::vector<std::string>
 metadata::get_att_filenames() const
 {
     auto data = std::vector<std::string>{};
-    for(const auto& filenames : att_filenames)
+    for(const auto& [key, files] : att_filenames)
     {
-        for(const auto& file : filenames.second.second)
+        for(const auto& file : files)
         {
             data.emplace_back(fs::path{file}.filename());
         }
@@ -489,8 +518,13 @@ host_function_data_vec_t
 metadata::get_host_symbols() const
 {
     return host_functions.rlock([](const auto& _data_v) {
+        auto _data_size = uint64_t{0};
+        for(const auto& itr : _data_v)
+            _data_size = std::max(_data_size, itr.first);
+
         auto _info = std::vector<host_function_info>{};
-        _info.resize(_data_v.size() + 1, host_function_info{});
+        _info.resize(_data_size + 1, host_function_info{});
+        // index by the host function id
         for(const auto& itr : _data_v)
             _info.at(itr.first) = itr.second;
         return _info;
@@ -506,6 +540,19 @@ metadata::get_gpu_agents() const
         if(itr.type == ROCPROFILER_AGENT_TYPE_GPU) _data.emplace_back(&itr);
     }
     return _data;
+}
+
+spm_config_vec_t
+metadata::get_spm_config_info(rocprofiler_agent_id_t _val) const
+{
+    auto _ret = spm_config_vec_t{};
+    if(agent_spm_config_info.find(_val) == agent_spm_config_info.end()) return _ret;
+    auto spm_config = agent_spm_config_info.at(_val);
+    for(const auto& itr : spm_config)
+    {
+        _ret.emplace_back(itr);
+    }
+    return _ret;
 }
 
 pc_sample_config_vec_t

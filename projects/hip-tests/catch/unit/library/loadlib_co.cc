@@ -1,29 +1,13 @@
 /*
-Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 
 
-TEST_CASE("Unit_hip_library_load_co") {
+HIP_TEST_CASE(Unit_hip_library_load_co) {
   constexpr size_t size = 32;
   constexpr size_t num_kernels = 3;
   std::vector<float> input1, input2;
@@ -46,7 +30,7 @@ TEST_CASE("Unit_hip_library_load_co") {
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
   std::string lib_co = "library_code_load.code";
-  
+
   auto host_verify = [](const std::vector<float>& x, const std::vector<float>&y, const std::vector<float>& expected, int op) {
     for (size_t i = 0; i < size; i++) {
       float tmp;
@@ -74,10 +58,10 @@ TEST_CASE("Unit_hip_library_load_co") {
 
     unsigned int count = 0;
     HIP_CHECK(hipLibraryGetKernelCount(&count, library));
-    REQUIRE(count == 3);
+    REQUIRE(count == 9);  // 3 arithmetic + 6 d_var/m_var write/read/read_modify (see library_code_load.cc)
 
     size_t offset, paramsize;
-    for (size_t k = 0; k < count; ++k) {
+    for (size_t k = 0; k < 3; ++k) {  // add/sub/mul_kernel each take 3 float* args
       HIP_CHECK(hipKernelGetParamInfo(function, k, &offset, &paramsize));
       REQUIRE(offset == k * sizeof(float*));
       REQUIRE(paramsize == sizeof(float*));
@@ -102,17 +86,17 @@ TEST_CASE("Unit_hip_library_load_co") {
     HIP_CHECK(
         hipLibraryLoadFromFile(&library, lib_co.data(), nullptr, nullptr, 0, nullptr, nullptr, 0));
     HIP_CHECK(hipLibraryGetKernel(&function, library, "sub_kernel"));
-    
+
     hipLibrary_t new_library;
     HIP_CHECK(hipKernelGetLibrary(&new_library, function));
     REQUIRE(new_library == library);
 
     unsigned int count = 0;
     HIP_CHECK(hipLibraryGetKernelCount(&count, library));
-    REQUIRE(count == 3);
+    REQUIRE(count == 9);  // 3 arithmetic + 6 d_var/m_var write/read/read_modify (see library_code_load.cc)
 
     size_t offset, paramsize;
-    for (size_t k = 0; k < count; ++k) {
+    for (size_t k = 0; k < 3; ++k) {  // add/sub/mul_kernel each take 3 float* args
       HIP_CHECK(hipKernelGetParamInfo(function, k, &offset, &paramsize));
       REQUIRE(offset == k * sizeof(float*));
       REQUIRE(paramsize == sizeof(float*));
@@ -137,17 +121,17 @@ TEST_CASE("Unit_hip_library_load_co") {
     HIP_CHECK(
         hipLibraryLoadFromFile(&library, lib_co.data(), nullptr, nullptr, 0, nullptr, nullptr, 0));
     HIP_CHECK(hipLibraryGetKernel(&function, library, "mul_kernel"));
-    
+
     hipLibrary_t new_library;
     HIP_CHECK(hipKernelGetLibrary(&new_library, function));
     REQUIRE(new_library == library);
 
     unsigned int count = 0;
     HIP_CHECK(hipLibraryGetKernelCount(&count, library));
-    REQUIRE(count == 3);
+    REQUIRE(count == 9);  // 3 arithmetic + 6 d_var/m_var write/read/read_modify (see library_code_load.cc)
 
     size_t offset, paramsize;
-    for (size_t k = 0; k < count; ++k) {
+    for (size_t k = 0; k < 3; ++k) {  // add/sub/mul_kernel each take 3 float* args
       HIP_CHECK(hipKernelGetParamInfo(function, k, &offset, &paramsize));
       REQUIRE(offset == k * sizeof(float*));
       REQUIRE(paramsize == sizeof(float*));
@@ -167,41 +151,49 @@ TEST_CASE("Unit_hip_library_load_co") {
 
   SECTION("All Kernels") {
     hipLibrary_t library;
-    hipKernel_t functions[num_kernels];
 
     HIP_CHECK(
       hipLibraryLoadFromFile(&library, lib_co.data(), nullptr, nullptr, 0, nullptr, nullptr, 0));
-    
-    HIP_CHECK(hipLibraryEnumerateKernels(functions, num_kernels, library));
 
-    void* args[] = {&d_out, &d_in1, &d_in2};
+    // Enumerate every kernel the library exposes; pick out the three
+    // arithmetic ones by name. Library_code_load.cc also defines kernels for
+    // d_var/m_var that take different signatures, so we can't just take the
+    // first num_kernels by enumeration order.
+    unsigned int total = 0;
+    HIP_CHECK(hipLibraryGetKernelCount(&total, library));
+    std::vector<hipKernel_t> all(total, nullptr);
+    HIP_CHECK(hipLibraryEnumerateKernels(all.data(), total, library));
 
     auto kernel_idx = [](const char* kName) {
       std::string ss = kName;
-      if (ss == "add_kernel") {
-        return 0;
-      } else if (ss == "sub_kernel") {
-        return 1;
-      } else if (ss == "mul_kernel") {
-        return 2;
-      }
+      if (ss == "add_kernel") return 0;
+      if (ss == "sub_kernel") return 1;
+      if (ss == "mul_kernel") return 2;
       return -1;
     };
 
-    
+    void* args[] = {&d_out, &d_in1, &d_in2};
     std::vector<float> out(size, 0);
     size_t offset, paramsize;
-    for (int k = 0; k < num_kernels; k++) {
+    int verified = 0;
+    for (auto kern : all) {
       const char* kName = nullptr;
-      HIP_CHECK(hipKernelGetName(&kName, functions[k]));
-      HIP_CHECK(hipKernelGetParamInfo(functions[k], k, &offset, &paramsize));
-      REQUIRE(paramsize == sizeof(float*));
-      REQUIRE(offset == k * sizeof(float*));
-      HIP_CHECK(hipLaunchKernel(functions[k], 1, size, args, 0, stream));
+      HIP_CHECK(hipKernelGetName(&kName, kern));
+      int op = kernel_idx(kName);
+      if (op < 0) continue;  // skip d_var/m_var helper kernels
+      // Verify the float* parameter layout for the 3-arg arithmetic kernels.
+      for (size_t p = 0; p < num_kernels; ++p) {
+        HIP_CHECK(hipKernelGetParamInfo(kern, p, &offset, &paramsize));
+        REQUIRE(paramsize == sizeof(float*));
+        REQUIRE(offset == p * sizeof(float*));
+      }
+      HIP_CHECK(hipLaunchKernel(kern, 1, size, args, 0, stream));
       HIP_CHECK(hipStreamSynchronize(stream));
       HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost));
-      host_verify(input1, input2, out, kernel_idx(kName));
+      host_verify(input1, input2, out, op);
+      ++verified;
     }
+    REQUIRE(verified == num_kernels);
 
     HIP_CHECK(hipLibraryUnload(library));
 
@@ -213,7 +205,7 @@ TEST_CASE("Unit_hip_library_load_co") {
   HIP_CHECK(hipFree(d_out));
 }
 
-TEST_CASE("Unit_hipKernelGetParamInfo_Negative") {
+HIP_TEST_CASE(Unit_hipKernelGetParamInfo_Negative) {
   size_t offset, paramsize;
 
   SECTION("Kernel as nullptr") {
@@ -232,4 +224,5 @@ TEST_CASE("Unit_hipKernelGetParamInfo_Negative") {
     HIP_CHECK_ERROR(hipKernelGetParamInfo(function, 0, nullptr, &paramsize), hipErrorInvalidValue);
   }
 
+  HIP_CHECK(hipLibraryUnload(library));
 }

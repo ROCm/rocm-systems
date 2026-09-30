@@ -46,9 +46,9 @@ cmake_minimum_required ( VERSION 3.7 )
 find_package(Clang REQUIRED HINTS ${CMAKE_PREFIX_PATH}/llvm PATHS /opt/rocm/llvm )
 find_package(LLVM REQUIRED HINTS ${CMAKE_PREFIX_PATH}/llvm PATHS /opt/rocm/llvm )
 
-set (TARGET_DEVS "gfx900;gfx942;gfx950;gfx1010;gfx1030;gfx1100;gfx1200")
-set (POSTFIX "9;942;950;1010;10;11;12")
-set (SOURCE_SUFFIX ";;;;;;_gfx12")
+set (TARGET_DEVS "gfx900;gfx942;gfx950;gfx1010;gfx1030;gfx1100;gfx1200;gfx1250")
+set (POSTFIX "9;942;950;1010;10;11;12;1250")
+set (SOURCE_SUFFIX ";;;;;;_gfx12;_gfx12")
 
 if(${CMAKE_VERBOSE_MAKEFILE})
   get_property(clang_path TARGET clang PROPERTY LOCATION)
@@ -138,21 +138,14 @@ function(generate_bytecodeStrm HeaderFILE)
   set(ARG_LIST ${ARG_LIST} ${HSACO_TARG_LIST})
 
   ## Add a custom command that generates amd_trap_handler_v2.h
-  ## This depends on all the generated code object files and the C++ generator script.
+  ## This depends on all the generated code object files and the Python generator script.
 
-if (UNIX)
-  add_custom_command(OUTPUT ${HeaderFILE}.h
-                     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/create_trap_handler_header.sh ${ARG_LIST}
-                     COMMENT "Collating trap handlers..."
-                     DEPENDS ${HSACO_TARG_LIST} create_trap_handler_header.sh )
-else()
   find_package(Python3 COMPONENTS Interpreter REQUIRED)
   add_custom_command(
     OUTPUT ${HeaderFILE}.h
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/create_trap_handler_header.py ${ARG_LIST}
-    COMMENT "Collating blit shaders..."
-    DEPENDS ${HSACO_TARG_LIST} create_trap_handler_header.py)
-endif()
+    COMMENT "Collating trap handlers..."
+    DEPENDS ${HSACO_TARG_LIST} ${CMAKE_CURRENT_SOURCE_DIR}/create_trap_handler_header.py)
 
 
   ## Export a target that builds (and depends on) amd_trap_handler_v2.h

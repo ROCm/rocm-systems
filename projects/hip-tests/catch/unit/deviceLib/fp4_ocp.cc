@@ -1,29 +1,17 @@
-/* Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <algorithm>
+#include <cmath>
 
 #include <hip_test_common.hh>
 
+#include <hip/hip_bf16.h>
 #include <hip/hip_fp4.h>
+#include <hip/hip_fp16.h>
 
 template <typename Lambda, typename... Type>
 static __global__ void lambda_kernel_launch(Lambda l, Type... args) {
@@ -42,7 +30,7 @@ static __global__ void lambda_kernel_launch(Lambda l, Type... args) {
  * ------------------------
  *  - HIP_VERSION >= 6.5
  */
-TEST_CASE("Unit_all_fp4_from_double") {
+HIP_TEST_CASE(Unit_all_fp4_from_double) {
   SECTION("sanityx1") {
     std::vector<double> inputs{-1.0, 0.0, 1.0};
     for (const auto input : inputs) {
@@ -92,7 +80,7 @@ TEST_CASE("Unit_all_fp4_from_double") {
  * ------------------------
  *  - HIP_VERSION >= 6.5
  */
-TEST_CASE("Unit_all_fp4_from_double_device") {
+HIP_TEST_CASE(Unit_all_fp4_from_double_device) {
   SECTION("sanityx1") {
     auto fp4x1_l = [] __device__(double* inputs, float* outputs, size_t size) {
       int i = threadIdx.x;
@@ -207,7 +195,7 @@ TEST_CASE("Unit_all_fp4_from_double_device") {
  * ------------------------
  *  - HIP_VERSION >= 6.5
  */
-TEMPLATE_TEST_CASE("Unit_all_fp4_from_interger_data", "", int, long int, long long int, short int) {
+HIP_TEMPLATE_TEST_CASE(Unit_all_fp4_from_interger_data, int, long int, long long int, short int) {
   SECTION("Fp4 with e2m1") {
     std::vector<TestType> input{-1, 0, 1};
     for (const auto val : input) {
@@ -232,7 +220,7 @@ TEMPLATE_TEST_CASE("Unit_all_fp4_from_interger_data", "", int, long int, long lo
  * ------------------------
  *  - HIP_VERSION >= 6.5
  */
-TEMPLATE_TEST_CASE("Unit_all_fp4_from__unsigned_integer_data", "", unsigned int, unsigned long int,
+HIP_TEMPLATE_TEST_CASE(Unit_all_fp4_from__unsigned_integer_data, unsigned int, unsigned long int,
                    unsigned long long int, unsigned short int) {
   SECTION("Fp4 with e2m1") {
     std::vector<TestType> input{1, 2, 3};
@@ -259,7 +247,7 @@ TEMPLATE_TEST_CASE("Unit_all_fp4_from__unsigned_integer_data", "", unsigned int,
  *  - HIP_VERSION >= 6.5
  */
 
-TEMPLATE_TEST_CASE("Unit_all_fp4_from_integer_data_device", "", int, long int, long long int,
+HIP_TEMPLATE_TEST_CASE(Unit_all_fp4_from_integer_data_device, int, long int, long long int,
                    short int) {
   std::vector<float> all_fp4{-6.0f, -4.0f, -3.0f, -2.0f, -1.5f, -1.0f, -0.5f, 0.0f,
                              0.5f,  1.0f,  1.5f,  2.0f,  3.0f,  4.0f,  6.0f};
@@ -310,7 +298,7 @@ TEMPLATE_TEST_CASE("Unit_all_fp4_from_integer_data_device", "", int, long int, l
  * ------------------------
  *  - HIP_VERSION >= 6.5
  */
-TEMPLATE_TEST_CASE("Unit_all_fp4_from__unsigned_integer_data_device", "", unsigned int,
+HIP_TEMPLATE_TEST_CASE(Unit_all_fp4_from__unsigned_integer_data_device, unsigned int,
                    unsigned long int, unsigned long long int, unsigned short int) {
   std::vector<float> all_fp4{-6.0f, -4.0f, -3.0f, -2.0f, -1.5f, -1.0f, -0.5f, 0.0f,
                              0.5f,  1.0f,  1.5f,  2.0f,  3.0f,  4.0f,  6.0f};
@@ -361,7 +349,7 @@ TEMPLATE_TEST_CASE("Unit_all_fp4_from__unsigned_integer_data_device", "", unsign
  * ------------------------
  *  - HIP_VERSION >= 6.5
  */
-TEST_CASE("Unit_ocp_fp4_from_double_full_range_host") {
+HIP_TEST_CASE(Unit_ocp_fp4_from_double_full_range_host) {
   std::vector<double> in;
   in.reserve(30);
   for (double i = -6.0; i <= 6.0; i += 0.5) {
@@ -393,7 +381,7 @@ TEST_CASE("Unit_ocp_fp4_from_double_full_range_host") {
  *  - HIP_VERSION >= 6.5
  */
 
-TEST_CASE("Unit_ocp_fp4_from_double_full_range_device") {
+HIP_TEST_CASE(Unit_ocp_fp4_from_double_full_range_device) {
   std::vector<float> all_fp4{-6.0f, -4.0f, -3.0f, -2.0f, -1.5f, -1.0f, -0.5f, 0.0f,
                              0.5f,  1.0f,  1.5f,  2.0f,  3.0f,  4.0f,  6.0f};
   auto fp4x1_l = [] __device__(double* inputs, float* outputs, size_t size) {
@@ -428,4 +416,67 @@ TEST_CASE("Unit_ocp_fp4_from_double_full_range_device") {
 
   HIP_CHECK(hipFree(d_in));
   HIP_CHECK(hipFree(d_out));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - E2M1 signed zeros must decode to the matching fp16 signed zero. Encoding
+ * 0x8 is negative zero and must give fp16 0x8000, not a normal value.
+ * Test source
+ * ------------------------
+ *  - /unit/deviceLib/fp4_ocp.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.5
+ */
+HIP_TEST_CASE(Unit_ocp_fp4_to_halfraw_signed_zero_host) {
+  SECTION("scalar") {
+    const __half_raw pos =
+        __hip_cvt_fp4_to_halfraw(static_cast<__hip_fp4_storage_t>(0x0), __HIP_E2M1);
+    const __half_raw neg =
+        __hip_cvt_fp4_to_halfraw(static_cast<__hip_fp4_storage_t>(0x8), __HIP_E2M1);
+
+    INFO("E2M1 0x0 -> fp16 bits 0x" << std::hex << pos.x);
+    REQUIRE(pos.x == 0x0000);
+    REQUIRE(__half2float(pos) == 0.0f);
+    REQUIRE(!std::signbit(__half2float(pos)));
+
+    INFO("E2M1 0x8 -> fp16 bits 0x" << std::hex << neg.x);
+    REQUIRE(neg.x == 0x8000);
+    REQUIRE(__half2float(neg) == 0.0f);
+    REQUIRE(std::signbit(__half2float(neg)));
+  }
+
+  SECTION("packed pair") {
+    // Low nibble 0x8 is -0.0, high nibble 0x0 is +0.0.
+    const __half2_raw pair =
+        __hip_cvt_fp4x2_to_halfraw2(static_cast<__hip_fp4x2_storage_t>(0x08), __HIP_E2M1);
+    INFO("E2M1 pair 0x08 -> fp16 bits 0x" << std::hex << pair.x.x << ", 0x" << pair.y.x);
+    REQUIRE(pair.x.x == 0x8000);
+    REQUIRE(pair.y.x == 0x0000);
+  }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - The bf16 destination must decode E2M1 signed zeros to the matching bf16
+ * signed zero: encoding 0x8 gives bf16 0x8000, encoding 0x0 gives 0x0000.
+ * Test source
+ * ------------------------
+ *  - /unit/deviceLib/fp4_ocp.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.5
+ */
+HIP_TEST_CASE(Unit_ocp_fp4_to_bfloat16raw_signed_zero_host) {
+  // Low nibble 0x8 is -0.0, high nibble 0x0 is +0.0.
+  __hip_fp4x2_e2m1 packed;
+  packed.__x = static_cast<__hip_fp4x2_storage_t>(0x08);
+  const __hip_bfloat162_raw out = static_cast<__hip_bfloat162_raw>(packed);
+
+  INFO("E2M1 pair 0x08 -> bf16 bits 0x" << std::hex << out.x << ", 0x" << out.y);
+  REQUIRE(out.x == 0x8000);
+  REQUIRE(out.y == 0x0000);
 }

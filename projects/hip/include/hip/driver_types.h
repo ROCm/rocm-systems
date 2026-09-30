@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2015 - 2024 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #ifndef HIP_INCLUDE_HIP_DRIVER_TYPES_H
 #define HIP_INCLUDE_HIP_DRIVER_TYPES_H
@@ -473,7 +457,13 @@ typedef struct hipMemLocation {
  */
 typedef enum hipMemcpyFlags {
   hipMemcpyFlagDefault = 0x0,                  ///< Default flag
-  hipMemcpyFlagPreferOverlapWithCompute = 0x1  ///< Tries to overlap copy with compute work.
+  hipMemcpyFlagPreferOverlapWithCompute = 0x1, ///< Tries to overlap copy with compute work.
+  hipMemcpyFlagExtPreferCE = 0x100,            ///< Prefer copy engine over compute engine.
+  hipMemcpyFlagExtOpSwap = 0x200,              ///< Swap contents of src and dst.
+  hipMemcpyFlagExtOpIndirectSrc = 0x400,       ///< The src pointer holds the address of the real
+                                               ///< source pointer, read when the copy runs rather
+                                               ///< than when it is submitted.
+  hipMemcpyFlagExtOpIndirectDst = 0x800        ///< Same as IndirectSrc, but for the dst pointer.
 } hipMemcpyFlags;
 
 /**
@@ -610,24 +600,31 @@ static inline struct hipExtent make_hipExtent(size_t w, size_t h, size_t d) {
   e.depth = d;
   return e;
 }
+
 typedef enum hipFunction_attribute {
-  HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK,  ///< The maximum number of threads per block. Depends
-                                             ///< on function and device.
-  HIP_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES,  ///< The statically allocated shared memory size in bytes
-                                         ///< per block required by the function.
-  HIP_FUNC_ATTRIBUTE_CONST_SIZE_BYTES,   ///< The user-allocated constant memory by the function in
-                                         ///< bytes.
-  HIP_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES,   ///< The local memory usage of each thread by this function
-                                         ///< in bytes.
-  HIP_FUNC_ATTRIBUTE_NUM_REGS,  ///< The number of registers used by each thread of this function.
-  HIP_FUNC_ATTRIBUTE_PTX_VERSION,                       ///< PTX version
-  HIP_FUNC_ATTRIBUTE_BINARY_VERSION,                    ///< Binary version
-  HIP_FUNC_ATTRIBUTE_CACHE_MODE_CA,                     ///< Cache mode
-  HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,     ///< The maximum dynamic shared memory per
-                                                        ///< block for this function in bytes.
-  HIP_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT,  ///< The shared memory carveout preference
-                                                        ///< in percent of the maximum shared
-                                                        ///< memory.
+  HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK,                 ///< The maximum number of threads per block. Depends
+                                                            ///< on function and device.
+  HIP_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES,                     ///< The statically allocated shared memory size in bytes
+                                                            ///< per block required by the function.
+  HIP_FUNC_ATTRIBUTE_CONST_SIZE_BYTES,                      ///< The user-allocated constant memory by the function in
+                                                            ///< bytes.
+  HIP_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES,                      ///< The local memory usage of each thread by this function
+                                                            ///< in bytes.
+  HIP_FUNC_ATTRIBUTE_NUM_REGS,                              ///< The number of registers used by each thread of this function.
+  HIP_FUNC_ATTRIBUTE_PTX_VERSION,                           ///< PTX version
+  HIP_FUNC_ATTRIBUTE_BINARY_VERSION,                        ///< Binary version
+  HIP_FUNC_ATTRIBUTE_CACHE_MODE_CA,                         ///< Cache mode
+  HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,         ///< The maximum dynamic shared memory per
+                                                            ///< block for this function in bytes.
+  HIP_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT,      ///< The shared memory carveout preference
+                                                            ///< in percent of the maximum shared
+                                                            ///< memory.
+  HIP_FUNC_ATTRIBUTE_CLUSTER_DIM_MUST_BE_SET,               ///< the kernel must launch with a valid cluster size specified.
+  HIP_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_WIDTH,                ///< The required cluster width in blocks
+  HIP_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_HEIGHT,               ///< The required cluster height in blocks
+  HIP_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_DEPTH,                ///< The required cluster depth in blocks
+  HIP_FUNC_ATTRIBUTE_NON_PORTABLE_CLUSTER_SIZE_ALLOWED,     ///< Is the function allowed to launch with non-portable cluster size.
+  HIP_FUNC_ATTRIBUTE_CLUSTER_SCHEDULING_POLICY_PREFERENCE,  ///< The block scheduling policy of a function.
   HIP_FUNC_ATTRIBUTE_MAX
 } hipFunction_attribute;
 

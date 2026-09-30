@@ -378,7 +378,7 @@ void MemoryAccessTest::CPUAccessToGPUMemoryTest(hsa_agent_t cpuAgent, hsa_agent_
       for (unsigned int i = 1; i <= max_element; ++i) {
         if (sys_data[i] != gpu_data[i]) {  // Reading GPU memory
           fprintf(stdout,
-                  "Values not mathing !! sys_data[%d]:%d ,"
+                  "Values not matching !! sys_data[%d]:%d ,"
                   "gpu_data[%d]\n",
                   sys_data[i], i, gpu_data[i]);
         }

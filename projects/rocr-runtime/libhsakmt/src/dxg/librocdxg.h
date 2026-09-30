@@ -114,6 +114,7 @@ struct hsakmtRuntime {
 
   size_t max_single_alloc_size;
   uint32_t default_node;
+  D3DKMT_DRIVERVERSION wddm_version = static_cast<D3DKMT_DRIVERVERSION>(0);
 
   /* local heap means bo's backend is vram of all GPUs */
   uint64_t local_heap_space_start_;
@@ -217,6 +218,12 @@ extern hsakmtRuntime *dxg_runtime;
 	hsakmt_print(HSAKMT_DEBUG_LEVEL_INFO, fmt, ##__VA_ARGS__)
 #define pr_debug(fmt, ...) \
 	hsakmt_print(HSAKMT_DEBUG_LEVEL_DEBUG, fmt, ##__VA_ARGS__)
+#define pr_rocr_info(fmt, ...) \
+	do { \
+		if (HSAKMT_DEBUG_LEVEL_INFO <= dxg_runtime->hsakmt_debug_level) { \
+			hsakmt_print_common(stdout, fmt, ##__VA_ARGS__); \
+		} \
+	} while (false)
 #define pr_err_once(fmt, ...)                   \
 {                                               \
         static bool __print_once;               \
@@ -248,6 +255,10 @@ uint32_t get_direct_link_cpu(uint32_t gpu_node);
 HSAKMT_STATUS topology_sysfs_get_system_props(HsaSystemProperties& props);
 HSAKMT_STATUS topology_get_node_props(HSAuint32 NodeId,
 				      HsaNodeProperties *NodeProperties);
+void topology_clear_snapshot_refs(void);
+void topology_abandon_after_fork(void);
+bool topology_snapshot_is_live(void);
+void topology_drop_snapshot_at_last_close(void);
 HSAKMT_STATUS topology_get_iolink_props(HSAuint32 NodeId,
 					HSAuint32 NumIoLinks,
 					HsaIoLinkProperties *IoLinkProperties);
@@ -294,7 +305,8 @@ uint32_t get_vgpr_size_per_cu(HSA_ENGINE_ID id);
 bool is_ipc_sysmemfd(uint64_t fd);
 
 HSAKMT_STATUS import_dmabuf_fd(uint64_t DMABufFd, uint32_t NodeId, bool alloc_va, bool is_ipc_memfd,
-                               wsl::thunk::GpuMemoryHandle* GpuMemHandle, bool is_kmt_handle);
+                               wsl::thunk::GpuMemoryHandle* GpuMemHandle, bool is_kmt_handle,
+                               uint64_t size_hint = 0);
 
 bool hsakmt_hsa_loader_init();
 

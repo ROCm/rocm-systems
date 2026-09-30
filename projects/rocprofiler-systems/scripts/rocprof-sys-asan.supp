@@ -1,0 +1,46 @@
+# AddressSanitizer suppression file for rocprofiler-systems
+# See: https://github.com/google/sanitizers/wiki/AddressSanitizerLeakSanitizer#suppression
+#
+# Note: ASan interceptor suppressions use a different format than LSan.
+# Use "interceptor_via_fun:" or "interceptor_via_lib:" prefixes.
+
+# Dyninst libraries
+interceptor_via_lib:libcommon.so
+interceptor_via_lib:libdynC_API.so
+interceptor_via_lib:libdynDwarf.so
+interceptor_via_lib:libdynElf.so
+interceptor_via_lib:libdyninstAPI.so
+interceptor_via_lib:libinstructionAPI.so
+interceptor_via_lib:libparseAPI.so
+interceptor_via_lib:libpatchAPI.so
+interceptor_via_lib:libpcontrol.so
+interceptor_via_lib:libstackwalk.so
+interceptor_via_lib:libsymtabAPI.so
+
+# TBB
+interceptor_via_lib:libtbb.so
+
+# OpenMP runtime (libgomp): Dyninst spawns parallel sections internally
+interceptor_via_lib:libgomp.so
+
+# Boost
+interceptor_via_fun:boost::*
+
+# External libraries
+interceptor_via_lib:libdw.so
+interceptor_via_lib:libpfm.so
+
+# OpenMPI
+interceptor_via_lib:libopen-rte.so
+interceptor_via_lib:libopen-pal.so
+interceptor_via_lib:libhwloc.so
+interceptor_via_lib:libevent_core-2.1.so
+interceptor_via_lib:libevent_core.so
+
+# ROCm libraries (when present)
+interceptor_via_lib:libamd_comgr.so
+interceptor_via_lib:libhsa-runtime64.so
+interceptor_via_lib:libamdhip64.so
+interceptor_via_lib:libroctracer64.so
+interceptor_via_lib:librocprofiler64.so
+interceptor_via_lib:librocm_smi64.so

@@ -72,7 +72,9 @@ hsa_ven_amd_aqlprofile_profile_t* CreateProfile(const std::vector<hsa_ven_amd_aq
   auto* profile = new hsa_ven_amd_aqlprofile_profile_t();
   profile->event_count = events.size();
   if (!events.empty()) {
-      memcpy(reinterpret_cast<void*>(&profile->events), &events, sizeof(hsa_ven_amd_aqlprofile_event_t));
+    auto* arr = new hsa_ven_amd_aqlprofile_event_t[events.size()];
+    memcpy(arr, events.data(), events.size() * sizeof(hsa_ven_amd_aqlprofile_event_t));
+    profile->events = arr;
   } else {
     profile->events = nullptr;
   }

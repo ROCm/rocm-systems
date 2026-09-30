@@ -173,7 +173,7 @@ hsa_status_t ComputeQueueTest::AllocateAndInitBuffers(BinarySearch* bs) {
   uint32_t in_length = bs->num_sub_divisions * 2 * sizeof(uint32_t);
 
   // In all of these examples, we want both the cpu and gpu to have access to
-  // the buffer in question. We use the array of agents below in the susequent
+  // the buffer in question. We use the array of agents below in the subsequent
   // calls to hsa_amd_agents_allow_access() for this purpose.
   hsa_agent_t ag_list[2] = {bs->gpu_dev, bs->cpu_dev};
 
@@ -353,7 +353,7 @@ hsa_status_t ComputeQueueTest::AllocAndSetKernArgs(BinarySearch* bs, void* args,
   // hsa_amd_memory_pool is not of the correct alignment, we request a little
   // more than what we need in case we need to adjust.
   req_align = bs->kernarg_align;
-  // Allocate enough extra space for alignment adjustments if ncessary
+  // Allocate enough extra space for alignment adjustments if necessary
   buf_size = arg_size + (req_align << 1);
 
   err = hsa_amd_memory_pool_allocate(bs->kern_arg_pool, buf_size, 0,
@@ -505,7 +505,7 @@ hsa_status_t ComputeQueueTest::Run(BinarySearch* bs) {
     // Reset output buffer to zero
     bs->output[3] = 0;
 
-    // Dispatch kernel with global work size, work group size with ONE dimesion
+    // Dispatch kernel with global work size, work group size with ONE dimension
     // and wait for kernel to complete
 
     // Compute the write index of queue and copy Aql packet into it
@@ -642,7 +642,7 @@ hsa_status_t ComputeQueueTest::RunBinarySearchTest(void) {
   throw_if_error(err, "Fail to find pools.");
 
   // Allocate memory from the correct memory pool, and initialize them as
-  // neeeded for the algorihm.
+  // needed for the algorithm.
   err = AllocateAndInitBuffers(&bs);
   throw_if_error(err, "Allocate and initBuffers fail.");
 

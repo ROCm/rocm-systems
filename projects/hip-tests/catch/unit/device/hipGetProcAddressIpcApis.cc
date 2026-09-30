@@ -1,30 +1,23 @@
 /*
-Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 #include <hip_test_helper.hh>
 #include <hip_test_defgroups.hh>
+#include <hip_test_process.hh>
 #include <utils.hh>
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <cerrno>
+#include <cstdlib>
+#include <optional>
+#include <string>
 #include "hipGetProcAddressHelpers.hh"
+#include "hipIpcHandleHex.hh"
 
 /**
  * Test Description
@@ -40,7 +33,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_IPC_Memory") {
+HIP_TEST_CASE(Unit_hipGetProcAddress_IPC_Memory) {
   int N = 40;
   int Nbytes = N * sizeof(int);
 
@@ -74,7 +67,7 @@ TEST_CASE("Unit_hipGetProcAddress_IPC_Memory") {
     hipIpcMemHandle_t handle;
     HIP_CHECK(dyn_hipIpcGetMemHandle_ptr(&handle, devMemSrc));
 
-    REQUIRE(write(fd[1], &handle, sizeof(handle)) >= 0);
+    REQUIRE(hip::writeAll(fd[1], &handle, sizeof(handle)));
     REQUIRE(close(fd[1]) == 0);
 
     REQUIRE(wait(NULL) >= 0);
@@ -101,7 +94,7 @@ TEST_CASE("Unit_hipGetProcAddress_IPC_Memory") {
         reinterpret_cast<hipError_t (*)(void*)>(hipIpcCloseMemHandle_ptr);
 
     hipIpcMemHandle_t handle;
-    REQUIRE(read(fd[0], &handle, sizeof(handle)) >= 0);
+    REQUIRE(hip::readAll(fd[0], &handle, sizeof(handle)));
     REQUIRE(close(fd[0]) == 0);
 
     int* devPtr = nullptr;
@@ -123,13 +116,62 @@ TEST_CASE("Unit_hipGetProcAddress_IPC_Memory") {
   }
 }
 
+namespace {
+
+void runIpcEventProcAddressTest(std::optional<int> parentDeviceId,
+                                std::optional<int> childDeviceId) {
+  if (parentDeviceId) {
+    HIP_CHECK(hipSetDevice(*parentDeviceId));
+  }
+
+  void* hipIpcGetEventHandle_ptr = nullptr;
+
+  int currentHipVersion = 0;
+  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+
+  HIP_CHECK(hipGetProcAddress("hipIpcGetEventHandle", &hipIpcGetEventHandle_ptr, currentHipVersion,
+                              0, nullptr));
+  REQUIRE(hipIpcGetEventHandle_ptr != nullptr);
+
+  auto dyn_hipIpcGetEventHandle_ptr =
+      reinterpret_cast<hipError_t (*)(hipIpcEventHandle_t*, hipEvent_t)>(hipIpcGetEventHandle_ptr);
+
+  // Interprocess events must disable timing.
+  hipEvent_t event = nullptr;
+  HIP_CHECK(hipEventCreateWithFlags(&event, hipEventInterprocess | hipEventDisableTiming));
+  REQUIRE(event != nullptr);
+
+  hipIpcEventHandle_t handle{};
+  HIP_CHECK(dyn_hipIpcGetEventHandle_ptr(&handle, event));
+
+  std::string args = ipcHandleToHex(handle);
+  if (childDeviceId) {
+    args += " " + std::to_string(*childDeviceId);
+  }
+
+  // The event must stay alive until the child has attached to it.
+  hip::SpawnProc proc("hipGetProcAddressIpcEventImport", true);
+  REQUIRE(proc.spawn(args) == 0);
+
+  int childExit = proc.wait();
+  INFO("Child process output:\n" << proc.getOutput());
+  REQUIRE(childExit == 0);
+
+  HIP_CHECK(hipEventDestroy(event));
+}
+}  // namespace
+
 /**
  * Test Description
  * ------------------------
- *  - This test will get the function pointer of different
- *  - Event IPC related APIs from the hipGetProcAddress API
- *  - and then validates the basic functionality of that particular API
- *  - using the funtion pointer.
+ *  - Verifies that hipGetProcAddress returns usable function pointers for the
+ *  - Event IPC APIs (hipIpcGetEventHandle / hipIpcOpenEventHandle): the parent
+ *  - exports an interprocess event handle through the resolved
+ *  - hipIpcGetEventHandle pointer, and the child imports it through the resolved
+ *  - hipIpcOpenEventHandle pointer in a separate process.
+ *  - This test's unique purpose is to exercise the proc-address dispatch path for
+ *  - these APIs (address + ABI). Full cross-process event *synchronization*
+ *  - semantics are covered by Unit_hipIpcEventHandle_Functional.
  * Test source
  * ------------------------
  *  - unit/device/hipGetProcAddress_IPC_APIs.cc
@@ -137,93 +179,51 @@ TEST_CASE("Unit_hipGetProcAddress_IPC_Memory") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_IPC_Event") {
-  int fd[2];
-  REQUIRE(pipe(fd) == 0);
+HIP_TEST_CASE(Unit_hipGetProcAddress_IPC_Event) {
+  runIpcEventProcAddressTest(std::nullopt, std::nullopt);
+}
 
-  auto pid = fork();
-
-  // Validating hipIpcGetEventHandle API
-  if (pid != 0) {  // parent process
-    void* hipIpcGetEventHandle_ptr = nullptr;
-
-    int currentHipVersion = 0;
-    HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
-
-    HIP_CHECK(hipGetProcAddress("hipIpcGetEventHandle", &hipIpcGetEventHandle_ptr,
-                                currentHipVersion, 0, nullptr));
-
-    hipError_t (*dyn_hipIpcGetEventHandle_ptr)(hipIpcEventHandle_t*, hipEvent_t) =
-        reinterpret_cast<hipError_t (*)(hipIpcEventHandle_t*, hipEvent_t)>(
-            hipIpcGetEventHandle_ptr);
-
-    hipEvent_t start = nullptr;
-    HIP_CHECK(hipEventCreateWithFlags(&start, hipEventInterprocess | hipEventDisableTiming));
-    REQUIRE(start != nullptr);
-
-    hipIpcEventHandle_t handle;
-    HIP_CHECK(dyn_hipIpcGetEventHandle_ptr(&handle, start));
-
-    REQUIRE(write(fd[1], &handle, sizeof(hipIpcEventHandle_t)) >= 0);
-    REQUIRE(close(fd[1]) == 0);
-
-    REQUIRE(wait(NULL) >= 0);
-
-    HIP_CHECK(hipEventDestroy(start));
-  } else {  // child process
-    // Validating hipIpcOpenMemHandle API
-    void* hipIpcOpenEventHandle_ptr = nullptr;
-
-    int currentHipVersion = 0;
-    HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
-
-    HIP_CHECK(hipGetProcAddress("hipIpcOpenEventHandle", &hipIpcOpenEventHandle_ptr,
-                                currentHipVersion, 0, nullptr));
-
-    hipError_t (*dyn_hipIpcOpenEventHandle_ptr)(hipEvent_t*, hipIpcEventHandle_t) =
-        reinterpret_cast<hipError_t (*)(hipEvent_t*, hipIpcEventHandle_t)>(
-            hipIpcOpenEventHandle_ptr);
-
-    hipIpcEventHandle_t handle;
-    REQUIRE(read(fd[0], &handle, sizeof(handle)) >= 0);
-    REQUIRE(close(fd[0]) == 0);
-
-    hipEvent_t start = nullptr;
-    HIP_CHECK(dyn_hipIpcOpenEventHandle_ptr(&start, handle));
-    REQUIRE(start != nullptr);
-
-    hipEvent_t stop = nullptr;
-    HIP_CHECK(hipEventCreate(&stop));
-    REQUIRE(stop != nullptr);
-
-    int N = 40;
-    int Nbytes = N * sizeof(int);
-
-    int* hostMem = reinterpret_cast<int*>(malloc(Nbytes));
-    REQUIRE(hostMem != nullptr);
-    fillHostArray(hostMem, N, 10);
-
-    int* devMem = nullptr;
-    HIP_CHECK(hipMalloc(&devMem, Nbytes));
-    REQUIRE(devMem != nullptr);
-
-    hipStream_t stream;
-    HIP_CHECK(hipStreamCreate(&stream));
-
-    HIP_CHECK(hipEventRecord(start, stream));
-
-    HIP_CHECK(hipMemcpyAsync(devMem, hostMem, Nbytes, hipMemcpyHostToDevice, stream));
-    addOneKernel<<<1, 1>>>(devMem, N);
-    HIP_CHECK(hipMemcpyAsync(hostMem, devMem, Nbytes, hipMemcpyDeviceToHost, stream));
-
-    HIP_CHECK(hipEventRecord(stop, stream));
-    HIP_CHECK(hipEventSynchronize(stop));
-
-    REQUIRE(validateHostArray(hostMem, N, 11) == true);
-
-    HIP_CHECK(hipEventDestroy(stop));
-    HIP_CHECK(hipStreamDestroy(stream));
-    free(hostMem);
-    HIP_CHECK(hipFree(devMem));
+/**
+ * Test Description
+ * ------------------------
+ *  - Runs the Event IPC proc-address path with both processes on device 1
+ *  - through hipSetDevice, so the imported event is recorded on a GPU that is
+ *  - not the first agent of the topology and its interprocess signal page has to
+ *  - be reachable from there.
+ * Test source
+ * ------------------------
+ *  - unit/device/hipGetProcAddress_IPC_APIs.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.2
+ *  - Multiple devices
+ */
+HIP_TEST_CASE(Unit_hipGetProcAddress_IPC_Event_SetDevice) {
+  if (HipTest::getDeviceCount() < 2) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
+
+  runIpcEventProcAddressTest(1, 1);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Runs the Event IPC proc-address path with the parent on device 0 and the
+ *  - child on device 1, so the imported interprocess signal page exported from
+ *  - one GPU must be reachable when the consumer records on another.
+ * Test source
+ * ------------------------
+ *  - unit/device/hipGetProcAddress_IPC_APIs.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.2
+ *  - Multiple devices
+ */
+HIP_TEST_CASE(Unit_hipGetProcAddress_IPC_Event_CrossDevice) {
+  if (HipTest::getDeviceCount() < 2) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+  }
+
+  runIpcEventProcAddressTest(0, 1);
 }

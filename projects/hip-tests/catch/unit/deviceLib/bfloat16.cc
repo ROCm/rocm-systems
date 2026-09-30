@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 #include <hip/hip_bf16.h>
@@ -171,6 +155,69 @@ __global__ void bf16_compare(float* val, unsigned* res, size_t size) {
   }
 }
 
+// Order of predicates written by bf16_compare_nan(); the host uses the same
+// indices to label failures and look up the expected result.
+enum Bf16NanPredicate {
+  kHeq, kHne, kHlt, kHle, kHgt, kHge,        // ordered scalar   -> false for NaN
+  kHequ, kHneu, kHltu, kHleu, kHgtu, kHgeu,  // unordered scalar -> true for NaN
+  kHbeq2, kHbne2,                            // ordered bool2    -> false for NaN
+  kBf16NanPredicateCount
+};
+
+// Test NaN comparison semantics: for inputs where at least one operand is NaN the
+// ordered predicates (no 'u' suffix) must return false and the unordered predicates
+// ('u' suffix) must return true. Each thread writes one slot per predicate so the
+// host can identify exactly which intrinsic misbehaved. Each a[i]/b[i] pair must
+// have at least one NaN.
+__global__ void bf16_compare_nan(const float* a, const float* b, unsigned* res, size_t size) {
+  auto i = threadIdx.x;
+  if (i < size) {
+    const __hip_bfloat16 x = __float2bfloat16(a[i]);
+    const __hip_bfloat16 y = __float2bfloat16(b[i]);
+    const __hip_bfloat162 x2{x, x};
+    const __hip_bfloat162 y2{y, y};
+    unsigned* out = res + i * kBf16NanPredicateCount;
+
+    out[kHeq] = bool_to_unsigned(__heq(x, y));
+    out[kHne] = bool_to_unsigned(__hne(x, y));
+    out[kHlt] = bool_to_unsigned(__hlt(x, y));
+    out[kHle] = bool_to_unsigned(__hle(x, y));
+    out[kHgt] = bool_to_unsigned(__hgt(x, y));
+    out[kHge] = bool_to_unsigned(__hge(x, y));
+
+    out[kHequ] = bool_to_unsigned(__hequ(x, y));
+    out[kHneu] = bool_to_unsigned(__hneu(x, y));
+    out[kHltu] = bool_to_unsigned(__hltu(x, y));
+    out[kHleu] = bool_to_unsigned(__hleu(x, y));
+    out[kHgtu] = bool_to_unsigned(__hgtu(x, y));
+    out[kHgeu] = bool_to_unsigned(__hgeu(x, y));
+
+    out[kHbeq2] = bool_to_unsigned(__hbeq2(x2, y2));
+    out[kHbne2] = bool_to_unsigned(__hbne2(x2, y2));
+  }
+}
+
+// Order of scalar operator results written by bf16_nan_operators().
+enum Bf16NanOp {
+  kOpNeQnan, kOpNeSnan,  // operator!= : unordered -> true for NaN
+  kOpEqQnan, kOpEqSnan,  // operator== : ordered   -> false for NaN
+  kOpNeOne, kOpEqOne,    // sanity: normal value
+  kBf16NanOpCount
+};
+
+__global__ void bf16_nan_operators(unsigned* out) {
+  const __hip_bfloat16 qnan = __ushort_as_bfloat16((unsigned short)0x7FC0U);  // quiet NaN
+  const __hip_bfloat16 snan = __ushort_as_bfloat16((unsigned short)0x7FA0U);  // signaling NaN
+  const __hip_bfloat16 one = __ushort_as_bfloat16((unsigned short)0x3F80U);   // 1.0
+
+  out[kOpNeQnan] = bool_to_unsigned(qnan != qnan);
+  out[kOpNeSnan] = bool_to_unsigned(snan != snan);
+  out[kOpEqQnan] = bool_to_unsigned(qnan == qnan);
+  out[kOpEqSnan] = bool_to_unsigned(snan == snan);
+  out[kOpNeOne] = bool_to_unsigned(one != one);
+  out[kOpEqOne] = bool_to_unsigned(one == one);
+}
+
 // Convert to bits
 __global__ void bf16_conv_bits(float* val, unsigned short* res, size_t size) {
   auto i = threadIdx.x;
@@ -220,7 +267,7 @@ __global__ void bf16_fma(float* in1, float* in2, float plus_y, float* out, size_
   }
 }
 
-TEST_CASE("Unit_bf16_basic") {
+HIP_TEST_CASE(Unit_bf16_basic) {
   auto f_in = getAllBF16();
   auto max_bf16_num = f_in.size();
 
@@ -332,6 +379,79 @@ TEST_CASE("Unit_bf16_basic") {
     }
 
     HIP_CHECK(hipFree(d_in));
+    HIP_CHECK(hipFree(d_res));
+  }
+
+  SECTION("NaN comparison semantics") {
+    struct PredicateCase {
+      const char* name;
+      unsigned expected;
+    };
+    // Indexed by Bf16NanPredicate; drives both the failure label and the
+    // expected result so the two cannot drift out of alignment.
+    static const PredicateCase kPredicates[kBf16NanPredicateCount] = {
+        {"__heq", 0}, {"__hne", 0}, {"__hlt", 0}, {"__hle", 0},
+        {"__hgt", 0}, {"__hge", 0},
+        {"__hequ", 1}, {"__hneu", 1}, {"__hltu", 1}, {"__hleu", 1},
+        {"__hgtu", 1}, {"__hgeu", 1},
+        {"__hbeq2", 0}, {"__hbne2", 0}};
+
+    const float qnan = std::numeric_limits<float>::quiet_NaN();
+    constexpr size_t size = 6;
+    // Each pair has at least one NaN.
+    float a[size] = {qnan, qnan, 1.0f, qnan, -2.0f, qnan};
+    float b[size] = {qnan, 1.0f, qnan, -3.0f, qnan, 0.0f};
+    float *d_a, *d_b;
+    unsigned* d_res;
+    HIP_CHECK(hipMalloc(&d_a, sizeof(float) * size));
+    HIP_CHECK(hipMalloc(&d_b, sizeof(float) * size));
+    HIP_CHECK(hipMalloc(&d_res, sizeof(unsigned) * size * kBf16NanPredicateCount));
+
+    HIP_CHECK(hipMemcpy(d_a, a, sizeof(float) * size, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_b, b, sizeof(float) * size, hipMemcpyHostToDevice));
+
+    bf16_compare_nan<<<1, size>>>(d_a, d_b, d_res, size);
+
+    std::vector<unsigned> res(size * kBf16NanPredicateCount, 0);
+    HIP_CHECK(hipMemcpy(res.data(), d_res,
+                        sizeof(unsigned) * res.size(), hipMemcpyDeviceToHost));
+
+    for (size_t i = 0; i < size; i++) {
+      for (int p = 0; p < kBf16NanPredicateCount; p++) {
+        CAPTURE(i, a[i], b[i], kPredicates[p].name);
+        CHECK(res[i * kBf16NanPredicateCount + p] == kPredicates[p].expected);
+      }
+    }
+
+    HIP_CHECK(hipFree(d_a));
+    HIP_CHECK(hipFree(d_b));
+    HIP_CHECK(hipFree(d_res));
+  }
+
+  SECTION("NaN operator semantics") {
+    struct OpCase {
+      const char* name;
+      unsigned expected;
+    };
+    static const OpCase kOps[kBf16NanOpCount] = {
+        {"qnan != qnan", 1}, {"snan != snan", 1},
+        {"qnan == qnan", 0}, {"snan == snan", 0},
+        {"one != one", 0},   {"one == one", 1}};
+
+    unsigned* d_res;
+    HIP_CHECK(hipMalloc(&d_res, sizeof(unsigned) * kBf16NanOpCount));
+
+    bf16_nan_operators<<<1, 1>>>(d_res);
+
+    std::vector<unsigned> res(kBf16NanOpCount, 0);
+    HIP_CHECK(hipMemcpy(res.data(), d_res, sizeof(unsigned) * res.size(),
+                        hipMemcpyDeviceToHost));
+
+    for (int p = 0; p < kBf16NanOpCount; p++) {
+      CAPTURE(kOps[p].name);
+      CHECK(res[p] == kOps[p].expected);
+    }
+
     HIP_CHECK(hipFree(d_res));
   }
 
@@ -479,7 +599,7 @@ template <typename Type> __global__ void bf16_cvt_to_integral(Type* in, float* o
   }
 }
 
-TEMPLATE_TEST_CASE("Unit_bf16_conversion_to_integral_type", , unsigned short, short, int,
+HIP_TEMPLATE_TEST_CASE(Unit_bf16_conversion_to_integral_type, unsigned short, short, int,
                    unsigned int) {
   constexpr TestType start = std::is_unsigned<TestType>::value
                                  ? std::numeric_limits<unsigned short>::min()
@@ -542,7 +662,7 @@ __global__ void bf162_neq(float* in, char* out, size_t size) {
   }
 }
 
-TEST_CASE("Unit_bf162_basic") {
+HIP_TEST_CASE(Unit_bf162_basic) {
   auto f_in = getAllBF16();
   auto max_bf16_num = f_in.size();
 
@@ -588,7 +708,7 @@ TEST_CASE("Unit_bf162_basic") {
 }
 
 
-TEST_CASE("Unit_bf16_operators_host") {
+HIP_TEST_CASE(Unit_bf16_operators_host) {
   SECTION("Sanity with 1 and 0") {
     INFO("1+0 <-> 0+1");
     auto bf16_one = HIPRT_ONE_BF16;
@@ -654,7 +774,7 @@ TEST_CASE("Unit_bf16_operators_host") {
   }
 }
 
-TEST_CASE("Unit_bf162_operators_host") {
+HIP_TEST_CASE(Unit_bf162_operators_host) {
   SECTION("Sanity with 1 and 0") {
     INFO("1+0 <-> 0+1");
     __hip_bfloat162 bf162_one = {HIPRT_ONE_BF16, HIPRT_ONE_BF16};
@@ -704,7 +824,7 @@ TEST_CASE("Unit_bf162_operators_host") {
 
 // Bunch of tests which make sure we are packaging stuff correctly.
 // i.e. highs2bfloat lows2bfloat etc and its various combinations
-TEST_CASE("Unit_bf16_bf162_convert_tests") {
+HIP_TEST_CASE(Unit_bf16_bf162_convert_tests) {
   SECTION("float2->bfloat->float2") {
     float2 in = {3.0f, 4.0f};
     auto bf162 = __float22bfloat162_rn(in);
@@ -818,7 +938,7 @@ __global__ void bf16_shfl_sync(float* in, float* out, int size) {
   }
 }
 
-TEST_CASE("Unit_bf16_shfl") {
+HIP_TEST_CASE(Unit_bf16_shfl) {
   auto warp_size = getWarpSize();
   std::vector<float> in;
   for (size_t i = 1; i <= warp_size; i++) {
@@ -903,7 +1023,7 @@ __global__ void bf162_shfl_sync(float2* in, float2* out, int size) {
   }
 }
 
-TEST_CASE("Unit_bf162_shfl") {
+HIP_TEST_CASE(Unit_bf162_shfl) {
   auto warp_size = getWarpSize();
   std::vector<float2> in;
   for (size_t i = 1; i <= warp_size; i++) {
@@ -1018,7 +1138,7 @@ __global__ void bf16_hrsqrt(float* in, float* out) {
   out[i] = hrsqrt(bf);
 }
 
-TEST_CASE("Unit_bf16_value_ops") {
+HIP_TEST_CASE(Unit_bf16_value_ops) {
   constexpr size_t size = 32;
   float *d_in, *d_out;
   HIP_CHECK(hipMalloc(&d_in, sizeof(float) * size));
@@ -1171,7 +1291,7 @@ __global__ void bf16_htrunc(float* in, float* out) {
   out[i] = htrunc(bf);
 }
 
-TEST_CASE("Unit_bf16_floor_ceil") {
+HIP_TEST_CASE(Unit_bf16_floor_ceil) {
   constexpr size_t size = 32;
   float *d_in, *d_out;
   HIP_CHECK(hipMalloc(&d_in, sizeof(float) * size));
@@ -1261,7 +1381,7 @@ __global__ void bf162_htrunc(float2* in, float2* out) {
   out[i] = h2trunc(bf);
 }
 
-TEST_CASE("Unit_bf162_floor_ceil") {
+HIP_TEST_CASE(Unit_bf162_floor_ceil) {
   constexpr size_t size = 32;
   float2 *d_in, *d_out;
   HIP_CHECK(hipMalloc(&d_in, sizeof(float2) * size));

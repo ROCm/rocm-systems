@@ -40,28 +40,28 @@
  *
  */
 
-#include <stdint.h>
-#include <stddef.h>
+#include "rocm_smi_test/functional/pci_read_write.h"
 
-#include <iostream>
-#include <bitset>
-#include <string>
+#include <stddef.h>
+#include <stdint.h>
+
 #include <algorithm>
+#include <bitset>
+#include <iostream>
+#include <string>
 
 #include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
-#include "rocm_smi_test/functional/pci_read_write.h"
 #include "rocm_smi_test/test_common.h"
-
 
 TestPciReadWrite::TestPciReadWrite() : TestBase() {
   set_title("RSMI PCIe Bandwidth Read/Write Test");
-  set_description("The PCIe Bandwidth tests verify that the PCIe bandwidth "
-                             "settings can be read and controlled properly.");
+  set_description(
+      "The PCIe Bandwidth tests verify that the PCIe bandwidth "
+      "settings can be read and controlled properly.");
 }
 
-TestPciReadWrite::~TestPciReadWrite(void) {
-}
+TestPciReadWrite::~TestPciReadWrite(void) {}
 
 void TestPciReadWrite::SetUp(void) {
   TestBase::SetUp();
@@ -69,9 +69,7 @@ void TestPciReadWrite::SetUp(void) {
   return;
 }
 
-void TestPciReadWrite::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void TestPciReadWrite::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void TestPciReadWrite::DisplayResults(void) const {
   TestBase::DisplayResults();
@@ -83,7 +81,6 @@ void TestPciReadWrite::Close() {
   // rsmi_shut_down(), so it should be done after other hsa cleanup
   TestBase::Close();
 }
-
 
 void TestPciReadWrite::Run(void) {
   rsmi_status_t ret;
@@ -102,28 +99,27 @@ void TestPciReadWrite::Run(void) {
 
     ret = rsmi_dev_pci_replay_counter_get(dv_ind, &u64int);
 
-     if (ret == RSMI_STATUS_NOT_SUPPORTED) {
-        std::cout <<
-            "\t**rsmi_dev_pci_replay_counter_get() is not supported"
-            " on this machine" << std::endl;
+    if (ret == RSMI_STATUS_NOT_SUPPORTED) {
+      std::cout << "\t**rsmi_dev_pci_replay_counter_get() is not supported"
+                   " on this machine"
+                << std::endl;
 
-        // Verify api support checking functionality is working
-        ret = rsmi_dev_pci_replay_counter_get(dv_ind, nullptr);
-        ASSERT_EQ(ret, RSMI_STATUS_NOT_SUPPORTED);
-      } else {
-        CHK_ERR_ASRT(ret)
-        IF_VERB(STANDARD) {
-          std::cout << "\tPCIe Replay Counter: " << u64int << std::endl;
-        }
-        // Verify api support checking functionality is working
-        ret = rsmi_dev_pci_replay_counter_get(dv_ind, nullptr);
-        ASSERT_EQ(ret, RSMI_STATUS_INVALID_ARGS);
-      }
+      // Verify api support checking functionality is working
+      ret = rsmi_dev_pci_replay_counter_get(dv_ind, nullptr);
+      ASSERT_EQ(ret, RSMI_STATUS_NOT_SUPPORTED);
+    } else {
+      CHK_ERR_ASRT(ret)
+      IF_VERB(STANDARD) { std::cout << "\tPCIe Replay Counter: " << u64int << std::endl; }
+      // Verify api support checking functionality is working
+      ret = rsmi_dev_pci_replay_counter_get(dv_ind, nullptr);
+      ASSERT_EQ(ret, RSMI_STATUS_INVALID_ARGS);
+    }
 
     ret = rsmi_dev_pci_throughput_get(dv_ind, &sent, &received, &max_pkt_sz);
     if (ret == RSMI_STATUS_NOT_SUPPORTED) {
       std::cout << "WARNING: Current PCIe throughput is not detected. "
-        "pcie_bw sysfs file is no longer supported on this device. Aborting test." << std::endl;
+                   "pcie_bw sysfs file is no longer supported on this device. Aborting test."
+                << std::endl;
 
       // We don't need to verify api support checking functionality is working
       // as the user may choose to have any of the input parameters as 0.
@@ -135,8 +131,7 @@ void TestPciReadWrite::Run(void) {
       std::cout << "\tPCIe Throughput (1 sec.): " << std::endl;
       std::cout << "\t\tSent: " << sent << " bytes" << std::endl;
       std::cout << "\t\tReceived: " << received << " bytes" << std::endl;
-      std::cout << "\t\tMax Packet Size: " << max_pkt_sz << " bytes" <<
-                                                                    std::endl;
+      std::cout << "\t\tMax Packet Size: " << max_pkt_sz << " bytes" << std::endl;
       std::cout << std::endl;
     }
 
@@ -144,7 +139,8 @@ void TestPciReadWrite::Run(void) {
 
     if (ret == RSMI_STATUS_NOT_SUPPORTED) {
       std::cout << "WARNING: Current PCIe bandwidth is not detected. "
-        "pp_dpm_pcie sysfs file is no longer supported on this device. Aborting test." << std::endl;
+                   "pp_dpm_pcie sysfs file is no longer supported on this device. Aborting test."
+                << std::endl;
       // Verify api support checking functionality is working
       ret = rsmi_dev_pci_bandwidth_get(dv_ind, nullptr);
       ASSERT_EQ(ret, RSMI_STATUS_NOT_SUPPORTED);
@@ -154,13 +150,14 @@ void TestPciReadWrite::Run(void) {
     CHK_ERR_ASRT(ret)
 
     IF_VERB(STANDARD) {
-      std::cout << "\tInitial PCIe BW index is " << bw.transfer_rate.current <<
-                                                                    std::endl;
+      std::cout << "\tInitial PCIe BW index is " << bw.transfer_rate.current << std::endl;
     }
     // Verify api support checking functionality is working
     ret = rsmi_dev_pci_bandwidth_get(dv_ind, nullptr);
     ASSERT_TRUE(ret == RSMI_STATUS_INVALID_ARGS || ret == RSMI_STATUS_NOT_SUPPORTED);
-    std::cout << "Expected INVALID_ARGS or NOT_SUPPORTED when passing nullptr to rsmi_dev_pci_bandwidth_get; got: " << ret;
+    std::cout << "Expected INVALID_ARGS or NOT_SUPPORTED when passing nullptr to "
+                 "rsmi_dev_pci_bandwidth_get; got: "
+              << ret;
 
     // First set the bitmask to all supported bandwidths
     freq_bitmask = ~(~0u << bw.transfer_rate.num_supported);
@@ -168,15 +165,12 @@ void TestPciReadWrite::Run(void) {
     // Then, set the bitmask to all bandwidths besides the initial BW
     freq_bitmask ^= (1 << bw.transfer_rate.current);
 
-    std::string freq_bm_str =
-               std::bitset<RSMI_MAX_NUM_FREQUENCIES>(freq_bitmask).to_string();
+    std::string freq_bm_str = std::bitset<RSMI_MAX_NUM_FREQUENCIES>(freq_bitmask).to_string();
 
-    freq_bm_str.erase(0, std::min(freq_bm_str.find_first_not_of('0'),
-                                                       freq_bm_str.size()-1));
+    freq_bm_str.erase(0, std::min(freq_bm_str.find_first_not_of('0'), freq_bm_str.size() - 1));
 
     IF_VERB(STANDARD) {
-    std::cout << "\tSetting bandwidth mask to " << "0b" << freq_bm_str <<
-                                                            " ..." << std::endl;
+      std::cout << "\tSetting bandwidth mask to " << "0b" << freq_bm_str << " ..." << std::endl;
     }
     ret = rsmi_dev_pci_bandwidth_set(dv_ind, freq_bitmask);
     if (ret != RSMI_STATUS_NOT_SUPPORTED) {
@@ -187,8 +181,7 @@ void TestPciReadWrite::Run(void) {
     CHK_ERR_ASRT(ret)
 
     IF_VERB(STANDARD) {
-      std::cout << "\tBandwidth is now index " << bw.transfer_rate.current <<
-                                                                      std::endl;
+      std::cout << "\tBandwidth is now index " << bw.transfer_rate.current << std::endl;
       std::cout << "\tResetting mask to all bandwidths." << std::endl;
     }
     ret = rsmi_dev_pci_bandwidth_set(dv_ind, 0xFFFFFFFF);

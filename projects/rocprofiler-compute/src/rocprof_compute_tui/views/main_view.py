@@ -1,27 +1,6 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
-##############################################################################
 """
 Main View Module
 ---------------
@@ -33,6 +12,7 @@ import traceback
 from pathlib import Path
 from typing import Any, Optional
 
+import pandas as pd
 from textual import on, work
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
@@ -45,7 +25,6 @@ from rocprof_compute_tui.widgets.center_panel.center_area import CenterPanel
 from rocprof_compute_tui.widgets.menu_bar.menu_bar import MenuBar
 from rocprof_compute_tui.widgets.right_panel.right import RightPanel
 from rocprof_compute_tui.widgets.tabs.tabs_area import TabsArea
-from utils import file_io
 
 
 class MainView(Horizontal):
@@ -59,6 +38,7 @@ class MainView(Horizontal):
         super().__init__(id="main-container")
         self.logger = Logger()
         self.logger.info("MainView initialized", update_ui=False)
+        self.analyzer: Optional[Any] = None
 
     def flush(self) -> None:
         """Required for stdout compatibility."""
@@ -182,7 +162,7 @@ class MainView(Horizontal):
                 self.app.call_from_thread(ui_missing_sysinfo)
                 return
 
-            sys_info = file_io.load_sys_info(str(sysinfo_path)).iloc[0].to_dict()
+            sys_info = pd.read_csv(str(sysinfo_path)).iloc[0].to_dict()
             self.app.load_soc_specs(sys_info)
             analyzer.set_soc(self.app.soc)
 
@@ -207,6 +187,7 @@ class MainView(Horizontal):
             # ------------------------------------
             self.app.call_from_thread(
                 self._analysis_success,
+                analyzer,
                 kernel_to_df_dict,
                 top_kernel_to_df_list,
             )
@@ -229,9 +210,13 @@ class MainView(Horizontal):
 
     def _analysis_success(
         self,
+        analyzer: Any,  # noqa: ANN401
         kernel_to_df_dict: dict[str, dict[str, Any]],
         top_kernel_to_df_list: list[dict[str, Any]],
     ) -> None:
+        # Store analyzer for filter re-runs
+        self.analyzer = analyzer
+
         self.kernel_to_df_dict = kernel_to_df_dict or {}
         self.top_kernel_to_df_list = top_kernel_to_df_list or []
 

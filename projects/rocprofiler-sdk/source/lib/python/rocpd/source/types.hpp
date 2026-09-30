@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022-2026 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,7 @@
 #pragma once
 
 #include "lib/output/agent_info.hpp"
+#include "lib/output/kfd_info.hpp"
 #include "lib/output/node_info.hpp"
 
 #include <rocprofiler-sdk/agent.h>
@@ -245,6 +246,27 @@ struct sample
     decoded_extdata get_extdata() const;
 };
 
+struct event
+{
+    struct decoded_extdata
+    {
+        std::optional<::rocprofiler::tool::rocpd_kfd_event_data_t> kfd = {};
+    };
+
+    uint64_t    id              = 0;
+    guid_t      guid            = {};
+    uint64_t    category_id     = 0;
+    uint64_t    stack_id        = 0;
+    uint64_t    parent_stack_id = 0;
+    uint64_t    correlation_id  = 0;
+    std::string call_stack      = {};
+    std::string line_info       = {};
+    std::string extdata         = {};
+
+    bool            has_extdata() const { return (extdata.length() > 2); }
+    decoded_extdata get_extdata() const;
+};
+
 struct region_arg
 {
     uint64_t    id    = 0;
@@ -275,6 +297,8 @@ struct kernel_dispatch
     uint64_t                dispatch_id         = 0;
     uint64_t                stream_id           = 0;
     uint64_t                queue_id            = 0;
+    std::optional<uint64_t> graph_exec_id       = std::nullopt;
+    std::optional<uint64_t> graph_node_id       = std::nullopt;
     std::string             queue               = {};
     std::string             stream              = {};
     rocprofiler_timestamp_t start               = 0;
@@ -333,6 +357,8 @@ struct memory_copies
     std::string             category             = {};
     uint64_t                stream_id            = 0;
     uint64_t                queue_id             = 0;
+    std::optional<uint64_t> graph_exec_id        = std::nullopt;
+    std::optional<uint64_t> graph_node_id        = std::nullopt;
     std::string             stream_name          = {};
     std::string             queue_name           = {};
     uint64_t                size                 = 0;
@@ -353,6 +379,21 @@ struct memory_copies
     uint64_t                corr_id              = 0;
 };
 
+struct graph_launch
+{
+    uint64_t                id                    = 0;
+    guid_t                  guid                  = {};
+    pid_t                   pid                   = 0;
+    pid_t                   tid                   = 0;
+    rocprofiler_timestamp_t start                 = 0;
+    rocprofiler_timestamp_t end                   = 0;
+    uint64_t                graph_exec_id         = 0;
+    uint64_t                kernel_dispatch_count = 0;
+    uint64_t                stack_id              = 0;
+    uint64_t                parent_stack_id       = 0;
+    uint64_t                corr_id               = 0;
+};
+
 struct scratch_memory
 {
     guid_t                  guid             = {};
@@ -369,6 +410,34 @@ struct scratch_memory
     rocprofiler_timestamp_t start            = 0;
     rocprofiler_timestamp_t end              = 0;
     uint64_t                size             = 0;
+    uint64_t                stack_id         = 0;
+    uint64_t                parent_stack_id  = 0;
+    uint64_t                corr_id          = 0;
+};
+
+struct hip_events
+{
+    uint64_t                id               = 0;
+    guid_t                  guid             = {};
+    std::string             category         = {};
+    uint64_t                nid              = 0;
+    pid_t                   pid              = 0;
+    pid_t                   tid              = 0;
+    rocprofiler_timestamp_t start            = 0;
+    rocprofiler_timestamp_t end              = 0;
+    uint64_t                duration         = 0;
+    std::string             name             = {};
+    uint64_t                stream_id        = 0;
+    uint64_t                queue_id         = 0;
+    std::string             stream_name      = {};
+    std::string             queue_name       = {};
+    std::string             device           = {};
+    uint64_t                agent_abs_index  = 0;
+    uint64_t                agent_log_index  = 0;
+    uint64_t                agent_type_index = 0;
+    std::string             agent_type       = {};
+    uint64_t                hip_event_handle = 0;
+    uint64_t                source_queue_id  = 0;
     uint64_t                stack_id         = 0;
     uint64_t                parent_stack_id  = 0;
     uint64_t                corr_id          = 0;
@@ -409,12 +478,15 @@ struct stats_node
 
 struct pmc_event
 {
-    uint64_t id            = 0;
-    guid_t   guid          = {};
-    pid_t    pid           = 0;
-    uint64_t event_id      = 0;
-    uint64_t pmc_id        = 0;
-    double   counter_value = 0;
+    uint64_t    id       = 0;
+    guid_t      guid     = {};
+    uint64_t    event_id = 0;
+    uint64_t    pmc_id   = 0;
+    double      value    = 0;
+    std::string extdata  = {};
+
+    bool has_extdata() const { return (extdata.length() > 2); }
+    void load_extdata();
 };
 
 struct counter
@@ -466,16 +538,26 @@ struct counter
 
 struct pmc_info
 {
-    uint64_t    id              = 0;
-    guid_t      guid            = {};
-    uint64_t    nid             = 0;
-    uint64_t    agent_abs_index = 0;
-    bool        is_constant     = false;
-    bool        is_derived      = false;
-    std::string name            = {};
-    std::string description     = {};
-    std::string block           = {};
-    std::string expression      = {};
+    uint64_t    id               = 0;
+    guid_t      guid             = {};
+    uint64_t    nid              = 0;
+    uint64_t    pid              = 0;
+    uint64_t    agent_id         = 0;
+    std::string target_arch      = {};
+    uint64_t    event_code       = 0;
+    uint64_t    instance_id      = 0;
+    std::string name             = {};
+    std::string symbol           = {};
+    std::string description      = {};
+    std::string long_description = {};
+    std::string component        = {};
+    std::string units            = {};
+    std::string value_type       = {};
+    std::string block            = {};
+    std::string expression       = {};
+    uint16_t    is_constant      = 0;
+    uint16_t    is_derived       = 0;
+    std::string extdata          = {};
 };
 
 }  // namespace types
@@ -670,6 +752,29 @@ load(ArchiveT& ar, rocpd::types::sample::decoded_extdata& data)
 
 template <typename ArchiveT>
 void
+load(ArchiveT& ar, rocpd::types::event& data)
+{
+    LOAD_DATA_FIELD(id);
+    LOAD_DATA_FIELD(guid);
+    LOAD_DATA_FIELD(category_id);
+    LOAD_DATA_FIELD(stack_id);
+    LOAD_DATA_FIELD(parent_stack_id);
+    LOAD_DATA_FIELD(correlation_id);
+    LOAD_DATA_FIELD(call_stack);
+    LOAD_DATA_FIELD(line_info);
+    LOAD_DATA_FIELD(extdata);
+}
+
+template <typename ArchiveT>
+void
+load(ArchiveT& ar, rocpd::types::event::decoded_extdata& data)
+{
+    data.kfd.reset();
+    ar(cereal::make_nvp("kfd", data.kfd));
+}
+
+template <typename ArchiveT>
+void
 load(ArchiveT& ar, rocpd::types::region_arg& data)
 {
     LOAD_DATA_FIELD(id);
@@ -708,6 +813,8 @@ load(ArchiveT& ar, rocpd::types::kernel_dispatch& data)
     LOAD_DATA_FIELD(dispatch_id);
     LOAD_DATA_FIELD(queue_id);
     LOAD_DATA_FIELD(stream_id);
+    LOAD_DATA_FIELD(graph_exec_id);
+    LOAD_DATA_FIELD(graph_node_id);
     LOAD_DATA_FIELD(queue);
     LOAD_DATA_FIELD(stream);
     LOAD_DATA_FIELD(start);
@@ -769,6 +876,8 @@ load(ArchiveT& ar, rocpd::types::memory_copies& data)
     LOAD_DATA_FIELD(region_name);
     LOAD_DATA_FIELD(stream_id);
     LOAD_DATA_FIELD(queue_id);
+    LOAD_DATA_FIELD(graph_exec_id);
+    LOAD_DATA_FIELD(graph_node_id);
     LOAD_DATA_FIELD(stream_name);
     LOAD_DATA_FIELD(queue_name);
     LOAD_DATA_FIELD(size);
@@ -792,6 +901,23 @@ load(ArchiveT& ar, rocpd::types::memory_copies& data)
 
 template <typename ArchiveT>
 void
+load(ArchiveT& ar, rocpd::types::graph_launch& data)
+{
+    LOAD_DATA_FIELD(id);
+    LOAD_DATA_FIELD(guid);
+    LOAD_DATA_FIELD(pid);
+    LOAD_DATA_FIELD(tid);
+    LOAD_DATA_FIELD(start);
+    LOAD_DATA_FIELD(end);
+    LOAD_DATA_FIELD(graph_exec_id);
+    LOAD_DATA_FIELD(kernel_dispatch_count);
+    LOAD_DATA_FIELD(stack_id);
+    LOAD_DATA_FIELD(parent_stack_id);
+    LOAD_DATA_FIELD(corr_id);
+}
+
+template <typename ArchiveT>
+void
 load(ArchiveT& ar, rocpd::types::scratch_memory& data)
 {
     LOAD_DATA_FIELD(guid);
@@ -808,6 +934,36 @@ load(ArchiveT& ar, rocpd::types::scratch_memory& data)
     LOAD_DATA_FIELD(end);
     LOAD_DATA_FIELD(size);
     LOAD_DATA_FIELD(category);
+    LOAD_DATA_FIELD(stack_id);
+    LOAD_DATA_FIELD(parent_stack_id);
+    LOAD_DATA_FIELD(corr_id);
+}
+
+template <typename ArchiveT>
+void
+load(ArchiveT& ar, rocpd::types::hip_events& data)
+{
+    LOAD_DATA_FIELD(id);
+    LOAD_DATA_FIELD(guid);
+    LOAD_DATA_FIELD(category);
+    LOAD_DATA_FIELD(nid);
+    LOAD_DATA_FIELD(pid);
+    LOAD_DATA_FIELD(tid);
+    LOAD_DATA_FIELD(start);
+    LOAD_DATA_FIELD(end);
+    LOAD_DATA_FIELD(duration);
+    LOAD_DATA_FIELD(name);
+    LOAD_DATA_FIELD(stream_id);
+    LOAD_DATA_FIELD(queue_id);
+    LOAD_DATA_FIELD(stream_name);
+    LOAD_DATA_FIELD(queue_name);
+    LOAD_DATA_FIELD(device);
+    LOAD_DATA_FIELD(agent_abs_index);
+    LOAD_DATA_FIELD(agent_log_index);
+    LOAD_DATA_FIELD(agent_type_index);
+    LOAD_DATA_FIELD(agent_type);
+    LOAD_DATA_FIELD(hip_event_handle);
+    LOAD_DATA_FIELD(source_queue_id);
     LOAD_DATA_FIELD(stack_id);
     LOAD_DATA_FIELD(parent_stack_id);
     LOAD_DATA_FIELD(corr_id);
@@ -856,10 +1012,10 @@ load(ArchiveT& ar, rocpd::types::pmc_event& data)
 {
     LOAD_DATA_FIELD(id);
     LOAD_DATA_FIELD(guid);
-    LOAD_DATA_FIELD(pid);
     LOAD_DATA_FIELD(event_id);
     LOAD_DATA_FIELD(pmc_id);
-    // LOAD_DATA_FIELD(counter_value);
+    LOAD_DATA_FIELD(value);
+    LOAD_DATA_FIELD(extdata);
 }
 
 template <typename ArchiveT>
@@ -910,6 +1066,7 @@ load(ArchiveT& ar, rocpd::types::counter& data)
     LOAD_DATA_FIELD(is_constant);
     LOAD_DATA_FIELD(is_derived);
 }
+
 template <typename ArchiveT>
 void
 load(ArchiveT& ar, rocpd::types::pmc_info& data)
@@ -917,13 +1074,22 @@ load(ArchiveT& ar, rocpd::types::pmc_info& data)
     LOAD_DATA_FIELD(id);
     LOAD_DATA_FIELD(guid);
     LOAD_DATA_FIELD(nid);
-    LOAD_DATA_FIELD(agent_abs_index);
-    LOAD_DATA_FIELD(is_constant);
-    LOAD_DATA_FIELD(is_derived);
+    LOAD_DATA_FIELD(pid);
+    LOAD_DATA_FIELD(agent_id);
+    LOAD_DATA_FIELD(target_arch);
+    LOAD_DATA_FIELD(event_code);
+    LOAD_DATA_FIELD(instance_id);
     LOAD_DATA_FIELD(name);
     LOAD_DATA_FIELD(description);
+    LOAD_DATA_FIELD(long_description);
+    LOAD_DATA_FIELD(component);
+    LOAD_DATA_FIELD(units);
+    LOAD_DATA_FIELD(value_type);
     LOAD_DATA_FIELD(block);
     LOAD_DATA_FIELD(expression);
+    LOAD_DATA_FIELD(is_constant);
+    LOAD_DATA_FIELD(is_derived);
+    LOAD_DATA_FIELD(extdata);
 }
 
 }  // namespace cereal

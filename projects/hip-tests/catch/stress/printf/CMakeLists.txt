@@ -1,7 +1,12 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
 # Common Tests - Test independent of all platforms
 set(TEST_SRC
     Stress_printf_ComplexKernels.cc
     Stress_printf_SimpleKernels.cc
+    Stress_printf_HostcallListenerRace.cc
 )
 
 hip_add_exe_to_target(NAME printf_stress

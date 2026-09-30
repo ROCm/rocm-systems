@@ -1,22 +1,8 @@
-/* Copyright (c) 2020 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /** \file Format string processing for printf based on hostcall messages.
  */
@@ -28,6 +14,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <utility>
 
 namespace amd {
 static void checkPrintf(FILE* stream, int* outCount, const char* fmt, ...) {
@@ -273,8 +260,11 @@ bool populateFormatStringHashMap(const std::vector<device::PrintfInfo>& printfIn
       return false;
     }
 
-    auto InsertResult = strMap.emplace(HashVal, info.fmtString_.substr(Delim + 1));
-    if (!InsertResult.second) {
+    // A repeated hash is only a real collision if it maps to a different string; try_emplace leaves
+    // FmtStr intact when no insert happens, keeping the check valid.
+    auto FmtStr = info.fmtString_.substr(Delim + 1);
+    auto InsertResult = strMap.try_emplace(HashVal, std::move(FmtStr));
+    if (!InsertResult.second && InsertResult.first->second != FmtStr) {
       LogError("Hash value collision detected, printf buffer ill formed");
       return false;
     }

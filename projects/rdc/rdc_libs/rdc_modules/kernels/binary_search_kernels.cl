@@ -55,7 +55,7 @@
  * we are looking for, that is marked in the output and we no longer need to
  * look any further.
  */
- 
+
 __kernel void
 binarySearch(__global uint4 * outputArray,
              __const __global uint2  * sortedArray,
@@ -74,7 +74,7 @@ binarySearch(__global uint4 * outputArray,
     // However, if the element does lie between the lower
     // and upper bounds of this thread's searchspace
     // we need to narrow down the search further in this
-    // search space 
+    // search space
     // The search space for this thread is marked in the
     // output as being the total search space for the next pass
     outputArray[0].x = tid;

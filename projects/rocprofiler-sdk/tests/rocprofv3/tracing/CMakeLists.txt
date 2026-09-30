@@ -1,7 +1,7 @@
 #
 # rocprofv3 tool test
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 project(
     rocprofiler-sdk-tests-rocprofv3-tracing
@@ -23,9 +23,9 @@ rocprofiler_add_integration_execute_test(
     rocprofv3-test-trace
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -M --hsa-trace --kernel-trace
-        --memory-copy-trace --marker-trace -d ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace -o
-        cmdl-input/out --output-format pftrace csv json rocpd --log-level ${LOG_LEVEL} --
-        $<TARGET_FILE:simple-transpose>
+        --memory-copy-trace --marker-trace --kfd-trace -d
+        ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace -o cmdl-input/out --output-format pftrace
+        csv json rocpd --log-level ${LOG_LEVEL} -- $<TARGET_FILE:simple-transpose>
     DEPENDS simple-transpose
     TIMEOUT 45
     LABELS "integration-tests"

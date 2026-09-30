@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 
 /* Test Description:
@@ -35,6 +22,7 @@ THE SOFTWARE.
 */
 #include <vector>
 #include <thread>
+#include <atomic>
 #include <chrono>
 #ifdef _WIN32
 #include <Windows.h>
@@ -55,7 +43,7 @@ using namespace cooperative_groups;
 #endif
 
 
-static bool IfTestPassed = false;
+static std::atomic<bool> IfTestPassed{false};
 // kernel
 __global__ void StreamPerThrd(int* Ad, int* Ad1, size_t n, int Pk_Clk, int Wait, int WaitEvnt = 0) {
   size_t index = blockIdx.x * blockDim.x + threadIdx.x;
@@ -208,30 +196,30 @@ static void HIPRT_CB CallBackFunctn(hipStream_t strm, hipError_t err, void* ChkV
 static void EventSync() {
   int *Ad = nullptr, *Ah = nullptr, NumElms = 4096, CONST_NUM = 123;
   int blockSize = 32, peak_clk;
-  HIP_CHECK(hipMalloc(&Ad, NumElms * sizeof(int)));
+  HIP_CHECK_THREAD(hipMalloc(&Ad, NumElms * sizeof(int)));
   Ah = new int[NumElms];
   for (int i = 0; i < NumElms; ++i) {
     Ah[i] = CONST_NUM;
   }
   // creating event objects
   hipEvent_t start, end;
-  HIP_CHECK(hipEventCreate(&start));
-  HIP_CHECK(hipEventCreate(&end));
-  HIP_CHECK(hipMemcpy(Ad, Ah, NumElms * sizeof(int), hipMemcpyHostToDevice));
+  HIP_CHECK_THREAD(hipEventCreate(&start));
+  HIP_CHECK_THREAD(hipEventCreate(&end));
+  HIP_CHECK_THREAD(hipMemcpy(Ad, Ah, NumElms * sizeof(int), hipMemcpyHostToDevice));
   dim3 dimBlock(blockSize, 1, 1);
   dim3 dimGrid((NumElms + blockSize - 1) / blockSize, 1, 1);
-  HIP_CHECK(hipEventRecord(start, hipStreamPerThread));
+  HIP_CHECK_THREAD(hipEventRecord(start, hipStreamPerThread));
   if (IsGfx11()) {
-    HIP_CHECK(hipDeviceGetAttribute(&peak_clk, hipDeviceAttributeWallClockRate, 0));
+    HIP_CHECK_THREAD(hipDeviceGetAttribute(&peak_clk, hipDeviceAttributeWallClockRate, 0));
     StreamPerThrd_gfx11<<<dimGrid, dimBlock, 0, hipStreamPerThread>>>(Ad, NULL, NumElms, peak_clk,
                                                                       0);
   } else {
-    HIP_CHECK(hipDeviceGetAttribute(&peak_clk, hipDeviceAttributeClockRate, 0));
+    HIP_CHECK_THREAD(hipDeviceGetAttribute(&peak_clk, hipDeviceAttributeClockRate, 0));
     StreamPerThrd<<<dimGrid, dimBlock, 0, hipStreamPerThread>>>(Ad, NULL, NumElms, peak_clk, 0);
   }
-  HIP_CHECK(hipEventRecord(end, hipStreamPerThread));
-  HIP_CHECK(hipEventSynchronize(end));
-  HIP_CHECK(hipMemcpy(Ah, Ad, NumElms * sizeof(int), hipMemcpyDeviceToHost));
+  HIP_CHECK_THREAD(hipEventRecord(end, hipStreamPerThread));
+  HIP_CHECK_THREAD(hipEventSynchronize(end));
+  HIP_CHECK_THREAD(hipMemcpy(Ah, Ad, NumElms * sizeof(int), hipMemcpyDeviceToHost));
   int MisMatch = 0;
   for (int i = 0; i < NumElms; ++i) {
     if (Ah[i] != (CONST_NUM + 10)) {
@@ -239,21 +227,20 @@ static void EventSync() {
     }
   }
   delete[] Ah;
-  HIP_CHECK(hipFree(Ad));
+  HIP_CHECK_THREAD(hipFree(Ad));
   if (MisMatch) {
-    WARN("Data Mismatch observed!!\n");
+    // WARN is a thread-unsafe Catch2 macro; use printf from the worker thread.
+    printf("Data Mismatch observed!!\n");
     IfTestPassed = false;
-  } else {
-    IfTestPassed = true;
   }
 
-  HIP_CHECK(hipEventDestroy(start));
-  HIP_CHECK(hipEventDestroy(end));
+  HIP_CHECK_THREAD(hipEventDestroy(start));
+  HIP_CHECK_THREAD(hipEventDestroy(end));
 }
 
 /* Launch a kernel in hipStreamPerThread, while it is in flight check for
    hipStreamQuery(hipStreamPerThread) it should return hipErrorNotReady.*/
-TEST_CASE("Unit_hipStreamPerThreadTst_StrmQuery") {
+HIP_TEST_CASE(Unit_hipStreamPerThreadTst_StrmQuery) {
   int *Ad = nullptr, *Ah = nullptr, NumElms = 4096, CONST_NUM = 123;
   int blockSize = 32, peak_clk;
   hipError_t err;
@@ -302,58 +289,49 @@ TEST_CASE("Unit_hipStreamPerThreadTst_StrmQuery") {
 }
 
 /* Testing hipStreamPerThread stream object with hipMallocManaged() memory*/
-TEST_CASE("Unit_hipStreamPerThread_MangdMem") {
-  int managed = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeManagedMemory, 0));
-  if (managed == 1) {
-    int *Hmm = nullptr, NumElms = 4096, CONST_NUM = 123, blockSize = 32;
-    SECTION("Using Managed memory") {
-      HIP_CHECK(hipMallocManaged(&Hmm, NumElms * sizeof(int)));
-      for (int i = 0; i < NumElms; ++i) {
-        Hmm[i] = CONST_NUM;
-      }
-    }
-    SECTION("Prefetching Managed memory to device") {
-      HIP_CHECK(hipMallocManaged(&Hmm, NumElms * sizeof(int)));
-      for (int i = 0; i < NumElms; ++i) {
-        Hmm[i] = CONST_NUM;
-      }
-      HIP_CHECK(hipMemPrefetchAsync(Hmm, NumElms * sizeof(int), 0, hipStreamPerThread));
-    }
-    int peak_clk;
-    dim3 dimBlock(blockSize, 1, 1);
-    dim3 dimGrid((NumElms + blockSize - 1) / blockSize, 1, 1);
-    if (IsGfx11()) {
-      HIP_CHECK(hipDeviceGetAttribute(&peak_clk, hipDeviceAttributeWallClockRate, 0));
-      StreamPerThrd_gfx11<<<dimGrid, dimBlock, 0, hipStreamPerThread>>>(Hmm, NULL, NumElms,
-                                                                        peak_clk, 0);
-    } else {
-      HIP_CHECK(hipDeviceGetAttribute(&peak_clk, hipDeviceAttributeClockRate, 0));
-      StreamPerThrd<<<dimGrid, dimBlock, 0, hipStreamPerThread>>>(Hmm, NULL, NumElms, peak_clk, 0);
-    }
-    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
-    // Validating the result
-    int MisMatch = 0;
+HIP_TEST_CASE(Unit_hipStreamPerThread_MangdMem) {
+  CHECK_MANAGED_MEMORY_SUPPORT
+
+  int *Hmm = nullptr, NumElms = 4096, CONST_NUM = 123, blockSize = 32;
+  SECTION("Using Managed memory") {
+    HIP_CHECK(hipMallocManaged(&Hmm, NumElms * sizeof(int)));
     for (int i = 0; i < NumElms; ++i) {
-      if (Hmm[i] != (CONST_NUM + 10)) {
-        MisMatch++;
-      }
+      Hmm[i] = CONST_NUM;
     }
-    HIP_CHECK(hipFree(Hmm));
-    if (MisMatch) {
-      WARN("Data mismatch observed!!\n");
-      REQUIRE(false);
-    }
-  } else {
-    SUCCEED(
-        "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
-        "attribute. Hence skipping the testing with Pass result.\n");
   }
+  SECTION("Prefetching Managed memory to device") {
+    HIP_CHECK(hipMallocManaged(&Hmm, NumElms * sizeof(int)));
+    for (int i = 0; i < NumElms; ++i) {
+      Hmm[i] = CONST_NUM;
+    }
+    HIP_CHECK(hipMemPrefetchAsync(Hmm, NumElms * sizeof(int), 0, hipStreamPerThread));
+  }
+  int peak_clk;
+  dim3 dimBlock(blockSize, 1, 1);
+  dim3 dimGrid((NumElms + blockSize - 1) / blockSize, 1, 1);
+  if (IsGfx11()) {
+    HIP_CHECK(hipDeviceGetAttribute(&peak_clk, hipDeviceAttributeWallClockRate, 0));
+    StreamPerThrd_gfx11<<<dimGrid, dimBlock, 0, hipStreamPerThread>>>(Hmm, NULL, NumElms, peak_clk,
+                                                                      0);
+  } else {
+    HIP_CHECK(hipDeviceGetAttribute(&peak_clk, hipDeviceAttributeClockRate, 0));
+    StreamPerThrd<<<dimGrid, dimBlock, 0, hipStreamPerThread>>>(Hmm, NULL, NumElms, peak_clk, 0);
+  }
+  HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+  // Validating the result
+  int MisMatch = 0;
+  for (int i = 0; i < NumElms; ++i) {
+    if (Hmm[i] != (CONST_NUM + 10)) {
+      MisMatch++;
+    }
+  }
+  HIP_CHECK(hipFree(Hmm));
+  REQUIRE(MisMatch == 0);
 }
 
 /*  To check the working of hipStreamPerThread in forked process*/
 #ifdef __linux__
-TEST_CASE("Unit_hipStreamPerThread_ChildProc") {
+HIP_TEST_CASE(Unit_hipStreamPerThread_ChildProc) {
   if (fork() == 0) {  //  child process
     int *Ad = nullptr, *Ah = nullptr, NumElms = 4096, CONST_NUM = 123;
     int blockSize = 32, peak_clk;
@@ -402,7 +380,7 @@ TEST_CASE("Unit_hipStreamPerThread_ChildProc") {
 
 /* The following test case tests the working of hipEventSynchronize in
    multiple threads which are launched in quick succession*/
-TEST_CASE("Unit_hipStreamPerThread_EvtRcrdMThrd") {
+HIP_TEST_CASE(Unit_hipStreamPerThread_EvtRcrdMThrd) {
   IfTestPassed = true;
   int MAX_THREAD_CNT = 20;
   std::vector<std::thread> threads(MAX_THREAD_CNT);
@@ -412,12 +390,13 @@ TEST_CASE("Unit_hipStreamPerThread_EvtRcrdMThrd") {
   for (auto& th : threads) {
     th.join();
   }
+  HIP_CHECK_THREAD_FINALIZE();
   REQUIRE(IfTestPassed);
 }
 
 /* The following test case checks the working of hipStreamWaitEvent() with
    hipStreamWaitEvent()*/
-TEST_CASE("Unit_hipStreamPerThread_StrmWaitEvt") {
+HIP_TEST_CASE(Unit_hipStreamPerThread_StrmWaitEvt) {
   IfTestPassed = true;
   int *Ad = nullptr, NumElms = 4096, CONST_NUM = 123, blockSize = 32, *Ah = nullptr;
   int *Ad1 = nullptr, *Ah1 = nullptr;
@@ -482,12 +461,12 @@ TEST_CASE("Unit_hipStreamPerThread_StrmWaitEvt") {
 
 
 /* Testing hipLaunchCooperativeKernel() api with hipStreamPerThread*/
-TEST_CASE("Unit_hipStreamPerThread_CoopLaunch") {
+HIP_TEST_CASE(Unit_hipStreamPerThread_CoopLaunch) {
   hipDeviceProp_t device_properties;
   HIPCHECK(hipGetDeviceProperties(&device_properties, 0));
   /* Test whether target device supports cooperative groups ****************/
   if (device_properties.cooperativeLaunch == 0) {
-    SUCCEED("Cooperative group support not available...");
+    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
   } else {
     /* We will launch enough waves to fill up all of the GPU *****************/
     int warp_size = device_properties.warpSize;

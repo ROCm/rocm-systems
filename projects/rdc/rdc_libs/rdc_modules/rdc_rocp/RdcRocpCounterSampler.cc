@@ -103,7 +103,7 @@ const std::string& CounterSampler::decode_record_name(
   // Query SDK directly for the counter name (more robust than pre-enumeration)
   rocprofiler_counter_info_v0_t info;
   auto status = rocprofiler_query_counter_info(counter_id, ROCPROFILER_COUNTER_INFO_VERSION_0,
-                                                static_cast<void*>(&info));
+                                               static_cast<void*>(&info));
   if (status == ROCPROFILER_STATUS_SUCCESS) {
     // Cache the result for future lookups
     id_to_name_[counter_id.handle] = info.name;
@@ -111,8 +111,9 @@ const std::string& CounterSampler::decode_record_name(
   }
 
   // Counter not found - log error
-  RDC_LOG(RDC_ERROR, "Error: Failed to query counter info for handle=0x" << std::hex
-          << counter_id.handle << std::dec << " (status=" << status << ")" << std::endl);
+  RDC_LOG(RDC_ERROR, "Error: Failed to query counter info for handle=0x"
+                         << std::hex << counter_id.handle << std::dec << " (status=" << status
+                         << ")" << std::endl);
 
   // Return a static error string rather than throwing
   static const std::string unknown_counter = "UNKNOWN_COUNTER";
@@ -337,8 +338,8 @@ CounterSampler::ProfileSet CounterSampler::create_profiles_for_counters(
   // Build ordered list of counters
   std::vector<std::string> remaining_counters = counters;
 
-  RDC_LOG(RDC_DEBUG, "Creating profiles for " << counters.size() << " counters on agent "
-          << agent_.handle);
+  RDC_LOG(RDC_DEBUG,
+          "Creating profiles for " << counters.size() << " counters on agent " << agent_.handle);
 
   // Greedy packing: try to fit as many counters as possible into each profile
   while (!remaining_counters.empty()) {
@@ -351,8 +352,8 @@ CounterSampler::ProfileSet CounterSampler::create_profiles_for_counters(
     for (const auto& counter_name : remaining_counters) {
       auto it = roc_counters.find(counter_name);
       if (it == roc_counters.end()) {
-        RDC_LOG(RDC_DEBUG, "Counter " << counter_name << " not supported on agent "
-                << agent_.handle);
+        RDC_LOG(RDC_DEBUG,
+                "Counter " << counter_name << " not supported on agent " << agent_.handle);
         continue;
       }
 
@@ -372,7 +373,7 @@ CounterSampler::ProfileSet CounterSampler::create_profiles_for_counters(
       // Try to create config
       rocprofiler_counter_config_id_t config = {};
       auto status = rocprofiler_create_counter_config(agent_, gpu_counters.data(),
-                                                       gpu_counters.size(), &config);
+                                                      gpu_counters.size(), &config);
 
       if (status == ROCPROFILER_STATUS_ERROR_EXCEEDS_HW_LIMIT) {
         // Counter doesn't fit, try next one
@@ -392,10 +393,11 @@ CounterSampler::ProfileSet CounterSampler::create_profiles_for_counters(
 
     // Save the profile if valid
     if (!current_profile_counters.empty() && last_valid_config.handle != 0) {
-      profile_set.profiles.push_back({last_valid_config, current_profile_counters, last_valid_size});
+      profile_set.profiles.push_back(
+          {last_valid_config, current_profile_counters, last_valid_size});
 
-      RDC_LOG(RDC_DEBUG, "  Profile " << profile_set.profiles.size()
-              << ": " << current_profile_counters.size() << " counters");
+      RDC_LOG(RDC_DEBUG, "  Profile " << profile_set.profiles.size() << ": "
+                                      << current_profile_counters.size() << " counters");
     }
 
     // Continue with failed counters
@@ -403,19 +405,20 @@ CounterSampler::ProfileSet CounterSampler::create_profiles_for_counters(
 
     // Safety check to prevent infinite loop
     if (current_profile_counters.empty() && !remaining_counters.empty()) {
-      RDC_LOG(RDC_ERROR, "Failed to create profile for remaining counters on agent "
-              << agent_.handle);
+      RDC_LOG(RDC_ERROR,
+              "Failed to create profile for remaining counters on agent " << agent_.handle);
       break;
     }
   }
 
   if (counters.size() == 0) {
     RDC_LOG(RDC_DEBUG, "Created " << profile_set.profiles.size()
-            << " profiles from 0 counters (compression: N/A)");
+                                  << " profiles from 0 counters (compression: N/A)");
   } else {
-    RDC_LOG(RDC_DEBUG, "Created " << profile_set.profiles.size()
-            << " profiles from " << counters.size() << " counters (compression: "
-            << (100.0 * profile_set.profiles.size() / counters.size()) << "%)");
+    RDC_LOG(RDC_DEBUG, "Created " << profile_set.profiles.size() << " profiles from "
+                                  << counters.size() << " counters (compression: "
+                                  << (100.0 * profile_set.profiles.size() / counters.size())
+                                  << "%)");
   }
 
   return profile_set;
@@ -433,7 +436,7 @@ void CounterSampler::sample_counters_with_packing(const std::vector<std::string>
   if (cached == cached_profile_sets_.end()) {
     // Create new profile set with greedy packing
     RDC_LOG(RDC_DEBUG, "Creating new profile set for " << sorted_counters.size()
-            << " counters on agent " << agent_.handle);
+                                                       << " counters on agent " << agent_.handle);
     ProfileSet profile_set = create_profiles_for_counters(sorted_counters);
     cached = cached_profile_sets_.emplace(sorted_counters, std::move(profile_set)).first;
   }
@@ -476,9 +479,10 @@ void CounterSampler::sample_counters_with_packing(const std::vector<std::string>
   // Log statistics periodically (every 100 sample calls)
   if (total_sample_calls % 100 == 0) {
     RDC_LOG(RDC_DEBUG, "Greedy packed sampling statistics: "
-            << total_sample_calls << " total sample calls, "
-            << total_profiles_sampled << " total profiles sampled, "
-            << "avg " << (double)total_profiles_sampled / total_sample_calls << " profiles/sample");
+                           << total_sample_calls << " total sample calls, "
+                           << total_profiles_sampled << " total profiles sampled, "
+                           << "avg " << (double)total_profiles_sampled / total_sample_calls
+                           << " profiles/sample");
   }
 }
 

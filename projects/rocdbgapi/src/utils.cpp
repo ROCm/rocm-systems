@@ -196,6 +196,11 @@ template std::pair<amd_dbgapi_dispatch_id_t * /* objects */,
 get_handle_list<dispatch_t> (const std::vector<process_t *> &processes,
                              amd_dbgapi_changed_t *changed);
 
+template std::pair<amd_dbgapi_cluster_id_t * /* objects */,
+                   size_t /* count */>
+get_handle_list<cluster_t> (const std::vector<process_t *> &processes,
+                            amd_dbgapi_changed_t *changed);
+
 template std::pair<amd_dbgapi_workgroup_id_t * /* objects */,
                    size_t /* count */>
 get_handle_list<workgroup_t> (const std::vector<process_t *> &processes,
@@ -226,12 +231,13 @@ string_vprintf (const char *format, va_list va)
   va_list copy;
 
   va_copy (copy, va);
-  size_t size = vsnprintf (NULL, 0, format, copy);
+  int size = vsnprintf (NULL, 0, format, copy);
   va_end (copy);
 
-  std::string str (size, '\0');
-  vsprintf (&str[0], format, va);
+  dbgapi_assert (size >= 0);
 
+  std::string str (static_cast<size_t> (size), '\0');
+  vsnprintf (&str[0], str.size () + 1, format, va);
   return str;
 }
 

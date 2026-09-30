@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <functional>
 
@@ -51,7 +35,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphMemcpyNodeSetParams_Positive_Basic") {
+HIP_TEST_CASE(Unit_hipGraphMemcpyNodeSetParams_Positive_Basic) {
   CHECK_IMAGE_SUPPORT
 
   constexpr bool async = false;
@@ -112,17 +96,21 @@ TEST_CASE("Unit_hipGraphMemcpyNodeSetParams_Positive_Basic") {
  * ------------------------
  *    - Verify API behaviour with invalid arguments:
  *        -# node is nullptr
- *        -# graph is nullptr
- *        -# pDependencies is nullptr when numDependencies is not zero
- *        -# A node in pDependencies originates from a different graph
- *        -# numDependencies is invalid
- *        -# A node is duplicated in pDependencies
+ *        -# pNodeParams is nullptr
+ *        -# node is uninitialized
  *        -# dst is nullptr
  *        -# src is nullptr
+ *        -# dst pitch is less than width
+ *        -# src pitch is less than width
+ *        -# dst pitch exceeds max pitch
+ *        -# src pitch exceeds max pitch
+ *        -# extent width + dst position exceeds dst pitch
+ *        -# extent width + src position exceeds src pitch
+ *        -# dst position y is out of bounds
+ *        -# src position y is out of bounds
+ *        -# dst position z is out of bounds
+ *        -# src position z is out of bounds
  *        -# kind is an invalid enum value
- *        -# count is zero
- *        -# count is larger than dst allocation size
- *        -# count is larger than src allocation size
  * Test source
  * ------------------------
  *    - unit/graph/hipGraphAddMemcpyNode.cc
@@ -130,9 +118,7 @@ TEST_CASE("Unit_hipGraphMemcpyNodeSetParams_Positive_Basic") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphMemcpyNodeSetParams_Negative_Parameters") {
-  CHECK_IMAGE_SUPPORT
-
+HIP_TEST_CASE(Unit_hipGraphMemcpyNodeSetParams_Negative_Parameters) {
   using namespace std::placeholders;
 
   constexpr hipExtent extent{128 * sizeof(int), 128, 8};
@@ -149,6 +135,16 @@ TEST_CASE("Unit_hipGraphMemcpyNodeSetParams_Negative_Parameters") {
     SECTION("node == nullptr") {
       params = GetMemcpy3DParms(dst_ptr, dst_pos, src_ptr, src_pos, extent, kind);
       HIP_CHECK_ERROR(hipGraphMemcpyNodeSetParams(nullptr, &params), hipErrorInvalidValue);
+    }
+
+    SECTION("pNodeParams == nullptr") {
+      HIP_CHECK_ERROR(hipGraphMemcpyNodeSetParams(node, nullptr), hipErrorInvalidValue);
+    }
+
+    SECTION("Uninitialized node") {
+      hipGraphNode_t node_uninit{};
+      params = GetMemcpy3DParms(dst_ptr, dst_pos, src_ptr, src_pos, extent, kind);
+      HIP_CHECK_ERROR(hipGraphMemcpyNodeSetParams(node_uninit, &params), hipErrorInvalidValue);
     }
 
     SECTION("dst_ptr.ptr == nullptr") {
@@ -287,6 +283,96 @@ TEST_CASE("Unit_hipGraphMemcpyNodeSetParams_Negative_Parameters") {
     NegativeTests(dst_alloc.pitched_ptr(), make_hipPos(0, 0, 0), src_alloc.pitched_ptr(),
                   make_hipPos(0, 0, 0), extent, hipMemcpyDeviceToDevice);
   }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Verify CUDA single-memcpy-node-type semantics across HIP's node variants: a linear 3D
+ *    description updates a 1D node (and round-trips through the 3D getter), a 1D update applies
+ *    to a 3D node, and a non-linear 3D description is rejected on a 1D node.
+ * Test source
+ * ------------------------
+ *  - unit/graph/hipGraphMemcpyNodeSetParams.cc
+ */
+HIP_TEST_CASE(Unit_hipGraphMemcpyNodeSetParams_CrossKind) {
+  constexpr size_t kCount = 32;
+  constexpr size_t kBytes = kCount * sizeof(int);
+  int* src = nullptr;
+  int* dst = nullptr;
+  int* src2 = nullptr;
+  int* dst2 = nullptr;
+  HIP_CHECK(hipMalloc(&src, kBytes));
+  HIP_CHECK(hipMalloc(&dst, kBytes));
+  HIP_CHECK(hipMalloc(&src2, kBytes));
+  HIP_CHECK(hipMalloc(&dst2, kBytes));
+  std::vector<int> host(kCount);
+  for (size_t i = 0; i < kCount; ++i) host[i] = static_cast<int>(i) * 3 + 1;
+  HIP_CHECK(hipMemcpy(src2, host.data(), kBytes, hipMemcpyHostToDevice));
+
+  auto linear3D = [&](void* d, const void* s) {
+    hipMemcpy3DParms p{};
+    p.srcPtr = make_hipPitchedPtr(const_cast<void*>(s), kBytes, kCount, 1);
+    p.dstPtr = make_hipPitchedPtr(d, kBytes, kCount, 1);
+    p.srcPos = make_hipPos(0, 0, 0);
+    p.dstPos = make_hipPos(0, 0, 0);
+    p.extent = make_hipExtent(kBytes, 1, 1);
+    p.kind = hipMemcpyDeviceToDevice;
+    return p;
+  };
+  auto launch_and_check = [&](hipGraph_t graph, int* expected_dst) {
+    hipGraphExec_t exec = nullptr;
+    HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphLaunch(exec, hipStreamPerThread));
+    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+    std::vector<int> actual(kCount);
+    HIP_CHECK(hipMemcpy(actual.data(), expected_dst, kBytes, hipMemcpyDeviceToHost));
+    REQUIRE(actual == host);
+    HIP_CHECK(hipGraphExecDestroy(exec));
+  };
+
+  hipGraph_t graph = nullptr;
+  HIP_CHECK(hipGraphCreate(&graph, 0));
+
+  SECTION("linear 3D params update a 1D node and round-trip") {
+    hipGraphNode_t node1D = nullptr;
+    HIP_CHECK(hipGraphAddMemcpyNode1D(&node1D, graph, nullptr, 0, dst, src, kBytes,
+                                      hipMemcpyDeviceToDevice));
+    hipMemcpy3DParms params = linear3D(dst2, src2);
+    HIP_CHECK(hipGraphMemcpyNodeSetParams(node1D, &params));
+    hipMemcpy3DParms returned{};
+    HIP_CHECK(hipGraphMemcpyNodeGetParams(node1D, &returned));
+    REQUIRE(returned.srcPtr.ptr == src2);
+    REQUIRE(returned.dstPtr.ptr == dst2);
+    REQUIRE(returned.extent.width == kBytes);
+    REQUIRE(returned.kind == hipMemcpyDeviceToDevice);
+    launch_and_check(graph, dst2);
+  }
+  SECTION("non-linear 3D params are rejected on a 1D node") {
+    hipGraphNode_t node1D = nullptr;
+    HIP_CHECK(hipGraphAddMemcpyNode1D(&node1D, graph, nullptr, 0, dst, src, kBytes,
+                                      hipMemcpyDeviceToDevice));
+    hipMemcpy3DParms params = linear3D(dst2, src2);
+    params.extent = make_hipExtent(kBytes / 2, 2, 1);
+    HIP_CHECK_ERROR(hipGraphMemcpyNodeSetParams(node1D, &params), hipErrorInvalidValue);
+  }
+  SECTION("1D setter applies to a 3D node") {
+    hipGraphNode_t node3D = nullptr;
+    hipMemcpy3DParms params = linear3D(dst, src);
+    HIP_CHECK(hipGraphAddMemcpyNode(&node3D, graph, nullptr, 0, &params));
+    HIP_CHECK(hipGraphMemcpyNodeSetParams1D(node3D, dst2, src2, kBytes, hipMemcpyDeviceToDevice));
+    hipMemcpy3DParms returned{};
+    HIP_CHECK(hipGraphMemcpyNodeGetParams(node3D, &returned));
+    REQUIRE(returned.srcPtr.ptr == src2);
+    REQUIRE(returned.dstPtr.ptr == dst2);
+    launch_and_check(graph, dst2);
+  }
+
+  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipFree(dst2));
+  HIP_CHECK(hipFree(src2));
+  HIP_CHECK(hipFree(dst));
+  HIP_CHECK(hipFree(src));
 }
 
 /**

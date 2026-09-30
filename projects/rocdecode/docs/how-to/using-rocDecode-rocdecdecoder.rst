@@ -20,7 +20,7 @@ The sample decodes raw elementary video frame files as input and produces indivi
 ``rocdecdecode.cpp`` takes the following arguments:
 
 .. list-table:: 
-    :widths: 10 60 30 
+    :widths: 20 60 30 
     :header-rows: 1
 
     * - Argument      
@@ -54,7 +54,15 @@ The sample decodes raw elementary video frame files as input and produces indivi
 
     * - ``-m`` 
       - The output surface memory type. The memory type where the surface data, such as the decoded frames, resides. Set this to 0 for intermediate GPU memory, to 1 for GPU memory, and to 2 for CPU memory. See :doc:`Surface data memory locations <../conceptual/rocDecode-memory-types>` for more information. 
-      - Optional. Set to 0 by default. 
+      - Optional. Set to 0 by default.
+
+    * - ``-f``
+      - Number of decoded frames to be decoded.
+      - Optional.
+
+    * - ``-o_format``
+      - Output surface format; [NV12, P016].
+      - Optional. If not set: auto-detected from stream.
 
 The ``DecoderInfo`` struct defined in the sample is used to store user-supplied parameters as well as the decoder and parser handles. 
 
@@ -103,6 +111,7 @@ The ``create_decoder()`` function sets the decoder parameters and passes them to
   
   void create_decoder(DecoderInfo& dec_info) {
     RocDecoderCreateInfo create_info = {};
+    create_info.device_id = static_cast<uint8_t>(dec_info.dec_device_id);
     create_info.codec_type = dec_info.rocdec_codec_id;     // user specified codec_type for raw files
     [...]
     CHECK(rocDecCreateDecoder(&dec_info.decoder, &create_info));
@@ -234,6 +243,11 @@ From the ``rocdecdecode.cpp`` sample:
   }
 
 Once decoding is complete, ``rocDecDestroyVideoParser()`` needs to be called to destroy the parser, and either ``rocDecDestroyDecoderHost()`` or ``rocDecDestroyDecoder()`` needs to be called to destroy the decoder.
+
+.. note::
+
+  Before running the sample, ensure that the ``ROCM_PATH`` environment variable is pointing to the location of your ROCm installation.
+
 
 .. |rocdecdecode| replace:: ``rocdecdecode``
 .. _rocdecdecode: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/samples/rocdecDecode/README.md

@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 /**
  * @file aca_tables.c
@@ -409,7 +390,7 @@ const size_t NUM_XCD_ERRORS = sizeof(xcd_error_table) / sizeof(xcd_error_table[0
 const size_t NUM_AID_ERRORS = sizeof(aid_error_table) / sizeof(aid_error_table[0]);
 const size_t NUM_INSTANCES = sizeof(instance_table) / sizeof(instance_table[0]);
 
-int find_bank_name(uint16_t hw_id, uint16_t aca_type, const char **bank_name) {
+int find_bank_name(uint16_t hw_id, uint16_t aca_type, const char** bank_name) {
   if (!bank_name) {
     return -1;
   }
@@ -425,7 +406,7 @@ int find_bank_name(uint16_t hw_id, uint16_t aca_type, const char **bank_name) {
   return 1;
 }
 
-int find_error_type_by_bank(const char *bank, uint32_t error_code, const char **error_type) {
+int find_error_type_by_bank(const char* bank, uint32_t error_code, const char** error_type) {
   if (!bank || !error_type) {
     return -1;
   }
@@ -441,8 +422,8 @@ int find_error_type_by_bank(const char *bank, uint32_t error_code, const char **
   return 1;
 }
 
-int find_error_in_table(const aca_error_entry_t *table, size_t table_size, uint32_t error_code,
-                        const char **error_type) {
+int find_error_in_table(const aca_error_entry_t* table, size_t table_size, uint32_t error_code,
+                        const char** error_type) {
   if (!table || !error_type) {
     return -1;
   }
@@ -458,7 +439,7 @@ int find_error_in_table(const aca_error_entry_t *table, size_t table_size, uint3
   return 1;
 }
 
-int find_oam_aid(uint8_t instance_id_hi, oam_aid_map_t *oam_aid) {
+int find_oam_aid(uint8_t instance_id_hi, oam_aid_map_t* oam_aid) {
   if (!oam_aid || instance_id_hi >= NUM_OAM_AID_ENTRIES) {
     return -1;
   }
@@ -468,7 +449,7 @@ int find_oam_aid(uint8_t instance_id_hi, oam_aid_map_t *oam_aid) {
   return 0;
 }
 
-int find_instance_name(const char *bank, uint32_t instance_id_lo, const char **instance_name) {
+int find_instance_name(const char* bank, uint32_t instance_id_lo, const char** instance_name) {
   if (!bank || !instance_name) {
     return -1;
   }

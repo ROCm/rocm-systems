@@ -52,6 +52,7 @@
 #include "common/common.h"
 #include "common/helper_funcs.h"
 #include "common/hsatimer.h"
+#include "common/platform_filter.h"
 #include "gtest/gtest.h"
 #include "hsa/hsa.h"
 
@@ -96,6 +97,8 @@ ConcurrentShutdownTest::~ConcurrentShutdownTest(void) {
 }
 
 void ConcurrentShutdownTest::SetUp(void) {
+  if (!checkPlatformFiltering()) return;
+
   hsa_status_t status;
   // Initialize the hsa runtime sequentially, NumTimesInitalize
   for (int Counter = 0; Counter < NumTimesInitalize; ++Counter) {
@@ -152,5 +155,11 @@ void ConcurrentShutdownTest::TestConcurrentShutdown(void) {
       std::cout << Id << "Thread creation failed " << std::endl;
     }
   }
+
+  for (int Id = 0; Id < NumOfThreads; ++Id) {
+    pthread_join(ThreadId[Id], nullptr);
+  }
+
+  pthread_attr_destroy(&attr);
 }
 #undef RET_IF_HSA_ERR

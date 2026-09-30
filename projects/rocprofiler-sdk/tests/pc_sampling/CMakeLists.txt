@@ -1,7 +1,7 @@
 #
 #
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 if(NOT CMAKE_HIP_COMPILER)
     find_program(
@@ -26,6 +26,16 @@ foreach(_TYPE DEBUG MINSIZEREL RELEASE RELWITHDEBINFO)
 endforeach()
 
 find_package(rocprofiler-sdk REQUIRED)
+find_package(
+    amd_comgr
+    REQUIRED
+    CONFIG
+    HINTS
+    ${rocm_version_DIR}
+    ${ROCM_PATH}
+    PATHS
+    ${rocm_version_DIR}
+    ${ROCM_PATH})
 
 add_library(pc-sampling-integration-test-client SHARED)
 target_sources(
@@ -49,7 +59,7 @@ target_sources(
 target_link_libraries(
     pc-sampling-integration-test-client
     PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::tests-build-flags
-            rocprofiler-sdk::tests-common-library)
+            rocprofiler-sdk::tests-common-library amd_comgr)
 
 set_source_files_properties(main.cpp PROPERTIES LANGUAGE HIP)
 find_package(Threads REQUIRED)

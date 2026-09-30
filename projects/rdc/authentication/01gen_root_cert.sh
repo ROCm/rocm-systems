@@ -30,4 +30,3 @@ openssl req -new -x509 -nodes -extensions v3_ca -keyout private/rdc_cakey.pem \
 # A root CA certificate in rdc_cacert.pem (distribute to clients)
 
 popd
-

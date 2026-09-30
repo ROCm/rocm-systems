@@ -51,7 +51,7 @@
       "block_name" : "denormals",
       "compiler_option" : "-fgpu-flush-denormals-to-zero",
       "reverse_compiler_option" : "-fno-gpu-flush-denormals-to-zero",
-      "Input_Vals" : [2, -125, 2, -126, 2, -149, 2, -150, 2, -1000, 2, -2000, 2, -128],
+      "Input_Vals" : [2, -125, 2, -130, 2, -149, 2, -150, 2, -1000, 2, -2000, 2, -128],
       "Expected_Results" : [1, 0, 0, 0, 0, 0, 0 ],
       "Expected_Results_for_no" : [1, 1, 1, 0, 0, 0, 1 ],
       "kernel_name" : "denormals"

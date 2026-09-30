@@ -6,8 +6,8 @@
 #
 include_guard(DIRECTORY)
 
-if(NOT TARGET rocprofiler-systems::rocprofiler-systems-user-library)
-    find_package(rocprofiler-systems REQUIRED COMPONENTS user)
+if(NOT TARGET rocprofiler-systems::rocprofiler-systems-causal-api-library)
+    find_package(rocprofiler-systems REQUIRED COMPONENTS causal-api)
 endif()
 
 if(NOT coz-profiler_FOUND)
@@ -31,7 +31,12 @@ function(rocprofiler_systems_causal_example_executable _NAME)
         if(NOT TARGET ${_TARGET})
             find_package(Threads REQUIRED)
             add_library(${_TARGET} INTERFACE)
-            target_link_libraries(${_TARGET} INTERFACE Threads::Threads ${CMAKE_DL_LIBS})
+            # bare 'pthread' (alongside Threads::Threads) ensures libpthread is
+            # linked for pthread_barrier_* used in causal.cpp
+            target_link_libraries(
+                ${_TARGET}
+                INTERFACE Threads::Threads pthread ${CMAKE_DL_LIBS}
+            )
         endif()
     endfunction()
 
@@ -57,7 +62,7 @@ function(rocprofiler_systems_causal_example_executable _NAME)
         ${_NAME}
         PRIVATE
             ${CAUSAL_LINK_LIBRARIES}
-            rocprofiler-systems::rocprofiler-systems-user-library
+            rocprofiler-systems::rocprofiler-systems-causal-api-library
             rocprofsys-causal-example-lib-debug
     )
 
@@ -74,7 +79,7 @@ function(rocprofiler_systems_causal_example_executable _NAME)
         ${_NAME}-rocprofsys
         PRIVATE
             ${CAUSAL_LINK_LIBRARIES}
-            rocprofiler-systems::rocprofiler-systems-user-library
+            rocprofiler-systems::rocprofiler-systems-causal-api-library
             rocprofsys-causal-example-lib-debug
     )
 
@@ -91,7 +96,7 @@ function(rocprofiler_systems_causal_example_executable _NAME)
         ${_NAME}-ndebug
         PRIVATE
             ${CAUSAL_LINK_LIBRARIES}
-            rocprofiler-systems::rocprofiler-systems-user-library
+            rocprofiler-systems::rocprofiler-systems-causal-api-library
             rocprofsys-causal-example-lib-no-debug
     )
 
@@ -108,7 +113,7 @@ function(rocprofiler_systems_causal_example_executable _NAME)
         ${_NAME}-rocprofsys-ndebug
         PRIVATE
             ${CAUSAL_LINK_LIBRARIES}
-            rocprofiler-systems::rocprofiler-systems-user-library
+            rocprofiler-systems::rocprofiler-systems-causal-api-library
             rocprofsys-causal-example-lib-no-debug
     )
 

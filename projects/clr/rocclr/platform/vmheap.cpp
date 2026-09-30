@@ -1,22 +1,8 @@
-/* Copyright (c) 2025 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <string>
 #include <fstream>
@@ -90,7 +76,6 @@ bool VmHeap::UncommitMemory(void* addr, size_t size) {
   cmd->enqueue();
   cmd->awaitCompletion();
   cmd->release();
-  vaddr_sub_obj->release();
   SvmBuffer::free(device_->context(), phys_mem_obj->getSvmPtr());
   return true;
 }
@@ -99,7 +84,6 @@ bool VmHeap::UncommitMemory(void* addr, size_t size) {
 VmHeap::VmHeap(Device* device, size_t va_size, size_t chunk_size, GetQueueFunc get_queue)
     : block_alignment_(kMinBlockAlignment),
       chunk_size_(chunk_size),
-      lock_(true),
       device_(device),
       get_vm_queue_(get_queue) {
   va_size_ = alignUp(va_size, chunk_size);
@@ -109,7 +93,7 @@ VmHeap::VmHeap(Device* device, size_t va_size, size_t chunk_size, GetQueueFunc g
 // ================================================================================================
 VmHeap::~VmHeap() {
   if (created_) {
-    ScopedLock k(lock_);
+    std::scoped_lock k(lock_);
 
     // Release all heap blocks
     HeapBlock *walk, *next;
@@ -213,7 +197,7 @@ void VmHeap::UnmapPhysMemory(size_t offset, size_t size) {
 
 // ================================================================================================
 void VmHeap::TrimPhysMemory(size_t unmap_threshold) {
-  ScopedLock k(lock_);
+  std::scoped_lock k(lock_);
   auto current = free_list_;
   auto unmap_org = unmap_threshold_;
   unmap_threshold_ = unmap_threshold;
@@ -226,7 +210,7 @@ void VmHeap::TrimPhysMemory(size_t unmap_threshold) {
 
 // ================================================================================================
 address VmHeap::Alloc(size_t size) {
-  ScopedLock k(lock_);
+  std::scoped_lock k(lock_);
 
   if (!created_) {
     // Create VM heap if it's not created
@@ -273,7 +257,7 @@ void VmHeap::Free(Memory* memory) {
   if (!created_ || (addr < base_address_)) {
     return;
   }
-  ScopedLock k(lock_);
+  std::scoped_lock k(lock_);
   if (memory->getUserData().data != nullptr) {
     auto hb = reinterpret_cast<HeapBlock*>(memory->getUserData().data);
     ClPrint(LOG_INFO, LOG_MEM_POOL, "VmHeap Free: %p offset(%zx + %zx) hb(%p)", addr, hb->Offset(),
@@ -287,7 +271,7 @@ void VmHeap::Free(Memory* memory) {
 // ================================================================================================
 HeapBlock* VmHeap::AllocBlock(size_t un_size) {
   assert(un_size != 0);
-  ScopedLock k(lock_);
+  std::scoped_lock k(lock_);
   HeapBlock* walk = free_list_;
   HeapBlock* best = nullptr;
 

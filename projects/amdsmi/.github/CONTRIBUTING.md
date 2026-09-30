@@ -28,57 +28,71 @@ for interacting with AMD GPUs.
 
 ## Coding Style ##
 
-Please refer to `.clang-format`. It is suggested you use `pre-commit` tool.
-It mostly follows Google C++ formatting with 100 character line limit.
+We use [pre-commit](https://pre-commit.com/) hooks to enforce formatting.
+Install and run with:
+
+```bash
+pip install pre-commit
+pre-commit install
+pre-commit run --files ./**/*
+```
+
+### C/C++ ###
+
+Formatted with **clang-format** (Google style, 100 character line limit).
+See `.clang-format` for the full configuration.
+
+You can also format manually: `clang-format -i <path-to-source-file>`
+
+### Python ###
+
+Formatted and linted with **Ruff**. Configuration is in `pyproject.toml`.
+
+You can also run manually:
+
+```bash
+ruff check --fix .   # lint and auto-fix
+ruff format .        # format
+```
+
+### CMake ###
+
+Formatted with **gersemi** (cmake-format replacement).
 
 ## Pull Request Guidelines ##
 
 When you create a pull request, you should target the default branch. Our
-current default branch is the **amd-staging** branch, which serves as our
+current default branch is the **develop** branch, which serves as our
 integration branch.
 
 ### Deliverables ###
 
-For each new file in repository,
-Please include the licensing header
+Every AMD-owned source file must start with the two-line SPDX header, using the
+file's comment leader (`//` for C/C++/Go/Rust, `#` for Python/CMake/shell):
 
-    /*
-     * =============================================================================
-     * Copyright (c) 2019-2025 Advanced Micro Devices, Inc.
-     *
-     * Permission is hereby granted, free of charge, to any person obtaining a copy
-     * of this software and associated documentation files (the "Software"), to deal
-     * in the Software without restriction, including without limitation the rights
-     * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-     * copies of the Software, and to permit persons to whom the Software is
-     * furnished to do so, subject to the following conditions:
-     *
-     * The above copyright notice and this permission notice shall be included in
-     * all copies or substantial portions of the Software.
-     *
-     * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-     * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-     * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-     * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-     * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-     * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-     * THE SOFTWARE.
-     *
-     */
+    // Copyright Advanced Micro Devices, Inc.
+    // SPDX-License-Identifier: MIT
+
+    # Copyright Advanced Micro Devices, Inc.
+    # SPDX-License-Identifier: MIT
+
+Do not add a year, an "All rights reserved" line, or the full MIT license text
+to each file. The full license text lives in `LICENSE` at the repository root.
+Put the header above any file-level doc comment, and keep a shebang (and coding
+line) on the first line(s) when present.
+
+Third-party, vendored, and generated files keep their upstream headers and are
+out of scope. The `amdsmi-license-headers` pre-commit hook
+(`projects/amdsmi/tests/check_license_headers.py`) checks this on every commit.
 
 ### Process ###
 
 * Reviewers are listed in the CODEOWNERS file
-* Code format guidelines
-
-AMD SMI uses the clang-format tool for formatting code in source files.
-The formatting style is captured in .clang-format which is located at
-the root of AMD SMI. These are different options to follow:
-
-   1. Using pre-commit and docker - `pre-commit run`
-   1. Using only clang-format - `clang-format -i \<path-to-the-source-file\>`
+* All code must pass pre-commit checks before review
 
 ## References ##
 
 1. [pre-commit](https://github.com/pre-commit/pre-commit)
 1. [clang-format](https://clang.llvm.org/docs/ClangFormat.html)
+1. [Ruff](https://docs.astral.sh/ruff/)
+1. [gersemi](https://github.com/BlankSpruce/gersemi)

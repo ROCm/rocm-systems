@@ -1,28 +1,15 @@
-/* Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip/hip_fp6.h>
+#include <hip/hip_fp16.h>
 #include <hip_test_common.hh>
 
 #include <bitset>
+#include <cmath>
 #include <type_traits>
 #include <vector>
 
@@ -63,7 +50,7 @@ __global__ void Type_to_fp6(T* f, __hip_fp6_storage_t* res, size_t size) {
  * ------------------------
  *  - HIP_VERSION >= 6.5
  */
-TEMPLATE_TEST_CASE("Unit_all_fp6_ocp_vector_cvt_interger_data", "", int, long int, long long int,
+HIP_TEMPLATE_TEST_CASE(Unit_all_fp6_ocp_vector_cvt_interger_data, int, long int, long long int,
                    short int) {
   SECTION("Fp6 with e2m3") {
     std::vector<TestType> input = {0, 1, 2, 3, 4, 5, 6, 7, -0, -1, -2, -3, -4, -5, -6, -7};
@@ -101,7 +88,7 @@ TEMPLATE_TEST_CASE("Unit_all_fp6_ocp_vector_cvt_interger_data", "", int, long in
  * ------------------------
  *  - HIP_VERSION >= 6.5
  */
-TEMPLATE_TEST_CASE("Unit_all_fp6_ocp_vector_cvt_unsigned_interger_data", "", int, long int,
+HIP_TEMPLATE_TEST_CASE(Unit_all_fp6_ocp_vector_cvt_unsigned_interger_data, int, long int,
                    long long int, short int) {
   SECTION("Fp6 with e2m3") {
     std::vector<TestType> input = {0, 1, 2, 3, 4, 5, 6, 7};
@@ -137,7 +124,7 @@ TEMPLATE_TEST_CASE("Unit_all_fp6_ocp_vector_cvt_unsigned_interger_data", "", int
  * ------------------------
  *  - HIP_VERSION >= 6.5
  */
-TEMPLATE_TEST_CASE("Unit_all_fp6_ocp_vector_cvt_unsigned_integer_device", "", unsigned int,
+HIP_TEMPLATE_TEST_CASE(Unit_all_fp6_ocp_vector_cvt_unsigned_integer_device, unsigned int,
                    unsigned long int, unsigned long long int, unsigned short int) {
   bool is_e2m3 = GENERATE(true, false);
   std::vector<TestType> f_vals;
@@ -223,7 +210,7 @@ TEMPLATE_TEST_CASE("Unit_all_fp6_ocp_vector_cvt_unsigned_integer_device", "", un
  *  - HIP_VERSION >= 6.5
  */
 
-TEMPLATE_TEST_CASE("Unit_all_fp6_ocp_vector_cvt_interger_data_device", "", int, long int,
+HIP_TEMPLATE_TEST_CASE(Unit_all_fp6_ocp_vector_cvt_interger_data_device, int, long int,
                    long long int, short int) {
   bool is_e2m3 = GENERATE(true, false);
   std::vector<TestType> f_vals;
@@ -318,4 +305,36 @@ TEMPLATE_TEST_CASE("Unit_all_fp6_ocp_vector_cvt_interger_data_device", "", int, 
 
   HIP_CHECK(hipFree(d_f_vals));
   HIP_CHECK(hipFree(d_res));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - FP6 signed zeros must decode to the matching fp16 signed zero. Encoding
+ * 0x20 sets the sign bit of a 6 bit value, so it is negative zero in both E3M2
+ * and E2M3 and must give fp16 0x8000, not a normal value.
+ * Test source
+ * ------------------------
+ *  - /unit/deviceLib/fp6_ocp.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.5
+ */
+HIP_TEST_CASE(Unit_ocp_fp6_to_halfraw_signed_zero_host) {
+  for (auto interp : {__HIP_E3M2, __HIP_E2M3}) {
+    const __half_raw pos =
+        __hip_cvt_fp6_to_halfraw(static_cast<__hip_fp6_storage_t>(0x00), interp);
+    const __half_raw neg =
+        __hip_cvt_fp6_to_halfraw(static_cast<__hip_fp6_storage_t>(0x20), interp);
+
+    INFO("interpretation " << static_cast<int>(interp) << ": 0x00 -> fp16 bits 0x" << std::hex
+                           << pos.x << ", 0x20 -> fp16 bits 0x" << neg.x);
+    REQUIRE(pos.x == 0x0000);
+    REQUIRE(__half2float(pos) == 0.0f);
+    REQUIRE(!std::signbit(__half2float(pos)));
+
+    REQUIRE(neg.x == 0x8000);
+    REQUIRE(__half2float(neg) == 0.0f);
+    REQUIRE(std::signbit(__half2float(neg)));
+  }
 }

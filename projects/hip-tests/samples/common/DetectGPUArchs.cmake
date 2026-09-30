@@ -1,27 +1,11 @@
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 
 # Detect unique GPU architectures for add_custom_command
 if(NOT DEFINED HIP_ARCH_DETECTION_DONE)
   set(HIP_ARCH_DETECTION_DONE TRUE CACHE INTERNAL "HIP architecture detection completed")
-  
+
   # Detect GPU architectures for code object generation
   # Note: CMake's HIP language support may not deduplicate architectures
   # Fix any duplicates in CMAKE_HIP_ARCHITECTURES if already set
@@ -35,20 +19,23 @@ if(NOT DEFINED HIP_ARCH_DETECTION_DONE)
   elseif(NOT DEFINED CMAKE_HIP_ARCHITECTURES OR NOT CMAKE_HIP_ARCHITECTURES)
     # Auto-detect if not set
     if(NOT DEFINED ROCM_PATH)
+      # Derive ROCM_PATH from HIP_PATH
       if(DEFINED ENV{ROCM_PATH})
         set(ROCM_PATH $ENV{ROCM_PATH})
-      else()
-        set(ROCM_PATH "/opt/rocm")
+      elseif(DEFINED HIP_PATH)
+        set(ROCM_PATH ${HIP_PATH})
       endif()
     endif()
-    
+
+    find_program(ROCM_AGENT_ENUM rocm_agent_enumerator
+      HINTS ${ROCM_PATH}/bin)
     execute_process(
-      COMMAND ${ROCM_PATH}/bin/rocm_agent_enumerator
+      COMMAND ${ROCM_AGENT_ENUM}
       OUTPUT_VARIABLE DETECTED_GPUS
       OUTPUT_STRIP_TRAILING_WHITESPACE
       ERROR_QUIET
     )
-    
+
     if(DETECTED_GPUS)
       string(REPLACE "\n" ";" GPU_ARCH_LIST "${DETECTED_GPUS}")
       list(REMOVE_ITEM GPU_ARCH_LIST "gfx000" "")
@@ -69,3 +56,8 @@ foreach(arch ${CMAKE_HIP_ARCHITECTURES})
   list(APPEND OFFLOAD_ARCH_FLAGS "--offload-arch=${arch}")
 endforeach()
 
+# Build flags for device-only compilation (CMAKE_HIP_FLAGS minus --offload-arch)
+string(TOUPPER "${CMAKE_BUILD_TYPE}" _HIP_BUILD_TYPE_UPPER)
+separate_arguments(HIP_DEVICE_BUILD_FLAGS_NO_ARCH NATIVE_COMMAND
+  "${CMAKE_HIP_FLAGS} ${CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}}")
+list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH EXCLUDE REGEX "--offload-arch=")

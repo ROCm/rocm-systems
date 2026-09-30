@@ -1,0 +1,25 @@
+{
+  "phase": "5",
+  "generated_by": "scripts/exit_dashboard.py",
+  "metrics": {
+    "parity_agreement_rate": "pending",
+    "red_team_pass_count": 14,
+    "airgap_identical_rate": "pending",
+    "regression_gate_false_positive_rate": "pending",
+    "per_agent_narrow_scope_violations": -1,
+    "tool_class_split_violations": 0,
+    "provider_smoke_status": "nightly-only",
+    "benchmark_geomean": "nightly-only",
+    "user_signoff": "pending"
+  },
+  "thresholds": {
+    "parity_agreement_rate": ">=0.95",
+    "red_team_pass_count": "==14",
+    "airgap_identical_rate": "==1.0",
+    "regression_gate_false_positive_rate": "<=0.05",
+    "per_agent_narrow_scope_violations": "==0",
+    "tool_class_split_violations": "==0",
+    "user_signoff": "==yes"
+  },
+  "overall_verdict": "NO-GO"
+}

@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -43,9 +43,8 @@
 #ifndef HSA_RUNTIME_CORE_INC_AMD_HW_AQL_AIE_COMMAND_PROCESSOR_H_
 #define HSA_RUNTIME_CORE_INC_AMD_HW_AQL_AIE_COMMAND_PROCESSOR_H_
 
-#include <limits>
-
 #include "core/inc/amd_aie_agent.h"
+#include "core/inc/exceptions.h"
 #include "core/inc/queue.h"
 #include "core/inc/runtime.h"
 #include "core/inc/signal.h"
@@ -69,7 +68,7 @@ class AieAqlQueue : public core::Queue,
   }
 
   AieAqlQueue(core::SharedQueue* shared_queue, AieAgent* agent, size_t req_size_pkts,
-              uint32_t node_id, uint64_t flags);
+              uint32_t node_id, core::HsaEventCallback callback, void* err_data, uint64_t flags);
   ~AieAqlQueue();
 
   hsa_status_t Inactivate() override;
@@ -93,53 +92,47 @@ class AieAqlQueue : public core::Queue,
   uint64_t AddWriteIndexAcqRel(uint64_t value) override;
   void StoreRelaxed(hsa_signal_value_t value) override;
   void StoreRelease(hsa_signal_value_t value) override;
-
-  /// @brief Provide information about the queue.
   hsa_status_t GetInfo(hsa_queue_info_attribute_t attribute,
                        void *value) override;
+  hsa_status_t GetCUMasking(uint32_t num_cu_mask_count, uint32_t* cu_mask) override;
+  hsa_status_t SetCUMasking(uint32_t num_cu_mask_count, const uint32_t* cu_mask) override;
+  void ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope_t acquireFence,
+                  hsa_fence_scope_t releaseFence, hsa_signal_t* signal) override;
 
-  // AIE-specific API
-
-  /// @brief Returns the agent associated with this queue.
-  AieAgent& GetAgent() { return agent_; }
-
-  // GPU-specific queue functions are unsupported.
-
-  hsa_status_t GetCUMasking(uint32_t num_cu_mask_count,
-                            uint32_t *cu_mask) override;
-  hsa_status_t SetCUMasking(uint32_t num_cu_mask_count,
-                            const uint32_t *cu_mask) override;
-  void ExecutePM4(uint32_t *cmd_data, size_t cmd_size_b,
-                  hsa_fence_scope_t acquireFence = HSA_FENCE_SCOPE_NONE,
-                  hsa_fence_scope_t releaseFence = HSA_FENCE_SCOPE_NONE,
-                  hsa_signal_t *signal = NULL) override;
-
- private:
-  HSA_QUEUEID queue_id_ = INVALID_QUEUEID;
-  /// @brief ID of AIE device on which this queue has been mapped.
-  uint32_t node_id_ = std::numeric_limits<uint32_t>::max();
-  /// @brief Queue size in bytes.
-  uint32_t queue_size_bytes_ = std::numeric_limits<uint32_t>::max();
+  /// @brief Invoke the per-queue error callback if a non-default one is registered.
+  void InvokeErrorCallback(hsa_status_t error) {
+    if (errors_callback_ != nullptr && errors_callback_ != core::Queue::DefaultErrorHandler) {
+      errors_callback_(error, public_handle(), errors_data_);
+    }
+  }
 
  protected:
   bool _IsA(Queue::rtti_t id) const override { return id == &rtti_id(); }
 
  private:
-  AieAgent &agent_;
-
-  /// @brief Base of the queue's ring buffer storage.
-  void *ring_buf_ = nullptr;
-
   /// @brief Called when the doorbell is rung to submit all queued packets.
   void SubmitPackets();
 
-  /// @brief Indicates if queue is active.
-  std::atomic<bool> active_;
   static __forceinline int& rtti_id() {
     static int rtti_id_ = 0;
     return rtti_id_;
   }
 
+  /// @brief Queue size in bytes.
+  uint32_t queue_size_bytes_ = 0;
+  /// @brief Base of the queue's ring buffer storage.
+  void* ring_buf_ = nullptr;
+  /// @brief Kernel Mode Queue (KMQ) metadata associated with this queue.
+  void* kmq_metadata_ = nullptr;
+  /// @brief Indicates if queue is active.
+  std::atomic<bool> active_ = false;
+  /// @brief Set when the queue is suspended after an error; no further packets are submitted.
+  /// Only accessed on the packet-submission path, so it does not need to be atomic.
+  bool suspended_ = false;
+  /// @brief Per-queue error callback registered at queue creation.
+  AMD::callback_t<core::HsaEventCallback> errors_callback_;
+  /// @brief User data passed to @ref errors_callback_.
+  void* errors_data_;
 };
 
 } // namespace AMD

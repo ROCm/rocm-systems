@@ -1,22 +1,8 @@
-/* Copyright (c) 2010 - 2023 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "top.hpp"
 
@@ -376,6 +362,20 @@ bool amd::GLFunctions::init(intptr_t hdc, intptr_t hglrc) {
     }
     Drawable_ = glXGetCurrentDrawable_();
     origCtx_ = (GLXContext)hglrc;
+
+    // init() is re-entered when the GL context is re-associated (e.g. on a context switch, via
+    // Context::create -> glenv_->init on an already-allocated glenv_). Release any X display
+    // connection / GLX context from a previous init() before opening new ones; otherwise each
+    // re-association leaks an X11 client connection and a long-running process eventually hits the
+    // X server's client limit ("Maximum number of clients reached").
+    if (intDpy_) {
+      if (intCtx_) {
+        glXDestroyContext_(intDpy_, intCtx_);
+        intCtx_ = nullptr;
+      }
+      XCloseDisplay_(intDpy_);
+      intDpy_ = nullptr;
+    }
 
     int attribList[] = {GLX_RGBA, None};
     if (!(intDpy_ = XOpenDisplay_(DisplayString(Dpy_)))) {

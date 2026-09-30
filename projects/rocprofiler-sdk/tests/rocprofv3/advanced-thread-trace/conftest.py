@@ -21,13 +21,11 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-import csv
 import pytest
 import json
 
 from rocprofiler_sdk.pytest_utils.dotdict import dotdict
 from rocprofiler_sdk.pytest_utils import collapse_dict_list
-from rocprofiler_sdk.pytest_utils.perfetto_reader import PerfettoReader
 
 import re
 import os
@@ -50,6 +48,52 @@ def pytest_addoption(parser):
         action="store",
         help="Output Path.",
     )
+    parser.addoption(
+        "--target-cu",
+        action="store",
+        default=None,
+        help="Target CU for perfcounter validation.",
+    )
+    parser.addoption(
+        "--att-occupancy-event-trace-out-dir",
+        action="store",
+        help="Path to ATT occupancy event trace output directory.",
+    )
+    parser.addoption(
+        "--att-other-simd-out-dir",
+        action="store",
+        help="Path to Output directory.",
+    )
+    parser.addoption(
+        "--att-shaderdata-out-dir",
+        action="store",
+        help="Path to Output directory.",
+    )
+    parser.addoption(
+        "--att-multi-gpu-out-dir",
+        action="store",
+        help="Path to multi-GPU ATT output directory.",
+    )
+    parser.addoption(
+        "--att-marker-trace-out-dir",
+        action="store",
+        help="Path to ATT marker trace output directory.",
+    )
+    parser.addoption(
+        "--att-no-intercept-out-dir",
+        action="store",
+        help="Path to ATT no-intercept output directory.",
+    )
+    parser.addoption(
+        "--att-no-detail-out-dir",
+        action="store",
+        help="Path to ATT no-detail output directory.",
+    )
+    parser.addoption(
+        "--att-pmc-input",
+        action="store",
+        help="Path to JSON file from a combined ATT + counter collection run.",
+    )
 
 
 @pytest.fixture
@@ -65,12 +109,22 @@ def output_path(request):
 
 
 @pytest.fixture
+def att_occupancy_event_trace_out_dir_path(request):
+    output_dir_path = request.config.getoption("--att-occupancy-event-trace-out-dir")
+    if not output_dir_path:
+        pytest.skip("--att-occupancy-event-trace-out-dir not provided")
+    return output_dir_path
+
+
+@pytest.fixture
 def code_object_file_path(request):
     file_path = request.config.getoption("--code-object-input")
+    if file_path is None:
+        pytest.skip("--code-object-input not provided")
     # hsa_file_load = re.compile(".*copy.hsaco$")
     code_object_files = {}
     code_object_memory = []
-    hsa_memory_load_pattern = "gfx[a-z0-9]+_copy_memory.hsaco"
+    hsa_memory_load_pattern = "gfx[a-zA-Z0-9_-]+_copy_memory.hsaco"
     for root, dirs, files in os.walk(file_path, topdown=True):
         for file in files:
             filename = os.path.join(root, file)
@@ -78,3 +132,60 @@ def code_object_file_path(request):
                 code_object_memory.append(filename)
     code_object_files["hsa_memory_load"] = code_object_memory
     return code_object_files
+
+
+@pytest.fixture
+def att_other_simd_out_dir_path(request):
+    output_dir_path = request.config.getoption("--att-other-simd-out-dir")
+    if not output_dir_path:
+        pytest.skip("--att-other-simd-out-dir not provided")
+    return output_dir_path
+
+
+@pytest.fixture
+def att_shaderdata_out_dir_path(request):
+    output_dir_path = request.config.getoption("--att-shaderdata-out-dir")
+    if not output_dir_path:
+        pytest.skip("--att-shaderdata-out-dir not provided")
+    return output_dir_path
+
+
+@pytest.fixture
+def att_multi_gpu_out_dir_path(request):
+    output_dir_path = request.config.getoption("--att-multi-gpu-out-dir")
+    if not output_dir_path:
+        pytest.skip("--att-multi-gpu-out-dir not provided")
+    return output_dir_path
+
+
+@pytest.fixture
+def att_marker_trace_out_dir_path(request):
+    output_dir_path = request.config.getoption("--att-marker-trace-out-dir")
+    if not output_dir_path:
+        pytest.skip("--att-marker-trace-out-dir not provided")
+    return output_dir_path
+
+
+@pytest.fixture
+def att_no_intercept_out_dir_path(request):
+    output_dir_path = request.config.getoption("--att-no-intercept-out-dir")
+    if not output_dir_path:
+        pytest.skip("--att-no-intercept-out-dir not provided")
+    return output_dir_path
+
+
+@pytest.fixture
+def att_no_detail_out_dir_path(request):
+    output_dir_path = request.config.getoption("--att-no-detail-out-dir")
+    if not output_dir_path:
+        pytest.skip("--att-no-detail-out-dir not provided")
+    return output_dir_path
+
+
+@pytest.fixture
+def att_pmc_json_data(request):
+    filename = request.config.getoption("--att-pmc-input")
+    if not filename:
+        pytest.skip("--att-pmc-input not provided")
+    with open(filename, "r") as inp:
+        return dotdict(collapse_dict_list(json.load(inp)))

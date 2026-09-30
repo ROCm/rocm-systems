@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2021 - 2022 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 #include "hip_test_common.hh"
@@ -52,7 +36,7 @@ size_t checkVectors(T* A, T* B, T* Out, size_t N, T (*F)(T a, T b), bool expectM
       }
       mismatchCount++;
       if ((mismatchCount <= mismatchesToPrint) && expectMatch) {
-        INFO("Mismatch at " << i << " Computed: " << Out[i] << " Expeted: " << expected);
+        INFO("Mismatch at " << i << " Computed: " << Out[i] << " Expected: " << expected);
         CHECK(false);
       }
     }
@@ -61,7 +45,7 @@ size_t checkVectors(T* A, T* B, T* Out, size_t N, T (*F)(T a, T b), bool expectM
   if (reportMismatch) {
     if (expectMatch) {
       if (mismatchCount) {
-        INFO(mismatchCount << " Mismatches  First Mismatch at index : " << firstMismatch);
+        INFO(mismatchCount << " Mismatches. First Mismatch at index : " << firstMismatch);
         REQUIRE(false);
       }
     } else {
@@ -73,6 +57,43 @@ size_t checkVectors(T* A, T* B, T* Out, size_t N, T (*F)(T a, T b), bool expectM
   }
 
   return mismatchCount;
+}
+
+// Thread-safe variant of checkVectors to be called from multi thread tests.
+// Call HIP_CHECK_THREAD_FINALIZE() after join.
+template <typename T>
+void checkVectorsT(T* A, T* B, T* Out, size_t N, T (*F)(T a, T b), bool expectMatch = true,
+                   bool reportMismatch = true) {
+  size_t mismatchCount = 0;
+  size_t firstMismatch = 0;
+  size_t mismatchesToPrint = 10;
+  for (size_t i = 0; i < N; i++) {
+    T expected = F(A[i], B[i]);
+    if (std::fabs(Out[i] - expected) > TOL) {
+      if (mismatchCount == 0) {
+        firstMismatch = i;
+      }
+      mismatchCount++;
+      if ((mismatchCount <= mismatchesToPrint) && expectMatch) {
+        INFO_THREAD("Mismatch at " << i << " Computed: " << Out[i] << " Expected: " << expected);
+        CHECK_THREAD(false);
+      }
+    }
+  }
+
+  if (reportMismatch) {
+    if (expectMatch) {
+      if (mismatchCount) {
+        INFO_THREAD(mismatchCount << " Mismatches. First Mismatch at index : " << firstMismatch);
+        CHECK_THREAD(false);
+      }
+    } else {
+      if (mismatchCount == 0) {
+        INFO_THREAD("Expected Mismatch but not found any");
+        CHECK_THREAD(false);
+      }
+    }
+  }
 }
 template <typename T>  // pointer type
 bool checkArray(T* hData, T* hOutputData, size_t width, size_t height, size_t depth = 1) {
@@ -96,6 +117,15 @@ template <typename T>
 size_t checkVectorADD(T* A_h, T* B_h, T* result_H, size_t N, bool expectMatch = true,
                       bool reportMismatch = true) {
   return checkVectors<T>(
+      A_h, B_h, result_H, N, [](T a, T b) { return a + b; }, expectMatch, reportMismatch);
+}
+
+// Thread-safe variant of checkVectorADD to be called from multi thread tests.
+// Call HIP_CHECK_THREAD_FINALIZE() after join.
+template <typename T>
+void checkVectorADDT(T* A_h, T* B_h, T* result_H, size_t N, bool expectMatch = true,
+                     bool reportMismatch = true) {
+  checkVectorsT<T>(
       A_h, B_h, result_H, N, [](T a, T b) { return a + b; }, expectMatch, reportMismatch);
 }
 
@@ -392,7 +422,7 @@ static bool assemblyFile_Verification(std::string assemfilename, std::string ins
     }
   } else {
     result = true;
-    SUCCEED("Assembly file does not exist");
+    HIP_SKIP_TEST("expected assembly file not found.");
   }
   return result;
 }

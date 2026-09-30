@@ -26,11 +26,13 @@
 
 #include <fmt/format.h>
 
+#include <sys/auxv.h>
 #include <cctype>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -40,12 +42,38 @@ namespace common
 {
 namespace impl
 {
+// Safely read environment variable directly from environ array.
+// This avoids issues with bash's custom getenv() implementation which
+// breaks when setenv() is called before bash initializes its internal tables.
+//
+// THREAD SAFETY: Reads are NOT safe against concurrent setenv()/putenv()/
+// unsetenv() from any thread, because glibc may reallocate the environ
+// array itself (not just mutate entries). Prefer reading at init time or
+// caching in a function-local static.
+std::optional<std::string>
+get_env_direct(std::string_view name)
+{
+    if(name.empty() || !environ) return std::nullopt;
+
+    for(char** env = environ; *env; ++env)
+    {
+        std::string_view entry{*env};
+        if(entry.size() > name.size() && entry.compare(0, name.size(), name) == 0 &&
+           entry[name.size()] == '=')
+        {
+            // copy the value so callers do not retain pointers into environ.
+            return std::string{entry.substr(name.size() + 1)};
+        }
+    }
+
+    return std::nullopt;
+}
+
 std::string
 get_env(std::string_view env_id, std::string_view _default)
 {
-    if(env_id.empty()) return std::string{_default};
-    char* env_var = ::std::getenv(env_id.data());
-    if(env_var) return std::string{env_var};
+    auto env_var = get_env_direct(env_id);
+    if(env_var) return *env_var;
     return std::string{_default};
 }
 
@@ -59,24 +87,26 @@ bool
 get_env(std::string_view env_id, bool _default)
 {
     if(env_id.empty()) return _default;
-    char* env_var = ::std::getenv(env_id.data());
+    auto env_var = get_env_direct(env_id);
     if(env_var)
     {
-        if(std::string_view{env_var}.empty())
+        if(env_var->empty())
         {
             ROCP_FATAL << fmt::format("No boolean value provided for {}", env_id);
         }
 
-        if(std::string_view{env_var}.find_first_not_of("0123456789") == std::string_view::npos)
+        if(env_var->find_first_not_of("0123456789") == std::string_view::npos)
         {
-            return static_cast<bool>(std::stoi(env_var));
+            return static_cast<bool>(std::stoi(*env_var));
         }
 
-        for(size_t i = 0; i < std::string_view{env_var}.length(); ++i)
-            env_var[i] = tolower(env_var[i]);
+        // Convert to lowercase in-place (cast to unsigned char to avoid UB)
+        for(size_t i = 0; i < env_var->length(); ++i)
+            (*env_var)[i] =
+                static_cast<char>(std::tolower(static_cast<unsigned char>((*env_var)[i])));
 
         for(const auto& itr : {"off", "false", "no", "n", "f", "0"})
-            if(std::string_view{env_var} == itr) return false;
+            if(*env_var == itr) return false;
 
         return true;
     }
@@ -85,28 +115,36 @@ get_env(std::string_view env_id, bool _default)
 
 template <typename Tp>
 Tp
-get_env(std::string_view env_id, Tp _default, std::enable_if_t<std::is_integral<Tp>::value, sfinae>)
+get_env(std::string_view env_id,
+        Tp               _default,
+        std::enable_if_t<std::is_integral<Tp>::value || std::is_floating_point<Tp>::value, sfinae>)
 {
     static_assert(!std::is_same<Tp, bool>::value, "unexpected! should be using bool overload");
     static_assert(
         sizeof(Tp) <= sizeof(uint64_t),
         "change use of stol/stoul if instantiating for type larger than a 64-bit integer");
 
-    if(env_id.empty()) return _default;
-    char* env_var = ::std::getenv(env_id.data());
+    auto env_var = get_env_direct(env_id);
     if(env_var)
     {
         try
         {
-            // use stol/stoul
-            if constexpr(std::is_signed<Tp>::value)
-                return static_cast<Tp>(std::stol(env_var));
-            else
-                return static_cast<Tp>(std::stoul(env_var));
+            if constexpr(std::is_integral<Tp>::value)
+            {
+                // use stol/stoul
+                if constexpr(std::is_signed<Tp>::value)
+                    return static_cast<Tp>(std::stol(*env_var));
+                else
+                    return static_cast<Tp>(std::stoul(*env_var));
+            }
+            else if constexpr(std::is_floating_point<Tp>::value)
+            {
+                return static_cast<Tp>(std::stod(*env_var));
+            }
         } catch(std::exception& _e)
         {
             ROCP_ERROR << "[rocprofiler][get_env] Exception thrown converting getenv(\"" << env_id
-                       << "\") = " << env_var << " to " << cxx_demangle(typeid(Tp).name())
+                       << "\") = " << *env_var << " to " << cxx_demangle(typeid(Tp).name())
                        << " :: " << _e.what() << ". Using default value of " << _default << "\n";
         }
         return _default;
@@ -114,6 +152,8 @@ get_env(std::string_view env_id, Tp _default, std::enable_if_t<std::is_integral<
     return _default;
 }
 
+// set_env uses standard ::setenv() (no wrapper needed).
+// Unlike getenv(), bash does not interpose setenv(), so it works correctly.
 int
 set_env(std::string_view env_id, bool value, int override)
 {
@@ -133,8 +173,10 @@ set_env(std::string_view env_id,
 
 #define SPECIALIZE_GET_ENV(TYPE)                                                                   \
     template TYPE get_env<TYPE>(                                                                   \
-        std::string_view, TYPE, std::enable_if_t<std::is_integral<TYPE>::value, sfinae>);          \
-    template int set_env<TYPE>(std::string_view, TYPE, int);
+        std::string_view,                                                                          \
+        TYPE,                                                                                      \
+        std::enable_if_t<std::is_integral<TYPE>::value || std::is_floating_point<TYPE>::value,     \
+                         sfinae>);
 
 #define SPECIALIZE_SET_ENV(TYPE) template int set_env<TYPE>(std::string_view, TYPE, int);
 
@@ -146,20 +188,40 @@ SPECIALIZE_GET_ENV(uint8_t)
 SPECIALIZE_GET_ENV(uint16_t)
 SPECIALIZE_GET_ENV(uint32_t)
 SPECIALIZE_GET_ENV(uint64_t)
+SPECIALIZE_GET_ENV(float)
+SPECIALIZE_GET_ENV(double)
 
 SPECIALIZE_SET_ENV(const char*)
 SPECIALIZE_SET_ENV(std::string)
 SPECIALIZE_SET_ENV(std::string_view)
 SPECIALIZE_SET_ENV(float)
 SPECIALIZE_SET_ENV(double)
+SPECIALIZE_SET_ENV(int8_t)
+SPECIALIZE_SET_ENV(int16_t)
+SPECIALIZE_SET_ENV(int32_t)
+SPECIALIZE_SET_ENV(int64_t)
+SPECIALIZE_SET_ENV(uint8_t)
+SPECIALIZE_SET_ENV(uint16_t)
+SPECIALIZE_SET_ENV(uint32_t)
+SPECIALIZE_SET_ENV(uint64_t)
 }  // namespace impl
+
+bool
+is_at_secure()
+{
+    // AT_SECURE is set by the kernel when the program was executed in a way that
+    // requires "secure execution" (setuid/setgid, file capabilities, etc.).
+    // Cache the value since it cannot change during the lifetime of the process.
+    static const bool _v = (::getauxval(AT_SECURE) != 0);
+    return _v;
+}
 
 env_store::env_store(std::initializer_list<env_config>&& _container)
 {
     for(const auto& itr : _container)
     {
         m_original.emplace_back(env_config{itr.env_name, get_env(itr.env_name, ""), 1});
-        m_modified.emplace_back(env_config{itr.env_name, itr.env_value, 1});
+        m_modified.emplace_back(env_config{itr.env_name, itr.env_value, itr.overwrite});
     }
 }
 

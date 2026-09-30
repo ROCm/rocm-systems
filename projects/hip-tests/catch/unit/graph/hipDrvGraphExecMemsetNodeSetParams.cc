@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 #include <vector>
@@ -47,9 +34,7 @@ const int value = 120;
  * ------------------------
  * - catch/unit/memory/hipDrvGraphExecMemsetNodeSetParams.cc
  */
-TEST_CASE("Unit_hipDrvGraphExecMemsetNodeSetParams_BasicPositive") {
-  CHECK_IMAGE_SUPPORT
-
+HIP_TEST_CASE(Unit_hipDrvGraphExecMemsetNodeSetParams_BasicPositive) {
   HIP_CHECK(hipInit(0));
   hipDevice_t device;
   hipCtx_t context;
@@ -156,9 +141,7 @@ TEST_CASE("Unit_hipDrvGraphExecMemsetNodeSetParams_BasicPositive") {
  * ------------------------
  * - catch/unit/memory/hipDrvGraphExecMemsetNodeSetParams.cc
  */
-TEST_CASE("Unit_hipDrvGraphExecMemsetNodeSetParams_Negative") {
-  CHECK_IMAGE_SUPPORT
-
+HIP_TEST_CASE(Unit_hipDrvGraphExecMemsetNodeSetParams_Negative) {
   HIP_CHECK(hipInit(0));
   hipDevice_t device;
   hipCtx_t context;
@@ -215,5 +198,63 @@ TEST_CASE("Unit_hipDrvGraphExecMemsetNodeSetParams_Negative") {
   HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipFree(reinterpret_cast<void*>(devMemSrc)));
+  HIP_CHECK(hipCtxDestroy(context));
+}
+
+__global__ void DrvMemsetTypeGateKernel(int* output) { output[0] = 1; }
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Verify that hipDrvGraphExecMemsetNodeSetParams rejects a handle of another node type
+ *    instead of reinterpreting it as a memset node.
+ * Test source
+ * ------------------------
+ *  - unit/graph/hipDrvGraphExecMemsetNodeSetParams.cc
+ */
+HIP_TEST_CASE(Unit_hipDrvGraphExecMemsetNodeSetParams_WrongNodeType) {
+  HIP_CHECK(hipInit(0));
+  hipDevice_t device;
+  hipCtx_t context;
+  HIP_CHECK(hipDeviceGet(&device, 0));
+  HIP_CHECK(hipCtxCreate(&context, 0, device));
+
+  constexpr size_t kBytes = 256;
+  void* memsetDst = nullptr;
+  HIP_CHECK(hipMalloc(&memsetDst, kBytes));
+  int* kernelOutput = nullptr;
+  HIP_CHECK(hipMalloc(&kernelOutput, sizeof(int)));
+
+  hipMemsetParams memsetParams{};
+  memsetParams.dst = memsetDst;
+  memsetParams.elementSize = sizeof(char);
+  memsetParams.width = kBytes;
+  memsetParams.height = 1;
+  memsetParams.pitch = 0;
+  memsetParams.value = 7;
+
+  hipGraph_t graph = nullptr;
+  HIP_CHECK(hipGraphCreate(&graph, 0));
+  hipGraphNode_t memsetNode, kernelNode;
+  HIP_CHECK(hipDrvGraphAddMemsetNode(&memsetNode, graph, nullptr, 0, &memsetParams, context));
+  void* args[] = {&kernelOutput};
+  hipKernelNodeParams kernelParams{};
+  kernelParams.func = reinterpret_cast<void*>(DrvMemsetTypeGateKernel);
+  kernelParams.gridDim = dim3(1);
+  kernelParams.blockDim = dim3(1);
+  kernelParams.kernelParams = args;
+  HIP_CHECK(hipGraphAddKernelNode(&kernelNode, graph, nullptr, 0, &kernelParams));
+  hipGraphExec_t graphExec = nullptr;
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+
+  HIP_CHECK_ERROR(hipDrvGraphExecMemsetNodeSetParams(graphExec, kernelNode, &memsetParams, context),
+                  hipErrorInvalidValue);
+  memsetParams.value = 9;
+  HIP_CHECK(hipDrvGraphExecMemsetNodeSetParams(graphExec, memsetNode, &memsetParams, context));
+
+  HIP_CHECK(hipGraphExecDestroy(graphExec));
+  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipFree(kernelOutput));
+  HIP_CHECK(hipFree(memsetDst));
   HIP_CHECK(hipCtxDestroy(context));
 }

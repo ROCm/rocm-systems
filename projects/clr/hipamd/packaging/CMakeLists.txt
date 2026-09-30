@@ -1,22 +1,6 @@
-# Copyright (c) 2020 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 
 cmake_minimum_required(VERSION 3.16.8)
 
@@ -243,14 +227,12 @@ configure_file(hip-devel.prerm    ${CMAKE_CURRENT_BINARY_DIR}/dev/prerm @ONLY)
 set(CPACK_DEBIAN_DEV_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_BINARY_DIR}/dev/postinst;${CMAKE_CURRENT_BINARY_DIR}/dev/prerm")
 # Dev/devel package dependencies
 set(HIP_DEV_ROCM_PKG_DEPENDENCIES "hip-runtime-amd, rocm-llvm, rocm-core")
-set(CPACK_DEBIAN_DEV_PACKAGE_RECOMMENDS "perl (>= 5.0), libfile-copy-recursive-perl, libfile-listing-perl, libfile-which-perl, liburi-perl")
 set(CPACK_DEBIAN_DEV_PACKAGE_DEPENDS "libc6, file, ${HIP_DEV_ROCM_PKG_DEPENDENCIES}, hsa-rocr-dev, hipcc")
 set(CPACK_DEBIAN_DEV_PACKAGE_PROVIDES "hip-base")
 set(CPACK_DEBIAN_DEV_PACKAGE_REPLACES "hip-base")
 
 set(CPACK_RPM_DEV_POST_INSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/dev/postinst")
 set(CPACK_RPM_DEV_PRE_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/dev/prerm")
-set(CPACK_RPM_DEV_PACKAGE_SUGGESTS "perl >= 5.0, perl-File-Which, perl-File-Listing, perl-URI")
 set(CPACK_RPM_DEV_PACKAGE_REQUIRES "file, ${HIP_DEV_ROCM_PKG_DEPENDENCIES}, hsa-rocr-devel, hipcc")
 
 set(CPACK_RPM_DEV_PACKAGE_PROVIDES "hip-base")

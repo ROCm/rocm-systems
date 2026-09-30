@@ -25,7 +25,7 @@
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/fwd.h>
 
-#include <fmt/core.h>
+#include <fmt/format.h>
 #include <fmt/ranges.h>
 #include <hsa/hsa_ven_amd_aqlprofile.h>
 
@@ -36,6 +36,11 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+
+namespace YAML
+{
+class Node;
+}
 
 namespace rocprofiler
 {
@@ -129,6 +134,16 @@ checkValidMetric(const std::string& agent, const Metric& metric);
  */
 rocprofiler_status_t
 setCustomCounterDefinition(const CustomCounterDefinition& def);
+
+bool
+has_spm_support(const Metric& metric, rocprofiler_agent_id_t agent_id);
+
+/**
+ * Validate custom counter YAML structure and field types.
+ * Returns std::nullopt if valid, or an error message if invalid.
+ */
+std::optional<std::string>
+validate_extra_counter_yaml(const YAML::Node& root);
 }  // namespace counters
 }  // namespace rocprofiler
 

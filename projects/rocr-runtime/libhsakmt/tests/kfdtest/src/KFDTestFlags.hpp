@@ -31,6 +31,8 @@ extern int g_TestNodeId;
 extern int g_TestDstNodeId;
 extern bool g_IsChildProcess;
 extern bool g_IsEmuMode;
+extern unsigned int g_AisThreads;
+extern unsigned int g_AisSizeMB;
 
 // Each test should call TEST_START with the test custom profile and HW scheduling
 enum TESTPROFILE{
@@ -65,6 +67,7 @@ enum KfdFamilyId {
     FAMILY_NV,    // Navi10
     FAMILY_GFX11, // GFX11
     FAMILY_GFX12, // GFX12
+    FAMILY_GFX125X, // GFX125x
 };
 
 #endif  //  __KFD_TEST_FLAGS__H__

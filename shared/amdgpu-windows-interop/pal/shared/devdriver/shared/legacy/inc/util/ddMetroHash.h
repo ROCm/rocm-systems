@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) 2021-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+ *  Copyright (c) 2021-2026 Advanced Micro Devices, Inc. All Rights Reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -44,21 +44,14 @@ struct Hash
 };
 
 // Compacts a 128-bit hash into a 64-bit one by XOR'ing the low and high 64-bits together.
-inline uint64 Compact64(
-    const Hash* pHash)
-{
-    return (static_cast<uint64>(pHash->dwords[3] ^ pHash->dwords[1]) |
-           (static_cast<uint64>(pHash->dwords[2] ^ pHash->dwords[0]) << 32));
-}
+uint64 Compact64(
+    const Hash* pHash);
 
 // Compacts a 64-bit hash checksum into a 32-bit one by XOR'ing each 32-bit chunk together.
-inline uint32 Compact32(
-    const Hash* pHash)
-{
-    return pHash->dwords[3] ^ pHash->dwords[2] ^ pHash->dwords[1] ^ pHash->dwords[0];
-}
+uint32 Compact32(
+    const Hash* pHash);
 
-// Compacts a 64-bit hash checksum into a 32-bit one by XOR'ing each 32-bit chunk together.
+// Compacts a 64-bit hash into a 32-bit one by XOR'ing its low and high 32-bit halves together.
 inline uint32 Compact32(
     const uint64 hash)
 {
@@ -77,10 +70,7 @@ inline uint32 MetroHash32(const uint8* pData, const uint64 dataSize)
     return Compact32(MetroHash64(pData, dataSize));
 }
 
-inline uint64 HashCStr64(const char* pString)
-{
-    return MetroHash64(reinterpret_cast<const uint8*>(pString), strlen(pString));
-}
+uint64 HashCStr64(const char* pString, size_t maxLength = SIZE_MAX);
 
 } // MetroHash
 } // DevDriver

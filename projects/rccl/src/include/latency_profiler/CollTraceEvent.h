@@ -19,16 +19,14 @@ namespace latency_profiler {
 struct CudaEventDeleter {
   void operator()(cudaEvent_t e) {
     // Ignore error at destroy
-    cudaEventDestroy(e);
+    (void)cudaEventDestroy(e);
   }
 };
-using CudaEventPtr = std::unique_ptr<
-    std::pointer_traits<cudaEvent_t>::element_type,
-    CudaEventDeleter>;
+using CudaEventPtr = std::unique_ptr<std::pointer_traits<cudaEvent_t>::element_type, CudaEventDeleter>;
 
 // a wrapper class for cuda event
 class CudaWaitEvent {
- public:
+public:
   CudaWaitEvent(CudaEventPtr e) : event_(std::move(e)) {}
   ~CudaWaitEvent() {}
 
@@ -39,13 +37,16 @@ class CudaWaitEvent {
   std::shared_ptr<float> getElapsedTimeSinceEvent(CudaWaitEvent* start);
   ncclResult_t waitEventFinish();
 
- private:
+private:
   CudaEventPtr event_;
 };
 
 // Event data structure
 struct CollTraceEvent {
-  enum class EventType { COMM, TERMINATE };
+  enum class EventType {
+    COMM,
+    TERMINATE
+  };
 
   CollTraceInfo coll;
   std::unique_ptr<CudaWaitEvent> start{nullptr};

@@ -19,7 +19,7 @@ kpack_error_t decompress_noop(kpack_archive* archive, uint32_t ordinal,
   archive->kernel_cache.resize(blob.size);
 
   // Seek to blob offset
-  if (fseek(archive->file.get(), blob.offset, SEEK_SET) != 0) {
+  if (kpack_fseek(archive->file.get(), blob.offset, SEEK_SET) != 0) {
     return KPACK_ERROR_IO_ERROR;
   }
 
@@ -45,7 +45,7 @@ kpack_error_t build_zstd_frame_index(kpack_archive* archive) {
   archive->zstd_blob.resize(archive->zstd_size);
 
   // Seek to blob start
-  if (fseek(archive->file.get(), archive->zstd_offset, SEEK_SET) != 0) {
+  if (kpack_fseek(archive->file.get(), archive->zstd_offset, SEEK_SET) != 0) {
     return KPACK_ERROR_IO_ERROR;
   }
 

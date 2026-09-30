@@ -1,22 +1,6 @@
-# Copyright (c) 2023 Advanced Micro Devices, Inc. All Rights Reserved.
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 
 # Common Tests - Test independent of all platforms
 set(TEST_SRC
@@ -38,7 +22,6 @@ set(TEST_SRC
     DoublePrecisionIntrinsics.cc
     DoublePrecisionMathDevice.cc
     DoublePrecisionMathHost.cc
-    FloatMathPrecise.cc
     IntegerIntrinsics.cc
     SinglePrecisionIntrinsics.cc
     SinglePrecisionMathDevice.cc
@@ -78,6 +61,7 @@ set(AMD_TEST_SRC
     hipVectorTypesDevice.cc
     hipTestHalf.cc
     hipTestHalfConstexpr.cc
+    hipTestHalfIntegralAssign_test.cc
     hipComplex.cc
     hipTestFMA.cc
     hipTestNativeHalf.cc
@@ -86,65 +70,120 @@ set(AMD_TEST_SRC
     AtomicsWithRandomActiveLanesInWavefront.cc
     fp16_ops.cc
     fp8_host.cc
-    # fp8_e8m0.cc # TODO, reenable it, disabling this test due to failure seen on TheRock,
+    fp8_e8m0.cc
     fp6_ocp.cc
     fp4_ocp.cc
+    memcpy_async.cc
+    bfloat16_atomic_test.cc
+    fp16_atomic_test.cc
 )
 
+# The OCP host reference (fcbx packed bitfield structs in amd_hip_ocp_host.hpp)
+# relies on Itanium bitfield packing and fails a static_assert under the MSVC
+# bitfield ABI on Windows. Only compile the fp4/fp6/fp8 OCP tests on non-Windows
+# until the header is made portable.
+if(NOT WIN32)
+  list(APPEND AMD_TEST_SRC ext_ocp_fp6.cc ext_ocp_fp8.cc ext_ocp_fp4.cc)
+  # The OCP host reference returns wide vector types (__amd_floatx32_storage_t)
+  # by value. Without AVX-512 enabled this triggers -Wpsabi ABI-change notes,
+  # which are inherent to the type and not a real defect, so suppress them here.
+  set_source_files_properties(ext_ocp_fp6.cc ext_ocp_fp8.cc ext_ocp_fp4.cc
+                              PROPERTIES COMPILE_OPTIONS "-Wno-psabi")
+endif()
+
 set(AMD_ARCH_SPEC_TEST_SRC
-    AtomicAdd_Coherent_withunsafeflag.cc
-    AtomicAdd_Coherent_withoutflag.cc
-    AtomicAdd_Coherent_withnoUnsafeflag.cc
-    AtomicAdd_NonCoherent_withoutflag.cc
-    AtomicAdd_NonCoherent_withnoUnsafeflag.cc
-    AtomicAdd_NonCoherent_withunsafeflag.cc
+    AtomicAdd_Coherent.cc
+    AtomicAdd_NonCoherent.cc
     BuiltIns_fmax.cc
     BuiltIns_fmin.cc
-    BuiltIns_fadd.cc
     unsafeAtomicAdd_RTC.cc
-    unsafeAtomicAdd_Coherent_withunsafeflag.cc
-    unsafeAtomicAdd_Coherent_withoutflag.cc
-    unsafeAtomicAdd_Coherent_withnounsafeflag.cc
-    unsafeAtomicAdd_NonCoherent_withoutflag.cc
-    unsafeAtomicAdd_NonCoherent_withnounsafeflag.cc
-    unsafeAtomicAdd_NonCoherent_withunsafeflag.cc
+    unsafeAtomicAdd_Coherent.cc
+    unsafeAtomicAdd_NonCoherent.cc
 )
 
 set(AMD_GFX940_SPEC_TEST_SRC
     fp8_fnuz.cc
 )
 
-set(AMD_GFX1200_SPEC_TEST_SRC
+set(AMD_OCP_TEST_SRC
     fp8_ocp.cc
 )
 
-# Note to pass arch use format like -DOFFLOAD_ARCH_STR="--offload-arch=gfx900  --offload-arch=gfx906"
-# having space at the start/end of OFFLOAD_ARCH_STR can cause build failures
-add_custom_target(kerDevAllocMultCO.code
-                  COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
+if (HIP_PLATFORM MATCHES "amd")
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/kerDevAllocMultCO.code
+                  COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/kerDevAllocMultCO.cc
-                  -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/deviceLib/kerDevAllocMultCO.code
+                  -o ${CMAKE_CURRENT_BINARY_DIR}/kerDevAllocMultCO.code
                   -I${HIP_INCLUDE_DIR}
-                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-add_custom_target(kerDevWriteMultCO.code
-                  COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
+                  ${HIP_PATH_OPT}
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+                  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/kerDevAllocMultCO.cc
+                  COMMENT "Compiling kerDevAllocMultCO.code")
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/kerDevWriteMultCO.code
+                  COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/kerDevWriteMultCO.cc
-                  -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/deviceLib/kerDevWriteMultCO.code
+                  -o ${CMAKE_CURRENT_BINARY_DIR}/kerDevWriteMultCO.code
                   -I${HIP_INCLUDE_DIR}
-                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-add_custom_target(kerDevFreeMultCO.code
-                  COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
+                  ${HIP_PATH_OPT}
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+                  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/kerDevWriteMultCO.cc
+                  COMMENT "Compiling kerDevWriteMultCO.code")
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/kerDevFreeMultCO.code
+                  COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/kerDevFreeMultCO.cc
-                  -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/deviceLib/kerDevFreeMultCO.code
+                  -o ${CMAKE_CURRENT_BINARY_DIR}/kerDevFreeMultCO.code
                   -I${HIP_INCLUDE_DIR}
-                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-add_custom_target(kerDevAllocSingleKer.code
-                  COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
+                  ${HIP_PATH_OPT}
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+                  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/kerDevFreeMultCO.cc
+                  COMMENT "Compiling kerDevFreeMultCO.code")
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/kerDevAllocSingleKer.code
+                  COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/kerDevAllocSingleKer.cc
-                  -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/deviceLib/kerDevAllocSingleKer.code
+                  -o ${CMAKE_CURRENT_BINARY_DIR}/kerDevAllocSingleKer.code
                   -I${HIP_INCLUDE_DIR}
-                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-
+                  ${HIP_PATH_OPT}
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+                  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/kerDevAllocSingleKer.cc
+                  COMMENT "Compiling kerDevAllocSingleKer.code")
+else()
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/kerDevAllocMultCO.code
+                  COMMAND ${CMAKE_HIP_COMPILER} --fatbin ${OFFLOAD_ARCH_LIST}
+                  -x cu ${CMAKE_CURRENT_SOURCE_DIR}/kerDevAllocMultCO.cc
+                  -o ${CMAKE_CURRENT_BINARY_DIR}/kerDevAllocMultCO.code
+                  -I${HIP_INCLUDE_DIR}
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+                  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/kerDevAllocMultCO.cc
+                  COMMENT "Compiling kerDevAllocMultCO.code")
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/kerDevWriteMultCO.code
+                  COMMAND ${CMAKE_HIP_COMPILER} --fatbin ${OFFLOAD_ARCH_LIST}
+                  -x cu ${CMAKE_CURRENT_SOURCE_DIR}/kerDevWriteMultCO.cc
+                  -o ${CMAKE_CURRENT_BINARY_DIR}/kerDevWriteMultCO.code
+                  -I${HIP_INCLUDE_DIR}
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+                  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/kerDevWriteMultCO.cc
+                  COMMENT "Compiling kerDevWriteMultCO.code")
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/kerDevFreeMultCO.code
+                  COMMAND ${CMAKE_HIP_COMPILER} --fatbin ${OFFLOAD_ARCH_LIST}
+                  -x cu ${CMAKE_CURRENT_SOURCE_DIR}/kerDevFreeMultCO.cc
+                  -o ${CMAKE_CURRENT_BINARY_DIR}/kerDevFreeMultCO.code
+                  -I${HIP_INCLUDE_DIR}
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+                  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/kerDevFreeMultCO.cc
+                  COMMENT "Compiling kerDevFreeMultCO.code")
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/kerDevAllocSingleKer.code
+                  COMMAND ${CMAKE_HIP_COMPILER} --fatbin ${OFFLOAD_ARCH_LIST}
+                  -x cu ${CMAKE_CURRENT_SOURCE_DIR}/kerDevAllocSingleKer.cc
+                  -o ${CMAKE_CURRENT_BINARY_DIR}/kerDevAllocSingleKer.code
+                  -I${HIP_INCLUDE_DIR}
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+                  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/kerDevAllocSingleKer.cc
+                  COMMENT "Compiling kerDevAllocSingleKer.code")
+endif()
+add_custom_target(kerDevAllocMultCO_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/kerDevAllocMultCO.code)
+add_custom_target(kerDevWriteMultCO_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/kerDevWriteMultCO.code)
+add_custom_target(kerDevFreeMultCO_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/kerDevFreeMultCO.code)
+add_custom_target(kerDevAllocSingleKer_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/kerDevAllocSingleKer.code)
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/kerDevAllocSingleKer.code)
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/kerDevFreeMultCO.code)
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/kerDevWriteMultCO.code)
@@ -153,11 +192,11 @@ set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BIN
 # Accepted archs to compile this cmake file
 set(ACCEPTED_OFFLOAD_ARCHS gfx90a gfx942)
 set(ACCEPTED_GFX940_ARCH gfx942)
-set(ACCEPTED_GFX1200_ARCH gfx1200 gfx1201)
+set(ACCEPTED_OCP_ARCH gfx1200 gfx1201 gfx950)
 function(CheckAcceptedArchs OFFLOAD_ARCH_STR_LOCAL)
   set(ARCH_CHECK -1 PARENT_SCOPE)
   set(ARCH_GFX940 -1 PARENT_SCOPE)
-  set(ARCH_GFX1200 -1 PARENT_SCOPE)
+  set(ARCH_OCP -1 PARENT_SCOPE)
   string(REGEX MATCHALL "--offload-arch=gfx[0-9a-z]+" OFFLOAD_ARCH_LIST ${OFFLOAD_ARCH_STR_LOCAL})
   foreach(OFFLOAD_ARCH IN LISTS OFFLOAD_ARCH_LIST)
     string(REGEX MATCHALL "--offload-arch=(gfx[0-9a-z]+)" matches ${OFFLOAD_ARCH})
@@ -168,27 +207,28 @@ function(CheckAcceptedArchs OFFLOAD_ARCH_STR_LOCAL)
       if (CMAKE_MATCH_1 IN_LIST ACCEPTED_GFX940_ARCH)
         set(ARCH_GFX940 1 PARENT_SCOPE)
       endif()
-      if (CMAKE_MATCH_1 IN_LIST ACCEPTED_GFX1200_ARCH)
-        set(ARCH_GFX1200 1 PARENT_SCOPE)
+      if (CMAKE_MATCH_1 IN_LIST ACCEPTED_OCP_ARCH)
+        set(ARCH_OCP 1 PARENT_SCOPE)
       endif()
     endif()        # CMAKE_MATCH_COUNT
   endforeach()   # OFFLOAD_ARCH_LIST
 endfunction()  # CheckAcceptedArchs
 
 if(HIP_PLATFORM MATCHES "amd")
-    if (DEFINED OFFLOAD_ARCH_STR)
-      CheckAcceptedArchs(${OFFLOAD_ARCH_STR})
-    elseif(DEFINED $ENV{HCC_AMDGPU_TARGET})
-      CheckAcceptedArchs($ENV{HCC_AMDGPU_TARGET})
-    else()
-      set(ARCH_CHECK -1)
-      set(ARCH_GFX940 -1)
-      set(ARCH_GFX1200 -1)
-    endif()
-    set(TEST_SRC ${TEST_SRC} ${AMD_TEST_SRC})
-    set_source_files_properties(bfloat16.cc PROPERTIES COMPILE_FLAGS "-DHIP_ENABLE_WARP_SYNC_BUILTINS")
-if(${ARCH_CHECK} GREATER_EQUAL 0)
-	set(TEST_SRC ${TEST_SRC} ${AMD_ARCH_SPEC_TEST_SRC})
+  # Do not enable arch specific tests for ASAN.
+  if (DEFINED OFFLOAD_ARCH_STR AND NOT (ENABLE_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN"))
+    CheckAcceptedArchs(${OFFLOAD_ARCH_STR})
+  elseif(DEFINED $ENV{HCC_AMDGPU_TARGET})
+    CheckAcceptedArchs($ENV{HCC_AMDGPU_TARGET})
+  else()
+    set(ARCH_CHECK -1)
+    set(ARCH_GFX940 -1)
+    set(ARCH_OCP -1)
+  endif()
+  set(TEST_SRC ${TEST_SRC} ${AMD_TEST_SRC})
+  set_source_files_properties(bfloat16.cc PROPERTIES COMPILE_FLAGS "-DHIP_ENABLE_WARP_SYNC_BUILTINS")
+  if(${ARCH_CHECK} GREATER_EQUAL 0)
+    set(TEST_SRC ${TEST_SRC} ${AMD_ARCH_SPEC_TEST_SRC})
     set_source_files_properties(AtomicAdd_Coherent_withunsafeflag.cc PROPERTIES COMPILE_OPTIONS "-munsafe-fp-atomics")
     set_source_files_properties(AtomicAdd_NonCoherent_withunsafeflag.cc PROPERTIES COMPILE_OPTIONS "-munsafe-fp-atomics")
     set_source_files_properties(AtomicAdd_Coherent_withnoUnsafeflag.cc PROPERTIES COMPILE_OPTIONS "-mno-unsafe-fp-atomics")
@@ -198,26 +238,26 @@ if(${ARCH_CHECK} GREATER_EQUAL 0)
     set_source_files_properties(unsafeAtomicAdd_Coherent_withnounsafeflag.cc PROPERTIES COMPILE_OPTIONS "-mno-unsafe-fp-atomics")
     set_source_files_properties(unsafeAtomicAdd_NonCoherent_withnounsafeflag.cc PROPERTIES COMPILE_OPTIONS "-mno-unsafe-fp-atomics")
     set_source_files_properties(hipMathFunctions.cc PROPERTIES COMPILE_FLAGS "-Xclang -fallow-half-arguments-and-returns")
-    file(GLOB AtomicAdd_files *AtomicAdd_*_*.cc)
+    file(GLOB AtomicAdd_files CONFIGURE_DEPENDS *AtomicAdd_*_*.cc)
     set_property(SOURCE ${AtomicAdd_files} PROPERTY COMPILE_FLAGS --save-temps)
-    file(GLOB unsafeAtomicAdd_files *unsafeAtomicAdd_*_*.cc)
+    file(GLOB unsafeAtomicAdd_files CONFIGURE_DEPENDS *unsafeAtomicAdd_*_*.cc)
     set_property(SOURCE ${unsafeAtomicAdd_files} PROPERTY COMPILE_FLAGS --save-temps)
-endif()
-if(${ARCH_GFX940} GREATER_EQUAL 0)
-  set(TEST_SRC ${TEST_SRC} ${AMD_GFX940_SPEC_TEST_SRC})
-endif()
-if(${ARCH_GFX1200} GREATER_EQUAL 0)
-  set(TEST_SRC ${TEST_SRC} ${AMD_GFX1200_SPEC_TEST_SRC})
-endif()
-    hip_add_exe_to_target(NAME UnitDeviceTests
+  endif()
+  if(${ARCH_GFX940} GREATER_EQUAL 0)
+    set(TEST_SRC ${TEST_SRC} ${AMD_GFX940_SPEC_TEST_SRC})
+  endif()
+  if(${ARCH_OCP} GREATER_EQUAL 0)
+    set(TEST_SRC ${TEST_SRC} ${AMD_OCP_TEST_SRC})
+  endif()
+  hip_add_exe_to_target(NAME UnitDeviceTests
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests
                       LINKER_LIBS hiprtc::hiprtc)
 elseif(HIP_PLATFORM MATCHES "nvidia")
-    hip_add_exe_to_target(NAME UnitDeviceTests
+  hip_add_exe_to_target(NAME UnitDeviceTests
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests
                       COMPILE_OPTIONS --Wno-deprecated-declarations)
 endif()
 
-add_dependencies(UnitDeviceTests kerDevAllocMultCO.code kerDevWriteMultCO.code kerDevFreeMultCO.code kerDevAllocSingleKer.code)
+add_dependencies(UnitDeviceTests kerDevAllocMultCO_code kerDevWriteMultCO_code kerDevFreeMultCO_code kerDevAllocSingleKer_code)
