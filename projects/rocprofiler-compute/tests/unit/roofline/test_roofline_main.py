@@ -626,6 +626,20 @@ def test_the_controller_looks_up_controls_the_page_renders() -> None:
         )
 
 
+def test_roofline_uses_shared_kernel_list_and_preserves_local_controls() -> None:
+    """Kernel selection belongs to the shared controller; roof controls stay local."""
+    controller = read_asset(_ASSETS, "roofline_plot.js")
+    page_css = read_asset(_ASSETS, "roofline_plot.css")
+
+    assert "window.HtmlReport.createKernelList({" in controller
+    assert "kernelPanel.select(kernels[position].index, data.event)" in controller
+    assert "kernelPanel.applyRowStates(" in controller
+    assert "kernelPanel.setCountText(" in controller
+    assert "buildOffPlotBadge(kernels[item.key])" in controller
+    assert "createRoofPanelRow(roof)" in controller
+    assert ".roofline-kernel-pct" not in page_css
+
+
 def test_browser_exposes_fixed_reset_fit_and_offplot_controls() -> None:
     """The page labels fixed reset separately from one-shot data fitting."""
     page_template = read_asset(roofline_html.ASSETS_DIR, "roofline_plot.html")
