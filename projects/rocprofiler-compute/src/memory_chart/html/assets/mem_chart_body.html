@@ -1,0 +1,44 @@
+<div class="report-app mem-chart-app">
+  <header class="report-toolbar mem-chart-toolbar">
+    <div class="mem-chart-title">
+      <h1 id="mem-chart-heading">Memory Chart</h1>
+      <p id="mem-chart-scope"></p>
+    </div>
+    <button type="button" id="mem-chart-theme-toggle"
+            class="report-btn report-btn-sm" aria-pressed="false">Dark mode</button>
+  </header>
+  <div class="report-body mem-chart-body">
+    <main class="mem-chart-main">
+      <section class="mem-chart-section" aria-label="Memory hierarchy diagram">
+        <div class="mem-chart-section-heading">
+          <h2>Memory hierarchy</h2>
+          <span id="mem-chart-view-label" aria-live="polite"></span>
+        </div>
+        <div id="mem-chart-diagram" class="mem-chart-diagram"></div>
+        <div id="mem-chart-legend" class="mem-chart-legend"
+             aria-label="Diagram legend"></div>
+      </section>
+      <section class="mem-chart-section" aria-label="Memory chart tables">
+        <h2>Metrics</h2>
+        <div id="mem-chart-tables" class="mem-chart-tables"></div>
+      </section>
+      <section id="mem-chart-guidance" class="mem-chart-section mem-chart-guidance"
+               aria-label="Memory bandwidth guidance" hidden></section>
+    </main>
+    <div class="report-panel-wrap mem-chart-panel-wrap">
+      <aside class="report-panel mem-chart-kernel-panel" aria-label="Kernels">
+        <div class="report-panel-title">
+          <span class="report-panel-title-label">Kernels
+            <span id="mem-chart-kernel-count" class="report-panel-count"></span>
+          </span>
+          <button type="button" id="mem-chart-show-all"
+                  class="report-btn report-btn-sm">Show all</button>
+        </div>
+        <p class="report-panel-help">Select a kernel to see its values. Select it
+          again or choose Show all for the aggregate.</p>
+        <ul id="mem-chart-kernel-list" class="report-panel-list"></ul>
+      </aside>
+    </div>
+  </div>
+  <noscript>This memory chart needs JavaScript to display its diagram and values.</noscript>
+</div>

@@ -55,8 +55,7 @@ def slot_specs(layout: Mapping[str, object]) -> Tuple[SlotSpec, ...]:
     for block in cast(List[Dict[str, object]], layout["blocks"]):
         for index, item in enumerate(cast(List[Dict[str, object]], block["content"])):
             category = cast(str, item["category"])
-            default_unit = "%" if category in _BAR_CATEGORIES else ""
-            unit = cast(str, item.get("unit", default_unit))
+            unit = cast(str, item.get("unit", ""))
             specs.append(
                 SlotSpec(
                     slot_id=f"{block['id']}.{index}",
@@ -65,7 +64,7 @@ def slot_specs(layout: Mapping[str, object]) -> Tuple[SlotSpec, ...]:
                     category=category,
                     on_arrow=False,
                     cu_block=block["column"] == 0,
-                    bar=unit == "%" and category in _BAR_CATEGORIES,
+                    bar=_content_has_bar(item),
                 )
             )
 
@@ -149,7 +148,11 @@ def _block_payload(
     payload["order"] = block.get("order", 0)
     payload["position"] = block.get("position", "grid")
     payload["content"] = [
-        {**item, "slotId": f"{block['id']}.{index}"}
+        {
+            **item,
+            "slotId": f"{block['id']}.{index}",
+            "bar": _content_has_bar(item),
+        }
         for index, item in enumerate(cast(List[Dict[str, object]], block["content"]))
     ]
     payload["children"] = [
@@ -157,6 +160,11 @@ def _block_payload(
         for child_id in cast(List[str], block.get("children", []))
     ]
     return payload
+
+
+def _content_has_bar(item: Mapping[str, object]) -> bool:
+    """Show a bar only for an explicitly marked percentage metric."""
+    return item.get("unit", "") == "%" and item["category"] in _BAR_CATEGORIES
 
 
 def _arrow_groups(arrows: List[Dict[str, object]]) -> List[Dict[str, object]]:
