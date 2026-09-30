@@ -479,8 +479,6 @@ class OmniSoC_Base:
                 next(iter(metric.keys()))
                 for metric in sets_info[args.set_selected]["metric"]
             ]
-        elif args.roof_only:
-            filter_blocks = ["4"]
 
         texts: list[str] = []
         if not filter_blocks:

@@ -45,7 +45,12 @@ There are three high-level GPU analysis views:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze -p workloads/vcopy/MI200/ -b 2
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/ --speed-of-light
+
+.. tip::
+
+   ``--speed-of-light``, ``--memory-chart``, and ``--roofline`` are short forms of
+   ``-b 2``, ``-b 3``, and ``-b 4``. They can be combined with each other and with ``-b``.
 
 .. image:: ../../data/analyze/cli/system_speed_of_light.png
    :align: left
@@ -55,7 +60,7 @@ There are three high-level GPU analysis views:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze -p workloads/vcopy/MI200/ -b 3
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/ --memory-chart
 
 .. image:: ../../data/analyze/cli/mem_chart.png
    :align: left
@@ -92,7 +97,7 @@ To print the block as tables instead of the diagram, see :ref:`cli-view-table`.
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze -p workloads/vcopy/MI200/ -b 4
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/ --roofline
 
 .. image:: ../../data/analyze/cli/roofline_chart.png
    :align: left
@@ -526,23 +531,28 @@ Two-step workflow:
 .. code-block:: shell-session
 
    # Step 1: Profile to generate roofline.csv
-   $ rocprof-compute profile --name vcopy --roof-only -- tests/vcopy -n 1048576 -b 256
+   $ rocprof-compute profile --name vcopy --roofline -- tests/vcopy -n 1048576 -b 256
 
    # Step 2: Analyze to generate HTML roofline plots
    $ rocprof-compute analyze -p workloads/vcopy/MI300A_A1/ -b 4
 
 Roofline visualization options (available only in analyze mode):
 
-* ``--sort``: Overlay top kernels or top dispatches (default: kernels)
-* ``--mem-level``: Filter by memory level -- HBM, L2, vL1D, L0, LDS (default: ALL)
-* ``--roofline-data-type``: Choose datatypes for roofline visualization (default: FP32)
+* ``--roofline-sort``: Overlay top kernels or top dispatches (default: kernels)
+* ``-m``, ``--roofline-mem-level``: Filter by memory level -- HBM, L2, vL1D, L0, LDS (default: ALL)
+* ``-R``, ``--roofline-data-types``: Choose datatypes for roofline visualization (default: FP32)
    * CLI only supports visualizing one precision at a time. Visualizing multiple data types on one plot is available in the Interactive Roofline HTML file.
 
-Example with multiple ``--mem-level`` and ``--roofline-data-type`` options:
+.. note::
+
+   The old names ``--sort``, ``--mem-level``, and ``--roofline-data-type`` still work,
+   but show a warning. They will be removed in a future release.
+
+Example that uses several memory levels and data types:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze -p workloads/vcopy/MI200/ --sort dispatches --mem-level HBM L2 --roofline-data-type FP32 FP16
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/ --roofline-sort dispatches --roofline-mem-level HBM,L2 --roofline-data-types FP32,FP16
 
 Interactive Roofline HTML:
 

@@ -7,11 +7,31 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
+* Added `--speed-of-light`, `--memory-chart`, and `--roofline` options to profile and analyze modes.
+  * They are short forms of `-b 2`, `-b 3`, and `-b 4`.
+  * They can be combined with each other and with `-b`. For example, `--speed-of-light --roofline` is the same as `-b 2,4`.
+
+* Options that take a list now accept values separated by commas, for example `-b 2,5` or `-R FP16,FP32`. Values separated by spaces still work.
+
 ### Changed
 
 * Merged the metric listing options into `--list-metrics`, which now shows the alias of each block and the unit and description of each metric. Per-channel metrics are no longer listed.
   * The GPU architecture is optional. Without it, `--list-metrics` lists the metrics of the current GPU.
   * Use `-b/--block` to list only some blocks or metrics, for example `rocprof-compute --list-metrics gfx950 -b sol 12.1`.
+
+* Renamed the roofline options so they all start with `--roofline`. The old names still work, but show a warning.
+  * Profile mode:
+    * `--roof-only` is now `--roofline`
+    * `--bench-only` is now `--roofline-bench-only`
+    * `--device` is now `--roofline-device`
+  * Analyze mode:
+    * `--sort` is now `--roofline-sort`
+    * `--mem-level` is now `--roofline-mem-level` (`-m` still works)
+    * `--roofline-data-type` is now `--roofline-data-types` (`-R` still works)
+
+* In profile mode, `--roofline` can now be combined with `-b`. For example, `-b 2 --roofline` profiles blocks 2 and 4.
+
+* The profile and analyze help is easier to read. Each option shows what value it takes, the values it accepts, and its default.
 
 ### Removed
 
@@ -25,6 +45,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Upcoming changes
 
 * `--list-blocks` and `--list-available-metrics` are deprecated and will be removed in a future release. Use `--list-metrics` instead.
+
+* The old roofline option names (`--roof-only`, `--bench-only`, `--device`, `--sort`, `--mem-level`, and `--roofline-data-type`) will be removed in a future release. Use the new `--roofline-*` names instead.
 
 ### Known issues
 
