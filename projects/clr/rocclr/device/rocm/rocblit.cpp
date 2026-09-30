@@ -2233,18 +2233,21 @@ bool KernelBlitManager::CopyBufferRectBatch(
   sequential_copy_ops.reserve(copy_ops.size());
 
   for (const amd::BatchCopyRectOp& op : copy_ops) {
-    device::Memory* src_dev_mem =
-        op.src_memory->getDeviceMemory(*op.src_memory->getContext().devices()[0]);
-    device::Memory* dst_dev_mem =
-        op.dst_memory->getDeviceMemory(*op.dst_memory->getContext().devices()[0]);
-    const address src = gpuMem(*src_dev_mem).getDeviceMemory() + op.src_rect.offset(0, 0, 0);
-    const address dst = gpuMem(*dst_dev_mem).getDeviceMemory() + op.dst_rect.offset(0, 0, 0);
+    const Memory& src_memory =
+        gpuMem(*op.src_memory->getDeviceMemory(*op.src_memory->getContext().devices()[0]));
+    const Memory& dst_memory =
+        gpuMem(*op.dst_memory->getDeviceMemory(*op.dst_memory->getContext().devices()[0]));
+    const address src = src_memory.getDeviceMemory() + op.src_rect.offset(0, 0, 0);
+    const address dst = dst_memory.getDeviceMemory() + op.dst_rect.offset(0, 0, 0);
     const bool dword_aligned =
         (reinterpret_cast<uintptr_t>(src) % 4) == 0 &&
         (reinterpret_cast<uintptr_t>(dst) % 4) == 0 && (op.src_rect.rowPitch_ % 4) == 0 &&
         (op.src_rect.slicePitch_ % 4) == 0 && (op.dst_rect.rowPitch_ % 4) == 0 &&
         (op.dst_rect.slicePitch_ % 4) == 0;
-    if (dword_aligned) {
+    const size_t copy_size = op.size[0] * op.size[1] * op.size[2];
+    const bool use_shader_copy_path =
+        useShaderCopyBufferPath(src_memory, dst_memory, copy_size, amd::CopyMetadata());
+    if (dword_aligned && !use_shader_copy_path) {
       dma_copy_ops.push_back(op);
     } else {
       sequential_copy_ops.push_back(op);
