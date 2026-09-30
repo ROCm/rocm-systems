@@ -29,7 +29,7 @@ extern std::atomic<int (*)(activity_domain_t domain, uint32_t operation_id, void
     report_activity;
 
 #if defined(__linux__)
-extern __thread activity_correlation_id_t correlation_id __attribute__((tls_model("initial-exec")));
+extern __thread activity_correlation_id_t correlation_id __attribute__((tls_model("global-dynamic")));
 #elif defined(_WIN32)
 extern __declspec(thread) activity_correlation_id_t correlation_id;
 #endif  // defined(_WIN32)

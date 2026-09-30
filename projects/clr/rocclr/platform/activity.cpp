@@ -27,7 +27,7 @@ void CommitRecord(OpId operation_id) {
 }
 
 #if defined(__linux__)
-__thread activity_correlation_id_t correlation_id __attribute__((tls_model("initial-exec"))) = 0;
+__thread activity_correlation_id_t correlation_id __attribute__((tls_model("global-dynamic"))) = 0;
 #elif defined(_WIN32)
 __declspec(thread) activity_correlation_id_t correlation_id = 0;
 #endif  // defined(_WIN32)

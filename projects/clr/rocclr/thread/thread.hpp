@@ -136,7 +136,7 @@ namespace details {
 
 #if defined(__linux__)
 
-extern __thread Thread* thread_ __attribute__((tls_model("initial-exec")));
+extern __thread Thread* thread_ __attribute__((tls_model("global-dynamic")));
 
 static inline Thread* currentThread() { return thread_; }
 

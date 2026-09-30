@@ -105,7 +105,7 @@ void Thread::resume() {
 
 namespace details {
 
-__thread Thread* thread_ __attribute__((tls_model("initial-exec")));
+__thread Thread* thread_ __attribute__((tls_model("global-dynamic")));
 
 }  // namespace details
 
