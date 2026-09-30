@@ -376,7 +376,8 @@ inline std::vector<uint8_t> make_gfx1200_wave32_kernel_elf(const std::vector<uin
 
 // Target ELF for any of the three DBI-supported ISAs whose descriptor advertises a
 // kernarg segment pointer. The entry prologue rejects a kernel without one, so this
-// is the only builder here that reaches the splice rather than a rejection path.
+// is the only builder here that reaches prologue placement rather than a rejection
+// path.
 inline std::vector<uint8_t> make_kernarg_kernel_elf(const std::vector<uint32_t> &text_words,
                                                     uint32_t private_bytes, uint32_t e_flags,
                                                     uint32_t kernarg_size, bool wave32 = false,

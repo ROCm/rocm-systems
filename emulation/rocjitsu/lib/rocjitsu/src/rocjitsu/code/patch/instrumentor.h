@@ -19,7 +19,8 @@
 ///         |  make_trampoline_plan() + TrampolineBuilder::build()
 ///         v
 ///   (preflight: per-site plan + built bytes, accumulated locally)
-///         |  splice anchors + append trampoline caves into .text + emit()
+///         |  splice anchors + append probe bodies, entry stub and trampolines
+///         |  into .text + redirect the entry to the stub + emit()
 ///         v
 ///   InstrumentedCodeObject      -- patched ELF + per-site InstrumentationPatch
 ///
