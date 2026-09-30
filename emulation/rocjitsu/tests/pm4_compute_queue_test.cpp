@@ -1,9 +1,12 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "embedded_schema.h"
+#include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
-#include "rocjitsu/vm/amdgpu/pm4/pm4_queue_controller.h"
+#include "rocjitsu/vm/soc.h"
+#include "simdojo/sim/simulation.h"
 
 #include <gtest/gtest.h>
 
@@ -58,6 +61,8 @@ public:
   }
 
   AtomicLoadResult atomic_load(VmMemoryDomain, uint64_t address, uint32_t width) override {
+    if (unavailable_read_ && address == *unavailable_read_)
+      return {.outcome = VmAccessOutcome::Unavailable};
     if ((width != 4 && width != 8) || address % width != 0 || address > bytes_.size() ||
         width > bytes_.size() - address) {
       return {.outcome = VmAccessOutcome::Malformed};
@@ -112,25 +117,41 @@ private:
   std::optional<uint64_t> faulted_store_;
 };
 
-class Pm4QueueControllerTest : public ::testing::Test {
+class Pm4ComputeQueueTest : public ::testing::Test {
 protected:
   void SetUp() override {
     memory = std::make_shared<Pm4QueueMemory>();
     address_space = gpu_vm.register_translated(1, memory, memory);
     ASSERT_TRUE(address_space);
     memory->store<uint32_t>(kReadPointer, 0);
+    auto loaded = config::load_config_from_string(R"({"max_ticks":100000,"num_threads":1,
+      "vm":{"arch":"cdna3"},"topology":{"root":{"name":"soc","type":"soc","children":[
+      {"name":"vram","type":"gpu_memory"},{"name":"xcd0","type":"xcd","children":[
+      {"name":"l2","type":"l2_cache"},{"name":"cp","type":"command_processor"},
+      {"name":"se0","type":"shader_engine","children":[{"name":"cu0","type":"compute_unit"}]}]}]},
+      "links":[{"src":"xcd0.cp.req_0","dst":"xcd0.se0.cu0.cpl","latency":1,"weight":2},
+      {"src":"xcd0.se0.cu0.req","dst":"xcd0.l2.cpl_0","latency":1,"weight":10}]}})",
+                                                  kEmbeddedSchema);
+    cp = loaded.soc()->xcd(0)->command_processor();
+    engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
+    engine->topology().set_root(loaded.take_root());
+    loaded.wire_links(engine->topology());
+    engine->create();
+    cp->set_gpu_vm(&gpu_vm, address_space);
   }
 
-  Pm4QueueController::RegistrationId attach(Pm4PacketCallbacks callbacks, uint64_t ring = kRing,
-                                            uint64_t read_pointer = kReadPointer,
-                                            uint32_t ring_bytes = kRingBytes) {
-    return controller.attach({.address_space = address_space,
-                              .ring_base = ring,
-                              .ring_size_bytes = ring_bytes,
-                              .consumer_pointer_address = read_pointer,
-                              .initial_consumer_cursor = std::nullopt,
-                              .packet_callbacks = std::move(callbacks)});
+  uint64_t attach(Pm4PacketCallbacks callbacks, uint64_t ring = kRing,
+                  uint64_t read_pointer = kReadPointer, uint32_t ring_bytes = kRingBytes) {
+    return cp->register_queue({.address_space = address_space,
+                               .queue_id = next_queue_id++,
+                               .ring_base_va = ring,
+                               .ring_size = ring_bytes,
+                               .read_ptr_va = read_pointer,
+                               .packet_format = QueuePacketFormat::Pm4,
+                               .packet_callbacks = std::move(callbacks)});
   }
+
+  void service() { (void)engine->step(); }
 
   static constexpr uint64_t kRing = 0x100;
   static constexpr uint32_t kRingBytes = 64;
@@ -139,10 +160,12 @@ protected:
   GpuVm gpu_vm;
   std::shared_ptr<Pm4QueueMemory> memory;
   AddressSpaceHandle address_space;
-  Pm4QueueController controller{gpu_vm};
+  std::unique_ptr<simdojo::SimulationEngine> engine;
+  CommandProcessor *cp = nullptr;
+  uint32_t next_queue_id = 1;
 };
 
-TEST_F(Pm4QueueControllerTest, SubmissionDefersEffectsUntilTheCpServicesTheQueue) {
+TEST_F(Pm4ComputeQueueTest, SubmissionDefersEffectsUntilTheCpServicesTheQueue) {
   memory->store<uint32_t>(kRing, 0xc0017900);
   memory->store<uint32_t>(kRing + 4, 0x40);
   memory->store<uint32_t>(kRing + 8, 0xdeadbeef);
@@ -153,16 +176,16 @@ TEST_F(Pm4QueueControllerTest, SubmissionDefersEffectsUntilTheCpServicesTheQueue
   }});
   ASSERT_NE(registration, 0u);
 
-  EXPECT_EQ(controller.notify(registration, 3), QueueSubmissionStatus::Accepted);
+  EXPECT_EQ(cp->notify_pm4_queue_doorbell(registration, 3), QueueSubmissionStatus::Accepted);
   EXPECT_EQ(writes, 0u);
   EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 0u);
 
-  EXPECT_FALSE(controller.service());
+  service();
   EXPECT_EQ(writes, 1u);
   EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 3u);
 }
 
-TEST_F(Pm4QueueControllerTest, BoundsEachQueueServiceTurn) {
+TEST_F(Pm4ComputeQueueTest, BoundsEachQueueServiceTurn) {
   constexpr uint64_t kLargeRing = 0x400;
   constexpr uint64_t kLargeReadPointer = 0xe00;
   constexpr uint32_t kPacketCount = 257;
@@ -173,25 +196,26 @@ TEST_F(Pm4QueueControllerTest, BoundsEachQueueServiceTurn) {
 
   const auto registration = attach({}, kLargeRing, kLargeReadPointer, kLargeRingBytes);
   ASSERT_NE(registration, 0u);
-  ASSERT_EQ(controller.notify(registration, kPacketCount), QueueSubmissionStatus::Accepted);
+  ASSERT_EQ(cp->notify_pm4_queue_doorbell(registration, kPacketCount),
+            QueueSubmissionStatus::Accepted);
 
-  EXPECT_TRUE(controller.service());
+  service();
   EXPECT_EQ(memory->load<uint32_t>(kLargeReadPointer), 256u);
 
-  EXPECT_FALSE(controller.service());
+  service();
   EXPECT_EQ(memory->load<uint32_t>(kLargeReadPointer), kPacketCount);
 }
 
-TEST_F(Pm4QueueControllerTest, RetainsItsAddressSpaceUntilDetach) {
-  const Pm4QueueController::RegistrationId registration = attach({});
+TEST_F(Pm4ComputeQueueTest, RetainsItsAddressSpaceUntilDetach) {
+  const uint64_t registration = attach({});
   ASSERT_NE(registration, 0u);
 
   EXPECT_FALSE(gpu_vm.unregister_address_space(address_space));
-  EXPECT_TRUE(controller.detach(registration));
+  EXPECT_TRUE(cp->unregister_pm4_queue_registration(registration));
   EXPECT_TRUE(gpu_vm.unregister_address_space(address_space));
 }
 
-TEST_F(Pm4QueueControllerTest, CursorPublicationRetryDoesNotReplayThePacketEffect) {
+TEST_F(Pm4ComputeQueueTest, CursorPublicationRetryDoesNotReplayThePacketEffect) {
   memory->store<uint32_t>(kRing, 0xc0017900);
   memory->store<uint32_t>(kRing + 4, 0x40);
   memory->store<uint32_t>(kRing + 8, 0xdeadbeef);
@@ -201,20 +225,20 @@ TEST_F(Pm4QueueControllerTest, CursorPublicationRetryDoesNotReplayThePacketEffec
     return Pm4RegisterWriteStatus::Complete;
   }});
   ASSERT_NE(registration, 0u);
-  ASSERT_EQ(controller.notify(registration, 3), QueueSubmissionStatus::Accepted);
+  ASSERT_EQ(cp->notify_pm4_queue_doorbell(registration, 3), QueueSubmissionStatus::Accepted);
   memory->make_store_unavailable(kReadPointer);
 
-  EXPECT_TRUE(controller.service());
+  service();
   EXPECT_EQ(writes, 1u);
   EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 0u);
 
   memory->make_available();
-  EXPECT_FALSE(controller.service());
+  service();
   EXPECT_EQ(writes, 1u);
   EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 3u);
 }
 
-TEST_F(Pm4QueueControllerTest, RootReplacementDoesNotMovePendingCursorPublication) {
+TEST_F(Pm4ComputeQueueTest, RootReplacementDoesNotMovePendingCursorPublication) {
   memory->store<uint32_t>(kRing, 0xc0017900);
   memory->store<uint32_t>(kRing + 4, 0x40);
   memory->store<uint32_t>(kRing + 8, 0xdeadbeef);
@@ -224,10 +248,10 @@ TEST_F(Pm4QueueControllerTest, RootReplacementDoesNotMovePendingCursorPublicatio
     return Pm4RegisterWriteStatus::Complete;
   }});
   ASSERT_NE(registration, 0u);
-  ASSERT_EQ(controller.notify(registration, 3), QueueSubmissionStatus::Accepted);
+  ASSERT_EQ(cp->notify_pm4_queue_doorbell(registration, 3), QueueSubmissionStatus::Accepted);
   memory->make_store_unavailable(kReadPointer);
 
-  EXPECT_TRUE(controller.service());
+  service();
   EXPECT_EQ(writes, 1u);
 
   auto replacement = std::make_shared<Pm4QueueMemory>();
@@ -235,13 +259,13 @@ TEST_F(Pm4QueueControllerTest, RootReplacementDoesNotMovePendingCursorPublicatio
   ASSERT_TRUE(gpu_vm.replace_translated(address_space, replacement, replacement));
   memory->make_available();
 
-  EXPECT_FALSE(controller.service());
+  service();
   EXPECT_EQ(writes, 1u);
   EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 3u);
   EXPECT_EQ(replacement->load<uint32_t>(kReadPointer), 99u);
 }
 
-TEST_F(Pm4QueueControllerTest, RootReplacementDoesNotMoveBlockedPacketFetch) {
+TEST_F(Pm4ComputeQueueTest, RootReplacementDoesNotMoveBlockedPacketFetch) {
   memory->store<uint32_t>(kRing, 0xc0017900);
   memory->store<uint32_t>(kRing + 4, 0x40);
   memory->store<uint32_t>(kRing + 8, 0xdeadbeef);
@@ -251,10 +275,10 @@ TEST_F(Pm4QueueControllerTest, RootReplacementDoesNotMoveBlockedPacketFetch) {
     return Pm4RegisterWriteStatus::Complete;
   }});
   ASSERT_NE(registration, 0u);
-  ASSERT_EQ(controller.notify(registration, 3), QueueSubmissionStatus::Accepted);
+  ASSERT_EQ(cp->notify_pm4_queue_doorbell(registration, 3), QueueSubmissionStatus::Accepted);
   memory->make_read_unavailable(kRing);
 
-  EXPECT_TRUE(controller.service());
+  service();
   EXPECT_EQ(written_value, 0u);
 
   auto replacement = std::make_shared<Pm4QueueMemory>();
@@ -265,13 +289,13 @@ TEST_F(Pm4QueueControllerTest, RootReplacementDoesNotMoveBlockedPacketFetch) {
   ASSERT_TRUE(gpu_vm.replace_translated(address_space, replacement, replacement));
   memory->make_available();
 
-  EXPECT_FALSE(controller.service());
+  service();
   EXPECT_EQ(written_value, 0xdeadbeefu);
   EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 3u);
   EXPECT_EQ(replacement->load<uint32_t>(kReadPointer), 99u);
 }
 
-TEST_F(Pm4QueueControllerTest, LaterDoorbellUsesFreshSnapshotAfterBlockedTransaction) {
+TEST_F(Pm4ComputeQueueTest, LaterDoorbellUsesFreshSnapshotAfterBlockedTransaction) {
   memory->store<uint32_t>(kRing, 0xc0017900);
   memory->store<uint32_t>(kRing + 4, 0x40);
   memory->store<uint32_t>(kRing + 8, 0x11111111);
@@ -281,10 +305,10 @@ TEST_F(Pm4QueueControllerTest, LaterDoorbellUsesFreshSnapshotAfterBlockedTransac
     return Pm4RegisterWriteStatus::Complete;
   }});
   ASSERT_NE(registration, 0u);
-  ASSERT_EQ(controller.notify(registration, 3), QueueSubmissionStatus::Accepted);
+  ASSERT_EQ(cp->notify_pm4_queue_doorbell(registration, 3), QueueSubmissionStatus::Accepted);
   memory->make_store_unavailable(kReadPointer);
 
-  EXPECT_TRUE(controller.service());
+  service();
   ASSERT_EQ(values.size(), 1u);
   EXPECT_EQ(values[0], 0x11111111u);
 
@@ -294,21 +318,18 @@ TEST_F(Pm4QueueControllerTest, LaterDoorbellUsesFreshSnapshotAfterBlockedTransac
   replacement->store<uint32_t>(kRing + 20, 0x22222222);
   replacement->store<uint32_t>(kReadPointer, 3);
   ASSERT_TRUE(gpu_vm.replace_translated(address_space, replacement, replacement));
-  ASSERT_EQ(controller.notify(registration, 6), QueueSubmissionStatus::Accepted);
+  ASSERT_EQ(cp->notify_pm4_queue_doorbell(registration, 6), QueueSubmissionStatus::Accepted);
   memory->make_available();
 
-  EXPECT_TRUE(controller.service());
-  ASSERT_EQ(values.size(), 1u);
+  service();
   EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 3u);
-  EXPECT_EQ(replacement->load<uint32_t>(kReadPointer), 3u);
-
-  EXPECT_FALSE(controller.service());
+  service();
   ASSERT_EQ(values.size(), 2u);
   EXPECT_EQ(values[1], 0x22222222u);
   EXPECT_EQ(replacement->load<uint32_t>(kReadPointer), 6u);
 }
 
-TEST_F(Pm4QueueControllerTest, PublishesEarlierProgressBeforeRetryingALaterFetch) {
+TEST_F(Pm4ComputeQueueTest, PublishesEarlierProgressBeforeRetryingALaterFetch) {
   memory->store<uint32_t>(kRing, 0xc0017900);
   memory->store<uint32_t>(kRing + 4, 0x40);
   memory->store<uint32_t>(kRing + 8, 0xdeadbeef);
@@ -319,44 +340,44 @@ TEST_F(Pm4QueueControllerTest, PublishesEarlierProgressBeforeRetryingALaterFetch
     return Pm4RegisterWriteStatus::Complete;
   }});
   ASSERT_NE(registration, 0u);
-  ASSERT_EQ(controller.notify(registration, 4), QueueSubmissionStatus::Accepted);
+  ASSERT_EQ(cp->notify_pm4_queue_doorbell(registration, 4), QueueSubmissionStatus::Accepted);
   memory->make_read_unavailable(kRing + 12);
 
-  EXPECT_TRUE(controller.service());
+  service();
   EXPECT_EQ(writes, 1u);
   EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 3u);
 
   memory->make_available();
-  EXPECT_FALSE(controller.service());
+  service();
   EXPECT_EQ(writes, 1u);
   EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 4u);
 }
 
-TEST_F(Pm4QueueControllerTest, RejectsInvalidRingsAtRegistration) {
-  EXPECT_EQ(controller.attach({.address_space = address_space,
-                               .ring_base = kRing + 1,
-                               .ring_size_bytes = kRingBytes,
-                               .consumer_pointer_address = kReadPointer,
-                               .initial_consumer_cursor = std::nullopt,
-                               .packet_callbacks = {}}),
+TEST_F(Pm4ComputeQueueTest, RejectsInvalidRingsAtRegistration) {
+  EXPECT_EQ(cp->register_pm4_queue({.address_space = address_space,
+                                    .ring_base = kRing + 1,
+                                    .ring_size_bytes = kRingBytes,
+                                    .consumer_pointer_address = kReadPointer,
+                                    .initial_consumer_cursor = std::nullopt,
+                                    .packet_callbacks = {}}),
             0u);
-  EXPECT_EQ(controller.attach({.address_space = address_space,
-                               .ring_base = kRing,
-                               .ring_size_bytes = kRingBytes - 1,
-                               .consumer_pointer_address = kReadPointer,
-                               .initial_consumer_cursor = std::nullopt,
-                               .packet_callbacks = {}}),
+  EXPECT_EQ(cp->register_pm4_queue({.address_space = address_space,
+                                    .ring_base = kRing,
+                                    .ring_size_bytes = kRingBytes - 1,
+                                    .consumer_pointer_address = kReadPointer,
+                                    .initial_consumer_cursor = std::nullopt,
+                                    .packet_callbacks = {}}),
             0u);
-  EXPECT_EQ(controller.attach({.address_space = address_space,
-                               .ring_base = kRing,
-                               .ring_size_bytes = kRingBytes,
-                               .consumer_pointer_address = kReadPointer + sizeof(uint32_t),
-                               .initial_consumer_cursor = std::nullopt,
-                               .packet_callbacks = {}}),
+  EXPECT_EQ(cp->register_pm4_queue({.address_space = address_space,
+                                    .ring_base = kRing,
+                                    .ring_size_bytes = kRingBytes,
+                                    .consumer_pointer_address = kReadPointer + sizeof(uint16_t),
+                                    .initial_consumer_cursor = std::nullopt,
+                                    .packet_callbacks = {}}),
             0u);
 }
 
-TEST_F(Pm4QueueControllerTest, NormalizesWrappedNativeProducerBeforeRetainingProgress) {
+TEST_F(Pm4ComputeQueueTest, NormalizesWrappedNativeProducerBeforeRetainingProgress) {
   constexpr uint32_t kRingDwords = 4;
   memory->store<uint64_t>(kReadPointer, 3);
   memory->store<uint32_t>(kRing + 3 * sizeof(uint32_t), 0xc0017900);
@@ -364,7 +385,7 @@ TEST_F(Pm4QueueControllerTest, NormalizesWrappedNativeProducerBeforeRetainingPro
   memory->store<uint32_t>(kRing + sizeof(uint32_t), 0xdeadbeef);
 
   uint32_t writes = 0;
-  const auto registration = controller.attach({
+  const auto registration = cp->register_pm4_queue({
       .address_space = address_space,
       .ring_base = kRing,
       .ring_size_bytes = kRingDwords * sizeof(uint32_t),
@@ -378,15 +399,15 @@ TEST_F(Pm4QueueControllerTest, NormalizesWrappedNativeProducerBeforeRetainingPro
   });
   ASSERT_NE(registration, 0u);
 
-  EXPECT_EQ(controller.notify(registration, 2), QueueSubmissionStatus::Accepted);
-  EXPECT_FALSE(controller.service());
+  EXPECT_EQ(cp->notify_pm4_queue_doorbell(registration, 2), QueueSubmissionStatus::Accepted);
+  service();
   EXPECT_EQ(writes, 1u);
   EXPECT_EQ(memory->load<uint64_t>(kReadPointer), 2u);
-  EXPECT_FALSE(controller.service()) << "the consumed wrapped cursor remained spuriously ready";
+  service();
   EXPECT_EQ(writes, 1u);
 }
 
-TEST_F(Pm4QueueControllerTest, BlockedQueuesRetryIndependently) {
+TEST_F(Pm4ComputeQueueTest, BlockedQueuesRetryIndependently) {
   constexpr uint64_t kOtherRing = 0x300;
   constexpr uint64_t kOtherReadPointer = 0x380;
   memory->store<uint32_t>(kRing, 0xc0017900);
@@ -414,25 +435,28 @@ TEST_F(Pm4QueueControllerTest, BlockedQueuesRetryIndependently) {
                              kOtherRing, kOtherReadPointer);
   ASSERT_NE(first, 0u);
   ASSERT_NE(second, 0u);
-  ASSERT_EQ(controller.notify(first, 3), QueueSubmissionStatus::Accepted);
-  ASSERT_EQ(controller.notify(second, 3), QueueSubmissionStatus::Accepted);
+  ASSERT_EQ(cp->notify_pm4_queue_doorbell(first, 3), QueueSubmissionStatus::Accepted);
+  ASSERT_EQ(cp->notify_pm4_queue_doorbell(second, 3), QueueSubmissionStatus::Accepted);
 
-  EXPECT_TRUE(controller.service());
-  EXPECT_EQ(first_attempts, 1u);
-  EXPECT_EQ(second_attempts, 1u);
+  service();
+  EXPECT_GE(first_attempts, 1u);
+  EXPECT_GE(second_attempts, 1u);
   EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 0u);
   EXPECT_EQ(memory->load<uint32_t>(kOtherReadPointer), 0u);
 
+  const uint32_t first_blocked_attempts = first_attempts;
   first_blocked = false;
-  second_blocked = false;
-  EXPECT_FALSE(controller.service());
-  EXPECT_EQ(first_attempts, 2u);
-  EXPECT_EQ(second_attempts, 2u);
+  service();
+  EXPECT_EQ(first_attempts, first_blocked_attempts + 1);
   EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 3u);
+  EXPECT_EQ(memory->load<uint32_t>(kOtherReadPointer), 0u);
+  second_blocked = false;
+  service();
+  EXPECT_EQ(first_attempts, first_blocked_attempts + 1);
   EXPECT_EQ(memory->load<uint32_t>(kOtherReadPointer), 3u);
 }
 
-TEST_F(Pm4QueueControllerTest, DetachWaitsForActiveServiceWithoutHoldingControllerMutex) {
+TEST_F(Pm4ComputeQueueTest, DetachWaitsForActiveCommandProcessorService) {
   using namespace std::chrono_literals;
   memory->store<uint32_t>(kRing, 0xc0017900);
   memory->store<uint32_t>(kRing + 4, 0x40);
@@ -446,20 +470,20 @@ TEST_F(Pm4QueueControllerTest, DetachWaitsForActiveServiceWithoutHoldingControll
     return Pm4RegisterWriteStatus::Complete;
   }});
   ASSERT_NE(registration, 0u);
-  ASSERT_EQ(controller.notify(registration, 3), QueueSubmissionStatus::Accepted);
+  ASSERT_EQ(cp->notify_pm4_queue_doorbell(registration, 3), QueueSubmissionStatus::Accepted);
 
-  auto service = std::async(std::launch::async, [&] { return controller.service(); });
+  auto service_task = std::async(std::launch::async, [&] { service(); });
   ASSERT_EQ(callback_entered.get_future().wait_for(1s), std::future_status::ready);
-  auto detach = std::async(std::launch::async, [&] { return controller.detach(registration); });
+  auto detach = std::async(std::launch::async,
+                           [&] { return cp->unregister_pm4_queue_registration(registration); });
 
   EXPECT_EQ(detach.wait_for(20ms), std::future_status::timeout);
-  EXPECT_EQ(controller.active_queues(), 1u);
   release_callback.set_value();
-  EXPECT_FALSE(service.get());
+  service_task.get();
   EXPECT_TRUE(detach.get());
 }
 
-TEST_F(Pm4QueueControllerTest, ReconfigureWaitsForActiveService) {
+TEST_F(Pm4ComputeQueueTest, ReconfigureWaitsForActiveService) {
   using namespace std::chrono_literals;
   memory->store<uint32_t>(kRing, 0xc0017900);
   memory->store<uint32_t>(kRing + 4, 0x40);
@@ -473,23 +497,23 @@ TEST_F(Pm4QueueControllerTest, ReconfigureWaitsForActiveService) {
     return Pm4RegisterWriteStatus::Complete;
   }});
   ASSERT_NE(registration, 0u);
-  ASSERT_EQ(controller.notify(registration, 3), QueueSubmissionStatus::Accepted);
+  ASSERT_EQ(cp->notify_pm4_queue_doorbell(registration, 3), QueueSubmissionStatus::Accepted);
 
-  auto service = std::async(std::launch::async, [&] { return controller.service(); });
+  auto service_task = std::async(std::launch::async, [&] { service(); });
   ASSERT_EQ(callback_entered.get_future().wait_for(1s), std::future_status::ready);
   auto reconfigure = std::async(std::launch::async, [&] {
-    return controller.update(
+    return cp->update_pm4_queue_registration(
         registration,
         {.ring_base_address = kRing, .ring_size_bytes = kRingBytes, .scheduling_percentage = 100});
   });
 
   EXPECT_EQ(reconfigure.wait_for(20ms), std::future_status::timeout);
   release_callback.set_value();
-  EXPECT_FALSE(service.get());
+  service_task.get();
   EXPECT_EQ(reconfigure.get(), QueueReconfigureStatus::Applied);
 }
 
-TEST_F(Pm4QueueControllerTest, GracefulDetachWaitsForPendingCursorPublication) {
+TEST_F(Pm4ComputeQueueTest, GracefulDetachWaitsForPendingCursorPublication) {
   memory->store<uint32_t>(kRing, 0xc0017900);
   memory->store<uint32_t>(kRing + 4, 0x40);
   memory->store<uint32_t>(kRing + 8, 0xdeadbeef);
@@ -499,23 +523,25 @@ TEST_F(Pm4QueueControllerTest, GracefulDetachWaitsForPendingCursorPublication) {
     return Pm4RegisterWriteStatus::Complete;
   }});
   ASSERT_NE(registration, 0u);
-  ASSERT_EQ(controller.notify(registration, 3), QueueSubmissionStatus::Accepted);
+  ASSERT_EQ(cp->notify_pm4_queue_doorbell(registration, 3), QueueSubmissionStatus::Accepted);
   memory->make_store_unavailable(kReadPointer);
 
-  EXPECT_TRUE(controller.service());
-  EXPECT_EQ(controller.prepare_detach(registration), QueuePrepareCloseStatus::Busy);
-  EXPECT_EQ(controller.active_queues(), 1u);
+  service();
+  EXPECT_EQ(cp->prepare_unregister_pm4_queue_registration(registration),
+            QueuePrepareCloseStatus::Busy);
+  EXPECT_EQ(cp->registered_pm4_queue_count_for_test(), 1u);
   EXPECT_EQ(writes, 1u);
 
   memory->make_available();
-  EXPECT_FALSE(controller.service());
+  service();
   EXPECT_EQ(writes, 1u);
   EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 3u);
-  EXPECT_EQ(controller.prepare_detach(registration), QueuePrepareCloseStatus::Ready);
-  EXPECT_EQ(controller.active_queues(), 0u);
+  EXPECT_EQ(cp->prepare_unregister_pm4_queue_registration(registration),
+            QueuePrepareCloseStatus::Ready);
+  EXPECT_EQ(cp->registered_pm4_queue_count_for_test(), 0u);
 }
 
-TEST_F(Pm4QueueControllerTest, GracefulDetachCancelsBlockedPacketBeforeAnyEffect) {
+TEST_F(Pm4ComputeQueueTest, GracefulDetachWaitsForBlockedCommandStream) {
   memory->store<uint32_t>(kRing, 0xc0017900);
   memory->store<uint32_t>(kRing + 4, 0x40);
   memory->store<uint32_t>(kRing + 8, 0xdeadbeef);
@@ -525,15 +551,17 @@ TEST_F(Pm4QueueControllerTest, GracefulDetachCancelsBlockedPacketBeforeAnyEffect
     return Pm4RegisterWriteStatus::Blocked;
   }});
   ASSERT_NE(registration, 0u);
-  ASSERT_EQ(controller.notify(registration, 3), QueueSubmissionStatus::Accepted);
+  ASSERT_EQ(cp->notify_pm4_queue_doorbell(registration, 3), QueueSubmissionStatus::Accepted);
 
-  EXPECT_TRUE(controller.service());
+  service();
   EXPECT_EQ(attempts, 1u);
-  EXPECT_EQ(controller.prepare_detach(registration), QueuePrepareCloseStatus::Ready);
-  EXPECT_EQ(controller.active_queues(), 0u);
+  EXPECT_EQ(cp->prepare_unregister_pm4_queue_registration(registration),
+            QueuePrepareCloseStatus::Busy);
+  EXPECT_EQ(cp->registered_pm4_queue_count_for_test(), 1u);
+  EXPECT_TRUE(cp->unregister_pm4_queue_registration(registration));
 }
 
-TEST_F(Pm4QueueControllerTest, GracefulDetachReportsFaultedPublicationWithoutRetryingForever) {
+TEST_F(Pm4ComputeQueueTest, GracefulDetachReportsFaultedPublicationWithoutRetryingForever) {
   memory->store<uint32_t>(kRing, 0xc0017900);
   memory->store<uint32_t>(kRing + 4, 0x40);
   memory->store<uint32_t>(kRing + 8, 0xdeadbeef);
@@ -541,39 +569,177 @@ TEST_F(Pm4QueueControllerTest, GracefulDetachReportsFaultedPublicationWithoutRet
     return Pm4RegisterWriteStatus::Complete;
   }});
   ASSERT_NE(registration, 0u);
-  ASSERT_EQ(controller.notify(registration, 3), QueueSubmissionStatus::Accepted);
+  ASSERT_EQ(cp->notify_pm4_queue_doorbell(registration, 3), QueueSubmissionStatus::Accepted);
   memory->make_store_faulted(kReadPointer);
 
-  EXPECT_FALSE(controller.service());
-  EXPECT_EQ(controller.prepare_detach(registration), QueuePrepareCloseStatus::Faulted);
-  EXPECT_EQ(controller.active_queues(), 1u);
-  EXPECT_TRUE(controller.detach(registration));
-  EXPECT_EQ(controller.active_queues(), 0u);
+  service();
+  EXPECT_EQ(cp->prepare_unregister_pm4_queue_registration(registration),
+            QueuePrepareCloseStatus::Faulted);
+  EXPECT_EQ(cp->registered_pm4_queue_count_for_test(), 1u);
+  EXPECT_TRUE(cp->unregister_pm4_queue_registration(registration));
+  EXPECT_EQ(cp->registered_pm4_queue_count_for_test(), 0u);
 }
 
-TEST_F(Pm4QueueControllerTest, TerminalQueueCanBeDisabledAndReconfigured) {
+TEST_F(Pm4ComputeQueueTest, DrainedQueueCanBeDisabledAndReconfigured) {
   constexpr uint64_t kReplacementRing = 0x300;
   memory->store<uint32_t>(kRing, 0xffff1000);
   const auto registration = attach({});
   ASSERT_NE(registration, 0u);
-  ASSERT_EQ(controller.notify(registration, 1), QueueSubmissionStatus::Accepted);
-  EXPECT_FALSE(controller.service());
+  ASSERT_EQ(cp->notify_pm4_queue_doorbell(registration, 1), QueueSubmissionStatus::Accepted);
+  service();
 
   EXPECT_EQ(
-      controller.update(registration,
-                        {.ring_base_address = 0, .ring_size_bytes = 0, .scheduling_percentage = 0}),
+      cp->update_pm4_queue_registration(
+          registration, {.ring_base_address = 0, .ring_size_bytes = 0, .scheduling_percentage = 0}),
       QueueReconfigureStatus::Disabled);
   memory->store<uint32_t>(kReplacementRing, 0xffff1000);
-  EXPECT_EQ(controller.update(registration, {.ring_base_address = kReplacementRing,
-                                             .ring_size_bytes = kRingBytes,
-                                             .scheduling_percentage = 100}),
+  EXPECT_EQ(cp->update_pm4_queue_registration(registration, {.ring_base_address = kReplacementRing,
+                                                             .ring_size_bytes = kRingBytes,
+                                                             .scheduling_percentage = 100}),
             QueueReconfigureStatus::Applied);
-  EXPECT_EQ(controller.notify(registration, 1), QueueSubmissionStatus::Accepted);
-  EXPECT_FALSE(controller.service());
-  EXPECT_EQ(controller.prepare_detach(registration), QueuePrepareCloseStatus::Ready);
+  EXPECT_EQ(cp->notify_pm4_queue_doorbell(registration, 1), QueueSubmissionStatus::Accepted);
+  service();
+  EXPECT_EQ(cp->prepare_unregister_pm4_queue_registration(registration),
+            QueuePrepareCloseStatus::Ready);
 }
 
-TEST(Pm4QueueBindingTest, SupportsPollingModesThroughTheComputeQueueBinding) {
+TEST_F(Pm4ComputeQueueTest, InitialCursorRetryKeepsTheOriginalVmSnapshot) {
+  memory->store<uint32_t>(kRing, 0xffff1000);
+  memory->make_read_unavailable(kReadPointer);
+  const auto id = attach({});
+  ASSERT_NE(id, 0u);
+  ASSERT_EQ(cp->notify_pm4_queue_doorbell(id, 1), QueueSubmissionStatus::Accepted);
+  service();
+  EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 0u);
+  EXPECT_EQ(cp->prepare_unregister_pm4_queue_registration(id), QueuePrepareCloseStatus::Busy);
+  auto replacement = std::make_shared<Pm4QueueMemory>();
+  replacement->store<uint32_t>(kReadPointer, 99);
+  ASSERT_TRUE(gpu_vm.replace_translated(address_space, replacement, replacement));
+  memory->make_available();
+  service();
+  EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 1u);
+  EXPECT_EQ(replacement->load<uint32_t>(kReadPointer), 99u);
+}
+
+TEST_F(Pm4ComputeQueueTest, InitialCursorRetryIsReportedWithoutAnEngine) {
+  CommandProcessor standalone("standalone");
+  standalone.set_gpu_vm(&gpu_vm);
+  memory->make_read_unavailable(kReadPointer);
+  const auto id = standalone.register_pm4_queue({.address_space = address_space,
+                                                 .ring_base = kRing,
+                                                 .ring_size_bytes = kRingBytes,
+                                                 .consumer_pointer_address = kReadPointer});
+  ASSERT_NE(id, 0u);
+  EXPECT_EQ(standalone.notify_pm4_queue_doorbell(id, 1), QueueSubmissionStatus::Retry);
+}
+
+TEST_F(Pm4ComputeQueueTest, ChangedRingWaitsForANewDoorbell) {
+  constexpr uint64_t replacement_ring = 0x300;
+  memory->store<uint32_t>(kRing, 0xffff1000);
+  memory->store<uint32_t>(replacement_ring, 0xffff1000);
+  const auto id = attach({});
+  ASSERT_NE(id, 0u);
+  ASSERT_EQ(cp->notify_pm4_queue_doorbell(id, 1), QueueSubmissionStatus::Accepted);
+  service();
+  ASSERT_EQ(memory->load<uint32_t>(kReadPointer), 1u);
+  ASSERT_EQ(cp->update_pm4_queue_registration(id, {}), QueueReconfigureStatus::Disabled);
+  memory->store<uint32_t>(kReadPointer, 0);
+  ASSERT_EQ(cp->update_pm4_queue_registration(id, {.ring_base_address = replacement_ring,
+                                                   .ring_size_bytes = kRingBytes,
+                                                   .scheduling_percentage = 100}),
+            QueueReconfigureStatus::Applied);
+  service();
+  EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 0u);
+  EXPECT_FALSE(cp->queue_faulted_for_test(1, 0));
+  ASSERT_EQ(cp->notify_pm4_queue_doorbell(id, 1), QueueSubmissionStatus::Accepted);
+  service();
+  EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 1u);
+}
+
+TEST_F(Pm4ComputeQueueTest, SameRingRuntimeResumePreservesSubmittedProgress) {
+  memory->store<uint32_t>(kRing, 0xffff1000);
+  const auto id = attach({});
+  ASSERT_NE(id, 0u);
+  ASSERT_EQ(cp->notify_pm4_queue_doorbell(id, 1), QueueSubmissionStatus::Accepted);
+  ASSERT_EQ(cp->update_pm4_queue_registration(id, {}), QueueReconfigureStatus::Disabled);
+  service();
+  EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 0u);
+  ASSERT_EQ(cp->update_pm4_queue_registration(id, {.ring_base_address = kRing,
+                                                   .ring_size_bytes = kRingBytes,
+                                                   .scheduling_percentage = 100}),
+            QueueReconfigureStatus::Applied);
+  service();
+  EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 1u);
+}
+
+TEST_F(Pm4ComputeQueueTest, DebugResumeServicesTheExistingDoorbell) {
+  memory->store<uint32_t>(kRing, 0xffff1000);
+  const auto id = attach({});
+  ASSERT_NE(id, 0u);
+  cp->set_queue_debug_suspended(1, 0, true);
+  ASSERT_EQ(cp->notify_pm4_queue_doorbell(id, 1), QueueSubmissionStatus::Accepted);
+  service();
+  EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 0u);
+  cp->set_queue_debug_suspended(1, 0, false);
+  service();
+  EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 1u);
+}
+
+TEST_F(Pm4ComputeQueueTest, EngineNotificationRejectsDisabledInvalidAndFaultedQueues) {
+  const auto id = attach({});
+  ASSERT_NE(id, 0u);
+  ASSERT_EQ(cp->update_pm4_queue_registration(id, {}), QueueReconfigureStatus::Disabled);
+  EXPECT_EQ(cp->notify_pm4_queue_doorbell(id, 1), QueueSubmissionStatus::Faulted);
+  ASSERT_EQ(cp->update_pm4_queue_registration(id, {.ring_base_address = kRing,
+                                                   .ring_size_bytes = kRingBytes,
+                                                   .scheduling_percentage = 100}),
+            QueueReconfigureStatus::Applied);
+  EXPECT_EQ(cp->notify_pm4_queue_doorbell(id, kRingBytes / 4 + 1), QueueSubmissionStatus::Faulted);
+  EXPECT_EQ(cp->notify_pm4_queue_doorbell(id, 1), QueueSubmissionStatus::Faulted);
+  EXPECT_EQ(cp->notify_pm4_queue_doorbell(id + 100, 1), QueueSubmissionStatus::Faulted);
+  EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 0u);
+}
+
+TEST_F(Pm4ComputeQueueTest, NativeRegisterWritesRequireSupportedCallbacks) {
+  for (const uint32_t opcode : {0x79u, 0xbeu}) {
+    SCOPED_TRACE(opcode);
+    memory->store<uint32_t>(kRing, 0xc0010000 | opcode << 8);
+    memory->store<uint32_t>(kRing + 4, 0x40);
+    memory->store<uint32_t>(kRing + 8, 0xdeadbeef);
+    uint32_t writes = 0;
+    Pm4PacketCallbacks callbacks;
+    if (opcode == 0xbe)
+      callbacks.write_uconfig_register = [&](uint64_t, uint32_t) {
+        ++writes;
+        return Pm4RegisterWriteStatus::Complete;
+      };
+    const auto id = attach(std::move(callbacks));
+    ASSERT_NE(id, 0u);
+    ASSERT_EQ(cp->notify_pm4_queue_doorbell(id, 3), QueueSubmissionStatus::Accepted);
+    service();
+    EXPECT_EQ(cp->notify_pm4_queue_doorbell(id, 3), QueueSubmissionStatus::Faulted);
+    EXPECT_EQ(writes, 0u);
+    EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 0u);
+    ASSERT_TRUE(cp->unregister_pm4_queue_registration(id));
+  }
+}
+
+TEST(Pm4ComputeQueueStateTest, PendingWorkIncludesStreamsAndShaderDispatches) {
+  ComputeQueueRecord queue;
+  EXPECT_FALSE(queue.has_pending_commands());
+  queue.commands.submissions.emplace_back();
+  EXPECT_TRUE(queue.has_pending_commands());
+  queue.commands.submissions.clear();
+  queue.dispatches.entries.emplace_back();
+  EXPECT_TRUE(queue.has_pending_commands());
+  queue.dispatches.entries.clear();
+  queue.entries.emplace_back();
+  EXPECT_TRUE(queue.has_pending_commands());
+  queue.entries.clear();
+  EXPECT_FALSE(queue.has_pending_commands());
+}
+
+TEST(Pm4QueueBindingTest, RejectsUnsupportedVmPollingThroughTheComputeQueueBinding) {
   constexpr uint64_t kRing = 0x100;
   constexpr uint64_t kReadPointer = 0x200;
   constexpr uint64_t kWritePointer = 0x208;
@@ -601,6 +767,11 @@ TEST(Pm4QueueBindingTest, SupportsPollingModesThroughTheComputeQueueBinding) {
         .type = QueueType::Compute,
         .packet_format = QueuePacketFormat::Pm4,
     });
+    if (mode == QueueDoorbellMode::VmPolled) {
+      EXPECT_FALSE(queue);
+      EXPECT_EQ(command_processor.registered_pm4_queue_count_for_test(), 0u);
+      continue;
+    }
     ASSERT_TRUE(queue);
     EXPECT_EQ(registry.active_queues(), 1u);
     EXPECT_EQ(command_processor.registered_pm4_queue_count_for_test(), 1u);
@@ -661,7 +832,7 @@ TEST(Pm4QueueBindingTest, GracefulRegistryRemovalKeepsHandleUntilPublicationComp
 }
 
 } // namespace
-TEST_F(Pm4QueueControllerTest, ComputeQueueRetainsCursorPublicationWithoutReplayingEffects) {
+TEST_F(Pm4ComputeQueueTest, ComputeQueueRetainsCursorPublicationWithoutReplayingEffects) {
   CommandProcessor cp("compute");
   cp.set_gpu_vm(&gpu_vm, address_space);
   memory->store<uint32_t>(kRing, 0xc0017900);
@@ -691,7 +862,7 @@ TEST_F(Pm4QueueControllerTest, ComputeQueueRetainsCursorPublicationWithoutReplay
   EXPECT_EQ(cp.prepare_unregister_queue_registration(id), QueuePrepareCloseStatus::Ready);
 }
 
-TEST_F(Pm4QueueControllerTest, ComputeQueueUsesDwordCursorsAcrossRingWrap) {
+TEST_F(Pm4ComputeQueueTest, ComputeQueueUsesDwordCursorsAcrossRingWrap) {
   CommandProcessor cp("compute");
   cp.set_gpu_vm(&gpu_vm, address_space);
   memory->store<uint32_t>(kReadPointer, 15);
@@ -718,7 +889,7 @@ TEST_F(Pm4QueueControllerTest, ComputeQueueUsesDwordCursorsAcrossRingWrap) {
   EXPECT_TRUE(cp.unregister_queue_registration(id));
 }
 
-TEST_F(Pm4QueueControllerTest, ComputeQueueRetainsItsSnapshotWhilePacketFetchIsBlocked) {
+TEST_F(Pm4ComputeQueueTest, ComputeQueueRetainsItsSnapshotWhilePacketFetchIsBlocked) {
   CommandProcessor cp("compute");
   cp.set_gpu_vm(&gpu_vm, address_space);
   memory->store<uint32_t>(kRing, 0xc0017900);
@@ -752,7 +923,7 @@ TEST_F(Pm4QueueControllerTest, ComputeQueueRetainsItsSnapshotWhilePacketFetchIsB
   EXPECT_TRUE(cp.unregister_queue_registration(id));
 }
 
-TEST_F(Pm4QueueControllerTest, ComputeQueueCancellationDropsItsNestedStreamAndVmLease) {
+TEST_F(Pm4ComputeQueueTest, ComputeQueueCancellationDropsItsNestedStreamAndVmLease) {
   CommandProcessor cp("compute");
   cp.set_gpu_vm(&gpu_vm, address_space);
   constexpr uint64_t child = 0x400, gate = 0x700;

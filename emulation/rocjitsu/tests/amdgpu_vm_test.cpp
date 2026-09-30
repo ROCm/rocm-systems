@@ -7752,9 +7752,8 @@ TEST(Pm4DispatchTest, BooleanPredicationOrdersReadsAndOnlySuppressesFlaggedPacke
        {"rdna1", "rdna2", "rdna3", "rdna3_5", "rdna4", "cdna1", "cdna2", "cdna3", "cdna4"}) {
     SCOPED_TRACE(arch);
     VmFixture f(arch, 1, 8, 64, 106, 256, 1, 0);
-    amdgpu::Pm4SubmitQueue queue;
+    amdgpu::ComputeQueueConfig queue;
     queue.queue_id = 71;
-    queue.pm4 = std::make_shared<amdgpu::Pm4QueueState>();
     ASSERT_TRUE(f.cp()->register_drm_queue(std::move(queue)));
     constexpr uint64_t ib = 0x4000, predicate = 0x6000, output = 0x7000;
     std::vector<uint32_t> words;

@@ -22,8 +22,6 @@ set(CP_SOURCES
     lib/rocjitsu/src/rocjitsu/vm/amdgpu/pm4/pm4_packet_processor.cpp
     lib/rocjitsu/src/rocjitsu/vm/amdgpu/pm4/pm4_queue_binding_factory.h
     lib/rocjitsu/src/rocjitsu/vm/amdgpu/pm4/pm4_queue_binding_factory.cpp
-    lib/rocjitsu/src/rocjitsu/vm/amdgpu/pm4/pm4_queue_controller.h
-    lib/rocjitsu/src/rocjitsu/vm/amdgpu/pm4/pm4_queue_controller.cpp
 )
 
 foreach(SOURCE_FILE IN LISTS CP_SOURCES)

@@ -91,6 +91,7 @@ struct ComputeQueueConfig {
   Pm4PacketCallbacks packet_callbacks{};
   /// DRM supplies command buffers directly rather than a user-mode ring.
   bool submission_queue = false;
+  uint32_t scheduling_percentage = 100;
 };
 
 struct WorkgroupCoord {
@@ -703,6 +704,13 @@ struct ComputeQueueRecord : ComputeQueueConfig {
   Pm4DispatchState dispatches;
   /// Exact VM snapshot used for a root PM4 ring batch and its cursor writeback.
   std::optional<GpuVmAccess> command_access;
+  // A transient VM access is retried only on a later CP pass.
+  bool command_retry_pending = false;
+  bool command_fault_pending = false;
+  [[nodiscard]] bool has_pending_commands() const {
+    return !entries.empty() || !dispatches.entries.empty() || !commands.submissions.empty() ||
+           command_access.has_value() || read_pointer_journal.publication_pending();
+  }
 
   enum class Status { Idle, Active, Blocked };
 
@@ -719,7 +727,7 @@ struct ComputeQueueRecord : ComputeQueueConfig {
   /// tears it down; fault notification is handled separately.
   bool faulted = false;
   bool debug_suspended = false;
-  bool runtime_suspended = false;
+  bool runtime_suspended = scheduling_percentage == 0;
   bool exception_suspended = false;
   [[nodiscard]] bool suspended() const {
     return debug_suspended || runtime_suspended || exception_suspended;

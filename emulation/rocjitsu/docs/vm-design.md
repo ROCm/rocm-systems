@@ -33,11 +33,11 @@ execution.
 | `amdgpu/packet_processor.h` | Shared compile-time one-packet contract and validated protocol-independent result envelope |
 | `amdgpu/aql_packet_processor.h/cpp` | AqlPacketProcessor: fixed-size AQL decode and durable CP admission |
 | `amdgpu/pm4_packet_processor.h/cpp` | Pm4PacketProcessor: PM4 framing, validation, and supported packet effects |
-| `amdgpu/pm4_ring_consumer.h/cpp` | `Pm4RingConsumer`: per-queue ring traversal, retry, and cursor publication owned by the CP |
-| `amdgpu/pm4_queue_controller.h/cpp` | Pm4QueueController: CP-owned PM4 queue, VM snapshot, retry, and cursor-publication state |
+| `amdgpu/pm4_ring_consumer.h/cpp` | `Pm4RingConsumer`: standalone ring traversal helper; production compute queues execute in CommandProcessor |
+| `amdgpu/dispatch_entry.h` | ComputeQueueRecord: CP-owned AQL/PM4 queues, nested command streams, shader dispatches and cursor publication |
 | `amdgpu/pm4_queue_binding_factory.h/cpp` | Thin PM4 lifetime/notification adapter from GpuQueueRegistry to the owning CP |
 | `amdgpu/gpu_queue_registry.h/cpp` | Frontend-neutral queue admission, lifetime, routing, and generation-safe handles |
-| `amdgpu/aql_queue_binding_factory.h/cpp` | Reusable binding adapter from GpuQueueRegistry to the AQL command processor |
+| `amdgpu/compute_queue_binding_factory.h/cpp` | Reusable binding adapter from GpuQueueRegistry to the unified compute command processor |
 
 ---
 
