@@ -43,6 +43,24 @@ uint32_t for_each_coalesced_lane_run(const uint64_t *addrs, uint64_t lane_mask, 
   return run_count;
 }
 
+// A single element wholly inside its swizzle unit already has its final
+// address. In particular, adjacent lanes of a DWORD scratch spill form a
+// contiguous run: don't turn one wave store into 32 independent VM snapshots.
+bool single_element_is_linear(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
+                              uint32_t num_elems, uint32_t swizzle_unit,
+                              uint32_t addr_base_offset) {
+  assert((swizzle_unit == 4 || swizzle_unit == 16) && addr_base_offset < swizzle_unit);
+  if (num_elems != 1 || elem_size > swizzle_unit)
+    return false;
+  while (lane_mask) {
+    const uint32_t lane = std::countr_zero(lane_mask);
+    lane_mask &= lane_mask - 1;
+    if ((addrs[lane] - addr_base_offset) % swizzle_unit + elem_size > swizzle_unit)
+      return false;
+  }
+  return true;
+}
+
 bool all_elements_use_lane_mask(std::span<const uint64_t> element_lane_masks, uint64_t lane_mask,
                                 uint32_t num_elems) {
   if (element_lane_masks.empty())
@@ -281,6 +299,9 @@ VmAccessOutcome L1VectorCache::load(const uint64_t *addrs, uint64_t lane_mask, u
   // rather than strided over. With no element masks this walks exactly the
   // lanes and bytes the uniform path would. addr_base_offset identifies the
   // low bits added after swizzling so they do not move the logical swizzle-unit boundary.
+  if (addr_stride != 0 && single_element_is_linear(addrs, lane_mask, elem_size, num_elems,
+                                                   swizzle_unit, addr_base_offset))
+    addr_stride = 0;
   if (addr_stride != 0) {
     assert((swizzle_unit == 4 || swizzle_unit == 16) && addr_base_offset < swizzle_unit);
     const uint32_t astride = addr_stride;
@@ -365,6 +386,9 @@ VmAccessOutcome L1VectorCache::store(const uint64_t *addrs, uint64_t lane_mask, 
   // rather than strided over. With no element masks this walks exactly the
   // lanes and bytes the uniform path would. addr_base_offset identifies the
   // low bits added after swizzling so they do not move the logical swizzle-unit boundary.
+  if (addr_stride != 0 && single_element_is_linear(addrs, lane_mask, elem_size, num_elems,
+                                                   swizzle_unit, addr_base_offset))
+    addr_stride = 0;
   if (addr_stride != 0) {
     assert((swizzle_unit == 4 || swizzle_unit == 16) && addr_base_offset < swizzle_unit);
     const uint32_t astride = addr_stride;
