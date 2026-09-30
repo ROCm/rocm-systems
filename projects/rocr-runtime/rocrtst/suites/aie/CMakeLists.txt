@@ -431,23 +431,13 @@ target_include_directories(test_dispatch PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/../../../runtime/hsa-runtime)
 target_compile_definitions(test_dispatch
   PRIVATE
-    DEFAULT_PDI_PATH=${vsadd_DESIGN_PDI}
-    DEFAULT_INSTS_PATH=${vsadd_INSTS_BIN}
-    # The kernel is addressed as "<device>:<sequence>", the names aiecc writes
-    # into aie.mlir.prj/full_elf_config.json. Neither design names its
-    # aie.device or its runtime sequence, so aiecc defaults them to "main" and
-    # "sequence" for both.
-    DEFAULT_ELF_PATH=${vsadd_FULL_ELF}
-    DEFAULT_ELF_KERNEL_NAME="main:sequence"
-    MUL_PDI_PATH=${vsmul_DESIGN_PDI}
-    MUL_INSTS_PATH=${vsmul_INSTS_BIN}
-    MUL_ELF_PATH=${vsmul_FULL_ELF}
     MUL_SCALE=${VSMUL_SCALE}
     DEFAULT_HSACO_PATH=${vsadd_HSACO}
     DEFAULT_HSACO_KERNEL_NAME="${VSADD_HSACO_KERNEL_NAME}"
     DEFAULT_ELF_HSACO_PATH=${vsadd_ELF_HSACO}
-    # Same "<device>:<sequence>" kernel key as DEFAULT_ELF_KERNEL_NAME above; aie-hsaco's elf:
-    # form derives the hsaco's kernel name from the same underlying ELF, so the two must match.
+    # The kernel is addressed as "<device>:<sequence>", which aie-hsaco's elf: form derives from
+    # the nested ELF. Neither design names its aie.device or its runtime sequence, so aiecc
+    # defaults them to "main" and "sequence" for both.
     DEFAULT_ELF_HSACO_KERNEL_NAME="main:sequence"
     MUL_HSACO_PATH=${vsmul_HSACO}
     MUL_HSACO_KERNEL_NAME="${VSMUL_HSACO_KERNEL_NAME}"

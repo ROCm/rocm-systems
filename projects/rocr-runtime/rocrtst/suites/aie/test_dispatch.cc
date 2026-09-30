@@ -119,29 +119,6 @@ bool read_exact(std::ifstream& f, void* dst, std::size_t size) {
   return static_cast<std::size_t>(f.gcount()) == size;
 }
 
-testing::AssertionResult load_binary(hsa_amd_memory_pool_t pool, const std::filesystem::path& path,
-                                     void** buf, std::size_t& size_out) {
-  std::size_t size = 0;
-  auto f = open_binary(path, &size);
-  if (!f) {
-    return testing::AssertionFailure() << "failed to open '" << path << "'";
-  }
-
-  if (hsa_amd_memory_pool_allocate(pool, size, 0, buf) != HSA_STATUS_SUCCESS) {
-    return testing::AssertionFailure()
-        << "failed to allocate " << size << " bytes for '" << path << "'";
-  }
-
-  if (!read_exact(f, *buf, size)) {
-    hsa_amd_memory_pool_free(*buf);
-    *buf = nullptr;
-    return testing::AssertionFailure()
-        << "short read loading '" << path << "' (expected " << size << " bytes)";
-  }
-  size_out = size;
-  return testing::AssertionSuccess();
-}
-
 // ---------------------------------------------------------------------------
 // Virtual memory (vmem) allocation
 // ---------------------------------------------------------------------------
@@ -231,35 +208,6 @@ testing::AssertionResult vmem_free(const vmem_buffer& buf) {
   }
   return result;
 }
-
-#if 0
-// Load a file into a freshly vmem-allocated buffer accessible to `agents`.
-// Disabled: PDI/instructions must live in the dev heap, which is incompatible
-// with the vmem reserve+map path (see docs/bug-vmem-map-dev-heap.md). Kept here,
-// guarded out, so the intended vmem code path is preserved for when the
-// runtime/driver gains dev-heap vmem support.
-testing::AssertionResult load_binary_vmem(hsa_amd_memory_pool_t pool,
-                                          const std::vector<hsa_agent_t>& agents,
-                                          const std::filesystem::path& path, vmem_buffer* out) {
-  std::size_t size = 0;
-  auto f = open_binary(path, &size);
-  if (!f) {
-    return testing::AssertionFailure() << "failed to open '" << path << "'";
-  }
-
-  if (auto r = vmem_allocate(pool, size, agents, out); !r) {
-    return testing::AssertionFailure() << "loading '" << path << "': " << r.message();
-  }
-
-  if (!read_exact(f, out->va, size)) {
-    vmem_free(*out);
-    *out = {};
-    return testing::AssertionFailure()
-        << "short read loading '" << path << "' (expected " << size << " bytes)";
-  }
-  return testing::AssertionSuccess();
-}
-#endif
 
 // ---------------------------------------------------------------------------
 // AIE packet submission
@@ -425,9 +373,6 @@ class loaded_hsaco {
 // Compile-time constants and dispatch helper for the vector-scalar-add AIE
 // kernel: adds 1 to every element of a uint32 array of element_count entries.
 struct aie_vector_scalar_kernel {
-  static const std::filesystem::path pdiPath;
-  static const std::filesystem::path instsPath;
-
   // Number of elements in the input and output buffers for the vector-scalar add kernel.
   static constexpr std::size_t element_count = 1024;
   static constexpr std::size_t element_bytes = element_count * sizeof(std::uint32_t);
@@ -468,8 +413,6 @@ struct aie_vector_scalar_kernel {
     return enqueue_aie_packet(q, pkt);
   }
 };
-const std::filesystem::path aie_vector_scalar_kernel::pdiPath = STRINGIFY(DEFAULT_PDI_PATH);
-const std::filesystem::path aie_vector_scalar_kernel::instsPath = STRINGIFY(DEFAULT_INSTS_PATH);
 
 // Compile-time constants and dispatch helper for the vector-scalar-mul AIE kernel: multiplies
 // every element of a uint32 array by `scale`, in place.
@@ -478,9 +421,6 @@ const std::filesystem::path aie_vector_scalar_kernel::instsPath = STRINGIFY(DEFA
 // says which design ran, and the single in/out buffer means one kernarg instead of two, so the
 // two kernels' commands are not the same shape either.
 struct aie_vector_scalar_mul_kernel {
-  static const std::filesystem::path pdiPath;
-  static const std::filesystem::path instsPath;
-
   // Injected by the build from VSMUL_SCALE, the same value it passes to the design script.
   static constexpr std::uint32_t scale = MUL_SCALE;
 
@@ -521,8 +461,6 @@ struct aie_vector_scalar_mul_kernel {
     return enqueue_aie_packet(q, pkt);
   }
 };
-const std::filesystem::path aie_vector_scalar_mul_kernel::pdiPath = STRINGIFY(MUL_PDI_PATH);
-const std::filesystem::path aie_vector_scalar_mul_kernel::instsPath = STRINGIFY(MUL_INSTS_PATH);
 
 }  // namespace
 
@@ -627,59 +565,6 @@ TEST(Dispatch, KernargPoolDiscovery) {
   ASSERT_NE(test_buf, nullptr);
   EXPECT_EQ(hsa_amd_memory_pool_free(test_buf), HSA_STATUS_SUCCESS);
 
-  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
-}
-
-TEST(Dispatch, LoadPDI) {
-  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-
-  std::vector<hsa_agent_t> aie_agents;
-  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
-            HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(aie_agents.empty());
-
-  find_pool_data dev_pool_data{};
-  dev_pool_data.expected_flags = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED;
-  dev_pool_data.expected_allocatable = false;
-  ASSERT_EQ(
-      hsa_amd_agent_iterate_memory_pools(aie_agents.front(), find_memory_pool, &dev_pool_data),
-      HSA_STATUS_INFO_BREAK);
-
-  void* pdi_buf = nullptr;
-  std::size_t pdi_size = 0;
-  ASSERT_TRUE(
-      load_binary(dev_pool_data.pool, aie_vector_scalar_kernel::pdiPath, &pdi_buf, pdi_size));
-  EXPECT_NE(pdi_buf, nullptr);
-  EXPECT_GT(pdi_size, 0u);
-
-  EXPECT_EQ(hsa_amd_memory_pool_free(pdi_buf), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
-}
-
-TEST(Dispatch, LoadInstructions) {
-  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-
-  std::vector<hsa_agent_t> aie_agents;
-  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
-            HSA_STATUS_SUCCESS);
-  ASSERT_FALSE(aie_agents.empty());
-
-  find_pool_data dev_pool_data{};
-  dev_pool_data.expected_flags = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED;
-  dev_pool_data.expected_allocatable = false;
-  ASSERT_EQ(
-      hsa_amd_agent_iterate_memory_pools(aie_agents.front(), find_memory_pool, &dev_pool_data),
-      HSA_STATUS_INFO_BREAK);
-
-  void* insts_buf = nullptr;
-  std::size_t insts_size = 0;
-  ASSERT_TRUE(
-      load_binary(dev_pool_data.pool, aie_vector_scalar_kernel::instsPath, &insts_buf, insts_size));
-  EXPECT_NE(insts_buf, nullptr);
-  EXPECT_GT(insts_size, 0u);
-  EXPECT_EQ(insts_size % sizeof(std::uint32_t), 0u);
-
-  EXPECT_EQ(hsa_amd_memory_pool_free(insts_buf), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
@@ -1937,10 +1822,6 @@ std::vector<std::uint8_t> BadNameHsaco() {
 }
 
 TEST_F(FullElfDispatchTest, HsacoFullElfLoads) {
-  if (!elf_hsaco_available()) {
-    GTEST_SKIP() << "elf hsaco was not built: " << kElfHsacoPath;
-  }
-
   const auto hsaco = elf_hsaco_bytes();
   ASSERT_FALSE(hsaco.empty()) << "failed to read " << kElfHsacoPath;
 
@@ -1973,10 +1854,6 @@ TEST_F(FullElfDispatchTest, HsacoFullElfLoads) {
 }
 
 TEST_F(FullElfDispatchTest, HsacoFullElfRejectsUnknownKernelName) {
-  if (!elf_hsaco_available()) {
-    GTEST_SKIP() << "elf hsaco was not built: " << kElfHsacoPath;
-  }
-
   const auto bad_hsaco = BadNameHsaco();
   ASSERT_FALSE(bad_hsaco.empty()) << "failed to build a corrupted copy of " << kElfHsacoPath;
 
@@ -2208,48 +2085,11 @@ TEST_F(FullElfDispatchTest, ControlCodeIsAlignedForDispatch) {
   EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
 }
 
-TEST_F(FullElfDispatchTest, KernargCountMismatchRejected) {
-  // The arguments are patched into a copy of the kernel's control code rather than handed to the
-  // hardware, so nothing downstream would notice a short list: the dispatch would run against
-  // whatever the ELF's placeholder happened to be. The refusal has to name the reason, so this
-  // asserts the status as well as the fact that it was refused.
-  dispatch_error err;
-  hsa_queue_t* queue = nullptr;
-  ASSERT_EQ(create_queue_with_error_callback(aie_agents.front(), min_queue_size, &err, &queue),
-            HSA_STATUS_SUCCESS);
-
-  pool_buffer input, output, kernargs;
-  ASSERT_EQ(input.allocate(data_pool, aie_full_elf_kernel::element_bytes), HSA_STATUS_SUCCESS);
-  ASSERT_EQ(output.allocate(data_pool, aie_full_elf_kernel::element_bytes), HSA_STATUS_SUCCESS);
-  ASSERT_EQ(kernargs.allocate(kernarg_pool, aie_full_elf_kernel::kernarg_bytes),
-            HSA_STATUS_SUCCESS);
-
-  auto* in = input.as<std::uint32_t>();
-  auto* out = output.as<std::uint32_t>();
-  std::iota(in, in + aie_full_elf_kernel::element_count, 0);
-  constexpr std::uint32_t sentinel = 0xD0D0D0D0;
-  std::fill_n(out, aie_full_elf_kernel::element_count, sentinel);
-
-  hsa_signal_t signal{};
-  ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
-  const auto wr_idx = aie_full_elf_kernel::dispatch_packet(
-      elf_kernel, in, out, kernargs.as<std::uint64_t>(), signal, queue,
-      [](hsa_amd_aie_kernel_dispatch_packet_t& p) {
-        p.num_kernargs = aie_full_elf_kernel::num_kernargs - 1;
-      });
-  hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
-
-  ExpectRejected(err, queue, signal, 1);
-  EXPECT_EQ(err.status, HSA_STATUS_ERROR_INVALID_PACKET_FORMAT);
-
-  EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
-}
-
 TEST_F(FullElfDispatchTest, ElfMalformedPacketsRejected) {
   // Each case corrupts exactly one field of a packet that is otherwise known good, so a failure
   // points at one validation rather than at "the packet was bad somehow". Either way the output
-  // buffer must come back untouched and the refusal must reach the error callback.
+  // buffer must come back untouched and the refusal must reach the error callback, naming the
+  // packet as the reason.
   //
   // All of them are refused while the batch is being built, before anything is submitted.
   using packet_t = hsa_amd_aie_kernel_dispatch_packet_t;
@@ -2303,6 +2143,7 @@ TEST_F(FullElfDispatchTest, ElfMalformedPacketsRejected) {
         elf_kernel, in, out, kernargs.as<std::uint64_t>(), signal, queue, c.mutate);
     hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
     ExpectRejected(err, queue, signal, 1);
+    EXPECT_EQ(err.status, HSA_STATUS_ERROR_INVALID_PACKET_FORMAT);
 
     for (std::size_t i = 0; i < aie_full_elf_kernel::element_count; ++i) {
       ASSERT_EQ(out[i], sentinel) << "rejected dispatch wrote output at index " << i;
