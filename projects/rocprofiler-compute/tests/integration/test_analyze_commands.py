@@ -126,7 +126,7 @@ def test_list_metrics_gfx908_with_block(binary_handler_analyze_rocprof_compute):
         "--block",
         "1",
     ])
-    assert code == 1
+    assert code == 0
 
     for dir in indirs:
         workload_dir = integration_common.setup_workload_dir(dir)
@@ -139,7 +139,7 @@ def test_list_metrics_gfx908_with_block(binary_handler_analyze_rocprof_compute):
             "--block",
             "1",
         ])
-        assert code == 1
+        assert code == 0
 
         common.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -165,6 +165,7 @@ def test_list_available_metrics(binary_handler_analyze_rocprof_compute, capsys):
 
             # Test output
             output = capsys.readouterr().out
+            assert "--list-available-metrics is deprecated" in output
             assert "0 -> Top Stats" in output
             assert "1 -> System Info" in output
         finally:
