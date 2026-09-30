@@ -228,13 +228,17 @@ On AMD GPUs, use the following commands instead:
      - Look for earlier peer-access errors on the source rank.
 
 To see a record for every tested edge, including passing ones, add
-``NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=INIT``. Each edge produces
+``NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=INIT``. Each passing edge produces
 ``Diagnostics P2P import``, ``write``, and ``read`` records with the same
 fields:
 
 .. code:: none
 
    NCCL INFO Diagnostics P2P write srcRank=6 srcCudaDev=6 srcNvmlDev=6 dstRank=5 dstCudaDev=5 dstNvmlDev=5 path=XGMI handle=LEGACY_CUDA_IPC topoRead=0
+
+A failed edge has no records for the phases after the failure. For example,
+when the import fails, the ``import`` record shows ``import=0`` and a
+``reason``, and no ``write`` or ``read`` record follows for that edge.
 
 .. _diagnostics-containers:
 
@@ -247,12 +251,19 @@ descriptors when cuMem is enabled. Run all ranks of a node in one container
 and make all GPUs of the node visible to it, for example with
 ``--device /dev/kfd --device /dev/dri``.
 
-If the ranks of one node are split over several containers, for example with a
-different ``ROCR_VISIBLE_DEVICES`` in each container, RCCL cannot share GPU
-memory between the ranks and communicator initialization fails. When the check
-runs before that failure, it reports the affected edges, for example as
-``destination buffer unavailable ... handle=LEGACY_CUDA_IPC reason=noDescriptor``
-when cuMem is not enabled.
+If the ranks of one node are split over several containers, what the check
+reports depends on the containers:
+
+* Containers with separate ``/dev/shm``, for example with a private IPC
+  namespace, are treated as isolated. RCCL does not use P2P between them, so
+  the check does not test those pairs and the summary counts fewer than
+  ``N * (N - 1)`` edges.
+* If a pair between the containers is eligible for P2P but its memory cannot be
+  shared, the check reports the edge as failed.
+  ``destination buffer unavailable ... reason=noDescriptor`` means that the
+  destination rank did not provide its buffer.
+  ``peer-memory import failed ... reason=import`` means that the source rank
+  could not map a buffer that the destination provided.
 
 Collecting the report
 =====================
