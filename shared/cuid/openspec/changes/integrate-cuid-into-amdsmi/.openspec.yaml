@@ -1,7 +1,7 @@
 schema: spec-driven
 created: 2026-08-20
-# implemented: the AMD SMI identity API and CLI are in projects/amdsmi, seed
-# provisioning waits for the key store, and the last outstanding obligation -- task 2.3, determining
+# implemented: the AMD SMI identity API, CLI and seed provisioning are in
+# projects/amdsmi, and the last outstanding obligation -- task 2.3, determining
 # which stage of the staged lookup answered -- is met by AMDCUID_QUERY_SOURCE.
 # Test both lookup configurations in README.md; the library-computed one (no
 # driver attributes) exercises paths the driver-published one bypasses.

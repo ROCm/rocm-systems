@@ -73,10 +73,10 @@
 
 ## 5. Tests
 
-Cases live in `tests/amd_smi_test/unit/gpu/cuid_info_test.cc`,
-`tests/python/unit/gpu/test_cli_cuid_static.py` and
-`tests/python/unit/gpu/test_cli_cuid_identity.py`. Current release counts and
-hardware limitations are in `shared/cuid/tests/QA_PLAN.md`.
+Cases live in `tests/amd_smi_test/unit/gpu/cuid_info_test.cc` and
+`tests/python/unit/gpu/test_cli_cuid_seed.py`. Current release counts and
+hardware limitations are in `shared/cuid/tests/QA_PLAN.md`. CLI provisioning
+tests stub the library call; real privileged CUID tests require seed restoration.
 
 - [x] 5.1 Snapshot call against a fake sysfs root: a driver-published value is
       returned verbatim and reported as driver-sourced
