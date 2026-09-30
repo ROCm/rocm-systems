@@ -255,12 +255,10 @@ rocprofiler_ompt_start_tool(unsigned int omp_version, const char* /*runtime_vers
         return nullptr;
     }
 
-    // log to clog since logging probably won't be initialized here
     auto _init_status = ::rocprofiler::ompt::init_status.load();
     if(_init_status != 0)
     {
-        std::clog << "ERROR: rocprofiler-sdk OMPT backend has already been initialized: "
-                  << _init_status << '\n';
+        ROCP_ERROR << "rocprofiler-sdk OMPT backend has already been initialized: " << _init_status;
         return nullptr;
     }
 
