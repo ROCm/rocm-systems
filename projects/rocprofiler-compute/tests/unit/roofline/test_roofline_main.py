@@ -675,8 +675,7 @@ def test_precision_controller_remains_single_and_does_not_reset_view() -> None:
 
 def test_the_dark_theme_is_named_the_same_in_every_asset() -> None:
     """The page sets this class before its first paint, the stylesheet colors it,
-    and the toggle flips it. One name in three files, or a reader's theme silently
-    stops following either of them."""
+    and the toggle flips it. Both stylesheets must use the same selector."""
     dark_class = DARK_THEME_CLASS
     page = report_document.build_document(
         title="Roofline",
@@ -686,11 +685,13 @@ def test_the_dark_theme_is_named_the_same_in_every_asset() -> None:
         model_id="roofline-model",
         model={},
     )
-    css = (_ASSETS / "roofline_plot.css").read_text(encoding="utf-8")
+    base_css = read_asset(_SHARED_ASSETS, "report_base.css")
+    page_css = read_asset(_ASSETS, "roofline_plot.css")
     controller = read_asset(_SHARED_ASSETS, "report_base.js")
 
     assert f'classList.add("{dark_class}")' in page
-    assert f":root.{dark_class}" in css
+    assert f":root.{dark_class}" in base_css
+    assert f":root.{dark_class}" in page_css
     assert f'"{dark_class}"' in controller
 
 
@@ -701,6 +702,9 @@ def test_roofline_document_keeps_one_plotly_bundle_and_model_id() -> None:
     assert document.count('id="roofline-model"') == 1
     assert document.count('id="roofline-plot"') == 1
     assert document.count("plotly.js v") == 1
+    assert document.count("<style>") == 1
+    assert document.count("</style>") == 1
+    assert document.index("--report-border") < document.index("--roofline-warning")
     assert document.index("plotly.js v") < document.index('id="roofline-model"')
     assert document.index("window.HtmlReport") < document.index(
         'readModel("roofline-model")'

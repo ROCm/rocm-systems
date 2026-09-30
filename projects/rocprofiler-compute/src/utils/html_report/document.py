@@ -76,7 +76,8 @@ def build_document(
     shell = Template(read_asset(_ASSETS_DIR, "report_shell.html"))
     return shell.substitute(
         TITLE=html.escape(title),
-        CSS=page_css,
+        BASE_CSS=read_asset(_ASSETS_DIR, "report_base.css"),
+        PAGE_CSS=page_css,
         DARK_THEME_CLASS=DARK_THEME_CLASS,
         BODY_HTML=body_html,
         MODEL_ID=model_id,
