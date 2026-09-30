@@ -191,10 +191,10 @@ following lifecycle:
    retired and, from the perspective of all threads in all wavefronts, the
    operation is complete.
 
-Generic `FLAT_*` instructions have two independent completion obligations:
-the vector-memory counter and the LDS counter. On gfx950, an ordinary FLAT load
-whose requesting lanes all use one memory pipeline separates its returned values
-from the empty portion's counter entry. Global and scratch results require
+Generic `FLAT_*` instructions participate in both the vector-memory and LDS
+counter domains. On gfx950, the race detector tracks an ordinary FLAT load whose
+requesting lanes all use one memory pipeline against the counter that produces
+its returned values. Global and scratch results require
 `vmcnt(0)`; LDS results require `lgkmcnt(0)`. For example, with global addresses
 in every active lane, this use of `v8` has a sufficient wait:
 
@@ -204,14 +204,17 @@ s_waitcnt vmcnt(0)
 flat_store_dword v[2:3], v8
 ```
 
-The unused portion still contributes a counter entry with no register or LDS
-access. Waiting for the result does not discard that entry or make it ordered
-with other memory operations. Both portions retain CDNA's unordered completion
-class, so nonzero waits do not prove a FLAT result ready. This follows the
-distinction between data writeback and whole-instruction completion in the
+The detector omits the empty portion: it has no register or LDS access to protect,
+and its unordered completion cannot help prove other accesses ready under partial
+waits or counter-capacity constraints. The producing obligation retains CDNA's
+unordered completion class, so nonzero waits do not prove a FLAT result ready.
+This result-readiness rule follows the distinction between data writeback and
+whole-instruction completion in the
 [CDNA4 ISA](https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-cdna4-instruction-set-architecture.pdf)
 §§4.4 and 10.2–10.2.2, and agrees with the core checker's
 [FLAT register-readiness policy](memory-wait-counter-coverage.md#flat-register-readiness).
+It does not assume a physical conditional-increment optimization; issue-time
+admission and the functional memory pipelines still use both decoded obligations.
 
 This result-specific handling is limited to ordinary gfx950 loads with uniform
 pipeline routing; a mixture of global and scratch lanes uses the same VMEM
