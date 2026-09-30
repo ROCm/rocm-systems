@@ -33,6 +33,15 @@ def load_layout(arch: str) -> dict[str, Any]:
         return json.load(fp)
 
 
+def has_layout(arch: str) -> bool:
+    """Return whether load_layout succeeds for this architecture."""
+    try:
+        load_layout(arch)
+    except Exception:
+        return False
+    return True
+
+
 def list_architectures() -> list[str]:
     """Return all supported architecture names."""
     return list(_ARCH_TO_FILE)
