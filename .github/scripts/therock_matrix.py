@@ -36,7 +36,7 @@ subtree_to_project_map = {
 
 project_map = {
     "core": {
-        "cmake_options": ["-DTHEROCK_ENABLE_CORE=ON", "-DTHEROCK_ENABLE_ALL=OFF", "-DTHEROCK_ENABLE_PROFILER=ON"],
+        "cmake_options": ["-DTHEROCK_ENABLE_CORE=ON", "-DTHEROCK_ENABLE_ALL=OFF", "-DTHEROCK_ENABLE_PROFILER=ON", "-Dhip-tests_CMAKE_ARGS='-DHIP_TESTS_ENABLE_WERROR=ON'", "-Dhip-clr_CMAKE_ARGS='-DCLR_ENABLE_WERROR=ON'"],
         "projects_to_test": "amdsmi, aqlprofile, rocprofiler-compute, rocprofiler-sdk, rocprofiler-systems",  # will run sanity test to cover rocminfo
     },
     # amdsmi changes fan out to its downstream dependents across rocm-systems

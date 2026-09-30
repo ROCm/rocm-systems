@@ -420,6 +420,8 @@ def retrieve_projects(args):
             flags = cmake_options
         if "-DTHEROCK_ENABLE_ALL=ON" in flags:
             enable_all = True
+        if project == "core" and args.get("platform") == "linux":
+            merged_flags.update(set("-Dhip-tests_CMAKE_ARGS='-DHIP_TESTS_ENABLE_WERROR=ON'", "-Dhip-clr_CMAKE_ARGS='-DCLR_ENABLE_WERROR=ON'"))
         merged_flags.update(flags)
         tests = config.get("projects_to_test", "")
         if tests:
