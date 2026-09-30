@@ -6,8 +6,9 @@
 #include "common/path.hpp"
 #include "common/units/data_size.hpp"
 #include "config.hpp"
+#include "core/output/registry.hpp"
+#include "core/perfetto/log_filter.hpp"
 #include "library/runtime.hpp"
-#include "output_file_registry.hpp"
 #include "perfetto_fwd.hpp"
 #include "utility.hpp"
 
@@ -109,9 +110,14 @@ setup()
     }
 
     // Silence all Perfetto log output on log-disabled ranks with empty callback
+    // Otherwise apply filter to silence unnecessary perfetto output logs
     if(!config::output_filtering::is_log_output_enabled_for_current_mpi_rank())
     {
         args.log_message_callback = +[](::perfetto::base::LogMessageCallbackArgs) {};
+    }
+    else
+    {
+        core::log_filter::register_with_perfetto_logger();
     }
 
     ::perfetto::Tracing::Initialize(args);
@@ -185,12 +191,13 @@ stop()
 }
 
 void
-post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error,
-             output_file_registry& _output_registry)
+post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error)
 {
     using char_vec_t = std::vector<char>;
 
     stop();
+
+    core::log_filter::unregister_from_perfetto_logger();
 
     auto& tracing_session = get_perfetto_session();
     if(!tracing_session)
@@ -306,7 +313,8 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error,
                 {
                     _timemory_manager->add_file_output("protobuf", "perfetto", _filename);
                 }
-                _output_registry.register_file(_filename, output_format::perfetto);
+                output::registry::instance().register_file(
+                    _filename, output::output_format::perfetto);
             }
             ofs.close();
         }
