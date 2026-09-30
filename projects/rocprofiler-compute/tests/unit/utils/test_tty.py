@@ -31,7 +31,6 @@ from utils.utils_analysis import (
     build_call_trees,
     build_operator_summary,
 )
-from utils.utils_common import is_gfx115x, is_gfx1250
 
 TIME_UNITS = {"s": 10**9, "ms": 10**6, "us": 10**3, "ns": 1}
 
@@ -170,20 +169,20 @@ def test_format_table_output_mem_chart_uses_unscaled_bytes(
 ) -> None:
     calls: dict[str, dict] = {}
 
-    def gfx9_stub(
+    def chart_stub(
         mem_data: dict,
         *,
         chart_title: str,
         gpu_arch: str = "",
     ) -> str:
-        calls["gfx9"] = {
+        calls["chart"] = {
             "mem_data": mem_data,
             "chart_title": chart_title,
             "gpu_arch": gpu_arch,
         }
         return "rendered CDNA memory chart"
 
-    monkeypatch.setattr("utils.tty.mem_chart_gfx9.plot_mem_chart", gfx9_stub)
+    monkeypatch.setattr("utils.tty._plot_mem_chart", chart_stub)
     df = pd.DataFrame({
         "Metric": ["DRAM Read Bandwidth"],
         "Value": [1e9],
@@ -203,7 +202,7 @@ def test_format_table_output_mem_chart_uses_unscaled_bytes(
         gpu_arch="gfx942",
     )
 
-    assert calls["gfx9"]["mem_data"] == {"DRAM Read Bandwidth": 1e9}
+    assert calls["chart"]["mem_data"] == {"DRAM Read Bandwidth": 1e9}
     assert content == "rendered CDNA memory chart\n"
 
 
@@ -513,21 +512,20 @@ def test_show_all_dispatches_gfx1250_memory_chart(
             sys_info=pd.DataFrame([{"gpu_arch": "gfx1250"}]),
         )
     }
-    calls: list[tuple[dict, str]] = []
+    calls: list[tuple[dict, str, str]] = []
 
     monkeypatch.setattr(
         "utils.tty.process_table_data",
         lambda *_args, **_kwargs: metric_dataframe,
     )
 
-    def gfx1250_stub(mem_data: dict, *, chart_title: str) -> str:
-        calls.append((mem_data, chart_title))
+    def chart_stub(
+        mem_data: dict, *, chart_title: str, gpu_arch: str, membw=None
+    ) -> str:
+        calls.append((mem_data, chart_title, gpu_arch))
         return "rendered gfx1250 memory chart"
 
-    monkeypatch.setattr(
-        "utils.tty.mem_chart_gfx1250.plot_mem_chart",
-        gfx1250_stub,
-    )
+    monkeypatch.setattr("utils.tty._plot_mem_chart", chart_stub)
     rendered_output = StringIO()
 
     show_all(
@@ -542,6 +540,7 @@ def test_show_all_dispatches_gfx1250_memory_chart(
         (
             {"DRAM Read Bandwidth": 512e9},
             "3. Memory Chart (Normalization: per_wave)",
+            "gfx1250",
         )
     ]
     assert "rendered gfx1250 memory chart" in rendered_output.getvalue()
@@ -620,48 +619,18 @@ def test_format_table_output_dispatches_memory_chart_renderer(
     monkeypatch: pytest.MonkeyPatch,
     gpu_arch: str,
 ) -> None:
-    """Memory Chart output uses the architecture renderer and shared heading."""
-    calls: dict[str, dict] = {}
+    """Memory Chart output passes the architecture and heading to the renderer."""
+    calls: list[dict] = []
 
-    def gfx11_stub(mem_data: dict, *, chart_title: str) -> str:
-        calls["gfx11"] = {
+    def chart_stub(mem_data: dict, *, chart_title: str, gpu_arch: str) -> str:
+        calls.append({
             "mem_data": mem_data,
             "chart_title": chart_title,
-        }
-        return "rendered RDNA3.5 memory chart"
+            "gpu_arch": gpu_arch,
+        })
+        return "rendered memory chart"
 
-    def gfx9_stub(
-        mem_data: dict,
-        *,
-        chart_title: str = "",
-        gpu_arch: str = "",
-    ) -> str:
-        calls["gfx9"] = {
-            "mem_data": mem_data,
-            "chart_title": chart_title,
-        }
-        return "rendered CDNA memory chart"
-
-    monkeypatch.setattr(
-        "utils.tty.mem_chart_gfx11.plot_mem_chart",
-        gfx11_stub,
-    )
-
-    def gfx1250_stub(mem_data: dict, *, chart_title: str) -> str:
-        calls["gfx1250"] = {
-            "mem_data": mem_data,
-            "chart_title": chart_title,
-        }
-        return "rendered gfx1250 memory chart"
-
-    monkeypatch.setattr(
-        "utils.tty.mem_chart_gfx9.plot_mem_chart",
-        gfx9_stub,
-    )
-    monkeypatch.setattr(
-        "utils.tty.mem_chart_gfx1250.plot_mem_chart",
-        gfx1250_stub,
-    )
+    monkeypatch.setattr("utils.tty._plot_mem_chart", chart_stub)
     df = pd.DataFrame({"Metric": ["Metric A"], "Value": [1]})
 
     content = format_table_output(
@@ -677,20 +646,14 @@ def test_format_table_output_dispatches_memory_chart_renderer(
         gpu_arch=gpu_arch,
     )
 
-    if is_gfx115x(gpu_arch):
-        expected, return_value = "gfx11", "rendered RDNA3.5 memory chart"
-    elif is_gfx1250(gpu_arch):
-        expected, return_value = "gfx1250", "rendered gfx1250 memory chart"
-    else:
-        expected, return_value = "gfx9", "rendered CDNA memory chart"
-
-    assert calls[expected] == {
-        "mem_data": {"Metric A": 1},
-        "chart_title": "7. Memory Chart (Normalization: per_wave)",
-    }
-    for other in {"gfx11", "gfx9", "gfx1250"} - {expected}:
-        assert other not in calls
-    assert content == f"{return_value}\n"
+    assert calls == [
+        {
+            "mem_data": {"Metric A": 1},
+            "chart_title": "7. Memory Chart (Normalization: per_wave)",
+            "gpu_arch": gpu_arch,
+        }
+    ]
+    assert content == "rendered memory chart\n"
 
 
 def test_format_duration_microseconds_below_threshold():
@@ -896,7 +859,7 @@ def test_format_table_output_view_table_skips_gfx9_memory_chart_renderer(
     """--view table renders a mem_chart table as a plain titled table on gfx9."""
 
     monkeypatch.setattr(
-        "utils.tty.mem_chart_gfx9.plot_mem_chart",
+        "utils.tty._plot_mem_chart",
         lambda *_a, **_k: pytest.fail(
             "gfx9 memory chart renderer ran despite --view table"
         ),
@@ -922,7 +885,7 @@ def test_format_table_output_view_table_skips_gfx11_memory_chart_renderer(
     """--view table renders a mem_chart table as a plain titled table on gfx11."""
 
     monkeypatch.setattr(
-        "utils.tty.mem_chart_gfx11.plot_mem_chart",
+        "utils.tty._plot_mem_chart",
         lambda *_a, **_k: pytest.fail(
             "gfx11 memory chart renderer ran despite --view table"
         ),
@@ -948,7 +911,7 @@ def test_format_table_output_view_table_skips_gfx1250_memory_chart_renderer(
     """--view table renders a mem_chart table as a plain titled table on gfx1250."""
 
     monkeypatch.setattr(
-        "utils.tty.mem_chart_gfx1250.plot_mem_chart",
+        "utils.tty._plot_mem_chart",
         lambda *_a, **_k: pytest.fail(
             "gfx1250 memory chart renderer ran despite --view table"
         ),
@@ -985,7 +948,7 @@ def test_show_all_view_table_replaces_memory_chart_panel(
     df = pd.DataFrame({"Metric": ["Metric A"], "Value": [1]})
     monkeypatch.setattr("utils.tty.process_table_data", lambda *_a, **_k: df)
     monkeypatch.setattr(
-        "utils.tty.mem_chart_gfx9.plot_mem_chart",
+        "utils.tty._plot_mem_chart",
         lambda *_a, **_k: mem_chart_marker,
     )
     rendered_output = StringIO()
