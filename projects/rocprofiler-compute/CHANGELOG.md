@@ -7,7 +7,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
-* Added Data Fabric to MALL bandwidth arrows to the CDNA (gfx9) Memory Chart. On gfx940–gfx942 these report estimated HBM bandwidth, derived from a 64B-per-request approximation.
+* Added Data Fabric to MALL bandwidth arrows to the CDNA (gfx9) Memory Chart. On gfx940–gfx942 these report estimated HBM bandwidth, derived from a 64B-per-request approximation, through the new `Estimated HBM Read BW` and `Estimated HBM Write and Atomic BW` metrics. On gfx950 they use the existing `HBM Read BW` and the new `HBM Write and Atomic BW` metric.
 
 * Added the `VL1 Coalesce` metric to the VL1D panel of the CDNA (gfx9) Memory Chart.
 
@@ -24,9 +24,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Removed the experimental `--gui` and `--tui` analyze modes and the `--random-port` option. Use the default CLI analyze mode for terminal output, or `--output-format db` to explore results in ROCm Optiq.
   * The `dash`, `dash-bootstrap-components`, `dash-svg`, `textual`, and `textual_plotext` dependencies are no longer installed.
 
-* Removed the HBM and remote traffic percentage metrics from the gfx940–gfx942 Memory Chart. The new Data Fabric to MALL arrows report estimated HBM bandwidth instead.
+* Removed the HBM and remote traffic percentage metrics from the gfx908–gfx942 Memory Chart. On gfx940–gfx942 the new Data Fabric to MALL arrows report estimated HBM bandwidth instead.
 
-* Removed Memory Chart metrics that the panel YAMLs defined but never rendered, across all CDNA architectures.
+* Removed Memory Chart metrics that the panel YAMLs defined but never rendered, across all CDNA architectures. The remaining Memory Chart metrics are renumbered, so `3.1.N` metric IDs used with `--block` now refer to different metrics.
 
 ### Optimized
 

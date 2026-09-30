@@ -43,8 +43,6 @@ Panel Config:
         value: Value
         unit: Unit
       metric:
-        # Wavefront Occupancy: SQ has one instance per WGP, so SQ_BUSY_CYCLES_sum is the
-        # total WGP-busy cycles. Dividing by the _avr instead yields a GPU-wide count.
         Wavefront Occupancy:
           value: ROUND(SUM(SQ_WAVE_CYCLES_sum) / SUM(SQ_BUSY_CYCLES_sum), 0)
         VGPR:
