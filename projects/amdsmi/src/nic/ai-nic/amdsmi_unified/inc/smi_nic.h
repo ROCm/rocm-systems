@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include "smi_nic_stats.h"
 #include "smi_nic_transport.h"
 
 /**
@@ -98,7 +99,8 @@ class SmiNicPort {
  public:
   SmiNicPort(const std::string& iface, const std::string& bdf, const std::string& sysfs_class_path,
              const std::string& sysfs_bus_path,
-             std::shared_ptr<amd::smi::nic::transport::NicTransport> transport = nullptr);
+             std::shared_ptr<amd::smi::nic::transport::NicTransport> transport = nullptr,
+             const StatTable_t* stat_table = nullptr);
 
   const std::string& interface() const;
   const std::string& bdf() const;
@@ -124,27 +126,22 @@ class SmiNicPort {
   void add_infiniband(const SmiInfiniBand& infiniband);
   const std::vector<SmiInfiniBand>& infiniband() const;
   uint8_t infiniband_num() const;
-  void collect_vendor_statistics();
-  const std::map<std::string, uint64_t>& get_vendor_stats_map() const;
-  void collect_standard_statistics();
+
+  // Refreshes the vendor-counter cache from the transport (ethtool -S plus,
+  // when the transport supports it, netlink FEC stats). Const: the cache is a
+  // mutable implementation detail, not part of the port's logical state, so a
+  // query-time refresh does not require a non-const port.
+  void collect_vendor_statistics() const;
+  // Returns the subset of the cached counters this port's stat_table_ allows
+  // for `scope`: Default returns only Default-tier names present; Extended
+  // returns every present name in the table (Default is a subset of Extended).
+  // Returns an empty map if this port has no table (e.g. IFoE has no ports).
+  std::map<std::string, uint64_t> get_vendor_stats_map(StatTier_t scope) const;
+
+  void collect_standard_statistics() const;
   const std::map<std::string, uint64_t>& get_standard_stats_map() const;
 
  private:
-  enum class SmiVendorStat {
-    TX_PACKETS,
-    RX_PACKETS,
-    TX_BYTES,
-    RX_BYTES,
-    TX_CSUM_NONE,
-    RX_CSUM_NONE,
-    TX_CSUM,
-    TX_TSO,
-    TX_TSO_BYTES
-  };
-
-  std::string map_vendor_stat_to_string(SmiVendorStat stat) const;
-  bool is_vendor_stat_allowed(const std::string& stat_name) const;
-
   std::string iface_;
   std::string bdf_;
   NicType type_;
@@ -152,9 +149,10 @@ class SmiNicPort {
   std::string sysfs_bus_path_;
   std::optional<uint32_t> port_num_;
   std::vector<SmiInfiniBand> infiniband_;
-  std::map<std::string, uint64_t> vendor_stats_map_;
-  std::map<std::string, uint64_t> standard_stats_map_;
+  mutable std::map<std::string, uint64_t> vendor_stats_map_;
+  mutable std::map<std::string, uint64_t> standard_stats_map_;
   std::shared_ptr<amd::smi::nic::transport::NicTransport> transport_;
+  const StatTable_t* stat_table_;
 };
 
 class SmiNic {

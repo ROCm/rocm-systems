@@ -18,6 +18,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace amd::nic::netlink {
 
@@ -147,6 +148,13 @@ class NLAttributes {
   static const char* get_string(struct nlattr* attr);
 
   static bool is_present(struct nlattr* attr);
+
+  static int parse_nested(struct nlattr* nested, struct nlattr** tb, int maxtype,
+                          struct nla_policy* policy = nullptr);
+
+  // attr's payload is a packed array of u64 (nla_len(attr) / 8 elements), not
+  // a single scalar; the ethtool netlink FEC-stat attributes use this shape.
+  static std::vector<uint64_t> get_u64_array(struct nlattr* attr);
 
  private:
   NLMessage& msg_;

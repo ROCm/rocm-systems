@@ -56,6 +56,13 @@ class NetlinkBackend : public NicTransport {
     return {false, {}, ENOTSUP};
   }
 
+  Result<FecStatistics_t> get_fec_statistics(const std::string& iface) override {
+    if (!initialized_) {
+      return {false, {}, ENOTSUP};
+    }
+    return client_.get_fec_statistics(iface);
+  }
+
   Result<PermanentAddress> get_permanent_address(const std::string& /* iface */) override {
     return {false, {}, ENOTSUP};
   }
@@ -125,6 +132,13 @@ class AutoBackend : public NicTransport {
 
   Result<VendorStatistics> get_statistics(const std::string& iface) override {
     return ioctl_backend_->get_statistics(iface);
+  }
+
+  Result<FecStatistics_t> get_fec_statistics(const std::string& iface) override {
+    if (netlink_backend_) {
+      return netlink_backend_->get_fec_statistics(iface);
+    }
+    return ioctl_backend_->get_fec_statistics(iface);
   }
 
   Result<PermanentAddress> get_permanent_address(const std::string& iface) override {

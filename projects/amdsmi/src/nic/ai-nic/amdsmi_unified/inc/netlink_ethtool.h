@@ -48,6 +48,8 @@ class EthtoolNetlinkClient {
   transport::Result<transport::DriverInfo> get_driver_info(const std::string& iface);
   transport::Result<transport::VendorStatistics> get_statistics(const std::string& iface);
 
+  transport::Result<transport::FecStatistics_t> get_fec_statistics(const std::string& iface);
+
  private:
   GenericNetlinkClient client_;
   int family_id_;
@@ -57,7 +59,7 @@ class EthtoolNetlinkClient {
    * Adds the per-message header nest (header_attr, an ETHTOOL_A_*_HEADER id)
    * carrying the interface name.
    */
-  int build_header(NLMessage& msg, const std::string& iface, int header_attr);
+  int build_header(NLMessage& msg, const std::string& iface, int header_attr, uint32_t flags = 0);
 };
 
 }  // namespace amd::nic::netlink
