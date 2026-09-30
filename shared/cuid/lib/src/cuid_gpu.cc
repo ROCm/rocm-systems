@@ -94,10 +94,10 @@ amdcuid_status_t read_partition_metadata(amdcuid_gpu_info& info) {
   CuidUtilities::remove_UUIDv8_bits(&primary, raw);
   if (((raw[14] >> 6) | ((raw[15] & 3) << 2)) != AMDCUID_DEVICE_TYPE_GPU)
     return AMDCUID_STATUS_INVALID_FORMAT;
-  info.header.fields.gpu.unit_id = raw[8] | ((raw[14] & 0x1f) << 8);
+  info.header.fields.gpu.unit_id = static_cast<uint16_t>(raw[8] | ((raw[14] & 0x1f) << 8));
   info.header.fields.gpu.revision_id = raw[9];
-  info.header.fields.gpu.device_id = raw[10] | (raw[11] << 8);
-  info.header.fields.gpu.vendor_id = raw[12] | (raw[13] << 8);
+  info.header.fields.gpu.device_id = static_cast<uint16_t>(raw[10] | (raw[11] << 8));
+  info.header.fields.gpu.vendor_id = static_cast<uint16_t>(raw[12] | (raw[13] << 8));
   info.partition_metadata_valid = true;
   return AMDCUID_STATUS_SUCCESS;
 }
@@ -453,7 +453,8 @@ amdcuid_status_t CuidGpu::discover_single(amdcuid_gpu_info* gpu_info, const std:
     amdcuid_status_t status = PciUtil::read_pci_config_space(bdf, &revision_id_byte, 1, offset);
     info.header.fields.gpu.revision_id = (status == AMDCUID_STATUS_SUCCESS) ? revision_id_byte : 0;
   } else {
-    info.header.fields.gpu.revision_id = (uint16_t)strtol(revision_id.c_str(), nullptr, 16);
+    info.header.fields.gpu.revision_id =
+        static_cast<uint8_t>(strtol(revision_id.c_str(), nullptr, 16));
   }
 
   // Prefer the renderD node; without one (e.g., GIM driver), use the card path.

@@ -57,19 +57,19 @@ bool get_cpuid_info(uint16_t& vendor_id, uint16_t& family, uint16_t& model, uint
 
   // Calculate DisplayFamily and DisplayModel per AMD/Intel spec
   if (base_family == 0x0F) {
-    family = base_family + ext_family;
+    family = static_cast<uint16_t>(base_family + ext_family);
   } else {
-    family = base_family;
+    family = static_cast<uint16_t>(base_family);
   }
 
   if (base_family == 0x0F || (vendor_id == 0x8086 && base_family == 0x06)) {
-    model = (ext_model << 4) | base_model;
+    model = static_cast<uint16_t>((ext_model << 4) | base_model);
   } else {
-    model = base_model;
+    model = static_cast<uint16_t>(base_model);
   }
 
   // DeviceID = combination of Family and Model
-  device_id = (family << 8) | model;
+  device_id = static_cast<uint16_t>((family << 8) | model);
 
   return true;
 #else

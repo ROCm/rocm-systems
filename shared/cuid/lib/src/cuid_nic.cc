@@ -121,7 +121,8 @@ amdcuid_status_t CuidNic::discover_single(amdcuid_nic_info* nic_info,
     amdcuid_status_t status = PciUtil::read_pci_config_space(bdf, &revision_id_byte, 1, offset);
     info.header.fields.nic.revision_id = (status == AMDCUID_STATUS_SUCCESS) ? revision_id_byte : 0;
   } else {
-    info.header.fields.nic.revision_id = (uint16_t)strtol(revision_id.c_str(), nullptr, 16);
+    info.header.fields.nic.revision_id =
+        static_cast<uint8_t>(strtol(revision_id.c_str(), nullptr, 16));
   }
   info.bdf = bdf;
   std::string full_device_node;

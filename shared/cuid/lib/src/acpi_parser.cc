@@ -43,7 +43,7 @@ amdcuid_status_t AcpiParser::read_acpi_table(const char* table_name, std::vector
     return AMDCUID_STATUS_FILE_ERROR;
   }
 
-  data.resize(st.st_size);
+  data.resize(static_cast<size_t>(st.st_size));
   file.read(reinterpret_cast<char*>(data.data()), st.st_size);
 
   if (!file) {

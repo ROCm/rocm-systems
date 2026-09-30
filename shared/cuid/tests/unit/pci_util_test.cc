@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <initializer_list>
 
 #include "src/pci_util.h"
 
@@ -108,7 +109,7 @@ TEST(cuidtstUnprivileged, VsecSerialNeedsRoomAndTheDevicesVendor) {
   uint16_t offset = 0;
 
   // The length counts both 4-byte headers: 8 is a VSEC with no body at all.
-  for (uint16_t length : {0, 8, 12, 15}) {
+  for (uint16_t length : std::initializer_list<uint16_t>{0, 8, 12, 15}) {
     VsecConfig(config, length);
     EXPECT_EQ(PciUtil::find_vsec_serial_offset(config, sizeof(config), 0x1002, offset),
               AMDCUID_STATUS_UNSUPPORTED)

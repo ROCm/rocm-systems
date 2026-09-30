@@ -28,11 +28,13 @@ static void extract_primary_raw_bits(const amdcuid_id_t& uuid, uint8_t raw_bits[
   CuidUtilities::remove_UUIDv8_bits(&mutable_uuid, raw_bits);
 }
 
+namespace {
+
 // Adopted firmware bytes have no CUID payload to reverse. Verify their source
 // and reject missing-UUID sentinels before bypassing field decoding. Restricting
 // adoption to Platform keeps this from hiding a GPU framing defect.
-static bool AdoptedPrimary(const amdcuid_id_t& handle, const amdcuid_id_t& primary,
-                           const char* device_node) {
+bool AdoptedPrimary(const amdcuid_id_t& handle, const amdcuid_id_t& primary,
+                    const char* device_node) {
   if (CuidUtilities::is_constructed(&primary)) {
     return false;
   }
@@ -66,6 +68,8 @@ static bool AdoptedPrimary(const amdcuid_id_t& handle, const amdcuid_id_t& prima
   }
   return true;
 }
+
+}  // namespace
 
 // ---------------------------------------------------------------------------
 // TestReverseSerialNumber
@@ -104,7 +108,9 @@ void TestReverseSerialNumber::Run() {
     length = sizeof(serial_number);
     status = amdcuid_query_device_property(device_handles_[i], AMDCUID_QUERY_HARDWARE_FINGERPRINT,
                                            &serial_number, &length);
-    if (status == AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND) EXPECT_TRUE(auxiliary_primary);
+    if (status == AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND) {
+      EXPECT_TRUE(auxiliary_primary);
+    }
 
     if (auxiliary_primary) {
       // An auxiliary primary carries the fallback serial even where the

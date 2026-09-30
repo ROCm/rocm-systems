@@ -528,18 +528,18 @@ void CuidUtilities::pack_auxiliary_input(const AuxiliaryInput& input, uint8_t st
   // Pack the 256-bit structure LSB-first into 32 octets. See AuxiliaryInput in
   // cuid_util.h for the field positions.
   std::memset(structure, 0, 32);
-  structure[0] = input.format & 0xFF;               // bits 0:15
-  structure[1] = (input.format >> 8) & 0xFF;        //
-  structure[18] = input.routing_id & 0xFF;          // bits 144:175
-  structure[19] = (input.routing_id >> 8) & 0xFF;   //
-  structure[20] = (input.routing_id >> 16) & 0xFF;  //
-  structure[21] = (input.routing_id >> 24) & 0xFF;  //
-  structure[22] = input.revision_id;                // bits 176:183
-  structure[23] = input.device_id & 0xFF;           // bits 184:199
-  structure[24] = (input.device_id >> 8) & 0xFF;    //
-  structure[25] = input.vendor_id & 0xFF;           // bits 200:215
-  structure[26] = (input.vendor_id >> 8) & 0xFF;    //
-  structure[27] = input.component_type & 0x0F;      // bits 216:219
+  structure[0] = static_cast<uint8_t>(input.format & 0xFF);               // bits 0:15
+  structure[1] = static_cast<uint8_t>((input.format >> 8) & 0xFF);        //
+  structure[18] = static_cast<uint8_t>(input.routing_id & 0xFF);          // bits 144:175
+  structure[19] = static_cast<uint8_t>((input.routing_id >> 8) & 0xFF);   //
+  structure[20] = static_cast<uint8_t>((input.routing_id >> 16) & 0xFF);  //
+  structure[21] = static_cast<uint8_t>((input.routing_id >> 24) & 0xFF);  //
+  structure[22] = input.revision_id;                                      // bits 176:183
+  structure[23] = static_cast<uint8_t>(input.device_id & 0xFF);           // bits 184:199
+  structure[24] = static_cast<uint8_t>((input.device_id >> 8) & 0xFF);    //
+  structure[25] = static_cast<uint8_t>(input.vendor_id & 0xFF);           // bits 200:215
+  structure[26] = static_cast<uint8_t>((input.vendor_id >> 8) & 0xFF);    //
+  structure[27] = input.component_type & 0x0F;                            // bits 216:219
   // structure[27] high nibble and structure[28..31] are the reserved field.
 }
 
@@ -677,7 +677,7 @@ amdcuid_status_t CuidUtilities::generate_primary_cuid(uint64_t serial_number, ui
   // Build 122-bit value in little-endian order
   uint8_t id_bits[16] = {0};  // 128 bits total (122 bits + 6 bits padding)
 
-  uint8_t unit_id_part1 = unit_id & 0xFF;
+  uint8_t unit_id_part1 = static_cast<uint8_t>(unit_id & 0xFF);
   uint8_t unit_id_part2 = (unit_id >> 8) & 0x1F;
 
   // Bits 0-63: Serial number (8 bytes)
@@ -691,12 +691,12 @@ amdcuid_status_t CuidUtilities::generate_primary_cuid(uint64_t serial_number, ui
 
   // Bits 80-95: DeviceID (2 bytes); These format changes are necessary to make
   // the final ID little Endian, as specified in the design
-  id_bits[10] = device_id & 0xFF;
-  id_bits[11] = (device_id >> 8) & 0xFF;
+  id_bits[10] = static_cast<uint8_t>(device_id & 0xFF);
+  id_bits[11] = static_cast<uint8_t>((device_id >> 8) & 0xFF);
 
   // Bits 96-111: VendorID (2 bytes)
-  id_bits[12] = vendor_id & 0xFF;
-  id_bits[13] = (vendor_id >> 8) & 0xFF;
+  id_bits[12] = static_cast<uint8_t>(vendor_id & 0xFF);
+  id_bits[13] = static_cast<uint8_t>((vendor_id >> 8) & 0xFF);
 
   // Bits 112-116: UnitID part 2 (5 bits) + Bit 117: Auxiliary Value Identifier
   // (1 bit) + Bits 118-121: Component Type (4 bits), which straddles the octet
@@ -736,17 +736,26 @@ void CuidUtilities::remove_UUIDv8_bits(amdcuid_id_t* id, uint8_t out_raw_bits[16
   out_raw_bits[5] = id->bytes[5];
 
   // Bits 48-51: Version (8) + Bits 52-63: ID value part 2
-  out_raw_bits[6] = ((id->bytes[6] & 0x0F) << 4) | ((id->bytes[7] & 0xF0) >> 4);
-  out_raw_bits[7] = ((id->bytes[7] & 0x0F) << 4) | ((id->bytes[8] & 0x3C) >> 2);
+  out_raw_bits[6] =
+      static_cast<uint8_t>(((id->bytes[6] & 0x0F) << 4) | ((id->bytes[7] & 0xF0) >> 4));
+  out_raw_bits[7] =
+      static_cast<uint8_t>(((id->bytes[7] & 0x0F) << 4) | ((id->bytes[8] & 0x3C) >> 2));
 
   // Bits 64-65: Variant (10b) + Bits 66-127: ID value part 3 (MSB)
-  out_raw_bits[8] = ((id->bytes[8] & 0x03) << 6) | ((id->bytes[9] & 0xFC) >> 2);
-  out_raw_bits[9] = ((id->bytes[9] & 0x03) << 6) | ((id->bytes[10] & 0xFC) >> 2);
-  out_raw_bits[10] = ((id->bytes[10] & 0x03) << 6) | ((id->bytes[11] & 0xFC) >> 2);
-  out_raw_bits[11] = ((id->bytes[11] & 0x03) << 6) | ((id->bytes[12] & 0xFC) >> 2);
-  out_raw_bits[12] = ((id->bytes[12] & 0x03) << 6) | ((id->bytes[13] & 0xFC) >> 2);
-  out_raw_bits[13] = ((id->bytes[13] & 0x03) << 6) | ((id->bytes[14] & 0xFC) >> 2);
-  out_raw_bits[14] = ((id->bytes[14] & 0x03) << 6) | ((id->bytes[15] & 0xFC) >> 2);
+  out_raw_bits[8] =
+      static_cast<uint8_t>(((id->bytes[8] & 0x03) << 6) | ((id->bytes[9] & 0xFC) >> 2));
+  out_raw_bits[9] =
+      static_cast<uint8_t>(((id->bytes[9] & 0x03) << 6) | ((id->bytes[10] & 0xFC) >> 2));
+  out_raw_bits[10] =
+      static_cast<uint8_t>(((id->bytes[10] & 0x03) << 6) | ((id->bytes[11] & 0xFC) >> 2));
+  out_raw_bits[11] =
+      static_cast<uint8_t>(((id->bytes[11] & 0x03) << 6) | ((id->bytes[12] & 0xFC) >> 2));
+  out_raw_bits[12] =
+      static_cast<uint8_t>(((id->bytes[12] & 0x03) << 6) | ((id->bytes[13] & 0xFC) >> 2));
+  out_raw_bits[13] =
+      static_cast<uint8_t>(((id->bytes[13] & 0x03) << 6) | ((id->bytes[14] & 0xFC) >> 2));
+  out_raw_bits[14] =
+      static_cast<uint8_t>(((id->bytes[14] & 0x03) << 6) | ((id->bytes[15] & 0xFC) >> 2));
   // The last two rendered bits are payload 120:121 (the Component Type's high
   // two bits), which live in the low bits of raw[15]. Payload 122:127 are
   // padding and are not carried in the rendered value at all.
@@ -769,21 +778,21 @@ void CuidUtilities::add_UUIDv8_bits(const uint8_t raw_bits[16], amdcuid_id_t* id
 
   // Bits 48-51: Version (8) + Bits 52-63: ID value part 2
   id->bytes[6] = ((raw_bits[6] & 0xF0) >> 4) | 0x80;  // Version 8 in upper 4 bits
-  id->bytes[7] = ((raw_bits[6] & 0x0F) << 4) | ((raw_bits[7] & 0xF0) >> 4);
+  id->bytes[7] = static_cast<uint8_t>(((raw_bits[6] & 0x0F) << 4) | ((raw_bits[7] & 0xF0) >> 4));
 
   // Bits 64-65: Variant (10b) + Bits 66-127: ID value part 3 (MSB)
-  id->bytes[8] = 0x80 | (raw_bits[7] & 0x0F) << 2 | (raw_bits[8] & 0xC0) >> 6;
+  id->bytes[8] = static_cast<uint8_t>(0x80 | (raw_bits[7] & 0x0F) << 2 | (raw_bits[8] & 0xC0) >> 6);
   // everything past here is now shifted by 6 bits
-  id->bytes[9] = ((raw_bits[8] & 0x3F) << 2) | ((raw_bits[9] & 0xC0) >> 6);
-  id->bytes[10] = ((raw_bits[9] & 0x3F) << 2) | ((raw_bits[10] & 0xC0) >> 6);
-  id->bytes[11] = ((raw_bits[10] & 0x3F) << 2) | ((raw_bits[11] & 0xC0) >> 6);
-  id->bytes[12] = ((raw_bits[11] & 0x3F) << 2) | ((raw_bits[12] & 0xC0) >> 6);
-  id->bytes[13] = ((raw_bits[12] & 0x3F) << 2) | ((raw_bits[13] & 0xC0) >> 6);
-  id->bytes[14] = ((raw_bits[13] & 0x3F) << 2) | ((raw_bits[14] & 0xC0) >> 6);
+  id->bytes[9] = static_cast<uint8_t>(((raw_bits[8] & 0x3F) << 2) | ((raw_bits[9] & 0xC0) >> 6));
+  id->bytes[10] = static_cast<uint8_t>(((raw_bits[9] & 0x3F) << 2) | ((raw_bits[10] & 0xC0) >> 6));
+  id->bytes[11] = static_cast<uint8_t>(((raw_bits[10] & 0x3F) << 2) | ((raw_bits[11] & 0xC0) >> 6));
+  id->bytes[12] = static_cast<uint8_t>(((raw_bits[11] & 0x3F) << 2) | ((raw_bits[12] & 0xC0) >> 6));
+  id->bytes[13] = static_cast<uint8_t>(((raw_bits[12] & 0x3F) << 2) | ((raw_bits[13] & 0xC0) >> 6));
+  id->bytes[14] = static_cast<uint8_t>(((raw_bits[13] & 0x3F) << 2) | ((raw_bits[14] & 0xC0) >> 6));
   // The final octet takes payload 120:121 (the Component Type's high two bits)
   // from the low bits of raw[15]. What falls off the end is payload 122:127,
   // always zero padding, so the framing preserves payload 0:121 exactly.
-  id->bytes[15] = ((raw_bits[14] & 0x3F) << 2) | (raw_bits[15] & 0x03);
+  id->bytes[15] = static_cast<uint8_t>(((raw_bits[14] & 0x3F) << 2) | (raw_bits[15] & 0x03));
 }
 
 std::string CuidUtilities::get_cuid_as_string(const amdcuid_id_t* id) {

@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include <cstring>
+#include <initializer_list>
 #include <string>
 #include <vector>
 
@@ -56,7 +57,7 @@ TEST(cuidtstUnprivileged, GpuPropagatesInvalidUnitId) {
   const bool have_machine_id =
       CuidUtilities::make_fallback_fingerprint(CuidUtilities::AuxiliaryInput{}, probe) ==
       AMDCUID_STATUS_SUCCESS;
-  for (const uint16_t unit_id : {0x1FFF, 0x2000, 0x2001, 0xFFFF}) {
+  for (const uint16_t unit_id : std::initializer_list<uint16_t>{0x1FFF, 0x2000, 0x2001, 0xFFFF}) {
     SCOPED_TRACE(::testing::Message() << "unit=" << unit_id);
     amdcuid_gpu_info info = {};
     info.header.fields.gpu.unit_id = unit_id;

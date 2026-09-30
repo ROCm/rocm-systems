@@ -29,7 +29,7 @@ namespace {
 class PrimaryOnlyDevice : public CuidDevice {
  public:
   PrimaryOnlyDevice(bool auxiliary, amdcuid_status_t primary_status = AMDCUID_STATUS_SUCCESS)
-      : auxiliary_(auxiliary), primary_status_(primary_status) {}
+      : primary_status_(primary_status), auxiliary_(auxiliary) {}
   amdcuid_device_type_t type() const override { return AMDCUID_DEVICE_TYPE_OTHER; }
   amdcuid_status_t get_primary_cuid(amdcuid_primary_id& id) const override {
     if (primary_status_ != AMDCUID_STATUS_SUCCESS) return primary_status_;

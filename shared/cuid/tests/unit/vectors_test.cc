@@ -326,7 +326,7 @@ void check_device_type_validity() {
   EXPECT_FALSE(amdcuid_device_type_is_valid(AMDCUID_DEVICE_TYPE_NONE));
   EXPECT_FALSE(amdcuid_device_type_is_valid(static_cast<amdcuid_device_type_t>(0x10)));
   EXPECT_FALSE(amdcuid_device_type_is_valid(static_cast<amdcuid_device_type_t>(0xFE)));
-  EXPECT_FALSE(amdcuid_device_type_is_valid(static_cast<amdcuid_device_type_t>(0x1000)));
+  EXPECT_FALSE(amdcuid_test_device_type_is_valid_c(0x1000));
 }
 
 }  // namespace
@@ -714,7 +714,8 @@ void TestVectors::Run() {
     EXPECT_EQ(shifted & (shifted + 1), 0u) << "mask is not contiguous";
     EXPECT_EQ(unit_id, (static_cast<unsigned>(__builtin_popcount(mask)) << 6) | first);
     amdcuid_primary_id id = {};
-    EXPECT_EQ(CuidUtilities::generate_primary_cuid(0x06C5349BD3AAABD4ULL, unit_id, 0, 0x73A3,
+    EXPECT_EQ(CuidUtilities::generate_primary_cuid(0x06C5349BD3AAABD4ULL,
+                                                   static_cast<uint16_t>(unit_id), 0, 0x73A3,
                                                    0x1002, AMDCUID_DEVICE_TYPE_GPU, &id, false),
               AMDCUID_STATUS_SUCCESS);
     consumed.emplace(v.kind, v.name);
@@ -773,10 +774,10 @@ TEST(cuidtstUnprivileged, PrimaryRejectsOutOfRangeUnitId) {
       amdcuid_primary_id id;
       std::memset(&id, 0xA5, sizeof(id));
       const amdcuid_primary_id original = id;
-      ASSERT_EQ(
-          CuidUtilities::generate_primary_cuid(0x06C5349BD3AAABD4ULL, unit_id, 0, 0x73A3, 0x1002,
-                                               AMDCUID_DEVICE_TYPE_GPU, &id, auxiliary),
-          AMDCUID_STATUS_INVALID_ARGUMENT)
+      ASSERT_EQ(CuidUtilities::generate_primary_cuid(
+                    0x06C5349BD3AAABD4ULL, static_cast<uint16_t>(unit_id), 0, 0x73A3, 0x1002,
+                    AMDCUID_DEVICE_TYPE_GPU, &id, auxiliary),
+                AMDCUID_STATUS_INVALID_ARGUMENT)
           << "unit=" << unit_id << " auxiliary=" << auxiliary;
       ASSERT_EQ(std::memcmp(&id, &original, sizeof(id)), 0) << "unit=" << unit_id;
     }

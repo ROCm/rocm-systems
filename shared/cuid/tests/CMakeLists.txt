@@ -52,6 +52,7 @@ set(TEST_SOURCES_UNIT
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/concurrency_test.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/cpu_unit_id_test.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/cuid_gpu_test.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/unit/device_type_c.c
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/device_type_table_test.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/driver_cuid_test.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/gim_util_test.cc

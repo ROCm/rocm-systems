@@ -92,7 +92,7 @@ TEST(cuidtstUnprivileged, GpuUniqueIdZeroIsAbsentNotAnIdentity) {
     EXPECT_EQ(fingerprint, 0u);
   }
 
-  std::remove(attr.c_str());
+  (void)std::remove(attr.c_str());
   rmdir(root.c_str());
 }
 
