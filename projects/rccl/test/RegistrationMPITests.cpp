@@ -926,15 +926,38 @@ protected:
         return mpiCoordinatedSkipReason(!allocated, msg);
     }
 
-    // True when the selector would run this AllReduce on CE. The receive-offset
-    // tests assert CE behavior, so they skip when another backend is chosen.
-    bool ceAllReduceSelected(void* sendBuf, void* recvBuf, size_t count)
+    // The receive-offset tests reduce with Max. The selector requests the
+    // symmetric kernel only for Sum, and that kernel wins over registered CE
+    // wherever it is eligible (always on gfx942 and gfx950).
+    static constexpr ncclRedOp_t kCeRegOp = ncclMax;
+
+    // True when the selector would run this AllReduce on registered CE, the
+    // only CE path that writes through the receive window. CE 2-shot always
+    // stages, so it would not exercise the window offset.
+    bool ceRegisteredAllReduceSelected(void* sendBuf, void* recvBuf, size_t count)
     {
         int algo = 0, proto = 0, nCh = 0;
         ncclResult_t res = rcclGetCollImplInfo(
             getActiveCommunicator(), ncclFuncAllReduce, count, getNcclDataType<T>(),
-            ncclSum, sendBuf, recvBuf, /*graphCapturing=*/0, &algo, &proto, &nCh);
-        return res == ncclSuccess && (algo == RCCL_CE_REGISTERED || algo == RCCL_CE_2SHOT);
+            kCeRegOp, sendBuf, recvBuf, /*graphCapturing=*/0, &algo, &proto, &nCh);
+        return res == ncclSuccess && algo == RCCL_CE_REGISTERED;
+    }
+
+    // Each rank holds the maximum for 1/nRanks of the elements, so every peer's
+    // shard is visible in the Max result. Values stay <= nRanks, exact in bf16.
+    void initCeMaxSendBuffer(void* buffer, size_t count, int rank, int nRanks)
+    {
+        ASSERT_MPI_EQ(hipSuccess, initializeBufferWithPattern<T>(buffer, count,
+            [rank, nRanks](size_t i) {
+                return static_cast<T>(static_cast<float>(1 + (static_cast<size_t>(rank) + i) %
+                                                             static_cast<size_t>(nRanks)));
+            }));
+    }
+
+    bool verifyCeMaxResult(void* buffer, size_t count, int nRanks)
+    {
+        const T expected = static_cast<T>(static_cast<float>(nRanks));
+        return verifyBufferData<T>(buffer, count, [expected](size_t) { return expected; });
     }
 
     struct MultiSegmentBuffer
@@ -1424,13 +1447,13 @@ TEST_F(UBR_MultiSegment, Generic)
  *   "[<lsaRank>] Segment <i>, Type : <t>, numSegments <N>, Segment size ..."
  *
  * Unlike the ncclCommRegister path, the multi-segment registration happens once
- * at ncclCommWindowRegister time. The two AllReduce calls then reuse the same
- * window, confirming it stays valid and correct across collectives.
+ * at ncclCommWindowRegister time.
  *
  * This is the AFTER regression for the CE AllReduce receive-window offset:
  * recvBuf sits at a non-zero offset from the window base, so Phase 3 must use
- * (recvbuff - recvWin->userPtr) + rank * shardBytes. The BEFORE control is
- * Symmetric_Lsa_BeforeLegacyRecvOffsetCorruptsResult.
+ * (recvbuff - recvWin->userPtr) + rank * shardBytes. The AllReduce uses Max so
+ * registered CE is selected instead of the symmetric kernel. The BEFORE control
+ * is Symmetric_Lsa_BeforeLegacyRecvOffsetCorruptsResult.
  */
  TEST_F(UBR_MultiSegment, Symmetric_Lsa)
  {
@@ -1451,18 +1474,13 @@ TEST_F(UBR_MultiSegment, Generic)
      constexpr int kNumSegments = 8;
      SCOPED_TRACE("kNumSegments=" + std::to_string(kNumSegments));
 
-     {
-         const std::string why = mpiCoordinatedSkipReason(
-             !ceAllReduceSelected(sendBuf, recvBuf, count),
-             "CE AllReduce was not selected (rcclGetCollImplInfo)");
-         if (!why.empty()) GTEST_SKIP() << why;
-     }
+     ASSERT_MPI_TRUE(ceRegisteredAllReduceSelected(sendBuf, recvBuf, count));
 
-     initSendBuffer<T>(sendBuf, count, rank);
+     ASSERT_NO_FATAL_FAILURE(initCeMaxSendBuffer(sendBuf, count, rank, nRanks));
 
-     ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(sendBuf, recvBuf, count, getNcclDataType<T>(), ncclSum, getActiveCommunicator(), getActiveStream()));
+     ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(sendBuf, recvBuf, count, getNcclDataType<T>(), kCeRegOp, getActiveCommunicator(), getActiveStream()));
      ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
-     ASSERT_TRUE(verifyAllReduceResult<T>(recvBuf, count, nRanks));
+     ASSERT_TRUE(verifyCeMaxResult(recvBuf, count, nRanks));
 
      REGLogChecker checker = getLogChecker();
      TEST_INFO("SymmetricWindow_MultiSegment: %s (log size: %zu bytes)",
@@ -1500,14 +1518,9 @@ TEST_F(UBR_MultiSegment, Symmetric_Lsa_BeforeLegacyRecvOffsetCorruptsResult)
     });
     if (::testing::Test::IsSkipped() || ::testing::Test::HasFatalFailure()) return;
 
-    {
-        const std::string why = mpiCoordinatedSkipReason(
-            !ceAllReduceSelected(sendBuf, recvBuf, count),
-            "CE AllReduce was not selected (rcclGetCollImplInfo)");
-        if (!why.empty()) GTEST_SKIP() << why;
-    }
+    ASSERT_MPI_TRUE(ceRegisteredAllReduceSelected(sendBuf, recvBuf, count));
 
-    initSendBuffer<T>(sendBuf, count, rank);
+    ASSERT_NO_FATAL_FAILURE(initCeMaxSendBuffer(sendBuf, count, rank, nRanks));
     ASSERT_MPI_EQ(hipSuccess, hipMemset(recvBuf, 0, totalBytes));
 
     ASSERT_MPI_EQ(ncclSuccess, ncclCeFaultSet(
@@ -1517,19 +1530,19 @@ TEST_F(UBR_MultiSegment, Symmetric_Lsa_BeforeLegacyRecvOffsetCorruptsResult)
     });
 
     ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(
-        sendBuf, recvBuf, count, getNcclDataType<T>(), ncclSum,
+        sendBuf, recvBuf, count, getNcclDataType<T>(), kCeRegOp,
         getActiveCommunicator(), getActiveStream()));
     ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
 
     const size_t shardElems = count / static_cast<size_t>(nRanks);
-    const T expectedLocal = static_cast<T>(static_cast<float>(nRanks * (nRanks + 1) / 2));
+    const T expectedLocal = static_cast<T>(static_cast<float>(nRanks));
     const T expectedOther = static_cast<T>(static_cast<float>(0));
     ASSERT_TRUE(verifyBufferData<T>(recvBuf, count,
         [shardElems, rank, expectedLocal, expectedOther](size_t i) {
             return (i / shardElems == static_cast<size_t>(rank)) ? expectedLocal : expectedOther;
         }))
         << "BEFORE control did not pin local-shard reduce + memset-0 remote shards";
-    EXPECT_FALSE(verifyAllReduceResult<T>(recvBuf, count, nRanks))
+    EXPECT_FALSE(verifyCeMaxResult(recvBuf, count, nRanks))
         << "BEFORE control did not reproduce the legacy receive-window offset corruption";
 }
 #endif
@@ -1557,19 +1570,14 @@ TEST_F(UBR_MultiSegment, Symmetric_Lsa_RecvRangePastWindowFallsBack)
     });
     if (::testing::Test::IsSkipped() || ::testing::Test::HasFatalFailure()) return;
 
-    {
-        const std::string why = mpiCoordinatedSkipReason(
-            !ceAllReduceSelected(sendBuf, recvBuf, count),
-            "CE AllReduce was not selected (rcclGetCollImplInfo)");
-        if (!why.empty()) GTEST_SKIP() << why;
-    }
+    ASSERT_MPI_TRUE(ceRegisteredAllReduceSelected(sendBuf, recvBuf, count));
 
-    initSendBuffer<T>(sendBuf, count, rank);
+    ASSERT_NO_FATAL_FAILURE(initCeMaxSendBuffer(sendBuf, count, rank, nRanks));
     ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(
-        sendBuf, recvBuf, count, getNcclDataType<T>(), ncclSum,
+        sendBuf, recvBuf, count, getNcclDataType<T>(), kCeRegOp,
         getActiveCommunicator(), getActiveStream()));
     ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
-    ASSERT_TRUE(verifyAllReduceResult<T>(recvBuf, count, nRanks));
+    ASSERT_TRUE(verifyCeMaxResult(recvBuf, count, nRanks));
 }
 
 /**
@@ -1596,19 +1604,14 @@ TEST_F(UBR_MultiSegment, Symmetric_Lsa_RecvRangePastWindowChunkedFallback)
     });
     if (::testing::Test::IsSkipped() || ::testing::Test::HasFatalFailure()) return;
 
-    {
-        const std::string why = mpiCoordinatedSkipReason(
-            !ceAllReduceSelected(sendBuf, recvBuf, count),
-            "CE AllReduce was not selected (rcclGetCollImplInfo)");
-        if (!why.empty()) GTEST_SKIP() << why;
-    }
+    ASSERT_MPI_TRUE(ceRegisteredAllReduceSelected(sendBuf, recvBuf, count));
 
-    initSendBuffer<T>(sendBuf, count, rank);
+    ASSERT_NO_FATAL_FAILURE(initCeMaxSendBuffer(sendBuf, count, rank, nRanks));
     ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(
-        sendBuf, recvBuf, count, getNcclDataType<T>(), ncclSum,
+        sendBuf, recvBuf, count, getNcclDataType<T>(), kCeRegOp,
         getActiveCommunicator(), getActiveStream()));
     ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
-    ASSERT_TRUE(verifyAllReduceResult<T>(recvBuf, count, nRanks));
+    ASSERT_TRUE(verifyCeMaxResult(recvBuf, count, nRanks));
 }
 
 /**
