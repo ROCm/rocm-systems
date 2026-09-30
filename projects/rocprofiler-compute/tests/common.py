@@ -513,3 +513,43 @@ def _check_analysis_csv_owners(frames):
             assert set(zip(frame.workload_id, frame.kernel_uuid)) <= owners, (
                 f"Mismatched workload/kernel owner in {name}"
             )
+
+
+def check_roofline_csv(path, *, allowed_zero=()):
+    """Read and validate ordered benchmark mean/Low/High triplets."""
+    import pandas as pd
+
+    assert Path(path).is_file(), f"Missing roofline CSV: {path}"
+    return _check_roofline_frame(pd.read_csv(path), allowed_zero)
+
+
+def _check_roofline_frame(df, allowed_zero):
+    """Check benchmark layout, zero allowances and measurement bounds."""
+    import numpy as np
+    import pandas as pd
+
+    assert not df.empty, "Empty roofline CSV"
+    # Historical MI200 exports spell this one column with an extra F.
+    aliases = {"mfmafi8opslow": "mfmai8opslow"}
+    columns = [aliases.get(str(name).lower(), str(name).lower()) for name in df.columns]
+    assert columns[0] == "device", "Device must be first"
+    assert len(columns) > 1 and (len(columns) - 1) % 3 == 0, "Incomplete triplets"
+    assert len(set(columns)) == len(columns), "Duplicate measurement columns"
+    devices = pd.to_numeric(df.iloc[:, 0], errors="coerce")
+    assert (np.isfinite(devices) & (devices >= 0) & (devices % 1 == 0)).all()
+    allowed = {str(name).lower() for name in allowed_zero}
+    for offset in range(1, len(columns), 3):
+        mean_name, low_name, high_name = columns[offset : offset + 3]
+        assert (low_name, high_name) == (mean_name + "low", mean_name + "high"), (
+            f"Malformed triplet: {mean_name}"
+        )
+        values = df.iloc[:, offset : offset + 3].apply(pd.to_numeric, errors="coerce")
+        assert (np.isfinite(values) & (values >= 0)).all().all(), "Invalid measurements"
+        mean, low, high = (values.iloc[:, index] for index in range(3))
+        if mean_name not in allowed:
+            assert (values > 0).all().all(), f"Unexpected zero: {mean_name}"
+        positive = mean > 0
+        assert (
+            (low[positive] <= mean[positive]) & (mean[positive] <= high[positive])
+        ).all(), f"Inverted bounds: {mean_name}"
+    return df
