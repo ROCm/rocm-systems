@@ -20,14 +20,20 @@
     "--bind-to none"
   ],
   "build_configuration": {
-    "install_flags": ["-l", "-t", "--enable-tdm-prim-ll128"],
+    "install_flags": [
+      "-l",
+      "-t",
+      "--enable-tdm-prim-ll128"
+    ],
     "cmake_options": "-DBITCODE_LIB_ARCH=gfx1250",
     "parallel_jobs": 64
   },
   "test_configurations": {
     "default": {
       "env_variables": {},
-      "rerun_env_variables": { "NCCL_DEBUG": "INFO" }
+      "rerun_env_variables": {
+        "NCCL_DEBUG": "INFO"
+      }
     },
     "tdm_ll128_ring": {
       "extends": "default",
@@ -102,6 +108,43 @@
           "test_filter": "Broadcast.*"
         }
       ]
+    },
+    "tdm_ll128_ubr": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTests",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 7200,
+      "env_variables": {
+        "RCCL_LOG_ROCTX": "1",
+        "UT_MIN_GPUS": "1",
+        "UT_MAX_GPUS": "8",
+        "UT_POW2_GPUS": "1",
+        "UT_DATATYPES": "all",
+        "UT_REDOPS": "all",
+        "RCCL_LL128_FORCE_ENABLE": "1",
+        "NCCL_PROTO": "LL128",
+        "NCCL_ALGO": "Ring"
+      },
+      "tests": [
+        {
+          "name": "TDM_LL128_Ring_AllReduce_UserBufferRegistration",
+          "description": "Registered user buffers under forced Ring + LL128, covering the system-scope cache policy",
+          "test_filter": "AllReduce.UserBufferRegistration:AllReduce.ManagedMemUserBufferRegistration"
+        },
+        {
+          "name": "TDM_LL128_Ring_AllGather_UserBufferRegistration",
+          "description": "Registered user buffers for AllGather under forced Ring + LL128",
+          "test_filter": "AllGather.UserBufferRegistration:AllGather.ManagedMemUserBufferRegistration"
+        },
+        {
+          "name": "TDM_LL128_Ring_ReduceScatter_UserBufferRegistration",
+          "description": "Registered user buffers for ReduceScatter under forced Ring + LL128",
+          "test_filter": "ReduceScatter.UserBufferRegistration:ReduceScatter.ManagedMemUserBufferRegistration"
+        }
+      ]
     }
   },
   "test_suites": [
@@ -115,6 +158,12 @@
       "name": "TDM LL128 - Tree",
       "description": "Unit suite under forced Tree + LL128 on a TDM-enabled build",
       "config": "tdm_ll128_tree",
+      "enabled": true
+    },
+    {
+      "name": "TDM LL128 - Registered user buffers",
+      "description": "Registered-buffer cases under forced Ring + LL128, covering the system-scope cache policy",
+      "config": "tdm_ll128_ubr",
       "enabled": true
     }
   ]
