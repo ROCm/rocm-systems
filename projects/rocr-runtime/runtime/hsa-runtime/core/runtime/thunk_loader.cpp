@@ -483,6 +483,9 @@ std::string GetAdjacentThunkLibraryPath(const std::string& library_name) {
       HSAKMT_PFN(hsaKmtGetAmdGPUDeviceFd) = (HSAKMT_DEF(hsaKmtGetAmdGPUDeviceFd)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtGetAmdGPUDeviceFd");
       if (HSAKMT_PFN(hsaKmtGetAmdGPUDeviceFd) == nullptr) goto LOAD_ERROR;
 
+      HSAKMT_PFN(hsaKmtSetPersistingCacheSize) = (HSAKMT_DEF(hsaKmtSetPersistingCacheSize)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtSetPersistingCacheSize");
+      if (HSAKMT_PFN(hsaKmtSetPersistingCacheSize) == nullptr) goto LOAD_ERROR;
+
       HSAKMT_PFN(hsaKmtMemoryCpuMap) = (HSAKMT_DEF(hsaKmtMemoryCpuMap)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtMemoryCpuMap");
       if (HSAKMT_PFN(hsaKmtMemoryCpuMap) == nullptr) goto LOAD_ERROR;
 
