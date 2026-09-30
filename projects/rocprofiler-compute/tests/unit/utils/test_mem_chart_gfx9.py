@@ -266,25 +266,17 @@ class TestPanelYamlGfx9:
         )
         assert len(output) > 100
 
-    def test_panel_yaml_metrics_render_same_line_count_across_base_architectures(self):
-        base_archs = [a for a in GFX9_ARCHITECTURES if a != "gfx950"]
-        line_counts = {
-            arch: len(
-                render_gfx9_chart(panel_yaml_metrics(arch), gpu_arch=arch).splitlines()
+    def test_panel_yaml_metrics_render_same_line_count_per_fabric_layout(self):
+        # Architectures that render the same fabric blocks share a line count.
+        line_counts_by_layout = {}
+        for arch in GFX9_ARCHITECTURES:
+            layout = tuple(sorted(GFX9_EXPECTED_FABRIC_BLOCKS[arch].items()))
+            output = render_gfx9_chart(panel_yaml_metrics(arch), gpu_arch=arch)
+            line_counts_by_layout.setdefault(layout, {})[arch] = len(
+                output.splitlines()
             )
-            for arch in base_archs
-        }
-        # All archs have xGMI.  gfx908/gfx90a have no MALL; gfx940-942 have MALL.
-        no_mall = [a for a in base_archs if a not in ("gfx940", "gfx941", "gfx942")]
-        mall = [a for a in base_archs if a in ("gfx940", "gfx941", "gfx942")]
-        no_mall_counts = {line_counts[a] for a in no_mall}
-        assert len(no_mall_counts) == 1, (
-            f"Non-MALL architectures should share a line count: {line_counts}"
-        )
-        mall_counts = {line_counts[a] for a in mall}
-        assert len(mall_counts) == 1, (
-            f"MALL architectures should share a line count: {line_counts}"
-        )
+        for line_counts in line_counts_by_layout.values():
+            assert len(set(line_counts.values())) == 1, line_counts
 
     @pytest.mark.parametrize("architecture", GFX9_ARCHITECTURES)
     def test_panel_yaml_metrics_render_expected_placeholders(self, architecture):
