@@ -910,7 +910,7 @@ export_domain_gpu(nlohmann::json&                           config,
         gpu["process_sampling"]["enabled"] = is_truthy(*v);
     }
 
-    // hipFile GPU-direct storage I/O telemetry is independent of AMD SMI.
+    // hipFile infinty storage I/O telemetry is independent of AMD SMI.
     if(auto hipfile_enabled = lookup(env_map, env_vars::USE_HIPFILE))
     {
         gpu["hipfile"]["enabled"] = is_truthy(*hipfile_enabled);
