@@ -532,6 +532,8 @@ hipError_t hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, con
 }
 }  // namespace hip
 
+namespace hip_impl {
+
 // ================================================================================================
 // @launchConfig  a launch configuration that might have the cluster size unconfigured
 // @return        hipErrorInvalidClusterSize if the cluster dimensions are not specified
