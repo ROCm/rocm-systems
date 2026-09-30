@@ -95,13 +95,13 @@ __global__ void QpPingPongTest(int loop, int skip, long long int *start_time,
       } else {
         uint64_t expected = static_cast<uint64_t>(i + 1);
         if (pe == 0) {
-          qp.put_nbi_single(data_r, data_s, size, PostOpt{RingDB<false>});
-          qp.atomic_add_single(sig, 1,            PostOpt{RingDB<true>});
+          qp.put_nbi_single(data_r, data_s, size, CommOpt{Initiate<false>});
+          qp.atomic_add_single(sig, 1,            CommOpt{Initiate<true>});
           while (uncached_load(sig) < expected) {}
         } else {
           while (uncached_load(sig) < expected) {}
-          qp.put_nbi_single(data_r, data_s, size, PostOpt{RingDB<false>});
-          qp.atomic_add_single(sig, 1,            PostOpt{RingDB<true>});
+          qp.put_nbi_single(data_r, data_s, size, CommOpt{Initiate<false>});
+          qp.atomic_add_single(sig, 1,            CommOpt{Initiate<true>});
         }
       }
     }
