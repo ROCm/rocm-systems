@@ -1345,7 +1345,8 @@ typedef struct {
 /**
  * @brief Power Information
  *
- * @note Unsupported struct members are set to UINT32_MAX
+ * @note Unsupported struct members are set to the max value of their type (UINT32_MAX or
+ * UINT64_MAX)
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @tag{guest_windows} @endcond
  */
@@ -1387,11 +1388,9 @@ typedef struct {
  * @cond @tag{gpu_bm_linux} @tag{guest_windows} @tag{host} @endcond
  **/
 typedef struct {
-  uint32_t gfx_activity;  //!< In %. Reported as N/A via the sentinel 0x0000FFFF
-                          //!< (a uint16_t max value carried in this uint32_t field,
-                          //!< inherited from average_gfx_activity), not 0xFFFFFFFF.
-  uint32_t umc_activity;  //!< In %
-  uint32_t mm_activity;   //!< In %
+  uint32_t gfx_activity;  //!< In %. UINT32_MAX when unavailable
+  uint32_t umc_activity;  //!< In %. UINT32_MAX when unavailable
+  uint32_t mm_activity;   //!< In %. UINT32_MAX when unavailable
   uint32_t reserved[13];
 } amdsmi_engine_usage_t;
 
@@ -2196,7 +2195,7 @@ typedef struct {
  * Use ::amdsmi_gpu_metrics_t.common_header to identify which version populated
  * the fields.
  *
- * **Sentinel Values:**
+ * **Unavailable Values:**
  * Fields not applicable to the current version are initialized to the maximum value
  * of their respective type: 0xFFFF for uint16_t fields, 0xFFFFFFFF for uint32_t fields,
  * and UINT64_MAX for uint64_t fields. For example, on v3.0 hardware, v2.4-only fields
@@ -2558,9 +2557,10 @@ typedef struct {
    * - v3.0: format_revision == 3 && content_revision == 0
    *
    * **Field Validity:**
-   * Not all fields are valid for all versions. Fields contain sentinel value
-   * 0xFFFF (65535) when not populated for the current version. Refer to inline
-   * comments in ::amdsmi_apu_metrics_t for per-field version availability.
+   * Not all fields are valid for all versions. Fields not populated for the current
+   * version contain the max value of their type (e.g. 0xFFFF for uint16_t,
+   * 0xFFFFFFFF for uint32_t, UINT64_MAX for uint64_t). Refer to inline comments
+   * in ::amdsmi_apu_metrics_t for per-field version availability.
    */
   amdsmi_apu_metrics_t* apu_metrics;
 
@@ -7818,8 +7818,7 @@ amdsmi_status_t amdsmi_get_temp_metric(amdsmi_processor_handle processor_handle,
  *  @param[in] processor_handle Device which to query
  *
  *  @param[out] info Reference to the gpu engine usage structure. Must be allocated by user.
- *  When @p gfx_activity is unavailable it is reported as N/A using the sentinel
- *  0x0000FFFF (a uint16_t max value carried in the uint32_t field), not 0xFFFFFFFF.
+ *  An unavailable usage is reported as UINT32_MAX.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
@@ -7835,7 +7834,8 @@ amdsmi_status_t amdsmi_get_gpu_activity(amdsmi_processor_handle processor_handle
  *
  *  @note amdsmi_power_info_t::socket_power metric can rarely spike above the socket power limit in
  * some cases
- *  @note unsupported struct members are set to UINT32_MAX
+ *  @note unsupported struct members are set to the max value of their type (UINT32_MAX or
+ *  UINT64_MAX)
  *
  *  @param[in] processor_handle PF of a processor for which  to query
  *

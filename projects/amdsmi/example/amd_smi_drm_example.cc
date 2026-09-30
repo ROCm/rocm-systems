@@ -1254,9 +1254,9 @@ int main() {
       printf("    Output of amdsmi_get_gpu_activity:\n");
       if (ret != AMDSMI_STATUS_NOT_SUPPORTED) {
         CHK_AMDSMI_RET(ret)
-        printf("\tAverage GFX Activity: %d\n", engine_usage.gfx_activity);
-        printf("\tAverage MM Activity: %d\n", engine_usage.mm_activity);
-        printf("\tAverage UMC Activity: %d\n\n", engine_usage.umc_activity);
+        printf("\tAverage GFX Activity: %u\n", engine_usage.gfx_activity);
+        printf("\tAverage MM Activity: %u\n", engine_usage.mm_activity);
+        printf("\tAverage UMC Activity: %u\n\n", engine_usage.umc_activity);
       } else {
         printf("\tamdsmi_get_gpu_activity(): not supported on this device.\n");
       }
