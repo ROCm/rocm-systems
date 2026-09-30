@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <vector>
 #include <unistd.h>
 #include "CollectiveArgs.hpp"
@@ -56,6 +57,21 @@ namespace RcclUnitTesting
       "QUERY_SYMMETRIC"
     };
 
+    // argv layout of an exec'd child worker (TestBed::InitChild builds it, main() parses it)
+    enum
+    {
+      CHILD_ARG_FLAG            = 1, // "--child"
+      CHILD_ARG_ID              = 2,
+      CHILD_ARG_READ_FD         = 3,
+      CHILD_ARG_WRITE_FD        = 4,
+      CHILD_ARG_VERBOSE         = 5,
+      CHILD_ARG_PRINT_VALUES    = 6,
+      CHILD_ARG_RANK_THREADING  = 7,
+      CHILD_ARG_MEM_ALLOC_TYPE  = 8,
+      NUM_CHILD_ARGS            = 9  // argc, including argv[0]
+    };
+    static constexpr char const* kChildFlag = "--child";
+
     // These variables remain constant for life of TestBedChild
     int   childId;
     pid_t pid;
@@ -95,6 +111,12 @@ namespace RcclUnitTesting
     void StartExecutionLoop();
 
   protected:
+    // Number of elements UT_PRINT_VALUES prints from a buffer of numElements (-1 prints all)
+    size_t NumElementsToPrint(size_t numElements) const
+    {
+      return printValues < 0 ? numElements : std::min(numElements, static_cast<size_t>(printValues));
+    }
+
     // Calls ncclGetUniqueId and returns it to parent
     ErrCode GetUniqueId(std::vector<char>& retValBuf);
 

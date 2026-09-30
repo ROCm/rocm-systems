@@ -149,22 +149,24 @@ namespace RcclUnitTesting
     std::string const sThreading    = std::to_string(ev.useMultithreading ? 1 : 0);
     std::string const sMemAllocType = std::to_string(static_cast<int>(memAllocType));
 
+    char const* childArgv[TestBedChild::NUM_CHILD_ARGS + 1] = {};
+    childArgv[0]                                      = "rccl_unit_test";
+    childArgv[TestBedChild::CHILD_ARG_FLAG]           = TestBedChild::kChildFlag;
+    childArgv[TestBedChild::CHILD_ARG_ID]             = sChildId.c_str();
+    childArgv[TestBedChild::CHILD_ARG_READ_FD]        = sChildReadFd.c_str();
+    childArgv[TestBedChild::CHILD_ARG_WRITE_FD]       = sChildWriteFd.c_str();
+    childArgv[TestBedChild::CHILD_ARG_VERBOSE]        = sVerbose.c_str();
+    childArgv[TestBedChild::CHILD_ARG_PRINT_VALUES]   = sPrintVal.c_str();
+    childArgv[TestBedChild::CHILD_ARG_RANK_THREADING] = sThreading.c_str();
+    childArgv[TestBedChild::CHILD_ARG_MEM_ALLOC_TYPE] = sMemAllocType.c_str();
+
     fflush(nullptr);
     pid_t const pid = fork();
     if (pid == 0)
     {
       close(child->parentWriteFd);
       close(child->parentReadFd);
-      execl("/proc/self/exe", "rccl_unit_test",
-            "--child",
-            sChildId.c_str(),
-            sChildReadFd.c_str(),
-            sChildWriteFd.c_str(),
-            sVerbose.c_str(),
-            sPrintVal.c_str(),
-            sThreading.c_str(),
-            sMemAllocType.c_str(),
-            static_cast<char*>(nullptr));
+      execv("/proc/self/exe", const_cast<char* const*>(childArgv));
       _exit(127);
     }
     if (pid < 0)

@@ -134,18 +134,21 @@ namespace RcclUnitTesting
       atomicAdd((unsigned long long*)badEltN, bad);
     }
 
-    __global__ void GenerateKernel(uint8_t* elts, intptr_t eltN, bool isE5m2, int redOp, int rankN,
+    template <bool IsE5m2>
+    using Fp8 = typename std::conditional<IsE5m2, rccl_bfloat8, rccl_float8>::type;
+
+    template <bool IsE5m2>
+    __global__ void GenerateKernel(uint8_t* elts, intptr_t eltN, int redOp, int rankN,
                                    int rankMe, uint64_t seed, intptr_t eltIx0)
     {
-      if (isE5m2) GenerateBody<rccl_bfloat8>(elts, eltN, redOp, rankN, rankMe, seed, eltIx0);
-      else        GenerateBody<rccl_float8> (elts, eltN, redOp, rankN, rankMe, seed, eltIx0);
+      GenerateBody<Fp8<IsE5m2>>(elts, eltN, redOp, rankN, rankMe, seed, eltIx0);
     }
 
-    __global__ void VerifyKernel(uint8_t const* results, intptr_t eltN, bool isE5m2, int redOp, int rankN,
+    template <bool IsE5m2>
+    __global__ void VerifyKernel(uint8_t const* results, intptr_t eltN, int redOp, int rankN,
                                  uint64_t seed, intptr_t eltIx0, int tolerance, int64_t* badEltN)
     {
-      if (isE5m2) VerifyBody<rccl_bfloat8>(results, eltN, redOp, rankN, seed, eltIx0, tolerance, badEltN);
-      else        VerifyBody<rccl_float8> (results, eltN, redOp, rankN, seed, eltIx0, tolerance, badEltN);
+      VerifyBody<Fp8<IsE5m2>>(results, eltN, redOp, rankN, seed, eltIx0, tolerance, badEltN);
     }
 
     bool IsSupported(ncclDataType_t dataType, ncclRedOp_t redOp, int rankN)
@@ -164,9 +167,9 @@ namespace RcclUnitTesting
     {
       if (!IsSupported(dataType, redOp, rankN)) return hipErrorInvalidValue;
       if (eltN == 0) return hipSuccess;
-      hipLaunchKernelGGL(GenerateKernel, dim3(NumBlocks(eltN)), dim3(kThreadsPerBlock), 0, stream,
-                         (uint8_t*)elts, eltN, dataType == ncclFloat8e5m2, (int)redOp, rankN, rankMe,
-                         seed, eltIx0);
+      auto const kernel = (dataType == ncclFloat8e5m2) ? GenerateKernel<true> : GenerateKernel<false>;
+      hipLaunchKernelGGL(kernel, dim3(NumBlocks(eltN)), dim3(kThreadsPerBlock), 0, stream,
+                         (uint8_t*)elts, eltN, (int)redOp, rankN, rankMe, seed, eltIx0);
       return hipGetLastError();
     }
   }
@@ -193,8 +196,9 @@ namespace RcclUnitTesting
     if (!IsSupported(dataType, redOp, rankN)) return hipErrorInvalidValue;
     *badEltN = 0;
     if (eltN == 0) return hipSuccess;
-    hipLaunchKernelGGL(VerifyKernel, dim3(NumBlocks(eltN)), dim3(kThreadsPerBlock), 0, stream,
-                       (uint8_t const*)results, eltN, dataType == ncclFloat8e5m2, (int)redOp, rankN,
+    auto const kernel = (dataType == ncclFloat8e5m2) ? VerifyKernel<true> : VerifyKernel<false>;
+    hipLaunchKernelGGL(kernel, dim3(NumBlocks(eltN)), dim3(kThreadsPerBlock), 0, stream,
+                       (uint8_t const*)results, eltN, (int)redOp, rankN,
                        seed, eltIx0, redOp == ncclAvg ? 2 : 0, badEltN);
     return hipGetLastError();
   }

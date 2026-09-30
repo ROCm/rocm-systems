@@ -106,6 +106,7 @@ test_categories:
       - "NonBlocking.*"
       - "Standalone.*"
       - "Fp8Validation.*"
+      - "Fp8Verifiable.*"
       - "Teardown.*"
       - "Register.*"
       - "Recorder.*"
@@ -124,7 +125,7 @@ test_categories:
       - "UT_MIN_GPUS=2"
       - "UT_MAX_GPUS=8"
       - "UT_POW2_GPUS=1"
-      - "UT_DATATYPES=ncclInt8,ncclUint8,ncclInt32,ncclUint32,ncclInt64,ncclUint64,ncclFloat16,ncclFloat32,ncclFloat64,ncclBfloat16"
+      - "UT_DATATYPES=ncclInt8,ncclUint8,ncclInt32,ncclUint32,ncclInt64,ncclUint64,ncclFloat16,ncclFloat32,ncclFloat64,ncclBfloat16,ncclFloat8e4m3,ncclFloat8e5m2"
       - "UT_REDOPS=sum,prod,max,min"
   comprehensive:
     description: "Exhaustive for rccl-UnitTests — every case per suite (Suite.*), comprehensive harness sweeps, longest timeout."

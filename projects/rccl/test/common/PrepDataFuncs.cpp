@@ -23,14 +23,17 @@ namespace RcclUnitTesting
         savedDeviceId_ = 0;
       }
       // Only switch context if target is different from current
-      if (savedDeviceId_ != targetDeviceId) {
-        hipSetDevice(targetDeviceId);
+      switched_ = (savedDeviceId_ != targetDeviceId);
+      if (switched_) {
+        (void)hipSetDevice(targetDeviceId);
       }
     }
 
     ~ScopedDevice() {
-      // Automatically restore caller's original device on scope exit
-      hipSetDevice(savedDeviceId_);
+      // Restore the caller's original device on scope exit, only if we switched away from it
+      if (switched_) {
+        (void)hipSetDevice(savedDeviceId_);
+      }
     }
 
     // Prevent copying/moving
@@ -39,6 +42,7 @@ namespace RcclUnitTesting
 
   private:
     int savedDeviceId_ = 0;
+    bool switched_ = false;
   };
   // Byte written into expectedGpu[0] by the UT_DEVICE_DATA_FAULT negative control.
   static constexpr int kDeviceDataFaultByte = 0xFF;

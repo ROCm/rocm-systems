@@ -670,7 +670,7 @@ namespace RcclUnitTesting
           CollectiveArgs& collArg = this->collArgs[groupId][localRank][collId];
           CHECK_HIP(hipSetDevice(this->deviceIds[localRank]));
 
-          int const numInputElementsToPrint = (this->printValues < 0 ? collArg.numInputElements : this->printValues);
+          size_t const numInputElementsToPrint = NumElementsToPrint(collArg.numInputElements);
           PtrUnion inputCpu;
           size_t const numInputBytes = numInputElementsToPrint * DataTypeToBytes(collArg.dataType);
           inputCpu.AllocateCpuMem(numInputBytes);
@@ -681,7 +681,7 @@ namespace RcclUnitTesting
                  inputCpu.ToString(collArg.dataType, numInputElementsToPrint).c_str());
           inputCpu.FreeCpuMem();
 
-          int const numOutputElementsToPrint = (this->printValues < 0 ? collArg.numOutputElements : this->printValues);
+          size_t const numOutputElementsToPrint = NumElementsToPrint(collArg.numOutputElements);
           size_t const numOutputBytes = numOutputElementsToPrint * DataTypeToBytes(collArg.dataType);
           CHECK_HIP(hipMemcpy(collArg.outputCpu.ptr, collArg.outputGpu.ptr, numOutputBytes, hipMemcpyDeviceToHost));
           printf("[ DEBUG    ] Rank %02d Group %d Coll %d %-10s: %s\n", collArg.globalRank, groupId, collId, "Pre-Output",
@@ -1098,7 +1098,7 @@ namespace RcclUnitTesting
         {
           CollectiveArgs const& collArg = this->collArgs[groupId][localRank][collId];
           CHECK_HIP(hipSetDevice(this->deviceIds[localRank]));
-          int numOutputElementsToPrint = (this->printValues < 0 ? collArg.numOutputElements : this->printValues);
+          size_t const numOutputElementsToPrint = NumElementsToPrint(collArg.numOutputElements);
           size_t const numOutputBytes = numOutputElementsToPrint * DataTypeToBytes(collArg.dataType);
           CHECK_HIP(hipMemcpy(collArg.outputCpu.ptr, collArg.outputGpu.ptr, numOutputBytes, hipMemcpyDeviceToHost));
           printf("[ DEBUG    ] Rank %02d Group %d Coll %d %-10s: %s\n", collArg.globalRank, groupId, collId, "Output",
