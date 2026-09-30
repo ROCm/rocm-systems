@@ -151,6 +151,6 @@ def test_device_filter(binary_handler_profile_rocprof_compute):
     file_dict = integration_common.check_csv_files(workload_dir, 1, num_kernels)
     assert sorted(list(file_dict.keys())) == CSVS
 
-    # TODO - verify expected device id in results
+    # --device selects the GPU used by the roofline benchmark.
 
     common.clean_output_dir(config["cleanup"], workload_dir)
