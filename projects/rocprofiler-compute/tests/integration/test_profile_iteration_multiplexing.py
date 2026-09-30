@@ -407,6 +407,7 @@ def test_iteration_multiplexing_data_types(
         workload_dir,
         "--roofline-data-type",
         "FP16",
+        "--overwrite",
     ])
     assert code_fp16 == 0
 

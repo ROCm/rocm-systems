@@ -203,7 +203,7 @@ def binary_handler_analyze_rocprof_compute(tmp_path):
 
     def _handler(arguments):
         arguments = list(arguments)
-        if not any(
+        if "analyze" in arguments and not any(
             argument == "--output-directory"
             or argument.startswith("--output-directory=")
             for argument in arguments
