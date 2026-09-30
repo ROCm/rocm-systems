@@ -32,6 +32,9 @@
 #include <utility>
 #include <vector>
 
+#include <sys/wait.h>
+#include <unistd.h>
+
 #include <fmt/core.h>
 #include <gtest/gtest.h>
 
@@ -136,6 +139,34 @@ TEST(consumer, restart)
 
     for(auto& var : *array)
         EXPECT_EQ(var.load(), static_cast<size_t>(CYCLES));
+}
+
+// A forked child must be able to destroy a running consumer.
+TEST(consumer, fork_child_exit_returns)
+{
+    auto array = std::make_shared<result_array_t>();
+
+    consumer_t consumer(consume_fn);
+    consumer.start();
+
+    pid_t pid = fork();
+    ASSERT_NE(pid, -1);
+    if(pid == 0)
+    {
+        alarm(10);
+        consumer.release_after_fork();
+        consumer.~consumer_t();
+        _exit(0);
+    }
+
+    int status = 0;
+    ASSERT_EQ(waitpid(pid, &status, 0), pid);
+    EXPECT_TRUE(WIFEXITED(status));
+    EXPECT_EQ(WEXITSTATUS(status), 0);
+
+    consumer.add(DummyData{2, 3, array});
+    consumer.exit();
+    EXPECT_EQ(array->at(2).load(), 3u);
 }
 
 // Verifies that calling add() after exit() does not lose work: the
