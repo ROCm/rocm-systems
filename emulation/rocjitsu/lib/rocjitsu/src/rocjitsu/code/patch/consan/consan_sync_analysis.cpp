@@ -154,7 +154,7 @@ void append_lds_address_fault_sites(std::span<const uint8_t> bytes, std::string_
 
 void build_fault_site_inventory(std::span<const uint8_t> bytes, rj_code_arch_t arch,
                                 ProgramAnalysisResult &result) {
-  const std::string fingerprint = make_code_object_id(bytes).fingerprint;
+  const std::string &fingerprint = result.program_inventory.code_object_id().fingerprint;
   result.fault_sites.clear();
   append_decoded_fault_sites(fingerprint, arch, result.program_inventory, result.fault_sites);
   std::ranges::stable_sort(result.fault_sites, [&](const FaultSite &lhs, const FaultSite &rhs) {
@@ -390,12 +390,11 @@ void build_sync_events(const CodeObjectId &code_object_id, rj_code_arch_t arch,
   }
 }
 
-void build_sync_event_inventory(std::span<const uint8_t> bytes,
-                                SynchronizationInventoryBuildView inventory,
+void build_sync_event_inventory(SynchronizationInventoryBuildView inventory,
                                 const ProgramInventory &program_inventory, rj_code_arch_t arch) {
-  const CodeObjectId code_object_id = make_code_object_id(bytes);
   inventory.sync_events.clear();
-  build_sync_events(code_object_id, arch, program_inventory, inventory.sync_events);
+  build_sync_events(program_inventory.code_object_id(), arch, program_inventory,
+                    inventory.sync_events);
 
   std::ranges::stable_sort(inventory.sync_events, [&](const SyncEvent &lhs, const SyncEvent &rhs) {
     const ProgramContainerId lhs_container =
@@ -2303,8 +2302,7 @@ bool analyze_semantic_inventory(std::span<const uint8_t> code_object_bytes,
   }
 
   build_fault_site_inventory(code_object_bytes, arch, result);
-  build_sync_event_inventory(code_object_bytes, synchronization_inventory, result.program_inventory,
-                             arch);
+  build_sync_event_inventory(synchronization_inventory, result.program_inventory, arch);
   if (!canonicalize_sync_events_by_physical_site(synchronization_inventory, result)) {
     result.program_inventory = inventory_builder.view();
     return false;

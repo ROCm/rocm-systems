@@ -1144,6 +1144,40 @@ TEST(ConSanProgramInventory, SymbolAliasesSharePhysicalAndRangeIdentityButKeepAt
   EXPECT_EQ(inventory.container(sites[1].container)->kind, ProgramContainerKind::Function);
 }
 
+TEST(ConSanProgramInventory, SemanticAndFaultIdentitiesFollowEachInputImage) {
+  const std::array<uint32_t, 4> words = {
+      0xD8340000u,
+      0x00000000u, // ds_store_b32
+      0xBF940000u, // s_barrier_wait
+      0xBFB00000u, // s_endpgm
+  };
+  auto bytes = make_rdna4_lds_code_object(words);
+  Options options;
+  options.mode = Mode::Default;
+  options.fault_dry_run = true;
+  CodeObjectId previous;
+  // Change descriptor bytes without changing instruction sites. Identity reuse
+  // must remain local to an inventory, including for equal-sized images.
+  for (uint32_t group_bytes : {1024u, 2048u}) {
+    mutate_first_kernel_descriptor(
+        bytes, [=](KD &descriptor) { descriptor.group_segment_fixed_size = group_bytes; });
+    const CodeObjectId expected = make_code_object_id(bytes);
+    EXPECT_NE(expected, previous);
+    const auto result = test_lower_consan(bytes, options);
+    ASSERT_TRUE(patch_succeeded(result));
+    EXPECT_EQ(result.program_inventory.code_object_id(), expected);
+    ASSERT_FALSE(result.program_inventory.sync().sync_events.empty());
+    for (const SyncEvent &event : result.program_inventory.sync().sync_events) {
+      EXPECT_EQ(event.semantic_id.physical.code_object, expected);
+      EXPECT_TRUE(event.identity.starts_with(expected.fingerprint + "|"));
+    }
+    ASSERT_FALSE(result.fault_sites.empty());
+    for (const FaultSite &site : result.fault_sites)
+      EXPECT_TRUE(site.identity.starts_with(expected.fingerprint + "|"));
+    previous = expected;
+  }
+}
+
 TEST(ConSanProgramInventory, RealCodeObjectPublishesDecodedContainersAndNormalizedAccesses) {
   std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
   mutate_first_kernel_descriptor(
