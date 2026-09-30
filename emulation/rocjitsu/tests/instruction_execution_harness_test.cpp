@@ -7882,6 +7882,46 @@ TEST(HwregTest, Gfx1250GetregReadsWgpId) {
     cu->wf(slot)->halt();
 }
 
+TEST(HwregHelperTest, Gfx1250WgpIdRequiresRepresentableShaderArrayWidth) {
+  amdgpu::GpuMemory gpu_mem("hwreg_gfx1250_wgp_id_width_mem");
+  amdgpu::L2Cache l2("hwreg_gfx1250_wgp_id_width_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 128;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+
+  constexpr uint32_t kWgpId = encode_hwreg(23, 10, 4);
+  for (uint32_t cu_index : {15u, 31u}) {
+    SCOPED_TRACE(cu_index);
+    cu->set_shader_engine_location(0, cu_index, 16);
+    uint32_t value = 0;
+    EXPECT_EQ(amdgpu::read_hwreg_field(*wf, kWgpId, value), amdgpu::HwregAccessResult::Success);
+    EXPECT_EQ(value, 15u);
+  }
+
+  for (uint32_t width : {0u, 17u, 32u, std::numeric_limits<uint32_t>::max()}) {
+    SCOPED_TRACE(width);
+    for (uint32_t cu_index : {0u, 16u}) {
+      SCOPED_TRACE(cu_index);
+      cu->set_shader_engine_location(0, cu_index, width);
+      for (uint16_t hwreg : {kWgpId, encode_hwreg(23, 11, 2)}) {
+        SCOPED_TRACE(hwreg);
+        uint32_t value = 0xFFFFFFFFu;
+        EXPECT_EQ(amdgpu::read_hwreg_field(*wf, hwreg, value),
+                  amdgpu::HwregAccessResult::Unsupported);
+        EXPECT_EQ(value, 0u);
+      }
+    }
+  }
+  wf->halt();
+}
+
 TEST(HwregHelperTest, Gfx1250ReadsModeledIbStsCounters) {
   amdgpu::GpuMemory gpu_mem("hwreg_helper_gfx1250_ib_sts_mem");
   amdgpu::L2Cache l2("hwreg_helper_gfx1250_ib_sts_l2");
