@@ -1017,10 +1017,6 @@ def show_all(
     )
 
     for panel_id, panel in arch_configs.panel_configs.items():
-        # Skip panels that don't support baseline comparison
-        if len(args.path) > 1 and panel_id in config.HIDDEN_SECTIONS:
-            continue
-
         # Handle roofline panel (400) with custom display logic
         # Skip if --view table is set; tables 401/402 will be rendered as normal tables
         if panel_id == 400 and not _tty_view_is_table(args):
