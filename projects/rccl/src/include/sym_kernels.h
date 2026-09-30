@@ -34,7 +34,7 @@ constexpr int ncclSymkLLMaxEltSize = 8;
 // selects an appropriate value for the architecture and method of transfer (TDM or non-TDM).
 constexpr int ncclSymkWarpsPerBlock = 16;
 
-// Widest LL block the gfx950 reduce kernels launch, worth 5 to 10% at the sizes where it removes an
+// Widest LL block the gfx950 symmetric kernels launch, worth 5 to 10% at the sizes where it removes an
 // epoch, since an LL epoch carries one element per thread. This bounds the shared slot buffer the
 // host allocates; the kernels take their slot stride from blockDim.
 constexpr int ncclSymkGfx950LLThreads = 512;
@@ -192,9 +192,12 @@ bool ncclSymkIsGfx950(struct ncclComm* comm);
 #endif
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-// Block width the gfx950 reduce kernels launch at, split out of the symmetric tuning model so the
-// size bands can be unit tested. Returns ncclSymkMaxThreads for any collective that is not tuned.
+// Block width the gfx950 symmetric kernels launch at, split out of the symmetric tuning model so the
+// size bands can be unit tested. Returns ncclSymkMaxThreads for any collective without width bands.
 int ncclSymkGfx950BlockThreads(ncclFunc_t coll, bool isLL, int nRanks, size_t nBytes);
+// Whether AllGather should take the store kernel over LL on gfx950, where the shared cost model
+// keeps LL well past the point the store kernel overtakes it.
+bool ncclSymkGfx950AllGatherPrefersStore(int nRanks, size_t nBytes);
 #endif
 
 ncclResult_t ncclSymkMakeDevWork(struct ncclComm* comm, struct ncclTaskColl* task, struct ncclSymkDevWork* outDevWork);
