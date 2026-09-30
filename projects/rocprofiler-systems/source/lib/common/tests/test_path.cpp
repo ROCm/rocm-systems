@@ -593,3 +593,76 @@ TEST_F(PathTest, CreateParentDirsAndOpenOfstream_TruncatesExistingFile)
     std::getline(in_fstream, content);
     EXPECT_EQ(content, "ab");
 }
+
+TEST_F(PathTest, CheckTargetPathVisibility_AvailableWhenFileExists)
+{
+    // using our own pid makes "/proc/<pid>/root" resolve to the real filesystem
+    // root, so a plain absolute path exercises the same stat() logic a genuine
+    // cross-namespace target would, without needing any test-only indirection
+    const std::string absolute_path =
+        m_test_dir + "/opt/rocprofiler-systems/lib/librocprof-sys-dl.so";
+    std::filesystem::create_directories(
+        std::filesystem::path{ absolute_path }.parent_path());
+    std::ofstream{ absolute_path } << "fake library contents";
+
+    EXPECT_EQ(check_target_path_visibility(getpid(), absolute_path),
+              target_visibility::available);
+}
+
+TEST_F(PathTest, CheckTargetPathVisibility_ConfirmedMissingWhenAbsent)
+{
+    const std::string absolute_path =
+        m_test_dir + "/opt/rocprofiler-systems/lib/librocprof-sys-dl.so";
+
+    EXPECT_EQ(check_target_path_visibility(getpid(), absolute_path),
+              target_visibility::confirmed_missing);
+}
+
+TEST_F(PathTest, CheckTargetPathVisibility_IndeterminateWhenStatFails)
+{
+    // a path component longer than NAME_MAX (255 bytes on most Linux filesystems)
+    // makes stat() fail with ENAMETOOLONG regardless of privilege level, letting
+    // this test exercise the "could not be determined" branch portably (a plain
+    // nonexistent path is reported as confirmed_missing, not indeterminate)
+    const std::string too_long_path =
+        "/" + std::string(300, 'a') + "/librocprof-sys-dl.so";
+
+    EXPECT_EQ(check_target_path_visibility(getpid(), too_long_path),
+              target_visibility::indeterminate);
+}
+
+TEST_F(PathTest, CheckTargetPathVisibility_IndeterminateForNonAbsolutePath)
+{
+    EXPECT_EQ(check_target_path_visibility(1, "librocprof-sys-dl.so"),
+              target_visibility::indeterminate);
+}
+
+TEST_F(PathTest, FindLoadedLibraryDir_FindsLibraryMappedByProcess)
+{
+    const auto libc_dir = find_loaded_library_dir(getpid(), "libc.so");
+
+    ASSERT_TRUE(libc_dir.has_value());
+    EXPECT_TRUE(std::filesystem::exists(*libc_dir + "/libc.so.6"));
+}
+
+TEST_F(PathTest, FindLoadedLibraryDir_NulloptWhenNotMapped)
+{
+    EXPECT_FALSE(
+        find_loaded_library_dir(getpid(), "libnot-mapped-anywhere.so").has_value());
+}
+
+TEST_F(PathTest, FindLibraryInLoadedDir_FindsLibraryInLoadedDirectory)
+{
+    const auto libc_dir = find_loaded_library_dir(getpid(), "libc.so");
+    ASSERT_TRUE(libc_dir.has_value());
+
+    EXPECT_EQ(find_library_in_loaded_dir(getpid(), "libc.so.6", "libc.so"),
+              *libc_dir + "/libc.so.6");
+}
+
+TEST_F(PathTest, FindLibraryInLoadedDir_NulloptWhenLibraryAbsent)
+{
+    EXPECT_FALSE(
+        find_library_in_loaded_dir(getpid(), "librocprof-sys-missing.so", "libc.so")
+            .has_value());
+}
