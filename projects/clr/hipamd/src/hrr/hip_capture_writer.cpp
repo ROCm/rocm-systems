@@ -1126,7 +1126,8 @@ static bool atomic_write_file(const std::string& path,
   std::string tmp = path + ".XXXXXX.tmp";
   const int fd = ::mkostemps(&tmp[0], 4, O_CLOEXEC);
   if (fd < 0) return false;
-  bool ok = write_all_fd(fd, data, len);
+  // mkostemps creates the file 0600 minus the umask.
+  bool ok = ::fchmod(fd, 0600) == 0 && write_all_fd(fd, data, len);
   if (::close(fd) != 0) ok = false;
   if (!ok) { remove(tmp.c_str()); return false; }
   ok = (rename(tmp.c_str(), path.c_str()) == 0);

@@ -13,8 +13,9 @@
  *
  *   Unit_HRR_CaptureArchiveIsPrivate:
  *     every archive directory the capture creates or reuses is 0700 and every
- *     file 0600 even with the umask cleared, while a missing parent of the
- *     archive gets the default mode (POSIX).
+ *     file 0600, with the umask cleared and, where HIP can run under it, set
+ *     to 0277, while a missing parent of the archive gets the default mode
+ *     (POSIX).
  *
  *   Unit_HRR_CaptureRefusesPlantedLinks:
  *     a symbolic link planted at pid-<pid>/events.bin, at pid-<pid> itself, or
@@ -60,6 +61,13 @@ struct ScopedUmask {
   explicit ScopedUmask(mode_t mask) : saved(::umask(mask)) {}
   ~ScopedUmask() { ::umask(saved); }
 };
+
+// HIP writes into temporary directories of its own, which a umask that takes
+// an owner bit away leaves unusable unless the process has CAP_DAC_OVERRIDE.
+bool can_write_in_new_dir(const fs::path& dir) {
+  if (::mkdir(dir.c_str(), 0700) != 0) return false;
+  return static_cast<bool>(std::ofstream(dir / "probe"));
+}
 
 void write_text(const fs::path& p, const std::string& text) {
   std::ofstream out(p, std::ios::binary);
@@ -125,6 +133,9 @@ TEST_CASE("Unit_HRR_CaptureAbort_Direct", "[.][hrr-direct]") {
  *   - With the umask cleared, captures Unit_HRR_GpuWorkload_Direct into a
  *     directory whose parent does not exist yet, then captures it again into
  *     the same directory after creating that run's pid-<pid> with mode 0755.
+ *   - Captures it a third time with the umask set to 0277, which takes the
+ *     owner's write bit off every file and directory created under it, when
+ *     the process can still write in a directory created under that umask.
  *   - Every directory in the archive is 0700 and every regular file 0600: the
  *     archive holds host buffers, kernel arguments and code objects. The parent
  *     the capture had to create is not part of the archive and gets the
@@ -145,7 +156,19 @@ HRR_TEST_CASE(Unit_HRR_CaptureArchiveIsPrivate) {
                                                 "mkdir -m 0755 \"$HRR_TEST_BASE/pid-$$\"\n");
   INFO("Workload exit code: " << run.ret << "\n" << run.output);
   REQUIRE(run.ret == 0);
-  REQUIRE(hrr_process_archives(base).size() == 2);
+  size_t archives = 2;
+  {
+    const ScopedUmask strict(0277);
+    if (can_write_in_new_dir(work.path / "strict")) {
+      const PlantedRun strict_run = capture_after_planting(base, work.path / "strict.sh", "");
+      INFO("Exit code under umask 0277: " << strict_run.ret << "\n" << strict_run.output);
+      REQUIRE(strict_run.ret == 0);
+      archives = 3;
+    } else {
+      WARN("Not capturing under umask 0277: HIP cannot run under it without CAP_DAC_OVERRIDE");
+    }
+  }
+  REQUIRE(hrr_process_archives(base).size() == archives);
 
   CHECK(perms_of(parent) == fs::perms::all);
   CHECK(perms_of(base) == fs::perms::owner_all);
@@ -161,7 +184,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureArchiveIsPrivate) {
       ++files;
     }
   }
-  CHECK(files >= 6);  // events.bin, manifest.json and at least one blob in each archive
+  CHECK(files >= 3 * archives);  // events.bin, manifest.json and a blob in each archive
 #endif
 }
 
