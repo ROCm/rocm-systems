@@ -53,7 +53,9 @@ set(CPP_SRCS
     "${NIC_SOURCE_DIR}/vendors/vendor_registry.cpp"
     "${NIC_SOURCE_DIR}/vendors/amd/ifoe_subsystem.cpp"
     "${NIC_SOURCE_DIR}/vendors/broadcom/broadcom_subsystem.cpp"
+    "${NIC_SOURCE_DIR}/vendors/broadcom/broadcom_stats.cpp"
     "${NIC_SOURCE_DIR}/vendors/pensando/pensando_subsystem.cpp"
+    "${NIC_SOURCE_DIR}/vendors/pensando/pensando_stats.cpp"
 )
 
 # Netlink transport backend requires libnl-3; gated by explicit membership, not a

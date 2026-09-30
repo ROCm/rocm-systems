@@ -150,9 +150,15 @@ target_include_directories(test_nic_discovery_suite PRIVATE ${PROJECT_SOURCE_DIR
 target_link_libraries(test_nic_discovery_suite amdsminic ${FILESYSTEM_LIB})
 add_test(NAME nic_discovery_suite COMMAND test_nic_discovery_suite)
 
+add_executable(test_nic_stats_suite ${CMAKE_CURRENT_SOURCE_DIR}/../nic/test_nic_stats_suite.cpp)
+target_compile_options(test_nic_stats_suite PRIVATE -fno-rtti)
+target_include_directories(test_nic_stats_suite PRIVATE ${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/src)
+target_link_libraries(test_nic_stats_suite amdsminic ${FILESYSTEM_LIB})
+add_test(NAME nic_stats_suite COMMAND test_nic_stats_suite)
+
 # Install tests
 install(
-    TARGETS ${TEST} test_nic_telemetry_suite test_nic_discovery_suite
+    TARGETS ${TEST} test_nic_telemetry_suite test_nic_discovery_suite test_nic_stats_suite
     DESTINATION ${SHARE_INSTALL_PREFIX}/tests
     COMPONENT ${TESTS_COMPONENT}
 )

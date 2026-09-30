@@ -840,9 +840,12 @@ class AMDSMIParser(argparse.ArgumentParser):
             def __call__(self, parser, args, values, option_string=None):
                 if "all" in nic_choices:
                     del nic_choices["all"]
+                # Bare --nic (nargs="*" yields []) selects every NIC, matching
+                # --port's bare-means-all convention.
+                nic_selections = values if values else ["all"]
                 status, selected_device_handles = (
                     amdsmi_helpers.get_device_handles_from_nic_selections(
-                        nic_selections=values, nic_choices=nic_choices
+                        nic_selections=nic_selections, nic_choices=nic_choices
                     )
                 )
                 if status:
@@ -1260,6 +1263,20 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         parser.error = _intercept
 
+    @staticmethod
+    def _guard_extended_requires_port(parser):
+        """--extended with no --port has no counter set to extend; this is a
+        parse-time usage error regardless of flag order on the command line."""
+        _original_parse_known_args = parser.parse_known_args
+
+        def _intercept(args=None, namespace=None):
+            namespace, extras = _original_parse_known_args(args, namespace)
+            if getattr(namespace, "extended", False) and getattr(namespace, "port", None) is None:
+                parser.error("argument --extended: not allowed without --port")
+            return namespace, extras
+
+        parser.parse_known_args = _intercept
+
     def _add_device_arguments(self, subcommand_parser: argparse.ArgumentParser, required=False):
         # Device arguments help text
         gpu_help = (
@@ -1311,7 +1328,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 f"Select a NIC ID, BDF, or UUID from the possible choices:\n{self.nic_choices_str}"
             )
             device_args.add_argument(
-                "-N", "--nic", action=self._nic_select(self.nic_choices), nargs="+", help=nic_help
+                "-N", "--nic", action=self._nic_select(self.nic_choices), nargs="*", help=nic_help
             )
 
     def _add_command_modifiers(self, subcommand_parser: argparse.ArgumentParser):
@@ -2130,6 +2147,28 @@ class AMDSMIParser(argparse.ArgumentParser):
                 required=False,
                 help=core_eff_floor_limit_help,
             )
+
+        if self.helpers.is_ainic_initialized():
+            port_help = (
+                "Show per-port statistics for the selected NIC.\n"
+                "    Bare --port shows all ports; --port <idx> shows one port."
+            )
+            extended_help = "Show the extended vendor statistics set. Requires --port."
+
+            nic_stats_group = metric_parser.add_argument_group("NIC Arguments")
+            nic_stats_group.add_argument(
+                "--port",
+                type=int,
+                nargs="?",
+                const=-1,
+                default=None,
+                required=False,
+                help=port_help,
+            )
+            nic_stats_group.add_argument(
+                "--extended", action="store_true", required=False, help=extended_help
+            )
+            self._guard_extended_requires_port(metric_parser)
 
         # Add Universal Arguments & watch Args
         self._add_watch_arguments(metric_parser)

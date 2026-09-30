@@ -2716,6 +2716,79 @@ def amdsmi_get_nic_telemetry(
     }
 
 
+def amdsmi_get_nic_port_info(
+    processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
+) -> Dict[str, Any]:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    port_info = amdsmi_wrapper.amdsmi_nic_port_info_t()
+    _check_res(amdsmi_wrapper.amdsmi_get_nic_port_info(processor_handle, ctypes.byref(port_info)))
+
+    # num_ports comes from the C layer; clamp to the fixed ports[] capacity so a
+    # bad count can't drive an out-of-bounds ctypes access.
+    ports = [
+        {"netdev": port_info.ports[i].netdev.decode("utf-8")}
+        for i in range(min(port_info.num_ports, len(port_info.ports)))
+    ]
+
+    return {"num_ports": port_info.num_ports, "ports": ports}
+
+
+def amdsmi_get_nic_port_statistics(
+    processor_handle: amdsmi_wrapper.amdsmi_processor_handle, port_index: int
+) -> Dict[str, int]:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    num_stats = ctypes.c_uint32(0)
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_nic_port_statistics(
+            processor_handle, port_index, ctypes.byref(num_stats), None
+        )
+    )
+
+    if num_stats.value == 0:
+        return {}
+
+    stats = (amdsmi_wrapper.amdsmi_nic_stat_t * num_stats.value)()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_nic_port_statistics(
+            processor_handle, port_index, ctypes.byref(num_stats), stats
+        )
+    )
+
+    return {stats[i].name.decode("utf-8"): stats[i].value for i in range(num_stats.value)}
+
+
+def amdsmi_get_nic_vendor_statistics(
+    processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
+    port_index: int,
+    scope: int = amdsmi_wrapper.AMDSMI_NIC_STAT_SCOPE_DEFAULT,
+) -> Dict[str, int]:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    num_stats = ctypes.c_uint32(0)
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_nic_vendor_statistics(
+            processor_handle, port_index, scope, ctypes.byref(num_stats), None
+        )
+    )
+
+    if num_stats.value == 0:
+        return {}
+
+    stats = (amdsmi_wrapper.amdsmi_nic_stat_t * num_stats.value)()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_nic_vendor_statistics(
+            processor_handle, port_index, scope, ctypes.byref(num_stats), stats
+        )
+    )
+
+    return {stats[i].name.decode("utf-8"): stats[i].value for i in range(num_stats.value)}
+
+
 def amdsmi_get_gpu_device_uuid(processor_handle: processor_handle_t) -> str:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)

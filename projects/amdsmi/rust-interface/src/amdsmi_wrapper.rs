@@ -5427,10 +5427,17 @@ extern "C" {
         stats: *mut AmdsmiNicStatT,
     ) -> AmdsmiStatusT;
 }
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum AmdsmiNicStatScopeT {
+    AmdsmiNicStatScopeDefault = 0,
+    AmdsmiNicStatScopeExtended = 1,
+}
 extern "C" {
     pub fn amdsmi_get_nic_vendor_statistics(
         processor_handle: AmdsmiProcessorHandle,
         port_index: u32,
+        scope: AmdsmiNicStatScopeT,
         num_stats: *mut u32,
         stats: *mut AmdsmiNicStatT,
     ) -> AmdsmiStatusT;
