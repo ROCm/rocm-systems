@@ -7310,17 +7310,17 @@ TEST(RoutedMemoryObservationTest, AFlatAccessSeparatesDdsFromLdsLanes) {
 
   ASSERT_EQ(plugin->accesses.size(), 1u);
   const auto &access = plugin->accesses.front();
-  EXPECT_EQ(access.route, MemoryRoute::LOCAL);
+  EXPECT_EQ(access.route, MemoryRoute::GLOBAL);
   EXPECT_EQ(access.decoded_space, DecodedMemorySpace::FLAT);
-  EXPECT_TRUE(access.normalized_to_local);
+  EXPECT_FALSE(access.normalized_to_local);
   EXPECT_EQ(access.flat_local_lane_mask, 0b010u);
   EXPECT_EQ(access.flat_dds_lane_mask, 0b001u);
   EXPECT_EQ(access.scratch_lane_mask, 0u);
   EXPECT_EQ(access.flat_local_lane_mask & access.flat_dds_lane_mask, 0u);
-  ASSERT_EQ(access.pre_routing_addresses.size(), wave->wf_size());
-  EXPECT_EQ(access.pre_routing_addresses[0], kDdsAddress);
-  EXPECT_EQ(access.pre_routing_addresses[1], kLdsAddress);
-  EXPECT_EQ(access.pre_routing_addresses[2], 0x2000u);
+  EXPECT_TRUE(access.pre_routing_addresses.empty());
+  EXPECT_EQ(access.addresses[0], kDdsAddress);
+  EXPECT_EQ(access.addresses[1], kLdsAddress);
+  EXPECT_EQ(access.addresses[2], 0x2000u);
   auto *scoreboard = wave->memory_wait_scoreboard();
   ASSERT_NE(scoreboard, nullptr);
   EXPECT_EQ(scoreboard->outstanding(WaitCounterKind::Load), 1u);
