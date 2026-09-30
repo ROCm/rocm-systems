@@ -2609,6 +2609,10 @@ bool CommandProcessor::fault_dispatch_local(uint32_t queue_id, uint32_t process_
 
   dispatch_launch_metadata_.erase(static_cast<uint32_t>(dispatch_id));
   queue->faulted = true;
+  // A vendor packet's child shaders have their own dispatch IDs. Cancel its
+  // stream as well when a peer reports failure of the parent AQL dispatch.
+  if (!queue->commands.submissions.empty() || !queue->dispatches.entries.empty())
+    fail_pm4_queue(*queue, queue->dispatches);
   util::Logger::cp([&](auto &os) {
     os << std::format("{}: terminal VM fault pid={} qid={} dispatch={} outcome={}", name(),
                       process_id, queue_id, dispatch_id, static_cast<unsigned>(outcome));
@@ -2666,6 +2670,8 @@ void CommandProcessor::on_cu_idle() {
       if (e.wait_for_predecessors && !barrier_satisfied(qs, qs.next_dispatch_idx))
         break;
       if (!e.is_non_kernel())
+        break;
+      if (!execute_aql_pm4(qs, e, engine() ? engine()->context(partition_id()).current_tick() : 0))
         break;
       const uint32_t queue_id = e.queue_id;
       const uint32_t process_id = e.process_id;
@@ -2763,6 +2769,9 @@ void CommandProcessor::process_queues() {
         break; // Stalled on barrier bit.
 
       if (entry.is_non_kernel()) {
+        if (!execute_aql_pm4(qs, entry,
+                             engine() ? engine()->context(partition_id()).current_tick() : 0))
+          break;
         const uint32_t queue_id = entry.queue_id;
         const uint32_t process_id = entry.process_id;
         const uint32_t dispatch_id = entry.dispatch_id;
@@ -3214,11 +3223,14 @@ void CommandProcessor::fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchStat
   }
   flush_gpu_caches();
   qs.entries.clear();
-  for (auto &submission : queue.commands.submissions)
-    if (submission.complete)
-      submission.complete(false);
+  // Detach callbacks before invoking them: parent fault propagation can cancel
+  // this queue again, and must not invalidate the container being traversed.
+  auto submissions = std::move(queue.commands.submissions);
   queue.commands.submissions.clear();
   queue.command_access.reset();
+  for (auto &submission : submissions)
+    if (submission.complete)
+      submission.complete(false);
 }
 
 void CommandProcessor::fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs,
@@ -3327,6 +3339,28 @@ void CommandProcessor::fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs
       switch (static_cast<Pm4Opcode>(opcode)) {
       case Pm4Opcode::Nop:
         break;
+      case Pm4Opcode::PredExec: {
+        if (words.size() != 1 || cus_.empty() ||
+            (cus_[0]->config().arch != ROCJITSU_CODE_ARCH_CDNA3 &&
+             cus_[0]->config().arch != ROCJITSU_CODE_ARCH_CDNA4 &&
+             cus_[0]->config().arch != ROCJITSU_CODE_ARCH_CDNA5) ||
+            (words[0] & 0x00ffc000) || scratch_xcc_id_ >= 8) {
+          util::Logger::warn("unsupported PRED_EXEC control or target");
+          fail_pm4_queue(queue, qs);
+          return;
+        }
+        const uint32_t skip = words[0] & 0x3fff;
+        if (skip > ib.dwords) {
+          util::Logger::warn("PRED_EXEC exceeds its command stream");
+          fail_pm4_queue(queue, qs);
+          return;
+        }
+        if (!(words[0] & (1u << (24 + scratch_xcc_id_)))) {
+          ib.address += uint64_t{skip} * 4;
+          ib.dwords -= skip;
+        }
+        break;
+      }
       case Pm4Opcode::ContextControl:
       case Pm4Opcode::ClearState:
       case Pm4Opcode::PfpSyncMe:
@@ -3517,7 +3551,12 @@ void CommandProcessor::fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs
           throw std::runtime_error("SET_UCONFIG_REG_PAIRS is unsupported on a native ring");
         break;
       case Pm4Opcode::AcquireMem: // ACQUIRE_MEM: earlier dispatches and DMA are already retired.
-        require(7);
+        require(!cus_.empty() && (cus_[0]->config().arch == ROCJITSU_CODE_ARCH_CDNA1 ||
+                                  cus_[0]->config().arch == ROCJITSU_CODE_ARCH_CDNA2 ||
+                                  cus_[0]->config().arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+                                  cus_[0]->config().arch == ROCJITSU_CODE_ARCH_CDNA4)
+                    ? 6
+                    : 7);
         flush_gpu_caches();
         break;
       case Pm4Opcode::EventWrite: {
@@ -3601,6 +3640,8 @@ void CommandProcessor::fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs
         // An IB enters a child frame; only the root packet advances the root ring.
         // The journal retains this stream's snapshot until writeback is durable.
         uint64_t retired = root_cursor;
+        if (opcode == uint32_t(Pm4Opcode::PredExec))
+          retired = submission.buffers.front().address / 4;
         queue.read_pointer_journal.retire(retired, retired % (root_ring_bytes / 4), *access);
         const auto published = queue.read_pointer_journal.publish();
         if (published == VmAccessOutcome::Unavailable) {
@@ -4456,6 +4497,48 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
   return {.status = AqlAdmissionStatus::Complete};
 }
 
+bool CommandProcessor::execute_aql_pm4(ComputeQueueRecord &queue, DispatchEntry &entry,
+                                       simdojo::Tick now) {
+  if (!entry.pm4_ib_dwords || entry.command_stream_complete)
+    return true;
+  if (!entry.command_stream_started) {
+    assert(queue.commands.submissions.empty());
+    queue.command_access = entry.pm4_access;
+    Pm4Submission stream;
+    stream.buffers.push_back({entry.pm4_ib_address, entry.pm4_ib_dwords});
+    stream.failure->wake = [this] {
+      if (engine())
+        engine()->schedule_event_now(doorbell_event());
+    };
+    stream.complete = [this, id = queue.registration_id,
+                       packet_id = entry.dispatch_id](bool success) {
+      auto owner = std::ranges::find(compute_queues_, id, &ComputeQueueRecord::registration_id);
+      if (owner == compute_queues_.end())
+        return;
+      auto parent = std::ranges::find(owner->entries, packet_id, &DispatchEntry::dispatch_id);
+      if (parent == owner->entries.end())
+        return;
+      if (success) {
+        parent->command_stream_complete = true;
+      } else {
+        notify_dispatch_vm_fault(parent->queue_id, parent->process_id, packet_id,
+                                 VmAccessOutcome::Faulted);
+      }
+    };
+    queue.commands.submissions.push_back(std::move(stream));
+    entry.command_stream_started = true;
+  }
+  // Child shader dispatches use this queue's normal VM/fault/CU ownership.
+  // The next CP pass drives them and resumes this packet after its stream returns.
+  fetch_pm4(queue, queue.dispatches, now);
+  // Failure callbacks remove the parent entry. Do not dereference it afterward.
+  if (queue.faulted)
+    return false;
+  if (!entry.command_stream_complete)
+    arm_stall_recheck(now);
+  return entry.command_stream_complete;
+}
+
 AqlAdmissionResult CommandProcessor::admit_aql_packet(const AqlPacketProcessRequest &request,
                                                       AqlPreparedPacket prepared) {
   const std::vector<ComputeQueueRecord>::iterator queue = std::ranges::find(
@@ -4481,7 +4564,18 @@ AqlAdmissionResult CommandProcessor::admit_aql_packet(const AqlPacketProcessRequ
       .kind = DispatchPacketKind::NonKernel,
       .wait_for_predecessors = prepared.barrier_bit,
       .blocks_following = prepared.blocks_following,
+      .pm4_ib_address = prepared.pm4_ib_address,
+      .pm4_ib_dwords = prepared.pm4_ib_dwords,
   };
+  if (prepared.kind == AqlPreparedPacketKind::Pm4Ib) {
+    entry.pm4_access = request.access;
+    // One token per XCD tracks completion of the whole stream, including shaders.
+    entry.total_wgs = entry.dispatched_wgs = 1;
+    if (queue->xcd_fanout && xcd_peers_.size() > 1) {
+      entry.grid_completion = std::make_shared<GridCompletion>();
+      entry.grid_completion->grid_wgs = xcd_peers_.size();
+    }
+  }
   if (queue->xcd_fanout)
     replicate_non_kernel_entry(entry);
   queue->push_entry(std::move(entry));
@@ -4546,7 +4640,8 @@ void CommandProcessor::arm_stall_recheck(simdojo::Tick now) {
 }
 
 void CommandProcessor::fetch_from_queue(ComputeQueueRecord &queue, simdojo::Tick now) {
-  if (queue.packet_format != QueuePacketFormat::Aql || queue.submission_queue)
+  // The active stream selects decoding; the root format still defines ring cursors.
+  if (queue.active_packet_format() != QueuePacketFormat::Aql || queue.submission_queue)
     return;
   // A replica's work arrives as dispatch shards, not from the ring. Reading the
   // ring here would also advance a read pointer the owning XCD owns, and its
@@ -4865,6 +4960,8 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
   });
 
   auto complete_non_kernel = [&](ComputeQueueRecord &queue, DispatchEntry &entry) {
+    if (!execute_aql_pm4(queue, entry, now))
+      return false;
     const uint32_t queue_id = entry.queue_id;
     const uint32_t process_id = entry.process_id;
     const uint32_t dispatch_id = entry.dispatch_id;

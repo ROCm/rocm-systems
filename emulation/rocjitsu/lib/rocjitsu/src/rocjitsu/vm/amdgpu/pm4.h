@@ -35,6 +35,7 @@ inline constexpr uint32_t kPm4ComputeUserData0 = 0x240;
 /// @brief Type-3 packet opcodes accepted by the compute command processor.
 enum class Pm4Opcode : uint32_t {
   Nop = 0x10,
+  PredExec = 0x23,
   SetBase = 0x11,
   ClearState = 0x12,
   ContextControl = 0x28,
