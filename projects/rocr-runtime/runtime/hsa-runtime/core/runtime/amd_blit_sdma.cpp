@@ -1378,15 +1378,6 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitBodies(
   if (is_swap && !swap_supported_ && !is_gfx125plus_)
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
-  // The swap packet carries a single count; reject asymmetric entries so the
-  // caller decomposes them (symmetric swap + linear tail copy).
-  if (is_swap && dst_size_list != nullptr && !NativeAsymmetricSwapSupported()) {
-    for (size_t i = 0; i < num_entries; ++i) {
-      if (dst_size_list[indices[i]] != size_list[indices[i]])
-        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    }
-  }
-
   const size_t max_copy_size = is_swap
       ? SDMA_PKT_COPY_LINEAR_SWAP_WAITSIGNAL_GFX1250::kMaxSize_
       : (max_single_linear_copy_size_ ? max_single_linear_copy_size_ : kMaxSingleCopySize);

@@ -1681,6 +1681,17 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
     }
   }
 
+  // The swap packet carries a single count; reject asymmetric entries so the
+  // caller decomposes them (symmetric swap + linear tail copy). Checked before
+  // any engine is submitted, so it covers both the fused coordinator and the
+  // body paths.
+  if (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP && dst_size_list != nullptr) {
+    for (uint32_t d = 0; d < num_entries; ++d) {
+      if (dst_size_list[d] != size_list[d] && !engines[d].blit->NativeAsymmetricSwapSupported())
+        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+  }
+
   const bool is_indirect =
       (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC) ||
       (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST) ||
@@ -2040,8 +2051,8 @@ hsa_status_t GpuAgent::DmaCopySwap(
   core::Signal& out_signal = *out_signal_obj;
 
   if (op.num_entries == 0) {
-    // Scalar swap: A = src_size, B = dst_size. The blit rejects A != B unless
-    // native asymmetric swap is supported.
+    // Scalar swap: A = src_size, B = dst_size. DmaCopyFanOutOp rejects A != B
+    // unless native asymmetric swap is supported.
     const void* src_arr[1] = { op.src };
     void* dst_arr[1] = { op.dst };
     hsa_agent_t dst_agent_arr[1] = { op.dst_agent };

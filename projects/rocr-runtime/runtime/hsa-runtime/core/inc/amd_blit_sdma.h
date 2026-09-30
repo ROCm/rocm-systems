@@ -185,7 +185,8 @@ class BlitSdmaBase : public core::Blit {
   /// @param dst_size_list  Optional per-entry B-side sizes for asymmetric
   ///   LINEAR_SWAP (size_list is the A side). When null, or when
   ///   dst_size_list[d] == size_list[d], the swap is symmetric. Asymmetric
-  ///   entries are rejected with HSA_STATUS_ERROR_INVALID_ARGUMENT.
+  ///   entries require NativeAsymmetricSwapSupported(); the caller must reject
+  ///   them otherwise.
   virtual hsa_status_t SubmitBodies(
       hsa_amd_memory_copy_op_type_t op,
       void* const* dst_list,
@@ -199,6 +200,8 @@ class BlitSdmaBase : public core::Blit {
       const size_t* dst_size_list = nullptr) = 0;
 
   virtual bool SwapSupported() const = 0;
+  /// @brief Whether LINEAR_SWAP supports src_size != dst_size natively.
+  virtual bool NativeAsymmetricSwapSupported() const = 0;
   virtual bool IndirectCopySupported() const = 0;
   virtual bool UsesGCR() const = 0;
 };
@@ -341,13 +344,11 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
       const size_t* dst_size_list = nullptr) override;
 
   bool SwapSupported() const override { return swap_supported_; }
+  bool NativeAsymmetricSwapSupported() const override { return false; }
   bool IndirectCopySupported() const override { return indirect_copy_supported_; }
   bool UsesGCR() const override { return useGCR; }
 
  private:
-  /// @brief Whether this device supports asymmetric LINEAR_SWAP natively.
-  bool NativeAsymmetricSwapSupported() const { return false; }
-
   /// @brief Acquires the address into queue buffer where a new command
   /// packet of specified size could be written. The address that is
   /// returned is guaranteed to be unique even in a multi-threaded access
