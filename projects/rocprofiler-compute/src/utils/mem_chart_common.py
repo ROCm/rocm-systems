@@ -78,7 +78,7 @@ def format_value(
     return f"{numeric:.{precision}f}{unit}"
 
 
-def format_scientific(value: Union[int, float, str, None], precision: int = 2) -> str:
+def format_scientific(value: Union[int, float, str, None]) -> str:
     """Format as rounded integer (<1000) or scientific notation (>=1000)."""
     if value is None:
         return "N/A"
@@ -90,7 +90,7 @@ def format_scientific(value: Union[int, float, str, None], precision: int = 2) -
         return "N/A"
     if abs(numeric) < 1000:
         return str(round(numeric))
-    return f"{numeric:.{precision}e}"
+    return f"{numeric:.2e}"
 
 
 def colored(text: str, color: str) -> str:
@@ -192,25 +192,21 @@ def format_mem_chart_heading(
     normal_unit: str,
     *,
     panel_id: int = 300,
-    section_label: str = "Memory Chart",
 ) -> str:
-    """Build heading: '{panel_id//100}. {label} (Normalization: {unit})'."""
+    """Build heading: '{panel_id//100}. Memory Chart (Normalization: {unit})'."""
     section = max(0, int(panel_id)) // 100
-    return f"{section}. {section_label} (Normalization: {normal_unit})"
+    return f"{section}. Memory Chart (Normalization: {normal_unit})"
 
 
 def build_legend(
     *,
     include_atomic: bool = True,
-    include_util: bool = True,
     include_stall: bool = False,
 ) -> str:
     """Build the color legend string from ``_LEGEND_ENTRIES``."""
     exclude = set()
     if not include_atomic:
         exclude.add("atomic")
-    if not include_util:
-        exclude.add("util")
     entries = [
         (symbol, label, key)
         for symbol, label, key in _LEGEND_ENTRIES

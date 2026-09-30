@@ -366,8 +366,9 @@ def format_node_stats(node: CallTreeNode) -> str:
     )
 
 
-def get_tree_wrap_width(min_width: int = 72, max_width: int = 120) -> int:
+def get_tree_wrap_width() -> int:
     """Pick wrap width based on terminal size to avoid terminal hard-wrap artifacts."""
+    min_width, max_width = 72, 120
     terminal_cols = shutil.get_terminal_size((max_width, 20)).columns
     safe_width = max(terminal_cols - 2, min_width)
     return min(safe_width, max_width)
@@ -376,18 +377,15 @@ def get_tree_wrap_width(min_width: int = 72, max_width: int = 120) -> int:
 def print_wrapped_tree_line(
     prefix: str,
     body: str,
-    width: Optional[int] = None,
-    break_long_words: bool = False,
 ) -> None:
     """Print a tree line and wrap continuation lines to preserve indentation."""
-    effective_width = get_tree_wrap_width() if width is None else width
     print(
         textwrap.fill(
             body,
-            width=effective_width,
+            width=get_tree_wrap_width(),
             initial_indent=prefix,
             subsequent_indent=" " * len(prefix),
-            break_long_words=break_long_words,
+            break_long_words=False,
             break_on_hyphens=False,
         )
     )
@@ -397,12 +395,10 @@ def print_wrapped_kernel_line(
     prefix: str,
     kernel_name: str,
     suffix: str,
-    width: Optional[int] = None,
     continuation_prefix: str = "",
 ) -> None:
     """Wrap long kernel names while keeping suffix attached to final name chunk."""
-    effective_width = get_tree_wrap_width() if width is None else width
-    content_width = max(effective_width - len(prefix), 20)
+    content_width = max(get_tree_wrap_width() - len(prefix), 20)
 
     inline = f"{kernel_name} {suffix}"
     if len(inline) <= content_width:
@@ -744,7 +740,6 @@ def format_table_output(
     table_type: str,
     runs: dict[str, Any],
     gpu_arch: Optional[str] = None,
-    mem_data_override: Optional[dict[str, Any]] = None,
 ) -> str:
     """Format table for output, handling special cases and saving to files if needed."""
 
@@ -817,10 +812,7 @@ def format_table_output(
     )
 
     if use_mem_chart:
-        if mem_data_override is not None:
-            mem_data = mem_data_override
-        else:
-            mem_data = raw_chart_values or {}
+        mem_data = raw_chart_values or {}
 
         if is_gfx115x(gpu_arch):
             content += (

@@ -261,9 +261,7 @@ def _build_metric_table_df(
 
 
 @demarcate
-def apply_filters(
-    workload: schema.Workload, dir_path: str, debug: bool
-) -> pd.DataFrame:
+def apply_filters(workload: schema.Workload, debug: bool) -> pd.DataFrame:
     """
     Apply user's filters to the raw_pmc df.
     """
@@ -686,7 +684,6 @@ def load_table_data(
     dir_path: str,
     args: argparse.Namespace,
     dfs_expressions: dict[int, list[str]],
-    skip_kernel_top: bool = False,
     pc_sampling_tool_data: Optional[list[dict[str, Any]]] = None,
 ) -> None:
     """
@@ -694,8 +691,7 @@ def load_table_data(
     - Load data for "pc_sampling_table"
     - Calculate mertric value for all "metric_table"
     """
-    if not skip_kernel_top:
-        load_non_mertrics_table(workload, dir_path, args, pc_sampling_tool_data)
+    load_non_mertrics_table(workload, dir_path, args, pc_sampling_tool_data)
 
     eval_metric(
         workload.dfs,
@@ -703,7 +699,7 @@ def load_table_data(
         dfs_expressions,
         workload.sys_info.iloc[0],
         workload.roofline_peaks,
-        apply_filters(workload, dir_path, args.debug),
+        apply_filters(workload, args.debug),
         args.debug,
     )
 
