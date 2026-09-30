@@ -60,7 +60,14 @@ protected:
 TEST_F(SdkPmcDeviceTest, DeviceProperties)
 {
     auto meta = std::vector<counter_metadata>{
-        counter_metadata{ 10, "SQ_WAVES", "", "", "", false, false, {} },
+        counter_metadata{ .counter_id  = 10,
+                          .name        = "SQ_WAVES",
+                          .description = "",
+                          .block       = "",
+                          .expression  = "",
+                          .is_constant = false,
+                          .is_derived  = false,
+                          .dimensions  = {} },
     };
 
     const device<MockBackend> dev(mock_backend, test_context, test_agent,
@@ -99,8 +106,22 @@ TEST_F(SdkPmcDeviceTest, DeviceWithIndex3)
 TEST_F(SdkPmcDeviceTest, SampleWithScalarCounters)
 {
     auto meta = std::vector<counter_metadata>{
-        counter_metadata{ 10, "SQ_WAVES", "", "", "", false, false, {} },
-        counter_metadata{ 20, "SQ_INSTS_VALU", "", "", "", false, false, {} },
+        counter_metadata{ .counter_id  = 10,
+                          .name        = "SQ_WAVES",
+                          .description = "",
+                          .block       = "",
+                          .expression  = "",
+                          .is_constant = false,
+                          .is_derived  = false,
+                          .dimensions  = {} },
+        counter_metadata{ .counter_id  = 20,
+                          .name        = "SQ_INSTS_VALU",
+                          .description = "",
+                          .block       = "",
+                          .expression  = "",
+                          .is_constant = false,
+                          .is_derived  = false,
+                          .dimensions  = {} },
     };
 
     device<MockBackend> dev(mock_backend, test_context, test_agent, test_profile_config,
@@ -149,38 +170,46 @@ TEST_F(SdkPmcDeviceTest, SampleWithScalarCounters)
 TEST_F(SdkPmcDeviceTest, SampleWithMultiDimCounters)
 {
     auto meta = std::vector<counter_metadata>{
-        counter_metadata{ 100,
-                          "SQC_ICACHE_HITS",
-                          "",
-                          "",
-                          "",
-                          false,
-                          false,
-                          { { "WGP", 0 }, { "SA", 0 }, { "SE", 0 } } },
-        counter_metadata{ 101,
-                          "SQC_ICACHE_HITS",
-                          "",
-                          "",
-                          "",
-                          false,
-                          false,
-                          { { "WGP", 1 }, { "SA", 0 }, { "SE", 0 } } },
-        counter_metadata{ 102,
-                          "SQC_ICACHE_HITS",
-                          "",
-                          "",
-                          "",
-                          false,
-                          false,
-                          { { "WGP", 2 }, { "SA", 0 }, { "SE", 0 } } },
-        counter_metadata{ 103,
-                          "SQC_ICACHE_HITS",
-                          "",
-                          "",
-                          "",
-                          false,
-                          false,
-                          { { "WGP", 3 }, { "SA", 0 }, { "SE", 0 } } },
+        counter_metadata{ .counter_id  = 100,
+                          .name        = "SQC_ICACHE_HITS",
+                          .description = "",
+                          .block       = "",
+                          .expression  = "",
+                          .is_constant = false,
+                          .is_derived  = false,
+                          .dimensions  = { { .name = "WGP", .position = 0 },
+                                           { .name = "SA", .position = 0 },
+                                           { .name = "SE", .position = 0 } } },
+        counter_metadata{ .counter_id  = 101,
+                          .name        = "SQC_ICACHE_HITS",
+                          .description = "",
+                          .block       = "",
+                          .expression  = "",
+                          .is_constant = false,
+                          .is_derived  = false,
+                          .dimensions  = { { .name = "WGP", .position = 1 },
+                                           { .name = "SA", .position = 0 },
+                                           { .name = "SE", .position = 0 } } },
+        counter_metadata{ .counter_id  = 102,
+                          .name        = "SQC_ICACHE_HITS",
+                          .description = "",
+                          .block       = "",
+                          .expression  = "",
+                          .is_constant = false,
+                          .is_derived  = false,
+                          .dimensions  = { { .name = "WGP", .position = 2 },
+                                           { .name = "SA", .position = 0 },
+                                           { .name = "SE", .position = 0 } } },
+        counter_metadata{ .counter_id  = 103,
+                          .name        = "SQC_ICACHE_HITS",
+                          .description = "",
+                          .block       = "",
+                          .expression  = "",
+                          .is_constant = false,
+                          .is_derived  = false,
+                          .dimensions  = { { .name = "WGP", .position = 3 },
+                                           { .name = "SA", .position = 0 },
+                                           { .name = "SE", .position = 0 } } },
     };
 
     device<MockBackend> dev(mock_backend, test_context, test_agent, test_profile_config,
@@ -237,8 +266,14 @@ TEST_F(SdkPmcDeviceTest, CounterIdDecodedFromInstanceId)
     constexpr std::uint64_t sdk_instance_id      = 0xDEAD0007ULL;
 
     auto meta = std::vector<counter_metadata>{
-        counter_metadata{
-            plain_counter_handle, "SQ_WAVES", "", "", "", false, false, {} },
+        counter_metadata{ .counter_id  = plain_counter_handle,
+                          .name        = "SQ_WAVES",
+                          .description = "",
+                          .block       = "",
+                          .expression  = "",
+                          .is_constant = false,
+                          .is_derived  = false,
+                          .dimensions  = {} },
     };
 
     device<MockBackend> dev(mock_backend, test_context, test_agent, test_profile_config,
@@ -278,7 +313,14 @@ TEST_F(SdkPmcDeviceTest, CounterIdDecodedFromInstanceId)
 TEST_F(SdkPmcDeviceTest, ResultCacheReusedAcrossSamples)
 {
     auto meta = std::vector<counter_metadata>{
-        counter_metadata{ 5, "SQ_WAVES", "", "", "", false, false, {} },
+        counter_metadata{ .counter_id  = 5,
+                          .name        = "SQ_WAVES",
+                          .description = "",
+                          .block       = "",
+                          .expression  = "",
+                          .is_constant = false,
+                          .is_derived  = false,
+                          .dimensions  = {} },
     };
 
     device<MockBackend> dev(mock_backend, test_context, test_agent, test_profile_config,

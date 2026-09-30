@@ -60,12 +60,12 @@ struct recording_output_sink
 {
     void register_file(std::string path, output_format format)
     {
-        files.push_back({ std::move(path), format });
+        files.push_back({ .path = std::move(path), .format = format });
     }
 
     void clear() { files.clear(); }
 
-    std::vector<registered_file> files = {};
+    std::vector<registered_file> files;
 };
 
 // The processor reads output config from timemory globals at construction

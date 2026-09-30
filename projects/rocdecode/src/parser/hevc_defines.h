@@ -32,6 +32,10 @@ THE SOFTWARE.
 
 #define HEVC_MAX_DPB_FRAMES 16  // (A-2)
 #define HEVC_MAX_NUM_REF_PICS 16
+// A.4.1 g): num_tile_columns_minus1 < MaxTileCols and num_tile_rows_minus1 < MaxTileRows. The largest
+// MaxTileCols and MaxTileRows in Table A.4 are those of levels 6, 6.1 and 6.2.
+#define HEVC_MAX_TILE_COLS 20
+#define HEVC_MAX_TILE_ROWS 22
 // 7.4.7.1. (num_tile_columns_minus1 + 1) * PicHeightInCtbsY − 1. Max tile columns = 20 (A.4.2). Pic height in 16x16 CTB of 8K = 270.
 #define MAX_ENTRY_POINT_OFFSETS 20 * 270
 
@@ -355,9 +359,10 @@ typedef struct {
     uint32_t vps_max_latency_increase_plus1[7];          //ue(v)
     uint32_t vps_max_layer_id;                           //u(6)
     uint32_t vps_num_layer_sets_minus1;                  //ue(v)
-    //vps_num_layer_sets_minus1 max is  1023  (dont +1 since starts from 1)
-    //vps_max_layer_id max is 62                   (+1 since starts from 0 and <= condition)
-    bool layer_id_included_flag[1023][63];               //u(1)
+    //vps_num_layer_sets_minus1 max is 1023 and it is used as an inclusive upper bound, so 1024 entries are needed
+    //vps_max_layer_id is range checked to a max of 62 (7.4.3.1) and it is used as an inclusive upper bound,
+    //so 63 entries are needed
+    bool layer_id_included_flag[1024][63];               //u(1)
     bool vps_timing_info_present_flag;                   //u(1)
     uint32_t vps_num_units_in_tick;                      //u(32)
     uint32_t vps_time_scale;                             //u(32)
@@ -471,12 +476,8 @@ typedef struct {
     uint32_t num_tile_columns_minus1;                    //ue(v)
     uint32_t num_tile_rows_minus1;                       //ue(v)
     bool uniform_spacing_flag;                           //u(1)
-    //PicWidthInCtbsY = Ceil( pic_width_in_luma_samples / CtbSizeY )  = 256 assume max width is 4096
-    //CtbSizeY = 1<<CtbLog2SizeY   so min is 16
-    // 4 <= CtbLog2SizeY <= 6
-    uint32_t column_width_minus1[265];                   //ue(v)
-    //2304/16=144 assume max height is 2304
-    uint32_t row_height_minus1[144];                     //ue(v)
+    uint32_t column_width_minus1[HEVC_MAX_TILE_COLS];    //ue(v)
+    uint32_t row_height_minus1[HEVC_MAX_TILE_ROWS];      //ue(v)
     bool loop_filter_across_tiles_enabled_flag;          //u(1)
     bool pps_loop_filter_across_slices_enabled_flag;     //u(1)
     bool deblocking_filter_control_present_flag;         //u(1)
