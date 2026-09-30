@@ -4,9 +4,9 @@
 
 """Hardware-free regression tests for streaming event CSV/JSON output.
 
-The event command prints one record at a time, once per event, from one
-listener thread per GPU. These tests lock in that each streaming format emits
-a single well-formed record per event: CSV writes the header exactly once
+The event command prints one record at a time, once per event. These tests lock
+in that each streaming format emits a single well-formed record per event: CSV
+writes the header exactly once
 followed by a row per event (no repeated headers, no blank separator lines),
 and JSON emits one object per line (newline-delimited JSON).
 
@@ -163,9 +163,10 @@ class TestEventCsvOutput(_LoggerTestBase):
 
         lines = [line for line in buffer.getvalue().splitlines() if line != ""]
 
-        self.assertEqual(lines[0], "gpu,timestamp,event,pid,task")
-        self.assertEqual(lines[1], "0,100,PROCESS_START,1,foo")
-        self.assertEqual(lines[2], "0,101,VMFAULT,N/A,N/A")
+        self.assertEqual(lines[0], "gpu,timestamp,event,message")
+        self.assertEqual(lines[1], '0,100,PROCESS_START,"{""pid"":""1"",""task"":""foo""}"')
+        self.assertEqual(lines[2], '0,101,VMFAULT,"{""addr"":""0xdead""}"')
+        self.assertNotIn('"pid":', lines[2])
         self.assertNotIn("foo", lines[2])
 
 

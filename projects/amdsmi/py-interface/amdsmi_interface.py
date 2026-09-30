@@ -8,6 +8,7 @@ import re
 import warnings
 from collections.abc import Iterable
 from ctypes import POINTER, c_void_p
+from datetime import datetime, timezone
 from enum import IntEnum, Enum
 from pathlib import Path
 from time import asctime, localtime, time
@@ -808,12 +809,13 @@ class AmdSmiEventReader:
             )
         )
 
-        receipt_time = int(time())
+        receipt_time = int(datetime.now(timezone.utc).timestamp())
         ret = []
+        event_values = {event.value for event in AmdSmiEvtNotificationType}
         for i in range(c_count.value):
-            unique_event_values = set(event.value for event in AmdSmiEvtNotificationType)
-            if event_info[i].event in unique_event_values:
-                if AmdSmiEvtNotificationType(event_info[i].event).name != "NONE":
+            if event_info[i].event in event_values:
+                event_type = AmdSmiEvtNotificationType(event_info[i].event)
+                if event_type.name != "NONE":
                     processor_handle = amdsmi_wrapper.amdsmi_processor_handle(
                         event_info[i].processor_handle
                     )
@@ -821,7 +823,7 @@ class AmdSmiEventReader:
                         {
                             "timestamp": receipt_time,
                             "processor_handle": processor_handle,
-                            "event": AmdSmiEvtNotificationType(event_info[i].event).name,
+                            "event": event_type.name,
                             "message": event_info[i].message.decode("utf-8"),
                         }
                     )

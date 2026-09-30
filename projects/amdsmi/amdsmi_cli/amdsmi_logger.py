@@ -5,7 +5,6 @@
 import csv
 import json
 import re
-import threading
 import time
 from typing import Dict
 from enum import Enum
@@ -42,16 +41,9 @@ class AMDSMILogger:
         self.store_partition_profiles_json_output = []
         self.store_partition_resources_json_output = []
 
-        # Event streaming state. The event command prints one record at a time,
-        # once per event, from one listener thread per GPU. ``_event_csv_header``
-        # is captured from the first event so the CSV header is written once
-        # (subsequent events emit only a data row). ``_event_lock`` serializes
-        # printing so records from concurrent GPU threads do not interleave, and
-        # the caller also holds it across store_output()+print_event_output() so
-        # the shared ``self.output`` cannot be clobbered between store and print;
-        # it is re-entrant so the internal print acquisition still works.
+        # The event command prints one record at a time. The CSV header is
+        # captured from the first event so subsequent events emit only a row.
         self._event_csv_header = None
-        self._event_lock = threading.RLock()
 
     class LoggerFormat(Enum):
         """Enum for logger formats"""
@@ -477,15 +469,21 @@ class AMDSMILogger:
     def store_event_output(self, device_handle, values_dict):
         """Store one streamed event as a fresh, self-contained record.
 
-        Event streaming emits one independent record per event, so the shared
-        ``output`` accumulator is cleared first. Without this reset a previous
-        event's flattened message keys (e.g. ``pid``/``task``) would linger and
-        leak stale values into a later event that carries a different message
-        schema — most visibly in ``--csv``, whose columns are fixed from the
-        first row and cannot grow to hold the new event's keys.
+        Keep each event payload isolated from previous records. CSV output uses a
+        single stable ``message`` column containing the event's serialized payload,
+        so later events with a different schema do not inherit stale flattened
+        keys or silently lose data.
         """
-        self.output = {}
-        self.store_output(device_handle, "values", values_dict)
+        gpu_id = self.helpers.get_gpu_id_from_device_handle(device_handle)
+        message = values_dict.get("message", {})
+        if self.is_csv_format():
+            message = json.dumps(message, separators=(",", ":")) if message else "{}"
+        self.output = {
+            "gpu": int(gpu_id),
+            "timestamp": values_dict.get("timestamp"),
+            "event": values_dict.get("event"),
+            "message": message,
+        }
 
     def store_nic_output(self, device_handle, argument, data):
         """Convert device handle to nic id and store output
@@ -775,23 +773,20 @@ class AMDSMILogger:
     def print_event_output(self):
         """Print a single event record in the configured format.
 
-        The event command streams one record per call, once per event, from one
-        listener thread per GPU. Each format emits a single well-formed record:
-        human-readable is one indented block (including its TIMESTAMP), CSV writes
-        the header once followed by a row per event, and JSON emits one object per
-        line (newline-delimited JSON so every line is independently parseable).
-        Printing is serialized so records from concurrent GPU threads do not
-        interleave.
+        The event command streams one record per call. Each format emits a single
+        well-formed record: human-readable is one indented block (including its
+        TIMESTAMP), CSV writes the header once followed by a row per event, and
+        JSON emits one object per line (newline-delimited JSON so every line is
+        independently parseable).
         """
-        with self._event_lock:
-            if self.is_human_readable_format():
-                self._write_event_line(self._format_event_human_readable(self.output))
-            elif self.is_csv_format():
-                self._print_event_csv_output()
-            elif self.is_json_format():
-                self._write_event_line(json.dumps(self.output))
-            else:
-                raise ValueError("Invalid output format: expected json, csv, or human_readable")
+        if self.is_human_readable_format():
+            self._write_event_line(self._format_event_human_readable(self.output))
+        elif self.is_csv_format():
+            self._print_event_csv_output()
+        elif self.is_json_format():
+            self._write_event_line(json.dumps(self.output))
+        else:
+            raise ValueError("Invalid output format: expected json, csv, or human_readable")
 
     def _write_event_line(self, line):
         """Emit a single event line to stdout or append it to the output file."""
