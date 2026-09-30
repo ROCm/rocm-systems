@@ -17,9 +17,7 @@
 #include <algorithm>
 #include <utility>
 
-namespace rocprofsys
-{
-namespace rocprofiler_sdk
+namespace rocprofsys::rocprofiler_sdk
 {
 namespace
 {
@@ -34,7 +32,9 @@ dimensions_info_callback(rocprofiler_counter_id_t /*id*/,
         static_cast<std::vector<rocprofiler_record_dimension_info_t>*>(user_data);
     dimensions_info->reserve(num_dims);
     for(size_t j = 0; j < num_dims; j++)
+    {
         dimensions_info->emplace_back(dim_info[j]);
+    }
 
     return ROCPROFILER_STATUS_SUCCESS;
 }
@@ -61,7 +61,9 @@ counters_supported_callback(rocprofiler_agent_id_t    agent_id,
             counters[i], dimensions_info_callback, &_dim_info));
 
         if(!_info.is_constant)
+        {
             data_v->at(agent_id).emplace_back(agent_id, _info, std::move(_dim_info));
+        }
     }
     return ROCPROFILER_STATUS_SUCCESS;
 }
@@ -141,7 +143,9 @@ client_data::initialize_event_info()
     }
 
     if(agent_counter_info.size() != gpu_agents.size())
+    {
         agent_counter_info = get_agent_counter_info(gpu_agents);
+    }
 
     try
     {
@@ -173,18 +177,30 @@ client_data::initialize_event_info()
                       [](const rocprofiler_tool_counter_info_t& lhs,
                          const rocprofiler_tool_counter_info_t& rhs) {
                           if(lhs.is_constant && rhs.is_constant)
+                          {
                               return lhs.id < rhs.id;
-                          else if(lhs.is_constant)
+                          }
+                          if(lhs.is_constant)
+                          {
                               return true;
-                          else if(rhs.is_constant)
+                          }
+                          if(rhs.is_constant)
+                          {
                               return false;
+                          }
 
                           if(!lhs.is_derived && !rhs.is_derived)
+                          {
                               return lhs.id < rhs.id;
-                          else if(!lhs.is_derived)
+                          }
+                          if(!lhs.is_derived)
+                          {
                               return true;
-                          else if(!rhs.is_derived)
+                          }
+                          if(!rhs.is_derived)
+                          {
                               return false;
+                          }
 
                           return lhs.id < rhs.id;
                       });
@@ -198,7 +214,7 @@ client_data::initialize_event_info()
                 {
                     continue;
                 }
-                else if(ditr.is_derived)
+                if(ditr.is_derived)
                 {
                     auto _sym = fmt::format("{}:device={}", ditr.name, _dev_index);
                     auto _short_desc =
@@ -218,7 +234,10 @@ client_data::initialize_event_info()
                             (itr.instance_size > 1)
                                 ? fmt::format("{}[0:{}]", itr.name, itr.instance_size - 1)
                                 : std::string{};
-                        if(!_info.empty()) _dim_info.emplace_back(_info);
+                        if(!_info.empty())
+                        {
+                            _dim_info.emplace_back(_info);
+                        }
                     }
 
                     auto _sym = fmt::format("{}:device={}", ditr.name, _dev_index);
@@ -250,12 +269,12 @@ client_data::set_agents()
         const auto& _agents = agent_mngr.get_agents_by_type(type);
         for(const auto& agent : _agents)
         {
-            out.emplace_back(tool_agent{ agent->device_type_index, agent.get() });
+            out.emplace_back(tool_agent{ .device_id = agent->device_type_index,
+                                         .agent     = agent.get() });
         }
     };
 
     fill_agents(agent_type::gpu, gpu_agents);
     fill_agents(agent_type::cpu, cpu_agents);
 }
-}  // namespace rocprofiler_sdk
-}  // namespace rocprofsys
+}  // namespace rocprofsys::rocprofiler_sdk

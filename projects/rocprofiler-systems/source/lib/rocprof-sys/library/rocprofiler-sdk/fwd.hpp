@@ -25,9 +25,7 @@
 #include <memory>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace rocprofiler_sdk
+namespace rocprofsys::rocprofiler_sdk
 {
 using hardware_counter_info = ::tim::hardware_counters::info;
 
@@ -71,8 +69,8 @@ struct rocprofiler_tool_counter_info_t : rocprofiler_counter_info_v0_t
     rocprofiler_tool_counter_info_t& operator=(
         rocprofiler_tool_counter_info_t&&) noexcept = default;
 
-    rocprofiler_agent_id_t                           agent_id       = {};
-    std::vector<rocprofiler_record_dimension_info_t> dimension_info = {};
+    rocprofiler_agent_id_t                           agent_id = {};
+    std::vector<rocprofiler_record_dimension_info_t> dimension_info;
 };
 
 struct tool_agent
@@ -128,17 +126,17 @@ struct client_data
     rocprofiler_buffer_id_t            memory_copy_buffer        = { 0 };
     rocprofiler_buffer_id_t            memory_alloc_buffer       = { 0 };
     rocprofiler_buffer_id_t            counter_collection_buffer = { 0 };
-    std::vector<tool_agent>            cpu_agents                = {};
-    std::vector<tool_agent>            gpu_agents                = {};
-    std::vector<hardware_counter_info> events_info               = {};
-    agent_counter_id_map_t             agent_events              = {};
-    agent_counter_info_map_t           agent_counter_info        = {};
-    agent_counter_profile_map_t        agent_counter_profiles    = {};
-    common::synchronized<code_object_vec_t, state::thread>   code_object_records   = {};
-    common::synchronized<kernel_symbol_vec_t, state::thread> kernel_symbol_records = {};
+    std::vector<tool_agent>            cpu_agents;
+    std::vector<tool_agent>            gpu_agents;
+    std::vector<hardware_counter_info> events_info;
+    agent_counter_id_map_t             agent_events;
+    agent_counter_info_map_t           agent_counter_info;
+    agent_counter_profile_map_t        agent_counter_profiles;
+    common::synchronized<code_object_vec_t, state::thread>   code_object_records;
+    common::synchronized<kernel_symbol_vec_t, state::thread> kernel_symbol_records;
     buffer_name_info_t                                       buffered_tracing_info = {};
     callback_name_info_t                                     callback_tracing_info = {};
-    backtrace_operation_map_t                                backtrace_operations  = {};
+    backtrace_operation_map_t                                backtrace_operations;
 
     void                        initialize();
     void                        initialize_event_info();
@@ -204,7 +202,12 @@ inline const tool_agent*
 client_data::get_gpu_tool_agent(rocprofiler_agent_id_t id) const
 {
     for(const auto& itr : gpu_agents)
-        if(id.handle == itr.agent->handle) return &itr;
+    {
+        if(id.handle == itr.agent->handle)
+        {
+            return &itr;
+        }
+    }
     return nullptr;
 }
 
@@ -218,7 +221,6 @@ client_data::get_kernel_symbol_info(std::uint64_t _kernel_id) const
                 if(_kernel_id == itr.payload.kernel_id)
                 {
                     return &itr.payload;
-                    break;
                 }
             }
             return nullptr;
@@ -231,7 +233,10 @@ client_data::get_tool_counter_info(rocprofiler_agent_id_t   _agent_id,
 {
     for(const auto& itr : agent_counter_info.at(_agent_id))
     {
-        if(itr.id == _counter_id) return &itr;
+        if(itr.id == _counter_id)
+        {
+            return &itr;
+        }
     }
     return nullptr;
 }
@@ -247,7 +252,6 @@ client_data::get_code_object_info(std::uint64_t code_object_id) const
                 if(code_object_id == itr.payload.code_object_id)
                 {
                     return &itr.payload;
-                    break;
                 }
             }
             return nullptr;
@@ -259,8 +263,7 @@ as_client_data(void* _ptr)
 {
     return static_cast<client_data*>(_ptr);
 }
-}  // namespace rocprofiler_sdk
-}  // namespace rocprofsys
+}  // namespace rocprofsys::rocprofiler_sdk
 
 #if !defined(ROCPROFILER_CALL)
 #    define ROCPROFILER_CALL(result)                                                     \

@@ -14,12 +14,48 @@ test_categories:
     # A trailing '.*' anchors the end of the suite name. Dropping the dot widens instead
     # ("Devcomm*" matches all five Devcomm suites).
     test_patterns:
+      # transport/p2p.cc
       - "P2pMicrotest.*"
+      - "P2pMicrotestIsolated.*"
+      - "P2pCanConnectMicrotest.*"
+      - "P2pCanConnectMicrotestIsolated.*"
+      - "P2pSetupMicrotest.*"
+      - "P2pFreeMicrotest.*"
+      - "P2pShareableBufferMicrotest.*"
+      - "P2pRegisterFamilyMicrotest.*"
+      - "P2pMultiSegmentMicrotest.*"
+      - "P2pProxyRegisterMicrotest.*"
+      - "P2pProxyDeregisterMicrotest.*"
+      - "P2pProxyLifecycleMicrotest.*"
+      - "P2pProxyCeMicrotestIsolated.*"
+      - "GuardOperands/P2pAllocateSkipMarkExport.*"
+      - "MappingStages/P2pImportMapStageFails.*"
       - "FreshRegistrationMicrotest.*"
       - "FreshRegistrationLegacyIpcSucceedsFixture.*"
+      # ras/ras.cc
       - "RasMicrotest.*"
+      # ras/diagnostics_checks_common.cc
+      - "RasDiagnosticsCommonMicrotest.*"
+      # ras/client.cc
       - "RasClientMicrotest.*"
+      # rma/rma_proxy_launch.cc
+      - "RmaProxyBatchMemOpTest.*"
+      - "RmaProxyDescriptorTest.*"
+      - "RmaProxyLaunchTest.*"
+      - "RmaProxyQueueTest.*"
+      - "RmaProxyParamsTest.*"
+      - "RmaProxyReclaimTest.*"
+      # rma/rma_proxy_progress.cc
       - "RmaProxyProgressTest.*"
+      # rma/rma_ce.cc
+      - "RmaCeLaunchTest.*"
+      - "RmaCeInitTest.*"
+      - "RmaCeFinalizeTest.*"
+      - "RmaCePutLaunchTest.*"
+      - "RmaCeNonPersistTest.*"
+      - "RmaCePersistTest.*"
+      - "RmaCeWaitLaunchTest.*"
+      # rma/rma.cc
       - "RmaWaitSignalTest.*"
       - "RmaPutTest.*"
       - "RmaLaunchTest.*"
@@ -27,9 +63,21 @@ test_categories:
       - "RmaDebugLoggingTest.*"
       - "RmaProxyGatingTest.*"
       - "RmaProxyReadyTest.*"
+      # tuning/tuning_general.cc
+      - "TuningGeneralMicrotest.*"
+      # group.cc
       - "GroupEndInternalTest.*"
+      - "ReclaimPlannerStateTest.*"
+      - "AsyncLaunchTest.*"
+      - "GroupJobAbortTest.*"
+      - "GroupApiWrapperTest.*"
+      - "ArgsGlobalCheckTest.*"
+      # rccl_wrap.cc
       - "WrapMicrotest.*"
       - "WrapMicrotestIsolated.*"
+      # misc/gdr_probe.cc
+      - "GdrProbeTest.*"
+      # dev_runtime.cc
       - "Alloc*"
       - "Comm*"
       - "Compute*"

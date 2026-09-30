@@ -205,6 +205,13 @@ static_assert(isa_properties(ROCJITSU_CODE_ARCH_RDNA4).descriptor_vgpr_count_gra
 static_assert(isa_properties(ROCJITSU_CODE_ARCH_CDNA5).descriptor_vgpr_count_granule_wave32 == 16);
 static_assert(isa_properties(ROCJITSU_CODE_ARCH_CDNA5).descriptor_vgpr_count_granule_wave64 == 0);
 
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_CDNA4).vmcnt_capacity == 63);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_CDNA4).lgkmcnt_capacity == 15);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_RDNA3_5).vmcnt_capacity == 63);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_RDNA3_5).lgkmcnt_capacity == 63);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_RDNA4).vmcnt_capacity == 0);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_RDNA4).lgkmcnt_capacity == 0);
+
 // RDNA3/3.5 retain monolithic S_WAITCNT (GFX11 layout).
 static_assert(HasMonolithicWaitcnt<rdna3::Isa>);
 
@@ -762,6 +769,66 @@ void fill_vgprs(amdgpu::ComputeUnitCore &cu, uint32_t base, uint32_t regs, uint3
   for (uint32_t reg = 0; reg < regs; ++reg)
     for (uint32_t lane = 0; lane < lanes; ++lane)
       cu.write_vgpr(base + reg, lane, value);
+}
+
+TEST(MfmaExecTest, SwmmacI32K64U4VaryingSelectorsMatchSparseReference) {
+  amdgpu::GpuMemory gpu_mem("rdna4_swmmac_u4_exec_mem");
+  amdgpu::L2Cache l2("rdna4_swmmac_u4_exec_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("rdna4_swmmac_u4_exec", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 32u);
+  wf->set_exec((1ULL << wf->wf_size()) - 1ULL);
+
+  const uint32_t vb = wf->vgpr_alloc().base;
+  const uint32_t a_base = vb, b_base = vb + 4, c_base = vb + 12;
+  const uint32_t d_base = vb + 20, index_base = vb + 32;
+  fill_vgprs(*cu, vb, 40, 32, 0);
+  constexpr std::array<std::array<uint32_t, 2>, 6> pairs = {
+      {{0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}}};
+  auto write_nibble = [&](uint32_t base, const amdgpu::InputLoc &loc, uint32_t value) {
+    const uint32_t reg = base + loc.vgpr_offset;
+    const uint32_t shift = 4u * loc.sub_element;
+    const uint32_t old = cu->read_vgpr(reg, loc.lane);
+    cu->write_vgpr(reg, loc.lane, old | (value << shift));
+  };
+
+  for (uint32_t row = 0; row < 16; ++row)
+    for (uint32_t group = 0; group < 16; ++group) {
+      const auto pair = pairs[(row + group + 73u) % pairs.size()];
+      // K=64 selectors follow the same interleaved lane halves as sparse A.
+      const uint32_t lane = row + 16u * ((group / 4u) & 1u);
+      const uint32_t shift = 4u * (4u * (group / 8u) + group % 4u);
+      const uint32_t old = cu->read_vgpr(index_base, lane);
+      cu->write_vgpr(index_base, lane, old | ((pair[0] | (pair[1] << 2u)) << shift));
+      for (uint32_t slot = 0; slot < 2; ++slot)
+        write_nibble(a_base, amdgpu::swmmac_a_input_loc(32, 16, 64, row, 2u * group + slot, 4), 1u);
+    }
+  for (uint32_t k = 0; k < 64; ++k)
+    for (uint32_t col = 0; col < 16; ++col)
+      write_nibble(b_base, amdgpu::swmmac_b_input_loc(32, 16, 64, col, k, 4), (k % 15u) + 1u);
+
+  amdgpu::exec_swmmac_i32(*cu, 16, 16, 64, 4, d_base, a_base, b_base, c_base, index_base, 16,
+                          /*index_key=*/0, amdgpu::extract_u4, amdgpu::extract_u4,
+                          /*clamp=*/false);
+  for (uint32_t row = 0; row < 16; ++row)
+    for (uint32_t col = 0; col < 16; ++col) {
+      uint32_t expected = 0;
+      for (uint32_t group = 0; group < 16; ++group) {
+        const auto pair = pairs[(row + group + 73u) % pairs.size()];
+        expected += ((4u * group + pair[0]) % 15u) + 1u;
+        expected += ((4u * group + pair[1]) % 15u) + 1u;
+      }
+      const auto out = amdgpu::wmma_output_loc_32(16, 16, row, col);
+      EXPECT_EQ(cu->read_vgpr(d_base + out.reg, out.lane), expected) << row << "," << col;
+    }
 }
 
 TEST(MfmaExecTest, SwmmacF32K32Fp8MatchesSparseReference) {
@@ -2138,7 +2205,7 @@ TEST(GpuMemoryTest, BlockAccessRechecksTranslationAfterSparseFallbackPage) {
                                                   0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47};
 
   std::array<uint8_t, KfdProcess::kPageSize> second_page{};
-  std::copy(kReadData.begin() + 8, kReadData.end(), second_page.begin());
+  std::ranges::copy(std::span(kReadData).subspan(8), second_page.begin());
   KfdProcess::PageTable page_table;
   util::DistributedSharedMutex page_table_mutex;
   page_table[1] = {second_page.data(), amdgpu::Mtype::RW};
@@ -2153,7 +2220,8 @@ TEST(GpuMemoryTest, BlockAccessRechecksTranslationAfterSparseFallbackPage) {
   mem.write_block(kAddr, std::span<const uint8_t>(kWriteData), kVmid);
   for (size_t i = 0; i < 8; ++i)
     EXPECT_EQ(mem.read8(kAddr + i, kVmid), kWriteData[i]);
-  EXPECT_TRUE(std::equal(kWriteData.begin() + 8, kWriteData.end(), second_page.begin()));
+  EXPECT_TRUE(std::ranges::equal(std::span(kWriteData).subspan(8),
+                                 std::span(second_page).first(kWriteData.size() - 8)));
 }
 
 TEST(GpuMemoryTest, CopyBlockTransfersPageableClientMemoryAcrossPageBoundaries) {
@@ -2184,14 +2252,14 @@ TEST(GpuMemoryTest, CopyBlockTransfersPageableClientMemoryAcrossPageBoundaries) 
       amdgpu::CopyOutcome::Complete);
   std::vector<uint8_t> gpu_result(kSize);
   mem.read_block(kGpuAddr, std::span<uint8_t>(gpu_result), kVmid);
-  EXPECT_TRUE(std::equal(source.begin(), source.end(), gpu_result.begin()));
+  EXPECT_TRUE(std::ranges::equal(source, gpu_result));
 
   std::vector<uint8_t> host_destination(kSize + 23, 0);
   auto destination = std::span<uint8_t>(host_destination).subspan(13, kSize);
   ASSERT_EQ(mem.copy_block(reinterpret_cast<uint64_t>(destination.data()), kGpuAddr,
                            destination.size(), kVmid),
             amdgpu::CopyOutcome::Complete);
-  EXPECT_TRUE(std::equal(source.begin(), source.end(), destination.begin()));
+  EXPECT_TRUE(std::ranges::equal(source, destination));
 }
 
 TEST(GpuMemoryTest, AuthorizedProcMemAccessesAnonymousTargetMemory) {
@@ -6039,7 +6107,7 @@ TEST(RdnaAddrCalcTest, Rdna3MubufWrapsOffsetPartBeforeBoundsCheck) {
   EXPECT_EQ(d.per_lane_addr[0], kBase);
 }
 
-TEST(RdnaAddrCalcTest, Rdna3MubufIgnoresSoffsetInRangeCheck) {
+TEST(RdnaAddrCalcTest, Rdna3IndexedBoundsExcludeSoffset) {
   amdgpu::GpuMemory mem("rdna3_mubuf_soffset_mem");
   amdgpu::L2Cache l2("rdna3_mubuf_soffset_l2");
   amdgpu::ComputeUnitCore::Config cfg{};
@@ -6061,7 +6129,7 @@ TEST(RdnaAddrCalcTest, Rdna3MubufIgnoresSoffsetInRangeCheck) {
   cu->write_sgpr(sbase, static_cast<uint32_t>(kBase));
   cu->write_sgpr(sbase + 1, static_cast<uint32_t>(kBase >> 32));
   cu->write_sgpr(sbase + 2, 120);
-  cu->write_sgpr(sbase + 3, 0);
+  cu->write_sgpr(sbase + 3, 1u << 28); // Index-only mode.
   cu->write_sgpr(sbase + 8, 64);
   cu->write_vgpr(vbase + 4, 0, 116);
 
@@ -6436,7 +6504,7 @@ TEST(RdnaAddrCalcTest, Rdna4VbufferWrapsOffsetPartBeforeBaseAddition) {
   cu->write_sgpr(sbase + 4, static_cast<uint32_t>(kBase));
   cu->write_sgpr(sbase + 5, static_cast<uint32_t>(kBase >> 32));
   cu->write_sgpr(sbase + 6, 0x1000);
-  cu->write_sgpr(sbase + 7, 0);
+  cu->write_sgpr(sbase + 7, 3u << 28); // Complete byte-range bounds.
   cu->write_vgpr(vbase + 4, 0, 0xFFFF'8200u);
 
   rdna4::VbufferMachineInst inst{};
@@ -6524,7 +6592,7 @@ void expect_element_lane_masks(const amdgpu::ElementLaneMasks &masks,
                                std::initializer_list<uint64_t> expected) {
   const auto actual = masks.view();
   ASSERT_EQ(actual.size(), expected.size());
-  EXPECT_TRUE(std::equal(actual.begin(), actual.end(), expected.begin(), expected.end()));
+  EXPECT_TRUE(std::ranges::equal(actual, expected));
 }
 
 TEST(AmdgpuElementLaneMasksTest, UsesInlineWidthAndPreservesLargerFallback) {
@@ -6541,8 +6609,8 @@ TEST(AmdgpuElementLaneMasksTest, UsesInlineWidthAndPreservesLargerFallback) {
   masks[31] = 0x7u;
   const auto overflow_view = masks.view();
   ASSERT_EQ(overflow_view.size(), 32u);
-  EXPECT_TRUE(std::all_of(overflow_view.begin(), overflow_view.end() - 1,
-                          [](uint64_t mask) { return mask == 0x5u; }));
+  EXPECT_TRUE(std::ranges::all_of(overflow_view.first(overflow_view.size() - 1),
+                                  [](uint64_t mask) { return mask == 0x5u; }));
   EXPECT_EQ(overflow_view.back(), 0x7u);
 
   masks.assign(amdgpu::ElementLaneMasks::kInlineCapacity, 0x9u);
@@ -8063,5 +8131,47 @@ TEST(AluExceptionTest, OutputModifierDoesNotFabricateInexact) {
   EXPECT_EQ(amdgpu::classify_mul_f32(nan, 3.0f) & kInexact, 0u);
   EXPECT_EQ(amdgpu::classify_mul_f32(nan, 3.0f, 2.0f) & kInexact, 0u);
 }
+
+TEST(AluExceptionTest, MultiplyExactProductCoversF32RangeAndRounding) {
+  struct Case {
+    uint32_t lhs;
+    uint32_t rhs;
+    float scale;
+    uint32_t causes;
+  };
+  constexpr Case cases[] = {
+      {0x3f800000, 0x40000000, 4.0f, 0},
+      {0x3f800001, 0x3f800001, 1.0f, 1u << 5},
+      {0x00800000, 0x3f800000, 0.5f, 1u << 4},
+      {0x00800000, 0x00800000, 1.0f, (1u << 4) | (1u << 5)},
+      {0x00000001, 0x3f800000, 1.0f, (1u << 1) | (1u << 4)},
+      {0x00000001, 0x7f000000, 4.0f, 1u << 1},
+  };
+  for (uint32_t round = 0; round < 4; ++round) {
+    const amdgpu::fp_mode::ScopedEnvironment environment(round);
+    for (const auto &sample : cases) {
+      SCOPED_TRACE(testing::Message() << "round " << round << " lhs " << sample.lhs << " rhs "
+                                      << sample.rhs << " scale " << sample.scale);
+      volatile float lhs = std::bit_cast<float>(sample.lhs);
+      volatile float rhs = std::bit_cast<float>(sample.rhs);
+      EXPECT_EQ(amdgpu::classify_mul_f32(lhs, rhs, sample.scale), sample.causes);
+    }
+    volatile float largest = std::bit_cast<float>(0x7f7fffffu);
+    // Directed rounding toward a finite result still reports INEXACT.
+    EXPECT_EQ(amdgpu::classify_mul_f32(largest, 2.0f), (1u << 5) | (round < 2 ? 1u << 3 : 0u));
+  }
+}
+
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+TEST(AluExceptionTest, HostDazPreservesExactSubnormalOutputClassification) {
+  const amdgpu::fp_mode::ScopedEnvironment environment(0);
+  _mm_setcsr(_mm_getcsr() | (1u << 6));
+  volatile float lhs = std::bit_cast<float>(0x00800000u);
+  volatile float rhs = 1.0f;
+  // OMOD produces an exact subnormal. Widening that result through a host
+  // conversion would flush it and falsely report INEXACT.
+  EXPECT_EQ(amdgpu::classify_mul_f32(lhs, rhs, 0.5f), 1u << 4);
+}
+#endif
 
 } // namespace

@@ -19,9 +19,7 @@
 
 #include <type_traits>
 
-namespace rocprofsys
-{
-namespace tracing
+namespace rocprofsys::tracing
 {
 using perfetto_event_context_t = ::perfetto::EventContext;
 
@@ -138,7 +136,9 @@ add_perfetto_annotation(perfetto_event_context_t&      ctx,
     // the name to a null pointer, type to none, or value to a null pointer
     if(_annotation.name == nullptr || _annotation.type == 0 ||
        _annotation.value == nullptr)
+    {
         return;
+    }
 
     if(_annotation.type == Idx)
     {
@@ -161,8 +161,8 @@ add_perfetto_annotation(perfetto_event_context_t&      ctx,
         // the first "iteration": check whether annotation type has valid range
         if constexpr(Idx == ROCPROFSYS_VALUE_NONE + 1)
         {
-            if(!(_annotation.type > ROCPROFSYS_VALUE_NONE &&
-                 _annotation.type < ROCPROFSYS_VALUE_LAST))
+            if(_annotation.type <= ROCPROFSYS_VALUE_NONE ||
+               _annotation.type >= ROCPROFSYS_VALUE_LAST)
             {
                 LOG_CRITICAL("Annotation '{}' has an invalid type designation "
                              "{} which is outside of acceptable range [{}, {}]",
@@ -188,14 +188,11 @@ add_perfetto_annotation(perfetto_event_context_t&      ctx,
 void
 add_perfetto_annotation(perfetto_event_context_t&      ctx,
                         const rocprofsys_annotation_t& _annotation);
-}  // namespace tracing
-}  // namespace rocprofsys
+}  // namespace rocprofsys::tracing
 
 #include <timemory/operations/types/annotate.hpp>
 
-namespace tim
-{
-namespace operation
+namespace tim::operation
 {
 using perfetto_event_context_t = ::rocprofsys::tracing::perfetto_event_context_t;
 
@@ -261,5 +258,4 @@ struct perfetto_annotate : annotate<perfetto_event_context_t, Tp>
         return base_type::operator()(obj, _ctx);
     }
 };
-}  // namespace operation
-}  // namespace tim
+}  // namespace tim::operation

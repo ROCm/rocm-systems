@@ -10,6 +10,9 @@ The information presented in this document is for informational purposes only an
 
 © 2026 Advanced Micro Devices, Inc. All Rights Reserved.
 
+## Note
+HRR Capture is now disabled by default on AMD platforms. The feature will be securely re-enabled in a future release
+
 ## Capture
 
 ```bash
@@ -179,6 +182,7 @@ capture.hrr/
   pid-<pid>/
     events.bin
     blobs/
+    code_objects/
     regions/          (optional)
     manifest.json
 ```
@@ -188,7 +192,15 @@ capture.hrr/
   dispatch table never saw. Written by code outside the runtime, never by
   capture itself
 - **blobs/** — host payloads referenced by the trace
+- **code_objects/** — code objects, content-addressed by hash (device images
+  extracted by the runtime, or the raw file for `hipModuleLoad`); a launch
+  records the hash so kernels sharing a name (Triton emits many `triton_`)
+  still resolve to the code object they came from
 - **Complete: NO** — original run crashed before clean shutdown; reader still recovers complete events
+
+Code objects read back from the runtime must start with `\x7fELF`,
+`__CLANG_OFFLOAD_BUNDLE__` or `CCOB`; capture warns and records none rather
+than storing an image that fails only at replay with HIP error 200.
 
 Capture wire version must match the `hrr-playback` reader (see DESIGN.md wire-format notes).
 

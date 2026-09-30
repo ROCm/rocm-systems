@@ -199,6 +199,22 @@
         }
       ]
     },
+    "a_cast_multithread": {
+      "extends": "cast_base",
+      "timeout": 600,
+      "command_args": "--net_ib_nthreads=4",
+      "description": "A18: four worker threads per rank on independent IB-CAST connections, so several WRR schedulers advance at once.",
+      "env_variables": {
+        "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "10000000"
+      },
+      "tests": [
+        {
+          "name": "A18_Cast_MultiThread_StressMultiRound",
+          "description": "Concurrent CAST connections, each auditing its own WRR token ledger.",
+          "test_filter": "NetIbMPITest.CastStressMultiRoundTwoConns"
+        }
+      ]
+    },
 
     "cast_grh": {
       "extends": "cast_base",
@@ -288,6 +304,57 @@
           "name": "A15_Gin_AinicSelectsCastBackend",
           "description": "GIN on AINIC uses IbCastGinIb, not the generic ncclGinIbProxy (no dual enumeration).",
           "test_filter": "GinInitMPITest.AinicSelectsCastBackend"
+        }
+      ]
+    },
+
+    "cast_by_order_no_cts": {
+      "extends": "gtest_base",
+      "timeout": 600,
+      "description": "Software BY_ORDER receive matching with CTS offload forced off (the no-offload arm). QP scheduler off so TX fan-out stays at base nqps. QPS=4 / splitData=0 covers FIFO matching across QPs.",
+      "env_variables": {
+        "NCCL_NET": "ib-cast",
+        "RCCL_CTS_OFFLOAD_ENABLED": "0",
+        "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME": "2",
+        "RCCL_IB_QP_SCHED_ENABLE": "0",
+        "NCCL_IB_QPS_PER_CONNECTION": "4",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "0"
+      },
+      "tests": [
+        {
+          "name": "A18_ByOrder_NoCts_SimpleSendRecv",
+          "description": "Basic send/recv on software BY_ORDER with CTS offload off.",
+          "test_filter": "NetIbMPITest.SimpleSendRecv"
+        },
+        {
+          "name": "A18_ByOrder_NoCts_MultipleSizes",
+          "description": "Size ladder on software BY_ORDER with CTS offload off.",
+          "test_filter": "NetIbMPITest.SendRecvMultipleSizes"
+        },
+        {
+          "name": "A18_ByOrder_NoCts_LargeTransfer",
+          "description": "Large transfer on software BY_ORDER with CTS offload off.",
+          "test_filter": "NetIbMPITest.LargeTransfer"
+        },
+        {
+          "name": "A18_ByOrder_NoCts_MultipleOutstanding",
+          "description": "Multiple in-flight send/recv on software BY_ORDER with CTS offload off.",
+          "test_filter": "NetIbMPITest.MultipleOutstandingSendRecv"
+        },
+        {
+          "name": "A18_ByOrder_NoCts_MultiRecv",
+          "description": "irecv batching matched by posted WR identity (software BY_ORDER, no CTS offload).",
+          "test_filter": "NetIbMPITest.MultiRecv"
+        },
+        {
+          "name": "A18_ByOrder_NoCts_MultiRecvShuffled",
+          "description": "Shuffled irecv slots: wr_id is the request index, not the CTS slot (software BY_ORDER, no CTS offload).",
+          "test_filter": "NetIbMPITest.MultiRecvShuffled"
+        },
+        {
+          "name": "A18_ByOrder_NoCts_FlushAfterRecv",
+          "description": "GDR flush after recv hits the BY_ORDER IBV_WC_RDMA_READ completion arm (skipped if GDR unavailable).",
+          "test_filter": "NetIbMPITest.FlushAfterRecv"
         }
       ]
     },
@@ -558,6 +625,7 @@
     { "config": "cts_on_depth32",        "enabled": true, "smoke": true },
     { "config": "cast_wrr",              "enabled": true, "smoke": true },
     { "config": "cast_fault_injection",  "enabled": true, "smoke": true },
+    { "config": "cast_by_order_no_cts",  "enabled": true, "smoke": true },
     { "config": "cast_grh",              "enabled": true, "smoke": true },
     { "config": "cast_subnet_routing",   "enabled": true, "smoke": true },
     { "config": "gin_proxy",             "enabled": true, "smoke": true },
@@ -566,6 +634,7 @@
     { "config": "bootstrap_socket_poll", "enabled": true, "smoke": true },
     { "config": "net_ib_cast_plane_subnet", "enabled": true, "smoke": true },
     { "config": "a_netib_multithread",   "enabled": true, "smoke": true },
+    { "config": "a_cast_multithread",    "enabled": true, "smoke": true },
 
     { "config": "ib_baseline",           "enabled": true, "smoke": true },
     { "config": "cast_alltoall_full",    "enabled": true, "smoke": true },

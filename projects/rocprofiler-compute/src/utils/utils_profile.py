@@ -50,6 +50,15 @@ _DUPLICATE_ROCM_MESSAGE = (
     "how-to/profile/mode.html#torch-trace-requirements"
 )
 
+# Exit code the integration suite skips on instead of failing.
+EXIT_CODE_OUTDATED_GPU_FIRMWARE = 3
+_FIRMWARE_TOO_OLD_RE = re.compile(
+    r"firmware version \d+ which is below minimum required version \d+"
+)
+_OUTDATED_FIRMWARE_MESSAGE = (
+    "GPU firmware on this machine is below the minimum rocprofiler-sdk requires."
+)
+
 ProfilerOptions = Union[list[str], dict[str, Union[str, list[str]]]]
 
 # inject_roctx appends a trailing "|<backend>" suffix to marker names.
@@ -291,6 +300,11 @@ def run_prof(
         duplicate_rocm_message = _duplicate_rocm_install_message(output)
         if duplicate_rocm_message is not None:
             console_error(duplicate_rocm_message, exit=False)
+        if _FIRMWARE_TOO_OLD_RE.search(output):
+            console_error(
+                _OUTDATED_FIRMWARE_MESSAGE,
+                exit_code=EXIT_CODE_OUTDATED_GPU_FIRMWARE,
+            )
         console_error("Profiling execution failed.")
 
     out_dir = Path(workload_dir) / "out"
@@ -325,10 +339,14 @@ def run_prof(
     marker_csv = csv_compression.compressed_name(
         out_pmc_1 / f"{fbase}_marker_api_trace.csv"
     )
+    kernel_symbols_csv = csv_compression.compressed_name(
+        Path(workload_dir) / f"kernel_symbols_{fbase}.csv"
+    )
     rocpd_data.convert_dbs_to_csv(
         [str(p) for p in db_paths],
         str(counter_csv),
         str(marker_csv),
+        str(kernel_symbols_csv),
     )
 
     # Reset Dispatch_ID based on PID, Kernel_Name, Grid_Size, Workgroup_Size,
@@ -371,6 +389,7 @@ def run_prof(
         rows_written = 0
     if not rows_written:
         results_csv.unlink(missing_ok=True)
+        kernel_symbols_csv.unlink(missing_ok=True)
         console_warning(
             "No GPU kernel data collected. "
             "The workload may not have dispatched any GPU kernels."

@@ -37,7 +37,7 @@ using metrics = std::vector<counter_value>;
 
 struct counter_definition
 {
-    std::string name{};
+    std::string name;
     size_t      device_index{ 0 };
 
     [[nodiscard]] std::string to_string() const
@@ -124,7 +124,10 @@ namespace rocprofsys::pmc::collectors::gpu_perf_counter
 inline std::string
 make_qualified_name(const counter_metadata& meta)
 {
-    if(meta.dimensions.empty()) return meta.name;
+    if(meta.dimensions.empty())
+    {
+        return meta.name;
+    }
     return fmt::format("{}[{}]", meta.name, fmt::join(meta.dimensions, ","));
 }
 
