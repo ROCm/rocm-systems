@@ -994,6 +994,54 @@
         { "name": "NetIB_GIN_DmaBuf_MixedIPutIGetIPutSignal_Ctx2_1MiB", "description": "GIN dmabuf: mixed iput/iget/iput-signal (Ctx2, 1MiB, DmaBuf)", "test_filter": "CtxAndSize/RmaMPITest.MixedIPutIGetIPutSignal/Ctx2_1MiB_DmaBuf" }
       ]
     },
+    "net_ib_host_api_fused": {
+      "extends": "net_ib_base",
+      "timeout": 900,
+      "env_variables": {
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_GIN_TYPE": "2",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_NET": "ib",
+        "NCCL_NET_MERGE_LEVEL": "PHB"
+      },
+      "description": "The host one-sided RMA API itself with NIC fusion active and GIN on -- the surface the proxy fix unblocks",
+      "tests": [
+        {"name": "NetIB_HostApi_Fused", "description": "Whole HostApiTest suite under NIC fusion, minus GraphCaptureReplayPutWait which fails independently of fusion", "test_filter": "HostApiTest.*-HostApiTest.GraphCaptureReplayPutWait"}
+      ]
+    },
+
+    "net_ib_rma_fused_gin_off": {
+      "extends": "net_ib_base",
+      "timeout": 120,
+      "env_variables": {
+        "NCCL_GIN_ENABLE": "0",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_NET": "ib",
+        "NCCL_NET_MERGE_LEVEL": "PHB"
+      },
+      "description": "Host RMA must stay available with fusion on and GIN off, where the proxy is the sole RMA user",
+      "tests": [
+        {"name": "NetIB_RmaFusedGinOff_WindowRegister", "description": "ncclCommWindowRegister with NIC fusion active and GIN disabled", "test_filter": "HostApiTest.WindowRegisterDeregister"}
+      ]
+    },
+
+    "net_ib_gin_nic_fusion": {
+      "extends": "net_ib_base",
+      "timeout": 120,
+      "env_variables": {
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_GIN_TYPE": "2",
+        "NCCL_NET": "ib",
+        "NCCL_NET_MERGE_LEVEL": "PHB"
+      },
+      "tests": [
+        { "name": "NetIB_GIN_NicFusion_HostRma", "description": "GIN nic fusion: host RMA proxy stays available when NICs are fused", "test_filter": "GinNicFusionMPITest.HostRmaSurvivesNicFusion" },
+        { "name": "NetIB_GIN_NicFusion_GinType", "description": "GIN nic fusion: communicator keeps a usable GIN backend when NICs are fused", "test_filter": "GinNicFusionMPITest.GinTypeSurvivesNicFusion" },
+        { "name": "NetIB_GIN_NicFusion_IPut", "description": "Robustness: RMA proxy iput over a hand-built fused vNIC, which production never hands it", "test_filter": "RmaMPIFusedNicTest.IPutOverFusedVNic" },
+        { "name": "NetIB_GIN_NicFusion_IGet", "description": "Robustness: RMA proxy iget over a hand-built fused vNIC, which production never hands it", "test_filter": "RmaMPIFusedNicTest.IGetOverFusedVNic" },
+        { "name": "NetIB_GIN_NicFusion_IPutSignal", "description": "Robustness: RMA proxy iput+signal over a hand-built fused vNIC, which production never hands it", "test_filter": "RmaMPIFusedNicTest.IPutSignalOverFusedVNic" }
+      ]
+    },
     "net_ib_cast_gin_peermem": {
       "extends": "net_ib_gin_peermem",
       "env_variables": {
@@ -1599,6 +1647,24 @@
       "name": "NET IB - GIN DmaBuf",
       "description": "GIN plugin tests with dma-buf support",
       "config": "net_ib_gin_dmabuf",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Host RMA API on fused NICs",
+      "description": "The unblocked host one-sided RMA API exercised with NIC fusion active and GIN enabled",
+      "config": "net_ib_host_api_fused",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - RMA on fused NICs with GIN off",
+      "description": "Regression for host RMA window registration with fused NICs and GIN disabled",
+      "config": "net_ib_rma_fused_gin_off",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - GIN NIC Fusion",
+      "description": "GIN capabilities with NIC fusion active",
+      "config": "net_ib_gin_nic_fusion",
       "enabled": true
     },
     {
