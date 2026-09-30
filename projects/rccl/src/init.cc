@@ -4536,10 +4536,12 @@ static ncclResult_t ncclCommInitChildComm(ncclComm_t comm, ncclComm_t* newcomm, 
     job->excludeRanksCount = excludeRanksCount;
     NCCLCHECKGOTO(ncclCalloc(&job->excludeRanksList, excludeRanksCount), res, fail);
     memcpy(job->excludeRanksList, excludeRanksList, excludeRanksCount * sizeof(int));
-    for (int i = 0; i < excludeRanksCount; i++) {
-      if (comm->peerInfo[excludeRanksList[i]].hostHash == comm->peerInfo[comm->rank].hostHash) {
-        comm->hasExcludedLocalRank = true;
-        break;
+    if (comm->peerInfo) {
+      for (int i = 0; i < excludeRanksCount; i++) {
+        if (comm->peerInfo[excludeRanksList[i]].hostHash == comm->peerInfo[comm->rank].hostHash) {
+          comm->hasExcludedLocalRank = true;
+          break;
+        }
       }
     }
   } else {
