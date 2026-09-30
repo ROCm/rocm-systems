@@ -37,15 +37,31 @@
     } while(0)
 
 __global__ void
-kernelA(int x, int y)
+kernelA(int* out, int x, int y, size_t N)
 {
-    x = x + y;
+    size_t idx    = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t stride = blockDim.x * gridDim.x;
+    for(size_t i = idx; i < N; i += stride)
+    {
+        int val = x + y;
+        for(int r = 0; r < 1000; r++)
+            val = val * 3 + 1;
+        out[i] = val;
+    }
 }
 
 __global__ void
-kernelB(int x, int y)
+kernelB(int* out, int x, int y, size_t N)
 {
-    x = x + y;
+    size_t idx    = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t stride = blockDim.x * gridDim.x;
+    for(size_t i = idx; i < N; i += stride)
+    {
+        int val = x + y;
+        for(int r = 0; r < 1000; r++)
+            val = val * 5 + 3;
+        out[i] = val;
+    }
 }
 
 template <typename T>
@@ -54,7 +70,7 @@ kernelC(T* C_d, const T* A_d, size_t N)
 {
     size_t offset = (blockIdx.x * blockDim.x + threadIdx.x);
     size_t stride = blockDim.x * gridDim.x;
-    for(int rep = 0; rep < 10; rep++)
+    for(int rep = 0; rep < 500; rep++)
     {
         for(size_t i = offset; i < N; i += stride)
         {
@@ -71,14 +87,14 @@ launchKernels(const long NUM_LAUNCH, const long SYNC_INTERVAL, const int DEV_ID)
     [[maybe_unused]] hipDeviceProp_t devProp;
     HIP_CALL(hipGetDeviceProperties(&devProp, DEV_ID));
 
-    int* gpuMem = nullptr;
-    HIP_CALL(hipMalloc((void**) &gpuMem, 1 * sizeof(int)));
+    const size_t abElems = 1024 * 1024;
+    int*         abMem   = nullptr;
+    HIP_CALL(hipMalloc((void**) &abMem, abElems * sizeof(int)));
 
     for(long i = 0; i < NUM_LAUNCH; i++)
     {
-        // KernelA and KernelB to be profiled as part of the session
-        hipLaunchKernelGGL(kernelA, dim3(64), dim3(256), 0, 0, 1, 2);
-        hipLaunchKernelGGL(kernelB, dim3(64), dim3(256), 0, 0, 1, 2);
+        hipLaunchKernelGGL(kernelA, dim3(512), dim3(256), 0, 0, abMem, 1, 2, abElems);
+        hipLaunchKernelGGL(kernelB, dim3(512), dim3(256), 0, 0, abMem, 1, 2, abElems);
         if(i % SYNC_INTERVAL == (SYNC_INTERVAL - 1)) HIP_CALL(hipDeviceSynchronize());
     }
 
@@ -108,7 +124,7 @@ launchKernels(const long NUM_LAUNCH, const long SYNC_INTERVAL, const int DEV_ID)
     }
     HIP_CALL(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
     HIP_CALL(hipDeviceSynchronize());
-    HIP_CALL(hipFree(gpuMem));
+    HIP_CALL(hipFree(abMem));
     HIP_CALL(hipFree(A_d));
     HIP_CALL(hipFree(C_d));
     delete[] A_h;
