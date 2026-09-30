@@ -16,7 +16,7 @@ import re
 import sys
 import time
 import urllib.parse
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -98,6 +98,102 @@ class CheckResult:
 
 
 @dataclass(frozen=True)
+class RequiredCheck:
+    """A uniquely named check and the PR filters that require it."""
+
+    # Exact check-run name published by its workflow.
+    name: str
+    # Ordered GitHub Actions path patterns; empty means every changed path.
+    paths: List[str]
+    # Ordered GitHub Actions base-branch patterns; empty means every branch.
+    branches: List[str]
+
+
+def _workflow_filter_regex(pattern: str) -> str:
+    """Translate GitHub Actions filter syntax, including optional directories."""
+    parts: List[str] = []
+    position = 0
+    while position < len(pattern):
+        character = pattern[position]
+        if pattern.startswith("**/", position):
+            parts.append("(?:.*/)?")
+            position += 3
+        elif pattern.startswith("**", position):
+            parts.append(".*")
+            position += 2
+        elif character == "*":
+            parts.append("[^/]*")
+            position += 1
+        elif character == "[":
+            end = pattern.find("]", position + 1)
+            characters = pattern[position + 1 : end]
+            if end == -1 or not re.fullmatch(r"[a-zA-Z0-9-]+", characters):
+                raise ValueError(f"Invalid filter character class: {pattern!r}")
+            parts.append(f"[{characters}]")
+            position = end + 1
+        elif character in "?+":
+            if not parts or parts[-1] in {".*", "[^/]*"} or parts[-1].startswith("(?:"):
+                raise ValueError(f"Invalid filter repetition: {pattern!r}")
+            parts[-1] = f"(?:{parts[-1]}){character}"
+            position += 1
+        elif character == "\\":
+            position += 1
+            if position == len(pattern):
+                raise ValueError(f"Trailing filter escape: {pattern!r}")
+            parts.append(re.escape(pattern[position]))
+            position += 1
+        else:
+            parts.append(re.escape(character))
+            position += 1
+    return "".join(parts)
+
+
+def _matches_workflow_filter(value: str, patterns: List[str]) -> bool:
+    """Apply ordered includes/excludes with GitHub Actions slash semantics."""
+    if not patterns:
+        return True
+    included = False
+    for pattern in patterns:
+        negative = pattern.startswith("!")
+        expression = _workflow_filter_regex(pattern[1:] if negative else pattern)
+        if re.fullmatch(expression, value, flags=re.DOTALL):
+            included = not negative
+    return included
+
+
+def _load_required_checks(raw_checks: Any) -> List[RequiredCheck]:
+    """Validate the declared check set before interpreting any API results."""
+    if not isinstance(raw_checks, list):
+        raise ValueError("required_check_runs must be a list")
+    checks: List[RequiredCheck] = []
+    names = set()
+    for raw in raw_checks:
+        if not isinstance(raw, dict) or set(raw) - {"name", "paths", "branches"}:
+            raise ValueError(
+                "Required checks must be mappings with only name, paths, and branches"
+            )
+        name = raw.get("name")
+        if not isinstance(name, str) or not name.strip() or name in names:
+            raise ValueError(f"Missing or duplicate required check name: {name!r}")
+        filters = []
+        for key in ("paths", "branches"):
+            patterns = raw.get(key, [])
+            if not isinstance(patterns, list) or any(
+                not isinstance(pattern, str) or not pattern.lstrip("!")
+                for pattern in patterns
+            ):
+                raise ValueError(f"{name}: {key} must be a list of nonempty patterns")
+            if patterns and all(pattern.startswith("!") for pattern in patterns):
+                raise ValueError(f"{name}: {key} needs a positive pattern")
+            for pattern in patterns:
+                re.compile(_workflow_filter_regex(pattern.removeprefix("!")))
+            filters.append(patterns)
+        names.add(name)
+        checks.append(RequiredCheck(name, *filters))
+    return checks
+
+
+@dataclass(frozen=True)
 class Policy:
     description_min_length: int
     description_issue_patterns: List[re.Pattern[str]]
@@ -108,7 +204,8 @@ class Policy:
     unit_test_patterns: List[str]
     unit_test_exempt_paths: List[str]
     bump_bot_authors: List[str]
-    required_checks: List[str]
+    # Declared checks, narrowed to applicable path/branch rules before polling.
+    required_checks: List[RequiredCheck]
     precommit_failure_comment: Optional[FailureComment]
 
 
@@ -157,7 +254,7 @@ def load_policy(policy_path: Path) -> Policy:
     # Bump-PR bot authors that bypass all policy checks.
     bump_bot_authors = [str(a) for a in (pr.get("bump_bot_authors", []) or [])]
 
-    required_checks = [str(x) for x in (checks.get("required_check_runs", []) or [])]
+    required_checks = _load_required_checks(checks.get("required_check_runs", []))
 
     fc = ((checks.get("failure_comments", {}) or {}).get("pre-commit")) or None
     precommit_failure_comment = None
@@ -260,15 +357,58 @@ def iter_pr_files(
 
 
 def get_check_runs(owner: str, repo: str, sha: str, token: str) -> List[Dict[str, Any]]:
-    """Return the list of check-runs associated with a commit SHA."""
-    data = gh_get(
-        f"https://api.github.com/repos/{owner}/{repo}/commits/{sha}/check-runs?per_page=100",
-        token,
+    """Collect every page of current check runs, excluding superseded attempts."""
+    runs: List[Dict[str, Any]] = []
+    page = 1
+    while True:
+        data = gh_get(
+            f"https://api.github.com/repos/{owner}/{repo}/commits/{sha}/check-runs"
+            f"?filter=latest&per_page=100&page={page}",
+            token,
+        )
+        if not isinstance(data, dict):
+            raise RuntimeError("Unexpected check-runs payload")
+        batch = data.get("check_runs")
+        total_count = data.get("total_count")
+        if (
+            not isinstance(batch, list)
+            or any(not isinstance(run, dict) for run in batch)
+            or type(total_count) is not int
+            or total_count < 0
+        ):
+            raise RuntimeError("Unexpected check-runs payload")
+        runs.extend(batch)
+        if not batch or len(runs) >= total_count:
+            return runs
+        page += 1
+
+
+def select_required_checks(
+    policy: Policy, pr_files: List[Dict[str, Any]], base_branch: str
+) -> Policy:
+    """Freeze the expected set from trusted policy and PR paths before polling.
+
+    Removed files also trigger workflow path filters. Renames can match either
+    the old or the new path, so both names participate in scope selection.
+    """
+    paths = [
+        str(filename)
+        for item in pr_files
+        for filename in (item.get("filename"), item.get("previous_filename"))
+        if filename
+    ]
+    return replace(
+        policy,
+        required_checks=[
+            check
+            for check in policy.required_checks
+            if _matches_workflow_filter(base_branch, check.branches)
+            and (
+                not check.paths
+                or any(_matches_workflow_filter(path, check.paths) for path in paths)
+            )
+        ],
     )
-    if not isinstance(data, dict):
-        raise RuntimeError("Unexpected check-runs payload")
-    runs = data.get("check_runs", [])
-    return runs if isinstance(runs, list) else []
 
 
 def ensure_pr_not_draft(policy: Policy, is_draft: bool, errors: List[str]) -> None:
@@ -505,13 +645,15 @@ def summarize_required_checks(
         )
         conc_by_name[name] = ", ".join(conclusions)
 
-    missing = [n for n in policy.required_checks if n not in by_name]
+    missing = [
+        check.name for check in policy.required_checks if check.name not in by_name
+    ]
 
     failing: List[str] = []
-    for n in policy.required_checks:
-        _, _, failed_conclusions = _required_check_status(by_name.get(n, []))
+    for check in policy.required_checks:
+        _, _, failed_conclusions = _required_check_status(by_name.get(check.name, []))
         if failed_conclusions:
-            failing.append(f"{n}={failed_conclusions}")
+            failing.append(f"{check.name}={failed_conclusions}")
 
     return missing, failing, conc_by_name
 
@@ -536,11 +678,9 @@ def _required_check_status(
 ) -> Tuple[bool, bool, Optional[str]]:
     """Return passed, pending, and failed conclusions for one check name.
 
-    Several path-owned workflows can legitimately create the same required
-    check name on a multi-subtree pull request. The combined check passes only
-    when at least one run exists and every run has an accepted conclusion.
-    Failures take precedence over pending runs so a terminal failure is
-    reported without waiting for the remaining duplicate runs.
+    Each applicable workflow has a distinct required name. If the API returns
+    several current runs with that name, every run must be accepted. Failures
+    take precedence over pending runs so they can be reported immediately.
     """
     if not check_runs:
         return False, True, None
@@ -657,7 +797,10 @@ def build_policy_table_comment(
     # Render rows in a fixed, human-friendly order regardless of the order in
     # which they were appended (policy rows + required-check rows).
     order_index = {name: i for i, name in enumerate(TABLE_ORDER)}
-    results = sorted(results, key=lambda r: order_index.get(r.name, len(TABLE_ORDER)))
+    results = sorted(
+        results,
+        key=lambda r: order_index.get(r.name.split(" / ", 1)[0], len(TABLE_ORDER)),
+    )
 
     all_passed = all(r.passed for r in results)
     if all_passed and ready:
@@ -762,7 +905,8 @@ def build_check_results(
         return _required_check_status(by_name.get(name, []))
 
     results: List[CheckResult] = []
-    for name in policy.required_checks:
+    for check in policy.required_checks:
+        name = check.name
         passed, pending, conc = status_of(name)
         if pending:
             details: List[str] = ["⏳ Still running…"]
@@ -787,15 +931,21 @@ def maybe_comment_precommit_failure(
 ) -> None:
     """Post the configured pre-commit failure help comment, if applicable.
 
-    Does nothing unless `policy.precommit_failure_comment` is set and the
-    `pre-commit` check-run concluded in a failed state.
+    Does nothing unless `policy.precommit_failure_comment` is set and
+    an applicable `pre-commit / <scope>` check concluded in a failed state.
     """
     if not policy.precommit_failure_comment:
         return
 
     failure_conclusions = {"failure", "cancelled", "timed_out", "action_required"}
+    precommit_names = {
+        check.name
+        for check in policy.required_checks
+        if check.name == "pre-commit" or check.name.startswith("pre-commit / ")
+    }
     if not any(
-        run.get("name") == "pre-commit" and run.get("conclusion") in failure_conclusions
+        run.get("name") in precommit_names
+        and run.get("conclusion") in failure_conclusions
         for run in check_runs
     ):
         return
@@ -900,8 +1050,8 @@ def build_bump_pr_results(policy: Policy) -> List[CheckResult]:
         CheckResult("Feature Flag", "🚩", True, [], note=bump_note),
         CheckResult("Code Coverage", "📊", True, [], note=bump_note),
     ]
-    for name in policy.required_checks:
-        rows.append(CheckResult(name, "🔎", True, [], note=bump_note))
+    for check in policy.required_checks:
+        rows.append(CheckResult(check.name, "🔎", True, [], note=bump_note))
     rows.append(CheckResult("therock-pr-bot", "🤖", True, [], note=bump_note))
     return rows
 
@@ -1023,6 +1173,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
 
     pr_files = list(iter_pr_files(owner, repo, pr_number, token))  # type: ignore[arg-type]
+    base_branch = (pr.get("base") or {}).get("ref")
+    if not isinstance(base_branch, str) or not base_branch:
+        raise RuntimeError("PR payload is missing the base branch")
+    policy = select_required_checks(policy, pr_files, base_branch)
 
     results: List[CheckResult] = []
 
@@ -1145,9 +1299,11 @@ def main(argv: Optional[List[str]] = None) -> int:
             by_name = _group_check_runs_by_name(poll_runs)
             # Check whether every required CI check has a conclusion yet.
             all_concluded = all(
-                bool(by_name.get(name))
-                and all(run.get("conclusion") is not None for run in by_name[name])
-                for name in policy.required_checks
+                bool(by_name.get(check.name))
+                and all(
+                    run.get("conclusion") is not None for run in by_name[check.name]
+                )
+                for check in policy.required_checks
             )
             if all_concluded:
                 final_combined = results + build_check_results(policy, poll_runs)
@@ -1211,8 +1367,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         all_present = not missing
         by_name = _group_check_runs_by_name(runs)
         all_ok = True
-        for name in policy.required_checks:
-            passed, _, _ = _required_check_status(by_name.get(name, []))
+        for check in policy.required_checks:
+            passed, _, _ = _required_check_status(by_name.get(check.name, []))
             if not passed:
                 all_ok = False
 

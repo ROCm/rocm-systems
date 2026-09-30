@@ -1,4 +1,4 @@
-version: 2
+version: 3
 
 pr:
   # Special case: automated dependency "bump" PRs.
@@ -147,10 +147,45 @@ diff:
     - '**/*.asc'
 
 checks:
-  # External checks that must be GREEN before PR is "ready for review"
-  # (Do NOT include therock-pr-bot here to avoid circular dependency.)
+  # Each name identifies one workflow, independently of scheduling order.
+  # Paths and branches mirror its pull_request filters, including ordered
+  # exclusions. The policy tests verify these filters against the workflows.
+  # An omitted filter applies to every path or base branch, respectively.
   required_check_runs:
-    - pre-commit
+    - name: pre-commit / runtimes
+      branches: [develop]
+      paths:
+        - 'runtimes/**'
+        - '.github/workflows/runtimes-formatting.yml'
+        - '.pre-commit-config.yaml'
+    - name: pre-commit / rocjitsu
+      paths:
+        - 'emulation/mirage/**'
+        - 'emulation/rocjitsu/**'
+        - '.github/workflows/rocjitsu-*.yml'
+        - '.pre-commit-config.yaml'
+    - name: pre-commit / cuid
+      paths:
+        - '.github/workflows/cuid-formatting.yml'
+        - 'projects/cuid/**'
+        - '!**/*.md'
+        - '!**/*.rst'
+        - '!**/*.rtf'
+        - '!**/.readthedocs.yaml'
+        - '!projects/cuid/docs/**'
+    - name: pre-commit / rocprofiler-compute
+      paths:
+        - '.github/workflows/rocprofiler-compute-formatting.yml'
+        - 'projects/rocprofiler-compute/**'
+        - '!**/*.md'
+        - '!**/*.rtf'
+        - '!**/*.rst'
+        - '!**/.markdownlint-ci2.yaml'
+        - '!**/.readthedocs.yaml'
+        - '!**/.spellcheck.local.yaml'
+        - '!**/.wordlist.txt'
+        - '!docs/**'
+        - '!projects/*/docs/**'
 
   failure_comments:
     pre-commit:
@@ -163,4 +198,6 @@ checks:
         - `pre-commit install`
         - `pre-commit run --all-files --show-diff-on-failure`
 
-        This repo uses `.pre-commit-config.yaml`.
+        The runtimes and rocjitsu checks use `.pre-commit-config.yaml`.
+        For CUID or rocprofiler-compute, add
+        `--config projects/<project>/.pre-commit-config.yaml` to the run command.

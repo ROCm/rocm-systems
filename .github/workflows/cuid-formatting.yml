@@ -27,6 +27,7 @@ concurrency:
 
 jobs:
   pre-commit:
+    name: pre-commit / cuid
     runs-on: ubuntu-24.04
     env:
       # PRs diff against the base branch; pushes diff against the pre-push tip.
