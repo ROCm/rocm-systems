@@ -1081,26 +1081,32 @@ void Vp9VideoParser::SetupSegDequant(Vp9UncompressedHeader *p_uncomp_header) {
 void Vp9VideoParser::LoopFilterFrameInit(Vp9UncompressedHeader *p_uncomp_header) {
     int n_shift = p_uncomp_header->loop_filter_params.loop_filter_level >> 5;
     for (int seg_id = 0; seg_id < VP9_MAX_SEGMENTS; seg_id++) {
-        uint8_t lvl_seg = p_uncomp_header->loop_filter_params.loop_filter_level;
+        // 8.8.1 clips signed intermediates, so lvlSeg, intraLvl and interLvl are held in int
+        // here. feature_data and the loop filter deltas are signed, and accumulating into a
+        // uint8_t wrapped a negative result before the clamp could bring it back to 0.
+        int lvl_seg = p_uncomp_header->loop_filter_params.loop_filter_level;
         if (p_uncomp_header->segmentation_params.feature_enabled[seg_id][VP9_SEG_LVL_ALT_L]) {
             if (p_uncomp_header->segmentation_params.segmentation_abs_or_delta_update) {
                 lvl_seg = p_uncomp_header->segmentation_params.feature_data[seg_id][VP9_SEG_LVL_ALT_L];
             } else {
                 lvl_seg += p_uncomp_header->segmentation_params.feature_data[seg_id][VP9_SEG_LVL_ALT_L];
             }
-            lvl_seg = std::clamp(static_cast<int>(lvl_seg), 0, VP9_MAX_LOOP_FILTER);
+            lvl_seg = std::clamp(lvl_seg, 0, VP9_MAX_LOOP_FILTER);
         }
         if (p_uncomp_header->loop_filter_params.loop_filter_delta_update == 0) {
             memset(lvl_lookup_[seg_id], lvl_seg, VP9_MAX_REF_FRAMES * MAX_MODE_LF_DELTAS * sizeof(uint8_t));
         }
         if (p_uncomp_header->loop_filter_params.loop_filter_delta_enabled) {
-            uint8_t intra_lvl = lvl_seg + (p_uncomp_header->loop_filter_params.loop_filter_ref_deltas[kVp9IntraFrame] << n_shift);
-            lvl_lookup_[seg_id][kVp9IntraFrame][0] = std::clamp(static_cast<int>(intra_lvl), 0, VP9_MAX_LOOP_FILTER);
+            // The deltas are signed and the defaults alone include -1. Left shifting a
+            // negative value is undefined, so scale by the equivalent multiplier instead.
+            int lf_multiplier = 1 << n_shift;
+            int intra_lvl = lvl_seg + p_uncomp_header->loop_filter_params.loop_filter_ref_deltas[kVp9IntraFrame] * lf_multiplier;
+            lvl_lookup_[seg_id][kVp9IntraFrame][0] = std::clamp(intra_lvl, 0, VP9_MAX_LOOP_FILTER);
             for (int ref = kVp9LastFrame; ref < VP9_MAX_REF_FRAMES; ref++) {
                 for (int mode = 0; mode < MAX_MODE_LF_DELTAS; mode++) {
-                    uint8_t inter_lvl = lvl_seg + (p_uncomp_header->loop_filter_params.loop_filter_ref_deltas[ref] << n_shift)
-                    + (p_uncomp_header->loop_filter_params.loop_filter_mode_deltas[mode] << n_shift);
-                    lvl_lookup_[seg_id][ref][mode] = std::clamp(static_cast<int>(inter_lvl), 0, VP9_MAX_LOOP_FILTER);
+                    int inter_lvl = lvl_seg + p_uncomp_header->loop_filter_params.loop_filter_ref_deltas[ref] * lf_multiplier
+                    + p_uncomp_header->loop_filter_params.loop_filter_mode_deltas[mode] * lf_multiplier;
+                    lvl_lookup_[seg_id][ref][mode] = std::clamp(inter_lvl, 0, VP9_MAX_LOOP_FILTER);
                 }
             }
         }
