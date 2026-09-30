@@ -139,24 +139,13 @@ if(NOT EXISTS "${PEANO_INSTALL_DIR}")
 endif()
 message(STATUS "Peano install dir: ${PEANO_INSTALL_DIR}")
 
-# aie_hsaco.py shells out to llvm-objcopy to attach the AIE section. It ships in the mlir_aie
-# wheel's bin directory, which iron_env_setup.sh does not put on PATH -- so probe for it here
-# rather than letting the packaging step die with a Python traceback halfway through a build.
-execute_process(
-  COMMAND "${Python3_EXECUTABLE}" -c
-          "import os, sysconfig; print(os.path.join(sysconfig.get_paths()['purelib'], 'mlir_aie'))"
-  OUTPUT_VARIABLE MLIR_AIE_INSTALL_DIR
-  OUTPUT_STRIP_TRAILING_WHITESPACE
-)
-find_program(LLVM_OBJCOPY llvm-objcopy
-  HINTS "${MLIR_AIE_INSTALL_DIR}/bin" "${PEANO_INSTALL_DIR}/bin"
-)
-if(NOT LLVM_OBJCOPY)
-  message(FATAL_ERROR "Could not find llvm-objcopy, which aie_hsaco.py needs to package an hsaco. "
-                      "It ships with mlir_aie; add its bin directory to PATH.")
+# aie-hsaco packages the kernel artifacts into an hsaco. It ships with mlir-aie, next to aiecc.
+find_program(AIE_HSACO aie-hsaco)
+if(NOT AIE_HSACO)
+  message(FATAL_ERROR "Could not find aie-hsaco, which packages the kernels into an hsaco. "
+                      "It ships with mlir-aie; set up the IRON environment first.")
 endif()
-get_filename_component(LLVM_OBJCOPY_DIR "${LLVM_OBJCOPY}" DIRECTORY)
-message(STATUS "llvm-objcopy: ${LLVM_OBJCOPY}")
+message(STATUS "aie-hsaco: ${AIE_HSACO}")
 
 # ---------------------------------------------------------------------------
 # Kernel artifact build
@@ -293,7 +282,7 @@ endif()
 # hsaco packaging
 #
 # Both HSA benchmarks dispatch by kernel object, so each needs an hsaco rather than the raw
-# artifacts. aie_hsaco.py names sections by architecture, which is what the loader matches against
+# artifacts. aie-hsaco names sections by architecture, which is what the loader matches against
 # the agent; NPU_TARGET is the aiecc spelling of the same thing. PDI+insts works on either
 # architecture, so this mapping is not gated on full-ELF support.
 # ---------------------------------------------------------------------------
@@ -302,7 +291,6 @@ if(NPU_TARGET STREQUAL "npu2")
 else()
   set(AIE_ARCH "aie2")
 endif()
-set(AIE_HSACO_PY "${CMAKE_CURRENT_SOURCE_DIR}/../aie/aie_hsaco.py")
 
 # ---------------------------------------------------------------------------
 # HSA PDI/insts benchmark
@@ -313,16 +301,11 @@ set(PDI_HSACO_KERNEL_NAME "vsadd")
 set(PDI_HSACO "${CMAKE_CURRENT_BINARY_DIR}/vsadd.hsaco")
 add_custom_command(
   OUTPUT "${PDI_HSACO}"
-  # aie_hsaco.py creates the container before it can fail, so a failed run would otherwise leave
-  # a newer-than-dependencies hsaco behind that the next build treats as up to date.
-  COMMAND "${CMAKE_COMMAND}" -E rm -f "${PDI_HSACO}"
-  COMMAND "${CMAKE_COMMAND}" -E env "PATH=${LLVM_OBJCOPY_DIR}:$ENV{PATH}"
-          "${Python3_EXECUTABLE}" "${AIE_HSACO_PY}"
-          --hsaco "${PDI_HSACO}" --arch "${AIE_ARCH}"
+  COMMAND "${AIE_HSACO}" --hsaco "${PDI_HSACO}" --arch "${AIE_ARCH}"
           --kernel "${PDI_HSACO_KERNEL_NAME}:${INSTS_BIN}:${DESIGN_PDI}:32:1"
   # Depend on the target, not its outputs: two custom commands racing aiecc in one build
   # directory produce concurrent runs that clobber each other's intermediates.
-  DEPENDS aie_kernel_artifacts "${AIE_HSACO_PY}"
+  DEPENDS aie_kernel_artifacts
   COMMENT "Packaging the vsadd PDI+insts artifacts into an hsaco for the benchmark"
   VERBATIM)
 add_custom_target(vsadd_pdi_hsaco_bench DEPENDS "${PDI_HSACO}")
@@ -348,14 +331,9 @@ if(AIE_FULL_ELF_SUPPORTED)
   set(ELF_HSACO "${CMAKE_CURRENT_BINARY_DIR}/vsadd_elf.hsaco")
   add_custom_command(
     OUTPUT "${ELF_HSACO}"
-    # Same as the PDI+insts rule above: clear the output so a failed run cannot be mistaken for
-    # an up-to-date one.
-    COMMAND "${CMAKE_COMMAND}" -E rm -f "${ELF_HSACO}"
-    COMMAND "${CMAKE_COMMAND}" -E env "PATH=${LLVM_OBJCOPY_DIR}:$ENV{PATH}"
-            "${Python3_EXECUTABLE}" "${AIE_HSACO_PY}"
-            --hsaco "${ELF_HSACO}" --arch "${AIE_ARCH}"
+    COMMAND "${AIE_HSACO}" --hsaco "${ELF_HSACO}" --arch "${AIE_ARCH}"
             --kernel "elf:${FULL_ELF}:0:1"
-    DEPENDS aie_full_elf "${AIE_HSACO_PY}"
+    DEPENDS aie_full_elf
     COMMENT "Packaging the full ELF into an hsaco for the benchmark"
     VERBATIM)
   add_custom_target(vsadd_elf_hsaco_bench DEPENDS ${ELF_HSACO})

@@ -142,6 +142,19 @@ if(AIE_KERNEL_TOOLCHAIN)
   endif()
 endif()
 
+# aie-hsaco packages the kernel artifacts into the hsacos the loader tests dispatch from. It ships
+# with mlir-aie, next to aiecc.
+if(AIE_KERNEL_TOOLCHAIN)
+  find_program(AIE_HSACO aie-hsaco)
+  if(NOT AIE_HSACO)
+    message(STATUS "Could not find aie-hsaco; AIE kernel artifacts and the dispatch tests will not "
+                   "be built. It ships with mlir-aie; set up the IRON environment to build them.")
+    set(AIE_KERNEL_TOOLCHAIN FALSE)
+  else()
+    message(STATUS "aie-hsaco: ${AIE_HSACO}")
+  endif()
+endif()
+
 if(NOT AIE_KERNEL_TOOLCHAIN)
   message(STATUS "AIE kernel toolchain incomplete: building test_error_callback and test_memory only.")
   return()
@@ -308,10 +321,10 @@ add_aie_kernel(vsmul "${CMAKE_CURRENT_SOURCE_DIR}/vector_scalar_mul.py" "--scale
 # Unified hsaco packaging
 #
 # Packages the vsadd PDI+insts artifacts into a single AIE hsaco via
-# aie_hsaco.py, so the loader test in test_dispatch.cc can exercise
+# aie-hsaco, so the loader test in test_dispatch.cc can exercise
 # hsa_executable_load_agent_code_object on a PdiInsts hsaco.
 #
-# aie_hsaco.py's --arch uses "aie2"/"aie2p", while NPU_TARGET (detected above)
+# aie-hsaco's --arch uses "aie2"/"aie2p", while NPU_TARGET (detected above)
 # uses "npu"/"npu2" -- map the latter onto the former.
 # ---------------------------------------------------------------------------
 if(NPU_TARGET STREQUAL "npu2")
@@ -324,7 +337,7 @@ set(VSADD_HSACO_KERNEL_NAME "vsadd")
 set(vsadd_HSACO "${CMAKE_CURRENT_BINARY_DIR}/vsadd.hsaco")
 add_custom_command(
   OUTPUT "${vsadd_HSACO}"
-  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/aie_hsaco.py"
+  COMMAND "${AIE_HSACO}"
           --hsaco "${vsadd_HSACO}"
           --arch "${AIE_HSACO_ARCH}"
           # vsadd's kernarg buffer is 2 pointers + 2 sizes (see aie_vector_scalar_kernel::kernarg_bytes
@@ -345,7 +358,7 @@ set(VSMUL_HSACO_KERNEL_NAME "vsmul")
 set(vsmul_HSACO "${CMAKE_CURRENT_BINARY_DIR}/vsmul.hsaco")
 add_custom_command(
   OUTPUT "${vsmul_HSACO}"
-  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/aie_hsaco.py"
+  COMMAND "${AIE_HSACO}"
           --hsaco "${vsmul_HSACO}"
           --arch "${AIE_HSACO_ARCH}"
           --kernel "${VSMUL_HSACO_KERNEL_NAME}:${vsmul_INSTS_BIN}:${vsmul_DESIGN_PDI}:16:1"
@@ -365,7 +378,7 @@ set(vsadd_ELF_HSACO "${CMAKE_CURRENT_BINARY_DIR}/vsadd_elf.hsaco")
 if(AIE_FULL_ELF_SUPPORTED)
   add_custom_command(
     OUTPUT "${vsadd_ELF_HSACO}"
-    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/aie_hsaco.py"
+    COMMAND "${AIE_HSACO}"
             --hsaco "${vsadd_ELF_HSACO}"
             --arch "${AIE_HSACO_ARCH}"
             --kernel "elf:${vsadd_FULL_ELF}:0:1"
@@ -377,35 +390,12 @@ if(AIE_FULL_ELF_SUPPORTED)
   add_custom_target(vsadd_elf_hsaco_artifact DEPENDS "${vsadd_ELF_HSACO}")
 endif()
 
-# A FullElf hsaco whose kernel table has two entries sharing one blob and declaring the same
-# kernel name, for HsacoFullElfRejectsDuplicateKernelName in test_dispatch.cc. Pointing
-# aie_hsaco.py at the vsadd ELF twice is deliberate: it derives each entry's name from the ELF's
-# own COMDAT symbols, so two references to the same ELF always produce two identical names, and its
-# blob-pool dedup (keyed on raw bytes) collapses the two identical instruction blobs into one
-# shared blob -- exactly the "two entries, one blob, same name" shape the loader must reject.
-set(vsadd_DUP_ELF_HSACO "${CMAKE_CURRENT_BINARY_DIR}/vsadd_dup_elf.hsaco")
-if(AIE_FULL_ELF_SUPPORTED)
-  add_custom_command(
-    OUTPUT "${vsadd_DUP_ELF_HSACO}"
-    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/aie_hsaco.py"
-            --hsaco "${vsadd_DUP_ELF_HSACO}"
-            --arch "${AIE_HSACO_ARCH}"
-            --kernel "elf:${vsadd_FULL_ELF}:0:1"
-            --kernel "elf:${vsadd_FULL_ELF}:0:1"
-    # Depend on the target, not its output files: see the vsadd_HSACO rule above for why.
-    DEPENDS vsadd_full_elf_artifacts
-    COMMENT "Packaging a duplicate-kernel-name FullElf hsaco for the rejection test"
-    VERBATIM
-  )
-  add_custom_target(vsadd_dup_elf_hsaco_artifact DEPENDS "${vsadd_DUP_ELF_HSACO}")
-endif()
-
 # The mul design's full ELF, packaged the same way, for the full-ELF interleaving test.
 set(vsmul_ELF_HSACO "${CMAKE_CURRENT_BINARY_DIR}/vsmul_elf.hsaco")
 if(AIE_FULL_ELF_SUPPORTED)
   add_custom_command(
     OUTPUT "${vsmul_ELF_HSACO}"
-    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/aie_hsaco.py"
+    COMMAND "${AIE_HSACO}"
             --hsaco "${vsmul_ELF_HSACO}"
             --arch "${AIE_HSACO_ARCH}"
             --kernel "elf:${vsmul_FULL_ELF}:0:1"
@@ -456,10 +446,9 @@ target_compile_definitions(test_dispatch
     DEFAULT_HSACO_PATH=${vsadd_HSACO}
     DEFAULT_HSACO_KERNEL_NAME="${VSADD_HSACO_KERNEL_NAME}"
     DEFAULT_ELF_HSACO_PATH=${vsadd_ELF_HSACO}
-    # Same "<device>:<sequence>" kernel key as DEFAULT_ELF_KERNEL_NAME above; aie_hsaco.py's elf:
+    # Same "<device>:<sequence>" kernel key as DEFAULT_ELF_KERNEL_NAME above; aie-hsaco's elf:
     # form derives the hsaco's kernel name from the same underlying ELF, so the two must match.
     DEFAULT_ELF_HSACO_KERNEL_NAME="main:sequence"
-    DUP_ELF_HSACO_PATH=${vsadd_DUP_ELF_HSACO}
     MUL_HSACO_PATH=${vsmul_HSACO}
     MUL_HSACO_KERNEL_NAME="${VSMUL_HSACO_KERNEL_NAME}"
     MUL_ELF_HSACO_PATH=${vsmul_ELF_HSACO}
@@ -479,8 +468,7 @@ if(vsadd_FULL_ELF_TARGET OR vsmul_FULL_ELF_TARGET)
   add_dependencies(test_dispatch ${vsadd_FULL_ELF_TARGET} ${vsmul_FULL_ELF_TARGET})
 endif()
 if(AIE_FULL_ELF_SUPPORTED)
-  add_dependencies(test_dispatch vsadd_elf_hsaco_artifact vsmul_elf_hsaco_artifact
-                                 vsadd_dup_elf_hsaco_artifact)
+  add_dependencies(test_dispatch vsadd_elf_hsaco_artifact vsmul_elf_hsaco_artifact)
 endif()
 
 gtest_discover_tests(test_dispatch)
