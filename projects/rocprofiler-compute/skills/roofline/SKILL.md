@@ -44,8 +44,24 @@ application.
 
 ```bash
 rocprof-compute analyze --path ./workloads/<name>/<gpu_model> --list-stats
-rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b roof
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b roof \
+    --output-directory ./analysis/roofline
 ```
+
+Analyze writes the standalone `empirRoof_gpu-0*.html` chart into
+`--output-directory`, whose default is `./analysis/` in the current working
+directory. A single supported workload with a valid device-0 row in
+`roofline.csv` produces HTML in terminal, TXT, CSV, and DB modes.
+`--list-stats` skips the chart. Missing or corrupt benchmarks warn and
+skip roofline output while other analysis continues.
+
+Use a fresh output directory for each invocation, as the examples do.
+Reusing a non-empty directory requires `--overwrite`, which clears all its
+contents before regenerating the report. Keep the output directory outside
+profiling workloads and their ancestors. Analyze leaves raw profiling files
+unchanged. The chart, terminal plot, and roofline tables use the same persisted
+kernel measurements and device ceilings; zero-performance kernels remain in
+the tables even when no point is drawn.
 
 Always pass one kernel id. The table gives the kernel's arithmetic intensity in
 FLOPs per byte alongside the empirical peak FLOPs and peak bandwidth measured
@@ -84,11 +100,11 @@ the hierarchy.
 ```bash
 # Ceilings for the precision the kernel actually uses
 rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b roof \
-    -R FP16 BF16
+    -R FP16 BF16 --output-directory ./analysis/roofline_precision
 
 # Ceilings for a specific level
 rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b roof \
-    -m HBM L2
+    -m HBM L2 --output-directory ./analysis/roofline_memory
 ```
 
 `-R` defaults to FP32. A mixed-precision or matrix kernel compared against the
@@ -108,6 +124,7 @@ L2 and vL1D show whether caches are absorbing the traffic.
 | Profiled with `--no-roof` | re-profile without it |
 | Architecture has no microbenchmark support | use Speed-of-Light and the `memory` skill instead |
 | `roofline.csv` absent from the workload directory | the benchmark did not complete; check the profile log |
+| `roofline.csv` corrupt or missing the selected device row | check the warning and regenerate the benchmark for that device |
 
 The concepts behind the ceilings are in the
 [performance model](../../docs/conceptual/performance-model.rst).

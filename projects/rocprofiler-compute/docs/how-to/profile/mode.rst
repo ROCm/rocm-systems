@@ -228,7 +228,7 @@ an Instinct MI210 vs an Instinct MI250.
    profiling output is stored in ``log.txt``. Roofline-specific benchmark
    results are stored in ``roofline.csv``. To generate roofline HTML plots,
    run ``rocprof-compute analyze`` on the profiling output directory
-   (see :doc:`../analyze/mode`).
+   (see :ref:`roofline-html-generation`).
 
 .. code-block:: shell-session
 
@@ -329,8 +329,8 @@ Examples:
     ├── roofline.csv
     └── sysinfo.csv
 
-The output files use ``rocpd`` format. See :ref:`profiling-output-format` for
-details on when the final ``pmc_perf.csv.gz`` is created.
+The profiling backend uses ``rocpd`` format. See :ref:`profiling-output-format`
+for the intermediate files and how analyze reads them.
 
 * Profiling with MPI at host ``amd-ryzen``:
 
@@ -387,7 +387,7 @@ Raw performance counter data produced by the underlying
 (SQLite) format:
 
 * The rocpd database files are converted to gzip-compressed CSV files (``results_pmc_perf_0.csv.gz``, ``results_pmc_perf_SQ_*.csv.gz``, etc.) for each profiling run, after which the database files are removed.
-* These files are merged into a single gzip-compressed ``pmc_perf.csv.gz`` file when running ``rocprof-compute analyze``.
+* Analyze merges these counter files in memory. It does not write a merged counter file or analysis caches into the workload directory.
 * Use ``--retain-rocpd-output`` to preserve the ``rocpd`` database(s) in the workload folder for custom analysis.
 
 .. note::
@@ -735,7 +735,9 @@ b) Otherwise, profile mode runs microbenchmarks and collects roofline performanc
 Profile mode generates ``roofline.csv`` containing microbenchmark data. To generate
 roofline HTML plots, use ``rocprof-compute analyze`` on a profiling output directory
 that contains both ``roofline.csv`` and application performance counters
-(see :doc:`../analyze/mode`). Visualization options (``--sort``, ``--mem-level``,
+(see :ref:`roofline-html-generation`). Analyze writes HTML into
+``--output-directory`` (default: ``./analysis/``), leaving the profiling workload
+unchanged. Visualization options (``--sort``, ``--mem-level``,
 ``--roofline-data-type``) are available in analyze mode.
 
 .. note::
@@ -818,7 +820,7 @@ successfully.
    -rw-r--r-- 1 auser agroup   650 Mar 21 23:49 sysinfo.csv
    -rw-r--r-- 1 auser agroup   399 Mar 21 23:49 timestamps.csv
 
-To generate roofline HTML plots from this data, see :doc:`../analyze/mode`.
+To generate roofline HTML plots from this data, see :ref:`roofline-html-generation`.
 
 
 Benchmark only
@@ -1004,12 +1006,13 @@ the workload directory: **marker_api_trace** and **counter_collection** files wi
 the ``ml_api_trace`` prefix. These correlate PyTorch operators
 with GPU kernels and performance counters. When you run analyze (e.g. with
 ``--list-torch-operators`` or ``--torch-operator``), a consolidated CSV is written
-to ``ml_api_trace/consolidated.csv``; the source marker and counter files are
-**retained** in the workload directory and are not deleted.
+to ``<output-directory>/ml_api_trace/consolidated.csv``. The analysis output
+directory defaults to ``./analysis/`` and can be set with analyze
+``--output-directory``. The source marker and counter files are **retained** in
+the workload directory and are not deleted.
 
-``ml_api_trace/`` directory
-The ``ml_api_trace/`` directory contains ``consolidated.csv`` with all
-operator/kernel data. The columns include:
+The analysis output's ``ml_api_trace/`` directory contains ``consolidated.csv``
+with all operator/kernel data. The columns include:
 
    * ``Operator_Name``: Full operator hierarchy (e.g. ``nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.relu``, ``nn.Module.ResNet.forward/torch.nn.functional.relu``).
    * ``Context_Id``: Call context (e.g., ``1@__init__.py:231``)
@@ -1017,11 +1020,14 @@ operator/kernel data. The columns include:
    * ``Start_Timestamp_function`` / ``End_Timestamp_function``: Operator timing
    * ``Start_Timestamp_kernel`` / ``End_Timestamp_kernel``: Kernel timing
 
-The consolidated CSV is generated automatically on the first analysis run that
-requires it (``--list-torch-operators`` or ``--torch-operator``) and is reused on
-subsequent runs.
+Analyze regenerates the consolidated CSV from the raw trace files on every
+operator listing or filtering run. Use a fresh analysis output directory for
+each run, or pass analyze ``--overwrite`` to clear an existing non-empty one.
+This flag clears the entire analysis directory, so keep that directory separate
+from the profiling workload and other files you want to retain.
 
-Sample rows from ``ml_api_trace/consolidated.csv`` (from profiling an mnist model).
+Sample rows from ``<output-directory>/ml_api_trace/consolidated.csv`` (from
+profiling an mnist model).
 
 .. list-table::
    :header-rows: 1
@@ -1070,7 +1076,9 @@ Sample rows from ``ml_api_trace/consolidated.csv`` (from profiling an mnist mode
 Performance counter data file
 -----------------------------
 
-The ``pmc_perf.csv.gz`` file contains the standard performance counter data (same as non-torch profiling). This data enables analysis such as:
+The profiling counter files contain the same standard performance counter
+data as non-Torch profiling. Analyze merges the files in memory and combines
+them with the operator traces. This data enables analysis such as:
 
 * Identifying which PyTorch operators executed which GPU kernels
 * Aggregating performance counter values by operator
@@ -1121,8 +1129,8 @@ operator occurs in your PyTorch application:
    nn.Module.MyModel.forward/nn.Module.Linear.forward
    torch.nn.functional.relu
 
-The ``Operator_Name`` column in ``ml_api_trace/consolidated.csv`` contains
-the full operator hierarchy.
+The ``Operator_Name`` column in the analysis output's
+``ml_api_trace/consolidated.csv`` contains the full operator hierarchy.
 
 This hierarchical information enables:
 
@@ -1211,8 +1219,8 @@ frameworks in a single run:
    $ rocprof-compute profile --experimental --torch-trace --triton-trace --name compiled_model -- python train.py
 
 Each captured marker records its originating framework in the ``Backend`` column
-of ``ml_api_trace/consolidated.csv``, so each framework can be analyzed
-independently. To enable all supported backends at once, use
+of ``<output-directory>/ml_api_trace/consolidated.csv``, so each framework can
+be analyzed independently. To enable all supported backends at once, use
 :ref:`--ml-api-trace <ml-api-trace>`.
 
 To analyze the captured Triton kernels, use the ``--list-triton-operators`` and

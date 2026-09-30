@@ -9,13 +9,19 @@ Use this after Speed-of-Light points at memory, or when the user asks about
 bandwidth, caches, or data movement directly.
 
 Run `rocprof-compute analyze --help` before choosing flags.
+Choose a fresh `--output-directory` for each artifact-producing analyze run.
+The default is `./analysis/`; reuse requires `--overwrite`, which clears that
+directory. Keep it outside profiling workloads and their ancestors. Raw
+profiling files remain unchanged.
+
 Never use the GUI or TUI.
 
 ## 1. Start with the Memory Chart
 
 ```bash
 rocprof-compute analyze --path ./workloads/<name>/<gpu_model> --list-stats
-rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b memchart
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b memchart \
+    --output-directory ./analysis/memory_memchart
 ```
 
 The Memory Chart shows the whole hierarchy at once: requests issued, what each
@@ -28,22 +34,28 @@ Always analyze one kernel at a time with `-k`.
 
 ```bash
 # Vector L1 data cache
-rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b vl1d
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b vl1d \
+    --output-directory ./analysis/memory_vl1d
 
 # L2 cache
-rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b l2
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b l2 \
+    --output-directory ./analysis/memory_l2
 
 # L2 per channel, including Infinity Fabric read and write stalls
-rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b l2_per_channel
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b l2_per_channel \
+    --output-directory ./analysis/memory_l2_per_channel
 
 # Local Data Share, including bank conflicts and unaligned stalls
-rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b lds
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b lds \
+    --output-directory ./analysis/memory_lds
 
 # Address processing and data return, for coalescing behaviour
-rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b tatd
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b tatd \
+    --output-directory ./analysis/memory_tatd
 
 # Scalar L1 data cache
-rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b sl1d
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b sl1d \
+    --output-directory ./analysis/memory_sl1d
 ```
 
 Aliases are stable; numeric block ids are architecture-specific. List what this
@@ -85,14 +97,15 @@ What usually follows from what:
 ## 4. Memory bandwidth analysis (experimental, gfx950)
 
 A guided breakdown that walks the bandwidth tree and names the limiting level.
-It is experimental and currently shipped for gfx950 only. It needs block 30 at
-both profile and analyze time:
+It is experimental and currently shipped for gfx950 only. The profile flag
+collects block 30 counters; analyze detects the collected data automatically:
 
 ```bash
 rocprof-compute profile --experimental --membw-analysis --name <name> -- <application>
 
 rocprof-compute analyze --path ./workloads/<name>/<gpu_model> \
-    --experimental --membw-analysis -k <kernel_id>
+    --experimental -k <kernel_id> \
+    --output-directory ./analysis/memory_bandwidth
 ```
 
 Its cutoffs and guidance text are data, not something to restate from memory.

@@ -204,17 +204,29 @@ Per-kernel ISA and source in CSV output
 ``--output-format csv`` writes, alongside the analysis tables, one file per
 kernel per code object per process holding that kernel's instruction lines with
 the samples collected on them, and exports the source those instructions were
-compiled from beside it:
+compiled from beside it. All files are placed inside ``--output-directory``
+(default: ``./analysis/``), beneath the folder named by ``--output-name``:
+
+.. code-block:: shell-session
+
+   $ rocprof-compute analyze -p <workload_dir> --output-format csv --output-name pc_report --output-directory ./analysis
 
 .. code-block:: none
 
-   <output_name>/
-       kernel.csv, pc_sampling_summary.csv, ...
-       per_kernel_pc_sampling/
-           <workload_name>/<workload_sub_name>/
-               source/<source path with the leading separator dropped>
-               <short_name>_uuid_<kernel_uuid>/
-                   isa_code_object_id_<code_object_id>_pid_<pid>.csv
+   <output_directory>/
+       <output_name>/
+           kernel.csv, pc_sampling_summary.csv, ...
+           per_kernel_pc_sampling/
+               <workload_name>/<workload_sub_name>/
+                   source/<source path with the leading separator dropped>
+                   <short_name>_uuid_<kernel_uuid>/
+                       isa_code_object_id_<code_object_id>_pid_<pid>.csv
+
+The example writes ``./analysis/pc_report/``. Database output uses the same
+output directory: ``--output-format db --output-name pc_report`` writes
+``./analysis/pc_report.db``. Use a fresh directory for each analysis run, or
+pass ``--overwrite`` to clear the entire non-empty analysis directory before
+writing. No analysis artifacts are written into ``<workload_dir>``.
 
 A folder leads with the kernel's short name, the identifier its C++ signature
 demangles down to, so ``vecCopy_2(double*, double*, double*, int, int)`` is

@@ -43,7 +43,9 @@
       "prompt": "export the annotated disassembly with sample counts from my pc sampling workload",
       "expected_behavior": [
         "uses --output-format csv or db",
-        "notes that the per-kernel disassembly is written under per_kernel_pc_sampling"
+        "notes that the per-kernel disassembly is written under per_kernel_pc_sampling",
+        "writes the export into the analysis output directory and keeps the profiling workload unchanged",
+        "uses a fresh directory or explains that --overwrite clears its existing contents"
       ],
       "logs_contain": ["--output-format"]
     },

@@ -823,12 +823,13 @@ Examples:
             "\t\t           when available.\n"
             "\t\t  txt    - write report to <name>.txt; disables terminal output.\n"
             "\t\t  csv    - write one CSV per analysis view into a folder <name>/.\n"
-            "\t\t           Requires profiles collected in rocpd format. "
-            "Disables terminal output.\n"
-            "\t\t  db     - write a SQLite database <name>.db (see analysis\n"
-            "\t\t           database schema in the docs). Requires profiles\n"
-            "\t\t           collected in rocpd format.\n"
             "\t\t           Disables terminal output.\n"
+            "\t\t  db     - write a SQLite database <name>.db (see analysis\n"
+            "\t\t           database schema in the docs).\n"
+            "\t\t           Disables terminal output.\n"
+            "\t\tCounter analysis in csv/db requires rocpd-format profiles;\n"
+            "\t\tconverted counter files are sufficient. PC-sampling-only\n"
+            "\t\tSDK workloads can also export samples to csv/db.\n"
             "\t\tDefault <name> is rocprof_compute_<uuid>; override with"
             " --output-name.\n"
             "\t\tDefault format is stdout.\n"
@@ -898,7 +899,8 @@ Examples:
         default="kernels",
         choices=["kernels", "dispatches"],
         help=(
-            "\t\tOverlay top kernels or top dispatches: (DEFAULT: kernels)\n"
+            "\t\tLegacy roofline sort option (DEFAULT: kernels).\n"
+            "\t\tRoofline points aggregate dispatches by kernel.\n"
             "\t\t   kernels\n"
             "\t\t   dispatches"
         ),

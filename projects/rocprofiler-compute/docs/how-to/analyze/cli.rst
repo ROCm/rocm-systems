@@ -522,7 +522,10 @@ This generates enhanced roofline output showing per-kernel performance rates and
       |   │ 4.2.4       │ Performance (GFLOPs) │         │ Gflop/s    │
       |   ╘═════════════╧══════════════════════╧═════════╧════════════╛
 
-The per-kernel analysis uses YAML-based metric evaluation for accurate calculations.
+The per-kernel analysis evaluates the architecture's roofline metric definitions
+once, then reads the results from an in-memory analysis database for the tables,
+terminal plot, and HTML. The same calculation supplies the persisted database
+and CSV exports. Missing metric values appear as ``N/A`` in the tables.
 
 Analyze multiple kernels for comparison:
 
@@ -536,7 +539,22 @@ Analyze multiple kernels for comparison:
 
 Roofline HTML plots are generated during analyze mode. Profile mode creates
 ``roofline.csv`` containing microbenchmark data, and analyze mode uses this
-data to produce interactive HTML roofline charts.
+data to produce interactive HTML roofline charts. All analysis artifacts go to
+``--output-directory``, which defaults to ``./analysis/``. The profiling workload
+directory is kept unchanged.
+
+For CLI analysis with terminal or text output, HTML generation requires a single
+workload path, a supported architecture, and valid benchmark data for device 0.
+``--list-stats``
+does not generate a roofline plot. Missing or corrupt benchmark data skips
+roofline charting while the remaining analysis continues.
+
+Database and CSV analysis generate HTML for each workload with usable roofline
+data. Those plots are built from queried database rows before export. A single
+workload produces ``empirRoof_gpu-0.html``; multiple workloads produce
+``empirRoof_<workload-name>_<workload-sub-name>_gpu-0.html``. A kernel filter adds
+its IDs or names to the filename. The filename does not change with
+``--output-name``.
 
 .. note::
    Matrix multiplication performance data will vary depending on which architecture is profiled:
@@ -556,20 +574,36 @@ Two-step workflow:
    $ rocprof-compute profile --name vcopy --roof-only -- tests/vcopy -n 1048576 -b 256
 
    # Step 2: Analyze to generate HTML roofline plots
-   $ rocprof-compute analyze -p workloads/vcopy/MI300A_A1/ -b 4
+   $ rocprof-compute analyze -p workloads/vcopy/MI300A_A1/ -b 4 --output-directory ./analysis/vcopy
+
+Open ``./analysis/vcopy/empirRoof_gpu-0.html``. Use a fresh output directory for
+each run, or pass ``--overwrite`` to clear the directory before regenerating
+the artifacts; see :ref:`analysis-output-format`.
 
 Roofline visualization options (available only in analyze mode):
 
-* ``--sort``: Overlay top kernels or top dispatches (default: kernels)
+* ``--sort``: Accepted for compatibility (default: kernels). Roofline points
+  aggregate dispatches by kernel.
 * ``--mem-level``: Filter by memory level -- HBM, L2, vL1D, L0, LDS (default: ALL)
-* ``--roofline-data-type``: Choose datatypes for roofline visualization (default: FP32)
-   * CLI only supports visualizing one precision at a time. Visualizing multiple data types on one plot is available in the Interactive Roofline HTML file.
+* ``--roofline-data-type``: Choose the terminal plot precision (default: FP32).
+  The terminal uses the first selected datatype. The HTML includes all supported
+  datatypes with usable benchmark data and selects them interactively, independently
+  of this option.
 
 Example with multiple ``--mem-level`` and ``--roofline-data-type`` options:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze -p workloads/vcopy/MI200/ --sort dispatches --mem-level HBM L2 --roofline-data-type FP32 FP16
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/ --mem-level HBM L2 --roofline-data-type FP32 FP16 --output-directory ./analysis/vcopy-hbm-l2
+
+Kernel points use GFLOP/s, so integer datatypes supply compute ceilings without
+kernel points. All filtered kernels are retained in the database and tables;
+only kernels with positive performance are included in the plots. Kernel rank,
+dispatch count, total duration, and runtime percentage use the GPU- and
+dispatch-filtered workload, before the kernel filter is applied. Selecting a
+kernel therefore retains the rank and runtime share shown in the top-stats table.
+When table 4.2 is absent or excluded by a block filter, benchmark ceilings remain
+available and the HTML contains roofs without kernel points.
 
 Interactive Roofline HTML:
 
@@ -629,39 +663,81 @@ Examples:
 Analysis output format
 ======================
 
-Use the ``--output-format <format>`` analyze mode option to specify the output format of the
-analysis report. Supported formats are ``stdout``, ``txt``, ``csv``, and ``db``. The default output
-format is ``stdout``.
+Use ``--output-format <format>`` to choose the analysis report format. The
+accepted values are ``stdout`` (default), ``txt``, ``csv``, and ``db``.
+``--output-directory <directory>`` places all generated artifacts in the chosen
+directory and defaults to ``./analysis/`` relative to the current working
+directory.
 
-* ``stdout`` format:
-   * Print analysis report to the terminal.
-   * NOTE: This option will not generate any file or folder.
+.. list-table:: Analysis report formats
+   :header-rows: 1
+   :widths: 15 35 50
 
-* ``txt`` format:
-   * Generate a file named ``rocprof_compute_<uuid>.txt`` in the current working directory.
-   * This file contains the entire analysis report as printed on the terminal.
-   * This is useful in case of searching across long analysis reports.
-   * NOTE: This option will disable output of analysis report to terminal.
+   * - Format
+     - Report location
+     - Contents
+   * - ``stdout``
+     - Terminal
+     - Prints the analysis report. Eligible single-workload runs also save
+       :ref:`roofline HTML <roofline-html-generation>`.
+   * - ``txt``
+     - ``<output-directory>/<name>.txt``
+     - Saves the terminal report as text and disables terminal report output.
+   * - ``csv``
+     - ``<output-directory>/<name>/``
+     - Saves one CSV per :ref:`analysis view <analysis-database>` and disables
+       terminal report output. PC-sampled workloads also export per-kernel
+       disassembly and source; see :ref:`pc-sampling-per-kernel-csv`.
+   * - ``db``
+     - ``<output-directory>/<name>.db``
+     - Saves a SQLite :ref:`analysis database <analysis-database>` and disables
+       terminal report output.
 
-* ``csv`` format:
-   * Generate a folder named ``rocprof_compute_<uuid>`` in the current working directory.
-   * This folder contains one CSV file per view defined in the :ref:`analysis database schema <analysis-database>`.
-   * For a PC-sampled workload it also holds each kernel's disassembly and source; see :ref:`pc-sampling-per-kernel-csv`.
-   * This is useful for further programmatic analysis of analysis reports.
-   * NOTE: This option will disable output of analysis report to terminal.
+Counter analysis in CSV and database reports requires profiles collected in
+``rocpd`` format; the converted counter files are sufficient. PC-sampling-only
+workloads collected through ``rocprofiler-sdk`` can also export their samples
+to CSV and databases. All report formats can produce roofline HTML when the
+workload is eligible.
+Operator listing and filtering write
+``<output-directory>/ml_api_trace/consolidated.csv``. Analysis reads profiling
+workloads without writing derived files into them. A stdout run that produces
+no artifacts does not create the output directory.
 
-* ``db`` format:
-   * Generate a file named ``rocprof_compute_<uuid>.db`` in the current working directory.
-   * This is a SQLite database file containing all the data in the analysis report structured according to :ref:`analysis database schema <analysis-database>`.
-   * This is useful for further programmatic analysis of analysis reports.
-   * NOTE: This option will disable output of analysis report to terminal.
+The default report name is ``rocprof_compute_<uuid>``. Override it with
+``--output-name <name>``; the name may contain alphanumeric characters,
+underscores, and hyphens. It names the report file or CSV folder inside the
+output directory, while the directory itself is set by ``--output-directory``.
 
-Default file/folder name ``rocprof_compute_<uuid>`` can be overridden using ``--output-name <name>`` analyze mode option. For ``csv`` format the name is used as the output folder; for ``db`` format the name is used with a ``.db`` suffix.
+.. warning::
+
+   A run that writes artifacts refuses an existing non-empty analysis directory.
+   Use a fresh directory per run. ``--overwrite`` clears **all contents** of the
+   chosen directory before analysis, including files from earlier runs and files
+   unrelated to the report name. Choose a directory outside every profiling
+   workload; an output directory equal to, inside, or containing a workload
+   directory is rejected.
+
+For example, these two commands first create a report and then replace all
+artifacts in its output directory:
+
+.. code-block:: shell-session
+
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/ --output-format db --output-name report --output-directory ./analysis/vcopy
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/ --output-format db --output-name report --output-directory ./analysis/vcopy --overwrite
+
+The database is ``./analysis/vcopy/report.db``. Any roofline HTML is saved beside
+it, rather than inside the profiling workload or a CSV report folder.
 
 .. _analysis-database:
 
 Analysis database schema
 ========================
+
+The analysis schema version is **3.0.0**, recorded in
+``compute_metadata.schema_version``. This major version removes the unused
+``compute_workload_roofline_data`` table. Roofline results are stored per kernel,
+with no workload-level aggregate replacement. Other roofline schema changes
+are additive.
 
 Analysis database tables
 
@@ -669,61 +745,132 @@ Analysis database tables
    :align: center
    :alt: Analysis database tables
 
+The roofline tables hold the data used by terminal tables, plots, and standalone
+HTML:
+
+.. list-table:: Roofline tables
+   :header-rows: 1
+   :widths: 45 55
+
+   * - Table
+     - Contents
+   * - ``compute_roofline_bandwidth_ceiling``
+     - Per-workload, per-device bandwidth measurements, keyed by memory level
+       and retaining the benchmark column name. Values are GB/s.
+   * - ``compute_roofline_compute_ceiling``
+     - Per-workload, per-device compute measurements, with datatype, execution
+       pipe, benchmark column, and unit: GFLOP/s or GOP/s.
+   * - ``compute_kernel_roofline_data``
+     - Kernel performance and per-level arithmetic intensity, plus
+       ``kernel_rank``, ``dispatch_count``, ``total_duration_ns``, and
+       ``percent_runtime``.
+   * - ``compute_kernel_roofline_point``
+     - Arithmetic intensity, performance, roof performance, and percent of roof
+       per kernel, envelope, and memory level.
+   * - ``compute_kernel_roofline_limiter``
+     - Binding roof, compute ceiling, and compute ceiling label per kernel and
+       envelope.
+   * - ``compute_kernel_roofline_metric``
+     - Evaluated rows from tables 4.1 and 4.2, retaining metric IDs, units,
+       nullable values and peaks, and percent of peak.
+
+The ceiling tables retain every positive finite ``Bw``, ``Flops``, or ``Ops``
+benchmark column from device 0. Compute columns without a supported datatype
+mapping, such as ``MFMAF6F4Flops``, retain a NULL datatype and still contribute
+to the HTML frame. The database contains enough empirical ceiling data to
+rebuild the frame and roofs without reading ``roofline.csv`` again.
+
+Point and limiter envelopes exist for supported floating-point datatypes and
+for ``MEMORY``, which applies no compute cap. Integer datatypes are ceilings
+only because kernel points are measured in GFLOP/s. Point rows use the memory
+levels defined by the architecture's table 4.2 and supported by its ALL memory
+hierarchy; MALL is excluded. Every filtered kernel remains stored, including
+kernels whose performance is zero or negative.
+
+The existing columns in ``compute_kernel_roofline_data`` retain their meanings:
+``total_flops`` stores **GFLOP/s**, despite its name, and the cache columns store
+arithmetic intensity. Invalid evaluations become zero in these cleaned fields;
+NULL means the architecture's table 4.2 lacks the corresponding row. Raw values
+in ``compute_kernel_roofline_metric`` preserve NULL, which displays as ``N/A`` in
+terminal tables. ``compute_workload.roofline_bench_extdata`` retains its existing
+benchmark whitelist.
+
+``kernel_rank`` is the zero-based top-stats index selected by ``-k``.
+``dispatch_count`` counts the kernel's dispatches after GPU and dispatch
+filtering. ``total_duration_ns`` sums their end-minus-start durations in
+nanoseconds, and ``percent_runtime`` is the kernel's share of the duration of
+all GPU- and dispatch-filtered kernels. The kernel filter does not renumber
+these ranks or change the denominator.
+
 Analysis database views
 
 .. image:: ../../data/analyze/analysis_data_dump_views.png
    :align: center
    :alt: Analysis database views
 
+.. list-table:: Roofline views and CSV exports
+   :header-rows: 1
+   :widths: 40 25 35
+
+   * - Database view
+     - CSV file
+     - Contents
+   * - ``compute_roofline_ceiling_view``
+     - ``roofline_ceiling.csv``
+     - Combined bandwidth and compute ceilings with workload/device identity,
+       benchmark column, value, and unit.
+   * - ``compute_roofline_roof_view``
+     - ``roofline_roof.csv``
+     - Bandwidth, VALU and matrix peaks, envelope peak, and knee arithmetic
+       intensity per datatype and memory level.
+   * - ``compute_kernel_roofline_view``
+     - ``kernel_roofline.csv``
+     - Kernel identities, statistics, envelope, limiter, arithmetic intensity,
+       performance, roof performance, and percent of roof.
+   * - ``compute_kernel_roofline_metric_view``
+     - ``kernel_roofline_metric.csv``
+     - Raw per-kernel table 4.1/4.2 values, units, peaks, and percent of peak.
+
+For the roof view, ``roof_peak`` is the larger of ``valu_peak`` and
+``matrix_peak``, and ``knee_ai`` is ``roof_peak / bandwidth``. Database and CSV
+analysis construct HTML from queried rows before the export closes the analysis
+session. CLI analysis uses the same computation and queries through an
+in-memory database.
+
 Analysis database example
 
-.. note::
-
-   Some metrics cannot be calculated when corresponding counters are missing as shown in the warnings below
-
-.. note::
-
-   It is possible to merge the analysis data dump for multiple workload folders (resulting from multiple profiles) by repeating ``-p`` option for each workload
+Repeat ``-p`` to combine multiple workloads in one database:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze --verbose --output-name test --output-format db -p workloads/nbody/MI300X_A1 -p workloads/nbody1/MI300X_A1
-   DEBUG Execution mode = analyze
+   $ rocprof-compute analyze --output-name comparison --output-format db --output-directory ./analysis/comparison -p workloads/nbody/MI300X_A1 -p workloads/nbody1/MI300X_A1
 
-                                    __                                       _
-   _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
-   | '__/ _ \ / __| '_ \| '__/ _ \| |_ _____ / __/ _ \| '_ ` _ \| '_ \| | | | __/ _ \
-   | | | (_) | (__| |_) | | | (_) |  _|_____| (_| (_) | | | | | | |_) | |_| | ||  __/
-   |_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
-                  |_|                                           |_|
+This creates ``./analysis/comparison/comparison.db`` and, when usable benchmark
+data is present, one HTML file per workload beside it. Missing counters can
+leave individual metric values NULL without preventing database export.
 
-      INFO Analysis mode = db
-      INFO ed45b0b189
-   DEBUG [omnisoc init]
-      INFO ed45b0b189
-   DEBUG [omnisoc init]
-   DEBUG [analysis] prepping to do some analysis
-      INFO [analysis] deriving rocprofiler-compute metrics...
-   DEBUG Collected roofline ceilings
-   WARNING PC sampling data not found for /app/projects/rocprofiler-compute/workloads/nbody/MI300X_A1.
-   WARNING PC sampling data not found for /app/projects/rocprofiler-compute/workloads/nbody1/MI300X_A1.
-   DEBUG Collected dispatch data
-   DEBUG Applied analysis mode filters
-   DEBUG Calculated dispatch data
-   DEBUG Collected metrics data
-   WARNING Failed to evaluate expression for 3.1.39 - Value: to_round((to_avg(
-      (pmc_df.get("pmc_perf_ACCUM") / pmc_df.get("SQC_ICACHE_REQ")).where((pmc_df.get("SQC_ICACHE_REQ") != 0), None)) * 100), 0) - unsupported operand type(s) for /: 'NoneType' and 'float'
-   WARNING Failed to evaluate expression for 3.1.39 - Value: to_round((to_avg(
-      (pmc_df.get("pmc_perf_ACCUM") / pmc_df.get("SQC_ICACHE_REQ")).where((pmc_df.get("SQC_ICACHE_REQ") != 0), None)) * 100), 0) - unsupported operand type(s) for /: 'NoneType' and 'float'
-   DEBUG Calculated metric values
-   DEBUG Calculated roofline data points
-   DEBUG [analysis] generating analysis
-   DEBUG SQLite database initialized with name: test.db
-   DEBUG Initialized database: test.db
-      INFO ed45b0b189
-      INFO ed45b0b189
-   DEBUG Completed writing database
-   WARNING Created file: test.db
+Inspect the schema version and a kernel's FP32 roofline rows with SQLite:
+
+.. code-block:: shell-session
+
+   $ sqlite3 ./analysis/comparison/comparison.db "SELECT schema_version FROM compute_metadata;"
+   3.0.0
+   $ sqlite3 -header -column ./analysis/comparison/comparison.db "
+   SELECT workload_name, kernel_name, kernel_rank, mem_level,
+          arithmetic_intensity, performance, limiter, percent_of_roof
+   FROM compute_kernel_roofline_view
+   WHERE envelope = 'FP32'
+   ORDER BY workload_id, kernel_rank, mem_level
+   LIMIT 10;"
+
+For CSV output, use a fresh directory:
+
+.. code-block:: shell-session
+
+   $ rocprof-compute analyze -p workloads/nbody/MI300X_A1 --output-format csv --output-name report --output-directory ./analysis/nbody-csv
+
+The four roofline CSV files are under ``./analysis/nbody-csv/report/``. The HTML
+is ``./analysis/nbody-csv/empirRoof_gpu-0.html`` when roofline data is usable.
 
 
 PyTorch operator analysis
@@ -778,8 +925,11 @@ Display all PyTorch operators captured during profiling:
 
 Output is grouped by source location (``file:line``) and shows full operator
 hierarchy (``/``-separated) and kernel stats. A consolidated CSV
-(``ml_api_trace/consolidated.csv``) is written with all operator/kernel data;
-see :ref:`torch-operator-profiling` for details.
+(``<output-directory>/ml_api_trace/consolidated.csv``) is written with all
+operator/kernel data. Each operator analysis run regenerates it from the raw
+profiling traces. Use a fresh output directory for filtering after listing,
+or pass ``--overwrite`` to replace the previous analysis artifacts; see
+:ref:`analysis-output-format` and :ref:`torch-operator-profiling` for details.
 
 The flat **Operator summary** table below the call tree has one row per
 operator that ran at least one GPU kernel. Time cells auto-switch between
@@ -850,10 +1000,10 @@ Triton operator analysis
    ``--list-triton-operators`` or ``--triton-operator`` as needed.
 
 Triton kernels can be analyzed similar to PyTorch operators. You can use the
-``--list-triton-operators`` and ``--triton-operator`` options. Both options read the
-same ``ml_api_trace/consolidated.csv`` and select rows where the ``Backend`` column is
-``triton``. As a result, Triton kernels are reported independently even if PyTorch
-operators appear in the same run.
+``--list-triton-operators`` and ``--triton-operator`` options. Each run regenerates
+``<output-directory>/ml_api_trace/consolidated.csv`` and selects rows where the
+``Backend`` column is ``triton``. As a result, Triton kernels are reported
+independently even if PyTorch operators appear in the same run.
 
 List all captured Triton kernels
 ---------------------------------

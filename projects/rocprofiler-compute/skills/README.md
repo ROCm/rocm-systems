@@ -31,6 +31,16 @@ Every skill directory holds:
 boundaries are. Explanations stay in `docs/`, linked from the skill, so the
 same fact is not maintained in two places.
 
+## Analysis artifacts
+
+Analyze writes HTML, TXT, databases, CSV exports, and consolidated operator
+traces into `--output-directory` (default: `./analysis/` in the current working
+directory). Use a fresh directory for each run. Reusing a non-empty directory
+requires `--overwrite`, which clears its contents. The output directory must
+stay outside each profiling workload and cannot contain a workload. Analyze
+leaves raw profiling files unchanged. Commands that only list statistics or
+metrics and produce no artifacts do not reserve an output directory.
+
 ## Tests
 
 There is no CI for skills. `run_evals.py` is the gate, and it is meant to be

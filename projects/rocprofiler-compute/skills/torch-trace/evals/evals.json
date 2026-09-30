@@ -7,7 +7,9 @@
       "expected_behavior": [
         "collects with --experimental --torch-trace",
         "lists the captured operators before filtering",
-        "checks the documented PyTorch version requirement"
+        "checks the documented PyTorch version requirement",
+        "writes the consolidated operator trace beneath the analysis output directory",
+        "uses separate fresh output directories for listing and filtering operators"
       ],
       "unexpected_behavior": [
         "guesses an operator pattern without listing the captured operators first"

@@ -10,13 +10,19 @@ headline metric next to the hardware peak for the current GPU, so one table
 says whether a kernel is near any limit at all.
 
 Run `rocprof-compute analyze --help` before choosing flags.
+Choose a fresh `--output-directory` for each artifact-producing analyze run.
+The default is `./analysis/`; reuse requires `--overwrite`, which clears that
+directory. Keep it outside profiling workloads and their ancestors. Raw
+profiling files remain unchanged.
+
 Never use the GUI or TUI.
 
 ## 1. Get the panel
 
 ```bash
 rocprof-compute analyze --path ./workloads/<name>/<gpu_model> --list-stats
-rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b sol
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b sol \
+    --output-directory ./analysis/speed_of_light_sol
 ```
 
 `--path` points at the directory containing `profiling_config.yaml`. Always
@@ -66,7 +72,8 @@ for client APUs. The whole metric hierarchy is in the
 The compute pipeline has its own Speed-of-Light table with the same shape:
 
 ```bash
-rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b cu_pipe
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b cu_pipe \
+    --output-directory ./analysis/speed_of_light_cu_pipe
 ```
 
 Read it when the system-level table shows compute near peak and you need to

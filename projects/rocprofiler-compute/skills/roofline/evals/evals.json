@@ -7,7 +7,9 @@
       "expected_behavior": [
         "analyzes the roof block for a single kernel id",
         "compares arithmetic intensity against the empirical peaks printed in the table",
-        "says when the kernel is below both ceilings instead of forcing a bound"
+        "says when the kernel is below both ceilings instead of forcing a bound",
+        "uses a fresh analysis output directory outside the profiling workload",
+        "leaves the raw profiling workload unchanged"
       ],
       "unexpected_behavior": [
         "opens the generated roofline HTML chart instead of reading the table",

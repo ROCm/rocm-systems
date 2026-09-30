@@ -221,24 +221,30 @@ Output formats
      - Description
    * - ``rocpd``
      - profile
-     - SQLite database of raw counters per dispatch, written automatically. Required for ``analyze --output-format csv`` or ``db``.
+     - Raw counters per dispatch collected through the ``rocpd`` backend. Profile converts these databases to compressed CSV files by default; those files are sufficient for ``analyze --output-format csv`` or ``db``.
    * - ``stdout`` (default)
      - analyze
-     - Analysis results printed to the terminal only.
+     - Analysis report printed to the terminal. Eligible roofline HTML is also saved.
    * - ``txt``
      - analyze
-     - Analysis results written to a ``rocprof_compute_<uuid>.txt`` file.
+     - Analysis results written to ``<output-directory>/rocprof_compute_<uuid>.txt``.
    * - ``csv``
      - analyze
-     - Analysis results written to a folder of CSV files. Requires the workload's ``rocpd`` database from profiling.
+     - Analysis results written to ``<output-directory>/rocprof_compute_<uuid>/`` as CSV files. Counter analysis requires a profile collected through the ``rocpd`` backend; its converted counter files are sufficient. PC-sampling-only SDK workloads can also export samples.
    * - ``db``
      - analyze
-     - Analysis results written to a ``rocprof_compute_<uuid>.db`` SQLite analysis database. Same requirement as ``csv``.
+     - Analysis results written to ``<output-directory>/rocprof_compute_<uuid>.db``, a SQLite analysis database distinct from the raw profiling database. Same requirement as ``csv``.
    * - ``html``
      - analyze
-     - Standalone Plotly roofline plot(s) (``empirRoof_gpu-<id>...html``), written automatically whenever the workload includes roofline data, independent of ``--output-format``. See :ref:`standalone-roofline`.
+     - Standalone Plotly roofline charts (``empirRoof_gpu-<id>...html``) saved inside ``--output-directory`` for supported workloads with valid benchmark data, except with ``--list-stats``. CLI reports require a single workload; database and CSV reports can generate a chart for each workload. HTML is generated automatically rather than selected through ``--output-format``. See :ref:`roofline-html-generation`.
 
-Select the analyze output format with ``--output-format`` and override the file name with ``--output-name``. See :ref:`analysis-output-format` for details.
+Select the analysis report format with ``--output-format`` and override its name
+with ``--output-name``. All analysis artifacts go into ``--output-directory``,
+which defaults to ``./analysis/``. Profiling workload directories stay unchanged.
+A rerun into a non-empty analysis directory requires ``--overwrite``, which
+clears its contents. A stdout-only run without roofline or operator trace
+artifacts creates no output directory. See :ref:`analysis-output-format` for
+details, and :ref:`roofline-html-generation` for HTML eligibility and filenames.
 
 .. _glance-supported-hardware:
 

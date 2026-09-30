@@ -70,7 +70,8 @@ rocprof-compute analyze \
     --path ./workloads/<name>/<gpu_model> \
     -k <kernel_id> \
     --pc-sampling-sorting-type count \
-    --pc-sampling-rows 20
+    --pc-sampling-rows 20 \
+    --output-directory ./analysis/pc_sampling
 ```
 
 Sorting defaults to `count`, which puts the hottest instruction first. Use
@@ -99,16 +100,19 @@ reason from host-trap data; it does not record one.
 
 ```bash
 rocprof-compute analyze --path ./workloads/<name>/<gpu_model> \
-    --output-format csv --output-name pc_report --output-directory ./analysis
+    --output-format csv --output-name pc_report --output-directory ./analysis/pc_export
 ```
 
 CSV output writes per-kernel annotated disassembly into
-`./analysis/pc_report/per_kernel_pc_sampling/`, with sample counts and source
-lines beside each instruction. `--output-format db` stores the same content in the analysis
-database at `./analysis/pc_report.db`. Both disable terminal output. All analysis
-artifacts go into `--output-directory`, which defaults to `./analysis/`, and
-profiling workloads stay unchanged. Use a fresh directory for each export;
-reusing a non-empty directory requires `--overwrite`, which deletes its contents.
+`./analysis/pc_export/pc_report/per_kernel_pc_sampling/`, with sample counts
+and source lines beside each instruction. `--output-format db` stores the same
+content in the analysis database at `./analysis/pc_export/pc_report.db`. Both
+disable terminal output. All analysis artifacts go into `--output-directory`,
+which defaults to `./analysis/`, and profiling workloads stay unchanged. Use a
+fresh directory for each export;
+reusing a non-empty directory requires `--overwrite`, which clears all its
+contents. Keep the output directory outside the profiling workload and its
+ancestors. `--output-name` accepts a name, not a path.
 
 ## 6. When there are too few samples
 

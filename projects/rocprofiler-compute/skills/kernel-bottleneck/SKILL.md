@@ -11,6 +11,8 @@ what limits it. Hand off to a focused skill once the limit is clear.
 
 Run `rocprof-compute profile --help` and `rocprof-compute analyze --help`
 before choosing flags. Options change between releases; do not guess one.
+When an analyze command saves artifacts, choose a fresh `--output-directory`
+for that run; the default is `./analysis/` in the current working directory.
 
 Never use the GUI or TUI. This is a command-line workflow.
 
@@ -126,7 +128,8 @@ and go to `-d`.
 Work on one kernel at a time:
 
 ```bash
-rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k 0
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k 0 \
+    --output-directory ./analysis/kernel_0
 ```
 
 `-k` at profile time is different: it filters by kernel name and is used as a
@@ -137,7 +140,8 @@ regex, so `-k gemm` matches every kernel whose name contains `gemm`.
 Get the overview, then open exactly one detailed block:
 
 ```bash
-rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k 0 -b sol
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k 0 -b sol \
+    --output-directory ./analysis/sol
 ```
 
 Read the `Percent of Peak` column. The report prints the peak for each metric,
@@ -165,7 +169,8 @@ Where to go next:
 ### Occupancy and wavefront limits
 
 ```bash
-rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k 0 -b wavefront
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k 0 -b wavefront \
+    --output-directory ./analysis/wavefront
 ```
 
 Compare active waves per CU against the theoretical occupancy in the same
@@ -179,10 +184,12 @@ examples are in
 
 ```bash
 # Workgroup launch rate and resource allocation limits
-rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k 0 -b spi
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k 0 -b spi \
+    --output-directory ./analysis/spi
 
 # Pipeline utilization and instruction mix
-rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k 0 -b cu_pipe
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k 0 -b cu_pipe \
+    --output-directory ./analysis/cu_pipe
 ```
 
 There is no single stall panel. Stall counters sit in the block that owns the
@@ -229,8 +236,11 @@ disables terminal output, and `--output-name` sets the file name inside
 `--output-directory` (default: `./analysis/`). Roofline HTML also goes into that
 directory, including when the report prints to the terminal. Use a fresh output
 directory for each run. Reusing a non-empty directory requires `--overwrite`,
-which deletes its contents. Keep the output directory outside the profiling
-workload directory. See
+which clears all contents of the selected directory. Keep that directory
+outside each profiling workload, and never choose a workload ancestor. Analyze
+leaves the raw profiling files unchanged, including when overwriting a report.
+`--output-name report` creates `report.txt`, `report.db`, or a `report/` CSV
+folder inside the output directory; it accepts a name, not a path. See
 [analysis output format](../../docs/how-to/analyze/cli.rst).
 
 ## 9. When something looks wrong

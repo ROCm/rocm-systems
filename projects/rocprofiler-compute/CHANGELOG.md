@@ -7,31 +7,27 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
-* Added per-kernel roofline ceilings, metrics, runtime statistics, and roof bounds to analysis database and CSV exports. Database analysis also generates roofline HTML from those stored rows.
+* Added empirical roofline ceiling, per-kernel metric, runtime statistic, and roof-bound tables and CSV exports. Database analysis now generates roofline HTML from the stored rows.
 
-* Added analyze `--output-directory` for all analysis artifacts and `--overwrite` to clear an existing non-empty analysis directory.
+* Added analyze `--output-directory` (default: `./analysis/`) and `--overwrite` for analysis artifact placement and reruns.
 
 ### Changed
 
-* CLI roofline analysis now computes once and builds HTML, terminal plots, and per-kernel tables from the same in-memory database rows used by database analysis.
+* Updated the analysis database schema from 2.3.0 to 3.0.0.
 
-* Updated the analysis database schema version from 2.3.0 to 3.0.0.
+* CLI and database roofline analysis share one computation. CLI HTML, terminal plots, and per-kernel tables read the same queried data as database analysis. All filtered kernels are retained; charts display only kernels with positive performance.
 
-* Analyze writes roofline HTML, text reports, databases, CSV exports, and `ml_api_trace/` under `--output-directory`, which defaults to `./analysis/`. Roofline HTML and operator trace output move out of the profiling workload directory. A rerun into a non-empty analysis directory requires `--overwrite`, which clears that directory.
-
-* Analyze keeps Top Kernels and Dispatch List tables in memory instead of writing `pmc_kernel_top.csv` and `pmc_dispatch_info.csv` caches into the profiling workload directory.
+* Analyze writes HTML, text reports, databases, CSV exports, and `ml_api_trace/` inside `--output-directory`, leaving profiling workload directories unchanged. A non-empty analysis directory requires `--overwrite`, which clears the entire directory. Operator traces are regenerated from their raw inputs on every operator analysis run.
 
 ### Removed
 
-* Removed the unused `compute_workload_roofline_data` table from the analysis database.
-
-* Removed the separate `--output-name` existence check; analysis directory collision handling now controls overwrite behavior.
+* Removed the unused `compute_workload_roofline_data` table, workload-side `pmc_kernel_top.csv` and `pmc_dispatch_info.csv` analysis caches, and the separate `--output-name` existence check. Directory collision handling now controls overwrite behavior.
 
 ### Optimized
 
 ### Resolved issues
 
-* Database analysis uses the selected device benchmark for every empirical peak, including F6/F4 matrix throughput, and retains all filtered kernels before chart display filtering.
+* Roofline and generic empirical metrics use the selected benchmark device row, including the F6/F4 matrix throughput peak.
 
 ### Upcoming changes
 

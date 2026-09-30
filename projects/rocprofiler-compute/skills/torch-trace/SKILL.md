@@ -64,7 +64,8 @@ guessing a pattern wastes a profile:
 ```bash
 rocprof-compute analyze \
     --path ./workloads/<name>/<gpu_model> \
-    --experimental --list-torch-operators
+    --experimental --list-torch-operators \
+    --output-directory ./analysis/operator_list
 ```
 
 This prints the operators as a call tree grouped by source location, with
@@ -72,12 +73,24 @@ kernel launch statistics, so it also shows which operators are worth opening.
 
 The Triton equivalent is `--list-triton-operators`.
 
+Operator analysis writes `ml_api_trace/consolidated.csv` under
+`--output-directory`, which defaults to `./analysis/` in the current working
+directory. The listing example saves it at
+`./analysis/operator_list/ml_api_trace/consolidated.csv`. Analyze rebuilds this
+trace without changing the profiling workload.
+
+Choose a fresh output directory for each invocation, including when moving
+from listing to filtering. Reusing a non-empty directory requires
+`--overwrite`, which clears all its contents. Keep that directory outside
+profiling workloads and their ancestors.
+
 ## 4. Filter to an operator
 
 ```bash
 rocprof-compute analyze \
     --path ./workloads/<name>/<gpu_model> \
-    --experimental --torch-operator '*conv2d*'
+    --experimental --torch-operator '*conv2d*' \
+    --output-directory ./analysis/operator_conv2d
 ```
 
 Patterns are shell-style globs, not regexes, matched against a `/`-separated
