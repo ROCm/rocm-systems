@@ -249,6 +249,12 @@ how the destination memory was shared. The following table summarizes it:
    * - ``handle=DIRECT``
      - Look for earlier peer-access errors on the source rank.
 
+For example, a failed edge between two GPUs connected by XGMI is reported as:
+
+.. code:: none
+
+   node01:4242 NCCL DIAG [INFO] p2p: destination buffer unavailable srcRank=0 srcCudaDev=0 srcNvmlDev=0 dstRank=1 dstCudaDev=1 dstNvmlDev=1 path=XGMI handle=LEGACY_CUDA_IPC reason=noDescriptor; inspect earlier allocation, export, or initialization errors on the destination rank, then check the XGMI link status and link type with 'amd-smi xgmi -l' and 'amd-smi topology -t'
+
 To see a record for every tested edge, including passing ones, add
 ``NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=INIT``. Each passing edge produces
 ``Diagnostics P2P import``, ``write``, and ``read`` records with the same
