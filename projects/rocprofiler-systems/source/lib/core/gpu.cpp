@@ -206,7 +206,7 @@ mask_if_unreliable(const char* name, std::string_view value)
     {
         return std::nullopt;
     }
-    return visibility_env{ name, std::string{ value } };
+    return visibility_env{ .name = name, .value = std::string{ value } };
 }
 
 /// @brief First visibility mask that would put HIP ordinals in a different order
