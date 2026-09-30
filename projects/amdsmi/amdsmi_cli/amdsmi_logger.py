@@ -18,6 +18,7 @@ class AMDSMILogger:
         self.watch_output = []
         self.format = format  # csv, json, or human_readable
         self.destination = destination  # stdout, path to a file (append)
+        self.usage_fields = None
         self.table_title = ""
         self.table_header = ""
         self.secondary_table_title = ""
@@ -450,6 +451,26 @@ class AMDSMILogger:
                 output_dict[key] = value
         return output_dict
 
+    def _flatten_usage_field(self, field: str, value: object) -> dict:
+        if isinstance(value, dict):
+            if not value:
+                return {field: "N/A"}
+            result = {}
+            for key, item in value.items():
+                result.update(self._flatten_usage_field(field + "_" + key, item))
+            return result
+        return {field: value}
+
+    def _flatten_selected_usage(self, data: dict) -> dict:
+        result = {}
+        for section, value in data.items():
+            if section == "usage":
+                for field in self.usage_fields:
+                    result.update(self._flatten_usage_field(field, value[field]))
+            else:
+                result.update(self.flatten_dict({section: value}))
+        return result
+
     def store_output(self, device_handle, argument, data):
         """Convert device handle to gpu id and store output
         params:
@@ -578,7 +599,10 @@ class AMDSMILogger:
             self.output["gpu"] = int(gpu_id)
 
             if argument == "values" or isinstance(data, dict):
-                flat_dict = self.flatten_dict(data)
+                if self.usage_fields and argument == "values" and "usage" in data:
+                    flat_dict = self._flatten_selected_usage(data)
+                else:
+                    flat_dict = self.flatten_dict(data)
                 self.output.update(flat_dict)
             else:
                 self.output[argument] = data
@@ -754,8 +778,18 @@ class AMDSMILogger:
             if (
                 watching_output
             ):  # Flush the full JSON output to the file on watch command completion
+                watch_output = self.watch_output
+                if self.usage_fields and (
+                    self.store_cpu_json_output or self.store_core_json_output
+                ):
+                    watch_output = {}
+                    if self.store_cpu_json_output:
+                        watch_output["cpu_data"] = self.store_cpu_json_output
+                    if self.store_core_json_output:
+                        watch_output["core_data"] = self.store_core_json_output
+                    watch_output["gpu_data"] = self.watch_output
                 with self.destination.open("w", encoding="utf-8") as output_file:
-                    json.dump(self.watch_output, output_file, indent=4)
+                    json.dump(watch_output, output_file, indent=4)
             else:
                 with self.destination.open("a", encoding="utf-8") as output_file:
                     json.dump(json_output, output_file, indent=4)
@@ -791,7 +825,51 @@ class AMDSMILogger:
             with self.destination.open("w", encoding="utf-8") as output_file:
                 json.dump(combined_json, output_file, indent=4)
 
+    def _usage_csv_header(self, rows: list) -> list:
+        keys = list(dict.fromkeys(key for row in rows for key in row))
+        selected = [
+            key
+            for field in self.usage_fields
+            for key in keys
+            if key == field or key.startswith(field + "_")
+        ]
+        header = []
+        inserted = False
+        for key in keys:
+            if key in selected:
+                if not inserted:
+                    header.extend(selected)
+                    inserted = True
+            else:
+                header.append(key)
+        return header
+
+    def _print_usage_csv(self, multiple_device_enabled: bool, watching_output: bool) -> None:
+        rows = self.multiple_device_output if multiple_device_enabled else [self.output]
+        if self.destination != "stdout" and watching_output:
+            rows = self.watch_output
+        if not rows:
+            return
+        header = self._usage_csv_header(rows)
+        if self.destination == "stdout":
+            output = self.CsvStdoutBuilder()
+            writer = csv.DictWriter(output, fieldnames=header, restval="N/A")
+            writer.writeheader()
+            writer.writerows(rows)
+            print(str(output))
+        else:
+            mode = "w" if watching_output else "a"
+            with self.destination.open(mode, newline="", encoding="utf-8") as output:
+                writer = csv.DictWriter(output, fieldnames=header, restval="N/A")
+                writer.writeheader()
+                writer.writerows(rows)
+
     def _print_csv_output(self, multiple_device_enabled=False, watching_output=False):
+        if self.usage_fields:
+            self._print_usage_csv(
+                multiple_device_enabled=multiple_device_enabled, watching_output=watching_output
+            )
+            return
         if multiple_device_enabled:
             stored_csv_output = self.multiple_device_output
         else:
