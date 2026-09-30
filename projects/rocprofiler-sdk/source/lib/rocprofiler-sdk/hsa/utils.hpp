@@ -248,7 +248,7 @@ struct formatter<hsa_fabric_handle_t>
 }  // namespace fmt
 #endif
 
-#if ROCPROFILER_HSA_RUNTIME_EXT_AMD_VERSION >= 13300
+#if ROCPROFILER_HSA_RUNTIME_EXT_AMD_VERSION >= 13400
 namespace fmt
 {
 // Not a handle struct, so handle_formatter does not apply.
