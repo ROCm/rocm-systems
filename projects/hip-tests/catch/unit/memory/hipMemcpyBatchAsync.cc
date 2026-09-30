@@ -1804,6 +1804,27 @@ HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_AttrValidation_Negative) {
     REQUIRE(err == hipErrorInvalidValue);
   }
 
+  SECTION("PreferLinear combined with PreferBroadcast") {
+    attr.flags = hipMemcpyFlagExtPreferLinear | hipMemcpyFlagExtPreferBroadcast;
+    hipError_t err = hipExtMemcpyBatchAsync(dsts, srcs, sizes, nullptr, nullptr, nullptr,
+                                            1, &attr, attrsIdxs, 1, stream);
+    REQUIRE(err == hipErrorInvalidValue);
+  }
+
+  SECTION("PreferBroadcast combined with swap") {
+    attr.flags = hipMemcpyFlagExtPreferBroadcast | hipMemcpyFlagExtOpSwap;
+    hipError_t err = hipExtMemcpyBatchAsync(dsts, srcs, sizes, nullptr, nullptr, nullptr,
+                                            1, &attr, attrsIdxs, 1, stream);
+    REQUIRE(err == hipErrorInvalidValue);
+  }
+
+  SECTION("PreferBroadcast combined with indirect") {
+    attr.flags = hipMemcpyFlagExtPreferBroadcast | hipMemcpyFlagExtOpIndirectSrc;
+    hipError_t err = hipExtMemcpyBatchAsync(dsts, srcs, sizes, nullptr, nullptr, nullptr,
+                                            1, &attr, attrsIdxs, 1, stream);
+    REQUIRE(err == hipErrorInvalidValue);
+  }
+
   HIP_CHECK(hipFree(d_a));
   HIP_CHECK(hipFree(d_b));
   HIP_CHECK(hipStreamDestroy(stream));
@@ -1868,6 +1889,65 @@ HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_PreferComputeEngine_D2D) {
   HIP_CHECK(hipFree(d_src_b));
   HIP_CHECK(hipFree(d_dst_a));
   HIP_CHECK(hipFree(d_dst_b));
+  HIP_CHECK(hipStreamDestroy(stream));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - hipMemcpyFlagExtPreferLinear and hipMemcpyFlagExtPreferBroadcast are accepted on a
+ *   device-to-device batch where every copy shares the same source. The hints must not
+ *   change the result: every destination receives the source bytes.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ */
+HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_PreferLinearBroadcast_D2D) {
+  constexpr size_t kNumDsts = 3;
+  constexpr size_t kNumElements = 4096;
+  constexpr size_t kSizeBytes = kNumElements * sizeof(int);
+  constexpr int kVal = 37;
+
+  const unsigned int flag = GENERATE(static_cast<unsigned int>(hipMemcpyFlagExtPreferLinear),
+                                     static_cast<unsigned int>(hipMemcpyFlagExtPreferBroadcast));
+
+  void* d_src = nullptr;
+  HIP_CHECK(hipMalloc(&d_src, kSizeBytes));
+  std::vector<int> host(kNumElements, kVal);
+  HIP_CHECK(hipMemcpy(d_src, host.data(), kSizeBytes, hipMemcpyHostToDevice));
+
+  void* dsts[kNumDsts] = {};
+  void* srcs[kNumDsts] = {};
+  size_t sizes[kNumDsts] = {};
+  for (size_t d = 0; d < kNumDsts; ++d) {
+    HIP_CHECK(hipMalloc(&dsts[d], kSizeBytes));
+    HIP_CHECK(hipMemset(dsts[d], 0, kSizeBytes));
+    srcs[d] = d_src;
+    sizes[d] = kSizeBytes;
+  }
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  size_t attrsIdxs[] = {0};
+  hipExtMemcpyAttributes attr{};
+  attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
+  attr.flags = flag;
+
+  HIP_CHECK(hipExtMemcpyBatchAsync(dsts, srcs, sizes, nullptr, nullptr, nullptr, kNumDsts,
+                                   &attr, attrsIdxs, 1, stream));
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  std::vector<int> out(kNumElements);
+  for (size_t d = 0; d < kNumDsts; ++d) {
+    HIP_CHECK(hipMemcpy(out.data(), dsts[d], kSizeBytes, hipMemcpyDeviceToHost));
+    for (size_t i = 0; i < kNumElements; ++i) {
+      REQUIRE(out[i] == kVal);
+    }
+    HIP_CHECK(hipFree(dsts[d]));
+  }
+
+  HIP_CHECK(hipFree(d_src));
   HIP_CHECK(hipStreamDestroy(stream));
 }
 

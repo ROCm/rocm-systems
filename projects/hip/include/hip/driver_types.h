@@ -464,9 +464,15 @@ typedef enum hipMemcpyFlags {
                                                ///< source pointer, read when the copy runs rather
                                                ///< than when it is submitted.
   hipMemcpyFlagExtOpIndirectDst = 0x800,       ///< Same as IndirectSrc, but for the dst pointer.
-  hipMemcpyFlagExtPreferComputeEngine = 0x1000 ///< Prefer compute engine over copy engine.
+  hipMemcpyFlagExtPreferComputeEngine = 0x1000,///< Prefer compute engine over copy engine.
                                                ///< Linear copies only; mutually exclusive with
                                                ///< hipMemcpyFlagExtPreferCE.
+  hipMemcpyFlagExtPreferLinear = 0x2000,       ///< Prefer issuing each copy individually, without
+                                               ///< combining copies that share a source.
+                                               ///< Mutually exclusive with PreferBroadcast.
+  hipMemcpyFlagExtPreferBroadcast = 0x4000     ///< Prefer combining copies with the same src and
+                                               ///< size into one broadcast (src read once, written
+                                               ///< to every dst). Linear copies only.
 } hipMemcpyFlags;
 
 /**
