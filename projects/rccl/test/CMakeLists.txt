@@ -1013,6 +1013,7 @@ if(BUILD_TESTS)
       transport/NetIbMPI/OpsFaultUnitTests.cpp
       transport/RmaMPI/RmaMPITests.cpp
       transport/RmaMPI/RmaMultiSegmentMPITests.cpp
+      transport/RmaMPI/RmaMultiSegmentElasticMPITests.cpp
       transport/NetIbMPI/StressTests.cpp
       transport/GinDeviceMPITests.cpp
       WarpSpeedMPITests.cpp
@@ -1021,6 +1022,8 @@ if(BUILD_TESTS)
       NChannelsPerNetPeerMPITests.cpp
       MaxP2pPeersMPITests.cpp
       RegistrationMPITests.cpp
+      multisegment/MultiSegmentRegistrationMPITests.cpp
+      multisegment/MultiSegmentCollectiveMPITests.cpp
       HostApiMPITests.cpp
       HostApiCustomGinPluginMPITests.cpp
       RmaExternalPluginPutSignalMPITests.cpp
