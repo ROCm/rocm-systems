@@ -23,25 +23,6 @@ Pre-built simulator configs are in `configs/`:
 | `gfx1151.json` | Single RDNA3.5 GPU (standalone simulation) |
 | `gfx1201_r9700.json` | Single RDNA4 GPU (standalone simulation) |
 
-### CDNA SIMD identity
-
-On CDNA2, CDNA3, and CDNA4, wave slots belong to four logical SIMDs in round-robin order:
-`SIMD_ID = wave_slot % 4`. A wave's CU slot is permanent, so its SIMD ID
-is stable during execution, slot reuse, and checkpoint restoration.
-`s_getreg_b32` reads wholly within `HW_ID[5:4]` return this identity by
-default. Other or wider HW_ID fields remain unsupported and retain their
-diagnostics; HW_ID is read-only.
-
-This lets resident waves select different instruction schedules in the same
-execution. For example, a branch on HW_ID bit 4 selects alternate paths for
-SIMDs 0/2 and 1/3. A workload using only slot 0 still exercises only its
-selected path. The assignment is a functional placement policy; it does not
-model per-SIMD resource allocation or hardware timing.
-
-CDNA1's SIMD field layout has not yet been verified. RDNA and CDNA5 use
-different hardware-ID registers and need their own field and placement
-mapping. Their SIMD-ID reads remain unsupported.
-
 ### PCI/VFIO guest compatibility
 
 The gfx1250 PCI profile intentionally advertises no UVD, VCN, or JPEG hardware.
