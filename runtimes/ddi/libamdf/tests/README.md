@@ -50,7 +50,7 @@ unadvertised.
 
 ## Reproducible checks
 
-Run from `runtimes/rocddi`:
+Run from `runtimes`:
 
 ```sh
 cargo test --workspace --all-targets --locked

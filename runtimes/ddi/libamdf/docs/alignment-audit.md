@@ -10,7 +10,7 @@ APIs or imply capabilities that the provider has not qualified.
 
 ## Sources and authority
 
-The seven [vendored headers](../../../../api-headers/README.md) are synchronized
+The seven [vendored headers](../../../api-headers/README.md) are synchronized
 from `hrx-system@4aa34130de44c45d68a48575cebfd0ff0610c461` with only the approved
 AMD copyright and MIT license preamble substitution. These headers define the ABI; the
 [support map](api-support.md) describes what this implementation supports. The
@@ -26,7 +26,7 @@ upstream CTS and consumer sources were inspected at that same revision.
 | Preserve AMDF memory identity and cache semantics | [Memory implementation](../src/memory.rs) distinguishes mismatched physical identity from unavailable identity, requires the selected registration cacheability, and qualifies concrete and prospective write-back visibility recipes. C and Rust regression coverage exercises these distinctions and output preservation. |
 | Establish complete ordered access sets | Multi-device SYSTEM CREATE and REGISTER use one common VA, pass the ordered distinct GPU-ID list through mapping retries, reuse a mapping for repeated consumers of one VM, and publish one immutable access record per requested device. LOCAL CREATE additionally requires the physical owner and a cached directional direct-XGMI or validated-PCIe route for every peer, allocates on the owner independently of request order, and maps the same backing through each distinct VM. SYSTEM IMPORT is qualified for one native VM; distinct-GPU IMPORT remains unadvertised. |
 | Keep device production explicit | AQL and SDMA families advertise device production, but a queue acquires the KFD doorbell BO only when creation requires that capability. The owner mapping is immediate. A peer mapping requires the same instance, common VA coverage, and successful KFD attachment of the ring, indices, and doorbell. Hardware execution remains a separate gate. |
-| Keep ownership and control lightweight | [Shared boundary rules](../src/support.rs) explain caller provenance, borrowed parents, destruction serialization, and output publication. The private rocddi [Driver](../../../src/driver.rs) owns native control; cached queries need no native call or global registry. |
+| Keep ownership and control lightweight | [Shared boundary rules](../src/support.rs) explain caller provenance, borrowed parents, destruction serialization, and output publication. The private rocddi [Driver](../../rocddi/src/driver.rs) owns native control; cached queries need no native call or global registry. |
 | Honor method-level cost contracts | API-table negotiation and cached endpoint, family, scope, device, memory, mapping, and address queries use retained immutable or atomic state without allocation, locks, lazy initialization, or ownership-counter updates. Pair queries directly compose the two supplied sites. User status is the documented native-observation path; wait calls are the explicit synchronization path. |
 | Publish exact queue encodings | Family format features propagate unchanged through created queue and mapping information. GFX1201 PM4 reports ACQUIRE_MEM GCR, SDMA 7.0.1 reports GCR plus explicit-system FENCE, and AQL reports the zero baseline. |
 | Separate queue transport from application completion | [Queue documentation](../README.md) distinguishes producer reservations, release publication, consumption, and application resource lifetime. The GFX1201 multiple-producer workload observes unpublished reservations and later packets blocked behind an INVALID hole. |

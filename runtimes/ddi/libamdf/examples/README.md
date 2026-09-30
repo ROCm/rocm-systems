@@ -14,7 +14,7 @@ COPY_DATA, WRITE_DATA, EVENT_WRITE, ACQUIRE_MEM, and NOP packet forms through
 a fixed 4 KiB native KFD COMPUTE ring.
 
 These are standalone C sources. Build `libamdf`, then compile each example
-against `../api-headers/include` and the shared or static library. Run them
+against `api-headers/include` and the shared or static library. Run them
 only with native GPU access. `sdma-readonly-fault.c` deliberately triggers a
 fault and should be run separately from the non-faulting examples.
 
@@ -50,11 +50,11 @@ stream does not claim compatibility with a different feature combination.
 ## SDMA LOCAL round trip
 
 `sdma-local-round-trip.c` accepts `private` or `public` and `process` or
-`instance`; the defaults are private and PROCESS. From `runtimes/rocddi`:
+`instance`; the defaults are private and PROCESS. From `runtimes`:
 
 ```sh
-cc -O2 -std=c11 -Wall -Wextra -Werror -I../api-headers/include \
-  frontends/libamdf/examples/sdma-local-round-trip.c \
+cc -O2 -std=c11 -Wall -Wextra -Werror -Iapi-headers/include \
+  ddi/libamdf/examples/sdma-local-round-trip.c \
   -Ltarget/release -lamdf -o /tmp/sdma-local-round-trip
 LD_LIBRARY_PATH=target/release /tmp/sdma-local-round-trip private process
 LD_LIBRARY_PATH=target/release /tmp/sdma-local-round-trip private instance
@@ -77,11 +77,11 @@ need separate qualification. AQL and PM4 LOCAL execution are covered below.
 ## PM4 LOCAL round trip
 
 `pm4-local-round-trip.c` accepts `private` or `public` and `process` or
-`instance`. From `runtimes/rocddi`:
+`instance`. From `runtimes`:
 
 ```sh
-cc -O2 -std=c11 -Wall -Wextra -Werror -I../api-headers/include \
-  frontends/libamdf/examples/pm4-local-round-trip.c \
+cc -O2 -std=c11 -Wall -Wextra -Werror -Iapi-headers/include \
+  ddi/libamdf/examples/pm4-local-round-trip.c \
   -Ltarget/release -lamdf -o /tmp/pm4-local-round-trip
 LD_LIBRARY_PATH=target/release /tmp/pm4-local-round-trip private process
 LD_LIBRARY_PATH=target/release /tmp/pm4-local-round-trip private instance
@@ -182,16 +182,16 @@ dependency signals remain outside this example.
 OpenCL kernel descriptor and text bytes for GFX1201 code-object v4. That
 artifact must be checked for relocations, section bounds, a nonzero private
 segment declaration, and scratch instructions before use. The generator performs
-those checks and writes the include to the requested path. From `runtimes/rocddi`
+those checks and writes the include to the requested path. From `runtimes`
 with ROCm LLVM installed at `/opt/rocm/llvm/bin`:
 
 ```sh
 cargo build --release -p libamdf --locked
-python3 frontends/libamdf/examples/generate-aql-copy-add-gfx1201.py \
+python3 ddi/libamdf/examples/generate-aql-copy-add-gfx1201.py \
   /tmp/aql-copy-add-gfx1201.inc
 cc -O2 -std=c11 -Wall -Wextra -Werror \
-  -I../api-headers/include -I/tmp \
-  frontends/libamdf/examples/aql-copy-add.c \
+  -Iapi-headers/include -I/tmp \
+  ddi/libamdf/examples/aql-copy-add.c \
   -Ltarget/release -lamdf -pthread -o /tmp/aql-copy-add
 LD_LIBRARY_PATH=target/release /tmp/aql-copy-add
 LD_LIBRARY_PATH=target/release /tmp/aql-copy-add instance
@@ -232,17 +232,17 @@ timeout retains all potentially referenced GPU resources until process exit.
 Two freestanding OpenCL kernels are compiled as GFX1201 code-object v4
 objects. The generator verifies their descriptors, ELF sections, symbols,
 relocations, and zero scratch requirement, then emits C includes. From
-`runtimes/rocddi`, with ROCm LLVM at `/opt/rocm/llvm/bin`:
+`runtimes`, with ROCm LLVM at `/opt/rocm/llvm/bin`:
 
 ```sh
 cargo build --release -p libamdf --locked
-python3 frontends/libamdf/examples/generate-device-producer-gfx1201.py \
+python3 ddi/libamdf/examples/generate-device-producer-gfx1201.py \
   publisher /tmp/device-producer-publisher-gfx1201.inc
-python3 frontends/libamdf/examples/generate-device-producer-gfx1201.py \
+python3 ddi/libamdf/examples/generate-device-producer-gfx1201.py \
   target /tmp/device-producer-target-gfx1201.inc
 cc -O2 -std=c11 -Wall -Wextra -Werror \
-  -I../api-headers/include -I/tmp \
-  frontends/libamdf/examples/device-producer.c \
+  -Iapi-headers/include -I/tmp \
+  ddi/libamdf/examples/device-producer.c \
   -Ltarget/release -lamdf -o /tmp/device-producer
 LD_LIBRARY_PATH=target/release /tmp/device-producer sdma process
 LD_LIBRARY_PATH=target/release /tmp/device-producer aql process
@@ -263,8 +263,8 @@ is authorized, then run a healthy workload in another process. It leaves
 faulted resources to process teardown because retirement was not proved.
 
 ```sh
-cc -O2 -std=c11 -Wall -Wextra -Werror -I../api-headers/include \
-  frontends/libamdf/examples/sdma-readonly-fault.c \
+cc -O2 -std=c11 -Wall -Wextra -Werror -Iapi-headers/include \
+  ddi/libamdf/examples/sdma-readonly-fault.c \
   -Ltarget/release -lamdf -o /tmp/sdma-readonly-fault
 LD_LIBRARY_PATH=target/release /tmp/sdma-readonly-fault
 LD_LIBRARY_PATH=target/release /tmp/device-producer sdma process
