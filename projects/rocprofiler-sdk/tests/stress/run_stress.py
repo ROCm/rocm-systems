@@ -49,6 +49,7 @@ from __future__ import print_function
 import argparse
 import json
 import os
+import random
 import re
 import signal
 import subprocess
@@ -338,6 +339,15 @@ def main():
     parser.add_argument("--exclude", action="append", default=None)
     parser.add_argument("--max-output-bytes", type=int, default=36000)
     parser.add_argument(
+        "--shuffle",
+        action="store_true",
+        help="run the selection in a different order every iteration, so a failure that "
+        "depends on the test before it gets different neighbours",
+    )
+    parser.add_argument(
+        "--seed", type=int, default=None, help="seed for --shuffle (default: random)"
+    )
+    parser.add_argument(
         "--list", action="store_true", help="print the selection and exit"
     )
     parser.add_argument(
@@ -369,9 +379,14 @@ def run(args):
         if any_match(select, t.name) and not any_match(exclude, t.name) and not t.disabled
     ]
 
+    seed = args.seed if args.seed is not None else random.randrange(1 << 31)
+    rng = random.Random(seed)
     log(
-        "STRESS selected {} of {} tests, budget {:.0f}s".format(
-            len(chosen), len(all_tests), args.budget_seconds
+        "STRESS selected {} of {} tests, budget {:.0f}s{}".format(
+            len(chosen),
+            len(all_tests),
+            args.budget_seconds,
+            ", shuffled with --seed {}".format(seed) if args.shuffle else "",
         )
     )
     for test in chosen:
@@ -395,6 +410,7 @@ def run(args):
     timeouts = dict((t.name, 0) for t in chosen)
     setups = Setups(all_tests)
     iteration = 0
+    previous = None
 
     def emit(text):
         if printed[0] + len(text) <= args.max_output_bytes:
@@ -407,7 +423,10 @@ def run(args):
         iteration += 1
         ran = 0
         tally = {}
-        for test in chosen:
+        order = list(chosen)
+        if args.shuffle:
+            rng.shuffle(order)
+        for test in order:
             if test.name in quarantined:
                 continue
             timeout = min(
@@ -459,16 +478,23 @@ def run(args):
                         "status": status,
                         "iteration": iteration,
                         "rc": rc,
+                        "after": previous,
                     }
                 )
                 key = (test.name, status)
                 if key not in shown:
                     shown.add(key)
                     emit(
-                        "---- first {} of {} (iteration {}, rc={}) ----\n{}".format(
-                            status, test.name, iteration, rc, excerpt(output, 80, 6000)
+                        "---- first {} of {} (iteration {}, rc={}, after {}) ----\n{}".format(
+                            status,
+                            test.name,
+                            iteration,
+                            rc,
+                            previous,
+                            excerpt(output, 80, 6000),
                         )
                     )
+            previous = test.name
             if status == "TIMEOUT":
                 timeouts[test.name] += 1
                 if timeouts[test.name] >= args.quarantine_after_timeouts:
@@ -518,6 +544,7 @@ def run(args):
         "iterations": iteration,
         "elapsed_s": round(elapsed, 1),
         "budget_s": args.budget_seconds,
+        "seed": seed if args.shuffle else None,
         "counts": counts,
         "never_ran": never_ran,
         "cut_unseen": cut_unseen,
