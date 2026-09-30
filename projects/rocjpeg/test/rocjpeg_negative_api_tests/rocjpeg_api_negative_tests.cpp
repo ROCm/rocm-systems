@@ -583,10 +583,36 @@ int RocJpegApiNegativeTests::CheckParseInvariants(const std::vector<uint8_t> &da
     // no such marker, which is what makes it safe to apply to every fuzz case.
     // rocJpegGetImageInfo cannot report an empty scan, so without this check an
     // accepted stream with no entropy-coded data would look perfectly healthy.
-    if (FindMarker(data, 0xDA) >= data.size()) {
+    const size_t sos_offset = FindMarker(data, 0xDA);
+    if (sos_offset >= data.size()) {
         std::cerr << "[" << case_name << "] a stream with no SOS marker was accepted as decodable\n  "
                   << HexDump(data) << std::endl;
         return EXIT_FAILURE;
+    }
+
+    // The presence of an SOS marker says nothing about the scan behind it. A
+    // stream that stops right after the scan header, or puts EOI directly after
+    // it, carries no entropy-coded data and so describes nothing to decode,
+    // while still satisfying every marker and image-description check. Measure
+    // the scan instead: the segment length follows the marker, and the entropy
+    // coded data starts after it and runs to EOI or to the end of the buffer.
+    if (sos_offset + 4 <= data.size()) {
+        const size_t segment_length = (static_cast<size_t>(data[sos_offset + 2]) << 8) | data[sos_offset + 3];
+        const size_t scan_start = sos_offset + 2 + segment_length;
+        if (scan_start <= data.size()) {
+            size_t scan_end = scan_start;
+            while (scan_end + 1 < data.size() && !(data[scan_end] == 0xFF && data[scan_end + 1] == 0xD9)) {
+                scan_end++;
+            }
+            if (scan_end + 1 >= data.size()) {
+                scan_end = data.size();
+            }
+            if (scan_end <= scan_start) {
+                std::cerr << "[" << case_name << "] a stream whose scan carries no entropy-coded data was "
+                             "accepted as decodable\n  " << HexDump(data) << std::endl;
+                return EXIT_FAILURE;
+            }
+        }
     }
     if (FindMarker(data, 0xC0) >= data.size()) {
         std::cerr << "[" << case_name << "] a stream with no SOF marker was accepted as decodable\n  "
@@ -696,7 +722,7 @@ int RocJpegApiNegativeTests::TestStreamParseFuzz() {
         const char *name;
         std::vector<uint8_t> data;
     };
-    const std::vector<RegressionCase> regressions = {
+    std::vector<RegressionCase> regressions = {
         // The stream ends immediately after a marker code, so the two-byte
         // segment length field is not present at all.
         {"marker at end of stream", {0xFF, 0xD8, 0xFF, 0xC0}},
@@ -737,6 +763,51 @@ int RocJpegApiNegativeTests::TestStreamParseFuzz() {
         {"single byte stream", {0xFF}},
         {"empty stream", {}},
     };
+    // A scan header with nothing behind it. Both spellings are built from a seed
+    // that parses, so the only thing wrong with them is the empty scan: the
+    // stream either stops at the end of the SOS segment or puts EOI right after
+    // it. Every marker is present and the frame header is intact, which is what
+    // makes these reachable by truncation and invisible to a marker-only check.
+    {
+        const size_t sos_offset = FindMarker(color_seed, 0xDA);
+        if (sos_offset + 4 > color_seed.size()) {
+            std::cerr << "The color fuzzing seed no longer carries a parsable SOS segment." << std::endl;
+            return EXIT_FAILURE;
+        }
+        const size_t segment_length =
+            (static_cast<size_t>(color_seed[sos_offset + 2]) << 8) | color_seed[sos_offset + 3];
+        const size_t scan_start = sos_offset + 2 + segment_length;
+        if (scan_start > color_seed.size()) {
+            std::cerr << "The color fuzzing seed no longer carries a parsable SOS segment." << std::endl;
+            return EXIT_FAILURE;
+        }
+        std::vector<uint8_t> empty_scan(color_seed.begin(), color_seed.begin() + scan_start);
+        std::vector<uint8_t> empty_scan_eoi = empty_scan;
+        empty_scan_eoi.push_back(0xFF);
+        empty_scan_eoi.push_back(0xD9);
+        regressions.push_back({"scan header with no entropy-coded data", empty_scan});
+        regressions.push_back({"scan header immediately followed by EOI", empty_scan_eoi});
+    }
+
+    // A three-component frame header whose chroma sampling factors are zero.
+    // Sampling factors of zero are outside the range the format allows, and
+    // leaving them unchecked made the frame classify as 4:0:0, so a colour
+    // image was described as if it were grayscale.
+    {
+        const size_t sof_offset = FindMarker(color_seed, 0xC0);
+        if (sof_offset + 18 > color_seed.size()) {
+            std::cerr << "The color fuzzing seed no longer carries a parsable SOF segment." << std::endl;
+            return EXIT_FAILURE;
+        }
+        std::vector<uint8_t> zero_chroma = color_seed;
+        // The component descriptors follow the 8-byte segment header as
+        // (identifier, sampling factors, quantisation table) triplets.
+        zero_chroma[sof_offset + 11] = 0x11;
+        zero_chroma[sof_offset + 14] = 0x00;
+        zero_chroma[sof_offset + 17] = 0x00;
+        regressions.push_back({"SOF with zero chroma sampling factors", zero_chroma});
+    }
+
     for (const RegressionCase &regression : regressions) {
         RocJpegStatus rocjpeg_status = ParseExactBuffer(regression.data);
         if (rocjpeg_status == ROCJPEG_STATUS_SUCCESS) {
