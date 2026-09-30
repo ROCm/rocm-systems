@@ -30,7 +30,8 @@ namespace rocjitsu::plugins::race_detector {
 ///
 /// LDS race validation uses a two-level approach:
 ///   - Fast path: per-byte counters (byteWriteCounts / byteReadCounts)
-///     provide O(1) checks.
+///     skip empty chunks and chunks owned by the accessing wave's
+///     ordered LDS events.
 ///   - Slow path: when counts are non-zero, scans live event intervals
 ///     with binary search (IntervalSet::overlapsRange).
 class RaceDetector {
@@ -102,7 +103,18 @@ public:
 private:
   void setProfiler(ProfilerInterface &);
 
-  static void adjustByteCounts(const IntervalSet &ivs, std::vector<int> &counts, int delta);
+  struct LdsChunkCounts {
+    int bytes = 0;
+    /// A sole ordinary-LDS owner, or -1 for mixed waves/ordering classes.
+    /// Once mixed, a chunk stays conservative until its count drains.
+    WaveId orderedWave{-1};
+  };
+
+  static void adjustByteCounts(const IntervalSet &ivs, std::vector<LdsChunkCounts> &counts,
+                               int delta, WaveId orderedWave = WaveId{-1});
+  static bool hasPotentialLdsConflict(int addr, int nBytes,
+                                      const std::vector<LdsChunkCounts> &counts, WaveId wave,
+                                      MemoryOrderClass currentMemoryOrder);
 
   /// Active LDS write events (for scanning during read validation).
   std::vector<EventId> ldsWriteEvents;
@@ -116,8 +128,11 @@ private:
   /// and grow dynamically in adjustByteCounts as LDS events arrive, avoiding
   /// reliance on compiler metadata for the LDS size.
   static constexpr int kCountGranularity = 16;
-  std::vector<int> byteWriteCounts;
-  std::vector<int> byteReadCounts;
+  /// Sole-owner tracking avoids rescanning a long loop's own ordered LDS
+  /// history, using one wave ID per chunk rather than per-wave counters.
+  /// Events remain live for other waves until a barrier retires them.
+  std::vector<LdsChunkCounts> byteWriteCounts;
+  std::vector<LdsChunkCounts> byteReadCounts;
 
   EventRegistry events_;
 
