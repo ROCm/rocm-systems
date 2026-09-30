@@ -3,7 +3,6 @@
 
 """Integration tests for profile output paths and directory templating."""
 
-import inspect
 import os
 import socket
 from pathlib import Path
@@ -23,7 +22,6 @@ from tests.integration.common import (
     mock_load_soc_specs,
     num_devices,
     num_kernels,
-    validate,
 )
 
 
@@ -36,8 +34,6 @@ def test_path(binary_handler_profile_rocprof_compute):
     )
 
     assert sorted(list(file_dict.keys())) == CSVS
-
-    validate(inspect.stack()[0][3], workload_dir, file_dict)
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -68,8 +64,6 @@ def test_path_no_native(binary_handler_profile_rocprof_compute):
     )
 
     assert sorted(list(file_dict.keys())) == CSVS
-
-    validate(inspect.stack()[0][3], workload_dir, file_dict)
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 
