@@ -631,9 +631,17 @@ int RocJpegApiNegativeTests::CheckParseInvariants(const std::vector<uint8_t> &da
                   << static_cast<int>(subsampling) << ")\n  " << HexDump(data) << std::endl;
         return EXIT_FAILURE;
     }
-    if (num_components == 1 && subsampling != ROCJPEG_CSS_400) {
-        std::cerr << "[" << case_name << "] a single-component stream reports subsampling "
-                  << static_cast<int>(subsampling) << " instead of 4:0:0\n  " << HexDump(data) << std::endl;
+    // 4:0:0 means there is no chroma at all, so it describes a single-component
+    // image and nothing else. Checking only one direction of that equivalence
+    // leaves the more interesting failure uncovered: a multi-component frame
+    // header whose chroma sampling factors are zero is classified as 4:0:0, and
+    // a one-way check would accept it because the component count looks fine on
+    // its own and the subsampling looks fine on its own.
+    if ((num_components == 1) != (subsampling == ROCJPEG_CSS_400)) {
+        std::cerr << "[" << case_name << "] an accepted stream reports " << static_cast<int>(num_components)
+                  << " components with subsampling " << static_cast<int>(subsampling)
+                  << "; 4:0:0 (" << static_cast<int>(ROCJPEG_CSS_400)
+                  << ") and a single component have to imply each other\n  " << HexDump(data) << std::endl;
         return EXIT_FAILURE;
     }
 
