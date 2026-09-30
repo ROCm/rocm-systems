@@ -458,15 +458,15 @@ typedef struct hipMemLocation {
 typedef enum hipMemcpyFlags {
   hipMemcpyFlagDefault = 0x0,                  ///< Default flag
   hipMemcpyFlagPreferOverlapWithCompute = 0x1, ///< Tries to overlap copy with compute work.
-  hipMemcpyFlagExtPreferCE = 0x100,            ///< Prefer copy engine (SDMA) over compute engine.
+  hipMemcpyFlagExtPreferCE = 0x100,            ///< Prefer copy engine over compute engine.
   hipMemcpyFlagExtOpSwap = 0x200,              ///< Swap contents of src and dst.
   hipMemcpyFlagExtOpIndirectSrc = 0x400,       ///< The src pointer holds the address of the real
                                                ///< source pointer, read when the copy runs rather
                                                ///< than when it is submitted.
   hipMemcpyFlagExtOpIndirectDst = 0x800,       ///< Same as IndirectSrc, but for the dst pointer.
-  hipMemcpyFlagExtPreferCU = 0x1000            ///< Prefer compute engine (shader copy) over the
-                                               ///< copy engine. Linear copies only; mutually
-                                               ///< exclusive with hipMemcpyFlagExtPreferCE.
+  hipMemcpyFlagExtPreferComputeEngine = 0x1000 ///< Prefer compute engine over copy engine.
+                                               ///< Linear copies only; mutually exclusive with
+                                               ///< hipMemcpyFlagExtPreferCE.
 } hipMemcpyFlags;
 
 /**
