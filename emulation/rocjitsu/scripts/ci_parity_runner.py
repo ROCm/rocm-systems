@@ -22,7 +22,13 @@ import time
 from pathlib import Path
 
 GTEST_RESULT = re.compile(
-    r"^(?:\d+:\s*)?\[\s+(OK|FAILED)\s+\]\s+(\S+)\s+\((\d+)\s+ms\)\s*$"
+    r"^(?:\d+:\s*)?\[\s+(OK|FAILED)\s+\]\s+(.+?)\s+\((\d+)\s+ms\)\s*$"
+)
+GTEST_TYPEPARAM = re.compile(r",\s*where\s+TypeParam\s+=.*$")
+CTEST_SUMMARY = re.compile(
+    r"^(?P<index>\d+)/(?P<total>\d+) Test #(?P<n>\d+): (?P<name>\S+)\s*\.*\s*"
+    r"(?P<status>\*{3}Timeout|\*{3}Failed|\*{3}Not Run|Passed)\s+"
+    r"(?P<seconds>[0-9.]+) sec\s*$"
 )
 ADD_TEST_RE = re.compile(
     r'^add_test\((?P<name>[A-Za-z0-9_\-]+)\s+"(?P<command>[^"]+)"\)\s*$'
@@ -37,22 +43,60 @@ UNSUPPORTED_MARKERS = (
 )
 
 
+def gtest_case_id(raw_id: str) -> str:
+    """Drop gtest's ', where TypeParam = ...' suffix so the id matches the baseline."""
+    return GTEST_TYPEPARAM.sub("", raw_id).strip()
+
+
 def parse_gtest_output(text: str) -> list[dict]:
-    """Return per-case verdicts from gtest OK/FAILED lines that include a time."""
+    """Return per-case verdicts from gtest OK/FAILED lines that include a time.
+
+    CTest -V prints each line, and --output-on-failure prints a failed test's
+    output again. Keep one row per id. A failure replaces an earlier pass.
+    """
     cases = []
+    index_by_id = {}
     for line in text.splitlines():
         match = GTEST_RESULT.match(line.strip())
         if not match:
             continue
-        status_word, case_id, millis = match.groups()
-        cases.append(
+        status_word, raw_id, millis = match.groups()
+        case = {
+            "id": gtest_case_id(raw_id),
+            "status": "passed" if status_word == "OK" else "failed",
+            "seconds": int(millis) / 1000.0,
+        }
+        previous = index_by_id.get(case["id"])
+        if previous is None:
+            index_by_id[case["id"]] = len(cases)
+            cases.append(case)
+            continue
+        if cases[previous]["status"] != "failed":
+            cases[previous] = case
+    return cases
+
+
+def parse_ctest_binaries(text: str) -> list[dict]:
+    """Return one row per CTest summary line (Passed, ***Failed, ***Timeout)."""
+    status_names = {
+        "Passed": "passed",
+        "***Failed": "failed",
+        "***Timeout": "timeout",
+        "***Not Run": "not_run",
+    }
+    binaries = []
+    for line in text.splitlines():
+        match = CTEST_SUMMARY.match(line.strip())
+        if not match:
+            continue
+        binaries.append(
             {
-                "id": case_id,
-                "status": "passed" if status_word == "OK" else "failed",
-                "seconds": int(millis) / 1000.0,
+                "name": match.group("name"),
+                "status": status_names[match.group("status")],
+                "seconds": float(match.group("seconds")),
             }
         )
-    return cases
+    return binaries
 
 
 def parse_installed_tests(text: str) -> list[dict]:
@@ -356,6 +400,7 @@ def run_labeled_ctest(
     log_lines, returncode = stream_raw_output(proc)
     log_text = "\n".join(log_lines)
     cases = parse_gtest_output(log_text)
+    binaries = parse_ctest_binaries(log_text)
     errors = []
     if returncode != 0 and not cases:
         errors.append(
@@ -369,6 +414,7 @@ def run_labeled_ctest(
     return {
         "returncode": returncode,
         "cases": cases,
+        "binaries": binaries,
         "errors": errors,
         "log_lines": [f"Running: {shlex.join(command)}", ""] + log_lines,
     }
@@ -416,6 +462,7 @@ def main() -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
     cases = []
     errors = []
+    binaries = []
     if args.ctest_label:
         result = run_labeled_ctest(
             args.rocjitsu,
@@ -429,6 +476,7 @@ def main() -> int:
             out.parent,
         )
         cases.extend(result["cases"])
+        binaries.extend(result["binaries"])
         errors.extend(result["errors"])
         log_lines = result["log_lines"]
         ctest_status = result["returncode"]
@@ -465,6 +513,7 @@ def main() -> int:
         "ctest_label": args.ctest_label,
         "runner_label": args.runner_label,
         "cases": cases,
+        "binaries": binaries,
         "errors": errors,
     }
     out.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
