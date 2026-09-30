@@ -93,7 +93,8 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   - `ras/collectives.cc` (`COLLECTIVES_CC_PATH`, from
     `ras-collectives-test.cc`); suite `RasCollectivesMicrotest.*`. Covers
     request initialization, collective forwarding and responses, completion,
-    timeout handling, history, connection cleanup, and failure propagation.
+    timeout handling, history, connection cleanup, diagnostics-init failure
+    absorption, and dependency-error propagation.
   - `ras/client.cc` (`RAS_CLIENT_CC_PATH`, from `ras-client-test.cc`); suite
     `RasClientMicrotest.*`. With
     `NCCL_RAS_CLIENT` defined, `ras_internal.h` reduces to four macros, so this
