@@ -12,6 +12,7 @@ import pytest
 from utils.file_io import (
     create_df_kernel_top_stats,
     create_df_pmc,
+    filter_dispatch_frame,
     is_single_panel_config,
     load_kernel_short_names,
     rank_kernels_by_total_duration,
@@ -115,6 +116,34 @@ def test_ranking_uses_total_duration_not_longest_dispatch() -> None:
         "kernel_frequent",
         "kernel_long",
     ]
+
+
+@pytest.mark.parametrize(
+    "gpu_ids,kernel_ids,dispatch_ids,expected_ids",
+    [
+        (None, None, None, [1, 2, 3, 4]),
+        (["0"], None, None, [1, 2, 4]),
+        (None, None, ["> 2"], [3, 4]),
+        (None, None, ["4", "1"], [1, 4]),
+        (None, [0], None, [1, 3]),
+        (["0"], [0], None, [2]),
+        (None, [0], ["> 2"], [3]),
+    ],
+)
+def test_dispatch_filter_ranks_after_gpu_and_dispatch_filters(
+    gpu_ids, kernel_ids, dispatch_ids, expected_ids
+):
+    """Kernel IDs index filtered total durations and preserve source row order."""
+    original = _raw_pmc()
+    filtered = filter_dispatch_frame(original, gpu_ids, kernel_ids, dispatch_ids)
+    assert filtered["Dispatch_ID"].tolist() == expected_ids
+    pd.testing.assert_frame_equal(original, _raw_pmc())
+
+
+def test_dispatch_filter_kernel_id_bounds_follow_filtered_ranking():
+    """A dispatch filter can leave fewer valid kernel IDs than the full frame."""
+    with pytest.raises(SystemExit):
+        filter_dispatch_frame(_raw_pmc(), None, [1], ["1"])
 
 
 def test_kernel_duration_statistics_match_top_stats() -> None:

@@ -13,6 +13,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
+* CLI roofline analysis now computes once and builds HTML, terminal plots, and per-kernel tables from the same in-memory database rows used by database analysis.
+
 * Updated the analysis database schema version from 2.3.0 to 3.0.0.
 
 * Analyze writes roofline HTML, text reports, databases, CSV exports, and `ml_api_trace/` under `--output-directory`, which defaults to `./analysis/`. Roofline HTML and operator trace output move out of the profiling workload directory. A rerun into a non-empty analysis directory requires `--overwrite`, which clears that directory.

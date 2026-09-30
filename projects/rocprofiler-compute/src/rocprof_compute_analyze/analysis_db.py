@@ -1,7 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-import re
 from pathlib import Path
 from typing import Any, Dict, NamedTuple, Optional
 
@@ -43,11 +42,12 @@ from roofline.roofline_main import ROOFLINE_SUPPORTED, Roofline
 from utils import file_io, schema, utils_analysis
 from utils.analysis_orm import Database
 from utils.file_io import (
+    filter_dispatch_frame as filter_dispatch_frame,
+)
+from utils.file_io import (
     load_kernel_short_names,
     load_pc_sampling_results,
     process_pc_sampling_kernel_traces,
-    rank_kernels_by_total_duration,
-    validate_kernel_filter_ids,
 )
 from utils.logger import (
     console_debug,
@@ -74,51 +74,11 @@ from utils.utils_analysis import (
     PEAK_COL_PREFERENCE,
     VALUE_COL_PREFERENCE,
 )
-from utils.utils_common import get_uuid, get_version, normalize_filter_to_str_list
+from utils.utils_common import get_uuid, get_version
 
 KernelKey = str
 CodeObjectKey = tuple[int, int]
 KernelSymbolKey = tuple[int, int, str]  # (pid, code_object_id, kernel_name)
-
-
-def filter_dispatch_frame(
-    dispatch_frame: pd.DataFrame,
-    filter_gpu_ids: Optional[list[str]],
-    filter_kernel_ids: Optional[list[int]],
-    filter_dispatch_ids: Optional[list[str]],
-) -> pd.DataFrame:
-    """Apply the analysis mode filters to one frame of dispatch rows.
-
-    The frame carries the profiler's column names, so both the counter frame
-    and the PC-sampling trace can be filtered by the same rules. Kernel ids
-    index the gpu and dispatch filtered ranking, the same ids the cli mode's
-    top stats table shows.
-    """
-    if filter_gpu_ids:
-        dispatch_frame = dispatch_frame.loc[
-            dispatch_frame["GPU_ID"]
-            .astype(str)
-            .isin(normalize_filter_to_str_list(filter_gpu_ids))
-        ]
-    if filter_dispatch_ids:
-        if ">" in filter_dispatch_ids[0]:
-            dispatch_bound = re.match(r"\>\s*(\d+)", filter_dispatch_ids[0])
-            dispatch_frame = dispatch_frame[
-                dispatch_frame["Dispatch_ID"] > int(dispatch_bound.group(1))
-            ]
-        else:
-            dispatch_frame = dispatch_frame.loc[
-                dispatch_frame["Dispatch_ID"].astype(str).isin(filter_dispatch_ids)
-            ]
-    if filter_kernel_ids:
-        top_kernels = rank_kernels_by_total_duration(dispatch_frame)
-        validate_kernel_filter_ids(filter_kernel_ids, len(top_kernels))
-        dispatch_frame = dispatch_frame.loc[
-            dispatch_frame["Kernel_Name"].isin([
-                top_kernels[kernel_id] for kernel_id in filter_kernel_ids
-            ])
-        ]
-    return dispatch_frame
 
 
 class MetricInfoRow(NamedTuple):

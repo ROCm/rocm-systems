@@ -4,17 +4,25 @@
 import argparse
 import sys
 from pathlib import Path
+from typing import Optional
 
 import pandas as pd
 
 from membw_analysis.engine import run_membw_analysis
-from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
+from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base, new_workload_row
+from roofline.roofline_analysis import (
+    compute_roofline,
+    load_roofline_view,
+    persist_roofline,
+)
 from roofline.roofline_main import ROOFLINE_SUPPORTED, Roofline
+from utils import analysis_orm as orm
 from utils import file_io, parser, schema, tty
+from utils.analysis_orm import Database
 from utils.logger import console_error, console_log, console_warning, demarcate
+from utils.metrics import expression_evaluator
 from utils.roofline_calc import (
     ROOFLINE_DEVICE_ID,
-    calc_ai_analyze,
     load_roofline_benchmark,
 )
 from utils.utils_analysis import (
@@ -22,7 +30,6 @@ from utils.utils_analysis import (
     build_call_trees_with_kernel_ids,
     build_operator_summary,
     decode_marker_name,
-    get_matrix_ops_type,
     process_ml_api_trace_output,
     write_ml_api_trace_consolidated_csv,
 )
@@ -190,85 +197,7 @@ class cli_analysis(OmniAnalyze_Base):
                 self._output,
             )
         else:
-            roof_plot = None
-
-            # Generate roofline plot for single-path, compatible architectures
-            if (len(args.path)) == 1:
-                if gpu_arch in ROOFLINE_SUPPORTED:
-                    is_roofline_valid, roofline_error_msg = validate_roofline_csv(
-                        Path(workload_path)
-                    )
-                    soc = self.get_socs()
-                    if not soc or gpu_arch not in soc:
-                        console_warning(
-                            "roofline",
-                            "Skipping roofline charting: "
-                            f"gpu arch {gpu_arch} not in soc {soc}",
-                        )
-                    benchmark = (
-                        load_roofline_benchmark(
-                            Path(workload_path),
-                            ROOFLINE_DEVICE_ID,
-                            workload.sys_info.iloc[0],
-                        )
-                        if is_roofline_valid
-                        else None
-                    )
-                    if benchmark is not None and soc and gpu_arch in soc:
-                        soc_obj = soc[gpu_arch]
-
-                        roof_obj = Roofline(
-                            benchmark_peaks=benchmark.peaks,
-                            args=soc_obj.get_args(),
-                            mspec=soc_obj._mspec,
-                            run_parameters={
-                                "workload_dir": workload_path,
-                                "device_id": ROOFLINE_DEVICE_ID,
-                                "gpu_arch": gpu_arch,
-                                "sort_type": str(args.sort),
-                                "mem_level": args.mem_level,
-                                "roofline_data_type": args.roofline_data_type,
-                                "kernel_filter": bool(args.gpu_kernel),
-                                "iteration_multiplexing": self._profiling_config.get(
-                                    "iteration_multiplexing"
-                                ),
-                                "matrix_ops_type": get_matrix_ops_type(
-                                    workload.sys_info.iloc[0]["gpu_series"]
-                                ),
-                            },
-                        )
-                        workload.path = workload_path
-
-                        pmc_df = parser.apply_filters(
-                            workload, workload_path, is_gui=False, debug=args.debug
-                        )
-                        ai_data = calc_ai_analyze(
-                            workload=workload,
-                            pmc_df=pmc_df,
-                            arch_config=arch_config,
-                        )
-
-                        # NOTE: using default data type
-                        roof_plot = roof_obj.cli_generate_plot(
-                            dtype=roof_obj.get_dtype()[0],
-                            ai_data=ai_data,
-                        )
-
-                        (
-                            ops_fig,
-                            flops_fig,
-                            ops_dt,
-                            flops_dt,
-                        ) = roof_obj.construct_plotly_figures(ai_data=ai_data)
-                        roof_obj.save_html_files(
-                            ops_fig, flops_fig, ops_dt, flops_dt, self._output_dir
-                        )
-                    else:
-                        console_warning(
-                            "roofline",
-                            "Skipping roofline charting: "
-                            f"Invalid roofline.csv: {roofline_error_msg}",
-                        )
+            roof_plot = self.generate_roofline_plot(workload_path, workload)
 
             tty.show_all(
                 args,
@@ -278,6 +207,118 @@ class cli_analysis(OmniAnalyze_Base):
                 self._profiling_config,
                 roof_plot=roof_plot,
             )
+
+    def generate_roofline_plot(
+        self, workload_path: str, workload: schema.Workload
+    ) -> Optional[str]:
+        """Build CLI roofline artifacts from one temporary database view."""
+        args = self.get_args()
+        sys_info = workload.sys_info.iloc[0].to_dict()
+        gpu_arch = sys_info["gpu_arch"]
+        if len(args.path) != 1 or gpu_arch not in ROOFLINE_SUPPORTED:
+            return None
+        is_valid, roofline_error = validate_roofline_csv(Path(workload_path))
+        benchmark = (
+            load_roofline_benchmark(Path(workload_path), ROOFLINE_DEVICE_ID, sys_info)
+            if is_valid
+            else None
+        )
+        if benchmark is None:
+            console_warning(
+                "roofline",
+                f"Skipping roofline charting: Invalid roofline.csv: {roofline_error}",
+            )
+            return None
+        socs = self.get_socs()
+        if not socs or gpu_arch not in socs:
+            console_warning(
+                "roofline",
+                f"Skipping roofline charting: gpu arch {gpu_arch} not in soc {socs}",
+            )
+            return None
+
+        workload.path = workload_path
+        arch_config = self._arch_configs[gpu_arch]
+        pmc_df = parser.apply_filters(
+            workload, workload_path, is_gui=False, debug=args.debug
+        )
+        stats_df = file_io.filter_dispatch_frame(
+            workload.raw_pmc,
+            workload.filter_gpu_ids,
+            None,
+            workload.filter_dispatch_ids,
+        )
+        sys_info["_workload_path"] = workload_path
+        result = compute_roofline(
+            sys_info=sys_info,
+            arch_config=arch_config,
+            benchmark=benchmark,
+            pmc_df=pmc_df,
+            stats_df=stats_df,
+            evaluate=expression_evaluator.evaluate,
+        )
+        Database.init()
+        try:
+            workload_obj = new_workload_row(
+                workload_path,
+                workload.sys_info.iloc[0].to_dict(),
+                benchmark,
+                self._profiling_config,
+            )
+            Database.get_session().add(workload_obj)
+            kernel_objs = {
+                kernel.kernel_name: orm.Kernel(
+                    kernel_name=kernel.kernel_name, workload=workload_obj
+                )
+                for kernel in result.kernels
+            }
+            for kernel in kernel_objs.values():
+                Database.get_session().add(kernel)
+            persist_roofline(result, workload_obj, kernel_objs)
+            Database.commit()
+            view = load_roofline_view(
+                workload_obj.workload_id, ROOFLINE_DEVICE_ID, args.time_unit
+            )
+            kernel_order = workload.filter_kernel_ids
+            if kernel_order and all(isinstance(name, str) for name in kernel_order):
+                ranks_by_name = {
+                    kernel.kernel_name.strip(): kernel.kernel_rank
+                    for kernel in result.kernels
+                }
+                kernel_order = [
+                    ranks_by_name[name.strip()]
+                    for name in kernel_order
+                    if name.strip() in ranks_by_name
+                ]
+            workload.roofline_metrics = view.tty_tables(arch_config, kernel_order)
+            roofline = Roofline(
+                args=args,
+                mspec=socs[gpu_arch]._mspec,
+                run_parameters={
+                    "workload_dir": workload_path,
+                    "device_id": ROOFLINE_DEVICE_ID,
+                    "gpu_arch": gpu_arch,
+                    "sort_type": str(args.sort),
+                    "mem_level": args.mem_level,
+                    "roofline_data_type": args.roofline_data_type,
+                    "kernel_filter": bool(args.gpu_kernel),
+                    "iteration_multiplexing": self._profiling_config.get(
+                        "iteration_multiplexing"
+                    ),
+                    "matrix_ops_type": benchmark.matrix_ops_type,
+                },
+                benchmark_peaks=view.benchmark_peaks,
+            )
+            roof_plot = roofline.cli_generate_plot(
+                dtype=roofline.get_dtype()[0], ai_data=view.plot_points
+            )
+            roofline.save_html_files(
+                *roofline.construct_plotly_figures(ai_data=view.plot_points),
+                output_dir=self._output_dir,
+            )
+            return roof_plot
+        finally:
+            Database.close()
 
     @staticmethod
     def _filter_by_backend(consolidated_df: pd.DataFrame, backend: str) -> pd.DataFrame:

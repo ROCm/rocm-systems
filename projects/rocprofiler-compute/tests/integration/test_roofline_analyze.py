@@ -7,6 +7,7 @@ MI200 (gfx90a) tests run through the ``analyze`` CLI and assert that roofline
 HTML is generated, including the per-datatype VALU/MFMA legend.
 """
 
+import copy
 import json
 import re
 import shutil
@@ -19,8 +20,13 @@ import common
 import pandas as pd
 import pytest
 
+from rocprof_compute_analyze import analysis_cli
+from roofline import roofline_analysis
 from roofline.roofline_frame import canonical_frame
+from roofline.roofline_main import Roofline
 from tests.integration import common as integration_common
+from utils import analysis_orm as orm
+from utils import parser, roofline_calc, tty
 
 config = {}
 config["cleanup"] = True
@@ -665,3 +671,157 @@ def test_analyze_roofline_csv_is_populated_before_session_close(
     assert len(metrics) == 34
     assert set(ceilings["ceiling_kind"]) == {"bandwidth", "compute"}
     assert roofs["knee_ai"].gt(0).all()
+
+
+@pytest.mark.parametrize(
+    "kernel_order", [[], [1, 0]], ids=["rank-order", "filter-order"]
+)
+def test_analyze_cli_roofline_matches_database_and_legacy_points(
+    binary_handler_analyze_rocprof_compute, tmp_path, monkeypatch, kernel_order
+):
+    """CLI plots and TTY tables consume the same persisted values as DB mode."""
+    workload_dir = setup_db_roofline_workload(tmp_path, positive=True)
+    db_output = tmp_path / "db_reports"
+    cli_output = tmp_path / "cli_reports"
+    common_arguments = [
+        "analyze",
+        "--path",
+        str(workload_dir),
+        "--block",
+        "4",
+        "--roofline-data-type",
+        "FP32",
+        "--time-unit",
+        "us",
+    ]
+    filter_arguments = ["--kernel", *map(str, kernel_order)] if kernel_order else []
+    code = binary_handler_analyze_rocprof_compute([
+        *common_arguments,
+        *filter_arguments,
+        "--output-directory",
+        str(db_output),
+        "--output-format",
+        "db",
+        "--output-name",
+        "result",
+    ])
+    assert code == 0
+    db_html = next(db_output.glob("empirRoof_gpu-0*.html"))
+    db_model = embedded_roofline_model(db_html.read_text(encoding="utf-8"))
+    captures = {}
+    original_compute = roofline_analysis.compute_roofline
+    original_load = roofline_analysis.load_roofline_view
+    original_terminal = Roofline.cli_generate_plot
+    original_show_all = tty.show_all
+
+    def capture_compute(*args, **kwargs):
+        result = original_compute(*args, **kwargs)
+        captures["compute"] = result
+        return result
+
+    def capture_load(*args, **kwargs):
+        view = original_load(*args, **kwargs)
+        captures["view"] = view
+        return view
+
+    def capture_terminal(self, dtype, ai_data):
+        captures["terminal"] = copy.deepcopy(ai_data)
+        return original_terminal(self, dtype, ai_data)
+
+    def capture_tty(args, runs, arch_config, output, profiling_config, roof_plot=None):
+        workload = next(iter(runs.values()))
+        captures["tty"] = copy.deepcopy(workload.roofline_metrics)
+        # The retained legacy implementation is an independent evaluator oracle.
+        legacy_workload = copy.deepcopy(workload)
+        pmc_frame = parser.apply_filters(
+            legacy_workload, str(workload_dir), is_gui=False, debug=args.debug
+        )
+        captures["legacy"] = roofline_calc.calc_ai_analyze(
+            legacy_workload, pmc_frame, arch_config
+        )
+        return original_show_all(
+            args, runs, arch_config, output, profiling_config, roof_plot=roof_plot
+        )
+
+    monkeypatch.setattr(roofline_analysis, "compute_roofline", capture_compute)
+    monkeypatch.setattr(roofline_analysis, "load_roofline_view", capture_load)
+    monkeypatch.setattr(
+        analysis_cli, "compute_roofline", capture_compute, raising=False
+    )
+    monkeypatch.setattr(analysis_cli, "load_roofline_view", capture_load, raising=False)
+    monkeypatch.setattr(Roofline, "cli_generate_plot", capture_terminal)
+    monkeypatch.setattr(tty, "show_all", capture_tty)
+    code = binary_handler_analyze_rocprof_compute([
+        *common_arguments,
+        *filter_arguments,
+        "--output-directory",
+        str(cli_output),
+    ])
+    assert code == 0
+    assert "compute" in captures
+    assert "view" in captures
+    assert orm.Database.get_session() is None
+    assert orm.Database._engine is None
+    view = captures["view"]
+    assert captures["terminal"] == view.plot_points
+    assert len(view.kernel_rows) == 2
+    assert len(captures["tty"]) == 2
+    assert list(captures["tty"]) == (kernel_order or [0, 1])
+    assert view.plot_points["kernelNames"]
+    for field in ["ai_hbm", "ai_l2", "ai_l1", "ai_lds"]:
+        for queried_values, legacy_values in zip(
+            view.plot_points[field], captures["legacy"][field]
+        ):
+            assert queried_values == pytest.approx(legacy_values)
+    for field in ["kernelNames", "counts", "totalTime", "pctRuntime", "timeUnit"]:
+        assert view.plot_points[field] == captures["legacy"][field]
+    cli_html = next(cli_output.glob("empirRoof_gpu-0*.html"))
+    cli_model = embedded_roofline_model(cli_html.read_text(encoding="utf-8"))
+    assert cli_model["kernels"] == db_model["kernels"]
+    assert cli_model["frame"] == db_model["frame"]
+    document = cli_html.read_text(encoding="utf-8")
+    for limiter in view.limiters:
+        if (
+            limiter["envelope"] == "FP32"
+            and limiter["kernel_name"] in view.plot_points["kernelNames"]
+        ):
+            assert f"Performance limiter: {limiter['limiter']}" in document
+    connection = sqlite3.connect(db_output / "result.db")
+    connection.row_factory = sqlite3.Row
+    try:
+        metric_rows = sqlite_rows(
+            connection, "SELECT * FROM compute_kernel_roofline_metric_view"
+        )
+        for tables in captures["tty"].values():
+            rows = {
+                row["metric_id"]: row
+                for row in metric_rows
+                if row["kernel_name"] == tables["name"]
+            }
+            assert rows
+            for table_key in ["ai_table", "calc_table"]:
+                for metric_id, display_row in tables[table_key].iterrows():
+                    stored = rows[str(metric_id)]
+                    expected = "N/A" if stored["value"] is None else stored["value"]
+                    if expected == "N/A":
+                        assert display_row["Value"] == expected
+                    else:
+                        assert display_row["Value"] == pytest.approx(expected)
+                    if "Peak (Empirical)" in display_row:
+                        expected_peak = (
+                            "N/A" if stored["peak"] is None else stored["peak"]
+                        )
+                        assert display_row["Peak (Empirical)"] == expected_peak
+                    if "Percent of Peak" in display_row:
+                        expected_percent = (
+                            ""
+                            if stored["percent_of_peak"] is None
+                            else stored["percent_of_peak"]
+                        )
+                        assert display_row["Percent of Peak"] == expected_percent
+        assert any(
+            tables["calc_table"]["Value"].eq("N/A").any()
+            for tables in captures["tty"].values()
+        )
+    finally:
+        connection.close()

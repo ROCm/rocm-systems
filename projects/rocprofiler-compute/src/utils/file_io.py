@@ -102,6 +102,46 @@ def validate_kernel_filter_ids(
             )
 
 
+def filter_dispatch_frame(
+    dispatch_frame: pd.DataFrame,
+    filter_gpu_ids: Optional[list[str]],
+    filter_kernel_ids: Optional[list[int]],
+    filter_dispatch_ids: Optional[list[str]],
+) -> pd.DataFrame:
+    """Apply the analysis mode filters to one frame of dispatch rows.
+
+    The frame carries the profiler's column names, so both the counter frame
+    and the PC-sampling trace can be filtered by the same rules. Kernel ids
+    index the gpu and dispatch filtered ranking, the same ids the cli mode's
+    top stats table shows.
+    """
+    if filter_gpu_ids:
+        dispatch_frame = dispatch_frame.loc[
+            dispatch_frame["GPU_ID"]
+            .astype(str)
+            .isin(normalize_filter_to_str_list(filter_gpu_ids))
+        ]
+    if filter_dispatch_ids:
+        if ">" in filter_dispatch_ids[0]:
+            dispatch_bound = re.match(r"\>\s*(\d+)", filter_dispatch_ids[0])
+            dispatch_frame = dispatch_frame[
+                dispatch_frame["Dispatch_ID"] > int(dispatch_bound.group(1))
+            ]
+        else:
+            dispatch_frame = dispatch_frame.loc[
+                dispatch_frame["Dispatch_ID"].astype(str).isin(filter_dispatch_ids)
+            ]
+    if filter_kernel_ids:
+        top_kernels = rank_kernels_by_total_duration(dispatch_frame)
+        validate_kernel_filter_ids(filter_kernel_ids, len(top_kernels))
+        dispatch_frame = dispatch_frame.loc[
+            dispatch_frame["Kernel_Name"].isin([
+                top_kernels[kernel_id] for kernel_id in filter_kernel_ids
+            ])
+        ]
+    return dispatch_frame
+
+
 def kernel_duration_stats(df: pd.DataFrame) -> pd.DataFrame:
     """Return ranked kernel counts, nanosecond durations, and runtime shares."""
     execution_times = df["End_Timestamp"] - df["Start_Timestamp"]
