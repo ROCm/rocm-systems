@@ -246,7 +246,7 @@ unreliable_hip_ordinal_mask()
 [[nodiscard]] bool
 hip_ordinal_mapping_is_reliable()
 {
-    static const bool reliable = [] {
+    static const bool k_reliable = [] {
         const auto unreliable = unreliable_hip_ordinal_mask();
         if(!unreliable)
         {
@@ -262,7 +262,7 @@ hip_ordinal_mapping_is_reliable()
                     unreliable->name, unreliable->value);
         return false;
     }();
-    return reliable;
+    return k_reliable ;
 }
 }  // namespace
 
