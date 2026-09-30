@@ -1319,6 +1319,23 @@ static int rcclP2pPolicyChannels(struct ncclComm* comm, struct ncclTaskP2p* task
   return -1;
 }
 
+// Direct AllGather connects every peer up front, so its P2P connections cost p2pnChannelsPerPeer
+// x nRanks buffers per rank. Across gfx942 nodes that can exhaust the HBM left free by frameworks
+// that preallocate most of it, and 2 channels per peer keep Direct's bandwidth there. Inside a
+// node the full count stays: the grouped 4 MiB AllGather needs it. The cap applies to Direct
+// AllGather's tasks only; other P2P traffic keeps p2pnChannelsPerPeer.
+// -1 = arch default (2 on multi-node gfx942, otherwise no cap), 0 = no cap, N = at most N per peer.
+RCCL_PARAM(DirectAllGatherP2pNChannels, "DIRECT_ALLGATHER_P2P_NCHANNELS", -1);
+
+// Channels per peer a P2P task may use: its parts are the first N of the peer's channel map.
+static int rcclP2pTaskParts(struct ncclComm* comm, ncclFunc_t collAPI) {
+  int full = comm->p2pnChannelsPerPeer;
+  if (collAPI != ncclFuncAllGather) return full;
+  int64_t cap = rcclParamDirectAllGatherP2pNChannels();
+  if (cap < 0) cap = (comm->cudaArch == 940 && comm->nNodes > 1) ? 2 : 0;
+  return cap > 0 ? (int)std::min<int64_t>(full, cap) : full;
+}
+
 // Put p2p op in plan assuming there is sizeof(ncclDevWorkBatch) in batch budget
 // and sizeof(ncclDevWorkP2p) in work budget. "sendRank" and "recvRank" must
 // match the corresponding values for this round of the p2p schedule (no -1's).
@@ -1343,6 +1360,11 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   // Keep policy direction-local so a different task paired in the same planner
   // round cannot change the channel count selected by this task's peer.
   int kChannels[2] = {rcclP2pPolicyChannels(comm, p2pTasks[0]), rcclP2pPolicyChannels(comm, p2pTasks[1])};
+  // Parts past a task's cap were never preconnected (see p2pTaskAppend).
+  int partCap[2];
+  for (int dir = 0; dir < 2; dir++)
+    partCap[dir] =
+      p2pTasks[dir] ? std::min(nChannelsMax, rcclP2pTaskParts(comm, p2pTasks[dir]->collAPI)) : nChannelsMax;
   bool batchP2P = rcclP2pBatchEligible(comm, sendBytes, recvBytes);
   // Keep work-fusion size-gated (batchP2P) but select the channel map from the
   // communicator flag. Keying the map to eligibility collapsed large AllToAll
@@ -1388,6 +1410,7 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
         ncclP2pChannelForPart(comm->p2pnChannels, base, part, nChannelsMax, comm->nNodes, comm->p2pChannelShiftSize);
       struct ncclChannelPeer** channelPeers = comm->channels[channelId].peers;
       for (int dir = 0; dir <= 1; dir++) {
+        if (part >= partCap[dir]) continue;
         int peerRank = dir ? sendRank : recvRank;
         struct ncclConnector* conn =
           dir ? &channelPeers[peerRank]->send[connIndex[dir]] : &channelPeers[peerRank]->recv[connIndex[dir]];
@@ -1432,9 +1455,9 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
       // sides of a P2P pair agree on nChStart — planTotalTasks varies per rank.
       bool asymmetric =
         p2pTasks[dir] && (p2pTasks[dir]->collAPI == ncclFuncGather || p2pTasks[dir]->collAPI == ncclFuncScatter);
-      int nChMax = kChannels[dir] > 0 ? std::min(kChannels[dir], nChannelsMax) : nChannelsMax;
-      int nChStart =
-        kChannels[dir] > 0 ? nChMax : ((comm->nNodes <= 1 && asymmetric) ? nChannelsMax : nChannelsMin);
+      int nChMax = std::min(kChannels[dir] > 0 ? std::min(kChannels[dir], nChannelsMax) : nChannelsMax, partCap[dir]);
+      int nChStart = std::min(
+        kChannels[dir] > 0 ? nChMax : ((comm->nNodes <= 1 && asymmetric) ? nChannelsMax : nChannelsMin), nChMax);
       nChannels[dir] = std::min<int>(nChStart, divUp(bytes[dir], minPartSize));
       size_t partSize = std::max(minPartSize, divUp(bytes[dir], nChannels[dir]));
       while (partSize > maxPartSize && nChannels[dir] <= nChMax / 2) {
@@ -1492,7 +1515,7 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
         if (bytes[dir] > 0 && proxySameProcess[dir] && protocol[dir] == NCCL_PROTO_SIMPLE && (!pxnUsed)) {
           int regFlag = 0;
           NCCLCHECKGOTO(ncclCalloc(&handles[dir], nChannelsMax), ret, cleanup);
-          for (int part = 0; part < nChannelsMax; part++) {
+          for (int part = 0; part < partCap[dir]; part++) {
             int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, part, nChannelsMax, comm->nNodes,
                                                   comm->p2pChannelShiftSize);
             struct ncclChannelPeer** channelPeers = comm->channels[channelId].peers;
@@ -1538,9 +1561,9 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
       // sides of a P2P pair agree on nChStart — planTotalTasks varies per rank.
       bool asymmetric =
         p2pTasks[dir] && (p2pTasks[dir]->collAPI == ncclFuncGather || p2pTasks[dir]->collAPI == ncclFuncScatter);
-      int nChMax = kChannels[dir] > 0 ? std::min(kChannels[dir], nChannelsMax) : nChannelsMax;
-      int nChStart =
-        kChannels[dir] > 0 ? nChMax : ((comm->nNodes <= 1 && asymmetric) ? nChannelsMax : nChannelsMin);
+      int nChMax = std::min(kChannels[dir] > 0 ? std::min(kChannels[dir], nChannelsMax) : nChannelsMax, partCap[dir]);
+      int nChStart = std::min(
+        kChannels[dir] > 0 ? nChMax : ((comm->nNodes <= 1 && asymmetric) ? nChannelsMax : nChannelsMin), nChMax);
       nChannels[dir] = std::min<int>(nChStart, divUp(bytes[dir], minPartSize));
       size_t partSize = std::max(minPartSize, divUp(bytes[dir], nChannels[dir]));
       while (partSize > maxPartSize && nChannels[dir] <= nChMax / 2) {
@@ -3634,14 +3657,18 @@ static ncclResult_t p2pTaskAppend(struct ncclComm* comm, struct ncclInfo* info, 
   // Mark channels that need pre-connect
   if (comm->rank != peer) {
     if (!(isSendNotRecv ? planner->peers[peer].sendSeen : planner->peers[peer].recvSeen)) {
+      int nParts = rcclP2pTaskParts(comm, collAPI);
       // planner->peers[peer].send/recvSeen is private to each comm, so we need to set it anyway.
-      (isSendNotRecv ? planner->peers[peer].sendSeen : planner->peers[peer].recvSeen) = true;
+      // A capped task connects only its first nParts channels and leaves the peer unseen, so an
+      // uncapped task to the same peer later in the group still connects the rest.
+      if (nParts == comm->p2pnChannelsPerPeer)
+        (isSendNotRecv ? planner->peers[peer].sendSeen : planner->peers[peer].recvSeen) = true;
       int round = 0;
       while (peer != (isSendNotRecv ? comm->p2pSchedule[round].sendRank : comm->p2pSchedule[round].recvRank)) {
         round += 1;
       }
       uint8_t base = ncclP2pChannelBaseForRound(comm, round, rcclEffectiveP2pBatchEnable(comm));
-      for (int c = 0; c < comm->p2pnChannelsPerPeer; c++) {
+      for (int c = 0; c < nParts; c++) {
           int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, c, comm->p2pnChannelsPerPeer, comm->nNodes,
                                                 comm->p2pChannelShiftSize);
           if (isSendNotRecv) {

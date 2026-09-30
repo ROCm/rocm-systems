@@ -78,3 +78,5 @@ ncclResult_t ncclProfilerRecordGroupApiEventState(ncclProfilerEventState_t) { re
 ncclResult_t ncclProfilerStopGroupApiEvent() { return ncclSuccess; }
 ncclResult_t ncclProfilerStartCollApiEvent(struct ncclInfo*, bool) { return ncclSuccess; }
 ncclResult_t ncclProfilerStopCollApiEvent() { return ncclSuccess; }
+ncclResult_t ncclProfilerStartP2pApiEvent(struct ncclInfo*, bool) { return ncclSuccess; }
+ncclResult_t ncclProfilerStopP2pApiEvent() { return ncclSuccess; }

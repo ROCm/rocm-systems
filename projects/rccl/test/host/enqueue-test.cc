@@ -1989,6 +1989,78 @@ TEST_F(EnqueueMicrotest, EffectiveP2pBatchEnable_MultiNodeOtherArch_IsDisabled) 
 }
 
 // ===========================================================================
+// rcclP2pTaskParts (enqueue.cc:1331) -- channels per peer a P2P task may use.
+// Only Direct AllGather's tasks (collAPI == AllGather) are ever capped, the
+// default cap is multi-node gfx942 only, and no cap raises the count.
+// ===========================================================================
+
+namespace {
+// cudaArch is 100 * major + 10 * minor (init.cc), so gfx942 is 940.
+struct PartsComm {
+  std::unique_ptr<ncclComm> comm{new ncclComm{}};
+  PartsComm(int cudaArch, int nNodes, int perPeer) {
+    comm->cudaArch = cudaArch;
+    comm->nNodes = nNodes;
+    comm->p2pnChannelsPerPeer = perPeer;
+  }
+  ncclComm* get() { return comm.get(); }
+};
+void SetDirectAgCap(int64_t v) { SetParam("RCCL_DIRECT_ALLGATHER_P2P_NCHANNELS", v); }
+}  // namespace
+
+TEST_F(EnqueueMicrotest, P2pTaskParts_Gfx942MultiNode_CapsDirectAllGatherToTwo) {
+  PartsComm pc(/*cudaArch=*/940, /*nNodes=*/2, /*perPeer=*/4);
+  EXPECT_EQ(2, rcclP2pTaskParts(pc.get(), ncclFuncAllGather));
+}
+
+TEST_F(EnqueueMicrotest, P2pTaskParts_Gfx942SingleNode_KeepsFullCount) {
+  // Differential with the test above: same arch, one node.
+  PartsComm pc(/*cudaArch=*/940, /*nNodes=*/1, /*perPeer=*/8);
+  EXPECT_EQ(8, rcclP2pTaskParts(pc.get(), ncclFuncAllGather));
+}
+
+TEST_F(EnqueueMicrotest, P2pTaskParts_OtherArchMultiNode_KeepsFullCount) {
+  for (int arch : {900, 950, 1100}) {
+    PartsComm pc(arch, /*nNodes=*/2, /*perPeer=*/4);
+    EXPECT_EQ(4, rcclP2pTaskParts(pc.get(), ncclFuncAllGather)) << "cudaArch=" << arch;
+  }
+}
+
+TEST_F(EnqueueMicrotest, P2pTaskParts_OtherP2pTraffic_NeverCapped) {
+  // Where the default caps Direct AllGather, and under an explicit cap too.
+  PartsComm pc(/*cudaArch=*/940, /*nNodes=*/2, /*perPeer=*/4);
+  for (int64_t cap : {int64_t(-1), int64_t(1)}) {
+    SetDirectAgCap(cap);
+    for (ncclFunc_t f : {ncclFuncSend, ncclFuncRecv, ncclFuncAlltoAll, ncclFuncGather, ncclFuncScatter}) {
+      EXPECT_EQ(4, rcclP2pTaskParts(pc.get(), f)) << "collAPI=" << f << " cap=" << cap;
+    }
+  }
+}
+
+TEST_F(EnqueueMicrotest, P2pTaskParts_ZeroOverride_DisablesDefaultCap) {
+  PartsComm pc(/*cudaArch=*/940, /*nNodes=*/2, /*perPeer=*/4);
+  SetDirectAgCap(0);
+  EXPECT_EQ(4, rcclP2pTaskParts(pc.get(), ncclFuncAllGather));
+}
+
+TEST_F(EnqueueMicrotest, P2pTaskParts_Override_AppliesOnAnyArchAndNodeCount) {
+  PartsComm single(/*cudaArch=*/950, /*nNodes=*/1, /*perPeer=*/8);
+  SetDirectAgCap(1);
+  EXPECT_EQ(1, rcclP2pTaskParts(single.get(), ncclFuncAllGather));
+  PartsComm multi(/*cudaArch=*/940, /*nNodes=*/2, /*perPeer=*/4);
+  SetDirectAgCap(3);
+  EXPECT_EQ(3, rcclP2pTaskParts(multi.get(), ncclFuncAllGather));
+}
+
+TEST_F(EnqueueMicrotest, P2pTaskParts_CapAboveFullCount_KeepsFullCount) {
+  PartsComm fewer(/*cudaArch=*/940, /*nNodes=*/4, /*perPeer=*/1);
+  EXPECT_EQ(1, rcclP2pTaskParts(fewer.get(), ncclFuncAllGather)) << "default cap 2 must not raise 1";
+  PartsComm pc(/*cudaArch=*/940, /*nNodes=*/2, /*perPeer=*/4);
+  SetDirectAgCap(16);
+  EXPECT_EQ(4, rcclP2pTaskParts(pc.get(), ncclFuncAllGather));
+}
+
+// ===========================================================================
 // getImplicitOrder (enqueue.cc:2091)
 // Reads comm->config.launchOrderImplicit (env is applied at init). On AMD the
 // CUDA driver-version arm is #if'd out, so only two arms are reachable:
@@ -2380,6 +2452,100 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_EveryItemLandsInExactlyOneBatch) {
   EXPECT_EQ(kItems, bits) << "every call must set exactly one slot bit";
   EXPECT_EQ(bp.queueLength(), bp.p()->nWorkBatches)
       << "plan->nWorkBatches must track the queue length";
+}
+
+// ===========================================================================
+// p2pTaskAppend preconnect (enqueue.cc:3657) -- a capped task marks only its
+// first parts for connection and leaves the peer unseen, so an uncapped task to
+// the same peer later in the group still marks the rest. Uses SetDirectAgCap
+// from the rcclP2pTaskParts group and BatchPlanComm from addWorkBatchToPlan.
+// ===========================================================================
+
+namespace {
+// Rank 0 of 4 on one node: a round's channel base is the round itself, and part
+// p of a peer's task lands on channel base * perPeer + p (ncclP2pChannelForPart).
+// Peer 1 is sent to in round 1 (channels 4..7) and received from in round 3
+// (channels 12..15).
+struct PreconnectComm {
+  static constexpr int kRanks = 4;
+  static constexpr int kP2pChannels = 16;
+  static constexpr int kPerPeer = 4;
+  BatchPlanComm bpc{/*nNodes=*/1, /*cudaArch=*/940};
+  std::vector<ncclKernelPlanner::Peer> plannerPeers = std::vector<ncclKernelPlanner::Peer>(kRanks);
+  std::vector<ncclComm::P2pSchedulePair> schedule = std::vector<ncclComm::P2pSchedulePair>(kRanks);
+  std::vector<channelMasks> connectSend = std::vector<channelMasks>(kRanks);
+  std::vector<channelMasks> connectRecv = std::vector<channelMasks>(kRanks);
+  std::vector<ncclChannelPeer> peerStore = std::vector<ncclChannelPeer>(kP2pChannels * kRanks);
+  std::vector<ncclChannelPeer*> peerPtrs = std::vector<ncclChannelPeer*>(kP2pChannels * kRanks);
+  char buff[64] = {};
+
+  PreconnectComm() {
+    ncclComm* comm = bpc.c();
+    comm->rank = 0;
+    comm->nRanks = kRanks;
+    comm->p2pnChannels = kP2pChannels;
+    comm->p2pnChannelsPerPeer = kPerPeer;
+    comm->planner.peers = plannerPeers.data();
+    comm->connectSend = connectSend.data();
+    comm->connectRecv = connectRecv.data();
+    for (int r = 0; r < kRanks; r++) schedule[r] = {r, (kRanks - r) % kRanks};
+    comm->p2pSchedule = schedule.data();
+    for (int c = 0; c < kP2pChannels; c++) {
+      for (int p = 0; p < kRanks; p++) peerPtrs[c * kRanks + p] = &peerStore[c * kRanks + p];
+      comm->channels[c].peers = &peerPtrs[c * kRanks];
+    }
+  }
+  ncclResult_t append(ncclFunc_t coll, ncclFunc_t collAPI, int peer) {
+    ncclInfo info{};
+    return p2pTaskAppend(bpc.c(), &info, coll, collAPI, buff, sizeof(buff), ncclInt8, peer, false);
+  }
+  std::vector<int> seenChannels(bool send, int peer) {
+    std::vector<int> seen;
+    for (int c = 0; c < kP2pChannels; c++) {
+      ncclChannelPeer* cp = bpc.c()->channels[c].peers[peer];
+      if ((send ? cp->send[1] : cp->recv[1]).hasSeen) seen.push_back(c);
+    }
+    return seen;
+  }
+  ncclKernelPlanner::Peer& plannerPeer(int peer) { return plannerPeers[peer]; }
+};
+}  // namespace
+
+TEST_F(EnqueueMicrotest, P2pTaskAppendPreconnect_CappedSend_MarksFirstPartsOnly) {
+  PreconnectComm pc;
+  SetDirectAgCap(2);
+  ASSERT_EQ(ncclSuccess, pc.append(ncclFuncSend, ncclFuncAllGather, /*peer=*/1));
+  EXPECT_EQ(std::vector<int>({4, 5}), pc.seenChannels(/*send=*/true, 1));
+  EXPECT_EQ(uint64_t{0x30}, pc.connectSend[1].masks[0]);
+  EXPECT_FALSE(pc.plannerPeer(1).sendSeen) << "a capped task must leave the peer unseen";
+}
+
+TEST_F(EnqueueMicrotest, P2pTaskAppendPreconnect_CappedRecv_MarksFirstPartsOnly) {
+  PreconnectComm pc;
+  SetDirectAgCap(2);
+  ASSERT_EQ(ncclSuccess, pc.append(ncclFuncRecv, ncclFuncAllGather, /*peer=*/1));
+  EXPECT_EQ(std::vector<int>({12, 13}), pc.seenChannels(/*send=*/false, 1));
+  EXPECT_EQ(uint64_t{0x3000}, pc.connectRecv[1].masks[0]);
+  EXPECT_FALSE(pc.plannerPeer(1).recvSeen);
+}
+
+TEST_F(EnqueueMicrotest, P2pTaskAppendPreconnect_UncappedAfterCapped_MarksTheRest) {
+  // A Direct AllGather and a send/recv to the same peer in one group.
+  PreconnectComm pc;
+  SetDirectAgCap(2);
+  ASSERT_EQ(ncclSuccess, pc.append(ncclFuncSend, ncclFuncAllGather, /*peer=*/1));
+  ASSERT_EQ(ncclSuccess, pc.append(ncclFuncSend, ncclFuncSend, /*peer=*/1));
+  EXPECT_EQ(std::vector<int>({4, 5, 6, 7}), pc.seenChannels(/*send=*/true, 1));
+  EXPECT_EQ(uint64_t{0xF0}, pc.connectSend[1].masks[0]);
+  EXPECT_TRUE(pc.plannerPeer(1).sendSeen);
+}
+
+TEST_F(EnqueueMicrotest, P2pTaskAppendPreconnect_NoCap_MarksEveryPartAndThePeer) {
+  PreconnectComm pc;
+  SetDirectAgCap(0);
+  ASSERT_EQ(ncclSuccess, pc.append(ncclFuncSend, ncclFuncAllGather, /*peer=*/1));
+  EXPECT_EQ(std::vector<int>({4, 5, 6, 7}), pc.seenChannels(/*send=*/true, 1));
+  EXPECT_TRUE(pc.plannerPeer(1).sendSeen);
 }
 
 // ===========================================================================

@@ -18,11 +18,13 @@
 ASSERT_HOOK_MATCHES_PROD(g_ncclCollPreconnect, ncclCollPreconnect);
 #undef ASSERT_HOOK_MATCHES_PROD
 
-// group.cc's thread-local group state. ncclGroupCommJoin is inline in group.h,
-// so any TU that joins a comm to a group needs these even though it never calls
-// into group.cc. ncclGroupDepth/ncclGroupError sit in nccl_stubs.cc because the
-// fail-loud floor already needed them.
+// group.cc's thread-local group state. ncclGroupCommJoin and ncclGroupCommPreconnect
+// are inline in group.h, so any TU that joins a comm to a group or queues it for
+// preconnect needs these even though it never calls into group.cc.
+// ncclGroupDepth/ncclGroupError sit in nccl_stubs.cc because the fail-loud floor
+// already needed them.
 thread_local struct ncclComm* ncclGroupCommHead[ncclGroupTaskTypeNum] = {nullptr};
+thread_local struct ncclComm* ncclGroupCommPreconnectHead = nullptr;
 thread_local int ncclGroupBlocking = -1;  // group.cc's "default mode" sentinel
 
 ncclResult_t ncclGroupStartInternal() { return ncclSuccess; }
