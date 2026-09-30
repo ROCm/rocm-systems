@@ -230,6 +230,7 @@ configure_callback_spm_dispatch(rocprofiler_context_id_t                       c
     if(ctx.pc_sampler) return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
     if(ctx.dispatch_counter_collection) return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
     if(ctx.device_counter_collection) return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
+    if(ctx.device_spm) return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
     if(!ctx.dispatch_spm)
         ctx.dispatch_spm =
             std::make_unique<rocprofiler::context::spm_dispatch_counter_collection_service>();

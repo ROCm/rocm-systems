@@ -134,7 +134,6 @@ build_spm_profile_for_agent(rocprofiler_agent_id_t agent)
 {
     std::set<std::string> counters_to_collect;
     counters_to_collect.insert("SQ_WAVES");
-    counters_to_collect.insert("SQC_DCACHE_REQ");
 
     std::vector<rocprofiler_counter_id_t> gpu_counters;
 
@@ -177,7 +176,7 @@ build_spm_profile_for_agent(rocprofiler_agent_id_t agent)
     rocprofiler_spm_parameters_t interval_param = {
         .size  = sizeof(rocprofiler_spm_parameters_t),
         .type  = ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES,
-        .value = 100};
+        .value = 10000};
 
     rocprofiler_spm_parameters_t* params[] = {&interval_param};
 
