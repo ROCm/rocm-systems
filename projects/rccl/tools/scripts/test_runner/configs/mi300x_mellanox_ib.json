@@ -4011,8 +4011,18 @@
         {
           "name": "GIN_DeviceMPI_AllTests",
           "description": "GIN proxy device-side MPI tests over IB across two nodes (put/signal/counter/barrier/alltoall/recycle/splitShare)",
-          "test_filter": "GinMPIDeviceTests.*:GinProxyNthreadsSplitTests.*-GinMPIDeviceTests.MultiContext_NonPowerOf2:GinMPIDeviceTests.RailConnection_Create:GinMPIDeviceTests.*_MultiContext",
+          "test_filter": "GinMPIDeviceTests.*-GinMPIDeviceTests.MultiContext_NonPowerOf2:GinProxyNthreadsSplitTests.*-GinMPIDeviceTests.MultiContext_NonPowerOf2:GinMPIDeviceTests.RailConnection_Create:GinMPIDeviceTests.*_MultiContext:GinMPIDeviceTests.Signal_ExplicitWeak:GinMPIDeviceTests.Signal_ExplicitStrong",
           "timeout": 600
+        },
+        {
+          "name": "GIN_Signal_ExplicitWeak",
+          "description": "Weak GIN signal publishes its bundled put over the IB proxy",
+          "test_filter": "GinMPIDeviceTests.Signal_ExplicitWeak"
+        },
+        {
+          "name": "GIN_Signal_ExplicitStrong",
+          "description": "IB proxy (NCCL_GIN_TYPE=2) drops the strong bit; a pass shows same-QP order, not strong-signal enforcement",
+          "test_filter": "GinMPIDeviceTests.Signal_ExplicitStrong"
         },
         {
           "name": "GIN_DeviceMPI_MultiContext",

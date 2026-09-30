@@ -99,7 +99,9 @@ generate_xcp_metrics(const char* base_name, const std::string& base_track,
             auto suffix   = "_xcp" + std::to_string(xcp) + "[" + std::to_string(i) + "]";
             auto pmc_name = std::string(base_name) + suffix;
             auto track_name = base_track + suffix;
-            entries.push_back({ pmc_name, track_name, static_cast<double>(arr[i]) });
+            entries.push_back({ .pmc_name   = pmc_name,
+                                .track_name = track_name,
+                                .value      = static_cast<double>(arr[i]) });
         }
     }
     return entries;
@@ -121,7 +123,9 @@ generate_device_level_metrics(const std::string& base_name, bool is_enabled,
         auto suffix     = "_" + std::to_string(i);
         auto pmc_name   = base_name + suffix;
         auto track_name = pmc_name;
-        entries.push_back({ pmc_name, track_name, static_cast<double>(arr[i]) });
+        entries.push_back({ .pmc_name   = pmc_name,
+                            .track_name = track_name,
+                            .value      = static_cast<double>(arr[i]) });
     }
     return entries;
 }

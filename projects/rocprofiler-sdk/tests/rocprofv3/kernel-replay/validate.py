@@ -45,6 +45,7 @@ import sys
 # Python 3.6 compatibility: dataclasses added in 3.7
 try:
     from dataclasses import dataclass
+
     _HAVE_DATACLASS = True
 except ImportError:
     _HAVE_DATACLASS = False
@@ -102,6 +103,7 @@ EXACT_ACROSS_PASSES = frozenset(
 
 
 if _HAVE_DATACLASS:
+
     @dataclass(frozen=True)
     class PassTolerance:
         """Tolerance specification for counter variance across replay passes.
@@ -112,8 +114,10 @@ if _HAVE_DATACLASS:
         - Relative: for counters that scale with workload (most counters)
         - Absolute: for counters with hardware jitter independent of value (SQ_WAVES)
         """
+
         relative: float  # Relative tolerance as a fraction (e.g., 0.10 = 10%)
         absolute: float  # Absolute tolerance in counter units (e.g., 8.0 waves)
+
 else:
     # Python 3.6 fallback: simple immutable-by-convention class
     class PassTolerance:
@@ -125,11 +129,12 @@ else:
         - Relative: for counters that scale with workload (most counters)
         - Absolute: for counters with hardware jitter independent of value (SQ_WAVES)
         """
-        __slots__ = ('relative', 'absolute')
+
+        __slots__ = ("relative", "absolute")
 
         def __init__(self, relative, absolute):
-            object.__setattr__(self, 'relative', float(relative))
-            object.__setattr__(self, 'absolute', float(absolute))
+            object.__setattr__(self, "relative", float(relative))
+            object.__setattr__(self, "absolute", float(absolute))
 
         def __repr__(self):
             return f"PassTolerance(relative={self.relative}, absolute={self.absolute})"

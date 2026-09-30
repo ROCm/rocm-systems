@@ -1302,7 +1302,7 @@ bool CommandProcessor::signal_queue_exception(uint32_t queue_id, uint32_t proces
 }
 
 bool CommandProcessor::publish_queue_exception(uint32_t queue_id, uint32_t process_id,
-                                               uint64_t status) {
+                                               uint64_t status, bool wait_for_ack) {
   if (!gpu_vm_)
     return false;
 
@@ -1334,6 +1334,8 @@ bool CommandProcessor::publish_queue_exception(uint32_t queue_id, uint32_t proce
                             combined_status) != VmAccessOutcome::Complete)
     return false;
   interrupt_sink.deliver(process_id, exception_event_id);
+  if (!wait_for_ack)
+    return true;
   const auto deadline = std::chrono::steady_clock::now() + ack_timeout;
   AtomicLoadResult exception_status =
       gpu_vm_->atomic_load(address_space, exception_status_va, sizeof(uint64_t));

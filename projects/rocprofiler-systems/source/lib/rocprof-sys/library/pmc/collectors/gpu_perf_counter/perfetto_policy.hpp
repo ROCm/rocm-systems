@@ -87,8 +87,8 @@ struct perfetto_policy
             return;
         }
 
-        it->second.samples->emplace_back(
-            detail::gpu_perf_counter_perfetto_sample{ timestamp, metric_values });
+        it->second.samples->emplace_back(detail::gpu_perf_counter_perfetto_sample{
+            .timestamp = timestamp, .values = metric_values });
     }
 
     static void post_process(const enabled_metrics& /*enabled*/)

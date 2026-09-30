@@ -736,7 +736,12 @@ TEST_F(marker_write_test, all_backends_with_annotations)
     EXPECT_CALL(mock, pop_perfetto_ts(StrEq("my_region"), 2000,
                                       ElementsAre(IsAnnotation("end_ns", 2000u))));
     const auto thread_info =
-        rocprofsys::trace_cache::info::thread{ getppid(), getpid(), 42u, 0, 0, "{}" };
+        rocprofsys::trace_cache::info::thread{ .parent_process_id = getppid(),
+                                               .process_id        = getpid(),
+                                               .thread_id         = 42u,
+                                               .start             = 0,
+                                               .end               = 0,
+                                               .extdata           = "{}" };
     EXPECT_CALL(mock, add_thread_info(thread_info));
     EXPECT_CALL(mock,
                 store_region(AllOf(Field(&region_sample::thread_id, 42u),

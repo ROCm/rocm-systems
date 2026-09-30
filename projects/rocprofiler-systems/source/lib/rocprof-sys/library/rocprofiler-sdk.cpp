@@ -762,14 +762,19 @@ cache_category()
 void
 cache_add_thread_info(std::uint64_t tid)
 {
-    trace_cache::get_metadata_registry().add_thread_info(
-        { getppid(), getpid(), tid, 0, 0, "{}" });
+    trace_cache::get_metadata_registry().add_thread_info({ .parent_process_id = getppid(),
+                                                           .process_id        = getpid(),
+                                                           .thread_id         = tid,
+                                                           .start             = 0,
+                                                           .end               = 0,
+                                                           .extdata           = "{}" });
 }
 
 void
 cache_add_track(const char* track_name, std::uint64_t tid)
 {
-    trace_cache::get_metadata_registry().add_track({ track_name, tid, "{}" });
+    trace_cache::get_metadata_registry().add_track(
+        { .track_name = track_name, .thread_id = tid, .extdata = "{}" });
 }
 
 size_t
@@ -1071,8 +1076,8 @@ tool_code_object_callback(rocprofiler_callback_tracing_record_t record,
                 auto data_v = *static_cast<kernel_symbol_data_t*>(record.payload);
                 g_tool_data->kernel_symbol_records.wlock(
                     [ts, &record, &data_v](auto& _data) {
-                        _data.emplace_back(
-                            kernel_symbol_callback_record_t{ ts, record, data_v });
+                        _data.emplace_back(kernel_symbol_callback_record_t{
+                            .timestamp = ts, .record = record, .payload = data_v });
                     });
                 trace_cache::get_metadata_registry().add_kernel_symbol(data_v);
             }
@@ -1147,8 +1152,11 @@ ompt_iterate_operation_args(const rocprofiler_callback_tracing_record_t& record,
         }
         else
         {
-            args.emplace_back(argument_info{ static_cast<std::uint32_t>(args.size()),
-                                             flag_type, key, val });
+            args.emplace_back(
+                argument_info{ .arg_number = static_cast<std::uint32_t>(args.size()),
+                               .arg_type   = flag_type,
+                               .arg_name   = key,
+                               .arg_value  = val });
         }
     };
 
@@ -1380,7 +1388,8 @@ ompt_push_standard_callback(const rocprofiler_callback_tracing_record_t& record,
     ompt_iterate_operation_args(record, args);
     get_ompt_standard_cb_storage().emplace(
         record.correlation_id.internal,
-        rocprofsys_ompt_data_storage_t{ record, _beg_ts, args });
+        rocprofsys_ompt_data_storage_t{
+            .record = record, ._beg_ts = _beg_ts, .args = args });
 }
 
 void
@@ -1395,7 +1404,9 @@ ompt_pop_standard_callback(
     {
         auto args = function_args_t{};
         ompt_iterate_operation_args(record, args);
-        ompt_cache_orphan_event(rocprofsys_ompt_data_storage_t{ record, _end_ts, args },
+        ompt_cache_orphan_event(rocprofsys_ompt_data_storage_t{ .record  = record,
+                                                                ._beg_ts = _end_ts,
+                                                                .args    = args },
                                 _bt_data);
         return;
     }
@@ -1423,7 +1434,8 @@ ompt_push_parallel_callback(const rocprofiler_callback_tracing_record_t& record,
     ompt_iterate_operation_args(record, args);
     get_ompt_parallel_cb_storage().emplace(
         reinterpret_cast<uintptr_t>(parallel_data_address),
-        rocprofsys_ompt_data_storage_t{ record, _beg_ts, args });
+        rocprofsys_ompt_data_storage_t{
+            .record = record, ._beg_ts = _beg_ts, .args = args });
 }
 
 void
@@ -1443,7 +1455,9 @@ ompt_pop_parallel_callback(
     {
         auto args = function_args_t{};
         ompt_iterate_operation_args(record, args);
-        ompt_cache_orphan_event(rocprofsys_ompt_data_storage_t{ record, _end_ts, args },
+        ompt_cache_orphan_event(rocprofsys_ompt_data_storage_t{ .record  = record,
+                                                                ._beg_ts = _end_ts,
+                                                                .args    = args },
                                 _bt_data);
         return;
     }
@@ -1833,7 +1847,8 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                     // save for post-processing
                     get_kernel_dispatch_timestamps().emplace(
                         _data->dispatch_info.dispatch_id,
-                        timing_interval{ _data->start_timestamp, _data->end_timestamp });
+                        timing_interval{ .start = _data->start_timestamp,
+                                         .end   = _data->end_timestamp });
                 }
             }
             break;
@@ -2492,8 +2507,11 @@ counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_da
                 counter_storage{ g_tool_data, _dev_id, _dev_type_index, 0, info->name });
         }
 
-        auto _event = counter_event{ counter_dispatch_record{
-            &dispatch_data, _dispatch_id, itr.first, itr.second } };
+        auto _event =
+            counter_event{ counter_dispatch_record{ .dispatch_data  = &dispatch_data,
+                                                    .dispatch_id    = _dispatch_id,
+                                                    .counter_id     = itr.first,
+                                                    .record_counter = itr.second } };
 
         _agent_counter_storage->at(_agent_id).at(itr.first)(_event, _interval, _scope);
     }
@@ -3574,10 +3592,10 @@ extern "C"
         }
 
         static auto cfg = rocprofiler_tool_configure_result_t{
-            sizeof(rocprofiler_tool_configure_result_t),
-            &::rocprofsys::rocprofiler_sdk::tool_init,
-            &::rocprofsys::rocprofiler_sdk::tool_fini,
-            rocprofsys::rocprofiler_sdk::g_tool_data
+            .size       = sizeof(rocprofiler_tool_configure_result_t),
+            .initialize = &::rocprofsys::rocprofiler_sdk::tool_init,
+            .finalize   = &::rocprofsys::rocprofiler_sdk::tool_fini,
+            .tool_data  = rocprofsys::rocprofiler_sdk::g_tool_data
         };
         return &cfg;
     }
@@ -3594,10 +3612,10 @@ extern "C"
         }
 
         static auto cfg = rocprofiler_tool_configure_attach_result_t{
-            sizeof(rocprofiler_tool_configure_attach_result_t),
-            &rocprofsys::rocprofiler_sdk::tool_attach_init,
-            &rocprofsys::rocprofiler_sdk::tool_attach_fini,
-            rocprofsys::rocprofiler_sdk::g_tool_data
+            .size        = sizeof(rocprofiler_tool_configure_attach_result_t),
+            .tool_attach = &rocprofsys::rocprofiler_sdk::tool_attach_init,
+            .tool_detach = &rocprofsys::rocprofiler_sdk::tool_attach_fini,
+            .tool_data   = rocprofsys::rocprofiler_sdk::g_tool_data
         };
         return &cfg;
     }
