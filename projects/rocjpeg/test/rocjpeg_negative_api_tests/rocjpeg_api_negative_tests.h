@@ -88,6 +88,21 @@ class RocJpegApiNegativeTests {
          */
         int CheckParseInvariants(const std::vector<uint8_t> &data, const std::string &case_name);
 
+        /**
+         * @brief Destroys the decoder handle and clears the member.
+         *
+         * TestInvalidCreate destroys and recreates the handle several times over.
+         * Clearing it is what keeps those rounds independent: rocJpegCreate only
+         * writes through its out parameter once construction has succeeded, so a
+         * failure that returns early - the throw path in rocJpegCreate, for one -
+         * leaves whatever was there before, and the destructor would then hand a
+         * freed pointer back to rocJpegDestroy. A cleared member turns that into
+         * the documented null case instead of a double free.
+         *
+         * @return EXIT_SUCCESS when the destroy reported success.
+         */
+        int DestroyHandle();
+
         RocJpegHandle rocjpeg_handle_ = nullptr;
         RocJpegStreamHandle rocjpeg_stream_handle_ = nullptr;
         /**

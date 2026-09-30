@@ -322,13 +322,23 @@ uint32_t EnvOrDefault(const char *name, uint32_t fallback) {
 RocJpegApiNegativeTests:: RocJpegApiNegativeTests() {};
 
 RocJpegApiNegativeTests::~RocJpegApiNegativeTests() {
-    RocJpegStatus rocjpeg_status = rocJpegDestroy(rocjpeg_handle_);
-    if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
-        std::cerr << "Failed to destroy rocjpeg handle: " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+    // Either handle can still be null here, because a test that fails before
+    // creating one returns straight away. Destroying a null handle is the
+    // documented invalid-parameter case rather than an error worth reporting,
+    // so skip it instead of printing a failure the run did not actually have.
+    if (rocjpeg_handle_ != nullptr) {
+        RocJpegStatus rocjpeg_status = rocJpegDestroy(rocjpeg_handle_);
+        rocjpeg_handle_ = nullptr;
+        if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+            std::cerr << "Failed to destroy rocjpeg handle: " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+        }
     }
-    rocjpeg_status = rocJpegStreamDestroy(rocjpeg_stream_handle_);
-    if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
-        std::cerr << "Failed to destroy rocjpeg stream handle " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+    if (rocjpeg_stream_handle_ != nullptr) {
+        RocJpegStatus rocjpeg_status = rocJpegStreamDestroy(rocjpeg_stream_handle_);
+        rocjpeg_stream_handle_ = nullptr;
+        if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+            std::cerr << "Failed to destroy rocjpeg stream handle " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+        }
     }
 }
 
@@ -506,6 +516,18 @@ int RocJpegApiNegativeTests::TestInvalidStreamDestroy() {
     return EXIT_SUCCESS;
 }
 
+int RocJpegApiNegativeTests::DestroyHandle() {
+    RocJpegStatus rocjpeg_status = rocJpegDestroy(rocjpeg_handle_);
+    // Cleared whatever the status was: a failed destroy is reported below, but
+    // the handle must not be left behind for the destructor either way.
+    rocjpeg_handle_ = nullptr;
+    if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+        std::cerr << "Expected ROCJPEG_STATUS_SUCCESS but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+        return EXIT_FAILURE;
+    }
+    return EXIT_SUCCESS;
+}
+
 int RocJpegApiNegativeTests::TestInvalidCreate() {
     std::cout << "info: Executing negative test cases for the rocJpegCreate API" << std::endl;
     // Scenario 1: Pass nullptr for decoder_handle and decoder_create_info
@@ -522,9 +544,7 @@ int RocJpegApiNegativeTests::TestInvalidCreate() {
         std::cerr << "Expected ROCJPEG_STATUS_EXECUTION_FAILED but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
         return EXIT_FAILURE;
     }
-    rocjpeg_status = rocJpegDestroy(rocjpeg_handle_);
-    if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
-        std::cerr << "Expected ROCJPEG_STATUS_SUCCESS but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+    if (DestroyHandle()) {
         return EXIT_FAILURE;
     }
 
@@ -535,9 +555,7 @@ int RocJpegApiNegativeTests::TestInvalidCreate() {
         std::cerr << "Expected ROCJPEG_STATUS_INVALID_PARAMETER but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
         return EXIT_FAILURE;
     }
-    rocjpeg_status = rocJpegDestroy(rocjpeg_handle_);
-    if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
-        std::cerr << "Expected ROCJPEG_STATUS_SUCCESS but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+    if (DestroyHandle()) {
         return EXIT_FAILURE;
     }
 
@@ -548,9 +566,7 @@ int RocJpegApiNegativeTests::TestInvalidCreate() {
         std::cerr << "Expected ROCJPEG_STATUS_NOT_IMPLEMENTED but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
         return EXIT_FAILURE;
     }
-    rocjpeg_status = rocJpegDestroy(rocjpeg_handle_);
-    if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
-        std::cerr << "Expected ROCJPEG_STATUS_SUCCESS but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+    if (DestroyHandle()) {
         return EXIT_FAILURE;
     }
 
@@ -561,9 +577,7 @@ int RocJpegApiNegativeTests::TestInvalidCreate() {
         std::cerr << "Expected ROCJPEG_STATUS_INVALID_PARAMETER but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
         return EXIT_FAILURE;
     }
-    rocjpeg_status = rocJpegDestroy(rocjpeg_handle_);
-    if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
-        std::cerr << "Expected ROCJPEG_STATUS_SUCCESS but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+    if (DestroyHandle()) {
         return EXIT_FAILURE;
     }
 
