@@ -34,6 +34,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Fixed measured zero HBM bandwidth rendering as `N/A` on the CDNA (gfx9) Memory Chart Data Fabric to MALL arrows. It now reports `0.000 GB/s`.
 
+* Fixed gfx1250 Wavefront Occupancy in System Speed-of-Light (2.1), which reported a per-WGP value against a GPU-wide peak. It now reports the GPU-wide wavefront count. Both this metric and the Memory Chart's per-WGP value now use `GRBM_GUI_ACTIVE_sum` as the active-cycle timebase, matching the other gfx1250 utilization metrics.
+
 ### Upcoming changes
 
 ### Known issues

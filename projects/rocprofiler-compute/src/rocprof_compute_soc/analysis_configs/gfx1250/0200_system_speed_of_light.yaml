@@ -127,8 +127,10 @@ Panel Config:
           unit: Instructions per Cycle
           peak: 5
           pct_of_peak: true
+        # GPU-wide wave count, to match the GPU-wide peak (the memory chart divides by
+        # cu_per_gpu for a per-WGP value). Same GRBM_GUI_ACTIVE_sum timebase as GL0/TXA.
         Wavefront Occupancy:
-          value: SUM(SQG_WAVE_CYCLES_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          value: SUM(SQG_WAVE_CYCLES_sum) / SUM(GRBM_GUI_ACTIVE_sum)
           unit: Wavefronts
           peak: $max_waves_per_cu * $cu_per_gpu
           pct_of_peak: true

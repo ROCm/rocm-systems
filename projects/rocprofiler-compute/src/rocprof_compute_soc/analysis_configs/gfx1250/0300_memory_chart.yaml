@@ -25,8 +25,9 @@ Panel Config:
         unit: Unit
       metric:
         # Wavefront Occupancy: on gfx1250 cu_per_gpu (rocminfo "Compute Unit") counts WGPs.
+        # Timebase is GRBM_GUI_ACTIVE_sum * cu_per_gpu, matching GL0 Utilization below.
         Wavefront Occupancy:
-          value: ROUND(SUM(SQG_WAVE_CYCLES_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu), 0)
+          value: ROUND(SUM(SQG_WAVE_CYCLES_sum) / SUM(GRBM_GUI_ACTIVE_sum * $cu_per_gpu), 0)
         VGPR:
           value: ROUND(AVG(Arch_VGPR), 0)
         SGPR:
