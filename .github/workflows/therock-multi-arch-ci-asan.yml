@@ -61,7 +61,7 @@ concurrency:
 
 jobs:
   setup:
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@users/dravindr/host_asan_prs_test # 2026-09-09
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@users/dravindr/host_asan_8455_test # 2026-09-30
     with:
       build_variant: "host-asan"
       # Only applies to workflow_dispatch; a pull_request trigger starts from
@@ -72,11 +72,9 @@ jobs:
       # Runtime-only build: everything outside these two stages, math-libs
       # included, is dropped from the build graph.
       build_stages: "compiler-runtime,runtime-tests"
-      # Declares this workflow an automatic ASAN presubmit gate, which is what
-      # makes host-asan eligible for a sandbox test runner outside of nightly.
-      # Kept separate from build_stages so that narrowing the build graph does
-      # not by itself claim ASAN runner capacity.
-      asan_presubmit: true
+      # No presubmit opt-in input here: host-asan lists "pull_request" in its
+      # test_triggers in amdgpu_family_matrix.py, so reaching this gate with a
+      # host-asan build is enough to claim a sandbox test runner.
       # The sanity check currently reports a LeakSanitizer failure originating
       # in libamdhip64, which would otherwise hide every hip-tests and rocrtst
       # result behind it. Sanity still runs and still reports its own status.
@@ -90,7 +88,7 @@ jobs:
       baseline_run_id: ${{ inputs.baseline_run_id || '' }}
       baseline_repository: ${{ inputs.baseline_repository || (inputs.baseline_run_id != '' && github.repository) || '' }}
       repository: ROCm/TheRock
-      ref: users/dravindr/host_asan_prs_test # 2026-09-09
+      ref: users/dravindr/host_asan_8455_test # 2026-09-30
       external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
 
   linux_build_and_test:
@@ -101,7 +99,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@users/dravindr/host_asan_prs_test # 2026-09-09
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@users/dravindr/host_asan_8455_test # 2026-09-30
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
       test_labels: ${{ needs.setup.outputs.linux_test_labels }}
@@ -111,7 +109,7 @@ jobs:
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       repository: ROCm/TheRock
-      ref: users/dravindr/host_asan_prs_test # 2026-09-09
+      ref: users/dravindr/host_asan_8455_test # 2026-09-30
     permissions:
       contents: read
       id-token: write
@@ -129,7 +127,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: users/dravindr/host_asan_prs_test # 2026-09-09
+          ref: users/dravindr/host_asan_8455_test # 2026-09-30
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
