@@ -105,6 +105,13 @@ void seed_constant_indices(SwmmacFixture &fx) {
       fx.cu->write_vgpr(fx.vbase + INDEX_OFF + reg, lane, 0x44444444u);
 }
 
+void seed_constant_operand(SwmmacFixture &fx, uint32_t off, uint32_t regs, uint8_t value) {
+  const uint32_t word = static_cast<uint32_t>(value) * 0x01010101u;
+  for (uint32_t reg = 0; reg < regs; ++reg)
+    for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+      fx.cu->write_vgpr(fx.vbase + off + reg, lane, word);
+}
+
 void write_byte(SwmmacFixture &fx, uint32_t off, uint32_t reg, uint32_t lane, uint32_t byte,
                 uint8_t value) {
   const uint32_t address = fx.vbase + off + reg;
@@ -208,6 +215,39 @@ uint32_t result_bits(const SwmmacCase &test, float value) {
   return test.f32_result ? std::bit_cast<uint32_t>(value) : util::f32_to_f16(value);
 }
 
+void expect_uniform_result_with_overflow_modes(const SwmmacCase &test, uint8_t a, uint8_t b,
+                                               uint32_t clear_word, uint32_t set_word) {
+  SwmmacFixture fx;
+  ASSERT_NE(fx.cu, nullptr);
+  ASSERT_NE(fx.wf, nullptr);
+  clear_state(fx);
+  seed_constant_indices(fx);
+  seed_constant_operand(fx, A_OFF, A_REGS, a);
+  seed_constant_operand(fx, B_OFF, B_REGS, b);
+  fx.seed_words(D_OFF - 1, 1, 1801);
+  fx.seed_words(D_OFF + test.dst_regs(), 1, 1802);
+
+  auto instruction = decode_case(test);
+  ASSERT_NE(instruction, nullptr) << test.name;
+  const auto initial = fx.snapshot(0, STATE_REGS);
+  ForceScalarGuard guard;
+  for (bool fp16_ovfl : {false, true}) {
+    SCOPED_TRACE(::testing::Message() << "FP16_OVFL=" << fp16_ovfl);
+    const uint32_t mode = fp16_ovfl ? amdgpu::Wavefront::FP16_OVFL_BIT : 0u;
+    fx.wf->set_mode_raw(mode);
+    const auto scalar = execute_from_state(fx, *instruction, initial, true);
+    fx.wf->set_mode_raw(mode);
+    const auto simd = execute_from_state(fx, *instruction, initial, false);
+    expect_equal_and_bounded(test, initial, scalar, simd);
+    const std::vector<uint32_t> expected(static_cast<size_t>(test.dst_regs()) * WF_SIZE,
+                                         fp16_ovfl ? set_word : clear_word);
+    expect_output(test, scalar, expected);
+    expect_output(test, simd, expected);
+    if (testing::Test::HasFatalFailure())
+      return;
+  }
+}
+
 } // namespace
 
 TEST(SwmmacK128SimdExact, AllEightDecodedFormsMatchForcedScalar) {
@@ -225,6 +265,50 @@ TEST(SwmmacK128SimdExact, AllEightDecodedFormsMatchForcedScalar) {
         continue;
       SCOPED_TRACE(::testing::Message() << test.name << " mode=" << static_cast<int>(mode));
       run_case(test, mode, 101 + 17 * case_index + mode_index, case_index + mode_index);
+      if (testing::Test::HasFatalFailure())
+        return;
+    }
+  }
+}
+
+TEST(SwmmacK128SimdExact, InfinityInEitherOperandHonorsFp16Ovfl) {
+  for (const auto &test : CASES)
+    for (bool infinity_in_a : {true, false}) {
+      if ((infinity_in_a ? test.a_fmt : test.b_fmt) != Fmt::BF8)
+        continue;
+      for (bool negative : {false, true}) {
+        SCOPED_TRACE(::testing::Message()
+                     << test.name << " infinity source=" << (infinity_in_a ? "A" : "B")
+                     << " negative=" << negative);
+        // FP8 has no infinity. Fill only the BF8 operand with signed infinity
+        // and the other operand with +1 so every selected product is infinity.
+        const uint8_t infinity = negative ? 0xFCu : 0x7Cu;
+        const uint8_t a = infinity_in_a ? infinity : one(test.a_fmt);
+        const uint8_t b = infinity_in_a ? one(test.b_fmt) : infinity;
+        const uint32_t clear_word = test.f32_result ? (negative ? 0xFF800000u : 0x7F800000u)
+                                                    : (negative ? 0xFC00FC00u : 0x7C007C00u);
+        const uint32_t set_word =
+            test.f32_result ? clear_word : (negative ? 0xFBFFFBFFu : 0x7BFF7BFFu);
+        expect_uniform_result_with_overflow_modes(test, a, b, clear_word, set_word);
+        if (testing::Test::HasFatalFailure())
+          return;
+      }
+    }
+}
+
+TEST(SwmmacK128SimdExact, AllF16FormsHonorFp16OvflForFiniteOverflow) {
+  for (const auto &test : CASES) {
+    if (test.f32_result)
+      continue;
+    for (bool negative : {false, true}) {
+      SCOPED_TRACE(::testing::Message() << test.name << " negative=" << negative);
+      // Both formats represent 256 exactly. The 64 selected products sum to
+      // signed 2^22, overflowing F16 even for FP8/FP8 without infinite inputs.
+      const uint8_t positive_a = test.a_fmt == Fmt::FP8 ? 0x78u : 0x5Cu;
+      const uint8_t a = negative ? static_cast<uint8_t>(positive_a | 0x80u) : positive_a;
+      const uint8_t b = test.b_fmt == Fmt::FP8 ? 0x78u : 0x5Cu;
+      expect_uniform_result_with_overflow_modes(test, a, b, negative ? 0xFC00FC00u : 0x7C007C00u,
+                                                negative ? 0xFBFFFBFFu : 0x7BFF7BFFu);
       if (testing::Test::HasFatalFailure())
         return;
     }
