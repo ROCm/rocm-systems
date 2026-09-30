@@ -47,11 +47,10 @@
 ///
 /// Call-and-return variants of both kernels put an s_call_b64 to a helper
 /// returning through s_setpc_b64 s[4:5] between the entry and the anchor, which
-/// then sits on the call's continuation. The indirect return is one the
-/// instrumentor accepts because it is validated against the call, so these show
-/// the prologue still runs exactly once in a kernel carrying indirect control
-/// flow. An indirect transfer with unknown targets is refused at patch time
-/// (tests/patch/instrumentor_test.cpp), so there is nothing of that kind to run.
+/// then sits on the call's continuation. The return goes to the continuation,
+/// not the entry, so these show a call and an indirect return leave the
+/// prologue's storage and the restored kernarg pointer intact. A transfer back
+/// to the entry would re-run the prologue, which nothing guards against yet.
 ///
 /// Call delivery:                          Call restore:
 ///   s_mov_b32 s0, 0       ; 0:  ENTRY       s_nop                 ; 0:  ENTRY
