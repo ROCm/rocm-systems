@@ -2,6 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 import csv
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Flag
 from pathlib import Path
@@ -11,13 +12,15 @@ import numpy as np
 import pandas as pd
 
 from utils import schema
-from utils.logger import console_debug, console_error, console_warning
+from utils.logger import console_debug, console_warning
 from utils.metrics.evaluation_pipeline import eval_metric
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.specs import MachineSpecs
-from utils.utils_common import _workload_base_dir
+from utils.utils_analysis import get_matrix_ops_type
+from utils.utils_common import validate_roofline_csv
 
 # Log-axis extent for ceiling math.
+ROOFLINE_DEVICE_ID = 0
 XMIN = 0.01
 XMAX_DEFAULT = 1000.0
 
@@ -280,9 +283,8 @@ def sanitize_mem_level(mem_level: Union[list[str], str], gpu_model: str) -> list
 def calc_ceilings(
     roofline_parameters: dict[str, Any],
     dtype: str,
-    benchmark_data: dict[str, list[str]],
+    peaks: Mapping[str, float],
     mspec: MachineSpecs,
-    device_row_index: int,
 ) -> dict[str, list[Union[list[float], float, None]]]:
     """Given benchmarking data, calculate ceilings (or peak performance) for
     empirical roofline"""
@@ -310,9 +312,7 @@ def calc_ceilings(
     peak_ops = 0.0
     if OpsSupport.VALU in SUPPORTED_DATATYPES[mspec.gpu_arch][dtype]:
         try:
-            peak_ops = sanitize_ai_value(
-                benchmark_data[f"{dtype}{ops_flops}"][device_row_index]
-            )
+            peak_ops = sanitize_ai_value(peaks[f"{dtype}{ops_flops}"])
         except KeyError:
             console_warning(
                 f"Missing benchmark data for {dtype}{ops_flops} in benchmark_results. "
@@ -331,7 +331,7 @@ def calc_ceilings(
         # Plot BW line
         curr_bw = f"{cache_level}Bw"
         try:
-            peak_bw = sanitize_ai_value(benchmark_data[curr_bw][device_row_index])
+            peak_bw = sanitize_ai_value(peaks[curr_bw])
         except KeyError:
             console_warning(
                 f"Missing benchmark data for {curr_bw} in benchmark_results. "
@@ -380,9 +380,7 @@ def calc_ceilings(
                     f"{roofline_parameters['matrix_ops_type']}"
                     f"{target_precision}{ops_flops}"
                 )
-                peak_matrix = sanitize_ai_value(
-                    benchmark_data[matrix_key][device_row_index]
-                )
+                peak_matrix = sanitize_ai_value(peaks[matrix_key])
                 if peak_matrix > 0:
                     x2_matrix = sanitize_ai_value(peak_matrix / peak_bw)
                     y2_matrix = peak_matrix
@@ -638,84 +636,24 @@ def calc_ai_analyze(
 
 
 def machine_ceilings(
-    roofline_parameters: dict[str, Any],
-    mspec: MachineSpecs,
+    peaks: Mapping[str, float],
 ) -> tuple[list[float], list[float]]:
-    """Return positive bandwidth and compute ceilings for one device."""
-    base_dir = _workload_base_dir(roofline_parameters.get("workload_dir"))
-    if base_dir is None:
-        console_warning(
-            "roofline",
-            "Unable to read machine ceilings: workload path is absent",
-        )
-        return [], []
-    roofline_csv = Path(base_dir) / "roofline.csv"
-    try:
-        csv_data = _parse_roofline_csv(roofline_csv)
-        row_index = _resolve_device_row_index(
-            csv_data, roofline_parameters["device_id"]
-        )
-        bandwidths = _device_values(csv_data.columns, row_index, ("Bw",))
-        peaks = _device_values(csv_data.columns, row_index, ("Flops", "Ops"))
-        if not bandwidths:
-            raise ValueError("no usable bandwidth ceilings in roofline.csv")
-        if not peaks:
-            raise ValueError("no usable compute ceilings in roofline.csv")
-    except (
-        OSError,
-        csv.Error,
-        KeyError,
-        TypeError,
-        ValueError,
-        IndexError,
-        OverflowError,
-    ) as error:
-        console_warning(
-            "roofline",
-            f"Unable to read machine ceilings from {roofline_csv}: {error}",
-        )
-        return [], []
-    console_debug(
-        "roofline",
-        f"Loaded machine ceilings for {mspec.gpu_model}: "
-        f"{len(bandwidths)} bandwidth, {len(peaks)} compute values",
+    """Return positive finite bandwidth and compute ceilings from a device row."""
+    benchmark = RooflineBenchmark(ROOFLINE_DEVICE_ID, dict(peaks), "MFMA")
+    return list(benchmark.bandwidths().values()), list(
+        benchmark.compute_peaks().values()
     )
-    return bandwidths, peaks
 
 
 def construct_roof(
     roofline_parameters: dict[str, Any],
     dtype: str,
     mspec: MachineSpecs,
+    peaks: Mapping[str, float],
 ) -> dict[str, list[Union[list[float], float, None]]]:
-    """Load benchmark results from disk and compute the empirical roofline."""
-    base_dir = _workload_base_dir(roofline_parameters.get("workload_dir"))
-
-    try:
-        benchmark_results = Path(base_dir) / "roofline.csv"
-        csv_data = _parse_roofline_csv(benchmark_results)
-        device_row_index = _resolve_device_row_index(
-            csv_data, roofline_parameters["device_id"]
-        )
-    except (
-        OSError,
-        csv.Error,
-        KeyError,
-        TypeError,
-        ValueError,
-        IndexError,
-        OverflowError,
-    ) as error:
-        console_error(
-            "roofline",
-            f"Failed to read benchmark results from {base_dir}: {error}",
-            exit=False,
-        )
-        return GraphPoints.empty().__dict__
-
-    benchmark_data = csv_data.columns
+    """Compute the empirical roofline from resolved benchmark peaks."""
     expected_columns = _expected_benchmark_columns(roofline_parameters, dtype, mspec)
-    missing_columns = [col for col in expected_columns if col not in benchmark_data]
+    missing_columns = [column for column in expected_columns if column not in peaks]
     if missing_columns:
         console_warning(
             f"Missing expected columns in roofline.csv for datatype {dtype}: "
@@ -723,14 +661,86 @@ def construct_roof(
             "The roofline plot may be incomplete. Consider regenerating "
             "benchmark data or cleaning the directory and re-running the analysis."
         )
+    return calc_ceilings(roofline_parameters, dtype, peaks, mspec)
 
-    return calc_ceilings(
-        roofline_parameters,
-        dtype,
-        benchmark_data,
-        mspec,
-        device_row_index,
-    )
+
+def load_roofline_benchmark(
+    workload_dir: Path,
+    device_id: int,
+    sys_info: Mapping[str, Any],
+) -> Optional["RooflineBenchmark"]:
+    """Load a device's benchmark row, warning and skipping malformed input."""
+    try:
+        valid, error = validate_roofline_csv(workload_dir)
+        if not valid:
+            raise ValueError(error)
+        csv_data = _parse_roofline_csv(Path(workload_dir) / "roofline.csv")
+        row_index = _resolve_device_row_index(csv_data, device_id)
+        peaks = {
+            column: sanitize_ai_value(rows[row_index])
+            for column, rows in csv_data.columns.items()
+        }
+        return RooflineBenchmark(
+            _parse_requested_device_id(device_id),
+            peaks,
+            get_matrix_ops_type(sys_info["gpu_series"]),
+        )
+    except (
+        OSError,
+        csv.Error,
+        KeyError,
+        TypeError,
+        ValueError,
+        IndexError,
+        OverflowError,
+    ) as error:
+        console_warning("roofline", f"Unable to load roofline.csv: {error}")
+        return None
+
+
+def datatype_for_compute_column(
+    column: str,
+    gpu_arch: str,
+    matrix_ops_type: str,
+) -> Optional[tuple[str, str]]:
+    """Map a benchmark compute column to its supported datatype and pipe."""
+    for datatype, support in SUPPORTED_DATATYPES.get(gpu_arch, {}).items():
+        suffix = "Ops" if datatype.startswith("I") else "Flops"
+        if OpsSupport.VALU in support and column == f"{datatype}{suffix}":
+            return datatype, "VALU"
+        matrix_datatype = datatype.replace("FP", "F")
+        if (
+            OpsSupport.MATRIX in support
+            and column == f"{matrix_ops_type}{matrix_datatype}{suffix}"
+        ):
+            return datatype, "MATRIX"
+    return None
+
+
+def kernel_roof_bounds(
+    level_ai: Mapping[str, float],
+    performance: float,
+    bandwidths: Mapping[str, float],
+    compute_cap: float,
+    compute_cap_label: str,
+) -> tuple[str, dict[str, tuple[Optional[float], Optional[float]]]]:
+    """Compute each memory roof and name the lowest binding roof."""
+    candidates: list[tuple[float, str]] = []
+    bounds: dict[str, tuple[Optional[float], Optional[float]]] = {}
+    for level, intensity in level_ai.items():
+        bandwidth = bandwidths.get(level)
+        roof = None
+        if bandwidth and intensity > 0:
+            diagonal = bandwidth * intensity
+            candidates.append((diagonal, level))
+            roof = min(diagonal, compute_cap)
+            if roof <= 0:
+                roof = None
+        bounds[level] = (roof, performance / roof * 100 if roof else None)
+    if compute_cap != float("inf"):
+        candidates.append((compute_cap, compute_cap_label))
+    limiter = min(candidates, key=lambda item: item[0])[1] if candidates else "Unknown"
+    return limiter, bounds
 
 
 def _parse_roofline_csv(benchmark_results: Path) -> RooflineCsvData:
@@ -863,17 +873,42 @@ def _expected_benchmark_columns(
     return columns
 
 
-def _device_values(
-    benchmark_data: dict[str, list[str]],
-    row_index: int,
-    column_suffixes: tuple[str, ...],
-) -> list[float]:
-    """Collect positive finite values from columns ending in the given suffixes."""
-    values: list[float] = []
-    for column, rows in benchmark_data.items():
-        if not any(column.endswith(suffix) for suffix in column_suffixes):
-            continue
-        sanitized = sanitize_ai_value(rows[row_index])
-        if sanitized > 0:
-            values.append(sanitized)
-    return values
+@dataclass(frozen=True)
+class RooflineBenchmark:
+    """Resolved device row shared by roofline computation and renderers."""
+
+    device_id: int
+    peaks: dict[str, float]
+    matrix_ops_type: str
+
+    def bandwidths(self) -> dict[str, float]:
+        """Positive finite bandwidths, keyed by memory level."""
+        return {
+            column[:-2]: sanitize_ai_value(value)
+            for column, value in self.peaks.items()
+            if column.endswith("Bw") and sanitize_ai_value(value) > 0
+        }
+
+    def compute_peaks(self) -> dict[str, float]:
+        """Positive finite compute columns, excluding Low and High variants."""
+        return {
+            column: sanitize_ai_value(value)
+            for column, value in self.peaks.items()
+            if column.endswith(("Flops", "Ops")) and sanitize_ai_value(value) > 0
+        }
+
+    def empirical_peak_vars(self) -> dict[str, float]:
+        """Evaluation variables for every column in the device row."""
+        return {
+            f"{column}_empirical_peak": value for column, value in self.peaks.items()
+        }
+
+    def bench_extdata(self, gpu_arch: str, gpu_model: str) -> dict[str, float]:
+        """Preserve the legacy roofline_bench_extdata column whitelist."""
+        keys = [f"{level}Bw" for level in mi_gpu_specs.get_memory_levels(gpu_model)]
+        keys.extend(
+            column
+            for column in self.peaks
+            if datatype_for_compute_column(column, gpu_arch, self.matrix_ops_type)
+        )
+        return {key: self.peaks[key] for key in keys if key in self.peaks}

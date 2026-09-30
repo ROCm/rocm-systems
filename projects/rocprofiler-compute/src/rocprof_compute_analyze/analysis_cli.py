@@ -12,7 +12,11 @@ from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from roofline.roofline_main import ROOFLINE_SUPPORTED, Roofline
 from utils import file_io, parser, schema, tty
 from utils.logger import console_error, console_log, console_warning, demarcate
-from utils.roofline_calc import calc_ai_analyze
+from utils.roofline_calc import (
+    ROOFLINE_DEVICE_ID,
+    calc_ai_analyze,
+    load_roofline_benchmark,
+)
 from utils.utils_analysis import (
     build_call_trees,
     build_call_trees_with_kernel_ids,
@@ -202,15 +206,25 @@ class cli_analysis(OmniAnalyze_Base):
                             "Skipping roofline charting: "
                             f"gpu arch {gpu_arch} not in soc {soc}",
                         )
-                    if is_roofline_valid:
+                    benchmark = (
+                        load_roofline_benchmark(
+                            Path(workload_path),
+                            ROOFLINE_DEVICE_ID,
+                            workload.sys_info.iloc[0],
+                        )
+                        if is_roofline_valid
+                        else None
+                    )
+                    if benchmark is not None and soc and gpu_arch in soc:
                         soc_obj = soc[gpu_arch]
 
                         roof_obj = Roofline(
+                            benchmark_peaks=benchmark.peaks,
                             args=soc_obj.get_args(),
                             mspec=soc_obj._mspec,
                             run_parameters={
                                 "workload_dir": workload_path,
-                                "device_id": 0,
+                                "device_id": ROOFLINE_DEVICE_ID,
                                 "gpu_arch": gpu_arch,
                                 "sort_type": str(args.sort),
                                 "mem_level": args.mem_level,

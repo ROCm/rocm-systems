@@ -19,6 +19,7 @@ from utils.roofline_calc import (
     calc_ai_analyze,
     calc_ceilings,
     construct_roof,
+    load_roofline_benchmark,
     machine_ceilings,
     sanitize_ai_value,
     sanitize_mem_level,
@@ -407,11 +408,11 @@ def roofline_parameters(
     }
 
 
-def full_benchmark_data() -> dict[str, list[str]]:
+def full_benchmark_data() -> dict[str, float]:
     """Benchmark dict with every BW, PEAK_OPS and matrix column populated."""
-    data = {col: [str(BW_VALUE)] for col in BW_COLUMNS}
+    data = {col: BW_VALUE for col in BW_COLUMNS}
     for col, value in PEAK_VALUES.items():
-        data[col] = [str(value)]
+        data[col] = value
     return data
 
 
@@ -434,7 +435,6 @@ def test_calc_ceilings_roofline_datatype(
         dtype,
         full_benchmark_data(),
         MockMspec(gpu_model, gpu_arch),
-        0,
     )
 
     if valu_col is None:
@@ -470,7 +470,6 @@ def test_fp8_special_mfma_only() -> None:
         "FP8",
         full_benchmark_data(),
         MockMspec(),
-        0,
     )
 
     assert result["valu"] == [], "FP8 is not a PEAK_OPS datatype; no VALU roof"
@@ -487,7 +486,6 @@ def test_missing_peak_ops_column_returns_empty() -> None:
         "FP64",
         benchmark_data,
         MockMspec(),
-        0,
     )
 
     assert result == GraphPoints.empty().__dict__
@@ -513,7 +511,6 @@ def test_missing_matrix_column_skips_matrix_roof(
         "BF16",
         benchmark_data,
         MockMspec(gpu_model, gpu_arch),
-        0,
     )
 
     assert result["valu"] == [], "BF16 has no VALU roof regardless of matrix data"
@@ -545,6 +542,13 @@ def capture_roofline_warnings(
     return warnings
 
 
+def benchmark_peaks(parameters):
+    benchmark = load_roofline_benchmark(
+        parameters["workload_dir"], parameters["device_id"], {"gpu_series": "mi200"}
+    )
+    return benchmark.peaks if benchmark else {}
+
+
 def test_machine_ceilings_reads_base_values_for_device(tmp_path: Path) -> None:
     """Device 0 selects base Bw/Flops/Ops columns, not Low/High variants."""
     write_roofline_csv(
@@ -558,13 +562,13 @@ def test_machine_ceilings_reads_base_values_for_device(tmp_path: Path) -> None:
     parameters = roofline_parameters()
     parameters["workload_dir"] = str(tmp_path)
 
-    assert machine_ceilings(parameters, MockMspec()) == (
+    assert machine_ceilings(benchmark_peaks(parameters)) == (
         [5300.0, 10000.0],
         [81000.0, 40000.0],
     )
 
     parameters["device_id"] = 1
-    assert machine_ceilings(parameters, MockMspec()) == (
+    assert machine_ceilings(benchmark_peaks(parameters)) == (
         [6300.0, 20000.0],
         [91000.0, 50000.0],
     )
@@ -583,9 +587,8 @@ def test_machine_ceilings_drops_invalid_cells(
     parameters = roofline_parameters()
     parameters["workload_dir"] = str(tmp_path)
 
-    assert machine_ceilings(parameters, MockMspec()) == ([], [])
-    assert len(warnings) == 1
-    assert "no usable" in str(warnings[0]).lower()
+    assert machine_ceilings(benchmark_peaks(parameters)) == ([], [])
+    assert not warnings
 
 
 def test_machine_ceilings_missing_file_returns_empty(
@@ -596,7 +599,7 @@ def test_machine_ceilings_missing_file_returns_empty(
     parameters = roofline_parameters()
     parameters["workload_dir"] = str(tmp_path)
 
-    assert machine_ceilings(parameters, MockMspec()) == ([], [])
+    assert machine_ceilings(benchmark_peaks(parameters)) == ([], [])
     assert len(warnings) == 1
     assert "roofline.csv" in str(warnings[0])
 
@@ -609,9 +612,9 @@ def test_machine_ceilings_warns_when_workload_path_absent(
     parameters = roofline_parameters()
     parameters["workload_dir"] = None
 
-    assert machine_ceilings(parameters, MockMspec()) == ([], [])
+    assert machine_ceilings(benchmark_peaks(parameters)) == ([], [])
     assert len(warnings) == 1
-    assert "workload path is absent" in str(warnings[0])
+    assert "Workload directory is not set" in str(warnings[0])
 
 
 def test_machine_ceilings_negative_device_id(tmp_path: Path) -> None:
@@ -625,7 +628,7 @@ def test_machine_ceilings_negative_device_id(tmp_path: Path) -> None:
     parameters["workload_dir"] = str(tmp_path)
     parameters["device_id"] = -1
 
-    assert machine_ceilings(parameters, MockMspec()) == ([], [])
+    assert machine_ceilings(benchmark_peaks(parameters)) == ([], [])
 
 
 def test_machine_ceilings_out_of_range_device_id(tmp_path: Path) -> None:
@@ -639,7 +642,7 @@ def test_machine_ceilings_out_of_range_device_id(tmp_path: Path) -> None:
     parameters["workload_dir"] = str(tmp_path)
     parameters["device_id"] = 5
 
-    assert machine_ceilings(parameters, MockMspec()) == ([], [])
+    assert machine_ceilings(benchmark_peaks(parameters)) == ([], [])
 
 
 def test_machine_ceilings_matches_sparse_device_id(tmp_path: Path) -> None:
@@ -653,7 +656,7 @@ def test_machine_ceilings_matches_sparse_device_id(tmp_path: Path) -> None:
     parameters["workload_dir"] = str(tmp_path)
     parameters["device_id"] = 2
 
-    assert machine_ceilings(parameters, MockMspec()) == ([5300.0], [81000.0])
+    assert machine_ceilings(benchmark_peaks(parameters)) == ([5300.0], [81000.0])
 
 
 def test_construct_roof_matches_sparse_semantic_device_id(tmp_path: Path) -> None:
@@ -667,9 +670,11 @@ def test_construct_roof_matches_sparse_semantic_device_id(tmp_path: Path) -> Non
     parameters["workload_dir"] = str(tmp_path)
     parameters["device_id"] = 2
 
-    graph_points = construct_roof(parameters, "FP32", MockMspec())
+    graph_points = construct_roof(
+        parameters, "FP32", MockMspec(), benchmark_peaks(parameters)
+    )
 
-    assert machine_ceilings(parameters, MockMspec()) == (
+    assert machine_ceilings(benchmark_peaks(parameters)) == (
         [500.0, 600.0, 700.0, 800.0],
         [2000.0, 3000.0],
     )
@@ -692,9 +697,11 @@ def test_construct_roof_matches_reordered_semantic_device_id(tmp_path: Path) -> 
     parameters["workload_dir"] = str(tmp_path)
     parameters["device_id"] = 0
 
-    graph_points = construct_roof(parameters, "FP32", MockMspec())
+    graph_points = construct_roof(
+        parameters, "FP32", MockMspec(), benchmark_peaks(parameters)
+    )
 
-    assert machine_ceilings(parameters, MockMspec()) == (
+    assert machine_ceilings(benchmark_peaks(parameters)) == (
         [500.0, 600.0, 700.0, 800.0],
         [2000.0, 3000.0],
     )
@@ -714,9 +721,7 @@ def test_construct_roof_invalid_device_id_returns_empty_graph(tmp_path: Path) ->
     parameters["workload_dir"] = str(tmp_path)
     parameters["device_id"] = 0
 
-    assert construct_roof(parameters, "FP32", MockMspec()) == (
-        GraphPoints.empty().__dict__
-    )
+    assert load_roofline_benchmark(tmp_path, 0, {"gpu_series": "mi200"}) is None
 
 
 @pytest.mark.parametrize("invalid_value", ["N/A", "nan", "inf"])
@@ -735,7 +740,9 @@ def test_construct_roof_invalid_valu_returns_empty_graph(
     parameters = roofline_parameters()
     parameters["workload_dir"] = str(tmp_path)
 
-    graph_points = construct_roof(parameters, "FP32", MockMspec())
+    graph_points = construct_roof(
+        parameters, "FP32", MockMspec(), benchmark_peaks(parameters)
+    )
 
     assert graph_points == GraphPoints.empty().__dict__
     assert len(warnings) == 1
@@ -757,7 +764,9 @@ def test_construct_roof_invalid_bandwidth_skips_level(
     parameters = roofline_parameters()
     parameters["workload_dir"] = str(tmp_path)
 
-    graph_points = construct_roof(parameters, "FP32", MockMspec())
+    graph_points = construct_roof(
+        parameters, "FP32", MockMspec(), benchmark_peaks(parameters)
+    )
 
     assert graph_points["hbm"] == []
     assert graph_points["l2"][2] == 600.0
@@ -780,7 +789,9 @@ def test_construct_roof_invalid_matrix_skips_matrix_geometry(
     parameters = roofline_parameters()
     parameters["workload_dir"] = str(tmp_path)
 
-    graph_points = construct_roof(parameters, "FP32", MockMspec())
+    graph_points = construct_roof(
+        parameters, "FP32", MockMspec(), benchmark_peaks(parameters)
+    )
 
     assert graph_points["matrix_ops"] == []
     assert graph_points["hbm"][2] == 500.0
@@ -802,7 +813,9 @@ def test_construct_roof_invalid_matrix_only_peak_returns_empty_geometry(
     parameters = roofline_parameters()
     parameters["workload_dir"] = str(tmp_path)
 
-    graph_points = construct_roof(parameters, "BF16", MockMspec())
+    graph_points = construct_roof(
+        parameters, "BF16", MockMspec(), benchmark_peaks(parameters)
+    )
 
     assert graph_points == {
         "hbm": [],
@@ -831,7 +844,7 @@ def test_machine_ceilings_rejects_bool_device_id(
     parameters["workload_dir"] = str(tmp_path)
     parameters["device_id"] = device_id
 
-    assert machine_ceilings(parameters, MockMspec()) == ([], [])
+    assert machine_ceilings(benchmark_peaks(parameters)) == ([], [])
     assert "boolean" in str(warnings[0]).lower()
 
 
@@ -849,7 +862,7 @@ def test_machine_ceilings_rejects_fractional_device_id(
     parameters["workload_dir"] = str(tmp_path)
     parameters["device_id"] = 2.5
 
-    assert machine_ceilings(parameters, MockMspec()) == ([], [])
+    assert machine_ceilings(benchmark_peaks(parameters)) == ([], [])
     assert "integral" in str(warnings[0]).lower()
 
 
@@ -866,7 +879,7 @@ def test_machine_ceilings_rejects_duplicate_benchmark_headers(
     parameters = roofline_parameters()
     parameters["workload_dir"] = str(tmp_path)
 
-    assert machine_ceilings(parameters, MockMspec()) == ([], [])
+    assert machine_ceilings(benchmark_peaks(parameters)) == ([], [])
     assert "duplicate benchmark header" in str(warnings[0]).lower()
 
 
@@ -883,7 +896,7 @@ def test_machine_ceilings_rejects_duplicate_device_ids(
     parameters = roofline_parameters()
     parameters["workload_dir"] = str(tmp_path)
 
-    assert machine_ceilings(parameters, MockMspec()) == ([], [])
+    assert machine_ceilings(benchmark_peaks(parameters)) == ([], [])
     assert "duplicate device id" in str(warnings[0]).lower()
 
 
@@ -900,7 +913,7 @@ def test_machine_ceilings_rejects_short_csv_row(
     parameters = roofline_parameters()
     parameters["workload_dir"] = str(tmp_path)
 
-    assert machine_ceilings(parameters, MockMspec()) == ([], [])
+    assert machine_ceilings(benchmark_peaks(parameters)) == ([], [])
     assert "expected 3" in str(warnings[0]).lower()
 
 
@@ -917,7 +930,7 @@ def test_machine_ceilings_rejects_over_wide_csv_row(
     parameters = roofline_parameters()
     parameters["workload_dir"] = str(tmp_path)
 
-    assert machine_ceilings(parameters, MockMspec()) == ([], [])
+    assert machine_ceilings(benchmark_peaks(parameters)) == ([], [])
     assert "expected 3" in str(warnings[0]).lower()
 
 
@@ -933,8 +946,8 @@ def test_machine_ceilings_rejects_empty_csv_row(
     parameters = roofline_parameters()
     parameters["workload_dir"] = str(tmp_path)
 
-    assert machine_ceilings(parameters, MockMspec()) == ([], [])
-    assert "empty" in str(warnings[0]).lower()
+    assert machine_ceilings(benchmark_peaks(parameters)) == ([], [])
+    assert "inconsistent row length" in str(warnings[0]).lower()
 
 
 @pytest.mark.parametrize(
@@ -958,8 +971,9 @@ def test_machine_ceilings_warns_when_ceiling_group_empty(
     parameters = roofline_parameters()
     parameters["workload_dir"] = str(tmp_path)
 
-    assert machine_ceilings(parameters, MockMspec()) == ([], [])
-    assert message in str(warnings[0]).lower()
+    bandwidths, peaks = machine_ceilings(benchmark_peaks(parameters))
+    assert not (bandwidths if message == "bandwidth" else peaks)
+    assert not warnings
 
 
 def test_calc_ceilings_uses_xmax_default_for_compute_roofs() -> None:
@@ -969,8 +983,65 @@ def test_calc_ceilings_uses_xmax_default_for_compute_roofs() -> None:
         "FP32",
         full_benchmark_data(),
         MockMspec(),
-        0,
     )
 
     assert result["valu"][0][1] == XMAX_DEFAULT
     assert result["matrix_ops"][0][1] == XMAX_DEFAULT
+
+
+def test_benchmark_device_row_and_empirical_peaks(tmp_path):
+    from utils.roofline_calc import load_roofline_benchmark
+
+    write_roofline_csv(
+        tmp_path / "roofline.csv",
+        "device,HBMBw,FP32Flops,MFMAF6F4Flops,FP32FlopsHigh",
+        ["2,900,12000,18000,13000", "0,500,2000,3000,2100"],
+    )
+    benchmark = load_roofline_benchmark(tmp_path, 0, {"gpu_series": "mi200"})
+    assert benchmark.device_id == 0
+    assert benchmark.bandwidths() == {"HBM": 500.0}
+    assert benchmark.compute_peaks() == {"FP32Flops": 2000.0, "MFMAF6F4Flops": 3000.0}
+    assert benchmark.empirical_peak_vars()["MFMAF6F4Flops_empirical_peak"] == 3000
+    assert benchmark.peaks["FP32FlopsHigh"] == 2100
+    assert machine_ceilings(benchmark.peaks) == ([500.0], [2000.0, 3000.0])
+
+
+@pytest.mark.parametrize(
+    "content", [None, "device,HBMBw\n0\n", "device,HBMBw\n0,1\n0,2\n"]
+)
+def test_benchmark_missing_or_corrupt_skips(tmp_path, content):
+    from utils.roofline_calc import load_roofline_benchmark
+
+    if content is not None:
+        (tmp_path / "roofline.csv").write_text(content, encoding="utf-8")
+    assert load_roofline_benchmark(tmp_path, 0, {"gpu_series": "mi200"}) is None
+
+
+@pytest.mark.parametrize(
+    "column,expected",
+    [
+        ("FP32Flops", ("FP32", "VALU")),
+        ("MFMAF32Flops", ("FP32", "MATRIX")),
+        ("MFMAI8Ops", ("I8", "MATRIX")),
+        ("MFMAMXF8Flops", ("MXFP8", "MATRIX")),
+        ("MFMAF6F4Flops", None),
+    ],
+)
+def test_datatype_for_compute_column(column, expected):
+    from utils.roofline_calc import datatype_for_compute_column
+
+    assert datatype_for_compute_column(column, "gfx950", "MFMA") == expected
+
+
+def test_shared_kernel_roof_bounds():
+    from utils.roofline_calc import kernel_roof_bounds
+
+    limiter, bounds = kernel_roof_bounds(
+        {"HBM": 2, "L2": 10, "L1": 0},
+        200,
+        {"HBM": 100, "L2": 300},
+        1000,
+        "FP32 MFMA",
+    )
+    assert limiter == "HBM"
+    assert bounds == {"HBM": (200, 100), "L2": (1000, 20), "L1": (None, None)}

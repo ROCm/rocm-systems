@@ -20,6 +20,7 @@ import roofline.roofline_html as roofline_html
 from roofline.roofline_frame import FRAME_X_MIN, canonical_frame
 from roofline.roofline_hover import wrap_hover_name
 from roofline.roofline_html import RooflineViewModel, build_interactive_document
+from utils.roofline_calc import load_roofline_benchmark
 
 if TYPE_CHECKING:
     from roofline.roofline_main import Roofline
@@ -50,7 +51,21 @@ def make_roofline(datatypes: List[str], **run_parameters: object) -> "Roofline":
         "roofline_data_type": datatypes,
     }
     parameters.update(run_parameters)
-    return Roofline(argparse.Namespace(), MockMspec(), parameters)
+    benchmark = (
+        load_roofline_benchmark(
+            Path(parameters["workload_dir"]),
+            parameters["device_id"],
+            {"gpu_series": "mi200"},
+        )
+        if parameters["workload_dir"]
+        else None
+    )
+    return Roofline(
+        argparse.Namespace(),
+        MockMspec(),
+        parameters,
+        benchmark.peaks if benchmark else {},
+    )
 
 
 @pytest.fixture

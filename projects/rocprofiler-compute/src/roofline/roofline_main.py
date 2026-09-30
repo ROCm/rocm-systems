@@ -3,6 +3,7 @@
 
 import argparse
 import math
+from collections.abc import Mapping
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Optional
@@ -45,6 +46,7 @@ from utils.roofline_calc import (
     XMIN,
     OpsSupport,
     construct_roof,
+    kernel_roof_bounds,
     machine_ceilings,
     sanitize_mem_level,
 )
@@ -162,7 +164,9 @@ class Roofline:
         args: argparse.Namespace,
         mspec: MachineSpecs,
         run_parameters: dict[str, Any],
+        benchmark_peaks: Mapping[str, float],
     ) -> None:
+        self.__benchmark_peaks = benchmark_peaks
         self.__args = args
         self.__mspec = mspec
         self.__run_parameters = run_parameters
@@ -180,51 +184,17 @@ class Roofline:
                 roofline_parameters=self.__run_parameters,
                 dtype=dtype,
                 mspec=self.__mspec,
+                peaks=self.__benchmark_peaks,
             )
         return self.__ceiling_by_dtype[dtype]
 
     def _canonical_frame_bounds(self) -> tuple[float, float, float, float]:
         """Return this machine's shared frame, computing it only once."""
         if self.__frame_bounds is None:
-            machine_frame = canonical_frame(
-                *machine_ceilings(self.__run_parameters, self.__mspec)
-            )
+            machine_frame = canonical_frame(*machine_ceilings(self.__benchmark_peaks))
             self.__frame_from_machine_ceilings = machine_frame is not None
             self.__frame_bounds = machine_frame or DEFAULT_AXIS_BOUNDS
         return self.__frame_bounds
-
-    def roof_setup(self) -> None:
-        workload_dir_val = self.__run_parameters.get("workload_dir")
-
-        if not workload_dir_val:
-            console_error(
-                "Workload directory is not set. Cannot perform setup.", exit=False
-            )
-            return
-
-        base_dir = str(workload_dir_val)
-
-        base_path = Path(base_dir)
-
-        if base_path.name == "workloads" and base_path.parent == Path.cwd():
-            app_name = getattr(self.__args, "name", "default_app_name")
-            gpu_model_name = getattr(self.__mspec, "gpu_model", "default_gpu_model")
-
-            new_path = base_path / app_name / gpu_model_name
-
-            if isinstance(workload_dir_val, list):
-                if isinstance(workload_dir_val[0], (list, tuple)):
-                    self.__run_parameters["workload_dir"][0][0] = str(new_path)
-                else:
-                    self.__run_parameters["workload_dir"][0] = str(new_path)
-            else:
-                self.__run_parameters["workload_dir"] = str(new_path)
-
-            final_dir = str(new_path)
-        else:
-            final_dir = base_dir
-
-        Path(final_dir).mkdir(parents=True, exist_ok=True)
 
     @staticmethod
     def _peak_value(ceiling_data: dict[str, Any], key: str) -> Optional[float]:
@@ -359,13 +329,14 @@ class Roofline:
     ) -> Optional[float]:
         """Roofline throughput (peak) at this AI for the point's memory level:
         min(bandwidth * AI, active compute cap); None when unavailable."""
-        bandwidth = self._peak_value(ceiling_data, cache_key)
-        if not bandwidth or ai_value <= 0:
-            return None
-        roof = bandwidth * ai_value
-        if cap != float("inf"):
-            roof = min(roof, cap)
-        return roof if roof > 0 else None
+        _, bounds = kernel_roof_bounds(
+            {cache_key: ai_value},
+            0,
+            {cache_key: self._peak_value(ceiling_data, cache_key)},
+            cap,
+            "",
+        )
+        return bounds[cache_key][0]
 
     def _determine_kernel_limiter(
         self,
@@ -379,18 +350,17 @@ class Roofline:
         candidate is the envelope cap the diagonals are actually drawn to, so
         the limiter agrees with the drawn roof and with the percent of roofline
         the tooltip reports."""
-        candidates: list[tuple[float, str]] = []
-        for level_name, ai_value in level_ai.items():
-            bandwidth = self._peak_value(ceiling_data, level_name.lower())
-            if bandwidth and ai_value > 0:
-                candidates.append((bandwidth * ai_value, level_name))
-
-        if compute_cap != float("inf"):
-            candidates.append((compute_cap, compute_cap_label))
-
-        if not candidates:
-            return "Unknown"
-        return min(candidates, key=lambda candidate: candidate[0])[1]
+        limiter, _ = kernel_roof_bounds(
+            level_ai,
+            0,
+            {
+                level: self._peak_value(ceiling_data, level.lower())
+                for level in level_ai
+            },
+            compute_cap,
+            compute_cap_label,
+        )
+        return limiter
 
     def _build_kernel_traces(
         self,
@@ -521,7 +491,6 @@ class Roofline:
         No I/O or HTML wrapping. When datatypes is None, use every datatype
         supported by the profiled GPU architecture.
         """
-        self.roof_setup()
         self.__frame_bounds = None
         self.__frame_from_machine_ceilings = None
         self._canonical_frame_bounds()
@@ -1101,21 +1070,12 @@ class Roofline:
 
         self.__ai_data = ai_data
 
-        workload_dir = self.__run_parameters.get("workload_dir", "")
-        if not (Path(workload_dir) / "roofline.csv").is_file():
-            console_log(
-                "roofline",
-                f"{workload_dir}/roofline.csv does not exist",
-            )
-            return None
-
         self.__ceiling_data = construct_roof(
             roofline_parameters=self.__run_parameters,
             dtype=dtype,
             mspec=self.__mspec,
+            peaks=self.__benchmark_peaks,
         )
-
-        self.roof_setup()
 
         sanitized_cache_hierarchy = sanitize_mem_level(
             self.__run_parameters["mem_level"], self.__mspec.gpu_model

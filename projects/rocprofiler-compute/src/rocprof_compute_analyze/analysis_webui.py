@@ -26,7 +26,11 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
-from utils.roofline_calc import calc_ai_analyze
+from utils.roofline_calc import (
+    ROOFLINE_DEVICE_ID,
+    calc_ai_analyze,
+    load_roofline_benchmark,
+)
 from utils.utils_analysis import get_matrix_ops_type
 from utils.utils_common import validate_roofline_csv
 
@@ -231,16 +235,26 @@ class webui_analysis(OmniAnalyze_Base):
             )
             soc = self.get_socs()
             if soc and self.arch in soc:
-                if is_roofline_valid:
+                benchmark = (
+                    load_roofline_benchmark(
+                        Path(self.dest_dir),
+                        ROOFLINE_DEVICE_ID,
+                        base_data[base_run].sys_info.iloc[0],
+                    )
+                    if is_roofline_valid
+                    else None
+                )
+                if benchmark is not None:
                     matrix_ops_type = get_matrix_ops_type(
                         getattr(soc[self.arch]._mspec, "gpu_series", "unknown_series")
                     )
                     roof_obj = Roofline(
+                        benchmark_peaks=benchmark.peaks,
                         args=soc[self.arch].get_args(),
                         mspec=soc[self.arch]._mspec,
                         run_parameters={
                             "workload_dir": self.dest_dir,
-                            "device_id": 0,
+                            "device_id": ROOFLINE_DEVICE_ID,
                             "gpu_arch": self.arch,
                             "sort_type": str(args.sort),
                             "mem_level": args.mem_level,

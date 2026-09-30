@@ -97,55 +97,6 @@ def test_roof_rocpd(
 
 
 @pytest.mark.roofline_dir
-def test_roofline_workload_dir_not_set_error():
-    """
-    Test roof_setup() error: "Workload directory is not set. Cannot perform setup."
-    This covers lines 113-117
-    """
-    skip_unsupported_roofline_soc()
-
-    try:
-        from roofline.roofline_main import Roofline
-        from utils.specs import generate_machine_specs
-
-        class MockArgs:
-            def __init__(self):
-                self.roof_only = True
-                self.mem_level = "ALL"
-                self.sort = "ALL"
-                self.roofline_data_type = ["FP32"]
-
-        args = MockArgs()
-        mspec = generate_machine_specs(None, None)
-
-        run_parameters = {
-            "workload_dir": None,
-            "device_id": 0,
-            "sort_type": "kernels",
-            "mem_level": "ALL",
-            "roofline_data_type": ["FP32"],
-        }
-
-        roofline_instance = Roofline(args, mspec, run_parameters)
-
-        import contextlib
-        from io import StringIO
-
-        captured_output = StringIO()
-
-        with contextlib.redirect_stderr(captured_output):
-            try:
-                roofline_instance.roof_setup()
-            except SystemExit:
-                pass
-
-        assert True
-
-    except ImportError:
-        pytest.skip("Could not import roofline module for direct testing")
-
-
-@pytest.mark.roofline_dir
 def test_roof_workload_dir_validation(binary_handler_profile_rocprof_compute):
     skip_unsupported_roofline_soc()
 

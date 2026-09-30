@@ -24,6 +24,7 @@ from utils.logger import (
     demarcate,
 )
 from utils.metrics.expression import build_metric_value_string
+from utils.roofline_calc import ROOFLINE_DEVICE_ID, load_roofline_benchmark
 from utils.utils_analysis import (
     impute_counters_iteration_multiplex,
     validate_workload,
@@ -34,7 +35,6 @@ from utils.utils_common import (
     get_uuid,
     is_only_pc_sampling,
     load_panel_configs,
-    validate_roofline_csv,
 )
 
 # the build-in config to list kernel names purpose only
@@ -236,27 +236,12 @@ class OmniAnalyze_Base:
             if sysinfo_path:
                 w.sys_info = pd.read_csv(f"{sysinfo_path}/sysinfo.csv")
                 if not getattr(args, "no_roof", False):
-                    # Validate roofline CSV before loading
-
-                    is_valid, error_msg = validate_roofline_csv(sysinfo_path)
-
-                    if is_valid:
-                        try:
-                            roofline_df = pd.read_csv(f"{sysinfo_path}/roofline.csv")
-                            w.roofline_peaks = roofline_df
-                        except Exception as e:
-                            console_error(
-                                "roofline",
-                                f"Failed to load roofline.csv: {e}",
-                                exit=False,
-                            )
-                            w.roofline_peaks = pd.DataFrame()
-                    else:
-                        console_log(
-                            "roofline",
-                            f"Roofline analysis skipped: {error_msg}",
-                        )
-                        w.roofline_peaks = pd.DataFrame()
+                    benchmark = load_roofline_benchmark(
+                        Path(sysinfo_path), ROOFLINE_DEVICE_ID, w.sys_info.iloc[0]
+                    )
+                    w.roofline_peaks = (
+                        pd.DataFrame([benchmark.peaks]) if benchmark else pd.DataFrame()
+                    )
                 else:
                     w.roofline_peaks = pd.DataFrame()
 
