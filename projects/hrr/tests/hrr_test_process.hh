@@ -5,15 +5,19 @@
  */
 #pragma once
 
+#include <atomic>
 #include <cerrno>
+#include <chrono>
 #include <cstring>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
 #if defined(_WIN32)
 #include <windows.h>
 #else
+#include <csignal>
 #include <unistd.h>
 #include <sys/wait.h>
 #endif
@@ -39,6 +43,13 @@ namespace hrr::test {
 // run() returns the child's exit code, or 128 + signal number if it was killed
 // by a signal (127 if the process could not be launched). Both the capturing
 // and non-capturing paths use the same normalization.
+//
+// runWithTimeout() adds a deadline. Some replays do not fail, they hang: an API
+// that is a no-op at replay leaves a program waiting forever on a value that is
+// never written. Without a deadline that becomes a CI job that runs until the
+// harness kills it, which is both slower to diagnose and easy to misread as
+// infrastructure flake. Killing the child ourselves turns the hang into an
+// assertable outcome, reported as kKilledOnTimeout.
 class SpawnProc {
  public:
   // capture_stderr merges the child's stderr into the same captured stream as
@@ -54,8 +65,26 @@ class SpawnProc {
     env_.push_back({key, value});
   }
 
-  int run(const std::string& args) {
+  // Exit code reported when the deadline fired and the child had to be killed.
+  // 128 + SIGKILL matches the encoding run() already uses for a signalled
+  // child, so callers that only distinguish "crashed" from "clean" need no
+  // special case; callers that care about the hang check for this value.
+  static constexpr int kKilledOnTimeout = 128 + 9;
+
+  int run(const std::string& args) { return run_impl(args, 0); }
+
+  // As run(), but kill the child after timeout_seconds and return
+  // kKilledOnTimeout. A timeout_seconds of 0 or less means no deadline.
+  int runWithTimeout(const std::string& args, int timeout_seconds) {
+    return run_impl(args, timeout_seconds);
+  }
+
+  const std::string& getOutput() const { return output_; }
+
+ private:
+  int run_impl(const std::string& args, int timeout_seconds) {
     output_.clear();
+    timeout_seconds_ = timeout_seconds;
     std::vector<std::string> tokens = split_args(args);
 
 #if defined(_WIN32)
@@ -65,9 +94,6 @@ class SpawnProc {
 #endif
   }
 
-  const std::string& getOutput() const { return output_; }
-
- private:
   // Split on whitespace into argv tokens, keeping every other character
   // (including quotes) literal. No shell-style quote or escape processing.
   static std::vector<std::string> split_args(const std::string& args) {
@@ -127,7 +153,21 @@ class SpawnProc {
       ::_exit(127);
     }
 
-    // Parent.
+    // Parent. Arm the deadline before draining the pipe: the read below blocks
+    // until the child exits or is killed, so the kill has to come from another
+    // thread.
+    std::atomic<bool> finished{false};
+    std::thread watchdog;
+    if (timeout_seconds_ > 0) {
+      watchdog = std::thread([&finished, pid, secs = timeout_seconds_]() {
+        const auto deadline =
+            std::chrono::steady_clock::now() + std::chrono::seconds(secs);
+        while (!finished.load() && std::chrono::steady_clock::now() < deadline)
+          std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        if (!finished.load()) ::kill(pid, SIGKILL);
+      });
+    }
+
     if (capture_stdout_) {
       ::close(pipefd[1]);
       char buffer[4096];
@@ -146,9 +186,16 @@ class SpawnProc {
     }
 
     int status = 0;
+    int rc = 0;
     while (::waitpid(pid, &status, 0) < 0) {
-      if (errno != EINTR) return 127;
+      if (errno != EINTR) {
+        rc = 127;
+        break;
+      }
     }
+    finished.store(true);
+    if (watchdog.joinable()) watchdog.join();
+    if (rc == 127) return 127;
     if (WIFEXITED(status)) return WEXITSTATUS(status);
     if (WIFSIGNALED(status)) return 128 + WTERMSIG(status);
     return 127;
@@ -212,6 +259,22 @@ class SpawnProc {
       return 127;
     }
 
+    // Arm the deadline before draining the pipe, for the same reason as the
+    // POSIX path: the read below blocks until the child goes away.
+    std::atomic<bool> finished{false};
+    std::thread watchdog;
+    if (timeout_seconds_ > 0) {
+      HANDLE proc_h = pi.hProcess;
+      watchdog = std::thread([&finished, proc_h, secs = timeout_seconds_]() {
+        const auto deadline =
+            std::chrono::steady_clock::now() + std::chrono::seconds(secs);
+        while (!finished.load() && std::chrono::steady_clock::now() < deadline)
+          std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        if (!finished.load())
+          TerminateProcess(proc_h, static_cast<UINT>(kKilledOnTimeout));
+      });
+    }
+
     if (capture_stdout_) {
       CloseHandle(write_h);
       char buffer[4096];
@@ -223,6 +286,8 @@ class SpawnProc {
     }
 
     WaitForSingleObject(pi.hProcess, INFINITE);
+    finished.store(true);
+    if (watchdog.joinable()) watchdog.join();
     DWORD exit_code = 127;
     GetExitCodeProcess(pi.hProcess, &exit_code);
     CloseHandle(pi.hProcess);
@@ -273,6 +338,7 @@ class SpawnProc {
 #endif
 
   std::string exe_;
+  int timeout_seconds_ = 0;
   bool capture_stdout_ = false;
   bool capture_stderr_ = false;
   std::string output_;

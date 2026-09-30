@@ -275,8 +275,8 @@ ROCm Systems Profiler supports several output formats, each suited to a differen
      - ``.db``
      - Detailed trace and counter data stored as a SQLite3 database; queryable with SQL or convertible to other formats via ``rocpd convert``
      - `ROCm Optiq <https://rocm.docs.amd.com/projects/roc-optiq/en/latest/>`_
-   * - Perfetto (proto)
-     - ``.proto``
+   * - Perfetto (pftrace)
+     - ``.pftrace``
      - Detailed trace stored as a protocol buffer for interactive timeline visualization
      - `ui.perfetto.dev <https://ui.perfetto.dev>`_
    * - Text
@@ -300,7 +300,7 @@ Output-format selection differs by tool:
 
   .. code-block:: shell
 
-     rocprof-sys-run --output-format proto rocpd json text -- ./my_app
+     rocprof-sys-run --output-format pftrace rocpd json text -- ./my_app
 
 * ``rocprof-sys-attach`` uses its own ``-F`` flag with different token names for the same formats (``perfetto`` instead of ``proto``):
 

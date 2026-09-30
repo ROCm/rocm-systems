@@ -109,7 +109,7 @@ protected:
     pt.anchor_offset = 4; // v_mov_b32 v1, v0 -> reads v0 (v0 live at the anchor).
     pt.probe_obj = &probe_obj;
     pt.probe_symbol = "rj_test_arg_probe";
-    pt.probe_args = {kArgSentinel};
+    pt.probe_args.push_back(probe_arg_imm(kArgSentinel));
     instr.add_point(pt);
 
     auto result = instr.patch_with_debug_summaries();
@@ -155,7 +155,7 @@ protected:
     const uint32_t nop = build_s_nop(0, a_.arch);
 
     std::vector<uint32_t> sabotaged = patched_text_;
-    auto it = std::search(sabotaged.begin(), sabotaged.end(), arg_write.begin(), arg_write.end());
+    auto it = std::ranges::search(sabotaged, arg_write).begin();
     ASSERT_NE(it, sabotaged.end()) << "argument materialization not found in the patched text";
     for (size_t i = 0; i < arg_write.size(); ++i)
       *(it + static_cast<std::ptrdiff_t>(i)) = nop;

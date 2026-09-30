@@ -156,12 +156,11 @@ inline uint64_t align_up_for_test(uint64_t value, uint64_t alignment) {
 // `wrap_symtab_range` sets the .symtab sh_offset so sh_offset + sh_size overflows;
 // `kd_crosses_section` shrinks the .rodata sh_size below sizeof(KD) so the 64-byte `.kd`
 // descriptor extends past its owning section into the adjacent one.
-inline std::vector<uint8_t>
-make_amdgpu_kernel_elf(const std::vector<uint32_t> &text_words, uint32_t private_bytes,
-                       uint32_t granulated_sgpr_count, uint32_t e_flags,
-                       uint32_t granulated_vgpr_count = 0, uint32_t accum_offset = 0,
-                       bool unterminated_kd_name = false, bool wrap_section_header_table = false,
-                       bool wrap_symtab_range = false, bool kd_crosses_section = false) {
+inline std::vector<uint8_t> make_amdgpu_kernel_elf(
+    const std::vector<uint32_t> &text_words, uint32_t private_bytes, uint32_t granulated_sgpr_count,
+    uint32_t e_flags, uint32_t granulated_vgpr_count = 0, uint32_t accum_offset = 0,
+    bool unterminated_kd_name = false, bool wrap_section_header_table = false,
+    bool wrap_symtab_range = false, bool kd_crosses_section = false, bool wave32 = false) {
   namespace kd = rocr::llvm::amdhsa;
   using KD = kd::kernel_descriptor_t;
 
@@ -245,6 +244,14 @@ make_amdgpu_kernel_elf(const std::vector<uint32_t> &text_words, uint32_t private
   AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
                   granulated_vgpr_count);
   AMDHSA_BITS_SET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, accum_offset);
+  // RDNA opts into Wave32 through this bit; a clear bit is Wave64. CDNA has no
+  // such field, so setting it there would describe a kernel that cannot exist.
+  // Braced deliberately: AMDHSA_BITS_SET expands to two unbraced statements, so
+  // an unbraced `if` would run the second one unconditionally.
+  if (wave32) {
+    AMDHSA_BITS_SET(desc.kernel_code_properties, kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32,
+                    1);
+  }
   std::memcpy(image.data() + rodata_offset, &desc, sizeof(desc));
   std::memcpy(image.data() + strtab_offset, strtab.data(), strtab.size());
 
@@ -335,6 +342,22 @@ inline std::vector<uint8_t> make_gfx1200_kernel_elf(const std::vector<uint32_t> 
                                                     uint32_t accum_offset = 0) {
   return make_amdgpu_kernel_elf(text_words, private_bytes, granulated_sgpr_count,
                                 EF_AMDGPU_MACH_AMDGCN_GFX1200, granulated_vgpr_count, accum_offset);
+}
+
+// The same target ELF with the descriptor's Wave32 bit set. A separate builder
+// rather than a parameter: make_gfx1200_kernel_elf is taken by address as part
+// of a per-arch factory triple, so its signature is pinned by that use. RDNA is
+// the only family with a wave size to choose, so there is no CDNA counterpart.
+inline std::vector<uint8_t> make_gfx1200_wave32_kernel_elf(const std::vector<uint32_t> &text_words,
+                                                           uint32_t private_bytes,
+                                                           uint32_t granulated_sgpr_count = 3,
+                                                           uint32_t granulated_vgpr_count = 0,
+                                                           uint32_t accum_offset = 0) {
+  return make_amdgpu_kernel_elf(text_words, private_bytes, granulated_sgpr_count,
+                                EF_AMDGPU_MACH_AMDGCN_GFX1200, granulated_vgpr_count, accum_offset,
+                                /*unterminated_kd_name=*/false,
+                                /*wrap_section_header_table=*/false, /*wrap_symtab_range=*/false,
+                                /*kd_crosses_section=*/false, /*wave32=*/true);
 }
 
 // gfx950 target ELF whose `.kd` symbol name runs to the end of its string table

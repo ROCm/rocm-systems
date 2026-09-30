@@ -38,9 +38,9 @@ struct backtrace_metrics : comp::empty_base
     using clock_type        = std::chrono::steady_clock;
     using value_type        = void;
     using hw_counters       = tim::component::papi_array<num_hw_counters>;
-    using hw_counter_data_t = typename hw_counters::value_type;
+    using hw_counter_data_t = hw_counters::value_type;
     using system_clock      = std::chrono::system_clock;
-    using system_time_point = typename system_clock::time_point;
+    using system_time_point = system_clock::time_point;
 
     using categories_t =
         type_list<category::thread_cpu_time, category::thread_peak_memory,
@@ -106,7 +106,7 @@ struct backtrace_metrics : comp::empty_base
     }
 
 private:
-    valid_array_t     m_valid      = {};
+    valid_array_t     m_valid;
     std::int64_t      m_cpu        = 0;
     std::int64_t      m_mem_peak   = 0;
     std::int64_t      m_ctx_swch   = 0;

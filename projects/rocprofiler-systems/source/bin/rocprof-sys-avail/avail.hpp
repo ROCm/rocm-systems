@@ -33,9 +33,7 @@
 
 //======================================================================================//
 
-namespace tim
-{
-namespace cereal
+namespace tim::cereal
 {
 class SettingsTextArchive
 : public OutputArchive<SettingsTextArchive>
@@ -79,12 +77,15 @@ public:
     //! Sets the name for the next node created with startNode
     void setNextName(const char* name)
     {
-        if(exclude_stream.count(name) > 0) return;
+        if(exclude_stream.count(name) > 0)
+        {
+            return;
+        }
 
         if((current_entry != nullptr) && value_keys.count(name) > 0)
         {
             current_entry->insert({ name, "" });
-            current_value = &((*current_entry)[name]);
+            current_value = &(*current_entry)[name];
             return;
         }
 
@@ -95,7 +96,7 @@ public:
 
         current_value = nullptr;
         output_stream->push_back(entry_type{});
-        current_entry = &(output_stream->back());
+        current_entry = &output_stream->back();
 
         current_entry->insert({ "identifier", name });
         std::string       func   = name;
@@ -122,7 +123,7 @@ public:
 
 public:
     template <typename Tp>
-    inline void saveValue(Tp _val)
+    void saveValue(Tp _val)
     {
         std::stringstream ssval;
         ssval << std::boolalpha << _val;
@@ -137,10 +138,10 @@ public:
     void makeArray() {}
 
 private:
-    value_type* current_value  = nullptr;
-    entry_type* current_entry  = nullptr;
-    array_type* output_stream  = nullptr;
-    unique_set  exclude_stream = {};
+    value_type* current_value = nullptr;
+    entry_type* current_entry = nullptr;
+    array_type* output_stream = nullptr;
+    unique_set  exclude_stream;
     int_stack   name_counter;
     unique_set  value_keys = { "name",    "value",     "description", "count",
                                "environ", "max_count", "cmdline",     "data_type",
@@ -281,7 +282,10 @@ template <typename T>
 inline void
 TIMEMORY_CEREAL_SAVE_FUNCTION_NAME(SettingsTextArchive& ar, const T& t)
 {
-    if(std::is_same<T, std::string>::value) ar.setNextType("string");
+    if(std::is_same<T, std::string>::value)
+    {
+        ar.setNextType("string");
+    }
     ar.saveValue(t);
 }
 
@@ -304,8 +308,7 @@ TIMEMORY_CEREAL_SAVE_FUNCTION_NAME(SettingsTextArchive&, const SizeTag<T>&)
     // nothing to do here, we don't explicitly save the size
 }
 
-}  // namespace cereal
-}  // namespace tim
+}  // namespace tim::cereal
 
 // register archives for polymorphic support
 TIMEMORY_CEREAL_REGISTER_ARCHIVE(SettingsTextArchive)

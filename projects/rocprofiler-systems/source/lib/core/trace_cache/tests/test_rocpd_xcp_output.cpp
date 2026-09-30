@@ -87,7 +87,10 @@ generate_xcp_metrics(const char* base_name, const std::string& base_track,
                      bool is_enabled, const mock_metrics& m, GetArrayFn&& get_array)
 {
     std::vector<rocpd_xcp_entry> entries;
-    if(!is_enabled) return entries;
+    if(!is_enabled)
+    {
+        return entries;
+    }
     for(size_t xcp = 0; xcp < m.xcp_stats.size(); ++xcp)
     {
         const auto& arr = get_array(m.xcp_stats[xcp]);
@@ -96,7 +99,9 @@ generate_xcp_metrics(const char* base_name, const std::string& base_track,
             auto suffix   = "_xcp" + std::to_string(xcp) + "[" + std::to_string(i) + "]";
             auto pmc_name = std::string(base_name) + suffix;
             auto track_name = base_track + suffix;
-            entries.push_back({ pmc_name, track_name, static_cast<double>(arr[i]) });
+            entries.push_back({ .pmc_name   = pmc_name,
+                                .track_name = track_name,
+                                .value      = static_cast<double>(arr[i]) });
         }
     }
     return entries;
@@ -109,13 +114,18 @@ generate_device_level_metrics(const std::string& base_name, bool is_enabled,
                               const ArrayT& arr)
 {
     std::vector<rocpd_xcp_entry> entries;
-    if(!is_enabled) return entries;
+    if(!is_enabled)
+    {
+        return entries;
+    }
     for(size_t i = 0; i < arr.size(); ++i)
     {
         auto suffix     = "_" + std::to_string(i);
         auto pmc_name   = base_name + suffix;
         auto track_name = pmc_name;
-        entries.push_back({ pmc_name, track_name, static_cast<double>(arr[i]) });
+        entries.push_back({ .pmc_name   = pmc_name,
+                            .track_name = track_name,
+                            .value      = static_cast<double>(arr[i]) });
     }
     return entries;
 }
@@ -369,7 +379,10 @@ TEST_F(xcp_output_test, SentinelValuesSkipped)
         for(size_t i = 0; i < m.xcp_stats[xcp].vcn_busy.size(); ++i)
         {
             auto value = m.xcp_stats[xcp].vcn_busy[i];
-            if(value == std::numeric_limits<std::uint16_t>::max()) continue;
+            if(value == std::numeric_limits<std::uint16_t>::max())
+            {
+                continue;
+            }
             emitted.emplace_back(format_perfetto_xcp_track(device_id, "VCN Busy", xcp, i),
                                  static_cast<double>(value));
         }
@@ -385,7 +398,10 @@ TEST_F(xcp_output_test, SentinelValuesSkipped)
         for(size_t i = 0; i < m.xcp_stats[xcp].vcn_busy.size(); ++i)
         {
             auto value = m.xcp_stats[xcp].vcn_busy[i];
-            if(value == std::numeric_limits<std::uint16_t>::max()) continue;
+            if(value == std::numeric_limits<std::uint16_t>::max())
+            {
+                continue;
+            }
             emitted.emplace_back(format_perfetto_xcp_track(device_id, "VCN Busy", xcp, i),
                                  static_cast<double>(value));
         }

@@ -45,8 +45,8 @@ static const std::vector<size_t> kMultiQpAlignmentSizes = {
 // E0.  InvalidRecvCount — ncclIbIrecv with n > NCCL_NET_IB_MAX_RECVS (8)
 //      must reject the request without crashing on a live recvComm.
 TEST_F(NetIbMPITest, InvalidRecvCount) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
@@ -75,8 +75,8 @@ TEST_F(NetIbMPITest, InvalidRecvCount) {
 //      SAME address from its own communicator, so all of them contend on one
 //      cache entry's refcount rather than merely on the cache mutex.
 TEST_F(NetIbMPITest, MrCacheRefCount) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
@@ -182,8 +182,8 @@ TEST_F(NetIbMPITest, MrCacheRefCount) {
 // E2.  SendSizeClamping — sender posts a buffer larger than the receiver's
 //      posted size; isend must clamp to recv_size and complete cleanly.
 TEST_F(NetIbMPITest, SendSizeClamping) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
@@ -251,8 +251,8 @@ TEST_F(NetIbMPITest, SendSizeClamping) {
 // E3.  NullCommClose — ncclIbCloseSend/Recv on NULL must return
 //      ncclSuccess without crashing (null-guard branch).
 TEST_F(NetIbMPITest, NullCommClose) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     AssertInitAndGetDevices(nullptr);
 
     EXPECT_EQ(CloseSendComm(nullptr), ncclSuccess);
@@ -268,8 +268,8 @@ TEST_F(NetIbMPITest, NullCommClose) {
 //      tag 0 on its own connection, a completion routed to the wrong comm shows
 //      up as a data mismatch instead of passing silently.
 TEST_F(NetIbMPITest, TagZeroReuse) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
@@ -339,8 +339,8 @@ TEST_F(NetIbMPITest, TagZeroReuse) {
 //      When AR is enabled and size > threshold, ncclIbMultiSend appends a
 //      0-byte RDMA_WRITE_WITH_IMM work request.
 TEST_F(NetIbMPITest, AdaptiveRoutingThresholdBoundary) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     const char* arEnv = getenv("NCCL_IB_ADAPTIVE_ROUTING");
     if (!arEnv || atoi(arEnv) == 0) {
         GTEST_SKIP() << "Set NCCL_IB_ADAPTIVE_ROUTING=1 to run this test";
@@ -384,8 +384,8 @@ TEST_F(NetIbMPITest, InlineSendBoundary) {
         GTEST_SKIP() << "Requires NCCL_IB_USE_INLINE=1";
     }
 
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
@@ -421,8 +421,8 @@ TEST_F(NetIbMPITest, InlineSendBoundary) {
 //      below at 2 or 4 workers, 4 MB and below at 16 -- so the largest steps are
 //      covered by the serial body.
 TEST_F(NetIbMPITest, MixedSizeBarrage) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
@@ -471,8 +471,8 @@ TEST_F(NetIbMPITest, MixedSizeBarrage) {
 //      tight senders replace an idle fabric with genuine queue contention, while
 //      the backpressure assertion stays per-connection.
 TEST_F(NetIbMPITest, FifoPressureSenderFast) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
@@ -658,8 +658,8 @@ TEST_F(NetIbMPITest, FifoPressureSenderFast) {
 //      also cycles more than a whole pool through each comm, which is what makes
 //      recycling assertable rather than assumed -- see kRounds below.
 TEST_F(NetIbMPITest, RequestSlotExhaustion) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
@@ -784,8 +784,8 @@ TEST_F(NetIbMPITest, RequestSlotExhaustion) {
 //      device behind a single mutex, so concurrent storms are the only way to
 //      race its insert, lookup and release paths against each other.
 TEST_F(NetIbMPITest, MemoryRegistrationStorm) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
@@ -952,8 +952,8 @@ TEST_F(NetIbMPITest, MemoryRegistrationStorm) {
 // C1.  ConcurrentMultiConnectionStress — 4 connections on same device,
 //      concurrent I/O with independent tag spaces.
 TEST_F(NetIbMPITest, ConcurrentMultiConnectionStress) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
@@ -1055,8 +1055,8 @@ TEST_F(NetIbMPITest, ConcurrentMultiConnectionStress) {
 // C2.  ConnectionChurnUnderLoad — 1000 connect→transfer→close cycles,
 //      with RDMA resource leak detection.
 TEST_F(NetIbMPITest, ConnectionChurnUnderLoad) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
@@ -1167,8 +1167,8 @@ TEST_F(NetIbMPITest, ConnectionChurnUnderLoad) {
 //      all, close all, repeat 100 times (1000 lifecycles total).
 //      RDMA checkpoints at batches 25, 50, 75, 100.
 TEST_F(NetIbMPITest, ConnectionBatchCreateDestroy) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
@@ -1300,8 +1300,8 @@ TEST_F(NetIbMPITest, MultiQpSplitDataStress) {
         GTEST_SKIP() << "Requires NCCL_IB_QPS_PER_CONNECTION>=2, NCCL_IB_SPLIT_DATA_ON_QPS=1";
     }
 
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
@@ -1353,8 +1353,8 @@ TEST_F(NetIbMPITest, MultiQpNoSplitStress) {
         GTEST_SKIP() << "Requires NCCL_IB_QPS_PER_CONNECTION>=2, NCCL_IB_SPLIT_DATA_ON_QPS=0";
     }
 
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
@@ -1400,8 +1400,8 @@ TEST_F(NetIbMPITest, MultiQpNoSplitStress) {
 
 // B1.  FanInStress — ranks 1,2,3 each send to rank 0, 100 iterations.
 TEST_F(NetIbMPITest, FanInStress) {
-    ASSERT_TRUE(validateTestPrerequisites(kMinFourProcesses, kMinFourProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kMinFourProcesses, kMinFourProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
@@ -1459,8 +1459,8 @@ TEST_F(NetIbMPITest, FanInStress) {
 
 // B2.  FanOutStress — rank 0 sends to ranks 1,2,3, 100 iterations.
 TEST_F(NetIbMPITest, FanOutStress) {
-    ASSERT_TRUE(validateTestPrerequisites(kMinFourProcesses, kMinFourProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kMinFourProcesses, kMinFourProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
@@ -1517,8 +1517,8 @@ TEST_F(NetIbMPITest, FanOutStress) {
 
 // B3.  AllToAllStress — full mesh (12 connections for 4 ranks), 50 iters.
 TEST_F(NetIbMPITest, AllToAllStress) {
-    ASSERT_TRUE(validateTestPrerequisites(kMinFourProcesses, kMinFourProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kMinFourProcesses, kMinFourProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     int nranks = MPIEnvironment::world_size;
     AssertInitAndGetDevices(nullptr);
@@ -1582,8 +1582,8 @@ TEST_F(NetIbMPITest, MultiQpFanIn) {
         GTEST_SKIP() << "Requires NCCL_IB_QPS_PER_CONNECTION>=2, NCCL_IB_SPLIT_DATA_ON_QPS=1";
     }
 
-    ASSERT_TRUE(validateTestPrerequisites(kMinFourProcesses, kMinFourProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kMinFourProcesses, kMinFourProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
@@ -1640,8 +1640,8 @@ TEST_F(NetIbMPITest, MultiQpFanIn) {
 
 // B5.  BidirectionalMultiRank — all pairs bidirectional, 4 ranks, 50 iters.
 TEST_F(NetIbMPITest, BidirectionalMultiRank) {
-    ASSERT_TRUE(validateTestPrerequisites(kMinFourProcesses, kMinFourProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kMinFourProcesses, kMinFourProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     int nranks = MPIEnvironment::world_size;
     AssertInitAndGetDevices(nullptr);
@@ -1700,8 +1700,8 @@ TEST_F(NetIbMPITest, BidirectionalMultiRank) {
 
 // B6.  LongRunningMultiRank — fan-in 3→1, 1000 iterations, RDMA checkpoints.
 TEST_F(NetIbMPITest, LongRunningMultiRank) {
-    ASSERT_TRUE(validateTestPrerequisites(kMinFourProcesses, kMinFourProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kMinFourProcesses, kMinFourProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
@@ -1772,8 +1772,8 @@ TEST_F(NetIbMPITest, LongRunningMultiRank) {
 // G1.  BidirectionalSaturation — two opposing connections, full-duplex,
 //      50 iterations.
 TEST_F(NetIbMPITest, BidirectionalSaturation) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
@@ -1836,8 +1836,8 @@ TEST_F(NetIbMPITest, BidirectionalSaturation) {
 //      the main thread around the whole run: an in-loop snapshot would see the
 //      other workers' live QPs and report a false leak.
 TEST_F(NetIbMPITest, LongRunningEndurance) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
@@ -1907,8 +1907,8 @@ TEST_F(NetIbMPITest, LongRunningEndurance) {
 
 // H1.  GpuMemoryTransferStress — 5 alloc/transfer/flush/verify/free cycles.
 TEST_F(NetIbMPITest, GpuMemoryTransferStress) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
@@ -2089,8 +2089,8 @@ TEST_F(NetIbMPITest, GpuMemoryTransferStress) {
 //      in flight on one NIC at once, so recycling has to hold up while other
 //      communicators are draining their own batches.
 TEST_F(NetIbMPITest, RapidRecvPostDrain) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
@@ -2178,8 +2178,8 @@ TEST_F(NetIbMPITest, RapidRecvPostDrain) {
 //      Placed after Group J (not adjacent to E0-E7) because it was added in a later
 //      coverage iteration; the test number is kept to preserve git blame continuity.
 TEST_F(NetIbMPITest, SetNetAttrNoOp) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     AssertInitAndGetDevices(nullptr);
     ASSERT_NE(net_->setNetAttr, nullptr);
     EXPECT_EQ(net_->setNetAttr(initCtx_, nullptr), ncclSuccess);

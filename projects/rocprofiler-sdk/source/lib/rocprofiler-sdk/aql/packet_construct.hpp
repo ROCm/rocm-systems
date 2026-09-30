@@ -59,9 +59,12 @@ operator<(aqlprofile_pmc_event_t lhs, aqlprofile_pmc_event_t rhs)
 
 namespace rocprofiler
 {
-namespace thread_trace
+namespace kfd
 {
 class kfd_copy_queue_t;
+}  // namespace kfd
+namespace thread_trace
+{
 struct thread_trace_parameter_pack;
 }  // namespace thread_trace
 
@@ -115,10 +118,10 @@ class ThreadTraceAQLPacketFactory
     using thread_trace_parameter_pack = thread_trace::thread_trace_parameter_pack;
 
 public:
-    ThreadTraceAQLPacketFactory(rocprofiler_agent_id_t                           agent_id,
-                                const thread_trace_parameter_pack&               params,
-                                std::shared_ptr<thread_trace::kfd_memory_pool_t> kfd_memory = {},
-                                std::shared_ptr<thread_trace::kfd_copy_queue_t>  copy_queue = {});
+    ThreadTraceAQLPacketFactory(rocprofiler_agent_id_t                  agent_id,
+                                const thread_trace_parameter_pack&      params,
+                                std::shared_ptr<kfd::kfd_memory_pool_t> kfd_memory = {},
+                                std::shared_ptr<kfd::kfd_copy_queue_t>  copy_queue = {});
 
     std::unique_ptr<hsa::TraceControlAQLPacket>  construct_control_packet();
     std::unique_ptr<hsa::CodeobjMarkerAQLPacket> construct_load_marker_packet(uint64_t id,

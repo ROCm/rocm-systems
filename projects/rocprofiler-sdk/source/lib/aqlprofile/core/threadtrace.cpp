@@ -97,7 +97,7 @@ _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t            handle,
         if(control_ptr[se_index].status & sqttbuilder->GetUTCErrorMask())
         {
             ERR_LOGGING("SQTT memory error received, SE({})", se_index);
-            status = HSA_STATUS_ERROR_EXCEPTION;
+            if(status == HSA_STATUS_SUCCESS) status = HSA_STATUS_ERROR_OUT_OF_RESOURCES;
         }
         auto status2_value = (pm4_factory->GetGpuId() >= aql_profile::GFX12_GPU_ID)
                                  ? control_ptr[se_index].status2
@@ -141,8 +141,8 @@ _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t            handle,
             size_t buf_num = memorymgr->config.buffer_data.at(se_index).size();
             sample_ptr     = memorymgr->config.buffer_data.at(
                 se_index)[(memorymgr->buffer_swaps + buf_num - 1) % buf_num];
-            callback(se_index, sample_ptr, sample_size, userdata);
-            return status;
+            auto callback_status = callback(se_index, sample_ptr, sample_size, userdata);
+            return callback_status == HSA_STATUS_SUCCESS ? status : callback_status;
         }
     }
 
@@ -173,8 +173,10 @@ _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t            handle,
             sample_size_plus_header = sample_size + gfx9_header_size;
         }
 
-        memorymgr->CopyMemory((void*) sample_data_ptr, sample_ptr, sample_size);
-        callback(se_index, (void*) cpu_sample, sample_size_plus_header, userdata);
+        auto copy_status = memorymgr->CopyMemory(sample_data_ptr, sample_ptr, sample_size);
+        if(copy_status != HSA_STATUS_SUCCESS) return copy_status;
+        auto callback_status = callback(se_index, cpu_sample, sample_size_plus_header, userdata);
+        if(callback_status != HSA_STATUS_SUCCESS) return callback_status;
     }
 
     return status;
@@ -287,7 +289,7 @@ _internal_aqlprofile_att_create_packets(aqlprofile_handle_t*                  ha
             // First == Last buf for ring
             buffer_data.emplace_back(memorymgr->GetOutputBuf());
 
-            if((pm4_factory->GetGpuId() != aql_profile::GFX9_GPU_ID) && (buffer_num % 2))
+            if(pm4_factory->GetGpuId() >= aql_profile::GFX10_GPU_ID && (buffer_num % 2))
             {
                 // For gfxip != 9, an odd number of buffers in the ring causes buf0 and buf1 to have
                 // swapped pointers after a round trip. We need two turns around the ring to restore
@@ -298,9 +300,13 @@ _internal_aqlprofile_att_create_packets(aqlprofile_handle_t*                  ha
         }
     }
 
-    MemoryManager::RegisterManager(memorymgr);
-
     auto* control_ptr = memorymgr->GetTraceControlBuf<pm4_builder::TraceControl>();
+    // The allocation callback returns uninitialized storage; initialize clocks before GPU writes.
+    for(size_t i = 0; i < se_number_total; ++i)
+    {
+        control_ptr[i].gpu_clock_start  = 0;
+        control_ptr[i].gpu_clock_latest = 0;
+    }
 
     trace_config.control_buffer_ptr  = control_ptr;
     trace_config.control_buffer_size = control_size;
@@ -320,16 +326,19 @@ _internal_aqlprofile_att_create_packets(aqlprofile_handle_t*                  ha
     const size_t stop_size  = aql_profile::CommandBufferMgr::Align(stop_cmd.Size());
     memorymgr->CreateCmdBuf(start_size + stop_size);
 
-    handle->handle                      = memorymgr->GetHandler();
     pm4_builder::CmdBuilder* cmd_writer = pm4_factory->GetCmdBuilder();
     uint8_t*                 cmdbuf     = reinterpret_cast<uint8_t*>(memorymgr->GetCmdBuf());
 
-    copy_fn(cmdbuf, start_cmd.Data(), start_cmd.Size(), userdata);
+    auto copy_status = copy_fn(cmdbuf, start_cmd.Data(), start_cmd.Size(), userdata);
+    if(copy_status != HSA_STATUS_SUCCESS) return copy_status;
     aql_profile::PopulateAql(cmdbuf, start_cmd.Size(), cmd_writer, &packets->start_packet);
     cmdbuf += start_size;
-    copy_fn(cmdbuf, stop_cmd.Data(), stop_cmd.Size(), userdata);
+    copy_status = copy_fn(cmdbuf, stop_cmd.Data(), stop_cmd.Size(), userdata);
+    if(copy_status != HSA_STATUS_SUCCESS) return copy_status;
     aql_profile::PopulateAql(cmdbuf, stop_cmd.Size(), cmd_writer, &packets->stop_packet);
 
+    MemoryManager::RegisterManager(memorymgr);
+    handle->handle = memorymgr->GetHandler();
     return HSA_STATUS_SUCCESS;
 }
 
@@ -445,9 +454,35 @@ aqlprofile_att_update_buffer_status(aqlprofile_att_buffer_status_t* out,
         out->num_swaps    = manager->buffer_swaps.fetch_add(1);
         out->data = buffer_data.at((out->num_swaps + buffer_data.size() - 1) % buffer_data.size());
 
-        out->read_offset = sizeof(uint16_t) * (control.wptr_doublebuffer >> 30);
+        if(out->num_swaps > 0)
+            out->read_offset = sizeof(uint16_t) * (control.wptr_doublebuffer >> 30);
     }
 
+    return HSA_STATUS_SUCCESS;
+}
+
+PUBLIC_API hsa_status_t
+aqlprofile_att_get_gpu_clock(aqlprofile_att_gpu_clock_t* out,
+                             aqlprofile_handle_t         handle,
+                             int                         shader_engine_id)
+{
+    if(out == nullptr || shader_engine_id < 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+    auto  generic_manager = MemoryManager::GetManager(handle.handle);
+    auto* manager         = dynamic_cast<TraceMemoryManager*>(generic_manager.get());
+    if(manager == nullptr) return HSA_STATUS_ERROR;
+
+    auto* factory = aql_profile::Pm4Factory::Create(manager->AgentHandle());
+    if(static_cast<uint32_t>(shader_engine_id) >= factory->GetShaderEnginesNumber())
+        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+    const auto se_per_xcc =
+        factory->GetShaderEnginesNumber() / std::max(1u, factory->GetXccNumber());
+    volatile auto& control = manager->GetTraceControlBuf<
+        pm4_builder::TraceControl>()[static_cast<uint32_t>(shader_engine_id) / se_per_xcc];
+
+    out->start  = control.gpu_clock_start;
+    out->latest = control.gpu_clock_latest;
     return HSA_STATUS_SUCCESS;
 }
 

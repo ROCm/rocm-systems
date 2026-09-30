@@ -3,10 +3,11 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
-# This code was automatically generated with version 2.30.4. Do not modify it directly.
+# This code was automatically generated with version 2.30.7. Do not modify it directly.
 
 from libc.stdint cimport intptr_t, uintptr_t
 
+import os
 import threading
 
 from .utils import FunctionNotFoundError, NotSupportedError
@@ -50,6 +51,14 @@ cdef int get_cuda_version():
 
     return driver_ver
 
+
+cdef extern from "<dlfcn.h>" nogil:
+    ctypedef struct Dl_info:
+        const char* dli_fname
+        void* dli_fbase
+        const char* dli_sname
+        void* dli_saddr
+    int dladdr(const void*, Dl_info*)
 
 
 ###############################################################################
@@ -108,12 +117,36 @@ cdef void* __ncclWaitSignal = NULL
 cdef void* __ncclGroupStart = NULL
 cdef void* __ncclGroupEnd = NULL
 cdef void* __ncclGroupSimulateEnd = NULL
+cdef void* __ncclParamBind = NULL
+cdef void* __ncclParamGetI8 = NULL
+cdef void* __ncclParamGetI16 = NULL
+cdef void* __ncclParamGetI32 = NULL
+cdef void* __ncclParamGetI64 = NULL
+cdef void* __ncclParamGetU8 = NULL
+cdef void* __ncclParamGetU16 = NULL
+cdef void* __ncclParamGetU32 = NULL
+cdef void* __ncclParamGetU64 = NULL
+cdef void* __ncclParamGetStr = NULL
+cdef void* __ncclParamGet = NULL
+cdef void* __ncclParamGetParameter = NULL
+cdef void* __ncclParamGetAllParameterKeys = NULL
+cdef void* __ncclParamDumpAll = NULL
 cdef void* __ncclCommQueryProperties = NULL
 cdef void* __ncclDevCommCreate = NULL
 cdef void* __ncclDevCommDestroy = NULL
 cdef void* __ncclGetLsaMultimemDevicePointer = NULL
 cdef void* __ncclGetLsaDevicePointer = NULL
+cdef void* __ncclGetMultimemDevicePointer = NULL
 cdef void* __ncclGetPeerDevicePointer = NULL
+cdef void* __ncclTeamWorld = NULL
+cdef void* __ncclTeamLsa = NULL
+cdef void* __ncclTeamRail = NULL
+cdef void* __ncclTeamRankToWorld = NULL
+cdef void* __ncclTeamRankToLsa = NULL
+cdef void* __ncclLsaBarrierCreateRequirement = NULL
+cdef void* __ncclGinBarrierCreateRequirement = NULL
+cdef void* __ncclLLA2ACreateRequirement = NULL
+cdef void* __ncclLLA2ACalcSlots = NULL
 
 
 cdef void* load_library() except* with gil:
@@ -515,6 +548,104 @@ cdef int _check_or_init_nccl() except -1 nogil:
                 handle = load_library()
             __ncclGroupSimulateEnd = dlsym(handle, 'ncclGroupSimulateEnd')
 
+        global __ncclParamBind
+        __ncclParamBind = dlsym(RTLD_DEFAULT, 'ncclParamBind')
+        if __ncclParamBind == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclParamBind = dlsym(handle, 'ncclParamBind')
+
+        global __ncclParamGetI8
+        __ncclParamGetI8 = dlsym(RTLD_DEFAULT, 'ncclParamGetI8')
+        if __ncclParamGetI8 == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclParamGetI8 = dlsym(handle, 'ncclParamGetI8')
+
+        global __ncclParamGetI16
+        __ncclParamGetI16 = dlsym(RTLD_DEFAULT, 'ncclParamGetI16')
+        if __ncclParamGetI16 == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclParamGetI16 = dlsym(handle, 'ncclParamGetI16')
+
+        global __ncclParamGetI32
+        __ncclParamGetI32 = dlsym(RTLD_DEFAULT, 'ncclParamGetI32')
+        if __ncclParamGetI32 == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclParamGetI32 = dlsym(handle, 'ncclParamGetI32')
+
+        global __ncclParamGetI64
+        __ncclParamGetI64 = dlsym(RTLD_DEFAULT, 'ncclParamGetI64')
+        if __ncclParamGetI64 == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclParamGetI64 = dlsym(handle, 'ncclParamGetI64')
+
+        global __ncclParamGetU8
+        __ncclParamGetU8 = dlsym(RTLD_DEFAULT, 'ncclParamGetU8')
+        if __ncclParamGetU8 == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclParamGetU8 = dlsym(handle, 'ncclParamGetU8')
+
+        global __ncclParamGetU16
+        __ncclParamGetU16 = dlsym(RTLD_DEFAULT, 'ncclParamGetU16')
+        if __ncclParamGetU16 == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclParamGetU16 = dlsym(handle, 'ncclParamGetU16')
+
+        global __ncclParamGetU32
+        __ncclParamGetU32 = dlsym(RTLD_DEFAULT, 'ncclParamGetU32')
+        if __ncclParamGetU32 == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclParamGetU32 = dlsym(handle, 'ncclParamGetU32')
+
+        global __ncclParamGetU64
+        __ncclParamGetU64 = dlsym(RTLD_DEFAULT, 'ncclParamGetU64')
+        if __ncclParamGetU64 == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclParamGetU64 = dlsym(handle, 'ncclParamGetU64')
+
+        global __ncclParamGetStr
+        __ncclParamGetStr = dlsym(RTLD_DEFAULT, 'ncclParamGetStr')
+        if __ncclParamGetStr == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclParamGetStr = dlsym(handle, 'ncclParamGetStr')
+
+        global __ncclParamGet
+        __ncclParamGet = dlsym(RTLD_DEFAULT, 'ncclParamGet')
+        if __ncclParamGet == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclParamGet = dlsym(handle, 'ncclParamGet')
+
+        global __ncclParamGetParameter
+        __ncclParamGetParameter = dlsym(RTLD_DEFAULT, 'ncclParamGetParameter')
+        if __ncclParamGetParameter == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclParamGetParameter = dlsym(handle, 'ncclParamGetParameter')
+
+        global __ncclParamGetAllParameterKeys
+        __ncclParamGetAllParameterKeys = dlsym(RTLD_DEFAULT, 'ncclParamGetAllParameterKeys')
+        if __ncclParamGetAllParameterKeys == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclParamGetAllParameterKeys = dlsym(handle, 'ncclParamGetAllParameterKeys')
+
+        global __ncclParamDumpAll
+        __ncclParamDumpAll = dlsym(RTLD_DEFAULT, 'ncclParamDumpAll')
+        if __ncclParamDumpAll == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclParamDumpAll = dlsym(handle, 'ncclParamDumpAll')
+
         global __ncclCommQueryProperties
         __ncclCommQueryProperties = dlsym(RTLD_DEFAULT, 'ncclCommQueryProperties')
         if __ncclCommQueryProperties == NULL:
@@ -550,12 +681,82 @@ cdef int _check_or_init_nccl() except -1 nogil:
                 handle = load_library()
             __ncclGetLsaDevicePointer = dlsym(handle, 'ncclGetLsaDevicePointer')
 
+        global __ncclGetMultimemDevicePointer
+        __ncclGetMultimemDevicePointer = dlsym(RTLD_DEFAULT, 'ncclGetMultimemDevicePointer')
+        if __ncclGetMultimemDevicePointer == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclGetMultimemDevicePointer = dlsym(handle, 'ncclGetMultimemDevicePointer')
+
         global __ncclGetPeerDevicePointer
         __ncclGetPeerDevicePointer = dlsym(RTLD_DEFAULT, 'ncclGetPeerDevicePointer')
         if __ncclGetPeerDevicePointer == NULL:
             if handle == NULL:
                 handle = load_library()
             __ncclGetPeerDevicePointer = dlsym(handle, 'ncclGetPeerDevicePointer')
+
+        global __ncclTeamWorld
+        __ncclTeamWorld = dlsym(RTLD_DEFAULT, 'ncclTeamWorld')
+        if __ncclTeamWorld == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclTeamWorld = dlsym(handle, 'ncclTeamWorld')
+
+        global __ncclTeamLsa
+        __ncclTeamLsa = dlsym(RTLD_DEFAULT, 'ncclTeamLsa')
+        if __ncclTeamLsa == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclTeamLsa = dlsym(handle, 'ncclTeamLsa')
+
+        global __ncclTeamRail
+        __ncclTeamRail = dlsym(RTLD_DEFAULT, 'ncclTeamRail')
+        if __ncclTeamRail == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclTeamRail = dlsym(handle, 'ncclTeamRail')
+
+        global __ncclTeamRankToWorld
+        __ncclTeamRankToWorld = dlsym(RTLD_DEFAULT, 'ncclTeamRankToWorld')
+        if __ncclTeamRankToWorld == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclTeamRankToWorld = dlsym(handle, 'ncclTeamRankToWorld')
+
+        global __ncclTeamRankToLsa
+        __ncclTeamRankToLsa = dlsym(RTLD_DEFAULT, 'ncclTeamRankToLsa')
+        if __ncclTeamRankToLsa == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclTeamRankToLsa = dlsym(handle, 'ncclTeamRankToLsa')
+
+        global __ncclLsaBarrierCreateRequirement
+        __ncclLsaBarrierCreateRequirement = dlsym(RTLD_DEFAULT, 'ncclLsaBarrierCreateRequirement')
+        if __ncclLsaBarrierCreateRequirement == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclLsaBarrierCreateRequirement = dlsym(handle, 'ncclLsaBarrierCreateRequirement')
+
+        global __ncclGinBarrierCreateRequirement
+        __ncclGinBarrierCreateRequirement = dlsym(RTLD_DEFAULT, 'ncclGinBarrierCreateRequirement')
+        if __ncclGinBarrierCreateRequirement == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclGinBarrierCreateRequirement = dlsym(handle, 'ncclGinBarrierCreateRequirement')
+
+        global __ncclLLA2ACreateRequirement
+        __ncclLLA2ACreateRequirement = dlsym(RTLD_DEFAULT, 'ncclLLA2ACreateRequirement')
+        if __ncclLLA2ACreateRequirement == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclLLA2ACreateRequirement = dlsym(handle, 'ncclLLA2ACreateRequirement')
+
+        global __ncclLLA2ACalcSlots
+        __ncclLLA2ACalcSlots = dlsym(RTLD_DEFAULT, 'ncclLLA2ACalcSlots')
+        if __ncclLLA2ACalcSlots == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclLLA2ACalcSlots = dlsym(handle, 'ncclLLA2ACalcSlots')
         __py_nccl_init = True
         return 0
 
@@ -718,6 +919,48 @@ cpdef dict _inspect_function_pointers():
     global __ncclGroupSimulateEnd
     data["__ncclGroupSimulateEnd"] = <intptr_t>__ncclGroupSimulateEnd
 
+    global __ncclParamBind
+    data["__ncclParamBind"] = <intptr_t>__ncclParamBind
+
+    global __ncclParamGetI8
+    data["__ncclParamGetI8"] = <intptr_t>__ncclParamGetI8
+
+    global __ncclParamGetI16
+    data["__ncclParamGetI16"] = <intptr_t>__ncclParamGetI16
+
+    global __ncclParamGetI32
+    data["__ncclParamGetI32"] = <intptr_t>__ncclParamGetI32
+
+    global __ncclParamGetI64
+    data["__ncclParamGetI64"] = <intptr_t>__ncclParamGetI64
+
+    global __ncclParamGetU8
+    data["__ncclParamGetU8"] = <intptr_t>__ncclParamGetU8
+
+    global __ncclParamGetU16
+    data["__ncclParamGetU16"] = <intptr_t>__ncclParamGetU16
+
+    global __ncclParamGetU32
+    data["__ncclParamGetU32"] = <intptr_t>__ncclParamGetU32
+
+    global __ncclParamGetU64
+    data["__ncclParamGetU64"] = <intptr_t>__ncclParamGetU64
+
+    global __ncclParamGetStr
+    data["__ncclParamGetStr"] = <intptr_t>__ncclParamGetStr
+
+    global __ncclParamGet
+    data["__ncclParamGet"] = <intptr_t>__ncclParamGet
+
+    global __ncclParamGetParameter
+    data["__ncclParamGetParameter"] = <intptr_t>__ncclParamGetParameter
+
+    global __ncclParamGetAllParameterKeys
+    data["__ncclParamGetAllParameterKeys"] = <intptr_t>__ncclParamGetAllParameterKeys
+
+    global __ncclParamDumpAll
+    data["__ncclParamDumpAll"] = <intptr_t>__ncclParamDumpAll
+
     global __ncclCommQueryProperties
     data["__ncclCommQueryProperties"] = <intptr_t>__ncclCommQueryProperties
 
@@ -733,8 +976,38 @@ cpdef dict _inspect_function_pointers():
     global __ncclGetLsaDevicePointer
     data["__ncclGetLsaDevicePointer"] = <intptr_t>__ncclGetLsaDevicePointer
 
+    global __ncclGetMultimemDevicePointer
+    data["__ncclGetMultimemDevicePointer"] = <intptr_t>__ncclGetMultimemDevicePointer
+
     global __ncclGetPeerDevicePointer
     data["__ncclGetPeerDevicePointer"] = <intptr_t>__ncclGetPeerDevicePointer
+
+    global __ncclTeamWorld
+    data["__ncclTeamWorld"] = <intptr_t>__ncclTeamWorld
+
+    global __ncclTeamLsa
+    data["__ncclTeamLsa"] = <intptr_t>__ncclTeamLsa
+
+    global __ncclTeamRail
+    data["__ncclTeamRail"] = <intptr_t>__ncclTeamRail
+
+    global __ncclTeamRankToWorld
+    data["__ncclTeamRankToWorld"] = <intptr_t>__ncclTeamRankToWorld
+
+    global __ncclTeamRankToLsa
+    data["__ncclTeamRankToLsa"] = <intptr_t>__ncclTeamRankToLsa
+
+    global __ncclLsaBarrierCreateRequirement
+    data["__ncclLsaBarrierCreateRequirement"] = <intptr_t>__ncclLsaBarrierCreateRequirement
+
+    global __ncclGinBarrierCreateRequirement
+    data["__ncclGinBarrierCreateRequirement"] = <intptr_t>__ncclGinBarrierCreateRequirement
+
+    global __ncclLLA2ACreateRequirement
+    data["__ncclLLA2ACreateRequirement"] = <intptr_t>__ncclLLA2ACreateRequirement
+
+    global __ncclLLA2ACalcSlots
+    data["__ncclLLA2ACalcSlots"] = <intptr_t>__ncclLLA2ACalcSlots
 
     func_ptrs = data
     return data
@@ -745,6 +1018,33 @@ cpdef _inspect_function_pointer(str name):
     if func_ptrs is None:
         func_ptrs = _inspect_function_pointers()
     return func_ptrs[name]
+
+
+cdef object __nccl_loaded_so_path = None
+
+
+cpdef object _inspect_loaded_library_path():
+    # Path of the .so backing the loaded symbols, via dladdr() on a
+    # resolved entry point. None if it cannot be determined.
+    global __nccl_loaded_so_path
+    if __nccl_loaded_so_path is not None:
+        return __nccl_loaded_so_path
+
+    cdef dict ptrs = _inspect_function_pointers()
+    # Any resolved symbol maps to the same .so.
+    cdef intptr_t addr = 0
+    for value in ptrs.values():
+        if value:
+            addr = value
+            break
+
+    cdef Dl_info info
+    if addr == 0:
+        return None
+    if dladdr(<void*>addr, &info) == 0 or info.dli_fname == NULL:
+        return None
+    __nccl_loaded_so_path = os.fsdecode(<bytes>info.dli_fname)
+    return __nccl_loaded_so_path
 
 
 ###############################################################################
@@ -1241,6 +1541,146 @@ cdef ncclResult_t _ncclGroupSimulateEnd(ncclSimInfo_t* simInfo) except?_NCCLRESU
         simInfo)
 
 
+cdef ncclResult_t _ncclParamBind(ncclParamHandle_t* out, const char* key) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclParamBind
+    _check_or_init_nccl()
+    if __ncclParamBind == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclParamBind is not found")
+    return (<ncclResult_t (*)(ncclParamHandle_t*, const char*) noexcept nogil>__ncclParamBind)(
+        out, key)
+
+
+cdef ncclResult_t _ncclParamGetI8(ncclParamHandle_t h, int8_t* out) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclParamGetI8
+    _check_or_init_nccl()
+    if __ncclParamGetI8 == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclParamGetI8 is not found")
+    return (<ncclResult_t (*)(ncclParamHandle_t, int8_t*) noexcept nogil>__ncclParamGetI8)(
+        h, out)
+
+
+cdef ncclResult_t _ncclParamGetI16(ncclParamHandle_t h, int16_t* out) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclParamGetI16
+    _check_or_init_nccl()
+    if __ncclParamGetI16 == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclParamGetI16 is not found")
+    return (<ncclResult_t (*)(ncclParamHandle_t, int16_t*) noexcept nogil>__ncclParamGetI16)(
+        h, out)
+
+
+cdef ncclResult_t _ncclParamGetI32(ncclParamHandle_t h, int32_t* out) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclParamGetI32
+    _check_or_init_nccl()
+    if __ncclParamGetI32 == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclParamGetI32 is not found")
+    return (<ncclResult_t (*)(ncclParamHandle_t, int32_t*) noexcept nogil>__ncclParamGetI32)(
+        h, out)
+
+
+cdef ncclResult_t _ncclParamGetI64(ncclParamHandle_t h, int64_t* out) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclParamGetI64
+    _check_or_init_nccl()
+    if __ncclParamGetI64 == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclParamGetI64 is not found")
+    return (<ncclResult_t (*)(ncclParamHandle_t, int64_t*) noexcept nogil>__ncclParamGetI64)(
+        h, out)
+
+
+cdef ncclResult_t _ncclParamGetU8(ncclParamHandle_t h, uint8_t* out) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclParamGetU8
+    _check_or_init_nccl()
+    if __ncclParamGetU8 == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclParamGetU8 is not found")
+    return (<ncclResult_t (*)(ncclParamHandle_t, uint8_t*) noexcept nogil>__ncclParamGetU8)(
+        h, out)
+
+
+cdef ncclResult_t _ncclParamGetU16(ncclParamHandle_t h, uint16_t* out) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclParamGetU16
+    _check_or_init_nccl()
+    if __ncclParamGetU16 == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclParamGetU16 is not found")
+    return (<ncclResult_t (*)(ncclParamHandle_t, uint16_t*) noexcept nogil>__ncclParamGetU16)(
+        h, out)
+
+
+cdef ncclResult_t _ncclParamGetU32(ncclParamHandle_t h, uint32_t* out) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclParamGetU32
+    _check_or_init_nccl()
+    if __ncclParamGetU32 == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclParamGetU32 is not found")
+    return (<ncclResult_t (*)(ncclParamHandle_t, uint32_t*) noexcept nogil>__ncclParamGetU32)(
+        h, out)
+
+
+cdef ncclResult_t _ncclParamGetU64(ncclParamHandle_t h, uint64_t* out) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclParamGetU64
+    _check_or_init_nccl()
+    if __ncclParamGetU64 == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclParamGetU64 is not found")
+    return (<ncclResult_t (*)(ncclParamHandle_t, uint64_t*) noexcept nogil>__ncclParamGetU64)(
+        h, out)
+
+
+cdef ncclResult_t _ncclParamGetStr(ncclParamHandle_t h, const char** out) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclParamGetStr
+    _check_or_init_nccl()
+    if __ncclParamGetStr == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclParamGetStr is not found")
+    return (<ncclResult_t (*)(ncclParamHandle_t, const char**) noexcept nogil>__ncclParamGetStr)(
+        h, out)
+
+
+cdef ncclResult_t _ncclParamGet(ncclParamHandle_t h, void* out, int maxLen, int* len) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclParamGet
+    _check_or_init_nccl()
+    if __ncclParamGet == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclParamGet is not found")
+    return (<ncclResult_t (*)(ncclParamHandle_t, void*, int, int*) noexcept nogil>__ncclParamGet)(
+        h, out, maxLen, len)
+
+
+cdef ncclResult_t _ncclParamGetParameter(const char* key, const char** value, int* valueLen) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclParamGetParameter
+    _check_or_init_nccl()
+    if __ncclParamGetParameter == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclParamGetParameter is not found")
+    return (<ncclResult_t (*)(const char*, const char**, int*) noexcept nogil>__ncclParamGetParameter)(
+        key, value, valueLen)
+
+
+cdef ncclResult_t _ncclParamGetAllParameterKeys(const char*** table, int* tableLen) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclParamGetAllParameterKeys
+    _check_or_init_nccl()
+    if __ncclParamGetAllParameterKeys == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclParamGetAllParameterKeys is not found")
+    return (<ncclResult_t (*)(const char***, int*) noexcept nogil>__ncclParamGetAllParameterKeys)(
+        table, tableLen)
+
+
+cdef void _ncclParamDumpAll() except* nogil:
+    global __ncclParamDumpAll
+    _check_or_init_nccl()
+    if __ncclParamDumpAll == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclParamDumpAll is not found")
+    (<void (*)() noexcept nogil>__ncclParamDumpAll)(
+        )
+
+
 cdef ncclResult_t _ncclCommQueryProperties(ncclComm_t comm, ncclCommProperties_t* props) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
     global __ncclCommQueryProperties
     _check_or_init_nccl()
@@ -1291,6 +1731,16 @@ cdef ncclResult_t _ncclGetLsaDevicePointer(ncclWindow_t window, size_t offset, i
         window, offset, lsaRank, outPtr)
 
 
+cdef ncclResult_t _ncclGetMultimemDevicePointer(ncclWindow_t window, size_t offset, ncclMultimemHandle_t multimem, void** outPtr) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclGetMultimemDevicePointer
+    _check_or_init_nccl()
+    if __ncclGetMultimemDevicePointer == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclGetMultimemDevicePointer is not found")
+    return (<ncclResult_t (*)(ncclWindow_t, size_t, ncclMultimemHandle_t, void**) noexcept nogil>__ncclGetMultimemDevicePointer)(
+        window, offset, multimem, outPtr)
+
+
 cdef ncclResult_t _ncclGetPeerDevicePointer(ncclWindow_t window, size_t offset, int peer, void** outPtr) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
     global __ncclGetPeerDevicePointer
     _check_or_init_nccl()
@@ -1299,3 +1749,93 @@ cdef ncclResult_t _ncclGetPeerDevicePointer(ncclWindow_t window, size_t offset, 
             raise FunctionNotFoundError("function ncclGetPeerDevicePointer is not found")
     return (<ncclResult_t (*)(ncclWindow_t, size_t, int, void**) noexcept nogil>__ncclGetPeerDevicePointer)(
         window, offset, peer, outPtr)
+
+
+cdef ncclTeam_t _ncclTeamWorld(ncclComm_t comm) except* nogil:
+    global __ncclTeamWorld
+    _check_or_init_nccl()
+    if __ncclTeamWorld == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclTeamWorld is not found")
+    return (<ncclTeam_t (*)(ncclComm_t) noexcept nogil>__ncclTeamWorld)(
+        comm)
+
+
+cdef ncclTeam_t _ncclTeamLsa(ncclComm_t comm) except* nogil:
+    global __ncclTeamLsa
+    _check_or_init_nccl()
+    if __ncclTeamLsa == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclTeamLsa is not found")
+    return (<ncclTeam_t (*)(ncclComm_t) noexcept nogil>__ncclTeamLsa)(
+        comm)
+
+
+cdef ncclTeam_t _ncclTeamRail(ncclComm_t comm) except* nogil:
+    global __ncclTeamRail
+    _check_or_init_nccl()
+    if __ncclTeamRail == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclTeamRail is not found")
+    return (<ncclTeam_t (*)(ncclComm_t) noexcept nogil>__ncclTeamRail)(
+        comm)
+
+
+cdef int _ncclTeamRankToWorld(ncclComm_t comm, ncclTeam_t team, int rank) except?-42 nogil:
+    global __ncclTeamRankToWorld
+    _check_or_init_nccl()
+    if __ncclTeamRankToWorld == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclTeamRankToWorld is not found")
+    return (<int (*)(ncclComm_t, ncclTeam_t, int) noexcept nogil>__ncclTeamRankToWorld)(
+        comm, team, rank)
+
+
+cdef int _ncclTeamRankToLsa(ncclComm_t comm, ncclTeam_t team, int rank) except?-42 nogil:
+    global __ncclTeamRankToLsa
+    _check_or_init_nccl()
+    if __ncclTeamRankToLsa == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclTeamRankToLsa is not found")
+    return (<int (*)(ncclComm_t, ncclTeam_t, int) noexcept nogil>__ncclTeamRankToLsa)(
+        comm, team, rank)
+
+
+cdef ncclResult_t _ncclLsaBarrierCreateRequirement(ncclTeam_t team, int nBarriers, ncclLsaBarrierHandle_t* outHandle, ncclDevResourceRequirements_t* outReq) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclLsaBarrierCreateRequirement
+    _check_or_init_nccl()
+    if __ncclLsaBarrierCreateRequirement == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclLsaBarrierCreateRequirement is not found")
+    return (<ncclResult_t (*)(ncclTeam_t, int, ncclLsaBarrierHandle_t*, ncclDevResourceRequirements_t*) noexcept nogil>__ncclLsaBarrierCreateRequirement)(
+        team, nBarriers, outHandle, outReq)
+
+
+cdef ncclResult_t _ncclGinBarrierCreateRequirement(ncclComm_t comm, ncclTeam_t team, int nBarriers, ncclGinBarrierHandle_t* outHandle, ncclDevResourceRequirements_t* outReq) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclGinBarrierCreateRequirement
+    _check_or_init_nccl()
+    if __ncclGinBarrierCreateRequirement == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclGinBarrierCreateRequirement is not found")
+    return (<ncclResult_t (*)(ncclComm_t, ncclTeam_t, int, ncclGinBarrierHandle_t*, ncclDevResourceRequirements_t*) noexcept nogil>__ncclGinBarrierCreateRequirement)(
+        comm, team, nBarriers, outHandle, outReq)
+
+
+cdef ncclResult_t _ncclLLA2ACreateRequirement(int nBlocks, int nSlots, ncclLLA2AHandle_t* outHandle, ncclDevResourceRequirements_t* outReq) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclLLA2ACreateRequirement
+    _check_or_init_nccl()
+    if __ncclLLA2ACreateRequirement == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclLLA2ACreateRequirement is not found")
+    return (<ncclResult_t (*)(int, int, ncclLLA2AHandle_t*, ncclDevResourceRequirements_t*) noexcept nogil>__ncclLLA2ACreateRequirement)(
+        nBlocks, nSlots, outHandle, outReq)
+
+
+cdef int _ncclLLA2ACalcSlots(int maxElts, int maxEltSize) except?-42 nogil:
+    global __ncclLLA2ACalcSlots
+    _check_or_init_nccl()
+    if __ncclLLA2ACalcSlots == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclLLA2ACalcSlots is not found")
+    return (<int (*)(int, int) noexcept nogil>__ncclLLA2ACalcSlots)(
+        maxElts, maxEltSize)

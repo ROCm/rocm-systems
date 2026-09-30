@@ -43,7 +43,6 @@
 extern std::function<ncclTeam_t(ncclComm_t)> g_devrTeamWorld;
 
 extern std::function<ncclResult_t(void*, int, int, int)> g_devrBootstrapBarrier;
-extern std::function<ncclResult_t(struct ncclComm*)> g_devrSymkInitOnce;
 extern std::function<ncclResult_t(struct ncclIntruAddressMap_untyped*, int, int, int, uintptr_t, void*)>
     g_devrIntruAddressMapInsert;
 
@@ -74,6 +73,16 @@ extern std::function<ncclResult_t(struct ncclIntruAddressMap_untyped*, int, int,
 extern std::function<ncclResult_t(struct ncclDevrState*, struct ncclDevrMemory*, hipStream_t,
                                   struct ncclSegmentWindow**)>
     g_devrAllocAndPopulateSegmentWindows;
+extern std::function<ncclResult_t(struct ncclDevrMemory*, struct ncclComm*)> g_devrVerifySegmentLayouts;
+extern std::function<ncclResult_t(struct ncclDevrMemory*)> g_devrBuildGinSegmentInfos;
+
+// The CFT seams 2.31 added: the two team accessors, the two sizes
+// ncclDevrInitOnce caches, and whether the RMA proxy is in play. Defaults
+// describe a comm without CFT and without the proxy; see dev_runtime_micro_fakes.cc.
+extern std::function<ncclTeam_t(ncclComm_t, ncclCftTeamMode_t)> g_devrTeamCft;
+extern std::function<ncclTeam_t(ncclComm_t)> g_devrTeamCftMultimem;
+extern std::function<int(struct ncclComm*)> g_devrComputeCftSize;
+extern std::function<int(struct ncclComm*)> g_devrComputeCftMcSize;
 
 extern std::function<ncclResult_t(struct ncclComm*)> g_devrRmaProxyConnectOnce;
 extern std::function<ncclResult_t(struct ncclComm*, void*, size_t, void*[NCCL_GIN_MAX_CONNECTIONS])>

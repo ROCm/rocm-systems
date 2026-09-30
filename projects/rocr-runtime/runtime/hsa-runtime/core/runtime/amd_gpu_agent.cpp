@@ -131,7 +131,8 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
       extended_aql_dispatch_supported_(false),
       workgroup_clusters_supported_(false),
       kern_cluster_max_dim_({ INT32_MAX, UINT16_MAX, UINT16_MAX }),
-      cluster_max_dim_({ 1, 1, 1 }) {
+      cluster_max_dim_({ 1, 1, 1 }),
+      persisting_l2_cache_size_(0) {
   const bool is_apu_node = (properties_.NumCPUCores > 0);
   profile_ = (is_apu_node) ? HSA_PROFILE_FULL : HSA_PROFILE_BASE;
 
@@ -466,8 +467,12 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
       (assemble_target == AssembleTarget::AQL ? sizeof(amd_kernel_code_t) : 0);
   code_buf_size = AlignUp(header_size + asic_shader->size, 0x1000);
 
+  // NonPaged: GPU-executed code, and a trap handler that can itself fault turns one fault into a
+  // retry storm.
   code_buf = system_allocator()(code_buf_size, 0x1000,
-    core::MemoryRegion::AllocateExecutable | core::MemoryRegion::AllocateExecutableBlitKernelObject);
+                                core::MemoryRegion::AllocateExecutable |
+                                    core::MemoryRegion::AllocateExecutableBlitKernelObject |
+                                    core::MemoryRegion::AllocateNonPaged);
   assert(code_buf != NULL && "Code buffer allocation failed");
 
   memset(code_buf, 0, code_buf_size);
@@ -700,6 +705,15 @@ void GpuAgent::InitCacheList() {
   for (size_t i = 0; i < caches_.size(); i++)
     caches_[i].reset(new core::Cache(deviceName + " L" + std::to_string(cache_props_[i].CacheLevel),
                                      cache_props_[i].CacheLevel, cache_props_[i].CacheSize));
+}
+
+size_t GpuAgent::GetMaxPersistingL2CacheSize() const {
+  for (const auto& cache : cache_props_) {
+    if ((cache.CacheLevel == 2) && (cache.PersistingCacheSizeMax)) {
+      return cache.PersistingCacheSizeMax;
+    }
+  }
+  return 0;
 }
 
 void GpuAgent::InitDerivedCuid() {
@@ -2500,7 +2514,7 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
         }
       }
       // Fallback for when KFD is returning zero.
-      *((uint32_t*)value) = 64;
+      *((uint32_t*)value) = 256;
       break;
     case HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT:
       *((uint32_t*)value) =
@@ -2728,6 +2742,14 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       // GPU agents can participate in host memory DMA-BUF export if the system supports virtual memory APIs
       *static_cast<bool*>(value) = core::Runtime::runtime_singleton_->VirtualMemApiSupported();
       break;
+  case HSA_AMD_AGENT_INFO_REQUEST_PERSISTING_L2_CACHE_SIZE:{
+        *((size_t*)value) = persisting_l2_cache_size_;
+        break;
+    }
+  case HSA_AMD_AGENT_INFO_MAX_PERSISTING_L2_CACHE_SIZE: {
+        *((size_t*)value) = GetMaxPersistingL2CacheSize();
+        break;
+      }
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       break;
@@ -2735,6 +2757,29 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
   return HSA_STATUS_SUCCESS;
 }
 
+hsa_status_t GpuAgent::SetAgentAttribute(hsa_agent_info_t attribute, void* value) {
+  const size_t attribute_u = static_cast<size_t>(attribute);
+
+  switch (attribute_u) {
+    case HSA_AMD_AGENT_ATTRIBUTE_REQUEST_PERSISTING_L2_CACHE_SIZE: {
+      const size_t requested = *((size_t*)value);
+
+      // Validate against hardware maximum
+      const size_t maxSize = GetMaxPersistingL2CacheSize();
+      if (requested > maxSize) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+      hsa_status_t status = driver().SetPersistingCacheSize(node_id(), requested);
+
+      if (status != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      persisting_l2_cache_size_ = requested;
+      break;
+    }
+    default:
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      break;
+  }
+  return HSA_STATUS_SUCCESS;
+}
 hsa_status_t GpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, uint64_t flags,
                                    core::HsaEventCallback event_callback, void* data,
                                    uint32_t private_segment_size, uint32_t group_segment_size,
@@ -3790,6 +3835,8 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
   // Detect if we need PM4 fallback (non-large-BAR systems cannot use CPU atomics on VRAM)
   pcs_data->use_pm4_fallback = !LargeBarEnabled();
 
+  if (is_gfx1250()) pcs_data->use_pm4_fallback = true;
+
   // Allocate cache-line aligned per-XCC data array
   // Each per_xcc_pcs_data_t is 64-byte aligned to prevent false sharing between XCCs
   pcs_data->xcc_data = new per_xcc_pcs_data_t[pcs_data->num_xcc]();
@@ -3798,7 +3845,7 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
     pcs_data->xcc_data[i].host_write_offset = 0;
     pcs_data->xcc_data[i].host_read_offset = 0;
     pcs_data->xcc_data[i].lost_sample_count.store(0, std::memory_order_relaxed);
-    pcs_data->xcc_data[i].which_buffer = 0;
+    pcs_data->xcc_data[i].which_buffer.store(0, std::memory_order_relaxed);
     pcs_data->xcc_data[i].thread = nullptr;
     pcs_data->xcc_data[i].done_sig0.handle = 0;
     pcs_data->xcc_data[i].done_sig1.handle = 0;
@@ -4540,7 +4587,8 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC(
   uint8_t* buffer[2];
 
   // Get references to this XCC's buffers and state (using cached values)
-  uint32_t& which_buffer = pcs_data->xcc_data[xcc_id].which_buffer;
+  const uint32_t which_buffer =
+      pcs_data->xcc_data[xcc_id].which_buffer.load(std::memory_order_acquire);
   const size_t per_xcc_host_buffer_size = pcs_data->per_xcc_host_buffer_size;
   uint8_t* host_buffer_begin = pcs_data->xcc_data[xcc_id].host_buffer_begin;
   const size_t samples_per_trap_buffer = pcs_data->samples_per_trap_buffer;
@@ -4653,7 +4701,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC(
     rocr::atomic::Store(bwv_written, 0U, std::memory_order_release);
   }
 
-  which_buffer = next_buffer;
+  pcs_data->xcc_data[xcc_id].which_buffer.store(next_buffer, std::memory_order_release);
   return HSA_STATUS_SUCCESS;
 }
 
@@ -4686,7 +4734,8 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
   const uint32_t pred_exec_cmd_sz = 2;
 
   // Get references to this XCC's buffers and state (using cached values)
-  uint32_t& which_buffer = pcs_data->xcc_data[xcc_id].which_buffer;
+  const uint32_t which_buffer =
+      pcs_data->xcc_data[xcc_id].which_buffer.load(std::memory_order_acquire);
   const size_t per_xcc_host_buffer_size = pcs_data->per_xcc_host_buffer_size;
   uint8_t* host_buffer_begin = pcs_data->xcc_data[xcc_id].host_buffer_begin;
   const size_t samples_per_trap_buffer = pcs_data->samples_per_trap_buffer;
@@ -4781,7 +4830,10 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
   do {
     val = HSA::hsa_signal_wait_scacquire(exec_pm4_signal, HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX,
                                          HSA_WAIT_STATE_BLOCKED);
-    if (val == -1) return HSA_STATUS_SUCCESS;  // Session stopped
+    // Session stopped: device swap already issued but the host selector flip below is
+    // skipped. Safe only because this path is reached during teardown, when no worker
+    // is bound to a done_sig.
+    if (val == -1) return HSA_STATUS_SUCCESS;
     if (val == 0) break;
   } while (true);
 
@@ -4835,10 +4887,14 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
   if (properties_.NumXcc > 1) i += pred_exec_cmd_sz;
   memset(cmd_data, 0, cmd_data_sz);
 
-  // WAIT_REG_MEM: Wait for trap handler to finish writing samples
+  // WAIT_REG_MEM: Wait for trap handler to finish writing samples.
+  // The completion counter must be polled with GREATER-OR-EQUAL, not strict EQUAL.
+  // The trap-handler counter atomics run at SYSTEM scope, so the completion value is
+  // already visible to the CP past GL2; an overshoot past the armed reference still
+  // satisfies the poll instead of hanging on a value that is never matched exactly.
   cmd_data[i++] =
       PM4_HDR(PM4_HDR_IT_OPCODE_WAIT_REG_MEM, wait_reg_mem_cmd_sz, supported_isas()[0]->GetMajorVersion());
-  cmd_data[i++] = PM4_WAIT_REG_MEM_DW1(PM4_WAIT_REG_MEM_FUNCTION_EQUAL_TO_REFERENCE |
+  cmd_data[i++] = PM4_WAIT_REG_MEM_DW1(PM4_WAIT_REG_MEM_FUNCTION_GREATER_OR_EQUAL_REF |
                                        PM4_WAIT_REG_MEM_MEM_SPACE_MEMORY_SPACE |
                                        PM4_WAIT_REG_MEM_OPERATION_WAIT_REG_MEM);
   cmd_data[i++] = PM4_WAIT_REG_MEM_DW2_MEM_POLL_ADDR_LO(buf_written_val_addr[which_buffer]);
@@ -4947,7 +5003,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
     pcs_data->xcc_data[xcc_id].host_write_offset = write_offset + to_copy;
   }
 
-  which_buffer = next_buffer;
+  pcs_data->xcc_data[xcc_id].which_buffer.store(next_buffer, std::memory_order_release);
   return HSA_STATUS_SUCCESS;
 }
 
@@ -4958,15 +5014,18 @@ void GpuAgent::PcSamplingThreadPerXCC(pcs_data_t& pcs_data, uint32_t xcc_id,
     // by the consumer thread which aggregates data across all XCCs.
     pcs::PcsRuntime::PcSamplingSession& session = *pcs_data.session;
     per_xcc_pcs_data_t& xcc = pcs_data.xcc_data[xcc_id];
-    uint32_t& which_buffer = xcc.which_buffer;
 
     // Get this XCC's double-buffer done signals
     hsa_signal_t done_sig[] = {xcc.done_sig0, xcc.done_sig1};
 
     while (true) {
+      // Re-read the selector on every iteration: PcSamplingFlush can move it from another
+      // thread, and the wait below binds to one signal object for its whole duration.
+      uint32_t cur = xcc.which_buffer.load(std::memory_order_acquire);
+
       // Wait for trap handler to signal buffer is ready (val=0) or exit (val=-1)
       hsa_signal_value_t val = HSA::hsa_signal_wait_scacquire(
-          done_sig[which_buffer], HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+          done_sig[cur], HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
 
       if (val == -1) {
         // Exit signal received - notify consumer and exit.
@@ -4986,7 +5045,7 @@ void GpuAgent::PcSamplingThreadPerXCC(pcs_data_t& pcs_data, uint32_t xcc_id,
       }
 
       // Reset signal for next buffer fill cycle
-      HSA::hsa_signal_store_screlease(done_sig[which_buffer], 1);
+      HSA::hsa_signal_store_screlease(done_sig[cur], 1);
 
       // Flush device buffer to host buffer (under per-XCC mutex)
       {
@@ -5159,13 +5218,31 @@ hsa_status_t GpuAgent::PcSamplingFlush(pcs::PcsRuntime::PcSamplingSession& sessi
   std::lock_guard<std::mutex> delivery_lock(pcs_data->delivery_mutex);
 
   // First, flush device buffers to host buffers for all XCCs
+  auto drain_active_buffer = [&](uint32_t xcc_index) {
+    return pcs_data->use_pm4_fallback
+        ? PcSamplingFlushDeviceBuffersPerXCC_PM4(pcs_data, session, xcc_index)
+        : PcSamplingFlushDeviceBuffersPerXCC(pcs_data, session, xcc_index);
+  };
+
   for (uint32_t xcc_id = 0; xcc_id < pcs_data->num_xcc; xcc_id++) {
     per_xcc_pcs_data_t& xcc = pcs_data->xcc_data[xcc_id];
     std::lock_guard<std::mutex> lock(xcc.host_buffer_mutex);
 
-    hsa_status_t flush_status = pcs_data->use_pm4_fallback
-        ? PcSamplingFlushDeviceBuffersPerXCC_PM4(pcs_data, session, xcc_id)
-        : PcSamplingFlushDeviceBuffersPerXCC(pcs_data, session, xcc_id);
+    // Two swaps == net identity: which_buffer returns to the worker's bound half.
+    // BOTH drains MUST run unconditionally regardless of the first status; an odd
+    // swap count reintroduces the permanent selector desync this fix resolves.
+    const uint32_t before =
+        pcs_data->xcc_data[xcc_id].which_buffer.load(std::memory_order_acquire);
+    hsa_status_t flush_status = drain_active_buffer(xcc_id);       // swap 1
+    hsa_status_t other_half_status = drain_active_buffer(xcc_id);  // swap 2
+    const uint32_t after =
+        pcs_data->xcc_data[xcc_id].which_buffer.load(std::memory_order_acquire);
+    if (after != before) {
+      log_warning_n(1, "PC sampling XCC %u: flush left the buffer selector at %u, expected %u\n",
+                    xcc_id, after, before);
+    }
+    assert(after == before && "PcSamplingFlush must leave the selector on the worker's half");
+    if (flush_status == HSA_STATUS_SUCCESS) flush_status = other_half_status;
 
     if (flush_status != HSA_STATUS_SUCCESS) {
       if (first_error == HSA_STATUS_SUCCESS) first_error = flush_status;
