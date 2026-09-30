@@ -124,15 +124,15 @@ protected:
         }
     }
 
-    consume_func_t             consume_fn;
-    std::atomic<bool>          valid{false};
-    std::atomic<bool>          exited{true};
-    std::mutex                 mut;
-    std::atomic<size_t>        write_ptr{0};
-    std::atomic<size_t>        read_ptr{0};
-    std::array<DataType, SIZE> buffer;
+    consume_func_t               consume_fn;
+    std::atomic<bool>            valid{false};
+    std::atomic<bool>            exited{true};
+    std::mutex                   mut;
+    std::atomic<size_t>          write_ptr{0};
+    std::atomic<size_t>          read_ptr{0};
+    std::array<DataType, SIZE>   buffer;
     std::unique_ptr<std::thread> consumer{};
-    std::condition_variable    cv;
+    std::condition_variable      cv;
 };
 
 }  // namespace counters
