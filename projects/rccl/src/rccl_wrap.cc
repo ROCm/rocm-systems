@@ -1681,7 +1681,10 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
       if (hierCeAvailable && !hasSysmemSegment &&
           (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO)) {
         decision->algo = RCCL_CE_REGISTERED;
-        if (query) {
+        // rcclHierarchicalAlgoInfo dereferences the SM hierarchical sub-comms.
+        // Those exist only when hierarchicalCommsInitialized is set (nNodes >= 8).
+        // Hier CE does not use them and runs on 2+ nodes, so skip the fill otherwise.
+        if (query && comm->hierarchicalCommsInitialized) {
           int a, p, ch;
           NCCLCHECK(rcclHierarchicalAlgoInfo(comm, ncclFuncAllGather, sendcount, datatype, &a, &p, &ch));
           decision->protocol = p;
@@ -2014,7 +2017,9 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
     if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && !a2aHasSysmem &&
         ncclHierCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, a2aWinRegType, a2aSendWin, a2aRecvWin)) {
       decision->algo = RCCL_CE_REGISTERED;  // reports as CE; hier dispatch in taskAppend
-      if (query) {
+      // Same null-sub-comm guard as the AllGather hier CE query: the SM
+      // sub-comms are absent on 2 to 7 node communicators.
+      if (query && comm->hierarchicalCommsInitialized) {
         int a, p, ch;
         NCCLCHECK(rcclHierarchicalAlgoInfo(comm, ncclFuncAlltoAll, count, datatype, &a, &p, &ch));
         decision->protocol = p;

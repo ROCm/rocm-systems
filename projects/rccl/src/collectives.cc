@@ -696,12 +696,16 @@ ncclResult_t ncclAlltoAllv_impl(const void* sendbuff, const size_t sendcounts[],
   const bool hierElig =
     ncclHierCeAlltoAllvEligible(comm, datatype, winRegType, sendWin, recvWin, hasSysmemSegment, ceCapturing);
   if (ceElig || hierElig) {
-    if (comm->localSizes == nullptr || comm->gatheredSizes == nullptr) {
-      WARN("CE AlltoAllv: size staging buffers not allocated (need CTA_POLICY_ZERO at init)");
-      return ncclInvalidUsage;
-    }
     const size_t nLocal = 4 * (size_t)nRanks;
     const size_t nGather = nLocal * (size_t)nRanks;
+    // First call allocates. Doing it here, rather than at init, keeps the
+    // 32 * nRanks^2 byte reservation off communicators that never AlltoAllv.
+    if (comm->localSizes == nullptr) {
+      NCCLCHECK(ncclMemAlloc(&comm->localSizes, nLocal * sizeof(size_t)));
+    }
+    if (comm->gatheredSizes == nullptr) {
+      NCCLCHECK(ncclMemAlloc(&comm->gatheredSizes, nGather * sizeof(size_t)));
+    }
 
     CUDACHECK(cudaMemcpyAsync(comm->localSizes, sizes.data(), nLocal * sizeof(size_t), cudaMemcpyHostToDevice, stream));
     NCCLCHECK(ncclGroupStart());
@@ -711,6 +715,10 @@ ncclResult_t ncclAlltoAllv_impl(const void* sendbuff, const size_t sendcounts[],
       NCCLCHECK(ncclRecv(recvPtr, nLocal, ncclUint64, r, comm, stream));
     }
     NCCLCHECK(ncclGroupEnd());
+    // The CE and hier CE planners walk this matrix on the host (global maxSend,
+    // per-peer chunk counts, RMA put offsets, wait signal counts). The device
+    // copy cannot feed that plan. The exchange is on the user's stream, so the
+    // synchronize is what makes the host matrix visible before enqueue.
     CUDACHECK(cudaMemcpyAsync(gatheredSizes.data(), comm->gatheredSizes, nGather * sizeof(size_t),
                               cudaMemcpyDeviceToHost, stream));
     CUDACHECK(cudaStreamSynchronize(stream));

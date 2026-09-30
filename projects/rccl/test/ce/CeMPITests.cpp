@@ -4,7 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// End-to-end MPI tests for CE collectives via the public RCCL API (AllGather, AlltoAll, Scatter, Gather, Fallback, Stress).
+// End-to-end MPI tests for CE collectives via the public RCCL API (AllGather, AlltoAll, AlltoAllv, Scatter, Gather, Fallback, Stress).
 
 #include "CeTestHelpers.hpp"
 #include "DeviceBufferHelpers.hpp"
@@ -57,6 +57,14 @@ constexpr size_t kChunkBoundaryCount = (68ull * 1024 * 1024) / sizeof(float);
 // two chunk-boundary cases at the two-node shape they are meant to cover; past
 // it the host mirror alone would throw out of its vector constructor.
 constexpr int kChunkBoundaryMaxRanks = 16;
+// Single-node AlltoAllv intra-batch sync needs more than kCeIntraBatchSyncFreq
+// destinations and at least 512 MiB of sends. pairCount keeps 1/2, 3/4, or all
+// of `count` (three of each across 9 peers), so 9 ranks send 27/4 * count
+// elements. 20 Mi elements clears 512 MiB at that minimum; the cap keeps the
+// buffers near the chunk-boundary cases.
+constexpr size_t kIntraBatchCount = 20ull * 1024 * 1024;
+constexpr int kIntraBatchMinRanks = 9;
+constexpr int kIntraBatchMaxRanks = 16;
 // Coarse offset applied to the upper half of every sent slice, so a chunk landing
 // at the wrong offset changes the received bytes. It has to be coarse: at this
 // element count a per-element term would exceed the range float represents
@@ -593,12 +601,13 @@ class CeMPI_AlltoAllv : public CeMPITest
 protected:
     static constexpr float kRecvSentinel = -1.0f;
 
-    // Elements rank src sends to rank dst. Varies per pair so slices land at
-    // distinct displacements and mix single- and multi-chunk peers at the chunk
-    // boundary; sparse additionally zeroes some non-self pairs.
+    // Elements rank src sends to rank dst. Asymmetric in (src, dst), so
+    // sendcounts and recvcounts differ and a swap of sendSizes[peer] with
+    // recvSizes[peer] fails the data check. Sparse additionally zeroes some
+    // non-self pairs.
     static size_t pairCount(int src, int dst, size_t count, bool sparse)
     {
-        const int phase = (src + dst) % 3;
+        const int phase = (src + 2 * dst) % 3;
         if(sparse && phase == 1 && src != dst)
             return 0;
         return count - static_cast<size_t>(phase) * (count / 4);
@@ -719,6 +728,14 @@ TEST_F(CeMPI_AlltoAllv, FourRanks)  { runAlltoAllv(kMinRanks4, kMediumCount, "Ce
 TEST_F(CeMPI_AlltoAllv, EightRanks) { runAlltoAllv(kMinRanks8, kMediumCount, "CeMPI_AlltoAllv/EightRanks"); }
 // CE-MPI-A2AV-04: Odd rank count (3) — non-power-of-two op layout vs 2/4/8 ranks.
 TEST_F(CeMPI_AlltoAllv, ThreeRanks) { runAlltoAllv(3,          kSmallCount,  "CeMPI_AlltoAllv/ThreeRanks"); }
+// CE-MPI-A2AV-04b: more than 8 destinations and >= 512 MiB of sends, so the
+// single-node batch takes the intraBatchSync path. Smaller cases only assert
+// the negative.
+TEST_F(CeMPI_AlltoAllv, IntraBatchSync)
+{
+    runAlltoAllv(kIntraBatchMinRanks, kIntraBatchCount, "CeMPI_AlltoAllv/IntraBatchSync",
+                 /*requireScaleOut=*/false, /*scaleOutIters=*/1, kIntraBatchMaxRanks);
+}
 // CE-MPI-A2AV-05: Multi-node RMA proxy + intra-node CE path.
 TEST_F(CeMPI_AlltoAllv, MultiNodeHierarchical)
 {

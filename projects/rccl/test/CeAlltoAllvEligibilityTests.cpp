@@ -651,8 +651,11 @@ TEST_F(CeHierAlltoAllvEligibilityTest, SparseSizeMatrixValidates)
 {
     constexpr int nRanks = 8;
     std::vector<size_t> g(4 * nRanks * nRanks, 0);
+    // Asymmetric in (src, dst), including the zero pattern, so a transposed
+    // index in ncclAlltoAllvValidateSizeMatrix cannot pass by accident.
     auto bytes = [](int src, int dst) -> size_t {
-        return ((src + dst) % 3 == 1 && src != dst) ? 0 : static_cast<size_t>(1024 * (src + dst + 1));
+        if ((src + 2 * dst) % 3 == 1 && src != dst) return 0;
+        return static_cast<size_t>(1024 * (src + 1) * (dst + 2));
     };
     for (int r = 0; r < nRanks; ++r)
     {

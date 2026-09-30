@@ -488,11 +488,13 @@ static ncclResult_t commFree(ncclComm_t comm) {
   NCCLCHECK(ncclCeFinalize(comm));
   NCCLCHECK(ncclRmaCeFinalize(comm));
 
-  if (comm->nNodes == 1) {
+  // AlltoAllv staging is allocated for single-node CE and multi-node hier CE.
+  if (comm->localSizes != nullptr) {
     NCCLCHECK(ncclMemFree(comm->localSizes));
-    NCCLCHECK(ncclMemFree(comm->gatheredSizes));
-
     comm->localSizes = nullptr;
+  }
+  if (comm->gatheredSizes != nullptr) {
+    NCCLCHECK(ncclMemFree(comm->gatheredSizes));
     comm->gatheredSizes = nullptr;
   }
   // tempBuff is allocated per-communicator for direct ReduceScatter on gfx950.
@@ -3021,15 +3023,6 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   }
   // update communicator state
   comm->initState = ncclSuccess;
-
-  // AlltoAllv size-matrix staging (CE single-node and hierarchical multi-node).
-  if (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) {
-    const size_t nLocal = 4 * (size_t)comm->nRanks;
-    const size_t nGather = nLocal * (size_t)comm->nRanks;
-
-    NCCLCHECK(ncclMemAlloc((void**)&comm->localSizes, nLocal * sizeof(size_t)));
-    NCCLCHECK(ncclMemAlloc((void**)&comm->gatheredSizes, nGather * sizeof(size_t)));
-  }
 
   // Initialize hierarchical sub-communicators and temp buffers
   if (!job->parent && !comm->isGrow && comm->nNodes >= 8 && comm->maxLocalRanks > 1 &&
