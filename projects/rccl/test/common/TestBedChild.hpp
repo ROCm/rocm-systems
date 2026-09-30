@@ -161,9 +161,9 @@ namespace RcclUnitTesting
     ErrCode RegisterMemSymmetric(int localRank, CollectiveArgs& collArg);
     ErrCode RegisterMemLegacy(int localRank, CollectiveArgs& collArg);
 
-    ErrCode DeregisterMemInternal_impl(int groupId, int collId, int localRank);
+    ErrCode DeregisterMemInternal(int groupId, int collId, int localRank);
 
-    ErrCode DeallocateMemInternal_impl(int groupId, int collId, int localRank);
+    ErrCode DeallocateMemInternal(int groupId, int collId, int localRank);
 
     // Closes an NCCL group opened by the caller and returns bodyStatus unless
     // ncclGroupEnd itself fails. The group must be closed on every exit path,

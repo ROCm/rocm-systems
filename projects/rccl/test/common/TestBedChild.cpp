@@ -58,6 +58,23 @@ static int getThreadId()
 #define PIPE_READ(val) \
     if (RcclUnitTesting::detail::safe_pipe_read(childReadFd, &val, sizeof(val)) != sizeof(val)) return TEST_FAIL;
 
+// Receives a std::vector sent by the parent's PIPE_WRITE_VEC: int element count, then the elements
+#define PIPE_READ_VEC(vec)                                                                    \
+  {                                                                                           \
+    int vecSize = 0;                                                                          \
+    PIPE_READ(vecSize);                                                                       \
+    if (vecSize < 0)                                                                          \
+    {                                                                                         \
+      TEST_ERROR("Child %d received invalid %s size %d", childId, #vec, vecSize);             \
+      return TEST_FAIL;                                                                       \
+    }                                                                                         \
+    (vec).resize(vecSize);                                                                    \
+    ssize_t const vecBytes = static_cast<ssize_t>(vecSize * sizeof((vec)[0]));                \
+    if (vecSize > 0 &&                                                                        \
+        RcclUnitTesting::detail::safe_pipe_read(childReadFd, (vec).data(), vecBytes) != vecBytes) \
+      return TEST_FAIL;                                                                       \
+  }
+
 #ifdef ENABLE_OPENMP
 #define CHILD_NCCL_CALL_RANK(errCode, cmd, msg) CHILD_NCCL_CALL_BASE(cmd, msg, OMP_CANCEL_FOR, errCode)
 #define CHILD_NCCL_CALL_NON_BLOCKING_RANK(errCode, msg, localRank) CHILD_NCCL_CALL_NON_BLOCKING_BASE(msg, localRank, OMP_CANCEL_FOR, errCode)
@@ -235,23 +252,7 @@ namespace RcclUnitTesting
     PIPE_READ(this->totalRanks);
     PIPE_READ(this->rankOffset);
     PIPE_READ(this->numGroupCalls);
-    // --- Read numCollectivesInGroup ---
-    int numCollSize = 0;
-    PIPE_READ(numCollSize);
-    if (numCollSize < 0)
-    {
-      TEST_ERROR("Child %d received invalid numCollectivesInGroup size %d", this->childId, numCollSize);
-      return TEST_FAIL;
-    }
-    this->numCollectivesInGroup.resize(numCollSize);
-    if (numCollSize > 0)
-    {
-      if (RcclUnitTesting::detail::safe_pipe_read(this->childReadFd,
-                                                  this->numCollectivesInGroup.data(),
-                                                  numCollSize * sizeof(int)) !=
-          static_cast<ssize_t>(numCollSize * sizeof(int)))
-        return TEST_FAIL;
-    }
+    PIPE_READ_VEC(numCollectivesInGroup);
     PIPE_READ(this->useBlocking);
     int allocTypeInt = 0;
     PIPE_READ(allocTypeInt);
@@ -259,23 +260,7 @@ namespace RcclUnitTesting
 
     bool useMultiRankPerGpu;
     PIPE_READ(useMultiRankPerGpu);
-    // --- Read numStreamsPerGroup ---
-    int numStreamsSize = 0;
-    PIPE_READ(numStreamsSize);
-    if (numStreamsSize < 0)
-    {
-      TEST_ERROR("Child %d received invalid numStreamsPerGroup size %d", this->childId, numStreamsSize);
-      return TEST_FAIL;
-    }
-    this->numStreamsPerGroup.resize(numStreamsSize);
-    if (numStreamsSize > 0)
-    {
-      if (RcclUnitTesting::detail::safe_pipe_read(this->childReadFd,
-                                                  this->numStreamsPerGroup.data(),
-                                                  numStreamsSize * sizeof(int)) !=
-          static_cast<ssize_t>(numStreamsSize * sizeof(int)))
-        return TEST_FAIL;
-    }
+    PIPE_READ_VEC(numStreamsPerGroup);
 
     // Read GPUs and prepare storage
     int numGpus;
@@ -1228,7 +1213,7 @@ namespace RcclUnitTesting
     return TEST_SUCCESS;
   }
 
-  ErrCode TestBedChild::DeregisterMemInternal_impl(int groupId, int collId, int localRank)
+  ErrCode TestBedChild::DeregisterMemInternal(int groupId, int collId, int localRank)
   {
     if (this->verbose) TEST_INFO("Child %d begins DeregisterMemInternal", this->childId);
     CHECK_HIP(hipSetDevice(this->deviceIds[localRank]));
@@ -1311,7 +1296,7 @@ namespace RcclUnitTesting
     return TEST_SUCCESS;
   }
 
-  ErrCode TestBedChild::DeallocateMemInternal_impl(int groupId, int collId, int localRank)
+  ErrCode TestBedChild::DeallocateMemInternal(int groupId, int collId, int localRank)
   {
     if (this->verbose) TEST_INFO("Child %d begins DeallocateMemInternal", this->childId);
     // Release every collective even if one fails; a pooled worker would otherwise
@@ -1362,8 +1347,8 @@ namespace RcclUnitTesting
     int const localRank = globalRank - rankOffset;
     // Free the buffers even if deregistration fails, so a pooled worker does not
     // carry them into the next config.
-    ErrCode const deregisterStatus = this->DeregisterMemInternal_impl(groupId, collId, localRank);
-    ErrCode const deallocateStatus = this->DeallocateMemInternal_impl(groupId, collId, localRank);
+    ErrCode const deregisterStatus = this->DeregisterMemInternal(groupId, collId, localRank);
+    ErrCode const deallocateStatus = this->DeallocateMemInternal(groupId, collId, localRank);
     return deregisterStatus != TEST_SUCCESS ? deregisterStatus : deallocateStatus;
   }
 
