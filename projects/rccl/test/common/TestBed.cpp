@@ -40,6 +40,17 @@
     }                                                                                   \
   }
 
+// Sends a std::vector as its int element count followed by its elements (see the child's PIPE_READ_VEC)
+#define PIPE_WRITE_VEC(childId, vec)                                                              \
+  {                                                                                               \
+    int const vecSize = static_cast<int>((vec).size());                                           \
+    PIPE_WRITE(childId, vecSize);                                                                 \
+    ssize_t const vecBytes = static_cast<ssize_t>(vecSize * sizeof((vec)[0]));                    \
+    if (vecSize > 0)                                                                              \
+      ASSERT_EQ(RcclUnitTesting::detail::safe_pipe_write(childList[childId]->parentWriteFd,       \
+                                                         (vec).data(), vecBytes), vecBytes);      \
+  }
+
 #define PIPE_CHECK(childId)                         \
   {                                                 \
     int response = 0;                               \
@@ -372,14 +383,7 @@ namespace RcclUnitTesting
       PIPE_WRITE(childId, numGroupCalls);
 
       // Send the number of collectives to be run per group call
-      int const numCollSize = this->numCollectivesInGroup.size();
-      PIPE_WRITE(childId, numCollSize);
-      if (numCollSize > 0) {
-        ASSERT_EQ(RcclUnitTesting::detail::safe_pipe_write(childList[childId]->parentWriteFd,
-                                                           this->numCollectivesInGroup.data(),
-                                                           numCollSize * sizeof(int)),
-                  static_cast<ssize_t>(numCollSize * sizeof(int)));
-      }
+      PIPE_WRITE_VEC(childId, this->numCollectivesInGroup);
 
       // Send the RCCL communication with blocking or non-blocking option
       PIPE_WRITE(childId, useBlocking);
@@ -392,14 +396,7 @@ namespace RcclUnitTesting
       PIPE_WRITE(childId, useMulti);
 
       // Send how many streams to use per group call
-      int const numStreamsSize = this->numStreamsPerGroup.size();
-      PIPE_WRITE(childId, numStreamsSize);
-      if (numStreamsSize > 0) {
-        ASSERT_EQ(RcclUnitTesting::detail::safe_pipe_write(childList[childId]->parentWriteFd,
-                                                           this->numStreamsPerGroup.data(),
-                                                           numStreamsSize * sizeof(int)),
-                  static_cast<ssize_t>(numStreamsSize * sizeof(int)));
-      }
+      PIPE_WRITE_VEC(childId, this->numStreamsPerGroup);
 
       // Send the GPUs this child uses
       int const numGpus = deviceIdsPerProcess[childId].size();
