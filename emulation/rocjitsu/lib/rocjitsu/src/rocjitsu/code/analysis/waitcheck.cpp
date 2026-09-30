@@ -624,6 +624,16 @@ struct PendingWaitGroup {
 struct CfgInstructionView {
   uint64_t section_offset = 0;
   const Instruction *instruction = nullptr;
+  // Exclusive end of a straight-line run that leaves path-search state intact.
+  size_t neutral_run_end = 0;
+  size_t predicate_index = std::numeric_limits<size_t>::max();
+  uint64_t issued_counters = 0;
+  bool invalidates_scc = false;
+};
+
+struct PathQueryStart {
+  uint64_t offset = 0;
+  size_t contexts = 0;
 };
 
 struct CfgBlockView {
@@ -648,6 +658,7 @@ struct SccPredicate {
   Kind kind = Kind::EqImm;
   uint16_t sgpr = 0;
   uint32_t value = 0;
+  bool operator==(const SccPredicate &) const = default;
 };
 
 struct Analyzer {
@@ -1076,7 +1087,7 @@ struct Analyzer {
       return;
     }
 
-    prepare_cfg_path_filter(analysis_blocks, cfg_predecessors, cfg_successors);
+    prepare_cfg_path_filter(analysis_blocks, cfg_predecessors, cfg_successors, arch);
     for (size_t i = 0; i < analysis_blocks.size(); ++i) {
       current_cfg_view_index_ = i;
       current_in_callee_context_ = !std::get<1>(analysis_node_keys[i]).empty();
@@ -1223,9 +1234,13 @@ private:
 
   void prepare_cfg_path_filter(const std::vector<BasicBlock *> &blocks,
                                const std::vector<std::vector<size_t>> &predecessors,
-                               const std::vector<std::vector<size_t>> &successors) {
+                               const std::vector<std::vector<size_t>> &successors,
+                               rj_code_arch_t arch) {
     cfg_views_.clear();
     feasible_path_cache_.clear();
+    path_scalar_defs_.clear();
+    path_predicates_.clear();
+    path_query_starts_.clear();
     reverse_reachability_cache_.clear();
     forward_reachability_cache_.clear();
     reachability_cache_bytes_ = 0;
@@ -1241,8 +1256,54 @@ private:
       view.successors = successors[block_index];
       uint64_t section_offset = block->start_offset();
       for (const Instruction &inst : block->instructions()) {
-        view.instructions.push_back({section_offset, &inst});
+        const auto predicate = scalar_scc_predicate(inst);
+        const size_t predicate_index =
+            predicate ? path_predicates_.size() : std::numeric_limits<size_t>::max();
+        if (predicate)
+          path_predicates_.emplace_back(block_index, section_offset, *predicate);
+        auto [defs, inserted] = path_scalar_defs_.try_emplace(&inst);
+        if (inserted) {
+          const InstDefUse du =
+              inst_def_use_for_waitcheck(inst, VgprMsbState{}, arch, wavefront_size_);
+          du.defs.for_each([&](RegisterRef ref) {
+            if (ref.cls == RegClass::SGPR)
+              defs->second.push_back(ref.index);
+          });
+        }
+        static_assert(kCounterCount <= 64);
+        uint64_t issued_counters = 0;
+        for (const auto &event : classify_events(inst, arch))
+          issued_counters |= uint64_t{1} << counter_index(event.counter);
+        const bool invalidates_scc = instruction_defines_special(inst, {RegClass::SCC, 0, 1}) ||
+                                     instruction_uses_special(inst, {RegClass::SCC, 0, 1});
+        const bool neutral = defs->second.empty() && !predicate && !inst.is_branch() &&
+                             !inst.is_waitcnt() && !is_program_end(inst.mnemonic()) &&
+                             !vinterp_wait_exp(inst) && dsdir_wait_vm_vsrc(inst) != 0 &&
+                             !invalidates_scc && issued_counters == 0;
+        const size_t index = view.instructions.size();
+        view.instructions.push_back({section_offset, &inst, index + (neutral ? 1 : 0),
+                                     predicate_index, issued_counters, invalidates_scc});
         section_offset += static_cast<uint64_t>(inst.size());
+      }
+      for (size_t index = view.instructions.size(); index-- > 0;) {
+        auto &inst = view.instructions[index];
+        if (inst.neutral_run_end == index + 1 && index + 1 < view.instructions.size())
+          inst.neutral_run_end = view.instructions[index + 1].neutral_run_end;
+      }
+      size_t run_begin = 0;
+      for (size_t index = 0; index < view.instructions.size(); ++index) {
+        const auto &inst = view.instructions[index];
+        uint64_t query_start = inst.section_offset;
+        if (inst.neutral_run_end > index)
+          query_start = view.instructions[run_begin].section_offset;
+        else
+          run_begin = index + 1;
+        auto [entry, inserted] =
+            path_query_starts_.try_emplace(inst.section_offset, PathQueryStart{query_start, 0});
+        ++entry->second.contexts;
+        // Overlapping blocks or call contexts must agree on the whole run.
+        if (entry->second.offset != query_start)
+          entry->second.offset = inst.section_offset;
       }
       cfg_views_.push_back(std::move(view));
     }
@@ -1369,6 +1430,9 @@ private:
   void clear_cfg_path_filter() {
     cfg_views_.clear();
     feasible_path_cache_.clear();
+    path_scalar_defs_.clear();
+    path_predicates_.clear();
+    path_query_starts_.clear();
     reverse_reachability_cache_.clear();
     forward_reachability_cache_.clear();
     reachability_cache_bytes_ = 0;
@@ -4430,18 +4494,14 @@ private:
     return result;
   }
 
-  [[nodiscard]] bool instruction_adds_younger_event(const Instruction &inst,
-                                                    const PendingEvent &event,
-                                                    rj_code_arch_t arch) const {
-    const auto events = classify_events(inst, arch);
-    return std::ranges::any_of(events, [&](const ClassifiedEvent &classification) {
-      return classification.counter == event.counter;
-    });
-  }
-
   void apply_path_pre_dependency_waits(const Instruction &inst, const PendingEvent &event,
                                        rj_code_arch_t arch, bool &pending, uint32_t &age) {
     if (!pending)
+      return;
+    // Most path instructions cannot retire an event. Avoid constructing and
+    // copying a full pending state merely to apply an identity transition.
+    const auto wait_vm_vsrc = dsdir_wait_vm_vsrc(inst);
+    if (!inst.is_waitcnt() && !vinterp_wait_exp(inst) && (!wait_vm_vsrc || *wait_vm_vsrc != 0))
       return;
 
     PendingEvent path_event = event;
@@ -4589,15 +4649,26 @@ private:
     return os.str();
   }
 
-  static void invalidate_redefined_scalar_constraints(ScalarConstraints &constraints,
-                                                      const InstDefUse &du) {
-    std::vector<uint16_t> redefined;
-    du.defs.for_each([&](RegisterRef ref) {
-      if (ref.cls == RegClass::SGPR)
-        redefined.push_back(ref.index);
-    });
-    for (uint16_t sgpr : redefined)
-      constraints.erase(sgpr);
+  bool invalidate_redefined_scalar_constraints(ScalarConstraints &constraints,
+                                               const Instruction &inst, rj_code_arch_t arch) {
+    if (constraints.empty())
+      return false;
+    // Path searches revisit the same instruction for many producer/consumer
+    // pairs. Only scalar definitions affect these constraints; cache that
+    // immutable projection instead of rebuilding full VGPR def/use sets at
+    // every search state. The cache is scoped to one CFG (and wave size).
+    auto [entry, inserted] = path_scalar_defs_.try_emplace(&inst);
+    if (inserted) {
+      const InstDefUse du = inst_def_use_for_waitcheck(inst, VgprMsbState{}, arch, wavefront_size_);
+      du.defs.for_each([&](RegisterRef ref) {
+        if (ref.cls == RegClass::SGPR)
+          entry->second.push_back(ref.index);
+      });
+    }
+    bool changed = false;
+    for (uint16_t sgpr : entry->second)
+      changed |= constraints.erase(sgpr) != 0;
+    return changed;
   }
 
   [[nodiscard]] bool has_cfg_path_with_event_pending(const PendingEvent &event,
@@ -4606,6 +4677,21 @@ private:
     if (cfg_views_.empty())
       return true;
 
+    // Every consumer in a neutral run observes the same pending-event state.
+    // Reuse one path query for the run instead of repeating the CFG search for
+    // every arithmetic use of the same asynchronous load. A producer between
+    // the run's start and the consumer, or additional overlapping contexts,
+    // prevents this equivalence. Producers later in the block are safe too:
+    // their loop-carried state is unchanged throughout this prefix of the run.
+    if (!before_target) {
+      const auto query = path_query_starts_.find(consumer_offset);
+      if (query != path_query_starts_.end() && query->second.offset < consumer_offset &&
+          (event.section_offset < query->second.offset || event.section_offset > consumer_offset)) {
+        const auto start = path_query_starts_.find(query->second.offset);
+        if (start != path_query_starts_.end() && start->second.contexts == query->second.contexts)
+          consumer_offset = query->second.offset;
+      }
+    }
     using CacheKey = std::tuple<uint64_t, uint64_t, WaitCounterKind, bool>;
     const CacheKey cache_key{event.section_offset, consumer_offset, event.counter, before_target};
     if (auto cached = feasible_path_cache_.find(cache_key); cached != feasible_path_cache_.end())
@@ -4680,21 +4766,15 @@ private:
     using PredicateKey = std::tuple<SccPredicate::Kind, uint16_t, uint32_t>;
     std::set<PredicateKey> predicates_before_producer;
     std::set<PredicateKey> predicates_after_producer;
-    for (size_t block_index = 0; block_index < cfg_views_.size(); ++block_index) {
-      for (const CfgInstructionView &inst_view : cfg_views_[block_index].instructions) {
-        const auto predicate = scalar_scc_predicate(*inst_view.instruction);
-        if (!predicate)
-          continue;
-        const PredicateKey key{predicate->kind, predicate->sgpr, predicate->value};
-        if (can_reach_producer[block_index] != 0 &&
-            inst_view.section_offset < event.section_offset) {
-          predicates_before_producer.insert(key);
-        }
-        if (reachable_from_producer[block_index] != 0 && can_reach_consumer[block_index] != 0 &&
-            inst_view.section_offset >= event.section_offset) {
-          predicates_after_producer.insert(key);
-        }
-      }
+    // The CFG is immutable during these searches. Index scalar comparisons
+    // once rather than re-decoding every instruction for every event pair.
+    for (const auto &[block_index, section_offset, predicate] : path_predicates_) {
+      const PredicateKey key{predicate.kind, predicate.sgpr, predicate.value};
+      if (can_reach_producer[block_index] != 0 && section_offset < event.section_offset)
+        predicates_before_producer.insert(key);
+      if (reachable_from_producer[block_index] != 0 && can_reach_consumer[block_index] != 0 &&
+          section_offset >= event.section_offset)
+        predicates_after_producer.insert(key);
     }
     std::set<PredicateKey> relevant_predicates;
     std::ranges::set_intersection(predicates_before_producer, predicates_after_producer,
@@ -4714,6 +4794,7 @@ private:
       uint32_t age = 0;
       ScalarConstraints constraints;
       std::optional<SccPredicate> scc_predicate;
+      std::optional<uint32_t> constraint_id = std::nullopt;
     };
 
     constexpr uint32_t kMaxTrackedAge = 255;
@@ -4728,7 +4809,28 @@ private:
       for (size_t producer_block_index : producer_block_indices)
         worklist.push_back({producer_block_index, 0, false, 0, {}, std::nullopt});
     }
-    std::set<std::tuple<size_t, size_t, bool, uint32_t, std::string>> visited;
+    struct SearchKey {
+      size_t block_index;
+      size_t inst_index;
+      bool pending;
+      uint32_t age;
+      uint32_t constraint_id;
+      bool operator==(const SearchKey &) const = default;
+    };
+    struct SearchKeyHash {
+      size_t operator()(const SearchKey &key) const {
+        size_t hash = key.block_index;
+        for (size_t value : {key.inst_index, static_cast<size_t>(key.pending),
+                             static_cast<size_t>(key.age), static_cast<size_t>(key.constraint_id)})
+          hash ^= value + 0x9e3779b9u + (hash << 6) + (hash >> 2);
+        return hash;
+      }
+    };
+    // Most instructions preserve scalar facts. Intern them only when they
+    // change, and keep visited-state keys numeric instead of repeatedly
+    // formatting and comparing the same constraint strings.
+    std::unordered_map<std::string, uint32_t> constraint_ids;
+    std::unordered_set<SearchKey, SearchKeyHash> visited;
     size_t states_processed = 0;
 
     auto can_continue_from = [&](size_t block_index, bool pending) {
@@ -4739,10 +4841,15 @@ private:
       SearchState state = worklist.back();
       worklist.pop_back();
       state.age = std::min(state.age, kMaxTrackedAge);
-      const std::string constraint_key = constraints_key(state.constraints, state.scc_predicate);
+      if (!state.constraint_id) {
+        const auto [entry, inserted] =
+            constraint_ids.try_emplace(constraints_key(state.constraints, state.scc_predicate),
+                                       static_cast<uint32_t>(constraint_ids.size()));
+        state.constraint_id = entry->second;
+      }
       if (!visited
-               .insert(
-                   {state.block_index, state.inst_index, state.pending, state.age, constraint_key})
+               .insert({state.block_index, state.inst_index, state.pending, state.age,
+                        *state.constraint_id})
                .second)
         continue;
       if (++states_processed > kMaxPathSearchStates) {
@@ -4756,13 +4863,41 @@ private:
           continue;
         for (size_t successor : block_view.successors) {
           if (can_continue_from(successor, state.pending))
-            worklist.push_back(
-                {successor, 0, state.pending, state.age, state.constraints, state.scc_predicate});
+            worklist.push_back({successor, 0, state.pending, state.age, state.constraints,
+                                state.scc_predicate, state.constraint_id});
         }
         continue;
       }
 
       const CfgInstructionView &inst_view = block_view.instructions[state.inst_index];
+      size_t run_end = inst_view.neutral_run_end;
+      if (run_end > state.inst_index) {
+        // A neutral run has one entry and changes no pending-event, age, or
+        // scalar-predicate state. Its entry's visited key therefore covers its
+        // interior. Keep query endpoints explicit and charge every skipped
+        // instruction to the original conservative search budget.
+        for (uint64_t endpoint : {event.section_offset, consumer_offset}) {
+          const auto begin = block_view.instructions.begin() + state.inst_index;
+          const auto end = block_view.instructions.begin() + run_end;
+          const auto target = std::lower_bound(begin, end, endpoint,
+                                               [](const CfgInstructionView &view, uint64_t offset) {
+                                                 return view.section_offset < offset;
+                                               });
+          if (target != end && target->section_offset == endpoint)
+            run_end = static_cast<size_t>(target - block_view.instructions.begin());
+        }
+        if (run_end > state.inst_index) {
+          const size_t additional_states = run_end - state.inst_index - 1;
+          if (additional_states > kMaxPathSearchStates - states_processed) {
+            feasible_path_cache_[cache_key] = true;
+            return true;
+          }
+          states_processed += additional_states;
+          state.inst_index = run_end;
+          worklist.push_back(std::move(state));
+          continue;
+        }
+      }
       const Instruction &inst = *inst_view.instruction;
       if (before_target && inst_view.section_offset == consumer_offset && state.pending) {
         feasible_path_cache_[cache_key] = true;
@@ -4782,15 +4917,17 @@ private:
         state.pending = false;
         state.age = 0;
       } else if (state.pending && !inst.is_waitcnt() &&
-                 instruction_adds_younger_event(inst, event, arch)) {
+                 (inst_view.issued_counters & (uint64_t{1} << counter_index(event.counter))) != 0) {
         state.age = std::min<uint32_t>(state.age + 1, kMaxTrackedAge);
       }
 
-      const InstDefUse du = inst_def_use_for_waitcheck(inst, VgprMsbState{}, arch, wavefront_size_);
-      invalidate_redefined_scalar_constraints(state.constraints, du);
+      const bool constraints_changed =
+          invalidate_redefined_scalar_constraints(state.constraints, inst, arch);
+      const auto previous_predicate = state.scc_predicate;
 
-      if (const auto predicate = scalar_scc_predicate(inst)) {
-        if (relevant_predicates.contains({predicate->kind, predicate->sgpr, predicate->value}))
+      if (inst_view.predicate_index != std::numeric_limits<size_t>::max()) {
+        const auto &predicate = std::get<2>(path_predicates_[inst_view.predicate_index]);
+        if (relevant_predicates.contains({predicate.kind, predicate.sgpr, predicate.value}))
           state.scc_predicate = predicate;
         else
           state.scc_predicate.reset();
@@ -4840,13 +4977,14 @@ private:
           }
         }
         continue;
-      } else if (instruction_defines_special(inst, RegisterRef{RegClass::SCC, 0, 1}) ||
-                 instruction_uses_special(inst, RegisterRef{RegClass::SCC, 0, 1})) {
+      } else if (inst_view.invalidates_scc) {
         state.scc_predicate.reset();
       }
 
+      if (constraints_changed || previous_predicate != state.scc_predicate)
+        state.constraint_id.reset();
       worklist.push_back({state.block_index, state.inst_index + 1, state.pending, state.age,
-                          std::move(state.constraints), state.scc_predicate});
+                          std::move(state.constraints), state.scc_predicate, state.constraint_id});
     }
 
     feasible_path_cache_[cache_key] = false;
@@ -5494,6 +5632,9 @@ private:
   std::set<std::tuple<std::string, WaitCounterKind, uint64_t, uint64_t, uint64_t, uint32_t,
                       uint32_t, bool>>
       counter_underaccounting_keys_;
+  std::unordered_map<const Instruction *, std::vector<uint16_t>> path_scalar_defs_;
+  std::vector<std::tuple<size_t, uint64_t, SccPredicate>> path_predicates_;
+  std::unordered_map<uint64_t, PathQueryStart> path_query_starts_;
   std::vector<CfgBlockView> cfg_views_;
   std::optional<size_t> current_cfg_view_index_;
   bool current_in_callee_context_ = false;

@@ -6588,6 +6588,49 @@ TEST(WaitcheckTest, ObjectAnalysisCorrelatesUnsignedRangeChecksAroundWait) {
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
 }
 
+TEST(WaitcheckTest, ObjectAnalysisPreservesPredicatesAndConsumersAcrossNeutralRuns) {
+  for (bool rewrite : {false, true}) {
+    for (unsigned padding : {0u, 64u}) {
+      SCOPED_TRACE(::testing::Message() << "rewrite=" << rewrite << " padding=" << padding);
+      std::vector<uint32_t> program;
+      auto neutral_run = [&] {
+        for (unsigned i = 0; i < padding; ++i)
+          append_inst(program, v_mov_b32(7, 6));
+      };
+      append_inst(program, s_cmp_eq_u32(0, 129)); // s0 == 1
+      append_inst(program, sopp(34, 2));          // skip load when s0 == 1
+      append_inst(program, global_load_b32(0));
+      neutral_run();
+      if (rewrite)
+        append_inst(program, s_mov_b32(0, 129)); // invalidate the load's s0 != 1 fact
+      neutral_run();
+      append_inst(program, s_cmp_eq_u32(0, 129));
+      append_inst(program, sopp(34, 1)); // skip wait when s0 == 1
+      append_inst(program, sopp(64, 0)); // s_wait_loadcnt 0
+      neutral_run();
+      std::vector<uint64_t> consumer_offsets;
+      for (unsigned dst : {1u, 2u}) {
+        consumer_offsets.push_back(program.size() * sizeof(uint32_t));
+        append_inst(program, v_mov_b32(dst, 0));
+        neutral_run();
+      }
+
+      TestCodeObject code_object(program);
+      const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA4);
+      ASSERT_TRUE(report.supported) << report.analysis_error;
+      ASSERT_EQ(report.diagnostics.size(), rewrite ? consumer_offsets.size() : 0u)
+          << diagnostic_summary(report);
+      if (rewrite) {
+        for (size_t i = 0; i < consumer_offsets.size(); ++i) {
+          EXPECT_EQ(report.diagnostics[i].section_offset, consumer_offsets[i]);
+          EXPECT_EQ(report.diagnostics[i].reg.index, 0u);
+          EXPECT_EQ(report.diagnostics[i].access, WaitcheckAccessKind::Use);
+        }
+      }
+    }
+  }
+}
+
 TEST(WaitcheckTest, ObjectAnalysisKeepsPathFeasibleAfterScalarRewrite) {
   std::vector<uint32_t> program;
   append_inst(program, global_load_b32(0));
@@ -6745,6 +6788,40 @@ TEST(WaitcheckTest, ObjectAnalysisReportsLoopCarriedDsLoadUse) {
   }
   EXPECT_EQ(uses, 1u);
   EXPECT_EQ(defs, 1u);
+}
+
+TEST(WaitcheckTest, ObjectAnalysisRetainsEachLoopCarriedUseAcrossNeutralRuns) {
+  for (bool wait : {false, true}) {
+    SCOPED_TRACE(wait);
+    std::vector<uint32_t> program;
+    if (wait)
+      append_inst(program, sopp(70, 0)); // s_wait_dscnt 0 at loop header
+    auto neutral_run = [&] {
+      for (unsigned i = 0; i < 32; ++i)
+        append_inst(program, v_mov_b32(7, 6));
+    };
+    neutral_run();
+    for (unsigned dst : {1u, 2u}) {
+      append_inst(program, v_mov_b32(dst, 0));
+      neutral_run();
+    }
+    append_inst(program, ds_load_b32(0, 4));
+    const int32_t backedge = -static_cast<int32_t>(program.size() + 1);
+    append_inst(program, sopp(34, static_cast<uint16_t>(backedge)));
+
+    TestCodeObject code_object(program);
+    const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA4);
+    ASSERT_TRUE(report.supported) << report.analysis_error;
+    ASSERT_EQ(report.diagnostics.size(), wait ? 0u : 3u) << diagnostic_summary(report);
+    if (!wait) {
+      EXPECT_EQ(std::ranges::count_if(report.diagnostics,
+                                      [](const auto &diag) {
+                                        return diag.access == WaitcheckAccessKind::Use &&
+                                               diag.reg.index == 0;
+                                      }),
+                2);
+    }
+  }
 }
 
 TEST(WaitcheckTest, ObjectAnalysisAcceptsLoopCarriedDsLoadUseAfterWait) {
