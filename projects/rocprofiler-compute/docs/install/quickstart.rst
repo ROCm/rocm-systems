@@ -76,7 +76,7 @@ Ensure ROCm is installed and follow the steps:
         - Supported Python versions
       * - Profile mode (standard library only)
         - 3.8 through 3.14
-      * - Analyze mode (numpy, pandas, dash, textual, etc.)
+      * - Analyze mode (numpy, pandas, plotly, rich, etc.)
         - 3.9 through 3.14
 
    Analyze mode aborts with a clear message if launched on Python older
@@ -243,10 +243,6 @@ analysis options are available to accommodate different workflows.
     - When to Use
   * - :doc:`CLI (Command Line Interface) </how-to/analyze/cli>`
     - Fast, scriptable insights; great for automation and quick checks.
-  * - :doc:`GUI (Standalone Graphical Interface) </how-to/analyze/standalone-gui>`
-    - Interactive exploration, visual drill-down, and detailed charts.
-  * - :doc:`TUI (Textual User Interface) </how-to/analyze/tui>`
-    - Lightweight, keyboard-driven experience for terminals.
   * - :doc:`ROCm Optiq </how-to/analyze/optiq>`
     - Interactive graphical exploration of generated ROCm Compute Profiler
       analysis databases.

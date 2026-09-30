@@ -12,8 +12,6 @@ what limits it. Hand off to a focused skill once the limit is clear.
 Run `rocprof-compute profile --help` and `rocprof-compute analyze --help`
 before choosing flags. Options change between releases; do not guess one.
 
-Never use the GUI or TUI. This is a command-line workflow.
-
 ## Two sources of performance data
 
 rocprof-compute collects from two independent sources, and they answer

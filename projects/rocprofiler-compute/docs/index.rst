@@ -55,10 +55,6 @@ in practice.
 
         * :doc:`how-to/analyze/cli`
 
-        * :doc:`how-to/analyze/standalone-gui`
-
-        * :doc:`how-to/analyze/tui`
-
         * :doc:`how-to/analyze/optiq`
 
    .. grid-item-card:: Conceptual
