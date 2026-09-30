@@ -23,6 +23,7 @@ THE SOFTWARE.
 
 #include "rocjpeg_api_negative_tests.h"
 
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <iomanip>
@@ -166,14 +167,36 @@ size_t FindMarker(const std::vector<uint8_t> &data, uint8_t marker) {
     return data.size();
 }
 
-/** @brief Reads an unsigned environment variable, falling back to a default. */
+/**
+ * @brief Reads an unsigned environment variable, falling back to a default.
+ *
+ * The whole string has to be a positive number that fits in a uint32_t. A
+ * value that is out of range, negative or only partly numeric is rejected
+ * rather than narrowed, because narrowing would quietly change how much
+ * fuzzing runs: 4294967296 would wrap to zero and skip the fuzz loops
+ * altogether, and "100junk" would be read as 100. A rejected value is
+ * reported so that a typo in the override does not look like a clean run.
+ */
 uint32_t EnvOrDefault(const char *name, uint32_t fallback) {
     const char *value = std::getenv(name);
     if (value == nullptr || *value == '\0') {
         return fallback;
     }
-    const long parsed = std::strtol(value, nullptr, 0);
-    return parsed > 0 ? static_cast<uint32_t>(parsed) : fallback;
+    // strtoull negates a leading minus into the unsigned range, so "-18446744073709551615"
+    // would come back as 1. Reject the sign before parsing instead.
+    const char *digits = value;
+    while (*digits == ' ' || *digits == '\t') {
+        digits++;
+    }
+    char *end = nullptr;
+    const unsigned long long parsed = std::strtoull(digits, &end, 0);
+    if (*digits != '-' && end != digits && *end == '\0' && parsed > 0 && parsed <= UINT32_MAX) {
+        return static_cast<uint32_t>(parsed);
+    }
+    std::cerr << "warning: ignoring " << name << "=" << value
+              << ", expected a number between 1 and " << UINT32_MAX
+              << "; using " << fallback << std::endl;
+    return fallback;
 }
 
 }  // namespace
