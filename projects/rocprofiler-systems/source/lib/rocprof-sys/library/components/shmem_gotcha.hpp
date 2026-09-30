@@ -488,7 +488,7 @@ shmem_gotcha<SHMEMPolicy>::configure()
         {
             return shmem_categories::get_default_permit();
         }
-        if(tokens.count("all"))
+        if(tokens.contains("all"))
         {
             std::set<std::string> all_apis;
             for(const auto& kv : shmem_categories::get_category_map())

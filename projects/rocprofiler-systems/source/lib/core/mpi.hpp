@@ -408,7 +408,7 @@ rank(comm_t comm)
         // application calls MPI_Finalize() directly
         static communicator_map_t<std::int32_t>* _instance =
             new communicator_map_t<std::int32_t>();
-        if(_instance->find(comm) == _instance->end())
+        if(!_instance->contains(comm))
         {
             PMPI_Comm_rank(comm, &_rank);
             (*_instance)[comm] = _rank;
@@ -431,7 +431,7 @@ size(comm_t comm)
         // application calls MPI_Finalize() directly
         static communicator_map_t<std::int32_t>* _instance =
             new communicator_map_t<std::int32_t>();
-        if(_instance->find(comm) == _instance->end())
+        if(!_instance->contains(comm))
         {
             PMPI_Comm_size(comm, &_size);
             (*_instance)[comm] = _size;

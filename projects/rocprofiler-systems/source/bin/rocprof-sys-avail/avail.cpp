@@ -134,7 +134,7 @@ main(int argc, char** argv)
                 continue;
             }
             auto _categories = setting.second->get_categories();
-            if(_categories.find("native") != _categories.end())
+            if(_categories.contains("native"))
             {
                 _categories.erase("native");
                 _categories.emplace("timemory");
@@ -766,8 +766,7 @@ main(int argc, char** argv)
         category_regex_keys.emplace_back(_pos_regex);
     }
 
-    if(category_view.count("advanced") > 0 ||
-       category_view.count("settings::advanced") > 0)
+    if(category_view.contains("advanced") || category_view.contains("settings::advanced"))
     {
         fmt_opts.print_advanced = true;
     }
@@ -1145,12 +1144,12 @@ write_settings_info(std::ostream& os, format_options& fmt_opts,
             bool _found = false;
             for(const auto& category : _categories)
             {
-                if(category_view.count(category) > 0)
+                if(category_view.contains(category))
                 {
                     _found = true;
                 }
             }
-            if(!fmt_opts.print_advanced && _categories.count("settings::advanced") > 0)
+            if(!fmt_opts.print_advanced && _categories.contains("settings::advanced"))
             {
                 if(!sitr->second->get_config_updated() &&
                    !sitr->second->get_environ_updated())
@@ -1418,8 +1417,8 @@ write_hw_counter_info(std::ostream& os, format_options& fmt_opts,
     auto _valid_symbols = std::set<std::string>{};
     for(auto& fitr : fields)
     {
-        if(!category_view.empty() && category_view.count(fitr.first) == 0 &&
-           category_view.count(std::string{ "hw_counters::" } + fitr.first) == 0)
+        if(!category_view.empty() && !category_view.contains(fitr.first) &&
+           !category_view.contains(std::string{ "hw_counters::" } + fitr.first))
         {
             fitr.second.clear();
         }

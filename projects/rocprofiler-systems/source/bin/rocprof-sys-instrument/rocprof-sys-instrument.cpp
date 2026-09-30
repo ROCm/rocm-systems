@@ -1455,7 +1455,7 @@ main(int argc, char** argv)
     }
 
     auto const get_dyninst_option = [&](const std::string& _opt) {
-        const bool _ret = dyninst_defs.find(_opt) != dyninst_defs.end();
+        const bool _ret = dyninst_defs.contains(_opt);
         verbprintf(dyninst_verb, "[dyninst-option]> %-20s = %4s\n", _opt.c_str(),
                    (_ret) ? "on" : "off");
         return _ret;
@@ -1991,7 +1991,7 @@ main(int argc, char** argv)
         string_t best_init_name = {};
         for(const auto& sitr : init_stub_names)
         {
-            if(sitr.find(_name) != npos_v && used_stub_names.count(sitr) == 0)
+            if(sitr.find(_name) != npos_v && !used_stub_names.contains(sitr))
             {
                 verbprintf(
                     3, "Found possible match for '%s' instrumentation init: '%s'...\n",
@@ -2004,7 +2004,7 @@ main(int argc, char** argv)
         string_t base_fini_name = {};
         for(const auto& sitr : fini_stub_names)
         {
-            if(sitr.find(_name) != npos_v && used_stub_names.count(sitr) == 0)
+            if(sitr.find(_name) != npos_v && !used_stub_names.contains(sitr))
             {
                 verbprintf(
                     3, "Found possible match for '%s' instrumentation fini: '%s'...\n",
@@ -2022,13 +2022,13 @@ main(int argc, char** argv)
         // check user-specified signatures first
         for(const auto& bitr : init_stub_names)
         {
-            if(used_stub_names.find(bitr) != used_stub_names.end())
+            if(used_stub_names.contains(bitr))
             {
                 continue;
             }
             for(const auto& fitr : fini_stub_names)
             {
-                if(used_stub_names.find(fitr) != used_stub_names.end())
+                if(used_stub_names.contains(fitr))
                 {
                     continue;
                 }
@@ -2429,7 +2429,7 @@ main(int argc, char** argv)
         static std::map<std::string, strset_t> already_reported{};
         auto const                             _key =
             fmt::format("{}_{}_{}_{}_{}", _type, _action, _reason, _name, _extra);
-        if(already_reported[_key].count(_name) == 0)
+        if(!already_reported[_key].contains(_name))
         {
             verbprintf(_lvl, "[%s][%s] %s :: '%s'", _type.c_str(), _action.c_str(),
                        _reason.c_str(), _name.c_str());
@@ -2616,7 +2616,7 @@ main(int argc, char** argv)
         std::map<std::string, std::vector<std::string>>                  _data{};
         std::unordered_map<std::string, std::unordered_set<std::string>> _dups{};
         auto const _insert = [&](const std::string& _m, const std::string& _v) {
-            if(_dups[_m].find(_v) == _dups[_m].end())
+            if(!_dups[_m].contains(_v))
             {
                 _dups[_m].emplace(_v);
                 _data[_m].emplace_back(_v);

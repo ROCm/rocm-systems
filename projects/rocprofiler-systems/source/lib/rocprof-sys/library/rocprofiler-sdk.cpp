@@ -530,7 +530,7 @@ create_agent_profile(rocprofiler_agent_id_t          agent_id,
     using counter_vec_t = std::vector<rocprofiler_counter_id_t>;
 
     // check if already created
-    if(data->agent_counter_profiles.find(agent_id) != data->agent_counter_profiles.end())
+    if(data->agent_counter_profiles.contains(agent_id))
     {
         return counter_vec_t{};
     }
@@ -1150,7 +1150,7 @@ ompt_iterate_operation_args(const rocprofiler_callback_tracing_record_t& record,
         ROCPROFILER_OMPT_ID_task_create,    ROCPROFILER_OMPT_ID_implicit_task,
         ROCPROFILER_OMPT_ID_cancel,
     };
-    if(ompt_has_flags.find(ompt_operation_type) == ompt_has_flags.end())
+    if(!ompt_has_flags.contains(ompt_operation_type))
     {
         return;
     }
@@ -1876,7 +1876,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
 
                 auto const ompt_operation_type =
                     static_cast<rocprofiler_ompt_operation_t>(record.operation);
-                if(ompt_no_process.find(ompt_operation_type) != ompt_no_process.end())
+                if(ompt_no_process.contains(ompt_operation_type))
                 {
                     return;
                 }
@@ -2477,12 +2477,12 @@ counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_da
         }
     }
 
-    if(_agent_counter_storage->count(_agent_id) == 0)
+    if(!_agent_counter_storage->contains(_agent_id))
     {
         _agent_counter_storage->emplace(_agent_id, counter_storage_map_t{});
     }
 
-    if(get_kernel_dispatch_timestamps().count(_dispatch_id) > 0)
+    if(get_kernel_dispatch_timestamps().contains(_dispatch_id))
     {
         _interval = get_kernel_dispatch_timestamps().at(_dispatch_id);
         get_kernel_dispatch_timestamps().erase(_dispatch_id);
@@ -2490,7 +2490,7 @@ counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_da
 
     for(const auto& itr : _aggregate)
     {
-        if(_agent_counter_storage->at(_agent_id).count(itr.first) == 0)
+        if(!_agent_counter_storage->at(_agent_id).contains(itr.first))
         {
             const auto* agent = g_tool_data->get_gpu_tool_agent(_agent_id);
             const auto* info  = g_tool_data->get_tool_counter_info(_agent_id, itr.first);
@@ -2797,7 +2797,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 #endif
         })
     {
-        if(_callback_domains.count(itr) > 0)
+        if(_callback_domains.contains(itr))
         {
             auto _ops = tracing_config_t::get_operations(itr);
             _data->backtrace_operations.emplace(
@@ -2817,8 +2817,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         set_kernel_rename_and_stream_correlation_id, _data));
 
 #if(ROCPROFILER_VERSION >= 700)
-    if((_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH) > 0) ||
-       (_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY) > 0))
+    if((_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH)) ||
+       (_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY)))
     {
         ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
             _data->primary_ctx, ROCPROFILER_CALLBACK_TRACING_HIP_STREAM, nullptr, 0,
@@ -2826,12 +2826,12 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     }
 #endif
 
-    if(_callback_domains.count(ROCPROFILER_CALLBACK_TRACING_RCCL_API) > 0)
+    if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_RCCL_API))
     {
         rocprofiler_sdk::rccl_comm_data_initialize();
     }
 
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH) > 0)
+    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH))
     {
         ROCPROFILER_CALL(rocprofiler_create_buffer(
             _data->primary_ctx, buffer_size, watermark,
@@ -2844,7 +2844,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     }
     // ROCPROFILER_BUFFER_TRACING_HSA_CORE_API,          ///< @see
     // ::rocprofiler_hsa_core_api_id_t ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API,
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY) > 0)
+    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY))
     {
         ROCPROFILER_CALL(rocprofiler_create_buffer(
             _data->primary_ctx, buffer_size, watermark,
@@ -2855,7 +2855,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
             _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_MEMORY_COPY, nullptr, 0,
             _data->memory_copy_buffer));
     }
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY) > 0)
+    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY))
     {
         ROCPROFILER_CALL(rocprofiler_create_buffer(
             _data->primary_ctx, buffer_size, watermark,
@@ -2868,7 +2868,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     }
 
 #if(ROCPROFILER_VERSION >= 600)
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION) > 0)
+    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION))
     {
         ROCPROFILER_CALL(rocprofiler_create_buffer(
             _data->primary_ctx, buffer_size, watermark,

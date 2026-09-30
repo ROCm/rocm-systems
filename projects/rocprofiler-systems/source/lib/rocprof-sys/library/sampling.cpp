@@ -629,7 +629,7 @@ load_offload_buffer(std::int64_t _thread_idx)
         return _data;
     }
 
-    if(offload_seq_data.count(_thread_idx) == 0)
+    if(!offload_seq_data.contains(_thread_idx))
     {
         return _data;
     }
@@ -748,7 +748,7 @@ configure(bool _setup, std::int64_t _tid)
         _sampler->set_flags(SA_RESTART);
         _sampler->set_verbose(_verbose);
 
-        if(_signal_types->count(get_sampling_realtime_signal()) > 0)
+        if(_signal_types->contains(get_sampling_realtime_signal()))
         {
             _sampler->configure(timer{ get_sampling_realtime_signal(), CLOCK_REALTIME,
                                        SIGEV_THREAD_ID, get_sampling_realtime_freq(),
@@ -756,7 +756,7 @@ configure(bool _setup, std::int64_t _tid)
                                        threading::get_sys_tid() });
         }
 
-        if(_signal_types->count(get_sampling_cputime_signal()) > 0)
+        if(_signal_types->contains(get_sampling_cputime_signal()))
         {
             _sampler->configure(
                 timer{ get_sampling_cputime_signal(), CLOCK_THREAD_CPUTIME_ID,
@@ -764,7 +764,7 @@ configure(bool _setup, std::int64_t _tid)
                        get_sampling_cputime_delay(), _tid, threading::get_sys_tid() });
         }
 
-        if(_signal_types->count(get_sampling_overflow_signal()) > 0)
+        if(_signal_types->contains(get_sampling_overflow_signal()))
         {
             if(_signal_types->size() == 1)
             {

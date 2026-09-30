@@ -40,7 +40,7 @@ using ::rocprofsys::pmc::device_type;
 [[nodiscard]] inline bool
 is_runtime_visible(const std::string& bdf, const std::set<std::string>& visible_bdfs)
 {
-    return !bdf.empty() && visible_bdfs.count(bdf) > 0;
+    return !bdf.empty() && visible_bdfs.contains(bdf);
 }
 
 /**

@@ -261,7 +261,7 @@ parse_args(int argc, char** argv, std::vector<std::string>& _env,
     auto const help_check = [](parser_t& p, int _argc, char** _argv) {
         std::unordered_set<std::string> help_args = { "-h", "--help", "-?" };
         return (p.exists("help") || _argc == 1 ||
-                (_argc > 1 && help_args.find(_argv[1]) != help_args.end()));
+                (_argc > 1 && help_args.contains(_argv[1])));
     };
 
     auto       _pec        = EXIT_SUCCESS;

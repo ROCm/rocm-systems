@@ -367,7 +367,7 @@ get_internal_basic_libs_impl()
     {
         for(auto const itr : gitr)
         {
-            if(!itr.empty() && _exclude.count(itr) == 0)
+            if(!itr.empty() && !_exclude.contains(itr))
             {
                 _libs.emplace(itr);
             }

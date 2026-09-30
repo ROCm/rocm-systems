@@ -946,7 +946,7 @@ rocprofsys_init_tooling_hidden(void)
         {
             _comps.emplace(tim::runtime::enumerate(itr));
         }
-        if(_comps.size() == 1 && _comps.find(TIMEMORY_WALL_CLOCK) != _comps.end())
+        if(_comps.size() == 1 && _comps.contains(TIMEMORY_WALL_CLOCK))
         {
             // using wall_clock directly is lower overhead than using it via user_bundle
             instrumentation_bundle_t::get_initializer() =

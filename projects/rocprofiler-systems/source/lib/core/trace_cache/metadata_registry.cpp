@@ -766,14 +766,14 @@ metadata_registry::overwrite_callback_names(
             i < ROCPROFILER_CALLBACK_TRACING_LAST;
             i = static_cast<callback_kind_t>(static_cast<int>(i) + 1))
         {
-            if(modified_ops.find(i) != modified_ops.end())
+            if(modified_ops.contains(i))
             {
                 break;
             }
             modified_ops[i] = extract_operations(i);
         }
 
-        if(modified_ops.find(callback_kind) != modified_ops.end())
+        if(modified_ops.contains(callback_kind))
         {
             throw std::runtime_error(
                 "Overwriting a previously overwritten entry is forbidden");

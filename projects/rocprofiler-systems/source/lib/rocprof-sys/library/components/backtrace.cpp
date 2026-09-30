@@ -72,7 +72,7 @@ backtrace::get() const
     auto _known_excludes =
         std::set<std::string>{ "funlockfile", "killpg", "__restore_rt" };
     // remove some known functions which are by-products of interrupts
-    while(!_v.empty() && _known_excludes.find(_v.back().name) != _known_excludes.end())
+    while(!_v.empty() && _known_excludes.contains(_v.back().name))
     {
         _v.pop_back();
     }
