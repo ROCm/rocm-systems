@@ -855,22 +855,48 @@ bool RocJpegStreamParser::ParseEOI() {
     jpeg_stream_parameters_.slice_data_buffer = stream_;
 
     // A scan header with no entropy-coded data behind it describes nothing to
-    // decode. This happens when the buffer ends right after the SOS segment, or
-    // when an EOI immediately follows it, and both were reported as a
-    // successful parse with a zero-length slice.
+    // decode. This happens when the buffer ends right after the SOS segment,
+    // when an EOI immediately follows it, and when the only thing between them
+    // is fill or restart markers, and all of those were reported as a
+    // successful parse.
     //
-    // Trailing 0xFF bytes do not count towards the scan. ISO/IEC 10918-1
-    // B.1.1.2 allows any number of 0xFF fill bytes before a marker, and inside
-    // entropy-coded data a 0xFF is always followed by a stuffed 0x00 or a
-    // restart code, so a 0xFF at the very end of the scan is fill or a
-    // truncated marker rather than coded data. Without discounting it, a scan
-    // of "FF FF D9" measures one byte and an all-0xFF tail measures its whole
-    // length, both of which are still empty scans.
-    const uint8_t *entropy_end = stream_temp;
-    while (entropy_end > stream_ && *(entropy_end - 1) == 0xFF) {
-        entropy_end--;
+    // Deciding that from the byte count alone is not enough, because not every
+    // byte of the scan is coded data. Walk the scan as ISO/IEC 10918-1 B.1.1.2
+    // and B.1.1.3 define it instead: a 0xFF starts either a run of fill bytes
+    // before a marker, a stuffed 0x00 that stands for a real 0xFF of coded
+    // data, or a restart marker that carries no bits of its own. Anything else
+    // is coded data. Counting bytes rather than tokens let a scan of "FF FF D9"
+    // measure one byte, an all-0xFF tail measure its whole length, and a scan
+    // of nothing but RST0 measure two, none of which contain a coded bit.
+    bool has_entropy_data = false;
+    const uint8_t *scan = stream_;
+    while (scan < stream_temp) {
+        if (*scan != 0xFF) {
+            has_entropy_data = true;
+            break;
+        }
+        // Any number of 0xFF fill bytes may precede a marker, so the code is
+        // the first byte after the run.
+        while (scan < stream_temp && *scan == 0xFF) {
+            scan++;
+        }
+        if (scan >= stream_temp) {
+            // A trailing 0xFF run is fill or a truncated marker, never data.
+            break;
+        }
+        const uint8_t marker_code = *scan;
+        if (marker_code == 0x00) {
+            // Byte stuffing: this pair stands for one 0xFF of coded data.
+            has_entropy_data = true;
+            break;
+        }
+        if (marker_code < RST0 || marker_code > RST7) {
+            // Any other marker terminates the scan, so nothing beyond it counts.
+            break;
+        }
+        scan++;
     }
-    if (entropy_end == stream_) {
+    if (!has_entropy_data) {
         ErrorLog(g_rocjpeg_logger, "Invalid JPEG: the scan contains no entropy-coded data!");
         return false;
     }

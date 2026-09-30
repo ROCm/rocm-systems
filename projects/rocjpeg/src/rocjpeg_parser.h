@@ -52,6 +52,8 @@ enum JpegMarkers {
     DRI  = 0xDD, /**< Define Restart Interval */
     SOS  = 0xDA, /**< Start of Scan */
     EOI  = 0xD9, /**< End Of Image */
+    RST0 = 0xD0, /**< First of the eight restart markers, which carry no payload. */
+    RST7 = 0xD7, /**< Last of the eight restart markers, which carry no payload. */
 };
 
 /**
