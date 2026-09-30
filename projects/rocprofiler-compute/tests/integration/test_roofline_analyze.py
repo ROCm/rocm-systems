@@ -41,6 +41,7 @@ def embedded_roofline_model(document: str) -> dict:
 
 def test_analyze_generates_roofline_html(
     binary_handler_analyze_rocprof_compute: Callable[[list[str]], int],
+    tmp_path: Path,
 ) -> None:
     """
     Analyze generates roofline HTML from existing workload data.
@@ -50,6 +51,7 @@ def test_analyze_generates_roofline_html(
     try:
         assert (Path(workload_dir) / "roofline.csv").exists()
 
+        before = common.read_binary_file_tree(Path(workload_dir))
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -58,8 +60,9 @@ def test_analyze_generates_roofline_html(
             "FP32",
         ])
         assert code == 0
+        assert common.read_binary_file_tree(Path(workload_dir)) == before
 
-        html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
+        html_files = list((tmp_path / "analysis").glob("empirRoof_*.html"))
         assert [html_file.name for html_file in html_files] == ["empirRoof_gpu-0.html"]
 
         html_text = html_files[0].read_text(encoding="utf-8")
@@ -76,6 +79,7 @@ def test_analyze_generates_roofline_html(
 
 def test_analyze_roofline_datatype_independently(
     binary_handler_analyze_rocprof_compute: Callable[[list[str]], int],
+    tmp_path: Path,
 ) -> None:
     """
     Analyze with multiple data types.
@@ -92,10 +96,11 @@ def test_analyze_roofline_datatype_independently(
             workload_dir,
             "--roofline-data-type",
             dtype,
+            "--overwrite",
         ])
         assert code == 0
 
-    html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
+    html_files = list((tmp_path / "analysis").glob("empirRoof_*.html"))
     assert [html_file.name for html_file in html_files] == ["empirRoof_gpu-0.html"]
 
     common.clean_output_dir(config["cleanup"], workload_dir)
@@ -103,6 +108,7 @@ def test_analyze_roofline_datatype_independently(
 
 def test_analyze_roofline_multiple_datatypes_single_invocation(
     binary_handler_analyze_rocprof_compute: Callable[[list[str]], int],
+    tmp_path: Path,
 ) -> None:
     """
     Analyze with multiple data types in a single invocation.
@@ -123,7 +129,7 @@ def test_analyze_roofline_multiple_datatypes_single_invocation(
     ])
     assert code == 0
 
-    html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
+    html_files = list((tmp_path / "analysis").glob("empirRoof_*.html"))
     assert len(html_files) > 0, "Analyze should generate roofline HTML files"
 
     common.clean_output_dir(config["cleanup"], workload_dir)
@@ -131,6 +137,7 @@ def test_analyze_roofline_multiple_datatypes_single_invocation(
 
 def test_analyze_missing_roofline_csv_graceful(
     binary_handler_analyze_rocprof_compute: Callable[[list[str]], int],
+    tmp_path: Path,
 ) -> None:
     """
     Analyze without roofline.csv should not crash.
@@ -151,12 +158,13 @@ def test_analyze_missing_roofline_csv_graceful(
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-def test_analyze_roofline_idempotent(
+def test_analyze_roofline_rerun_requires_overwrite(
     binary_handler_analyze_rocprof_compute: Callable[[list[str]], int],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """
-    Running analyze twice on the same profiling output should produce
-    consistent results without errors.
+    An existing analysis directory requires explicit overwrite on reruns.
     """
     workload_dir = integration_common.setup_workload_dir(roofline_dir)
 
@@ -173,10 +181,24 @@ def test_analyze_roofline_idempotent(
     code1 = binary_handler_analyze_rocprof_compute(analyze_args)
     assert code1 == 0
 
+    html_path = tmp_path / "analysis" / "empirRoof_gpu-0.html"
+    first_html = html_path.read_bytes()
+    sentinel = tmp_path / "analysis" / "stale.txt"
+    sentinel.write_text("old result", encoding="utf-8")
+    capsys.readouterr()
     code2 = binary_handler_analyze_rocprof_compute(analyze_args)
-    assert code2 == 0
+    assert code2 != 0
+    captured = capsys.readouterr()
+    assert "--overwrite" in captured.out + captured.err
+    assert html_path.read_bytes() == first_html
+    assert sentinel.is_file()
 
-    html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
+    code3 = binary_handler_analyze_rocprof_compute([*analyze_args, "--overwrite"])
+    assert code3 == 0
+    assert not sentinel.exists()
+    assert html_path.read_bytes() == first_html
+
+    html_files = list((tmp_path / "analysis").glob("empirRoof_*.html"))
     assert len(html_files) > 0, "Analyze should generate roofline HTML files"
 
     common.clean_output_dir(config["cleanup"], workload_dir)
@@ -184,6 +206,7 @@ def test_analyze_roofline_idempotent(
 
 def test_analyze_corrupted_roofline_csv_graceful(
     binary_handler_analyze_rocprof_compute: Callable[[list[str]], int],
+    tmp_path: Path,
 ) -> None:
     """
     Analyze with a corrupted roofline.csv should handle gracefully.
@@ -207,6 +230,7 @@ def test_analyze_corrupted_roofline_csv_graceful(
 
 def test_roof_invalid_data_type(
     binary_handler_analyze_rocprof_compute: Callable[[list[str]], int],
+    tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Invalid --roofline-data-type should be rejected by the analyze argparser."""
@@ -231,6 +255,7 @@ def test_roof_invalid_data_type(
 
 def test_roof_invalid_mem_level(
     binary_handler_analyze_rocprof_compute: Callable[[list[str]], int],
+    tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Invalid --mem-level should be rejected by the analyze argparser."""
@@ -266,6 +291,7 @@ roofline_mem_level_dirs = {
 )
 def test_roof_mem_levels(
     binary_handler_analyze_rocprof_compute: Callable[[list[str]], int],
+    tmp_path: Path,
     mem_level: str,
 ) -> None:
     """Analyze with --mem-level generates roofline HTML output."""
@@ -286,7 +312,7 @@ def test_roof_mem_levels(
     ])
     assert code == 0
 
-    html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
+    html_files = list((tmp_path / "analysis").glob("empirRoof_*.html"))
     assert len(html_files) > 0, "Analyze should generate roofline HTML files"
 
     common.clean_output_dir(config["cleanup"], workload_dir)
@@ -304,6 +330,7 @@ DATATYPE_LEGEND_CASES = {
 @pytest.mark.parametrize("dtype", list(DATATYPE_LEGEND_CASES))
 def test_analyze_roofline_datatype_html_legend(
     binary_handler_analyze_rocprof_compute: Callable[[list[str]], int],
+    tmp_path: Path,
     dtype: str,
 ) -> None:
     """Per-datatype roofline HTML embeds the expected VALU/MFMA legend.
@@ -324,7 +351,7 @@ def test_analyze_roofline_datatype_html_legend(
     ])
     assert code == 0
 
-    html_path = Path(workload_dir) / "empirRoof_gpu-0.html"
+    html_path = tmp_path / "analysis" / "empirRoof_gpu-0.html"
     assert html_path.is_file(), f"Analyze should generate a {dtype} roofline HTML"
 
     html_text = html_path.read_text(encoding="utf-8")
@@ -334,3 +361,96 @@ def test_analyze_roofline_datatype_html_legend(
         assert legend not in html_text, f"{dtype} HTML should not contain '{legend}'"
 
     common.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.parametrize(
+    "output_kind", ["workload", "ancestor", "descendant", "symlink"]
+)
+def test_analyze_output_directory_protects_workload(
+    binary_handler_analyze_rocprof_compute, tmp_path, output_kind
+):
+    """Overwrite cannot remove a workload through containment or a symlink."""
+    workload_dir = tmp_path / "profiles" / "run"
+    shutil.copytree(roofline_dir, workload_dir)
+    before = common.read_binary_file_tree(workload_dir)
+    output_dir = {
+        "workload": workload_dir,
+        "ancestor": workload_dir.parent,
+        "descendant": workload_dir / "analysis",
+        "symlink": tmp_path / "workload_link",
+    }[output_kind]
+    if output_kind == "symlink":
+        output_dir.symlink_to(workload_dir, target_is_directory=True)
+
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        str(workload_dir),
+        "--output-directory",
+        str(output_dir),
+        "--overwrite",
+    ])
+
+    assert code != 0
+    assert common.read_binary_file_tree(workload_dir) == before
+
+
+def test_analyze_overwrite_unlinks_children_without_following_symlinks(
+    binary_handler_analyze_rocprof_compute, tmp_path
+):
+    """Clearing an output directory leaves symlink targets intact."""
+    workload_dir = tmp_path / "profiles" / "run"
+    shutil.copytree(roofline_dir, workload_dir)
+    output_dir = tmp_path / "reports"
+    output_dir.mkdir()
+    external_dir = tmp_path / "external"
+    external_dir.mkdir()
+    sentinel = external_dir / "keep.txt"
+    sentinel.write_text("keep", encoding="utf-8")
+    (output_dir / "linked_dir").symlink_to(external_dir, target_is_directory=True)
+    (output_dir / "linked_file").symlink_to(sentinel)
+    (output_dir / "dangling").symlink_to(tmp_path / "missing")
+
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        str(workload_dir),
+        "--output-directory",
+        str(output_dir),
+        "--overwrite",
+    ])
+
+    assert code == 0
+    assert sentinel.read_text(encoding="utf-8") == "keep"
+    assert {path.name for path in output_dir.iterdir()} == {"empirRoof_gpu-0.html"}
+
+
+@pytest.mark.parametrize("output_format", ["txt", "db", "csv"])
+def test_analyze_artifacts_use_explicit_output_directory(
+    binary_handler_analyze_rocprof_compute, tmp_path, output_format
+):
+    """Each output format writes only into the requested analysis directory."""
+    workload_dir = tmp_path / "profiles" / "run"
+    shutil.copytree(roofline_dir, workload_dir)
+    before = common.read_binary_file_tree(workload_dir)
+    output_dir = tmp_path / "reports"
+
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        str(workload_dir),
+        "--output-directory",
+        str(output_dir),
+        "--output-format",
+        output_format,
+        "--output-name",
+        "result",
+    ])
+
+    assert code == 0
+    assert common.read_binary_file_tree(workload_dir) == before
+    if output_format == "csv":
+        assert (output_dir / "result" / "roofline_ceiling.csv").is_file()
+        assert not (output_dir / "result.db").exists()
+    else:
+        assert (output_dir / f"result.{output_format}").is_file()

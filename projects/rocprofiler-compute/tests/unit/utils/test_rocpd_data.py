@@ -442,8 +442,36 @@ def test_ml_api_trace_counter_copy_stays_compressed(tmp_path):
     assert dst.is_file(), "counter copy should keep the compressed name"
     assert dst.read_bytes() == src_counter.read_bytes(), "should be a byte copy"
 
-    consolidated_df, _ = process_ml_api_trace_output(str(tmp_path))
+    consolidated_df, _ = process_ml_api_trace_output(
+        str(tmp_path), tmp_path / "analysis"
+    )
     assert not consolidated_df.empty, "analyze must resolve the compressed copy"
+
+
+def test_ml_api_trace_output_uses_analysis_directory(tmp_path):
+    """Consolidation writes into the chosen output and preserves source traces."""
+    workload_dir = tmp_path / "workload"
+    workload_dir.mkdir()
+    write_rocpd_layout(str(workload_dir))
+    source_cache = workload_dir / "ml_api_trace"
+    source_cache.mkdir()
+    sentinel = source_cache / "consolidated.csv"
+    sentinel.write_text("previous source content", encoding="utf-8")
+    original_files = {
+        path.relative_to(workload_dir): path.read_bytes()
+        for path in workload_dir.rglob("*")
+        if path.is_file()
+    }
+    output_dir = tmp_path / "analysis"
+    frame, trace_path = process_ml_api_trace_output(str(workload_dir), output_dir)
+    write_ml_api_trace_consolidated_csv(frame, trace_path)
+    assert trace_path == output_dir / "ml_api_trace"
+    assert (trace_path / "consolidated.csv").is_file()
+    assert {
+        path.relative_to(workload_dir): path.read_bytes()
+        for path in workload_dir.rglob("*")
+        if path.is_file()
+    } == original_files
 
 
 def test_ml_api_trace_output_same_for_rocpd_and_csv():
@@ -458,8 +486,8 @@ def test_ml_api_trace_output_same_for_rocpd_and_csv():
     write_csv_layout(csv_dir)
 
     kernel_top_df = build_kernel_top_df()
-    rocpd_output = process_ml_api_trace_output(rocpd_dir)
-    csv_output = process_ml_api_trace_output(csv_dir)
+    rocpd_output = process_ml_api_trace_output(rocpd_dir, Path(rocpd_dir) / "analysis")
+    csv_output = process_ml_api_trace_output(csv_dir, Path(csv_dir) / "analysis")
     assert rocpd_output is not None
     assert csv_output is not None
     rocpd_df, rocpd_trace_path = rocpd_output
@@ -488,8 +516,8 @@ def test_ml_api_trace_output_same_for_rocpd_and_csv():
         assert "kernel_mm" in mm_node.kernels
         assert mm_node.kernels["kernel_mm"].launches == 1
 
-    rocpd_results = read_ml_api_trace_csvs(Path(rocpd_dir) / "ml_api_trace")
-    csv_results = read_ml_api_trace_csvs(Path(csv_dir) / "ml_api_trace")
+    rocpd_results = read_ml_api_trace_csvs(rocpd_trace_path)
+    csv_results = read_ml_api_trace_csvs(csv_trace_path)
 
     assert rocpd_results.keys() == csv_results.keys(), (
         f"ML API trace CSV files differ: rocpd={sorted(rocpd_results.keys())} "
@@ -516,7 +544,9 @@ def test_process_ml_api_trace_output_defaults_backend_for_untagged(tmp_path):
     workload_dir = str(tmp_path)
     write_rocpd_layout(workload_dir)
 
-    consolidated_df, _ = process_ml_api_trace_output(workload_dir)
+    consolidated_df, _ = process_ml_api_trace_output(
+        workload_dir, tmp_path / "analysis"
+    )
 
     assert "Backend" in consolidated_df.columns
     assert (consolidated_df["Backend"] == "torch").all()
@@ -536,7 +566,9 @@ def test_process_ml_api_trace_output_preserves_per_row_backend(tmp_path):
     df["Backend"] = ["torch", "torch", "triton"]
     df.to_csv(marker_path, index=False)
 
-    consolidated_df, _ = process_ml_api_trace_output(workload_dir)
+    consolidated_df, _ = process_ml_api_trace_output(
+        workload_dir, tmp_path / "analysis"
+    )
 
     assert "Backend" in consolidated_df.columns
     backend_by_operator = dict(

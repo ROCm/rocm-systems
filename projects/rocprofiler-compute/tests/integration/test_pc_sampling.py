@@ -177,6 +177,7 @@ def test_multiprocess_pc_sampling_distinct_code_objects(
     binary_handler_analyze_rocprof_compute,
     monkeypatch,
     sampling_method,
+    tmp_path,
 ):
     """Assert each process keeps its own code-object ID for the same kernel.
 
@@ -216,11 +217,8 @@ def test_multiprocess_pc_sampling_distinct_code_objects(
     file_dict = integration_common.check_non_pmc_files(workload_dir, num_devices, 1)
     _assert_pc_sampling_files(file_dict, expected_count=2)
 
-    # --output-name forbids path separators, so the db lands in the cwd; run
-    # from the workload dir to keep it there for clean_output_dir to remove.
     workload_path = Path(workload_dir).resolve()
     database_name = f"cg_code_objects_{sampling_method}"
-    monkeypatch.chdir(workload_path)
     code = binary_handler_analyze_rocprof_compute([
         "analyze",
         "--path",
@@ -232,7 +230,7 @@ def test_multiprocess_pc_sampling_distinct_code_objects(
     ])
     assert code == 0
 
-    database_path = workload_path / f"{database_name}.db"
+    database_path = tmp_path / "analysis" / f"{database_name}.db"
     assert database_path.is_file()
     connection = sqlite3.connect(str(database_path))
     try:
@@ -392,6 +390,8 @@ def test_pc_sampling_profile_then_analyze(
     file_dict = integration_common.check_non_pmc_files(workload_dir, num_devices, 1)
     _assert_pc_sampling_files(file_dict)
 
+    workload_path = Path(workload_dir)
+    before = common.read_binary_file_tree(workload_path)
     code = binary_handler_analyze_rocprof_compute(
         [
             "analyze",
@@ -407,21 +407,7 @@ def test_pc_sampling_profile_then_analyze(
     assert "0.1 Top Kernels" in captured.out
     assert "0.2 Dispatch List" in captured.out
 
-    workload_path = Path(workload_dir)
-
-    kernel_top_csv = workload_path / "pmc_kernel_top.csv"
-    assert kernel_top_csv.exists()
-    kernel_top_header = kernel_top_csv.read_text().splitlines()[0]
-    assert "Kernel_Name" in kernel_top_header
-    assert "Count" in kernel_top_header
-    assert "Percent" in kernel_top_header
-
-    dispatch_info_csv = workload_path / "pmc_dispatch_info.csv"
-    assert dispatch_info_csv.exists()
-    dispatch_info_header = dispatch_info_csv.read_text().splitlines()[0]
-    assert "Dispatch_ID" in dispatch_info_header
-    assert "Kernel_Name" in dispatch_info_header
-    assert "GPU_ID" in dispatch_info_header
+    assert common.read_binary_file_tree(workload_path) == before
 
     code = binary_handler_analyze_rocprof_compute(
         [
@@ -432,6 +418,7 @@ def test_pc_sampling_profile_then_analyze(
             "21",
             "--kernel",
             "0",
+            "--overwrite",
         ],
     )
     assert code == 0

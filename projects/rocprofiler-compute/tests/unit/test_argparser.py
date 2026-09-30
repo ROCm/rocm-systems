@@ -389,3 +389,18 @@ def test_experimental_action_help_suppression():
 
     # Help should be suppressed
     assert "--test-exp-feature" not in help_text, f"{help_text}"
+
+
+def test_analyze_output_directory_defaults_to_analysis(tmp_path, monkeypatch):
+    """Analyze artifacts default to the current directory's analysis folder."""
+    monkeypatch.chdir(tmp_path)
+    args = build_args(["analyze"])
+    assert args.output_directory == str(tmp_path / "analysis")
+    assert args.overwrite is False
+
+
+def test_analyze_output_directory_override_and_overwrite(tmp_path):
+    """Analyze accepts an explicit output directory and clearing authorization."""
+    args = build_args(["analyze", "--output-directory", str(tmp_path), "--overwrite"])
+    assert args.output_directory == str(tmp_path)
+    assert args.overwrite is True

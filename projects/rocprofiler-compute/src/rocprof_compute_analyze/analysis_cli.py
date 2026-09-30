@@ -136,7 +136,6 @@ class cli_analysis(OmniAnalyze_Base):
 
             kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
                 df_in=workload.raw_pmc,
-                raw_data_dir=path_info[0],
                 filter_gpu_ids=workload.filter_gpu_ids,
                 filter_dispatch_ids=workload.filter_dispatch_ids,
                 time_unit=args.time_unit,
@@ -261,7 +260,9 @@ class cli_analysis(OmniAnalyze_Base):
                             ops_dt,
                             flops_dt,
                         ) = roof_obj.construct_plotly_figures(ai_data=ai_data)
-                        roof_obj.save_html_files(ops_fig, flops_fig, ops_dt, flops_dt)
+                        roof_obj.save_html_files(
+                            ops_fig, flops_fig, ops_dt, flops_dt, self._output_dir
+                        )
                     else:
                         console_warning(
                             "roofline",
@@ -299,7 +300,9 @@ class cli_analysis(OmniAnalyze_Base):
     ) -> None:
         """Render the operator call tree for a single backend."""
         label = _ML_API_ANALYSIS_CLI_OPTIONS[backend]["label"]
-        consolidated_df, ml_api_trace_path = process_ml_api_trace_output(workload_path)
+        consolidated_df, ml_api_trace_path = process_ml_api_trace_output(
+            workload_path, self._output_dir
+        )
         if consolidated_df.empty:
             tty.list_ml_operators(workload_path, {}, framework_label=label)
             return
@@ -331,28 +334,17 @@ class cli_analysis(OmniAnalyze_Base):
         """
         cli = _ML_API_ANALYSIS_CLI_OPTIONS[backend]
         label = cli["label"]
-        ml_api_trace_dir = Path(workload_path) / "ml_api_trace"
-        consolidated_path = ml_api_trace_dir / "consolidated.csv"
-
-        if consolidated_path.exists():
-            consolidated_df = pd.read_csv(consolidated_path)
-            console_log(
+        consolidated_df, ml_api_trace_path = process_ml_api_trace_output(
+            workload_path, self._output_dir
+        )
+        if consolidated_df.empty:
+            console_warning(
                 "ml api trace",
-                f"Loaded cached {consolidated_path}. "
-                "Delete ml_api_trace/ directory to force regeneration from raw traces.",
+                f"No {label} operator data found in this workload. "
+                f"Proceeding without {label} operator filter.",
             )
-        else:
-            consolidated_df, ml_api_trace_path = process_ml_api_trace_output(
-                workload_path
-            )
-            if consolidated_df.empty:
-                console_warning(
-                    "ml api trace",
-                    f"No {label} operator data found in this workload. "
-                    f"Proceeding without {label} operator filter.",
-                )
-                return
-            write_ml_api_trace_consolidated_csv(consolidated_df, ml_api_trace_path)
+            return
+        write_ml_api_trace_consolidated_csv(consolidated_df, ml_api_trace_path)
 
         consolidated_df = self._filter_by_backend(consolidated_df, backend)
         if consolidated_df.empty:

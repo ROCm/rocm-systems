@@ -301,6 +301,7 @@ def test_list_torch_operators(
     torch_trace_profiled_workload,
     binary_handler_analyze_rocprof_compute,
     capsys,
+    tmp_path,
 ):
     """Assert --list-torch-operators call tree, relu names, and consolidated.csv."""
     workload_dir = torch_trace_profiled_workload
@@ -341,7 +342,7 @@ def test_list_torch_operators(
         f"Source locations not sorted by descending duration: {location_durations}"
     )
 
-    ml_api_trace_dir = Path(workload_dir) / "ml_api_trace"
+    ml_api_trace_dir = tmp_path / "analysis" / "ml_api_trace"
     assert ml_api_trace_dir.exists(), "ml_api_trace directory not created"
     consolidated_csv = ml_api_trace_dir / "consolidated.csv"
     assert consolidated_csv.exists(), "consolidated.csv not found in ml_api_trace"
@@ -391,6 +392,7 @@ def test_torch_operator_filters(
     returncode_all = run_analyze(
         binary_handler_analyze_rocprof_compute,
         workload_dir,
+        "--overwrite",
         "--torch-operator",
         "all",
     )
@@ -403,6 +405,7 @@ def test_torch_operator_filters(
     returncode_intersect = run_analyze(
         binary_handler_analyze_rocprof_compute,
         workload_dir,
+        "--overwrite",
         "--torch-operator",
         "all",
         "-k",
@@ -422,6 +425,7 @@ def test_torch_operator_filters(
     returncode_nomatch = run_analyze(
         binary_handler_analyze_rocprof_compute,
         workload_dir,
+        "--overwrite",
         "--torch-operator",
         "nonexistent_operator_xyz",
     )

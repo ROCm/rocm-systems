@@ -1519,3 +1519,39 @@ def test_is_gfx1250_matches_only_the_supported_architecture():
     assert not utils_common.is_gfx1250("gfx12500")
     assert not utils_common.is_gfx1250("gfx1251")
     assert not utils_common.is_gfx1250(None)
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_prepare_output_directory_accepts_missing_or_empty(tmp_path, existing):
+    output = tmp_path / "analysis"
+    if existing:
+        output.mkdir()
+    utils_common.prepare_output_directory(output, False, "analysis")
+    assert output.is_dir()
+    assert list(output.iterdir()) == []
+
+
+def test_prepare_output_directory_refuses_nonempty(tmp_path, caplog):
+    marker = tmp_path / "keep.txt"
+    marker.write_text("keep", encoding="utf-8")
+    with pytest.raises(SystemExit):
+        utils_common.prepare_output_directory(tmp_path, False, "analysis")
+    assert marker.read_text(encoding="utf-8") == "keep"
+    assert "please use --overwrite" in caplog.text
+
+
+def test_prepare_output_directory_overwrite_preserves_symlink_targets(tmp_path):
+    output = tmp_path / "analysis"
+    output.mkdir()
+    target = tmp_path / "target"
+    target.mkdir()
+    marker = target / "keep.txt"
+    marker.write_text("keep", encoding="utf-8")
+    (output / "linked").symlink_to(target, target_is_directory=True)
+    (output / "broken").symlink_to(tmp_path / "missing")
+    (output / "ordinary").mkdir()
+    (output / "ordinary" / "old.txt").write_text("old", encoding="utf-8")
+    (output / "old.txt").write_text("old", encoding="utf-8")
+    utils_common.prepare_output_directory(output, True, "analysis")
+    assert list(output.iterdir()) == []
+    assert marker.read_text(encoding="utf-8") == "keep"

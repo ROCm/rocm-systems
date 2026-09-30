@@ -4,7 +4,6 @@
 """Unit tests for utils.file_io."""
 
 import gzip
-import tempfile
 
 import common
 import pandas as pd
@@ -62,56 +61,52 @@ def make_repeated_dispatch_frame() -> pd.DataFrame:
 
 def test_returns_valid_dataframes() -> None:
     """create_df_kernel_top_stats returns valid DFs with correct structure."""
-    with tempfile.TemporaryDirectory() as temp_dir:
-        kernel_top_df, dispatch_info_df = create_df_kernel_top_stats(
-            df_in=_raw_pmc(),
-            raw_data_dir=temp_dir,
-            filter_gpu_ids=None,
-            filter_dispatch_ids=None,
-            time_unit="ns",
-        )
+    kernel_top_df, dispatch_info_df = create_df_kernel_top_stats(
+        df_in=_raw_pmc(),
+        filter_gpu_ids=None,
+        filter_dispatch_ids=None,
+        time_unit="ns",
+    )
 
-        assert isinstance(kernel_top_df, pd.DataFrame)
-        assert isinstance(dispatch_info_df, pd.DataFrame)
+    assert isinstance(kernel_top_df, pd.DataFrame)
+    assert isinstance(dispatch_info_df, pd.DataFrame)
 
-        expected_columns = [
-            "Kernel_Name",
-            "Count",
-            "Sum(ns)",
-            "Mean(ns)",
-            "Median(ns)",
-            "Percent",
-        ]
-        for col in expected_columns:
-            assert col in kernel_top_df.columns, f"Missing column: {col}"
+    expected_columns = [
+        "Kernel_Name",
+        "Count",
+        "Sum(ns)",
+        "Mean(ns)",
+        "Median(ns)",
+        "Percent",
+    ]
+    for col in expected_columns:
+        assert col in kernel_top_df.columns, f"Missing column: {col}"
 
-        assert "Kernel_Name" in dispatch_info_df.columns
-        assert "GPU_ID" in dispatch_info_df.columns
-        assert "Dispatch_ID" in dispatch_info_df.columns
+    assert "Kernel_Name" in dispatch_info_df.columns
+    assert "GPU_ID" in dispatch_info_df.columns
+    assert "Dispatch_ID" in dispatch_info_df.columns
 
-        assert kernel_top_df.index[0] == 0
-        assert kernel_top_df["Percent"].sum() == pytest.approx(100.0, abs=0.01)
+    assert kernel_top_df.index[0] == 0
+    assert kernel_top_df["Percent"].sum() == pytest.approx(100.0, abs=0.01)
 
 
 def test_grouping_and_aggregation() -> None:
     """Kernel grouping, aggregation functions, and sorting behavior."""
-    with tempfile.TemporaryDirectory() as temp_dir:
-        kernel_top_df, _ = create_df_kernel_top_stats(
-            df_in=_raw_pmc(),
-            raw_data_dir=temp_dir,
-            filter_gpu_ids=None,
-            filter_dispatch_ids=None,
-            time_unit="ns",
-        )
+    kernel_top_df, _ = create_df_kernel_top_stats(
+        df_in=_raw_pmc(),
+        filter_gpu_ids=None,
+        filter_dispatch_ids=None,
+        time_unit="ns",
+    )
 
-        # kernel_a appears twice in input and must group into one row.
-        kernel_a_row = kernel_top_df[kernel_top_df["Kernel_Name"] == "kernel_a"]
-        assert len(kernel_a_row) == 1
-        assert kernel_a_row["Count"].iloc[0] == 2
+    # kernel_a appears twice in input and must group into one row.
+    kernel_a_row = kernel_top_df[kernel_top_df["Kernel_Name"] == "kernel_a"]
+    assert len(kernel_a_row) == 1
+    assert kernel_a_row["Count"].iloc[0] == 2
 
-        # Sorting by sum is descending.
-        sum_values = kernel_top_df["Sum(ns)"].tolist()
-        assert sum_values == sorted(sum_values, reverse=True)
+    # Sorting by sum is descending.
+    sum_values = kernel_top_df["Sum(ns)"].tolist()
+    assert sum_values == sorted(sum_values, reverse=True)
 
 
 def test_ranking_uses_total_duration_not_longest_dispatch() -> None:
@@ -122,21 +117,50 @@ def test_ranking_uses_total_duration_not_longest_dispatch() -> None:
     ]
 
 
+def test_kernel_duration_statistics_match_top_stats() -> None:
+    """The reusable nanosecond statistics retain the CLI ranking and values."""
+    from utils import file_io
+
+    frame = make_repeated_dispatch_frame()
+    expected, _ = create_df_kernel_top_stats(
+        df_in=frame,
+        filter_gpu_ids=None,
+        filter_dispatch_ids=None,
+        time_unit="ns",
+    )
+    pd.testing.assert_frame_equal(file_io.kernel_duration_stats(frame), expected)
+
+
+def test_kernel_top_stats_can_run_without_an_output_directory(monkeypatch) -> None:
+    """In-memory statistics work without filesystem access."""
+
+    def reject_csv_write(*args, **kwargs):
+        pytest.fail("Statistics must remain in memory")
+
+    monkeypatch.setattr(pd.DataFrame, "to_csv", reject_csv_write)
+    stats, dispatches = create_df_kernel_top_stats(
+        df_in=_raw_pmc(),
+        filter_gpu_ids=None,
+        filter_dispatch_ids=None,
+        time_unit="us",
+    )
+    assert stats["Sum(us)"].tolist() == pytest.approx([0.9, 0.8, 0.2])
+    assert len(dispatches) == 4
+
+
 def test_kernel_top_stats_rows_follow_the_ranking() -> None:
     """Top stats rows are ordered by the ranking that -k indexes into."""
     dispatch_frame = make_repeated_dispatch_frame()
-    with tempfile.TemporaryDirectory() as temp_dir:
-        kernel_top_df, _ = create_df_kernel_top_stats(
-            df_in=dispatch_frame,
-            raw_data_dir=temp_dir,
-            filter_gpu_ids=None,
-            filter_dispatch_ids=None,
-            time_unit="ns",
-        )
+    kernel_top_df, _ = create_df_kernel_top_stats(
+        df_in=dispatch_frame,
+        filter_gpu_ids=None,
+        filter_dispatch_ids=None,
+        time_unit="ns",
+    )
 
-        assert kernel_top_df["Kernel_Name"].tolist() == (
-            rank_kernels_by_total_duration(dispatch_frame)
-        )
+    assert kernel_top_df["Kernel_Name"].tolist() == (
+        rank_kernels_by_total_duration(dispatch_frame)
+    )
 
 
 class TestValidateKernelFilterIds:
@@ -177,55 +201,50 @@ class TestValidateKernelFilterIds:
 
 def test_filters() -> None:
     """GPU ID, dispatch ID (including '> n' syntax), and empty input handling."""
-    with tempfile.TemporaryDirectory() as temp_dir:
-        # GPU ID filter: GPU_ID=0 excludes kernel_a at GPU 1 (3 dispatches).
-        _, dispatch_df = create_df_kernel_top_stats(
-            df_in=_raw_pmc(),
-            raw_data_dir=temp_dir,
-            filter_gpu_ids="0",
-            filter_dispatch_ids=None,
-            time_unit="ns",
-        )
-        assert len(dispatch_df) == 3
+    # GPU ID filter: GPU_ID=0 excludes kernel_a at GPU 1 (3 dispatches).
+    _, dispatch_df = create_df_kernel_top_stats(
+        df_in=_raw_pmc(),
+        filter_gpu_ids="0",
+        filter_dispatch_ids=None,
+        time_unit="ns",
+    )
+    assert len(dispatch_df) == 3
 
-        # Dispatch ID filter with "> n" syntax keeps IDs 3 and 4.
-        _, dispatch_df = create_df_kernel_top_stats(
-            df_in=_raw_pmc(),
-            raw_data_dir=temp_dir,
-            filter_gpu_ids=None,
-            filter_dispatch_ids=["> 2"],
-            time_unit="ns",
-        )
-        assert len(dispatch_df) == 2
-        assert all(dispatch_df["Dispatch_ID"] > 2)
+    # Dispatch ID filter with "> n" syntax keeps IDs 3 and 4.
+    _, dispatch_df = create_df_kernel_top_stats(
+        df_in=_raw_pmc(),
+        filter_gpu_ids=None,
+        filter_dispatch_ids=["> 2"],
+        time_unit="ns",
+    )
+    assert len(dispatch_df) == 2
+    assert all(dispatch_df["Dispatch_ID"] > 2)
 
-        # Dispatch ID filter with specific IDs.
-        _, dispatch_df = create_df_kernel_top_stats(
-            df_in=_raw_pmc(),
-            raw_data_dir=temp_dir,
-            filter_gpu_ids=None,
-            filter_dispatch_ids=["1", "2"],
-            time_unit="ns",
-        )
-        assert len(dispatch_df) == 2
+    # Dispatch ID filter with specific IDs.
+    _, dispatch_df = create_df_kernel_top_stats(
+        df_in=_raw_pmc(),
+        filter_gpu_ids=None,
+        filter_dispatch_ids=["1", "2"],
+        time_unit="ns",
+    )
+    assert len(dispatch_df) == 2
 
-        # Empty input yields empty outputs.
-        empty_raw_pmc = pd.DataFrame({
-            "Kernel_Name": [],
-            "GPU_ID": [],
-            "Dispatch_ID": [],
-            "Start_Timestamp": [],
-            "End_Timestamp": [],
-        })
-        kernel_top_df, dispatch_df = create_df_kernel_top_stats(
-            df_in=empty_raw_pmc,
-            raw_data_dir=temp_dir,
-            filter_gpu_ids=None,
-            filter_dispatch_ids=None,
-            time_unit="ns",
-        )
-        assert len(kernel_top_df) == 0
-        assert len(dispatch_df) == 0
+    # Empty input yields empty outputs.
+    empty_raw_pmc = pd.DataFrame({
+        "Kernel_Name": [],
+        "GPU_ID": [],
+        "Dispatch_ID": [],
+        "Start_Timestamp": [],
+        "End_Timestamp": [],
+    })
+    kernel_top_df, dispatch_df = create_df_kernel_top_stats(
+        df_in=empty_raw_pmc,
+        filter_gpu_ids=None,
+        filter_dispatch_ids=None,
+        time_unit="ns",
+    )
+    assert len(kernel_top_df) == 0
+    assert len(dispatch_df) == 0
 
 
 # =============================================================================

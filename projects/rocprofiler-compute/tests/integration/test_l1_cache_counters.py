@@ -25,7 +25,10 @@ def load_metrics(csv_file_path):
 
 
 def test_L1_cache_counters(
-    binary_handler_profile_rocprof_compute, binary_handler_analyze_rocprof_compute, soc
+    binary_handler_profile_rocprof_compute,
+    binary_handler_analyze_rocprof_compute,
+    soc,
+    tmp_path,
 ):
     if not soc or "MI300" not in soc:
         pytest.skip("Skipping L1 cache test for non-mi300 socs.")
@@ -42,7 +45,9 @@ def test_L1_cache_counters(
 
     for app_name in app_names:
         workload_dir = f"{base}/{app_name}"
-        workload_dir_output = f"{base}_{app_name}"
+        output_name = f"{base.name}_{app_name}"
+        output_dir = tmp_path / f"analysis_{app_name}"
+        workload_dir_output = output_dir / output_name
 
         # 1. profile the app
         return_code = binary_handler_profile_rocprof_compute(
@@ -65,12 +70,14 @@ def test_L1_cache_counters(
             "--output-format",
             "csv",
             "--output-name",
-            workload_dir_output,
+            output_name,
+            "--output-directory",
+            str(output_dir),
         ])
         assert return_code == 0
 
         # 3. save results in local
-        csv_path = workload_dir_output + "/workload_metric.csv"
+        csv_path = workload_dir_output / "workload_metric.csv"
         data = load_metrics(csv_path)
 
         for metric in metrics:

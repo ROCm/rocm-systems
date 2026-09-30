@@ -291,6 +291,7 @@ class db_analysis(OmniAnalyze_Base):
             db_name = f"{self.get_args().output_name}.db"
         else:
             db_name = f"rocprof_compute_{get_uuid()}.db"
+        db_name = str(self._output_dir / db_name)
         Database.init(db_name)
         console_debug(f"Initialized database: {db_name}")
 

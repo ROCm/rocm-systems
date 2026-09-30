@@ -7,13 +7,21 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
+* Added analyze `--output-directory` for all analysis artifacts and `--overwrite` to clear an existing non-empty analysis directory.
+
 ### Changed
 
 * Updated the analysis database schema version from 2.3.0 to 3.0.0.
 
+* Analyze writes roofline HTML, text reports, databases, CSV exports, and `ml_api_trace/` under `--output-directory`, which defaults to `./analysis/`. Roofline HTML and operator trace output move out of the profiling workload directory. A rerun into a non-empty analysis directory requires `--overwrite`, which clears that directory.
+
+* Analyze keeps Top Kernels and Dispatch List tables in memory instead of writing `pmc_kernel_top.csv` and `pmc_dispatch_info.csv` caches into the profiling workload directory.
+
 ### Removed
 
 * Removed the unused `compute_workload_roofline_data` table from the analysis database.
+
+* Removed the separate `--output-name` existence check; analysis directory collision handling now controls overwrite behavior.
 
 ### Optimized
 

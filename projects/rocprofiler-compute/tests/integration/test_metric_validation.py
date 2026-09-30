@@ -119,7 +119,10 @@ VALIDATE_METRICS = {
 
 
 def test_validate_metrics(
-    binary_handler_profile_rocprof_compute, binary_handler_analyze_rocprof_compute, soc
+    binary_handler_profile_rocprof_compute,
+    binary_handler_analyze_rocprof_compute,
+    soc,
+    tmp_path,
 ):
     for workload in VALIDATE_METRICS:
         metrics = VALIDATE_METRICS[workload].get(soc, [])
@@ -132,7 +135,9 @@ def test_validate_metrics(
             continue
 
         profile_workload_dir = common.get_output_dir(param_id=f"{workload}_profile")
-        analysis_workload_dir = common.get_output_dir(param_id=f"{workload}_analysis")
+        analysis_name = common.get_output_dir(param_id=f"{workload}_analysis")
+        analysis_output_dir = tmp_path / f"analysis_{workload}"
+        analysis_workload_dir = analysis_output_dir / analysis_name
         try:
             # Copy to prevent upstream global mutations
             options = list(VALIDATE_METRICS[workload].get("profile_options", []))
@@ -154,9 +159,11 @@ def test_validate_metrics(
             code = binary_handler_analyze_rocprof_compute([
                 "analyze",
                 "--output-name",
-                f"{analysis_workload_dir}",
+                analysis_name,
                 "--output-format",
                 "csv",
+                "--output-directory",
+                str(analysis_output_dir),
                 "-b",
                 *metric_ids,
                 "--path",

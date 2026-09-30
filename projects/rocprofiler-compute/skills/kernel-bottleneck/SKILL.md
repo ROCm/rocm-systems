@@ -225,7 +225,12 @@ settings without stating that those differ.
 
 Terminal output is the default. Only choose a format when the user asks to save
 or export. `--output-format` takes `txt`, `csv`, or `db`, each of which
-disables terminal output, and `--output-name` sets the file name. See
+disables terminal output, and `--output-name` sets the file name inside
+`--output-directory` (default: `./analysis/`). Roofline HTML also goes into that
+directory, including when the report prints to the terminal. Use a fresh output
+directory for each run. Reusing a non-empty directory requires `--overwrite`,
+which deletes its contents. Keep the output directory outside the profiling
+workload directory. See
 [analysis output format](../../docs/how-to/analyze/cli.rst).
 
 ## 9. When something looks wrong

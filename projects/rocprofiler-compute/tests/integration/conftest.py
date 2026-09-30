@@ -190,7 +190,7 @@ def binary_handler_profile_rocprof_compute(request):
 
 
 @pytest.fixture
-def binary_handler_analyze_rocprof_compute():
+def binary_handler_analyze_rocprof_compute(tmp_path):
     """
     Fixture to run rocprof-compute analyze command.
 
@@ -202,6 +202,13 @@ def binary_handler_analyze_rocprof_compute():
     """
 
     def _handler(arguments):
+        arguments = list(arguments)
+        if not any(
+            argument == "--output-directory"
+            or argument.startswith("--output-directory=")
+            for argument in arguments
+        ):
+            arguments.extend(["--output-directory", str(tmp_path / "analysis")])
         with pytest.raises(SystemExit) as e:
             with patch(
                 "sys.argv",

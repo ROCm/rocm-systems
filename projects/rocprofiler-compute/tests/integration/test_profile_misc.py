@@ -4,9 +4,7 @@
 """Integration tests for assorted profile CLI options."""
 
 import inspect
-import os
 import sqlite3
-from pathlib import Path
 
 import common
 import pandas as pd
@@ -24,7 +22,9 @@ from tests.integration.common import (
 
 @pytest.mark.misc
 def test_analyze_rocpd(
-    binary_handler_profile_rocprof_compute, binary_handler_analyze_rocprof_compute
+    binary_handler_profile_rocprof_compute,
+    binary_handler_analyze_rocprof_compute,
+    tmp_path,
 ):
     skip_unsupported_roofline_soc()
 
@@ -43,7 +43,8 @@ def test_analyze_rocpd(
         workload_dir,
     ])
     assert code == 0
-    assert os.path.isfile(f"{db_name}.db")
+    database_path = tmp_path / "analysis" / f"{db_name}.db"
+    assert database_path.is_file()
 
     # Open the sqlite database and assert the schema
     # Import Kernel from analysis_orm.py
@@ -53,8 +54,13 @@ def test_analyze_rocpd(
         Kernel,
         KernelMetricValue,
         KernelRooflineData,
+        KernelRooflineLimiter,
+        KernelRooflineMetric,
+        KernelRooflinePoint,
         Metadata,
         MetricDefinition,
+        RooflineBandwidthCeiling,
+        RooflineComputeCeiling,
         Workload,
         WorkloadMetricValue,
     )
@@ -63,6 +69,11 @@ def test_analyze_rocpd(
         "compute_workload": Workload,
         "compute_metric_definition": MetricDefinition,
         "compute_kernel_roofline_data": KernelRooflineData,
+        "compute_roofline_bandwidth_ceiling": RooflineBandwidthCeiling,
+        "compute_roofline_compute_ceiling": RooflineComputeCeiling,
+        "compute_kernel_roofline_point": KernelRooflinePoint,
+        "compute_kernel_roofline_limiter": KernelRooflineLimiter,
+        "compute_kernel_roofline_metric": KernelRooflineMetric,
         "compute_dispatch": Dispatch,
         "compute_kernel": Kernel,
         "compute_kernel_metric_value": KernelMetricValue,
@@ -71,7 +82,7 @@ def test_analyze_rocpd(
     }
 
     def check_cols(table_name, orm_obj):
-        conn = sqlite3.connect(f"{db_name}.db")
+        conn = sqlite3.connect(database_path)
         cursor = conn.cursor()
         cursor.execute(f"PRAGMA table_info('{table_name}');")
         columns = cursor.fetchall()
@@ -83,7 +94,7 @@ def test_analyze_rocpd(
     for table_name, orm_obj in table_name_map.items():
         check_cols(table_name, orm_obj)
 
-    conn = sqlite3.connect(f"{db_name}.db")
+    conn = sqlite3.connect(database_path)
     cursor = conn.cursor()
     cursor.execute(
         "SELECT name FROM sqlite_master "
@@ -94,13 +105,14 @@ def test_analyze_rocpd(
     assert cursor.fetchone() == ("3.0.0",)
     conn.close()
 
-    os.remove(f"{db_name}.db")
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.misc
 def test_save_csv(
-    binary_handler_profile_rocprof_compute, binary_handler_analyze_rocprof_compute
+    binary_handler_profile_rocprof_compute,
+    binary_handler_analyze_rocprof_compute,
+    tmp_path,
 ):
     workload_dir = common.get_output_dir(param_id="profile")
     analysis_workload_dir = common.get_output_dir(param_id="analysis")
@@ -117,7 +129,7 @@ def test_save_csv(
     ])
     assert code == 0
 
-    csv_dir = Path(analysis_workload_dir)
+    csv_dir = tmp_path / "analysis" / analysis_workload_dir
     assert csv_dir.is_dir()
 
     expected_view_csvs = ["kernel.csv", "kernel_metric.csv", "workload_metric.csv"]
@@ -127,9 +139,15 @@ def test_save_csv(
         df = pd.read_csv(csv_path)
         assert len(df.index) >= 1, f"Per-view CSV is empty: {csv_path}"
 
-    assert not Path(f"{analysis_workload_dir}.db").exists()
+    for csv_name in [
+        "roofline_ceiling.csv",
+        "roofline_roof.csv",
+        "kernel_roofline.csv",
+        "kernel_roofline_metric.csv",
+    ]:
+        assert (csv_dir / csv_name).is_file()
+    assert not csv_dir.with_suffix(".db").exists()
 
-    common.clean_output_dir(config["cleanup"], analysis_workload_dir)
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 

@@ -99,13 +99,16 @@ reason from host-trap data; it does not record one.
 
 ```bash
 rocprof-compute analyze --path ./workloads/<name>/<gpu_model> \
-    --output-format csv --output-name pc_report
+    --output-format csv --output-name pc_report --output-directory ./analysis
 ```
 
-CSV output writes per-kernel annotated disassembly into a
-`per_kernel_pc_sampling/` directory, with sample counts and source lines beside
-each instruction. `--output-format db` stores the same content in the analysis
-database. Both disable terminal output.
+CSV output writes per-kernel annotated disassembly into
+`./analysis/pc_report/per_kernel_pc_sampling/`, with sample counts and source
+lines beside each instruction. `--output-format db` stores the same content in the analysis
+database at `./analysis/pc_report.db`. Both disable terminal output. All analysis
+artifacts go into `--output-directory`, which defaults to `./analysis/`, and
+profiling workloads stay unchanged. Use a fresh directory for each export;
+reusing a non-empty directory requires `--overwrite`, which deletes its contents.
 
 ## 6. When there are too few samples
 

@@ -20,6 +20,7 @@ def test_triton_trace_profile(
     binary_handler_profile_rocprof_compute,
     binary_handler_analyze_rocprof_compute,
     capsys,
+    tmp_path,
 ):
     """
     Profile and analyze flow for the Triton backend.
@@ -95,7 +96,7 @@ def test_triton_trace_profile(
     # The workload launches a Triton matmul kernel.
     assert "matmul" in list_output, "matmul kernel missing from operator list"
 
-    consolidated_csv = Path(workload_dir) / "ml_api_trace" / "consolidated.csv"
+    consolidated_csv = tmp_path / "analysis" / "ml_api_trace" / "consolidated.csv"
     assert consolidated_csv.exists(), "consolidated.csv not found in ml_api_trace"
     df = pd.read_csv(consolidated_csv)
     assert not df.empty, "consolidated.csv is empty"
@@ -112,6 +113,7 @@ def test_triton_trace_profile(
         "analyze",
         "--path",
         workload_dir,
+        "--overwrite",
         "--triton-operator",
         "*matmul*",
     ])
@@ -126,6 +128,7 @@ def test_triton_trace_profile(
         "analyze",
         "--path",
         workload_dir,
+        "--overwrite",
         "--triton-operator",
         "nonexistent_kernel_xyz",
     ])
@@ -142,6 +145,7 @@ def test_ml_api_trace_torch_compile_triton(
     binary_handler_profile_rocprof_compute,
     binary_handler_analyze_rocprof_compute,
     capsys,
+    tmp_path,
 ):
     """
     Validate the ML API trace flow for a torch.compile Triton workload.
@@ -196,7 +200,7 @@ def test_ml_api_trace_torch_compile_triton(
     assert returncode_list == 0, "Analyze with --list-triton-operators failed"
     capsys.readouterr()
 
-    consolidated_csv = Path(workload_dir) / "ml_api_trace" / "consolidated.csv"
+    consolidated_csv = tmp_path / "analysis" / "ml_api_trace" / "consolidated.csv"
     assert consolidated_csv.exists(), "consolidated.csv not found in ml_api_trace"
     df = pd.read_csv(consolidated_csv)
     assert not df.empty, "consolidated.csv is empty"
@@ -223,6 +227,7 @@ def test_ml_api_trace_torch_compile_triton(
         "analyze",
         "--path",
         workload_dir,
+        "--overwrite",
         "--triton-operator",
         "all",
     ])
@@ -234,6 +239,7 @@ def test_ml_api_trace_torch_compile_triton(
         "analyze",
         "--path",
         workload_dir,
+        "--overwrite",
         "--torch-operator",
         "all",
     ])

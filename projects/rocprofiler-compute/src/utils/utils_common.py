@@ -45,6 +45,24 @@ INVALID_BLOCK_HINT = (
 )
 
 
+def prepare_output_directory(output_dir: Path, overwrite: bool, kind: str) -> None:
+    """Prepare an artifact directory, clearing existing contents when requested."""
+    if output_dir.is_dir() and any(output_dir.iterdir()):
+        if not overwrite:
+            console_error(
+                f"Existing {kind} directory {output_dir} is not empty, "
+                "please use --overwrite"
+            )
+        console_warning(f"Clearing existing directory {output_dir} due to --overwrite")
+        for child in output_dir.iterdir():
+            if child.is_dir() and not child.is_symlink():
+                shutil.rmtree(child)
+            else:
+                child.unlink()
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+
 def is_gfx9(gpu_arch: Optional[str]) -> bool:
     """Return True if gpu_arch is a gfx9xx (CDNA) architecture."""
     return bool(gpu_arch and gpu_arch.startswith("gfx9"))

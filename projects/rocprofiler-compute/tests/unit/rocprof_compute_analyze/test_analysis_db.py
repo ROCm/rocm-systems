@@ -141,6 +141,7 @@ def make_pc_sampling_database_analyzer(
         SimpleNamespace(output_name=None, output_format="database"),
         {},
     )
+    analyzer._output_dir = Path(".")
     analyzer._runs = {
         workload_path: schema.Workload(
             sys_info=pd.DataFrame([
@@ -193,6 +194,7 @@ def make_counter_backed_database_analyzer(
         SimpleNamespace(output_name=None, output_format="database"),
         {},
     )
+    analyzer._output_dir = Path(".")
     analyzer._runs = {
         workload_path: schema.Workload(
             sys_info=pd.DataFrame([{"gpu_arch": "gfx942"}]),
@@ -221,6 +223,7 @@ def make_counter_backed_database_analyzer(
 
 def run_analysis_with_existing_database(analyzer):
     """Run analysis while preserving the test's existing database session."""
+    analyzer._output_dir = Path(".")
     with ExitStack() as patch_stack:
         patch_stack.enter_context(patch.object(orm.Database, "init"))
         patch_stack.enter_context(patch.object(orm.Database, "create_views"))
@@ -236,6 +239,7 @@ def run_analysis_with_existing_database(analyzer):
 
 def run_analysis_with_materialized_views(analyzer):
     """Run analysis while materializing views in the existing test database."""
+    analyzer._output_dir = Path(".")
     with ExitStack() as patch_stack:
         patch_stack.enter_context(patch.object(orm.Database, "init"))
         patch_stack.enter_context(patch.object(orm.Database, "write"))
@@ -517,7 +521,6 @@ def test_filter_dispatch_frame_kernel_ids_match_the_cli_top_stats(tmp_path):
     dispatch_frame = make_repeated_dispatch_frame()
     kernel_top_df, _ = create_df_kernel_top_stats(
         df_in=dispatch_frame,
-        raw_data_dir=str(tmp_path),
         filter_gpu_ids=None,
         filter_dispatch_ids=None,
         time_unit="ns",
@@ -1089,6 +1092,7 @@ def test_run_analysis_scopes_pc_sampling_uuids_by_process(db_session):
         SimpleNamespace(output_name=None, output_format="database"),
         {},
     )
+    analyzer._output_dir = Path(".")
     analyzer._runs = {workload_path: workload}
     analyzer._roofline_ceilings_per_workload = {}
     analyzer._profiling_config = {"filter_blocks": ["pc_sampling"]}
@@ -1716,7 +1720,8 @@ def make_source_export_analyzer(tmp_path, output_format):
 
     analyzer = make_pc_sampling_database_analyzer(tool_data_per_workload)
     result_path = tmp_path / f"{output_format}_analysis"
-    analyzer.get_args().output_name = str(result_path)
+    analyzer.get_args().output_name = result_path.name
+    analyzer._output_dir = result_path.parent
     analyzer.get_args().output_format = output_format
     return analyzer, result_path, expected_exported_files
 
@@ -2605,7 +2610,8 @@ def make_csv_run_analyzer(tmp_path, tool_data_per_workload, **filters):
     """Build a CSV-output analyzer over sampling-only workloads."""
     analyzer = make_pc_sampling_database_analyzer(tool_data_per_workload, **filters)
     result_path = tmp_path / "csv_analysis"
-    analyzer.get_args().output_name = str(result_path)
+    analyzer.get_args().output_name = result_path.name
+    analyzer._output_dir = result_path.parent
     analyzer.get_args().output_format = "csv"
     return analyzer, result_path
 

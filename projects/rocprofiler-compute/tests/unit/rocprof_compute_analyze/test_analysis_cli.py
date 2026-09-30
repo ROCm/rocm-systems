@@ -10,6 +10,7 @@ import pandas as pd
 import pytest
 
 from rocprof_compute_analyze.analysis_cli import cli_analysis, parse_operator_patterns
+from utils import parser
 
 # -- parse_operator_patterns (torch_operator) -------------------------------
 
@@ -169,3 +170,51 @@ def test_pre_processing_membw_auto_run(membw_collected, expect_called, monkeypat
     inst.pre_processing()
 
     assert len(membw_calls) == (1 if expect_called else 0)
+
+
+def test_operator_filter_regenerates_trace_in_analysis_directory(tmp_path, monkeypatch):
+    """Operator selection uses raw traces even when a workload has cached output."""
+    workload_path = tmp_path / "workload"
+    cache_dir = workload_path / "ml_api_trace"
+    cache_dir.mkdir(parents=True)
+    cached_trace = cache_dir / "consolidated.csv"
+    cached_trace.write_text("stale workload cache", encoding="utf-8")
+    analyzer = cli_analysis.__new__(cli_analysis)
+    analyzer._output_dir = tmp_path / "analysis"
+    trace = pd.DataFrame({
+        "Operator_Name": ["torch.relu"],
+        "Kernel_Name": ["relu_kernel"],
+        "Backend": ["torch"],
+    })
+    calls = []
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_cli.process_ml_api_trace_output",
+        lambda source, output: (
+            calls.append((source, output)) or trace,
+            output / "ml_api_trace",
+        ),
+    )
+    writes = []
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_cli.write_ml_api_trace_consolidated_csv",
+        lambda frame, path: writes.append(path),
+    )
+    workload = SimpleNamespace(
+        dfs={
+            parser.PMC_KERNEL_TOP_TABLE_ID: pd.DataFrame({
+                "Kernel_Name": ["other_kernel", "relu_kernel"],
+            })
+        },
+        filter_kernel_ids=[],
+        matched_ml_api_trace_dfs={},
+    )
+    analyzer.apply_operator_filter(
+        argparse.Namespace(torch_operator=["torch.relu"]),
+        workload,
+        str(workload_path),
+        "torch",
+    )
+    assert calls == [(str(workload_path), analyzer._output_dir)]
+    assert writes == [analyzer._output_dir / "ml_api_trace"]
+    assert workload.filter_kernel_ids == [1]
+    assert cached_trace.read_text(encoding="utf-8") == "stale workload cache"

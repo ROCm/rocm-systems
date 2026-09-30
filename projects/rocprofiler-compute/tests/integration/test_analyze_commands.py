@@ -44,11 +44,13 @@ def setup_pc_sampling_source_workload(tmp_path):
 
 
 @pytest.mark.misc
-def test_valid_path(binary_handler_analyze_rocprof_compute):
+def test_valid_path(binary_handler_analyze_rocprof_compute, tmp_path):
     for dir in indirs:
         workload_dir = integration_common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
+            "--output-directory",
+            str(tmp_path / "analysis" / Path(dir).name),
             "--path",
             workload_dir,
         ])
@@ -58,11 +60,13 @@ def test_valid_path(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.misc
-def test_list_kernels(binary_handler_analyze_rocprof_compute):
+def test_list_kernels(binary_handler_analyze_rocprof_compute, tmp_path):
     for dir in indirs:
         workload_dir = integration_common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
+            "--output-directory",
+            str(tmp_path / "analysis" / Path(dir).name),
             "--path",
             workload_dir,
             "--list-stats",
@@ -199,11 +203,13 @@ def test_list_available_metrics_with_block(
 
 
 @pytest.mark.filter_block
-def test_filter_block_1(binary_handler_analyze_rocprof_compute):
+def test_filter_block_1(binary_handler_analyze_rocprof_compute, tmp_path):
     for dir in indirs:
         workload_dir = integration_common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
+            "--output-directory",
+            str(tmp_path / "analysis" / Path(dir).name),
             "--path",
             workload_dir,
             "--block",
@@ -215,11 +221,13 @@ def test_filter_block_1(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.filter_block
-def test_filter_block_2(binary_handler_analyze_rocprof_compute):
+def test_filter_block_2(binary_handler_analyze_rocprof_compute, tmp_path):
     for dir in indirs:
         workload_dir = integration_common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
+            "--output-directory",
+            str(tmp_path / "analysis" / Path(dir).name),
             "--path",
             workload_dir,
             "--block",
@@ -231,11 +239,13 @@ def test_filter_block_2(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.filter_block
-def test_filter_block_3(binary_handler_analyze_rocprof_compute):
+def test_filter_block_3(binary_handler_analyze_rocprof_compute, tmp_path):
     for dir in indirs:
         workload_dir = integration_common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
+            "--output-directory",
+            str(tmp_path / "analysis" / Path(dir).name),
             "--path",
             workload_dir,
             "--block",
@@ -247,11 +257,13 @@ def test_filter_block_3(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.filter_block
-def test_filter_block_4(binary_handler_analyze_rocprof_compute):
+def test_filter_block_4(binary_handler_analyze_rocprof_compute, tmp_path):
     for dir in indirs:
         workload_dir = integration_common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
+            "--output-directory",
+            str(tmp_path / "analysis" / Path(dir).name),
             "--path",
             workload_dir,
             "--block",
@@ -263,11 +275,13 @@ def test_filter_block_4(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.filter_block
-def test_filter_block_5(binary_handler_analyze_rocprof_compute):
+def test_filter_block_5(binary_handler_analyze_rocprof_compute, tmp_path):
     for dir in indirs:
         workload_dir = integration_common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
+            "--output-directory",
+            str(tmp_path / "analysis" / Path(dir).name),
             "--path",
             workload_dir,
             "--block",
@@ -279,11 +293,13 @@ def test_filter_block_5(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.filter_block
-def test_filter_block_6(binary_handler_analyze_rocprof_compute, capsys):
+def test_filter_block_6(binary_handler_analyze_rocprof_compute, capsys, tmp_path):
     for dir in indirs:
         workload_dir = integration_common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
+            "--output-directory",
+            str(tmp_path / "analysis" / Path(dir).name),
             "--path",
             workload_dir,
             "--block",
@@ -298,11 +314,13 @@ def test_filter_block_6(binary_handler_analyze_rocprof_compute, capsys):
 
 
 @pytest.mark.serial
-def test_filter_kernel_1(binary_handler_analyze_rocprof_compute):
+def test_filter_kernel_1(binary_handler_analyze_rocprof_compute, tmp_path):
     for dir in indirs:
         workload_dir = integration_common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
+            "--output-directory",
+            str(tmp_path / "analysis" / Path(dir).name),
             "--path",
             workload_dir,
             "--kernel",
@@ -314,11 +332,13 @@ def test_filter_kernel_1(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.serial
-def test_filter_kernel_2(binary_handler_analyze_rocprof_compute):
+def test_filter_kernel_2(binary_handler_analyze_rocprof_compute, tmp_path):
     for dir in indirs:
         workload_dir = integration_common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
+            "--output-directory",
+            str(tmp_path / "analysis" / Path(dir).name),
             "--path",
             workload_dir,
             "--kernel",
@@ -330,11 +350,13 @@ def test_filter_kernel_2(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.serial
-def test_filter_kernel_3(binary_handler_analyze_rocprof_compute):
+def test_filter_kernel_3(binary_handler_analyze_rocprof_compute, tmp_path):
     for dir in indirs:
         workload_dir = integration_common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
+            "--output-directory",
+            str(tmp_path / "analysis" / Path(dir).name),
             "--path",
             workload_dir,
             "--kernel",
@@ -347,11 +369,13 @@ def test_filter_kernel_3(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.serial
-def test_dispatch_1(binary_handler_analyze_rocprof_compute):
+def test_dispatch_1(binary_handler_analyze_rocprof_compute, tmp_path):
     for dir in indirs:
         workload_dir = integration_common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
+            "--output-directory",
+            str(tmp_path / "analysis" / Path(dir).name),
             "--path",
             workload_dir,
             "--dispatch",
@@ -363,11 +387,13 @@ def test_dispatch_1(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.serial
-def test_dispatch_2(binary_handler_analyze_rocprof_compute):
+def test_dispatch_2(binary_handler_analyze_rocprof_compute, tmp_path):
     for dir in indirs:
         workload_dir = integration_common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
+            "--output-directory",
+            str(tmp_path / "analysis" / Path(dir).name),
             "--path",
             workload_dir,
             "--dispatch",
@@ -379,11 +405,13 @@ def test_dispatch_2(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.serial
-def test_dispatch_3(binary_handler_analyze_rocprof_compute):
+def test_dispatch_3(binary_handler_analyze_rocprof_compute, tmp_path):
     for dir in indirs:
         workload_dir = integration_common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
+            "--output-directory",
+            str(tmp_path / "analysis" / Path(dir).name),
             "--path",
             workload_dir,
             "--dispatch",
@@ -395,11 +423,13 @@ def test_dispatch_3(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.serial
-def test_dispatch_4(binary_handler_analyze_rocprof_compute):
+def test_dispatch_4(binary_handler_analyze_rocprof_compute, tmp_path):
     for dir in indirs:
         workload_dir = integration_common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
+            "--output-directory",
+            str(tmp_path / "analysis" / Path(dir).name),
             "--path",
             workload_dir,
             "--dispatch",
@@ -412,11 +442,13 @@ def test_dispatch_4(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.serial
-def test_dispatch_5(binary_handler_analyze_rocprof_compute):
+def test_dispatch_5(binary_handler_analyze_rocprof_compute, tmp_path):
     for dir in indirs:
         workload_dir = integration_common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
+            "--output-directory",
+            str(tmp_path / "analysis" / Path(dir).name),
             "--path",
             workload_dir,
             "--dispatch",
@@ -429,12 +461,14 @@ def test_dispatch_5(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.misc
-def test_gpu_ids(binary_handler_analyze_rocprof_compute):
+def test_gpu_ids(binary_handler_analyze_rocprof_compute, tmp_path):
     for dir in indirs:
         gpu_id = "0"
         workload_dir = integration_common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
+            "--output-directory",
+            str(tmp_path / "analysis" / Path(dir).name / f"gpu_{gpu_id}"),
             "--path",
             workload_dir,
             "--gpu-id",
@@ -446,11 +480,13 @@ def test_gpu_ids(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.normal_unit
-def test_normal_unit_per_wave(binary_handler_analyze_rocprof_compute):
+def test_normal_unit_per_wave(binary_handler_analyze_rocprof_compute, tmp_path):
     for dir in indirs:
         workload_dir = integration_common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
+            "--output-directory",
+            str(tmp_path / "analysis" / Path(dir).name),
             "--path",
             workload_dir,
             "--normal-unit",
@@ -462,11 +498,13 @@ def test_normal_unit_per_wave(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.normal_unit
-def test_normal_unit_per_cycle(binary_handler_analyze_rocprof_compute):
+def test_normal_unit_per_cycle(binary_handler_analyze_rocprof_compute, tmp_path):
     for dir in indirs:
         workload_dir = integration_common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
+            "--output-directory",
+            str(tmp_path / "analysis" / Path(dir).name),
             "--path",
             workload_dir,
             "--normal-unit",
@@ -478,11 +516,13 @@ def test_normal_unit_per_cycle(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.normal_unit
-def test_normal_unit_per_second(binary_handler_analyze_rocprof_compute):
+def test_normal_unit_per_second(binary_handler_analyze_rocprof_compute, tmp_path):
     for dir in indirs:
         workload_dir = integration_common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
+            "--output-directory",
+            str(tmp_path / "analysis" / Path(dir).name),
             "--path",
             workload_dir,
             "--normal-unit",
@@ -494,11 +534,13 @@ def test_normal_unit_per_second(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.normal_unit
-def test_normal_unit_per_kernel(binary_handler_analyze_rocprof_compute):
+def test_normal_unit_per_kernel(binary_handler_analyze_rocprof_compute, tmp_path):
     for dir in indirs:
         workload_dir = integration_common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
+            "--output-directory",
+            str(tmp_path / "analysis" / Path(dir).name),
             "--path",
             workload_dir,
             "--normal-unit",
@@ -510,11 +552,13 @@ def test_normal_unit_per_kernel(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.max_stat
-def test_max_stat_num_1(binary_handler_analyze_rocprof_compute):
+def test_max_stat_num_1(binary_handler_analyze_rocprof_compute, tmp_path):
     for dir in indirs:
         workload_dir = integration_common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
+            "--output-directory",
+            str(tmp_path / "analysis" / Path(dir).name),
             "--path",
             workload_dir,
             "--max-stat-num",
@@ -526,11 +570,13 @@ def test_max_stat_num_1(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.max_stat
-def test_max_stat_num_2(binary_handler_analyze_rocprof_compute):
+def test_max_stat_num_2(binary_handler_analyze_rocprof_compute, tmp_path):
     for dir in indirs:
         workload_dir = integration_common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
+            "--output-directory",
+            str(tmp_path / "analysis" / Path(dir).name),
             "--path",
             workload_dir,
             "--max-stat-num",
@@ -542,11 +588,13 @@ def test_max_stat_num_2(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.max_stat
-def test_max_stat_num_3(binary_handler_analyze_rocprof_compute):
+def test_max_stat_num_3(binary_handler_analyze_rocprof_compute, tmp_path):
     for dir in indirs:
         workload_dir = integration_common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
+            "--output-directory",
+            str(tmp_path / "analysis" / Path(dir).name),
             "--path",
             workload_dir,
             "--max-stat-num",
@@ -558,11 +606,13 @@ def test_max_stat_num_3(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.max_stat
-def test_max_stat_num_4(binary_handler_analyze_rocprof_compute):
+def test_max_stat_num_4(binary_handler_analyze_rocprof_compute, tmp_path):
     for dir in indirs:
         workload_dir = integration_common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
+            "--output-directory",
+            str(tmp_path / "analysis" / Path(dir).name),
             "--path",
             workload_dir,
             "--max-stat-num",
@@ -574,11 +624,13 @@ def test_max_stat_num_4(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.time_unit
-def test_time_unit_s(binary_handler_analyze_rocprof_compute):
+def test_time_unit_s(binary_handler_analyze_rocprof_compute, tmp_path):
     for dir in indirs:
         workload_dir = integration_common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
+            "--output-directory",
+            str(tmp_path / "analysis" / Path(dir).name),
             "--path",
             workload_dir,
             "--time-unit",
@@ -590,11 +642,13 @@ def test_time_unit_s(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.time_unit
-def test_time_unit_ms(binary_handler_analyze_rocprof_compute):
+def test_time_unit_ms(binary_handler_analyze_rocprof_compute, tmp_path):
     for dir in indirs:
         workload_dir = integration_common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
+            "--output-directory",
+            str(tmp_path / "analysis" / Path(dir).name),
             "--path",
             workload_dir,
             "--time-unit",
@@ -606,11 +660,13 @@ def test_time_unit_ms(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.time_unit
-def test_time_unit_us(binary_handler_analyze_rocprof_compute):
+def test_time_unit_us(binary_handler_analyze_rocprof_compute, tmp_path):
     for dir in indirs:
         workload_dir = integration_common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
+            "--output-directory",
+            str(tmp_path / "analysis" / Path(dir).name),
             "--path",
             workload_dir,
             "--time-unit",
@@ -622,11 +678,13 @@ def test_time_unit_us(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.time_unit
-def test_time_unit_ns(binary_handler_analyze_rocprof_compute):
+def test_time_unit_ns(binary_handler_analyze_rocprof_compute, tmp_path):
     for dir in indirs:
         workload_dir = integration_common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
+            "--output-directory",
+            str(tmp_path / "analysis" / Path(dir).name),
             "--path",
             workload_dir,
             "--time-unit",
@@ -638,11 +696,13 @@ def test_time_unit_ns(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.decimal
-def test_decimal_1(binary_handler_analyze_rocprof_compute):
+def test_decimal_1(binary_handler_analyze_rocprof_compute, tmp_path):
     for dir in indirs:
         workload_dir = integration_common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
+            "--output-directory",
+            str(tmp_path / "analysis" / Path(dir).name),
             "--path",
             workload_dir,
             "--decimal",
@@ -654,11 +714,13 @@ def test_decimal_1(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.decimal
-def test_decimal_2(binary_handler_analyze_rocprof_compute):
+def test_decimal_2(binary_handler_analyze_rocprof_compute, tmp_path):
     for dir in indirs:
         workload_dir = integration_common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
+            "--output-directory",
+            str(tmp_path / "analysis" / Path(dir).name),
             "--path",
             workload_dir,
             "--decimal",
@@ -670,11 +732,13 @@ def test_decimal_2(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.decimal
-def test_decimal_3(binary_handler_analyze_rocprof_compute):
+def test_decimal_3(binary_handler_analyze_rocprof_compute, tmp_path):
     for dir in indirs:
         workload_dir = integration_common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
+            "--output-directory",
+            str(tmp_path / "analysis" / Path(dir).name),
             "--path",
             workload_dir,
             "--decimal",
@@ -686,11 +750,13 @@ def test_decimal_3(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.col
-def test_col_1(binary_handler_analyze_rocprof_compute):
+def test_col_1(binary_handler_analyze_rocprof_compute, tmp_path):
     for dir in indirs:
         workload_dir = integration_common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
+            "--output-directory",
+            str(tmp_path / "analysis" / Path(dir).name),
             "--path",
             workload_dir,
             "--cols",
@@ -702,11 +768,13 @@ def test_col_1(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.col
-def test_col_2(binary_handler_analyze_rocprof_compute):
+def test_col_2(binary_handler_analyze_rocprof_compute, tmp_path):
     for dir in indirs:
         workload_dir = integration_common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
+            "--output-directory",
+            str(tmp_path / "analysis" / Path(dir).name),
             "--path",
             workload_dir,
             "--cols",
@@ -720,11 +788,13 @@ def test_col_2(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.col
-def test_col_3(binary_handler_analyze_rocprof_compute):
+def test_col_3(binary_handler_analyze_rocprof_compute, tmp_path):
     for dir in indirs:
         workload_dir = integration_common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
+            "--output-directory",
+            str(tmp_path / "analysis" / Path(dir).name),
             "--path",
             workload_dir,
             "--cols",
@@ -737,11 +807,13 @@ def test_col_3(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.misc
-def test_g(binary_handler_analyze_rocprof_compute):
+def test_g(binary_handler_analyze_rocprof_compute, tmp_path):
     for dir in indirs:
         workload_dir = integration_common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
+            "--output-directory",
+            str(tmp_path / "analysis" / Path(dir).name),
             "--path",
             workload_dir,
             "-g",
@@ -787,11 +859,13 @@ def test_baseline(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.misc
-def test_dependency_MI100(binary_handler_analyze_rocprof_compute):
+def test_dependency_MI100(binary_handler_analyze_rocprof_compute, tmp_path):
     for dir in indirs:
         workload_dir = integration_common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
+            "--output-directory",
+            str(tmp_path / "analysis" / Path(dir).name),
             "--path",
             workload_dir,
             "--dependency",
@@ -809,7 +883,9 @@ def test_missing_file_handling(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.misc
-def test_filter_combinations_coverage(binary_handler_analyze_rocprof_compute, capsys):
+def test_filter_combinations_coverage(
+    binary_handler_analyze_rocprof_compute, capsys, tmp_path
+):
     """Test basic filters that should work"""
     for dir in ["tests/workloads/vcopy/MI100", "tests/workloads/vcopy/MI200"]:
         if os.path.exists(dir):
@@ -817,6 +893,8 @@ def test_filter_combinations_coverage(binary_handler_analyze_rocprof_compute, ca
 
             code = binary_handler_analyze_rocprof_compute([
                 "analyze",
+                "--output-directory",
+                str(tmp_path / "analysis" / Path(dir).name),
                 "--path",
                 workload_dir,
             ])
@@ -824,6 +902,8 @@ def test_filter_combinations_coverage(binary_handler_analyze_rocprof_compute, ca
 
             code = binary_handler_analyze_rocprof_compute([
                 "analyze",
+                "--output-directory",
+                str(tmp_path / "analysis" / Path(dir).name),
                 "--path",
                 workload_dir,
                 "--block",
@@ -839,7 +919,7 @@ def test_filter_combinations_coverage(binary_handler_analyze_rocprof_compute, ca
 
 
 @pytest.mark.misc
-def test_missing_files_scenarios(binary_handler_analyze_rocprof_compute):
+def test_missing_files_scenarios(binary_handler_analyze_rocprof_compute, tmp_path):
     """Test scenarios with missing files to cover error paths"""
     for dir in ["tests/workloads/vcopy/MI100", "tests/workloads/vcopy/MI200"]:
         if os.path.exists(dir):
@@ -855,6 +935,8 @@ def test_missing_files_scenarios(binary_handler_analyze_rocprof_compute):
 
                 binary_handler_analyze_rocprof_compute([
                     "analyze",
+                    "--output-directory",
+                    str(tmp_path / "analysis" / Path(dir).name),
                     "--path",
                     workload_dir,
                 ])
@@ -879,6 +961,7 @@ def test_iteration_multiplexing(binary_handler_analyze_rocprof_compute):
     # Test without dispatch filtering
     code = binary_handler_analyze_rocprof_compute([
         "analyze",
+        "--overwrite",
         "--path",
         workload_dir,
     ])
@@ -961,7 +1044,7 @@ def test_analyze_per_kernel_export_output_format(
 ):
     """Export each kernel's ISA and its source for CSV output only."""
     workload_path = setup_pc_sampling_source_workload(tmp_path).resolve()
-    output_path = (tmp_path / output_name).resolve()
+    output_path = (tmp_path / "analysis" / output_name).resolve()
     monkeypatch.chdir(tmp_path)
 
     code = binary_handler_analyze_rocprof_compute([

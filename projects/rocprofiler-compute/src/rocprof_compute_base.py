@@ -44,6 +44,7 @@ from utils.utils_common import (
     get_version_display,
     load_panel_configs,
     parse_sets_yaml,
+    prepare_output_directory,
     reconfigure_stdio_utf8,
     replace_env,
     replace_rank,
@@ -493,22 +494,7 @@ class RocProfCompute:
         """Error if the output directory is non-empty unless overwrite is set,
         in which case its contents are removed before profiling.
         """
-        if output_dir.is_dir() and any(output_dir.iterdir()):
-            if not overwrite:
-                console_error(
-                    f"Existing workload directory {output_dir} is not empty, "
-                    "please use --overwrite"
-                )
-            console_warning(
-                f"Clearing existing directory {output_dir} due to --overwrite"
-            )
-            for child in output_dir.iterdir():
-                if child.is_dir() and not child.is_symlink():
-                    shutil.rmtree(child)
-                else:
-                    child.unlink()
-
-        output_dir.mkdir(parents=True, exist_ok=True)
+        prepare_output_directory(output_dir, overwrite, kind="workload")
 
     @demarcate
     def run_profiler(self) -> None:

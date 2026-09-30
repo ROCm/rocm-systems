@@ -4,7 +4,6 @@
 """Integration tests for the profile --sort option."""
 
 import inspect
-from pathlib import Path
 
 import common
 
@@ -21,6 +20,7 @@ from tests.integration.common import (
 def test_roof_sort_dispatches(
     binary_handler_profile_rocprof_compute,
     binary_handler_analyze_rocprof_compute,
+    tmp_path,
 ):
     """Profile creates CSV; analyze with --sort dispatches generates output."""
     skip_unsupported_roofline_soc()
@@ -44,7 +44,7 @@ def test_roof_sort_dispatches(
     ])
     assert code == 0
 
-    html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
+    html_files = list((tmp_path / "analysis").glob("empirRoof_*.html"))
     assert len(html_files) > 0, "Analyze should generate roofline HTML files"
 
     validate(inspect.stack()[0][3], workload_dir, file_dict)
@@ -54,6 +54,7 @@ def test_roof_sort_dispatches(
 def test_roof_sort_kernels(
     binary_handler_profile_rocprof_compute,
     binary_handler_analyze_rocprof_compute,
+    tmp_path,
 ):
     """Profile creates CSV; analyze with --sort kernels generates output."""
     skip_unsupported_roofline_soc()
@@ -77,7 +78,7 @@ def test_roof_sort_kernels(
     ])
     assert code == 0
 
-    html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
+    html_files = list((tmp_path / "analysis").glob("empirRoof_*.html"))
     assert len(html_files) > 0, "Analyze should generate roofline HTML files"
 
     validate(inspect.stack()[0][3], workload_dir, file_dict)

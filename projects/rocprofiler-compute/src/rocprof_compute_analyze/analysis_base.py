@@ -14,6 +14,7 @@ import pandas as pd
 
 import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base
+from roofline.run_benchmark import BENCHMARKING_SUPPORTED
 from utils import file_io, parser, schema
 from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 from utils.logger import (
@@ -35,6 +36,7 @@ from utils.utils_common import (
     get_uuid,
     is_only_pc_sampling,
     load_panel_configs,
+    prepare_output_directory,
 )
 
 # the build-in config to list kernel names purpose only
@@ -71,6 +73,7 @@ class OmniAnalyze_Base:
         self._arch_configs: dict[str, schema.ArchConfig] = {}
         self.__supported_archs = supported_archs
         self._output: Optional[TextIO] = None
+        self._output_dir: Optional[Path] = None
         self.__socs: Optional[dict[str, OmniSoC_Base]] = None
 
     def get_args(self) -> argparse.Namespace:
@@ -111,7 +114,6 @@ class OmniAnalyze_Base:
         )
         kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
             df_in=workload.raw_pmc,
-            raw_data_dir=str(dir_path),
             filter_gpu_ids=workload.filter_gpu_ids,
             filter_dispatch_ids=workload.filter_dispatch_ids,
             time_unit=args.time_unit,
@@ -334,7 +336,7 @@ class OmniAnalyze_Base:
             ]):
                 validate_workload(dir_info[0])
 
-        # Ensure analysis output does not overwrite existing files
+        # Validate the artifact name independently of its output directory.
         if args.output_name:
             if not re.match(r"^[A-Za-z0-9_-]+$", args.output_name):
                 console_error(
@@ -342,16 +344,6 @@ class OmniAnalyze_Base:
                     "Analysis output file/folder name must "
                     "contain only alphanumeric characters "
                     "or underscores (_), hyphens (-).",
-                )
-
-            path_to_check = args.output_name
-            if args.output_format in ("txt", "db"):
-                path_to_check += f".{args.output_format}"
-
-            if Path(path_to_check).exists():
-                console_error(
-                    f"Analysis output file/folder {path_to_check} already exists. "
-                    "Please choose a different name."
                 )
 
         if profiling_config.get("iteration_multiplexing") is not None:
@@ -363,6 +355,48 @@ class OmniAnalyze_Base:
                 ),
             )
 
+    def writes_analysis_artifacts(self) -> bool:
+        """Return whether this CLI or database run will save an artifact."""
+        args = self.get_args()
+        if getattr(args, "gui", False) or getattr(args, "tui", False):
+            return False
+        if args.output_format in ("txt", "csv", "db"):
+            return True
+        if any(
+            getattr(args, f"list_{backend}_operators", False)
+            or getattr(args, f"{backend}_operator", None) is not None
+            for backend in KNOWN_ML_API_BACKENDS
+        ):
+            return True
+        if getattr(args, "list_stats", False) or len(args.path) != 1:
+            return False
+        return any(
+            workload.sys_info.iloc[0]["gpu_arch"] in BENCHMARKING_SUPPORTED
+            and not workload.roofline_peaks.empty
+            for workload in self._runs.values()
+        )
+
+    def prepare_output_directory(self) -> None:
+        """Prepare the analysis directory outside all profiling workloads."""
+        if not self.writes_analysis_artifacts():
+            return
+        args = self.get_args()
+        output_dir = Path(args.output_directory).resolve()
+        for path_info in args.path:
+            workload_dir = Path(path_info[0]).resolve()
+            if (
+                output_dir == workload_dir
+                or output_dir in workload_dir.parents
+                or workload_dir in output_dir.parents
+            ):
+                console_error(
+                    "analysis",
+                    f"Analysis output directory {output_dir} must be outside "
+                    f"workload directory {workload_dir} and its ancestors.",
+                )
+        prepare_output_directory(output_dir, args.overwrite, kind="analysis")
+        self._output_dir = output_dir
+
     # ----------------------------------------------------
     # Required methods to be implemented by child classes
     # ----------------------------------------------------
@@ -373,17 +407,17 @@ class OmniAnalyze_Base:
         console_log("analysis", "deriving rocprofiler-compute metrics...")
         args = self.get_args()
 
-        # initalize output file
+        # Initialize workloads before deciding whether artifacts will be written.
+        self._runs = self.initalize_runs()
+        self.prepare_output_directory()
+
         if args.output_format == "txt":
-            output_filename = args.output_name or f"rocprof_compute_{get_uuid()}"
-            output_filename += ".txt"
-            self._output = open(output_filename, "w+", encoding="utf-8")
-            console_warning("analysis", f"Created file: {output_filename}")
+            output_name = args.output_name or f"rocprof_compute_{get_uuid()}"
+            output_path = self._output_dir / f"{output_name}.txt"
+            self._output = output_path.open("w+", encoding="utf-8")
+            console_warning("analysis", f"Created file: {output_path}")
         elif args.output_format == "stdout":
             self._output = sys.stdout
-
-        # initalize runs
-        self._runs = self.initalize_runs()
 
         # set filters
         filter_configs = [

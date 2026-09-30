@@ -135,6 +135,19 @@ def test_cli_generate_plot_returns_nothing_without_usable_input(dtype: str) -> N
     assert make_roofline(["FP32"]).cli_generate_plot(dtype, ai_data={}) is None
 
 
+@pytest.mark.parametrize("prefix", ["", "workload_run_"])
+def test_save_html_uses_output_directory(benchmarked_roofline, tmp_path, prefix):
+    """HTML placement supports both single and multiple workload filenames."""
+    roofline = benchmarked_roofline(["FP64"])
+    figures = roofline.construct_plotly_figures(ai_data={})
+    output_dir = tmp_path / "analysis"
+    output_dir.mkdir()
+    path = roofline.save_html_files(*figures, output_dir, prefix)
+    assert path == output_dir / f"empirRoof_{prefix}gpu-0.html"
+    assert embedded_model(path.read_text(encoding="utf-8"))["frame"]
+    assert not (tmp_path / "empirRoof_gpu-0.html").exists()
+
+
 @pytest.mark.parametrize(
     "dtype, drawn, not_drawn",
     [

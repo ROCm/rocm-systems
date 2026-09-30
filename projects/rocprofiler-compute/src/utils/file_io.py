@@ -102,55 +102,8 @@ def validate_kernel_filter_ids(
             )
 
 
-@demarcate
-def create_df_kernel_top_stats(
-    df_in: pd.DataFrame,
-    raw_data_dir: str,
-    filter_gpu_ids: Optional[list[str]],
-    filter_dispatch_ids: Optional[list[str]],
-    time_unit: str,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    Create top stats info by grouping kernels with user's filters.
-
-    Returns:
-        A tuple of (kernel_top_df, dispatch_info_df).
-    """
-
-    df = df_in.copy()
-
-    # The logic below for filters are the same as in parser.apply_filters(),
-    # which can be merged together if need it.
-
-    if filter_gpu_ids:
-        df = df.loc[
-            df["GPU_ID"].astype(str).isin(normalize_filter_to_str_list(filter_gpu_ids))
-        ]
-
-    if filter_dispatch_ids:
-        # NB: support ignoring the 1st n dispatched execution by '> n'
-        #     The better way may be parsing python slice string
-        first_filter = filter_dispatch_ids[0]
-
-        if isinstance(first_filter, str) and first_filter.startswith(">"):
-            match = re.match(r">\s*(\d+)", str(first_filter))
-            if match:
-                threshold = int(match.group(1))
-                df = df[df["Dispatch_ID"] > threshold]
-        else:
-            filter_strings = [str(f) for f in filter_dispatch_ids]
-            df = df.loc[df["Dispatch_ID"].astype(str).isin(filter_strings)]
-
-    # First, create a dispatches file used to populate global vars
-    dispatch_columns = ["Dispatch_ID", "Kernel_Name", "GPU_ID"]
-    if "PID" in df.columns:
-        dispatch_columns.insert(1, "PID")
-
-    dispatch_info = df[dispatch_columns]
-    dispatch_output_path = Path(raw_data_dir) / "pmc_dispatch_info.csv"
-    dispatch_info.to_csv(dispatch_output_path, index=False)
-
-    # Calculate execution times
+def kernel_duration_stats(df: pd.DataFrame) -> pd.DataFrame:
+    """Return ranked kernel counts, nanosecond durations, and runtime shares."""
     execution_times = df["End_Timestamp"] - df["Start_Timestamp"]
     time_stats = pd.DataFrame({
         "Kernel_Name": df["Kernel_Name"],
@@ -164,34 +117,58 @@ def create_df_kernel_top_stats(
         "median",
     ])
 
-    # Rename columns with time unit
-    time_unit_suffix = f"({time_unit})"
     column_mapping = {
         "count": "Count",
-        "sum": f"Sum{time_unit_suffix}",
-        "mean": f"Mean{time_unit_suffix}",
-        "median": f"Median{time_unit_suffix}",
+        "sum": "Sum(ns)",
+        "mean": "Mean(ns)",
+        "median": "Median(ns)",
     }
     grouped = grouped.rename(columns=column_mapping)
 
-    # Convert time units
-    time_divisor = config.TIME_UNITS[time_unit]
-    for col in [
-        f"Sum{time_unit_suffix}",
-        f"Mean{time_unit_suffix}",
-        f"Median{time_unit_suffix}",
-    ]:
-        grouped[col] = grouped[col] / time_divisor
-
+    for column in ["Sum(ns)", "Mean(ns)", "Median(ns)"]:
+        grouped[column] = grouped[column] / config.TIME_UNITS["ns"]
     grouped = grouped.reset_index()
-
-    # Calculate percent
-    sum_column = f"Sum{time_unit_suffix}"
-    grouped["Percent"] = grouped[sum_column] / grouped[sum_column].sum() * 100
-
+    grouped["Percent"] = grouped["Sum(ns)"] / grouped["Sum(ns)"].sum() * 100
     kernel_order = rank_kernels_by_total_duration(df)
-    grouped = grouped.set_index("Kernel_Name").loc[kernel_order].reset_index()
-    grouped.to_csv(str(Path(raw_data_dir) / "pmc_kernel_top.csv"), index=False)
+    return grouped.set_index("Kernel_Name").loc[kernel_order].reset_index()
+
+
+@demarcate
+def create_df_kernel_top_stats(
+    df_in: pd.DataFrame,
+    filter_gpu_ids: Optional[list[str]],
+    filter_dispatch_ids: Optional[list[str]],
+    time_unit: str,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Return kernel statistics and dispatch information with the user's filters."""
+    df = df_in.copy()
+    if filter_gpu_ids:
+        df = df.loc[
+            df["GPU_ID"].astype(str).isin(normalize_filter_to_str_list(filter_gpu_ids))
+        ]
+    if filter_dispatch_ids:
+        first_filter = filter_dispatch_ids[0]
+        if isinstance(first_filter, str) and first_filter.startswith(">"):
+            match = re.match(r">\s*(\d+)", str(first_filter))
+            if match:
+                df = df[df["Dispatch_ID"] > int(match.group(1))]
+        else:
+            filter_strings = [str(f) for f in filter_dispatch_ids]
+            df = df.loc[df["Dispatch_ID"].astype(str).isin(filter_strings)]
+
+    dispatch_columns = ["Dispatch_ID", "Kernel_Name", "GPU_ID"]
+    if "PID" in df.columns:
+        dispatch_columns.insert(1, "PID")
+    dispatch_info = df[dispatch_columns]
+    grouped = kernel_duration_stats(df)
+    for statistic in ["Sum", "Mean", "Median"]:
+        grouped[f"{statistic}(ns)"] /= config.TIME_UNITS[time_unit]
+    grouped = grouped.rename(
+        columns={
+            f"{statistic}(ns)": f"{statistic}({time_unit})"
+            for statistic in ["Sum", "Mean", "Median"]
+        }
+    )
 
     return grouped.reset_index(drop=True), dispatch_info.reset_index(drop=True)
 

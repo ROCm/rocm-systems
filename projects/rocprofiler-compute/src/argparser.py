@@ -705,7 +705,7 @@ Examples:
         help=(
             "\t\tList PyTorch operators as a unified call tree grouped by "
             "source location with kernel launch stats. "
-            "Recreates ml_api_trace output directory."
+            "Writes ml_api_trace/ inside --output-directory."
         ),
     )
     analyze_group.add_argument(
@@ -732,7 +732,8 @@ Examples:
             "\t\t\tMultiple patterns (space or comma-separated):\n"
             "\t\t\t  --torch-operator *relu,*conv*,*linear\n"
             "\t\t\t  --torch-operator */*conv2d */*relu\n"
-            "\t\t\tCombine with -k to intersect with kernel IDs."
+            "\t\t\tCombine with -k to intersect with kernel IDs.\n"
+            "\t\t\tWrites ml_api_trace/ inside --output-directory."
         ),
     )
     analyze_group.add_argument(
@@ -748,7 +749,7 @@ Examples:
         help=(
             "\t\tList Triton kernels as a unified call tree grouped by "
             "source location with kernel launch stats. "
-            "Recreates ml_api_trace output directory."
+            "Writes ml_api_trace/ inside --output-directory."
         ),
     )
     analyze_group.add_argument(
@@ -770,7 +771,8 @@ Examples:
             "\t\t\t  all  or  '*'        match every kernel\n"
             "\t\t\tMultiple patterns (space or comma-separated):\n"
             "\t\t\t  --triton-operator *matmul*,*softmax*\n"
-            "\t\t\tCombine with -k to intersect with kernel IDs."
+            "\t\t\tCombine with -k to intersect with kernel IDs.\n"
+            "\t\t\tWrites ml_api_trace/ inside --output-directory."
         ),
     )
     analyze_group.add_argument(
@@ -815,8 +817,10 @@ Examples:
         choices=["stdout", "txt", "csv", "db"],
         default="stdout",
         help=(
-            "\t\tFormat of the analysis output. One of: stdout, txt, csv, db.\n"
-            "\t\t  stdout - print report to the terminal (no file/folder created).\n"
+            "\t\tFormat of the analysis output inside --output-directory.\n"
+            "\t\tOne of: stdout, txt, csv, db.\n"
+            "\t\t  stdout - print report to the terminal. Roofline HTML is saved\n"
+            "\t\t           when available.\n"
             "\t\t  txt    - write report to <name>.txt; disables terminal output.\n"
             "\t\t  csv    - write one CSV per analysis view into a folder <name>/.\n"
             "\t\t           Requires profiles collected in rocpd format. "
@@ -831,12 +835,34 @@ Examples:
         ),
     )
     analyze_group.add_argument(
+        "--output-directory",
+        metavar="",
+        dest="output_directory",
+        default=str(Path.cwd() / "analysis"),
+        help=(
+            "\t\tDirectory for all analysis artifacts (roofline HTML, and the "
+            ".txt/.db/csv output of --output-format). "
+            "(DEFAULT: <current-working-directory>/analysis)"
+        ),
+    )
+    analyze_group.add_argument(
+        "--overwrite",
+        dest="overwrite",
+        action="store_true",
+        help=(
+            "\t\tClear an existing non-empty analysis directory.\n"
+            "\t\t\tWithout it, analyzing into a non-empty directory fails.\n"
+            "\t\t\tUse a fresh directory per run; pass this flag only to "
+            "replace all existing analysis artifacts."
+        ),
+    )
+    analyze_group.add_argument(
         "--output-name",
         metavar="",
         dest="output_name",
         help=(
             "\t\tOverride the default output file name rocprof_compute_<uuid> "
-            "with the specified name.\n"
+            "with the specified name inside --output-directory.\n"
             "\t\tThis is only applicable when --output-format txt/csv/db is used.\n"
         ),
     )

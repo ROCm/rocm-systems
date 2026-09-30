@@ -35,7 +35,6 @@ from roofline.run_benchmark import (
 from utils.logger import (
     console_debug,
     console_error,
-    console_log,
     console_warning,
     demarcate,
 )
@@ -552,7 +551,9 @@ class Roofline:
         flops_figure: Optional[go.Figure],
         ops_dt_list: str,
         flops_dt_list: str,
-    ) -> None:
+        output_dir: Path,
+        file_stem_prefix: str = "",
+    ) -> Path:
         """Write one precision-selectable Plotly HTML document to disk."""
         dev_id = str(self.__run_parameters["device_id"])
         kernel_list = ""
@@ -567,7 +568,9 @@ class Roofline:
                 for name in sorted(flat):
                     kernel_list += "_" + name
 
-        workload_dir = self.__run_parameters["workload_dir"]
+        path = (
+            output_dir / f"empirRoof_{file_stem_prefix}gpu-{dev_id}{kernel_list}.html"
+        )
         figure, view_model = self._combined_html_figure(ops_figure, flops_figure)
         if figure is not None:
             document = build_interactive_document(
@@ -575,9 +578,9 @@ class Roofline:
                 view_model,
                 title="Empirical Roofline Analysis",
             )
-            path = f"{workload_dir}/empirRoof_gpu-{dev_id}{kernel_list}.html"
-            Path(path).write_text(document, encoding="utf-8")
-            console_log("roofline", "Roofline HTML files saved.")
+            path.write_text(document, encoding="utf-8")
+            console_warning(f"Created file: {path}")
+        return path
 
     def _combined_html_figure(
         self,

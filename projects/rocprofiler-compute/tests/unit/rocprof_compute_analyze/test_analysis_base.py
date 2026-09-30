@@ -22,6 +22,8 @@ PRE_PROCESSING_ARGS = {
     "gpu_kernel": None,
     "gpu_id": None,
     "gpu_dispatch_id": None,
+    "output_directory": "analysis",
+    "overwrite": False,
 }
 
 
@@ -45,7 +47,7 @@ def test_sanitize_rejects_paths_sharing_a_workload_name(tmp_path, monkeypatch) -
 
 
 def test_pre_processing_txt_creates_named_file(tmp_path, monkeypatch) -> None:
-    """--output-format txt with --output-name writes <name>.txt in the cwd."""
+    """A named txt report is written inside the analysis output directory."""
     mocks = common.patch_console(monkeypatch, MODULE, "debug", "log", "warning")
     monkeypatch.setattr(OmniAnalyze_Base, "initalize_runs", lambda self: {})
     monkeypatch.chdir(tmp_path)
@@ -59,7 +61,7 @@ def test_pre_processing_txt_creates_named_file(tmp_path, monkeypatch) -> None:
     analyzer.pre_processing()
 
     try:
-        report = tmp_path / "analysis_report.txt"
+        report = tmp_path / "analysis" / "analysis_report.txt"
         assert report.is_file()
         assert not analyzer._output.closed
         assert Path(analyzer._output.name).resolve() == report
@@ -84,7 +86,7 @@ def test_pre_processing_txt_default_name_is_uuid(tmp_path, monkeypatch) -> None:
     analyzer.pre_processing()
 
     try:
-        created = list(tmp_path.iterdir())
+        created = list((tmp_path / "analysis").iterdir())
         assert len(created) == 1
         assert created[0].match("rocprof_compute_*.txt")
     finally:
@@ -176,3 +178,103 @@ def test_membw_analysis_collected(profiling_config, expected) -> None:
 def test_membw_analysis_collected_without_config_attribute() -> None:
     inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
     assert inst.membw_analysis_collected() is False
+
+
+@pytest.mark.parametrize("relationship", ["equal", "ancestor", "descendant", "alias"])
+def test_prepare_output_directory_protects_workload(tmp_path, relationship):
+    workload = tmp_path / "workload"
+    workload.mkdir()
+    marker = workload / "profiling.csv"
+    marker.write_text("keep", encoding="utf-8")
+    outputs = {
+        "equal": workload,
+        "ancestor": tmp_path,
+        "descendant": workload / "analysis",
+        "alias": tmp_path / "alias",
+    }
+    if relationship == "alias":
+        outputs[relationship].symlink_to(workload, target_is_directory=True)
+    analyzer = OmniAnalyze_Base(
+        argparse.Namespace(
+            output_format="txt",
+            output_directory=str(outputs[relationship]),
+            overwrite=True,
+            path=[[str(workload)]],
+        ),
+        {},
+    )
+    with pytest.raises(SystemExit):
+        analyzer.prepare_output_directory()
+    assert marker.read_text(encoding="utf-8") == "keep"
+
+
+@pytest.mark.parametrize(
+    ("options", "workloads", "expected"),
+    [
+        ({"output_format": "csv"}, [("gfx908", False)], True),
+        ({"list_torch_operators": True}, [("gfx908", False)], True),
+        ({"torch_operator": []}, [("gfx908", False)], True),
+        ({"list_triton_operators": True}, [("gfx908", False)], True),
+        ({"triton_operator": ["*"]}, [("gfx908", False)], True),
+        ({}, [("gfx90a", True)], True),
+        ({"list_stats": True}, [("gfx90a", True)], False),
+        ({}, [("gfx908", True)], False),
+        ({}, [("gfx90a", False)], False),
+        ({}, [("gfx90a", True), ("gfx90a", True)], False),
+        ({"output_format": "db"}, [("gfx90a", True), ("gfx90a", True)], True),
+        ({"gui": True}, [("gfx90a", True)], False),
+        ({"tui": True, "output_format": "txt"}, [("gfx90a", True)], False),
+    ],
+)
+def test_prepare_output_directory_artifact_eligibility(
+    tmp_path, options, workloads, expected
+):
+    args = argparse.Namespace(
+        output_format="stdout",
+        output_directory=str(tmp_path / "analysis"),
+        overwrite=False,
+        path=[],
+    )
+    for name, value in options.items():
+        setattr(args, name, value)
+    analyzer = OmniAnalyze_Base(args, {})
+    for index, (arch, has_peaks) in enumerate(workloads):
+        path = str(tmp_path / f"workload{index}")
+        args.path.append([path])
+        analyzer._runs[path] = SimpleNamespace(
+            sys_info=pd.DataFrame([{"gpu_arch": arch}]),
+            roofline_peaks=pd.DataFrame([{"FP32": 1}]) if has_peaks else pd.DataFrame(),
+        )
+    analyzer.prepare_output_directory()
+    assert (tmp_path / "analysis").exists() is expected
+    assert (analyzer._output_dir is not None) is expected
+
+
+def test_prepare_output_directory_resolves_safe_output_symlink(tmp_path):
+    """An output alias clears its resolved directory without following child links."""
+    workload = tmp_path / "workload"
+    workload.mkdir()
+    output = tmp_path / "analysis"
+    output.mkdir()
+    alias = tmp_path / "alias"
+    alias.symlink_to(output, target_is_directory=True)
+    target = tmp_path / "target"
+    target.mkdir()
+    marker = target / "keep.txt"
+    marker.write_text("keep", encoding="utf-8")
+    (output / "linked").symlink_to(target, target_is_directory=True)
+    (output / "old.txt").write_text("old", encoding="utf-8")
+    analyzer = OmniAnalyze_Base(
+        argparse.Namespace(
+            output_format="txt",
+            output_directory=str(alias),
+            overwrite=True,
+            path=[[str(workload)]],
+        ),
+        {},
+    )
+    analyzer.prepare_output_directory()
+    assert analyzer._output_dir == output.resolve()
+    assert list(output.iterdir()) == []
+    assert alias.is_symlink()
+    assert marker.read_text(encoding="utf-8") == "keep"

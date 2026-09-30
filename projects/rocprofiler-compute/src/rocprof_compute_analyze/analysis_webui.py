@@ -168,7 +168,6 @@ class webui_analysis(OmniAnalyze_Base):
                 # Regenerate kernel top stats for Top Stats panel
                 kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
                     df_in=run_workload.raw_pmc,
-                    raw_data_dir=str(self.dest_dir),
                     filter_gpu_ids=run_workload.filter_gpu_ids,
                     filter_dispatch_ids=run_workload.filter_dispatch_ids,
                     time_unit=args.time_unit,
@@ -432,7 +431,6 @@ class webui_analysis(OmniAnalyze_Base):
 
         kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
             df_in=workload.raw_pmc,
-            raw_data_dir=self.dest_dir,
             filter_gpu_ids=workload.filter_gpu_ids,
             filter_dispatch_ids=workload.filter_dispatch_ids,
             time_unit=args.time_unit,

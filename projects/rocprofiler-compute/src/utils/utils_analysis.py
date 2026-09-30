@@ -2,7 +2,6 @@
 # SPDX-License-Identifier:  MIT
 
 import math
-import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional, Union
@@ -443,13 +442,14 @@ def build_operator_summary(
 @demarcate
 def process_ml_api_trace_output(
     workload_dir: str,
+    output_dir: Path,
 ) -> tuple[pd.DataFrame, Path]:
     """
     Build consolidated ML API trace rows and prepare output directory.
 
     - Performs inner join on Correlation_ID, filtering out unmatched entries
     - Consolidates data across passes and normalizes required columns
-    - Prepares a clean workload_dir/ml_api_trace/ directory for output files
+    - Prepares output_dir/ml_api_trace/ for output files
 
     Returns (consolidated_df, ml_api_trace_path) on success.
     """
@@ -476,12 +476,9 @@ def process_ml_api_trace_output(
             "Ensure profiling was done with ML API tracing enabled "
             "(e.g., via '--torch-trace')."
         )
-        return pd.DataFrame(), Path(f"{workload_dir}/ml_api_trace")
+        return pd.DataFrame(), output_dir / "ml_api_trace"
 
-    ml_api_trace_path = Path(f"{workload_dir}/ml_api_trace")
-    if ml_api_trace_path.exists():
-        shutil.rmtree(ml_api_trace_path)
-        console_log(f"Removed previous ml_api_trace directory: {ml_api_trace_path}")
+    ml_api_trace_path = output_dir / "ml_api_trace"
     ml_api_trace_path.mkdir(parents=True, exist_ok=True)
 
     # Join marker and counter data
