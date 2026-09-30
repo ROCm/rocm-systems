@@ -13,6 +13,7 @@
 // live in gin_device_common.h, which must be included first.
 #include "nccl_device/coop.h"
 #include "nccl_device/impl/core__funcs.h" 
+#include "nccl_device/impl/gin__funcs.h"
 #include "nccl_device/gin/gin_device_host_common.h"
 #include "nccl_device/gin/gin_device_common.h"
 #include "nccl_device/gin/proxy/gin_proxy.h"
@@ -24,6 +25,121 @@ namespace RcclUnitTesting
 {
 
 class GinDeviceTest : public DeviceTestBase {};
+
+struct SignalActionResult {
+  ncclGinSignalDescriptor descriptor;
+  ncclGinSignalOp_t       op;
+  uint64_t                arg;
+};
+
+template<typename Action>
+__device__ void captureSignalAction(ncclGin const& gin, Action action,
+                                    SignalActionResult* result) {
+  result->descriptor = ncclGin_getSignalDescriptor(gin, action);
+  result->op = ncclGin_getSignalOp(action);
+  result->arg = ncclGin_getSignalOpArg(action);
+}
+
+__global__ void kernelExplicitSignalActions(
+    ncclDevComm comm, ncclWindow_t signalWindow, SignalActionResult* results) {
+  if (threadIdx.x != 0 || blockIdx.x != 0) return;
+
+  ncclGin gin{comm, /*contextIndex=*/0};
+  captureSignalAction(gin, ncclGin_StrongSignalInc{3}, &results[0]);
+  captureSignalAction(gin, ncclGin_StrongSignalAdd{4, 0x1234}, &results[1]);
+  captureSignalAction(gin, ncclGin_WeakSignalInc{5}, &results[2]);
+  captureSignalAction(gin, ncclGin_WeakSignalAdd{6, 0x5678}, &results[3]);
+  captureSignalAction(gin, ncclGin_StrongVASignalInc{signalWindow, 64}, &results[4]);
+  captureSignalAction(gin, ncclGin_StrongVASignalAdd{signalWindow, 72, 0x9abc}, &results[5]);
+  captureSignalAction(gin, ncclGin_WeakVASignalInc{signalWindow, 80}, &results[6]);
+  captureSignalAction(gin, ncclGin_WeakVASignalAdd{signalWindow, 88, 0xdef0}, &results[7]);
+
+  comm.ginStrongLegacySignals = false;
+  ncclGin legacyWeak{comm, /*contextIndex=*/0};
+  captureSignalAction(legacyWeak, ncclGin_SignalInc{7}, &results[8]);
+  captureSignalAction(legacyWeak, ncclGin_VASignalAdd{signalWindow, 96, 0x1111}, &results[9]);
+
+  comm.ginStrongLegacySignals = true;
+  ncclGin legacyStrong{comm, /*contextIndex=*/0};
+  captureSignalAction(legacyStrong, ncclGin_SignalAdd{8, 0x2222}, &results[10]);
+  captureSignalAction(legacyStrong, ncclGin_VASignalInc{signalWindow, 104}, &results[11]);
+  captureSignalAction(legacyStrong, ncclGin_WeakSignalAdd{9, 0x3333}, &results[12]);
+}
+
+TEST_F(GinDeviceTest, ExplicitSignalActions) {
+  constexpr size_t kResultCount = 13;
+  constexpr uint32_t kGinOffset4K = 3;
+  constexpr uintptr_t kGinWindowToken = 0x12345000;
+
+  DeviceBuffer<uint64_t> d_signalShadows(1);
+  DeviceBuffer<ncclWindow_vidmem> d_signalWindow(1);
+  DeviceBuffer<SignalActionResult> d_results(kResultCount);
+
+  ncclWindow_vidmem hostWindow{};
+  hostWindow.ginOffset4K = kGinOffset4K;
+  hostWindow.ginWinsDefaultBackend[0] =
+      reinterpret_cast<ncclGinWindow_t>(kGinWindowToken);
+  hostWindow.numSegments = 1;
+  d_signalWindow.upload(hostWindow);
+  d_results.zero();
+
+  ncclDevComm comm{};
+  comm.ginConnectionCount = 1;
+  comm.backendIndex = 0;
+  comm.ginNetDeviceTypes[0] = NCCL_NET_DEVICE_GIN_PROXY;
+  comm.ginSignalCount = 1;
+  comm.ginSignalShadows = d_signalShadows.ptr;
+
+  kernelExplicitSignalActions<<<1, 1>>>(
+      comm, d_signalWindow.ptr, d_results.ptr);
+  syncAndCheck();
+
+  const std::vector<SignalActionResult> results = d_results.copyTo();
+
+  struct ExpectedSignal {
+    bool strong;
+    ncclGinSignalOp_t op;
+    uint64_t arg;
+    ncclGinSignalType type;
+    ncclGinSignal_t signalId;
+    size_t vaOffset;
+  };
+  const ExpectedSignal cases[] = {
+      {true,  ncclGinSignalInc, 1,      NCCL_GIN_SIGNAL_TYPE_INDEXED, 3, 0},
+      {true,  ncclGinSignalAdd, 0x1234, NCCL_GIN_SIGNAL_TYPE_INDEXED, 4, 0},
+      {false, ncclGinSignalInc, 1,      NCCL_GIN_SIGNAL_TYPE_INDEXED, 5, 0},
+      {false, ncclGinSignalAdd, 0x5678, NCCL_GIN_SIGNAL_TYPE_INDEXED, 6, 0},
+      {true,  ncclGinSignalInc, 1,      NCCL_GIN_SIGNAL_TYPE_VA,      0, 64},
+      {true,  ncclGinSignalAdd, 0x9abc, NCCL_GIN_SIGNAL_TYPE_VA,      0, 72},
+      {false, ncclGinSignalInc, 1,      NCCL_GIN_SIGNAL_TYPE_VA,      0, 80},
+      {false, ncclGinSignalAdd, 0xdef0, NCCL_GIN_SIGNAL_TYPE_VA,      0, 88},
+      {false, ncclGinSignalInc, 1,      NCCL_GIN_SIGNAL_TYPE_INDEXED, 7, 0},
+      {false, ncclGinSignalAdd, 0x1111, NCCL_GIN_SIGNAL_TYPE_VA,      0, 96},
+      {true,  ncclGinSignalAdd, 0x2222, NCCL_GIN_SIGNAL_TYPE_INDEXED, 8, 0},
+      {true,  ncclGinSignalInc, 1,      NCCL_GIN_SIGNAL_TYPE_VA,      0, 104},
+      {false, ncclGinSignalAdd, 0x3333, NCCL_GIN_SIGNAL_TYPE_INDEXED, 9, 0},
+  };
+  static_assert(sizeof(cases) / sizeof(cases[0]) == kResultCount,
+                "one expected row per captured signal action");
+
+  for (size_t i = 0; i < kResultCount; ++i) {
+    const auto& expected = cases[i];
+    const auto& descriptor = results[i].descriptor;
+    EXPECT_EQ(descriptor.isStrong, expected.strong) << "case " << i;
+    EXPECT_EQ(results[i].op, expected.op) << "case " << i;
+    EXPECT_EQ(results[i].arg, expected.arg) << "case " << i;
+    EXPECT_EQ(descriptor.type, expected.type) << "case " << i;
+    if (expected.type == NCCL_GIN_SIGNAL_TYPE_INDEXED) {
+      EXPECT_EQ(descriptor.indexedSignal.signalId, expected.signalId) << "case " << i;
+    } else {
+      EXPECT_EQ(descriptor.vaSignal.signalWindow,
+                reinterpret_cast<ncclGinWindow_t>(kGinWindowToken)) << "case " << i;
+      EXPECT_EQ(descriptor.vaSignal.signalOffset,
+                4096 * kGinOffset4K + expected.vaOffset) << "case " << i;
+      EXPECT_EQ(descriptor.vaSignal.ncclWindow, d_signalWindow.ptr) << "case " << i;
+    }
+  }
+}
 
 // ---------------------------------------------------------------------------
 // ConstructProxyOp: pack (hasInline, hasSignal, signalOp, hasCounter) -> op byte
@@ -163,6 +279,8 @@ TEST_F(GinDeviceTest, BuildGfd_PutOnly) {
 
   // Header qword: flag, size (op now lives in the headerExt qword).
   EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdHeader].header.flag), 1ULL);
+  EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdHeader].header.version),
+            static_cast<uint64_t>(NCCL_GIN_PROXY_GFD_VERSION));
   EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdHeaderExt].headerExt.op),
             static_cast<uint64_t>(ncclGinProxyOpPut));
   EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdHeader].header.size), kSize);
@@ -422,6 +540,46 @@ TEST_F(GinDeviceTest, BuildGfd_SignalAndCounter) {
   EXPECT_EQ(signalValRoundtrip, kSignalVal) << "signalVal 16+16+32 split round-trip";
 
   EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdQwords - 1].flag.v), 1ULL);
+}
+
+__global__ void kernelBuildGfdSignalStrength(ncclGinProxyGfd_t* gfds, uint64_t signalVal) {
+  if (threadIdx.x != 0 || blockIdx.x != 0) return;
+  for (int i = 0; i < 2; ++i) {
+    nccl::gin::proxy::buildGfd<uint64_t>(
+        &gfds[i],
+        static_cast<ncclGinProxyOp_t>(
+            static_cast<uint32_t>(ncclGinProxyOpPut) |
+            static_cast<uint32_t>(ncclGinProxyOpWithSignalInc)),
+        /*srcVal=*/0, /*hasInline=*/false,
+        /*srcOff=*/0, /*srcHandle=*/nullptr,
+        /*dstOff=*/0, /*dstHandle=*/nullptr,
+        /*size=*/64, /*counterId=*/0, /*signalId=*/1,
+        /*signalVal=*/signalVal, /*signalWindow=*/nullptr, /*signalOff=*/0,
+        /*isStrongSignal=*/i == 1);
+  }
+}
+
+TEST_F(GinDeviceTest, BuildGfd_SignalStrength) {
+  // Exercise every field sharing the qword with isStrongSignal.
+  constexpr uint64_t kSignalVal = 0x0123456789ABCDEFULL;
+  constexpr uint16_t kSigValLow2 = static_cast<uint16_t>(kSignalVal >> 16);
+  constexpr uint32_t kSigValHigh = static_cast<uint32_t>(kSignalVal >> 32);
+
+  DeviceBuffer<ncclGinProxyGfd_t> d_gfds(2);
+  d_gfds.zero();
+
+  kernelBuildGfdSignalStrength<<<1, 1>>>(d_gfds.ptr, kSignalVal);
+  syncAndCheck();
+
+  const std::vector<ncclGinProxyGfd_t> gfds = d_gfds.copyTo();
+  for (int i = 0; i < 2; ++i) {
+    const auto& signalVal = gfds[i].qword[ncclGinProxyGfdSignalVal].signalVal;
+    EXPECT_EQ(signalVal.flag, 1u) << i;
+    EXPECT_EQ(signalVal.resv, 0u) << i;
+    EXPECT_EQ(signalVal.isStrongSignal, static_cast<uint32_t>(i)) << i;
+    EXPECT_EQ(signalVal.signalValLow2, kSigValLow2) << i;
+    EXPECT_EQ(signalVal.signalValHigh, kSigValHigh) << i;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -799,9 +957,14 @@ TEST_F(GinDeviceTest, PostGfd_PiCiOverflow) {
 }
 
 // ---------------------------------------------------------------------------
-// ResetSignal: ncclGinApi_ResetSignal<NCCL_NET_DEVICE_GIN_PROXY>::call writes
-//   0 to signals[signalId] via base + offset; verify only the targeted cell
-//   is touched and the rest of the pool stays intact.
+// ResetSignal: proxy signals use an offset/baseline model. The effective value
+//   of an indexed signal is signals[id] measured against a baseline held in
+//   signalOffsets[id] (see ncclGinApi_GetSignalPtr, which returns
+//   {signals + id, signalOffsets[id]}). "Reset" therefore does NOT zero the raw
+//   signals[] cell -- it snapshots the current signals[id] into signalOffsets[id]
+//   so the effective (relative) value becomes 0. Verify that only the targeted
+//   offset cell is updated, that signals[] is left completely untouched, and
+//   that the rest of the offset pool stays intact.
 // ---------------------------------------------------------------------------
 
 __global__ void kernelResetSignal(ncclGinCtx ctx, ncclGinSignal_t signalId) {
@@ -813,23 +976,30 @@ __global__ void kernelResetSignal(ncclGinCtx ctx, ncclGinSignal_t signalId) {
 }
 
 TEST_F(GinDeviceTest, ResetSignal) {
-  constexpr uint32_t        kNumSignals = 8;
-  constexpr ncclGinSignal_t kTargetId   = 3;
-  constexpr uint64_t        kPattern    = 0xA000ULL;   // signals[i] = 0xA000 + i
+  constexpr uint32_t        kNumSignals   = 8;
+  constexpr ncclGinSignal_t kTargetId     = 3;
+  constexpr uint64_t        kPattern      = 0xA000ULL;   // signals[i]       = 0xA000 + i
+  constexpr uint64_t        kOffsetSeed   = 0xC000ULL;   // signalOffsets[i] = 0xC000 + i
 
   DeviceBuffer<uint64_t>             d_signals(kNumSignals);
+  DeviceBuffer<uint64_t>             d_signalOffsets(kNumSignals);
   DeviceBuffer<ncclGinProxyGpuCtx_t> d_proxyCtx(1);
 
-  // Pre-fill with non-zero pattern so any spurious zeroing surfaces as a mismatch.
+  // Pre-fill signals with one pattern and offsets with a distinct one so we can
+  // tell exactly which array (and which cell) the reset touches.
   std::vector<uint64_t> hostSignals(kNumSignals);
+  std::vector<uint64_t> hostOffsets(kNumSignals);
   for (uint32_t i = 0; i < kNumSignals; i++) {
     hostSignals[i] = kPattern + i;
+    hostOffsets[i] = kOffsetSeed + i;
   }
   d_signals.copyFrom(hostSignals);
+  d_signalOffsets.copyFrom(hostOffsets);
 
-  // ResetSignal only reads proxyCtx->signals; the rest of the struct is untouched.
+  // ResetSignal (indexed) reads proxyCtx->signals and writes proxyCtx->signalOffsets.
   ncclGinProxyGpuCtx_t hostProxyCtx{};
-  hostProxyCtx.signals = d_signals.ptr;
+  hostProxyCtx.signals       = d_signals.ptr;
+  hostProxyCtx.signalOffsets = d_signalOffsets.ptr;
   d_proxyCtx.upload(hostProxyCtx);
 
   // Wrap the proxy ctx in an ncclGinCtx; the leaf only dereferences ctx.handle.
@@ -840,14 +1010,23 @@ TEST_F(GinDeviceTest, ResetSignal) {
   kernelResetSignal<<<1, 1>>>(ctx, kTargetId);
   syncAndCheck();
 
-  std::vector<uint64_t> result = d_signals.copyTo();
+  std::vector<uint64_t> signals = d_signals.copyTo();
+  std::vector<uint64_t> offsets = d_signalOffsets.copyTo();
 
-  // Target cell zeroed; all other cells keep their pre-filled value.
-  EXPECT_EQ(result[kTargetId], 0ULL) << "target signal " << kTargetId << " must be zeroed";
+  // The raw signals[] array must be left completely untouched.
+  for (uint32_t i = 0; i < kNumSignals; i++) {
+    EXPECT_EQ(signals[i], kPattern + i)
+        << "signals[" << i << "] unexpectedly modified (expected 0x" << std::hex << (kPattern + i) << ")";
+  }
+
+  // The target offset cell is snapshotted to the current signal value (making the
+  // effective value 0); every other offset cell keeps its pre-filled value.
+  EXPECT_EQ(offsets[kTargetId], kPattern + kTargetId)
+      << "signalOffsets[" << kTargetId << "] must snapshot signals[" << kTargetId << "]";
   for (uint32_t i = 0; i < kNumSignals; i++) {
     if (i == kTargetId) continue;
-    EXPECT_EQ(result[i], kPattern + i)
-        << "signal " << i << " unexpectedly modified (expected 0x" << std::hex << (kPattern + i) << ")";
+    EXPECT_EQ(offsets[i], kOffsetSeed + i)
+        << "signalOffsets[" << i << "] unexpectedly modified (expected 0x" << std::hex << (kOffsetSeed + i) << ")";
   }
 }
 

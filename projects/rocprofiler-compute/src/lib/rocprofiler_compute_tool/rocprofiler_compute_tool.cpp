@@ -205,7 +205,7 @@ std::unique_ptr<tool_data_t> create_tool_data(rocprofiler_client_id_t* /*id*/)
     auto tool_data = std::make_unique<tool_data_t>();
 
     const auto output_path = g_input_parameters->get_output_path();
-    tool_data->output_filename = generate_output_filename(output_path, "_native_counter_collection.csv");
+    tool_data->output_filename = generate_output_filename(output_path, CsvCountersWriter::kFileSuffix);
 
     const auto pc_sampling_method = g_input_parameters->get_pc_sampling_method();
     if (!pc_sampling_method.empty())

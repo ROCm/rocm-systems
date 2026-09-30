@@ -18,6 +18,7 @@
 #include "os/os.hpp"
 #include <atomic>
 #include <condition_variable>
+#include <memory>
 #include <mutex>
 #include <stack>
 #include <string>
@@ -29,6 +30,14 @@ class Device;
 class Memory;
 struct ProfilingSignal;
 class Timestamp;
+
+constexpr static uint64_t kInvalidAqlSlot = std::numeric_limits<uint64_t>::max();
+
+struct AqlSlotReservation {
+  uint64_t start_slot;
+  size_t packet_count;
+  uint64_t barrier_bit_slot_before_reservation;
+};
 
 //! True while the calling thread is inside HsaAmdSignalHandler (async-events thread).
 bool InAsyncSignalHandler();
@@ -593,6 +602,11 @@ class VirtualGPU : public device::VirtualDevice {
   //! Set the active HW queue and keep the metadata preloader in sync.
   void SetGpuQueue(hsa_queue_t* queue);
 
+  //! Ensure a HW queue is held, acquiring one (with the last_hwq_ affinity hint) if a
+  //! dynamic-queue reclaim released it. No-op for dedicated queues or when one is already held.
+  //! Caller must hold the execution() lock.
+  void AcquireHwQueueIfNeeded();
+
   //! Snapshot the current HW queue as preferred for future re-acquisition (used by graph launch).
   //! Only updates if the queue is still valid — avoids clobbering a hint saved by ReleaseHwQueue.
   void SetPreferredQueue() override {
@@ -648,6 +662,8 @@ class VirtualGPU : public device::VirtualDevice {
   amd::Command* command() const { return command_; }
 
   void* allocKernArg(size_t size, size_t alignment);
+  //! Returns the size of one managed kernarg pool chunk.
+  size_t KernArgPoolChunkSize() const;
   bool isFenceDirty() const { return fence_dirty_.load(std::memory_order_acquire); }
   void setFenceDirty(bool state) { fence_dirty_.store(state, std::memory_order_release); }
   void WaitCompleteSignal(hsa_signal_t signal);
@@ -676,6 +692,10 @@ class VirtualGPU : public device::VirtualDevice {
   //! Analyzes a crashed AQL queue to find a broken AQL packet.
   //! Returns the faulting kernel name ("<not identified>" if not found).
   std::string AnalyzeAqlQueue() const;
+
+  //! Emits the hang report itself. Called by AnalyzeAqlQueue, which brackets it
+  //! with the banner.
+  std::string AnalyzeAqlQueueBody() const;
   bool ForceIrq() const { return force_irq_; }
 
   //! SDMA engine affinity management
@@ -707,11 +727,9 @@ class VirtualGPU : public device::VirtualDevice {
 
   //! Dispatch (or capture, when graph-capturing) a kernel dispatch packet.
   //! Handles both hsa_kernel_dispatch_packet_t and hsa_amd_ext_kernel_dispatch_packet_t.
-  template <typename AqlPacket>
-  bool dispatchAqlPacket(AqlPacket* packet, uint16_t header, uint16_t rest,
-                         bool blocking = true, bool attach_signal = false);
-  bool dispatchAqlPacket(hsa_barrier_and_packet_t* packet, uint16_t header, uint16_t rest,
-                         bool blocking = true, bool attach_signal = false);
+  template <typename AqlPacket> bool dispatchAqlPacket(AqlPacket* packet, uint16_t header,
+                                                       uint16_t rest, bool blocking = true,
+                                                       bool attach_signal = false);
 
   //! Fast-path dispatch: pre-built flat contiguous buffer
   bool dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>& flatPacketData,
@@ -724,8 +742,7 @@ class VirtualGPU : public device::VirtualDevice {
 
   template <typename AqlPacket> bool dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header,
                                                               uint16_t rest, bool blocking,
-                                                              bool attach_signal = false,
-                                                              bool cluster_launch = false);
+                                                              bool attach_signal = false);
 
   bool dispatchCounterAqlPacket(hsa_ext_amd_aql_pm4_packet_t* packet, const uint32_t gfxVersion,
                                 bool blocking, const hsa_ven_amd_aqlprofile_1_00_pfn_t* extApi);
@@ -748,6 +765,20 @@ class VirtualGPU : public device::VirtualDevice {
 
   //! Ring the queue doorbell via direct UC store or ROCr signal.
   void ringQueueDoorbell(uint64_t index);
+
+  //! Snapshot shared barrier state before atomically reserving AQL queue slots.
+  AqlSlotReservation ReserveAqlSlots(size_t packet_count);
+
+  //! Clear a caller-requested barrier when prior queue state already preserves stream ordering.
+  void OptimizeStreamOrderingBarrier(uint16_t& header,
+                                     const AqlSlotReservation& reservation) const;
+
+  //! Record a final packet header in the shared HW-queue barrier state.
+  void RecordAqlPacketHeader(const AqlSlotReservation& reservation, size_t packet_offset,
+                             uint16_t header);
+
+  //! Record the final slot in a submission as this VirtualGPU's previous packet.
+  void CompleteAqlSubmission(const AqlSlotReservation& reservation);
 
   void resetKernArgPool() { managed_kernarg_buffer_.ResetPool(); }
 
@@ -875,6 +906,10 @@ class VirtualGPU : public device::VirtualDevice {
   //! Cached hardware doorbell for the active queue (UC MMIO). Non-null only when
   //! DEBUG_CLR_DIRECT_DOORBELL is enabled and the doorbell id query succeeded.
   volatile uint64_t* doorbell_ptr_ = nullptr;
+  //! Largest barrier-bit slot shared by every VirtualGPU using the physical HW queue.
+  std::shared_ptr<std::atomic<uint64_t>> largest_aql_barrier_bit_slot_;
+  //! Final AQL slot submitted by this stream, or kInvalidAqlSlot before its first packet.
+  uint64_t last_aql_packet_slot_ = kInvalidAqlSlot;
   alignas(64) hsa_barrier_and_packet_t barrier_packet_ {};
   alignas(64) hsa_amd_barrier_value_packet_t barrier_value_packet_ {};
 

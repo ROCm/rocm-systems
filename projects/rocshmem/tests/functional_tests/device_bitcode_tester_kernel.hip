@@ -150,7 +150,7 @@ extern "C" __global__ void test_typed_atomic(
   }
 }
 
-extern "C" __global__ void test_typed_put_signal(
+extern "C" __global__ __attribute__((optnone)) void test_typed_put_signal(
     int *sym_src, int *sym_dst, uint64_t *sym_sig,
     int my_pe, int n_pes, int count)
 {

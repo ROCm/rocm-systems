@@ -3,11 +3,13 @@
 
 #include "rocjitsu/isa/arch/amdgpu/cdna4/target_provider.h"
 
-#include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/execution_backend.h"
 #include "rocjitsu/isa/target_provider.h"
 
 namespace rocjitsu::cdna4 {
 
-std::unique_ptr<rocjitsu::Decoder> create_target_decoder() { return make_isa_decoder<Isa>(); }
+std::unique_ptr<rocjitsu::Decoder> create_target_decoder() {
+  return make_isa_decoder<Isa>(&execution_backend());
+}
 
 } // namespace rocjitsu::cdna4

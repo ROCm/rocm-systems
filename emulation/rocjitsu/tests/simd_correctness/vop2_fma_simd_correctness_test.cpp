@@ -22,10 +22,11 @@
 /// equal per active, non-skipped lane (util::set_force_scalar_for_testing flips
 /// the gate in-process).
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -188,10 +189,10 @@ void check_case(const FmaCase &c, uint64_t exec) {
     // f16 constant 0x3E00 = 1.5h (high bits ignored by the op).
     const uint32_t literal = c.is_f16 ? 0x00003E00u : 0x3FC00000u;
     uint32_t words[4] = {enc, c.has_literal ? literal : 0u, 0u, 0u};
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << c.label << ": decode failed";
     seeded = fx.seed_inputs(SEED, c.is_f16, exec, &nan_lane);
-    fx.cu->execute_instruction(inst, *fx.wf);
+    EXPECT_TRUE(fx.cu->execute_instruction(inst, *fx.wf).succeeded());
     auto out = fx.snapshot_dst();
     delete inst;
     return out;
@@ -200,13 +201,12 @@ void check_case(const FmaCase &c, uint64_t exec) {
   const auto scalar_out = run_mode(/*force_scalar=*/true);
   const auto simd_out = run_mode(/*force_scalar=*/false);
 
-  // Core A/B equivalence per active, non-skipped lane. NaN-input lanes carry an
-  // accepted NaN-payload divergence and are excluded identically in both runs
-  // (the skip condition is input-derived).
+  // F32 compares every active lane, including the selected NaN payload.
+  // Legacy F16 forms retain their separate host-arithmetic behavior.
   for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
     const bool active = (exec >> lane) & 1ULL;
     if (active) {
-      if (nan_lane[lane])
+      if (c.is_f16 && nan_lane[lane])
         continue;
       EXPECT_EQ(scalar_out[lane], simd_out[lane])
           << c.label << " lane " << lane << ": SIMD path diverged from scalar body";

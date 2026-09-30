@@ -25,6 +25,7 @@ class Bench_gfx9(benchmark_base.Bench_base):
             "F4": "mfma_f8f6f4<FP4_E2M1>",
             "F6": "mfma_f8f6f4<FP6_E2M3>",
             "F6F4": "mfma_f8f6f4<FP6_FP4_MIXED>",
+            "MXF8": "mfma_f8f6f4<FP8_E4M3>",
             "F8": "mfma_f8",
             "F16": "mfma_f16",
             "BF16": "mfma_bf16",
@@ -48,6 +49,7 @@ class Bench_gfx9(benchmark_base.Bench_base):
             "MFMA-F4": super().matrix_f4_bench,
             "MFMA-F6": super().matrix_f6_bench,
             "MFMA-F6F4": super().matrix_f6f4_bench,
+            "MFMA-MXF8": super().matrix_mxf8_bench,
             "MFMA-F8": super().matrix_f8_bench,
             "MFMA-F16": super().matrix_f16_bench,
             "MFMA-BF16": super().matrix_bf16_bench,
@@ -71,6 +73,7 @@ class Bench_gfx9(benchmark_base.Bench_base):
             "MFMA-F4": "MFMAF4Flops",
             "MFMA-F6": "MFMAF6Flops",
             "MFMA-F6F4": "MFMAF6F4Flops",
+            "MFMA-MXF8": "MFMAMXF8Flops",
             "MFMA-F8": "MFMAF8Flops",
             "MFMA-F16": "MFMAF16Flops",
             "MFMA-BF16": "MFMABF16Flops",
@@ -95,14 +98,26 @@ class Bench_gfx9(benchmark_base.Bench_base):
         # All other cache and FLOPs definitions are completed in the Bench_base
         # class set_kernel_source()
 
-        # HBM Bandwidth benchmark
+        # HBM Bandwidth benchmark — read-only with non-temporal loads
         self.hbm_bw_src = """
-        template<typename T>
-        __global__ void HBM_bw(T *dst, const T *src)
+        extern "C" __global__ void HBM_bw(__uint128_t *src, long numSteps)
         {
-            const unsigned int gid = blockDim.x * blockIdx.x + threadIdx.x;
-            const unsigned int tid = threadIdx.x;
-            dst[gid] = src[gid];
+            unsigned long offset = (unsigned long)blockIdx.x * blockDim.x
+                                   + threadIdx.x;
+            const unsigned long stride = (unsigned long)gridDim.x * blockDim.x;
+            __uint128_t v = 0;
+
+            #pragma unroll 1
+            for (long step = 0; step < numSteps; step++)
+            {
+                #pragma unroll
+                for (int i = 0; i < 16; i++)
+                {
+                    v |= __builtin_nontemporal_load(&src[offset]);
+                    offset += stride;
+                }
+            }
+            if (v == 0) src[0] = v;
         }
         """
 

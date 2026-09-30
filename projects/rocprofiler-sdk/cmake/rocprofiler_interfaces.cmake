@@ -43,6 +43,9 @@ rocprofiler_add_interface_library(rocprofiler-sdk-release-flags
                                   "Compiler flags for more debug info" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-stack-protector
                                   "Adds stack-protector compiler flags" INTERNAL)
+rocprofiler_add_interface_library(
+    rocprofiler-sdk-sanitizer
+    "Sanitizer instrumentation flags (no --no-undefined link policy)" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-memcheck INTERFACE INTERNAL)
 rocprofiler_add_interface_library(
     rocprofiler-sdk-experimental-flags
@@ -85,6 +88,9 @@ rocprofiler_add_interface_library(rocprofiler-sdk-aqlprofile-external
 rocprofiler_add_interface_library(rocprofiler-sdk-hsakmt
                                   "HSAKMT library for AMD KFD support" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-drm "drm (amdgpu) library" INTERNAL)
+rocprofiler_add_interface_library(
+    rocprofiler-sdk-rocprof-trace-decoder
+    "Provides ATT trace decoder SONAME version compile definitions" INTERNAL)
 
 #
 # "nolink" interface targets emulate another interface target but do not link to the

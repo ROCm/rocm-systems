@@ -3,15 +3,10 @@
 
 #include "link_map.hpp"
 #include "common/path.hpp"
-#include "core/common.hpp"
 #include "core/config.hpp"
-#include "core/timemory.hpp"
-
-#include <timemory/utility/filepath.hpp>
 
 #include "logger/debug.hpp"
 
-#include <cstdint>
 #include <dlfcn.h>
 #include <link.h>
 #include <set>
@@ -31,9 +26,15 @@ const open_modes_vec_t default_link_open_modes = { (RTLD_LAZY | RTLD_NOLOAD),
 std::optional<std::string>
 get_linked_path(const char* _name, open_modes_vec_t&& _open_modes)
 {
-    if(_name == nullptr) return config::get_exe_realpath();
+    if(_name == nullptr)
+    {
+        return config::get_exe_realpath();
+    }
 
-    if(_open_modes.empty()) _open_modes = default_link_open_modes;
+    if(_open_modes.empty())
+    {
+        _open_modes = default_link_open_modes;
+    }
 
     void* _handle = nullptr;
     bool  _noload = false;
@@ -41,7 +42,10 @@ get_linked_path(const char* _name, open_modes_vec_t&& _open_modes)
     {
         _handle = dlopen(_name, _mode);
         _noload = (_mode & RTLD_NOLOAD) == RTLD_NOLOAD;
-        if(_handle) break;
+        if(_handle)
+        {
+            break;
+        }
     }
 
     if(_handle)
@@ -52,7 +56,10 @@ get_linked_path(const char* _name, open_modes_vec_t&& _open_modes)
         {
             return path::realpath(_link_map->l_name);
         }
-        if(_noload == false) dlclose(_handle);
+        if(_noload == false)
+        {
+            dlclose(_handle);
+        }
     }
 
     return std::optional<std::string>{};
@@ -62,7 +69,10 @@ std::set<link_file>
 get_link_map(const char* _lib, const std::string& _exclude_linked_by,
              const std::string& _exclude_re, open_modes_vec_t&& _open_modes)
 {
-    if(_open_modes.empty()) _open_modes = default_link_open_modes;
+    if(_open_modes.empty())
+    {
+        _open_modes = default_link_open_modes;
+    }
 
     auto _get_chain = [&_open_modes](const char* _name) {
         void* _handle = nullptr;
@@ -71,7 +81,10 @@ get_link_map(const char* _lib, const std::string& _exclude_linked_by,
         {
             _handle = dlopen(_name, _mode);
             _noload = (_mode & RTLD_NOLOAD) == RTLD_NOLOAD;
-            if(_handle) break;
+            if(_handle)
+            {
+                break;
+            }
         }
 
         auto _chain = std::set<std::string>{};
@@ -96,7 +109,10 @@ get_link_map(const char* _lib, const std::string& _exclude_linked_by,
                 _next = _next->l_next;
             }
 
-            if(_noload == false) dlclose(_handle);
+            if(_noload == false)
+            {
+                dlclose(_handle);
+            }
         }
         return _chain;
     };
@@ -112,16 +128,20 @@ get_link_map(const char* _lib, const std::string& _exclude_linked_by,
         if(_excl_chain.find(itr) == _excl_chain.end())
         {
             if(_exclude_re.empty() || !std::regex_search(itr, std::regex{ _exclude_re }))
+            {
                 _fini_chain.emplace(itr);
+            }
             else
+            {
                 _excl_chain.emplace(itr);
+            }
         }
     }
 
     auto _name = (!_lib) ? config::get_exe_realpath() : std::string{ _lib };
     for(const auto& itr : _fini_chain)
     {
-        LOG_DEBUG("[linkmap][{}]: {}", filepath::basename(_name), itr.real());
+        LOG_DEBUG("[linkmap][{}]: {}", path::filename(_name), itr.real());
     }
 
     for(const auto& itr : _excl_chain)
@@ -135,22 +155,28 @@ get_link_map(const char* _lib, const std::string& _exclude_linked_by,
 bool
 link_file::operator<(const link_file& _rhs) const
 {
-    if(name == _rhs.name) return false;
+    if(name == _rhs.name)
+    {
+        return false;
+    }
 
     auto _lhs_base = base();
     auto _lhs_real = real();
     auto _rhs_base = _rhs.base();
     auto _rhs_real = _rhs.real();
 
-    if(_lhs_base == _rhs_base || _lhs_real == _rhs_real) return false;
+    if(_lhs_base == _rhs_base || _lhs_real == _rhs_real)
+    {
+        return false;
+    }
 
     return (_lhs_real < _rhs_real);
 }
 
-std::string_view
+std::string
 link_file::base() const
 {
-    return std::string_view{ filepath::basename(name) };
+    return path::filename(name);
 }
 
 std::string

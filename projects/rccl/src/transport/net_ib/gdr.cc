@@ -7,6 +7,7 @@
 
 #include "common.h"
 #include "graph/xml.h"
+#include "gdr_peermem.h"
 
 // Detect whether GDR can work on a given NIC with the current CUDA device
 // Returns :
@@ -14,6 +15,8 @@
 // ncclSystemError : no module or module loaded but not supported by GPU
 #define KNL_MODULE_LOADED(a) ((access(a, F_OK) == -1) ? 0 : 1)
 static int ncclIbGdrModuleLoaded = 0; // 1 = true, 0 = false
+// Set when a platform-specific override (e.g. Hyper-V below) forces GDR off despite a present peermem client.
+static int ncclIbGdrBlocklisted = 0; // 1 = true, 0 = false
 
 // Introduce RCCL_FORCE_ENABLE_GDRDMA to force load GPU-NIC RDMA module
 // Use ONLY for debugging!
@@ -32,54 +35,16 @@ static void ibGdrSupportInitOnce() {
   }
 
   if (ncclIbGdrModuleLoaded == 0) {
-    // Check for `memory_peers` directory containing `amdkfd/version`
-    // This `memory_peers` directory is created by NIC-GPU driver interaction
-    // On Linux kernel 5.15.0 (e.g. Ubuntu 22.04), `memory_peers` is created under `/sys/kernel/mm/`
-    // However, on newer kernels like Ubuntu 24.04.1 (Linux kernel 6.8.0) or Ubuntu 22.04.4 HWE (Linux kernel 6.5.0),
-    // this `memory_peers` directory is either not created (go to else-if condition)
-    // or created under a different path like `/sys/kernel/` or `/sys/` (depending on your ib_peer_mem module)
-    const char* memory_peers_paths[] = {"/sys/kernel/mm/memory_peers/amdkfd/version",
-                                        "/sys/kernel/memory_peers/amdkfd/version", "/sys/memory_peers/amdkfd/version",
-                                        NULL};
-    int i = 0;
-
-    while (memory_peers_paths[i]) {
-      if (access(memory_peers_paths[i], F_OK) == 0) {
-        ncclIbGdrModuleLoaded = 1;
-        INFO(NCCL_INIT, "Found %s", memory_peers_paths[i]);
-        break;
-      } else {
-        ncclIbGdrModuleLoaded = 0;
-      }
-      ++i;
-    }
+    if (ncclIbScanDefaultPeerMemClients()) ncclIbGdrModuleLoaded = 1;
 
     char strValue[MAX_STR_LEN];
-    (void)ncclTopoGetStrFromSys("/sys/devices/virtual/dmi/id", "bios_version", strValue);
-    if (strncmp("Hyper-V UEFI Release", strValue, 20) == 0) {
+    ncclResult_t rc = ncclOsTopoGetStrFromSys("/sys/devices/virtual/dmi/id", "bios_version", strValue, sizeof(strValue));
+    if (rc == ncclSuccess && strncmp("Hyper-V UEFI Release", strValue, 20) == 0) {
       int roMode = ncclParamIbPciRelaxedOrdering();
-      (void)ncclTopoGetStrFromSys("/proc/sys/kernel", "numa_balancing", strValue);
-      if (strcmp(strValue, "1") == 0 && roMode == 0) ncclIbGdrModuleLoaded = 0;
-    }
-
-    if (ncclIbGdrModuleLoaded == 0) {
-      // Check for `ib_register_peer_memory_client` symbol in `/proc/kallsyms`
-      // if your system uses native OS ib_peer module
-      char buf[256];
-      FILE* fp = NULL;
-      fp = fopen("/proc/kallsyms", "r");
-
-      if (fp == NULL) {
-        INFO(NCCL_INIT, "Could not open /proc/kallsyms");
-      } else {
-        while (fgets(buf, sizeof(buf), fp) != NULL) {
-          if (strstr(buf, "t ib_register_peer_memory_client") != NULL ||
-              strstr(buf, "T ib_register_peer_memory_client") != NULL) {
-            ncclIbGdrModuleLoaded = 1;
-            INFO(NCCL_INIT, "Found ib_register_peer_memory_client in /proc/kallsyms");
-            break;
-          }
-        }
+      rc = ncclOsTopoGetStrFromSys("/proc/sys/kernel", "numa_balancing", strValue, sizeof(strValue));
+      if (rc == ncclSuccess && strcmp(strValue, "1") == 0 && roMode == 0) {
+        ncclIbGdrModuleLoaded = 0;
+        ncclIbGdrBlocklisted = 1;
       }
     }
   }
@@ -91,12 +56,20 @@ static void ibGdrSupportInitOnce() {
 #endif
 }
 
-// Returns ncclSuccess if any of the peermem modules are loaded.
+// Returns ncclSuccess if a peermem module is loaded, or a device-0 runtime probe confirms GPU registration works without one.
 ncclResult_t ncclIbGdrSupport() {
   static std::once_flag once;
   std::call_once(once, ibGdrSupportInitOnce);
-  if (!ncclIbGdrModuleLoaded) return ncclSystemError;
-  return ncclSuccess;
+  if (ncclIbGdrModuleLoaded) return ncclSuccess;
+  // Don't probe past a deliberate safety override.
+  if (ncclIbGdrBlocklisted) return ncclSystemError;
+
+  static std::once_flag probeOnce;
+  static bool probeResult = false;
+  std::call_once(probeOnce, []() {
+    probeResult = ncclIbProbeGdrSupport(ncclIbDevs[0].context, ncclIbRelaxedOrderingEnabled) == 1;
+  });
+  return probeResult ? ncclSuccess : ncclSystemError;
 }
 
 static int ncclIbPeerMemModuleLoaded = 0; // 1 = true, 0 = false
@@ -104,7 +77,8 @@ static void ibPeerMemSupportInitOnce() {
   ncclIbPeerMemModuleLoaded = KNL_MODULE_LOADED("/sys/module/nvidia_peermem/version");
 }
 
-// Returns ncclSuccess if nvidia_peermem module is loaded. Does not check legacy implementations of nv_peer_mem (e.g. nv_mem, nv_mem_nc)
+// Returns ncclSuccess if nvidia_peermem module is loaded. Does not check legacy implementations of nv_peer_mem
+// (e.g. nv_mem, nv_mem_nc)
 ncclResult_t ncclIbPeerMemSupport() {
   static std::once_flag once;
   std::call_once(once, ibPeerMemSupportInitOnce);

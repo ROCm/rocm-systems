@@ -332,6 +332,54 @@ add_test(
 
 add_test(
   NAME
+    jpeg-decode-async-fmt-native
+  COMMAND
+    "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocjpeg/samples/jpegDecodeAsync"
+                              "${CMAKE_CURRENT_BINARY_DIR}/jpegDecodeAsync"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "jpegdecodeasync"
+            -i ${ROCM_PATH}/share/rocjpeg/images/
+)
+
+add_test(
+  NAME
+    jpeg-decode-async-fmt-rgb
+  COMMAND
+    "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocjpeg/samples/jpegDecodeAsync"
+                              "${CMAKE_CURRENT_BINARY_DIR}/jpegDecodeAsync"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "jpegdecodeasync"
+            -i ${ROCM_PATH}/share/rocjpeg/images/ -fmt rgb
+)
+
+add_test(
+  NAME
+    jpeg-decode-batch-async-fmt-native
+  COMMAND
+    "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocjpeg/samples/jpegDecodeBatchedAsync"
+                              "${CMAKE_CURRENT_BINARY_DIR}/jpegDecodeBatchedAsync"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "jpegdecodebatchedasync"
+            -i ${ROCM_PATH}/share/rocjpeg/images/
+)
+
+add_test(
+  NAME
+    jpeg-decode-batch-async-fmt-rgb
+  COMMAND
+    "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocjpeg/samples/jpegDecodeBatchedAsync"
+                              "${CMAKE_CURRENT_BINARY_DIR}/jpegDecodeBatchedAsync"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "jpegdecodebatchedasync"
+            -i ${ROCM_PATH}/share/rocjpeg/images/ -fmt rgb
+)
+
+add_test(
+  NAME
     jpeg-negative-api-tests
   COMMAND
     "${CMAKE_CTEST_COMMAND}"

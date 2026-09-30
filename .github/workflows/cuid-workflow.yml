@@ -1,0 +1,215 @@
+name: CUID CI
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'projects/cuid/**'
+      - 'projects/rocprofiler-sdk/source/lib/common/sha256.cpp'
+      - '.github/workflows/cuid-workflow.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+  DEBCONF_NONINTERACTIVE_SEEN: true
+  BUILD_TYPE: Release
+  ROCM_DIR: /opt/rocm
+
+jobs:
+  sha256-drift-check:
+    name: SHA-256 Drift Check
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+    runs-on:
+      - self-hosted
+      - ${{ vars.RUNNER_TYPE }}
+    steps:
+      # Runner workspace (including the top-level dir itself) can be left root-owned by other
+      # container jobs; this job has no host sudo access, so use a throwaway root container
+      # (docker is already required here for build-and-test) to clear it and hand it back.
+      - name: Clean workspace
+        run: |
+          docker run --rm -v "$GITHUB_WORKSPACE":/workspace alpine sh -c \
+            "find /workspace -mindepth 1 -delete && chown $(id -u):$(id -g) /workspace"
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            projects/cuid/tests/check_sha256_drift.py
+            projects/cuid/lib/src/sha256.cc
+            projects/rocprofiler-sdk/source/lib/common/sha256.cpp
+          sparse-checkout-cone-mode: false
+
+      - name: Check for sha256 drift
+        run: python3 projects/cuid/tests/check_sha256_drift.py
+
+  build-and-test:
+    name: Build and Test
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+    runs-on:
+      - self-hosted
+      - ${{ vars.RUNNER_TYPE }}
+    continue-on-error: true
+    strategy:
+      max-parallel: 10
+      matrix:
+        os:
+          - Ubuntu20
+          - Ubuntu22
+          - Debian10
+          - SLES
+          - RHEL8
+          - RHEL9
+          - RHEL10
+          - AzureLinux3
+          - AlmaLinux8
+    container:
+      image: ${{ vars[format('{0}_DOCKER_IMAGE', matrix.os)] }}
+      options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules -u root
+
+    steps:
+      # Container runs as root, so clean any root-owned leftovers before checkout.
+      # GITHUB_WORKSPACE is a bind-mounted directory, not just its contents.
+      - name: Clean workspace
+        run: find "$GITHUB_WORKSPACE" -mindepth 1 -delete
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set Project Directory
+        run: |
+          # Find the directory containing the main CMakeLists.txt for CUID
+          # Prioritize finding it in projects/cuid
+          TARGET_DIR=$(find $GITHUB_WORKSPACE -path "*/projects/cuid/CMakeLists.txt" -exec dirname {} \;)
+
+          if [ -z "$TARGET_DIR" ]; then
+            echo "Could not find CMakeLists.txt in projects/cuid. Searching workspace..."
+            TARGET_DIR=$(find $GITHUB_WORKSPACE -name "CMakeLists.txt" | grep "projects/cuid" | head -n 1 | xargs dirname)
+          fi
+
+          if [ -z "$TARGET_DIR" ]; then
+             echo "Could not find CMakeLists.txt for CUID."
+             exit 1
+          fi
+
+          echo "PROJECT_DIR=$TARGET_DIR" >> $GITHUB_ENV
+
+      - name: Build and Install CUID
+        run: |
+          set -e
+          echo 'Building on ${{ matrix.os }}'
+
+          # Ensure build directory exists
+          BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
+          rm -rf $BUILD_FOLDER
+          mkdir -p $BUILD_FOLDER
+          cd $BUILD_FOLDER
+
+          # Configure
+          cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DBUILD_DAEMON=OFF
+
+          # Build
+          make -j $(nproc)
+
+          # Install
+          # This requires sudo or root, container runs as root
+          make install
+
+          # run post install step
+          /opt/rocm/core/share/amdcuid/amdcuid_postinst.sh
+
+      - name: Run CUID Tests
+        run: |
+          set -e
+          echo 'Running CUID tests on ${{ matrix.os }}'
+
+          OUTPUT_DIR="/tmp/test-results-${{ matrix.os }}"
+          mkdir -p $OUTPUT_DIR
+          TEST_LOG="$OUTPUT_DIR/amdcuid_test.log"
+
+          # Start daemon if present (daemon is not built in this workflow).
+          if [ -x /opt/rocm/core/bin/amdcuid_daemon ]; then
+            /opt/rocm/core/bin/amdcuid_daemon &
+          fi
+          # Run the test binary
+          if /opt/rocm/core/share/amdcuid/tests/amdcuid_test > $TEST_LOG 2>&1; then
+             echo "CUID tests passed"
+          else
+             echo "CUID tests failed"
+             cat $TEST_LOG
+             exit 1
+          fi
+
+      - name: Display Test Results
+        if: always()
+        run: |
+          echo "Displaying CUID test results for ${{ matrix.os }}"
+          cat /tmp/test-results-${{ matrix.os }}/amdcuid_test.log || echo "No CUID test results found for ${{ matrix.os }}"
+
+      - name: Upload Test Results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: cuid-test-results-${{ matrix.os }}
+          path: /tmp/test-results-${{ matrix.os }}
+
+  clang-tidy:
+    name: clang-tidy
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+    runs-on:
+      - self-hosted
+      - ${{ vars.RUNNER_TYPE }}
+    container:
+      # this runs once rather than across full build-and-test matrix
+      image: ${{ vars.Ubuntu22_DOCKER_IMAGE }}
+      options: --rm -u root
+
+    steps:
+      - name: Clean workspace
+        run: find "$GITHUB_WORKSPACE" -mindepth 1 -delete
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set Project Directory
+        run: |
+          # Find the directory containing the main CMakeLists.txt for CUID
+          # Prioritize finding it in projects/cuid
+          TARGET_DIR=$(find $GITHUB_WORKSPACE -path "*/projects/cuid/CMakeLists.txt" -exec dirname {} \;)
+
+          if [ -z "$TARGET_DIR" ]; then
+            echo "Could not find CMakeLists.txt in projects/cuid. Searching workspace..."
+            TARGET_DIR=$(find $GITHUB_WORKSPACE -name "CMakeLists.txt" | grep "projects/cuid" | head -n 1 | xargs dirname)
+          fi
+
+          if [ -z "$TARGET_DIR" ]; then
+             echo "Could not find CMakeLists.txt for CUID."
+             exit 1
+          fi
+
+          echo "PROJECT_DIR=$TARGET_DIR" >> $GITHUB_ENV
+
+      - name: Configure CUID
+        run: |
+          set -e
+
+          # Build daemon so its sources land in compile_commands.json
+          BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
+          rm -rf $BUILD_FOLDER
+          mkdir -p $BUILD_FOLDER
+          cd $BUILD_FOLDER
+
+          cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DBUILD_DAEMON=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          make -j $(nproc)
+
+      - name: Run clang-tidy
+        run: |
+          set -e
+
+          if ! command -v clang-tidy &> /dev/null; then
+            apt-get update && apt-get install -y clang-tidy
+          fi
+
+          cd ${{ env.PROJECT_DIR }}
+          # .clang-tidy at the project root is picked up per-file automatically.
+          clang-tidy -p build $(find lib/src cli daemon -name '*.cc')

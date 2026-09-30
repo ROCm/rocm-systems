@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -31,8 +31,8 @@
 
 #include <dlfcn.h>
 #include <fmt/format.h>
+#include <algorithm>
 #include <fstream>
-#include <mutex>
 
 #include "yaml-cpp/exceptions.h"
 #include "yaml-cpp/node/convert.h"
@@ -75,6 +75,117 @@ findViaEnvironment(const std::string& filename)
     return findViaInstallPath(filename);
 }
 
+std::optional<std::vector<FirmwareRestriction>>
+load_installed_firmware_restrictions()
+{
+    auto fw_restrictions_path = findViaEnvironment("config.yaml");
+
+    if(!common::filesystem::exists(fw_restrictions_path))
+    {
+        ROCP_WARNING << "Counter definitions file '" << fw_restrictions_path
+                     << "' does not exist, skipping firmware validation";
+        return std::nullopt;
+    }
+
+    std::ifstream file(fw_restrictions_path);
+    if(!file.is_open())
+    {
+        ROCP_WARNING << "Failed to open counter definitions file '" << fw_restrictions_path << "'";
+        return std::nullopt;
+    }
+
+    std::string yaml_content((std::istreambuf_iterator<char>(file)),
+                             std::istreambuf_iterator<char>());
+
+    if(yaml_content.empty())
+    {
+        ROCP_INFO << "Counter definitions file '" << fw_restrictions_path << "' is empty";
+        return std::nullopt;
+    }
+
+    ROCP_INFO << "Checking firmware restrictions from '" << fw_restrictions_path << "'";
+
+    auto restrictions = parse_firmware_restrictions(yaml_content);
+    if(!restrictions)
+        ROCP_WARNING << "Failed to parse firmware restrictions from '" << fw_restrictions_path
+                     << "'";
+    return restrictions;
+}
+
+// Parsed once; shared by the startup gate and feature queries.
+const std::optional<std::vector<FirmwareRestriction>>&
+installed_firmware_restrictions()
+{
+    static const auto restrictions = load_installed_firmware_restrictions();
+    return restrictions;
+}
+
+// A restriction applies to an architecture when its affected list is empty
+// (applies to all) or contains that architecture.
+bool
+affects(const FirmwareRestriction& restriction, std::string_view arch)
+{
+    return restriction.affected_architectures.empty() ||
+           std::any_of(restriction.affected_architectures.begin(),
+                       restriction.affected_architectures.end(),
+                       [&](const auto& a) { return arch == a; });
+}
+
+// Select the agent firmware version relevant to a restriction's firmware_type,
+// or nullopt for an unrecognized type.
+std::optional<uint32_t>
+firmware_version(std::string_view type, uint32_t cp, uint32_t sdma)
+{
+    if(type == "CP" || type == "MEC") return cp;
+    if(type == "SDMA") return sdma;
+    return std::nullopt;
+}
+
+bool
+check_agents_against_restrictions(const std::vector<FirmwareRestriction>& restrictions)
+{
+    bool result = true;
+
+    for(const auto* agent : rocprofiler::agent::get_agents())
+    {
+        if(!agent || agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
+
+        const std::string agent_arch = agent->name ? agent->name : "";
+        if(agent_arch.empty())
+        {
+            ROCP_WARNING << "Agent " << agent->node_id << " has no architecture name";
+            continue;
+        }
+
+        for(const auto& restriction : restrictions)
+        {
+            // Feature-scoped floors are queried via agent_supports_feature().
+            if(!restriction.feature.empty()) continue;
+            if(!affects(restriction, agent_arch)) continue;
+
+            auto agent_fw_version = firmware_version(
+                restriction.firmware_type, agent->fw_version.Value, agent->sdma_fw_version.Value);
+            if(!agent_fw_version)
+            {
+                ROCP_WARNING << "Unknown firmware type '" << restriction.firmware_type
+                             << "' in restriction for agent " << agent->node_id;
+                continue;
+            }
+
+            if(*agent_fw_version < restriction.min_version)
+            {
+                ROCP_WARNING << "Agent " << agent->node_id << " (" << agent_arch << ") has "
+                             << restriction.firmware_type << " firmware version "
+                             << *agent_fw_version << " which is below minimum required version "
+                             << restriction.min_version << ". Reason: " << restriction.reason;
+                result = false;
+            }
+        }
+    }
+
+    return result;
+}
+
 }  // namespace
 
 std::optional<std::vector<FirmwareRestriction>>
@@ -84,10 +195,8 @@ parse_firmware_restrictions(const std::string& yaml_content)
 
     try
     {
-        // Parse the YAML content
         YAML::Node root = YAML::Load(yaml_content);
 
-        // Check for required top-level key
         if(!root["rocprofiler-sdk"])
         {
             return std::nullopt;
@@ -95,25 +204,22 @@ parse_firmware_restrictions(const std::string& yaml_content)
 
         YAML::Node sdk_node = root["rocprofiler-sdk"];
 
-        // Check for schema version
         if(!sdk_node["fw-restriction-schema-version"])
         {
             return std::nullopt;
         }
 
-        // For future reference on how to read schema versions:
-        // int schema_version = sdk_node["fw-restriction-schema-version"].as<int>();
-        // if(schema_version != 1)
-        // {
-        //     return std::nullopt;
-        // }
+        // Schema 2 added the optional per-feature `feature` field.
+        const auto schema_version = sdk_node["fw-restriction-schema-version"].as<int>();
+        if(schema_version < 1 || schema_version > 2)
+        {
+            return std::nullopt;
+        }
 
-        // Parse firmware restrictions if present
         if(sdk_node["firmware_restrictions"])
         {
             YAML::Node restrictions = sdk_node["firmware_restrictions"];
 
-            // Iterate through each firmware restriction entry
             for(const auto& fw_entry : restrictions)
             {
                 auto& restriction = result.emplace_back(FirmwareRestriction{});
@@ -127,8 +233,9 @@ parse_firmware_restrictions(const std::string& yaml_content)
                 restriction.min_version   = fw_entry["min_version"].as<uint32_t>();
                 restriction.reason =
                     (fw_entry["reason"] ? fw_entry["reason"].as<std::string>() : std::string{});
+                restriction.feature =
+                    (fw_entry["feature"] ? fw_entry["feature"].as<std::string>() : std::string{});
 
-                // Parse affected architectures
                 if(fw_entry["affected_architectures"])
                 {
                     for(const auto& arch : fw_entry["affected_architectures"])
@@ -149,133 +256,67 @@ parse_firmware_restrictions(const std::string& yaml_content)
 bool
 check_agent_firmware_restrictions(const std::string& yaml_content)
 {
-    bool result = true;  // Assume valid until proven otherwise
-
-    // Parse firmware restrictions from YAML
     auto restrictions_opt = parse_firmware_restrictions(yaml_content);
     if(!restrictions_opt)
     {
         ROCP_WARNING << "Failed to parse firmware restrictions from YAML content";
-        return true;  // If parsing fails, assume no restrictions
+        return true;
     }
 
-    const auto& restrictions = *restrictions_opt;
-    // Get all agents
-    auto agents = rocprofiler::agent::get_agents();
-    // Check each agent against applicable firmware restrictions
-    for(const auto* agent : agents)
-    {
-        if(!agent || agent->type != ROCPROFILER_AGENT_TYPE_GPU)
-        {
-            continue;  // Skip non-GPU agents
-        }
-
-        // Get agent architecture (name field contains gfx architecture)
-        const std::string agent_arch = agent->name ? agent->name : "";
-        if(agent_arch.empty())
-        {
-            ROCP_WARNING << "Agent " << agent->node_id << " has no architecture name";
-            continue;
-        }
-
-        // Check each firmware restriction
-        for(const auto& restriction : restrictions)
-        {
-            // Check if this architecture is affected by this restriction
-            bool is_affected = restriction.affected_architectures.empty();
-            for(const auto& affected_arch : restriction.affected_architectures)
-            {
-                if(agent_arch == affected_arch)
-                {
-                    is_affected = true;
-                    break;
-                }
-            }
-
-            if(!is_affected)
-            {
-                continue;  // This restriction doesn't apply to this architecture
-            }
-
-            // Get firmware version based on type
-            uint32_t agent_fw_version = 0;
-            if(restriction.firmware_type == "CP" || restriction.firmware_type == "MEC")
-            {
-                agent_fw_version = agent->fw_version.Value;
-            }
-            else if(restriction.firmware_type == "SDMA")
-            {
-                agent_fw_version = agent->sdma_fw_version.Value;
-            }
-            else
-            {
-                ROCP_WARNING << "Unknown firmware type '" << restriction.firmware_type
-                             << "' in restriction for agent " << agent->node_id;
-                continue;
-            }
-
-            // Check if firmware version meets minimum requirement
-            if(agent_fw_version < restriction.min_version)
-            {
-                ROCP_WARNING << "Agent " << agent->node_id << " (" << agent_arch << ") has "
-                             << restriction.firmware_type << " firmware version "
-                             << agent_fw_version << " which is below minimum required version "
-                             << restriction.min_version << ". Reason: " << restriction.reason;
-                result = false;
-            }
-        }
-    }
-
-    return result;
+    return check_agents_against_restrictions(*restrictions_opt);
 }
 
 bool
 check_installed_firmware_restrictions()
 {
-    static std::once_flag check_flag;
-    static bool           result = true;
-
-    std::call_once(check_flag, []() {
-        result = true;  // Assume valid until proven otherwise
-
-        // Find the counter definitions YAML file that contains firmware restrictions
-        auto fw_restrictions_path = findViaEnvironment("config.yaml");
-
-        // Check if file exists
-        if(!common::filesystem::exists(fw_restrictions_path))
-        {
-            ROCP_WARNING << "Counter definitions file '" << fw_restrictions_path
-                         << "' does not exist, skipping firmware validation";
-            return;  // No restrictions file means no restrictions
-        }
-
-        // Read the file content
-        std::ifstream file(fw_restrictions_path);
-        if(!file.is_open())
-        {
-            ROCP_WARNING << "Failed to open counter definitions file '" << fw_restrictions_path
-                         << "'";
-            return;  // If we can't read the file, assume no restrictions
-        }
-
-        std::string yaml_content((std::istreambuf_iterator<char>(file)),
-                                 std::istreambuf_iterator<char>());
-        file.close();
-
-        if(yaml_content.empty())
-        {
-            ROCP_INFO << "Counter definitions file '" << fw_restrictions_path
-                      << "' is empty, no restrictions to apply";
-            return;
-        }
-
-        ROCP_INFO << "Checking firmware restrictions from '" << fw_restrictions_path << "'";
-
-        // Use the existing function to perform the actual check
-        result = check_agent_firmware_restrictions(yaml_content);
-    });
+    static const bool result = []() {
+        const auto& restrictions = installed_firmware_restrictions();
+        return restrictions ? check_agents_against_restrictions(*restrictions) : true;
+    }();
 
     return result;
+}
+
+std::optional<bool>
+evaluate_feature_support(const std::vector<FirmwareRestriction>& restrictions,
+                         std::string_view                        agent_arch,
+                         uint32_t                                cp_fw_version,
+                         uint32_t                                sdma_fw_version,
+                         std::string_view                        feature)
+{
+    if(feature.empty()) return std::nullopt;
+
+    bool any_matched = false;
+    bool all_met     = true;
+
+    for(const auto& restriction : restrictions)
+    {
+        if(restriction.feature != feature || !affects(restriction, agent_arch)) continue;
+
+        auto agent_fw_version =
+            firmware_version(restriction.firmware_type, cp_fw_version, sdma_fw_version);
+        if(!agent_fw_version) return std::nullopt;  // malformed applicable entry
+
+        any_matched = true;
+        if(*agent_fw_version < restriction.min_version) all_met = false;
+    }
+
+    if(!any_matched) return std::nullopt;
+    return all_met;
+}
+
+std::optional<bool>
+agent_supports_feature(const rocprofiler_agent_t* agent, std::string_view feature)
+{
+    if(agent == nullptr || agent->type != ROCPROFILER_AGENT_TYPE_GPU || agent->name == nullptr ||
+       agent->name[0] == '\0')
+        return std::nullopt;
+
+    const auto& restrictions = installed_firmware_restrictions();
+    if(!restrictions) return std::nullopt;
+
+    return evaluate_feature_support(
+        *restrictions, agent->name, agent->fw_version.Value, agent->sdma_fw_version.Value, feature);
 }
 
 }  // namespace counters

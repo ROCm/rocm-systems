@@ -290,6 +290,11 @@ hsa_status_t hsa_amd_queue_create(hsa_agent_t agent,
                                   uint32_t num_descs);
 
 // Mirrors Amd Extension Apis
+hsa_status_t hsa_amd_agent_set_attribute(hsa_agent_t agent,
+                                         hsa_amd_agent_attribute_t attribute,
+                                         void* value);
+
+// Mirrors Amd Extension Apis
 hsa_status_t hsa_amd_register_deallocation_callback(
     void* ptr, hsa_amd_deallocation_callback_t callback, void* user_data);
 
@@ -428,6 +433,13 @@ hsa_status_t HSA_API hsa_amd_counted_queue_release(hsa_queue_t* queue);
 hsa_status_t HSA_API hsa_amd_svm_discard_batch_async(void** ptrs, size_t* sizes, uint32_t count,
                                                uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
                                                hsa_signal_t completion_signal);
+
+// Mirrors Amd Extension Apis
+hsa_status_t HSA_API hsa_amd_svm_discard_and_prefetch_batch_async(
+    void** ptrs, size_t* sizes, uint32_t count,
+    const hsa_agent_t* dst_agents, uint32_t num_dst_agents,
+    uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
+    hsa_signal_t completion_signal);
 
 // Mirrors Amd Extension Apis
 hsa_status_t HSA_API hsa_amd_enable_logging(uint8_t* flags, void* file);

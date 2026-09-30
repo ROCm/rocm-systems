@@ -12,11 +12,7 @@
 #include <timemory/hash/types.hpp>
 #include <timemory/mpl/type_traits.hpp>
 
-namespace rocprofsys
-{
-namespace causal
-{
-namespace component
+namespace rocprofsys::causal::component
 {
 namespace
 {
@@ -48,7 +44,10 @@ std::unordered_map<tim::hash_value_t, progress_point>
 progress_point::get_progress_points()
 {
     auto _data = std::unordered_map<tim::hash_value_t, progress_point>{};
-    if(!get_progress_map()) return _data;
+    if(!get_progress_map())
+    {
+        return _data;
+    }
     for(const auto& titr : *get_progress_map())
     {
         for(const auto& itr : titr)
@@ -148,7 +147,10 @@ progress_point::get_delta() const
 std::int64_t
 progress_point::get_arrival() const
 {
-    if(!is_latency_point()) return m_arrival;
+    if(!is_latency_point())
+    {
+        return m_arrival;
+    }
     // when it is a latency point, we want the difference to be greater than zero
     return (m_arrival >= m_departure) ? (m_arrival + 1) : m_arrival;
 }
@@ -179,13 +181,9 @@ progress_point::print(std::ostream& os) const
     os << tim::get_hash_identifier(m_hash) << " :: ";
     tim::operation::base_printer<progress_point>(os, *this);
 }
-}  // namespace component
-}  // namespace causal
-}  // namespace rocprofsys
+}  // namespace rocprofsys::causal::component
 
-namespace tim
-{
-namespace operation
+namespace tim::operation
 {
 namespace causal = rocprofsys::causal;
 
@@ -216,5 +214,4 @@ pop_node<causal::component::progress_point>::operator()(type& _obj, std::int64_t
         *itr += _obj;
     }
 }
-}  // namespace operation
-}  // namespace tim
+}  // namespace tim::operation

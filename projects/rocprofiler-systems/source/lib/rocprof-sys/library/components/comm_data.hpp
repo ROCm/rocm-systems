@@ -32,9 +32,7 @@
 ROCPROFSYS_COMPONENT_ALIAS(comm_data_tracker_t,
                            ::tim::component::data_tracker<float, project::rocprofsys>)
 
-namespace rocprofsys
-{
-namespace component
+namespace rocprofsys::component
 {
 using gotcha_data = ::tim::component::gotcha_data;
 
@@ -185,7 +183,7 @@ struct comm_data : base<comm_data, void>
 private:
     static auto& add(tracker_t& _t, data_type value)
     {
-        if(rocprofsys::get_state() != rocprofsys::State::Active)
+        if(rocprofsys::state::process::get() != rocprofsys::state::process::Active)
         {
             _t.invoke<operation::set_is_invalid>(true);
             return _t;
@@ -212,5 +210,4 @@ private:
         return add(_t, value);
     }
 };
-}  // namespace component
-}  // namespace rocprofsys
+}  // namespace rocprofsys::component

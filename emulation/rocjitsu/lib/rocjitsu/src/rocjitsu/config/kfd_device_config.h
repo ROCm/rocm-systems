@@ -8,9 +8,21 @@
 #define ROCJITSU_CONFIG_KFD_DEVICE_CONFIG_H_
 
 #include <cstdint>
+#include <optional>
 #include <string>
 
 namespace rocjitsu::config {
+
+/// @brief Per-field topology values explicitly supplied by configuration.
+struct KfdDiscoveryOverrides {
+  std::optional<uint32_t> max_waves_per_simd;
+  std::optional<uint32_t> num_shader_engines;
+  std::optional<uint32_t> num_shader_arrays_per_engine;
+  std::optional<uint32_t> num_cu_per_sh;
+  std::optional<uint32_t> wave_front_size;
+  std::optional<uint32_t> max_slots_scratch_cu;
+  std::optional<uint32_t> lds_size_kb;
+};
 
 /// @brief KFD device identity extracted from vm.gpu.device or dbt_guest.guest_device.
 ///
@@ -31,7 +43,10 @@ struct KfdDeviceConfig {
   uint32_t pci_revision_id = 0;     ///< PCI config-space revision id.
   uint32_t simd_count = 0;          ///< Total SIMD units exposed in KFD properties.
   uint32_t max_waves_per_simd = 10; ///< Maximum waves per SIMD.
-  uint32_t num_shader_engines = 0;  ///< KFD array_count: total shader arrays.
+  uint32_t num_shader_engines = 0;  ///< Shader engines per XCC, matching the
+                                    ///< simulated SoC's se[] count. KFD's
+                                    ///< array_count is derived from this and
+                                    ///< num_shader_arrays_per_engine.
   uint32_t num_shader_arrays_per_engine = 1; ///< Shader arrays per shader engine.
   uint32_t num_cu_per_sh = 0;                ///< Compute units per shader array.
   uint32_t simd_per_cu = 4;                  ///< SIMD units per compute unit.
@@ -48,7 +63,7 @@ struct KfdDeviceConfig {
   uint32_t l2_size_kb = 4096;                ///< L2 cache size in KiB.
   uint32_t l2_line_size = 128;               ///< L2 cache line size in bytes.
   uint32_t l2_assoc = 16;                    ///< L2 cache associativity.
-  uint32_t num_sdma_engines = 2;             ///< SDMA engine count.
+  uint32_t num_sdma_engines = 0;             ///< SDMA engine count.
   uint32_t num_sdma_xgmi_engines = 0;        ///< XGMI SDMA engine count.
   uint32_t num_cp_queues = 128;              ///< Hardware queue count.
   uint32_t max_engine_clk_fcompute = 2100;   ///< Maximum compute clock in MHz.
@@ -59,6 +74,8 @@ struct KfdDeviceConfig {
   uint32_t capability2 = 0;                  ///< KFD debug capability2 bits, or 0 to derive.
   uint64_t debug_prop = 0;                   ///< KFD debug_prop bits, or 0 to derive.
   bool present = false;                      ///< True if device section existed in config.
+  uint32_t num_sdma_queues_per_engine = 0;   ///< Regular SDMA queues per engine.
+  KfdDiscoveryOverrides discovery_overrides; ///< Explicit PCI discovery topology overrides.
 };
 
 } // namespace rocjitsu::config

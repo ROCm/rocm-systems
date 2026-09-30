@@ -504,9 +504,10 @@ TEST(rocprofiler_lib, buffer_registration_lambda_with_result)
     // expected callback count is two for hsa_iterate_agents and two callbacks for
     // hsa_agent_get_info for each agent.
     uint64_t expected_cb_count = 1 + _agent_data.agent_count;
-    // expect the tool init, tool fini, and two calls to thread_precreate and thread_postcreate each
-    // (the main thread and the assigned thread for the buffer)
-    uint64_t expected_workflow_count = 6;
+    // expect the tool init, tool fini, and a precreate and postcreate for each internal thread:
+    // the main thread, the buffer's assigned thread, the completion monitor, and the monitor's
+    // record emitter.
+    uint64_t expected_workflow_count = 10;
 
     EXPECT_EQ(cb_data.client_workflow_count, expected_workflow_count);
     EXPECT_EQ(cb_data.client_callback_count, expected_cb_count);

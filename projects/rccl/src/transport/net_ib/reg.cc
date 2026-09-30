@@ -7,8 +7,8 @@
 
 #include "common.h"
 
-ncclResult_t ncclIbRegMrDmaBufInternal(ncclIbNetCommDevBase* base, void* data, size_t size, int type, uint64_t offset,
-                                       int fd, ibv_mr** mhandle) {
+ncclResult_t ncclIbRegMrDmaBufInternal2(ncclIbNetCommDevBase* base, void* data, size_t size, int type, uint64_t offset,
+                                        int fd, uint64_t mrFlags, ibv_mr** mhandle) {
   static thread_local uintptr_t pageSize = 0;
   if (pageSize == 0) pageSize = sysconf(_SC_PAGESIZE);
   struct ncclIbMrCache* cache = &ncclIbDevs[base->ibDevN].mrCache;
@@ -23,18 +23,17 @@ ncclResult_t ncclIbRegMrDmaBufInternal(ncclIbNetCommDevBase* base, void* data, s
       }
       // Deregister / register
       struct ibv_mr* mr;
-      // REMOTE_ATOMIC required for GIN proxy atomic fetch-add on signal MR;
-      // without it mlx5 returns WC_REM_ACCESS_ERR (vendor_err 0x88).
       unsigned int flags =
         IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_ATOMIC;
-      if (ncclIbRelaxedOrderingEnabled) flags |= IBV_ACCESS_RELAXED_ORDERING;
+      bool relaxedOrdering = ncclIbRelaxedOrderingEnabled && (mrFlags & NCCL_NET_MR_FLAG_FORCE_SO) == 0;
+      if (relaxedOrdering) flags |= IBV_ACCESS_RELAXED_ORDERING;
       if (fd != -1) {
         /* DMA-BUF support. Prefer mlx5 data-direct when advertised, but fall back
          * to ibv_reg_dmabuf_mr when libmlx5 lacks mlx5dv_reg_dmabuf_mr (ROCM-30069). */
         NCCLCHECK(wrap_reg_dmabuf_mr(&mr, base->pd, offset, pages * pageSize, addr, fd, flags,
                                      ncclIbDevs[base->ibDevN].capsProvider.mlx5.dataDirect));
       } else {
-        if (ncclIbRelaxedOrderingEnabled) {
+        if (relaxedOrdering) {
           // Use IBVERBS_1.8 API - needed for IBV_ACCESS_RELAXED_ORDERING support
           NCCLCHECK(wrap_ibv_reg_mr_iova2(&mr, base->pd, (void*)addr, pages * pageSize, addr, flags));
         } else {
@@ -63,19 +62,20 @@ ncclResult_t ncclIbRegMrDmaBufInternal(ncclIbNetCommDevBase* base, void* data, s
 }
 
 /* DMA-BUF support */
-ncclResult_t ncclIbRegMrDmaBuf(void* comm, void* data, size_t size, int type, uint64_t offset, int fd, void** mhandle) {
+ncclResult_t ncclIbRegMrDmaBufInternal(void* comm, void* data, size_t size, int type, uint64_t offset, int fd,
+                                       uint64_t mrFlags, void** mhandle) {
   ncclResult_t ret = ncclSuccess;
-  assert(size > 0);
+  if (size == 0) {
+    WARN("NET/IB: Invalid memory registration size %zu, expected > 0", size);
+    return ncclInternalError;
+  }
   struct ncclIbNetCommBase* base = (struct ncclIbNetCommBase*)comm;
   struct ncclIbMrHandle* mhandleWrapper = (struct ncclIbMrHandle*)malloc(sizeof(struct ncclIbMrHandle));
-  if (mhandleWrapper == nullptr) {
-    WARN("Failed to allocate IB MR handle wrapper");
-    return ncclSystemError;
-  }
   for (int i = 0; i < base->vProps.ndevs; i++) {
     // Each ncclIbNetCommDevBase is at different offset in send and recv netComms
     struct ncclIbNetCommDevBase* devComm = ncclIbGetNetCommDevBase(base, i);
-    NCCLCHECKGOTO(ncclIbRegMrDmaBufInternal(devComm, data, size, type, offset, fd, mhandleWrapper->mrs + i), ret, fail);
+    NCCLCHECKGOTO(ncclIbRegMrDmaBufInternal2(devComm, data, size, type, offset, fd, mrFlags, mhandleWrapper->mrs + i),
+                  ret, fail);
   }
   *mhandle = (void*)mhandleWrapper;
 exit:
@@ -85,8 +85,12 @@ fail:
   goto exit;
 }
 
+ncclResult_t ncclIbRegMrDmaBuf(void* comm, void* data, size_t size, int type, uint64_t offset, int fd, void** mhandle) {
+  return ncclIbRegMrDmaBufInternal(comm, data, size, type, offset, fd, 0ULL, mhandle);
+}
+
 ncclResult_t ncclIbRegMr(void* comm, void* data, size_t size, int type, void** mhandle) {
-  return ncclIbRegMrDmaBuf(comm, data, size, type, 0ULL, -1, mhandle);
+  return ncclIbRegMrDmaBufInternal(comm, data, size, type, 0ULL, -1, 0, mhandle);
 }
 
 ncclResult_t ncclIbDeregMrInternal(ncclIbNetCommDevBase* base, ibv_mr* mhandle) {

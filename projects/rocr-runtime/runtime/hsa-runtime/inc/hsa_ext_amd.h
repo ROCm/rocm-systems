@@ -82,9 +82,12 @@
  * - 1.28 - hsa_amd_agent_info_t: HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED
  * - 1.29 - hsa_amd_image_create_v2, hsa_amd_interop_map_buffer_with_size
  * - 1.30 - hsa_amd_queue_get_info: engine type and SDMA engine ID
+ * - 1.31 - hsa_amd_queue_get_info: queue read/write pointer addresses
+ * - 1.32 - hsa_amd_svm_discard_and_prefetch_batch_async
+ * - 1.33 - hsa_amd_agent_set_attribute: GL2 persisting cache size control
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 30
+#define HSA_AMD_INTERFACE_VERSION_MINOR 33
 
 #ifdef __cplusplus
 extern "C" {
@@ -989,6 +992,18 @@ typedef enum hsa_amd_agent_info_s {
    * Use HSA_AMD_SYSTEM_INFO_HOST_ALLOC_DMA_BUF_SUPPORTED instead.
    */
   HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED = 0xA124,
+  /**
+   * Returns the last value set by
+   * HSA_AMD_AGENT_ATTRIBUTE_REQUEST_PERSISTING_L2_CACHE_SIZE, default 0.
+   * The type of this attribute is size_t.
+   */
+  HSA_AMD_AGENT_INFO_REQUEST_PERSISTING_L2_CACHE_SIZE = 0xA125,
+  /**
+   * Returns the maximum supported persisting L2 cache size on this HW in bytes.
+   * The type of this attribute is size_t.
+   */
+  HSA_AMD_AGENT_INFO_MAX_PERSISTING_L2_CACHE_SIZE = 0xA126
+
 } hsa_amd_agent_info_t;
 
 /**
@@ -1600,6 +1615,13 @@ typedef struct hsa_amd_image_descriptor_s {
   uint32_t data[1];
 } hsa_amd_image_descriptor_t;
 
+// Value stamped into hsa_amd_image_descriptor_t::version to mark a descriptor whose data[] holds an
+// opaque surface-metadata blob (not a full SRD) that the gfx image manager must interpret to
+// reconstruct the SRD (Windows Vulkan image interop, where the AMD driver exposes no SRD-query
+// extension). Disjoint from the small SRD-format versions (1, ...) used when data[0..7] already hold
+// a full driver SRD (GL/D3D/Linux). "WMDS" in ASCII.
+#define HSA_AMD_IMAGE_DESC_VERSION_WDDM_SURFACE_METADATA 0x574D4453u
+
 /**
  * @brief Creates an image from an opaque vendor specific image format.
  * Does not modify data at image_data.  Intended initially for
@@ -1950,18 +1972,22 @@ typedef enum hsa_amd_memory_pool_flag_s {
    * Allocates fine grain memory type where memory ordering is per point to point
    * connection. Atomic memory operations on these memory buffers are not
    * guaranteed to be visible at system scope.
+   * Honored by ::hsa_amd_memory_pool_allocate and ::hsa_amd_vmem_handle_create.
    */
   HSA_AMD_MEMORY_POOL_PCIE_FLAG = (1 << 0),
   /**
-   *  Allocates physically contiguous memory
+   *  Allocates physically contiguous memory.
+   *  Honored by ::hsa_amd_memory_pool_allocate and ::hsa_amd_vmem_handle_create.
    */
   HSA_AMD_MEMORY_POOL_CONTIGUOUS_FLAG = (1 << 1),
   /**
-   *  Allocates executable memory
+   *  Allocates executable memory.
+   *  Honored by ::hsa_amd_memory_pool_allocate and ::hsa_amd_vmem_handle_create.
    */
   HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG = (1 << 2),
   /**
-   *  Allocates uncached memory
+   *  Allocates uncached memory. Honored by ::hsa_amd_memory_pool_allocate and
+   *  ::hsa_amd_vmem_handle_create.
    */
   HSA_AMD_MEMORY_POOL_UNCACHED_FLAG = (1 << 3),
 } hsa_amd_memory_pool_flag_t;
@@ -4280,6 +4306,37 @@ hsa_status_t HSA_API hsa_amd_svm_discard_batch_async(void** ptrs, size_t* sizes,
                                                      const hsa_signal_t* dep_signals,
                                                      hsa_signal_t completion_signal);
 
+/**
+ * @brief Discards a batch of SVM memory ranges and prefetches them to a GPU agent.
+ * Combines discard and prefetch into a single operation.
+ *
+ * @param[in] ptrs            Array of @p count SVM range pointers to discard and prefetch.
+ *                            Must not be NULL.
+ * @param[in] sizes           Array of @p count range sizes in bytes. Must not be NULL.
+ * @param[in] count           Number of ranges. Must not be 0.
+ * @param[in] dst_agents      Array of @p num_dst_agents destination GPU agents.
+ *                            Must not be NULL. All entries must be valid GPU agents.
+ * @param[in] num_dst_agents  Number of entries in @p dst_agents. Must not be 0.
+ * @param[in] num_dep_signals Number of dependency signals. Can be 0.
+ * @param[in] dep_signals     Dependency signals to wait on before starting. Can be NULL
+ *                            when @p num_dep_signals is 0.
+ * @param[in] completion_signal Signal decremented on completion. May be null.
+ *
+ * @retval ::HSA_STATUS_SUCCESS Operation scheduled successfully.
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED HSA runtime not initialized.
+ * @retval ::HSA_STATUS_ERROR_INVALID_AGENT An entry in @p dst_agents is not a valid
+ *         GPU agent.
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p ptrs, @p sizes, @p dst_agents
+ *         is NULL; @p count or @p num_dst_agents is 0; @p dep_signals and @p num_dep_signals are
+ *         inconsistent; or a pointer was not allocated with hsa_amd_vmem_address_reserve.
+ * @retval ::HSA_STATUS_ERROR_XNACK_DISABLED XNACK is not enabled on this system.
+ */
+hsa_status_t HSA_API hsa_amd_svm_discard_and_prefetch_batch_async(
+    void** ptrs, size_t* sizes, uint32_t count,
+    const hsa_agent_t* dst_agents, uint32_t num_dst_agents,
+    uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
+    hsa_signal_t completion_signal);
+
 /** @} */
 
 /** \addtogroup profile Profiling
@@ -4338,6 +4395,25 @@ hsa_status_t hsa_amd_spm_release(hsa_agent_t preferred_agent);
 hsa_status_t hsa_amd_spm_set_dest_buffer(hsa_agent_t preferred_agent, size_t size_in_bytes,
                                          uint32_t* timeout, uint32_t* size_copied, void* dest,
                                          bool* is_data_loss);
+
+
+/** @} */
+
+/** \addtogroup hsa agent attribute
+ *  @{
+ */
+typedef enum hsa_amd_agent_attribute_s {
+  /**
+   * Requested persisting L2 cache size in bytes.
+   * The type of this attribute is size_t.
+   */
+  HSA_AMD_AGENT_ATTRIBUTE_REQUEST_PERSISTING_L2_CACHE_SIZE,
+
+} hsa_amd_agent_attribute_t;
+
+hsa_status_t HSA_API hsa_amd_agent_set_attribute(hsa_agent_t agent,
+                                                 hsa_amd_agent_attribute_t attribute,
+                                                 void* value);
 
 /** @} */
 
@@ -4558,7 +4634,10 @@ typedef enum {
  * @param[in] pool memory to use.
  * @param[in] size of the memory allocation
  * @param[in] type of memory
- * @param[in] flags - currently unsupported
+ * @param[in] flags A bit-field of ::hsa_amd_memory_pool_flag_t allocation
+ * directives. ::HSA_AMD_MEMORY_POOL_PCIE_FLAG,
+ * ::HSA_AMD_MEMORY_POOL_CONTIGUOUS_FLAG, ::HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG,
+ * and ::HSA_AMD_MEMORY_POOL_UNCACHED_FLAG are honored.
  * @param[out] memory_handle - handle for the allocation
  *
  * @retval ::HSA_STATUS_SUCCESS memory allocated successfully
@@ -4696,7 +4775,7 @@ hsa_status_t hsa_amd_vmem_get_access(void* va, hsa_access_permission_t* perms,
  *
  * @param[out] dmabuf_fd shareable handle
  * @param[in] handle previously allocated virtual memory handle
- * @param[in] flags Currently unsupported
+ * @param[in] flags Bitmask of hsa_amd_dma_buf_mapping_type_t flags.
  *
  * @retval ::HSA_STATUS_SUCCESS
  *
@@ -4942,6 +5021,18 @@ typedef enum {
    * The type of this attribute is uint32_t.
    */
   HSA_AMD_QUEUE_INFO_SDMA_ENGINE_ID,
+  /*
+   * Address of the queue's monotonic hardware read pointer. The returned
+   * uint64_t contains an address usable by agents that can directly submit to
+   * this queue. Unsupported queue types return HSA_STATUS_ERROR_INVALID_ARGUMENT.
+   */
+  HSA_AMD_QUEUE_INFO_READ_POINTER,
+  /*
+   * Address of the queue's canonical monotonic write pointer. The returned
+   * uint64_t contains an address usable by agents that can directly submit to
+   * this queue. Unsupported queue types return HSA_STATUS_ERROR_INVALID_ARGUMENT.
+   */
+  HSA_AMD_QUEUE_INFO_WRITE_POINTER,
 } hsa_queue_info_attribute_t;
 
 hsa_status_t hsa_amd_queue_get_info(hsa_queue_t* queue, hsa_queue_info_attribute_t attribute,

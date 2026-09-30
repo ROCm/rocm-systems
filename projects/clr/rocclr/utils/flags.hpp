@@ -22,8 +22,6 @@ release(bool, AMD_LOG_ASYNC, true,                                            \
         "Async logging with in-memory buffer and background thread (set 0 to disable)")\
 debug(uint, DEBUG_GPU_FLAGS, 0,                                               \
         "The debug options for GPU device")                                   \
-release(size_t, CQ_THREAD_STACK_SIZE, 256*Ki, /* @todo: that much! */         \
-        "The default command queue thread stack size")                        \
 release(int, GPU_MAX_WORKGROUP_SIZE, 0,                                       \
         "Maximum number of workitems in a workgroup for GPU, 0 -use default") \
 debug(bool, CPU_MEMORY_GUARD_PAGES, false,                                    \
@@ -110,8 +108,8 @@ release(bool, DISABLE_DEFERRED_ALLOC, false,                                  \
         "Disables deferred memory allocation on device")                      \
 release(int, AMD_GPU_FORCE_SINGLE_FP_DENORM, -1,                              \
         "Force denorm for single precision: -1 - don't force, 0 - disable, 1 - enable") \
-release(uint, OCL_SET_SVM_SIZE, 256*1024,                                     \
-        "set SVM space size for discrete GPU")                                \
+release(uint, OCL_SET_SVM_SIZE, 4 * 1024 * 1024,                              \
+        "Set SVM space size for discrete GPU (MiB)")                          \
 release(uint, GPU_WAVES_PER_SIMD, 0,                                          \
         "Force the number of waves per SIMD (1-10)")                          \
 release(bool, OCL_STUB_PROGRAMS, false,                                       \
@@ -141,6 +139,8 @@ release(uint, GPU_MAX_COMMAND_BUFFERS, 8,                                     \
          "The maximum number of command buffers allocated per queue")         \
 release(uint, GPU_MAX_HW_QUEUES, 4,                                           \
          "The maximum number of HW queues allocated per device")              \
+release(bool, DEBUG_CLR_AQL_BARRIER_OPT, true,                                \
+        "Enable per-stream AQL barrier-bit optimization on shared HW queues") \
 release(bool, GPU_IMAGE_BUFFER_WAR, true,                                     \
         "Enables image buffer workaround")                                    \
 release(cstring, HIP_VISIBLE_DEVICES, "",                                     \
@@ -223,8 +223,6 @@ release(bool, ROC_SKIP_KERNEL_ARG_COPY, false,                                \
         "If true, then runtime can skip kernel arg copy")                     \
 release(bool, GPU_STREAMOPS_CP_WAIT, false,                                   \
         "Force the stream wait memory operation to wait on CP.")              \
-release(bool, HIPRTC_USE_RUNTIME_UNBUNDLER, false,                            \
-        "Set this to true to force runtime unbundler in hiprtc.")             \
 release(size_t, HIP_INITIAL_DM_SIZE, 8 * Mi,                                  \
         "Set initial heap size for device malloc.")                           \
 release(bool, HIP_FORCE_DEV_KERNARG, true,                                    \
@@ -265,8 +263,8 @@ release(bool, DEBUG_CLR_SYSMEM_POOL, false,                                   \
 release(uint, DEBUG_HIP_DYNAMIC_QUEUES, 1,                                    \
         "Dynamic queue management: 0=off, 1=Depth heuristic,"                 \
         " 2=1 + dedicated null-stream queue")                                 \
-release(bool, DEBUG_HIP_IGNORE_STREAM_PRIORITY, false,                        \
-        "Ignore priority streams")                                            \
+release(bool, DEBUG_HIP_IGNORE_STREAM_PRIORITY, true,                         \
+        "Treat all streams as normal priority")                               \
 release(uint, HIP_SKIP_ABORT_ON_GPU_ERROR, true,                              \
         "Set this to true, to avoid host side abort for GPU errors")          \
 release(bool, HIP_FORCE_SPIRV_CODEOBJECT, false,                              \
@@ -292,6 +290,8 @@ release(uint, DEBUG_CLR_AQL_DEV_QUEUE, 0,                                     \
 release(uint, DEBUG_CLR_USE_MOVDIR64B, 1,                                     \
         "Use MOVDIR64B full-packet writes for AQL + metadata rings"           \
         "(1=enabled (default), 0=non-temporal store path)")                   \
+release(bool, DEBUG_CLR_ENABLE_KDQ, true,                                     \
+        "Kernel dispatch metadata (prefetch) queue, 0 = disable")             \
 
 namespace amd {
 

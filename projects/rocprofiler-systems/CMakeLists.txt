@@ -275,8 +275,8 @@ rocprofiler_systems_add_option(ROCPROFSYS_BUILD_SPDLOG
     "Enable building spdlog library internally" ON
 )
 
-rocprofiler_systems_add_option(ROCPROFSYS_BUILD_SQLITE3
-    "Enable building sqlite3 library internally" ON
+rocprofiler_systems_add_option(ROCPROFSYS_BUILD_FMT
+    "Enable building fmt library internally" ON
 )
 
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_GTEST
