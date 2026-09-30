@@ -889,10 +889,7 @@ hsa_status_t Runtime::GetSystemInfo(hsa_system_info_t attribute, void* value) {
       break;
     }
     case HSA_AMD_SYSTEM_INFO_SVM_ACCESSIBLE_BY_DEFAULT: {
-      bool ret = true;
-      for (auto agent : gpu_agents_)
-        ret &= (agent->supported_isas()[0]->GetXnack() == IsaFeature::Enabled);
-      *(bool*)value = ret;
+      *(bool*)value = core::Runtime::runtime_singleton_->XnackEnabled();
       break;
     }
     case HSA_AMD_SYSTEM_INFO_MWAITX_ENABLED: {
