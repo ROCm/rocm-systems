@@ -4,6 +4,132 @@
 include(rj_configure_target)
 include(rj_find_amdcxx)
 
+# The probe entry point lives in librocjitsu.so under BUILD_TESTING, allowing
+# this standalone driver to observe the actual shared-image/provider boundary.
+if(BUILD_TESTING AND TARGET rocjitsu_shared AND TARGET rocjitsu_x86_v4)
+    add_executable(
+        cdna5_wmma_provider_probe
+        cdna5_wmma_provider_probe_driver.cpp
+    )
+    target_link_libraries(
+        cdna5_wmma_provider_probe
+        PRIVATE rocjitsu_shared ${CMAKE_DL_LIBS}
+    )
+    rj_configure_target(cdna5_wmma_provider_probe PRIVATE_INCLUDES WARNINGS)
+    add_dependencies(cdna5_wmma_provider_probe rocjitsu_x86_v4)
+
+    add_test(
+        NAME Cdna5WmmaProviderProbe
+        COMMAND $<TARGET_FILE:cdna5_wmma_provider_probe> all 100 0 any
+    )
+    add_test(
+        NAME Cdna5WmmaProviderV3
+        COMMAND $<TARGET_FILE:cdna5_wmma_provider_probe> all 0 0 main
+    )
+    set_tests_properties(
+        Cdna5WmmaProviderV3
+        PROPERTIES ENVIRONMENT "RJ_CDNA5_WMMA_BACKEND=v3"
+    )
+    add_test(
+        NAME Cdna5WmmaProviderScalar
+        COMMAND $<TARGET_FILE:cdna5_wmma_provider_probe> all 0 0 main
+    )
+    set_tests_properties(
+        Cdna5WmmaProviderScalar
+        PROPERTIES ENVIRONMENT "RJ_FORCE_SCALAR=1"
+    )
+    add_test(
+        NAME Cdna5WmmaProviderV4
+        COMMAND $<TARGET_FILE:cdna5_wmma_provider_probe> all 0 0 provider
+    )
+    set_tests_properties(
+        Cdna5WmmaProviderV4
+        PROPERTIES
+            ENVIRONMENT
+                "RJ_CDNA5_WMMA_BACKEND=v4;RJ_MATH_BACKEND=auto;RJ_FORCE_SCALAR=0"
+            SKIP_RETURN_CODE 77
+    )
+
+    # Unlike the object-composed FP unit tests, this driver exercises decoded
+    # instructions and selected wave callbacks in the actual shared image.
+    add_executable(fp_math_provider_probe fp_math_provider_probe_driver.cpp)
+    target_link_libraries(
+        fp_math_provider_probe
+        PRIVATE rocjitsu_shared ${CMAKE_DL_LIBS}
+    )
+    rj_configure_target(fp_math_provider_probe PRIVATE_INCLUDES WARNINGS)
+
+    foreach(
+        _mode
+        IN
+        ITEMS Auto V3 Scalar ForceScalar V4
+    )
+        string(TOLOWER "${_mode}" _argument)
+        set(_backend "${_argument}")
+        set(_force_scalar 0)
+        if(_mode STREQUAL "ForceScalar")
+            set(_argument "force-scalar")
+            set(_backend "v4")
+            set(_force_scalar 1)
+        endif()
+        add_test(
+            NAME FpMathProvider${_mode}
+            COMMAND $<TARGET_FILE:fp_math_provider_probe> "${_argument}"
+        )
+        set_tests_properties(
+            FpMathProvider${_mode}
+            PROPERTIES
+                ENVIRONMENT
+                    "RJ_MATH_BACKEND=${_backend};RJ_FORCE_SCALAR=${_force_scalar};RJ_CDNA5_WMMA_BACKEND=v3"
+                SKIP_RETURN_CODE 77
+                TIMEOUT 60
+        )
+    endforeach()
+
+    add_library(
+        fp_math_provider_invalid
+        SHARED
+        fp_math_provider_probe_driver.cpp
+    )
+    target_compile_definitions(
+        fp_math_provider_invalid
+        PRIVATE ROCJITSU_FP_MATH_PROBE_INVALID_PROVIDER=1
+    )
+    target_link_libraries(fp_math_provider_invalid PRIVATE simdojo_headers)
+    set_target_properties(
+        fp_math_provider_invalid
+        PROPERTIES
+            OUTPUT_NAME rocjitsu_x86_v4
+            LIBRARY_OUTPUT_DIRECTORY
+                "${CMAKE_CURRENT_BINARY_DIR}/invalid_fp_math_provider"
+    )
+    rj_configure_target(fp_math_provider_invalid PRIVATE_INCLUDES WARNINGS HIDDEN)
+    add_dependencies(
+        fp_math_provider_probe
+        rocjitsu_x86_v4
+        fp_math_provider_invalid
+    )
+    foreach(_fixture IN ITEMS missing mismatch)
+        foreach(_mode IN ITEMS auto v4 wmma-auto wmma-v4)
+            add_test(
+                NAME FpMathProvider.${_fixture}.${_mode}
+                COMMAND
+                    $<TARGET_FILE:fp_math_provider_probe> --fixture
+                    "${_fixture}" "${_mode}"
+                    $<TARGET_FILE:fp_math_provider_invalid>
+            )
+            set_tests_properties(
+                FpMathProvider.${_fixture}.${_mode}
+                PROPERTIES
+                    ENVIRONMENT
+                        "RJ_MATH_BACKEND=auto;RJ_FORCE_SCALAR=0;RJ_CDNA5_WMMA_BACKEND=v3"
+                    SKIP_RETURN_CODE 77
+                    TIMEOUT 60
+            )
+        endforeach()
+    endforeach()
+endif()
+
 # Device kernels (compiled from HIP sources for simulator testing).
 add_subdirectory(kernels)
 
@@ -13,6 +139,7 @@ set(RJ_OBJECT_LIBS
     rocjitsu_code
     rocjitsu_code_object
     rocjitsu_isa
+    rocjitsu_fp_math_embedded
     rocjitsu_isa_registry
     simdojo
     rocjitsu_kmd
@@ -420,6 +547,19 @@ add_dependencies(rj_decode_fuzz_test rj_decode_fuzz)
 rj_add_gtest_tests(rj_decode_fuzz_test)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+if(TARGET cdna5_wmma_provider_probe)
+    add_test(
+        NAME Cdna5WmmaProviderScalarOracle
+        COMMAND
+            ${Python3_EXECUTABLE} -B
+            ${CMAKE_CURRENT_SOURCE_DIR}/test_cdna5_wmma_provider.py
+            $<TARGET_FILE:cdna5_wmma_provider_probe>
+    )
+    set_tests_properties(
+        Cdna5WmmaProviderScalarOracle
+        PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 60
+    )
+endif()
 add_test(
     NAME DecodeDifferentialUnitTest
     COMMAND
@@ -603,6 +743,7 @@ add_executable(
     shared_infra_test.cpp
     scalar_buffer_test.cpp
     transcendental_test.cpp
+    fp_math_provider_test.cpp
     amdgpu_elf_test_support.cpp
     analysis/liveness_test.cpp
     patch/spill_manager_test.cpp
@@ -738,6 +879,12 @@ add_executable(
     pci/ip_discovery_test.cpp
     pci/ip_block_model_test.cpp
 )
+if(TARGET rocjitsu_fp_math_v3)
+    target_compile_definitions(
+        rocjitsu_tests
+        PRIVATE ROCJITSU_FP_MATH_X86_BACKENDS=1
+    )
+endif()
 if(ROCJITSU_ENABLE_PERFSIM_PLUGIN)
     target_sources(rocjitsu_tests PRIVATE perfsim_plugin_test.cpp)
 endif()
@@ -1064,6 +1211,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         rocjitsu_downstream_isa_registry_fixture
         PRIVATE
             rocjitsu_isa
+            rocjitsu_fp_math_embedded
             rocjitsu_downstream_registry_fixture
             simdojo_headers
     )

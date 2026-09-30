@@ -217,6 +217,29 @@ def _profile_for_arch(arch_name: str):
 
 
 @pytest.mark.parametrize(
+    ('arch_name', 'profile_type', 'type_export'),
+    (
+        ('cdna5', Cdna5Profile, 'RJ_API_TYPE_EXPORT '),
+        ('rdna4', Rdna4Profile, ''),
+    ),
+)
+def test_generated_operand_exports_cross_dso_rtti_only_for_cdna5(
+    tmp_path: Path, arch_name: str, profile_type, type_export: str
+):
+    spec = Parser(
+        str(_mrisa_dir() / f'amdgpu_isa_{arch_name}.xml'), profile_type()
+    ).parse()
+    CodeGenerator(spec, str(tmp_path)).gen_operand()
+
+    header = (tmp_path / spec.generated_dir_name / 'operand.h').read_text()
+    assert f'class {type_export}Operand final :' in header
+    if type_export:
+        assert '#include "rocjitsu/base/rj_compiler.h"' in header
+    else:
+        assert 'RJ_API_TYPE_EXPORT' not in header
+
+
+@pytest.mark.parametrize(
     'arch_name',
     (
         'cdna1',

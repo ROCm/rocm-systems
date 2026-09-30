@@ -108,7 +108,7 @@ jobs:
             -DRJ_ENABLE_UBSAN=OFF \
             -DROCM_PATH="${ROCM_PATH}"
           cmake --build "${ROCJITSU_BUILD_DIR}" \
-            --target rocjitsu_bin rocjitsu_shared
+            --target rocjitsu_bin rocjitsu_shared rocjitsu_x86_v4
 
       - name: Run nightly suite
         timeout-minutes: 60

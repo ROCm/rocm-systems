@@ -79,6 +79,7 @@ if [[ "${RJ_INSTALLED:-0}" != "1" ]]; then
     CONFIG="${RJ_CONFIG:-${PROJECT_DIR}/configs/gfx950_mi355x_kmd.json}"
     SCHEMA="${PROJECT_DIR}/schemas/simulation_config.fbs"
     LIB_PATH="${BUILD_DIR}/librocjitsu.so"
+    PROVIDER_LIB_PATH="${BUILD_DIR}/librocjitsu_x86_v4.so"
 
     if [[ ! -f "$LIB_PATH" ]]; then
         echo "Error: librocjitsu.so not found at $LIB_PATH" >&2
@@ -95,6 +96,9 @@ if [[ "${RJ_INSTALLED:-0}" != "1" ]]; then
         -v "${CONFIG}:${INSTALL_DIR}/share/rocjitsu/configs/gfx950_mi355x_kmd.json:ro"
         -v "${SCHEMA}:${INSTALL_DIR}/share/rocjitsu/schemas/simulation_config.fbs:ro"
     )
+    if [[ -f "$PROVIDER_LIB_PATH" ]]; then
+        VOLUME_ARGS+=(-v "${PROVIDER_LIB_PATH}:${INSTALL_DIR}/lib/librocjitsu_x86_v4.so:ro")
+    fi
 
     echo "rocjitsu: simulating GPU via LD_PRELOAD (bind-mount)" >&2
     echo "  config: $(basename "$CONFIG")" >&2

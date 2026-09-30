@@ -1425,6 +1425,9 @@ inline bool InstructionComputeUnitView::observes_register_access() const {
   return raw_cu().observes_register_access();
 }
 inline bool InstructionComputeUnitView::debug_active() const { return raw_cu().debug_active(); }
+inline rj_code_target_id_t InstructionComputeUnitView::target() const {
+  return raw_cu().config().target;
+}
 inline uint32_t InstructionComputeUnitView::wf_size() const { return raw_cu().wf_size(); }
 inline uint32_t InstructionComputeUnitView::sgprs_per_wf() const {
   return raw_cu().config().sgprs_per_wf;

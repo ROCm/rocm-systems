@@ -124,7 +124,6 @@ option(
     "Enable link-time optimization (IPO) for Release / RelWithDebInfo"
     OFF
 )
-
 set(_rj_sanitizer_kinds)
 if(RJ_ENABLE_ASAN)
     list(APPEND _rj_sanitizer_kinds address)
@@ -371,6 +370,124 @@ endif()
 # Apply the host CPU policy to rocjitsu targets, after configuring dependencies.
 include(rj_host_cpu)
 
+# Build the shared v4 provider for supported targets independently of the
+# selected baseline. Other platforms retain their scalar math composition.
+if(
+    CMAKE_SYSTEM_NAME STREQUAL "Linux"
+    AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$"
+    AND CMAKE_SIZEOF_VOID_P EQUAL 8
+    AND CMAKE_CXX_COMPILER_ID MATCHES "^(GNU|Clang)$"
+)
+    include(CheckCXXCompilerFlag)
+    check_cxx_compiler_flag("-march=x86-64-v4" RJ_X86_V4_FLAG_SUPPORTED)
+    if(NOT RJ_X86_V4_FLAG_SUPPORTED)
+        message(
+            FATAL_ERROR
+            "The C++ compiler does not support -march=x86-64-v4"
+        )
+    endif()
+    execute_process(
+        COMMAND ${CMAKE_LINKER} --help
+        RESULT_VARIABLE _rj_x86_v4_linker_result
+        OUTPUT_VARIABLE _rj_x86_v4_linker_help
+        ERROR_VARIABLE _rj_x86_v4_linker_error
+    )
+    if(
+        NOT _rj_x86_v4_linker_result EQUAL 0
+        OR NOT "${_rj_x86_v4_linker_help}${_rj_x86_v4_linker_error}"
+            MATCHES
+            "--force-group-allocation"
+        OR NOT CMAKE_OBJCOPY
+    )
+        message(
+            FATAL_ERROR
+            "The shared x86-v4 provider requires a linker supporting "
+            "--force-group-allocation and an objcopy tool"
+        )
+    endif()
+    unset(_rj_x86_v4_linker_result)
+    unset(_rj_x86_v4_linker_help)
+    unset(_rj_x86_v4_linker_error)
+
+    set(_rj_x86_v4_src_root
+        "${PROJECT_SOURCE_DIR}/lib/rocjitsu/src/rocjitsu/isa"
+    )
+    set(_rj_wmma_v4_source
+        "${_rj_x86_v4_src_root}/arch/amdgpu/generated/cdna5/wmma_v4_exec.cpp"
+    )
+    if(NOT EXISTS "${_rj_wmma_v4_source}")
+        message(
+            FATAL_ERROR
+            "${_rj_wmma_v4_source} is missing; regenerate the CDNA5 ISA"
+        )
+    endif()
+
+    # Match both provider families to their private ABI, execution helpers,
+    # compiler and effective host flags.
+    set(_rj_x86_v4_digest_files
+        "${_rj_x86_v4_src_root}/arch/amdgpu/shared/x86_v4_provider.h"
+        "${_rj_x86_v4_src_root}/arch/amdgpu/shared/x86_v4_provider.cpp"
+        "${_rj_x86_v4_src_root}/arch/amdgpu/shared/x86_v4_dispatch.cpp"
+        "${_rj_x86_v4_src_root}/arch/amdgpu/shared/fp_math_provider.h"
+        "${_rj_x86_v4_src_root}/arch/amdgpu/shared/fp_math_provider.cpp"
+        "${_rj_x86_v4_src_root}/arch/amdgpu/shared/fp_math_kernels.h"
+        "${_rj_x86_v4_src_root}/arch/amdgpu/shared/fp_math_kernels_detail.h"
+        "${_rj_x86_v4_src_root}/arch/amdgpu/shared/fp_math_kernels_v3.cpp"
+        "${_rj_x86_v4_src_root}/arch/amdgpu/shared/fp_math_kernels_v4.cpp"
+        "${_rj_x86_v4_src_root}/arch/amdgpu/cdna5/wmma_v4_provider.h"
+        "${_rj_x86_v4_src_root}/arch/amdgpu/cdna5/wmma_v4_dispatch.cpp"
+        "${_rj_x86_v4_src_root}/arch/amdgpu/cdna5/isa.h"
+        "${_rj_x86_v4_src_root}/arch/amdgpu/generated/cdna5/execution_backend.h"
+        "${_rj_x86_v4_src_root}/arch/amdgpu/generated/cdna5/operand.h"
+        "${_rj_x86_v4_src_root}/arch/amdgpu/generated/cdna5/vop3p.h"
+        "${_rj_x86_v4_src_root}/arch/amdgpu/generated/cdna5/vop3p_exec.cpp"
+        "${_rj_x86_v4_src_root}/arch/amdgpu/generated/cdna5/wmma_v4_exec.cpp"
+        "${_rj_x86_v4_src_root}/arch/amdgpu/cdna5/mma_exec.h"
+        "${_rj_x86_v4_src_root}/arch/amdgpu/shared/mma_exec.h"
+        "${_rj_x86_v4_src_root}/execution_backend.h"
+        "${_rj_x86_v4_src_root}/instruction.h"
+        "${_rj_x86_v4_src_root}/operand.h"
+        "${PROJECT_SOURCE_DIR}/lib/rocjitsu/include/rocjitsu/base/rj_compiler.h"
+        "${PROJECT_SOURCE_DIR}/lib/rocjitsu/src/rocjitsu/vm/amdgpu/compute_unit.h"
+        "${PROJECT_SOURCE_DIR}/lib/rocjitsu/src/rocjitsu/vm/amdgpu/instruction_compute_unit_view.h"
+        "${PROJECT_SOURCE_DIR}/lib/rocjitsu/src/rocjitsu/vm/amdgpu/register_access.h"
+        "${PROJECT_SOURCE_DIR}/lib/rocjitsu/src/rocjitsu/vm/amdgpu/wavefront.h"
+        "${PROJECT_SOURCE_DIR}/lib/util/include/util/simd.h"
+        "${PROJECT_SOURCE_DIR}/lib/util/include/util/data_types.h"
+        "${PROJECT_SOURCE_DIR}/lib/util/include/util/amdgpu_exp.h"
+        "${PROJECT_SOURCE_DIR}/lib/util/include/util/amdgpu_log.h"
+    )
+    set_property(
+        DIRECTORY
+        APPEND
+        PROPERTY CMAKE_CONFIGURE_DEPENDS ${_rj_x86_v4_digest_files}
+    )
+    set(_rj_x86_v4_digest_input
+        "${CMAKE_CXX_COMPILER}|${CMAKE_CXX_COMPILER_ID}|"
+        "${CMAKE_CXX_COMPILER_VERSION}|${CMAKE_CXX_COMPILER_TARGET}|"
+        "${CMAKE_BUILD_TYPE}|${CMAKE_CXX_FLAGS}|"
+        "${CMAKE_CXX_FLAGS_DEBUG}|${CMAKE_CXX_FLAGS_RELEASE}|"
+        "${CMAKE_CXX_FLAGS_RELWITHDEBINFO}|${CMAKE_CXX_FLAGS_MINSIZEREL}|"
+        "${ROCJITSU_HOST_CPU_BASELINE}|-O3|-march=x86-64-v4|-fno-lto|"
+        "ROCJITSU_DEFER_FORCE_SCALAR_INIT=1|"
+        "${LTO}|${RJ_SANITIZER_COMPILE_OPTIONS}"
+    )
+    foreach(_rj_x86_v4_digest_file IN LISTS _rj_x86_v4_digest_files)
+        file(SHA256 "${_rj_x86_v4_digest_file}" _rj_x86_v4_file_hash)
+        string(
+            APPEND _rj_x86_v4_digest_input
+            "|${_rj_x86_v4_digest_file}:${_rj_x86_v4_file_hash}"
+        )
+    endforeach()
+    string(SHA256 RJ_X86_V4_BUILD_DIGEST "${_rj_x86_v4_digest_input}")
+    unset(_rj_x86_v4_file_hash)
+    unset(_rj_x86_v4_digest_file)
+    unset(_rj_x86_v4_digest_files)
+    unset(_rj_x86_v4_digest_input)
+    unset(_rj_x86_v4_src_root)
+    unset(_rj_wmma_v4_source)
+endif()
+
 # Libraries
 add_subdirectory(lib/util)
 add_subdirectory(lib/simdojo)
@@ -409,6 +526,11 @@ target_link_libraries(
         flatbuffers
         Threads::Threads
 )
+if(TARGET rocjitsu_fp_math_shared)
+    target_link_libraries(rocjitsu_shared PRIVATE rocjitsu_fp_math_shared)
+else()
+    target_link_libraries(rocjitsu_shared PRIVATE rocjitsu_fp_math_embedded)
+endif()
 target_include_directories(
     rocjitsu_shared
     PRIVATE ${ROCJITSU_INCLUDE_DIR} ${ROCJITSU_SRC_DIR} ${GENERATED_DIR}
@@ -427,6 +549,143 @@ endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_options(rocjitsu_shared PRIVATE "LINKER:--exclude-libs,ALL")
+endif()
+
+if(TARGET rocjitsu_x86_v4_provider_object)
+    # The partial-link/localization step requires native objects, even when
+    # the rest of the project uses LTO. Override both IPO and directory flags.
+    foreach(
+        _rj_x86_v4_target
+        rocjitsu_x86_v4_provider_object
+        rocjitsu_fp_math_v4
+        rocjitsu_cdna5_wmma_v4_object
+    )
+        set_target_properties(
+            ${_rj_x86_v4_target}
+            PROPERTIES
+                INTERPROCEDURAL_OPTIMIZATION FALSE
+                INTERPROCEDURAL_OPTIMIZATION_RELEASE FALSE
+                INTERPROCEDURAL_OPTIMIZATION_RELWITHDEBINFO FALSE
+        )
+        target_compile_options(${_rj_x86_v4_target} PRIVATE -fno-lto)
+    endforeach()
+    unset(_rj_x86_v4_target)
+
+    # The baseline resolver and WMMA selector hook are present only in the
+    # shared image. Standalone execution images retain embedded math and the
+    # baseline WMMA callbacks.
+    target_sources(
+        rocjitsu_shared
+        PRIVATE
+            ${ROCJITSU_SRC_DIR}/rocjitsu/isa/arch/amdgpu/cdna5/wmma_v4_dispatch.cpp
+            ${ROCJITSU_SRC_DIR}/rocjitsu/isa/arch/amdgpu/shared/x86_v4_dispatch.cpp
+    )
+    target_compile_definitions(
+        rocjitsu_shared
+        PRIVATE "ROCJITSU_X86_V4_BUILD_DIGEST=\"${RJ_X86_V4_BUILD_DIGEST}\""
+    )
+
+    # Flatten the entire provider's COMDAT groups before localizing definitions
+    # so baseline helpers cannot coalesce with their v4 variants.
+    # EXP/LOG and focused WMMA share the same getter and isolated object.
+    set(_rj_x86_v4_reloc_object "${PROJECT_BINARY_DIR}/rocjitsu_x86_v4.reloc.o")
+    set(_rj_x86_v4_local_object "${PROJECT_BINARY_DIR}/rocjitsu_x86_v4.local.o")
+    set(_rj_x86_v4_keep_global_options
+        --keep-global-symbol=rj_x86_v4_provider_v1
+    )
+    if(RJ_ENABLE_ASAN AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        # LLVM cannot link a localized COMMON symbol. This per-image ASan
+        # registry is already hidden and must retain its global binding.
+        list(
+            APPEND _rj_x86_v4_keep_global_options
+            --keep-global-symbol=___asan_globals_registered
+        )
+    endif()
+    add_custom_command(
+        OUTPUT "${_rj_x86_v4_local_object}"
+        BYPRODUCTS "${_rj_x86_v4_reloc_object}"
+        COMMAND
+            ${CMAKE_LINKER} -r --force-group-allocation -o
+            "${_rj_x86_v4_reloc_object}"
+            $<TARGET_OBJECTS:rocjitsu_x86_v4_provider_object>
+            $<TARGET_OBJECTS:rocjitsu_fp_math_v4>
+            $<TARGET_OBJECTS:rocjitsu_cdna5_wmma_v4_object>
+        COMMAND
+            ${CMAKE_OBJCOPY} ${_rj_x86_v4_keep_global_options}
+            "${_rj_x86_v4_reloc_object}" "${_rj_x86_v4_local_object}"
+        DEPENDS
+            rocjitsu_x86_v4_provider_object
+            rocjitsu_fp_math_v4
+            rocjitsu_cdna5_wmma_v4_object
+            $<TARGET_OBJECTS:rocjitsu_x86_v4_provider_object>
+            $<TARGET_OBJECTS:rocjitsu_fp_math_v4>
+            $<TARGET_OBJECTS:rocjitsu_cdna5_wmma_v4_object>
+        COMMENT "Isolating shared x86-v4 provider COMDAT definitions"
+        COMMAND_EXPAND_LISTS
+        VERBATIM
+    )
+    set_source_files_properties(
+        "${_rj_x86_v4_local_object}"
+        PROPERTIES GENERATED TRUE EXTERNAL_OBJECT TRUE
+    )
+    add_custom_target(
+        rocjitsu_x86_v4_local_object
+        DEPENDS "${_rj_x86_v4_local_object}"
+    )
+
+    add_library(rocjitsu_x86_v4 SHARED "${_rj_x86_v4_local_object}")
+    add_dependencies(rocjitsu_x86_v4 rocjitsu_x86_v4_local_object)
+    set_target_properties(
+        rocjitsu_x86_v4
+        PROPERTIES
+            LINKER_LANGUAGE CXX
+            LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}
+            BUILD_RPATH "$ORIGIN"
+            INSTALL_RPATH "$ORIGIN"
+    )
+    target_link_libraries(rocjitsu_x86_v4 PRIVATE rocjitsu_shared)
+    set(_rj_x86_v4_export_map "${PROJECT_BINARY_DIR}/rocjitsu_x86_v4.map")
+    file(
+        GENERATE OUTPUT "${_rj_x86_v4_export_map}"
+        CONTENT "{\n  global: rj_x86_v4_provider_v1;\n  local: *;\n};\n"
+    )
+    set_property(
+        TARGET rocjitsu_x86_v4
+        APPEND
+        PROPERTY LINK_DEPENDS "${_rj_x86_v4_export_map}"
+    )
+    target_link_options(
+        rocjitsu_x86_v4
+        PRIVATE "LINKER:--version-script=${_rj_x86_v4_export_map}"
+    )
+    # Static ASan/TSan runtimes (and all Clang static sanitizer runtimes) are
+    # supplied by the executable/preload, not linked into DSOs.
+    if(
+        RJ_SANITIZER_USE_SHARED
+        OR NOT RJ_SANITIZER_COMPILE_OPTIONS
+        OR (
+            CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
+            AND NOT RJ_ENABLE_ASAN
+            AND NOT RJ_ENABLE_TSAN
+        )
+    )
+        target_link_options(rocjitsu_x86_v4 PRIVATE "LINKER:-z,defs")
+    endif()
+    unset(_rj_x86_v4_export_map)
+    unset(_rj_x86_v4_reloc_object)
+    unset(_rj_x86_v4_local_object)
+    unset(_rj_x86_v4_keep_global_options)
+endif()
+
+if(BUILD_TESTING AND TARGET rocjitsu_x86_v4)
+    # Exercise decoding and execution through this exact shared image, rather
+    # than through a separately composed test executable's ISA objects.
+    target_sources(
+        rocjitsu_shared
+        PRIVATE
+            ${PROJECT_SOURCE_DIR}/tests/cdna5_wmma_provider_probe.cpp
+            ${PROJECT_SOURCE_DIR}/tests/fp_math_provider_probe.cpp
+    )
 endif()
 
 add_dependencies(rocjitsu_shared flatbuffers_schemas)
@@ -460,6 +719,9 @@ install(
     TARGETS rocjitsu_shared rocjitsu_hooks
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
+if(TARGET rocjitsu_x86_v4)
+    install(TARGETS rocjitsu_x86_v4 LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
+endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # The translator ships alongside the hook: both must resolve to the SAME
     # shared object, or the cache identity they derive from it would differ and

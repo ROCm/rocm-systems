@@ -10,6 +10,101 @@ rj_add_object_library(rocjitsu_isa
     target_registry.cpp
 )
 
+# Keep math execution composition separate from the core ISA objects, which
+# are also embedded by model-only DBT libraries. Standalone execution images
+# use the embedded interface; the shared library selects its own composition.
+rj_add_object_library(
+    rocjitsu_fp_math_provider
+    arch/amdgpu/shared/fp_math_provider.cpp
+)
+add_library(rocjitsu_fp_math_embedded INTERFACE)
+target_sources(
+    rocjitsu_fp_math_embedded
+    INTERFACE $<TARGET_OBJECTS:rocjitsu_fp_math_provider>
+)
+target_link_libraries(
+    rocjitsu_fp_math_embedded
+    INTERFACE rocjitsu_fp_math_provider
+)
+
+# Keep the host-specific kernels in separate translation units. With the
+# default x86-64-v3 baseline, AVX-512 instructions are confined to the v4
+# object, which the provider selects only on suitable CPUs at runtime.
+if(
+    CMAKE_SYSTEM_NAME STREQUAL "Linux"
+    AND CMAKE_SIZEOF_VOID_P EQUAL 8
+    AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$"
+    AND CMAKE_CXX_COMPILER_ID MATCHES "^(GNU|Clang)$"
+)
+    target_compile_definitions(
+        rocjitsu_fp_math_provider
+        PRIVATE ROCJITSU_FP_MATH_X86_BACKENDS=1
+    )
+    rj_add_object_library(
+        rocjitsu_fp_math_v3
+        arch/amdgpu/shared/fp_math_kernels_v3.cpp
+    )
+    target_compile_options(rocjitsu_fp_math_v3 PRIVATE -march=x86-64-v3)
+
+    rj_add_object_library(
+        rocjitsu_fp_math_v4
+        arch/amdgpu/shared/fp_math_kernels_v4.cpp
+    )
+    target_compile_options(rocjitsu_fp_math_v4 PRIVATE -O3 -march=x86-64-v4)
+    target_compile_definitions(
+        rocjitsu_fp_math_v4
+        PRIVATE ROCJITSU_DEFER_FORCE_SCALAR_INIT=1
+    )
+
+    # Preserve embedded v4 behavior for standalone CLI, test, fuzz and hook
+    # images. Object-library link dependencies do not propagate their objects.
+    target_sources(
+        rocjitsu_fp_math_embedded
+        INTERFACE
+            $<TARGET_OBJECTS:rocjitsu_fp_math_v3>
+            $<TARGET_OBJECTS:rocjitsu_fp_math_v4>
+    )
+    target_link_libraries(
+        rocjitsu_fp_math_embedded
+        INTERFACE rocjitsu_fp_math_v3 rocjitsu_fp_math_v4
+    )
+
+    rj_add_object_library(
+        rocjitsu_fp_math_provider_external_v4
+        arch/amdgpu/shared/fp_math_provider.cpp
+    )
+    target_compile_definitions(
+        rocjitsu_fp_math_provider_external_v4
+        PRIVATE ROCJITSU_FP_MATH_X86_BACKENDS=1 ROCJITSU_FP_MATH_EXTERNAL_V4=1
+    )
+    add_library(rocjitsu_fp_math_shared INTERFACE)
+    target_sources(
+        rocjitsu_fp_math_shared
+        INTERFACE
+            $<TARGET_OBJECTS:rocjitsu_fp_math_provider_external_v4>
+            $<TARGET_OBJECTS:rocjitsu_fp_math_v3>
+    )
+    target_link_libraries(
+        rocjitsu_fp_math_shared
+        INTERFACE rocjitsu_fp_math_provider_external_v4 rocjitsu_fp_math_v3
+    )
+
+    rj_add_object_library(
+        rocjitsu_x86_v4_provider_object
+        arch/amdgpu/shared/x86_v4_provider.cpp
+    )
+    target_compile_options(
+        rocjitsu_x86_v4_provider_object
+        PRIVATE -O3 -march=x86-64-v4
+    )
+    target_compile_definitions(
+        rocjitsu_x86_v4_provider_object
+        PRIVATE
+            ROCJITSU_DEFER_FORCE_SCALAR_INIT=1
+            "ROCJITSU_X86_V4_BUILD_DIGEST=\"${RJ_X86_V4_BUILD_DIGEST}\""
+    )
+endif()
+
 function(rj_add_split_amdgpu_isa_library arch)
     set(options NO_BUILTIN)
     set(one_value_args GENERATED_ROOT INCLUDE_BASE)
@@ -44,6 +139,9 @@ function(rj_add_split_amdgpu_isa_library arch)
         CONFIGURE_DEPENDS
         "${_generated_dir}/*_exec*.cpp"
     )
+    # The focused CDNA5 WMMA v4 source is linked only into the shared provider,
+    # never into the baseline ISA objects (or model/CLI/test images).
+    list(FILTER _execution_sources EXCLUDE REGEX "/wmma_v4_exec\\.cpp$")
     list(APPEND _execution_sources addr_calc.cpp target_provider.cpp)
     list(SORT _execution_sources)
 

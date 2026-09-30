@@ -32,6 +32,7 @@ target_link_libraries(
         rocjitsu_code
         rocjitsu_code_object
         rocjitsu_isa
+        rocjitsu_fp_math_embedded
         rocjitsu_isa_registry
         simdojo
         rocjitsu_vm

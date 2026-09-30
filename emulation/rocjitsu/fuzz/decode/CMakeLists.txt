@@ -8,7 +8,11 @@ target_include_directories(
 )
 target_link_libraries(
     rj_decode_fuzz_core
-    PUBLIC rocjitsu_amdgpu_isa_model_registry rocjitsu_isa util
+    PUBLIC
+        rocjitsu_amdgpu_isa_model_registry
+        rocjitsu_isa
+        rocjitsu_fp_math_embedded
+        util
 )
 rj_configure_target(rj_decode_fuzz_core PRIVATE_INCLUDES WARNINGS)
 

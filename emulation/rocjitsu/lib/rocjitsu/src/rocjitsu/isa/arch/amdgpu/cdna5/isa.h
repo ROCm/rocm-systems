@@ -4,6 +4,7 @@
 #ifndef ROCJITSU_ISA_ARCH_AMDGPU_CDNA5_ISA_H_
 #define ROCJITSU_ISA_ARCH_AMDGPU_CDNA5_ISA_H_
 
+#include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/decoder.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
@@ -80,9 +81,9 @@ struct Isa : amdgpu::RdnaIsaBase {
       isa_properties(ROCJITSU_CODE_ARCH_CDNA5).max_addressable_vgprs_per_wf;
 
   static std::optional<uint32_t> resolved_vgpr_offset(OperandType opr_type, int ev);
-  static std::optional<uint32_t> resolved_vgpr_offset(const amdgpu::Wavefront &wf,
-                                                      OperandType opr_type, int ev,
-                                                      amdgpu::VgprMsbRole role);
+  RJ_API_EXPORT static std::optional<uint32_t> resolved_vgpr_offset(const amdgpu::Wavefront &wf,
+                                                                    OperandType opr_type, int ev,
+                                                                    amdgpu::VgprMsbRole role);
   static bool simd_capable_value(OperandType opr_type, int ev);
   static uint32_t simd_broadcast_value(const amdgpu::Wavefront &wf, OperandType opr_type, int ev);
 };

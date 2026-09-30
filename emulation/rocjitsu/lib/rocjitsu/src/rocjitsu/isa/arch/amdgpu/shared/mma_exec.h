@@ -1733,6 +1733,35 @@ void exec_i32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, ui
     RegisterAccess(cu).write_vgpr(dst + r.reg, r.lane, r.val);
 }
 
+/// FMA step with host-independent NaN source priority. Matrix instructions use
+/// fused arithmetic, but scalar and packed host FMAs may select different NaN
+/// operands after lowering. RocJITsu deterministically selects src0, then src1,
+/// then the accumulator, quieting the selected signaling NaN.
+inline float matrix_fma(float src0, float src1, float acc) {
+  const float result = std::fma(src0, src1, acc);
+  if (!std::isnan(result))
+    return result;
+  auto quiet = [](float value) {
+    return std::bit_cast<float>(std::bit_cast<uint32_t>(value) | 0x00400000u);
+  };
+  if (std::isnan(src0))
+    return quiet(src0);
+  if (std::isnan(src1))
+    return quiet(src1);
+  if (std::isnan(acc))
+    return quiet(acc);
+  // Use a deterministic negative canonical NaN for invalid operations such
+  // as Inf*0 and Inf + -Inf.
+  return std::bit_cast<float>(0xFFC00000u);
+}
+
+RJ_NOINLINE inline float matrix_replay_nan_buffers(const float *a, const float *b, uint32_t K,
+                                                   uint32_t stride, uint32_t col, float acc) {
+  for (uint32_t k = 0; k < K; ++k)
+    acc = matrix_fma(a[k], b[k * stride + col], acc);
+  return acc;
+}
+
 template <typename ExtractA, typename ExtractB>
 void exec_wmma_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t a_bits,
                          uint32_t b_bits, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
@@ -1746,6 +1775,11 @@ void exec_wmma_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t 
   };
   std::vector<Result> results;
   results.reserve(M * N);
+  using A = std::remove_cvref_t<ExtractA>;
+  using B = std::remove_cvref_t<ExtractB>;
+  const bool replay_nan = M == 16 && N == 16 && K == 32 && wave_size == WMMA_WAVE32 &&
+                          ((std::is_same_v<A, ExtractF16> && std::is_same_v<B, ExtractF16>) ||
+                           (std::is_same_v<A, ExtractBf16> && std::is_same_v<B, ExtractBf16>));
 
   auto run_scalar = [&]() {
     for (uint32_t row = 0; row < M; ++row) {
@@ -1760,6 +1794,18 @@ void exec_wmma_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t 
           auto al = gfx12_wmma_a_input_loc(wave_size, M, K, row, k, a_bits, b_bits);
           auto bl = gfx12_wmma_b_input_loc(wave_size, N, K, col, k, a_bits, b_bits);
           acc += ea(cu, s0, al) * eb(cu, s1, bl);
+        }
+        if (replay_nan && std::isnan(acc)) [[unlikely]] {
+          acc = apply_wmma_c_modifier(
+              (const_acc != ACC_FROM_VGPR)
+                  ? std::bit_cast<float>(const_acc)
+                  : std::bit_cast<float>(RegisterAccess(cu).read_vgpr(s2 + out.reg, out.lane)),
+              c_modifier);
+          for (uint32_t k = 0; k < K; ++k) {
+            auto al = gfx12_wmma_a_input_loc(wave_size, M, K, row, k, a_bits, b_bits);
+            auto bl = gfx12_wmma_b_input_loc(wave_size, N, K, col, k, a_bits, b_bits);
+            acc = matrix_fma(ea(cu, s0, al), eb(cu, s1, bl), acc);
+          }
         }
         results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(acc)});
       }
@@ -1804,7 +1850,16 @@ void exec_wmma_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t 
       for (uint32_t row = 0; row < M; ++row)
         for (uint32_t col = 0; col < N; ++col) {
           auto out = gfx12_wmma_output_loc_32(wave_size, M, N, row, col);
-          results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(Cbuf[row * stride + col])});
+          float value = Cbuf[row * stride + col];
+          if (replay_nan && std::isnan(value)) [[unlikely]] {
+            const float initial = apply_wmma_c_modifier(
+                (const_acc != ACC_FROM_VGPR)
+                    ? std::bit_cast<float>(const_acc)
+                    : std::bit_cast<float>(reads.acc->lane(out.reg, out.lane)),
+                c_modifier);
+            value = matrix_replay_nan_buffers(Abuf + row * K, Bbuf, K, stride, col, initial);
+          }
+          results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(value)});
         }
     }
   } else {
@@ -2282,8 +2337,15 @@ inline void exec_wmma_f32_16x16x32_f16(auto &cu, uint32_t dst, uint32_t s0, uint
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
         auto out = wmma_output_loc_32(M, N, row, col);
-        writes.set_linear_word(out.reg * wf + out.lane,
-                               std::bit_cast<uint32_t>(C_buf[row * N + col]));
+        float value = C_buf[row * N + col];
+        if (std::isnan(value)) [[unlikely]] {
+          const float initial = apply_wmma_c_modifier(
+              (const_acc != ACC_FROM_VGPR) ? std::bit_cast<float>(const_acc)
+                                           : std::bit_cast<float>(C_words[out.reg * wf + out.lane]),
+              c_modifier);
+          value = matrix_replay_nan_buffers(A_buf + row * K, B_buf, K, N, col, initial);
+        }
+        writes.set_linear_word(out.reg * wf + out.lane, std::bit_cast<uint32_t>(value));
       }
   }
 }
@@ -2360,8 +2422,15 @@ inline void exec_wmma_f32_16x16x32_bf16(auto &cu, uint32_t dst, uint32_t s0, uin
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
         auto out = wmma_output_loc_32(M, N, row, col);
-        writes.set_linear_word(out.reg * wf + out.lane,
-                               std::bit_cast<uint32_t>(C_buf[row * N + col]));
+        float value = C_buf[row * N + col];
+        if (std::isnan(value)) [[unlikely]] {
+          const float initial = apply_wmma_c_modifier(
+              (const_acc != ACC_FROM_VGPR) ? std::bit_cast<float>(const_acc)
+                                           : std::bit_cast<float>(C_words[out.reg * wf + out.lane]),
+              c_modifier);
+          value = matrix_replay_nan_buffers(A_buf + row * K, B_buf, K, N, col, initial);
+        }
+        writes.set_linear_word(out.reg * wf + out.lane, std::bit_cast<uint32_t>(value));
       }
   }
 }
@@ -2576,28 +2645,6 @@ enum class SwmmacK64Input { F16, BF16 };
 enum class SwmmacK64Accumulator { F32, F16, BF16 };
 enum class SwmmacK64Result { F32, F16, BF16 };
 
-/// FMA step with host-independent NaN source priority. Matrix instructions use
-/// fused arithmetic, but scalar and packed host FMAs may select different NaN
-/// operands after lowering. RocJITsu deterministically selects src0, then src1,
-/// then the accumulator, quieting the selected signaling NaN.
-inline float matrix_fma(float src0, float src1, float acc) {
-  const float result = std::fma(src0, src1, acc);
-  if (!std::isnan(result))
-    return result;
-  auto quiet = [](float value) {
-    return std::bit_cast<float>(std::bit_cast<uint32_t>(value) | 0x00400000u);
-  };
-  if (std::isnan(src0))
-    return quiet(src0);
-  if (std::isnan(src1))
-    return quiet(src1);
-  if (std::isnan(acc))
-    return quiet(acc);
-  // Use RocJITsu's deterministic negative canonical NaN for invalid operations
-  // such as Inf*0 and Inf + -Inf.
-  return std::bit_cast<float>(0xFFC00000u);
-}
-
 // Preserve the focused helper name used by the BF16F32 contract tests and by
 // callers that need the same deterministic matrix-FMA NaN behavior.
 inline float wmma_bf16f32_fma(float src0, float src1, float acc) {
@@ -2651,14 +2698,6 @@ RJ_NOINLINE float swmmac_replay_nan_vgpr(auto &cu, uint32_t M, uint32_t N, uint3
     const auto b_loc = swmmac_b_input_loc(wave_size, N, K, col, dense_k, b_bits);
     acc = matrix_fma(ea(cu, s0, a_loc), eb(cu, s1, b_loc), acc);
   }
-  return acc;
-}
-
-RJ_NOINLINE inline float swmmac_replay_nan_buffers(const float *a, const float *b,
-                                                   uint32_t compressed_k, uint32_t stride,
-                                                   uint32_t col, float acc) {
-  for (uint32_t ck = 0; ck < compressed_k; ++ck)
-    acc = matrix_fma(a[ck], b[ck * stride + col], acc);
   return acc;
 }
 
@@ -2929,7 +2968,7 @@ void exec_swmmac_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_
         wmma_simd_matmul<float>(1, N, compressed_k, W, stride, Abuf, Bbuf, Cbuf);
         for (uint32_t col = 0; col < N; ++col) {
           if (std::isnan(Cbuf[col])) [[unlikely]] {
-            Cbuf[col] = swmmac_replay_nan_buffers(Abuf, Bbuf, compressed_k, stride, col,
+            Cbuf[col] = matrix_replay_nan_buffers(Abuf, Bbuf, compressed_k, stride, col,
                                                   initial_acc_for(row, col));
           }
           auto out = gfx12_wmma_output_loc_32(wave_size, M, N, row, col);
@@ -3086,6 +3125,11 @@ void exec_wmma_packed16(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t i
   };
   std::vector<Result> results;
   results.reserve(M * N);
+  using A = std::remove_cvref_t<ExtractA>;
+  using B = std::remove_cvref_t<ExtractB>;
+  const bool replay_nan = M == 16 && N == 16 && K == 32 && wave_size == WMMA_WAVE32 &&
+                          ((std::is_same_v<A, ExtractF16> && std::is_same_v<B, ExtractF16>) ||
+                           (std::is_same_v<A, ExtractBf16> && std::is_same_v<B, ExtractBf16>));
 
   auto run_scalar = [&]() {
     for (uint32_t row = 0; row < M; ++row) {
@@ -3098,6 +3142,16 @@ void exec_wmma_packed16(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t i
           auto al = gfx12_wmma_input_loc(wave_size, M, K, row, k, in_bits);
           auto bl = gfx12_wmma_input_loc(wave_size, N, K, col, k, in_bits);
           acc += ea(cu, s0, al) * eb(cu, s1, bl);
+        }
+        if (replay_nan && std::isnan(acc)) [[unlikely]] {
+          acc = (const_acc != ACC_FROM_VGPR)
+                    ? std::bit_cast<float>(const_acc)
+                    : read_acc(cu, s2 + out.reg, out.lane, out.sub_element);
+          for (uint32_t k = 0; k < K; ++k) {
+            auto al = gfx12_wmma_input_loc(wave_size, M, K, row, k, in_bits);
+            auto bl = gfx12_wmma_input_loc(wave_size, N, K, col, k, in_bits);
+            acc = matrix_fma(ea(cu, s0, al), eb(cu, s1, bl), acc);
+          }
         }
         results.push_back({out.reg, out.lane, out.sub_element, pack_result(acc)});
       }
@@ -3136,8 +3190,14 @@ void exec_wmma_packed16(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t i
       for (uint32_t row = 0; row < M; ++row)
         for (uint32_t col = 0; col < N; ++col) {
           auto out = gfx12_wmma_output_loc_16(wave_size, M, N, row, col);
-          results.push_back(
-              {out.reg, out.lane, out.sub_element, pack_result(Cbuf[row * stride + col])});
+          float value = Cbuf[row * stride + col];
+          if (replay_nan && std::isnan(value)) [[unlikely]] {
+            const float initial = (const_acc != ACC_FROM_VGPR)
+                                      ? std::bit_cast<float>(const_acc)
+                                      : read_acc(cu, s2 + out.reg, out.lane, out.sub_element);
+            value = matrix_replay_nan_buffers(Abuf + row * K, Bbuf, K, stride, col, initial);
+          }
+          results.push_back({out.reg, out.lane, out.sub_element, pack_result(value)});
         }
     }
   } else {
@@ -3406,7 +3466,7 @@ void exec_swmmac_packed16(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t
         wmma_simd_matmul<float>(1, N, compressed_k, W, stride, Abuf, Bbuf, Cbuf);
         for (uint32_t col = 0; col < N; ++col) {
           if (std::isnan(Cbuf[col])) [[unlikely]] {
-            Cbuf[col] = swmmac_replay_nan_buffers(Abuf, Bbuf, compressed_k, stride, col,
+            Cbuf[col] = matrix_replay_nan_buffers(Abuf, Bbuf, compressed_k, stride, col,
                                                   initial_acc_for(row, col));
           }
           auto out = gfx12_wmma_output_loc_16(wave_size, M, N, row, col);
@@ -3536,7 +3596,16 @@ void exec_wmma_f16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32
         auto out = wmma_output_loc_16(M, N, row, col);
         uint32_t idx = out.reg * WMMA_WAVE32 + out.lane;
         uint32_t shift = out.sub_element * 16;
-        uint16_t v = util::f32_to_f16(C_buf[row * N + col]);
+        float value = C_buf[row * N + col];
+        if (M == 16 && N == 16 && K == 32 && std::isnan(value)) [[unlikely]] {
+          const float initial =
+              (const_acc != ACC_FROM_VGPR)
+                  ? std::bit_cast<float>(const_acc)
+                  : util::f16_to_f32(static_cast<uint16_t>(C_words[out.reg * wf + out.lane] >>
+                                                           (out.sub_element * 16)));
+          value = matrix_replay_nan_buffers(A_buf + row * K, B_buf, K, N, col, initial);
+        }
+        uint16_t v = util::f32_to_f16(value);
         words[idx] = (words[idx] & ~(0xFFFFu << shift)) | (static_cast<uint32_t>(v) << shift);
         masks[idx] |= 1u << out.sub_element;
       }
@@ -3672,7 +3741,16 @@ void exec_wmma_bf16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint3
         auto out = wmma_output_loc_16(M, N, row, col);
         uint32_t idx = out.reg * WMMA_WAVE32 + out.lane;
         uint32_t shift = out.sub_element * 16;
-        uint16_t v = util::f32_to_bf16(C_buf[row * N + col]);
+        float value = C_buf[row * N + col];
+        if (M == 16 && N == 16 && K == 32 && std::isnan(value)) [[unlikely]] {
+          const float initial =
+              (const_acc != ACC_FROM_VGPR)
+                  ? std::bit_cast<float>(const_acc)
+                  : util::bf16_to_f32(static_cast<uint16_t>(C_words[out.reg * wf + out.lane] >>
+                                                            (out.sub_element * 16)));
+          value = matrix_replay_nan_buffers(A_buf + row * K, B_buf, K, N, col, initial);
+        }
+        uint16_t v = util::f32_to_bf16(value);
         words[idx] = (words[idx] & ~(0xFFFFu << shift)) | (static_cast<uint32_t>(v) << shift);
         masks[idx] |= 1u << out.sub_element;
       }
