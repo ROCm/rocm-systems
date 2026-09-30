@@ -42,8 +42,9 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `rma-proxy-progress-test.cc`); suite `RmaProxyProgressTest.*`.
   - `plugin/gin.cc` (`GIN_CC_PATH`, from `gin-plugin-init-test.cc`); suite
     `GinPluginInitTest.*`. NVIDIA/nccl#2179 GIN init-context leak.
-  - `group.cc` (`GROUP_CC_PATH`, from `group-test.cc`); suite
-    `GroupEndInternalTest.*`.
+  - `group.cc` (`GROUP_CC_PATH`, from `group-test.cc`); suites
+    `GroupEndInternalTest.*`, `ReclaimPlannerStateTest.*`, `AsyncLaunchTest.*`,
+    `GroupJobAbortTest.*`, `GroupApiWrapperTest.*`, `ArgsGlobalCheckTest.*`.
   - `devcomm/devcomm_v22902.cc` + `devcomm/devcomm_v22907.cc`
     (`DEVCOMM_V22902_CC_PATH` / `DEVCOMM_V22907_CC_PATH`, both from
     `devcomm-test.cc`); suites `Devcomm*`. `devcomm/devcomm_v23000.cc` is not
@@ -167,17 +168,22 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `TASK_PREP_CC_PATH`, suite `TaskPrepMicrotest.*`),
   `src/enqueue/task_prep/task_classify.cc` (via `TASK_CLASSIFY_CC_PATH`, suite
   `TaskClassifyMicrotest.*`), `src/enqueue/task_prep/task_pretuning.cc` (via
-  `TASK_PRETUNING_CC_PATH`, suite `TaskPreTuningMicrotest.*`) and
+  `TASK_PRETUNING_CC_PATH`, suite `TaskPreTuningMicrotest.*`),
   `src/enqueue/task_prep/task_posttuning.cc` (via `TASK_POSTTUNING_CC_PATH`, suite
-  `TaskPostTuningMicrotest.*`). Its own binary, not sharing
-  `rccl-UnitTestsMicro`: that target links `collective_stubs.cc`, whose fail-loud
-  `ncclTaskPrepare` would be a duplicate symbol against the real one, and
-  `group-test.cc` drives the path that stub stands in for. All four production
-  files are now test TUs, one per file, so `task_prep.cc`'s sibling externs
-  resolve to real code and no file is listed twice. Shared scene, vocabulary
-  and fake-reset fixture live in `TaskPrepScene.h`. `ENABLE_WARP_SPEED` is
-  deliberately absent: all four files are free of it. See
-  `test_categories_micro_taskprep.yaml`.
+  `TaskPostTuningMicrotest.*`), and the seven `src/enqueue/task_sched/*.cc` files
+  (`task_sched.cc`, `sym_sched.cc`, `legacy_sched.cc`, `allgatherv_sched.cc`,
+  `p2p_sched.cc`, `rma_sched.cc`, `ce_sched.cc`, one `TASK_SCHED_*_CC_PATH` macro
+  each, all in one test TU, suite `TaskSchedMicrotest.*`). Its own binary, not
+  sharing `rccl-UnitTestsMicro`: that target links `collective_stubs.cc`, whose
+  fail-loud `ncclTaskPrepare` would be a duplicate symbol against the real one,
+  and `group-test.cc` drives the path that stub stands in for. The four
+  `task_prep/` files are separate test TUs, one per file, so `task_prep.cc`'s
+  sibling externs resolve to real code and no file is listed twice; the seven
+  `task_sched/` files share one TU instead, since none of them reference each
+  other and each defines exactly one distinct extern-linkage function. Shared
+  scene, vocabulary and fake-reset fixture live in `TaskPrepScene.h`.
+  `ENABLE_WARP_SPEED` is deliberately absent: all eleven files are free of it.
+  See `test_categories_micro_taskprep.yaml`.
 
 Everything below (seams, fakes, coverage) applies to both; the concrete examples
 use `p2p.cc`.
@@ -245,9 +251,10 @@ test:
    are in scope. A new unit generally warrants its own binary (see
    [Units under test](#units-under-test)) so its file-scope state stays isolated.
 2. **Register the source.** Add the test `.cc` to the target's source list in
-   `test/host/CMakeLists.txt` (`RCCL_MICRO_TEST_SOURCES` for
-   `rccl-UnitTestsMicro`). If you add a new gtest suite, add its pattern to the
-   target's `test/test_categories_micro*.yaml` so CTest runs it.
+   `rccl_define_micro_source_lists()` in `test/host/CMakeLists.txt`
+   (`TEST_MICRO_SOURCE_FILES` for `rccl-UnitTestsMicro`), which both build paths
+   share. If you add a new gtest suite, add its pattern to the target's
+   `test/test_categories_micro*.yaml` so CTest runs it.
 3. **Write the `TEST` / fixture.** Use a fixture whose `TearDown()` calls the
    unit's reset entry point (`ResetP2pFakes()`, `ResetInitFakes()`, ...) so
    hooks do not leak between tests. Install per-test behaviour by overwriting a
@@ -354,6 +361,10 @@ Five things do NOT follow the TU-per-file rule, deliberately:
 - `fakes/collective_stubs.cc` is a fail-loud floor for the collective *launch*
   pipeline (`ncclLaunchKernel` and friends), which `enqueue.cc` itself defines.
   It therefore cannot link into the enqueue target and stays target-shaped.
+  One symbol in it, `ncclArgsGlobalCheck`, is a controllable hook
+  (`g_ncclArgsGlobalCheck` in `fakes/collective_stubs.h`) rather than a hard
+  `::abort()`, for `group-test.cc`'s `ArgsGlobalCheckTest`; everything else in
+  the file is still the same fail-loud floor described above.
 - `ncclStrongStreamAcquire` / `Release` stay in `nccl_fakes.cc` rather than
   `strongstream_stubs.cc`: they carry `ASSERT_HOOK_MATCHES_PROD` drift
   assertions and moving those is a larger change.
@@ -713,7 +724,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroEnqueue            # enqueue.cc tests
 ./build/rccl-UnitTestsMicroEnqueue-devlinker  # same, RCCL_DEVICE_LINKER arm
 ./build/rccl-UnitTestsMicroSymKernels         # sym_kernels.cc tests
-./build/rccl-UnitTestsMicroTaskPrep           # src/enqueue/task_prep/ tests
+./build/rccl-UnitTestsMicroTaskPrep           # src/enqueue/task_prep/ + task_sched/ tests
 ./build/rccl-HostUnitTests
 ```
 
