@@ -58,8 +58,9 @@ class CuidDevice {
     return AMDCUID_STATUS_UNSUPPORTED;
   }
 
-  // This library's computation: keyed with `hmac` where it holds a key,
-  // otherwise temporary for a key-gated component.
+  // The driver's cuid_derived, else this library's computation. Where the
+  // kernel answers, it wins. Virtual: a spatial GPU partition answers from the
+  // driver alone.
   virtual amdcuid_status_t get_derived_cuid(amdcuid_derived_id& id,
                                             cuid_hmac* hmac = nullptr) const;
 
@@ -75,9 +76,9 @@ class CuidDevice {
   // AMDCUID_SOURCE_UNKNOWN before one and after a failed one.
   amdcuid_source_t derived_source() const { return last_source_; }
 
-  // Stage 1 of the staged lookup: read `attribute`
-  // (CuidUtilities::kDriverPrimaryAttribute) for this device's BDF, where it
-  // has one.
+  // Stage 1 of the staged lookup: read `attribute` (one of
+  // CuidUtilities::kDriverPrimaryAttribute / kDriverDerivedAttribute) for
+  // this device's BDF, where it has one.
   //
   // On the base class rather than on CuidGpu because the interface is a
   // property of the PCI device, not of amdgpu: a NIC or NPU whose driver grows
@@ -152,6 +153,10 @@ class CuidDevice {
   }
 
  protected:
+  // Stage 1: the driver's cuid_derived. UNSUPPORTED when it holds no value
+  // for this component.
+  amdcuid_status_t driver_derived_cuid(amdcuid_derived_id& id) const;
+
   // Record the derivation's source: a later sysfs lookup could observe
   // provisioning changes and attribute the returned value to the wrong stage.
   mutable amdcuid_source_t last_source_ = AMDCUID_SOURCE_UNKNOWN;

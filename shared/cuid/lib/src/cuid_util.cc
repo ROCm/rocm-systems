@@ -102,6 +102,12 @@ amdcuid_status_t CuidUtilities::read_driver_cuid_from_path(const std::string& pa
   close(fd);
 
   if (n < 0) {
+    // amdgpu fails cuid_derived with ENODATA while it holds no node key: the
+    // attribute exists but publishes nothing.
+    if (read_err == ENODATA) {
+      LOG(DEBUG, "driver CUID attribute " << path << " holds no value");
+      return AMDCUID_STATUS_FILE_NOT_FOUND;
+    }
     // amdgpu checks CAP_SYS_ADMIN in show(), not at open(), so root without the
     // capability (a default container) opens cuid_primary and is refused here.
     if (read_err == EPERM || read_err == EACCES) {

@@ -567,6 +567,15 @@ amdcuid_status_t CuidGpu::driver_attribute_path(const std::string& attribute,
   return CuidDevice::driver_attribute_path(attribute, path);
 }
 
+amdcuid_status_t CuidGpu::get_derived_cuid(amdcuid_derived_id& id, cuid_hmac* hmac) const {
+  if (m_info.partition_attr_dir.empty()) return CuidDevice::get_derived_cuid(id, hmac);
+  const auto status = read_driver_published(CuidUtilities::kDriverDerivedAttribute,
+                                            id.UUIDv8_representation, id.raw_bits);
+  if (status == AMDCUID_STATUS_SUCCESS) cuid::get_hash_from_raw(id.raw_bits, id.hash);
+  last_source_ = status == AMDCUID_STATUS_SUCCESS ? AMDCUID_SOURCE_DRIVER : AMDCUID_SOURCE_UNKNOWN;
+  return status;
+}
+
 amdcuid_status_t CuidGpu::get_hardware_fingerprint(uint64_t& fingerprint) const {
   if (geteuid() != 0) {
     return AMDCUID_STATUS_PERMISSION_DENIED;

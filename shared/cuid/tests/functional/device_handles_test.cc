@@ -114,8 +114,8 @@ void TestGetAllHandles::Run() {
   }
 
   // Every enumerated GPU must exist, and every GPU sysfs presents must be
-  // enumerated, for any caller: a GPU's derived identity is a temporary CUID
-  // keyed by the machine-id.
+  // enumerated, for any caller: a GPU's identity is the driver's world-readable
+  // cuid_derived or a temporary CUID keyed by the machine-id.
   std::set<std::string> present;
   for (const ColdLookup& gpu : ColdLookupEnvironment::results()) present.insert(gpu.bdf);
 

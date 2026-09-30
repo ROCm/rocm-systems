@@ -166,7 +166,7 @@ Derived CUID
 
 For typical day-to-day operations, the derived CUID is used. It is derived by hashing the primary CUID using HMAC-SHA2-256 (keyed hash) using a 256-bit key. The derived CUID obscures hardware details from lower-privilege software and prevents precomputed table attacks.
 
-The key is the node key, a 256-bit HMAC key as described in FIPS 198-1, The Keyed-Hash Message Authentication Code (HMAC). Anyone holding the key can confirm a guessed serial number, so it must be random, unique per deployment, and readable only by root. This version of the library holds no node key, so every derived CUID it returns is temporary; see :ref:`read-cuids`.
+The key is the node key, a 256-bit HMAC key as described in FIPS 198-1, The Keyed-Hash Message Authentication Code (HMAC). An administrator sets it in amdgpu, which holds it in memory until the module is unloaded or the host reboots; see :ref:`manage-node-key`. Anyone holding the key can confirm a guessed serial number, so it must be random, unique per deployment, and readable only by root.
 
 If the node key changes, every derived CUID computed with it changes. Primary CUIDs do not change, so they still trace each derived CUID back to its device.
 
@@ -214,7 +214,7 @@ Temporary CUIDs are keyed with the host's machine-id rather than the node key: `
 Machine identity and containers
 -------------------------------
 
-The library reads the machine-id from ``/etc/machine-id``, and from ``/var/lib/dbus/machine-id`` only when ``/etc/machine-id`` does not exist. An ``/etc/machine-id`` that is empty, ``uninitialized`` or all zero counts as no machine-id. Every temporary CUID needs the machine-id. Without one the auxiliary input reduces to properties of the hardware model and its slot, so two identically configured hosts would report the same temporary CUID for different physical parts; the library therefore reports an **error** rather than a placeholder for each component that would get a temporary CUID, which without a node key is every component. Every container started from an image that bakes in a machine-id reports the same temporary CUIDs for the same device in the same slot, on every host. Passing the driver's sysfs attributes into a container does not avoid this: without a node key the library derives every CUID with the machine-id, including a GPU's. Give the container the host's ``/etc/machine-id``, for example with a read-only bind mount.
+The library reads the machine-id from ``/etc/machine-id``, and from ``/var/lib/dbus/machine-id`` only when ``/etc/machine-id`` does not exist. An ``/etc/machine-id`` that is empty, ``uninitialized`` or all zero counts as no machine-id. Every temporary CUID needs the machine-id. Without one the auxiliary input reduces to properties of the hardware model and its slot, so two identically configured hosts would report the same temporary CUID for different physical parts; the library therefore reports an **error** rather than a placeholder for each component that would get a temporary CUID, which without a node key is every component. Every container started from an image that bakes in a machine-id reports the same temporary CUIDs for the same device in the same slot, on every host. With a node key set, a GPU's or partition's CUID is the driver's ``cuid_derived``, which a container sees through sysfs; every other component still needs the machine-id. Give the container the host's ``/etc/machine-id``, for example with a read-only bind mount.
 
 NIC functions
 =============
