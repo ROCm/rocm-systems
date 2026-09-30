@@ -5,7 +5,17 @@
 
 package amdsmi_test
 
-import "github.com/ROCm/rocm-systems/projects/amdsmi/go/amdsmi"
+import (
+	"testing"
+
+	"github.com/ROCm/rocm-systems/projects/amdsmi/go/amdsmi"
+)
+
+func TestBMVramTypeHBM4(t *testing.T) {
+	if got := amdsmi.VramType(6).String(); got != "HBM4" {
+		t.Fatalf("VramType(6).String() = %q, want HBM4", got)
+	}
+}
 
 var (
 	_ func(amdsmi.ProcessorHandle, amdsmi.ClkType) (amdsmi.Frequencies, error) = amdsmi.GetClockFrequencies
