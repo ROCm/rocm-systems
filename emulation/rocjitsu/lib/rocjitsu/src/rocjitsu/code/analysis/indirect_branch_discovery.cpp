@@ -1655,6 +1655,10 @@ build_analysis_blocks(const AnalysisContext &ctx, std::span<const uint64_t> extr
   // after unrelated fallthrough instructions.
   const std::vector<uint8_t> leaders = compute_block_leaders(ctx.insts, extra_leaders);
 
+  // Both streams are ordered. Do not rescan every external entry for each
+  // block in a large kernel library.
+  assert(std::ranges::is_sorted(external_entries));
+  auto external_entry = external_entries.begin();
   std::vector<AnalysisBlock> blocks;
   blocks.reserve(std::ranges::count(leaders, uint8_t{1}));
   for (size_t i = 0; i < ctx.insts.size(); ++i) {
@@ -1664,8 +1668,10 @@ build_analysis_blocks(const AnalysisContext &ctx, std::span<const uint64_t> extr
     block.offset = ctx.insts[i]->src_loc();
     block.first_index = i;
     block.last_index = i;
+    while (external_entry != external_entries.end() && *external_entry < block.offset)
+      ++external_entry;
     block.external_entry =
-        i == 0 || std::ranges::find(external_entries, block.offset) != external_entries.end();
+        i == 0 || (external_entry != external_entries.end() && *external_entry == block.offset);
     blocks.push_back(std::move(block));
   }
 

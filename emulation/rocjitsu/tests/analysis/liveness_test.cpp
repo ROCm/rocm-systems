@@ -3468,6 +3468,55 @@ TEST(CfgAnalysis, MultipleUnorderedExplicitEntriesMakeIncomingPcBuilderIncomplet
   }
 }
 
+TEST(CfgAnalysis, ManyExternalEntriesPreserveIndependentConsumerState) {
+  constexpr uint16_t kPcSreg = 8;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+
+  // Entry A builds a static target and branches into entries B and C. Both are
+  // separately launchable kernels, so their externally supplied s[8:9] values
+  // must participate in the joins with A's concrete builder. Supply the entry
+  // offsets out of order with a duplicate to exercise the ordered merge.
+  std::vector<uint32_t> words = {
+      pack_sop1(0x1c, kPcSreg, 0),                         // 0x00: s_getpc_b64.
+      pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand),     // 0x04: s_add_u32.
+      32,                                                  // 0x08: 0x04 + 32 = 0x24.
+      pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kInlineInt0), // 0x0c: s_addc_u32.
+      pack_sopp(5, 2),                                     // 0x10: cbranch -> entry C at 0x1c.
+      build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA4),         // 0x14 -> entry B at 0x18.
+      pack_sop1(0x1d, 0, kPcSreg),                         // 0x18: entry B setpc.
+      pack_sop1(0x1d, 0, kPcSreg),                         // 0x1c: entry C setpc.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),            // 0x20: not a target.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),            // 0x24: A's target.
+  };
+
+  // Put the consumers after a library of unrelated external entries. Their
+  // external state must survive the ordered membership walk, including the
+  // last entry and duplicates supplied in reverse order.
+  constexpr uint64_t kPrefixWords = 1024;
+  constexpr uint64_t kPrefixBytes = kPrefixWords * sizeof(uint32_t);
+  words.insert(words.begin(), kPrefixWords, build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  std::vector<uint64_t> extra_leaders{kPrefixBytes + 28, kPrefixBytes + 24, kPrefixBytes + 28};
+  for (uint64_t offset = kPrefixBytes;; offset -= sizeof(uint32_t)) {
+    extra_leaders.push_back(offset);
+    if (offset == 0)
+      break;
+  }
+  auto blocks = build_valid_blocks(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, extra_leaders);
+
+  for (uint64_t consumer_offset : {uint64_t{24}, uint64_t{28}}) {
+    auto *consumer = block_starting_at(blocks, kPrefixBytes + consumer_offset);
+    ASSERT_NE(consumer, nullptr);
+    ASSERT_EQ(consumer->static_indirect_call_fixups().size(), 1u);
+    EXPECT_EQ(consumer->static_indirect_call_fixups()[0].source_target_offset, kPrefixBytes + 36u);
+    EXPECT_TRUE(consumer->static_indirect_call_fixups()[0].source_incomplete)
+        << "each independently launchable entry must include unconstrained external SGPR state";
+  }
+}
+
 TEST(CfgAnalysis, RocrAbortTrapStopsTemporaryPcBuilderCfg) {
   constexpr uint16_t kPcSreg = 8;
   constexpr uint32_t kLiteralOperand = 255;
