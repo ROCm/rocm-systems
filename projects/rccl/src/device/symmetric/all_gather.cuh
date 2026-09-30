@@ -90,7 +90,7 @@ static __device__ void bcastDeep(ncclSymkArgsHandler const& handler, int tn, int
         for (int i = 0; partial ? i < 1 : (dr + UnrollPeers <= nRanks); partial ? i++ : (dr += UnrollPeers)) {
           NVCC_PRAGMA_UNROLL_AUTO
           for (int ur = 0; ur < UnrollPeers - partial; ur++) {
-            if (partial && dr == nRanks) break;
+            if (partial && dr + ur == nRanks) break;
 #if NCCL_SYMK_ASYNC_TILE
             if NCCL_IF_CONSTEXPR (EnableTma) {
               ncclSymkTileStore<TileAligned>(outPacks.lsaPtr(r), tmaSmem->buff[0], tileSize, lane);
@@ -168,7 +168,15 @@ static __device__ void bcast(ncclSymkArgsHandler const& handler, int tn, int t, 
                              size_t nElts) {
   bool inPlace = (input == output);
   size_t nBytes = nElts * sizeof(T);
+
+#if defined(__gfx950__)
+  // Engage on a floor instead of trimming, so the partial final wave is kept rather than handed to
+  // the per-byte tail. The floor is the old trim modulus, so the deep path engages where it did.
+  uint32_t const chunkFloor = uint32_t(nBlocks);
+#else
   uint32_t nBlocks_rcp32 = nccl::utility::idivRcp32_upto64(nBlocks);
+  uint32_t const chunkFloor = 1;
+#endif
 
   uint32_t alignment = uint32_t(input.offset - output.offset);
   uint32_t nPreBytes =
@@ -203,11 +211,20 @@ static __device__ void bcast(ncclSymkArgsHandler const& handler, int tn, int t, 
 #endif
 
   if (alignment % 16 == 0) {
-    constexpr int BytePerPack = ncclSymkBytePerPack, UnrollPacks = ncclSymkUnrollPacks, UnrollPeers = 2;
-    constexpr int BytePerChunk = ncclSymkBytePerChunk;
+#if defined(__gfx950__)
+    // Dropping to one pack cuts BytePerChunk to a quarter, so mid sizes reach this tier's floor instead
+    // of falling to the 4-byte and per-byte paths. One pack per peer lets UnrollPeers batch them all.
+    constexpr int UnrollPacks = 1, UnrollPeers = 8;
+#else
+    constexpr int UnrollPacks = ncclSymkUnrollPacks, UnrollPeers = 2;
+#endif
+    constexpr int BytePerPack = ncclSymkBytePerPack;
+    constexpr int BytePerChunk = ncclSymkGetBytesPerChunk(ncclSymkMinWarpsPerBlock, UnrollPacks);
     uint32_t chunks = (nBytes - cursor) / BytePerChunk;
+#if !defined(__gfx950__)
     chunks -= imodFast32(chunks, nBlocks, nBlocks_rcp32);
-    if (chunks != 0) {
+#endif
+    if (chunks >= chunkFloor) {
       uintptr_t cursorAfter = cursor + uintptr_t(chunks) * BytePerChunk;
       bcastDeep<BytePerPack, UnrollPacks, UnrollPeers, EnableTma>(handler, tn, t, waitNeeded, bar,
                                                                   (ncclSymPtr<char>)input + cursor,
@@ -219,11 +236,19 @@ static __device__ void bcast(ncclSymkArgsHandler const& handler, int tn, int t, 
   }
 
   if (sizeof(T) == 4 || (sizeof(T) < 4 && alignment % 4 == 0)) {
-    constexpr int BytePerPack = 4, UnrollPacks = 4, UnrollPeers = 4;
+#if defined(__gfx950__)
+    // Only reached by 16-byte misaligned buffers, since the tier above shares this chunk size.
+    constexpr int UnrollPeers = 8;
+#else
+    constexpr int UnrollPeers = 4;
+#endif
+    constexpr int BytePerPack = 4, UnrollPacks = 4;
     constexpr int BytePerChunk = ncclSymkMinWarpsPerBlock * UnrollPacks * WARP_SIZE * BytePerPack;
     uint32_t chunks = (nBytes - cursor) / BytePerChunk;
+#if !defined(__gfx950__)
     chunks -= imodFast32(chunks, nBlocks, nBlocks_rcp32);
-    if (chunks != 0) {
+#endif
+    if (chunks >= chunkFloor) {
       uintptr_t cursorAfter = cursor + uintptr_t(chunks) * BytePerChunk;
       bcastDeep<(sizeof(T) <= BytePerPack ? BytePerPack : 0), UnrollPacks, UnrollPeers, false>(
         handler, tn, t, waitNeeded, bar, (ncclSymPtr<char>)input + cursor, (ncclSymPtr<char>)output + cursor, inPlace,

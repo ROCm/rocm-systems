@@ -28,7 +28,9 @@
 #include "SymmetricBufferHelpers.hpp"
 #include "TestChecks.hpp"
 #include "rccl/rccl.h"
+#include "rccl_common.h"  // rcclSymKGetInfo, rcclAddonAlgos_t
 
+#include <cstring>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <memory>
@@ -508,8 +510,8 @@ TEST_F(SymmetricKernelCorruptionTest, GroupedOps_Sub8ByteAlignment)
 }
 
 // ===========================================================================
-// Test group 3: gfx950 LD tuning, chunk floor and pack tier selection. Both use
-// position-dependent data, since a constant fill hides a mispartitioned range.
+// Test group 3: gfx950 LD tuning, chunk floor, pack tier and AllGather kernel selection. The
+// data tests use position-dependent data, since a constant fill hides a mispartitioned range.
 // ===========================================================================
 
 namespace
@@ -553,6 +555,7 @@ TEST_F(SymmetricKernelCorruptionTest, CountSweep_PartitioningAndSlots)
     // AllReduce runs narrow below 64 KB of message bytes and wide at 16K floats. The rest have an
     // odd chunk count (count / 1024), which nRanks * nBlocks cannot divide for any block count the
     // cost model picks, so the trim gfx950 drops would always have removed a partial wave.
+    // AllGather reuses the AllReduce input and reaches its store kernel at the larger counts.
     const std::vector<size_t> counts = {2 * 1024,
                                         8 * 1024,
                                         16 * 1024,
@@ -565,11 +568,12 @@ TEST_F(SymmetricKernelCorruptionTest, CountSweep_PartitioningAndSlots)
     // exhausts the symmetric pool well before the buffer bytes matter.
     const size_t maxCount = counts.back();
 
-    SymBuf rsSend, rsRecv, arSend, arRecv;
+    SymBuf rsSend, rsRecv, arSend, arRecv, agRecv;
     if(!tryAllocSymBuf(maxCount * nRanks * sizeof(float), rsSend) ||
        !tryAllocSymBuf(maxCount * sizeof(float), rsRecv) ||
        !tryAllocSymBuf(maxCount * sizeof(float), arSend) ||
-       !tryAllocSymBuf(maxCount * sizeof(float), arRecv))
+       !tryAllocSymBuf(maxCount * sizeof(float), arRecv) ||
+       !tryAllocSymBuf(maxCount * nRanks * sizeof(float), agRecv))
     {
         GTEST_SKIP() << "Symmetric memory not available (VMM/cuMem unsupported)";
     }
@@ -628,6 +632,27 @@ TEST_F(SymmetricKernelCorruptionTest, CountSweep_PartitioningAndSlots)
                 << " index=" << errIdx
                 << " expected=" << expVal << " got=" << actVal;
         }
+
+        // --- AllGather: count is the per-rank input size ---
+        {
+            ASSERT_EQ(hipSuccess, zeroInitializeBuffer<float>(agRecv.ptr, count * nRanks));
+
+            ASSERT_EQ(ncclSuccess,
+                      ncclAllGather(arSend.ptr, agRecv.ptr, count, ncclFloat,
+                                    getActiveCommunicator(), getActiveStream()));
+            ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+            // Output element i comes from rank i / count, which wrote it at its own index i % count.
+            size_t errIdx{};
+            float  expVal{}, actVal{};
+            ASSERT_TRUE(verifyBufferData<float>(
+                agRecv.ptr, count * nRanks,
+                [count](size_t i) { return ldPatternValue(static_cast<int>(i / count), i % count); },
+                0, 1e-3, &errIdx, &expVal, &actVal))
+                << "AllGather mismatch at count=" << count
+                << " index=" << errIdx
+                << " expected=" << expVal << " got=" << actVal;
+        }
     }
 }
 
@@ -651,11 +676,12 @@ TEST_F(SymmetricKernelCorruptionTest, MisalignedBuffers_FourBytePackTier)
 
     const size_t maxCount = counts.back();
 
-    SymBuf rsSend, rsRecv, arSend, arRecv;
+    SymBuf rsSend, rsRecv, arSend, arRecv, agRecv;
     if(!tryAllocSymBuf((maxCount * nRanks + kSkewElts) * sizeof(float), rsSend) ||
        !tryAllocSymBuf(maxCount * sizeof(float), rsRecv) ||
        !tryAllocSymBuf((maxCount + kSkewElts) * sizeof(float), arSend) ||
-       !tryAllocSymBuf(maxCount * sizeof(float), arRecv))
+       !tryAllocSymBuf(maxCount * sizeof(float), arRecv) ||
+       !tryAllocSymBuf(maxCount * nRanks * sizeof(float), agRecv))
     {
         GTEST_SKIP() << "Symmetric memory not available (VMM/cuMem unsupported)";
     }
@@ -717,7 +743,78 @@ TEST_F(SymmetricKernelCorruptionTest, MisalignedBuffers_FourBytePackTier)
                 << " index=" << errIdx
                 << " expected=" << expVal << " got=" << actVal;
         }
+
+        // --- AllGather ---
+        {
+            ASSERT_EQ(hipSuccess, zeroInitializeBuffer<float>(agRecv.ptr, count * nRanks));
+
+            ASSERT_EQ(ncclSuccess,
+                      ncclAllGather(arSendSkewed, agRecv.ptr, count, ncclFloat,
+                                    getActiveCommunicator(), getActiveStream()));
+            ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+            size_t errIdx{};
+            float  expVal{}, actVal{};
+            ASSERT_TRUE(verifyBufferData<float>(
+                agRecv.ptr, count * nRanks,
+                [count](size_t i) { return ldPatternValue(static_cast<int>(i / count), i % count); },
+                0, 1e-3, &errIdx, &expVal, &actVal))
+                << "AllGather misaligned mismatch at count=" << count
+                << " index=" << errIdx
+                << " expected=" << expVal << " got=" << actVal;
+        }
     }
+}
+
+// On gfx950 AllGather moves from LL to the store kernel at 4 MB of bus bytes. The data tests above
+// pass on either kernel, so this asks the symmetric tuner through the reporter rccl-tests uses.
+TEST_F(SymmetricKernelCorruptionTest, AllGather_StoreKernelFrom4MB)
+{
+    if(!validateTestPrerequisites(2))
+        GTEST_SKIP() << "Need >= 2 MPI ranks";
+
+    ASSERT_EQ(ncclSuccess, createTestCommunicator());
+
+    int             dev{}, nRanks{};
+    hipDeviceProp_t prop{};
+    ASSERT_EQ(hipSuccess, hipGetDevice(&dev));
+    ASSERT_EQ(hipSuccess, hipGetDeviceProperties(&prop, dev));
+    if(std::strncmp(prop.gcnArchName, "gfx950", 6) != 0)
+        GTEST_SKIP() << "The AllGather store crossover is tuned for gfx950 only";
+
+    ncclCommCount(getActiveCommunicator(), &nRanks);
+    if(nRanks != 8)
+        GTEST_SKIP() << "The AllGather store crossover is fitted on 8 ranks";
+
+    // The threshold counts bus bytes, which is nRanks times AllGather's per-rank count.
+    constexpr size_t kStoreFromBusBytes = 4 << 20;
+    const size_t     switchCount = kStoreFromBusBytes / (static_cast<size_t>(nRanks) * sizeof(float));
+
+    SymBuf agSend, agRecv;
+    if(!tryAllocSymBuf(switchCount * sizeof(float), agSend) ||
+       !tryAllocSymBuf(switchCount * nRanks * sizeof(float), agRecv))
+    {
+        GTEST_SKIP() << "Symmetric memory not available (VMM/cuMem unsupported)";
+    }
+
+    // Run once on the registered windows so the reporter sees the state a real run leaves.
+    ASSERT_EQ(ncclSuccess,
+              ncclAllGather(agSend.ptr, agRecv.ptr, switchCount, ncclFloat,
+                            getActiveCommunicator(), getActiveStream()));
+    ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+    int algo{-1}, proto{-1}, nChannels{};
+    ASSERT_EQ(ncclSuccess,
+              rcclSymKGetInfo(getActiveCommunicator(), ncclFuncAllGather, switchCount - 1, ncclFloat,
+                              ncclSum, &algo, &proto, &nChannels));
+    EXPECT_EQ(static_cast<int>(RCCL_SYMMETRIC), algo) << "AllGather just below 4 MB left the symmetric kernels";
+    EXPECT_EQ(NCCL_PROTO_LL, proto) << "AllGather just below 4 MB should stay on LL";
+
+    ASSERT_EQ(ncclSuccess,
+              rcclSymKGetInfo(getActiveCommunicator(), ncclFuncAllGather, switchCount, ncclFloat,
+                              ncclSum, &algo, &proto, &nChannels));
+    EXPECT_EQ(static_cast<int>(RCCL_SYMMETRIC), algo) << "AllGather at 4 MB left the symmetric kernels";
+    EXPECT_EQ(NCCL_PROTO_SIMPLE, proto) << "AllGather at 4 MB should take the store kernel";
 }
 
 #endif // MPI_TESTS_ENABLED

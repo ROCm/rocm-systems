@@ -4,7 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Size bands for the gfx950 symmetric reduce kernel block widths.
+// Size bands for the gfx950 symmetric kernel block widths.
 //
 // ncclSymkGfx950BlockThreads() is the width decision lifted out of the
 // symmetric tuning model. It is a pure function of the collective, the kernel
@@ -16,9 +16,10 @@
 // constant were changed, which is exactly the regression these tests exist to
 // catch.
 //
-// Two of these tests are not about the bands at all. AllGatherAlwaysUpstreamWidth
-// and UntunedCollectivesKeepUpstreamWidth pin down the blast radius: the
-// tuning must never reach a collective other than AllReduce and ReduceScatter.
+// AllGatherPrefersStoreFrom4M covers the one threshold that picks a kernel
+// rather than a width. UntunedCollectivesKeepUpstreamWidth pins down the blast
+// radius: the width bands must never reach a collective other than AllReduce,
+// ReduceScatter and AllGather.
 
 #include "gtest/gtest.h"
 #include "nccl.h"
@@ -151,22 +152,40 @@ TEST(SymkBlockWidthTest, ReduceScatterLDBands)
 }
 
 // ===========================================================================
-// Blast radius. These two matter more than the bands above: they are the only
-// automated guard that the tuning stays confined to the two reduce kernels.
+// AllGather: LL widens from 512 KB bus, and the store kernel stays narrow below
+// 64 MB bus and widens above. The store kernel takes over from LL at 4 MB bus.
+// Thresholds are bus bytes, like ReduceScatter's.
 // ===========================================================================
 
-TEST(SymkBlockWidthTest, AllGatherAlwaysUpstreamWidth)
+TEST(SymkBlockWidthTest, AllGatherLLWidensFrom512K)
 {
-    const size_t sizes[] = {4, 2 * KiB, 64 * KiB, 512 * KiB, 8 * MiB, 1 * GiB};
-
-    for(size_t nBytes : sizes)
-    {
-        EXPECT_EQ(llWidth(ncclFuncAllGather, nBytes), kNarrow)
-            << "AllGather LL width changed at " << nBytes << " bytes";
-        EXPECT_EQ(ldWidth(ncclFuncAllGather, nBytes), kNarrow)
-            << "AllGather LD width changed at " << nBytes << " bytes";
-    }
+    EXPECT_EQ(llWidth(ncclFuncAllGather, busToBytes(64 * KiB)), kNarrow);
+    EXPECT_EQ(llWidth(ncclFuncAllGather, busToBytes(512 * KiB) - 1), kNarrow);
+    EXPECT_EQ(llWidth(ncclFuncAllGather, busToBytes(512 * KiB)), kWide);
+    EXPECT_EQ(llWidth(ncclFuncAllGather, busToBytes(2 * MiB)), kWide);
 }
+
+TEST(SymkBlockWidthTest, AllGatherStoreBands)
+{
+    // The store kernel is AllGather's non-LL kernel, so ldWidth() reaches it.
+    EXPECT_EQ(ldWidth(ncclFuncAllGather, busToBytes(4 * MiB)), kNarrow);
+    EXPECT_EQ(ldWidth(ncclFuncAllGather, busToBytes(64 * MiB) - 1), kNarrow);
+    EXPECT_EQ(ldWidth(ncclFuncAllGather, busToBytes(64 * MiB)), kWide);
+    EXPECT_EQ(ldWidth(ncclFuncAllGather, busToBytes(4 * GiB)), kWide);
+}
+
+TEST(SymkBlockWidthTest, AllGatherPrefersStoreFrom4M)
+{
+    EXPECT_FALSE(ncclSymkGfx950AllGatherPrefersStore(kRanks, busToBytes(2 * MiB)));
+    EXPECT_FALSE(ncclSymkGfx950AllGatherPrefersStore(kRanks, busToBytes(4 * MiB) - 1));
+    EXPECT_TRUE(ncclSymkGfx950AllGatherPrefersStore(kRanks, busToBytes(4 * MiB)));
+    EXPECT_TRUE(ncclSymkGfx950AllGatherPrefersStore(kRanks, busToBytes(4 * GiB)));
+}
+
+// ===========================================================================
+// Blast radius. This matters more than the bands above: it is the only
+// automated guard that the width bands stay confined to the tuned collectives.
+// ===========================================================================
 
 TEST(SymkBlockWidthTest, UntunedCollectivesKeepUpstreamWidth)
 {

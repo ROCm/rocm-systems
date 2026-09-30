@@ -512,6 +512,20 @@ ncclResult_t ncclTuningSymkModelSim(struct ncclTuningInput_t* const inputs, stru
     return ncclSuccess;
   }
 
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  // On gfx950 AllGather's store kernel overtakes LL well before the shared cost model switches, so LL
+  // gives way wherever the store kernel can run, unless the user forced or narrowed the choice.
+  if (tuning->symKernelId == ncclSymkKernelId_AllGather_LL && ncclSymkIsGfx950(inputs->comm) &&
+      !inputs->comm->tuningContext.forced[inputs->func] && (valid_kmask >> ncclSymkKernelId_AllGather_ST & 1) &&
+      (inputs->tuningMask >> (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_ST) & 1) &&
+      (inputs->winRegType == ncclSymSendRegRecvReg || inputs->winRegType == ncclSymSendNonregRecvReg) &&
+      ncclSymkGfx950AllGatherPrefersStore(inputs->comm->nRanks, inputs->nBytes)) {
+    tuning->valid = 0;
+    tuning->timeUs = -1.0;
+    return ncclSuccess;
+  }
+#endif
+
   float kTime = 0.0f;
   int kBlocks = 0;
   queryModel(inputs, (ncclSymkKernelId)tuning->symKernelId, inputs->nBytes, &kTime, &kBlocks);
