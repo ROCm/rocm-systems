@@ -211,7 +211,7 @@ private:
     static constexpr std::array<int, 10> defaultBlockSizes = {32, 64, 96, 128, 192, 256, 384, 512, 768, 1024};
     static constexpr int defaultIterations = 5;
     static constexpr int defaultWarmups = 5;
-    static constexpr int defaultCgIterations = 1;
+    static constexpr int defaultCgIterations = 2;
     static constexpr uint64_t defaultMathAccuracyIterations = 4294967296; // 2^32
     static constexpr int defaultMathAccuracyMaxMemoryPercentage = 80;
     static constexpr size_t defaultMathMaxMemory = 8589934592; // 8G
