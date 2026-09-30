@@ -168,7 +168,7 @@ constexpr std::uint64_t TS_2       = 2 * NS_PER_SEC;
 
 namespace test_bytes
 {
-constexpr std::uint64_t kb512 = 512;
+constexpr std::uint64_t b512  = 512;
 constexpr std::uint64_t kb4   = 4096;
 constexpr std::uint64_t b1000 = 1000;
 constexpr std::uint64_t b3000 = 3000;
@@ -421,7 +421,7 @@ TEST_F(HipFileCollectorTest, devices_survive_an_unavailable_interval)
     EXPECT_EQ(m_collector->get_device_count(), before);
 
     backend().available         = true;
-    backend().gpu(0).read_bytes = test_bytes::kb512;
+    backend().gpu(0).read_bytes = test_bytes::b512;
     m_collector->sample(static_cast<std::int64_t>(TS_2));
 
     EXPECT_FALSE(stub_cache::samples.empty());

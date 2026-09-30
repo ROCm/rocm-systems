@@ -89,8 +89,9 @@ private:
         static const api _api = []() noexcept {
             auto _value = api{};
 
-            // SOVERSION is hipFile's major version, still 0 for every release (see
-            // runtime_version_supported below, which re-checks the real version).
+            // SOVERSION is the major of the hipFile found at configure time.
+            // runtime_version_supported still checks the loaded library against
+            // the minimum API version.
             void* _handle = dlopen(ROCPROFSYS_HIPFILE_SONAME, RTLD_LAZY | RTLD_LOCAL);
             if(_handle == nullptr)
             {

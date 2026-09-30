@@ -8,13 +8,10 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ### Added
 
-- GPU-direct storage I/O telemetry. A background sampler reports per-GPU I/O
-  counters (bytes, operation counts, errors, and bandwidth) in both Perfetto and RocPD
-  output, with metrics selected by `ROCPROFSYS_HIPFILE_METRICS` and GPUs by
-  `ROCPROFSYS_SAMPLING_GPUS`. Requires hipFile 0.5.0 or later. `ROCPROFSYS_USE_HIPFILE`
-  is both the CMake option that compiles support in (`AUTO`/`ON`/`OFF`, default `AUTO`)
-  and the run-time setting that enables collection (default `OFF`). See
-  [hipFile GPU-direct storage I/O telemetry](./docs/how-to/hipfile-telemetry.rst).
+- AMD Infinity Storage I/O telemetry. Per-GPU I/O counters are sampled into
+  the profiler output. Enable collection with `ROCPROFSYS_USE_HIPFILE` and select metrics with
+  `ROCPROFSYS_HIPFILE_METRICS`. See
+  [hipFile Infinity Storage I/O telemetry](./docs/how-to/hipfile-telemetry.rst).
 
 ## ROCm Systems Profiler 1.9.0 for ROCm 10.1 (unreleased)
 

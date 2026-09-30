@@ -37,6 +37,17 @@ list(GET _hipfile_min_version 0 _hipfile_min_version_major)
 list(GET _hipfile_min_version 1 _hipfile_min_version_minor)
 list(GET _hipfile_min_version 2 _hipfile_min_version_patch)
 
+# dlopen's SOVERSION is the major of the hipFile find_package() found, not the
+# minimum we accept. Keeping the minimum's major would still open libhipfile.so.0
+# after the found package moves to libhipfile.so.1.
+if(NOT hipfile_VERSION MATCHES "^([0-9]+)\\.")
+    message(
+        FATAL_ERROR
+        "hipFile support is enabled but hipfile_VERSION ('${hipfile_VERSION}') has no major component"
+    )
+endif()
+set(_hipfile_found_version_major "${CMAKE_MATCH_1}")
+
 # ROCPROFSYS_BUILD_HIPFILE is also exported globally on
 # rocprofiler-systems-compile-definitions (cmake/Packages.cmake) so core can
 # guard setting registration.
@@ -44,7 +55,7 @@ target_compile_definitions(
     rocprofiler-systems-hipfile-backend
     INTERFACE
         ROCPROFSYS_BUILD_HIPFILE=1
-        ROCPROFSYS_HIPFILE_SONAME="libhipfile.so.${_hipfile_min_version_major}"
+        ROCPROFSYS_HIPFILE_SONAME="libhipfile.so.${_hipfile_found_version_major}"
         ROCPROFSYS_HIPFILE_MIN_VERSION_MAJOR=${_hipfile_min_version_major}
         ROCPROFSYS_HIPFILE_MIN_VERSION_MINOR=${_hipfile_min_version_minor}
         ROCPROFSYS_HIPFILE_MIN_VERSION_PATCH=${_hipfile_min_version_patch}

@@ -85,6 +85,11 @@ public:
      * @param timestamp Sample timestamp in nanoseconds. Doubles as the backend's
      *                  memoization key and as the bandwidth denominator.
      */
+    // User mask is applied at store time: one snapshot fills every counter, 
+    // and bandwidth needs the byte totals even when those tracks are off.
+    // @param enabled User mask applied at store time.
+    // @param timestamp Sample timestamp in nanoseconds. Doubles as the backend's
+    //                  memoization key and as the bandwidth denominator.
     [[nodiscard]] metrics get_metrics(const enabled_metrics& /*enabled*/,
                                       std::uint64_t timestamp)
     {
