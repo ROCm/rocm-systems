@@ -41,6 +41,10 @@
 # OMPT is a rocpd-only trace, so rocprofv3's side is read from the rocpd database
 # and the other tool's side from the JSON summary it writes at teardown.
 
+import sys
+
+import pytest
+
 OMPT_CATEGORY = "OMPT"
 
 
@@ -168,3 +172,8 @@ def test_kernel_dispatch_tracing_intact(rocpd_conn):
     assert (
         _kernel_dispatch_count(rocpd_conn) > 0
     ), "rocprofv3 was run with --kernel-trace but recorded no kernel dispatches"
+
+
+if __name__ == "__main__":
+    exit_code = pytest.main(["-x", __file__] + sys.argv[1:])
+    sys.exit(exit_code)

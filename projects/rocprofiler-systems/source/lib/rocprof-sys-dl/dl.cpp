@@ -1353,6 +1353,11 @@ rocprofsys_preload()
     {
         reset_rocprofsys_preload();
         rocprofsys_preinit_library();
+
+#if ROCPROFSYS_USE_OMPT > 0
+        // Populates ompt_start_tool_f before the OpenMP runtime resolves it.
+        if(get_env(env_vars::USE_OMPT, false)) (void) get_indirect();
+#endif
     }
 
     return _preload;
