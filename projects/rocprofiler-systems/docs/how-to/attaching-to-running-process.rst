@@ -263,12 +263,17 @@ Attaching to a process in a container
 ----------------------------------------
 
 ``rocprof-sys-attach`` injects a tool library (``librocprof-sys-dl.so``) into the
-target process. By default, it uses the path to its own installation, which is
-only valid if the target process shares the attaching process' mount namespace
-(view of the filesystem).
+target process. The path must be valid in the target's mount namespace (view of
+the filesystem), which can differ from the attaching process' when the target runs
+in a container. ``rocprof-sys-attach`` picks the library in this order:
 
-If the target process is running in a container (or any mount namespace that
-does not have rocprofiler-systems installed at the same path), set
+1. ``ROCPROF_ATTACH_TOOL_LIBRARY``, if set.
+2. The library from its own installation, if the target can see it at the same path.
+3. The ``librocprof-sys-dl.so`` located next to the ``librocprofiler-register``
+   library the target has loaded, that is, the one shipped with the target's own
+   ROCm installation.
+
+If none of these is available in the target's mount namespace, set
 ``ROCPROF_ATTACH_TOOL_LIBRARY`` to the absolute path of ``librocprof-sys-dl.so``
 **as seen by the target process** before attaching:
 
@@ -278,8 +283,8 @@ does not have rocprofiler-systems installed at the same path), set
    export ROCPROF_ATTACH_TOOL_LIBRARY=/opt/rocprofiler-systems/lib/librocprof-sys-dl.so
    rocprof-sys-attach -p <pid>
 
-``rocprof-sys-attach`` validates this path against the target's mount namespace
-before attaching. If the library cannot be found there, attachment fails
+``rocprof-sys-attach`` validates the chosen path against the target's mount
+namespace before attaching. If the library cannot be found there, attachment fails
 cleanly with a diagnostic instead of injecting a path the target cannot load.
 
 See also
