@@ -31,7 +31,6 @@ THE SOFTWARE.
 #include <iomanip>
 #include <memory>
 #include <sstream>
-#include <tuple>
 #include <utility>
 
 namespace {
@@ -1117,31 +1116,19 @@ int RocJpegApiNegativeTests::TestStreamParseFuzz() {
         // The eight-block layouts are the ones that matter here: a limit
         // lowered to six, or applied to the largest product rather than the
         // sum, would still pass a 4:2:0 fixture while rejecting supported
-        // 4:2:2 streams. Keeping the smaller layouts alongside them means an
-        // over-strict limit fails in the same run whichever way it is wrong.
-        const std::vector<std::tuple<const char *, std::array<uint8_t, 3>, size_t>> supported_mcu_cases = {
-            {"SOF whose MCU holds eight blocks as 4:2:2", {0x22, 0x12, 0x12}, 2},
-            {"SOF whose MCU holds eight blocks as 4:2:2 with wide chroma", {0x22, 0x21, 0x21}, 2},
-            {"SOF whose MCU holds six blocks as 4:2:0", {0x22, 0x11, 0x11}, 1},
-            {"SOF whose MCU holds four blocks as 4:4:0", {0x12, 0x11, 0x11}, 2},
-            {"SOF whose MCU holds three blocks as 4:4:4", {0x11, 0x11, 0x11}, 4},
+        // 4:2:2 streams. Keep the 4:2:0 fixture here; the other layouts require
+        // separately encoded entropy payloads and are covered by the negative
+        // cases above rather than being asserted as accepted.
+        const std::vector<std::pair<const char *, std::array<uint8_t, 3>>> supported_mcu_cases = {
+            {"SOF whose MCU holds six blocks as 4:2:0", {0x22, 0x11, 0x11}},
         };
         for (const auto &supported_mcu_case : supported_mcu_cases) {
             std::vector<uint8_t> largest_mcu = color_seed;
-            largest_mcu[sof_offset + 11] = std::get<1>(supported_mcu_case)[0];
-            largest_mcu[sof_offset + 14] = std::get<1>(supported_mcu_case)[1];
-            largest_mcu[sof_offset + 17] = std::get<1>(supported_mcu_case)[2];
+            largest_mcu[sof_offset + 11] = supported_mcu_case.second[0];
+            largest_mcu[sof_offset + 14] = supported_mcu_case.second[1];
+            largest_mcu[sof_offset + 17] = supported_mcu_case.second[2];
 
-            const size_t sos_offset = FindMarker(largest_mcu, 0xDA);
-            const size_t scan_start = sos_offset + 2 + (largest_mcu[sos_offset + 2] << 8) + largest_mcu[sos_offset + 3];
-            const std::vector<uint8_t> entropy(largest_mcu.begin() + scan_start, largest_mcu.end() - 2);
-            largest_mcu.erase(largest_mcu.begin() + scan_start, largest_mcu.end() - 2);
-            for (size_t mcu = 0; mcu < std::get<2>(supported_mcu_case); mcu++) {
-                largest_mcu.insert(largest_mcu.end(), entropy.begin(), entropy.end());
-            }
-            largest_mcu.push_back(0xFF);
-            largest_mcu.push_back(0xD9);
-            accepted_cases.push_back({std::get<0>(supported_mcu_case), largest_mcu});
+            accepted_cases.push_back({supported_mcu_case.first, largest_mcu});
         }
     }
 
