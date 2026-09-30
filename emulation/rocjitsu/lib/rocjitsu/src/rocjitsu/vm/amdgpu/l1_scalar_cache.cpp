@@ -83,9 +83,9 @@ void L1ScalarCache::cache_partial_bytes(uint64_t addr, const uint8_t *src, uint3
 }
 
 VmAccessOutcome L1ScalarCache::store(uint64_t addr, uint32_t num_dwords, const uint32_t *src,
-                                     uint32_t vmid) {
+                                     uint32_t vmid, Mtype instruction_mtype) {
   synchronize_epoch();
-  RequestMtypeResolver mtypes(gpu_vm_, vmid);
+  RequestMtypeResolver mtypes(gpu_vm_, vmid, instruction_mtype);
   for (uint32_t i = 0; i < num_dwords; ++i) {
     uint64_t ea = addr + i * 4;
     uint8_t buf[4];
@@ -171,9 +171,9 @@ void L1ScalarCache::flush_line(uint64_t addr, uint32_t vmid) {
 }
 
 VmAccessOutcome L1ScalarCache::load(uint64_t addr, uint32_t num_dwords, uint32_t *dst,
-                                    uint32_t vmid) {
+                                    uint32_t vmid, Mtype instruction_mtype) {
   synchronize_epoch();
-  RequestMtypeResolver mtypes(gpu_vm_, vmid);
+  RequestMtypeResolver mtypes(gpu_vm_, vmid, instruction_mtype);
   for (uint32_t i = 0; i < num_dwords; ++i) {
     uint64_t ea = addr + i * 4;
     uint8_t buf[4]{};
@@ -224,9 +224,9 @@ VmAccessOutcome L1ScalarCache::load(uint64_t addr, uint32_t num_dwords, uint32_t
 }
 
 VmAccessOutcome L1ScalarCache::load_bytes(uint64_t addr, uint32_t num_bytes, uint8_t *dst,
-                                          uint32_t vmid) {
+                                          uint32_t vmid, Mtype instruction_mtype) {
   synchronize_epoch();
-  RequestMtypeResolver mtypes(gpu_vm_, vmid);
+  RequestMtypeResolver mtypes(gpu_vm_, vmid, instruction_mtype);
   uint32_t copied = 0;
   while (copied < num_bytes) {
     uint64_t ea = addr + copied;
