@@ -553,37 +553,23 @@ apply_persistent_vgpr_assignment(OperatingPoint &point, OwnerAssignments assignm
          mnemonic == "s_setreg_imm32_b32";
 }
 
-[[nodiscard]] uint16_t max_referenced_vgpr_count(const KernelCfgScope &scope) {
+// The owner summary already unions definitions and uses across its entire scope.
+// Enumerate that union once per register class, rather than once per instruction.
+[[nodiscard]] uint16_t max_referenced_vgpr_count(const RegisterSet &references) {
   uint32_t max_count = 0;
-  for (BasicBlock *block : scope.blocks) {
-    if (block == nullptr)
-      continue;
-    for (const Instruction &inst : block->instructions()) {
-      const InstDefUse du(inst);
-      const RegisterSet referenced = du.defs | du.uses;
-      referenced.for_each([&](RegisterRef ref) {
-        if (ref.cls == RegClass::VGPR)
-          max_count = std::max<uint32_t>(max_count, static_cast<uint32_t>(ref.index) + 1u);
-      });
-    }
-  }
+  references.for_each_ordinary([&](RegisterRef ref) {
+    if (ref.cls == RegClass::VGPR)
+      max_count = std::max<uint32_t>(max_count, static_cast<uint32_t>(ref.index) + 1u);
+  });
   return static_cast<uint16_t>(std::min<uint32_t>(max_count, kMaxVgprs));
 }
 
-[[nodiscard]] uint16_t max_referenced_sgpr_count(const KernelCfgScope &scope) {
+[[nodiscard]] uint16_t max_referenced_sgpr_count(const RegisterSet &references) {
   uint32_t max_count = 0;
-  for (BasicBlock *block : scope.blocks) {
-    if (block == nullptr)
-      continue;
-    for (const Instruction &inst : block->instructions()) {
-      const InstDefUse du(inst);
-      const RegisterSet referenced = du.defs | du.uses;
-      referenced.for_each([&](RegisterRef ref) {
-        if (ref.cls == RegClass::SGPR)
-          max_count = std::max<uint32_t>(max_count, static_cast<uint32_t>(ref.index) + 1u);
-      });
-    }
-  }
+  references.for_each_ordinary([&](RegisterRef ref) {
+    if (ref.cls == RegClass::SGPR)
+      max_count = std::max<uint32_t>(max_count, static_cast<uint32_t>(ref.index) + 1u);
+  });
   return static_cast<uint16_t>(std::min<uint32_t>(max_count, kMaxSgprs));
 }
 
@@ -849,12 +835,12 @@ struct ResourcePlanningState {
       }
       stored.liveness = std::make_unique<LivenessAnalysis>(
           KernelBlockScope(stored.scope.blocks), liveness_options, stored.scope.liveness_edges);
-      stored.max_referenced_vgpr_count = max_referenced_vgpr_count(stored.scope);
-      stored.max_referenced_sgpr_count = std::max<uint16_t>(max_referenced_sgpr_count(stored.scope),
-                                                            kernel.sgpr_count.value_or(0u));
       const std::array<const KernelResourceContext *, 1> owner = {&stored};
       const OwnerRegisterReferenceSummary scalar_references =
           summarize_owner_register_references(owner);
+      stored.max_referenced_vgpr_count = max_referenced_vgpr_count(scalar_references.references);
+      stored.max_referenced_sgpr_count = std::max<uint16_t>(
+          max_referenced_sgpr_count(scalar_references.references), kernel.sgpr_count.value_or(0u));
       stored.has_indirect_sgpr_access = scalar_references.uses_indirect_sgprs;
       stored.sgpr_reference_coverage_complete = scalar_references.control_flow_closed;
       // Static live-before sets cannot name registers reached through relative

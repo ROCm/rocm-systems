@@ -2042,6 +2042,37 @@ TEST(ConSan, InventoriesDynamicStackMarker) {
   EXPECT_TRUE(*result.program_inventory.kernels().front().uses_dynamic_stack);
 }
 
+TEST(ConSan, OwnerRegisterBoundsIncludeDefinitionsUsesAndMetadata) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA4;
+  // Exercise both source-only and destination-only highest references, with a
+  // metadata floor below and above the actual scalar references.
+  for (bool highest_is_source : {false, true}) {
+    for (uint16_t metadata_count : {0u, 83u}) {
+      SCOPED_TRACE(highest_is_source);
+      SCOPED_TRACE(metadata_count);
+      const std::array<uint32_t, 5> text_words = {
+          build_v_mov_b32_e32(highest_is_source ? 0 : 62,
+                              vector_source_vgpr(highest_is_source ? 62 : 0), arch),
+          build_s_mov_b32(highest_is_source ? 0 : 70, highest_is_source ? 70 : 0, arch),
+          0xD8340000u,
+          0x00000000u, // ds_store_b32 v0, v0
+          build_s_endpgm(arch),
+      };
+      constexpr std::string_view name = "register_bounds";
+      auto bytes =
+          make_rdna4_lds_code_object(text_words, name, kRdna4Wave64AllVgprsGranulated, false);
+      append_kernel_metadata_note(bytes, name, false, metadata_count);
+      const auto result = test_lower_consan(bytes, test_options());
+      ASSERT_TRUE(patch_succeeded(result)) << testing::PrintToString(result.errors);
+      ASSERT_FALSE(result.resource_plans.empty());
+      for (const CandidateResourcePlan &plan : result.resource_plans) {
+        EXPECT_EQ(plan.max_referenced_vgpr_count, 63u);
+        EXPECT_EQ(plan.max_referenced_sgpr_count, std::max<uint16_t>(71u, metadata_count));
+      }
+    }
+  }
+}
+
 TEST(ConSan, DynamicStackMetadataOverridesZeroValuedMarker) {
   constexpr std::string_view kernel_name = "metadata_dynamic_stack_kernel";
   const std::array<uint32_t, 3> text_words = {
