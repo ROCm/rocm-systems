@@ -727,6 +727,14 @@ add_test(
 )
 
 add_test(
+    NAME test_expression_evaluator
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_expression_evaluator.xml
+        ${COV_OPTION} tests/unit/utils/metrics/test_expression_evaluator.py
+        ${WORKING_DIR_OPTION}
+)
+
+add_test(
     NAME test_evaluation_pipeline
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_evaluation_pipeline.xml
@@ -1089,6 +1097,7 @@ if(${ENABLE_COVERAGE})
         test_analyze_workloads
         test_aggregation
         test_expression
+        test_expression_evaluator
         test_evaluation_pipeline
         test_metric_evaluator
         test_utils_counter_defs
