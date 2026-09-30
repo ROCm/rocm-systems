@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
 # Tests for the HIP Fortran bindings.
 #
 # One executable per test, driven by CTest. These are runtime tests: they call

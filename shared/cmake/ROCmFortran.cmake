@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
 # Answers one question, once per build tree: is a Fortran compiler available?
 #
 # Every ROCm project that ships Fortran bindings has to know, because the bindings

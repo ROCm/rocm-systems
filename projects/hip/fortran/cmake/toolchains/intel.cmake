@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
 # Intel oneAPI toolchain (ifx, the LLVM-based compiler).
 #
 # Usage, from projects/hip/fortran:

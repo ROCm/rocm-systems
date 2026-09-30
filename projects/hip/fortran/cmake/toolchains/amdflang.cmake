@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
 # AMD ROCm toolchain (amdflang). The recommended default: amdflang is the LLVM-based Fortran compiler shipped with ROCm.
 #
 # Usage, from projects/hip/fortran:

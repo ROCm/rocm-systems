@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
 # NVIDIA HPC SDK toolchain (nvfortran).
 #
 # Usage, from projects/hip/fortran:

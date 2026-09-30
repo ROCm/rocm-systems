@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
 # Fortran bindings for HIP.
 #
 # hip.F90 is GENERATED from the HIP C headers by the rocm-fortran generator and
