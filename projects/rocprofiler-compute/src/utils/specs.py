@@ -1088,11 +1088,3 @@ class MachineSpecsRDNA35(MachineSpecs):
             self.num_memory_channels = str(int(bit_width) // 32)
         else:
             self.num_memory_channels = self.total_l2_chan
-
-
-if __name__ == "__main__":
-    specs = generate_machine_specs(None, None)
-    if specs:
-        print(specs)
-    else:
-        console_error("specs", "Failed to generate machine specifications", exit=False)

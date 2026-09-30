@@ -31,7 +31,6 @@ from utils.mem_chart_common import (
     format_edge,
     format_value,
     make_arrows,
-    mem_chart_cli_main,
     metric_line,
     render_chart_to_string,
     safe_float,
@@ -759,18 +758,3 @@ def plot_mem_chart(
         chart_title=chart_title,
         gpu_arch=gpu_arch,
     )
-
-
-def main() -> None:
-    """CLI entry point."""
-    mem_chart_cli_main(
-        "gfx1250 Memory Chart - CLI",
-        create_mem_chart_diagram,
-        normalize_mem_chart_metrics,
-        DEFAULT_SAMPLE_METRICS,
-        console_width=_CONSOLE_WIDTH,
-    )
-
-
-if __name__ == "__main__":
-    main()
