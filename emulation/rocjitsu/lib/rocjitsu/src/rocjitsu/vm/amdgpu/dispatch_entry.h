@@ -417,6 +417,13 @@ struct DispatchEntry {
   bool wait_for_predecessors = false;
   /// Packet-type ordering: following packets cannot pass this packet.
   bool blocks_following = false;
+  /// An AQL vendor packet enters a PM4 stream and returns here after it finishes.
+  uint64_t pm4_ib_address = 0;
+  uint32_t pm4_ib_dwords = 0;
+  bool command_stream_started = false;
+  bool command_stream_complete = false;
+  std::optional<GpuVmAccess> pm4_access = std::nullopt;
+
   /// Completion hooks and signal have already been delivered.
   bool completion_notified = false;
   bool execution_begun = false;
@@ -701,6 +708,10 @@ struct ComputeQueueRecord : ComputeQueueConfig {
   /// Registers survive IB return; command frames retain their own fetch positions.
   ComputeCommandState commands;
   Pm4DispatchState dispatches;
+  /// The root format is unchanged while a vendor packet executes its PM4 frames.
+  [[nodiscard]] QueuePacketFormat active_packet_format() const {
+    return commands.submissions.empty() ? packet_format : QueuePacketFormat::Pm4;
+  }
   /// Exact VM snapshot used for a root PM4 ring batch and its cursor writeback.
   std::optional<GpuVmAccess> command_access;
 

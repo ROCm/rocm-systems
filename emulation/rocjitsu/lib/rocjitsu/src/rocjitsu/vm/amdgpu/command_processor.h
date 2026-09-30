@@ -622,6 +622,7 @@ private:
                     const std::array<uint32_t, 4> &dimensions);
   void service_command_streams(simdojo::Tick now);
   void service_pm4_ring(ComputeQueueRecord &queue, simdojo::Tick now);
+  bool execute_aql_pm4(ComputeQueueRecord &queue, DispatchEntry &entry, simdojo::Tick now);
 
   /// @brief Split a dispatch across the SoC's XCDs, keeping this XCD's share.
   ///

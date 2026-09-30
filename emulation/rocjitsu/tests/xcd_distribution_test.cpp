@@ -918,6 +918,41 @@ TEST(XcdDistributionTest, FanoutReplicatesNonKernelPacketsButSignalsThemOnce) {
       << "a replicated packet must still signal once, not once per XCD";
 }
 
+TEST(XcdDistributionTest, VendorPm4DispatchesOnEveryXcdAndCompletesOnce) {
+  for (const auto threading : {Threading::Single, Threading::ThreadPerXcd}) {
+    XcdDistributionFixture fx(threading);
+    constexpr uint64_t code = 0x8000, ib = 0x4000, signal = 0x70000;
+    fx.memory->write32(code, build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));
+    fx.memory->write64(signal + 8, 5);
+    std::vector<uint32_t> commands{0xc0037600,
+                                   amdgpu::kPm4ComputeNumThreadX,
+                                   64,
+                                   1,
+                                   1,
+                                   0xc0027600,
+                                   amdgpu::kPm4ComputePgmLo,
+                                   uint32_t(code >> 8),
+                                   0};
+    // Each XCD decodes the same stream, but executes only its predicated dispatch.
+    for (uint32_t xcd = 0; xcd < kTotalXcds; ++xcd) {
+      commands.push_back(0xc0002300);
+      commands.push_back((1u << (24 + xcd)) | 5);
+      commands.insert(commands.end(), {0xc0031500, 1, 1, 1, 1});
+    }
+    fx.memory->load_image(reinterpret_cast<const uint8_t *>(commands.data()), commands.size() * 4,
+                          ib);
+    auto *cp = fx.soc->assign_queue_owner_cp(0);
+    auto queue = test::make_fanout_queue(fx.memory, cp);
+    queue->submit(test::make_pm4_ib_packet(ib, commands.size(), signal));
+    fx.engine->run();
+    EXPECT_EQ(fx.memory->read64(signal + 8), 4u);
+    for (const auto count : fx.soc->dispatched_workgroups_per_xcd())
+      EXPECT_EQ(count, 1u);
+    for (uint32_t xcd = 0; xcd < kTotalXcds; ++xcd)
+      EXPECT_FALSE(fx.soc->xcd(xcd)->command_processor()->queue_faulted_for_test(1, 0));
+  }
+}
+
 // The replication itself. Every XCD must accept its share of the kernel and then
 // the following IB.
 //
