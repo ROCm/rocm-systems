@@ -6,6 +6,7 @@
 #include <cstring>
 #include <filesystem>
 #include <msgpack.hpp>
+#include <new>
 #include <string>
 #include <vector>
 
@@ -52,15 +53,11 @@ msgpack::object* find_key(const msgpack::object_map& map, const char* key) {
 // Structure: {"kernel_name": "...", "kpack_search_paths": ["...", ...]}
 kpack_error_t parse_hipk_metadata(const void* data, size_t max_size,
                                   std::string& kernel_name,
-                                  std::vector<std::string>& search_paths) {
+                                  std::vector<std::string>& search_paths) try {
   // We don't know the exact size of the msgpack data, so we try to unpack
   // and let msgpack determine the boundaries
-  msgpack::object_handle oh;
-  try {
-    oh = msgpack::unpack(static_cast<const char*>(data), max_size);
-  } catch (...) {
-    return KPACK_ERROR_INVALID_METADATA;
-  }
+  msgpack::object_handle oh =
+      msgpack::unpack(static_cast<const char*>(data), max_size);
 
   msgpack::object obj = oh.get();
   if (obj.type != msgpack::type::MAP) {
@@ -96,6 +93,10 @@ kpack_error_t parse_hipk_metadata(const void* data, size_t max_size,
   }
 
   return KPACK_SUCCESS;
+} catch (const std::bad_alloc&) {
+  return KPACK_ERROR_OUT_OF_MEMORY;
+} catch (...) {
+  return KPACK_ERROR_INVALID_METADATA;
 }
 
 // Split a path string by separator (colon on Linux, semicolon on Windows)
