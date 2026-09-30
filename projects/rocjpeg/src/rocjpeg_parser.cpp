@@ -856,9 +856,21 @@ bool RocJpegStreamParser::ParseEOI() {
 
     // A scan header with no entropy-coded data behind it describes nothing to
     // decode. This happens when the buffer ends right after the SOS segment, or
-    // when an EOI immediately follows it, and until now both were reported as a
+    // when an EOI immediately follows it, and both were reported as a
     // successful parse with a zero-length slice.
-    if (jpeg_stream_parameters_.slice_parameter_buffer.slice_data_size == 0) {
+    //
+    // Trailing 0xFF bytes do not count towards the scan. ISO/IEC 10918-1
+    // B.1.1.2 allows any number of 0xFF fill bytes before a marker, and inside
+    // entropy-coded data a 0xFF is always followed by a stuffed 0x00 or a
+    // restart code, so a 0xFF at the very end of the scan is fill or a
+    // truncated marker rather than coded data. Without discounting it, a scan
+    // of "FF FF D9" measures one byte and an all-0xFF tail measures its whole
+    // length, both of which are still empty scans.
+    const uint8_t *entropy_end = stream_temp;
+    while (entropy_end > stream_ && *(entropy_end - 1) == 0xFF) {
+        entropy_end--;
+    }
+    if (entropy_end == stream_) {
         ErrorLog(g_rocjpeg_logger, "Invalid JPEG: the scan contains no entropy-coded data!");
         return false;
     }
