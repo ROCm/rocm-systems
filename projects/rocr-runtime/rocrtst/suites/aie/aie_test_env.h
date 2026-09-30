@@ -11,7 +11,7 @@
 // and test_memory.cc, and each fixture beyond the common base is specific to its binary, so those
 // live with the tests that use them.
 //
-// This header depends on gtest, so it is for the test suite only. The aie-performance benchmarks
+// This header depends on gtest, so it is for the test suite only. The aie-benchmarks programs
 // repeat some of the same discovery, but they are plain main() programs that do not link gtest.
 
 #ifndef ROCRTST_SUITES_AIE_AIE_TEST_ENV_H_

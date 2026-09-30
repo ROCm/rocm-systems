@@ -183,7 +183,7 @@ batch has been accepted, so a rejected submission cannot pin an otherwise-unused
   signals it by throwing from a void HSA entry point, which aborts the process. Each was confirmed
   to exercise a real rejection.
 
-### Benchmarks (`rocrtst/suites/aie-performance`)
+### Benchmarks (`rocrtst/suites/aie-benchmarks`)
 
 - `VectorScalarAddHSAELF`, `VectorScalarAddHSAELFAllocKernargs` and `VectorScalarAddHSAELFParse`,
   mirroring the existing PDI + instruction sequence benchmarks.
