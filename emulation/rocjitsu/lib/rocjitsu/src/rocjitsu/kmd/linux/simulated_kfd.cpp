@@ -13,6 +13,7 @@
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
+#include "rocjitsu/vm/amdgpu/pm4/pm4_queue_binding_factory.h"
 #include "rocjitsu/vm/amdgpu/sdma_queue_binding_factory.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
@@ -2172,7 +2173,9 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
                       alloc.gpu_va, reinterpret_cast<uintptr_t>(host_ptr), length, alloc.flags,
                       bool(flags & MAP_FIXED), alloc.user_va, alloc.memfd);
   });
-  map_to_gpu(proc, alloc.gpu_va, host_ptr, length, pte_mtype_for_flags(alloc.flags));
+  // mmap and KFD BOs cover whole pages, including the last partial page.
+  const size_t mapped_bytes = std::min(alloc.size, (uint64_t(length) + 0xFFF) & ~uint64_t(0xFFF));
+  map_to_gpu(proc, alloc.gpu_va, host_ptr, mapped_bytes, pte_mtype_for_flags(alloc.flags));
 
   return host_ptr;
 }
@@ -2413,6 +2416,11 @@ int SimulatedKfd::unmap_memory_ioctl(void *arg) {
 
 int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
   auto *args = static_cast<kfd_ioctl_alloc_memory_of_gpu_args *>(arg);
+  if (args->size == 0 || args->size > UINT64_MAX - 0xFFF)
+    return -EINVAL;
+  // The kernel creates a PAGE_ALIGN(size) BO. LLVM can legally widen a scalar
+  // load within its mapped tail page even when the logical tensor is smaller.
+  const uint64_t allocation_size = (args->size + 0xFFF) & ~uint64_t(0xFFF);
 
   std::lock_guard<std::mutex> lock(proc.alloc_mutex_);
 
@@ -2420,12 +2428,12 @@ int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
   uint64_t va = args->va_addr;
   if (va == 0) {
     va = proc.next_gpu_va_;
-    proc.next_gpu_va_ += (args->size + 0xFFF) & ~0xFFFULL;
+    proc.next_gpu_va_ += allocation_size;
   }
 
   KfdProcess::GpuAllocation alloc{};
   alloc.gpu_va = va;
-  alloc.size = args->size;
+  alloc.size = allocation_size;
   alloc.flags = args->flags;
   alloc.handle = proc.next_handle_++;
   alloc.host_ptr = nullptr;
@@ -2437,7 +2445,7 @@ int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
   bool is_doorbell = (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_DOORBELL) != 0;
   if (is_userptr && !daemon_mode_) {
     alloc.host_ptr = reinterpret_cast<void *>(va);
-    map_to_gpu(proc, va, reinterpret_cast<void *>(va), args->size, alloc_mtype);
+    map_to_gpu(proc, va, reinterpret_cast<void *>(va), alloc.size, alloc_mtype);
   } else if (daemon_mode_ || !user_provided_va) {
     auto raw_fd = memfd_create("rocjitsu_alloc", MFD_CLOEXEC | MFD_ALLOW_SEALING);
     if (raw_fd >= 0) {
@@ -2703,9 +2711,22 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
   const bool is_sdma = args->queue_type == KFD_IOC_QUEUE_TYPE_SDMA ||
                        args->queue_type == KFD_IOC_QUEUE_TYPE_SDMA_XGMI ||
                        args->queue_type == KFD_IOC_QUEUE_TYPE_SDMA_BY_ENG_ID;
-  if (is_pm4_compute)
-    return -ENOTSUP;
-  if (!is_aql_compute && !is_sdma)
+  // Native PM4 queues are qualified on these single-XCD RDNA profiles.
+  // CDNA uses AQL queues, including vendor packets carrying PM4 indirect buffers.
+  const auto arch = gpu->soc->arch();
+  if (is_pm4_compute) {
+    if ((arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_RDNA3_5 &&
+         arch != ROCJITSU_CODE_ARCH_RDNA4) ||
+        gpu->soc->num_xcds() != 1)
+      return -ENOTSUP;
+    const auto ordinal = gpu_ordinal(args->gpu_id);
+    if (ordinal >= gpu_infos_.size())
+      return -ENOTSUP;
+    const uint32_t target = gpu_infos_[ordinal].gfx_target_version;
+    if (target != 110000 && target != 110501 && target != 120001)
+      return -ENOTSUP;
+  }
+  if (!is_pm4_compute && !is_aql_compute && !is_sdma)
     return -ENOTSUP;
 
   const std::optional<uint32_t> ring_size = normalize_queue_ring_size(args->ring_size);
@@ -2795,8 +2816,9 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
                           .consumer_pointer_address = args->read_pointer_address,
                           .producer_pointer_address = args->write_pointer_address};
     queue_request.binding_factory =
-        is_sdma ? amdgpu::make_sdma_queue_binding_factory(gpu->soc->sdma_queue_scheduler())
-                : amdgpu::make_aql_queue_binding_factory(*target_cp);
+        is_sdma          ? amdgpu::make_sdma_queue_binding_factory(gpu->soc->sdma_queue_scheduler())
+        : is_pm4_compute ? amdgpu::make_kfd_pm4_compute_queue_binding_factory(*target_cp)
+                         : amdgpu::make_aql_queue_binding_factory(*target_cp);
     queue_request.engine_id = args->sdma_engine_id;
     // doorbell_base is captured here under alloc_mutex_ but register_queue() runs
     // after the lock is released. This is stable because ROCr maps the doorbell
@@ -2809,13 +2831,13 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
                               .host_base = gs.doorbell_monitor_page,
                               .last_value = ~uint64_t(0)};
     queue_request.type = is_sdma ? amdgpu::QueueType::Sdma : amdgpu::QueueType::Compute;
-    queue_request.packet_format =
-        is_sdma ? amdgpu::QueuePacketFormat::Sdma : amdgpu::QueuePacketFormat::Aql;
-    queue_request.abi = is_sdma ? amdgpu::QueueAbi::Generic : amdgpu::QueueAbi::KfdAql;
-    // Queue creation initializes both SDMA pointers to zero below. Preserve that
-    // device-side cursor explicitly so execution does not depend on reading the
-    // writeback destination before the first packet can retire.
-    if (is_sdma)
+    queue_request.packet_format = is_sdma          ? amdgpu::QueuePacketFormat::Sdma
+                                  : is_pm4_compute ? amdgpu::QueuePacketFormat::Pm4
+                                                   : amdgpu::QueuePacketFormat::Aql;
+    queue_request.abi = is_aql_compute ? amdgpu::QueueAbi::KfdAql : amdgpu::QueueAbi::Generic;
+    // Fresh SDMA and native PM4 MQDs start at zero; the writeback destination
+    // need not contain the initial hardware cursor before the first retirement.
+    if (is_sdma || is_pm4_compute)
       queue_request.initial_consumer_cursor = 0;
     // The topology advertises every XCD's compute units as one agent, so a
     // compute dispatch must be able to reach all of them. Without this a
@@ -2828,10 +2850,10 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
     // unsupported value silently acquires.
     queue_request.xcd_fanout = is_aql_compute;
     // amd_queue_t base: write_pointer_address points to write_dispatch_id.
-    if (!is_sdma)
+    if (is_aql_compute)
       queue_request.queue_descriptor_address =
           args->write_pointer_address - offsetof(amd_queue_t, write_dispatch_id);
-    if (!is_sdma && args->ctx_save_restore_address != 0) {
+    if (is_aql_compute && args->ctx_save_restore_address != 0) {
       constexpr uint32_t kErrorReasonOffset = 6 * sizeof(uint32_t);
       const std::optional<amdgpu::GpuVmAccess> access =
           gpu->soc->gpu_vm().snapshot(gs.address_space);

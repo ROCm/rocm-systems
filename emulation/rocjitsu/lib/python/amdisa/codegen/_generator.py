@@ -969,6 +969,16 @@ class CodeGenerator:
         if self._uses_generic_wmma_accumulator_selector(inst_sem, opnd):
             return 'OPR_SRC'
         if (
+            getattr(self.isa_spec, 'arch_name', None) in ('cdna3', 'cdna4')
+            and inst_sem
+            and inst_sem.semantic_class == 'vector_readlane'
+            and opnd.is_output
+            and opnd.operand_type == 'OPR_SREG_NOVCC'
+        ):
+            # LLVM's SReg_32_XM0 destination includes VCC_LO/HI. Its SGPR
+            # spill reloads use these selectors, which the XML omits here.
+            return 'OPR_SREG'
+        if (
             inst_sem
             and inst_sem.semantic_class in ('vector_readfirstlane', 'vector_readlane')
             and opnd.name == 'src0'
