@@ -86,10 +86,15 @@ if(ROCPROFILER_STRESS_FOCUS_REGEX)
         )
 endif()
 
-# Repeats multistream under rocprofv3 with SQ_WAVES_RESTORED and SQ_WAVES_SAVED next to
-# SQ_WAVES, to test whether the rare SQ_WAVES_sum == 2 in
-# counter-collection.test_counter_values is a preempted wave counted again on restore (see
-# probe_multistream_restore.py).
+# Repeats multistream under rocprofv3 to study the rare SQ_WAVES_sum == 2 in
+# counter-collection.test_counter_values (see probe_multistream_restore.py). With
+# SQ_WAVES_RESTORED and SQ_WAVES_SAVED next to SQ_WAVES it tests whether the extra wave is
+# a preempted wave counted again on restore; with SQ_WAVES alone, the failing test's
+# setup, it measures how often the double count happens.
+set(ROCPROFILER_STRESS_PROBE_COUNTERS
+    "SQ_WAVES"
+    CACHE STRING "Comma-separated counters the multistream probe collects in one pass")
+
 if(TARGET multistream AND TARGET rocprofiler-sdk::rocprofv3)
     add_test(
         NAME stress.probe-multistream-restore
@@ -97,7 +102,8 @@ if(TARGET multistream AND TARGET rocprofiler-sdk::rocprofv3)
             ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/probe_multistream_restore.py
             --rocprofv3 $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --app
             $<TARGET_FILE:multistream> --workdir ${CMAKE_CURRENT_BINARY_DIR}/probe
-            --budget-seconds ${ROCPROFILER_STRESS_PROBE_BUDGET_SECONDS} --report-only
+            --budget-seconds ${ROCPROFILER_STRESS_PROBE_BUDGET_SECONDS} --counters
+            ${ROCPROFILER_STRESS_PROBE_COUNTERS} --report-only
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
     set_tests_properties(
