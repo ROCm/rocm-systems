@@ -237,6 +237,11 @@ struct KernelTextLayout {
   std::vector<IndirectCallFixup> recovered_builder_fixups;
 };
 
+/// @brief Alignment of a kernel entry address: hardware takes it shifted right
+///        by 8. A launch stub placed at the source entry's residue modulo this
+///        is as aligned as the source entry.
+inline constexpr uint64_t kKernelEntryAlignment = 256;
+
 void append_words(std::vector<uint8_t> &text, std::span<const uint32_t> words);
 
 void append_nop_padding(std::vector<uint8_t> &text, uint64_t byte_count, rj_code_arch_t arch);
