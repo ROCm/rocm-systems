@@ -7537,7 +7537,7 @@ def test_vmem_store_issue_metadata_follows_arch_profile(
     assert completion in issue
 
 
-def test_pre_gfx12_stores_and_gds_preserve_expcnt_obligations():
+def test_legacy_stores_and_gds_preserve_expcnt_obligations():
     codegen = object.__new__(CodeGenerator)
     store = InstructionSemantics(
         'BUFFER_STORE_DWORD', 'buffer_store', elem_size=4, num_elems=1
@@ -7557,6 +7557,29 @@ def test_pre_gfx12_stores_and_gds_preserve_expcnt_obligations():
         assert 'inst_.gds != 0' in ds_info
         assert 'amdgpu::MemoryCompletionClass::GDS' in ds_info
         assert 'amdgpu::WaitCounterType::EXPCNT' in ds_info
+
+
+@pytest.mark.parametrize(
+    'name,semantic_class,fields,counter',
+    [
+        ('BUFFER_STORE_DWORD', 'buffer_store', set(), 'VMCNT'),
+        ('BUFFER_ATOMIC_ADD', 'buffer_atomic', set(), 'VMCNT'),
+        ('FLAT_STORE_DWORD', 'flat_store', {'seg'}, 'VMCNT'),
+        ('FLAT_ATOMIC_ADD', 'flat_atomic', {'seg'}, 'VMCNT'),
+        ('DS_READ_B32', 'ds_read', {'gds'}, 'LGKMCNT'),
+    ],
+)
+def test_cdna4_memory_issue_omits_unused_expcnt(name, semantic_class, fields, counter):
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(arch_name='cdna4', profile=Cdna4Profile())
+    sem = InstructionSemantics(name, semantic_class, elem_size=4, num_elems=1)
+
+    issue = codegen._memory_issue_initializer(sem, fields)
+
+    assert f'amdgpu::WaitCounterType::{counter}' in issue
+    assert 'amdgpu::WaitCounterType::EXPCNT' not in issue
+    if 'seg' in fields:
+        assert 'amdgpu::WaitCounterType::LGKMCNT' in issue
 
 
 def test_cdna5_async_completion_domains_are_explicit():

@@ -1939,6 +1939,16 @@ class Cdna4Profile(CdnaProfile):
     """ISA profile for CDNA4-only encoding capabilities."""
 
     @property
+    def vmem_writes_use_expcnt(self) -> bool:
+        # CDNA4 ISA, sections 3.1 and 4.4: EXPCNT is unused. In particular,
+        # returning GLOBAL atomics require their VMCNT wait, not an EXP wait.
+        return False
+
+    @property
+    def gds_uses_expcnt(self) -> bool:
+        return False
+
+    @property
     def mfma_scale_vop3px2_specs(self) -> tuple[MfmaScaleVop3px2Spec, ...]:
         return (
             MfmaScaleVop3px2Spec(
