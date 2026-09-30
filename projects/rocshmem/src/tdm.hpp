@@ -22,15 +22,13 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-// Tensor Data Mover (TDM) API for gfx1250 (MI450).
+// Tensor Data Mover (TDM) API for gfx1250 (MI450): wraps the
+// __builtin_amdgcn_tensor_load_to_lds/store_from_lds intrinsics (descriptor
+// construction, cache-policy encoding, bulk tile-copy helpers) plus the
+// per-workgroup LDS registration backing rocshmem_set_tdm_lds().
 //
-// A wrapper around the __builtin_amdgcn_tensor_load_to_lds /
-// __builtin_amdgcn_tensor_store_from_lds intrinsics: descriptor construction,
-// cache-policy encoding, and bulk tile-copy execution helpers, plus the
-// per-workgroup LDS registration primitives backing rocshmem_set_tdm_lds().
-//
-// Background, hardware layout, and the verified GROUP0/GROUP1 bit encodings
-// this file implements are documented in tdm.md (this directory).
+// See tdm.md (this directory) for hardware background and the verified
+// GROUP0/GROUP1 bit encodings.
 
 #ifndef LIBRARY_SRC_TDM_HPP_
 #define LIBRARY_SRC_TDM_HPP_
@@ -79,10 +77,8 @@ constexpr uint32_t data_size_bytes(DataSize d) {
 
 // ==============================================================================
 // CACHE POLICY (the `cachepolicy` immediate argument of the TDM intrinsics)
-//
-// cachepolicy = th_bits[2:0] | (scope_bits[1:0] << 3). Tables below are
-// verified by assembly inspection — see Posts/2026-08-06-TDM.md's "Cache
-// policy" section (and Experiments 03-06) for the raw `.s` output.
+// cachepolicy = th_bits[2:0] | (scope_bits[1:0] << 3); verified by assembly
+// inspection (see Posts/2026-08-06-TDM.md).
 // ==============================================================================
 
 // Memory scope (cachepolicy bits[4:3]), pre-shifted into place here.
@@ -130,18 +126,14 @@ constexpr int make_cache_policy(StoreTemporalHint th, Scope scope = Scope::Wgp) 
 // ==============================================================================
 
 // GROUP0 (addresses + control) and GROUP1 (tensor layout) for a 2D transfer.
-// GROUP2/GROUP3 (3D/iterate/gather extensions) are not modeled here — every
-// call site in this codebase is 2D. Advanced users needing them can call
-// load_to_lds/store_from_lds directly with their own group2/group3, built
-// per the layout in Posts/2026-08-06-TDM.md's GROUP2/GROUP3 sections.
+// GROUP2/GROUP3 (3D/gather) aren't modeled; every call site here is 2D.
 struct Descriptor2D {
   u32x4 group0{};
   i32x8 group1{};
 };
 
-// GROUP0 only: LDS destination/source address and the 48-bit global VA.
-// Split out so callers can cheaply rebuild just the addresses of an
-// otherwise-invariant descriptor inside a copy loop (see copy_region below).
+// GROUP0 only (LDS address + 48-bit global VA), split out so callers can
+// cheaply rebuild just the addresses of an otherwise-invariant descriptor.
 __device__ __forceinline__ u32x4 make_group0(uintptr_t lds_addr, uintptr_t global_addr) {
   return u32x4{
       1u,  // m_count = 1
@@ -154,12 +146,9 @@ __device__ __forceinline__ u32x4 make_group0(uintptr_t lds_addr, uintptr_t globa
   };
 }
 
-// GROUP1: element size, full-tensor dims, tile dims, and row/plane strides
-// (in elements, not bytes). tensor_dimN describes the whole buffer in global
-// memory; tile_dimN is the sub-region this call actually transfers. Strides
-// are genuinely 48-bit (unlike AMD's own amd_gfx1250_TDM.h header, whose
-// tensorDimNStride() setters truncate to 32 bits) — pass full tensor extents
-// without worrying about the truncation bug in that header.
+// GROUP1: element size, full-tensor/tile dims, and strides (in elements).
+// Strides are genuinely 48-bit here, unlike AMD's own amd_gfx1250_TDM.h
+// header, whose tensorDimNStride() setters truncate to 32 bits.
 __device__ __forceinline__ i32x8 make_group1(DataSize data_size, uint32_t tensor_dim0,
                                              uint32_t tensor_dim1, uint32_t tile_dim0,
                                              uint32_t tile_dim1, uint64_t tensor_dim0_stride,
@@ -198,13 +187,10 @@ __device__ __forceinline__ Descriptor2D make_descriptor_2d(
 // RAW INTRINSIC WRAPPERS
 // ==============================================================================
 
-// Stalls the calling wave until fewer than Cnt+1 of its TDM ops are in
-// flight. wait<0>() waits for all of this wave's outstanding TDM ops.
-//
-// Cnt (and CachePolicy below) is a template parameter rather than a plain
-// argument because the underlying builtins take an immarg (a literal
-// required at the call site), which only a non-type template parameter
-// can guarantee.
+// Stalls the wave until fewer than Cnt+1 of its TDM ops are in flight;
+// wait<0>() drains all of them. Cnt (and CachePolicy below) is a template
+// parameter, not a plain argument, because the underlying builtins require
+// an immarg (a literal at the call site).
 template <uint16_t Cnt>
 __device__ __forceinline__ void wait() {
   __builtin_amdgcn_s_wait_tensorcnt(Cnt);
@@ -239,21 +225,17 @@ __device__ __forceinline__ void store_from_lds(const Descriptor2D &d) {
 #endif  // HIP_HAVE_TDM_INTRINSICS
 
 // ==============================================================================
-// BULK TILE-COPY HELPERS
-//
-// Flat byte copies (global <-> global, staged through LDS), tiled as 2D
-// descriptors with 8-byte elements (the largest legal size). Must be called
-// from exactly one lane; callers own that gating and copying any tail bytes
-// covered_bytes() leaves uncovered via a non-TDM path.
+// BULK TILE-COPY HELPERS: flat global<->global byte copies staged through
+// LDS, tiled as 2D descriptors with 8-byte elements. Must be called from
+// exactly one lane; callers own that gating and any tail bytes left
+// uncovered by covered_bytes().
 // ==============================================================================
 
 constexpr uint32_t FlatCopyElementLog2 = 3;  // 8 bytes/element
 
-// Bytes of [0, total_bytes) that copy_region/copy_region_pipelined will
-// actually move for a given tile_bytes_cap: the largest multiple of
-// tile_bytes_cap not exceeding total_bytes, or — if total_bytes is smaller
-// than one tile — a single undersized tile (rounded down to a whole
-// element) so TDM still engages instead of sitting idle.
+// Bytes of [0, total_bytes) actually moved for a given tile_bytes_cap: the
+// largest multiple of tile_bytes_cap not exceeding total_bytes, or a single
+// undersized tile if total_bytes is smaller than one.
 __device__ __forceinline__ size_t covered_bytes(size_t total_bytes, uint32_t tile_bytes_cap) {
   if (total_bytes == 0) return 0;
   if (total_bytes < tile_bytes_cap) {
@@ -265,15 +247,13 @@ __device__ __forceinline__ size_t covered_bytes(size_t total_bytes, uint32_t til
 
 #if HIP_HAVE_TDM_INTRINSICS
 
-// Copies covered_bytes(bytes, tile_bytes_cap) bytes from src to dst, tile by
-// tile, through lds_scratch. double_buffered ping-pongs between the two
-// halves of lds_scratch (needs 2*tile_bytes_cap bytes there) so the load for
-// tile N+1 and the store for tile N are both in flight together; otherwise
-// each tile is a fully serialized load-wait-store-wait (needs only
-// tile_bytes_cap bytes). tile_bytes_cap must be a multiple of 8 bytes.
+// Copies covered_bytes(bytes, tile_bytes_cap) bytes tile by tile through
+// lds_scratch. double_buffered overlaps load(tile N+1) with store(tile N)
+// (needs 2*tile_bytes_cap bytes); otherwise each tile is a serialized
+// load-wait-store-wait. tile_bytes_cap must be a multiple of 8 bytes.
 //
-// LoadCachePolicy/StoreCachePolicy are template parameters (see the comment
-// on load_to_lds above), built with make_cache_policy(hint, scope).
+// LoadCachePolicy/StoreCachePolicy are template parameters (see load_to_lds
+// above), built with make_cache_policy(hint, scope).
 template <int LoadCachePolicy, int StoreCachePolicy>
 __device__ inline void copy_region(void *dst, const void *src, size_t bytes, void *lds_scratch,
                                    uint32_t tile_bytes_cap, bool double_buffered) {
@@ -295,7 +275,7 @@ __device__ inline void copy_region(void *dst, const void *src, size_t bytes, voi
   const auto *src_bytes = static_cast<const char *>(src);
   auto *lds_base = static_cast<uint8_t *>(lds_scratch);
 
-#if defined(__GFX12__)
+#if defined(__gfx1250__)
   if (double_buffered) {
     uintptr_t ping = reinterpret_cast<uintptr_t>(lds_base);
     uintptr_t pong = reinterpret_cast<uintptr_t>(lds_base + tile_bytes);
@@ -346,21 +326,17 @@ __device__ inline void copy_region(void *dst, const void *src, size_t bytes, voi
 }
 
 // Same contract as copy_region, but always double-buffered and pipelined
-// more tightly: instead of draining with wait<0>() every iteration (idling
-// the tensor engine between pairs), it only ever waits for the in-flight
-// count to drop to <=1 (wait<1>()), so a load and a store are almost always
-// both in flight. Tiles are issued in pairs — load(odd), store(even),
-// store(odd), load(next even), ... — with buffer choice fixed by tile
-// parity. Each op is issued exactly two slots after the op it depends on,
-// so wait<1>() right before issuing op N guarantees op N-2 has completed —
-// the tightest spacing that's still correct.
-// Falls back to copy_region's single-buffered path on non-GFX12 builds.
-// LoadCachePolicy/StoreCachePolicy are template parameters — see the comment
-// on load_to_lds above.
+// tighter: waits only for the in-flight count to drop to <=1 (wait<1>())
+// instead of draining every iteration, so a load and a store are almost
+// always both in flight. Tiles issue in pairs (load/store alternating
+// even/odd, buffer chosen by parity); each op is issued exactly two slots
+// after the op it depends on, so wait<1>() before op N guarantees op N-2
+// has completed. Falls back to copy_region's single-buffered path on
+// non-gfx1250 builds.
 template <int LoadCachePolicy, int StoreCachePolicy>
 __device__ inline void copy_region_pipelined(void *dst, const void *src, size_t bytes,
                                              void *lds_scratch, uint32_t tile_bytes_cap) {
-#if defined(__GFX12__)
+#if defined(__gfx1250__)
   const size_t covered = covered_bytes(bytes, tile_bytes_cap);
   if (covered == 0) return;
   const uint32_t tile_bytes =
@@ -398,10 +374,8 @@ __device__ inline void copy_region_pipelined(void *dst, const void *src, size_t 
       issue_load(buf[tile_odd & 1u], reinterpret_cast<uintptr_t>(src_bytes + tile_odd * tile_bytes));
     }
 
-    // When there's no odd tile in this pair, load(tile_even) was issued only
-    // one op ago, not two — wait<1>() would let this store race ahead of it.
-    // Drain fully in that case. (Two separate literal-arg calls, not one
-    // call with a runtime-selected count: the wait count is an immarg.)
+    // No odd tile: load(tile_even) was only one op ago, not two, so
+    // wait<1>() would race ahead of it -- drain fully instead.
     if (has_odd) {
       wait<1>();
     } else {
@@ -433,15 +407,10 @@ __device__ inline void copy_region_pipelined(void *dst, const void *src, size_t 
 #endif  // HIP_HAVE_TDM_INTRINSICS
 
 // ==============================================================================
-// LDS REGISTRATION
-//
-// Backs rocshmem_set_tdm_lds()/rocshmem_query_tdm_lds_bytes(): the public API
-// letting a caller's kernel hand rocSHMEM the LDS buffer it may stage TDM
-// transfers through, without rocSHMEM ever assuming ownership of a kernel's
-// dynamic LDS. Every thread in the block must call set_lds() (only thread
-// (0,0,0)'s arguments are used, but the internal barrier needs every thread
-// to reach it) before any work-group put/get in that kernel that should use
-// TDM.
+// LDS REGISTRATION: backs rocshmem_set_tdm_lds()/rocshmem_query_tdm_lds_bytes().
+// Every thread in the block must call set_lds() -- only thread (0,0,0)'s
+// arguments are used, but its internal barrier needs every thread to reach
+// it -- before any work-group put/get in that kernel that should use TDM.
 // ==============================================================================
 
 // LDS bytes needed for a double-buffered copy_region call with this tile size.

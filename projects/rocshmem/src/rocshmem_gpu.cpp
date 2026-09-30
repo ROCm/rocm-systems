@@ -152,7 +152,7 @@ __device__ size_t rocshmem_query_tdm_lds_bytes() {
 
 __device__ void rocshmem_set_tdm_lds([[maybe_unused]] void *lds,
                                      [[maybe_unused]] size_t lds_bytes) {
-#if defined(USE_TDM) && defined(__GFX12__)
+#if defined(USE_TDM) && defined(__gfx1250__)
   tdm::set_lds(lds, lds_bytes);
 #endif
 }
