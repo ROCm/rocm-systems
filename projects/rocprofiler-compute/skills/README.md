@@ -39,19 +39,11 @@ The script replaces any `rocprof-compute-*` skills already in that folder, so
 run it again after upgrading ROCm. Cursor also reads the Claude and Codex
 folders, so install for one agent only if you use Cursor alongside them.
 
-To install by hand, copy the skill directories:
-
-```bash
-cp -r <rocm-path>/share/rocprofiler-compute/skills/rocprof-compute-*/ ~/.claude/skills/
-```
-
 ## Uninstall
 
 ```bash
 <rocm-path>/share/rocprofiler-compute/skills/install-skills.sh --agent claude --uninstall
 ```
-
-Or remove them by hand with `rm -r ~/.claude/skills/rocprof-compute-*`.
 
 ## Structure
 

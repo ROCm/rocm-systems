@@ -22,10 +22,10 @@ different questions. Choose by what the user is asking, not by difficulty.
 | Source | Answers | Skill |
 |---|---|---|
 | Perfmon counters | How the architecture behaves: bandwidth, cache, occupancy, pipeline utilization | this skill, then `rocprof-compute-speed-of-light`, `rocprof-compute-memory`, `rocprof-compute-roofline` |
-| PC sampling | How the source code behaves: which instruction or line is hot and why it stalls | `pc-sampling` |
+| PC sampling | How the source code behaves: which instruction or line is hot and why it stalls | `rocprof-compute-pc-sampling` |
 
 Counters are the default starting point because they cover the whole kernel
-cheaply. Go straight to `pc-sampling` when the user asks about instructions,
+cheaply. Go straight to `rocprof-compute-pc-sampling` when the user asks about instructions,
 source lines, or stall reasons, and use both when an architectural limit needs
 to be traced back to the code that causes it.
 
