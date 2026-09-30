@@ -57,7 +57,9 @@ import sys
 import time
 
 # The kernel-replay concurrency stress test plus the tests that failed on the four
-# remove-callbacks PRs, and the per-service queue_hooks unit tests. rocprofv3-test-rocshmem-tracing
+# remove-callbacks PRs, the per-service queue_hooks unit tests, and the external correlation id
+# samples, whose many-threaded dispatches all go through the queue interceptor the PRs change
+# and which stalled once in a coverage build. rocprofv3-test-rocshmem-tracing
 # is left out: on ubuntu and rhel-8.8 its first run in a job passes and nearly every re-run hangs
 # until its timeout, so repeating it measures leftover state from the previous run and spends the
 # budget the other tests need.
@@ -72,6 +74,7 @@ DEFAULT_SELECT = [
     # counters_queue_hooks, spm_queue_hooks, pc_sampling_queue_hooks, ThreadTraceQueueHooks
     r"(?i)^unit\.[a-z_]*queue_?hooks[a-z_]*\.",
     r"^unit\.kernel_replay_",
+    r"^external-correlation-id-request",
 ]
 
 # Never select this harness (recursion) or validation tests, whose inputs are the output of an
