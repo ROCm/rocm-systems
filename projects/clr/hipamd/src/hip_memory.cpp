@@ -3068,7 +3068,8 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
     constexpr unsigned int kValidFlagMask =
         hipMemcpyFlagPreferOverlapWithCompute | hipMemcpyFlagExtPreferCE |
         hipMemcpyFlagExtPreferComputeEngine | hipMemcpyFlagExtOpSwap |
-        hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst;
+        hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst |
+        hipMemcpyFlagExtPreferLinear | hipMemcpyFlagExtPreferBroadcast;
     for (size_t i = 0; i < numAttrs; ++i) {
       if (attrs[i].srcAccessOrder < hipMemcpySrcAccessOrderStream ||
           attrs[i].srcAccessOrder > hipMemcpySrcAccessOrderAny) {
@@ -3091,6 +3092,16 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
       // The shader copy path only handles linear copies, so PreferComputeEngine cannot be
       // combined with a swap or indirect operation.
       if ((f & hipMemcpyFlagExtPreferComputeEngine) &&
+          (f & (hipMemcpyFlagExtOpSwap | hipMemcpyFlagExtOpIndirectSrc |
+                hipMemcpyFlagExtOpIndirectDst))) {
+        return hipErrorInvalidValue;
+      }
+      // PreferLinear and PreferBroadcast are opposite grouping hints, and broadcast only
+      // applies to linear copies. Both are accepted but not yet acted on.
+      if ((f & hipMemcpyFlagExtPreferLinear) && (f & hipMemcpyFlagExtPreferBroadcast)) {
+        return hipErrorInvalidValue;
+      }
+      if ((f & hipMemcpyFlagExtPreferBroadcast) &&
           (f & (hipMemcpyFlagExtOpSwap | hipMemcpyFlagExtOpIndirectSrc |
                 hipMemcpyFlagExtOpIndirectDst))) {
         return hipErrorInvalidValue;
