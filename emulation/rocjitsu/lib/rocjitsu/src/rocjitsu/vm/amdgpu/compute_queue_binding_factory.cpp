@@ -91,6 +91,7 @@ public:
         .packet_format = request.packet_format,
         .initial_consumer_cursor = request.initial_consumer_cursor,
         .packet_callbacks = callbacks_,
+        .scheduling_percentage = request.scheduling_percentage,
     });
     if (registration_id == 0)
       return {};

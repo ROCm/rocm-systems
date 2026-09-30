@@ -573,7 +573,7 @@ add_executable(
     aql_packet_processor_test.cpp
     pm4_ring_consumer_test.cpp
     pm4_packet_processor_test.cpp
-    pm4_queue_controller_test.cpp
+    pm4_compute_queue_test.cpp
     sdma_queue_scheduler_test.cpp
     sdma_packet_processor_test.cpp
     sdma_ring_consumer_test.cpp

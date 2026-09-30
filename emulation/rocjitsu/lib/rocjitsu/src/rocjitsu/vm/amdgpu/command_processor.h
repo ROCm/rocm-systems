@@ -71,14 +71,22 @@ namespace amdgpu {
 class GpuVm;
 class GpuVmAccess;
 class CommandProcessorCloseTestAccess;
-class Pm4QueueController;
 class QueueBindingFactory;
 enum class VmAccessOutcome : uint8_t;
 enum class QueueReconfigureStatus : uint8_t;
 enum class QueueSubmissionStatus : uint8_t;
 enum class QueuePrepareCloseStatus : uint8_t;
 struct AtomicLoadResult;
-struct Pm4QueueConfig;
+/// @brief PM4 queue configuration admitted by one CommandProcessor.
+struct Pm4QueueConfig {
+  AddressSpaceHandle address_space;
+  uint64_t ring_base = 0;
+  uint32_t ring_size_bytes = 0;
+  uint64_t consumer_pointer_address = 0;
+  std::optional<uint64_t> initial_consumer_cursor = std::nullopt;
+  Pm4PacketCallbacks packet_callbacks{};
+};
+
 struct QueueReconfigureRequest;
 
 /// @brief AMDGPU command processor that dispatches wavefronts to compute units.
