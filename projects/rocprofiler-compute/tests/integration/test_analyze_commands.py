@@ -1042,3 +1042,53 @@ def test_analyze_per_kernel_export_output_format(
     assert [row[0] for row in rows] == [
         str(line_number) for line_number in range(1, len(rows) + 1)
     ]
+
+
+@pytest.mark.misc
+@pytest.mark.parametrize("output_format", ["db", "csv"])
+def test_two_counter_workload_exports(
+    binary_handler_analyze_rocprof_compute, tmp_path, monkeypatch, output_format
+):
+    fixture_root = Path(common.ROOT) / "tests/workloads/vcopy"
+    monkeypatch.chdir(tmp_path)
+    workloads = [
+        integration_common.setup_workload_dir(
+            fixture_root / model, param_id=f"{model}_{output_format}"
+        )
+        for model in ("MI100", "MI200")
+    ]
+    output_dir = tmp_path / "analysis"
+    command = [
+        "analyze",
+        "--output-directory",
+        str(output_dir),
+        "--output-format",
+        output_format,
+        "--output-name",
+        "two_workloads",
+    ]
+    for workload in workloads:
+        command.extend(["--path", workload])
+    assert binary_handler_analyze_rocprof_compute(command) == 0
+    kernel_name = "vecCopy(double*, double*, double*, int, int)"
+    if output_format == "db":
+        summaries = common.check_analysis_db(
+            output_dir / "two_workloads.db", expected_workloads=2
+        )
+        assert all(
+            row["kernels"] == {kernel_name} and row["dispatch_count"] == 3
+            for row in summaries.values()
+        )
+        assert len(set.union(*(row["kernel_uuids"] for row in summaries.values()))) == 2
+        assert len({(row["name"], row["sub_name"]) for row in summaries.values()}) == 2
+    else:
+        frames = common.check_analysis_csv_dir(output_dir / "two_workloads")
+        kernels = frames["kernel"]
+        assert len(kernels) == 2
+        assert kernels.workload_id.nunique() == kernels.kernel_uuid.nunique() == 2
+        assert set(kernels.kernel_name) == {kernel_name}
+        assert kernels.dispatch_count.tolist() == [3, 3]
+        assert frames["pc_sampling_summary"].empty
+        assert frames["source_lines"].empty
+    for workload in workloads:
+        common.clean_output_dir(config["cleanup"], workload)
