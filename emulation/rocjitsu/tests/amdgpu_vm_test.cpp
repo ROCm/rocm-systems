@@ -43,6 +43,7 @@ RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "hsa/AMDHSAKernelDescriptor.h"
 #include "hsa/amd_hsa_queue.h"
+#include "linux/uapi/kfd_ioctl.h"
 RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
@@ -1064,7 +1065,10 @@ TEST(AqlDispatchTest, InvalidatedAdmissionSnapshotRecapturesBeforeFirstFetch) {
                        test::AqlQueue::DEFAULT_WRITE_PTR_ADDR,
                        test::AqlQueue::DEFAULT_DOORBELL_ADDR, /*xcd_fanout=*/false,
                        /*queue_id=*/1, address_space, kProcessId);
-  queue.dispatch(kernel, /*grid_size=*/32, /*workgroup_size=*/32);
+  constexpr uint64_t kCompletionSignal = 0x3000;
+  init_completion_signal(fixture.mem(), kCompletionSignal);
+  queue.submit(make_dispatch_packet(kernel, kCompletionSignal, /*grid_size_x=*/32,
+                                    /*workgroup_size_x=*/32));
 
   for (uint32_t step = 0; step < 100 && fixture.engine->step(); ++step) {
   }
@@ -1072,6 +1076,8 @@ TEST(AqlDispatchTest, InvalidatedAdmissionSnapshotRecapturesBeforeFirstFetch) {
   ASSERT_TRUE(observed->attempted());
   ASSERT_TRUE(observed->invalidated());
   EXPECT_TRUE(fixture.cu()->is_idle());
+  EXPECT_EQ(completion_signal_value(fixture.mem(), kCompletionSignal), 0);
+  EXPECT_FALSE(fixture.cp()->queue_faulted_for_test(1, kProcessId));
 }
 
 TEST(AqlDispatchTest, InvalidationRefetchesInstructionsAlreadyInCache) {
@@ -1129,7 +1135,10 @@ TEST(AqlDispatchTest, InvalidationRefetchesInstructionsAlreadyInCache) {
                        test::AqlQueue::DEFAULT_WRITE_PTR_ADDR,
                        test::AqlQueue::DEFAULT_DOORBELL_ADDR, /*xcd_fanout=*/false,
                        /*queue_id=*/1, address_space, kProcessId);
-  queue.dispatch(kernel, /*grid_size=*/32, /*workgroup_size=*/32);
+  constexpr uint64_t kCompletionSignal = 0x3000;
+  init_completion_signal(fixture.mem(), kCompletionSignal);
+  queue.submit(make_dispatch_packet(kernel, kCompletionSignal, /*grid_size_x=*/32,
+                                    /*workgroup_size_x=*/32));
 
   for (uint32_t step = 0; step < 100 && fixture.engine->step(); ++step) {
   }
@@ -1137,6 +1146,130 @@ TEST(AqlDispatchTest, InvalidationRefetchesInstructionsAlreadyInCache) {
   ASSERT_TRUE(observed->invalidated());
   EXPECT_EQ(observed->instruction_count(), 1u);
   EXPECT_TRUE(fixture.cu()->is_idle());
+  EXPECT_EQ(completion_signal_value(fixture.mem(), kCompletionSignal), 0);
+  EXPECT_FALSE(fixture.cp()->queue_faulted_for_test(1, kProcessId));
+}
+
+TEST(AqlDispatchTest, RevokedInFlightLoadPublishesQueueMemoryException) {
+  constexpr uint32_t kProcessId = 77;
+  constexpr uint32_t kQueueId = 1;
+  constexpr uint32_t kExceptionEvent = 19;
+  constexpr uint64_t kDataAddress = 0x2000;
+  constexpr uint64_t kCompletionSignal = 0x3000;
+  constexpr uint64_t kExceptionStatus = 0x4000;
+  constexpr uint32_t kLoadedValue = 0x12345678;
+
+  class DeferredDataTranslator final : public amdgpu::AddressSpaceTranslator {
+  public:
+    amdgpu::VmTranslationResult translate(uint64_t address, size_t size,
+                                          amdgpu::VmAccessKind access) const override {
+      if (address == kDataAddress && access == amdgpu::VmAccessKind::Read && deferred) {
+        ++deferred_reads;
+        return {.outcome = amdgpu::VmAccessOutcome::Unavailable, .translation = {}};
+      }
+      return identity_.translate(address, size, access);
+    }
+
+    bool deferred = true;
+    mutable uint32_t deferred_reads = 0;
+
+  private:
+    amdgpu::IdentityAddressSpaceTranslator identity_;
+  };
+
+  class InitializeLoad final : public ExecutionPlugin {
+  public:
+    InitializeLoad() : ExecutionPlugin("initialize_revoked_load") {}
+
+    void onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) override {
+      wf.set_exec(1);
+      wf.debug_write_sgpr(0, kDataAddress);
+      wf.debug_write_sgpr(1, 0);
+      wf.debug_write_vgpr(0, 0, 0);
+    }
+  };
+
+  // The control completes the same deferred load. Invalidation must instead
+  // notify the queue owner, without publishing a successful kernel completion.
+  for (bool invalidate : {false, true}) {
+    SCOPED_TRACE(invalidate);
+    VmFixture fixture("cdna5");
+    auto translator = std::make_shared<DeferredDataTranslator>();
+    auto physical = std::make_shared<amdgpu::GpuMemoryPhysicalAccess>(*fixture.mem());
+    uint32_t snapshot_faults = 0;
+    const auto address_space = fixture.soc_ptr->gpu_vm().register_address_space(
+        kProcessId, translator, physical,
+        [&](uint64_t, amdgpu::VmAccessKind) { ++snapshot_faults; });
+    ASSERT_TRUE(address_space);
+
+    auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+    ASSERT_TRUE(group->add(std::make_unique<InitializeLoad>()));
+    fixture.soc_ptr->set_plugin_group(group);
+
+    constexpr auto load = cdna5::build_vglobal(cdna5::kGlobalLoadB32Vglobal,
+                                               {.saddr = 0, .vdst = 1, .vaddr = 0, .ioffset = 0});
+    constexpr auto wait = cdna5::build_sopp(cdna5::kSWaitLoadcntSopp, {.simm16 = 0});
+    const uint32_t code[] = {load[0], load[1], load[2], wait[0], 0xBFB00000u};
+    const uint64_t kernel = fixture.write_kernel(0x1000, code, sizeof(code));
+    fixture.mem()->write32(kDataAddress, kLoadedValue);
+    init_completion_signal(fixture.mem(), kCompletionSignal);
+    fixture.mem()->write64(kExceptionStatus, 0);
+
+    uint32_t exception_count = 0;
+    uint64_t exception_status = 0;
+    amdgpu::InterruptSubscription owner([&](uint32_t process_id, uint32_t event_id) {
+      EXPECT_EQ(process_id, kProcessId);
+      if (event_id == 0) // Ordinary queue-idle notification.
+        return;
+      EXPECT_EQ(event_id, kExceptionEvent);
+      ++exception_count;
+      exception_status = fixture.mem()->read64(kExceptionStatus);
+      // Model ROCr acknowledging the queue's exception signal.
+      fixture.mem()->write64(kExceptionStatus, 0);
+    });
+    amdgpu::ComputeQueueConfig queue{};
+    queue.address_space = address_space;
+    queue.interrupt_sink = owner.sink();
+    queue.process_id = kProcessId;
+    queue.queue_id = kQueueId;
+    queue.ring_base_va = test::AqlQueue::DEFAULT_RING_ADDR;
+    queue.ring_size = test::AqlQueue::DEFAULT_RING_SIZE;
+    queue.read_ptr_va = test::AqlQueue::DEFAULT_READ_PTR_ADDR;
+    queue.write_ptr_va = test::AqlQueue::DEFAULT_WRITE_PTR_ADDR;
+    queue.doorbell_va = test::AqlQueue::DEFAULT_DOORBELL_ADDR;
+    queue.doorbell_mode = amdgpu::QueueDoorbellMode::VmPolled;
+    queue.exception_status_va = kExceptionStatus;
+    queue.exception_event_id = kExceptionEvent;
+    fixture.cp()->register_queue(queue);
+    const auto packet = make_dispatch_packet(kernel, kCompletionSignal, 32, 32);
+    fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(&packet), sizeof(packet),
+                              queue.ring_base_va);
+    fixture.mem()->write64(queue.read_ptr_va, 0);
+    fixture.mem()->write64(queue.write_ptr_va, 1);
+    fixture.mem()->write64(queue.doorbell_va, 1);
+    fixture.engine->schedule_event_now(fixture.cp()->doorbell_event());
+
+    for (uint32_t step = 0; step < 100 && translator->deferred_reads == 0; ++step)
+      ASSERT_TRUE(fixture.engine->step());
+    ASSERT_GT(translator->deferred_reads, 0u);
+    ASSERT_EQ(fixture.cu()->wf(0)->state(), amdgpu::WfState::VM_RETRY);
+    ASSERT_EQ(completion_signal_value(fixture.mem(), kCompletionSignal), 1);
+    ASSERT_EQ(exception_count, 0u);
+
+    if (invalidate) {
+      ASSERT_TRUE(fixture.soc_ptr->gpu_vm().invalidate(address_space));
+    }
+    translator->deferred = false;
+    for (uint32_t step = 0; step < 1000 && fixture.engine->step(); ++step) {
+    }
+
+    EXPECT_TRUE(fixture.cu()->is_idle());
+    EXPECT_EQ(fixture.cp()->queue_faulted_for_test(kQueueId, kProcessId), invalidate);
+    EXPECT_EQ(completion_signal_value(fixture.mem(), kCompletionSignal), invalidate ? 1 : 0);
+    EXPECT_EQ(exception_count, invalidate ? 1u : 0u);
+    EXPECT_EQ(exception_status, invalidate ? KFD_EC_MASK(EC_QUEUE_WAVE_MEMORY_VIOLATION) : 0);
+    EXPECT_EQ(snapshot_faults, 0u);
+  }
 }
 
 TEST(AqlDispatchTest, ConcurrentRootReplacementPreservesAdmittedDispatchSnapshot) {

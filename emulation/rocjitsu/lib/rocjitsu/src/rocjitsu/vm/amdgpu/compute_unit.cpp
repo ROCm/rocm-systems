@@ -446,6 +446,16 @@ void ComputeUnitCore::handle_terminal_vm_fault(Wavefront &wf, VmAccessOutcome ou
                                 .process_id = wf.process_id(),
                                 .dispatch_id = wf.dispatch_id(),
                                 .outcome = outcome});
+  if (outcome == VmAccessOutcome::Revoked) {
+    // Fetch revocation is recovered before reaching this terminal path. An
+    // in-flight data access cannot be replayed safely. Notify the live queue
+    // owner after dropping the wave-state lock, rather than invoking a fault
+    // reporter retained by the revoked snapshot. The dispatch still aborts
+    // without publishing a successful completion.
+    defer_queue_exception(nullptr, wf.queue_id(), wf.process_id(), kAqlQueueMemoryViolation,
+                          /*clear_debug_stop_on_success=*/false,
+                          /*retain_failure_for_debugger=*/false);
+  }
   abort_dispatch(wf.dispatch_id());
 }
 
