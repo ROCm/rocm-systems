@@ -36,6 +36,8 @@
 
 #include <rocprofiler-sdk/fwd.h>
 
+#include <pthread.h>
+
 namespace rocprofiler
 {
 namespace counters
@@ -161,11 +163,28 @@ process_completed_cb(completed_cb_params_t&& params)
 
 using callback_consumer_t = consumer_thread_t<completed_cb_params_t>;
 
+callback_consumer_t*&
+callback_thread_slot()
+{
+    static auto*& _v = common::static_object<callback_consumer_t>::construct(&process_completed_cb);
+    return _v;
+}
+
+void
+callback_consumer_child_fork()
+{
+    callback_thread_slot()->release_after_fork();
+}
+
 callback_consumer_t&
 callback_thread_get()
 {
-    static auto*& _v = common::static_object<callback_consumer_t>::construct(&process_completed_cb);
-    return *CHECK_NOTNULL(_v);
+    auto& consumer = *CHECK_NOTNULL(callback_thread_slot());
+    static std::once_flag once;
+    std::call_once(once, []() {
+        ::pthread_atfork(nullptr, nullptr, callback_consumer_child_fork);
+    });
+    return consumer;
 }
 }  // namespace
 
