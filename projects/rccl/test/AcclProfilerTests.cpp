@@ -236,6 +236,28 @@ static void MakeKernelChDescr(ncclProfilerEventDescr_v5_t* d, void* collHandle,
     d->kernelCh.pTimer = pTimer;
 }
 
+// Fills a ProxyOp event descriptor parented to `collHandle`. Hand-built copies
+// of this had already drifted apart on peer and channelId.
+static void MakeProxyOpDescr(ncclProfilerEventDescr_v5_t* d, void* collHandle,
+                             int channelId, int peer, int nSteps, int isSend) {
+    memset(d, 0, sizeof(*d));
+    d->type = ncclProfileProxyOp;
+    d->parentObj = collHandle;
+    d->proxyOp.channelId = channelId;
+    d->proxyOp.peer = peer;
+    d->proxyOp.nSteps = nSteps;
+    d->proxyOp.isSend = isSend;
+}
+
+// Fills a ProxyStep event descriptor parented to `opHandle`.
+static void MakeProxyStepDescr(ncclProfilerEventDescr_v5_t* d, void* opHandle,
+                               int step) {
+    memset(d, 0, sizeof(*d));
+    d->type = ncclProfileProxyStep;
+    d->parentObj = opHandle;
+    d->proxyStep.step = step;
+}
+
 // Drives one single-channel collective to completion and returns its coll
 // handle, or nullptr if the size filter rejected it at start.
 static void* RunSingleChannelColl(void* ctx, uint64_t seqNumber, size_t count) {
@@ -534,12 +556,8 @@ TEST(AcclProfilerLifecycle, CollWithKernelChProducesOutput) {
             ASSERT_EQ(acclPluginFinalize(ctx), 0);
 
             // Verify output file contains valid JSONL
-            char hostname[256] = {0};
-            gethostname(hostname, sizeof(hostname) - 1);
-            char path[1024];
-            snprintf(path, sizeof(path),
-                "%s/accl_profiler_rank0_%s_pid%d_0xbeef.jsonl",
-                ProfilerDirRoot(dir).c_str(), hostname, (int)getpid());
+            const std::string path =
+                ProfilerOutputPath(ProfilerDirRoot(dir).c_str(), "0xbeef");
             std::ifstream ifs(path);
             ASSERT_TRUE(ifs.good()) << "Output file not found: " << path;
             std::string line;
@@ -858,13 +876,8 @@ TEST(AcclProfilerLifecycle, ProxyOpAfterKernelStopIsValid) {
 
             // Start ProxyOp (referencing the same coll)
             ncclProfilerEventDescr_v5_t proxyDescr;
-            memset(&proxyDescr, 0, sizeof(proxyDescr));
-            proxyDescr.type = ncclProfileProxyOp;
-            proxyDescr.parentObj = collHandle;
-            proxyDescr.proxyOp.channelId = 0;
-            proxyDescr.proxyOp.peer = 1;
-            proxyDescr.proxyOp.nSteps = 1;
-            proxyDescr.proxyOp.isSend = 1;
+            MakeProxyOpDescr(&proxyDescr, collHandle, /*channelId=*/0, /*peer=*/1,
+                             /*nSteps=*/1, /*isSend=*/1);
 
             void* proxyHandle = nullptr;
             ASSERT_EQ(acclPluginStartEvent(ctx, &proxyHandle, &proxyDescr), 0);
@@ -1077,22 +1090,14 @@ TEST(AcclProfilerLifecycle, FullProxyStepDecomposition) {
 
             // Start ProxyOp
             ncclProfilerEventDescr_v5_t proxyDescr;
-            memset(&proxyDescr, 0, sizeof(proxyDescr));
-            proxyDescr.type = ncclProfileProxyOp;
-            proxyDescr.parentObj = collHandle;
-            proxyDescr.proxyOp.channelId = 0;
-            proxyDescr.proxyOp.peer = 1;
-            proxyDescr.proxyOp.nSteps = 1;
-            proxyDescr.proxyOp.isSend = 1;
+            MakeProxyOpDescr(&proxyDescr, collHandle, /*channelId=*/0, /*peer=*/1,
+                             /*nSteps=*/1, /*isSend=*/1);
             void* proxyHandle = nullptr;
             ASSERT_EQ(acclPluginStartEvent(ctx, &proxyHandle, &proxyDescr), 0);
 
             // Start ProxyStep
             ncclProfilerEventDescr_v5_t stepDescr;
-            memset(&stepDescr, 0, sizeof(stepDescr));
-            stepDescr.type = ncclProfileProxyStep;
-            stepDescr.parentObj = proxyHandle;
-            stepDescr.proxyStep.step = 0;
+            MakeProxyStepDescr(&stepDescr, proxyHandle, /*step=*/0);
             void* stepHandle = nullptr;
             ASSERT_EQ(acclPluginStartEvent(ctx, &stepHandle, &stepDescr), 0);
 
@@ -1164,21 +1169,13 @@ TEST(AcclProfilerLifecycle, ProxyStepIntervalsChargedToStateBeingLeft) {
             ASSERT_EQ(acclPluginStartEvent(ctx, &kchHandle, &kchDescr), 0);
 
             ncclProfilerEventDescr_v5_t proxyDescr;
-            memset(&proxyDescr, 0, sizeof(proxyDescr));
-            proxyDescr.type = ncclProfileProxyOp;
-            proxyDescr.parentObj = collHandle;
-            proxyDescr.proxyOp.channelId = 0;
-            proxyDescr.proxyOp.peer = 1;
-            proxyDescr.proxyOp.nSteps = 1;
-            proxyDescr.proxyOp.isSend = 1;
+            MakeProxyOpDescr(&proxyDescr, collHandle, /*channelId=*/0, /*peer=*/1,
+                             /*nSteps=*/1, /*isSend=*/1);
             void* proxyHandle = nullptr;
             ASSERT_EQ(acclPluginStartEvent(ctx, &proxyHandle, &proxyDescr), 0);
 
             ncclProfilerEventDescr_v5_t stepDescr;
-            memset(&stepDescr, 0, sizeof(stepDescr));
-            stepDescr.type = ncclProfileProxyStep;
-            stepDescr.parentObj = proxyHandle;
-            stepDescr.proxyStep.step = 0;
+            MakeProxyStepDescr(&stepDescr, proxyHandle, /*step=*/0);
             void* stepHandle = nullptr;
             ASSERT_EQ(acclPluginStartEvent(ctx, &stepHandle, &stepDescr), 0);
 
@@ -1257,20 +1254,12 @@ TEST(AcclProfilerLifecycle, ProxyStepIntervalsChargedToStateBeingLeft) {
 static void DriveProxyOpWithTimings(void* ctx, void* coll, int isSend,
                                     void** opOut) {
     ncclProfilerEventDescr_v5_t od;
-    memset(&od, 0, sizeof(od));
-    od.type = ncclProfileProxyOp;
-    od.parentObj = coll;
-    od.proxyOp.channelId = 0;
-    od.proxyOp.peer = 1;
-    od.proxyOp.nSteps = 1;
-    od.proxyOp.isSend = isSend;
+    MakeProxyOpDescr(&od, coll, /*channelId=*/0, /*peer=*/1,
+                     /*nSteps=*/1, /*isSend=*/isSend);
     ASSERT_EQ(acclPluginStartEvent(ctx, opOut, &od), 0);
 
     ncclProfilerEventDescr_v5_t sd;
-    memset(&sd, 0, sizeof(sd));
-    sd.type = ncclProfileProxyStep;
-    sd.parentObj = *opOut;
-    sd.proxyStep.step = 0;
+    MakeProxyStepDescr(&sd, *opOut, /*step=*/0);
     void* step = nullptr;
     ASSERT_EQ(acclPluginStartEvent(ctx, &step, &sd), 0);
 
@@ -1326,12 +1315,8 @@ TEST(AcclProfilerLifecycle, OutstandingProxyEventsAreReportedAtFinalize) {
             ASSERT_NE(coll, nullptr);
 
             ncclProfilerEventDescr_v5_t od;
-            memset(&od, 0, sizeof(od));
-            od.type = ncclProfileProxyOp;
-            od.parentObj = coll;
-            od.proxyOp.channelId = 0;
-            od.proxyOp.nSteps = 1;
-            od.proxyOp.isSend = 1;
+            MakeProxyOpDescr(&od, coll, /*channelId=*/0, /*peer=*/0,
+                             /*nSteps=*/1, /*isSend=*/1);
             void* op = nullptr;
             ASSERT_EQ(acclPluginStartEvent(ctx, &op, &od), 0);
             ASSERT_NE(op, nullptr);
@@ -1343,10 +1328,7 @@ TEST(AcclProfilerLifecycle, OutstandingProxyEventsAreReportedAtFinalize) {
             ASSERT_NE(parentlessOp, nullptr);
 
             ncclProfilerEventDescr_v5_t sd;
-            memset(&sd, 0, sizeof(sd));
-            sd.type = ncclProfileProxyStep;
-            sd.parentObj = op;
-            sd.proxyStep.step = 0;
+            MakeProxyStepDescr(&sd, op, /*step=*/0);
             void* step = nullptr;
             ASSERT_EQ(acclPluginStartEvent(ctx, &step, &sd), 0);
             ASSERT_NE(step, nullptr);
@@ -1364,8 +1346,12 @@ TEST(AcclProfilerLifecycle, OutstandingProxyEventsAreReportedAtFinalize) {
 
             const std::string summary = ReadSummaryLine(dir.c_str(), "0xd1d5");
             ASSERT_FALSE(summary.empty());
-            EXPECT_EQ(JsonNumber(summary, "outstanding_proxy_ops"), 2.0);
-            EXPECT_EQ(JsonNumber(summary, "outstanding_proxy_steps"), 1.0);
+            // Outstanding, not dropped or stale: nothing here was rejected.
+            // The collective is a leak too -- its op never stopped, so it never
+            // reached its completion predicate.
+            ExpectSummaryCounters(summary, {{"outstanding_proxy_ops", 2},
+                                            {"outstanding_proxy_steps", 1},
+                                            {"leaked_collectives", 1}});
             // The loss has to reach the consumer; it cannot be reclaimed.
             EXPECT_NE(summary.find("\"complete\":false"), std::string::npos);
 
@@ -1400,9 +1386,12 @@ TEST(AcclProfilerLifecycle, ProxyComponentsAveragedOverTheirOwnOpClass) {
             void* kch = nullptr;
             ASSERT_EQ(acclPluginStartEvent(ctx, &kch, &kd), 0);
 
+            // 6 send / 2 recv, not 4/4: with equal counts the two divisors are
+            // interchangeable, so swapping them would still produce the right
+            // numbers and this test would pass.
             void* ops[8] = {nullptr};
             for (int i = 0; i < 8; i++) {
-                DriveProxyOpWithTimings(ctx, coll, i < 4 ? 1 : 0, &ops[i]);
+                DriveProxyOpWithTimings(ctx, coll, i < 6 ? 1 : 0, &ops[i]);
                 ASSERT_NE(ops[i], nullptr);
             }
 
@@ -1418,17 +1407,17 @@ TEST(AcclProfilerLifecycle, ProxyComponentsAveragedOverTheirOwnOpClass) {
             }
             ASSERT_EQ(acclPluginFinalize(ctx), 0);
 
-            std::string out = ReadProfilerOutput(dir.c_str(), "0xd1d0");
-            ASSERT_FALSE(out.empty());
-            std::string line = out.substr(0, out.find('\n'));
+            const std::string line = ReadCollRecord(dir.c_str(), "0xd1d0");
+            ASSERT_FALSE(line.empty());
 
             EXPECT_EQ(JsonNumber(line, "n_proxy_ops"), 8);
-            EXPECT_EQ(JsonNumber(line, "n_send_ops"), 4);
-            EXPECT_EQ(JsonNumber(line, "n_recv_ops"), 4);
+            EXPECT_EQ(JsonNumber(line, "n_send_ops"), 6);
+            EXPECT_EQ(JsonNumber(line, "n_recv_ops"), 2);
 
             // usleep only guarantees a lower bound, so each window is
             // [nominal, 2x nominal): wide enough for scheduling jitter, tight
-            // enough to exclude the halved /n_proxy_ops value.
+            // enough to exclude both the /n_proxy_ops value and a send/recv
+            // divisor swap.
             struct { const char* key; double lo, hi; } expect[] = {
                 {"proxy_gpu_wait_us",      4000, 8000},
                 {"proxy_peer_wait_us",     3000, 6000},
@@ -1485,9 +1474,8 @@ TEST(AcclProfilerLifecycle, SendOnlyCollectiveReportsZeroRecvComponents) {
             ASSERT_EQ(acclPluginStopEvent(op), 0);
             ASSERT_EQ(acclPluginFinalize(ctx), 0);
 
-            std::string out = ReadProfilerOutput(dir.c_str(), "0xd1d1");
-            ASSERT_FALSE(out.empty());
-            std::string line = out.substr(0, out.find('\n'));
+            const std::string line = ReadCollRecord(dir.c_str(), "0xd1d1");
+            ASSERT_FALSE(line.empty());
 
             EXPECT_EQ(JsonNumber(line, "n_recv_ops"), 0);
             EXPECT_EQ(line.find("nan"), std::string::npos)
@@ -1755,8 +1743,10 @@ TEST(AcclProfilerNChannels, Wrapped256DoesNotFinalizeEarly) {
             EXPECT_EQ(out.find("\"coll_perf\""), std::string::npos)
                 << "1 of 256 channels reported: the collective must not be "
                    "finalized, because its slot is still live for RCCL";
-            EXPECT_NE(out.find("\"leaked_collectives\":1"), std::string::npos)
-                << "The unfinalized slot must be counted as leaked, not hidden";
+            // The unfinalized slot must be counted as leaked, not hidden, and
+            // no other loss channel may have fired instead.
+            ExpectSummaryCounters(ReadSummaryLine(dir.c_str(), "0x2602"),
+                                  {{"leaked_collectives", 1}});
         },
         {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
     );
@@ -1806,7 +1796,17 @@ TEST(AcclProfilerSummary, CleanRunReportsComplete) {
             EXPECT_NE(out.find("\"complete\":true"), std::string::npos);
             // Every counter, so "complete":true is checked against the same
             // vector the loss tests check against.
-            ExpectSummaryCounters(ReadSummaryLine(dir.c_str(), "0x5101"), {});
+            const std::string s = ReadSummaryLine(dir.c_str(), "0x5101");
+            ExpectSummaryCounters(s, {});
+            // The pool sizes are how a consumer tells "0 drops" from "0 drops
+            // because the pool was 16x bigger", so the producer must emit them.
+            EXPECT_EQ(JsonNumber(s, "coll_pool_size"), ACCL_COLL_POOL_SIZE);
+            EXPECT_EQ(JsonNumber(s, "proxy_op_pool_size"),
+                      ACCL_PROXY_OP_POOL_SIZE);
+            EXPECT_EQ(JsonNumber(s, "proxy_step_pool_size"),
+                      ACCL_PROXY_STEP_POOL_SIZE);
+            EXPECT_EQ(JsonNumber(s, "max_proxy_ops_per_coll"),
+                      ACCL_MAX_PROXY_OPS);
         },
         {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
     );
@@ -1838,9 +1838,11 @@ TEST(AcclProfilerSummary, LeakedSlotsAreCounted) {
             std::string out =
                 ReadProfilerOutput(dir.c_str(), "0x5102");
             ASSERT_FALSE(out.empty());
-            EXPECT_NE(out.find("\"leaked_collectives\":3"), std::string::npos)
-                << "Every slot the drain reclaims must be counted";
             EXPECT_NE(out.find("\"complete\":false"), std::string::npos);
+            // Every slot the drain reclaims must be counted, and as a leak
+            // rather than as one of the other loss channels.
+            ExpectSummaryCounters(ReadSummaryLine(dir.c_str(), "0x5102"),
+                                  {{"leaked_collectives", 3}});
         },
         {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
     );
@@ -1879,11 +1881,12 @@ TEST(AcclProfilerSummary, PoolExhaustionIsCounted) {
             std::string out =
                 ReadProfilerOutput(dir.c_str(), "0x5103");
             ASSERT_FALSE(out.empty());
-            EXPECT_NE(out.find("\"dropped_collectives\":2"), std::string::npos)
-                << "Both rejected allocations must be counted";
-            EXPECT_NE(out.find("\"leaked_collectives\":256"), std::string::npos)
-                << "The pinned slots the drain reclaims are leaks, not drops";
             EXPECT_NE(out.find("\"complete\":false"), std::string::npos);
+            // Both rejected allocations are drops; the 256 pinned slots the
+            // drain reclaims are leaks. The two must not be conflated.
+            ExpectSummaryCounters(ReadSummaryLine(dir.c_str(), "0x5103"),
+                                  {{"dropped_collectives", 2},
+                                   {"leaked_collectives", 256}});
         },
         {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
     );
@@ -1923,22 +1926,14 @@ TEST(AcclProfilerLifecycle, ProxyStepOutlivingFinalizeKeepsContextAlive) {
             ASSERT_NE(collHandle, nullptr);
 
             ncclProfilerEventDescr_v5_t od;
-            memset(&od, 0, sizeof(od));
-            od.type = ncclProfileProxyOp;
-            od.parentObj = collHandle;
-            od.proxyOp.channelId = 0;
-            od.proxyOp.peer = 1;
-            od.proxyOp.nSteps = 1;
-            od.proxyOp.isSend = 1;
+            MakeProxyOpDescr(&od, collHandle, /*channelId=*/0, /*peer=*/1,
+                             /*nSteps=*/1, /*isSend=*/1);
             void* opHandle = nullptr;
             ASSERT_EQ(acclPluginStartEvent(ctx, &opHandle, &od), 0);
             ASSERT_NE(opHandle, nullptr);
 
             ncclProfilerEventDescr_v5_t sd;
-            memset(&sd, 0, sizeof(sd));
-            sd.type = ncclProfileProxyStep;
-            sd.parentObj = opHandle;
-            sd.proxyStep.step = 0;
+            MakeProxyStepDescr(&sd, opHandle, /*step=*/0);
             void* stepHandle = nullptr;
             ASSERT_EQ(acclPluginStartEvent(ctx, &stepHandle, &sd), 0);
             ASSERT_NE(stepHandle, nullptr);
@@ -1976,13 +1971,8 @@ TEST(AcclProfilerLifecycle, ProxyOpOutlivingFinalizeKeepsContextAlive) {
             ASSERT_NE(collHandle, nullptr);
 
             ncclProfilerEventDescr_v5_t od;
-            memset(&od, 0, sizeof(od));
-            od.type = ncclProfileProxyOp;
-            od.parentObj = collHandle;
-            od.proxyOp.channelId = 0;
-            od.proxyOp.peer = 1;
-            od.proxyOp.nSteps = 1;
-            od.proxyOp.isSend = 1;
+            MakeProxyOpDescr(&od, collHandle, /*channelId=*/0, /*peer=*/1,
+                             /*nSteps=*/1, /*isSend=*/1);
             void* opHandle = nullptr;
             ASSERT_EQ(acclPluginStartEvent(ctx, &opHandle, &od), 0);
             ASSERT_NE(opHandle, nullptr);
@@ -2044,6 +2034,11 @@ TEST(AcclProfilerLifecycle, DrainLeavesSlotsAnOwnerAlreadyClaimed) {
             // plugin this reads a freed context.
             EXPECT_EQ(test_acclRefCount(ctx), 1)
                 << "drain released a slot whose owner had already claimed it";
+
+            // This is the state inflight_collectives exists to name: the record
+            // may never reach disk, so the run must not read as clean.
+            ExpectSummaryCounters(ReadSummaryLine(dir.c_str(), "0x4b01"),
+                                  {{"inflight_collectives", 1}});
 
             // Now the owner finishes. This is its normal next step, and it must
             // not drive the count negative or touch a freed context.
@@ -2137,10 +2132,8 @@ TEST(AcclProfilerSummary, ProxyOpPoolExhaustionIsCounted) {
 
             // Pin every proxy-op slot by starting ops and never stopping them.
             ncclProfilerEventDescr_v5_t od;
-            memset(&od, 0, sizeof(od));
-            od.type = ncclProfileProxyOp;
-            od.proxyOp.nSteps = 1;
-            od.proxyOp.isSend = 1;
+            MakeProxyOpDescr(&od, nullptr, /*channelId=*/0, /*peer=*/0,
+                             /*nSteps=*/1, /*isSend=*/1);
             for (int i = 0; i < ACCL_PROXY_OP_POOL_SIZE; i++) {
                 void* h = nullptr;
                 ASSERT_EQ(acclPluginStartEvent(ctx, &h, &od), 0);
@@ -2179,18 +2172,14 @@ TEST(AcclProfilerSummary, ProxyStepPoolExhaustionIsCounted) {
                                      1, 1, 0, nullptr), 0);
 
             ncclProfilerEventDescr_v5_t od;
-            memset(&od, 0, sizeof(od));
-            od.type = ncclProfileProxyOp;
-            od.proxyOp.nSteps = 1;
-            od.proxyOp.isSend = 1;
+            MakeProxyOpDescr(&od, nullptr, /*channelId=*/0, /*peer=*/0,
+                             /*nSteps=*/1, /*isSend=*/1);
             void* op = nullptr;
             ASSERT_EQ(acclPluginStartEvent(ctx, &op, &od), 0);
             ASSERT_NE(op, nullptr);
 
             ncclProfilerEventDescr_v5_t sd;
-            memset(&sd, 0, sizeof(sd));
-            sd.type = ncclProfileProxyStep;
-            sd.parentObj = op;
+            MakeProxyStepDescr(&sd, op, /*step=*/0);
             for (int i = 0; i < ACCL_PROXY_STEP_POOL_SIZE; i++) {
                 void* h = nullptr;
                 ASSERT_EQ(acclPluginStartEvent(ctx, &h, &sd), 0);
@@ -2235,11 +2224,8 @@ TEST(AcclProfilerSummary, ProxyOpOverflowPerCollectiveIsCounted) {
             // Two more ops than the collective can record. They complete
             // normally; the plugin has nowhere to put the last two.
             ncclProfilerEventDescr_v5_t od;
-            memset(&od, 0, sizeof(od));
-            od.type = ncclProfileProxyOp;
-            od.parentObj = coll;
-            od.proxyOp.nSteps = 1;
-            od.proxyOp.isSend = 1;
+            MakeProxyOpDescr(&od, coll, /*channelId=*/0, /*peer=*/0,
+                             /*nSteps=*/1, /*isSend=*/1);
             for (int i = 0; i < ACCL_MAX_PROXY_OPS + 2; i++) {
                 void* h = nullptr;
                 ASSERT_EQ(acclPluginStartEvent(ctx, &h, &od), 0);
@@ -2289,11 +2275,8 @@ TEST(AcclProfilerLifecycle, ProxyOpMutexSurvivesSlotRelease) {
             // A proxy op with no parent collective is freed by its own stop
             // event, which is the shortest path through acclFreeProxyOp.
             ncclProfilerEventDescr_v5_t od;
-            memset(&od, 0, sizeof(od));
-            od.type = ncclProfileProxyOp;
-            od.proxyOp.channelId = 0;
-            od.proxyOp.nSteps = 2;
-            od.proxyOp.isSend = 1;
+            MakeProxyOpDescr(&od, nullptr, /*channelId=*/0, /*peer=*/0,
+                             /*nSteps=*/2, /*isSend=*/1);
             void* op = nullptr;
             ASSERT_EQ(acclPluginStartEvent(ctx, &op, &od), 0);
             ASSERT_NE(op, nullptr);
@@ -2305,10 +2288,7 @@ TEST(AcclProfilerLifecycle, ProxyOpMutexSurvivesSlotRelease) {
             // A step that is still outstanding when the op is released. This is
             // the handle that later reaches pthread_mutex_lock(&op->mutex).
             ncclProfilerEventDescr_v5_t sd;
-            memset(&sd, 0, sizeof(sd));
-            sd.type = ncclProfileProxyStep;
-            sd.parentObj = op;
-            sd.proxyStep.step = 0;
+            MakeProxyStepDescr(&sd, op, /*step=*/0);
             void* step = nullptr;
             ASSERT_EQ(acclPluginStartEvent(ctx, &step, &sd), 0);
             ASSERT_NE(step, nullptr);
@@ -2513,10 +2493,8 @@ TEST(AcclProfilerLogging, WarningsUseAllSubsysAndFireOncePerPool) {
 
             // The proxy-op pool carries its own guard, so it adds one more.
             ncclProfilerEventDescr_v5_t od;
-            memset(&od, 0, sizeof(od));
-            od.type = ncclProfileProxyOp;
-            od.proxyOp.nSteps = 1;
-            od.proxyOp.isSend = 1;
+            MakeProxyOpDescr(&od, nullptr, /*channelId=*/0, /*peer=*/0,
+                             /*nSteps=*/1, /*isSend=*/1);
             for (int i = 0; i < ACCL_PROXY_OP_POOL_SIZE + 5; i++) {
                 void* h = nullptr;
                 ASSERT_EQ(acclPluginStartEvent(ctx, &h, &od), 0);
@@ -2601,11 +2579,8 @@ TEST(AcclProfilerSummary, StaleProxyStepIsDroppedAndCounted) {
                                      1, 1, 0, nullptr), 0);
 
             ncclProfilerEventDescr_v5_t od;
-            memset(&od, 0, sizeof(od));
-            od.type = ncclProfileProxyOp;
-            od.proxyOp.channelId = 0;
-            od.proxyOp.nSteps = 1;
-            od.proxyOp.isSend = 1;
+            MakeProxyOpDescr(&od, nullptr, /*channelId=*/0, /*peer=*/0,
+                             /*nSteps=*/1, /*isSend=*/1);
             void* op = nullptr;
             ASSERT_EQ(acclPluginStartEvent(ctx, &op, &od), 0);
             ASSERT_NE(op, nullptr);
@@ -2614,10 +2589,7 @@ TEST(AcclProfilerSummary, StaleProxyStepIsDroppedAndCounted) {
             const unsigned long gen0 = test_acclProxyOpGeneration(ctx, slot);
 
             ncclProfilerEventDescr_v5_t sd;
-            memset(&sd, 0, sizeof(sd));
-            sd.type = ncclProfileProxyStep;
-            sd.parentObj = op;
-            sd.proxyStep.step = 0;
+            MakeProxyStepDescr(&sd, op, /*step=*/0);
             void* step = nullptr;
             ASSERT_EQ(acclPluginStartEvent(ctx, &step, &sd), 0);
             ASSERT_NE(step, nullptr);
@@ -2676,11 +2648,8 @@ TEST(AcclProfilerLifecycle, ProxyOpSlotReuseDoesNotWriteTheSlotMutex) {
                                      1, 1, 0, nullptr), 0);
 
             ncclProfilerEventDescr_v5_t od;
-            memset(&od, 0, sizeof(od));
-            od.type = ncclProfileProxyOp;
-            od.proxyOp.channelId = 0;
-            od.proxyOp.nSteps = 1;
-            od.proxyOp.isSend = 1;
+            MakeProxyOpDescr(&od, nullptr, /*channelId=*/0, /*peer=*/0,
+                             /*nSteps=*/1, /*isSend=*/1);
             void* op = nullptr;
             ASSERT_EQ(acclPluginStartEvent(ctx, &op, &od), 0);
             ASSERT_NE(op, nullptr);
@@ -2693,10 +2662,7 @@ TEST(AcclProfilerLifecycle, ProxyOpSlotReuseDoesNotWriteTheSlotMutex) {
             std::atomic<unsigned long> locks{0};
             std::thread steps([&]() {
                 ncclProfilerEventDescr_v5_t sd;
-                memset(&sd, 0, sizeof(sd));
-                sd.type = ncclProfileProxyStep;
-                sd.parentObj = op;
-                sd.proxyStep.step = 0;
+                MakeProxyStepDescr(&sd, op, /*step=*/0);
                 while (!stop.load(std::memory_order_relaxed)) {
                     void* sh = nullptr;
                     if (acclPluginStartEvent(ctx, &sh, &sd) == 0 && sh) {

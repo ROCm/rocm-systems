@@ -208,11 +208,12 @@ def print_drop_warnings(summaries: List[dict]):
 def reject_legacy_summaries(summaries: List[dict], label: str):
     # `pool_size` was renamed `coll_pool_size` in the same change that moved the
     # proxy_* means onto per-op-class divisors, so a file still carrying the old
-    # key is on the old scale: every proxy_* field would read as a 2x regression.
+    # key is on the old scale: roughly 2x low, which both misclassifies the
+    # bottleneck in `single` and reads as a regression in `compare`.
     if any('pool_size' in s and 'coll_pool_size' not in s for s in summaries):
         print(f"ERROR: {label} was produced by a pre-rename profiler "
               f"(summary has 'pool_size'). Its proxy_* fields use a different "
-              f"divisor and are not comparable; regenerate it.", file=sys.stderr)
+              f"divisor and cannot be interpreted; regenerate it.", file=sys.stderr)
         sys.exit(1)
 
 
@@ -544,6 +545,7 @@ def main():
         if args.cmd == 'single':
             records = load_dir_or_file(args.input, args.warmup)
             summaries = load_summaries(args.input)
+            reject_legacy_summaries(summaries, "input")
             print(f"Loaded {len(records)} records")
             print_drop_warnings(summaries)
             print_single_report(records)

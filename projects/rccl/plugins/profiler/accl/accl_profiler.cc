@@ -148,15 +148,17 @@ static struct acclCollInfo* acclAllocColl(struct acclCommContext* ctx) {
   for (int i = 0; i < ACCL_COLL_POOL_SIZE; i++) {
     if (!ctx->collPoolUsed[i]) {
       ctx->collPoolUsed[i] = 1;
-      // Clear around the mutex, never through it. It is created once in
-      // acclPluginInit and outlives every tenancy, and a stale KernelCh start
-      // can be inside pthread_mutex_lock on it right now -- that path does not
-      // take collPoolMutex. POSIX does not define copying a pthread_mutex_t.
+      // Clear around the mutex, never through it, and hold it while clearing: a
+      // stale KernelCh stop writes nKernelChCompleted under this lock, and that
+      // path does not take collPoolMutex. POSIX does not define copying a
+      // pthread_mutex_t.
       struct acclCollInfo* slot = &ctx->collPool[i];
       const size_t muOff = offsetof(struct acclCollInfo, mutex);
       const size_t muEnd = muOff + sizeof(slot->mutex);
+      pthread_mutex_lock(&slot->mutex);
       memset(slot, 0, muOff);
       memset((char*)slot + muEnd, 0, sizeof(*slot) - muEnd);
+      pthread_mutex_unlock(&slot->mutex);
       __atomic_add_fetch(&ctx->refCount, 1, __ATOMIC_SEQ_CST);
       pthread_mutex_unlock(&ctx->collPoolMutex);
       return &ctx->collPool[i];
@@ -189,6 +191,17 @@ static void acclFreeColl(struct acclCommContext* ctx, struct acclCollInfo* coll)
   acclCtxUnref(ctx);
 }
 
+// Shared tail of both proxy allocators: count the drop, warn once per pool.
+static void acclProxyPoolExhausted(uint64_t* dropped, int* warned,
+                                   const char* noun, int poolSize) {
+  __atomic_add_fetch(dropped, 1, __ATOMIC_SEQ_CST);
+  if (__atomic_exchange_n(warned, 1, __ATOMIC_SEQ_CST) == 0) {
+    ACCL_WARN("ACCL Profiler: proxy %s pool exhausted (%d slots). Proxy timing for this "
+              "communicator is now INCOMPLETE. Further drops are counted in the "
+              "end-of-run summary only.", noun, poolSize);
+  }
+}
+
 static struct acclProxyOpInfo* acclAllocProxyOp(struct acclCommContext* ctx) {
   pthread_mutex_lock(&ctx->proxyOpPoolMutex);
   for (int i = 0; i < ACCL_PROXY_OP_POOL_SIZE; i++) {
@@ -214,12 +227,8 @@ static struct acclProxyOpInfo* acclAllocProxyOp(struct acclCommContext* ctx) {
     }
   }
   pthread_mutex_unlock(&ctx->proxyOpPoolMutex);
-  __atomic_add_fetch(&ctx->droppedProxyOps, 1, __ATOMIC_SEQ_CST);
-  if (__atomic_exchange_n(&ctx->proxyOpPoolWarned, 1, __ATOMIC_SEQ_CST) == 0) {
-    ACCL_WARN("ACCL Profiler: proxy op pool exhausted (%d slots). Proxy timing for this "
-              "communicator is now INCOMPLETE. Further drops are counted in the "
-              "end-of-run summary only.", ACCL_PROXY_OP_POOL_SIZE);
-  }
+  acclProxyPoolExhausted(&ctx->droppedProxyOps, &ctx->proxyOpPoolWarned,
+                         "op", ACCL_PROXY_OP_POOL_SIZE);
   return NULL;
 }
 
@@ -248,12 +257,8 @@ static struct acclProxyStepInfo* acclAllocProxyStep(struct acclCommContext* ctx)
     }
   }
   pthread_mutex_unlock(&ctx->proxyStepPoolMutex);
-  __atomic_add_fetch(&ctx->droppedProxySteps, 1, __ATOMIC_SEQ_CST);
-  if (__atomic_exchange_n(&ctx->proxyStepPoolWarned, 1, __ATOMIC_SEQ_CST) == 0) {
-    ACCL_WARN("ACCL Profiler: proxy step pool exhausted (%d slots). Proxy timing for this "
-              "communicator is now INCOMPLETE. Further drops are counted in the "
-              "end-of-run summary only.", ACCL_PROXY_STEP_POOL_SIZE);
-  }
+  acclProxyPoolExhausted(&ctx->droppedProxySteps, &ctx->proxyStepPoolWarned,
+                         "step", ACCL_PROXY_STEP_POOL_SIZE);
   return NULL;
 }
 
@@ -494,6 +499,9 @@ static void acclFinalizeCollective(struct acclCollInfo* coll) {
     int opIdx = coll->proxyOpIndices[i];
     if (opIdx < 0 || opIdx >= ACCL_PROXY_OP_POOL_SIZE) continue;
     struct acclProxyOpInfo* op = &ctx->proxyOpPool[opIdx];
+    // Under op->mutex: a step of this op can still be stopping and adding to
+    // these accumulators, and that path writes them under the same lock.
+    pthread_mutex_lock(&op->mutex);
     if (op->isSend) {
       nSend++;
       sendGpuWait += (double)op->totalGpuWaitUs;
@@ -505,6 +513,7 @@ static void acclFinalizeCollective(struct acclCollInfo* coll) {
       recvGpuWait += (double)op->totalGpuRecvWaitUs;
       recvNetwork += (double)op->totalNetworkUs;
     }
+    pthread_mutex_unlock(&op->mutex);
   }
 
   // A zero denominator only happens when the class has no ops at all, in which
