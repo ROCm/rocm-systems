@@ -11,6 +11,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Removed
 
+* Removed the experimental `--gui` and `--tui` analyze modes and the `--random-port` option. Use the default CLI analyze mode for terminal output, or `--output-format db` to explore results in ROCm Optiq.
+  * The `dash`, `dash-bootstrap-components`, `dash-svg`, `textual`, and `textual_plotext` dependencies are no longer installed.
+
 ### Optimized
 
 ### Resolved issues
