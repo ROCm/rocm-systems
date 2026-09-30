@@ -220,14 +220,39 @@ as systems with multiple ROCm instances.
 
 ### Enable CLI autocompletion
 
-The `amd-smi` CLI application supports autocompletion. If `argcomplete` is not
-installed and enabled already, do so using the following commands.
+The `amd-smi` CLI application supports bash autocompletion through
+`argcomplete`. For a native package, install it with your distribution's
+package manager:
+
+```shell
+sudo apt install python3-argcomplete      # Debian, Ubuntu
+sudo dnf install python3-argcomplete      # RHEL, AlmaLinux, Rocky Linux
+sudo zypper install python3-argcomplete   # SLES, openSUSE
+```
+
+For a pip-installed ROCm SDK, activate its virtual environment and install
+`argcomplete` there:
 
 ```shell
 python3 -m pip install argcomplete
-activate-global-python-argcomplete --user
-# restart shell to enable
 ```
+
+Register the command in your current Bash shell. Some distributions,
+including Ubuntu 22.04, suffix the helper name with `3`:
+
+```shell
+if command -v register-python-argcomplete >/dev/null 2>&1; then
+    eval "$(register-python-argcomplete amd-smi)"
+else
+    eval "$(register-python-argcomplete3 amd-smi)"
+fi
+```
+
+To persist registration, add that block to your `~/.bashrc` after any
+virtual environment activation. Explicit registration works with both the
+native script and TheRock's pip launcher. The `amd-smi-lib` package can also
+activate the global hook during installation, but it recognizes only native
+CLI builds carrying the `PYTHON_ARGCOMPLETE_OK` marker.
 
 (install-manual-py-lib)=
 ### Install the Python library for multiple ROCm instances
