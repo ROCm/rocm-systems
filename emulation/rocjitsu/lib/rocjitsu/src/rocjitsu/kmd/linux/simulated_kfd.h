@@ -590,7 +590,7 @@ private:
   int duplicate_debug_notifier(int fd);
   int retry_debug_notifications(pid_t target_pid, bool invoke_result_hook = false);
   bool signal_runtime_queue_exception(uint32_t gpu_id, uint32_t queue_id, uint32_t process_id,
-                                      uint64_t exception_mask);
+                                      uint64_t exception_mask, bool wait_for_ack = true);
 
   bool on_wave_single_step_complete(amdgpu::Wavefront &wf);
   void apply_debug_event_publication_hook_for_testing(const std::shared_ptr<KfdProcess> &proc);

@@ -512,6 +512,7 @@ public:
   uint32_t dpp_bank_mask_ = 0xF;
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
+  amdgpu::dpp::SourceModifiers dpp_modifiers_;
   uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
   bool sdwa_src0_sext_ = false;
   bool sdwa_src0_neg_ = false;
@@ -565,6 +566,7 @@ public:
   uint32_t dpp_bank_mask_ = 0xF;
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
+  amdgpu::dpp::SourceModifiers dpp_modifiers_;
   uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
   bool sdwa_src0_sext_ = false;
   bool sdwa_src0_neg_ = false;
@@ -627,6 +629,7 @@ public:
   uint32_t dpp_bank_mask_ = 0xF;
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
+  amdgpu::dpp::SourceModifiers dpp_modifiers_;
   uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
   bool sdwa_src0_sext_ = false;
   bool sdwa_src0_neg_ = false;
