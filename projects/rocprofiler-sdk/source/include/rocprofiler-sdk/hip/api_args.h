@@ -3647,7 +3647,10 @@ typedef union rocprofiler_hip_api_args_t
         unsigned int   numFunctions;
         hipModule_t    mod;
     } hipModuleEnumerateFunctions;
-    struct {
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 35
+    struct
+    {
         void**                  dsts;
         void**                  srcs;
         size_t*                 sizes;

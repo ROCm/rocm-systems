@@ -636,7 +636,7 @@ ROCP_SDK_HIP_FORMATTER(hipMemcpyAttributes,
                        v.dstLocHint,
                        v.flags,
                        '}')
-#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 34
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 35
 ROCP_SDK_HIP_FORMATTER(hipExtMemcpyAttributes,
                        "{}srcAccessOrder={}, srcLocHint={}, dstLocHint={}, flags={}{}",
                        '{',
