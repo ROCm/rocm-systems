@@ -831,9 +831,8 @@ VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront 
     }
     // Under the current uniform-address-space assumption, FLAT operations
     // targeting the shared aperture use the LDS pipeline. Scratch-targeting
-    // FLATs stay on the global path. Architectural wait-counter obligations
-    // remain properties of the decoded instruction; this route selects only
-    // the memory path used by the emulator.
+    // FLATs stay on the global path. Counter participation is selected from all
+    // requesting lanes below, independently of the first-lane functional route.
     const uint64_t request_lanes = transpose_request_lane_mask(d, wf_size);
     const uint32_t first_lane =
         request_lanes == 0 ? wf_size : static_cast<uint32_t>(std::countr_zero(request_lanes));
@@ -862,6 +861,15 @@ VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront 
     }
   }
 
+  if (decoded_route_tag == GLOBAL_MEM && inst->mnemonic().starts_with("flat_")) {
+    auto &d = *inst->data_as<VectorMemState>();
+    if (const auto *issue = inst->amdgpu_memory_issue_info()) {
+      const uint64_t requests = transpose_request_lane_mask(d, wf.wf_size());
+      const uint64_t shared = (flat_local_lane_mask | flat_dds_lane_mask) & requests;
+      d.routed_issue_info = issue->for_flat_memory_domains((requests & ~shared) != 0, shared != 0);
+    }
+  }
+
   const uint8_t route_tag = inst->data()->tag();
   // After the aperture rewrite, before the pipeline takes the instruction:
   // this is the one point at which the space, the counter, and the addresses
@@ -873,8 +881,7 @@ VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront 
     report_routed_access(*inst, wf, route_tag, decoded_route_tag, normalized_to_local,
                          pre_routing_addresses, flat_local_lane_mask, flat_dds_lane_mask);
 
-  // Resolved FLAT lanes determine which pipeline produces each register result.
-  // Keep both architectural counter entries, including the counter-only one.
+  // Resolved FLAT lanes determine counter participation and result readiness.
   if (config_.memory_wait_diagnostics != MemoryWaitDiagnostics::Off &&
       inst->is_memory_wait_producer())
     track_memory_wait(*inst, wf, flat_local_lane_mask | flat_dds_lane_mask);
@@ -993,6 +1000,30 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf,
           ? inst.data_as<VectorMemState>()->exec_mask
           : wf.exec();
 
+  // FLAT counter admission depends on addresses. It cannot prove operands
+  // ready before those addresses are read; apply it here, before writeback.
+  const bool flat = inst.mnemonic().starts_with("flat_");
+  const uint64_t flat_requests =
+      flat && inst.data() && (inst.data()->tag() == GLOBAL_MEM || inst.data()->tag() == LOCAL_MEM)
+          ? transpose_request_lane_mask(*inst.data_as<VectorMemState>(), wf.wf_size())
+          : 0;
+  const auto flat_counter_lanes = [&](WaitCounterKind counter) {
+    return counter == WaitCounterKind::Ds ? flat_requests & flat_shared_lanes
+                                          : flat_requests & ~flat_shared_lanes;
+  };
+  const auto is_flat_memory_counter = [&](WaitCounterKind counter) {
+    return flat && (counter == WaitCounterKind::Load || counter == WaitCounterKind::Store ||
+                    counter == WaitCounterKind::Ds);
+  };
+  for (const auto &event : classified.value()) {
+    if (!is_flat_memory_counter(event.counter) || !flat_counter_lanes(event.counter))
+      continue;
+    const auto maximum = WaitcheckTarget::maximum_dependency_wait(config_.arch, event.counter);
+    if (maximum.succeeded())
+      scoreboard.backpressure(event.counter, maximum.value() + 1,
+                              scoreboard.issue_units(inst, event, config_.arch));
+  }
+
   struct Destination {
     RegisterRef reg;
     uint64_t lanes;
@@ -1106,6 +1137,8 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf,
   std::optional<WaitCounterKind> xcnt_completion;
   for (const auto &event : classified.value()) {
     const auto counter = event.counter;
+    if (is_flat_memory_counter(counter) && !flat_counter_lanes(counter))
+      continue;
     if (counter == WaitCounterKind::X) {
       if (track_xcnt && (xscalar || vector_lanes || scoreboard.outstanding(counter))) {
         const auto sequence = scoreboard.issue_xcnt(xcnt_completion, xscalar);
