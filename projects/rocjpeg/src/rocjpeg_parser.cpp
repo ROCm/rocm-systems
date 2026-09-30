@@ -298,6 +298,13 @@ bool RocJpegStreamParser::ParseSOF() {
         return false;
     }
 
+    // A frame with no components has nothing to decode, and leaves every
+    // sampling factor at zero for the divisions further down.
+    if (jpeg_stream_parameters_.picture_parameter_buffer.num_components == 0) {
+        ErrorLog(g_rocjpeg_logger, "Invalid JPEG: the frame header declares no components!");
+        return false;
+    }
+
     if (jpeg_stream_parameters_.picture_parameter_buffer.num_components > NUM_COMPONENTS - 1) {
         ErrorLog(g_rocjpeg_logger, "Unsupported JPEG: " +
             ROCJPEG_TOSTR(static_cast<int>(jpeg_stream_parameters_.picture_parameter_buffer.num_components)) +
@@ -328,16 +335,24 @@ bool RocJpegStreamParser::ParseSOF() {
         jpeg_stream_parameters_.picture_parameter_buffer.components[i].v_sampling_factor = sampling_factor & 0xF;
         jpeg_stream_parameters_.picture_parameter_buffer.components[i].h_sampling_factor = sampling_factor >> 4;
         jpeg_stream_parameters_.picture_parameter_buffer.components[i].quantiser_table_selector = quantiser_table_selector;
+
+        // ISO/IEC 10918-1 B.2.2: H and V are in the range 1 to 4 for every
+        // component of the frame, not just the first one. Checking only
+        // component 0 would let the chroma factors be zero, which
+        // GetChromaSubsampling reads as 4:0:0 and so turns a multi-component
+        // frame header into what looks like a valid grayscale image.
+        const uint8_t h_factor = jpeg_stream_parameters_.picture_parameter_buffer.components[i].h_sampling_factor;
+        const uint8_t v_factor = jpeg_stream_parameters_.picture_parameter_buffer.components[i].v_sampling_factor;
+        if (h_factor < 1 || h_factor > 4 || v_factor < 1 || v_factor > 4) {
+            ErrorLog(g_rocjpeg_logger, "Invalid SOF sampling factor for component " + ROCJPEG_TOSTR(i) +
+                " (H=" + ROCJPEG_TOSTR(static_cast<int>(h_factor)) +
+                ", V=" + ROCJPEG_TOSTR(static_cast<int>(v_factor)) + "); both must be between 1 and 4!");
+            return false;
+        }
     }
 
     uint8_t max_h_factor = jpeg_stream_parameters_.picture_parameter_buffer.components[0].h_sampling_factor;
     uint8_t max_v_factor = jpeg_stream_parameters_.picture_parameter_buffer.components[0].v_sampling_factor;
-
-    // Validate sampling factors before using them as divisors.
-    if (max_h_factor == 0 || max_v_factor == 0) {
-        ErrorLog(g_rocjpeg_logger, "Invalid SOF sampling factor (zero)!");
-        return false;
-    }
 
     // Compute pixel-count product in 64-bit to detect overflow before it
     // propagates to allocations. Reject images whose raw pixel footprint
@@ -838,6 +853,15 @@ bool RocJpegStreamParser::ParseEOI() {
 
     jpeg_stream_parameters_.slice_parameter_buffer.slice_data_size = stream_temp - stream_;
     jpeg_stream_parameters_.slice_data_buffer = stream_;
+
+    // A scan header with no entropy-coded data behind it describes nothing to
+    // decode. This happens when the buffer ends right after the SOS segment, or
+    // when an EOI immediately follows it, and until now both were reported as a
+    // successful parse with a zero-length slice.
+    if (jpeg_stream_parameters_.slice_parameter_buffer.slice_data_size == 0) {
+        ErrorLog(g_rocjpeg_logger, "Invalid JPEG: the scan contains no entropy-coded data!");
+        return false;
+    }
 
     if (g_rocjpeg_logger.GetLogLevel() >= kRocJpegLogDebug) {
         uint32_t eoi_offset = static_cast<uint32_t>(stream_temp - stream_start_);
