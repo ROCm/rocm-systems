@@ -573,7 +573,7 @@ TEST_F(Pm4QueueControllerTest, TerminalQueueCanBeDisabledAndReconfigured) {
   EXPECT_EQ(controller.prepare_detach(registration), QueuePrepareCloseStatus::Ready);
 }
 
-TEST(Pm4QueueBindingTest, RejectsPollingModesWithoutPollingSupport) {
+TEST(Pm4QueueBindingTest, TransportBindingRejectsPollingDoorbells) {
   constexpr uint64_t kRing = 0x100;
   constexpr uint64_t kReadPointer = 0x200;
   constexpr uint64_t kWritePointer = 0x208;

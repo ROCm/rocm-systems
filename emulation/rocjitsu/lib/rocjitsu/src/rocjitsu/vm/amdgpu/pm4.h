@@ -41,6 +41,7 @@ enum class Pm4Opcode : uint32_t {
   ClearState = 0x12,
   SetPredication = 0x20,
   CondExec = 0x22,
+  PredExec = 0x23,
   ContextControl = 0x28,
   PfpSyncMe = 0x42,
   SetContextReg = 0x69,
@@ -114,6 +115,9 @@ struct Pm4IndirectBuffer {
   uint64_t address = 0;
   uint32_t dwords = 0;
   uint32_t depth = 0;
+  // Root native-ring buffers wrap; nested indirect buffers remain contiguous.
+  uint64_t ring_base = 0;
+  uint32_t ring_bytes = 0;
 };
 
 /// @brief Shared launch/wave failure status; wake the CP to cancel the owning queue.
@@ -132,6 +136,7 @@ struct Pm4FailureState {
 /// publishes completion only after all commands retire.
 struct Pm4Submission {
   bool graphics_engine = false;
+  bool allow_dispatch = true;
   std::deque<Pm4IndirectBuffer> buffers;
   uint32_t indirect_expansions = 0;
   static constexpr uint32_t kMaxIndirectDepth = 64;

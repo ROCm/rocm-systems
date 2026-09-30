@@ -7,8 +7,8 @@
 /// @brief Command processor (CP) component.
 ///
 /// @details Models a CP that works with the ROCm runtime to fetch
-/// and process HSA AQL packets, or consume DRM PM4 compute submissions, and
-/// dispatch work to compute units.
+/// and process HSA AQL packets, or consume DRM PM4 submissions and native KFD PM4 compute rings,
+/// and dispatch work to compute units.
 ///
 /// Architecture: the CP directly owns queue state and doorbell monitoring
 /// (CP hardware functions). Four sub-blocks handle distinct pipeline stages:
@@ -28,6 +28,7 @@
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/cpu_dispatch_pool.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
+#include "rocjitsu/vm/amdgpu/gpu_queue_registry.h"
 #include "rocjitsu/vm/amdgpu/interrupt_sink.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/pm4.h"
@@ -87,7 +88,20 @@ struct Pm4DispatchState {
   void push_entry(DispatchEntry entry) { entries.push_back(std::move(entry)); }
 };
 
-/// @brief CP-owned DRM queue, independent of AQL rings and PM4 transport rings.
+/// @brief Native compute ring feeding the same PM4 executor as DRM submissions.
+struct Pm4ComputeRing {
+  explicit Pm4ComputeRing(const QueueRegistrationRequest &request)
+      : layout(request.ring), doorbell(request.doorbell),
+        cursor(request.ring.consumer_pointer_address, request.initial_consumer_cursor,
+               sizeof(uint32_t)) {}
+  QueueRingLayout layout;
+  QueueDoorbellBinding doorbell;
+  ConsumerCursorJournal cursor;
+  std::optional<GpuVmAccess> publication_access;
+  bool enabled = true;
+};
+
+/// @brief CP-owned PM4 queue, fed by DRM submissions or a native compute ring.
 struct Pm4SubmitQueue {
   AddressSpaceHandle address_space;
   std::optional<GpuVmBindingLease> binding;
@@ -96,6 +110,7 @@ struct Pm4SubmitQueue {
   bool faulted = false;
   std::shared_ptr<Pm4QueueState> pm4;
   Pm4DispatchState dispatches;
+  std::shared_ptr<Pm4ComputeRing> compute_ring;
 };
 
 /// @brief AMDGPU command processor that dispatches wavefronts to compute units.
@@ -103,9 +118,9 @@ struct Pm4SubmitQueue {
 /// @details Distributes AQL dispatch packets across the registered compute units in
 /// round-robin order, materializing wavefronts in configured slots on first use.
 ///
-/// Event-driven: the CP monitors registered AQL queue doorbells via a
-/// polling thread. When new AQL packets are detected, it fetches them from the
-/// ring buffer, parses the kernel descriptor, and dispatches wavefronts to CUs.
+/// Event-driven: the CP monitors AQL and native KFD PM4 queue doorbells via a
+/// polling thread. It consumes their rings, decodes AQL kernel descriptors or
+/// PM4 launch registers, and dispatches wavefronts to CUs.
 ///
 /// Completion signals fire per-dispatch when all workgroups retire (gem5 model),
 /// not on global CU idle. Signals fire in per-queue submission order.
@@ -176,7 +191,7 @@ public:
   /// @param peers All XCD command processors of the SoC, in XCD index order.
   void set_xcd_topology(uint32_t rank, std::vector<CommandProcessor *> peers);
 
-  /// @brief Create a PM4 queue binding factory backed by this CP's queue controller.
+  /// @brief Create an Explicit MES transport binding backed by this CP's PM4 controller.
   /// @details The returned factory is a lifetime/notification adapter. This CP
   /// owns PM4 ring, packet, retry, and cursor-publication state so semantics do
   /// not migrate into MES or a PCI/VFIO transport adapter.
@@ -217,6 +232,18 @@ public:
 
   /// @brief Register one DRM indirect-buffer submission queue.
   [[nodiscard]] bool register_drm_queue(Pm4SubmitQueue queue);
+  /// @brief Register a host-polled native KFD ring with 32-bit wrapped writeback.
+  /// @details The frontend supplies the initial cursor; fresh KFD queues use zero.
+  [[nodiscard]] bool register_pm4_compute_queue(const QueueRegistrationRequest &request);
+  /// @brief Stop native ring admission once all work and writeback have completed.
+  [[nodiscard]] QueuePrepareCloseStatus prepare_pm4_compute_queue(uint32_t queue_id,
+                                                                  uint32_t process_id);
+  /// @brief Pause/resume a native ring, rejecting replacement and fault recovery.
+  /// @details A null ring address or zero percentage pauses the existing ring;
+  /// restoring its original geometry resumes it without resetting its cursor.
+  [[nodiscard]] QueueReconfigureStatus
+  update_pm4_compute_queue(uint32_t queue_id, uint32_t process_id,
+                           const QueueReconfigureRequest &request);
   /// @brief Cancel DRM work before its frontend revokes the process VM binding.
   void unregister_drm_queues(uint32_t process_id);
   void unregister_drm_queue(uint32_t queue_id, uint32_t process_id);
@@ -633,9 +660,11 @@ private:
   [[nodiscard]] DispatchWorkgroupResult dispatch_workgroups(DispatchEntry &entry);
   void fail_pm4_queue(Pm4SubmitQueue &queue, Pm4DispatchState &qs);
   void fetch_pm4(Pm4SubmitQueue &queue, Pm4DispatchState &qs, simdojo::Tick now);
+  bool execute_aql_pm4(AqlQueueRecord &queue, DispatchEntry &entry, simdojo::Tick now);
   void dispatch_pm4(const Pm4SubmitQueue &queue, Pm4DispatchState &qs,
                     const std::array<uint32_t, 4> &dimensions);
   void service_drm_queues(simdojo::Tick now);
+  void service_pm4_compute_ring(Pm4SubmitQueue &queue, simdojo::Tick now);
 
   /// @brief Split a dispatch across the SoC's XCDs, keeping this XCD's share.
   ///
@@ -794,6 +823,9 @@ private:
   /// @details Answers whether this CP's lifecycle is anchored by the VM-level
   /// primary, which a fan-out replica does anchor just as its owner does.
   bool has_kfd_queues() const {
+    for (const auto &q : drm_queues_)
+      if (q.compute_ring)
+        return true;
     for (const auto &q : aql_queues_)
       if (q.uses_kfd_queue_abi)
         return true;
@@ -807,6 +839,9 @@ private:
   /// to the doorbell monitor must ask this rather than has_kfd_queues(), or a CP
   /// left holding only replicas keeps a monitor alive for a ring it never reads.
   bool polls_kfd_queues() const {
+    for (const auto &q : drm_queues_)
+      if (q.compute_ring)
+        return true;
     for (const auto &q : aql_queues_)
       if (q.doorbell_mode == QueueDoorbellMode::HostPolled && !q.fanout_replica)
         return true;

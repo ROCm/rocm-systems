@@ -37,6 +37,7 @@ namespace amdgpu {
 class ComputeUnitCore;
 class Pm4ScratchPool;
 struct Pm4FailureState;
+struct Pm4SubmitQueue;
 using QueueCuSelection = std::optional<std::vector<ComputeUnitCore *>>;
 class GpuVmAccess;
 
@@ -408,6 +409,9 @@ struct DispatchEntry {
   bool wait_for_predecessors = false;
   /// Packet-type ordering: following packets cannot pass this packet.
   bool blocks_following = false;
+  /// An AMD vendor packet executes this PM4 buffer before publishing completion.
+  uint64_t aql_pm4_ib_address = 0;
+  uint32_t aql_pm4_ib_dwords = 0;
   /// Completion hooks and signal have already been delivered.
   bool completion_notified = false;
   bool execution_begun = false;
@@ -712,6 +716,8 @@ struct AqlQueueRecord : AqlQueueConfig {
   /// and never polls a doorbell; work reaches it as dispatch shards from the XCD
   /// that owns the queue.
   bool fanout_replica = false;
+  /// Each XCD owns its PM4 state and retry cursor for vendor IB packets.
+  std::shared_ptr<Pm4SubmitQueue> pm4;
   Status status = Status::Idle;
   std::deque<DispatchEntry> entries;
   /// @brief Total entries accepted by this queue, for tests.

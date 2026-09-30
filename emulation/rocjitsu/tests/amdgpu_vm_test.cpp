@@ -4532,8 +4532,11 @@ TEST_P(IsaTest, NonKernelBarrierPacketsOrderQueueEntries) {
 
     hsa_kernel_dispatch_packet_t barrier{};
     barrier.header = packet_type | (header_barrier_bit ? (1 << HSA_PACKET_HEADER_BARRIER) : 0);
-    if (packet_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC)
-      barrier.setup = amdgpu::kAmdAqlFormatPm4Ib;
+    if (packet_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC) {
+      f.mem()->write32(0x9000, 0x80000000);
+      barrier = test::make_pm4_ib_packet(0x9000, 1);
+      barrier.header |= header_barrier_bit ? (1 << HSA_PACKET_HEADER_BARRIER) : 0;
+    }
     barrier.completion_signal.handle = kBarrierCompletionSignal;
 
     test::AqlQueue queue(f.mem(), f.cp());
@@ -4604,7 +4607,7 @@ TEST(CommandProcessorAqlTest, BlockingBarriersRetireBeforeUnsupportedSuccessorFa
   }
 }
 
-TEST(CommandProcessorAqlTest, Pm4IbDoesNotBlockFetchOfUnsupportedSuccessor) {
+TEST(CommandProcessorAqlTest, Pm4IbRetiresBeforeUnsupportedSuccessorFaultsQueue) {
   VmFixture f("cdna5", 1, 8);
   const uint32_t code[] = {SOPP_S_ENDPGM};
   const uint64_t kernel = f.write_kernel(0x1000, code, sizeof(code));
@@ -4613,10 +4616,9 @@ TEST(CommandProcessorAqlTest, Pm4IbDoesNotBlockFetchOfUnsupportedSuccessor) {
   init_completion_signal(f.mem(), kPriorCompletionSignal);
   init_completion_signal(f.mem(), kPm4CompletionSignal);
 
-  hsa_kernel_dispatch_packet_t pm4_ib{};
-  pm4_ib.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC | (1 << HSA_PACKET_HEADER_BARRIER);
-  pm4_ib.setup = amdgpu::kAmdAqlFormatPm4Ib;
-  pm4_ib.completion_signal.handle = kPm4CompletionSignal;
+  f.mem()->write32(0x9000, 0x80000000);
+  auto pm4_ib = test::make_pm4_ib_packet(0x9000, 1, kPm4CompletionSignal);
+  pm4_ib.header |= 1 << HSA_PACKET_HEADER_BARRIER;
 
   hsa_kernel_dispatch_packet_t unsupported{};
   unsupported.header = HSA_PACKET_TYPE_AGENT_DISPATCH;
@@ -4627,11 +4629,43 @@ TEST(CommandProcessorAqlTest, Pm4IbDoesNotBlockFetchOfUnsupportedSuccessor) {
   queue.submit(unsupported);
 
   EXPECT_NO_THROW((void)f.engine->step());
-  EXPECT_EQ(completion_signal_value(f.mem(), kPriorCompletionSignal), 1);
-  EXPECT_EQ(completion_signal_value(f.mem(), kPm4CompletionSignal), 1)
-      << "PM4 IB unexpectedly blocked fetch of the following packet";
+  EXPECT_FALSE(f.cp()->queue_faulted_for_test(1, 0));
+  for (uint32_t i = 0; i < 100 && !f.cp()->queue_faulted_for_test(1, 0); ++i)
+    EXPECT_NO_THROW((void)f.engine->step());
+  EXPECT_EQ(completion_signal_value(f.mem(), kPriorCompletionSignal), 0);
+  EXPECT_EQ(completion_signal_value(f.mem(), kPm4CompletionSignal), 0);
   EXPECT_EQ(f.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 2u);
   EXPECT_TRUE(f.cp()->queue_faulted_for_test(1, 0));
+}
+
+TEST(CommandProcessorAqlTest, InvalidPm4IbFaultsWithoutCompletionOrSuccessorExecution) {
+  for (const auto *arch : {"cdna3", "cdna4"}) {
+    SCOPED_TRACE(arch);
+    // An unknown opcode, a truncated WRITE_DATA, and a forbidden shader dispatch.
+    for (const std::vector<uint32_t> &words : {
+             std::vector<uint32_t>{0xc000ff00, 0},
+             std::vector<uint32_t>{0xc0033700, 5u << 8},
+             std::vector<uint32_t>{0xc0031500, 1, 1, 1, 1},
+         }) {
+      SCOPED_TRACE(words[0]);
+      VmFixture f(arch, 1, 8);
+      constexpr uint64_t signal = 0x7100;
+      init_completion_signal(f.mem(), signal);
+      f.mem()->load_image(reinterpret_cast<const uint8_t *>(words.data()), words.size() * 4,
+                          0x9000);
+      // A later IB would write 99 if the fault incorrectly allowed it to execute.
+      const uint32_t successor[] = {0xc0033700, 5u << 8, 0xb000, 0, 99};
+      f.mem()->load_image(reinterpret_cast<const uint8_t *>(successor), sizeof(successor), 0xa000);
+      test::AqlQueue queue(f.mem(), f.cp());
+      queue.submit(test::make_pm4_ib_packet(0x9000, words.size(), signal));
+      queue.submit(test::make_pm4_ib_packet(0xa000, 5));
+      for (unsigned i = 0; i < 100 && !f.cp()->queue_faulted_for_test(1, 0); ++i)
+        EXPECT_NO_THROW((void)f.engine->step());
+      EXPECT_TRUE(f.cp()->queue_faulted_for_test(1, 0));
+      EXPECT_EQ(completion_signal_value(f.mem(), signal), 1);
+      EXPECT_EQ(f.mem()->read32(0xb000), 0u);
+    }
+  }
 }
 
 TEST_P(IsaTest, EmptyCuMaskAllowsNonKernelPackets) {
@@ -4660,6 +4694,10 @@ TEST_P(IsaTest, EmptyCuMaskAllowsNonKernelPackets) {
     hsa_kernel_dispatch_packet_t packet{};
     packet.header = test.type;
     packet.setup = test.format;
+    if (test.type == HSA_PACKET_TYPE_VENDOR_SPECIFIC && test.format == amdgpu::kAmdAqlFormatPm4Ib) {
+      f.mem()->write32(0x9000, 0x80000000);
+      packet = test::make_pm4_ib_packet(0x9000, 1);
+    }
     packet.completion_signal.handle = kSignal;
     queue.submit(packet);
     queue.dispatch(ko, 64);
