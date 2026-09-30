@@ -23,22 +23,20 @@ Pre-built simulator configs are in `configs/`:
 | `gfx1151.json` | Single RDNA3.5 GPU (standalone simulation) |
 | `gfx1201_r9700.json` | Single RDNA4 GPU (standalone simulation) |
 
-### Diagnostic CDNA4 SIMD path selection
+### CDNA4 SIMD identity
 
-For kernels that select a schedule using `s_getreg_b32` on `HW_ID[5:4]`, add
-`{"key": "diagnostic_hw_id_simd", "value": "1"}` to a `compute_unit` component's
-`config` array. Values 0 through 3 provide that SIMD_ID to every wave on the
-configured CU. Bitfield reads wholly within bits 5:4 are supported, including
-the single-bit selector `hwreg(HW_REG_HW_ID, 4, 1)`. Reads of other or wider
-HW_ID fields remain unsupported and keep their diagnostics. The setting is
-accepted only for CDNA4; omitting it preserves the unsupported HW_ID behavior.
-Checkpoints preserve each CU's setting, including omission and explicit zero.
+CDNA4 wave slots belong to four logical SIMDs in round-robin order:
+`SIMD_ID = wave_slot % 4`. A wave's CU slot is permanent, so its SIMD ID
+is stable during execution, slot reuse, and checkpoint restoration.
+`s_getreg_b32` reads wholly within `HW_ID[5:4]` return this identity by
+default. Other or wider HW_ID fields remain unsupported and retain their
+diagnostics; HW_ID is read-only.
 
-This is a functional path-selection control. It does not change where waves
-execute, model physical SIMD assignment, or establish hardware scheduling or
-timing. Runs with uniform values 0 and 1 can cover both sides of a bit-4 branch,
-but do not cover arbitrary mixtures of SIMD assignments among a CU's waves.
-Confirm the intended branches execute when using the control for coverage.
+This lets resident waves select different instruction schedules in the same
+execution. For example, a branch on HW_ID bit 4 selects alternate paths for
+SIMDs 0/2 and 1/3. A workload using only slot 0 still exercises only its
+selected path. The assignment is a functional placement policy; it does not
+model per-SIMD resource allocation or hardware timing.
 
 ### PCI/VFIO guest compatibility
 

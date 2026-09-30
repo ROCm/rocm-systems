@@ -11,7 +11,6 @@
 #include "simdojo/sim/sim_types.h"
 
 #include <cstdint>
-#include <optional>
 #include <string>
 
 namespace simdojo {
@@ -49,7 +48,6 @@ public:
   Lds &lds();
   bool sram_ecc() const;
   bool setreg_vgpr_msb_fixup() const;
-  std::optional<uint32_t> diagnostic_hw_id_simd() const;
   /// Whether register accesses have a diagnostic or plugin consumer.
   bool observes_register_access() const;
   bool debug_active() const;
