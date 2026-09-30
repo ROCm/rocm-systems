@@ -149,16 +149,16 @@ class Program {
   amd::option::Options* getCompilerOptions() const { return programOptions_; }
 
   //! Compile the device program.
-  int32_t compile(const std::string& sourceCode, const std::vector<const std::string*>& headers,
-                  const char** headerIncludeNames, const char* origOptions,
+  int32_t compile(const std::string& source_code, const std::vector<const std::string*>& headers,
+                  const char** header_include_names, const char* orig_options,
                   amd::option::Options* options);
 
   //! Link the device program.
-  int32_t link(const std::vector<Program*>& inputPrograms, const char* origLinkOptions,
-               amd::option::Options* linkOptions);
+  int32_t link(const std::vector<Program*>& input_programs, const char* orig_link_options,
+               amd::option::Options* link_options);
 
   //! Build the device program.
-  int32_t build(const std::string& sourceCode, const char* origOptions,
+  int32_t build(const std::string& source_code, const char* orig_options,
                 amd::option::Options* options);
 
   //! Load the device program.
@@ -202,7 +202,7 @@ class Program {
   ClBinary* clBinary() { return clBinary_; }
   const ClBinary* clBinary() const { return clBinary_; }
 
-  bool setBinary(const char* binaryIn, size_t size, const device::Program* same_dev_prog = nullptr,
+  bool setBinary(const char* binary_in, size_t size, const device::Program* same_dev_prog = nullptr,
                  amd::Os::FileDesc fdesc = amd::Os::FDescInit(), size_t foffset = 0,
                  std::string uri = std::string());
 
@@ -245,10 +245,10 @@ class Program {
   const bool isHIP() const { return (isHIP_ == 1); }
 
   //! Get mangled name of a name expresion
-  const bool getLoweredNames(std::vector<std::string>* mangledNames) const;
+  const bool getLoweredNames(std::vector<std::string>* mangled_names) const;
 
   //! Get demangled names
-  bool getDemangledName(const std::string& mangledNames, std::string& demangledNames) const;
+  bool getDemangledName(const std::string& mangled_name, std::string& demangled_name) const;
 
   bool getGlobalFuncFromCodeObj(std::vector<std::string>* func_names) const;
   bool getGlobalVarFromCodeObj(std::vector<std::string>* var_names) const;
@@ -271,15 +271,15 @@ class Program {
   bool initBuild(amd::option::Options* options);
 
   //! post-compile cleanup
-  bool finiBuild(bool isBuildGood);
+  bool finiBuild(bool is_build_good);
 
   /*! \brief Compiles GPU CL program to LLVM binary (compiler frontend)
    *
    *  \return True if we successefully compiled a GPU program
    */
-  bool compileImpl(const std::string& sourceCode,  //!< the program's source code
+  bool compileImpl(const std::string& source_code,  //!< the program's source code
                    const std::vector<const std::string*>& headers,
-                   const char** headerIncludeNames,
+                   const char** header_include_names,
                    amd::option::Options* options  //!< compile options's object
   );
 
@@ -287,13 +287,13 @@ class Program {
   bool linkImpl(amd::option::Options* options);
 
   //! Link the device programs.
-  bool linkImpl(const std::vector<Program*>& inputPrograms, amd::option::Options* options,
-                bool createLibrary);
+  bool linkImpl(const std::vector<Program*>& input_programs, amd::option::Options* options,
+                bool create_library);
 
   virtual bool createBinary(amd::option::Options* options) = 0;
 
   //! Initialize Binary (used only for clCreateProgramWithBinary()).
-  bool initClBinary(const char* binaryIn, size_t size,
+  bool initClBinary(const char* binary_in, size_t size,
                     amd::Os::FileDesc fdesc = amd::Os::FDescInit(), size_t foffset = 0,
                     std::string uri = std::string());
 
@@ -323,24 +323,25 @@ class Program {
 
   //! At linking time, get the set of compile options to be used from
   //! the set of input program, warn if they have inconsisten compile options.
-  bool getCompileOptionsAtLinking(const std::vector<Program*>& inputPrograms,
-                                  const amd::option::Options* linkOptions);
+  bool getCompileOptionsAtLinking(const std::vector<Program*>& input_programs,
+                                  const amd::option::Options* link_options);
 
   void setType(type_t newType) { type_ = newType; }
 
   /* \brief Returns the next stage to compile from, based on sections in binary,
-   *  also returns completeStages in a vector, which contains at least ACL_TYPE_DEFAULT,
-   *  sets needOptionsCheck to true if options check is needed to decide whether or not to recompile
+   *  also returns complete_stages in a vector, which contains at least ACL_TYPE_DEFAULT,
+   *  sets need_options_check to true if options check is needed to decide whether or
+   *  not to recompile
    */
-  file_type_t getCompilationStagesFromBinary(std::vector<file_type_t>& completeStages,
-                                             bool& needOptionsCheck);
+  file_type_t getCompilationStagesFromBinary(std::vector<file_type_t>& complete_stages,
+                                             bool& need_options_check);
 
   /* \brief Returns the next stage to compile from, based on sections and options in binary
    */
   file_type_t getNextCompilationStageFromBinary(amd::option::Options* options);
 
   //! Finds the total size of all global variables in the program
-  bool FindGlobalVarSize(void* binary, size_t binSize);
+  bool FindGlobalVarSize(void* binary, size_t bin_size);
 
   bool isElf(const char* bin) const { return amd::Elf::isElfMagic(bin); }
 
@@ -357,44 +358,45 @@ class Program {
  private:
 
   //! Dump the log data object to the build log, if a log data object is present
-  void extractBuildLog(amd_comgr_data_set_t dataSet);
+  void extractBuildLog(amd_comgr_data_set_t data_set);
   //! Dump the code object data
-  amd_comgr_status_t extractByteCodeBinary(const amd_comgr_data_set_t inDataSet,
-                                           const amd_comgr_data_kind_t dataKind,
-                                           const std::string& outFileName,
-                                           char* outBinary[] = nullptr, size_t* outSize = nullptr);
+  amd_comgr_status_t extractByteCodeBinary(const amd_comgr_data_set_t in_data_set,
+                                           const amd_comgr_data_kind_t data_kind,
+                                           const std::string& out_file_name,
+                                           char* out_binary[] = nullptr,
+                                           size_t* out_size = nullptr);
 
   //! Create code object and add it into the data set
   amd_comgr_status_t addCodeObjData(const char* source, const size_t size,
                                     const amd_comgr_data_kind_t type, const char* name,
-                                    amd_comgr_data_set_t* dataSet);
+                                    amd_comgr_data_set_t* data_set);
 
   //! Create action for the specified language, target and options
   amd_comgr_status_t createAction(const amd_comgr_language_t oclver,
                                   const std::vector<std::string>& options,
-                                  amd_comgr_action_info_t* action, bool* hasAction);
+                                  amd_comgr_action_info_t* action, bool* has_action);
 
   //! Create the bitcode of the linked input dataset
   bool linkLLVMBitcode(const amd_comgr_data_set_t inputs, const std::vector<std::string>& options,
-                       amd::option::Options* amdOptions, amd_comgr_data_set_t* output,
-                       char* binaryData[] = nullptr, size_t* binarySize = nullptr);
+                       amd::option::Options* amd_options, amd_comgr_data_set_t* output,
+                       char* binary_data[] = nullptr, size_t* binary_size = nullptr);
 
   //! Create the bitcode of the compiled input dataset
-  bool compileToLLVMBitcode(const amd_comgr_data_set_t compileInputs,
+  bool compileToLLVMBitcode(const amd_comgr_data_set_t compile_inputs,
                             const std::vector<std::string>& options,
-                            amd::option::Options* amdOptions, char* binaryData[],
-                            size_t* binarySize, const bool link_dev_libs = true);
+                            amd::option::Options* amd_options, char* binary_data[],
+                            size_t* binary_size, const bool link_dev_libs = true);
 
   //! Compile and create the excutable of the input dataset
   bool compileAndLinkExecutable(const amd_comgr_data_set_t inputs,
                                 const std::vector<std::string>& options,
-                                amd::option::Options* amdOptions, char* executable[],
-                                size_t* executableSize, file_type_t continueCompileFrom);
+                                amd::option::Options* amd_options, char* executable[],
+                                size_t* executable_size, file_type_t continue_compile_from);
 
   //! Create the map for the kernel name and its metadata for fast access
-  bool createKernelMetadataMap(void* binary, size_t binSize);
+  bool createKernelMetadataMap(void* binary, size_t bin_size);
 
-  bool trySubstObjFile(const char* SubstCfgFile, const std::string& sourceCode,
+  bool trySubstObjFile(const char* subst_cfg_file, const std::string& source_code,
                        const amd::option::Options* options);
 
   //! Disable default copy constructor
@@ -408,7 +410,7 @@ class ComgrBinaryData {
  public:
   ComgrBinaryData() : binaryData_({0}), created_(false) {}
   ~ComgrBinaryData();
-  bool create(amd_comgr_data_kind_t kind, void* binary, size_t binSize);
+  bool create(amd_comgr_data_kind_t kind, void* binary, size_t bin_size);
   amd_comgr_data_t& data();
 
  private:
