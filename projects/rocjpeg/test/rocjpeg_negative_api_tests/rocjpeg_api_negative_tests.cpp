@@ -226,6 +226,51 @@ size_t FindStructuralMarker(const std::vector<uint8_t> &data, uint8_t marker) {
 }
 
 /**
+ * @brief Reports whether a scan body carries at least one byte of coded data.
+ *
+ * Not every byte between the scan header and the EOI is entropy-coded data, so
+ * a byte count cannot answer this. ISO/IEC 10918-1 B.1.1.2 and B.1.1.3 define
+ * what a 0xFF introduces inside a scan: a run of fill bytes before a marker, a
+ * stuffed 0x00 standing for one real 0xFF of coded data, or a restart marker
+ * that carries no bits of its own. Everything else is coded data. Walking those
+ * tokens is what separates a scan of "FF D0 FF D9", which holds nothing but a
+ * restart, from one that actually encodes a block.
+ *
+ * @param data The stream the scan belongs to.
+ * @param scan_start The offset of the first byte after the scan header.
+ * @param scan_end The offset one past the last byte of the scan.
+ * @return true when the scan contains at least one byte of coded data.
+ */
+bool ScanHasEntropyData(const std::vector<uint8_t> &data, size_t scan_start, size_t scan_end) {
+    size_t offset = scan_start;
+    while (offset < scan_end) {
+        if (data[offset] != 0xFF) {
+            return true;
+        }
+        // Any number of 0xFF fill bytes may precede a marker, so the code is
+        // the first byte after the run.
+        while (offset < scan_end && data[offset] == 0xFF) {
+            offset++;
+        }
+        if (offset >= scan_end) {
+            // A trailing 0xFF run is fill or a truncated marker, never data.
+            return false;
+        }
+        const uint8_t marker_code = data[offset];
+        if (marker_code == 0x00) {
+            // Byte stuffing: this pair stands for one 0xFF of coded data.
+            return true;
+        }
+        if (marker_code < 0xD0 || marker_code > 0xD7) {
+            // Any other marker terminates the scan, so nothing beyond it counts.
+            return false;
+        }
+        offset++;
+    }
+    return false;
+}
+
+/**
  * @brief Reads an unsigned environment variable, falling back to a default.
  *
  * The whole string has to be a positive number that fits in a uint32_t. A
@@ -651,13 +696,9 @@ int RocJpegApiNegativeTests::CheckParseInvariants(const std::vector<uint8_t> &da
     // The presence of an SOS marker says nothing about the scan behind it. A
     // stream that stops right after the scan header, or puts EOI directly after
     // it, carries no entropy-coded data and so describes nothing to decode,
-    // while still satisfying every marker and image-description check. Measure
-    // the scan instead: the segment length follows the marker, and the entropy
-    // coded data starts after it and runs to EOI or to the end of the buffer.
-    // Trailing 0xFF bytes are discounted, because a 0xFF inside entropy-coded
-    // data is always followed by a stuffed 0x00 or a restart code, so one at the
-    // end of the scan is marker fill or a truncated marker. Counting it would
-    // let "FF FF D9" and an all-0xFF tail pass as non-empty scans.
+    // while still satisfying every marker and image-description check. Inspect
+    // the scan instead: the segment length follows the marker, and the scan
+    // starts after it and runs to EOI or to the end of the buffer.
     //
     // This needs the structural SOS, not the first matching byte pair. The
     // mutation strategies rewrite the byte after any 0xFF, so an accepted stream
@@ -679,10 +720,7 @@ int RocJpegApiNegativeTests::CheckParseInvariants(const std::vector<uint8_t> &da
             if (scan_end + 1 >= data.size()) {
                 scan_end = data.size();
             }
-            while (scan_end > scan_start && data[scan_end - 1] == 0xFF) {
-                scan_end--;
-            }
-            if (scan_end <= scan_start) {
+            if (!ScanHasEntropyData(data, scan_start, scan_end)) {
                 std::cerr << "[" << case_name << "] a stream whose scan carries no entropy-coded data was "
                              "accepted as decodable\n  " << HexDump(data) << std::endl;
                 return EXIT_FAILURE;
@@ -797,6 +835,10 @@ int RocJpegApiNegativeTests::TestStreamParseFuzz() {
         const char *name;
         std::vector<uint8_t> data;
     };
+    // Streams that have to stay accepted. Every check that rejects something has
+    // a matching case here, so that a check which over-rejects is caught by the
+    // same run rather than by a later corpus regression.
+    std::vector<RegressionCase> accepted_cases;
     std::vector<RegressionCase> regressions = {
         // The stream ends immediately after a marker code, so the two-byte
         // segment length field is not present at all.
@@ -863,19 +905,42 @@ int RocJpegApiNegativeTests::TestStreamParseFuzz() {
         regressions.push_back({"scan header with no entropy-coded data", empty_scan});
         regressions.push_back({"scan header immediately followed by EOI", empty_scan_eoi});
 
-        // The same empty scan padded with the 0xFF fill bytes that may precede a
-        // marker. These are still empty scans, but a naive byte count would see
-        // one or more bytes between the scan header and the EOI and accept them.
-        const std::vector<std::pair<const char *, std::vector<uint8_t>>> fill_tails = {
+        // The same empty scan padded with bodies made of nothing but fill bytes
+        // and restart markers, all of which are markers rather than coded bits.
+        // These are still empty scans, but a naive byte count sees one or more
+        // bytes between the scan header and the EOI and accepts them.
+        const std::vector<std::pair<const char *, std::vector<uint8_t>>> empty_bodies = {
             {"empty scan with a fill byte before EOI", {0xFF, 0xFF, 0xD9}},
             {"empty scan with several fill bytes before EOI", {0xFF, 0xFF, 0xFF, 0xD9}},
             {"empty scan ending in a truncated marker", {0xFF}},
             {"empty scan with an all-0xFF tail", {0xFF, 0xFF, 0xFF}},
+            {"scan containing only a restart marker", {0xFF, 0xD0, 0xFF, 0xD9}},
+            {"scan containing only a truncated restart marker", {0xFF, 0xD0}},
+            {"scan containing only two restart markers", {0xFF, 0xD0, 0xFF, 0xD1, 0xFF, 0xD9}},
+            {"scan containing only the eight restart markers",
+             {0xFF, 0xD0, 0xFF, 0xD1, 0xFF, 0xD2, 0xFF, 0xD3, 0xFF, 0xD4, 0xFF, 0xD5, 0xFF, 0xD6, 0xFF, 0xD7,
+              0xFF, 0xD9}},
+            {"scan of restart markers padded with fill bytes",
+             {0xFF, 0xFF, 0xD0, 0xFF, 0xFF, 0xFF, 0xD1, 0xFF, 0xFF, 0xD9}},
         };
-        for (const auto &fill_tail : fill_tails) {
+        for (const auto &empty_body : empty_bodies) {
             std::vector<uint8_t> padded = empty_scan;
-            padded.insert(padded.end(), fill_tail.second.begin(), fill_tail.second.end());
-            regressions.push_back({fill_tail.first, padded});
+            padded.insert(padded.end(), empty_body.second.begin(), empty_body.second.end());
+            regressions.push_back({empty_body.first, padded});
+        }
+
+        // The mirror image of the cases above: a scan whose body is the smallest
+        // thing that does carry data. These have to stay accepted, so that the
+        // token walk is not simply rejecting every short scan.
+        const std::vector<std::pair<const char *, std::vector<uint8_t>>> minimal_bodies = {
+            {"scan of a single stuffed 0xFF", {0xFF, 0x00, 0xFF, 0xD9}},
+            {"scan of a single coded byte", {0x00, 0xFF, 0xD9}},
+            {"scan of a restart marker followed by a coded byte", {0xFF, 0xD0, 0x42, 0xFF, 0xD9}},
+        };
+        for (const auto &minimal_body : minimal_bodies) {
+            std::vector<uint8_t> padded = empty_scan;
+            padded.insert(padded.end(), minimal_body.second.begin(), minimal_body.second.end());
+            accepted_cases.push_back({minimal_body.first, padded});
         }
     }
 
@@ -908,6 +973,19 @@ int RocJpegApiNegativeTests::TestStreamParseFuzz() {
         if (!IsKnownStatus(rocjpeg_status)) {
             std::cerr << "[" << regression.name << "] rocJpegStreamParse returned an undocumented status ("
                       << static_cast<int>(rocjpeg_status) << ")\n  " << HexDump(regression.data) << std::endl;
+            return EXIT_FAILURE;
+        }
+    }
+
+    for (const RegressionCase &accepted_case : accepted_cases) {
+        RocJpegStatus rocjpeg_status = ParseExactBuffer(accepted_case.data);
+        if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+            std::cerr << "[" << accepted_case.name << "] Expected a well-formed stream to be accepted but it was "
+                         "rejected with " << rocJpegGetErrorName(rocjpeg_status) << "\n  "
+                      << HexDump(accepted_case.data) << std::endl;
+            return EXIT_FAILURE;
+        }
+        if (CheckParseInvariants(accepted_case.data, accepted_case.name)) {
             return EXIT_FAILURE;
         }
     }
@@ -977,7 +1055,7 @@ int RocJpegApiNegativeTests::TestStreamParseFuzz() {
         const std::vector<uint8_t> &base = (random.Next() & 1u) ? color_seed : gray_seed;
         std::vector<uint8_t> mutated = base;
 
-        switch (random.Below(6)) {
+        switch (random.Below(7)) {
             case 0: {
                 // Flip a handful of individual bytes anywhere in the stream.
                 const uint32_t flips = 1 + random.Below(4);
@@ -1033,6 +1111,33 @@ int RocJpegApiNegativeTests::TestStreamParseFuzz() {
                 break;
             }
             case 4: {
+                // Replace the scan body with a short sequence of markers and
+                // stuffing. The other strategies edit bytes in place or cut the
+                // stream down, so none of them can produce a stream that keeps
+                // every header intact while emptying the scan of coded data -
+                // which is exactly the shape the empty-scan postcondition is
+                // about. Building it directly keeps that case reachable.
+                static const uint8_t kScanTokens[] = {0xFF, 0xD0, 0xD7, 0x00, 0xD9, 0x42};
+                const size_t scan_sos = FindStructuralMarker(mutated, 0xDA);
+                if (scan_sos + 4 <= mutated.size()) {
+                    const size_t scan_segment_length =
+                        (static_cast<size_t>(mutated[scan_sos + 2]) << 8) | mutated[scan_sos + 3];
+                    const size_t scan_body = scan_sos + 2 + scan_segment_length;
+                    if (scan_body <= mutated.size()) {
+                        mutated.resize(scan_body);
+                        const uint32_t tokens = random.Below(9);
+                        for (uint32_t i = 0; i < tokens; i++) {
+                            mutated.push_back(kScanTokens[random.Below(sizeof(kScanTokens) / sizeof(kScanTokens[0]))]);
+                        }
+                        if (random.Below(4) != 0) {
+                            mutated.push_back(0xFF);
+                            mutated.push_back(0xD9);
+                        }
+                    }
+                }
+                break;
+            }
+            case 5: {
                 // Splice a run of 0xFF fill bytes in, optionally leaving the
                 // stream ending inside that run.
                 const size_t offset = random.Below(static_cast<uint32_t>(mutated.size()) + 1);
