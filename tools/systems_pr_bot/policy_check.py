@@ -493,34 +493,71 @@ def summarize_required_checks(
     Returns:
       - missing: required checks not present
       - failing: required checks that concluded not-success
-      - conc_by_name: name -> conclusion (string; 'null' if none)
+      - conc_by_name: name -> sorted conclusions (string; 'null' if pending)
     """
-    by_name: Dict[str, Dict[str, Any]] = {}
-    for r in check_runs:
-        name = r.get("name")
-        if isinstance(name, str):
-            by_name[name] = r
+    by_name = _group_check_runs_by_name(check_runs)
 
     conc_by_name: Dict[str, str] = {}
-    for name, r in by_name.items():
-        conc = r.get("conclusion")
-        conc_by_name[name] = str(conc) if conc is not None else "null"
+    for name, runs in by_name.items():
+        conclusions = sorted(
+            str(run.get("conclusion")) if run.get("conclusion") is not None else "null"
+            for run in runs
+        )
+        conc_by_name[name] = ", ".join(conclusions)
 
     missing = [n for n in policy.required_checks if n not in by_name]
 
-    ok = {"success", "neutral", "skipped"}
     failing: List[str] = []
     for n in policy.required_checks:
-        r = by_name.get(n)
-        if not r:
-            continue
-        conc = r.get("conclusion")
-        if conc is None:
-            continue  # still running
-        if str(conc) not in ok:
-            failing.append(f"{n}={conc}")
+        _, _, failed_conclusions = _required_check_status(by_name.get(n, []))
+        if failed_conclusions:
+            failing.append(f"{n}={failed_conclusions}")
 
     return missing, failing, conc_by_name
+
+
+_ACCEPTED_CHECK_CONCLUSIONS = {"success", "neutral", "skipped"}
+
+
+def _group_check_runs_by_name(
+    check_runs: List[Dict[str, Any]],
+) -> Dict[str, List[Dict[str, Any]]]:
+    """Group check runs without discarding same-name workflow results."""
+    by_name: Dict[str, List[Dict[str, Any]]] = {}
+    for run in check_runs:
+        name = run.get("name")
+        if isinstance(name, str):
+            by_name.setdefault(name, []).append(run)
+    return by_name
+
+
+def _required_check_status(
+    check_runs: List[Dict[str, Any]],
+) -> Tuple[bool, bool, Optional[str]]:
+    """Return passed, pending, and failed conclusions for one check name.
+
+    Several path-owned workflows can legitimately create the same required
+    check name on a multi-subtree pull request. The combined check passes only
+    when at least one run exists and every run has an accepted conclusion.
+    Failures take precedence over pending runs so a terminal failure is
+    reported without waiting for the remaining duplicate runs.
+    """
+    if not check_runs:
+        return False, True, None
+
+    failed_conclusions = sorted(
+        {
+            str(conclusion)
+            for run in check_runs
+            if (conclusion := run.get("conclusion")) is not None
+            and str(conclusion) not in _ACCEPTED_CHECK_CONCLUSIONS
+        }
+    )
+    if failed_conclusions:
+        return False, False, ", ".join(failed_conclusions)
+    if any(run.get("conclusion") is None for run in check_runs):
+        return False, True, None
+    return True, False, None
 
 
 def upsert_comment(
@@ -602,6 +639,7 @@ def build_policy_table_comment(
     appended. `ready` switches the heading to "Ready for Review"; `note` adds an
     optional banner (used for the bump-PR special case).
     """
+
     def _format_details(details: List[str]) -> str:
         """Join a check's detail parts into one table-cell-safe string.
 
@@ -682,7 +720,9 @@ def build_policy_table_comment(
     else:
         footer = "\n\n> 🎉 All policy checks passed!"
 
-    faq_url = "https://github.com/ROCm/rocm-systems/blob/develop/docs/SYSTEMS_PR_BOT_FAQ.md"
+    faq_url = (
+        "https://github.com/ROCm/rocm-systems/blob/develop/docs/SYSTEMS_PR_BOT_FAQ.md"
+    )
 
     faq_link = (
         "\n\n📖 **Need help?** See the "
@@ -715,22 +755,11 @@ def build_check_results(
     pre_commit_security.yml. To gate on such a workflow, add its check-run name
     to `checks.required_check_runs` in policy.yml.
     """
-    ok = {"success", "neutral", "skipped"}
-    by_name = {
-        r.get("name"): r
-        for r in check_runs
-        if isinstance(r, dict) and isinstance(r.get("name"), str)
-    }
+    by_name = _group_check_runs_by_name(check_runs)
 
     def status_of(name: str) -> Tuple[bool, bool, Optional[str]]:
-        """Return (passed, pending, conclusion) for one check-run."""
-        r = by_name.get(name)
-        if not r:
-            return False, True, None
-        conc = r.get("conclusion")
-        if conc is None:
-            return False, True, None
-        return str(conc) in ok, False, str(conc)
+        """Return the aggregate state for every run with this check name."""
+        return _required_check_status(by_name.get(name, []))
 
     results: List[CheckResult] = []
     for name in policy.required_checks:
@@ -764,16 +793,11 @@ def maybe_comment_precommit_failure(
     if not policy.precommit_failure_comment:
         return
 
-    precommit_run = None
-    for r in check_runs:
-        if r.get("name") == "pre-commit":
-            precommit_run = r
-            break
-    if not precommit_run:
-        return
-
-    conc = precommit_run.get("conclusion")
-    if conc not in ("failure", "cancelled", "timed_out", "action_required"):
+    failure_conclusions = {"failure", "cancelled", "timed_out", "action_required"}
+    if not any(
+        run.get("name") == "pre-commit" and run.get("conclusion") in failure_conclusions
+        for run in check_runs
+    ):
         return
 
     marker = "<!-- therock-pr-bot-precommit-failed -->"
@@ -1116,18 +1140,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         # --- Poll until pre-commit / CodeQL have a final conclusion so the
         # table updates from ⏳ Pending to a real ✅ Pass or ❌ Fail. ---
         ci_start = time.time()
-        ok_set = {"success", "neutral", "skipped"}
         while True:
             poll_runs = get_check_runs(owner=owner, repo=repo, sha=sha, token=token)  # type: ignore[arg-type]
-            by_name = {
-                r.get("name"): r
-                for r in poll_runs
-                if isinstance(r, dict) and isinstance(r.get("name"), str)
-            }
+            by_name = _group_check_runs_by_name(poll_runs)
             # Check whether every required CI check has a conclusion yet.
             all_concluded = all(
-                by_name.get(n) is not None and by_name[n].get("conclusion") is not None
-                for n in policy.required_checks
+                bool(by_name.get(name))
+                and all(run.get("conclusion") is not None for run in by_name[name])
+                for name in policy.required_checks
             )
             if all_concluded:
                 final_combined = results + build_check_results(policy, poll_runs)
@@ -1189,22 +1209,11 @@ def main(argv: Optional[List[str]] = None) -> int:
 
         # If any required checks are missing or still running, keep waiting.
         all_present = not missing
+        by_name = _group_check_runs_by_name(runs)
         all_ok = True
-        ok = {"success", "neutral", "skipped"}
-        by_name = {
-            r.get("name"): r
-            for r in runs
-            if isinstance(r, dict) and isinstance(r.get("name"), str)
-        }
         for name in policy.required_checks:
-            r = by_name.get(name)
-            if not r:
-                all_ok = False
-                continue
-            conc = r.get("conclusion")
-            if conc is None:
-                all_ok = False
-            elif str(conc) not in ok:
+            passed, _, _ = _required_check_status(by_name.get(name, []))
+            if not passed:
                 all_ok = False
 
         if all_present and all_ok:
