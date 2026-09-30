@@ -190,10 +190,20 @@ class StatCO : public CodeObject {
   // Resize device-specific data structures for all registered functions and variables
   void ResizeForDevices(size_t device_count);
 
+  // Back every registered managed variable with a tracked allocation, so its host
+  // pointer is resolvable through MemObjMap before any HIP API can observe it.
+  // Called once from PlatformState::Init after devices are sized.
+  hipError_t PromoteManagedVars();
+
   // Iterate all registered fat binary data pointers — for HRR capture post-registration sweep.
   void ForEachFatBinaryBlob(void (*cb)(const void*)) const;
 
  private:
+  // Precondition: caller holds sclock_.
+  hipError_t PromoteManagedVar(Var* var);
+  // Precondition: caller holds sclock_.
+  hipError_t WriteManagedVarDevicePtr(Var* var, amd::Memory* mem, int deviceId);
+
   mutable std::recursive_mutex sclock_;    //!< Guards Static Code object
   const PlatformState& owner_;             //!< Reference to owning PlatformState
   //! Populated during __hipRegisterFatBinary

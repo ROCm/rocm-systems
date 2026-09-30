@@ -3,7 +3,6 @@
  *
  * SPDX-License-Identifier: MIT
  */
-
 #include <memcpy1d_tests_common.hh>
 #include <memcpy3d_tests_common.hh>
 
@@ -43,6 +42,13 @@ HIP_TEST_CASE(Unit_hipMemcpy3D_Positive_Synchronization_Behavior) {
   SECTION("Host to Host") { Memcpy3DHtoHSyncBehavior(Memcpy3DWrapper<>, true); }
 }
 
+// Proves a device-to-device hipMemcpy3D does not synchronize on the host, which
+// is its documented behavior: the runtime performs no host-side synchronization
+// for device-to-device transfers, so the call returns before the copy executes.
+// The stream is blocked first, so a host-synchronous copy could never return
+// (the copy cannot run until the stream is unblocked). The call therefore
+// returning while hipStreamQuery still reports hipErrorNotReady is only possible
+// if it was asynchronous, which is what makes this assertion valid.
 HIP_TEST_CASE(Unit_hipMemcpy3D_Positive_DeviceToDevice_Synchronization_Behavior) {
   LinearAllocGuard3D<int> src_alloc(make_hipExtent(32 * sizeof(int), 32, 8));
   LinearAllocGuard3D<int> dst_alloc(make_hipExtent(32 * sizeof(int), 32, 8));
@@ -53,7 +59,7 @@ HIP_TEST_CASE(Unit_hipMemcpy3D_Positive_DeviceToDevice_Synchronization_Behavior)
       GetMemcpy3DParms(dst_alloc.pitched_ptr(), make_hipPos(0, 0, 0), src_alloc.pitched_ptr(),
                        make_hipPos(0, 0, 0), dst_alloc.extent(), hipMemcpyDeviceToDevice);
 
-  b_context.block_stream();
+  HIP_CHECK(b_context.block_stream());
   REQUIRE(b_context.is_blocked());
 
   hipError_t memcpy_err = hipSuccess;

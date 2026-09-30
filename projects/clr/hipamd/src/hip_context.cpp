@@ -81,8 +81,13 @@ void init(bool* status) {
 
   amd::RuntimeTearDown::RegisterObject(host_context);
 
-  // Complete platform initialization
-  PlatformState::Instance().Init();
+  // Complete platform initialization. Managed-variable promotion happens here, so a
+  // failure leaves the runtime uninitialized rather than letting a HIP API observe a
+  // managed pointer that no memory API can resolve.
+  if (PlatformState::Instance().Init() != hipSuccess) {
+    *status = false;
+    return;
+  }
 
   // HRR in-tree capture — snapshot dispatch table, install shims, open writer when
   // HIP_HRR_CAPTURE_OUTPUT is set (all deferred to hip_capture_init, not DSO ctor).

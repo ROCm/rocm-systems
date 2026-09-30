@@ -548,6 +548,9 @@ class Device : public NullDevice {
   //! return a new device pointer accessible by the GPU agent.
   void* hostLock(void* hostMem, size_t size, MemorySegment memSegment) const;
 
+  GlobalWriteResult writeDeviceGlobal(amd::Memory& dst, size_t offset, size_t size,
+                                      const void* src) const override;
+
   //! Returns transfer engine object
   const device::BlitManager& xferMgr() const { return xferQueue()->blitMgr(); }
 
