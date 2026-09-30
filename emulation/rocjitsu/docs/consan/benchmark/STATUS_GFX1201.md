@@ -20,3 +20,8 @@ Times are milliseconds. Startup is instrumentation plus the first run; Run is th
 | pytorch-dense-prefill | 724 / 2.94 | 7.85e+04 / 3.46 (1.18×) | 7.93e+04 / 6.06 (2.06×) | 5.6e+04 / 3.42 (1.16×) | +0.5% |
 | pytorch-synthetic-decode | 1.05e+03 / 2.66 | 9.01e+04 / 5.68 (2.13×) | 9.23e+04 / 8.98 (3.37×) | 6.08e+04 / 3.52 (1.32×) | -1.1% |
 | pytorch-top1-moe-prefill | 1.11e+03 / 7.56 | 1.67e+05 / 13.1 (1.73×) | 1.73e+05 / 20.8 (2.75×) | 1.05e+05 / 9.09 (1.2×) | +15.3%; timing provisional |
+
+September 30 follow-up: [startup profiling and no-op preparation fix](STARTUP_GFX1201_20260930.md)
+reproduces the default-preset overhead on current code and reduces dense-prefill /
+synthetic-decode startup from 85.0 / 97.7 s to 29.0 / 32.9 s. This focused result
+does not replace the historical full-matrix table above.
