@@ -66,7 +66,18 @@ RCCL_PARAM(IbQpsPerP2p, "IB_QPS_PER_P2P", 0);
 
 // nQpsPerDev > 0 wins (GIN passes 1). Otherwise use the IB QP env policy.
 static int rcclIbQpsPerDev(int nQpsPerDev, int isP2p) {
-  if (nQpsPerDev > 0) return nQpsPerDev;
+  if (nQpsPerDev > 0) {
+    // GIN opens a link per context per peer, so log once per process.
+    static std::once_flag once;
+    if (ncclParamIbQpsPerConn() > nQpsPerDev) {
+      std::call_once(once, [&]() {
+        INFO(NCCL_ENV | NCCL_NET,
+             "NET/IB: NCCL_IB_QPS_PER_CONNECTION=%ld is not applied to GIN connections, which use %d QP per device",
+             ncclParamIbQpsPerConn(), nQpsPerDev);
+      });
+    }
+    return nQpsPerDev;
+  }
   if (rcclParamIbQpsPerP2p() > 0 && isP2p) return (int)rcclParamIbQpsPerP2p();
   return (int)ncclParamIbQpsPerConn();
 }
