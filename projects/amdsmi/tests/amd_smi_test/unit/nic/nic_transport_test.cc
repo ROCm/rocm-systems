@@ -24,6 +24,7 @@
 namespace {
 
 using amd::smi::nic::transport::DriverInfo;
+using amd::smi::nic::transport::FecStatistics_t;
 using amd::smi::nic::transport::LinkSettings;
 using amd::smi::nic::transport::NicTransport;
 using amd::smi::nic::transport::parse_perm_addr;
@@ -93,6 +94,9 @@ class FakeTransport : public NicTransport {
     return {false, {}, ENODATA};
   }
   Result<PermanentAddress> get_permanent_address(const std::string&) override { return perm; }
+  Result<FecStatistics_t> get_fec_statistics(const std::string&) override {
+    return {false, {}, ENODATA};
+  }
   std::string backend_name() const override { return "fake"; }
 };
 
