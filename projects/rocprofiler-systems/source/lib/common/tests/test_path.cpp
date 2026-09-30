@@ -636,3 +636,38 @@ TEST_F(PathTest, CheckTargetPathVisibility_IndeterminateForNonAbsolutePath)
     EXPECT_EQ(check_target_path_visibility(1, "librocprof-sys-dl.so"),
               target_visibility::indeterminate);
 }
+
+// the test binary itself is anchored on rather than a system library because system
+// library file names vary across distros (e.g. glibc < 2.34 maps libc-<version>.so)
+TEST_F(PathTest, FindLoadedLibraryDir_FindsLibraryMappedByProcess)
+{
+    const auto self_path = std::filesystem::canonical("/proc/self/exe");
+
+    EXPECT_EQ(find_loaded_library_dir(getpid(), self_path.filename().string()),
+              self_path.parent_path().string());
+}
+
+TEST_F(PathTest, FindLoadedLibraryDir_NulloptWhenNotMapped)
+{
+    EXPECT_FALSE(
+        find_loaded_library_dir(getpid(), "libnot-mapped-anywhere.so").has_value());
+}
+
+TEST_F(PathTest, FindLibraryInLoadedDir_FindsLibraryInLoadedDirectory)
+{
+    const auto self_path = std::filesystem::canonical("/proc/self/exe");
+    const auto self_name = self_path.filename().string();
+
+    EXPECT_EQ(find_library_in_loaded_dir(getpid(), self_name, self_name),
+              self_path.string());
+}
+
+TEST_F(PathTest, FindLibraryInLoadedDir_NulloptWhenLibraryAbsent)
+{
+    const auto self_name =
+        std::filesystem::canonical("/proc/self/exe").filename().string();
+
+    EXPECT_FALSE(
+        find_library_in_loaded_dir(getpid(), "librocprof-sys-missing.so", self_name)
+            .has_value());
+}
