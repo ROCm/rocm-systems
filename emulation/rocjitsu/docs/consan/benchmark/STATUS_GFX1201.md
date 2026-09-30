@@ -25,3 +25,6 @@ September 30 follow-up: [startup profiling and no-op preparation fix](STARTUP_GF
 reproduces the default-preset overhead on current code and reduces dense-prefill /
 synthetic-decode startup from 85.0 / 97.7 s to 29.0 / 32.9 s. This focused result
 does not replace the historical full-matrix table above.
+Further iterations in that report reduce startup to 20.8–21.1 / 22.5–22.8 s
+in two endpoint runs, by sharing block-position indices and invariant kernel
+call facts. Selected-site coverage and numerical checks remain unchanged.
