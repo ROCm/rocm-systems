@@ -61,4 +61,14 @@ inline int rcclLL128ShmemElemsPerThreadFromArch(char const* arch) {
   return IsArchMatch(arch, "gfx1250") ? 32 : 8;
 }
 
+/* Host Code: Must match the rccl_float8 / rccl_bfloat8 typedef selection in rccl_float8.h
+ * for HIP 6.3 and newer. Device code takes the OCP types only on the arches below. gfx942
+ * takes the FNUZ types, and every other arch falls back to the software implementation,
+ * which is FNUZ as well. Below HIP 6.3 every arch takes that fallback, whose
+ * rcclFp8ToFloat ignores this answer. */
+inline bool rcclFp8DeviceIsFnuz(char const* arch) {
+  return !(IsArchMatch(arch, "gfx950") || IsArchMatch(arch, "gfx1200") || IsArchMatch(arch, "gfx1201") ||
+           IsArchMatch(arch, "gfx1250"));
+}
+
 #endif // ARCHINFO_H
