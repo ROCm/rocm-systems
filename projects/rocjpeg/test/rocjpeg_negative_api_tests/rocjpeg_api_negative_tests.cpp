@@ -1078,6 +1078,21 @@ int RocJpegApiNegativeTests::TestStreamParseFuzz() {
             accepted_cases.push_back({factors == 0x11 ? "grayscale SOF sampling 1x1" : "grayscale SOF sampling 4x4",
                                       gray_frame});
         }
+
+        // The case above reads components 1 and 2 to decide 4:0:0, so it holds
+        // only while nothing can leave stale factors in them. A frame header is
+        // the one thing that writes those slots, and it writes only as many as
+        // it declares, so a one-component frame behind a three-component one
+        // inherits the earlier chroma factors and classifies as 4:2:0 while
+        // reporting a single component - the same stream shape the
+        // component-count invariant further down is meant to exclude.
+        const std::vector<uint8_t> three_component_sof = {0xFF, 0xC0, 0x00, 0x11, 0x08, 0x00, 0x10, 0x00, 0x10, 0x03,
+                                                          0x01, 0x22, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01};
+        std::vector<uint8_t> two_frames;
+        two_frames.insert(two_frames.end(), gray_seed.begin(), gray_seed.begin() + gray_sof_offset);
+        two_frames.insert(two_frames.end(), three_component_sof.begin(), three_component_sof.end());
+        two_frames.insert(two_frames.end(), gray_seed.begin() + gray_sof_offset, gray_seed.end());
+        regressions.push_back({"a second frame header behind the first", two_frames});
     }
 
     for (const RegressionCase &regression : regressions) {

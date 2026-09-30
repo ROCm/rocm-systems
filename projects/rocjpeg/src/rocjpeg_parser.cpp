@@ -63,6 +63,7 @@ bool RocJpegStreamParser::ParseJpegStream(const uint8_t *jpeg_stream, uint32_t j
     jpeg_stream_parameters_ = {};
     bool soi_marker_found = false;
     bool sos_marker_found = false;
+    bool sof_marker_found = false;
     bool dht_marker_found = false;
     bool dqt_marker_found = false;
     uint8_t marker;
@@ -154,10 +155,26 @@ bool RocJpegStreamParser::ParseJpegStream(const uint8_t *jpeg_stream, uint32_t j
 
         switch (marker) {
             case SOF:
+                // ISO/IEC 10918-1 B.2: a baseline image has exactly one frame.
+                // A second frame header is not just redundant - ParseSOF writes
+                // only the components it declares, so a shorter frame behind a
+                // longer one leaves the earlier frame's sampling factors in the
+                // unused slots. GetChromaSubsampling reads components 1 and 2
+                // unconditionally and matches 4:0:0 on their factors being
+                // zero, so a one-component frame behind a three-component one
+                // is classified as a colour subsampling: num_components says 1
+                // while chroma_subsampling says 4:2:0, and the decoder then
+                // allocates and copies out a chroma plane nothing ever wrote.
+                if (sof_marker_found) {
+                    ErrorLog(g_rocjpeg_logger, "Invalid JPEG: the stream has more than one frame header!");
+                    FunctionExitLog(g_rocjpeg_logger);
+                    return false;
+                }
                 if (!ParseSOF()) {
                     FunctionExitLog(g_rocjpeg_logger);
                     return false;
                 }
+                sof_marker_found = true;
                 break;
             case SOF2:
                 ErrorLog(g_rocjpeg_logger, "Progressive JPEG is not supported!");
