@@ -1628,6 +1628,36 @@ TEST(CfgAnalysis, RecoveredIndirectBranchEdgeStartsAtConsumerBlock) {
   EXPECT_FALSE(has_predecessor(*fallthrough, consumer));
 }
 
+TEST(CfgAnalysis, IndirectRecoveryWithoutConsumersDoesNotBuildAnalysisGraph) {
+  class CountingInstruction : public TestInstruction {
+  public:
+    CountingInstruction() : TestInstruction("s_nop") {}
+    std::optional<int64_t> branch_offset_bytes() const override {
+      ++branch_queries;
+      return std::nullopt;
+    }
+    mutable size_t branch_queries = 0;
+  };
+  // No consumer means no auxiliary CFG or dataflow, even with assertions
+  // enabled. Counting graph queries makes this a deterministic cost regression.
+  for (const auto arch :
+       {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3,
+        ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    SCOPED_TRACE(arch);
+    CountingInstruction instruction;
+    const std::array<const Instruction *, 1> instructions{&instruction};
+    const std::array<uint8_t, 4> text{};
+    std::vector<PcAddressBuilder> builders(1);
+    EXPECT_TRUE(discover_indirect_branch_edges(instructions, text, arch, {},
+                                               ExternalEntryPolicy::InferPredecessorless, &builders)
+                    .empty());
+    EXPECT_TRUE(builders.empty());
+    EXPECT_EQ(instruction.branch_queries, 0u);
+    EXPECT_TRUE(discover_indirect_branch_edges(instructions, text, arch, {}, 32).empty());
+    EXPECT_EQ(instruction.branch_queries, 0u);
+  }
+}
+
 TEST(CfgAnalysis, IndirectRecoveryPrefilterAdmitsSetPcConsumer) {
   constexpr uint16_t kPcSreg = 8;
   constexpr uint32_t kLiteralOperand = 255;
@@ -5380,9 +5410,11 @@ TEST(CfgAnalysis, Gfx1250ImmediateModeWriteKeepsLaneStashBankKnown) {
       cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = kModeBit25Hwreg});
   std::vector<uint32_t> words = {
       0xBE804700u, // 0x00: s_get_pc_i64 s[0:1].
-      0xA980FE00u, 60u,
+      0xA980FE00u,
+      60u,
       0u, // 0x04: s_add_nc_u64 ..., lit64(60) -> target 0x40.
-      set_dst_src0_bank_one[0], 0xD761002Cu,
+      set_dst_src0_bank_one[0],
+      0xD761002Cu,
       0x02010000u, // 0x14: v_writelane_b32 physical v300, s0, 0.
       0xD761002Cu,
       0x02010201u, // 0x1c: v_writelane_b32 physical v300, s1, 1.
@@ -6913,7 +6945,8 @@ TEST(IndirectBranchDiscovery, DirectCallConsumesSetregHazardBeforeCalleeEntry) {
   const std::vector<uint32_t> words = {
       select_dst_src0_bank_one[0], // 0x00: select physical v300 for write and read roles.
       0xBE804700u,                 // 0x04: s_get_pc_i64 s[0:1].
-      0xA980FE00u, 68u,
+      0xA980FE00u,
+      68u,
       0u, // 0x08: s_add_nc_u64 ..., lit64(68) -> target 0x4c.
       0xD761002Cu,
       0x02010000u, // 0x14: v_writelane_b32 physical v300, s0, 0.

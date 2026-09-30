@@ -5548,17 +5548,11 @@ std::vector<IndirectCallFixup> discover_indirect_branch_edges(
   // making a false one.
   const bool has_indirect_consumer = std::ranges::any_of(
       insts, [](const Instruction *inst) { return is_recoverable_indirect_consumer(*inst); });
-  if (!has_indirect_consumer) {
-#ifndef NDEBUG
-    // Keep the cheap predicate coupled to every fixup producer. A future
-    // recovery path for another consumer kind must extend the predicate above.
-    const auto unfiltered = discover_indirect_branch_edges_unfiltered(
-        insts, text, arch, extra_leaders, entry_policy, nullptr, extra_split_points,
-        /*wavefront_size=*/0, extra_leaders, analysis_root_offsets, target);
-    assert(unfiltered.empty() && "indirect-recovery prefilter skipped a fixup-producing consumer");
-#endif
+  // Do not run the full analysis merely to validate this fast path in
+  // assertion-enabled builds: large libraries pay that cost for every CFG.
+  // Consumer admission and the no-analysis path are covered by CFG tests.
+  if (!has_indirect_consumer)
     return {};
-  }
 
   return discover_indirect_branch_edges_unfiltered(
       insts, text, arch, extra_leaders, entry_policy, pc_builders, extra_split_points,
