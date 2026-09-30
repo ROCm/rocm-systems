@@ -7672,6 +7672,22 @@ static hipError_t capture_hipModuleEnumerateFunctions(hipFunction_t* functions, 
 }
 
 // Generated shim
+static hipError_t capture_hipDeviceGetP2PAtomicCapabilities(unsigned int* capabilities, const hipAtomicOperation* operations, unsigned int count, int srcDevice, int dstDevice) {
+  hipError_t r = g_real_table.hipDeviceGetP2PAtomicCapabilities_fn(capabilities, operations, count, srcDevice, dstDevice);
+  if (r == hipSuccess) {
+    hrr_args_hipDeviceGetP2PAtomicCapabilities a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.capabilities = reinterpret_cast<uint64_t>(capabilities);
+    a.operations = reinterpret_cast<uint64_t>(operations);
+    a.count = static_cast<decltype(a.count)>(count);
+    a.srcDevice = static_cast<decltype(a.srcDevice)>(srcDevice);
+    a.dstDevice = static_cast<decltype(a.dstDevice)>(dstDevice);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPDEVICEGETP2PATOMICCAPABILITIES, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
 static hipError_t capture___hipPopCallConfiguration(dim3* gridDim, dim3* blockDim, size_t* sharedMem, hipStream_t* stream) {
   hipError_t r = g_real_compiler_table.__hipPopCallConfiguration_fn(gridDim, blockDim, sharedMem, stream);
   if (r == hipSuccess) {
@@ -8403,6 +8419,7 @@ void hip_capture_build_table() {
   g_cap_table.hipDeviceGetLuid_fn = capture_hipDeviceGetLuid;
   g_cap_table.hipInitDevice_fn = capture_hipInitDevice;
   g_cap_table.hipModuleEnumerateFunctions_fn = capture_hipModuleEnumerateFunctions;
+  g_cap_table.hipDeviceGetP2PAtomicCapabilities_fn = capture_hipDeviceGetP2PAtomicCapabilities;
 }
 
 void hip_capture_build_compiler_table() {
