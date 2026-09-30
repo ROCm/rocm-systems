@@ -13,15 +13,6 @@
 }
 
 :root.report-theme-dark {
-  color-scheme: dark;
-  --roofline-border: #363c45;
-  --roofline-bg-soft: #16191e;
-  --roofline-surface: #0a0b0d;
-  --roofline-accent: #58a6ff;
-  --roofline-text: #e6e9ef;
-  --roofline-muted: #9aa4b2;
-  --roofline-selected-bg: rgba(88, 166, 255, 0.18);
-  --roofline-swatch-border: rgba(255, 255, 255, 0.35);
   --roofline-warning: #ffd580;
   --roofline-warning-bg: #402d08;
   --roofline-warning-border: #d69e2e;

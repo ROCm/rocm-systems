@@ -21,7 +21,7 @@ _ASSETS = Path(report_document.__file__).parent / "assets"
 
 
 def test_build_document_places_fragments_in_one_shell() -> None:
-    """The base controller loads before the page controller and after the model."""
+    """Shared assets precede page assets inside one self-contained shell."""
     rendered = build_document(
         title="Report <one>",
         body_html='<main id="body-marker">body</main>',
@@ -36,6 +36,8 @@ def test_build_document_places_fragments_in_one_shell() -> None:
     assert '<meta name="viewport"' in rendered
     assert "<title>Report &lt;one&gt;</title>" in rendered
     assert rendered.count("<style>") == 1
+    assert rendered.count("</style>") == 1
+    assert rendered.index("--report-border") < rendered.index(".page-marker")
     assert rendered.count(".page-marker { color: red; }") == 1
     assert rendered.index("<style>") < rendered.index("body-marker")
     assert rendered.index("body-marker") < rendered.index('id="sample-model"')
