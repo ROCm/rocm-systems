@@ -610,7 +610,8 @@ inline native<float> f16_to_f32_simd(native<uint32_t> v) {
   // set bit of mant; mant is in 1..1023 (< 2^24) so the int->float cast is
   // exact and p = floor(log2(mant)) reads straight out of the f32 exponent.
   const native<float> mf = stdx::static_simd_cast<native<float>>(mant);
-  const U p = (std::bit_cast<U>(mf) >> 23) - 127u;
+  U p = (std::bit_cast<U>(mf) >> 23) - 127u;
+  stdx::where(mant == 0u, p) = 0u;
   // Scalar k = 10 - p shifts; exp_final = 1 - k = p - 9; exp field = p + 103.
   const U dn = sign31 | ((p + 103u) << 23) | (((mant << (10u - p)) & 0x3FFu) << 13);
   stdx::where(exp == 0u && mant != 0u, bits) = dn;
@@ -671,12 +672,10 @@ inline native<uint32_t> f32_to_f16_simd(native<float> val) {
   // Denormal (fe 102..112): m' = fm|0x800000, shift right by sh=126-fe (14..24)
   // with round-to-nearest-even.
   const U mm = fm | 0x800000u;
-  // sh = 126 - fe is in [14,24] for the real denormal range (fe 102..112), but
-  // lanes with fe < 102 (flushed to zero below) yield sh up to 126. Clamp to 31
-  // so the shifts here never hit undefined/masked behaviour; those lanes are
-  // overwritten by the `fe < 102` flush, so the clamped value is discarded.
+  // Only denormal-result lanes use these shifts. Keep every lane in [14,24]
+  // so both sh and sh-1 are valid, including discarded normal/special lanes.
   U sh = 126u - fe;
-  stdx::where(sh > 31u, sh) = 31u;
+  stdx::where(fe < 102u || fe > 112u, sh) = 14u;
   const U drb = (mm >> (sh - 1u)) & 1u;
   const U mask_lo = (1u << (sh - 1u)) - 1u;
   U dsticky(0u);
@@ -689,9 +688,11 @@ inline native<uint32_t> f32_to_f16_simd(native<float> val) {
   stdx::where(fe < 102u, out) = sign;
   stdx::where(fe >= 143u && fe <= 254u, out) = sign | 0x7C00u;
 
-  // Inf / NaN (fe == 255): NaN keeps payload MSBs and forces the low bit.
+  // Inf / NaN (fe == 255): retain payload MSBs, keeping NaNs distinct from infinity.
   stdx::where(fe == 255u, out) = sign | 0x7C00u;
-  stdx::where(fe == 255u && fm != 0u, out) = sign | 0x7C00u | (fm >> 13) | 1u;
+  U payload = fm >> 13;
+  stdx::where(payload == 0u, payload) = 1u;
+  stdx::where(fe == 255u && fm != 0u, out) = sign | 0x7C00u | payload;
 
   return out;
 }
@@ -726,14 +727,16 @@ inline native<uint32_t> f32_to_f16_rtz_simd(native<float> val) {
 
   const U mm = fm | 0x800000u;
   U sh = 126u - fe;
-  stdx::where(sh > 31u, sh) = 31u;
+  stdx::where(fe < 102u || fe > 112u, sh) = 14u;
   stdx::where(fe <= 112u, out) = sign | (mm >> sh);
 
   stdx::where(fe < 102u, out) = sign;
   stdx::where(fe >= 143u && fe <= 254u, out) = sign | 0x7BFFu;
 
   stdx::where(fe == 255u, out) = sign | 0x7C00u;
-  stdx::where(fe == 255u && fm != 0u, out) = sign | 0x7C00u | (fm >> 13) | 1u;
+  U payload = fm >> 13;
+  stdx::where(payload == 0u, payload) = 1u;
+  stdx::where(fe == 255u && fm != 0u, out) = sign | 0x7C00u | payload;
 
   return out;
 }
@@ -914,13 +917,12 @@ inline native<float> flush_denorm_f32_simd(native<float> v) {
 
 /// Vector ports of `amdgpu::transcendental::*_f32`, mirroring the scalar
 /// reference body bit-for-bit so the VOP1 SIMD fast path agrees with the
-/// forced-scalar path on every lane. The ±0/Inf special cases fall out of IEEE
-/// div/sqrt after the FTZ input flush; only NaN payload preservation with signaling NaNs quieted
-/// and the negative-domain canonical qNaN (0x7FC00000) need explicit blends. The 16-bit (f16) ops
-/// reuse these on the f16->f32 intermediate, matching the scalar `f32_to_f16(rcp_f32(f16_to_f32))`.
+/// forced-scalar path on every lane. RCP, RSQ, LOG and EXP use shared integer
+/// hardware mappings; SQRT uses host arithmetic with explicit NaN and FTZ handling.
+/// F16 operations use promoted inputs; RSQ additionally applies the F16 input-denormal mode.
 // Canonical positive quiet-NaN (f32), broadcast across the vector. Shared by
 // the transcendental fast paths below, which blend it into out-of-domain
-// lanes (negative sqrt/rsqrt, log of a negative) to match the scalar refs.
+// SQRT lanes to match the scalar reference.
 inline const native<float> kQNaN = std::bit_cast<native<float>>(native<uint32_t>(0x7FC00000u));
 
 inline native<float> rcp_f32_simd(native<float> a) {
@@ -1117,55 +1119,6 @@ template <typename V> V ieee_minimum_simd(V a, V b) {
   }
 }
 
-/// Cubemap face ops (back v_cube{id,sc,tc}_f32). The scalar bodies select among
-/// the three axes by an `else if` cascade on |x|,|y|,|z| with `>=` ties: the X
-/// face wins ties, then Y, then Z. The vector forms apply the blends in reverse
-/// priority (Z default, Y overwrite, X overwrite last) so X wins ties exactly as
-/// scalar. Every branch is a bit-identical value copy / sign flip of the
-/// (already abs/neg-applied) inputs — no FP arithmetic — so byte-identical. NaN
-/// inputs make every `>=` mask false -> the Z-axis default, matching scalar.
-/// (cubema = 2 * fmax(|x|,fmax(|y|,|z|)) is emitted inline at the call site.)
-inline native<float> cube_id_f32_simd(native<float> x, native<float> y, native<float> z) {
-  using F = native<float>;
-  const F ax = stdx::abs(x), ay = stdx::abs(y), az = stdx::abs(z);
-  const auto x_face = (ax >= ay) && (ax >= az);
-  const auto y_face = (ay >= ax) && (ay >= az);
-  F r = F(5.0f);
-  stdx::where(z >= F(0.0f), r) = F(4.0f); // Z face: z>=0 ? 4 : 5
-  F yv = F(3.0f);
-  stdx::where(y >= F(0.0f), yv) = F(2.0f);
-  stdx::where(y_face, r) = yv;
-  F xv = F(1.0f);
-  stdx::where(x >= F(0.0f), xv) = F(0.0f);
-  stdx::where(x_face, r) = xv;
-  return r;
-}
-inline native<float> cube_sc_f32_simd(native<float> x, native<float> y, native<float> z) {
-  using F = native<float>;
-  const F ax = stdx::abs(x), ay = stdx::abs(y), az = stdx::abs(z);
-  const auto x_face = (ax >= ay) && (ax >= az);
-  const auto y_face = (ay >= ax) && (ay >= az);
-  F r = x;
-  stdx::where(z >= F(0.0f), r) = -x; // Z face: z>=0 ? -x : x
-  stdx::where(y_face, r) = x;
-  F xv = -z;
-  stdx::where(x >= F(0.0f), xv) = z; // X face: x>=0 ? z : -z
-  stdx::where(x_face, r) = xv;
-  return r;
-}
-inline native<float> cube_tc_f32_simd(native<float> x, native<float> y, native<float> z) {
-  using F = native<float>;
-  const F ax = stdx::abs(x), ay = stdx::abs(y), az = stdx::abs(z);
-  const auto x_face = (ax >= ay) && (ax >= az);
-  const auto y_face = (ay >= ax) && (ay >= az);
-  F r = -y; // Z face and X face both return -y
-  F yv = z;
-  stdx::where(y >= F(0.0f), yv) = -z; // Y face: y>=0 ? -z : z
-  stdx::where(y_face, r) = yv;
-  stdx::where(x_face, r) = -y; // restore -y on ties where the Y mask also fired
-  return r;
-}
-
 /// Round an in-range finite float to the nearest integer, with halfway values
 /// choosing the even integer. Unlike nearbyint(), this is independent of the
 /// process floating-point environment.
@@ -1189,25 +1142,32 @@ inline native<float> round_to_nearest_even_simd(native<float> value) {
   return lower;
 }
 
-/// Normalized f32->int16 / ->uint16 pack-convert lanes (back v_cvt_pk[_]norm_*).
-/// Scalar: `isnan(f) ? 0 : static_cast<intN>(round_to_nearest_even(clamp(f * K, lo, hi)))`. The
-/// NaN->0 blend is done in the FLOAT domain (so the mask type matches) before the int conversion,
-/// avoiding any float-mask -> int-mask conversion. The caller masks &0xFFFF when packing. i16:
-/// K=32767, clamp
-/// [-32768,32767]; u16: K=65535, clamp [0,65535].
-inline native<int32_t> cvt_pknorm_i16_f32_simd(native<float> f) {
-  native<float> p = f * native<float>(32767.0f);
-  stdx::where(p < native<float>(-32768.0f), p) = native<float>(-32768.0f);
-  stdx::where(p > native<float>(32767.0f), p) = native<float>(32767.0f);
-  stdx::where(stdx::isnan(f), p) = native<float>(0.0f);
-  return stdx::static_simd_cast<native<int32_t>>(round_to_nearest_even_simd(p));
+/// Round a normalized value scaled by 32767 or 65535 to the nearest integer,
+/// with ties to even. Clamp inputs to [minimum, 1] and convert NaNs to zero.
+/// An FP32 product can round onto an integer midpoint. The FMA residual
+/// distinguishes these false ties so the conversion rounds only once.
+inline native<float> round_normalized_simd(native<float> f, float scale, float minimum) {
+  using F = native<float>;
+  stdx::where(f < F(minimum), f) = F(minimum);
+  stdx::where(f > F(1.0f), f) = F(1.0f);
+  stdx::where(stdx::isnan(f), f) = F(0.0f);
+  const F product = f * F(scale);
+  const F residual = stdx::fma(f, F(scale), -product);
+  const F lower = stdx::floor(product);
+  const auto midpoint = product == lower + F(0.5f);
+  F rounded = rndne_simd(product);
+  stdx::where(midpoint && (residual < F(0.0f)), rounded) = lower;
+  stdx::where(midpoint && (residual > F(0.0f)), rounded) = lower + F(1.0f);
+  return rounded;
 }
+
+/// Convert to signed normalized integers in [-32767, 32767]; NaNs become zero.
+inline native<int32_t> cvt_pknorm_i16_f32_simd(native<float> f) {
+  return stdx::static_simd_cast<native<int32_t>>(round_normalized_simd(f, 32767.0f, -1.0f));
+}
+/// Convert to unsigned normalized integers in [0, 65535]; NaNs become zero.
 inline native<uint32_t> cvt_pknorm_u16_f32_simd(native<float> f) {
-  native<float> p = f * native<float>(65535.0f);
-  stdx::where(p < native<float>(0.0f), p) = native<float>(0.0f);
-  stdx::where(p > native<float>(65535.0f), p) = native<float>(65535.0f);
-  stdx::where(stdx::isnan(f), p) = native<float>(0.0f);
-  return stdx::static_simd_cast<native<uint32_t>>(round_to_nearest_even_simd(p));
+  return stdx::static_simd_cast<native<uint32_t>>(round_normalized_simd(f, 65535.0f, 0.0f));
 }
 
 /// Vector port of the f32 `std::frexp` mantissa over raw float bits. Returns the

@@ -29,6 +29,12 @@
 
 namespace {
 
+struct RestoreEnvironment {
+  std::fenv_t saved;
+  RestoreEnvironment() { std::fegetenv(&saved); }
+  ~RestoreEnvironment() { std::fesetenv(&saved); }
+};
+
 // Toolchain-guard sweep length. The bit-exactness guards below were validated
 // over a 250k-iteration full-range sweep, but running that on every CI build
 // adds significant wall time (5 sweeps x 250k x SIMD width). Default to a
@@ -724,6 +730,30 @@ TEST(UtilSimd, F16ToF32_VectorMatchesScalar_Exhaustive) {
   }
 }
 
+TEST(UtilSimd, F16RoundTripPreservesEveryEncoding) {
+  SKIP_IF_NO_SIMD();
+  RestoreEnvironment environment;
+  std::feclearexcept(FE_ALL_EXCEPT);
+  using V = util::native<uint32_t>;
+  constexpr std::size_t W = util::native_width_v<uint32_t>;
+  for (uint32_t base = 0; base < 65536u; base += static_cast<uint32_t>(W)) {
+    uint32_t input[W];
+    for (std::size_t i = 0; i < W; ++i)
+      input[i] = base + static_cast<uint32_t>(i);
+    const V encoded(input, util::stdx::element_aligned);
+    const auto promoted = util::f16_to_f32_simd(encoded);
+    const V nearest = util::f32_to_f16_simd(promoted);
+    const V truncated = util::f32_to_f16_rtz_simd(promoted);
+    for (std::size_t i = 0; i < W; ++i) {
+      ASSERT_EQ(nearest[i], input[i]);
+      ASSERT_EQ(truncated[i], input[i]);
+    }
+  }
+  // Discarded lanes in the subnormal paths must still have valid shift counts.
+  // Some SIMD backends implement variable shifts with floating conversions.
+  EXPECT_EQ(std::fetestexcept(FE_INVALID), 0);
+}
+
 TEST(UtilSimd, F32ToF16_VectorMatchesScalar_Sweep) {
   SKIP_IF_NO_SIMD();
   using V = util::native<float>;
@@ -938,110 +968,26 @@ TEST(UtilSimd, IeeeMaximum3_F32_BitExact) {
       }
 }
 
-// --- Cubemap face ops (v_cube{id,ma,sc,tc}_f32) ------------------------------
-//
-// util::cube_{id,sc,tc}_f32_simd back the v_cube* gap ops; they must be
-// bit-identical to the generated scalar bodies (transcribed verbatim below).
-// Sweep every sign/magnitude/tie/zero/Inf/NaN triple.
-
-float scalar_cubeid(float x, float y, float z) {
-  float ax = std::fabs(x), ay = std::fabs(y), az = std::fabs(z);
-  if (ax >= ay && ax >= az)
-    return x >= 0 ? 0.0f : 1.0f;
-  if (ay >= ax && ay >= az)
-    return y >= 0 ? 2.0f : 3.0f;
-  return z >= 0 ? 4.0f : 5.0f;
-}
-float scalar_cubesc(float x, float y, float z) {
-  float ax = std::fabs(x), ay = std::fabs(y), az = std::fabs(z);
-  if (ax >= ay && ax >= az)
-    return x >= 0 ? z : -z;
-  if (ay >= ax && ay >= az)
-    return x;
-  return z >= 0 ? -x : x;
-}
-float scalar_cubetc(float x, float y, float z) {
-  float ax = std::fabs(x), ay = std::fabs(y), az = std::fabs(z);
-  if (ax >= ay && ax >= az)
-    return -y;
-  if (ay >= ax && ay >= az)
-    return y >= 0 ? -z : z;
-  return -y;
-}
-float scalar_cubema(float x, float y, float z) {
-  float ax = std::fabs(x), ay = std::fabs(y), az = std::fabs(z);
-  return 2.0f * std::fmax(ax, std::fmax(ay, az));
-}
-
-template <typename SimdFn, typename ScalarFn> void check_cube(SimdFn simd_fn, ScalarFn scalar_fn) {
-  using V = util::native<float>;
-  constexpr std::size_t W = V::size();
-  const std::array<float, 9> grid = {{-2.0f, -1.0f, -0.0f, 0.0f, 0.5f, 1.0f, 2.0f,
-                                      std::numeric_limits<float>::infinity(),
-                                      std::numeric_limits<float>::quiet_NaN()}};
-  for (float zv : grid)
-    for (float yv : grid)
-      for (float xv : grid) {
-        alignas(V) float xb[W], yb[W], zb[W];
-        for (std::size_t i = 0; i < W; ++i) {
-          xb[i] = xv;
-          yb[i] = yv;
-          zb[i] = zv;
-        }
-        V x(xb, util::stdx::vector_aligned), y(yb, util::stdx::vector_aligned),
-            z(zb, util::stdx::vector_aligned);
-        V r = simd_fn(x, y, z);
-        const float expect = scalar_fn(xv, yv, zv);
-        for (std::size_t i = 0; i < W; ++i) {
-          const float rv = r[i];
-          EXPECT_EQ(bits_of(rv), bits_of(expect))
-              << "x=" << xv << " y=" << yv << " z=" << zv << " lane=" << i;
-        }
-      }
-}
-
-TEST(UtilSimd, CubeId_F32_BitExact) {
-  SKIP_IF_NO_SIMD();
-  check_cube([](auto x, auto y, auto z) { return util::cube_id_f32_simd(x, y, z); }, scalar_cubeid);
-}
-TEST(UtilSimd, CubeSc_F32_BitExact) {
-  SKIP_IF_NO_SIMD();
-  check_cube([](auto x, auto y, auto z) { return util::cube_sc_f32_simd(x, y, z); }, scalar_cubesc);
-}
-TEST(UtilSimd, CubeTc_F32_BitExact) {
-  SKIP_IF_NO_SIMD();
-  check_cube([](auto x, auto y, auto z) { return util::cube_tc_f32_simd(x, y, z); }, scalar_cubetc);
-}
-TEST(UtilSimd, CubeMa_F32_BitExact) {
-  SKIP_IF_NO_SIMD();
-  check_cube(
-      [](auto x, auto y, auto z) {
-        return 2.0f * util::stdx::fmax(util::stdx::abs(x),
-                                       util::stdx::fmax(util::stdx::abs(y), util::stdx::abs(z)));
-      },
-      scalar_cubema);
-}
-
 // --- Normalized pack-convert lanes (v_cvt_pk[_]norm_{i16,u16}_*) -------------
 
 int16_t scalar_cvt_pknorm_i16(float f) {
   if (std::isnan(f))
     return 0;
-  float scaled = std::clamp(f * 32767.0f, -32768.0f, 32767.0f);
-  float lower = std::floor(scaled);
-  float fraction = scaled - lower;
-  if (fraction > 0.5f || (fraction == 0.5f && (static_cast<int32_t>(lower) & int32_t{1}) != 0))
-    lower += 1.0f;
+  double scaled = std::clamp(static_cast<double>(f) * 32767.0, -32767.0, 32767.0);
+  double lower = std::floor(scaled);
+  double fraction = scaled - lower;
+  if (fraction > 0.5 || (fraction == 0.5 && (static_cast<int32_t>(lower) & int32_t{1}) != 0))
+    lower += 1.0;
   return static_cast<int16_t>(lower);
 }
 uint16_t scalar_cvt_pknorm_u16(float f) {
   if (std::isnan(f))
     return 0;
-  float scaled = std::clamp(f * 65535.0f, 0.0f, 65535.0f);
-  float lower = std::floor(scaled);
-  float fraction = scaled - lower;
-  if (fraction > 0.5f || (fraction == 0.5f && (static_cast<int32_t>(lower) & int32_t{1}) != 0))
-    lower += 1.0f;
+  double scaled = std::clamp(static_cast<double>(f) * 65535.0, 0.0, 65535.0);
+  double lower = std::floor(scaled);
+  double fraction = scaled - lower;
+  if (fraction > 0.5 || (fraction == 0.5 && (static_cast<int32_t>(lower) & int32_t{1}) != 0))
+    lower += 1.0;
   return static_cast<uint16_t>(lower);
 }
 
@@ -1085,11 +1031,7 @@ template <typename Float> void check_rndne_host_independence() {
   std::mt19937_64 rng(0x11939);
   for (unsigned i = 0; i < 2048; ++i)
     inputs.push_back(static_cast<Bits>(rng()));
-  struct RestoreEnvironment {
-    std::fenv_t saved;
-    RestoreEnvironment() { std::fegetenv(&saved); }
-    ~RestoreEnvironment() { std::fesetenv(&saved); }
-  } restore_environment;
+  RestoreEnvironment restore_environment;
   ASSERT_EQ(std::fesetround(FE_TONEAREST), 0);
   std::vector<Bits> expected;
   for (Bits bits : inputs) {
@@ -1149,6 +1091,37 @@ TEST(UtilSimd, CvtPkNormI16_F32_BitExact) {
                 static_cast<uint16_t>(scalar_cvt_pknorm_i16(fv)))
           << "i16 f=" << fv << " lane=" << i;
       EXPECT_EQ(static_cast<uint16_t>(ru[i]), scalar_cvt_pknorm_u16(fv)) << "u16 f=" << fv;
+    }
+  }
+}
+
+TEST(UtilSimd, PackedNormalizedThresholdsIgnoreHostRounding) {
+  SKIP_IF_NO_SIMD();
+  using V = util::native<float>;
+  RestoreEnvironment restore_environment;
+  // Generate the neighborhood in nearest mode, then evaluate under every mode.
+  ASSERT_EQ(std::fesetround(FE_TONEAREST), 0);
+  std::vector<float> inputs;
+  for (int i = 0; i < 65536; ++i) {
+    for (float center : {float((i + 0.5) / 65535), float((i - 32768 + 0.5) / 32767)}) {
+      inputs.push_back(std::nextafter(center, -std::numeric_limits<float>::infinity()));
+      inputs.push_back(center);
+      inputs.push_back(std::nextafter(center, std::numeric_limits<float>::infinity()));
+    }
+  }
+  for (int mode : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
+    ASSERT_EQ(std::fesetround(mode), 0);
+    SCOPED_TRACE(mode);
+    for (size_t base = 0; base < inputs.size(); base += V::size()) {
+      V f([&](auto lane) { return inputs[(base + lane) % inputs.size()]; });
+      const auto signed_result = util::cvt_pknorm_i16_f32_simd(f);
+      const auto unsigned_result = util::cvt_pknorm_u16_f32_simd(f);
+      for (size_t lane = 0; lane < V::size(); ++lane) {
+        EXPECT_EQ(static_cast<int32_t>(signed_result[lane]), scalar_cvt_pknorm_i16(f[lane]))
+            << "input bits=" << std::bit_cast<uint32_t>(float(f[lane]));
+        EXPECT_EQ(static_cast<uint32_t>(unsigned_result[lane]), scalar_cvt_pknorm_u16(f[lane]))
+            << "input bits=" << std::bit_cast<uint32_t>(float(f[lane]));
+      }
     }
   }
 }

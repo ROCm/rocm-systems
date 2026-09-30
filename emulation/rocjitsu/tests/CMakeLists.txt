@@ -643,6 +643,7 @@ add_executable(
     vgpr_redispatch_test.cpp
     instruction_execution_harness_test.cpp
     vop3_conversion_modifiers_test.cpp
+    cube_instruction_test.cpp
     division_test.cpp
     division_macro_test.cpp
     valu_floating_policy_test.cpp
@@ -721,6 +722,7 @@ add_executable(
     execution_plugin_test.cpp
     plugin_config_resolver_test.cpp
     plugin_loader_test.cpp
+    race-detector/race_detector_counter_capacity_tests.cpp
     race-detector/race_detector_event_registry_test.cpp
     race-detector/race_detector_tests.cpp
     race-detector/interval_set_tests.cpp

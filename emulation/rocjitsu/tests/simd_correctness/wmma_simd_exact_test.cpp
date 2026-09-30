@@ -517,7 +517,8 @@ TEST(WmmaSimdExact, SparseK128NaNPayloadsMatchScalar) {
                                 amdgpu::extract_bf8, amdgpu::extract_bf8);
       },
       ACC, ACC_REGS);
-  EXPECT_EQ(fx.cu->read_vgpr(fx.vbase + ACC, 0) & 0xFFFFu, 0x7E01u);
+  // Narrowing 0x7FC00000 retains the quiet bit without adding a payload bit.
+  EXPECT_EQ(fx.cu->read_vgpr(fx.vbase + ACC, 0) & 0xFFFFu, 0x7E00u);
 }
 
 // --- integer WMMA/SWMMAC, signed/unsigned, clamp on and off ---
