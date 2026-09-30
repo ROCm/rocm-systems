@@ -70,20 +70,20 @@ Common filters to customize data collection include:
 See :ref:`Filtering <filtering>` for an in-depth walkthrough.
 
 To view available metrics by hardware block, use the ``--list-metrics``
-option with a system architecture argument or ``--list-available-metrics``
-to view the metrics for current system architecture:
+option. It lists the current GPU unless you pass a system architecture. Each
+block shows its alias, and each metric shows its unit and description. Add
+``-b`` to list only some blocks or metrics, given by ID or block alias:
 
 .. code-block:: shell
 
+   $ rocprof-compute --list-metrics
    $ rocprof-compute --list-metrics <sys_arch>
-   $ rocprof-compute profile --list-available-metrics
+   $ rocprof-compute --list-metrics <sys_arch> -b sol 12 11.1.0
 
-To view available aliases by hardware block, use the ``--list-blocks``
-option with a system architecture argument
+.. note::
 
-.. code-block:: shell
-
-   $ rocprof-compute --list-blocks <sys_arch>
+   ``--list-blocks`` and ``--list-available-metrics`` are deprecated and will be
+   removed in a future release. Use ``--list-metrics`` instead.
 
 .. _basic-analyze-cli:
 

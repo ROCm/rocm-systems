@@ -58,6 +58,6 @@ it at the end of the description as `(Default: value)`.
 ```text
 --output-format <format>   Specify output format (Default: stdout).
                             Values: stdout, txt, csv, db.
---list-blocks [arch]       List all available blocks for analysis on specified GPU <arch> (Default: current GPU arch).
-                            Values: gfx908, gfx90a, gfx940, gfx941, gfx942, gfx950, gfx1151
+--list-metrics [arch]      List available metrics for specified GPU [arch] (Default: current GPU arch).
+                            Values: gfx908, gfx90a, gfx940, gfx941, gfx942, gfx950, gfx1150, gfx1151, gfx1152, gfx1153, gfx1250
 ```
