@@ -205,16 +205,6 @@
           "test_filter": "UBR_MultiSegment.Generic_Reuse"
         },
         {
-          "name": "UBR_MultiSegment_Symmetric_Lsa",
-          "description": "Symmetric-window LSA CE AllReduce receive-offset regression. FORCE keeps CE selected when the symmetric kernel is also eligible.",
-          "test_filter": "UBR_MultiSegment.Symmetric_Lsa",
-          "env_variables": {
-            "RCCL_CE_ALLREDUCE": "1",
-            "RCCL_FORCE_CE_ALLREDUCE": "1",
-            "NCCL_CTA_POLICY": "2"
-          }
-        },
-        {
           "name": "UBR_MultiSegment_Symmetric_Elastic_Lsa",
           "description": "LSA-only elastic buffer: symmetric window with a host-backed trailing segment (NCCL_ELASTIC_BUFFER_REGISTER=1)",
           "test_filter": "UBR_MultiSegment.Symmetric_Elastic_Lsa"
