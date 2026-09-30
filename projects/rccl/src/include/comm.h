@@ -749,6 +749,12 @@ struct ncclComm {
   struct ncclComm* hierarchicalIntraComm;
   struct ncclComm* hierarchicalInterComm;
   bool hierarchicalCommsInitialized;
+  // Set at init when a hierarchical collective is enabled and the topology permits
+  // it; cleared if building the sub-communicators fails. Eligible but not yet
+  // initialized means RCCL_HIERARCHICAL_LAZY_INIT deferred them.
+  bool hierarchicalEligible;
+  // Eligible AllGathers seen while the deferred setup is pending.
+  uint64_t hierarchicalLazyCalls;
 
   // Hierarchical temporary buffer
   // Both hierarchical AG and RS use the same temp buffer,
