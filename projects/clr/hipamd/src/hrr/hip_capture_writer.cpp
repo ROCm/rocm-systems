@@ -1154,10 +1154,16 @@ Hash128 write_blob(const void* data, size_t len) {
 
   {
     std::lock_guard<std::mutex> lk(g_blob_mu);
-    if (!g_written_blobs.insert(key).second) return h;  // already written
+    if (g_written_blobs.count(key) != 0) return h;  // already written
   }
+  // Publish the key only after the space is reserved: a caller that finds it returns
+  // the hash at once, so the blob must not be abandoned after that.
   if (!reserve_space(len)) return {};
   const SpaceReservation reservation{len};
+  {
+    std::lock_guard<std::mutex> lk(g_blob_mu);
+    if (!g_written_blobs.insert(key).second) return h;  // written meanwhile
+  }
 
   // blobs/<2-char-prefix>/<fullhash>.blob
   std::string subdir = g_output_dir + "/blobs/" + std::string(hex, 2);
@@ -1192,10 +1198,15 @@ Hash128 write_code_object(const void* image, size_t image_size) {
 
   {
     std::lock_guard<std::mutex> lk(g_blob_mu);
-    if (!g_written_blobs.insert(key).second) return h;  // already written
+    if (g_written_blobs.count(key) != 0) return h;  // already written
   }
+  // As in write_blob(), the key is published only after the space is reserved.
   if (!reserve_space(image_size)) return {};
   const SpaceReservation reservation{image_size};
+  {
+    std::lock_guard<std::mutex> lk(g_blob_mu);
+    if (!g_written_blobs.insert(key).second) return h;  // written meanwhile
+  }
 
   std::string path = g_output_dir + "/code_objects/" + hex + ".hsaco";
   if (atomic_write_file(path, image, image_size)) {
