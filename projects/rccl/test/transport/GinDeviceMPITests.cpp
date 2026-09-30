@@ -1924,8 +1924,10 @@ __global__ void getVisibilityKernel(
   const size_t sliceBase = (size_t)blockIdx.x * nChunks * chunkBytes;
 
   uint32_t* flushGfdPi = nullptr;
-  if (countFlushGfds) {
-    auto ctx = gin._makeCtx();
+  auto ctx = gin._makeCtx();
+  // The host picks the backend from NCCL_GIN_TYPE, which an env plugin can
+  // override, so the handle is only cast once the device agrees it is proxy.
+  if (countFlushGfds && ctx.backend == NCCL_NET_DEVICE_GIN_PROXY) {
     ncclGinProxyGpuCtx_t* proxyCtx = &((ncclGinProxyGpuCtx_t*)ctx.handle)[ctx.contextId];
     flushGfdPi = &proxyCtx->pis[ctx.rank];
   }
