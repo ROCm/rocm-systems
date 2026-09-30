@@ -40,6 +40,7 @@ time_trace=false
 use_ninja=false
 force_reduce_pipeline=false
 enable_tdm_simple=false
+enable_tdm_prim_ll128=false
 generate_sym_kernels=true
 device_linker=true
 warp_speed_enabled=true # note that this flag will be overridden to false for non MI350/MI300 platforms
@@ -92,6 +93,7 @@ function display_help()
     echo "       --enable-mpi-tests      Enable MPI-based tests (requires --debug and MPI installation; set MPI_PATH if not in /opt/ompi)"
     echo "       --enable-rccl-ep-tests  Build the rccl_ep multi-GPU tests (requires --enable-mpi-tests and a runtime with working cuMem symmetric memory)"
     echo "       --enable-tdm-simple     Build the experimental gfx1250 TDM SIMPLE copy path"
+    echo "       --enable-tdm-prim-ll128 Build the experimental gfx1250 TDM LL128 user-buffer path"
     echo "    -f|--fast                  Quick-build RCCL (local gpu arch only, no backtrace)"
     echo "       --force-reduce-pipeline Force reduce_copy sw pipeline to be used for every reduce-based collectives and datatypes"
     echo "    -h|--help                  Prints this help message"
@@ -148,7 +150,7 @@ function display_help()
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ "$?" -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,all_unrolls,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-colltrace,disable-kernarg-preload,disable-roctx,disable-sym-kernels,disable-warp-speed,dump-asm,enable-code-coverage,enable-full-coverage,enable_backtrace,enable-mpi-tests,enable-rccl-ep-tests,enable-tdm-simple,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,ninja,no_clean,no-device-linker,npkit-enable,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,rocshmem-gin,roctx-enable,sqtt-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,all_unrolls,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-colltrace,disable-kernarg-preload,disable-roctx,disable-sym-kernels,disable-warp-speed,dump-asm,enable-code-coverage,enable-full-coverage,enable_backtrace,enable-mpi-tests,enable-rccl-ep-tests,enable-tdm-simple,enable-tdm-prim-ll128,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,ninja,no_clean,no-device-linker,npkit-enable,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,rocshmem-gin,roctx-enable,sqtt-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
@@ -181,6 +183,7 @@ while true; do
          --enable_backtrace)         build_bfd=true;                                                                                   shift ;;
          --enable-mpi-tests)         enable_mpi_tests=true;                                                                            shift ;;
          --enable-rccl-ep-tests)     enable_rccl_ep_tests=true;                                                                        shift ;;
+         --enable-tdm-prim-ll128)    enable_tdm_prim_ll128=true;                                                                   shift ;;
          --enable-tdm-simple)        enable_tdm_simple=true;                                                                           shift ;;
     -f | --fast)                     build_local_gpu_only=true;                                                                        shift ;;
          --force-reduce-pipeline)    force_reduce_pipeline=true;                                                                       shift ;;
@@ -479,6 +482,10 @@ fi
 # Experimental gfx1250 TDM SIMPLE copy path
 if [[ "${enable_tdm_simple}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DENABLE_TDM_SIMPLE=ON"
+fi
+
+if [[ "${enable_tdm_prim_ll128}" == true ]]; then
+    cmake_common_options="${cmake_common_options} -DENABLE_TDM_PRIM_LL128=ON"
 fi
 
 # Disable symmetric memory kernels

@@ -10,9 +10,11 @@
 
 #define NCCL_LL128_FLAGTHREAD (NCCL_LL128_LINEELEMS - 1)
 
-// gfx1250 async-to-LDS path for the LL128 user-buffer legs. Implementation lives in
-// tdm/ll128Tdm.h; this file only carries the call sites. Compiled in wherever the
-// async-to-LDS builtins exist, and selected at runtime with RCCL_TDM_LL128_ENABLE=1.
+// gfx1250 async-to-LDS path for the LL128 user buffers; see tdm/ll128Tdm.h.
+#ifndef ENABLE_TDM_PRIM_LL128
+#define ENABLE_TDM_PRIM_LL128 0
+#endif
+#define TDM_LL128_ON (ASYNC_COPY_SUPPORTED && ENABLE_TDM_PRIM_LL128)
 
 #ifndef RCCL_USE_WBINVL1_VOL
 #if defined(__GFX8__) || defined(__gfx906__) || defined(__gfx908__) || defined(__gfx90a__)
@@ -242,13 +244,13 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     }
   }
 
-#if ASYNC_COPY_SUPPORTED
+#if TDM_LL128_ON
 #include "tdm/ll128Tdm.h"  // member functions; included inside the class body on purpose
 #endif
 
   template <int WordPerThread>
   __device__ __forceinline__ void loadRegsBegin(uint64_t (&regs)[WordPerThread], T const* src, int eltN) {
-#if ASYNC_COPY_SUPPORTED
+#if TDM_LL128_ON
     if (tdmLoadBegin<WordPerThread>(src, eltN)) return;
 #endif
     constexpr int EltPer16B = 16 / sizeof(T);
@@ -310,7 +312,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
 
   template <int WordPerThread>
   __device__ __forceinline__ void loadRegsFinish(uint64_t (&regs)[WordPerThread]) {
-#if ASYNC_COPY_SUPPORTED
+#if TDM_LL128_ON
     tdmLoadFinish<WordPerThread>(regs);
 #endif
     // Move data out of flag registers into the vacant registers.
@@ -328,7 +330,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     for (int g = 1; g < WordPerThread / 2; g += 2) {
       if (flagThread) regs[2 * g - 1] = regs[2 * g];
     }
-#if ASYNC_COPY_SUPPORTED
+#if TDM_LL128_ON
     if (tdmStoreRegs<WordPerThread>(dst, regs, eltN)) return;
 #endif
 
@@ -488,7 +490,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     barrier();
 
     sqtt_marker_enter("PRIM_LL128_DATA_PROCESS");
-#if ASYNC_COPY_SUPPORTED
+#if TDM_LL128_ON
     tdmLoadAllowed = RECV;  // async source load only pays when there is a spin to hide
 #endif
     nelem -= DataEltPerSlice * warp;
@@ -503,12 +505,12 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
       if (DST) {
         if (accPtr != nullptr) {
           uint64_t accRegs[NCCL_LL128_SHMEM_ELEMS_PER_THREAD];
-#if ASYNC_COPY_SUPPORTED
+#if TDM_LL128_ON
           tdmLoadAllowed = false;  // accumulator load has no spin to overlap with
 #endif
           loadRegsBegin(accRegs, accPtr, eltInSlice);
           loadRegsFinish(accRegs);
-#if ASYNC_COPY_SUPPORTED
+#if TDM_LL128_ON
           tdmLoadAllowed = RECV;
 #endif
           accPtr += DataEltPerSlice * nwarps;
@@ -525,7 +527,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
       dstPtr += DataEltPerSlice * nwarps;
       nelem -= DataEltPerSlice * nwarps;
     }
-#if ASYNC_COPY_SUPPORTED
+#if TDM_LL128_ON
     tdmDrain();
 #endif
 

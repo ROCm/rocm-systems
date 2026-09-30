@@ -4,28 +4,12 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-/* TDM (async-to-LDS) path for the LL128 user-buffer legs.
- *
- *
- * Covers two of the four LL128 memory legs:
- *   load  -- user source buffer, issued in loadRegsBegin, consumed in loadRegsFinish.
- *            Overlaps the global read with the receive-FIFO spin.
- *   store -- user destination buffer, staged in LDS and pushed out as one bulk
- *            transfer instead of per-lane vector stores.
- *
- * The receive and send FIFO legs are NOT eligible: the receive path re-evaluates a
- * predicate on the loaded values, and both interleave protocol flag words into the
- * payload, so neither survives a bulk copy.
- *
- * Both legs share ONE per-warp staging window (ncclScratchForWarp), so every write
- * to that window must first drain whatever async op is still reading the staging window.
- * That is why tdmLoadBegin() and tdmStoreRegs() both open with a drain. Splitting the windows
- * would buy more overlap at the cost of another slice of LDS per warp.
- */
+// Async-to-LDS path for the LL128 user source and destination buffers. The FIFO legs
+// are not eligible: they interleave flag words into the payload. Both legs share one
+// per-warp staging window, so each write to it drains first.
 
 static constexpr int TdmAlign = 128;
-// Load mirrors loadUser128 (non-temporal); store mirrors storeUser128 (plain cacheable).
-// Both take system scope only when the buffer is registered.
+// Mirrors loadUser128/storeUser128: system scope only when the buffer is registered.
 static constexpr CachePolicy TdmLoadDevPolicy = createCachePolicy(TemporalHint::NT, MemScope::DEV);
 static constexpr CachePolicy TdmLoadSysPolicy = createCachePolicy(TemporalHint::NT, MemScope::SYS);
 static constexpr CachePolicy TdmStoreDevPolicy = createCachePolicy(TemporalHint::RT, MemScope::DEV);
@@ -37,24 +21,19 @@ bool tdmLoadAllowed = false;
 bool tdmLoadPending = false;
 int tdmLoadEltN = 0;
 
-// Runtime opt-in, mirroring TDM_SIMPLE: RCCL_TDM_LL128_ENABLE=1, gfx1250 only.
-// Off by default, so the synchronous path is what runs unless asked otherwise.
-__device__ __forceinline__ bool tdmEnabled() const { return ncclShmem.comm.tdmLl128Enable; }
-
 __device__ __forceinline__ uint8_t* tdmWindow() const {
-  uintptr_t p = reinterpret_cast<uintptr_t>(ncclScratchForWarp(warpInBlock));
-  return reinterpret_cast<uint8_t*>((p + TdmAlign - 1) & -uintptr_t(TdmAlign));
+  uint8_t* p = reinterpret_cast<uint8_t*>(ncclScratchForWarp(warpInBlock));
+  return p + ((-reinterpret_cast<uintptr_t>(p)) & (TdmAlign - 1));
 }
 
-/* Issue the user-source read into LDS. Returns true when it took ownership of the
- * slice, in which case loadRegsBegin must not run its own path. */
+// Issues the source read into LDS; true means loadRegsBegin must not run its own path.
 template <int WordPerThread>
 __device__ __forceinline__ bool tdmLoadBegin(T const* src, int eltN) {
   constexpr int WireBytes = WordPerThread * WARP_SIZE * sizeof(uint64_t);
   constexpr int DataBytes = WireBytes - WireBytes / NCCL_LL128_LINEELEMS;
   static_assert(ncclShmemScratchWarpSize() >= DataBytes + TdmAlign - 1,
                 "LL128 TDM needs one aligned data slice of per-warp scratch");
-  if (!tdmEnabled() || !tdmLoadAllowed) return false;
+  if (!tdmLoadAllowed) return false;
   if (reinterpret_cast<uintptr_t>(src) & (TdmAlign - 1)) return false;
 
   asyncWait<0>();  // previous slice's store may still be reading the window
@@ -70,8 +49,7 @@ __device__ __forceinline__ bool tdmLoadBegin(T const* src, int eltN) {
   return true;
 }
 
-/* Wait on the outstanding load and read LDS into the pre-shuffled register layout.
- * Returns false when no load was in flight, so loadRegsFinish keeps its own path. */
+// Waits on the outstanding load and reads LDS into the pre-shuffled register layout.
 template <int WordPerThread>
 __device__ __forceinline__ bool tdmLoadFinish(uint64_t (&regs)[WordPerThread]) {
   if (!tdmLoadPending) return false;
@@ -90,11 +68,9 @@ __device__ __forceinline__ bool tdmLoadFinish(uint64_t (&regs)[WordPerThread]) {
   return true;
 }
 
-/* Stage the whole destination slice in LDS and push it out with one async store.
- * Caller has already reversed the register permutation. Always takes the slice. */
+// Stages the destination slice in LDS and pushes it out as one async store.
 template <int WordPerThread>
 __device__ __forceinline__ bool tdmStoreRegs(T* dst, uint64_t (&regs)[WordPerThread], int eltN) {
-  if (!tdmEnabled()) return false;
   constexpr int LineElems = NCCL_LL128_LINEELEMS;
   constexpr int LineSkip = 2 * WARP_SIZE / LineElems;
   asyncWait<0>();  // drain the previous slice before overwriting the window
@@ -115,7 +91,5 @@ __device__ __forceinline__ bool tdmStoreRegs(T* dst, uint64_t (&regs)[WordPerThr
   return true;
 }
 
-/* The last slice's store has to land before the barrier that publishes completion. */
-__device__ __forceinline__ void tdmDrain() {
-  if (tdmEnabled()) asyncWait<0>();
-}
+// The last store must land before the barrier that publishes completion.
+__device__ __forceinline__ void tdmDrain() { asyncWait<0>(); }
