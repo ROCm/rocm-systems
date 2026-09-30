@@ -6,6 +6,28 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ## amd_smi_lib for ROCm 10.2.0
 
+### Added
+
+- **Added Component Unified ID (CUID) reporting and seed provisioning APIs**.  
+  - `amdsmi_get_gpu_cuid_info()` returns a device's primary and derived CUIDs together with the Component Type, the lookup stage that answered, and whether the value is auxiliary, in the new `amdsmi_cuid_info_t`. The new `amdsmi_cuid_source_t` and `amdsmi_cuid_component_type_t` enums name the on-wire values.
+  - `amdsmi_set_cuid_seed()` provisions the node-wide CUID derivation seed, and `amdsmi_get_cuid_seed_info()` reports whether one is provisioned along with a fingerprint of the seed in use, in the new `amdsmi_cuid_seed_info_t`. The seed itself is never returned.
+  - The entry points are exported whether or not the build links `libamdcuid`; without it they return `AMDSMI_STATUS_NOT_SUPPORTED`.
+  - CLI: `amd-smi static --cuid` reports the CUID block, `--cuid-primary` adds the serial-bearing primary CUID (requires elevation), and `amd-smi set --cuid-seed <file|->` provisions the node seed. `--cuid` is opt-in, so the default `amd-smi static` output is unchanged. The seed is a property of the node, so `seed_provisioned` and `seed_fingerprint` are reported once for the invocation, beside the per-GPU blocks rather than inside them; in JSON they are top-level keys next to `gpu_data`.
+
+  ```shell
+  $ amd-smi static --cuid
+      SEED_PROVISIONED: False
+      SEED_FINGERPRINT: be8937fba7ed4e6f
+
+  GPU: 0
+    CUID:
+        DERIVED_CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+        PRIMARY_CUID: N/A (not requested)
+        COMPONENT_TYPE: GPU
+        AUXILIARY: False
+        SOURCE: DRIVER
+  ```
+
 ### Resolved Issues
 
 - **Fixed runtime fatal CPERs reporting no AFIDs**.  
@@ -39,26 +61,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Added `AMDSMI_VRAM_TYPE_HBM4` to `amdsmi_vram_type_t`**.  
   - Identifies HBM Generation 4 VRAM, reported by `amdsmi_get_gpu_vram_info()`.
   - Also added the pre-existing `HBM3E` value to the Python `AmdSmiVramType` enum, which had been missing it.
-
-- **Added Component Unified ID (CUID) reporting and seed provisioning APIs**.  
-  - `amdsmi_get_gpu_cuid_info()` returns a device's primary and derived CUIDs together with the Component Type, the lookup stage that answered, and whether the value is auxiliary, in the new `amdsmi_cuid_info_t`. The new `amdsmi_cuid_source_t` and `amdsmi_cuid_component_type_t` enums name the on-wire values.
-  - `amdsmi_set_cuid_seed()` provisions the node-wide CUID derivation seed, and `amdsmi_get_cuid_seed_info()` reports whether one is provisioned along with a fingerprint of the seed in use, in the new `amdsmi_cuid_seed_info_t`. The seed itself is never returned.
-  - The entry points are exported whether or not the build links `libamdcuid`; without it they return `AMDSMI_STATUS_NOT_SUPPORTED`.
-  - CLI: `amd-smi static --cuid` reports the CUID block, `--cuid-primary` adds the serial-bearing primary CUID (requires elevation), and `amd-smi set --cuid-seed <file|->` provisions the node seed. `--cuid` is opt-in, so the default `amd-smi static` output is unchanged. The seed is a property of the node, so `seed_provisioned` and `seed_fingerprint` are reported once for the invocation, beside the per-GPU blocks rather than inside them; in JSON they are top-level keys next to `gpu_data`.
-
-  ```shell
-  $ amd-smi static --cuid
-      SEED_PROVISIONED: False
-      SEED_FINGERPRINT: be8937fba7ed4e6f
-
-  GPU: 0
-    CUID:
-        DERIVED_CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
-        PRIMARY_CUID: N/A (not requested)
-        COMPONENT_TYPE: GPU
-        AUXILIARY: False
-        SOURCE: DRIVER
-  ```
 
 ### Changed
 
