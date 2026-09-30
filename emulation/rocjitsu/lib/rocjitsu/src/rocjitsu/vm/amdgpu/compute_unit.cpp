@@ -454,6 +454,16 @@ void ComputeUnitCore::handle_terminal_vm_fault(Wavefront &wf, VmAccessOutcome ou
                                 .process_id = wf.process_id(),
                                 .dispatch_id = wf.dispatch_id(),
                                 .outcome = outcome});
+  if (outcome == VmAccessOutcome::Revoked) {
+    // Fetch revocation is recovered before reaching this terminal path. An
+    // in-flight data access cannot be replayed safely. Notify the live queue
+    // owner after dropping the wave-state lock, rather than invoking a fault
+    // reporter retained by the revoked snapshot. The dispatch still aborts
+    // without publishing a successful completion.
+    defer_queue_exception(nullptr, wf.queue_id(), wf.process_id(), kAqlQueueMemoryViolation,
+                          /*clear_debug_stop_on_success=*/false,
+                          /*retain_failure_for_debugger=*/false);
+  }
   abort_dispatch(wf.dispatch_id());
 }
 
@@ -1415,7 +1425,8 @@ template <bool EnableAsync>
     }
   };
 
-  const GpuVmAccess *vm_access = nullptr;
+  const GpuVmAccess *vm_access = active->vm_access();
+  const bool using_retained_vm_access = vm_access != nullptr;
   if (active->address_space() || vmid != 0) {
     if (gpu_vm_ == nullptr) {
       drain_async_window();
@@ -1424,16 +1435,18 @@ template <bool EnableAsync>
       handle_terminal_vm_fault(*active, VmAccessOutcome::Faulted);
       return;
     }
-    const AddressSpaceHandle address_space = active->address_space();
-    if (!instruction_vm_access_ || instruction_address_space_ != address_space ||
-        (!address_space && instruction_vmid_ != vmid) || !instruction_vm_access_->is_current()) {
-      instruction_vm_access_ =
-          address_space ? gpu_vm_->snapshot(address_space) : gpu_vm_->snapshot_vmid(vmid);
-      instruction_address_space_ = address_space;
-      instruction_vmid_ = vmid;
+    if (vm_access == nullptr) {
+      const AddressSpaceHandle address_space = active->address_space();
+      if (!instruction_vm_access_ || instruction_address_space_ != address_space ||
+          (!address_space && instruction_vmid_ != vmid) || !instruction_vm_access_->is_current()) {
+        instruction_vm_access_ =
+            address_space ? gpu_vm_->snapshot(address_space) : gpu_vm_->snapshot_vmid(vmid);
+        instruction_address_space_ = address_space;
+        instruction_vmid_ = vmid;
+      }
+      if (instruction_vm_access_)
+        vm_access = &*instruction_vm_access_;
     }
-    if (instruction_vm_access_)
-      vm_access = &*instruction_vm_access_;
     if (!vm_access) {
       drain_async_window();
       util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(),
@@ -1473,6 +1486,15 @@ template <bool EnableAsync>
 
   if (fetch_outcome != VmAccessOutcome::Complete) {
     drain_async_window();
+    if (fetch_outcome == VmAccessOutcome::Revoked) {
+      // Invalidation deliberately revokes pinned snapshots. Drop this wave's
+      // retained fast path so the next issue can capture the new translation
+      // epoch, or report a terminal fault if the binding is gone.
+      if (using_retained_vm_access)
+        active->set_vm_access({});
+      request_functional_yield();
+      return;
+    }
     if (fetch_outcome == VmAccessOutcome::Unavailable) {
       request_functional_yield();
       return;

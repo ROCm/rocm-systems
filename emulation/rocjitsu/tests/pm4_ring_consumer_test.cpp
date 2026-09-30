@@ -203,6 +203,22 @@ TEST(Pm4RingConsumerTest, PreservesUnavailableAsARetryableOutcome) {
   EXPECT_EQ(result.read_pointer, 0u);
 }
 
+TEST(Pm4RingConsumerTest, RevokedTransactionBecomesTerminalInsteadOfBlocked) {
+  RingConsumerFixture fixture;
+  ASSERT_TRUE(fixture.access);
+  constexpr uint64_t kRing = 0x100;
+  fixture.memory->make_read_unavailable(kRing);
+
+  Pm4PacketProcessor packet_processor;
+  Pm4RingConsumer consumer(packet_processor, fixture.vm, fixture.handle, kRing,
+                           4 * sizeof(uint32_t), 0x80, 0);
+  EXPECT_EQ(consumer.consume(1).status, Pm4RingStatus::Blocked);
+  ASSERT_TRUE(fixture.vm.invalidate(fixture.handle));
+
+  EXPECT_EQ(consumer.consume(1).status, Pm4RingStatus::Faulted);
+  EXPECT_FALSE(consumer.in_flight());
+}
+
 TEST(Pm4RingConsumerTest, RejectsARingWhoseAddressRangeWraps) {
   RingConsumerFixture fixture;
   ASSERT_TRUE(fixture.access);
