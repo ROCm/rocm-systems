@@ -286,28 +286,31 @@ TEST(CdnaVop3pPackedF32Test, SgprSourcesUseArchitectureSpecificWidth) {
   }
 }
 
-class Gfx1250MemoryTestCu
-    : public amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, cdna5::Isa> {
+template <typename Isa>
+class MemoryTestCu : public amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, Isa> {
 public:
-  using Base = amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, cdna5::Isa>;
+  using Base = amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, Isa>;
+  using Base::route_memory_inst;
 
-  Gfx1250MemoryTestCu(std::string name, const amdgpu::ComputeUnitCore::Config &config,
-                      amdgpu::GpuMemory *memory, amdgpu::L2Cache *l2)
+  MemoryTestCu(std::string name, const amdgpu::ComputeUnitCore::Config &config,
+               amdgpu::GpuMemory *memory, amdgpu::L2Cache *l2)
       : Base(std::move(name), config, memory, l2) {
     if (l2)
       l2->set_backing_memory(memory);
-    set_memory(memory);
-    set_l2(l2);
+    this->set_memory(memory);
+    this->set_l2(l2);
   }
 
   void execute_and_route(Instruction *inst, amdgpu::Wavefront &wf) {
-    EXPECT_TRUE(execute_instruction(inst, wf).succeeded());
+    EXPECT_TRUE(this->execute_instruction(inst, wf).succeeded());
     if (inst->is_memory_op())
-      route_memory_inst(inst, wf);
+      this->route_memory_inst(inst, wf);
     else
       delete inst;
   }
 };
+
+using Gfx1250MemoryTestCu = MemoryTestCu<cdna5::Isa>;
 
 class Cdna4MemoryTestCu
     : public amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, cdna4::Isa> {
@@ -626,6 +629,87 @@ TEST(InstructionExecutionHarness, Gfx1250) {
 }
 
 #undef RUN_HARNESS
+
+TEST(Gfx1250MemoryExecutionHarness, MixedFlatLdsAndGlobalLanesPreserveEachResult) {
+  struct Case {
+    uint16_t opcode;
+    uint32_t width;
+    bool load;
+    bool atomic = false;
+  };
+  const std::array cases = {
+      Case{cdna5::kFlatLoadB32, 1, true},           Case{cdna5::kFlatLoadB64, 2, true},
+      Case{cdna5::kFlatLoadB128, 4, true},          Case{cdna5::kFlatStoreB32, 1, false},
+      Case{cdna5::kFlatStoreB64, 2, false},         Case{cdna5::kFlatStoreB128, 4, false},
+      Case{cdna5::kFlatAtomicAddU32, 1, true, true}};
+  for (bool first_lane_is_lds : {false, true}) {
+    for (const auto test : cases) {
+      SCOPED_TRACE(testing::Message()
+                   << "first LDS=" << first_lane_is_lds << " opcode=" << test.opcode);
+      amdgpu::GpuMemory memory("mixed_flat_memory");
+      amdgpu::L2Cache l2("mixed_flat_l2");
+      amdgpu::ComputeUnitCore::Config cfg{};
+      cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+      cfg.num_wf_slots = 1;
+      cfg.sgprs_per_wf = 106;
+      cfg.vgprs_per_wf = 256;
+      cfg.lds_size_kb = 64;
+      Gfx1250MemoryTestCu cu("mixed_flat", cfg, &memory, &l2);
+      constexpr uint64_t shared_base = uint64_t{1} << 48;
+      cu.set_apertures(shared_base, shared_base + 0xffff, 0, 0);
+      auto *wf = cu.dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+      ASSERT_NE(wf, nullptr);
+      wf->set_exec(0x3);
+      wf->set_lds_base(0x200);
+      const uint32_t local_lane = first_lane_is_lds ? 0 : 1;
+      const uint32_t vb = wf->vgpr_alloc().base;
+      auto initial = [](uint32_t lane, uint32_t word) { return 0x12000000u + lane * 16 + word; };
+      constexpr uint32_t canary = 0xdeadbeef;
+      for (uint32_t lane = 0; lane < 3; ++lane) {
+        const uint64_t address = lane == local_lane ? shared_base + 0x40 : 0x2000 + lane * 64;
+        cu.write_vgpr(vb, lane, static_cast<uint32_t>(address));
+        cu.write_vgpr(vb + 1, lane, static_cast<uint32_t>(address >> 32));
+        for (uint32_t word = 0; word <= test.width; ++word) {
+          const uint32_t value = word == test.width ? canary : initial(lane, word);
+          if (lane == local_lane)
+            wf->lds().write32(wf->lds_base() + 0x40 + word * 4, value);
+          else
+            memory.write32(address + word * 4, value);
+          cu.write_vgpr(vb + 8 + word, lane, 7 + word);
+          cu.write_vgpr(vb + 16 + word, lane, canary);
+        }
+      }
+      const auto words =
+          cdna5::build_vflat(test.opcode, {.saddr = 0x7c,
+                                           .vdst = uint8_t(test.load ? 16 : 0),
+                                           .th = uint8_t(test.atomic ? 1 : 0),
+                                           .vsrc = uint8_t(!test.load || test.atomic ? 8 : 0),
+                                           .vaddr = 0});
+      auto decoder = Decoder::create(cfg.arch);
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+      ASSERT_NE(inst, nullptr);
+      ASSERT_TRUE(cu.execute_instruction(inst.get(), *wf).succeeded());
+      ASSERT_EQ(cu.route_memory_inst(inst.release(), *wf), amdgpu::VmAccessOutcome::Complete);
+      cu.flush_all();
+      for (uint32_t lane = 0; lane < 3; ++lane) {
+        for (uint32_t word = 0; word <= test.width; ++word) {
+          const bool selected = lane < 2 && word < test.width;
+          const uint32_t before = word == test.width ? canary : initial(lane, word);
+          const uint32_t expected = !selected || (test.load && !test.atomic) ? before
+                                    : test.atomic                            ? before + 7 + word
+                                                                             : 7 + word;
+          const uint32_t actual = lane == local_lane
+                                      ? wf->lds().read32(wf->lds_base() + 0x40 + word * 4)
+                                      : memory.read32(0x2000 + lane * 64 + word * 4);
+          EXPECT_EQ(actual, expected) << "lane=" << lane << " word=" << word;
+          EXPECT_EQ(cu.read_vgpr(vb + 16 + word, lane), selected && test.load ? before : canary);
+        }
+      }
+      EXPECT_TRUE(wf->wait_counters().empty());
+      wf->halt();
+    }
+  }
+}
 
 TEST(Gfx1250MemoryExecutionHarness, ExecutesRepresentativeValidAddressStores) {
   amdgpu::GpuMemory gpu_mem("gfx1250_memory_harness_mem");

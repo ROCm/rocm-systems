@@ -834,15 +834,12 @@ VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront 
         }
       }
     }
-    // Under the current uniform-address-space assumption, FLAT operations
-    // targeting the shared aperture use the LDS pipeline. Scratch-targeting
-    // FLATs stay on the global path. Counter participation is selected from all
-    // requesting lanes below, independently of the first-lane functional route.
+    // Uniform shared-aperture requests use the LDS pipeline. Mixed requests
+    // retain their addresses; the global pipeline separates LDS from global
+    // and scratch lanes before accessing either backing store.
     const uint64_t request_lanes = transpose_request_lane_mask(d, wf_size);
-    const uint32_t first_lane =
-        request_lanes == 0 ? wf_size : static_cast<uint32_t>(std::countr_zero(request_lanes));
     const uint64_t flat_shared_lane_mask = flat_local_lane_mask | flat_dds_lane_mask;
-    if (first_lane < wf_size && (flat_shared_lane_mask & (uint64_t{1} << first_lane)) != 0) {
+    if (request_lanes != 0 && (request_lanes & ~flat_shared_lane_mask) == 0) {
       if (observe_routed_access) {
         std::ranges::copy_n(d.per_lane_addr.begin(), wf_size, pre_routing_address_storage.begin());
         pre_routing_addresses = {pre_routing_address_storage.data(), wf_size};
@@ -863,6 +860,9 @@ VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront 
         }
       }
       normalized_to_local = true;
+    } else if (flat_shared_lane_mask != 0) {
+      d.flat_lds_lane_mask = flat_shared_lane_mask & request_lanes;
+      d.flat_lds_aperture_base = shared_aperture_base_;
     }
   }
 
