@@ -7545,7 +7545,9 @@ def test_legacy_stores_and_gds_preserve_expcnt_obligations():
     ds = InstructionSemantics('DS_READ_B32', 'ds_read', elem_size=4, num_elems=1)
 
     for arch_name, profile in (
+        ('cdna1', Cdna1Profile()),
         ('cdna2', Cdna2Profile()),
+        ('cdna3', CdnaProfile()),
         ('rdna2', Rdna2Profile()),
         ('rdna3', Rdna3Profile()),
     ):
@@ -7566,7 +7568,10 @@ def test_legacy_stores_and_gds_preserve_expcnt_obligations():
         ('BUFFER_ATOMIC_ADD', 'buffer_atomic', set(), 'VMCNT'),
         ('FLAT_STORE_DWORD', 'flat_store', {'seg'}, 'VMCNT'),
         ('FLAT_ATOMIC_ADD', 'flat_atomic', {'seg'}, 'VMCNT'),
+        ('GLOBAL_STORE_DWORD', 'flat_store', set(), 'VMCNT'),
+        ('GLOBAL_ATOMIC_ADD', 'flat_atomic', set(), 'VMCNT'),
         ('DS_READ_B32', 'ds_read', {'gds'}, 'LGKMCNT'),
+        ('DS_WRITE_B32', 'ds_write', {'gds'}, 'LGKMCNT'),
     ],
 )
 def test_cdna4_memory_issue_omits_unused_expcnt(name, semantic_class, fields, counter):
