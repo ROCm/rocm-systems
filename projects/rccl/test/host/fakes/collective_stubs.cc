@@ -9,10 +9,13 @@
 // references but that a host-only control-flow test never executes. Reaching
 // one at run time is a real escape and the abort surfaces it immediately.
 //
-// Self-contained by design: unlike the init binary's transport_stubs.cc (whose
+// Mostly self-contained: unlike the init binary's transport_stubs.cc (whose
 // NVLS/P2P-level stubs now route through test-driven seam globals defined in
-// the init test's own TUs), this floor has no external seam globals, so it
+// the init test's own TUs), this floor has just the one seam global of its
+// own (g_ncclArgsGlobalCheck, for ncclArgsGlobalCheck below), so it still
 // links into any micro-test binary on its own.
+
+#include "collective_stubs.h"
 
 #include <cstdlib>
 
@@ -27,6 +30,11 @@
 #include "dev_runtime.h"
 #include "transport.h"
 #include "os.h"
+#include "fail_loud.h"
+#include "signature-drift.h"
+
+ASSERT_HOOK_MATCHES_PROD(g_ncclArgsGlobalCheck, ncclArgsGlobalCheck);
+#undef ASSERT_HOOK_MATCHES_PROD
 
 // enqueue.h
 ncclResult_t ncclPrepareTasks(struct ncclComm*, bool*, bool*, ncclSimInfo_t*) { ::abort(); }
@@ -44,13 +52,9 @@ ncclResult_t ncclTaskPrepare(struct ncclComm*, ncclSimInfo_t*) { ::abort(); }
 int64_t ncclParamEnqueueRearchEnable() { return 0; }
 
 // ce_coll.h
-ncclResult_t ncclCeInit(struct ncclComm*) { ::abort(); }
 ncclResult_t ncclLaunchCeColl(struct ncclComm*, struct ncclKernelPlan*) { ::abort(); }
 
 // rma/rma.h, rma/rma_ce.h
-// ncclLaunchRma is absent on purpose: rma-test.cc compiles the real rma.cc in,
-// so a stub here would be a duplicate symbol.
-ncclResult_t ncclRmaCeInit(struct ncclComm*) { ::abort(); }
 
 // dev_runtime.h
 // ncclDevrCommCreateInternal, ncclDevrWindowRegisterInGroup and
@@ -65,14 +69,21 @@ ncclResult_t ncclCommMemSuspend(struct ncclComm*) { ::abort(); }
 ncclResult_t ncclCommMemResume(struct ncclComm*) { ::abort(); }
 
 // argcheck.h
-ncclResult_t ncclArgsGlobalCheck(struct ncclArgsInfo*) { ::abort(); }
+static ncclResult_t DefaultArgsGlobalCheck(struct ncclArgsInfo*) {
+  FailLoudUnfaked("collective_stubs", "ncclArgsGlobalCheck");
+}
+std::function<ncclResult_t(struct ncclArgsInfo*)> g_ncclArgsGlobalCheck = DefaultArgsGlobalCheck;
+ncclResult_t ncclArgsGlobalCheck(struct ncclArgsInfo* info) { return g_ncclArgsGlobalCheck(info); }
+
+void ResetCollectiveStubs() {
+  g_ncclArgsGlobalCheck = DefaultArgsGlobalCheck;
+}
 
 // os.h
 int ncclOsCpuCount(const ncclAffinity&) { ::abort(); }
 ncclResult_t ncclOsSetAffinity(const ncclAffinity&) { ::abort(); }
 
 // transport.h -- only the connect/setup entry points group.cc references.
-ncclResult_t ncclTransportP2pSetup(struct ncclComm*, struct ncclTopoGraph*, int, bool*) { ::abort(); }
 ncclResult_t ncclTransportRingConnect(struct ncclComm*) { ::abort(); }
 ncclResult_t ncclTransportTreeConnect(struct ncclComm*) { ::abort(); }
 ncclResult_t ncclTransportPatConnect(struct ncclComm*) { ::abort(); }

@@ -14,6 +14,9 @@ table ComputeUnitConfig {
   lds_size_kb: uint32;    // Local Data Share size in kilobytes.
   // Maximum CU step() iterations per functional dispatch quantum (0 = unbounded).
   functional_quantum: uint32;
+  // Scratch-addressable wave slots per CU. Omitted in legacy checkpoints,
+  // which retain the execution-slot count as their scratch capacity.
+  scratch_slots_per_cu: uint32;
 }
 
 /// Configuration for a command processor.

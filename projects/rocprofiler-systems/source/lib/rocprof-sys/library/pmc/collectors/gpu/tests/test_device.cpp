@@ -44,7 +44,8 @@ protected:
 
         EXPECT_CALL(*mock_backend, get_gpu_asic_info())
             .Times(AnyNumber())
-            .WillRepeatedly(Return(asic_info{ "Test GPU", "AMD" }));
+            .WillRepeatedly(
+                Return(asic_info{ .product_name = "Test GPU", .vendor_name = "AMD" }));
 
         EXPECT_CALL(*mock_backend, get_hotspot_temperature())
             .Times(AnyNumber())
@@ -1671,7 +1672,8 @@ TEST_F(DeviceTest, concurrent_device_objects)
 
     EXPECT_CALL(*mock_backend1, get_gpu_asic_info())
         .Times(AnyNumber())
-        .WillRepeatedly(Return(asic_info{ "GPU1", "AMD" }));
+        .WillRepeatedly(
+            Return(asic_info{ .product_name = "GPU1", .vendor_name = "AMD" }));
 
     SetupTemperatureExpectationsUnsupported(mock_backend1);
 
@@ -1690,7 +1692,8 @@ TEST_F(DeviceTest, concurrent_device_objects)
 
     EXPECT_CALL(*mock_backend2, get_gpu_asic_info())
         .Times(AnyNumber())
-        .WillRepeatedly(Return(asic_info{ "GPU2", "AMD" }));
+        .WillRepeatedly(
+            Return(asic_info{ .product_name = "GPU2", .vendor_name = "AMD" }));
 
     SetupTemperatureExpectationsUnsupported(mock_backend2);
 
@@ -1771,7 +1774,8 @@ TEST_F(DeviceTest, full_lifecycle_with_realistic_data)
 
     EXPECT_CALL(*mock, get_gpu_asic_info())
         .Times(AnyNumber())
-        .WillRepeatedly(Return(asic_info{ "Test GPU", "AMD" }));
+        .WillRepeatedly(
+            Return(asic_info{ .product_name = "Test GPU", .vendor_name = "AMD" }));
 
     EXPECT_CALL(*mock, get_hotspot_temperature())
         .WillOnce(Return(std::int64_t{ 70 }))

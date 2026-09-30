@@ -625,8 +625,8 @@ TEST(TrampolineBuilderPlan, FullExecOpensTheWindowAndCostsTwoToggles) {
       << err;
 
   const uint16_t exec_lo = scalar_operand_exec_lo(full.arch);
-  EXPECT_TRUE(std::any_of(full.special_state_saves.begin(), full.special_state_saves.end(),
-                          [&](const SpecialStateSlot &s) { return s.operand == exec_lo; }));
+  EXPECT_TRUE(std::ranges::any_of(full.special_state_saves,
+                                  [&](const SpecialStateSlot &s) { return s.operand == exec_lo; }));
   constexpr uint32_t kExecToggles = 2;
   constexpr uint32_t kExecSaveRestore = 2; // the EXEC temp's s_mov pair
   EXPECT_EQ(full.before_word_count, masked.before_word_count + kExecToggles + kExecSaveRestore);
@@ -848,11 +848,11 @@ TEST(TrampolineBuilderEmit, MaterializesArgumentsInsideTheFullMaskWindow) {
   const std::vector<uint32_t> &w = bytes->trampoline_words;
   const uint16_t exec_lo = scalar_operand_exec_lo(plan.arch);
   const uint32_t widen = build_s_mov_b64(exec_lo, scalar_inline_neg_one(plan.arch), plan.arch);
-  const auto widen_at = std::find(w.begin(), w.end(), widen);
+  const auto widen_at = std::ranges::find(w, widen);
   ASSERT_NE(widen_at, w.end()) << "no full-mask widen; an argument site must open the window";
 
   // The anchor-mask restore closing the window is the next EXEC write after it.
-  const auto restore_at = std::find_if(widen_at + 1, w.end(), [&](uint32_t word) {
+  const auto restore_at = std::ranges::find_if(widen_at + 1, w.end(), [&](uint32_t word) {
     return decode_sop1_op(word) == sop1_op_mov_b64(plan.arch) && decode_sop1_sdst(word) == exec_lo;
   });
   ASSERT_NE(restore_at, w.end());
@@ -868,7 +868,7 @@ TEST(TrampolineBuilderEmit, MaterializesArgumentsInsideTheFullMaskWindow) {
   EXPECT_EQ(args_begin[3], arg1[1]);
 
   // And still before the call.
-  const auto swappc = std::find_if(w.begin(), w.end(), [&](uint32_t word) {
+  const auto swappc = std::ranges::find_if(w, [&](uint32_t word) {
     return decode_sop1_op(word) == sop1_op_swappc_b64(plan.arch) &&
            decode_sop1_sdst(word) == plan.link_pair_base;
   });
@@ -891,8 +891,8 @@ TEST(TrampolineBuilderEmit, AnchorExecArgumentsReadTheSavedPair) {
   ASSERT_TRUE(bytes.has_value()) << err;
 
   const uint16_t exec_lo = scalar_operand_exec_lo(plan.arch);
-  const auto saved = std::find_if(plan.special_state_saves.begin(), plan.special_state_saves.end(),
-                                  [&](const SpecialStateSlot &s) { return s.operand == exec_lo; });
+  const auto saved = std::ranges::find_if(
+      plan.special_state_saves, [&](const SpecialStateSlot &s) { return s.operand == exec_lo; });
   ASSERT_NE(saved, plan.special_state_saves.end());
 
   // Both halves come from the temp pair, in declaration order into v0 and v1.
@@ -900,13 +900,13 @@ TEST(TrampolineBuilderEmit, AnchorExecArgumentsReadTheSavedPair) {
   const uint32_t lo = build_v_mov_b32_src(0, saved->temp_base, plan.arch);
   const uint32_t hi =
       build_v_mov_b32_src(1, static_cast<uint16_t>(saved->temp_base + 1), plan.arch);
-  const auto lo_at = std::find(w.begin(), w.end(), lo);
+  const auto lo_at = std::ranges::find(w, lo);
   ASSERT_NE(lo_at, w.end());
   ASSERT_NE(lo_at + 1, w.end());
   EXPECT_EQ(lo_at[1], hi);
 
   // Nothing reads the live EXEC register into a VGPR.
-  EXPECT_EQ(std::count(w.begin(), w.end(), build_v_mov_b32_src(0, exec_lo, plan.arch)), 0);
+  EXPECT_EQ(std::ranges::count(w, build_v_mov_b32_src(0, exec_lo, plan.arch)), 0);
 }
 
 // Under force_full_exec the call is reached with EXEC still -1: no anchor-mask
@@ -925,9 +925,9 @@ TEST(TrampolineBuilderEmit, FullExecReachesTheCallWithTheWindowOpen) {
   const std::vector<uint32_t> &w = bytes->trampoline_words;
   const uint16_t exec_lo = scalar_operand_exec_lo(plan.arch);
   const uint32_t widen = build_s_mov_b64(exec_lo, scalar_inline_neg_one(plan.arch), plan.arch);
-  const auto widen_at = std::find(w.begin(), w.end(), widen);
+  const auto widen_at = std::ranges::find(w, widen);
   ASSERT_NE(widen_at, w.end());
-  const auto swappc = std::find_if(w.begin(), w.end(), [&](uint32_t word) {
+  const auto swappc = std::ranges::find_if(w, [&](uint32_t word) {
     return decode_sop1_op(word) == sop1_op_swappc_b64(plan.arch) &&
            decode_sop1_sdst(word) == plan.link_pair_base;
   });
@@ -935,7 +935,7 @@ TEST(TrampolineBuilderEmit, FullExecReachesTheCallWithTheWindowOpen) {
   ASSERT_LT(widen_at - w.begin(), swappc - w.begin());
 
   // No EXEC write of any kind between the widen and the call.
-  const auto between = std::find_if(widen_at + 1, swappc, [&](uint32_t word) {
+  const auto between = std::ranges::find_if(widen_at + 1, swappc, [&](uint32_t word) {
     return decode_sop1_op(word) == sop1_op_mov_b64(plan.arch) && decode_sop1_sdst(word) == exec_lo;
   });
   EXPECT_EQ(between, swappc) << "the anchor mask must not be restored before a full-exec call";
@@ -956,16 +956,16 @@ TEST(TrampolineBuilderEmit, WithoutFullExecTheAnchorMaskIsRestoredBeforeTheCall)
 
   const std::vector<uint32_t> &w = bytes->trampoline_words;
   const uint16_t exec_lo = scalar_operand_exec_lo(plan.arch);
-  const auto saved = std::find_if(plan.special_state_saves.begin(), plan.special_state_saves.end(),
-                                  [&](const SpecialStateSlot &s) { return s.operand == exec_lo; });
+  const auto saved = std::ranges::find_if(
+      plan.special_state_saves, [&](const SpecialStateSlot &s) { return s.operand == exec_lo; });
   ASSERT_NE(saved, plan.special_state_saves.end());
   const uint32_t restore = build_s_mov_b64(exec_lo, saved->temp_base, plan.arch);
-  const auto swappc = std::find_if(w.begin(), w.end(), [&](uint32_t word) {
+  const auto swappc = std::ranges::find_if(w, [&](uint32_t word) {
     return decode_sop1_op(word) == sop1_op_swappc_b64(plan.arch) &&
            decode_sop1_sdst(word) == plan.link_pair_base;
   });
   ASSERT_NE(swappc, w.end());
-  EXPECT_NE(std::find(w.begin(), swappc, restore), swappc);
+  EXPECT_NE(std::ranges::find(w.begin(), swappc, restore), swappc);
 }
 
 // A call passing nothing emits no argument words at all -- the v0 write that a
@@ -978,7 +978,7 @@ TEST(TrampolineBuilderEmit, NoArgumentsEmitsNoArgumentWords) {
 
   const std::vector<uint32_t> &w = bytes->trampoline_words;
   const uint32_t v_mov_v0 = build_v_mov_b32_imm(0, 0, plan.arch)[0];
-  EXPECT_EQ(std::count(w.begin(), w.end(), v_mov_v0), 0);
+  EXPECT_EQ(std::ranges::count(w, v_mov_v0), 0);
 }
 
 // The relocated original appears exactly once, after the call.
@@ -989,10 +989,10 @@ TEST(TrampolineBuilderEmit, OriginalAppearsOnceAfterCall) {
   ASSERT_TRUE(bytes.has_value()) << err;
 
   const std::vector<uint32_t> &w = bytes->trampoline_words;
-  const auto first = std::find(w.begin(), w.end(), plan.original_words[0]);
+  const auto first = std::ranges::find(w, plan.original_words[0]);
   ASSERT_NE(first, w.end());
   // Exactly one occurrence.
-  EXPECT_EQ(std::count(w.begin(), w.end(), plan.original_words[0]), 1);
+  EXPECT_EQ(std::ranges::count(w, plan.original_words[0]), 1);
   // It sits after the whole envelope: the arch-agnostic before_word_count plus the
   // two boundary drains (top of envelope and immediately after the call return).
   const size_t d = build_wait_all_loads_complete(plan.arch).size();

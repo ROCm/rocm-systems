@@ -131,7 +131,8 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
       extended_aql_dispatch_supported_(false),
       workgroup_clusters_supported_(false),
       kern_cluster_max_dim_({ INT32_MAX, UINT16_MAX, UINT16_MAX }),
-      cluster_max_dim_({ 1, 1, 1 }) {
+      cluster_max_dim_({ 1, 1, 1 }),
+      persisting_l2_cache_size_(0) {
   const bool is_apu_node = (properties_.NumCPUCores > 0);
   profile_ = (is_apu_node) ? HSA_PROFILE_FULL : HSA_PROFILE_BASE;
 
@@ -704,6 +705,15 @@ void GpuAgent::InitCacheList() {
   for (size_t i = 0; i < caches_.size(); i++)
     caches_[i].reset(new core::Cache(deviceName + " L" + std::to_string(cache_props_[i].CacheLevel),
                                      cache_props_[i].CacheLevel, cache_props_[i].CacheSize));
+}
+
+size_t GpuAgent::GetMaxPersistingL2CacheSize() const {
+  for (const auto& cache : cache_props_) {
+    if ((cache.CacheLevel == 2) && (cache.PersistingCacheSizeMax)) {
+      return cache.PersistingCacheSizeMax;
+    }
+  }
+  return 0;
 }
 
 void GpuAgent::InitDerivedCuid() {
@@ -2504,7 +2514,7 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
         }
       }
       // Fallback for when KFD is returning zero.
-      *((uint32_t*)value) = 64;
+      *((uint32_t*)value) = 256;
       break;
     case HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT:
       *((uint32_t*)value) =
@@ -2732,6 +2742,14 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       // GPU agents can participate in host memory DMA-BUF export if the system supports virtual memory APIs
       *static_cast<bool*>(value) = core::Runtime::runtime_singleton_->VirtualMemApiSupported();
       break;
+  case HSA_AMD_AGENT_INFO_REQUEST_PERSISTING_L2_CACHE_SIZE:{
+        *((size_t*)value) = persisting_l2_cache_size_;
+        break;
+    }
+  case HSA_AMD_AGENT_INFO_MAX_PERSISTING_L2_CACHE_SIZE: {
+        *((size_t*)value) = GetMaxPersistingL2CacheSize();
+        break;
+      }
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       break;
@@ -2739,6 +2757,29 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
   return HSA_STATUS_SUCCESS;
 }
 
+hsa_status_t GpuAgent::SetAgentAttribute(hsa_agent_info_t attribute, void* value) {
+  const size_t attribute_u = static_cast<size_t>(attribute);
+
+  switch (attribute_u) {
+    case HSA_AMD_AGENT_ATTRIBUTE_REQUEST_PERSISTING_L2_CACHE_SIZE: {
+      const size_t requested = *((size_t*)value);
+
+      // Validate against hardware maximum
+      const size_t maxSize = GetMaxPersistingL2CacheSize();
+      if (requested > maxSize) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+      hsa_status_t status = driver().SetPersistingCacheSize(node_id(), requested);
+
+      if (status != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      persisting_l2_cache_size_ = requested;
+      break;
+    }
+    default:
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      break;
+  }
+  return HSA_STATUS_SUCCESS;
+}
 hsa_status_t GpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, uint64_t flags,
                                    core::HsaEventCallback event_callback, void* data,
                                    uint32_t private_segment_size, uint32_t group_segment_size,
@@ -3794,6 +3835,8 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
   // Detect if we need PM4 fallback (non-large-BAR systems cannot use CPU atomics on VRAM)
   pcs_data->use_pm4_fallback = !LargeBarEnabled();
 
+  if (is_gfx1250()) pcs_data->use_pm4_fallback = true;
+
   // Allocate cache-line aligned per-XCC data array
   // Each per_xcc_pcs_data_t is 64-byte aligned to prevent false sharing between XCCs
   pcs_data->xcc_data = new per_xcc_pcs_data_t[pcs_data->num_xcc]();
@@ -4206,7 +4249,12 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
           ? pcs_data->device_data_base
           : (pcs_stochastic_data_.session ? pcs_stochastic_data_.device_data_base : nullptr);
 
-  if (UpdateTrapHandlerWithPCS(hosttrap_buffers, stochastic_buffers, deviceAllocSize) !=
+  /* A stride of 0 tells the trap handler to use the buffer base directly.  A single-XCC
+     agent allocates one buffer, so the base is the only valid address. */
+  const uint32_t per_xcc_size =
+      (properties_.NumXcc > 1) ? static_cast<uint32_t>(deviceAllocSize) : 0;
+
+  if (UpdateTrapHandlerWithPCS(hosttrap_buffers, stochastic_buffers, per_xcc_size) !=
       HSA_STATUS_SUCCESS)
     return HSA_STATUS_ERROR;
 
@@ -4247,10 +4295,14 @@ hsa_status_t GpuAgent::PcSamplingDestroy(pcs::PcsRuntime::PcSamplingSession& ses
           : pcs_stochastic_data_.device_data_base;  // Preserve if still active
 
   uint32_t per_xcc_size = 0;
-  if (hosttrap_buffers && pcs_hosttrap_data_.device_data_base)
-    per_xcc_size = std::max(per_xcc_size, static_cast<uint32_t>(pcs_hosttrap_data_.per_xcc_device_stride));
-  if (stochastic_buffers && pcs_stochastic_data_.device_data_base)
-    per_xcc_size = std::max(per_xcc_size, static_cast<uint32_t>(pcs_stochastic_data_.per_xcc_device_stride));
+  if (properties_.NumXcc > 1) {
+    if (hosttrap_buffers)
+      per_xcc_size = std::max(per_xcc_size,
+                              static_cast<uint32_t>(pcs_hosttrap_data_.per_xcc_device_stride));
+    if (stochastic_buffers)
+      per_xcc_size = std::max(per_xcc_size,
+                              static_cast<uint32_t>(pcs_stochastic_data_.per_xcc_device_stride));
+  }
 
   hsa_status_t tma_status = UpdateTrapHandlerWithPCS(hosttrap_buffers, stochastic_buffers, per_xcc_size);
   if (tma_status != HSA_STATUS_SUCCESS) {
@@ -4844,10 +4896,14 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
   if (properties_.NumXcc > 1) i += pred_exec_cmd_sz;
   memset(cmd_data, 0, cmd_data_sz);
 
-  // WAIT_REG_MEM: Wait for trap handler to finish writing samples
+  // WAIT_REG_MEM: Wait for trap handler to finish writing samples.
+  // The completion counter must be polled with GREATER-OR-EQUAL, not strict EQUAL.
+  // The trap-handler counter atomics run at SYSTEM scope, so the completion value is
+  // already visible to the CP past GL2; an overshoot past the armed reference still
+  // satisfies the poll instead of hanging on a value that is never matched exactly.
   cmd_data[i++] =
       PM4_HDR(PM4_HDR_IT_OPCODE_WAIT_REG_MEM, wait_reg_mem_cmd_sz, supported_isas()[0]->GetMajorVersion());
-  cmd_data[i++] = PM4_WAIT_REG_MEM_DW1(PM4_WAIT_REG_MEM_FUNCTION_EQUAL_TO_REFERENCE |
+  cmd_data[i++] = PM4_WAIT_REG_MEM_DW1(PM4_WAIT_REG_MEM_FUNCTION_GREATER_OR_EQUAL_REF |
                                        PM4_WAIT_REG_MEM_MEM_SPACE_MEMORY_SPACE |
                                        PM4_WAIT_REG_MEM_OPERATION_WAIT_REG_MEM);
   cmd_data[i++] = PM4_WAIT_REG_MEM_DW2_MEM_POLL_ADDR_LO(buf_written_val_addr[which_buffer]);

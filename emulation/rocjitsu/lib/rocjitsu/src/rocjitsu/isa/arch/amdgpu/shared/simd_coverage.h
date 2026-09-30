@@ -136,6 +136,7 @@ template <unsigned Arity, bool E32, bool HalfDst, unsigned HalfInputs, typename 
 /// requiring subnormal rounding, overflow or exceptional-value handling use
 /// the scalar architectural primitive.
 template <typename Float>
+  requires(!(UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS && sizeof(Float) == 8))
 inline auto div_scale_simd(util::native<Float> value, util::native<Float> denominator,
                            util::native<Float> numerator, uint32_t rounding, uint32_t denorm) {
   using F = DivisionFormat<Float>;
@@ -171,10 +172,8 @@ inline auto div_scale_simd(util::native<Float> value, util::native<Float> denomi
   post = post || large_delta;
   I ve = exp(v), scaled_exp = ve + adjustment;
   U result = (v & U(~F::infinity)) | (util::stdx::static_simd_cast<U>(scaled_exp) << F::fraction);
-  uint64_t post_bits = 0;
+  uint64_t post_bits = util::simd_mask_to_bits(post);
   for (std::size_t i = 0; i < U::size(); ++i) {
-    if (post[i])
-      post_bits |= uint64_t{1} << i;
     if (ve[i] == 0 || ve[i] == int(F::infinity >> F::fraction) || scaled_exp[i] <= 0 ||
         scaled_exp[i] >= int(F::infinity >> F::fraction) || (d[i] & ~F::sign) == 0 ||
         (n[i] & ~F::sign) == 0) {
@@ -186,6 +185,23 @@ inline auto div_scale_simd(util::native<Float> value, util::native<Float> denomi
   }
   return std::pair{std::bit_cast<util::native<Float>>(result), post_bits};
 }
+
+#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+template <typename Float>
+  requires(sizeof(Float) == 8)
+inline auto div_scale_simd(util::native<Float> value, util::native<Float> denominator,
+                           util::native<Float> numerator, uint32_t rounding, uint32_t denorm) {
+  util::native<Float> result(0);
+  uint64_t post_bits = 0;
+  for (std::size_t lane = 0; lane < result.size(); ++lane) {
+    const auto scalar =
+        div_scale<Float>(value[lane], denominator[lane], numerator[lane], rounding, denorm);
+    result[lane] = scalar.value;
+    post_bits |= uint64_t{scalar.post_scale} << lane;
+  }
+  return std::pair{result, post_bits};
+}
+#endif
 
 template <typename T, typename Inst, typename WriteResult>
   requires(util::has_stdx_simd)
@@ -255,6 +271,26 @@ template <bool Extended, typename Slot>
   };
   if (!capable(x) || !capable(y))
     return false;
+  // Each arithmetic slot must match its own MODE precision before either
+  // slot reads operands. Other policies use the mode-aware scalar executor.
+  auto is_arithmetic = [](const Slot &slot) {
+    return slot.op <= 7 || (Extended && (slot.op == 19 || (slot.op >= 32 && slot.op <= 34)));
+  };
+  auto matches_mode = [&](const Slot &slot) {
+    if (!is_arithmetic(slot))
+      return true;
+    const bool f64 = Extended && slot.op >= 32;
+    return fp_mode::native_arithmetic_matches(
+        f64 ? wf.fp_round_mode_f16_f64() : wf.fp_round_mode_f32(),
+        f64 ? wf.fp_denorm_mode_f16_f64() : wf.fp_denorm_mode_f32());
+  };
+  if (!matches_mode(x) || !matches_mode(y))
+    return false;
+  // Matching controls still permit arithmetic to raise host exception flags.
+  // Preserve the caller's environment just as the scalar arithmetic path does.
+  std::optional<fp_mode::ScopedEnvironment> environment;
+  if (is_arithmetic(x) || is_arithmetic(y))
+    environment.emplace(0);
   struct Results {
     alignas(util::native<uint32_t>) uint32_t words[64]{};
     alignas(util::native<uint64_t>) uint64_t pairs[64]{};
@@ -321,7 +357,8 @@ template <bool Extended, typename Slot>
     if (slot.op == 0)
       acc.emplace(regs.read_operand(*slot.dst, exec));
     const uint64_t condition =
-        slot.op == 9 ? (slot.uses_vcc ? wf.vcc() : read_wave_mask_scalar(*slot.src2, wf)) : 0;
+        slot.op == 9 ? (slot.uses_vcc ? wf.vcc_mask(exec) : read_wave_mask_scalar(*slot.src2, wf))
+                     : 0;
     for (uint32_t base = 0; base < wf.wf_size(); base += W) {
       if (!((exec >> base) & util::mask<uint64_t>(W)))
         continue;
@@ -340,20 +377,20 @@ template <bool Extended, typename Slot>
       U result;
       switch (slot.op) {
       case 0:
-        result = std::bit_cast<U>(util::stdx::fma(af, bf, acc->template load_native<float>(base)));
+        result = std::bit_cast<U>(fma_f32_simd(af, bf, acc->template load_native<float>(base), wf));
         break;
       case 1:
       case 19:
-        result = std::bit_cast<U>(util::stdx::fma(af, bf, cf));
+        result = std::bit_cast<U>(fma_f32_simd(af, bf, cf, wf));
         break;
       case 2:
-        result = std::bit_cast<U>(util::stdx::fma(af, cf, bf));
+        result = std::bit_cast<U>(fma_f32_simd(af, cf, bf, wf));
         break;
       case 3:
-        result = std::bit_cast<U>(af * bf);
+        result = std::bit_cast<U>(binary_f32_simd<fp_mode::Arithmetic::MUL>(af, bf, wf));
         break;
       case 4:
-        result = std::bit_cast<U>(af + bf);
+        result = std::bit_cast<U>(binary_f32_simd<fp_mode::Arithmetic::ADD>(af, bf, wf));
         break;
       case 5:
         result = std::bit_cast<U>(af - bf);
@@ -370,9 +407,8 @@ template <bool Extended, typename Slot>
         result = av;
         break;
       case 9: {
-        U choose([&](auto i) { return uint32_t((condition >> (base + i)) & 1u); });
         result = av;
-        util::stdx::where(choose != U(0), result) = bv;
+        util::stdx::where(util::simd_mask_from_bits<U>(condition >> base), result) = bv;
         break;
       }
       case 10:
@@ -488,12 +524,27 @@ template <bool Vop3, typename Inst>
     if (!mask)
       continue;
     U av = a.template load_native<uint32_t>(base), bv = b.template load_native<uint32_t>(base);
+    // Inline constants denote one half value broadcast to both elements;
+    // literals and register sources already contain an independent packed pair.
+    auto inline_pair = [](U raw, const auto &operand, uint32_t selector) {
+      if (pk16_src_needs_narrowing(selector, operand.size_bits()))
+        raw = util::f32_to_f16_simd(std::bit_cast<util::native<float>>(raw));
+      if (dot2_src_needs_half_replication(selector)) {
+        raw &= U(0xffffu);
+        raw |= raw << 16;
+      }
+      return raw;
+    };
+    av = inline_pair(av, inst.src0, inst.inst_.src0);
+    if constexpr (Vop3)
+      bv = inline_pair(bv, second, inst.inst_.src1);
     U cv = dst.template load_native<uint32_t>(base);
     auto compute = [&](unsigned shift) {
       return fma_f16_mode_simd(
           (av >> shift) & U(0xffffu), (bv >> shift) & U(0xffffu), (cv >> shift) & U(0xffffu),
           abs & 1, abs & 2, false, neg & 1, neg & 2, false, wf.fp_round_mode_f16_f64(),
-          wf.fp_denorm_mode_f16_f64(), omod, clamp, wf.fp16_ovfl(), floating_clamp_nan_to_zero(wf));
+          wf.fp_denorm_mode_f16_f64(), omod, clamp, wf.fp16_ovfl(), floating_clamp_nan_to_zero(wf),
+          fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
     };
     U low = compute(0), high = compute(16);
     dst.template store_native<uint32_t>(base, low | (high << 16), mask);

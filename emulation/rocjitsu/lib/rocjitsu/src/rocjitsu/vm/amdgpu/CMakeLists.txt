@@ -5,6 +5,7 @@ rj_add_object_library(rocjitsu_vm_amdgpu
     aql/aql_packet_processor.cpp
     aql/aql_queue_binding_factory.cpp
     circular_ring_reader.cpp
+    buffer_format.cpp
     cluster_lds_multicast.cpp
     command_processor.cpp
     completion_tracker.cpp
@@ -19,9 +20,11 @@ rj_add_object_library(rocjitsu_vm_amdgpu
     l1_scalar_cache.cpp
     l1_vector_cache.cpp
     l2_cache.cpp
+    lds_stack.cpp
     memory_pipeline.cpp
     memory_side_cache.cpp
     mes_engine.cpp
+    memory_wait_scoreboard.cpp
     pm4/pm4_packet_processor.cpp
     pm4/pm4_queue_binding_factory.cpp
     pm4/pm4_queue_controller.cpp
@@ -33,6 +36,14 @@ rj_add_object_library(rocjitsu_vm_amdgpu
     shader_engine.cpp
     wavefront.cpp
     xcd.cpp
+)
+
+# Share ISA wait decoding with the offline checker, without its dataflow state.
+# Final VM consumers need the objects; transitive object-library linking alone
+# propagates usage requirements without including those object files.
+target_link_libraries(
+    rocjitsu_vm_amdgpu
+    INTERFACE $<TARGET_OBJECTS:rocjitsu_waitcheck_target>
 )
 
 add_subdirectory(pci)
