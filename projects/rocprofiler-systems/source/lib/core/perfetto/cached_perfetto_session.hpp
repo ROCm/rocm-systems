@@ -28,6 +28,7 @@ namespace core
 class cached_perfetto_session
 {
 public:
+    // NOLINTNEXTLINE(misc-include-cleaner)
     cached_perfetto_session(pid_t root_pid, bool combine_traces,
                             const std::vector<int>&      source_pids,
                             trace_cache::post_processor& processor);

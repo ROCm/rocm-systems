@@ -12,12 +12,12 @@ namespace rocprofsys::output
 
 // Sentinel for "no such pid" — an absent parent (root process) or a not-yet
 // assigned pid field.
-inline constexpr pid_t NO_PID = -1;
+inline constexpr pid_t k_no_pid = -1;
 
 struct process_metadata
 {
-    pid_t       pid{ NO_PID };
-    pid_t       ppid{ NO_PID };
+    pid_t       pid{ k_no_pid };
+    pid_t       ppid{ k_no_pid };
     std::string command;
 };
 

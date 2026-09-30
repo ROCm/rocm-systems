@@ -26,7 +26,7 @@ enum class output_format
 struct artifact
 {
     std::string   path;
-    pid_t         pid{ NO_PID };
+    pid_t         pid{ k_no_pid };
     std::uint64_t size_bytes{ 0 };
     output_format format{ output_format::perfetto };
 };

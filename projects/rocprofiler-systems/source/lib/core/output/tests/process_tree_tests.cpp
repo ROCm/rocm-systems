@@ -7,10 +7,15 @@
 #include "core/output/process_metadata.hpp"
 #include "core/output/process_tree.hpp"
 
+// Directly provides pid_t used below; clang-tidy's Include Cleaner flags this
+// header as both redundant and required (a known false-positive with glibc's
+// sys/types.h).
+// NOLINTNEXTLINE(misc-include-cleaner)
 #include <sys/types.h>
 
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace
@@ -21,34 +26,37 @@ using rocprofsys::output::process_metadata;
 using rocprofsys::output::process_tree;
 
 artifact
+// NOLINTNEXTLINE(misc-include-cleaner)
 make_row(std::string path, pid_t pid, std::uint64_t size_bytes = 0)
 {
-    artifact a{};
-    a.path       = std::move(path);
-    a.pid        = pid;
-    a.size_bytes = size_bytes;
-    a.format     = output_format::text;
-    return a;
+    artifact row{};
+    row.path       = std::move(path);
+    row.pid        = pid;
+    row.size_bytes = size_bytes;
+    row.format     = output_format::text;
+    return row;
 }
 
 process_metadata
 make_meta(pid_t pid, pid_t ppid, std::string command = "")
 {
-    process_metadata m{};
-    m.pid     = pid;
-    m.ppid    = ppid;
-    m.command = std::move(command);
-    return m;
+    process_metadata meta{};
+    meta.pid     = pid;
+    meta.ppid    = ppid;
+    meta.command = std::move(command);
+    return meta;
 }
 }  // namespace
 
 TEST(process_tree, single_pid_becomes_single_root)
 {
-    std::vector<artifact>         rows{ make_row("a", 100) };
-    std::vector<process_metadata> processes{ make_meta(100, -1) };
+    constexpr pid_t k_pid = 100;
+
+    std::vector<artifact>         rows{ make_row("a", k_pid) };
+    std::vector<process_metadata> processes{ make_meta(k_pid, -1) };
     process_tree                  tree{ rows, processes };
     ASSERT_EQ(tree.roots().size(), 1u);
-    EXPECT_EQ(tree.roots().front().meta.pid, 100);
+    EXPECT_EQ(tree.roots().front().meta.pid, k_pid);
     EXPECT_EQ(tree.roots().front().rows.size(), 1u);
     EXPECT_TRUE(tree.roots().front().children.empty());
     EXPECT_TRUE(tree.diagnostics().missing_metadata_pids.empty());
@@ -57,58 +65,82 @@ TEST(process_tree, single_pid_becomes_single_root)
 
 TEST(process_tree, parent_with_two_children_nests_under_parent)
 {
-    std::vector<artifact>         rows{ make_row("p", 100), make_row("c1", 200),
-                                make_row("c2", 201) };
-    std::vector<process_metadata> processes{ make_meta(100, -1), make_meta(200, 100),
-                                             make_meta(201, 100) };
+    constexpr pid_t k_parent_pid = 100;
+    constexpr pid_t k_child1_pid = 200;
+    constexpr pid_t k_child2_pid = 201;
+
+    std::vector<artifact> rows{ make_row("p", k_parent_pid), make_row("c1", k_child1_pid),
+                                make_row("c2", k_child2_pid) };
+    std::vector<process_metadata> processes{ make_meta(k_parent_pid, -1),
+                                             make_meta(k_child1_pid, k_parent_pid),
+                                             make_meta(k_child2_pid, k_parent_pid) };
     process_tree                  tree{ rows, processes };
     ASSERT_EQ(tree.roots().size(), 1u);
     ASSERT_EQ(tree.roots().front().children.size(), 2u);
-    EXPECT_EQ(tree.roots().front().children[0].meta.pid, 200);
-    EXPECT_EQ(tree.roots().front().children[1].meta.pid, 201);
+    EXPECT_EQ(tree.roots().front().children[0].meta.pid, k_child1_pid);
+    EXPECT_EQ(tree.roots().front().children[1].meta.pid, k_child2_pid);
 }
 
 TEST(process_tree, orphan_with_missing_ppid_attaches_at_root)
 {
-    std::vector<artifact>         rows{ make_row("p", 100), make_row("orphan", 999) };
-    std::vector<process_metadata> processes{ make_meta(100, -1),
-                                             make_meta(999, 12345 /* unknown ppid */) };
+    constexpr pid_t k_root_pid     = 100;
+    constexpr pid_t k_orphan_pid   = 999;
+    constexpr pid_t k_unknown_ppid = 12345;
+
+    std::vector<artifact>         rows{ make_row("p", k_root_pid),
+                                make_row("orphan", k_orphan_pid) };
+    std::vector<process_metadata> processes{ make_meta(k_root_pid, -1),
+                                             make_meta(k_orphan_pid, k_unknown_ppid) };
     process_tree                  tree{ rows, processes };
     ASSERT_EQ(tree.roots().size(), 2u);
-    EXPECT_EQ(tree.roots()[0].meta.pid, 100);
-    EXPECT_EQ(tree.roots()[1].meta.pid, 999);
+    EXPECT_EQ(tree.roots()[0].meta.pid, k_root_pid);
+    EXPECT_EQ(tree.roots()[1].meta.pid, k_orphan_pid);
 }
 
 TEST(process_tree, missing_metadata_pid_is_diagnosed)
 {
-    std::vector<artifact>         rows{ make_row("p", 100), make_row("ghost", 555) };
-    std::vector<process_metadata> processes{ make_meta(100, -1) };
+    constexpr pid_t k_known_pid = 100;
+    constexpr pid_t k_ghost_pid = 555;
+
+    std::vector<artifact>         rows{ make_row("p", k_known_pid),
+                                make_row("ghost", k_ghost_pid) };
+    std::vector<process_metadata> processes{ make_meta(k_known_pid, -1) };
     process_tree                  tree{ rows, processes };
-    EXPECT_EQ(tree.diagnostics().missing_metadata_pids, (std::vector<pid_t>{ 555 }));
+    EXPECT_EQ(tree.diagnostics().missing_metadata_pids,
+              (std::vector<pid_t>{ k_ghost_pid }));
     ASSERT_EQ(tree.roots().size(), 2u);
 }
 
 TEST(process_tree, ppid_cycle_excludes_members_and_is_diagnosed)
 {
-    std::vector<artifact>         rows{ make_row("a", 300), make_row("b", 400) };
-    std::vector<process_metadata> processes{ make_meta(300, 400), make_meta(400, 300) };
+    constexpr pid_t k_pid_a = 300;
+    constexpr pid_t k_pid_b = 400;
+
+    std::vector<artifact>         rows{ make_row("a", k_pid_a), make_row("b", k_pid_b) };
+    std::vector<process_metadata> processes{ make_meta(k_pid_a, k_pid_b),
+                                             make_meta(k_pid_b, k_pid_a) };
     process_tree                  tree{ rows, processes };
     EXPECT_TRUE(tree.roots().empty());
-    EXPECT_EQ(tree.diagnostics().cyclic_ppid_pids, (std::vector<pid_t>{ 300, 400 }));
+    EXPECT_EQ(tree.diagnostics().cyclic_ppid_pids,
+              (std::vector<pid_t>{ k_pid_a, k_pid_b }));
 }
 
 TEST(process_tree, deep_parent_chain_does_not_overflow_stack)
 {
-    constexpr int                 CHAIN_DEPTH = 1000;
+    constexpr int                 k_chain_depth = 1000;
     std::vector<process_metadata> processes;
-    processes.reserve(CHAIN_DEPTH);
-    for(pid_t pid = 1; pid <= CHAIN_DEPTH; ++pid)
+    processes.reserve(k_chain_depth);
+    for(pid_t pid = 1; pid <= k_chain_depth; ++pid)
+    {
         processes.push_back(make_meta(pid, pid == 1 ? -1 : pid - 1));
+    }
 
     std::vector<artifact> rows;
-    rows.reserve(CHAIN_DEPTH);
-    for(pid_t pid = 1; pid <= CHAIN_DEPTH; ++pid)
+    rows.reserve(k_chain_depth);
+    for(pid_t pid = 1; pid <= k_chain_depth; ++pid)
+    {
         rows.push_back(make_row(std::to_string(pid), pid));
+    }
 
     process_tree tree{ rows, processes };
     ASSERT_EQ(tree.roots().size(), 1u);
@@ -122,15 +154,20 @@ TEST(process_tree, deep_parent_chain_does_not_overflow_stack)
         cur = &cur->children.front();
         ++depth;
     }
-    EXPECT_EQ(depth, CHAIN_DEPTH);
+    EXPECT_EQ(depth, k_chain_depth);
 }
 
 TEST(process_tree, rows_sorted_descending_by_size)
 {
-    std::vector<artifact>         rows{ make_row("small", 100, 1024),
-                                make_row("large", 100, 1024ULL * 1024),
-                                make_row("medium", 100, 4096) };
-    std::vector<process_metadata> processes{ make_meta(100, -1) };
+    constexpr pid_t         k_pid         = 100;
+    constexpr std::uint64_t k_small_size  = 1024;
+    constexpr std::uint64_t k_large_size  = 1024ULL * 1024;
+    constexpr std::uint64_t k_medium_size = 4096;
+
+    std::vector<artifact>         rows{ make_row("small", k_pid, k_small_size),
+                                make_row("large", k_pid, k_large_size),
+                                make_row("medium", k_pid, k_medium_size) };
+    std::vector<process_metadata> processes{ make_meta(k_pid, -1) };
     process_tree                  tree{ rows, processes };
     ASSERT_EQ(tree.roots().size(), 1u);
     const auto& sorted_rows = tree.roots().front().rows;
@@ -142,25 +179,36 @@ TEST(process_tree, rows_sorted_descending_by_size)
 
 TEST(process_tree, size_rollup_computed_during_construction)
 {
-    std::vector<artifact> rows{ make_row("p", 100, 1000), make_row("c1", 200, 4096),
-                                make_row("c2", 201, 2048) };
-    std::vector<process_metadata> processes{ make_meta(100, -1), make_meta(200, 100),
-                                             make_meta(201, 100) };
+    constexpr pid_t         k_parent_pid  = 100;
+    constexpr std::uint64_t k_parent_size = 1000;
+    constexpr pid_t         k_child1_pid  = 200;
+    constexpr std::uint64_t k_child1_size = 4096;
+    constexpr pid_t         k_child2_pid  = 201;
+    constexpr std::uint64_t k_child2_size = 2048;
+
+    std::vector<artifact>         rows{ make_row("p", k_parent_pid, k_parent_size),
+                                make_row("c1", k_child1_pid, k_child1_size),
+                                make_row("c2", k_child2_pid, k_child2_size) };
+    std::vector<process_metadata> processes{ make_meta(k_parent_pid, -1),
+                                             make_meta(k_child1_pid, k_parent_pid),
+                                             make_meta(k_child2_pid, k_parent_pid) };
     process_tree                  tree{ rows, processes };
 
     ASSERT_EQ(tree.roots().size(), 1u);
     const auto& root = tree.roots().front();
-    EXPECT_EQ(root.own_size_bytes, 1000u);
-    EXPECT_EQ(root.cumulative_size_bytes, 1000u + 4096u + 2048u);
+    EXPECT_EQ(root.own_size_bytes, k_parent_size);
+    EXPECT_EQ(root.cumulative_size_bytes, k_parent_size + k_child1_size + k_child2_size);
     ASSERT_EQ(root.children.size(), 2u);
-    EXPECT_EQ(root.children[0].own_size_bytes, 4096u);
-    EXPECT_EQ(root.children[0].cumulative_size_bytes, 4096u);
+    EXPECT_EQ(root.children[0].own_size_bytes, k_child1_size);
+    EXPECT_EQ(root.children[0].cumulative_size_bytes, k_child1_size);
 }
 
 TEST(process_tree, size_rollup_treats_default_size_as_zero)
 {
-    std::vector<artifact>         rows{ make_row("p", 100) };
-    std::vector<process_metadata> processes{ make_meta(100, -1) };
+    constexpr pid_t k_pid = 100;
+
+    std::vector<artifact>         rows{ make_row("p", k_pid) };
+    std::vector<process_metadata> processes{ make_meta(k_pid, -1) };
     process_tree                  tree{ rows, processes };
     ASSERT_EQ(tree.roots().size(), 1u);
     EXPECT_EQ(tree.roots().front().own_size_bytes, 0u);

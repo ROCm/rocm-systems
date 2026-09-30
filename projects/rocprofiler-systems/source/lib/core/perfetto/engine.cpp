@@ -258,7 +258,9 @@ perfetto_sdk_backend::init_sdk(const engine_config& cfg) const
             args.log_message_callback = [](::perfetto::base::LogMessageCallbackArgs) {};
         }
         else
+        {
             log_filter::register_with_perfetto_logger();
+        }
 
         ::perfetto::Tracing::Initialize(args);
         ::perfetto::TrackEvent::Register();

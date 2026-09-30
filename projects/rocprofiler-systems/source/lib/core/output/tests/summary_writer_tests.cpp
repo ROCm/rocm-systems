@@ -8,14 +8,17 @@
 #include "core/output/process_tree.hpp"
 #include "core/output/summary_writer.hpp"
 
-#include <spdlog/fmt/fmt.h>
+#include <fmt/format.h>
 
+// Directly provides pid_t used below; clang-tidy's Include Cleaner flags this
+// header as both redundant and required (a known false-positive with glibc's
+// sys/types.h).
+// NOLINTNEXTLINE(misc-include-cleaner)
+#include <sys/types.h>
 #include <unistd.h>
 
-#include <optional>
 #include <sstream>
 #include <string>
-#include <utility>
 #include <vector>
 
 using rocprofsys::output::artifact;
@@ -78,9 +81,9 @@ namespace
 std::string
 render(const std::vector<artifact>& rows, const std::vector<process_metadata>& processes)
 {
-    process_tree                     tree{ rows, processes };
-    rocprofsys::output::run_metadata meta{};
-    std::ostringstream               oss;
+    process_tree                           tree{ rows, processes };
+    const rocprofsys::output::run_metadata meta{};
+    std::ostringstream                     oss;
     rocprofsys::output::write_summary(oss, tree, meta, rows);
     return oss.str();
 }
@@ -90,9 +93,13 @@ TEST(write_summary, empty_rows_prints_nothing) { EXPECT_TRUE(render({}, {}).empt
 
 TEST(write_summary, single_row_renders_all_header_fields)
 {
-    std::vector<artifact> rows{ artifact{ "/tmp/rocprofsys-test/perfetto-trace.proto",
-                                          getpid(), 0, output_format::perfetto } };
-    std::vector<process_metadata> processes{ process_metadata{ getpid(), -1, "self" } };
+    const std::vector<artifact>         rows{ artifact{
+                .path       = "/tmp/rocprofsys-test/perfetto-trace.proto",
+                .pid        = getpid(),
+                .size_bytes = 0,
+                .format     = output_format::perfetto } };
+    const std::vector<process_metadata> processes{ process_metadata{
+        .pid = getpid(), .ppid = -1, .command = "self" } };
 
     const std::string out = render(rows, processes);
     EXPECT_NE(out.find("Output Summary"), std::string::npos);
@@ -105,9 +112,13 @@ TEST(write_summary, single_row_renders_all_header_fields)
 
 TEST(write_summary, single_row_renders_full_absolute_path)
 {
-    std::vector<artifact> rows{ artifact{ "/tmp/rocprofsys-test/perfetto-trace.proto",
-                                          getpid(), 0, output_format::perfetto } };
-    std::vector<process_metadata> processes{ process_metadata{ getpid(), -1, "self" } };
+    const std::vector<artifact>         rows{ artifact{
+                .path       = "/tmp/rocprofsys-test/perfetto-trace.proto",
+                .pid        = getpid(),
+                .size_bytes = 0,
+                .format     = output_format::perfetto } };
+    const std::vector<process_metadata> processes{ process_metadata{
+        .pid = getpid(), .ppid = -1, .command = "self" } };
 
     const std::string out = render(rows, processes);
     EXPECT_NE(out.find("/tmp/rocprofsys-test/perfetto-trace.proto"), std::string::npos);
@@ -115,9 +126,13 @@ TEST(write_summary, single_row_renders_full_absolute_path)
 
 TEST(write_summary, single_row_renders_format_badge_name)
 {
-    std::vector<artifact> rows{ artifact{ "/tmp/rocprofsys-test/perfetto-trace.proto",
-                                          getpid(), 0, output_format::perfetto } };
-    std::vector<process_metadata> processes{ process_metadata{ getpid(), -1, "self" } };
+    const std::vector<artifact>         rows{ artifact{
+                .path       = "/tmp/rocprofsys-test/perfetto-trace.proto",
+                .pid        = getpid(),
+                .size_bytes = 0,
+                .format     = output_format::perfetto } };
+    const std::vector<process_metadata> processes{ process_metadata{
+        .pid = getpid(), .ppid = -1, .command = "self" } };
 
     const std::string out = render(rows, processes);
     EXPECT_NE(out.find("perfetto"), std::string::npos);
@@ -125,9 +140,13 @@ TEST(write_summary, single_row_renders_format_badge_name)
 
 TEST(write_summary, single_row_renders_legend_entry)
 {
-    std::vector<artifact> rows{ artifact{ "/tmp/rocprofsys-test/perfetto-trace.proto",
-                                          getpid(), 0, output_format::perfetto } };
-    std::vector<process_metadata> processes{ process_metadata{ getpid(), -1, "self" } };
+    const std::vector<artifact>         rows{ artifact{
+                .path       = "/tmp/rocprofsys-test/perfetto-trace.proto",
+                .pid        = getpid(),
+                .size_bytes = 0,
+                .format     = output_format::perfetto } };
+    const std::vector<process_metadata> processes{ process_metadata{
+        .pid = getpid(), .ppid = -1, .command = "self" } };
 
     const std::string out = render(rows, processes);
     EXPECT_NE(out.find("perfetto → https://ui.perfetto.dev"), std::string::npos);
@@ -135,11 +154,18 @@ TEST(write_summary, single_row_renders_legend_entry)
 
 TEST(write_summary, multiple_formats_render_both_file_names)
 {
-    std::vector<artifact> rows{ artifact{ "/tmp/rocprofsys-test/perfetto-trace.proto",
-                                          getpid(), 0, output_format::perfetto },
-                                artifact{ "/tmp/rocprofsys-test/wall_clock.txt", getpid(),
-                                          0, output_format::text } };
-    std::vector<process_metadata> processes{ process_metadata{ getpid(), -1, "self" } };
+    const std::vector<artifact> rows{
+        artifact{ .path       = "/tmp/rocprofsys-test/perfetto-trace.proto",
+                  .pid        = getpid(),
+                  .size_bytes = 0,
+                  .format     = output_format::perfetto },
+        artifact{ .path       = "/tmp/rocprofsys-test/wall_clock.txt",
+                  .pid        = getpid(),
+                  .size_bytes = 0,
+                  .format     = output_format::text }
+    };
+    const std::vector<process_metadata> processes{ process_metadata{
+        .pid = getpid(), .ppid = -1, .command = "self" } };
 
     const std::string out = render(rows, processes);
     EXPECT_NE(out.find("perfetto-trace.proto"), std::string::npos);
@@ -148,11 +174,18 @@ TEST(write_summary, multiple_formats_render_both_file_names)
 
 TEST(write_summary, multiple_formats_render_both_legend_entries)
 {
-    std::vector<artifact> rows{ artifact{ "/tmp/rocprofsys-test/perfetto-trace.proto",
-                                          getpid(), 0, output_format::perfetto },
-                                artifact{ "/tmp/rocprofsys-test/wall_clock.txt", getpid(),
-                                          0, output_format::text } };
-    std::vector<process_metadata> processes{ process_metadata{ getpid(), -1, "self" } };
+    const std::vector<artifact> rows{
+        artifact{ .path       = "/tmp/rocprofsys-test/perfetto-trace.proto",
+                  .pid        = getpid(),
+                  .size_bytes = 0,
+                  .format     = output_format::perfetto },
+        artifact{ .path       = "/tmp/rocprofsys-test/wall_clock.txt",
+                  .pid        = getpid(),
+                  .size_bytes = 0,
+                  .format     = output_format::text }
+    };
+    const std::vector<process_metadata> processes{ process_metadata{
+        .pid = getpid(), .ppid = -1, .command = "self" } };
 
     const std::string out = render(rows, processes);
     EXPECT_NE(out.find("perfetto → https://ui.perfetto.dev"), std::string::npos);
@@ -161,10 +194,13 @@ TEST(write_summary, multiple_formats_render_both_legend_entries)
 
 TEST(write_summary, peer_controlled_path_control_chars_are_stripped)
 {
-    std::vector<artifact>         rows{ artifact{
-        "/tmp/rocprofsys-test/\x1b[31mevil\x1b[0m.proto", getpid(), 0,
-        output_format::perfetto } };
-    std::vector<process_metadata> processes{ process_metadata{ getpid(), -1, "self" } };
+    const std::vector<artifact>         rows{ artifact{
+                .path       = "/tmp/rocprofsys-test/\x1b[31mevil\x1b[0m.proto",
+                .pid        = getpid(),
+                .size_bytes = 0,
+                .format     = output_format::perfetto } };
+    const std::vector<process_metadata> processes{ process_metadata{
+        .pid = getpid(), .ppid = -1, .command = "self" } };
 
     const std::string out = render(rows, processes);
     EXPECT_EQ(out.find('\x1b'), std::string::npos);
@@ -173,9 +209,13 @@ TEST(write_summary, peer_controlled_path_control_chars_are_stripped)
 
 TEST(write_summary, relative_path_renders_as_absolute)
 {
-    std::vector<artifact> rows{ artifact{ "relative-dir/perfetto-trace.proto", getpid(),
-                                          0, output_format::perfetto } };
-    std::vector<process_metadata> processes{ process_metadata{ getpid(), -1, "self" } };
+    const std::vector<artifact>         rows{ artifact{ .path =
+                                                    "relative-dir/perfetto-trace.proto",
+                                                        .pid        = getpid(),
+                                                        .size_bytes = 0,
+                                                        .format = output_format::perfetto } };
+    const std::vector<process_metadata> processes{ process_metadata{
+        .pid = getpid(), .ppid = -1, .command = "self" } };
 
     const std::string out = render(rows, processes);
     EXPECT_NE(out.find("/relative-dir/perfetto-trace.proto"), std::string::npos);
@@ -183,17 +223,25 @@ TEST(write_summary, relative_path_renders_as_absolute)
 
 TEST(write_summary, multi_process_tree_renders_parent_and_child)
 {
-    const pid_t           root  = getpid();
-    constexpr pid_t       child = 700;
-    std::vector<artifact> rows{
-        artifact{ "/tmp/rocprofsys-test/root.proto", root, 0, output_format::perfetto },
-        artifact{ "/tmp/rocprofsys-test/child.proto", child, 0, output_format::perfetto }
+    // NOLINTNEXTLINE(misc-include-cleaner)
+    const pid_t                 root    = getpid();
+    constexpr pid_t             k_child = 700;
+    const std::vector<artifact> rows{ artifact{ .path = "/tmp/rocprofsys-test/root.proto",
+                                                .pid  = root,
+                                                .size_bytes = 0,
+                                                .format     = output_format::perfetto },
+                                      artifact{ .path =
+                                                    "/tmp/rocprofsys-test/child.proto",
+                                                .pid        = k_child,
+                                                .size_bytes = 0,
+                                                .format     = output_format::perfetto } };
+    const std::vector<process_metadata> processes{
+        process_metadata{ .pid = root, .ppid = -1, .command = "root" },
+        process_metadata{ .pid = k_child, .ppid = root, .command = "child" }
     };
-    std::vector<process_metadata> processes{ process_metadata{ root, -1, "root" },
-                                             process_metadata{ child, root, "child" } };
 
     const std::string out = render(rows, processes);
     EXPECT_NE(out.find(fmt::format("[{}]", root)), std::string::npos);
-    EXPECT_NE(out.find(fmt::format("[{}]", child)), std::string::npos);
+    EXPECT_NE(out.find(fmt::format("[{}]", k_child)), std::string::npos);
     EXPECT_NE(out.find("main"), std::string::npos);
 }
