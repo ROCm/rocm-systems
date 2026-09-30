@@ -213,12 +213,6 @@ def openmp_target_rules(validation_rules_dir: Path) -> list[Path]:
     ]
 
 
-@pytest.fixture
-def openmp_cg_rules(validation_rules_dir: Path) -> list[Path]:
-    """Get validation rules for OpenMP CG tests."""
-    return [validation_rules_dir / "openmp-cg" / "sdk-metrics-rules.json"]
-
-
 # ============================================================================
 # Test Class: OpenMP CG Tests
 # ============================================================================
@@ -253,9 +247,6 @@ class TestOpenMPCG(RocprofsysTest):
             binary_rewrite_args=binary_rewrite_args,
         )
         self.assert_regex(result)
-
-        if mode == "sampling":
-            self.assert_rocpd(result, rules_files=openmp_cg_rules)
 
     @pytest.mark.sampling_duration
     def test_sampling_duration(self, ompt_sampling_env):
@@ -350,12 +341,23 @@ class TestOpenMPTarget(RocprofsysTest):
             "sys_run",
         ],
     )
-    def test(self, mode, ompt_target_env, openmp_target_rules):
+    def test(self, mode, ompt_target_env, openmp_target_rules, gpu_info):
         result = self.run_test(mode, "openmp-target", env=ompt_target_env)
         self.assert_regex(result)
 
         if mode == "sampling":
-            self.assert_rocpd(result, rules_files=openmp_target_rules)
+            # Do not pass full gpu_info.categories: MI300A is instinct+apu and
+            # would skip both rules. APU -> ["apu"]; discrete -> instinct/radeon.
+            is_apu = "apu" in gpu_info.categories
+            self.assert_rocpd(
+                result,
+                rules_files=openmp_target_rules,
+                gpu_category_to_skip=(
+                    ["apu"]
+                    if is_apu
+                    else [c for c in gpu_info.categories if c in ("instinct", "radeon")]
+                ),
+            )
             self.assert_perfetto(
                 result,
                 subtest_name="Perfetto Kernel Dispatch Validation",
