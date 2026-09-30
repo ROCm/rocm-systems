@@ -619,6 +619,13 @@ add_test(
 )
 
 add_test(
+    NAME test_mem_chart_common
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_mem_chart_common.xml
+        ${COV_OPTION} tests/unit/utils/test_mem_chart_common.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
     NAME test_mem_chart_gfx9
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_mem_chart_gfx9.xml
@@ -1073,6 +1080,7 @@ if(${ENABLE_COVERAGE})
         test_analysis_cli
         test_pattern_matching
         test_list_metrics_cli
+        test_mem_chart_common
         test_mem_chart_gfx9
         test_mem_chart_gfx11
         test_mem_chart_gfx1250
@@ -1098,6 +1106,7 @@ if(${ENABLE_COVERAGE})
         test_pc_sampling_analysis
         test_pc_sampling_analyze_cli
         test_pc_sampling_profile
+        test_per_kernel_isa_export
         test_metrics_common
         test_metric_validation
         test_native_tool_finder
