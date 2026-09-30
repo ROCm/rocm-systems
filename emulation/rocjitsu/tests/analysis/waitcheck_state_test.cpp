@@ -852,6 +852,17 @@ TEST(WaitcheckState, CounterOnlySmemRequiresZeroXcntEvenWithoutAnAge) {
   EXPECT_FALSE(state.pending_smem[x]);
 }
 
+TEST(WaitcheckState, DependencyRequiredCountClampsTrackedAgeToWaitEncoding) {
+  PendingState state;
+  PendingEvent event = load(0, 7);
+  event.counter = WaitCounterKind::VmVsrc;
+
+  const auto required = Ops::dependency_required_count(state, event, ROCJITSU_CODE_ARCH_CDNA5);
+
+  ASSERT_TRUE(required.succeeded());
+  EXPECT_EQ(required.value(), 6u);
+}
+
 TEST(WaitcheckState, ExplicitAndEmbeddedWaitsRetireVectorHazards) {
   PendingState state;
   const size_t vm = Ops::counter_index(WaitCounterKind::VmVsrc);

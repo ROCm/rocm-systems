@@ -66,8 +66,9 @@ namespace rocjitsu::waitcheck_detail {
 /// Lower bounds on the age of the newest possibly pending request of each kind.
 /// kNoPendingEventAge denotes absence. These summaries include counter-only
 /// requests and may overlap materialized PendingEvents; they are not token counts.
-/// Byte storage keeps the dense per-counter summaries compact. Ages saturate at
-/// the target dependency-wait limit, below the reserved absence value.
+/// Byte storage keeps the dense per-counter summaries compact. Ages stay below
+/// the reserved absence value and may exceed a dependency wait's encodable range
+/// when another counter can apply a wider implied wait.
 struct PendingEventAges {
   std::array<uint8_t, kWaitEventKindCount> values = [] {
     std::array<uint8_t, kWaitEventKindCount> result;
