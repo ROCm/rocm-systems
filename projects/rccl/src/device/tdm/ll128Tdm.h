@@ -33,10 +33,11 @@ __device__ __forceinline__ bool tdmLoadBegin(T const* src, int eltN) {
   constexpr int DataBytes = WireBytes - WireBytes / NCCL_LL128_LINEELEMS;
   static_assert(ncclShmemScratchWarpSize() >= DataBytes + TdmAlign - 1,
                 "LL128 TDM needs one aligned data slice of per-warp scratch");
+  // Drain before any return: loadRegsBegin's fallback also stages through this window.
+  asyncWait<0>();
   if (!tdmLoadAllowed) return false;
   if (reinterpret_cast<uintptr_t>(src) & (TdmAlign - 1)) return false;
 
-  asyncWait<0>();  // previous slice's store may still be reading the window
   uint8_t* shm = tdmWindow();
   size_t bytes = static_cast<size_t>(eltN) * sizeof(T);
   if (userBypass()) {
