@@ -819,10 +819,10 @@ hsa_status_t AieLoadedCodeObjectImpl::IterateLoadedSegments(
 }
 
 void AieLoadedCodeObjectImpl::Print(std::ostream& out) {
-  out << "AIE Loaded Code Object:" << std::endl;
-  out << "  ELF Size: " << elf_size << std::endl;
-  out << "  Kernels: " << descriptors.size() << std::endl;
-  out << "  Device Buffers: " << device_buffers.size() << std::endl;
+  out << "AIE Loaded Code Object:\n";
+  out << "  ELF Size: " << elf_size << "\n";
+  out << "  Kernels: " << descriptors.size() << "\n";
+  out << "  Device Buffers: " << device_buffers.size() << "\n";
 }
 
 void AieLoadedCodeObjectImpl::Destroy() {
@@ -848,7 +848,8 @@ uint64_t AieLoadedCodeObjectImpl::getElfSize() const { return elf_size; }
 uint64_t AieLoadedCodeObjectImpl::getStorageOffset() const { return 0; }
 
 // Unlike the GPU path (one contiguous load segment), an AIE object is placed as
-// N independent XDNA BOs (per-kernel insts/PDI), so there is no single load
+// independent XDNA BOs per kernel -- insts and PDI for a PdiInsts kernel, only the
+// PDI extracted from the nested ELF for a FullElf one -- so there is no single load
 // base/size/delta to report. Keep these 0; per-kernel device addresses live in
 // each AieKernelDescriptor if a consumer ever needs them.
 uint64_t AieLoadedCodeObjectImpl::getLoadBase() const { return 0; }
