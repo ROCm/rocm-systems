@@ -176,7 +176,7 @@ int timesync_client_translate(uint32_t agent_kfd_gpu_id, uint64_t agent_timestam
 - `timesync_client_init()` initializes the library for use in the running ROCR instance. ROCR can specify whether it
   wants "HIGH" precision or can tolerate "LOW" precision in its time translations. "HIGH" is understood as meeting the
   cluster's PTP standard, if PTP hardware is present, while "LOW" is a low overhead implementation for workloads that do
-  not require tight alignment.
+  not require precise translation.
 - `timesync_client_deinit()` tears down the library when the runtime is finished.
 - `timesync_client_translate()` takes the provided agent ID and agent timestamp, and translates them to the
   corresponding time on the system time domain.
