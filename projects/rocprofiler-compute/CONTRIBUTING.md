@@ -164,7 +164,7 @@ ROCm Compute Profiler uses [Ruff](https://docs.astral.sh/ruff/) for linting and 
 |-------|-----------------|
 | Function design, naming, code organization | [Python Coding Style Guidelines](PYTHON_CODING_STYLE.md) |
 | Ruff configuration (enforced rules, ignores, formatting) | [`pyproject.toml`](pyproject.toml) |
-| YAML metric equation formatting | [YAML Metric Equation Formatting](#yaml-metric-equation-formatting) |
+| Analysis config YAML linting | [Analysis Config YAML Linting](#analysis-config-yaml-linting) |
 
 ### Running Ruff Manually
 
@@ -178,19 +178,21 @@ ruff check --fix .
 ruff format .
 ```
 
-### YAML Metric Equation Formatting
+### Analysis Config YAML Linting
 
-Metric equations in YAML config files follow a canonical format. The canonical
-implementation is [`tools/format_yaml.py`](tools/format_yaml.py).
+Analysis config YAML files are linted by
+[`tools/lint_analysis_config.py`](tools/lint_analysis_config.py): metric
+equations must follow a canonical format, and metric table keys must match
+their header.
 
-**Scope.** Equation formatting applies to YAML files under:
+**Scope.** Linting applies to YAML files under:
 
 - `src/rocprof_compute_soc/analysis_configs/gfx*/*.yaml`
 
 Template files (`*_template.yaml`) and build artifacts are excluded. Only values
 under these keys are treated as equations: `value`, `avg`, `min`, `max`, `peak`.
 
-**Rules.**
+**Equation rules.**
 
 - **Operator spacing** — all binary operators (`+`, `-`, `*`, `/`) have exactly
   one space on each side: `SUM(x) / SUM(y)`.
@@ -209,16 +211,24 @@ under these keys are treated as equations: `value`, `avg`, `min`, `max`, `peak`.
 Equations with unsupported syntax (unknown characters, unmatched parentheses) are
 left unchanged; the formatter never corrupts an equation it cannot fully parse.
 
-**Enforcement.** The `yaml-format-fix` pre-commit hook runs
-`tools/format_yaml.py --fix` on staged config files and auto-corrects equations
-in place. Re-stage the modified files and commit again.
+**Header/metric key consistency.** Each metric entry in a `metric_table` must
+have exactly the keys declared in that table's `header` (other than `metric`).
+A missing key crashes `analyze`; an extra key (for example `units` instead of
+`unit`) is silently dropped. Exempt keys: `coll_level` and `alias`, `expr` in
+`cli_style: simple_box` tables, and `unit` in memory chart (panel 3xx) tables.
+These mismatches are not auto-fixed.
+
+**Enforcement.** The `analysis-config-lint` pre-commit hook runs
+`tools/lint_analysis_config.py --fix` on staged config files. It auto-corrects
+equations in place (re-stage the modified files and commit again) and fails on
+any header/metric key mismatch.
 
 ```bash
 # Show proposed changes
-python tools/format_yaml.py --diff src/rocprof_compute_soc/analysis_configs/gfx950/*.yaml
+python tools/lint_analysis_config.py --diff src/rocprof_compute_soc/analysis_configs/gfx950/*.yaml
 
 # Auto-fix in place
-python tools/format_yaml.py --fix src/rocprof_compute_soc/analysis_configs/gfx950/*.yaml
+python tools/lint_analysis_config.py --fix src/rocprof_compute_soc/analysis_configs/gfx950/*.yaml
 ```
 
 ## Documentation Changes
