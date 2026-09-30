@@ -1825,30 +1825,36 @@ void relay_flat_pointer_provenance_across_calls(
 
   const std::vector<ProgramContainer> original_functions(functions.begin(), functions.end());
   const ProgramSiteArena original_sites = sites;
+  // Kernel entry provenance is independent of the helper fixed point: each
+  // kernel decode starts with the same empty tracker on every pass. Compute
+  // its call-site facts once, then seed each pass with a fresh copy so helper
+  // updates cannot leak back into these immutable roots.
+  std::unordered_map<uint64_t, FlatPointerTracker> kernel_call_states;
+  std::vector<std::string> kernel_warnings;
+  for (const ProgramContainer &kernel : kernels) {
+    ProgramContainer decoded;
+    decoded.kind = ProgramContainerKind::Kernel;
+    ProgramSiteArena ignored_sites;
+    decoded.name = kernel.name;
+    decoded.entry_text_offset = kernel.entry_text_offset;
+    decoded.text_file_offset = kernel.text_file_offset;
+    decoded.code_size = kernel.code_size;
+    decoded.has_text_range = kernel.has_text_range;
+    try {
+      decode_container_stats(code_object_bytes, *relay_decoder, arch, decoded, ignored_sites,
+                             kernel_warnings, nullptr, &call_targets, &kernel_call_states);
+    } catch (...) {
+      std::ranges::copy(original_functions, functions.begin());
+      sites = original_sites;
+      return;
+    }
+  }
   std::unordered_map<uint64_t, FlatPointerTracker> entry_trackers;
   constexpr uint32_t kMaxRelayPasses = 6u;
   for (uint32_t pass = 0; pass < kMaxRelayPasses; ++pass) {
-    std::unordered_map<uint64_t, FlatPointerTracker> call_states;
-    std::vector<std::string> pass_warnings;
+    auto call_states = kernel_call_states;
+    auto pass_warnings = kernel_warnings;
     ProgramSiteArena pass_sites;
-    for (const ProgramContainer &kernel : kernels) {
-      ProgramContainer decoded;
-      decoded.kind = ProgramContainerKind::Kernel;
-      ProgramSiteArena ignored_sites;
-      decoded.name = kernel.name;
-      decoded.entry_text_offset = kernel.entry_text_offset;
-      decoded.text_file_offset = kernel.text_file_offset;
-      decoded.code_size = kernel.code_size;
-      decoded.has_text_range = kernel.has_text_range;
-      try {
-        decode_container_stats(code_object_bytes, *relay_decoder, arch, decoded, ignored_sites,
-                               pass_warnings, nullptr, &call_targets, &call_states);
-      } catch (...) {
-        std::ranges::copy(original_functions, functions.begin());
-        sites = original_sites;
-        return;
-      }
-    }
     for (ProgramContainer &function : functions) {
       ProgramContainer decoded;
       decoded.id = function.id;

@@ -1885,6 +1885,41 @@ TEST(ConSan, PropagatesCdna4AccVgprPointerAcrossHelperCall) {
   EXPECT_EQ(result.program_inventory.functions().front().stats.flat_unknown_hint_count, 0u);
 }
 
+TEST(ConSan, PointerRelayKeepsDistinctKernelCallSiteInputsAcrossPasses) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA4;
+  for (const bool conflicting : {false, true}) {
+    SCOPED_TRACE(conflicting);
+    // Two calls to one helper. The second call either agrees with the first
+    // shared pointer or supplies a private pointer. Reusing root facts must
+    // preserve both call sites and their conservative merge on every pass.
+    const std::array<uint32_t, 9> kernel_words = {
+        0xbe8001ebu, // s_mov_b64 s[0:1], src_shared_base
+        build_v_mov_b32_e32(0, 0, arch),
+        build_v_mov_b32_e32(1, 1, arch),
+        build_s_call_b64(30, 5, arch), // word 3 -> helper at word 9
+        conflicting ? 0xbe8001edu : 0xbe8001ebu,
+        build_v_mov_b32_e32(0, 0, arch),
+        build_v_mov_b32_e32(1, 1, arch),
+        build_s_call_b64(30, 1, arch), // word 7 -> same helper
+        build_s_endpgm(arch),
+    };
+    const std::array<uint32_t, 3> function_words = {
+        0xdc500000u,
+        0x04000000u, // flat_load_dword v4, v[0:1]
+        build_s_setpc_b64(30, arch),
+    };
+    TestOptions options;
+    options.mode = Mode::SuperCollider;
+    const auto result = test_semantic_inventory(
+        make_cdna4_code_object_with_local_function(kernel_words, function_words), options);
+    ASSERT_TRUE(result.errors.empty());
+    ASSERT_EQ(result.program_inventory.functions().size(), 1u);
+    ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
+    EXPECT_EQ(result.program_inventory.access_sites().front().flat_address_space_hint,
+              conflicting ? FlatAddressSpaceHint::Unknown : FlatAddressSpaceHint::MaybeGroup);
+  }
+}
+
 TEST(ConSan, RelaysCdna4SharedPointerThroughPrivateHelperFrame) {
   constexpr uint32_t kFunctionDelta = 20u;
   const std::array<uint32_t, 21> kernel_words = {
