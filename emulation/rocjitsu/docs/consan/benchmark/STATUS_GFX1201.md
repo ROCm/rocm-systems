@@ -23,9 +23,10 @@ Times are milliseconds. Startup is instrumentation plus the first run; Run is th
 
 September 30 follow-up: [startup profiling and successive fixes](STARTUP_GFX1201_20260930.md)
 reproduces the default-preset overhead on current code and reduces dense-prefill /
-synthetic-decode startup from 85.0 / 97.7 s to 13.79–14.04 / 15.19–15.25 s in
+synthetic-decode startup from 85.0 / 97.7 s to 13.50–13.57 / 14.81–14.87 s in
 repeated endpoint runs. The fixes remove redundant no-op preparation, repeated
 kernel-scope scans and pointer-relay decoding, duplicate CFG construction,
-per-instruction register-bound scans, and repeated content hashing.
+per-instruction register-bound scans, repeated content hashing, and uniform-address
+tracking beyond its block-local consumers.
 Selected-site coverage and numerical checks remain unchanged. This focused result
 does not replace the historical full-matrix table above.
