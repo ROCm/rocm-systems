@@ -547,6 +547,7 @@ smi_nic_status_t smi_get_nic_port_statistics_count(smi_nic_ctx_t ctx, uint64_t d
   }
 
   const auto& port = ports[port_index];
+  port.collect_standard_statistics();
   const auto& stats_map = port.get_standard_stats_map();
   *count = static_cast<uint32_t>(stats_map.size());
 
@@ -584,6 +585,7 @@ smi_nic_status_t smi_get_nic_port_statistics_list(smi_nic_ctx_t ctx, uint64_t de
   }
 
   const auto& port = ports[port_index];
+  port.collect_standard_statistics();
   const auto& stats_map = port.get_standard_stats_map();
 
   if (stats_map.empty()) {
@@ -606,7 +608,8 @@ smi_nic_status_t smi_get_nic_port_statistics_list(smi_nic_ctx_t ctx, uint64_t de
 }
 
 smi_nic_status_t smi_get_nic_vendor_statistics_count(smi_nic_ctx_t ctx, uint64_t device,
-                                                     uint32_t port_index, uint32_t* count) {
+                                                     uint32_t port_index,
+                                                     smi_nic_stat_scope_t scope, uint32_t* count) {
   if (!ctx || !count) {
     return SMI_NIC_STATUS_WRONG_PARAM;
   }
@@ -636,14 +639,16 @@ smi_nic_status_t smi_get_nic_vendor_statistics_count(smi_nic_ctx_t ctx, uint64_t
   }
 
   const auto& port = ports[port_index];
-  const auto& stats_map = port.get_vendor_stats_map();
-  *count = static_cast<uint32_t>(stats_map.size());
+  port.collect_vendor_statistics();
+  const auto tier =
+      (scope == SMI_NIC_STAT_SCOPE_EXTENDED) ? StatTier_t::Extended : StatTier_t::Default;
+  *count = static_cast<uint32_t>(port.get_vendor_stats_map(tier).size());
 
   return SMI_NIC_STATUS_SUCCESS;
 }
 
 smi_nic_status_t smi_get_nic_vendor_statistics_list(smi_nic_ctx_t ctx, uint64_t device,
-                                                    uint32_t port_index,
+                                                    uint32_t port_index, smi_nic_stat_scope_t scope,
                                                     smi_nic_stat_info_t* stats) {
   if (!ctx || !stats) {
     return SMI_NIC_STATUS_WRONG_PARAM;
@@ -674,7 +679,10 @@ smi_nic_status_t smi_get_nic_vendor_statistics_list(smi_nic_ctx_t ctx, uint64_t 
   }
 
   const auto& port = ports[port_index];
-  const auto& stats_map = port.get_vendor_stats_map();
+  port.collect_vendor_statistics();
+  const auto tier =
+      (scope == SMI_NIC_STAT_SCOPE_EXTENDED) ? StatTier_t::Extended : StatTier_t::Default;
+  const auto stats_map = port.get_vendor_stats_map(tier);
 
   if (stats_map.empty()) {
     return SMI_NIC_STATUS_NO_DATA;
@@ -844,14 +852,22 @@ smi_nic_status_t smi_get_nic_fw_info(smi_nic_ctx_t ctx, uint64_t device,
     return SMI_NIC_STATUS_NOT_INIT;
   }
 
-  std::lock_guard<std::mutex> lock(ctx->ctx_mutex);
-  const SmiNic* nic = nic_system->get_nic_by_bdf(device);
-  if (!nic) {
-    return SMI_NIC_STATUS_NOT_FOUND;
+  // DEVLINK_CMD_INFO_GET is a live FW/NVM mailbox round trip (~1s); the lock is
+  // released before it runs so concurrent per-NIC callers overlap that wait
+  // instead of serializing on it. create_devlink_client() below is a fresh,
+  // unshared socket per call, so nothing here needs ctx_mutex's protection.
+  std::string telemetry_bdf;
+  {
+    std::lock_guard<std::mutex> lock(ctx->ctx_mutex);
+    const SmiNic* nic = nic_system->get_nic_by_bdf(device);
+    if (!nic) {
+      return SMI_NIC_STATUS_NOT_FOUND;
+    }
+    telemetry_bdf = nic->telemetry_bdf();
   }
 
-  amd::smi::nic::telemetry::NicTelemetry telemetry(amd::nic::netlink::create_devlink_client());
-  auto dev = telemetry.get_device_info(*nic);
+  auto devlink = amd::nic::netlink::create_devlink_client();
+  auto dev = devlink->get_device_info(telemetry_bdf);
   if (!dev.success) {
     return SMI_NIC_STATUS_NOT_SUPPORTED;
   }

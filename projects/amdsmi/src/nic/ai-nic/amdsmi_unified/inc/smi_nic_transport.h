@@ -74,6 +74,14 @@ struct VendorStatistics {
   std::vector<uint64_t> values;    // parallel to names
 };
 
+// FEC (forward error correction) statistics. Netlink-only
+// (ETHTOOL_MSG_FEC_GET with ETHTOOL_FLAG_STATS); the ioctl backend and
+// no-libnl builds report unsupported.
+struct FecStatistics_t {
+  std::vector<std::string> names;  // parallel to values
+  std::vector<uint64_t> values;    // parallel to names
+};
+
 // Factory-programmed MAC address. ethtool -P
 struct PermanentAddress {
   std::array<uint8_t, 6> mac;
@@ -109,6 +117,12 @@ class NicTransport {
 
   // ethtool -S; internally queries driver info, stat names, and stat values.
   virtual Result<VendorStatistics> get_statistics(const std::string& iface) = 0;
+
+  // ethtool -I --show-fec (netlink FEC stats); ENOTSUP on backends that do
+  // not support it. Failure here is not an error for the caller — it means
+  // this port's FEC counters stay absent, same as any table entry the driver
+  // does not expose.
+  virtual Result<FecStatistics_t> get_fec_statistics(const std::string& iface) = 0;
 
   // ethtool -P
   virtual Result<PermanentAddress> get_permanent_address(const std::string& iface) = 0;

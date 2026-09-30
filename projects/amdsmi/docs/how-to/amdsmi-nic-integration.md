@@ -665,15 +665,9 @@ amdsmi_status_t amdsmi_get_nic_rdma_port_statistics(
 
 ### NIC port statistics and vendor statistics
 
-> **Not yet implemented.** `amdsmi_get_nic_port_statistics` and
-> `amdsmi_get_nic_vendor_statistics` currently return
-> `AMDSMI_STATUS_NOT_YET_IMPLEMENTED`. The counters exist in the NIC library's
-> transport layer but aren't bridged to the public API yet; the two-call
-> contract below describes the intended shape once that bridge lands.
-
 Both APIs use a **two-call pattern** and return per-port counters. Port
 statistics are the standard driver counters for a NIC port; vendor statistics
-are the driver-defined counters exposed via `ethtool -S`.
+are the driver-defined counters exposed via `ethtool -S`, tiered by `scope`.
 
 ```c
 amdsmi_status_t amdsmi_get_nic_port_statistics(
@@ -685,6 +679,7 @@ amdsmi_status_t amdsmi_get_nic_port_statistics(
 amdsmi_status_t amdsmi_get_nic_vendor_statistics(
     amdsmi_processor_handle processor_handle,
     uint32_t port_index,
+    amdsmi_nic_stat_scope_t scope,
     uint32_t *num_stats,
     amdsmi_nic_stat_t *stats);
 ```
@@ -774,6 +769,60 @@ when a NIC is selected with `-N/--nic`. `amd-smi metric --nic` reports NIC
 telemetry (temperature, health, port-split) and `amd-smi firmware --nic` reports
 NIC firmware versions. The selector works only when you initialize NIC discovery
 (see [Initialization flags](#initialization-flags)).
+
+### Per-port NIC statistics with `metric --nic --port`
+
+The `metric --nic` command supports per-port statistics collection via the
+`--port` flag:
+
+```
+amd-smi metric --nic <ID | BDF | UUID> --port [PORT_NUM] [--extended] [--json]
+```
+
+**Flags:**
+
+- `--port` (bare, no argument): Report statistics for all ports on the NIC.
+- `--port PORT_NUM`: Report statistics for a single port (by numeric index).
+- `--extended`: Include extended (vendor-specific) counters. Requires `--port` to be specified. Text output only; JSON output always includes extended counters.
+- `--json`: Output as JSON. When combined with `--port --extended`, the output still contains the full extended set.
+
+**Scopes:**
+
+- `DEFAULT`: The vendor-tier subset of `VENDOR_STATISTICS` (e.g. `frames_rx_ok` for ionic, `rx_pfc_frames` for bnxt).
+- `EXTENDED`: The full vendor-specific counter set from the driver (via `ethtool -S` plus, for ionic, netlink FEC stats). A superset of `DEFAULT`. Text output requires `--extended` to display the extra counters; JSON always returns the full set.
+
+`STATISTICS` (the standard driver counters, e.g. `RX_PACKETS`, `TX_PACKETS`,
+`RX_BYTES`) is a separate, untiered block; it isn't affected by scope.
+
+**Output structure:**
+
+```
+PORTS:
+  PORT_<N>:
+    NETDEV: <interface name>
+    VENDOR_STATISTICS:
+      <COUNTER_NAME>: <value>  # DEFAULT scope, or EXTENDED with --extended
+      ...
+    STATISTICS:
+      <COUNTER_NAME>: <value>
+      ...
+```
+
+`VENDOR_STATISTICS` is always present; only its scope (`DEFAULT` or
+`EXTENDED`) varies with `--extended`.
+
+**Examples:**
+
+```bash
+# All ports on NIC 0, DEFAULT scope
+sudo amd-smi metric --nic 0 --port
+
+# Port 0 on NIC 0, EXTENDED scope (text)
+sudo amd-smi metric --nic 0 --port 0 --extended
+
+# All ports on NIC 0, EXTENDED scope (JSON)
+sudo amd-smi metric --nic 0 --port --json
+```
 
 ---
 
