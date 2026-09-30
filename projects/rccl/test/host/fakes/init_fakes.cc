@@ -81,6 +81,9 @@ void ResetInitFakes() {
   ResetRcclWrapFakes();
   ResetRecorderFakes();
   ResetRocmWrapFakes();
+#ifdef ENABLE_ROCSHMEM
+  ResetRocshmemFakes();
+#endif
   ResetStrongStreamStubs();
   ResetTopoStubs();
   ResetTransportStubs();

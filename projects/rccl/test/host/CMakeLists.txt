@@ -720,6 +720,10 @@ endif()
 # Shared micro-test binary definitions (identical for BOTH build paths).
 # =====================================================================
 rccl_define_micro_source_lists()
+# rocshmem.hpp is only on the include path under ENABLE_ROCSHMEM.
+if(ENABLE_ROCSHMEM)
+  list(APPEND TEST_MICRO_INIT_SOURCE_FILES fakes/rocshmem_fakes.cc)
+endif()
 
 # Mark every hipified misc/ oracle TU any target below compiles as GENERATED.
 # The property is directory-scoped and idempotent, so one call up front covers

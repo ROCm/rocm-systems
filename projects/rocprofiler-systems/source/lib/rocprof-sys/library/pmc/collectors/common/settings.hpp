@@ -246,7 +246,7 @@ struct settings_policy
                     try
                     {
                         result.explicit_counters.push_back(
-                            { name, std::stoull(device_str) });
+                            { .name = name, .device_index = std::stoull(device_str) });
                     } catch(const std::exception&)
                     {
                         LOG_ERROR("Invalid :device= value in "

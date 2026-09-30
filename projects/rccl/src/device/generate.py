@@ -293,7 +293,7 @@ def calc_unroll_and_pipeline_for_local_arch():
       return (["1", "2"], ["0"])  # Disable pipelining for gfx950
     elif "gfx908" == gfx_name or ("gfx942" == gfx_name and cu_count > 80):
       return (["2"], all_pipelines)
-    elif "gfx1250" == gfx_name:
+    elif gfx_name.startswith("gfx1250"):
       # gfx1250 (MI450/MI455) runs unroll 32. Unroll 8 was once noted as required for the FP8
       # launch; nothing in src/ depends on it now. Use --all_unrolls to build 8 and 16.
       return (unrolls_requiring_arch("gfx1250"), all_pipelines)
@@ -450,17 +450,18 @@ def get_arch_guard(fn):
       # LL128 SendRecv kernel. gfx942/gfx950 activate it via ALLOC_P2P_NET_LL_BUFFERS;
       # gfx1250 activates it via NCCL_P2P_LL128_ENABLE. Built for all three so the
       # unroll-32 slot is not a nullptr in the table gfx1250 indexes.
-      cond = "(defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)) && defined(ENABLE_LL128)"
+      cond = "(defined(__gfx942__) || defined(__gfx950__) || (defined(__gfx1250__) || defined(__gfx1250_strict__))) && defined(ENABLE_LL128)"
   elif fn.unroll in unroll_arch_requirement:
-      cond = "defined(__%s__)" % unroll_arch_requirement[fn.unroll]
+      arch = unroll_arch_requirement[fn.unroll]
+      cond = "(defined(__%s__) || defined(__%s_strict__))" % (arch, arch)
       if fn.proto == "LL128":
         cond += " && defined(ENABLE_LL128)"
   elif fn.proto == "LL128" and fn.acc == "1":
-      cond = "(defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)) && defined(ENABLE_LL128)"
+      cond = "(defined(__gfx942__) || defined(__gfx950__) || (defined(__gfx1250__) || defined(__gfx1250_strict__))) && defined(ENABLE_LL128)"
   elif fn.proto == "LL128":
-      cond = "(defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)) && defined(ENABLE_LL128)"
+      cond = "(defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__) || (defined(__gfx1250__) || defined(__gfx1250_strict__))) && defined(ENABLE_LL128)"
   elif fn.acc == "1":
-      cond = "defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)"
+      cond = "defined(__gfx942__) || defined(__gfx950__) || (defined(__gfx1250__) || defined(__gfx1250_strict__))"
   return cond
 
 # Build the mangled function symbol suffix. The user-buffer registration mode is
