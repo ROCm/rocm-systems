@@ -305,30 +305,91 @@ Do not mix it with `/opt/rocm` compilers or libraries.
 
 ## External-workload runner
 
-Set a workspace containing RocJITsu and whichever external projects the chosen
-manifest rows require:
+Set the workspace to the parent directory containing RocJITsu and whichever
+external projects the chosen manifest rows require:
 
 ```sh
 export CONSAN_VALIDATION_WORKSPACE_DIR=/path/to/workspace
-export CONSAN_VALIDATION_TARGET=gfx1201
+# Replace gfxNNNN with the architecture named by the target ledger.
+export CONSAN_VALIDATION_TARGET=gfxNNNN
 ```
 
 The runner recognizes `rocm-systems/` and `TheRock/rocm-systems/` source
-layouts. Its common workspace names are:
+layouts. Do not assume that every repository below is required for every
+target: run `manifest` first, then use `doctor` to check the selected rows.
+
+### External source checkouts
+
+The validation manifests draw workloads and tools from the following public
+repositories. Clone only the repositories required by the selected manifest
+rows:
+
+| Workspace path | Repository | Purpose |
+| --- | --- | --- |
+| `hip-moi/` | [`bjacob/hip-moi`](https://github.com/bjacob/hip-moi) | Source for the hip-moi validation executables. |
+| `iree-test-suites/` | [`iree-org/iree-test-suites`](https://github.com/iree-org/iree-test-suites) | Qwen inputs and the Sharktank TP1, TP2, and CLIP sources, parameters, and reference data. This repository uses Git LFS. |
+| `iree/` | [`iree-org/iree`](https://github.com/iree-org/iree) | Optional source checkout for building matching IREE compiler, runtime, command-line tools, or Python packages. The runner does not read this checkout directly. |
+| `rocjitsu-test-corpus/` | [`ROCm/rocjitsu-test-corpus`](https://github.com/ROCm/rocjitsu-test-corpus) | Native kernel, llama.cpp, and Tensile validation inputs selected by some manifests. |
+| `TheRock/` | [`ROCm/TheRock`](https://github.com/ROCm/TheRock) | Optional combined source and toolchain layout. Tensile defaults to its `rocm-libraries/projects/hipblaslt/tensilelite` submodule and `build/dist/rocm`. |
+| `upstream-rocm-libraries/` | [`ROCm/rocm-libraries`](https://github.com/ROCm/rocm-libraries) | Alternative standalone source for `projects/hipblaslt/tensilelite` when the workspace does not use TheRock. |
+| `pytorch/` | [`pytorch/pytorch`](https://github.com/pytorch/pytorch) | Optional source-provenance checkout for PyTorch rows. Execution uses the selected installed PyTorch/Triton Python environment. |
+
+Run the applicable clone commands from the parent workspace so the destination
+names match the paths above:
+
+```sh
+git clone https://github.com/bjacob/hip-moi.git hip-moi
+git clone https://github.com/iree-org/iree-test-suites.git iree-test-suites
+git -C iree-test-suites lfs pull
+git clone --recurse-submodules https://github.com/iree-org/iree.git iree
+git clone https://github.com/ROCm/rocjitsu-test-corpus.git \
+  rocjitsu-test-corpus
+git clone https://github.com/ROCm/rocm-libraries.git \
+  upstream-rocm-libraries
+```
+
+Record the exact commit of each checkout with the campaign artifacts. A moving
+branch name is not a reproducible source identity.
+
+The IREE source checkout is optional. Whether IREE comes from that source tree
+or from installed packages, put
+`iree-compile`, `iree-run-module`, and `iree-benchmark-module` on `PATH`. The
+Python selected for Sharktank must import `iree.compiler`, `iree.runtime`,
+`numpy`, and `pytest`. Merely cloning `iree/` does not satisfy those runtime
+requirements.
+
+### Tensile source and toolchain paths
+
+Tensile rows require both TensileLite source and a coherent ROCm installation.
+The default combined layout uses
+`TheRock/rocm-libraries/projects/hipblaslt/tensilelite` and
+`TheRock/build/dist/rocm`. A standalone `upstream-rocm-libraries/` checkout is
+also recognized for TensileLite. Set `CONSAN_VALIDATION_TENSILELITE_ROOT` and
+`CONSAN_VALIDATION_ROCM_ROOT` when those inputs live elsewhere.
+
+Source checkouts and generated or build directories are different. A complete
+workspace can contain:
 
 ```text
+rocm-systems/                         # source checkout
 iree-test-suites/
-iree-test-suites-build/
 hip-moi/
+iree/                                # optional IREE source checkout
 rocjitsu-test-corpus/
+TheRock/
+upstream-rocm-libraries/             # alternative TensileLite source
+
+iree-test-suites-build/              # generated Qwen VMFB and manifest
+hip-moi-build*/                      # target-specific hip-moi build trees
 rocjitsu-test-corpus-build/
-rocjitsu-build/
+rocjitsu-build/                       # RocJITsu build and ConSan hook
 ```
 
 Set `CONSAN_VALIDATION_HOOK=/absolute/path/to/librocjitsu_dbi_hooks.so` to
 select a freshly built hook outside the default `rocjitsu-build` directory.
 
-Additional paths are workload-dependent and are reported by `doctor`. IREE
+The exact build and artifact paths are workload-dependent and are reported by
+`doctor`; do not create empty directories merely to satisfy their names. IREE
 command-line tools and `rocminfo` are resolved from `PATH`. Workload-specific
 Python interpreters may be selected with:
 
