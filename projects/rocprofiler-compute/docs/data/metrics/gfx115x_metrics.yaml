@@ -56,7 +56,7 @@ System Speed-of-Light:
   Instruction Cache BW:
     rst: Bandwidth of instruction cache requests to the GL1 cache. High values may indicate instruction cache pressure from large kernels or frequent instruction cache misses.
     unit: Bytes/s
-Memory chart - Instruction Cache:
+Memory chart - Workgroup Processors (WGPs):
   Wavefront Occupancy:
     rst: Wavefronts per active WGP.
   VGPR:
@@ -69,6 +69,7 @@ Memory chart - Instruction Cache:
     rst: The number of bytes of scratch memory requested per work-item for this kernel.
   Workgroups:
     rst: The total number of workgroups forming this kernel launch.
+Memory chart - Instruction Cache:
   ICache Hit Rate:
     rst: Percentage of instruction cache accesses that are serviced from cache without fetching from the GL1 cache. High hit rates indicate good instruction locality. Low hit rates may indicate large kernels exceeding instruction cache capacity or divergent branches.
     unit: Percent

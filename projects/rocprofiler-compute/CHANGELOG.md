@@ -11,7 +11,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added the `VL1 Coalesce` metric to the VL1D panel of the CDNA (gfx9) Memory Chart.
 
-* Added the xGMI block to the gfx90a and gfx940–gfx942 Memory Charts, which previously showed it only on gfx950. The block is drawn without bandwidth counters on these architectures.
+* Added the xGMI block to the gfx908, gfx90a, and gfx940–gfx942 Memory Charts, which previously showed it only on gfx950. The block is drawn without bandwidth counters on these architectures.
 
 ### Changed
 

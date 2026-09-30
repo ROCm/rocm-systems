@@ -39,16 +39,9 @@ from utils.mem_chart_common import (
 )
 
 # ---------------------------------------------------------------------------
-# Metric keys — match 0300_Memory_Chart.yaml for gfx1250 (tables 301-308)
+# Metric keys — match 0300_Memory_Chart.yaml for gfx1250 (tables 301-309)
 # ---------------------------------------------------------------------------
 _MEM_CHART_DEFAULT_ROWS: tuple[tuple[str, Union[int, float]], ...] = (
-    # WGPs
-    ("Wavefront Occupancy", 8),
-    ("VGPR", 64),
-    ("SGPR", 32),
-    ("LDS Allocation", 32768),
-    ("Scratch Allocation", 0),
-    ("Workgroups", 256),
     # Table 301: Instruction Cache
     ("ICache Requests", 450),
     ("ICache Utilization", 60.0),
@@ -122,6 +115,13 @@ _MEM_CHART_DEFAULT_ROWS: tuple[tuple[str, Union[int, float]], ...] = (
     ("GMI Read Bandwidth", 256e9),
     ("GMI Write Bandwidth", 192e9),
     ("EA Stall Rate", 15.2),
+    # Table 309: Workgroup Processors (WGPs)
+    ("Wavefront Occupancy", 8),
+    ("VGPR", 64),
+    ("SGPR", 32),
+    ("LDS Allocation", 32768),
+    ("Scratch Allocation", 0),
+    ("Workgroups", 256),
 )
 
 MEM_CHART_PANEL_METRIC_KEYS: tuple[str, ...] = tuple(

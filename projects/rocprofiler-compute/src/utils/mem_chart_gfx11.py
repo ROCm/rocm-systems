@@ -44,16 +44,9 @@ from utils.mem_chart_common import (
 # ---------------------------------------------------------------------------
 
 # Keys = ``metric:`` names under each ``metric_table`` in
-# ``analysis_configs/gfx115x/0300_memory_chart.yaml`` (tables 301–309), in panel order.
+# ``analysis_configs/gfx115x/0300_memory_chart.yaml`` (tables 301–310).
 # Commented-out YAML metrics (e.g. TCP Atomic) are omitted.
 _MEM_CHART_DEFAULT_ROWS: tuple[tuple[str, Union[int, float]], ...] = (
-    # WGPs
-    ("Wavefront Occupancy", 8),
-    ("VGPR", 64),
-    ("SGPR", 32),
-    ("LDS Allocation", 32768),
-    ("Scratch Allocation", 0),
-    ("Workgroups", 256),
     # Table 301: Instruction Cache
     ("ICache Requests", 450),
     ("ICache Hit Rate", 98.5),
@@ -92,6 +85,13 @@ _MEM_CHART_DEFAULT_ROWS: tuple[tuple[str, Union[int, float]], ...] = (
     ("SysArb Stall Rate", 12.4),
     ("DRAM Read Bandwidth", 100e9),
     ("DRAM Write Bandwidth", 60e9),
+    # Table 310: Workgroup Processors (WGPs)
+    ("Wavefront Occupancy", 8),
+    ("VGPR", 64),
+    ("SGPR", 32),
+    ("LDS Allocation", 32768),
+    ("Scratch Allocation", 0),
+    ("Workgroups", 256),
 )
 
 MEM_CHART_PANEL_METRIC_KEYS: tuple[str, ...] = tuple(
