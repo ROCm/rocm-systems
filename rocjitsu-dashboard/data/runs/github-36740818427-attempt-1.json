@@ -1,0 +1,515 @@
+{
+  "comparisonId": "github-36740818427-attempt-1",
+  "environment": [
+    {
+      "key": "buildType",
+      "label": "buildType",
+      "value": "Release"
+    },
+    {
+      "key": "corpusCommitSha",
+      "label": "corpusCommitSha",
+      "value": "e1bac822f3fd2e8c29e3a08ae6c326db1692a757"
+    },
+    {
+      "key": "corpusCommitTimestamp",
+      "label": "corpusCommitTimestamp",
+      "value": "2026-09-22T17:25:56Z"
+    },
+    {
+      "key": "cpu",
+      "label": "cpu",
+      "value": "x86_64"
+    },
+    {
+      "key": "environmentId",
+      "label": "environmentId",
+      "value": "rocjitsu-benchmark-u2404-4150afe4-rocm-10.1.0a20260812"
+    },
+    {
+      "key": "kernel",
+      "label": "kernel",
+      "value": "6.17.0-35-generic"
+    },
+    {
+      "key": "measurement.samples",
+      "label": "measurement.samples",
+      "value": 21
+    },
+    {
+      "key": "measurement.timeoutSeconds",
+      "label": "measurement.timeoutSeconds",
+      "value": 300.0
+    },
+    {
+      "key": "measurement.warmups",
+      "label": "measurement.warmups",
+      "value": 3
+    },
+    {
+      "key": "package.amd-torch-device-gfx1250",
+      "label": "package.amd-torch-device-gfx1250",
+      "value": "2.14.0a0+rocm10.1.0a20260812"
+    },
+    {
+      "key": "package.amd-torch-device-gfx950",
+      "label": "package.amd-torch-device-gfx950",
+      "value": "2.14.0a0+rocm10.1.0a20260812"
+    },
+    {
+      "key": "package.rocm-sdk-devel",
+      "label": "package.rocm-sdk-devel",
+      "value": "10.1.0a20260812"
+    },
+    {
+      "key": "package.rocm-sdk-device-gfx1250",
+      "label": "package.rocm-sdk-device-gfx1250",
+      "value": "10.1.0a20260812"
+    },
+    {
+      "key": "package.rocm-sdk-device-gfx950",
+      "label": "package.rocm-sdk-device-gfx950",
+      "value": "10.1.0a20260812"
+    },
+    {
+      "key": "package.rocm-sdk-libraries",
+      "label": "package.rocm-sdk-libraries",
+      "value": "10.1.0a20260812"
+    },
+    {
+      "key": "package.torch",
+      "label": "package.torch",
+      "value": "2.14.0a0+rocm10.1.0a20260812"
+    },
+    {
+      "key": "package.triton",
+      "label": "package.triton",
+      "value": "3.8.0+git675c5987.rocm10.1.0a20260812"
+    },
+    {
+      "key": "platform",
+      "label": "platform",
+      "value": "Linux-6.17.0-35-generic-x86_64-with-glibc2.39"
+    },
+    {
+      "key": "pythonVersion",
+      "label": "pythonVersion",
+      "value": "3.12.14"
+    },
+    {
+      "key": "rocmSdkVersion",
+      "label": "rocmSdkVersion",
+      "value": "10.1.0a20260812"
+    },
+    {
+      "key": "sourceRef",
+      "label": "sourceRef",
+      "value": "develop"
+    },
+    {
+      "key": "target.gfx1250.configSha256",
+      "label": "target.gfx1250.configSha256",
+      "value": "f2b3bc1121dd5ab3e01acaff462de8ae2f7c66013208c41680fbb53301e80286"
+    },
+    {
+      "key": "target.gfx1250.execMode",
+      "label": "target.gfx1250.execMode",
+      "value": "functional"
+    },
+    {
+      "key": "target.gfx1250.numThreads",
+      "label": "target.gfx1250.numThreads",
+      "value": 8
+    },
+    {
+      "key": "target.gfx950.configSha256",
+      "label": "target.gfx950.configSha256",
+      "value": "52c1a01d287dd8be8bf9614cff3406ee54f02fea1bd9c98e4baac8444ff47387"
+    },
+    {
+      "key": "target.gfx950.execMode",
+      "label": "target.gfx950.execMode",
+      "value": "functional"
+    },
+    {
+      "key": "target.gfx950.numThreads",
+      "label": "target.gfx950.numThreads",
+      "value": 8
+    },
+    {
+      "key": "torchVersion",
+      "label": "torchVersion",
+      "value": "2.14.0a0+rocm10.1.0a20260812"
+    },
+    {
+      "key": "tritonVersion",
+      "label": "tritonVersion",
+      "value": "3.8.0+git675c5987.rocm10.1.0a20260812"
+    }
+  ],
+  "execution": {
+    "completedAt": "2026-09-30T16:23:11.626849Z",
+    "machine": "shark10-ci",
+    "trigger": "auto"
+  },
+  "id": "github-36740818427-attempt-1",
+  "plugin": {
+    "id": "vanilla",
+    "name": "Vanilla"
+  },
+  "source": {
+    "branch": "develop",
+    "commit": "96f1528fa5c5a0e12d706dbf4507c441c456f6eb",
+    "committedAt": "2026-09-30T15:58:42Z",
+    "message": "[rocjitsu][AVX-512] Vectorize F32 sparse MFMA (SMFMAC) (#12302)"
+  },
+  "targets": [
+    {
+      "id": "gfx1250",
+      "results": [
+        {
+          "durationSeconds": 1.286553119,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.atomic_add_fp32_contended.threads8"
+        },
+        {
+          "durationSeconds": 0.711599198,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.copy_fp32_32m.threads8"
+        },
+        {
+          "durationSeconds": 9.826001944,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.gather_fp32_irregular.threads8"
+        },
+        {
+          "durationSeconds": 0.861575938,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.gemm_bf16_1024x1024x1024.threads8"
+        },
+        {
+          "durationSeconds": 0.068322821,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.gemm_bf16_1024x128x512.threads8"
+        },
+        {
+          "durationSeconds": 0.065107613,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.gemm_bf16_128x1024x512.threads8"
+        },
+        {
+          "durationSeconds": 0.004166035,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.gemm_bf16_128x128x128.threads8"
+        },
+        {
+          "durationSeconds": 0.049203751,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.gemm_bf16_128x128x2048.threads8"
+        },
+        {
+          "durationSeconds": 0.129980408,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.gemm_bf16_512x512x512.threads8"
+        },
+        {
+          "durationSeconds": 0.036431207,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.gemm_bf16_aligned.threads8"
+        },
+        {
+          "durationSeconds": 0.072740742,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.gemm_bf16_ragged.threads8"
+        },
+        {
+          "durationSeconds": 0.872500309,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.gemm_fp16_1024x1024x1024.threads8"
+        },
+        {
+          "durationSeconds": 0.06988559,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.gemm_fp16_1024x128x512.threads8"
+        },
+        {
+          "durationSeconds": 0.067928633,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.gemm_fp16_128x1024x512.threads8"
+        },
+        {
+          "durationSeconds": 0.004223422,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.gemm_fp16_128x128x128.threads8"
+        },
+        {
+          "durationSeconds": 0.050555302,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.gemm_fp16_128x128x2048.threads8"
+        },
+        {
+          "durationSeconds": 0.072560512,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.gemm_fp16_250x250x510.threads8"
+        },
+        {
+          "durationSeconds": 0.035828287,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.gemm_fp16_256x256x512.threads8"
+        },
+        {
+          "durationSeconds": 0.127846057,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.gemm_fp16_512x512x512.threads8"
+        },
+        {
+          "durationSeconds": 0.050716383,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.gpt_oss_attention_bf16.threads8"
+        },
+        {
+          "durationSeconds": 0.104039143,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.gpt_oss_attention_bf16_seq256.threads8"
+        },
+        {
+          "durationSeconds": 0.022811488,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.rmsnorm_bf16.threads8"
+        },
+        {
+          "durationSeconds": 0.023600643,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.rmsnorm_fp16_128x4096.threads8"
+        },
+        {
+          "durationSeconds": 0.014044451,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.softmax_fp16_aligned.threads8"
+        },
+        {
+          "durationSeconds": 0.038815489,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.softmax_fp16_boundary.threads8"
+        },
+        {
+          "durationSeconds": 0.022663717,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.softmax_fp32_64x4096.threads8"
+        },
+        {
+          "durationSeconds": 0.367741431,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.transpose_fp16_2048.threads8"
+        },
+        {
+          "durationSeconds": 7.722698019,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.vector_add_fp32_boundary.threads8"
+        }
+      ]
+    },
+    {
+      "id": "gfx950",
+      "results": [
+        {
+          "durationSeconds": 1.319041844,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.atomic_add_fp32_contended.threads8"
+        },
+        {
+          "durationSeconds": 0.835910864,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.copy_fp32_32m.threads8"
+        },
+        {
+          "durationSeconds": 9.662217803,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.gather_fp32_irregular.threads8"
+        },
+        {
+          "durationSeconds": 0.881103224,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.gemm_bf16_1024x1024x1024.threads8"
+        },
+        {
+          "durationSeconds": 0.063253091,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.gemm_bf16_1024x128x512.threads8"
+        },
+        {
+          "durationSeconds": 0.063864545,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.gemm_bf16_128x1024x512.threads8"
+        },
+        {
+          "durationSeconds": 0.003045112,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.gemm_bf16_128x128x128.threads8"
+        },
+        {
+          "durationSeconds": 0.025129944,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.gemm_bf16_128x128x2048.threads8"
+        },
+        {
+          "durationSeconds": 0.124583162,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.gemm_bf16_512x512x512.threads8"
+        },
+        {
+          "durationSeconds": 0.032141045,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.gemm_bf16_aligned.threads8"
+        },
+        {
+          "durationSeconds": 0.054384595,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.gemm_bf16_ragged.threads8"
+        },
+        {
+          "durationSeconds": 0.897033881,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.gemm_fp16_1024x1024x1024.threads8"
+        },
+        {
+          "durationSeconds": 0.062541463,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.gemm_fp16_1024x128x512.threads8"
+        },
+        {
+          "durationSeconds": 0.059040353,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.gemm_fp16_128x1024x512.threads8"
+        },
+        {
+          "durationSeconds": 0.003011851,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.gemm_fp16_128x128x128.threads8"
+        },
+        {
+          "durationSeconds": 0.028219692,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.gemm_fp16_128x128x2048.threads8"
+        },
+        {
+          "durationSeconds": 0.057288766,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.gemm_fp16_250x250x510.threads8"
+        },
+        {
+          "durationSeconds": 0.031914283,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.gemm_fp16_256x256x512.threads8"
+        },
+        {
+          "durationSeconds": 0.123508873,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.gemm_fp16_512x512x512.threads8"
+        },
+        {
+          "durationSeconds": 0.134934235,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.gpt_oss_attention_bf16.threads8"
+        },
+        {
+          "durationSeconds": 0.348107553,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.gpt_oss_attention_bf16_seq256.threads8"
+        },
+        {
+          "durationSeconds": 0.026277705,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.rmsnorm_bf16.threads8"
+        },
+        {
+          "durationSeconds": 0.028188405,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.rmsnorm_fp16_128x4096.threads8"
+        },
+        {
+          "durationSeconds": 0.014276462,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.softmax_fp16_aligned.threads8"
+        },
+        {
+          "durationSeconds": 0.029189605,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.softmax_fp16_boundary.threads8"
+        },
+        {
+          "durationSeconds": 0.022793262,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.softmax_fp32_64x4096.threads8"
+        },
+        {
+          "durationSeconds": 0.567980968,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.transpose_fp16_2048.threads8"
+        },
+        {
+          "durationSeconds": 7.599379917,
+          "error": null,
+          "status": "completed",
+          "testId": "triton.vector_add_fp32_boundary.threads8"
+        }
+      ]
+    }
+  ],
+  "testCatalog": "test-catalogs/catalog-c090f84cca3d.json"
+}
