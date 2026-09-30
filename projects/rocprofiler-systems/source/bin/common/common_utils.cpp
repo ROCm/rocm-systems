@@ -513,36 +513,10 @@ run_post_parse_validation(std::string_view tool_name, domain_flag_state& state,
 
 namespace
 {
-std::string
-strip_ansi(const std::string& text)
-{
-    std::string result;
-    result.reserve(text.size());
-    bool in_escape = false;
-    for(const char ch : text)
-    {
-        if(in_escape)
-        {
-            if(ch == 'm')
-            {
-                in_escape = false;
-            }
-            continue;
-        }
-        if(ch == '\033')
-        {
-            in_escape = true;
-            continue;
-        }
-        result += ch;
-    }
-    return result;
-}
-
 bool
 is_section_header(const std::string& line, std::string& bracket_name)
 {
-    auto ansi_stripped = strip_ansi(line);
+    auto ansi_stripped = utility::string::strip_ansi(line);
     auto stripped      = utility::string::ltrim(ansi_stripped);
     if(stripped.empty() || stripped.front() != '[')
     {
@@ -561,7 +535,7 @@ is_section_header(const std::string& line, std::string& bracket_name)
 bool
 line_contains_flag(const std::string& line, const std::string& flag)
 {
-    auto stripped = strip_ansi(line);
+    auto stripped = utility::string::strip_ansi(line);
     // Flag lines have leading whitespace then the flag name
     auto pos = stripped.find(flag);
     if(pos == std::string::npos)
@@ -944,7 +918,7 @@ print_help_for_domain(const std::string& captured, std::string_view domain,
     size_t options_start = 0;
     for(size_t line_idx = 0; line_idx < lines.size(); ++line_idx)
     {
-        auto stripped = strip_ansi(lines[line_idx]);
+        auto stripped = utility::string::strip_ansi(lines[line_idx]);
         if(utility::string::ltrim(stripped).starts_with("Options:"))
         {
             options_start = line_idx + 1;
@@ -960,7 +934,7 @@ print_help_for_domain(const std::string& captured, std::string_view domain,
     for(size_t idx = options_start; idx < lines.size(); ++idx)
     {
         const auto& current_line = lines[idx];
-        auto        stripped     = strip_ansi(current_line);
+        auto        stripped     = utility::string::strip_ansi(current_line);
         auto        trimmed      = utility::string::ltrim(stripped);
 
         // Skip separators and empty lines at the top
