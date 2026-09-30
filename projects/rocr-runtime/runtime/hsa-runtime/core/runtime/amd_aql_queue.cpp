@@ -1565,8 +1565,10 @@ hsa_status_t AqlQueue::SetCUMasking(uint32_t num_cu_mask_count, const uint32_t* 
       }
     }
 
-    return agent_->driver().SetQueueCUMask(queue_id_, mask.size() * 32,
-                                           reinterpret_cast<HSAuint32*>(&mask[0]));
+    hsa_status_t status = agent_->driver().SetQueueCUMask(
+        queue_id_, mask.size() * 32, reinterpret_cast<HSAuint32*>(&mask[0]));
+    // On failure leave cu_mask_ describing the mask the driver still has.
+    if (status != HSA_STATUS_SUCCESS) return status;
   }
 
   // update current cu masking tracking.

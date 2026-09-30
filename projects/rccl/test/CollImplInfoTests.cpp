@@ -41,6 +41,7 @@
 #include "common/ProcessIsolatedTestRunner.hpp"
 #include "common/SymmetricBufferHelpers.hpp"  // RCCLTestHelpers::SymBuf (RAII deregister+free)
 #include "rccl_common.h"  // rcclGetCollImplInfo, rcclSymKGetInfo, rcclGetAlgoName, rcclGetProtocolName, rcclAddonAlgos_t
+#include "sym_kernels.h"  // ncclSymkMaxBlocks
 
 // rccl_common.h drags in RCCL's internal NCCLCHECK (which `return`s). These tests
 // live in void functions, so use a gtest-friendly, non-returning check instead.
@@ -121,6 +122,26 @@ namespace RcclUnitTesting
         if (line.find(func + " impl selected: algo ") != std::string::npos)
         {
           addon = {true, TokenAfter(line, "algo "), false, "", false, 0};
+        }
+
+        // "<Func> [Copy Engine]:" confirms a CE dispatch but does not name the
+        // variant. "impl selected: algo CE-Scratch" (or CE / CE2) is the name
+        // rcclGetAlgoName returns, so keep it. Use "CE" only when that line is
+        // absent, which is the registered-window path.
+        if (line.find(func + " [Copy Engine]:") != std::string::npos && addon.algoName.empty())
+        {
+          addon = {true, "CE", false, "", false, 0};
+        }
+
+        // Live SYM is scheduled in enqueue: "<Func> [Symmetric]: ... Kernel AllGather_LL nchannels N"
+        if (line.find(func + " [Symmetric]:") != std::string::npos)
+        {
+          std::string kernel = TokenAfter(line, "Kernel ");
+          std::string proto;
+          if (kernel.find("LL128") != std::string::npos) proto = "LL128";
+          else if (kernel.find("LL") != std::string::npos) proto = "LL";
+          else if (!kernel.empty()) proto = "SIMPLE";
+          addon = {true, "SYM", !proto.empty(), proto, false, 0};
         }
 
         if (func == "AllGather")
@@ -354,6 +375,15 @@ namespace RcclUnitTesting
           // -- queried with the real registered buffers -- covers the rest.)
           EXPECT_EQ(symk.algoName, "SYM")
             << "symk did not report SYM though dispatch ran SYM\nLOG:\n" << log;
+
+          // Symmetric block count: at least 1 because the model rejects a zero count, at most
+          // ncclSymkMaxBlocks. Device independent, since the model clamps to that constant and to
+          // maxCTAs and never to the CU count. Was -1 before the model set maxChannels, which is
+          // the regression this guards.
+          EXPECT_GE(symk.channels, 1)
+            << "symk reported SYM without a channel count\nLOG:\n" << log;
+          EXPECT_LE(symk.channels, ncclSymkMaxBlocks)
+            << "symk channel count above ncclSymkMaxBlocks\nLOG:\n" << log;
         }
       }
 
