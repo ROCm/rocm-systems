@@ -2825,6 +2825,11 @@
           "test_filter": "CeMPI_AlltoAll.TwoRanks"
         },
         {
+          "name": "CE_AlltoAllv_2Ranks",
+          "description": "AlltoAllv CE correctness and 'Init CE' log marker (2 ranks)",
+          "test_filter": "CeMPI_AlltoAllv.TwoRanks"
+        },
+        {
           "name": "CE_Fallback_AllReduce",
           "description": "AllReduce must NOT take CE path; verifies SM fallback",
           "test_filter": "CeMPI_Fallback.AllReduceNeverUsesCE"
@@ -2866,6 +2871,11 @@
           "test_filter": "CeMPI_AlltoAll.ThreeRanks"
         },
         {
+          "name": "CE_AlltoAllv_3Ranks",
+          "description": "AlltoAllv CE correctness with odd (non-power-of-two) rank count",
+          "test_filter": "CeMPI_AlltoAllv.ThreeRanks"
+        },
+        {
           "name": "CE_AllReduce_3Ranks",
           "description": "AllReduce CE correctness with odd (non-power-of-two) rank count",
           "test_filter": "CeMPI_AllReduce.ThreeRanks"
@@ -2894,6 +2904,11 @@
           "name": "CE_AlltoAll_4Ranks",
           "description": "AlltoAll CE correctness and 'Init CE' log marker (4 ranks)",
           "test_filter": "CeMPI_AlltoAll.FourRanks"
+        },
+        {
+          "name": "CE_AlltoAllv_4Ranks",
+          "description": "AlltoAllv CE correctness and 'Init CE' log marker (4 ranks)",
+          "test_filter": "CeMPI_AlltoAllv.FourRanks"
         },
         {
           "name": "CE_Scatter_4Ranks_Root0",
@@ -2933,6 +2948,11 @@
           "name": "CE_AlltoAll_8Ranks",
           "description": "AlltoAll CE correctness — default production topology (8 ranks)",
           "test_filter": "CeMPI_AlltoAll.EightRanks"
+        },
+        {
+          "name": "CE_AlltoAllv_8Ranks",
+          "description": "AlltoAllv CE correctness — default production topology (8 ranks)",
+          "test_filter": "CeMPI_AlltoAllv.EightRanks"
         },
         {
           "name": "CE_Scatter_8Ranks",
