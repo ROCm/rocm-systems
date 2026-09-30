@@ -759,13 +759,18 @@ TEST(GpuVmPipeline, TranslatedAtomicsUseStrongBackingOperationsForBothWidths) {
     uint64_t source;
     uint64_t compare;
     uint64_t expected;
+    bool source_nan_first = false;
   };
-  constexpr std::array<AtomicCase, 4> kCases = {{
+  constexpr std::array<AtomicCase, 8> kCases = {{
       {amdgpu::AtomicOp::ADD, 4, 0x300, 7, 5, 0, 12},
       {amdgpu::AtomicOp::ADD, 8, 0x308, 0x1'0000'0000ULL, 9, 0, 0x1'0000'0009ULL},
       {amdgpu::AtomicOp::CMPSWAP, 4, 0x310, 0x11223344, 0xaabbccdd, 0x11223344, 0xaabbccdd},
       {amdgpu::AtomicOp::CMPSWAP, 8, 0x318, 0x1122334455667788ULL, 0xaabbccddeeff0011ULL,
        0x1122334455667788ULL, 0xaabbccddeeff0011ULL},
+      {amdgpu::AtomicOp::PK_ADD_F16, 4, 0x320, 0x3c004000, 0x42004400, 0, 0x44004600},
+      {amdgpu::AtomicOp::PK_ADD_BF16, 4, 0x324, 0x3f804000, 0x40404080, 0, 0x408040c0},
+      {amdgpu::AtomicOp::FADD, 4, 0x328, 0x7f800002, 0xff800004, 0, 0x7fc00002},
+      {amdgpu::AtomicOp::FADD, 4, 0x32c, 0x7f800002, 0xff800004, 0, 0xffc00004, true},
   }};
 
   amdgpu::GlobalMemPipeline pipeline(&context.cu->l1_vector(), context.cu->l2());
@@ -781,6 +786,7 @@ TEST(GpuVmPipeline, TranslatedAtomicsUseStrongBackingOperationsForBothWidths) {
     state->num_elems = 1;
     state->is_load = true;
     state->atomic_op = test.operation;
+    state->atomic_source_nan_first = test.source_nan_first;
     state->wf_size = context.wf->wf_size();
     state->exec_mask = 1;
     state->lane_mask = 1;
