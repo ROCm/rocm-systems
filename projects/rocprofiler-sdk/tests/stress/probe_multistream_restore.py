@@ -39,8 +39,12 @@ dispatch:
   restore_without_inflation  SQ_WAVES == 1 but a wave was saved or restored  (refutes it)
   zero_waves                 SQ_WAVES == 0  (an undercount)
   missing_counter            a counter has no row for this dispatch
+  inflated                   SQ_WAVES >= 2 with the restore counters not collected
 
-All three counters must come from the same pass. Giving rocprofv3 one --pmc per counter makes
+--counters SQ_WAVES collects SQ_WAVES alone, the way the failing test does, to measure how often
+the double count happens without the two extra SQ counters programmed next to it.
+
+All the counters must come from the same pass. Giving rocprofv3 one --pmc per counter makes
 it replay the whole application once per counter, each run writing its own pass_N/ output, so
 the counters of one dispatch would come from different runs and could not be compared.
 
@@ -74,6 +78,7 @@ CLASSES = (
     "restore_without_inflation",
     "zero_waves",
     "missing_counter",
+    "inflated",
 )
 # the app's only kernel; the runtime's copy kernels also appear in the output and are ignored
 KERNEL_RE = re.compile(r"(^|[^A-Za-z0-9_])add($|[^A-Za-z0-9_])")
@@ -117,7 +122,7 @@ def read_counters(csv_path):
     return header, table
 
 
-def describe(csv_path, run_dir, header, add_entries):
+def describe(csv_path, run_dir, header, add_entries, counters):
     """Print what the first parsed run contained, so a misread shows up in the log."""
     log("first run: {}".format(os.path.relpath(csv_path, run_dir)))
     log("  header: {}".format(",".join(header)))
@@ -129,13 +134,13 @@ def describe(csv_path, run_dir, header, add_entries):
                 name, len(values), len(add_entries), sum(values), min(values), max(values)
             )
         )
-    absent = [name for name in COUNTERS if name not in names]
+    absent = [name for name in counters if name not in names]
     if absent:
         log("  no rows at all for: {}".format(", ".join(absent)))
 
 
-def classify(entry):
-    if any(name not in entry for name in COUNTERS):
+def classify(entry, counters):
+    if any(name not in entry for name in counters):
         return "missing_counter"
     waves = int(round(entry.get("SQ_WAVES", 0.0)))
     restored = int(round(entry.get("SQ_WAVES_RESTORED", 0.0)))
@@ -143,6 +148,8 @@ def classify(entry):
     if waves == 0:
         return "zero_waves"
     if waves >= 2:
+        if "SQ_WAVES_RESTORED" not in counters:
+            return "inflated"
         return "inflated_with_restore" if restored >= 1 else "inflated_without_restore"
     if restored or saved:
         return "restore_without_inflation"
@@ -150,7 +157,7 @@ def classify(entry):
 
 
 def run_once(args, run_dir, timeout):
-    cmd = [args.rocprofv3, "--pmc"] + list(COUNTERS)
+    cmd = [args.rocprofv3, "--pmc"] + list(args.counters)
     cmd += ["--output-format", "csv", "-d", run_dir, "-o", "out", "--", args.app]
     proc = subprocess.Popen(
         cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True
@@ -177,12 +184,20 @@ def main():
     parser.add_argument("--run-timeout", type=float, default=90.0)
     parser.add_argument("--max-events", type=int, default=40)
     parser.add_argument(
+        "--counters",
+        default=",".join(COUNTERS),
+        help="comma-separated counters collected together in one pass; must include SQ_WAVES",
+    )
+    parser.add_argument(
         "--report-only",
         action="store_true",
         help="always exit 0; a failing test makes ctest fail the CI step and skip the steps "
         "after it, so findings are read from the recorded output (CDash) instead",
     )
     args = parser.parse_args()
+    args.counters = [c for c in args.counters.split(",") if c]
+    if "SQ_WAVES" not in args.counters:
+        parser.error("--counters must include SQ_WAVES")
     code = run(args)
     return 0 if args.report_only else code
 
@@ -201,7 +216,7 @@ def run(args):
 
     log(
         "PROBE rocprofv3 --pmc {} on {} for {:.0f}s".format(
-            " ".join(COUNTERS), os.path.basename(args.app), args.budget_seconds
+            " ".join(args.counters), os.path.basename(args.app), args.budget_seconds
         )
     )
     while True:
@@ -261,16 +276,16 @@ def run(args):
             if KERNEL_RE.search(entry.get("kernel", ""))
         ]
         if not described and add_entries:
-            describe(found[0], run_dir, header, add_entries)
+            describe(found[0], run_dir, header, add_entries, args.counters)
             described = True
 
         counts = dict((k, 0) for k in CLASSES)
         for dispatch_id, entry in add_entries:
-            kind = classify(entry)
+            kind = classify(entry, args.counters)
             counts[kind] += 1
             if kind != "normal" and len(events) < args.max_events:
                 event = {"run": runs, "dispatch_id": dispatch_id, "class": kind}
-                for name in COUNTERS:
+                for name in args.counters:
                     event[name] = entry.get(name)
                 events.append(event)
         for k in CLASSES:
@@ -293,21 +308,17 @@ def run(args):
     if run_failures:
         log("  runs that produced no usable output: {}".format(len(run_failures)))
     for ev in events:
-        values = dict(
-            (name, "-" if ev[name] is None else "{:g}".format(ev[name]))
-            for name in COUNTERS
+        values = " ".join(
+            "{}={}".format(name, "-" if ev[name] is None else "{:g}".format(ev[name]))
+            for name in args.counters
         )
         log(
-            "  event run={} dispatch={} {}: SQ_WAVES={} RESTORED={} SAVED={}".format(
-                ev["run"],
-                ev["dispatch_id"],
-                ev["class"],
-                values["SQ_WAVES"],
-                values["SQ_WAVES_RESTORED"],
-                values["SQ_WAVES_SAVED"],
+            "  event run={} dispatch={} {}: {}".format(
+                ev["run"], ev["dispatch_id"], ev["class"], values
             )
         )
     result = {
+        "counters": args.counters,
         "runs": runs,
         "elapsed_s": round(elapsed, 1),
         "totals": totals,
