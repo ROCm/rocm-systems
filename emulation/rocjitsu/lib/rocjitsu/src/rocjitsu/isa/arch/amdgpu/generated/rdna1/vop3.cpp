@@ -26,6 +26,7 @@ VInterpP1F32Vop3::VInterpP1F32Vop3(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   m0.apply_fieldless_caps(false, false, false);
+  flags_ |= EMBEDDED_MEMORY_WAIT;
 }
 
 namespace detail {
@@ -53,6 +54,7 @@ VInterpP2F32Vop3::VInterpP2F32Vop3(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   m0.apply_fieldless_caps(false, false, false);
+  flags_ |= EMBEDDED_MEMORY_WAIT;
 }
 
 namespace detail {
@@ -80,6 +82,7 @@ VInterpMovF32Vop3::VInterpMovF32Vop3(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   m0.apply_fieldless_caps(false, false, false);
+  flags_ |= EMBEDDED_MEMORY_WAIT;
 }
 
 namespace detail {
@@ -1508,14 +1511,10 @@ VClrexcpVop3::VClrexcpVop3(const MachineInst *inst)
 
 namespace detail {
 DecodeResult decodeVClrexcpVop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
-  const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
       "v_clrexcp", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
-    return emit_error.emit() << "V_CLREXCP does not support DPP";
   return std::make_unique<VClrexcpVop3>(opcode);
 }
 } // namespace detail
@@ -6009,6 +6008,7 @@ VInterpP1llF16Vop3::VInterpP1llF16Vop3(const MachineInst *inst)
   src_operands_[1] = &src0;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EMBEDDED_MEMORY_WAIT;
 }
 
 namespace detail {
@@ -6035,6 +6035,7 @@ VInterpP1lvF16Vop3::VInterpP1lvF16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EMBEDDED_MEMORY_WAIT;
 }
 
 namespace detail {
@@ -6671,6 +6672,7 @@ VInterpP2F16Vop3::VInterpP2F16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EMBEDDED_MEMORY_WAIT;
 }
 
 namespace detail {

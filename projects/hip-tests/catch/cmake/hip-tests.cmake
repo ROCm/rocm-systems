@@ -108,6 +108,11 @@ function(hip_gen_exe_target)
 
     # Add dependency on build_tests to build it on this custom target
     add_dependencies(${_TEST_TARGET_NAME} ${_EXE_NAME})
+    # Test deprecated functions too. We would like to stay on the
+    # latest API, so define HIP_ABI_IMPL to access deprecated
+    # APIs. The cost of this is that we lose access to wrapper
+    # functions.
+    target_compile_definitions(${_EXE_NAME} PRIVATE HIP_ABI_IMPL)
 
     if (DEFINED _COMPILE_OPTIONS)
       target_compile_options(${_EXE_NAME} PUBLIC ${_COMPILE_OPTIONS})
@@ -119,7 +124,12 @@ function(hip_gen_exe_target)
     endforeach()
     # add binary to global list of binaries to install
     set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS ${_EXE_NAME})
-    set(_DISCOVER_PROPERTIES "")
+    # Catch2 already defaults discovered tests to SKIP_RETURN_CODE 4
+    # (extras/Catch.cmake) unless SKIP_IS_FAILURE is passed. Restated
+    # here because main() deliberately returns 4 when the active level
+    # matches none of the requested tests - this is the contract that
+    # makes those entries report as skipped rather than failed.
+    set(_DISCOVER_PROPERTIES SKIP_RETURN_CODE 4)
     if (DEFINED HIP_TEST_LABELS)
       list(APPEND _DISCOVER_PROPERTIES LABELS "${HIP_TEST_LABELS}")
     endif()

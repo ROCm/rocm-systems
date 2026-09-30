@@ -9,12 +9,18 @@ LABEL org.opencontainers.image.source=https://github.com/ROCm/hipFile
 # Brings ROCKY_VERSION in-scope
 ARG ROCKY_MAJOR_VERSION
 ARG ROCKY_VERSION
-ARG ROCM_VERSION=7.2.2
+ARG ROCM_VERSION=7.14.0
 
 # If the target ROCm Version on the package repository is non-standard, you can forcibly
 # set the ROCm version used in the package repo URL.
 # Ex. Package 7.0_alpha installs 7.0.0
 ARG ROCM_PKG_REPO_OVERRIDE
+
+# Nightly ROCm build id (YYYYMMDD-<gha_run_id>). When set, ROCm is installed from
+# the unsigned nightly repo at
+# nightly.repo.amd.com/rocm/core/packages/<distro>/<ROCM_NIGHTLY_BUILD>
+# and ROCM_VERSION is expected to be the clean MAJOR.MINOR.PATCH that build pins.
+ARG ROCM_NIGHTLY_BUILD
 
 # Update repo and install program dependencies.
 # microdnf is too stripped down, install full dnf.
@@ -40,19 +46,73 @@ RUN microdnf install -y \
 #     dnf install -y ./amdgpu_install.rpm
 # Method 2: Manually create repo file.
 
-# ROCM_PKG_REPO_VERSION normalizes the ROCm version used in the package repo URL.
-# If the PATCH component is 0, the PATCH of the version is dropped. Otherwise no
-# modification is made.
-RUN ROCM_PKG_REPO_VERSION="$(echo ${ROCM_PKG_REPO_OVERRIDE:-$ROCM_VERSION} | sed -E 's|([^.]+\.[^.]+)\.0$|\1|')"; \
-    cat <<EOF > /etc/yum.repos.d/rocm.repo
-[ROCm-${ROCM_VERSION}]
-name=ROCm${ROCM_VERSION}
-baseurl=https://repo.radeon.com/rocm/el${ROCKY_MAJOR_VERSION}/${ROCM_PKG_REPO_VERSION}/main
-enabled=1
-priority=50
-gpgcheck=1
-gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key
-EOF
+# Cache MAJOR/MINOR and the ROCm build type for use by later RUN steps.
+# ROCm 7.11+ ships from repo.amd.com/stable.repo.amd.com to
+# /opt/rocm/core-<MAJOR>.<MINOR>, split across three release bands:
+#   7.11-7.12  repo.amd.com/rocm/packages
+#   7.13-7.14  repo.amd.com/rocm/packages-multi-arch
+#   10.0+      stable.repo.amd.com/rocm/core/packages  (ROCm jumped 7.14 -> 10.0)
+# Earlier releases ship from repo.radeon.com to /opt/rocm (legacy symlink).
+# A non-empty ROCM_NIGHTLY_BUILD selects the nightly repo and shares the 7.11+
+# install layout (ROCM_VERSION must be the clean version that build pins).
+RUN ROCM_MAJOR=$(echo "${ROCM_VERSION}" | cut -d. -f1); \
+    ROCM_MINOR=$(echo "${ROCM_VERSION}" | cut -d. -f2); \
+    ROCM_INSTALL_PATH="/opt/rocm/core-${ROCM_MAJOR}.${ROCM_MINOR}"; \
+    if [ -n "${ROCM_NIGHTLY_BUILD}" ]; then \
+        ROCM_BUILD_TYPE=nightly; \
+    elif [ "${ROCM_MAJOR}" -gt 7 ]; then \
+        ROCM_BUILD_TYPE=stable; \
+    elif [ "${ROCM_MAJOR}" -eq 7 ] && [ "${ROCM_MINOR}" -ge 13 ]; then \
+        ROCM_BUILD_TYPE=multiarch; \
+    elif [ "${ROCM_MAJOR}" -eq 7 ] && [ "${ROCM_MINOR}" -ge 11 ]; then \
+        ROCM_BUILD_TYPE=packages; \
+    else \
+        ROCM_BUILD_TYPE=legacy; \
+        ROCM_INSTALL_PATH="/opt/rocm"; \
+    fi; \
+    printf 'ROCM_MAJOR=%s\nROCM_MINOR=%s\nROCM_BUILD_TYPE=%s\nROCM_INSTALL_PATH=%s\nROCM_NIGHTLY_BUILD=%s\n' \
+        "${ROCM_MAJOR}" "${ROCM_MINOR}" "${ROCM_BUILD_TYPE}" "${ROCM_INSTALL_PATH}" "${ROCM_NIGHTLY_BUILD}" \
+        > /etc/rocm-build.env
+
+# Manually setup ROCm Package Repos. The 7.11+ bands and nightly serve a flat
+# <base>/<distro-slug>/x86_64 tree; only the legacy repo carries a version
+# component in the URL. ROCM_PKG_REPO_VERSION normalizes that legacy version:
+# if the PATCH component is 0, the PATCH is dropped. Otherwise no modification
+# is made. ROCM_PKG_REPO_OVERRIDE applies to the legacy repo only.
+#
+# The stable-band packages are signed (each serves repodata/repomd.xml.asc);
+# the nightly packages are not, so it sets gpgcheck=0.
+RUN . /etc/rocm-build.env && \
+    ROCM_SLUG="rhel${ROCKY_MAJOR_VERSION}" && \
+    case "${ROCM_BUILD_TYPE}" in \
+        packages) \
+            ROCM_REPO_URL="https://repo.amd.com/rocm/packages/${ROCM_SLUG}/x86_64"; \
+            ROCM_GPG_URL="https://repo.amd.com/rocm/packages/gpg/rocm.gpg";; \
+        multiarch) \
+            ROCM_REPO_URL="https://repo.amd.com/rocm/packages-multi-arch/${ROCM_SLUG}/x86_64"; \
+            ROCM_GPG_URL="https://repo.amd.com/rocm/packages-multi-arch/gpg/rocm.gpg";; \
+        stable) \
+            ROCM_REPO_URL="https://stable.repo.amd.com/rocm/core/packages/${ROCM_SLUG}/x86_64"; \
+            ROCM_GPG_URL="https://stable.repo.amd.com/rocm/gpg/packages.gpg";; \
+        nightly) \
+            ROCM_REPO_URL="https://nightly.repo.amd.com/rocm/core/packages/${ROCM_SLUG}/${ROCM_NIGHTLY_BUILD}/x86_64"; \
+            ROCM_GPG_URL="";; \
+        legacy) \
+            ROCM_PKG_REPO_VERSION="$(echo ${ROCM_PKG_REPO_OVERRIDE:-$ROCM_VERSION} | sed -E 's|([^.]+\.[^.]+)\.0$|\1|')"; \
+            ROCM_REPO_URL="https://repo.radeon.com/rocm/el${ROCKY_MAJOR_VERSION}/${ROCM_PKG_REPO_VERSION}/main"; \
+            ROCM_GPG_URL="https://repo.radeon.com/rocm/rocm.gpg.key";; \
+    esac && \
+    { echo "[ROCm-${ROCM_VERSION}]"; \
+      echo "name=ROCm${ROCM_VERSION}"; \
+      echo "baseurl=${ROCM_REPO_URL}"; \
+      echo "enabled=1"; \
+      echo "priority=50"; \
+      if [ -n "${ROCM_GPG_URL}" ]; then \
+          echo "gpgcheck=1"; \
+          echo "gpgkey=${ROCM_GPG_URL}"; \
+      else \
+          echo "gpgcheck=0"; \
+      fi; } > /etc/yum.repos.d/rocm.repo
 
 # Development Dependencies
 # clang version == 19
@@ -67,41 +127,68 @@ RUN dnf makecache && \
         gcc-toolset-13 \
         gdb \
         git \
-        hip-devel \
         libmount-devel \
         llvm-devel \
         python3.12-devel \
         rpm-build
 
-# Point amdclang++ at the gcc-toolset-13 libstdc++.
-# clang locates its C++ standard library by scanning a fixed set of prefixes
-# (essentially /usr) for the newest GCC; it does NOT consult PATH. The default
-# el8 GCC (8) lacks the C++20 <concepts> header, and gcc-toolset-13 lives under
-# /opt/rh, which clang's scanner doesn't search on this toolchain. Append
-# --gcc-install-dir to the ROCm config file that amdclang++ auto-loads so it
-# selects the gcc-toolset-13 libstdc++.
-RUN echo '--gcc-install-dir=/opt/rh/gcc-toolset-13/root/usr/lib/gcc/x86_64-redhat-linux/13' \
-        >> /opt/rocm/lib/llvm/bin/rocm.cfg
+# Install ROCm dev runtime packages.
+# Every 7.11+ and nightly ships as amdrocm-runtime-devel<MAJOR>.<MINOR> package;
+# hip-devel exists on the legacy repo only.
+RUN . /etc/rocm-build.env && \
+    if [ "${ROCM_BUILD_TYPE}" = "legacy" ]; then \
+        dnf install -y \
+            hip-devel; \
+    else \
+        dnf install -y \
+            amdrocm-runtime-devel${ROCM_MAJOR}.${ROCM_MINOR}; \
+    fi
+
+# Pin the gcc-13 version of libstdc++ for amdclang++ to use.
+# By default, Clang scans a fixed set of paths for the C++ standard library,
+# and picks the newest version available. This includes RHEL's /opt/rh path.
+# On legacy ROCm (~clang-22), this set of paths to scan stops at gcc-12.
+# As such, it will default to the system toolchain (gcc-8 on el8) which is
+# too old for the needed C++20 features. However, on ROCm 10.1, amdclang searches
+# up to the gcc-15 toolchain which will be quietly picked over the desired gcc-13
+# version.
+# (At time of writing, the `clang` package pulls in the gcc-15 C++ standard library.)
+# Pinning keeps all ROCm bands on the same toolset version.
+# See: https://github.com/ROCm/llvm-project/blob/94c74897d01e15aa542b0b7b5cab459761cb06b3/clang/lib/Driver/ToolChains/Gnu.cpp#L2307-L2329
+RUN . /etc/rocm-build.env && \
+    printf '\n%s\n' \
+        '--gcc-install-dir=/opt/rh/gcc-toolset-13/root/usr/lib/gcc/x86_64-redhat-linux/13' \
+        >> "${ROCM_INSTALL_PATH}/lib/llvm/bin/rocm.cfg"
 
 # Configure system linker for ROCm
-RUN cat <<EOF > /etc/ld.so.conf.d/rocm.conf
-/opt/rocm/lib
-/opt/rocm/lib64
-EOF
-RUN ldconfig
-
-# Add ROCm bin directory to the path
-ENV PATH=/opt/rocm/bin:${PATH}
+RUN . /etc/rocm-build.env && \
+    { echo "${ROCM_INSTALL_PATH}/lib"; \
+      echo "${ROCM_INSTALL_PATH}/lib64"; } \
+        > /etc/ld.so.conf.d/rocm.conf && \
+    ldconfig
 
 # Environment Build Arg for ROCm
 ENV ROCM_VERSION="${ROCM_VERSION}"
 
-# .rc and .profile files are not automatically read on non-login,
-# non-interactive shells. Tell Bash to read a minimal .profile
-# when a shell of any type is opened.
-# Uncomment to prefer newer version of GCC.
-RUN echo 'source /opt/rh/gcc-toolset-13/enable' >> ~/.bashrc
-RUN echo 'source ~/.bashrc' >> ~/.bash_profile
+# Write a /etc/profile.d script exporting ROCM_PATH and PATH for the install layout.
+RUN . /etc/rocm-build.env && \
+    printf 'export ROCM_PATH=%s\nexport PATH=%s/bin:$PATH\n' \
+        "${ROCM_INSTALL_PATH}" "${ROCM_INSTALL_PATH}" \
+        > /etc/profile.d/rocm.sh && \
+    chmod +x /etc/profile.d/rocm.sh
+
+# Prefer the newer version of GCC.
+RUN echo 'source /opt/rh/gcc-toolset-13/enable' \
+        > /etc/profile.d/gcc-toolset-13.sh && \
+    chmod +x /etc/profile.d/gcc-toolset-13.sh
+
+# /etc/profile already iterates /etc/profile.d/*.sh for login shells. The
+# iterator script below applies the same behaviour to interactive, non-login
+# bash (via .bashrc) and non-interactive, non-login bash (via BASH_ENV).
+RUN printf '%s\n' \
+        'for _f in /etc/profile.d/*.sh; do [ -r "$_f" ] && . "$_f"; done' \
+        'unset _f' \
+        >> ~/.bashrc
 ENV BASH_ENV="~/.bashrc"
 
 # AIS Code Repository Mount Point

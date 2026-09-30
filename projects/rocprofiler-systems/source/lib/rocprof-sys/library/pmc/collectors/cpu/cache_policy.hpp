@@ -10,8 +10,6 @@
 #include "library/pmc/collectors/cpu/sample.hpp"
 #include "library/pmc/collectors/cpu/types.hpp"
 
-#include <spdlog/fmt/fmt.h>
-
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -76,13 +74,13 @@ struct cache_policy
             const auto freq_name =
                 fmt::format("{} [{}] Core [{}]", freq_base, socket_id, cpu_id);
             registry.add_pmc_info(
-                { /* type             = */ agent_type::CPU,
+                { /* type             = */ agent_type::cpu,
                   /* agent_type_index = */ socket_id,
                   /* target_arch      = */ target_arch,
                   /* event_code       = */ event_code,
                   /* instance_id      = */ instance_id,
-                  /* name             = */ freq_name.c_str(),
-                  /* symbol           = */ freq_name.c_str(),
+                  /* name             = */ freq_name,
+                  /* symbol           = */ freq_name,
                   /* description      = */ "CPU Core Frequency",
                   /* long_description = */ long_description,
                   /* component        = */ component,
@@ -98,13 +96,13 @@ struct cache_policy
             const auto load_name =
                 fmt::format("{} [{}] Core [{}]", load_base, socket_id, cpu_id);
             registry.add_pmc_info(
-                { /* type             = */ agent_type::CPU,
+                { /* type             = */ agent_type::cpu,
                   /* agent_type_index = */ socket_id,
                   /* target_arch      = */ target_arch,
                   /* event_code       = */ event_code,
                   /* instance_id      = */ instance_id,
-                  /* name             = */ load_name.c_str(),
-                  /* symbol           = */ load_name.c_str(),
+                  /* name             = */ load_name,
+                  /* symbol           = */ load_name,
                   /* description      = */ "CPU Core Load Percentage",
                   /* long_description = */ long_description,
                   /* component        = */ component,
@@ -118,12 +116,15 @@ struct cache_policy
             registry.add_track({ load_name, std::nullopt, extdata });
         }
 
-        if(!is_first_socket) return;
+        if(!is_first_socket)
+        {
+            return;
+        }
 
         auto add_process_pmc = [&, socket_id](const char* metric_name, const char* symbol,
                                               const char* description, const char* units,
                                               const char* value_type) {
-            registry.add_pmc_info({ /* type             = */ agent_type::CPU,
+            registry.add_pmc_info({ /* type             = */ agent_type::cpu,
                                     /* agent_type_index = */ socket_id,
                                     /* target_arch      = */ target_arch,
                                     /* event_code       = */ event_code,
@@ -233,7 +234,9 @@ private:
                 s_zero_entries.clear();
                 s_zero_entries.reserve(src.size());
                 for(const auto& cpu : src)
+                {
                     s_zero_entries.push_back({ cpu.cpu_id, 0.0f, 0.0 });
+                }
             }
             return src;
         }

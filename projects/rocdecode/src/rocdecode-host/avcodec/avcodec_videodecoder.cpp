@@ -240,7 +240,7 @@ rocDecStatus AvcodecVideoDecoder::SubmitDecode(RocdecPicParamsHost *pPicParams) 
     }
     AVPacket *av_pkt = av_packets_[av_pkt_cnt_];
     std::pair<uint8_t *, int> *packet_data = &av_packet_data_[av_pkt_cnt_];
-    if (pPicParams->bitstream_data_len > packet_data->second) {
+    if (pPicParams->bitstream_data_len > static_cast<uint32_t>(packet_data->second)) {
         void *new_pkt_data = av_realloc(av_pkt->data, (pPicParams->bitstream_data_len + MAX_AV_PACKET_DATA_SIZE));  // add more to avoid frequent reallocation
         if (!new_pkt_data) {
             ErrorLog(g_rocdec_logger, "ERROR: couldn't allocate packet data");
@@ -420,7 +420,7 @@ rocDecStatus AvcodecVideoDecoder::NotifyNewSequence(AVFrame *p_frame) {
     p_video_format->progressive_sequence = !p_frame->interlaced_frame;
 #endif
     //number of decode surfaces are internal and not exposed in avcodec based decoding. Setting some value for sanity
-    p_video_format->min_num_decode_surfaces = dec_frames_.size();
+    p_video_format->min_num_decode_surfaces = static_cast<uint8_t>(dec_frames_.size());
     p_video_format->coded_width = p_frame->linesize[0];
     p_video_format->coded_height = p_frame->height;
     p_video_format->chroma_format = AVPixelFormat2rocDecVideoChromaFormat(dec_context_->pix_fmt);

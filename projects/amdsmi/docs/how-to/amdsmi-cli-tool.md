@@ -1028,6 +1028,47 @@ Command Modifiers:
                              DEBUG, INFO, WARNING, ERROR, CRITICAL
 ```
 
+### amd-smi node
+
+Gets power and baseboard information for the node. Returns information for
+node 0 (OAM_ID 0) on the system. If no node argument is provided, all node
+information will be displayed.
+
+```shell-session
+~$ amd-smi node --help
+usage: amd-smi node [-h] [-p] [-b] [-G] [-T] [--json | --csv] [--file FILE]
+                     [--loglevel LEVEL]
+
+Node arguments:
+  -h, --help                    show this help message and exit
+  -p, --power-management        Displays power management information
+  -b, --base-board-temps        Displays baseboard temperatures
+  -G, --gtt                     Displays GTT (shared GPU memory) size
+  -T, --tray                    Displays compute tray type and accelerator count
+
+Command Modifiers:
+  --json                        Displays output in JSON format (human readable by default).
+  --csv                         Displays output in CSV format (human readable by default).
+  --file FILE                   Saves output into a file on the provided path (stdout by default).
+  --loglevel LEVEL              Set the logging level from the possible choices:
+                                   DEBUG, INFO, WARNING, ERROR, CRITICAL
+```
+
+This example shows `amd-smi node --tray` output on a system with a UALoE
+session active:
+
+```shell-session
+~$ amd-smi node --tray
+NODE:
+    TRAY:
+        MAX_ACC_PER_TRAY: 8
+        TRAY_TYPE: HELIOS_P
+```
+
+On systems without UALoE hardware/session, `amdsmi_get_tray_info()` returns
+`AMDSMI_STATUS_NOT_SUPPORTED` and the `TRAY:` block (and the `tray`/
+`max_acc_per_tray`/`tray_type` keys in `--json`/`--csv`) is omitted entirely.
+
 ## Interpreting the output
 
 When you run an `amd-smi` command, the tool presents detailed information
@@ -1148,6 +1189,16 @@ Memory) is automatically detected based on the first available sensor.
   which handles current and future versions, so releases from 7.13 onward are no
   longer affected by this mismatch.)
 
+**Empty Section**: In human-readable output, `N/A` on a section header rather than a
+field means the section has no entries. For example, `RDMA_DEVICES: N/A` under an
+AI-NIC means the NIC reported no RDMA device, which is what you see when `ionic` is
+bound but `ionic_rdma` is not loaded. A header also reads `N/A` when the section's
+query failed and the whole section was replaced by `N/A` rather than left empty, which
+is what `NIC`, `SMU`, and `IFWI` in `amd-smi static` and `FW_LIST` in `amd-smi firmware`
+do. JSON output represents an empty section as an empty object. CSV drops the section's
+columns when no device in the run reports it, and fills them with `N/A` when only some
+do.
+
 (cli-ex-static)=
 ### Example output from amd-smi static
 
@@ -1171,8 +1222,11 @@ GPU: 0
         DEVICE_ID: 0x74a0
         SUBSYSTEM_ID: 0x74a0
         REV_ID: 0x00
+        CHIP_REV_ID: 0x01
+        EXTERNAL_REV_ID: 0x47
         ASIC_SERIAL: 0xXXXXXXXXXXXXXXXX
         OAM_ID: 0
+        PHYSICAL_ACC_ID: N/A
         NUM_COMPUTE_UNITS: 228
         TARGET_GRAPHICS_VERSION: gfx942
         FLAGS: 17
@@ -1611,13 +1665,15 @@ interfaces (sysfs / modprobe.d) and do **not** require libdrm.
 
 | Feature | Hardware | Status |
 |---|---|---|
-| `--mem-carveout` (UMA carveout) | Strix and later APUs (gfx1150, gfx1151, gfx1152) whose VBIOS exposes ATCS 0xA | Supported |
+| `--mem-carveout` (UMA carveout) | Strix and later APUs (gfx1150, gfx1151, gfx1152) whose VBIOS exposes ATCS 0xA | Supported (amdgpu sysfs node) |
+| `--mem-carveout` (UMA carveout) | UEFI-HII APU platforms (e.g. HP ZBook Ultra G1a, Z2 Mini G1a) that expose the carveout through fwupd | Supported (via the fwupd daemon) |
 | `--mem-carveout` (UMA carveout) | Radeon dGPUs, Instinct MI-series (MI100, MI200, MI300, MI300A) | Not supported — reported as `MEM_CARVEOUT: N/A (UMA carveout is not supported on this ASIC/VBIOS)` |
 | `--gtt` (TTM `pages_limit`) | Any amdgpu system, including Instinct MI300A (`amdttm` / `amd-ttm`) and Ryzen APUs (`ttm`) | Supported |
 
 ### Prerequisites
 
 - **UMA carveout:** Linux kernel >= 7.0 (upstream commit [`685b711`](https://github.com/torvalds/linux/commit/685b711); some distros backport it to earlier kernels), an APU VBIOS that advertises ATCS 0xA + IGP info table v2.3, root, and a reboot after changing the index.
+- **UMA carveout (UEFI-HII platforms, via fwupd):**AMD SMI library reads and writes the carveout through the fwupd daemon's D-Bus BIOS-settings interface. Reading needs fwupd >= 1.8.4; writing needs fwupd >= 2.1.1 (Ubuntu 26.04+). PolicyKit brokers authorization (no explicit `sudo`) for writes, and a reboot applies the new size.
 - **GTT (TTM `pages_limit`):** root (to write `/etc/modprobe.d/<module>.conf`), optionally `dracut` (the tool will rebuild the initramfs automatically when `dracut` is present), and a reboot to apply the new limit. amd-smi auto-detects the TTM kernel module name (`ttm`, `amdttm`, or `amd-ttm`) and writes the matching `.conf`.
 
 ### Troubleshooting: `MEM_CARVEOUT: N/A`
@@ -1630,5 +1686,8 @@ prints
 MEM_CARVEOUT: N/A (UMA carveout is not supported on this ASIC/VBIOS)
 ```
 
-This is expected. Use `amd-smi node --gtt` / `amd-smi set --gtt` to tune
-shared GPU memory on those platforms instead.
+On UEFI-HII APU platforms the same knob may still be reachable through fwupd; see
+the fwupd prerequisite above.
+
+This is expected on platforms with no carveout interface. Use `amd-smi node --gtt` /
+`amd-smi set --gtt` to tune shared GPU memory on those platforms instead.

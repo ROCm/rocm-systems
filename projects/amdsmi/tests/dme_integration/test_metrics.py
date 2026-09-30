@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-# Copyright (C) Advanced Micro Devices. All rights reserved.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 """Stdlib-only unit tests for ``dme_integration.metrics``."""
 
 import sys

@@ -16,6 +16,17 @@ if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").match
 <body>
 <div class="roofline-app">
   <div class="roofline-toolbar">
+    <div class="roofline-control">Precision
+      <div class="roofline-precision-dropdown">
+        <button type="button" id="roofline-precision-btn"
+                class="roofline-precision-btn"
+                aria-haspopup="true" aria-expanded="false">
+          <span id="roofline-precision-label">All</span>&#9660;
+        </button>
+        <div class="roofline-precision-menu" id="roofline-precision-menu"
+             hidden></div>
+      </div>
+    </div>
     <label class="roofline-control" id="roofline-peak-control"
            for="roofline-peak-select"
            title="${PEAK_TITLE}">AI axis
@@ -27,7 +38,10 @@ if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").match
       double-click to reset</span>
     <button type="button" id="roofline-reset-view"
             class="roofline-btn roofline-btn-sm"
-            title="Frame the kernels currently shown">Reset zoom</button>
+            title="Return to the fixed opening axes">Reset zoom</button>
+    <button type="button" id="roofline-fit-data"
+            class="roofline-btn roofline-btn-sm"
+            title="Use one-shot zoom for drawn kernels; Reset zoom or double-click returns to fixed axes">Fit to data</button>
     <button type="button" id="roofline-export-png"
             class="roofline-btn roofline-btn-sm"
             title="Download the current chart as a PNG image">Export PNG</button>
@@ -43,6 +57,8 @@ ${PLOT_FRAGMENT}
       <div class="roofline-panel-title">
         <span class="roofline-panel-title-label">Kernels
           <span id="roofline-kernel-count" class="roofline-panel-count"></span>
+          <span id="roofline-kernel-offplot-count"
+                class="roofline-offplot-count" aria-live="polite" hidden></span>
         </span>
         <button type="button" id="roofline-show-all"
                 class="roofline-btn roofline-btn-sm">Show all kernels</button>

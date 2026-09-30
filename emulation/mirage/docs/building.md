@@ -22,6 +22,115 @@ Rust is the only toolchain the mirage build itself needs. Everything
 below that is about rocjitsu, which is a separate C++ project mirage
 merely loads at runtime.
 
+### Upgrading Existing Agents
+
+The complete builtin `vm` and component `topology` are read from the
+RocJITsu configs and validated at build time. Every GPU RocJITsu has a
+config for becomes one builtin agent: `mi300x`, `mi350x` and `mi450x`
+from `gfx942_cdna3.json`, `gfx950_mi355x.json` and `gfx1250_mi455x.json`
+(including their 320, 288 and 256 CU topologies), and `gfx90a_mi210_kmd`,
+`gfx1100_w7900`, `gfx1151` and `gfx1201_r9700` under their config's own
+name. Where RocJITsu ships several configs for one GPU — a `_kmd`
+variant, an `_Ngpu` one — Mirage takes the plainest, because the GPU
+count is a Mirage topology setting (`--gpus-per-node`) that would
+override a baked-in one anyway. Mirage no longer maintains separate
+hardware values or uniform 256-CU layouts.
+
+Builtin **profiles** are not read from disk or written to it. Each is
+derived from the agent it pins, whenever it is asked for, so there is
+nothing to seed and nothing to go stale on upgrade. A profile file is
+always one you wrote, and it shadows the builtin of that name until you
+delete it.
+
+RocJITsu refuses a device that has SDMA engines and no queues on them,
+and it refuses it while loading the config — so a session dies at daemon
+start rather than at profile validation. Mirage never wrote
+`vm.gpu.device.num_sdma_queues_per_engine` before this release, so every
+agent an older Mirage left on disk is one RocJITsu now rejects, `mi350x`
+included — which is what `--profile` defaults to. The shipped MI300X and
+MI350X presets use 8 queues per engine, and MI450X uses 2.
+
+So on startup Mirage replaces an agent file it can prove it wrote itself
+with the one it ships now. Proof means the stored document is either the
+shipped one with just that field missing, or byte-for-meaning one of the
+documents a previous release wrote, kept verbatim in
+`builtin/legacy/*.json` because they cannot be derived from anything —
+the code that produced them is gone. Recognition is exact, and the answer
+is always the whole shipped document rather than a patched copy of the
+old one: the previous `mi350x` has five SDMA engines and four CUs per
+shader array against today's two and nine, so pasting today's queue count
+into it would leave a machine neither Mirage nor RocJITsu ships.
+
+Anything else is left exactly as it is. An agent you edited is yours to
+keep, and so is one from a release too old to be in that table — the
+serialized shape moved more than once before this, and a document from
+one of those is simply not recognised. Adding a release to the table is a
+matter of dumping its agents and appending the file. An explicit `0` is
+likewise an answer, and Mirage does not argue with it — RocJITsu will.
+
+An unrecognised file is not left silent. `mirage state builtins` names it
+along with every other builtin document that differs from the shipped
+one, with its path and how to take the shipped version instead
+(`mirage agent delete <name>`, then run `mirage state builtins` again).
+Profile validation refuses the incomplete pair with the reason, at
+`profile create`, `profile import` and `run` — while the document can
+still be edited, rather than at daemon start.
+
+Agents with older or customized layouts are not overwritten. Missing fields
+are reported against the selected RocJITsu preset during profile validation
+and config synthesis. Preserve any customizations before deleting an old
+builtin agent; the next invocation recreates a missing builtin from the
+current preset.
+
+### Profile Compatibility
+
+Additional JSON fields on an agent are preserved recursively and passed to
+RocJITsu. Additional profile fields may be placed inside `emulator` or at the
+profile root; root extras are normalized into `emulator` when saved. For example:
+
+```json
+{
+  "name": "custom",
+  "emulator": {
+    "emulator": "rocjitsu",
+    "plugins": {},
+    "exec_mode": "Functional",
+    "options": {},
+    "topology": "MI350X-1x1",
+    "max_ticks": 200000,
+    "vm": { "gpu": { "device": { "capability2": 1 } } }
+  }
+}
+```
+
+Objects are merged recursively over the agent configuration; scalar values
+and arrays replace the corresponding values. Mirage's per-node GPU count
+and explicitly selected plugins remain authoritative. Duplicate root and
+emulator overrides are rejected. Mirage-only container and system-topology
+controls still reject unknown fields *within* them. Replacement stops at
+the shape of a field Mirage has a name for: `vm` still has to describe a
+device after merging, so a scalar over `vm.gpu.device` or a string over
+`num_sdma_engines` is refused when the profile is written.
+
+Passthrough is not validation, and RocJITsu is not a backstop: it parses
+the synthesised config with `skip_unexpected_fields_in_json` set, so a key
+it does not recognise is dropped without a word (see
+`config_common.h`). A misspelled key therefore survives Mirage and
+vanishes in RocJITsu, and the machine that comes up is quietly not the one
+the file describes. What Mirage can still tell you is that the key was not
+one of *its own*: a profile-root field Mirage does not recognise is
+forwarded to the emulator with a warning naming it, which is the signal to
+read for `containerise`, `descriptoin` and the like. Inside `emulator` and
+inside an agent there is no such signal — check those against the preset.
+
+Missing profile fields produce warnings on stderr. Omitted `plugins`,
+`exec_mode` and `options` use their defaults; required structural fields
+still cause a parse error. Missing agent fields stay absent in the generated
+JSON so RocJITsu's schema defaults apply. Warnings identify fields present
+in the matching preset, including component config entries; they do not
+replace RocJITsu validation. Explicit zeroes are preserved, not mistaken
+for missing values. `--config` continues to use the supplied file verbatim.
+
 ## Prerequisites
 
 | Tool | Version | Needed for | Notes |
@@ -49,9 +158,10 @@ cargo build --release    # optimized
 This builds the `mirage` binary at `target/debug/mirage` (or
 `target/release/mirage`). The build embeds:
 
-- the **builtin agents, topologies and profiles** — Rust constructors in
-  the `builtin` crate, so the data is validated by the compiler rather
-  than by a runtime parse, and
+- the **builtin agents**, one per GPU in `rocjitsu/configs/`, read from
+  that directory and validated by the `builtin` build script — plus
+  Mirage's system topologies, and the builtin profiles generated from
+  those agents at run time, and
 - the **third-party dependency manifest** that `mirage about` prints,
   distilled from `cargo metadata` by the root `build.rs`.
 
@@ -141,14 +251,17 @@ policy, so what works for one works for the others. For rocjitsu
 1. `$ROCJITSU_LIB`, which names the `.so` **file** itself rather than a
    directory;
 2. every directory on `$LD_LIBRARY_PATH`;
-3. a sibling monorepo build, found by walking up from the `mirage`
+3. an install layout — `<prefix>/lib` next to a `<prefix>/bin/mirage`.
+   This outranks everything below it on purpose: a prefix that ships its
+   own library must use it, even when the prefix happens to sit inside a
+   checkout whose `emulation/rocjitsu/build` also has one;
+4. a sibling monorepo build, found by walking up from the `mirage`
    binary and looking for a rocjitsu build under each ancestor — so an
    integration-test binary in `target/<profile>/deps/` finds it just as
    the CLI does, without anybody counting `..`s;
-4. `$ROCM_HOME/lib`, then `$ROCM_PATH/lib`;
-5. `$(rocm-sdk path --root)/lib` (present when a ROCm Python wheel venv
+5. `$ROCM_HOME/lib`, then `$ROCM_PATH/lib`;
+6. `$(rocm-sdk path --root)/lib` (present when a ROCm Python wheel venv
    is active);
-6. an install layout — `<prefix>/lib` next to a `<prefix>/bin/mirage`;
 7. the standard system directories: `/opt/rocm/lib`, `/usr/local/lib`,
    `/usr/lib`, `/usr/lib/x86_64-linux-gnu`;
 8. the in-container mount directory, for a containerised session where
@@ -167,8 +280,11 @@ opts out: it takes `HOTSWAP_HOME` (an install root, with
 
 Reach for the file overrides — `ROCJITSU_LIB`, `ROCJITSU_HOOKS_LIB` — when
 you have a library in a place no search would guess, or when you want to
-pin one build while another sits in the way. Reach for `ROCM_HOME` or
-`ROCM_PATH` for an ordinary install root.
+pin one build while another sits in the way. They are also what you need
+when the prefix itself is the problem: step 3 outranks
+`ROCM_HOME`/`ROCM_PATH`, so those two select an ordinary install root but
+cannot override a `<prefix>/lib` beside the `mirage` you are running —
+only `ROCJITSU_LIB` or `$LD_LIBRARY_PATH` can.
 
 You do not have to reason about any of this in the dark. `mirage
 emulators -l` prints, per backend, the library it resolved — or, when it
@@ -235,6 +351,16 @@ alive, every one of those tests is bounded by a process it started: a
 suite that crashes cannot leave a session behind for the next one to
 trip over.
 
+The release lane of [RocJITsu CI](../../../.github/workflows/rocjitsu-corpus-tests.yml)
+runs `cargo test --locked --workspace --no-fail-fast -- --test-threads=4 --nocapture`
+against that job's freshly built RocJITsu libraries, with missing-emulator
+skips disabled. Changes to either project trigger the workflow. This
+includes daemon startup for every builtin agent — the list is taken from
+`mirage agent list`, so a GPU added to RocJITsu is covered without
+editing a test — legacy-agent upgrades, the container and lifecycle
+suites, and the software-emulator matrix.
+Hardware-dependent DBT cases remain capability-gated.
+
 ## Linting
 
 The workspace lint policy lives in [`Cargo.toml`](../Cargo.toml) under
@@ -279,6 +405,33 @@ test suite.
 - **`no mirage run is serving session <id>`** — the run that owned the
   session has exited. A session exists exactly as long as its `mirage
   run` does; start one in another terminal and `mirage exec` into that.
+- **The workload sees no GPU, and exits 0 anyway** — `rocminfo` reports
+  only the CPU agent, the session came up normally and nothing failed.
+  Almost always this is a ROCm that predates the GPU the session
+  emulates: `libhsa-runtime64.so` enumerates agents by looking their ISA
+  up in the table it was compiled with, and one it does not recognise is
+  skipped without a word. Before each host workload starts, mirage
+  statically checks the command's unambiguous direct `DT_RUNPATH`
+  resolution and warns —
+
+  > `mirage: the ROCm runtime this workload will load does not support
+  > gfx1250, which is the GPU this session emulates. …`
+
+  — naming the resolved runtime and the ROCm version beside it. Run the
+  workload under a newer ROCm (`mirage run --image <a newer ROCm image>`
+  is the usual way), or emulate a GPU this ROCm supports: a session's
+  target comes from its profile, or from the device a drop-in `--config`
+  describes. A `--config` with a DBT guest enabled names no target, because
+  the session presents the host's devices and the guest together. The
+  check is deliberately conservative — it warns only for a
+  trusted system executable that links ROCr directly through a modern
+  absolute or `$ORIGIN`-based `RUNPATH`, with no loader override or
+  hardware-capability alternative in the way. Everything else stays
+  silent: user-built executables, anything that loads ROCr later with
+  `dlopen` (Python included), transitive dependencies, legacy `RPATH`,
+  cache-only resolution, preloads including a system-wide
+  `/etc/ld.so.preload`, HSA overrides, and set-ID or file-capability
+  executables. Its silence therefore does not rule this cause out.
 - **A backend reported as not installed** — run `mirage emulators -l`
   first. It prints every path that was searched for that backend's
   library and the environment variables that would resolve it, which is

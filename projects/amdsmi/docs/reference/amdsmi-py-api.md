@@ -620,9 +620,12 @@ Field | Content
 `vendor_id` |  vendor id
 `vendor_name` |  vendor name
 `device_id` |  device id
-`rev_id` |  revision id
+`rev_id` |  PCI config-space revision id (`"N/A"` if not supported)
+`chip_rev_id` | amdgpu `chip_rev`; internal chip revision (stepping) as the driver reports it, not decoded (`"N/A"` if not supported)
+`external_rev_id` | amdgpu `external_rev`; family-scoped, so interpret it alongside `device_id` (`"N/A"` if not supported)
 `asic_serial` | asic serial
 `oam_id` | oam id
+`physical_acc_id` | physical accelerator ID (UALoE-backed; `"N/A"` if not supported)
 `num_of_compute_units` | number of compute units on asic
 `target_graphics_version` | hardware graphics version
 `subsystem_id` |  subsystem id
@@ -1776,7 +1779,7 @@ Field | Description
 ---|---
 `pid` | Process ID
 `name` | Name of process. If user does not have permission this will be "N/A"
-`container_name` | Container name, when the process runs inside a container
+`container_name` | Identifier of the container the process runs in, or empty if it is not in a container. For Docker, containerd, CRI-O and Podman this is the full 64-character container ID; for LXC it is the container name
 `gpus` | <table><thead><tr><th>Subfield</th><th>Description</th></tr></thead><tbody><tr><td>`gpu_index`</td><td>GPU index the entry refers to</td></tr><tr><td>`mem`</td><td>Total memory usage on this GPU in Bytes</td></tr><tr><td>`engine_usage`</td><td>`gfx` and `enc` engine usage in ns</td></tr><tr><td>`memory_usage`</td><td>`gtt_mem`, `cpu_mem`, and `vram_mem` usage in Bytes</td></tr><tr><td>`cu_occupancy`</td><td>Number of Compute Units utilized</td></tr><tr><td>`sdma_usage`</td><td>SDMA usage in microseconds</td></tr><tr><td>`evicted_time`</td><td>Time queues are evicted on this GPU in milliseconds</td></tr></tbody></table>
 
 Exceptions that can be thrown by `amdsmi_get_gpu_process_list_by_pid` function:
@@ -3083,6 +3086,42 @@ try:
         print(npm_info['status'])
         print(npm_info['limit'])
         print(npm_info['ubb_power_threshold'])
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_tray_info
+
+Description: Returns node-scoped compute tray type and accelerator count via UALoE.
+
+Input parameters: `node_handle` (reserved for future use; must be `None`)
+
+Output: Dictionary with fields
+
+Field | Description | Units
+---|---|---
+`max_acc_per_tray` | Number of accelerators on the compute tray | -
+`tray_type` | Compute tray type (`HELIOS_P`, `HELIOS_R`, `TITAN`, or `UNKNOWN`) | -
+
+Exceptions that can be thrown by `amdsmi_get_tray_info` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported (no active UALoE session)
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    tray_info = amdsmi.amdsmi_get_tray_info()
+    print(tray_info['max_acc_per_tray'])
+    print(tray_info['tray_type'])
 except amdsmi.AmdSmiException as e:
     print(e)
 finally:

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -40,6 +40,7 @@
 #include <stdexcept>
 #include <thread>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #define ROCPROFILER_CALL(result, msg)                                                              \
@@ -78,14 +79,16 @@ public:
     // Decode the counter name of a record
     std::string decode_record_name(const rocprofiler_counter_record_t& rec) const;
 
-    // Get the dimensions of a record (what CU/SE/etc the counter is for). High cost operation
-    // should be cached if possible.
-    static std::unordered_map<std::string, size_t> get_record_dimensions(
-        const rocprofiler_counter_record_t& rec);
+    // Get the dimensions of a record (what CU/SE/etc the counter is for) paired with the
+    // position of the record within each dimension. High cost operation, should be cached
+    // if possible.
+    static std::vector<std::pair<rocprofiler_counter_record_dimension_info_t, size_t>>
+    get_record_dimensions(const rocprofiler_counter_record_t& rec);
 
     // Sample the counter values for a set of counters, returns the records in the out parameter.
     rocprofiler_status_t sample_counter_values(const std::vector<std::string>&            counters,
-                                               std::vector<rocprofiler_counter_record_t>& out);
+                                               std::vector<rocprofiler_counter_record_t>& out,
+                                               rocprofiler_user_data_t user_data);
 
     // Get the available agents on the system
     static std::vector<rocprofiler_agent_v0_t> get_available_agents();
@@ -184,26 +187,26 @@ counter_sampler::decode_record_name(const rocprofiler_counter_record_t& rec) con
     return id_to_name_.at(counter_id.handle);
 }
 
-std::unordered_map<std::string, size_t>
+std::vector<std::pair<rocprofiler_counter_record_dimension_info_t, size_t>>
 counter_sampler::get_record_dimensions(const rocprofiler_counter_record_t& rec)
 {
-    std::unordered_map<std::string, size_t> out;
-    rocprofiler_counter_id_t                counter_id = {.handle = 0};
+    std::vector<std::pair<rocprofiler_counter_record_dimension_info_t, size_t>> out;
+    rocprofiler_counter_id_t counter_id = {.handle = 0};
     rocprofiler_query_record_counter_id(rec.id, &counter_id);
-    auto dims = get_counter_dimensions(counter_id);
 
-    for(auto& dim : dims)
+    for(auto& dim : get_counter_dimensions(counter_id))
     {
         size_t pos = 0;
         rocprofiler_query_record_dimension_position(rec.id, dim.id, &pos);
-        out.emplace(dim.name, pos);
+        out.emplace_back(dim, pos);
     }
     return out;
 }
 
 rocprofiler_status_t
 counter_sampler::sample_counter_values(const std::vector<std::string>&            counters,
-                                       std::vector<rocprofiler_counter_record_t>& out)
+                                       std::vector<rocprofiler_counter_record_t>& out,
+                                       rocprofiler_user_data_t                    user_data)
 {
     auto profile_cached = cached_profiles_.find(counters);
     if(profile_cached == cached_profiles_.end())
@@ -223,6 +226,13 @@ counter_sampler::sample_counter_values(const std::vector<std::string>&          
             gpu_counters.push_back(it->second);
             expected_size += get_counter_size(it->second);
         }
+        // A partial profile would silently drop a requested counter, so treat any missing
+        // counter as unavailable.
+        if(gpu_counters.size() < counters.size())
+        {
+            out.clear();
+            return ROCPROFILER_STATUS_ERROR_NO_HARDWARE_COUNTERS;
+        }
         ROCPROFILER_CALL(rocprofiler_create_counter_config(
                              agent_, gpu_counters.data(), gpu_counters.size(), &profile),
                          "Could not create profile");
@@ -238,14 +248,26 @@ counter_sampler::sample_counter_values(const std::vector<std::string>&          
         std::cerr << "Caught exception: " << e.what() << "\n";
         return ROCPROFILER_STATUS_ERROR;
     }
-    profile_ = profile_cached->second;
-    rocprofiler_start_context(ctx_);
+    profile_          = profile_cached->second;
+    auto start_status = rocprofiler_start_context(ctx_);
+    if(start_status != ROCPROFILER_STATUS_SUCCESS)
+    {
+        // A failed start still leaves the context active, and starting an active
+        // context reports success without configuring the service. Leaving it
+        // there also lets the library start the service itself once HSA
+        // registers, racing this loop, so undo the attempt before returning.
+        rocprofiler_stop_context(ctx_);
+        out.clear();
+        return start_status;
+    }
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     size_t out_size = out.size();
     auto   status   = rocprofiler_sample_device_counting_service(
-        ctx_, {}, ROCPROFILER_COUNTER_FLAG_NONE, out.data(), &out_size);
-    rocprofiler_stop_context(ctx_);
+        ctx_, user_data, ROCPROFILER_COUNTER_FLAG_NONE, out.data(), &out_size);
+    auto stop_status = rocprofiler_stop_context(ctx_);
     out.resize(out_size);
+    if(status == ROCPROFILER_STATUS_SUCCESS && stop_status != ROCPROFILER_STATUS_SUCCESS)
+        return stop_status;
     return status;
 }
 
@@ -263,7 +285,9 @@ counter_sampler::get_available_agents()
         for(size_t i = 0; i < num_agents; ++i)
         {
             const auto* rocp_agent = static_cast<const rocprofiler_agent_v0_t*>(agents_arr[i]);
-            if(rocp_agent->type == ROCPROFILER_AGENT_TYPE_GPU) agents_v->emplace_back(*rocp_agent);
+            if(rocp_agent->type == ROCPROFILER_AGENT_TYPE_GPU &&
+               rocp_agent->runtime_visibility.hsa && rocp_agent->runtime_visibility.hip)
+                agents_v->emplace_back(*rocp_agent);
         }
         return ROCPROFILER_STATUS_SUCCESS;
     };
@@ -349,6 +373,13 @@ exit_toggle()
     return exit_toggle;
 }
 
+bool
+is_terminal_status(rocprofiler_status_t status)
+{
+    return status == ROCPROFILER_STATUS_ERROR_FINALIZED ||
+           status == ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
+}
+
 rocprofiler_client_finalize_t    finalize       = nullptr;
 rocprofiler_client_id_t*         client_id      = nullptr;
 std::shared_ptr<counter_sampler> sampler        = {};
@@ -356,9 +387,11 @@ std::thread*                     sampler_thread = nullptr;
 }  // namespace
 
 int
-tool_init(rocprofiler_client_finalize_t fini_func, void*)
+tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 {
-    finalize = fini_func;
+    finalize            = fini_func;
+    auto* output_stream = static_cast<std::ostream*>(user_data);
+    if(!output_stream) throw std::runtime_error{"nullptr to output stream"};
 
     std::atexit([]() {
         if(client_id) finalize(*client_id);
@@ -375,41 +408,58 @@ tool_init(rocprofiler_client_finalize_t fini_func, void*)
     // Use the first agent found
     sampler = std::make_shared<counter_sampler>(agents[0].id);
 
-    sampler_thread = new std::thread{[=]() {
-        size_t                                    count = 1;
-        std::vector<rocprofiler_counter_record_t> records;
-        while(sampler && exit_toggle().load() == false)
+    sampler_thread = new std::thread{[output_stream]() {
+        // An exception escaping this thread would terminate the profiled application.
+        try
         {
-            auto status = sampler->sample_counter_values({"SQ_WAVES"}, records);
-            if(status == ROCPROFILER_STATUS_ERROR_HSA_NOT_LOADED)
+            size_t                                    count              = 1;
+            bool                                      printed_dimensions = false;
+            std::vector<rocprofiler_counter_record_t> records;
+            while(sampler && exit_toggle().load() == false)
             {
-                std::clog << "HSA not loaded yet....\n";
-                std::this_thread::sleep_for(std::chrono::milliseconds(50));
-                continue;
-            }
-            std::clog << "Sample " << count << ":\n";
-            if(status == ROCPROFILER_STATUS_SUCCESS)
-            {
+                auto status = sampler->sample_counter_values(
+                    {"SQ_WAVES", "GRBM_COUNT"}, records, {.value = count});
+                if(exit_toggle().load()) break;
+                if(status == ROCPROFILER_STATUS_ERROR_HSA_NOT_LOADED ||
+                   status == ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR ||
+                   status == ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED)
+                {
+                    std::clog << "Device counting service unavailable, retrying....\n";
+                    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                    continue;
+                }
+                if(is_terminal_status(status)) break;
+                if(status == ROCPROFILER_STATUS_ERROR_NO_HARDWARE_COUNTERS)
+                {
+                    *output_stream << "Device counting unavailable: no hardware counters\n";
+                    break;
+                }
+                ROCPROFILER_CALL(status, "Could not sample");
+                *output_stream << "Sample " << count << ":\n";
                 for(const auto& record : records)
                 {
                     if(!sampler) break;
                     auto recname = sampler->decode_record_name(record);
-                    std::clog << "\tCounter: " << record.id << " Name: " << recname
-                              << " Value: " << record.counter_value
-                              << " User data: " << record.user_data.value << "\n";
-                    if(count == 1)
+                    *output_stream << "\tCounter: " << record.id << " Name: " << recname
+                                   << " Value: " << record.counter_value
+                                   << " User data: " << record.user_data.value << "\n";
+                    if(!printed_dimensions)
                     {
                         if(!sampler) break;
-                        auto dims = sampler->get_record_dimensions(record);
-                        for(const auto& [name, pos] : dims)
+                        for(const auto& [dim, pos] : sampler->get_record_dimensions(record))
                         {
-                            std::clog << "\t\tDimension Name: " << name << ": " << pos << "\n";
+                            *output_stream << "\t\tDimension Name: " << dim.name << ": " << pos
+                                           << "/" << dim.instance_size << "\n";
                         }
                     }
                 }
+                if(!records.empty()) printed_dimensions = true;
+                count++;
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
             }
-            count++;
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        } catch(const std::exception& e)
+        {
+            std::cerr << "Sampler thread threw an exception: " << e.what() << "\n";
         }
         exit_toggle().store(false);
     }};
@@ -426,13 +476,12 @@ tool_fini(void* user_data)
     client_id = nullptr;
 
     exit_toggle().store(true);
-    while(exit_toggle().load() == true)
-    {};
-
-    sampler->stop();
-    sampler->flush();
-
-    sampler_thread->join();
+    if(sampler_thread && sampler_thread->joinable()) sampler_thread->join();
+    if(sampler)
+    {
+        sampler->stop();
+        sampler->flush();
+    }
 
     auto* output_stream = static_cast<std::ostream*>(user_data);
     *output_stream << std::flush;
@@ -440,6 +489,7 @@ tool_fini(void* user_data)
 
     sampler.reset();
     delete sampler_thread;
+    sampler_thread = nullptr;
 
     std::clog << "Completed tool fini\n" << std::flush;
 }

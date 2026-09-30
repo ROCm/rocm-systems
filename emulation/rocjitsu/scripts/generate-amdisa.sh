@@ -39,6 +39,10 @@ repo="$(git -C "$script_dir" rev-parse --show-toplevel)" \
   || die "could not find repository root from $script_dir"
 repo="$(cd "$repo" && pwd -P)"
 isa_xml="$repo/shared/machine-readable-isa/isa"
+cdna5_delta="$isa_xml/amdgpu_isa_cdna5_gfx1251_delta.xml"
+cdna5_provenance="$isa_xml/amdgpu_isa_cdna5_gfx1251_provenance.json"
+cdna5_provenance_verifier="$isa_xml/verify_amdgpu_isa_cdna5_gfx1251_delta.py"
+cdna5_variants="$isa_xml/amdgpu_isa_cdna5_variants.json"
 isa_out="$rocjitsu/lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated"
 dbt_out="$rocjitsu/lib/rocjitsu/src/rocjitsu/code/dbt/generated"
 
@@ -90,14 +94,24 @@ done
 for entry in "${isa_entries[@]}"; do
   [[ -f "${entry#*:}" ]] || die "ISA XML not found: ${entry#*:}"
 done
+for input in "$cdna5_delta" "$cdna5_provenance" "$cdna5_provenance_verifier" \
+  "$cdna5_variants"; do
+  [[ -f "$input" ]] || die "CDNA5 extension input not found: $input"
+done
 
 export PATH="$venv/bin:$PATH"
 export PYTHONPATH="$rocjitsu/lib/python${PYTHONPATH:+:$PYTHONPATH}"
 
+log "Verify CDNA5 gfx1251 public provenance"
+"$python" "$cdna5_provenance_verifier" --manifest "$cdna5_provenance"
+
 log "Running amdisa generator"
 "$python" -m amdisa \
-  --multi "${isa_entries[@]}" \
+  "${isa_entries[@]}" \
+  --isa-additions "cdna5:$cdna5_delta" \
+  --isa-variants "cdna5:$cdna5_variants" \
   --isa-output "$isa_out" \
+  --include-root "$rocjitsu/lib/rocjitsu/src" \
   --dbt-output "$dbt_out"
 
 isa_rel="${isa_out#"$repo/"}"

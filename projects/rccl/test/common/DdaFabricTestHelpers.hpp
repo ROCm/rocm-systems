@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <cstring>
 #include <limits>
 
@@ -34,6 +35,7 @@ struct DdaFabricMockComm
         // with an exact small value when exercising scratch-size rejection.
         comm.ddaScratchBytes    = std::numeric_limits<size_t>::max();
         comm.ddaFabricMaxBlocks = DDA_FABRIC_MAXBLOCKS;
+        comm.archName            = const_cast<char*>("gfx1250");
         setFabricResourcesPresent(true);
     }
 
@@ -47,6 +49,8 @@ struct DdaFabricMockComm
             comm.ddaPeerPtrsDev = reinterpret_cast<void*>(0x3);
             comm.ddaFabricBarrierState =
                 reinterpret_cast<nccl_dda_detail::DdaFabricBarrierState*>(0x4);
+            comm.ddaLLEpochDev = reinterpret_cast<uint32_t*>(0x5);
+            comm.ddaLLEpochLen = DDA_FABRIC_MAXBLOCKS;
         }
         else
         {
@@ -54,6 +58,8 @@ struct DdaFabricMockComm
             comm.ddaScratch            = nullptr;
             comm.ddaPeerPtrsDev        = nullptr;
             comm.ddaFabricBarrierState = nullptr;
+            comm.ddaLLEpochDev         = nullptr;
+            comm.ddaLLEpochLen         = 0;
         }
     }
 

@@ -31,10 +31,12 @@ namespace RcclUnitTesting
     bool useInteractive; // Run in interactive mode                [UT_INTERACTIVE]
     int  timeoutUs;      // Set timeout for child in microseconds  [UT_TIMEOUT_US]
     bool useMultithreading; // Multi-thread single-process ranks   [UT_MULTITHREAD]
+    bool commPool;       // Reuse child processes across configs    [UT_COMM_POOL]
 
     bool isGfx94;        // Detects if architecture is gfx94
     bool isGfx95;        // Detects if architecture is gfx95
     bool isGfx12;        // Detects if architecture is gfx12
+    bool isGfx1250;      // Detects if architecture is exactly gfx1250
     bool isGfx90;        // Detects if architecture is gfx90
 
     // Constructor that parses and collects environment variables
@@ -46,6 +48,8 @@ namespace RcclUnitTesting
     std::vector<int>            const& GetNumGpusList();
     std::vector<int>            const& GetIsMultiProcessList();
     std::vector<int>            const& GetGpuPriorityOrder();   // Orders the gpus based on the associativity of them with OAM with higher gpus linked.
+    // Detected device count (computed HIP-clean via a forked probe)
+    int GetNumDetectedGpus() const { return numDetectedGpus; }
     void ShowConfig();
 
   protected:

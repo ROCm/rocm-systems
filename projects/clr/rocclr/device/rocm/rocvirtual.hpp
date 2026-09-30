@@ -692,6 +692,10 @@ class VirtualGPU : public device::VirtualDevice {
   //! Analyzes a crashed AQL queue to find a broken AQL packet.
   //! Returns the faulting kernel name ("<not identified>" if not found).
   std::string AnalyzeAqlQueue() const;
+
+  //! Emits the hang report itself. Called by AnalyzeAqlQueue, which brackets it
+  //! with the banner.
+  std::string AnalyzeAqlQueueBody() const;
   bool ForceIrq() const { return force_irq_; }
 
   //! SDMA engine affinity management

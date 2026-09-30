@@ -14,8 +14,9 @@
 // parameters to this specialization; UserRegMode selects the latency protocol:
 //   UserRegMode == 0 -> latency-bound send/recv uses the legacy LL protocol. Built on every
 //                       arch; the default and the only variant when LL128 is off.
-//   UserRegMode == 1 -> latency-bound send/recv uses LL128. Only generated for gfx942/gfx950
-//                       and only launched when NCCL_ALLOC_P2P_NET_LL_BUFFERS=1.
+//   UserRegMode == 1 -> latency-bound send/recv uses LL128. Built for gfx942/gfx950/gfx1250,
+//                       launched on gfx942/gfx950 only, and only when
+//                       NCCL_ALLOC_P2P_NET_LL_BUFFERS=1.
 // The host picks the variant via ncclDevFuncId_P2p(useLL128); the per-op work->{send,recv}
 // ProtoLL bit only means "this op is latency-bound", not which LL-family protocol.
 template <typename T, typename RedOp>
@@ -60,7 +61,7 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
     } while (cursor < bytes);
   }
 
-#if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__) && !defined(__gfx1250__)
+#if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__) && (!defined(__gfx1250__) && !defined(__gfx1250_strict__))
   __device__ void run(){
 #else
   __device__ __attribute__((noinline)) void run() {
@@ -174,7 +175,7 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
   }
 
   if (isCopy) {
-#if defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)
+#if defined(__gfx942__) || defined(__gfx950__) || (defined(__gfx1250__) || defined(__gfx1250_strict__))
     reduceCopy<COLL_UNROLL * 2, 0, RedOp, T, 0, 1, 1, 0, 1, 1, /*PreOpSrcs=*/0>(
       subtid, subtn, 0, false, 1, &work->sendAddr, 1, &work->recvAddr, (ssize_t)work->sendBytes);
 #else
@@ -193,7 +194,7 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
       runSend<ProtoSimple<1, 1, 0, 8>>(subtid, subtn, group, work);
 #elif defined(__gfx908__) || defined(__gfx942__) || defined(__gfx950__)
         runSend<ProtoSimple<1, 1, 0, 4>>(subtid, subtn, group, work);
-#elif defined(__gfx1250__)
+#elif (defined(__gfx1250__) || defined(__gfx1250_strict__))
       runSend<ProtoSimple<1, 1, 0, COLL_UNROLL>>(subtid, subtn, group, work);
 #else
       runSend<ProtoSimple<1, 1>>(subtid, subtn, group, work);
@@ -211,7 +212,7 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
       runRecv<ProtoSimple<1, 1, 0, 8>>(subtid, subtn, group, work);
 #elif defined(__gfx908__) || defined(__gfx942__) || defined(__gfx950__)
         runRecv<ProtoSimple<1, 1, 0, 4>>(subtid, subtn, group, work);
-#elif defined(__gfx1250__)
+#elif (defined(__gfx1250__) || defined(__gfx1250_strict__))
       runRecv<ProtoSimple<1, 1, 0, COLL_UNROLL>>(subtid, subtn, group, work);
 #else
       runRecv<ProtoSimple<1, 1>>(subtid, subtn, group, work);

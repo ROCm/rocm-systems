@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "ualoe_cdev.h"
 
@@ -319,10 +300,10 @@ int ualoe_cdev_set_ifoe_config(ualoe_handle_t handle, ifoe_virt_mode_e virt_mode
   struct cfg_ifoe_config config;
   int rc;
 
-  config.v_mode = virt_mode;
-  config.e_type = encap_type;
-  config.f_mode = failover_mode;
-  config.loopback_mode = loopback_mode;
+  config.v_mode = (enum cfg_ifoe_virt_mode)virt_mode;
+  config.e_type = (enum cfg_ifoe_encap_type)encap_type;
+  config.f_mode = (enum cfg_ifoe_failover_mode)failover_mode;
+  config.loopback_mode = (enum cfg_ifoe_loopback_mode)loopback_mode;
 
   rc = ioctl(handle, CFG_SET_IFOE_CONFIG, &config);
   if (rc == -1) return errno;
@@ -334,7 +315,7 @@ int ualoe_cdev_next_config_phase(ualoe_handle_t handle, ualoe_config_phase_e nex
   enum cfg_config_phase n_phase;
   int rc;
 
-  n_phase = next_phase;
+  n_phase = (enum cfg_config_phase)next_phase;
   rc = ioctl(handle, CFG_NEXT_CONFIG_PHASE, &n_phase);
   if (rc == -1) return errno;
 
@@ -348,7 +329,7 @@ int ualoe_cdev_get_current_config_phase(ualoe_handle_t handle, ualoe_config_phas
   rc = ioctl(handle, CFG_GET_CURRENT_CONFIG_PHASE, &curr_phase);
   if (rc == -1) return errno;
 
-  *phase = curr_phase;
+  *phase = (ualoe_config_phase_e)curr_phase;
   return 0;
 }
 
@@ -689,7 +670,7 @@ static int ualoe_cdev_telemetry_ioctl_get(ualoe_handle_t handle, ualoe_telemetry
     /* Skip NULL datasets (filtered categories) */
     if (telemetry->datasets[i] == NULL) continue;
 
-    telemetry->datasets[i]->category = cfg_tele.datasets[i].category;
+    telemetry->datasets[i]->category = (ualoe_telemetry_category_e)cfg_tele.datasets[i].category;
     telemetry->datasets[i]->generation_count = cfg_tele.datasets[i].generation_count;
     telemetry->datasets[i]->timestamp = cfg_tele.datasets[i].timestamp;
     telemetry->datasets[i]->instance_count = cfg_tele.datasets[i].instance_count;

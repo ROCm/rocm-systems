@@ -65,13 +65,14 @@ namespace RcclUnitTesting
     int isGfx94 = (numGpus > 0);
     int isGfx95 = (numGpus > 0);
     int isGfx12 = (numGpus > 0);
+    int isGfx1250 = (numGpus > 0);
     int isGfx90 = (numGpus > 0);
     for (int dev = 0; dev < numGpus; ++dev)
     {
       hipDeviceProp_t devProp;
       if (hipGetDeviceProperties(&devProp, dev) != hipSuccess)
       {
-        isGfx94 = isGfx95 = isGfx12 = isGfx90 = 0;
+        isGfx94 = isGfx95 = isGfx12 = isGfx1250 = isGfx90 = 0;
         break;
       }
       char const* tok  = strtok(devProp.gcnArchName, ":");
@@ -79,6 +80,7 @@ namespace RcclUnitTesting
       isGfx94 &= (std::strncmp("gfx94", arch, 5) == 0);
       isGfx95 &= (std::strncmp("gfx95", arch, 5) == 0);
       isGfx12 &= (std::strncmp("gfx12", arch, 5) == 0);
+      isGfx1250 &= (std::strcmp("gfx1250", arch) == 0);
       isGfx90 &= (std::strncmp("gfx90", arch, 5) == 0);
     }
 
@@ -136,7 +138,7 @@ namespace RcclUnitTesting
       }
     }
 
-    // Serialize: numGpus, 4 arch flags, cpx flag, then numGpus priority ints.
+    // Serialize: numGpus, 5 arch flags, cpx flag, then numGpus priority ints.
     auto writeAll = [fd](void const* buf, size_t len)
     {
       size_t off = 0;
@@ -154,6 +156,7 @@ namespace RcclUnitTesting
     writeAll(&isGfx94, sizeof(isGfx94));
     writeAll(&isGfx95, sizeof(isGfx95));
     writeAll(&isGfx12, sizeof(isGfx12));
+    writeAll(&isGfx1250, sizeof(isGfx1250));
     writeAll(&isGfx90, sizeof(isGfx90));
     writeAll(&isCpx,   sizeof(isCpx));
     if (numGpus > 0)
@@ -226,10 +229,11 @@ namespace RcclUnitTesting
       return true;
     };
 
-    int numGpus = 0, g94 = 0, g95 = 0, g12 = 0, g90 = 0, cpx = 0;
+    int numGpus = 0, g94 = 0, g95 = 0, g12 = 0, g1250 = 0, g90 = 0, cpx = 0;
     bool ok = readAll(&numGpus, sizeof(numGpus)) && readAll(&g94, sizeof(g94))
               && readAll(&g95, sizeof(g95)) && readAll(&g12, sizeof(g12))
-              && readAll(&g90, sizeof(g90)) && readAll(&cpx, sizeof(cpx));
+              && readAll(&g1250, sizeof(g1250)) && readAll(&g90, sizeof(g90))
+              && readAll(&cpx, sizeof(cpx));
     std::vector<int> priority;
     if (ok && numGpus > 0)
     {
@@ -251,6 +255,7 @@ namespace RcclUnitTesting
     isGfx94 = (g94 != 0);
     isGfx95 = (g95 != 0);
     isGfx12 = (g12 != 0);
+    isGfx1250 = (g1250 != 0);
     isGfx90 = (g90 != 0);
     if (isCpxOut != nullptr)
     {
@@ -302,7 +307,7 @@ namespace RcclUnitTesting
     // NOTE: HIP must not be used in this parent before the tests launch their own
     // child processes, hence the isolated probe.
     numDetectedGpus = 0;
-    isGfx94 = isGfx95 = isGfx12 = isGfx90 = false;
+    isGfx94 = isGfx95 = isGfx12 = isGfx1250 = isGfx90 = false;
     bool             isCpxMode = false;
     std::vector<int> detectedPriority;
     if (!isIsolatedChild)
@@ -333,6 +338,7 @@ namespace RcclUnitTesting
     useInteractive = GetEnvVar("UT_INTERACTIVE",  0);
     timeoutUs      = GetEnvVar("UT_TIMEOUT_US" ,  5000000);
     useMultithreading = GetEnvVar("UT_MULTITHREAD", false);
+    commPool          = GetEnvVar("UT_COMM_POOL", true);
 
     // Total number of reduction ops
     int numOps = ncclNumOps;
@@ -481,6 +487,7 @@ namespace RcclUnitTesting
         std::make_tuple("UT_INTERACTIVE"      , useInteractive, "Run in interactive mode"),
         std::make_tuple("UT_TIMEOUT_US"       , timeoutUs     , "Timeout limit for collective calls in us"),
         std::make_tuple("UT_MULTITHREAD"      , useMultithreading, "Multi-thread single-process ranks"),
+        std::make_tuple("UT_COMM_POOL"        , commPool      , "Reuse child processes across configs"),
         std::make_tuple("UT_DEVICE_DATA"      , -1            , "Build/validate test data on GPU (0=host path; default on)"),
         std::make_tuple("UT_DEVICE_DATA_MIN_ELEMS", -1        , "Min elements for the device-data path (default 1Mi)"),
         std::make_tuple("UT_DEVICE_DATA_FAULT", -1            , "Negative control: corrupt one expected element (default off)"),

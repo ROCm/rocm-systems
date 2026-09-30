@@ -26,7 +26,7 @@ constexpr uint32_t kInvalidLdsAddress = UINT32_MAX;
 /// latter has the combined capacity of both physical CUs. Addresses are
 /// byte-granularity and local to the selected placement (not globally visible).
 /// Logical capacity is independent of host storage: unmaterialized bytes read
-/// as zero, while writes and workgroup reservations grow a contiguous,
+/// as zero, while writes and workgroup reservations grow a contiguous
 /// prefix in fixed 4 KiB backing granules. Clearing LDS retains the materialized
 /// prefix for reuse.
 class Lds : public simdojo::MemoryInterface {
@@ -40,7 +40,7 @@ public:
   /// @brief Return the bytes currently backed by host storage.
   ///
   /// @details The remaining logical capacity reads as zero and is materialized
-  /// on the first write or workgroup allocation that reaches it. This accessor
+  /// on the first write or workgroup reservation that reaches it. This accessor
   /// is intended for diagnostics and allocation tests.
   size_t materialized_size_bytes() const { return data_.size(); }
 
@@ -72,8 +72,7 @@ public:
   void write16(uint32_t addr, uint16_t val) {
     if (!contains(addr, 2))
       return;
-    ensure_materialized(static_cast<size_t>(addr) + sizeof(val));
-    std::memcpy(&data_[addr], &val, 2);
+    write_backing(addr, reinterpret_cast<const uint8_t *>(&val), sizeof(val));
   }
 
   /// @brief Read 32 bits (little-endian) from LDS. OOB returns 0.
@@ -89,8 +88,7 @@ public:
   void write32(uint32_t addr, uint32_t val) {
     if (!contains(addr, 4))
       return;
-    ensure_materialized(static_cast<size_t>(addr) + sizeof(val));
-    std::memcpy(&data_[addr], &val, 4);
+    write_backing(addr, reinterpret_cast<const uint8_t *>(&val), sizeof(val));
   }
 
   /// @brief Read 64 bits (little-endian) from LDS. OOB returns 0.
@@ -106,8 +104,7 @@ public:
   void write64(uint32_t addr, uint64_t val) {
     if (!contains(addr, 8))
       return;
-    ensure_materialized(static_cast<size_t>(addr) + sizeof(val));
-    std::memcpy(&data_[addr], &val, 8);
+    write_backing(addr, reinterpret_cast<const uint8_t *>(&val), sizeof(val));
   }
 
   /// @brief Bulk read of arbitrary size from LDS. OOB returns 0.
@@ -125,8 +122,7 @@ public:
   void write(uint32_t addr, const uint8_t *src, uint32_t size) {
     if (size == 0 || !contains(addr, size))
       return;
-    ensure_materialized(static_cast<size_t>(addr) + size);
-    std::memcpy(&data_[addr], src, size);
+    write_backing(addr, src, size);
   }
 
   /// @brief MemoryInterface read (truncates addr to 32-bit local address).
@@ -144,8 +140,7 @@ public:
       return;
     auto a = static_cast<uint32_t>(addr);
     assert(contains(a, size));
-    ensure_materialized(static_cast<size_t>(a) + size);
-    std::memcpy(&data_[a], src, size);
+    write_backing(a, src, size);
   }
 
   /// @brief Per-lane vector load from LDS.
@@ -191,8 +186,7 @@ public:
         uint64_t ea = base + static_cast<uint64_t>(e) * elem_size;
         if (ea + elem_size > capacity_bytes_)
           continue;
-        ensure_materialized(static_cast<size_t>(ea) + elem_size);
-        std::memcpy(&data_[ea], src + lane * stride + e * elem_size, elem_size);
+        write_backing(static_cast<size_t>(ea), src + lane * stride + e * elem_size, elem_size);
       }
     }
   }
@@ -201,6 +195,14 @@ public:
   void clear() {
     if (!data_.empty())
       std::memset(data_.data(), 0, data_.size());
+  }
+
+  /// @brief Materialize a reservation without clearing previously written bytes.
+  void materialize_range(uint32_t offset, uint32_t len) {
+    const size_t begin = offset;
+    const size_t end = std::min(capacity_bytes_, begin + static_cast<size_t>(len));
+    if (begin < end)
+      ensure_materialized(end);
   }
 
   void zero_range(uint32_t offset, uint32_t len) {
@@ -224,6 +226,15 @@ private:
       std::memcpy(dst, &data_[begin], backed);
     if (backed != size)
       std::memset(dst + backed, 0, size - backed);
+  }
+
+  void write_backing(size_t offset, const uint8_t *src, size_t size) {
+    assert(offset <= capacity_bytes_ && size <= capacity_bytes_ - offset);
+    ensure_materialized(offset + size);
+    // Keep the checked loop explicit: GCC 15 can retain the vector's old object
+    // size across resize and report a false stringop-overflow for memcpy here.
+    for (size_t i = 0; i < size; ++i)
+      data_[offset + i] = src[i];
   }
 
   void ensure_materialized(size_t required) {

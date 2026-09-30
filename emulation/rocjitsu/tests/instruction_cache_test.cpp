@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/instruction_cache.h"
@@ -13,37 +14,117 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstring>
 #include <memory>
+#include <optional>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
 namespace {
 
 using rocjitsu::amdgpu::GpuMemory;
+using rocjitsu::amdgpu::GpuVm;
 using rocjitsu::amdgpu::InstructionCache;
 namespace amdgpu = rocjitsu::amdgpu;
 
 constexpr uint64_t kCodeBase = 0x200000;
 
 /// @brief Fill @p bytes of code memory at kCodeBase with a per-byte pattern.
-std::vector<uint8_t> fill_code(GpuMemory &memory, size_t bytes, uint8_t salt, uint32_t vmid = 0) {
+std::vector<uint8_t> fill_code(GpuMemory &memory, size_t bytes, uint8_t salt) {
   std::vector<uint8_t> expected(bytes);
   for (size_t i = 0; i < bytes; ++i)
     expected[i] = static_cast<uint8_t>((i * 7) ^ salt);
-  memory.write_block(kCodeBase, std::span<const uint8_t>(expected), vmid);
+  memory.write_block(kCodeBase, std::span<const uint8_t>(expected));
   return expected;
 }
 
-std::array<uint8_t, InstructionCache::kFetchBytes>
-fetch_at(InstructionCache &icache, const GpuMemory &memory, uint64_t pc, uint32_t vmid = 0) {
+std::array<uint8_t, InstructionCache::kFetchBytes> fetch_at(InstructionCache &icache,
+                                                            const GpuMemory &memory, uint64_t pc) {
   std::array<uint8_t, InstructionCache::kFetchBytes> got{};
-  icache.fetch(memory, pc, vmid, got.data());
+  icache.fetch(memory, pc, got.data());
+  return got;
+}
+
+class ExecutableAddressSpace final : public amdgpu::AddressSpaceTranslator,
+                                     public amdgpu::PhysicalMemoryAccess {
+public:
+  explicit ExecutableAddressSpace(uint8_t value, size_t size = InstructionCache::kLineSize * 2)
+      : bytes_(size, static_cast<std::byte>(value)) {}
+
+  void fill(uint8_t value) { std::ranges::fill(bytes_, static_cast<std::byte>(value)); }
+
+  void write_program(std::span<const uint32_t> words) {
+    ASSERT_LE(words.size_bytes(), bytes_.size());
+    std::memcpy(bytes_.data(), words.data(), words.size_bytes());
+  }
+
+  amdgpu::VmTranslationResult translate(uint64_t address, std::size_t size,
+                                        amdgpu::VmAccessKind access) const override {
+    if (access != amdgpu::VmAccessKind::Read && access != amdgpu::VmAccessKind::Execute)
+      return {.outcome = amdgpu::VmAccessOutcome::Faulted, .translation = {}};
+    if (address < kCodeBase || size == 0 || address - kCodeBase > bytes_.size() ||
+        size > bytes_.size() - (address - kCodeBase)) {
+      return {.outcome = amdgpu::VmAccessOutcome::Faulted, .translation = {}};
+    }
+    return {
+        .outcome = amdgpu::VmAccessOutcome::Complete,
+        .translation = {.domain = amdgpu::VmMemoryDomain::System,
+                        .address = address - kCodeBase,
+                        .contiguous_bytes = bytes_.size() - (address - kCodeBase),
+                        .mtype = amdgpu::Mtype::RW,
+                        .permissions = {.readable = true, .writable = false, .executable = true}}};
+  }
+
+  amdgpu::VmAccessOutcome read(amdgpu::VmMemoryDomain domain, uint64_t address,
+                               std::span<std::byte> bytes) override {
+    if (domain != amdgpu::VmMemoryDomain::System || address > bytes_.size() ||
+        bytes.size() > bytes_.size() - address) {
+      return amdgpu::VmAccessOutcome::Faulted;
+    }
+    std::ranges::copy_n(bytes_.begin() + static_cast<ptrdiff_t>(address), bytes.size(),
+                        bytes.begin());
+    return amdgpu::VmAccessOutcome::Complete;
+  }
+
+  amdgpu::VmAccessOutcome write(amdgpu::VmMemoryDomain, uint64_t,
+                                std::span<const std::byte>) override {
+    return amdgpu::VmAccessOutcome::Faulted;
+  }
+
+private:
+  std::vector<std::byte> bytes_;
+};
+
+std::array<uint8_t, InstructionCache::kFetchBytes>
+fetch_at(InstructionCache &icache, const amdgpu::GpuVmAccess &access, uint64_t pc = kCodeBase) {
+  std::array<uint8_t, InstructionCache::kFetchBytes> got{};
+  EXPECT_EQ(icache.fetch(access, pc, got.data()), amdgpu::VmAccessOutcome::Complete);
   return got;
 }
 
 // Every four-byte-aligned PC in a two-line window, including the offsets whose
 // fetch window runs off the end of a line, must return the backing bytes.
+TEST(InstructionCacheTest, PeekOnlyReturnsPresentAlignedWordsForTheOwningVmid) {
+  GpuMemory memory("peek_memory");
+  InstructionCache cache;
+  constexpr uint64_t pc = 0x4000;
+  constexpr uint32_t value = 0x12345678;
+  uint32_t word = 0;
+  memory.write32(pc + 60, value);
+  EXPECT_FALSE(cache.peek_word(pc + 60, 0, word));
+  uint8_t fetched[InstructionCache::kFetchBytes];
+  cache.fetch(memory, pc, fetched);
+  ASSERT_TRUE(cache.peek_word(pc + 60, 0, word));
+  EXPECT_EQ(word, value);
+  EXPECT_FALSE(cache.peek_word(pc + 61, 0, word));
+  EXPECT_FALSE(cache.peek_word(pc + 60, 1, word));
+  EXPECT_FALSE(cache.peek_word(pc + InstructionCache::kCacheBytes + 60, 0, word));
+  cache.invalidate_all();
+  EXPECT_FALSE(cache.peek_word(pc + 60, 0, word));
+}
+
 TEST(InstructionCacheTest, FetchMatchesBackingMemoryAtEveryAlignedOffset) {
   GpuMemory memory("memory");
   InstructionCache icache;
@@ -52,7 +133,7 @@ TEST(InstructionCacheTest, FetchMatchesBackingMemoryAtEveryAlignedOffset) {
 
   for (uint32_t off = 0; off + InstructionCache::kFetchBytes <= span; off += 4) {
     const auto got = fetch_at(icache, memory, kCodeBase + off);
-    EXPECT_TRUE(std::equal(got.begin(), got.end(), expected.begin() + off))
+    EXPECT_TRUE(std::ranges::equal(got, std::span(expected).subspan(off, got.size())))
         << "mismatch at offset " << off;
   }
 }
@@ -70,7 +151,7 @@ TEST(InstructionCacheTest, FetchWindowStraddlesALineBoundary) {
   ASSERT_GT(kStraddle + InstructionCache::kFetchBytes, InstructionCache::kLineSize);
 
   const auto got = fetch_at(icache, memory, kCodeBase + kStraddle);
-  EXPECT_TRUE(std::equal(got.begin(), got.end(), expected.begin() + kStraddle));
+  EXPECT_TRUE(std::ranges::equal(got, std::span(expected).subspan(kStraddle, got.size())));
 }
 
 // The I$ is deliberately not coherent with data writes, matching hardware: a
@@ -81,48 +162,122 @@ TEST(InstructionCacheTest, CachedLineSurvivesABackingWriteUntilInvalidated) {
   const std::vector<uint8_t> first = fill_code(memory, InstructionCache::kLineSize, 0x11);
 
   const auto before = fetch_at(icache, memory, kCodeBase);
-  EXPECT_TRUE(std::equal(before.begin(), before.end(), first.begin()));
+  EXPECT_TRUE(std::ranges::equal(before, std::span(first).first(before.size())));
 
   const std::vector<uint8_t> second = fill_code(memory, InstructionCache::kLineSize, 0x22);
   ASSERT_NE(first, second);
 
   const auto stale = fetch_at(icache, memory, kCodeBase);
-  EXPECT_TRUE(std::equal(stale.begin(), stale.end(), first.begin()))
+  EXPECT_TRUE(std::ranges::equal(stale, std::span(first).first(stale.size())))
       << "the I$ must not observe a data write on its own";
 
   icache.invalidate_all();
   const auto after = fetch_at(icache, memory, kCodeBase);
-  EXPECT_TRUE(std::equal(after.begin(), after.end(), second.begin()));
+  EXPECT_TRUE(std::ranges::equal(after, std::span(second).first(after.size())));
 }
 
-// Lines are tagged by vmid, so the same address in two address spaces must not
-// alias even though it selects the same line. vmid 1 has no mapping and no
-// client process, so it reaches the same sparse backing as vmid 0 -- rewriting
-// that backing between the two fetches is what makes the miss observable at
-// all. Without it, dropping the vmid check from line_for() would still pass.
-TEST(InstructionCacheTest, LinesDoNotAliasAcrossVmids) {
+TEST(InstructionCacheTest, DeviceMaintenanceInvalidatesLazilyOnOwningThread) {
   GpuMemory memory("memory");
+  InstructionCache instruction_cache;
+  const std::vector<uint8_t> first = fill_code(memory, InstructionCache::kLineSize, 0x31);
+  const std::array<uint8_t, InstructionCache::kFetchBytes> before =
+      fetch_at(instruction_cache, memory, kCodeBase);
+  ASSERT_TRUE(std::ranges::equal(before, std::span(first).first(before.size())));
+
+  const uint64_t epoch_before = instruction_cache.coherence_domain()->current_instruction_epoch();
+  std::vector<uint8_t> second(InstructionCache::kLineSize, 0x72);
+  {
+    [[maybe_unused]] amdgpu::DeviceCacheMaintenanceLease maintenance =
+        instruction_cache.coherence_domain()->acquire_cache_maintenance(
+            amdgpu::DeviceCacheOperation::WritebackInvalidate);
+    EXPECT_EQ(instruction_cache.coherence_domain()->current_instruction_epoch(), epoch_before);
+    memory.write_block(kCodeBase, std::span<const uint8_t>(second));
+  }
+  EXPECT_GT(instruction_cache.coherence_domain()->current_instruction_epoch(), epoch_before);
+
+  const std::array<uint8_t, InstructionCache::kFetchBytes> after =
+      fetch_at(instruction_cache, memory, kCodeBase);
+  EXPECT_TRUE(std::ranges::equal(after, std::span(second).first(after.size())));
+}
+
+// Lines are tagged by address-space identity, so the same virtual address in
+// two address spaces must not alias even though it selects the same line.
+TEST(InstructionCacheTest, LinesDoNotAliasAcrossVmids) {
+  GpuVm gpu_vm;
   InstructionCache icache;
-  const std::vector<uint8_t> vm0 = fill_code(memory, InstructionCache::kLineSize, 0x01, 0);
+  auto vm0 = std::make_shared<ExecutableAddressSpace>(0x01);
+  auto vm1 = std::make_shared<ExecutableAddressSpace>(0x02);
+  const auto handle0 = gpu_vm.register_translated(0, vm0, vm0);
+  const auto handle1 = gpu_vm.register_translated(1, vm1, vm1);
+  ASSERT_TRUE(handle0);
+  ASSERT_TRUE(handle1);
+  const auto access0 = gpu_vm.snapshot(handle0);
+  const auto access1 = gpu_vm.snapshot(handle1);
+  ASSERT_TRUE(access0);
+  ASSERT_TRUE(access1);
 
-  const auto got0 = fetch_at(icache, memory, kCodeBase, 0);
-  EXPECT_TRUE(std::equal(got0.begin(), got0.end(), vm0.begin()));
+  const auto got0 = fetch_at(icache, *access0);
+  EXPECT_TRUE(std::ranges::all_of(got0, [](uint8_t byte) { return byte == 0x01; }));
+  uint32_t legacy_word = 0;
+  EXPECT_FALSE(icache.peek_word(kCodeBase, 0, legacy_word))
+      << "translated code must not satisfy legacy-address-space lookahead";
 
-  // A vmid 1 fetch of the same address must miss and refill, so it sees the
-  // rewritten bytes rather than the line vmid 0 just installed.
-  const std::vector<uint8_t> vm1 = fill_code(memory, InstructionCache::kLineSize, 0x02, 0);
-  ASSERT_NE(vm0, vm1);
-  const auto got1 = fetch_at(icache, memory, kCodeBase, 1);
-  EXPECT_TRUE(std::equal(got1.begin(), got1.end(), vm1.begin()))
+  const auto got1 = fetch_at(icache, *access1);
+  EXPECT_TRUE(std::ranges::all_of(got1, [](uint8_t byte) { return byte == 0x02; }))
       << "the vmid 1 lookup returned vmid 0's line";
 
-  // ...and it must have installed a line under its own tag, not bypassed the
-  // cache: a second rewrite is invisible to the vmid 1 fetch that follows it.
-  const std::vector<uint8_t> vm2 = fill_code(memory, InstructionCache::kLineSize, 0x03, 0);
-  ASSERT_NE(vm1, vm2);
-  const auto again1 = fetch_at(icache, memory, kCodeBase, 1);
-  EXPECT_TRUE(std::equal(again1.begin(), again1.end(), vm1.begin()))
-      << "the vmid 1 fetch did not cache its line";
+  const auto again1 = fetch_at(icache, *access1);
+  EXPECT_EQ(again1, got1) << "the vmid 1 fetch did not cache its line";
+}
+
+TEST(InstructionCacheTest, TranslatedLinesDoNotAliasAcrossRootReplacement) {
+  GpuVm gpu_vm;
+  InstructionCache icache;
+  auto first = std::make_shared<ExecutableAddressSpace>(0x11);
+  const amdgpu::AddressSpaceHandle handle = gpu_vm.register_translated(7, first, first);
+  ASSERT_TRUE(handle);
+  const std::optional<amdgpu::GpuVmAccess> first_access = gpu_vm.snapshot_pinned(handle);
+  ASSERT_TRUE(first_access);
+
+  const auto first_fetch = fetch_at(icache, *first_access);
+  EXPECT_TRUE(std::ranges::all_of(first_fetch, [](uint8_t byte) { return byte == 0x11; }));
+
+  auto replacement = std::make_shared<ExecutableAddressSpace>(0x22);
+  ASSERT_TRUE(gpu_vm.replace_translated(handle, replacement, replacement));
+  const std::optional<amdgpu::GpuVmAccess> replacement_access = gpu_vm.snapshot(handle);
+  ASSERT_TRUE(replacement_access);
+  EXPECT_NE(first_access->cache_namespace(), replacement_access->cache_namespace());
+
+  const auto replacement_fetch = fetch_at(icache, *replacement_access);
+  EXPECT_TRUE(std::ranges::all_of(replacement_fetch, [](uint8_t byte) { return byte == 0x22; }));
+  const auto retained_old_fetch = fetch_at(icache, *first_access);
+  EXPECT_TRUE(std::ranges::all_of(retained_old_fetch, [](uint8_t byte) { return byte == 0x11; }));
+}
+
+TEST(InstructionCacheTest, FetchBypassesAnIncompleteCacheLine) {
+  GpuVm gpu_vm;
+  InstructionCache icache;
+  auto address_space =
+      std::make_shared<ExecutableAddressSpace>(0x11, InstructionCache::kFetchBytes);
+  const amdgpu::AddressSpaceHandle handle =
+      gpu_vm.register_translated(7, address_space, address_space);
+  ASSERT_TRUE(handle);
+  const std::optional<amdgpu::GpuVmAccess> access = gpu_vm.snapshot(handle);
+  ASSERT_TRUE(access);
+
+  const auto first = fetch_at(icache, *access);
+  EXPECT_TRUE(std::ranges::all_of(first, [](uint8_t byte) { return byte == 0x11; }));
+
+  address_space->fill(0x22);
+  const auto second = fetch_at(icache, *access);
+  EXPECT_TRUE(std::ranges::all_of(second, [](uint8_t byte) { return byte == 0x22; }))
+      << "a partial executable extent must not leave a cached full line";
+
+  std::array<uint8_t, InstructionCache::kFetchBytes> invalid{};
+  std::ranges::fill(invalid, uint8_t{0xcc});
+  EXPECT_EQ(icache.fetch(*access, kCodeBase + sizeof(uint32_t), invalid.data()),
+            amdgpu::VmAccessOutcome::Faulted);
+  EXPECT_TRUE(std::ranges::all_of(invalid, [](uint8_t byte) { return byte == 0xcc; }));
 }
 
 // A working set larger than the cache must still read correctly once lines
@@ -137,7 +292,7 @@ TEST(InstructionCacheTest, FetchIsCorrectWhenTheWorkingSetExceedsTheCache) {
     for (uint32_t off = 0; off + InstructionCache::kFetchBytes <= span;
          off += InstructionCache::kLineSize) {
       const auto got = fetch_at(icache, memory, kCodeBase + off);
-      EXPECT_TRUE(std::equal(got.begin(), got.end(), expected.begin() + off))
+      EXPECT_TRUE(std::ranges::equal(got, std::span(expected).subspan(off, got.size())))
           << "pass " << pass << " offset " << off;
     }
   }
@@ -187,7 +342,7 @@ public:
   /// @brief Bytes the CU's I$ currently returns for @p pc, without refilling.
   std::array<uint8_t, InstructionCache::kFetchBytes> peek(uint64_t pc = kCodeBase) {
     std::array<uint8_t, InstructionCache::kFetchBytes> got{};
-    cu_->instruction_cache().fetch(memory_, pc, 0, got.data());
+    cu_->instruction_cache().fetch(memory_, pc, got.data());
     return got;
   }
 
@@ -204,6 +359,336 @@ private:
   amdgpu::ComputeUnitCore::Config config_{};
   std::unique_ptr<amdgpu::ComputeUnitCore> cu_;
 };
+
+// A warm instruction-cache line must not hide revocation of the VM snapshot
+// retained by the CU. Exercise both explicit handles and the VMID fallback.
+TEST(InstructionCacheCuTest, VmInvalidationRefreshesAnAlreadyCachedInstruction) {
+  for (const bool explicit_handle : {false, true}) {
+    SCOPED_TRACE(explicit_handle);
+    GpuVm gpu_vm;
+    CuFixture fixture("vm_invalidation_cu");
+    auto backing = std::make_shared<ExecutableAddressSpace>(0);
+    backing->write_program(std::array<uint32_t, 3>{kSNop, s_mov_b32_s0_imm(1), kSEndpgm});
+    const auto handle = gpu_vm.register_translated(7, backing, backing);
+    ASSERT_TRUE(handle);
+    fixture.cu()->set_gpu_vm(&gpu_vm);
+    auto *wf = fixture.launch(1, 0);
+    ASSERT_NE(wf, nullptr);
+    wf->set_process_id(7);
+    if (explicit_handle)
+      wf->set_address_space(handle);
+    fixture.cu()->step();
+    ASSERT_EQ(wf->pc, kCodeBase + 4);
+
+    backing->write_program(std::array<uint32_t, 3>{kSNop, s_mov_b32_s0_imm(2), kSEndpgm});
+    ASSERT_TRUE(gpu_vm.invalidate(handle));
+    fixture.cu()->step();
+    EXPECT_EQ(fixture.read_s0(*wf), 2u);
+  }
+}
+
+TEST(InstructionCacheCuTest, RootReplacementRefreshesAnAlreadyCachedInstruction) {
+  GpuVm gpu_vm;
+  CuFixture fixture("vm_replacement_cu");
+  auto first = std::make_shared<ExecutableAddressSpace>(0);
+  first->write_program(std::array<uint32_t, 3>{kSNop, s_mov_b32_s0_imm(1), kSEndpgm});
+  const auto handle = gpu_vm.register_translated(7, first, first);
+  ASSERT_TRUE(handle);
+  fixture.cu()->set_gpu_vm(&gpu_vm);
+  auto *wf = fixture.launch(1, 0);
+  ASSERT_NE(wf, nullptr);
+  wf->set_process_id(7);
+  wf->set_address_space(handle);
+  fixture.cu()->step();
+  ASSERT_EQ(wf->pc, kCodeBase + 4);
+
+  auto replacement = std::make_shared<ExecutableAddressSpace>(0);
+  replacement->write_program(std::array<uint32_t, 3>{kSNop, s_mov_b32_s0_imm(2), kSEndpgm});
+  ASSERT_TRUE(gpu_vm.replace_translated(handle, replacement, replacement));
+  fixture.cu()->step();
+  EXPECT_EQ(fixture.read_s0(*wf), 2u);
+}
+
+TEST(InstructionCacheCuTest, ReusedVmidCannotReviveAStaleExplicitHandle) {
+  GpuVm gpu_vm;
+  CuFixture fixture("vm_stale_handle_cu");
+  auto backing = std::make_shared<ExecutableAddressSpace>(0);
+  backing->write_program(std::array<uint32_t, 3>{kSNop, s_mov_b32_s0_imm(1), kSEndpgm});
+  const auto handle = gpu_vm.register_translated(7, backing, backing);
+  ASSERT_TRUE(handle);
+  fixture.cu()->set_gpu_vm(&gpu_vm);
+  auto *wf = fixture.launch(1, 0);
+  ASSERT_NE(wf, nullptr);
+  wf->set_process_id(7);
+  wf->set_address_space(handle);
+  fixture.cu()->step();
+  ASSERT_EQ(wf->pc, kCodeBase + 4);
+
+  ASSERT_TRUE(gpu_vm.unregister_address_space(handle));
+  const auto replacement = gpu_vm.register_translated(7, backing, backing);
+  ASSERT_TRUE(replacement);
+  EXPECT_NE(handle, replacement);
+  fixture.cu()->step();
+  EXPECT_TRUE(wf->is_halted());
+  EXPECT_FALSE(fixture.cu()->has_active_wfs())
+      << "the stale address space must abort the dispatch before executing cached code";
+}
+
+TEST(InstructionCacheCuTest, ChangingAddressSpaceSelectsItsOwnInstruction) {
+  for (const bool explicit_handle : {false, true}) {
+    SCOPED_TRACE(explicit_handle);
+    GpuVm gpu_vm;
+    CuFixture fixture("vm_switch_cu");
+    auto first = std::make_shared<ExecutableAddressSpace>(0);
+    first->write_program(std::array<uint32_t, 3>{kSNop, s_mov_b32_s0_imm(1), kSEndpgm});
+    const auto first_handle = gpu_vm.register_translated(7, first, first);
+    auto second = std::make_shared<ExecutableAddressSpace>(0);
+    second->write_program(std::array<uint32_t, 3>{kSNop, s_mov_b32_s0_imm(2), kSEndpgm});
+    const auto second_handle = gpu_vm.register_translated(8, second, second);
+    ASSERT_TRUE(first_handle);
+    ASSERT_TRUE(second_handle);
+    fixture.cu()->set_gpu_vm(&gpu_vm);
+    auto *wf = fixture.launch(1, 0);
+    ASSERT_NE(wf, nullptr);
+    wf->set_process_id(7);
+    if (explicit_handle)
+      wf->set_address_space(first_handle);
+    fixture.cu()->step();
+    ASSERT_EQ(wf->pc, kCodeBase + 4);
+
+    wf->set_process_id(8);
+    if (explicit_handle)
+      wf->set_address_space(second_handle);
+    fixture.cu()->step();
+    EXPECT_EQ(fixture.read_s0(*wf), 2u);
+  }
+}
+
+TEST(InstructionCacheCuTest, SwitchingVmServicesDropsTheRetainedAccess) {
+  GpuVm first_vm;
+  GpuVm second_vm;
+  CuFixture fixture("vm_service_switch_cu");
+  auto first = std::make_shared<ExecutableAddressSpace>(0);
+  first->write_program(std::array<uint32_t, 3>{kSNop, s_mov_b32_s0_imm(1), kSEndpgm});
+  const auto first_handle = first_vm.register_translated(7, first, first);
+  auto second = std::make_shared<ExecutableAddressSpace>(0);
+  second->write_program(std::array<uint32_t, 3>{kSNop, s_mov_b32_s0_imm(2), kSEndpgm});
+  const auto second_handle = second_vm.register_translated(7, second, second);
+  ASSERT_TRUE(first_handle);
+  ASSERT_EQ(first_handle, second_handle) << "exercise matching keys in different VM services";
+  fixture.cu()->set_gpu_vm(&first_vm);
+  auto *wf = fixture.launch(1, 0);
+  ASSERT_NE(wf, nullptr);
+  wf->set_process_id(7);
+  wf->set_address_space(first_handle);
+  fixture.cu()->step();
+  ASSERT_EQ(wf->pc, kCodeBase + 4);
+
+  fixture.cu()->set_gpu_vm(&second_vm);
+  fixture.cu()->step();
+  EXPECT_EQ(fixture.read_s0(*wf), 2u);
+}
+
+struct CountedReporter {
+  std::shared_ptr<rocjitsu::KfdProcess> process;
+  unsigned *copies;
+
+  CountedReporter(std::shared_ptr<rocjitsu::KfdProcess> owner, unsigned &count)
+      : process(std::move(owner)), copies(&count) {}
+  CountedReporter(const CountedReporter &other) : process(other.process), copies(other.copies) {
+    ++*copies;
+  }
+  void operator()(uint64_t, amdgpu::VmAccessKind) const {}
+};
+
+// Capture a real process as the KFD binding does. Releasing the registry binding
+// must not leave that process owned by an idle CU.
+TEST(InstructionCacheCuTest, CompletedWaveDoesNotRetainItsVmOwner) {
+  GpuVm gpu_vm;
+  CuFixture fixture("vm_completed_lifetime_cu");
+  auto backing = std::make_shared<ExecutableAddressSpace>(0);
+  backing->write_program(std::array<uint32_t, 2>{kSNop, kSEndpgm});
+  auto owner = std::make_shared<rocjitsu::KfdProcess>(7);
+  const std::weak_ptr<rocjitsu::KfdProcess> lifetime = owner;
+  const auto handle = gpu_vm.register_address_space(
+      7, backing, backing, [owner](uint64_t, amdgpu::VmAccessKind) { (void)owner; });
+  ASSERT_TRUE(handle);
+  owner.reset();
+  fixture.cu()->set_gpu_vm(&gpu_vm);
+  auto *wf = fixture.launch(1, 0);
+  ASSERT_NE(wf, nullptr);
+  wf->set_dispatch_id(1);
+  wf->set_process_id(7);
+  wf->set_address_space(handle);
+  fixture.cu()->step();
+  ASSERT_EQ(wf->pc, kCodeBase + 4);
+  fixture.cu()->step();
+  ASSERT_TRUE(wf->is_halted());
+  ASSERT_FALSE(fixture.cu()->has_active_wfs());
+
+  ASSERT_TRUE(gpu_vm.unregister_address_space(handle));
+  EXPECT_TRUE(lifetime.expired()) << "an idle CU retained the completed process binding";
+}
+
+TEST(InstructionCacheCuTest, AbortedWaveDoesNotRetainItsVmOwner) {
+  GpuVm gpu_vm;
+  CuFixture fixture("vm_aborted_lifetime_cu");
+  auto backing = std::make_shared<ExecutableAddressSpace>(0);
+  backing->write_program(std::array<uint32_t, 3>{kSNop, kSNop, kSEndpgm});
+  auto owner = std::make_shared<rocjitsu::KfdProcess>(7);
+  const std::weak_ptr<rocjitsu::KfdProcess> lifetime = owner;
+  const auto handle = gpu_vm.register_address_space(
+      7, backing, backing, [owner](uint64_t, amdgpu::VmAccessKind) { (void)owner; });
+  ASSERT_TRUE(handle);
+  owner.reset();
+  fixture.cu()->set_gpu_vm(&gpu_vm);
+  auto *wf = fixture.launch(1, 0);
+  ASSERT_NE(wf, nullptr);
+  wf->set_dispatch_id(1);
+  wf->set_process_id(7);
+  wf->set_address_space(handle);
+  fixture.cu()->step();
+  ASSERT_EQ(wf->pc, kCodeBase + 4);
+  fixture.cu()->abort_dispatch(1);
+  ASSERT_TRUE(wf->is_halted());
+
+  ASSERT_TRUE(gpu_vm.unregister_address_space(handle));
+  EXPECT_TRUE(lifetime.expired()) << "an idle CU retained the cancelled process binding";
+}
+
+TEST(InstructionCacheCuTest, ReentrantFaultCancellationKeepsAccessUntilIssueReturns) {
+  GpuVm gpu_vm;
+  CuFixture fixture("vm_reentrant_lifetime_cu");
+  auto backing = std::make_shared<ExecutableAddressSpace>(0);
+  auto owner = std::make_shared<rocjitsu::KfdProcess>(7);
+  const std::weak_ptr<rocjitsu::KfdProcess> lifetime = owner;
+  unsigned faults = 0;
+  const auto handle = gpu_vm.register_address_space(
+      7, backing, backing, [owner, &fixture, &lifetime, &faults](uint64_t, amdgpu::VmAccessKind) {
+        (void)owner;
+        ++faults;
+        fixture.cu()->abort_dispatch(1);
+        // The registry and the in-flight snapshot must both still own the
+        // callback. Clearing the CU snapshot inside abort would destroy an
+        // object whose read/fault callback is still on the stack.
+        EXPECT_GE(lifetime.use_count(), 2);
+      });
+  ASSERT_TRUE(handle);
+  owner.reset();
+  fixture.cu()->set_gpu_vm(&gpu_vm);
+  auto *wf = fixture.launch(1, 0, kCodeBase + InstructionCache::kLineSize * 4);
+  ASSERT_NE(wf, nullptr);
+  wf->set_dispatch_id(1);
+  wf->set_process_id(7);
+  wf->set_address_space(handle);
+  fixture.cu()->step();
+  EXPECT_GE(faults, 1u);
+  EXPECT_TRUE(wf->is_halted());
+
+  ASSERT_TRUE(gpu_vm.unregister_address_space(handle));
+  EXPECT_TRUE(lifetime.expired()) << "fault handling left the binding retained after issue";
+}
+
+TEST(InstructionCacheCuTest, ExceptionalQuantumRetainsTheProcessUntilCancellation) {
+  GpuVm gpu_vm;
+  CuFixture fixture("vm_exception_lifetime_cu");
+  auto backing = std::make_shared<ExecutableAddressSpace>(0);
+  auto owner = std::make_shared<rocjitsu::KfdProcess>(7);
+  const std::weak_ptr<rocjitsu::KfdProcess> lifetime = owner;
+  const auto handle =
+      gpu_vm.register_address_space(7, backing, backing, [owner](uint64_t, amdgpu::VmAccessKind) {
+        (void)owner;
+        throw std::runtime_error("fault callback failed");
+      });
+  ASSERT_TRUE(handle);
+  owner.reset();
+  fixture.cu()->set_gpu_vm(&gpu_vm);
+  auto *wf = fixture.launch(1, 0, kCodeBase + InstructionCache::kLineSize * 4);
+  ASSERT_NE(wf, nullptr);
+  wf->set_dispatch_id(1);
+  wf->set_process_id(7);
+  wf->set_address_space(handle);
+  EXPECT_THROW(fixture.cu()->run_quantum(), std::runtime_error);
+  ASSERT_TRUE(fixture.cu()->has_active_wfs());
+  ASSERT_TRUE(gpu_vm.unregister_address_space(handle));
+  EXPECT_FALSE(lifetime.expired()) << "the active wave must keep its snapshot until cancellation";
+  fixture.cu()->abort_dispatch(1);
+  EXPECT_TRUE(lifetime.expired());
+}
+
+TEST(InstructionCacheCuTest, ActiveWaveReusesVmAccessAcrossQuantaAndDirectSteps) {
+  GpuVm gpu_vm;
+  CuFixture fixture("vm_quantum_lifetime_cu");
+  auto backing = std::make_shared<ExecutableAddressSpace>(0);
+  backing->write_program(std::array<uint32_t, 3>{kSNop, kSNop, kSEndpgm});
+  auto process = std::make_shared<rocjitsu::KfdProcess>(7);
+  const std::weak_ptr<rocjitsu::KfdProcess> lifetime = process;
+  unsigned copies = 0;
+  const auto handle =
+      gpu_vm.register_address_space(7, backing, backing, CountedReporter(process, copies));
+  ASSERT_TRUE(handle);
+  process.reset();
+  fixture.cu()->set_gpu_vm(&gpu_vm);
+  fixture.cu()->set_functional_quantum(1);
+  auto *wf = fixture.launch(1, 0);
+  ASSERT_NE(wf, nullptr);
+  wf->set_dispatch_id(1);
+  wf->set_process_id(7);
+  wf->set_address_space(handle);
+  copies = 0;
+  fixture.cu()->run_quantum();
+  ASSERT_EQ(wf->pc, kCodeBase + 4);
+  EXPECT_EQ(copies, 1u);
+  fixture.cu()->run_quantum();
+  ASSERT_EQ(wf->pc, kCodeBase + 8);
+  EXPECT_EQ(copies, 1u) << "a quantum boundary must not discard an active wave's snapshot";
+  fixture.cu()->step();
+  EXPECT_TRUE(wf->is_halted());
+  EXPECT_EQ(copies, 1u) << "direct stepping must reuse the active snapshot";
+
+  ASSERT_TRUE(gpu_vm.unregister_address_space(handle));
+  EXPECT_TRUE(lifetime.expired()) << "the final wave retained its process after retiring";
+}
+
+TEST(InstructionCacheCuTest, EndingOneWaveKeepsTheOtherWavesVmAccess) {
+  GpuVm gpu_vm;
+  CuFixture fixture("vm_multiwave_lifetime_cu", /*wf_slots=*/2);
+  auto backing = std::make_shared<ExecutableAddressSpace>(0);
+  backing->write_program(std::array<uint32_t, 3>{kSNop, kSNop, kSEndpgm});
+  auto process = std::make_shared<rocjitsu::KfdProcess>(7);
+  const std::weak_ptr<rocjitsu::KfdProcess> lifetime = process;
+  unsigned copies = 0;
+  const auto handle =
+      gpu_vm.register_address_space(7, backing, backing, CountedReporter(process, copies));
+  ASSERT_TRUE(handle);
+  process.reset();
+  fixture.cu()->set_gpu_vm(&gpu_vm);
+  auto *first = fixture.launch(1, 0, kCodeBase + 8);
+  auto *second = fixture.launch(1, 1);
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(second, nullptr);
+  for (auto *wf : {first, second}) {
+    wf->set_dispatch_id(1);
+    wf->set_process_id(7);
+    wf->set_address_space(handle);
+  }
+  copies = 0;
+  fixture.cu()->step();
+  ASSERT_TRUE(first->is_halted());
+  ASSERT_FALSE(second->is_halted());
+  ASSERT_EQ(second->pc, kCodeBase + 4);
+  EXPECT_EQ(copies, 1u) << "retiring the first wave must not discard the live wave's snapshot";
+  EXPECT_GE(lifetime.use_count(), 2);
+  fixture.cu()->step();
+  ASSERT_EQ(second->pc, kCodeBase + 8);
+  EXPECT_EQ(copies, 1u);
+  fixture.cu()->step();
+  EXPECT_TRUE(second->is_halted());
+  EXPECT_FALSE(fixture.cu()->has_active_wfs());
+  EXPECT_EQ(copies, 1u);
+  ASSERT_TRUE(gpu_vm.unregister_address_space(handle));
+  EXPECT_TRUE(lifetime.expired());
+}
 
 // Self-modifying code: the rewritten instruction only becomes visible to the
 // fetcher when the wave retires s_icache_inv. This runs the generated
@@ -292,7 +777,7 @@ TEST(InstructionCacheCuTest, LaunchInvalidationIsOncePerDispatch) {
   // launch drops everything.
   ASSERT_NE(fixture.launch(8, 0), nullptr);
   const auto next_dispatch = fixture.peek();
-  EXPECT_TRUE(std::equal(next_dispatch.begin(), next_dispatch.end(), rewritten.begin()))
+  EXPECT_TRUE(std::ranges::equal(next_dispatch, std::span(rewritten).first(next_dispatch.size())))
       << "a new dispatch reused code bytes cached by the previous one";
 }
 

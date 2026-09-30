@@ -29,6 +29,7 @@ class L2Cache;
 class Lds;
 class OperandExecutionAccess;
 class RegisterAccess;
+struct TensorDmaMemoryAccessObservation;
 class Wavefront;
 
 /// @brief Narrow CU API exposed to AMDGPU instruction emulation code.
@@ -38,7 +39,7 @@ class Wavefront;
 /// should reach registers through Operand or RegisterAccess.
 class InstructionComputeUnitView {
 public:
-  explicit InstructionComputeUnitView(ComputeUnitCore &cu) : cu_(&cu) {}
+  InstructionComputeUnitView(ComputeUnitCore &cu, Wavefront &wf) : cu_(&cu), wf_(&wf) {}
 
   InstructionCache &instruction_cache();
   L1ScalarCache &l1_scalar();
@@ -46,6 +47,10 @@ public:
   L2Cache *l2() const;
   Lds &lds();
   bool sram_ecc() const;
+  bool setreg_vgpr_msb_fixup() const;
+  /// Whether register accesses have a diagnostic or plugin consumer.
+  bool observes_register_access() const;
+  bool debug_active() const;
   rj_code_arch_t arch() const;
   uint32_t wf_size() const;
   uint32_t sgprs_per_wf() const;
@@ -53,23 +58,31 @@ public:
   std::string full_path() const;
   simdojo::ComponentID id() const;
   simdojo::SimulationEngine *engine() const;
+  uint32_t fetch_instruction_word(uint64_t address, uint32_t process_id) const;
   void request_functional_yield();
   bool handle_sendmsg(Wavefront &wf, uint32_t message);
   void notify_trap_complete(Wavefront &wf);
-  bool signal_queue_exception(uint32_t queue_id, uint32_t process_id, uint64_t status);
+  /// Queue a runtime exception for delivery after instruction execution drops
+  /// the compute unit's wave-state lock.
+  bool signal_queue_exception(uint32_t queue_id, uint32_t process_id, uint64_t status,
+                              bool clear_debug_stop_on_success = false,
+                              bool retain_failure_for_debugger = true);
+  bool observes_tensor_dma_memory_access() const;
+  void report_tensor_dma_memory_access(const TensorDmaMemoryAccessObservation &access);
 
 private:
-  uint32_t read_sgpr(uint32_t reg_idx) const;
-  void write_sgpr(uint32_t reg_idx, uint32_t value);
-
   ComputeUnitCore &raw_cu() { return *cu_; }
   const ComputeUnitCore &raw_cu() const { return *cu_; }
+  Wavefront &raw_wavefront() { return *wf_; }
+  const Wavefront &raw_wavefront() const { return *wf_; }
 
   ComputeUnitCore *cu_ = nullptr;
+  Wavefront *wf_ = nullptr;
 
-  // RegisterAccess unwraps the view so instruction helpers can use the same
-  // observed physical-register facade whether they were passed a full CU or an
-  // instruction-facing CU view.
+  // RegisterAccess unwraps both the CU and the owning wave. This keeps legacy
+  // instruction helpers that accept a CU-shaped service view wave-bound:
+  // physical register indices are validated against the executing wave rather
+  // than re-attributed through the CU's reverse ownership maps.
   friend class RegisterAccess;
 
   // The non-split ISA operand fallback and the execution-only access key are

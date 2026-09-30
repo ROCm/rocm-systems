@@ -14,16 +14,14 @@
 
 #include "logger/debug.hpp"
 
-#include <spdlog/fmt/ranges.h>
+#include <fmt/ranges.h>
 
 #include <cstddef>
 #include <cstdlib>
 #include <tuple>
 #include <unistd.h>
 
-namespace rocprofsys
-{
-namespace component
+namespace rocprofsys::component
 {
 void
 exit_gotcha::configure()
@@ -89,5 +87,4 @@ exit_gotcha::get_exit_info()
 {
     return _exit_info;
 }
-}  // namespace component
-}  // namespace rocprofsys
+}  // namespace rocprofsys::component
