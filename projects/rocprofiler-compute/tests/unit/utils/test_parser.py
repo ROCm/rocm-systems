@@ -617,6 +617,105 @@ class TestApplyFilters:
         workload.filter_gpu_ids = [0, 1]
         assert len(apply_filters(workload, "/tmp", False, False)) == 4
 
+    @pytest.mark.parametrize("dispatch_id", ["2", ">2"])
+    def test_combined_filters_keep_kernel_scoped_dispatch_error(
+        self, monkeypatch, dispatch_id
+    ) -> None:
+        error_calls, record_and_exit = record_and_exit_stub()
+        common.patch_console(
+            monkeypatch, "utils.parser", "error", error=record_and_exit
+        )
+        workload = _filter_workload()
+        workload.filter_gpu_ids = "0"
+        workload.filter_kernel_ids = ["vecCopy"]
+        workload.filter_dispatch_ids = [dispatch_id]
+
+        with pytest.raises(SystemExit):
+            apply_filters(workload, "/tmp", False, False)
+
+        assert error_calls == [
+            (
+                "analysis",
+                f"{dispatch_id} is an invalid dispatch id. "
+                "Dispatch ids run from 1 to 1.",
+            )
+        ]
+
+    @pytest.mark.parametrize(
+        "gpu_ids,dispatch_ids,kernel_ids,expected_rows,expected_index",
+        [
+            (
+                None,
+                None,
+                None,
+                [
+                    (0, "vecCopy", 1),
+                    (0, "vecAdd", 2),
+                    (1, "vecCopy", 3),
+                    (1, "vecMul", 4),
+                ],
+                [0, 1, 2, 3],
+            ),
+            (
+                "0",
+                None,
+                None,
+                [(0, "vecCopy", 1), (0, "vecAdd", 2)],
+                [0, 1],
+            ),
+            (
+                None,
+                ["1", "3"],
+                None,
+                [(0, "vecCopy", 1), (1, "vecCopy", 3)],
+                [0, 2],
+            ),
+            (
+                None,
+                None,
+                ["vecCopy"],
+                [(0, "vecCopy", 1), (1, "vecCopy", 3)],
+                [0, 2],
+            ),
+            (
+                "0",
+                ["1"],
+                ["vecCopy"],
+                [(0, "vecCopy", 1)],
+                [0],
+            ),
+            (
+                [0, 1],
+                ["1", "3"],
+                ["vecCopy"],
+                [(0, "vecCopy", 1), (1, "vecCopy", 3)],
+                [0, 2],
+            ),
+        ],
+    )
+    def test_apply_filters_matches_expected_rows(
+        self,
+        gpu_ids,
+        dispatch_ids,
+        kernel_ids,
+        expected_rows,
+        expected_index,
+    ) -> None:
+        workload = _filter_workload()
+        workload.filter_gpu_ids = gpu_ids
+        workload.filter_dispatch_ids = dispatch_ids
+        workload.filter_kernel_ids = kernel_ids
+
+        filtered = apply_filters(workload, "/tmp", False, False)
+        columns = ["GPU_ID", "Kernel_Name", "Dispatch_ID"]
+        expected = pd.DataFrame(
+            expected_rows,
+            columns=columns,
+            index=expected_index,
+        )
+
+        pd.testing.assert_frame_equal(filtered, expected)
+
 
 class TestApplyKernelFilter:
     """Tests for utils.parser.apply_kernel_filter."""
