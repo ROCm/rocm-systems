@@ -19,6 +19,7 @@ from tests.common import (
     check_analysis_csv_dir,
     check_analysis_db,
     check_counter_results,
+    check_roofline_csv,
     check_sysinfo,
     read_counter_results,
     write_result_csv,
@@ -459,3 +460,84 @@ def test_check_analysis_rows_rejects_orphans_without_foreign_keys(
     workloads = [(1, "workload1", "run")]
     with pytest.raises(AssertionError, match=message):
         _check_analysis_rows(workloads, kernels, dispatches, expected_workloads=1)
+
+
+@pytest.mark.parametrize(
+    "relative",
+    [
+        "mem_levels_LDS/MI200/roofline.csv",
+        "mem_levels_HBM/MI200/roofline.csv",
+        "mem_levels_vL1D/MI200/roofline.csv",
+    ],
+)
+def test_check_roofline_committed_mi200(relative):
+    path = Path(__file__).parents[1] / "workloads" / relative
+    assert len(check_roofline_csv(path)) > 0
+
+
+@pytest.mark.parametrize("allowed", [(), ("UNSUPPORTED",)])
+def test_check_roofline_valid(tmp_path, allowed):
+    frame = pd.DataFrame(
+        [[0, 10, 9, 11]], columns=["device", "hbmBw", "hbmBwLow", "hbmBwHigh"]
+    )
+    if allowed:
+        frame[["unsupported", "unsupportedLow", "unsupportedHigh"]] = 0
+    path = tmp_path / "roofline.csv"
+    frame.to_csv(path, index=False)
+    assert check_roofline_csv(path, allowed_zero=allowed).device.tolist() == [0]
+
+
+def test_check_roofline_legacy_i8_alias(tmp_path):
+    path = tmp_path / "roofline.csv"
+    pd.DataFrame(
+        [[0, 10, 9, 11]],
+        columns=["device", "MFMAI8Ops", "MFMAFI8OpsLow", "MFMAI8OpsHigh"],
+    ).to_csv(path, index=False)
+    assert len(check_roofline_csv(path)) == 1
+
+
+@pytest.mark.parametrize(
+    "columns,values",
+    [
+        (["device", "bw", "bwHigh", "bwLow"], [0, 10, 11, 9]),
+        (["device", "bw", "bwLow"], [0, 10, 9]),
+        (["bw", "device", "bwLow", "bwHigh"], [10, 0, 9, 11]),
+        (["device", "bw", "bwLow", "bwHigh"], [0, float("inf"), 9, 11]),
+        (["device", "bw", "bwLow", "bwHigh"], [0, "invalid", 9, 11]),
+        (["device", "bw", "bwLow", "bwHigh"], [0, float("nan"), 9, 11]),
+        (["device", "bw", "bwLow", "bwHigh"], [0, -1, 9, 11]),
+        (["device", "bw", "bwLow", "bwHigh"], [0, 0, 0, 0]),
+        (["device", "bw", "bwLow", "bwHigh"], [0, 10, 11, 12]),
+        (["device", "bw", "bwLow", "bwHigh"], [0, 10, 9, 8]),
+        (["device", "bw", "bwLow", "bwHigh"], [0, 10, 0, 11]),
+        (["device", "bw", "bwLow", "bwHigh"], [-1, 10, 9, 11]),
+        (["device", "bw", "bwLow", "bwHigh"], [0.5, 10, 9, 11]),
+        (["device", "bw", "bwLow", "bwHigh"], [float("nan"), 10, 9, 11]),
+        (["device", "bw", "bwLow", "bwHigh"], [0, 10, 9, float("inf")]),
+        (["device", "bw", "bwLow", "bwHigh"], [0, 10, float("nan"), 11]),
+    ],
+)
+def test_check_roofline_malformed(tmp_path, columns, values):
+    path = tmp_path / "roofline.csv"
+    pd.DataFrame([values], columns=columns).to_csv(path, index=False)
+    with pytest.raises(AssertionError):
+        check_roofline_csv(path)
+
+
+def test_check_roofline_empty(tmp_path):
+    path = tmp_path / "roofline.csv"
+    path.write_text("device,bw,bwLow,bwHigh\n")
+    with pytest.raises(AssertionError, match="Empty"):
+        check_roofline_csv(path)
+
+
+def test_check_roofline_missing(tmp_path):
+    with pytest.raises(AssertionError, match="Missing"):
+        check_roofline_csv(tmp_path / "missing.csv")
+
+
+def test_check_roofline_zero_requires_matching_allowance(tmp_path):
+    path = tmp_path / "roofline.csv"
+    path.write_text("device,unsupported,unsupportedLow,unsupportedHigh\n0,0,0,0\n")
+    with pytest.raises(AssertionError, match="Unexpected zero"):
+        check_roofline_csv(path, allowed_zero=("other",))

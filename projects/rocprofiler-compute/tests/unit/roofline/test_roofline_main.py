@@ -60,12 +60,20 @@ def benchmarked_roofline(tmp_path: Path):
     which is what the figure the tests read back off differs by.
     """
     header = (
-        "device,LDSBw,HBMBw,L1Bw,L2Bw,FP64Flops,MFMAF16Flops,MFMABF16Flops,MFMAF64Flops"
+        "device,LDSBw,HBMBw,L1Bw,L2Bw,FP64Flops,MFMAF16Flops,"
+        "MFMABF16Flops,MFMAF64Flops,FP16Flops,FP32Flops,I8Ops,"
+        "MFMAF32Flops,MFMAI8Ops"
     )
-    row = "0,500,500,500,500,3000,10000,11000,12000"
+    row = "0,500,500,500,500,3000,10000,11000,12000,2000,2500,4000,8000,9000"
     (tmp_path / "roofline.csv").write_text(f"{header}\n{row}\n", encoding="utf-8")
 
     def build(datatypes: List[str], **run_parameters: object):
+        values = row.split(",")
+        for level in run_parameters.pop("zero_bandwidth", []):
+            values[header.split(",").index(f"{level}Bw")] = "0"
+        (tmp_path / "roofline.csv").write_text(
+            f"{header}\n{','.join(values)}\n", encoding="utf-8"
+        )
         parameters = {
             "workload_dir": str(tmp_path),
             "matrix_ops_type": "MFMA",
@@ -140,21 +148,70 @@ def test_generate_plot_draws_the_roofs_the_datatype_reaches(
     assert names.isdisjoint(not_drawn)
 
 
+@pytest.mark.parametrize(
+    "mem_level, expected_levels",
+    [
+        (["vL1D"], {"L1"}),
+        (["LDS"], {"LDS"}),
+        (["L2"], {"L2"}),
+        (["HBM", "LDS"], {"HBM", "LDS"}),
+        ("ALL", {"LDS", "L1", "L2", "HBM"}),
+        (["unsupported"], {"LDS", "L1", "L2", "HBM"}),
+    ],
+)
 def test_generate_plot_filters_bandwidth_roofs_by_mem_level(
-    benchmarked_roofline,
+    benchmarked_roofline, mem_level, expected_levels
 ) -> None:
-    """The selected memory level reaches both the figure and client model."""
-    roofline = benchmarked_roofline(["FP64"], mem_level=["HBM"])
+    """Selected levels and their colors reach both the figure and client model."""
+    roofline = benchmarked_roofline(["FP64"], mem_level=mem_level)
     fig = roofline.generate_plot("FP64", fig=go.Figure())
 
     bandwidth_levels = {"LDS", "L1", "L2", "HBM"}
     drawn_bandwidth_levels = {
         trace.name for trace in fig.data if trace.name in bandwidth_levels
     }
-    assert drawn_bandwidth_levels == {"HBM"}
+    assert drawn_bandwidth_levels == expected_levels
 
     view_model = roofline._Roofline__view_models["FLOP"]
-    assert {roof["level"] for roof in view_model.roofline_traces} == {"HBM"}
+    assert {roof["level"] for roof in view_model.roofline_traces} == expected_levels
+    assert set(view_model.peak_colors) == expected_levels
+
+
+def test_generate_plot_omits_zero_bandwidth_roofs(benchmarked_roofline) -> None:
+    """A zero bandwidth contributes neither a Plotly roof nor a model trace."""
+    roofline = benchmarked_roofline(["FP64"], zero_bandwidth=["L2"])
+    figure = roofline.generate_plot("FP64")
+    levels = {"LDS", "L1", "L2", "HBM"}
+    expected = levels - {"L2"}
+
+    assert {trace.name for trace in figure.data if trace.name in levels} == expected
+    model = roofline._Roofline__view_models["FLOP"]
+    assert {trace["level"] for trace in model.roofline_traces} == expected
+    assert set(model.peak_colors) == levels
+
+
+def test_combined_model_reports_supported_precisions_and_fp32_default(
+    benchmarked_roofline,
+) -> None:
+    """MI210 supports scalar and matrix FP16/FP32/I8, and opens on FP32."""
+    roofline = benchmarked_roofline(["FP16", "FP32", "I8"])
+    ops_figure, flops_figure, _, _ = roofline.construct_plotly_figures(
+        {"kernelNames": []}, datatypes=None
+    )
+    figure, model = roofline._combined_html_figure(ops_figure, flops_figure)
+    assert figure is not None
+    assert set(model.precisions) == {"FP16", "FP32", "FP64", "BF16", "I8"}
+    assert "FP8" not in model.precisions
+    assert model.default_precisions == ["FP32"]
+    labels = {trace["label"] for trace in model.compute_traces}
+    assert {
+        "Peak VALU-FP16",
+        "Peak MFMA-FP16",
+        "Peak VALU-FP32",
+        "Peak MFMA-FP32",
+        "Peak VALU-I8",
+        "Peak MFMA-I8",
+    }.issubset(labels)
 
 
 CEILING = {"hbm": [[0.01, 1.0], [1.0, 1500.0], 1500.0]}
@@ -590,8 +647,9 @@ def test_construct_plotly_figures_all_datatypes_ignores_cli_selection(
         {"kernelNames": []}, datatypes=None
     )
 
-    assert ops_figure is None
+    assert ops_figure is not None
     assert flops_figure is not None
+    assert "Peak MFMA-I8" in {trace.name for trace in ops_figure.data}
     trace_names = {trace.name for trace in flops_figure.data}
     assert "Peak MFMA-BF16" in trace_names
     assert "Peak VALU-FP64" in trace_names
