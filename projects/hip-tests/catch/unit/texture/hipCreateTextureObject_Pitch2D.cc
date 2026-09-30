@@ -244,7 +244,6 @@ HIP_TEST_CASE(Unit_hipCreateTextureObject_Pitch2DResource) {
  * Test requirements
  * ------------------------
  *  - Textures supported on device
- *  - AMD only
  *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Unit_hipCreateTextureObject_Pitch2D_NormalizedCoordsLinearFilter) {
@@ -271,27 +270,39 @@ HIP_TEST_CASE(Unit_hipCreateTextureObject_Pitch2D_NormalizedCoordsLinearFilter) 
 
   // Sections
   SECTION("hipResourceTypePitch2D and normalizedCoords(1)") {
+#if HT_AMD
     texDesc.normalizedCoords = 1;
     texDesc.filterMode = hipFilterModePoint;
 
     HIP_CHECK_ERROR(hipCreateTextureObject(&texObj, &resDesc, &texDesc, nullptr),
                     hipErrorNotSupported);
+#else
+    WARN("Skipping section: " << HipTest::SkipReason::kPitch2DSamplerModesSupportedOnNvidia);
+#endif
   }
 
   SECTION("hipResourceTypePitch2D and hipFilterModeLinear") {
+#if HT_AMD
     texDesc.normalizedCoords = 0;
     texDesc.filterMode = hipFilterModeLinear;
 
     HIP_CHECK_ERROR(hipCreateTextureObject(&texObj, &resDesc, &texDesc, nullptr),
                     hipErrorNotSupported);
+#else
+    WARN("Skipping section: " << HipTest::SkipReason::kPitch2DSamplerModesSupportedOnNvidia);
+#endif
   }
 
   SECTION("hipResourceTypePitch2D and normalizedCoords(1)/hipFilterModeLinear") {
+#if HT_AMD
     texDesc.normalizedCoords = 1;
     texDesc.filterMode = hipFilterModeLinear;
 
     HIP_CHECK_ERROR(hipCreateTextureObject(&texObj, &resDesc, &texDesc, nullptr),
                     hipErrorNotSupported);
+#else
+    WARN("Skipping section: " << HipTest::SkipReason::kPitch2DSamplerModesSupportedOnNvidia);
+#endif
   }
 
   SECTION("hipResourceTypePitch2D and normalizedCoords(0)/hipFilterModePoint") {
