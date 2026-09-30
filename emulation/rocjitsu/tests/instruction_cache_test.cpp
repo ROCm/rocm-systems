@@ -616,7 +616,7 @@ TEST(InstructionCacheCuTest, ExceptionalQuantumRetainsTheProcessUntilCancellatio
   EXPECT_TRUE(lifetime.expired());
 }
 
-TEST(InstructionCacheCuTest, ActiveWaveReusesVmAccessAcrossQuantaAndDirectSteps) {
+TEST(InstructionCacheCuTest, ActiveWaveDoesNotCopyVmReporterAcrossQuantaAndDirectSteps) {
   GpuVm gpu_vm;
   CuFixture fixture("vm_quantum_lifetime_cu");
   auto backing = std::make_shared<ExecutableAddressSpace>(0);
@@ -635,22 +635,24 @@ TEST(InstructionCacheCuTest, ActiveWaveReusesVmAccessAcrossQuantaAndDirectSteps)
   wf->set_dispatch_id(1);
   wf->set_process_id(7);
   wf->set_address_space(handle);
+  // Snapshots share the generation payload; even the first fetch must not
+  // copy its fault reporter. Callback copies no longer count VM snapshots.
   copies = 0;
   fixture.cu()->run_quantum();
   ASSERT_EQ(wf->pc, kCodeBase + 4);
-  EXPECT_EQ(copies, 1u);
+  EXPECT_EQ(copies, 0u);
   fixture.cu()->run_quantum();
   ASSERT_EQ(wf->pc, kCodeBase + 8);
-  EXPECT_EQ(copies, 1u) << "a quantum boundary must not discard an active wave's snapshot";
+  EXPECT_EQ(copies, 0u) << "a quantum boundary must not copy the shared reporter";
   fixture.cu()->step();
   EXPECT_TRUE(wf->is_halted());
-  EXPECT_EQ(copies, 1u) << "direct stepping must reuse the active snapshot";
+  EXPECT_EQ(copies, 0u) << "direct stepping must not copy the shared reporter";
 
   ASSERT_TRUE(gpu_vm.unregister_address_space(handle));
   EXPECT_TRUE(lifetime.expired()) << "the final wave retained its process after retiring";
 }
 
-TEST(InstructionCacheCuTest, EndingOneWaveKeepsTheOtherWavesVmAccess) {
+TEST(InstructionCacheCuTest, EndingOneWaveDoesNotCopyTheOtherWavesVmReporter) {
   GpuVm gpu_vm;
   CuFixture fixture("vm_multiwave_lifetime_cu", /*wf_slots=*/2);
   auto backing = std::make_shared<ExecutableAddressSpace>(0);
@@ -672,20 +674,22 @@ TEST(InstructionCacheCuTest, EndingOneWaveKeepsTheOtherWavesVmAccess) {
     wf->set_process_id(7);
     wf->set_address_space(handle);
   }
+  // Snapshots share the generation payload; even the first fetch must not
+  // copy its fault reporter. Callback copies no longer count VM snapshots.
   copies = 0;
   fixture.cu()->step();
   ASSERT_TRUE(first->is_halted());
   ASSERT_FALSE(second->is_halted());
   ASSERT_EQ(second->pc, kCodeBase + 4);
-  EXPECT_EQ(copies, 1u) << "retiring the first wave must not discard the live wave's snapshot";
+  EXPECT_EQ(copies, 0u) << "retiring the first wave must not copy the live wave's reporter";
   EXPECT_GE(lifetime.use_count(), 2);
   fixture.cu()->step();
   ASSERT_EQ(second->pc, kCodeBase + 8);
-  EXPECT_EQ(copies, 1u);
+  EXPECT_EQ(copies, 0u);
   fixture.cu()->step();
   EXPECT_TRUE(second->is_halted());
   EXPECT_FALSE(fixture.cu()->has_active_wfs());
-  EXPECT_EQ(copies, 1u);
+  EXPECT_EQ(copies, 0u);
   ASSERT_TRUE(gpu_vm.unregister_address_space(handle));
   EXPECT_TRUE(lifetime.expired());
 }
