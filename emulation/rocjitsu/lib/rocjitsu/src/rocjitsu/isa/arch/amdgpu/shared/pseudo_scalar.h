@@ -50,7 +50,9 @@ inline float flush_input_f16(float value, uint32_t denorm_mode) {
 
 inline float quiet_nan(float value) {
   uint32_t bits = std::bit_cast<uint32_t>(value);
-  if ((bits & 0x7f800000u) == 0x7f800000u && (bits & 0x007fffffu) != 0)
+  // Test signaling NaNs specifically: a general NaN check can become a host
+  // floating-point comparison that raises FE_INVALID before the quieting step.
+  if ((bits & 0x7fc00000u) == 0x7f800000u && (bits & 0x003fffffu) != 0)
     bits |= 0x00400000u;
   return std::bit_cast<float>(bits);
 }

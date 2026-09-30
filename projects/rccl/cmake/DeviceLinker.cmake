@@ -85,6 +85,17 @@ if(_rccl_copts)
 endif()
 message(STATUS "Device Linker: inherited compile options: ${DL_INHERITED_FLAGS}")
 
+# The --link step is the one consumer that cannot take a -fvisibility= option:
+# the ncclDevFunc_* device functions have to stay visible, or the device link
+# fails with "recompile with -fPIC". The host objects below still need it.
+set(DL_LINK_INHERITED_FLAGS "")
+foreach(_opt IN LISTS DL_INHERITED_FLAGS)
+  if(_opt MATCHES "^-fvisibility=")
+    continue()
+  endif()
+  list(APPEND DL_LINK_INHERITED_FLAGS "${_opt}")
+endforeach()
+
 # ---------------------------------------------------------------------------
 # Parse GPU_TARGETS: strip target features, build offload-arch flag list
 # ---------------------------------------------------------------------------
@@ -184,14 +195,15 @@ function(dl_evaluate_guard GUARD GPU_TARGET RESULT_VAR)
     set(${RESULT_VAR} FALSE PARENT_SCOPE)
     return()
   endif()
-  string(REGEX MATCHALL "__gfx[0-9a-z]+__" _guard_archs "${GUARD}")
+  string(REGEX MATCHALL "__gfx[0-9a-z_]+__" _guard_archs "${GUARD}")
+  string(REPLACE "-" "_" _gpu_macro "${GPU_TARGET}")
   if(NOT _guard_archs)
     set(${RESULT_VAR} TRUE PARENT_SCOPE)
     return()
   endif()
   foreach(_ga ${_guard_archs})
     string(REGEX REPLACE "^__(.+)__$" "\\1" _arch "${_ga}")
-    if("${_arch}" STREQUAL "${GPU_TARGET}")
+    if("${_arch}" STREQUAL "${_gpu_macro}")
       set(${RESULT_VAR} TRUE PARENT_SCOPE)
       return()
     endif()
@@ -369,6 +381,7 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
       ${_link_def_flags}
       ${_link_inc_flags}
       ${DL_OPT_FLAGS}
+      ${DL_LINK_INHERITED_FLAGS}
       -std=c++17
       -o ${ARCH_DEVICE_ELF}
       @${_link_rsp}
