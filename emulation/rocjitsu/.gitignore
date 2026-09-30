@@ -23,8 +23,7 @@
 # Misc local working artifacts
 *.swp
 .vscode
-build*/
-!/lib/rocjitsu/src/rocjitsu/code/builders/
+/build*/
 third_party
 Testing
 tmp
