@@ -66,6 +66,12 @@ inline constexpr std::size_t kOperatorHandleAlignment     = 8;
 inline constexpr std::size_t kOperatorHandleDefinitionOff = 0;
 inline constexpr std::size_t kOperatorHandleIteratorOff   = 8;
 
+// Dispatcher registration listener vptr and returned std::function owner.
+inline constexpr std::size_t kOpRegistrationListenerSize      = 8;
+inline constexpr std::size_t kOpRegistrationListenerAlignment = 8;
+inline constexpr std::size_t kRegistrationHandleSize          = 32;
+inline constexpr std::size_t kRegistrationHandleAlignment     = 8;
+
 inline constexpr std::size_t kInputArrayViewSize      = 16;
 inline constexpr std::size_t kInputArrayViewAlignment = 8;
 
@@ -73,7 +79,6 @@ inline constexpr std::size_t  kKnownScalarTypeCount = 47;
 inline constexpr std::int32_t kBComplex32ScalarType = 46;
 
 // AOTI dtype availability differs between the supported PyTorch minors.
-inline constexpr std::uint64_t kTorch213AotiAbi = 0x020d000000000000ULL;
 inline constexpr std::uint64_t kTorch214AotiAbi = 0x020e000000000000ULL;
 
 }  // namespace torch_abi

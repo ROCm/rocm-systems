@@ -187,6 +187,10 @@ bool install()
     {
         return true;
     }
+    if (!torch_trace_collector::detail::initialize_argument_capture())
+    {
+        return false;
+    }
     g_handle = at::addGlobalCallback(
         at::RecordFunctionCallback(start_callback, end_callback).needsInputs(true));
     if (g_handle == at::INVALID_CALLBACK_HANDLE)

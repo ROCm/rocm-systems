@@ -918,6 +918,7 @@ add_test(
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_inject_roctx_package.xml
         ${COV_OPTION} tests/unit/utils/inject_roctx/test_inject_roctx_package.py
+        tests/unit/utils/inject_roctx/_backends/test_torch.py
         tests/unit/utils/inject_roctx/_backends/test_torch_trace_collector.py
         ${WORKING_DIR_OPTION}
 )
