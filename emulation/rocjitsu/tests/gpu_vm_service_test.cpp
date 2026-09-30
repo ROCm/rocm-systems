@@ -979,6 +979,77 @@ TEST(GpuVmService, AccessSnapshotIsRevokedAndNamespacesItsTranslationEpoch) {
   EXPECT_EQ(new_access->read(0, value), VmAccessOutcome::Unavailable);
 }
 
+TEST(GpuVmService, SnapshotsDoNotCopyTheFaultReporter) {
+  struct Reporter {
+    std::atomic<unsigned> &copies;
+    explicit Reporter(std::atomic<unsigned> &copies) : copies(copies) {}
+    Reporter(const Reporter &other) : copies(other.copies) { ++copies; }
+    void operator()(uint64_t, VmAccessKind) const {}
+  };
+  GpuVm gpu_vm;
+  std::atomic<unsigned> copies{0};
+  auto backing = std::make_shared<ByteAddressSpace>(0x11);
+  const auto handle = gpu_vm.register_address_space(7, backing, backing, Reporter(copies));
+  ASSERT_TRUE(handle);
+  const unsigned registration_copies = copies.load();
+  for (unsigned iteration = 0; iteration < 64; ++iteration) {
+    const auto access = gpu_vm.snapshot(handle);
+    const auto routed = gpu_vm.snapshot_vmid(7);
+    ASSERT_TRUE(access);
+    ASSERT_TRUE(routed);
+    const auto copy = *access;
+    std::array<std::byte, 1> value{};
+    EXPECT_EQ(copy.read(0, value), VmAccessOutcome::Complete);
+    EXPECT_EQ(value[0], std::byte{0x11});
+  }
+  EXPECT_EQ(copies.load(), registration_copies);
+}
+
+// Exercise the read-mostly registry while writers replace and revoke bindings.
+// A snapshot must retain a consistent translator/backing/epoch tuple even when
+// another reader or a replacement runs concurrently.
+TEST(GpuVmService, ConcurrentSnapshotsRemainConsistentAcrossReplacement) {
+  GpuVm gpu_vm;
+  const auto handle = register_byte_address_space(gpu_vm, 7, 0x11);
+  ASSERT_TRUE(handle);
+  const auto initial = gpu_vm.snapshot(handle);
+  ASSERT_TRUE(initial);
+  const uint64_t initial_epoch = initial->info().translation_epoch;
+  std::promise<void> start;
+  const auto ready = start.get_future().share();
+  std::vector<std::future<void>> readers;
+  for (unsigned reader = 0; reader < 8; ++reader) {
+    readers.push_back(std::async(std::launch::async, [&, reader] {
+      ready.wait();
+      for (unsigned iteration = 0; iteration < 2000; ++iteration) {
+        const auto access = reader % 2 ? gpu_vm.snapshot(handle) : gpu_vm.snapshot_vmid(7);
+        ASSERT_TRUE(access);
+        EXPECT_EQ(access->info().vmid, 7u);
+        const auto epoch = access->info().translation_epoch;
+        const std::byte expected{static_cast<uint8_t>((epoch - initial_epoch) % 2 ? 0x22 : 0x11)};
+        std::array<std::byte, 16> bytes{};
+        const auto outcome = access->read(0, bytes);
+        if (outcome == VmAccessOutcome::Complete) {
+          for (const auto byte : bytes)
+            EXPECT_EQ(byte, expected);
+        } else {
+          EXPECT_EQ(outcome, VmAccessOutcome::Unavailable);
+        }
+      }
+    }));
+  }
+  start.set_value();
+  for (unsigned iteration = 0; iteration < 64; ++iteration) {
+    auto replacement = std::make_shared<ByteAddressSpace>(iteration % 2 ? 0x11 : 0x22);
+    EXPECT_TRUE(gpu_vm.replace_translated(handle, replacement, replacement));
+  }
+  for (auto &reader : readers)
+    reader.get();
+  EXPECT_FALSE(initial->is_current());
+  EXPECT_TRUE(gpu_vm.unregister_address_space(handle));
+  EXPECT_FALSE(gpu_vm.snapshot_vmid(7));
+}
+
 TEST(GpuVmService, ExplicitInvalidationRevokesTheAccessSnapshot) {
   GpuVm gpu_vm;
   const auto handle = register_byte_address_space(gpu_vm, 7, 0x11);

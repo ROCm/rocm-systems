@@ -8,6 +8,7 @@
 
 #include "rocjitsu/vm/amdgpu/gpu_handles.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
+#include "util/distributed_shared_mutex.h"
 
 #include <atomic>
 #include <cstddef>
@@ -541,13 +542,8 @@ private:
   friend class GpuVm;
 
   GpuVmAccess(AddressSpaceHandle address_space, AddressSpaceInfo info,
-              std::shared_ptr<AddressSpaceTranslator> translator,
-              std::shared_ptr<PhysicalMemoryAccess> physical_memory,
-              std::shared_ptr<GpuVmAccessState> access_state,
-              std::function<void(uint64_t, VmAccessKind)> fault_reporter)
-      : address_space_(address_space), info_(info), translator_(std::move(translator)),
-        physical_memory_(std::move(physical_memory)), access_state_(std::move(access_state)),
-        fault_reporter_(std::move(fault_reporter)) {}
+              std::shared_ptr<GpuVmAccessState> access_state)
+      : address_space_(address_space), info_(info), access_state_(std::move(access_state)) {}
 
   void report_terminal_fault(uint64_t address, VmAccessKind access, VmAccessOutcome outcome) const;
   [[nodiscard]] VmAccessOutcome probe_impl(uint64_t address, std::size_t size, VmAccessKind access,
@@ -555,10 +551,8 @@ private:
 
   AddressSpaceHandle address_space_;
   AddressSpaceInfo info_;
-  std::shared_ptr<AddressSpaceTranslator> translator_;
-  std::shared_ptr<PhysicalMemoryAccess> physical_memory_;
+  // One ownership operation per snapshot, without copying the fault callback.
   std::shared_ptr<GpuVmAccessState> access_state_;
-  std::function<void(uint64_t, VmAccessKind)> fault_reporter_;
 };
 
 /// @brief Owns GPU address-space identities independently of their front end.
@@ -700,10 +694,12 @@ private:
   [[nodiscard]] AddressSpaceHandle allocate_locked(Binding binding);
   [[nodiscard]] Binding *find_locked(AddressSpaceHandle handle);
   [[nodiscard]] const Binding *find_locked(AddressSpaceHandle handle) const;
-  void advance_access_state_locked(Binding &binding);
+  void advance_access_state_locked(Binding &binding, std::shared_ptr<GpuVmAccessState> replacement);
   void revoke_access_state_locked(Binding &binding);
 
-  mutable std::mutex mutex_;
+  // Every memory request may snapshot a binding. Keep independent readers
+  // off a single contended registry lock; mapping changes still lock all shards.
+  mutable util::DistributedSharedMutex mutex_;
   std::vector<Slot> slots_;
   std::vector<uint32_t> free_slots_;
   std::unordered_map<uint32_t, AddressSpaceHandle> vmid_handles_;
