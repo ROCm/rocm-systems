@@ -154,6 +154,7 @@ int blocking_coll = 0;
 int per_iter_timing = 0;
 int per_iter_skip = 0;
 static int streamnull = 0;
+static int allow_gpu_aware_mpi = 0;
 static int timeout = 0;
 int cudaGraphLaunches = 0;
 static int output_algo_proto_channels = 0;
@@ -1942,13 +1943,27 @@ testResult_t run(); // Main function
 // Looks for a configure option in MPICH's version string. A delimiter has to
 // follow the option so that "--with-ze" does not match "--with-zelda", and
 // "--with-hip" is not found inside "--without-hip".
-static bool mpichConfiguredWith(const char* version, const char* option) {
-  size_t len = strlen(option);
-  for (const char* p = strstr(version, option); p; p = strstr(p + 1, option)) {
-    char next = p[len];
-    if (next == '\0' || next == '=' || isspace((unsigned char)next)) return true;
+static bool mpichConfiguredWith(const std::string& version, const std::string& option) {
+  for (size_t pos = version.find(option); pos != std::string::npos;
+       pos = version.find(option, pos + 1)) {
+    const size_t end = pos + option.size();
+    if (end == version.size() || version[end] == '=' || isspace((unsigned char)version[end]))
+      return true;
   }
   return false;
+}
+#endif
+
+#if defined(OPEN_MPI) && defined(NCCL_OS_LINUX)
+// Open MPI does not register opal_built_with_rocm_support as an MCA parameter,
+// so there is no MPI_T route to it. Weak references resolve against both shared
+// and static MPI libraries, and stay null on an Open MPI too old to define the
+// symbol at all.
+// The inner 'extern' keeps these declarations: a weak *definition* here would
+// override the symbol the MPI library exports and always read false.
+extern "C" {
+extern bool opal_built_with_rocm_support NCCL_WEAK;
+extern bool opal_built_with_cuda_support NCCL_WEAK;
 }
 #endif
 
@@ -1966,17 +1981,12 @@ static const char* detectGpuAwareMpi() {
   return "it was built against an Open MPI with CUDA-aware support compiled in";
 #endif
 #if defined(OPEN_MPI) && defined(NCCL_OS_LINUX)
-  // The Open MPI actually loaded, which for a prebuilt binary need not be the
-  // one above. opal_built_with_rocm_support is not registered as an MCA
-  // parameter, so read the exported symbols rather than going through MPI_T.
-  {
-    const bool* builtWithRocm = (const bool*)dlsym(RTLD_DEFAULT, "opal_built_with_rocm_support");
-    if (builtWithRocm && *builtWithRocm)
-      return "the Open MPI it is running against has ROCm-aware support compiled in";
-    const bool* builtWithCuda = (const bool*)dlsym(RTLD_DEFAULT, "opal_built_with_cuda_support");
-    if (builtWithCuda && *builtWithCuda)
-      return "the Open MPI it is running against has CUDA-aware support compiled in";
-  }
+  // The Open MPI actually linked, which for a prebuilt binary need not be the
+  // one the macros above came from.
+  if (&opal_built_with_rocm_support != NULL && opal_built_with_rocm_support)
+    return "the Open MPI it is running against has ROCm-aware support compiled in";
+  if (&opal_built_with_cuda_support != NULL && opal_built_with_cuda_support)
+    return "the Open MPI it is running against has CUDA-aware support compiled in";
 #endif
 #ifdef MPIX_GPU_SUPPORT_HIP
   {
@@ -1999,10 +2009,12 @@ static const char* detectGpuAwareMpi() {
   // configure line, which the switch does not affect. Derivatives such as
   // MVAPICH or Cray MPICH need not report a configure line at all.
   {
-    char version[MPI_MAX_LIBRARY_VERSION_STRING] = {0};
+    char buf[MPI_MAX_LIBRARY_VERSION_STRING] = {0};
     int len = 0;
-    if (MPI_Get_library_version(version, &len) == MPI_SUCCESS) {
-      version[sizeof(version) - 1] = '\0';
+    if (MPI_Get_library_version(buf, &len) == MPI_SUCCESS) {
+      // Build from the reported length rather than trusting NUL termination.
+      if (len < 0 || len > (int)sizeof(buf)) len = (int)sizeof(buf);
+      const std::string version(buf, (size_t)len);
       if (mpichConfiguredWith(version, "--with-hip"))
         return "it is running against an MPICH configured --with-hip";
       if (mpichConfiguredWith(version, "--with-cuda"))
@@ -2020,18 +2032,13 @@ static const char* detectGpuAwareMpi() {
   // above this describes the run rather than the build, and so sees nothing if
   // the job never selected the UCX transport.
   {
-    FILE* maps = fopen("/proc/self/maps", "r");
-    if (maps) {
-      char line[4096];
-      const char* reason = NULL;
-      while (reason == NULL && fgets(line, sizeof(line), maps)) {
-        if (strstr(line, "libuct_rocm"))
-          reason = "the UCX it is running against has the ROCm transport module built in";
-        else if (strstr(line, "libuct_cuda"))
-          reason = "the UCX it is running against has the CUDA transport module built in";
-      }
-      fclose(maps);
-      if (reason) return reason;
+    std::ifstream maps("/proc/self/maps");
+    std::string line;
+    while (std::getline(maps, line)) {
+      if (line.find("libuct_rocm") != std::string::npos)
+        return "the UCX it is running against has the ROCm transport module built in";
+      if (line.find("libuct_cuda") != std::string::npos)
+        return "the UCX it is running against has the CUDA transport module built in";
     }
   }
 #endif
@@ -2047,15 +2054,24 @@ static void abortIfGpuAwareMpi() {
 
   int rank = 0;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-  if (rank == 0) {
+
+  if (allow_gpu_aware_mpi) {
+    if (rank == 0)
+      fprintf(stderr,
+              "[WARN] rccl-tests is running under a GPU-aware MPI: %s.\n"
+              "       Continuing because --allow_gpu_aware_mpi was given.\n",
+              reason);
+    return;
+  }
+
+  if (rank == 0)
     fprintf(stderr,
             "[FATAL] rccl-tests requires a non-GPU-aware MPI, but %s.\n"
             "        Re-run with an MPI configured without GPU support (Open MPI: without\n"
             "        --with-rocm/--with-cuda, MPICH: without --with-hip/--with-cuda).\n"
-            "        Turning GPU support off at launch time is not sufficient.\n",
+            "        Turning GPU support off at launch time is not sufficient.\n"
+            "        Pass --allow_gpu_aware_mpi to run anyway.\n",
             reason);
-    fflush(stderr);
-  }
   // Every rank detects this identically, so the barrier cannot deadlock. It
   // keeps the other ranks from aborting, and taking the job down with them,
   // before rank 0's message has made it out through the launcher.
@@ -2110,6 +2126,8 @@ int main(int argc, char* argv[], char **envp) {
   #endif
   loadRcclSyms();
   // Parse args
+  // Values above any char so long-only options cannot collide with short ones.
+  enum { OPT_ALLOW_GPU_AWARE_MPI = 256 };
   double parsed;
   int longindex;
   char *output_file = nullptr;
@@ -2164,6 +2182,10 @@ int main(int argc, char* argv[], char **envp) {
     {"devtime_skip_mid", required_argument, 0, 'j'},
     {"devtime_skip_large", required_argument, 0, 'k'},
     {"devtime_check", required_argument, 0, 'H'},
+#ifdef MPI_SUPPORT
+    // Long-only: the short-option space is exhausted.
+    {"allow_gpu_aware_mpi", no_argument, 0, OPT_ALLOW_GPU_AWARE_MPI},
+#endif
     {"help", no_argument, 0, 'h'},
     {}
   };
@@ -2392,6 +2414,11 @@ int main(int argc, char* argv[], char **envp) {
       case 'u':
         unalign = (int)strtol(optarg, NULL, 0);
         break;
+#ifdef MPI_SUPPORT
+      case OPT_ALLOW_GPU_AWARE_MPI:
+        allow_gpu_aware_mpi = 1;
+        break;
+#endif
       case 'h':
       default:
         if (c != 'h') printf("invalid option '%c'\n", c);
@@ -2453,6 +2480,9 @@ int main(int argc, char* argv[], char **envp) {
             "[-j,--devtime_skip_mid <count> skip at mid tier (-1=min(-P,2); default: -1)] \n\t"
             "[-k,--devtime_skip_large <count> skip at large tier (-1=min(-P,1); default: -1)] \n\t"
             "[-H,--devtime_check <0/1> validate timed-kernel output before datacheck (default: 0)] \n\t"
+#ifdef MPI_SUPPORT
+            "[--allow_gpu_aware_mpi warn instead of aborting when the MPI is GPU-aware] \n\t"
+#endif
             "[-h,--help]\n",
           programName);
         return 0;
