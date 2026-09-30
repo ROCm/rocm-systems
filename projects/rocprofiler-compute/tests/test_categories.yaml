@@ -38,6 +38,7 @@ test_categories:
       - test_roofline_calc
       - test_roofline_analyze
       - test_roofline_main
+      - test_html_report
       - test_num_xcds_spec_class
       - test_profiler_base
       - test_pc_sampling_profile
@@ -122,6 +123,7 @@ test_categories:
       - test_roofline_calc
       - test_roofline_analyze
       - test_roofline_main
+      - test_html_report
       - test_rocpd_data
       - test_torch_trace_coverage
       - test_conftest
@@ -217,6 +219,7 @@ test_categories:
       - test_roofline_calc
       - test_roofline_analyze
       - test_roofline_main
+      - test_html_report
       - test_rocpd_data
       - test_torch_trace_coverage
       - test_conftest
@@ -312,6 +315,7 @@ test_categories:
       - test_roofline_calc
       - test_roofline_analyze
       - test_roofline_main
+      - test_html_report
       - test_rocpd_data
       - test_torch_trace_coverage
       - test_conftest
