@@ -7,9 +7,7 @@
 #include <string_view>
 #include <vector>
 
-namespace rocprofsys
-{
-inline namespace common
+namespace rocprofsys::inline common
 {
 namespace
 {
@@ -69,7 +67,7 @@ delimit(const std::string& line, std::string_view delimiters)
     {
         // tally every character in the line that is one of the delimiters
         size_t _nmax = 0;
-        for(char itr : line)
+        for(const char itr : line)
         {
             if(delimiters.find(itr) != std::string_view::npos)
             {
@@ -84,7 +82,10 @@ delimit(const std::string& line, std::string_view delimiters)
         _beginp = line.find_first_not_of(delimiters, _delimp);
         // if no a character after or at _end that is not a delimiter is not found
         // then we are done
-        if(_beginp == std::string::npos) break;
+        if(_beginp == std::string::npos)
+        {
+            break;
+        }
         // starting at the position of the new string, find the next delimiter
         _delimp = line.find_first_of(delimiters, _beginp);
         std::string _tmp{};
@@ -92,10 +93,12 @@ delimit(const std::string& line, std::string_view delimiters)
         // between this position and the next delimiter
         _tmp = line.substr(_beginp, _delimp - _beginp);
         // don't add empty strings
-        if(!_tmp.empty()) emplace(_result, _tmp);
+        if(!_tmp.empty())
+        {
+            emplace(_result, _tmp);
+        }
     }
     return _result;
 }
 }  // namespace
-}  // namespace common
-}  // namespace rocprofsys
+}  // namespace rocprofsys::inline common

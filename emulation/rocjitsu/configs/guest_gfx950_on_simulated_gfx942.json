@@ -17,7 +17,7 @@
       "drm_render_minor": 191,
       "simd_count": 64,
       "max_waves_per_simd": 8,
-      "num_shader_engines": 4,
+      "num_shader_engines": 2,
       "num_shader_arrays_per_engine": 2,
       "num_cu_per_sh": 4,
       "simd_per_cu": 4,
@@ -35,6 +35,7 @@
       "l2_assoc": 16,
       "num_sdma_engines": 5,
       "num_sdma_xgmi_engines": 12,
+      "num_sdma_queues_per_engine": 8,
       "num_cp_queues": 128,
       "max_engine_clk_fcompute": 2400
     }

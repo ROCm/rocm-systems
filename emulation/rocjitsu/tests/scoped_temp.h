@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -107,6 +108,34 @@ private:
   }
 
   std::string path_;
+};
+
+/// @brief Sets an environment variable for the current scope and restores it on exit.
+/// @details Tests that steer config discovery through the environment share one process
+/// with every other test in the binary, so an unrestored variable silently changes what
+/// later tests resolve. Restoring means putting back the original value, or unsetting the
+/// variable again when it was absent to begin with.
+class ScopedEnvironmentVariable {
+public:
+  ScopedEnvironmentVariable(const char *name, const std::string &value) : name_(name) {
+    if (const char *original = std::getenv(name))
+      original_ = original;
+    setenv(name_.c_str(), value.c_str(), 1);
+  }
+
+  ~ScopedEnvironmentVariable() {
+    if (original_)
+      setenv(name_.c_str(), original_->c_str(), 1);
+    else
+      unsetenv(name_.c_str());
+  }
+
+  ScopedEnvironmentVariable(const ScopedEnvironmentVariable &) = delete;
+  ScopedEnvironmentVariable &operator=(const ScopedEnvironmentVariable &) = delete;
+
+private:
+  std::string name_;
+  std::optional<std::string> original_;
 };
 
 } // namespace rocjitsu::test

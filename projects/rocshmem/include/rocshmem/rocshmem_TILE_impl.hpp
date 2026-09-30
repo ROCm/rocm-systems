@@ -29,6 +29,98 @@
 // implementations. The extern "C" wrappers for JIT consumers are in
 // src/device/rocshmem_wrapper.cc
 namespace rocshmem {
+  template <typename T>
+  struct rocshmem_tile_element_type {
+    static constexpr ROCSHMEM_TILE_ELEMENT_TYPE value =
+        ROCSHMEM_TILE_ELEMENT_UNKNOWN;
+  };
+
+  template <>
+  struct rocshmem_tile_element_type<char> {
+    static constexpr ROCSHMEM_TILE_ELEMENT_TYPE value =
+        ROCSHMEM_TILE_ELEMENT_INT8;
+  };
+
+  template <>
+  struct rocshmem_tile_element_type<signed char> {
+    static constexpr ROCSHMEM_TILE_ELEMENT_TYPE value =
+        ROCSHMEM_TILE_ELEMENT_INT8;
+  };
+
+  template <>
+  struct rocshmem_tile_element_type<unsigned char> {
+    static constexpr ROCSHMEM_TILE_ELEMENT_TYPE value =
+        ROCSHMEM_TILE_ELEMENT_UINT8;
+  };
+
+  template <>
+  struct rocshmem_tile_element_type<short> {
+    static constexpr ROCSHMEM_TILE_ELEMENT_TYPE value =
+        ROCSHMEM_TILE_ELEMENT_SHORT;
+  };
+
+  template <>
+  struct rocshmem_tile_element_type<unsigned short> {
+    static constexpr ROCSHMEM_TILE_ELEMENT_TYPE value =
+        ROCSHMEM_TILE_ELEMENT_USHORT;
+  };
+
+  template <>
+  struct rocshmem_tile_element_type<int> {
+    static constexpr ROCSHMEM_TILE_ELEMENT_TYPE value =
+        ROCSHMEM_TILE_ELEMENT_INT;
+  };
+
+  template <>
+  struct rocshmem_tile_element_type<unsigned int> {
+    static constexpr ROCSHMEM_TILE_ELEMENT_TYPE value =
+        ROCSHMEM_TILE_ELEMENT_UINT;
+  };
+
+  template <>
+  struct rocshmem_tile_element_type<long> {
+    static constexpr ROCSHMEM_TILE_ELEMENT_TYPE value =
+        ROCSHMEM_TILE_ELEMENT_LONG;
+  };
+
+  template <>
+  struct rocshmem_tile_element_type<unsigned long> {
+    static constexpr ROCSHMEM_TILE_ELEMENT_TYPE value =
+        ROCSHMEM_TILE_ELEMENT_ULONG;
+  };
+
+  template <>
+  struct rocshmem_tile_element_type<long long> {
+    static constexpr ROCSHMEM_TILE_ELEMENT_TYPE value =
+        ROCSHMEM_TILE_ELEMENT_LONGLONG;
+  };
+
+  template <>
+  struct rocshmem_tile_element_type<unsigned long long> {
+    static constexpr ROCSHMEM_TILE_ELEMENT_TYPE value =
+        ROCSHMEM_TILE_ELEMENT_ULONGLONG;
+  };
+
+  template <>
+  struct rocshmem_tile_element_type<float> {
+    static constexpr ROCSHMEM_TILE_ELEMENT_TYPE value =
+        ROCSHMEM_TILE_ELEMENT_FLOAT;
+  };
+
+  template <>
+  struct rocshmem_tile_element_type<double> {
+    static constexpr ROCSHMEM_TILE_ELEMENT_TYPE value =
+        ROCSHMEM_TILE_ELEMENT_DOUBLE;
+  };
+
+  template <typename T>
+  __device__ inline uint64_t rocshmem_tile_flags_with_element_type(uint64_t flags) {
+    constexpr uint64_t type_bits =
+        static_cast<uint64_t>(rocshmem_tile_element_type<T>::value)
+        << ROCSHMEM_TILE_ELEMENT_TYPE_SHIFT;
+    return (flags & ~ROCSHMEM_TILE_ELEMENT_TYPE_MASK) | type_bits;
+  }
+
   // RMA PUT operations
   __device__ int rocshmem_ctx_tile_put_internal(
       rocshmem_ctx_t ctx, void* dst_data, const void* src_data,
@@ -676,10 +768,11 @@ __device__ inline int rocshmem_ctx_tile_sum_reduce(rocshmem_ctx_t ctx,
   }
 
   // Forward to type-erased bitcode implementation
+  const uint64_t typed_flags = rocshmem_tile_flags_with_element_type<element_t>(flags);
   return rocshmem_tile_sum_reduce_internal(team, dst.data_handle(), src.data_handle(),
                                      dst_strides, src_strides,
                                      start_arr, boundary_arr,
-                                     ndim, sizeof(element_t), root, flags);
+                                     ndim, sizeof(element_t), root, typed_flags);
 }
 
 template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
@@ -707,10 +800,11 @@ __device__ inline int rocshmem_ctx_tile_sum_reduce_wave(rocshmem_ctx_t ctx,
   }
 
   // Forward to type-erased bitcode implementation
+  const uint64_t typed_flags = rocshmem_tile_flags_with_element_type<element_t>(flags);
   return rocshmem_tile_sum_reduce_wave_internal(team, dst.data_handle(), src.data_handle(),
                                           dst_strides, src_strides,
                                           start_arr, boundary_arr,
-                                          ndim, sizeof(element_t), root, flags);
+                                          ndim, sizeof(element_t), root, typed_flags);
 }
 
 template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
@@ -738,10 +832,11 @@ __device__ inline int rocshmem_ctx_tile_sum_reduce_wg(rocshmem_ctx_t ctx,
   }
 
   // Forward to type-erased bitcode implementation
+  const uint64_t typed_flags = rocshmem_tile_flags_with_element_type<element_t>(flags);
   return rocshmem_tile_sum_reduce_wg_internal(team, dst.data_handle(), src.data_handle(),
                                         dst_strides, src_strides,
                                         start_arr, boundary_arr,
-                                        ndim, sizeof(element_t), root, flags);
+                                        ndim, sizeof(element_t), root, typed_flags);
 }
 
 /******************************************************************************
@@ -803,10 +898,11 @@ __device__ inline int rocshmem_ctx_tile_max_reduce(rocshmem_ctx_t ctx,
   }
 
   // Forward to type-erased bitcode implementation
+  const uint64_t typed_flags = rocshmem_tile_flags_with_element_type<element_t>(flags);
   return rocshmem_tile_max_reduce_internal(team, dst.data_handle(), src.data_handle(),
                                      dst_strides, src_strides,
                                      start_arr, boundary_arr,
-                                     ndim, sizeof(element_t), root, flags);
+                                     ndim, sizeof(element_t), root, typed_flags);
 }
 
 template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
@@ -834,10 +930,11 @@ __device__ inline int rocshmem_ctx_tile_max_reduce_wave(rocshmem_ctx_t ctx,
   }
 
   // Forward to type-erased bitcode implementation
+  const uint64_t typed_flags = rocshmem_tile_flags_with_element_type<element_t>(flags);
   return rocshmem_tile_max_reduce_wave_internal(team, dst.data_handle(), src.data_handle(),
                                           dst_strides, src_strides,
                                           start_arr, boundary_arr,
-                                          ndim, sizeof(element_t), root, flags);
+                                          ndim, sizeof(element_t), root, typed_flags);
 }
 
 template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
@@ -865,10 +962,11 @@ __device__ inline int rocshmem_ctx_tile_max_reduce_wg(rocshmem_ctx_t ctx,
   }
 
   // Forward to type-erased bitcode implementation
+  const uint64_t typed_flags = rocshmem_tile_flags_with_element_type<element_t>(flags);
   return rocshmem_tile_max_reduce_wg_internal(team, dst.data_handle(), src.data_handle(),
                                         dst_strides, src_strides,
                                         start_arr, boundary_arr,
-                                        ndim, sizeof(element_t), root, flags);
+                                        ndim, sizeof(element_t), root, typed_flags);
 }
 
 /******************************************************************************
@@ -930,10 +1028,11 @@ __device__ inline int rocshmem_ctx_tile_min_reduce(rocshmem_ctx_t ctx,
   }
 
   // Forward to type-erased bitcode implementation
+  const uint64_t typed_flags = rocshmem_tile_flags_with_element_type<element_t>(flags);
   return rocshmem_tile_min_reduce_internal(team, dst.data_handle(), src.data_handle(),
                                      dst_strides, src_strides,
                                      start_arr, boundary_arr,
-                                     ndim, sizeof(element_t), root, flags);
+                                     ndim, sizeof(element_t), root, typed_flags);
 }
 
 template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
@@ -961,10 +1060,11 @@ __device__ inline int rocshmem_ctx_tile_min_reduce_wave(rocshmem_ctx_t ctx,
   }
 
   // Forward to type-erased bitcode implementation
+  const uint64_t typed_flags = rocshmem_tile_flags_with_element_type<element_t>(flags);
   return rocshmem_tile_min_reduce_wave_internal(team, dst.data_handle(), src.data_handle(),
                                           dst_strides, src_strides,
                                           start_arr, boundary_arr,
-                                          ndim, sizeof(element_t), root, flags);
+                                          ndim, sizeof(element_t), root, typed_flags);
 }
 
 template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
@@ -992,10 +1092,11 @@ __device__ inline int rocshmem_ctx_tile_min_reduce_wg(rocshmem_ctx_t ctx,
   }
 
   // Forward to type-erased bitcode implementation
+  const uint64_t typed_flags = rocshmem_tile_flags_with_element_type<element_t>(flags);
   return rocshmem_tile_min_reduce_wg_internal(team, dst.data_handle(), src.data_handle(),
                                         dst_strides, src_strides,
                                         start_arr, boundary_arr,
-                                        ndim, sizeof(element_t), root, flags);
+                                        ndim, sizeof(element_t), root, typed_flags);
 }
 
 /******************************************************************************

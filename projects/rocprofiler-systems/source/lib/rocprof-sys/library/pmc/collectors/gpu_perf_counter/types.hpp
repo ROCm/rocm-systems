@@ -5,8 +5,8 @@
 
 #include "backends/rocprofiler_sdk/types.hpp"
 
-#include <spdlog/fmt/fmt.h>
-#include <spdlog/fmt/ranges.h>
+#include <fmt/format.h>
+#include <fmt/ranges.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -124,7 +124,10 @@ namespace rocprofsys::pmc::collectors::gpu_perf_counter
 inline std::string
 make_qualified_name(const counter_metadata& meta)
 {
-    if(meta.dimensions.empty()) return meta.name;
+    if(meta.dimensions.empty())
+    {
+        return meta.name;
+    }
     return fmt::format("{}[{}]", meta.name, fmt::join(meta.dimensions, ","));
 }
 

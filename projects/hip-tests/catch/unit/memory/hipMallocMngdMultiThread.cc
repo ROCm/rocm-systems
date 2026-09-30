@@ -103,13 +103,10 @@ static void LaunchKrnl2(int* Hmm, size_t NumElms, int InitVal, int HmmMem) {
       }
     }
   }
-  if (DataMismatch != 0) {
-    INFO("Data Mismatch observed at line: " << __LINE__);
-    REQUIRE(false);
-  }
+  REQUIRE_THREAD(DataMismatch == 0);
 
-  HIP_CHECK(hipFree(ptr));
-  HIP_CHECK(hipStreamDestroy(strm));
+  HIP_CHECK_THREAD(hipFree(ptr));
+  HIP_CHECK_THREAD(hipStreamDestroy(strm));
 }
 
 static void LaunchKrnl3(int* Dptr, size_t NumElms, int InitVal) {
@@ -130,13 +127,10 @@ static void LaunchKrnl3(int* Dptr, size_t NumElms, int InitVal) {
       DataMismatch++;
     }
   }
-  if (DataMismatch != 0) {
-    INFO("Data Mismatch observed at line: " << __LINE__);
-    REQUIRE(false);
-  }
+  REQUIRE_THREAD(DataMismatch == 0);
 
-  HIP_CHECK(hipFree(Hmm));
-  HIP_CHECK(hipStreamDestroy(strm));
+  HIP_CHECK_THREAD(hipFree(Hmm));
+  HIP_CHECK_THREAD(hipStreamDestroy(strm));
 }
 
 
@@ -170,13 +164,10 @@ static void LaunchKrnl5(int* Hmm1, size_t NumElms, int InitVal, int KerneltoLaun
       }
     }
   }
-  if (DataMismatch != 0) {
-    INFO("Data Mismatch observed at line: " << __LINE__);
-    REQUIRE(false);
-  }
+  REQUIRE_THREAD(DataMismatch == 0);
 
-  HIP_CHECK(hipFree(Hmm2));
-  HIP_CHECK(hipStreamDestroy(strm));
+  HIP_CHECK_THREAD(hipFree(Hmm2));
+  HIP_CHECK_THREAD(hipStreamDestroy(strm));
 }
 
 
@@ -393,6 +384,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiKrnlComnHmm) {
       thr.join();
     }
   }
+  HIP_CHECK_THREAD_FINALIZE();
   delete[] HstPtr;
   HIP_CHECK(hipFree(Hmm));
 }
@@ -421,6 +413,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiKrnlComnMalloc) {
       thr.join();
     }
   }
+  HIP_CHECK_THREAD_FINALIZE();
   delete[] HstPtr;
   HIP_CHECK(hipFree(Dptr));
 }
@@ -451,6 +444,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiThrdMultiStrm) {
     }
   }
 
+  HIP_CHECK_THREAD_FINALIZE();
   HIP_CHECK(hipFree(Hmm1));
 }
 
@@ -478,6 +472,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_TwoKrnlsComnHmmMem) {
       thr.join();
     }
   }
+  HIP_CHECK_THREAD_FINALIZE();
   delete[] HstPtr;
   HIP_CHECK(hipFree(Dptr));
 }

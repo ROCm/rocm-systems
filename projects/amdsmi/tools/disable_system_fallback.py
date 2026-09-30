@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 """Disable the loader's system-library fallback in a staged wheel wrapper.
 
 The committed ``amdsmi_wrapper.py`` ships with

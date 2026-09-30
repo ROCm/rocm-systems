@@ -15,6 +15,8 @@
 #include <cstdlib>
 #include <iostream>
 #include <iomanip>
+#include <sstream>
+#include <string>
 #include <mutex>
 #include <cstdlib>
 #include <thread>
@@ -144,6 +146,32 @@ inline bool isQuickLevel() {
 // Do not call before all threads have joined
 #define HIP_CHECK_THREAD_FINALIZE()                                                                \
   { TestContext::get().finalizeResults(); }
+
+// Per-thread buffer used by INFO_THREAD
+inline std::string& threadInfoMessageBuffer() {
+  static thread_local std::string buffer;
+  return buffer;
+}
+
+// Thread-safe counterpart of INFO: stashes a diagnostic message that the next
+// CHECK_THREAD attaches to its recorded result.
+#define INFO_THREAD(message)                                                                       \
+  {                                                                                                \
+    std::stringstream threadInfoStream;                                                            \
+    threadInfoStream << message;                                                                   \
+    threadInfoMessageBuffer() = threadInfoStream.str();                                            \
+  }
+
+// Thread-safe counterpart of CHECK
+#define CHECK_THREAD(condition)                                                                    \
+  {                                                                                                \
+    auto localResult = (condition);                                                                \
+    std::string threadCall =                                                                       \
+        threadInfoMessageBuffer().empty() ? std::string(#condition) : threadInfoMessageBuffer();   \
+    HCResult result(__LINE__, __FILE__, hipSuccess, threadCall, localResult);                      \
+    TestContext::get().addResults(result);                                                         \
+    threadInfoMessageBuffer().clear();                                                             \
+  }
 
 // Selects between the thread-safe and the regular check based on a runtime flag.
 #define HIP_CHECK_OPT_THREAD(threadSafe, error)                                                    \
@@ -287,10 +315,12 @@ static void initHipCtx(hipCtx_t* pcontext) {
 #define HIP_TEST_DRIVER_INIT()
 #endif
 
-#if defined(__gfx1250__) || defined(__gfx1251__)
+#if defined(__gfx1250__) || defined(__gfx1250_strict__) || defined(__gfx1251__)
 // Wrap __cluster_dims__ so a test's host code is NOT compiled away when the
 // offload-arch string mixes archs that support clusters with ones that don't
 // (e.g. gfx950). The attribute is only emitted for targets with cluster support.
+// Note: __gfx1250_strict__ is a separate predefine; __gfx1250__ is NOT defined
+// for the gfx1250-strict target, so it must be listed explicitly.
 #define CLUSTER_DIMS(...) __cluster_dims__(__VA_ARGS__)
 #else
 #define CLUSTER_DIMS(...)

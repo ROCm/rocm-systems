@@ -34,17 +34,15 @@
 
 #include "logger/debug.hpp"
 
-#include <spdlog/fmt/ostr.h>
-#include <spdlog/fmt/ranges.h>
+#include <fmt/ostream.h>
+#include <fmt/ranges.h>
 
 #include <string>
 #include <string_view>
 #include <type_traits>
 #include <utility>
 
-namespace rocprofsys
-{
-namespace utility
+namespace rocprofsys::utility
 {
 
 struct entry_key
@@ -222,7 +220,7 @@ struct category_region
     template <typename... Args>
     static std::string serialize_name_value_pairs(Args&&... args)
     {
-        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+        auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
         if constexpr(has_trace_cache_arg_pairs_v<Args...>)
         {
@@ -279,7 +277,10 @@ struct category_region
     // Returns std::nullopt when the wire string is malformed
     static std::optional<std::uint32_t> next_arg_index(const std::string& args_str)
     {
-        if(args_str.empty()) return 0u;
+        if(args_str.empty())
+        {
+            return 0u;
+        }
 
         constexpr std::string_view delim = rocprofsys::ARG_DELIMITER;
 
@@ -290,13 +291,19 @@ struct category_region
         for(std::size_t i = 0; i < delims_to_last_record; ++i)
         {
             const std::size_t p = args_str.rfind(delim, search_end);
-            if(p == std::string::npos) break;
+            if(p == std::string::npos)
+            {
+                break;
+            }
             if(i == fields_per_record)
             {
                 record_start = p + delim.size();
                 break;
             }
-            if(p == 0) break;
+            if(p == 0)
+            {
+                break;
+            }
             search_end = p - 1;
         }
 
@@ -319,7 +326,7 @@ struct category_region
     template <typename... Args>
     static std::string serialize_annotation_args(Args&&... args)
     {
-        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+        auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
         std::string   args_str = {};
         std::uint32_t idx      = 0;
@@ -337,7 +344,7 @@ struct category_region
     template <typename T>
     static std::string serialize_return_arg(T&& value)
     {
-        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+        auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
         std::string args_str = {};
         append_serialized_arg(args_str, 0, "return", std::forward<T>(value));
@@ -361,7 +368,10 @@ struct category_region
     void append_cache_args(const char* name, std::string_view category,
                            std::string args_str)
     {
-        if(args_str.empty()) return;
+        if(args_str.empty())
+        {
+            return;
+        }
 
         auto key = entry_key{ name, std::string{ category } };
         auto itr = map_name_to_args.find(key);
@@ -376,7 +386,10 @@ struct category_region
             {
                 const auto next_idx = next_arg_index(entry.args);
                 // Existing args are malformed: drop this batch
-                if(!next_idx) return;
+                if(!next_idx)
+                {
+                    return;
+                }
 
                 renumber_serialized_args(args_str, *next_idx);
                 entry.args += std::move(args_str);
@@ -386,13 +399,16 @@ struct category_region
 
     void cache_stop(const char* name, std::string_view category)
     {
-        entry_key key{ name, std::string{ category } };
-        auto      x = map_name_to_args.find(key);
+        const entry_key key{ name, std::string{ category } };
+        auto            x = map_name_to_args.find(key);
         if(x != map_name_to_args.end() && !x->second.empty())
         {
             auto entry = std::move(x->second.back());
             x->second.pop_back();
-            if(x->second.empty()) map_name_to_args.erase(x);
+            if(x->second.empty())
+            {
+                map_name_to_args.erase(x);
+            }
 
             const auto          end_ts    = clock_.now();
             const std::uint64_t thread_id = thread_meta_.resolve_current_thread();
@@ -432,18 +448,15 @@ private:
                            args_str.c_str());
     }
 
-    typename Policy::clock_type                           clock_{};
-    typename Policy::region_sink_type                     sink_{};
-    typename Policy::thread_metadata_type                 thread_meta_{};
+    Policy::clock_type                                    clock_{};
+    Policy::region_sink_type                              sink_{};
+    Policy::thread_metadata_type                          thread_meta_{};
     std::map<entry_key, std::vector<pending_cache_entry>> map_name_to_args{};
 };
 
-}  // namespace utility
-}  // namespace rocprofsys
+}  // namespace rocprofsys::utility
 
-namespace tim
-{
-namespace quirk
+namespace tim::quirk
 {
 struct causal : concepts::quirk_type
 {};
@@ -453,12 +466,9 @@ struct perfetto : concepts::quirk_type
 
 struct timemory : concepts::quirk_type
 {};
-}  // namespace quirk
-}  // namespace tim
+}  // namespace tim::quirk
 
-namespace rocprofsys
-{
-namespace component
+namespace rocprofsys::component
 {
 using tim::is_one_of;
 using tim::type_list;
@@ -479,13 +489,13 @@ using causal_throughput_categories_t =
 
 // define this outside of category region functions so that the
 // static thread_local is global instead of per-template instantiation
-inline ThreadState
+inline state::thread::State
 get_thread_status()
 {
     static thread_local auto _thread_init_once = std::once_flag{};
     std::call_once(_thread_init_once, tracing::thread_init);
 
-    return get_thread_state();
+    return state::thread::get();
 }
 
 // timemory component which calls rocprof-sys functions
@@ -556,22 +566,41 @@ category_region<CategoryT>::start_impl(std::string_view name, std::string cache_
                                        Args&&... args)
 {
     // skip if category is disabled
-    if(tracing::category_push_disabled<CategoryT>()) return;
+    if(tracing::category_push_disabled<CategoryT>())
+    {
+        return;
+    }
 
     // unconditionally return if thread is disabled or finalized
-    if(get_thread_state() == ThreadState::Disabled) return;
-    if(get_state() >= State::Finalized) return;
+    if(state::thread::get() == state::thread::Disabled)
+    {
+        return;
+    }
+    if(state::process::get() >= state::process::Finalized)
+    {
+        return;
+    }
 
-    if(name.empty()) return;
+    if(name.empty())
+    {
+        return;
+    }
 
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     // the expectation here is that if the state is not active then the call
     // to rocprofsys_init_tooling_hidden will activate all the appropriate
     // tooling one time and as it exits set it to active and return true.
-    if(get_state() != State::Active && !rocprofsys_init_tooling_hidden()) return;
+    if(state::process::get() != state::process::Active &&
+       !rocprofsys_init_tooling_hidden())
+    {
+        return;
+    }
 
-    if(get_thread_status() == ThreadState::Disabled) return;
+    if(get_thread_status() == state::thread::Disabled)
+    {
+        return;
+    }
 
     // Gotcha starts pass the region name followed by ("arg-name", value) pairs.
     // Serialize those pairs into the trace-cache wire format
@@ -593,8 +622,8 @@ category_region<CategoryT>::start_impl(std::string_view name, std::string cache_
     if(tracing::debug_push)
     {
         LOG_DEBUG("[{}][PID={}][state={}][thread_state={}] rocprofsys_push_region({})",
-                  category_name, process::get_id(), std::to_string(get_state()),
-                  std::to_string(get_thread_state()), name.data());
+                  category_name, process::get_id(), state::process::get(),
+                  state::thread::get(), name.data());
     }
 
     if constexpr(is_one_of<CategoryT, tracing_count_categories_t>::value)
@@ -609,7 +638,10 @@ category_region<CategoryT>::start_impl(std::string_view name, std::string cache_
     {
         if constexpr(!is_one_of<CategoryT, causal_throughput_categories_t>::value)
         {
-            if(get_use_causal()) causal::push_progress_point(name);
+            if(get_use_causal())
+            {
+                causal::push_progress_point(name);
+            }
         }
     }
 
@@ -651,9 +683,12 @@ void
 category_region<CategoryT>::append_cache_args(std::string_view name,
                                               std::string      serialized_args)
 {
-    if(name.empty() || serialized_args.empty()) return;
+    if(name.empty() || serialized_args.empty())
+    {
+        return;
+    }
 
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     auto _hash = tim::add_hash_id(name);
     name       = tim::get_hash_identifier_fast(_hash);
@@ -667,11 +702,17 @@ void
 category_region<CategoryT>::stop(std::string_view name, Args&&... args)
 {
     // skip if category is disabled
-    if(tracing::category_pop_disabled<CategoryT>()) return;
+    if(tracing::category_pop_disabled<CategoryT>())
+    {
+        return;
+    }
 
-    if(get_thread_state() == ThreadState::Disabled) return;
+    if(state::thread::get() == state::thread::Disabled)
+    {
+        return;
+    }
 
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     constexpr bool _ct_use_timemory =
         (sizeof...(OptsT) == 0 || is_one_of<quirk::timemory, type_list<OptsT...>>::value);
@@ -685,12 +726,12 @@ category_region<CategoryT>::stop(std::string_view name, Args&&... args)
     if(tracing::debug_pop)
     {
         LOG_DEBUG("[{}][PID={}][state={}][thread_state={}] rocprofsys_pop_region({})",
-                  category_name, process::get_id(), std::to_string(get_state()),
-                  std::to_string(get_thread_state()), name.data());
+                  category_name, process::get_id(), state::process::get(),
+                  state::thread::get(), name.data());
     }
 
     // only execute when active
-    if(get_state() == State::Active)
+    if(state::process::get() == state::process::Active)
     {
         if constexpr(is_one_of<CategoryT, tracing_count_categories_t>::value)
         {
@@ -718,11 +759,17 @@ category_region<CategoryT>::stop(std::string_view name, Args&&... args)
         {
             if constexpr(is_one_of<CategoryT, causal_throughput_categories_t>::value)
             {
-                if(get_use_causal()) causal::mark_progress_point(name);
+                if(get_use_causal())
+                {
+                    causal::mark_progress_point(name);
+                }
             }
             else
             {
-                if(get_use_causal()) causal::pop_progress_point(name);
+                if(get_use_causal())
+                {
+                    causal::pop_progress_point(name);
+                }
             }
         }
 
@@ -731,7 +778,7 @@ category_region<CategoryT>::stop(std::string_view name, Args&&... args)
     else
     {
         LOG_DEBUG("[{}] rocprofsys_pop_region({}) ignored :: state = {}", category_name,
-                  name.data(), std::to_string(get_state()));
+                  name.data(), state::process::get());
     }
 }
 
@@ -743,28 +790,41 @@ category_region<CategoryT>::mark(std::string_view name, Args&&...)
     constexpr bool _ct_use_causal =
         (sizeof...(OptsT) == 0 || is_one_of<quirk::causal, type_list<OptsT...>>::value);
 
-    if constexpr(!_ct_use_causal) return;
+    if constexpr(!_ct_use_causal)
+    {
+        return;
+    }
 
     // skip if category is disabled
-    if(tracing::category_mark_disabled<CategoryT>()) return;
+    if(tracing::category_mark_disabled<CategoryT>())
+    {
+        return;
+    }
 
     // the expectation here is that if the state is not active then the call
     // to rocprofsys_init_tooling_hidden will activate all the appropriate
     // tooling one time and as it exits set it to active and return true.
-    if(get_state() != State::Active && !rocprofsys_init_tooling_hidden()) return;
+    if(state::process::get() != state::process::Active &&
+       !rocprofsys_init_tooling_hidden())
+    {
+        return;
+    }
 
     // unconditionally return if thread is disabled or finalized
-    if(get_thread_state() >= ThreadState::Completed) return;
+    if(state::thread::get() >= state::thread::Completed)
+    {
+        return;
+    }
 
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     if(get_use_causal())
     {
         if(tracing::debug_mark)
         {
             LOG_DEBUG("[{}][PID={}][state={}][thread_state={}] rocprofsys_progress({})",
-                      category_name, process::get_id(), std::to_string(get_state()),
-                      std::to_string(get_thread_state()), name.data());
+                      category_name, process::get_id(), state::process::get(),
+                      state::thread::get(), name.data());
         }
 
         causal::mark_progress_point(name);
@@ -777,7 +837,7 @@ void
 category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::incoming,
                                   Args&&... _args)
 {
-    start<OptsT...>(_data.tool_id.c_str(), [&](::perfetto::EventContext ctx) {
+    start<OptsT...>(_data.tool_id, [&](::perfetto::EventContext ctx) {
         if(config::get_perfetto_annotations())
         {
             std::int64_t _n = 0;
@@ -790,7 +850,7 @@ category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::incoming,
 
     if constexpr(sizeof...(Args) > 0)
     {
-        append_cache_args(_data.tool_id.c_str(),
+        append_cache_args(_data.tool_id,
                           region_cache::serialize_annotation_args(_args...));
     }
 }
@@ -803,15 +863,16 @@ category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::outgoing,
 {
     if constexpr(sizeof...(Args) > 0)
     {
-        append_cache_args(_data.tool_id.c_str(),
-                          region_cache::serialize_return_arg(_args...));
+        append_cache_args(_data.tool_id, region_cache::serialize_return_arg(_args...));
     }
 
-    stop<OptsT...>(_data.tool_id.c_str(), [&](::perfetto::EventContext ctx) {
+    stop<OptsT...>(_data.tool_id, [&](::perfetto::EventContext ctx) {
         if(config::get_perfetto_annotations())
+        {
             tracing::add_perfetto_annotation(
                 ctx, "return",
                 fmt::format("{}", fmt::join(std::forward_as_tuple(_args...), ", ")));
+        }
     });
 }
 
@@ -852,9 +913,11 @@ category_region<CategoryT>::audit(std::string_view _name, audit::outgoing,
 
     stop<OptsT...>(_name.data(), [&](::perfetto::EventContext ctx) {
         if(config::get_perfetto_annotations())
+        {
             tracing::add_perfetto_annotation(
                 ctx, "return",
                 fmt::format("{}", fmt::join(std::forward_as_tuple(_args...), ", ")));
+        }
     });
 }
 
@@ -877,21 +940,30 @@ struct local_category_region : comp::base<local_category_region<CategoryT>, void
     template <typename... OptsT, typename... Args>
     auto start(Args&&... args)
     {
-        if(m_prefix.empty()) return;
+        if(m_prefix.empty())
+        {
+            return;
+        }
         return impl_type::template start<OptsT...>(m_prefix, std::forward<Args>(args)...);
     }
 
     template <typename... OptsT, typename... Args>
     auto stop(Args&&... args)
     {
-        if(m_prefix.empty()) return;
+        if(m_prefix.empty())
+        {
+            return;
+        }
         return impl_type::template stop<OptsT...>(m_prefix, std::forward<Args>(args)...);
     }
 
     template <typename... OptsT, typename... Args>
     auto mark(Args&&... args)
     {
-        if(m_prefix.empty()) return;
+        if(m_prefix.empty())
+        {
+            return;
+        }
         return impl_type::template mark<OptsT...>(m_prefix, std::forward<Args>(args)...);
     }
 
@@ -900,14 +972,20 @@ struct local_category_region : comp::base<local_category_region<CategoryT>, void
         -> decltype(impl_type::template audit<OptsT...>(std::declval<std::string_view>(),
                                                         std::forward<Args>(args)...))
     {
-        if(m_prefix.empty()) return;
+        if(m_prefix.empty())
+        {
+            return;
+        }
         return impl_type::template audit<OptsT...>(m_prefix, std::forward<Args>(args)...);
     }
 
     template <typename... OptsT, typename... Args>
     auto audit(quirk::config<OptsT...>, Args&&... args)
     {
-        if(m_prefix.empty()) return;
+        if(m_prefix.empty())
+        {
+            return;
+        }
         return impl_type::template audit<OptsT...>(quirk::config<OptsT...>{}, m_prefix,
                                                    std::forward<Args>(args)...);
     }
@@ -917,5 +995,4 @@ struct local_category_region : comp::base<local_category_region<CategoryT>, void
 private:
     std::string_view m_prefix = {};
 };
-}  // namespace component
-}  // namespace rocprofsys
+}  // namespace rocprofsys::component

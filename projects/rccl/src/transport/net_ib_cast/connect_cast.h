@@ -36,6 +36,10 @@ struct ncclIbHandle {
   uint64_t magic; // random number to help debugging
   int isP2p;
   bool isRMA;
+  // GIDs of the listener's device PFs, used by the connector to find a local
+  // NIC on the same subnet (for multi-subnet RoCE direct-connect topologies).
+  // Zero-valued slots are ignored (validGid() returns false).
+  union ibv_gid listenGids[2];
   struct ncclIbCommStage stage; // Used by the other side when connecting
 };
 
@@ -53,6 +57,10 @@ struct ncclIbQpCreateAttr {
   int channelId;
   int ibDevN;
   bool useIonic;
+  int isP2p;
+  bool isQpSharingEnabled;
+  int  cqDepthMultiplier;
+  int  qpSharingGroupIdx;
 };
 
 // Per-QP connection metatdata
@@ -101,7 +109,19 @@ struct ncclIbConnectionMetadata {
   int sl;
   int isP2p;
   bool isRMA;
+
+  // QP Sharing metadata
+  int      sharedGroupIdx;      // QP sharing group index (-1 = not shared)
+  uint16_t commId;              // QP sharing comm ID (0 = not shared)
+  int      senderIbDevIdx;      // sender's IB device index
 };
+
+// Initialize QP sharing fields to defaults (sharing disabled)
+static inline void IbCastQpCreateAttrInitSharing(struct ncclIbQpCreateAttr* attr) {
+  attr->isQpSharingEnabled = false;
+  attr->qpSharingGroupIdx = -1;
+  attr->cqDepthMultiplier = 1;
+}
 
 ncclResult_t IbCastQpCreate(struct ncclIbQp* qp, struct ncclIbQpCreateAttr* createQpAttrs);
 void IbCastBuildDataQpCreateAttr(struct ncclIbNetCommBase* base, int devIndex, struct ncclIbQpCreateAttr* out);

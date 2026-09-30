@@ -73,9 +73,9 @@ __global__ void ColorConvertYUV444ToRGBKernel(uint8_t *dst_image, uint32_t dst_i
         uint32_t rgb0_idx = y * dst_image_stride_in_bytes_comp + (x * 24);
         uint32_t rgb1_idx = rgb0_idx + dst_image_stride_in_bytes;
 
-        float2 cr = make_float2( 0.0000f,  1.5748f);
-        float2 cg = make_float2(-0.1873f, -0.4681f);
-        float2 cb = make_float2( 1.8556f,  0.0000f);
+        float2 cr = make_float2(CC_CR0, CC_CR1);
+        float2 cg = make_float2(CC_CG0, CC_CG1);
+        float2 cb = make_float2(CC_CB0, CC_CB1);
         float3 yuv;
         DUINT6 rgb0, rgb1;
         float4 f;
@@ -280,9 +280,9 @@ __global__ void ColorConvertYUV444ToRGBPlanarKernel(uint8_t *dst_image_r, uint8_
         uint32_t rgb0_idx = y * dst_image_stride_in_bytes_comp + (x * 8);
         uint32_t rgb1_idx = rgb0_idx + dst_image_stride_in_bytes;
 
-        float2 cr = make_float2( 0.0000f,  1.5748f);
-        float2 cg = make_float2(-0.1873f, -0.4681f);
-        float2 cb = make_float2( 1.8556f,  0.0000f);
+        float2 cr = make_float2(CC_CR0, CC_CR1);
+        float2 cg = make_float2(CC_CG0, CC_CG1);
+        float2 cb = make_float2(CC_CB0, CC_CB1);
         float3 yuv;
         DUINT6 rgb0, rgb1;
         float4 f;
@@ -507,9 +507,9 @@ __global__ void ColorConvertYUV440ToRGBKernel(uint8_t *dst_image, uint32_t dst_i
         uint32_t rgb0_idx = y * dst_image_stride_in_bytes_comp + (x * 24);
         uint32_t rgb1_idx = rgb0_idx + dst_image_stride_in_bytes;
 
-        float2 cr = make_float2( 0.0000f,  1.5748f);
-        float2 cg = make_float2(-0.1873f, -0.4681f);
-        float2 cb = make_float2( 1.8556f,  0.0000f);
+        float2 cr = make_float2(CC_CR0, CC_CR1);
+        float2 cg = make_float2(CC_CG0, CC_CG1);
+        float2 cb = make_float2(CC_CB0, CC_CB1);
         float3 yuv;
         DUINT6 rgb0, rgb1;
         float4 f;
@@ -711,9 +711,9 @@ __global__ void ColorConvertYUV440ToRGBPlanarKernel(uint8_t *dst_image_r, uint8_
         uint32_t rgb0_idx = y * dst_image_stride_in_bytes_comp + (x * 8);
         uint32_t rgb1_idx = rgb0_idx + dst_image_stride_in_bytes;
 
-        float2 cr = make_float2( 0.0000f,  1.5748f);
-        float2 cg = make_float2(-0.1873f, -0.4681f);
-        float2 cb = make_float2( 1.8556f,  0.0000f);
+        float2 cr = make_float2(CC_CR0, CC_CR1);
+        float2 cg = make_float2(CC_CG0, CC_CG1);
+        float2 cb = make_float2(CC_CB0, CC_CB1);
         float3 yuv;
         DUINT6 rgb0, rgb1;
         float4 f;
@@ -953,9 +953,9 @@ __global__ void ColorConvertYUYVToRGBKernel(
         pv1.x = hipPack(make_float4(hipUnpack3(l1.x), hipUnpack3(l1.x), hipUnpack3(l1.y), hipUnpack3(l1.y)));
         pv1.y = hipPack(make_float4(hipUnpack3(l1.z), hipUnpack3(l1.z), hipUnpack3(l1.w), hipUnpack3(l1.w)));
 
-        float2 cr = make_float2( 0.0000f,  1.5748f);
-        float2 cg = make_float2(-0.1873f, -0.4681f);
-        float2 cb = make_float2( 1.8556f,  0.0000f);
+        float2 cr = make_float2(CC_CR0, CC_CR1);
+        float2 cg = make_float2(CC_CG0, CC_CG1);
+        float2 cb = make_float2(CC_CB0, CC_CB1);
         float3 yuv;
         DUINT6 prgb0, prgb1;
 
@@ -1167,9 +1167,9 @@ __global__ void ColorConvertYUYVToRGBPlanarKernel(
         pv1.x = hipPack(make_float4(hipUnpack3(l1.x), hipUnpack3(l1.x), hipUnpack3(l1.y), hipUnpack3(l1.y)));
         pv1.y = hipPack(make_float4(hipUnpack3(l1.z), hipUnpack3(l1.z), hipUnpack3(l1.w), hipUnpack3(l1.w)));
 
-        float2 cr = make_float2( 0.0000f,  1.5748f);
-        float2 cg = make_float2(-0.1873f, -0.4681f);
-        float2 cb = make_float2( 1.8556f,  0.0000f);
+        float2 cr = make_float2(CC_CR0, CC_CR1);
+        float2 cg = make_float2(CC_CG0, CC_CG1);
+        float2 cb = make_float2(CC_CB0, CC_CB1);
         float3 yuv;
         DUINT6 prgb0, prgb1;
 
@@ -1428,9 +1428,9 @@ __global__ void ColorConvertNV12ToRGBKernel(
         v1.x = v0.x;
         v1.y = v0.y;
 
-        float2 cr = make_float2( 0.0000f,  1.5748f);
-        float2 cg = make_float2(-0.1873f, -0.4681f);
-        float2 cb = make_float2( 1.8556f,  0.0000f);
+        float2 cr = make_float2(CC_CR0, CC_CR1);
+        float2 cg = make_float2(CC_CG0, CC_CG1);
+        float2 cb = make_float2(CC_CB0, CC_CB1);
         float3 yuv;
         DUINT6 rgb0, rgb1;
 
@@ -1664,9 +1664,9 @@ __global__ void ColorConvertNV12ToRGBPlanarKernel(
         v1.x = v0.x;
         v1.y = v0.y;
 
-        float2 cr = make_float2( 0.0000f,  1.5748f);
-        float2 cg = make_float2(-0.1873f, -0.4681f);
-        float2 cb = make_float2( 1.8556f,  0.0000f);
+        float2 cr = make_float2(CC_CR0, CC_CR1);
+        float2 cg = make_float2(CC_CG0, CC_CG1);
+        float2 cb = make_float2(CC_CB0, CC_CB1);
         float3 yuv;
         DUINT6 rgb0, rgb1;
 

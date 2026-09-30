@@ -104,6 +104,7 @@ struct module_function
     bool is_overlapping() const;  // checks if func overlaps
 
 private:
+    const string_t&     get_module_identity(const string_t& module_base) const;
     symbol_linkage_t    get_linkage() const;
     symbol_visibility_t get_visibility() const;
     bool is_loop_num_instructions_constrained() const;  // checks loop instr constraint
@@ -142,7 +143,9 @@ public:
 
         auto _get_str = [](const std::string& _inc) {
             if(_inc.length() > absolute_max_width)
+            {
                 return _inc.substr(0, absolute_max_width - 3) + "...";
+            }
             return _inc;
         };
 
@@ -223,7 +226,9 @@ module_function::serialize(ArchiveT& ar, const unsigned)
         ar.setNextName("instruction_breakdown");
         ar.startNode();
         for(auto itr : instruction_types)
+        {
             ar(cereal::make_nvp(std::to_string(itr.first).c_str(), itr.second));
+        }
         ar.finishNode();
         // instructions can inflate JSON size so only output when verbosity is increased
         // above default

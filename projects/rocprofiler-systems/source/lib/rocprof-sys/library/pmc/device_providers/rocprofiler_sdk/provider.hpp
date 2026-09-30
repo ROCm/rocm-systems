@@ -9,6 +9,7 @@
 #include "library/pmc/collectors/gpu_perf_counter/types.hpp"
 #include "library/pmc/common/types.hpp"
 #include "logger/debug.hpp"
+#include "policies/rocprofiler-sdk/gpu_perf_counters/backend.hpp"
 
 #include <concepts>
 #include <cstddef>
@@ -24,20 +25,20 @@ namespace rocprofsys::pmc::device_providers::rocprofiler_sdk
 {
 
 // Contract required of the factory type passed to provider<BackendFactory>: it must
-// produce a backend satisfying collectors::gpu_perf_counter::backend_contract.
+// produce a backend satisfying policies::gpu_perf_counters::backend.
 template <typename BackendFactory>
 concept backend_factory_contract = requires {
     typename BackendFactory::backend_t;
     {
         BackendFactory::create_backend()
     } -> std::same_as<std::shared_ptr<typename BackendFactory::backend_t>>;
-} && collectors::gpu_perf_counter::backend_contract<typename BackendFactory::backend_t>;
+} && policies::gpu_perf_counters::backend<typename BackendFactory::backend_t>;
 
 template <backend_factory_contract BackendFactory>
 class provider
 {
 public:
-    using backend_t = typename BackendFactory::backend_t;
+    using backend_t = BackendFactory::backend_t;
     using device_t  = collectors::gpu_perf_counter::device<backend_t>;
 
     provider(const std::vector<std::shared_ptr<agent>>&           agent_list,
@@ -78,8 +79,10 @@ public:
     template <typename Device>
     [[nodiscard]] std::vector<std::shared_ptr<Device>> get_devices(device_type type)
     {
-        if(type != device_type::GPU) return {};
-        return { m_devices.begin(), m_devices.end() };
+        return type != device_type::gpu
+                   ? std::vector<std::shared_ptr<Device>>{}
+                   : std::vector<std::shared_ptr<Device>>{ m_devices.begin(),
+                                                           m_devices.end() };
     }
 
 private:
@@ -120,25 +123,28 @@ private:
             m_profile_configs[gpu_agent->handle] = profile;
 
             typename backend_t::context_id_t counter_context{};
-            status = m_backend_api->create_context(&counter_context);
-            if(status != backend_t::status_success)
+            try
             {
-                LOG_WARNING("Failed to create context for agent {} (status={})",
-                            gpu_agent->handle, static_cast<int>(status));
+                m_backend_api->create_context(&counter_context);
+            } catch(const std::exception& e)
+            {
+                LOG_WARNING("Failed to create context for agent {} ({})",
+                            gpu_agent->handle, e.what());
                 continue;
             }
 
             status = m_backend_api->configure_device_counting_service(
                 counter_context, typename backend_t::buffer_id_t{ 0 }, agent_id,
-                [](typename backend_t::context_id_t               ctx,
-                   typename backend_t::agent_id_t                 agent_cb,
-                   typename backend_t::device_counting_agent_cb_t set_config,
-                   void*                                          user_data) {
+                [](backend_t::context_id_t ctx, backend_t::agent_id_t agent_cb,
+                   backend_t::device_counting_agent_cb_t set_config, void* user_data) {
                     auto* configs = static_cast<std::unordered_map<
                         std::uint64_t, typename backend_t::counter_config_id_t>*>(
                         user_data);
                     auto iter = configs->find(agent_cb.handle);
-                    if(iter != configs->end()) set_config(ctx, iter->second);
+                    if(iter != configs->end())
+                    {
+                        set_config(ctx, iter->second);
+                    }
                 },
                 &m_profile_configs);
             if(status != backend_t::status_success)
@@ -156,10 +162,10 @@ private:
     }
 
     [[nodiscard]] std::vector<typename backend_t::counter_id_t> query_supported_counters(
-        typename backend_t::agent_id_t agent_id) const
+        backend_t::agent_id_t agent_id) const
     {
         const auto collect_counters =
-            [](typename backend_t::agent_id_t, typename backend_t::counter_id_t* counters,
+            [](backend_t::agent_id_t, backend_t::counter_id_t* counters,
                size_t num_counters, void* user_data) -> typename backend_t::status_t {
             auto* out =
                 static_cast<std::vector<typename backend_t::counter_id_t>*>(user_data);
@@ -193,9 +199,14 @@ private:
         for(const auto& counter_id : supported)
         {
             auto details = m_backend_api->query_counter_details(counter_id);
-            if(details.empty()) continue;
-            if(!enabled.is_counter_enabled({ details.front().name, device_index }))
+            if(details.empty())
+            {
                 continue;
+            }
+            if(!enabled.is_counter_enabled({ details.front().name, device_index }))
+            {
+                continue;
+            }
             ids.push_back(counter_id);
             meta.insert(meta.end(), std::make_move_iterator(details.begin()),
                         std::make_move_iterator(details.end()));

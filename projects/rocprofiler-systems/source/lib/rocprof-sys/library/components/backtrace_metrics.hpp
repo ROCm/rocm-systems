@@ -13,7 +13,6 @@
 #include <timemory/components/base.hpp>
 #include <timemory/components/papi/papi_array.hpp>
 #include <timemory/components/papi/types.hpp>
-#include <timemory/macros/language.hpp>
 #include <timemory/mpl/concepts.hpp>
 #include <timemory/utility/type_list.hpp>
 #include <timemory/variadic/types.hpp>
@@ -39,9 +38,9 @@ struct backtrace_metrics : comp::empty_base
     using clock_type        = std::chrono::steady_clock;
     using value_type        = void;
     using hw_counters       = tim::component::papi_array<num_hw_counters>;
-    using hw_counter_data_t = typename hw_counters::value_type;
+    using hw_counter_data_t = hw_counters::value_type;
     using system_clock      = std::chrono::system_clock;
-    using system_time_point = typename system_clock::time_point;
+    using system_time_point = system_clock::time_point;
 
     using categories_t =
         type_list<category::thread_cpu_time, category::thread_peak_memory,

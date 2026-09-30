@@ -9,6 +9,9 @@ on:
     paths:
       - '.github/workflows/rocprofiler-ghcr-cleanup.yml'
 
+permissions:
+  contents: read
+
 jobs:
   cleanup-rocprofiler-images:
     runs-on: ubuntu-latest

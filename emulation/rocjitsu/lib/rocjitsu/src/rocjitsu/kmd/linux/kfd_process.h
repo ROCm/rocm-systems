@@ -9,20 +9,29 @@
 /// SimulatedKfd owns a process table mapping fds to KfdProcess instances,
 /// and delegates per-process ioctl operations through here.
 
-#ifndef ROCJITSU_KMD_LINUX_KFD_PROCESS_H_
-#define ROCJITSU_KMD_LINUX_KFD_PROCESS_H_
+#pragma once
 
 #include "rocjitsu/kmd/linux/events.h"
+#include "rocjitsu/kmd/linux/kfd_topology.h"
+#include "rocjitsu/kmd/linux/libc_passthrough.h"
+#include "rocjitsu/vm/amdgpu/gpu_handles.h"
+#include "rocjitsu/vm/amdgpu/legacy_page_table.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
+#include "util/distributed_shared_mutex.h"
 #include "util/unique_handle.h"
 
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <cassert>
 #include <cstdint>
+#include <memory>
+#include <memory_resource>
 #include <mutex>
-#include <shared_mutex>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
+#include <variant>
 #include <vector>
 
 #include <sys/types.h> // pid_t
@@ -39,14 +48,25 @@ class KfdProcess {
 public:
   /// @brief Per-GPU state within a process.
   struct PerGpuState {
-    void *doorbell_page = nullptr;
+    /// @brief One live client mapping of the canonical doorbell backing.
+    struct DoorbellView {
+      void *page = nullptr;
+      uint64_t gpu_va = 0;
+    };
+
+    /// @brief Canonical shared backing retained for the process lifetime.
+    int doorbell_memfd = -1;
+    /// @brief Every client doorbell view still owned by the mapping layer.
+    std::vector<DoorbellView> doorbell_views;
+    /// @brief Stable driver-side alias used exclusively by the command processor.
+    void *doorbell_monitor_page = nullptr;
     size_t doorbell_page_size = 0;
-    uint64_t doorbell_gpu_va = 0;
     uint64_t next_doorbell_offset = 0;
     std::vector<uint32_t> free_doorbell_offsets;
     uint64_t scratch_backing_va = 0;
     uint64_t trap_tba_addr = 0;
     uint64_t trap_tma_addr = 0;
+    amdgpu::AddressSpaceHandle address_space;
   };
 
   /// @brief Construct a new KFD process with a unique process ID.
@@ -126,13 +146,15 @@ public:
     uint64_t r_debug = 0;
   };
 
-  /// @brief Per-process debugger session state.
+  /// @brief Debugger session state for one target process.
   ///
   /// @details Mirrors the debug-related fields the kernel maintains on
   /// @c struct @c kfd_process in
   /// @c drivers/gpu/drm/amd/amdkfd/kfd_priv.h.
-  /// Managed by the @c AMDKFD_IOC_DBG_TRAP ioctl handler
-  /// (@c kfd_ioctl_set_debug_trap in the real driver).
+  /// SimulatedKfd stores these sessions in a table keyed by the target's Linux
+  /// pid, independently of KfdProcess, so a debugger can attach before the
+  /// inferior opens /dev/kfd. This mirrors the real driver's DBG_TRAP_ENABLE
+  /// path creating the target kfd_process.
   ///
   /// Field mapping to @c kfd_priv.h:
   /// | DebugSession field     | kfd_process field                               |
@@ -143,6 +165,11 @@ public:
   /// | @ref dbg_fd            | @c struct @c file* @c dbg_ev_file (flattened to fd) |
   /// | @ref debugger_pid      | @c struct @c kfd_process* @c debugger_process (stored as pid) |
   struct DebugSession {
+    /// @brief Monotonic identity for this ENABLE lifetime.
+    /// @details Async notification completion uses this to avoid mutating a
+    /// replacement session after DISABLE followed by another ENABLE.
+    uint64_t generation = 0;
+
     /// @brief Mirrors @c kfd_process::debug_trap_enabled.
     /// Set when the device process is debug-attached with a reserved VMID.
     bool enabled = false;
@@ -155,6 +182,68 @@ public:
     /// Bitmask of exception classes that are forwarded to the debugger.
     uint64_t exception_enable_mask = 0;
 
+    struct NotificationClaim {
+      /// Complete exception event represented by an in-flight notifier write.
+      uint64_t exception_mask = 0;
+      /// False once a mask update leaves none of the event subscribed.
+      bool continuously_subscribed = true;
+      /// Bits consumed while this particular publication was in flight.
+      uint64_t consumed_mask = 0;
+    };
+
+    /// Active whole-event ownership decisions, keyed by a local monotonic id.
+    /// A SET_EXCEPTIONS_ENABLED transition invalidates a claim only when the
+    /// complete event becomes unsubscribed, preserving ownership while one
+    /// subscribed bit atomically replaces another.
+    uint64_t next_notification_claim_id = 1;
+    std::unordered_map<uint64_t, NotificationClaim> notification_claims;
+
+    /// Process/device exception bits already used to wake this session.
+    uint64_t notified_process_exception_mask = 0;
+    /// Process/device exception bits reserved by a notifier write in flight.
+    uint64_t pending_process_exception_mask = 0;
+    /// In-flight process/device notifier writes per exception bit.
+    std::array<uint32_t, 64> pending_process_exception_counts{};
+    /// A failed or superseded publication still requires a background retry.
+    bool notification_retry_needed = false;
+    /// QUERY consumed a wake while queue publication still hid its status.
+    bool notification_query_retry_needed = false;
+
+    void consume_process_notification(uint64_t mask) {
+      notified_process_exception_mask &= ~mask;
+      for (auto &[_, claim] : notification_claims)
+        claim.consumed_mask |= claim.exception_mask & mask;
+    }
+
+    void begin_process_notification(uint64_t mask) {
+      for (uint32_t bit = 0; bit < 64; ++bit) {
+        const uint64_t bit_mask = uint64_t{1} << bit;
+        if ((mask & bit_mask) == 0)
+          continue;
+        ++pending_process_exception_counts[bit];
+        pending_process_exception_mask |= bit_mask;
+      }
+    }
+
+    void finish_process_notification(uint64_t mask) {
+      for (uint32_t bit = 0; bit < 64; ++bit) {
+        const uint64_t bit_mask = uint64_t{1} << bit;
+        if ((mask & bit_mask) == 0 || pending_process_exception_counts[bit] == 0)
+          continue;
+        if (--pending_process_exception_counts[bit] == 0)
+          pending_process_exception_mask &= ~bit_mask;
+      }
+    }
+
+    /// @brief Previously configured process debug flags.
+    uint32_t flags = 0;
+
+    /// @brief Current wave launch mode.
+    uint32_t launch_mode = 0;
+
+    /// @brief Current wave-launch trap override mask.
+    uint32_t launch_override_enable = 0;
+
     /// @brief Mirrors @c kfd_process::dbg_ev_file (flattened from @c struct @c file* to fd).
     /// File descriptor used as the debugger notification / poll target.
     /// -1 when no debugger is attached.
@@ -166,39 +255,138 @@ public:
     /// debug session ends (DISABLE) or the process tears down. Engaged only in
     /// daemon mode; empty in local mode, where @ref dbg_fd is the debugger's own
     /// descriptor and is not owned here. RAII replaces an explicit close.
-    util::UniqueHandle owned_dbg_fd;
+    UniqueDriverFd owned_dbg_fd;
+
+    /// @brief Debugger-authorized access to the target's address space.
+    /// @details The ptrace parent opens /proc/<target>/mem and transfers it to
+    /// the daemon, which cannot use process_vm_readv/process_vm_writev itself.
+    UniqueDriverFd target_mem_fd;
+
+    /// @brief Pins the target process identity and reports target exit.
+    /// @details Prevents a stale session from being mistaken for a later process
+    /// that reuses the same numeric pid.
+    UniqueDriverFd target_pidfd;
+
+    /// @brief Pins the target's procfs directory used for ptrace authorization.
+    /// @details Status is opened relative to this descriptor so authorization
+    /// cannot silently switch to a process that reuses the numeric pid.
+    UniqueDriverFd target_procfd;
 
     /// @brief Mirrors @c kfd_process::debugger_process (stored as pid instead of pointer).
     /// Linux PID of the attached debugger (ptrace parent). 0 when not attached.
     pid_t debugger_pid = 0;
+
+    /// @brief Target exit was observed and owned resources were released.
+    /// @details Keeps the pinned pidfd identity until a racing DISABLE consumes
+    /// the session, so numeric PID reuse cannot turn process exit into EINVAL.
+    bool target_exited = false;
+
+    /// @brief The target's KfdProcess has been observed at least once.
+    /// @details Distinguishes the two ways a target can have no KfdProcess.
+    /// The real driver has only one: DBG_TRAP_ENABLE calls kfd_create_process,
+    /// so from then on the kfd_process exists and a failed lookup means the
+    /// process is gone (-ESRCH). Here the KfdProcess appears only when the
+    /// inferior opens /dev/kfd, which can be after the debugger attaches, so
+    /// "not up yet" and "torn down" are otherwise indistinguishable.
+    bool saw_kfd_process = false;
+
+    /// @brief Pins the debugger process identity and reports debugger exit.
+    /// @details Mirrors the kernel's debugger-process notifier: the session is
+    /// disabled when the debugger task exits, even if the target remains alive.
+    UniqueDriverFd debugger_pidfd;
+
+    /// @brief One programmed hardware address-watch register (TCP_WATCH0..3).
+    struct AddressWatch {
+      bool active = false;
+      uint64_t address = 0;
+      uint64_t mask = 0;
+      uint32_t mode = 0;
+
+      /// @brief Construct the full hardware compare state from the KFD UAPI.
+      /// @details KFD transports only the programmable low 32 mask bits. The
+      /// upper address bits are fixed compares in TCP_WATCH and must remain
+      /// set, or unrelated addresses with the same low 32 bits alias.
+      static constexpr AddressWatch from_kfd(uint64_t address, uint32_t mask, uint32_t mode) {
+        return AddressWatch{true, address, 0xFFFFFFFF00000000ULL | mask, mode};
+      }
+
+      /// @brief Return whether an access overlaps the watched address block.
+      [[nodiscard]] constexpr bool overlaps(uint64_t access_address, uint32_t bytes) const {
+        if (!active || bytes == 0)
+          return false;
+        const uint64_t block_base = address & mask;
+        const uint64_t block_size = ~mask + 1;
+        const uint64_t access_end =
+            access_address > UINT64_MAX - bytes ? UINT64_MAX : access_address + bytes;
+        const uint64_t block_end = block_size == 0 || block_base > UINT64_MAX - block_size
+                                       ? UINT64_MAX
+                                       : block_base + block_size;
+        return block_size == 0 || (access_address < block_end && block_base < access_end);
+      }
+    };
+    /// The register file the topology advertises, so a debugger can never hold
+    /// more watchpoints than the device snapshot told it exist.
+    static constexpr uint32_t kMaxAddressWatches = kmd::kNumWatchPoints;
+    std::array<AddressWatch, kMaxAddressWatches> address_watches;
+
+    /// @brief Return a bit for every hardware watch slot matching an access.
+    /// @details A single access may overlap multiple programmed watch ranges.
+    /// Hardware reports all of them concurrently in TRAPSTS, allowing the
+    /// debugger to associate every logical watchpoint with the same stop.
+    /// @param matching_modes Bit set of watch modes the access satisfies,
+    /// indexed by mode value. The modes overlap (a write is both NONREAD and
+    /// ALL), so the caller -- which owns the KFD ABI -- resolves them into this
+    /// set rather than passing a single mode to compare for equality.
+    [[nodiscard]] constexpr uint32_t matching_address_watch_slots(uint64_t access_address,
+                                                                  uint32_t bytes,
+                                                                  uint32_t matching_modes) const {
+      uint32_t slots = 0;
+      for (uint32_t slot = 0; slot < kMaxAddressWatches; ++slot) {
+        const auto &watch = address_watches[slot];
+        if (watch.mode < 32 && ((matching_modes >> watch.mode) & 1u) != 0 &&
+            watch.overlaps(access_address, bytes))
+          slots |= uint32_t{1} << slot;
+      }
+      return slots;
+    }
   };
 
-  /// @brief Per-page translation entry, mirroring HW PTE fields.
-  /// @details Stores the host pointer for VA→PA translation and the PTE MTYPE
-  /// that the GPU MMU uses to override instruction-level caching. On real
-  /// AMDGPU hardware, PTE bits 57:55 encode MTYPE per page.
-  struct PageTableEntry {
-    uint8_t *host_ptr = nullptr;
-    amdgpu::Mtype mtype = amdgpu::Mtype::RW;
-  };
-
-  /// @brief Per-process GPU page table (GPU VA page number → PTE).
-  /// @details Managed by the driver's mmap/munmap handlers. GpuMemory holds a
-  ///          pointer to the active process's page table and resolves translations
-  ///          on each memory access (TLB-like role).
-  using PageTable = std::unordered_map<uint64_t, PageTableEntry>;
-
-  static constexpr uint64_t kPageShift = 12;
-  static constexpr uint64_t kPageSize = 1ULL << kPageShift;
+  static constexpr uint64_t kPageShift = amdgpu::kLegacyPageShift;
+  static constexpr uint64_t kPageSize = amdgpu::kLegacyPageSize;
+  using HostExtentOwner = amdgpu::LegacyHostExtentOwner;
+  using HostExtent = amdgpu::LegacyHostExtent;
+  using PageTableEntry = amdgpu::LegacyPageTableEntry;
+  using PageTable = amdgpu::LegacyPageTable;
 
   /// @brief Map host pages into this process's GPU page table.
   /// @param mtype PTE MTYPE for these pages (derived from allocation flags).
+  /// @param owner Who may revoke the backing; see HostExtentOwner. Defaults to
+  ///        Application so an unannotated caller is validated rather than
+  ///        trusted.
   void map_pages(uint64_t gpu_va, void *host_ptr, size_t size,
-                 amdgpu::Mtype mtype = amdgpu::Mtype::RW) {
+                 amdgpu::Mtype mtype = amdgpu::Mtype::RW,
+                 HostExtentOwner owner = HostExtentOwner::Application) {
+    std::unique_lock request_lock(*page_table_request_mutex_);
     std::unique_lock lock(page_table_mutex_);
+    invalidate_page_policies_locked();
     auto *base = static_cast<uint8_t *>(host_ptr);
-    for (size_t off = 0; off < size; off += kPageSize)
-      page_table_[(gpu_va + off) >> kPageShift] = {base + off, mtype};
+    uint64_t mapped_va = gpu_va;
+    size_t host_offset = 0;
+    while (host_offset < size) {
+      const size_t gpu_page_offset = mapped_va & (kPageSize - 1);
+      const size_t host_backed_bytes =
+          std::min<size_t>(kPageSize - gpu_page_offset, size - host_offset);
+      auto [page, inserted] =
+          page_table_.try_emplace(mapped_va >> kPageShift, base + host_offset, mtype,
+                                  host_backed_bytes, gpu_page_offset, owner);
+      if (!inserted) {
+        page->second.mtype = mtype;
+        replace_host_extent(page->second,
+                            {base + host_offset, host_backed_bytes, gpu_page_offset, owner});
+      }
+      mapped_va += host_backed_bytes;
+      host_offset += host_backed_bytes;
+    }
     // Keep publication in the page-table critical section. Cached readers
     // validate this generation while holding the shared side of the same lock;
     // publishing after unlock would permit a stale-cache hit in between.
@@ -207,9 +395,25 @@ public:
 
   /// @brief Unmap pages from this process's GPU page table.
   void unmap_pages(uint64_t gpu_va, size_t size) {
+    std::unique_lock request_lock(*page_table_request_mutex_);
     std::unique_lock lock(page_table_mutex_);
-    for (size_t off = 0; off < size; off += kPageSize)
-      page_table_.erase((gpu_va + off) >> kPageShift);
+    invalidate_page_policies_locked();
+    uint64_t mapped_va = gpu_va;
+    size_t unmapped_bytes = 0;
+    while (unmapped_bytes < size) {
+      const size_t chunk =
+          std::min<size_t>(kPageSize - (mapped_va & (kPageSize - 1)), size - unmapped_bytes);
+      auto page = page_table_.find(mapped_va >> kPageShift);
+      if (page != page_table_.end()) {
+        // Avoid building a temporary extent vector for a page being discarded.
+        if (chunk != kPageSize)
+          erase_host_extent(page->second, mapped_va & (kPageSize - 1), chunk);
+        if (chunk == kPageSize || page->second.host_extents.empty())
+          page_table_.erase(page);
+      }
+      mapped_va += chunk;
+      unmapped_bytes += chunk;
+    }
     // See map_pages(): the mutation and generation publication are one
     // page-table critical section by design.
     publish_page_table_mutation_locked();
@@ -220,17 +424,34 @@ public:
   /// page-table critical section. Only entries still pointing at the expected
   /// old page are changed.
   void remap_page_host_ptrs(uint64_t gpu_va, void *old_host_ptr, void *new_host_ptr, size_t size) {
+    std::unique_lock request_lock(*page_table_request_mutex_);
     std::unique_lock lock(page_table_mutex_);
+    invalidate_page_policies_locked();
     auto *old_base = static_cast<uint8_t *>(old_host_ptr);
     auto *new_base = static_cast<uint8_t *>(new_host_ptr);
     bool changed = false;
-    for (size_t off = 0; off < size; off += kPageSize) {
-      auto it = page_table_.find((gpu_va + off) >> kPageShift);
-      if (it != page_table_.end() && it->second.host_ptr == old_base + off &&
-          it->second.host_ptr != new_base + off) {
-        it->second.host_ptr = new_base + off;
-        changed = true;
+    uint64_t mapped_va = gpu_va;
+    size_t host_offset = 0;
+    while (host_offset < size) {
+      auto page = page_table_.find(mapped_va >> kPageShift);
+      if (page != page_table_.end()) {
+        const uint64_t page_base = mapped_va & ~(kPageSize - 1);
+        for (auto &extent : page->second.host_extents) {
+          const uint64_t extent_va = page_base + extent.gpu_page_offset;
+          if (extent_va < gpu_va || extent_va - gpu_va >= size)
+            continue;
+          const size_t extent_host_offset = extent_va - gpu_va;
+          if (extent.host_ptr == old_base + extent_host_offset &&
+              extent.host_ptr != new_base + extent_host_offset) {
+            extent.host_ptr = new_base + extent_host_offset;
+            changed = true;
+          }
+        }
       }
+      const size_t chunk =
+          std::min<size_t>(kPageSize - (mapped_va & (kPageSize - 1)), size - host_offset);
+      mapped_va += chunk;
+      host_offset += chunk;
     }
     if (changed)
       publish_page_table_mutation_locked();
@@ -238,14 +459,22 @@ public:
 
   /// @brief Update the MTYPE of mapped pages and invalidate cached PTE copies.
   void set_page_mtype(uint64_t gpu_va, size_t size, amdgpu::Mtype mtype) {
+    std::unique_lock request_lock(*page_table_request_mutex_);
     std::unique_lock lock(page_table_mutex_);
+    invalidate_page_policies_locked();
     bool changed = false;
-    for (size_t off = 0; off < size; off += kPageSize) {
-      auto it = page_table_.find((gpu_va + off) >> kPageShift);
+    uint64_t mapped_va = gpu_va;
+    size_t updated_bytes = 0;
+    while (updated_bytes < size) {
+      auto it = page_table_.find(mapped_va >> kPageShift);
       if (it != page_table_.end() && it->second.mtype != mtype) {
         it->second.mtype = mtype;
         changed = true;
       }
+      const size_t chunk =
+          std::min<size_t>(kPageSize - (mapped_va & (kPageSize - 1)), size - updated_bytes);
+      mapped_va += chunk;
+      updated_bytes += chunk;
     }
     if (changed)
       publish_page_table_mutation_locked();
@@ -254,8 +483,23 @@ public:
   /// @brief Return the mutation counter used by GpuMemory translation caches.
   const uint64_t *page_table_generation() const { return &page_table_generation_; }
 
-  mutable std::shared_mutex page_table_mutex_;
-  PageTable page_table_;
+  /// @brief Return the retained token invalidated before each page-policy mutation.
+  std::shared_ptr<const std::atomic<uint64_t>> page_table_mutation_epoch() const {
+    return page_table_mutation_epoch_;
+  }
+
+  /// @brief Return the lease shared by page-table readers and mutations.
+  std::shared_ptr<util::DistributedSharedMutex> page_table_request_mutex() const {
+    return page_table_request_mutex_;
+  }
+
+  mutable util::DistributedSharedMutex page_table_mutex_;
+  /// @brief Pool for page-table nodes and buckets.
+  /// @details Writers serialize allocation under page_table_mutex_. Declaration
+  /// order keeps the pool alive until the table is destroyed; capacity is
+  /// retained for reuse until this process is destroyed.
+  std::pmr::unsynchronized_pool_resource page_table_pool_;
+  PageTable page_table_{&page_table_pool_};
 
   // -- Per-process state --
 
@@ -270,6 +514,15 @@ public:
   /// must produce, so holding it would deadlock forward progress.
   std::mutex op_mutex_;
   mutable std::mutex alloc_mutex_;
+  /// @brief Serializes scratch-pool backing allocation for this process.
+  /// @details Every XCD of a fanned-out dispatch independently finds the same
+  /// process-wide pool VA unbacked and races to map it; remapping a pool that
+  /// already has live waves spilling into it would drop their data. Per-process
+  /// rather than driver-wide so daemon clients do not serialize against each
+  /// other. Lock order: hw_queue_mutex_ (held by the calling command processor)
+  /// -> scratch_backing_mutex_ -> {alloc_mutex_, owned_fds_mutex_,
+  /// page_table_mutex_}; nothing taken under it reaches a command processor.
+  std::mutex scratch_backing_mutex_;
   std::unordered_map<uint64_t, GpuAllocation> allocations_;
   uint64_t next_handle_ = 1;
   uint64_t next_gpu_va_;
@@ -286,8 +539,218 @@ public:
   struct QueueDoorbellInfo {
     uint32_t gpu_ordinal;
     uint32_t doorbell_offset;
+    amdgpu::QueueHandle queue_handle;
   };
   std::unordered_map<uint32_t, QueueDoorbellInfo> queue_doorbell_map_;
+
+  /// @brief Debug-relevant per-queue info reported by GET_QUEUE_SNAPSHOT.
+  ///
+  /// @details Captured when CREATE_QUEUE completes. rocm-dbgapi consumes the
+  /// context-save-restore address/size to locate each queue's CWSR area (from
+  /// which it walks the wave save state), plus the ring pointers to correlate
+  /// dispatches. Mirrors the fields the kernel fills in
+  /// @c kfd_queue_snapshot_entry (kfd_process_queue_manager.c:
+  /// @c pqm_get_queue_snapshot).
+  struct QueueSnapshotInfo {
+    uint64_t ring_base_address = 0;
+    uint64_t write_pointer_address = 0;
+    uint64_t read_pointer_address = 0;
+    uint64_t ctx_save_restore_address = 0;
+    uint32_t ctx_save_restore_area_size = 0;
+    uint32_t ring_size = 0;
+    uint32_t queue_type = 0;
+    uint32_t gpu_id = 0;
+    uint32_t xcc_id = 0;
+    uint64_t exception_status = 0; ///< Raised exceptions on this queue (KFD_EC_MASK bits).
+    /// Exception bits whose ROCr ownership decision is still in flight.
+    uint64_t runtime_exception_pending_status = 0;
+    /// Runtime publications per bit; identical concurrent events may overlap.
+    std::array<uint32_t, 64> runtime_exception_pending_counts{};
+    /// Pending runtime bits for which at least one publication failed.
+    uint64_t runtime_exception_failed_status = 0;
+    /// Failed runtime-owned bits waiting for a debugger to resolve them.
+    uint64_t runtime_exception_retained_status = 0;
+    /// Runtime-owned bits already queried by the current debugger session.
+    uint64_t runtime_exception_queried_status = 0;
+    /// Session that owns the notification bookkeeping below.
+    uint64_t debug_notification_session_generation = 0;
+    /// Debugger notification writes currently in flight, counted per bit.
+    std::array<uint32_t, 64> debug_notification_pending_counts{};
+    /// Status hidden from QUERY until every corresponding write completes.
+    uint64_t debug_notification_pending_status = 0;
+    /// Status for which at least one notification write succeeded.
+    uint64_t debug_notification_delivered_status = 0;
+    /// Status retained for a later subscription even if notification fails.
+    uint64_t debug_notification_retained_status = 0;
+    /// Whole events represented by the flattened debugger status fields.
+    /// Retaining their boundaries lets a retry preserve ownership when one
+    /// subscribed bit in a combined event atomically replaces another.
+    std::vector<uint64_t> debug_notification_events;
+
+    void record_debug_notification_event(uint64_t mask) {
+      if (mask != 0 && std::find(debug_notification_events.begin(), debug_notification_events.end(),
+                                 mask) == debug_notification_events.end())
+        debug_notification_events.push_back(mask);
+    }
+
+    void clear_debug_notification_events(uint64_t mask) {
+      for (uint64_t &event : debug_notification_events)
+        event &= ~mask;
+      std::erase(debug_notification_events, uint64_t{0});
+    }
+
+    void prune_debug_notification_events() {
+      for (uint64_t &event : debug_notification_events)
+        event &= exception_status;
+      std::erase(debug_notification_events, uint64_t{0});
+    }
+
+    /// @brief Return exception status that the debugger may currently consume.
+    uint64_t debugger_visible_exception_status(uint64_t session_generation = 0) const {
+      const uint64_t pending_status =
+          session_generation == 0 || debug_notification_session_generation == session_generation
+              ? debug_notification_pending_status
+              : 0;
+      return exception_status & ~runtime_exception_pending_status &
+             ~runtime_exception_queried_status & ~pending_status;
+    }
+
+    /// @brief Reserve queue-exception bits for an in-flight ROCr decision.
+    void begin_runtime_exception(uint64_t mask) {
+      exception_status |= mask;
+      record_debug_notification_event(mask);
+      for (uint32_t bit = 0; bit < 64; ++bit) {
+        const uint64_t bit_mask = uint64_t{1} << bit;
+        if ((mask & bit_mask) == 0)
+          continue;
+        ++runtime_exception_pending_counts[bit];
+        runtime_exception_pending_status |= bit_mask;
+      }
+    }
+
+    /// @brief Resolve one in-flight ROCr decision without losing overlaps.
+    uint64_t finish_runtime_exception(uint64_t mask, bool delivered, bool retain_failure) {
+      uint64_t failed = 0;
+      if (!delivered && retain_failure)
+        runtime_exception_failed_status |= mask;
+      for (uint32_t bit = 0; bit < 64; ++bit) {
+        const uint64_t bit_mask = uint64_t{1} << bit;
+        if ((mask & bit_mask) == 0)
+          continue;
+        if (runtime_exception_pending_counts[bit] == 0) {
+          if (!delivered && retain_failure) {
+            exception_status |= bit_mask;
+            runtime_exception_retained_status |= bit_mask;
+            runtime_exception_queried_status &= ~bit_mask;
+            failed |= bit_mask;
+          }
+          continue;
+        }
+        if (--runtime_exception_pending_counts[bit] != 0)
+          continue;
+        runtime_exception_pending_status &= ~bit_mask;
+        if ((runtime_exception_failed_status & bit_mask) != 0) {
+          runtime_exception_retained_status |= bit_mask;
+          runtime_exception_queried_status &= ~bit_mask;
+          failed |= bit_mask;
+        } else if (((debug_notification_pending_status | debug_notification_delivered_status |
+                     debug_notification_retained_status | runtime_exception_retained_status) &
+                    bit_mask) == 0) {
+          exception_status &= ~bit_mask;
+        }
+        runtime_exception_failed_status &= ~bit_mask;
+      }
+      prune_debug_notification_events();
+      return failed;
+    }
+
+    /// @brief Hide an event while its debugger-notifier write is in flight.
+    void begin_debug_notification(uint64_t mask, uint64_t session_generation) {
+      if (debug_notification_session_generation != session_generation) {
+        debug_notification_session_generation = session_generation;
+        debug_notification_pending_counts.fill(0);
+        debug_notification_pending_status = 0;
+        debug_notification_delivered_status = 0;
+      }
+      exception_status |= mask;
+      for (uint32_t bit = 0; bit < 64; ++bit) {
+        const uint64_t bit_mask = uint64_t{1} << bit;
+        if ((mask & bit_mask) == 0)
+          continue;
+        ++debug_notification_pending_counts[bit];
+        debug_notification_pending_status |= bit_mask;
+      }
+    }
+
+    /// @brief Commit one debugger-notifier result without losing overlaps.
+    void finish_debug_notification(uint64_t mask, uint64_t delivered_mask) {
+      debug_notification_delivered_status |= mask & delivered_mask;
+      for (uint32_t bit = 0; bit < 64; ++bit) {
+        const uint64_t bit_mask = uint64_t{1} << bit;
+        if ((mask & bit_mask) == 0 || debug_notification_pending_counts[bit] == 0)
+          continue;
+        if (--debug_notification_pending_counts[bit] != 0)
+          continue;
+        debug_notification_pending_status &= ~bit_mask;
+        if ((debug_notification_delivered_status & bit_mask) == 0 &&
+            (debug_notification_retained_status & bit_mask) == 0 &&
+            (runtime_exception_pending_status & bit_mask) == 0 &&
+            (runtime_exception_retained_status & bit_mask) == 0)
+          exception_status &= ~bit_mask;
+      }
+      prune_debug_notification_events();
+    }
+
+    /// @brief Require another wake if this session later re-enables @p mask.
+    void reset_debug_notification_delivery(uint64_t mask, uint64_t session_generation) {
+      if (debug_notification_session_generation == session_generation)
+        debug_notification_delivered_status &= ~mask;
+    }
+
+    /// @brief Consume only status currently visible to the debugger.
+    void clear_debugger_exception_status(uint64_t mask) {
+      const uint64_t consumed = mask & debugger_visible_exception_status();
+      runtime_exception_queried_status |= consumed & runtime_exception_retained_status;
+      exception_status &= ~(consumed & ~runtime_exception_retained_status);
+      debug_notification_delivered_status &= ~consumed;
+      debug_notification_retained_status &= ~consumed;
+      clear_debug_notification_events(consumed & ~runtime_exception_retained_status);
+    }
+
+    /// @brief Resolve retained runtime ownership after a successful debugger resume.
+    void resolve_runtime_exceptions() {
+      const uint64_t resolved = runtime_exception_retained_status;
+      runtime_exception_retained_status = 0;
+      runtime_exception_queried_status &= ~resolved;
+      runtime_exception_failed_status &= ~resolved;
+      const uint64_t still_owned =
+          runtime_exception_pending_status | debug_notification_pending_status |
+          debug_notification_delivered_status | debug_notification_retained_status;
+      exception_status &= ~(resolved & ~still_owned);
+      prune_debug_notification_events();
+    }
+
+    /// @brief Clear every debugger-session-owned exception field.
+    void clear_debugger_exception_state() {
+      exception_status &= runtime_exception_pending_status | runtime_exception_retained_status;
+      runtime_exception_queried_status = 0;
+      debug_notification_session_generation = 0;
+      debug_notification_pending_counts.fill(0);
+      debug_notification_pending_status = 0;
+      debug_notification_delivered_status = 0;
+      debug_notification_retained_status = 0;
+      prune_debug_notification_events();
+    }
+
+    /// @brief Area used by the XCC that owns this queue.
+    uint64_t cwsr_xcc_address() const {
+      return ctx_save_restore_address == 0
+                 ? 0
+                 : ctx_save_restore_address +
+                       static_cast<uint64_t>(xcc_id) * ctx_save_restore_area_size;
+    }
+  };
+  std::unordered_map<uint32_t, QueueSnapshotInfo> queue_snapshot_map_;
 
   EventState event_state_;
 
@@ -298,19 +761,97 @@ public:
   std::mutex runtime_mutex_;
   RuntimeState runtime_state_;
 
-  mutable std::mutex debug_mutex_;
-  DebugSession debug_session_;
-
 private:
+  static void normalize_host_extents(PageTableEntry &page) {
+    auto &extents = page.host_extents;
+    if (extents.size() > 1)
+      std::ranges::sort(extents, {}, &HostExtent::gpu_page_offset);
+    size_t out = 0;
+    for (const auto &extent : extents) {
+      if (extent.host_ptr == nullptr || extent.host_backed_bytes == 0)
+        continue;
+      if (out > 0) {
+        auto &previous = extents[out - 1];
+        if (previous.gpu_page_offset + previous.host_backed_bytes == extent.gpu_page_offset &&
+            previous.host_ptr + previous.host_backed_bytes == extent.host_ptr) {
+          previous.host_backed_bytes += extent.host_backed_bytes;
+          continue;
+        }
+      }
+      extents[out++] = extent;
+    }
+    extents.resize(out);
+  }
+
+  static void replace_host_extent(PageTableEntry &page, HostExtent replacement) {
+    const size_t replacement_begin = replacement.gpu_page_offset;
+    const size_t replacement_end = replacement_begin + replacement.host_backed_bytes;
+    if (replacement_begin == 0 && replacement_end == kPageSize) {
+      page.host_extents = std::vector<HostExtent>{replacement};
+      return;
+    }
+    std::vector<HostExtent> updated;
+    updated.reserve(page.host_extents.size() + 1);
+    for (const auto &extent : page.host_extents) {
+      const size_t extent_begin = extent.gpu_page_offset;
+      const size_t extent_end = extent_begin + extent.host_backed_bytes;
+      if (extent_end <= replacement_begin || replacement_end <= extent_begin) {
+        updated.push_back(extent);
+        continue;
+      }
+      if (extent_begin < replacement_begin)
+        updated.push_back({extent.host_ptr, replacement_begin - extent_begin, extent_begin});
+      if (replacement_end < extent_end)
+        updated.push_back({extent.host_ptr + (replacement_end - extent_begin),
+                           extent_end - replacement_end, replacement_end});
+    }
+    updated.push_back(replacement);
+    page.host_extents = std::move(updated);
+    normalize_host_extents(page);
+  }
+
+  static void erase_host_extent(PageTableEntry &page, size_t erased_begin, size_t erased_bytes) {
+    const size_t erased_end = erased_begin + erased_bytes;
+    std::vector<HostExtent> updated;
+    updated.reserve(page.host_extents.size() + 1);
+    for (const auto &extent : page.host_extents) {
+      const size_t extent_begin = extent.gpu_page_offset;
+      const size_t extent_end = extent_begin + extent.host_backed_bytes;
+      if (extent_end <= erased_begin || erased_end <= extent_begin) {
+        updated.push_back(extent);
+        continue;
+      }
+      if (extent_begin < erased_begin)
+        updated.push_back({extent.host_ptr, erased_begin - extent_begin, extent_begin});
+      if (erased_end < extent_end)
+        updated.push_back(
+            {extent.host_ptr + (erased_end - extent_begin), extent_end - erased_end, erased_end});
+    }
+    page.host_extents = std::move(updated);
+    normalize_host_extents(page);
+  }
+
+  // Invalidate copied policies before mutation, including a partial update
+  // that throws before publishing the ordinary translation generation.
+  void invalidate_page_policies_locked() {
+    page_table_mutation_epoch_->fetch_add(1, std::memory_order_release);
+  }
+
   void publish_page_table_mutation_locked() { ++page_table_generation_; }
+
+  std::shared_ptr<util::DistributedSharedMutex> page_table_request_mutex_ =
+      std::make_shared<util::DistributedSharedMutex>();
 
   /// @brief Page table version counter, bumped on every PTE mutation.
   /// @details GpuMemory keeps per-thread TLB-like translation caches keyed by
-  ///          this generation; all reads and writes occur while holding
-  ///          page_table_mutex_, so the counter itself does not need atomics.
+  ///          this generation. Mutations hold both page_table_request_mutex_
+  ///          and page_table_mutex_; readers hold at least one of those locks,
+  ///          so the counter itself does not need atomics.
   uint64_t page_table_generation_{1};
+  /// @brief Retained atomic token for lockless copied-policy checks.
+  /// @details Invalidate before mutation, including partially throwing updates.
+  std::shared_ptr<std::atomic<uint64_t>> page_table_mutation_epoch_ =
+      std::make_shared<std::atomic<uint64_t>>(1);
 };
 
 } // namespace rocjitsu
-
-#endif // ROCJITSU_KMD_LINUX_KFD_PROCESS_H_

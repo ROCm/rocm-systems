@@ -77,7 +77,7 @@ TEST(SparseMemoryThreadingTest, ConcurrentSamePageWritesArePreserved) {
   for (uint32_t tid = 0; tid < kThreads; ++tid) {
     workers.emplace_back([&, tid] {
       std::array<uint8_t, kBytesPerThread> bytes{};
-      std::fill(bytes.begin(), bytes.end(), static_cast<uint8_t>(0x20 + tid));
+      std::ranges::fill(bytes, static_cast<uint8_t>(0x20 + tid));
       start.arrive_and_wait();
       for (uint32_t iteration = 0; iteration < 64; ++iteration)
         memory.write_block(kBase + tid * kBytesPerThread, bytes);
@@ -92,7 +92,7 @@ TEST(SparseMemoryThreadingTest, ConcurrentSamePageWritesArePreserved) {
   for (uint32_t tid = 0; tid < kThreads; ++tid) {
     const auto begin = actual.begin() + tid * kBytesPerThread;
     const auto end = begin + kBytesPerThread;
-    EXPECT_TRUE(std::all_of(
+    EXPECT_TRUE(std::ranges::all_of(
         begin, end, [tid](uint8_t byte) { return byte == static_cast<uint8_t>(0x20 + tid); }));
   }
 }
@@ -111,6 +111,34 @@ TEST(SparseMemoryTest, UnalignedBlockRoundTripCrossesPageBoundary) {
   memory.read_block(kAddr, output);
   EXPECT_EQ(output, input);
   EXPECT_EQ(memory.num_pages(), 2u);
+}
+
+TEST(SparseMemoryTest, HasPageSeesPagesWrittenThroughEveryStripe) {
+  simdojo::SparseMemory memory("memory");
+  constexpr uint64_t kPageSize = simdojo::SparseMemory::PAGE_SIZE;
+
+  // has_page() has to use the same key the storage does -- the aligned byte
+  // address, not the page number. Keying it on `addr >> PAGE_SHIFT` reported
+  // every page above the first as absent, which made GpuMemory::is_fetchable()
+  // deny instruction fetches that were backed only by sparse memory.
+  const uint64_t addr = 0x400000u + 37u;
+  EXPECT_FALSE(memory.has_page(addr));
+  memory.write8(addr, 0x5Au);
+  EXPECT_TRUE(memory.has_page(addr));
+
+  // Every offset within the page reports the same backing, and the neighbours
+  // stay absent.
+  EXPECT_TRUE(memory.has_page(addr & ~simdojo::SparseMemory::PAGE_MASK));
+  EXPECT_TRUE(memory.has_page((addr & ~simdojo::SparseMemory::PAGE_MASK) + kPageSize - 1));
+  EXPECT_FALSE(memory.has_page(addr + kPageSize));
+  EXPECT_FALSE(memory.has_page(addr - kPageSize));
+
+  // Spread across many pages so the answer cannot come from one lucky stripe:
+  // the old page-number key collided with the aligned key only at address 0.
+  for (uint64_t page = 0; page < 64; ++page)
+    memory.write8(page * kPageSize + 8u, static_cast<uint8_t>(page));
+  for (uint64_t page = 0; page < 64; ++page)
+    EXPECT_TRUE(memory.has_page(page * kPageSize + 8u)) << "page " << page;
 }
 
 TEST(SparseMemoryThreadingTest, ConcurrentOverlappingBlocksRemainAtomicPerPage) {
@@ -143,10 +171,8 @@ TEST(SparseMemoryThreadingTest, ConcurrentOverlappingBlocksRemainAtomicPerPage) 
   for (size_t page = 0; page < 2; ++page) {
     const auto bytes = std::span<const uint8_t>(actual).subspan(
         page * simdojo::SparseMemory::PAGE_SIZE, simdojo::SparseMemory::PAGE_SIZE);
-    const bool is_first =
-        std::all_of(bytes.begin(), bytes.end(), [](uint8_t byte) { return byte == 0x3C; });
-    const bool is_second =
-        std::all_of(bytes.begin(), bytes.end(), [](uint8_t byte) { return byte == 0xC3; });
+    const bool is_first = std::ranges::all_of(bytes, [](uint8_t byte) { return byte == 0x3C; });
+    const bool is_second = std::ranges::all_of(bytes, [](uint8_t byte) { return byte == 0xC3; });
     EXPECT_TRUE(is_first || is_second) << "page=" << page;
   }
 }

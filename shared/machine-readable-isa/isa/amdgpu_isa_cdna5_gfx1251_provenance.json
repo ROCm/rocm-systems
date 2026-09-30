@@ -1,0 +1,156 @@
+{
+  "schema_version": 1,
+  "llvm_commit": "3bcd9a803184e2d3657b9d5cc2a1773e9ce0f116",
+  "base_xml": "amdgpu_isa_cdna5.xml",
+  "delta_xml": "amdgpu_isa_cdna5_gfx1251_delta.xml",
+  "identifier_derivation": "Interpret the public MC encoding bytes as one little-endian integer, AND it with the named public base-XML EncodingIdentifierMask, then render exactly BitCount binary digits.",
+  "template_derivation": "Instruction flags, functional group, encoding names, encoding conditions, operand attributes, and literal-form expansion come from the named instruction in the public CDNA5 base XML. Operand formats and widths come from the cited public LLVM TableGen profile.",
+  "instructions": [
+    {
+      "instruction": "V_PK_FMA_F64",
+      "opcode": 59,
+      "base_template": "V_PK_FMA_F32",
+      "template_mapping": "Retain the public VOP3P three-source/literal expansion and replace every packed-F32 operand with the packed-F64 128-bit profile cited below.",
+      "tablegen_definition": {"path": "llvm/lib/Target/AMDGPU/VOP3PInstructions.td", "line": 1474, "text": "defm V_PK_FMA_F64 : VOP3PInst<\"v_pk_fma_f64\", V_PK_VOP3_F64_Profile, any_fma>;"},
+      "tablegen_profile": {"path": "llvm/lib/Target/AMDGPU/VOP3PInstructions.td", "line": 139, "text": "def V_PK_VOP3_F64_Profile : VOP3P_Profile<VOP_V2F64_V2F64_V2F64_V2F64, VOP3_PACKED> {"},
+      "tablegen_opcode": {"path": "llvm/lib/Target/AMDGPU/VOP3PInstructions.td", "line": 2776, "text": "defm V_PK_FMA_F64      : VOP3P_Real_gfx1250<0x3b>;"},
+      "primary_mc": {"path": "llvm/test/MC/AMDGPU/gfx1251_asm_vop3p.s", "test": "GFX1251", "assembly_line": 101, "check_line": 103, "assembly": "v_pk_fma_f64 v[4:7], v[8:11], v[12:15], v[16:19]", "bytes": ["0x04", "0x40", "0x3b", "0xcc", "0x08", "0x19", "0x42", "0x1c"]},
+      "literal_mc": {"path": "llvm/test/MC/AMDGPU/gfx1251_asm_vop3p.s", "test": "GFX1251", "assembly_line": 137, "check_line": 139, "assembly": "v_pk_fma_f64 v[4:7], 101.0, v[8:11], v[16:19]", "bytes": ["0x04", "0x40", "0x3b", "0xcc", "0xff", "0x10", "0x42", "0x1c", "0x00", "0x40", "0x59", "0x40"]},
+      "operands": [
+        {"field": "VDST", "format": "FMT_NUM_PK2_F64", "type": "OPR_VGPR", "size": 128, "input": false, "output": true},
+        {"field": "SRC0", "format": "FMT_NUM_PK2_F64", "type": "OPR_SRC", "size": 128, "input": true, "output": false},
+        {"field": "SRC1", "format": "FMT_NUM_PK2_F64", "type": "OPR_SRC", "size": 128, "input": true, "output": false},
+        {"field": "SRC2", "format": "FMT_NUM_PK2_F64", "type": "OPR_SRC", "size": 128, "input": true, "output": false}
+      ]
+    },
+    {
+      "instruction": "V_PK_MUL_F64",
+      "opcode": 60,
+      "base_template": "V_PK_ADD_F32",
+      "template_mapping": "Retain the public VOP3P two-source/literal expansion and replace every packed-F32 operand with the packed-F64 128-bit profile cited below.",
+      "tablegen_definition": {"path": "llvm/lib/Target/AMDGPU/VOP3PInstructions.td", "line": 1475, "text": "defm V_PK_MUL_F64 : VOP3PInst<\"v_pk_mul_f64\", V_PK_VOP2_F64_Profile, any_fmul>;"},
+      "tablegen_profile": {"path": "llvm/lib/Target/AMDGPU/VOP3PInstructions.td", "line": 132, "text": "def V_PK_VOP2_F64_Profile : VOP3P_Profile<VOP_V2F64_V2F64_V2F64, VOP3_PACKED> {"},
+      "tablegen_opcode": {"path": "llvm/lib/Target/AMDGPU/VOP3PInstructions.td", "line": 2777, "text": "defm V_PK_MUL_F64      : VOP3P_Real_gfx1250<0x3c>;"},
+      "primary_mc": {"path": "llvm/test/MC/AMDGPU/gfx1251_asm_vop3p.s", "test": "GFX1251", "assembly_line": 53, "check_line": 55, "assembly": "v_pk_mul_f64 v[4:7], v[8:11], v[12:15]", "bytes": ["0x04", "0x40", "0x3c", "0xcc", "0x08", "0x19", "0x02", "0x1a"]},
+      "literal_mc": {"path": "llvm/test/MC/AMDGPU/gfx1251_asm_vop3p.s", "test": "GFX1251", "assembly_line": 93, "check_line": 95, "assembly": "v_pk_mul_f64 v[4:7], 101.0, v[8:11]", "bytes": ["0x04", "0x40", "0x3c", "0xcc", "0xff", "0x10", "0x02", "0x1a", "0x00", "0x40", "0x59", "0x40"]},
+      "operands": [
+        {"field": "VDST", "format": "FMT_NUM_PK2_F64", "type": "OPR_VGPR", "size": 128, "input": false, "output": true},
+        {"field": "SRC0", "format": "FMT_NUM_PK2_F64", "type": "OPR_SRC", "size": 128, "input": true, "output": false},
+        {"field": "SRC1", "format": "FMT_NUM_PK2_F64", "type": "OPR_SRC", "size": 128, "input": true, "output": false}
+      ]
+    },
+    {
+      "instruction": "V_PK_ADD_F64",
+      "opcode": 75,
+      "base_template": "V_PK_ADD_F32",
+      "template_mapping": "Retain the public VOP3P two-source/literal expansion and replace every packed-F32 operand with the packed-F64 128-bit profile cited below.",
+      "tablegen_definition": {"path": "llvm/lib/Target/AMDGPU/VOP3PInstructions.td", "line": 1476, "text": "defm V_PK_ADD_F64 : VOP3PInst<\"v_pk_add_f64\", V_PK_VOP2_F64_Profile, any_fadd>;"},
+      "tablegen_profile": {"path": "llvm/lib/Target/AMDGPU/VOP3PInstructions.td", "line": 132, "text": "def V_PK_VOP2_F64_Profile : VOP3P_Profile<VOP_V2F64_V2F64_V2F64, VOP3_PACKED> {"},
+      "tablegen_opcode": {"path": "llvm/lib/Target/AMDGPU/VOP3PInstructions.td", "line": 2778, "text": "defm V_PK_ADD_F64      : VOP3P_Real_gfx1250<0x4b>;"},
+      "primary_mc": {"path": "llvm/test/MC/AMDGPU/gfx1251_asm_vop3p.s", "test": "GFX1251", "assembly_line": 5, "check_line": 7, "assembly": "v_pk_add_f64 v[4:7], v[8:11], v[12:15]", "bytes": ["0x04", "0x40", "0x4b", "0xcc", "0x08", "0x19", "0x02", "0x1a"]},
+      "literal_mc": {"path": "llvm/test/MC/AMDGPU/gfx1251_asm_vop3p.s", "test": "GFX1251", "assembly_line": 45, "check_line": 47, "assembly": "v_pk_add_f64 v[4:7], 101.0, v[8:11]", "bytes": ["0x04", "0x40", "0x4b", "0xcc", "0xff", "0x10", "0x02", "0x1a", "0x00", "0x40", "0x59", "0x40"]},
+      "operands": [
+        {"field": "VDST", "format": "FMT_NUM_PK2_F64", "type": "OPR_VGPR", "size": 128, "input": false, "output": true},
+        {"field": "SRC0", "format": "FMT_NUM_PK2_F64", "type": "OPR_SRC", "size": 128, "input": true, "output": false},
+        {"field": "SRC1", "format": "FMT_NUM_PK2_F64", "type": "OPR_SRC", "size": 128, "input": true, "output": false}
+      ]
+    },
+    {
+      "instruction": "V_PK_ADD_NC_U64",
+      "opcode": 76,
+      "base_template": "V_PK_ADD_F32",
+      "template_mapping": "Retain the public VOP3P two-source/literal expansion and replace every packed-F32 operand with the packed-U64 128-bit profile cited below.",
+      "tablegen_definition": {"path": "llvm/lib/Target/AMDGPU/VOP3PInstructions.td", "line": 193, "text": "defm V_PK_ADD_NC_U64 : VOP3PInst<\"v_pk_add_nc_u64\", V_PK_VOP2_I64_Profile, add>;"},
+      "tablegen_profile": {"path": "llvm/lib/Target/AMDGPU/VOP3PInstructions.td", "line": 147, "text": "def V_PK_VOP2_I64_Profile : VOP3P_Profile<VOP_V2I64_V2I64_V2I64, VOP3_PACKED> {"},
+      "tablegen_opcode": {"path": "llvm/lib/Target/AMDGPU/VOP3PInstructions.td", "line": 2779, "text": "defm V_PK_ADD_NC_U64   : VOP3P_Real_gfx1250<0x4c>;"},
+      "primary_mc": {"path": "llvm/test/MC/AMDGPU/gfx1251_asm_vop3p.s", "test": "GFX1251", "assembly_line": 257, "check_line": 259, "assembly": "v_pk_add_nc_u64 v[4:7], v[8:11], v[12:15]", "bytes": ["0x04", "0x40", "0x4c", "0xcc", "0x08", "0x19", "0x02", "0x1a"]},
+      "literal_mc": {"path": "llvm/test/MC/AMDGPU/gfx1251_asm_vop3p.s", "test": "GFX1251", "assembly_line": 297, "check_line": 299, "assembly": "v_pk_add_nc_u64 v[4:7], 101, v[8:11]", "bytes": ["0x04", "0x40", "0x4c", "0xcc", "0xff", "0x10", "0x02", "0x1a", "0x65", "0x00", "0x00", "0x00"]},
+      "operands": [
+        {"field": "VDST", "format": "FMT_NUM_PK2_U64", "type": "OPR_VGPR", "size": 128, "input": false, "output": true},
+        {"field": "SRC0", "format": "FMT_NUM_PK2_U64", "type": "OPR_SRC", "size": 128, "input": true, "output": false},
+        {"field": "SRC1", "format": "FMT_NUM_PK2_U64", "type": "OPR_SRC", "size": 128, "input": true, "output": false}
+      ]
+    },
+    {
+      "instruction": "V_PK_SUB_NC_U64",
+      "opcode": 77,
+      "base_template": "V_PK_ADD_F32",
+      "template_mapping": "Retain the public VOP3P two-source/literal expansion and replace every packed-F32 operand with the packed-U64 128-bit profile cited below.",
+      "tablegen_definition": {"path": "llvm/lib/Target/AMDGPU/VOP3PInstructions.td", "line": 209, "text": "defm V_PK_SUB_NC_U64 : VOP3PInst<\"v_pk_sub_nc_u64\", V_PK_VOP2_I64_Profile, sub>;"},
+      "tablegen_profile": {"path": "llvm/lib/Target/AMDGPU/VOP3PInstructions.td", "line": 147, "text": "def V_PK_VOP2_I64_Profile : VOP3P_Profile<VOP_V2I64_V2I64_V2I64, VOP3_PACKED> {"},
+      "tablegen_opcode": {"path": "llvm/lib/Target/AMDGPU/VOP3PInstructions.td", "line": 2780, "text": "defm V_PK_SUB_NC_U64   : VOP3P_Real_gfx1250<0x4d>;"},
+      "primary_mc": {"path": "llvm/test/MC/AMDGPU/gfx1251_asm_vop3p.s", "test": "GFX1251", "assembly_line": 305, "check_line": 307, "assembly": "v_pk_sub_nc_u64 v[4:7], v[8:11], v[12:15]", "bytes": ["0x04", "0x40", "0x4d", "0xcc", "0x08", "0x19", "0x02", "0x1a"]},
+      "literal_mc": {"path": "llvm/test/MC/AMDGPU/gfx1251_asm_vop3p.s", "test": "GFX1251", "assembly_line": 345, "check_line": 347, "assembly": "v_pk_sub_nc_u64 v[4:7], 101, v[8:11]", "bytes": ["0x04", "0x40", "0x4d", "0xcc", "0xff", "0x10", "0x02", "0x1a", "0x65", "0x00", "0x00", "0x00"]},
+      "operands": [
+        {"field": "VDST", "format": "FMT_NUM_PK2_U64", "type": "OPR_VGPR", "size": 128, "input": false, "output": true},
+        {"field": "SRC0", "format": "FMT_NUM_PK2_U64", "type": "OPR_SRC", "size": 128, "input": true, "output": false},
+        {"field": "SRC1", "format": "FMT_NUM_PK2_U64", "type": "OPR_SRC", "size": 128, "input": true, "output": false}
+      ]
+    },
+    {
+      "instruction": "V_PK_MAX_NUM_F64",
+      "opcode": 78,
+      "base_template": "V_PK_ADD_F32",
+      "template_mapping": "Retain the public VOP3P two-source/literal expansion and replace every packed-F32 operand with the packed-F64 128-bit profile cited below; no mnemonic alias is introduced.",
+      "tablegen_definition": {"path": "llvm/lib/Target/AMDGPU/VOP3PInstructions.td", "line": 188, "text": "defm V_PK_MAX_NUM_F64 : VOP3PInst<\"v_pk_max_num_f64\", V_PK_VOP2_F64_Profile, fmaxnum_like>;"},
+      "tablegen_profile": {"path": "llvm/lib/Target/AMDGPU/VOP3PInstructions.td", "line": 132, "text": "def V_PK_VOP2_F64_Profile : VOP3P_Profile<VOP_V2F64_V2F64_V2F64, VOP3_PACKED> {"},
+      "tablegen_opcode": {"path": "llvm/lib/Target/AMDGPU/VOP3PInstructions.td", "line": 2781, "text": "defm V_PK_MAX_NUM_F64  : VOP3P_Real_gfx1250<0x4e>;"},
+      "primary_mc": {"path": "llvm/test/MC/AMDGPU/gfx1251_asm_vop3p.s", "test": "GFX1251", "assembly_line": 161, "check_line": 163, "assembly": "v_pk_max_num_f64 v[4:7], v[8:11], v[12:15]", "bytes": ["0x04", "0x40", "0x4e", "0xcc", "0x08", "0x19", "0x02", "0x1a"]},
+      "literal_mc": {"path": "llvm/test/MC/AMDGPU/gfx1251_asm_vop3p.s", "test": "GFX1251", "assembly_line": 201, "check_line": 203, "assembly": "v_pk_max_num_f64 v[4:7], 101.0, v[8:11]", "bytes": ["0x04", "0x40", "0x4e", "0xcc", "0xff", "0x10", "0x02", "0x1a", "0x00", "0x40", "0x59", "0x40"]},
+      "operands": [
+        {"field": "VDST", "format": "FMT_NUM_PK2_F64", "type": "OPR_VGPR", "size": 128, "input": false, "output": true},
+        {"field": "SRC0", "format": "FMT_NUM_PK2_F64", "type": "OPR_SRC", "size": 128, "input": true, "output": false},
+        {"field": "SRC1", "format": "FMT_NUM_PK2_F64", "type": "OPR_SRC", "size": 128, "input": true, "output": false}
+      ]
+    },
+    {
+      "instruction": "V_PK_MIN_NUM_F64",
+      "opcode": 79,
+      "base_template": "V_PK_ADD_F32",
+      "template_mapping": "Retain the public VOP3P two-source/literal expansion and replace every packed-F32 operand with the packed-F64 128-bit profile cited below; no mnemonic alias is introduced.",
+      "tablegen_definition": {"path": "llvm/lib/Target/AMDGPU/VOP3PInstructions.td", "line": 189, "text": "defm V_PK_MIN_NUM_F64 : VOP3PInst<\"v_pk_min_num_f64\", V_PK_VOP2_F64_Profile, fminnum_like>;"},
+      "tablegen_profile": {"path": "llvm/lib/Target/AMDGPU/VOP3PInstructions.td", "line": 132, "text": "def V_PK_VOP2_F64_Profile : VOP3P_Profile<VOP_V2F64_V2F64_V2F64, VOP3_PACKED> {"},
+      "tablegen_opcode": {"path": "llvm/lib/Target/AMDGPU/VOP3PInstructions.td", "line": 2782, "text": "defm V_PK_MIN_NUM_F64  : VOP3P_Real_gfx1250<0x4f>;"},
+      "primary_mc": {"path": "llvm/test/MC/AMDGPU/gfx1251_asm_vop3p.s", "test": "GFX1251", "assembly_line": 209, "check_line": 211, "assembly": "v_pk_min_num_f64 v[4:7], v[8:11], v[12:15]", "bytes": ["0x04", "0x40", "0x4f", "0xcc", "0x08", "0x19", "0x02", "0x1a"]},
+      "literal_mc": {"path": "llvm/test/MC/AMDGPU/gfx1251_asm_vop3p.s", "test": "GFX1251", "assembly_line": 249, "check_line": 251, "assembly": "v_pk_min_num_f64 v[4:7], 101.0, v[8:11]", "bytes": ["0x04", "0x40", "0x4f", "0xcc", "0xff", "0x10", "0x02", "0x1a", "0x00", "0x40", "0x59", "0x40"]},
+      "operands": [
+        {"field": "VDST", "format": "FMT_NUM_PK2_F64", "type": "OPR_VGPR", "size": 128, "input": false, "output": true},
+        {"field": "SRC0", "format": "FMT_NUM_PK2_F64", "type": "OPR_SRC", "size": 128, "input": true, "output": false},
+        {"field": "SRC1", "format": "FMT_NUM_PK2_F64", "type": "OPR_SRC", "size": 128, "input": true, "output": false}
+      ]
+    },
+    {
+      "instruction": "V_PK_LSHL_ADD_U64",
+      "opcode": 126,
+      "base_template": "V_PK_FMA_F32",
+      "template_mapping": "Retain the public VOP3P three-source/literal expansion; map destination, SRC0, and SRC2 to packed-U64 128-bit operands and SRC1 to the packed-U32 64-bit operand declared by VOP_V2I64_V2I64_V2I32_V2I64.",
+      "tablegen_definition": {"path": "llvm/lib/Target/AMDGPU/VOP3PInstructions.td", "line": 210, "text": "defm V_PK_LSHL_ADD_U64 : VOP3PInst<\"v_pk_lshl_add_u64\", V_PK_LSHL_ADD_U64_Profile>;"},
+      "tablegen_profile": {"path": "llvm/lib/Target/AMDGPU/VOP3PInstructions.td", "line": 153, "text": "def V_PK_LSHL_ADD_U64_Profile : VOP3P_Profile<VOP_V2I64_V2I64_V2I32_V2I64, VOP3_PACKED> {"},
+      "tablegen_opcode": {"path": "llvm/lib/Target/AMDGPU/VOP3PInstructions.td", "line": 2783, "text": "defm V_PK_LSHL_ADD_U64 : VOP3P_Real_gfx1250<0x7e>;"},
+      "primary_mc": {"path": "llvm/test/MC/AMDGPU/gfx1251_asm_vop3p.s", "test": "GFX1251", "assembly_line": 353, "check_line": 355, "assembly": "v_pk_lshl_add_u64 v[4:7], v[8:11], v[12:13], v[16:19]", "bytes": ["0x04", "0x40", "0x7e", "0xcc", "0x08", "0x19", "0x42", "0x1c"]},
+      "literal_mc": {"path": "llvm/test/MC/AMDGPU/gfx1251_asm_vop3p.s", "test": "GFX1251", "assembly_line": 385, "check_line": 387, "assembly": "v_pk_lshl_add_u64 v[4:7], v[8:11], 101, v[16:19]", "bytes": ["0x04", "0x40", "0x7e", "0xcc", "0x08", "0xff", "0x41", "0x1c", "0x65", "0x00", "0x00", "0x00"]},
+      "operands": [
+        {"field": "VDST", "format": "FMT_NUM_PK2_U64", "type": "OPR_VGPR", "size": 128, "input": false, "output": true},
+        {"field": "SRC0", "format": "FMT_NUM_PK2_U64", "type": "OPR_SRC", "size": 128, "input": true, "output": false},
+        {"field": "SRC1", "format": "FMT_NUM_PK2_U32", "type": "OPR_SRC", "size": 64, "input": true, "output": false},
+        {"field": "SRC2", "format": "FMT_NUM_PK2_U64", "type": "OPR_SRC", "size": 128, "input": true, "output": false}
+      ]
+    },
+    {
+      "instruction": "V_WMMA_F64_16X16X4_F64",
+      "opcode": 91,
+      "base_template": "V_WMMA_F32_16X16X4_F32",
+      "template_mapping": "Retain the public CDNA5 four-operand WMMA VOP3P shape without literal forms; substitute LLVM's F64 input/output register widths for the F64_F64X4_WMMA_w32 profile.",
+      "tablegen_definition": {"path": "llvm/lib/Target/AMDGPU/VOP3PInstructions.td", "line": 2168, "text": "defm V_WMMA_F64_16X16X4_F64_w32      : WMMAInstGFX12<\"v_wmma_f64_16x16x4_f64\",       F64_F64X4_WMMA_w32, \"_w32\">;"},
+      "tablegen_profile": {"path": "llvm/lib/Target/AMDGPU/VOP3PInstructions.td", "line": 1999, "text": "def F64_F64X4_WMMA_w32           : VOP3PWMMA_Profile<[v8f64, v2f64,    v2f64,    v8f64], /*_IsSWMMAC=*/0, /*_IndexType=*/0, /*_IsIU=*/0, /*_IsFP8BF8=*/0,"},
+      "tablegen_opcode": {"path": "llvm/lib/Target/AMDGPU/VOP3PInstructions.td", "line": 2620, "text": "defm V_WMMA_F64_16X16X4_F64_w32       : VOP3P_Real_WMMA_gfx1250 <0x05b, F64_F64X4_WMMA_w32>;"},
+      "primary_mc": {"path": "llvm/test/MC/AMDGPU/gfx1251_asm_wmma_w32.s", "test": "GFX1251", "assembly_line": 6, "check_line": 8, "assembly": "v_wmma_f64_16x16x4_f64 v[8:23], v[0:3], v[4:7], v[8:23]", "bytes": ["0x08", "0x00", "0x5b", "0xcc", "0x00", "0x09", "0x22", "0x1c"]},
+      "operands": [
+        {"field": "VDST", "format": "FMT_WMMA_DC_16X16_F64", "type": "OPR_VGPR", "size": 512, "input": false, "output": true},
+        {"field": "SRC0", "format": "FMT_WMMA_AB_16X4_F64", "type": "OPR_SRC_VGPR", "size": 128, "input": true, "output": false},
+        {"field": "SRC1", "format": "FMT_WMMA_AB_16X4_F64", "type": "OPR_SRC_VGPR", "size": 128, "input": true, "output": false},
+        {"field": "SRC2", "format": "FMT_WMMA_DC_16X16_F64", "type": "OPR_SRC_VGPR_OR_INLINE", "size": 512, "input": true, "output": false}
+      ]
+    }
+  ]
+}

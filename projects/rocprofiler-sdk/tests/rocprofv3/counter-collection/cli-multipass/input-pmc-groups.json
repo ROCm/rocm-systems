@@ -1,0 +1,15 @@
+{
+    "jobs": [
+        {
+            "pmc_groups": [
+                [
+                    "SQ_WAVES",
+                    "GRBM_COUNT"
+                ],
+                [
+                    "GRBM_GUI_ACTIVE"
+                ]
+            ]
+        }
+    ]
+}

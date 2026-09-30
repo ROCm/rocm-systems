@@ -132,7 +132,16 @@ void ncclProfilerProxyTraceDump(void* profilerContext, ncclDebugLogger_t logfn) 
   CommCtx* c = (CommCtx*)profilerContext;
   if (!c || !c->trace || !logfn) return;
   std::string s = c->trace->dump();
-  logfn(NCCL_LOG_WARN, NCCL_ALL, __func__, __LINE__, "%s", s.c_str());
+  // The debug logger formats into a fixed 1KB buffer, so a whole-dump message
+  // would be truncated. dump() emits one record per line, so log line by line.
+  for (size_t pos = 0; pos < s.size();) {
+    size_t end = s.find('\n', pos);
+    if (end == std::string::npos) end = s.size();
+    if (end > pos) {
+      logfn(NCCL_LOG_WARN, NCCL_ALL, __func__, __LINE__, "%.*s", (int)(end - pos), s.data() + pos);
+    }
+    pos = end + 1;
+  }
 }
 
 ncclProfiler_v6_t ncclProfiler_v6 = {"ProxyTrace", pluginInit, pluginStartEvent, pluginStopEvent, pluginRecordEventState,

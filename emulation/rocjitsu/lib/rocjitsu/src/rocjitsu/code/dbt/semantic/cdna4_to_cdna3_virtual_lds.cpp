@@ -3,18 +3,19 @@
 
 #include "rocjitsu/code/dbt/semantic/cdna4_to_cdna3_virtual_lds.h"
 
+#include "rocjitsu/code/analysis/liveness.h"
 #include "rocjitsu/code/basic_block.h"
+#include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/dbt/semantic/cdna3_lds.h"
 #include "rocjitsu/code/dbt/semantic/cdna3_scratch.h"
 #include "rocjitsu/code/dbt/virtual_lds.h"
-#include "rocjitsu/code/patch/instruction_builder.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna3/builders.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna3/encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna3/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna3/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/isa_traits.h"
 
@@ -566,46 +567,15 @@ void emit_virtual_lds_copy_temp_to_acc_range(std::vector<uint32_t> &words,
 [[nodiscard]] std::optional<VirtualLdsBaseSgprReservation>
 reserve_cdna3_virtual_lds_base_sgpr_pair(TranslationContext &context, KernelBlockScope blocks,
                                          const KdTranslation &translation, rj_code_arch_t arch) {
-  if (!arch_is_cdna(arch))
+  if (!arch_is_cdna_4_or_lower(arch))
     return std::nullopt;
 
-  auto note_sgpr_ref = [](uint32_t &count, RegisterRef ref) {
-    if (ref.cls != RegClass::SGPR)
-      return;
-    // Implicit operands include architectural special registers such as EXEC
-    // and VCC. Those live in the descriptor tail and must not make virtual-LDS
-    // scratch selection think every ordinary SGPR is already occupied.
-    if (ref.index >= kCdnaOrdinarySgprLimit)
-      return;
-    count = std::max<uint32_t>(count, static_cast<uint32_t>(ref.index) + ref.width);
-  };
-
-  uint32_t ordinary_floor = 0;
-  for (BasicBlock *block : blocks) {
-    if (block == nullptr)
-      continue;
-    for (const Instruction &inst : block->instructions()) {
-      for (int i = 0; i < inst.num_src_operands(); ++i) {
-        if (const Operand *operand = inst.src_operand(i)) {
-          if (auto ref = operand->to_register_ref())
-            note_sgpr_ref(ordinary_floor, *ref);
-        }
-      }
-      for (int i = 0; i < inst.num_dst_operands(); ++i) {
-        if (const Operand *operand = inst.dst_operand(i)) {
-          if (auto ref = operand->to_register_ref())
-            note_sgpr_ref(ordinary_floor, *ref);
-        }
-      }
-
-      // Do not fold implicit uses/defs into the ordinary SGPR floor. They can
-      // describe architectural state such as EXEC/VCC/SCC rather than guest
-      // ordinary scalar registers, and counting them here forces small kernels
-      // into descriptor-full virtual-LDS spill mode. Explicit operands plus the
-      // descriptor ABI SGPR fields below are the values that matter for choosing
-      // a non-conflicting backing-pointer pair.
-    }
-  }
+  // The rest of this function bounds against kCdnaOrdinarySgprLimit; the shared
+  // scan excludes operands using its own constant.
+  static_assert(kCdnaOrdinarySgprLimit == REGISTER_SET_ALLOCATABLE_SGPRS,
+                "virtual-LDS reservation and the shared SGPR scan must agree on "
+                "where ordinary SGPRs end");
+  uint32_t ordinary_floor = explicit_ordinary_sgpr_bound(blocks);
 
   ordinary_floor = std::max<uint32_t>(ordinary_floor, translation.target_user_sgpr_count);
   auto include_sgpr = [&](int16_t sgpr, uint32_t width) {

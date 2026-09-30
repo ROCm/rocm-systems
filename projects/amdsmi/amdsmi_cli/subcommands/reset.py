@@ -1,28 +1,13 @@
 #!/usr/bin/env python3
-#
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 import logging
 import sys
 
 from amdsmi_cli_exceptions import AmdSmiRequiredCommandException
+from amdsmi_cli_exceptions import AmdSmiInvalidParameterException
+from amdsmi_cli_exceptions import AmdSmiExitCode
 from amdsmi_helpers import AMDSMIHelpers
 
 from amdsmi import amdsmi_exception, amdsmi_interface
@@ -61,8 +46,9 @@ class ResetCommands:
             clean_local_data (bool, optional): Value override for args.run_cleaner_shader. Defaults to None.
 
         Raises:
-            ValueError: Value error if no gpu value is provided
-            IndexError: Index error if gpu list is empty
+            AmdSmiInvalidParameterException: If an invalid parameter combination is provided (e.g. --gtt with --gpu)
+            AmdSmiRequiredCommandException: If no reset subcommand argument is provided
+            PermissionError: If a reset operation requires elevation (AMDSMI_STATUS_NO_PERM)
 
         Return:
             Nothing
@@ -93,12 +79,13 @@ class ResetCommands:
         # Special GTT handling (system-wide, not per-GPU) — handle before device dispatch
         if hasattr(args, "gtt") and args.gtt:
             if hasattr(args, "gpu") and args.gpu is not None:
-                print(
+                msg = (
                     "amd-smi reset: error: argument --gtt: not allowed with argument --gpu/-g "
-                    "(--gtt is a system-wide setting, not per-GPU)",
-                    file=sys.stderr,
+                    "(--gtt is a system-wide setting, not per-GPU)"
                 )
-                sys.exit(2)
+                raise AmdSmiInvalidParameterException(
+                    "reset", "--gtt", self.helpers.get_output_format(), msg
+                )
             try:
                 amdsmi_interface.amdsmi_reset_ttm_pages_limit()
                 self.logger.output["reset_gtt"] = (
@@ -115,6 +102,7 @@ class ResetCommands:
                 self.logger.output["reset_gtt"] = (
                     f"[{e.get_error_info(detailed=False)}] Unable to reset GTT"
                 )
+                self.helpers.error_collector.record_library_error(e.get_error_code())
                 self.logger.print_output()
                 return
 
@@ -214,11 +202,13 @@ class ResetCommands:
                             raise PermissionError("Command requires elevation") from e
                         result = f"[{e.get_error_info(detailed=False)}] Unable to reset GPU"
                         self.logger.store_output(args.gpu, "gpu_reset", result)
+                        self.helpers.error_collector.record_library_error(e.get_error_code())
                         self.logger.print_output()
                         self.logger.clear_multiple_devices_output()
                         return
                 else:
                     result = "Unable to reset non-amd GPU"
+                    self.helpers.error_collector.record(AmdSmiExitCode.DEVICE_NOT_FOUND)
                 self.logger.store_output(args.gpu, "gpu_reset", result)
                 self.logger.print_output()
                 self.logger.clear_multiple_devices_output()
@@ -237,6 +227,7 @@ class ResetCommands:
                     reset_clocks_results["overdrive"] = (
                         f"[{e.get_error_info(detailed=False)}] Unable to reset overdrive to 0"
                     )
+                    self.helpers.error_collector.record_library_error(e.get_error_code())
                     # continue to reset clocks and performance level
                 try:
                     level_auto = amdsmi_interface.AmdSmiDevPerfLevel.AUTO
@@ -248,6 +239,7 @@ class ResetCommands:
                     reset_clocks_results["clocks"] = (
                         f"[{e.get_error_info(detailed=False)}] Unable to reset performance level to auto"
                     )
+                    self.helpers.error_collector.record_library_error(e.get_error_code())
                     logging.debug(
                         "Failed to reset perf level on gpu %s | %s", gpu_id, e.get_error_info()
                     )
@@ -265,6 +257,7 @@ class ResetCommands:
                     reset_clocks_results["performance"] = (
                         f"[{e.get_error_info(detailed=False)}] Unable to reset performance level to auto"
                     )
+                    self.helpers.error_collector.record_library_error(e.get_error_code())
                     logging.debug(
                         "Failed to reset perf level on gpu %s | %s", gpu_id, e.get_error_info()
                     )
@@ -282,7 +275,9 @@ class ResetCommands:
                         raise PermissionError("Command requires elevation") from e
                     result = f"[{e.get_error_info(detailed=False)}] Unable to reset fan speed to driver control"
                     logging.debug("Failed to reset fans on gpu %s | %s", gpu_id, e.get_error_info())
-                    self.logger.store_output(args.gpu, "reset_fans", result)
+                    self.helpers.store_device_error(
+                        self.logger, args.gpu, "reset_fans", result, exception=e
+                    )
                     self.logger.print_output()
                     self.logger.clear_multiple_devices_output()
                     return
@@ -306,6 +301,7 @@ class ResetCommands:
                     reset_profile_results["power_profile"] = (
                         f"[{e.get_error_info(detailed=False)}] Unable to reset Power Profile to default (bootup default)"
                     )
+                    self.helpers.error_collector.record_library_error(e.get_error_code())
                     logging.debug(
                         "Failed to reset power profile on gpu %s | %s", gpu_id, e.get_error_info()
                     )
@@ -329,7 +325,9 @@ class ResetCommands:
                     result = (
                         f"[{e.get_error_info(detailed=False)}] Unable to reset XGMI Error count"
                     )
-                    self.logger.store_output(args.gpu, "reset_xgmi_err", result)
+                    self.helpers.store_device_error(
+                        self.logger, args.gpu, "reset_xgmi_err", result, exception=e
+                    )
                     self.logger.print_output()
                     self.logger.clear_multiple_devices_output()
                     return
@@ -349,7 +347,9 @@ class ResetCommands:
                         "Failed to set perf level on gpu %s | %s", gpu_id, e.get_error_info()
                     )
                     result = f"[{e.get_error_info(detailed=False)}] Unable to reset Performance Level to default (auto)"
-                    self.logger.store_output(args.gpu, "reset_perf_determinism", result)
+                    self.helpers.store_device_error(
+                        self.logger, args.gpu, "reset_perf_determinism", result, exception=e
+                    )
                     self.logger.print_output()
                     self.logger.clear_multiple_devices_output()
                     return
@@ -403,6 +403,7 @@ class ResetCommands:
                     final_output[f"ppt{current_sensor_num}"] = (
                         f"[{e.get_error_info(detailed=False)}] Unable to reset cap to default power cap"
                     )
+                    self.helpers.error_collector.record_library_error(e.get_error_code())
                 self.logger.store_output(args.gpu, "powercap", final_output)
                 if multiple_devices:
                     self.logger.store_multiple_device_output()
@@ -422,7 +423,9 @@ class ResetCommands:
                 if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                     raise PermissionError("Command requires elevation") from e
                 result = f"[{e.get_error_info(detailed=False)}] Unable to clean local data"
-                self.logger.store_output(args.gpu, "clean_local_data", result)
+                self.helpers.store_device_error(
+                    self.logger, args.gpu, "clean_local_data", result, exception=e
+                )
                 self.logger.print_output()
                 self.logger.clear_multiple_devices_output()
                 return

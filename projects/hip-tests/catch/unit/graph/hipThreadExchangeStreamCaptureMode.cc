@@ -22,7 +22,8 @@
 
 /* Local Function for swaping stream capture mode of a thread
  */
-static void hipGraphLaunchWithMode(hipStream_t stream, hipStreamCaptureMode mode) {
+static void hipGraphLaunchWithMode(hipStream_t stream, hipStreamCaptureMode mode,
+                                   bool threadSafe = false) {
   constexpr size_t N = 1024;
   size_t Nbytes = N * sizeof(float);
   constexpr float fill_value = 5.0f;
@@ -36,40 +37,40 @@ static void hipGraphLaunchWithMode(hipStream_t stream, hipStreamCaptureMode mode
   LinearAllocGuard<float> B_d(LinearAllocs::hipMalloc, Nbytes);
   float* C_d;
 
-  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&mode));
+  HIP_CHECK_OPT_THREAD(threadSafe, hipThreadExchangeStreamCaptureMode(&mode));
 
-  HIP_CHECK(hipStreamBeginCapture(stream, mode));
+  HIP_CHECK_OPT_THREAD(threadSafe, hipStreamBeginCapture(stream, mode));
 
-  captureSequenceLinear(A_h.host_ptr(), A_d.ptr(), B_h.host_ptr(), B_d.ptr(), N, stream);
-  captureSequenceCompute(A_d.ptr(), B_h.host_ptr(), B_d.ptr(), N, stream);
+  captureSequenceLinear(A_h.host_ptr(), A_d.ptr(), B_h.host_ptr(), B_d.ptr(), N, stream, threadSafe);
+  captureSequenceCompute(A_d.ptr(), B_h.host_ptr(), B_d.ptr(), N, stream, threadSafe);
 
   if (mode == hipStreamCaptureModeRelaxed) {
-    HIP_CHECK(hipMalloc(&C_d, Nbytes));
+    HIP_CHECK_OPT_THREAD(threadSafe, hipMalloc(&C_d, Nbytes));
   }
 
-  HIP_CHECK(hipStreamEndCapture(stream, &graph));
+  HIP_CHECK_OPT_THREAD(threadSafe, hipStreamEndCapture(stream, &graph));
 
   // Validate end capture is successful
-  REQUIRE(graph != nullptr);
+  REQUIRE_OPT_THREAD(threadSafe, graph != nullptr);
 
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK_OPT_THREAD(threadSafe, hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
 
   std::fill_n(A_h.host_ptr(), N, fill_value);
-  HIP_CHECK(hipGraphLaunch(graphExec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK_OPT_THREAD(threadSafe, hipGraphLaunch(graphExec, stream));
+  HIP_CHECK_OPT_THREAD(threadSafe, hipStreamSynchronize(stream));
 
   // Validate the computation
   ArrayFindIfNot(B_h.host_ptr(), fill_value * fill_value, N);
   if (mode == hipStreamCaptureModeRelaxed) {
-    HIP_CHECK(hipFree(C_d));
+    HIP_CHECK_OPT_THREAD(threadSafe, hipFree(C_d));
   }
 
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK_OPT_THREAD(threadSafe, hipGraphExecDestroy(graphExec));
+  HIP_CHECK_OPT_THREAD(threadSafe, hipGraphDestroy(graph));
 }
 
 void threadFuncCaptureMode(hipStream_t stream, hipStreamCaptureMode mode) {
-  hipGraphLaunchWithMode(stream, mode);
+  hipGraphLaunchWithMode(stream, mode, true);
 }
 
 /**
@@ -97,6 +98,7 @@ HIP_TEST_CASE(Unit_hipThreadExchangeStreamCaptureMode_Positive_Functional) {
   hipGraphLaunchWithMode(stream, captureModeMain);
   std::thread t(threadFuncCaptureMode, stream, captureModeThread);
   t.join();
+  HIP_CHECK_THREAD_FINALIZE();
 }
 
 /**

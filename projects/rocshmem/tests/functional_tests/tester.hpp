@@ -196,8 +196,24 @@
   X(AllToAllWave,              151)  \
   X(FcollectWave,              152)  \
   X(ReduceWave,                153)  \
-  X(TeamReduceScatterWave,     154)
-  
+  X(TeamReduceScatterWave,     154)  \
+  X(TileReduce,                155)  \
+  X(TileReduceWave,            156)  \
+  X(TileReduceWG,              157)  \
+  X(QpPingPong,                158)  \
+  X(QpPutNbi,                  159)  \
+  X(SdmaPingPong,              160)  \
+  X(SdmaPutNbi,                161)  \
+  X(BufferRegisterSymmetric,   162)  \
+  X(TilePutWaveRowMajor,       163)  \
+  X(TilePutWaveColumnMajor,    164)  \
+  X(TileGetWaveRowMajor,       165)  \
+  X(TileGetWaveColumnMajor,    166)  \
+  X(TilePutWGRowMajor,         167)  \
+  X(TilePutWGColumnMajor,      168)  \
+  X(TileGetWGRowMajor,         169)  \
+  X(TileGetWGColumnMajor,      170)
+
 #define _ROCSHMEM_ENUM_ENTRY(name, val) name##TestType = val,
 enum TestType {
   ROCSHMEM_FOREACH_TEST_TYPE(_ROCSHMEM_ENUM_ENTRY)

@@ -72,12 +72,17 @@ target_sources(
     flood_amo_tester.cpp
     device_bitcode_tester.cpp
     library_info_tester.cpp
+    buffer_register_symmetric_tester.cpp
     fence_ordering_tester.cpp
     tile_rma_tester.cpp
     host_team_sync_barrier_tester.cpp
     host_rma_tester.cpp
     tile_broadcast_tester.cpp
     tile_allgather_tester.cpp
+    $<$<BOOL:${USE_GDA}>:qp_ping_pong_tester.cpp>
+    $<$<BOOL:${USE_GDA}>:qp_put_nbi_tester.cpp>
+    $<$<BOOL:${USE_SDMA}>:sdma_ping_pong_tester.cpp>
+    $<$<BOOL:${USE_SDMA}>:sdma_put_nbi_tester.cpp>
 )
 
 ###############################################################################

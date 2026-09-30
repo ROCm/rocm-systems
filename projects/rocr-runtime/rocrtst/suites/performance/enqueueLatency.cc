@@ -158,12 +158,7 @@ void EnqueueLatency::Run() {
     if (enqueue_single_) {
       EnqueueSinglePacket();
     } else {
-      hsa_status_t err;
-      uint32_t size = 0;
-      err = hsa_agent_get_info(*gpu_dev, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &size);
-      ASSERT_EQ(err, HSA_STATUS_SUCCESS);
-
-      num_of_pkts_ = num_of_pkts_ > size ? size : num_of_pkts_;
+      num_of_pkts_ = std::min<uint32_t>(num_of_pkts_, q->size);
       EnqueueMultiPackets();
     }
     hsa_queue_destroy(q);

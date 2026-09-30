@@ -9,7 +9,8 @@ include( CMakeFindDependencyMacro )
 if(@HSAKMT_FIND_NUMA_DEPENDENCY@)
   # A ROCm distribution that bundles libnuma installs its package config under
   # lib/rocm_sysdeps, which is not on a consumer's default search path.
-  find_dependency(NUMA PATHS "${PACKAGE_PREFIX_DIR}/lib/rocm_sysdeps")
+  # Force CONFIG mode to ensure the imported target (numa::numa) is created.
+  find_dependency(NUMA CONFIG PATHS "${PACKAGE_PREFIX_DIR}/lib/rocm_sysdeps")
 endif()
 
 # If the option is ON link other dependent libraries dynamically

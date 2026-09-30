@@ -7,6 +7,7 @@ import shlex
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils.logger import console_error, console_log, demarcate
+from utils.utils_common import PROFILE_OUTPUT_FORMAT
 from utils.utils_profile import pc_sampling_unit
 
 
@@ -49,7 +50,7 @@ class rocprof_v3_profiler(RocProfCompute_Base):
             f"{self.get_args().output_directory}/out",
             trace_option,
             "--output-format",
-            args.format_rocprof_output,
+            PROFILE_OUTPUT_FORMAT,
         ]
 
         if args.attach_pid:
@@ -59,22 +60,22 @@ class rocprof_v3_profiler(RocProfCompute_Base):
         if args.kernel:
             profiling_options.extend(["--kernel-include-regex", "|".join(args.kernel)])
 
-        # Dispatch filtering
-        dispatch = []
-        # rocprofv3 dispatch indexing is inclusive and starts from 1
-        if args.dispatch:
-            for dispatch_id in args.dispatch:
-                if ":" in dispatch_id:
+        # Kernel iteration filtering
+        iterations = []
+        # rocprofv3 iteration indexing is inclusive and starts from 1
+        if args.kernel_iteration_range:
+            for iteration in args.kernel_iteration_range:
+                if ":" in iteration:
                     # 4:7 -> 4-7
-                    start, end = dispatch_id.split(":")
-                    dispatch.append(f"{start}-{end}")
+                    start, end = iteration.split(":")
+                    iterations.append(f"{start}-{end}")
                 else:
                     # 4 -> 4
-                    dispatch.append(f"{dispatch_id}")
-        if dispatch:
+                    iterations.append(f"{iteration}")
+        if iterations:
             profiling_options.extend([
                 "--kernel-iteration-range",
-                f"[{','.join(dispatch)}]",
+                f"[{','.join(iterations)}]",
             ])
 
         if not args.attach_pid:
@@ -99,7 +100,8 @@ class rocprof_v3_profiler(RocProfCompute_Base):
             "-d",
             args.output_directory,
             "-o",
-            "ps_file",  # TODO: sync up with the name from source in 2100_.yaml
+            # %pid% is expanded by rocprofiler-sdk, not by rocprof-compute.
+            "%pid%_ps_file",
         ]
 
         if args.attach_pid:

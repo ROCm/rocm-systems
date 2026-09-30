@@ -167,6 +167,7 @@ function(rocprofiler_rocpd_python_bindings _VERSION)
         ${PROJECT_BINARY_DIR}/${rocpd_PYTHON_INSTALL_DIRECTORY})
     set(rocpd_PYTHON_SOURCES
         csv.py
+        features.py
         importer.py
         __init__.py
         __main__.py
@@ -216,7 +217,8 @@ function(rocprofiler_rocpd_python_bindings _VERSION)
                 rocprofiler-sdk::rocprofiler-sdk-gotcha
                 rocprofiler-sdk::rocprofiler-sdk-dw
                 rocprofiler-sdk::rocprofiler-sdk-static-library
-                rocprofiler-sdk::rocprofiler-sdk-rocpd-library)
+                rocprofiler-sdk::rocprofiler-sdk-rocpd-library
+                rocprofiler-sdk::rocprofiler-sdk-amd-comgr)
 
     # if "Development" is specified instead of "Development.Module", we need to link to
     # python libraries

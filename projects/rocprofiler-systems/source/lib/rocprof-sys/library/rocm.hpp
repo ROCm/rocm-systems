@@ -17,16 +17,13 @@
 #include <cstdint>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace rocm
+namespace rocprofsys::rocm
 {
 using hardware_counter_info = ::tim::hardware_counters::info;
 
 std::vector<hardware_counter_info>
 rocm_events();
-}  // namespace rocm
-}  // namespace rocprofsys
+}  // namespace rocprofsys::rocm
 
 extern "C"
 {
