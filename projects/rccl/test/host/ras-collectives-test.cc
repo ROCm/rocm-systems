@@ -664,6 +664,23 @@ TEST_F(RasCollectivesMicrotest, NetSendCollReq_ForwardArrayAllocationFailureClea
   EXPECT_EQ(nullptr, rasCollectivesTail);
 }
 
+TEST_F(RasCollectivesMicrotest, NetSendCollReq_PeerAllocationFailureKeepsCollectiveWithoutLocalPeer) {
+  MakeConn(10);
+  struct rasCollRequest req{};
+  req.type = RAS_COLL_CONNS;
+  struct rasCollective* coll = nullptr;
+  bool allDone = false;
+  g_failAllocationCall = 3;
+
+  EXPECT_EQ(ncclSuccess, rasNetSendCollReq(&req, &allDone, &coll));
+  ASSERT_NE(nullptr, coll);
+  EXPECT_EQ(coll, rasCollectivesHead);
+  EXPECT_EQ(coll, rasCollectivesTail);
+  EXPECT_EQ(nullptr, coll->peers);
+  EXPECT_EQ(0, coll->nPeers);
+  EXPECT_TRUE(allDone);
+}
+
 TEST_F(RasCollectivesMicrotest, NetSendCollReq_TrackedTypeCreatesCollectiveWithSelfAsFirstPeer) {
   rasNetListeningSocket.addr = MakeAddr(4321);
   struct rasCollRequest req{};
@@ -1610,6 +1627,7 @@ TEST_F(RasCollectivesMicrotest, CommsMerge_HashCollisionSizeMismatchOrdersBySize
   EXPECT_EQ(ncclSuccess, DeliverResp(msg, respConn));
   auto* merged = reinterpret_cast<struct rasCollComms*>(coll->data);
   EXPECT_EQ(2, merged->nComms);  // Kept as two separate entries rather than merged.
+  EXPECT_EQ(2, merged->comms[0].commNRanks);
 }
 
 TEST_F(RasCollectivesMicrotest, CommsMerge_CommOnlyInMsgIsCopiedWithShiftedPeerIdx) {
