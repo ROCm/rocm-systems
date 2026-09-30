@@ -67,8 +67,12 @@ looks like this:
 Result lines use two tags:
 
 * ``[OK]`` means that every tested edge passed.
-* ``[INFO]`` means that at least one edge failed or that a step of the check
-  could not run. The lines that follow identify the affected GPU pairs.
+* ``[INFO]`` marks both notices and problems. A notice, such as the
+  peer-access line described in `Single-process and multi-process jobs`_, is
+  expected on a healthy system. A problem means that at least one edge failed
+  or that a step of the check could not run, and the line identifies the
+  affected GPU pair. Use the message text and the summary line to tell them
+  apart: when every tested edge passed, the summary line is tagged ``[OK]``.
 
 Which GPU pairs are tested
 --------------------------
@@ -98,9 +102,11 @@ Single-process and multi-process jobs
 -------------------------------------
 
 When one process drives several GPUs, for example ``ncclCommInitAll`` or
-rccl-tests with ``-g 8``, the check enables peer access between the devices of
-that process for its duration. Each rank then prints a line similar to the
-following. This is expected and is not an error:
+rccl-tests with ``-g 8``, the check needs peer access between the devices of
+that process. Without HIP virtual memory management (cuMem, see
+``NCCL_CUMEM_ENABLE``), it enables context-wide peer access for its duration,
+and each rank that newly enables it prints a line similar to the following.
+This is expected and is not an error:
 
 .. code:: none
 
@@ -109,8 +115,13 @@ following. This is expected and is not an error:
 In this message, "CUDA" refers to the HIP runtime. Do not issue HIP work on
 these devices from other threads while the communicator is being initialized.
 
+The line is not printed when cuMem is enabled, because access is then limited
+to the test buffers, or when peer access between the devices was already
+enabled. A missing line does not mean that the check did not run.
+
 When each GPU is driven by its own process, peer memory is shared through HIP
-IPC handles and no such line is printed.
+IPC handles, or through HIP virtual-memory handles when cuMem is enabled, and
+no such line is printed.
 
 Performance impact
 ------------------
@@ -144,8 +155,9 @@ suggested next step. The table lists the kinds of failure.
        Look for earlier HIP errors on that rank.
    * - ``peer-memory import failed``
      - The source rank could not map the destination buffer. In a multi-process
-       job this usually means that the processes cannot share HIP IPC handles,
-       see :ref:`diagnostics-containers`.
+       job this usually means that the processes cannot share memory handles
+       (HIP IPC or, with cuMem, HIP virtual-memory handles), see
+       :ref:`diagnostics-containers`.
    * - ``write mismatch``
      - Data written by the source GPU into the destination GPU memory did not
        arrive intact. The ``expected`` and ``got`` fields show the test pattern
@@ -179,7 +191,10 @@ The edge fields have the following meaning:
        PCIe path type such as ``PIX``, ``PXB``, ``PHB``, or ``SYS``.
    * - ``handle``
      - How the destination memory was shared: ``DIRECT`` (both GPUs in one
-       process) or ``LEGACY_CUDA_IPC`` (HIP IPC handle between processes).
+       process), ``LEGACY_CUDA_IPC`` (HIP IPC handle between processes), or,
+       when cuMem is enabled, a HIP virtual-memory handle between processes:
+       ``CUMEM_POSIX_FD`` (file descriptor, the default), ``CUMEM_FABRIC``, or
+       ``CUMEM_OTHER``.
 
 .. note::
 
@@ -206,6 +221,9 @@ On AMD GPUs, use the following commands instead:
    * - ``handle=LEGACY_CUDA_IPC``
      - Check that all processes see the GPUs and can share IPC handles, see
        :ref:`diagnostics-containers`.
+   * - ``handle=CUMEM_POSIX_FD`` and other ``CUMEM_*`` values
+     - Check that HIP virtual memory is supported and that the processes can
+       share memory handles, see :ref:`diagnostics-containers`.
    * - ``handle=DIRECT``
      - Look for earlier peer-access errors on the source rank.
 
@@ -224,15 +242,17 @@ Running in containers
 =====================
 
 When the ranks of one node run as separate processes, they share GPU memory
-through HIP IPC handles. Run all ranks of a node in one container and make all
-GPUs of the node visible to it, for example with
+through HIP IPC handles, or through HIP virtual-memory handles passed as file
+descriptors when cuMem is enabled. Run all ranks of a node in one container
+and make all GPUs of the node visible to it, for example with
 ``--device /dev/kfd --device /dev/dri``.
 
 If the ranks of one node are split over several containers, for example with a
 different ``ROCR_VISIBLE_DEVICES`` in each container, RCCL cannot share GPU
 memory between the ranks and communicator initialization fails. When the check
-runs before that failure, it reports the affected edges as
-``destination buffer unavailable ... handle=LEGACY_CUDA_IPC reason=noDescriptor``.
+runs before that failure, it reports the affected edges, for example as
+``destination buffer unavailable ... handle=LEGACY_CUDA_IPC reason=noDescriptor``
+when cuMem is not enabled.
 
 Collecting the report
 =====================
