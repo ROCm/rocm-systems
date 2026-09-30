@@ -1423,6 +1423,34 @@ TEST(CfgAnalysis, IndirectBranchHasNoStaticSuccessor) {
   EXPECT_TRUE(blocks[1]->predecessors().empty());
 }
 
+TEST(CfgAnalysis, IndirectRecoveryWithoutConsumersDoesNotBuildAnalysisGraph) {
+  class CountingInstruction : public TestInstruction {
+  public:
+    CountingInstruction() : TestInstruction("s_nop") {}
+    std::optional<int64_t> branch_offset_bytes() const override {
+      ++branch_queries;
+      return std::nullopt;
+    }
+    mutable size_t branch_queries = 0;
+  };
+  // No consumer means no auxiliary CFG or dataflow, even with assertions
+  // enabled. Counting graph queries makes this a deterministic cost regression.
+  for (const auto arch :
+       {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3,
+        ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    SCOPED_TRACE(arch);
+    CountingInstruction instruction;
+    const std::array<const Instruction *, 1> instructions{&instruction};
+    const std::array<uint8_t, 4> text{};
+    std::vector<PcAddressBuilder> builders(1);
+    EXPECT_TRUE(discover_indirect_branch_edges(instructions, text, arch, {},
+                                               ExternalEntryPolicy::InferPredecessorless, &builders)
+                    .empty());
+    EXPECT_TRUE(builders.empty());
+    EXPECT_EQ(instruction.branch_queries, 0u);
+  }
+}
+
 TEST(CfgAnalysis, IndirectRecoveryPrefilterAdmitsSetPcConsumer) {
   constexpr uint16_t kPcSreg = 8;
   constexpr uint32_t kLiteralOperand = 255;
