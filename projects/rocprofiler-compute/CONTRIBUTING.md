@@ -135,6 +135,41 @@ When a feature is ready for general availability:
 3. Remove the `experimental_enabled`, `feature_label`, and `base_action` parameters.
 4. Update documentation and tests accordingly.
 
+## Adding or Changing Command-Line Options
+
+All command-line options are in [`src/argparser.py`](./src/argparser.py).
+New and changed options must follow the rules in
+[`.ai/rules/cli-options.md`](.ai/rules/cli-options.md). In short:
+
+- Filters use glob patterns such as `*copy*`. Regex can be added as an extra choice.
+- If an option only works with another option, start its name with that option's
+  name, for example `--roofline` and `--roofline-bench-only`.
+- Give options that people use often a one-letter short form, such as `-v`.
+- Name options for what they turn on, not what they turn off: `--roofline`, not
+  `--no-roofline`. Options for developers, such as `--no-roof`, are the exception.
+- Options that take a list use commas, for example `-R FP16,FP32`.
+  Use `action=CommaListAction`.
+- In the help text:
+  - show a required value as `<arg>`, an optional value as `[arg]`, and a list as
+    `<args>...`
+  - list the accepted values on a new line that starts with `Values:`
+  - end with the default, for example `(Default: FP32)`
+
+A renamed option must keep its old name working for now. Add the old name with
+`add_deprecated_alias`. The old name is hidden from help and shows a warning when
+used:
+
+```python
+new_option = group.add_argument("--roofline-device", dest="device", ...)
+add_deprecated_alias(group, "--device", new_option)
+```
+
+Then:
+
+- check the output of `rocprof-compute profile --help` and `rocprof-compute analyze --help`
+- add the new name to `CHANGELOG.md` under "Changed"
+- add the old name to `CHANGELOG.md` under "Upcoming changes"
+
 ## Using Pre-Commit Hooks
 
 Pre-commit hooks automatically check your code for formatting issues before each commit, helping you catch problems before they reach CI.
