@@ -455,9 +455,9 @@ struct tmp_file
 
     explicit operator bool() const;
 
-    std::string  filename = {};
-    std::fstream stream   = {};
-    int          fd       = -1;
+    std::string  filename;
+    std::fstream stream;
+    int          fd = -1;
 
 private:
     void touch() const;

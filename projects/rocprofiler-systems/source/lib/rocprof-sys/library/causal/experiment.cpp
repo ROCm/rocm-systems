@@ -67,8 +67,8 @@ experiment::sample::sample(const base_type& _b, std::uint64_t _c)
         {
             if(itr.inlined)
             {
-                inlines.emplace_back(
-                    binary::inlined_symbol{ itr.line, itr.location, itr.name });
+                inlines.emplace_back(binary::inlined_symbol{
+                    .line = itr.line, .file = itr.location, .func = itr.name });
             }
         }
     }

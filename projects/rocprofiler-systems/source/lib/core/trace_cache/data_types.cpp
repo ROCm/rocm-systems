@@ -56,10 +56,18 @@ constexpr auto sequential_pred = [](const format_t& f) { return !f.process_paral
 }  // namespace
 
 enabled_formats_t::enabled_formats_t()
-: formats{ { format_kind::rocpd, true, get_use_rocpd(), "rocpd" },
-           { format_kind::perfetto, true, get_caching_perfetto(), "perfetto" },
-           { format_kind::unified_memory, false, get_use_unified_memory_profiling(),
-             "unified_memory" } }
+: formats{ { .kind             = format_kind::rocpd,
+             .process_parallel = true,
+             .enabled          = get_use_rocpd(),
+             .name             = "rocpd" },
+           { .kind             = format_kind::perfetto,
+             .process_parallel = true,
+             .enabled          = get_caching_perfetto(),
+             .name             = "perfetto" },
+           { .kind             = format_kind::unified_memory,
+             .process_parallel = false,
+             .enabled          = get_use_unified_memory_profiling(),
+             .name             = "unified_memory" } }
 {}
 
 enabled_formats_t::enabled_formats_t(std::vector<format_t> _formats) noexcept

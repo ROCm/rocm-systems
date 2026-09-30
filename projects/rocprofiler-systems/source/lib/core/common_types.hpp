@@ -33,10 +33,10 @@ inline constexpr std::size_t fields_per_record = 4;
  */
 struct argument_info
 {
-    std::uint32_t arg_number = 0;   ///< Argument position/index
-    std::string   arg_type   = {};  ///< Argument type (e.g., "int", "float*")
-    std::string   arg_name   = {};  ///< Argument name
-    std::string   arg_value  = {};  ///< Argument value as string
+    std::uint32_t arg_number = 0;  ///< Argument position/index
+    std::string   arg_type;        ///< Argument type (e.g., "int", "float*")
+    std::string   arg_name;        ///< Argument name
+    std::string   arg_value;       ///< Argument value as string
 };
 
 using function_args_t = std::vector<argument_info>;
@@ -162,9 +162,10 @@ process_arguments_string(std::string_view arg_str)
             throw std::invalid_argument("Malformed argument string.");
         }
 
-        const argument_info arg = { arg_number, unescape_field(*(it + 1)),
-                                    unescape_field(*(it + 2)),
-                                    unescape_field(*(it + 3)) };
+        const argument_info arg = { .arg_number = arg_number,
+                                    .arg_type   = unescape_field(*(it + 1)),
+                                    .arg_name   = unescape_field(*(it + 2)),
+                                    .arg_value  = unescape_field(*(it + 3)) };
         args.push_back(arg);
     }
 

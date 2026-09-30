@@ -325,8 +325,8 @@ struct fini_bundle
         return _ss.str();
     }
 
-    std::string_view m_label = {};
-    data_type        m_data  = {};
+    std::string_view m_label;
+    data_type        m_data = {};
 };
 
 template <typename... Tp>
@@ -418,8 +418,13 @@ rocprofsys_preinit_cache()
     config::print_settings_json(_extdata_stream);
 
     trace_cache::get_metadata_registry().set_process(
-        { getpid(), getppid(), _command, "", escape_quotes(_extdata_stream.str()), 0,
-          0 });
+        { .pid         = getpid(),
+          .ppid        = getppid(),
+          .command     = _command,
+          .environment = "",
+          .extdata     = escape_quotes(_extdata_stream.str()),
+          .start       = 0,
+          .end         = 0 });
 }
 
 void

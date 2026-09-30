@@ -21,7 +21,10 @@ serialize_source_object(const std::string& source_object)
     function_args_t args{};
     if(!source_object.empty())
     {
-        args.push_back({ 0U, "string", "source_object", source_object });
+        args.push_back({ .arg_number = 0U,
+                         .arg_type   = "string",
+                         .arg_name   = "source_object",
+                         .arg_value  = source_object });
     }
     return get_args_string(args);
 }
@@ -34,21 +37,35 @@ TEST(args_serialization_test, empty_args_yields_empty_string)
 
 TEST(args_serialization_test, single_arg_exact_wire_format)
 {
-    const function_args_t args{ { 0U, "string", "source_object", "libfoo.so" } };
+    const function_args_t args{ { .arg_number = 0U,
+                                  .arg_type   = "string",
+                                  .arg_name   = "source_object",
+                                  .arg_value  = "libfoo.so" } };
     EXPECT_EQ(get_args_string(args), "0;;string;;source_object;;libfoo.so;;");
 }
 
 TEST(args_serialization_test, multiple_args_are_concatenated)
 {
-    const function_args_t args{ { 0U, "string", "object", "libomp.so" },
-                                { 1U, "int", "count", "42" } };
+    const function_args_t args{
+        { .arg_number = 0U,
+          .arg_type   = "string",
+          .arg_name   = "object",
+          .arg_value  = "libomp.so" },
+        { .arg_number = 1U, .arg_type = "int", .arg_name = "count", .arg_value = "42" }
+    };
     EXPECT_EQ(get_args_string(args), "0;;string;;object;;libomp.so;;1;;int;;count;;42;;");
 }
 
 TEST(args_serialization_test, get_args_string_roundtrips_through_parser)
 {
-    function_args_t args{ { 0U, "string", "source_object", "libfoo.so" },
-                          { 1U, "std::uint64_t", "addr", "0x7f00" } };
+    function_args_t args{ { .arg_number = 0U,
+                            .arg_type   = "string",
+                            .arg_name   = "source_object",
+                            .arg_value  = "libfoo.so" },
+                          { .arg_number = 1U,
+                            .arg_type   = "std::uint64_t",
+                            .arg_name   = "addr",
+                            .arg_value  = "0x7f00" } };
 
     auto parsed = process_arguments_string(get_args_string(args));
 
@@ -67,7 +84,10 @@ TEST(args_serialization_test, get_args_string_roundtrips_through_parser)
 TEST(args_serialization_test, value_containing_delimiter_roundtrips)
 {
     // A value that embeds the raw delimiter ";;" must not split into extra records.
-    const function_args_t args{ { 0U, "string", "path", "a;;b" } };
+    const function_args_t args{ { .arg_number = 0U,
+                                  .arg_type   = "string",
+                                  .arg_name   = "path",
+                                  .arg_value  = "a;;b" } };
 
     auto parsed = process_arguments_string(get_args_string(args));
 
@@ -78,8 +98,14 @@ TEST(args_serialization_test, value_containing_delimiter_roundtrips)
 
 TEST(args_serialization_test, escape_character_and_semicolons_are_lossless)
 {
-    const function_args_t args{ { 0U, "string", "name;with;semis", "50% off ;; today" },
-                                { 1U, "string", "already_escaped", "x%3By" } };
+    const function_args_t args{ { .arg_number = 0U,
+                                  .arg_type   = "string",
+                                  .arg_name   = "name;with;semis",
+                                  .arg_value  = "50% off ;; today" },
+                                { .arg_number = 1U,
+                                  .arg_type   = "string",
+                                  .arg_name   = "already_escaped",
+                                  .arg_value  = "x%3By" } };
 
     auto parsed = process_arguments_string(get_args_string(args));
 
@@ -94,7 +120,10 @@ TEST(args_serialization_test, escape_character_and_semicolons_are_lossless)
 // type and name also carry delimiters/escape chars must still round-trip intact.
 TEST(args_serialization_test, all_escapable_fields_roundtrip)
 {
-    const function_args_t args{ { 7U, "ns::T<;;>%", "n;%ame", "v;;%val" } };
+    const function_args_t args{ { .arg_number = 7U,
+                                  .arg_type   = "ns::T<;;>%",
+                                  .arg_name   = "n;%ame",
+                                  .arg_value  = "v;;%val" } };
 
     auto parsed = process_arguments_string(get_args_string(args));
 
@@ -109,7 +138,9 @@ TEST(args_serialization_test, all_escapable_fields_roundtrip)
 // or merged into the trailing delimiter).
 TEST(args_serialization_test, empty_value_roundtrips)
 {
-    const function_args_t args{ { 0U, "string", "name", "" } };
+    const function_args_t args{
+        { .arg_number = 0U, .arg_type = "string", .arg_name = "name", .arg_value = "" }
+    };
 
     auto parsed = process_arguments_string(get_args_string(args));
 
