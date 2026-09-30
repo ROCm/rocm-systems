@@ -2908,6 +2908,14 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
                              ncclDataType_t datatype, ncclRedOp_t op, cudaStream_t stream,
                              struct ncclDevrWindow* recvWin, struct ncclCeCollArgs* profilerArgs) {
   ncclResult_t ret = ncclSuccess;
+  // Every phase below addresses peers by world rank, which equals the LSA rank
+  // only when one LSA team spans the comm. Reject before staging or any launch:
+  // the pipelined path queues a persistent reduce kernel that waits for all
+  // nRanks, so failing at the first peer lookup would leave it spinning.
+  if (!ncclDevrIsOneLsaTeam(comm)) {
+    WARN("CE AllReduce requires one LSA team spanning the comm (nRanks %d, nNodes %d)", comm->nRanks, comm->nNodes);
+    return ncclInvalidUsage;
+  }
   NCCLCHECK(ncclCeEnsureAllReduceStaging(comm));
   if (comm->ceColl.ceARTmpBuf == nullptr) {
     WARN("CE AllReduce staging is not available");

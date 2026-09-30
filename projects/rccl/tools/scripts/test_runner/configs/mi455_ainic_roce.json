@@ -2858,6 +2858,43 @@
         }
       ]
     },
+    "ce_allreduce_lsa_guard": {
+      "extends": "ce_base",
+      "num_ranks": 4,
+      "num_gpus": 4,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_LSA_TEAM_SIZE": "2",
+        "RCCL_CE_ALLREDUCE": "1",
+        "RCCL_FORCE_CE_ALLREDUCE": "1"
+      },
+      "tests": [
+        {
+          "name": "CE_AllReduce_LsaGuard_SplitLsaTeam",
+          "description": "One node, 4 ranks, LSA team of 2: ncclCeAllReduce rejects before staging or launch (single-step and pipelined), the comm stays usable, and forced CE AllReduce is never selected",
+          "test_filter": "CeAllReduceLsaGuardTest.*"
+        }
+      ]
+    },
+    "ce_allreduce_lsa_guard_multinode": {
+      "extends": "ce_base",
+      "num_ranks": 4,
+      "num_nodes": 2,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_IB_DISABLE": "0",
+        "RCCL_CE_ALLREDUCE": "1",
+        "RCCL_FORCE_CE_ALLREDUCE": "1"
+      },
+      "tests": [
+        {
+          "name": "CE_AllReduce_LsaGuard_MultiNode",
+          "description": "Two nodes, 2 ranks each: ncclCeAllReduce rejects before staging or launch (single-step and pipelined), the comm stays usable, and forced CE AllReduce is never selected",
+          "test_filter": "CeAllReduceLsaGuardTest.*"
+        }
+      ]
+    },
     "ce_fault_injection": {
       "extends": "ce_base",
       "num_ranks": 2,
@@ -6328,6 +6365,18 @@
       "name": "CE Internal Tests (white-box, Debug build only)",
       "description": "White-box CE internal function tests (ncclCeInit, ncclPrepUCSync, ncclCeLaunchBatchOps). Requires Debug build for symbol visibility. Skips on unsupported driver version.",
       "config": "ce_internal",
+      "enabled": true
+    },
+    {
+      "name": "CE AllReduce LSA Guard (split LSA team, single node)",
+      "description": "ncclCeAllReduce must reject a comm whose LSA team does not span it before staging or any launch. Runs on one node with NCCL_LSA_TEAM_SIZE=2 at 4 ranks.",
+      "config": "ce_allreduce_lsa_guard",
+      "enabled": true
+    },
+    {
+      "name": "CE AllReduce LSA Guard (multi-node)",
+      "description": "ncclCeAllReduce must reject a comm spanning two nodes before staging or any launch; forced CE AllReduce must never be selected.",
+      "config": "ce_allreduce_lsa_guard_multinode",
       "enabled": true
     },
     {
