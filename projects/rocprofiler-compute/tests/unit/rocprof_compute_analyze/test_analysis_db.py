@@ -21,11 +21,13 @@ from sqlalchemy import text
 from pc_sampling import per_kernel_isa_export, source_snapshot_analysis
 from pc_sampling.code_object_analysis import CodeObjectInstruction, CodeObjectSymbol
 from pc_sampling.pc_sampling_analysis import SOURCE_LINE_MISSING, InstructionLineRecord
+from rocprof_compute_analyze.analysis_base import new_workload_row
 from rocprof_compute_analyze.analysis_db import (
     SourceFrameCollector,
     db_analysis,
     filter_dispatch_frame,
 )
+from roofline.roofline_analysis import KernelRoofline, RooflineResult
 from utils import analysis_orm as orm
 from utils import schema
 from utils.file_io import create_df_kernel_top_stats
@@ -33,6 +35,7 @@ from utils.metrics.noise_clamper import (
     clear_noise_clamp_warnings,
     get_noise_clamp_warnings,
 )
+from utils.roofline_calc import RooflineBenchmark
 
 ISA_WORKLOAD_NAME = "vector_copy"
 ISA_WORKLOAD_SUB_NAME = "run"
@@ -68,12 +71,24 @@ def make_dual_issue_arch_config(metric_name: str, peak_col: str = "Peak"):
 
 def make_roofline_calc_analyzer(workload_path, pmc_df, roofline_df):
     """Build a SimpleNamespace analyzer for calc_roofline_data tests."""
-    sys_info_df = pd.DataFrame([{"gpu_arch": "gfx90a"}])
+    sys_info_df = pd.DataFrame([
+        {"gpu_arch": "gfx90a", "gpu_model": "MI200", "gpu_series": "MI200"}
+    ])
     arch_config = SimpleNamespace(dfs={402: roofline_df})
     return SimpleNamespace(
-        _runs={workload_path: SimpleNamespace(sys_info=sys_info_df)},
+        _runs={
+            workload_path: SimpleNamespace(
+                sys_info=sys_info_df, filter_gpu_ids=None, filter_dispatch_ids=None
+            )
+        },
         _pmc_df_per_workload={workload_path: pmc_df},
         _arch_configs={"gfx90a": arch_config},
+        _roofline_benchmarks={
+            workload_path: RooflineBenchmark(
+                0, {"HBMBw": 100, "FP32Flops": 1000}, "MFMA"
+            )
+        },
+        _stats_pmc_df_per_workload={workload_path: pmc_df},
         get_args=lambda: SimpleNamespace(),
     )
 
@@ -157,7 +172,7 @@ def make_pc_sampling_database_analyzer(
         )
         for workload_path in tool_data_per_workload
     }
-    analyzer._roofline_ceilings_per_workload = {}
+    analyzer._roofline_benchmarks = {}
     analyzer._profiling_config = {"filter_blocks": ["pc_sampling"]}
     analyzer._pc_sampling_tool_data_per_workload = tool_data_per_workload
     analyzer._dispatch_data_per_workload = {
@@ -166,7 +181,7 @@ def make_pc_sampling_database_analyzer(
         )
         for workload_path, tool_data_records in tool_data_per_workload.items()
     }
-    analyzer._roofline_data_per_kernel = {}
+    analyzer._roofline_results = {}
     return analyzer
 
 
@@ -200,7 +215,7 @@ def make_counter_backed_database_analyzer(
             sys_info=pd.DataFrame([{"gpu_arch": "gfx942"}]),
         )
     }
-    analyzer._roofline_ceilings_per_workload = {}
+    analyzer._roofline_benchmarks = {}
     analyzer._profiling_config = {"filter_blocks": filter_blocks}
     analyzer._pc_sampling_tool_data_per_workload = {workload_path: tool_data_records}
     analyzer._dispatch_data_per_workload = {
@@ -214,7 +229,7 @@ def make_counter_backed_database_analyzer(
             }
         ])
     }
-    analyzer._roofline_data_per_kernel = {workload_path: pd.DataFrame()}
+    analyzer._roofline_results = {}
     analyzer._metrics_info_data_per_workload = {}
     analyzer._kernel_values_data_per_workload = {}
     analyzer._workload_values_data_per_workload = {}
@@ -225,6 +240,7 @@ def run_analysis_with_existing_database(analyzer):
     """Run analysis while preserving the test's existing database session."""
     analyzer._output_dir = Path(".")
     with ExitStack() as patch_stack:
+        patch_stack.enter_context(patch.object(orm.Database, "close"))
         patch_stack.enter_context(patch.object(orm.Database, "init"))
         patch_stack.enter_context(patch.object(orm.Database, "create_views"))
         patch_stack.enter_context(patch.object(orm.Database, "write"))
@@ -241,6 +257,7 @@ def run_analysis_with_materialized_views(analyzer):
     """Run analysis while materializing views in the existing test database."""
     analyzer._output_dir = Path(".")
     with ExitStack() as patch_stack:
+        patch_stack.enter_context(patch.object(orm.Database, "close"))
         patch_stack.enter_context(patch.object(orm.Database, "init"))
         patch_stack.enter_context(patch.object(orm.Database, "write"))
         patch_stack.enter_context(patch.object(analyzer, "run_analysis_metrics"))
@@ -588,7 +605,7 @@ def test_calc_expressions_noise_clamp():
     analyzer._pmc_df_per_workload = {workload_path: pmc_df}
     analyzer._metric_expression_data_per_workload = {workload_path: expression_template}
     analyzer._metrics_info_data_per_workload = {}
-    analyzer._roofline_ceilings_per_workload = {workload_path: {}}
+    analyzer._roofline_benchmarks = {}
     analyzer._runs = {workload_path: MagicMock(sys_info=sys_info_df)}
     analyzer._arch_configs = MagicMock()
 
@@ -1094,7 +1111,7 @@ def test_run_analysis_scopes_pc_sampling_uuids_by_process(db_session):
     )
     analyzer._output_dir = Path(".")
     analyzer._runs = {workload_path: workload}
-    analyzer._roofline_ceilings_per_workload = {}
+    analyzer._roofline_benchmarks = {}
     analyzer._profiling_config = {"filter_blocks": ["pc_sampling"]}
     analyzer._pc_sampling_tool_data_per_workload = {workload_path: tool_data_records}
     analyzer._dispatch_data_per_workload = {
@@ -1102,9 +1119,10 @@ def test_run_analysis_scopes_pc_sampling_uuids_by_process(db_session):
             tool_data_records, workload
         )
     }
-    analyzer._roofline_data_per_kernel = {}
+    analyzer._roofline_results = {}
 
     with ExitStack() as patch_stack:
+        patch_stack.enter_context(patch.object(orm.Database, "close"))
         patch_stack.enter_context(patch.object(orm.Database, "init"))
         patch_stack.enter_context(patch.object(orm.Database, "create_views"))
         patch_stack.enter_context(patch.object(orm.Database, "write"))
@@ -1469,8 +1487,24 @@ def test_run_analysis_keeps_mixed_counter_and_pc_sampling_ownership(
         ["1", "pc_sampling"],
         tool_data_records,
     )
-    analyzer._roofline_data_per_kernel = {
-        workload_path: pd.DataFrame([{"kernel_name": "vecCopy", "total_flops": 64.0}])
+    analyzer._roofline_results = {
+        workload_path: RooflineResult(
+            benchmark=RooflineBenchmark(0, {"HBMBw": 100}, "MFMA"),
+            kernels=[
+                KernelRoofline(
+                    kernel_name="vecCopy",
+                    kernel_rank=0,
+                    dispatch_count=1,
+                    total_duration_ns=10,
+                    percent_runtime=100,
+                    longest_dispatch_ns=10,
+                    metrics=[],
+                    level_ai={},
+                    performance=64.0,
+                    envelopes={},
+                )
+            ],
+        )
     }
     analyzer._metrics_info_data_per_workload = {
         workload_path: pd.DataFrame([
@@ -2905,12 +2939,7 @@ def test_run_analysis_dispatch_filter_reaches_a_sampling_only_workload(
 
 
 def test_calc_roofline_data_early_exit_on_empty_roofline_df(monkeypatch):
-    """Test calc_roofline_data exits early when roofline data is empty.
-
-    This test verifies that when the roofline dataframe (ID 402) is empty
-    or filtered out, the function logs a warning and skips that workload
-    without adding it to the result dictionary.
-    """
+    """An empty 402 table retains benchmark ceilings and yields no kernels."""
     workload_path = "/mock/workload/path"
     pmc_df = pd.DataFrame({
         "Kernel_Name": ["kernel1", "kernel2"],
@@ -2926,9 +2955,7 @@ def test_calc_roofline_data_early_exit_on_empty_roofline_df(monkeypatch):
     def mock_warning(msg):
         warning_messages.append(msg)
 
-    monkeypatch.setattr(
-        "rocprof_compute_analyze.analysis_db.console_warning", mock_warning
-    )
+    monkeypatch.setattr("roofline.roofline_analysis.console_warning", mock_warning)
     monkeypatch.setattr(
         "rocprof_compute_analyze.analysis_db.console_debug", lambda msg: None
     )
@@ -2937,7 +2964,10 @@ def test_calc_roofline_data_early_exit_on_empty_roofline_df(monkeypatch):
     result = db_analysis.calc_roofline_data(analyzer)
 
     # Verify early exit behavior
-    assert result == {}, "Should return no kernel data when roofline data is empty"
+    assert result[workload_path].kernels == []
+    assert (
+        result[workload_path].benchmark is analyzer._roofline_benchmarks[workload_path]
+    )
     assert len(warning_messages) == 1, "Should log one warning message"
     assert "Roofline data is filtered out or not found" in warning_messages[0]
     assert workload_path in warning_messages[0]
@@ -3082,22 +3112,255 @@ def test_calc_roofline_data_includes_all_kernels(monkeypatch):
     kernel_data = db_analysis.calc_roofline_data(analyzer)
 
     assert len(kernel_data) == 1
-    df = kernel_data[workload_path]
-    assert len(df) == NUM_KERNELS, f"Expected {NUM_KERNELS} kernels, got {len(df)}"
-    assert list(df["kernel_name"]) == kernel_names, (
-        f"Expected kernels sorted by duration descending, got {list(df['kernel_name'])}"
+    kernels = kernel_data[workload_path].kernels
+    assert len(kernels) == NUM_KERNELS
+    assert [kernel.kernel_name for kernel in kernels] == kernel_names
+    for kernel in kernels:
+        assert kernel.performance == 42.0
+        assert set(kernel.level_ai.values()) == {42.0}
+        assert kernel.dispatch_count == 2
+    assert evaluated_row_counts == [2] * (NUM_KERNELS * len(roofline_metrics))
+
+
+def test_calc_roofline_data_uses_shared_result_and_unselected_stats(monkeypatch):
+    """Shared computation receives selected counters and the full ranking frame."""
+    module = "rocprof_compute_analyze.analysis_db"
+    workload_path = "/mock/workload/path"
+    raw = pd.DataFrame({
+        "Kernel_Name": ["selected", "other", "third"],
+        "GPU_ID": [0, 0, 1],
+        "Dispatch_ID": [1, 2, 3],
+        "Start_Timestamp": [0, 0, 0],
+        "End_Timestamp": [10, 20, 30],
+    })
+    selected = raw.iloc[:1]
+    analyzer = make_roofline_calc_analyzer(workload_path, selected, pd.DataFrame())
+    analyzer._stats_pmc_df_per_workload = {workload_path: raw}
+    analyzer._runs[workload_path].filter_gpu_ids = ["0"]
+    shared_result = object()
+    calls = []
+    monkeypatch.setattr(
+        f"{module}.compute_roofline",
+        lambda **kwargs: calls.append(kwargs) or shared_result,
+        raising=False,
+    )
+    results = db_analysis.calc_roofline_data(analyzer)
+    assert results == {workload_path: shared_result}
+    assert calls[0]["pmc_df"] is selected
+    assert calls[0]["stats_df"]["Kernel_Name"].tolist() == ["selected", "other"]
+    assert calls[0]["benchmark"] is analyzer._roofline_benchmarks[workload_path]
+    assert calls[0]["evaluate"] == db_analysis.evaluate
+
+
+def test_calc_expressions_injects_every_empirical_device_column(monkeypatch):
+    """Generic metrics can use peaks outside the legacy benchmark JSON whitelist."""
+    path = "/mock/workload/path"
+    analyzer = db_analysis(SimpleNamespace(), {})
+    analyzer._runs = {
+        path: SimpleNamespace(sys_info=pd.DataFrame([{"gpu_arch": "gfx950"}]))
+    }
+    analyzer._pmc_df_per_workload = {path: pd.DataFrame({"Kernel_Name": ["kernel"]})}
+    analyzer._metric_expression_data_per_workload = {
+        path: pd.DataFrame({
+            "metric_id": ["4.1"],
+            "value_name": ["Peak (Empirical)"],
+            "value": ["expression"],
+        })
+    }
+    analyzer._metrics_info_data_per_workload = {}
+    analyzer._arch_configs = {"gfx950": SimpleNamespace()}
+    analyzer._roofline_benchmarks = {}
+    analyzer._roofline_benchmarks = {
+        path: RooflineBenchmark(0, {"MFMAF6F4Flops": 600, "extra_peak": 7}, "MFMA")
+    }
+    contexts = []
+    monkeypatch.setattr(
+        db_analysis,
+        "calc_dataframe_expressions",
+        lambda frame, context, expressions, **kwargs: (
+            contexts.append(context.copy()) or [1.0]
+        ),
+    )
+    monkeypatch.setattr(db_analysis, "validate_dual_issue_metrics", lambda *args: None)
+    analyzer.calc_expressions()
+    assert contexts[0]["MFMAF6F4Flops_empirical_peak"] == 600
+    assert contexts[0]["extra_peak_empirical_peak"] == 7
+
+
+def test_run_analysis_commits_then_renders_before_csv_export(tmp_path, monkeypatch):
+    """HTML queries run while the committed session is still available."""
+    analyzer = db_analysis(
+        SimpleNamespace(output_name="report", output_format="csv"), {}
+    )
+    analyzer._output_dir = tmp_path
+    events = []
+    session = SimpleNamespace(add=lambda row: None)
+    monkeypatch.setattr(orm.Database, "init", lambda name: events.append("init"))
+    monkeypatch.setattr(orm.Database, "get_session", lambda: session)
+    monkeypatch.setattr(orm.Database, "commit", lambda: events.append("commit"))
+    monkeypatch.setattr(orm.Database, "close", lambda: events.append("close"))
+    monkeypatch.setattr(
+        orm.Database, "write_csv_dir", lambda directory: events.append("csv")
+    )
+    monkeypatch.setattr(
+        analyzer, "write_roofline_html", lambda workloads: events.append("html")
+    )
+    monkeypatch.setattr(analyzer, "_build_workload_isa_exports", lambda workloads: [])
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_db.export_per_kernel_isa_files",
+        lambda **kwargs: tmp_path,
+    )
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_db.export_source_snapshot_files",
+        lambda **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_db.get_version",
+        lambda path: {"version": "test", "sha": "test"},
+    )
+    analyzer.run_analysis()
+    assert events == ["init", "commit", "html", "csv", "close"]
+
+
+def test_run_analysis_closes_database_when_html_render_fails(tmp_path, monkeypatch):
+    """A renderer failure releases the database without producing a partial export."""
+    analyzer = db_analysis(
+        SimpleNamespace(output_name="report", output_format="csv"), {}
+    )
+    analyzer._output_dir = tmp_path
+    events = []
+    monkeypatch.setattr(orm.Database, "init", lambda name: None)
+    monkeypatch.setattr(
+        orm.Database, "get_session", lambda: SimpleNamespace(add=lambda row: None)
+    )
+    monkeypatch.setattr(orm.Database, "commit", lambda: None)
+    monkeypatch.setattr(orm.Database, "close", lambda: events.append("close"))
+    monkeypatch.setattr(
+        orm.Database, "write_csv_dir", lambda path: events.append("csv")
+    )
+    monkeypatch.setattr(
+        analyzer,
+        "write_roofline_html",
+        lambda workloads: (_ for _ in ()).throw(RuntimeError("renderer failed")),
+    )
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_db.get_version",
+        lambda path: {"version": "test", "sha": "test"},
+    )
+    with pytest.raises(RuntimeError, match="renderer failed"):
+        analyzer.run_analysis()
+    assert events == ["close"]
+
+
+def test_write_roofline_html_uses_queried_peaks_and_multiworkload_prefix(
+    tmp_path, monkeypatch
+):
+    """Every workload's HTML receives its queried peaks, points, and distinct name."""
+    analyzer = db_analysis(
+        SimpleNamespace(
+            time_unit="ns",
+            sort="kernels",
+            mem_level=["ALL"],
+            roofline_data_type=["FP32"],
+            gpu_kernel=None,
+        ),
+        {},
+    )
+    analyzer._output_dir = tmp_path
+    analyzer._profiling_config = {}
+    analyzer._roofline_results = {
+        "/workloads/one/run": object(),
+        "/workloads/two/run": object(),
+    }
+    analyzer._runs = {
+        path: SimpleNamespace(
+            sys_info=pd.DataFrame([{"gpu_arch": "gfx90a", "gpu_series": "MI200"}])
+        )
+        for path in analyzer._roofline_results
+    }
+    analyzer.set_soc({"gfx90a": SimpleNamespace(_mspec=object())})
+    views = {
+        index: SimpleNamespace(
+            benchmark_peaks={"FP32Flops": index}, plot_points={"point": index}
+        )
+        for index in (1, 2)
+    }
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_db.load_roofline_view",
+        lambda workload_id, device_id, unit: views[workload_id],
+    )
+    renderers = []
+    renderers = [MagicMock(), MagicMock()]
+    factory = MagicMock(side_effect=renderers)
+    for renderer in renderers:
+        renderer.construct_plotly_figures.return_value = (None, None, "", "")
+    monkeypatch.setattr("rocprof_compute_analyze.analysis_db.Roofline", factory)
+    workloads = [
+        SimpleNamespace(workload_id=1, name="one", sub_name="run"),
+        SimpleNamespace(workload_id=2, name="two", sub_name="run"),
+    ]
+    analyzer.write_roofline_html(workloads)
+    for index, renderer in enumerate(renderers, 1):
+        assert (
+            factory.call_args_list[index - 1].kwargs["benchmark_peaks"]
+            is views[index].benchmark_peaks
+        )
+        renderer.construct_plotly_figures.assert_called_once_with(
+            ai_data=views[index].plot_points
+        )
+        assert renderer.save_html_files.call_args.kwargs["output_dir"] == tmp_path
+        assert (
+            renderer.save_html_files.call_args.kwargs["file_stem_prefix"]
+            == workloads[index - 1].name + "_run_"
+        )
+
+
+def test_new_workload_row_keeps_legacy_benchmark_json(monkeypatch):
+    """Workload JSON keeps approved peak columns while evaluation uses all columns."""
+    monkeypatch.setattr(
+        "utils.mi_gpu_spec.mi_gpu_specs.get_memory_levels", lambda model: ["HBM"]
+    )
+    benchmark = RooflineBenchmark(
+        3, {"HBMBw": 100, "FP32Flops": 200, "unmapped": 7}, "MFMA"
+    )
+    sys_info = {"gpu_arch": "gfx90a", "gpu_model": "MI200"}
+    profiling_config = {"filter_blocks": ["1", "4"]}
+    workload = new_workload_row(
+        "/workloads/vector/run", sys_info, benchmark, profiling_config
+    )
+    assert (workload.name, workload.sub_name) == ("vector", "run")
+    assert workload.sys_info_extdata == sys_info
+    assert workload.profiling_config_extdata == profiling_config
+    assert workload.roofline_bench_extdata == {"HBMBw": 100, "FP32Flops": 200}
+    assert (
+        new_workload_row(
+            "/workloads/vector/run", sys_info, None, profiling_config
+        ).roofline_bench_extdata
+        is None
     )
 
-    expected_columns = [
-        "total_flops",
-        "l0_cache_data",
-        "l1_cache_data",
-        "l2_cache_data",
-        "hbm_cache_data",
-        "lds_cache_data",
-    ]
-    for col in expected_columns:
-        assert col in df.columns
-        assert (df[col] == 42.0).all()
 
-    assert evaluated_row_counts == [2] * (NUM_KERNELS * len(roofline_metrics))
+def test_load_roofline_benchmarks_skips_invalid_and_unsupported(monkeypatch):
+    """Unsupported architectures and rejected benchmarks cannot enter computation."""
+    analyzer = db_analysis(SimpleNamespace(), {})
+    analyzer._runs = {
+        "/workloads/unsupported/run": SimpleNamespace(
+            sys_info=pd.DataFrame([{"gpu_arch": "gfx908"}])
+        ),
+        "/workloads/corrupt/run": SimpleNamespace(
+            sys_info=pd.DataFrame([{"gpu_arch": "gfx90a"}])
+        ),
+        "/workloads/valid/run": SimpleNamespace(
+            sys_info=pd.DataFrame([{"gpu_arch": "gfx90a"}])
+        ),
+    }
+    benchmark = RooflineBenchmark(0, {"HBMBw": 100}, "MFMA")
+    paths = []
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_db.load_roofline_benchmark",
+        lambda path, device, sys_info: (
+            paths.append(str(path)) or (benchmark if "valid" in str(path) else None)
+        ),
+    )
+    assert analyzer.load_roofline_benchmarks() == {"/workloads/valid/run": benchmark}
+    assert paths == ["/workloads/corrupt/run", "/workloads/valid/run"]

@@ -10,13 +10,16 @@ HTML is generated, including the per-datatype VALU/MFMA legend.
 import json
 import re
 import shutil
+import sqlite3
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
 import common
+import pandas as pd
 import pytest
 
+from roofline.roofline_frame import canonical_frame
 from tests.integration import common as integration_common
 
 config = {}
@@ -34,6 +37,30 @@ def embedded_roofline_model(document: str) -> dict:
     )
     assert match is not None
     return json.loads(match.group(1))
+
+
+def setup_db_roofline_workload(tmp_path: Path, positive: bool) -> Path:
+    """Create two coherent kernels, optionally making one execute FP32 FMAs."""
+    workload_dir = tmp_path / "profiles" / "run"
+    shutil.copytree(roofline_dir, workload_dir)
+    for csv_path in workload_dir.glob("results_*.csv.gz"):
+        frame = pd.read_csv(csv_path)
+        duplicate = frame.copy()
+        duplicate["Kernel_Name"] = "zeroKernel(double*, double*, double*, int, int)"
+        duplicate["Kernel_ID"] = 1
+        for column in ["Dispatch_ID", "Correlation_Id"]:
+            duplicate[column] += 3
+        if positive:
+            frame.loc[
+                frame["Counter_Name"] == "SQ_INSTS_VALU_FMA_F32", "Counter_Value"
+            ] = 10000
+        pd.concat([frame, duplicate], ignore_index=True).to_csv(csv_path, index=False)
+    return workload_dir
+
+
+def sqlite_rows(connection: sqlite3.Connection, query: str) -> list[dict]:
+    """Read named exported database columns for comparisons with HTML."""
+    return [dict(row) for row in connection.execute(query)]
 
 
 # Roofline HTML generation
@@ -454,3 +481,187 @@ def test_analyze_artifacts_use_explicit_output_directory(
         assert not (output_dir / "result.db").exists()
     else:
         assert (output_dir / f"result.{output_format}").is_file()
+
+
+@pytest.mark.parametrize(
+    "positive", [False, True], ids=["zero-performance", "positive-performance"]
+)
+def test_analyze_db_roofline_retains_kernels_and_matches_html(
+    binary_handler_analyze_rocprof_compute, tmp_path, positive
+):
+    """DB output retains zero kernels while HTML renders positive points only."""
+    workload_dir = setup_db_roofline_workload(tmp_path, positive)
+    before = common.read_binary_file_tree(workload_dir)
+    output_dir = tmp_path / "reports"
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        str(workload_dir),
+        "--block",
+        "4",
+        "--output-directory",
+        str(output_dir),
+        "--output-format",
+        "db",
+        "--output-name",
+        "result",
+        "--roofline-data-type",
+        "FP32",
+    ])
+    assert code == 0
+    html_path = output_dir / "empirRoof_gpu-0.html"
+    assert html_path.is_file()
+    model = embedded_roofline_model(html_path.read_text(encoding="utf-8"))
+    assert common.read_binary_file_tree(workload_dir) == before
+    connection = sqlite3.connect(output_dir / "result.db")
+    connection.row_factory = sqlite3.Row
+    try:
+        stats = sqlite_rows(
+            connection,
+            "SELECT * FROM compute_kernel_roofline_data ORDER BY kernel_rank",
+        )
+        assert len(stats) == 2
+        assert {row["kernel_rank"] for row in stats} == {0, 1}
+        assert {row["dispatch_count"] for row in stats} == {3}
+        assert all(row["total_duration_ns"] > 0 for row in stats)
+        assert sum(row["percent_runtime"] for row in stats) == pytest.approx(100)
+        assert all(row["l0_cache_data"] is None for row in stats)
+        assert sum(row["total_flops"] > 0 for row in stats) == int(positive)
+        metrics = sqlite_rows(
+            connection, "SELECT * FROM compute_kernel_roofline_metric_view"
+        )
+        assert {row["table_id"] for row in metrics} == {401, 402}
+        assert len(metrics) == 34
+        assert any(row["value"] is None for row in metrics)
+        # The ordinary metric export retains the same evaluated roofline values.
+        generic_metrics = sqlite_rows(
+            connection,
+            "SELECT kernel_uuid, metric_id, value FROM compute_kernel_metric_view "
+            "WHERE value_name = 'Value' AND "
+            "(metric_id LIKE '4.1.%' OR metric_id LIKE '4.2.%')",
+        )
+        generic_values = {
+            (row["kernel_uuid"], row["metric_id"]): row["value"]
+            for row in generic_metrics
+        }
+        assert generic_values
+        for row in metrics:
+            key = (row["kernel_uuid"], row["metric_id"])
+            if key in generic_values:
+                assert row["value"] == pytest.approx(generic_values[key])
+        ceiling_rows = sqlite_rows(
+            connection, "SELECT * FROM compute_roofline_ceiling_view"
+        )
+        assert ceiling_rows
+        bandwidths = {
+            row["mem_level"]: row["value"]
+            for row in ceiling_rows
+            if row["ceiling_kind"] == "bandwidth"
+        }
+        compute_peaks = [
+            row["value"] for row in ceiling_rows if row["ceiling_kind"] == "compute"
+        ]
+        frame = canonical_frame(list(bandwidths.values()), compute_peaks)
+        assert model["frame"] == {"x": list(frame[:2]), "y": list(frame[2:])}
+        roof_rows = sqlite_rows(
+            connection,
+            "SELECT * FROM compute_roofline_roof_view WHERE datatype = 'FP32'",
+        )
+        for trace in model["rooflineTraces"]:
+            roof = next(row for row in roof_rows if row["mem_level"] == trace["level"])
+            assert trace["bandwidth"] == pytest.approx(roof["bandwidth"])
+            assert trace["kneeAi"] == pytest.approx(roof["knee_ai"])
+            assert trace["kneePerf"] == pytest.approx(roof["roof_peak"])
+        point_rows = sqlite_rows(
+            connection,
+            "SELECT * FROM compute_kernel_roofline_view WHERE envelope = 'FP32'",
+        )
+        assert len(point_rows) == 8
+        assert len(model["kernels"]) == int(positive)
+        if positive:
+            rendered_kernel = model["kernels"][0]
+            rows = [
+                row
+                for row in point_rows
+                if row["kernel_name"] == rendered_kernel["name"]
+            ]
+            assert rows
+            assert rendered_kernel["pctRuntime"] == pytest.approx(
+                rows[0]["percent_runtime"]
+            )
+            assert rendered_kernel["points"]
+            candidates = [
+                (
+                    row["arithmetic_intensity"] * bandwidths[row["mem_level"]],
+                    row["mem_level"],
+                )
+                for row in rows
+                if row["arithmetic_intensity"] > 0
+            ]
+            candidates.append((
+                rows[0]["compute_ceiling"],
+                rows[0]["compute_ceiling_label"],
+            ))
+            expected_limiter = min(candidates, key=lambda candidate: candidate[0])[1]
+            assert rows[0]["limiter"] == expected_limiter
+            for point in rendered_kernel["points"]:
+                row = next(row for row in rows if row["mem_level"] == point["peak"])
+                assert point["ai"] == pytest.approx(row["arithmetic_intensity"])
+                assert point["perf"] == pytest.approx(row["performance"])
+                expected_roof = min(
+                    row["arithmetic_intensity"] * bandwidths[row["mem_level"]],
+                    row["compute_ceiling"],
+                )
+                assert row["roof_performance"] == pytest.approx(expected_roof)
+                assert row["percent_of_roof"] == pytest.approx(
+                    row["performance"] / expected_roof * 100
+                )
+                assert point["hoverCells"] == [
+                    f"{row['roof_performance']:,.3f}",
+                    f"{row['percent_of_roof']:.4f}",
+                ]
+            # Plotly stores the kernel limiter in its hover template.
+            document = html_path.read_text(encoding="utf-8")
+            assert f"Performance limiter: {expected_limiter}" in document
+            assert "Total dispatches: 3" in document
+            assert (
+                f"Aggregate time in kernel: {rows[0]['total_duration_ns']:,.2f} ns"
+                in document
+            )
+    finally:
+        connection.close()
+
+
+def test_analyze_roofline_csv_is_populated_before_session_close(
+    binary_handler_analyze_rocprof_compute, tmp_path
+):
+    """CSV export contains every persisted roofline row and the DB-mode HTML."""
+    workload_dir = setup_db_roofline_workload(tmp_path, positive=True)
+    output_dir = tmp_path / "reports"
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        str(workload_dir),
+        "--block",
+        "4",
+        "--output-directory",
+        str(output_dir),
+        "--output-format",
+        "csv",
+        "--output-name",
+        "result",
+    ])
+    assert code == 0
+    assert (output_dir / "empirRoof_gpu-0.html").is_file()
+    csv_dir = output_dir / "result"
+    points = pd.read_csv(csv_dir / "kernel_roofline.csv")
+    metrics = pd.read_csv(csv_dir / "kernel_roofline_metric.csv")
+    ceilings = pd.read_csv(csv_dir / "roofline_ceiling.csv")
+    roofs = pd.read_csv(csv_dir / "roofline_roof.csv")
+    assert points["kernel_uuid"].nunique() == 2
+    assert points["envelope"].nunique() > 1
+    assert points["performance"].gt(0).any()
+    assert points["performance"].eq(0).any()
+    assert len(metrics) == 34
+    assert set(ceilings["ceiling_kind"]) == {"bandwidth", "compute"}
+    assert roofs["knee_ai"].gt(0).all()

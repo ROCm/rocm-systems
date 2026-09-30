@@ -8,13 +8,14 @@ import sys
 from abc import abstractmethod
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Optional, TextIO
+from typing import Any, Dict, Optional, TextIO
 
 import pandas as pd
 
 import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from roofline.run_benchmark import BENCHMARKING_SUPPORTED
+from utils import analysis_orm as orm
 from utils import file_io, parser, schema
 from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 from utils.logger import (
@@ -25,7 +26,11 @@ from utils.logger import (
     demarcate,
 )
 from utils.metrics.expression import build_metric_value_string
-from utils.roofline_calc import ROOFLINE_DEVICE_ID, load_roofline_benchmark
+from utils.roofline_calc import (
+    ROOFLINE_DEVICE_ID,
+    RooflineBenchmark,
+    load_roofline_benchmark,
+)
 from utils.utils_analysis import (
     impute_counters_iteration_multiplex,
     validate_workload,
@@ -62,6 +67,27 @@ TOP_STATS_BUILD_IN_CONFIG: OrderedDict[int, dict[str, Any]] = OrderedDict([
         },
     ),
 ])
+
+
+def new_workload_row(
+    workload_path: str,
+    sys_info: Dict[str, Any],
+    benchmark: Optional[RooflineBenchmark],
+    profiling_config: Dict[str, Any],
+) -> orm.Workload:
+    """Build a workload row with the legacy benchmark JSON column meanings."""
+    workload_dir = Path(workload_path)
+    return orm.Workload(
+        name=workload_dir.parent.name,
+        sub_name=workload_dir.name,
+        sys_info_extdata=sys_info,
+        roofline_bench_extdata=(
+            benchmark.bench_extdata(sys_info["gpu_arch"], sys_info["gpu_model"])
+            if benchmark is not None
+            else None
+        ),
+        profiling_config_extdata=profiling_config,
+    )
 
 
 class OmniAnalyze_Base:

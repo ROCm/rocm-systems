@@ -45,6 +45,7 @@ def test_analyze_rocpd(
     assert code == 0
     database_path = tmp_path / "analysis" / f"{db_name}.db"
     assert database_path.is_file()
+    assert (tmp_path / "analysis" / "empirRoof_gpu-0.html").is_file()
 
     # Open the sqlite database and assert the schema
     # Import Kernel from analysis_orm.py

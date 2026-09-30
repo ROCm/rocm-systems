@@ -781,6 +781,14 @@ class Database:
         statement = (
             cls
             ._kernel_roofline_statement()
+            .add_columns(
+                KernelRooflineData.total_flops,
+                KernelRooflineData.l0_cache_data,
+                KernelRooflineData.l1_cache_data,
+                KernelRooflineData.l2_cache_data,
+                KernelRooflineData.hbm_cache_data,
+                KernelRooflineData.lds_cache_data,
+            )
             .where(Kernel.workload_id == workload_id)
             .order_by(
                 KernelRooflineData.kernel_rank,

@@ -7,6 +7,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
+* Added per-kernel roofline ceilings, metrics, runtime statistics, and roof bounds to analysis database and CSV exports. Database analysis also generates roofline HTML from those stored rows.
+
 * Added analyze `--output-directory` for all analysis artifacts and `--overwrite` to clear an existing non-empty analysis directory.
 
 ### Changed
@@ -26,6 +28,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Optimized
 
 ### Resolved issues
+
+* Database analysis uses the selected device benchmark for every empirical peak, including F6/F4 matrix throughput, and retains all filtered kernels before chart display filtering.
 
 ### Upcoming changes
 

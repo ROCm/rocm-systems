@@ -1348,7 +1348,13 @@ def test_roofline_kernel_query_preserves_envelopes_and_all_kernels(db_session):
         ),
         {"workload_id": workload.workload_id},
     ).mappings()
-    assert sorted((dict(row) for row in view_rows), key=str) == sorted(rows, key=str)
+    view_rows = [dict(row) for row in view_rows]
+    view_columns = set(view_rows[0])
+    queried_view_rows = [
+        {key: value for key, value in row.items() if key in view_columns}
+        for row in rows
+    ]
+    assert sorted(view_rows, key=str) == sorted(queried_view_rows, key=str)
 
 
 def test_roofline_metric_query_preserves_null_and_workload_scope(db_session):
@@ -1483,3 +1489,19 @@ def test_roofline_rows_enforce_unique_identity(db_session, model_name, keys):
     with pytest.raises(IntegrityError):
         db_session.commit()
     db_session.rollback()
+
+
+def test_roofline_query_returns_metrics_without_point_rows(db_session):
+    """An absent AI point retains performance and NULL legacy AI fields."""
+    workload = orm.Workload(name="roof", sub_name="device")
+    kernel = orm.Kernel(kernel_name="compute", workload=workload)
+    db_session.add_all([
+        workload,
+        kernel,
+        orm.KernelRooflineData(kernel=kernel, total_flops=42, hbm_cache_data=0),
+    ])
+    Database.commit()
+    row = Database.get_kernel_roofline_rows(workload.workload_id)[0]
+    assert row["total_flops"] == 42
+    assert row["hbm_cache_data"] == 0
+    assert row["l0_cache_data"] is None

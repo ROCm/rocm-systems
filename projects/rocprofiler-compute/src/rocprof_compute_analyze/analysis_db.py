@@ -3,7 +3,7 @@
 
 import re
 from pathlib import Path
-from typing import Any, NamedTuple, Optional
+from typing import Any, Dict, NamedTuple, Optional
 
 import pandas as pd
 
@@ -32,8 +32,14 @@ from pc_sampling.source_snapshot_analysis import (
     read_source_file_digest_and_lines,
     resolve_snapshot_path,
 )
-from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
-from roofline.roofline_main import ROOFLINE_SUPPORTED
+from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base, new_workload_row
+from roofline.roofline_analysis import (
+    RooflineResult,
+    compute_roofline,
+    load_roofline_view,
+    persist_roofline,
+)
+from roofline.roofline_main import ROOFLINE_SUPPORTED, Roofline
 from utils import file_io, schema, utils_analysis
 from utils.analysis_orm import Database
 from utils.file_io import (
@@ -59,10 +65,10 @@ from utils.metrics.noise_clamper import (
     clear_noise_clamp_warnings,
     print_noise_clamp_summary,
 )
-from utils.mi_gpu_spec import mi_gpu_specs
 from utils.roofline_calc import (
-    SUPPORTED_DATATYPES,
-    OpsSupport,
+    ROOFLINE_DEVICE_ID,
+    RooflineBenchmark,
+    load_roofline_benchmark,
 )
 from utils.utils_analysis import (
     PEAK_COL_PREFERENCE,
@@ -257,13 +263,14 @@ class db_analysis(OmniAnalyze_Base):
         """Perform any pre-processing steps prior to analysis."""
         super().pre_processing()
 
-        self._roofline_ceilings_per_workload = self.calc_roofline_ceilings()
+        self._roofline_benchmarks = self.load_roofline_benchmarks()
         self._pc_sampling_tool_data_per_workload = (
             {path: load_pc_sampling_results(path) for path in self._runs}
             if self.pc_sampling_collected()
             else {}
         )
         self._pmc_df_per_workload = self.calc_pmc_df_data()
+        self._stats_pmc_df_per_workload = self._pmc_df_per_workload.copy()
         self._pmc_df_per_workload = self.apply_pmc_filters()
         self._dispatch_data_per_workload = self.calc_dispatch_data(
             self._pc_sampling_tool_data_per_workload
@@ -276,7 +283,7 @@ class db_analysis(OmniAnalyze_Base):
             self._kernel_values_data_per_workload,
             self._workload_values_data_per_workload,
         ) = self.calc_expressions()
-        self._roofline_data_per_kernel = self.calc_roofline_data()
+        self._roofline_results = self.calc_roofline_data()
 
         report_evaluation_diagnostics()
 
@@ -295,137 +302,172 @@ class db_analysis(OmniAnalyze_Base):
         Database.init(db_name)
         console_debug(f"Initialized database: {db_name}")
 
-        # Iterate over all workloads
-        workload_source_snapshots: list[WorkloadSourceSnapshot] = []
-        workload_objs: list[orm.Workload] = []
-        for workload_path in self._runs.keys():
-            # Add workload
-            sys_info = self._runs[workload_path].sys_info.iloc[0].to_dict()
-            workload_obj = orm.Workload(
-                name=workload_path.split("/")[-2],
-                sub_name=workload_path.split("/")[-1],
-                sys_info_extdata=sys_info,
-                roofline_bench_extdata=self._roofline_ceilings_per_workload.get(
-                    workload_path
-                ),
-                profiling_config_extdata=self._profiling_config,
-            )
-            Database.get_session().add(workload_obj)
-            workload_objs.append(workload_obj)
+        try:
+            # Iterate over all workloads
+            workload_source_snapshots: list[WorkloadSourceSnapshot] = []
+            workload_objs: list[orm.Workload] = []
+            for workload_path in self._runs.keys():
+                # Add workload
+                sys_info = self._runs[workload_path].sys_info.iloc[0].to_dict()
+                workload_obj = new_workload_row(
+                    workload_path,
+                    sys_info,
+                    self._roofline_benchmarks.get(workload_path),
+                    self._profiling_config,
+                )
+                Database.get_session().add(workload_obj)
+                workload_objs.append(workload_obj)
 
-            # Add kernel
-            kernel_objs: dict[KernelKey, orm.Kernel] = {}
-            kernel_short_names = load_kernel_short_names(
-                workload_path,
-                self._pc_sampling_tool_data_per_workload.get(workload_path, []),
-            )
+                # Add kernel
+                kernel_objs: dict[KernelKey, orm.Kernel] = {}
+                kernel_short_names = load_kernel_short_names(
+                    workload_path,
+                    self._pc_sampling_tool_data_per_workload.get(workload_path, []),
+                )
 
-            for dispatch in self._dispatch_data_per_workload.get(
-                workload_path, pd.DataFrame()
-            ).itertuples():
-                kernel_key: KernelKey = dispatch.kernel_name
-                # Add kernel object and map it, if not already added
-                if kernel_key not in kernel_objs:
-                    kernel_objs[kernel_key] = orm.Kernel(
-                        kernel_name=dispatch.kernel_name,
-                        short_name=kernel_short_names.get(dispatch.kernel_name),
-                        workload=workload_obj,
+                for dispatch in self._dispatch_data_per_workload.get(
+                    workload_path, pd.DataFrame()
+                ).itertuples():
+                    kernel_key: KernelKey = dispatch.kernel_name
+                    # Add kernel object and map it, if not already added
+                    if kernel_key not in kernel_objs:
+                        kernel_objs[kernel_key] = orm.Kernel(
+                            kernel_name=dispatch.kernel_name,
+                            short_name=kernel_short_names.get(dispatch.kernel_name),
+                            workload=workload_obj,
+                        )
+                        Database.get_session().add(kernel_objs[kernel_key])
+
+                    # Add dispatch object and link with kernel object
+                    Database.get_session().add(
+                        orm.Dispatch(
+                            dispatch_id=dispatch.dispatch_id,
+                            gpu_id=dispatch.gpu_id,
+                            start_timestamp=dispatch.start_timestamp,
+                            end_timestamp=dispatch.end_timestamp,
+                            kernel=kernel_objs[kernel_key],
+                        )
                     )
-                    Database.get_session().add(kernel_objs[kernel_key])
 
-                # Add dispatch object and link with kernel object
-                Database.get_session().add(
-                    orm.Dispatch(
-                        dispatch_id=dispatch.dispatch_id,
-                        gpu_id=dispatch.gpu_id,
-                        start_timestamp=dispatch.start_timestamp,
-                        end_timestamp=dispatch.end_timestamp,
-                        kernel=kernel_objs[kernel_key],
+                roofline_result = self._roofline_results.get(workload_path)
+                if roofline_result is not None:
+                    persist_roofline(roofline_result, workload_obj, kernel_objs)
+
+                # Add pc sampling data, then the full code-object ISA
+                source_frames = SourceFrameCollector(Path(workload_path), workload_obj)
+                kernel_symbols: dict[KernelSymbolKey, orm.KernelSymbol] = {}
+                code_object_stores = self.add_pc_sampling_data(
+                    workload_path,
+                    workload_obj,
+                    kernel_objs,
+                    kernel_symbols,
+                    source_frames,
+                    sys_info,
+                )
+                self.add_code_object_isa(
+                    workload_path,
+                    workload_obj,
+                    kernel_objs,
+                    code_object_stores,
+                    kernel_symbols,
+                    source_frames,
+                    sys_info,
+                )
+                workload_source_snapshots.append(
+                    WorkloadSourceSnapshot(
+                        workload_path=Path(workload_path),
+                        workload_name=workload_obj.name,
+                        workload_sub_name=workload_obj.sub_name,
+                        absolute_source_paths=source_frames.captured_source_paths(),
                     )
                 )
 
-            # Add kernel-level roofline data points
-            for roofline_data in self._roofline_data_per_kernel.get(
-                workload_path, pd.DataFrame()
-            ).itertuples():
-                kernel_name = getattr(roofline_data, "kernel_name", None)
-                kernel_key: KernelKey = kernel_name
-                if kernel_key not in kernel_objs:
-                    console_warning(
-                        f"Kernel {kernel_name} from roofline data "
-                        "not found in dispatch data. Skipping roofline entry."
-                    )
-                    continue
-                Database.get_session().add(
-                    orm.KernelRooflineData(
-                        total_flops=getattr(roofline_data, "total_flops", None),
-                        l0_cache_data=getattr(roofline_data, "l0_cache_data", None),
-                        l1_cache_data=getattr(roofline_data, "l1_cache_data", None),
-                        l2_cache_data=getattr(roofline_data, "l2_cache_data", None),
-                        hbm_cache_data=getattr(roofline_data, "hbm_cache_data", None),
-                        lds_cache_data=getattr(roofline_data, "lds_cache_data", None),
-                        kernel=kernel_objs[kernel_key],
-                    )
-                )
+                # Add metrics and values - iterate on values, create metrics as needed
+                self.run_analysis_metrics(workload_path, workload_obj, kernel_objs)
 
-            # Add pc sampling data, then the full code-object ISA
-            source_frames = SourceFrameCollector(Path(workload_path), workload_obj)
-            kernel_symbols: dict[KernelSymbolKey, orm.KernelSymbol] = {}
-            code_object_stores = self.add_pc_sampling_data(
-                workload_path,
-                workload_obj,
-                kernel_objs,
-                kernel_symbols,
-                source_frames,
-                sys_info,
-            )
-            self.add_code_object_isa(
-                workload_path,
-                workload_obj,
-                kernel_objs,
-                code_object_stores,
-                kernel_symbols,
-                source_frames,
-                sys_info,
-            )
-            workload_source_snapshots.append(
-                WorkloadSourceSnapshot(
-                    workload_path=Path(workload_path),
-                    workload_name=workload_obj.name,
-                    workload_sub_name=workload_obj.sub_name,
-                    absolute_source_paths=source_frames.captured_source_paths(),
+            version = get_version(rocprof_compute_home)
+            Database.get_session().add(
+                orm.Metadata(
+                    compute_version=version["version"],
+                    git_version=version["sha"],
+                    schema_version=orm.SCHEMA_VERSION,
                 )
             )
 
-            # Add metrics and values - iterate on values, create metrics as needed
-            self.run_analysis_metrics(workload_path, workload_obj, kernel_objs)
-
-        version = get_version(rocprof_compute_home)
-        Database.get_session().add(
-            orm.Metadata(
-                compute_version=version["version"],
-                git_version=version["sha"],
-                schema_version=orm.SCHEMA_VERSION,
-            )
-        )
-
-        if self.get_args().output_format == "csv":
+            if self.get_args().output_format != "csv":
+                Database.create_views()
             Database.commit()
-            csv_result_folder = Path(db_name).with_suffix("")
-            # Before write_csv_dir, which closes the session these rows stream from.
-            per_kernel_folder = export_per_kernel_isa_files(
-                csv_result_directory=csv_result_folder,
-                workload_isa_exports=self._build_workload_isa_exports(workload_objs),
+            self.write_roofline_html(workload_objs)
+
+            if self.get_args().output_format == "csv":
+                csv_result_folder = Path(db_name).with_suffix("")
+                # Before write_csv_dir, which closes the session these rows stream from.
+                per_kernel_folder = export_per_kernel_isa_files(
+                    csv_result_directory=csv_result_folder,
+                    workload_isa_exports=self._build_workload_isa_exports(
+                        workload_objs
+                    ),
+                )
+                Database.write_csv_dir(csv_result_folder)
+                export_source_snapshot_files(
+                    workload_source_snapshots=workload_source_snapshots,
+                    export_directory=per_kernel_folder,
+                )
+            else:
+                Database.write()
+        finally:
+            Database.close()
+
+    def write_roofline_html(self, workload_objs: list[orm.Workload]) -> None:
+        """Render each benchmark-backed workload from the committed database rows."""
+        args = self.get_args()
+        if getattr(args, "list_stats", False):
+            return
+        socs = self.get_socs()
+        for workload_path, workload_obj in zip(self._runs, workload_objs):
+            if workload_path not in self._roofline_results:
+                continue
+            gpu_arch = self._runs[workload_path].sys_info.iloc[0]["gpu_arch"]
+            if not socs or gpu_arch not in socs:
+                console_warning(
+                    "roofline",
+                    "Skipping roofline charting: "
+                    f"gpu arch {gpu_arch} not in soc {socs}",
+                )
+                continue
+            view = load_roofline_view(
+                workload_obj.workload_id, ROOFLINE_DEVICE_ID, args.time_unit
             )
-            Database.write_csv_dir(csv_result_folder)
-            export_source_snapshot_files(
-                workload_source_snapshots=workload_source_snapshots,
-                export_directory=per_kernel_folder,
+            roofline = Roofline(
+                args=args,
+                mspec=socs[gpu_arch]._mspec,
+                run_parameters={
+                    "workload_dir": workload_path,
+                    "device_id": ROOFLINE_DEVICE_ID,
+                    "gpu_arch": gpu_arch,
+                    "sort_type": str(args.sort),
+                    "mem_level": args.mem_level,
+                    "roofline_data_type": args.roofline_data_type,
+                    "kernel_filter": bool(args.gpu_kernel),
+                    "iteration_multiplexing": self._profiling_config.get(
+                        "iteration_multiplexing"
+                    ),
+                    "matrix_ops_type": utils_analysis.get_matrix_ops_type(
+                        self._runs[workload_path].sys_info.iloc[0]["gpu_series"]
+                    ),
+                },
+                benchmark_peaks=view.benchmark_peaks,
             )
-        else:
-            Database.create_views()
-            Database.commit()
-            Database.write()
+            prefix = (
+                f"{workload_obj.name}_{workload_obj.sub_name}_"
+                if len(self._runs) > 1
+                else ""
+            )
+            roofline.save_html_files(
+                *roofline.construct_plotly_figures(ai_data=view.plot_points),
+                output_dir=self._output_dir,
+                file_stem_prefix=prefix,
+            )
 
     @staticmethod
     def _build_workload_isa_exports(
@@ -551,49 +593,33 @@ class db_analysis(OmniAnalyze_Base):
 
         return pmc_df_per_workload
 
-    def calc_roofline_ceilings(self) -> dict[str, dict[str, Any]]:
-        roofline_ceilings_per_workload: dict[str, dict[str, Any]] = {}
-
-        for workload_path in self._runs.keys():
-            sys_row = self._runs[workload_path].sys_info.iloc[0]
-            gpu_arch = sys_row["gpu_arch"]
-
+    def load_roofline_benchmarks(self) -> Dict[str, RooflineBenchmark]:
+        """Load each supported workload's selected device benchmark."""
+        benchmarks = {}
+        for workload_path, workload in self._runs.items():
+            sys_info = workload.sys_info.iloc[0]
+            gpu_arch = sys_info["gpu_arch"]
             if gpu_arch not in ROOFLINE_SUPPORTED:
                 console_warning(f"Roofline not supported for {gpu_arch}.")
                 continue
-            if not (Path(workload_path) / "roofline.csv").exists():
-                console_warning(f"Roofline ceilings not found for {workload_path}.")
+            if getattr(self.get_args(), "no_roof", False):
                 continue
-
-            roofline_dict = (
-                pd.read_csv(f"{workload_path}/roofline.csv").iloc[0].to_dict()
+            benchmark = load_roofline_benchmark(
+                Path(workload_path), ROOFLINE_DEVICE_ID, sys_info
             )
-            keys: list[str] = []
+            if benchmark is not None:
+                benchmarks[workload_path] = benchmark
+        return benchmarks
 
-            matrix_ops_type = utils_analysis.get_matrix_ops_type(sys_row["gpu_series"])
-
-            for mem_level in mi_gpu_specs.get_memory_levels(sys_row["gpu_model"]):
-                keys.append(f"{mem_level}Bw")
-            for dtype in SUPPORTED_DATATYPES[gpu_arch].keys():
-                if OpsSupport.VALU in SUPPORTED_DATATYPES[gpu_arch][dtype]:
-                    if dtype.startswith("F") or dtype.startswith("B"):
-                        keys.append(f"{dtype}Flops")
-                    elif dtype.startswith("I"):
-                        keys.append(f"{dtype}Ops")
-                if OpsSupport.MATRIX in SUPPORTED_DATATYPES[gpu_arch][dtype]:
-                    if dtype.startswith(("F", "B", "MX")):
-                        # FP16 -> F16, MXFP8 -> MXF8
-                        matrix_dtype = dtype.replace("FP", "F")
-                        keys.append(f"{matrix_ops_type}{matrix_dtype}Flops")
-                    elif dtype.startswith("I"):
-                        keys.append(f"{matrix_ops_type}{dtype}Ops")
-            roofline_ceilings_per_workload[workload_path] = {
-                key: roofline_dict[key] for key in keys if key in roofline_dict
-            }
-
-        if roofline_ceilings_per_workload:
-            console_debug("Collected roofline ceilings")
-        return roofline_ceilings_per_workload
+    def calc_roofline_ceilings(self) -> dict[str, dict[str, Any]]:
+        """Return the legacy benchmark JSON fields for compatibility callers."""
+        return {
+            path: benchmark.bench_extdata(
+                self._runs[path].sys_info.iloc[0]["gpu_arch"],
+                self._runs[path].sys_info.iloc[0]["gpu_model"],
+            )
+            for path, benchmark in self.load_roofline_benchmarks().items()
+        }
 
     def add_pc_sampling_data(
         self,
@@ -945,10 +971,9 @@ class db_analysis(OmniAnalyze_Base):
                 workload_path
             ]
             sys_info = self._runs[workload_path].sys_info.iloc[0].to_dict()
-            for key, value in self._roofline_ceilings_per_workload.get(
-                workload_path, {}
-            ).items():
-                sys_info[f"{key}_empirical_peak"] = value
+            benchmark = self._roofline_benchmarks.get(workload_path)
+            if benchmark is not None:
+                sys_info.update(benchmark.empirical_peak_vars())
 
             metrics_info = self._metrics_info_data_per_workload.get(
                 workload_path, pd.DataFrame(columns=["pct_of_peak", "metric_id"])
@@ -1247,63 +1272,29 @@ class db_analysis(OmniAnalyze_Base):
 
         return pmc_df_per_workload
 
-    def calc_roofline_data(self) -> dict[str, pd.DataFrame]:
-        """Calculate per-kernel roofline data for each workload."""
-        roofline_data_per_kernel: dict[str, pd.DataFrame] = {}
-
-        for workload_path in self._pmc_df_per_workload.keys():
-            pmc_df = self._pmc_df_per_workload[workload_path].copy()
-            sys_info = self._runs[workload_path].sys_info.iloc[0].to_dict()
-            gfx_arch = sys_info["gpu_arch"]
-            roofline_data_df = self._arch_configs[gfx_arch].dfs.get(402)
-
-            if roofline_data_df is None or roofline_data_df.empty:
-                console_warning(
-                    f"Roofline data is filtered out or not found for {workload_path}."
-                )
+    def calc_roofline_data(self) -> Dict[str, RooflineResult]:
+        """Compute one shared result per benchmark-backed workload."""
+        results = {}
+        for workload_path, pmc_df in self._pmc_df_per_workload.items():
+            benchmark = self._roofline_benchmarks.get(workload_path)
+            if benchmark is None:
                 continue
-
-            roofline_data_expressions = dict(
-                zip(roofline_data_df["Metric"], roofline_data_df["Value"])
+            workload = self._runs[workload_path]
+            sys_info = workload.sys_info.iloc[0].to_dict()
+            sys_info["_workload_path"] = workload_path
+            stats_df = filter_dispatch_frame(
+                self._stats_pmc_df_per_workload[workload_path],
+                workload.filter_gpu_ids,
+                None,
+                workload.filter_dispatch_ids,
             )
-            roofline_data_expressions = {
-                "total_flops": roofline_data_expressions.get(
-                    "Performance (GFLOPs)", ""
-                ),
-                "l0_cache_data": roofline_data_expressions.get("AI L0", ""),
-                "l1_cache_data": roofline_data_expressions.get("AI L1", ""),
-                "l2_cache_data": roofline_data_expressions.get("AI L2", ""),
-                "hbm_cache_data": roofline_data_expressions.get("AI HBM", ""),
-                "lds_cache_data": roofline_data_expressions.get("AI LDS", ""),
-            }
-
-            # Calculate kernel-level roofline data
-            top_kernels = (
-                pmc_df
-                .assign(duration=pmc_df["End_Timestamp"] - pmc_df["Start_Timestamp"])
-                .sort_values(by="duration", ascending=False)
-                .drop_duplicates("Kernel_Name")["Kernel_Name"]
-                .to_list()
+            results[workload_path] = compute_roofline(
+                sys_info=sys_info,
+                arch_config=self._arch_configs[sys_info["gpu_arch"]],
+                benchmark=benchmark,
+                pmc_df=pmc_df,
+                stats_df=stats_df,
+                evaluate=db_analysis.evaluate,
             )
-
-            roofline_df = pd.DataFrame([
-                {
-                    "kernel_name": kernel_name,
-                    **{
-                        metric_name: db_analysis.evaluate(
-                            metric_name,
-                            roofline_data_expressions[metric_name],
-                            pmc_df[pmc_df["Kernel_Name"] == kernel_name],
-                            sys_info,
-                        )
-                        for metric_name in roofline_data_expressions
-                        if roofline_data_expressions[metric_name]
-                    },
-                }
-                for kernel_name in top_kernels
-            ])
-
-            roofline_data_per_kernel[workload_path] = roofline_df
-
         console_debug("Calculated kernel-level roofline data")
-        return roofline_data_per_kernel
+        return results
