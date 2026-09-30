@@ -811,6 +811,12 @@ RocJpegStatus RocJpegDecoder::GetChromaHeight(uint32_t surface_format, uint16_t 
  *         is successful. Returns ROCJPEG_STATUS_JPEG_NOT_SUPPORTED if the surface format is not supported.
  */
 RocJpegStatus RocJpegDecoder::ColorConvertToRGB(HipInteropDeviceMem& hip_interop_dev_mem, uint32_t picture_width, uint32_t picture_height, RocJpegImage *destination, const RocJpegDecodeParams *decode_params, bool is_roi_valid) {
+    // roi_offset is the generic ROI byte offset, computed against the luma pitch. It is applied to the
+    // Y component of every supported YUV surface format, and also to the U/V planes of the formats whose
+    // chroma is neither vertically nor horizontally subsampled (e.g. YUV444 / VA_FOURCC_444P).
+    // roi_uv_offset is the chroma-specific ROI byte offset, computed against the chroma pitch with the
+    // row index halved. It is applied only to the U/V data of the vertically-subsampled formats:
+    // YUV440 (VA_FOURCC_422V surface) and YUV420 (VA_FOURCC_NV12 surface).
     uint32_t roi_offset = 0;
     uint32_t roi_uv_offset = 0;
     int16_t top = decode_params->crop_rectangle.top;
@@ -872,6 +878,12 @@ RocJpegStatus RocJpegDecoder::ColorConvertToRGB(HipInteropDeviceMem& hip_interop
  *         Returns ROCJPEG_STATUS_JPEG_NOT_SUPPORTED if the surface format is not supported.
  */
 RocJpegStatus RocJpegDecoder::ColorConvertToRGBPlanar(HipInteropDeviceMem& hip_interop_dev_mem, uint32_t picture_width, uint32_t picture_height, RocJpegImage *destination, const RocJpegDecodeParams *decode_params, bool is_roi_valid) {
+    // roi_offset is the generic ROI byte offset, computed against the luma pitch. It is applied to the
+    // Y component of every supported YUV surface format, and also to the U/V planes of the formats whose
+    // chroma is neither vertically nor horizontally subsampled (e.g. YUV444 / VA_FOURCC_444P).
+    // roi_uv_offset is the chroma-specific ROI byte offset, computed against the chroma pitch with the
+    // row index halved. It is applied only to the U/V data of the vertically-subsampled formats:
+    // YUV440 (VA_FOURCC_422V surface) and YUV420 (VA_FOURCC_NV12 surface).
     uint32_t roi_offset = 0;
     uint32_t roi_uv_offset = 0;
     int16_t top = decode_params->crop_rectangle.top;
@@ -937,6 +949,10 @@ RocJpegStatus RocJpegDecoder::ColorConvertToRGBPlanar(HipInteropDeviceMem& hip_i
  * @return The status of the operation. Returns ROCJPEG_STATUS_SUCCESS if successful.
  */
 RocJpegStatus RocJpegDecoder::GetPlanarYUVOutputFormat(HipInteropDeviceMem& hip_interop_dev_mem, uint32_t picture_width, uint32_t picture_height, uint16_t chroma_height, RocJpegImage *destination, const RocJpegDecodeParams *decode_params, bool is_roi_valid) {
+    // Only one ROI offset is needed here, and which plane it addresses depends on the surface format:
+    // for YUV420 (VA_FOURCC_NV12) it is the chroma offset into the interleaved UV plane (row index halved,
+    // chroma pitch) since the luma plane is handled by CopyChannel; for YUY2 it is the offset into the
+    // packed plane (left doubled, because each YUYV pixel occupies 2 bytes).
     uint32_t roi_offset = 0;
     if (is_roi_valid) {
          int16_t top = decode_params->crop_rectangle.top;
@@ -981,7 +997,10 @@ RocJpegStatus RocJpegDecoder::GetPlanarYUVOutputFormat(HipInteropDeviceMem& hip_
  * @return The status of the operation. Returns ROCJPEG_STATUS_SUCCESS if successful.
  */
 RocJpegStatus RocJpegDecoder::GetYOutputFormat(HipInteropDeviceMem& hip_interop_dev_mem, uint32_t picture_width, uint32_t picture_height, RocJpegImage *destination, const RocJpegDecodeParams *decode_params, bool is_roi_valid) {
-    uint32_t roi_offset = 0; 
+    // Only the Y component is produced here, so a single ROI offset into the source luma data suffices.
+    // It is used for YUY2 only (left doubled, because each YUYV pixel occupies 2 bytes); every other
+    // format takes the CopyChannel path, which computes its own offset.
+    uint32_t roi_offset = 0;
     if (hip_interop_dev_mem.surface_format == VA_FOURCC_YUY2) {
         // calculate offset and add to hip_mapped_device_mem
         if (is_roi_valid) {
@@ -1029,6 +1048,12 @@ RocJpegStatus RocJpegDecoder::LaunchBatchedParams() {
  *        Mirrors the pointer/offset arithmetic of ColorConvertToRGB exactly.
  */
 RocJpegStatus RocJpegDecoder::AccumulateColorConvertToRGB(HipInteropDeviceMem& mem, uint32_t picture_width, uint32_t picture_height, RocJpegImage *destination, const RocJpegDecodeParams *decode_params, bool is_roi_valid) {
+    // roi_offset is the generic ROI byte offset, computed against the luma pitch. It is applied to the
+    // Y component of every supported YUV surface format, and also to the U/V planes of the formats whose
+    // chroma is neither vertically nor horizontally subsampled (e.g. YUV444 / VA_FOURCC_444P).
+    // roi_uv_offset is the chroma-specific ROI byte offset, computed against the chroma pitch with the
+    // row index halved. It is applied only to the U/V data of the vertically-subsampled formats:
+    // YUV440 (VA_FOURCC_422V surface) and YUV420 (VA_FOURCC_NV12 surface).
     uint32_t roi_offset = 0;
     uint32_t roi_uv_offset = 0;
     int16_t top = decode_params->crop_rectangle.top;
@@ -1041,22 +1066,23 @@ RocJpegStatus RocJpegDecoder::AccumulateColorConvertToRGB(HipInteropDeviceMem& m
         }
         roi_offset = top * mem.pitch[0] + left;
     }
-    uint32_t width_comp  = (picture_width  + 7) / 8;
-    uint32_t height_comp = (picture_height + 1) / 2;
+    // Each thread of the unified kernel converts an 8-pixel-wide by 2-row block.
+    uint32_t dst_width_in_8px_blocks   = (picture_width  + 7) / 8;
+    uint32_t dst_height_in_2row_blocks = (picture_height + 1) / 2;
     // The five YUV surface formats share one unified batched kernel; only the
     // per-image source layout (format tag + which src pointers are set) differs.
     if (mem.surface_format == VA_FOURCC_444P || mem.surface_format == VA_FOURCC_422V ||
         mem.surface_format == VA_FOURCC_YUY2 || mem.surface_format == VA_FOURCC_NV12 ||
         mem.surface_format == VA_FOURCC_Y800) {
         YUVToRGBBatchParams bp{};
-        bp.dst_image                        = destination->channel[0];
-        bp.dst_image_stride_in_bytes        = destination->pitch[0];
-        bp.dst_image_stride_in_bytes_comp   = destination->pitch[0] * 2;
-        bp.src_y_image                      = mem.hip_mapped_device_mem + roi_offset;
-        bp.src_y_image_stride_in_bytes      = mem.pitch[0];
-        bp.src_y_image_stride_in_bytes_comp = mem.pitch[0] * 2;
-        bp.dst_width_comp                   = width_comp;
-        bp.dst_height_comp                  = height_comp;
+        bp.dst_image                            = destination->channel[0];
+        bp.dst_image_stride_in_bytes            = destination->pitch[0];
+        bp.dst_image_row_pair_stride_in_bytes   = destination->pitch[0] * 2;
+        bp.src_y_image                          = mem.hip_mapped_device_mem + roi_offset;
+        bp.src_y_image_stride_in_bytes          = mem.pitch[0];
+        bp.src_y_image_row_pair_stride_in_bytes = mem.pitch[0] * 2;
+        bp.dst_width_in_8px_blocks              = dst_width_in_8px_blocks;
+        bp.dst_height_in_2row_blocks            = dst_height_in_2row_blocks;
         switch (mem.surface_format) {
             case VA_FOURCC_444P:
                 bp.layout      = YUV_LAYOUT_YUV444;
@@ -1080,7 +1106,7 @@ RocJpegStatus RocJpegDecoder::AccumulateColorConvertToRGB(HipInteropDeviceMem& m
                 bp.layout = YUV_LAYOUT_YUV400;
                 break;
         }
-        b_yuv_rgb_.Add(bp, width_comp, height_comp);
+        b_yuv_rgb_.Add(bp, dst_width_in_8px_blocks, dst_height_in_2row_blocks);
         return ROCJPEG_STATUS_SUCCESS;
     }
     switch (mem.surface_format) {
@@ -1107,6 +1133,12 @@ RocJpegStatus RocJpegDecoder::AccumulateColorConvertToRGB(HipInteropDeviceMem& m
  *        stays a per-image memcpy; all convertible formats accumulate kernel params.
  */
 RocJpegStatus RocJpegDecoder::AccumulateColorConvertToRGBPlanar(HipInteropDeviceMem& mem, uint32_t picture_width, uint32_t picture_height, RocJpegImage *destination, const RocJpegDecodeParams *decode_params, bool is_roi_valid) {
+    // roi_offset is the generic ROI byte offset, computed against the luma pitch. It is applied to the
+    // Y component of every supported YUV surface format, and also to the U/V planes of the formats whose
+    // chroma is neither vertically nor horizontally subsampled (e.g. YUV444 / VA_FOURCC_444P).
+    // roi_uv_offset is the chroma-specific ROI byte offset, computed against the chroma pitch with the
+    // row index halved. It is applied only to the U/V data of the vertically-subsampled formats:
+    // YUV440 (VA_FOURCC_422V surface) and YUV420 (VA_FOURCC_NV12 surface).
     uint32_t roi_offset = 0;
     uint32_t roi_uv_offset = 0;
     int16_t top = decode_params->crop_rectangle.top;
@@ -1119,23 +1151,24 @@ RocJpegStatus RocJpegDecoder::AccumulateColorConvertToRGBPlanar(HipInteropDevice
         }
         roi_offset = top * mem.pitch[0] + left;
     }
-    uint32_t width_comp  = (picture_width  + 7) / 8;
-    uint32_t height_comp = (picture_height + 1) / 2;
+    // Each thread of the unified kernel converts an 8-pixel-wide by 2-row block.
+    uint32_t dst_width_in_8px_blocks   = (picture_width  + 7) / 8;
+    uint32_t dst_height_in_2row_blocks = (picture_height + 1) / 2;
     // Same five YUV formats share one unified batched planar kernel.
     if (mem.surface_format == VA_FOURCC_444P || mem.surface_format == VA_FOURCC_422V ||
         mem.surface_format == VA_FOURCC_YUY2 || mem.surface_format == VA_FOURCC_NV12 ||
         mem.surface_format == VA_FOURCC_Y800) {
         YUVToRGBPlanarBatchParams bp{};
-        bp.dst_image_r                      = destination->channel[0];
-        bp.dst_image_g                      = destination->channel[1];
-        bp.dst_image_b                      = destination->channel[2];
-        bp.dst_image_stride_in_bytes        = destination->pitch[0];
-        bp.dst_image_stride_in_bytes_comp   = destination->pitch[0] * 2;
-        bp.src_y_image                      = mem.hip_mapped_device_mem + roi_offset;
-        bp.src_y_image_stride_in_bytes      = mem.pitch[0];
-        bp.src_y_image_stride_in_bytes_comp = mem.pitch[0] * 2;
-        bp.dst_width_comp                   = width_comp;
-        bp.dst_height_comp                  = height_comp;
+        bp.dst_image_r                          = destination->channel[0];
+        bp.dst_image_g                          = destination->channel[1];
+        bp.dst_image_b                          = destination->channel[2];
+        bp.dst_image_stride_in_bytes            = destination->pitch[0];
+        bp.dst_image_row_pair_stride_in_bytes   = destination->pitch[0] * 2;
+        bp.src_y_image                          = mem.hip_mapped_device_mem + roi_offset;
+        bp.src_y_image_stride_in_bytes          = mem.pitch[0];
+        bp.src_y_image_row_pair_stride_in_bytes = mem.pitch[0] * 2;
+        bp.dst_width_in_8px_blocks              = dst_width_in_8px_blocks;
+        bp.dst_height_in_2row_blocks            = dst_height_in_2row_blocks;
         switch (mem.surface_format) {
             case VA_FOURCC_444P:
                 bp.layout      = YUV_LAYOUT_YUV444;
@@ -1159,7 +1192,7 @@ RocJpegStatus RocJpegDecoder::AccumulateColorConvertToRGBPlanar(HipInteropDevice
                 bp.layout = YUV_LAYOUT_YUV400;
                 break;
         }
-        b_yuv_rgbp_.Add(bp, width_comp, height_comp);
+        b_yuv_rgbp_.Add(bp, dst_width_in_8px_blocks, dst_height_in_2row_blocks);
         return ROCJPEG_STATUS_SUCCESS;
     }
     switch (mem.surface_format) {
@@ -1182,6 +1215,10 @@ RocJpegStatus RocJpegDecoder::AccumulateColorConvertToRGBPlanar(HipInteropDevice
  *        conversions accumulate kernel params.
  */
 RocJpegStatus RocJpegDecoder::AccumulatePlanarYUVOutputFormat(HipInteropDeviceMem& mem, uint32_t picture_width, uint32_t picture_height, uint16_t chroma_height, RocJpegImage *destination, const RocJpegDecodeParams *decode_params, bool is_roi_valid) {
+    // Only one ROI offset is needed here, and which plane it addresses depends on the surface format:
+    // for YUV420 (VA_FOURCC_NV12) it is the chroma offset into the interleaved UV plane (row index halved,
+    // chroma pitch) since the luma plane is handled by CopyChannel; for YUY2 it is the offset into the
+    // packed plane (left doubled, because each YUYV pixel occupies 2 bytes).
     uint32_t roi_offset = 0;
     if (is_roi_valid) {
         int16_t top = decode_params->crop_rectangle.top;
@@ -1202,7 +1239,7 @@ RocJpegStatus RocJpegDecoder::AccumulatePlanarYUVOutputFormat(HipInteropDeviceMe
         bp.dst_chroma_stride_in_bytes  = destination->pitch[1];
         bp.src_image                   = mem.hip_mapped_device_mem + roi_offset;
         bp.src_image_stride_in_bytes   = mem.pitch[0];
-        bp.dst_width_comp              = (picture_width + 7) / 8;
+        bp.dst_width_in_8px_blocks     = (picture_width + 7) / 8;
         b_yuyv_yuvp_.Add(bp, (picture_width + 7) >> 3, picture_height);
     } else {
         // Copy Luma
@@ -1233,6 +1270,9 @@ RocJpegStatus RocJpegDecoder::AccumulatePlanarYUVOutputFormat(HipInteropDeviceMe
  *        kernel; other formats copy the luma plane per image.
  */
 RocJpegStatus RocJpegDecoder::AccumulateYOutputFormat(HipInteropDeviceMem& mem, uint32_t picture_width, uint32_t picture_height, RocJpegImage *destination, const RocJpegDecodeParams *decode_params, bool is_roi_valid) {
+    // Only the Y component is produced here, so a single ROI offset into the source luma data suffices.
+    // It is used for YUY2 only (left doubled, because each YUYV pixel occupies 2 bytes); every other
+    // format takes the CopyChannel path, which computes its own offset.
     uint32_t roi_offset = 0;
     if (mem.surface_format == VA_FOURCC_YUY2) {
         if (is_roi_valid) {
@@ -1246,7 +1286,7 @@ RocJpegStatus RocJpegDecoder::AccumulateYOutputFormat(HipInteropDeviceMem& mem, 
         bp.dst_luma_stride_in_bytes  = destination->pitch[0];
         bp.src_image                 = mem.hip_mapped_device_mem + roi_offset;
         bp.src_image_stride_in_bytes = mem.pitch[0];
-        bp.dst_width_comp            = (picture_width + 7) / 8;
+        bp.dst_width_in_8px_blocks   = (picture_width + 7) / 8;
         b_yuyv_y_.Add(bp, (picture_width + 7) >> 3, picture_height);
     } else {
         // Copy Luma

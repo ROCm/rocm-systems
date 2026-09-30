@@ -2337,12 +2337,12 @@ __global__ void ExtractYFromPackedYUYVBatchedKernel(const YFromPackedYUYVBatchPa
     uint32_t dst_luma_stride_in_bytes = p.dst_luma_stride_in_bytes;
     const uint8_t *src_image = p.src_image;
     uint32_t src_image_stride_in_bytes = p.src_image_stride_in_bytes;
-    uint32_t dst_width_comp = p.dst_width_comp;
+    uint32_t dst_width_in_8px_blocks = p.dst_width_in_8px_blocks;
 
     uint32_t x = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
     uint32_t y = hipBlockDim_y * hipBlockIdx_y + hipThreadIdx_y;
 
-    if (x < dst_width_comp && y < dst_height) {
+    if (x < dst_width_in_8px_blocks && y < dst_height) {
         uint32_t src_idx = y * src_image_stride_in_bytes + (x << 4);
         uint32_t dst_idx = y * dst_luma_stride_in_bytes + (x << 3);
 
@@ -2374,12 +2374,12 @@ __global__ void ConvertPackedYUYVToPlanarYUVBatchedKernel(const PackedYUYVToPlan
     uint32_t dst_chroma_stride_in_bytes = p.dst_chroma_stride_in_bytes;
     const uint8_t *src_image = p.src_image;
     uint32_t src_image_stride_in_bytes = p.src_image_stride_in_bytes;
-    uint32_t dst_width_comp = p.dst_width_comp;
+    uint32_t dst_width_in_8px_blocks = p.dst_width_in_8px_blocks;
 
     uint32_t x = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
     uint32_t y = hipBlockDim_y * hipBlockIdx_y + hipThreadIdx_y;
 
-    if ((x < dst_width_comp && y < dst_height)) {
+    if ((x < dst_width_in_8px_blocks && y < dst_height)) {
         uint32_t src_idx = y * src_image_stride_in_bytes + (x << 4);
         uint32_t dst_y_idx = y * dst_luma_stride_in_bytes + (x << 3);
         uint32_t dst_uv_idx = y * dst_chroma_stride_in_bytes + (x << 2);
@@ -2419,14 +2419,14 @@ void ConvertPackedYUYVToPlanarYUVBatched(hipStream_t stream, uint32_t max_gx, ui
 // layout the `layout` tag denotes. All five layouts share the same 8-luma-per-thread,
 // 2-rows-per-thread geometry, so only the load differs.
 __device__ __forceinline__ void LoadYUVSamples(uint32_t layout,
-    const uint8_t *src_y_image, uint32_t src_y_stride, uint32_t src_y_stride_comp,
+    const uint8_t *src_y_image, uint32_t src_y_stride, uint32_t src_y_row_pair_stride,
     const uint8_t *src_u_image, const uint8_t *src_v_image,
     const uint8_t *src_chroma_image, uint32_t src_chroma_stride,
     uint32_t x, uint32_t y,
     uint2 &y0, uint2 &y1, uint2 &u0, uint2 &u1, uint2 &v0, uint2 &v1) {
 
     if (layout == YUV_LAYOUT_YUYV) {
-        uint32_t l0_idx = y * src_y_stride_comp + (x << 4);
+        uint32_t l0_idx = y * src_y_row_pair_stride + (x << 4);
         uint32_t l1_idx = l0_idx + src_y_stride;
         uint4 l0 = *((uint4 *)(&src_y_image[l0_idx]));
         uint4 l1 = *((uint4 *)(&src_y_image[l1_idx]));
@@ -2446,7 +2446,7 @@ __device__ __forceinline__ void LoadYUVSamples(uint32_t layout,
     }
 
     // Y / luma plane load, common to NV12 / YUV444 / YUV440 / YUV400.
-    uint32_t src_y0_idx = y * src_y_stride_comp + (x << 3);
+    uint32_t src_y0_idx = y * src_y_row_pair_stride + (x << 3);
     uint32_t src_y1_idx = src_y0_idx + src_y_stride;
     y0 = *((uint2 *)(&src_y_image[src_y0_idx]));
     y1 = *((uint2 *)(&src_y_image[src_y1_idx]));
@@ -2634,14 +2634,14 @@ __global__ void ColorConvertYUVToRGBBatchedKernel(const YUVToRGBBatchParams *par
     uint32_t x = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
     uint32_t y = hipBlockDim_y * hipBlockIdx_y + hipThreadIdx_y;
 
-    if ((x < p.dst_width_comp) && (y < p.dst_height_comp)) {
+    if ((x < p.dst_width_in_8px_blocks) && (y < p.dst_height_in_2row_blocks)) {
         uint2 y0, y1, u0, u1, v0, v1;
-        LoadYUVSamples(p.layout, p.src_y_image, p.src_y_image_stride_in_bytes, p.src_y_image_stride_in_bytes_comp,
+        LoadYUVSamples(p.layout, p.src_y_image, p.src_y_image_stride_in_bytes, p.src_y_image_row_pair_stride_in_bytes,
                           p.src_u_image, p.src_v_image, p.src_chroma_image, p.src_chroma_image_stride_in_bytes,
                           x, y, y0, y1, u0, u1, v0, v1);
         DUINT6 rgb0, rgb1;
         ConvertYUVToRGB(y0, y1, u0, u1, v0, v1, rgb0, rgb1);
-        uint32_t rgb0_idx = y * p.dst_image_stride_in_bytes_comp + (x * 24);
+        uint32_t rgb0_idx = y * p.dst_image_row_pair_stride_in_bytes + (x * 24);
         uint32_t rgb1_idx = rgb0_idx + p.dst_image_stride_in_bytes;
         *((DUINT6 *)(&p.dst_image[rgb0_idx])) = rgb0;
         *((DUINT6 *)(&p.dst_image[rgb1_idx])) = rgb1;
@@ -2663,9 +2663,9 @@ __global__ void ColorConvertYUVToRGBPlanarBatchedKernel(const YUVToRGBPlanarBatc
     uint32_t x = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
     uint32_t y = hipBlockDim_y * hipBlockIdx_y + hipThreadIdx_y;
 
-    if ((x < p.dst_width_comp) && (y < p.dst_height_comp)) {
+    if ((x < p.dst_width_in_8px_blocks) && (y < p.dst_height_in_2row_blocks)) {
         uint2 y0, y1, u0, u1, v0, v1;
-        LoadYUVSamples(p.layout, p.src_y_image, p.src_y_image_stride_in_bytes, p.src_y_image_stride_in_bytes_comp,
+        LoadYUVSamples(p.layout, p.src_y_image, p.src_y_image_stride_in_bytes, p.src_y_image_row_pair_stride_in_bytes,
                           p.src_u_image, p.src_v_image, p.src_chroma_image, p.src_chroma_image_stride_in_bytes,
                           x, y, y0, y1, u0, u1, v0, v1);
         DUINT6 rgb0, rgb1;
@@ -2674,7 +2674,7 @@ __global__ void ColorConvertYUVToRGBPlanarBatchedKernel(const YUVToRGBPlanarBatc
         uint8_t *dst_image_r = p.dst_image_r;
         uint8_t *dst_image_g = p.dst_image_g;
         uint8_t *dst_image_b = p.dst_image_b;
-        uint32_t rgb0_idx = y * p.dst_image_stride_in_bytes_comp + (x * 8);
+        uint32_t rgb0_idx = y * p.dst_image_row_pair_stride_in_bytes + (x * 8);
         uint32_t rgb1_idx = rgb0_idx + p.dst_image_stride_in_bytes;
         uint2 red0, red1, green0, green1, blue0, blue1;
         red0.x = hipPack(make_float4(hipUnpack0(rgb0.data[0]), hipUnpack3(rgb0.data[0]), hipUnpack2(rgb0.data[1]), hipUnpack1(rgb0.data[2])));
