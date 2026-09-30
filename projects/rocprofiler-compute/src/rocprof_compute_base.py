@@ -29,15 +29,18 @@ from utils.logger import (
     setup_file_handler,
     setup_logging_priority,
 )
+from utils.metrics.expression import update_normal_unit_string
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.specs import (
     MachineSpecs,
     generate_machine_specs,
 )
 from utils.utils_common import (
+    build_metric_details,
     build_metric_list,
     canonical_config_arch,
     detect_rocprof,
+    filter_metric_ids,
     get_arch_panel_id_to_alias,
     get_job_rank_and_size,
     get_version,
@@ -51,6 +54,25 @@ from utils.utils_common import (
 )
 from utils.utils_exceptions import WorkloadCommandError
 from utils.utils_profile import get_submodules
+
+DEPRECATED_LIST_OPTION = (
+    "{} is deprecated and will be removed in a future release. "
+    "Use --list-metrics instead."
+)
+
+
+def _format_metric_listing_line(
+    metric_id: str, name: str, unit: str, description: str, alias: str
+) -> str:
+    """Format one --list-metrics row, indented by its depth in the hierarchy."""
+    line = "\t" * min(metric_id.count("."), 2) + f"{metric_id} -> {name}"
+    if alias:
+        line += f" (alias: {alias})"
+    if unit:
+        line += f" [{update_normal_unit_string(unit, 'per_normUnit')}]"
+    if description:
+        line += f": {description}"
+    return line
 
 
 class RocProfCompute:
@@ -86,7 +108,10 @@ class RocProfCompute:
             or self.__args.list_blocks is not None
         )
 
-        if self.__mode != "analyze" and not skip_machine_specs:
+        # --list-metrics without an arch lists the current GPU, in any mode
+        if self.__args.list_metrics == "" or (
+            self.__mode != "analyze" and not skip_machine_specs
+        ):
             self.generate_machine_specs()
 
         self.handle_list_args()
@@ -145,7 +170,7 @@ class RocProfCompute:
 
     def sanitize(self) -> None:
         if self.__args.mode is None and not (
-            getattr(self.__args, "list_metrics", False)
+            self.__args.list_metrics is not None
             or getattr(self.__args, "list_blocks", False)
             or getattr(self.__args, "specs", False)
         ):
@@ -343,17 +368,53 @@ class RocProfCompute:
             if self.__args.list_sets:
                 self.list_sets()
             elif self.__args.list_available_metrics:
-                self.list_metrics()
+                self.list_available_metrics()
 
     @demarcate
     def list_metrics(self) -> None:
-        for_current_arch = getattr(self.__args, "list_available_metrics", False)
-        arch = self.__mspec.gpu_arch if for_current_arch else self.__args.list_metrics
+        arch = self.__args.list_metrics or self.__mspec.gpu_arch
+        config_root = Path(self.__args.config_dir) / (
+            canonical_config_arch(arch) or arch
+        )
+        if arch not in self.__supported_archs and not config_root.is_dir():
+            console_error(f"Unsupported arch: {arch}")
+
+        metric_details = build_metric_details(
+            load_panel_configs([str(config_root)]), sys_info=None
+        )
+        listed_ids = list(metric_details)
+        filter_tokens = self._list_metrics_filter_tokens()
+        if filter_tokens:
+            listed_ids = filter_metric_ids(listed_ids, filter_tokens, arch)
+        # Aliases are keyed by block id, so only block rows get one
+        panel_alias_dict = get_arch_panel_id_to_alias(arch)
+        for metric_id in listed_ids:
+            alias = panel_alias_dict.get(metric_id, "")
+            print(
+                _format_metric_listing_line(
+                    metric_id, *metric_details[metric_id], alias=alias
+                )
+            )
+        sys.exit(0)
+
+    def _list_metrics_filter_tokens(self) -> list[str]:
+        """Return the -b tokens; each parser stores them under its own dest."""
+        return (
+            getattr(self.__args, "list_filter", None)
+            or getattr(self.__args, "filter_blocks", None)
+            or getattr(self.__args, "filter_metrics", None)
+            or []
+        )
+
+    @demarcate
+    def list_available_metrics(self) -> None:
+        console_warning(DEPRECATED_LIST_OPTION.format("--list-available-metrics"))
+        arch = self.__mspec.gpu_arch
         config_arch = canonical_config_arch(arch) or arch
         config_root = Path(self.__args.config_dir) / config_arch
 
         if arch in self.__supported_archs.keys() or config_root.is_dir():
-            sys_info = self.__mspec.get_class_members() if for_current_arch else None
+            sys_info = self.__mspec.get_class_members()
             metric_list = self._build_arch_metric_list(arch, sys_info)
             for key, value in metric_list.items():
                 prefix = "\t" * min(key.count("."), 2)
@@ -364,6 +425,7 @@ class RocProfCompute:
 
     @demarcate
     def list_blocks(self) -> None:
+        console_warning(DEPRECATED_LIST_OPTION.format("--list-blocks"))
         arch = self.__args.list_blocks
         config_arch = canonical_config_arch(arch) or arch
         config_root = Path(self.__args.config_dir) / config_arch
@@ -603,19 +665,19 @@ class RocProfCompute:
             )
 
     def _validate_list_option_exclusions(self) -> None:
-        """Validate that list/discovery options aren't combined with --block.
-        Applies to both profile and analyze mode.
-        """
+        """Of the list options, only --list-metrics accepts --block."""
         args = self.__args
+        if getattr(args, "list_filter", None) and args.list_metrics is None:
+            console_error("--block without a mode can only be used with --list-metrics")
+
         block_active = bool(
             getattr(args, "filter_blocks", None)
             or getattr(args, "filter_metrics", None)
+            or getattr(args, "list_filter", None)
         )
         if not block_active:
             return
 
-        if args.list_metrics is not None:
-            console_error("Cannot use --list-metrics with --blocks")
         if args.list_blocks is not None:
             console_error("Cannot use --list-blocks with --blocks")
         if getattr(args, "list_available_metrics", False):
@@ -717,7 +779,7 @@ class RocProfCompute:
             self.load_soc_specs(sys_info_dict)
 
         if getattr(self.__args, "list_available_metrics", False):
-            self.list_metrics()
+            self.list_available_metrics()
 
         analyzer.set_soc(self.__soc)
         analyzer.pre_processing()

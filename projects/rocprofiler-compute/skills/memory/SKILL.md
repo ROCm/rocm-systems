@@ -45,9 +45,9 @@ rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b 
 rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b sl1d
 ```
 
-Aliases are stable; numeric block ids are architecture-specific. List what this
-workload actually has with `--list-available-metrics`, and the aliases for an
-architecture with `rocprof-compute --list-blocks <arch>`.
+Aliases are stable; numeric block ids are architecture-specific. List the
+blocks, their aliases, and their metrics for the workload's architecture (the
+`gpu_arch` column of its `sysinfo.csv`) with `rocprof-compute --list-metrics <arch>`.
 
 ## 3. Interpret
 

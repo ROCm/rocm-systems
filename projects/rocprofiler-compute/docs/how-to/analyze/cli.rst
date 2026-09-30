@@ -8,7 +8,7 @@ CLI analysis
 
 This section provides an overview of ROCm Compute Profiler's CLI analysis features.
 
-* :ref:`Derived metrics <cli-list-available-metrics>`: All of ROCm Compute Profiler's built-in metrics.
+* :ref:`Derived metrics <cli-list-metrics>`: All of ROCm Compute Profiler's built-in metrics.
 
 * :ref:`Baseline comparison <analysis-baseline-comparison>`: Compare multiple runs in a side-by-side manner.
 
@@ -103,57 +103,31 @@ To print the block as tables instead of the diagram, see :ref:`cli-view-table`.
    * Visualized memory chart is drawn at a fixed width and needs a wide terminal. See :ref:`cli-memory-chart-viewing` if it wraps.
    * Visualized Roofline chart is adapted to the initial terminal size only. If it is not clear, you may need to adjust the terminal size and regenerate it to check the display effect. Roofline analysis provides detailed, structured table output with measured empirical peak values for comparison.
 
-.. _cli-list-available-metrics:
+.. _cli-list-metrics:
 
-2. Use ``--list-available-metrics`` to generate a list of available metrics for inspection.
+2. Use ``--list-metrics`` with the architecture of the profiled GPU, for example
+   ``gfx90a`` for MI200, to generate a list of available metrics for inspection.
+   Each block shows its alias, and each metric shows its unit and description
+   (shortened with ``...`` below).
 
    .. code-block:: shell-session
 
-      $ rocprof-compute analyze -p workloads/vcopy/MI200/ --list-available-metrics
+      $ rocprof-compute --list-metrics gfx90a
 
-                                       __                                       _
-       _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
-      | '__/ _ \ / __| '_ \| '__/ _ \| |_ _____ / __/ _ \| '_ ` _ \| '_ \| | | | __/ _ \
-      | | | (_) | (__| |_) | | | (_) |  _|_____| (_| (_) | | | | | | |_) | |_| | ||  __/
-      |_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
-                     |_|                                           |_|
-
-      Analysis mode = cli
-      [analysis] deriving rocprofiler-compute metrics...
-      0 -> Top Stats
-      1 -> System Info
-      2 -> System Speed-of-Light
-              2.1 -> Speed-of-Light
-                      2.1.0 -> VALU FLOPs
-                      2.1.1 -> MFMA FLOPs (BF16)
-                      2.1.2 -> MFMA FLOPs (F16)
-                      2.1.3 -> MFMA FLOPs (F32)
-                      2.1.4 -> MFMA FLOPs (F64)
-                      2.1.5 -> MFMA IOPs (Int8)
-                      2.1.6 -> SALU Utilization
-                      2.1.7 -> VALU Utilization
-                      2.1.8 -> MFMA Utilization
-                      2.1.9 -> VMEM Utilization
-                      2.1.10 -> Branch Utilization
-                      2.1.11 -> VALU Active Threads
-                      2.1.12 -> IPC
-                      2.1.13 -> Wavefront Occupancy
-                      2.1.14 -> Theoretical LDS Bandwidth
-                      2.1.15 -> LDS Bank Conflicts/Access
-                      2.1.16 -> vL1D Cache Hit Rate
-                      2.1.17 -> vL1D Cache BW
-                      2.1.18 -> L2 Cache Hit Rate
-                      2.1.19 -> L2 Cache BW
-                      2.1.20 -> L2-Fabric Read BW
-                      2.1.21 -> L2-Fabric Write BW
-                      2.1.22 -> L2-Fabric Read Latency
-                      2.1.23 -> L2-Fabric Write Latency
-                      2.1.24 -> sL1D Cache Hit Rate
-                      2.1.25 -> sL1D Cache BW
-                      2.1.26 -> L1I Hit Rate
-                      2.1.27 -> L1I BW
-                      2.1.28 -> L1I Fetch Latency
+      0 -> Top Stats (alias: topstats)
+      1 -> System Info (alias: sysinfo)
+      2 -> System Speed-of-Light (alias: sol)
+              2.1 -> System Speed-of-Light
+                      2.1.0 -> VALU FLOPs [GFLOP/s]: The total floating-point operations executed per second on the VALU. ...
+                      2.1.1 -> MFMA FLOPs (BF16) [GFLOP/s]: The total number of 16-bit brain floating point MFMA operations executed per second. ...
+                      2.1.2 -> MFMA FLOPs (F16) [GFLOP/s]: The total number of 16-bit floating point MFMA operations executed per second. ...
+                      2.1.3 -> MFMA FLOPs (F32) [GFLOP/s]: The total number of 32-bit floating point MFMA operations executed per second. ...
       ...
+
+   .. note::
+
+      ``--list-available-metrics`` is deprecated and will be removed in a future
+      release. Use ``--list-metrics`` instead.
 
    On MI300 and MI350 series GPUs, block **1 (System Info)** also reports compute
    and memory partition modes. See :doc:`/conceptual/cdna/compute-memory-partition`
@@ -372,18 +346,17 @@ More analysis options
 
    $ rocprof-compute analyze -p workloads/vcopy/MI200/  --list-metrics gfx90a
 
-**List IP blocks**
+**List metrics of selected blocks**
 
 .. code-block:: shell
 
-   $ rocprof-compute analyze -p workloads/vcopy/MI200/  --list-blocks gfx90a
-
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/  --list-metrics gfx90a -b sol 12
 
 **Show Description column which is excluded by default in cli output**
 
 .. code-block:: shell
 
-   $ rocprof-compute analyze -p workloads/vcopy/MI200/  --list-metrics gfx90a --include-cols Description
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/  --include-cols Description
 
 .. _cli-view-table:
 
