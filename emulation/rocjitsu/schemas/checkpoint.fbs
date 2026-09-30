@@ -57,8 +57,6 @@ table ComputeUnitState {
   // before per-CU execution controls were serialized.
   functional_quantum: uint32;
   functional_quantum_present: bool;
-  // Omitted means no override, including in checkpoints predating this field.
-  diagnostic_hw_id_simd: uint32 = null;
 }
 
 /// Serialized state of a command processor.

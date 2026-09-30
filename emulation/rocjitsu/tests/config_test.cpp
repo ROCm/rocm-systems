@@ -6,7 +6,6 @@
 #include "long_path_handoff.h"
 #include "scoped_temp.h"
 #include "test_paths.h"
-#include "util/except.h"
 
 #include "checkpoint_generated.h"
 #include "embedded_schema.h"
@@ -20,6 +19,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/rpc.h"
+#include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 #include "rocjitsu/vm/amdgpu/partitioning.h"
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device_spec.h"
@@ -641,52 +641,6 @@ TEST(ConfigLoaderTest, ComputeUnitFunctionalQuantumUsesDeclarativeValue) {
   auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(cu, nullptr);
   EXPECT_EQ(cu->functional_quantum(), 37u);
-}
-
-TEST(ConfigLoaderTest, DiagnosticHwIdSimdRequiresCdna4AndAnExactValue) {
-  const auto make_json = [](std::string_view arch, std::string_view entries) {
-    return std::string(R"({"num_threads":1,"vm":{"arch":")") + std::string(arch) +
-           R"("},"topology":{"root":{"name":"soc","type":"soc","children":[
-             {"name":"vram","type":"gpu_memory"},
-             {"name":"xcd0","type":"xcd","children":[
-               {"name":"l2","type":"l2_cache"},
-               {"name":"cp","type":"command_processor"},
-               {"name":"se0","type":"shader_engine","children":[
-                 {"name":"cu0","type":"compute_unit","config":[)" +
-           std::string(entries) + R"(]}]}]}]}}})";
-  };
-  const auto entry = [](std::string_view value) {
-    return std::string(R"({"key":"diagnostic_hw_id_simd","value":")") + std::string(value) +
-           R"("})";
-  };
-  for (uint32_t simd = 0; simd < 4; ++simd) {
-    auto loaded = config::load_config_from_string(make_json("cdna4", entry(std::to_string(simd))),
-                                                  rocjitsu::kEmbeddedSchema);
-    const auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
-    ASSERT_TRUE(cu->config().diagnostic_hw_id_simd.has_value());
-    EXPECT_EQ(*cu->config().diagnostic_hw_id_simd, simd);
-  }
-  auto default_config =
-      config::load_config_from_string(make_json("cdna4", ""), rocjitsu::kEmbeddedSchema);
-  EXPECT_FALSE(default_config.soc()
-                   ->xcd(0)
-                   ->shader_engine(0)
-                   ->compute_unit(0)
-                   ->config()
-                   .diagnostic_hw_id_simd.has_value());
-
-  for (const char *value : {"", "-1", "4", "4294967296", "1junk", "1.0"}) {
-    SCOPED_TRACE(value);
-    EXPECT_THROW(config::load_config_from_string(make_json("cdna4", entry(value)),
-                                                 rocjitsu::kEmbeddedSchema),
-                 std::exception);
-  }
-  for (const char *arch : {"cdna3", "rdna4", "cdna5"}) {
-    SCOPED_TRACE(arch);
-    EXPECT_THROW(
-        config::load_config_from_string(make_json(arch, entry("1")), rocjitsu::kEmbeddedSchema),
-        util::ConfigError);
-  }
 }
 
 TEST(ConfigLoaderTest, DeviceCapabilityFieldsDefaultToAutoCompute) {
@@ -1946,28 +1900,46 @@ TEST(CheckpointTest, RoundTripsHeterogeneousFunctionalQuantum) {
   EXPECT_EQ(restored_se->compute_unit(1)->config().functional_quantum, 37u);
 }
 
-TEST(CheckpointTest, RoundTripsDiagnosticHwIdSimdPerCu) {
-  // These existing wire IDs must not move when the optional control is appended.
-  static_assert(fb::ComputeUnitConfig::VT_SCRATCH_SLOTS_PER_CU == 14);
-  static_assert(fb::ComputeUnitState::VT_FUNCTIONAL_QUANTUM_PRESENT == 12);
-  for (const auto first : {0u, 3u}) {
-    std::string json = functional_quantum_checkpoint_config(7, 37);
-    json.replace(json.find("cdna3"), 5, "cdna4");
-    auto source = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
-    auto *source_se = source.soc()->xcd(0)->shader_engine(0);
-    source_se->compute_unit(0)->set_diagnostic_hw_id_simd(first);
-    if (first == 0)
-      source_se->compute_unit(1)->set_diagnostic_hw_id_simd(1);
-
-    test::ScopedTempFile checkpoint_file("rocjitsu-diagnostic-simd-");
-    config::save_checkpoint(checkpoint_file.path(), *source.soc(), 0, source.engine_config,
-                            source.cpu_dispatch_threads);
-    auto restored = config::restore_checkpoint(checkpoint_file.path());
-    auto *restored_se = restored.soc()->xcd(0)->shader_engine(0);
-    for (uint32_t i = 0; i < 2; ++i)
-      EXPECT_EQ(restored_se->compute_unit(i)->config().diagnostic_hw_id_simd,
-                source_se->compute_unit(i)->config().diagnostic_hw_id_simd);
+TEST(CheckpointTest, PreservesCdna4SimdIdsWithSparseWaveSlots) {
+  std::string json = functional_quantum_checkpoint_config(7, 37);
+  json.replace(json.find("cdna3"), 5, "cdna4");
+  auto source = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+  auto *source_se = source.soc()->xcd(0)->shader_engine(0);
+  struct Resident {
+    uint32_t cu, slot, simd;
+  };
+  constexpr std::array<Resident, 5> residents{
+      {{0, 1, 1}, {0, 4, 0}, {0, 7, 3}, {1, 2, 2}, {1, 5, 1}}};
+  constexpr uint16_t hw_id_simd = 4u | (4u << 6) | (1u << 11); // HW_ID[5:4].
+  for (const auto &[cu_id, slot, simd] : residents) {
+    auto *cu = source_se->compute_unit(cu_id);
+    auto *wf = cu->dispatch_wf_at(slot, cu_id * 10 + slot, 0x1000, cu->config().sgprs_per_wf,
+                                  cu->config().vgprs_per_wf);
+    ASSERT_NE(wf, nullptr);
+    uint32_t value = 0xDEADBEEFu;
+    ASSERT_EQ(amdgpu::read_hwreg_field(*wf, hw_id_simd, value), amdgpu::HwregAccessResult::Success);
+    EXPECT_EQ(value, simd);
   }
+
+  test::ScopedTempFile checkpoint_file("rocjitsu-simd-identity-");
+  config::save_checkpoint(checkpoint_file.path(), *source.soc(), 0, source.engine_config,
+                          source.cpu_dispatch_threads);
+  auto restored = config::restore_checkpoint(checkpoint_file.path());
+  auto *restored_se = restored.soc()->xcd(0)->shader_engine(0);
+  for (const auto &[cu_id, slot, simd] : residents) {
+    SCOPED_TRACE(cu_id);
+    SCOPED_TRACE(slot);
+    auto *wf = restored_se->compute_unit(cu_id)->wf(slot);
+    ASSERT_NE(wf, nullptr);
+    ASSERT_FALSE(wf->is_halted());
+    EXPECT_EQ(wf->wf_id(), slot);
+    uint32_t value = 0xDEADBEEFu;
+    EXPECT_EQ(amdgpu::read_hwreg_field(*wf, hw_id_simd, value), amdgpu::HwregAccessResult::Success);
+    EXPECT_EQ(value, simd);
+  }
+  // Restoration must not compact the resident waves into different slots.
+  EXPECT_EQ(restored_se->compute_unit(0)->wf(0), nullptr);
+  EXPECT_EQ(restored_se->compute_unit(1)->wf(0), nullptr);
 }
 
 TEST(CheckpointTest, SaveAndRestoreMemory) {

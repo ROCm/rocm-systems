@@ -7617,43 +7617,46 @@ TEST(HwregTest, GetregReadsModeAndStatusTargetIds) {
   }
 }
 
-TEST(HwregTest, Cdna4DiagnosticSimdControlsOnlyTheRequestedHwIdField) {
-  amdgpu::GpuMemory memory("diagnostic_simd_mem");
-  amdgpu::L2Cache l2("diagnostic_simd_l2");
+TEST(HwregTest, Cdna4SimdIdsFollowResidentWaveSlots) {
+  amdgpu::GpuMemory memory("simd_identity_mem");
+  amdgpu::L2Cache l2("simd_identity_l2");
   amdgpu::ComputeUnitCore::Config cfg{};
   cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
-  cfg.num_wf_slots = 1;
+  cfg.num_wf_slots = 8;
   cfg.sgprs_per_wf = 104;
   cfg.vgprs_per_wf = 256;
   cfg.lds_size_kb = 64;
-  auto cu = amdgpu::ComputeUnitCore::create("diagnostic_simd", cfg, &memory, &l2);
+  auto cu = amdgpu::ComputeUnitCore::create("simd_identity", cfg, &memory, &l2);
   auto decoder = Decoder::create(cfg.arch);
   ASSERT_NE(cu, nullptr);
   ASSERT_NE(decoder, nullptr);
-  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
-  ASSERT_NE(wf, nullptr);
 
-  uint32_t value = 0xDEADBEEFu;
-  EXPECT_EQ(amdgpu::read_hwreg_field(*wf, encode_hwreg(4, 4, 1), value),
-            amdgpu::HwregAccessResult::Unsupported);
-  EXPECT_EQ(value, 0u);
+  // Keep all waves resident. Two-wave workgroups must not restart the SIMD
+  // assignment, and more than four waves must share the four SIMD identities.
+  constexpr std::array<uint32_t, 8> expected_ids{0, 1, 2, 3, 0, 1, 2, 3};
+  for (uint32_t slot = 0; slot < expected_ids.size(); ++slot) {
+    auto *wf = cu->dispatch_wf(slot / 2, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+    ASSERT_NE(wf, nullptr);
+    ASSERT_EQ(wf->wf_id(), slot);
+  }
 
-  for (uint32_t simd = 0; simd < 4; ++simd) {
-    SCOPED_TRACE(simd);
-    cu->set_diagnostic_hw_id_simd(simd);
+  for (uint32_t slot = 0; slot < expected_ids.size(); ++slot) {
+    SCOPED_TRACE(slot);
+    auto *wf = cu->wf(slot);
+    uint32_t value = 0xDEADBEEFu;
     for (const auto &[offset, width] :
          std::array<std::pair<uint32_t, uint32_t>, 3>{{{4, 1}, {5, 1}, {4, 2}}}) {
       SCOPED_TRACE(offset);
       SCOPED_TRACE(width);
       const auto field = encode_hwreg(4, offset, width);
-      const uint32_t expected = (simd >> (offset - 4)) & ((1u << width) - 1u);
+      const uint32_t expected = (expected_ids[slot] >> (offset - 4)) & ((1u << width) - 1u);
       EXPECT_EQ(amdgpu::read_hwreg_field(*wf, field, value), amdgpu::HwregAccessResult::Success);
       EXPECT_EQ(value, expected);
       const auto words = encode_sopk(cdna4::kSGetregB32Sopk, 4, field);
       std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
       ASSERT_NE(inst, nullptr);
       ASSERT_EQ(std::string_view(inst->mnemonic()), "s_getreg_b32");
-      // SOPK remains scalar even when all vector lanes are inactive.
+      // Scalar register reads also execute when all vector lanes are inactive.
       wf->set_exec(0);
       cu->write_sgpr(wf->sgpr_alloc().base + 4, 0xDEADBEEFu);
       ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
@@ -7668,15 +7671,44 @@ TEST(HwregTest, Cdna4DiagnosticSimdControlsOnlyTheRequestedHwIdField) {
                 amdgpu::HwregAccessResult::Unsupported);
       EXPECT_EQ(value, 0u);
     }
-    EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(4, 4, 2), 0),
+    EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(4, 4, 2), 3u - expected_ids[slot]),
               amdgpu::HwregAccessResult::ReadOnly);
-    EXPECT_EQ(cu->config().diagnostic_hw_id_simd, simd);
+    EXPECT_EQ(amdgpu::read_hwreg_field(*wf, encode_hwreg(4, 4, 2), value),
+              amdgpu::HwregAccessResult::Success);
+    EXPECT_EQ(value, expected_ids[slot]);
   }
-  EXPECT_THROW(cu->set_diagnostic_hw_id_simd(4), util::ConfigError);
-  EXPECT_EQ(cu->config().diagnostic_hw_id_simd, 3u);
-  cu->set_diagnostic_hw_id_simd(std::nullopt);
-  EXPECT_EQ(amdgpu::read_hwreg_field(*wf, encode_hwreg(4, 4, 1), value),
+
+  // Reusing one halted slot must preserve its identity without changing peers.
+  auto *retired = cu->wf(1);
+  retired->halt();
+  auto *reused = cu->dispatch_wf(42, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_EQ(reused, retired);
+  for (uint32_t slot = 0; slot < expected_ids.size(); ++slot) {
+    uint32_t value = 0xDEADBEEFu;
+    EXPECT_EQ(amdgpu::read_hwreg_field(*cu->wf(slot), encode_hwreg(4, 4, 2), value),
+              amdgpu::HwregAccessResult::Success);
+    EXPECT_EQ(value, expected_ids[slot]);
+    cu->wf(slot)->halt();
+  }
+}
+
+TEST(HwregTest, Cdna3HwIdRemainsUnsupported) {
+  amdgpu::GpuMemory memory("cdna3_hw_id_mem");
+  amdgpu::L2Cache l2("cdna3_hw_id_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA3;
+  cfg.num_wf_slots = 2;
+  cfg.sgprs_per_wf = 104;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("cdna3_hw_id", cfg, &memory, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf_at(1, 0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  uint32_t value = 0xDEADBEEFu;
+  EXPECT_EQ(amdgpu::read_hwreg_field(*wf, encode_hwreg(4, 4, 2), value),
             amdgpu::HwregAccessResult::Unsupported);
+  EXPECT_EQ(value, 0u);
   wf->halt();
 }
 
