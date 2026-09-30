@@ -677,6 +677,11 @@ static void stop_for_space(uint64_t keep_free) {
     g_events_fd = -1;
   }
   mark_incomplete(reason);
+  // Not gated on AMD_LOG_LEVEL, like the refusal in open().
+  fprintf(stderr,
+          "[HRR capture] Capture stopped: less than %llu MiB would stay free on the file "
+          "system holding %s. The archive is incomplete.\n",
+          static_cast<unsigned long long>(keep_free >> 20), g_output_dir.c_str());
 }
 
 // Size the reserve for the archive's file system. False when less than the
