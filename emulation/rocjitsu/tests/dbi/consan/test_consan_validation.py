@@ -2089,6 +2089,20 @@ class ConSanValidationTest(unittest.TestCase):
             self.assertEqual(setting["category"], "workload-tuning")
             self.assertTrue(setting["usability_exception"])
 
+    def test_operating_point_controls_are_audited_as_workload_tuning(self) -> None:
+        for name in (
+            "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES",
+            "RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE",
+            "RJ_CONSAN_PRESET",
+            "RJ_CONSAN_SC_DELAY",
+            "RJ_CONSAN_SC_DELAY_MODE",
+            "RJ_CONSAN_SC_DELAY_READS_ONLY",
+            "RJ_CONSAN_WATCHPOINT_BANKS",
+        ):
+            [setting] = validation._audited_settings({name: "fixture-value"})
+            self.assertEqual(setting["category"], "workload-tuning")
+            self.assertTrue(setting["usability_exception"])
+
     def test_coverage_limiting_controls_are_audited_as_workload_tuning(self) -> None:
         for name in validation.ORDINARY_FORBIDDEN_ENVIRONMENT:
             [setting] = validation._audited_settings({name: "fixture-value"})

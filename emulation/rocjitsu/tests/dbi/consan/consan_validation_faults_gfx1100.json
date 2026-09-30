@@ -4,6 +4,999 @@
   "evidence_model": "reviewed against fresh target-specific inventories",
   "review_required": false,
   "workloads": {
+    "d128-block": {
+      "faults": [
+        {
+          "id": "barrier-drop-k-publication-group-preset-default",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed the pristine gfx1100 ELF fnv1a64:43b0a96f4ab07982 and the native FastContextPolicy dispatch from hip-moi 011_gfx1100_d128_attention_block_test.hip:289. The K-fragment producers store to LDS before the two s_barrier instructions at .text+0x54844 and .text+0x54850, and peer LDS consumption follows. FastContext implements this one logical ctx.syncthreads with two physical __syncthreads calls, so both singleton barriers must be removed as one grouped mutation; the earlier compute/reuse pair is retained. Fresh inventory, pristine device object, metadata, and final disassembly are retained under gfx1100-barrier-inventory-20260930/d128-block and review/d128-block. Prospective Default calibration declares preset=default, eight independent trials, and at least 6/8 detections with a matching clean comparator, complete reports, and healthy execution. The ascending search order is default, high, higher, max; the first passing preset is selected."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:43b0a96f4ab07982|kernel=_ZN12_GLOBAL__N_127d128_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x0000000000054844|mnemonic=s_barrier|occurrence=3",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:43b0a96f4ab07982|kernel=_ZN12_GLOBAL__N_127d128_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x0000000000054844|mnemonic=s_barrier|occurrence=3|sequence=singleton",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SITE_IDENTITY": "fnv1a64:43b0a96f4ab07982|kernel=_ZN12_GLOBAL__N_127d128_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x0000000000054850|mnemonic=s_barrier|occurrence=4",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SEQUENCE_IDENTITY": "fnv1a64:43b0a96f4ab07982|kernel=_ZN12_GLOBAL__N_127d128_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x0000000000054850|mnemonic=s_barrier|occurrence=4|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-k-publication-group-preset-high",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed the pristine gfx1100 ELF fnv1a64:43b0a96f4ab07982 and the native FastContextPolicy dispatch from hip-moi 011_gfx1100_d128_attention_block_test.hip:289. The K-fragment producers store to LDS before the two s_barrier instructions at .text+0x54844 and .text+0x54850, and peer LDS consumption follows. FastContext implements this one logical ctx.syncthreads with two physical __syncthreads calls, so both singleton barriers must be removed as one grouped mutation; the earlier compute/reuse pair is retained. Fresh inventory, pristine device object, metadata, and final disassembly are retained under gfx1100-barrier-inventory-20260930/d128-block and review/d128-block. Prospective Default calibration declares preset=high, eight independent trials, and at least 6/8 detections with a matching clean comparator, complete reports, and healthy execution. The ascending search order is default, high, higher, max; the first passing preset is selected."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:43b0a96f4ab07982|kernel=_ZN12_GLOBAL__N_127d128_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x0000000000054844|mnemonic=s_barrier|occurrence=3",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:43b0a96f4ab07982|kernel=_ZN12_GLOBAL__N_127d128_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x0000000000054844|mnemonic=s_barrier|occurrence=3|sequence=singleton",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SITE_IDENTITY": "fnv1a64:43b0a96f4ab07982|kernel=_ZN12_GLOBAL__N_127d128_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x0000000000054850|mnemonic=s_barrier|occurrence=4",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SEQUENCE_IDENTITY": "fnv1a64:43b0a96f4ab07982|kernel=_ZN12_GLOBAL__N_127d128_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x0000000000054850|mnemonic=s_barrier|occurrence=4|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-k-publication-group-preset-higher",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed the pristine gfx1100 ELF fnv1a64:43b0a96f4ab07982 and the native FastContextPolicy dispatch from hip-moi 011_gfx1100_d128_attention_block_test.hip:289. The K-fragment producers store to LDS before the two s_barrier instructions at .text+0x54844 and .text+0x54850, and peer LDS consumption follows. FastContext implements this one logical ctx.syncthreads with two physical __syncthreads calls, so both singleton barriers must be removed as one grouped mutation; the earlier compute/reuse pair is retained. Fresh inventory, pristine device object, metadata, and final disassembly are retained under gfx1100-barrier-inventory-20260930/d128-block and review/d128-block. Prospective Default calibration declares preset=higher, eight independent trials, and at least 6/8 detections with a matching clean comparator, complete reports, and healthy execution. The ascending search order is default, high, higher, max; the first passing preset is selected."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:43b0a96f4ab07982|kernel=_ZN12_GLOBAL__N_127d128_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x0000000000054844|mnemonic=s_barrier|occurrence=3",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:43b0a96f4ab07982|kernel=_ZN12_GLOBAL__N_127d128_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x0000000000054844|mnemonic=s_barrier|occurrence=3|sequence=singleton",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SITE_IDENTITY": "fnv1a64:43b0a96f4ab07982|kernel=_ZN12_GLOBAL__N_127d128_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x0000000000054850|mnemonic=s_barrier|occurrence=4",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SEQUENCE_IDENTITY": "fnv1a64:43b0a96f4ab07982|kernel=_ZN12_GLOBAL__N_127d128_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x0000000000054850|mnemonic=s_barrier|occurrence=4|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-k-publication-group-preset-max",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed the pristine gfx1100 ELF fnv1a64:43b0a96f4ab07982 and the native FastContextPolicy dispatch from hip-moi 011_gfx1100_d128_attention_block_test.hip:289. The K-fragment producers store to LDS before the two s_barrier instructions at .text+0x54844 and .text+0x54850, and peer LDS consumption follows. FastContext implements this one logical ctx.syncthreads with two physical __syncthreads calls, so both singleton barriers must be removed as one grouped mutation; the earlier compute/reuse pair is retained. Fresh inventory, pristine device object, metadata, and final disassembly are retained under gfx1100-barrier-inventory-20260930/d128-block and review/d128-block. Prospective Default calibration declares preset=max, eight independent trials, and at least 6/8 detections with a matching clean comparator, complete reports, and healthy execution. The ascending search order is default, high, higher, max; the first passing preset is selected."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:43b0a96f4ab07982|kernel=_ZN12_GLOBAL__N_127d128_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x0000000000054844|mnemonic=s_barrier|occurrence=3",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:43b0a96f4ab07982|kernel=_ZN12_GLOBAL__N_127d128_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x0000000000054844|mnemonic=s_barrier|occurrence=3|sequence=singleton",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SITE_IDENTITY": "fnv1a64:43b0a96f4ab07982|kernel=_ZN12_GLOBAL__N_127d128_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x0000000000054850|mnemonic=s_barrier|occurrence=4",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SEQUENCE_IDENTITY": "fnv1a64:43b0a96f4ab07982|kernel=_ZN12_GLOBAL__N_127d128_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x0000000000054850|mnemonic=s_barrier|occurrence=4|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-k-publication-group-sc-sleep-15",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed the pristine gfx1100 ELF fnv1a64:43b0a96f4ab07982 and the native FastContextPolicy dispatch from hip-moi 011_gfx1100_d128_attention_block_test.hip:289. The K-fragment producers store to LDS before the two s_barrier instructions at .text+0x54844 and .text+0x54850, and peer LDS consumption follows. FastContext implements this one logical ctx.syncthreads with two physical __syncthreads calls, so both singleton barriers must be removed as one grouped mutation; the earlier compute/reuse pair is retained. Fresh inventory, pristine device object, metadata, and final disassembly are retained under gfx1100-barrier-inventory-20260930/d128-block and review/d128-block. Prospective SuperCollider qualification declares sleep delay 15, eight independent trials, and at least 6/8 detections with a matching clean comparator, complete reports, and healthy execution."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:43b0a96f4ab07982|kernel=_ZN12_GLOBAL__N_127d128_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x0000000000054844|mnemonic=s_barrier|occurrence=3",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:43b0a96f4ab07982|kernel=_ZN12_GLOBAL__N_127d128_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x0000000000054844|mnemonic=s_barrier|occurrence=3|sequence=singleton",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SITE_IDENTITY": "fnv1a64:43b0a96f4ab07982|kernel=_ZN12_GLOBAL__N_127d128_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x0000000000054850|mnemonic=s_barrier|occurrence=4",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SEQUENCE_IDENTITY": "fnv1a64:43b0a96f4ab07982|kernel=_ZN12_GLOBAL__N_127d128_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x0000000000054850|mnemonic=s_barrier|occurrence=4|sequence=singleton"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "d128-pressure": {
+      "faults": [
+        {
+          "id": "barrier-drop-kv-publication-group-preset-default",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed the pristine gfx1100 ELF fnv1a64:e969c5a2e1a058f7 and the native FullKvDoubleBuffered16Key FastContextPolicy dispatch from hip-moi 012_gfx1100_d128_attention_pressure_test.hip:391. The selected two s_barrier instructions at .text+0x3ac0c and .text+0x3ac18 follow completion of the K/V LDS stores and precede their peer consumption. FastContext implements this one logical ctx.syncthreads with two physical __syncthreads calls, so both singleton barriers must be removed as one grouped mutation; the preceding compute/reuse pair is retained. Fresh inventory, pristine device object, metadata, and final disassembly are retained under gfx1100-barrier-inventory-20260930/d128-pressure and review/d128-pressure. Prospective Default calibration declares preset=default, eight independent trials, and at least 6/8 detections with a matching clean comparator, complete reports, and healthy execution. The ascending search order is default, high, higher, max; the first passing preset is selected."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:e969c5a2e1a058f7|kernel=_ZN12_GLOBAL__N_125attention_pressure_kernelINS_25FullKvDoubleBuffered16KeyENS_17FastContextPolicyEEEvPKDv16_DF16_S5_S5_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x000000000003ac0c|mnemonic=s_barrier|occurrence=3",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:e969c5a2e1a058f7|kernel=_ZN12_GLOBAL__N_125attention_pressure_kernelINS_25FullKvDoubleBuffered16KeyENS_17FastContextPolicyEEEvPKDv16_DF16_S5_S5_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x000000000003ac0c|mnemonic=s_barrier|occurrence=3|sequence=singleton",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SITE_IDENTITY": "fnv1a64:e969c5a2e1a058f7|kernel=_ZN12_GLOBAL__N_125attention_pressure_kernelINS_25FullKvDoubleBuffered16KeyENS_17FastContextPolicyEEEvPKDv16_DF16_S5_S5_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x000000000003ac18|mnemonic=s_barrier|occurrence=4",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SEQUENCE_IDENTITY": "fnv1a64:e969c5a2e1a058f7|kernel=_ZN12_GLOBAL__N_125attention_pressure_kernelINS_25FullKvDoubleBuffered16KeyENS_17FastContextPolicyEEEvPKDv16_DF16_S5_S5_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x000000000003ac18|mnemonic=s_barrier|occurrence=4|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-kv-publication-group-preset-high",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed the pristine gfx1100 ELF fnv1a64:e969c5a2e1a058f7 and the native FullKvDoubleBuffered16Key FastContextPolicy dispatch from hip-moi 012_gfx1100_d128_attention_pressure_test.hip:391. The selected two s_barrier instructions at .text+0x3ac0c and .text+0x3ac18 follow completion of the K/V LDS stores and precede their peer consumption. FastContext implements this one logical ctx.syncthreads with two physical __syncthreads calls, so both singleton barriers must be removed as one grouped mutation; the preceding compute/reuse pair is retained. Fresh inventory, pristine device object, metadata, and final disassembly are retained under gfx1100-barrier-inventory-20260930/d128-pressure and review/d128-pressure. Prospective Default calibration declares preset=high, eight independent trials, and at least 6/8 detections with a matching clean comparator, complete reports, and healthy execution. The ascending search order is default, high, higher, max; the first passing preset is selected."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:e969c5a2e1a058f7|kernel=_ZN12_GLOBAL__N_125attention_pressure_kernelINS_25FullKvDoubleBuffered16KeyENS_17FastContextPolicyEEEvPKDv16_DF16_S5_S5_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x000000000003ac0c|mnemonic=s_barrier|occurrence=3",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:e969c5a2e1a058f7|kernel=_ZN12_GLOBAL__N_125attention_pressure_kernelINS_25FullKvDoubleBuffered16KeyENS_17FastContextPolicyEEEvPKDv16_DF16_S5_S5_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x000000000003ac0c|mnemonic=s_barrier|occurrence=3|sequence=singleton",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SITE_IDENTITY": "fnv1a64:e969c5a2e1a058f7|kernel=_ZN12_GLOBAL__N_125attention_pressure_kernelINS_25FullKvDoubleBuffered16KeyENS_17FastContextPolicyEEEvPKDv16_DF16_S5_S5_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x000000000003ac18|mnemonic=s_barrier|occurrence=4",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SEQUENCE_IDENTITY": "fnv1a64:e969c5a2e1a058f7|kernel=_ZN12_GLOBAL__N_125attention_pressure_kernelINS_25FullKvDoubleBuffered16KeyENS_17FastContextPolicyEEEvPKDv16_DF16_S5_S5_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x000000000003ac18|mnemonic=s_barrier|occurrence=4|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-kv-publication-group-preset-higher",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed the pristine gfx1100 ELF fnv1a64:e969c5a2e1a058f7 and the native FullKvDoubleBuffered16Key FastContextPolicy dispatch from hip-moi 012_gfx1100_d128_attention_pressure_test.hip:391. The selected two s_barrier instructions at .text+0x3ac0c and .text+0x3ac18 follow completion of the K/V LDS stores and precede their peer consumption. FastContext implements this one logical ctx.syncthreads with two physical __syncthreads calls, so both singleton barriers must be removed as one grouped mutation; the preceding compute/reuse pair is retained. Fresh inventory, pristine device object, metadata, and final disassembly are retained under gfx1100-barrier-inventory-20260930/d128-pressure and review/d128-pressure. Prospective Default calibration declares preset=higher, eight independent trials, and at least 6/8 detections with a matching clean comparator, complete reports, and healthy execution. The ascending search order is default, high, higher, max; the first passing preset is selected."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:e969c5a2e1a058f7|kernel=_ZN12_GLOBAL__N_125attention_pressure_kernelINS_25FullKvDoubleBuffered16KeyENS_17FastContextPolicyEEEvPKDv16_DF16_S5_S5_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x000000000003ac0c|mnemonic=s_barrier|occurrence=3",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:e969c5a2e1a058f7|kernel=_ZN12_GLOBAL__N_125attention_pressure_kernelINS_25FullKvDoubleBuffered16KeyENS_17FastContextPolicyEEEvPKDv16_DF16_S5_S5_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x000000000003ac0c|mnemonic=s_barrier|occurrence=3|sequence=singleton",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SITE_IDENTITY": "fnv1a64:e969c5a2e1a058f7|kernel=_ZN12_GLOBAL__N_125attention_pressure_kernelINS_25FullKvDoubleBuffered16KeyENS_17FastContextPolicyEEEvPKDv16_DF16_S5_S5_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x000000000003ac18|mnemonic=s_barrier|occurrence=4",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SEQUENCE_IDENTITY": "fnv1a64:e969c5a2e1a058f7|kernel=_ZN12_GLOBAL__N_125attention_pressure_kernelINS_25FullKvDoubleBuffered16KeyENS_17FastContextPolicyEEEvPKDv16_DF16_S5_S5_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x000000000003ac18|mnemonic=s_barrier|occurrence=4|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-kv-publication-group-preset-max",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed the pristine gfx1100 ELF fnv1a64:e969c5a2e1a058f7 and the native FullKvDoubleBuffered16Key FastContextPolicy dispatch from hip-moi 012_gfx1100_d128_attention_pressure_test.hip:391. The selected two s_barrier instructions at .text+0x3ac0c and .text+0x3ac18 follow completion of the K/V LDS stores and precede their peer consumption. FastContext implements this one logical ctx.syncthreads with two physical __syncthreads calls, so both singleton barriers must be removed as one grouped mutation; the preceding compute/reuse pair is retained. Fresh inventory, pristine device object, metadata, and final disassembly are retained under gfx1100-barrier-inventory-20260930/d128-pressure and review/d128-pressure. Prospective Default calibration declares preset=max, eight independent trials, and at least 6/8 detections with a matching clean comparator, complete reports, and healthy execution. The ascending search order is default, high, higher, max; the first passing preset is selected."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:e969c5a2e1a058f7|kernel=_ZN12_GLOBAL__N_125attention_pressure_kernelINS_25FullKvDoubleBuffered16KeyENS_17FastContextPolicyEEEvPKDv16_DF16_S5_S5_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x000000000003ac0c|mnemonic=s_barrier|occurrence=3",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:e969c5a2e1a058f7|kernel=_ZN12_GLOBAL__N_125attention_pressure_kernelINS_25FullKvDoubleBuffered16KeyENS_17FastContextPolicyEEEvPKDv16_DF16_S5_S5_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x000000000003ac0c|mnemonic=s_barrier|occurrence=3|sequence=singleton",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SITE_IDENTITY": "fnv1a64:e969c5a2e1a058f7|kernel=_ZN12_GLOBAL__N_125attention_pressure_kernelINS_25FullKvDoubleBuffered16KeyENS_17FastContextPolicyEEEvPKDv16_DF16_S5_S5_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x000000000003ac18|mnemonic=s_barrier|occurrence=4",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SEQUENCE_IDENTITY": "fnv1a64:e969c5a2e1a058f7|kernel=_ZN12_GLOBAL__N_125attention_pressure_kernelINS_25FullKvDoubleBuffered16KeyENS_17FastContextPolicyEEEvPKDv16_DF16_S5_S5_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x000000000003ac18|mnemonic=s_barrier|occurrence=4|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-kv-publication-group-sc-sleep-15",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed the pristine gfx1100 ELF fnv1a64:e969c5a2e1a058f7 and the native FullKvDoubleBuffered16Key FastContextPolicy dispatch from hip-moi 012_gfx1100_d128_attention_pressure_test.hip:391. The selected two s_barrier instructions at .text+0x3ac0c and .text+0x3ac18 follow completion of the K/V LDS stores and precede their peer consumption. FastContext implements this one logical ctx.syncthreads with two physical __syncthreads calls, so both singleton barriers must be removed as one grouped mutation; the preceding compute/reuse pair is retained. Fresh inventory, pristine device object, metadata, and final disassembly are retained under gfx1100-barrier-inventory-20260930/d128-pressure and review/d128-pressure. Prospective SuperCollider qualification declares sleep delay 15, eight independent trials, and at least 6/8 detections with a matching clean comparator, complete reports, and healthy execution."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:e969c5a2e1a058f7|kernel=_ZN12_GLOBAL__N_125attention_pressure_kernelINS_25FullKvDoubleBuffered16KeyENS_17FastContextPolicyEEEvPKDv16_DF16_S5_S5_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x000000000003ac0c|mnemonic=s_barrier|occurrence=3",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:e969c5a2e1a058f7|kernel=_ZN12_GLOBAL__N_125attention_pressure_kernelINS_25FullKvDoubleBuffered16KeyENS_17FastContextPolicyEEEvPKDv16_DF16_S5_S5_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x000000000003ac0c|mnemonic=s_barrier|occurrence=3|sequence=singleton",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SITE_IDENTITY": "fnv1a64:e969c5a2e1a058f7|kernel=_ZN12_GLOBAL__N_125attention_pressure_kernelINS_25FullKvDoubleBuffered16KeyENS_17FastContextPolicyEEEvPKDv16_DF16_S5_S5_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x000000000003ac18|mnemonic=s_barrier|occurrence=4",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SEQUENCE_IDENTITY": "fnv1a64:e969c5a2e1a058f7|kernel=_ZN12_GLOBAL__N_125attention_pressure_kernelINS_25FullKvDoubleBuffered16KeyENS_17FastContextPolicyEEEvPKDv16_DF16_S5_S5_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x000000000003ac18|mnemonic=s_barrier|occurrence=4|sequence=singleton"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "wmma-attention": {
+      "faults": [
+        {
+          "id": "barrier-drop-kv-publication-group-preset-default",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed the pristine gfx1100 ELF fnv1a64:f8a2c2abd1d454c2 and the native FastContextPolicy dispatch from hip-moi 010_gfx1100_wmma_attention_block_test.hip:270. K/V fragments are stored by ds_store_b128 at final-ISA addresses 0x17900 and 0x1790c; waits retire them before the two selected s_barrier instructions at .text+0x15530 and .text+0x1553c (absolute 0x17930 and 0x1793c), and peer LDS loads follow. FastContext implements this one logical ctx.syncthreads with two physical __syncthreads calls, so both singleton barriers must be removed as one grouped mutation; the earlier compute/reuse pair is retained. Fresh inventory, pristine device object, metadata, and final disassembly are retained under gfx1100-barrier-inventory-20260930/wmma-attention and review/wmma-attention. Prospective Default calibration declares preset=default, eight independent trials, and at least 6/8 detections with a matching clean comparator, complete reports, and healthy execution. The ascending search order is default, high, higher, max; the first passing preset is selected."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:f8a2c2abd1d454c2|kernel=_ZN12_GLOBAL__N_127wmma_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x0000000000015530|mnemonic=s_barrier|occurrence=3",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:f8a2c2abd1d454c2|kernel=_ZN12_GLOBAL__N_127wmma_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x0000000000015530|mnemonic=s_barrier|occurrence=3|sequence=singleton",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SITE_IDENTITY": "fnv1a64:f8a2c2abd1d454c2|kernel=_ZN12_GLOBAL__N_127wmma_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x000000000001553c|mnemonic=s_barrier|occurrence=4",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SEQUENCE_IDENTITY": "fnv1a64:f8a2c2abd1d454c2|kernel=_ZN12_GLOBAL__N_127wmma_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x000000000001553c|mnemonic=s_barrier|occurrence=4|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-kv-publication-group-preset-high",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed the pristine gfx1100 ELF fnv1a64:f8a2c2abd1d454c2 and the native FastContextPolicy dispatch from hip-moi 010_gfx1100_wmma_attention_block_test.hip:270. K/V fragments are stored by ds_store_b128 at final-ISA addresses 0x17900 and 0x1790c; waits retire them before the two selected s_barrier instructions at .text+0x15530 and .text+0x1553c (absolute 0x17930 and 0x1793c), and peer LDS loads follow. FastContext implements this one logical ctx.syncthreads with two physical __syncthreads calls, so both singleton barriers must be removed as one grouped mutation; the earlier compute/reuse pair is retained. Fresh inventory, pristine device object, metadata, and final disassembly are retained under gfx1100-barrier-inventory-20260930/wmma-attention and review/wmma-attention. Prospective Default calibration declares preset=high, eight independent trials, and at least 6/8 detections with a matching clean comparator, complete reports, and healthy execution. The ascending search order is default, high, higher, max; the first passing preset is selected."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:f8a2c2abd1d454c2|kernel=_ZN12_GLOBAL__N_127wmma_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x0000000000015530|mnemonic=s_barrier|occurrence=3",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:f8a2c2abd1d454c2|kernel=_ZN12_GLOBAL__N_127wmma_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x0000000000015530|mnemonic=s_barrier|occurrence=3|sequence=singleton",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SITE_IDENTITY": "fnv1a64:f8a2c2abd1d454c2|kernel=_ZN12_GLOBAL__N_127wmma_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x000000000001553c|mnemonic=s_barrier|occurrence=4",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SEQUENCE_IDENTITY": "fnv1a64:f8a2c2abd1d454c2|kernel=_ZN12_GLOBAL__N_127wmma_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x000000000001553c|mnemonic=s_barrier|occurrence=4|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-kv-publication-group-preset-higher",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed the pristine gfx1100 ELF fnv1a64:f8a2c2abd1d454c2 and the native FastContextPolicy dispatch from hip-moi 010_gfx1100_wmma_attention_block_test.hip:270. K/V fragments are stored by ds_store_b128 at final-ISA addresses 0x17900 and 0x1790c; waits retire them before the two selected s_barrier instructions at .text+0x15530 and .text+0x1553c (absolute 0x17930 and 0x1793c), and peer LDS loads follow. FastContext implements this one logical ctx.syncthreads with two physical __syncthreads calls, so both singleton barriers must be removed as one grouped mutation; the earlier compute/reuse pair is retained. Fresh inventory, pristine device object, metadata, and final disassembly are retained under gfx1100-barrier-inventory-20260930/wmma-attention and review/wmma-attention. Prospective Default calibration declares preset=higher, eight independent trials, and at least 6/8 detections with a matching clean comparator, complete reports, and healthy execution. The ascending search order is default, high, higher, max; the first passing preset is selected."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:f8a2c2abd1d454c2|kernel=_ZN12_GLOBAL__N_127wmma_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x0000000000015530|mnemonic=s_barrier|occurrence=3",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:f8a2c2abd1d454c2|kernel=_ZN12_GLOBAL__N_127wmma_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x0000000000015530|mnemonic=s_barrier|occurrence=3|sequence=singleton",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SITE_IDENTITY": "fnv1a64:f8a2c2abd1d454c2|kernel=_ZN12_GLOBAL__N_127wmma_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x000000000001553c|mnemonic=s_barrier|occurrence=4",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SEQUENCE_IDENTITY": "fnv1a64:f8a2c2abd1d454c2|kernel=_ZN12_GLOBAL__N_127wmma_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x000000000001553c|mnemonic=s_barrier|occurrence=4|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-kv-publication-group-preset-max",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed the pristine gfx1100 ELF fnv1a64:f8a2c2abd1d454c2 and the native FastContextPolicy dispatch from hip-moi 010_gfx1100_wmma_attention_block_test.hip:270. K/V fragments are stored by ds_store_b128 at final-ISA addresses 0x17900 and 0x1790c; waits retire them before the two selected s_barrier instructions at .text+0x15530 and .text+0x1553c (absolute 0x17930 and 0x1793c), and peer LDS loads follow. FastContext implements this one logical ctx.syncthreads with two physical __syncthreads calls, so both singleton barriers must be removed as one grouped mutation; the earlier compute/reuse pair is retained. Fresh inventory, pristine device object, metadata, and final disassembly are retained under gfx1100-barrier-inventory-20260930/wmma-attention and review/wmma-attention. Prospective Default calibration declares preset=max, eight independent trials, and at least 6/8 detections with a matching clean comparator, complete reports, and healthy execution. The ascending search order is default, high, higher, max; the first passing preset is selected."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:f8a2c2abd1d454c2|kernel=_ZN12_GLOBAL__N_127wmma_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x0000000000015530|mnemonic=s_barrier|occurrence=3",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:f8a2c2abd1d454c2|kernel=_ZN12_GLOBAL__N_127wmma_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x0000000000015530|mnemonic=s_barrier|occurrence=3|sequence=singleton",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SITE_IDENTITY": "fnv1a64:f8a2c2abd1d454c2|kernel=_ZN12_GLOBAL__N_127wmma_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x000000000001553c|mnemonic=s_barrier|occurrence=4",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SEQUENCE_IDENTITY": "fnv1a64:f8a2c2abd1d454c2|kernel=_ZN12_GLOBAL__N_127wmma_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x000000000001553c|mnemonic=s_barrier|occurrence=4|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-kv-publication-group-sc-sleep-15",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed the pristine gfx1100 ELF fnv1a64:f8a2c2abd1d454c2 and the native FastContextPolicy dispatch from hip-moi 010_gfx1100_wmma_attention_block_test.hip:270. K/V fragments are stored by ds_store_b128 at final-ISA addresses 0x17900 and 0x1790c; waits retire them before the two selected s_barrier instructions at .text+0x15530 and .text+0x1553c (absolute 0x17930 and 0x1793c), and peer LDS loads follow. FastContext implements this one logical ctx.syncthreads with two physical __syncthreads calls, so both singleton barriers must be removed as one grouped mutation; the earlier compute/reuse pair is retained. Fresh inventory, pristine device object, metadata, and final disassembly are retained under gfx1100-barrier-inventory-20260930/wmma-attention and review/wmma-attention. Prospective SuperCollider qualification declares sleep delay 15, eight independent trials, and at least 6/8 detections with a matching clean comparator, complete reports, and healthy execution."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:f8a2c2abd1d454c2|kernel=_ZN12_GLOBAL__N_127wmma_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x0000000000015530|mnemonic=s_barrier|occurrence=3",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:f8a2c2abd1d454c2|kernel=_ZN12_GLOBAL__N_127wmma_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x0000000000015530|mnemonic=s_barrier|occurrence=3|sequence=singleton",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SITE_IDENTITY": "fnv1a64:f8a2c2abd1d454c2|kernel=_ZN12_GLOBAL__N_127wmma_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x000000000001553c|mnemonic=s_barrier|occurrence=4",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SEQUENCE_IDENTITY": "fnv1a64:f8a2c2abd1d454c2|kernel=_ZN12_GLOBAL__N_127wmma_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x000000000001553c|mnemonic=s_barrier|occurrence=4|sequence=singleton"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "jakub-attention": {
+      "faults": [
+        {
+          "id": "barrier-drop-load-compute-publication-preset-default",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed the pristine gfx1100 ELF fnv1a64:60f9f11b7f717a09 and the maintained non-pipelined safe dispatch fp16_wmma_tiled_kernel<16,8,false,false,SyncMode0,8,2,4,4> from hip-moi gfx1100_jakub_matmul_reference.hip:562-568. The load_stage stores fragments with ds_store_b128 at final-ISA addresses 0x4258 and 0x4264; the selected sync_after_load barrier at .text+0x068c (absolute 0x428c) publishes them immediately before peer ds_load_b128 instructions beginning at 0x429c. The occurrence-zero barrier is the prior reuse/control boundary and is retained. Fresh inventory, pristine device object, metadata, and final disassembly are retained under gfx1100-barrier-inventory-20260930/jakub-attention and review/jakub-attention. Prospective Default calibration declares preset=default, eight independent trials, and at least 6/8 detections with a matching clean comparator, complete reports, and healthy execution. The ascending search order is default, high, higher, max; the first passing preset is selected."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:60f9f11b7f717a09|kernel=_ZN12_GLOBAL__N_122fp16_wmma_tiled_kernelILi16ELi8ELb0ELb0ELNS_8SyncModeE0ELi8ELi2ELi4ELi4EEEvPKDF16_S3_Pfiii|kind=barrier|pc=0x000000000000068c|mnemonic=s_barrier|occurrence=1"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-load-compute-publication-preset-high",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed the pristine gfx1100 ELF fnv1a64:60f9f11b7f717a09 and the maintained non-pipelined safe dispatch fp16_wmma_tiled_kernel<16,8,false,false,SyncMode0,8,2,4,4> from hip-moi gfx1100_jakub_matmul_reference.hip:562-568. The load_stage stores fragments with ds_store_b128 at final-ISA addresses 0x4258 and 0x4264; the selected sync_after_load barrier at .text+0x068c (absolute 0x428c) publishes them immediately before peer ds_load_b128 instructions beginning at 0x429c. The occurrence-zero barrier is the prior reuse/control boundary and is retained. Fresh inventory, pristine device object, metadata, and final disassembly are retained under gfx1100-barrier-inventory-20260930/jakub-attention and review/jakub-attention. Prospective Default calibration declares preset=high, eight independent trials, and at least 6/8 detections with a matching clean comparator, complete reports, and healthy execution. The ascending search order is default, high, higher, max; the first passing preset is selected."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:60f9f11b7f717a09|kernel=_ZN12_GLOBAL__N_122fp16_wmma_tiled_kernelILi16ELi8ELb0ELb0ELNS_8SyncModeE0ELi8ELi2ELi4ELi4EEEvPKDF16_S3_Pfiii|kind=barrier|pc=0x000000000000068c|mnemonic=s_barrier|occurrence=1"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-load-compute-publication-preset-higher",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed the pristine gfx1100 ELF fnv1a64:60f9f11b7f717a09 and the maintained non-pipelined safe dispatch fp16_wmma_tiled_kernel<16,8,false,false,SyncMode0,8,2,4,4> from hip-moi gfx1100_jakub_matmul_reference.hip:562-568. The load_stage stores fragments with ds_store_b128 at final-ISA addresses 0x4258 and 0x4264; the selected sync_after_load barrier at .text+0x068c (absolute 0x428c) publishes them immediately before peer ds_load_b128 instructions beginning at 0x429c. The occurrence-zero barrier is the prior reuse/control boundary and is retained. Fresh inventory, pristine device object, metadata, and final disassembly are retained under gfx1100-barrier-inventory-20260930/jakub-attention and review/jakub-attention. Prospective Default calibration declares preset=higher, eight independent trials, and at least 6/8 detections with a matching clean comparator, complete reports, and healthy execution. The ascending search order is default, high, higher, max; the first passing preset is selected."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:60f9f11b7f717a09|kernel=_ZN12_GLOBAL__N_122fp16_wmma_tiled_kernelILi16ELi8ELb0ELb0ELNS_8SyncModeE0ELi8ELi2ELi4ELi4EEEvPKDF16_S3_Pfiii|kind=barrier|pc=0x000000000000068c|mnemonic=s_barrier|occurrence=1"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-load-compute-publication-preset-max",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed the pristine gfx1100 ELF fnv1a64:60f9f11b7f717a09 and the maintained non-pipelined safe dispatch fp16_wmma_tiled_kernel<16,8,false,false,SyncMode0,8,2,4,4> from hip-moi gfx1100_jakub_matmul_reference.hip:562-568. The load_stage stores fragments with ds_store_b128 at final-ISA addresses 0x4258 and 0x4264; the selected sync_after_load barrier at .text+0x068c (absolute 0x428c) publishes them immediately before peer ds_load_b128 instructions beginning at 0x429c. The occurrence-zero barrier is the prior reuse/control boundary and is retained. Fresh inventory, pristine device object, metadata, and final disassembly are retained under gfx1100-barrier-inventory-20260930/jakub-attention and review/jakub-attention. Prospective Default calibration declares preset=max, eight independent trials, and at least 6/8 detections with a matching clean comparator, complete reports, and healthy execution. The ascending search order is default, high, higher, max; the first passing preset is selected."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:60f9f11b7f717a09|kernel=_ZN12_GLOBAL__N_122fp16_wmma_tiled_kernelILi16ELi8ELb0ELb0ELNS_8SyncModeE0ELi8ELi2ELi4ELi4EEEvPKDF16_S3_Pfiii|kind=barrier|pc=0x000000000000068c|mnemonic=s_barrier|occurrence=1"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-load-compute-publication-sc-sleep-15",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed the pristine gfx1100 ELF fnv1a64:60f9f11b7f717a09 and the maintained non-pipelined safe dispatch fp16_wmma_tiled_kernel<16,8,false,false,SyncMode0,8,2,4,4> from hip-moi gfx1100_jakub_matmul_reference.hip:562-568. The load_stage stores fragments with ds_store_b128 at final-ISA addresses 0x4258 and 0x4264; the selected sync_after_load barrier at .text+0x068c (absolute 0x428c) publishes them immediately before peer ds_load_b128 instructions beginning at 0x429c. The occurrence-zero barrier is the prior reuse/control boundary and is retained. Fresh inventory, pristine device object, metadata, and final disassembly are retained under gfx1100-barrier-inventory-20260930/jakub-attention and review/jakub-attention. Prospective SuperCollider qualification declares sleep delay 15, eight independent trials, and at least 6/8 detections with a matching clean comparator, complete reports, and healthy execution."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:60f9f11b7f717a09|kernel=_ZN12_GLOBAL__N_122fp16_wmma_tiled_kernelILi16ELi8ELb0ELb0ELNS_8SyncModeE0ELi8ELi2ELi4ELi4EEEvPKDF16_S3_Pfiii|kind=barrier|pc=0x000000000000068c|mnemonic=s_barrier|occurrence=1"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
     "streamk-arrival": {
       "faults": [
         {

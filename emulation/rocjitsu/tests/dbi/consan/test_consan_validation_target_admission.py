@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 from unittest import mock
 
 import consan_validation as validation
+import consan_validation_faults as validation_faults
 
 
 class ConSanValidationTargetAdmissionTest(unittest.TestCase):
@@ -62,6 +64,108 @@ class ConSanValidationTargetAdmissionTest(unittest.TestCase):
                 self.assertEqual(
                     validation._fault_families("gfx1100", workload),
                     ("atomic-weaken-order",),
+                )
+
+    def test_gfx1100_barrier_faults_target_reviewed_publications(self) -> None:
+        catalog = Path(__file__).with_name("consan_validation_faults_gfx1100.json")
+        expected = {
+            "d128-block": (
+                "barrier-drop-k-publication-group",
+                "fnv1a64:43b0a96f4ab07982",
+                "pc=0x0000000000054844",
+                "pc=0x0000000000054850",
+            ),
+            "d128-pressure": (
+                "barrier-drop-kv-publication-group",
+                "fnv1a64:e969c5a2e1a058f7",
+                "pc=0x000000000003ac0c",
+                "pc=0x000000000003ac18",
+            ),
+            "wmma-attention": (
+                "barrier-drop-kv-publication-group",
+                "fnv1a64:f8a2c2abd1d454c2",
+                "pc=0x0000000000015530",
+                "pc=0x000000000001553c",
+            ),
+            "jakub-attention": (
+                "barrier-drop-load-compute-publication",
+                "fnv1a64:60f9f11b7f717a09",
+                "pc=0x000000000000068c",
+                None,
+            ),
+        }
+
+        for workload_id, (
+            fault_prefix,
+            code_object,
+            primary_pc,
+            companion_pc,
+        ) in expected.items():
+            grouped = companion_pc is not None
+            workload = validation.WORKLOAD_BY_ID[workload_id]
+            with self.subTest(workload=workload_id, profile="default"):
+                for preset in ("default", "high", "higher", "max"):
+                    fault = validation_faults._load_fault(
+                        catalog,
+                        "gfx1100",
+                        workload,
+                        f"{fault_prefix}-preset-{preset}",
+                    )
+                    environment = fault["environment"]
+                    self.assertEqual(environment["RJ_CONSAN_FAULT_DROP_BARRIER"], "1")
+                    self.assertIn(
+                        code_object, environment["RJ_CONSAN_FAULT_SITE_IDENTITY"]
+                    )
+                    self.assertIn(
+                        primary_pc, environment["RJ_CONSAN_FAULT_SITE_IDENTITY"]
+                    )
+                    self.assertEqual(
+                        "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY" in environment,
+                        grouped,
+                    )
+                    self.assertEqual(
+                        "RJ_CONSAN_FAULT_BARRIER_COMPANION_SITE_IDENTITY"
+                        in environment,
+                        grouped,
+                    )
+                    self.assertEqual(
+                        "RJ_CONSAN_FAULT_BARRIER_COMPANION_SEQUENCE_IDENTITY"
+                        in environment,
+                        grouped,
+                    )
+                    if companion_pc is not None:
+                        self.assertIn(
+                            companion_pc,
+                            environment[
+                                "RJ_CONSAN_FAULT_BARRIER_COMPANION_SITE_IDENTITY"
+                            ],
+                        )
+                    policy, trials = validation_faults._fault_trials(fault, "default")
+                    self.assertEqual(policy["detector"], "statistical")
+                    self.assertEqual(policy["minimum_detections"], 6)
+                    self.assertEqual(policy["oracle"], "any")
+                    self.assertEqual(trials, [{"RJ_CONSAN_PRESET": preset}] * 8)
+
+            with self.subTest(workload=workload_id, profile="supercollider"):
+                fault = validation_faults._load_fault(
+                    catalog,
+                    "gfx1100",
+                    workload,
+                    f"{fault_prefix}-sc-sleep-15",
+                )
+                policy, trials = validation_faults._fault_trials(fault, "supercollider")
+                self.assertEqual(policy["detector"], "statistical")
+                self.assertEqual(policy["minimum_detections"], 6)
+                self.assertEqual(policy["oracle"], "any")
+                self.assertEqual(
+                    trials,
+                    [
+                        {
+                            "RJ_CONSAN_SC_DELAY_MODE": "sleep",
+                            "RJ_CONSAN_SC_DELAY": "15",
+                        }
+                    ]
+                    * 8,
                 )
 
     def test_gfx1100_fails_closed_without_native_registry(self) -> None:
