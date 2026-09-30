@@ -955,6 +955,7 @@ TEST_F(GinTrafficClassMPITest, DeviceHostPrecedence)
 
     configured_traffic_class_ = kHostCommTrafficClass;
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    SKIP_IF_GIN_UNSUPPORTED();
 
     GinTrafficClassCapture device =
         captureGinQpTrafficClass(kDeviceCommTrafficClass, log_ctx);
@@ -1025,6 +1026,7 @@ TEST_F(GinTrafficClassMPITest, ExplicitIbEnvironmentOverrides)
 
     configured_traffic_class_ = kHostCommTrafficClass;
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    SKIP_IF_GIN_UNSUPPORTED();
     GinTrafficClassCapture capture =
         captureGinQpTrafficClass(kDeviceCommTrafficClass, log_ctx);
     ASSERT_MPI_EQ(ncclSuccess, capture.create_result);
