@@ -76,7 +76,6 @@ docker run -it --rm --shm-size 64G \
         -x NCCL_DMABUF_ENABLE=1 \
         -x NCCL_P2P_DISABLE=1 \
         -x NCCL_CROSS_NIC=1 \
-        -x NCCL_IB_MERGE_NICS=0 \
         -x NCCL_MSCCL_ENABLE=0 \
         -x HSA_NO_SCRATCH_RECLAIM=1 \
         -x NCCL_DEBUG=INFO \
