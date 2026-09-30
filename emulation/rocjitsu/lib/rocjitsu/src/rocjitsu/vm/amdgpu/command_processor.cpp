@@ -2411,6 +2411,16 @@ CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
       const VmAccessOutcome initialization = init_wavefront_regs(cu, wf, entry, global_wg_id, w);
       if (initialization != VmAccessOutcome::Complete) {
         free_reserved();
+        if (initialization == VmAccessOutcome::Revoked && !entry.pm4_abi) {
+          // No wave in this workgroup has executed. Discard its partial register
+          // setup and recapture access on retry; scratch provisioning is idempotent.
+          // Keep a retry scheduled even when releasing these reservations left
+          // every CU idle. PM4 retains its submission-failure path.
+          entry.execution_access.reset();
+          if (engine())
+            arm_stall_recheck(engine()->context(partition_id()).current_tick());
+          return VmAccessOutcome::Unavailable;
+        }
         return initialization;
       }
     }

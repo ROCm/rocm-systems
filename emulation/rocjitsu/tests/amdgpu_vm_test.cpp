@@ -1150,6 +1150,142 @@ TEST(AqlDispatchTest, InvalidationRefetchesInstructionsAlreadyInCache) {
   EXPECT_FALSE(fixture.cp()->queue_faulted_for_test(1, kProcessId));
 }
 
+TEST(AqlDispatchTest, RevokedWaveSetupRecoversBeforeExecution) {
+  using namespace rocr::llvm::amdhsa;
+  constexpr uint32_t kProcessId = 77;
+  constexpr uint32_t kQueueId = 1;
+  constexpr uint32_t kExceptionEvent = 19;
+  constexpr uint64_t kKernargAddress = 0x2000;
+  constexpr uint64_t kCompletionSignal = 0x3000;
+  constexpr uint64_t kExceptionStatus = 0x4000;
+  constexpr uint32_t kKernargValue = 0x12345678;
+
+  class SetupObserver final : public ExecutionPlugin {
+  public:
+    explicit SetupObserver(std::function<void()> before_setup)
+        : ExecutionPlugin("observe_revoked_setup"), before_setup_(std::move(before_setup)) {}
+
+    void onAmdgpuDispatchExecutionBegin(uint32_t) override { before_setup_(); }
+
+    void onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) override {
+      preloaded_values.push_back(wf.debug_read_sgpr(0));
+      scratch_bases.push_back(wf.scratch_base());
+    }
+
+    std::vector<uint32_t> preloaded_values;
+    std::vector<uint64_t> scratch_bases;
+
+  private:
+    std::function<void()> before_setup_;
+  };
+
+  // Revoke before a kernarg preload, or between scratch's initial probe and
+  // post-allocation validation. Neither setup path has executed guest code;
+  // both must release the uncommitted workgroup and allow it to complete.
+  for (bool scratch : {false, true}) {
+    for (bool invalidate : {false, true}) {
+      SCOPED_TRACE(testing::Message() << "scratch=" << scratch << ", invalidate=" << invalidate);
+      VmFixture fixture("cdna5", /*num_cus=*/1, /*num_wf_slots=*/2);
+      auto translator = std::make_shared<amdgpu::IdentityAddressSpaceTranslator>();
+      auto physical = std::make_shared<amdgpu::GpuMemoryPhysicalAccess>(*fixture.mem());
+      uint32_t snapshot_faults = 0;
+      const auto address_space = fixture.soc_ptr->gpu_vm().register_address_space(
+          kProcessId, translator, physical,
+          [&](uint64_t, amdgpu::VmAccessKind) { ++snapshot_faults; });
+      ASSERT_TRUE(address_space);
+
+      uint32_t invalidations = 0;
+      const auto invalidate_once = [&] {
+        if (invalidate && invalidations == 0) {
+          ASSERT_TRUE(fixture.soc_ptr->gpu_vm().invalidate(address_space));
+          ++invalidations;
+        }
+      };
+      auto observer = std::make_unique<SetupObserver>([&] {
+        if (!scratch)
+          invalidate_once();
+      });
+      auto *observed = observer.get();
+      auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+      ASSERT_TRUE(group->add(std::move(observer)));
+      fixture.soc_ptr->set_plugin_group(group);
+      uint32_t allocations = 0;
+      fixture.cp()->set_scratch_backing_allocator([&](uint32_t, uint64_t, size_t) {
+        ++allocations;
+        invalidate_once();
+        return true;
+      });
+
+      const uint32_t code[] = {0xBFB00000u}; // CDNA5 s_endpgm.
+      const uint64_t kernel = fixture.write_kernel(0x1000, code, sizeof(code), 104, 256, 1);
+      if (scratch) {
+        fixture.mem()->write32(kernel + offsetof(kernel_descriptor_t, private_segment_fixed_size),
+                               4);
+      } else {
+        uint16_t preload = 0;
+        AMDHSA_BITS_SET(preload, KERNARG_PRELOAD_SPEC_LENGTH, 1);
+        fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(&preload), sizeof(preload),
+                                  kernel + offsetof(kernel_descriptor_t, kernarg_preload));
+      }
+      fixture.mem()->write32(kKernargAddress, kKernargValue);
+      init_completion_signal(fixture.mem(), kCompletionSignal);
+      fixture.mem()->write64(kExceptionStatus, 0);
+
+      uint32_t exception_count = 0;
+      amdgpu::InterruptSubscription owner([&](uint32_t process_id, uint32_t event_id) {
+        EXPECT_EQ(process_id, kProcessId);
+        if (event_id == 0)
+          return;
+        EXPECT_EQ(event_id, kExceptionEvent);
+        ++exception_count;
+        fixture.mem()->write64(kExceptionStatus, 0);
+      });
+      amdgpu::ComputeQueueConfig queue{};
+      queue.address_space = address_space;
+      queue.interrupt_sink = owner.sink();
+      queue.process_id = kProcessId;
+      queue.queue_id = kQueueId;
+      queue.ring_base_va = test::AqlQueue::DEFAULT_RING_ADDR;
+      queue.ring_size = test::AqlQueue::DEFAULT_RING_SIZE;
+      queue.read_ptr_va = test::AqlQueue::DEFAULT_READ_PTR_ADDR;
+      queue.write_ptr_va = test::AqlQueue::DEFAULT_WRITE_PTR_ADDR;
+      queue.doorbell_va = test::AqlQueue::DEFAULT_DOORBELL_ADDR;
+      queue.doorbell_mode = amdgpu::QueueDoorbellMode::VmPolled;
+      queue.exception_status_va = kExceptionStatus;
+      queue.exception_event_id = kExceptionEvent;
+      fixture.cp()->register_queue(queue);
+      auto packet = make_dispatch_packet(kernel, kCompletionSignal, 64, 64);
+      packet.kernarg_address = reinterpret_cast<void *>(kKernargAddress);
+      fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(&packet), sizeof(packet),
+                                queue.ring_base_va);
+      fixture.mem()->write64(queue.read_ptr_va, 0);
+      fixture.mem()->write64(queue.write_ptr_va, 1);
+      fixture.mem()->write64(queue.doorbell_va, 1);
+      fixture.engine->schedule_event_now(fixture.cp()->doorbell_event());
+      for (uint32_t step = 0; step < 1000 && fixture.engine->step(); ++step) {
+      }
+
+      EXPECT_EQ(invalidations, invalidate ? 1u : 0u);
+      EXPECT_TRUE(fixture.cu()->is_idle());
+      EXPECT_FALSE(fixture.cp()->queue_faulted_for_test(kQueueId, kProcessId));
+      EXPECT_EQ(completion_signal_value(fixture.mem(), kCompletionSignal), 0);
+      EXPECT_EQ(exception_count, 0u);
+      EXPECT_EQ(snapshot_faults, 0u);
+      EXPECT_EQ(observed->preloaded_values.size(), 2u);
+      if (observed->preloaded_values.size() != 2)
+        continue;
+      if (scratch) {
+        EXPECT_GT(allocations, 0u);
+        EXPECT_NE(observed->scratch_bases[0], 0u);
+        EXPECT_NE(observed->scratch_bases[0], observed->scratch_bases[1]);
+      } else {
+        EXPECT_EQ(observed->preloaded_values,
+                  (std::vector<uint32_t>{kKernargValue, kKernargValue}));
+      }
+    }
+  }
+}
+
 TEST(AqlDispatchTest, RevokedInFlightLoadPublishesQueueMemoryException) {
   constexpr uint32_t kProcessId = 77;
   constexpr uint32_t kQueueId = 1;
