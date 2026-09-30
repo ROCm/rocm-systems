@@ -140,7 +140,7 @@ cache:
   max_entries_per_gpu: 1024
 ```
 
-### `rocr-runtime`
+### rocr-runtime
 
 ROCR implements 3 HSA API routines that involve GPU->system time translation, and thus must vector through this
 translation system. They are:
