@@ -50,7 +50,7 @@ static const char* const kDiagFailureMarkers[] = {
     "p2p: active check returned",
     "p2p: setup failed",
     "p2p: destination buffer unavailable",
-    "p2p: local CUDA setup failed",
+    "p2p: local HIP setup failed",
     "p2p: peer-memory import failed",
     "p2p: write mismatch",
     "p2p: read mismatch",
@@ -509,7 +509,7 @@ TEST_F(Diagnostics, SingleProcessPeerAccessNotice)
 
         const std::vector<int> devices = firstDevices(nGpus);
         const bool full                = xgmiFullMesh(devices);
-        const std::string notice = "NCCL DIAG [INFO] p2p: temporarily enabled context-wide CUDA peer access rank=";
+        const std::string notice = "NCCL DIAG [INFO] p2p: temporarily enabled context-wide HIP peer access rank=";
         EXPECT_LE(report.count(notice), nGpus) << report.dump();
         for(int rank = 0; rank < nGpus; ++rank)
         {
@@ -555,7 +555,7 @@ TEST_F(Diagnostics, ReportParserOnFixedCapture)
           "node01:4242 NCCL DIAG [INFO] p2p: active check returned 3\n"
           "node01:4242 NCCL DIAG [INFO] p2p: setup failed on rank 2 result=1\n"
           "node01:4242 NCCL DIAG [INFO] p2p: destination buffer unavailable srcRank=0 dstRank=1 reason=noDescriptor\n"
-          "node01:4242 NCCL DIAG [INFO] p2p: local CUDA setup failed srcRank=0 dstRank=1 reason=localCuda\n"
+          "node01:4242 NCCL DIAG [INFO] p2p: local HIP setup failed srcRank=0 dstRank=1 reason=localCuda\n"
           "node01:4242 NCCL DIAG [INFO] p2p: peer-memory import failed srcRank=0 dstRank=1 reason=import\n"
           "node01:4242 NCCL DIAG [INFO] p2p: write mismatch srcRank=0 dstRank=1 expected=0x1 got=0x0\n"
           "node01:4242 NCCL DIAG [INFO] p2p: read mismatch srcRank=0 dstRank=1 expected=0x1 got=0x0\n"
