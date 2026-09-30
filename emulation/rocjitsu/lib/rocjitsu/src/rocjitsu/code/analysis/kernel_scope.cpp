@@ -39,7 +39,7 @@ struct ReachableKernelBlocks {
 }
 
 [[nodiscard]] ReachableKernelBlocks
-reachable_kernel_blocks(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
+reachable_kernel_blocks(const BlockPositionIndex &block_positions,
                         const BlockOffsetIndex &block_index, BasicBlock &entry,
                         const std::unordered_set<uint64_t> &kernel_entries,
                         const std::unordered_set<uint64_t> &own_entries) {
@@ -48,6 +48,7 @@ reachable_kernel_blocks(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
     KernelCfgOwnerProofKind proof = KernelCfgOwnerProofKind::KernelLocal;
   };
   std::unordered_map<const BasicBlock *, KernelCfgOwnerProofKind> reachable;
+  std::vector<BasicBlock *> reached_blocks;
   std::vector<WorkItem> stack{{.block = &entry}};
   for (const uint64_t own_entry : own_entries) {
     if (own_entry == entry.start_offset())
@@ -67,6 +68,8 @@ reachable_kernel_blocks(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
     if (prior != reachable.end() &&
         static_cast<uint8_t>(prior->second) <= static_cast<uint8_t>(item.proof))
       continue;
+    if (prior == reachable.end())
+      reached_blocks.push_back(block);
     reachable[block] = item.proof;
 
     for (BasicBlock *succ : block->successors()) {
@@ -88,10 +91,18 @@ reachable_kernel_blocks(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
 
   ReachableKernelBlocks result;
   result.blocks.reserve(reachable.size());
-  for (const auto &block : blocks) {
-    if (block && reachable.contains(block.get()))
-      result.blocks.push_back(block.get());
+  // Order only the reachable subset. Scanning every block for every owner
+  // makes small kernel scopes quadratic in the size of a kernel library.
+  std::vector<std::pair<size_t, BasicBlock *>> ordered;
+  ordered.reserve(reachable.size());
+  for (BasicBlock *block : reached_blocks) {
+    const auto position = block_positions.find(block);
+    if (position != block_positions.end())
+      ordered.emplace_back(position->second, block);
   }
+  std::ranges::sort(ordered, {}, &std::pair<size_t, BasicBlock *>::first);
+  for (const auto &[position, block] : ordered)
+    result.blocks.push_back(block);
   result.proofs = std::move(reachable);
   return result;
 }
@@ -215,11 +226,11 @@ kernel_cfg_owners_for_offset(std::span<const KernelCfgOwnerScope> owner_scopes,
   return owners;
 }
 
-std::optional<KernelCfgScope>
-build_kernel_cfg_scope(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
-                       const BlockOffsetIndex &block_index, const KernelScopeRequest &request,
-                       std::span<const uint64_t> all_kernel_entries,
-                       std::span<const uint8_t> text) {
+std::optional<KernelCfgScope> build_kernel_cfg_scope(const BlockPositionIndex &block_positions,
+                                                     const BlockOffsetIndex &block_index,
+                                                     const KernelScopeRequest &request,
+                                                     std::span<const uint64_t> all_kernel_entries,
+                                                     std::span<const uint8_t> text) {
   BasicBlock *entry = block_for_offset(block_index, request.entry_offset);
   if (entry == nullptr)
     return std::nullopt;
@@ -235,11 +246,20 @@ build_kernel_cfg_scope(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
   KernelCfgScope scope;
   scope.entry = entry;
   ReachableKernelBlocks reachable =
-      reachable_kernel_blocks(blocks, block_index, *entry, kernel_entries, own_entries);
+      reachable_kernel_blocks(block_positions, block_index, *entry, kernel_entries, own_entries);
   scope.blocks = std::move(reachable.blocks);
   scope.owner_proofs = std::move(reachable.proofs);
   add_scoped_call_flow(scope, text);
   return scope;
+}
+
+std::optional<KernelCfgScope>
+build_kernel_cfg_scope(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
+                       const BlockOffsetIndex &block_index, const KernelScopeRequest &request,
+                       std::span<const uint64_t> all_kernel_entries,
+                       std::span<const uint8_t> text) {
+  return build_kernel_cfg_scope(build_block_position_index(blocks), block_index, request,
+                                all_kernel_entries, text);
 }
 
 } // namespace rocjitsu

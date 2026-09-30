@@ -82,4 +82,12 @@ build_kernel_cfg_scope(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
                        const BlockOffsetIndex &block_index, const KernelScopeRequest &request,
                        std::span<const uint64_t> all_kernel_entries, std::span<const uint8_t> text);
 
+/// Build a scope using positions shared across all owners of an immutable CFG.
+/// Both indices must describe the same block vector. Positions preserve its
+/// order without scanning unrelated blocks for each kernel.
+[[nodiscard]] std::optional<KernelCfgScope>
+build_kernel_cfg_scope(const BlockPositionIndex &block_positions,
+                       const BlockOffsetIndex &block_index, const KernelScopeRequest &request,
+                       std::span<const uint64_t> all_kernel_entries, std::span<const uint8_t> text);
+
 } // namespace rocjitsu

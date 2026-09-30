@@ -2172,6 +2172,7 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
   }
   const auto &blocks = *reusable_blocks;
   const BlockOffsetIndex block_index = build_block_offset_index(blocks);
+  const BlockPositionIndex block_positions = build_block_position_index(blocks);
   CodeObjectPatcher patcher(code_object);
   const std::span<const uint8_t> text = patcher.text_bytes();
   std::unordered_map<const BasicBlock *, std::vector<ExecutionOwner>> owners_by_block;
@@ -2190,7 +2191,7 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
         additional_entry_offsets.push_back(*range.continuation_text_offset);
     }
     auto scope = build_kernel_cfg_scope(
-        blocks, block_index,
+        block_positions, block_index,
         KernelScopeRequest{.entry_offset = kernel.entry_text_offset,
                            .additional_entry_offsets = additional_entry_offsets},
         cfg.kernel_entries, text);

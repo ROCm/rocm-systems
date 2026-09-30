@@ -119,6 +119,7 @@ public:
     blocks_ = BasicBlock::build(code_object, *decoder_, arch, cfg.leaders, cfg.code_ranges);
     block_ptrs_ = block_ptrs_for(blocks_);
     block_index_ = build_block_offset_index(blocks_);
+    block_positions_ = build_block_position_index(blocks_);
     kernel_entries_ = std::move(cfg.kernel_entries);
     if (code_object.text_sections().size() == 1u) {
       const Section *text = code_object.text_sections().front();
@@ -142,7 +143,7 @@ public:
     const ProgramContainer *owner = kernel(id);
     if (!decoder_ || owner == nullptr || !owner->has_text_range || failed_contexts_[id.ordinal])
       return nullptr;
-    auto scope = build_kernel_cfg_scope(blocks_, block_index_,
+    auto scope = build_kernel_cfg_scope(block_positions_, block_index_,
                                         KernelScopeRequest{.entry_offset = owner->entry_text_offset,
                                                            .additional_entry_offsets = {}},
                                         kernel_entries_, pristine_text_);
@@ -231,6 +232,7 @@ private:
   std::vector<std::unique_ptr<BasicBlock>> blocks_;
   std::vector<BasicBlock *> block_ptrs_;
   BlockOffsetIndex block_index_;
+  BlockPositionIndex block_positions_;
   std::vector<uint64_t> kernel_entries_;
   std::span<const uint8_t> pristine_text_;
   std::vector<std::optional<SuperColliderOwnerContext>> contexts_;

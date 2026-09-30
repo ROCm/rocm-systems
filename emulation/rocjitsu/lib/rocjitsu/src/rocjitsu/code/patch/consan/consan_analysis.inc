@@ -1718,6 +1718,7 @@ void prune_unreachable_inferred_ranges(const AmdGpuCodeObject &code_object, Deco
   }
   auto blocks = BasicBlock::build(code_object, decoder, arch, cfg.leaders, cfg.code_ranges);
   const BlockOffsetIndex block_index = build_block_offset_index(blocks);
+  const BlockPositionIndex block_positions = build_block_position_index(blocks);
   CodeObjectPatcher patcher(code_object);
   const std::span<const uint8_t> text = patcher.text_bytes();
   std::unordered_set<const BasicBlock *> owned_blocks;
@@ -1737,7 +1738,7 @@ void prune_unreachable_inferred_ranges(const AmdGpuCodeObject &code_object, Deco
         additional_entries.push_back(*range.continuation_text_offset);
     }
     auto scope = build_kernel_cfg_scope(
-        blocks, block_index,
+        block_positions, block_index,
         KernelScopeRequest{kernel.entry_text_offset, std::move(additional_entries)},
         cfg.kernel_entries, text);
     // One kernel's valid scope cannot prove that another kernel's sites are

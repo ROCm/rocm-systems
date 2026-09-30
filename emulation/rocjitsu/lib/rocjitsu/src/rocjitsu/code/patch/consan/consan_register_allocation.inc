@@ -761,6 +761,7 @@ struct ResourcePlanningState {
         problem.inventory().preapplied_mutation().code_ranges, problem.request(), DebugOverrides{});
     blocks = BasicBlock::build(code_object, *decoder, arch, cfg.leaders, cfg.code_ranges);
     block_index = build_block_offset_index(blocks);
+    const BlockPositionIndex block_positions = build_block_position_index(blocks);
     CodeObjectPatcher patcher(code_object);
     const std::span<const uint8_t> text = patcher.text_bytes();
 
@@ -811,7 +812,7 @@ struct ResourcePlanningState {
           additional_entry_offsets.push_back(*range.continuation_text_offset);
       }
       auto scope = build_kernel_cfg_scope(
-          blocks, block_index,
+          block_positions, block_index,
           KernelScopeRequest{.entry_offset = kernel.entry_text_offset,
                              .additional_entry_offsets = additional_entry_offsets},
           cfg.kernel_entries, text);

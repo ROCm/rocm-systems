@@ -2578,6 +2578,37 @@ TEST(KernelScopeAnalysis, SeedsAdditionalDescriptorEntryWithoutClaimingNextKerne
   EXPECT_FALSE(build_kernel_cfg_scope(blocks, index, request, kernel_entries, text).has_value());
 }
 
+TEST(KernelScopeAnalysis, IndexedScopesPreserveBlockOrderAndExcludeOtherKernels) {
+  std::vector<uint32_t> words(512, build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));
+  TestCodeObject co(words);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  std::vector<uint64_t> entries;
+  for (size_t i = 0; i < words.size(); ++i)
+    entries.push_back(i * sizeof(uint32_t));
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, entries);
+  ASSERT_EQ(blocks.size(), words.size());
+  // Preserve vector order, including holes, rather than pointer or offset order.
+  std::ranges::reverse(blocks);
+  blocks.insert(blocks.begin() + 3, nullptr);
+  const auto offsets = build_block_offset_index(blocks);
+  const auto positions = build_block_position_index(blocks);
+  const auto text = std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(words.data()),
+                                             words.size() * sizeof(uint32_t));
+  for (uint64_t entry : entries) {
+    const uint64_t extra = (entry + sizeof(uint32_t)) % text.size();
+    const auto scope = build_kernel_cfg_scope(positions, offsets,
+                                              KernelScopeRequest{entry, {extra}}, entries, text);
+    ASSERT_TRUE(scope);
+    ASSERT_EQ(scope->blocks.size(), 2u);
+    EXPECT_EQ(scope->blocks[0]->start_offset(), std::max(entry, extra));
+    EXPECT_EQ(scope->blocks[1]->start_offset(), std::min(entry, extra));
+    EXPECT_EQ(scope->owner_proofs.size(), 2u);
+    EXPECT_TRUE(scope->liveness_edges.empty());
+    EXPECT_TRUE(scope->call_return_offsets.empty());
+  }
+}
+
 TEST(KernelScopeAnalysis, SharedHelperGetsContextSpecificReturnEdges) {
   constexpr uint16_t kReturnSreg = 30;
   std::vector<uint32_t> words = {
