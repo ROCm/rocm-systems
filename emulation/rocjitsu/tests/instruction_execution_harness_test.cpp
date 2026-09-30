@@ -7938,8 +7938,9 @@ TEST(HwregTest, OtherArchitecturesPreserveHardwareRegisterMappings) {
       // Slot 1 distinguishes its zero value from a wrongly applied slot % 4.
       const bool state_priv =
           id == 4 && (cfg.arch == ROCJITSU_CODE_ARCH_RDNA4 || cfg.arch == ROCJITSU_CODE_ARCH_CDNA5);
-      if (state_priv)
+      if (state_priv) {
         EXPECT_STREQ(amdgpu::hwreg_name(*wf, field), "WAVE_STATE_PRIV");
+      }
       uint32_t value = UINT32_MAX;
       EXPECT_EQ(amdgpu::read_hwreg_field(*wf, field, value),
                 state_priv ? amdgpu::HwregAccessResult::Success
