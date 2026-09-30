@@ -183,7 +183,7 @@ experiment::serialize(ArchiveT& ar, const unsigned)
         init_progress.clear();
         fini_progress.clear();
         ar(cereal::make_nvp("progress_points", _ppts));
-        for(auto const itr : _ppts)
+        for(const auto& itr : _ppts)
         {
             fini_progress.emplace(itr.get_hash(), itr);
         }
@@ -197,7 +197,7 @@ experiment::serialize(ArchiveT& ar, const unsigned)
             {
                 pitr.second.set_hash(pitr.first);
             }
-            for(auto const pitr : init_progress)
+            for(const auto& pitr : init_progress)
             {
                 ppts[pitr.first] -= pitr.second;
             }
@@ -313,7 +313,7 @@ experiment::stop()
     auto _prog_stats = tim::statistics<double>{};
     auto _prog_vals  = std::vector<std::int64_t>{};
     _prog_vals.reserve(fini_progress.size());
-    for(auto const fitr : fini_progress)
+    for(auto const& fitr : fini_progress)
     {
         auto const         _pt  = fitr.second - init_progress[fitr.first];
         const std::int64_t _num = std::max<std::int64_t>(
@@ -700,12 +700,12 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
                 << "\n";
 
             auto ppts = itr.fini_progress;
-            for(auto const pitr : itr.init_progress)
+            for(const auto& pitr : itr.init_progress)
             {
                 ppts[pitr.first] -= pitr.second;
             }
 
-            for(auto const pitr : ppts)
+            for(auto const& pitr : ppts)
             {
                 // if(pitr.second.get_laps() == 0) continue;
                 if(get_causal_end_to_end() && pitr.second.get_laps() > 1)
