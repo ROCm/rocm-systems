@@ -69,7 +69,10 @@ ftid fields use PyTorch's own thread identifiers and must not replace it.
 The callback requests RecordFunction inputs. The capture module reads the
 borrowed input-array view through the shim's recorded offset and uses the
 operator name and overload, when available, to look up schema argument names.
-Schema names are cached; a missing schema leaves positional values usable.
+The collector updates cached argument names when PyTorch registers or removes
+a schema. It reads schemas under PyTorch's registration lock and keeps old
+name data until process exit so other threads can finish reading it safely.
+If names are unavailable, arguments are recorded without them.
 
 | Input | Marker representation |
 | --- | --- |
@@ -163,7 +166,8 @@ rocprofiler-compute library directory under lib or lib64, without a Torch
 minor or Python-SOABI suffix.
 
 The local shim covers RecordFunction and callback layouts, input views,
-IValue payloads, operator names and handles, and ThreadLocalDebugInfo. These
+IValue payloads, operator names and handles, Dispatcher registration listeners
+and their registration handle, and ThreadLocalDebugInfo. These
 are private PyTorch interfaces. The accepted compatibility boundary is the
 validated 2.13/2.14 layout set, not an upstream ABI guarantee for every build
 of those minors. Extending this set requires real-header and runtime behavior

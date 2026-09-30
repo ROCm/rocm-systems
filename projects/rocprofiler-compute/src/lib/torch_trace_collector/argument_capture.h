@@ -20,6 +20,9 @@ inline constexpr std::size_t kTruncationSuffixLength = 4;
 inline constexpr std::size_t kMaxEncodedArgumentsLength = (kMaxArgsLength * 3) + kTruncationSuffixLength;
 inline constexpr std::size_t kMaxEncodedArgumentsSize = kMaxEncodedArgumentsLength + 1;
 
+/** Install schema tracking before enabling RecordFunction callbacks. */
+bool initialize_argument_capture() noexcept;
+
 /**
  * Capture the encoded argument field from a borrowed RecordFunction.
  *

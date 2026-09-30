@@ -103,11 +103,11 @@ PROCESS_GROUP_METHODS = (
 
 
 def _render_tensor(obj: object) -> Optional[str]:
-    shape = getattr(obj, "shape", None)
-    dtype = getattr(obj, "dtype", None)
-    if shape is None or dtype is None:
-        return None
     try:
+        shape = getattr(obj, "shape", None)
+        dtype = getattr(obj, "dtype", None)
+        if shape is None or dtype is None:
+            return None
         dims = "x".join(str(int(d)) for d in shape)
         dt = str(dtype).replace("torch.", "")
         return f"{dt}[{dims}]"

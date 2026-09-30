@@ -15,6 +15,7 @@
 #include <ATen/record_function.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
 #include <gtest/gtest.h>
+#include <torch/library.h>
 #include <torch/version.h>
 
 #include <algorithm>
@@ -23,13 +24,16 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <exception>
 #include <functional>
+#include <future>
 #include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
 #include <vector>
 
 static_assert(sizeof(at::RecordFunction) == torch_abi::kRecordFunctionSize);
@@ -56,6 +60,10 @@ static_assert(sizeof(std::optional<c10::OperatorName>) == torch_abi::kOptionalOp
 static_assert(alignof(std::optional<c10::OperatorName>) == torch_abi::kOptionalOperatorNameAlignment);
 static_assert(sizeof(c10::OperatorHandle) == torch_abi::kOperatorHandleSize);
 static_assert(alignof(c10::OperatorHandle) == torch_abi::kOperatorHandleAlignment);
+static_assert(sizeof(c10::OpRegistrationListener) == torch_abi::kOpRegistrationListenerSize);
+static_assert(alignof(c10::OpRegistrationListener) == torch_abi::kOpRegistrationListenerAlignment);
+static_assert(sizeof(c10::RegistrationHandleRAII) == torch_abi::kRegistrationHandleSize);
+static_assert(alignof(c10::RegistrationHandleRAII) == torch_abi::kRegistrationHandleAlignment);
 static_assert(sizeof(c10::ArrayRef<const c10::IValue>) == torch_abi::kInputArrayViewSize);
 static_assert(alignof(c10::ArrayRef<const c10::IValue>) == torch_abi::kInputArrayViewAlignment);
 
@@ -387,6 +395,79 @@ TEST_F(TorchTraceCollectorTest, CapturesRealSchemaArgumentNamesAndOverloads)
                                         "dtype",
                                         {tensor, std::int64_t{6}, false, false, c10::IValue{}}),
               "(self=float32[2x3], dtype=Int, non_blocking=Bool, copy=Bool, memory_format=None)");
+}
+
+TEST_F(TorchTraceCollectorTest, CapturesReloadedSchemaNamesOnWarmAndColdThreads)
+{
+    constexpr auto       name = "schema_cache_regression::reload";
+    constexpr std::array argument_names{"original_input", "replacement_input", "final_input"};
+    torch::Library library(torch::Library::FRAGMENT, "schema_cache_regression", std::nullopt, __FILE__, __LINE__);
+    torch::Library implementation(torch::Library::IMPL, "schema_cache_regression", std::nullopt, __FILE__, __LINE__);
+    implementation.impl("reload", [](std::int64_t input) { return input; });
+    auto original_handle = c10::Dispatcher::singleton().findOp({name, ""});
+    ASSERT_TRUE(original_handle.has_value());
+    const std::vector<c10::IValue> inputs{std::int64_t{7}};
+
+    std::array<std::promise<std::string>, argument_names.size()> worker_captured;
+    std::array<std::future<std::string>, argument_names.size()>  worker_arguments;
+    std::future<void>                                            worker;
+    // Destruction releases the worker before its async future can wait for it.
+    std::array<std::promise<void>, argument_names.size()> schema_ready;
+    std::array<std::future<void>, argument_names.size()>  readiness;
+    for (std::size_t index = 0; index < argument_names.size(); ++index)
+    {
+        worker_arguments[index] = worker_captured[index].get_future();
+        readiness[index]        = schema_ready[index].get_future();
+    }
+    worker = std::async(std::launch::async,
+                        [&, ready = std::move(readiness)]() mutable
+                        {
+                            for (std::size_t index = 0; index < argument_names.size(); ++index)
+                            {
+                                try
+                                {
+                                    ready[index].get();
+                                    worker_captured[index].set_value(
+                                        captured_schema_arguments(name, "", inputs));
+                                }
+                                catch (...)
+                                {
+                                    worker_captured[index].set_exception(std::current_exception());
+                                    return;
+                                }
+                            }
+                        });
+
+    for (std::size_t index = 0; index < argument_names.size(); ++index)
+    {
+        SCOPED_TRACE(argument_names[index]);
+        library.reset();
+        EXPECT_FALSE(c10::Dispatcher::singleton().findSchema({name, ""}).has_value());
+        if (index + 1 == argument_names.size())
+        {
+            original_handle.reset();
+            implementation.reset();
+            EXPECT_FALSE(c10::Dispatcher::singleton().findOp({name, ""}).has_value());
+        }
+        const auto schema = "reload(int " + std::string{argument_names[index]} + ") -> int";
+        library.def(schema.c_str());
+        const auto handle = c10::Dispatcher::singleton().findSchemaOrThrow(name, "");
+        EXPECT_EQ(handle.schema().arguments()[0].name(), argument_names[index]);
+        if (original_handle.has_value())
+        {
+            EXPECT_EQ(handle, *original_handle);
+        }
+
+        const auto expected = "(" + std::string{argument_names[index]} + "=Int)";
+        EXPECT_EQ(captured_schema_arguments(name, "", inputs), expected);
+        schema_ready[index].set_value();
+        EXPECT_EQ(worker_arguments[index].get(), expected);
+        EXPECT_EQ(std::async(std::launch::async,
+                             [&] { return captured_schema_arguments(name, "", inputs); })
+                      .get(),
+                  expected);
+    }
+    worker.get();
 }
 
 TEST_F(TorchTraceCollectorTest, RealForwardBackwardDispatchCapturesArgumentsAndBalances)
