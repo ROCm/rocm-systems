@@ -121,7 +121,12 @@ struct thread_metadata_source
             constexpr size_t UNKNOWN_TIME = 0;
             thread_id                     = extended_info->index_data->system_value;
             rocprofsys::trace_cache::get_metadata_registry().add_thread_info(
-                { getppid(), getpid(), thread_id, UNKNOWN_TIME, UNKNOWN_TIME, "{}" });
+                { .parent_process_id = getppid(),
+                  .process_id        = getpid(),
+                  .thread_id         = thread_id,
+                  .start             = UNKNOWN_TIME,
+                  .end               = UNKNOWN_TIME,
+                  .extdata           = "{}" });
         }
         return thread_id;
     }
@@ -361,8 +366,8 @@ struct category_region
                      std::string args_str = {})
     {
         const auto start_ts = clock_.now();
-        map_name_to_args[entry_key{ name, std::string{ category } }].push_back(
-            pending_cache_entry{ start_ts, std::move(args_str) });
+        map_name_to_args[entry_key{ .name = name, .category = std::string{ category } }]
+            .push_back(pending_cache_entry{ start_ts, std::move(args_str) });
     }
 
     void append_cache_args(const char* name, std::string_view category,
@@ -373,7 +378,7 @@ struct category_region
             return;
         }
 
-        auto key = entry_key{ name, std::string{ category } };
+        auto key = entry_key{ .name = name, .category = std::string{ category } };
         auto itr = map_name_to_args.find(key);
         if(itr != map_name_to_args.end() && !itr->second.empty())
         {
@@ -399,7 +404,7 @@ struct category_region
 
     void cache_stop(const char* name, std::string_view category)
     {
-        const entry_key key{ name, std::string{ category } };
+        const entry_key key{ .name = name, .category = std::string{ category } };
         auto            x = map_name_to_args.find(key);
         if(x != map_name_to_args.end() && !x->second.empty())
         {

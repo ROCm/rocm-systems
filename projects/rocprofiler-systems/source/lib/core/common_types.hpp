@@ -162,9 +162,10 @@ process_arguments_string(std::string_view arg_str)
             throw std::invalid_argument("Malformed argument string.");
         }
 
-        const argument_info arg = { arg_number, unescape_field(*(it + 1)),
-                                    unescape_field(*(it + 2)),
-                                    unescape_field(*(it + 3)) };
+        const argument_info arg = { .arg_number = arg_number,
+                                    .arg_type   = unescape_field(*(it + 1)),
+                                    .arg_name   = unescape_field(*(it + 2)),
+                                    .arg_value  = unescape_field(*(it + 3)) };
         args.push_back(arg);
     }
 

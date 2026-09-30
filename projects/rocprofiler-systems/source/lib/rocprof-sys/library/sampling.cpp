@@ -217,10 +217,12 @@ metadata_initialize_thread_info(size_t tid)
     }
 
     trace_cache::get_metadata_registry().add_thread_info(
-        { getppid(), getpid(),
-          static_cast<size_t>(_thread_info->index_data->system_value),
-          static_cast<std::uint32_t>(_thread_info->get_start()),
-          static_cast<std::uint32_t>(_thread_info->get_stop()), "{}" });
+        { .parent_process_id = getppid(),
+          .process_id        = getpid(),
+          .thread_id = static_cast<size_t>(_thread_info->index_data->system_value),
+          .start     = static_cast<std::uint32_t>(_thread_info->get_start()),
+          .end       = static_cast<std::uint32_t>(_thread_info->get_stop()),
+          .extdata   = "{}" });
 }
 
 void
@@ -244,9 +246,9 @@ metadata_initialize_track(std::int64_t tid)
         get_track_name<category::overflow_sampling>(*_thread_info);
 
     trace_cache::get_metadata_registry().add_track(
-        { _timer_track_name, thread_id, "{}" });
+        { .track_name = _timer_track_name, .thread_id = thread_id, .extdata = "{}" });
     trace_cache::get_metadata_registry().add_track(
-        { _overflow_track_name, thread_id, "{}" });
+        { .track_name = _overflow_track_name, .thread_id = thread_id, .extdata = "{}" });
 }
 
 // Added
@@ -2129,7 +2131,8 @@ resume()
     if(_pause_ts > 0)
     {
         auto _lk = std::lock_guard<std::mutex>{ pause_mutex };
-        pause_intervals.push_back(pause_interval_t{ _pause_ts, _resume_ts });
+        pause_intervals.push_back(
+            pause_interval_t{ .pause_ts = _pause_ts, .resume_ts = _resume_ts });
     }
 
     set_sampler_timers(timer_state::running);
