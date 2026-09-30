@@ -201,7 +201,7 @@ The following table lists ROCm Compute Profiler's basic operations, their
 
    * - :ref:`Standalone roofline analysis <standalone-roofline>`
      - ``profile``
-     - ``--name`` or ``--output-directory``, ``--roofline``, ``--roofline-data-types <data_type>``, ``-- <profile_cmd>``
+     - ``--name`` or ``--output-directory``, ``--roofline``, ``-- <profile_cmd>``
 
    * - :doc:`Interact with profiling results from CLI </how-to/analyze/cli>`
      - ``analyze``

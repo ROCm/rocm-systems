@@ -29,7 +29,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
     * `--mem-level` is now `--roofline-mem-level` (`-m` still works)
     * `--roofline-data-type` is now `--roofline-data-types` (`-R` still works)
 
-* In profile mode, `--roofline` can now be combined with `-b`. For example, `-b 2 --roofline` profiles blocks 2 and 4.
+* In profile mode, `--roofline` now works the same as `-b 4`:
+  * It can be combined with `-b`. For example, `-b 2 --roofline` profiles blocks 2 and 4.
+  * On gfx908, it collects the roofline counters and skips the roofline benchmark, which gfx908 does not support.
 
 * The profile and analyze help is easier to read. Each option shows what value it takes, the values it accepts, and its default.
 

@@ -315,7 +315,7 @@ class RocProfCompute:
 
     def handle_profile_args(self) -> None:
         apply_panel_shortcuts(self.__args, "filter_blocks")
-        # --roofline alone profiles roofline data only
+        # --roofline and -b 4 both profile roofline data only
         self.__args.roof_only = self.__args.filter_blocks == ["4"]
         # Handle list operations first - these are independent and exit immediately
         if getattr(self.__args, "list_sets", False):

@@ -1050,6 +1050,30 @@ def test_sanitize_pc_sampling_method_unsupported(interval, monkeypatch):
         instance.sanitize()
 
 
+@pytest.mark.parametrize(
+    ("roofline", "filter_blocks", "expected_roof_only"),
+    [
+        (True, [], True),
+        (False, ["4"], True),
+        (True, ["2"], False),
+    ],
+    ids=["roofline_alone", "block_4", "roofline_with_block"],
+)
+def test_handle_profile_args_roof_only(roofline, filter_blocks, expected_roof_only):
+    """--roofline and -b 4 both mark a roofline-only run."""
+    args = argparse.Namespace(
+        mode="profile",
+        filter_blocks=filter_blocks,
+        speed_of_light=False,
+        memory_chart=False,
+        roofline=roofline,
+        list_sets=False,
+        list_available_metrics=False,
+    )
+    _make_rpc_with_args(args).handle_profile_args()
+    assert args.roof_only is expected_roof_only
+
+
 # ---------------------------------------------------------------------------
 # run_profiling(): native_tool_path reaches get_pc_sampling_profiler_options
 # ---------------------------------------------------------------------------
