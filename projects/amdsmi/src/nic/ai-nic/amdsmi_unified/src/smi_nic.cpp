@@ -17,7 +17,6 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 #include "smi_nic_transport.h"
@@ -115,14 +114,16 @@ static amd::smi::nic::vpd::VpdFields read_device_vpd(const std::string& sysfs_bu
 
 SmiNicPort::SmiNicPort(const std::string& iface, const std::string& bdf,
                        const std::string& sysfs_class_path, const std::string& sysfs_bus_path,
-                       std::shared_ptr<amd::smi::nic::transport::NicTransport> transport)
+                       std::shared_ptr<amd::smi::nic::transport::NicTransport> transport,
+                       const StatTable_t* stat_table)
     : iface_(iface),
       bdf_(bdf),
       sysfs_class_path_(sysfs_class_path),
       sysfs_bus_path_(sysfs_bus_path),
       transport_(transport ? std::move(transport)
                            : amd::smi::nic::transport::create_transport(
-                                 amd::smi::nic::transport::NicBackend_t::Auto)) {
+                                 amd::smi::nic::transport::NicBackend_t::Auto)),
+      stat_table_(stat_table) {
   port_num_ = get_sysfs_data<uint32_t>(sysfs_class_path_ + "/dev_port");
   auto type_value = get_sysfs_data<int>(sysfs_class_path_ + "/type");
 
@@ -250,25 +251,55 @@ const std::vector<SmiInfiniBand>& SmiNicPort::infiniband() const { return infini
 
 uint8_t SmiNicPort::infiniband_num() const { return static_cast<uint8_t>(infiniband_.size()); }
 
-void SmiNicPort::collect_vendor_statistics() {
-  auto result = transport_->get_statistics(iface_);
-  if (!result.success) {
-    return;
-  }
+void SmiNicPort::collect_vendor_statistics() const {
+  // Built fresh and assigned wholesale (not merged) so a counter the driver
+  // stops reporting disappears instead of keeping its last value forever,
+  // and so FEC counters (previously merged via emplace into a map that
+  // already held them from a prior call) get refreshed instead of frozen.
+  std::map<std::string, uint64_t> merged;
 
-  for (size_t i = 0; i < result.value.names.size(); ++i) {
-    const std::string& key = result.value.names[i];
-    if (is_vendor_stat_allowed(key)) {
-      vendor_stats_map_[key] = result.value.values[i];
+  auto result = transport_->get_statistics(iface_);
+  if (result.success) {
+    for (size_t i = 0; i < result.value.names.size(); ++i) {
+      merged.emplace(result.value.names[i], result.value.values[i]);
     }
   }
+
+  // FEC stats are netlink-only; a backend without them (ioctl, no libnl-3)
+  // reports failure here, which is not an error for the port — the FEC
+  // counters simply stay absent, same as any other name the table allows but
+  // the driver does not expose.
+  auto fec_result = transport_->get_fec_statistics(iface_);
+  if (fec_result.success) {
+    for (size_t i = 0; i < fec_result.value.names.size(); ++i) {
+      // `-S` wins on a name collision: emplace is a no-op if the key already
+      // exists from the loop above.
+      merged.emplace(fec_result.value.names[i], fec_result.value.values[i]);
+    }
+  }
+
+  vendor_stats_map_ = std::move(merged);
 }
 
-const std::map<std::string, uint64_t>& SmiNicPort::get_vendor_stats_map() const {
-  return vendor_stats_map_;
+std::map<std::string, uint64_t> SmiNicPort::get_vendor_stats_map(StatTier_t scope) const {
+  std::map<std::string, uint64_t> result;
+  if (!stat_table_) {
+    return result;
+  }
+
+  for (const auto& entry : *stat_table_) {
+    if ((scope == StatTier_t::Default) && (entry.tier != StatTier_t::Default)) {
+      continue;
+    }
+    auto it = vendor_stats_map_.find(entry.name);
+    if (it != vendor_stats_map_.end()) {
+      result.emplace(entry.name, it->second);
+    }
+  }
+  return result;
 }
 
-void SmiNicPort::collect_standard_statistics() {
+void SmiNicPort::collect_standard_statistics() const {
   std::string stats_path = sysfs_class_path_ + "/statistics";
 
   if (!std::filesystem::exists(stats_path) || !std::filesystem::is_directory(stats_path)) {
@@ -292,29 +323,6 @@ void SmiNicPort::collect_standard_statistics() {
 
 const std::map<std::string, uint64_t>& SmiNicPort::get_standard_stats_map() const {
   return standard_stats_map_;
-}
-
-std::string SmiNicPort::map_vendor_stat_to_string(SmiVendorStat stat) const {
-  static const std::unordered_map<SmiVendorStat, std::string> stat_map = {
-      {SmiVendorStat::TX_PACKETS, "tx_packets"},     {SmiVendorStat::RX_PACKETS, "rx_packets"},
-      {SmiVendorStat::TX_BYTES, "tx_bytes"},         {SmiVendorStat::RX_BYTES, "rx_bytes"},
-      {SmiVendorStat::TX_CSUM_NONE, "tx_csum_none"}, {SmiVendorStat::RX_CSUM_NONE, "rx_csum_none"},
-      {SmiVendorStat::TX_CSUM, "tx_csum"},           {SmiVendorStat::TX_TSO, "tx_tso"},
-      {SmiVendorStat::TX_TSO_BYTES, "tx_tso_bytes"}};
-
-  auto it = stat_map.find(stat);
-  return (it != stat_map.end()) ? it->second : "";
-}
-
-bool SmiNicPort::is_vendor_stat_allowed(const std::string& stat_name) const {
-  for (int i = static_cast<int>(SmiVendorStat::TX_PACKETS);
-       i <= static_cast<int>(SmiVendorStat::TX_TSO_BYTES); i++) {
-    SmiVendorStat stat = static_cast<SmiVendorStat>(i);
-    if (map_vendor_stat_to_string(stat) == stat_name) {
-      return true;
-    }
-  }
-  return false;
 }
 
 // **** SmiInfiniBandPort ****

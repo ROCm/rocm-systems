@@ -9879,6 +9879,20 @@ amdsmi_status_t amdsmi_get_nic_port_statistics(amdsmi_processor_handle processor
                                                amdsmi_nic_stat_t* stats);
 
 /**
+ *  @brief Which tier of vendor statistics to return
+ *
+ *  @ingroup tagNicInfo
+ *
+ *  AMDSMI_NIC_STAT_SCOPE_EXTENDED is a superset of AMDSMI_NIC_STAT_SCOPE_DEFAULT.
+ *
+ *  @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef enum {
+  AMDSMI_NIC_STAT_SCOPE_DEFAULT = 0,
+  AMDSMI_NIC_STAT_SCOPE_EXTENDED = 1
+} amdsmi_nic_stat_scope_t;
+
+/**
  *  @brief Retrieve vendor specific statistics for the NIC port
  *
  *  @ingroup tagNicInfo
@@ -9895,6 +9909,8 @@ amdsmi_status_t amdsmi_get_nic_port_statistics(amdsmi_processor_handle processor
  *
  *  @param[in] processor_handle NIC for which to query
  *  @param[in] port_index index of the NIC port to query
+ *  @param[in] scope AMDSMI_NIC_STAT_SCOPE_DEFAULT for the driver's default
+ *  counter set, AMDSMI_NIC_STAT_SCOPE_EXTENDED for the full set (a superset)
  *  @param[in,out] num_stats pointer to the number of statistics
  *    - Input: maximum number of statistics that stats array can hold
  *    - Output: actual number of statistics available/returned
@@ -9905,8 +9921,8 @@ amdsmi_status_t amdsmi_get_nic_port_statistics(amdsmi_processor_handle processor
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_nic_vendor_statistics(amdsmi_processor_handle processor_handle,
-                                                 uint32_t port_index, uint32_t* num_stats,
-                                                 amdsmi_nic_stat_t* stats);
+                                                 uint32_t port_index, amdsmi_nic_stat_scope_t scope,
+                                                 uint32_t* num_stats, amdsmi_nic_stat_t* stats);
 
 /** @} End tagNicInfo */
 

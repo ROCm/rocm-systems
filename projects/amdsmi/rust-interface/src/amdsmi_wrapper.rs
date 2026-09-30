@@ -516,6 +516,7 @@ pub enum AmdsmiVramTypeT {
     AmdsmiVramTypeHbm2e = 3,
     AmdsmiVramTypeHbm3 = 4,
     AmdsmiVramTypeHbm3e = 5,
+    AmdsmiVramTypeHbm4 = 6,
     AmdsmiVramTypeDdr2 = 10,
     AmdsmiVramTypeDdr3 = 11,
     AmdsmiVramTypeDdr4 = 12,
@@ -5414,10 +5415,17 @@ extern "C" {
         stats: *mut AmdsmiNicStatT,
     ) -> AmdsmiStatusT;
 }
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum AmdsmiNicStatScopeT {
+    AmdsmiNicStatScopeDefault = 0,
+    AmdsmiNicStatScopeExtended = 1,
+}
 extern "C" {
     pub fn amdsmi_get_nic_vendor_statistics(
         processor_handle: AmdsmiProcessorHandle,
         port_index: u32,
+        scope: AmdsmiNicStatScopeT,
         num_stats: *mut u32,
         stats: *mut AmdsmiNicStatT,
     ) -> AmdsmiStatusT;

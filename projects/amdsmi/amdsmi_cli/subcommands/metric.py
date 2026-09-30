@@ -3223,7 +3223,7 @@ class MetricCommands:
             self.logger.print_output(multiple_device_enabled=multiple_devices_csv_override)
 
     def metric_nic(self, args, multiple_devices=False, nic=None):
-        """Get metric (telemetry) information for target nic
+        """Get metric (telemetry, and optionally per-port statistics) for target nic
 
         Args:
             args (Namespace): Namespace containing the parsed CLI args
@@ -3250,13 +3250,93 @@ class MetricCommands:
 
         args.nic = device_handle
         nic_id = self.helpers.get_ainic_id_from_device_handle(args.nic)
+        values = {}
+
         telemetry = {}
         try:
             telemetry = amdsmi_interface.amdsmi_get_nic_telemetry(args.nic)
         except amdsmi_exception.AmdSmiLibraryException as e:
             logging.debug("Failed to get telemetry for nic %s | %s", nic_id, e.get_error_info())
+        values.update(telemetry)
 
-        self.logger.store_ainic_output(args.nic, "values", telemetry)
+        requested_port = getattr(args, "port", None)
+        if requested_port is not None:
+            # JSON always requests the full extended set regardless of --extended
+            # (design doc section 6); text output honors --extended.
+            want_extended = self.logger.is_json_format() or getattr(args, "extended", False)
+            scope = (
+                amdsmi_interface.amdsmi_wrapper.AMDSMI_NIC_STAT_SCOPE_EXTENDED
+                if want_extended
+                else amdsmi_interface.amdsmi_wrapper.AMDSMI_NIC_STAT_SCOPE_DEFAULT
+            )
+
+            try:
+                port_info = amdsmi_interface.amdsmi_get_nic_port_info(args.nic)
+                num_ports = port_info["num_ports"]
+            except (amdsmi_exception.AmdSmiLibraryException, KeyError) as e:
+                logging.debug("Failed to get port info for nic %s | %s", nic_id, e)
+                num_ports = 0
+
+            if requested_port == -1:
+                port_indices = list(range(num_ports))
+            else:
+                port_indices = [requested_port]
+
+            ports_output = {}
+            for port_index in port_indices:
+                if port_index >= num_ports:
+                    continue
+
+                netdev = "N/A"
+                try:
+                    netdev = port_info["ports"][port_index]["netdev"]
+                except (KeyError, IndexError):
+                    pass
+
+                vendor_stats = {}
+                try:
+                    raw_vendor_stats = amdsmi_interface.amdsmi_get_nic_vendor_statistics(
+                        args.nic, port_index, scope
+                    )
+                    vendor_stats = {name.upper(): value for name, value in raw_vendor_stats.items()}
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    logging.debug(
+                        "Failed to get vendor statistics for nic %s port %s | %s",
+                        nic_id,
+                        port_index,
+                        e.get_error_info(),
+                    )
+
+                standard_stats = {}
+                try:
+                    raw_standard_stats = amdsmi_interface.amdsmi_get_nic_port_statistics(
+                        args.nic, port_index
+                    )
+                    standard_stats = {
+                        name.upper(): value for name, value in raw_standard_stats.items()
+                    }
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    logging.debug(
+                        "Failed to get standard statistics for nic %s port %s | %s",
+                        nic_id,
+                        port_index,
+                        e.get_error_info(),
+                    )
+
+                ports_output[f"PORT_{port_index}"] = {
+                    "NETDEV": netdev,
+                    "VENDOR_STATISTICS": vendor_stats,
+                    "STATISTICS": standard_stats,
+                }
+
+            if ports_output:
+                values["PORTS"] = ports_output
+            elif not self.logger.is_json_format():
+                values["PORTS"] = "No ports found for this NIC"
+            else:
+                values["PORTS"] = {}
+
+        self.logger.store_ainic_output(args.nic, "values", values)
 
         if multiple_devices:
             self.logger.store_multiple_device_output()

@@ -203,6 +203,10 @@ class IoctlBackend : public NicTransport {
     return {true, result, 0};
   }
 
+  Result<FecStatistics_t> get_fec_statistics(const std::string& /* iface */) override {
+    return {false, {}, ENOTSUP};
+  }
+
   Result<PermanentAddress> get_permanent_address(const std::string& iface) override {
     /**
      * ethtool_perm_addr is followed by the MAC bytes; size the buffer for

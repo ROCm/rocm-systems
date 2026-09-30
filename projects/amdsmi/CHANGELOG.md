@@ -167,6 +167,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - A numeric profile INDEX (e.g. `-C 0`) is also accepted, matched against an estimated `SPX, DPX, TPX, QPX, CPX` ordering.
   - The `-C` help now lists `SPX, DPX, TPX, QPX, CPX` and `0-4` instead of `N/A`.
 
+- **`amdsmi_get_nic_port_statistics()` and `amdsmi_get_nic_vendor_statistics()` are now implemented**.  
+  - Both previously always returned `AMDSMI_STATUS_NOT_YET_IMPLEMENTED`. They now report per-port standard and vendor driver counters.
+  - `amdsmi_get_nic_vendor_statistics()` gains a new `amdsmi_nic_stat_scope_t scope` parameter (`DEFAULT` or `EXTENDED`), inserted before `num_stats`. This is a breaking signature change, but no released caller could have depended on the old signature actually returning data.
+  - `amd-smi metric --nic --port [--extended]` now shows per-port vendor and standard statistics.
+
 ### Removed
 
 - **Removed the internal `amd-smi` CLI exception classes `AmdSmiParameterNotSupportedException` and `AmdSmiUnknownErrorException`**.  
