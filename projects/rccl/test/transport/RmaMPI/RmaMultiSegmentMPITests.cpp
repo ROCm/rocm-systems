@@ -3,256 +3,19 @@
  *
  * See LICENSE.txt for license information
  ************************************************************************/
-
 // Multi-segment DMA-BUF registration tests for ncclRmaIbProxy / IbCastRmaIbProxy
 // (AIRUNTIME-2351). Run with NCCL_NET=IB or NCCL_NET=IB-CAST and NCCL_CUMEM_ENABLE=1.
 
 #ifdef MPI_TESTS_ENABLED
 #ifdef RCCL_HAS_RMA_IB_PROXY
 
-#include "RmaMPITestBase.hpp"
-#include "RmaMultiSegmentHelpers.hpp"
-#include "HybridVmmHelpers.hpp"
-#include "MPIHelpers.hpp"
-#include "transport/net_ib/rma_multiseg.h"
-#include "rccl_common.h"
+#include "RmaMultiSegmentFixture.hpp"
 
-#include <algorithm>
-#include <cstdint>
-#include <memory>
 #include <numeric>
 #include <random>
-#include <string>
-#include <vector>
 
 namespace RCCLRmaTests
 {
-
-namespace
-{
-
-constexpr size_t kSegRequestBytes = 2u * 1024 * 1024;
-constexpr int    kNumSegments     = 4;
-constexpr size_t kSignalSize      = 64;
-constexpr size_t kMiB             = 1024u * 1024;
-
-// Edge-case payload sizes from 0 up to `maxBytes`, anchored around byte/word,
-// page (4K), 64K, and the per-segment boundary `seg`. Deduplicated + sorted.
-inline std::vector<size_t> EdgeCaseSizes(size_t seg, size_t maxBytes)
-{
-    std::vector<size_t> v;
-    auto add = [&](size_t s) { if (s <= maxBytes) v.push_back(s); };
-    for (size_t s : {size_t{0}, size_t{1}, size_t{2}, size_t{3}, size_t{7},
-                     size_t{63}, size_t{64}, size_t{65}, size_t{255}, size_t{256},
-                     size_t{4095}, size_t{4096}, size_t{4097},
-                     size_t{65535}, size_t{65536}, size_t{65537}})
-        add(s);
-    // Per-segment boundary neighbourhood (the split points under test).
-    if (seg >= 1)     { add(seg - 1); add(seg); add(seg + 1); add(seg + 4096); }
-    if (2 * seg >= 1) { add(2 * seg - 1); add(2 * seg); add(2 * seg + 1); }
-    add(3 * seg);
-    add(maxBytes ? maxBytes - 1 : 0);
-    add(maxBytes);
-    std::sort(v.begin(), v.end());
-    v.erase(std::unique(v.begin(), v.end()), v.end());
-    return v;
-}
-
-} // namespace
-
-// RMA proxy fixture. The per-segment path is the MR handle's segment count.
-class RmaMultiSegmentMPITest : public RmaMPITestBase
-{
-protected:
-    std::unique_ptr<MPIHelpers::MpiEnvGuard> cuMemGuard_;
-
-    int GetNumContexts() const override { return 1; }
-
-    void SetUp() override
-    {
-        // Per-segment enumeration needs cuMem. NCCL_PARAM caches it for the process.
-        cuMemGuard_ = std::make_unique<MPIHelpers::MpiEnvGuard>("NCCL_CUMEM_ENABLE", "1");
-        RmaMPITestBase::SetUp();
-    }
-
-    void TearDown() override
-    {
-        // Deregister IB MRs (base TearDown) BEFORE releasing their backing VMM;
-        // freeing VMM under a live DMA-BUF MR aborts/stalls cleanup (AIRUNTIME-2351).
-        RmaMPITestBase::TearDown();
-        for (auto& b : vmmBuffers_)
-            FreeMultiSegmentVmm(*b);
-        vmmBuffers_.clear();
-        for (auto& b : hybridBuffers_)
-        {
-            for (int fd : b->segFds)
-                if (fd >= 0) rcclHostSegmentFdDeregister(fd);
-            RCCLHybridVmmTests::FreeHybridVmm(*b);
-        }
-        hybridBuffers_.clear();
-        cuMemGuard_.reset();
-    }
-
-    // Collective skip: if ANY rank wants to skip, all ranks return true so they
-    // GTEST_SKIP together (a unilateral skip would hang peers).
-    bool SyncSkip(bool wantSkip)
-    {
-        return MPIHelpers::anyRankTrue(wantSkip);
-    }
-
-    // True when a registration on this rank returned more than one segment.
-    bool RegisteredMultiSegment() const
-    {
-        for (void* mh : registeredMhandles_) {
-            if (rcclRmaIbProxyMrSegmentCount(mh) > 1) return true;
-        }
-        return false;
-    }
-
-    // True only if EVERY rank registered more than one segment.
-    bool AllTookMultiSegPath()
-    {
-        return MPIHelpers::allRanksTrue(RegisteredMultiSegment());
-    }
-
-    // Allocate a fixture-owned N-segment VMM window (freed in TearDown after MR
-    // dereg). Returns nullptr on failure so the caller can SyncSkip. Uses the
-    // rank's CURRENT GPU (round-robin assigned by the harness), not the IB-device
-    // index defaultDevice_, or rank>0 would fault touching dev-0 memory.
-    MultiSegmentVmmBuffer* AllocSym(int nSegments, size_t segBytes)
-    {
-        int dev = 0;
-        if (hipGetDevice(&dev) != hipSuccess)
-            return nullptr;
-        auto buf = std::make_unique<MultiSegmentVmmBuffer>();
-        if (!AllocMultiSegmentVmm(dev, nSegments, segBytes, buf.get()))
-            return nullptr;
-        vmmBuffers_.push_back(std::move(buf));
-        return vmmBuffers_.back().get();
-    }
-
-    MultiSegmentVmmBuffer* AllocDeepEpElastic(size_t gpuBytes, size_t cpuBytes)
-    {
-        int dev = 0;
-        if (hipGetDevice(&dev) != hipSuccess)
-            return nullptr;
-        auto buf = std::make_unique<MultiSegmentVmmBuffer>();
-        if (!AllocDeepEpElasticVmm(dev, gpuBytes, cpuBytes, buf.get()))
-            return nullptr;
-        vmmBuffers_.push_back(std::move(buf));
-        return vmmBuffers_.back().get();
-    }
-
-    // TearDown frees the buffer; AllocHybridCollective already freed it on a collective failure.
-    RCCLHybridVmmTests::HybridVmmStatus AllocHybridForLocalRanks(
-        size_t gpuBytes, size_t localCpuBytes, int expectedLocalRanks,
-        RCCLHybridVmmTests::HybridVmmBuffer** out, std::string* reason)
-    {
-        *out = nullptr;
-        auto buf = std::make_unique<RCCLHybridVmmTests::HybridVmmBuffer>();
-        const auto status = RCCLHybridVmmTests::AllocHybridCollective(
-            gpuBytes, localCpuBytes, expectedLocalRanks, buf.get(), reason);
-        if (status != RCCLHybridVmmTests::HybridVmmStatus::Ok) return status;
-        // Plugin registration has no window, so the importer publishes the owner's DMA-BUF fds.
-        uintptr_t va = reinterpret_cast<uintptr_t>(buf->ptr);
-        for (size_t s = 0; s < buf->segSizes.size(); ++s) {
-            if (buf->segFds[s] >= 0)
-                rcclHostSegmentFdRegister(reinterpret_cast<void*>(va), buf->segSizes[s], buf->segFds[s]);
-            va += buf->segSizes[s];
-        }
-        hybridBuffers_.push_back(std::move(buf));
-        *out = hybridBuffers_.back().get();
-        return status;
-    }
-
-    bool AllocSymPair(MultiSegmentVmmBuffer** src, MultiSegmentVmmBuffer** dst,
-                      int nSegments = kNumSegments,
-                      size_t segBytes = kSegRequestBytes)
-    {
-        *src = AllocSym(nSegments, segBytes);
-        *dst = AllocSym(nSegments, segBytes);
-        return !SyncSkip(*src == nullptr || *dst == nullptr);
-    }
-
-    // Skip only when no rank took the per-segment path. A mixed result is a
-    // failure: SyncSkip(ANY miss) would hide a unilateral-success bug.
-    // RCCL_TEST_RMA_MSEG_REQUIRE=1 (CI) turns the skip into a failure.
-    bool MultiSegmentPathAvailable()
-    {
-        const bool local = RegisteredMultiSegment();
-        if (!MPIHelpers::anyRankTrue(local)) {
-            if (MPIHelpers::getEnvParam<int>("RCCL_TEST_RMA_MSEG_REQUIRE", 0) != 0)
-                ADD_FAILURE() << "RCCL_TEST_RMA_MSEG_REQUIRE=1 but no rank took the multi-segment path";
-            return false;
-        }
-        if (!AllTookMultiSegPath()) {
-            ADD_FAILURE() << "multi-segment registration was asymmetric across ranks";
-            return true;
-        }
-        return true;
-    }
-
-    void ExpectPayloadIsolated(const void* window, size_t totalSize,
-                               size_t offset, size_t size, int seed,
-                               uint8_t sentinel, const std::string& context)
-    {
-        SCOPED_TRACE(context);
-        const auto* bytes = static_cast<const uint8_t*>(window);
-        EXPECT_TRUE(VerifyBuf(bytes + offset, size, seed));
-        EXPECT_TRUE(AllSentinel(window, offset, sentinel));
-        EXPECT_TRUE(AllSentinel(bytes + offset + size,
-                                totalSize - offset - size, sentinel));
-    }
-
-    void RunIPutSizeSweep(MultiSegmentVmmBuffer* src,
-                          MultiSegmentVmmBuffer* dst,
-                          void* srcMh, void* dstMh, size_t offset,
-                          uint8_t seedBase, uint8_t sentinel)
-    {
-        const size_t total = src->totalSize;
-        const size_t seg = src->segSize;
-        const std::vector<size_t> sizes = EdgeCaseSizes(seg, total - offset);
-        for (size_t idx = 0; idx < sizes.size(); ++idx)
-        {
-            const size_t size = sizes[idx];
-            const uint8_t seed =
-                static_cast<uint8_t>(seedBase + (idx & 0x3F));
-            const std::string context =
-                "size=" + std::to_string(size) +
-                " offset=" + std::to_string(offset);
-            SCOPED_TRACE(context);
-
-            if (worldRank_ == 0 && size > 0)
-                FillBuf(static_cast<uint8_t*>(src->ptr) + offset, size, seed);
-            if (worldRank_ == 1)
-                FillSentinel(dst->ptr, total, sentinel);
-
-            Barrier();
-            bool putOk = true;
-            if (worldRank_ == 0)
-            {
-                void* req = nullptr;
-                putOk = rma_->iput(rmaCtx_, 0, offset, srcMh, size,
-                                   offset, dstMh, 1, ncclRmaOptFlagsDefault, &req) == ncclSuccess;
-                if (putOk) putOk = PollUntilDone(req);
-            }
-            if (!MPIHelpers::allRanksTrue(putOk))
-            {
-                ADD_FAILURE() << "iput sweep failed " << context;
-                return;
-            }
-            Barrier();
-
-            if (worldRank_ == 1)
-                ExpectPayloadIsolated(dst->ptr, total, offset, size,
-                                      seed, sentinel, context);
-            Barrier();
-        }
-    }
-
-    std::vector<std::unique_ptr<MultiSegmentVmmBuffer>> vmmBuffers_;
-    std::vector<std::unique_ptr<RCCLHybridVmmTests::HybridVmmBuffer>> hybridBuffers_;
-};
 
 // Reproducer (AIRUNTIME-2351): a multi-segment window must register per-segment
 // and move data correctly end to end. Flagship positive case.
@@ -346,9 +109,7 @@ TEST_F(RmaMultiSegmentMPITest, PartialFinalSegmentRegistrationAndTransfer)
                               "partial final physical segment");
 }
 
-// Register from a sub-page offset into the first mapping through a sub-page
-// length into the third. Each per-segment DMA-BUF export must cover every page
-// its MR spans, or ibv_reg_dmabuf_mr rejects the first and last segments.
+
 TEST_F(RmaMultiSegmentMPITest, SubPageBoundsRegistrationAndTransfer)
 {
     if (!SetUpFixture(/*minProcs=*/2, /*maxProcs=*/2)) return;
@@ -520,263 +281,7 @@ TEST_F(RmaMultiSegmentMPITest, IGetCrossSegmentBoundaryAtOffset)
     Barrier();
 }
 
-// DeepEP Engram pattern (DeepEP/csrc/kernels/backend/symmetric.hpp and
-// DeepEP/csrc/kernels/elastic/engram.hpp): one symmetric VMM window contains a
-// large GPU receive segment followed by an independently-sized CPU storage
-// segment. An IGet reads from a non-zero offset in the remote CPU segment into a
-// different non-zero offset in the local GPU segment. This specifically guards
-// independent local and remote registration-relative offset tracking.
-TEST_F(RmaMultiSegmentMPITest, DeepEP_EngramMixedWindowIGet)
-{
-    if (!SetUpFixture(2, 2)) return;
 
-    constexpr size_t kGpuBytes   = 4 * kMiB;
-    constexpr size_t kCpuBytes   = 2 * kMiB;
-    constexpr size_t kRemoteOff  = kGpuBytes + 4096;
-    constexpr size_t kLocalOff   = 64 * 1024;
-    constexpr size_t kPayload    = 128 * 1024;
-    constexpr uint8_t kSentinel  = 0xD7;
-
-    MultiSegmentVmmBuffer* window = AllocDeepEpElastic(kGpuBytes, kCpuBytes);
-    if (SyncSkip(window == nullptr))
-        GTEST_SKIP() << "DeepEP-style GPU+CPU VMM allocation unavailable on this runtime";
-
-    if (worldRank_ == 1)
-        FillBuf(static_cast<uint8_t*>(window->ptr) + kRemoteOff, kPayload, /*seed=*/0x4D);
-    if (worldRank_ == 0)
-        FillSentinel(window->ptr, kGpuBytes, kSentinel);
-
-    void *mh = nullptr, *gh = nullptr;
-    ASSERT_EQ(ncclSuccess, RegMr(window->ptr, window->totalSize, &mh, &gh));
-    if (!MultiSegmentPathAvailable())
-        GTEST_SKIP() << "DeepEP window did not take the multi-segment RMA registration path";
-
-    Barrier();
-    if (worldRank_ == 0)
-    {
-        void* req = nullptr;
-        ASSERT_EQ(ncclSuccess,
-                  rma_->iget(rmaCtx_, 0,
-                             /*remoteOff=*/kRemoteOff, mh, kPayload,
-                             /*localOff=*/kLocalOff, mh, /*peerRank=*/1, ncclRmaOptFlagsDefault, &req));
-        ASSERT_TRUE(PollUntilDone(req));
-        ExpectPayloadIsolated(window->ptr, kGpuBytes, kLocalOff, kPayload,
-                              /*seed=*/0x4D, kSentinel,
-                              "DeepEP CPU-to-GPU IGet");
-    }
-    Barrier();
-}
-
-// Multi-node stress form of the DeepEP Engram fetch pattern. The registered
-// window is [GPU receive area][CPU Engram storage] at DeepEP's 2 MiB alignment.
-// Each IGet reads a changing non-zero remote CPU offset into an unrelated local
-// GPU offset, while sentinels ensure the GPU receive area is not over-written.
-TEST_F(RmaMultiSegmentMPITest, DeepEP_MultiNodeEngramMixedWindowIGetStress)
-{
-    if (!SetUpFixture(2, 2)) return;
-    if (MPIEnvironment::cached_multi_node_result != 1)
-        GTEST_SKIP() << "requires exactly one rank on each of two nodes";
-
-    constexpr size_t kGpuBytes  = 8 * kMiB;
-    constexpr size_t kCpuBytes  = 4 * kMiB;
-    constexpr int    kIterations = 32;
-    constexpr uint8_t kSentinel = 0xD9;
-    const std::vector<size_t> payloadSizes = {
-        size_t{1}, size_t{63}, size_t{4095}, size_t{4096},
-        size_t{65535}, size_t{65536}, size_t{131072}, size_t{262144}
-    };
-
-    MultiSegmentVmmBuffer* window = AllocDeepEpElastic(kGpuBytes, kCpuBytes);
-    if (SyncSkip(window == nullptr))
-        GTEST_SKIP() << "DeepEP-style GPU+CPU VMM allocation unavailable on this runtime";
-
-    void *mh = nullptr, *gh = nullptr;
-    ASSERT_EQ(ncclSuccess, RegMr(window->ptr, window->totalSize, &mh, &gh));
-    if (!MultiSegmentPathAvailable())
-        GTEST_SKIP() << "DeepEP window did not take the multi-segment RMA registration path";
-
-    for (int i = 0; i < kIterations; ++i)
-    {
-        const size_t len = payloadSizes[static_cast<size_t>(i) % payloadSizes.size()];
-        const size_t remoteSpan = kCpuBytes - len - 4096;
-        const size_t localSpan = kGpuBytes - len - 65536;
-        const size_t remoteOff = kGpuBytes + 4096 +
-                                 (static_cast<size_t>(i) * 131071) % remoteSpan;
-        const size_t localOff = 65536 +
-                                (static_cast<size_t>(i) * 65537) % localSpan;
-        const uint8_t seed = static_cast<uint8_t>(0x40 + i);
-
-        if (worldRank_ == 1)
-            FillBuf(static_cast<uint8_t*>(window->ptr) + remoteOff, len, seed);
-        if (worldRank_ == 0)
-            FillSentinel(window->ptr, kGpuBytes, kSentinel);
-
-        Barrier();
-        bool getOk = true;
-        if (worldRank_ == 0)
-        {
-            void* req = nullptr;
-            getOk = rma_->iget(rmaCtx_, 0, remoteOff, mh, len,
-                               localOff, mh, /*peerRank=*/1, ncclRmaOptFlagsDefault, &req) == ncclSuccess;
-            if (getOk) getOk = PollUntilDone(req);
-        }
-        ASSERT_TRUE(MPIHelpers::allRanksTrue(getOk))
-            << "DeepEP Engram IGet failed at iteration " << i;
-        if (worldRank_ == 0)
-            ExpectPayloadIsolated(window->ptr, kGpuBytes, localOff, len,
-                                  seed, kSentinel,
-                                  "DeepEP Engram iteration " + std::to_string(i));
-        Barrier();
-    }
-}
-
-// DeepEP HybridElasticSymmetricMemory:
-// [GPU][CPU local-rank 0]...[CPU local-rank 3]. Each process imports the same
-// local CPU handles before registration. Fetch from the matching CPU segment
-// on the other node into a non-zero local GPU offset.
-TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridImportedCpuSegmentIGet)
-{
-    if (!SetUpFixture(/*minProcesses=*/8, /*maxProcesses=*/8,
-                      /*minNodes=*/2, /*maxNodes=*/2))
-        GTEST_SKIP() << "requires exactly 8 ranks across 2 nodes";
-
-    constexpr size_t kGpuBytes = 8 * kMiB;
-    constexpr size_t kCpuBytes = 2 * kMiB;
-    constexpr size_t kPayload = 128 * 1024;
-    constexpr size_t kLocalOff = 64 * 1024;
-    constexpr uint8_t kSentinel = 0xB7;
-
-    std::string reason;
-    RCCLHybridVmmTests::HybridVmmBuffer* window = nullptr;
-    HYBRID_VMM_SKIP_OR_FAIL(AllocHybridForLocalRanks(
-            kGpuBytes, kCpuBytes, /*expectedLocalRanks=*/4, &window, &reason), reason);
-
-    const size_t remoteOff = kGpuBytes + static_cast<size_t>(window->localRank) * kCpuBytes + 4096;
-    const int peer = MPIHelpers::findRemotePeerForLocalRank(window->localRank);
-    ASSERT_TRUE(MPIHelpers::allRanksTrue(peer >= 0)) << "no remote peer for local rank " << window->localRank;
-
-    FillBuf(static_cast<uint8_t*>(window->ptr) + remoteOff, kPayload,
-            static_cast<uint8_t>(0x30 + worldRank_));
-    FillSentinel(window->ptr, kGpuBytes, kSentinel);
-
-    void *mh = nullptr, *gh = nullptr;
-    ASSERT_EQ(ncclSuccess, RegMr(window->ptr, window->totalSize, &mh, &gh));
-    if (!MultiSegmentPathAvailable())
-        GTEST_SKIP() << "hybrid window did not take the multi-segment RMA path";
-
-    Barrier();
-    void* req = nullptr;
-    bool getOk = rma_->iget(rmaCtx_, 0, remoteOff, mh, kPayload,
-                            kLocalOff, mh, peer, ncclRmaOptFlagsDefault, &req) == ncclSuccess;
-    if (getOk) getOk = PollUntilDone(req);
-    ASSERT_TRUE(MPIHelpers::allRanksTrue(getOk)) << "hybrid IGet failed on at least one rank";
-    ExpectPayloadIsolated(window->ptr, kGpuBytes, kLocalOff, kPayload,
-                          static_cast<uint8_t>(0x30 + peer), kSentinel,
-                          "DeepEP hybrid imported CPU IGet");
-    Barrier();
-}
-
-// Multi-node hybrid stress: alternate the remote node's imported CPU-owner
-// segment while varying source/destination offsets and transfer sizes. This
-// exercises segment-window selection, shared-handle lifetime, and independent
-// local/remote cursors with sentinel protection.
-TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridMultiNodeIGetStress)
-{
-    if (!SetUpFixture(/*minProcesses=*/8, /*maxProcesses=*/8,
-                      /*minNodes=*/2, /*maxNodes=*/2))
-        GTEST_SKIP() << "requires exactly 8 ranks across 2 nodes";
-
-    constexpr size_t kGpuBytes = 8 * kMiB;
-    constexpr size_t kCpuBytes = 2 * kMiB;
-    constexpr int kIterations = 32;
-    constexpr uint8_t kSentinel = 0xBC;
-    const std::vector<size_t> sizes = {
-        size_t{1}, size_t{63}, size_t{4095}, size_t{4096},
-        size_t{65535}, size_t{65536}, size_t{131072}, size_t{262144}
-    };
-
-    std::string reason;
-    RCCLHybridVmmTests::HybridVmmBuffer* window = nullptr;
-    HYBRID_VMM_SKIP_OR_FAIL(AllocHybridForLocalRanks(
-            kGpuBytes, kCpuBytes, /*expectedLocalRanks=*/4, &window, &reason), reason);
-
-    void *mh = nullptr, *gh = nullptr;
-    ASSERT_EQ(ncclSuccess, RegMr(window->ptr, window->totalSize, &mh, &gh));
-    if (!MultiSegmentPathAvailable())
-        GTEST_SKIP() << "hybrid window did not take the multi-segment RMA path";
-
-    for (int i = 0; i < kIterations; ++i)
-    {
-        const size_t len = sizes[static_cast<size_t>(i) % sizes.size()];
-        const size_t sourceInnerOff = 4096 +
-            (static_cast<size_t>(i) * 131071) % (kCpuBytes - len - 4096);
-        const size_t ownCpuOff = kGpuBytes +
-            static_cast<size_t>(window->localRank) * kCpuBytes + sourceInnerOff;
-        const size_t localOff = 65536 +
-            (static_cast<size_t>(i) * 65537) % (kGpuBytes - len - 65536);
-        const uint8_t seed = static_cast<uint8_t>(0x40 + worldRank_ + i);
-
-        FillBuf(static_cast<uint8_t*>(window->ptr) + ownCpuOff, len, seed);
-        FillSentinel(window->ptr, kGpuBytes, kSentinel);
-        Barrier();
-
-        const int sourceLocalRank = (i + window->localRank) % window->localSize;
-        const int peer = MPIHelpers::findRemotePeerForLocalRank(sourceLocalRank);
-        ASSERT_TRUE(MPIHelpers::allRanksTrue(peer >= 0))
-            << "no remote peer for local rank " << sourceLocalRank << " at iteration " << i;
-        const size_t remoteOff = kGpuBytes +
-            static_cast<size_t>(sourceLocalRank) * kCpuBytes + sourceInnerOff;
-
-        void* req = nullptr;
-        bool getOk = rma_->iget(rmaCtx_, 0, remoteOff, mh, len,
-                                localOff, mh, peer, ncclRmaOptFlagsDefault, &req) == ncclSuccess;
-        if (getOk) getOk = PollUntilDone(req);
-        ASSERT_TRUE(MPIHelpers::allRanksTrue(getOk))
-            << "hybrid IGet failed on at least one rank at iteration " << i;
-        ExpectPayloadIsolated(window->ptr, kGpuBytes, localOff, len,
-                              static_cast<uint8_t>(0x40 + peer + i),
-                              kSentinel,
-                              "hybrid IGet iteration " + std::to_string(i));
-        Barrier();
-    }
-}
-
-// Negative hybrid range guard: an IGet that overruns the final imported CPU
-// segment must be rejected before posting and leave the GPU destination intact.
-TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridOutOfRangeIGetRejected)
-{
-    if (!SetUpFixture(/*minProcesses=*/8, /*maxProcesses=*/8,
-                      /*minNodes=*/2, /*maxNodes=*/2))
-        GTEST_SKIP() << "requires exactly 8 ranks across 2 nodes";
-
-    constexpr size_t kGpuBytes = 8 * kMiB;
-    constexpr size_t kCpuBytes = 2 * kMiB;
-    constexpr uint8_t kSentinel = 0xC7;
-
-    std::string reason;
-    RCCLHybridVmmTests::HybridVmmBuffer* window = nullptr;
-    HYBRID_VMM_SKIP_OR_FAIL(AllocHybridForLocalRanks(
-            kGpuBytes, kCpuBytes, /*expectedLocalRanks=*/4, &window, &reason), reason);
-
-    void *mh = nullptr, *gh = nullptr;
-    ASSERT_EQ(ncclSuccess, RegMr(window->ptr, window->totalSize, &mh, &gh));
-    FillSentinel(window->ptr, kGpuBytes, kSentinel);
-    Barrier();
-
-    const int peer = MPIHelpers::findRemotePeerForLocalRank(window->localRank);
-    ASSERT_TRUE(MPIHelpers::allRanksTrue(peer >= 0)) << "no remote peer for local rank " << window->localRank;
-    void* req = nullptr;
-    EXPECT_EQ(ncclInvalidArgument,
-              rma_->iget(rmaCtx_, 0, window->totalSize - 32, mh, 64,
-                         /*localOff=*/0, mh, peer, ncclRmaOptFlagsDefault, &req));
-    EXPECT_EQ(req, nullptr);
-    EXPECT_TRUE(AllSentinel(window->ptr, kGpuBytes, kSentinel));
-    Barrier();
-}
-
-// findRemotePeerForLocalRank must return a rank on another node with the
-// requested local rank, or -1 when no node has one. Pure MPI topology, so it
-// runs even where the hybrid tests that use it are skipped.
 TEST_F(RmaMultiSegmentMPITest, FindRemotePeerForLocalRankTopology)
 {
     if (!SetUpFixture(2, 2)) return;
@@ -862,9 +367,7 @@ TEST_F(RmaMultiSegmentMPITest, IFlushMultiSegment)
         void* freq = nullptr;
         EXPECT_EQ(ncclSuccess, rma_->iflush(rmaCtx_, 0, recvMh, /*peerRank=*/0, &freq))
             << "multi-segment iflush post failed";
-        // A NULL request means GDR flush is disabled; there is nothing to wait for.
-        if (freq != nullptr)
-            EXPECT_TRUE(PollUntilDone(freq)) << "multi-segment flush did not complete";
+        EXPECT_TRUE(PollUntilDone(freq)) << "multi-segment flush did not complete";
         EXPECT_TRUE(VerifyBuf(rb->ptr, kSize, /*seed=*/0x3C))
             << "data corrupted across segment boundaries after flush";
     }
@@ -917,8 +420,7 @@ TEST_F(RmaMultiSegmentMPITest, IFlushAfterPartialMultiSegmentPut)
         void* freq = nullptr;
         EXPECT_EQ(ncclSuccess, rma_->iflush(rmaCtx_, 0, recvMh, /*peerRank=*/0, &freq))
             << "multi-segment iflush post failed after partial put";
-        if (freq != nullptr)
-            EXPECT_TRUE(PollUntilDone(freq)) << "multi-segment flush did not complete";
+        EXPECT_TRUE(PollUntilDone(freq)) << "multi-segment flush did not complete";
 
         ExpectPayloadIsolated(rb->ptr, rb->totalSize, off, kSize,
                               /*seed=*/0x4F, kSentinel,
@@ -965,8 +467,7 @@ TEST_F(RmaMultiSegmentMPITest, IFlushSingleSegmentRegression)
         void* freq = nullptr;
         EXPECT_EQ(ncclSuccess, rma_->iflush(rmaCtx_, 0, recvMh, /*peerRank=*/0, &freq))
             << "single-segment iflush post failed";
-        if (freq != nullptr)
-            EXPECT_TRUE(PollUntilDone(freq)) << "single-segment flush did not complete";
+        EXPECT_TRUE(PollUntilDone(freq)) << "single-segment flush did not complete";
         EXPECT_TRUE(VerifyBuf(recvBuf, kSize, /*seed=*/0x2D))
             << "data corrupted after single-segment flush";
     }
@@ -1022,11 +523,7 @@ TEST_F(RmaMultiSegmentMPITest, IPutSignalMultiSegment)
     }
 }
 
-// The signal itself lives in a multi-segment window. NEGATIVE: atomics that
-// straddle a segment boundary, are misaligned inside a later segment, or run
-// past the window are rejected without posting. POSITIVE: atomics at the last
-// word of segment 0, the first word of segment 1, and inside segment 2 each
-// land at exactly that offset and nowhere else.
+
 TEST_F(RmaMultiSegmentMPITest, IPutSignalInLaterSegment)
 {
     if (!SetUpFixture(2, 2)) return;
@@ -1202,25 +699,6 @@ TEST_F(RmaMultiSegmentMPITest, RegisterExceedsMaxSegmentsRejected)
     EXPECT_EQ(mh, nullptr) << "no MR handle should be produced on rejection";
 }
 
-// NCCL_MULTI_SEGMENT_REGISTER=0 keeps a multi-segment window on the upstream single-MR path,
-// whether or not that MR registers.
-TEST_F(RmaMultiSegmentMPITest, MultiSegmentRegisterOff_KeepsUpstreamPath)
-{
-    if (!SetUpFixture(2, 2)) return;
-    if (SyncSkip(MPIHelpers::getEnvParam<int>("NCCL_MULTI_SEGMENT_REGISTER", 1) != 0))
-        GTEST_SKIP() << "Requires NCCL_MULTI_SEGMENT_REGISTER=0";
-
-    MultiSegmentVmmBuffer* buf = AllocSym(kNumSegments, kSegRequestBytes);
-    if (SyncSkip(buf == nullptr))
-        GTEST_SKIP() << "Multi-segment VMM allocation not supported";
-
-    void* mh = nullptr;
-    (void)RegMr(buf->ptr, buf->totalSize, &mh);
-    const bool local = rcclRmaIbProxyMrSegmentCount(mh) > 1;
-    EXPECT_FALSE(MPIHelpers::anyRankTrue(local))
-        << "NCCL_MULTI_SEGMENT_REGISTER=0 still took the per-segment RMA path";
-}
-
 // REGRESSION: an ordinary single-allocation buffer must still register and
 // transfer via the nSeg==1 fast path.
 TEST_F(RmaMultiSegmentMPITest, SingleSegmentRegression)
@@ -1271,14 +749,15 @@ TEST_F(RmaMultiSegmentMPITest, RegisterAsymmetricSegmentCountRejected)
     void *mh = nullptr, *gh = nullptr;
     ncclResult_t r = RegMr(bb->ptr, bb->totalSize, &mh, &gh);
 
-    // Only the per-segment count consensus rejects collectively, and a rejection leaves no handle to read.
-    if (!MPIHelpers::allRanksTrue(r == ncclInvalidUsage)) {
-        if (!MultiSegmentPathAvailable())
-            GTEST_SKIP() << "multi-segment path not exercised on this host";
-        // Skip only if every rank succeeded (identical enumeration). any-rank skip hid unilateral success.
-        if (MPIHelpers::allRanksTrue(r == ncclSuccess))
-            GTEST_SKIP() << "ranks enumerated identical segment counts; no asymmetry";
-    }
+    // Both ranks must have taken the per-segment path, else there is nothing to test.
+    if (!MultiSegmentPathAvailable())
+        GTEST_SKIP() << "multi-segment path not exercised on this host";
+
+    // If enumeration happened to return identical counts there is no asymmetry
+    // to reject (registration succeeds on both ranks); skip rather than misfire.
+    // Skip only if every rank succeeded (identical enumeration). any-rank skip hid unilateral success.
+    if (MPIHelpers::allRanksTrue(r == ncclSuccess))
+        GTEST_SKIP() << "ranks enumerated identical segment counts; no asymmetry";
 
     EXPECT_EQ(r, ncclInvalidUsage)
         << "asymmetric per-rank segment count must be rejected (rank " << worldRank_
@@ -1353,10 +832,7 @@ TEST_F(RmaMultiSegmentMPITest, RankLocalRegistrationFailureRejectedCollectively)
     EXPECT_EQ(mh, nullptr);
 }
 
-// POSITIVE after NEGATIVE: the registration consensus buffer is per-comm and
-// reused by every registration. After a collectively rejected registration,
-// later registrations with shrinking and growing segment counts must each see
-// only their own layout and move data across every segment.
+
 TEST_F(RmaMultiSegmentMPITest, RegistrationAfterCollectiveRejectionTransfers)
 {
     if (!SetUpFixture(2, 2)) return;
@@ -1745,8 +1221,8 @@ protected:
 
     static constexpr uint8_t kSentinel       = 0xD3;
     static constexpr int     kIbRequestSlots = 256;  // NET_IB_MAX_REQUESTS
-    // Send-queue depth of an RMA queue pair with multi-segment on.
-    static constexpr int     kSendQueueWrs   = NCCL_RMA_SEND_QP_WRS;
+    // Send-queue depth of an RMA queue pair: NCCL_IB_MAX_SEND_WRS (common.h).
+    static constexpr int     kSendQueueWrs   = 2 * kIbRequestSlots + 8 * 2 * NCCL_RMA_MAX_SEGMENTS + 1;
 
     int numContexts_ = 1;
     int GetNumContexts() const override { return numContexts_; }
@@ -1909,12 +1385,6 @@ protected:
     bool DoneBehindZeroSizeOp(void* req)
     {
         return rma_ == &ncclRmaIbProxy ? DoneOnFirstTest(req) : PollUntilDone(req);
-    }
-
-    // IB-CAST posts no WR for a zero-size op, so it must be done on its first test().
-    bool ZeroSizeOpDone(void* req)
-    {
-        return rma_ == &IbCastRmaIbProxy ? DoneOnFirstTest(req) : PollUntilDone(req);
     }
 
     // Like PollUntilDone, but returns test()'s error, or ncclInProgress on timeout.
@@ -2139,7 +1609,7 @@ TEST_F(RmaMultiSegmentPostMPITest, ZeroSizeOpsCompleteWithQueuedPredecessor)
         void* first   = post(OpKind::Put, srcMh_, dstMh_, chains[0]);
         void* zeroPut = post(OpKind::Put, srcMh_, dstMh_, none);
         void* zeroGet = post(OpKind::Get, dstMh_, srcMh_, none);
-        ok = ZeroSizeOpDone(zeroPut) && ok;
+        ok = PollUntilDone(zeroPut) && ok;
         ok = DoneBehindZeroSizeOp(first) && ok;
         ok = DoneOnFirstTest(zeroGet) && ok;
 
@@ -2288,7 +1758,7 @@ TEST_F(RmaMultiSegmentPostMPITest, RejectedOpsLeaveNoSlotOrSequenceGap)
         for (int i = 0; rejecter && i < kIbRequestSlots; i++) accepted += !rejected(i);
         EXPECT_EQ(accepted, 0) << "invalid ops were accepted";
         void* zero = post(MakeOp(OpKind::Put, srcMh_, dstMh_, Chain{}, 0, aggregate));
-        ok = ZeroSizeOpDone(zero) && ok;
+        ok = PollUntilDone(zero) && ok;
         ok = DoneBehindZeroSizeOp(first) && ok;
 
         std::vector<void*> reqs;
@@ -2544,6 +2014,7 @@ TEST_F(RmaMultiSegmentPostMPITest, ManyToOneSignalsIntoMultiSegmentWindow)
     }
     Barrier();
 }
+
 
 } // namespace RCCLRmaTests
 
