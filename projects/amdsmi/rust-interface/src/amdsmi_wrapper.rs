@@ -518,6 +518,7 @@ pub enum AmdsmiVramTypeT {
     AmdsmiVramTypeHbm2e = 3,
     AmdsmiVramTypeHbm3 = 4,
     AmdsmiVramTypeHbm3e = 5,
+    AmdsmiVramTypeHbm4 = 6,
     AmdsmiVramTypeDdr2 = 10,
     AmdsmiVramTypeDdr3 = 11,
     AmdsmiVramTypeDdr4 = 12,
@@ -4815,6 +4816,14 @@ extern "C" {
         buf_size: u32,
         afids: *mut u64,
         num_afids: *mut u32,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
+    pub fn amdsmi_get_cper_json(
+        cper_buffer: *mut ::std::os::raw::c_char,
+        buf_size: u32,
+        json_buffer: *mut ::std::os::raw::c_char,
+        json_buffer_size: *mut u32,
     ) -> AmdsmiStatusT;
 }
 extern "C" {

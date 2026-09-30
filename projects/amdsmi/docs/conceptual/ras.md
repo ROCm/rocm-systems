@@ -54,6 +54,12 @@ facilitate root cause analysis. Each AFID is associated with category, type, and
 [AFID Event List](https://docs.amd.com/r/en-US/AMD_Field_ID_70122_v1.0/AFID-Event-List) for more
 information.
 
+AMD SMI generates AFIDs with the addc-base library, one per AFID it attaches to an event decoded
+from a CPER record. 16999 is addc-base's unclassified value, and an event with no AFID contributes
+none. A record that cannot be parsed is rejected as a whole with `AMDSMI_STATUS_UNEXPECTED_DATA`
+instead of returning a partial list.
+`amdsmi_get_cper_json()` returns the full decoded event report, including each event's FRU, as JSON.
+
 ## From concept to action
 
 AMD SMI provides tools to programmatically monitor and manage these RAS features.
@@ -75,6 +81,7 @@ See related APIs:
 - [](/reference/amdsmi-py-api.md#amdsmi_get_gpu_total_ecc_count)
 - [](/reference/amdsmi-py-api.md#amdsmi_get_gpu_cper_entries)
 - [](/reference/amdsmi-py-api.md#amdsmi_get_afids_from_cper)
+- [](/reference/amdsmi-py-api.md#amdsmi_get_cper_json)
 - [](/reference/amdsmi-py-api.md#amdsmi_get_gpu_ras_feature_info)
 - [](/reference/amdsmi-py-api.md#amdsmi_get_gpu_ras_block_features_enabled)
 ::::

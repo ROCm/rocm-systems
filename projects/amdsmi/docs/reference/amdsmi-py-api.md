@@ -1951,7 +1951,7 @@ Refer to [amd_smi_cper_example.py](https://github.com/ROCm/rocm-systems/blob/dev
 
 ### amdsmi_get_afids_from_cper
 
-Description: Get the AFIDs from CPER buffer
+Description: Get the AFIDs from CPER buffer. AFIDs come from addc-base, one per AFID it attaches to a decoded event; 16999 is its unclassified value. A record that cannot be parsed raises `AMDSMI_STATUS_UNEXPECTED_DATA` with no partial list.
 
 Input parameters:
 
@@ -1970,7 +1970,7 @@ Exceptions that can be thrown by `amdsmi_get_afids_from_cper` function:
 
 - `AMDSMI_STATUS_INVAL` - Invalid parameters
 - `AMDSMI_STATUS_UNEXPECTED_SIZE` - unexpected size of data was read
-- `AMDSMI_STATUS_UNEXPECTED_DATA` - The data read or provided was unexpected
+- `AMDSMI_STATUS_UNEXPECTED_DATA` - The record is not a valid CPER record, or addc-base cannot parse it
 - `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
 
 Example 1: Using a single CPER record as bytes
@@ -2026,6 +2026,47 @@ finally:
 ```
 
 Refer to [amd_smi_afid_example.py](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/example/amd_smi_afid_example.py) for a complete example.
+
+### amdsmi_get_cper_json
+
+Description: Get the decoded event report of one CPER record as JSON
+
+Input parameters:
+
+* `cper_data`: raw bytes of a single CPER record.
+
+Output: str: The addc-base event report as JSON text, with the events, their AFIDs and FRUs. The
+schema belongs to addc-base and is identified by the document's own `schema_version` field.
+
+Exceptions that can be thrown by `amdsmi_get_cper_json` function:
+
+* `AmdSmiParameterException`
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_INVAL` - Empty record
+- `AMDSMI_STATUS_UNEXPECTED_SIZE` - unexpected size of data was read
+- `AMDSMI_STATUS_UNEXPECTED_DATA` - The data read or provided was unexpected, or the record cannot be parsed
+- `AMDSMI_STATUS_OUT_OF_RESOURCES` - Not enough memory
+- `AMDSMI_STATUS_INTERNAL_EXCEPTION` - An internal exception was caught
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+
+Example:
+
+```python
+import json
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    with open("record.cper", "rb") as file:
+        report = json.loads(amdsmi.amdsmi_get_cper_json(file.read()))
+    print(report["schema_version"])
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
 
 ### amdsmi_get_gpu_ras_feature_info
 

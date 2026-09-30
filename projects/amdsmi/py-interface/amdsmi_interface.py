@@ -3626,21 +3626,68 @@ def amdsmi_get_afids_from_cper(cper_afid_data: bytes) -> Tuple[List[int], int]:
         buf = ctypes.create_string_buffer(raw_bytes, record_size)
         buf_ptr = ctypes.cast(buf, POINTER(ctypes.c_char))
 
-        afid_array = (ctypes.c_uint64 * AMDSMI_MAX_NUMBER_OF_AFIDS_PER_RECORD)()
-        num_afids_ct = ctypes.c_uint32(AMDSMI_MAX_NUMBER_OF_AFIDS_PER_RECORD)
-
-        # Call the wrapper function
-        status = amdsmi_wrapper.amdsmi_get_afids_from_cper(
-            buf_ptr, ctypes.c_uint32(record_size), afid_array, ctypes.byref(num_afids_ct)
-        )
-        if status != amdsmi_wrapper.AMDSMI_STATUS_SUCCESS:
-            raise AmdSmiLibraryException(status)
+        capacity = AMDSMI_MAX_NUMBER_OF_AFIDS_PER_RECORD
+        # The library reports the full count even when the array was too small, so one
+        # retry with that count is enough; a second overrun means the library misreported.
+        for attempt in range(2):
+            afid_array = (ctypes.c_uint64 * capacity)()
+            num_afids_ct = ctypes.c_uint32(capacity)
+            status = amdsmi_wrapper.amdsmi_get_afids_from_cper(
+                buf_ptr, ctypes.c_uint32(record_size), afid_array, ctypes.byref(num_afids_ct)
+            )
+            if status != amdsmi_wrapper.AMDSMI_STATUS_SUCCESS:
+                raise AmdSmiLibraryException(status)
+            count = num_afids_ct.value
+            if count <= capacity:
+                break
+            capacity = count
+        else:
+            raise AmdSmiLibraryException(amdsmi_wrapper.AMDSMI_STATUS_INTERNAL_EXCEPTION)
 
         # Collect exactly the decoded AFIDs
-        count = num_afids_ct.value
         all_afids.extend(afid_array[i] for i in range(count))
 
     return all_afids, len(all_afids)
+
+
+def amdsmi_get_cper_json(cper_data: bytes) -> str:
+    """
+    Get the decoded event report of one CPER record as JSON.
+
+    Args:
+        cper_data: raw bytes of a single CPER record.
+
+    Returns:
+        str: The addc-base event report as JSON text. The schema belongs to addc-base and
+        is identified by the document's own ``schema_version`` field.
+
+    Raises:
+        AmdSmiParameterException: ``cper_data`` is not bytes.
+        AmdSmiLibraryException: the library returned a non-success status.
+    """
+    if not isinstance(cper_data, bytes):
+        raise AmdSmiParameterException(cper_data, bytes)
+
+    cper_buf = ctypes.create_string_buffer(cper_data, len(cper_data))
+    cper_ptr = ctypes.cast(cper_buf, POINTER(ctypes.c_char))
+    record_size = ctypes.c_uint32(len(cper_data))
+
+    # A NULL buffer makes the library report the size the JSON needs.
+    json_size = ctypes.c_uint32(0)
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_cper_json(cper_ptr, record_size, None, ctypes.byref(json_size))
+    )
+
+    json_buf = ctypes.create_string_buffer(json_size.value)
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_cper_json(
+            cper_ptr,
+            record_size,
+            ctypes.cast(json_buf, POINTER(ctypes.c_char)),
+            ctypes.byref(json_size),
+        )
+    )
+    return json_buf.value.decode("utf-8")
 
 
 def amdsmi_get_gpu_board_info(processor_handle: processor_handle_t) -> Dict[str, Any]:

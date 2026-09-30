@@ -48,6 +48,7 @@ set(SRC_LIST
     "${SRC_DIR}/amd_smi.cc"
     "${SRC_DIR}/fwupd_carveout.cc"
     "${SRC_DIR}/fwupd_carveout_parse.cc"
+    "${SRC_DIR}/amd_smi_addc.cc"
     "${SRC_DIR}/amd_smi_cper.cc"
     "${SRC_DIR}/amd_smi_common.cc"
     "${SRC_DIR}/amd_smi_drm.cc"
@@ -80,35 +81,6 @@ set(INC_LIST
     "${NIC_INCLUDES}"
 )
 
-set(RAS_DECODE "ras-decode")
-set(RAS_DECODE_REPO "git@github.amd.com:dctools/ras-decode-instinct-staging.git")
-set(RAS_DECODE_SRC_DIR "${PROJECT_SOURCE_DIR}/src/${RAS_DECODE}")
-set(RAS_DECODE_INC_DIR "${PROJECT_SOURCE_DIR}/include/${RAS_DECODE}")
-find_package(Git QUIET)
-if(GIT_FOUND)
-    add_custom_target(
-        ${RAS_DECODE}
-        COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_CURRENT_BINARY_DIR}/${RAS_DECODE}
-        COMMAND ${GIT_EXECUTABLE} clone ${RAS_DECODE_REPO} -b main ${CMAKE_CURRENT_BINARY_DIR}/${RAS_DECODE}
-        COMMAND ${CMAKE_COMMAND} -E remove_directory ${RAS_DECODE_SRC_DIR}
-        COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_BINARY_DIR}/${RAS_DECODE}/src ${RAS_DECODE_SRC_DIR}
-        COMMAND ${CMAKE_COMMAND} -E remove_directory ${RAS_DECODE_INC_DIR}
-        COMMAND
-            ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_BINARY_DIR}/${RAS_DECODE}/include ${RAS_DECODE_INC_DIR}
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-        COMMENT "Cloning ${RAS_DECODE_REPO} from GitHub"
-        VERBATIM
-    )
-else()
-    message(WARNING "Git not found, cannot clone ${RAS_DECODE_REPO}.")
-endif()
-file(GLOB RAS_DECODE_INCLUDES "${RAS_DECODE_INC_DIR}/*.h")
-file(GLOB RAS_DECODE_SOURCES "${RAS_DECODE_SRC_DIR}/*.c")
-list(REMOVE_ITEM RAS_DECODE_SOURCES "main.c")
-
-set(SRC_LIST ${SRC_LIST} ${RAS_DECODE_SOURCES})
-set(INC_LIST ${INC_LIST} ${RAS_DECODE_INCLUDES})
-
 # Include UALOE library - always required
 set(UALOE_LIB "ualoe_lib")
 set(UALOE_LIB_SRC_DIR "${PROJECT_SOURCE_DIR}/src/${UALOE_LIB}")
@@ -116,6 +88,102 @@ set(UALOE_LIB_INC_DIR "${PROJECT_SOURCE_DIR}/include/${UALOE_LIB}")
 add_subdirectory("ualoe_lib")
 set(SRC_LIST ${SRC_LIST} ${UALOE_SOURCES})
 set(INC_LIST ${INC_LIST} ${UALOE_HEADERS})
+
+# addc-base decodes CPER records into AFIDs and the JSON event report. It is C++20 and is
+# built as static archives that end up inside libamd_smi; the rest of the library stays C++17.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 10)
+    message(FATAL_ERROR "addc-base needs a C++20 compiler (GCC 10 or newer); found GCC ${CMAKE_CXX_COMPILER_VERSION}")
+endif()
+
+# Catches other compilers (clang with an old libstdc++) that the GCC check above misses.
+include(CheckCXXSourceCompiles)
+set(_addc_saved_std "${CMAKE_CXX_STANDARD}")
+set(CMAKE_CXX_STANDARD 20)
+check_cxx_source_compiles(
+    "#include <span>
+     int main() { int a[1] = {0}; return (std::span<int>(a).size() == 1) ? 0 : 1; }"
+    AMD_SMI_HAS_CXX20_SPAN
+)
+set(CMAKE_CXX_STANDARD "${_addc_saved_std}")
+if(NOT AMD_SMI_HAS_CXX20_SPAN)
+    message(FATAL_ERROR "addc-base needs a C++20 compiler and standard library with <span>")
+endif()
+
+# A system nlohmann_json is preferred. Otherwise use the vendored 3.12.0 release
+# (include.zip, sha256 b8cb0ef2dd7f57f18933997c9934bb1fa962594f701cd5a8d3c2c80541559372),
+# so a build needs no extra package or download.
+find_package(nlohmann_json 3.11 QUIET)
+if(nlohmann_json_FOUND)
+    message(STATUS "addc-base: using system nlohmann_json ${nlohmann_json_VERSION}")
+else()
+    message(STATUS "addc-base: using vendored nlohmann_json 3.12.0")
+    add_library(nlohmann_json::nlohmann_json INTERFACE IMPORTED)
+    set_target_properties(
+        nlohmann_json::nlohmann_json
+        PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${PROJECT_SOURCE_DIR}/third_party/nlohmann_json/include"
+    )
+endif()
+
+set(ADDC_LIB_STATIC ON)
+set(ADDC_ENABLE_CLI OFF)
+set(ADDC_ENABLE_TESTS OFF)
+set(ADDC_INSTALL OFF)
+set(ADDC_WERROR OFF)
+add_subdirectory("${PROJECT_SOURCE_DIR}/third_party/addc-base" "${CMAKE_CURRENT_BINARY_DIR}/addc-base")
+
+# Vendored code: keep the parent's warning flags out, and undo its -fno-rtti so the sources
+# build as upstream does. The archives are exported with libamd_smi_static, so every property
+# below also keeps the export free of source-tree paths, nlohmann_json and C++20 requirements.
+# The checks fail the configure when an addc-base update changes what this loop assumes.
+# libamd_smi_static carries addc's default-visibility C symbols (addc_*), so it cannot be
+# linked together with another copy of addc.
+get_property(AMD_SMI_ADDC_TARGETS DIRECTORY "${PROJECT_SOURCE_DIR}/third_party/addc-base" PROPERTY BUILDSYSTEM_TARGETS)
+foreach(_addc_target IN LISTS AMD_SMI_ADDC_TARGETS)
+    get_target_property(_addc_type ${_addc_target} TYPE)
+    if(NOT _addc_type MATCHES "^(STATIC_LIBRARY|INTERFACE_LIBRARY)$")
+        message(
+            FATAL_ERROR
+            "addc-base target ${_addc_target} is a ${_addc_type}; only static archives can be "
+            "exported with libamd_smi_static"
+        )
+    endif()
+    if(NOT _addc_type STREQUAL "INTERFACE_LIBRARY")
+        target_compile_options(${_addc_target} PRIVATE -w -frtti)
+    endif()
+    # The export has no namespace, so a bare addc_* name would collide with a consumer's own addc-base.
+    set_property(TARGET ${_addc_target} PROPERTY EXPORT_NAME amd_smi_${_addc_target})
+    # amdsmi includes only the C header addc/lib_c.h, so addc must not make amdsmi (or a
+    # consumer of the exported static library) compile as C++20.
+    set_property(TARGET ${_addc_target} PROPERTY INTERFACE_COMPILE_FEATURES "")
+    # The export rejects source-tree include paths.
+    get_target_property(_addc_dirs ${_addc_target} INTERFACE_INCLUDE_DIRECTORIES)
+    if(_addc_dirs)
+        set(_addc_wrapped "")
+        foreach(_dir IN LISTS _addc_dirs)
+            if(_dir MATCHES "^\\$<")
+                list(APPEND _addc_wrapped "${_dir}")
+            else()
+                list(APPEND _addc_wrapped "$<BUILD_INTERFACE:${_dir}>")
+            endif()
+        endforeach()
+        set_property(TARGET ${_addc_target} PROPERTY INTERFACE_INCLUDE_DIRECTORIES "${_addc_wrapped}")
+    endif()
+    # nlohmann_json is header-only and used only while building addc. A build-tree export still
+    # names it, because BUILD_INTERFACE applies there.
+    get_target_property(_addc_libs ${_addc_target} INTERFACE_LINK_LIBRARIES)
+    if(_addc_libs)
+        list(
+            TRANSFORM _addc_libs
+            REPLACE "^nlohmann_json::nlohmann_json$" "$<BUILD_INTERFACE:nlohmann_json::nlohmann_json>"
+        )
+        set_property(TARGET ${_addc_target} PROPERTY INTERFACE_LINK_LIBRARIES "${_addc_libs}")
+        foreach(_lib IN LISTS _addc_libs)
+            if(_lib MATCHES "nlohmann_json" AND NOT _lib MATCHES "^\\$<BUILD_INTERFACE:")
+                message(FATAL_ERROR "addc-base target ${_addc_target} still links ${_lib} in its exported interface")
+            endif()
+        endforeach()
+    endif()
+endforeach()
 
 if(ENABLE_ESMI_LIB)
     list(APPEND INC_LIST ${ESMI_INC_DIR}/e_smi/e_smi.h)
@@ -156,12 +224,15 @@ if(BUILD_BOTH_LIBS)
     add_library(${AMD_SMI} SHARED ${SRC_LIST} ${INC_LIST})
     add_library(${AMD_SMI}_static STATIC ${SRC_LIST} ${INC_LIST})
     set(AMD_SMI_TARGET ${AMD_SMI}_static PARENT_SCOPE)
-    set(AMD_SMI_EXPORT_TARGETS ${AMD_SMI} ${AMD_SMI}_static amdsminic PARENT_SCOPE)
+    set(AMD_SMI_EXPORT_TARGETS ${AMD_SMI} ${AMD_SMI}_static amdsminic ${AMD_SMI_ADDC_TARGETS} PARENT_SCOPE)
     set(_AMD_SMI_ALL_TARGETS ${AMD_SMI} ${AMD_SMI}_static)
 else()
     add_library(${AMD_SMI} ${SRC_LIST} ${INC_LIST})
     set(AMD_SMI_TARGET ${AMD_SMI} PARENT_SCOPE)
     set(AMD_SMI_EXPORT_TARGETS ${AMD_SMI} amdsminic PARENT_SCOPE)
+    if(NOT BUILD_SHARED_LIBS)
+        set(AMD_SMI_EXPORT_TARGETS ${AMD_SMI} amdsminic ${AMD_SMI_ADDC_TARGETS} PARENT_SCOPE)
+    endif()
     set(_AMD_SMI_ALL_TARGETS ${AMD_SMI})
 endif()
 
@@ -173,7 +244,7 @@ endif()
 function(amdsmi_configure_common_target _TARGET)
     target_link_libraries(
         ${_TARGET}
-        PRIVATE rt Threads::Threads ${CMAKE_DL_LIBS} amdsminic ${FILESYSTEM_LIB} ${UALOE_LINK_LIBRARIES}
+        PRIVATE rt Threads::Threads ${CMAKE_DL_LIBS} amdsminic addc::addc_lib ${FILESYSTEM_LIB} ${UALOE_LINK_LIBRARIES}
     )
 
     if(ENABLE_WSL_BACKEND)
@@ -197,7 +268,6 @@ function(amdsmi_configure_common_target _TARGET)
             ${CMAKE_CURRENT_SOURCE_DIR}/../
             ${PROJECT_SOURCE_DIR}/rocm_smi/include
             ${PROJECT_SOURCE_DIR}/common/shared_mutex
-            ${RAS_DECODE_INC_DIR}
             ${DRM_INCLUDE_DIRS}
             ${DRM_AMDGPU_INCLUDE_DIRS}
             ${NIC_INCLUDE_DIRS}
@@ -321,6 +391,10 @@ set(_INSTALL_TARGETS ${AMD_SMI} amdsminic)
 if(BUILD_BOTH_LIBS)
     list(APPEND _INSTALL_TARGETS ${AMD_SMI}_static)
 endif()
+# Only a static amd_smi needs the addc archives at link time; a shared library carries them.
+if(BUILD_BOTH_LIBS OR NOT BUILD_SHARED_LIBS)
+    list(APPEND _INSTALL_TARGETS ${AMD_SMI_ADDC_TARGETS})
+endif()
 install(
     TARGETS ${_INSTALL_TARGETS}
     EXPORT amd_smiTargets
@@ -344,6 +418,7 @@ install(
 # both of amd_smi_cper.h's declarations).
 set(INSTALL_IMPL_HEADERS ${IMPL_HEADERS})
 list(FILTER INSTALL_IMPL_HEADERS EXCLUDE REGEX "_test")
+list(FILTER INSTALL_IMPL_HEADERS EXCLUDE REGEX "amd_smi_addc")
 list(FILTER INSTALL_IMPL_HEADERS EXCLUDE REGEX "amd_smi_container_id_parser")
 list(FILTER INSTALL_IMPL_HEADERS EXCLUDE REGEX "amd_smi_cper")
 list(FILTER INSTALL_IMPL_HEADERS EXCLUDE REGEX "amd_smi_wsl_device")
