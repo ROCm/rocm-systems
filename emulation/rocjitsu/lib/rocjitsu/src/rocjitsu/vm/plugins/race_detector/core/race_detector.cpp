@@ -142,6 +142,8 @@ bool RaceDetector::hasPotentialLdsConflict(int addr, int nBytes,
   const int limit = static_cast<int>(counts.size());
   const int cStart = addr / kCountGranularity;
   const int cEnd = (addr + nBytes + kCountGranularity - 1) / kCountGranularity;
+  // Every overlapping event contributes to a touched chunk. A matching owner
+  // proves that the full scan would skip it by the same-wave LDS ordering rule.
   for (int c = cStart; c < cEnd && c < limit; ++c) {
     if (counts[c].bytes > 0 &&
         (currentMemoryOrder != MemoryOrderClass::LDS || counts[c].orderedWave != wave))

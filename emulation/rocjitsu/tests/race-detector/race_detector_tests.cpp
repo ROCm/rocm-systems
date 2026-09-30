@@ -674,6 +674,61 @@ TEST(RaceDetector, LdsSameWave_SharedChunksKeepOtherWaveHazards) {
   }
 }
 
+TEST(RaceDetector, LdsSameWave_MixedOrderingSurvivesPartialRetirement) {
+  for (bool writes : {false, true}) {
+    SCOPED_TRACE(writes ? "RAW" : "WAR");
+    RaceTestBuilder b(/*numWaves=*/2, /*vgprs=*/8, /*sgprs=*/8);
+    auto ordinary = [&](int wave) {
+      if (writes)
+        b.ldsWrite(wave, /*lane=*/0, /*addr=*/12, /*bytes=*/8);
+      else
+        b.ldsRead(wave, /*lane=*/0, /*addr=*/12, /*bytes=*/8, /*vgprDst=*/2);
+    };
+    auto check = [&](int wave) {
+      if (writes)
+        b.checkLdsRead(wave, /*lane=*/0, /*addr=*/14, /*bytes=*/4);
+      else
+        b.checkLdsWrite(wave, /*lane=*/0, /*addr=*/14, /*bytes=*/4);
+    };
+
+    ordinary(/*wave=*/0);
+    // An unordered access from the same wave must invalidate the owner of
+    // both chunks. Keep its destination distinct from the ordinary read's.
+    if (writes)
+      b.flatLdsStore(/*wave=*/0, /*lane=*/0, /*addr=*/14, /*bytes=*/4);
+    else
+      b.flatLdsLoad(/*wave=*/0, /*lane=*/0, /*addr=*/14, /*bytes=*/4, /*vgprDst=*/4);
+    ASSERT_FALSE(b.hasRace());
+    check(/*wave=*/0);
+    EXPECT_EQ(b.raceCount(), 1);
+
+    // Only the ordinary event completes and retires; FLAT still needs VMCNT.
+    b.clearViolations();
+    b.waitcnt(/*wave=*/0, /*vmcnt=*/-1, /*lgkmcnt=*/0);
+    b.barrier();
+    ordinary(/*wave=*/0);
+    check(/*wave=*/0);
+    EXPECT_EQ(b.raceCount(), 1);
+
+    // Completion makes the history safe for this wave, but other waves
+    // must still see both events until a barrier retires them.
+    b.clearViolations();
+    b.waitcnt(/*wave=*/0, /*vmcnt=*/0, /*lgkmcnt=*/0);
+    check(/*wave=*/0);
+    ASSERT_FALSE(b.hasRace());
+    check(/*wave=*/1);
+    EXPECT_EQ(b.raceCount(), 2);
+
+    b.clearViolations();
+    b.barrier();
+    check(/*wave=*/1);
+    ASSERT_FALSE(b.hasRace());
+    ordinary(/*wave=*/1);
+    check(/*wave=*/0);
+    EXPECT_EQ(b.raceCount(), 1);
+  }
+}
+
 // ---- Same-wave VGPR via LDS load ----
 
 TEST(RaceDetector, SameWave_WriteReadRace) {
