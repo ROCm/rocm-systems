@@ -581,12 +581,10 @@ calculate_load_bias(const target_elf& elf, const mapped_object& object)
     auto page_size =
         (page_size_value > 0) ? static_cast<uint64_t>(page_size_value) : uint64_t{4096};
 
-    // Derive a bias from every (mapping, PT_LOAD segment) pair instead of
-    // assuming mappings.front() corresponds to the lowest-p_vaddr segment, and
-    // keep a candidate only if it accounts for every file-backed PT_LOAD
-    // segment rather than just the one it came from. Each such segment is still
-    // required to have its own maps entry whose start and file offset match the
-    // candidate exactly; segments sharing one merged VMA are not handled.
+// Accept a bias only if every file-backed PT_LOAD segment has a maps entry
+// at bias + page-aligned p_vaddr with the matching file page. Segments merged
+// into one maps entry are not handled. More than one surviving bias (e.g. the
+// same inode mapped twice) is rejected as ambiguous.
     auto segment_is_mapped_at_bias = [&](const Elf64_Phdr& segment, uint64_t bias) {
         if(segment.p_filesz == 0) return true;
 
