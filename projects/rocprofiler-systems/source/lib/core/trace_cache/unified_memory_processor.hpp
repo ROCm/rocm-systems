@@ -17,6 +17,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 
@@ -28,9 +29,12 @@ class output_file_sink_view
 public:
     using register_file_fn_t = void (*)(void*, std::string, output_format);
 
-    template <typename SinkT>
     // Non-owning sink view. The referenced sink object must outlive any
-    // unified_memory_processor_t storing this view.
+    // unified_memory_processor_t storing this view. Excludes output_file_sink_view
+    // itself so this doesn't shadow the copy/move constructors below and wrap
+    // a soon-to-be-destroyed view instead of the real sink.
+    template <typename SinkT>
+        requires(!std::is_same_v<std::decay_t<SinkT>, output_file_sink_view>)
     explicit output_file_sink_view(SinkT& sink) noexcept
     : m_object{ std::addressof(sink) }
     , m_register_file_impl{ +[](void* obj, std::string path, output_format format) {
