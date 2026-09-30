@@ -26,7 +26,7 @@
 #define LIBRARY_SRC_IPC_CONTEXT_DEVICE_HPP_
 
 #include "context.hpp"
-#include "comm_options.hpp"
+#include "rocshmem/comm_options.hpp"
 #include "atomic.hpp"
 #include "team.hpp"
 
@@ -129,9 +129,9 @@ class IPCContext : public Context {
   template <typename T, typename... Options>
   __device__ void p(T *dest, T value, int pe, CommOpt<Options...>) { p(dest, value, pe); }
   template <typename... Options>
-  __device__ void fence(CommOpt<Options...>) { fence(); }
+  __device__ void fence(CommOpt<Options...>) { if constexpr (CommOpt<Options...>::RelaxedOrdering) { wait_on_vmem(0); } else { fence(); } }
   template <typename... Options>
-  __device__ void fence(int pe, CommOpt<Options...>) { fence(pe); }
+  __device__ void fence(int pe, CommOpt<Options...>) { if constexpr (CommOpt<Options...>::RelaxedOrdering) { wait_on_vmem(0); } else { fence(pe); } }
 
   __device__ void quiet();
 

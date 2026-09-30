@@ -90,12 +90,22 @@ __device__ void GDAContext::putmem_nbi(void *dest, const void *source,
 // CommOpt is accepted and ignored; a later commit reads its ordering tag here.
 template <typename... Options>
 __device__ void GDAContext::fence(CommOpt<Options...>) {
-  fence();
+  if constexpr (CommOpt<Options...>::RelaxedOrdering) {
+    // Relaxed ordering: remote stores are already system-scope visible, so a
+    // waitcnt drain suffices; no per-QP quiet or L2-flushing ipcFence needed.
+    wait_on_vmem(0);
+  } else {
+    fence();
+  }
 }
 
 template <typename... Options>
 __device__ void GDAContext::fence(int pe, CommOpt<Options...>) {
-  fence(pe);
+  if constexpr (CommOpt<Options...>::RelaxedOrdering) {
+    wait_on_vmem(0);
+  } else {
+    fence(pe);
+  }
 }
 
 template <typename T>

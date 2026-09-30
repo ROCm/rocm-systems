@@ -21,7 +21,7 @@
 #include <hip/hip_runtime.h>
 
 #include "queue_pair_common.hpp"
-#include "comm_options.hpp"
+#include "rocshmem/comm_options.hpp"
 
 namespace rocshmem {
 

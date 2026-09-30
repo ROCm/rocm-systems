@@ -10,6 +10,7 @@
 #include "gda/endian.hpp"
 #include "gda/mlx5/provider_gda_mlx5.hpp"
 #include "gda/queue_pair/queue_pair_device.hpp"
+#include "assembly.hpp"
 
 #define GDA_MLX5_LOCK_USE_S_SLEEP  1
 #define GDA_MLX5_LOCK_USE_S_WAKEUP (0 && GDA_MLX5_LOCK_USE_S_SLEEP)
@@ -111,7 +112,11 @@ private:
   }
 #endif
 
+  template <typename CommOptions>
   __device__ void ring_doorbell(uint64_t sq_post, const gda_mlx5_wqe& wqe);
+
+  template <typename CommOptions>
+  __device__ __forceinline__ void store_wqe(uint16_t sq_idx, const gda_mlx5_wqe& wqe);
   __device__ void poll_cq_until(uint16_t requested_available_slots);
 
   static __device__ void acquire_lock(uint32_t* lock);
@@ -158,7 +163,7 @@ __device__ void QueuePairMLX5::post_ringdb_unlock(int wqe_count, const gda_mlx5_
   sq.post += wqe_count;
   if constexpr (CommOptions::Initiate || CommOptions::Concurrent) {
     if constexpr (CommOptions::Initiate) {
-      ring_doorbell(sq.post, wqe);
+      ring_doorbell<CommOptions>(sq.post, wqe);
     }
     if constexpr (CommOptions::Concurrent) {
       release_lock(&sq.lock);
@@ -196,7 +201,7 @@ __device__ __noinline__ void QueuePairMLX5::post_wqe_rma(
                    raddr, rkey, laddr, lkey, byte_count, send_inline};
 
   // copy to SQ
-  sq.buf[sq_idx] = wqe;
+  store_wqe<CommOptions>(sq_idx, wqe);
 
   if (wf_info.is_pe_group_last) {
     /* increment post counter, ring doorbell, and release SQ lock
@@ -229,7 +234,7 @@ __device__ __noinline__ void QueuePairMLX5::post_wqe_rma_single(
                    raddr, rkey, laddr, lkey, byte_count, send_inline};
 
   // copy to SQ
-  sq.buf[sq_idx] = wqe;
+  store_wqe<CommOptions>(sq_idx, wqe);
 
   // increment post counter, ring doorbell for this WQE, and release SQ lock
   post_ringdb_unlock<CommOptions>(1, wqe);
@@ -266,7 +271,7 @@ __device__ __noinline__ QueuePairMLX5::amo_ret_t<Fetch> QueuePairMLX5::post_wqe_
                    raddr, rkey, swap_add, compare, reinterpret_cast<uintptr_t>(atomic_laddr), atomic_lkey};
 
   // copy to SQ
-  sq.buf[sq_idx] = wqe;
+  store_wqe<CommOptions>(sq_idx, wqe);
 
   if (wf_info.is_pe_group_last) {
     // increment fetching-atomic counter
@@ -315,7 +320,7 @@ __device__ __noinline__ QueuePairMLX5::amo_ret_t<Fetch> QueuePairMLX5::post_wqe_
                    raddr, rkey, swap_add, compare, reinterpret_cast<uintptr_t>(atomic_laddr), atomic_lkey};
 
   // copy to SQ
-  sq.buf[sq_idx] = wqe;
+  store_wqe<CommOptions>(sq_idx, wqe);
 
   // increment fetching-atomic counter
   if constexpr (Fetch == AMOFetchType::Blocking) {
@@ -402,6 +407,29 @@ __device__ inline void QueuePairMLX5::poll_cq_until(uint16_t requested_available
   }
 }
 
+template <typename CommOptions>
+__device__ __forceinline__ void QueuePairMLX5::store_wqe(
+    uint16_t sq_idx, const gda_mlx5_wqe& wqe) {
+  if constexpr (CommOptions::RelaxedOrdering) {
+    // Relaxed ordering: write the WQE with cache-bypassing system-scope stores
+    // (sc0 sc1) so it reaches HBM without an L2 writeback. The doorbell path's
+    // wait_on_vmem then orders it before the doorbell writes.
+    using Access = AsmAccess<16, CachePolicy::Standard, CachePolicy::SystemScope>;
+    using vec_t = typename Access::type;
+    static_assert(sizeof(gda_mlx5_wqe) == 4 * sizeof(vec_t),
+                  "relaxed WQE store assumes a 64-byte (4x16B) WQE");
+    auto* dst = reinterpret_cast<vec_t*>(&sq.buf[sq_idx]);
+    const auto* src = reinterpret_cast<const vec_t*>(&wqe);
+    Access::store(&dst[0], src[0]);
+    Access::store(&dst[1], src[1]);
+    Access::store(&dst[2], src[2]);
+    Access::store(&dst[3], src[3]);
+  } else {
+    sq.buf[sq_idx] = wqe;
+  }
+}
+
+template <typename CommOptions>
 __device__ __forceinline__ void QueuePairMLX5::ring_doorbell(
     uint64_t sq_post, const gda_mlx5_wqe& wqe) {
   // sq_wqebb_counter is the least significant bits of the post counter
@@ -413,10 +441,20 @@ __device__ __forceinline__ void QueuePairMLX5::ring_doorbell(
   // get BlueFlame buffer from SQ
   gda_mlx5_bf_buffer* bf = sq.bf_buffer();
 
-  // store sq_wqebb_counter to doorbell record
-  __scoped_atomic_store_n(sq.dbrec, be_sq_wqebb_counter, __ATOMIC_RELEASE, __MEMORY_SCOPE_SYSTEM);
-  // ring doorbell by storing first 8B of WQE to the doorbell register
-  __scoped_atomic_store_n(&bf->db_reg.val, db_val.val, __ATOMIC_RELEASE, __MEMORY_SCOPE_SYSTEM);
+  if constexpr (CommOptions::RelaxedOrdering) {
+    // Relaxed ordering: the WQE was written with cache-bypassing system-scope
+    // stores, so a waitcnt drain (no L2 flush) suffices to order it before the
+    // doorbell record and BlueFlame register writes, which are relaxed.
+    wait_on_vmem(0);
+    __scoped_atomic_store_n(sq.dbrec, be_sq_wqebb_counter, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
+    wait_on_vmem(0);
+    __scoped_atomic_store_n(&bf->db_reg.val, db_val.val, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
+  } else {
+    // store sq_wqebb_counter to doorbell record
+    __scoped_atomic_store_n(sq.dbrec, be_sq_wqebb_counter, __ATOMIC_RELEASE, __MEMORY_SCOPE_SYSTEM);
+    // ring doorbell by storing first 8B of WQE to the doorbell register
+    __scoped_atomic_store_n(&bf->db_reg.val, db_val.val, __ATOMIC_RELEASE, __MEMORY_SCOPE_SYSTEM);
+  }
 
   LOGD_TRACE("SQ: posted WQEs with dbrec(%p)=%x (%hu), dbreg(%p)=%lx (%x, %x)",
              sq.dbrec, be_sq_wqebb_counter, sq_wqebb_counter, &bf->db_reg, db_val.val,

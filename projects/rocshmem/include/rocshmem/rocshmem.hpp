@@ -29,6 +29,7 @@
 
 #include "rocshmem_config.h"
 #include "rocshmem_common.hpp"
+#include "comm_options.hpp"
 #include "rocshmem_RMA.hpp"
 #include "rocshmem_AMO.hpp"
 #include "rocshmem_SIG_OP.hpp"
@@ -864,6 +865,14 @@ __device__ ATTR_NO_INLINE void rocshmem_wg_ctx_destroy(rocshmem_ctx_t *ctx);
 __device__ ATTR_NO_INLINE void rocshmem_ctx_fence(rocshmem_ctx_t ctx);
 
 __device__ ATTR_NO_INLINE void rocshmem_fence();
+
+/* Targeted (relaxed) ordering: request it by passing CommOpt{RelaxedOrdering<true>}.
+ * The option pack lowers the completion fence to a waitcnt-only drain. */
+template <typename... Options>
+__device__ void rocshmem_ctx_fence(rocshmem_ctx_t ctx, CommOpt<Options...> opts);
+
+template <typename... Options>
+__device__ void rocshmem_fence(CommOpt<Options...> opts);
 
 /**
  * @brief Guarantees order between messages in this context in accordance with

@@ -1,8 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef LIBRARY_SRC_COMM_OPTIONS_HPP_
-#define LIBRARY_SRC_COMM_OPTIONS_HPP_
+#ifndef LIBRARY_INCLUDE_ROCSHMEM_COMM_OPTIONS_HPP_
+#define LIBRARY_INCLUDE_ROCSHMEM_COMM_OPTIONS_HPP_
 
 /**
  * @file comm_options.hpp
@@ -35,10 +35,6 @@
 #include <type_traits>
 
 #include <hip/hip_runtime.h>
-
-// ActiveWFInfo (used by the completion-granularity helper). It only depends on
-// util.hpp, so including it here does not couple CommOpt to any GDA transport.
-#include "gda/queue_pair/queue_pair_common.hpp"
 
 namespace rocshmem {
 
@@ -125,6 +121,24 @@ namespace CommOption {
     using type = completion_tag<CompletionScope::Every>;
   };
 
+  /*
+   * @brief Option: whether relaxed (targeted) ordering is requested.
+   *
+   * When set, the operation's completion ordering may be relaxed: remote stores
+   * are made cache-bypassing / system-scope-visible and the completion fence
+   * lowers to a waitcnt-only drain instead of a full release fence with an L2
+   * flush/invalidate. This is the "targeted ordering" low-latency optimization.
+   * (GDA: cache-bypassing WQE store + relaxed doorbell; fence: wait_on_vmem.)
+   * Backends that cannot relax ordering ignore this tag.
+   */
+  template <bool relaxed_ordering>
+  struct relaxed_ordering_tag : constant_t<relaxed_ordering> { };
+
+  template <> struct default_option<relaxed_ordering_tag> {
+    /* default: standard (strict) ordering */
+    using type = relaxed_ordering_tag<false>;
+  };
+
   /* forward declaration */
   template <typename... Options> struct CommOpt;
 
@@ -144,26 +158,31 @@ namespace CommOption {
 #pragma clang diagnostic pop
 
   /* Base case with all options defined */
-  template <bool initiate, bool concurrent, bool flow_control, CompletionScope completion>
+  template <bool initiate, bool concurrent, bool flow_control, CompletionScope completion,
+            bool relaxed_ordering>
   struct CommOpt<initiate_tag<initiate>,
                  concurrent_tag<concurrent>,
                  flow_control_tag<flow_control>,
-                 completion_tag<completion>> {
+                 completion_tag<completion>,
+                 relaxed_ordering_tag<relaxed_ordering>> {
     /* explicitly-defaulted default constructor */
     __host__ __device__ constexpr CommOpt() = default;
     /* constructor for type deduction from tags */
     __host__ __device__ constexpr CommOpt(initiate_tag<initiate>,
                                           concurrent_tag<concurrent>,
                                           flow_control_tag<flow_control>,
-                                          completion_tag<completion>) { }
+                                          completion_tag<completion>,
+                                          relaxed_ordering_tag<relaxed_ordering>) { }
 
     /* static constexpr data members to simplify option access */
-    static constexpr auto Initiate    = initiate;
-    static constexpr auto Concurrent  = concurrent;
-    static constexpr auto FlowControl = flow_control;
-    static constexpr auto Completion  = completion;
+    static constexpr auto Initiate        = initiate;
+    static constexpr auto Concurrent      = concurrent;
+    static constexpr auto FlowControl     = flow_control;
+    static constexpr auto Completion      = completion;
+    static constexpr auto RelaxedOrdering = relaxed_ordering;
 
-    static __device__ constexpr inline bool signal_completion(const ActiveWFInfo& wf_info) {
+    template <typename WFInfo>
+    static __device__ constexpr inline bool signal_completion(const WFInfo& wf_info) {
       if constexpr (Completion == CompletionScope::Every) {
         // every operation is tracked to completion
         return true;
@@ -191,15 +210,48 @@ namespace CommOption {
   };
 
   /* Extraneous parameters,
-   * else matches CommOpt<initiate_tag, concurrent_tag, flow_control_tag, completion_tag> */
+   * else matches CommOpt<initiate_tag, concurrent_tag, flow_control_tag, completion_tag,
+   *                      relaxed_ordering_tag> */
+  template <bool initiate, bool concurrent, bool flow_control, CompletionScope completion,
+            bool relaxed_ordering, typename... Options>
+  struct CommOpt<initiate_tag<initiate>,
+                 concurrent_tag<concurrent>,
+                 flow_control_tag<flow_control>,
+                 completion_tag<completion>,
+                 relaxed_ordering_tag<relaxed_ordering>,
+                 Options...> {
+    static_assert(sizeof...(Options) == 0, "Too many or invalid options");
+  };
+
+  /* Missing relaxed_ordering_tag,
+   * else matches CommOpt<initiate_tag, concurrent_tag, flow_control_tag, completion_tag,
+   *                      relaxed_ordering_tag, Options...> */
   template <bool initiate, bool concurrent, bool flow_control, CompletionScope completion,
             typename... Options>
   struct CommOpt<initiate_tag<initiate>,
                  concurrent_tag<concurrent>,
                  flow_control_tag<flow_control>,
                  completion_tag<completion>,
+                 Options...>
+       : CommOpt<initiate_tag<initiate>,
+                 concurrent_tag<concurrent>,
+                 flow_control_tag<flow_control>,
+                 completion_tag<completion>,
+                 default_option_t<relaxed_ordering_tag>,
                  Options...> {
-    static_assert(sizeof...(Options) == 0, "Too many or invalid options");
+    __host__ __device__ constexpr CommOpt(initiate_tag<initiate>,
+                                          concurrent_tag<concurrent>,
+                                          flow_control_tag<flow_control>,
+                                          completion_tag<completion>,
+                                          Options...) { }
+    /* inherit constructor */
+    using CommOpt<initiate_tag<initiate>,
+                  concurrent_tag<concurrent>,
+                  flow_control_tag<flow_control>,
+                  completion_tag<completion>,
+                  default_option_t<relaxed_ordering_tag>,
+                  Options...
+                 >::CommOpt;
   };
 
   /* Missing completion_tag,
@@ -279,10 +331,11 @@ namespace CommOption {
   };
 
   /* ensure default CommOpt<> uses all the default options */
-  static_assert(CommOpt<>::Initiate    == default_option_v<initiate_tag>     &&
-                CommOpt<>::Concurrent  == default_option_v<concurrent_tag>   &&
-                CommOpt<>::FlowControl == default_option_v<flow_control_tag> &&
-                CommOpt<>::Completion  == default_option_v<completion_tag>);
+  static_assert(CommOpt<>::Initiate        == default_option_v<initiate_tag>         &&
+                CommOpt<>::Concurrent      == default_option_v<concurrent_tag>       &&
+                CommOpt<>::FlowControl     == default_option_v<flow_control_tag>     &&
+                CommOpt<>::Completion      == default_option_v<completion_tag>       &&
+                CommOpt<>::RelaxedOrdering == default_option_v<relaxed_ordering_tag>);
 
 }  // namespace CommOption
 
@@ -299,7 +352,8 @@ template <auto V> constexpr inline auto Initiate    = CommOption::initiate_tag<V
 template <auto V> constexpr inline auto Concurrent  = CommOption::concurrent_tag<V>{};
 template <auto V> constexpr inline auto FlowControl = CommOption::flow_control_tag<V>{};
 template <auto V> constexpr inline auto Completion  = CommOption::completion_tag<V>{};
+template <auto V> constexpr inline auto RelaxedOrdering = CommOption::relaxed_ordering_tag<V>{};
 
 }  // namespace rocshmem
 
-#endif  // LIBRARY_SRC_COMM_OPTIONS_HPP_
+#endif  // LIBRARY_INCLUDE_ROCSHMEM_COMM_OPTIONS_HPP_

@@ -29,7 +29,7 @@
 
 #include "queue_pair_common.hpp"
 #include "queue_pair_interface.hpp"
-#include "comm_options.hpp"
+#include "rocshmem/comm_options.hpp"
 #include "queue_pair_shmem.hpp"
 
 namespace rocshmem {

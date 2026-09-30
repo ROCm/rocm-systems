@@ -851,6 +851,28 @@ ROCSHMEM_DIRECT_CTX_T_MEM_HELPER(put_nbi_wave, NUM_PUT_NBI_WAVE, put_nbi_wave)
 ROCSHMEM_DIRECT_CTX_T_MEM_HELPER(get_wave, NUM_GET_WAVE, get_wave)
 ROCSHMEM_DIRECT_CTX_T_MEM_HELPER(get_nbi_wave, NUM_GET_NBI_WAVE, get_nbi_wave)
 
+/******************************************************************************
+ ***** TARGETED (RELAXED) ORDERING via CommOpt RelaxedOrdering ****************
+ ***** Request targeted ordering by passing CommOpt{RelaxedOrdering<true>}. **
+ *****************************************************************************/
+template <typename... Options>
+__device__ __forceinline__ void direct_ctx_fence(rocshmem_ctx_t ctx,
+                                                 CommOpt<Options...> opts) {
+  get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_FENCE);
+  ROCSHMEM_DIRECT_BACKEND_DISPATCH(ctx, fence(opts));
+}
+
+template <typename T, typename... Options>
+__device__ __forceinline__ void direct_ctx_put_nbi_wave(
+    rocshmem_ctx_t ctx, T *dest, const T *source, size_t nelems, int pe,
+    CommOpt<Options...> opts) {
+  if (nelems == 0) { return; }
+  get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_PUT_NBI_WAVE);
+  ROCSHMEM_DIRECT_BACKEND_DISPATCH(
+      ctx, put_nbi_wave(dest, source, nelems, pe, opts));
+}
+
+
 #undef ROCSHMEM_DIRECT_CTX_T_MEM_HELPER
 
 template <typename T, ROCSHMEM_OP Op>
@@ -1297,6 +1319,58 @@ __device__ __forceinline__ void direct_destroy_ctx(rocshmem_ctx_t *ctx) {
 }
 
 }  // namespace
+
+template <typename... Options>
+__device__ void rocshmem_ctx_fence(rocshmem_ctx_t ctx, CommOpt<Options...> opts) {
+  LOGD_API("device::ctx_fence+opts (ctx=%zd)", ctx.ctx_opaque);
+  direct_ctx_fence(ctx, opts);
+}
+
+template <typename... Options>
+__device__ void rocshmem_fence(CommOpt<Options...> opts) {
+  rocshmem_ctx_fence(ROCSHMEM_CTX_DEFAULT, opts);
+}
+
+template <typename T, typename... Options>
+__device__ void rocshmem_put_nbi_wave(rocshmem_ctx_t ctx, T *dest,
+                                      const T *source, size_t nelems, int pe,
+                                      CommOpt<Options...> opts) {
+  LOGD_API("device::put_nbi_wave+opts (ctx=%zd, dest=%p, source=%p, nelems=%zd, pe=%d)",
+           ctx.ctx_opaque, dest, source, nelems, pe);
+  direct_ctx_put_nbi_wave(ctx, dest, source, nelems, pe, opts);
+}
+
+template <typename T, typename... Options>
+__device__ void rocshmem_put_nbi_wave(T *dest, const T *source, size_t nelems,
+                                      int pe, CommOpt<Options...> opts) {
+  rocshmem_put_nbi_wave<T>(ROCSHMEM_CTX_DEFAULT, dest, source, nelems, pe, opts);
+}
+
+template <typename... Options>
+__device__ void rocshmem_ctx_schar_put_nbi_wave(
+    rocshmem_ctx_t ctx, signed char *dest, const signed char *source,
+    size_t nelems, int pe, CommOpt<Options...> opts) {
+  rocshmem_put_nbi_wave<signed char>(ctx, dest, source, nelems, pe, opts);
+}
+
+template <typename... Options>
+__device__ void rocshmem_schar_put_nbi_wave(
+    signed char *dest, const signed char *source, size_t nelems, int pe,
+    CommOpt<Options...> opts) {
+  rocshmem_put_nbi_wave<signed char>(dest, source, nelems, pe, opts);
+}
+
+/* Explicit instantiation of the targeted-ordering (RelaxedOrdering) variants so
+ * they are emitted into the device bitcode for external (DeepEP) device linking,
+ * exactly as the standard typed RMA functions are instantiated above. */
+using _ro_t = CommOption::relaxed_ordering_tag<true>;
+template __device__ void rocshmem_fence<_ro_t>(CommOpt<_ro_t>);
+template __device__ void rocshmem_ctx_fence<_ro_t>(rocshmem_ctx_t, CommOpt<_ro_t>);
+template __device__ void rocshmem_schar_put_nbi_wave<_ro_t>(
+    signed char *, const signed char *, size_t, int, CommOpt<_ro_t>);
+template __device__ void rocshmem_ctx_schar_put_nbi_wave<_ro_t>(
+    rocshmem_ctx_t, signed char *, const signed char *, size_t, int, CommOpt<_ro_t>);
+
 
 __device__ int rocshmem_wg_ctx_create(long options, rocshmem_ctx_t *ctx) {
   LOGD_API("device::wg_ctx_create (options=%ld)", options);
