@@ -108,7 +108,7 @@ TEST_F(HipFileAsyncOp, submitIo_runs_io_fn_on_pool_and_signals_completion)
     std::function<void()>   captured;
     EXPECT_CALL(mpool, makeTaskGroup()).WillOnce(Return(ByMove(std::move(tg))));
     EXPECT_CALL(*tg_raw, wait());
-    AsyncMonitor monitor;
+    StrictMock<MAsyncMonitor> mmon;
 
     uint64_t slot_storage      = 0;
     size_t   size              = 100;
@@ -121,10 +121,12 @@ TEST_F(HipFileAsyncOp, submitIo_runs_io_fn_on_pool_and_signals_completion)
     op->io_fn = testAsyncIoFn;
     g_test_io_fn_calls.store(0);
 
+    EXPECT_CALL(mmon, submitIo(op.get())).WillOnce([&mmon](AsyncOp *o) { mmon.AsyncMonitor::submitIo(o); });
     EXPECT_CALL(*tg_raw, run(_)).WillOnce([&captured](std::function<void()> work) {
         captured = std::move(work);
     });
-    monitor.submitIo(op.get());
+    EXPECT_CALL(mmon, completeOp(op.get()));
+    mmon.submitIo(op.get());
 
     captured();
     ASSERT_EQ(g_test_io_fn_calls.load(), 1);
@@ -159,12 +161,13 @@ TEST_F(HipFileAsyncOp, async_dispatch_runs_inline_when_submit_throws)
     g_test_io_fn_calls.store(0);
 
     EXPECT_CALL(mmon, submitIo(op.get())).WillOnce(Throw(std::runtime_error("no capacity")));
+    EXPECT_CALL(mmon, completeOp(op.get()));
     async_dispatch(op.get());
     ASSERT_EQ(g_test_io_fn_calls.load(), 1);
     ASSERT_EQ(slot_storage, 1u);
 }
 
-TEST_F(HipFileAsyncOp, enqueueAsync_supported_emits_dispatch_wait_cleanup)
+TEST_F(HipFileAsyncOp, enqueueAsync_supported_emits_dispatch_and_wait)
 {
     StrictMock<MAsyncMonitor> mmon;
     auto                      backend       = std::make_shared<StrictMock<MBackend>>();
@@ -183,13 +186,12 @@ TEST_F(HipFileAsyncOp, enqueueAsync_supported_emits_dispatch_wait_cleanup)
     EXPECT_CALL(mmon, addOp);
     EXPECT_CALL(mhip, hipLaunchHostFunc(hip_stream, Eq(&async_dispatch), _));
     EXPECT_CALL(mhip, hipStreamWaitValue64(hip_stream, &slot_storage, 5u, hipStreamWaitValueGte, _));
-    EXPECT_CALL(mhip, hipLaunchHostFunc(hip_stream, Eq(&async_io_cleanup), _));
 
     enqueueAsync(backend, IoType::Read, file, buffer, &size, &file_offset, &buffer_offset, &bytes, stream);
     ASSERT_EQ(bytes, 0);
 }
 
-TEST_F(HipFileAsyncOp, enqueueAsync_unsupported_emits_inline_and_cleanup)
+TEST_F(HipFileAsyncOp, enqueueAsync_unsupported_emits_inline)
 {
     StrictMock<MAsyncMonitor> mmon;
     auto                      backend       = std::make_shared<StrictMock<MBackend>>();
@@ -203,8 +205,7 @@ TEST_F(HipFileAsyncOp, enqueueAsync_unsupported_emits_inline_and_cleanup)
     EXPECT_CALL(*stream, canUseStreamWaitValue).WillRepeatedly(Return(false));
     EXPECT_CALL(*stream, getLock);
     EXPECT_CALL(mmon, addOp);
-    EXPECT_CALL(mhip, hipLaunchHostFunc(hip_stream, Eq(&async_run_io), _));
-    EXPECT_CALL(mhip, hipLaunchHostFunc(hip_stream, Eq(&async_io_cleanup), _));
+    EXPECT_CALL(mhip, hipLaunchHostFunc(hip_stream, Eq(&async_run_inline), _));
 
     enqueueAsync(backend, IoType::Read, file, buffer, &size, &file_offset, &buffer_offset, &bytes, stream);
 }
@@ -228,7 +229,7 @@ TEST_F(HipFileAsyncOp, enqueueAsync_compensates_signal_when_dispatch_fails)
     EXPECT_CALL(mmon, addOp);
     EXPECT_CALL(mhip, hipLaunchHostFunc(hip_stream, Eq(&async_dispatch), _))
         .WillOnce(Throw(Hip::RuntimeError(hipErrorInvalidHandle)));
-    EXPECT_CALL(mhip, hipLaunchHostFunc(hip_stream, Eq(&async_io_cleanup), _));
+    EXPECT_CALL(mmon, completeOp(_));
 
     EXPECT_THROW(enqueueAsync(backend, IoType::Read, file, buffer, &size, &file_offset, &buffer_offset,
                               &bytes, stream),
@@ -259,7 +260,7 @@ TEST_F(HipFileAsyncOp, async_run_io_reports_invalid_value_on_bad_params)
     auto    op            = std::make_shared<AsyncOp>(IoType::Read, file, buffer, stream, &size, &file_offset,
                                                       &buffer_offset, &bytes);
     async_run_io(op.get());
-    ASSERT_EQ(op->bytes_transferred_internal, -hipFileInvalidValue);
+    ASSERT_EQ(bytes, -hipFileInvalidValue);
 }
 
 static auto
@@ -441,98 +442,5 @@ INSTANTIATE_TEST_SUITE_P(HipFileAsyncSuite, HipFileReadWriteAsync, ::testing::Va
                          [](const testing::TestParamInfo<HipFileReadWriteAsync::ParamType> &param_info) {
                              return param_info.param.name;
                          });
-
-struct AsyncIoOp : public ::testing::Test {
-
-    AsyncIoOp()
-        : mfile{std::make_shared<StrictMock<MFile>>()}, mbuffer{std::make_shared<StrictMock<MBuffer>>()},
-          mstream{std::make_shared<StrictMock<MStream>>()}
-    {
-    }
-    void SetUp() override
-    {
-        EXPECT_CALL(*mstream, fixedBufferOffset)
-            .Times(AnyNumber())
-            .WillRepeatedly(Return(fixed_buffer_offset));
-        EXPECT_CALL(*mstream, fixedFileOffset).Times(AnyNumber()).WillRepeatedly(Return(fixed_file_offset));
-        EXPECT_CALL(*mstream, fixedIOSize).Times(AnyNumber()).WillRepeatedly(Return(fixed_io_size));
-        op = std::make_shared<AsyncOp>(io_type, mfile, mbuffer, mstream, &size, &file_offset, &buffer_offset,
-                                       &bytes_transferred);
-    }
-    StrictMock<MHip>                     mhip;
-    StrictMock<MSys>                     msys;
-    StrictMock<MAsyncMonitor>            masync_monitor;
-    std::shared_ptr<StrictMock<MFile>>   mfile;
-    std::shared_ptr<StrictMock<MBuffer>> mbuffer;
-    std::shared_ptr<StrictMock<MStream>> mstream;
-    IoType                               io_type             = IoType::Read;
-    size_t                               size                = 1_MiB;
-    hoff_t                               file_offset         = 0;
-    hoff_t                               buffer_offset       = 0;
-    ssize_t                              bytes_transferred   = 0;
-    bool                                 fixed_buffer_offset = false;
-    bool                                 fixed_file_offset   = false;
-    bool                                 fixed_io_size       = false;
-    std::shared_ptr<AsyncOp>             op;
-};
-
-struct AsyncIoOpCleanup : public AsyncIoOp {
-    void SetUp() override
-    {
-        fixed_buffer_offset = true;
-        fixed_file_offset   = true;
-        fixed_io_size       = true;
-        AsyncIoOp::SetUp();
-    }
-};
-
-TEST_F(AsyncIoOpCleanup, cleanupBytesTransferredIsUpdated)
-{
-    op->bytes_transferred_internal = 1000;
-    EXPECT_CALL(masync_monitor, completeOp);
-    async_io_cleanup(op.get());
-    ASSERT_EQ(op->bytes_transferred_internal, *op->bytes_transferred);
-}
-
-TEST_F(AsyncIoOpCleanup, cleanupInvalidOpSetsError)
-{
-    op->bytes_transferred_internal = 1000;
-    EXPECT_CALL(masync_monitor, completeOp).WillOnce(Throw(std::invalid_argument("error")));
-    async_io_cleanup(op.get());
-    ASSERT_EQ(*op->bytes_transferred, -hipFileInternalError);
-}
-
-TEST_F(AsyncIoOpCleanup, cleanupSkipsResultWriteWhenWriteResultFalse)
-{
-    op->bytes_transferred_internal = 1000;
-    op->write_result               = false;
-    *op->bytes_transferred         = 555;
-    EXPECT_CALL(masync_monitor, completeOp);
-    async_io_cleanup(op.get());
-    ASSERT_EQ(*op->bytes_transferred, 555);
-}
-
-TEST_F(AsyncIoOpCleanup, cleanupSkipsErrorWriteWhenWriteResultFalse)
-{
-    op->bytes_transferred_internal = 1000;
-    op->write_result               = false;
-    *op->bytes_transferred         = 555;
-    EXPECT_CALL(masync_monitor, completeOp).WillOnce(Throw(std::invalid_argument("error")));
-    async_io_cleanup(op.get());
-    ASSERT_EQ(*op->bytes_transferred, 555);
-}
-
-TEST_F(AsyncIoOpCleanup, cleanupSkipsResultWriteWhenNotCommitted)
-{
-    // An armed but only partially enqueued fallback: write_result is set but committed never is, so the
-    // primary's result must be left in place.
-    op->bytes_transferred_internal = 1000;
-    op->write_result               = true;
-    op->committed                  = false;
-    *op->bytes_transferred         = 555;
-    EXPECT_CALL(masync_monitor, completeOp);
-    async_io_cleanup(op.get());
-    ASSERT_EQ(*op->bytes_transferred, 555);
-}
 
 HIPFILE_WARN_NO_GLOBAL_CTOR_ON

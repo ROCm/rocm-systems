@@ -45,9 +45,6 @@ public:
     std::variant<const hoff_t, hoff_t *> file_offset;
     std::variant<const hoff_t, hoff_t *> buffer_offset;
     ssize_t *const                       bytes_transferred;
-    ssize_t                              bytes_transferred_internal;
-    bool                                 write_result{true};
-    bool                                 committed{true};
     void (*io_fn)(void *){nullptr};
     uint64_t                 wait_target{0};
     std::shared_ptr<Backend> backend{};
@@ -91,6 +88,6 @@ void enqueueAsync(std::shared_ptr<Backend> backend, IoType type, std::shared_ptr
 }
 
 extern "C" {
-void async_io_cleanup(void *userargs);
+void async_run_inline(void *userargs);
 void async_dispatch(void *userargs);
 }
