@@ -87,12 +87,11 @@ TEST_F(Gfx950RaceTest, vgpr_waitcnt_race) {
   ExpectRace(kVgprWaitcntRaceExpectation);
 }
 
-// --- Generic FLAT dual-counter waits ---
+// --- Generic FLAT result waits ---
 
-// Generic FLAT carries simultaneous VMCNT and LGKMCNT obligations, regardless
-// of whether the uniformly resolved address uses the global or LDS route. The
-// all-ones operands below leave one counter unchanged so each negative test
-// demonstrates that draining only the other counter is insufficient.
+// Generic FLAT contributes to both counters. With a uniform address space, its
+// returned VGPR lanes need only the counter for the pipeline producing them.
+// The other counter still participates in subsequent waits and backpressure.
 static constexpr int kFlatVmcntNoWait = 63;
 static constexpr int kFlatLgkmcntNoWait = 15;
 
@@ -139,11 +138,11 @@ TEST_F(Gfx950RaceTest, flat_global_wait_both) {
   ExpectNoRace();
 }
 
-TEST_F(Gfx950RaceTest, flat_global_vmcnt_only_race) {
+TEST_F(Gfx950RaceTest, flat_global_vmcnt_only) {
   auto *src = allocWithData<float>(64), *dst = alloc<float>(64);
   flat_global_wait_kernel<0, kFlatLgkmcntNoWait><<<1, 64>>>(src, dst);
   sync();
-  ExpectRace(kFlatPartialWaitRaceExpectation);
+  ExpectNoRace();
 }
 
 TEST_F(Gfx950RaceTest, flat_global_lgkmcnt_only_race) {
@@ -165,10 +164,10 @@ TEST_F(Gfx950RaceTest, flat_lds_vmcnt_only_race) {
   ExpectRace(kFlatPartialWaitRaceExpectation);
 }
 
-TEST_F(Gfx950RaceTest, flat_lds_lgkmcnt_only_race) {
+TEST_F(Gfx950RaceTest, flat_lds_lgkmcnt_only) {
   flat_lds_wait_kernel<kFlatVmcntNoWait, 0><<<1, 64>>>(alloc<int>(64));
   sync();
-  ExpectRace(kFlatPartialWaitRaceExpectation);
+  ExpectNoRace();
 }
 
 // --- All-ones wait operands ---

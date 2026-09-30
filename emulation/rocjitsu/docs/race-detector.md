@@ -192,11 +192,32 @@ following lifecycle:
    operation is complete.
 
 Generic `FLAT_*` instructions have two independent completion obligations:
-the vector-memory counter and the LDS counter. A wait on only one domain does
-not complete the race-detector event; both domains must be satisfied. The
-resolved route still determines whether the event accesses global memory or
-LDS. This currently assumes that all active lanes select the same memory space;
-mixed LDS/global lanes are tracked separately in #11456.
+the vector-memory counter and the LDS counter. On gfx950, an ordinary FLAT load
+whose requesting lanes all use one memory pipeline separates its returned values
+from the empty portion's counter entry. Global and scratch results require
+`vmcnt(0)`; LDS results require `lgkmcnt(0)`. For example, with global addresses
+in every active lane, this use of `v8` has a sufficient wait:
+
+```asm
+flat_load_dword v8, v[0:1]
+s_waitcnt vmcnt(0)
+flat_store_dword v[2:3], v8
+```
+
+The unused portion still contributes a counter entry with no register or LDS
+access. Waiting for the result does not discard that entry or make it ordered
+with other memory operations. Both portions retain CDNA's unordered completion
+class, so nonzero waits do not prove a FLAT result ready. This follows the
+distinction between data writeback and whole-instruction completion in the
+[CDNA4 ISA](https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-cdna4-instruction-set-architecture.pdf)
+§§4.4 and 10.2–10.2.2, and agrees with the core checker's
+[FLAT register-readiness policy](memory-wait-counter-coverage.md#flat-register-readiness).
+
+This result-specific handling is limited to ordinary gfx950 loads with uniform
+pipeline routing; a mixture of global and scratch lanes uses the same VMEM
+pipeline. Other FLAT events retain both obligations. Mixed LDS/global functional
+execution is tracked separately in #11456, and the broader diagnostic audit is
+tracked in #12237.
 
 An all-ones wait-count field is the architectural “do not wait” value. CDNA's
 four-bit `lgkmcnt(15)` and six-bit `vmcnt(63)` therefore retire no events;
