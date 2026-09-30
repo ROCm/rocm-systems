@@ -1,0 +1,65 @@
+# Publish the Rocjitsu dashboard from develop.
+# A change under emulation/rocjitsu/website/ replaces gh-pages/rocjitsu-dashboard/.
+
+name: "rocjitsu-publish-website"
+
+on:
+  push:
+    branches:
+      - develop
+    paths:
+      - "emulation/rocjitsu/website/**"
+      - ".github/workflows/rocjitsu-publish-website.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rocjitsu-publish-website
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish rocjitsu dashboard
+    if: github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.13.0"
+          cache: npm
+          cache-dependency-path: emulation/rocjitsu/website/package-lock.json
+
+      - name: Build rocjitsu dashboard
+        working-directory: emulation/rocjitsu/website
+        run: |
+          npm ci
+          npm run build
+
+      - name: Generate publishing token
+        id: app-token
+        uses: actions/create-github-app-token@df432ceedc7162793a195dd1713ff69aefc7379e # v2.0.6
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          permission-contents: write
+
+      - name: Publish rocjitsu dashboard
+        uses: peaceiris/actions-gh-pages@84c30a85c19949d7eee79c4ff27748b70285e453 # v4.1.0
+        with:
+          # GITHUB_TOKEN pushes do not trigger branch-based Pages builds.
+          github_token: ${{ steps.app-token.outputs.token }}
+          publish_branch: gh-pages
+          publish_dir: ./emulation/rocjitsu/website/dist
+          destination_dir: rocjitsu-dashboard
+          commit_message: "Publish rocjitsu dashboard"
+          # Skip the default root .nojekyll file so only rocjitsu-dashboard changes.
+          enable_jekyll: true
