@@ -161,3 +161,15 @@ def test_chart_title_appears_as_first_line():
     )
     assert output.strip().splitlines()[0] == chart_title
     assert "3. Memory Chart" not in output
+
+
+def test_left_panel_uses_wgp_terminology():
+    """RDNA3.5 schedules waves onto WGPs, so the left panel is labelled per WGP."""
+    output = strip_ansi(
+        mem_chart_gfx11.plot_mem_chart(
+            mem_chart_gfx11.get_sample_metrics(), chart_title=DEFAULT_TITLE
+        )
+    )
+    assert "WGPs" in output
+    assert "waves/WGP" in output
+    assert "Compute Units" not in output

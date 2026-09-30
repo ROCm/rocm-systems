@@ -15,7 +15,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
-* Renamed the Memory Chart left-hand panel from "Kernel" to "Compute Units" across all architectures. The panel now shows resource allocation stats (Wave Occupancy, vGPRs, sGPRs, Scratch, LDS Allocation, Workgroups).
+* Renamed the Memory Chart left-hand panel from "Kernel" to "Compute Units" on CDNA (gfx9) and to "WGPs" on gfx115x and gfx1250. The panel now shows resource allocation stats (Wave Occupancy, vGPRs, sGPRs, Scratch, LDS Allocation, Workgroups). Wave Occupancy is reported per CU on gfx9 and per WGP on gfx115x and gfx1250.
 
 * All Memory Chart bandwidth values now use uniform fixed-point GB/s formatting (3 decimal places) for easy cross-level comparison.
 

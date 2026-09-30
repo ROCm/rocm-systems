@@ -43,8 +43,10 @@ Panel Config:
         value: Value
         unit: Unit
       metric:
+        # Wavefront Occupancy: SQ has one instance per WGP, so SQ_BUSY_CYCLES_sum is the
+        # total WGP-busy cycles. Dividing by the _avr instead yields a GPU-wide count.
         Wavefront Occupancy:
-          value: ROUND(SUM(SQ_WAVE_CYCLES_sum) / SUM(SQ_BUSY_CYCLES_avr), 0)
+          value: ROUND(SUM(SQ_WAVE_CYCLES_sum) / SUM(SQ_BUSY_CYCLES_sum), 0)
         VGPR:
           value: ROUND(AVG(Arch_VGPR), 0)
         SGPR:
@@ -257,7 +259,7 @@ Panel Config:
           unit: Bytes/s
 
   metrics_description:
-    Wavefront Occupancy: Wavefronts per active CU.
+    Wavefront Occupancy: Wavefronts per active WGP.
     VGPR: >-
       The number of architected vector general-purpose registers allocated
       for the kernel. Note: this may not exactly match the number of VGPRs

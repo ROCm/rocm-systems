@@ -24,6 +24,7 @@ Panel Config:
         value: Value
         unit: Unit
       metric:
+        # Wavefront Occupancy: on gfx1250 cu_per_gpu (rocminfo "Compute Unit") counts WGPs.
         Wavefront Occupancy:
           value: ROUND(SUM(SQG_WAVE_CYCLES_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu), 0)
         VGPR:
@@ -312,7 +313,7 @@ Panel Config:
           unit: Percent
 
   metrics_description:
-    Wavefront Occupancy: Wavefronts per active CU.
+    Wavefront Occupancy: Wavefronts per WGP, averaged over GPU-active cycles.
     VGPR: >-
       The number of architected vector general-purpose registers allocated
       for the kernel. Note: this may not exactly match the number of VGPRs

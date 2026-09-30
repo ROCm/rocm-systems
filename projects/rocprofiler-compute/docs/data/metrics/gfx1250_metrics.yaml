@@ -112,7 +112,7 @@ System Speed-of-Light:
     unit: Cycles
 Memory chart - Instruction Cache:
   Wavefront Occupancy:
-    rst: Wavefronts per active CU.
+    rst: Wavefronts per WGP, averaged over GPU-active cycles.
   VGPR:
     rst: 'The number of architected vector general-purpose registers allocated for the kernel. Note: this may not exactly match the number of VGPRs requested by the compiler due to allocation granularity.'
   SGPR:

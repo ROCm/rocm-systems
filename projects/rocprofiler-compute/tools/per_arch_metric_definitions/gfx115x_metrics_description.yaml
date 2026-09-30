@@ -77,8 +77,8 @@ System Speed-of-Light:
     unit: Bytes/s
 Memory chart - Instruction Cache:
   Wavefront Occupancy:
-    plain: Wavefronts per active CU.
-    rst: Wavefronts per active CU.
+    plain: Wavefronts per active WGP.
+    rst: Wavefronts per active WGP.
   VGPR:
     plain: 'The number of architected vector general-purpose registers allocated for the kernel. Note: this may not exactly match the number of VGPRs requested by the compiler due to allocation granularity.'
     rst: 'The number of architected vector general-purpose registers allocated for the kernel. Note: this may not exactly match the number of VGPRs requested by the compiler due to allocation granularity.'

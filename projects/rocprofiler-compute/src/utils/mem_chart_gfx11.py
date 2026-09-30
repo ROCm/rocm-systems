@@ -4,8 +4,8 @@
 """RDNA3.5 memory chart renderer.
 
 Hierarchy (GCEA = Graphics Core Efficiency Arbiter):
-  Compute Units -> GL0 (TCP) / SQC -> GL1 -> GL2 -> GCEA -> System Memory
-         -> LDS (on-CU, no GL1 connection)
+  WGPs -> GL0 (TCP) / SQC -> GL1 -> GL2 -> GCEA -> System Memory
+         -> LDS (on-WGP, no GL1 connection)
 
 Metric keys must match ``gfx115x/0300_memory_chart.yaml``.
 """
@@ -47,7 +47,7 @@ from utils.mem_chart_common import (
 # ``analysis_configs/gfx115x/0300_memory_chart.yaml`` (tables 301–309), in panel order.
 # Commented-out YAML metrics (e.g. TCP Atomic) are omitted.
 _MEM_CHART_DEFAULT_ROWS: tuple[tuple[str, Union[int, float]], ...] = (
-    # Compute Units
+    # WGPs
     ("Wavefront Occupancy", 8),
     ("VGPR", 64),
     ("SGPR", 32),
@@ -160,7 +160,7 @@ def _extract_metrics(metric_dict: dict[str, Any]) -> dict[str, Any]:
     """Map YAML metric names to short internal keys."""
     metrics: dict[str, Any] = {}
 
-    # Compute Units
+    # WGPs
     metrics["wave_occ"] = metric_dict.get("Wavefront Occupancy")
     metrics["vgpr"] = metric_dict.get("VGPR")
     metrics["sgpr"] = metric_dict.get("SGPR")
@@ -222,7 +222,7 @@ def _build_cu_and_l0(
     cu_arrows: dict[str, str],
     std_arrows: dict[str, str],
 ) -> tuple[Panel, Text, Group, Text]:
-    """Compute Units panel, CU edges, L0 stack, and GL1 edges."""
+    """WGPs panel, WGP edges, L0 stack, and GL1 edges."""
 
     color_read = COLORS["read"]
     color_write = COLORS["write"]
@@ -232,14 +232,14 @@ def _build_cu_and_l0(
     lds_bytes = safe_float(metrics["lds_alloc"])
     lds_alloc_kb = lds_bytes / 1024 if lds_bytes is not None else None
     cu_stats = [
-        ("Wave Occ", metrics["wave_occ"], " waves/CU"),
+        ("Wave Occ", metrics["wave_occ"], " waves/WGP"),
         ("vGPRs", metrics["vgpr"], ""),
         ("sGPRs", metrics["sgpr"], ""),
         ("Scratch", scratch_kb, " KB"),
         ("LDS Alloc", lds_alloc_kb, " KB"),
         ("Workgroups", metrics["workgroups"], ""),
     ]
-    cu_panel = build_cu_panel(_TOTAL_H, stats=cu_stats)
+    cu_panel = build_cu_panel(_TOTAL_H, stats=cu_stats, title="WGPs")
 
     cu_arrow_left = cu_arrows["left"]
     cu_arrow_right = cu_arrows["right"]
@@ -507,7 +507,7 @@ def create_mem_chart_diagram(
         sections.append(
             build_arch_notes([
                 ("TCP (Texture Cache Pipe)", "L0 vector cache for VMEM operations"),
-                ("LDS (Local Data Share)", "On-CU scratchpad, NO GL1 Cache connection"),
+                ("LDS (Local Data Share)", "On-WGP scratchpad, no GL1 connection"),
                 ("SQC (Sequencer Cache)", "ICache + DCache for scalar operations"),
             ])
         )

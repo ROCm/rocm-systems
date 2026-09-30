@@ -4,12 +4,12 @@
 """gfx1250 (CDNA5) memory chart renderer.
 
 Renders the Instinct gfx1250 memory hierarchy as a Rich terminal diagram.
-Layout: CU -> TCP(LDS+GL0)/SQC -> GL1 -> GLARB -> GL2 -> EA/DF -> HBM/IO/HDM/GMI
+Layout: WGP -> TCP(LDS+GL0)/SQC -> GL1 -> GLARB -> GL2 -> EA/DF -> HBM/IO/HDM/GMI
 
 Architecture regions::
 
     |<--------- XCD (Compute Die) -------->|<---- AID (I/O Die) --->|
-    CU     -> SQC/TCP -> GL1 -> GLARB -> GL2 -> EA/DF -> HBM (DRAM)
+    WGP    -> SQC/TCP -> GL1 -> GLARB -> GL2 -> EA/DF -> HBM (DRAM)
                                                        -> IO  (PCIe)
                                                        -> HDM (CXL)
                                                        -> GMI (Multi-GPU)
@@ -42,7 +42,7 @@ from utils.mem_chart_common import (
 # Metric keys — match 0300_Memory_Chart.yaml for gfx1250 (tables 301-308)
 # ---------------------------------------------------------------------------
 _MEM_CHART_DEFAULT_ROWS: tuple[tuple[str, Union[int, float]], ...] = (
-    # Compute Units
+    # WGPs
     ("Wavefront Occupancy", 8),
     ("VGPR", 64),
     ("SGPR", 32),
@@ -162,7 +162,7 @@ def _build_cu_edge_column(
     entries: list[tuple[str, Union[int, float, None], str, str]],
     arrows: dict[str, str],
 ) -> Text:
-    """Compute Units -> TCP/SQC edge column with request-count labels."""
+    """WGPs -> TCP/SQC edge column with request-count labels."""
     lines: list[str] = []
     for label, value, arrow_key, color in entries:
         lines.append(colored(format_edge(label, value, width=8), color))
@@ -471,22 +471,22 @@ def create_mem_chart_diagram(
     cu_arrows = make_arrows(_CU_ARROW_LEN)
     std_arrows = make_arrows(_ARROW_LEN)
 
-    # --- Compute Units panel ---
+    # --- WGPs panel ---
     scratch_bytes = safe_float(m.get("Scratch Allocation"))
     scratch_kb = scratch_bytes / 1024 if scratch_bytes is not None else None
     lds_bytes = safe_float(m.get("LDS Allocation"))
     lds_alloc_kb = lds_bytes / 1024 if lds_bytes is not None else None
     cu_stats = [
-        ("Wave Occ", m.get("Wavefront Occupancy"), " waves/CU"),
+        ("Wave Occ", m.get("Wavefront Occupancy"), " waves/WGP"),
         ("vGPRs", m.get("VGPR"), ""),
         ("sGPRs", m.get("SGPR"), ""),
         ("Scratch", scratch_kb, " KB"),
         ("LDS Alloc", lds_alloc_kb, " KB"),
         ("Workgroups", m.get("Workgroups"), ""),
     ]
-    cu_panel = build_cu_panel(_CU_PANEL_H, stats=cu_stats)
+    cu_panel = build_cu_panel(_CU_PANEL_H, stats=cu_stats, title="WGPs")
 
-    # --- Compute Units -> TCP/SQC edges ---
+    # --- WGPs -> TCP/SQC edges ---
     color_read = COLORS["read"]
     color_write = COLORS["write"]
     color_atomic = COLORS["atomic"]

@@ -244,11 +244,13 @@ def build_cu_panel(
     height: int,
     padding_lines: int = 13,
     stats: Optional[list] = None,
+    title: str = "Compute Units",
 ) -> Panel:
     """Build the Compute Units panel.
 
     *stats*: list of (label, value, unit) tuples to display.
     Falls back to decorative placeholder text when omitted.
+    *title*: panel title; RDNA-style charts pass "WGPs".
     """
     if stats:
         # Borders and padding leave CU_PANEL_W - 4 columns for text
@@ -269,7 +271,7 @@ def build_cu_panel(
     color = COLORS["cu"]
     return Panel(
         content,
-        title=f"[bold {color}]Compute Units[/bold {color}]",
+        title=f"[bold {color}]{title}[/bold {color}]",
         border_style=color,
         width=CU_PANEL_W,
         height=height,
