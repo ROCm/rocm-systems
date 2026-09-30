@@ -153,33 +153,54 @@ bool RocJpegStreamParser::ParseJpegStream(const uint8_t *jpeg_stream, uint32_t j
         }
         next_chunck = stream_ + chuck_len;
 
-        switch (marker) {
-            case SOF:
-                // ISO/IEC 10918-1 B.2: a baseline image has exactly one frame.
-                // A second frame header is not just redundant - ParseSOF writes
-                // only the components it declares, so a shorter frame behind a
-                // longer one leaves the earlier frame's sampling factors in the
-                // unused slots. GetChromaSubsampling reads components 1 and 2
-                // unconditionally and matches 4:0:0 on their factors being
-                // zero, so a one-component frame behind a three-component one
-                // is classified as a colour subsampling: num_components says 1
-                // while chroma_subsampling says 4:2:0, and the decoder then
-                // allocates and copies out a chroma plane nothing ever wrote.
-                if (sof_marker_found) {
-                    ErrorLog(g_rocjpeg_logger, "Invalid JPEG: the stream has more than one frame header!");
-                    FunctionExitLog(g_rocjpeg_logger);
-                    return false;
+        // Frame headers are handled ahead of the switch because they are a range
+        // of marker codes rather than a single one. Matching only SOF0 and SOF2
+        // would leave the other twelve to fall through as unknown segments, and
+        // an unknown segment is skipped: a stream could then pair a valid SOF0
+        // with an SOF1 and carry two frame headers past both checks below.
+        if (IsFrameMarker(marker)) {
+            // Of the frame headers only SOF0 names a coding process this library
+            // decodes. The rest are rejected on the marker alone, whether or not
+            // a frame has already been seen, since none of them describes a
+            // stream the decoder could go on to handle.
+            if (marker != SOF) {
+                if (marker == SOF2) {
+                    ErrorLog(g_rocjpeg_logger, "Progressive JPEG is not supported!");
+                } else {
+                    std::ostringstream oss;
+                    oss << "Unsupported JPEG: frame header 0xFF" << std::uppercase << std::hex
+                        << static_cast<int>(marker)
+                        << " names a coding process other than baseline sequential DCT!";
+                    ErrorLog(g_rocjpeg_logger, oss.str());
                 }
-                if (!ParseSOF()) {
-                    FunctionExitLog(g_rocjpeg_logger);
-                    return false;
-                }
-                sof_marker_found = true;
-                break;
-            case SOF2:
-                ErrorLog(g_rocjpeg_logger, "Progressive JPEG is not supported!");
                 FunctionExitLog(g_rocjpeg_logger);
                 return false;
+            }
+            // ISO/IEC 10918-1 B.2: a baseline image has exactly one frame.
+            // A second frame header is not just redundant - ParseSOF writes
+            // only the components it declares, so a shorter frame behind a
+            // longer one leaves the earlier frame's sampling factors in the
+            // unused slots. GetChromaSubsampling reads components 1 and 2
+            // unconditionally and matches 4:0:0 on their factors being
+            // zero, so a one-component frame behind a three-component one
+            // is classified as a colour subsampling: num_components says 1
+            // while chroma_subsampling says 4:2:0, and the decoder then
+            // allocates and copies out a chroma plane nothing ever wrote.
+            if (sof_marker_found) {
+                ErrorLog(g_rocjpeg_logger, "Invalid JPEG: the stream has more than one frame header!");
+                FunctionExitLog(g_rocjpeg_logger);
+                return false;
+            }
+            if (!ParseSOF()) {
+                FunctionExitLog(g_rocjpeg_logger);
+                return false;
+            }
+            sof_marker_found = true;
+            stream_ = next_chunck;
+            continue;
+        }
+
+        switch (marker) {
             case DHT:
                 if (!ParseDHT()) {
                     FunctionExitLog(g_rocjpeg_logger);

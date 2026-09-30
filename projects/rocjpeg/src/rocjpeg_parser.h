@@ -49,6 +49,9 @@ enum JpegMarkers {
     SOI  = 0xD8, /**< Start Of Image */
     SOF  = 0xC0, /**< Start Of Frame for a baseline DCT-based JPEG. */
     SOF2 = 0xC2, /**< Start Of Frame for a progressive DCT-based JPEG (not supported). */
+    SOF15 = 0xCF, /**< Last of the frame headers, which run from SOF (0xC0) to here. */
+    JPG  = 0xC8, /**< Reserved marker sitting inside the frame header range. */
+    DAC  = 0xCC, /**< Define Arithmetic Coding, also inside the frame header range. */
     DHT  = 0xC4, /**< Define Huffman Table */
     DQT  = 0xDB, /**< Define Quantization Table */
     DRI  = 0xDD, /**< Define Restart Interval */
@@ -57,6 +60,22 @@ enum JpegMarkers {
     RST0 = 0xD0, /**< First of the eight restart markers, which carry no payload. */
     RST7 = 0xD7, /**< Last of the eight restart markers, which carry no payload. */
 };
+
+/**
+ * @brief Tells whether a marker code introduces a frame header.
+ *
+ * ISO/IEC 10918-1 B.1.1.3 assigns the whole SOF0 to SOF15 range to frame
+ * headers, bar the three codes reserved for other purposes: DHT, JPG and DAC.
+ * Only SOF0 names a coding process this library decodes, but the rest still
+ * have to be recognised as frames rather than ignored as unknown segments, or
+ * a stream could carry a second frame header under one of their codes.
+ *
+ * @param marker The marker code, without its 0xFF prefix byte.
+ * @return True if the code introduces a frame header.
+ */
+inline bool IsFrameMarker(uint8_t marker) {
+    return marker >= SOF && marker <= SOF15 && marker != DHT && marker != JPG && marker != DAC;
+}
 
 /**
  * @brief Structure representing the picture parameter buffer.
