@@ -111,10 +111,10 @@ This is expected and is not an error:
 
 .. code:: none
 
-   node01:4242 NCCL DIAG [INFO] p2p: temporarily enabled context-wide CUDA peer access rank=3 cudaDev=3; avoid concurrent CUDA use on this context until diagnostics completes
+   node01:4242 NCCL DIAG [INFO] p2p: temporarily enabled context-wide HIP peer access rank=3 cudaDev=3; avoid concurrent HIP use on this context until diagnostics completes
 
-In this message, "CUDA" refers to the HIP runtime. Do not issue HIP work on
-these devices from other threads while the communicator is being initialized.
+Do not issue HIP work on these devices from other threads while the
+communicator is being initialized.
 
 The line is not printed when peer access between the devices was already
 enabled. A missing line does not mean that the check did not run.
@@ -159,7 +159,7 @@ suggested next step. The table lists the kinds of failure.
    * - ``destination buffer unavailable``
      - The destination rank could not allocate or export its test buffer.
        Look for earlier allocation or initialization errors on that rank.
-   * - ``local CUDA setup failed``
+   * - ``local HIP setup failed``
      - The source rank could not set up its device, stream, or buffers.
        Look for earlier HIP errors on that rank.
    * - ``peer-memory import failed``
@@ -224,14 +224,8 @@ The edge fields have the following meaning:
        is enabled). The report format also defines ``CUMEM_POSIX_FD`` and
        ``CUMEM_FABRIC``, but RCCL does not report them on AMD GPUs.
 
-.. note::
-
-   Known limitation: the suggested next step at the end of each line comes
-   from NCCL and still refers to NVIDIA tools and terms (``nvidia-smi``,
-   ``nvidia-imex-ctl``, NVLink, CUDA IPC). AMD-specific wording in the report
-   is tracked separately. Until then, use the commands in the following table.
-
-On AMD GPUs, use the following commands instead:
+The suggested next step at the end of each line depends on the path and on
+how the destination memory was shared. The following table summarizes it:
 
 .. list-table::
    :header-rows: 1
