@@ -1353,6 +1353,7 @@ The event wire format (finding H5):
   and copied into the translated device `dst` with the recorded `dpitch`. D2H snapshots
   the host `dst` after the copy and validates the device result against it at replay.
   Row-padded image/tensor buffers are now handled.
+- The D2H expected output of `hipMemcpy2D`, the four `hipMemcpy3D` spellings, `hipDrvMemcpy3D` / `hipDrvMemcpy3DAsync` and the three driver 2D spellings is the host destination from its base pointer through the last copied byte, laid out with the recorded pitch and offsets: the same footprint as the driver copies' H2D source. A footprint blob therefore also holds the host bytes between rows and before the first copied row, which the copy never touched. Replay re-runs the recorded copy into a scratch buffer of that size and compares only the copied rows, so bytes between rows or before the first one are never judged. Archives captured earlier hold the flat `width*height*depth` bytes for the 3D and driver copies; replay reports such a blob as not validated unless the copy is dense from the base, in which case the two layouts coincide.
 - `hipMemset3D` / `hipMemset3DAsync` drop the destination pitched pointer/extent at
   capture (`pitchedDevPtr = 0`) and no-op at replay, so 3D-memset-initialized regions
   are invisible to replay.
@@ -1372,9 +1373,7 @@ dispatch before the create populates the translation map and silently
 
 D2H validation can pass when replay actually diverged:
 
-- **Length clamp.** Comparison uses `min(copy_size, blob_size)`; a truncated or
-  crash-recovered blob validates only a prefix (the corrupted tail is unchecked) and
-  still counts as PASS. A zero-length compare counts as pass.
+- **Length clamp.** Linear copies compare `min(copy_size, blob_size)`; a truncated or crash-recovered blob validates only a prefix (the corrupted tail is unchecked) and still counts as PASS. A zero-length compare counts as pass. The 2D, 3D and driver copies do not clamp: a blob shorter than the rect's footprint is not validated.
 - **Float-dtype guessing.** Blobs carry no dtype. On a byte mismatch the validator
   tries `{fp32, bf16, fp16, fp64}` and passes on the first encoding within tolerance,
   so integer/index/pointer output buffers can silently false-pass; both-NaN counts as
