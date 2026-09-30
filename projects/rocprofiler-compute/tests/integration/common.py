@@ -15,7 +15,6 @@ import os
 import re
 import shutil
 import subprocess
-import sys
 from functools import lru_cache
 from pathlib import Path
 
@@ -53,8 +52,6 @@ config["torch_test_app"] = ["python3", "./tests/simple_net.py"]
 config["triton_test_app"] = ["python3", "./tests/triton_ffn.py"]
 config["torch_compile_test_app"] = ["python3", "./tests/torch_compile_triton.py"]
 config["cleanup"] = True
-config["METRIC_COMPARE"] = False
-config["METRIC_LOGGING"] = False
 
 arch_config = {}
 
@@ -62,9 +59,6 @@ num_kernels = 3
 num_devices = 1
 
 attach_detach_interval_msec_no_delay = 1000
-DEFAULT_ABS_DIFF = 15
-DEFAULT_REL_DIFF = 50
-MAX_REOCCURING_COUNT = 28
 
 CSVS = sorted([
     "sysinfo.csv",
@@ -75,74 +69,6 @@ ROOF_ONLY_FILES = sorted([
     "sysinfo.csv",
 ])
 
-METRIC_THRESHOLDS = {
-    "2.1.10": {"absolute": 0, "relative": 8},
-    "3.1.1": {"absolute": 0, "relative": 10},
-    "3.1.10": {"absolute": 0, "relative": 10},
-    "3.1.11": {"absolute": 0, "relative": 1},
-    "3.1.12": {"absolute": 0, "relative": 1},
-    "3.1.13": {"absolute": 0, "relative": 1},
-    "5.1.0": {"absolute": 0, "relative": 15},
-    "5.2.0": {"absolute": 0, "relative": 15},
-    "6.1.4": {"absolute": 4, "relative": 0},
-    "6.1.5": {"absolute": 0, "relative": 1},
-    "6.1.0": {"absolute": 0, "relative": 15},
-    "6.1.3": {"absolute": 0, "relative": 11},
-    "6.2.12": {"absolute": 0, "relative": 1},
-    "6.2.13": {"absolute": 0, "relative": 1},
-    "7.1.0": {"absolute": 0, "relative": 1},
-    "7.1.1": {"absolute": 0, "relative": 1},
-    "7.1.2": {"absolute": 0, "relative": 1},
-    "7.1.5": {"absolute": 0, "relative": 1},
-    "7.1.6": {"absolute": 0, "relative": 1},
-    "7.1.7": {"absolute": 0, "relative": 1},
-    "7.2.1": {"absolute": 0, "relative": 10},
-    "7.2.3": {"absolute": 0, "relative": 12},
-    "7.2.6": {"absolute": 0, "relative": 1},
-    "10.1.4": {"absolute": 0, "relative": 1},
-    "10.1.5": {"absolute": 0, "relative": 1},
-    "10.1.6": {"absolute": 0, "relative": 1},
-    "10.1.7": {"absolute": 0, "relative": 1},
-    "10.3.4": {"absolute": 0, "relative": 1},
-    "10.3.5": {"absolute": 0, "relative": 1},
-    "10.3.6": {"absolute": 0, "relative": 1},
-    "11.2.1": {"absolute": 0, "relative": 1},
-    "11.2.4": {"absolute": 0, "relative": 5},
-    "13.2.0": {"absolute": 0, "relative": 1},
-    "13.2.2": {"absolute": 0, "relative": 1},
-    "14.2.0": {"absolute": 0, "relative": 1},
-    "14.2.5": {"absolute": 0, "relative": 1},
-    "14.2.7": {"absolute": 0, "relative": 1},
-    "14.2.8": {"absolute": 0, "relative": 1},
-    "15.1.4": {"absolute": 0, "relative": 1},
-    "15.1.5": {"absolute": 0, "relative": 1},
-    "15.1.6": {"absolute": 0, "relative": 1},
-    "15.1.7": {"absolute": 0, "relative": 1},
-    "15.2.4": {"absolute": 0, "relative": 1},
-    "15.2.5": {"absolute": 0, "relative": 1},
-    "16.1.0": {"absolute": 0, "relative": 1},
-    "16.1.3": {"absolute": 0, "relative": 1},
-    "16.3.0": {"absolute": 0, "relative": 1},
-    "16.3.1": {"absolute": 0, "relative": 1},
-    "16.3.2": {"absolute": 0, "relative": 1},
-    "16.3.5": {"absolute": 0, "relative": 1},
-    "16.3.6": {"absolute": 0, "relative": 1},
-    "16.3.7": {"absolute": 0, "relative": 1},
-    "16.3.9": {"absolute": 0, "relative": 1},
-    "16.3.10": {"absolute": 0, "relative": 1},
-    "16.3.11": {"absolute": 0, "relative": 1},
-    "16.4.3": {"absolute": 0, "relative": 1},
-    "16.4.4": {"absolute": 0, "relative": 1},
-    "16.5.0": {"absolute": 0, "relative": 1},
-    "17.3.3": {"absolute": 0, "relative": 1},
-    "17.3.6": {"absolute": 0, "relative": 1},
-    "18.1.0": {"absolute": 0, "relative": 1},
-    "18.1.1": {"absolute": 0, "relative": 1},
-    "18.1.2": {"absolute": 0, "relative": 1},
-    "18.1.3": {"absolute": 0, "relative": 1},
-    "18.1.5": {"absolute": 0, "relative": 1},
-    "18.1.6": {"absolute": 1, "relative": 0},
-}
 
 # Shared constants for output directory tests.
 GPU_MODEL = "MIXXX"
@@ -405,210 +331,6 @@ def get_available_sets_for_arch(gpu_arch):
         return []
     data = yaml.safe_load(sets_file.read_text())
     return [s["set_option"] for s in data.get("sets", []) if s.get("set_option")]
-
-
-def counter_compare(test_name, errors_pd, baseline_df, run_df, threshold=5):
-    # iterate data one row at a time
-    for idx_1 in run_df.index:
-        run_row = run_df.iloc[idx_1]
-        baseline_row = baseline_df.iloc[idx_1]
-        if not run_row["KernelName"] == baseline_row["KernelName"]:
-            print("Kernel/dispatch mismatch")
-            assert 0
-        kernel_name = run_row["KernelName"]
-        gpu_id = run_row["gpu-id"]
-        differences = {}
-
-        for pmc_counter in run_row.index:
-            if "Ns" in pmc_counter or "id" in pmc_counter or "[" in pmc_counter:
-                # print("skipping "+pmc_counter)
-                continue
-                # assert 0
-
-            if not pmc_counter in list(baseline_df.columns):
-                print("error: pmc mismatch! " + pmc_counter + " is not in baseline_df")
-                continue
-
-            run_data = run_row[pmc_counter]
-            baseline_data = baseline_row[pmc_counter]
-            if isinstance(run_data, str) and isinstance(baseline_data, str):
-                if run_data not in baseline_data:
-                    print(baseline_data)
-            else:
-                # relative difference
-                if not run_data == 0:
-                    diff = round(100 * abs(baseline_data - run_data) / run_data, 2)
-                    if diff > threshold:
-                        print("[" + pmc_counter + "] diff is :" + str(diff) + "%")
-                        if pmc_counter not in differences.keys():
-                            print(
-                                "[" + pmc_counter + "] not found in ",
-                                list(differences.keys()),
-                            )
-                            differences[pmc_counter] = [diff]
-                        else:
-                            # Why are we here?
-                            print(
-                                "Why did we get here?!?!? errors_pd[idx_1]:",
-                                list(differences.keys()),
-                            )
-                            differences[pmc_counter].append(diff)
-                else:
-                    # if 0 show absolute difference
-                    diff = round(baseline_data - run_data, 2)
-                    if diff > threshold:
-                        print(
-                            str(idx_1) + "[" + pmc_counter + "] diff is :" + str(diff)
-                        )
-        differences["kernel_name"] = [kernel_name]
-        differences["test_name"] = [test_name]
-        differences["gpu-id"] = [gpu_id]
-        errors_pd = pd.concat([errors_pd, pd.DataFrame.from_dict(differences)])
-    return errors_pd
-
-
-def baseline_compare_metric(test_name, workload_dir, args=[]):
-    _, soc = gpu_soc()
-    baseline_dir = (Path("tests/workloads/vcopy") / soc).resolve()
-    if not baseline_dir.exists():
-        pytest.skip(f"Skipping test since {baseline_dir} does not exist")
-
-    baseline_dir = str(baseline_dir)
-
-    t = subprocess.Popen(
-        [
-            sys.executable,
-            "src/rocprof_compute",
-            "analyze",
-            "--path",
-            baseline_dir,
-        ]
-        + args
-        + ["--path", workload_dir, "--report-diff", "-1"],
-        stdout=subprocess.PIPE,
-    )
-    captured_output = t.communicate(timeout=1300)[0].decode("utf-8")
-    print(captured_output)
-    assert t.returncode == 0
-
-    if "DEBUG ERROR" in captured_output:
-        error_df = pd.DataFrame()
-        if Path(baseline_dir + "/metric_error_log.csv").exists():
-            error_df = pd.read_csv(
-                baseline_dir + "/metric_error_log.csv",
-                index_col=0,
-            )
-        output_metric_errors = re.findall(r"(\')([0-9.]*)(\')", captured_output)
-        high_diff_metrics = [x[1] for x in output_metric_errors]
-        for metric in high_diff_metrics:
-            metric_info = re.findall(
-                r"(^"
-                + metric
-                + (
-                    r")(?: *)([()0-9A-Za-z- ]+ )"
-                    r"(?: *)([0-9.-]*)"
-                    r"(?: *)([0-9.-]*)"
-                    r"(?: *)\(([-0-9.]*)%\)"
-                    r"(?: *)([-0-9.e]*)"
-                ),
-                captured_output,
-                flags=re.MULTILINE,
-            )
-            if len(metric_info):
-                metric_info = metric_info[0]
-                metric_idx = metric_info[0]
-                metric_name = metric_info[1].strip()
-                baseline_val = metric_info[-3]
-                current_val = metric_info[-4]
-                relative_diff = float(metric_info[-2])
-                absolute_diff = float(metric_info[-1])
-                if relative_diff > -99:
-                    if metric_idx in METRIC_THRESHOLDS.keys():
-                        # print(metric_idx+" is in FIXED_METRICS")
-                        threshold_type = (
-                            "absolute"
-                            if METRIC_THRESHOLDS[metric_idx]["absolute"]
-                            > METRIC_THRESHOLDS[metric_idx]["relative"]
-                            else "relative"
-                        )
-
-                        isValid = (
-                            (
-                                abs(absolute_diff)
-                                <= METRIC_THRESHOLDS[metric_idx]["absolute"]
-                            )
-                            if (threshold_type == "absolute")
-                            else (
-                                abs(relative_diff)
-                                <= METRIC_THRESHOLDS[metric_idx]["relative"]
-                            )
-                        )
-                        if not isValid:
-                            print(
-                                "index "
-                                + metric_idx
-                                + " "
-                                + threshold_type
-                                + " difference is supposed to be "
-                                + str(METRIC_THRESHOLDS[metric_idx][threshold_type])
-                                + ", absolute diff:",
-                                absolute_diff,
-                                "relative diff: ",
-                                relative_diff,
-                            )
-                            assert 0
-                        continue
-
-                    # Used for debugging metric lists
-                    if config["METRIC_LOGGING"] and (
-                        (
-                            abs(relative_diff) <= abs(DEFAULT_REL_DIFF)
-                            or (abs(absolute_diff) <= abs(DEFAULT_ABS_DIFF))
-                        )
-                        and (False if baseline_val == "" else float(baseline_val) > 0)
-                    ):
-                        # print("logging...")
-                        # print(metric_info)
-
-                        new_error = pd.DataFrame.from_dict({
-                            "Index": [metric_idx],
-                            "Metric": [metric_name],
-                            "Percent Difference": [relative_diff],
-                            "Absolute Difference": [absolute_diff],
-                            "Baseline": [baseline_val],
-                            "Current": [current_val],
-                            "Test Name": [test_name],
-                        })
-                        error_df = pd.concat([error_df, new_error])
-                        counts = error_df.groupby(["Index"]).cumcount()
-                        reoccurring_metrics = error_df.loc[
-                            counts > MAX_REOCCURING_COUNT
-                        ]
-                        reoccurring_metrics["counts"] = counts[
-                            counts > MAX_REOCCURING_COUNT
-                        ]
-                        if reoccurring_metrics.any(axis=None):
-                            with pd.option_context(
-                                "display.max_rows",
-                                None,
-                                "display.max_columns",
-                                None,
-                                #    'display.precision', 3,
-                            ):
-                                print(
-                                    "These metrics appear alot\n",
-                                    reoccurring_metrics,
-                                )
-                                # print(list(reoccurring_metrics["Index"]))
-
-                        # log into csv
-                        if not error_df.empty:
-                            error_df.to_csv(baseline_dir + "/metric_error_log.csv")
-
-
-def validate(test_name, workload_dir, file_dict, args=[]):
-    if config["METRIC_COMPARE"]:
-        baseline_compare_metric(test_name, workload_dir, args)
 
 
 def are_stochastic_counters_similar(test_dfs, baseline_df):
