@@ -30,7 +30,9 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - Fixed `rocprof-sys-attach` aborting the target process when attaching to a process
   running in a different mount namespace (for example, a container). The tool library
   path is now validated against the target's mount namespace before attaching, failing
-  cleanly with a diagnostic instead.
+  cleanly with a diagnostic instead. When the target cannot see this installation's tool
+  library, the one shipped next to the target's own `librocprofiler-register` is used, so
+  attaching into a container with its own ROCm installation needs no extra setup.
 
 ## ROCm Systems Profiler 1.9.0 for ROCm 10.1
 

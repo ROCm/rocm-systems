@@ -636,3 +636,33 @@ TEST_F(PathTest, CheckTargetPathVisibility_IndeterminateForNonAbsolutePath)
     EXPECT_EQ(check_target_path_visibility(1, "librocprof-sys-dl.so"),
               target_visibility::indeterminate);
 }
+
+TEST_F(PathTest, FindLoadedLibraryDir_FindsLibraryMappedByProcess)
+{
+    const auto libc_dir = find_loaded_library_dir(getpid(), "libc.so");
+
+    ASSERT_TRUE(libc_dir.has_value());
+    EXPECT_TRUE(std::filesystem::exists(*libc_dir + "/libc.so.6"));
+}
+
+TEST_F(PathTest, FindLoadedLibraryDir_NulloptWhenNotMapped)
+{
+    EXPECT_FALSE(
+        find_loaded_library_dir(getpid(), "libnot-mapped-anywhere.so").has_value());
+}
+
+TEST_F(PathTest, FindLibraryInLoadedDir_FindsLibraryInLoadedDirectory)
+{
+    const auto libc_dir = find_loaded_library_dir(getpid(), "libc.so");
+    ASSERT_TRUE(libc_dir.has_value());
+
+    EXPECT_EQ(find_library_in_loaded_dir(getpid(), "libc.so.6", "libc.so"),
+              *libc_dir + "/libc.so.6");
+}
+
+TEST_F(PathTest, FindLibraryInLoadedDir_NulloptWhenLibraryAbsent)
+{
+    EXPECT_FALSE(
+        find_library_in_loaded_dir(getpid(), "librocprof-sys-missing.so", "libc.so")
+            .has_value());
+}
