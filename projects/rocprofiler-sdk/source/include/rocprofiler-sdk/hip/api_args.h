@@ -3672,7 +3672,8 @@ typedef union rocprofiler_hip_api_args_t
     } hipKernelSetAttributeForDevice;
 #endif
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 38
-    struct {
+    struct
+    {
         void**                  dsts;
         void**                  srcs;
         size_t*                 sizes;
