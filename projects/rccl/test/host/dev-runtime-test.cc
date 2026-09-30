@@ -2040,7 +2040,7 @@ TEST_F(SymMemoryRegisterGinElasticTest, SingleHostSegment_RequiresDmabuf) {
   EXPECT_TRUE(needDmabuf[0]);
   // ptrType and needDmabuf are decided before this write. The put-fence
   // compares memType to HOST_NUMA, so the recorded type is the contract.
-  EXPECT_EQ(mem.ginSegmentInfos[0].memType, static_cast<CUmemLocationType>(kLocHostNuma));
+  EXPECT_EQ(mem.ginSegmentInfos[0].memType, kLocHostNuma);
 }
 #endif
 
