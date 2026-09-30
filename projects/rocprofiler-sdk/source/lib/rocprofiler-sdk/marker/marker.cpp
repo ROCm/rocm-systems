@@ -44,6 +44,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <stdexcept>
 #include <type_traits>
 #include <utility>
 
@@ -124,37 +125,51 @@ get_control_api_mutex()
     return current->mutex;
 }
 
-thread_local auto control_api_depth = size_t{0};
-
-struct control_api_call_scope
-{
-    control_api_call_scope()
-    {
-        if(control_api_depth++ == 0) lock.emplace(get_control_api_mutex());
-    }
-
-    ~control_api_call_scope() { --control_api_depth; }
-
-    control_api_call_scope(const control_api_call_scope&) = delete;
-    control_api_call_scope(control_api_call_scope&&)      = delete;
-
-    control_api_call_scope& operator=(const control_api_call_scope&) = delete;
-    control_api_call_scope& operator=(control_api_call_scope&&) = delete;
-
-    std::optional<control_api_read_lock_t> lock = {};
-};
+thread_local auto control_api_read_depth  = size_t{0};
+thread_local auto control_api_write_depth = size_t{0};
 }  // namespace
 
-control_api_read_lock_t
-acquire_control_api_read_lock()
+control_api_read_scope::control_api_read_scope()
+: m_process_id{getpid()}
 {
-    return control_api_read_lock_t{get_control_api_mutex()};
+    if(control_api_read_depth == 0 && control_api_write_depth == 0)
+    {
+        auto lock = std::shared_lock<std::shared_mutex>{get_control_api_mutex()};
+        m_lock.emplace(std::move(lock));
+    }
+    ++control_api_read_depth;
 }
 
-control_api_write_lock_t
-acquire_control_api_write_lock()
+control_api_read_scope::~control_api_read_scope()
 {
-    return control_api_write_lock_t{get_control_api_mutex()};
+    if(m_process_id != getpid() && m_lock) (void) m_lock->release();
+    if(control_api_read_depth > 0) --control_api_read_depth;
+}
+
+control_api_write_scope::control_api_write_scope()
+: m_process_id{getpid()}
+{
+    if(control_api_read_depth > 0 && control_api_write_depth == 0)
+        throw std::logic_error{"cannot transition ROCTx attachment from a control callback"};
+
+    if(control_api_write_depth == 0)
+    {
+        auto lock = std::unique_lock<std::shared_mutex>{get_control_api_mutex()};
+        m_lock.emplace(std::move(lock));
+    }
+    ++control_api_write_depth;
+}
+
+control_api_write_scope::~control_api_write_scope()
+{
+    if(m_process_id != getpid() && m_lock) (void) m_lock->release();
+    if(control_api_write_depth > 0) --control_api_write_depth;
+}
+
+bool
+control_api_gate_owned_by_this_thread()
+{
+    return control_api_read_depth > 0 || control_api_write_depth > 0;
 }
 
 template <size_t TableIdx, size_t OpIdx>
@@ -203,7 +218,7 @@ template <typename RetT, typename... Args>
 RetT
 roctx_api_impl<TableIdx, OpIdx>::functor(Args... args)
 {
-    [[maybe_unused]] auto control_api_scope = std::optional<control_api_call_scope>{};
+    [[maybe_unused]] auto control_api_scope = std::optional<control_api_read_scope>{};
     if constexpr(roctx_domain_info<TableIdx>::callback_domain_idx ==
                  ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API)
         control_api_scope.emplace();

@@ -868,10 +868,17 @@ invoke_client_finalizers()
 rocprofiler_status_t
 invoke_client_attaches()
 {
+    if(marker::control_api_gate_owned_by_this_thread())
+    {
+        ROCP_ERROR << "rocprofiler_attach cannot be invoked from an ROCTx control callback or "
+                      "attachment hook";
+        return ROCPROFILER_STATUS_ERROR;
+    }
+
     // ROCTx control calls hold the read side from callback selection through EXIT. Taking the
     // write side makes the new attachment a session boundary: prior calls finish first, and new
     // calls wait until every client has completed tool_attach.
-    auto control_api_lock = marker::acquire_control_api_write_lock();
+    auto control_api_scope = marker::control_api_write_scope{};
 
     ROCP_INFO << "Calling tool_attach for all registered clients. # of clients: "
               << get_num_clients();
@@ -914,8 +921,15 @@ invoke_client_attaches()
 rocprofiler_status_t
 invoke_client_detaches()
 {
+    if(marker::control_api_gate_owned_by_this_thread())
+    {
+        ROCP_ERROR << "rocprofiler_detach cannot be invoked from an ROCTx control callback or "
+                      "detachment hook";
+        return ROCPROFILER_STATUS_ERROR;
+    }
+
     // Prevent ROCTx control calls from crossing the context-stop and tool_detach boundary.
-    auto control_api_lock = marker::acquire_control_api_write_lock();
+    auto control_api_scope = marker::control_api_write_scope{};
 
     ROCP_INFO << "Calling tool_detach for all registered clients. # of clients: "
               << get_num_clients();

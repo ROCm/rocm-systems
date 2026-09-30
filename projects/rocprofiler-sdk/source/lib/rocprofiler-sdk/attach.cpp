@@ -36,15 +36,13 @@ rocprofiler_detach(void) ROCPROFILER_API;
 rocprofiler_status_t
 rocprofiler_attach(void)
 {
-    rocprofiler::registration::attach();
-    return ROCPROFILER_STATUS_SUCCESS;
+    return rocprofiler::registration::attach();
 }
 
 rocprofiler_status_t
 rocprofiler_detach(void)
 {
-    rocprofiler::registration::detach();
-    return ROCPROFILER_STATUS_SUCCESS;
+    return rocprofiler::registration::detach();
 }
 
 ROCPROFILER_EXTERN_C_FINI

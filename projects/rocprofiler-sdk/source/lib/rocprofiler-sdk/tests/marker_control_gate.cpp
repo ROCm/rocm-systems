@@ -28,6 +28,8 @@
 #include <unistd.h>
 #include <chrono>
 #include <future>
+#include <optional>
+#include <stdexcept>
 #include <thread>
 
 TEST(marker_control_gate, writer_waits_for_inflight_control_call)
@@ -43,7 +45,7 @@ TEST(marker_control_gate, writer_waits_for_inflight_control_call)
     auto writer_acquired_future = writer_acquired.get_future();
 
     auto reader = std::thread{[&]() {
-        auto lock = rocprofiler::marker::acquire_control_api_read_lock();
+        auto scope = rocprofiler::marker::control_api_read_scope{};
         reader_acquired.set_value();
         release_reader_future.wait();
     }};
@@ -52,7 +54,7 @@ TEST(marker_control_gate, writer_waits_for_inflight_control_call)
 
     auto writer = std::thread{[&]() {
         writer_started.set_value();
-        auto lock = rocprofiler::marker::acquire_control_api_write_lock();
+        auto scope = rocprofiler::marker::control_api_write_scope{};
         writer_acquired.set_value();
     }};
 
@@ -69,14 +71,25 @@ TEST(marker_control_gate, writer_waits_for_inflight_control_call)
 
 TEST(marker_control_gate, fork_child_uses_fresh_gate)
 {
-    auto parent_lock = rocprofiler::marker::acquire_control_api_read_lock();
-    auto child_pid   = fork();
+    auto parent_scope = std::optional<rocprofiler::marker::control_api_read_scope>{std::in_place};
+    auto child_pid    = fork();
     ASSERT_GE(child_pid, 0);
 
     if(child_pid == 0)
     {
         alarm(2);
-        auto child_lock = rocprofiler::marker::acquire_control_api_write_lock();
+
+        if(!rocprofiler::marker::control_api_gate_owned_by_this_thread()) _exit(1);
+        parent_scope.reset();
+        if(rocprofiler::marker::control_api_gate_owned_by_this_thread()) _exit(2);
+
+        try
+        {
+            auto child_scope = rocprofiler::marker::control_api_write_scope{};
+        } catch(...)
+        {
+            _exit(3);
+        }
         _exit(0);
     }
 
@@ -84,4 +97,30 @@ TEST(marker_control_gate, fork_child_uses_fresh_gate)
     ASSERT_EQ(waitpid(child_pid, &child_status, 0), child_pid);
     EXPECT_TRUE(WIFEXITED(child_status));
     EXPECT_EQ(WEXITSTATUS(child_status), 0);
+}
+
+TEST(marker_control_gate, writer_thread_can_reenter_control_api)
+{
+    {
+        auto writer_scope = rocprofiler::marker::control_api_write_scope{};
+        EXPECT_TRUE(rocprofiler::marker::control_api_gate_owned_by_this_thread());
+
+        auto reader_scope = rocprofiler::marker::control_api_read_scope{};
+        EXPECT_TRUE(rocprofiler::marker::control_api_gate_owned_by_this_thread());
+    }
+
+    EXPECT_FALSE(rocprofiler::marker::control_api_gate_owned_by_this_thread());
+    EXPECT_NO_THROW(auto reader_scope = rocprofiler::marker::control_api_read_scope{});
+}
+
+TEST(marker_control_gate, failed_read_to_write_upgrade_does_not_poison_gate)
+{
+    {
+        auto reader_scope = rocprofiler::marker::control_api_read_scope{};
+        EXPECT_THROW(auto writer_scope = rocprofiler::marker::control_api_write_scope{},
+                     std::logic_error);
+    }
+
+    EXPECT_FALSE(rocprofiler::marker::control_api_gate_owned_by_this_thread());
+    EXPECT_NO_THROW(auto writer_scope = rocprofiler::marker::control_api_write_scope{});
 }

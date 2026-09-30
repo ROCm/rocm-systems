@@ -25,8 +25,10 @@
 #include <rocprofiler-sdk-roctx/api_trace.h>
 #include <rocprofiler-sdk/callback_tracing.h>
 
+#include <sys/types.h>
 #include <cstdint>
 #include <mutex>
+#include <optional>
 #include <shared_mutex>
 #include <vector>
 
@@ -34,17 +36,46 @@ namespace rocprofiler
 {
 namespace marker
 {
-using roctx_core_api_table_t   = ::roctxCoreApiTable_t;
-using roctx_ctrl_api_table_t   = ::roctxControlApiTable_t;
-using roctx_name_api_table_t   = ::roctxNameApiTable_t;
-using control_api_read_lock_t  = std::shared_lock<std::shared_mutex>;
-using control_api_write_lock_t = std::unique_lock<std::shared_mutex>;
+using roctx_core_api_table_t = ::roctxCoreApiTable_t;
+using roctx_ctrl_api_table_t = ::roctxControlApiTable_t;
+using roctx_name_api_table_t = ::roctxNameApiTable_t;
 
-control_api_read_lock_t
-acquire_control_api_read_lock();
+class control_api_read_scope
+{
+public:
+    control_api_read_scope();
+    ~control_api_read_scope();
 
-control_api_write_lock_t
-acquire_control_api_write_lock();
+    control_api_read_scope(const control_api_read_scope&) = delete;
+    control_api_read_scope(control_api_read_scope&&)      = delete;
+
+    control_api_read_scope& operator=(const control_api_read_scope&) = delete;
+    control_api_read_scope& operator=(control_api_read_scope&&) = delete;
+
+private:
+    std::optional<std::shared_lock<std::shared_mutex>> m_lock       = {};
+    pid_t                                              m_process_id = 0;
+};
+
+class control_api_write_scope
+{
+public:
+    control_api_write_scope();
+    ~control_api_write_scope();
+
+    control_api_write_scope(const control_api_write_scope&) = delete;
+    control_api_write_scope(control_api_write_scope&&)      = delete;
+
+    control_api_write_scope& operator=(const control_api_write_scope&) = delete;
+    control_api_write_scope& operator=(control_api_write_scope&&) = delete;
+
+private:
+    std::optional<std::unique_lock<std::shared_mutex>> m_lock       = {};
+    pid_t                                              m_process_id = 0;
+};
+
+bool
+control_api_gate_owned_by_this_thread();
 
 template <typename Tp>
 Tp*
