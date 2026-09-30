@@ -235,6 +235,12 @@ namespace envvar {
         false);
   }  // namespace sdma
 
+  namespace tdm {
+    const var<uint32_t> tile_bytes("TILE_BYTES",
+        "TDM tile size in bytes for LDS-staged IPC transfers. 0 (default) "
+        "auto-sets the tile to use all LDS available per block", 0);
+  }  // namespace tdm
+
   namespace _detail {
     std::tuple<var_map_t&, std::mutex&> get_var_map() {
       // construct on first use idiom

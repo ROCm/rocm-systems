@@ -38,7 +38,9 @@
 #include "atomic.hpp"
 #include "bit.hpp"
 #include "constants.hpp"
+#include "constmem.hpp"
 #include "log.hpp"
+#include "tdm.hpp"
 
 namespace rocshmem {
 
@@ -586,6 +588,45 @@ template <MemcpyKind Kind = MemcpyKind::Put>
                            static_cast<uint8_t*>(src) + n_chunks * ChunkSize,
                            remainder);
   }
+}
+
+// Non-temporal + system scope is correct for both directions of an IPC copy,
+// since either dst or src may be remote peer memory. Split into separate
+// load/store constants (mirroring memcpy_wg's LP/SP) so they can be tuned
+// independently later; both are template parameters because CachePolicy is
+// an immarg to the underlying builtin (see tdm.hpp's load_to_lds comment).
+constexpr int TdmLoadPolicy = tdm::make_cache_policy(
+    tdm::LoadTemporalHint::NonTemporal, tdm::Scope::System);
+constexpr int TdmStorePolicy = tdm::make_cache_policy(
+    tdm::StoreTemporalHint::NonTemporal, tdm::Scope::System);
+
+// One thread drives the TDM transfer into the registered LDS buffer while
+// the rest of the block covers whatever TDM doesn't (disjoint byte ranges,
+// so no extra sync is needed). Falls back to a plain memcpy_wg when TDM
+// isn't built, isn't available on this arch, or no LDS buffer was set.
+template <MemcpyKind Kind = MemcpyKind::Put>
+[[maybe_unused]] __device__ __forceinline__ void memcpy_wg_tdm(void* dst, void* src,
+                                                                size_t size) {
+#if defined(USE_TDM) && defined(__GFX12__)
+  const tdm::LdsRegistration reg = tdm::get_lds();
+  // A minimum of 16 bytes (2 x 8-byte element, for double buffering) is
+  // required for one usable TDM tile; anything less isn't worth staging.
+  if (reg.ptr != nullptr && reg.bytes >= 16) {
+    const uint32_t tile_bytes = static_cast<uint32_t>(
+        min(static_cast<size_t>(constmem.tdm_tile_bytes), reg.bytes / 2));
+    if (is_thread_zero_in_block()) {
+      tdm::copy_region<TdmLoadPolicy, TdmStorePolicy>(dst, src, size, reg.ptr, tile_bytes,
+                                          /*double_buffered=*/true);
+    }
+    const size_t covered = tdm::covered_bytes(size, tile_bytes);
+    if (covered < size) {
+      memcpy_wg<Kind>(static_cast<char*>(dst) + covered,
+                      static_cast<char*>(src) + covered, size - covered);
+    }
+    return;
+  }
+#endif
+  memcpy_wg<Kind>(dst, src, size);
 }
 
 /* Is ptr_b in range [ptr_a, ptr_a + len_a) */
