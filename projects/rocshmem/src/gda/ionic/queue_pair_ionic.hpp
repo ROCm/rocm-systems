@@ -70,25 +70,25 @@ public:
   __device__ __noinline__
   void post_wqe_rma(uintptr_t laddr, uint32_t lkey,
                     uintptr_t raddr, uint32_t rkey, size_t size,
-                    const ActiveWFInfo& wf_info, PostOpt<Options...> = {});
+                    const ActiveWFInfo& wf_info, CommOpt<Options...> = {});
 
   template <OpCode Op, typename... Options>
   __device__ __noinline__
   void post_wqe_rma_single(uintptr_t laddr, uint32_t lkey,
                            uintptr_t raddr, uint32_t rkey, size_t size,
-                           PostOpt<Options...> = {});
+                           CommOpt<Options...> = {});
 
   template <OpCode Op, AMOFetchType Fetch, typename... Options>
   __device__ __noinline__
   amo_ret_t<Fetch> post_wqe_amo(uintptr_t raddr, uint32_t rkey,
                                 uint64_t swap_add, uint64_t compare,
-                                const ActiveWFInfo& wf_info, PostOpt<Options...> = {});
+                                const ActiveWFInfo& wf_info, CommOpt<Options...> = {});
 
   template <OpCode Op, AMOFetchType Fetch, typename... Options>
   __device__ __noinline__
   amo_ret_t<Fetch> post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
                                        uint64_t swap_add, uint64_t compare,
-                                       PostOpt<Options...> = {});
+                                       CommOpt<Options...> = {});
 
   __device__ __noinline__ void quiet_single();
 
@@ -153,8 +153,8 @@ private:
 template <QueuePairIONIC::OpCode Op, typename... Options>
 __device__ __noinline__ void QueuePairIONIC::post_wqe_rma(
     uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size,
-    const ActiveWFInfo& wf_info, PostOpt<Options...>) {
-  //using PostOptions = PostOpt<Options...>;
+    const ActiveWFInfo& wf_info, CommOpt<Options...>) {
+  //using CommOptions = CommOpt<Options...>;
   uint32_t num_wqes = 1;
   if (wf_info.scope == ThreadScope::thread) {
     num_wqes = wf_info.num_pe_group_lanes;
@@ -218,8 +218,8 @@ __device__ __noinline__ void QueuePairIONIC::post_wqe_rma(
 // precondition: called with all active lanes using different QPs
 template <QueuePairIONIC::OpCode Op, typename... Options>
 __device__ __noinline__ void QueuePairIONIC::post_wqe_rma_single(
-    uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size, PostOpt<Options...>) {
-  //using PostOptions = PostOpt<Options...>;
+    uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size, CommOpt<Options...>) {
+  //using CommOptions = CommOpt<Options...>;
   uint32_t num_wqes = 1;
   uint32_t my_sq_prod = reserve_sq_single(num_wqes);
   uint32_t my_sq_pos = my_sq_prod;
@@ -276,9 +276,9 @@ __device__ __noinline__ void QueuePairIONIC::post_wqe_rma_single(
 template <QueuePairIONIC::OpCode Op, AMOFetchType Fetch, typename... Options>
 __device__ __noinline__ QueuePairIONIC::amo_ret_t<Fetch> QueuePairIONIC::post_wqe_amo(
     uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare,
-    const ActiveWFInfo& wf_info, PostOpt<Options...>) {
+    const ActiveWFInfo& wf_info, CommOpt<Options...>) {
   static_assert(Fetch != AMOFetchType::NonBlocking, "non-blocking AMOs not yet implemented");
-  //using PostOptions = PostOpt<Options...>;
+  //using CommOptions = CommOpt<Options...>;
   uint32_t num_wqes = wf_info.num_pe_group_lanes;
   uint32_t my_sq_prod = reserve_sq(wf_info, num_wqes);
   uint32_t my_sq_pos = my_sq_prod + wf_info.pe_group_logical_lane_id;
@@ -346,9 +346,9 @@ __device__ __noinline__ QueuePairIONIC::amo_ret_t<Fetch> QueuePairIONIC::post_wq
 // precondition: called with all active lanes using different QPs
 template <QueuePairIONIC::OpCode Op, AMOFetchType Fetch, typename... Options>
 __device__ __noinline__ QueuePairIONIC::amo_ret_t<Fetch> QueuePairIONIC::post_wqe_amo_single(
-    uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare, PostOpt<Options...>) {
+    uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare, CommOpt<Options...>) {
   static_assert(Fetch != AMOFetchType::NonBlocking, "non-blocking AMOs not yet implemented");
-  //using PostOptions = PostOpt<Options...>;
+  //using CommOptions = CommOpt<Options...>;
   uint32_t num_wqes = 1;
   uint32_t my_sq_prod = reserve_sq_single(num_wqes);
   uint32_t my_sq_pos = my_sq_prod;

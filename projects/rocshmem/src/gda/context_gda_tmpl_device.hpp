@@ -45,8 +45,8 @@ namespace rocshmem {
 /******************************************************************************
  ************************** TEMPLATE SPECIALIZATIONS **************************
  *****************************************************************************/
-template <typename T>
-__device__ void GDAContext::p(T *dest, T value, int pe) {
+template <typename T, typename... Options>
+__device__ void GDAContext::p(T *dest, T value, int pe, CommOpt<Options...> opts) {
   int local_pe{-1};
   char *remote{nullptr};
   if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
@@ -54,17 +54,48 @@ __device__ void GDAContext::p(T *dest, T value, int pe) {
     ipcImpl_.ipcCopy<MemcpyKind::Put>(remote, reinterpret_cast<void *>(&value), sizeof(T), local_pe);
     return;
   }
-  putmem_nbi(dest, &value, sizeof(T), pe);
+  putmem_nbi(dest, &value, sizeof(T), pe, opts);
 }
 
-template <typename T>
-__device__ void GDAContext::put(T *dest, const T *source, size_t nelems, int pe) {
-  putmem(dest, source, nelems * sizeof(T), pe);
+template <typename T, typename... Options>
+__device__ void GDAContext::put(T *dest, const T *source, size_t nelems, int pe,
+                                   CommOpt<Options...> opts) {
+  putmem(dest, source, nelems * sizeof(T), pe, opts);
 }
 
-template <typename T>
-__device__ void GDAContext::put_nbi(T *dest, const T *source, size_t nelems, int pe) {
-  putmem_nbi(dest, source, sizeof(T) * nelems, pe);
+template <typename T, typename... Options>
+__device__ void GDAContext::put_nbi(T *dest, const T *source, size_t nelems, int pe,
+                                     CommOpt<Options...> opts) {
+  putmem_nbi(dest, source, sizeof(T) * nelems, pe, opts);
+}
+
+// Moved from context_gda_device.cpp and templated on CommOpt so the option
+// pack can be forwarded to the queue pair. IPC-fast-path stores are unchanged.
+template <typename... Options>
+__device__ void GDAContext::putmem_nbi(void *dest, const void *source,
+                                       size_t nelems, int pe, CommOpt<Options...> opts) {
+  int local_pe{-1};
+  char *remote{nullptr};
+  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
+      (remote = ipcImpl_.ipcPeerPtr(dest, local_pe)) != nullptr) {
+    ipcImpl_.ipcCopy<MemcpyKind::Put>(remote, const_cast<void *>(source), nelems, local_pe);
+    return;
+  }
+  ActiveWFInfo wf_info(pe);
+  int qp_index = get_qp_index(pe, wf_info);
+  qps[qp_index].put_nbi(dest, source, nelems, wf_info, opts);
+}
+
+// Targeted-ordering-ready fence overloads. In this (behavior-neutral) commit the
+// CommOpt is accepted and ignored; a later commit reads its ordering tag here.
+template <typename... Options>
+__device__ void GDAContext::fence(CommOpt<Options...>) {
+  fence();
+}
+
+template <typename... Options>
+__device__ void GDAContext::fence(int pe, CommOpt<Options...>) {
+  fence(pe);
 }
 
 template <typename T>
@@ -83,14 +114,16 @@ __device__ T GDAContext::g(const T *source, int pe) {
   return ret;
 }
 
-template <typename T>
-__device__ void GDAContext::get(T *dest, const T *source, size_t nelems, int pe) {
-  getmem(dest, source, sizeof(T) * nelems, pe);
+template <typename T, typename... Options>
+__device__ void GDAContext::get(T *dest, const T *source, size_t nelems, int pe,
+                                CommOpt<Options...> opts) {
+  getmem(dest, source, sizeof(T) * nelems, pe, opts);
 }
 
-template <typename T>
-__device__ void GDAContext::get_nbi(T *dest, const T *source, size_t nelems, int pe) {
-  getmem_nbi(dest, source, sizeof(T) * nelems, pe);
+template <typename T, typename... Options>
+__device__ void GDAContext::get_nbi(T *dest, const T *source, size_t nelems, int pe,
+                                    CommOpt<Options...> opts) {
+  getmem_nbi(dest, source, sizeof(T) * nelems, pe, opts);
 }
 
 // Atomics
@@ -1056,7 +1089,7 @@ __device__ void GDAContext::alltoallv_copy(rocshmem_team_t team, T *dest,
     if (nelems != 0) {
       T *src = &source[source_displs[j]];
       T *dst = &tmp_buf[my_pe_in_team * tmp_buf_off];
-      qps[dest_pe].put_nbi_single(dst, src, nelems, PostOpt{RingDB<false>});
+      qps[dest_pe].put_nbi_single(dst, src, nelems, CommOpt{RingDB<false>});
     }
 
     qps[dest_pe].atomic_add_single(amo_dst, 1);
@@ -1128,7 +1161,7 @@ __device__ void GDAContext::alltoallv_get(rocshmem_team_t team, T *dest,
 
     static_assert(QueuePair::can_inline<QueuePair::OpCode::RDMA_WRITE>(sizeof(ctrl_msg)),
                   "alltoallv_get control message must be posted inline");
-    qps[dest_pe].put_nbi_single(ctrl_dst, ctrl_src, sizeof(ctrl_msg), PostOpt{RingDB<true>});
+    qps[dest_pe].put_nbi_single(ctrl_dst, ctrl_src, sizeof(ctrl_msg), CommOpt{RingDB<true>});
 
     /* Wait for Ctrl Message */
     uint64_t ctrl_value;
@@ -1145,9 +1178,9 @@ __device__ void GDAContext::alltoallv_get(rocshmem_team_t team, T *dest,
     T *src = &source[displ_bits];
     T *dst = &dest[dest_displs[j]];
 
-    qps[dest_pe].get_nbi_single(dst, src, nelems, PostOpt{RingDB<true>});
+    qps[dest_pe].get_nbi_single(dst, src, nelems, CommOpt{RingDB<true>});
 
-    /* Put Completion */
+    /* Put UpdateCQ */
     long *amo_dst = &pSync[alltoall_pSync_offset + my_pe_in_team];
     qps[dest_pe].atomic_add_single(amo_dst, 1);
 
@@ -1226,44 +1259,71 @@ __device__ int GDAContext::fcollect_wave(rocshmem_team_t team, T *dst,
 }
 
 // Block/wave functions
-template <typename T>
-__device__ void GDAContext::put_wg(T *dest, const T *source, size_t nelems, int pe) {
-  putmem_wg(dest, source, nelems * sizeof(T), pe);
+template <typename T, typename... Options>
+__device__ void GDAContext::put_wg(T *dest, const T *source, size_t nelems, int pe,
+                                   CommOpt<Options...> opts) {
+  putmem_wg(dest, source, nelems * sizeof(T), pe, opts);
 }
 
-template <typename T>
-__device__ void GDAContext::put_nbi_wg(T *dest, const T *source, size_t nelems, int pe) {
-  putmem_nbi_wg(dest, source, nelems * sizeof(T), pe);
+template <typename T, typename... Options>
+__device__ void GDAContext::put_nbi_wg(T *dest, const T *source, size_t nelems, int pe,
+                                   CommOpt<Options...> opts) {
+  putmem_nbi_wg(dest, source, nelems * sizeof(T), pe, opts);
 }
 
-  template <typename T>
-__device__ void GDAContext::put_wave(T *dest, const T *source, size_t nelems, int pe) {
-  putmem_wave(dest, source, nelems * sizeof(T), pe);
+  template <typename T, typename... Options>
+__device__ void GDAContext::put_wave(T *dest, const T *source, size_t nelems, int pe,
+                                   CommOpt<Options...> opts) {
+  putmem_wave(dest, source, nelems * sizeof(T), pe, opts);
 }
 
-template <typename T>
-__device__ void GDAContext::put_nbi_wave(T *dest, const T *source, size_t nelems, int pe) {
-  putmem_nbi_wave(dest, source, nelems * sizeof(T), pe);
+template <typename T, typename... Options>
+__device__ void GDAContext::put_nbi_wave(T *dest, const T *source, size_t nelems, int pe,
+                                         CommOpt<Options...> opts) {
+  putmem_nbi_wave(dest, source, nelems * sizeof(T), pe, opts);
 }
 
-template <typename T>
-__device__ void GDAContext::get_wg(T *dest, const T *source, size_t nelems, int pe) {
-  getmem_wg(dest, source, nelems * sizeof(T), pe);
+// Moved from context_gda_device.cpp and templated on CommOpt so the option pack
+// can be forwarded to the queue pair. IPC-fast-path stores are unchanged.
+template <typename... Options>
+__device__ void GDAContext::putmem_nbi_wave(void *dest, const void *source,
+                                            size_t nelems, int pe, CommOpt<Options...> opts) {
+  int local_pe{-1};
+  char *remote{nullptr};
+  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
+      (remote = ipcImpl_.ipcPeerPtr(dest, local_pe)) != nullptr) {
+    ipcImpl_.ipcCopy_wave<MemcpyKind::Put>(remote, const_cast<void *>(source), nelems, local_pe);
+    return;
+  }
+  if (is_thread_zero_in_wave()) {
+    ActiveWFInfo wf_info(pe, ThreadScope::wave);
+    int qp_index = get_qp_index(pe, wf_info);
+    qps[qp_index].put_nbi(dest, source, nelems, wf_info, opts);
+  }
 }
 
-template <typename T>
-__device__ void GDAContext::get_nbi_wg(T *dest, const T *source, size_t nelems, int pe) {
-  getmem_nbi_wg(dest, source, nelems * sizeof(T), pe);
+template <typename T, typename... Options>
+__device__ void GDAContext::get_wg(T *dest, const T *source, size_t nelems, int pe,
+                                   CommOpt<Options...> opts) {
+  getmem_wg(dest, source, nelems * sizeof(T), pe, opts);
 }
 
-template <typename T>
-__device__ void GDAContext::get_wave(T *dest, const T *source, size_t nelems, int pe) {
-  getmem_wave(dest, source, nelems * sizeof(T), pe);
+template <typename T, typename... Options>
+__device__ void GDAContext::get_nbi_wg(T *dest, const T *source, size_t nelems, int pe,
+                                   CommOpt<Options...> opts) {
+  getmem_nbi_wg(dest, source, nelems * sizeof(T), pe, opts);
 }
 
-template <typename T>
-__device__ void GDAContext::get_nbi_wave(T *dest, const T *source, size_t nelems, int pe) {
-  getmem_nbi_wave(dest, source, nelems * sizeof(T), pe);
+template <typename T, typename... Options>
+__device__ void GDAContext::get_wave(T *dest, const T *source, size_t nelems, int pe,
+                                   CommOpt<Options...> opts) {
+  getmem_wave(dest, source, nelems * sizeof(T), pe, opts);
+}
+
+template <typename T, typename... Options>
+__device__ void GDAContext::get_nbi_wave(T *dest, const T *source, size_t nelems, int pe,
+                                   CommOpt<Options...> opts) {
+  getmem_nbi_wave(dest, source, nelems * sizeof(T), pe, opts);
 }
 
 #define GDA_CONTEXT_PUT_SIGNAL_DEF(SUFFIX)                                                            \
@@ -2924,6 +2984,179 @@ __device__ inline int GDAContext::tile_min_reduce_wg(rocshmem_team_t team,
 // Rooted SUM Reduction operations
 // Rooted MAX Reduction operations
 // Rooted MIN Reduction operations
+
+// --- void* RMA methods moved from context_gda_device.cpp, templated on
+// --- CommOpt so the option pack can be forwarded to the queue pair.
+template <typename... Options>
+__device__ void GDAContext::putmem_nbi_wg(void *dest, const void *source,
+                                          size_t nelems, int pe, CommOpt<Options...> opts) {
+  int local_pe{-1};
+  char *remote{nullptr};
+  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
+      (remote = ipcImpl_.ipcPeerPtr(dest, local_pe)) != nullptr) {
+    ipcImpl_.ipcCopy_wg<MemcpyKind::Put>(remote, const_cast<void *>(source), nelems, local_pe);
+    return;
+  }
+  if (is_thread_zero_in_block()) {
+    ActiveWFInfo wf_info(pe, ThreadScope::wg);
+    int qp_index = get_qp_index(pe, wf_info);
+    qps[qp_index].put_nbi(dest, source, nelems, wf_info, opts);
+  }
+}
+
+template <typename... Options>
+__device__ void GDAContext::getmem_nbi_wg(void *dest, const void *source,
+                                          size_t nelems, int pe, CommOpt<Options...> opts) {
+  int local_pe{-1};
+  char *remote{nullptr};
+  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
+      (remote = ipcImpl_.ipcPeerPtr(source, local_pe)) != nullptr) {
+    ipcImpl_.ipcCopy_wg<MemcpyKind::Get>(dest, remote, nelems, local_pe);
+    return;
+  }
+  if (is_thread_zero_in_block()) {
+    ActiveWFInfo wf_info(pe, ThreadScope::wg);
+    int qp_index = get_qp_index(pe, wf_info);
+    qps[qp_index].get_nbi(dest, source, nelems, wf_info, opts);
+  }
+}
+
+template <typename... Options>
+__device__ void GDAContext::getmem_nbi_wave(void *dest, const void *source,
+                                            size_t nelems, int pe, CommOpt<Options...> opts) {
+  int local_pe{-1};
+  char *remote{nullptr};
+  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
+      (remote = ipcImpl_.ipcPeerPtr(source, local_pe)) != nullptr) {
+    ipcImpl_.ipcCopy_wave<MemcpyKind::Get>(dest, remote, nelems, local_pe);
+    return;
+  }
+  if (is_thread_zero_in_wave()) {
+    ActiveWFInfo wf_info(pe, ThreadScope::wave);
+    int qp_index = get_qp_index(pe, wf_info);
+    qps[qp_index].get_nbi(dest, source, nelems, wf_info, opts);
+  }
+}
+
+template <typename... Options>
+__device__ void GDAContext::putmem_wave(void *dest, const void *source,
+                                        size_t nelems, int pe, CommOpt<Options...> opts) {
+  int local_pe{-1};
+  char *remote{nullptr};
+  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
+      (remote = ipcImpl_.ipcPeerPtr(dest, local_pe)) != nullptr) {
+    ipcImpl_.ipcCopy_wave<MemcpyKind::PutBlocking>(remote, const_cast<void *>(source), nelems, local_pe);
+    return;
+  }
+  if (is_thread_zero_in_wave()) {
+    ActiveWFInfo wf_info(pe, ThreadScope::wave);
+    int qp_index = get_qp_index(pe, wf_info);
+    qps[qp_index].put_nbi(dest, source, nelems, wf_info, opts);
+    qps[qp_index].quiet(wf_info);
+  }
+}
+
+template <typename... Options>
+__device__ void GDAContext::getmem_wave(void *dest, const void *source,
+                                        size_t nelems, int pe, CommOpt<Options...> opts) {
+  int local_pe{-1};
+  char *remote{nullptr};
+  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
+      (remote = ipcImpl_.ipcPeerPtr(source, local_pe)) != nullptr) {
+    ipcImpl_.ipcCopy_wave<MemcpyKind::GetBlocking>(dest, remote, nelems, local_pe);
+    return;
+  }
+  if (is_thread_zero_in_wave()) {
+    ActiveWFInfo wf_info(pe, ThreadScope::wave);
+    int qp_index = get_qp_index(pe, wf_info);
+    qps[qp_index].get_nbi(dest, source, nelems, wf_info, opts);
+    qps[qp_index].quiet(wf_info);
+  }
+}
+
+template <typename... Options>
+__device__ void GDAContext::putmem_wg(void *dest, const void *source,
+                                      size_t nelems, int pe, CommOpt<Options...> opts) {
+  int local_pe{-1};
+  char *remote{nullptr};
+  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
+      (remote = ipcImpl_.ipcPeerPtr(dest, local_pe)) != nullptr) {
+    ipcImpl_.ipcCopy_wg<MemcpyKind::PutBlocking>(remote, const_cast<void *>(source), nelems, local_pe);
+    return;
+  }
+  if (is_thread_zero_in_block()) {
+    ActiveWFInfo wf_info(pe, ThreadScope::wg);
+    int qp_index = get_qp_index(pe, wf_info);
+    qps[qp_index].put_nbi(dest, source, nelems, wf_info, opts);
+    qps[qp_index].quiet(wf_info);
+  }
+}
+
+template <typename... Options>
+__device__ void GDAContext::getmem_wg(void *dest, const void *source,
+                                      size_t nelems, int pe, CommOpt<Options...> opts) {
+  int local_pe{-1};
+  char *remote{nullptr};
+  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
+      (remote = ipcImpl_.ipcPeerPtr(source, local_pe)) != nullptr) {
+    ipcImpl_.ipcCopy_wg<MemcpyKind::GetBlocking>(dest, remote, nelems, local_pe);
+    return;
+  }
+  if (is_thread_zero_in_block()) {
+    ActiveWFInfo wf_info(pe, ThreadScope::wg);
+    int qp_index = get_qp_index(pe, wf_info);
+    qps[qp_index].get_nbi(dest, source, nelems, wf_info, opts);
+    qps[qp_index].quiet(wf_info);
+  }
+}
+
+template <typename... Options>
+__device__ void GDAContext::getmem_nbi(void *dest, const void *source,
+                                       size_t nelems, int pe, CommOpt<Options...> opts) {
+  int local_pe{-1};
+  char *remote{nullptr};
+  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
+      (remote = ipcImpl_.ipcPeerPtr(source, local_pe)) != nullptr) {
+    ipcImpl_.ipcCopy<MemcpyKind::Get>(dest, remote, nelems, local_pe);
+    return;
+  }
+  ActiveWFInfo wf_info(pe);
+  int qp_index = get_qp_index(pe, wf_info);
+  qps[qp_index].get_nbi(dest, source, nelems, wf_info, opts);
+}
+
+template <typename... Options>
+__device__ void GDAContext::putmem(void *dest, const void *source, size_t nelems,
+                                   int pe, CommOpt<Options...> opts) {
+  int local_pe{-1};
+  char *remote{nullptr};
+  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
+      (remote = ipcImpl_.ipcPeerPtr(dest, local_pe)) != nullptr) {
+    ipcImpl_.ipcCopy<MemcpyKind::PutBlocking>(remote, const_cast<void *>(source), nelems, local_pe);
+    return;
+  }
+  ActiveWFInfo wf_info(pe);
+  int qp_index = get_qp_index(pe, wf_info);
+  qps[qp_index].put_nbi(dest, source, nelems, wf_info, opts);
+  qps[qp_index].quiet(wf_info);
+}
+
+template <typename... Options>
+__device__ void GDAContext::getmem(void *dest, const void *source, size_t nelems,
+                                   int pe, CommOpt<Options...> opts) {
+  int local_pe{-1};
+  char *remote{nullptr};
+  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
+      (remote = ipcImpl_.ipcPeerPtr(source, local_pe)) != nullptr) {
+    ipcImpl_.ipcCopy<MemcpyKind::GetBlocking>(dest, remote, nelems, local_pe);
+    return;
+  }
+  ActiveWFInfo wf_info(pe);
+  int qp_index = get_qp_index(pe, wf_info);
+  qps[qp_index].get_nbi(dest, source, nelems, wf_info, opts);
+  qps[qp_index].quiet(wf_info);
+}
+
 }  // namespace rocshmem
 
 #endif  // LIBRARY_SRC_GDA_CONTEXT_TMPL_DEVICE_HPP_

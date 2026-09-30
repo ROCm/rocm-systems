@@ -22,7 +22,7 @@
 
 #include "queue_pair_common.hpp"
 #include "queue_pair_interface.hpp"
-#include "queue_pair_option.hpp"
+#include "comm_options.hpp"
 
 namespace rocshmem {
 
@@ -96,20 +96,20 @@ public:
    * @param[in] nelems Size in bytes of data transmission.
    * @param[in] wf_info Wavefront information.
    *
-   * @tparam PostOptions Options to use when posting these WQEs.
+   * @tparam CommOptions Options to use when posting these WQEs.
    */
-  template <typename... PostOptions>
+  template <typename... CommOptions>
   __device__ void put_nbi(void *dest, const void *source, size_t nelems,
                           const ActiveWFInfo& wf_info,
-                          PostOpt<PostOptions...> post_options = {}) {
+                          CommOpt<CommOptions...> post_options = {}) {
     bool inlined_wqe = Provider::template can_inline<OpCode::RDMA_WRITE>(nelems);
     auto [d_raddr, d_rkey] = provider().get_raddr_info(dest);
     auto [s_laddr, s_lkey] = provider().get_laddr_info(source, inlined_wqe);
     provider().put_nbi(d_raddr, d_rkey, s_laddr, s_lkey, nelems, wf_info, post_options);
   }
-  template <typename... PostOptions>
+  template <typename... CommOptions>
   __device__ void put_nbi_single(void *dest, const void *source, size_t nelems,
-                                 PostOpt<PostOptions...> post_options = {}) {
+                                 CommOpt<CommOptions...> post_options = {}) {
     bool inlined_wqe = Provider::template can_inline<OpCode::RDMA_WRITE>(nelems);
     auto [d_raddr, d_rkey] = provider().get_raddr_info(dest);
     auto [s_laddr, s_lkey] = provider().get_laddr_info(source, inlined_wqe);
@@ -127,19 +127,19 @@ public:
    * @param[in] nelems Size in bytes of data transmission.
    * @param[in] wf_info Wavefront information.
    *
-   * @tparam PostOptions Options to use when posting these WQEs.
+   * @tparam CommOptions Options to use when posting these WQEs.
    */
-  template <typename... PostOptions>
+  template <typename... CommOptions>
   __device__ void get_nbi(void *dest, const void *source, size_t nelems,
                           const ActiveWFInfo& wf_info,
-                          PostOpt<PostOptions...> post_options = {}) {
+                          CommOpt<CommOptions...> post_options = {}) {
     auto [d_laddr, d_lkey] = provider().get_laddr_info(dest);
     auto [s_raddr, s_rkey] = provider().get_raddr_info(source);
     provider().get_nbi(d_laddr, d_lkey, s_raddr, s_rkey, nelems, wf_info, post_options);
   }
-  template <typename... PostOptions>
+  template <typename... CommOptions>
   __device__ void get_nbi_single(void *dest, const void *source, size_t nelems,
-                                 PostOpt<PostOptions...> post_options = {}) {
+                                 CommOpt<CommOptions...> post_options = {}) {
     auto [d_laddr, d_lkey] = provider().get_laddr_info(dest);
     auto [s_raddr, s_rkey] = provider().get_raddr_info(source);
     provider().get_nbi_single(d_laddr, d_lkey, s_raddr, s_rkey, nelems, post_options);
@@ -164,20 +164,20 @@ public:
    * @param[in] value Data value for the atomic operation.
    * @param[in] wf_info Wavefront information.
    *
-   * @tparam PostOptions Options to use when posting these WQEs.
+   * @tparam CommOptions Options to use when posting these WQEs.
    *
    * @return An atomic value.
    */
-  template <typename... PostOptions>
+  template <typename... CommOptions>
   __device__ uint64_t atomic_fetch_add(void *dest, uint64_t value,
                                        const ActiveWFInfo& wf_info,
-                                       PostOpt<PostOptions...> post_options = {}) {
+                                       CommOpt<CommOptions...> post_options = {}) {
     auto [d_raddr, d_rkey] = provider().get_raddr_info(dest);
     return provider().atomic_fetch_add(d_raddr, d_rkey, value, wf_info, post_options);
   }
-  template <typename... PostOptions>
+  template <typename... CommOptions>
   __device__ uint64_t atomic_fetch_add_single(void *dest, uint64_t value,
-                                              PostOpt<PostOptions...> post_options = {}) {
+                                              CommOpt<CommOptions...> post_options = {}) {
     auto [d_raddr, d_rkey] = provider().get_raddr_info(dest);
     return provider().atomic_fetch_add_single(d_raddr, d_rkey, value, post_options);
   }
@@ -194,22 +194,22 @@ public:
    * @param[in] value Data value for the atomic operation.
    * @param[in] wf_info Wavefront information.
    *
-   * @tparam PostOptions Options to use when posting these WQEs.
+   * @tparam CommOptions Options to use when posting these WQEs.
    *
    * @return An atomic value.
    */
-  template <typename... PostOptions>
+  template <typename... CommOptions>
   __device__ void atomic_fetch_add_nbi(uint64_t *fetch, void *dest, uint64_t value,
                                        const ActiveWFInfo& wf_info,
-                                       PostOpt<PostOptions...> post_options = {}) {
+                                       CommOpt<CommOptions...> post_options = {}) {
     auto [f_laddr, f_lkey] = provider().get_laddr_info(fetch);
     auto [d_raddr, d_rkey] = provider().get_raddr_info(dest);
     provider().atomic_fetch_add_nbi(
         f_laddr, f_lkey, d_raddr, d_rkey, value, wf_info, post_options);
   }
-  template <typename... PostOptions>
+  template <typename... CommOptions>
   __device__ void atomic_fetch_add_nbi_single(uint64_t *fetch, void *dest, uint64_t value,
-                                              PostOpt<PostOptions...> post_options = {}) {
+                                              CommOpt<CommOptions...> post_options = {}) {
     auto [f_laddr, f_lkey] = provider().get_laddr_info(fetch);
     auto [d_raddr, d_rkey] = provider().get_raddr_info(dest);
     provider().atomic_fetch_add_nbi_single(
@@ -227,18 +227,18 @@ public:
    * @param[in] value Data value for the atomic operation.
    * @param[in] wf_info Wavefront information.
    *
-   * @tparam PostOptions Options to use when posting these WQEs.
+   * @tparam CommOptions Options to use when posting these WQEs.
    */
-  template <typename... PostOptions>
+  template <typename... CommOptions>
   __device__ void atomic_add(void *dest, uint64_t value,
                              const ActiveWFInfo& wf_info,
-                             PostOpt<PostOptions...> post_options = {}) {
+                             CommOpt<CommOptions...> post_options = {}) {
     auto [d_raddr, d_rkey] = provider().get_raddr_info(dest);
     provider().atomic_add(d_raddr, d_rkey, value, wf_info, post_options);
   }
-  template <typename... PostOptions>
+  template <typename... CommOptions>
   __device__ void atomic_add_single(void *dest, uint64_t value,
-                                    PostOpt<PostOptions...> post_options = {}) {
+                                    CommOpt<CommOptions...> post_options = {}) {
     auto [d_raddr, d_rkey] = provider().get_raddr_info(dest);
     provider().atomic_add_single(d_raddr, d_rkey, value, post_options);
   }
@@ -254,20 +254,20 @@ public:
    * @param[in] value Data value for the atomic operation.
    * @param[in] wf_info Wavefront information.
    *
-   * @tparam PostOptions Options to use when posting these WQEs.
+   * @tparam CommOptions Options to use when posting these WQEs.
    *
    * @return An atomic value.
    */
-  template <typename... PostOptions>
+  template <typename... CommOptions>
   __device__ uint64_t atomic_compare_swap(void *dest, uint64_t cond, uint64_t value,
                                           const ActiveWFInfo& wf_info,
-                                          PostOpt<PostOptions...> post_options = {}) {
+                                          CommOpt<CommOptions...> post_options = {}) {
     auto [d_raddr, d_rkey] = provider().get_raddr_info(dest);
     return provider().atomic_compare_swap(d_raddr, d_rkey, cond, value, wf_info, post_options);
   }
-  template <typename... PostOptions>
+  template <typename... CommOptions>
   __device__ uint64_t atomic_compare_swap_single(void *dest, uint64_t cond, uint64_t value,
-                                                 PostOpt<PostOptions...> post_options = {}) {
+                                                 CommOpt<CommOptions...> post_options = {}) {
     auto [d_raddr, d_rkey] = provider().get_raddr_info(dest);
     return provider().atomic_compare_swap_single(d_raddr, d_rkey, cond, value, post_options);
   }
@@ -285,24 +285,24 @@ public:
    * @param[in] value Data value for the atomic operation.
    * @param[in] wf_info Wavefront information.
    *
-   * @tparam PostOptions Options to use when posting these WQEs.
+   * @tparam CommOptions Options to use when posting these WQEs.
    *
    * @return An atomic value.
    */
-  template <typename... PostOptions>
+  template <typename... CommOptions>
   __device__ void atomic_compare_swap_nbi(uint64_t *fetch, void *dest,
                                           uint64_t cond, uint64_t value,
                                           const ActiveWFInfo& wf_info,
-                                          PostOpt<PostOptions...> post_options = {}) {
+                                          CommOpt<CommOptions...> post_options = {}) {
     auto [f_laddr, f_lkey] = provider().get_laddr_info(fetch);
     auto [d_raddr, d_rkey] = provider().get_raddr_info(dest);
     provider().atomic_compare_swap_nbi(
         f_laddr, f_lkey, d_raddr, d_rkey, cond, value, wf_info, post_options);
   }
-  template <typename... PostOptions>
+  template <typename... CommOptions>
   __device__ void atomic_compare_swap_nbi_single(uint64_t *fetch, void *dest,
                                                  uint64_t cond, uint64_t value,
-                                                 PostOpt<PostOptions...> post_options = {}) {
+                                                 CommOpt<CommOptions...> post_options = {}) {
     auto [f_laddr, f_lkey] = provider().get_laddr_info(fetch);
     auto [d_raddr, d_rkey] = provider().get_raddr_info(dest);
     provider().atomic_compare_swap_nbi_single(
@@ -321,23 +321,23 @@ public:
    * @param[in] value Data value for the atomic operation.
    * @param[in] wf_info Wavefront information.
    *
-   * @tparam PostOptions Options to use when posting these WQEs.
+   * @tparam CommOptions Options to use when posting these WQEs.
    *
    *
    * @return An atomic value.
    */
-  template <typename... PostOptions>
+  template <typename... CommOptions>
   __device__ void atomic_compare_swap_nofetch(void *dest, uint64_t cond, uint64_t value,
                                               const ActiveWFInfo& wf_info,
-                                              PostOpt<PostOptions...> post_options = {}) {
+                                              CommOpt<CommOptions...> post_options = {}) {
     auto [d_raddr, d_rkey] = provider().get_raddr_info(dest);
     /* QueuePairInterface doesn't provide atomic_compare_swap_nofetch */
     provider().template post_wqe_amo<OpCode::ATOMIC_CS, AMOFetchType::NonFetching>(
         d_raddr, d_rkey, value, cond, wf_info, post_options);
   }
-  template <typename... PostOptions>
+  template <typename... CommOptions>
   __device__ void atomic_compare_swap_nofetch_single(void *dest, uint64_t cond, uint64_t value,
-                                                     PostOpt<PostOptions...> post_options = {}) {
+                                                     CommOpt<CommOptions...> post_options = {}) {
     auto [d_raddr, d_rkey] = provider().get_raddr_info(dest);
     /* QueuePairInterface doesn't provide atomic_compare_swap_nofetch_single */
     provider().template post_wqe_amo_single<OpCode::ATOMIC_CS, AMOFetchType::NonFetching>(

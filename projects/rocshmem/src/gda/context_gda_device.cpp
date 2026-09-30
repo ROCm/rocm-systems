@@ -73,63 +73,8 @@ __host__ GDAContext::~GDAContext() {
   CHECK_HIP(hipFree(qps));
 }
 
-__device__ void GDAContext::putmem(void *dest, const void *source, size_t nelems,
-                                   int pe) {
-  int local_pe{-1};
-  char *remote{nullptr};
-  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
-      (remote = ipcImpl_.ipcPeerPtr(dest, local_pe)) != nullptr) {
-    ipcImpl_.ipcCopy<MemcpyKind::PutBlocking>(remote, const_cast<void *>(source), nelems, local_pe);
-    return;
-  }
-  ActiveWFInfo wf_info(pe);
-  int qp_index = get_qp_index(pe, wf_info);
-  qps[qp_index].put_nbi(dest, source, nelems, wf_info);
-  qps[qp_index].quiet(wf_info);
-}
 
-__device__ void GDAContext::getmem(void *dest, const void *source, size_t nelems,
-                                   int pe) {
-  int local_pe{-1};
-  char *remote{nullptr};
-  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
-      (remote = ipcImpl_.ipcPeerPtr(source, local_pe)) != nullptr) {
-    ipcImpl_.ipcCopy<MemcpyKind::GetBlocking>(dest, remote, nelems, local_pe);
-    return;
-  }
-  ActiveWFInfo wf_info(pe);
-  int qp_index = get_qp_index(pe, wf_info);
-  qps[qp_index].get_nbi(dest, source, nelems, wf_info);
-  qps[qp_index].quiet(wf_info);
-}
 
-__device__ void GDAContext::putmem_nbi(void *dest, const void *source,
-                                       size_t nelems, int pe) {
-  int local_pe{-1};
-  char *remote{nullptr};
-  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
-      (remote = ipcImpl_.ipcPeerPtr(dest, local_pe)) != nullptr) {
-    ipcImpl_.ipcCopy<MemcpyKind::Put>(remote, const_cast<void *>(source), nelems, local_pe);
-    return;
-  }
-  ActiveWFInfo wf_info(pe);
-  int qp_index = get_qp_index(pe, wf_info);
-  qps[qp_index].put_nbi(dest, source, nelems, wf_info);
-}
-
-__device__ void GDAContext::getmem_nbi(void *dest, const void *source,
-                                       size_t nelems, int pe) {
-  int local_pe{-1};
-  char *remote{nullptr};
-  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
-      (remote = ipcImpl_.ipcPeerPtr(source, local_pe)) != nullptr) {
-    ipcImpl_.ipcCopy<MemcpyKind::Get>(dest, remote, nelems, local_pe);
-    return;
-  }
-  ActiveWFInfo wf_info(pe);
-  int qp_index = get_qp_index(pe, wf_info);
-  qps[qp_index].get_nbi(dest, source, nelems, wf_info);
-}
 
 __device__ void GDAContext::fence() {
   /**
@@ -222,137 +167,12 @@ __device__ void *GDAContext::shmem_ptr(const void *dest, int pe) {
   return nullptr;
 }
 
-__device__ void GDAContext::putmem_wg(void *dest, const void *source,
-                                      size_t nelems, int pe) {
-  int local_pe{-1};
-  char *remote{nullptr};
-  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
-      (remote = ipcImpl_.ipcPeerPtr(dest, local_pe)) != nullptr) {
-    ipcImpl_.ipcCopy_wg<MemcpyKind::PutBlocking>(remote, const_cast<void *>(source), nelems, local_pe);
-    return;
-  }
-  if (is_thread_zero_in_block()) {
-    ActiveWFInfo wf_info(pe, ThreadScope::wg);
-    int qp_index = get_qp_index(pe, wf_info);
-    qps[qp_index].put_nbi(dest, source, nelems, wf_info);
-    qps[qp_index].quiet(wf_info);
-  }
-}
 
-__device__ void GDAContext::getmem_wg(void *dest, const void *source,
-                                      size_t nelems, int pe) {
-  int local_pe{-1};
-  char *remote{nullptr};
-  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
-      (remote = ipcImpl_.ipcPeerPtr(source, local_pe)) != nullptr) {
-    ipcImpl_.ipcCopy_wg<MemcpyKind::GetBlocking>(dest, remote, nelems, local_pe);
-    return;
-  }
-  if (is_thread_zero_in_block()) {
-    ActiveWFInfo wf_info(pe, ThreadScope::wg);
-    int qp_index = get_qp_index(pe, wf_info);
-    qps[qp_index].get_nbi(dest, source, nelems, wf_info);
-    qps[qp_index].quiet(wf_info);
-  }
-}
 
-__device__ void GDAContext::putmem_nbi_wg(void *dest, const void *source,
-                                          size_t nelems, int pe) {
-  int local_pe{-1};
-  char *remote{nullptr};
-  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
-      (remote = ipcImpl_.ipcPeerPtr(dest, local_pe)) != nullptr) {
-    ipcImpl_.ipcCopy_wg<MemcpyKind::Put>(remote, const_cast<void *>(source), nelems, local_pe);
-    return;
-  }
-  if (is_thread_zero_in_block()) {
-    ActiveWFInfo wf_info(pe, ThreadScope::wg);
-    int qp_index = get_qp_index(pe, wf_info);
-    qps[qp_index].put_nbi(dest, source, nelems, wf_info);
-  }
-}
 
-__device__ void GDAContext::getmem_nbi_wg(void *dest, const void *source,
-                                          size_t nelems, int pe) {
-  int local_pe{-1};
-  char *remote{nullptr};
-  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
-      (remote = ipcImpl_.ipcPeerPtr(source, local_pe)) != nullptr) {
-    ipcImpl_.ipcCopy_wg<MemcpyKind::Get>(dest, remote, nelems, local_pe);
-    return;
-  }
-  if (is_thread_zero_in_block()) {
-    ActiveWFInfo wf_info(pe, ThreadScope::wg);
-    int qp_index = get_qp_index(pe, wf_info);
-    qps[qp_index].get_nbi(dest, source, nelems, wf_info);
-  }
-}
 
-__device__ void GDAContext::putmem_wave(void *dest, const void *source,
-                                        size_t nelems, int pe) {
-  int local_pe{-1};
-  char *remote{nullptr};
-  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
-      (remote = ipcImpl_.ipcPeerPtr(dest, local_pe)) != nullptr) {
-    ipcImpl_.ipcCopy_wave<MemcpyKind::PutBlocking>(remote, const_cast<void *>(source), nelems, local_pe);
-    return;
-  }
-  if (is_thread_zero_in_wave()) {
-    ActiveWFInfo wf_info(pe, ThreadScope::wave);
-    int qp_index = get_qp_index(pe, wf_info);
-    qps[qp_index].put_nbi(dest, source, nelems, wf_info);
-    qps[qp_index].quiet(wf_info);
-  }
-}
 
-__device__ void GDAContext::getmem_wave(void *dest, const void *source,
-                                        size_t nelems, int pe) {
-  int local_pe{-1};
-  char *remote{nullptr};
-  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
-      (remote = ipcImpl_.ipcPeerPtr(source, local_pe)) != nullptr) {
-    ipcImpl_.ipcCopy_wave<MemcpyKind::GetBlocking>(dest, remote, nelems, local_pe);
-    return;
-  }
-  if (is_thread_zero_in_wave()) {
-    ActiveWFInfo wf_info(pe, ThreadScope::wave);
-    int qp_index = get_qp_index(pe, wf_info);
-    qps[qp_index].get_nbi(dest, source, nelems, wf_info);
-    qps[qp_index].quiet(wf_info);
-  }
-}
 
-__device__ void GDAContext::putmem_nbi_wave(void *dest, const void *source,
-                                            size_t nelems, int pe) {
-  int local_pe{-1};
-  char *remote{nullptr};
-  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
-      (remote = ipcImpl_.ipcPeerPtr(dest, local_pe)) != nullptr) {
-    ipcImpl_.ipcCopy_wave<MemcpyKind::Put>(remote, const_cast<void *>(source), nelems, local_pe);
-    return;
-  }
-  if (is_thread_zero_in_wave()) {
-    ActiveWFInfo wf_info(pe, ThreadScope::wave);
-    int qp_index = get_qp_index(pe, wf_info);
-    qps[qp_index].put_nbi(dest, source, nelems, wf_info);
-  }
-}
-
-__device__ void GDAContext::getmem_nbi_wave(void *dest, const void *source,
-                                            size_t nelems, int pe) {
-  int local_pe{-1};
-  char *remote{nullptr};
-  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
-      (remote = ipcImpl_.ipcPeerPtr(source, local_pe)) != nullptr) {
-    ipcImpl_.ipcCopy_wave<MemcpyKind::Get>(dest, remote, nelems, local_pe);
-    return;
-  }
-  if (is_thread_zero_in_wave()) {
-    ActiveWFInfo wf_info(pe, ThreadScope::wave);
-    int qp_index = get_qp_index(pe, wf_info);
-    qps[qp_index].get_nbi(dest, source, nelems, wf_info);
-  }
-}
 
 
 //TODO: copied from IPC, needs review

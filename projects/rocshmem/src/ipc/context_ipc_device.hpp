@@ -26,6 +26,7 @@
 #define LIBRARY_SRC_IPC_CONTEXT_DEVICE_HPP_
 
 #include "context.hpp"
+#include "comm_options.hpp"
 #include "atomic.hpp"
 #include "team.hpp"
 
@@ -50,6 +51,87 @@ class IPCContext : public Context {
   __device__ void fence();
 
   __device__ void fence(int pe);
+
+  // CommOpt-accepting overloads. This backend does not consume the option
+  // tags; they are accepted for API uniformity and ignored (delegated).
+  template <typename... Options>
+  __device__ void putmem(void *dest, const void *source, size_t nelems, int pe,
+                      CommOpt<Options...>) { putmem(dest, source, nelems, pe); }
+  template <typename... Options>
+  __device__ void putmem_nbi(void *dest, const void *source, size_t nelems, int pe,
+                      CommOpt<Options...>) { putmem_nbi(dest, source, nelems, pe); }
+  template <typename... Options>
+  __device__ void putmem_wave(void *dest, const void *source, size_t nelems, int pe,
+                      CommOpt<Options...>) { putmem_wave(dest, source, nelems, pe); }
+  template <typename... Options>
+  __device__ void putmem_nbi_wave(void *dest, const void *source, size_t nelems, int pe,
+                      CommOpt<Options...>) { putmem_nbi_wave(dest, source, nelems, pe); }
+  template <typename... Options>
+  __device__ void putmem_wg(void *dest, const void *source, size_t nelems, int pe,
+                      CommOpt<Options...>) { putmem_wg(dest, source, nelems, pe); }
+  template <typename... Options>
+  __device__ void putmem_nbi_wg(void *dest, const void *source, size_t nelems, int pe,
+                      CommOpt<Options...>) { putmem_nbi_wg(dest, source, nelems, pe); }
+  template <typename... Options>
+  __device__ void getmem(void *dest, const void *source, size_t nelems, int pe,
+                      CommOpt<Options...>) { getmem(dest, source, nelems, pe); }
+  template <typename... Options>
+  __device__ void getmem_nbi(void *dest, const void *source, size_t nelems, int pe,
+                      CommOpt<Options...>) { getmem_nbi(dest, source, nelems, pe); }
+  template <typename... Options>
+  __device__ void getmem_wave(void *dest, const void *source, size_t nelems, int pe,
+                      CommOpt<Options...>) { getmem_wave(dest, source, nelems, pe); }
+  template <typename... Options>
+  __device__ void getmem_nbi_wave(void *dest, const void *source, size_t nelems, int pe,
+                      CommOpt<Options...>) { getmem_nbi_wave(dest, source, nelems, pe); }
+  template <typename... Options>
+  __device__ void getmem_wg(void *dest, const void *source, size_t nelems, int pe,
+                      CommOpt<Options...>) { getmem_wg(dest, source, nelems, pe); }
+  template <typename... Options>
+  __device__ void getmem_nbi_wg(void *dest, const void *source, size_t nelems, int pe,
+                      CommOpt<Options...>) { getmem_nbi_wg(dest, source, nelems, pe); }
+  template <typename T, typename... Options>
+  __device__ void put(T *dest, const T *source, size_t nelems, int pe,
+                      CommOpt<Options...>) { put(dest, source, nelems, pe); }
+  template <typename T, typename... Options>
+  __device__ void put_nbi(T *dest, const T *source, size_t nelems, int pe,
+                      CommOpt<Options...>) { put_nbi(dest, source, nelems, pe); }
+  template <typename T, typename... Options>
+  __device__ void put_wave(T *dest, const T *source, size_t nelems, int pe,
+                      CommOpt<Options...>) { put_wave(dest, source, nelems, pe); }
+  template <typename T, typename... Options>
+  __device__ void put_nbi_wave(T *dest, const T *source, size_t nelems, int pe,
+                      CommOpt<Options...>) { put_nbi_wave(dest, source, nelems, pe); }
+  template <typename T, typename... Options>
+  __device__ void put_wg(T *dest, const T *source, size_t nelems, int pe,
+                      CommOpt<Options...>) { put_wg(dest, source, nelems, pe); }
+  template <typename T, typename... Options>
+  __device__ void put_nbi_wg(T *dest, const T *source, size_t nelems, int pe,
+                      CommOpt<Options...>) { put_nbi_wg(dest, source, nelems, pe); }
+  template <typename T, typename... Options>
+  __device__ void get(T *dest, const T *source, size_t nelems, int pe,
+                      CommOpt<Options...>) { get(dest, source, nelems, pe); }
+  template <typename T, typename... Options>
+  __device__ void get_nbi(T *dest, const T *source, size_t nelems, int pe,
+                      CommOpt<Options...>) { get_nbi(dest, source, nelems, pe); }
+  template <typename T, typename... Options>
+  __device__ void get_wave(T *dest, const T *source, size_t nelems, int pe,
+                      CommOpt<Options...>) { get_wave(dest, source, nelems, pe); }
+  template <typename T, typename... Options>
+  __device__ void get_nbi_wave(T *dest, const T *source, size_t nelems, int pe,
+                      CommOpt<Options...>) { get_nbi_wave(dest, source, nelems, pe); }
+  template <typename T, typename... Options>
+  __device__ void get_wg(T *dest, const T *source, size_t nelems, int pe,
+                      CommOpt<Options...>) { get_wg(dest, source, nelems, pe); }
+  template <typename T, typename... Options>
+  __device__ void get_nbi_wg(T *dest, const T *source, size_t nelems, int pe,
+                      CommOpt<Options...>) { get_nbi_wg(dest, source, nelems, pe); }
+  template <typename T, typename... Options>
+  __device__ void p(T *dest, T value, int pe, CommOpt<Options...>) { p(dest, value, pe); }
+  template <typename... Options>
+  __device__ void fence(CommOpt<Options...>) { fence(); }
+  template <typename... Options>
+  __device__ void fence(int pe, CommOpt<Options...>) { fence(pe); }
 
   __device__ void quiet();
 
@@ -135,6 +217,32 @@ class IPCContext : public Context {
 
   template <typename T>
   __device__ T amo_fetch_cas(void *dst, T value, T cond, int pe);
+
+  // CommOpt-accepting amo overloads (accepted for API uniformity, ignored).
+  template <typename T, typename... Options>
+  __device__ void amo_add(void *dst, T value, int pe, CommOpt<Options...>) { amo_add(dst, value, pe); }
+  template <typename T, typename... Options>
+  __device__ void amo_and(void *dst, T value, int pe, CommOpt<Options...>) { amo_and(dst, value, pe); }
+  template <typename T, typename... Options>
+  __device__ void amo_or(void *dst, T value, int pe, CommOpt<Options...>) { amo_or(dst, value, pe); }
+  template <typename T, typename... Options>
+  __device__ void amo_set(void *dst, T value, int pe, CommOpt<Options...>) { amo_set(dst, value, pe); }
+  template <typename T, typename... Options>
+  __device__ void amo_xor(void *dst, T value, int pe, CommOpt<Options...>) { amo_xor(dst, value, pe); }
+  template <typename T, typename... Options>
+  __device__ T amo_swap(void *dst, T value, int pe, CommOpt<Options...>) { return amo_swap(dst, value, pe); }
+  template <typename T, typename... Options>
+  __device__ T amo_fetch_add(void *dst, T value, int pe, CommOpt<Options...>) { return amo_fetch_add(dst, value, pe); }
+  template <typename T, typename... Options>
+  __device__ T amo_fetch_and(void *dst, T value, int pe, CommOpt<Options...>) { return amo_fetch_and(dst, value, pe); }
+  template <typename T, typename... Options>
+  __device__ T amo_fetch_or(void *dst, T value, int pe, CommOpt<Options...>) { return amo_fetch_or(dst, value, pe); }
+  template <typename T, typename... Options>
+  __device__ T amo_fetch_xor(void *dst, T value, int pe, CommOpt<Options...>) { return amo_fetch_xor(dst, value, pe); }
+  template <typename T, typename... Options>
+  __device__ void amo_cas(void *dst, T value, T cond, int pe, CommOpt<Options...>) { amo_cas(dst, value, cond, pe); }
+  template <typename T, typename... Options>
+  __device__ T amo_fetch_cas(void *dst, T value, T cond, int pe, CommOpt<Options...>) { return amo_fetch_cas(dst, value, cond, pe); }
 
   // Collectives
   template <typename T, ROCSHMEM_OP Op>
@@ -258,7 +366,20 @@ class IPCContext : public Context {
                                                                                          \
   __device__ void putmem_signal##SUFFIX(void *dest, const void *source, size_t nelems,   \
                                         uint64_t *sig_addr, uint64_t signal, int sig_op, \
-                                        int pe);
+                                        int pe);  \
+  \
+  template <typename T, typename... Options>  \
+  __device__ void put_signal##SUFFIX(T *dest, const T *source, size_t nelems,  \
+                                     uint64_t *sig_addr, uint64_t signal, int sig_op,  \
+                                     int pe, CommOpt<Options...>) {  \
+    put_signal##SUFFIX(dest, source, nelems, sig_addr, signal, sig_op, pe);  \
+  }  \
+  template <typename... Options>  \
+  __device__ void putmem_signal##SUFFIX(void *dest, const void *source, size_t nelems,  \
+                                        uint64_t *sig_addr, uint64_t signal, int sig_op,  \
+                                        int pe, CommOpt<Options...>) {  \
+    putmem_signal##SUFFIX(dest, source, nelems, sig_addr, signal, sig_op, pe);  \
+  }
 
   IPC_CONTEXT_PUT_SIGNAL_DEC()
   IPC_CONTEXT_PUT_SIGNAL_DEC(_wg)

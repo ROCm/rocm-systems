@@ -1,27 +1,33 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef LIBRARY_SRC_GDA_QUEUE_PAIR_OPTION_HPP_
-#define LIBRARY_SRC_GDA_QUEUE_PAIR_OPTION_HPP_
+#ifndef LIBRARY_SRC_COMM_OPTIONS_HPP_
+#define LIBRARY_SRC_COMM_OPTIONS_HPP_
 
 /**
- * @file queue_pair_option.hpp
+ * @file comm_options.hpp
  *
  * @section DESCRIPTION
- * An IB QueuePair (SQ and CQ) that the device can use to perform network
- * operations. Most important rocSHMEM operations are performed by this
- * class.
+ * Backend-agnostic, compile-time options for communication operations.
+ *
+ * Each option is a tag describing a property of a communication call. Backends
+ * consume the tags they understand and ignore the rest, so the same CommOpt can
+ * be threaded uniformly through every API communication call. These options
+ * were historically the GDA queue-pair "PostOpt" options; the tag names are
+ * preserved here (a later commit gives them backend-agnostic semantic names).
  */
 
 #include <type_traits>
 
 #include <hip/hip_runtime.h>
 
-#include "queue_pair_common.hpp"
+// ActiveWFInfo (used by the CQ-update helper). It only depends on util.hpp, so
+// including it here does not couple CommOpt to any GDA transport.
+#include "gda/queue_pair/queue_pair_common.hpp"
 
 namespace rocshmem {
 
-namespace QueuePairOption {
+namespace CommOption {
   /*
    * @brief Helper alias for option tag types before C++26 std::constant_wrapper.
    *
@@ -99,7 +105,7 @@ namespace QueuePairOption {
   };
 
   /* forward declaration */
-  template <typename... Options> struct PostOpt;
+  template <typename... Options> struct CommOpt;
 
   /* Clang versions < 22 implicitly treats deduction guides as __host__ functions
    * unless marked otherwise by explicit attributes.
@@ -113,19 +119,19 @@ namespace QueuePairOption {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-attributes"
   /* deduction guide, required before C++20 */
-  template <typename... Options> __host__ __device__ PostOpt(Options...) -> PostOpt<Options...>;
+  template <typename... Options> __host__ __device__ CommOpt(Options...) -> CommOpt<Options...>;
 #pragma clang diagnostic pop
 
   /* Base case with all options defined */
   template <bool ring_db, bool thread_safe, bool check_sq, UpdateThread update_cq>
-  struct PostOpt<ring_db_tag<ring_db>,
+  struct CommOpt<ring_db_tag<ring_db>,
                  thread_safe_tag<thread_safe>,
                  check_sq_tag<check_sq>,
                  update_cq_tag<update_cq>> {
     /* explicitly-defaulted default constructor */
-    __host__ __device__ constexpr PostOpt() = default;
+    __host__ __device__ constexpr CommOpt() = default;
     /* constructor for type deduction from tags */
-    __host__ __device__ constexpr PostOpt(ring_db_tag<ring_db>,
+    __host__ __device__ constexpr CommOpt(ring_db_tag<ring_db>,
                                           thread_safe_tag<thread_safe>,
                                           check_sq_tag<check_sq>,
                                           update_cq_tag<update_cq>) { }
@@ -164,10 +170,10 @@ namespace QueuePairOption {
   };
 
   /* Extraneous parameters,
-   * else matches PostOpt<ring_db_tag, thread_safe_tag, check_sq_tag, update_cq_tag> */
+   * else matches CommOpt<ring_db_tag, thread_safe_tag, check_sq_tag, update_cq_tag> */
   template <bool ring_db, bool thread_safe, bool check_sq, UpdateThread update_cq,
             typename... Options>
-  struct PostOpt<ring_db_tag<ring_db>,
+  struct CommOpt<ring_db_tag<ring_db>,
                  thread_safe_tag<thread_safe>,
                  check_sq_tag<check_sq>,
                  update_cq_tag<update_cq>,
@@ -176,103 +182,103 @@ namespace QueuePairOption {
   };
 
   /* Missing update_cq_tag,
-   * else matches PostOpt<ring_db_tag, thread_safe_tag, check_sq_tag, update_cq_tag, Options...> */
+   * else matches CommOpt<ring_db_tag, thread_safe_tag, check_sq_tag, update_cq_tag, Options...> */
   template <bool ring_db, bool thread_safe, bool check_sq, typename... Options>
-  struct PostOpt<ring_db_tag<ring_db>,
+  struct CommOpt<ring_db_tag<ring_db>,
                  thread_safe_tag<thread_safe>,
                  check_sq_tag<check_sq>,
                  Options...>
-       : PostOpt<ring_db_tag<ring_db>,
+       : CommOpt<ring_db_tag<ring_db>,
                  thread_safe_tag<thread_safe>,
                  check_sq_tag<check_sq>,
                  default_option_t<update_cq_tag>,
                  Options...> {
-    __host__ __device__ constexpr PostOpt(ring_db_tag<ring_db>,
+    __host__ __device__ constexpr CommOpt(ring_db_tag<ring_db>,
                                           thread_safe_tag<thread_safe>,
                                           check_sq_tag<check_sq>,
                                           Options...) { }
     /* inherit constructor */
-    using PostOpt<ring_db_tag<ring_db>,
+    using CommOpt<ring_db_tag<ring_db>,
                   thread_safe_tag<thread_safe>,
                   check_sq_tag<check_sq>,
                   default_option_t<update_cq_tag>,
                   Options...
-                 >::PostOpt;
+                 >::CommOpt;
   };
 
   /* Missing check_sq_tag,
-   * else matches PostOpt<ring_db_tag, thread_safe_tag, check_sq_tag, Options...> */
+   * else matches CommOpt<ring_db_tag, thread_safe_tag, check_sq_tag, Options...> */
   template <bool ring_db, bool thread_safe, typename... Options>
-  struct PostOpt<ring_db_tag<ring_db>,
+  struct CommOpt<ring_db_tag<ring_db>,
                  thread_safe_tag<thread_safe>,
                  Options...>
-       : PostOpt<ring_db_tag<ring_db>,
+       : CommOpt<ring_db_tag<ring_db>,
                  thread_safe_tag<thread_safe>,
                  default_option_t<check_sq_tag>,
                  Options...> {
-    __host__ __device__ constexpr PostOpt(ring_db_tag<ring_db>,
+    __host__ __device__ constexpr CommOpt(ring_db_tag<ring_db>,
                                           thread_safe_tag<thread_safe>,
                                           Options...) { }
     /* inherit constructor */
-    using PostOpt<ring_db_tag<ring_db>,
+    using CommOpt<ring_db_tag<ring_db>,
                   thread_safe_tag<thread_safe>,
                   default_option_t<check_sq_tag>,
                   Options...
-                 >::PostOpt;
+                 >::CommOpt;
   };
 
   /* Missing thread_safe_tag,
-   * else matches PostOpt<ring_db_tag, thread_safe_tag, Options...> */
+   * else matches CommOpt<ring_db_tag, thread_safe_tag, Options...> */
   template <bool ring_db, typename... Options>
-  struct PostOpt<ring_db_tag<ring_db>,
+  struct CommOpt<ring_db_tag<ring_db>,
                  Options...>
-       : PostOpt<ring_db_tag<ring_db>,
+       : CommOpt<ring_db_tag<ring_db>,
                  default_option_t<thread_safe_tag>,
                  Options...> {
-    __host__ __device__ constexpr PostOpt(ring_db_tag<ring_db>,
+    __host__ __device__ constexpr CommOpt(ring_db_tag<ring_db>,
                                           Options...) { }
     /* inherit constructor */
-    using PostOpt<ring_db_tag<ring_db>,
+    using CommOpt<ring_db_tag<ring_db>,
                   default_option_t<thread_safe_tag>,
                   Options...
-                 >::PostOpt;
+                 >::CommOpt;
   };
 
   /* Missing ring_db_tag,
-   * else matches PostOpt<ring_db_tag, Options...> */
+   * else matches CommOpt<ring_db_tag, Options...> */
   template <typename... Options>
-  struct PostOpt
-       : PostOpt<default_option_t<ring_db_tag>,
+  struct CommOpt
+       : CommOpt<default_option_t<ring_db_tag>,
                  Options...> {
-    __host__ __device__ constexpr PostOpt(Options...) { }
+    __host__ __device__ constexpr CommOpt(Options...) { }
     /* inherit constructor */
-    using PostOpt<default_option_t<ring_db_tag>,
+    using CommOpt<default_option_t<ring_db_tag>,
                   Options...
-                 >::PostOpt;
+                 >::CommOpt;
   };
 
-  /* ensure default PostOpt<> uses all the default options */
-  static_assert(PostOpt<>::RingDB     == default_option_v<ring_db_tag>     &&
-                PostOpt<>::ThreadSafe == default_option_v<thread_safe_tag> &&
-                PostOpt<>::CheckSQ    == default_option_v<check_sq_tag>    &&
-                PostOpt<>::UpdateCQ   == default_option_v<update_cq_tag>);
+  /* ensure default CommOpt<> uses all the default options */
+  static_assert(CommOpt<>::RingDB     == default_option_v<ring_db_tag>     &&
+                CommOpt<>::ThreadSafe == default_option_v<thread_safe_tag> &&
+                CommOpt<>::CheckSQ    == default_option_v<check_sq_tag>    &&
+                CommOpt<>::UpdateCQ   == default_option_v<update_cq_tag>);
 
-}  // namespace QueuePairOption
+}  // namespace CommOption
 
 /*
- * @brief Type alias helper for WQE posting options.
+ * @brief Type alias helper for communication options.
  */
-using QueuePairOption::PostOpt;
+using CommOption::CommOpt;
 
-/* bring QueuePairOption::UpdateThread into scope */
-using QueuePairOption::UpdateThread;
+/* bring CommOption::UpdateThread into scope */
+using CommOption::UpdateThread;
 
 /* constexpr variable templates to simplify usage */
-template <auto V> constexpr inline auto RingDB     = QueuePairOption::ring_db_tag<V>{};
-template <auto V> constexpr inline auto ThreadSafe = QueuePairOption::thread_safe_tag<V>{};
-template <auto V> constexpr inline auto CheckSQ    = QueuePairOption::check_sq_tag<V>{};
-template <auto V> constexpr inline auto UpdateCQ   = QueuePairOption::update_cq_tag<V>{};
+template <auto V> constexpr inline auto RingDB     = CommOption::ring_db_tag<V>{};
+template <auto V> constexpr inline auto ThreadSafe = CommOption::thread_safe_tag<V>{};
+template <auto V> constexpr inline auto CheckSQ    = CommOption::check_sq_tag<V>{};
+template <auto V> constexpr inline auto UpdateCQ   = CommOption::update_cq_tag<V>{};
 
 }  // namespace rocshmem
 
-#endif  // LIBRARY_SRC_GDA_QUEUE_PAIR_OPTION_HPP_
+#endif  // LIBRARY_SRC_COMM_OPTIONS_HPP_
