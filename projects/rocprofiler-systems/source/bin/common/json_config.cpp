@@ -231,7 +231,7 @@ resolve_schema_config(const nlohmann::json& config)
     {
         const auto& domains = config["domains"];
 
-        // GPU domain (AMD SMI metrics)
+        // GPU domain (AMD SMI and hipFile metrics)
         if(domains.contains("gpu"))
         {
             const auto& gpu = domains["gpu"];
