@@ -5186,18 +5186,24 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_ForceParamAloneDoesNotEnableCe) 
       });
 }
 
-// The 2-shot size cap from both sides. msgBytes is the whole send buffer, so nRanks is 4 to keep
-// its `* nRanks` term load-bearing, and the cap is a small literal rather than a value re-derived
-// from the (null) arch table. Only the force-specific guard names RCCL_FORCE_CE_REDUCESCATTER, so
-// the log assertion pins which one rejected the second call.
+// The tuned 2-shot size cap from both sides in non-force mode. msgBytes is the whole send buffer,
+// so nRanks is 4 to keep its `* nRanks` term load-bearing, and the cap is a small literal rather
+// than a value re-derived from the (null) arch table. Above the cap the registered-window path is
+// still valid; only the internally staged 2-shot path is excluded.
 TEST(WrapMicrotestIsolated, SelectReduceScatter_CeTwoShotMessageSizeCapBoundary) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectReduceScatter_CeTwoShotMessageSizeCapBoundary",
       []() {
         g_loadParam = [](const char* env, int64_t deft) {
           if (std::strcmp(env, "RCCL_CE_AR_MAX_MSG_BYTES") == 0) return int64_t(4096);
-          return ForcedCeReduceScatterParams(env, deft);
+          if (std::strcmp(env, "RCCL_CE_REDUCESCATTER") == 0) return int64_t(1);
+          if (std::strcmp(env, "RCCL_FORCE_CE_REDUCESCATTER") == 0) return int64_t(0);
+          return deft;
         };
+        ScopedHook ceAvailable(
+            g_ceAvailable,
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
         ncclComm* comm = MakeSelectComm();
         comm->nRanks = 4;
         comm->symmetricSupport = 1;
@@ -5215,8 +5221,8 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_CeTwoShotMessageSizeCapBoundary)
           EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, atCap + 1, ncclFloat32, ncclSum,
                                                          /*query=*/false, &pastCapDecision));
         });
-        EXPECT_EQ(NCCL_ALGO_RING, pastCapDecision.algo);
-        EXPECT_NE(std::string::npos, log.find("despite RCCL_FORCE_CE_REDUCESCATTER=1"));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, pastCapDecision.algo);
+        EXPECT_NE(std::string::npos, log.find("exceeds tuned twoShotMax"));
         DeleteCommWithArch(comm);
       });
 }
@@ -5517,12 +5523,11 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_RecvWinSysmemSegmentBlocksCeRegi
       });
 }
 
-// The 2-shot arm's `!symEligible`: CeTwoShotChosenWhenForcedAndStagingBufferReady with the
-// symmetric seam saying "requested". Nothing else can intercept, DDA, Hierarchical and Direct all
-// carrying their own `!symEligible` and the late arm having no g_ceAvailable hook.
-TEST(WrapMicrotestIsolated, SelectReduceScatter_SymmetricEligibleExcludesCeTwoShot) {
+// Explicit force is a user override, so it preempts an otherwise-eligible symmetric kernel when
+// staging is ready.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_ForcedCeTwoShotPreemptsSymmetric) {
   RUN_ISOLATED_TEST(
-      "Wrap_SelectReduceScatter_SymmetricEligibleExcludesCeTwoShot",
+      "Wrap_SelectReduceScatter_ForcedCeTwoShotPreemptsSymmetric",
       []() {
         g_loadParam = ForcedCeReduceScatterParams;
         ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
@@ -5535,17 +5540,16 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_SymmetricEligibleExcludesCeTwoSh
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
                                                        ncclSum, /*query=*/false, &decision));
-        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
-        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, decision.algo);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
         DeleteCommWithArch(comm);
       });
 }
 
-// The same conjunct on the staging-allocation arm, unreachable above because a ready buffer sends
-// 2-shot first. Only the staging buffer differs.
-TEST(WrapMicrotestIsolated, SelectReduceScatter_SymmetricEligibleExcludesCeRegistered) {
+// The same force precedence applies while staging still needs to be initialized; enqueue receives
+// the registered dispatch token and allocates the internal staging buffer.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_ForcedCeRegisteredPreemptsSymmetric) {
   RUN_ISOLATED_TEST(
-      "Wrap_SelectReduceScatter_SymmetricEligibleExcludesCeRegistered",
+      "Wrap_SelectReduceScatter_ForcedCeRegisteredPreemptsSymmetric",
       []() {
         g_loadParam = ForcedCeReduceScatterParams;
         ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
@@ -5557,18 +5561,16 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_SymmetricEligibleExcludesCeRegis
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
                                                        ncclSum, /*query=*/false, &decision));
-        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
-        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, decision.algo);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
         DeleteCommWithArch(comm);
       });
 }
 
-// ceReduceScatterAllowed's `ncclGroupDepth == 0`, with the depth as the only difference from
-// CeTwoShotChosenWhenForcedAndStagingBufferReady. The late arm has no group gate, so g_ceAvailable
-// stays false and the claim is only about CE_2SHOT.
-TEST(WrapMicrotestIsolated, SelectReduceScatter_InsideGroupExcludesCeTwoShot) {
+// Grouped collectives cannot take the eager 2-shot return. They remain queued using the registered
+// dispatch token and execute CE at ncclGroupEnd.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_InsideGroupQueuesCeRegistered) {
   RUN_ISOLATED_TEST(
-      "Wrap_SelectReduceScatter_InsideGroupExcludesCeTwoShot",
+      "Wrap_SelectReduceScatter_InsideGroupQueuesCeRegistered",
       []() {
         g_loadParam = ForcedCeReduceScatterParams;
         ncclComm* comm = MakeSelectComm();
@@ -5581,7 +5583,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_InsideGroupExcludesCeTwoShot) {
         EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
                                                        ncclSum, /*query=*/false, &decision));
         EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
-        EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
         DeleteCommWithArch(comm);
       });
 }
@@ -5868,6 +5870,110 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_CeOptInSelectsRegisteredThenTwoS
         EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
                                                         ncclSum, /*query=*/false, &decision));
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Primus coalesces the GPT-OSS gradient bucket into 139,370,448 BF16 values
+// per rank (2,229,927,168 bytes across eight ranks). That is intentionally
+// larger than the tuned 256 MiB 2-shot window, but CE ReduceScatter supports
+// it by chunking over the reusable staging slots. Explicit force mode must
+// therefore bypass both the tuning cap and an otherwise-eligible symk path.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_ForcePipelinesPrimusBfloat16AvgAboveCap) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_ForcePipelinesPrimusBfloat16AvgAboveCap",
+      []() {
+        g_loadParam = [](const char* env, int64_t defaultValue) {
+          if (std::strcmp(env, "RCCL_CE_REDUCESCATTER") == 0) return (int64_t)1;
+          if (std::strcmp(env, "RCCL_FORCE_CE_REDUCESCATTER") == 0) return (int64_t)1;
+          if (std::strcmp(env, "RCCL_CE_AR_MAX_MSG_BYTES") == 0) return (int64_t)(256ULL * 1024 * 1024);
+          return defaultValue;
+        };
+        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                                  size_t, const void*, void*, bool) { return true; });
+        alignas(16) static uint8_t staging;
+        ncclComm* comm = MakeSelectComm();
+        comm->nRanks = 8;
+        comm->nNodes = 1;
+        comm->symmetricSupport = true;
+        comm->ceColl.graphModeSeen = false;
+        comm->ceColl.ceARTmpBuf = nullptr;
+        rcclCollDecision decision{};
+        constexpr size_t kPrimusRecvCount = 139370448;
+        EXPECT_EQ(ncclSuccess,
+                  rcclSelectReduceScatter(comm, nullptr, nullptr, kPrimusRecvCount, ncclBfloat16, ncclAvg,
+                                          /*query=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+
+        comm->ceColl.ceARTmpBuf = &staging;
+        EXPECT_EQ(ncclSuccess,
+                  rcclSelectReduceScatter(comm, nullptr, nullptr, kPrimusRecvCount, ncclBfloat16, ncclAvg,
+                                          /*query=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+
+        // Primus issues the same collective between ncclGroupStart/End. The
+        // grouped call must stay queued and use CE at group end rather than
+        // executing the eager 2-shot path or falling back to symk.
+        ncclGroupDepth = 1;
+        EXPECT_EQ(ncclSuccess,
+                  rcclSelectReduceScatter(comm, nullptr, nullptr, kPrimusRecvCount, ncclBfloat16, ncclAvg,
+                                          /*query=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        ncclGroupDepth = 0;
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Primus' default gradient collective is BF16 Avg. CE implements that by
+// accumulating the BF16 sum and applying the reciprocal rank count once.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_Bfloat16AvgSelectsCeRegistered) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_Bfloat16AvgSelectsCeRegistered",
+      []() {
+        g_loadParam = [](const char* env, int64_t defaultValue) {
+          if (std::strcmp(env, "RCCL_CE_REDUCESCATTER") == 0) return (int64_t)1;
+          if (std::strcmp(env, "RCCL_FORCE_CE_REDUCESCATTER") == 0) return (int64_t)1;
+          return defaultValue;
+        };
+        ScopedHook ceAvailable(
+            g_ceAvailable,
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
+        ncclComm* comm = MakeSelectComm();
+        comm->nRanks = 8;
+        comm->nNodes = 1;
+        comm->symmetricSupport = true;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclBfloat16,
+                                                        ncclAvg, /*query=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// ncclCeAvailable does not filter datatypes, so the registered-window branch
+// must reject Float8 itself instead of dispatching to an unsupported CE kernel.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_Float8FallsBackWhenCeRegistered) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_Float8FallsBackWhenCeRegistered",
+      []() {
+        g_loadParam = ForceParam("RCCL_CE_REDUCESCATTER", int64_t(1));
+        ScopedHook ceAvailable(
+            g_ceAvailable,
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
+        ncclComm* comm = MakeSelectComm();
+        comm->nRanks = 1;
+        comm->nNodes = 1;
+        comm->symmetricSupport = true;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat8e4m3,
+                                                        ncclSum, /*query=*/false, &decision));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
         DeleteCommWithArch(comm);
       });
 }
