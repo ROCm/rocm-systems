@@ -12,7 +12,6 @@ traced back to the operator that launched it.
 Torch and Triton tracing are experimental. Every command needs
 `--experimental`, and option names can change between releases, so run
 `rocprof-compute profile --experimental --help` first.
-Never use the GUI or TUI.
 
 ## 1. Check the requirements
 

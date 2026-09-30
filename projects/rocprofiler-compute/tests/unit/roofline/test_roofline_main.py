@@ -566,9 +566,8 @@ def test_standalone_roofs_open_at_the_selected_cap(benchmarked_roofline) -> None
         assert roof["sampleAi"][-1] == pytest.approx(max(peaks) / roof["bandwidth"])
 
 
-def test_dash_figures_keep_every_ceiling(benchmarked_roofline) -> None:
-    """The WebUI has no precision selector, so narrowing the standalone document
-    must not reach back into the figures Dash renders."""
+def test_combined_figures_keep_every_ceiling(benchmarked_roofline) -> None:
+    """Narrowing the standalone document must not alter the source figures."""
     roofline, flops_figure = stacked_figure(benchmarked_roofline, ["BF16", "FP64"])
     source_model = roofline._Roofline__view_models["FLOP"]
     ceiling_indices = [trace["traceIndex"] for trace in source_model.compute_traces]
@@ -583,8 +582,8 @@ def test_dash_figures_keep_every_ceiling(benchmarked_roofline) -> None:
 def test_construct_plotly_figures_all_datatypes_ignores_cli_selection(
     benchmarked_roofline,
 ) -> None:
-    """GUI-style generation attempts all supported architecture datatypes even
-    when the shared analyze arguments selected only one terminal datatype."""
+    """construct_plotly_figures attempts all supported architecture datatypes
+    even when the analyze arguments selected only one terminal datatype."""
     roofline = benchmarked_roofline(["FP64"])
 
     ops_figure, flops_figure, _, _ = roofline.construct_plotly_figures(

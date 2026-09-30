@@ -71,9 +71,6 @@ class cli_analysis(OmniAnalyze_Base):
         super().pre_processing()
         args = self.get_args()
 
-        if args.random_port:
-            console_error("--gui flag is required to enable --random-port")
-
         active_operator_filters = [
             cli["filter_attr"]
             for cli in _ML_API_ANALYSIS_CLI_OPTIONS.values()
@@ -154,7 +151,6 @@ class cli_analysis(OmniAnalyze_Base):
             parser.load_table_data(
                 workload=workload,
                 dir_path=path_info[0],
-                is_gui=False,
                 args=args,
                 dfs_expressions=self._arch_configs[gpu_arch].dfs_expressions,
                 pc_sampling_tool_data=pc_sampling_data,
@@ -227,7 +223,7 @@ class cli_analysis(OmniAnalyze_Base):
                         workload.path = workload_path
 
                         pmc_df = parser.apply_filters(
-                            workload, workload_path, is_gui=False, debug=args.debug
+                            workload, workload_path, debug=args.debug
                         )
                         ai_data = calc_ai_analyze(
                             workload=workload,
