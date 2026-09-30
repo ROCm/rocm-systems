@@ -29,6 +29,7 @@ THE SOFTWARE.
 #include <iomanip>
 #include <memory>
 #include <sstream>
+#include <utility>
 
 namespace {
 
@@ -163,6 +164,63 @@ size_t FindMarker(const std::vector<uint8_t> &data, uint8_t marker) {
         if (data[i] == 0xFF && data[i + 1] == marker) {
             return i;
         }
+    }
+    return data.size();
+}
+
+/**
+ * @brief Finds a marker by walking the segment structure of a stream.
+ *
+ * Unlike FindMarker this does not match byte pairs inside segment payloads. It
+ * starts at SOI and steps from one marker to the next, skipping each
+ * length-bearing payload by its declared size, so a 0xFF marker_code planted in
+ * an APPn or DQT payload is never mistaken for a real marker. The walk gives up
+ * as soon as the structure stops making sense, which keeps callers from drawing
+ * conclusions from a stream whose layout could not be followed.
+ *
+ * @param data The stream to search.
+ * @param marker The marker code that follows the 0xFF prefix.
+ * @return The offset of the 0xFF byte, or data.size() when the marker was not
+ *         reached, including when the walk could not be completed.
+ */
+size_t FindStructuralMarker(const std::vector<uint8_t> &data, uint8_t marker) {
+    if (data.size() < 2 || data[0] != 0xFF || data[1] != 0xD8) {
+        return data.size();
+    }
+    size_t offset = 2;
+    while (offset + 1 < data.size()) {
+        if (data[offset] != 0xFF) {
+            return data.size();
+        }
+        // ISO/IEC 10918-1 B.1.1.2: any number of 0xFF fill bytes may precede a
+        // marker, so the code is the first byte after the run of 0xFF.
+        while (offset < data.size() && data[offset] == 0xFF) {
+            offset++;
+        }
+        if (offset >= data.size()) {
+            return data.size();
+        }
+        const uint8_t marker_code = data[offset++];
+        if (marker_code == marker) {
+            return offset - 2;
+        }
+        if (marker_code == 0x00 || marker_code == 0x01 || (marker_code >= 0xD0 && marker_code <= 0xD9)) {
+            // TEM, the restart markers and SOI/EOI carry no payload. A 0x00 here
+            // would be byte stuffing outside entropy-coded data, which is not a
+            // structure this walk can follow.
+            if (marker_code == 0x00 || marker_code == 0xD9) {
+                return data.size();
+            }
+            continue;
+        }
+        if (offset + 1 >= data.size()) {
+            return data.size();
+        }
+        const size_t segment_length = (static_cast<size_t>(data[offset]) << 8) | data[offset + 1];
+        if (segment_length < 2 || segment_length > data.size() - offset) {
+            return data.size();
+        }
+        offset += segment_length;
     }
     return data.size();
 }
@@ -596,9 +654,23 @@ int RocJpegApiNegativeTests::CheckParseInvariants(const std::vector<uint8_t> &da
     // while still satisfying every marker and image-description check. Measure
     // the scan instead: the segment length follows the marker, and the entropy
     // coded data starts after it and runs to EOI or to the end of the buffer.
-    if (sos_offset + 4 <= data.size()) {
-        const size_t segment_length = (static_cast<size_t>(data[sos_offset + 2]) << 8) | data[sos_offset + 3];
-        const size_t scan_start = sos_offset + 2 + segment_length;
+    // Trailing 0xFF bytes are discounted, because a 0xFF inside entropy-coded
+    // data is always followed by a stuffed 0x00 or a restart code, so one at the
+    // end of the scan is marker fill or a truncated marker. Counting it would
+    // let "FF FF D9" and an all-0xFF tail pass as non-empty scans.
+    //
+    // This needs the structural SOS, not the first matching byte pair. The
+    // mutation strategies rewrite the byte after any 0xFF, so an accepted stream
+    // can carry an "FF DA" inside an APPn or DQT payload ahead of its real scan
+    // header; reading the two bytes behind that as a segment length would put
+    // scan_start anywhere and condemn a stream the parser handled correctly. The
+    // walk returns data.size() when the layout could not be followed, and then
+    // there is no offset to measure from and the check is skipped.
+    const size_t structural_sos_offset = FindStructuralMarker(data, 0xDA);
+    if (structural_sos_offset + 4 <= data.size()) {
+        const size_t segment_length =
+            (static_cast<size_t>(data[structural_sos_offset + 2]) << 8) | data[structural_sos_offset + 3];
+        const size_t scan_start = structural_sos_offset + 2 + segment_length;
         if (scan_start <= data.size()) {
             size_t scan_end = scan_start;
             while (scan_end + 1 < data.size() && !(data[scan_end] == 0xFF && data[scan_end + 1] == 0xD9)) {
@@ -606,6 +678,9 @@ int RocJpegApiNegativeTests::CheckParseInvariants(const std::vector<uint8_t> &da
             }
             if (scan_end + 1 >= data.size()) {
                 scan_end = data.size();
+            }
+            while (scan_end > scan_start && data[scan_end - 1] == 0xFF) {
+                scan_end--;
             }
             if (scan_end <= scan_start) {
                 std::cerr << "[" << case_name << "] a stream whose scan carries no entropy-coded data was "
@@ -787,6 +862,21 @@ int RocJpegApiNegativeTests::TestStreamParseFuzz() {
         empty_scan_eoi.push_back(0xD9);
         regressions.push_back({"scan header with no entropy-coded data", empty_scan});
         regressions.push_back({"scan header immediately followed by EOI", empty_scan_eoi});
+
+        // The same empty scan padded with the 0xFF fill bytes that may precede a
+        // marker. These are still empty scans, but a naive byte count would see
+        // one or more bytes between the scan header and the EOI and accept them.
+        const std::vector<std::pair<const char *, std::vector<uint8_t>>> fill_tails = {
+            {"empty scan with a fill byte before EOI", {0xFF, 0xFF, 0xD9}},
+            {"empty scan with several fill bytes before EOI", {0xFF, 0xFF, 0xFF, 0xD9}},
+            {"empty scan ending in a truncated marker", {0xFF}},
+            {"empty scan with an all-0xFF tail", {0xFF, 0xFF, 0xFF}},
+        };
+        for (const auto &fill_tail : fill_tails) {
+            std::vector<uint8_t> padded = empty_scan;
+            padded.insert(padded.end(), fill_tail.second.begin(), fill_tail.second.end());
+            regressions.push_back({fill_tail.first, padded});
+        }
     }
 
     // A three-component frame header whose chroma sampling factors are zero.
