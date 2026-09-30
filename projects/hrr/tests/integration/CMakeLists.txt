@@ -16,9 +16,10 @@
 # pointer arithmetic and is replayed against a synthetic sidecar.
 #
 # hrr_pitched_d2h_test.cc covers device-to-host copies with a pitched host side
-# (hipMemcpy2D, hipMemcpy3D and the driver copies): its own hidden workload
-# plus the roundtrips that replay it and edit its expected blobs. The workload
-# calls only host APIs, so the file stays a plain C++ translation unit.
+# (hipMemcpy2D, hipMemcpy3D and the driver copies) and pitched hipMemcpy3D
+# host-to-device copies: its own hidden workloads plus the roundtrips that
+# replay them and edit their blobs. The workloads call only host APIs, so the
+# file stays a plain C++ translation unit.
 #
 # hrr_api_matrix_test.cc is the per-API replay matrix: Unit_HRR_ApiMatrix_T*_Roundtrip
 # captures each tier's workloads from hrr_api_matrix_workload_test.cc — one call

@@ -3710,15 +3710,37 @@ static HrrHostRect memcpy3d_host_dst(const hipMemcpy3DParms& p) {
                          p.dstPos.z, p.extent.width, p.extent.height, p.extent.depth);
 }
 
+// Defined with the driver-copy helpers below.
+static size_t drvmemcpy_host_bytes(size_t pitch, size_t pitch_height,
+                                   size_t x, size_t y, size_t z,
+                                   size_t width, size_t height, size_t depth);
+static const void* drvmemcpy_h2d_src_blob(PlaybackContext& ctx, const char* api,
+                                          uint64_t hash_lo, uint64_t hash_hi,
+                                          size_t need);
+
+// Points a hipMemcpy3D H2D source at its captured blob, which replay reads with
+// the recorded pitch and position, so it must span the whole source rect. False
+// when there is no such blob; the copy is then skipped, never issued from the
+// capture-time host address.
+static bool memcpy3d_h2d_src(PlaybackContext& ctx, const char* api, uint64_t hash_lo,
+                             uint64_t hash_hi, hipMemcpy3DParms& p) {
+    size_t need = drvmemcpy_host_bytes(p.srcPtr.pitch, p.srcPtr.ysize, p.srcPos.x, p.srcPos.y,
+                                       p.srcPos.z, p.extent.width, p.extent.height,
+                                       p.extent.depth);
+    const void* blob = drvmemcpy_h2d_src_blob(ctx, api, hash_lo, hash_hi, need);
+    if (!blob) return false;
+    p.srcPtr.ptr = const_cast<void*>(blob);
+    return true;
+}
+
 hipError_t playback_hipMemcpy3D(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipMemcpy3D*>(pl);
     hipMemcpy3DParms parms{};
     std::memcpy(&parms, a->parms_bytes, sizeof(parms));
 
-    if (parms.kind == hipMemcpyHostToDevice && a->blob_hash_lo != 0) {
-        size_t blob_sz = 0;
-        const void* blob = ctx.load_blob(a->blob_hash_lo, a->blob_hash_hi, &blob_sz);
-        if (blob) parms.srcPtr.ptr = const_cast<void*>(blob);
+    if (parms.kind == hipMemcpyHostToDevice) {
+        if (!memcpy3d_h2d_src(ctx, "hipMemcpy3D", a->blob_hash_lo, a->blob_hash_hi, parms))
+            return hipSuccess;
         parms.dstPtr.ptr = ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.dstPtr.ptr));
         hipError_t r = hipMemcpy3D(&parms);
         if (r == hipSuccess)
@@ -3755,10 +3777,10 @@ hipError_t playback_hipMemcpy3DAsync(PlaybackContext& ctx, const uint8_t* pl) {
     std::memcpy(&parms, a->parms_bytes, sizeof(parms));
     hipStream_t stream = ctx.translate_stream(a->stream);
 
-    if (parms.kind == hipMemcpyHostToDevice && a->blob_hash_lo != 0) {
-        size_t blob_sz = 0;
-        const void* blob = ctx.load_blob(a->blob_hash_lo, a->blob_hash_hi, &blob_sz);
-        if (blob) parms.srcPtr.ptr = const_cast<void*>(blob);
+    if (parms.kind == hipMemcpyHostToDevice) {
+        if (!memcpy3d_h2d_src(ctx, "hipMemcpy3DAsync", a->blob_hash_lo, a->blob_hash_hi,
+                              parms))
+            return hipSuccess;
         parms.dstPtr.ptr = ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.dstPtr.ptr));
         hipError_t r = hipMemcpy3DAsync(&parms, stream);
         if (r == hipSuccess)
@@ -3811,7 +3833,7 @@ static size_t drvmemcpy_host_bytes(size_t pitch, size_t pitch_height,
     return r.ok ? r.extent : SIZE_MAX;
 }
 
-// Resolve the H2D source blob for a driver copy. Returns nullptr when there is
+// Resolve the H2D source blob for a driver copy or a hipMemcpy3D. Returns nullptr when there is
 // nothing faithful to substitute: no blob recorded, or a blob smaller than the
 // recorded source rect (an archive captured before the blob-footprint fix).
 // Skipping matches replay_memcpy2d's H2D policy: never fall back to the stale

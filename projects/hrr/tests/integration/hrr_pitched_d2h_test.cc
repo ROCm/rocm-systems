@@ -18,6 +18,9 @@
  * Replay has to compare exactly those rows. The first width*height*depth bytes
  * of either buffer are mostly bytes the copy never touched, which fails a
  * correct replay, and they miss the later rows, which passes a wrong one.
+ *
+ * The same rects serve pitched hipMemcpy3D and hipMemcpy3DAsync host-to-device
+ * copies, whose source blob replay reads with the recorded pitch and position.
  */
 
 #include "hrr_test_common.hh"
@@ -27,6 +30,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <utility>
 #include <vector>
@@ -323,6 +327,171 @@ HRR_TEST_CASE(Unit_HRR_PitchedD2HBlobEdits) {
     check_blob_edits(cap.path, d2h_blob<hrr_args_hipMemcpy2D>(arc, HRR_API_HIPMEMCPY2D), 0,
                      kLastRow2D, kExtent2D);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Host-to-device: hipMemcpy3D and hipMemcpy3DAsync read the pitched host rect
+// the copies above write (the kDst* offsets) into the device rect they read
+// (the kSrc* offsets). A flat width*height*depth source blob read with the
+// recorded pitch and position runs past its end.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// One fill per device buffer, so the two readbacks record distinct blobs.
+constexpr uint8_t kDevFill[] = {0x51, 0x52};
+
+uint8_t host_byte(size_t offset) { return static_cast<uint8_t>(dev_byte(offset) ^ 0xA5); }
+
+// A device buffer filled with `fill` after one pitched H2D copy of the window.
+std::vector<uint8_t> expected_dev(uint8_t fill) {
+  std::vector<uint8_t> dev(kDevBytes, fill);
+  for (size_t z = 0; z < kDepth; ++z)
+    for (size_t y = 0; y < kHeight; ++y)
+      for (size_t x = 0; x < kWidth; ++x)
+        dev[(kSrcZ + z) * kDevSlice + (kSrcY + y) * kDevPitch + kSrcX + x] =
+            host_byte((kDstZ + z) * kHostSlice + (kDstY + y) * kHostPitch + kDstX + x);
+  return dev;
+}
+
+template <typename Args>
+std::vector<const Args*> event_args(const hrr::Archive& arc, hrr_api_id_t api) {
+  std::vector<const Args*> out;
+  for (const auto& e : arc.events) {
+    if (e.header().event_type != static_cast<uint16_t>(api)) continue;
+    REQUIRE(e.raw_payload.size() >= sizeof(Args));
+    out.push_back(reinterpret_cast<const Args*>(e.raw_payload.data()));
+  }
+  return out;
+}
+
+fs::path blob_path(const hrr::Archive& arc, uint64_t lo, uint64_t hi) {
+  REQUIRE((lo != 0 || hi != 0));
+  const auto it = arc.blobs.find(hrr::hash_hex(lo, hi));
+  REQUIRE(it != arc.blobs.end());
+  return it->second;
+}
+
+// The H2D source blob shared by the two 3D copies, which read the same rect.
+fs::path h2d_blob(const hrr::Archive& arc) {
+  const auto sync = event_args<hrr_args_hipMemcpy3D>(arc, HRR_API_HIPMEMCPY3D);
+  const auto async = event_args<hrr_args_hipMemcpy3DAsync>(arc, HRR_API_HIPMEMCPY3DASYNC);
+  REQUIRE(sync.size() == 1);
+  REQUIRE(async.size() == 1);
+  REQUIRE(sync[0]->blob_hash_lo == async[0]->blob_hash_lo);
+  REQUIRE(sync[0]->blob_hash_hi == async[0]->blob_hash_hi);
+  return blob_path(arc, sync[0]->blob_hash_lo, sync[0]->blob_hash_hi);
+}
+
+std::vector<uint8_t> read_file(const fs::path& path) {
+  std::ifstream f(path, std::ios::binary);
+  REQUIRE(f.good());
+  return std::vector<uint8_t>(std::istreambuf_iterator<char>(f), {});
+}
+
+void write_file(const fs::path& path, const std::vector<uint8_t>& bytes) {
+  std::ofstream f(path, std::ios::binary | std::ios::trunc);
+  f.write(reinterpret_cast<const char*>(bytes.data()),
+          static_cast<std::streamsize>(bytes.size()));
+  REQUIRE(f.good());
+}
+
+}  // namespace
+
+TEST_CASE("Unit_HRR_PitchedH2D_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+
+  std::vector<uint8_t> host(kHostBytes);
+  for (size_t i = 0; i < kHostBytes; ++i) host[i] = host_byte(i);
+  hipStream_t s = nullptr;
+  HRR_HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
+
+  hipMemcpy3DParms p{};
+  p.srcPtr = make_hipPitchedPtr(host.data(), kHostPitch, kHostPitch, kHostRows);
+  p.srcPos = make_hipPos(kDstX, kDstY, kDstZ);
+  p.dstPos = make_hipPos(kSrcX, kSrcY, kSrcZ);
+  p.extent = make_hipExtent(kWidth, kHeight, kDepth);
+  p.kind = hipMemcpyHostToDevice;
+
+  void* dev[2] = {nullptr, nullptr};
+  for (int i = 0; i < 2; ++i) {
+    HRR_HIP_CHECK(hipMalloc(&dev[i], kDevBytes));
+    HRR_HIP_CHECK(hipMemset(dev[i], kDevFill[i], kDevBytes));
+    p.dstPtr = make_hipPitchedPtr(dev[i], kDevPitch, kDevPitch, kDevRows);
+    if (i == 0) {
+      HRR_HIP_CHECK(hipMemcpy3D(&p));
+    } else {
+      HRR_HIP_CHECK(hipMemcpy3DAsync(&p, s));
+      HRR_HIP_CHECK(hipStreamSynchronize(s));
+    }
+    std::vector<uint8_t> out(kDevBytes);
+    HRR_HIP_CHECK(hipMemcpy(out.data(), dev[i], kDevBytes, hipMemcpyDeviceToHost));
+    REQUIRE(out == expected_dev(kDevFill[i]));
+  }
+
+  HRR_HIP_CHECK(hipFree(dev[0]));
+  HRR_HIP_CHECK(hipFree(dev[1]));
+  HRR_HIP_CHECK(hipStreamDestroy(s));
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Capture Unit_HRR_PitchedH2D_Direct: the H2D source blob must span the
+ *     host rect from srcPtr.ptr through the last copied byte.
+ *   - Replay with HIP_HRR_D2H_EXACT=1: both device readbacks must match.
+ */
+HRR_TEST_CASE(Unit_HRR_PitchedH2DRoundtrip) {
+#ifdef _WIN32
+  HRR_SKIP("pitched H2D HRR roundtrip is disabled on Windows");
+#endif
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_pitched_h2d"};
+  hrr_capture_direct("Unit_HRR_PitchedH2D_Direct", cap.path);
+  {
+    hrr::Archive arc;
+    REQUIRE(hrr::load_archive(cap.path.string(), arc));
+    REQUIRE(fs::file_size(h2d_blob(arc)) == kExtent3D);
+  }
+  require_replay(cap.path, 0, 2, 0);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Capture Unit_HRR_PitchedH2D_Direct, then cut its H2D source blob to the
+ *     first width*height*depth bytes, as an archive captured before footprint
+ *     H2D blobs holds, and rewrite each readback's expected blob to the buffer's
+ *     fill alone, which is what the device holds if the copy is skipped.
+ *   - Replay must skip both copies and pass both readbacks. Reading the short
+ *     blob with the recorded pitch and position runs past its end and writes
+ *     other bytes into the device rect.
+ */
+HRR_TEST_CASE(Unit_HRR_PitchedH2DShortBlob) {
+#ifdef _WIN32
+  HRR_SKIP("pitched H2D HRR roundtrip is disabled on Windows");
+#endif
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_pitched_h2d_short"};
+  hrr_capture_direct("Unit_HRR_PitchedH2D_Direct", cap.path);
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(cap.path.string(), arc));
+
+  const fs::path src = h2d_blob(arc);
+  std::vector<uint8_t> flat = read_file(src);
+  REQUIRE(flat.size() == kExtent3D);
+  flat.resize(kWidth * kHeight * kDepth);
+  write_file(src, flat);
+
+  int readbacks = 0;
+  for (const auto* a : event_args<hrr_args_hipMemcpy>(arc, HRR_API_HIPMEMCPY)) {
+    if (a->kind != hipMemcpyDeviceToHost) continue;
+    const fs::path blob = blob_path(arc, a->blob_hash_lo, a->blob_hash_hi);
+    const std::vector<uint8_t> want = read_file(blob);
+    REQUIRE(want.size() == kDevBytes);
+    write_file(blob, std::vector<uint8_t>(kDevBytes, want[0]));
+    ++readbacks;
+  }
+  REQUIRE(readbacks == 2);
+  require_replay(cap.path, 0, 2, 0);
 }
 
 /**

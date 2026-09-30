@@ -1574,9 +1574,16 @@ static void capture_memcpy3d_impl(
   std::memcpy(a.parms_bytes, p, sizeof(a.parms_bytes));
   size_t byte_count = memcpy3d_byte_count(p);
 
-  if (p->kind == hipMemcpyHostToDevice && p->srcPtr.ptr && byte_count > 0) {
-    // H2D: host source is valid at call time — no stream sync needed.
-    auto h = hrr_cap::writer::write_blob(p->srcPtr.ptr, byte_count);
+  if (p->kind == hipMemcpyHostToDevice && p->srcPtr.ptr && byte_count > 0 &&
+      a.ret == hipSuccess) {
+    // H2D: host source is valid at call time, so no stream sync is needed.
+    // Replay reads the blob with the recorded pitch and position, so it spans
+    // srcPtr.ptr through the last copied byte, as the driver copies do.
+    auto h = hrr_cap::writer::write_blob(
+        p->srcPtr.ptr,
+        drvmemcpy_host_byte_count(p->srcPtr.pitch, p->srcPtr.ysize, p->srcPos.x, p->srcPos.y,
+                                  p->srcPos.z, p->extent.width, p->extent.height,
+                                  p->extent.depth));
     a.blob_hash_lo = h.lo;
     a.blob_hash_hi = h.hi;
   } else if (p->kind == hipMemcpyDeviceToHost && p->dstPtr.ptr && byte_count > 0 &&
