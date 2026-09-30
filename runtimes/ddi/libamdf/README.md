@@ -13,11 +13,16 @@ The build produces `libamdf.so` and `libamdf.a`; `amdf_query_api` is the sole
 exported C entry point. `libamdf.so` is an independent preloadable API frontend
 and does not require an HSA frontend to be installed or loaded.
 
+On Linux, the shared library has SONAME `libamdf.so.0`. CMake stages it as
+`libamdf.so.0.1`, with the symlink chain `libamdf.so` → `libamdf.so.0` →
+`libamdf.so.0.1`. Cargo's internal artifact remains named `libamdf.so`.
+The static library remains `libamdf.a`.
+
 AMDF separates passive endpoint discovery from explicit device activation.
 An instance owns its native connections and callback allocator. Upper runtimes
 own device selection, suballocation, queue pooling, packet construction,
 graphs, synchronization policy, and recovery. Native GPU mechanisms are
-provided by the owning [rocddi](../../README.md) layer; this frontend owns the AMDF
+provided by the [rocddi](../rocddi/README.md) layer; this frontend owns the AMDF
 ABI and translates it to the implementation-neutral core interface.
 
 ## Implemented services
@@ -256,7 +261,7 @@ teardown. There is no hidden completion wait.
 
 ## Build and validation
 
-From `runtimes/rocddi`:
+From `runtimes`:
 
 ```sh
 cargo build --workspace
@@ -272,17 +277,17 @@ requires `/dev/kfd` and the selected DRM render device. The pinned upstream
 CTS source is recorded in [tests/README.md](tests/README.md).
 
 The header pin and licensing are recorded in the
-[API header provenance](../../../api-headers/README.md). The checked-in Rust
+[API header provenance](../../api-headers/README.md). The checked-in Rust
 bindings and C layout probe are snapshots of those headers. Header changes
 require regenerating and comparing both ABI declarations and layout values.
-The rocddi layer contains a private core and two peer API frontends:
+The runtime workspace contains a private core and two peer API frontends:
 
-- `frontends/libamdf` builds `libamdf.so` and `libamdf.a`. It owns C ABI
+- `ddi/libamdf` builds `libamdf.so` and `libamdf.a`. It owns C ABI
   validation, the negotiated tables, and public handle lifetimes.
-- `frontends/libhsa` builds `libhsa_runtime64.so`. It owns the HSA symbol
+- `hsa/libhsa` builds `libhsa_runtime64.so`. It owns the HSA symbol
   ABI, process runtime, public handles, queues, signals, loading, and tooling
   semantics.
-- The workspace root supplies implementation-neutral native mechanisms through
+- `ddi/rocddi` supplies implementation-neutral native mechanisms through
   domain modules for sessions, topology, activated devices, memory, queues,
   events, and profiling. Its private `driver/` layer owns the platform contract
   and Linux KFD implementation, while `host_storage.rs` implements fallible

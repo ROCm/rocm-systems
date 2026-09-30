@@ -4,7 +4,7 @@ As of 2026-09-24, audited from the current rocddi/libamdf tree, including the
 queue-format implementation and native execution qualification in the
 validation record.
 
-The [vendored headers](../../../../api-headers/README.md) synchronized from
+The [vendored headers](../../../api-headers/README.md) synchronized from
 `hrx-system@4aa34130de44c45d68a48575cebfd0ff0610c461` define the sole public contract.
 This page records implementation support; it does not define another ABI or
 promise every service described by those headers. The libamdf frontend translates
@@ -62,7 +62,7 @@ parents and excludes concurrent destruction. Memory and queue use through raw
 device addresses remains the caller's lifetime responsibility. Internal native
 owners preserve only the dependencies needed to finish their own cleanup.
 
-All native control enters the private [Driver](../../../src/driver.rs).
+All native control enters the private [Driver](../../rocddi/src/driver.rs).
 Cached endpoint, family, scope, device, memory, host-mapping, queue, mapping,
 and address queries read retained state without allocation, locking, lazy
 initialization, or ownership-counter updates. Pair queries compose only the two
@@ -81,7 +81,7 @@ Callback allocation failure must leave no partially published object. There is
 no global allocator selector, task scheduler, journal, pool cache, or allocation
 registry for general allocations; the instance has a cold list only for
 recognizing its own SYSTEM host views during registration. The HSA runtime is a
-peer under `frontends/`. HIP,
+peer at `runtimes/hsa/libhsa`. HIP,
 CUDA-like pool reuse, graphs, and recovery remain frontend or consumer policy.
 
 ## Qualification boundaries

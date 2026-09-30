@@ -3562,7 +3562,7 @@ def test_generated_pseudo_scalar_vop3_paths_ignore_exec_and_f16_opsel(
                 'amdgpu::RegisterAccess(wf).read_scalar(src0))' in body
             )
             assert 'amdgpu::RegisterAccess(wf).write_scalar(' in body
-            assert 'amdgpu::pseudo_scalar::execute_f16(' in body
+            assert 'amdgpu::transcendental::execute_pseudo_f16(' in body
             assert 'wf.fp_round_mode_f16_f64()' in body
             assert 'wf.fp_denorm_mode_f16_f64()' in body
 

@@ -12,7 +12,7 @@ PCI attachment, GPU execution, or a particular operating-system handle model
 mandatory. Kind-specific capabilities and platform interoperability are
 available through explicit child modules.
 
-The directory is a self-contained three-package Cargo workspace. The `rocddi`
+This is a member of the shared [runtime workspace](../../README.md). The `rocddi`
 crate is an `rlib`, not a public C API or preload target. It installs no
 headers, exports no C symbols, and does not promise a stable Rust ABI. The only
 implementation currently provided is the Linux KFD/DRM GPU backend on x86-64
@@ -24,9 +24,9 @@ KFD, DRM, file-descriptor, PCI, or GPU-only fields.
 
 The current peer frontends are:
 
-- `frontends/libamdf`, which implements the AMDF v3 table ABI and builds
+- `ddi/libamdf`, which implements the AMDF v3 table ABI and builds
   `libamdf.so` and `libamdf.a`;
-- `frontends/libhsa`, which implements early-access HSA and AMD HSA extension entry
+- `hsa/libhsa`, which implements early-access HSA and AMD HSA extension entry
   points and builds the Cargo artifact `libhsa_runtime64.so`.
 
 The frontends own public handles, statuses, callbacks, initialization and
@@ -59,13 +59,13 @@ the `Gpu` endpoint-kind payload instead of being mandatory universal fields.
 Likewise, Linux identities and sharing mechanisms stay in Linux-specific
 extensions rather than defining the core endpoint or memory contracts.
 
-Public API declarations live separately under `../api-headers/include`. The
-[runtime API headers README](../api-headers/README.md) records their
+Public API declarations live separately under `../../api-headers/include`. The
+[runtime API headers README](../../api-headers/README.md) records their
 authoritative sources and synchronization rules.
 
 ## Build and validation
 
-Run all commands in this section from `runtimes/rocddi`:
+Run all commands in this section from `runtimes`:
 
 ```sh
 cargo build --workspace --locked
@@ -75,6 +75,6 @@ cargo fmt --all --check
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
 ```
 
-The native C probes under `frontends/libamdf/tests/abi` and the GPU examples
-under `frontends/libamdf/examples` can be built directly when those checks are
+The native C probes under `ddi/libamdf/tests/abi` and the GPU examples
+under `ddi/libamdf/examples` can be built directly when those checks are
 needed. GPU execution requires `/dev/kfd` and DRM render-node access.
