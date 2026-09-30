@@ -30,6 +30,8 @@ test_categories:
       - test_roofline_calc
       - test_roofline_main
       - test_report_shell
+      - test_html_report
+      - test_num_xcds_spec_class
       - test_profiler_base
       - test_pc_sampling_profile
       - test_rocprofv3_avail_interface
@@ -110,6 +112,7 @@ test_categories:
       - test_roofline_analyze
       - test_roofline_main
       - test_report_shell
+      - test_html_report
       - test_rocpd_data
       - test_conftest
       - test_profile_multi_rank
@@ -214,6 +217,7 @@ test_categories:
       - test_roofline_analyze
       - test_roofline_main
       - test_report_shell
+      - test_html_report
       - test_rocpd_data
       - test_conftest
       - test_profile_multi_rank
@@ -318,6 +322,7 @@ test_categories:
       - test_roofline_analyze
       - test_roofline_main
       - test_report_shell
+      - test_html_report
       - test_rocpd_data
       - test_conftest
       - test_profile_multi_rank
