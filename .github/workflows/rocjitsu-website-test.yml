@@ -3,13 +3,13 @@ name: "rocjitsu-website"
 on:
   pull_request:
     paths:
-      - "emulation/rocjitsu/website/**"
+      - "emulation/rocjitsu/website/dashboard/**"
       - ".github/workflows/rocjitsu-website-test.yml"
   push:
     branches:
       - develop
     paths:
-      - "emulation/rocjitsu/website/**"
+      - "emulation/rocjitsu/website/dashboard/**"
       - ".github/workflows/rocjitsu-website-test.yml"
   workflow_dispatch:
 
@@ -27,7 +27,7 @@ jobs:
     timeout-minutes: 10
     defaults:
       run:
-        working-directory: emulation/rocjitsu/website
+        working-directory: emulation/rocjitsu/website/dashboard
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -37,7 +37,7 @@ jobs:
         with:
           node-version: "22.13.0"
           cache: npm
-          cache-dependency-path: emulation/rocjitsu/website/package-lock.json
+          cache-dependency-path: emulation/rocjitsu/website/dashboard/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -69,7 +69,7 @@ jobs:
         with:
           name: rocjitsu-website-playwright-results
           path: |
-            emulation/rocjitsu/website/test-results
-            emulation/rocjitsu/website/playwright-report
+            emulation/rocjitsu/website/dashboard/test-results
+            emulation/rocjitsu/website/dashboard/playwright-report
           if-no-files-found: ignore
           retention-days: 7

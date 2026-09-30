@@ -1,6 +1,6 @@
 # Website build and test
 
-The Rocjitsu simulation-performance dashboard lives in `emulation/rocjitsu/website`. It is a standalone
+The Rocjitsu simulation-performance dashboard lives in `emulation/rocjitsu/website/dashboard`. It is a standalone
 React + Vite source package. Real benchmark data belongs on the
 `gh-pages-rocjitsu` branch under `rocjitsu-dashboard/data/`; dummy data is retained only
 as test fixtures.
@@ -9,7 +9,7 @@ installation, GPU, or benchmark service.
 
 ## Prerequisites
 
-- Node.js matching `website/package.json`: `^20.19.0 || ^22.13.0 || >=24.0.0`.
+- Node.js matching `website/dashboard/package.json`: `^20.19.0 || ^22.13.0 || >=24.0.0`.
 - npm and network access to install the locked dependencies.
 - Chromium and its system libraries for Playwright browser tests. The install
   command below downloads Chromium and may need administrator privileges to
@@ -20,7 +20,7 @@ installation, GPU, or benchmark service.
 Run from the `rocm-systems` repository root:
 
 ```bash
-cd emulation/rocjitsu/website
+cd emulation/rocjitsu/website/dashboard
 node --version
 npm --version
 npm ci
@@ -44,7 +44,7 @@ published data.
 If port 4174 is occupied, select a free port without stopping other servers:
 `PLAYWRIGHT_PORT=4176 npm run verify` (or use the same variable with `npm run test:e2e`).
 
-Individual commands, all run from `website/`:
+Individual commands, all run from `website/dashboard/`:
 
 | Command | Purpose |
 | --- | --- |
@@ -73,7 +73,7 @@ after updating Playwright if its required browser version changes.
 ## Run locally
 
 ```bash
-# From emulation/rocjitsu/website:
+# From emulation/rocjitsu/website/dashboard:
 npm run dev:fixtures -- --host 127.0.0.1
 npm run dev:data -- /absolute/path/to/staged/data --host 127.0.0.1
 ```
@@ -144,5 +144,5 @@ npm run preview -- --host 127.0.0.1
 
 Dependencies, generated fixture data, production/test build output, coverage, and Playwright reports/results
 are ignored by Git. Keep the source, lockfile, tests, and test fixtures under version
-control. Parent-repository automation should use `emulation/rocjitsu/website` as its
+control. Parent-repository automation should use `emulation/rocjitsu/website/dashboard` as its
 working directory and its `package-lock.json` as the npm cache key.

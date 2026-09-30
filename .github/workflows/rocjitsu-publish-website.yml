@@ -1,5 +1,5 @@
 # Publish the Rocjitsu dashboard from develop.
-# A change under emulation/rocjitsu/website/ replaces gh-pages/rocjitsu-dashboard/.
+# A change under emulation/rocjitsu/website/dashboard/ replaces gh-pages/rocjitsu-dashboard/.
 
 name: "rocjitsu-publish-website"
 
@@ -8,7 +8,7 @@ on:
     branches:
       - develop
     paths:
-      - "emulation/rocjitsu/website/**"
+      - "emulation/rocjitsu/website/dashboard/**"
       - ".github/workflows/rocjitsu-publish-website.yml"
   workflow_dispatch:
 
@@ -36,10 +36,10 @@ jobs:
         with:
           node-version: "22.13.0"
           cache: npm
-          cache-dependency-path: emulation/rocjitsu/website/package-lock.json
+          cache-dependency-path: emulation/rocjitsu/website/dashboard/package-lock.json
 
       - name: Build rocjitsu dashboard
-        working-directory: emulation/rocjitsu/website
+        working-directory: emulation/rocjitsu/website/dashboard
         run: |
           npm ci
           npm run build
@@ -58,7 +58,7 @@ jobs:
           # GITHUB_TOKEN pushes do not trigger branch-based Pages builds.
           github_token: ${{ steps.app-token.outputs.token }}
           publish_branch: gh-pages
-          publish_dir: ./emulation/rocjitsu/website/dist
+          publish_dir: ./emulation/rocjitsu/website/dashboard/dist
           destination_dir: rocjitsu-dashboard
           commit_message: "Publish rocjitsu dashboard"
           # Skip the default root .nojekyll file so only rocjitsu-dashboard changes.
