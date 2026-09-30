@@ -717,8 +717,7 @@ namespace {
 std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologue(
     const std::vector<KernelDescriptorInfo> &kernels, std::optional<uint32_t> kernel_sgpr_count,
     const std::vector<BasicBlock *> &scope, const std::vector<ProbeCallable> &probes,
-    const std::vector<ProbeClobberSummary> &summaries,
-    const std::vector<ResolvedInstrumentationSite> &user_sites, uint64_t trampoline_offset,
+    const std::vector<ProbeClobberSummary> &summaries, uint64_t cave_offset,
     std::string *error_out) {
   // DBI does not support multiple kernels, so neither does the prologue. Every
   // site that can ask for the storage passes an argument, and that path already
@@ -739,41 +738,14 @@ std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologu
 
   const KernelDescriptorInfo &kernel = kernels.front();
   const uint64_t entry_offset = kernel.entry_text_offset;
-  const Instruction *entry = find_instruction_at_offset(entry_offset);
-  if (entry == nullptr) {
+  if (find_instruction_at_offset(entry_offset) == nullptr) {
     report(error_out, ("no decoded instruction starts at the kernel entry, .text offset " +
                        std::to_string(entry_offset))
                           .c_str());
     return std::nullopt;
   }
 
-  const Section *text = obj_.text_sections().front();
-  const std::span<const uint8_t> text_bytes(reinterpret_cast<const uint8_t *>(text->data()),
-                                            text->size());
   std::string err;
-  if (!is_relocatable_anchor(*entry, entry_offset, text_bytes, arch_, &err)) {
-    report(error_out, ("the kernel entry cannot anchor the entry prologue: " + err).c_str());
-    return std::nullopt;
-  }
-  if (clause_blocked_offsets_.contains(entry_offset)) {
-    report(error_out, "the kernel entry is inside an s_clause run, so it cannot anchor the entry "
-                      "prologue");
-    return std::nullopt;
-  }
-
-  // Both this and a user site splice a branch over their anchor, so overlapping
-  // ranges would each overwrite part of the other's patched bytes.
-  const uint32_t entry_size = entry->size();
-  for (const ResolvedInstrumentationSite &site : user_sites) {
-    if (entry_offset < site.anchor_offset + site.original_size &&
-        site.anchor_offset < entry_offset + entry_size) {
-      report(error_out, ("a point at anchor_offset " + std::to_string(site.anchor_offset) +
-                         " overlaps the kernel entry, which the entry prologue needs")
-                            .c_str());
-      return std::nullopt;
-    }
-  }
-
   RegisterSet reserved;
   if (!compute_probe_reserved_registers(probes, summaries, reserved, error_out))
     return std::nullopt;
@@ -791,31 +763,24 @@ std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologu
     return std::nullopt;
   }
 
-  // Placed through the ordinary trampoline path rather than a second entry-patch
-  // mechanism: the entry becomes an anchor like any other, and its original
-  // instruction runs after the prologue words.
-  ResolvedInstrumentationSite site;
-  site.kind = InstrumentationKind::BeforeInst;
-  site.anchor_offset = entry_offset;
-  site.original_size = entry_size;
-  site.original_bytes.assign(text_bytes.begin() + static_cast<ptrdiff_t>(entry_offset),
-                             text_bytes.begin() +
-                                 static_cast<ptrdiff_t>(entry_offset + entry_size));
-  site.mnemonic = std::string(entry->mnemonic());
-
-  TrampolinePlan plan = make_base_plan(site, arch_, trampoline_offset);
-  plan.before_items = {InlineAsmItem{planned->prologue.words}};
-  plan.emit_original = true;
-  auto bytes = TrampolineBuilder::build(plan, &err);
-  if (!bytes) {
-    report(error_out, ("could not build the entry-prologue trampoline: " + err).c_str());
+  // Dispatch enters at the stub, and nothing else in the kernel can: the
+  // original entry keeps its bytes, so a later transfer to it runs guest code
+  // only. The prologue is not idempotent, which is why it must not sit on the
+  // entry itself.
+  EntryProloguePatch patch;
+  patch.padding_bytes =
+      padding_for_residue(cave_offset, entry_offset % kKernelEntryAlignment, kKernelEntryAlignment);
+  patch.stub_offset = cave_offset + patch.padding_bytes;
+  patch.storage_base = planned->storage.persistent_base;
+  patch.words = planned->prologue.words;
+  const uint64_t branch_pc = patch.stub_offset + patch.words.size() * sizeof(uint32_t);
+  const auto simm16 = compute_sopp_branch_simm16(branch_pc, entry_offset);
+  if (!simm16) {
+    report(error_out, "the entry-prologue stub is out of branch range of the kernel entry");
     return std::nullopt;
   }
-
-  return EntryProloguePatch{.anchor_offset = entry_offset,
-                            .original_size = entry_size,
-                            .storage_base = planned->storage.persistent_base,
-                            .bytes = std::move(*bytes)};
+  patch.words.push_back(build_s_branch(*simm16, arch_));
+  return patch;
 }
 
 Instrumentor::Instrumentor(const AmdGpuCodeObject &obj, rj_code_arch_t arch)
@@ -1206,21 +1171,21 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     return result;
 
   // The kernel-entry prologue, planned only for kernels whose probes ask for the
-  // framework's entry storage. It runs before every site because it is anchored
-  // at the kernel entry. The prologue needs a kernarg wrapper that no runtime
+  // framework's entry storage. It runs before every site because dispatch
+  // enters at it. The prologue needs a kernarg wrapper that no runtime
   // builds yet, which patch() enforces by refusing these probes.
   std::optional<EntryProloguePatch> entry_patch;
   std::optional<uint16_t> entry_storage_base;
   if (probes_read_entry_storage(resolved.probes)) {
     std::string err;
     entry_patch = plan_entry_prologue(kernels, kernel_sgpr_count, liveness_scope, resolved.probes,
-                                      probe_summaries, sites, cave_cursor, &err);
+                                      probe_summaries, cave_cursor, &err);
     if (!entry_patch) {
       result.errors.push_back(std::move(err));
       return result;
     }
     entry_storage_base = entry_patch->storage_base;
-    cave_cursor += entry_patch->bytes.trampoline_words.size() * sizeof(uint32_t);
+    cave_cursor = entry_patch->stub_offset + entry_patch->words.size() * sizeof(uint32_t);
   }
 
   std::optional<SpillManager> spills;
@@ -1472,6 +1437,15 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     }
   }
 
+  // Like the scratch growth above, written at the descriptor's original file
+  // offset; replace_text then shifts the entry field with everything else.
+  if (entry_patch &&
+      !patcher.redirect_kernel_entry(kernels.front().descriptor_file_offset,
+                                     kernels.front().entry_text_offset, entry_patch->stub_offset)) {
+    result.errors.emplace_back("failed to redirect the kernel entry to the entry-prologue stub");
+    return result;
+  }
+
   // Every per-site validation, branch-range check, and trampoline-byte
   // construction has succeeded up to this point. Assemble the new .text in one
   // buffer: the original bytes with each anchor spliced to its forward branch,
@@ -1480,10 +1454,6 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   // sizes, moved symbols, descriptor entries).
   const auto text_span = patcher.text_bytes();
   std::vector<uint8_t> new_text(text_span.begin(), text_span.end());
-  if (entry_patch) {
-    std::memcpy(new_text.data() + entry_patch->anchor_offset,
-                entry_patch->bytes.patched_anchor_bytes.data(), entry_patch->original_size);
-  }
   for (const auto &a : applied) {
     std::memcpy(new_text.data() + a.site->anchor_offset, a.bytes.patched_anchor_bytes.data(),
                 a.site->original_size);
@@ -1492,8 +1462,10 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   // then the entry prologue, then the per-site trampolines.
   for (const ProbeCallable &probe : resolved.probes)
     append_words(new_text, probe.body_words);
-  if (entry_patch)
-    append_words(new_text, entry_patch->bytes.trampoline_words);
+  if (entry_patch) {
+    append_nop_padding(new_text, entry_patch->padding_bytes, arch_);
+    append_words(new_text, entry_patch->words);
+  }
   for (const auto &a : applied)
     append_words(new_text, a.bytes.trampoline_words);
   if (!patcher.replace_text(new_text)) {

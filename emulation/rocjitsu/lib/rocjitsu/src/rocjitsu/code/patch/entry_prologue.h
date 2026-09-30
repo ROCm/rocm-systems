@@ -110,7 +110,7 @@ struct DbiEntryPrologue {
 build_dbi_entry_prologue(const rocr::llvm::amdhsa::kernel_descriptor_t &desc, rj_code_arch_t arch,
                          DbiEntryStorage storage, std::string *error_out = nullptr);
 
-/// @brief Everything a caller needs to splice a prologue into one kernel: the
+/// @brief Everything a caller needs to place a prologue in one kernel: the
 ///        registers it owns and the words that fill them.
 struct DbiEntryProloguePlan {
   DbiEntryStorage storage;
