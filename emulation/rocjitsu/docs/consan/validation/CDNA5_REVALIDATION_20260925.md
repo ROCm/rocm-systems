@@ -2886,3 +2886,194 @@ qualification limits rather than treating partial runs as passes.
 legends, evidence checks, regression gates, memory limit, and empty validation
 process group. It distinguishes completed assessment from full qualification
 of the remaining orange and yellow cells.
+
+
+### Default-preset emulator performance investigation (2026-09-30)
+
+The September 21/24 timeout report was investigated with the maintained
+`tensile-sk-sgemm-quick` image, default mode and default preset (`standard-v1`),
+without changing sampling, coverage, or the numerical oracle. The diagnostic
+selects solution 18 at `511,511,1,511` and allowlists its exact kernel name. This
+kernel contains 20 `ds_store_b128` sites and launches 128 workgroups of 64
+threads. ConSan raises private memory from zero to 108 bytes per thread.
+Solution 0 of the same image provides a scalar-LDS comparator.
+
+The retained image is
+`sgemm-bank-fixed-untimed-sc-full-clean/tensile-sk-sgemm-quick/clean/supercollider/tensile-work/tensile-sk-sgemm-quick-clean-38uenhzf/1_BenchmarkProblems/Cijk_Ailk_Bjlk_S_B_UserArgs_01/00_Final/caches/99cfb8f31bf0/source/library/gfx1250/TensileLibrary_gfx1250.co`
+under `/home/benoit/workspace/consan-validation/cdna5-20260925/`.
+Its SHA-256 is
+`f63c2fbf471272b76cd60bbc1298362f971984825f7dee8270ebe4b8457f6c68`.
+The copied `ClientParameters.ini` retains its problem, strides, and complete
+numerical validation; it uses `num-warmups=0`, `num-syncs-per-benchmark=0`,
+`solution-start-idx=18`, and `num-solutions=1`. This is one validated dispatch,
+not a throughput timing loop or a complete family qualification.
+
+Artifacts are in `/home/benoit/workspace/consan-perf-20260930/`, notably
+`sgemm-b128.ini`, `sgemm-b128.txt`, and `sgemm-all-disassembly.txt`.
+Logs are `/home/benoit/workspace/consan-perf-sgemm-*.log`. All versions use
+`configs/gfx1250_mi455x.json`, the same audited ROCm environment/client/image,
+and GCC 15 RelWithDebInfo builds. Runs are memory-bounded with
+`scripts/consan-bounded-run.sh` and wall-clock deadlines. Other builds on this
+host make these diagnostic timings unsuitable as stable benchmark thresholds.
+
+For example, from `emulation/rocjitsu`, the final solution-18 run is:
+
+```sh
+source /home/benoit/workspace/consan-validation/cdna5-audit-20260925/env.sh
+perf_artifacts=/home/benoit/workspace/consan-perf-20260930
+perf_build=/home/benoit/workspace/rocjitsu-gcc-build
+scripts/consan-bounded-run.sh timeout 120 env \
+  HSA_TOOLS_LIB="$perf_build/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_dbi_hooks.so" \
+  HSA_TOOLS_DISABLE_REGISTER=1 RJ_CONSAN_LOG=1 \
+  RJ_CONSAN_KERNEL_ALLOWLIST_FILE="$perf_artifacts/sgemm-b128.txt" \
+  /usr/bin/time -p "$perf_build/tools/rocjitsu/rocjitsu" \
+  --config configs/gfx1250_mi455x.json -- "$CONSAN_VALIDATION_TENSILE_CLIENT" \
+  --config-file "$perf_artifacts/sgemm-b128.ini"
+```
+
+For full-image startup, omit the allowlist assignment and explicitly unset
+`RJ_CONSAN_KERNEL_ALLOWLIST_FILE` in the environment. Use a longer deadline;
+this instruments all 81 kernels even though the client dispatches only one.
+
+| Emulator | Hook | Solution 18 outcome |
+| --- | --- | --- |
+| `a3a161be` | `a3a161be` | numerical pass, 44.38 s |
+| `11f077a2` | `11f077a2` | timeout at 300 s |
+| `11f077a2` | disabled | numerical pass, 2.16 s |
+| `a3a161be` | `11f077a2` | numerical pass, 43.63 s |
+| `11f077a2` | current hook | numerical pass, 67.25 s |
+| `11f077a2` + scratch coalescing only | same current hook | numerical pass, 61.53 s |
+| `11f077a2` + memory-path changes | same current hook | numerical pass, 38.74 s |
+| `1e03999a` | `1e03999a` | numerical pass, 77.39 s |
+| `3c10a8520b1` | current hook | numerical pass, 72.99 s |
+| `3c10a8520b1` + memory-path changes | same current hook | numerical pass, 33.08 s |
+
+The historical timeout and the memory-path overhead are distinct. Backporting
+only the memory-path changes does **not** cure the September 24 hook's timeout.
+Debugger captures show metadata flat loads in `VM_RETRY`, using implausible
+addresses formed from guest floating-point VGPR values, with destination bank
+one selected. This matches the ordinary-sync bank-preservation failure repaired
+by `cdea2ec33b7`, documented above. The current hook completes on the September
+24 emulator. A successful September 21 numerical oracle alone did not validate
+those instrumentation metadata accesses: that emulator predates the VM retry
+path which exposes the bad addresses.
+
+For the remaining overhead, stack samples identify scratch spills repeatedly
+acquiring the shared VM registry's exclusive mutex, copying its fault-reporting
+callback and backing ownership, and taking one backing access per lane. The
+repair shares immutable translator/backing/callback state per VM generation,
+uses distributed reader locks for snapshots and access leases, and coalesces
+single-element scratch accesses wholly contained within a swizzle unit. A
+32-lane DWORD spill can therefore issue one contiguous backing operation.
+Cross-unit, unaligned, and multi-element accesses retain their swizzled paths;
+VM revocation and pinned-snapshot semantics remain enforced.
+
+On the current emulator, instrumentation itself takes 32.04 s before and
+30.48 s after; time outside instrumentation falls from approximately 41 s to
+2.6 s. Solution 0 also improves from 72.43 s to 39.69 s total. These are host
+process measurements, not GPU-event timings or a claim about the colleague's
+unavailable kernels.
+
+Validation: 972 focused VM, cache, distributed-lock and ConSan tests pass,
+including new concurrent replacement, callback-copy, and scratch transaction
+count regressions. The maintained `d128-block`, `d128-pressure`,
+`wmma-attention`, `hipkittens-bf16fp32-cdna5-naive`, and `tp1-prefill` clean
+workloads all accept both baseline and default-preset runs (10/10). Their
+results are retained under `consan-perf-20260930/e2e-fixed/`.
+
+The coalescing-only September 24 control spends 46.37 s in instrumentation
+and approximately 15 s outside it, versus approximately 6 s with both repairs.
+A heavier image solution (73, with 60 `ds_store_b128` sites) also passes on the
+repaired current emulator in 86.63 s, of which 83.04 s is instrumentation.
+Both runs overlap the historical-version build and retain that timing caveat.
+
+The exact September 29 emulator and hook (`1e03999a`) also complete solution
+18, in 77.39 s. Thus this selected workload does not reproduce the colleague's
+hour-long September 29 timeout. The new memory-path patch is a measured
+performance improvement, **not a demonstrated repair of that unavailable
+workload's timeout**. Solution 73 before the patch also passes (89.36 s total,
+59.39 s instrumentation, approximately 30 s outside instrumentation), compared
+with approximately 4 s outside instrumentation after the patch. Startup-time
+variation prevents interpreting that pair's total times as a stable speedup.
+
+
+### Waitcheck startup cost and final performance patch
+
+Removing the one-kernel allowlist exposes a second bottleneck before dispatch.
+The September 21 emulator/hook complete the full 81-kernel image with the
+same solution-18 numerical oracle in 119.26 s (74.17 s instrumentation).
+Unmodified current HEAD and the exact September 29 build (`1e03999a`)
+both time out at 600 s before completing the large image's preflight
+(`consan-perf-sgemm-full-image-before600.log` and
+`consan-perf-sgemm-full-image-sep29.log`). Scratch-only
+repairs cannot fix this phase. A debugger sample places the main thread in
+`has_cfg_path_with_event_pending`, repeatedly deriving register definitions
+while checking waitcheck diagnostics. A second sample after caching those
+definitions remains in the same path search, repeatedly classifying scalar
+condition-code effects.
+
+The diagnostic-count correction `7a8fbb9755f` (September 25) deliberately
+continues detecting diagnostics after the stored-detail cap. The repair keeps
+that contract. It caches immutable instruction properties and scalar-predicate
+locations per CFG; represents repeated constraint sets by interned identities;
+and uses numeric visited-state keys. Straight-line runs that cannot change
+pending events, event ages, or scalar facts are traversed together, charging
+skipped instructions to the original search budget. Equivalent consumer
+queries within those runs share a feasibility result, including loop-carried
+producers, while every diagnostic retains its original instruction and register.
+Overlapping CFG contexts must agree before a query can be shared. Scalar rewrites and predicate changes
+invalidate the interned identity; branch alternatives obtain fresh identities.
+No diagnostic cap, sampling stride, or search limit was reduced.
+
+With the complete emulator and waitcheck patch, the same two selected
+b128 solutions pass:
+
+| Solution | b128 sites | Unmodified current HEAD | Complete patch | Final instrumentation time |
+| --- | ---: | ---: | ---: | ---: |
+| 18 | 20 | 72.99 s | 6.79 s | 5.04 s |
+| 73 | 60 | 89.36 s | 6.52 s | 4.95 s |
+
+Both retain exactly their original waitcheck counts: 23,414 and 9,411
+respectively. These timings include process startup and numerical validation.
+The retained logs are `consan-perf-sgemm-b128-final.log` and
+`consan-perf-sgemm-heavy-final.log`; the earlier `*-fixed.log` measurements
+refer only to the memory-path stage, not the final patch.
+
+Final verification passes 1,400 tests across 15 suites (VM, caches,
+distributed locks, waitcheck, wait counters, and ConSan). The added path-search
+regressions check both feasible and infeasible hazards around long neutral
+instruction runs, scalar rewrites, multiple consumers within one run, and
+loop-carried dependencies with and without a wait. Existing
+cross-architecture waitcheck tests remain enabled. All five maintained E2E
+workloads listed above pass baseline and default-preset clean runs again
+(10/10), under `consan-perf-20260930/e2e-final-query-cache/`. Modified C++ files
+pass clang-format verification and `git diff --check`.
+
+Full-image limitation: `consan-perf-sgemm-full-image-final.log` reaches the end
+of waitcheck in 425.67 s, retaining all 1,040,971 diagnostics (32 stored details),
+then spends 124.00 s in inventory and 15.13 s in the patch phase. The process
+finishes in 566.30 s and its numerical oracle passes, but the transform returns
+`outcome=unsupported`, zero patched sites, and `analysis_complete=false`.
+**This is not an instrumented clean pass or an end-to-end speedup result.**
+The same image's report-capacity rejection is documented earlier in this ledger
+(`report-reason=per_buffer_ceiling`); this run used the unchanged 128 MiB default
+automatic-report setting and did not enable verbose warning text, so it does
+not independently establish that precise rejection reason. The selected-kernel
+results above do have complete instrumentation and passing numerical oracles.
+The large-library default-capacity case remains unqualified.
+
+A final full-image capacity control, logged in
+`consan-perf-sgemm-full-image-final-capacity.log`, keeps default mode/preset and
+adds only `RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE=1073741824`, verbose logging
+(`RJ_CONSAN_LOG=2`), and a 900 s deadline to the full-image command. It allocates
+879,844,160 report bytes and **passes with complete instrumentation**:
+33,372/33,372 accesses, 1,782/1,782 barriers, 322/322 atomics, and 322/322 fences.
+The hook emits 34,666 patches with `outcome=modified-valid`, and the numerical
+oracle passes. Final analysis is statically and dynamically complete, with no
+epoch exhaustion or incomplete code objects. Wall time is 686.97 s: preflight
+404.13 s, inventory 135.12 s, and patch emission 142.79 s. The waitcheck count
+remains 1,040,971. This verifies the large image with sufficient report capacity;
+it does not remove its default-capacity limitation, make startup inexpensive,
+or establish a measured full-process speedup against the timed-out controls.
+The exact colleague workloads remain unavailable, so their hour-long timeouts
+are not certified repaired by these measurements.
