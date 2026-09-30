@@ -654,6 +654,25 @@ TEST_F(RasPeersMicrotest, LocalAddRanksFreesConvertedPeersWhenRegistryAllocation
   EXPECT_TRUE(g_events.empty());
 }
 
+TEST_F(RasPeersMicrotest, LocalAddRanksPropagatesConnectionCreationFailure) {
+  const ncclSocketAddress self = MakeIpv4("10.0.0.1", 1);
+  const ncclSocketAddress remote = MakeIpv4("10.0.0.2", 1);
+  rasNetListeningSocket.addr = self;
+  auto* ranks = static_cast<rasRankInit*>(calloc(2, sizeof(rasRankInit)));
+  ranks[0] = MakeRank(remote, 2, 0, 0);
+  ranks[1] = MakeRank(self, 1, 0, 0);
+  g_connCreateResult = ncclSystemError;
+
+  EXPECT_EQ(ncclSystemError, rasLocalHandleAddRanks(ranks, 2));
+  EXPECT_EQ(2, nRasPeers);
+  EXPECT_EQ(0, myPeerIdx);
+  ASSERT_EQ(1u, g_createdAddrs.size());
+  EXPECT_EQ(0, ncclSocketsCompare(&g_createdAddrs[0], &remote));
+  ASSERT_NE(nullptr, rasNextLink.conns);
+  EXPECT_EQ(nullptr, rasNextLink.conns->conn);
+  EXPECT_EQ(nullptr, rasPrevLink.conns);
+}
+
 TEST_F(RasPeersMicrotest, SendPeersUpdateSkipsWhenHashesAreKnownFromEitherDirection) {
   const rasPeerInfo peer = MakePeer(MakeIpv4("10.0.0.2", 2), 2);
   SetDeadPeers({MakeIpv4("10.0.0.3", 3)});
@@ -838,6 +857,27 @@ TEST_F(RasPeersMicrotest, HandlePeersUpdatePropagatesReplyAllocationFailure) {
   rasMsgFree(msg);
 }
 
+TEST_F(RasPeersMicrotest, HandlePeersUpdatePropagatesConnectionCreationFailure) {
+  const ncclSocketAddress self = MakeIpv4("10.0.0.1", 1);
+  const rasPeerInfo incoming = MakePeer(MakeIpv4("10.0.0.2", 2), 2);
+  SetPeers({MakePeer(self, 1)}, 0);
+  rasConnection* conn = AddConnection(MakeIpv4("10.0.0.3", 3));
+  const rasPeerInfo merged[] = {rasPeers[0], incoming};
+  const uint64_t mergedHash = getHash(reinterpret_cast<const char*>(merged), sizeof(merged));
+  rasMsg* msg = MakePeersUpdate({incoming}, {}, mergedHash, rasDeadPeersHash);
+  g_connCreateResult = ncclSystemError;
+
+  EXPECT_EQ(ncclSystemError, rasMsgHandlePeersUpdate(msg, conn->sock));
+  EXPECT_EQ(2, nRasPeers);
+  ASSERT_EQ(1u, g_createdAddrs.size());
+  EXPECT_EQ(0, ncclSocketsCompare(&g_createdAddrs[0], &incoming.addr));
+  ASSERT_NE(nullptr, rasNextLink.conns);
+  EXPECT_EQ(nullptr, rasNextLink.conns->conn);
+  EXPECT_EQ(nullptr, rasPrevLink.conns);
+  EXPECT_TRUE(g_enqueuedMsgs.empty());
+  rasMsgFree(msg);
+}
+
 TEST_F(RasPeersMicrotest, HandlePeersUpdateRejectsSocketWithoutConnection) {
   rasMsg* msg = MakePeersUpdate({}, {}, 0, 0);
   rasSocket sock{};
@@ -974,6 +1014,17 @@ TEST_F(RasPeersMicrotest, FallbackCanSelectCandidateOnLocalNode) {
   SetPeers({lower, self, sameNode, remoteFallback}, 1);
 
   EXPECT_EQ(2, rasLinkCalculatePeer(&rasPrevLink, 3, true));
+}
+
+TEST_F(RasPeersMicrotest, FallbackFromLocalNodeDoesNotSkipSameNodeCandidate) {
+  const rasPeerInfo lower = MakePeer(MakeIpv4("10.0.0.0", 1), 1);
+  const rasPeerInfo self = MakePeer(MakeIpv4("10.0.0.1", 1), 2);
+  const rasPeerInfo localFallback = MakePeer(MakeIpv4("10.0.0.1", 2), 3);
+  const rasPeerInfo localCandidate = MakePeer(MakeIpv4("10.0.0.1", 3), 4);
+  const rasPeerInfo remote = MakePeer(MakeIpv4("10.0.0.2", 1), 5);
+  SetPeers({lower, self, localFallback, localCandidate, remote}, 1);
+
+  EXPECT_EQ(3, rasLinkCalculatePeer(&rasNextLink, 2, true));
 }
 
 TEST_F(RasPeersMicrotest, LinkReinitWithOnlySelfLeavesNoPrimaryPeer) {
