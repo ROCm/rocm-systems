@@ -68,6 +68,15 @@ std::uint32_t FindSection(const std::vector<std::uint8_t>& image, const char* na
   return 0;
 }
 
+// Contents of the section named `name`, or empty if there is none.
+std::vector<std::uint8_t> SectionContents(const std::vector<std::uint8_t>& image,
+                                          const char* name) {
+  const std::uint32_t index = FindSection(image, name);
+  if (index == 0) return {};
+  const Elf32_Shdr sh = SectionHeader(image, index);
+  return {image.begin() + sh.sh_offset, image.begin() + sh.sh_offset + sh.sh_size};
+}
+
 // Rewrite the relocation at `index` in .rela.dyn to reference symbol `sym` with relocation type
 // `type`. The entries are fixed size, so this is an in-place edit that shifts nothing.
 bool MutateRelocation(std::vector<std::uint8_t>& image, std::uint32_t index, std::uint32_t sym,
@@ -115,9 +124,16 @@ TEST(AieElfParse, ParsesVectorScalarAdd) {
             HSA_STATUS_SUCCESS) << error;
   ASSERT_FALSE(kernels.empty());
 
+  // Compared against the artifact's own sections rather than fixed sizes: their sizes change with
+  // the mlir-aie version that built the ELF, but the reader must copy them out verbatim either way.
+  const auto ctrltext = SectionContents(image, ".ctrltext.0");
+  const auto pdi = SectionContents(image, ".pdi.1");
+  ASSERT_FALSE(ctrltext.empty()) << "artifact has no .ctrltext.0 section";
+  ASSERT_FALSE(pdi.empty()) << "artifact has no .pdi.1 section";
+
   const auto& k = kernels.begin()->second;
-  EXPECT_EQ(k.ctrl_code.size(), 316u);   // .ctrltext.0, measured on this branch
-  EXPECT_EQ(k.pdi.size(), 2992u);        // .pdi.1
+  EXPECT_EQ(k.ctrl_code, ctrltext);
+  EXPECT_EQ(k.pdi, pdi);
   EXPECT_NE(k.pdi_patch_offset, 0u);
   EXPECT_GT(k.num_args(), 0u);
 }
