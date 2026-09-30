@@ -101,6 +101,16 @@ using namespace RCCLTestHelpers;
         }                                                                                \
     } while (0)
 
+// Skip a test that fails over between ports unless every rank completes RDMA READ
+// on all devices: failover probing reads the peer's completion records.
+// Collective (see AllRanksSupportRdmaRead), and must be expanded in the test body.
+#define FAILOVER_RDMA_READ_OR_SKIP()                                                    \
+    do {                                                                                 \
+        if (!AllRanksSupportRdmaRead()) {                                                \
+            GTEST_SKIP() << "RDMA READ is unsupported. Skipping port failover test";     \
+        }                                                                                \
+    } while (0)
+
 // External NET IB plugin
 extern ncclNet_t ncclNetIb;
 // External NET IB-CAST plugin (WRR scheduler, multi-QP, AINIC features)
@@ -288,30 +298,37 @@ protected:
         return net_->getProperties(dev, props);
     }
 
-    // If the query fails, assume UD works so the test runs as before.
+    // If the query fails, assume every feature works so the test runs as before.
     ncclIbCastDeviceCaps QueryDeviceCaps(int dev = 0) {
         ncclIbCastDeviceCaps caps;
         caps.udSupported = true;
+        caps.rdmaReadSupported = true;
         (void)ncclIbCastGetDeviceCaps(dev, &caps);
         return caps;
     }
 
-    // True if every rank supports UD on dev, or on every plugin device when dev < 0.
+    // True if every rank has the feature on dev, or on every plugin device when dev < 0.
     // Collective: all ranks must call it, before any per-connection MPI op.
-    bool AllRanksSupportUd(int dev = -1) {
+    bool AllRanksHaveCap(bool ncclIbCastDeviceCaps::*cap, int dev) {
         int local = 1;
         if (dev >= 0) {
-            local = QueryDeviceCaps(dev).udSupported ? 1 : 0;
+            local = QueryDeviceCaps(dev).*cap ? 1 : 0;
         } else {
             int ndev = 0;
             (void)net_->devices(&ndev);
             for (int d = 0; d < ndev; d++) {
-                if (!QueryDeviceCaps(d).udSupported) local = 0;
+                if (!(QueryDeviceCaps(d).*cap)) local = 0;
             }
         }
         int all = 0;
         MPI_Allreduce(&local, &all, 1, MPI_INT, MPI_LAND, MPI_COMM_WORLD);
         return all != 0;
+    }
+
+    bool AllRanksSupportUd(int dev = -1) { return AllRanksHaveCap(&ncclIbCastDeviceCaps::udSupported, dev); }
+
+    bool AllRanksSupportRdmaRead(int dev = -1) {
+        return AllRanksHaveCap(&ncclIbCastDeviceCaps::rdmaReadSupported, dev);
     }
 
     // Helper: Create listen comm

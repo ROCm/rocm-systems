@@ -53,6 +53,7 @@ ncclResult_t ncclIbCastSetSchedParms(void* sendComm, bool schedEnable, bool doWr
 /* ── Hardware capabilities of a vNic device, probed once and cached. ── */
 struct ncclIbCastDeviceCaps {
   bool udSupported;
+  bool rdmaReadSupported;
 };
 
 ncclResult_t ncclIbCastGetDeviceCaps(int dev, struct ncclIbCastDeviceCaps* out);

@@ -812,6 +812,8 @@ TEST_F(NetIbMPITest, FailoverCqeErrorRecovered) {
     int totalDevs = 0;
     AssertInitAndGetDevices(&totalDevs);
 
+    FAILOVER_RDMA_READ_OR_SKIP();
+
     int mergedDev = CreateMergedDeviceForFailover(net_, totalDevs);
     if (mergedDev < 0) {
         GTEST_SKIP() << "Failover requires NIC Fusion (ndevs >= 2). "
@@ -1212,6 +1214,8 @@ TEST_F(NetIbMPITest, FailoverLargeMessageDataIntegrity) {
     int totalDevs = 0;
     AssertInitAndGetDevices(&totalDevs);
 
+    FAILOVER_RDMA_READ_OR_SKIP();
+
     int mergedDev = CreateMergedDeviceForFailover(net_, totalDevs);
     if (mergedDev < 0) {
         GTEST_SKIP() << "Requires NIC Fusion (ndevs >= 2). Need at least 2 IB devices.";
@@ -1351,6 +1355,8 @@ TEST_F(NetIbMPITest, FailoverDeviceOneFailure) {
     int totalDevs = 0;
     AssertInitAndGetDevices(&totalDevs);
 
+    FAILOVER_RDMA_READ_OR_SKIP();
+
     int mergedDev = CreateMergedDeviceForFailover(net_, totalDevs);
     if (mergedDev < 0) {
         GTEST_SKIP() << "Requires NIC Fusion (ndevs >= 2).";
@@ -1480,6 +1486,8 @@ TEST_F(NetIbMPITest, FailoverMultiRequestInFlight) {
     net_ = &netIbCast;
     int totalDevs = 0;
     AssertInitAndGetDevices(&totalDevs);
+
+    FAILOVER_RDMA_READ_OR_SKIP();
 
     int mergedDev = CreateMergedDeviceForFailover(net_, totalDevs);
     if (mergedDev < 0) {
@@ -1718,6 +1726,7 @@ TEST_F(NetIbMPITest, RecoverySuccessRestoresTraffic) {
     AssertInitAndGetDevices(&totalDevs);
 
     RECOVERY_UD_OR_SKIP();
+    FAILOVER_RDMA_READ_OR_SKIP();
 
     int mergedDev = CreateMergedDeviceForFailover(net_, totalDevs);
     if (mergedDev < 0) {
@@ -1954,6 +1963,7 @@ TEST_F(NetIbMPITest, RecoveryPendingWhileLinkDown) {
     AssertInitAndGetDevices(&totalDevs);
 
     RECOVERY_UD_OR_SKIP();
+    FAILOVER_RDMA_READ_OR_SKIP();
 
     int mergedDev = CreateMergedDeviceForFailover(net_, totalDevs);
     if (mergedDev < 0) {
@@ -2118,6 +2128,7 @@ TEST_F(NetIbMPITest, RecoveryDeviceOneFailure) {
     AssertInitAndGetDevices(&totalDevs);
 
     RECOVERY_UD_OR_SKIP();
+    FAILOVER_RDMA_READ_OR_SKIP();
 
     int mergedDev = CreateMergedDeviceForFailover(net_, totalDevs);
     if (mergedDev < 0) {
@@ -2364,6 +2375,7 @@ TEST_F(NetIbMPITest, RecoveryUdTimeoutExhaustsAttempts) {
     AssertInitAndGetDevices(&totalDevs);
 
     RECOVERY_UD_OR_SKIP();
+    FAILOVER_RDMA_READ_OR_SKIP();
 
     int mergedDev = CreateMergedDeviceForFailover(net_, totalDevs);
     if (mergedDev < 0) {
