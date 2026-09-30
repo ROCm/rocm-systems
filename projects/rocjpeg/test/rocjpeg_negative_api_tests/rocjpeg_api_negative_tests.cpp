@@ -23,6 +23,7 @@ THE SOFTWARE.
 
 #include "rocjpeg_api_negative_tests.h"
 
+#include <array>
 #include <cctype>
 #include <cstdint>
 #include <cstdlib>
@@ -833,6 +834,49 @@ int RocJpegApiNegativeTests::TestStreamParseFuzz() {
         return EXIT_FAILURE;
     }
 
+    // ScanHasEntropyData decides every empty-scan verdict below, so exercise its
+    // token walk directly rather than only through whole streams. Driving these
+    // cases through the parser would need a stream for each, and the short ones
+    // could only be built by truncating a scan - which is exactly the shape that
+    // should not appear among the streams required to parse successfully.
+    {
+        struct ScanTokenCase {
+            const char *name;
+            std::vector<uint8_t> body;
+            bool has_data;
+        };
+        const std::vector<ScanTokenCase> scan_token_cases = {
+            {"empty body", {}, false},
+            {"a single coded byte", {0x42}, true},
+            {"a zero byte", {0x00}, true},
+            {"one fill byte", {0xFF}, false},
+            {"an all-0xFF run", {0xFF, 0xFF, 0xFF}, false},
+            {"fill before EOI", {0xFF, 0xFF, 0xD9}, false},
+            {"a stuffed 0xFF", {0xFF, 0x00}, true},
+            {"a stuffed 0xFF behind fill bytes", {0xFF, 0xFF, 0x00}, true},
+            {"one restart marker", {0xFF, 0xD0}, false},
+            {"the last restart marker", {0xFF, 0xD7}, false},
+            {"every restart marker",
+             {0xFF, 0xD0, 0xFF, 0xD1, 0xFF, 0xD2, 0xFF, 0xD3, 0xFF, 0xD4, 0xFF, 0xD5, 0xFF, 0xD6, 0xFF, 0xD7},
+             false},
+            {"restart markers behind fill bytes", {0xFF, 0xFF, 0xD0, 0xFF, 0xFF, 0xFF, 0xD1}, false},
+            {"a coded byte after a restart marker", {0xFF, 0xD0, 0x42}, true},
+            {"a stuffed 0xFF after a restart marker", {0xFF, 0xD0, 0xFF, 0x00}, true},
+            {"EOI before the coded data", {0xFF, 0xD9, 0x42}, false},
+            {"a scan header before the coded data", {0xFF, 0xDA, 0x42}, false},
+            {"a truncated marker after a restart", {0xFF, 0xD0, 0xFF}, false},
+        };
+        for (const ScanTokenCase &scan_token_case : scan_token_cases) {
+            if (ScanHasEntropyData(scan_token_case.body, 0, scan_token_case.body.size()) !=
+                scan_token_case.has_data) {
+                std::cerr << "[scan tokens/" << scan_token_case.name << "] expected a scan body of "
+                          << (scan_token_case.has_data ? "coded data" : "markers only")
+                          << " to be read as such\n  " << HexDump(scan_token_case.body) << std::endl;
+                return EXIT_FAILURE;
+            }
+        }
+    }
+
     // Part 1: hand-written streams that reproduce previously fixed defects. Each
     // one is expected to be rejected; an acceptance here is a regression.
     struct RegressionCase {
@@ -933,19 +977,39 @@ int RocJpegApiNegativeTests::TestStreamParseFuzz() {
             regressions.push_back({empty_body.first, padded});
         }
 
-        // The mirror image of the cases above: a scan whose body is the smallest
-        // thing that does carry data. These have to stay accepted, so that the
-        // token walk is not simply rejecting every short scan.
-        const std::vector<std::pair<const char *, std::vector<uint8_t>>> minimal_bodies = {
-            {"scan of a single stuffed 0xFF", {0xFF, 0x00, 0xFF, 0xD9}},
-            {"scan of a single coded byte", {0x00, 0xFF, 0xD9}},
-            {"scan of a restart marker followed by a coded byte", {0xFF, 0xD0, 0x42, 0xFF, 0xD9}},
-        };
-        for (const auto &minimal_body : minimal_bodies) {
-            std::vector<uint8_t> padded = empty_scan;
-            padded.insert(padded.end(), minimal_body.second.begin(), minimal_body.second.end());
-            accepted_cases.push_back({minimal_body.first, padded});
-        }
+        // The mirror image of the cases above: the smallest scan that does carry
+        // data, so the token walk is not simply rejecting every short scan.
+        //
+        // This has to be a complete MCU rather than just a byte or two, or the
+        // fixture would contradict the very postcondition it is here to protect.
+        // The seed is 16x16 4:2:0, which is one interleaved MCU of six blocks,
+        // and with its embedded Huffman tables an all-zero MCU still costs 18
+        // bits: four luma blocks at 1 bit of DC plus 1 bit of EOB, and two
+        // chroma blocks whose only DC symbol is category 3, so 1 bit of code
+        // plus 3 additional bits plus 1 bit of EOB. That is the body below,
+        // padded to a byte boundary with 1 bits as F.1.2.3 requires. A stream
+        // carrying fewer bits is truncated, and a parser that grew to validate
+        // entropy completeness would be right to reject it.
+        // Both spellings below were checked against an independent decoder,
+        // which renders them as a 16x16 image rather than reporting a truncated
+        // file.
+        const std::vector<uint8_t> complete_mcu = {0x00, 0x00, 0x3F};
+        std::vector<uint8_t> minimal_scan = empty_scan;
+        minimal_scan.insert(minimal_scan.end(), complete_mcu.begin(), complete_mcu.end());
+        minimal_scan.push_back(0xFF);
+        minimal_scan.push_back(0xD9);
+
+        // The same MCU behind a restart marker, so that the tokens a scan may
+        // legitimately contain are covered rather than just plain coded bytes.
+        std::vector<uint8_t> restart_then_mcu = empty_scan;
+        restart_then_mcu.push_back(0xFF);
+        restart_then_mcu.push_back(0xD0);
+        restart_then_mcu.insert(restart_then_mcu.end(), complete_mcu.begin(), complete_mcu.end());
+        restart_then_mcu.push_back(0xFF);
+        restart_then_mcu.push_back(0xD9);
+
+        accepted_cases.push_back({"scan of one complete MCU", minimal_scan});
+        accepted_cases.push_back({"scan of one complete MCU behind a restart marker", restart_then_mcu});
     }
 
     // A three-component frame header whose chroma sampling factors are zero.
@@ -965,6 +1029,36 @@ int RocJpegApiNegativeTests::TestStreamParseFuzz() {
         zero_chroma[sof_offset + 14] = 0x00;
         zero_chroma[sof_offset + 17] = 0x00;
         regressions.push_back({"SOF with zero chroma sampling factors", zero_chroma});
+
+        // Sampling factors that are each inside the 1 to 4 range the format
+        // allows, but whose products add up past the 10 blocks an interleaved
+        // MCU may hold. A per-component range check passes all of these, and
+        // the equal factors classify as 4:4:4, so the frame parameters reach
+        // the decoder describing an MCU it cannot hold. The pairs bracket the
+        // boundary from both sides.
+        const std::vector<std::pair<const char *, std::array<uint8_t, 3>>> mcu_cases = {
+            {"SOF whose MCU holds 48 blocks", {0x44, 0x44, 0x44}},
+            {"SOF whose MCU holds 12 blocks", {0x22, 0x22, 0x22}},
+            {"SOF whose MCU holds 11 blocks", {0x33, 0x11, 0x11}},
+        };
+        for (const auto &mcu_case : mcu_cases) {
+            std::vector<uint8_t> oversized_mcu = color_seed;
+            oversized_mcu[sof_offset + 11] = mcu_case.second[0];
+            oversized_mcu[sof_offset + 14] = mcu_case.second[1];
+            oversized_mcu[sof_offset + 17] = mcu_case.second[2];
+            regressions.push_back({mcu_case.first, oversized_mcu});
+        }
+
+        // The other side of the boundary. The largest MCU this decoder supports
+        // is 4:2:0 at six blocks - four luma plus one of each chroma - because
+        // the subsampling layouts that would reach ten are not among the ones it
+        // handles. Keeping it here means a limit applied one block early, or to
+        // the maximum rather than the sum, fails in the same run.
+        std::vector<uint8_t> largest_mcu = color_seed;
+        largest_mcu[sof_offset + 11] = 0x22;
+        largest_mcu[sof_offset + 14] = 0x11;
+        largest_mcu[sof_offset + 17] = 0x11;
+        accepted_cases.push_back({"SOF whose MCU holds six blocks", largest_mcu});
     }
 
     for (const RegressionCase &regression : regressions) {
