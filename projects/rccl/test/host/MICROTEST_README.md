@@ -93,7 +93,8 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   - `ras/diagnostics.cc` (`RAS_DIAGNOSTICS_CC_PATH`, from
     `ras-diagnostics-test.cc`); suite `RasDiagnosticsMicrotest.*`. Covers
     context initialization, request lifecycle, local-data collection,
-    peer-payload aggregation, summaries, timeouts, and reporter errors.
+    peer-payload aggregation, summaries, timeout propagation, and reporter
+    errors.
   - `ras/client.cc` (`RAS_CLIENT_CC_PATH`, from `ras-client-test.cc`); suite
     `RasClientMicrotest.*`. With
     `NCCL_RAS_CLIENT` defined, `ras_internal.h` reduces to four macros, so this
