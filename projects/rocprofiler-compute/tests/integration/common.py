@@ -23,6 +23,7 @@ import pandas as pd
 import pytest
 import yaml
 from common import SUPPORTED_ARCHS
+from common import read_counter_results as read_counter_results
 
 from utils.utils_common import canonical_config_arch
 
@@ -117,12 +118,6 @@ def setup_workload_dir(input_dir, suffix="_tmp", clean_existing=True, param_id=N
 
     shutil.copytree(input_dir, output_dir)
     return output_dir
-
-
-def read_counter_results(workload_dir):
-    """Load the long-form rocpd counter artifacts of a workload into one frame."""
-    result_files = sorted(Path(workload_dir).glob("results_*.csv.gz"))
-    return pd.concat([pd.read_csv(result_file) for result_file in result_files])
 
 
 def check_csv_files(output_dir, num_devices, num_kernels):
