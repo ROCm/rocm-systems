@@ -46,6 +46,7 @@ ncclResult_t ncclIbGidChangeEvent(int ibDev);
 ncclResult_t ncclIbGidGetQpState(void* comm, struct ncclIbGidQpState* out);
 ncclResult_t ncclIbGidGetDevState(void* comm, int devIndex, int* state);
 ncclResult_t ncclIbGidGetRecoveryGidIndex(void* comm, int devIndex, int* gidIndex);
+ncclResult_t ncclIbGidGetProbingGidIndex(void* comm, int devIndex, int* gidIndex);
 ncclResult_t ncclIbGidDriveQpToError(void* comm, int qpIdx);
 
 ncclResult_t ncclIbCastGidGetDev(int ibDev, struct ncclIbGidState* out);
@@ -56,6 +57,7 @@ ncclResult_t ncclIbCastGidChangeEvent(int ibDev);
 ncclResult_t ncclIbCastGidGetQpState(void* comm, struct ncclIbGidQpState* out);
 ncclResult_t ncclIbCastGidGetDevState(void* comm, int devIndex, int* state);
 ncclResult_t ncclIbCastGidGetRecoveryGidIndex(void* comm, int devIndex, int* gidIndex);
+ncclResult_t ncclIbCastGidGetProbingGidIndex(void* comm, int devIndex, int* gidIndex);
 ncclResult_t ncclIbCastGidDriveQpToError(void* comm, int qpIdx);
 
 #ifdef __cplusplus

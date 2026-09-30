@@ -34,19 +34,20 @@ struct GidTransport {
     ncclResult_t (*getQpState)(void*, ncclIbGidQpState*);
     ncclResult_t (*getDevState)(void*, int, int*);
     ncclResult_t (*getRecoveryGidIndex)(void*, int, int*);
+    ncclResult_t (*getProbingGidIndex)(void*, int, int*);
     ncclResult_t (*driveQpToError)(void*, int);
 };
 
 const GidTransport kNetIb = {
     "NetIb", &ncclNetIb, ncclIbGidGetDev, ncclIbGidSetDev, ncclIbGidGetComm, ncclIbGidSetComm,
     ncclIbGidChangeEvent, ncclIbGidGetQpState, ncclIbGidGetDevState, ncclIbGidGetRecoveryGidIndex,
-    ncclIbGidDriveQpToError,
+    ncclIbGidGetProbingGidIndex, ncclIbGidDriveQpToError,
 };
 
 const GidTransport kNetIbCast = {
     "NetIbCast", &netIbCast, ncclIbCastGidGetDev, ncclIbCastGidSetDev, ncclIbCastGidGetComm, ncclIbCastGidSetComm,
     ncclIbCastGidChangeEvent, ncclIbCastGidGetQpState, ncclIbCastGidGetDevState, ncclIbCastGidGetRecoveryGidIndex,
-    ncclIbCastGidDriveQpToError,
+    ncclIbCastGidGetProbingGidIndex, ncclIbCastGidDriveQpToError,
 };
 
 bool SameGid(const ncclIbGidState& a, const ncclIbGidState& b) {
@@ -115,16 +116,50 @@ protected:
         return minDev < 0 ? -1 : mergedDev;
     }
 
-    // Another valid entry of the same port carrying the same address under a different RoCE type
-    // (the v1/v2 twin), i.e. a GID reindex that keeps the port reachable.
-    bool FindTwinGid(const ncclIbGidState& real, ncclIbGidState* twin) {
-        if (real.linkLayer != IBV_LINK_LAYER_ETHERNET) return false;
+    std::string SysfsPortsDir(int ibDev) {
         ncclNetProperties_t props = {};
-        if (GetDeviceProperties(real.ibDev, &props) != ncclSuccess || props.name == nullptr) return false;
-        const std::string port = std::string("/sys/class/infiniband/") + props.name + "/ports/" +
-                                 std::to_string(props.port);
+        if (GetDeviceProperties(ibDev, &props) != ncclSuccess || props.name == nullptr) return "";
+        return std::string("/sys/class/infiniband/") + props.name + "/ports";
+    }
+
+    // Link layer from sysfs, independent of the cache under test: 1 if any port is Ethernet,
+    // 0 if none is, -1 if the device cannot be inspected.
+    int SysfsIsEthernet(int ibDev) {
+        const std::string portsDir = SysfsPortsDir(ibDev);
+        DIR* dir = portsDir.empty() ? nullptr : opendir(portsDir.c_str());
+        if (!dir) return -1;
+        int ethernet = 0;
+        for (struct dirent* ent; (ent = readdir(dir)) != nullptr;) {
+            if (ent->d_name[0] != '.' && PortIsEthernet(portsDir.c_str(), ent->d_name)) ethernet = 1;
+        }
+        closedir(dir);
+        return ethernet;
+    }
+
+    // Another valid entry of the same port carrying the same address under a different RoCE type
+    // (the v1/v2 twin), i.e. a GID reindex that keeps the port reachable. The port is the one whose
+    // table holds the cached GID at the cached index, since ncclNetProperties_t::port is not a sysfs
+    // port for VF siblings.
+    bool FindTwinGid(const ncclIbGidState& real, ncclIbGidState* twin, std::string* why) {
+        if (real.linkLayer != IBV_LINK_LAYER_ETHERNET) return *why = "not RoCE", false;
+        const std::string portsDir = SysfsPortsDir(real.ibDev);
+        DIR* dir = portsDir.empty() ? nullptr : opendir(portsDir.c_str());
+        if (!dir) return *why = "cannot open " + portsDir, false;
+        std::string port;
+        for (struct dirent* ent; port.empty() && (ent = readdir(dir)) != nullptr;) {
+            if (ent->d_name[0] == '.') continue;
+            std::string text;
+            uint8_t gid[16];
+            const std::string candidate = portsDir + "/" + ent->d_name;
+            if (ReadSysfsLine(candidate + "/gids/" + std::to_string(real.gidIndex), &text) &&
+                ParseGidText(text.c_str(), gid) && memcmp(gid, real.gid, sizeof(gid)) == 0)
+                port = candidate;
+        }
+        closedir(dir);
+        if (port.empty()) return *why = "cached GID not found in " + portsDir, false;
         std::string realType;
-        if (!ReadSysfsLine(port + "/gid_attrs/types/" + std::to_string(real.gidIndex), &realType)) return false;
+        if (!ReadSysfsLine(port + "/gid_attrs/types/" + std::to_string(real.gidIndex), &realType))
+            return *why = "no RoCE type for GID index " + std::to_string(real.gidIndex), false;
         for (int i = 0; i < kMaxGidTableEntries; i++) {
             if (i == real.gidIndex) continue;
             std::string text, type;
@@ -138,7 +173,21 @@ protected:
             twin->gidIndex = i;
             return true;
         }
-        return false;
+        return *why = "no " + realType + " twin in " + port, false;
+    }
+
+    bool FindTwinGidOnAllRanks(const ncclIbGidState& real, ncclIbGidState* twin) {
+        std::string why;
+        const bool found = FindTwinGid(real, twin, &why);
+        if (!found) printf("[   INFO   ] rank %d: no twin GID for ibDev %d: %s\n", MPIEnvironment::world_rank, real.ibDev, why.c_str());
+        return AllRanks(found);
+    }
+
+    bool ProbingUsesGidIndex(void* comm, int devIndex, int gidIndex) {
+        int probingGidIndex = -1;
+        EXPECT_EQ(T().getProbingGidIndex(comm, devIndex, &probingGidIndex), ncclSuccess) << "devIndex " << devIndex;
+        EXPECT_EQ(probingGidIndex, gidIndex) << "probing QP of devIndex " << devIndex;
+        return probingGidIndex == gidIndex;
     }
 
     bool QpsUseGidIndex(void* comm, int devIndex, int gidIndex) {
@@ -174,7 +223,15 @@ TEST_P(NetIbGidChangeTest, DeviceCacheInitializedAtDiscovery) {
         EXPECT_EQ(T().getDev(dev, &s), ncclSuccess);
         EXPECT_GE(s.gidIndex, 0) << "dev " << dev;
         ok = ok && s.gidIndex >= 0;
-        if (s.linkLayer == IBV_LINK_LAYER_ETHERNET) {
+        const bool linkKnown = s.linkLayer == IBV_LINK_LAYER_INFINIBAND || s.linkLayer == IBV_LINK_LAYER_ETHERNET;
+        EXPECT_TRUE(linkKnown) << "dev " << dev << " linkLayer " << s.linkLayer;
+        ok = ok && linkKnown;
+        const int sysfsEthernet = SysfsIsEthernet(dev);
+        if (sysfsEthernet >= 0) {
+            EXPECT_EQ(s.linkLayer == IBV_LINK_LAYER_ETHERNET, sysfsEthernet == 1) << "dev " << dev;
+            ok = ok && (s.linkLayer == IBV_LINK_LAYER_ETHERNET) == (sysfsEthernet == 1);
+        }
+        if (sysfsEthernet == 1) {
             EXPECT_FALSE(IsZeroGid(s)) << "dev " << dev;
             ok = ok && !IsZeroGid(s);
         }
@@ -222,12 +279,8 @@ TEST_P(NetIbGidChangeTest, ConnectSnapshotsDeviceCache) {
     ASSERT_EQ(T().getDev(0, &real), ncclSuccess);
     real.ibDev = 0;
     DevGidGuard guard(T(), 0, real);
-    const bool useTwin = AllRanks(FindTwinGid(real, &expected));
-    if (useTwin) {
-        EXPECT_EQ(T().setDev(0, &expected), ncclSuccess);
-    } else {
-        expected = real;
-    }
+    if (!FindTwinGidOnAllRanks(real, &expected)) GTEST_SKIP() << "Requires a RoCE v1/v2 twin GID on device 0";
+    EXPECT_EQ(T().setDev(0, &expected), ncclSuccess);
 
     void* listenComm = nullptr;
     void* sendComm = nullptr;
@@ -243,9 +296,8 @@ TEST_P(NetIbGidChangeTest, ConnectSnapshotsDeviceCache) {
     EXPECT_EQ(T().getComm(comm, 0, &snap), ncclSuccess);
     snap.ibDev = 0;
     bool ok = SameGid(snap, expected);
-    EXPECT_TRUE(ok) << "comm gidIndex " << snap.gidIndex << " expected " << expected.gidIndex
-                    << (useTwin ? " (device cache moved to twin)" : "");
-    if (expected.linkLayer == IBV_LINK_LAYER_ETHERNET) ok = QpsUseGidIndex(comm, 0, expected.gidIndex) && ok;
+    EXPECT_TRUE(ok) << "comm gidIndex " << snap.gidIndex << " expected twin " << expected.gidIndex;
+    ok = QpsUseGidIndex(comm, 0, expected.gidIndex) && ok;
     EXPECT_TRUE(AllRanks(ok));
 
     TeardownConnection(recvComm, listenComm, sendComm, mhandle);
@@ -280,21 +332,26 @@ TEST_P(NetIbGidChangeTest, PortRecoveryRefreshesStaleCommGid) {
     void* comm = (rank == 0) ? recvComm : sendComm;
     char* regBuf = (rank == 0) ? recvBuf.data() : sendBuf.data();
     void* mhandle = nullptr;
-    ASSERT_EQ(RegisterMemory(comm, regBuf, bufSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+    const bool registered = RegisterMemory(comm, regBuf, bufSize, NCCL_PTR_HOST, &mhandle) == ncclSuccess;
+    EXPECT_TRUE(registered);
+    if (!AllRanks(registered)) return;
     CastDoSendRecv(rank, sendComm, recvComm, regBuf, kMsgSize, /*tag=*/2300, mhandle);
 
     ncclIbGidQpState qps = {};
-    ASSERT_EQ(T().getQpState(comm, &qps), ncclSuccess);
-    ASSERT_GT(qps.nqps, 0);
-    const int failDev = qps.devIndex[0];
-    ASSERT_GE(failDev, 0);
+    ncclIbGidState real = {}, expected = {};
+    EXPECT_EQ(T().getQpState(comm, &qps), ncclSuccess);
+    const int failDev = qps.nqps > 0 ? qps.devIndex[0] : -1;
+    const bool haveFailDev = failDev >= 0 && T().getComm(comm, failDev, &real) == ncclSuccess;
+    EXPECT_TRUE(haveFailDev) << "nqps " << qps.nqps << " failDev " << failDev;
+    if (!AllRanks(haveFailDev)) {
+        TeardownConnection(recvComm, listenComm, sendComm, mhandle);
+        return;
+    }
 
     // With a twin, the device cache is reindexed so recovery has to move every QP and the recovery
     // path of failDev off their connect-time index. Without one, only the comm snapshot is stale.
-    ncclIbGidState real = {}, expected = {};
-    ASSERT_EQ(T().getComm(comm, failDev, &real), ncclSuccess);
     DevGidGuard guard(T(), real.ibDev, real);
-    const bool useTwin = AllRanks(FindTwinGid(real, &expected));
+    const bool useTwin = FindTwinGidOnAllRanks(real, &expected);
     if (useTwin) {
         EXPECT_EQ(T().setDev(real.ibDev, &expected), ncclSuccess);
     } else {
@@ -360,6 +417,8 @@ TEST_P(NetIbGidChangeTest, PortRecoveryRefreshesStaleCommGid) {
         EXPECT_EQ(T().getRecoveryGidIndex(comm, failDev, &recoveryGidIndex), ncclSuccess);
         EXPECT_EQ(recoveryGidIndex, expected.gidIndex) << "port recovery path of devIndex " << failDev;
         ok = ok && recoveryGidIndex == expected.gidIndex;
+        // AINIC cannot reset QPs, so net_ib_cast leaves its probing QPs on the connect-time GID.
+        if (!rcclUseAinic()) ok = ProbingUsesGidIndex(comm, failDev, expected.gidIndex) && ok;
     }
 
     bool trafficOk = true;

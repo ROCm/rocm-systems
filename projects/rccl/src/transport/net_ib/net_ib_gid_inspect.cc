@@ -105,6 +105,18 @@ extern "C" ncclResult_t ncclIbGidGetRecoveryGidIndex(void* comm, int devIndex, i
   return ncclInvalidArgument;
 }
 
+extern "C" ncclResult_t ncclIbGidGetProbingGidIndex(void* comm, int devIndex, int* gidIndex) {
+  struct ncclIbNetCommBase* base = ncclIbGidCommBase(comm);
+  if (base == NULL || gidIndex == NULL || base->resiliency == NULL) return ncclInvalidArgument;
+  for (int i = 0; i < base->resiliency->nProbingQps; i++) {
+    struct ncclIbQp* qp = &base->resiliency->probingQps[i];
+    if (qp->qp == NULL || qp->devIndex != devIndex) continue;
+    *gidIndex = qp->rtrAttr.localGidIndex;
+    return ncclSuccess;
+  }
+  return ncclInvalidArgument;
+}
+
 extern "C" ncclResult_t ncclIbGidDriveQpToError(void* comm, int qpIdx) {
   struct ncclIbNetCommBase* base = ncclIbGidCommBase(comm);
   if (base == NULL || qpIdx < 0 || qpIdx >= base->nqps || base->qps[qpIdx].qp == NULL) return ncclInvalidArgument;
