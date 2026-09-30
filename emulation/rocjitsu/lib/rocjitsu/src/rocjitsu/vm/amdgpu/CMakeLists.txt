@@ -3,7 +3,7 @@
 
 rj_add_object_library(rocjitsu_vm_amdgpu
     aql/aql_packet_processor.cpp
-    aql/aql_queue_binding_factory.cpp
+    compute_queue_binding_factory.cpp
     circular_ring_reader.cpp
     buffer_format.cpp
     cluster_lds_multicast.cpp

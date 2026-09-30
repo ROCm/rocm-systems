@@ -410,7 +410,7 @@ TEST(GpuVmPipeline, CompletionRetryOnOneQueueDoesNotStarveAnotherQueue) {
   external->store(kDoorbellAddress, uint64_t{1});
   external->store(kSignalAddress + 8, uint64_t{1});
 
-  amdgpu::AqlQueueConfig stalled_queue{};
+  amdgpu::ComputeQueueConfig stalled_queue{};
   stalled_queue.address_space = address_space;
   stalled_queue.process_id = kProcessId;
   stalled_queue.queue_id = kStalledQueueId;

@@ -1159,10 +1159,8 @@ TEST_F(KfdIoctlTest, CreateQueueDoesNotReplicateSdmaQueue) {
   EXPECT_EQ(soc_->sdma_queue_scheduler().active_queues(), 0u);
 }
 
-// KFD exposes PM4 and AQL as distinct compute queue formats. Rocjitsu supports
-// general KFD compute dispatch only through AQL; its PM4 processor intentionally
-// remains limited to the supported compute-queue packet subset.
-TEST_F(KfdIoctlTest, CreateQueueRejectsUnsupportedPm4ComputeAndUnknownTypes) {
+// Both compute formats share queue ownership; a native PM4 queue stays on one XCD.
+TEST_F(KfdIoctlTest, CreateQueueAcceptsPm4ComputeAndRejectsUnknownTypes) {
   const uint32_t num_xcds = soc_->num_xcds();
   ASSERT_GT(num_xcds, 1u);
 
@@ -1185,8 +1183,24 @@ TEST_F(KfdIoctlTest, CreateQueueRejectsUnsupportedPm4ComputeAndUnknownTypes) {
   pm4.read_pointer_address = reinterpret_cast<uint64_t>(&ptrs[0]);
   pm4.write_pointer_address = reinterpret_cast<uint64_t>(&ptrs[1]);
   pm4.queue_percentage = 100;
-  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &pm4), -ENOTSUP);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &pm4), 0);
+  EXPECT_EQ(registered_on_all_xcds(), 1u);
+  kfd_ioctl_destroy_queue_args destroy{};
+  destroy.queue_id = pm4.queue_id;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
   EXPECT_EQ(registered_on_all_xcds(), 0u);
+
+  // PM4 target placement is initial queue configuration, separate from decoding.
+  ASSERT_GT(num_xcds, 2u);
+  pm4.queue_percentage = 100 | (2u << 8);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &pm4), 0);
+  EXPECT_EQ(soc_->xcd(2)->command_processor()->registered_queue_count_for_test(), 1u);
+  EXPECT_EQ(soc_->xcd(0)->command_processor()->registered_queue_count_for_test(), 0u);
+  destroy.queue_id = pm4.queue_id;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
+  EXPECT_EQ(registered_on_all_xcds(), 0u);
+  pm4.queue_percentage = 100 | (num_xcds << 8);
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &pm4), -EINVAL);
 
   kfd_ioctl_create_queue_args unknown{};
   unknown.gpu_id = kGpuId;
@@ -7427,7 +7441,7 @@ TEST_F(KfdIoctlCdna5Test, ScratchGrowthPreservesSpillsFromOverlappingDispatches)
   alignas(64) std::array<std::array<uint64_t, 3>, 2> pointers{};
   std::array<uint64_t, 2> registrations{};
   for (uint32_t i = 0; i < cps.size(); ++i) {
-    amdgpu::AqlQueueConfig queue{};
+    amdgpu::ComputeQueueConfig queue{};
     queue.address_space = process->gpu(0).address_space;
     queue.process_id = process_id;
     queue.queue_id = i + 1;

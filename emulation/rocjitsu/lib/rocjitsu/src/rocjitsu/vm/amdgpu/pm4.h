@@ -98,6 +98,9 @@ struct Pm4IndirectBuffer {
   uint64_t address = 0;
   uint32_t dwords = 0;
   uint32_t depth = 0;
+  /// Nonzero only for a root ring frame; nested IBs always use linear addresses.
+  uint64_t ring_base = 0;
+  uint32_t ring_bytes = 0;
 };
 
 /// @brief Shared launch/wave failure status; wake the CP to cancel the owning queue.
@@ -111,7 +114,7 @@ struct Pm4FailureState {
   }
 };
 
-/// @brief One DRM command submission and its asynchronous fence callbacks.
+/// @brief One PM4 stream and its return or frontend completion callback.
 /// @details The CP evaluates dependencies without blocking its engine thread and
 /// publishes completion only after all commands retire.
 struct Pm4Submission {
@@ -125,8 +128,8 @@ struct Pm4Submission {
   std::function<void(bool)> complete;
 };
 
-/// @brief Compute register file and ordered DRM submissions for one CP queue.
-struct Pm4QueueState {
+/// @brief Persistent compute registers and ordered command streams of one CP queue.
+struct ComputeCommandState {
   uint64_t indirect_base = 0;
   std::array<uint32_t, 0x400> sh_registers{};
   std::deque<Pm4Submission> submissions;

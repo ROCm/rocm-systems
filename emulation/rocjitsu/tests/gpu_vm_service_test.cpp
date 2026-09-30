@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/aql/aql_packet_types.h"
-#include "rocjitsu/vm/amdgpu/aql/aql_queue_binding_factory.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
+#include "rocjitsu/vm/amdgpu/compute_queue_binding_factory.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory_access.h"
 #include "rocjitsu/vm/amdgpu/gpu_queue_registry.h"
@@ -47,27 +47,27 @@ class CommandProcessorCloseTestAccess {
 public:
   static bool fetch_first_queue(CommandProcessor &command_processor) {
     std::lock_guard<std::recursive_mutex> lock(command_processor.hw_queue_mutex_);
-    if (command_processor.aql_queues_.size() != 1)
+    if (command_processor.compute_queues_.size() != 1)
       return false;
-    command_processor.fetch_from_queue(command_processor.aql_queues_.front(), 0);
+    command_processor.fetch_from_queue(command_processor.compute_queues_.front(), 0);
     return true;
   }
 
   static bool retain_cursor_publication(CommandProcessor &command_processor, GpuVmAccess access,
                                         uint64_t cursor) {
     std::lock_guard<std::recursive_mutex> lock(command_processor.hw_queue_mutex_);
-    if (command_processor.aql_queues_.size() != 1)
+    if (command_processor.compute_queues_.size() != 1)
       return false;
-    command_processor.aql_queues_.front().read_pointer_journal.retire(cursor, cursor,
-                                                                      std::move(access));
+    command_processor.compute_queues_.front().read_pointer_journal.retire(cursor, cursor,
+                                                                          std::move(access));
     return true;
   }
 
   static bool retry_cursor_publication(CommandProcessor &command_processor) {
     std::lock_guard<std::recursive_mutex> lock(command_processor.hw_queue_mutex_);
-    if (command_processor.aql_queues_.size() != 1)
+    if (command_processor.compute_queues_.size() != 1)
       return false;
-    AqlQueueRecord &queue = command_processor.aql_queues_.front();
+    ComputeQueueRecord &queue = command_processor.compute_queues_.front();
     queue.faulted = true;
     command_processor.fetch_from_queue(queue, 0);
     return !queue.read_pointer_journal.publication_pending();
@@ -75,9 +75,9 @@ public:
 
   static bool retain_idle_completion_publication(CommandProcessor &command_processor) {
     std::lock_guard<std::recursive_mutex> lock(command_processor.hw_queue_mutex_);
-    if (command_processor.aql_queues_.size() != 1)
+    if (command_processor.compute_queues_.size() != 1)
       return false;
-    AqlQueueRecord &queue = command_processor.aql_queues_.front();
+    ComputeQueueRecord &queue = command_processor.compute_queues_.front();
     queue.idle_publication.phase = QueueIdlePublicationPhase::StoreMailbox;
     queue.publication_retry_pending = true;
     return true;
@@ -85,9 +85,9 @@ public:
 
   static bool clear_idle_completion_publication(CommandProcessor &command_processor) {
     std::lock_guard<std::recursive_mutex> lock(command_processor.hw_queue_mutex_);
-    if (command_processor.aql_queues_.size() != 1)
+    if (command_processor.compute_queues_.size() != 1)
       return false;
-    AqlQueueRecord &queue = command_processor.aql_queues_.front();
+    ComputeQueueRecord &queue = command_processor.compute_queues_.front();
     queue.idle_publication.reset();
     queue.publication_retry_pending = false;
     return true;
@@ -95,9 +95,9 @@ public:
 
   static bool mark_publication_faulted(CommandProcessor &command_processor) {
     std::lock_guard<std::recursive_mutex> lock(command_processor.hw_queue_mutex_);
-    if (command_processor.aql_queues_.size() != 1)
+    if (command_processor.compute_queues_.size() != 1)
       return false;
-    command_processor.aql_queues_.front().publication_faulted = true;
+    command_processor.compute_queues_.front().publication_faulted = true;
     return true;
   }
 };
@@ -320,7 +320,7 @@ QueueRegistrationRequest queue_request(AddressSpaceHandle address_space,
 
 QueueRegistrationRequest queue_request(AddressSpaceHandle address_space, CommandProcessor &owner,
                                        uint32_t queue_id) {
-  return queue_request(address_space, make_aql_queue_binding_factory(owner), queue_id);
+  return queue_request(address_space, make_compute_queue_binding_factory(owner), queue_id);
 }
 
 enum class BlockedQueueOperation : uint8_t {
@@ -562,7 +562,7 @@ TEST(GpuVmService, TwoQueuesRetainOneAddressSpace) {
   AddressSpaceHandle address_space = register_byte_address_space(gpu_vm, 7, 0x2a);
   command_processor.set_gpu_vm(&gpu_vm);
   const std::shared_ptr<QueueBindingFactory> binding_factory =
-      make_aql_queue_binding_factory(command_processor);
+      make_compute_queue_binding_factory(command_processor);
 
   QueueHandle first = queues.register_queue(queue_request(address_space, binding_factory, 1));
   QueueHandle second = queues.register_queue(queue_request(address_space, binding_factory, 2));
@@ -632,14 +632,14 @@ TEST(CommandProcessorDoorbell, TransportNotificationDoesNotWaitForQueueExecution
   CommandProcessor command_processor("cp");
   const AddressSpaceHandle address_space = register_byte_address_space(gpu_vm, 7, 0x11);
   command_processor.set_gpu_vm(&gpu_vm);
-  AqlQueueConfig queue{.address_space = address_space,
-                       .process_id = 7,
-                       .queue_id = 1,
-                       .ring_base_va = 0x100,
-                       .ring_size = 4096,
-                       .read_ptr_va = 0x80,
-                       .write_ptr_va = 0x88,
-                       .last_doorbell = 4};
+  ComputeQueueConfig queue{.address_space = address_space,
+                           .process_id = 7,
+                           .queue_id = 1,
+                           .ring_base_va = 0x100,
+                           .ring_size = 4096,
+                           .read_ptr_va = 0x80,
+                           .write_ptr_va = 0x88,
+                           .last_doorbell = 4};
   const uint64_t registration = command_processor.register_queue(queue);
 
   std::promise<void> locked;
@@ -671,14 +671,14 @@ TEST(CommandProcessorDoorbell, StaleRegistrationCannotNotifyReusedQueueIdentity)
   CommandProcessor command_processor("cp");
   const AddressSpaceHandle address_space = register_byte_address_space(gpu_vm, 7, 0x11);
   command_processor.set_gpu_vm(&gpu_vm);
-  AqlQueueConfig queue{.address_space = address_space,
-                       .process_id = 7,
-                       .queue_id = 1,
-                       .ring_base_va = 0x100,
-                       .ring_size = 4096,
-                       .read_ptr_va = 0x80,
-                       .write_ptr_va = 0x88,
-                       .last_doorbell = 4};
+  ComputeQueueConfig queue{.address_space = address_space,
+                           .process_id = 7,
+                           .queue_id = 1,
+                           .ring_base_va = 0x100,
+                           .ring_size = 4096,
+                           .read_ptr_va = 0x80,
+                           .write_ptr_va = 0x88,
+                           .last_doorbell = 4};
   const uint64_t stale = command_processor.register_queue(queue);
   command_processor.unregister_queue(queue.queue_id, queue.process_id);
 
@@ -799,14 +799,14 @@ TEST(CommandProcessorVmFault, FaultsEveryFanoutReplicaAndDropsPresentAndFutureWo
   constexpr uint32_t kProcessId = 7;
   constexpr uint32_t kQueueId = 41;
   constexpr uint32_t kDispatchId = 19;
-  AqlQueueConfig queue{.address_space = address_space,
-                       .process_id = kProcessId,
-                       .queue_id = kQueueId,
-                       .ring_base_va = 0x100,
-                       .ring_size = 4096,
-                       .read_ptr_va = 0x80,
-                       .write_ptr_va = 0x88,
-                       .xcd_fanout = true};
+  ComputeQueueConfig queue{.address_space = address_space,
+                           .process_id = kProcessId,
+                           .queue_id = kQueueId,
+                           .ring_base_va = 0x100,
+                           .ring_size = 4096,
+                           .read_ptr_va = 0x80,
+                           .write_ptr_va = 0x88,
+                           .xcd_fanout = true};
   (void)owner.register_queue(queue);
 
   auto grid = std::make_shared<GridCompletion>();
@@ -1299,7 +1299,7 @@ TEST(GpuVmService, FailedSecondAqlBindingCreationLeavesTheOriginalQueueUsable) {
   AddressSpaceHandle address_space = register_byte_address_space(gpu_vm, 7, 0x11);
   command_processor.set_gpu_vm(&gpu_vm);
   const std::shared_ptr<QueueBindingFactory> binding_factory =
-      make_aql_queue_binding_factory(command_processor);
+      make_compute_queue_binding_factory(command_processor);
   const QueueRegistrationRequest request = queue_request(address_space, binding_factory, 1);
 
   const QueueHandle original = queues.register_queue(request);
@@ -1324,7 +1324,7 @@ TEST(GpuVmService, AqlBindingFactoryRejectsInvalidRingLayoutsBeforeRegistration)
   CommandProcessor command_processor("cp");
   const AddressSpaceHandle address_space = register_byte_address_space(gpu_vm, 7, 0x11);
   const std::shared_ptr<QueueBindingFactory> binding_factory =
-      make_aql_queue_binding_factory(command_processor);
+      make_compute_queue_binding_factory(command_processor);
   const QueueRingLayout valid = queue_request(address_space, binding_factory, 1).ring;
 
   std::array<QueueRingLayout, 9> invalid{};
@@ -1360,7 +1360,7 @@ TEST(GpuVmService, ExplicitDoorbellAqlBindingPreservesKfdQueueAbi) {
   command_processor.set_gpu_vm(&gpu_vm);
   const AddressSpaceHandle address_space = register_byte_address_space(gpu_vm, 7, 0x11);
   QueueRegistrationRequest request =
-      queue_request(address_space, make_aql_queue_binding_factory(command_processor), 1);
+      queue_request(address_space, make_compute_queue_binding_factory(command_processor), 1);
   request.doorbell = {.mode = QueueDoorbellMode::Explicit, .offset = 0x40};
   request.abi = QueueAbi::KfdAql;
 
@@ -1378,15 +1378,15 @@ TEST(CommandProcessorQueueRegistration, RejectsInvalidAqlRingLayoutsAtDirectBoun
   CommandProcessor command_processor("cp");
   const AddressSpaceHandle address_space = register_byte_address_space(gpu_vm, 7, 0x11);
   command_processor.set_gpu_vm(&gpu_vm);
-  AqlQueueConfig valid{.address_space = address_space,
-                       .process_id = 7,
-                       .queue_id = 1,
-                       .ring_base_va = 0x100,
-                       .ring_size = 64,
-                       .read_ptr_va = 0x80,
-                       .write_ptr_va = 0x88};
+  ComputeQueueConfig valid{.address_space = address_space,
+                           .process_id = 7,
+                           .queue_id = 1,
+                           .ring_base_va = 0x100,
+                           .ring_size = 64,
+                           .read_ptr_va = 0x80,
+                           .write_ptr_va = 0x88};
 
-  std::array<AqlQueueConfig, 10> invalid{};
+  std::array<ComputeQueueConfig, 10> invalid{};
   invalid.fill(valid);
   invalid[0].ring_base_va = 0;
   invalid[1].ring_base_va += 1;
@@ -1399,7 +1399,7 @@ TEST(CommandProcessorQueueRegistration, RejectsInvalidAqlRingLayoutsAtDirectBoun
   invalid[8].write_ptr_va += 1;
   invalid[9].doorbell_mode = QueueDoorbellMode::VmPolled;
 
-  for (AqlQueueConfig &config : invalid)
+  for (ComputeQueueConfig &config : invalid)
     EXPECT_EQ(command_processor.register_queue(std::move(config)), 0u);
   EXPECT_EQ(command_processor.registered_queue_count_for_test(), 0u);
 
@@ -1415,13 +1415,13 @@ TEST(CommandProcessorQueueRegistration, RejectsInvalidAqlRingLayoutsAtDirectBoun
 }
 
 TEST(CommandProcessorQueueRegistration, RequiresAnAddressSpaceAndUsesTheConfiguredInternalOne) {
-  AqlQueueConfig queue{.address_space = {},
-                       .process_id = 0,
-                       .queue_id = 1,
-                       .ring_base_va = 0x100,
-                       .ring_size = 64,
-                       .read_ptr_va = 0x80,
-                       .write_ptr_va = 0x88};
+  ComputeQueueConfig queue{.address_space = {},
+                           .process_id = 0,
+                           .queue_id = 1,
+                           .ring_base_va = 0x100,
+                           .ring_size = 64,
+                           .read_ptr_va = 0x80,
+                           .write_ptr_va = 0x88};
   CommandProcessor unbound("unbound");
   EXPECT_EQ(unbound.register_queue(queue), 0u);
 
@@ -1530,7 +1530,7 @@ TEST(GpuVmService, AqlReconfigureRejectsInvalidRingGeometry) {
   const AddressSpaceHandle address_space = register_byte_address_space(gpu_vm, 7, 0x11);
   command_processor.set_gpu_vm(&gpu_vm);
   const std::shared_ptr<QueueBindingFactory> binding_factory =
-      make_aql_queue_binding_factory(command_processor);
+      make_compute_queue_binding_factory(command_processor);
   const QueueHandle queue = queues.register_queue(queue_request(address_space, binding_factory, 1));
   ASSERT_TRUE(queue);
 
@@ -1641,7 +1641,7 @@ TEST(GpuVmService, StaleAqlBindingCannotChangeOrRemoveReusedQueueIdentity) {
   const AddressSpaceHandle address_space = register_byte_address_space(gpu_vm, 7, 0x11);
   command_processor.set_gpu_vm(&gpu_vm);
   const std::shared_ptr<QueueBindingFactory> binding_factory =
-      make_aql_queue_binding_factory(command_processor);
+      make_compute_queue_binding_factory(command_processor);
   const QueueRegistrationRequest request = queue_request(address_space, binding_factory, 1);
 
   QueueBindingCreateResult stale = binding_factory->create_binding(request);
@@ -1809,7 +1809,7 @@ TEST(CommandProcessorQueueRegistration, FailedFanoutRollsBackOnlyNewReplicas) {
   rejecting_peer.set_gpu_vm(&gpu_vm);
   owner.set_xcd_topology(0, {&owner, &first_peer, &rejecting_peer});
 
-  AqlQueueConfig existing{};
+  ComputeQueueConfig existing{};
   existing.address_space = address_space;
   existing.process_id = 7;
   existing.queue_id = 11;
@@ -1819,7 +1819,7 @@ TEST(CommandProcessorQueueRegistration, FailedFanoutRollsBackOnlyNewReplicas) {
   existing.write_ptr_va = 0x88;
   rejecting_peer.register_queue(existing);
 
-  AqlQueueConfig fanout = existing;
+  ComputeQueueConfig fanout = existing;
   fanout.xcd_fanout = true;
   EXPECT_EQ(owner.register_queue(fanout), 0u);
 

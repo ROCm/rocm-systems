@@ -11,8 +11,8 @@ set(CP_SOURCES
     lib/rocjitsu/src/rocjitsu/vm/amdgpu/aql/aql_packet_types.h
     lib/rocjitsu/src/rocjitsu/vm/amdgpu/aql/aql_packet_processor.h
     lib/rocjitsu/src/rocjitsu/vm/amdgpu/aql/aql_packet_processor.cpp
-    lib/rocjitsu/src/rocjitsu/vm/amdgpu/aql/aql_queue_binding_factory.h
-    lib/rocjitsu/src/rocjitsu/vm/amdgpu/aql/aql_queue_binding_factory.cpp
+    lib/rocjitsu/src/rocjitsu/vm/amdgpu/compute_queue_binding_factory.h
+    lib/rocjitsu/src/rocjitsu/vm/amdgpu/compute_queue_binding_factory.cpp
     lib/rocjitsu/src/rocjitsu/vm/amdgpu/dispatch_entry.h
     lib/rocjitsu/src/rocjitsu/vm/amdgpu/completion_tracker.h
     lib/rocjitsu/src/rocjitsu/vm/amdgpu/completion_tracker.cpp
