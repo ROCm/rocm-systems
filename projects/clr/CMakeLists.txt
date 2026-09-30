@@ -146,3 +146,37 @@ if(CLANGFORMAT_EXE)
     add_custom_target(clangformat COMMAND ${CLANGFORMAT_EXE} -style=file -i ${FORMAT_SOURCE_FILE_LIST}
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 endif()
+
+#############################
+# Static analysis (clang-tidy)
+#############################
+# Target: clang-tidy
+# Incremental adoption: only the files listed in clang-tidy-files.txt are
+# linted (one repo-relative path per line; '#' comments and blanks ignored).
+# Enabled checks live in the root .clang-tidy. Compile flags come from the
+# build tree's compile database, so configure with a generator that emits one
+# (Ninja does so automatically; otherwise set CMAKE_EXPORT_COMPILE_COMMANDS=ON).
+# Expand coverage by adding paths to clang-tidy-files.txt.
+find_program(CLANGTIDY_EXE clang-tidy PATHS "${ROCM_PATH}/lib/llvm/bin")
+if(CLANGTIDY_EXE)
+    set(_clr_tidy_list "${CMAKE_CURRENT_SOURCE_DIR}/clang-tidy-files.txt")
+    if(EXISTS "${_clr_tidy_list}")
+        file(STRINGS "${_clr_tidy_list}" _clr_tidy_lines)
+        set(_clr_tidy_files "")
+        foreach(_line IN LISTS _clr_tidy_lines)
+            string(STRIP "${_line}" _line)
+            if(_line STREQUAL "" OR _line MATCHES "^#")
+                continue()
+            endif()
+            list(APPEND _clr_tidy_files "${CMAKE_CURRENT_SOURCE_DIR}/${_line}")
+        endforeach()
+        if(_clr_tidy_files)
+            add_custom_target(clang-tidy
+                COMMAND ${CLANGTIDY_EXE} -p "${CMAKE_BINARY_DIR}" ${_clr_tidy_files}
+                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                VERBATIM
+                COMMENT "Running clang-tidy on allowlisted files")
+        endif()
+        unset(_clr_tidy_files)
+    endif()
+endif()

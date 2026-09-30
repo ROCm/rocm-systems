@@ -1,0 +1,42 @@
+# Incremental clang-tidy adoption.
+#
+# Coverage is opt-in per file: only paths listed in clang-tidy-files.txt are
+# linted (see the `clang-tidy` target in the top-level CMakeLists.txt). This
+# file controls *which checks* run on those files.
+#
+# HeaderFilterRegex is set to a pattern that matches no header path, so only
+# the main translation unit is diagnosed. This keeps third-party headers
+# (Khronos OpenCL, etc.) and shared first-party headers silent while coverage
+# is still being rolled out file by file.
+---
+Checks: >
+  -*,
+  cppcoreguidelines-slicing,
+  cppcoreguidelines-virtual-class-destructor,
+  cppcoreguidelines-init-variables,
+  misc-const-correctness,
+  misc-unused-using-decls,
+  misc-redundant-expression,
+  misc-unused-parameters,
+  misc-static-assert,
+  misc-redundant-expression,
+  misc-override-with-different-visibility,
+  misc-include-cleaner,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  readability-misleading-indentation,
+  performance-for-range-copy,
+  performance-implicit-conversion-in-loop,
+  performance-move-const-arg,
+  performance-faster-string-find,
+  performance-trivially-destructible,
+  performance-inefficient-vector-operation,
+  performance-unnecessary-copy-initialization,
+  performance-noexcept-move-constructor,
+  performance-type-promotion-in-math-fn,
+  modernize-use-override,
+  modernize-use-equals-default,
+  modernize-use-nullptr,
+WarningsAsErrors: '*'
+HeaderFilterRegex: '^$'
+FormatStyle: file
