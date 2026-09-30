@@ -9,6 +9,7 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "hsa/amd_ext_aql_packet.h"
 RJ_DIAGNOSTIC_POP
 
+#include <array>
 #include <bit>
 #include <cstring>
 #include <limits>
@@ -228,10 +229,27 @@ AqlPacketProcessor::process_vendor(const Request &request,
   }
 
   if (extension.amd_format == kAmdAqlFormatPm4Ib) {
-    return admit(request, {.kind = AqlPreparedPacketKind::NonKernel,
+    // ROCr embeds a four-dword INDIRECT_BUFFER command followed by the remaining
+    // AQL slot length and completion signal. Copy before the ring slot is released.
+    std::array<uint32_t, 16> words{};
+    std::memcpy(words.data(), &packet, sizeof(packet));
+    constexpr uint32_t kIbSizeMask = 0x000fffff;
+    constexpr uint32_t kIbValid = 1u << 23;
+    // aqlprofile uses cache policy on GFX9/GFX11 and temporal hints on GFX12.
+    // These affect caching, not control flow; CHAIN, VMID and other controls
+    // remain unsupported in the outer AQL envelope.
+    constexpr uint32_t kIbCachePolicyMask = 3u << 28;
+    constexpr uint32_t kSupportedIbControl = kIbSizeMask | kIbValid | kIbCachePolicyMask;
+    if (words[1] != 0xc0023f00 || (words[2] & 3) || words[3] > 0xffff ||
+        (words[4] & ~kSupportedIbControl) || !(words[4] & kIbValid) || !(words[4] & kIbSizeMask) ||
+        words[5] != 10)
+      return terminal(PacketProcessStatus::Malformed, AqlPacketDiagnostic::MalformedPm4Ib);
+    return admit(request, {.kind = AqlPreparedPacketKind::Pm4Ib,
+                           .pm4_ib_address = uint64_t{words[2]} | (uint64_t{words[3]} << 32),
+                           .pm4_ib_dwords = words[4] & kIbSizeMask,
                            .completion_signal = extension.completion_signal.handle,
                            .barrier_bit = ((packet.header >> HSA_PACKET_HEADER_BARRIER) & 1) != 0,
-                           .blocks_following = false});
+                           .blocks_following = true});
   }
 
   return terminal(PacketProcessStatus::Unsupported, AqlPacketDiagnostic::UnsupportedVendorFormat);

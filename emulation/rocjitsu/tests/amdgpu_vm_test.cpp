@@ -4682,9 +4682,10 @@ TEST_P(IsaTest, NonKernelBarrierPacketsOrderQueueEntries) {
       BarrierCase{HSA_PACKET_TYPE_BARRIER_OR, true},
       BarrierCase{HSA_PACKET_TYPE_BARRIER_OR, false},
       BarrierCase{HSA_PACKET_TYPE_VENDOR_SPECIFIC, true},
+      BarrierCase{HSA_PACKET_TYPE_VENDOR_SPECIFIC, false},
   };
 
-  for (const auto [packet_type, header_barrier_bit] : barrier_cases) {
+  for (const auto &[packet_type, header_barrier_bit] : barrier_cases) {
     SCOPED_TRACE(packet_type);
     SCOPED_TRACE(header_barrier_bit);
     VmFixture f(arch(), 1, 8);
@@ -4710,9 +4711,11 @@ TEST_P(IsaTest, NonKernelBarrierPacketsOrderQueueEntries) {
 
     hsa_kernel_dispatch_packet_t barrier{};
     barrier.header = packet_type | (header_barrier_bit ? (1 << HSA_PACKET_HEADER_BARRIER) : 0);
-    if (packet_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC)
-      barrier.setup = amdgpu::kAmdAqlFormatPm4Ib;
     barrier.completion_signal.handle = kBarrierCompletionSignal;
+    if (packet_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC) {
+      f.mem()->write32(0x4000, 0xffff1000);
+      barrier = test::make_pm4_ib_packet(0x4000, 1, kBarrierCompletionSignal, header_barrier_bit);
+    }
 
     test::AqlQueue queue(f.mem(), f.cp());
     queue.submit(dispatch);
@@ -4721,9 +4724,7 @@ TEST_P(IsaTest, NonKernelBarrierPacketsOrderQueueEntries) {
     queue.submit(dispatch);
     (void)f.engine->step();
 
-    const bool completes_ahead_of_prior_dispatch =
-        !header_barrier_bit &&
-        (packet_type == HSA_PACKET_TYPE_BARRIER_AND || packet_type == HSA_PACKET_TYPE_BARRIER_OR);
+    const bool completes_ahead_of_prior_dispatch = !header_barrier_bit;
     EXPECT_EQ(f.cu()->num_wfs(), completes_ahead_of_prior_dispatch ? 2u : 1u);
     EXPECT_EQ(f.mem()->read64(kBarrierCompletionSignal + kSignalValueOffset),
               completes_ahead_of_prior_dispatch ? 0u : 1u);
@@ -4782,34 +4783,178 @@ TEST(CommandProcessorAqlTest, BlockingBarriersRetireBeforeUnsupportedSuccessorFa
   }
 }
 
-TEST(CommandProcessorAqlTest, Pm4IbDoesNotBlockFetchOfUnsupportedSuccessor) {
-  VmFixture f("cdna5", 1, 8);
-  const uint32_t code[] = {SOPP_S_ENDPGM};
-  const uint64_t kernel = f.write_kernel(0x1000, code, sizeof(code));
-  constexpr uint64_t kPriorCompletionSignal = 0x7000;
-  constexpr uint64_t kPm4CompletionSignal = 0x7100;
-  init_completion_signal(f.mem(), kPriorCompletionSignal);
-  init_completion_signal(f.mem(), kPm4CompletionSignal);
-
-  hsa_kernel_dispatch_packet_t pm4_ib{};
-  pm4_ib.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC | (1 << HSA_PACKET_HEADER_BARRIER);
-  pm4_ib.setup = amdgpu::kAmdAqlFormatPm4Ib;
-  pm4_ib.completion_signal.handle = kPm4CompletionSignal;
-
+TEST(CommandProcessorAqlTest, Pm4IbCompletesBeforeAnUnsupportedSuccessorFaults) {
+  VmFixture fixture("rdna4");
+  constexpr uint64_t ib = 0x4000, signal = 0x7100;
+  init_completion_signal(fixture.mem(), signal);
+  fixture.mem()->write32(ib, 0xffff1000);
   hsa_kernel_dispatch_packet_t unsupported{};
   unsupported.header = HSA_PACKET_TYPE_AGENT_DISPATCH;
-
-  test::AqlQueue queue(f.mem(), f.cp());
-  queue.submit(make_dispatch_packet(kernel, kPriorCompletionSignal));
-  queue.submit(pm4_ib);
+  test::AqlQueue queue(fixture.mem(), fixture.cp());
+  queue.submit(test::make_pm4_ib_packet(ib, 1, signal));
   queue.submit(unsupported);
+  fixture.engine->run();
+  EXPECT_EQ(completion_signal_value(fixture.mem(), signal), 0);
+  EXPECT_EQ(fixture.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 1u);
+  EXPECT_TRUE(fixture.cp()->queue_faulted_for_test(1, 0));
+}
 
-  EXPECT_NO_THROW((void)f.engine->step());
-  EXPECT_EQ(completion_signal_value(f.mem(), kPriorCompletionSignal), 1);
-  EXPECT_EQ(completion_signal_value(f.mem(), kPm4CompletionSignal), 1)
-      << "PM4 IB unexpectedly blocked fetch of the following packet";
-  EXPECT_EQ(f.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 2u);
-  EXPECT_TRUE(f.cp()->queue_faulted_for_test(1, 0));
+TEST(CommandProcessorAqlTest, StalledNestedPm4IbReturnsToItsAqlQueue) {
+  VmFixture fixture("rdna4");
+  constexpr uint64_t ib = 0x4000, child = 0x5000, gate = 0x6000, output = 0x6010;
+  constexpr uint64_t signal = 0x7100, successor_signal = 0x7200;
+  init_completion_signal(fixture.mem(), signal);
+  init_completion_signal(fixture.mem(), successor_signal);
+  const std::array<uint32_t, 17> commands{
+      0xc0053c00,      0x13, uint32_t(gate), 0,          1,     0xffffffff,           4, 0xc0023f00,
+      uint32_t(child), 0,    (1u << 23) | 5, 0xc0033700, 0x500, uint32_t(output + 4), 0, 0x5678,
+      0xffff1000};
+  const std::array<uint32_t, 5> nested{0xc0033700, 0x500, uint32_t(output), 0, 0x1234};
+  fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(commands.data()), sizeof(commands),
+                            ib);
+  fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(nested.data()), sizeof(nested),
+                            child);
+  const uint32_t code[] = {0xbfb00000};
+  const auto kernel = fixture.write_kernel(0x1000, code, sizeof(code));
+  test::AqlQueue queue(fixture.mem(), fixture.cp());
+  queue.submit(test::make_pm4_ib_packet(ib, commands.size(), signal));
+  queue.submit(make_dispatch_packet(kernel, successor_signal));
+  for (uint32_t index = 0; index < 8; ++index)
+    (void)fixture.engine->step();
+  EXPECT_EQ(completion_signal_value(fixture.mem(), signal), 1);
+  EXPECT_EQ(completion_signal_value(fixture.mem(), successor_signal), 1);
+  EXPECT_EQ(fixture.mem()->read32(output), 0u);
+  EXPECT_EQ(fixture.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 1u);
+  EXPECT_EQ(fixture.cp()->registered_queue_count_for_test(), 1u);
+  fixture.mem()->write32(gate, 1);
+  fixture.engine->run();
+  EXPECT_EQ(fixture.mem()->read32(output), 0x1234u);
+  EXPECT_EQ(fixture.mem()->read32(output + 4), 0x5678u);
+  EXPECT_EQ(completion_signal_value(fixture.mem(), signal), 0);
+  EXPECT_EQ(completion_signal_value(fixture.mem(), successor_signal), 0);
+  EXPECT_EQ(fixture.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 2u);
+  EXPECT_FALSE(fixture.cp()->queue_faulted_for_test(1, 0));
+}
+
+TEST(CommandProcessorAqlTest, Pm4RegistersSurviveIbReturnAndVendorStreamsCanDispatch) {
+  for (const auto arch : {"cdna3", "rdna3", "rdna4"}) {
+    SCOPED_TRACE(arch);
+    VmFixture fixture(arch);
+    constexpr uint64_t code = 0x8000, state_ib = 0x4000, dispatch_ib = 0x5000;
+    constexpr uint64_t first_signal = 0x7100, dispatch_signal = 0x7200, aql_signal = 0x7300;
+    for (const auto signal : {first_signal, dispatch_signal, aql_signal})
+      init_completion_signal(fixture.mem(), signal);
+    const bool gfx9 = std::string_view(arch) == "cdna3";
+    fixture.mem()->write32(code, gfx9 ? SOPP_S_ENDPGM : 0xbfb00000);
+    const std::array<uint32_t, 14> state{0xc0037600,
+                                         amdgpu::kPm4ComputeNumThreadX,
+                                         64,
+                                         1,
+                                         1,
+                                         0xc0027600,
+                                         amdgpu::kPm4ComputePgmLo,
+                                         uint32_t(code >> 8),
+                                         0,
+                                         0xc0017600,
+                                         amdgpu::kPm4ComputePgmRsrc2,
+                                         0,
+                                         0xffff1000,
+                                         0xffff1000};
+    const std::array<uint32_t, 5> dispatch{0xc0031500, 1, 1, 1, 1};
+    fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(state.data()), sizeof(state),
+                              state_ib);
+    fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(dispatch.data()), sizeof(dispatch),
+                              dispatch_ib);
+    const uint32_t aql_code[] = {gfx9 ? SOPP_S_ENDPGM : 0xbfb00000};
+    const auto kernel = fixture.write_kernel(0x1000, aql_code, sizeof(aql_code));
+    test::AqlQueue queue(fixture.mem(), fixture.cp());
+    queue.submit(test::make_pm4_ib_packet(state_ib, state.size(), first_signal));
+    queue.submit(test::make_pm4_ib_packet(dispatch_ib, dispatch.size(), dispatch_signal));
+    queue.submit(make_dispatch_packet(kernel, aql_signal));
+    fixture.engine->run();
+    for (const auto signal : {first_signal, dispatch_signal, aql_signal})
+      EXPECT_EQ(completion_signal_value(fixture.mem(), signal), 0);
+    EXPECT_EQ(fixture.cp()->dispatched_workgroups(), 2u);
+    EXPECT_EQ(fixture.cp()->registered_queue_count_for_test(), 1u);
+    EXPECT_FALSE(fixture.cp()->queue_faulted_for_test(1, 0));
+  }
+}
+
+hsa_kernel_dispatch_packet_t pm4_ib_with_control(uint64_t address, uint32_t dw3, uint64_t signal) {
+  auto packet = test::make_pm4_ib_packet(address, 1, signal);
+  std::array<uint32_t, 16> words{};
+  std::memcpy(words.data(), &packet, sizeof(packet));
+  words[4] = dw3;
+  std::memcpy(&packet, words.data(), sizeof(packet));
+  return packet;
+}
+
+TEST(CommandProcessorAqlTest, AqlprofileIbCachePolicyEnvelopeCompletes) {
+  const std::array<std::pair<const char *, uint32_t>, 3> cases{
+      {{"cdna3", 1u << 28}, {"rdna3", 1u << 28}, {"rdna4", 3u << 28}}};
+  for (const auto &[arch, policy] : cases) {
+    SCOPED_TRACE(arch);
+    VmFixture fixture(arch);
+    constexpr uint64_t ib = 0x4000, signal = 0x7100;
+    init_completion_signal(fixture.mem(), signal);
+    fixture.mem()->write32(ib, 0xffff1000);
+    test::AqlQueue queue(fixture.mem(), fixture.cp());
+    queue.submit(pm4_ib_with_control(ib, (1u << 23) | 1u | policy, signal));
+    fixture.engine->run();
+    EXPECT_EQ(completion_signal_value(fixture.mem(), signal), 0);
+    EXPECT_FALSE(fixture.cp()->queue_faulted_for_test(1, 0));
+  }
+}
+
+TEST(CommandProcessorAqlTest, ImmediateAndDelayedPm4FaultsRemoveTheParent) {
+  for (const bool stall_first : {false, true}) {
+    SCOPED_TRACE(stall_first ? "after-stall" : "synchronous");
+    VmFixture fixture("rdna4");
+    constexpr uint64_t ib = 0x4000, gate = 0x6000, signal = 0x7100, successor = 0x7200;
+    init_completion_signal(fixture.mem(), signal);
+    init_completion_signal(fixture.mem(), successor);
+    std::vector<uint32_t> commands;
+    if (stall_first)
+      commands.insert(commands.end(), {0xc0053c00, 0x13, uint32_t(gate), 0, 1, 0xffffffff, 4});
+    commands.insert(commands.end(), {0xc000ff00, 0});
+    fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(commands.data()),
+                              commands.size() * 4, ib);
+    test::AqlQueue queue(fixture.mem(), fixture.cp());
+    queue.submit(test::make_pm4_ib_packet(ib, commands.size(), signal));
+    const uint32_t code[] = {0xbfb00000};
+    queue.submit(make_dispatch_packet(fixture.write_kernel(0x1000, code, sizeof(code)), successor));
+    for (uint32_t index = 0; index < 8; ++index)
+      (void)fixture.engine->step();
+    if (stall_first) {
+      EXPECT_FALSE(fixture.cp()->queue_faulted_for_test(1, 0));
+      EXPECT_TRUE(fixture.cp()->has_dispatch_for_test(1, 0, 1));
+    }
+    fixture.mem()->write32(gate, 1);
+    fixture.engine->run();
+    EXPECT_TRUE(fixture.cp()->queue_faulted_for_test(1, 0));
+    EXPECT_EQ(completion_signal_value(fixture.mem(), signal), 1);
+    EXPECT_FALSE(fixture.cp()->has_dispatch_for_test(1, 0, 1));
+    EXPECT_EQ(completion_signal_value(fixture.mem(), successor), 1);
+    EXPECT_EQ(fixture.cp()->dispatched_workgroups(), 0u);
+    EXPECT_EQ(fixture.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 1u);
+  }
+}
+
+TEST(CommandProcessorAqlTest, InvalidPm4ChildFaultsItsParentAndSuppressesCompletion) {
+  VmFixture fixture("rdna4");
+  constexpr uint64_t ib = 0x4000, signal = 0x7100;
+  init_completion_signal(fixture.mem(), signal);
+  fixture.mem()->write32(ib, 0xc000ff00);
+  fixture.mem()->write32(ib + 4, 0);
+  test::AqlQueue queue(fixture.mem(), fixture.cp());
+  queue.submit(test::make_pm4_ib_packet(ib, 2, signal));
+  hsa_kernel_dispatch_packet_t barrier{};
+  barrier.header = HSA_PACKET_TYPE_BARRIER_AND;
+  queue.submit(barrier);
+  fixture.engine->run();
+  EXPECT_TRUE(fixture.cp()->queue_faulted_for_test(1, 0));
+  EXPECT_EQ(completion_signal_value(fixture.mem(), signal), 1);
+  EXPECT_EQ(fixture.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 1u);
 }
 
 TEST_P(IsaTest, EmptyCuMaskAllowsNonKernelPackets) {
@@ -4839,6 +4984,10 @@ TEST_P(IsaTest, EmptyCuMaskAllowsNonKernelPackets) {
     packet.header = test.type;
     packet.setup = test.format;
     packet.completion_signal.handle = kSignal;
+    if (test.format == amdgpu::kAmdAqlFormatPm4Ib) {
+      f.mem()->write32(0x4000, 0xffff1000);
+      packet = test::make_pm4_ib_packet(0x4000, 1, kSignal);
+    }
     queue.submit(packet);
     queue.dispatch(ko, 64);
     queue.submit(packet);
