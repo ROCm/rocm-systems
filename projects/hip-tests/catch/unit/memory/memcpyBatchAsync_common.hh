@@ -124,21 +124,16 @@ inline void DisablePeerAccess(const std::vector<std::pair<int, int>>& peer_pairs
   }
 }
 
-// Every ExtOp flag rides the SDMA batch path, which only carries transfers between device memory
-// and pinned host memory, plus peer device-to-device copies. Pageable memory, host-to-host and
-// same-device device-to-device pairings are rejected before the architecture is consulted.
-inline bool extOpPairingSupported(const LinearAllocs alloc_type_a, const LinearAllocs alloc_type_b,
-                                  const bool is_p2p) {
+// Every ExtOp flag rides the SDMA batch path, which carries transfers between device memory and
+// pinned host memory and device-to-device copies, same-device or peer. Pageable memory and
+// host-to-host pairings are rejected before the architecture is consulted.
+inline bool extOpPairingSupported(const LinearAllocs alloc_type_a,
+                                  const LinearAllocs alloc_type_b) {
   if (alloc_type_a == LinearAllocs::malloc || alloc_type_b == LinearAllocs::malloc) {
     return false;
   }
 
   if (alloc_type_a == LinearAllocs::hipHostMalloc && alloc_type_b == LinearAllocs::hipHostMalloc) {
-    return false;
-  }
-
-  if (alloc_type_a == LinearAllocs::hipMalloc && alloc_type_b == LinearAllocs::hipMalloc &&
-      !is_p2p) {
     return false;
   }
 
@@ -150,10 +145,7 @@ inline bool extOpPairingSupported(const LinearAllocs alloc_type_a, const LinearA
 inline hipError_t getSwapExpectedReturn(const LinearAllocs alloc_type_a,
                                         const LinearAllocs alloc_type_b, const int device_a = 0,
                                         const int device_b = 0) {
-  // The swap endpoints are peer-to-peer when they live on different devices.
-  const bool is_p2p = device_a != device_b;
-
-  if (!extOpPairingSupported(alloc_type_a, alloc_type_b, is_p2p)) {
+  if (!extOpPairingSupported(alloc_type_a, alloc_type_b)) {
     return hipErrorNotSupported;
   }
 
@@ -174,18 +166,17 @@ inline hipError_t getSwapExpectedReturn(const LinearAllocs alloc_type_a,
 
 inline hipError_t getIndirectExpectedReturn(const LinearAllocs alloc_type_src,
                                             const LinearAllocs alloc_type_dst,
-                                            const int device_src = 0, const int device_dst = 0,
+                                            [[maybe_unused]] const int device_src = 0,
+                                            [[maybe_unused]] const int device_dst = 0,
                                             const int stream_device = 0) {
-  const bool is_p2p = device_src != device_dst;
-
-  if (!extOpPairingSupported(alloc_type_src, alloc_type_dst, is_p2p)) {
+  if (!extOpPairingSupported(alloc_type_src, alloc_type_dst)) {
     return hipErrorNotSupported;
   }
 
-  // Mirrors CLR's sdma_indirect_supported_ check (rocclr/device/rocm/rocsettings.cpp), which is
-  // gfx1250 only. Keep in sync if CLR adds architectures.
+  // Mirrors CLR's sdma_indirect_supported_ check (rocclr/device/rocm/rocsettings.cpp).
+  // Keep in sync if CLR adds architectures.
   int major, minor;
   HIP_CHECK(hipDeviceComputeCapability(&major, &minor, stream_device));
 
-  return (major == 12 && minor == 5) ? hipSuccess : hipErrorNotSupported;
+  return (major == 12 && minor >= 5) ? hipSuccess : hipErrorNotSupported;
 }

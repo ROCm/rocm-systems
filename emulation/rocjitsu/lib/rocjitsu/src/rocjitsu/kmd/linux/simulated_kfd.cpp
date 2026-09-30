@@ -2495,7 +2495,7 @@ int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
 }
 
 bool SimulatedKfd::allocate_scratch_backing(uint32_t process_id, uint64_t gpu_va, size_t size) {
-  if (size == 0)
+  if (size == 0 || size > std::numeric_limits<size_t>::max() - 0xFFF)
     return false;
 
   std::shared_ptr<KfdProcess> proc;
@@ -2511,85 +2511,99 @@ bool SimulatedKfd::allocate_scratch_backing(uint32_t process_id, uint64_t gpu_va
   if (!proc)
     return false;
 
-  size_t aligned_size = (size + 0xFFF) & ~0xFFFULL;
+  const size_t aligned_size = (size + 0xFFF) & ~0xFFFULL;
+  if (gpu_va > std::numeric_limits<uint64_t>::max() - aligned_size)
+    return false;
+  const uint64_t end = gpu_va + aligned_size;
 
-  // Every XCD of a fanned-out dispatch races here for the same process-wide pool
-  // VA, each having independently found it unbacked. Only the first may map it:
-  // mapping again would repoint the pool underneath waves the first XCD already
-  // launched and leak the original. The requested size is grid-scale and therefore
-  // identical for every XCD of one grid, so a pool already at least that large
-  // satisfies all of them and this covers the whole fan-out race.
-  //
-  // A later dispatch in the same process needing a LARGER pool still falls through
-  // and remaps, as it did before fan-out existed. That path is unchanged here.
+  // Fan-out shards can request the same range concurrently, and non-barrier
+  // dispatches can grow it while older waves still use it. Keep every existing
+  // allocation in place and back only the gaps: copying or remapping an old
+  // prefix would race with live spills. Retain each chunk until process teardown.
   std::lock_guard<std::mutex> scratch_lock(proc->scratch_backing_mutex_);
+  std::vector<std::pair<uint64_t, uint64_t>> backed;
   {
     std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
     for (const auto &[handle, alloc] : proc->allocations_) {
-      if (alloc.gpu_va == gpu_va && alloc.size >= aligned_size)
-        return true;
+      if (!alloc.host_ptr || alloc.gpu_va >= end)
+        continue;
+      const uint64_t begin = std::max(gpu_va, alloc.gpu_va);
+      const uint64_t offset = begin - alloc.gpu_va;
+      if (offset < alloc.size)
+        backed.emplace_back(begin, begin + std::min(alloc.size - offset, end - begin));
     }
   }
-
-  auto raw_fd = memfd_create("rocjitsu_scratch", MFD_CLOEXEC);
-  if (raw_fd < 0)
-    return false;
-
-  int memfd = safe_fcntl(raw_fd, F_DUPFD_CLOEXEC, kBackingFdMin);
-  if (memfd < 0)
-    memfd = raw_fd;
-  else
-    libc_passthrough().close(raw_fd);
-  {
-    std::lock_guard<std::mutex> lk(owned_fds_mutex_);
-    owned_fds_.insert(memfd);
+  std::ranges::sort(backed);
+  std::vector<std::pair<uint64_t, size_t>> missing;
+  uint64_t cursor = gpu_va;
+  for (const auto &[begin, backed_end] : backed) {
+    if (cursor < begin)
+      missing.emplace_back(cursor, static_cast<size_t>(begin - cursor));
+    cursor = std::max(cursor, backed_end);
   }
+  if (cursor < end)
+    missing.emplace_back(cursor, static_cast<size_t>(end - cursor));
 
-  if (ftruncate(memfd, static_cast<off_t>(aligned_size)) != 0) {
+  for (const auto &[range_va, range_size] : missing) {
+    auto raw_fd = memfd_create("rocjitsu_scratch", MFD_CLOEXEC);
+    if (raw_fd < 0)
+      return false;
+
+    int memfd = safe_fcntl(raw_fd, F_DUPFD_CLOEXEC, kBackingFdMin);
+    if (memfd < 0)
+      memfd = raw_fd;
+    else
+      libc_passthrough().close(raw_fd);
+    {
+      std::lock_guard<std::mutex> lk(owned_fds_mutex_);
+      owned_fds_.insert(memfd);
+    }
+
+    if (ftruncate(memfd, static_cast<off_t>(range_size)) != 0) {
+      {
+        std::lock_guard<std::mutex> lk(owned_fds_mutex_);
+        owned_fds_.erase(memfd);
+      }
+      libc_passthrough().close(memfd);
+      return false;
+    }
+    auto *host_ptr = safe_mmap(nullptr, range_size, PROT_READ | PROT_WRITE, MAP_SHARED, memfd, 0);
+    if (host_ptr == MAP_FAILED) {
+      {
+        std::lock_guard<std::mutex> lk(owned_fds_mutex_);
+        owned_fds_.erase(memfd);
+      }
+      libc_passthrough().close(memfd);
+      return false;
+    }
     {
       std::lock_guard<std::mutex> lk(owned_fds_mutex_);
       owned_fds_.erase(memfd);
     }
     libc_passthrough().close(memfd);
-    return false;
-  }
-  auto *host_ptr = safe_mmap(nullptr, aligned_size, PROT_READ | PROT_WRITE, MAP_SHARED, memfd, 0);
-  if (host_ptr == MAP_FAILED) {
+    std::memset(host_ptr, 0, range_size);
+    // Driver-owned for the same reason as the allocation path: the backing is a
+    // memfd this function created and mapped read-write.
+    proc->map_pages(range_va, host_ptr, range_size, amdgpu::Mtype::RW,
+                    KfdProcess::HostExtentOwner::Driver);
+
     {
-      std::lock_guard<std::mutex> lk(owned_fds_mutex_);
-      owned_fds_.erase(memfd);
+      std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
+      KfdProcess::GpuAllocation alloc{};
+      alloc.gpu_va = range_va;
+      alloc.size = range_size;
+      alloc.host_ptr = host_ptr;
+      alloc.host_ptr_owned = true;
+      alloc.handle = proc->next_handle_++;
+      alloc.memfd = -1;
+      proc->allocations_[alloc.handle] = alloc;
     }
-    libc_passthrough().close(memfd);
-    return false;
-  }
-  {
-    std::lock_guard<std::mutex> lk(owned_fds_mutex_);
-    owned_fds_.erase(memfd);
-  }
-  libc_passthrough().close(memfd);
-  std::memset(host_ptr, 0, aligned_size);
-  // Driver-owned for the same reason as the allocation path: the backing is a
-  // memfd this function created and mapped read-write.
-  proc->map_pages(gpu_va, host_ptr, aligned_size, amdgpu::Mtype::RW,
-                  KfdProcess::HostExtentOwner::Driver);
 
-  {
-    std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
-    KfdProcess::GpuAllocation alloc{};
-    alloc.gpu_va = gpu_va;
-    alloc.size = aligned_size;
-    alloc.host_ptr = host_ptr;
-    alloc.host_ptr_owned = true;
-    alloc.handle = proc->next_handle_++;
-    alloc.memfd = -1;
-    proc->allocations_[alloc.handle] = alloc;
+    util::Logger::vm([&](auto &os) {
+      os << "SCRATCH_BACKING pid=" << process_id << " gpu_va=0x" << std::hex << range_va
+         << " size=0x" << range_size << std::dec << " host=" << host_ptr;
+    });
   }
-
-  util::Logger::vm([&](auto &os) {
-    os << "SCRATCH_BACKING pid=" << process_id << " gpu_va=0x" << std::hex << gpu_va << " size=0x"
-       << aligned_size << std::dec << " host=" << host_ptr;
-  });
-
   return true;
 }
 
@@ -4154,7 +4168,8 @@ void SimulatedKfd::complete_runtime_queue_exception(uint32_t process_id, uint32_
 }
 
 bool SimulatedKfd::signal_runtime_queue_exception(uint32_t gpu_id, uint32_t queue_id,
-                                                  uint32_t process_id, uint64_t exception_mask) {
+                                                  uint32_t process_id, uint64_t exception_mask,
+                                                  bool wait_for_ack) {
   auto *gpu = find_gpu(gpu_id);
   if (!gpu || !gpu->soc || exception_mask == 0)
     return false;
@@ -4189,7 +4204,8 @@ bool SimulatedKfd::signal_runtime_queue_exception(uint32_t gpu_id, uint32_t queu
   bool published = false;
   {
     std::lock_guard<std::mutex> lock(publication_lock->publication_mutex);
-    published = publisher->publish_queue_exception(queue_id, process_id, exception_mask);
+    published =
+        publisher->publish_queue_exception(queue_id, process_id, exception_mask, wait_for_ack);
   }
   if (queue_exception_cleanup_hook_for_testing_)
     queue_exception_cleanup_hook_for_testing_(false);
@@ -6054,18 +6070,24 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg, int *target_me
       auto *gpu = find_gpu(event.gpu_id);
       if (!gpu || !gpu->soc)
         return -ENODEV;
-      // Drop debug_sessions_mutex_ first: signal_queue_exception() takes the CU
-      // wave-state lock and waits up to a second for the target to observe the
-      // exception word, while the engine thread runs its issue loop under that
-      // same wave-state lock and calls back into the trap/watchpoint handlers,
-      // which take debug_sessions_mutex_. Holding it across the call inverts
-      // that order -- the inversion DISABLE and SUSPEND_QUEUES both avoid -- and
-      // would additionally stall every trap callback for the duration of the
-      // wait. Nothing below this point reads debug_sessions_ or session_it.
+      // Drop debug_sessions_mutex_ before entering the CU wave-state locks:
+      // trap callbacks acquire these in the opposite order. Nothing below
+      // this point reads debug_sessions_ or session_it.
       lk.unlock();
-      const bool delivered = signal_runtime_queue_exception(
-          event.gpu_id, event.queue_id, target_proc->process_id(), event.exception_mask);
-      return delivered ? 0 : -ENOENT;
+      // KFD's SEND_RUNTIME_EVENT publishes the status and event without
+      // waiting for ROCr to acknowledge them. ROCr removes its async exception
+      // handler after a fatal error, so later waves forwarding their aborts
+      // cannot satisfy such a wait. A debugger can also have the host stopped.
+      const bool published = signal_runtime_queue_exception(
+          event.gpu_id, event.queue_id, target_proc->process_id(), event.exception_mask,
+          /*wait_for_ack=*/false);
+      if (published)
+        return 0;
+      // The runtime may already have destroyed this queue after the first
+      // forwarded abort. KFD accepts that stale request too. Keep reporting
+      // actual publication failures for queues that still exist.
+      std::lock_guard<std::mutex> alloc_lock(target_proc->alloc_mutex_);
+      return target_proc->queue_snapshot_map_.contains(event.queue_id) ? -ENOENT : 0;
     }
     std::lock_guard<std::mutex> runtime_lock(runtime_handshake_mutex_);
     runtime_acked_.insert(target_pid);

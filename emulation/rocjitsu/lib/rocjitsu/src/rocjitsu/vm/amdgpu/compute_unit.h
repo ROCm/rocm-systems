@@ -59,6 +59,9 @@ class ComputeUnitTestAccess;
 }
 namespace amdgpu {
 
+/// @brief Reporting policy for pending memory-result register accesses.
+enum class MemoryWaitDiagnostics { Off, Warn };
+
 class CommandProcessor;
 class AsyncInstructionWindow;
 class MmaAdmissionCache;
@@ -112,13 +115,16 @@ struct FunctionalQuantumResult {
 /// file type, instruction execution dispatch, wavefront creation) are
 /// implemented by IsaExecComputeUnit<Mode, Isa>. Use the create() factory
 /// to construct.
-class ComputeUnitCore : public simdojo::CompositeComponent {
+// Observers compile inline register accessors against this polymorphic type.
+// Its RTTI must be visible to GCC UBSan's vptr checks in separately loaded DSOs.
+class RJ_API_TYPE_EXPORT ComputeUnitCore : public simdojo::CompositeComponent {
   friend class AsyncInstructionWindow;
 
 public:
   static constexpr uint32_t kFunctionalQuantum = 1024;
   static constexpr uint32_t kDebugFunctionalQuantum = 64;
   static constexpr uint32_t kMaxNamedBarriers = 16;
+  static constexpr uint32_t kMaxMemoryWaitDiagnostics = 16;
 
   /// @brief Configuration for a compute unit.
   struct Config {
@@ -133,9 +139,19 @@ public:
     uint32_t functional_quantum = kFunctionalQuantum;
     /// Shared VM resources; null preserves direct-construction environment controls.
     std::shared_ptr<matrix_coexecution::ExecutionResources> async_resources = nullptr;
+    /// Report premature memory-result accesses and conflicting replay-source overwrites.
+    MemoryWaitDiagnostics memory_wait_diagnostics = MemoryWaitDiagnostics::Off;
   };
 
   ~ComputeUnitCore() override = default;
+  /// @brief Number of memory-wait hazards observed, including suppressed reports.
+  uint64_t memory_wait_diagnostic_count() const { return memory_wait_diagnostic_count_; }
+  /// @brief Number of replay-source hazards, including suppressed reports.
+  uint64_t xcnt_diagnostic_count() const { return xcnt_diagnostic_count_; }
+  /// @brief Account for an executed producer using resolved shared FLAT lanes.
+  void track_memory_wait(Instruction &inst, Wavefront &wf, uint64_t flat_shared_lanes = 0);
+  /// @brief Format a scoreboard hazard using its owning wavefront context.
+  static void report_memory_wait(void *context, const MemoryWaitScoreboard::Hazard &hazard);
 
   /// @brief Create a compute unit for the given architecture and execution mode.
   /// @param name Human-readable name (e.g., "cu0").
@@ -353,6 +369,8 @@ public:
 
   /// @brief Set the device VM service shared by legacy and PCI/VFIO queues.
   void set_gpu_vm(GpuVm *gpu_vm) {
+    instruction_vm_access_.reset();
+    inst_cache_.invalidate_all();
     gpu_vm_ = gpu_vm;
     l1_vector_.set_gpu_vm(gpu_vm);
     l1_scalar_.set_gpu_vm(gpu_vm);
@@ -425,9 +443,22 @@ public:
   /// @brief Set the execution plugin group (shared ownership).
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
     plugin_group_ = pg ? std::move(pg) : ExecutionPluginGroup::empty_group();
+    observes_before_execute_instruction_ = plugin_group_->observes_before_execute_instruction();
+    observes_after_execute_instruction_ = plugin_group_->observes_after_execute_instruction();
+    observes_async_instruction_issued_ = plugin_group_->observes_async_instruction_issued();
+    observes_memory_instruction_routing_ = plugin_group_->observes_memory_instruction_routing();
+    observes_vgpr_reads_ = plugin_group_->observes_vgpr_reads();
+    observes_vgpr_writes_ = plugin_group_->observes_vgpr_writes();
     observes_sgpr_reads_ = plugin_group_->observes_sgpr_reads();
+    observes_scalar_register_writes_ = plugin_group_->observes_scalar_register_writes();
     observes_memory_routing_ = plugin_group_->observes_memory_routing();
+    observes_register_access_ = config_.memory_wait_diagnostics != MemoryWaitDiagnostics::Off ||
+                                observes_vgpr_reads_ || observes_vgpr_writes_ ||
+                                observes_sgpr_reads_ || observes_scalar_register_writes_;
   }
+
+  /// Whether register notifications have a diagnostic or plugin consumer.
+  bool observes_register_access() const { return observes_register_access_; }
 
   /// @brief Return the execution plugin group.
   ExecutionPluginGroup &plugin_group() { return *plugin_group_; }
@@ -748,28 +779,48 @@ private:
   void write_sgpr(const Wavefront &wf, uint32_t reg_idx, uint32_t val) {
     if (!owns_sgpr_range(wf, reg_idx, 1))
       return;
-    plugin_group_->onAmdgpuWriteScalarRegister(
-        &wf, RegisterRef{RegClass::SGPR, static_cast<uint16_t>(reg_idx - wf.sgpr_alloc().base), 1});
+    notify_scalar_register_write(
+        wf, RegisterRef{RegClass::SGPR, static_cast<uint16_t>(reg_idx - wf.sgpr_alloc().base), 1});
     sgpr_file_[reg_idx] = val;
   }
 
   void write_sgpr64(const Wavefront &wf, uint32_t reg_idx, uint64_t val) {
     if (!owns_sgpr_range(wf, reg_idx, 2))
       return;
-    plugin_group_->onAmdgpuWriteScalarRegister(
-        &wf, RegisterRef{RegClass::SGPR, static_cast<uint16_t>(reg_idx - wf.sgpr_alloc().base), 2});
+    notify_scalar_register_write(
+        wf, RegisterRef{RegClass::SGPR, static_cast<uint16_t>(reg_idx - wf.sgpr_alloc().base), 2});
     sgpr_file_[reg_idx] = static_cast<uint32_t>(val);
     sgpr_file_[reg_idx + 1] = static_cast<uint32_t>(val >> 32);
   }
 
   void notify_scalar_register_read(const Wavefront &wf, RegisterRef reg) const {
+    if (!observes_register_access_)
+      return;
+    if (wf.memory_wait_checks_enabled() && wf.memory_wait_shadow().pending(reg))
+      check_active_memory_wait(reg, ~uint64_t{0}, 0xf, false);
     if (observes_sgpr_reads_)
-      plugin_group_->onAmdgpuReadScalarRegister(&wf, reg);
+      observe_scalar_register_read(wf, reg);
   }
 
   void notify_scalar_register_write(const Wavefront &wf, RegisterRef reg) const {
-    plugin_group_->onAmdgpuWriteScalarRegister(&wf, reg);
+    if (!observes_register_access_)
+      return;
+    if (wf.memory_wait_checks_enabled() && wf.memory_wait_shadow().pending(reg, true))
+      check_active_memory_wait(reg, ~uint64_t{0}, 0xf, true);
+    if (observes_scalar_register_writes_)
+      observe_scalar_register_write(wf, reg);
   }
+
+  // Keep observer-only TLS suspension out of instruction access paths when no
+  // plugins are attached. These callbacks must not consume pending results.
+  RJ_API_EXPORT RJ_NOINLINE void observe_scalar_register_read(const Wavefront &wf,
+                                                              RegisterRef reg) const;
+  RJ_API_EXPORT RJ_NOINLINE void observe_scalar_register_write(const Wavefront &wf,
+                                                               RegisterRef reg) const;
+  RJ_API_EXPORT RJ_NOINLINE void observe_vgpr_read(const Wavefront *wf, uint32_t reg_idx,
+                                                   uint64_t lane_mask, uint8_t byte_mask) const;
+  RJ_API_EXPORT RJ_NOINLINE void observe_vgpr_write(const Wavefront *wf, uint32_t reg_idx,
+                                                    uint64_t lane_mask, uint8_t byte_mask) const;
 
 public:
   /// @brief Read a scalar register from the physical SGPR file.
@@ -811,8 +862,17 @@ public:
   /// storage access with this hook.
   void notify_vgpr_read(const Wavefront *wf, uint32_t reg_idx, uint64_t lane_mask,
                         uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const {
-    if (wf && lane_mask != 0 && owns_vgpr_range(*wf, reg_idx, 1))
-      plugin_group_->onAmdgpuReadVgprLanes(wf, reg_idx, lane_mask, byte_mask);
+    if (!observes_register_access_)
+      return;
+    if (wf && lane_mask != 0 && owns_vgpr_range(*wf, reg_idx, 1)) {
+      if (wf->memory_wait_checks_enabled() &&
+          wf->memory_wait_shadow().test(reg_idx - wf->vgpr_alloc().base))
+        check_active_memory_wait(
+            {RegClass::VGPR, static_cast<uint16_t>(reg_idx - wf->vgpr_alloc().base), 1}, lane_mask,
+            byte_mask, false);
+      if (observes_vgpr_reads_)
+        observe_vgpr_read(wf, reg_idx, lane_mask, byte_mask);
+    }
   }
 
   /// @brief Notify plugins that a wavefront wrote lanes of a physical VGPR.
@@ -820,10 +880,19 @@ public:
   /// Raw VM/storage writes deliberately bypass this hook.
   void notify_vgpr_write(const Wavefront *wf, uint32_t reg_idx, uint64_t lane_mask,
                          uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const {
+    if (!observes_register_access_)
+      return;
     if (wf)
       lane_mask &= wf->vgpr_write_mask();
-    if (wf && lane_mask != 0 && byte_mask != 0 && owns_vgpr_range(*wf, reg_idx, 1))
-      plugin_group_->onAmdgpuWriteVgprLanes(wf, reg_idx, lane_mask, byte_mask);
+    if (wf && lane_mask != 0 && byte_mask != 0 && owns_vgpr_range(*wf, reg_idx, 1)) {
+      if (wf->memory_wait_checks_enabled() &&
+          wf->memory_wait_shadow().test(reg_idx - wf->vgpr_alloc().base, true))
+        check_active_memory_wait(
+            {RegClass::VGPR, static_cast<uint16_t>(reg_idx - wf->vgpr_alloc().base), 1}, lane_mask,
+            byte_mask, true);
+      if (observes_vgpr_writes_)
+        observe_vgpr_write(wf, reg_idx, lane_mask, byte_mask);
+    }
   }
 
   /// @brief Report a scalar-lane VGPR write without applying vector write masks.
@@ -832,8 +901,17 @@ public:
   void notify_scalar_lane_vgpr_write(
       const Wavefront *wf, uint32_t reg_idx, uint64_t lane_mask,
       uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const {
-    if (wf && lane_mask != 0 && byte_mask != 0 && owns_vgpr_range(*wf, reg_idx, 1))
-      plugin_group_->onAmdgpuWriteVgprLanes(wf, reg_idx, lane_mask, byte_mask);
+    if (!observes_register_access_)
+      return;
+    if (wf && lane_mask != 0 && byte_mask != 0 && owns_vgpr_range(*wf, reg_idx, 1)) {
+      if (wf->memory_wait_checks_enabled() &&
+          wf->memory_wait_shadow().test(reg_idx - wf->vgpr_alloc().base, true))
+        check_active_memory_wait(
+            {RegClass::VGPR, static_cast<uint16_t>(reg_idx - wf->vgpr_alloc().base), 1}, lane_mask,
+            byte_mask, true);
+      if (observes_vgpr_writes_)
+        observe_vgpr_write(wf, reg_idx, lane_mask, byte_mask);
+    }
   }
 
   /// @brief Notify plugins that lanes of a physical VGPR were read.
@@ -1156,6 +1234,12 @@ protected:
     WaveStateGuard &operator=(const WaveStateGuard &) = delete;
     ~WaveStateGuard() {
       const bool outermost = --cu_.wave_state_depth_ == 0;
+      if (outermost && std::exchange(cu_.instruction_access_cleanup_pending_, false) &&
+          !cu_.has_active_wfs()) {
+        // Instruction issue has returned. Empty the cache before releasing owners
+        // whose destructors can reenter the CU.
+        auto retired = std::exchange(cu_.instruction_vm_access_, std::nullopt);
+      }
       std::function<void()> notification_flush_hook;
       if (outermost)
         notification_flush_hook = std::exchange(cu_.notification_flush_hook_for_testing_, {});
@@ -1193,6 +1277,8 @@ protected:
   /// @details Only ever touched under @ref wave_state_mutex_, so the value
   /// belongs to whichever thread currently owns it.
   unsigned wave_state_depth_ = 0;
+  // The final wave retired inside a guard; keep its snapshot until issue returns.
+  bool instruction_access_cleanup_pending_ = false;
   /// @brief Workgroups that finished while the wave-state lock was held.
   /// @details Drained by @ref flush_cp_notifications once the lock is dropped.
   std::vector<std::pair<uint32_t, uint32_t>> pending_wg_completions_;
@@ -1247,6 +1333,10 @@ protected:
   std::atomic<bool> debug_active_{false};
   CommandProcessor *cp_ = nullptr;
   GpuVm *gpu_vm_ = nullptr;
+  // Keep the fetch snapshot across instructions, including ones that release their wavefront.
+  std::optional<GpuVmAccess> instruction_vm_access_;
+  AddressSpaceHandle instruction_address_space_;
+  uint32_t instruction_vmid_ = 0;
 
   std::unordered_map<uint64_t, uint32_t> active_wgs_;
 
@@ -1270,9 +1360,19 @@ protected:
   uint64_t private_aperture_limit_ = 0;
 
   std::shared_ptr<ExecutionPluginGroup> plugin_group_ = ExecutionPluginGroup::empty_group();
+  bool observes_before_execute_instruction_ = false;
+  bool observes_after_execute_instruction_ = false;
+  bool observes_async_instruction_issued_ = false;
+  bool observes_memory_instruction_routing_ = false;
+  bool observes_vgpr_reads_ = false;
+  bool observes_vgpr_writes_ = false;
   bool observes_sgpr_reads_ = false;
+  bool observes_scalar_register_writes_ = false;
   bool pool_driven_ = false;
   bool observes_memory_routing_ = false;
+  bool observes_register_access_ = config_.memory_wait_diagnostics != MemoryWaitDiagnostics::Off;
+  uint64_t memory_wait_diagnostic_count_ = 0;
+  uint64_t xcnt_diagnostic_count_ = 0;
 
   /// @brief Resolve the owner of a physical SGPR from its allocation block.
   /// @details Power-of-two block sizes use a shift on the instruction read path;
@@ -1321,6 +1421,10 @@ inline bool InstructionComputeUnitView::setreg_vgpr_msb_fixup() const {
   return raw_cu().setreg_vgpr_msb_fixup();
 }
 inline rj_code_arch_t InstructionComputeUnitView::arch() const { return raw_cu().arch(); }
+inline bool InstructionComputeUnitView::observes_register_access() const {
+  return raw_cu().observes_register_access();
+}
+inline bool InstructionComputeUnitView::debug_active() const { return raw_cu().debug_active(); }
 inline uint32_t InstructionComputeUnitView::wf_size() const { return raw_cu().wf_size(); }
 inline uint32_t InstructionComputeUnitView::sgprs_per_wf() const {
   return raw_cu().config().sgprs_per_wf;
@@ -1356,11 +1460,12 @@ inline void InstructionComputeUnitView::notify_trap_complete(Wavefront &wf) {
   raw_cu().notify_trap_complete(wf);
 }
 inline bool InstructionComputeUnitView::observes_tensor_dma_memory_access() const {
-  return raw_cu().plugin_group().observes_tensor_dma_memory_access();
+  return raw_cu().plugin_group().observes_tensor_dma_memory_access(raw_wavefront());
 }
 inline void InstructionComputeUnitView::report_tensor_dma_memory_access(
     const TensorDmaMemoryAccessObservation &access) {
-  raw_cu().plugin_group().onAmdgpuTensorDmaMemoryAccess(access);
+  SuspendedMemoryWaitCheck observer_scope;
+  raw_cu().plugin_group().onAmdgpuTensorDmaMemoryAccess(access, raw_wavefront());
 }
 
 /// @brief Execution-mode-aware compute unit shell.
@@ -1544,6 +1649,8 @@ public:
   void notify_vgpr_read_by_reg(
       uint32_t reg_idx, uint64_t lane_mask,
       uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const override {
+    if (!this->observes_vgpr_reads_)
+      return;
     if (auto *wf = vgpr_owner(reg_idx))
       this->notify_vgpr_read(wf, reg_idx, lane_mask, byte_mask);
   }
@@ -1551,6 +1658,8 @@ public:
   void notify_vgpr_write_by_reg(
       uint32_t reg_idx, uint64_t lane_mask,
       uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const override {
+    if (!this->observes_vgpr_writes_)
+      return;
     if (auto *wf = vgpr_owner(reg_idx))
       this->notify_vgpr_write(wf, reg_idx, lane_mask, byte_mask);
   }

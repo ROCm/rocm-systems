@@ -87,7 +87,8 @@ Explicit E/D/H knobs take priority and may exceed the automatic budget. A config
 without a table uses serial defaults for unspecified knobs.
 
 Use `rocjitsu --config <path> --thread-budget-table` to show expected allocations
-without starting a VM. Mirage embeds the native tables in its RocJITsu backend.
+without starting a VM. `rocjitsu --cpu-thread-budget N` replaces the JSON ceiling
+for that launch. Mirage embeds the native tables in its RocJITsu backend.
 
 ### `exec_mode`
 
