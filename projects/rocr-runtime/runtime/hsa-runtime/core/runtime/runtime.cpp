@@ -1117,7 +1117,9 @@ hsa_status_t Runtime::VMemoryPtrInfo(const void* ptr, hsa_amd_pointer_info_t* in
       // owning agent and the allocation's memory flags belong to the exporter. Report those as
       // unset instead of resolving them through MemoryHandle::region, which is NULL here.
       const AMD::MemoryRegion* memRegion =
-          static_cast<const AMD::MemoryRegion*>(mappedHandleIt->second.mem_handle->region);
+          mappedHandleIt->second.mem_handle->imported
+              ? nullptr
+              : static_cast<const AMD::MemoryRegion*>(mappedHandleIt->second.mem_handle->region);
       info->agentOwner = {};
       info->global_flags = 0;
       info->alloc_flags = 0;
@@ -4605,7 +4607,7 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
 
     // For imported handles, we don't have a region/drm_owner 
     // we can import into first enabled gpu agent for getting an mmap_offset
-    if (!memHandle->drm_owner && !memHandle->region) {
+    if (!memHandle->drm_owner && memHandle->imported) {
       const auto& gpus = core::Runtime::runtime_singleton_->gpu_agents();
       if (gpus.empty()) return HSA_STATUS_ERROR;
       core::Agent* defaultDrm = gpus[0];
@@ -4695,9 +4697,7 @@ Runtime::MemoryHandle::MemoryHandle(const MemoryRegion* region, uint64_t flags_u
       is_fabric_handle(false),
       alloc_flag(alloc_flag),
       drm_owner(nullptr),
-      imported_region(nullptr),
-      imported_alloc_flag(MemoryRegion::AllocateNoFlags),
-      imported_size(0) {
+      import_info_queried(false) {
   assert(driver_handle.handle != 0);
 }
 
@@ -4710,9 +4710,7 @@ Runtime::MemoryHandle::MemoryHandle(int dmabuf_fd)
       is_fabric_handle(false),
       alloc_flag(MemoryRegion::AllocateNoFlags),
       drm_owner(nullptr),
-      imported_region(nullptr),
-      imported_alloc_flag(MemoryRegion::AllocateNoFlags),
-      imported_size(0) {}
+      import_info_queried(false) {}
 
 Runtime::MemoryHandle::MemoryHandle(hsa_fabric_handle_t fabric_handle)
     : region(nullptr),
@@ -4723,9 +4721,7 @@ Runtime::MemoryHandle::MemoryHandle(hsa_fabric_handle_t fabric_handle)
       is_fabric_handle(true),
       alloc_flag(MemoryRegion::AllocateNoFlags),
       drm_owner(nullptr),
-      imported_region(nullptr),
-      imported_alloc_flag(MemoryRegion::AllocateNoFlags),
-      imported_size(0) {}
+      import_info_queried(false) {}
 
 Runtime::MemoryHandle::~MemoryHandle() {
   if (driver_handle.handle != 0) {
@@ -4989,6 +4985,30 @@ const core::MemoryRegion* Runtime::ResolveImportedRegion(const core::DmaBufInfo&
   return system_regions_fine_[0].get();
 }
 
+/* Recover an imported handle's placement and size from its dmabuf and cache it in
+ * the handle's own fields. Ask each agent driver in turn and take the first that
+ * recognizes the fd; AgentDriver(KFD) is not used because it throws when no KFD
+ * driver is present. A buffer the driver cannot describe is marked queried so the
+ * ioctl is not repeated. Caller must hold memory_lock_. */
+void Runtime::EnsureImportInfo(MemoryHandle* memoryHandle) {
+  if (!memoryHandle->imported || memoryHandle->import_info_queried) return;
+  memoryHandle->import_info_queried = true;
+
+  if (memoryHandle->driver_handle.dmabuf_fd < 0) return;
+
+  core::DmaBufInfo info = {};
+  for (auto& driver : AgentDrivers()) {
+    if (driver->QueryDmaBufInfo(memoryHandle->driver_handle.dmabuf_fd, &info) ==
+        HSA_STATUS_SUCCESS) {
+      memoryHandle->region = ResolveImportedRegion(info);
+      memoryHandle->driver_handle.size = info.size;
+      /* alloc_flag stays AllocateNoFlags: the dmabuf carries no memory-type
+       * metadata, and the exporter may legitimately have used MEMORY_TYPE_NONE. */
+      return;
+    }
+  }
+}
+
 hsa_status_t Runtime::VMemoryImportShareableHandle(int dmabuf_fd,
                                                    hsa_amd_vmem_alloc_handle_t* memoryOnlyHandle) {
   /* The per-GPU import of this dmabuf is deferred until hsa_amd_vmem_set_access is called, but the
@@ -4998,28 +5018,10 @@ hsa_status_t Runtime::VMemoryImportShareableHandle(int dmabuf_fd,
   int owned_fd = os::DmaBufDup(dmabuf_fd);
   if (owned_fd < 0) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
-  /* Recover placement and size while we still have an fd. Ask each agent driver
-   * in turn and take the first that recognizes it; AgentDriver(KFD) is not used
-   * because it throws when no KFD driver is present. */
-  core::DmaBufInfo info = {};
-  bool have_info = false;
-  for (auto& driver : AgentDrivers()) {
-    if (driver->QueryDmaBufInfo(owned_fd, &info) == HSA_STATUS_SUCCESS) {
-      have_info = true;
-      break;
-    }
-  }
-
+  /* Placement is not recovered here: importers that never query it should not pay
+   * for an ioctl. EnsureImportInfo does it on the first query that needs it. */
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
   auto memoryHandle = std::make_unique<MemoryHandle>(owned_fd);
-  if (have_info) {
-    memoryHandle->imported_region = ResolveImportedRegion(info);
-    memoryHandle->imported_size = info.size;
-    /* imported_alloc_flag stays AllocateNoFlags: the dmabuf carries no memory-type
-     * metadata, and the exporter may legitimately have created the allocation with
-     * MEMORY_TYPE_NONE. Reporting a recovered type we cannot observe would be worse
-     * than reporting none. */
-  }
   *memoryOnlyHandle = MemoryHandle::Convert(memoryHandle.get());
   memory_handles.emplace(*memoryOnlyHandle, std::move(memoryHandle));
   return HSA_STATUS_SUCCESS;
@@ -5082,15 +5084,11 @@ hsa_status_t Runtime::VMemoryGetAllocPropertiesFromHandle(hsa_amd_vmem_alloc_han
   MemoryHandle* memoryHandle = FindMemoryHandle(MemoryHandle::Convert(allocHandle));
   if (memoryHandle == nullptr) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
 
-  /* Imported handles own no region; report the placement recovered at import
-   * time instead. Unresolved imports keep reporting nothing. */
-  const MemoryRegion* region =
-      memoryHandle->imported ? memoryHandle->imported_region : memoryHandle->region;
-  const MemoryRegion::AllocateFlags alloc_flag =
-      memoryHandle->imported ? memoryHandle->imported_alloc_flag : memoryHandle->alloc_flag;
+  EnsureImportInfo(memoryHandle);
 
+  const MemoryRegion* region = memoryHandle->region;
   *mem_region = region;
-  *type = (region != nullptr && (alloc_flag & core::MemoryRegion::AllocatePinned))
+  *type = (region != nullptr && (memoryHandle->alloc_flag & core::MemoryRegion::AllocatePinned))
               ? MEMORY_TYPE_PINNED
               : MEMORY_TYPE_NONE;
   return HSA_STATUS_SUCCESS;
@@ -5117,29 +5115,21 @@ hsa_status_t Runtime::VMemoryGetHandleInfo(hsa_amd_vmem_alloc_handle_t allocHand
   MemoryHandle* memoryHandle = FindMemoryHandle(MemoryHandle::Convert(allocHandle));
   if (memoryHandle == nullptr) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
 
-  const MemoryRegion* region =
-      memoryHandle->imported ? memoryHandle->imported_region : memoryHandle->region;
+  EnsureImportInfo(memoryHandle);
+  const MemoryRegion* region = memoryHandle->region;
 
   /* An unresolved import has no agent to report, and succeeding would hand back a
    * null one the caller cannot tell apart from a real agent. */
   if (memoryHandle->imported && region == nullptr)
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
-
-  /* Fill only the members that fit the layout the caller was built against, and
-   * report back the prefix actually produced, as hsa_amd_pointer_info does. */
+  
+  // Fill in the handle info structure with the allocation size and agent.
   const size_t caller_size = info->size;
-  auto fits = [caller_size](size_t end_offset) { return caller_size >= end_offset; };
   info->size = Min(caller_size, sizeof(hsa_amd_vmem_handle_info_t));
-
-  if (fits(offsetof(hsa_amd_vmem_handle_info_t, alloc_size) + sizeof(info->alloc_size))) {
-    info->alloc_size =
-        memoryHandle->imported ? memoryHandle->imported_size : memoryHandle->driver_handle.size;
-  }
-  if (fits(offsetof(hsa_amd_vmem_handle_info_t, agent) + sizeof(info->agent))) {
-    info->agent = (region != nullptr && region->owner() != nullptr)
-        ? core::Agent::Convert(region->owner())
-        : hsa_agent_t{0};
-  }
+  info->alloc_size = memoryHandle->driver_handle.size;
+  info->agent = (region != nullptr && region->owner() != nullptr)
+      ? core::Agent::Convert(region->owner())
+      : hsa_agent_t{0};
   return HSA_STATUS_SUCCESS;
 }
 
