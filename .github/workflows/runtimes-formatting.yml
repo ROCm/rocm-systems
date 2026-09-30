@@ -17,8 +17,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # The systems PR bot requires a check run with this exact name.
   pre-commit:
+    # Distinct names let the PR bot wait for every applicable workflow.
+    name: pre-commit / runtimes
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:

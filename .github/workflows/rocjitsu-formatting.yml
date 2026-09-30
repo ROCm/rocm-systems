@@ -8,10 +8,8 @@ on:
     # `pre-commit run --all-files` locally to catch issues outside this
     # scope. We should incrementally add more paths here as projects
     # adopt pre-commit.
-    # This job is named `pre-commit`, which is the one entry in
-    # `checks.required_check_runs` in tools/systems_pr_bot/policy.yml, so a
-    # path that is missing here leaves therock-pr-bot waiting out its timeout
-    # on a check run that is never created.
+    # The PR bot's path-scoped requirement in tools/systems_pr_bot/policy.yml
+    # mirrors these filters; its tests check that the two stay synchronized.
     paths:
       - "emulation/mirage/**"
       - "emulation/rocjitsu/**"
@@ -27,6 +25,7 @@ concurrency:
 
 jobs:
   pre-commit:
+    name: pre-commit / rocjitsu
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

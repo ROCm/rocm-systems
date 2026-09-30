@@ -12,9 +12,13 @@ Run locally:
     pytest tools/systems_pr_bot/test_policy_check_ut.py
 """
 
+import io
+import os
 import re
 import sys
 import unittest
+import urllib.parse
+from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from unittest import mock
@@ -71,7 +75,7 @@ def make_policy(**overrides: Any) -> pc.Policy:
         ],
         unit_test_exempt_paths=[],
         bump_bot_authors=["assistant-librarian", "systems-assistant", "dependabot"],
-        required_checks=["pre-commit"],
+        required_checks=[pc.RequiredCheck("pre-commit", [], [])],
         precommit_failure_comment=None,
     )
     defaults.update(overrides)
@@ -531,6 +535,351 @@ class RequiredCheckRunTests(unittest.TestCase):
                 )
                 upsert_comment.assert_called_once()
 
+    def test_failure_help_uses_only_selected_scoped_formatting_checks(self) -> None:
+        policy = make_policy(
+            required_checks=[pc.RequiredCheck("pre-commit / runtimes", [], [])],
+            precommit_failure_comment=pc.FailureComment(
+                title="Formatting failed", body="Run pre-commit locally."
+            ),
+        )
+        for name, expected_calls in (
+            ("pre-commit / runtimes", 1),
+            ("pre-commit / cuid", 0),
+            ("pre-commit", 0),
+        ):
+            with self.subTest(name=name), mock.patch.object(
+                pc, "upsert_comment"
+            ) as comment:
+                pc.maybe_comment_precommit_failure(
+                    "owner",
+                    "repo",
+                    7,
+                    "token",
+                    policy,
+                    [make_check_run("failure", name)],
+                )
+                self.assertEqual(comment.call_count, expected_calls)
+
+
+class CheckRunPaginationTests(unittest.TestCase):
+    def test_failure_and_required_run_on_second_page(self) -> None:
+        for first_required in ([], [make_check_run("success")]):
+            with self.subTest(first_required=first_required):
+                first_page = first_required + [
+                    make_check_run("success", f"other-{index}")
+                    for index in range(100 - len(first_required))
+                ]
+                with mock.patch.object(
+                    pc,
+                    "gh_get",
+                    side_effect=[
+                        {"total_count": 101, "check_runs": first_page},
+                        {"total_count": 101, "check_runs": [make_check_run("failure")]},
+                    ],
+                ) as get:
+                    runs = pc.get_check_runs("owner", "repo", "sha", "token")
+                self.assertEqual(len(runs), 101)
+                missing, failing, _ = pc.summarize_required_checks(make_policy(), runs)
+                self.assertEqual(missing, [])
+                self.assertEqual(failing, ["pre-commit=failure"])
+                self.assertEqual(
+                    get.call_args_list,
+                    [
+                        mock.call(
+                            "https://api.github.com/repos/owner/repo/commits/sha/check-runs"
+                            f"?filter=latest&per_page=100&page={page}",
+                            "token",
+                        )
+                        for page in (1, 2)
+                    ],
+                )
+
+    def test_empty_page_stops_pagination(self) -> None:
+        with mock.patch.object(
+            pc,
+            "gh_get",
+            side_effect=[
+                {"total_count": 2, "check_runs": [make_check_run("success")]},
+                {"total_count": 2, "check_runs": []},
+            ],
+        ) as get:
+            self.assertEqual(
+                pc.get_check_runs("owner", "repo", "sha", "token"),
+                [make_check_run("success")],
+            )
+        self.assertEqual(get.call_count, 2)
+
+    def test_error_on_later_page_does_not_return_partial_success(self) -> None:
+        with mock.patch.object(
+            pc,
+            "gh_get",
+            side_effect=[
+                {"total_count": 101, "check_runs": [make_check_run("success")] * 100},
+                RuntimeError("GET page 2 -> 403"),
+            ],
+        ), self.assertRaisesRegex(RuntimeError, "GET page 2 -> 403"):
+            pc.get_check_runs("owner", "repo", "sha", "token")
+
+    def test_malformed_payload_fails_loudly(self) -> None:
+        for payload in (
+            [],
+            {},
+            {"total_count": 1, "check_runs": None},
+            {"total_count": -1, "check_runs": []},
+            {"total_count": True, "check_runs": []},
+            {"total_count": 1, "check_runs": [None]},
+        ):
+            with self.subTest(payload=payload), mock.patch.object(
+                pc, "gh_get", return_value=payload
+            ), self.assertRaisesRegex(RuntimeError, "Unexpected check-runs payload"):
+                pc.get_check_runs("owner", "repo", "sha", "token")
+
+
+class RequiredCheckScopeTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.policy = pc.load_policy(THIS_DIR / "policy.yml")
+
+    def _required(self, *paths: str, branch: str = "develop") -> List[str]:
+        selected = pc.select_required_checks(
+            self.policy, [make_file(path) for path in paths], branch
+        )
+        return [check.name for check in selected.required_checks]
+
+    def test_multi_subtree_requires_both_workflows(self) -> None:
+        self.assertEqual(
+            self._required("runtimes/Cargo.toml", "emulation/rocjitsu/rocjitsu.py"),
+            ["pre-commit / runtimes", "pre-commit / rocjitsu"],
+        )
+
+    def test_shared_config_requires_both_root_config_workflows(self) -> None:
+        self.assertEqual(
+            self._required(".pre-commit-config.yaml"),
+            ["pre-commit / runtimes", "pre-commit / rocjitsu"],
+        )
+
+    def test_base_branch_is_part_of_scope(self) -> None:
+        self.assertEqual(
+            self._required("runtimes/Cargo.toml", branch="pr-bot-test"), []
+        )
+        self.assertEqual(
+            self._required("emulation/mirage/src/lib.rs", branch="pr-bot-test"),
+            ["pre-commit / rocjitsu"],
+        )
+
+    def test_each_project_workflow_and_documentation_exclusions(self) -> None:
+        for scope in ("cuid", "rocprofiler-compute"):
+            with self.subTest(scope=scope):
+                self.assertEqual(
+                    self._required(f"projects/{scope}/src/runtime.cpp"),
+                    [f"pre-commit / {scope}"],
+                )
+                self.assertEqual(
+                    self._required(f".github/workflows/{scope}-formatting.yml"),
+                    [f"pre-commit / {scope}"],
+                )
+                self.assertEqual(self._required(f"projects/{scope}/README.md"), [])
+                self.assertEqual(self._required(f"projects/{scope}/docs/conf.py"), [])
+                self.assertEqual(
+                    self._required(f"projects/{scope}/.readthedocs.yaml"), []
+                )
+
+    def test_removed_files_and_both_rename_paths_trigger_checks(self) -> None:
+        for changed in (
+            make_file("runtimes/old.rs", status="removed"),
+            {
+                **make_file("elsewhere/new.rs", status="renamed"),
+                "previous_filename": "runtimes/old.rs",
+            },
+            {
+                **make_file("runtimes/new.rs", status="renamed"),
+                "previous_filename": "elsewhere/old.rs",
+            },
+        ):
+            with self.subTest(changed=changed):
+                selected = pc.select_required_checks(self.policy, [changed], "develop")
+                self.assertEqual(
+                    [check.name for check in selected.required_checks],
+                    ["pre-commit / runtimes"],
+                )
+
+    def test_no_applicable_workflow_means_no_expected_checks(self) -> None:
+        self.assertEqual(self._required("docs/SYSTEMS_PR_BOT_FAQ.md"), [])
+
+    def test_actions_filters_match_slashes_optional_directories_and_repetition(
+        self,
+    ) -> None:
+        for pattern, value, expected in (
+            ("*.rs", "lib.rs", True),
+            ("*.rs", "src/lib.rs", False),
+            ("**/*.rs", "lib.rs", True),
+            ("**/*.rs", "src/deep/lib.rs", True),
+            ("runtimes/**", "runtimes/file\nname.rs", True),
+            ("projects/*/docs/**", "projects/cuid/docs/conf.py", True),
+            ("projects/*/docs/**", "projects/a/b/docs/conf.py", False),
+            ("*.jsx?", "page.js", True),
+            ("*.jsx?", "page.jsx", True),
+            ("v[12].[0-9]+", "v2.100", True),
+            ("v[12].[0-9]+", "v3.100", False),
+            (r"release/\+?", "release/+", True),
+        ):
+            with self.subTest(pattern=pattern, value=value):
+                self.assertEqual(
+                    pc._matches_workflow_filter(value, [pattern]), expected
+                )
+
+    def test_ordered_negative_filter_can_be_reincluded(self) -> None:
+        patterns = ["runtimes/**", "!**/*.md", "runtimes/README.md"]
+        self.assertTrue(pc._matches_workflow_filter("runtimes/README.md", patterns))
+        self.assertFalse(
+            pc._matches_workflow_filter("runtimes/ddi/README.md", patterns)
+        )
+
+    def test_unconditional_requirement_applies_to_any_pr(self) -> None:
+        policy = make_policy()
+        selected = pc.select_required_checks(policy, [], "anything")
+        self.assertEqual(selected.required_checks, policy.required_checks)
+
+
+class RequiredCheckPollingTests(unittest.TestCase):
+    """Exercise main(), mocking only GitHub I/O and the polling delay."""
+
+    def _run(
+        self,
+        snapshots: List[List[Dict[str, Any]]],
+        *,
+        paths: Optional[List[str]] = None,
+        body: Optional[str] = None,
+    ) -> tuple[int, int, int]:
+        remaining = iter(snapshots)
+        active: List[Dict[str, Any]] = []
+        polls = 0
+
+        def get(url: str, token: str) -> Any:
+            nonlocal active, polls
+            parsed = urllib.parse.urlparse(url)
+            query = urllib.parse.parse_qs(parsed.query)
+            if parsed.path.endswith("/pulls/7"):
+                return {
+                    "body": (
+                        body
+                        if body is not None
+                        else "Adds runtime tests and formatting.\nFixes #1234\n"
+                        "- [x] Look over the contributing guidelines"
+                    ),
+                    "base": {"ref": "develop"},
+                    "user": {"login": "human"},
+                }
+            if parsed.path.endswith("/pulls/7/files"):
+                return (
+                    [
+                        make_file(path)
+                        for path in (
+                            paths
+                            if paths is not None
+                            else ["runtimes/Cargo.toml", "emulation/rocjitsu/main.py"]
+                        )
+                    ]
+                    if query["page"] == ["1"]
+                    else []
+                )
+            if parsed.path.endswith("/commits/sha/check-runs"):
+                page = int(query["page"][0])
+                if page == 1:
+                    active = next(remaining)
+                    polls += 1
+                return {
+                    "total_count": len(active),
+                    "check_runs": active[(page - 1) * 100 : page * 100],
+                }
+            self.fail(f"Unexpected GitHub API request: {url}")
+
+        with mock.patch.dict(
+            os.environ,
+            {
+                "GH_TOKEN": "token",
+                "OWNER": "owner",
+                "REPO": "repo",
+                "PR_NUMBER": "7",
+                "SHA": "sha",
+            },
+            clear=True,
+        ), mock.patch.object(pc, "gh_get", side_effect=get), mock.patch.object(
+            pc, "CAN_POST_COMMENTS", False
+        ), mock.patch.object(
+            pc, "CAN_MUTATE_PR", False
+        ), mock.patch.object(
+            pc.time, "sleep"
+        ) as sleep, redirect_stdout(
+            io.StringIO()
+        ):
+            result = pc.main([])
+        return result, polls, sleep.call_count
+
+    def test_missing_then_pending_then_failing_workflow_never_passes_early(
+        self,
+    ) -> None:
+        first = make_check_run("success", "pre-commit / runtimes")
+        self.assertEqual(
+            self._run(
+                [
+                    [first],
+                    [first, make_check_run(None, "pre-commit / rocjitsu")],
+                    [first, make_check_run("failure", "pre-commit / rocjitsu")],
+                ]
+            ),
+            (1, 3, 2),
+        )
+
+    def test_missing_then_pending_then_successful_workflow_passes_only_at_end(
+        self,
+    ) -> None:
+        first = make_check_run("success", "pre-commit / runtimes")
+        self.assertEqual(
+            self._run(
+                [
+                    [first],
+                    [first, make_check_run(None, "pre-commit / rocjitsu")],
+                    [first, make_check_run("success", "pre-commit / rocjitsu")],
+                ]
+            ),
+            (0, 3, 2),
+        )
+
+    def test_main_observes_failure_on_second_page(self) -> None:
+        runs = (
+            [make_check_run("success", "pre-commit / runtimes")]
+            + [make_check_run("success", f"other-{index}") for index in range(99)]
+            + [make_check_run("failure", "pre-commit / rocjitsu")]
+        )
+        self.assertEqual(self._run([runs]), (1, 1, 0))
+
+    def test_unrelated_checks_do_not_satisfy_or_fail_scoped_requirement(self) -> None:
+        unrelated = [
+            make_check_run("failure"),
+            make_check_run("failure", "pre-commit / cuid"),
+        ]
+        self.assertEqual(
+            self._run(
+                [
+                    unrelated,
+                    unrelated + [make_check_run("success", "pre-commit / runtimes")],
+                ],
+                paths=["runtimes/Cargo.toml"],
+            ),
+            (0, 2, 1),
+        )
+
+    def test_description_failure_still_waits_for_every_applicable_check(self) -> None:
+        first = make_check_run("success", "pre-commit / runtimes")
+        final = [first, make_check_run("failure", "pre-commit / rocjitsu")]
+        self.assertEqual(
+            self._run([[first], [first], final], body="Missing tracking reference."),
+            (1, 3, 1),
+        )
+
+    def test_pr_with_no_applicable_workflows_does_not_wait(self) -> None:
+        self.assertEqual(self._run([[]], paths=["docs/README.md"]), (0, 1, 0))
+
 
 # ----------------------------- integration -----------------------------------
 
@@ -610,10 +959,52 @@ class LoadPolicyTests(unittest.TestCase):
         if not policy_path.exists():
             self.skipTest("policy.yml not present next to tests")
         policy = pc.load_policy(policy_path)
-        self.assertIn("pre-commit", policy.required_checks)
+        self.assertIn(
+            "pre-commit / runtimes", [check.name for check in policy.required_checks]
+        )
         # Title policy has been removed from policy.yml — the description
         # min-length is the meaningful text-length gate now.
         self.assertGreaterEqual(policy.description_min_length, 0)
+
+    def test_required_check_names_and_filters_match_workflow_sources(self) -> None:
+        policy = pc.load_policy(THIS_DIR / "policy.yml")
+        workflows = THIS_DIR.parents[1] / ".github" / "workflows"
+        by_name = {check.name: check for check in policy.required_checks}
+        declared = set()
+        for path in workflows.glob("*.yml"):
+            # BaseLoader preserves the YAML key "on" rather than treating it
+            # as a YAML 1.1 boolean. Filters and job names remain strings.
+            workflow = pc.yaml.load(path.read_text(), Loader=pc.yaml.BaseLoader)
+            for job in workflow.get("jobs", {}).values():
+                name = job.get("name", "")
+                if not name.startswith("pre-commit / "):
+                    continue
+                with self.subTest(workflow=path.name):
+                    self.assertNotIn(name, declared)
+                    declared.add(name)
+                    self.assertIn(name, by_name)
+                    trigger = workflow["on"]["pull_request"]
+                    self.assertEqual(by_name[name].paths, trigger.get("paths", []))
+                    self.assertEqual(
+                        by_name[name].branches, trigger.get("branches", [])
+                    )
+                    self.assertNotIn("paths-ignore", trigger)
+                    self.assertNotIn("branches-ignore", trigger)
+        self.assertEqual(declared, set(by_name))
+
+    def test_invalid_required_check_rules_are_rejected(self) -> None:
+        for rules in (
+            ["pre-commit"],
+            [{"name": ""}],
+            [{"name": "same"}, {"name": "same"}],
+            [{"name": "check", "paths": "runtimes/**"}],
+            [{"name": "check", "paths": ["!runtimes/**"]}],
+            [{"name": "check", "branches": [""]}],
+            [{"name": "check", "pathz": ["runtimes/**"]}],
+            [{"name": "check", "paths": ["[invalid"]}],
+        ):
+            with self.subTest(rules=rules), self.assertRaises(ValueError):
+                pc._load_required_checks(rules)
 
     def test_multiline_jira_issue_patterns_loaded(self) -> None:
         """Verify multiline JIRA/ISSUE ID patterns are in the loaded policy."""

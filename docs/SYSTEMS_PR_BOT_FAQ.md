@@ -194,8 +194,18 @@ ______________________________________________________________________
 ## 🔎 pre-commit
 
 **What does it check?**
-All pre-commit hooks defined in `.pre-commit-config.yaml` must pass.
-This typically includes linting, formatting (black, isort), and other code-quality checks.
+The bot requires the formatting workflows selected by the PR's changed paths
+and target branch. Each workflow publishes a distinct check name:
+`pre-commit / runtimes`, `pre-commit / rocjitsu`, `pre-commit / cuid`, or
+`pre-commit / rocprofiler-compute`. A PR touching several scopes must pass every
+applicable check, including checks that have not appeared yet when polling starts.
+
+The runtimes and rocjitsu workflows use the root `.pre-commit-config.yaml`.
+The CUID and rocprofiler-compute workflows use their project configurations.
+Their check names, paths, and branch filters are declared in
+`tools/systems_pr_bot/policy.yml`; automated tests compare those declarations
+with the workflows. Paths with no applicable formatting workflow do not cause
+the bot to wait for a check that cannot be created.
 
 **How to fix**
 Run the checks locally, let them auto-fix where possible, then commit the result:
@@ -208,13 +218,19 @@ git add -u
 git commit -m "chore: apply pre-commit fixes"
 ```
 
+For a project configuration, add `--config projects/<project>/.pre-commit-config.yaml`
+to the `pre-commit run` command.
+
 ______________________________________________________________________
 
 ## 🔎 CodeQL
 
 **What does it check?**
 GitHub's [CodeQL](https://codeql.github.com/) static-analysis engine scans the code added in this PR for known security vulnerabilities.
-The bot fails this check when CodeQL reports **critical**, **high**, or **error**-severity alerts.
+CodeQL's own workflows report their results on the PR. The bot currently
+requires formatting checks only; when a CodeQL check is added to
+`checks.required_check_runs`, it uses that check's conclusion rather than
+reading code-scanning alerts.
 
 Common findings include:
 
@@ -276,7 +292,14 @@ Draft PR, pre-commit, CodeQL) do **not** add the label.
 
 **How are pre-commit and CodeQL shown?**
 
-These run as separate CI workflows. The bot waits for them and folds their results into the same table — `pre-commit` and a single combined `CodeQL` row. The CodeQL row fails if CodeQL reports any error / critical / high severity alert.
+Required workflows appear in the table under their exact check names. The bot
+selects the expected names from trusted base-branch policy before it polls the
+GitHub API, then reads every page of current check runs. A missing or pending
+required check keeps the bot waiting; a failure is reported immediately.
+Checks outside the selected scopes do not satisfy or block these requirements.
+CodeQL is enforced by its own workflows; it is included in this table only if
+its check name is declared in `checks.required_check_runs`. The bot does not
+query code-scanning alerts.
 
 **The bot timed out — what do I do?**
 
