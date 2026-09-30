@@ -18,8 +18,11 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cstdint>
+#include <cstdlib>
 #include <memory>
 #include <thread>
+#include <vector>
 
 class HsaTest : public ::testing::Test {
 protected:
@@ -48,11 +51,13 @@ TEST_F(HsaTest, GpuAgentFound) {
 }
 
 #if defined(RJ_TEST_LEAK_SANITIZER)
-// The signal ABI block lives in driver-managed memory, so LeakSanitizer cannot
-// trace its owning host allocation. Suppress only allocations whose stack
-// includes the external HSA runtime; rocjitsu allocations remain covered.
+// The signal ABI block lives in driver-managed memory, and ROCR retains queue
+// bookkeeping after the simulated queues are destroyed. Match those owning
+// allocation sites instead of the runtime DSO so application callback leaks
+// remain visible.
 extern "C" __attribute__((visibility("default"))) const char *__lsan_default_suppressions() {
-  return "leak:libhsa-runtime64.so\n";
+  return "leak:rocr::AMD::hsa_amd_signal_create\n"
+         "leak:rocr::AMD::AqlQueue::AqlQueue\n";
 }
 
 TEST_F(HsaTest, ExternalRuntimeSignalAllocationsAreSuppressed) {
@@ -62,6 +67,29 @@ TEST_F(HsaTest, ExternalRuntimeSignalAllocationsAreSuppressed) {
   // the host Signal object. Both remain live during this leak check.
   EXPECT_EQ(__lsan_do_recoverable_leak_check(), 0);
   ASSERT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(__lsan_do_recoverable_leak_check(), 0);
+}
+
+TEST_F(HsaTest, RocrCallbackLeaksRemainVisible) {
+  constexpr size_t kLeakBytes = 12345;
+  constexpr uintptr_t kPointerMask = 0xa5a5a5a5a5a5a5a5ull;
+  std::vector<uintptr_t> encoded_allocations;
+  ASSERT_EQ(hsa_iterate_agents(
+                [](hsa_agent_t, void *data) -> hsa_status_t {
+                  void *allocation = std::malloc(kLeakBytes);
+                  if (allocation == nullptr)
+                    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+                  static_cast<std::vector<uintptr_t> *>(data)->push_back(
+                      reinterpret_cast<uintptr_t>(allocation) ^ kPointerMask);
+                  return HSA_STATUS_SUCCESS;
+                },
+                &encoded_allocations),
+            HSA_STATUS_SUCCESS);
+  ASSERT_FALSE(encoded_allocations.empty());
+  EXPECT_NE(__lsan_do_recoverable_leak_check(), 0)
+      << "ROCR callback frames must not suppress application-owned leaks";
+  for (const uintptr_t encoded : encoded_allocations)
+    std::free(reinterpret_cast<void *>(encoded ^ kPointerMask));
   EXPECT_EQ(__lsan_do_recoverable_leak_check(), 0);
 }
 #endif

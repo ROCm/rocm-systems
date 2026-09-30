@@ -4,10 +4,12 @@
 #pragma once
 
 #if !defined(__HIP_DEVICE_COMPILE__)
-// ROCR keeps process-lifetime runtime state allocated after hipDeviceReset().
-// Ignore only allocations whose stack includes the external HSA runtime while
-// retaining LeakSanitizer coverage for rocjitsu and this test executable.
+// ROCR keeps host Signal objects alive through driver-managed ABI storage and
+// retains queue bookkeeping after the simulated dispatch queues are destroyed.
+// Match those owning allocation sites, not the runtime DSO, so leaks from
+// application callbacks invoked by ROCR remain visible.
 extern "C" __attribute__((visibility("default"))) const char *__lsan_default_suppressions() {
-  return "leak:libhsa-runtime64.so\n";
+  return "leak:rocr::AMD::hsa_amd_signal_create\n"
+         "leak:rocr::AMD::AqlQueue::AqlQueue\n";
 }
 #endif

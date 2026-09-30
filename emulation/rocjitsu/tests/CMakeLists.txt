@@ -2650,7 +2650,11 @@ if(HSA_RUNTIME64)
             hsa_init_test
             PRIVATE RJ_TEST_LEAK_SANITIZER=1
         )
-        list(APPEND _rj_hsa_tests ExternalRuntimeSignalAllocationsAreSuppressed)
+        list(
+            APPEND _rj_hsa_tests
+            ExternalRuntimeSignalAllocationsAreSuppressed
+            RocrCallbackLeaksRemainVisible
+        )
     endif()
     foreach(_hsa_test IN LISTS _rj_hsa_tests)
         rj_add_test(
@@ -3773,6 +3777,58 @@ if(HIP_RUNTIME64 AND CMAKE_DL_LIBS)
             PRIVATE -fno-sanitize=all
         )
         rj_configure_target(asan_hsa_runtime_forwarder WARNINGS)
+
+        add_library(
+            asan_hsa_runtime_forwarder_mock
+            SHARED
+            asan_hsa_runtime_forwarder_mock.cpp
+        )
+        target_include_directories(
+            asan_hsa_runtime_forwarder_mock
+            SYSTEM
+            PRIVATE ${RJ_HSA_INCLUDE_DIR} ${HSA_INCLUDE_DIR}
+        )
+        target_compile_options(
+            asan_hsa_runtime_forwarder_mock
+            PRIVATE -fno-sanitize=all
+        )
+        target_link_options(
+            asan_hsa_runtime_forwarder_mock
+            PRIVATE -fno-sanitize=all
+        )
+        target_link_libraries(
+            asan_hsa_runtime_forwarder_mock
+            PRIVATE rj_build_config
+        )
+        rj_configure_target(asan_hsa_runtime_forwarder_mock WARNINGS)
+
+        add_executable(
+            asan_hsa_runtime_forwarder_test
+            asan_hsa_runtime_forwarder_test.cpp
+        )
+        target_link_libraries(
+            asan_hsa_runtime_forwarder_test
+            PRIVATE ${CMAKE_DL_LIBS} asan_hsa_runtime_forwarder rj_build_config
+        )
+        target_include_directories(
+            asan_hsa_runtime_forwarder_test
+            SYSTEM
+            PRIVATE ${RJ_HSA_INCLUDE_DIR} ${HSA_INCLUDE_DIR}
+        )
+        add_dependencies(
+            asan_hsa_runtime_forwarder_test
+            asan_hsa_runtime_forwarder_mock
+        )
+        rj_configure_target(asan_hsa_runtime_forwarder_test WARNINGS)
+        rj_add_test(
+            NAME AsanHsaRuntimeForwarder.LocalLoadAndReload
+            COMMAND
+                $<TARGET_FILE:asan_hsa_runtime_forwarder_test>
+                $<TARGET_FILE:asan_hsa_runtime_forwarder>
+                $<TARGET_FILE:asan_hsa_runtime_forwarder_mock>
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+            LABELS asan runtime-lifetime
+        )
     endif()
 
     add_executable(hip_runtime_dlopen_test hip_runtime_dlopen_test.cpp)
