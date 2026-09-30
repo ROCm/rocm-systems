@@ -160,6 +160,8 @@ protected:
     }
 };
 
+// Device GID cache is filled at init: valid GID index for every NIC, non-zero GID on RoCE,
+// out-of-range device rejected.
 TEST_P(NetIbGidChangeTest, DeviceCacheInitializedAtDiscovery) {
     SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses, false, kMinGpusPerNode, kNoNodeLimit);
     AssertInitAndGetDevices(nullptr);
@@ -182,6 +184,8 @@ TEST_P(NetIbGidChangeTest, DeviceCacheInitializedAtDiscovery) {
     EXPECT_TRUE(AllRanks(ok));
 }
 
+// A stale device cache entry is overwritten by the IBV_EVENT_GID_CHANGE handler: re-read from
+// hardware on RoCE, left untouched on IB (as upstream).
 TEST_P(NetIbGidChangeTest, GidChangeEventRefreshesDeviceCache) {
     SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses, false, kMinGpusPerNode, kNoNodeLimit);
     AssertInitAndGetDevices(nullptr);
@@ -207,6 +211,8 @@ TEST_P(NetIbGidChangeTest, GidChangeEventRefreshesDeviceCache) {
     EXPECT_TRUE(AllRanks(ok));
 }
 
+// Connect takes the GID from the device cache: with the cache moved to the v1/v2 twin index, the
+// comm snapshot and every QP of the new connection use the twin.
 TEST_P(NetIbGidChangeTest, ConnectSnapshotsDeviceCache) {
     SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses, false, kMinGpusPerNode, kNoNodeLimit);
     const int rank = MPIEnvironment::world_rank;
@@ -245,6 +251,9 @@ TEST_P(NetIbGidChangeTest, ConnectSnapshotsDeviceCache) {
     TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
+// Port recovery applies the current device GID: after the cache moves to the twin index and QP 0
+// fails, recovery completes, the comm snapshot, data QPs and recovery path use the twin, and
+// traffic flows. Without a twin (IB), a stale comm snapshot is replaced by the real GID.
 TEST_P(NetIbGidChangeTest, PortRecoveryRefreshesStaleCommGid) {
     SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses, false, kMinGpusPerNode, kNoNodeLimit);
     const char* failoverEnv = getenv("NCCL_IB_RESILIENCY_PORT_FAILOVER");
