@@ -222,3 +222,76 @@ def normalize_kernel_name(name: str) -> str:
 def normalize_kernel_names(names: Set[str]) -> Set[str]:
     """Return the normalized form of each name in ``names``."""
     return {normalize_kernel_name(name) for name in names}
+
+
+COUNTER_RESULT_COLUMNS = (
+    "GPU_ID",
+    "Dispatch_ID",
+    "Kernel_ID",
+    "Kernel_Name",
+    "Grid_Size",
+    "Workgroup_Size",
+    "LDS_Per_Workgroup",
+    "Scratch_Per_Workitem",
+    "Arch_VGPR",
+    "Accum_VGPR",
+    "SGPR",
+    "Start_Timestamp",
+    "End_Timestamp",
+    "Counter_Name",
+    "Counter_Value",
+)
+
+
+def read_counter_results(workload_dir):
+    """Read all long-form counter artifacts in deterministic filename order."""
+    import pandas as pd
+
+    result_files = sorted(Path(workload_dir).glob("results_*.csv.gz"))
+    assert result_files, f"No counter result files in {workload_dir}"
+    return pd.concat([pd.read_csv(path) for path in result_files], ignore_index=True)
+
+
+def check_counter_results(df, *, required_counters=()):
+    """Validate the identities, launch fields, values and timing of counters."""
+    import numpy as np
+    import pandas as pd
+
+    assert not df.empty, "Counter results are empty"
+    assert set(COUNTER_RESULT_COLUMNS) <= set(df.columns), "Missing counter columns"
+    for column in ("Counter_Value", "Start_Timestamp", "End_Timestamp"):
+        values = pd.to_numeric(df[column], errors="coerce")
+        assert np.isfinite(values).all(), f"Nonfinite or nonnumeric {column}"
+    assert (
+        pd.to_numeric(df.Start_Timestamp) < pd.to_numeric(df.End_Timestamp)
+    ).all(), "Unordered timestamps"
+    assert df.Kernel_Name.notna().all(), "Null kernel name"
+    assert df.Kernel_Name.astype(str).str.strip().ne("").all(), "Blank kernel name"
+    assert df.Counter_Name.notna().all(), "Null counter name"
+    assert df.Counter_Name.astype(str).str.strip().ne("").all(), "Blank counter name"
+    assert set(required_counters) <= set(df.Counter_Name), "Missing required counters"
+    return df
+
+
+def check_sysinfo(path):
+    """Read and validate the hardware metadata of every profiled device."""
+    import pandas as pd
+
+    return _check_sysinfo_frame(pd.read_csv(path))
+
+
+def _check_sysinfo_frame(df):
+    """Validate model, architecture and positive finite hardware counts."""
+    import numpy as np
+    import pandas as pd
+
+    required = {"gpu_model", "gpu_arch", "cu_per_gpu", "se_per_gpu", "simd_per_cu"}
+    assert not df.empty, "Sysinfo is empty"
+    assert required <= set(df.columns), "Missing sysinfo columns"
+    assert df.gpu_model.notna().all(), "Null GPU model"
+    assert df.gpu_model.astype(str).str.strip().ne("").all(), "Blank GPU model"
+    assert df.gpu_arch.isin(SUPPORTED_ARCHS).all(), "Unsupported GPU architecture"
+    for column in ("cu_per_gpu", "se_per_gpu", "simd_per_cu"):
+        values = pd.to_numeric(df[column], errors="coerce")
+        assert (np.isfinite(values) & (values > 0)).all(), f"Invalid {column}"
+    return df
