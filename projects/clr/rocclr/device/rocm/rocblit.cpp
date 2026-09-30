@@ -2244,7 +2244,10 @@ bool KernelBlitManager::CopyBufferRectBatch(
         (reinterpret_cast<uintptr_t>(dst) % 4) == 0 && (op.src_rect.rowPitch_ % 4) == 0 &&
         (op.src_rect.slicePitch_ % 4) == 0 && (op.dst_rect.rowPitch_ % 4) == 0 &&
         (op.dst_rect.slicePitch_ % 4) == 0;
-    if (dword_aligned) {
+    const size_t copy_size = op.size[0] * op.size[1] * op.size[2];
+    const bool use_shader_copy_path =
+        useShaderCopyBufferPath(src_memory, dst_memory, copy_size, amd::CopyMetadata());
+    if (dword_aligned && !use_shader_copy_path) {
       dma_copy_ops.push_back(op);
     } else {
       sequential_copy_ops.push_back(op);
