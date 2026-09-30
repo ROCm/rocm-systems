@@ -13,10 +13,11 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <unistd.h>
 
 #include "nccl.h"
 #include "alloc.h"        // ncclCuMemEnable
-#include "debug.h"        // ncclDebugLog, ncclDebugLevel, ...
+#include "debug.h"        // ncclDebugLog, ncclDebugLevelMask, ...
 #include "param.h"        // ncclLoadParam
 #include "rocmwrap.h"     // ncclCuMemHandleType
 #include "utils.h"        // busIdToInt64
@@ -27,6 +28,7 @@
 #include "comm.h"         // ncclCommGraphRegister / Deregister
 #include "strongstream.h" // ncclStrongStream*
 #include "mem_manager.h"  // ncclMemTrack / ncclMemUntrack / ncclDynMemMarkExportToPeer
+#include "ipcsocket.h"    // ncclIpcFd
 
 #include <functional>
 
@@ -64,7 +66,7 @@ hipMemAllocationHandleType ncclCuMemHandleType =
 // Logging / param infrastructure
 // ---------------------------------------------------------------------------
 
-int                 ncclDebugLevel   = 0;   // NCCL_LOG_NONE
+uint32_t            ncclDebugLevelMask = 0; // NCCL_LOG_NONE
 uint64_t            ncclDebugMask    = 0;
 thread_local int    ncclDebugNoWarn  = 0;
 
@@ -197,6 +199,11 @@ ncclResult_t ncclProxyClientQueryFdBlocking(struct ncclComm*           comm,
 {
     return g_proxyClientQueryFdBlocking(comm, proxyConn, localFd, rmtFd);
 }
+
+// src/os/linux_ipcsocket.cc (NCCL 2.32): p2p.cc and dev_runtime.cc close
+// imported fds through this instead of close(2). A real close, as production
+// does, so suites that hand back a dup'd fd can still prove it was closed.
+int ncclIpcFdClose(ncclIpcFd fd) { return ::close(fd); }
 
 // --- Controllable seam: ncclRegLocalIsValid -----------------------------
 // Default preserves the old stub: report the record as not locally valid

@@ -139,6 +139,18 @@ struct ncclCommEventCallback {
   ncclResult_t (*fn)(struct ncclComm* comm, struct ncclCommEventCallback* cb);
 };
 
+struct ncclUncapturedStreamPoolNode {
+  cudaStream_t stream;
+  struct ncclUncapturedStreamPoolNode* next;
+};
+
+struct ncclUncapturedStreamPool {
+  struct ncclUncapturedStreamPoolNode* head;
+};
+
+ncclResult_t ncclUncapturedStreamPoolAcquire(struct ncclUncapturedStreamPool* pool, cudaStream_t* stream);
+ncclResult_t ncclUncapturedStreamPoolDestroy(struct ncclUncapturedStreamPool* pool);
+
 struct ncclSharedResources {
   int refCount;
   struct ncclComm* owner; /* comm which creates this shared res. */
@@ -161,6 +173,7 @@ struct ncclSharedResources {
   struct ncclStrongStream deviceStream, hostStream;
   int persistentRefs;
   cudaEvent_t launchEvent, scratchEvent;
+  struct ncclUncapturedStreamPool uncapturedStreamPool;
 
   /* proxy related shared res */
   struct ncclProxyState* proxyState;
@@ -248,6 +261,7 @@ struct ncclTaskColl {
   uint32_t devFuncId:29;
   int regBufType;
   uint64_t opCount;
+  cudaEvent_t launchCompletionEvent;
   // number of elements in planner->ipcMemQueue associated with this collective
   int nCleanupQueueElts;
 
@@ -332,6 +346,7 @@ struct ncclTaskP2p {
   size_t bytes;
   uint64_t opCount;
   bool allowUB;
+  cudaEvent_t launchCompletionEvent;
 
   // Profiler plugin
   int eActivationMask;
@@ -413,6 +428,7 @@ struct ncclKernelPlan {
   uint16_t p2pPairCounter;
   int threadPerBlock;
   int cgaClusterSize;  // per-launch CGA cluster size; defaults to comm->config.cgaClusterSize
+  cudaEvent_t launchCompletionEvent;
 
   int collOpCount; // Number of collectives in this plan.
   int nWorkBatches; // Number of work batches.
@@ -523,6 +539,7 @@ struct ncclKernelPlanner {
   struct Peer* peers /*[nRanks]*/;
   int nTasksColl, nTasksP2p, nTasksBcast, nTasksRma;
   int nTasksP2pSend, nTasksP2pRecv;
+  int nCollConfigLaunchCompletionEvents; // Original event-bearing collective requests in this group.
 
   struct {
     int minBcastPeer; /* initialized to INT_MAX */
@@ -623,6 +640,11 @@ struct ncclPeerInfo {
   int fabricHandleSupport;
   int gpuCftSupport;
   uint32_t supportedGinTypeBitMask;
+  // NCCL 2.32 additions, appended at the tail for the same reason.
+  int cudaDriverVersion;
+  bool gpuCftMulticastSupport;
+  bool gpuCftCountedSupport;
+  uint32_t gitVersionHash;
 };
 
 typedef enum ncclGroupTaskType {
@@ -724,6 +746,9 @@ struct ncclComm {
   ncclAffinity cpuAffinity; // CPU affinity of the GPU
   int WarpSize;
   int cudaArch; // matches __CUDA_ARCH__ of device
+  int maxSharedMemOptin; // cudaDevAttrMaxSharedMemoryPerBlockOptin for cudaDev
+  int minDriverVersion; // min CUDA driver version
+  bool cuMemGdrSupport;  // global cuMem GDR support
 
   int cpuArch; // architecture - As defined in src/include/graph.h, e.g. x86/arm/ppc/mixed
   int cpuVendor; // vendor - As defined in src/include/graph.h
@@ -880,8 +905,8 @@ struct ncclComm {
   struct ncclCollNetSharedRes* collNetSharedRes;
 
   // NVLink SHARP (NVLS) support
-  int nvlsSupport;
-  int nvlsRegSupport;
+  int nvlsSupport; // NVLS multicast capability, including device runtime use. NCCL_NVLS_ENABLE can override.
+  int nvlsRegSupport; // host NVLS user-buffer registration supported
   /* sharable NVLS resource. */
   struct ncclNvlsSharedRes* nvlsResources;
 
@@ -974,8 +999,20 @@ struct ncclComm {
 
   // Profiler plugin
   void* profilerContext;
+  // Host-side collective sequence counters maintained by profiler support and
+  // also used by RAS; they are independent of GPU completed-work counters.
   uint64_t seqNumber[NCCL_NUM_FUNCTIONS];
   struct ncclProfilerCommState profiler;
+
+  // RAS GPU-resident counters support
+  // Pinned host mirror of the NCCL progress counters.
+  struct ncclProgressCountersBlock* hostCountersBlock;
+  // Device counters written by kernels.
+  struct ncclProgressCountersBlock* deviceCountersBlock;
+  // CPU/GPU timer offset cached per device.
+  int64_t gpuTimerOffsetNs;
+  // Intrusive link in the per-device progress-counter registration list.
+  struct ncclComm* nextProgressRegistration;
 
   // RMA state
   struct ncclRmaState rmaState;
@@ -996,6 +1033,8 @@ struct ncclComm {
   bool isAllDirectNvlink; // All GPUs are directly connected to each other through NVLink.
   int symmetricSupport;
   int gpuCftSupport;
+  bool gpuCftMulticastSupport;
+  bool gpuCftCountedSupport;
   bool useNetPXN;
   bool useGdr;
   bool hasMloPart; // if mlopart is used
@@ -1060,6 +1099,14 @@ struct ncclComm {
 
   uint64_t endMagic;
 };
+
+inline bool ncclNvlsTransportEnabled(const struct ncclComm* comm) {
+  return comm->nvlsSupport && !(comm->config.nvlsHostMode & ncclNvlsHostModeDisableTransport);
+}
+
+inline bool ncclNvlsSymmetricMultimemEnabled(const struct ncclComm* comm) {
+  return comm->nvlsSupport && !(comm->config.nvlsHostMode & ncclNvlsHostModeDisableSymmetricMultimem);
+}
 
 static_assert(offsetof(struct ncclComm, startMagic) == 0, "startMagic must be the first field of ncclComm");
 static_assert(offsetof(struct ncclComm, endMagic) == sizeof(struct ncclComm) - sizeof(uint64_t),

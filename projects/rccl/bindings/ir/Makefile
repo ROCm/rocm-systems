@@ -66,6 +66,10 @@ FINAL_BC       := $(LIBDIR)/librccl_device.bc
 
 WRAPPER_HEADER := $(INCDIR)/nccl_device_wrapper.h
 
+##### Device API defines #####
+# Enable all ReduceCopy type and block-size combinations in generated IR.
+NCCL_DEVICE_DEFINES := -DNCCL_DEVICE_PERMIT_EXPERIMENTAL_CODE=1
+
 ##### Include paths #####
 # Match bindings/ir/CMakeLists.txt: compile against the hipify-staged
 # headers librccl.so is built from, not raw src/include.
@@ -81,6 +85,8 @@ ROCM_INCLUDES := \
 ##### Compiler flags #####
 # HIP device-only compilation. --offload-device-only is the modern
 # (target-agnostic) spelling of NCCL's --cuda-device-only.
+# Clang supports extended device lambdas but does not define nvcc's feature
+# macro; the ReduceCopy device APIs require it.
 COMMON_CLANG_FLAGS := \
 	-std=$(BITCODE_CXX_STD) \
 	-x hip \
@@ -89,6 +95,8 @@ COMMON_CLANG_FLAGS := \
 	--offload-arch=$(BITCODE_LIB_ARCH) \
 	$(RCCL_INCLUDES) $(ROCM_INCLUDES) \
 	-D__clang_llvm_bitcode_lib__ \
+	-D__CUDACC_EXTENDED_LAMBDA__ \
+	$(NCCL_DEVICE_DEFINES) \
 	-D__HIP_PLATFORM_AMD__=1
 
 CLANG_FLAGS := -c -emit-llvm -O1 $(COMMON_CLANG_FLAGS)
@@ -120,7 +128,7 @@ $(WRAPPER_HEADER): nccl_device_wrapper.h
 	@echo "Copying nccl_device_wrapper.h -> $@"
 	cp -f $< $@
 
-$(UNOPTIMIZED_BC): $(LLVM_SRC) $(WRAPPER_HEADER) check_hipify
+$(UNOPTIMIZED_BC): $(LLVM_SRC) $(WRAPPER_HEADER) util.h check_hipify
 	@mkdir -p $(OBJDIR)
 	@echo "Generating unoptimized LLVM bitcode for $(BITCODE_LIB_ARCH)..."
 	$(CLANG) $(CLANG_FLAGS) $(LLVM_SRC) -o $@

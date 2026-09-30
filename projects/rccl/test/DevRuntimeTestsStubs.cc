@@ -19,6 +19,7 @@
 #include "sym_kernels.h"
 #include "allocator.h"
 #include "utils.h"
+#include "ipcsocket.h"
 #include "cudawrap.h"
 #include "dev_runtime_internal.h"
 #include "enqueue.h"
@@ -41,6 +42,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <sys/mman.h>
+#include <unistd.h>
 
 // Count hipMemAddressFree for skip-on vs skip-off finalize tests.
 int rcclTestHipMemAddressFreeCount = 0;
@@ -50,7 +52,7 @@ int rcclTestHipMemUnmapCount = 0;
 // ---------------------------------------------------------------------------
 // Globals the translation unit references.
 // ---------------------------------------------------------------------------
-int                          ncclDebugLevel = 0;
+uint32_t                     ncclDebugLevelMask = 0;
 uint64_t                     ncclDebugMask  = 0;
 thread_local int             ncclDebugNoWarn = 0;
 // Use POSIX-FD handles so the single-rank success path takes the no-export /
@@ -121,6 +123,8 @@ int64_t ncclParamWinEnable() { return 1; }
 // Proxy / mgmt task enqueue.
 // ---------------------------------------------------------------------------
 ncclResult_t ncclProxyClientGetFdBlocking(struct ncclComm*, int, void*, int*) { return ncclSuccess; }
+// NCCL 2.32: dev_runtime.cc closes imported fds through ncclIpcFdClose (os/linux_ipcsocket.cc).
+int ncclIpcFdClose(ncclIpcFd fd) { return close(fd); }
 ncclResult_t ncclMgmtTaskEnqueue(struct ncclAsyncJob*, ncclResult_t (*)(struct ncclAsyncJob*), void (*)(void*),
                                  struct ncclComm*) {
   return ncclSuccess;
@@ -262,11 +266,13 @@ int computeCftSize(struct ncclComm*) { return 1; }
 int computeCftMcSize(struct ncclComm*) { return 1; }
 ncclResult_t symBindTeamLe(struct ncclComm*, struct ncclDevrMemory*, ncclCftLeId) { return ncclSuccess; }
 ncclResult_t symUnbindTeamLe(struct ncclComm*, struct ncclDevrMemory*, ncclCftLeId) { return ncclSuccess; }
-ncclResult_t symTeamObtainUcLe(struct ncclComm*, struct ncclDevrTeam*, struct ncclDevrState*, bool* needBarrier) {
+ncclResult_t symTeamObtainUcLe(struct ncclComm*, struct ncclDevrTeam*, struct ncclDevrState*, bool* needBarrier,
+                               bool /*counted*/) {
   if (needBarrier) *needBarrier = false;
   return ncclSuccess;
 }
-ncclResult_t symTeamObtainMcLe(struct ncclComm*, struct ncclDevrTeam*, struct ncclDevrState*, bool* needBarrier) {
+ncclResult_t symTeamObtainMcLe(struct ncclComm*, struct ncclDevrTeam*, struct ncclDevrState*, bool* needBarrier,
+                               bool /*counted*/) {
   if (needBarrier) *needBarrier = false;
   return ncclSuccess;
 }

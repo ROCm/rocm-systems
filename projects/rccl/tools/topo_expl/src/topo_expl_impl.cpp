@@ -28,6 +28,8 @@
 #include <cstdarg>
 #include "xml.h"
 #include "coll_net.h"
+#include <map>
+#include <string>
 #include "model.h"
 #include "topo_expl_impl.h"
 #include "amdsmi_wrap.h"
@@ -181,7 +183,7 @@ void ncclMemoryStackDestruct(struct ncclMemoryStack* me) {
   }
 }
 
-int ncclDebugLevel = -1;
+static int ncclDebugLevel = -1;
 
 void ncclDebugInit() {
   if (ncclDebugLevel != -1) return;
@@ -224,11 +226,60 @@ void ncclDebugLog(ncclDebugLogLevel level, unsigned long flags, const char *file
 #endif
 }
 
+// Model XML never went through net plugin enumeration (ncclTopoProcessNet), so it lacks the
+// rail/plane attributes ncclTopoGetSystemFromXml() requires. Assign the same defaults: one rail per
+// distinct NIC on each host, in order of appearance, and the plane from the port.
+static ncclResult_t fillMissingRailPlane(struct ncclXml* xml) {
+  std::map<std::string, std::map<std::string, int>> railKeys;  // (tag, host) -> NIC ASIC -> rail index
+  for (int i = 0; i < xml->maxIndex; i++) {
+    struct ncclXmlNode* node = xml->nodes + i;
+    if (strcmp(node->name, "net") != 0 && strcmp(node->name, "gin") != 0 && strcmp(node->name, "rma") != 0) continue;
+    int rail, plane, port;
+    NCCLCHECK(xmlGetAttrIntDefault(node, "rail", &rail, NCCL_TOPO_UNDEF));
+    NCCLCHECK(xmlGetAttrIntDefault(node, "plane", &plane, NCCL_TOPO_UNDEF));
+    NCCLCHECK(xmlGetAttrIntDefault(node, "port", &port, 0));
+    if (rail == NCCL_TOPO_UNDEF) {
+      const char* hostHash = nullptr;
+      for (struct ncclXmlNode* p = node->parent; p != nullptr && hostHash == nullptr; p = p->parent) {
+        if (strcmp(p->name, "cpu") == 0) NCCLCHECK(xmlGetAttr(p, "host_hash", &hostHash));
+      }
+      // Without a GUID each net is its own ASIC, as ncclTopoAddNetAsic() assumes.
+      const char* guidStr;
+      NCCLCHECK(xmlGetAttr(node, "guid", &guidStr));
+      std::string asic;
+      if (guidStr) {
+        uint64_t guid;
+        NCCLCHECK(xmlGetAttrUint64Default(node, "guid", &guid, 0));
+        asic = "guid:" + std::to_string(guid);
+      } else {
+        int dev;
+        NCCLCHECK(xmlGetAttrIntDefault(node, "dev", &dev, i));
+        asic = "dev:" + std::to_string(dev);
+      }
+      auto& keys = railKeys[std::string(node->name) + "/" + (hostHash ? hostHash : "")];
+      int index = keys.emplace(asic, static_cast<int>(keys.size())).first->second;
+      NCCLCHECK(xmlSetAttrInt(node, "rail", NCCL_TOPO_UNDEF_BIT | index));
+    }
+    if (plane == NCCL_TOPO_UNDEF) NCCLCHECK(xmlSetAttrInt(node, "plane", NCCL_TOPO_UNDEF_BIT | port));
+  }
+  return ncclSuccess;
+}
+
 ncclResult_t ncclTopoGetSystem(const char* xmlTopoFile, struct ncclTopoSystem** system) {
   struct ncclXml* xml;
   NCCLCHECK(xmlAlloc(&xml, NCCL_GRAPH_XML_MAX_NODES));
   NCCLCHECK(ncclTopoGetXmlFromFile(xmlTopoFile, xml, 0));
-  NCCLCHECK(ncclTopoGetSystemFromXml(xml, system, 0));
+  NCCLCHECK(fillMissingRailPlane(xml));
+  // A model that records host hashes only loads as one of its own hosts.
+  uint64_t localHostHash = 0;
+  for (int i = 0; i < xml->maxIndex; i++) {
+    if (strcmp(xml->nodes[i].name, "cpu") != 0) continue;
+    const char* hostHashStr;
+    NCCLCHECK(xmlGetAttr(xml->nodes + i, "host_hash", &hostHashStr));
+    if (hostHashStr) localHostHash = strtoull(hostHashStr, NULL, 16);
+    break;
+  }
+  NCCLCHECK(ncclTopoGetSystemFromXml(xml, system, localHostHash));
   free(xml);
   return ncclSuccess;
 }
