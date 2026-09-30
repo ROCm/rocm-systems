@@ -172,40 +172,30 @@ class TestMIGPUSpecs:
     # -- get_num_dies --------------------------------------------------------
 
     def test_get_num_dies_all_models(self):
-        for arch, models in MIGPUSpecs._gpu_model_dict.items():
+        for models in MIGPUSpecs._gpu_model_dict.values():
             for model in models:
-                result = MIGPUSpecs.get_num_dies(arch, model)
+                result = MIGPUSpecs.get_num_dies(model)
                 assert isinstance(result, int) and result >= 1, (
-                    f"get_num_dies({arch!r}, {model!r}) returned {result!r}"
+                    f"get_num_dies({model!r}) returned {result!r}"
                 )
 
     def test_get_num_dies_cdna_no_design(self):
-        with patch.object(MIGPUSpecs, "_gpu_design", {"mi100": {}}), patch.object(
-            MIGPUSpecs, "_gpu_series_dict", {"gfx908": "mi100"}
-        ):
-            assert MIGPUSpecs.get_num_dies("gfx908", "mi100") == 1
+        with patch.object(MIGPUSpecs, "_gpu_design", {"mi100": {}}):
+            assert MIGPUSpecs.get_num_dies("mi100") == 1
 
     def test_get_num_dies_cdna_with_design(self):
         design = {"testmodel": {"physical_aid": 4, "logical_partitions_per_die": 2}}
-        with patch.object(MIGPUSpecs, "_gpu_design", design), patch.object(
-            MIGPUSpecs, "_gpu_series_dict", {"gfx942": "mi300"}
-        ):
-            assert MIGPUSpecs.get_num_dies("gfx942", "testmodel") == 8
+        with patch.object(MIGPUSpecs, "_gpu_design", design):
+            assert MIGPUSpecs.get_num_dies("testmodel") == 8
 
     def test_get_num_dies_cdna_partial_design(self):
         design = {"testmodel": {"physical_aid": 4}}
-        with patch.object(MIGPUSpecs, "_gpu_design", design), patch.object(
-            MIGPUSpecs, "_gpu_series_dict", {"gfx942": "mi300"}
-        ):
-            assert MIGPUSpecs.get_num_dies("gfx942", "testmodel") == 4
+        with patch.object(MIGPUSpecs, "_gpu_design", design):
+            assert MIGPUSpecs.get_num_dies("testmodel") == 4
 
     def test_get_num_dies_rdna_single_die(self):
-        design = {"rdna_model": {}}
-        for arch in ("gfx1151", "gfx1153"):
-            with patch.object(MIGPUSpecs, "_gpu_design", design), patch.object(
-                MIGPUSpecs, "_gpu_series_dict", {arch: "rdna3.5"}
-            ):
-                assert MIGPUSpecs.get_num_dies(arch, "rdna_model") == 1
+        with patch.object(MIGPUSpecs, "_gpu_design", {"rdna_model": {}}):
+            assert MIGPUSpecs.get_num_dies("rdna_model") == 1
 
     # -- get_memory_levels ---------------------------------------------------
 

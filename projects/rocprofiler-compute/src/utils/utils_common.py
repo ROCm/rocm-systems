@@ -780,8 +780,8 @@ def build_metric_list(
     return metric_list
 
 
-def get_uuid(length: int = 8) -> str:
-    return uuid.uuid4().hex[:length]
+def get_uuid() -> str:
+    return uuid.uuid4().hex[:8]
 
 
 def convert_filter_blocks_to_panel_ids(

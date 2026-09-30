@@ -454,9 +454,6 @@ class RocProfCompute:
             ),
         }
 
-        if self.__profiler_mode not in profiler_classes:
-            console_error("Unsupported profiler")
-
         module_name, class_name = profiler_classes[self.__profiler_mode]
         module = importlib.import_module(module_name)
         profiler_class = getattr(module, class_name)
