@@ -145,22 +145,12 @@ module hip
     enumerator :: hipLibraryBinaryIsPreserved = 1
   end enum
 
-  ! enum (unnamed at /opt/rocm/include/hip/hip_runtime_api.h:33:1)
+  ! enum (unnamed at /opt/rocm-10.2/include/hip/hip_runtime_api.h:37:1)
   enum, bind(c)
     enumerator :: HIP_SUCCESS = 0
     enumerator :: HIP_ERROR_INVALID_VALUE = 1
     enumerator :: HIP_ERROR_NOT_INITIALIZED = 2
     enumerator :: HIP_ERROR_LAUNCH_OUT_OF_RESOURCES = 3
-  end enum
-
-  ! hipMemoryType
-  enum, bind(c)
-    enumerator :: hipMemoryTypeUnregistered = 0
-    enumerator :: hipMemoryTypeHost = 1
-    enumerator :: hipMemoryTypeDevice = 2
-    enumerator :: hipMemoryTypeManaged = 3
-    enumerator :: hipMemoryTypeArray = 10
-    enumerator :: hipMemoryTypeUnified = 11
   end enum
 
   ! hipError_t
@@ -249,6 +239,16 @@ module hip
     enumerator :: hipErrorRuntimeOther = 1053
     enumerator :: hipErrorInvalidClusterSize = 1054
     enumerator :: hipErrorTbd = 1055
+  end enum
+
+  ! hipMemoryType
+  enum, bind(c)
+    enumerator :: hipMemoryTypeUnregistered = 0
+    enumerator :: hipMemoryTypeHost = 1
+    enumerator :: hipMemoryTypeDevice = 2
+    enumerator :: hipMemoryTypeManaged = 3
+    enumerator :: hipMemoryTypeArray = 10
+    enumerator :: hipMemoryTypeUnified = 11
   end enum
 
   ! hipDeviceAttribute_t
@@ -350,6 +350,7 @@ module hip
     enumerator :: hipDeviceAttributeDmaBufSupported = 93
     enumerator :: hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported = 94
     enumerator :: hipDeviceAttributeHandleTypeFabricSupported = 95
+    enumerator :: hipDeviceAttributeHostAllocDmaBufSupported = 96
     enumerator :: hipDeviceAttributeCudaCompatibleEnd = 9999
     enumerator :: hipDeviceAttributeAmdSpecificBegin = 10000
     enumerator :: hipDeviceAttributeClockInstructionRate = 10000
@@ -1032,8 +1033,8 @@ module hip
   end enum
 
   integer(c_int), parameter :: HIP_VERSION_MAJOR = 7
-  integer(c_int), parameter :: HIP_VERSION_MINOR = 15
-  integer(c_int), parameter :: HIP_VERSION_PATCH = 26302
+  integer(c_int), parameter :: HIP_VERSION_MINOR = 17
+  integer(c_int), parameter :: HIP_VERSION_PATCH = 26385
   integer(c_int), parameter :: HIP_VERSION_BUILD_ID = 0
   integer(c_int), parameter :: HIP_GET_PROC_ADDRESS_DEFAULT = 0
   integer(c_int), parameter :: HIP_GET_PROC_ADDRESS_LEGACY_STREAM = 1
@@ -1105,6 +1106,7 @@ module hip
   integer(c_int), parameter :: hipDeviceScheduleMask = 7
   integer(c_int), parameter :: hipDeviceMapHost = 8
   integer(c_int), parameter :: hipDeviceLmemResizeToMax = 16
+  integer(c_int), parameter :: hipInitDeviceFlagsAreValid = 1
   integer(c_int), parameter :: hipArrayDefault = 0
   integer(c_int), parameter :: hipArrayLayered = 1
   integer(c_int), parameter :: hipArraySurfaceLoadStore = 2
@@ -1836,26 +1838,6 @@ module hip
     !---------------------------------------------
     ! hipInit
     !---------------------------------------------
-    !> @ingroup Driver
-    !>
-    !>
-    !>
-    !>
-    !>
-    !>  @brief Explicitly initializes the HIP runtime.
-    !>
-    !>  @param [in] flags  Initialization flag, should be zero.
-    !>
-    !>  Most HIP APIs implicitly initialize the HIP runtime.
-    !>  This API provides control over the timing of the initialization.
-    !>
-    !>  @note Applications that use fork() should not initialize the HIP runtime
-    !>  before the fork when the child process will continue executing HIP code
-    !>  without an immediate exec(). Instead, the parent and child processes should
-    !>  initialize HIP independently after fork(). Inheriting HIP runtime state
-    !>  across fork() may lead to undefined behavior or initialization failures.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipInit(flags) &
        result(Init) &
        bind(C, name="hipInit")
@@ -1867,21 +1849,6 @@ module hip
     !---------------------------------------------
     ! hipDriverGetVersion
     !---------------------------------------------
-    !>  @brief Returns the approximate HIP driver version.
-    !>
-    !>  @param [out] driverVersion driver version
-    !>
-    !>  HIP driver version shows up in the format:
-    !>  HIP_VERSION_MAJOR * 10000000 + HIP_VERSION_MINOR * 100000 + HIP_VERSION_PATCH.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  @warning The HIP driver version does not correspond to an exact CUDA driver revision.
-    !>  On AMD platform, the API returns the HIP driver version, while on NVIDIA platform, it calls
-    !>  the corresponding CUDA runtime API and returns the CUDA driver version.
-    !>  There is no mapping/correlation between HIP driver version and CUDA driver version.
-    !>
-    !>  @see hipRuntimeGetVersion
     function hipDriverGetVersion(driverVersion) &
        result(DriverGetVersion) &
        bind(C, name="hipDriverGetVersion")
@@ -1893,18 +1860,6 @@ module hip
     !---------------------------------------------
     ! hipRuntimeGetVersion
     !---------------------------------------------
-    !>  @brief Returns the approximate HIP Runtime version.
-    !>
-    !>  @param [out] runtimeVersion HIP runtime version
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  @warning The version definition of HIP runtime is different from CUDA.
-    !>  On AMD platform, the function returns HIP runtime version,
-    !>  while on NVIDIA platform, it returns CUDA runtime version.
-    !>  And there is no mapping/correlation between HIP version and CUDA version.
-    !>
-    !>  @see hipDriverGetVersion
     function hipRuntimeGetVersion(runtimeVersion) &
        result(RuntimeGetVersion) &
        bind(C, name="hipRuntimeGetVersion")
@@ -1916,11 +1871,6 @@ module hip
     !---------------------------------------------
     ! hipDeviceGet
     !---------------------------------------------
-    !>  @brief Returns a handle to a compute device
-    !>  @param [out] device Handle of device
-    !>  @param [in] ordinal Device ordinal
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidDevice`
     function hipDeviceGet(device, ordinal) &
        result(DeviceGet) &
        bind(C, name="hipDeviceGet")
@@ -1933,12 +1883,6 @@ module hip
     !---------------------------------------------
     ! hipDeviceComputeCapability
     !---------------------------------------------
-    !>  @brief Returns the compute capability of the device
-    !>  @param [out] major Major compute capability version number
-    !>  @param [out] minor Minor compute capability version number
-    !>  @param [in] device Device ordinal
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidDevice`
     function hipDeviceComputeCapability(major, minor, device) &
        result(DeviceComputeCapability) &
        bind(C, name="hipDeviceComputeCapability")
@@ -1952,12 +1896,6 @@ module hip
     !---------------------------------------------
     ! hipDeviceGetName
     !---------------------------------------------
-    !>  @brief Returns an identifer string for the device.
-    !>  @param [out] name String of the device name
-    !>  @param [in] len Maximum length of string to store in device name
-    !>  @param [in] device Device ordinal
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidDevice`
     function hipDeviceGetName(name, len, device) &
        result(DeviceGetName) &
        bind(C, name="hipDeviceGetName")
@@ -1971,16 +1909,6 @@ module hip
     !---------------------------------------------
     ! hipDeviceGetUuid
     !---------------------------------------------
-    !>  @brief Returns an UUID for the device.[BETA]
-    !>  @param [out] uuid UUID for the device
-    !>  @param [in] device device ordinal
-    !>
-    !>  @warning This API is marked as Beta. While this feature is complete, it can
-    !>           change and might have outstanding issues.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidDevice`, `hipErrorInvalidValue`,
-    !>  `hipErrorNotInitialized`,
-    !>  `hipErrorDeinitialized`
     function hipDeviceGetUuid(uuid, device) &
        result(DeviceGetUuid) &
        bind(C, name="hipDeviceGetUuid")
@@ -1991,20 +1919,26 @@ module hip
     end function hipDeviceGetUuid
 
     !---------------------------------------------
+    ! hipDeviceGetLuid
+    !---------------------------------------------
+    function hipDeviceGetLuid(luid, deviceNodeMask, device) &
+       result(DeviceGetLuid) &
+       bind(C, name="hipDeviceGetLuid")
+       import :: c_ptr, c_int, hipSuccess
+       type(c_ptr), value :: luid
+       type(c_ptr), value :: deviceNodeMask
+       integer(c_int), value :: device
+       integer(kind(hipSuccess)) :: DeviceGetLuid
+    end function hipDeviceGetLuid
+
+    !---------------------------------------------
     ! hipDeviceGetP2PAttribute
     !---------------------------------------------
-    !>  @brief Returns a value for attribute of link between two devices
-    !>  @param [out] value Pointer of the value for the attrubute
-    !>  @param [in] attr enum of hipDeviceP2PAttr to query
-    !>  @param [in] srcDevice The source device of the link
-    !>  @param [in] dstDevice The destination device of the link
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidDevice`
     function hipDeviceGetP2PAttribute(myValue, attr, srcDevice, dstDevice) &
        result(DeviceGetP2PAttribute) &
        bind(C, name="hipDeviceGetP2PAttribute")
-       import :: c_ptr, hipDevP2PAttrPerformanceRank, c_int, hipSuccess
-       type(c_ptr), value :: myValue
+       import :: c_int, hipDevP2PAttrPerformanceRank, hipSuccess
+       integer(c_int) :: myValue
        integer(kind(hipDevP2PAttrPerformanceRank)), value :: attr
        integer(c_int), value :: srcDevice
        integer(c_int), value :: dstDevice
@@ -2014,12 +1948,6 @@ module hip
     !---------------------------------------------
     ! hipDeviceGetPCIBusId
     !---------------------------------------------
-    !>  @brief Returns a PCI Bus Id string for the device, overloaded to take int device ID.
-    !>  @param [out] pciBusId The string of PCI Bus Id format for the device
-    !>  @param [in] len Maximum length of string
-    !>  @param [in] device The device ordinal
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidDevice`
     function hipDeviceGetPCIBusId(pciBusId, len, device) &
        result(DeviceGetPCIBusId) &
        bind(C, name="hipDeviceGetPCIBusId")
@@ -2033,11 +1961,6 @@ module hip
     !---------------------------------------------
     ! hipDeviceGetByPCIBusId
     !---------------------------------------------
-    !>  @brief Returns a handle to a compute device.
-    !>  @param [out] device The handle of the device
-    !>  @param [in] pciBusId The string of PCI Bus Id for the device
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidDevice`, `hipErrorInvalidValue`
     function hipDeviceGetByPCIBusId(device, pciBusId) &
        result(DeviceGetByPCIBusId) &
        bind(C, name="hipDeviceGetByPCIBusId")
@@ -2050,11 +1973,6 @@ module hip
     !---------------------------------------------
     ! hipDeviceTotalMem
     !---------------------------------------------
-    !>  @brief Returns the total amount of memory on the device.
-    !>  @param [out] bytes The size of memory in bytes, on the device
-    !>  @param [in] device The ordinal of the device
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidDevice`
     function hipDeviceTotalMem(bytes, device) &
        result(DeviceTotalMem) &
        bind(C, name="hipDeviceTotalMem")
@@ -2067,21 +1985,6 @@ module hip
     !---------------------------------------------
     ! hipDeviceSynchronize
     !---------------------------------------------
-    !> @ingroup Device
-    !>
-    !>
-    !>
-    !>
-    !>
-    !>  @brief Waits on all active streams on current device
-    !>
-    !>  When this command is invoked, the host thread gets blocked until all the commands associated
-    !>  with streams associated with the device. HIP does not support multiple blocking modes
-    !>  (yet!).
-    !>
-    !>  @returns `hipSuccess`
-    !>
-    !>  @see hipSetDevice, hipDeviceReset
     function hipDeviceSynchronize() &
        result(DeviceSynchronize) &
        bind(C, name="hipDeviceSynchronize")
@@ -2092,16 +1995,6 @@ module hip
     !---------------------------------------------
     ! hipDeviceReset
     !---------------------------------------------
-    !>  @brief The state of current device is discarded and updated to a fresh state.
-    !>
-    !>  Calling this function deletes all streams created, memory allocated, kernels running, events
-    !>  created. Make sure that no other thread is using the device or streams, memory, kernels,
-    !>  events
-    !>  associated with the current device.
-    !>
-    !>  @returns `hipSuccess`
-    !>
-    !>  @see hipDeviceSynchronize
     function hipDeviceReset() &
        result(DeviceReset) &
        bind(C, name="hipDeviceReset")
@@ -2112,40 +2005,6 @@ module hip
     !---------------------------------------------
     ! hipSetDevice
     !---------------------------------------------
-    !>  @brief Set default device to be used for subsequent hip API calls from this thread.
-    !>
-    !>  @param[in] deviceId - Valid device in range 0...`hipGetDeviceCount()`.
-    !>
-    !>  Sets @p device as the default device for the calling host thread. Valid device id's are 0...
-    !>  (`hipGetDeviceCount()`-1).
-    !>
-    !>  Many HIP APIs implicitly use the "default device" :
-    !>
-    !>  - Any device memory subsequently allocated from this host thread (using hipMalloc) will be
-    !>  allocated on device.
-    !>  - Any streams or events created from this host thread will be associated with device.
-    !>  - Any kernels launched from this host thread (using hipLaunchKernel) will be executed on
-    !>  device
-    !>  (unless a specific stream is specified, in which case the device associated with that stream
-    !>  will
-    !>  be used).
-    !>
-    !>  This function may be called from any host thread. Multiple host threads may use the same
-    !>  device.
-    !>  This function does no synchronization with the previous or new device, and has very little
-    !>  runtime overhead. Applications can use hipSetDevice to quickly switch the default device
-    !>  before
-    !>  making a HIP runtime call which uses the default device.
-    !>
-    !>  The default device is stored in thread-local-storage for each thread.
-    !>  Thread-pool implementations may inherit the default device of the previous thread.  A good
-    !>  practice is to always call hipSetDevice at the start of HIP coding sequency to establish a
-    !>  known
-    !>  standard device.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidDevice`, `hipErrorNoDevice`
-    !>
-    !>  @see `hipGetDevice`, `hipGetDeviceCount`
     function hipSetDevice(deviceId) &
        result(SetDevice) &
        bind(C, name="hipSetDevice")
@@ -2157,15 +2016,6 @@ module hip
     !---------------------------------------------
     ! hipSetValidDevices
     !---------------------------------------------
-    !>  @brief Set a list of devices that can be used.
-    !>
-    !>  @param[in] device_arr - List of devices to try
-    !>  @param[in] len - Number of devices in specified list
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidDevice`, `hipErrorInvalidValue`
-    !>
-    !>  @see `hipGetDevice`, `hipGetDeviceCount`. `hipSetDevice`. `hipGetDeviceProperties`.
-    !>  `hipSetDeviceFlags`. `hipChooseDevice`
     function hipSetValidDevices(device_arr, len) &
        result(SetValidDevices) &
        bind(C, name="hipSetValidDevices")
@@ -2178,17 +2028,6 @@ module hip
     !---------------------------------------------
     ! hipGetDevice
     !---------------------------------------------
-    !>  @brief Return the default device id for the calling host thread.
-    !>
-    !>  @param [out] deviceId *device is written with the default device
-    !>
-    !>  HIP maintains an default device for each thread using thread-local-storage.
-    !>  This device is used implicitly for HIP runtime APIs called by this thread.
-    !>  hipGetDevice returns in * @p device the default device for the calling host thread.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidDevice`, `hipErrorInvalidValue`
-    !>
-    !>  @see hipSetDevice, hipGetDevicesizeBytes
     function hipGetDevice(deviceId) &
        result(GetDevice) &
        bind(C, name="hipGetDevice")
@@ -2200,17 +2039,6 @@ module hip
     !---------------------------------------------
     ! hipGetDeviceCount
     !---------------------------------------------
-    !>  @brief Return number of compute-capable devices.
-    !>
-    !>  @param [out] count Returns number of compute-capable devices.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorNoDevice`
-    !>
-    !>
-    !>  Returns in @p *count the number of devices that have ability to run compute commands. If
-    !>  there
-    !>  are no such devices, then `hipGetDeviceCount` will return `hipErrorNoDevice`. If 1 or more
-    !>  devices can be found, then hipGetDeviceCount returns `hipSuccess`.
     function hipGetDeviceCount(count) &
        result(GetDeviceCount) &
        bind(C, name="hipGetDeviceCount")
@@ -2222,13 +2050,6 @@ module hip
     !---------------------------------------------
     ! hipDeviceGetAttribute
     !---------------------------------------------
-    !>  @brief Query for a specific device attribute.
-    !>
-    !>  @param [out] pi pointer to value to return
-    !>  @param [in] attr attribute to query
-    !>  @param [in] deviceId which device to query for information
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidDevice`, `hipErrorInvalidValue`
     function hipDeviceGetAttribute(pi, attr, deviceId) &
        result(DeviceGetAttribute) &
        bind(C, name="hipDeviceGetAttribute")
@@ -2242,19 +2063,6 @@ module hip
     !---------------------------------------------
     ! hipDeviceGetDefaultMemPool
     !---------------------------------------------
-    !>  @brief Returns the default memory pool of the specified device
-    !>
-    !>  @param [out] mem_pool Default memory pool to return
-    !>  @param [in] device    Device index for query the default memory pool
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidDevice`, `hipErrorInvalidValue`,
-    !>  `hipErrorNotSupported`
-    !>
-    !>  @see hipDeviceGetDefaultMemPool, hipMallocAsync, hipMemPoolTrimTo, hipMemPoolGetAttribute,
-    !>  hipDeviceSetMemPool, hipMemPoolSetAttribute, hipMemPoolSetAccess, hipMemPoolGetAccess
-    !>
-    !>  @warning This API is marked as Beta. While this feature is complete, it can
-    !>           change and might have outstanding issues.
     function hipDeviceGetDefaultMemPool(mem_pool, device) &
        result(DeviceGetDefaultMemPool) &
        bind(C, name="hipDeviceGetDefaultMemPool")
@@ -2267,26 +2075,6 @@ module hip
     !---------------------------------------------
     ! hipDeviceSetMemPool
     !---------------------------------------------
-    !>  @brief Sets the current memory pool of a device
-    !>
-    !>  The memory pool must be local to the specified device.
-    !>  @p hipMallocAsync allocates from the current mempool of the provided stream's device.
-    !>  By default, a device's current memory pool is its default memory pool.
-    !>
-    !>  @note Use @p hipMallocFromPoolAsync for asynchronous memory allocations from a device
-    !>  different than the one the stream runs on.
-    !>
-    !>  @param [in] device   Device index for the update
-    !>  @param [in] mem_pool Memory pool for update as the current on the specified device
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidDevice`,
-    !>  `hipErrorNotSupported`
-    !>
-    !>  @see hipDeviceGetDefaultMemPool, hipMallocAsync, hipMemPoolTrimTo, hipMemPoolGetAttribute,
-    !>  hipDeviceSetMemPool, hipMemPoolSetAttribute, hipMemPoolSetAccess, hipMemPoolGetAccess
-    !>
-    !>  @warning This API is marked as Beta. While this feature is complete, it can
-    !>           change and might have outstanding issues.
     function hipDeviceSetMemPool(device, mem_pool) &
        result(DeviceSetMemPool) &
        bind(C, name="hipDeviceSetMemPool")
@@ -2299,23 +2087,6 @@ module hip
     !---------------------------------------------
     ! hipDeviceGetMemPool
     !---------------------------------------------
-    !>  @brief Gets the current memory pool for the specified device
-    !>
-    !>  Returns the last pool provided to @p hipDeviceSetMemPool for this device
-    !>  or the device's default memory pool if @p hipDeviceSetMemPool has never been called.
-    !>  By default the current mempool is the default mempool for a device,
-    !>  otherwise the returned pool must have been set with @p hipDeviceSetMemPool.
-    !>
-    !>  @param [out] mem_pool Current memory pool on the specified device
-    !>  @param [in] device    Device index to query the current memory pool
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotSupported`
-    !>
-    !>  @see hipDeviceGetDefaultMemPool, hipMallocAsync, hipMemPoolTrimTo, hipMemPoolGetAttribute,
-    !>  hipDeviceSetMemPool, hipMemPoolSetAttribute, hipMemPoolSetAccess, hipMemPoolGetAccess
-    !>
-    !>  @warning This API is marked as Beta. While this feature is complete, it can
-    !>           change and might have outstanding issues.
     function hipDeviceGetMemPool(mem_pool, device) &
        result(DeviceGetMemPool) &
        bind(C, name="hipDeviceGetMemPool")
@@ -2328,22 +2099,6 @@ module hip
     !---------------------------------------------
     ! hipDeviceGetTexture1DLinearMaxWidth
     !---------------------------------------------
-    !>  @brief Gets the maximum width for 1D linear textures on the specified device
-    !>
-    !>  This function queries the maximum width, in elements, of 1D linear textures that can be
-    !>  allocated
-    !>  on the specified device. The maximum width depends on the texture element size and the
-    !>  hardware
-    !>  limitations of the device.
-    !>
-    !>  @param [out] max_width Maximum width, in elements, of 1D linear textures that the device can
-    !>  support
-    !>  @param [in] desc       Requested channel format
-    !>  @param [in] device     Device index to query for maximum 1D texture width
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidDevice`
-    !>
-    !>  @see hipDeviceGetAttribute, hipMalloc, hipTexRefSetAddressMode
     function hipDeviceGetTexture1DLinearMaxWidth(max_width, desc, device) &
        result(DeviceGetTexture1DLinearMaxWidth) &
        bind(C, name="hipDeviceGetTexture1DLinearMaxWidth")
@@ -2357,14 +2112,6 @@ module hip
     !---------------------------------------------
     ! hipDeviceSetCacheConfig
     !---------------------------------------------
-    !>  @brief Set L1/Shared cache partition.
-    !>
-    !>  @param [in] cacheConfig Cache configuration
-    !>
-    !>  @returns `hipSuccess`, `hipErrorNotInitialized`, `hipErrorNotSupported`
-    !>
-    !>  Note: AMD devices do not support reconfigurable cache. This API is not implemented
-    !>  on AMD platform. If the function is called, it will return hipErrorNotSupported.
     function hipDeviceSetCacheConfig(cacheConfig) &
        result(DeviceSetCacheConfig) &
        bind(C, name="hipDeviceSetCacheConfig")
@@ -2376,13 +2123,6 @@ module hip
     !---------------------------------------------
     ! hipDeviceGetCacheConfig
     !---------------------------------------------
-    !>  @brief Get Cache configuration for a specific Device
-    !>
-    !>  @param [out] cacheConfig Pointer of cache configuration
-    !>
-    !>  @returns `hipSuccess`, `hipErrorNotInitialized`
-    !>  Note: AMD devices do not support reconfigurable cache. This hint is ignored
-    !>  on these architectures.
     function hipDeviceGetCacheConfig(cacheConfig) &
        result(DeviceGetCacheConfig) &
        bind(C, name="hipDeviceGetCacheConfig")
@@ -2394,17 +2134,6 @@ module hip
     !---------------------------------------------
     ! hipDeviceGetLimit
     !---------------------------------------------
-    !>  @brief Gets resource limits of current device
-    !>
-    !>  The function queries the size of limit value, as required by the input enum value
-    !>  hipLimit_t,
-    !>  which can be either `hipLimitStackSize`, or `hipLimitMallocHeapSize`. Any other input as
-    !>  default, the function will return `hipErrorUnsupportedLimit`.
-    !>
-    !>  @param [out] pValue Returns the size of the limit in bytes
-    !>  @param [in]  limit The limit to query
-    !>
-    !>  @returns `hipSuccess`, `hipErrorUnsupportedLimit`, `hipErrorInvalidValue`
     function hipDeviceGetLimit(pValue, limit) &
        result(DeviceGetLimit) &
        bind(C, name="hipDeviceGetLimit")
@@ -2417,24 +2146,6 @@ module hip
     !---------------------------------------------
     ! hipDeviceSetLimit
     !---------------------------------------------
-    !>  @brief Sets resource limits of current device.
-    !>
-    !>  As the input enum limit,
-    !>  `hipLimitStackSize` sets the limit value of the stack size on the current GPU device, per
-    !>  thread.
-    !>  The limit size can get via hipDeviceGetLimit. The size is in units of 256 dwords, up to the
-    !>  limit
-    !>  (128K - 16).
-    !>
-    !>  `hipLimitMallocHeapSize` sets the limit value of the heap used by the malloc()/free()
-    !>  calls. For limit size, use the `hipDeviceGetLimit` API.
-    !>
-    !>  Any other input as default, the funtion will return hipErrorUnsupportedLimit.
-    !>
-    !>  @param [in] limit Enum of hipLimit_t to set
-    !>  @param [in] value The size of limit value in bytes
-    !>
-    !>  @returns `hipSuccess`, `hipErrorUnsupportedLimit`, `hipErrorInvalidValue`
     function hipDeviceSetLimit(limit, myValue) &
        result(DeviceSetLimit) &
        bind(C, name="hipDeviceSetLimit")
@@ -2447,14 +2158,6 @@ module hip
     !---------------------------------------------
     ! hipDeviceGetSharedMemConfig
     !---------------------------------------------
-    !>  @brief Returns bank width of shared memory for current device
-    !>
-    !>  @param [out] pConfig The pointer of the bank width for shared memory
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotInitialized`
-    !>
-    !>  Note: AMD devices and some Nvidia GPUS do not support shared cache banking, and the hint is
-    !>  ignored on those architectures.
     function hipDeviceGetSharedMemConfig(pConfig) &
        result(DeviceGetSharedMemConfig) &
        bind(C, name="hipDeviceGetSharedMemConfig")
@@ -2466,11 +2169,6 @@ module hip
     !---------------------------------------------
     ! hipGetDeviceFlags
     !---------------------------------------------
-    !>  @brief Gets the flags set for current device
-    !>
-    !>  @param [out] flags Pointer of the flags
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidDevice`, `hipErrorInvalidValue`
     function hipGetDeviceFlags(flags) &
        result(GetDeviceFlags) &
        bind(C, name="hipGetDeviceFlags")
@@ -2482,14 +2180,6 @@ module hip
     !---------------------------------------------
     ! hipDeviceSetSharedMemConfig
     !---------------------------------------------
-    !>  @brief The bank width of shared memory on current device is set
-    !>
-    !>  @param [in] config Configuration for the bank width of shared memory
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotInitialized`
-    !>
-    !>  Note: AMD devices and some Nvidia GPUS do not support shared cache banking, and the hint is
-    !>  ignored on those architectures.
     function hipDeviceSetSharedMemConfig(config) &
        result(DeviceSetSharedMemConfig) &
        bind(C, name="hipDeviceSetSharedMemConfig")
@@ -2501,35 +2191,6 @@ module hip
     !---------------------------------------------
     ! hipSetDeviceFlags
     !---------------------------------------------
-    !>  @brief The current device behavior is changed according to the flags passed.
-    !>
-    !>  @param [in] flags Flag to set on the current device
-    !>
-    !>  The schedule flags impact how HIP waits for the completion of a command running on a device.
-    !>
-    !>  `hipDeviceScheduleSpin` : HIP runtime will actively spin in the thread which submitted
-    !>  the work until the command completes. This offers the lowest latency, but will consume a CPU
-    !>  core and may increase power.
-    !>
-    !>  `hipDeviceScheduleYield`        : The HIP runtime will yield the CPU to system so that other
-    !>  tasks can use it. This may increase latency to detect the completion but will consume less
-    !>  power and is friendlier to other tasks in the system.
-    !>
-    !>  `hipDeviceScheduleBlockingSync` : On ROCm platform, this is a synonym for
-    !>  hipDeviceScheduleYield.
-    !>
-    !>  `hipDeviceScheduleAuto`         : This is the default value if the input 'flags' is zero.
-    !>  Uses a heuristic to select between Spin and Yield modes. If the number of HIP contexts is
-    !>  greater than the number of logical processors in the system, uses Spin scheduling, otherwise
-    !>  uses Yield scheduling.
-    !>
-    !>  `hipDeviceMapHost` : Allows mapping host memory. On ROCm, this is always allowed and
-    !>  the flag is ignored.
-    !>
-    !>  `hipDeviceLmemResizeToMax`      : This flag is silently ignored on ROCm.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorNoDevice`, `hipErrorInvalidDevice`,
-    !>  `hipErrorSetOnActiveProcess`
     function hipSetDeviceFlags(flags) &
        result(SetDeviceFlags) &
        bind(C, name="hipSetDeviceFlags")
@@ -2541,12 +2202,6 @@ module hip
     !---------------------------------------------
     ! hipChooseDeviceR0600
     !---------------------------------------------
-    !>  @brief Device which matches hipDeviceProp_t is returned
-    !>
-    !>  @param [out] device Pointer of the device
-    !>  @param [in]  prop Pointer of the properties
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipChooseDeviceR0600(device, prop) &
        result(ChooseDeviceR0600) &
        bind(C, name="hipChooseDeviceR0600")
@@ -2557,19 +2212,21 @@ module hip
     end function hipChooseDeviceR0600
 
     !---------------------------------------------
+    ! hipInitDevice
+    !---------------------------------------------
+    function hipInitDevice(device, deviceFlags, flags) &
+       result(InitDevice) &
+       bind(C, name="hipInitDevice")
+       import :: c_int, hipSuccess
+       integer(c_int), value :: device
+       integer(c_int), value :: deviceFlags
+       integer(c_int), value :: flags
+       integer(kind(hipSuccess)) :: InitDevice
+    end function hipInitDevice
+
+    !---------------------------------------------
     ! hipExtGetLinkTypeAndHopCount
     !---------------------------------------------
-    !>  @brief Returns the link type and hop count between two devices
-    !>
-    !>  @param [in] device1 Ordinal for device1
-    !>  @param [in] device2 Ordinal for device2
-    !>  @param [out] linktype Returns the link type (See hsa_amd_link_info_type_t) between the two
-    !>  devices
-    !>  @param [out] hopcount Returns the hop count between the two devices
-    !>
-    !>  Queries and returns the HSA link type and the hop count between the two specified devices.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipExtGetLinkTypeAndHopCount(device1, device2, linktype, hopcount) &
        result(ExtGetLinkTypeAndHopCount) &
        bind(C, name="hipExtGetLinkTypeAndHopCount")
@@ -2584,26 +2241,6 @@ module hip
     !---------------------------------------------
     ! hipIpcGetMemHandle
     !---------------------------------------------
-    !>  @brief Gets an interprocess memory handle for an existing device memory
-    !>           allocation
-    !>
-    !>  Takes a pointer to the base of an existing device memory allocation created
-    !>  with hipMalloc and exports it for use in another process. This is a
-    !>  lightweight operation and may be called multiple times on an allocation
-    !>  without adverse effects.
-    !>
-    !>  If a region of memory is freed with hipFree and a subsequent call
-    !>  to hipMalloc returns memory with the same device address,
-    !>  hipIpcGetMemHandle will return a unique handle for the
-    !>  new memory.
-    !>
-    !>  @param handle - Pointer to user allocated hipIpcMemHandle to return
-    !>                     the handle in.
-    !>  @param devPtr - Base pointer to previously allocated device memory
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidHandle`, `hipErrorOutOfMemory`, `hipErrorMapFailed`
-    !>
-    !>  @note This IPC memory related feature API on Windows may behave differently from Linux.
     function hipIpcGetMemHandle(handle, devPtr) &
        result(IpcGetMemHandle) &
        bind(C, name="hipIpcGetMemHandle")
@@ -2616,38 +2253,6 @@ module hip
     !---------------------------------------------
     ! hipIpcOpenMemHandle
     !---------------------------------------------
-    !>  @brief Opens an interprocess memory handle exported from another process
-    !>           and returns a device pointer usable in the local process.
-    !>
-    !>  Maps memory exported from another process with hipIpcGetMemHandle into
-    !>  the current device address space. For contexts on different devices
-    !>  hipIpcOpenMemHandle can attempt to enable peer access between the
-    !>  devices as if the user called hipDeviceEnablePeerAccess. This behavior is
-    !>  controlled by the hipIpcMemLazyEnablePeerAccess flag.
-    !>  hipDeviceCanAccessPeer can determine if a mapping is possible.
-    !>
-    !>  Contexts that may open hipIpcMemHandles are restricted in the following way.
-    !>  hipIpcMemHandles from each device in a given process may only be opened
-    !>  by one context per device per other process.
-    !>
-    !>  Memory returned from hipIpcOpenMemHandle must be freed with
-    !>  hipIpcCloseMemHandle.
-    !>
-    !>  Calling hipFree on an exported memory region before calling
-    !>  hipIpcCloseMemHandle in the importing context will result in undefined
-    !>  behavior.
-    !>
-    !>  @param devPtr - Returned device pointer
-    !>  @param handle - hipIpcMemHandle to open
-    !>  @param flags - Flags for this operation. Must be specified as hipIpcMemLazyEnablePeerAccess
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidContext`,
-    !>   `hipErrorInvalidDevicePointer`
-    !>
-    !>  @note During multiple processes, using the same memory handle opened by the current context,
-    !>  there is no guarantee that the same device poiter will be returned in @p *devPtr.
-    !>  This is diffrent from CUDA.
-    !>  @note This IPC memory related feature API on Windows may behave differently from Linux.
     function hipIpcOpenMemHandle(devPtr, handle, flags) &
        result(IpcOpenMemHandle) &
        bind(C, name="hipIpcOpenMemHandle")
@@ -2661,20 +2266,6 @@ module hip
     !---------------------------------------------
     ! hipIpcCloseMemHandle
     !---------------------------------------------
-    !>  @brief Close memory mapped with hipIpcOpenMemHandle
-    !>
-    !>  Unmaps memory returnd by hipIpcOpenMemHandle. The original allocation
-    !>  in the exporting process as well as imported mappings in other processes
-    !>  will be unaffected.
-    !>
-    !>  Any resources used to enable peer access will be freed if this is the
-    !>  last mapping using them.
-    !>
-    !>  @param devPtr - Device pointer returned by hipIpcOpenMemHandle
-    !>
-    !>  @returns `hipSuccess`, `hipErrorMapFailed`, `hipErrorInvalidHandle`
-    !>
-    !>  @note This IPC memory related feature API on Windows may behave differently from Linux.
     function hipIpcCloseMemHandle(devPtr) &
        result(IpcCloseMemHandle) &
        bind(C, name="hipIpcCloseMemHandle")
@@ -2686,21 +2277,6 @@ module hip
     !---------------------------------------------
     ! hipIpcGetEventHandle
     !---------------------------------------------
-    !>  @brief Gets an opaque interprocess handle for an event.
-    !>
-    !>  This opaque handle may be copied into other processes and opened with hipIpcOpenEventHandle.
-    !>  Then hipEventRecord, hipEventSynchronize, hipStreamWaitEvent and hipEventQuery may be used
-    !>  in
-    !>  either process. Operations on the imported event after the exported event has been freed
-    !>  with
-    !>  hipEventDestroy will result in undefined behavior.
-    !>
-    !>  @param[out] handle - Pointer to hipIpcEventHandle to return the opaque event handle
-    !>  @param[in] event - Event allocated with hipEventInterprocess and hipEventDisableTiming flags
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidConfiguration`, `hipErrorInvalidValue`
-    !>
-    !>  @note This IPC event related feature API is currently applicable on Linux.
     function hipIpcGetEventHandle(handle, event) &
        result(IpcGetEventHandle) &
        bind(C, name="hipIpcGetEventHandle")
@@ -2713,25 +2289,6 @@ module hip
     !---------------------------------------------
     ! hipIpcOpenEventHandle
     !---------------------------------------------
-    !>  @brief Opens an interprocess event handles.
-    !>
-    !>  Opens an interprocess event handle exported from another process with hipIpcGetEventHandle.
-    !>  The
-    !>  returned hipEvent_t behaves like a locally created event with the hipEventDisableTiming flag
-    !>  specified. This event need be freed with hipEventDestroy. Operations on the imported event
-    !>  after
-    !>  the exported event has been freed with hipEventDestroy will result in undefined behavior. If
-    !>  the
-    !>  function is called within the same process where handle is returned by hipIpcGetEventHandle,
-    !>  it
-    !>  will return hipErrorInvalidContext.
-    !>
-    !>  @param[out] event - Pointer to hipEvent_t to return the event
-    !>  @param[in] handle - The opaque interprocess handle to open
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidContext`
-    !>
-    !>  @note This IPC event related feature API is currently applicable on Linux.
     function hipIpcOpenEventHandle(event, handle) &
        result(IpcOpenEventHandle) &
        bind(C, name="hipIpcOpenEventHandle")
@@ -2744,23 +2301,6 @@ module hip
     !---------------------------------------------
     ! hipFuncSetAttribute
     !---------------------------------------------
-    !> @ingroup Execution
-    !>
-    !>
-    !>
-    !>
-    !>
-    !>
-    !>  @brief Set attribute for a specific function
-    !>
-    !>  @param [in] func Pointer of the function
-    !>  @param [in] attr Attribute to set
-    !>  @param [in] value Value to set
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidDeviceFunction`, `hipErrorInvalidValue`
-    !>
-    !>  Note: AMD devices and some Nvidia GPUS do not support shared cache banking, and the hint is
-    !>  ignored on those architectures.
     function hipFuncSetAttribute(func, attr, myValue) &
        result(FuncSetAttribute) &
        bind(C, name="hipFuncSetAttribute")
@@ -2774,18 +2314,6 @@ module hip
     !---------------------------------------------
     ! hipKernelSetAttribute
     !---------------------------------------------
-    !>  @brief Set attribute for a specific kernel
-    !>
-    !>  @param [in] attrib Attribute to set
-    !>  @param [in] value Value to set
-    !>  @param [in] kernel Kernel to set attribute for
-    !>  @param [in] dev Device kernel execute on
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidHandle`,
-    !>  `hipErrorInvalidDevice`, `hipErrorInvalidDeviceFunction`, `hipErrorMissingConfiguration`
-    !>  Note: AMD devices and some Nvidia GPUS do not support reconfigurable cache. This hint is
-    !>  ignored
-    !>  on those architectures.
     function hipKernelSetAttribute(attrib, myValue, kernel, dev) &
        result(KernelSetAttribute) &
        bind(C, name="hipKernelSetAttribute")
@@ -2800,12 +2328,6 @@ module hip
     !---------------------------------------------
     ! hipKernelGetFunction
     !---------------------------------------------
-    !>  @brief Function will be extracted for specific kernel
-    !>
-    !>  @param [out] pFunc  Pointer to function handle for the kernel
-    !>  @param [in] kernel  kernel to get handle for
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotFound`
     function hipKernelGetFunction(pFunc, kernel) &
        result(KernelGetFunction) &
        bind(C, name="hipKernelGetFunction")
@@ -2818,15 +2340,6 @@ module hip
     !---------------------------------------------
     ! hipFuncSetCacheConfig
     !---------------------------------------------
-    !>  @brief Set Cache configuration for a specific function
-    !>
-    !>  @param [in] func Pointer of the function.
-    !>  @param [in] config Configuration to set.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorNotInitialized`
-    !>  Note: AMD devices and some Nvidia GPUS do not support reconfigurable cache. This hint is
-    !>  ignored
-    !>  on those architectures.
     function hipFuncSetCacheConfig(func, config) &
        result(FuncSetCacheConfig) &
        bind(C, name="hipFuncSetCacheConfig")
@@ -2839,15 +2352,6 @@ module hip
     !---------------------------------------------
     ! hipFuncSetSharedMemConfig
     !---------------------------------------------
-    !>  @brief Set shared memory configuation for a specific function
-    !>
-    !>  @param [in] func Pointer of the function
-    !>  @param [in] config Configuration
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidDeviceFunction`, `hipErrorInvalidValue`
-    !>
-    !>  Note: AMD devices and some Nvidia GPUS do not support shared cache banking, and the hint is
-    !>  ignored on those architectures.
     function hipFuncSetSharedMemConfig(func, config) &
        result(FuncSetSharedMemConfig) &
        bind(C, name="hipFuncSetSharedMemConfig")
@@ -2860,24 +2364,6 @@ module hip
     !---------------------------------------------
     ! hipGetLastError
     !---------------------------------------------
-    !> @ingroup Error
-    !>
-    !>
-    !>
-    !>
-    !>
-    !> -------------------------------------------------------------------------------------------------
-    !> -------------------------------------------------------------------------------------------------
-    !>  @brief Return last error returned by any HIP runtime API call and resets the stored error
-    !>  code to
-    !>  `hipSuccess`
-    !>
-    !>  @returns return code from last HIP called from the active host thread
-    !>
-    !>  Returns the last error that has been returned by any of the runtime calls in the same host
-    !>  thread, and then resets the saved error to `hipSuccess`.
-    !>
-    !>  @see hipGetErrorString, hipGetLastError, hipPeakAtLastError, hipError_t
     function hipGetLastError() &
        result(GetLastError) &
        bind(C, name="hipGetLastError")
@@ -2888,16 +2374,6 @@ module hip
     !---------------------------------------------
     ! hipExtGetLastError
     !---------------------------------------------
-    !>  @brief Return last error returned by any HIP runtime API call and resets the stored error
-    !>  code to
-    !>  `hipSuccess`
-    !>
-    !>  @returns return code from last HIP called from the active host thread
-    !>
-    !>  Returns the last error that has been returned by any of the runtime calls in the same host
-    !>  thread, and then resets the saved error to `hipSuccess`.
-    !>
-    !>  @see hipGetErrorString, hipGetLastError, hipPeakAtLastError, hipError_t
     function hipExtGetLastError() &
        result(ExtGetLastError) &
        bind(C, name="hipExtGetLastError")
@@ -2908,14 +2384,6 @@ module hip
     !---------------------------------------------
     ! hipPeekAtLastError
     !---------------------------------------------
-    !>  @brief Return last error returned by any HIP runtime API call.
-    !>
-    !>  @returns `hipSuccess`
-    !>
-    !>  Returns the last error that has been returned by any of the runtime calls in the same host
-    !>  thread. Unlike hipGetLastError, this function does not reset the saved error code.
-    !>
-    !>  @see hipGetErrorString, hipGetLastError, hipPeakAtLastError, hipError_t
     function hipPeekAtLastError() &
        result(PeekAtLastError) &
        bind(C, name="hipPeekAtLastError")
@@ -2926,12 +2394,6 @@ module hip
     !---------------------------------------------
     ! hipGetErrorName
     !---------------------------------------------
-    !>  @brief Return hip error as text string form.
-    !>
-    !>  @param hip_error - Error code to convert to name.
-    !>  @returns const char pointer to the NULL-terminated error name
-    !>
-    !>  @see hipGetErrorString, hipGetLastError, hipPeakAtLastError, hipError_t
     function hipGetErrorName(hip_error) &
        result(GetErrorName) &
        bind(C, name="hipGetErrorName")
@@ -2943,12 +2405,6 @@ module hip
     !---------------------------------------------
     ! hipGetErrorString
     !---------------------------------------------
-    !>  @brief Return handy text string message to explain the error which occurred
-    !>
-    !>  @param hipError - Error code to convert to string.
-    !>  @returns const char pointer to the NULL-terminated error string
-    !>
-    !>  @see hipGetErrorName, hipGetLastError, hipPeakAtLastError, hipError_t
     function hipGetErrorString(hipError) &
        result(GetErrorString) &
        bind(C, name="hipGetErrorString")
@@ -2960,13 +2416,6 @@ module hip
     !---------------------------------------------
     ! hipDrvGetErrorName
     !---------------------------------------------
-    !>  @brief Return hip error as text string form.
-    !>
-    !>  @param [in] hipError Error code to convert to string.
-    !>  @param [out] errorString char pointer to the NULL-terminated error string
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  @see hipGetErrorName, hipGetLastError, hipPeakAtLastError, hipError_t
     function hipDrvGetErrorName(hipError, errorString) &
        result(DrvGetErrorName) &
        bind(C, name="hipDrvGetErrorName")
@@ -2979,13 +2428,6 @@ module hip
     !---------------------------------------------
     ! hipDrvGetErrorString
     !---------------------------------------------
-    !>  @brief Return handy text string message to explain the error which occurred
-    !>
-    !>  @param [in] hipError Error code to convert to string.
-    !>  @param [out] errorString char pointer to the NULL-terminated error string
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  @see hipGetErrorName, hipGetLastError, hipPeakAtLastError, hipError_t
     function hipDrvGetErrorString(hipError, errorString) &
        result(DrvGetErrorString) &
        bind(C, name="hipDrvGetErrorString")
@@ -2998,25 +2440,6 @@ module hip
     !---------------------------------------------
     ! hipStreamCreate
     !---------------------------------------------
-    !>  @brief Creates an asynchronous stream.
-    !>
-    !>  @param[out] stream - Valid pointer to hipStream_t.  This function writes the memory with the
-    !>  newly created stream.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  Creates a new asynchronous stream with its associated current device. The @p stream returns
-    !>  an
-    !>  opaque handle that can be used to reference the newly created stream in subsequent
-    !>  hipStream*
-    !>  commands. The stream is allocated on the heap and will remain allocated even if the handle
-    !>  goes
-    !>  out-of-scope. To release the memory used by the stream, the application must call
-    !>  hipStreamDestroy.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  @see hipStreamCreateWithFlags, hipStreamCreateWithPriority, hipStreamSynchronize,
-    !>  hipStreamWaitEvent, hipStreamDestroy
     function hipStreamCreate(stream) &
        result(StreamCreate) &
        bind(C, name="hipStreamCreate")
@@ -3028,25 +2451,6 @@ module hip
     !---------------------------------------------
     ! hipStreamCreateWithFlags
     !---------------------------------------------
-    !>  @brief Creates an asynchronous stream with flag.
-    !>
-    !>  @param[out] stream - Pointer to new stream
-    !>  @param[in] flags - Parameters to control stream creation
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  Creates a new asynchronous stream with its associated current device. @p stream returns an
-    !>  opaque handle that can be used to reference the newly created stream in subsequent
-    !>  hipStream*
-    !>  commands. The stream is allocated on the heap and will remain allocated even if the handle
-    !>  goes out-of-scope. To release the memory used by the stream, application must call
-    !>  hipStreamDestroy.
-    !>
-    !>  The @p flags parameter controls behavior of the stream. The valid values are
-    !>  `hipStreamDefault`
-    !>  and `hipStreamNonBlocking`.
-    !>
-    !>  @see hipStreamCreate, hipStreamCreateWithPriority, hipStreamSynchronize, hipStreamWaitEvent,
-    !>  hipStreamDestroy.
     function hipStreamCreateWithFlags(stream, flags) &
        result(StreamCreateWithFlags) &
        bind(C, name="hipStreamCreateWithFlags")
@@ -3059,27 +2463,6 @@ module hip
     !---------------------------------------------
     ! hipStreamCreateWithPriority
     !---------------------------------------------
-    !>  @brief Creates an asynchronous stream with the specified priority.
-    !>
-    !>  @param[out] stream - Pointer to new stream
-    !>  @param[in] flags - Parameters to control stream creation
-    !>  @param[in] priority - Priority of the stream. Lower numbers represent higher priorities.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  Creates a new asynchronous stream with the specified priority, with its associated current
-    !>  device.
-    !>  @p stream returns an opaque handle that can be used to reference the newly created stream in
-    !>  subsequent hipStream* commands. The stream is allocated on the heap and will remain
-    !>  allocated
-    !>  even if the handle goes out-of-scope. To release the memory used by the stream, application
-    !>  must
-    !>  call hipStreamDestroy.
-    !>
-    !>  The @p flags parameter controls behavior of the stream. The valid values are
-    !>  `hipStreamDefault`
-    !>  and `hipStreamNonBlocking`.
-    !>
-    !>  @see hipStreamCreate, hipStreamSynchronize, hipStreamWaitEvent, hipStreamDestroy
     function hipStreamCreateWithPriority(stream, flags, priority) &
        result(StreamCreateWithPriority) &
        bind(C, name="hipStreamCreateWithPriority")
@@ -3093,24 +2476,6 @@ module hip
     !---------------------------------------------
     ! hipDeviceGetStreamPriorityRange
     !---------------------------------------------
-    !>  @brief Returns numerical values that correspond to the least and greatest stream priority.
-    !>
-    !>  @param[in, out] leastPriority - Pointer in which a value corresponding to least priority
-    !>  is returned.
-    !>  @param[in, out] greatestPriority - Pointer in which a value corresponding to greatest
-    !>  priority
-    !>  is returned.
-    !>  @returns `hipSuccess`
-    !>
-    !>  Returns in *leastPriority and *greatestPriority the numerical values that correspond to the
-    !>  least and greatest stream priority respectively. Stream priorities follow a convention where
-    !>  lower numbers imply greater priorities. The range of meaningful stream priorities is given
-    !>  by
-    !>  [*leastPriority,*greatestPriority]. If the user attempts to create a stream with a priority
-    !>  value that is outside the meaningful range as specified by this API, the priority is
-    !>  automatically clamped to within the valid range.
-    !>
-    !>  @warning This API is under development on AMD GPUs and simply returns `hipSuccess`.
     function hipDeviceGetStreamPriorityRange(leastPriority, greatestPriority) &
        result(DeviceGetStreamPriorityRange) &
        bind(C, name="hipDeviceGetStreamPriorityRange")
@@ -3123,23 +2488,6 @@ module hip
     !---------------------------------------------
     ! hipStreamDestroy
     !---------------------------------------------
-    !>  @brief Destroys the specified stream.
-    !>
-    !>  @param[in] stream - Stream identifier
-    !>  @returns `hipSuccess` `hipErrorInvalidHandle`
-    !>
-    !>  Destroys the specified stream.
-    !>
-    !>  If commands are still executing on the specified stream, some may complete execution before
-    !>  the
-    !>  queue is deleted.
-    !>
-    !>  The queue may be destroyed while some commands are still inflight, or may wait for all
-    !>  commands
-    !>  queued to the stream before destroying it.
-    !>
-    !>  @see hipStreamCreate, hipStreamCreateWithFlags, hipStreamCreateWithPriority, hipStreamQuery,
-    !>  hipStreamWaitEvent, hipStreamSynchronize
     function hipStreamDestroy(stream) &
        result(StreamDestroy) &
        bind(C, name="hipStreamDestroy")
@@ -3151,23 +2499,6 @@ module hip
     !---------------------------------------------
     ! hipStreamQuery
     !---------------------------------------------
-    !>  @brief Returns `hipSuccess` if all of the operations in the specified @p stream have
-    !>  completed, or
-    !>  `hipErrorNotReady` if not.
-    !>
-    !>  @param[in] stream - Stream to query
-    !>
-    !>  @returns `hipSuccess`, `hipErrorNotReady`, `hipErrorInvalidHandle`
-    !>
-    !>  This is thread-safe and returns a snapshot of the current state of the queue. However, if
-    !>  other
-    !>  host threads are sending work to the stream, the status may change immediately after the
-    !>  function
-    !>  is called.  It is typically used for debug.
-    !>
-    !>  @see hipStreamCreate, hipStreamCreateWithFlags, hipStreamCreateWithPriority,
-    !>  hipStreamWaitEvent,
-    !>  hipStreamSynchronize, hipStreamDestroy
     function hipStreamQuery(stream) &
        result(StreamQuery) &
        bind(C, name="hipStreamQuery")
@@ -3179,28 +2510,6 @@ module hip
     !---------------------------------------------
     ! hipStreamSynchronize
     !---------------------------------------------
-    !>  @brief Waits for all commands in the stream to complete.
-    !>
-    !>  @param[in] stream - Stream identifier.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidHandle`
-    !>
-    !>  This command is host-synchronous : the host will block until all operations on the specified
-    !>  stream with its associated device are completed. On multiple device systems, the @p stream
-    !>  is
-    !>  associated with its device, no need to call hipSetDevice before this API.
-    !>
-    !>  This command follows standard null-stream semantics. Specifying the null stream will cause
-    !>  the
-    !>  command to wait for other streams on the same device to complete all pending operations.
-    !>
-    !>  This command honors the `hipDeviceScheduleBlockingSync` flag, which controls whether the
-    !>  wait is
-    !>  active or blocking.
-    !>
-    !>  @see hipStreamCreate, hipStreamCreateWithFlags, hipStreamCreateWithPriority,
-    !>  hipStreamWaitEvent,
-    !>  hipStreamDestroy
     function hipStreamSynchronize(stream) &
        result(StreamSynchronize) &
        bind(C, name="hipStreamSynchronize")
@@ -3212,32 +2521,6 @@ module hip
     !---------------------------------------------
     ! hipStreamWaitEvent
     !---------------------------------------------
-    !>  @brief Makes the specified compute stream wait for the specified event
-    !>
-    !>  @param[in] stream - Stream to make wait
-    !>  @param[in] event - Event to wait on
-    !>  @param[in] flags - Parameters to control the operation
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidHandle`, `hipErrorInvalidValue`,
-    !>  `hipErrorStreamCaptureIsolation`
-    !>
-    !>  This function inserts a wait operation into the specified stream.
-    !>  All future work submitted to @p stream will wait until @p event reports completion before
-    !>  beginning execution.
-    !>
-    !>  Flags include:
-    !>    hipEventWaitDefault: Default event creation flag.
-    !>    hipEventWaitExternal: Wait is captured in the graph as an external event node when
-    !>                            performing stream capture
-    !>
-    !>  This function only waits for commands in the current stream to complete. Notably, this
-    !>  function
-    !>  does not implicitly wait for commands in the default stream to complete, even if the
-    !>  specified
-    !>  stream is created with hipStreamNonBlocking = 0.
-    !>
-    !>  @see hipStreamCreate, hipStreamCreateWithFlags, hipStreamCreateWithPriority,
-    !>  hipStreamSynchronize, hipStreamDestroy
     function hipStreamWaitEvent(stream, event, flags) &
        result(StreamWaitEvent) &
        bind(C, name="hipStreamWaitEvent")
@@ -3251,14 +2534,6 @@ module hip
     !---------------------------------------------
     ! hipStreamGetFlags
     !---------------------------------------------
-    !>  @brief Returns flags associated with this stream.
-    !>
-    !>  @param[in] stream - Stream to be queried
-    !>  @param[in,out] flags - Pointer to an unsigned integer in which the stream's flags are
-    !>  returned
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidHandle`.
-    !>
-    !>  @see hipStreamCreateWithFlags
     function hipStreamGetFlags(stream, flags) &
        result(StreamGetFlags) &
        bind(C, name="hipStreamGetFlags")
@@ -3271,14 +2546,6 @@ module hip
     !---------------------------------------------
     ! hipStreamGetId
     !---------------------------------------------
-    !>  @brief Queries the Id of a stream.
-    !>
-    !>  @param[in] stream - Stream to be queried
-    !>  flags - Pointer to an unsigned long long in which the stream's id is returned
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidHandle`.
-    !>
-    !>  @see hipStreamCreateWithFlags, hipStreamGetFlags, hipStreamCreateWithPriority,
-    !>  hipStreamGetPriority
     function hipStreamGetId(stream, streamId) &
        result(StreamGetId) &
        bind(C, name="hipStreamGetId")
@@ -3291,15 +2558,6 @@ module hip
     !---------------------------------------------
     ! hipStreamGetPriority
     !---------------------------------------------
-    !>  @brief Queries the priority of a stream.
-    !>
-    !>  @param[in] stream - Stream to be queried
-    !>  @param[in,out] priority - Pointer to an unsigned integer in which the stream's priority is
-    !>  returned
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidHandle`.
-    !>
-    !>  @see hipStreamCreateWithPriority
     function hipStreamGetPriority(stream, priority) &
        result(StreamGetPriority) &
        bind(C, name="hipStreamGetPriority")
@@ -3312,15 +2570,6 @@ module hip
     !---------------------------------------------
     ! hipStreamGetDevice
     !---------------------------------------------
-    !>  @brief Gets the device associated with the stream.
-    !>
-    !>  @param[in] stream - Stream to be queried
-    !>  @param[out] device - Device associated with the stream
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorContextIsDestroyed`,
-    !>  `hipErrorInvalidHandle`,
-    !>  `hipErrorNotInitialized`, `hipErrorDeinitialized`, `hipErrorInvalidContext`
-    !>
-    !>  @see hipStreamCreate, hipStreamDestroy, hipDeviceGetStreamPriorityRange
     function hipStreamGetDevice(stream, device) &
        result(StreamGetDevice) &
        bind(C, name="hipStreamGetDevice")
@@ -3333,27 +2582,6 @@ module hip
     !---------------------------------------------
     ! hipExtStreamCreateWithCUMask
     !---------------------------------------------
-    !>  @brief Creates an asynchronous stream with the specified CU mask.
-    !>
-    !>  @param[out] stream - Pointer to new stream
-    !>  @param[in] cuMaskSize - Size of CU mask bit array passed in.
-    !>  @param[in] cuMask - Bit-vector representing the CU mask. Each active bit represents using
-    !>  one CU.
-    !>  The first 32 bits represent the first 32 CUs, and so on. If its size is greater than
-    !>  physical
-    !>  CU number (i.e., multiProcessorCount member of hipDeviceProp_t), the extra elements are
-    !>  ignored.
-    !>  It is user's responsibility to make sure the input is meaningful.
-    !>  @returns `hipSuccess`, `hipErrorInvalidHandle`, `hipErrorInvalidValue`
-    !>
-    !>  Creates  a new asynchronous stream with the specified CU mask.  @p stream returns an opaque
-    !>  handle that can be used to reference the newly created stream in subsequent hipStream*
-    !>  commands.
-    !>  The stream is allocated on the heap and will remain allocated even if the handle goes
-    !>  out-of-scope. To release the memory used by the stream, application must call
-    !>  hipStreamDestroy.
-    !>
-    !>  @see hipStreamCreate, hipStreamSynchronize, hipStreamWaitEvent, hipStreamDestroy
     function hipExtStreamCreateWithCUMask(stream, cuMaskSize, cuMask) &
        result(ExtStreamCreateWithCUMask) &
        bind(C, name="hipExtStreamCreateWithCUMask")
@@ -3367,16 +2595,6 @@ module hip
     !---------------------------------------------
     ! hipExtStreamGetCUMask
     !---------------------------------------------
-    !>  @brief Gets CU mask associated with an asynchronous stream
-    !>
-    !>  @param[in] stream - Stream to be queried
-    !>  @param[in] cuMaskSize - Number of the block of memories (uint32_t *) allocated by user
-    !>  @param[out] cuMask - Pointer to a pre-allocated block of memories (uint32_t *) in which
-    !>  the stream's CU mask is returned. The CU mask is returned in a chunck of 32 bits where
-    !>  each active bit represents one active CU.
-    !>  @returns `hipSuccess`, `hipErrorInvalidHandle`, `hipErrorInvalidValue`
-    !>
-    !>  @see hipStreamCreate, hipStreamSynchronize, hipStreamWaitEvent, hipStreamDestroy
     function hipExtStreamGetCUMask(stream, cuMaskSize, cuMask) &
        result(ExtStreamGetCUMask) &
        bind(C, name="hipExtStreamGetCUMask")
@@ -3390,20 +2608,6 @@ module hip
     !---------------------------------------------
     ! hipStreamAddCallback
     !---------------------------------------------
-    !>  @brief Adds a callback to be called on the host after all currently enqueued items in the
-    !>  stream
-    !>  have completed. For each hipStreamAddCallback call, a callback will be executed exactly
-    !>  once.
-    !>  The callback will block later work in the stream until it is finished.
-    !>
-    !>  @param[in] stream - Stream to add callback to
-    !>  @param[in] callback - The function to call once preceding stream operations are complete
-    !>  @param[in] userData - User specified data to be passed to the callback function
-    !>  @param[in] flags - Reserved for future use, must be 0
-    !>  @returns `hipSuccess`, `hipErrorInvalidHandle`, `hipErrorNotSupported`
-    !>
-    !>  @see hipStreamCreate, hipStreamCreateWithFlags, hipStreamQuery, hipStreamSynchronize,
-    !>  hipStreamWaitEvent, hipStreamDestroy, hipStreamCreateWithPriority
     function hipStreamAddCallback(stream, callback, userData, flags) &
        result(StreamAddCallback) &
        bind(C, name="hipStreamAddCallback")
@@ -3418,11 +2622,6 @@ module hip
     !---------------------------------------------
     ! hipStreamSetAttribute
     !---------------------------------------------
-    !> @brief Sets stream attribute. Updated attribute is applied to work submitted to the stream.
-    !>  @param[in] stream - Stream to set attributes to
-    !>  @param[in] attr - Attribute ID for the attribute to set
-    !>  @param[in] myValue - Attribute value for the attribute to set
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidResourceHandle`
     function hipStreamSetAttribute(stream, attr, myValue) &
        result(StreamSetAttribute) &
        bind(C, name="hipStreamSetAttribute")
@@ -3436,11 +2635,6 @@ module hip
     !---------------------------------------------
     ! hipStreamGetAttribute
     !---------------------------------------------
-    !> @brief queries stream attribute.
-    !>  @param[in] stream - Stream to geet attributes from
-    !>  @param[in] attr - Attribute ID for the attribute to query
-    !>  value - Attribute value output
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidResourceHandle`
     function hipStreamGetAttribute(stream, attr, value_out) &
        result(StreamGetAttribute) &
        bind(C, name="hipStreamGetAttribute")
@@ -3454,10 +2648,6 @@ module hip
     !---------------------------------------------
     ! hipStreamCopyAttributes
     !---------------------------------------------
-    !> @brief Copies attributes from source stream to destination stream.
-    !>  @param[in] dst - Destination stream
-    !>  @param[in] src - Source stream
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipStreamCopyAttributes(dst, src) &
        result(StreamCopyAttributes) &
        bind(C, name="hipStreamCopyAttributes")
@@ -3470,41 +2660,6 @@ module hip
     !---------------------------------------------
     ! hipStreamWaitValue32
     !---------------------------------------------
-    !>  @brief Enqueues a wait command to the stream.[BETA]
-    !>
-    !>  @param [in] stream - Stream identifier
-    !>  @param [in] ptr    - Pointer to memory object allocated using `hipMallocSignalMemory` flag
-    !>  @param [in] value  - Value to be used in compare operation
-    !>  @param [in] flags - Defines the compare operation, supported values are
-    !>  `hipStreamWaitValueGte`
-    !>  `hipStreamWaitValueEq`, `hipStreamWaitValueAnd` and `hipStreamWaitValueNor`
-    !>  @param [in] mask   - Mask to be applied on value at memory before it is compared with value,
-    !>  default value is set to enable every bit
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  Enqueues a wait command to the stream, all operations enqueued on this stream after this,
-    !>  will
-    !>  not execute until the defined wait condition is true.
-    !>
-    !>  `hipStreamWaitValueGte`: waits until *ptr&mask >= value
-    !>
-    !>  `hipStreamWaitValueEq` : waits until *ptr&mask == value
-    !>
-    !>  `hipStreamWaitValueAnd`: waits until ((*ptr&mask) & value) != 0
-    !>
-    !>  `hipStreamWaitValueNor`: waits until ~((*ptr&mask) | (value&mask)) != 0
-    !>
-    !>  @note when using `hipStreamWaitValueNor`, mask is applied on both 'value' and '*ptr'.
-    !>
-    !>  @note Support for `hipStreamWaitValue32` can be queried using 'hipDeviceGetAttribute()' and
-    !>  'hipDeviceAttributeCanUseStreamWaitValue' flag.
-    !>
-    !>  @warning This API is marked as Beta. While this feature is complete, it can
-    !>           change and might have outstanding issues.
-    !>
-    !>  @see hipExtMallocWithFlags, hipFree, hipStreamWaitValue64, hipStreamWriteValue64,
-    !>  hipStreamWriteValue32, hipDeviceGetAttribute
     function hipStreamWaitValue32(stream, ptr, myValue, flags, mask) &
        result(StreamWaitValue32) &
        bind(C, name="hipStreamWaitValue32")
@@ -3520,41 +2675,6 @@ module hip
     !---------------------------------------------
     ! hipStreamWaitValue64
     !---------------------------------------------
-    !>  @brief Enqueues a wait command to the stream.[BETA]
-    !>
-    !>  @param [in] stream - Stream identifier
-    !>  @param [in] ptr    - Pointer to memory object allocated using 'hipMallocSignalMemory' flag
-    !>  @param [in] value  - Value to be used in compare operation
-    !>  @param [in] flags - Defines the compare operation, supported values are
-    !>  `hipStreamWaitValueGte`
-    !>  `hipStreamWaitValueEq`, `hipStreamWaitValueAnd` and `hipStreamWaitValueNor`.
-    !>  @param [in] mask   - Mask to be applied on value at memory before it is compared with value
-    !>  default value is set to enable every bit
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  Enqueues a wait command to the stream, all operations enqueued on this stream after this,
-    !>  will
-    !>  not execute until the defined wait condition is true.
-    !>
-    !>  `hipStreamWaitValueGte`: waits until *ptr&mask >= value
-    !>
-    !>  `hipStreamWaitValueEq` : waits until *ptr&mask == value
-    !>
-    !>  `hipStreamWaitValueAnd`: waits until ((*ptr&mask) & value) != 0
-    !>
-    !>  `hipStreamWaitValueNor`: waits until ~((*ptr&mask) | (value&mask)) != 0
-    !>
-    !>  @note when using `hipStreamWaitValueNor`, mask is applied on both 'value' and '*ptr'.
-    !>
-    !>  @note Support for hipStreamWaitValue64 can be queried using 'hipDeviceGetAttribute()' and
-    !>  'hipDeviceAttributeCanUseStreamWaitValue' flag.
-    !>
-    !>  @warning This API is marked as Beta. While this feature is complete, it can
-    !>           change and might have outstanding issues.
-    !>
-    !>  @see hipExtMallocWithFlags, hipFree, hipStreamWaitValue32, hipStreamWriteValue64,
-    !>  hipStreamWriteValue32, hipDeviceGetAttribute
     function hipStreamWaitValue64(stream, ptr, myValue, flags, mask) &
        result(StreamWaitValue64) &
        bind(C, name="hipStreamWaitValue64")
@@ -3570,24 +2690,6 @@ module hip
     !---------------------------------------------
     ! hipStreamWriteValue32
     !---------------------------------------------
-    !>  @brief Enqueues a write command to the stream.[BETA]
-    !>
-    !>  @param [in] stream - Stream identifier
-    !>  @param [in] ptr    - Pointer to a GPU accessible memory object
-    !>  @param [in] value  - Value to be written
-    !>  @param [in] flags  - reserved, ignored for now, will be used in future releases
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  Enqueues a write command to the stream, write operation is performed after all earlier
-    !>  commands
-    !>  on this stream have completed the execution.
-    !>
-    !>  @warning This API is marked as Beta. While this feature is complete, it can
-    !>           change and might have outstanding issues.
-    !>
-    !>  @see hipExtMallocWithFlags, hipFree, hipStreamWriteValue32, hipStreamWaitValue32,
-    !>  hipStreamWaitValue64
     function hipStreamWriteValue32(stream, ptr, myValue, flags) &
        result(StreamWriteValue32) &
        bind(C, name="hipStreamWriteValue32")
@@ -3602,24 +2704,6 @@ module hip
     !---------------------------------------------
     ! hipStreamWriteValue64
     !---------------------------------------------
-    !>  @brief Enqueues a write command to the stream.[BETA]
-    !>
-    !>  @param [in] stream - Stream identifier
-    !>  @param [in] ptr    - Pointer to a GPU accessible memory object
-    !>  @param [in] value  - Value to be written
-    !>  @param [in] flags  - reserved, ignored for now, will be used in future releases
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  Enqueues a write command to the stream, write operation is performed after all earlier
-    !>  commands
-    !>  on this stream have completed the execution.
-    !>
-    !>  @warning This API is marked as Beta. While this feature is complete, it can
-    !>           change and might have outstanding issues.
-    !>
-    !>  @see hipExtMallocWithFlags, hipFree, hipStreamWriteValue32, hipStreamWaitValue32,
-    !>  hipStreamWaitValue64
     function hipStreamWriteValue64(stream, ptr, myValue, flags) &
        result(StreamWriteValue64) &
        bind(C, name="hipStreamWriteValue64")
@@ -3634,22 +2718,6 @@ module hip
     !---------------------------------------------
     ! hipStreamBatchMemOp
     !---------------------------------------------
-    !>  @brief Enqueues an array of stream memory operations in the stream.[BETA]
-    !>
-    !>  @param [in] stream      - Stream identifier
-    !>  @param [in] count       - The number of operations in the array. Must be less than 256
-    !>  @param [in] paramArray  - The types and parameters of the individual operations.
-    !>  @param [in] flags       - Reserved for future expansion; must be 0.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  Batch operations to synchronize the stream via memory operations.
-    !>
-    !>  @warning This API is marked as beta, meaning, while this is feature complete,
-    !>  it is still open to changes and may have outstanding issues.
-    !>
-    !>  @see hipStreamWriteValue32, hipStreamWaitValue32,
-    !>  hipStreamWaitValue64. hipStreamWriteValue64
     function hipStreamBatchMemOp(stream, count, paramArray, flags) &
        result(StreamBatchMemOp) &
        bind(C, name="hipStreamBatchMemOp")
@@ -3664,21 +2732,6 @@ module hip
     !---------------------------------------------
     ! hipGraphAddBatchMemOpNode
     !---------------------------------------------
-    !>  @brief Creates a batch memory operation node and adds it to a graph.[BETA]
-    !>
-    !>  @param [out] phGraphNode     - Returns the newly created node
-    !>  @param [in] hGraph           - Graph to which to add the node
-    !>  @param [in] dependencies     -  Dependencies of the node
-    !>  @param [in] numDependencies  - Number of dependencies
-    !>  @param [in] nodeParams       - Parameters for the node
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  @warning This API is marked as beta, meaning, while this is feature complete,
-    !>  it is still open to changes and may have outstanding issues.
-    !>
-    !>  @see hipStreamWriteValue32, hipStreamWaitValue32,
-    !>  hipStreamWaitValue64. hipStreamWriteValue64, hipStreamBatchMemOp
     function hipGraphAddBatchMemOpNode(phGraphNode, hGraph, dependencies, numDependencies, &
                                        nodeParams) &
        result(GraphAddBatchMemOpNode) &
@@ -3695,23 +2748,6 @@ module hip
     !---------------------------------------------
     ! hipGraphBatchMemOpNodeGetParams
     !---------------------------------------------
-    !>  @brief Returns a batch mem op node's parameters.[BETA]
-    !>
-    !>  @param [in] hNode           - Node to get the parameters for
-    !>  @param [in] nodeParams_out  - Pointer to return the parameters
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  Returns the parameters of batch mem op node hNode in nodeParams_out.
-    !>  The paramArray returned in nodeParams_out is owned by the node.
-    !>  This memory remains valid until the node is destroyed or its parameters are modified,
-    !>  and should not be modified directly.
-    !>
-    !>  @warning This API is marked as beta, meaning, while this is feature complete,
-    !>  it is still open to changes and may have outstanding issues.
-    !>
-    !>  @see hipStreamWriteValue32, hipStreamWaitValue32,
-    !>  hipStreamWaitValue64. hipStreamWriteValue64. hipGraphBatchMemOpNodeSetParams
     function hipGraphBatchMemOpNodeGetParams(hNode, nodeParams_out) &
        result(GraphBatchMemOpNodeGetParams) &
        bind(C, name="hipGraphBatchMemOpNodeGetParams")
@@ -3724,20 +2760,6 @@ module hip
     !---------------------------------------------
     ! hipGraphBatchMemOpNodeSetParams
     !---------------------------------------------
-    !>  @brief Sets the batch mem op node's parameters.[BETA]
-    !>
-    !>  @param [in] hNode       - Node to set the parameters for
-    !>  @param [in] nodeParams  - Parameters to copy
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  Sets the parameters of batch mem op node hNode to nodeParams.
-    !>
-    !>  @warning This API is marked as beta, meaning, while this is feature complete,
-    !>  it is still open to changes and may have outstanding issues.
-    !>
-    !>  @see hipStreamWriteValue32, hipStreamWaitValue32,
-    !>  hipStreamWaitValue64. hipStreamWriteValue64, hipGraphBatchMemOpNodeGetParams
     function hipGraphBatchMemOpNodeSetParams(hNode, nodeParams) &
        result(GraphBatchMemOpNodeSetParams) &
        bind(C, name="hipGraphBatchMemOpNodeSetParams")
@@ -3750,23 +2772,6 @@ module hip
     !---------------------------------------------
     ! hipGraphExecBatchMemOpNodeSetParams
     !---------------------------------------------
-    !>  @brief Sets the parameters for a batch mem op node in the given graphExec.[BETA]
-    !>
-    !>  @param [in] hGraphExec  - The executable graph in which to set the specified node
-    !>  @param [in] hNode - Batch mem op node from the graph from which graphExec was instantiated
-    !>  @param [in] nodeParams  - Updated Parameters to set
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  Sets the parameters of a batch mem op node in an executable graph hGraphExec.
-    !>  The node is identified by the corresponding node hNode in the non-executable graph,
-    !>  from which the executable graph was instantiated.
-    !>
-    !>  @warning This API is marked as beta, meaning, while this is feature complete,
-    !>  it is still open to changes and may have outstanding issues.
-    !>
-    !>  @see hipStreamWriteValue32, hipStreamWaitValue32,
-    !>  hipStreamWaitValue64. hipStreamWriteValue64, hipStreamBatchMemOp
     function hipGraphExecBatchMemOpNodeSetParams(hGraphExec, hNode, nodeParams) &
        result(GraphExecBatchMemOpNodeSetParams) &
        bind(C, name="hipGraphExecBatchMemOpNodeSetParams")
@@ -3780,43 +2785,6 @@ module hip
     !---------------------------------------------
     ! hipEventCreateWithFlags
     !---------------------------------------------
-    !> @ingroup Event
-    !>
-    !>
-    !>
-    !>
-    !>
-    !> -------------------------------------------------------------------------------------------------
-    !> -------------------------------------------------------------------------------------------------
-    !>  @brief Create an event with the specified flags
-    !>
-    !>  @param[out] event - Returns the newly created event.
-    !>  @param[in] flags - Flags to control event behavior.  Valid values are `hipEventDefault`,
-    !>  `hipEventBlockingSync`, `hipEventDisableTiming`, `hipEventInterprocess`
-    !>  `hipEventDefault` : Default flag. The event will use active synchronization and will support
-    !>  timing. Blocking synchronization provides lowest possible latency at the expense of
-    !>  dedicating a
-    !>  CPU to poll on the event.
-    !>  `hipEventBlockingSync` : The event will use blocking synchronization : if
-    !>  hipEventSynchronize is
-    !>  called on this event, the thread will block until the event completes. This can increase
-    !>  latency
-    !>  for the synchroniation but can result in lower power and more resources for other CPU
-    !>  threads.
-    !>  `hipEventDisableTiming` : Disable recording of timing information. Events created with this
-    !>  flag
-    !>  would not record profiling data and provide best performance if used for synchronization.
-    !>  `hipEventInterprocess` : The event can be used as an interprocess event.
-    !>  hipEventDisableTiming
-    !>  flag also must be set when hipEventInterprocess flag is set.
-    !>  `hipEventDisableSystemFence` : Disable acquire and release system scope fence. This may
-    !>  improve performance but device memory may not be visible to the host and other devices
-    !>  if this flag is set.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorNotInitialized`, `hipErrorInvalidValue`,
-    !>  `hipErrorLaunchFailure`, `hipErrorOutOfMemory`
-    !>
-    !>  @see hipEventCreate, hipEventSynchronize, hipEventDestroy, hipEventElapsedTime
     function hipEventCreateWithFlags(event, flags) &
        result(EventCreateWithFlags) &
        bind(C, name="hipEventCreateWithFlags")
@@ -3829,15 +2797,6 @@ module hip
     !---------------------------------------------
     ! hipEventCreate
     !---------------------------------------------
-    !>   Create an event
-    !>
-    !>  @param[out] event - Returns the newly created event.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorNotInitialized`, `hipErrorInvalidValue`,
-    !>  `hipErrorLaunchFailure`, `hipErrorOutOfMemory`
-    !>
-    !>  @see hipEventCreateWithFlags, hipEventRecord, hipEventQuery, hipEventSynchronize,
-    !>  hipEventDestroy, hipEventElapsedTime
     function hipEventCreate(event) &
        result(EventCreate) &
        bind(C, name="hipEventCreate")
@@ -3849,42 +2808,6 @@ module hip
     !---------------------------------------------
     ! hipEventRecordWithFlags
     !---------------------------------------------
-    !>  @brief Record an event in the specified stream.
-    !>
-    !>  @param[in] event - event to record.
-    !>  @param[in] stream - stream in which to record event.
-    !>  @param[in] flags - parameter for operations
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotInitialized`,
-    !>  `hipErrorInvalidHandle`, `hipErrorLaunchFailure`
-    !>
-    !>  hipEventQuery() or hipEventSynchronize() must be used to determine when the event
-    !>  transitions from "recording" (after hipEventRecord() is called) to "recorded"
-    !>  (when timestamps are set, if requested).
-    !>
-    !>  Events which are recorded in a non-NULL stream will transition to
-    !>  from recording to "recorded" state when they reach the head of
-    !>  the specified stream, after all previous
-    !>  commands in that stream have completed executing.
-    !>
-    !>  Flags include:
-    !>    hipEventRecordDefault: Default event creation flag.
-    !>    hipEventRecordExternal: Event is captured in the graph as an external event node when
-    !>                            performing stream capture
-    !>
-    !>  If hipEventRecord() has been previously called on this event, then this call will overwrite
-    !>  any
-    !>  existing state in event.
-    !>
-    !>  If this function is called on an event that is currently being recorded, results are
-    !>  undefined
-    !>  - either outstanding recording may save state into the event, and the order is not
-    !>  guaranteed.
-    !>
-    !>  @note: If this function is not called before use hipEventQuery() or hipEventSynchronize(),
-    !>  `hipSuccess` is returned, meaning no pending event in the stream.
-    !>
-    !>  @see hipEventCreate, hipEventCreateWithFlags, hipEventQuery, hipEventSynchronize,
-    !>  hipEventDestroy, hipEventElapsedTime
     function hipEventRecordWithFlags(event, stream, flags) &
        result(EventRecordWithFlags) &
        bind(C, name="hipEventRecordWithFlags")
@@ -3910,21 +2833,6 @@ module hip
     !---------------------------------------------
     ! hipEventDestroy
     !---------------------------------------------
-    !>   @brief Destroy the specified event.
-    !>
-    !>   @param[in] event - Event to destroy.
-    !>   @returns `hipSuccess`, `hipErrorNotInitialized`, `hipErrorInvalidValue`,
-    !>  `hipErrorLaunchFailure`
-    !>
-    !>   Releases memory associated with the event.  If the event is recording but has not completed
-    !>  recording when hipEventDestroy() is called, the function will return immediately and the
-    !>  completion_future resources will be released later, when the hipDevice is synchronized.
-    !>
-    !>  @see hipEventCreate, hipEventCreateWithFlags, hipEventQuery, hipEventSynchronize,
-    !>  hipEventRecord,
-    !>  hipEventElapsedTime
-    !>
-    !>  @returns `hipSuccess`
     function hipEventDestroy(event) &
        result(EventDestroy) &
        bind(C, name="hipEventDestroy")
@@ -3936,25 +2844,6 @@ module hip
     !---------------------------------------------
     ! hipEventSynchronize
     !---------------------------------------------
-    !>   @brief Wait for an event to complete.
-    !>
-    !>   This function will block until the event is ready, waiting for all previous work in the
-    !>   stream
-    !>  specified when event was recorded with hipEventRecord().
-    !>
-    !>   If hipEventRecord() has not been called on @p event, this function returns `hipSuccess`
-    !>   when no
-    !>   event is captured.
-    !>
-    !>
-    !>   @param[in] event - Event on which to wait.
-    !>
-    !>   @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotInitialized`,
-    !>  `hipErrorInvalidHandle`, `hipErrorLaunchFailure`
-    !>
-    !>   @see hipEventCreate, hipEventCreateWithFlags, hipEventQuery, hipEventDestroy,
-    !>   hipEventRecord,
-    !>  hipEventElapsedTime
     function hipEventSynchronize(event) &
        result(EventSynchronize) &
        bind(C, name="hipEventSynchronize")
@@ -3966,35 +2855,6 @@ module hip
     !---------------------------------------------
     ! hipEventElapsedTime
     !---------------------------------------------
-    !>  @brief Return the elapsed time between two events.
-    !>
-    !>  @param[out] ms - : Return time between start and stop in ms.
-    !>  @param[in] start - : Start event.
-    !>  @param[in] myStop - : Stop event.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotReady`, `hipErrorInvalidHandle`,
-    !>  `hipErrorNotInitialized`, `hipErrorLaunchFailure`
-    !>
-    !>  Computes the elapsed time between two events. Time is computed in ms, with
-    !>  a resolution of approximately 1 us.
-    !>
-    !>  Events which are recorded in a NULL stream will block until all commands
-    !>  on all other streams complete execution, and then record the timestamp.
-    !>
-    !>  Events which are recorded in a non-NULL stream will record their timestamp
-    !>  when they reach the head of the specified stream, after all previous
-    !>  commands in that stream have completed executing.  Thus the time that
-    !>  the event recorded may be significantly after the host calls hipEventRecord().
-    !>
-    !>  If hipEventRecord() has not been called on either event, then `hipErrorInvalidHandle` is
-    !>  returned. If hipEventRecord() has been called on both events, but the timestamp has not yet
-    !>  been
-    !>  recorded on one or both events (that is, hipEventQuery() would return `hipErrorNotReady` on
-    !>  at
-    !>  least one of the events), then `hipErrorNotReady` is returned.
-    !>
-    !>  @see hipEventCreate, hipEventCreateWithFlags, hipEventQuery, hipEventDestroy,
-    !>  hipEventRecord,
-    !>  hipEventSynchronize
     function hipEventElapsedTime(ms, start, myStop) &
        result(EventElapsedTime) &
        bind(C, name="hipEventElapsedTime")
@@ -4008,20 +2868,6 @@ module hip
     !---------------------------------------------
     ! hipEventQuery
     !---------------------------------------------
-    !>  @brief Query event status
-    !>
-    !>  @param[in] event - Event to query.
-    !>  @returns `hipSuccess`, `hipErrorNotReady`, `hipErrorInvalidHandle`, `hipErrorInvalidValue`,
-    !>  `hipErrorNotInitialized`, `hipErrorLaunchFailure`
-    !>
-    !>  Query the status of the specified event.  This function will return `hipSuccess` if all
-    !>  commands in the appropriate stream (specified to hipEventRecord()) have completed.  If any
-    !>  execution has not completed, then `hipErrorNotReady` is returned.
-    !>
-    !>  @note This API returns `hipSuccess`, if hipEventRecord() is not called before this API.
-    !>
-    !>  @see hipEventCreate, hipEventCreateWithFlags, hipEventRecord, hipEventDestroy,
-    !>  hipEventSynchronize, hipEventElapsedTime
     function hipEventQuery(event) &
        result(EventQuery) &
        bind(C, name="hipEventQuery")
@@ -4033,16 +2879,6 @@ module hip
     !---------------------------------------------
     ! hipPointerSetAttribute
     !---------------------------------------------
-    !>   @brief Sets information on the specified pointer.[BETA]
-    !>
-    !>   @param [in]      value     Sets pointer attribute value
-    !>   @param [in]      attribute  Attribute to set
-    !>   @param [in]      ptr      Pointer to set attributes for
-    !>
-    !>   @returns `hipSuccess`, `hipErrorInvalidDevice`, `hipErrorInvalidValue`
-    !>
-    !>   @warning This API is marked as Beta. While this feature is complete, it can
-    !>            change and might have outstanding issues.
     function hipPointerSetAttribute(myValue, attribute, ptr) &
        result(PointerSetAttribute) &
        bind(C, name="hipPointerSetAttribute")
@@ -4056,23 +2892,6 @@ module hip
     !---------------------------------------------
     ! hipPointerGetAttributes
     !---------------------------------------------
-    !>   @brief Returns attributes for the specified pointer
-    !>
-    !>   @param [out]  attributes  attributes for the specified pointer
-    !>   @param [in]   ptr         pointer to get attributes for
-    !>
-    !>   The output parameter 'attributes' has a member named 'type' that describes what memory the
-    !>   pointer is associated with, such as device memory, host memory, managed memory, and others.
-    !>   Otherwise, the API cannot handle the pointer and returns `hipErrorInvalidValue`.
-    !>
-    !>   @note  The unrecognized memory type is unsupported to keep the HIP functionality backward
-    !>   compatibility due to `hipMemoryType` enum values.
-    !>
-    !>   @returns `hipSuccess`, `hipErrorInvalidDevice`, `hipErrorInvalidValue`
-    !>
-    !>   @note The current behavior of this HIP API corresponds to the CUDA API before version 11.0.
-    !>
-    !>   @see hipPointerGetAttribute
     function hipPointerGetAttributes(attributes, ptr) &
        result(PointerGetAttributes) &
        bind(C, name="hipPointerGetAttributes")
@@ -4085,18 +2904,6 @@ module hip
     !---------------------------------------------
     ! hipPointerGetAttribute
     !---------------------------------------------
-    !>   @brief Returns information about the specified pointer.[BETA]
-    !>
-    !>   @param [in, out] data     Returned pointer attribute value
-    !>   @param [in]      attribute  Attribute to query for
-    !>   @param [in]      ptr      Pointer to get attributes for
-    !>
-    !>   @returns `hipSuccess`, `hipErrorInvalidDevice`, `hipErrorInvalidValue`
-    !>
-    !>   @warning This API is marked as Beta. While this feature is complete, it can
-    !>            change and might have outstanding issues.
-    !>
-    !>   @see hipPointerGetAttributes
     function hipPointerGetAttribute(myData, attribute, ptr) &
        result(PointerGetAttribute) &
        bind(C, name="hipPointerGetAttribute")
@@ -4110,20 +2917,6 @@ module hip
     !---------------------------------------------
     ! hipDrvPointerGetAttributes
     !---------------------------------------------
-    !>   @brief Returns information about the specified pointer.[BETA]
-    !>
-    !>   @param [in]  numAttributes   number of attributes to query for
-    !>   @param [in]  attributes      attributes to query for
-    !>   @param [in, out] data        a two-dimensional containing pointers to memory locations
-    !>                                where the result of each attribute query will be written to
-    !>   @param [in]  ptr             pointer to get attributes for
-    !>
-    !>   @returns `hipSuccess`, `hipErrorInvalidDevice`, `hipErrorInvalidValue`
-    !>
-    !>   @warning This API is marked as Beta. While this feature is complete, it can
-    !>            change and might have outstanding issues.
-    !>
-    !>   @see hipPointerGetAttribute
     function hipDrvPointerGetAttributes(numAttributes, attributes, myData, ptr) &
        result(DrvPointerGetAttributes) &
        bind(C, name="hipDrvPointerGetAttributes")
@@ -4138,21 +2931,6 @@ module hip
     !---------------------------------------------
     ! hipImportExternalSemaphore
     !---------------------------------------------
-    !> @ingroup External
-    !>
-    !>
-    !> -------------------------------------------------------------------------------------------------
-    !> -------------------------------------------------------------------------------------------------
-    !>   @brief Imports an external semaphore.
-    !>
-    !>   @param[out] extSem_out - External semaphores to be waited on
-    !>   @param[in] semHandleDesc - Semaphore import handle descriptor
-    !>
-    !>   @returns `hipSuccess`, `hipErrorInvalidDevice`, `hipErrorInvalidValue`
-    !>
-    !>   @see
-    !>
-    !>   @note  This API is currently not supported on Linux.
     function hipImportExternalSemaphore(extSem_out, semHandleDesc) &
        result(ImportExternalSemaphore) &
        bind(C, name="hipImportExternalSemaphore")
@@ -4165,18 +2943,6 @@ module hip
     !---------------------------------------------
     ! hipSignalExternalSemaphoresAsync
     !---------------------------------------------
-    !>   @brief Signals a set of external semaphore objects.
-    !>
-    !>   @param[in] extSemArray - External semaphores to be waited on
-    !>   @param[in] paramsArray - Array of semaphore parameters
-    !>   @param[in] numExtSems - Number of semaphores to wait on
-    !>   @param[in] stream - Stream to enqueue the wait operations in
-    !>
-    !>   @returns `hipSuccess`, `hipErrorInvalidDevice`, `hipErrorInvalidValue`
-    !>
-    !>   @see
-    !>
-    !>   @note  This API is currently not supported on Linux.
     function hipSignalExternalSemaphoresAsync(extSemArray, paramsArray, numExtSems, stream) &
        result(SignalExternalSemaphoresAsync) &
        bind(C, name="hipSignalExternalSemaphoresAsync")
@@ -4191,18 +2957,6 @@ module hip
     !---------------------------------------------
     ! hipWaitExternalSemaphoresAsync
     !---------------------------------------------
-    !>   @brief Waits on a set of external semaphore objects
-    !>
-    !>   @param[in] extSemArray - External semaphores to be waited on
-    !>   @param[in] paramsArray - Array of semaphore parameters
-    !>   @param[in] numExtSems - Number of semaphores to wait on
-    !>   @param[in] stream - Stream to enqueue the wait operations in
-    !>
-    !>   @returns `hipSuccess`, `hipErrorInvalidDevice`, `hipErrorInvalidValue`
-    !>
-    !>   @see
-    !>
-    !>   @note  This API is currently not supported on Linux.
     function hipWaitExternalSemaphoresAsync(extSemArray, paramsArray, numExtSems, stream) &
        result(WaitExternalSemaphoresAsync) &
        bind(C, name="hipWaitExternalSemaphoresAsync")
@@ -4217,17 +2971,6 @@ module hip
     !---------------------------------------------
     ! hipDestroyExternalSemaphore
     !---------------------------------------------
-    !>   @brief Destroys an external semaphore object and releases any references to the underlying
-    !>  resource. Any outstanding signals or waits must have completed before the semaphore is
-    !>  destroyed.
-    !>
-    !>   @param[in] extSem - handle to an external memory object
-    !>
-    !>   @returns `hipSuccess`, `hipErrorInvalidDevice`, `hipErrorInvalidValue`
-    !>
-    !>   @see
-    !>
-    !>   @note  This API is currently not supported on Linux.
     function hipDestroyExternalSemaphore(extSem) &
        result(DestroyExternalSemaphore) &
        bind(C, name="hipDestroyExternalSemaphore")
@@ -4239,14 +2982,6 @@ module hip
     !---------------------------------------------
     ! hipImportExternalMemory
     !---------------------------------------------
-    !>   @brief Imports an external memory object.
-    !>
-    !>   @param[out] extMem_out - Returned handle to an external memory object
-    !>   @param[in] memHandleDesc - Memory import handle descriptor
-    !>
-    !>   @returns `hipSuccess`, `hipErrorInvalidDevice`, `hipErrorInvalidValue`
-    !>
-    !>   @see
     function hipImportExternalMemory(extMem_out, memHandleDesc) &
        result(ImportExternalMemory) &
        bind(C, name="hipImportExternalMemory")
@@ -4259,15 +2994,6 @@ module hip
     !---------------------------------------------
     ! hipExternalMemoryGetMappedBuffer
     !---------------------------------------------
-    !>   @brief Maps a buffer onto an imported memory object.
-    !>
-    !>   @param[out] devPtr - Returned device pointer to buffer
-    !>   @param[in] extMem - Handle to external memory object
-    !>   @param[in] bufferDesc - Buffer descriptor
-    !>
-    !>   @returns `hipSuccess`, `hipErrorInvalidDevice`, `hipErrorInvalidValue`
-    !>
-    !>   @see
     function hipExternalMemoryGetMappedBuffer(devPtr, extMem, bufferDesc) &
        result(ExternalMemoryGetMappedBuffer) &
        bind(C, name="hipExternalMemoryGetMappedBuffer")
@@ -4281,13 +3007,6 @@ module hip
     !---------------------------------------------
     ! hipDestroyExternalMemory
     !---------------------------------------------
-    !>   @brief Destroys an external memory object.
-    !>
-    !>   @param[in] extMem - External memory object to be destroyed
-    !>
-    !>   @returns `hipSuccess`, `hipErrorInvalidDevice`, `hipErrorInvalidValue`
-    !>
-    !>   @see
     function hipDestroyExternalMemory(extMem) &
        result(DestroyExternalMemory) &
        bind(C, name="hipDestroyExternalMemory")
@@ -4299,18 +3018,6 @@ module hip
     !---------------------------------------------
     ! hipExternalMemoryGetMappedMipmappedArray
     !---------------------------------------------
-    !>   @brief Maps a mipmapped array onto an external memory object.
-    !>
-    !>   @param[out] mipmap - mipmapped array to return
-    !>   @param[in] extMem - external memory object handle
-    !>   @param[in] mipmapDesc - external mipmapped array descriptor
-    !>
-    !>   Returned mipmapped array must be freed using hipFreeMipmappedArray.
-    !>
-    !>   @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidResourceHandle`
-    !>
-    !>   @see hipImportExternalMemory, hipDestroyExternalMemory, hipExternalMemoryGetMappedBuffer,
-    !>  hipFreeMipmappedArray
     function hipExternalMemoryGetMappedMipmappedArray(mipmap, extMem, mipmapDesc) &
        result(ExternalMemoryGetMappedMipmappedArray) &
        bind(C, name="hipExternalMemoryGetMappedMipmappedArray")
@@ -4324,25 +3031,6 @@ module hip
     !---------------------------------------------
     ! hipExtMallocWithFlags
     !---------------------------------------------
-    !>   @brief Allocate memory on the default accelerator
-    !>
-    !>   @param[out] ptr - Pointer to the allocated memory
-    !>   @param[in] sizeBytes - Requested memory size
-    !>   @param[in] flags - Type of memory allocation
-    !>
-    !>   If requested memory size is 0, no memory is allocated, *ptr returns nullptr, and
-    !>   `hipSuccess`
-    !>   is returned.
-    !>
-    !>   The memory allocation flag should be either `hipDeviceMallocDefault`,
-    !>   `hipDeviceMallocFinegrained`, `hipDeviceMallocUncached`, or `hipMallocSignalMemory`.
-    !>   If the flag is any other value, the API returns `hipErrorInvalidValue`.
-    !>
-    !>   @returns `hipSuccess`, `hipErrorOutOfMemory`, `hipErrorInvalidValue` (bad context, null
-    !>   *ptr)
-    !>
-    !>   @see hipMallocPitch, hipFree, hipMallocArray, hipFreeArray, hipMalloc3D, hipMalloc3DArray,
-    !>  hipHostFree, hiHostMalloc
     function hipExtMallocWithFlags(ptr, sizeBytes, flags) &
        result(ExtMallocWithFlags) &
        bind(C, name="hipExtMallocWithFlags")
@@ -4356,16 +3044,6 @@ module hip
     !---------------------------------------------
     ! hipMallocHost
     !---------------------------------------------
-    !>   @brief Allocate pinned host memory [Deprecated]
-    !>
-    !>   @param[out] ptr - Pointer to the allocated host pinned memory
-    !>   @param[in] mySize - Requested memory size
-    !>
-    !>   If size is 0, no memory is allocated, *ptr returns nullptr, and hipSuccess is returned.
-    !>
-    !>   @returns `hipSuccess`, `hipErrorOutOfMemory`
-    !>
-    !>   @warning  This API is deprecated, use hipHostMalloc() instead
     function hipMallocHost(ptr, mySize) &
        result(MallocHost) &
        bind(C, name="hipMallocHost")
@@ -4378,16 +3056,6 @@ module hip
     !---------------------------------------------
     ! hipMemAllocHost
     !---------------------------------------------
-    !>   @brief Allocate pinned host memory [Deprecated]
-    !>
-    !>   @param[out] ptr - Pointer to the allocated host pinned memory
-    !>   @param[in] mySize - Requested memory size
-    !>
-    !>   If size is 0, no memory is allocated, *ptr returns nullptr, and hipSuccess is returned.
-    !>
-    !>   @returns `hipSuccess`, `hipErrorOutOfMemory`
-    !>
-    !>   @warning  This API is deprecated, use hipHostMalloc() instead
     function hipMemAllocHost(ptr, mySize) &
        result(MemAllocHost) &
        bind(C, name="hipMemAllocHost")
@@ -4400,16 +3068,6 @@ module hip
     !---------------------------------------------
     ! hipMemPrefetchAsync
     !---------------------------------------------
-    !>  @brief Prefetches memory to the specified destination device using HIP.
-    !>
-    !>  @param [in] dev_ptr  pointer to be prefetched
-    !>  @param [in] count    size in bytes for prefetching
-    !>  @param [in] device   destination device to prefetch to
-    !>  @param [in] stream   stream to enqueue prefetch operation
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  @note  This API is implemented on Linux and is under development on Microsoft Windows.
     function hipMemPrefetchAsync(dev_ptr, count, device, stream) &
        result(MemPrefetchAsync) &
        bind(C, name="hipMemPrefetchAsync")
@@ -4424,17 +3082,6 @@ module hip
     !---------------------------------------------
     ! hipMemPrefetchAsync_v2
     !---------------------------------------------
-    !>  @brief Prefetches memory to the specified destination device using HIP.
-    !>
-    !>  @param [in] dev_ptr    pointer to be prefetched
-    !>  @param [in] count      size in bytes for prefetching
-    !>  @param [in] location   destination location to prefetch to
-    !>  @param [in] flags      flags for future use, must be zero now.
-    !>  @param [in] stream     stream to enqueue prefetch operation
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  @note  This API is implemented on Linux and is under development on Microsoft Windows.
     function hipMemPrefetchAsync_v2(dev_ptr, count, location, flags, stream) &
        result(MemPrefetchAsync_v2) &
        bind(C, name="hipMemPrefetchAsync_v2")
@@ -4450,20 +3097,6 @@ module hip
     !---------------------------------------------
     ! hipMemPrefetchBatchAsync
     !---------------------------------------------
-    !>  @brief Prefetches a batch of memory ranges to the specified locations using HIP.
-    !>
-    !>  @param [in] dev_ptrs      pointers to the memory ranges to prefetch
-    !>  @param [in] sizes      sizes in bytes of the memory ranges to prefetch
-    !>  @param [in] count      number of memory ranges to prefetch
-    !>  @param [in] prefetch_locs   locations to prefetch the memory ranges to
-    !>  @param [in] prefetch_loc_idxs  indices of the memory ranges to prefetch
-    !>  @param [in] num_prefetch_locs  number of locations to prefetch
-    !>  @param [in] flags      flags for future use, must be zero now.
-    !>  @param [in] stream    stream to enqueue the prefetch operation
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  @note  This API is implemented on Linux and is under development on Microsoft Windows.
     function hipMemPrefetchBatchAsync(dev_ptrs, sizes, count, prefetch_locs, prefetch_loc_idxs, &
                                       num_prefetch_locs, flags, stream) &
        result(MemPrefetchBatchAsync) &
@@ -4483,28 +3116,6 @@ module hip
     !---------------------------------------------
     ! hipMemDiscardBatchAsync
     !---------------------------------------------
-    !>  @brief Discards a batch of memory ranges asynchronously.
-    !>
-    !>  @param [in] dev_ptrs      pointers to the memory ranges to discard
-    !>  @param [in] sizes         sizes in bytes of the memory ranges to discard
-    !>  @param [in] count         number of memory ranges to discard
-    !>  @param [in] flags         flags for future use, must be zero now.
-    !>  @param [in] stream        stream to enqueue the discard operation
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotSupported`
-    !>
-    !>  @warning Reading from a discarded range without first writing or prefetching
-    !>           to it will return an indeterminate value.
-    !>  @warning Concurrent reads, writes, or prefetches to discarded ranges result
-    !>           in undefined behavior.
-    !>
-    !>  @note All memory ranges must be managed memory allocated via hipMallocManaged
-    !>        or system-allocated memory (if device supports pageable memory access).
-    !>  @note This API is implemented on Linux and requires XNACK to be enabled.
-    !>  @note This API is marked as beta, meaning, while this is feature complete,
-    !>        it is still open to changes and may have outstanding issues.
-    !>
-    !>  @see hipMemPrefetchBatchAsync, hipMallocManaged
     function hipMemDiscardBatchAsync(dev_ptrs, sizes, count, flags, stream) &
        result(MemDiscardBatchAsync) &
        bind(C, name="hipMemDiscardBatchAsync")
@@ -4520,24 +3131,6 @@ module hip
     !---------------------------------------------
     ! hipDrvMemDiscardBatchAsync
     !---------------------------------------------
-    !>  @brief Discards a batch of memory ranges asynchronously (driver API variant).
-    !>
-    !>  @param [in] dptrs    pointers to the memory ranges to discard
-    !>  @param [in] sizes    sizes in bytes of the memory ranges to discard
-    !>  @param [in] count    number of memory ranges to discard
-    !>  @param [in] flags    flags for future use, must be zero now.
-    !>  @param [in] stream   stream to enqueue the discard operation
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotSupported`
-    !>
-    !>  @warning Reading from a discarded range without first writing or prefetching
-    !>           to it will return an indeterminate value.
-    !>
-    !>  @note This is the driver API variant that uses hipDeviceptr_t instead of void*.
-    !>        Both hipMemDiscardBatchAsync and hipDrvMemDiscardBatchAsync use the same
-    !>        internal implementation.
-    !>
-    !>  @see hipMemDiscardBatchAsync, hipMemPrefetchBatchAsync, hipMallocManaged
     function hipDrvMemDiscardBatchAsync(dptrs, sizes, count, flags, stream) &
        result(DrvMemDiscardBatchAsync) &
        bind(C, name="hipDrvMemDiscardBatchAsync")
@@ -4553,33 +3146,6 @@ module hip
     !---------------------------------------------
     ! hipMemDiscardAndPrefetchBatchAsync
     !---------------------------------------------
-    !>  @brief Discards and prefetches a batch of memory ranges asynchronously.
-    !>
-    !>  @param [in] dptrs              pointers to the memory ranges
-    !>  @param [in] sizes              sizes in bytes of the memory ranges
-    !>  @param [in] count              number of memory ranges
-    !>  @param [in] prefetchLocs       array of target locations for prefetching
-    !>  @param [in] prefetchLocIdxs    indices mapping each range to a prefetch location
-    !>  @param [in] numPrefetchLocs    number of unique prefetch locations
-    !>  @param [in] flags              flags for future use, must be zero now.
-    !>  @param [in] stream             stream to enqueue the operation
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotSupported`
-    !>
-    !>  Semantically equivalent to calling @p hipMemDiscardBatchAsync followed by
-    !>  @p hipMemPrefetchBatchAsync, but combines both operations into a single
-    !>  command submission for reduced overhead.
-    !>
-    !>  @warning Reading from a discarded range without first writing or prefetching
-    !>           to it will return an indeterminate value.
-    !>
-    !>  @note All memory ranges must be managed memory allocated via hipMallocManaged
-    !>        or system-allocated memory (if device supports pageable memory access).
-    !>  @note This API is implemented on Linux and requires XNACK to be enabled.
-    !>  @note This API is marked as beta, meaning, while this is feature complete,
-    !>        it is still open to changes and may have outstanding issues.
-    !>
-    !>  @see hipMemDiscardBatchAsync, hipMemPrefetchBatchAsync, hipMallocManaged
     function hipMemDiscardAndPrefetchBatchAsync(dptrs, sizes, count, prefetchLocs, &
                                                 prefetchLocIdxs, numPrefetchLocs, flags, stream) &
        result(MemDiscardAndPrefetchBatchAsync) &
@@ -4599,22 +3165,6 @@ module hip
     !---------------------------------------------
     ! hipDrvMemDiscardAndPrefetchBatchAsync
     !---------------------------------------------
-    !>  @brief Discards and prefetches a batch of memory ranges asynchronously (driver API variant).
-    !>
-    !>  @param [in] dptrs              pointers to the memory ranges
-    !>  @param [in] sizes              sizes in bytes of the memory ranges
-    !>  @param [in] count              number of memory ranges
-    !>  @param [in] prefetchLocs       array of target locations for prefetching
-    !>  @param [in] prefetchLocIdxs    indices mapping each range to a prefetch location
-    !>  @param [in] numPrefetchLocs    number of unique prefetch locations
-    !>  @param [in] flags              flags for future use, must be zero now.
-    !>  @param [in] stream             stream to enqueue the operation
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotSupported`
-    !>
-    !>  @note This is the driver API variant that uses hipDeviceptr_t instead of void*.
-    !>
-    !>  @see hipMemDiscardAndPrefetchBatchAsync, hipMemDiscardBatchAsync, hipMemPrefetchBatchAsync
     function hipDrvMemDiscardAndPrefetchBatchAsync(dptrs, sizes, count, prefetchLocs, &
                                                    prefetchLocIdxs, numPrefetchLocs, flags, &
                                                    stream) &
@@ -4633,60 +3183,8 @@ module hip
     end function hipDrvMemDiscardAndPrefetchBatchAsync
 
     !---------------------------------------------
-    ! hipMemAdvise
-    !---------------------------------------------
-    !>  @brief Advise about the usage of a given memory range to HIP.
-    !>
-    !>  @param [in] dev_ptr  pointer to memory to set the advice for
-    !>  @param [in] count    size in bytes of the memory range, it should be CPU page size alligned.
-    !>  @param [in] advice   advice to be applied for the specified memory range
-    !>  @param [in] device   device to apply the advice for
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  This HIP API advises about the usage to be applied on unified memory allocation in the
-    !>  range starting from the pointer address devPtr, with the size of count bytes.
-    !>  The memory range must refer to managed memory allocated via the API hipMallocManaged, and
-    !>  the
-    !>  range will be handled with proper round down and round up respectively in the driver to
-    !>  be aligned to CPU page size, the same way as corresponding CUDA API behaves in CUDA version
-    !>  8.0
-    !>  and afterwards.
-    !>
-    !>  @note  This API is implemented on Linux and is under development on Microsoft Windows.
-    function hipMemAdvise(dev_ptr, count, advice, device) &
-       result(MemAdvise) &
-       bind(C, name="hipMemAdvise")
-       import :: c_ptr, c_size_t, hipMemAdviseSetReadMostly, c_int, hipSuccess
-       type(c_ptr), value :: dev_ptr
-       integer(c_size_t), value :: count
-       integer(kind(hipMemAdviseSetReadMostly)), value :: advice
-       integer(c_int), value :: device
-       integer(kind(hipSuccess)) :: MemAdvise
-    end function hipMemAdvise
-
-    !---------------------------------------------
     ! hipMemAdvise_v2
     !---------------------------------------------
-    !>  @brief Advise about the usage of a given memory range to HIP.
-    !>
-    !>  @param [in] dev_ptr    pointer to memory to set the advice for
-    !>  @param [in] count size in bytes of the memory range, it should be CPU page size alligned.
-    !>  @param [in] advice     advice to be applied for the specified memory range
-    !>  @param [in] location   location to apply the advice for
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  This HIP API advises about the usage to be applied on unified memory allocation in the
-    !>  range starting from the pointer address devPtr, with the size of count bytes.
-    !>  The memory range must refer to managed memory allocated via the API hipMallocManaged, and
-    !>  the
-    !>  range will be handled with proper round down and round up respectively in the driver to
-    !>  be aligned to CPU page size, the same way as corresponding CUDA API behaves in CUDA version
-    !>  8.0
-    !>  and afterwards.
-    !>
-    !>  @note  This API is implemented on Linux and is under development on Microsoft Windows.
     function hipMemAdvise_v2(dev_ptr, count, advice, location) &
        result(MemAdvise_v2) &
        bind(C, name="hipMemAdvise_v2")
@@ -4699,20 +3197,22 @@ module hip
     end function hipMemAdvise_v2
 
     !---------------------------------------------
+    ! hipMemAdvise
+    !---------------------------------------------
+    function hipMemAdvise(dev_ptr, count, advice, device) &
+       result(MemAdvise) &
+       bind(C, name="hipMemAdvise")
+       import :: c_ptr, c_size_t, hipMemAdviseSetReadMostly, c_int, hipSuccess
+       type(c_ptr), value :: dev_ptr
+       integer(c_size_t), value :: count
+       integer(kind(hipMemAdviseSetReadMostly)), value :: advice
+       integer(c_int), value :: device
+       integer(kind(hipSuccess)) :: MemAdvise
+    end function hipMemAdvise
+
+    !---------------------------------------------
     ! hipMemRangeGetAttribute
     !---------------------------------------------
-    !>  @brief Query an attribute of a given memory range in HIP.
-    !>
-    !>  @param [in,out] data   a pointer to a memory location where the result of each
-    !>                         attribute query will be written to
-    !>  @param [in] data_size  the size of data
-    !>  @param [in] attribute  the attribute to query
-    !>  @param [in] dev_ptr    start of the range to query
-    !>  @param [in] count      size of the range to query
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  @note  This API is implemented on Linux and is under development on Microsoft Windows.
     function hipMemRangeGetAttribute(myData, data_size, attribute, dev_ptr, count) &
        result(MemRangeGetAttribute) &
        bind(C, name="hipMemRangeGetAttribute")
@@ -4728,20 +3228,6 @@ module hip
     !---------------------------------------------
     ! hipMemRangeGetAttributes
     !---------------------------------------------
-    !>  @brief Query attributes of a given memory range in HIP.
-    !>
-    !>  @param [in,out] data     a two-dimensional array containing pointers to memory locations
-    !>                           where the result of each attribute query will be written to
-    !>  @param [in] data_sizes   an array, containing the sizes of each result
-    !>  @param [in] attributes   the attribute to query
-    !>  @param [in] num_attributes  an array of attributes to query (numAttributes and the number
-    !>                           of attributes in this array should match)
-    !>  @param [in] dev_ptr      start of the range to query
-    !>  @param [in] count        size of the range to query
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  @note  This API is implemented on Linux and is under development on Microsoft Windows.
     function hipMemRangeGetAttributes(myData, data_sizes, attributes, num_attributes, dev_ptr, &
                                       count) &
        result(MemRangeGetAttributes) &
@@ -4759,19 +3245,6 @@ module hip
     !---------------------------------------------
     ! hipStreamAttachMemAsync
     !---------------------------------------------
-    !>  @brief Attach memory to a stream asynchronously in HIP.
-    !>
-    !>  @param [in] stream     - stream in which to enqueue the attach operation
-    !>  @param [in] dev_ptr    - pointer to memory (must be a pointer to managed memory or
-    !>                           to a valid host-accessible region of system-allocated memory)
-    !>  @param [in] length     - length of memory (defaults to zero)
-    !>  @param [in] flags      - must be one of hipMemAttachGlobal, hipMemAttachHost or
-    !>                           hipMemAttachSingle (defaults to hipMemAttachSingle)
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  @warning This API is under development. Currently it is a no-operation (NOP)
-    !>           function on AMD GPUs and returns `hipSuccess`.
     function hipStreamAttachMemAsync(stream, dev_ptr, length, flags) &
        result(StreamAttachMemAsync) &
        bind(C, name="hipStreamAttachMemAsync")
@@ -4786,35 +3259,6 @@ module hip
     !---------------------------------------------
     ! hipMallocAsync
     !---------------------------------------------
-    !>  @brief Allocates memory with stream ordered semantics
-    !>
-    !>  Inserts a memory allocation operation into @p stream.
-    !>  A pointer to the allocated memory is returned immediately in *dptr.
-    !>  The allocation must not be accessed until the allocation operation completes.
-    !>  The allocation comes from the memory pool associated with the stream's device.
-    !>
-    !>  @note The default memory pool of a device contains device memory from that device.
-    !>  @note Basic stream ordering allows future work submitted into the same stream to use the
-    !>   allocation. Stream query, stream synchronize, and HIP events can be used to guarantee that
-    !>   the allocation operation completes before work submitted in a separate stream runs.
-    !>  @note During stream capture, this function results in the creation of an allocation node.
-    !>   In this case, the allocation is owned by the graph instead of the memory pool. The memory
-    !>   pool's properties are used to set the node's creation parameters.
-    !>
-    !>  @param [out] dev_ptr  Returned device pointer of memory allocation
-    !>  @param [in] size      Number of bytes to allocate
-    !>  @param [in] stream    The stream establishing the stream ordering contract and
-    !>                        the memory pool to allocate from
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotSupported`, `hipErrorOutOfMemory`
-    !>
-    !>  @see hipMallocFromPoolAsync, hipFreeAsync, hipMemPoolTrimTo, hipMemPoolGetAttribute,
-    !>  hipDeviceSetMemPool, hipMemPoolSetAttribute, hipMemPoolSetAccess, hipMemPoolGetAccess
-    !>
-    !>  @warning This API is marked as Beta. While this feature is complete, it can
-    !>           change and might have outstanding issues.
-    !>
-    !>  @note  This API is implemented on Linux and is under development on Microsoft Windows.
     function hipMallocAsync(dev_ptr, mySize, stream) &
        result(MallocAsync) &
        bind(C, name="hipMallocAsync")
@@ -4828,29 +3272,6 @@ module hip
     !---------------------------------------------
     ! hipFreeAsync
     !---------------------------------------------
-    !>  @brief Frees memory with stream ordered semantics
-    !>
-    !>  Inserts a free operation into @p stream.
-    !>  The allocation must not be used after stream execution reaches the free.
-    !>  After this API returns, accessing the memory from any subsequent work launched on the GPU
-    !>  or querying its pointer attributes results in undefined behavior.
-    !>
-    !>  @note During stream capture, this function results in the creation of a free node and
-    !>  must therefore be passed the address of a graph allocation.
-    !>
-    !>  @param [in] dev_ptr Pointer to device memory to free
-    !>  @param [in] stream The stream, where the destruciton will occur according to the execution
-    !>  order
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotSupported`
-    !>
-    !>  @see hipMallocFromPoolAsync, hipMallocAsync, hipMemPoolTrimTo, hipMemPoolGetAttribute,
-    !>  hipDeviceSetMemPool, hipMemPoolSetAttribute, hipMemPoolSetAccess, hipMemPoolGetAccess
-    !>
-    !>  @warning This API is marked as Beta. While this feature is complete, it can
-    !>           change and might have outstanding issues.
-    !>
-    !>  @note  This API is implemented on Linux and is under development on Microsoft Windows.
     function hipFreeAsync(dev_ptr, stream) &
        result(FreeAsync) &
        bind(C, name="hipFreeAsync")
@@ -4863,31 +3284,6 @@ module hip
     !---------------------------------------------
     ! hipMemPoolTrimTo
     !---------------------------------------------
-    !>  @brief Releases freed memory back to the OS
-    !>
-    !>  Releases memory back to the OS until the pool contains fewer than @p min_bytes_to_keep
-    !>  reserved bytes, or there is no more memory that the allocator can safely release.
-    !>  The allocator cannot release OS allocations that back outstanding asynchronous allocations.
-    !>  The OS allocations may happen at different granularity from the user allocations.
-    !>
-    !>  @note Allocations that have not been freed count as outstanding.
-    !>  @note Allocations that have been asynchronously freed but whose completion has
-    !>  not been observed on the host (eg. by a synchronize) can count as outstanding.
-    !>
-    !>  @param[in] mem_pool - The memory pool to trim allocations
-    !>  @param[in] min_bytes_to_hold - If the pool has less than min_bytes_to_hold reserved,
-    !>  then the TrimTo operation is a no-op.  Otherwise the memory pool will contain
-    !>  at least min_bytes_to_hold bytes reserved after the operation.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  @see hipMallocFromPoolAsync, hipMallocAsync, hipFreeAsync, hipMemPoolGetAttribute,
-    !>  hipDeviceSetMemPool, hipMemPoolSetAttribute, hipMemPoolSetAccess, hipMemPoolGetAccess
-    !>
-    !>  @warning This API is marked as Beta. While this feature is complete, it can
-    !>           change and might have outstanding issues.
-    !>
-    !>  @note  This API is implemented on Linux and is under development on Microsoft Windows.
     function hipMemPoolTrimTo(mem_pool, min_bytes_to_hold) &
        result(MemPoolTrimTo) &
        bind(C, name="hipMemPoolTrimTo")
@@ -4900,47 +3296,6 @@ module hip
     !---------------------------------------------
     ! hipMemPoolSetAttribute
     !---------------------------------------------
-    !>  @brief Sets attributes of a memory pool
-    !>
-    !>  Supported attributes are:
-    !>  - @p hipMemPoolAttrReleaseThreshold: (value type = cuuint64_t)
-    !>                                   Amount of reserved memory in bytes to hold onto before
-    !>                                   trying
-    !>                                   to release memory back to the OS. When more than the
-    !>                                   release
-    !>                                   threshold bytes of memory are held by the memory pool, the
-    !>                                   allocator will try to release memory back to the OS on the
-    !>                                   next call to stream, event or context synchronize. (default
-    !>                                   0)
-    !>  - @p hipMemPoolReuseFollowEventDependencies: (value type = int)
-    !>                                   Allow @p hipMallocAsync to use memory asynchronously freed
-    !>                                   in another stream as long as a stream ordering dependency
-    !>                                   of the allocating stream on the free action exists.
-    !>                                   HIP events and null stream interactions can create the
-    !>                                   required
-    !>                                   stream ordered dependencies. (default enabled)
-    !>  - @p hipMemPoolReuseAllowOpportunistic: (value type = int)
-    !>                                   Allow reuse of already completed frees when there is no
-    !>  dependency between the free and allocation. (default enabled)
-    !>  - @p hipMemPoolReuseAllowInternalDependencies: (value type = int)
-    !>                                   Allow @p hipMallocAsync to insert new stream dependencies
-    !>                                   in order to establish the stream ordering required to reuse
-    !>                                   a piece of memory released by @p hipFreeAsync (default
-    !>                                   enabled).
-    !>
-    !>  @param [in] mem_pool The memory pool to modify
-    !>  @param [in] attr     The attribute to modify
-    !>  @param [in] value    Pointer to the value to assign
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  @see hipMallocFromPoolAsync, hipMallocAsync, hipFreeAsync, hipMemPoolGetAttribute,
-    !>  hipMemPoolTrimTo, hipDeviceSetMemPool, hipMemPoolSetAccess, hipMemPoolGetAccess
-    !>
-    !>  @warning This API is marked as Beta. While this feature is complete, it can
-    !>           change and might have outstanding issues.
-    !>
-    !>  @note  This API is implemented on Linux and is under development on Microsoft Windows.
     function hipMemPoolSetAttribute(mem_pool, attr, myValue) &
        result(MemPoolSetAttribute) &
        bind(C, name="hipMemPoolSetAttribute")
@@ -4954,48 +3309,6 @@ module hip
     !---------------------------------------------
     ! hipMemPoolGetAttribute
     !---------------------------------------------
-    !>  @brief Gets attributes of a memory pool
-    !>
-    !>  Supported attributes are:
-    !>  - @p hipMemPoolAttrReleaseThreshold: (value type = cuuint64_t)
-    !>                                   Amount of reserved memory in bytes to hold onto before
-    !>                                   trying
-    !>                                   to release memory back to the OS. When more than the
-    !>                                   release
-    !>                                   threshold bytes of memory are held by the memory pool, the
-    !>                                   allocator will try to release memory back to the OS on the
-    !>                                   next call to stream, event or context synchronize. (default
-    !>                                   0)
-    !>  - @p hipMemPoolReuseFollowEventDependencies: (value type = int)
-    !>                                   Allow @p hipMallocAsync to use memory asynchronously freed
-    !>                                   in another stream as long as a stream ordering dependency
-    !>                                   of the allocating stream on the free action exists.
-    !>                                   HIP events and null stream interactions can create the
-    !>                                   required
-    !>                                   stream ordered dependencies. (default enabled)
-    !>  - @p hipMemPoolReuseAllowOpportunistic: (value type = int)
-    !>                                   Allow reuse of already completed frees when there is no
-    !>  dependency between the free and allocation. (default enabled)
-    !>  - @p hipMemPoolReuseAllowInternalDependencies: (value type = int)
-    !>                                   Allow @p hipMallocAsync to insert new stream dependencies
-    !>                                   in order to establish the stream ordering required to reuse
-    !>                                   a piece of memory released by @p hipFreeAsync (default
-    !>                                   enabled).
-    !>
-    !>  @param [in] mem_pool The memory pool to get attributes of
-    !>  @param [in] attr     The attribute to get
-    !>  @param [in] value    Retrieved value
-    !>
-    !>  @returns  `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  @see hipMallocFromPoolAsync, hipMallocAsync, hipFreeAsync,
-    !>  hipMemPoolTrimTo, hipDeviceSetMemPool, hipMemPoolSetAttribute, hipMemPoolSetAccess,
-    !>  hipMemPoolGetAccess
-    !>
-    !>  @warning This API is marked as Beta. While this feature is complete, it can
-    !>           change and might have outstanding issues.
-    !>
-    !>  @note  This API is implemented on Linux and is under development on Microsoft Windows.
     function hipMemPoolGetAttribute(mem_pool, attr, myValue) &
        result(MemPoolGetAttribute) &
        bind(C, name="hipMemPoolGetAttribute")
@@ -5009,22 +3322,6 @@ module hip
     !---------------------------------------------
     ! hipMemPoolSetAccess
     !---------------------------------------------
-    !>  @brief Controls visibility of the specified pool between devices
-    !>
-    !>  @param [in] mem_pool   Memory pool for acccess change
-    !>  @param [in] desc_list  Array of access descriptors. Each descriptor instructs the access to
-    !>  enable for a single gpu
-    !>  @param [in] count  Number of descriptors in the map array.
-    !>
-    !>  @returns  `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  @see hipMallocFromPoolAsync, hipMallocAsync, hipFreeAsync, hipMemPoolGetAttribute,
-    !>  hipMemPoolTrimTo, hipDeviceSetMemPool, hipMemPoolSetAttribute, hipMemPoolGetAccess
-    !>
-    !>  @warning This API is marked as Beta. While this feature is complete, it can
-    !>           change and might have outstanding issues.
-    !>
-    !>  @note  This API is implemented on Linux and is under development on Microsoft Windows.
     function hipMemPoolSetAccess(mem_pool, desc_list, count) &
        result(MemPoolSetAccess) &
        bind(C, name="hipMemPoolSetAccess")
@@ -5038,23 +3335,6 @@ module hip
     !---------------------------------------------
     ! hipMemPoolGetAccess
     !---------------------------------------------
-    !>  @brief Returns the accessibility of a pool from a device
-    !>
-    !>  Returns the accessibility of the pool's memory from the specified location.
-    !>
-    !>  @param [out] flags    Accessibility of the memory pool from the specified location/device
-    !>  @param [in] mem_pool   Memory pool being queried
-    !>  @param [in] location  Location/device for memory pool access
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  @see hipMallocFromPoolAsync, hipMallocAsync, hipFreeAsync, hipMemPoolGetAttribute,
-    !>  hipMemPoolTrimTo, hipDeviceSetMemPool, hipMemPoolSetAttribute, hipMemPoolSetAccess
-    !>
-    !>  @warning This API is marked as Beta. While this feature is complete, it can
-    !>           change and might have outstanding issues.
-    !>
-    !>  @note  This API is implemented on Linux and is under development on Microsoft Windows.
     function hipMemPoolGetAccess(flags, mem_pool, location) &
        result(MemPoolGetAccess) &
        bind(C, name="hipMemPoolGetAccess")
@@ -5068,29 +3348,6 @@ module hip
     !---------------------------------------------
     ! hipMemPoolCreate
     !---------------------------------------------
-    !>  @brief Creates a memory pool
-    !>
-    !>  Creates a HIP memory pool and returns the handle in @p mem_pool. The @p pool_props
-    !>  determines
-    !>  the properties of the pool such as the backing device and IPC capabilities.
-    !>
-    !>  By default, the memory pool will be accessible from the device it is allocated on.
-    !>
-    !>  @param [out] mem_pool    Contains createed memory pool
-    !>  @param [in] pool_props   Memory pool properties
-    !>
-    !>  @note Specifying hipMemHandleTypeNone creates a memory pool that will not support IPC.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotSupported`
-    !>
-    !>  @see hipMallocFromPoolAsync, hipMallocAsync, hipFreeAsync, hipMemPoolGetAttribute,
-    !>  hipMemPoolDestroy, hipMemPoolTrimTo, hipDeviceSetMemPool, hipMemPoolSetAttribute,
-    !>  hipMemPoolSetAccess, hipMemPoolGetAccess
-    !>
-    !>  @warning This API is marked as Beta. While this feature is complete, it can
-    !>           change and might have outstanding issues.
-    !>
-    !>  @note  This API is implemented on Linux and is under development on Microsoft Windows.
     function hipMemPoolCreate(mem_pool, pool_props) &
        result(MemPoolCreate) &
        bind(C, name="hipMemPoolCreate")
@@ -5103,31 +3360,6 @@ module hip
     !---------------------------------------------
     ! hipMemPoolDestroy
     !---------------------------------------------
-    !>  @brief Destroys the specified memory pool
-    !>
-    !>  If any pointers obtained from this pool haven't been freed or
-    !>  the pool has free operations that haven't completed
-    !>  when @p hipMemPoolDestroy is invoked, the function will return immediately and the
-    !>  resources associated with the pool will be released automatically
-    !>  once there are no more outstanding allocations.
-    !>
-    !>  Destroying the current mempool of a device sets the default mempool of
-    !>  that device as the current mempool for that device.
-    !>
-    !>  @param [in] mem_pool Memory pool for destruction
-    !>
-    !>  @note A device's default memory pool cannot be destroyed.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  @see hipMallocFromPoolAsync, hipMallocAsync, hipFreeAsync, hipMemPoolGetAttribute,
-    !>  hipMemPoolCreate hipMemPoolTrimTo, hipDeviceSetMemPool, hipMemPoolSetAttribute,
-    !>  hipMemPoolSetAccess, hipMemPoolGetAccess
-    !>
-    !>  @warning This API is marked as Beta. While this feature is complete, it can
-    !>           change and might have outstanding issues.
-    !>
-    !>  @note  This API is implemented on Linux and is under development on Microsoft Windows.
     function hipMemPoolDestroy(mem_pool) &
        result(MemPoolDestroy) &
        bind(C, name="hipMemPoolDestroy")
@@ -5139,42 +3371,6 @@ module hip
     !---------------------------------------------
     ! hipMallocFromPoolAsync
     !---------------------------------------------
-    !>  @brief Allocates memory from a specified pool with stream ordered semantics.
-    !>
-    !>  Inserts an allocation operation into @p stream.
-    !>  A pointer to the allocated memory is returned immediately in @p dev_ptr.
-    !>  The allocation must not be accessed until the allocation operation completes.
-    !>  The allocation comes from the specified memory pool.
-    !>
-    !>  @note The specified memory pool may be from a device different than that of the specified @p
-    !>  stream.
-    !>
-    !>  Basic stream ordering allows future work submitted into the same stream to use the
-    !>  allocation.
-    !>  Stream query, stream synchronize, and HIP events can be used to guarantee that the
-    !>  allocation
-    !>  operation completes before work submitted in a separate stream runs.
-    !>
-    !>  @note During stream capture, this function results in the creation of an allocation node. In
-    !>  this
-    !>  case, the allocation is owned by the graph instead of the memory pool. The memory pool's
-    !>  properties are used to set the node's creation parameters.
-    !>
-    !>  @param [out] dev_ptr Returned device pointer
-    !>  @param [in] size     Number of bytes to allocate
-    !>  @param [in] mem_pool The pool to allocate from
-    !>  @param [in] stream   The stream establishing the stream ordering semantic
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotSupported`, `hipErrorOutOfMemory`
-    !>
-    !>  @see hipMallocAsync, hipFreeAsync, hipMemPoolGetAttribute, hipMemPoolCreate
-    !>  hipMemPoolTrimTo, hipDeviceSetMemPool, hipMemPoolSetAttribute, hipMemPoolSetAccess,
-    !>  hipMemPoolGetAccess,
-    !>
-    !>  @warning This API is marked as Beta. While this feature is complete, it can
-    !>           change and might have outstanding issues.
-    !>
-    !>  @note  This API is implemented on Linux and is under development on Microsoft Windows.
     function hipMallocFromPoolAsync(dev_ptr, mySize, mem_pool, stream) &
        result(MallocFromPoolAsync) &
        bind(C, name="hipMallocFromPoolAsync")
@@ -5189,31 +3385,6 @@ module hip
     !---------------------------------------------
     ! hipMemPoolExportToShareableHandle
     !---------------------------------------------
-    !>  @brief Exports a memory pool to the requested handle type.
-    !>
-    !>  Given an IPC capable mempool, create an OS handle to share the pool with another process.
-    !>  A recipient process can convert the shareable handle into a mempool with @p
-    !>  hipMemPoolImportFromShareableHandle. Individual pointers can then be shared with the @p
-    !>  hipMemPoolExportPointer and @p hipMemPoolImportPointer APIs. The implementation of what the
-    !>  shareable handle is and how it can be transferred is defined by the requested handle type.
-    !>
-    !>  @note To create an IPC capable mempool, create a mempool with a @p
-    !>  hipMemAllocationHandleType
-    !>  other than @p hipMemHandleTypeNone.
-    !>
-    !>  @param [out] shared_handle Pointer to the location in which to store the requested handle
-    !>  @param [in] mem_pool       Pool to export
-    !>  @param [in] handle_type    The type of handle to create
-    !>  @param [in] flags          Must be 0
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorOutOfMemory`
-    !>
-    !>  @see hipMemPoolImportFromShareableHandle
-    !>
-    !>  @warning This API is marked as Beta. While this feature is complete, it can
-    !>           change and might have outstanding issues.
-    !>
-    !>  @note  This API is implemented on Linux and is under development on Microsoft Windows.
     function hipMemPoolExportToShareableHandle(shared_handle, mem_pool, handle_type, flags) &
        result(MemPoolExportToShareableHandle) &
        bind(C, name="hipMemPoolExportToShareableHandle")
@@ -5228,27 +3399,6 @@ module hip
     !---------------------------------------------
     ! hipMemPoolImportFromShareableHandle
     !---------------------------------------------
-    !>  @brief Imports a memory pool from a shared handle.
-    !>
-    !>  Specific allocations can be imported from the imported pool with @p hipMemPoolImportPointer.
-    !>
-    !>  @note Imported memory pools do not support creating new allocations.
-    !>  As such imported memory pools may not be used in @p hipDeviceSetMemPool
-    !>  or @p hipMallocFromPoolAsync calls.
-    !>
-    !>  @param [out] mem_pool     Returned memory pool
-    !>  @param [in] shared_handle OS handle of the pool to open
-    !>  @param [in] handle_type   The type of handle being imported
-    !>  @param [in] flags         Must be 0
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorOutOfMemory`
-    !>
-    !>  @see hipMemPoolExportToShareableHandle
-    !>
-    !>  @warning This API is marked as Beta. While this feature is complete, it can
-    !>           change and might have outstanding issues.
-    !>
-    !>  @note  This API is implemented on Linux and is under development on Microsoft Windows.
     function hipMemPoolImportFromShareableHandle(mem_pool, shared_handle, handle_type, flags) &
        result(MemPoolImportFromShareableHandle) &
        bind(C, name="hipMemPoolImportFromShareableHandle")
@@ -5263,24 +3413,6 @@ module hip
     !---------------------------------------------
     ! hipMemPoolExportPointer
     !---------------------------------------------
-    !>  @brief Export data to share a memory pool allocation between processes.
-    !>
-    !>  Constructs @p export_data for sharing a specific allocation from an already shared memory
-    !>  pool.
-    !>  The recipient process can import the allocation with the @p hipMemPoolImportPointer api.
-    !>  The data is not a handle and may be shared through any IPC mechanism.
-    !>
-    !>  @param[out] export_data - Returned export data
-    !>  @param[in] dev_ptr - Pointer to memory being exported
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorOutOfMemory`
-    !>
-    !>  @see hipMemPoolImportPointer
-    !>
-    !>  @warning This API is marked as Beta. While this feature is complete, it can
-    !>           change and might have outstanding issues.
-    !>
-    !>  @note  This API is implemented on Linux and is under development on Microsoft Windows.
     function hipMemPoolExportPointer(export_data, dev_ptr) &
        result(MemPoolExportPointer) &
        bind(C, name="hipMemPoolExportPointer")
@@ -5293,34 +3425,6 @@ module hip
     !---------------------------------------------
     ! hipMemPoolImportPointer
     !---------------------------------------------
-    !>  @brief Import a memory pool allocation from another process.
-    !>
-    !>  Returns in @p dev_ptr a pointer to the imported memory.
-    !>  The imported memory must not be accessed before the allocation operation completes
-    !>  in the exporting process. The imported memory must be freed from all importing processes
-    !>  before
-    !>  being freed in the exporting process. The pointer may be freed with @p hipFree
-    !>  or @p hipFreeAsync. If @p hipFreeAsync is used, the free must be completed
-    !>  on the importing process before the free operation on the exporting process.
-    !>
-    !>  @note The @p hipFreeAsync api may be used in the exporting process before
-    !>  the @p hipFreeAsync operation completes in its stream as long as the
-    !>  @p hipFreeAsync in the exporting process specifies a stream with
-    !>  a stream dependency on the importing process's @p hipFreeAsync.
-    !>
-    !>  @param [out] dev_ptr     Pointer to imported memory
-    !>  @param [in] mem_pool     Memory pool from which to import a pointer
-    !>  @param [in] export_data  Data specifying the memory to import
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotInitialized`,
-    !>  `hipErrorOutOfMemory`
-    !>
-    !>  @see hipMemPoolExportPointer
-    !>
-    !>  @warning This API is marked as Beta. While this feature is complete, it can
-    !>           change and might have outstanding issues.
-    !>
-    !>  @note  This API is implemented on Linux and is under development on Microsoft Windows.
     function hipMemPoolImportPointer(dev_ptr, mem_pool, export_data) &
        result(MemPoolImportPointer) &
        bind(C, name="hipMemPoolImportPointer")
@@ -5334,7 +3438,6 @@ module hip
     !---------------------------------------------
     ! hipMemSetMemPool
     !---------------------------------------------
-    !>  @brief Sets memory pool for memory location and allocation type.
     function hipMemSetMemPool(location, myType, pool) &
        result(MemSetMemPool) &
        bind(C, name="hipMemSetMemPool")
@@ -5348,7 +3451,6 @@ module hip
     !---------------------------------------------
     ! hipMemGetMemPool
     !---------------------------------------------
-    !>  @brief Retrieves memory pool for memory location and allocation type.
     function hipMemGetMemPool(pool, location, myType) &
        result(MemGetMemPool) &
        bind(C, name="hipMemGetMemPool")
@@ -5362,15 +3464,6 @@ module hip
     !---------------------------------------------
     ! hipMemGetDefaultMemPool
     !---------------------------------------------
-    !>  @brief Returns the default memory pool for a given location and allocation type
-    !>
-    !>  @param [out] memPool Returned memory pool
-    !>  @param [in] location location type for which to get the default memory pool,
-    !>  currently only hipMemLocationTypeDevice is supported
-    !>  @param [in] type allocation type for which to get the default memory pool,
-    !>  currently only hipMemAllocationTypePinned & hipMemAllocationTypeManaged are supported
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipMemGetDefaultMemPool(memPool, location, myType) &
        result(MemGetDefaultMemPool) &
        bind(C, name="hipMemGetDefaultMemPool")
@@ -5384,23 +3477,6 @@ module hip
     !---------------------------------------------
     ! hipHostAlloc
     !---------------------------------------------
-    !>   @brief Allocate device accessible page locked host memory
-    !>
-    !>   @param[out] ptr - Pointer to the allocated host pinned memory
-    !>   @param[in] mySize - Requested memory size in bytes
-    !>   @param[in] flags - Type of host memory allocation see below
-    !>
-    !>   If size is 0, no memory is allocated, *ptr returns nullptr, and hipSuccess is returned.
-    !>
-    !>   Flags:
-    !>   - `hipHostAllocDefault`   Default pinned memory allocation on the host.
-    !>   - `hipHostAllocPortable`  Memory is considered allocated by all contexts.
-    !>   - `hipHostAllocMapped`    Map the allocation into the address space for the current device.
-    !>   - `hipHostAllocWriteCombined`  Allocates the memory as write-combined.
-    !>   - `hipHostAllocUncached`  Allocate the host memory on extended fine grained access system
-    !>                            memory pool
-    !>
-    !>   @return `hipSuccess`, `hipErrorOutOfMemory`, `hipErrorInvalidValue`
     function hipHostAlloc(ptr, mySize, flags) &
        result(HostAlloc) &
        bind(C, name="hipHostAlloc")
@@ -5414,22 +3490,6 @@ module hip
     !---------------------------------------------
     ! hipMallocPitch
     !---------------------------------------------
-    !>   Allocates at least width (in bytes) * height bytes of linear memory
-    !>   Padding may occur to ensure alighnment requirements are met for the given row
-    !>   The change in width size due to padding will be returned in *pitch.
-    !>   Currently the alignment is set to 128 bytes
-    !>
-    !>   @param[out] ptr - Pointer to the allocated device memory
-    !>   @param[out] pitch - Pitch for allocation (in bytes)
-    !>   @param[in] width - Requested pitched allocation width (in bytes)
-    !>   @param[in] height - Requested pitched allocation height
-    !>
-    !>   If size is 0, no memory is allocated, *ptr returns nullptr, and hipSuccess is returned.
-    !>
-    !>   @returns Error code
-    !>
-    !>   @see hipMalloc, hipFree, hipMallocArray, hipFreeArray, hipHostFree, hipMalloc3D,
-    !>  hipMalloc3DArray, hipHostMalloc
     function hipMallocPitch(ptr, pitch, width, height) &
        result(MallocPitch) &
        bind(C, name="hipMallocPitch")
@@ -5444,26 +3504,6 @@ module hip
     !---------------------------------------------
     ! hipMemAllocPitch
     !---------------------------------------------
-    !>   Allocates at least width (in bytes) * height bytes of linear memory
-    !>   Padding may occur to ensure alighnment requirements are met for the given row
-    !>   The change in width size due to padding will be returned in *pitch.
-    !>   Currently the alignment is set to 128 bytes
-    !>
-    !>   @param[out] dptr - Pointer to the allocated device memory
-    !>   @param[out] pitch - Pitch for allocation (in bytes)
-    !>   @param[in] widthInBytes - Requested pitched allocation width (in bytes)
-    !>   @param[in] height - Requested pitched allocation height
-    !>   @param[in] elementSizeBytes - The size of element bytes, should be 4, 8 or 16
-    !>
-    !>   If size is 0, no memory is allocated, *ptr returns nullptr, and hipSuccess is returned.
-    !>   The intended usage of pitch is as a separate parameter of the allocation, used to compute
-    !>  addresses within the 2D array. Given the row and column of an array element of type T, the
-    !>  address is computed as: T* pElement = (T*)((char*)BaseAddress + Row * Pitch) + Column;
-    !>
-    !>   @returns Error code
-    !>
-    !>   @see hipMalloc, hipFree, hipMallocArray, hipFreeArray, hipHostFree, hipMalloc3D,
-    !>  hipMalloc3DArray, hipHostMalloc
     function hipMemAllocPitch(dptr, pitch, widthInBytes, height, elementSizeBytes) &
        result(MemAllocPitch) &
        bind(C, name="hipMemAllocPitch")
@@ -5479,14 +3519,6 @@ module hip
     !---------------------------------------------
     ! hipFreeHost
     !---------------------------------------------
-    !>   @brief Frees page-locked memory
-    !>   This API performs an implicit hipDeviceSynchronize() call.
-    !>   If pointer is NULL, the hip runtime is initialized and hipSuccess is returned.
-    !>
-    !>   @param[in] ptr - Pointer to memory to be freed
-    !>   @returns `hipSuccess`,
-    !>           `hipErrorInvalidValue` (if pointer is invalid, including device pointers allocated
-    !>   with hipMalloc)
     function hipFreeHost(ptr) &
        result(FreeHost) &
        bind(C, name="hipFreeHost")
@@ -5498,21 +3530,6 @@ module hip
     !---------------------------------------------
     ! hipMemcpyWithStream
     !---------------------------------------------
-    !>   @brief Memory copy on the stream.
-    !>   It allows single or multiple devices to do memory copy on single or multiple streams.
-    !>   The operation is akin to hipMemcpyAsync + hipStreamSynchronize.
-    !>   Since it is a sync API, it is not allowed during graph capture.
-    !>
-    !>   @param[out] dst - Data being copy to
-    !>   @param[in] src - Data being copy from
-    !>   @param[in] sizeBytes - Data size in bytes
-    !>   @param[in] myKind - Kind of transfer
-    !>   @param[in] stream - Valid stream
-    !>   @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorUnknown`,
-    !>   `hipErrorContextIsDestroyed`
-    !>
-    !>   @see hipMemcpy, hipStreamCreate, hipStreamSynchronize, hipStreamDestroy, hipSetDevice,
-    !>  hipLaunchKernelGGL
     function hipMemcpyWithStream(dst, src, sizeBytes, myKind, stream) &
        result(MemcpyWithStream) &
        bind(C, name="hipMemcpyWithStream")
@@ -5528,22 +3545,6 @@ module hip
     !---------------------------------------------
     ! hipMemcpyHtoD
     !---------------------------------------------
-    !>   @brief Copy data from Host to Device
-    !>
-    !>   @param[out] dst - Data being copy to
-    !>   @param[in] src - Data being copy from
-    !>   @param[in] sizeBytes - Data size in bytes
-    !>
-    !>   @returns `hipSuccess`, `hipErrorDeinitialized`, `hipErrorNotInitialized`,
-    !>   `hipErrorInvalidContext`,
-    !>  `hipErrorInvalidValue`
-    !>
-    !>   @see hipArrayCreate, hipArrayDestroy, hipArrayGetDescriptor, hipMemAlloc, hipMemAllocHost,
-    !>  hipMemAllocPitch, hipMemcpy2D, hipMemcpy2DAsync, hipMemcpy2DUnaligned, hipMemcpyAtoA,
-    !>  hipMemcpyAtoD, hipMemcpyAtoH, hipMemcpyAtoHAsync, hipMemcpyDtoA, hipMemcpyDtoD,
-    !>  hipMemcpyDtoDAsync, hipMemcpyDtoH, hipMemcpyDtoHAsync, hipMemcpyHtoA, hipMemcpyHtoAAsync,
-    !>  hipMemcpyHtoDAsync, hipMemFree, hipMemFreeHost, hipMemGetAddressRange, hipMemGetInfo,
-    !>  hipMemHostAlloc, hipMemHostGetDevicePointer
     function hipMemcpyHtoD(dst, src, sizeBytes) &
        result(MemcpyHtoD) &
        bind(C, name="hipMemcpyHtoD")
@@ -5557,22 +3558,6 @@ module hip
     !---------------------------------------------
     ! hipMemcpyDtoH
     !---------------------------------------------
-    !>   @brief Copy data from Device to Host
-    !>
-    !>   @param[out] dst - Data being copy to
-    !>   @param[in] src - Data being copy from
-    !>   @param[in] sizeBytes - Data size in bytes
-    !>
-    !>   @returns `hipSuccess`, `hipErrorDeinitialized`, `hipErrorNotInitialized`,
-    !>   `hipErrorInvalidContext`,
-    !>  `hipErrorInvalidValue`
-    !>
-    !>   @see hipArrayCreate, hipArrayDestroy, hipArrayGetDescriptor, hipMemAlloc, hipMemAllocHost,
-    !>  hipMemAllocPitch, hipMemcpy2D, hipMemcpy2DAsync, hipMemcpy2DUnaligned, hipMemcpyAtoA,
-    !>  hipMemcpyAtoD, hipMemcpyAtoH, hipMemcpyAtoHAsync, hipMemcpyDtoA, hipMemcpyDtoD,
-    !>  hipMemcpyDtoDAsync, hipMemcpyDtoH, hipMemcpyDtoHAsync, hipMemcpyHtoA, hipMemcpyHtoAAsync,
-    !>  hipMemcpyHtoDAsync, hipMemFree, hipMemFreeHost, hipMemGetAddressRange, hipMemGetInfo,
-    !>  hipMemHostAlloc, hipMemHostGetDevicePointer
     function hipMemcpyDtoH(dst, src, sizeBytes) &
        result(MemcpyDtoH) &
        bind(C, name="hipMemcpyDtoH")
@@ -5586,22 +3571,6 @@ module hip
     !---------------------------------------------
     ! hipMemcpyDtoD
     !---------------------------------------------
-    !>   @brief Copy data from Device to Device
-    !>
-    !>   @param[out] dst - Data being copy to
-    !>   @param[in] src - Data being copy from
-    !>   @param[in] sizeBytes - Data size in bytes
-    !>
-    !>   @returns `hipSuccess`, `hipErrorDeinitialized`, `hipErrorNotInitialized`,
-    !>   `hipErrorInvalidContext`,
-    !>  `hipErrorInvalidValue`
-    !>
-    !>   @see hipArrayCreate, hipArrayDestroy, hipArrayGetDescriptor, hipMemAlloc, hipMemAllocHost,
-    !>  hipMemAllocPitch, hipMemcpy2D, hipMemcpy2DAsync, hipMemcpy2DUnaligned, hipMemcpyAtoA,
-    !>  hipMemcpyAtoD, hipMemcpyAtoH, hipMemcpyAtoHAsync, hipMemcpyDtoA, hipMemcpyDtoD,
-    !>  hipMemcpyDtoDAsync, hipMemcpyDtoH, hipMemcpyDtoHAsync, hipMemcpyHtoA, hipMemcpyHtoAAsync,
-    !>  hipMemcpyHtoDAsync, hipMemFree, hipMemFreeHost, hipMemGetAddressRange, hipMemGetInfo,
-    !>  hipMemHostAlloc, hipMemHostGetDevicePointer
     function hipMemcpyDtoD(dst, src, sizeBytes) &
        result(MemcpyDtoD) &
        bind(C, name="hipMemcpyDtoD")
@@ -5615,23 +3584,6 @@ module hip
     !---------------------------------------------
     ! hipMemcpyAtoD
     !---------------------------------------------
-    !>   @brief Copies from one 1D array to device memory.
-    !>
-    !>   @param[out] dstDevice - Destination device pointer
-    !>   @param[in] srcArray - Source array
-    !>   @param[in] srcOffset - Offset in bytes of source array
-    !>   @param[in] ByteCount - Size of memory copy in bytes
-    !>
-    !>   @returns `hipSuccess`, `hipErrorDeinitialized`, `hipErrorNotInitialized`,
-    !>   `hipErrorInvalidContext`,
-    !>  `hipErrorInvalidValue`
-    !>
-    !>   @see hipArrayCreate, hipArrayDestroy, hipArrayGetDescriptor, hipMemAlloc, hipMemAllocHost,
-    !>  hipMemAllocPitch, hipMemcpy2D, hipMemcpy2DAsync, hipMemcpy2DUnaligned, hipMemcpyAtoA,
-    !>  hipMemcpyAtoD, hipMemcpyAtoH, hipMemcpyAtoHAsync, hipMemcpyDtoA, hipMemcpyDtoD,
-    !>  hipMemcpyDtoDAsync, hipMemcpyDtoH, hipMemcpyDtoHAsync, hipMemcpyHtoA, hipMemcpyHtoAAsync,
-    !>  hipMemcpyHtoDAsync, hipMemFree, hipMemFreeHost, hipMemGetAddressRange, hipMemGetInfo,
-    !>  hipMemHostAlloc, hipMemHostGetDevicePointer
     function hipMemcpyAtoD(dstDevice, srcArray, srcOffset, ByteCount) &
        result(MemcpyAtoD) &
        bind(C, name="hipMemcpyAtoD")
@@ -5646,23 +3598,6 @@ module hip
     !---------------------------------------------
     ! hipMemcpyDtoA
     !---------------------------------------------
-    !>   @brief Copies from device memory to a 1D array.
-    !>
-    !>   @param[out] dstArray - Destination array
-    !>   @param[in] dstOffset - Offset in bytes of destination array
-    !>   @param[in] srcDevice - Source device pointer
-    !>   @param[in] ByteCount - Size of memory copy in bytes
-    !>
-    !>   @returns `hipSuccess`, `hipErrorDeinitialized`, `hipErrorNotInitialized`,
-    !>   `hipErrorInvalidContext`,
-    !>  `hipErrorInvalidValue`
-    !>
-    !>   @see hipArrayCreate, hipArrayDestroy, hipArrayGetDescriptor, hipMemAlloc, hipMemAllocHost,
-    !>  hipMemAllocPitch, hipMemcpy2D, hipMemcpy2DAsync, hipMemcpy2DUnaligned, hipMemcpyAtoA,
-    !>  hipMemcpyAtoD, hipMemcpyAtoH, hipMemcpyAtoHAsync, hipMemcpyDtoA, hipMemcpyDtoD,
-    !>  hipMemcpyDtoDAsync, hipMemcpyDtoH, hipMemcpyDtoHAsync, hipMemcpyHtoA, hipMemcpyHtoAAsync,
-    !>  hipMemcpyHtoDAsync, hipMemFree, hipMemFreeHost, hipMemGetAddressRange, hipMemGetInfo,
-    !>  hipMemHostAlloc, hipMemHostGetDevicePointer
     function hipMemcpyDtoA(dstArray, dstOffset, srcDevice, ByteCount) &
        result(MemcpyDtoA) &
        bind(C, name="hipMemcpyDtoA")
@@ -5677,24 +3612,6 @@ module hip
     !---------------------------------------------
     ! hipMemcpyAtoA
     !---------------------------------------------
-    !>   @brief Copies from one 1D array to another.
-    !>
-    !>   @param[out] dstArray - Destination array
-    !>   @param[in] dstOffset - Offset in bytes of destination array
-    !>   @param[in] srcArray - Source array
-    !>   @param[in] srcOffset - Offset in bytes of source array
-    !>   @param[in] ByteCount - Size of memory copy in bytes
-    !>
-    !>   @returns `hipSuccess`, `hipErrorDeinitialized`, `hipErrorNotInitialized`,
-    !>   `hipErrorInvalidContext`,
-    !>  `hipErrorInvalidValue`
-    !>
-    !>   @see hipArrayCreate, hipArrayDestroy, hipArrayGetDescriptor, hipMemAlloc, hipMemAllocHost,
-    !>  hipMemAllocPitch, hipMemcpy2D, hipMemcpy2DAsync, hipMemcpy2DUnaligned, hipMemcpyAtoA,
-    !>  hipMemcpyAtoD, hipMemcpyAtoH, hipMemcpyAtoHAsync, hipMemcpyDtoA, hipMemcpyDtoD,
-    !>  hipMemcpyDtoDAsync, hipMemcpyDtoH, hipMemcpyDtoHAsync, hipMemcpyHtoA, hipMemcpyHtoAAsync,
-    !>  hipMemcpyHtoDAsync, hipMemFree, hipMemFreeHost, hipMemGetAddressRange, hipMemGetInfo,
-    !>  hipMemHostAlloc, hipMemHostGetDevicePointer
     function hipMemcpyAtoA(dstArray, dstOffset, srcArray, srcOffset, ByteCount) &
        result(MemcpyAtoA) &
        bind(C, name="hipMemcpyAtoA")
@@ -5710,23 +3627,6 @@ module hip
     !---------------------------------------------
     ! hipMemcpyHtoDAsync
     !---------------------------------------------
-    !>   @brief Copy data from Host to Device asynchronously
-    !>
-    !>   @param[out] dst - Data being copy to
-    !>   @param[in] src - Data being copy from
-    !>   @param[in] sizeBytes - Data size in bytes
-    !>   @param[in] stream - Stream identifier
-    !>
-    !>   @returns `hipSuccess`, `hipErrorDeinitialized`, `hipErrorNotInitialized`,
-    !>   `hipErrorInvalidContext`,
-    !>  `hipErrorInvalidValue`
-    !>
-    !>   @see hipArrayCreate, hipArrayDestroy, hipArrayGetDescriptor, hipMemAlloc, hipMemAllocHost,
-    !>  hipMemAllocPitch, hipMemcpy2D, hipMemcpy2DAsync, hipMemcpy2DUnaligned, hipMemcpyAtoA,
-    !>  hipMemcpyAtoD, hipMemcpyAtoH, hipMemcpyAtoHAsync, hipMemcpyDtoA, hipMemcpyDtoD,
-    !>  hipMemcpyDtoDAsync, hipMemcpyDtoH, hipMemcpyDtoHAsync, hipMemcpyHtoA, hipMemcpyHtoAAsync,
-    !>  hipMemcpyHtoDAsync, hipMemFree, hipMemFreeHost, hipMemGetAddressRange, hipMemGetInfo,
-    !>  hipMemHostAlloc, hipMemHostGetDevicePointer
     function hipMemcpyHtoDAsync(dst, src, sizeBytes, stream) &
        result(MemcpyHtoDAsync) &
        bind(C, name="hipMemcpyHtoDAsync")
@@ -5741,23 +3641,6 @@ module hip
     !---------------------------------------------
     ! hipMemcpyDtoHAsync
     !---------------------------------------------
-    !>   @brief Copy data from Device to Host asynchronously
-    !>
-    !>   @param[out] dst - Data being copy to
-    !>   @param[in] src - Data being copy from
-    !>   @param[in] sizeBytes - Data size in bytes
-    !>   @param[in] stream - Stream identifier
-    !>
-    !>   @returns `hipSuccess`, `hipErrorDeinitialized`, `hipErrorNotInitialized`,
-    !>   `hipErrorInvalidContext`,
-    !>  `hipErrorInvalidValue`
-    !>
-    !>   @see hipArrayCreate, hipArrayDestroy, hipArrayGetDescriptor, hipMemAlloc, hipMemAllocHost,
-    !>  hipMemAllocPitch, hipMemcpy2D, hipMemcpy2DAsync, hipMemcpy2DUnaligned, hipMemcpyAtoA,
-    !>  hipMemcpyAtoD, hipMemcpyAtoH, hipMemcpyAtoHAsync, hipMemcpyDtoA, hipMemcpyDtoD,
-    !>  hipMemcpyDtoDAsync, hipMemcpyDtoH, hipMemcpyDtoHAsync, hipMemcpyHtoA, hipMemcpyHtoAAsync,
-    !>  hipMemcpyHtoDAsync, hipMemFree, hipMemFreeHost, hipMemGetAddressRange, hipMemGetInfo,
-    !>  hipMemHostAlloc, hipMemHostGetDevicePointer
     function hipMemcpyDtoHAsync(dst, src, sizeBytes, stream) &
        result(MemcpyDtoHAsync) &
        bind(C, name="hipMemcpyDtoHAsync")
@@ -5772,23 +3655,6 @@ module hip
     !---------------------------------------------
     ! hipMemcpyDtoDAsync
     !---------------------------------------------
-    !>   @brief Copy data from Device to Device asynchronously
-    !>
-    !>   @param[out] dst - Data being copy to
-    !>   @param[in] src - Data being copy from
-    !>   @param[in] sizeBytes - Data size in bytes
-    !>   @param[in] stream - Stream identifier
-    !>
-    !>   @returns `hipSuccess`, `hipErrorDeinitialized`, `hipErrorNotInitialized`,
-    !>   `hipErrorInvalidContext`,
-    !>  `hipErrorInvalidValue`
-    !>
-    !>   @see hipArrayCreate, hipArrayDestroy, hipArrayGetDescriptor, hipMemAlloc, hipMemAllocHost,
-    !>  hipMemAllocPitch, hipMemcpy2D, hipMemcpy2DAsync, hipMemcpy2DUnaligned, hipMemcpyAtoA,
-    !>  hipMemcpyAtoD, hipMemcpyAtoH, hipMemcpyAtoHAsync, hipMemcpyDtoA, hipMemcpyDtoD,
-    !>  hipMemcpyDtoDAsync, hipMemcpyDtoH, hipMemcpyDtoHAsync, hipMemcpyHtoA, hipMemcpyHtoAAsync,
-    !>  hipMemcpyHtoDAsync, hipMemFree, hipMemFreeHost, hipMemGetAddressRange, hipMemGetInfo,
-    !>  hipMemHostAlloc, hipMemHostGetDevicePointer
     function hipMemcpyDtoDAsync(dst, src, sizeBytes, stream) &
        result(MemcpyDtoDAsync) &
        bind(C, name="hipMemcpyDtoDAsync")
@@ -5803,24 +3669,6 @@ module hip
     !---------------------------------------------
     ! hipMemcpyAtoHAsync
     !---------------------------------------------
-    !>  @brief Copies from one 1D array to host memory.
-    !>
-    !>   @param[out] dstHost - Destination pointer
-    !>   @param[in] srcArray - Source array
-    !>   @param[in] srcOffset - Offset in bytes of source array
-    !>   @param[in] ByteCount - Size of memory copy in bytes
-    !>   @param[in] stream - Stream identifier
-    !>
-    !>   @returns `hipSuccess`, `hipErrorDeinitialized`, `hipErrorNotInitialized`,
-    !>   `hipErrorInvalidContext`,
-    !>  `hipErrorInvalidValue`
-    !>
-    !>   @see hipArrayCreate, hipArrayDestroy, hipArrayGetDescriptor, hipMemAlloc, hipMemAllocHost,
-    !>  hipMemAllocPitch, hipMemcpy2D, hipMemcpy2DAsync, hipMemcpy2DUnaligned, hipMemcpyAtoA,
-    !>  hipMemcpyAtoD, hipMemcpyAtoH, hipMemcpyAtoHAsync, hipMemcpyDtoA, hipMemcpyDtoD,
-    !>  hipMemcpyDtoDAsync, hipMemcpyDtoH, hipMemcpyDtoHAsync, hipMemcpyHtoA, hipMemcpyHtoAAsync,
-    !>  hipMemcpyHtoDAsync, hipMemFree, hipMemFreeHost, hipMemGetAddressRange, hipMemGetInfo,
-    !>  hipMemHostAlloc, hipMemHostGetDevicePointer
     function hipMemcpyAtoHAsync(dstHost, srcArray, srcOffset, ByteCount, stream) &
        result(MemcpyAtoHAsync) &
        bind(C, name="hipMemcpyAtoHAsync")
@@ -5836,24 +3684,6 @@ module hip
     !---------------------------------------------
     ! hipMemcpyHtoAAsync
     !---------------------------------------------
-    !>  @brief Copies from host memory to a 1D array.
-    !>
-    !>   @param[out] dstArray - Destination array
-    !>   @param[in] dstOffset - Offset in bytes of destination array
-    !>   @param[in] srcHost - Source host pointer
-    !>   @param[in] ByteCount - Size of memory copy in bytes
-    !>   @param[in] stream - Stream identifier
-    !>
-    !>   @returns `hipSuccess`, `hipErrorDeinitialized`, `hipErrorNotInitialized`,
-    !>   `hipErrorInvalidContext`,
-    !>  `hipErrorInvalidValue`
-    !>
-    !>   @see hipArrayCreate, hipArrayDestroy, hipArrayGetDescriptor, hipMemAlloc, hipMemAllocHost,
-    !>  hipMemAllocPitch, hipMemcpy2D, hipMemcpy2DAsync, hipMemcpy2DUnaligned, hipMemcpyAtoA,
-    !>  hipMemcpyAtoD, hipMemcpyAtoH, hipMemcpyAtoHAsync, hipMemcpyDtoA, hipMemcpyDtoD,
-    !>  hipMemcpyDtoDAsync, hipMemcpyDtoH, hipMemcpyDtoHAsync, hipMemcpyHtoA, hipMemcpyHtoAAsync,
-    !>  hipMemcpyHtoDAsync, hipMemFree, hipMemFreeHost, hipMemGetAddressRange, hipMemGetInfo,
-    !>  hipMemHostAlloc, hipMemHostGetDevicePointer
     function hipMemcpyHtoAAsync(dstArray, dstOffset, srcHost, ByteCount, stream) &
        result(MemcpyHtoAAsync) &
        bind(C, name="hipMemcpyHtoAAsync")
@@ -5869,21 +3699,6 @@ module hip
     !---------------------------------------------
     ! hipModuleGetGlobal
     !---------------------------------------------
-    !>   @brief Returns a global pointer from a module.
-    !>   @ingroup Module
-    !>
-    !>   Returns in *dptr and *bytes the pointer and size of the global of name name located in
-    !>   module
-    !>  hmod. If no variable of that name exists, it returns hipErrorNotFound. Both parameters dptr
-    !>  and
-    !>  bytes are optional. If one of them is NULL, it is ignored and hipSuccess is returned.
-    !>
-    !>   @param[out] dptr - Returns global device pointer
-    !>   @param[out] bytes - Returns global size in bytes
-    !>   @param[in] hmod - Module to retrieve global from
-    !>   @param[in] name - Name of global to retrieve
-    !>
-    !>   @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotFound`, `hipErrorInvalidContext`
     function hipModuleGetGlobal(dptr, bytes, hmod, name) &
        result(ModuleGetGlobal) &
        bind(C, name="hipModuleGetGlobal")
@@ -5898,12 +3713,6 @@ module hip
     !---------------------------------------------
     ! hipGetSymbolAddress
     !---------------------------------------------
-    !>   @brief Gets device pointer associated with symbol on the device.
-    !>
-    !>   @param[out] devPtr - pointer to the device associated the symbole
-    !>   @param[in] symbol - pointer to the symbole of the device
-    !>
-    !>   @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGetSymbolAddress(devPtr, symbol) &
        result(GetSymbolAddress) &
        bind(C, name="hipGetSymbolAddress")
@@ -5916,12 +3725,6 @@ module hip
     !---------------------------------------------
     ! hipGetSymbolSize
     !---------------------------------------------
-    !>   @brief Gets the size of the given symbol on the device.
-    !>
-    !>   @param[in] symbol - pointer to the device symbole
-    !>   @param[out] mySize - pointer to the size
-    !>
-    !>   @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGetSymbolSize(mySize, symbol) &
        result(GetSymbolSize) &
        bind(C, name="hipGetSymbolSize")
@@ -5934,26 +3737,6 @@ module hip
     !---------------------------------------------
     ! hipGetProcAddress
     !---------------------------------------------
-    !>  @brief Gets the pointer of requested HIP driver function.
-    !>
-    !>  @param[in] symbol - The Symbol name of the driver function to request.
-    !>  @param[out] pfn - Output pointer to the requested driver function.
-    !>  @param[in] hipVersion - The HIP version for the requested driver function symbol.
-    !>  HIP version is defined as 100*version_major + version_minor. For example, in HIP 6.1, the
-    !>  hipversion is 601, for the symbol function "hipGetDeviceProperties", the specified
-    !>  hipVersion 601
-    !>  is greater or equal to the version 600, the symbol function will be handle properly as
-    !>  backend
-    !>  compatible function.
-    !>
-    !>  @param[in] flags - Currently only default flag is suppported.
-    !>  @param[out] symbolStatus - Optional enumeration for returned status of searching for symbol
-    !>  driver
-    !>  function based on the input hipVersion.
-    !>
-    !>  Returns hipSuccess if the returned pfn is addressed to the pointer of found driver function.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`.
     function hipGetProcAddress(symbol, pfn, hipVersion, flags, symbolStatus) &
        result(GetProcAddress) &
        bind(C, name="hipGetProcAddress")
@@ -5969,24 +3752,6 @@ module hip
     !---------------------------------------------
     ! hipMemcpyToSymbol
     !---------------------------------------------
-    !>   @brief Copies data to the given symbol on the device.
-    !>  Symbol HIP APIs allow a kernel to define a device-side data symbol which can be accessed on
-    !>  the host side. The symbol can be in __constant or device space.
-    !>  Note that the symbol name needs to be encased in the HIP_SYMBOL macro.
-    !>  This also applies to hipMemcpyFromSymbol, hipGetSymbolAddress, and hipGetSymbolSize.
-    !>  For detailed usage, see the
-    !>  <a
-    !>  href="https://rocm.docs.amd.com/projects/HIP/en/latest/how-to/hip_porting_guide.html#memcpytosymbol">memcpyToSymbol
-    !>  example</a> in the HIP Porting Guide.
-    !>
-    !>
-    !>   @param[out] symbol - pointer to the device symbole
-    !>   @param[in] src - pointer to the source address
-    !>   @param[in] sizeBytes - size in bytes to copy
-    !>   @param[in] offset - offset in bytes from start of symbole
-    !>   @param[in] myKind - type of memory transfer
-    !>
-    !>   @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipMemcpyToSymbol(symbol, src, sizeBytes, offset, myKind) &
        result(MemcpyToSymbol) &
        bind(C, name="hipMemcpyToSymbol")
@@ -6002,16 +3767,6 @@ module hip
     !---------------------------------------------
     ! hipMemcpyToSymbolAsync
     !---------------------------------------------
-    !>   @brief Copies data to the given symbol on the device asynchronously.
-    !>
-    !>   @param[out] symbol - pointer to the device symbole
-    !>   @param[in] src - pointer to the source address
-    !>   @param[in] sizeBytes - size in bytes to copy
-    !>   @param[in] offset - offset in bytes from start of symbole
-    !>   @param[in] myKind - type of memory transfer
-    !>   @param[in] stream - stream identifier
-    !>
-    !>   @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipMemcpyToSymbolAsync(symbol, src, sizeBytes, offset, myKind, stream) &
        result(MemcpyToSymbolAsync) &
        bind(C, name="hipMemcpyToSymbolAsync")
@@ -6028,15 +3783,6 @@ module hip
     !---------------------------------------------
     ! hipMemcpyFromSymbol
     !---------------------------------------------
-    !>   @brief Copies data from the given symbol on the device.
-    !>
-    !>   @param[out] dst - Returns pointer to destinition memory address
-    !>   @param[in] symbol - Pointer to the symbole address on the device
-    !>   @param[in] sizeBytes - Size in bytes to copy
-    !>   @param[in] offset - Offset in bytes from the start of symbole
-    !>   @param[in] myKind - Type of memory transfer
-    !>
-    !>   @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipMemcpyFromSymbol(dst, symbol, sizeBytes, offset, myKind) &
        result(MemcpyFromSymbol) &
        bind(C, name="hipMemcpyFromSymbol")
@@ -6052,16 +3798,6 @@ module hip
     !---------------------------------------------
     ! hipMemcpyFromSymbolAsync
     !---------------------------------------------
-    !>   @brief Copies data from the given symbol on the device asynchronously.
-    !>
-    !>   @param[out] dst - Returns pointer to destinition memory address
-    !>   @param[in] symbol - pointer to the symbole address on the device
-    !>   @param[in] sizeBytes - size in bytes to copy
-    !>   @param[in] offset - offset in bytes from the start of symbole
-    !>   @param[in] myKind - type of memory transfer
-    !>   @param[in] stream - stream identifier
-    !>
-    !>   @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipMemcpyFromSymbolAsync(dst, symbol, sizeBytes, offset, myKind, stream) &
        result(MemcpyFromSymbolAsync) &
        bind(C, name="hipMemcpyFromSymbolAsync")
@@ -6078,14 +3814,6 @@ module hip
     !---------------------------------------------
     ! hipMemset
     !---------------------------------------------
-    !>   @brief Fills the first sizeBytes bytes of the memory area pointed to by dest with the
-    !>   constant
-    !>  byte value value.
-    !>
-    !>   @param[out] dst - Data being filled
-    !>   @param[in] myValue - Value to be set
-    !>   @param[in] sizeBytes - Data size in bytes
-    !>   @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotInitialized`
     function hipMemset(dst, myValue, sizeBytes) &
        result(Memset) &
        bind(C, name="hipMemset")
@@ -6099,14 +3827,6 @@ module hip
     !---------------------------------------------
     ! hipMemsetD8
     !---------------------------------------------
-    !>   @brief Fills the first sizeBytes bytes of the memory area pointed to by dest with the
-    !>   constant
-    !>  byte value value.
-    !>
-    !>   @param[out] dest - Data ptr to be filled
-    !>   @param[in] myValue - Value to be set
-    !>   @param[in] count - Number of values to be set
-    !>   @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotInitialized`
     function hipMemsetD8(dest, myValue, count) &
        result(MemsetD8) &
        bind(C, name="hipMemsetD8")
@@ -6120,22 +3840,6 @@ module hip
     !---------------------------------------------
     ! hipMemsetD8Async
     !---------------------------------------------
-    !>   @brief Fills the first sizeBytes bytes of the memory area pointed to by dest with the
-    !>   constant
-    !>  byte value value.
-    !>
-    !>  hipMemsetD8Async() is asynchronous with respect to the host, so the call may return before
-    !>  the
-    !>  memset is complete. The operation can optionally be associated to a stream by passing a
-    !>  non-zero
-    !>  stream argument. If stream is non-zero, the operation may overlap with operations in other
-    !>  streams.
-    !>
-    !>   @param[out] dest - Data ptr to be filled
-    !>   @param[in] myValue - Constant value to be set
-    !>   @param[in] count - Number of values to be set
-    !>   @param[in] stream - Stream identifier
-    !>   @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotInitialized`
     function hipMemsetD8Async(dest, myValue, count, stream) &
        result(MemsetD8Async) &
        bind(C, name="hipMemsetD8Async")
@@ -6150,14 +3854,6 @@ module hip
     !---------------------------------------------
     ! hipMemsetD16
     !---------------------------------------------
-    !>   @brief Fills the first sizeBytes bytes of the memory area pointed to by dest with the
-    !>   constant
-    !>  short value value.
-    !>
-    !>   @param[out] dest - Data ptr to be filled
-    !>   @param[in] myValue - Constant value to be set
-    !>   @param[in] count - Number of values to be set
-    !>   @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotInitialized`
     function hipMemsetD16(dest, myValue, count) &
        result(MemsetD16) &
        bind(C, name="hipMemsetD16")
@@ -6171,22 +3867,6 @@ module hip
     !---------------------------------------------
     ! hipMemsetD16Async
     !---------------------------------------------
-    !>   @brief Fills the first sizeBytes bytes of the memory area pointed to by dest with the
-    !>   constant
-    !>  short value value.
-    !>
-    !>  hipMemsetD16Async() is asynchronous with respect to the host, so the call may return before
-    !>  the
-    !>  memset is complete. The operation can optionally be associated to a stream by passing a
-    !>  non-zero
-    !>  stream argument. If stream is non-zero, the operation may overlap with operations in other
-    !>  streams.
-    !>
-    !>   @param[out] dest - Data ptr to be filled
-    !>   @param[in] myValue - Constant value to be set
-    !>   @param[in] count - Number of values to be set
-    !>   @param[in] stream - Stream identifier
-    !>   @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotInitialized`
     function hipMemsetD16Async(dest, myValue, count, stream) &
        result(MemsetD16Async) &
        bind(C, name="hipMemsetD16Async")
@@ -6201,13 +3881,6 @@ module hip
     !---------------------------------------------
     ! hipMemsetD32
     !---------------------------------------------
-    !>   @brief Fills the memory area pointed to by dest with the constant integer
-    !>  value for specified number of times.
-    !>
-    !>   @param[out] dest - Data being filled
-    !>   @param[in] myValue - Constant value to be set
-    !>   @param[in] count - Number of values to be set
-    !>   @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotInitialized`
     function hipMemsetD32(dest, myValue, count) &
        result(MemsetD32) &
        bind(C, name="hipMemsetD32")
@@ -6221,21 +3894,6 @@ module hip
     !---------------------------------------------
     ! hipMemsetAsync
     !---------------------------------------------
-    !>   @brief Fills the first sizeBytes bytes of the memory area pointed to by dev with the
-    !>   constant
-    !>  byte value value.
-    !>
-    !>  hipMemsetAsync() is asynchronous with respect to the host, so the call may return before the
-    !>  memset is complete. The operation can optionally be associated to a stream by passing a
-    !>  non-zero
-    !>  stream argument. If stream is non-zero, the operation may overlap with operations in other
-    !>  streams.
-    !>
-    !>   @param[out] dst - Pointer to device memory
-    !>   @param[in] myValue - Value to set for each byte of specified memory
-    !>   @param[in] sizeBytes - Size in bytes to set
-    !>   @param[in] stream - Stream identifier
-    !>   @return `hipSuccess`, `hipErrorInvalidValue`
     function hipMemsetAsync(dst, myValue, sizeBytes, stream) &
        result(MemsetAsync) &
        bind(C, name="hipMemsetAsync")
@@ -6250,21 +3908,6 @@ module hip
     !---------------------------------------------
     ! hipMemsetD32Async
     !---------------------------------------------
-    !>   @brief Fills the memory area pointed to by dev with the constant integer
-    !>  value for specified number of times.
-    !>
-    !>   hipMemsetD32Async() is asynchronous with respect to the host, so the call may return before
-    !>   the
-    !>  memset is complete. The operation can optionally be associated to a stream by passing a
-    !>  non-zero
-    !>  stream argument. If stream is non-zero, the operation may overlap with operations in other
-    !>  streams.
-    !>
-    !>   @param[out] dst - Pointer to device memory
-    !>   @param[in] myValue - Value to set for each byte of specified memory
-    !>   @param[in] count - Number of values to be set
-    !>   @param[in] stream - Stream identifier
-    !>   @return `hipSuccess`, `hipErrorInvalidValue`
     function hipMemsetD32Async(dst, myValue, count, stream) &
        result(MemsetD32Async) &
        bind(C, name="hipMemsetD32Async")
@@ -6279,14 +3922,6 @@ module hip
     !---------------------------------------------
     ! hipMemset2D
     !---------------------------------------------
-    !>   @brief Fills the memory area pointed to by dst with the constant value.
-    !>
-    !>   @param[out] dst - Pointer to 2D device memory
-    !>   @param[in] pitch - Pitch size in bytes of 2D device memory, unused if height equals 1
-    !>   @param[in] myValue - Constant value to set for each byte of specified memory
-    !>   @param[in] width - Width size in bytes in 2D memory
-    !>   @param[in] height - Height size in bytes in 2D memory
-    !>   @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipMemset2D(dst, pitch, myValue, width, height) &
        result(Memset2D) &
        bind(C, name="hipMemset2D")
@@ -6302,15 +3937,6 @@ module hip
     !---------------------------------------------
     ! hipMemset2DAsync
     !---------------------------------------------
-    !>   @brief Fills asynchronously the memory area pointed to by dst with the constant value.
-    !>
-    !>   @param[in] dst - Pointer to 2D device memory
-    !>   @param[in] pitch - Pitch size in bytes of 2D device memory, unused if height equals 1
-    !>   @param[in] myValue - Value to set for each byte of specified memory
-    !>   @param[in] width - Width size in bytes in 2D memory
-    !>   @param[in] height - Height size in bytes in 2D memory
-    !>   @param[in] stream - Stream identifier
-    !>   @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipMemset2DAsync(dst, pitch, myValue, width, height, stream) &
        result(Memset2DAsync) &
        bind(C, name="hipMemset2DAsync")
@@ -6327,13 +3953,6 @@ module hip
     !---------------------------------------------
     ! hipMemset3D
     !---------------------------------------------
-    !>   @brief Fills synchronously the memory area pointed to by pitchedDevPtr with the constant
-    !>   value.
-    !>
-    !>   @param[in] pitchedDevPtr - Pointer to pitched device memory
-    !>   @param[in] myValue - Value to set for each byte of specified memory
-    !>   @param[in] extent - Size parameters for width field in bytes in device memory
-    !>   @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipMemset3D(pitchedDevPtr, myValue, extent) &
        result(Memset3D) &
        bind(C, name="hipMemset3D")
@@ -6347,14 +3966,6 @@ module hip
     !---------------------------------------------
     ! hipMemset3DAsync
     !---------------------------------------------
-    !>   @brief Fills asynchronously the memory area pointed to by pitchedDevPtr with the constant
-    !>   value.
-    !>
-    !>   @param[in] pitchedDevPtr - Pointer to pitched device memory
-    !>   @param[in] myValue - Value to set for each byte of specified memory
-    !>   @param[in] extent - Size parameters for width field in bytes in device memory
-    !>   @param[in] stream - Stream identifier
-    !>   @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipMemset3DAsync(pitchedDevPtr, myValue, extent, stream) &
        result(Memset3DAsync) &
        bind(C, name="hipMemset3DAsync")
@@ -6369,17 +3980,6 @@ module hip
     !---------------------------------------------
     ! hipMemsetD2D8
     !---------------------------------------------
-    !>   @brief Fills 2D memory range of 'width' 8-bit values synchronously to the specified char
-    !>   value.
-    !>  Height specifies numbers of rows to set and dstPitch speicifies the number of bytes between
-    !>  each
-    !>  row.
-    !>   @param[in] dst - Pointer to device memory
-    !>   @param[in] dstPitch - Pitch of dst device pointer
-    !>   @param[in] myValue - value to set
-    !>   @param[in] width - Width of row
-    !>   @param[in] height - Number of rows
-    !>   @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipMemsetD2D8(dst, dstPitch, myValue, width, height) &
        result(MemsetD2D8) &
        bind(C, name="hipMemsetD2D8")
@@ -6395,18 +3995,6 @@ module hip
     !---------------------------------------------
     ! hipMemsetD2D8Async
     !---------------------------------------------
-    !>   @brief Fills 2D memory range of 'width' 8-bit values asynchronously to the specified char
-    !>   value.
-    !>  Height specifies numbers of rows to set and dstPitch speicifies the number of bytes between
-    !>  each
-    !>  row.
-    !>   @param[in] dst - Pointer to device memory
-    !>   @param[in] dstPitch - Pitch of dst device pointer
-    !>   @param[in] myValue - value to set
-    !>   @param[in] width - Width of row
-    !>   @param[in] height - Number of rows
-    !>   @param[in] stream - Stream Identifier
-    !>   @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipMemsetD2D8Async(dst, dstPitch, myValue, width, height, stream) &
        result(MemsetD2D8Async) &
        bind(C, name="hipMemsetD2D8Async")
@@ -6423,15 +4011,6 @@ module hip
     !---------------------------------------------
     ! hipMemsetD2D16
     !---------------------------------------------
-    !>   @brief Fills 2D memory range of 'width' 16-bit values synchronously to the specified short
-    !>  value. Height specifies numbers of rows to set and dstPitch speicifies the number of bytes
-    !>  between each row.
-    !>   @param[in] dst - Pointer to device memory
-    !>   @param[in] dstPitch - Pitch of dst device pointer
-    !>   @param[in] myValue - value to set
-    !>   @param[in] width - Width of row
-    !>   @param[in] height - Number of rows
-    !>   @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipMemsetD2D16(dst, dstPitch, myValue, width, height) &
        result(MemsetD2D16) &
        bind(C, name="hipMemsetD2D16")
@@ -6447,16 +4026,6 @@ module hip
     !---------------------------------------------
     ! hipMemsetD2D16Async
     !---------------------------------------------
-    !>   @brief Fills 2D memory range of 'width' 16-bit values asynchronously to the specified short
-    !>  value. Height specifies numbers of rows to set and dstPitch speicifies the number of bytes
-    !>  between each row.
-    !>   @param[in] dst - Pointer to device memory
-    !>   @param[in] dstPitch - Pitch of dst device pointer
-    !>   @param[in] myValue - value to set
-    !>   @param[in] width - Width of row
-    !>   @param[in] height - Number of rows
-    !>   @param[in] stream - Stream Identifier
-    !>   @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipMemsetD2D16Async(dst, dstPitch, myValue, width, height, stream) &
        result(MemsetD2D16Async) &
        bind(C, name="hipMemsetD2D16Async")
@@ -6473,17 +4042,6 @@ module hip
     !---------------------------------------------
     ! hipMemsetD2D32
     !---------------------------------------------
-    !>   @brief Fills 2D memory range of 'width' 32-bit values synchronously to the specified int
-    !>   value.
-    !>  Height specifies numbers of rows to set and dstPitch speicifies the number of bytes between
-    !>  each
-    !>  row.
-    !>   @param[in] dst - Pointer to device memory
-    !>   @param[in] dstPitch - Pitch of dst device pointer
-    !>   @param[in] myValue - value to set
-    !>   @param[in] width - Width of row
-    !>   @param[in] height - Number of rows
-    !>   @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipMemsetD2D32(dst, dstPitch, myValue, width, height) &
        result(MemsetD2D32) &
        bind(C, name="hipMemsetD2D32")
@@ -6499,16 +4057,6 @@ module hip
     !---------------------------------------------
     ! hipMemsetD2D32Async
     !---------------------------------------------
-    !>   @brief Fills 2D memory range of 'width' 32-bit values asynchronously to the specified int
-    !>  value. Height specifies numbers of rows to set and dstPitch speicifies the number of bytes
-    !>  between each row.
-    !>   @param[in] dst - Pointer to device memory
-    !>   @param[in] dstPitch - Pitch of dst device pointer
-    !>   @param[in] myValue - value to set
-    !>   @param[in] width - Width of row
-    !>   @param[in] height - Number of rows
-    !>   @param[in] stream - Stream Identifier
-    !>   @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipMemsetD2D32Async(dst, dstPitch, myValue, width, height, stream) &
        result(MemsetD2D32Async) &
        bind(C, name="hipMemsetD2D32Async")
@@ -6525,20 +4073,6 @@ module hip
     !---------------------------------------------
     ! hipMemGetInfo
     !---------------------------------------------
-    !>  @brief Query memory info.
-    !>
-    !>  On ROCM, this function gets the actual free memory left on the current device, so supports
-    !>  the cases while running multi-workload (such as multiple processes, multiple threads, and
-    !>  multiple GPUs).
-    !>
-    !>  @warning On Windows, the free memory only accounts for memory allocated by this process and
-    !>  may
-    !>  be optimistic.
-    !>
-    !>  @param[out] free - Returns free memory on the current device in bytes
-    !>  @param[out] total - Returns total allocatable memory on the current device in bytes
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidDevice`, `hipErrorInvalidValue`
     function hipMemGetInfo(free, total) &
        result(MemGetInfo) &
        bind(C, name="hipMemGetInfo")
@@ -6551,14 +4085,6 @@ module hip
     !---------------------------------------------
     ! hipMemPtrGetInfo
     !---------------------------------------------
-    !>  @brief Get allocated memory size via memory pointer.
-    !>
-    !>  This function gets the allocated shared virtual memory size from memory pointer.
-    !>
-    !>  @param[in] ptr - Pointer to allocated memory
-    !>  @param[out] mySize - Returns the allocated memory size in bytes
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipMemPtrGetInfo(ptr, mySize) &
        result(MemPtrGetInfo) &
        bind(C, name="hipMemPtrGetInfo")
@@ -6571,16 +4097,6 @@ module hip
     !---------------------------------------------
     ! hipMallocArray
     !---------------------------------------------
-    !>   @brief Allocate an array on the device.
-    !>
-    !>   @param[out] array - Pointer to allocated array in device memory
-    !>   @param[in] desc - Requested channel format
-    !>   @param[in] width - Requested array allocation width
-    !>   @param[in] height - Requested array allocation height
-    !>   @param[in] flags - Requested properties of allocated array
-    !>   @returns     `hipSuccess`, `hipErrorOutOfMemory`
-    !>
-    !>   @see hipMalloc, hipMallocPitch, hipFree, hipFreeArray, hipHostMalloc, hipHostFree
     function hipMallocArray(array, desc, width, height, flags) &
        result(MallocArray) &
        bind(C, name="hipMallocArray")
@@ -6596,14 +4112,6 @@ module hip
     !---------------------------------------------
     ! hipArrayCreate
     !---------------------------------------------
-    !>   @brief Create an array memory pointer on the device.
-    !>
-    !>   @param[out] pHandle - Pointer to the array memory
-    !>   @param[in] pAllocateArray - Requested array desciptor
-    !>
-    !>   @returns     `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotSupported`
-    !>
-    !>   @see hipMallocArray, hipArrayDestroy, hipFreeArray
     function hipArrayCreate(pHandle, pAllocateArray) &
        result(ArrayCreate) &
        bind(C, name="hipArrayCreate")
@@ -6616,13 +4124,6 @@ module hip
     !---------------------------------------------
     ! hipArrayDestroy
     !---------------------------------------------
-    !>   @brief Destroy an array memory pointer on the device.
-    !>
-    !>   @param[in] array - Pointer to the array memory
-    !>
-    !>   @returns     `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>   @see hipArrayCreate, hipArrayDestroy, hipFreeArray
     function hipArrayDestroy(array) &
        result(ArrayDestroy) &
        bind(C, name="hipArrayDestroy")
@@ -6634,14 +4135,6 @@ module hip
     !---------------------------------------------
     ! hipArray3DCreate
     !---------------------------------------------
-    !>   @brief Create a 3D array memory pointer on the device.
-    !>
-    !>   @param[out] array - Pointer to the 3D array memory
-    !>   @param[in] pAllocateArray - Requested array desciptor
-    !>
-    !>   @returns     `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotSupported`
-    !>
-    !>   @see hipMallocArray, hipArrayDestroy, hipFreeArray
     function hipArray3DCreate(array, pAllocateArray) &
        result(Array3DCreate) &
        bind(C, name="hipArray3DCreate")
@@ -6654,14 +4147,6 @@ module hip
     !---------------------------------------------
     ! hipMalloc3D
     !---------------------------------------------
-    !>   @brief Create a 3D memory pointer on the device.
-    !>
-    !>   @param[out] pitchedDevPtr - Pointer to the 3D memory
-    !>   @param[in] extent - Requested extent
-    !>
-    !>   @returns     `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotSupported`
-    !>
-    !>   @see hipMallocPitch, hipMemGetInfo, hipFree
     function hipMalloc3D(pitchedDevPtr, extent) &
        result(Malloc3D) &
        bind(C, name="hipMalloc3D")
@@ -6674,12 +4159,6 @@ module hip
     !---------------------------------------------
     ! hipFreeArray
     !---------------------------------------------
-    !>   @brief Frees an array on the device.
-    !>
-    !>   @param[in] array - Pointer to array to free
-    !>   @returns    `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotInitialized`
-    !>
-    !>   @see hipMalloc, hipMallocPitch, hipFree, hipMallocArray, hipHostMalloc, hipHostFree
     function hipFreeArray(array) &
        result(FreeArray) &
        bind(C, name="hipFreeArray")
@@ -6691,15 +4170,6 @@ module hip
     !---------------------------------------------
     ! hipMalloc3DArray
     !---------------------------------------------
-    !>   @brief Allocate an array on the device.
-    !>
-    !>   @param[out] array - Pointer to allocated array in device memory
-    !>   @param[in] desc - Requested channel format
-    !>   @param[in] extent - Requested array allocation width, height and depth
-    !>   @param[in] flags - Requested properties of allocated array
-    !>   @returns     `hipSuccess`, `hipErrorOutOfMemory`
-    !>
-    !>   @see hipMalloc, hipMallocPitch, hipFree, hipFreeArray, hipHostMalloc, hipHostFree
     function hipMalloc3DArray(array, desc, extent, flags) &
        result(Malloc3DArray) &
        bind(C, name="hipMalloc3DArray")
@@ -6714,16 +4184,6 @@ module hip
     !---------------------------------------------
     ! hipArrayGetInfo
     !---------------------------------------------
-    !>  @brief Gets info about the specified array
-    !>
-    !>  @param[out] desc - Returned array type
-    !>  @param[out] extent - Returned array shape. 2D arrays will have depth of zero
-    !>  @param[out] flags - Returned array flags
-    !>  @param[in] array - The HIP array to get info for
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue` `hipErrorInvalidHandle`
-    !>
-    !>  @see hipArrayGetDescriptor, hipArray3DGetDescriptor
     function hipArrayGetInfo(desc, extent, flags, array) &
        result(ArrayGetInfo) &
        bind(C, name="hipArrayGetInfo")
@@ -6738,24 +4198,6 @@ module hip
     !---------------------------------------------
     ! hipArrayGetDescriptor
     !---------------------------------------------
-    !>  @brief Gets a 1D or 2D array descriptor
-    !>
-    !>  @param[out] pArrayDescriptor - Returned array descriptor
-    !>  @param[in] array - Array to get descriptor of
-    !>
-    !>  @returns `hipSuccess`, `hipErrorDeinitialized`, `hipErrorNotInitialized`,
-    !>  `hipErrorInvalidContext`,
-    !>  `hipErrorInvalidValue` `hipErrorInvalidHandle`
-    !>
-    !>  @see hipArray3DCreate, hipArray3DGetDescriptor, hipArrayCreate, hipArrayDestroy,
-    !>  hipMemAlloc,
-    !>  hipMemAllocHost, hipMemAllocPitch, hipMemcpy2D, hipMemcpy2DAsync, hipMemcpy2DUnaligned,
-    !>  hipMemcpy3D, hipMemcpy3DAsync, hipMemcpyAtoA, hipMemcpyAtoD, hipMemcpyAtoH,
-    !>  hipMemcpyAtoHAsync,
-    !>  hipMemcpyDtoA, hipMemcpyDtoD, hipMemcpyDtoDAsync, hipMemcpyDtoH, hipMemcpyDtoHAsync,
-    !>  hipMemcpyHtoA, hipMemcpyHtoAAsync, hipMemcpyHtoD, hipMemcpyHtoDAsync, hipMemFree,
-    !>  hipMemFreeHost, hipMemGetAddressRange, hipMemGetInfo, hipMemHostAlloc,
-    !>  hipMemHostGetDevicePointer, hipMemsetD8, hipMemsetD16, hipMemsetD32, hipArrayGetInfo
     function hipArrayGetDescriptor(pArrayDescriptor, array) &
        result(ArrayGetDescriptor) &
        bind(C, name="hipArrayGetDescriptor")
@@ -6768,23 +4210,6 @@ module hip
     !---------------------------------------------
     ! hipArray3DGetDescriptor
     !---------------------------------------------
-    !>  @brief Gets a 3D array descriptor
-    !>
-    !>  @param[out] pArrayDescriptor - Returned 3D array descriptor
-    !>  @param[in] array - 3D array to get descriptor of
-    !>
-    !>  @returns `hipSuccess`, `hipErrorDeinitialized`, `hipErrorNotInitialized`,
-    !>  `hipErrorInvalidContext`,
-    !>  `hipErrorInvalidValue` `hipErrorInvalidHandle`, `hipErrorContextIsDestroyed`
-    !>
-    !>  @see hipArray3DCreate, hipArrayCreate, hipArrayDestroy, hipArrayGetDescriptor, hipMemAlloc,
-    !>  hipMemAllocHost, hipMemAllocPitch, hipMemcpy2D, hipMemcpy2DAsync, hipMemcpy2DUnaligned,
-    !>  hipMemcpy3D, hipMemcpy3DAsync, hipMemcpyAtoA, hipMemcpyAtoD, hipMemcpyAtoH,
-    !>  hipMemcpyAtoHAsync,
-    !>  hipMemcpyDtoA, hipMemcpyDtoD, hipMemcpyDtoDAsync, hipMemcpyDtoH, hipMemcpyDtoHAsync,
-    !>  hipMemcpyHtoA, hipMemcpyHtoAAsync, hipMemcpyHtoD, hipMemcpyHtoDAsync, hipMemFree,
-    !>  hipMemFreeHost, hipMemGetAddressRange, hipMemGetInfo, hipMemHostAlloc,
-    !>  hipMemHostGetDevicePointer, hipMemsetD8, hipMemsetD16, hipMemsetD32, hipArrayGetInfo
     function hipArray3DGetDescriptor(pArrayDescriptor, array) &
        result(Array3DGetDescriptor) &
        bind(C, name="hipArray3DGetDescriptor")
@@ -6797,13 +4222,6 @@ module hip
     !---------------------------------------------
     ! hipMemcpyParam2D
     !---------------------------------------------
-    !>   @brief Copies memory for 2D arrays.
-    !>   @param[in] pCopy - Parameters for the memory copy
-    !>   @returns     `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidPitchValue`,
-    !>   `hipErrorInvalidDevicePointer`, `hipErrorInvalidMemcpyDirection`
-    !>
-    !>   @see hipMemcpy, hipMemcpy2D, hipMemcpyToArray, hipMemcpy2DToArray, hipMemcpyFromArray,
-    !>  hipMemcpyToSymbol, hipMemcpyAsync
     function hipMemcpyParam2D(pCopy) &
        result(MemcpyParam2D) &
        bind(C, name="hipMemcpyParam2D")
@@ -6815,14 +4233,6 @@ module hip
     !---------------------------------------------
     ! hipMemcpyParam2DAsync
     !---------------------------------------------
-    !>   @brief Copies memory for 2D arrays.
-    !>   @param[in] pCopy - Parameters for the memory copy
-    !>   @param[in] stream - Stream to use
-    !>   @returns     `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidPitchValue`,
-    !>  `hipErrorInvalidDevicePointer`, `hipErrorInvalidMemcpyDirection`
-    !>
-    !>   @see hipMemcpy, hipMemcpy2D, hipMemcpyToArray, hipMemcpy2DToArray, hipMemcpyFromArray,
-    !>  hipMemcpyToSymbol, hipMemcpyAsync
     function hipMemcpyParam2DAsync(pCopy, stream) &
        result(MemcpyParam2DAsync) &
        bind(C, name="hipMemcpyParam2DAsync")
@@ -6835,21 +4245,6 @@ module hip
     !---------------------------------------------
     ! hipMemcpy2DToArray
     !---------------------------------------------
-    !>   @brief Copies data between host and device.
-    !>
-    !>   @param[out] dst - Destination memory address
-    !>   @param[in] wOffset - Destination starting X offset
-    !>   @param[in] hOffset - Destination starting Y offset
-    !>   @param[in] src - Source memory address
-    !>   @param[in] spitch - Pitch of source memory
-    !>   @param[in] width - Width of matrix transfer (columns in bytes)
-    !>   @param[in] height - Height of matrix transfer (rows)
-    !>   @param[in] myKind - Type of transfer
-    !>   @returns     `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidPitchValue`,
-    !>  `hipErrorInvalidDevicePointer`, `hipErrorInvalidMemcpyDirection`
-    !>
-    !>   @see hipMemcpy, hipMemcpyToArray, hipMemcpy2D, hipMemcpyFromArray, hipMemcpyToSymbol,
-    !>  hipMemcpyAsync
     function hipMemcpy2DToArray(dst, wOffset, hOffset, src, spitch, width, height, myKind) &
        result(Memcpy2DToArray) &
        bind(C, name="hipMemcpy2DToArray")
@@ -6868,22 +4263,6 @@ module hip
     !---------------------------------------------
     ! hipMemcpy2DToArrayAsync
     !---------------------------------------------
-    !>   @brief Copies data between host and device.
-    !>
-    !>   @param[out] dst - Destination memory address
-    !>   @param[in] wOffset - Destination starting X offset
-    !>   @param[in] hOffset - Destination starting Y offset
-    !>   @param[in] src - Source memory address
-    !>   @param[in] spitch - Pitch of source memory
-    !>   @param[in] width - Width of matrix transfer (columns in bytes)
-    !>   @param[in] height - Height of matrix transfer (rows)
-    !>   @param[in] myKind - Type of transfer
-    !>   @param[in] stream - Accelerator view which the copy is being enqueued
-    !>   @returns     `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidPitchValue`,
-    !>  `hipErrorInvalidDevicePointer`, `hipErrorInvalidMemcpyDirection`
-    !>
-    !>   @see hipMemcpy, hipMemcpyToArray, hipMemcpy2D, hipMemcpyFromArray, hipMemcpyToSymbol,
-    !>  hipMemcpyAsync
     function hipMemcpy2DToArrayAsync(dst, wOffset, hOffset, src, spitch, width, height, myKind, &
                                      stream) &
        result(Memcpy2DToArrayAsync) &
@@ -6904,22 +4283,6 @@ module hip
     !---------------------------------------------
     ! hipMemcpy2DArrayToArray
     !---------------------------------------------
-    !>   @brief Copies data between host and device.
-    !>
-    !>   @param[out] dst - Destination memory address
-    !>   @param[in] wOffsetDst - Destination starting X offset
-    !>   @param[in] hOffsetDst - Destination starting Y offset
-    !>   @param[in] src - Source memory address
-    !>   @param[in] wOffsetSrc - Source starting X offset
-    !>   @param[in] hOffsetSrc - Source starting Y offset (columns in bytes)
-    !>   @param[in] width - Width of matrix transfer (columns in bytes)
-    !>   @param[in] height - Height of matrix transfer (rows)
-    !>   @param[in] myKind - Type of transfer
-    !>
-    !>   @returns     `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidMemcpyDirection`
-    !>
-    !>   @see hipMemcpy, hipMemcpyToArray, hipMemcpy2D, hipMemcpyFromArray, hipMemcpyToSymbol,
-    !>  hipMemcpyAsync
     function hipMemcpy2DArrayToArray(dst, wOffsetDst, hOffsetDst, src, wOffsetSrc, hOffsetSrc, &
                                      width, height, myKind) &
        result(Memcpy2DArrayToArray) &
@@ -6940,22 +4303,6 @@ module hip
     !---------------------------------------------
     ! hipMemcpyToArray
     !---------------------------------------------
-    !>   @brief Copies data between host and device [Deprecated]
-    !>
-    !>   @ingroup MemoryD
-    !>
-    !>   @param[out] dst - Destination memory address
-    !>   @param[in] wOffset - Destination starting X offset
-    !>   @param[in] hOffset - Destination starting Y offset
-    !>   @param[in] src - Source memory address
-    !>   @param[in] count - size in bytes to copy
-    !>   @param[in] myKind - Type of transfer
-    !>   @returns     `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidPitchValue`,
-    !>  `hipErrorInvalidDevicePointer`, `hipErrorInvalidMemcpyDirection`
-    !>
-    !>   @see hipMemcpy, hipMemcpy2DToArray, hipMemcpy2D, hipMemcpyFromArray, hipMemcpyToSymbol,
-    !>   hipMemcpyAsync
-    !>   @warning  This API is deprecated.
     function hipMemcpyToArray(dst, wOffset, hOffset, src, count, myKind) &
        result(MemcpyToArray) &
        bind(C, name="hipMemcpyToArray")
@@ -6972,22 +4319,6 @@ module hip
     !---------------------------------------------
     ! hipMemcpyFromArray
     !---------------------------------------------
-    !>   @brief Copies data between host and device [Deprecated]
-    !>
-    !>   @ingroup MemoryD
-    !>
-    !>   @param[out] dst - Destination memory address
-    !>   @param[in] srcArray - Source memory address
-    !>   @param[in] wOffset - Source starting X offset
-    !>   @param[in] hOffset - Source starting Y offset
-    !>   @param[in] count - Size in bytes to copy
-    !>   @param[in] myKind - Type of transfer
-    !>   @returns     `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidPitchValue`,
-    !>  `hipErrorInvalidDevicePointer`, `hipErrorInvalidMemcpyDirection`
-    !>
-    !>   @see hipMemcpy, hipMemcpy2DToArray, hipMemcpy2D, hipMemcpyFromArray, hipMemcpyToSymbol,
-    !>  hipMemcpyAsync
-    !>  @warning  This API is deprecated.
     function hipMemcpyFromArray(dst, srcArray, wOffset, hOffset, count, myKind) &
        result(MemcpyFromArray) &
        bind(C, name="hipMemcpyFromArray")
@@ -7004,21 +4335,6 @@ module hip
     !---------------------------------------------
     ! hipMemcpy2DFromArray
     !---------------------------------------------
-    !>   @brief Copies data between host and device.
-    !>
-    !>   @param[out] dst - Destination memory address
-    !>   @param[in] dpitch - Pitch of destination memory
-    !>   @param[in] src - Source memory address
-    !>   @param[in] wOffset - Source starting X offset
-    !>   @param[in] hOffset - Source starting Y offset
-    !>   @param[in] width - Width of matrix transfer (columns in bytes)
-    !>   @param[in] height - Height of matrix transfer (rows)
-    !>   @param[in] myKind - Type of transfer
-    !>   @returns     `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidPitchValue`,
-    !>  `hipErrorInvalidDevicePointer`, `hipErrorInvalidMemcpyDirection`
-    !>
-    !>   @see hipMemcpy, hipMemcpy2DToArray, hipMemcpy2D, hipMemcpyFromArray, hipMemcpyToSymbol,
-    !>  hipMemcpyAsync
     function hipMemcpy2DFromArray(dst, dpitch, src, wOffset, hOffset, width, height, myKind) &
        result(Memcpy2DFromArray) &
        bind(C, name="hipMemcpy2DFromArray")
@@ -7037,22 +4353,6 @@ module hip
     !---------------------------------------------
     ! hipMemcpy2DFromArrayAsync
     !---------------------------------------------
-    !>   @brief Copies data between host and device asynchronously.
-    !>
-    !>   @param[out] dst - Destination memory address
-    !>   @param[in] dpitch - Pitch of destination memory
-    !>   @param[in] src - Source memory address
-    !>   @param[in] wOffset - Source starting X offset
-    !>   @param[in] hOffset - Source starting Y offset
-    !>   @param[in] width - Width of matrix transfer (columns in bytes)
-    !>   @param[in] height - Height of matrix transfer (rows)
-    !>   @param[in] myKind - Type of transfer
-    !>   @param[in] stream - Accelerator view which the copy is being enqueued
-    !>   @returns     `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidPitchValue`,
-    !>  `hipErrorInvalidDevicePointer`, `hipErrorInvalidMemcpyDirection`
-    !>
-    !>   @see hipMemcpy, hipMemcpy2DToArray, hipMemcpy2D, hipMemcpyFromArray, hipMemcpyToSymbol,
-    !>  hipMemcpyAsync
     function hipMemcpy2DFromArrayAsync(dst, dpitch, src, wOffset, hOffset, width, height, myKind, &
                                        stream) &
        result(Memcpy2DFromArrayAsync) &
@@ -7073,17 +4373,6 @@ module hip
     !---------------------------------------------
     ! hipMemcpyAtoH
     !---------------------------------------------
-    !>   @brief Copies data between host and device.
-    !>
-    !>   @param[out] dst - Destination memory address
-    !>   @param[in] srcArray - Source array
-    !>   @param[in] srcOffset - Offset in bytes of source array
-    !>   @param[in] count - Size of memory copy in bytes
-    !>   @returns     `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidPitchValue`,
-    !>  `hipErrorInvalidDevicePointer`, `hipErrorInvalidMemcpyDirection`
-    !>
-    !>   @see hipMemcpy, hipMemcpy2DToArray, hipMemcpy2D, hipMemcpyFromArray, hipMemcpyToSymbol,
-    !>  hipMemcpyAsync
     function hipMemcpyAtoH(dst, srcArray, srcOffset, count) &
        result(MemcpyAtoH) &
        bind(C, name="hipMemcpyAtoH")
@@ -7098,17 +4387,6 @@ module hip
     !---------------------------------------------
     ! hipMemcpyHtoA
     !---------------------------------------------
-    !>   @brief Copies data between host and device.
-    !>
-    !>   @param[out] dstArray - Destination memory address
-    !>   @param[in] dstOffset - Offset in bytes of destination array
-    !>   @param[in] srcHost - Source host pointer
-    !>   @param[in] count - Size of memory copy in bytes
-    !>   @returns     `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidPitchValue`,
-    !>  `hipErrorInvalidDevicePointer`, `hipErrorInvalidMemcpyDirection`
-    !>
-    !>   @see hipMemcpy, hipMemcpy2DToArray, hipMemcpy2D, hipMemcpyFromArray, hipMemcpyToSymbol,
-    !>  hipMemcpyAsync
     function hipMemcpyHtoA(dstArray, dstOffset, srcHost, count) &
        result(MemcpyHtoA) &
        bind(C, name="hipMemcpyHtoA")
@@ -7123,14 +4401,6 @@ module hip
     !---------------------------------------------
     ! hipMemcpy3D
     !---------------------------------------------
-    !>   @brief Copies data between host and device.
-    !>
-    !>   @param[in] p - 3D memory copy parameters
-    !>   @returns     `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidPitchValue`,
-    !>  `hipErrorInvalidDevicePointer`, `hipErrorInvalidMemcpyDirection`
-    !>
-    !>   @see hipMemcpy, hipMemcpy2DToArray, hipMemcpy2D, hipMemcpyFromArray, hipMemcpyToSymbol,
-    !>  hipMemcpyAsync
     function hipMemcpy3D(p) &
        result(Memcpy3D) &
        bind(C, name="hipMemcpy3D")
@@ -7142,15 +4412,6 @@ module hip
     !---------------------------------------------
     ! hipMemcpy3DAsync
     !---------------------------------------------
-    !>   @brief Copies data between host and device asynchronously.
-    !>
-    !>   @param[in] p - 3D memory copy parameters
-    !>   @param[in] stream - Stream to use
-    !>   @returns     `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidPitchValue`,
-    !>  `hipErrorInvalidDevicePointer`, `hipErrorInvalidMemcpyDirection`
-    !>
-    !>   @see hipMemcpy, hipMemcpy2DToArray, hipMemcpy2D, hipMemcpyFromArray, hipMemcpyToSymbol,
-    !>  hipMemcpyAsync
     function hipMemcpy3DAsync(p, stream) &
        result(Memcpy3DAsync) &
        bind(C, name="hipMemcpy3DAsync")
@@ -7163,14 +4424,6 @@ module hip
     !---------------------------------------------
     ! hipDrvMemcpy3D
     !---------------------------------------------
-    !>   @brief Copies data between host and device.
-    !>
-    !>   @param[in] pCopy - 3D memory copy parameters
-    !>   @returns     `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidPitchValue`,
-    !>   `hipErrorInvalidDevicePointer`, `hipErrorInvalidMemcpyDirection`
-    !>
-    !>   @see hipMemcpy, hipMemcpy2DToArray, hipMemcpy2D, hipMemcpyFromArray, hipMemcpyToSymbol,
-    !>  hipMemcpyAsync
     function hipDrvMemcpy3D(pCopy) &
        result(DrvMemcpy3D) &
        bind(C, name="hipDrvMemcpy3D")
@@ -7182,15 +4435,6 @@ module hip
     !---------------------------------------------
     ! hipDrvMemcpy3DAsync
     !---------------------------------------------
-    !>   @brief Copies data between host and device asynchronously.
-    !>
-    !>   @param[in] pCopy - 3D memory copy parameters
-    !>   @param[in] stream - Stream to use
-    !>   @returns     `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidPitchValue`,
-    !>   `hipErrorInvalidDevicePointer`, `hipErrorInvalidMemcpyDirection`
-    !>
-    !>   @see hipMemcpy, hipMemcpy2DToArray, hipMemcpy2D, hipMemcpyFromArray, hipMemcpyToSymbol,
-    !>  hipMemcpyAsync
     function hipDrvMemcpy3DAsync(pCopy, stream) &
        result(DrvMemcpy3DAsync) &
        bind(C, name="hipDrvMemcpy3DAsync")
@@ -7203,17 +4447,6 @@ module hip
     !---------------------------------------------
     ! hipMemGetAddressRange
     !---------------------------------------------
-    !>  @brief Get information on memory allocations.
-    !>
-    !>  @param [out] pbase - BAse pointer address
-    !>  @param [out] psize - Size of allocation
-    !>  @param [in]  dptr- Device Pointer
-    !>
-    !>  @returns `hipSuccess`, `hipErrorNotFound`
-    !>
-    !>  @see hipCtxCreate, hipCtxDestroy, hipCtxGetFlags, hipCtxPopCurrent, hipCtxGetCurrent,
-    !>  hipCtxSetCurrent, hipCtxPushCurrent, hipCtxSetCacheConfig, hipCtxSynchronize,
-    !>  hipCtxGetDevice
     function hipMemGetAddressRange(pbase, psize, dptr) &
        result(MemGetAddressRange) &
        bind(C, name="hipMemGetAddressRange")
@@ -7227,19 +4460,6 @@ module hip
     !---------------------------------------------
     ! hipMemcpyBatchAsync
     !---------------------------------------------
-    !>  @brief Perform Batch of 1D copies
-    !>
-    !>  @param [out] dsts  - Array of destination pointers
-    !>  @param [in] srcs      - Array of source pointers.
-    !>  @param [in] sizes     - Array of sizes for memcpy operations
-    !>  @param [in] count     - Size of dsts, srcs and sizes arrays
-    !>  @param [in] attrs     - Array of memcpy attributes (not supported)
-    !>  @param [in] attrsIdxs - Array of indices to map attrs to copies (not supported)
-    !>  @param [in] numAttrs  - Size of attrs and attrsIdxs arrays (not supported)
-    !>  @param [in] failIdx   - Pointer to a location to return failure index inside the batch
-    !>  @param [in] stream    - stream used to enqueue operations in.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipMemcpyBatchAsync(dsts, srcs, sizes, count, attrs, attrsIdxs, numAttrs, failIdx, &
                                  stream) &
        result(MemcpyBatchAsync) &
@@ -7260,16 +4480,6 @@ module hip
     !---------------------------------------------
     ! hipMemcpy3DBatchAsync
     !---------------------------------------------
-    !>  @brief Perform Batch of 3D copies
-    !>
-    !>  @param [in] numOps  - Total number of memcpy operations.
-    !>  @param [in] opList  - Array of size numOps containing the actual memcpy operations.
-    !>  @param [in] failIdx - Pointer to a location to return the index of the copy where a failure
-    !>                      - was encountered.
-    !>  @param [in] flags   - Flags for future use, must be zero now.
-    !>  @param [in] stream  - The stream to enqueue the operations in.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipMemcpy3DBatchAsync(numOps, opList, failIdx, flags, stream) &
        result(Memcpy3DBatchAsync) &
        bind(C, name="hipMemcpy3DBatchAsync")
@@ -7285,12 +4495,6 @@ module hip
     !---------------------------------------------
     ! hipMemcpy3DPeer
     !---------------------------------------------
-    !>  @brief Performs 3D memory copies between devices
-    !>  This API is asynchronous with respect to host
-    !>
-    !>  @param [in] p  - Parameters for memory copy
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, hipErrorInvalidDevice
     function hipMemcpy3DPeer(p) &
        result(Memcpy3DPeer) &
        bind(C, name="hipMemcpy3DPeer")
@@ -7302,12 +4506,6 @@ module hip
     !---------------------------------------------
     ! hipMemcpy3DPeerAsync
     !---------------------------------------------
-    !>  @brief Performs 3D memory copies between devices asynchronously
-    !>
-    !>  @param [in] p  - Parameters for memory copy
-    !>  @param [in] stream - Stream to enqueue operation in.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, hipErrorInvalidDevice
     function hipMemcpy3DPeerAsync(p, stream) &
        result(Memcpy3DPeerAsync) &
        bind(C, name="hipMemcpy3DPeerAsync")
@@ -7320,19 +4518,6 @@ module hip
     !---------------------------------------------
     ! hipMipmappedArrayGetMemoryRequirements
     !---------------------------------------------
-    !>  @brief Returns the memory requirements of a HIP mipmapped array.
-    !>
-    !>  @param[out] memoryRequirements - Pointer to hipArrayMemoryRequirements
-    !>  @param[in] mipmap - HIP mipmapped array to get the memory requirements of
-    !>  @param[in] device - Device to get the memory requirements for
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  Returns the memory requirements of a HIP mipmapped array in memoryRequirements.
-    !>
-    !>  The returned value in hipArrayMemoryRequirements::size represents the total size of the HIP
-    !>  mipmapped array. The returned value in hipArrayMemoryRequirements::alignment represents the
-    !>  alignment necessary for mapping the HIP mipmapped array.
     function hipMipmappedArrayGetMemoryRequirements(memoryRequirements, mipmap, device) &
        result(MipmappedArrayGetMemoryRequirements) &
        bind(C, name="hipMipmappedArrayGetMemoryRequirements")
@@ -7346,35 +4531,6 @@ module hip
     !---------------------------------------------
     ! hipDeviceCanAccessPeer
     !---------------------------------------------
-    !> @ingroup PeerToPeer
-    !>
-    !>
-    !>
-    !>
-    !>
-    !> -------------------------------------------------------------------------------------------------
-    !> -------------------------------------------------------------------------------------------------
-    !>  @brief Determines if a device can access a peer device's memory.
-    !>
-    !>  @param [out] canAccessPeer - Returns the peer access capability (0 or 1)
-    !>  @param [in] deviceId - The device accessing the peer device memory.
-    !>  @param [in] peerDeviceId - Peer device where memory is physically located
-    !>
-    !>  The value of @p canAccessPeer,
-    !>
-    !>  Returns "1" if the specified @p deviceId is capable of directly accessing memory physically
-    !>  located on @p peerDeviceId,
-    !>
-    !>  Returns "0" if the specified @p deviceId is not capable of directly accessing memory
-    !>  physically
-    !>  located on @p peerDeviceId.
-    !>
-    !>  Returns "0" if @p deviceId == @p peerDeviceId, both are valid devices,
-    !>  however, a device is not a peer of itself.
-    !>
-    !>  Returns `hipErrorInvalidDevice` if deviceId or peerDeviceId are not valid devices
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidDevice`
     function hipDeviceCanAccessPeer(canAccessPeer, deviceId, peerDeviceId) &
        result(DeviceCanAccessPeer) &
        bind(C, name="hipDeviceCanAccessPeer")
@@ -7388,20 +4544,6 @@ module hip
     !---------------------------------------------
     ! hipDeviceEnablePeerAccess
     !---------------------------------------------
-    !>  @brief Enables direct access to memory allocations on a peer device.
-    !>
-    !>  When this API is successful, all memory allocations on peer device will be mapped into the
-    !>  address space of the current device. In addition, any future memory allocation on the
-    !>  peer device will remain accessible from the current device, until the access is disabled
-    !>  using
-    !>  hipDeviceDisablePeerAccess or device is reset using hipDeviceReset.
-    !>
-    !>  @param [in] peerDeviceId - Peer device to enable direct access to from the current device
-    !>  @param [in] flags - Reserved for future use, must be zero
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidDevice`, `hipErrorInvalidValue`,
-    !>  @returns `hipErrorPeerAccessAlreadyEnabled` if peer access is already enabled for this
-    !>  device.
     function hipDeviceEnablePeerAccess(peerDeviceId, flags) &
        result(DeviceEnablePeerAccess) &
        bind(C, name="hipDeviceEnablePeerAccess")
@@ -7414,15 +4556,6 @@ module hip
     !---------------------------------------------
     ! hipDeviceDisablePeerAccess
     !---------------------------------------------
-    !>  @brief Disables direct access to memory allocations on a peer device.
-    !>
-    !>  If direct access to memory allocations on peer device has not been enabled yet from the
-    !>  current
-    !>  device, it returns `hipErrorPeerAccessNotEnabled`.
-    !>
-    !>  @param [in] peerDeviceId  Peer device to disable direct access to
-    !>
-    !>  @returns `hipSuccess`, `hipErrorPeerAccessNotEnabled`
     function hipDeviceDisablePeerAccess(peerDeviceId) &
        result(DeviceDisablePeerAccess) &
        bind(C, name="hipDeviceDisablePeerAccess")
@@ -7434,15 +4567,6 @@ module hip
     !---------------------------------------------
     ! hipMemcpyPeer
     !---------------------------------------------
-    !>  @brief Copies memory between two peer accessible devices.
-    !>
-    !>  @param [out] dst - Destination device pointer
-    !>  @param [in] dstDeviceId - Destination device
-    !>  @param [in] src - Source device pointer
-    !>  @param [in] srcDeviceId - Source device
-    !>  @param [in] sizeBytes - Size of memory copy in bytes
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidDevice`
     function hipMemcpyPeer(dst, dstDeviceId, src, srcDeviceId, sizeBytes) &
        result(MemcpyPeer) &
        bind(C, name="hipMemcpyPeer")
@@ -7458,16 +4582,6 @@ module hip
     !---------------------------------------------
     ! hipMemcpyPeerAsync
     !---------------------------------------------
-    !>  @brief Copies memory between two peer accessible devices asynchronously.
-    !>
-    !>  @param [out] dst - Destination device pointer
-    !>  @param [in] dstDeviceId - Destination device
-    !>  @param [in] src - Source device pointer
-    !>  @param [in] srcDevice - Source device
-    !>  @param [in] sizeBytes - Size of memory copy in bytes
-    !>  @param [in] stream - Stream identifier
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidDevice`
     function hipMemcpyPeerAsync(dst, dstDeviceId, src, srcDevice, sizeBytes, stream) &
        result(MemcpyPeerAsync) &
        bind(C, name="hipMemcpyPeerAsync")
@@ -7484,22 +4598,6 @@ module hip
     !---------------------------------------------
     ! hipDeviceGetDevResource
     !---------------------------------------------
-    !> @ingroup ExecutionContext
-    !>
-    !>
-    !>
-    !>
-    !>
-    !> -------------------------------------------------------------------------------------------------
-    !> -------------------------------------------------------------------------------------------------
-    !>  @brief Gets device resource of a given type for a device.
-    !>
-    !>  @param [out] resource - Output device resource pointer
-    !>  @param [in]  device - Device to get resource for
-    !>  @param [in]  type - Type of resource to retrieve
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidResourceType`,
-    !>  `hipErrorInvalidDevice`
     function hipDeviceGetDevResource(device, resource, myType) &
        result(DeviceGetDevResource) &
        bind(C, name="hipDeviceGetDevResource")
@@ -7513,19 +4611,6 @@ module hip
     !---------------------------------------------
     ! hipDevSmResourceSplitByCount
     !---------------------------------------------
-    !>  @brief Splits SM resources into groups containing the specified number of SMs.
-    !>
-    !>  @param [out] result - Output device resource pointer
-    !>  @param [in]  nbGroups - The poiter specifying the number of groups
-    !>  @param [in]  input - Valid input SM resource to be split
-    !>  @param [in]  remainder - If the input resource cannot be evenly split among nbGroups,
-    !>  the remaining resourced are returned through this parameter.
-    !>  @param [in] flags - Flags specifying partition usage and constraints to apply when splitting
-    !>  the inout resource.
-    !>  @param [in]  minCount - Specifies the minimum number of SMs required
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidResourceType`,
-    !>  `hipErrorInvalidDevice`, `hipErrorNotSupported`
     function hipDevSmResourceSplitByCount(myResult, nbGroups, input, remainder, flags, minCount) &
        result(DevSmResourceSplitByCount) &
        bind(C, name="hipDevSmResourceSplitByCount")
@@ -7542,20 +4627,6 @@ module hip
     !---------------------------------------------
     ! hipDevSmResourceSplit
     !---------------------------------------------
-    !>  @brief Splits SM resources into structured groups.
-    !>
-    !>  @param [out] result - Output device resource pointer
-    !>  @param [in]  nbGroups - The poiter specifying the number of groups
-    !>  @param [in]  input - Valid input SM resource to be split
-    !>  @param [in]  remainder - If the input resource cannot be evenly split among nbGroups,
-    !>  the remaining resourced are returned through this parameter.
-    !>  @param [in] flags - Flags specifying partition usage and constraints to apply when splitting
-    !>  the inout resource.
-    !>  @param [in]  groupParams - Describes how the SM resources should be partitioned and assigned
-    !>  to the corresponding result entries.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidResourceType`,
-    !>  `hipErrorInvalidResourceConfiguration`, `hipErrorInvalidDevice`
     function hipDevSmResourceSplit(myResult, nbGroups, input, remainder, flags, groupParams) &
        result(DevSmResourceSplit) &
        bind(C, name="hipDevSmResourceSplit")
@@ -7572,14 +4643,6 @@ module hip
     !---------------------------------------------
     ! hipDevResourceGenerateDesc
     !---------------------------------------------
-    !>  @brief Generates a resource descriptor from one or more device resources.
-    !>
-    !>  @param [out] phDesc - Output parameter that receives the generated resource descriptor
-    !>  @param [in]  resources - Pointer of device resources to be included in the descriptor
-    !>  @param [in]  nbResources - Number of resources specified
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidResourceType`,
-    !>  `hipErrorInvalidDevice`
     function hipDevResourceGenerateDesc(phDesc, resources, nbResources) &
        result(DevResourceGenerateDesc) &
        bind(C, name="hipDevResourceGenerateDesc")
@@ -7593,16 +4656,6 @@ module hip
     !---------------------------------------------
     ! hipGreenCtxCreate
     !---------------------------------------------
-    !>  @brief Creates a green context from a resource descriptor.
-    !>
-    !>  @param [out] ctx - Output parameter that receives the handle to the created green context
-    !>  @param [in] desc - Resource descriptor generated via hipDevResourceGenerateDesc that
-    !>  specifies
-    !>  the set of resources to be used
-    !>  @param [in]  device - Device on which the green context is created
-    !>  @param [in]  flags - Flags controlling green context creation
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidDevice`
     function hipGreenCtxCreate(ctx, desc, device, flags) &
        result(GreenCtxCreate) &
        bind(C, name="hipGreenCtxCreate")
@@ -7617,11 +4670,6 @@ module hip
     !---------------------------------------------
     ! hipExecutionCtxDestroy
     !---------------------------------------------
-    !>  @brief Destroys an execution context.
-    !>
-    !>  @param [in]  ctx - Execution context to destroy
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipExecutionCtxDestroy(ctx) &
        result(ExecutionCtxDestroy) &
        bind(C, name="hipExecutionCtxDestroy")
@@ -7633,13 +4681,6 @@ module hip
     !---------------------------------------------
     ! hipDeviceGetExecutionCtx
     !---------------------------------------------
-    !>  @brief Returns the default execution context for a device.
-    !>
-    !>  @param [out]  ctx - Output pointer for execution context
-    !>  @param [in]  device - The device on which to receive the execution context
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidDevice`,
-    !>  `hipErrorOutOfMemory`
     function hipDeviceGetExecutionCtx(ctx, device) &
        result(DeviceGetExecutionCtx) &
        bind(C, name="hipDeviceGetExecutionCtx")
@@ -7652,14 +4693,6 @@ module hip
     !---------------------------------------------
     ! hipExecutionCtxStreamCreate
     !---------------------------------------------
-    !>  @brief Creates a stream on an execution context with specified flags and priority
-    !>
-    !>  @param [out]  stream - Output pointer of the created stream
-    !>  @param [in]   greenctx - Execution context used to create and initialize the stream
-    !>  @param [in]   flags - Flags for stream creation
-    !>  @param [in]   priority - Stream priority
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorOutOfMemory`
     function hipExecutionCtxStreamCreate(stream, greenctx, flags, priority) &
        result(ExecutionCtxStreamCreate) &
        bind(C, name="hipExecutionCtxStreamCreate")
@@ -7674,13 +4707,6 @@ module hip
     !---------------------------------------------
     ! hipExecutionCtxGetDevResource
     !---------------------------------------------
-    !>  @brief Returns the device resource of a given type for an execution context
-    !>
-    !>  @param [out] resource - Output pointer that receives the structured device resource
-    !>  @param [in]  ctx - Execution context to get resource for
-    !>  @param [in]  type - Type of device resource
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipExecutionCtxGetDevResource(ctx, resource, myType) &
        result(ExecutionCtxGetDevResource) &
        bind(C, name="hipExecutionCtxGetDevResource")
@@ -7694,12 +4720,6 @@ module hip
     !---------------------------------------------
     ! hipExecutionCtxGetDevice
     !---------------------------------------------
-    !>  @brief Returns the device associated with an execution context
-    !>
-    !>  @param [out] device - Returns device handle for the specified execution context
-    !>  @param [in]  ctx - Execution context to obtain the device
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipExecutionCtxGetDevice(device, ctx) &
        result(ExecutionCtxGetDevice) &
        bind(C, name="hipExecutionCtxGetDevice")
@@ -7712,12 +4732,6 @@ module hip
     !---------------------------------------------
     ! hipExecutionCtxGetId
     !---------------------------------------------
-    !>  @brief Returns a unique identifier for an execution context
-    !>
-    !>  @param [out] ctxId - Pointer to the context ID
-    !>  @param [in]  ctx - Execution context to obtain the ID
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipExecutionCtxGetId(ctx, ctxId) &
        result(ExecutionCtxGetId) &
        bind(C, name="hipExecutionCtxGetId")
@@ -7730,14 +4744,6 @@ module hip
     !---------------------------------------------
     ! hipStreamGetDevResource
     !---------------------------------------------
-    !>  @brief Returns the device resource of a given type for a stream
-    !>
-    !>  @param [out] resource - Pointer to the structured device resource
-    !>  @param [in]  hStream - Stream to get resource for
-    !>  @param [in]  type - Type of resource
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidResourceType`,
-    !>  `hipErrorInvalidHandle`
     function hipStreamGetDevResource(hStream, resource, myType) &
        result(StreamGetDevResource) &
        bind(C, name="hipStreamGetDevResource")
@@ -7751,12 +4757,6 @@ module hip
     !---------------------------------------------
     ! hipExecutionCtxRecordEvent
     !---------------------------------------------
-    !>  @brief Records an event on an execution context
-    !>
-    !>  @param [out] event - Event to record
-    !>  @param [in]  ctx - Execution context to record event for
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidHandle`
     function hipExecutionCtxRecordEvent(ctx, event) &
        result(ExecutionCtxRecordEvent) &
        bind(C, name="hipExecutionCtxRecordEvent")
@@ -7769,11 +4769,6 @@ module hip
     !---------------------------------------------
     ! hipExecutionCtxSynchronize
     !---------------------------------------------
-    !>  @brief Blocks until all work on an execution context has completed
-    !>
-    !>  @param [in]  ctx - Execution context to synchronize
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidHandle`
     function hipExecutionCtxSynchronize(ctx) &
        result(ExecutionCtxSynchronize) &
        bind(C, name="hipExecutionCtxSynchronize")
@@ -7785,12 +4780,6 @@ module hip
     !---------------------------------------------
     ! hipExecutionCtxWaitEvent
     !---------------------------------------------
-    !>  @brief Makes an execution context wait on an event
-    !>
-    !>  @param [in]  event - Event to wait on
-    !>  @param [in]  ctx - Execution context to wait for
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidHandle`
     function hipExecutionCtxWaitEvent(ctx, event) &
        result(ExecutionCtxWaitEvent) &
        bind(C, name="hipExecutionCtxWaitEvent")
@@ -7803,20 +4792,6 @@ module hip
     !---------------------------------------------
     ! hipCtxCreate
     !---------------------------------------------
-    !>  @brief Create a context and set it as current/default context
-    !>
-    !>  @param [out] ctx  Context to create
-    !>  @param [in] flags  Context creation flags
-    !>  @param [in] device  device handle
-    !>
-    !>  @returns `hipSuccess`
-    !>
-    !>  @see hipCtxDestroy, hipCtxGetFlags, hipCtxPopCurrent, hipCtxGetCurrent, hipCtxPushCurrent,
-    !>  hipCtxSetCacheConfig, hipCtxSynchronize, hipCtxGetDevice
-    !>
-    !>  @warning This API is deprecated on the AMD platform, only for equivalent cuCtx driver API on
-    !>  the
-    !>  NVIDIA platform.
     function hipCtxCreate(ctx, flags, device) &
        result(CtxCreate) &
        bind(C, name="hipCtxCreate")
@@ -7830,18 +4805,6 @@ module hip
     !---------------------------------------------
     ! hipCtxDestroy
     !---------------------------------------------
-    !>  @brief Destroy a HIP context [Deprecated]
-    !>
-    !>  @param [in] ctx Context to destroy
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  @see hipCtxCreate, hipCtxGetFlags, hipCtxPopCurrent, hipCtxGetCurrent,hipCtxSetCurrent,
-    !>  hipCtxPushCurrent, hipCtxSetCacheConfig, hipCtxSynchronize , hipCtxGetDevice
-    !>
-    !>  @warning This API is deprecated on the AMD platform, only for equivalent cuCtx driver API on
-    !>  the
-    !>  NVIDIA platform.
     function hipCtxDestroy(ctx) &
        result(CtxDestroy) &
        bind(C, name="hipCtxDestroy")
@@ -7853,18 +4816,6 @@ module hip
     !---------------------------------------------
     ! hipCtxPopCurrent
     !---------------------------------------------
-    !>  @brief Pop the current/default context and return the popped context [Deprecated]
-    !>
-    !>  @param [out] ctx  The current context to pop
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidContext`
-    !>
-    !>  @see hipCtxCreate, hipCtxDestroy, hipCtxGetFlags, hipCtxSetCurrent, hipCtxGetCurrent,
-    !>  hipCtxPushCurrent, hipCtxSetCacheConfig, hipCtxSynchronize, hipCtxGetDevice
-    !>
-    !>  @warning This API is deprecated on the AMD platform, only for equivalent cuCtx driver API on
-    !>  the
-    !>  NVIDIA platform.
     function hipCtxPopCurrent(ctx) &
        result(CtxPopCurrent) &
        bind(C, name="hipCtxPopCurrent")
@@ -7876,18 +4827,6 @@ module hip
     !---------------------------------------------
     ! hipCtxPushCurrent
     !---------------------------------------------
-    !>  @brief Push the context to be set as current/ default context [Deprecated]
-    !>
-    !>  @param [in] ctx  The current context to push
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidContext`
-    !>
-    !>  @see hipCtxCreate, hipCtxDestroy, hipCtxGetFlags, hipCtxPopCurrent, hipCtxGetCurrent,
-    !>  hipCtxPushCurrent, hipCtxSetCacheConfig, hipCtxSynchronize , hipCtxGetDevice
-    !>
-    !>  @warning This API is deprecated on the AMD platform, only for equivalent cuCtx driver API on
-    !>  the
-    !>  NVIDIA platform.
     function hipCtxPushCurrent(ctx) &
        result(CtxPushCurrent) &
        bind(C, name="hipCtxPushCurrent")
@@ -7899,18 +4838,6 @@ module hip
     !---------------------------------------------
     ! hipCtxSetCurrent
     !---------------------------------------------
-    !>  @brief Set the passed context as current/default [Deprecated]
-    !>
-    !>  @param [in] ctx The context to set as current
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidContext`
-    !>
-    !>  @see hipCtxCreate, hipCtxDestroy, hipCtxGetFlags, hipCtxPopCurrent, hipCtxGetCurrent,
-    !>  hipCtxPushCurrent, hipCtxSetCacheConfig, hipCtxSynchronize , hipCtxGetDevice
-    !>
-    !>  @warning This API is deprecated on the AMD platform, only for equivalent cuCtx driver API on
-    !>  the
-    !>  NVIDIA platform.
     function hipCtxSetCurrent(ctx) &
        result(CtxSetCurrent) &
        bind(C, name="hipCtxSetCurrent")
@@ -7922,18 +4849,6 @@ module hip
     !---------------------------------------------
     ! hipCtxGetCurrent
     !---------------------------------------------
-    !>  @brief Get the handle of the current/ default context [Deprecated]
-    !>
-    !>  @param [out] ctx  The context to get as current
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidContext`
-    !>
-    !>  @see hipCtxCreate, hipCtxDestroy, hipCtxGetDevice, hipCtxGetFlags, hipCtxPopCurrent,
-    !>  hipCtxPushCurrent, hipCtxSetCacheConfig, hipCtxSynchronize, hipCtxGetDevice
-    !>
-    !>  @warning This API is deprecated on the AMD platform, only for equivalent cuCtx driver API on
-    !>  the
-    !>  NVIDIA platform.
     function hipCtxGetCurrent(ctx) &
        result(CtxGetCurrent) &
        bind(C, name="hipCtxGetCurrent")
@@ -7945,18 +4860,6 @@ module hip
     !---------------------------------------------
     ! hipCtxGetDevice
     !---------------------------------------------
-    !>  @brief Get the handle of the device associated with current/default context [Deprecated]
-    !>
-    !>  @param [out] device The device from the current context
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidContext`
-    !>
-    !>  @see hipCtxCreate, hipCtxDestroy, hipCtxGetFlags, hipCtxPopCurrent, hipCtxGetCurrent,
-    !>  hipCtxPushCurrent, hipCtxSetCacheConfig, hipCtxSynchronize
-    !>
-    !>  @warning This API is deprecated on the AMD platform, only for equivalent cuCtx driver API on
-    !>  the
-    !>  NVIDIA platform.
     function hipCtxGetDevice(device) &
        result(CtxGetDevice) &
        bind(C, name="hipCtxGetDevice")
@@ -7968,25 +4871,6 @@ module hip
     !---------------------------------------------
     ! hipCtxGetApiVersion
     !---------------------------------------------
-    !>  @brief Returns the approximate HIP api version.
-    !>
-    !>  @param [in]  ctx Context to check [Deprecated]
-    !>  @param [out] apiVersion API version to get
-    !>
-    !>  @returns `hipSuccess`
-    !>
-    !>  @warning The HIP feature set does not correspond to an exact CUDA SDK api revision.
-    !>  This function always set *apiVersion to 4 as an approximation though HIP supports
-    !>  some features which were introduced in later CUDA SDK revisions.
-    !>  HIP apps code should not rely on the api revision number here and should
-    !>  use arch feature flags to test device capabilities or conditional compilation.
-    !>
-    !>  @see hipCtxCreate, hipCtxDestroy, hipCtxGetDevice, hipCtxGetFlags, hipCtxPopCurrent,
-    !>  hipCtxPushCurrent, hipCtxSetCacheConfig, hipCtxSynchronize, hipCtxGetDevice
-    !>
-    !>  @warning This API is deprecated on the AMD platform, only for equivalent cuCtx driver API on
-    !>  the
-    !>  NVIDIA platform.
     function hipCtxGetApiVersion(ctx, apiVersion) &
        result(CtxGetApiVersion) &
        bind(C, name="hipCtxGetApiVersion")
@@ -7999,22 +4883,6 @@ module hip
     !---------------------------------------------
     ! hipCtxGetCacheConfig
     !---------------------------------------------
-    !>  @brief Get Cache configuration for a specific function [Deprecated]
-    !>
-    !>  @param [out] cacheConfig  Cache configuration
-    !>
-    !>  @returns `hipSuccess`
-    !>
-    !>  @warning AMD devices and some Nvidia GPUS do not support reconfigurable cache.  This hint is
-    !>  ignored on those architectures.
-    !>
-    !>  @see hipCtxCreate, hipCtxDestroy, hipCtxGetFlags, hipCtxPopCurrent, hipCtxGetCurrent,
-    !>  hipCtxSetCurrent, hipCtxPushCurrent, hipCtxSetCacheConfig, hipCtxSynchronize,
-    !>  hipCtxGetDevice
-    !>
-    !>  @warning This API is deprecated on the AMD platform, only for equivalent cuCtx driver API on
-    !>  the
-    !>  NVIDIA platform.
     function hipCtxGetCacheConfig(cacheConfig) &
        result(CtxGetCacheConfig) &
        bind(C, name="hipCtxGetCacheConfig")
@@ -8026,22 +4894,6 @@ module hip
     !---------------------------------------------
     ! hipCtxSetCacheConfig
     !---------------------------------------------
-    !>  @brief Set L1/Shared cache partition [Deprecated]
-    !>
-    !>  @param [in] cacheConfig  Cache configuration to set
-    !>
-    !>  @return `hipSuccess`
-    !>
-    !>  @warning AMD devices and some Nvidia GPUS do not support reconfigurable cache.  This hint is
-    !>  ignored on those architectures.
-    !>
-    !>  @see hipCtxCreate, hipCtxDestroy, hipCtxGetFlags, hipCtxPopCurrent, hipCtxGetCurrent,
-    !>  hipCtxSetCurrent, hipCtxPushCurrent, hipCtxSetCacheConfig, hipCtxSynchronize,
-    !>  hipCtxGetDevice
-    !>
-    !>  @warning This API is deprecated on the AMD platform, only for equivalent cuCtx driver API on
-    !>  the
-    !>  NVIDIA platform.
     function hipCtxSetCacheConfig(cacheConfig) &
        result(CtxSetCacheConfig) &
        bind(C, name="hipCtxSetCacheConfig")
@@ -8053,23 +4905,6 @@ module hip
     !---------------------------------------------
     ! hipCtxSetSharedMemConfig
     !---------------------------------------------
-    !>  @brief Set Shared memory bank configuration  [Deprecated]
-    !>
-    !>  @param [in] config  Shared memory configuration to set
-    !>
-    !>  @return `hipSuccess`
-    !>
-    !>  @warning AMD devices and some Nvidia GPUS do not support shared cache banking, and the hint
-    !>  is
-    !>  ignored on those architectures.
-    !>
-    !>  @see hipCtxCreate, hipCtxDestroy, hipCtxGetFlags, hipCtxPopCurrent, hipCtxGetCurrent,
-    !>  hipCtxSetCurrent, hipCtxPushCurrent, hipCtxSetCacheConfig, hipCtxSynchronize,
-    !>  hipCtxGetDevice
-    !>
-    !>  @warning This API is deprecated on the AMD platform, only for equivalent cuCtx driver API on
-    !>  the
-    !>  NVIDIA platform.
     function hipCtxSetSharedMemConfig(config) &
        result(CtxSetSharedMemConfig) &
        bind(C, name="hipCtxSetSharedMemConfig")
@@ -8081,23 +4916,6 @@ module hip
     !---------------------------------------------
     ! hipCtxGetSharedMemConfig
     !---------------------------------------------
-    !>  @brief Get Shared memory bank configuration [Deprecated]
-    !>
-    !>  @param [out] pConfig  Pointer of shared memory configuration
-    !>
-    !>  @return `hipSuccess`
-    !>
-    !>  @warning AMD devices and some Nvidia GPUS do not support shared cache banking, and the hint
-    !>  is
-    !>  ignored on those architectures.
-    !>
-    !>  @see hipCtxCreate, hipCtxDestroy, hipCtxGetFlags, hipCtxPopCurrent, hipCtxGetCurrent,
-    !>  hipCtxSetCurrent, hipCtxPushCurrent, hipCtxSetCacheConfig, hipCtxSynchronize,
-    !>  hipCtxGetDevice
-    !>
-    !>  @warning This API is deprecated on the AMD platform, only for equivalent cuCtx driver API on
-    !>  the
-    !>  NVIDIA platform.
     function hipCtxGetSharedMemConfig(pConfig) &
        result(CtxGetSharedMemConfig) &
        bind(C, name="hipCtxGetSharedMemConfig")
@@ -8109,21 +4927,6 @@ module hip
     !---------------------------------------------
     ! hipCtxSynchronize
     !---------------------------------------------
-    !>  @brief Blocks until the default context has completed all preceding requested tasks
-    !>  [Deprecated]
-    !>
-    !>  @return `hipSuccess`
-    !>
-    !>  @warning This function waits for all streams on the default context to complete execution,
-    !>  and
-    !>  then returns.
-    !>
-    !>  @see hipCtxCreate, hipCtxDestroy, hipCtxGetFlags, hipCtxPopCurrent, hipCtxGetCurrent,
-    !>  hipCtxSetCurrent, hipCtxPushCurrent, hipCtxSetCacheConfig, hipCtxGetDevice
-    !>
-    !>  @warning This API is deprecated on the AMD platform, only for equivalent cuCtx driver API on
-    !>  the
-    !>  NVIDIA platform.
     function hipCtxSynchronize() &
        result(CtxSynchronize) &
        bind(C, name="hipCtxSynchronize")
@@ -8134,19 +4937,6 @@ module hip
     !---------------------------------------------
     ! hipCtxGetFlags
     !---------------------------------------------
-    !>  @brief Return flags used for creating default context [Deprecated]
-    !>
-    !>  @param [out] flags  Pointer of flags
-    !>
-    !>  @returns `hipSuccess`
-    !>
-    !>  @see hipCtxCreate, hipCtxDestroy, hipCtxPopCurrent, hipCtxGetCurrent, hipCtxGetCurrent,
-    !>  hipCtxSetCurrent, hipCtxPushCurrent, hipCtxSetCacheConfig, hipCtxSynchronize,
-    !>  hipCtxGetDevice
-    !>
-    !>  @warning This API is deprecated on the AMD platform, only for equivalent cuCtx driver API on
-    !>  the
-    !>  NVIDIA platform.
     function hipCtxGetFlags(flags) &
        result(CtxGetFlags) &
        bind(C, name="hipCtxGetFlags")
@@ -8158,31 +4948,6 @@ module hip
     !---------------------------------------------
     ! hipCtxEnablePeerAccess
     !---------------------------------------------
-    !>  @brief Enables direct access to memory allocations in a peer context [Deprecated]
-    !>
-    !>  Memory which already allocated on peer device will be mapped into the address space of the
-    !>  current device. In addition, all future memory allocations on peerDeviceId will be mapped
-    !>  into
-    !>  the address space of the current device when the memory is allocated. The peer memory
-    !>  remains
-    !>  accessible from the current device until a call to hipDeviceDisablePeerAccess or
-    !>  hipDeviceReset.
-    !>
-    !>
-    !>  @param [in] peerCtx  Peer context
-    !>  @param [in] flags  flags, need to set as 0
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidDevice`, `hipErrorInvalidValue`,
-    !>  `hipErrorPeerAccessAlreadyEnabled`
-    !>
-    !>  @see hipCtxCreate, hipCtxDestroy, hipCtxGetFlags, hipCtxPopCurrent, hipCtxGetCurrent,
-    !>  hipCtxSetCurrent, hipCtxPushCurrent, hipCtxSetCacheConfig, hipCtxSynchronize,
-    !>  hipCtxGetDevice
-    !>  @warning PeerToPeer support is experimental.
-    !>
-    !>  @warning This API is deprecated on the AMD platform, only for equivalent cuCtx driver API on
-    !>  the
-    !>  NVIDIA platform.
     function hipCtxEnablePeerAccess(peerCtx, flags) &
        result(CtxEnablePeerAccess) &
        bind(C, name="hipCtxEnablePeerAccess")
@@ -8195,27 +4960,6 @@ module hip
     !---------------------------------------------
     ! hipCtxDisablePeerAccess
     !---------------------------------------------
-    !>  @brief Disable direct access from current context's virtual address space to memory
-    !>  allocations
-    !>  physically located on a peer context.Disables direct access to memory allocations in a peer
-    !>  context and unregisters any registered allocations [Deprecated]
-    !>
-    !>  Returns `hipErrorPeerAccessNotEnabled` if direct access to memory on peerDevice has not yet
-    !>  been
-    !>  enabled from the current device.
-    !>
-    !>  @param [in] peerCtx  Peer context to be disabled
-    !>
-    !>  @returns `hipSuccess`, `hipErrorPeerAccessNotEnabled`
-    !>
-    !>  @see hipCtxCreate, hipCtxDestroy, hipCtxGetFlags, hipCtxPopCurrent, hipCtxGetCurrent,
-    !>  hipCtxSetCurrent, hipCtxPushCurrent, hipCtxSetCacheConfig, hipCtxSynchronize,
-    !>  hipCtxGetDevice
-    !>  @warning PeerToPeer support is experimental.
-    !>
-    !>  @warning This API is deprecated on the AMD platform, only for equivalent cuCtx driver API on
-    !>  the
-    !>  NVIDIA platform.
     function hipCtxDisablePeerAccess(peerCtx) &
        result(CtxDisablePeerAccess) &
        bind(C, name="hipCtxDisablePeerAccess")
@@ -8227,20 +4971,6 @@ module hip
     !---------------------------------------------
     ! hipDevicePrimaryCtxGetState
     !---------------------------------------------
-    !>  @brief Get the state of the primary context [Deprecated]
-    !>
-    !>  @param [in] dev  Device to get primary context flags for
-    !>  @param [out] flags  Pointer to store flags
-    !>  @param [out] active  Pointer to store context state; 0 = inactive, 1 = active
-    !>
-    !>  @returns `hipSuccess`
-    !>
-    !>  @see hipCtxCreate, hipCtxDestroy, hipCtxGetFlags, hipCtxPopCurrent, hipCtxGetCurrent,
-    !>  hipCtxSetCurrent, hipCtxPushCurrent, hipCtxSetCacheConfig, hipCtxSynchronize,
-    !>  hipCtxGetDevice
-    !>
-    !>  @warning  This API is deprecated on the AMD platform, only for equivalent driver API on the
-    !>  NVIDIA platform.
     function hipDevicePrimaryCtxGetState(dev, flags, active) &
        result(DevicePrimaryCtxGetState) &
        bind(C, name="hipDevicePrimaryCtxGetState")
@@ -8254,21 +4984,6 @@ module hip
     !---------------------------------------------
     ! hipDevicePrimaryCtxRelease
     !---------------------------------------------
-    !>  @brief Release the primary context on the GPU.
-    !>
-    !>  @param [in] dev  Device which primary context is released [Deprecated]
-    !>
-    !>  @returns `hipSuccess`
-    !>
-    !>  @see hipCtxCreate, hipCtxDestroy, hipCtxGetFlags, hipCtxPopCurrent, hipCtxGetCurrent,
-    !>  hipCtxSetCurrent, hipCtxPushCurrent, hipCtxSetCacheConfig, hipCtxSynchronize,
-    !>  hipCtxGetDevice
-    !>  @warning This function return `hipSuccess` though doesn't release the primaryCtx by design
-    !>  on
-    !>  HIP/HIP-CLANG path.
-    !>
-    !>  @warning  This API is deprecated on the AMD platform, only for equivalent driver API on the
-    !>  NVIDIA platform.
     function hipDevicePrimaryCtxRelease(dev) &
        result(DevicePrimaryCtxRelease) &
        bind(C, name="hipDevicePrimaryCtxRelease")
@@ -8280,19 +4995,6 @@ module hip
     !---------------------------------------------
     ! hipDevicePrimaryCtxRetain
     !---------------------------------------------
-    !>  @brief Retain the primary context on the GPU [Deprecated]
-    !>
-    !>  @param [out] pctx  Returned context handle of the new context
-    !>  @param [in] dev  Device which primary context is released
-    !>
-    !>  @returns `hipSuccess`
-    !>
-    !>  @see hipCtxCreate, hipCtxDestroy, hipCtxGetFlags, hipCtxPopCurrent, hipCtxGetCurrent,
-    !>  hipCtxSetCurrent, hipCtxPushCurrent, hipCtxSetCacheConfig, hipCtxSynchronize,
-    !>  hipCtxGetDevice
-    !>
-    !>  @warning  This API is deprecated on the AMD platform, only for equivalent driver API on the
-    !>  NVIDIA platform.
     function hipDevicePrimaryCtxRetain(pctx, dev) &
        result(DevicePrimaryCtxRetain) &
        bind(C, name="hipDevicePrimaryCtxRetain")
@@ -8305,18 +5007,6 @@ module hip
     !---------------------------------------------
     ! hipDevicePrimaryCtxReset
     !---------------------------------------------
-    !>  @brief Resets the primary context on the GPU [Deprecated]
-    !>
-    !>  @param [in] dev  Device which primary context is reset
-    !>
-    !>  @returns `hipSuccess`
-    !>
-    !>  @see hipCtxCreate, hipCtxDestroy, hipCtxGetFlags, hipCtxPopCurrent, hipCtxGetCurrent,
-    !>  hipCtxSetCurrent, hipCtxPushCurrent, hipCtxSetCacheConfig, hipCtxSynchronize,
-    !>  hipCtxGetDevice
-    !>
-    !>  @warning  This API is deprecated on the AMD platform, only for equivalent driver API on the
-    !>  NVIDIA platform.
     function hipDevicePrimaryCtxReset(dev) &
        result(DevicePrimaryCtxReset) &
        bind(C, name="hipDevicePrimaryCtxReset")
@@ -8328,19 +5018,6 @@ module hip
     !---------------------------------------------
     ! hipDevicePrimaryCtxSetFlags
     !---------------------------------------------
-    !>  @brief Set flags for the primary context [Deprecated]
-    !>
-    !>  @param [in] dev  Device for which the primary context flags are set
-    !>  @param [in] flags  New flags for the device
-    !>
-    !>  @returns `hipSuccess`, `hipErrorContextAlreadyInUse`
-    !>
-    !>  @see hipCtxCreate, hipCtxDestroy, hipCtxGetFlags, hipCtxPopCurrent, hipCtxGetCurrent,
-    !>  hipCtxSetCurrent, hipCtxPushCurrent, hipCtxSetCacheConfig, hipCtxSynchronize,
-    !>  hipCtxGetDevice
-    !>
-    !>  @warning  This API is deprecated on the AMD platform, only for equivalent driver API on the
-    !>  NVIDIA platform.
     function hipDevicePrimaryCtxSetFlags(dev, flags) &
        result(DevicePrimaryCtxSetFlags) &
        bind(C, name="hipDevicePrimaryCtxSetFlags")
@@ -8353,23 +5030,6 @@ module hip
     !---------------------------------------------
     ! hipModuleLoadFatBinary
     !---------------------------------------------
-    !> @ingroup Module
-    !>
-    !>
-    !>
-    !>
-    !>
-    !> -------------------------------------------------------------------------------------------------
-    !> -------------------------------------------------------------------------------------------------
-    !>
-    !>  @brief Loads fatbin object
-    !>
-    !>  @param [in] fatbin  fatbin to be loaded as a module
-    !>  @param [out] module  Module
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidContext`,
-    !>  `hipErrorFileNotFound`,
-    !>  `hipErrorOutOfMemory`, `hipErrorSharedObjectInitFailed`, `hipErrorNotInitialized`
     function hipModuleLoadFatBinary(myModule, fatbin) &
        result(ModuleLoadFatBinary) &
        bind(C, name="hipModuleLoadFatBinary")
@@ -8382,18 +5042,6 @@ module hip
     !---------------------------------------------
     ! hipModuleLoad
     !---------------------------------------------
-    !>  @brief Loads code object from file into a module the currrent context.
-    !>
-    !>  @param [in] fname  Filename of code object to load
-    !>
-    !>  @param [out] module  Module
-    !>
-    !>  @warning File/memory resources allocated in this function are released only in
-    !>  hipModuleUnload.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidContext`,
-    !>  `hipErrorFileNotFound`,
-    !>  `hipErrorOutOfMemory`, `hipErrorSharedObjectInitFailed`, `hipErrorNotInitialized`
     function hipModuleLoad(myModule, fname) &
        result(ModuleLoad) &
        bind(C, name="hipModuleLoad")
@@ -8406,13 +5054,6 @@ module hip
     !---------------------------------------------
     ! hipModuleUnload
     !---------------------------------------------
-    !>  @brief Frees the module
-    !>
-    !>  @param [in] module  Module to free
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidResourceHandle`
-    !>
-    !>  The module is freed, and the code objects associated with it are destroyed.
     function hipModuleUnload(myModule) &
        result(ModuleUnload) &
        bind(C, name="hipModuleUnload")
@@ -8424,15 +5065,6 @@ module hip
     !---------------------------------------------
     ! hipModuleGetFunction
     !---------------------------------------------
-    !>  @brief Function with kname will be extracted if present in module
-    !>
-    !>  @param [in] module  Module to get function from
-    !>  @param [in] kname  Pointer to the name of function
-    !>  @param [out] function  Pointer to function handle
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidContext`,
-    !>  `hipErrorNotInitialized`,
-    !>  `hipErrorNotFound`,
     function hipModuleGetFunction(myFunction, myModule, kname) &
        result(ModuleGetFunction) &
        bind(C, name="hipModuleGetFunction")
@@ -8446,14 +5078,6 @@ module hip
     !---------------------------------------------
     ! hipModuleGetFunctionCount
     !---------------------------------------------
-    !>  @brief Returns the number of functions within a module.
-    !>
-    !>  @param [in] mod  Module to get function count from
-    !>  @param [out] count  function count from module
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidContext`,
-    !>  `hipErrorNotInitialized`,
-    !>  `hipErrorNotFound`,
     function hipModuleGetFunctionCount(count, mod) &
        result(ModuleGetFunctionCount) &
        bind(C, name="hipModuleGetFunctionCount")
@@ -8464,47 +5088,21 @@ module hip
     end function hipModuleGetFunctionCount
 
     !---------------------------------------------
+    ! hipModuleEnumerateFunctions
+    !---------------------------------------------
+    function hipModuleEnumerateFunctions(functions, numFunctions, mod) &
+       result(ModuleEnumerateFunctions) &
+       bind(C, name="hipModuleEnumerateFunctions")
+       import :: c_ptr, c_int, hipSuccess
+       type(c_ptr) :: functions
+       integer(c_int), value :: numFunctions
+       type(c_ptr), value :: mod
+       integer(kind(hipSuccess)) :: ModuleEnumerateFunctions
+    end function hipModuleEnumerateFunctions
+
+    !---------------------------------------------
     ! hipKernelGetAttribute
     !---------------------------------------------
-    !>  @brief Returns information about a kernel.
-    !>
-    !>  @param[out] pi - Returned attribute value
-    !>  @param[in] attrib - Attribute requested
-    !>  @param[in] kernel - Kernel to query attribute of
-    !>  @param[in] dev - Device to query attribute of
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidHandle`,
-    !>  `hipErrorInvalidDevice`, `hipErrorInvalidDeviceFunction`, `hipErrorMissingConfiguration`
-    !>
-    !>  Returns in *pi the integer value of the attribute attrib for the kernel kernel for the
-    !>  requested
-    !>  device dev. The supported attributes are:
-    !>  - HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK The maximum number of threads per block. This
-    !>  number depends on both the kernel and the requested device.
-    !>  - HIP_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES The size in bytes of statically-allocated shared
-    !>  memory per block required by this kernel. This does not include dynamically-allocated shared
-    !>  memory requested by the user at runtime.
-    !>  - HIP_FUNC_ATTRIBUTE_CONST_SIZE_BYTES The size in bytes of user-allocated constant memory
-    !>  required by this kernel.
-    !>  - HIP_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES The size in bytes of local memory used by each thread
-    !>  of this kernel.
-    !>  - HIP_FUNC_ATTRIBUTE_NUM_REGS The number of registers used by each thread of this kernel.
-    !>  - HIP_FUNC_ATTRIBUTE_PTX_VERSION The PTX virtual architecture version for which the kernel
-    !>  was compiled. This value is the major PTX version * 10 + the minor PTX version, so a PTX
-    !>  version 1.3 function would return the value 13.
-    !>  - HIP_FUNC_ATTRIBUTE_BINARY_VERSION The binary architecture version for which the kernel was
-    !>  compiled. This value is the major binary version * 10 + the minor binary version, so a
-    !>  binary version 1.3 function would return the value 13.
-    !>  - HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES The maximum size in bytes of
-    !>  dynamically-allocated shared memory.
-    !>  - HIP_FUNC_ATTRIBUTE_CACHE_MODE_CA The attribute to indicate whether the kernel has been
-    !>  compiled with user specified option "-Xptxas --dlcm=ca" set.
-    !>  - HIP_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT Preferred shared memory-L1 cache split
-    !>  ratio in percent of total shared memory.
-    !>
-    !>  @see hipLibraryLoadData, hipLibraryLoadFromFile, hipLibraryUnload, hipKernelSetAttribute,
-    !>  hipLibraryGetKernel, hipLaunchKernel, hipKernelGetFunction, hipLibraryGetModule,
-    !>  hipModuleGetFunction, hipFuncGetAttribute
     function hipKernelGetAttribute(pi, attrib, kernel, dev) &
        result(KernelGetAttribute) &
        bind(C, name="hipKernelGetAttribute")
@@ -8519,17 +5117,6 @@ module hip
     !---------------------------------------------
     ! hipLibraryLoadData
     !---------------------------------------------
-    !>  @brief Load hip Library from inmemory object
-    !>
-    !>  @param [out] library Output Library
-    !>  @param [in] code In memory object
-    !>  @param [in] jitOptions JIT options, CUDA only
-    !>  @param [in] jitOptionsValues JIT options values, CUDA only
-    !>  @param [in] numJitOptions Number of JIT options
-    !>  @param [in] libraryOptions Library options
-    !>  @param [in] libraryOptionValues Library options values
-    !>  @param [in] numLibraryOptions Number of library options
-    !>  @return `hipSuccess`, `hipErrorInvalidValue`,
     function hipLibraryLoadData(library, code, jitOptions, jitOptionsValues, numJitOptions, &
                                 libraryOptions, libraryOptionValues, numLibraryOptions) &
        result(LibraryLoadData) &
@@ -8549,17 +5136,6 @@ module hip
     !---------------------------------------------
     ! hipLibraryLoadFromFile
     !---------------------------------------------
-    !>  @brief Load hip Library from file
-    !>
-    !>  @param [out] library Output Library
-    !>  @param [in] fileName file which contains code object
-    !>  @param [in] jitOptions JIT options, CUDA only
-    !>  @param [in] jitOptionsValues JIT options values, CUDA only
-    !>  @param [in] numJitOptions Number of JIT options
-    !>  @param [in] libraryOptions Library options
-    !>  @param [in] libraryOptionValues Library options values
-    !>  @param [in] numLibraryOptions Number of library options
-    !>  @return `hipSuccess`, `hipErrorInvalidValue`
     function hipLibraryLoadFromFile(library, fileName, jitOptions, jitOptionsValues, &
                                     numJitOptions, libraryOptions, libraryOptionValues, &
                                     numLibraryOptions) &
@@ -8580,10 +5156,6 @@ module hip
     !---------------------------------------------
     ! hipLibraryUnload
     !---------------------------------------------
-    !>  @brief Unload HIP Library
-    !>
-    !>  @param [in] library Input created hip library
-    !>  @return `hipSuccess`, `hipErrorInvalidValue`
     function hipLibraryUnload(library) &
        result(LibraryUnload) &
        bind(C, name="hipLibraryUnload")
@@ -8595,12 +5167,6 @@ module hip
     !---------------------------------------------
     ! hipLibraryGetKernel
     !---------------------------------------------
-    !>  @brief Get Kernel object from library
-    !>
-    !>  @param [out] pKernel Output kernel object
-    !>  @param [in] library Input hip library
-    !>  @param [in] name kernel name to be searched for
-    !>  @return `hipSuccess`, `hipErrorInvalidValue`
     function hipLibraryGetKernel(pKernel, library, name) &
        result(LibraryGetKernel) &
        bind(C, name="hipLibraryGetKernel")
@@ -8614,11 +5180,6 @@ module hip
     !---------------------------------------------
     ! hipLibraryGetKernelCount
     !---------------------------------------------
-    !>  @brief Get Kernel count in library
-    !>
-    !>  @param [out] count Count of kernels in library
-    !>  @param [in] library Input created hip library
-    !>  @return `hipSuccess`, `hipErrorInvalidValue`
     function hipLibraryGetKernelCount(count, library) &
        result(LibraryGetKernelCount) &
        bind(C, name="hipLibraryGetKernelCount")
@@ -8631,18 +5192,6 @@ module hip
     !---------------------------------------------
     ! hipLibraryGetGlobal
     !---------------------------------------------
-    !>  @brief Get device pointer to a `__device__` global variable defined in a library.
-    !>
-    !>  Returns the device pointer and size of the named global symbol within the
-    !>  library's code object. Mirrors CUDA's `cuLibraryGetGlobal` /
-    !>  `cudaLibraryGetGlobal`. Either `dptr` or `bytes` (but not both) may be NULL.
-    !>
-    !>  @param [out] dptr   Pointer to receive the device pointer, may be NULL.
-    !>  @param [out] bytes  Pointer to receive the size in bytes, may be NULL.
-    !>  @param [in]  library Input hip library handle.
-    !>  @param [in]  name   Name of the global symbol to look up.
-    !>  @return `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidResourceHandle`,
-    !>          `hipErrorNotFound`
     function hipLibraryGetGlobal(dptr, bytes, library, name) &
        result(LibraryGetGlobal) &
        bind(C, name="hipLibraryGetGlobal")
@@ -8657,20 +5206,6 @@ module hip
     !---------------------------------------------
     ! hipLibraryGetManaged
     !---------------------------------------------
-    !>  @brief Get host pointer to a `__managed__` variable defined in a library.
-    !>
-    !>  Returns the host-accessible managed pointer and size of the named managed
-    !>  symbol within the library's code object. Mirrors CUDA's
-    !>  `cuLibraryGetManaged` / `cudaLibraryGetManaged`. Either `dptr` or `bytes`
-    !>  (but not both) may be NULL. Returns `hipErrorNotFound` if the symbol does
-    !>  not exist or is not a `__managed__` variable.
-    !>
-    !>  @param [out] dptr   Pointer to receive the managed host pointer, may be NULL.
-    !>  @param [out] bytes  Pointer to receive the size in bytes, may be NULL.
-    !>  @param [in]  library Input hip library handle.
-    !>  @param [in]  name   Name of the managed symbol to look up.
-    !>  @return `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidResourceHandle`,
-    !>          `hipErrorNotFound`
     function hipLibraryGetManaged(dptr, bytes, library, name) &
        result(LibraryGetManaged) &
        bind(C, name="hipLibraryGetManaged")
@@ -8685,12 +5220,6 @@ module hip
     !---------------------------------------------
     ! hipLibraryEnumerateKernels
     !---------------------------------------------
-    !>  @brief Retrieve kernel handles within a library
-    !>
-    !>  @param [out] kernels Buffer for kernel handles
-    !>  @param [in] numKernels Maximum number of kernel handles to return to buffer
-    !>  @param [in] library Library handle to query from
-    !>  @return `hipSuccess`, `hipErrorInvalidValue`
     function hipLibraryEnumerateKernels(kernels, numKernels, library) &
        result(LibraryEnumerateKernels) &
        bind(C, name="hipLibraryEnumerateKernels")
@@ -8704,11 +5233,6 @@ module hip
     !---------------------------------------------
     ! hipKernelGetLibrary
     !---------------------------------------------
-    !>  @brief Returns a Library Handle
-    !>
-    !>  @param [out] library Returned Library handle
-    !>  @param [in] kernel Kernel to retrieve library Handle
-    !>  @return `hipSuccess`, `hipErrorInvalidValue`
     function hipKernelGetLibrary(library, kernel) &
        result(KernelGetLibrary) &
        bind(C, name="hipKernelGetLibrary")
@@ -8721,11 +5245,6 @@ module hip
     !---------------------------------------------
     ! hipKernelGetName
     !---------------------------------------------
-    !>  @brief Returns a Kernel Name
-    !>
-    !>  @param [out] name Returned Kernel Name
-    !>  @param [in] kernel Kernel handle to retrieve name
-    !>  @return `hipSuccess`, `hipErrorInvalidValue`
     function hipKernelGetName(name, kernel) &
        result(KernelGetName) &
        bind(C, name="hipKernelGetName")
@@ -8738,14 +5257,6 @@ module hip
     !---------------------------------------------
     ! hipKernelGetParamInfo
     !---------------------------------------------
-    !>  @brief Returns the offset and size of a kernel parameter
-    !>
-    !>  @param [in] kernel       Kernel handle to retrieve parameter info
-    !>  @param [in] paramIndex   Index of the parameter
-    !>  @param [out] paramOffset returns the offset of the parameter
-    !>  @param [out] paramSize   Optionally returns the size of the parameter
-    !>
-    !>  @return `hipSuccess`, `hipErrorInvalidValue`
     function hipKernelGetParamInfo(kernel, paramIndex, paramOffset, paramSize) &
        result(KernelGetParamInfo) &
        bind(C, name="hipKernelGetParamInfo")
@@ -8760,12 +5271,6 @@ module hip
     !---------------------------------------------
     ! hipFuncGetAttributes
     !---------------------------------------------
-    !>  @brief Find out attributes for a given function.
-    !>  @ingroup Execution
-    !>  @param [out] attr  Attributes of funtion
-    !>  @param [in] func  Pointer to the function handle
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidDeviceFunction`
     function hipFuncGetAttributes(attr, func) &
        result(FuncGetAttributes) &
        bind(C, name="hipFuncGetAttributes")
@@ -8778,18 +5283,11 @@ module hip
     !---------------------------------------------
     ! hipFuncGetAttribute
     !---------------------------------------------
-    !>  @brief Find out a specific attribute for a given function.
-    !>  @ingroup Execution
-    !>  @param [out] value  Pointer to the value
-    !>  @param [in]  attrib  Attributes of the given funtion
-    !>  @param [in]  hfunc  Function to get attributes from
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidDeviceFunction`
     function hipFuncGetAttribute(myValue, attrib, hfunc) &
        result(FuncGetAttribute) &
        bind(C, name="hipFuncGetAttribute")
-       import :: c_ptr, HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK, hipSuccess
-       type(c_ptr), value :: myValue
+       import :: c_int, HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK, c_ptr, hipSuccess
+       integer(c_int) :: myValue
        integer(kind(HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK)), value :: attrib
        type(c_ptr), value :: hfunc
        integer(kind(hipSuccess)) :: FuncGetAttribute
@@ -8798,12 +5296,6 @@ module hip
     !---------------------------------------------
     ! hipGetFuncBySymbol
     !---------------------------------------------
-    !>  @brief Gets pointer to device entry function that matches entry function symbolPtr.
-    !>
-    !>  @param [out] functionPtr  Device entry function
-    !>  @param [in]  symbolPtr  Pointer to device entry function to search for
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidDeviceFunction`
     function hipGetFuncBySymbol(functionPtr, symbolPtr) &
        result(GetFuncBySymbol) &
        bind(C, name="hipGetFuncBySymbol")
@@ -8816,14 +5308,6 @@ module hip
     !---------------------------------------------
     ! hipGetDriverEntryPoint
     !---------------------------------------------
-    !>  @brief Gets function pointer of a requested HIP API
-    !>
-    !>  @param [in]  symbol  The API base name
-    !>  @param [out] funcPtr  Pointer to the requested function
-    !>  @param [in]  flags  Flags for the search
-    !>  @param [out] driverStatus  Optional returned status of the search
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGetDriverEntryPoint(symbol, funcPtr, flags, driverStatus) &
        result(GetDriverEntryPoint) &
        bind(C, name="hipGetDriverEntryPoint")
@@ -8838,13 +5322,6 @@ module hip
     !---------------------------------------------
     ! hipModuleGetTexRef
     !---------------------------------------------
-    !>  @brief returns the handle of the texture reference with the name from the module.
-    !>
-    !>  @param [in] hmod  Module
-    !>  @param [in] name  Pointer of name of texture reference
-    !>  @param [out] texRef  Pointer of texture reference
-    !>
-    !>  @returns `hipSuccess`, `hipErrorNotInitialized`, `hipErrorNotFound`, `hipErrorInvalidValue`
     function hipModuleGetTexRef(texRef, hmod, name) &
        result(ModuleGetTexRef) &
        bind(C, name="hipModuleGetTexRef")
@@ -8858,31 +5335,6 @@ module hip
     !---------------------------------------------
     ! hipModuleLoadData
     !---------------------------------------------
-    !>  @brief builds module from code object data which resides in host memory.
-    !>
-    !>  The "image" is a pointer to the location of code object data. This data can be either
-    !>  a single code object or a fat binary (fatbin), which serves as the entry point for loading
-    !>  and
-    !>  launching device-specific kernel executions.
-    !>
-    !>  By default, the following command generates a fatbin:
-    !>
-    !>  "amdclang++ -O3 -c --offload-device-only --offload-arch=<GPU_ARCH> <input_file> -o
-    !>  <output_file>"
-    !>
-    !>  For more details, refer to:
-    !>  <a
-    !>  href=
-    !>  "https://rocm.docs.amd.com/projects/HIP/en/latest/how-to/kernel_language_cpp_support.html#kernel-compilation">
-    !>  Kernel Compilation</a> in the HIP kernel language C++ support, or
-    !>  <a
-    !>  href="https://rocm.docs.amd.com/projects/HIP/en/latest/how-to/hip_rtc.html">HIP runtime
-    !>  compilation (HIP RTC)</a>.
-    !>
-    !>  @param [in] image  The pointer to the location of data
-    !>  @param [out] module  Retuned module
-    !>
-    !>  @returns hipSuccess, hipErrorNotInitialized, hipErrorOutOfMemory, hipErrorNotInitialized
     function hipModuleLoadData(myModule, image) &
        result(ModuleLoadData) &
        bind(C, name="hipModuleLoadData")
@@ -8895,16 +5347,6 @@ module hip
     !---------------------------------------------
     ! hipModuleLoadDataEx
     !---------------------------------------------
-    !>  @brief builds module from code object which resides in host memory. Image is pointer to that
-    !>  location. Options are not used. hipModuleLoadData is called.
-    !>
-    !>  @param [in] image  The pointer to the location of data
-    !>  @param [out] module  Retuned module
-    !>  @param [in] numOptions Number of options
-    !>  @param [in] options Options for JIT
-    !>  @param [in] optionValues  Option values for JIT
-    !>
-    !>  @returns hipSuccess, hipErrorNotInitialized, hipErrorOutOfMemory, hipErrorNotInitialized
     function hipModuleLoadDataEx(myModule, image, numOptions, options, optionValues) &
        result(ModuleLoadDataEx) &
        bind(C, name="hipModuleLoadDataEx")
@@ -8920,22 +5362,6 @@ module hip
     !---------------------------------------------
     ! hipLinkAddData
     !---------------------------------------------
-    !>  @brief Adds bitcode data to be linked with options.
-    !>  @param [in] state hip link state
-    !>  @param [in] type  Type of the input data or bitcode
-    !>  @param [in] data  Input data which is null terminated
-    !>  @param [in] size  Size of the input data
-    !>  @param [in] name  Optional name for this input
-    !>  @param [in] numOptions  Size of the options
-    !>  @param [in] options  Array of options applied to this input
-    !>  @param [in] optionValues  Array of option values cast to void*
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidHandle`
-    !>
-    !>  If adding the file fails, it will
-    !>  @return `hipErrorInvalidConfiguration`
-    !>
-    !>  @see hipError_t
     function hipLinkAddData(state, myType, myData, mySize, name, numOptions, options, &
                             optionValues) &
        result(LinkAddData) &
@@ -8955,20 +5381,6 @@ module hip
     !---------------------------------------------
     ! hipLinkAddFile
     !---------------------------------------------
-    !>  @brief Adds a file with bitcode to be linked with options.
-    !>  @param [in] state hip link state
-    !>  @param [in] type  Type of the input data or bitcode
-    !>  @param [in] path  Path to the input file where bitcode is present
-    !>  @param [in] numOptions  Size of the options
-    !>  @param [in] options  Array of options applied to this input
-    !>  @param [in] optionValues  Array of option values cast to void*
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  If adding the file fails, it will
-    !>  @return `hipErrorInvalidConfiguration`
-    !>
-    !>  @see hipError_t
     function hipLinkAddFile(state, myType, path, numOptions, options, optionValues) &
        result(LinkAddFile) &
        bind(C, name="hipLinkAddFile")
@@ -8985,17 +5397,6 @@ module hip
     !---------------------------------------------
     ! hipLinkComplete
     !---------------------------------------------
-    !>  @brief Completes the linking of the given program.
-    !>  @param [in]   state hip link state
-    !>  @param [out]  hipBinOut  Upon success, points to the output binary
-    !>  @param [out]  sizeOut  Size of the binary is stored (optional)
-    !>
-    !>  @returns `hipSuccess` `hipErrorInvalidValue`
-    !>
-    !>  If adding the data fails, it will
-    !>  @return `hipErrorInvalidConfiguration`
-    !>
-    !>  @see hipError_t
     function hipLinkComplete(state, hipBinOut, sizeOut) &
        result(LinkComplete) &
        bind(C, name="hipLinkComplete")
@@ -9009,15 +5410,6 @@ module hip
     !---------------------------------------------
     ! hipLinkCreate
     !---------------------------------------------
-    !>  @brief Creates a linker instance with options.
-    !>  @param [in] numOptions  Number of options
-    !>  @param [in] options  Array of options
-    !>  @param [in] optionValues  Array of option values cast to void*
-    !>  @param [out] stateOut  hip link state created upon success
-    !>
-    !>  @returns `hipSuccess` `hipErrorInvalidValue` `hipErrorInvalidConfiguration`
-    !>
-    !>  @see hipSuccess
     function hipLinkCreate(numOptions, options, optionValues, stateOut) &
        result(LinkCreate) &
        bind(C, name="hipLinkCreate")
@@ -9032,12 +5424,6 @@ module hip
     !---------------------------------------------
     ! hipLinkDestroy
     !---------------------------------------------
-    !>  @brief Deletes the linker instance.
-    !>  @param [in] state link state instance
-    !>
-    !>  @returns `hipSuccess` `hipErrorInvalidValue`
-    !>
-    !>  @see hipSuccess
     function hipLinkDestroy(state) &
        result(LinkDestroy) &
        bind(C, name="hipLinkDestroy")
@@ -9049,35 +5435,6 @@ module hip
     !---------------------------------------------
     ! hipModuleLaunchKernel
     !---------------------------------------------
-    !>  @brief launches kernel f with launch parameters and shared memory on stream with arguments
-    !>  passed
-    !>  to kernelparams or extra
-    !>  @ingroup Execution
-    !>  @param [in] f         Kernel to launch.
-    !>  @param [in] gridDimX  X grid dimension specified as multiple of blockDimX.
-    !>  @param [in] gridDimY  Y grid dimension specified as multiple of blockDimY.
-    !>  @param [in] gridDimZ  Z grid dimension specified as multiple of blockDimZ.
-    !>  @param [in] blockDimX X block dimensions specified in work-items
-    !>  @param [in] blockDimY Y grid dimension specified in work-items
-    !>  @param [in] blockDimZ Z grid dimension specified in work-items
-    !>  @param [in] sharedMemBytes Amount of dynamic shared memory to allocate for this kernel. The
-    !>  HIP-Clang compiler provides support for extern shared declarations.
-    !>  @param [in] stream Stream where the kernel should be dispatched. May be 0, in which case th
-    !>  default stream is used with associated synchronization rules.
-    !>  @param [in] kernelParams  Kernel parameters to launch
-    !>  @param [in] extra Pointer to kernel arguments. These are passed directly to the kernel and
-    !>  must be in the memory layout and alignment expected by the kernel.
-    !>  All passed arguments must be naturally aligned according to their type. The memory address
-    !>  of
-    !>  each argument should be a multiple of its size in bytes. Please refer to
-    !>  hip_porting_driver_api.md for sample usage.
-    !>
-    !>  Please note, HIP does not support kernel launch with total work items defined in dimension
-    !>  with
-    !>  size gridDim x blockDim >= 2^32. So gridDim.x * blockDim.x, gridDim.y * blockDim.y
-    !>  and gridDim.z * blockDim.z are always less than 2^32.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorNotInitialized`, `hipErrorInvalidValue`
     function hipModuleLaunchKernel(f, gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, &
                                    blockDimZ, sharedMemBytes, stream, kernelParams, extra) &
        result(ModuleLaunchKernel) &
@@ -9100,37 +5457,6 @@ module hip
     !---------------------------------------------
     ! hipModuleLaunchCooperativeKernel
     !---------------------------------------------
-    !>  \addtogroup ModuleCooperativeG Cooperative groups kernel launch of Module management.
-    !>  \ingroup Module
-    !>
-    !>
-    !>  @brief launches kernel f with launch parameters and shared memory on stream with arguments
-    !>  passed
-    !>  to kernelParams, where thread blocks can cooperate and synchronize as they execute
-    !>
-    !>  @param [in] f              Kernel to launch.
-    !>  @param [in] gridDimX       X grid dimension specified as multiple of blockDimX.
-    !>  @param [in] gridDimY       Y grid dimension specified as multiple of blockDimY.
-    !>  @param [in] gridDimZ       Z grid dimension specified as multiple of blockDimZ.
-    !>  @param [in] blockDimX      X block dimension specified in work-items.
-    !>  @param [in] blockDimY      Y block dimension specified in work-items.
-    !>  @param [in] blockDimZ      Z block dimension specified in work-items.
-    !>  @param [in] sharedMemBytes Amount of dynamic shared memory to allocate for this kernel. The
-    !>  HIP-Clang compiler provides support for extern shared declarations.
-    !>  @param [in] stream         Stream where the kernel should be dispatched. May be 0,
-    !>  in which case the default stream is used with associated synchronization rules.
-    !>  @param [in] kernelParams   A list of kernel arguments.
-    !>
-    !>  Please note, HIP does not support kernel launch with total work items defined in dimension
-    !>  with
-    !>  size \f$ gridDim \cdot blockDim &ge; 2^{32} \f$.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorDeinitialized`, `hipErrorNotInitialized`,
-    !>  `hipErrorInvalidContext`,
-    !>  `hipErrorInvalidHandle`, `hipErrorInvalidImage`, `hipErrorInvalidValue`,
-    !>  `hipErrorInvalidConfiguration`, `hipErrorLaunchFailure`, `hipErrorLaunchOutOfResources`,
-    !>  `hipErrorLaunchTimeOut`, `hipErrorCooperativeLaunchTooLarge`,
-    !>  `hipErrorSharedObjectInitFailed`
     function hipModuleLaunchCooperativeKernel(f, gridDimX, gridDimY, gridDimZ, blockDimX, &
                                               blockDimY, blockDimZ, sharedMemBytes, stream, &
                                               kernelParams) &
@@ -9153,20 +5479,6 @@ module hip
     !---------------------------------------------
     ! hipModuleLaunchCooperativeKernelMultiDevice
     !---------------------------------------------
-    !>  @brief Launches kernels on multiple devices where thread blocks can cooperate and
-    !>  synchronize as they execute.
-    !>
-    !>  @param [in] launchParamsList         List of launch parameters, one per device.
-    !>  @param [in] numDevices               Size of the launchParamsList array.
-    !>  @param [in] flags                    Flags to control launch behavior.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorDeinitialized`, `hipErrorNotInitialized`,
-    !>  `hipErrorInvalidContext`,
-    !>  `hipErrorInvalidHandle`, `hipErrorInvalidImage`, `hipErrorInvalidValue`,
-    !>  `hipErrorInvalidConfiguration`, `hipErrorInvalidResourceHandle`, `hipErrorLaunchFailure`,
-    !>  `hipErrorLaunchOutOfResources`, `hipErrorLaunchTimeOut`,
-    !>  `hipErrorCooperativeLaunchTooLarge`,
-    !>  `hipErrorSharedObjectInitFailed`
     function hipModuleLaunchCooperativeKernelMultiDevice(launchParamsList, numDevices, flags) &
        result(ModuleLaunchCooperativeKernelMultiDevice) &
        bind(C, name="hipModuleLaunchCooperativeKernelMultiDevice")
@@ -9180,30 +5492,6 @@ module hip
     !---------------------------------------------
     ! hipLaunchCooperativeKernel
     !---------------------------------------------
-    !>  @brief Launches kernel f with launch parameters and shared memory on stream with arguments
-    !>  passed
-    !>  to kernelparams or extra, where thread blocks can cooperate and synchronize as they execute.
-    !>
-    !>  @param [in] f - Kernel to launch.
-    !>  @param [in] gridDim - Grid dimensions specified as multiple of blockDim.
-    !>  @param [in] blockDimX - Block dimensions specified in work-items
-    !>  @param [in] kernelParams - Pointer of arguments passed to the kernel. If the kernel has
-    !>  multiple
-    !>  parameters, 'kernelParams' should be array of pointers, each points the corresponding
-    !>  argument.
-    !>  @param [in] sharedMemBytes - Amount of dynamic shared memory to allocate for this kernel.
-    !>  The
-    !>  HIP-Clang compiler provides support for extern shared declarations.
-    !>  @param [in] stream - Stream where the kernel should be dispatched. May be 0, in which case
-    !>  th
-    !>  default stream is used with associated synchronization rules.
-    !>
-    !>  Please note, HIP does not support kernel launch with total work items defined in dimension
-    !>  with
-    !>  size \f$ gridDim \cdot blockDim &ge; 2^{32} \f$.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorNotInitialized`, `hipErrorInvalidValue`,
-    !>  `hipErrorCooperativeLaunchTooLarge`
     function hipLaunchCooperativeKernel(f, gridDim, blockDimX, kernelParams, sharedMemBytes, &
                                         stream) &
        result(LaunchCooperativeKernel) &
@@ -9221,15 +5509,6 @@ module hip
     !---------------------------------------------
     ! hipLaunchCooperativeKernelMultiDevice
     !---------------------------------------------
-    !>  @brief Launches kernels on multiple devices where thread blocks can cooperate and
-    !>  synchronize as they execute.
-    !>
-    !>  @param [in] launchParamsList         List of launch parameters, one per device.
-    !>  @param [in] numDevices               Size of the launchParamsList array.
-    !>  @param [in] flags                    Flags to control launch behavior.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorNotInitialized`, `hipErrorInvalidValue`,
-    !>   `hipErrorCooperativeLaunchTooLarge`
     function hipLaunchCooperativeKernelMultiDevice(launchParamsList, numDevices, flags) &
        result(LaunchCooperativeKernelMultiDevice) &
        bind(C, name="hipLaunchCooperativeKernelMultiDevice")
@@ -9243,17 +5522,6 @@ module hip
     !---------------------------------------------
     ! hipExtLaunchMultiKernelMultiDevice
     !---------------------------------------------
-    !>  @brief Launches kernels on multiple devices and guarantees all specified kernels are
-    !>  dispatched
-    !>  on respective streams before enqueuing any other work on the specified streams from any
-    !>  other
-    !>  threads
-    !>  @ingroup Execution
-    !>  @param [in] launchParamsList          List of launch parameters, one per device.
-    !>  @param [in] numDevices               Size of the launchParamsList array.
-    !>  @param [in] flags                    Flags to control launch behavior.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorNotInitialized`, `hipErrorInvalidValue`
     function hipExtLaunchMultiKernelMultiDevice(launchParamsList, numDevices, flags) &
        result(ExtLaunchMultiKernelMultiDevice) &
        bind(C, name="hipExtLaunchMultiKernelMultiDevice")
@@ -9267,20 +5535,6 @@ module hip
     !---------------------------------------------
     ! hipLaunchKernelExC
     !---------------------------------------------
-    !>  @brief Launches a HIP kernel using a generic function pointer and the specified
-    !>  configuration.
-    !>  @ingroup Execution
-    !>
-    !>  This function is equivalent to hipLaunchKernelEx but accepts the kernel as a generic
-    !>  function
-    !>  pointer.
-    !>
-    !>  @param [in] config                 Pointer to the kernel launch configuration structure.
-    !>  @param [in] fPtr                   Pointer to the device kernel function.
-    !>  @param [in] args                   Array of pointers to the kernel arguments.
-    !>
-    !>  @returns `hipSuccess` if the kernel is launched successfully, otherwise an appropriate error
-    !>  code.
     function hipLaunchKernelExC(config, fPtr, args) &
        result(LaunchKernelExC) &
        bind(C, name="hipLaunchKernelExC")
@@ -9294,21 +5548,6 @@ module hip
     !---------------------------------------------
     ! hipDrvLaunchKernelEx
     !---------------------------------------------
-    !>  @brief Launches a HIP kernel using the driver API with the specified configuration.
-    !>  @ingroup Execution
-    !>
-    !>  This function dispatches the device kernel represented by a HIP function object.
-    !>  It passes both the kernel parameters and any extra configuration arguments to the kernel
-    !>  launch.
-    !>
-    !>  @param [in] config  Pointer to the kernel launch configuration structure.
-    !>  @param [in] f       HIP function object representing the device kernel to be launched.
-    !>  @param [in] params  Array of pointers to the kernel parameters.
-    !>  @param [in] extra Array of pointers for additional launch parameters or extra configuration
-    !>  data.
-    !>
-    !>  @returns `hipSuccess` if the kernel is launched successfully, otherwise an appropriate error
-    !>  code.
     function hipDrvLaunchKernelEx(config, f, params, extra) &
        result(DrvLaunchKernelEx) &
        bind(C, name="hipDrvLaunchKernelEx")
@@ -9323,20 +5562,6 @@ module hip
     !---------------------------------------------
     ! hipMemGetHandleForAddressRange
     !---------------------------------------------
-    !>  @brief Returns a handle for the address range requested.
-    !>
-    !>  This function returns a handle to a device pointer created using either hipMalloc set of
-    !>  APIs
-    !>  or through hipMemAddressReserve (as long as the ptr is mapped).
-    !>
-    !>  @param [out] handle     Ptr to the handle where the fd or other types will be returned.
-    !>  @param [in] dptr        Device ptr for which we get the handle.
-    !>  @param [in] size        Size of the address range.
-    !>  @param [in] handleType  Type of the handle requested for the address range.
-    !>  @param [in] flags       Any flags set regarding the handle requested.
-    !>
-    !>  @returns `hipSuccess` if the kernel is launched successfully, otherwise an appropriate error
-    !>  code.
     function hipMemGetHandleForAddressRange(handle, dptr, mySize, handleType, flags) &
        result(MemGetHandleForAddressRange) &
        bind(C, name="hipMemGetHandleForAddressRange")
@@ -9352,25 +5577,6 @@ module hip
     !---------------------------------------------
     ! hipModuleOccupancyMaxPotentialBlockSize
     !---------------------------------------------
-    !> @ingroup Occupancy
-    !>
-    !>
-    !> -------------------------------------------------------------------------------------------------
-    !> -------------------------------------------------------------------------------------------------
-    !>  @brief determine the grid and block sizes to achieves maximum occupancy for a kernel
-    !>
-    !>  @param [out] gridSize           minimum grid size for maximum potential occupancy
-    !>  @param [out] blockSize          block size for maximum potential occupancy
-    !>  @param [in]  f                  kernel function for which occupancy is calculated
-    !>  @param [in] dynSharedMemPerBlk dynamic shared memory usage (in bytes) intended for each
-    !>  block
-    !>  @param [in]  blockSizeLimit     the maximum block size for the kernel, use 0 for no limit
-    !>
-    !>  Please note, HIP does not support kernel launch with total work items defined in dimension
-    !>  with
-    !>  size gridDim x blockDim >= 2^32.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipModuleOccupancyMaxPotentialBlockSize(gridSize, blockSize, f, dynSharedMemPerBlk, &
                                                      blockSizeLimit) &
        result(ModuleOccupancyMaxPotentialBlockSize) &
@@ -9387,21 +5593,6 @@ module hip
     !---------------------------------------------
     ! hipModuleOccupancyMaxPotentialBlockSizeWithFlags
     !---------------------------------------------
-    !>  @brief determine the grid and block sizes to achieves maximum occupancy for a kernel
-    !>
-    !>  @param [out] gridSize           minimum grid size for maximum potential occupancy
-    !>  @param [out] blockSize          block size for maximum potential occupancy
-    !>  @param [in]  f                  kernel function for which occupancy is calculated
-    !>  @param [in] dynSharedMemPerBlk dynamic shared memory usage (in bytes) intended for each
-    !>  block
-    !>  @param [in]  blockSizeLimit     the maximum block size for the kernel, use 0 for no limit
-    !>  @param [in]  flags            Extra flags for occupancy calculation (only default supported)
-    !>
-    !>  Please note, HIP does not support kernel launch with total work items defined in dimension
-    !>  with
-    !>  size gridDim x blockDim >= 2^32.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipModuleOccupancyMaxPotentialBlockSizeWithFlags(gridSize, blockSize, f, &
                                                               dynSharedMemPerBlk, blockSizeLimit, &
                                                               flags) &
@@ -9420,14 +5611,6 @@ module hip
     !---------------------------------------------
     ! hipModuleOccupancyMaxActiveBlocksPerMultiprocessor
     !---------------------------------------------
-    !>  @brief Returns occupancy for a device function.
-    !>
-    !>  @param [out] numBlocks        Returned occupancy
-    !>  @param [in] f Kernel function (hipFunction) for which occupancy is calculated
-    !>  @param [in]  blockSize        Block size the kernel is intended to be launched with
-    !>  @param [in] dynSharedMemPerBlk Dynamic shared memory usage (in bytes) intended for each
-    !>  block
-    !>  @returns  `hipSuccess`, `hipErrorInvalidValue`
     function hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(numBlocks, f, blockSize, &
                                                                 dynSharedMemPerBlk) &
        result(ModuleOccupancyMaxActiveBlocksPerMultiprocessor) &
@@ -9443,15 +5626,6 @@ module hip
     !---------------------------------------------
     ! hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags
     !---------------------------------------------
-    !>  @brief Returns occupancy for a device function.
-    !>
-    !>  @param [out] numBlocks        Returned occupancy
-    !>  @param [in] f Kernel function(hipFunction_t) for which occupancy is calculated
-    !>  @param [in]  blockSize        Block size the kernel is intended to be launched with
-    !>  @param [in] dynSharedMemPerBlk Dynamic shared memory usage (in bytes) intended for each
-    !>  block
-    !>  @param [in]  flags            Extra flags for occupancy calculation (only default supported)
-    !>  @returns  `hipSuccess`, `hipErrorInvalidValue`
     function hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(numBlocks, f, blockSize, &
                                                                          dynSharedMemPerBlk, &
                                                                          flags) &
@@ -9469,14 +5643,6 @@ module hip
     !---------------------------------------------
     ! hipOccupancyMaxActiveBlocksPerMultiprocessor
     !---------------------------------------------
-    !>  @brief Returns occupancy for a device function.
-    !>
-    !>  @param [out] numBlocks        Returned occupancy
-    !>  @param [in]  f                Kernel function for which occupancy is calculated
-    !>  @param [in]  blockSize        Block size the kernel is intended to be launched with
-    !>  @param [in] dynSharedMemPerBlk Dynamic shared memory usage (in bytes) intended for each
-    !>  block
-    !>  @returns  `hipSuccess`, `hipErrorInvalidDeviceFunction`, `hipErrorInvalidValue`
     function hipOccupancyMaxActiveBlocksPerMultiprocessor(numBlocks, f, blockSize, &
                                                           dynSharedMemPerBlk) &
        result(OccupancyMaxActiveBlocksPerMultiprocessor) &
@@ -9492,15 +5658,6 @@ module hip
     !---------------------------------------------
     ! hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags
     !---------------------------------------------
-    !>  @brief Returns occupancy for a device function.
-    !>
-    !>  @param [out] numBlocks        Returned occupancy
-    !>  @param [in]  f                Kernel function for which occupancy is calculated
-    !>  @param [in]  blockSize        Block size the kernel is intended to be launched with
-    !>  @param [in] dynSharedMemPerBlk Dynamic shared memory usage (in bytes) intended for each
-    !>  block
-    !>  @param [in]  flags            Extra flags for occupancy calculation (currently ignored)
-    !>  @returns  `hipSuccess`, `hipErrorInvalidDeviceFunction`, `hipErrorInvalidValue`
     function hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(numBlocks, f, blockSize, &
                                                                    dynSharedMemPerBlk, flags) &
        result(OccupancyMaxActiveBlocksPerMultiprocessorWithFlags) &
@@ -9517,20 +5674,6 @@ module hip
     !---------------------------------------------
     ! hipOccupancyMaxPotentialBlockSize
     !---------------------------------------------
-    !>  @brief determine the grid and block sizes to achieves maximum occupancy for a kernel
-    !>
-    !>  @param [out] gridSize           minimum grid size for maximum potential occupancy
-    !>  @param [out] blockSize          block size for maximum potential occupancy
-    !>  @param [in]  f                  kernel function for which occupancy is calculated
-    !>  @param [in] dynSharedMemPerBlk dynamic shared memory usage (in bytes) intended for each
-    !>  block
-    !>  @param [in]  blockSizeLimit     the maximum block size for the kernel, use 0 for no limit
-    !>
-    !>  Please note, HIP does not support kernel launch with total work items defined in dimension
-    !>  with
-    !>  size gridDim x blockDim >= 2^32.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipOccupancyMaxPotentialBlockSize(gridSize, blockSize, f, dynSharedMemPerBlk, &
                                                blockSizeLimit) &
        result(OccupancyMaxPotentialBlockSize) &
@@ -9547,21 +5690,6 @@ module hip
     !---------------------------------------------
     ! hipOccupancyAvailableDynamicSMemPerBlock
     !---------------------------------------------
-    !>  @brief Returns dynamic shared memory available per block when launching numBlocks blocks on
-    !>  SM.
-    !>
-    !>  @ingroup Occupancy
-    !>  Returns in \p *dynamicSmemSize the maximum size of dynamic shared memory /
-    !>  to allow numBlocks blocks per SM.
-    !>
-    !>  @param [out] dynamicSmemSize Returned maximum dynamic shared memory.
-    !>  @param [in]  f               Kernel function for which occupancy is calculated.
-    !>  @param [in]  numBlocks       Number of blocks to fit on SM
-    !>  @param [in]  blockSize       Size of the block
-    !>
-    !>  @return `hipSuccess`, `hipErrorInvalidDevice`, `hipErrorInvalidDeviceFunction`,
-    !>  `hipErrorInvalidValue`,
-    !>  `hipErrorUnknown`
     function hipOccupancyAvailableDynamicSMemPerBlock(dynamicSmemSize, f, numBlocks, blockSize) &
        result(OccupancyAvailableDynamicSMemPerBlock) &
        bind(C, name="hipOccupancyAvailableDynamicSMemPerBlock")
@@ -9576,15 +5704,6 @@ module hip
     !---------------------------------------------
     ! hipOccupancyMaxActiveClusters
     !---------------------------------------------
-    !>  @brief determines the amount of active kernel clusters can co-exist at the same time in a
-    !>  device
-    !>
-    !>  @param [out] numClusters the amount of clusters
-    !>  @param [in]  f           kernel function for which occupancy is calculated
-    !>  @param [in]  config      pointer to the kernel launch configuration structure
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidDeviceFunction`, hipErrorInvalidClusterSize,
-    !>           `hipErrorInvalidValue`
     function hipOccupancyMaxActiveClusters(numClusters, f, config) &
        result(OccupancyMaxActiveClusters) &
        bind(C, name="hipOccupancyMaxActiveClusters")
@@ -9598,14 +5717,6 @@ module hip
     !---------------------------------------------
     ! hipOccupancyMaxPotentialClusterSize
     !---------------------------------------------
-    !>  @brief returns the maximum cluster size (in number of blocks) that can run on the device
-    !>
-    !>  @param [out] clusterSize the maximum cluster size
-    !>  @param [in]  f           kernel function for which occupancy is calculated
-    !>  @param [in]  config      pointer to the kernel launch configuration structure
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidDeviceFunction`, hipErrorInvalidClusterSize,
-    !>           `hipErrorInvalidValue`
     function hipOccupancyMaxPotentialClusterSize(clusterSize, f, config) &
        result(OccupancyMaxPotentialClusterSize) &
        bind(C, name="hipOccupancyMaxPotentialClusterSize")
@@ -9619,10 +5730,6 @@ module hip
     !---------------------------------------------
     ! hipProfilerStart
     !---------------------------------------------
-    !>  @brief Start recording of profiling information [Deprecated]
-    !>  When using this API, start the profiler with profiling disabled.  (--startdisabled)
-    !>  @returns  `hipErrorNotSupported`
-    !>  @warning hipProfilerStart API is deprecated, use roctracer/rocTX instead.
     function hipProfilerStart() &
        result(ProfilerStart) &
        bind(C, name="hipProfilerStart")
@@ -9633,10 +5740,6 @@ module hip
     !---------------------------------------------
     ! hipProfilerStop
     !---------------------------------------------
-    !>  @brief Stop recording of profiling information [Deprecated]
-    !>  When using this API, start the profiler with profiling disabled.  (--startdisabled)
-    !>  @returns  `hipErrorNotSupported`
-    !>  @warning  hipProfilerStart API is deprecated, use roctracer/rocTX instead.
     function hipProfilerStop() &
        result(ProfilerStop) &
        bind(C, name="hipProfilerStop")
@@ -9647,28 +5750,6 @@ module hip
     !---------------------------------------------
     ! hipConfigureCall
     !---------------------------------------------
-    !> @ingroup Clang
-    !>
-    !>
-    !>
-    !>
-    !>
-    !> -------------------------------------------------------------------------------------------------
-    !> -------------------------------------------------------------------------------------------------
-    !>  @brief Configure a kernel launch.
-    !>
-    !>  @param [in] gridDim   grid dimension specified as multiple of blockDim.
-    !>  @param [in] blockDim  block dimensions specified in work-items
-    !>  @param [in] sharedMem Amount of dynamic shared memory to allocate for this kernel. The
-    !>  HIP-Clang compiler provides support for extern shared declarations.
-    !>  @param [in] stream Stream where the kernel should be dispatched. May be 0, in which case the
-    !>  default stream is used with associated synchronization rules.
-    !>
-    !>  Please note, HIP does not support kernel launch with total work items defined in dimension
-    !>  with
-    !>  size gridDim x blockDim >= 2^32.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorNotInitialized`, `hipErrorInvalidValue`
     function hipConfigureCall(gridDim, blockDim, sharedMem, stream) &
        result(ConfigureCall) &
        bind(C, name="hipConfigureCall")
@@ -9683,13 +5764,6 @@ module hip
     !---------------------------------------------
     ! hipSetupArgument
     !---------------------------------------------
-    !>  @brief Set a kernel argument.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorNotInitialized`, `hipErrorInvalidValue`
-    !>
-    !>  @param [in] arg    Pointer the argument in host memory.
-    !>  @param [in] size   Size of the argument.
-    !>  @param [in] offset Offset of the argument on the argument stack.
     function hipSetupArgument(arg, mySize, offset) &
        result(SetupArgument) &
        bind(C, name="hipSetupArgument")
@@ -9703,11 +5777,6 @@ module hip
     !---------------------------------------------
     ! hipLaunchByPtr
     !---------------------------------------------
-    !>  @brief Launch a kernel.
-    !>
-    !>  @param [in] func Kernel to launch.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorNotInitialized`, `hipErrorInvalidValue`
     function hipLaunchByPtr(func) &
        result(LaunchByPtr) &
        bind(C, name="hipLaunchByPtr")
@@ -9719,21 +5788,6 @@ module hip
     !---------------------------------------------
     ! hipLaunchKernel
     !---------------------------------------------
-    !>  @brief C compliant kernel launch API
-    !>
-    !>  @param [in] function_address - Kernel stub function pointer.
-    !>  @param [in] numBlocks - Number of blocks.
-    !>  @param [in] dimBlocks - Dimension of a block
-    !>  @param [in] args - Pointer of arguments passed to the kernel. If the kernel has multiple
-    !>  parameters, 'args' should be array of pointers, each points the corresponding argument.
-    !>  @param [in] sharedMemBytes - Amount of dynamic shared memory to allocate for this kernel.
-    !>  The
-    !>  HIP-Clang compiler provides support for extern shared declarations.
-    !>  @param [in] stream - Stream where the kernel should be dispatched. May be 0, in which case
-    !>  th
-    !>   default stream is used with associated synchronization rules.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipLaunchKernel(function_address, numBlocks, dimBlocks, args, sharedMemBytes, stream) &
        result(LaunchKernel) &
        bind(C, name="hipLaunchKernel")
@@ -9750,31 +5804,6 @@ module hip
     !---------------------------------------------
     ! hipLaunchHostFunc
     !---------------------------------------------
-    !>  @brief Enqueues a host function call in a stream.
-    !>
-    !>  @param [in] stream - The stream to enqueue work in.
-    !>  @param [in] fn - The function to call once enqueued preceeding operations are complete.
-    !>  @param [in] userData - User-specified data to be passed to the function.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidResourceHandle`, `hipErrorInvalidValue`,
-    !>  `hipErrorNotSupported`
-    !>
-    !>  The host function to call in this API will be executed after the preceding operations in
-    !>  the stream are complete. The function is a blocking operation that blocks operations in the
-    !>  stream that follow it, until the function is returned.
-    !>  Event synchronization and internal callback functions make sure enqueued operations will
-    !>  execute in order, in the stream.
-    !>
-    !>  The host function must not make any HIP API calls. The host function is non-reentrant. It
-    !>  must
-    !>  not perform sychronization with any operation that may depend on other processing execution
-    !>  but is not enqueued to run earlier in the stream.
-    !>
-    !>  Host functions that are enqueued respectively in different non-blocking streams can run
-    !>  concurrently.
-    !>
-    !>  @warning  This API is marked as beta, meaning, while this is feature complete,
-    !>  it is still open to changes and may have outstanding issues.
     function hipLaunchHostFunc(stream, fn, userData) &
        result(LaunchHostFunc) &
        bind(C, name="hipLaunchHostFunc")
@@ -9788,11 +5817,6 @@ module hip
     !---------------------------------------------
     ! hipDrvMemcpy2DUnaligned
     !---------------------------------------------
-    !>  Copies memory for 2D arrays.
-    !>
-    !>  @param pCopy - Parameters for the memory copy
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipDrvMemcpy2DUnaligned(pCopy) &
        result(DrvMemcpy2DUnaligned) &
        bind(C, name="hipDrvMemcpy2DUnaligned")
@@ -9804,26 +5828,6 @@ module hip
     !---------------------------------------------
     ! hipExtLaunchKernel
     !---------------------------------------------
-    !>  @brief Launches kernel from the pointer address, with arguments and shared memory on stream.
-    !>
-    !>  @param [in] function_address - Pointer to the Kernel to launch.
-    !>  @param [in] numBlocks -  Number of blocks.
-    !>  @param [in] dimBlocks - Dimension of a block.
-    !>  @param [in] args - Pointer of arguments passed to the kernel. If the kernel has multiple
-    !>  parameters, 'args' should be array of pointers, each points the corresponding argument.
-    !>  @param [in] sharedMemBytes - Amount of dynamic shared memory to allocate for this kernel.
-    !>  HIP-Clang compiler provides support for extern shared declarations.
-    !>  @param [in] stream - Stream where the kernel should be dispatched.
-    !>  May be 0, in which case the default stream is used with associated synchronization rules.
-    !>  @param [in] startEvent - If non-null, specified event will be updated to track the start
-    !>  time of
-    !>  the kernel launch. The event must be created before calling this API.
-    !>  @param [in] stopEvent - If non-null, specified event will be updated to track the stop time
-    !>  of
-    !>  the kernel launch. The event must be created before calling this API.
-    !>  @param [in] flags - The value of hipExtAnyOrderLaunch, signifies if kernel can be
-    !>  launched in any order.
-    !>  @returns `hipSuccess`, `hipErrorNotInitialized`, `hipErrorInvalidValue`.
     function hipExtLaunchKernel(function_address, numBlocks, dimBlocks, args, sharedMemBytes, &
                                 stream, startEvent, stopEvent, flags) &
        result(ExtLaunchKernel) &
@@ -9844,17 +5848,6 @@ module hip
     !---------------------------------------------
     ! hipCreateTextureObject
     !---------------------------------------------
-    !>  @brief Creates a texture object.
-    !>
-    !>  @param [out] pTexObject  pointer to the texture object to create
-    !>  @param [in] pResDesc  pointer to resource descriptor
-    !>  @param [in] pTexDesc  pointer to texture descriptor
-    !>  @param [in] pResViewDesc  pointer to resource view descriptor
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotSupported`, `hipErrorOutOfMemory`
-    !>
-    !>  @note 3D linear filter isn't supported on GFX90A boards, on which the API @p
-    !>  hipCreateTextureObject will return hipErrorNotSupported.
     function hipCreateTextureObject(pTexObject, pResDesc, pTexDesc, pResViewDesc) &
        result(CreateTextureObject) &
        bind(C, name="hipCreateTextureObject")
@@ -9869,11 +5862,6 @@ module hip
     !---------------------------------------------
     ! hipDestroyTextureObject
     !---------------------------------------------
-    !>  @brief Destroys a texture object.
-    !>
-    !>  @param [in] textureObject  texture object to destroy
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipDestroyTextureObject(textureObject) &
        result(DestroyTextureObject) &
        bind(C, name="hipDestroyTextureObject")
@@ -9885,12 +5873,6 @@ module hip
     !---------------------------------------------
     ! hipGetChannelDesc
     !---------------------------------------------
-    !>  @brief Gets the channel descriptor in an array.
-    !>
-    !>  @param [in] desc  pointer to channel format descriptor
-    !>  @param [out] array  memory array on the device
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGetChannelDesc(desc, array) &
        result(GetChannelDesc) &
        bind(C, name="hipGetChannelDesc")
@@ -9903,12 +5885,6 @@ module hip
     !---------------------------------------------
     ! hipGetTextureObjectResourceDesc
     !---------------------------------------------
-    !>  @brief Gets resource descriptor for the texture object.
-    !>
-    !>  @param [out] pResDesc  pointer to resource descriptor
-    !>  @param [in] textureObject  texture object
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGetTextureObjectResourceDesc(pResDesc, textureObject) &
        result(GetTextureObjectResourceDesc) &
        bind(C, name="hipGetTextureObjectResourceDesc")
@@ -9921,12 +5897,6 @@ module hip
     !---------------------------------------------
     ! hipGetTextureObjectResourceViewDesc
     !---------------------------------------------
-    !>  @brief Gets resource view descriptor for the texture object.
-    !>
-    !>  @param [out] pResViewDesc  pointer to resource view descriptor
-    !>  @param [in] textureObject  texture object
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGetTextureObjectResourceViewDesc(pResViewDesc, textureObject) &
        result(GetTextureObjectResourceViewDesc) &
        bind(C, name="hipGetTextureObjectResourceViewDesc")
@@ -9939,12 +5909,6 @@ module hip
     !---------------------------------------------
     ! hipGetTextureObjectTextureDesc
     !---------------------------------------------
-    !>  @brief Gets texture descriptor for the texture object.
-    !>
-    !>  @param [out] pTexDesc  pointer to texture descriptor
-    !>  @param [in] textureObject  texture object
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGetTextureObjectTextureDesc(pTexDesc, textureObject) &
        result(GetTextureObjectTextureDesc) &
        bind(C, name="hipGetTextureObjectTextureDesc")
@@ -9957,14 +5921,6 @@ module hip
     !---------------------------------------------
     ! hipTexObjectCreate
     !---------------------------------------------
-    !>  @brief Creates a texture object.
-    !>
-    !>  @param [out] pTexObject  pointer to texture object to create
-    !>  @param [in] pResDesc  pointer to resource descriptor
-    !>  @param [in] pTexDesc  pointer to texture descriptor
-    !>  @param [in] pResViewDesc  pointer to resource view descriptor
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipTexObjectCreate(pTexObject, pResDesc, pTexDesc, pResViewDesc) &
        result(TexObjectCreate) &
        bind(C, name="hipTexObjectCreate")
@@ -9979,11 +5935,6 @@ module hip
     !---------------------------------------------
     ! hipTexObjectDestroy
     !---------------------------------------------
-    !>  @brief Destroys a texture object.
-    !>
-    !>  @param [in] texObject  texture object to destroy
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipTexObjectDestroy(texObject) &
        result(TexObjectDestroy) &
        bind(C, name="hipTexObjectDestroy")
@@ -9995,12 +5946,6 @@ module hip
     !---------------------------------------------
     ! hipTexObjectGetResourceDesc
     !---------------------------------------------
-    !>  @brief Gets resource descriptor of a texture object.
-    !>
-    !>  @param [out] pResDesc  pointer to resource descriptor
-    !>  @param [in] texObject  texture object
-    !>
-    !>  @returns `hipSuccess`, `hipErrorNotSupported`, `hipErrorInvalidValue`
     function hipTexObjectGetResourceDesc(pResDesc, texObject) &
        result(TexObjectGetResourceDesc) &
        bind(C, name="hipTexObjectGetResourceDesc")
@@ -10013,12 +5958,6 @@ module hip
     !---------------------------------------------
     ! hipTexObjectGetResourceViewDesc
     !---------------------------------------------
-    !>  @brief Gets resource view descriptor of a texture object.
-    !>
-    !>  @param [out] pResViewDesc  pointer to resource view descriptor
-    !>  @param [in] texObject  texture object
-    !>
-    !>  @returns `hipSuccess`, `hipErrorNotSupported`, `hipErrorInvalidValue`
     function hipTexObjectGetResourceViewDesc(pResViewDesc, texObject) &
        result(TexObjectGetResourceViewDesc) &
        bind(C, name="hipTexObjectGetResourceViewDesc")
@@ -10031,12 +5970,6 @@ module hip
     !---------------------------------------------
     ! hipTexObjectGetTextureDesc
     !---------------------------------------------
-    !>  @brief Gets texture descriptor of a texture object.
-    !>
-    !>  @param [out] pTexDesc  pointer to texture descriptor
-    !>  @param [in] texObject  texture object
-    !>
-    !>  @returns `hipSuccess`, `hipErrorNotSupported`, `hipErrorInvalidValue`
     function hipTexObjectGetTextureDesc(pTexDesc, texObject) &
        result(TexObjectGetTextureDesc) &
        bind(C, name="hipTexObjectGetTextureDesc")
@@ -10049,17 +5982,6 @@ module hip
     !---------------------------------------------
     ! hipMallocMipmappedArray
     !---------------------------------------------
-    !>  @brief Allocate a mipmapped array on the device.
-    !>
-    !>  @param[out] mipmappedArray - Pointer to allocated mipmapped array in device memory
-    !>  @param[in] desc - Requested channel format
-    !>  @param[in] extent - Requested allocation size (width field in elements)
-    !>  @param[in] numLevels - Number of mipmap levels to allocate
-    !>  @param[in] flags - Flags for extensions
-    !>
-    !>  @return `hipSuccess`, `hipErrorInvalidValue`, `hipErrorMemoryAllocation`
-    !>
-    !>  @note  This API is implemented on Linux and is under development on Microsoft Windows.
     function hipMallocMipmappedArray(mipmappedArray, desc, extent, numLevels, flags) &
        result(MallocMipmappedArray) &
        bind(C, name="hipMallocMipmappedArray")
@@ -10075,13 +5997,6 @@ module hip
     !---------------------------------------------
     ! hipFreeMipmappedArray
     !---------------------------------------------
-    !>  @brief Frees a mipmapped array on the device.
-    !>
-    !>  @param[in] mipmappedArray - Pointer to mipmapped array to free
-    !>
-    !>  @return `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  @note  This API is implemented on Linux and is under development on Microsoft Windows.
     function hipFreeMipmappedArray(mipmappedArray) &
        result(FreeMipmappedArray) &
        bind(C, name="hipFreeMipmappedArray")
@@ -10093,15 +6008,6 @@ module hip
     !---------------------------------------------
     ! hipGetMipmappedArrayLevel
     !---------------------------------------------
-    !>  @brief Gets a mipmap level of a HIP mipmapped array.
-    !>
-    !>  @param[out] levelArray - Returned mipmap level HIP array
-    !>  @param[in] mipmappedArray - HIP mipmapped array
-    !>  @param[in] level - Mipmap level
-    !>
-    !>  @return `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  @note  This API is implemented on Linux and is under development on Microsoft Windows.
     function hipGetMipmappedArrayLevel(levelArray, mipmappedArray, level) &
        result(GetMipmappedArrayLevel) &
        bind(C, name="hipGetMipmappedArrayLevel")
@@ -10115,15 +6021,6 @@ module hip
     !---------------------------------------------
     ! hipMipmappedArrayCreate
     !---------------------------------------------
-    !>  @brief Create a mipmapped array.
-    !>
-    !>  @param [out] pHandle  pointer to mipmapped array
-    !>  @param [in] pMipmappedArrayDesc  mipmapped array descriptor
-    !>  @param [in] numMipmapLevels  mipmap level
-    !>
-    !>  @returns `hipSuccess`, `hipErrorNotSupported`, `hipErrorInvalidValue`
-    !>
-    !>  @note  This API is implemented on Linux and is under development on Microsoft Windows.
     function hipMipmappedArrayCreate(pHandle, pMipmappedArrayDesc, numMipmapLevels) &
        result(MipmappedArrayCreate) &
        bind(C, name="hipMipmappedArrayCreate")
@@ -10137,13 +6034,6 @@ module hip
     !---------------------------------------------
     ! hipMipmappedArrayDestroy
     !---------------------------------------------
-    !>  @brief Destroy a mipmapped array.
-    !>
-    !>  @param [out] hMipmappedArray  pointer to mipmapped array to destroy
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  @note  This API is implemented on Linux and is under development on Microsoft Windows.
     function hipMipmappedArrayDestroy(hMipmappedArray) &
        result(MipmappedArrayDestroy) &
        bind(C, name="hipMipmappedArrayDestroy")
@@ -10155,15 +6045,6 @@ module hip
     !---------------------------------------------
     ! hipMipmappedArrayGetLevel
     !---------------------------------------------
-    !>  @brief Get a mipmapped array on a mipmapped level.
-    !>
-    !>  @param [in] pLevelArray Pointer of array
-    !>  @param [out] hMipMappedArray Pointer of mipmapped array on the requested mipmap level
-    !>  @param [out] level  Mipmap level
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  @note  This API is implemented on Linux and is under development on Microsoft Windows.
     function hipMipmappedArrayGetLevel(pLevelArray, hMipMappedArray, level) &
        result(MipmappedArrayGetLevel) &
        bind(C, name="hipMipmappedArrayGetLevel")
@@ -10177,13 +6058,6 @@ module hip
     !---------------------------------------------
     ! hipBindTextureToMipmappedArray
     !---------------------------------------------
-    !>  @brief  Binds a mipmapped array to a texture [Deprecated]
-    !>
-    !>  @param [in] tex  pointer to the texture reference to bind
-    !>  @param [in] mipmappedArray memory mipmapped array on the device
-    !>  @param [in] desc  opointer to the channel format
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipBindTextureToMipmappedArray(tex, mipmappedArray, desc) &
        result(BindTextureToMipmappedArray) &
        bind(C, name="hipBindTextureToMipmappedArray")
@@ -10197,13 +6071,6 @@ module hip
     !---------------------------------------------
     ! hipGetTextureReference
     !---------------------------------------------
-    !>  @brief Gets the texture reference related with the symbol [Deprecated]
-    !>
-    !>  @param [out] texref  texture reference
-    !>  @param [in] symbol  pointer to the symbol related with the texture for the reference
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>  @warning This API is deprecated.
     function hipGetTextureReference(texref, symbol) &
        result(GetTextureReference) &
        bind(C, name="hipGetTextureReference")
@@ -10216,13 +6083,6 @@ module hip
     !---------------------------------------------
     ! hipTexRefGetBorderColor
     !---------------------------------------------
-    !>  @brief Gets the border color used by a texture reference [Deprecated]
-    !>
-    !>  @param [out] pBorderColor  Returned Type and Value of RGBA color.
-    !>  @param [in] texRef  Texture reference.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>  @warning This API is deprecated.
     function hipTexRefGetBorderColor(pBorderColor, texRef) &
        result(TexRefGetBorderColor) &
        bind(C, name="hipTexRefGetBorderColor")
@@ -10235,14 +6095,6 @@ module hip
     !---------------------------------------------
     ! hipTexRefGetArray
     !---------------------------------------------
-    !>  @brief Gets the array bound to a texture reference [Deprecated]
-    !>
-    !>
-    !>  @param [in] pArray  Returned array.
-    !>  @param [in] texRef  texture reference.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>  @warning This API is deprecated.
     function hipTexRefGetArray(pArray, texRef) &
        result(TexRefGetArray) &
        bind(C, name="hipTexRefGetArray")
@@ -10255,14 +6107,6 @@ module hip
     !---------------------------------------------
     ! hipTexRefSetAddressMode
     !---------------------------------------------
-    !>  @brief Sets address mode for a texture reference [Deprecated]
-    !>
-    !>  @param [in] texRef  texture reference.
-    !>  @param [in] dim  Dimension of the texture.
-    !>  @param [in] am  Value of the texture address mode.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>  @warning This API is deprecated.
     function hipTexRefSetAddressMode(texRef, dim, am) &
        result(TexRefSetAddressMode) &
        bind(C, name="hipTexRefSetAddressMode")
@@ -10276,15 +6120,6 @@ module hip
     !---------------------------------------------
     ! hipTexRefSetArray
     !---------------------------------------------
-    !>  @brief Binds an array as a texture reference [Deprecated]
-    !>
-    !>  @param [in] tex  Pointer texture reference.
-    !>  @param [in] array  Array to bind.
-    !>  @param [in] flags  Flags should be set as HIP_TRSA_OVERRIDE_FORMAT, as a valid value.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  @warning This API is deprecated.
     function hipTexRefSetArray(tex, array, flags) &
        result(TexRefSetArray) &
        bind(C, name="hipTexRefSetArray")
@@ -10298,14 +6133,6 @@ module hip
     !---------------------------------------------
     ! hipTexRefSetFilterMode
     !---------------------------------------------
-    !>  @brief Set filter mode for a texture reference [Deprecated]
-    !>
-    !>  @param [in] texRef  Pointer texture reference.
-    !>  @param [in] fm  Value of texture filter mode.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  @warning This API is deprecated.
     function hipTexRefSetFilterMode(texRef, fm) &
        result(TexRefSetFilterMode) &
        bind(C, name="hipTexRefSetFilterMode")
@@ -10318,14 +6145,6 @@ module hip
     !---------------------------------------------
     ! hipTexRefSetFlags
     !---------------------------------------------
-    !>  @brief Set flags for a texture reference [Deprecated]
-    !>
-    !>  @param [in] texRef  Pointer texture reference.
-    !>  @param [in] Flags  Value of flags.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  @warning This API is deprecated.
     function hipTexRefSetFlags(texRef, Flags) &
        result(TexRefSetFlags) &
        bind(C, name="hipTexRefSetFlags")
@@ -10338,15 +6157,6 @@ module hip
     !---------------------------------------------
     ! hipTexRefSetFormat
     !---------------------------------------------
-    !>  @brief Set format for a texture reference [Deprecated]
-    !>
-    !>  @param [in] texRef  Pointer texture reference.
-    !>  @param [in] fmt  Value of format.
-    !>  @param [in] NumPackedComponents  Number of components per array.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  @warning This API is deprecated.
     function hipTexRefSetFormat(texRef, fmt, NumPackedComponents) &
        result(TexRefSetFormat) &
        bind(C, name="hipTexRefSetFormat")
@@ -10360,17 +6170,6 @@ module hip
     !---------------------------------------------
     ! hipBindTexture
     !---------------------------------------------
-    !>  @brief Binds a memory area to a texture [Deprecated]
-    !>
-    !>  @param [in] offset  Offset in bytes.
-    !>  @param [in] tex  Texture to bind.
-    !>  @param [in] devPtr  Pointer of memory on the device.
-    !>  @param [in] desc  Pointer of channel format descriptor.
-    !>  @param [in] size  Size of memory in bites.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotSupported`
-    !>
-    !>  @warning This API is deprecated.
     function hipBindTexture(offset, tex, devPtr, desc, mySize) &
        result(BindTexture) &
        bind(C, name="hipBindTexture")
@@ -10386,19 +6185,6 @@ module hip
     !---------------------------------------------
     ! hipBindTexture2D
     !---------------------------------------------
-    !>  @brief Binds a 2D memory area to a texture [Deprecated]
-    !>
-    !>  @param [in] offset  Offset in bytes.
-    !>  @param [in] tex  Texture to bind.
-    !>  @param [in] devPtr  Pointer of 2D memory area on the device.
-    !>  @param [in] desc  Pointer of channel format descriptor.
-    !>  @param [in] width  Width in texel units.
-    !>  @param [in] height  Height in texel units.
-    !>  @param [in] pitch  Pitch in bytes.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotSupported`
-    !>
-    !>  @warning This API is deprecated.
     function hipBindTexture2D(offset, tex, devPtr, desc, width, height, pitch) &
        result(BindTexture2D) &
        bind(C, name="hipBindTexture2D")
@@ -10416,15 +6202,6 @@ module hip
     !---------------------------------------------
     ! hipBindTextureToArray
     !---------------------------------------------
-    !>  @brief Binds a memory area to a texture [Deprecated]
-    !>
-    !>  @param [in] tex  Pointer of texture reference.
-    !>  @param [in] array  Array to bind.
-    !>  @param [in] desc  Pointer of channel format descriptor.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotSupported`
-    !>
-    !>  @warning This API is deprecated.
     function hipBindTextureToArray(tex, array, desc) &
        result(BindTextureToArray) &
        bind(C, name="hipBindTextureToArray")
@@ -10438,14 +6215,6 @@ module hip
     !---------------------------------------------
     ! hipGetTextureAlignmentOffset
     !---------------------------------------------
-    !>  @brief Get the offset of the alignment in a texture [Deprecated]
-    !>
-    !>  @param [in] offset  Offset in bytes.
-    !>  @param [in] texref  Pointer of texture reference.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotSupported`
-    !>
-    !>  @warning This API is deprecated.
     function hipGetTextureAlignmentOffset(offset, texref) &
        result(GetTextureAlignmentOffset) &
        bind(C, name="hipGetTextureAlignmentOffset")
@@ -10458,13 +6227,6 @@ module hip
     !---------------------------------------------
     ! hipUnbindTexture
     !---------------------------------------------
-    !>  @brief Unbinds a texture [Deprecated]
-    !>
-    !>  @param [in] tex  Texture to unbind.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotSupported`
-    !>
-    !>  @warning This API is deprecated.
     function hipUnbindTexture(tex) &
        result(UnbindTexture) &
        bind(C, name="hipUnbindTexture")
@@ -10476,14 +6238,6 @@ module hip
     !---------------------------------------------
     ! hipTexRefGetAddress
     !---------------------------------------------
-    !>  @brief Gets the address for a texture reference [Deprecated]
-    !>
-    !>  @param [out] dev_ptr  Pointer of device address.
-    !>  @param [in] texRef  Pointer of texture reference.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotSupported`
-    !>
-    !>  @warning This API is deprecated.
     function hipTexRefGetAddress(dev_ptr, texRef) &
        result(TexRefGetAddress) &
        bind(C, name="hipTexRefGetAddress")
@@ -10496,15 +6250,6 @@ module hip
     !---------------------------------------------
     ! hipTexRefGetAddressMode
     !---------------------------------------------
-    !>  @brief Gets the address mode for a texture reference [Deprecated]
-    !>
-    !>  @param [out] pam  Pointer of address mode.
-    !>  @param [in] texRef  Pointer of texture reference.
-    !>  @param [in] dim  Dimension.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotSupported`
-    !>
-    !>  @warning This API is deprecated.
     function hipTexRefGetAddressMode(pam, texRef, dim) &
        result(TexRefGetAddressMode) &
        bind(C, name="hipTexRefGetAddressMode")
@@ -10518,14 +6263,6 @@ module hip
     !---------------------------------------------
     ! hipTexRefGetFilterMode
     !---------------------------------------------
-    !>  @brief Gets filter mode for a texture reference [Deprecated]
-    !>
-    !>  @param [out] pfm  Pointer of filter mode.
-    !>  @param [in] texRef  Pointer of texture reference.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotSupported`
-    !>
-    !>  @warning This API is deprecated.
     function hipTexRefGetFilterMode(pfm, texRef) &
        result(TexRefGetFilterMode) &
        bind(C, name="hipTexRefGetFilterMode")
@@ -10538,14 +6275,6 @@ module hip
     !---------------------------------------------
     ! hipTexRefGetFlags
     !---------------------------------------------
-    !>  @brief Gets flags for a texture reference [Deprecated]
-    !>
-    !>  @param [out] pFlags  Pointer of flags.
-    !>  @param [in] texRef  Pointer of texture reference.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotSupported`
-    !>
-    !>  @warning This API is deprecated.
     function hipTexRefGetFlags(pFlags, texRef) &
        result(TexRefGetFlags) &
        bind(C, name="hipTexRefGetFlags")
@@ -10558,15 +6287,6 @@ module hip
     !---------------------------------------------
     ! hipTexRefGetFormat
     !---------------------------------------------
-    !>  @brief Gets texture format for a texture reference [Deprecated]
-    !>
-    !>  @param [out] pFormat  Pointer of the format.
-    !>  @param [out] pNumChannels  Pointer of number of channels.
-    !>  @param [in] texRef  Pointer of texture reference.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotSupported`
-    !>
-    !>  @warning This API is deprecated.
     function hipTexRefGetFormat(pFormat, pNumChannels, texRef) &
        result(TexRefGetFormat) &
        bind(C, name="hipTexRefGetFormat")
@@ -10580,14 +6300,6 @@ module hip
     !---------------------------------------------
     ! hipTexRefGetMaxAnisotropy
     !---------------------------------------------
-    !>  @brief Gets the maximum anisotropy for a texture reference [Deprecated]
-    !>
-    !>  @param [out] pmaxAnsio  Pointer of the maximum anisotropy.
-    !>  @param [in] texRef  Pointer of texture reference.
-    !>
-    !>  @returns `hipErrorInvalidValue`, `hipErrorNotSupported`
-    !>
-    !>  @warning This API is deprecated.
     function hipTexRefGetMaxAnisotropy(pmaxAnsio, texRef) &
        result(TexRefGetMaxAnisotropy) &
        bind(C, name="hipTexRefGetMaxAnisotropy")
@@ -10600,14 +6312,6 @@ module hip
     !---------------------------------------------
     ! hipTexRefGetMipmapFilterMode
     !---------------------------------------------
-    !>  @brief Gets the mipmap filter mode for a texture reference [Deprecated]
-    !>
-    !>  @param [out] pfm  Pointer of the mipmap filter mode.
-    !>  @param [in] texRef  Pointer of texture reference.
-    !>
-    !>  @returns `hipErrorInvalidValue`, `hipErrorNotSupported`
-    !>
-    !>  @warning This API is deprecated.
     function hipTexRefGetMipmapFilterMode(pfm, texRef) &
        result(TexRefGetMipmapFilterMode) &
        bind(C, name="hipTexRefGetMipmapFilterMode")
@@ -10620,14 +6324,6 @@ module hip
     !---------------------------------------------
     ! hipTexRefGetMipmapLevelBias
     !---------------------------------------------
-    !>  @brief Gets the mipmap level bias for a texture reference [Deprecated]
-    !>
-    !>  @param [out] pbias  Pointer of the mipmap level bias.
-    !>  @param [in] texRef  Pointer of texture reference.
-    !>
-    !>  @returns `hipErrorInvalidValue`, `hipErrorNotSupported`
-    !>
-    !>  @warning This API is deprecated.
     function hipTexRefGetMipmapLevelBias(pbias, texRef) &
        result(TexRefGetMipmapLevelBias) &
        bind(C, name="hipTexRefGetMipmapLevelBias")
@@ -10640,15 +6336,6 @@ module hip
     !---------------------------------------------
     ! hipTexRefGetMipmapLevelClamp
     !---------------------------------------------
-    !>  @brief Gets the minimum and maximum mipmap level clamps for a texture reference [Deprecated]
-    !>
-    !>  @param [out] pminMipmapLevelClamp  Pointer of the minimum mipmap level clamp.
-    !>  @param [out] pmaxMipmapLevelClamp  Pointer of the maximum mipmap level clamp.
-    !>  @param [in] texRef  Pointer of texture reference.
-    !>
-    !>  @returns `hipErrorInvalidValue`, `hipErrorNotSupported`
-    !>
-    !>  @warning This API is deprecated.
     function hipTexRefGetMipmapLevelClamp(pminMipmapLevelClamp, pmaxMipmapLevelClamp, texRef) &
        result(TexRefGetMipmapLevelClamp) &
        bind(C, name="hipTexRefGetMipmapLevelClamp")
@@ -10662,14 +6349,6 @@ module hip
     !---------------------------------------------
     ! hipTexRefGetMipMappedArray
     !---------------------------------------------
-    !>  @brief Gets the mipmapped array bound to a texture reference [Deprecated]
-    !>
-    !>  @param [out] pArray  Pointer of the mipmapped array.
-    !>  @param [in] texRef  Pointer of texture reference.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotSupported`
-    !>
-    !>  @warning This API is deprecated.
     function hipTexRefGetMipMappedArray(pArray, texRef) &
        result(TexRefGetMipMappedArray) &
        bind(C, name="hipTexRefGetMipMappedArray")
@@ -10682,16 +6361,6 @@ module hip
     !---------------------------------------------
     ! hipTexRefSetAddress
     !---------------------------------------------
-    !>  @brief Sets an bound address for a texture reference [Deprecated]
-    !>
-    !>  @param [out] ByteOffset  Pointer of the offset in bytes.
-    !>  @param [in] texRef  Pointer of texture reference.
-    !>  @param [in] dptr  Pointer of device address to bind.
-    !>  @param [in] bytes  Size in bytes.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  @warning This API is deprecated.
     function hipTexRefSetAddress(ByteOffset, texRef, dptr, bytes) &
        result(TexRefSetAddress) &
        bind(C, name="hipTexRefSetAddress")
@@ -10706,16 +6375,6 @@ module hip
     !---------------------------------------------
     ! hipTexRefSetAddress2D
     !---------------------------------------------
-    !>  @brief Set a bind an address as a 2D texture reference [Deprecated]
-    !>
-    !>  @param [in] texRef  Pointer of texture reference.
-    !>  @param [in] desc  Pointer of array descriptor.
-    !>  @param [in] dptr  Pointer of device address to bind.
-    !>  @param [in] Pitch  Pitch in bytes.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotSupported`
-    !>
-    !>  @warning This API is deprecated.
     function hipTexRefSetAddress2D(texRef, desc, dptr, Pitch) &
        result(TexRefSetAddress2D) &
        bind(C, name="hipTexRefSetAddress2D")
@@ -10730,14 +6389,6 @@ module hip
     !---------------------------------------------
     ! hipTexRefSetMaxAnisotropy
     !---------------------------------------------
-    !>  @brief Sets the maximum anisotropy for a texture reference [Deprecated]
-    !>
-    !>  @param [in] texRef  Pointer of texture reference.
-    !>  @param [out] maxAniso  Value of the maximum anisotropy.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotSupported`
-    !>
-    !>  @warning This API is deprecated.
     function hipTexRefSetMaxAnisotropy(texRef, maxAniso) &
        result(TexRefSetMaxAnisotropy) &
        bind(C, name="hipTexRefSetMaxAnisotropy")
@@ -10750,14 +6401,6 @@ module hip
     !---------------------------------------------
     ! hipTexRefSetBorderColor
     !---------------------------------------------
-    !>  @brief Sets border color for a texture reference [Deprecated]
-    !>
-    !>  @param [in] texRef  Pointer of texture reference.
-    !>  @param [in] pBorderColor  Pointer of border color.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotSupported`
-    !>
-    !>  @warning This API is deprecated.
     function hipTexRefSetBorderColor(texRef, pBorderColor) &
        result(TexRefSetBorderColor) &
        bind(C, name="hipTexRefSetBorderColor")
@@ -10770,14 +6413,6 @@ module hip
     !---------------------------------------------
     ! hipTexRefSetMipmapFilterMode
     !---------------------------------------------
-    !>  @brief Sets mipmap filter mode for a texture reference [Deprecated]
-    !>
-    !>  @param [in] texRef  Pointer of texture reference.
-    !>  @param [in] fm  Value of filter mode.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotSupported`
-    !>
-    !>  @warning This API is deprecated.
     function hipTexRefSetMipmapFilterMode(texRef, fm) &
        result(TexRefSetMipmapFilterMode) &
        bind(C, name="hipTexRefSetMipmapFilterMode")
@@ -10790,14 +6425,6 @@ module hip
     !---------------------------------------------
     ! hipTexRefSetMipmapLevelBias
     !---------------------------------------------
-    !>  @brief Sets mipmap level bias for a texture reference [Deprecated]
-    !>
-    !>  @param [in] texRef  Pointer of texture reference.
-    !>  @param [in] bias  Value of mipmap bias.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotSupported`
-    !>
-    !>  @warning This API is deprecated.
     function hipTexRefSetMipmapLevelBias(texRef, bias) &
        result(TexRefSetMipmapLevelBias) &
        bind(C, name="hipTexRefSetMipmapLevelBias")
@@ -10810,15 +6437,6 @@ module hip
     !---------------------------------------------
     ! hipTexRefSetMipmapLevelClamp
     !---------------------------------------------
-    !>  @brief Sets mipmap level clamp for a texture reference [Deprecated]
-    !>
-    !>  @param [in] texRef  Pointer of texture reference.
-    !>  @param [in] minMipMapLevelClamp  Value of minimum mipmap level clamp.
-    !>  @param [in] maxMipMapLevelClamp  Value of maximum mipmap level clamp.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotSupported`
-    !>
-    !>  @warning This API is deprecated.
     function hipTexRefSetMipmapLevelClamp(texRef, minMipMapLevelClamp, maxMipMapLevelClamp) &
        result(TexRefSetMipmapLevelClamp) &
        bind(C, name="hipTexRefSetMipmapLevelClamp")
@@ -10832,15 +6450,6 @@ module hip
     !---------------------------------------------
     ! hipTexRefSetMipmappedArray
     !---------------------------------------------
-    !>  @brief Binds mipmapped array to a texture reference [Deprecated]
-    !>
-    !>  @param [in] texRef  Pointer of texture reference to bind.
-    !>  @param [in] mipmappedArray  Pointer of mipmapped array to bind.
-    !>  @param [in] Flags  Flags should be set as HIP_TRSA_OVERRIDE_FORMAT, as a valid value.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  @warning This API is deprecated.
     function hipTexRefSetMipmappedArray(texRef, mipmappedArray, Flags) &
        result(TexRefSetMipmappedArray) &
        bind(C, name="hipTexRefSetMipmappedArray")
@@ -10854,15 +6463,6 @@ module hip
     !---------------------------------------------
     ! hipApiName
     !---------------------------------------------
-    !> @ingroup Callback
-    !>
-    !>
-    !>
-    !>  @brief Returns HIP API name by ID.
-    !>
-    !>  @param [in] id ID of HIP API
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipApiName(id) &
        result(ApiName) &
        bind(C, name="hipApiName")
@@ -10874,11 +6474,6 @@ module hip
     !---------------------------------------------
     ! hipKernelNameRef
     !---------------------------------------------
-    !>  @brief Returns kernel name reference by function name.
-    !>
-    !>  @param [in] f Name of function
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipKernelNameRef(f) &
        result(KernelNameRef) &
        bind(C, name="hipKernelNameRef")
@@ -10890,12 +6485,6 @@ module hip
     !---------------------------------------------
     ! hipKernelNameRefByPtr
     !---------------------------------------------
-    !>  @brief Retrives kernel for a given host pointer, unless stated otherwise.
-    !>
-    !>  @param [in] hostFunction Pointer of host function.
-    !>  @param [in] stream Stream the kernel is executed on.
-    !>
-    !>  @returns The name of the passed kernel function object, or nullptr.
     function hipKernelNameRefByPtr(hostFunction, stream) &
        result(KernelNameRefByPtr) &
        bind(C, name="hipKernelNameRefByPtr")
@@ -10908,11 +6497,6 @@ module hip
     !---------------------------------------------
     ! hipGetStreamDeviceId
     !---------------------------------------------
-    !>  @brief Returns device ID on the stream.
-    !>
-    !>  @param [in] stream Stream of device executed on.
-    !>
-    !>  @returns The device ID on the stream.
     function hipGetStreamDeviceId(stream) &
        result(GetStreamDeviceId) &
        bind(C, name="hipGetStreamDeviceId")
@@ -10924,14 +6508,6 @@ module hip
     !---------------------------------------------
     ! hipStreamBeginCapture
     !---------------------------------------------
-    !>  @brief Begins graph capture on a stream.
-    !>
-    !>  @param [in] stream - Stream to initiate capture.
-    !>  @param [in] mode - Controls the interaction of this capture sequence with other API calls
-    !>  that
-    !>  are not safe.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipStreamBeginCapture(stream, mode) &
        result(StreamBeginCapture) &
        bind(C, name="hipStreamBeginCapture")
@@ -10944,26 +6520,6 @@ module hip
     !---------------------------------------------
     ! hipStreamBeginCaptureToGraph
     !---------------------------------------------
-    !>  @brief Begins graph capture on a stream to an existing graph.
-    !>
-    !>  @param [in] stream - Stream to initiate capture.
-    !>  @param [in] graph - Graph to capture into.
-    !>  @param [in] dependencies - Dependencies of the first node captured in the stream. Can be
-    !>  NULL if
-    !>  numDependencies is 0.
-    !>  @param [in] dependencyData - Optional array of data associated with each dependency.
-    !>  @param [in] numDependencies - Number of dependencies.
-    !>  @param [in] mode - Controls the interaction of this capture sequence with other API calls
-    !>  that
-    !> are not safe.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  @warning param "const hipGraphEdgeData* dependencyData" is currently not supported and has
-    !>  to be
-    !> passed as nullptr. This API is marked as beta, meaning, while this is feature complete, it is
-    !> still
-    !> open to changes and may have outstanding issues.
     function hipStreamBeginCaptureToGraph(stream, graph, dependencies, dependencyData, &
                                           numDependencies, mode) &
        result(StreamBeginCaptureToGraph) &
@@ -10981,12 +6537,6 @@ module hip
     !---------------------------------------------
     ! hipStreamEndCapture
     !---------------------------------------------
-    !>  @brief Ends capture on a stream, returning the captured graph.
-    !>
-    !>  @param [in] stream - Stream to end capture.
-    !>  @param [out] pGraph - Captured graph.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipStreamEndCapture(stream, pGraph) &
        result(StreamEndCapture) &
        bind(C, name="hipStreamEndCapture")
@@ -10999,13 +6549,6 @@ module hip
     !---------------------------------------------
     ! hipStreamGetCaptureInfo
     !---------------------------------------------
-    !>  @brief Get capture status of a stream.
-    !>
-    !>  @param [in] stream - Stream of which to get capture status from.
-    !>  @param [out] pCaptureStatus - Returns current capture status.
-    !>  @param [out] pId - Unique capture ID.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorStreamCaptureImplicit`
     function hipStreamGetCaptureInfo(stream, pCaptureStatus, pId) &
        result(StreamGetCaptureInfo) &
        bind(C, name="hipStreamGetCaptureInfo")
@@ -11019,17 +6562,6 @@ module hip
     !---------------------------------------------
     ! hipStreamGetCaptureInfo_v2
     !---------------------------------------------
-    !>  @brief Get stream's capture state
-    !>
-    !>  @param [in] stream - Stream of which to get capture status from.
-    !>  @param [out] captureStatus_out - Returns current capture status.
-    !>  @param [out] id_out - Unique capture ID.
-    !>  @param [out] graph_out - Returns the graph being captured into.
-    !>  @param [out] dependencies_out - Pointer to an array of nodes representing the graphs
-    !>  dependencies.
-    !>  @param [out] numDependencies_out - Returns size of the array returned in dependencies_out.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorStreamCaptureImplicit`
     function hipStreamGetCaptureInfo_v2(stream, captureStatus_out, id_out, graph_out, &
                                         dependencies_out, numDependencies_out) &
        result(StreamGetCaptureInfo_v2) &
@@ -11047,12 +6579,6 @@ module hip
     !---------------------------------------------
     ! hipStreamIsCapturing
     !---------------------------------------------
-    !>  @brief Get stream's capture state
-    !>
-    !>  @param [in] stream - Stream of which to get capture status from.
-    !>  @param [out] pCaptureStatus - Returns current capture status.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorStreamCaptureImplicit`
     function hipStreamIsCapturing(stream, pCaptureStatus) &
        result(StreamIsCapturing) &
        bind(C, name="hipStreamIsCapturing")
@@ -11065,14 +6591,6 @@ module hip
     !---------------------------------------------
     ! hipStreamUpdateCaptureDependencies
     !---------------------------------------------
-    !>  @brief Update the set of dependencies in a capturing stream
-    !>
-    !>  @param [in] stream  Stream that is being captured.
-    !>  @param [in] dependencies  Pointer to an array of nodes to add/replace.
-    !>  @param [in] numDependencies  Size of the dependencies array.
-    !>  @param [in] flags  Flag to update dependency set. Should be one of the values
-    !>  in enum `hipStreamUpdateCaptureDependenciesFlags`.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorIllegalState`
     function hipStreamUpdateCaptureDependencies(stream, dependencies, numDependencies, flags) &
        result(StreamUpdateCaptureDependencies) &
        bind(C, name="hipStreamUpdateCaptureDependencies")
@@ -11087,10 +6605,6 @@ module hip
     !---------------------------------------------
     ! hipThreadExchangeStreamCaptureMode
     !---------------------------------------------
-    !>  @brief Swaps the stream capture mode of a thread.
-    !>
-    !>  @param [in] mode - Pointer to mode value to swap with the current mode.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipThreadExchangeStreamCaptureMode(mode) &
        result(ThreadExchangeStreamCaptureMode) &
        bind(C, name="hipThreadExchangeStreamCaptureMode")
@@ -11102,12 +6616,6 @@ module hip
     !---------------------------------------------
     ! hipGraphCreate
     !---------------------------------------------
-    !>  @brief Creates a graph
-    !>
-    !>  @param [out] pGraph - pointer to graph to create.
-    !>  @param [in] flags - flags for graph creation, must be 0.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorMemoryAllocation`
     function hipGraphCreate(pGraph, flags) &
        result(GraphCreate) &
        bind(C, name="hipGraphCreate")
@@ -11120,11 +6628,6 @@ module hip
     !---------------------------------------------
     ! hipGraphDestroy
     !---------------------------------------------
-    !>  @brief Destroys a graph
-    !>
-    !>  @param [in] graph - instance of graph to destroy.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphDestroy(graph) &
        result(GraphDestroy) &
        bind(C, name="hipGraphDestroy")
@@ -11136,13 +6639,6 @@ module hip
     !---------------------------------------------
     ! hipGraphAddDependencies
     !---------------------------------------------
-    !>  @brief Adds dependency edges to a graph.
-    !>
-    !>  @param [in] graph - Instance of the graph to add dependencies to.
-    !>  @param [in] from - Pointer to the graph nodes with dependencies to add from.
-    !>  @param [in] to - Pointer to the graph nodes to add dependencies to.
-    !>  @param [in] numDependencies - Number of dependencies to add.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphAddDependencies(graph, from, to, numDependencies) &
        result(GraphAddDependencies) &
        bind(C, name="hipGraphAddDependencies")
@@ -11157,13 +6653,6 @@ module hip
     !---------------------------------------------
     ! hipGraphRemoveDependencies
     !---------------------------------------------
-    !>  @brief Removes dependency edges from a graph.
-    !>
-    !>  @param [in] graph - Instance of the graph to remove dependencies from.
-    !>  @param [in] from - Array of nodes that provide the dependencies.
-    !>  @param [in] to - Array of dependent nodes.
-    !>  @param [in] numDependencies - Number of dependencies to remove.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphRemoveDependencies(graph, from, to, numDependencies) &
        result(GraphRemoveDependencies) &
        bind(C, name="hipGraphRemoveDependencies")
@@ -11178,20 +6667,6 @@ module hip
     !---------------------------------------------
     ! hipGraphGetEdges
     !---------------------------------------------
-    !>  @brief Returns a graph's dependency edges.
-    !>
-    !>  @param [in] graph - Instance of the graph to get the edges from.
-    !>  @param [out] from - Pointer to the graph nodes to return edge endpoints.
-    !>  @param [out] to - Pointer to the graph nodes to return edge endpoints.
-    !>  @param [out] numEdges - Returns number of edges.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  from and to may both be NULL, in which case this function only returns the number of edges
-    !>  in
-    !>  numEdges. Otherwise, numEdges entries will be filled in. If numEdges is higher than the
-    !>  actual
-    !>  number of edges, the remaining entries in from and to will be set to NULL, and the number of
-    !>  edges actually returned will be written to numEdges.
     function hipGraphGetEdges(graph, from, to, numEdges) &
        result(GraphGetEdges) &
        bind(C, name="hipGraphGetEdges")
@@ -11206,18 +6681,6 @@ module hip
     !---------------------------------------------
     ! hipGraphGetNodes
     !---------------------------------------------
-    !>  @brief Returns a graph's nodes.
-    !>
-    !>  @param [in] graph - Instance of graph to get the nodes from.
-    !>  @param [out] nodes - Pointer to return the  graph nodes.
-    !>  @param [out] numNodes - Returns the number of graph nodes.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  nodes may be NULL, in which case this function will return the number of nodes in numNodes.
-    !>  Otherwise, numNodes entries will be filled in. If numNodes is higher than the actual number
-    !>  of
-    !>  nodes, the remaining entries in nodes will be set to NULL, and the number of nodes actually
-    !>  obtained will be returned in numNodes.
     function hipGraphGetNodes(graph, nodes, numNodes) &
        result(GraphGetNodes) &
        bind(C, name="hipGraphGetNodes")
@@ -11231,19 +6694,6 @@ module hip
     !---------------------------------------------
     ! hipGraphGetRootNodes
     !---------------------------------------------
-    !>  @brief Returns a graph's root nodes.
-    !>
-    !>  @param [in] graph - Instance of the graph to get the nodes from.
-    !>  @param [out] pRootNodes - Pointer to return the graph's root nodes.
-    !>  @param [out] pNumRootNodes - Returns the number of graph's root nodes.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  pRootNodes may be NULL, in which case this function will return the number of root nodes in
-    !>  pNumRootNodes. Otherwise, pNumRootNodes entries will be filled in. If pNumRootNodes is
-    !>  higher
-    !>  than the actual number of root nodes, the remaining entries in pRootNodes will be set to
-    !>  NULL,
-    !>  and the number of nodes actually obtained will be returned in pNumRootNodes.
     function hipGraphGetRootNodes(graph, pRootNodes, pNumRootNodes) &
        result(GraphGetRootNodes) &
        bind(C, name="hipGraphGetRootNodes")
@@ -11257,20 +6707,6 @@ module hip
     !---------------------------------------------
     ! hipGraphNodeGetDependencies
     !---------------------------------------------
-    !>  @brief Returns a node's dependencies.
-    !>
-    !>  @param [in] node - Graph node to get the dependencies from.
-    !>  @param [out] pDependencies - Pointer to return the dependencies.
-    !>  @param [out] pNumDependencies -  Returns the number of graph node dependencies.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  pDependencies may be NULL, in which case this function will return the number of
-    !>  dependencies in
-    !>  pNumDependencies. Otherwise, pNumDependencies entries will be filled in. If pNumDependencies
-    !>  is
-    !>  higher than the actual number of dependencies, the remaining entries in pDependencies will
-    !>  be set
-    !>  to NULL, and the number of nodes actually obtained will be returned in pNumDependencies.
     function hipGraphNodeGetDependencies(node, pDependencies, pNumDependencies) &
        result(GraphNodeGetDependencies) &
        bind(C, name="hipGraphNodeGetDependencies")
@@ -11284,20 +6720,6 @@ module hip
     !---------------------------------------------
     ! hipGraphNodeGetDependentNodes
     !---------------------------------------------
-    !>  @brief Returns a node's dependent nodes.
-    !>
-    !>  @param [in] node - Graph node to get the dependent nodes from.
-    !>  @param [out] pDependentNodes - Pointer to return the graph dependent nodes.
-    !>  @param [out] pNumDependentNodes - Returns the number of graph node dependent nodes.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  pDependentNodes may be NULL, in which case this function will return the number of dependent
-    !>  nodes in pNumDependentNodes. Otherwise, pNumDependentNodes entries will be filled in. If
-    !>  pNumDependentNodes is higher than the actual number of dependent nodes, the remaining
-    !>  entries in
-    !>  pDependentNodes will be set to NULL, and the number of nodes actually obtained will be
-    !>  returned
-    !>  in pNumDependentNodes.
     function hipGraphNodeGetDependentNodes(node, pDependentNodes, pNumDependentNodes) &
        result(GraphNodeGetDependentNodes) &
        bind(C, name="hipGraphNodeGetDependentNodes")
@@ -11311,11 +6733,6 @@ module hip
     !---------------------------------------------
     ! hipGraphNodeGetType
     !---------------------------------------------
-    !>  @brief Returns a node's type.
-    !>
-    !>  @param [in] node - Node to get type of.
-    !>  @param [out] pType - Returns the node's type.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphNodeGetType(node, pType) &
        result(GraphNodeGetType) &
        bind(C, name="hipGraphNodeGetType")
@@ -11328,10 +6745,6 @@ module hip
     !---------------------------------------------
     ! hipGraphDestroyNode
     !---------------------------------------------
-    !>  @brief Remove a node from the graph.
-    !>
-    !>  @param [in] node - graph node to remove
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphDestroyNode(node) &
        result(GraphDestroyNode) &
        bind(C, name="hipGraphDestroyNode")
@@ -11343,11 +6756,6 @@ module hip
     !---------------------------------------------
     ! hipGraphClone
     !---------------------------------------------
-    !>  @brief Clones a graph.
-    !>
-    !>  @param [out] pGraphClone - Returns newly created cloned graph.
-    !>  @param [in] originalGraph - original graph to clone from.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorMemoryAllocation`
     function hipGraphClone(pGraphClone, originalGraph) &
        result(GraphClone) &
        bind(C, name="hipGraphClone")
@@ -11360,12 +6768,6 @@ module hip
     !---------------------------------------------
     ! hipGraphNodeFindInClone
     !---------------------------------------------
-    !>  @brief Finds a cloned version of a node.
-    !>
-    !>  @param [out] pNode - Returns the cloned node.
-    !>  @param [in] originalNode - original node handle.
-    !>  @param [in] clonedGraph - Cloned graph to query.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphNodeFindInClone(pNode, originalNode, clonedGraph) &
        result(GraphNodeFindInClone) &
        bind(C, name="hipGraphNodeFindInClone")
@@ -11379,16 +6781,6 @@ module hip
     !---------------------------------------------
     ! hipGraphInstantiate
     !---------------------------------------------
-    !>  @brief Creates an executable graph from a graph
-    !>
-    !>  @param [out] pGraphExec - Pointer to instantiated executable graph.
-    !>  @param [in] graph - Instance of graph to instantiate.
-    !>  @param [out] pErrorNode - Pointer to error node. In case an error occured during
-    !>  graph instantiation, it could modify the corresponding node.
-    !>  @param [out] pLogBuffer - Pointer to log buffer.
-    !>  @param [out] bufferSize - Size of the log buffer.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorOutOfMemory`
     function hipGraphInstantiate(pGraphExec, graph, pErrorNode, pLogBuffer, bufferSize) &
        result(GraphInstantiate) &
        bind(C, name="hipGraphInstantiate")
@@ -11404,14 +6796,6 @@ module hip
     !---------------------------------------------
     ! hipGraphInstantiateWithFlags
     !---------------------------------------------
-    !>  @brief Creates an executable graph from a graph.
-    !>
-    !>  @param [out] pGraphExec - Pointer to instantiated executable graph.
-    !>  @param [in] graph - Instance of graph to instantiate.
-    !>  @param [in] flags - Flags to control instantiation.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  @warning This API does not support any of flag and is behaving as hipGraphInstantiate.
     function hipGraphInstantiateWithFlags(pGraphExec, graph, flags) &
        result(GraphInstantiateWithFlags) &
        bind(C, name="hipGraphInstantiateWithFlags")
@@ -11425,12 +6809,6 @@ module hip
     !---------------------------------------------
     ! hipGraphInstantiateWithParams
     !---------------------------------------------
-    !>  @brief Creates an executable graph from a graph.
-    !>
-    !>  @param [out] pGraphExec - Pointer to instantiated executable graph.
-    !>  @param [in] graph - Instance of graph to instantiate.
-    !>  @param [in] instantiateParams - Graph instantiation Params
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphInstantiateWithParams(pGraphExec, graph, instantiateParams) &
        result(GraphInstantiateWithParams) &
        bind(C, name="hipGraphInstantiateWithParams")
@@ -11444,11 +6822,6 @@ module hip
     !---------------------------------------------
     ! hipGraphLaunch
     !---------------------------------------------
-    !>  @brief Launches an executable graph in the specified stream.
-    !>
-    !>  @param [in] graphExec - Instance of executable graph to launch.
-    !>  @param [in] stream - Instance of stream in which to launch executable graph.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphLaunch(graphExec, stream) &
        result(GraphLaunch) &
        bind(C, name="hipGraphLaunch")
@@ -11461,11 +6834,6 @@ module hip
     !---------------------------------------------
     ! hipGraphUpload
     !---------------------------------------------
-    !>  @brief Uploads an executable graph to a stream
-    !>
-    !>  @param [in] graphExec - Instance of executable graph to be uploaded.
-    !>  @param [in] stream - Instance of stream to which the executable graph is uploaded to.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphUpload(graphExec, stream) &
        result(GraphUpload) &
        bind(C, name="hipGraphUpload")
@@ -11478,14 +6846,6 @@ module hip
     !---------------------------------------------
     ! hipGraphAddNode
     !---------------------------------------------
-    !>  @brief Creates a kernel execution node and adds it to a graph.
-    !>
-    !>  @param [out] pGraphNode - Pointer to kernel graph node that is created.
-    !>  @param [in] graph - Instance of graph to add the created node to.
-    !>  @param [in] pDependencies - Pointer to the dependencies on the kernel execution node.
-    !>  @param [in] numDependencies - Number of dependencies.
-    !>  @param [in] nodeParams - Pointer to the node parameters.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`.
     function hipGraphAddNode(pGraphNode, graph, pDependencies, numDependencies, nodeParams) &
        result(GraphAddNode) &
        bind(C, name="hipGraphAddNode")
@@ -11501,11 +6861,6 @@ module hip
     !---------------------------------------------
     ! hipGraphExecGetFlags
     !---------------------------------------------
-    !>  @brief Return the flags of an executable graph.
-    !>
-    !>  @param [in] graphExec - Executable graph to get the flags from.
-    !>  @param [out] flags - Flags used to instantiate this executable graph.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`.
     function hipGraphExecGetFlags(graphExec, flags) &
        result(GraphExecGetFlags) &
        bind(C, name="hipGraphExecGetFlags")
@@ -11518,12 +6873,6 @@ module hip
     !---------------------------------------------
     ! hipGraphNodeSetParams
     !---------------------------------------------
-    !>  @brief Updates parameters of a graph's node.
-    !>
-    !>  @param [in] node - Instance of the node to set parameters for.
-    !>  @param [in] nodeParams - Pointer to the parameters to be set.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidDeviceFunction`,
-    !>  `hipErrorNotSupported`.
     function hipGraphNodeSetParams(node, nodeParams) &
        result(GraphNodeSetParams) &
        bind(C, name="hipGraphNodeSetParams")
@@ -11536,13 +6885,6 @@ module hip
     !---------------------------------------------
     ! hipGraphExecNodeSetParams
     !---------------------------------------------
-    !>  @brief Updates parameters of an executable graph's node.
-    !>
-    !>  @param [in] graphExec - Instance of the executable graph.
-    !>  @param [in] node - Instance of the node to set parameters to.
-    !>  @param [in] nodeParams - Pointer to the parameters to be set.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidDeviceFunction`,
-    !>  `hipErrorNotSupported`.
     function hipGraphExecNodeSetParams(graphExec, node, nodeParams) &
        result(GraphExecNodeSetParams) &
        bind(C, name="hipGraphExecNodeSetParams")
@@ -11556,11 +6898,6 @@ module hip
     !---------------------------------------------
     ! hipGraphExecDestroy
     !---------------------------------------------
-    !>  @brief Destroys an executable graph
-    !>
-    !>  @param [in] graphExec - Instance of executable graph to destroy.
-    !>
-    !>  @returns `hipSuccess`.
     function hipGraphExecDestroy(graphExec) &
        result(GraphExecDestroy) &
        bind(C, name="hipGraphExecDestroy")
@@ -11572,16 +6909,6 @@ module hip
     !---------------------------------------------
     ! hipGraphExecUpdate
     !---------------------------------------------
-    !>  @brief Check whether an executable graph can be updated with a graph and perform the update
-    !>  if *
-    !>  possible.
-    !>
-    !>  @param [in] hGraphExec - instance of executable graph to update.
-    !>  @param [in] hGraph - graph that contains the updated parameters.
-    !>  @param [in] hErrorNode_out - node which caused the permissibility check to forbid the
-    !>  update.
-    !>  @param [in] updateResult_out - Return code whether the graph update was performed.
-    !>  @returns `hipSuccess`, `hipErrorGraphExecUpdateFailure`
     function hipGraphExecUpdate(hGraphExec, hGraph, hErrorNode_out, updateResult_out) &
        result(GraphExecUpdate) &
        bind(C, name="hipGraphExecUpdate")
@@ -11596,14 +6923,6 @@ module hip
     !---------------------------------------------
     ! hipGraphAddKernelNode
     !---------------------------------------------
-    !>  @brief Creates a kernel execution node and adds it to a graph.
-    !>
-    !>  @param [out] pGraphNode - Pointer to graph node that is created
-    !>  @param [in] graph - Instance of graph to add the created node to.
-    !>  @param [in] pDependencies - Pointer to the dependencies of the kernel execution node.
-    !>  @param [in] numDependencies - The number of the dependencies.
-    !>  @param [in] pNodeParams - Pointer to the parameters of the kernel execution node.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidDeviceFunction`
     function hipGraphAddKernelNode(pGraphNode, graph, pDependencies, numDependencies, pNodeParams) &
        result(GraphAddKernelNode) &
        bind(C, name="hipGraphAddKernelNode")
@@ -11619,11 +6938,6 @@ module hip
     !---------------------------------------------
     ! hipGraphKernelNodeGetParams
     !---------------------------------------------
-    !>  @brief Gets kernel node's parameters.
-    !>
-    !>  @param [in] node - instance of the node to get parameters from.
-    !>  @param [out] pNodeParams - pointer to the parameters
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphKernelNodeGetParams(node, pNodeParams) &
        result(GraphKernelNodeGetParams) &
        bind(C, name="hipGraphKernelNodeGetParams")
@@ -11636,11 +6950,6 @@ module hip
     !---------------------------------------------
     ! hipGraphKernelNodeSetParams
     !---------------------------------------------
-    !>  @brief Sets a kernel node's parameters.
-    !>
-    !>  @param [in] node - Instance of the node to set parameters of.
-    !>  @param [in] pNodeParams - const pointer to the parameters.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphKernelNodeSetParams(node, pNodeParams) &
        result(GraphKernelNodeSetParams) &
        bind(C, name="hipGraphKernelNodeSetParams")
@@ -11653,12 +6962,6 @@ module hip
     !---------------------------------------------
     ! hipGraphExecKernelNodeSetParams
     !---------------------------------------------
-    !>  @brief Sets the parameters for a kernel node in the given graphExec.
-    !>
-    !>  @param [in] hGraphExec - Instance of the executable graph with the node.
-    !>  @param [in] node - Instance of the node to set parameters of.
-    !>  @param [in] pNodeParams - const pointer to the kernel node parameters.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphExecKernelNodeSetParams(hGraphExec, node, pNodeParams) &
        result(GraphExecKernelNodeSetParams) &
        bind(C, name="hipGraphExecKernelNodeSetParams")
@@ -11672,15 +6975,6 @@ module hip
     !---------------------------------------------
     ! hipDrvGraphAddMemcpyNode
     !---------------------------------------------
-    !>  @brief Creates a memcpy node and adds it to a graph.
-    !>
-    !>  @param [out] phGraphNode - Pointer to graph node that is created.
-    !>  @param [in] hGraph - Instance of graph to add the created node to.
-    !>  @param [in] dependencies - const pointer to the dependencies of the memcpy execution node.
-    !>  @param [in] numDependencies - The number of dependencies.
-    !>  @param [in] copyParams - const pointer to the parameters for the memory copy.
-    !>  @param [in] ctx - context related to current device.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipDrvGraphAddMemcpyNode(phGraphNode, hGraph, dependencies, numDependencies, &
                                       copyParams, ctx) &
        result(DrvGraphAddMemcpyNode) &
@@ -11698,14 +6992,6 @@ module hip
     !---------------------------------------------
     ! hipGraphAddMemcpyNode
     !---------------------------------------------
-    !>  @brief Creates a memcpy node and adds it to a graph.
-    !>
-    !>  @param [out] pGraphNode - Pointer to graph node that is created.
-    !>  @param [in] graph - Instance of graph to add the created node to.
-    !>  @param [in] pDependencies - const pointer to the dependencies of the memcpy execution node.
-    !>  @param [in] numDependencies - The number of dependencies.
-    !>  @param [in] pCopyParams - const pointer to the parameters for the memory copy.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphAddMemcpyNode(pGraphNode, graph, pDependencies, numDependencies, pCopyParams) &
        result(GraphAddMemcpyNode) &
        bind(C, name="hipGraphAddMemcpyNode")
@@ -11721,11 +7007,6 @@ module hip
     !---------------------------------------------
     ! hipGraphMemcpyNodeGetParams
     !---------------------------------------------
-    !>  @brief Gets a memcpy node's parameters.
-    !>
-    !>  @param [in] node - instance of the node to get parameters from.
-    !>  @param [out] pNodeParams - pointer to the parameters.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphMemcpyNodeGetParams(node, pNodeParams) &
        result(GraphMemcpyNodeGetParams) &
        bind(C, name="hipGraphMemcpyNodeGetParams")
@@ -11738,11 +7019,6 @@ module hip
     !---------------------------------------------
     ! hipGraphMemcpyNodeSetParams
     !---------------------------------------------
-    !>  @brief Sets a memcpy node's parameters.
-    !>
-    !>  @param [in] node - instance of the node to set parameters to.
-    !>  @param [in] pNodeParams - const pointer to the parameters.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphMemcpyNodeSetParams(node, pNodeParams) &
        result(GraphMemcpyNodeSetParams) &
        bind(C, name="hipGraphMemcpyNodeSetParams")
@@ -11755,12 +7031,6 @@ module hip
     !---------------------------------------------
     ! hipGraphKernelNodeSetAttribute
     !---------------------------------------------
-    !>  @brief Sets a node's attribute.
-    !>
-    !>  @param [in] hNode - Instance of the node to set parameters of.
-    !>  @param [in] attr - The attribute type to be set.
-    !>  @param [in] value - const pointer to the parameters.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphKernelNodeSetAttribute(hNode, attr, myValue) &
        result(GraphKernelNodeSetAttribute) &
        bind(C, name="hipGraphKernelNodeSetAttribute")
@@ -11774,12 +7044,6 @@ module hip
     !---------------------------------------------
     ! hipGraphKernelNodeGetAttribute
     !---------------------------------------------
-    !>  @brief Gets a node's attribute.
-    !>
-    !>  @param [in] hNode - Instance of the node to set parameters of.
-    !>  @param [in] attr - The attribute type to be set.
-    !>  @param [in] value - const pointer to the parameters.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphKernelNodeGetAttribute(hNode, attr, myValue) &
        result(GraphKernelNodeGetAttribute) &
        bind(C, name="hipGraphKernelNodeGetAttribute")
@@ -11793,12 +7057,6 @@ module hip
     !---------------------------------------------
     ! hipGraphExecMemcpyNodeSetParams
     !---------------------------------------------
-    !>  @brief Sets the parameters of a memcpy node in the given graphExec.
-    !>
-    !>  @param [in] hGraphExec - Instance of the executable graph with the node.
-    !>  @param [in] node - Instance of the node to set parameters of.
-    !>  @param [in] pNodeParams - const pointer to the kernel node parameters.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphExecMemcpyNodeSetParams(hGraphExec, node, pNodeParams) &
        result(GraphExecMemcpyNodeSetParams) &
        bind(C, name="hipGraphExecMemcpyNodeSetParams")
@@ -11812,17 +7070,6 @@ module hip
     !---------------------------------------------
     ! hipGraphAddMemcpyNode1D
     !---------------------------------------------
-    !>  @brief Creates a 1D memcpy node and adds it to a graph.
-    !>
-    !>  @param [out] pGraphNode - Pointer to graph node that is created.
-    !>  @param [in] graph - Instance of graph to add the created node to.
-    !>  @param [in] pDependencies - const pointer to the dependencies of the memcpy execution node.
-    !>  @param [in] numDependencies - The number of dependencies.
-    !>  @param [in] dst - Pointer to memory address of the destination.
-    !>  @param [in] src - Pointer to memory address of the source.
-    !>  @param [in] count - Size of the memory to copy.
-    !>  @param [in] kind - Type of memory copy.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphAddMemcpyNode1D(pGraphNode, graph, pDependencies, numDependencies, dst, src, &
                                      count, myKind) &
        result(GraphAddMemcpyNode1D) &
@@ -11842,14 +7089,6 @@ module hip
     !---------------------------------------------
     ! hipGraphMemcpyNodeSetParams1D
     !---------------------------------------------
-    !>  @brief Sets a memcpy node's parameters to perform a 1-dimensional copy.
-    !>
-    !>  @param [in] node - Instance of the node to set parameters of.
-    !>  @param [in] dst - Pointer to memory address of the destination.
-    !>  @param [in] src - Pointer to memory address of the source.
-    !>  @param [in] count - Size of the memory to copy.
-    !>  @param [in] kind - Type of memory copy.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphMemcpyNodeSetParams1D(node, dst, src, count, myKind) &
        result(GraphMemcpyNodeSetParams1D) &
        bind(C, name="hipGraphMemcpyNodeSetParams1D")
@@ -11865,17 +7104,6 @@ module hip
     !---------------------------------------------
     ! hipGraphExecMemcpyNodeSetParams1D
     !---------------------------------------------
-    !>  @brief Sets the parameters for a memcpy node in the given graphExec to perform a
-    !>  1-dimensional
-    !>  copy.
-    !>
-    !>  @param [in] hGraphExec - Instance of the executable graph with the node.
-    !>  @param [in] node - Instance of the node to set parameters of.
-    !>  @param [in] dst - Pointer to memory address of the destination.
-    !>  @param [in] src - Pointer to memory address of the source.
-    !>  @param [in] count - Size of the memory to copy.
-    !>  @param [in] kind - Type of memory copy.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphExecMemcpyNodeSetParams1D(hGraphExec, node, dst, src, count, myKind) &
        result(GraphExecMemcpyNodeSetParams1D) &
        bind(C, name="hipGraphExecMemcpyNodeSetParams1D")
@@ -11892,18 +7120,6 @@ module hip
     !---------------------------------------------
     ! hipGraphAddMemcpyNodeFromSymbol
     !---------------------------------------------
-    !>  @brief Creates a memcpy node to copy from a symbol on the device and adds it to a graph.
-    !>
-    !>  @param [out] pGraphNode - Pointer to graph node that is created.
-    !>  @param [in] graph - Instance of graph to add the created node to.
-    !>  @param [in] pDependencies - const pointer to the dependencies of the memcpy execution node.
-    !>  @param [in] numDependencies - Number of the dependencies.
-    !>  @param [in] dst - Pointer to memory address of the destination.
-    !>  @param [in] symbol - Device symbol address.
-    !>  @param [in] count - Size of the memory to copy.
-    !>  @param [in] offset - Offset from start of symbol in bytes.
-    !>  @param [in] kind - Type of memory copy.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphAddMemcpyNodeFromSymbol(pGraphNode, graph, pDependencies, numDependencies, &
                                              dst, symbol, count, offset, myKind) &
        result(GraphAddMemcpyNodeFromSymbol) &
@@ -11924,15 +7140,6 @@ module hip
     !---------------------------------------------
     ! hipGraphMemcpyNodeSetParamsFromSymbol
     !---------------------------------------------
-    !>  @brief Sets a memcpy node's parameters to copy from a symbol on the device.
-    !>
-    !>  @param [in] node - Instance of the node to set parameters of.
-    !>  @param [in] dst - Pointer to memory address of the destination.
-    !>  @param [in] symbol - Device symbol address.
-    !>  @param [in] count - Size of the memory to copy.
-    !>  @param [in] offset - Offset from start of symbol in bytes.
-    !>  @param [in] kind - Type of memory copy.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphMemcpyNodeSetParamsFromSymbol(node, dst, symbol, count, offset, myKind) &
        result(GraphMemcpyNodeSetParamsFromSymbol) &
        bind(C, name="hipGraphMemcpyNodeSetParamsFromSymbol")
@@ -11949,18 +7156,6 @@ module hip
     !---------------------------------------------
     ! hipGraphExecMemcpyNodeSetParamsFromSymbol
     !---------------------------------------------
-    !>  @brief Sets the parameters for a memcpy node in the given graphExec to copy from a symbol on
-    !>  the
-    !>  * device.
-    !>
-    !>  @param [in] hGraphExec - Instance of the executable graph with the node.
-    !>  @param [in] node - Instance of the node to set parameters of.
-    !>  @param [in] dst - Pointer to memory address of the destination.
-    !>  @param [in] symbol - Device symbol address.
-    !>  @param [in] count - Size of the memory to copy.
-    !>  @param [in] offset - Offset from start of symbol in bytes.
-    !>  @param [in] kind - Type of memory copy.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphExecMemcpyNodeSetParamsFromSymbol(hGraphExec, node, dst, symbol, count, &
                                                        offset, myKind) &
        result(GraphExecMemcpyNodeSetParamsFromSymbol) &
@@ -11979,18 +7174,6 @@ module hip
     !---------------------------------------------
     ! hipGraphAddMemcpyNodeToSymbol
     !---------------------------------------------
-    !>  @brief Creates a memcpy node to copy to a symbol on the device and adds it to a graph.
-    !>
-    !>  @param [out] pGraphNode - Pointer to graph node that is created.
-    !>  @param [in] graph - Instance of graph to add the created node to.
-    !>  @param [in] pDependencies - const pointer to the dependencies on the memcpy execution node.
-    !>  @param [in] numDependencies - Number of dependencies.
-    !>  @param [in] symbol - Device symbol address.
-    !>  @param [in] src - Pointer to memory address of the src.
-    !>  @param [in] count - Size of the memory to copy.
-    !>  @param [in] offset - Offset from start of symbol in bytes.
-    !>  @param [in] kind - Type of memory copy.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphAddMemcpyNodeToSymbol(pGraphNode, graph, pDependencies, numDependencies, &
                                            symbol, src, count, offset, myKind) &
        result(GraphAddMemcpyNodeToSymbol) &
@@ -12011,15 +7194,6 @@ module hip
     !---------------------------------------------
     ! hipGraphMemcpyNodeSetParamsToSymbol
     !---------------------------------------------
-    !>  @brief Sets a memcpy node's parameters to copy to a symbol on the device.
-    !>
-    !>  @param [in] node - Instance of the node to set parameters of.
-    !>  @param [in] symbol - Device symbol address.
-    !>  @param [in] src - Pointer to memory address of the src.
-    !>  @param [in] count - Size of the memory to copy.
-    !>  @param [in] offset - Offset from start of symbol in bytes.
-    !>  @param [in] kind - Type of memory copy.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphMemcpyNodeSetParamsToSymbol(node, symbol, src, count, offset, myKind) &
        result(GraphMemcpyNodeSetParamsToSymbol) &
        bind(C, name="hipGraphMemcpyNodeSetParamsToSymbol")
@@ -12036,17 +7210,6 @@ module hip
     !---------------------------------------------
     ! hipGraphExecMemcpyNodeSetParamsToSymbol
     !---------------------------------------------
-    !>  @brief Sets the parameters for a memcpy node in the given graphExec to copy to a symbol on
-    !>  the
-    !>  device.
-    !>  @param [in] hGraphExec - Instance of the executable graph with the node.
-    !>  @param [in] node - Instance of the node to set parameters of.
-    !>  @param [in] symbol - Device symbol address.
-    !>  @param [in] src - Pointer to memory address of the src.
-    !>  @param [in] count - Size of the memory to copy.
-    !>  @param [in] offset - Offset from start of symbol in bytes.
-    !>  @param [in] kind - Type of memory copy.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphExecMemcpyNodeSetParamsToSymbol(hGraphExec, node, symbol, src, count, offset, &
                                                      myKind) &
        result(GraphExecMemcpyNodeSetParamsToSymbol) &
@@ -12065,14 +7228,6 @@ module hip
     !---------------------------------------------
     ! hipGraphAddMemsetNode
     !---------------------------------------------
-    !>  @brief Creates a memset node and adds it to a graph.
-    !>
-    !>  @param [out] pGraphNode - Pointer to graph node that is created.
-    !>  @param [in] graph - Instance of the graph to add the created node to.
-    !>  @param [in] pDependencies - const pointer to the dependencies on the memset execution node.
-    !>  @param [in] numDependencies - Number of dependencies.
-    !>  @param [in] pMemsetParams - const pointer to the parameters for the memory set.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphAddMemsetNode(pGraphNode, graph, pDependencies, numDependencies, &
                                    pMemsetParams) &
        result(GraphAddMemsetNode) &
@@ -12089,11 +7244,6 @@ module hip
     !---------------------------------------------
     ! hipGraphMemsetNodeGetParams
     !---------------------------------------------
-    !>  @brief Gets a memset node's parameters.
-    !>
-    !>  @param [in] node - Instance of the node to get parameters of.
-    !>  @param [out] pNodeParams - Pointer to the parameters.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphMemsetNodeGetParams(node, pNodeParams) &
        result(GraphMemsetNodeGetParams) &
        bind(C, name="hipGraphMemsetNodeGetParams")
@@ -12106,11 +7256,6 @@ module hip
     !---------------------------------------------
     ! hipGraphMemsetNodeSetParams
     !---------------------------------------------
-    !>  @brief Sets a memset node's parameters.
-    !>
-    !>  @param [in] node - Instance of the node to set parameters of.
-    !>  @param [in] pNodeParams - Pointer to the parameters.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphMemsetNodeSetParams(node, pNodeParams) &
        result(GraphMemsetNodeSetParams) &
        bind(C, name="hipGraphMemsetNodeSetParams")
@@ -12123,12 +7268,6 @@ module hip
     !---------------------------------------------
     ! hipGraphExecMemsetNodeSetParams
     !---------------------------------------------
-    !>  @brief Sets the parameters for a memset node in the given graphExec.
-    !>
-    !>  @param [in] hGraphExec - Instance of the executable graph with the node.
-    !>  @param [in] node - Instance of the node to set parameters of.
-    !>  @param [in] pNodeParams - Pointer to the parameters.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphExecMemsetNodeSetParams(hGraphExec, node, pNodeParams) &
        result(GraphExecMemsetNodeSetParams) &
        bind(C, name="hipGraphExecMemsetNodeSetParams")
@@ -12142,14 +7281,6 @@ module hip
     !---------------------------------------------
     ! hipGraphAddHostNode
     !---------------------------------------------
-    !>  @brief Creates a host execution node and adds it to a graph.
-    !>
-    !>  @param [out] pGraphNode - Pointer to graph node that is created.
-    !>  @param [in] graph - Instance of the graph to add the created node to.
-    !>  @param [in] pDependencies - const pointer to the dependencies of the memset execution node.
-    !>  @param [in] numDependencies - Number of dependencies.
-    !>  @param [in] pNodeParams - Pointer to the parameters.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphAddHostNode(pGraphNode, graph, pDependencies, numDependencies, pNodeParams) &
        result(GraphAddHostNode) &
        bind(C, name="hipGraphAddHostNode")
@@ -12165,11 +7296,6 @@ module hip
     !---------------------------------------------
     ! hipGraphHostNodeGetParams
     !---------------------------------------------
-    !>  @brief Returns a host node's parameters.
-    !>
-    !>  @param [in] node - Instance of the node to get parameters of.
-    !>  @param [out] pNodeParams - Pointer to the parameters.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphHostNodeGetParams(node, pNodeParams) &
        result(GraphHostNodeGetParams) &
        bind(C, name="hipGraphHostNodeGetParams")
@@ -12182,11 +7308,6 @@ module hip
     !---------------------------------------------
     ! hipGraphHostNodeSetParams
     !---------------------------------------------
-    !>  @brief Sets a host node's parameters.
-    !>
-    !>  @param [in] node - Instance of the node to set parameters of.
-    !>  @param [in] pNodeParams - Pointer to the parameters.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphHostNodeSetParams(node, pNodeParams) &
        result(GraphHostNodeSetParams) &
        bind(C, name="hipGraphHostNodeSetParams")
@@ -12199,12 +7320,6 @@ module hip
     !---------------------------------------------
     ! hipGraphExecHostNodeSetParams
     !---------------------------------------------
-    !>  @brief Sets the parameters for a host node in the given graphExec.
-    !>
-    !>  @param [in] hGraphExec - Instance of the executable graph with the node.
-    !>  @param [in] node - Instance of the node to set parameters of.
-    !>  @param [in] pNodeParams - Pointer to the parameters.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphExecHostNodeSetParams(hGraphExec, node, pNodeParams) &
        result(GraphExecHostNodeSetParams) &
        bind(C, name="hipGraphExecHostNodeSetParams")
@@ -12218,14 +7333,6 @@ module hip
     !---------------------------------------------
     ! hipGraphAddChildGraphNode
     !---------------------------------------------
-    !>  @brief Creates a child graph node and adds it to a graph.
-    !>
-    !>  @param [out] pGraphNode - Pointer to graph node that is created.
-    !>  @param [in] graph - Instance of the graph to add the created node.
-    !>  @param [in] pDependencies - const pointer to the dependencies of the memset execution node.
-    !>  @param [in] numDependencies - Number of dependencies.
-    !>  @param [in] childGraph - Graph to clone into this node
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphAddChildGraphNode(pGraphNode, graph, pDependencies, numDependencies, &
                                        childGraph) &
        result(GraphAddChildGraphNode) &
@@ -12242,11 +7349,6 @@ module hip
     !---------------------------------------------
     ! hipGraphChildGraphNodeGetGraph
     !---------------------------------------------
-    !>  @brief Gets a handle to the embedded graph of a child graph node.
-    !>
-    !>  @param [in] node - Instance of the node to get child graph of.
-    !>  @param [out] pGraph - Pointer to get the graph.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphChildGraphNodeGetGraph(node, pGraph) &
        result(GraphChildGraphNodeGetGraph) &
        bind(C, name="hipGraphChildGraphNodeGetGraph")
@@ -12259,12 +7361,6 @@ module hip
     !---------------------------------------------
     ! hipGraphExecChildGraphNodeSetParams
     !---------------------------------------------
-    !>  @brief Updates node parameters in the child graph node in the given graphExec.
-    !>
-    !>  @param [in] hGraphExec - instance of the executable graph with the node.
-    !>  @param [in] node - node from the graph which was used to instantiate graphExec.
-    !>  @param [in] childGraph - child graph with updated parameters.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphExecChildGraphNodeSetParams(hGraphExec, node, childGraph) &
        result(GraphExecChildGraphNodeSetParams) &
        bind(C, name="hipGraphExecChildGraphNodeSetParams")
@@ -12278,13 +7374,6 @@ module hip
     !---------------------------------------------
     ! hipGraphAddEmptyNode
     !---------------------------------------------
-    !>  @brief Creates an empty node and adds it to a graph.
-    !>
-    !>  @param [out] pGraphNode - Pointer to graph node that is created.
-    !>  @param [in] graph - Instance of the graph the node is added to.
-    !>  @param [in] pDependencies - const pointer to the node dependencies.
-    !>  @param [in] numDependencies - Number of dependencies.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphAddEmptyNode(pGraphNode, graph, pDependencies, numDependencies) &
        result(GraphAddEmptyNode) &
        bind(C, name="hipGraphAddEmptyNode")
@@ -12299,14 +7388,6 @@ module hip
     !---------------------------------------------
     ! hipGraphAddEventRecordNode
     !---------------------------------------------
-    !>  @brief Creates an event record node and adds it to a graph.
-    !>
-    !>  @param [out] pGraphNode - Pointer to graph node that is created.
-    !>  @param [in] graph - Instance of the graph the node is added to.
-    !>  @param [in] pDependencies - const pointer to the node dependencies.
-    !>  @param [in] numDependencies - Number of dependencies.
-    !>  @param [in] event - Event of the node.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphAddEventRecordNode(pGraphNode, graph, pDependencies, numDependencies, event) &
        result(GraphAddEventRecordNode) &
        bind(C, name="hipGraphAddEventRecordNode")
@@ -12322,11 +7403,6 @@ module hip
     !---------------------------------------------
     ! hipGraphEventRecordNodeGetEvent
     !---------------------------------------------
-    !>  @brief Returns the event associated with an event record node.
-    !>
-    !>  @param [in] node -  Instance of the node to get event of.
-    !>  @param [out] event_out - Pointer to return the event.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphEventRecordNodeGetEvent(node, event_out) &
        result(GraphEventRecordNodeGetEvent) &
        bind(C, name="hipGraphEventRecordNodeGetEvent")
@@ -12339,11 +7415,6 @@ module hip
     !---------------------------------------------
     ! hipGraphEventRecordNodeSetEvent
     !---------------------------------------------
-    !>  @brief Sets an event record node's event.
-    !>
-    !>  @param [in] node - Instance of the node to set event to.
-    !>  @param [in] event - Pointer to the event.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphEventRecordNodeSetEvent(node, event) &
        result(GraphEventRecordNodeSetEvent) &
        bind(C, name="hipGraphEventRecordNodeSetEvent")
@@ -12356,12 +7427,6 @@ module hip
     !---------------------------------------------
     ! hipGraphExecEventRecordNodeSetEvent
     !---------------------------------------------
-    !>  @brief Sets the event for an event record node in the given graphExec.
-    !>
-    !>  @param [in] hGraphExec - instance of the executable graph with the node.
-    !>  @param [in] hNode - node from the graph which was used to instantiate graphExec.
-    !>  @param [in] event - pointer to the event.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphExecEventRecordNodeSetEvent(hGraphExec, hNode, event) &
        result(GraphExecEventRecordNodeSetEvent) &
        bind(C, name="hipGraphExecEventRecordNodeSetEvent")
@@ -12375,14 +7440,6 @@ module hip
     !---------------------------------------------
     ! hipGraphAddEventWaitNode
     !---------------------------------------------
-    !>  @brief Creates an event wait node and adds it to a graph.
-    !>
-    !>  @param [out] pGraphNode - Pointer to graph node that is created.
-    !>  @param [in] graph - Instance of the graph the node to be added.
-    !>  @param [in] pDependencies - const pointer to the node dependencies.
-    !>  @param [in] numDependencies - Number of dependencies.
-    !>  @param [in] event - Event for the node.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphAddEventWaitNode(pGraphNode, graph, pDependencies, numDependencies, event) &
        result(GraphAddEventWaitNode) &
        bind(C, name="hipGraphAddEventWaitNode")
@@ -12398,11 +7455,6 @@ module hip
     !---------------------------------------------
     ! hipGraphEventWaitNodeGetEvent
     !---------------------------------------------
-    !>  @brief Returns the event associated with an event wait node.
-    !>
-    !>  @param [in] node -  Instance of the node to get event of.
-    !>  @param [out] event_out - Pointer to return the event.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphEventWaitNodeGetEvent(node, event_out) &
        result(GraphEventWaitNodeGetEvent) &
        bind(C, name="hipGraphEventWaitNodeGetEvent")
@@ -12415,11 +7467,6 @@ module hip
     !---------------------------------------------
     ! hipGraphEventWaitNodeSetEvent
     !---------------------------------------------
-    !>  @brief Sets an event wait node's event.
-    !>
-    !>  @param [in] node - Instance of the node to set event of.
-    !>  @param [in] event - Pointer to the event.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphEventWaitNodeSetEvent(node, event) &
        result(GraphEventWaitNodeSetEvent) &
        bind(C, name="hipGraphEventWaitNodeSetEvent")
@@ -12432,12 +7479,6 @@ module hip
     !---------------------------------------------
     ! hipGraphExecEventWaitNodeSetEvent
     !---------------------------------------------
-    !>  @brief Sets the event for an event record node in the given graphExec.
-    !>
-    !>  @param [in] hGraphExec - instance of the executable graph with the node.
-    !>  @param [in] hNode - node from the graph which was used to instantiate graphExec.
-    !>  @param [in] event - pointer to the event.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphExecEventWaitNodeSetEvent(hGraphExec, hNode, event) &
        result(GraphExecEventWaitNodeSetEvent) &
        bind(C, name="hipGraphExecEventWaitNodeSetEvent")
@@ -12451,16 +7492,6 @@ module hip
     !---------------------------------------------
     ! hipGraphAddMemAllocNode
     !---------------------------------------------
-    !>  @brief Creates a memory allocation node and adds it to a graph
-    !>
-    !>  @param [out] pGraphNode      - Pointer to the graph node to create and add to the graph
-    !>  @param [in] graph            - Instance of the graph node to be added
-    !>  @param [in] pDependencies    - Const pointer to the node dependencies
-    !>  @param [in] numDependencies  - The number of dependencies
-    !>  @param [in, out] pNodeParams - Node parameters for memory allocation, returns a pointer to
-    !>  the
-    !>  allocated memory.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphAddMemAllocNode(pGraphNode, graph, pDependencies, numDependencies, &
                                      pNodeParams) &
        result(GraphAddMemAllocNode) &
@@ -12477,11 +7508,6 @@ module hip
     !---------------------------------------------
     ! hipGraphMemAllocNodeGetParams
     !---------------------------------------------
-    !>  @brief Returns parameters for memory allocation node
-    !>
-    !>  @param [in] node         - Memory allocation node to query
-    !>  @param [out] pNodeParams - Parameters for the specified memory allocation node
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphMemAllocNodeGetParams(node, pNodeParams) &
        result(GraphMemAllocNodeGetParams) &
        bind(C, name="hipGraphMemAllocNodeGetParams")
@@ -12494,14 +7520,6 @@ module hip
     !---------------------------------------------
     ! hipGraphAddMemFreeNode
     !---------------------------------------------
-    !>  @brief Creates a memory free node and adds it to a graph
-    !>
-    !>  @param [out] pGraphNode      - Pointer to the graph node to create and add to the graph
-    !>  @param [in] graph            - Instance of the graph node to be added
-    !>  @param [in] pDependencies    - Const pointer to the node dependencies
-    !>  @param [in] numDependencies  - The number of dependencies
-    !>  @param [in] dev_ptr          - Pointer to the memory to be freed
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphAddMemFreeNode(pGraphNode, graph, pDependencies, numDependencies, dev_ptr) &
        result(GraphAddMemFreeNode) &
        bind(C, name="hipGraphAddMemFreeNode")
@@ -12517,11 +7535,6 @@ module hip
     !---------------------------------------------
     ! hipGraphMemFreeNodeGetParams
     !---------------------------------------------
-    !>  @brief Returns parameters for memory free node
-    !>
-    !>  @param [in] node     - Memory free node to query
-    !>  @param [out] dev_ptr - Device pointer of the specified memory free node
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphMemFreeNodeGetParams(node, dev_ptr) &
        result(GraphMemFreeNodeGetParams) &
        bind(C, name="hipGraphMemFreeNodeGetParams")
@@ -12534,12 +7547,6 @@ module hip
     !---------------------------------------------
     ! hipDeviceGetGraphMemAttribute
     !---------------------------------------------
-    !>  @brief Get the mem attribute for graphs.
-    !>
-    !>  @param [in] device - Device to get attributes from
-    !>  @param [in] attr - Attribute type to be queried
-    !>  @param [out] value - Value of the queried attribute
-    !>  @returns `hipSuccess`, `hipErrorInvalidDevice`
     function hipDeviceGetGraphMemAttribute(device, attr, myValue) &
        result(DeviceGetGraphMemAttribute) &
        bind(C, name="hipDeviceGetGraphMemAttribute")
@@ -12553,12 +7560,6 @@ module hip
     !---------------------------------------------
     ! hipDeviceSetGraphMemAttribute
     !---------------------------------------------
-    !>  @brief Set the mem attribute for graphs.
-    !>
-    !>  @param [in] device - Device to set attribute of.
-    !>  @param [in] attr - Attribute type to be set.
-    !>  @param [in] value - Value of the attribute.
-    !>  @returns `hipSuccess`, `hipErrorInvalidDevice`
     function hipDeviceSetGraphMemAttribute(device, attr, myValue) &
        result(DeviceSetGraphMemAttribute) &
        bind(C, name="hipDeviceSetGraphMemAttribute")
@@ -12572,11 +7573,6 @@ module hip
     !---------------------------------------------
     ! hipDeviceGraphMemTrim
     !---------------------------------------------
-    !>  @brief Free unused memory reserved for graphs on a specific device and return it back to the
-    !>  OS.
-    !>
-    !>  @param [in] device - Device for which memory should be trimmed
-    !>  @returns `hipSuccess`, `hipErrorInvalidDevice`
     function hipDeviceGraphMemTrim(device) &
        result(DeviceGraphMemTrim) &
        bind(C, name="hipDeviceGraphMemTrim")
@@ -12588,14 +7584,6 @@ module hip
     !---------------------------------------------
     ! hipUserObjectCreate
     !---------------------------------------------
-    !>  @brief Create an instance of userObject to manage lifetime of a resource.
-    !>
-    !>  @param [out] object_out - pointer to instace of userobj.
-    !>  @param [in] ptr - pointer to pass to destroy function.
-    !>  @param [in] destroy - destroy callback to remove resource.
-    !>  @param [in] initialRefcount - reference to resource.
-    !>  @param [in] flags - flags passed to API.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipUserObjectCreate(object_out, ptr, destroy, initialRefcount, flags) &
        result(UserObjectCreate) &
        bind(C, name="hipUserObjectCreate")
@@ -12611,11 +7599,6 @@ module hip
     !---------------------------------------------
     ! hipUserObjectRelease
     !---------------------------------------------
-    !>  @brief Release number of references to resource.
-    !>
-    !>  @param [in] object - pointer to instace of userobj.
-    !>  @param [in] count - reference to resource to be retained.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipUserObjectRelease(object, count) &
        result(UserObjectRelease) &
        bind(C, name="hipUserObjectRelease")
@@ -12628,11 +7611,6 @@ module hip
     !---------------------------------------------
     ! hipUserObjectRetain
     !---------------------------------------------
-    !>  @brief Retain number of references to resource.
-    !>
-    !>  @param [in] object - pointer to instace of userobj.
-    !>  @param [in] count - reference to resource to be retained.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipUserObjectRetain(object, count) &
        result(UserObjectRetain) &
        bind(C, name="hipUserObjectRetain")
@@ -12645,13 +7623,6 @@ module hip
     !---------------------------------------------
     ! hipGraphRetainUserObject
     !---------------------------------------------
-    !>  @brief Retain user object for graphs.
-    !>
-    !>  @param [in] graph - pointer to graph to retain the user object for.
-    !>  @param [in] object - pointer to instace of userobj.
-    !>  @param [in] count - reference to resource to be retained.
-    !>  @param [in] flags - flags passed to API.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphRetainUserObject(graph, object, count, flags) &
        result(GraphRetainUserObject) &
        bind(C, name="hipGraphRetainUserObject")
@@ -12666,12 +7637,6 @@ module hip
     !---------------------------------------------
     ! hipGraphReleaseUserObject
     !---------------------------------------------
-    !>  @brief Release user object from graphs.
-    !>
-    !>  @param [in] graph - pointer to graph to retain the user object for.
-    !>  @param [in] object - pointer to instace of userobj.
-    !>  @param [in] count - reference to resource to be retained.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphReleaseUserObject(graph, object, count) &
        result(GraphReleaseUserObject) &
        bind(C, name="hipGraphReleaseUserObject")
@@ -12685,12 +7650,6 @@ module hip
     !---------------------------------------------
     ! hipGraphDebugDotPrint
     !---------------------------------------------
-    !>  @brief Write a DOT file describing graph structure.
-    !>
-    !>  @param [in] graph - graph object for which DOT file has to be generated.
-    !>  @param [in] path - path to write the DOT file.
-    !>  @param [in] flags - Flags from hipGraphDebugDotFlags to get additional node information.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorOperatingSystem`
     function hipGraphDebugDotPrint(graph, path, flags) &
        result(GraphDebugDotPrint) &
        bind(C, name="hipGraphDebugDotPrint")
@@ -12704,16 +7663,6 @@ module hip
     !---------------------------------------------
     ! hipGraphKernelNodeCopyAttributes
     !---------------------------------------------
-    !>  @brief Copies attributes from source node to destination node.
-    !>
-    !>  Copies attributes from source node to destination node.
-    !>  Both node must have the same context.
-    !>
-    !>  @param [out] hDst - Destination node.
-    !>  @param [in] hSrc - Source node.
-    !>  For list of attributes see `hipKernelNodeAttrID`.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidContext`
     function hipGraphKernelNodeCopyAttributes(hSrc, hDst) &
        result(GraphKernelNodeCopyAttributes) &
        bind(C, name="hipGraphKernelNodeCopyAttributes")
@@ -12726,25 +7675,6 @@ module hip
     !---------------------------------------------
     ! hipGraphNodeSetEnabled
     !---------------------------------------------
-    !>  @brief Enables or disables the specified node in the given graphExec
-    !>
-    !>  Sets hNode to be either enabled or disabled. Disabled nodes are functionally equivalent
-    !>  to empty nodes until they are reenabled. Existing node parameters are not affected by
-    !>  disabling/enabling the node.
-    !>
-    !>  The node is identified by the corresponding hNode in the non-executable graph, from which
-    !>  the
-    !>  executable graph was instantiated.
-    !>
-    !>  hNode must not have been removed from the original graph.
-    !>
-    !>  @note Currently only kernel, memset and memcpy nodes are supported.
-    !>
-    !>  @param [in] hGraphExec - The executable graph in which to set the specified node.
-    !>  @param [in] hNode      - Node from the graph from which graphExec was instantiated.
-    !>  @param [in] isEnabled  - Node is enabled if != 0, otherwise the node is disabled.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`,
     function hipGraphNodeSetEnabled(hGraphExec, hNode, isEnabled) &
        result(GraphNodeSetEnabled) &
        bind(C, name="hipGraphNodeSetEnabled")
@@ -12758,22 +7688,6 @@ module hip
     !---------------------------------------------
     ! hipGraphNodeGetEnabled
     !---------------------------------------------
-    !>  @brief Query whether a node in the given graphExec is enabled
-    !>
-    !>  Sets isEnabled to 1 if hNode is enabled, or 0 if it is disabled.
-    !>
-    !>  The node is identified by the corresponding node in the non-executable graph, from which the
-    !>  executable graph was instantiated.
-    !>
-    !>  hNode must not have been removed from the original graph.
-    !>
-    !>  @note Currently only kernel, memset and memcpy nodes are supported.
-    !>
-    !>  @param [in]  hGraphExec - The executable graph in which to set the specified node.
-    !>  @param [in]  hNode      - Node from the graph from which graphExec was instantiated.
-    !>  @param [out] isEnabled  - Location to return the enabled status of the node.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphNodeGetEnabled(hGraphExec, hNode, isEnabled) &
        result(GraphNodeGetEnabled) &
        bind(C, name="hipGraphNodeGetEnabled")
@@ -12787,14 +7701,6 @@ module hip
     !---------------------------------------------
     ! hipGraphAddExternalSemaphoresWaitNode
     !---------------------------------------------
-    !>  @brief Creates a external semaphor wait node and adds it to a graph.
-    !>
-    !>  @param [out] pGraphNode - pointer to the graph node to create.
-    !>  @param [in] graph - instance of the graph to add the created node.
-    !>  @param [in] pDependencies - const pointer to the dependencies on the memset execution node.
-    !>  @param [in] numDependencies - the number of the dependencies.
-    !>  @param [in] nodeParams -pointer to the parameters.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphAddExternalSemaphoresWaitNode(pGraphNode, graph, pDependencies, &
                                                    numDependencies, nodeParams) &
        result(GraphAddExternalSemaphoresWaitNode) &
@@ -12811,14 +7717,6 @@ module hip
     !---------------------------------------------
     ! hipGraphAddExternalSemaphoresSignalNode
     !---------------------------------------------
-    !>  @brief Creates a external semaphor signal node and adds it to a graph.
-    !>
-    !>  @param [out] pGraphNode - pointer to the graph node to create.
-    !>  @param [in] graph - instance of the graph to add the created node.
-    !>  @param [in] pDependencies - const pointer to the dependencies on the memset execution node.
-    !>  @param [in] numDependencies - the number of the dependencies.
-    !>  @param [in] nodeParams -pointer to the parameters.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphAddExternalSemaphoresSignalNode(pGraphNode, graph, pDependencies, &
                                                      numDependencies, nodeParams) &
        result(GraphAddExternalSemaphoresSignalNode) &
@@ -12835,11 +7733,6 @@ module hip
     !---------------------------------------------
     ! hipGraphExternalSemaphoresSignalNodeSetParams
     !---------------------------------------------
-    !>  @brief Updates node parameters in the external semaphore signal node.
-    !>
-    !>  @param [in]  hNode      - Node from the graph from which graphExec was instantiated.
-    !>  @param [in]  nodeParams  - Pointer to the params to be set.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphExternalSemaphoresSignalNodeSetParams(hNode, nodeParams) &
        result(GraphExternalSemaphoresSignalNodeSetParams) &
        bind(C, name="hipGraphExternalSemaphoresSignalNodeSetParams")
@@ -12852,11 +7745,6 @@ module hip
     !---------------------------------------------
     ! hipGraphExternalSemaphoresWaitNodeSetParams
     !---------------------------------------------
-    !>  @brief Updates node parameters in the external semaphore wait node.
-    !>
-    !>  @param [in]  hNode      - Node from the graph from which graphExec was instantiated.
-    !>  @param [in]  nodeParams  - Pointer to the params to be set.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphExternalSemaphoresWaitNodeSetParams(hNode, nodeParams) &
        result(GraphExternalSemaphoresWaitNodeSetParams) &
        bind(C, name="hipGraphExternalSemaphoresWaitNodeSetParams")
@@ -12869,11 +7757,6 @@ module hip
     !---------------------------------------------
     ! hipGraphExternalSemaphoresSignalNodeGetParams
     !---------------------------------------------
-    !>  @brief Returns external semaphore signal node params.
-    !>
-    !>  @param [in]   hNode       - Node from the graph from which graphExec was instantiated.
-    !>  @param [out]  params_out  - Pointer to params.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphExternalSemaphoresSignalNodeGetParams(hNode, params_out) &
        result(GraphExternalSemaphoresSignalNodeGetParams) &
        bind(C, name="hipGraphExternalSemaphoresSignalNodeGetParams")
@@ -12886,11 +7769,6 @@ module hip
     !---------------------------------------------
     ! hipGraphExternalSemaphoresWaitNodeGetParams
     !---------------------------------------------
-    !>  @brief Returns external semaphore wait node params.
-    !>
-    !>  @param [in]   hNode       - Node from the graph from which graphExec was instantiated.
-    !>  @param [out]  params_out  - Pointer to params.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphExternalSemaphoresWaitNodeGetParams(hNode, params_out) &
        result(GraphExternalSemaphoresWaitNodeGetParams) &
        bind(C, name="hipGraphExternalSemaphoresWaitNodeGetParams")
@@ -12903,12 +7781,6 @@ module hip
     !---------------------------------------------
     ! hipGraphExecExternalSemaphoresSignalNodeSetParams
     !---------------------------------------------
-    !>  @brief Updates node parameters in the external semaphore signal node in the given graphExec.
-    !>
-    !>  @param [in]  hGraphExec - The executable graph in which to set the specified node.
-    !>  @param [in]  hNode      - Node from the graph from which graphExec was instantiated.
-    !>  @param [in]  nodeParams  - Pointer to the params to be set.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphExecExternalSemaphoresSignalNodeSetParams(hGraphExec, hNode, nodeParams) &
        result(GraphExecExternalSemaphoresSignalNodeSetParams) &
        bind(C, name="hipGraphExecExternalSemaphoresSignalNodeSetParams")
@@ -12922,12 +7794,6 @@ module hip
     !---------------------------------------------
     ! hipGraphExecExternalSemaphoresWaitNodeSetParams
     !---------------------------------------------
-    !>  @brief Updates node parameters in the external semaphore wait node in the given graphExec.
-    !>
-    !>  @param [in]  hGraphExec - The executable graph in which to set the specified node.
-    !>  @param [in]  hNode      - Node from the graph from which graphExec was instantiated.
-    !>  @param [in]  nodeParams  - Pointer to the params to be set.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphExecExternalSemaphoresWaitNodeSetParams(hGraphExec, hNode, nodeParams) &
        result(GraphExecExternalSemaphoresWaitNodeSetParams) &
        bind(C, name="hipGraphExecExternalSemaphoresWaitNodeSetParams")
@@ -12941,11 +7807,6 @@ module hip
     !---------------------------------------------
     ! hipDrvGraphMemcpyNodeGetParams
     !---------------------------------------------
-    !>  @brief Gets a memcpy node's parameters.
-    !>
-    !>  @param [in] hNode - instance of the node to get parameters from.
-    !>  @param [out] nodeParams - pointer to the parameters.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipDrvGraphMemcpyNodeGetParams(hNode, nodeParams) &
        result(DrvGraphMemcpyNodeGetParams) &
        bind(C, name="hipDrvGraphMemcpyNodeGetParams")
@@ -12958,11 +7819,6 @@ module hip
     !---------------------------------------------
     ! hipDrvGraphMemcpyNodeSetParams
     !---------------------------------------------
-    !>  @brief Sets a memcpy node's parameters.
-    !>
-    !>  @param [in] hNode - instance of the node to Set parameters for.
-    !>  @param [out] nodeParams - pointer to the parameters.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipDrvGraphMemcpyNodeSetParams(hNode, nodeParams) &
        result(DrvGraphMemcpyNodeSetParams) &
        bind(C, name="hipDrvGraphMemcpyNodeSetParams")
@@ -12975,15 +7831,6 @@ module hip
     !---------------------------------------------
     ! hipDrvGraphAddMemsetNode
     !---------------------------------------------
-    !>  @brief Creates a memset node and adds it to a graph.
-    !>
-    !>  @param [out] phGraphNode - pointer to graph node to create.
-    !>  @param [in] hGraph - instance of graph to add the created node to.
-    !>  @param [in] dependencies - const pointer to the dependencies on the memset execution node.
-    !>  @param [in] numDependencies - number of the dependencies.
-    !>  @param [in] memsetParams - const pointer to the parameters for the memory set.
-    !>  @param [in] ctx - cotext related to current device.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipDrvGraphAddMemsetNode(phGraphNode, hGraph, dependencies, numDependencies, &
                                       memsetParams, ctx) &
        result(DrvGraphAddMemsetNode) &
@@ -13001,14 +7848,6 @@ module hip
     !---------------------------------------------
     ! hipDrvGraphAddMemFreeNode
     !---------------------------------------------
-    !>  @brief Creates a memory free node and adds it to a graph
-    !>
-    !>  @param [out] phGraphNode - Pointer to the graph node to create and add to the graph
-    !>  @param [in]  hGraph - Instance of the graph the node to be added
-    !>  @param [in]  dependencies - Const pointer to the node dependencies
-    !>  @param [in]  numDependencies - The number of dependencies
-    !>  @param [in]  dptr - Pointer to the memory to be freed
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipDrvGraphAddMemFreeNode(phGraphNode, hGraph, dependencies, numDependencies, dptr) &
        result(DrvGraphAddMemFreeNode) &
        bind(C, name="hipDrvGraphAddMemFreeNode")
@@ -13024,13 +7863,6 @@ module hip
     !---------------------------------------------
     ! hipDrvGraphExecMemcpyNodeSetParams
     !---------------------------------------------
-    !>  @brief Sets the parameters for a memcpy node in the given graphExec.
-    !>
-    !>  @param [in] hGraphExec - instance of the executable graph with the node.
-    !>  @param [in] hNode - instance of the node to set parameters to.
-    !>  @param [in] copyParams - const pointer to the memcpy node params.
-    !>  @param [in] ctx - cotext related to current device.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipDrvGraphExecMemcpyNodeSetParams(hGraphExec, hNode, copyParams, ctx) &
        result(DrvGraphExecMemcpyNodeSetParams) &
        bind(C, name="hipDrvGraphExecMemcpyNodeSetParams")
@@ -13045,13 +7877,6 @@ module hip
     !---------------------------------------------
     ! hipDrvGraphExecMemsetNodeSetParams
     !---------------------------------------------
-    !>  @brief Sets the parameters for a memset node in the given graphExec.
-    !>
-    !>  @param [in] hGraphExec - instance of the executable graph with the node.
-    !>  @param [in] hNode - instance of the node to set parameters to.
-    !>  @param [in] memsetParams - pointer to the parameters.
-    !>  @param [in] ctx - cotext related to current device.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipDrvGraphExecMemsetNodeSetParams(hGraphExec, hNode, memsetParams, ctx) &
        result(DrvGraphExecMemsetNodeSetParams) &
        bind(C, name="hipDrvGraphExecMemsetNodeSetParams")
@@ -13066,13 +7891,6 @@ module hip
     !---------------------------------------------
     ! hipMemAddressFree
     !---------------------------------------------
-    !>  @brief Frees an address range reservation made via hipMemAddressReserve
-    !>
-    !>  @param [in] devPtr - starting address of the range.
-    !>  @param [in] size - size of the range.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotSupported`
-    !>
-    !>  @note  This API is implemented on Linux and is under development on Microsoft Windows.
     function hipMemAddressFree(devPtr, mySize) &
        result(MemAddressFree) &
        bind(C, name="hipMemAddressFree")
@@ -13085,16 +7903,6 @@ module hip
     !---------------------------------------------
     ! hipMemAddressReserve
     !---------------------------------------------
-    !>  @brief Reserves an address range
-    !>
-    !>  @param [out] ptr - starting address of the reserved range.
-    !>  @param [in] size - size of the reservation.
-    !>  @param [in] alignment - alignment of the address.
-    !>  @param [in] addr - requested starting address of the range.
-    !>  @param [in] flags - currently unused, must be zero.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotSupported`
-    !>
-    !>  @note  This API is implemented on Linux and is under development on Microsoft Windows.
     function hipMemAddressReserve(ptr, mySize, alignment, addr, flags) &
        result(MemAddressReserve) &
        bind(C, name="hipMemAddressReserve")
@@ -13110,23 +7918,6 @@ module hip
     !---------------------------------------------
     ! hipMemCreate
     !---------------------------------------------
-    !>  @brief Creates a memory handle for the allocation described by the properties and given size
-    !>
-    !>  @param [out] handle - value of the returned handle.
-    !>  @param [in] size - size of the allocation.
-    !>  @param [in] prop - properties of the allocation.
-    !>  @param [in] flags - currently unused, must be zero.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotSupported`
-    !>
-    !>  This API creates a memory allocation on the target device specified through the prop
-    !>  structure.
-    !>  The prop allocation type must be specified as either `hipMemAllocationTypePinned` or
-    !>  `hipMemAllocationTypeUncached`.
-    !>  The prop location type must be specified as `hipMemLocationTypeDevice` or
-    !>  `hipMemLocationTypeHost`.
-    !>  Any other value results in `hipErrorInvalidValue`.
-    !>
-    !>  @note  This API is implemented on Linux and is under development on Microsoft Windows.
     function hipMemCreate(handle, mySize, prop, flags) &
        result(MemCreate) &
        bind(C, name="hipMemCreate")
@@ -13141,15 +7932,6 @@ module hip
     !---------------------------------------------
     ! hipMemExportToShareableHandle
     !---------------------------------------------
-    !>  @brief Exports an allocation to a requested shareable handle type.
-    !>
-    !>  @param [out] shareableHandle - value of the returned handle.
-    !>  @param [in] handle - handle to share.
-    !>  @param [in] handleType - type of the shareable handle.
-    !>  @param [in] flags - currently unused, must be zero.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotSupported`
-    !>
-    !>  @note  This API is implemented on Linux and is under development on Microsoft Windows.
     function hipMemExportToShareableHandle(shareableHandle, handle, handleType, flags) &
        result(MemExportToShareableHandle) &
        bind(C, name="hipMemExportToShareableHandle")
@@ -13164,14 +7946,6 @@ module hip
     !---------------------------------------------
     ! hipMemGetAccess
     !---------------------------------------------
-    !>  @brief Get the access flags set for the given location and ptr.
-    !>
-    !>  @param [out] flags - flags for this location.
-    !>  @param [in] location - target location.
-    !>  @param [in] ptr - address to check the access flags.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotSupported`
-    !>
-    !>  @note  This API is implemented on Linux and is under development on Microsoft Windows.
     function hipMemGetAccess(flags, location, ptr) &
        result(MemGetAccess) &
        bind(C, name="hipMemGetAccess")
@@ -13185,14 +7959,6 @@ module hip
     !---------------------------------------------
     ! hipMemGetAllocationGranularity
     !---------------------------------------------
-    !>  @brief Calculates either the minimal or recommended granularity.
-    !>
-    !>  @param [out] granularity - returned granularity.
-    !>  @param [in] prop - location properties.
-    !>  @param [in] option - determines which granularity to return.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotSupported`
-    !>
-    !>  @note  This API is implemented on Linux and is under development on Microsoft Windows.
     function hipMemGetAllocationGranularity(granularity, prop, option) &
        result(MemGetAllocationGranularity) &
        bind(C, name="hipMemGetAllocationGranularity")
@@ -13206,13 +7972,6 @@ module hip
     !---------------------------------------------
     ! hipMemGetAllocationPropertiesFromHandle
     !---------------------------------------------
-    !>  @brief Retrieve the property structure of the given handle.
-    !>
-    !>  @param [out] prop - properties of the given handle.
-    !>  @param [in] handle - handle to perform the query on.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotSupported`
-    !>
-    !>  @note  This API is implemented on Linux and is under development on Microsoft Windows.
     function hipMemGetAllocationPropertiesFromHandle(prop, handle) &
        result(MemGetAllocationPropertiesFromHandle) &
        bind(C, name="hipMemGetAllocationPropertiesFromHandle")
@@ -13225,14 +7984,6 @@ module hip
     !---------------------------------------------
     ! hipMemImportFromShareableHandle
     !---------------------------------------------
-    !>  @brief Imports an allocation from a requested shareable handle type.
-    !>
-    !>  @param [out] handle - returned value.
-    !>  @param [in] osHandle - shareable handle representing the memory allocation.
-    !>  @param [in] shHandleType - handle type.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotSupported`
-    !>
-    !>  @note  This API is implemented on Linux and is under development on Microsoft Windows.
     function hipMemImportFromShareableHandle(handle, osHandle, shHandleType) &
        result(MemImportFromShareableHandle) &
        bind(C, name="hipMemImportFromShareableHandle")
@@ -13246,16 +7997,6 @@ module hip
     !---------------------------------------------
     ! hipMemMap
     !---------------------------------------------
-    !>  @brief Maps an allocation handle to a reserved virtual address range.
-    !>
-    !>  @param [in] ptr - address where the memory will be mapped.
-    !>  @param [in] size - size of the mapping.
-    !>  @param [in] offset - offset into the memory, currently must be zero.
-    !>  @param [in] handle - memory allocation to be mapped.
-    !>  @param [in] flags - currently unused, must be zero.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotSupported`
-    !>
-    !>  @note  This API is implemented on Linux and is under development on Microsoft Windows.
     function hipMemMap(ptr, mySize, offset, handle, flags) &
        result(MemMap) &
        bind(C, name="hipMemMap")
@@ -13271,12 +8012,6 @@ module hip
     !---------------------------------------------
     ! hipMemMapArrayAsync
     !---------------------------------------------
-    !>  @brief Maps or unmaps subregions of sparse HIP arrays and sparse HIP mipmapped arrays.
-    !>
-    !>  @param [in] mapInfoList - list of hipArrayMapInfo.
-    !>  @param [in] count - number of hipArrayMapInfo in mapInfoList.
-    !>  @param [in] stream - stream identifier for the stream to use for map or unmap operations.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotSupported`
     function hipMemMapArrayAsync(mapInfoList, count, stream) &
        result(MemMapArrayAsync) &
        bind(C, name="hipMemMapArrayAsync")
@@ -13290,14 +8025,6 @@ module hip
     !---------------------------------------------
     ! hipMemRelease
     !---------------------------------------------
-    !>  @brief Release a memory handle representing a memory allocation which was previously
-    !>  allocated
-    !>  through hipMemCreate.
-    !>
-    !>  @param [in] handle - handle of the memory allocation.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotSupported`
-    !>
-    !>  @note  This API is implemented on Linux and is under development on Microsoft Windows.
     function hipMemRelease(handle) &
        result(MemRelease) &
        bind(C, name="hipMemRelease")
@@ -13309,13 +8036,6 @@ module hip
     !---------------------------------------------
     ! hipMemRetainAllocationHandle
     !---------------------------------------------
-    !>  @brief Returns the allocation handle of the backing memory allocation given the address.
-    !>
-    !>  @param [out] handle - handle representing addr.
-    !>  @param [in] addr - address to look up.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotSupported`
-    !>
-    !>  @note  This API is implemented on Linux and is under development on Microsoft Windows.
     function hipMemRetainAllocationHandle(handle, addr) &
        result(MemRetainAllocationHandle) &
        bind(C, name="hipMemRetainAllocationHandle")
@@ -13328,17 +8048,6 @@ module hip
     !---------------------------------------------
     ! hipMemSetAccess
     !---------------------------------------------
-    !>  @brief Set the access flags for each location specified in desc for the given virtual
-    !>  address
-    !>  range.
-    !>
-    !>  @param [in] ptr - starting address of the virtual address range.
-    !>  @param [in] size - size of the range.
-    !>  @param [in] desc - array of hipMemAccessDesc.
-    !>  @param [in] count - number of hipMemAccessDesc in desc.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotSupported`
-    !>
-    !>  @note  This API is implemented on Linux and is under development on Microsoft Windows.
     function hipMemSetAccess(ptr, mySize, desc, count) &
        result(MemSetAccess) &
        bind(C, name="hipMemSetAccess")
@@ -13353,13 +8062,6 @@ module hip
     !---------------------------------------------
     ! hipMemUnmap
     !---------------------------------------------
-    !>  @brief Unmap memory allocation of a given address range.
-    !>
-    !>  @param [in] ptr - starting address of the range to unmap.
-    !>  @param [in] size - size of the virtual address range.
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorNotSupported`
-    !>
-    !>  @note  This API is implemented on Linux and is under development on Microsoft Windows.
     function hipMemUnmap(ptr, mySize) &
        result(MemUnmap) &
        bind(C, name="hipMemUnmap")
@@ -13372,14 +8074,6 @@ module hip
     !---------------------------------------------
     ! hipGraphicsMapResources
     !---------------------------------------------
-    !>  @brief Maps a graphics resource for access.
-    !>
-    !>  @param [in] count - Number of resources to map.
-    !>  @param [in] resources - Pointer of resources to map.
-    !>  @param [in] stream - Stream for synchronization.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorUnknown`,
-    !>  `hipErrorInvalidResourceHandle`
     function hipGraphicsMapResources(count, resources, stream) &
        result(GraphicsMapResources) &
        bind(C, name="hipGraphicsMapResources")
@@ -13393,17 +8087,6 @@ module hip
     !---------------------------------------------
     ! hipGraphicsSubResourceGetMappedArray
     !---------------------------------------------
-    !>  @brief Get an array through which to access a subresource of a mapped graphics resource.
-    !>
-    !>  @param [out] array - Pointer of array through which a subresource of resource may be
-    !>  accessed.
-    !>  @param [in] resource - Mapped resource to access.
-    !>  @param [in] arrayIndex - Array index for the subresource to access.
-    !>  @param [in] mipLevel - Mipmap level for the subresource to access.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  @note  In this API, the value of arrayIndex higher than zero is currently not supported.
     function hipGraphicsSubResourceGetMappedArray(array, resource, arrayIndex, mipLevel) &
        result(GraphicsSubResourceGetMappedArray) &
        bind(C, name="hipGraphicsSubResourceGetMappedArray")
@@ -13418,13 +8101,6 @@ module hip
     !---------------------------------------------
     ! hipGraphicsResourceGetMappedPointer
     !---------------------------------------------
-    !>  @brief Gets device accessible address of a graphics resource.
-    !>
-    !>  @param [out] devPtr - Pointer of device through which graphic resource may be accessed.
-    !>  @param [out] size - Size of the buffer accessible from devPtr.
-    !>  @param [in] resource - Mapped resource to access.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipGraphicsResourceGetMappedPointer(devPtr, mySize, resource) &
        result(GraphicsResourceGetMappedPointer) &
        bind(C, name="hipGraphicsResourceGetMappedPointer")
@@ -13438,14 +8114,6 @@ module hip
     !---------------------------------------------
     ! hipGraphicsUnmapResources
     !---------------------------------------------
-    !>  @brief Unmaps graphics resources.
-    !>
-    !>  @param [in] count - Number of resources to unmap.
-    !>  @param [in] resources - Pointer of resources to unmap.
-    !>  @param [in] stream - Stream for synchronization.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorUnknown`,
-    !>  `hipErrorContextIsDestroyed`
     function hipGraphicsUnmapResources(count, resources, stream) &
        result(GraphicsUnmapResources) &
        bind(C, name="hipGraphicsUnmapResources")
@@ -13459,11 +8127,6 @@ module hip
     !---------------------------------------------
     ! hipGraphicsUnregisterResource
     !---------------------------------------------
-    !>  @brief Unregisters a graphics resource.
-    !>
-    !>  @param [in] resource - Graphics resources to unregister.
-    !>
-    !>  @returns `hipSuccess`
     function hipGraphicsUnregisterResource(resource) &
        result(GraphicsUnregisterResource) &
        bind(C, name="hipGraphicsUnregisterResource")
@@ -13475,12 +8138,6 @@ module hip
     !---------------------------------------------
     ! hipCreateSurfaceObject
     !---------------------------------------------
-    !>  @brief Create a surface object.
-    !>
-    !>  @param [out] pSurfObject  Pointer of surface object to be created.
-    !>  @param [in] pResDesc  Pointer of suface object descriptor.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipCreateSurfaceObject(pSurfObject, pResDesc) &
        result(CreateSurfaceObject) &
        bind(C, name="hipCreateSurfaceObject")
@@ -13493,11 +8150,6 @@ module hip
     !---------------------------------------------
     ! hipDestroySurfaceObject
     !---------------------------------------------
-    !>  @brief Destroy a surface object.
-    !>
-    !>  @param [in] surfaceObject  Surface object to be destroyed.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
     function hipDestroySurfaceObject(surfaceObject) &
        result(DestroySurfaceObject) &
        bind(C, name="hipDestroySurfaceObject")
@@ -13509,14 +8161,6 @@ module hip
     !---------------------------------------------
     ! hipExtEnableLogging
     !---------------------------------------------
-    !>  @brief Enable HIP runtime logging.
-    !>
-    !>  This function enables the HIP runtime logging mechanism, allowing diagnostic
-    !>  and trace information to be captured during HIP API execution.
-    !>
-    !>  @returns `hipSuccess`
-    !>
-    !>  @see hipExtDisableLogging, hipExtSetLoggingParams
     function hipExtEnableLogging() &
        result(ExtEnableLogging) &
        bind(C, name="hipExtEnableLogging")
@@ -13527,14 +8171,6 @@ module hip
     !---------------------------------------------
     ! hipExtDisableLogging
     !---------------------------------------------
-    !>  @brief Disable HIP runtime logging.
-    !>
-    !>  This function disables the HIP runtime logging mechanism, stopping the capture
-    !>  of diagnostic and trace information during HIP API execution.
-    !>
-    !>  @returns `hipSuccess`
-    !>
-    !>  @see hipExtEnableLogging, hipExtSetLoggingParams
     function hipExtDisableLogging() &
        result(ExtDisableLogging) &
        bind(C, name="hipExtDisableLogging")
@@ -13545,19 +8181,6 @@ module hip
     !---------------------------------------------
     ! hipExtSetLoggingParams
     !---------------------------------------------
-    !>  @brief Set HIP runtime logging parameters.
-    !>
-    !>  This function configures the logging behavior of the HIP runtime, including
-    !>  the verbosity level, buffer size, and which components to log.
-    !>
-    !>  @param [in] log_level The logging verbosity level. Higher values produce more detailed
-    !>  output.
-    !>  @param [in] log_size   Reserved for future use. Currently not implemented.
-    !>  @param [in] log_mask   A bitmask specifying which HIP runtime components to log.
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    !>
-    !>  @see hipExtEnableLogging, hipExtDisableLogging
     function hipExtSetLoggingParams(log_level, log_size, log_mask) &
        result(ExtSetLoggingParams) &
        bind(C, name="hipExtSetLoggingParams")
@@ -14133,56 +8756,9 @@ module hip
        integer(kind(hipSuccess)) :: GetProcAddress_spt
     end function hipGetProcAddress_spt
 
-    !---------------------------------------------
-    ! hipChooseDeviceR0600
-    !---------------------------------------------
-    !>  @brief Device which matches hipDeviceProp_t is returned
-    !>
-    !>  @param [out] device Pointer of the device
-    !>  @param [in]  prop Pointer of the properties
-    !>
-    !>  @returns `hipSuccess`, `hipErrorInvalidValue`
-    function hipChooseDevice(device, prop) &
-       result(ChooseDevice) &
-       bind(C, name="hipChooseDeviceR0600")
-       import :: c_int, hipDeviceProp_t, hipSuccess
-       integer(c_int) :: device(*)
-       type(hipDeviceProp_t) :: prop
-       integer(kind(hipSuccess)) :: ChooseDevice
-    end function hipChooseDevice
-
   end interface
 
   interface hipMemcpy
-  !>   @brief Copy data from src to dst.
-  !>
-  !>   It supports memory from host to device,
-  !>   device to host, device to device and host to host
-  !>   The src and dst must not overlap.
-  !>
-  !>   For hipMemcpy, the copy is always performed by the current device (set by hipSetDevice).
-  !>   For multi-gpu or peer-to-peer configurations, it is recommended to set the current device to
-  !>   the
-  !>   device where the src data is physically located. For optimal peer-to-peer copies, the copy
-  !>  device must be able to access the src and dst pointers (by calling hipDeviceEnablePeerAccess
-  !>  with
-  !>  copy agent as the current device and src/dst as the peerDevice argument.  if this is not done,
-  !>  the hipMemcpy will still work, but will perform the copy using a staging buffer on the host.
-  !>   Calling hipMemcpy with dst and src pointers that do not match the hipMemcpyKind results in
-  !>   undefined behavior.
-  !>
-  !>   @param[out]  dest Data being copy to
-  !>   @param[in]  src Data being copy from
-  !>   @param[in]  sizeBytes Data size in bytes
-  !>   @param[in]  myKind Kind of transfer
-  !>   @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorUnknown`
-  !>
-  !>   @see hipArrayCreate, hipArrayDestroy, hipArrayGetDescriptor, hipMemAlloc, hipMemAllocHost,
-  !>  hipMemAllocPitch, hipMemcpy2D, hipMemcpy2DAsync, hipMemcpy2DUnaligned, hipMemcpyAtoA,
-  !>  hipMemcpyAtoD, hipMemcpyAtoH, hipMemcpyAtoHAsync, hipMemcpyDtoA, hipMemcpyDtoD,
-  !>  hipMemcpyDtoDAsync, hipMemcpyDtoH, hipMemcpyDtoHAsync, hipMemcpyHtoA, hipMemcpyHtoAAsync,
-  !>  hipMemcpyHtoDAsync, hipMemFree, hipMemFreeHost, hipMemGetAddressRange, hipMemGetInfo,
-  !>  hipMemHostAlloc, hipMemHostGetDevicePointer
     function hipMemcpy_(dest, src, sizeBytes, myKind) bind(c, name="hipMemcpy")
       use iso_c_binding
       implicit none
@@ -14192,7 +8768,7 @@ module hip
       integer(c_size_t), value :: sizeBytes
       integer(c_int), value :: myKind
     end function hipMemcpy_
-#ifdef USE_ASSUMED_RANK_INTERFACES
+#ifdef USE_ASSUMED_RANK
     module procedure hipMemcpy_i4_assumed_rank
     module procedure hipMemcpy_i4_assumed_rank_c_size_t
     module procedure hipMemcpy_i4_assumed_rank_c_int
@@ -14387,34 +8963,6 @@ module hip
   end interface hipMemcpy
 
   interface hipMemcpyAsync
-  !>   @brief Copies data from src to dst asynchronously.
-  !>
-  !>   The copy is always performed by the device associated with the specified stream.
-  !>
-  !>   For multi-gpu or peer-to-peer configurations, it is recommended to use a stream which is
-  !>  attached to the device where the src data is physically located.
-  !>   For optimal peer-to-peer copies, the copy device must be able to access the src and dst
-  !>  pointers (by calling hipDeviceEnablePeerAccess) with copy agent as the current device and
-  !>  src/dest as the peerDevice argument. If enabling device peer access is not done, the memory
-  !>  copy
-  !>  will still work, but will perform the copy using a staging buffer on the host.
-  !>
-  !>   @note If host or dst are not pinned, the memory copy will be performed synchronously. For
-  !>  best performance, use hipHostMalloc to allocate host memory that is transferred
-  !>  asynchronously.
-  !>
-  !>   @param[out] dest Data being copy to
-  !>   @param[in]  src Data being copy from
-  !>   @param[in]  sizeBytes Data size in bytes
-  !>   @param[in]  myKind  Type of memory transfer
-  !>   @param[in]  stream  Stream identifier
-  !>   @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorUnknown`
-  !>
-  !>   @see hipMemcpy, hipMemcpy2D, hipMemcpyToArray, hipMemcpy2DToArray, hipMemcpyFromArray,
-  !>  hipMemcpy2DFromArray, hipMemcpyArrayToArray, hipMemcpy2DArrayToArray, hipMemcpyToSymbol,
-  !>  hipMemcpyFromSymbol, hipMemcpy2DAsync, hipMemcpyToArrayAsync, hipMemcpy2DToArrayAsync,
-  !>  hipMemcpyFromArrayAsync, hipMemcpy2DFromArrayAsync, hipMemcpyToSymbolAsync,
-  !>  hipMemcpyFromSymbolAsync
     function hipMemcpyAsync_(dest, src, sizeBytes, myKind, stream) bind(c, name="hipMemcpyAsync")
       use iso_c_binding
       implicit none
@@ -14425,7 +8973,7 @@ module hip
       integer(c_int), value :: myKind
       type(c_ptr), value :: stream
     end function hipMemcpyAsync_
-#ifdef USE_ASSUMED_RANK_INTERFACES
+#ifdef USE_ASSUMED_RANK
     module procedure hipMemcpyAsync_i4_assumed_rank
     module procedure hipMemcpyAsync_i4_assumed_rank_c_size_t
     module procedure hipMemcpyAsync_i4_assumed_rank_c_int
@@ -14620,42 +9168,6 @@ module hip
   end interface hipMemcpyAsync
 
   interface hipMemcpy2D
-  !>   @brief Copies data between host and device.
-  !>
-  !>  hipMemcpy2D supports memory matrix copy from the pointed area src to the pointed area dst.
-  !>  The copy direction is defined by kind which must be one of `hipMemcpyHostToDevice`,
-  !>  `hipMemcpyHostToDevice`, `hipMemcpyDeviceToHost` `hipMemcpyDeviceToDevice` or
-  !>  `hipMemcpyDefault`.
-  !>  Device to Device copies don't need to wait for host synchronization.
-  !>  The copy is executed on the default null tream. The src and dst must not overlap.
-  !>  dpitch and spitch are the widths in bytes in memory matrix, width cannot exceed dpitch or
-  !>  spitch.
-  !>
-  !>  For hipMemcpy2D, the copy is always performed by the current device (set by hipSetDevice).
-  !>  For multi-gpu or peer-to-peer configurations, it is recommended to set the current device to
-  !>  the
-  !>  device where the src data is physically located. For optimal peer-to-peer copies, the copy
-  !>  device
-  !>  must be able to access the src and dst pointers (by calling hipDeviceEnablePeerAccess with
-  !>  copy
-  !>  agent as the current device and src/dst as the peerDevice argument.  if this is not done, the
-  !>  hipMemcpy2D will still work, but will perform the copy using a staging buffer on the host.
-  !>
-  !>   @warning  Calling hipMemcpy2D with dst and src pointers that do not match the hipMemcpyKind
-  !>  results in undefined behavior.
-  !>
-  !>   @param[out]  dest Destination memory address
-  !>   @param[in]   dpitch Pitch size in bytes of destination memory
-  !>   @param[in]   src    Source memory address
-  !>   @param[in]   spitch Pitch size in bytes of source memory
-  !>   @param[in]   width  Width size in bytes of matrix transfer (columns)
-  !>   @param[in]   height Height size in bytes of matrix transfer (rows)
-  !>   @param[in]   myKind   Type of transfer
-  !>   @returns     `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidPitchValue`,
-  !>  `hipErrorInvalidDevicePointer`, `hipErrorInvalidMemcpyDirection`
-  !>
-  !>   @see hipMemcpy, hipMemcpyToArray, hipMemcpy2DToArray, hipMemcpyFromArray, hipMemcpyToSymbol,
-  !>  hipMemcpyAsync
     function hipMemcpy2D_(dest, dpitch, src, spitch, width, height, myKind) &
         bind(c, name="hipMemcpy2D")
       use iso_c_binding
@@ -14669,7 +9181,7 @@ module hip
       integer(c_size_t), value :: height
       integer(c_int), value :: myKind
     end function hipMemcpy2D_
-#ifdef USE_ASSUMED_RANK_INTERFACES
+#ifdef USE_ASSUMED_RANK
     module procedure hipMemcpy2D_i4_assumed_rank_c_size_t
     module procedure hipMemcpy2D_i4_assumed_rank_c_int
     module procedure hipMemcpy2D_i8_assumed_rank_c_size_t
@@ -14801,48 +9313,6 @@ module hip
   end interface hipMemcpy2D
 
   interface hipMemcpy2DAsync
-  !>   @brief Copies data between host and device asynchronously.
-  !>
-  !>   hipMemcpy2DAsync supports memory matrix copy from the pointed area src to the pointed area
-  !>   dst.
-  !>  The copy direction is defined by kind which must be one of `hipMemcpyHostToDevice`,
-  !>  `hipMemcpyDeviceToHost`, `hipMemcpyDeviceToDevice` or `hipMemcpyDefault`.
-  !>  dpitch and spitch are the widths in bytes for memory matrix corresponds to dst and src.
-  !>  width cannot exceed dpitch or spitch.
-  !>
-  !>  The copy is always performed by the device associated with the specified stream.
-  !>  The API is asynchronous with respect to the host, so the call may return before the copy is
-  !>  complete. The copy can optionally be excuted in a specific stream by passing a non-zero stream
-  !>  argument, for HostToDevice or DeviceToHost copies, the copy can overlap with operations
-  !>  in other streams.
-  !>
-  !>  For multi-gpu or peer-to-peer configurations, it is recommended to use a stream which is
-  !>  attached to the device where the src data is physically located.
-  !>
-  !>  For optimal peer-to-peer copies, the copy device must be able to access the src and dst
-  !>  pointers
-  !>  (by calling hipDeviceEnablePeerAccess) with copy agent as the current device and src/dst as
-  !>  the
-  !>  peerDevice argument. If enabling device peer access is not done, the API will still work, but
-  !>  will perform the copy using a staging buffer on the host.
-  !>
-  !>   @note If host or dst are not pinned, the memory copy will be performed synchronously.  For
-  !>  best performance, use hipHostMalloc to allocate host memory that is transferred
-  !>  asynchronously.
-  !>
-  !>   @param[out]  dest Pointer to destination memory address
-  !>   @param[in]   dpitch Pitch size in bytes of destination memory
-  !>   @param[in]   src    Pointer to source memory address
-  !>   @param[in]   spitch Pitch size in bytes of source memory
-  !>   @param[in]   width  Width of matrix transfer (columns in bytes)
-  !>   @param[in]   height Height of matrix transfer (rows)
-  !>   @param[in]   myKind   Type of transfer
-  !>   @param[in]   stream Stream to use
-  !>   @returns     `hipSuccess`, `hipErrorInvalidValue`, `hipErrorInvalidPitchValue`,
-  !>  `hipErrorInvalidDevicePointer`, `hipErrorInvalidMemcpyDirection`
-  !>
-  !>   @see hipMemcpy, hipMemcpyToArray, hipMemcpy2DToArray, hipMemcpyFromArray, hipMemcpyToSymbol,
-  !>  hipMemcpyAsync
     function hipMemcpy2DAsync_(dest, dpitch, src, spitch, width, height, myKind, stream) &
         bind(c, name="hipMemcpy2DAsync")
       use iso_c_binding
@@ -14857,7 +9327,7 @@ module hip
       integer(c_int), value :: myKind
       type(c_ptr), value :: stream
     end function hipMemcpy2DAsync_
-#ifdef USE_ASSUMED_RANK_INTERFACES
+#ifdef USE_ASSUMED_RANK
     module procedure hipMemcpy2DAsync_i4_assumed_rank_c_size_t
     module procedure hipMemcpy2DAsync_i4_assumed_rank_c_int
     module procedure hipMemcpy2DAsync_i8_assumed_rank_c_size_t
@@ -14989,17 +9459,6 @@ module hip
   end interface hipMemcpy2DAsync
 
   interface hipMalloc
-  !>   @brief Allocate memory on the default accelerator
-  !>
-  !>   @param[out] ptr Pointer to the allocated memory
-  !>   @param[in]  sizeBytes Requested memory size
-  !>
-  !>   If size is 0, no memory is allocated, *ptr returns nullptr, and hipSuccess is returned.
-  !>
-  !>   @returns `hipSuccess`, `hipErrorOutOfMemory`, `hipErrorInvalidValue` (bad context, null *ptr)
-  !>
-  !>   @see hipMallocPitch, hipFree, hipMallocArray, hipFreeArray, hipMalloc3D, hipMalloc3DArray,
-  !>  hipHostFree, hipHostMalloc
     function hipMalloc_(ptr, sizeBytes) bind(c, name="hipMalloc")
       use iso_c_binding
       implicit none
@@ -15164,30 +9623,6 @@ module hip
   end interface hipMalloc
 
   interface hipMallocManaged
-  !> @ingroup MemoryM
-  !>
-  !>
-  !> -------------------------------------------------------------------------------------------------
-  !> -------------------------------------------------------------------------------------------------
-  !>  @brief Allocates memory that will be automatically managed by HIP.
-  !>
-  !>  This API is used for managed memory, allows data be shared and accessible to both CPU and
-  !>  GPU using a single pointer.
-  !>
-  !>  The API returns the allocation pointer, managed by HMM, can be used further to execute kernels
-  !>  on device and fetch data between the host and device as needed.
-  !>
-  !>  If HMM is not supported, the function behaves the same as @p hipMallocHost .
-  !>
-  !>  @note   It is recommend to do the capability check before call this API.
-  !>
-  !>  @param [out] ptr - pointer to allocated device memory
-  !>  @param [in] sizeBytes - requested allocation size in bytes, it should be granularity of 4KB
-  !>  @param [in]  flags   - must be either hipMemAttachGlobal or hipMemAttachHost
-  !>                         (defaults to hipMemAttachGlobal)
-  !>
-  !>  @returns `hipSuccess`, `hipErrorMemoryAllocation`, `hipErrorNotSupported`,
-  !>  `hipErrorInvalidValue`
     function hipMallocManaged_(ptr, sizeBytes, flags) bind(c, name="hipMallocManaged")
       use iso_c_binding
       implicit none
@@ -15353,39 +9788,6 @@ module hip
   end interface hipMallocManaged
 
   interface hipHostMalloc
-  !>   @brief Allocates device accessible page locked (pinned) host memory
-  !>
-  !>   This API allocates pinned host memory which is mapped into the address space of all GPUs
-  !>   in the system, the memory can be accessed directly by the GPU device, and can be read or
-  !>   written with much higher bandwidth than pageable memory obtained with functions such as
-  !>   malloc().
-  !>
-  !>   Using the pinned host memory, applications can implement faster data transfers for
-  !>   HostToDevice
-  !>   and DeviceToHost. The runtime tracks the hipHostMalloc allocations and can avoid some of the
-  !>   setup required for regular unpinned memory.
-  !>
-  !>   When the memory accesses are infrequent, zero-copy memory can be a good choice, for coherent
-  !>   allocation. GPU can directly access the host memory over the CPU/GPU interconnect, without
-  !>   need
-  !>   to copy the data.
-  !>
-  !>   Currently the allocation granularity is 4KB for the API.
-  !>
-  !>   Developers need to choose proper allocation flag with consideration of synchronization.
-  !>
-  !>   @param[out] ptr Pointer to the allocated host pinned memory
-  !>   @param[in]  sizeBytes Requested memory size in bytes
-  !>   If size is 0, no memory is allocated, *ptr returns nullptr, and hipSuccess is returned.
-  !>   @param[in]  flags Type of host memory allocation. See the description of flags in
-  !>   hipSetDeviceFlags.
-  !>
-  !>   If no input for flags, it will be the default pinned memory allocation on the host.
-  !>
-  !>   @returns `hipSuccess`, `hipErrorOutOfMemory`
-  !>
-  !>
-  !>   @see hipSetDeviceFlags, hiptHostFree
     function hipHostMalloc_(ptr, sizeBytes, flags) bind(c, name="hipHostMalloc")
       use iso_c_binding
       implicit none
@@ -15551,18 +9953,6 @@ module hip
   end interface hipHostMalloc
 
   interface hipFree
-  !>   @brief Free memory allocated by the HIP-Clang hip memory allocation API.
-  !>   This API performs an implicit hipDeviceSynchronize() call.
-  !>   If pointer is NULL, the hip runtime is initialized and hipSuccess is returned.
-  !>
-  !>   @param[in] ptr Pointer to memory to be freed
-  !>   @returns `hipSuccess`
-  !>   @returns `hipErrorInvalidDevicePointer` (if pointer is invalid, including host pointers
-  !>   allocated
-  !>  with hipHostMalloc)
-  !>
-  !>   @see hipMalloc, hipMallocPitch, hipMallocArray, hipFreeArray, hipHostFree, hipMalloc3D,
-  !>  hipMalloc3DArray, hipHostMalloc
     function hipFree_(ptr) bind(c, name="hipFree")
       use iso_c_binding
       implicit none
@@ -15628,20 +10018,6 @@ module hip
   end interface hipFree
 
   interface hipHostFree
-  !>   @brief Free memory allocated by the HIP-Clang hip host memory allocation API
-  !>   This API performs an implicit hipDeviceSynchronize() call.
-  !>   If pointer is NULL, the hip runtime is initialized and hipSuccess is returned.
-  !>
-  !>   @ingroup MemoryD
-  !>
-  !>   @param[in] ptr Pointer to memory to be freed
-  !>   @returns `hipSuccess`,
-  !>           `hipErrorInvalidValue` (if pointer is invalid, including device pointers allocated
-  !>           with
-  !>  hipMalloc)
-  !>
-  !>   @see hipMalloc, hipMallocPitch, hipFree, hipMallocArray, hipFreeArray, hipMalloc3D,
-  !>  hipMalloc3DArray, hipHostMalloc
     function hipHostFree_(ptr) bind(c, name="hipHostFree")
       use iso_c_binding
       implicit none
@@ -15707,45 +10083,6 @@ module hip
   end interface hipHostFree
 
   interface hipHostRegister
-  !>   @brief Register host memory so it can be accessed from the current device.
-  !>
-  !>   @param[out] hostPtr Pointer to host memory to be registered.
-  !>   @param[in] sizeBytes Size of the host memory
-  !>   @param[in] flags  See below.
-  !>
-  !>   Flags:
-  !>   - `hipHostRegisterDefault`   Memory is Mapped and Portable
-  !>   - `hipHostRegisterPortable` Memory is considered registered by all contexts. HIP only
-  !>   supports
-  !>  one context so this is always assumed true.
-  !>   - `hipHostRegisterMapped` Map the allocation into the address space for the current device.
-  !>  The device pointer can be obtained with `hipHostGetDevicePointer`.
-  !>   - `hipExtHostRegisterUncached`  Map the host memory onto extended fine grained access system
-  !>  memory pool.
-  !>
-  !>   After registering the memory, use `hipHostGetDevicePointer` to obtain the mapped device
-  !>   pointer.
-  !>   On many systems, the mapped device pointer will have a different value than the mapped host
-  !>  pointer. Applications must use the device pointer in device code, and the host pointer in host
-  !>  code.
-  !>
-  !>   On some systems, registered memory is pinned.  On some systems, registered memory may not be
-  !>  actually be pinned but uses OS or hardware facilities to all GPU access to the host memory.
-  !>
-  !>   Developers are strongly encouraged to register memory blocks which are aligned to the host
-  !>  cache-line size. (typically 64-bytes but can be obtains from the CPUID instruction).
-  !>
-  !>   If registering non-aligned pointers, the application must take care when register pointers
-  !>   from
-  !>  the same cache line on different devices.  HIP's coarse-grained synchronization model does not
-  !>  guarantee correct results if different devices write to different parts of the same cache
-  !>  block -
-  !>  typically one of the writes will "win" and overwrite data from the other registered memory
-  !>  region.
-  !>
-  !>   @returns `hipSuccess`, `hipErrorOutOfMemory`
-  !>
-  !>   @see hipHostUnregister, hipHostGetFlags, hipHostGetDevicePointer
     function hipHostRegister_(hostPtr, sizeBytes, flags) bind(c, name="hipHostRegister")
       use iso_c_binding
       implicit none
@@ -15911,12 +10248,6 @@ module hip
   end interface hipHostRegister
 
   interface hipHostUnregister
-  !>   @brief Un-register host pointer
-  !>
-  !>   @param[in] hostPtr Host pointer previously registered with `hipHostRegister`
-  !>   @returns Error code
-  !>
-  !>   @see hipHostRegister
     function hipHostUnregister_(hostPtr) bind(c, name="hipHostUnregister")
       use iso_c_binding
       implicit none
@@ -15982,15 +10313,6 @@ module hip
   end interface hipHostUnregister
 
   interface hipHostGetDevicePointer
-  !>   @brief Get Device pointer from Host Pointer allocated through hipHostMalloc
-  !>
-  !>   @param[out] devPtr Device Pointer mapped to passed host pointer
-  !>   @param[in]  hstPtr Host Pointer allocated through hipHostMalloc
-  !>   @param[in]  flags Flags to be passed for extension
-  !>
-  !>   @returns `hipSuccess`, `hipErrorInvalidValue`, `hipErrorOutOfMemory`
-  !>
-  !>   @see hipSetDeviceFlags, hipHostMalloc
     function hipHostGetDevicePointer_(devPtr, hstPtr, flags) bind(c, name="hipHostGetDevicePointer")
       use iso_c_binding
       implicit none
@@ -16058,13 +10380,6 @@ module hip
   end interface hipHostGetDevicePointer
 
   interface hipHostGetFlags
-  !>   @brief Return flags associated with host pointer
-  !>
-  !>   @param[out] flagsPtr Memory location to store flags
-  !>   @param[in]  hostPtr Host Pointer allocated through hipHostMalloc
-  !>   @returns `hipSuccess`, `hipErrorInvalidValue`
-  !>
-  !>   @see hipHostMalloc
     function hipHostGetFlags_(flagsPtr, hostPtr) bind(c, name="hipHostGetFlags")
       use iso_c_binding
       implicit none
@@ -16130,17 +10445,6 @@ module hip
     module procedure hipHostGetFlags_l_7
   end interface hipHostGetFlags
 
-  !>  @brief Returns device properties.
-  !>
-  !>  @param [out] prop written with device properties
-  !>  @param [in]  deviceId which device to query for information
-  !>
-  !>  @returns `hipSuccess`, `hipErrorInvalidDevice`
-  !>  @bug HIP-Clang always returns 0 for maxThreadsPerMultiProcessor
-  !>  @bug HIP-Clang always returns 0 for regsPerBlock
-  !>  @bug HIP-Clang always returns 0 for l2CacheSize
-  !>
-  !>  Populates hipGetDeviceProperties with information for the specified device.
   interface hipGetDeviceProperties
     function hipGetDeviceProperties_(prop,deviceId) bind(c, name="hipGetDevicePropertiesR0600")
       use iso_c_binding
@@ -16163,7 +10467,7 @@ module hip
         stop 1
       end if
     end subroutine hipCheck
-#ifdef USE_ASSUMED_RANK_INTERFACES
+#ifdef USE_ASSUMED_RANK
   function hipMemcpy_i4_assumed_rank_c_size_t(dest, src, length, myKind) result(res)
     use iso_c_binding
     implicit none
@@ -45286,98 +39590,4 @@ module hip
     res = hipHostGetFlags_(flagsPtr, c_loc(hostPtr(1,1,1,1,1,1,1)))
   end function hipHostGetFlags_l_7
 
-
-  !>   @defgroup API HIP API
-  !>
-  !>   Defines the HIP API. See the individual sections for more information.
-  !>
-
-  !>   @defgroup Driver Initialization and Version
-  !>
-  !>   This section describes the initialization and version functions of HIP runtime API.
-  !>
-
-  !>   @defgroup Device Device Management
-  !>
-  !>   This section describes the device management functions of HIP runtime API.
-  !>
-
-  !>   @defgroup Execution Execution Control
-  !>
-  !>   This section describes the execution control functions of HIP runtime API.
-  !>
-
-  !>   @defgroup Error Error Handling
-  !>
-  !>   This section describes the error handling functions of HIP runtime API.
-  !>
-
-  !>   @defgroup Event Event Management
-  !>
-  !>   This section describes the event management functions of HIP runtime API.
-  !>
-
-  !>   @defgroup External External Resource Interoperability
-  !>
-  !>   @ingroup API
-  !>
-  !>   This section describes the external resource interoperability functions of HIP runtime API.
-  !>
-
-  !>   @defgroup PeerToPeer PeerToPeer Device Memory Access
-  !>
-  !>   @ingroup API
-  !>
-  !>   This section describes the PeerToPeer device memory access functions of HIP runtime API.
-  !>
-
-  !>   @defgroup ExecutionContext Execution Context Management
-  !>
-  !>   This section describes execution context management functions of HIP runtime API.
-  !>
-
-  !>   @defgroup Module Module Management
-  !>
-  !>   @ingroup API
-  !>
-  !>   This section describes the module management functions of HIP runtime API.
-  !>
-
-  !>   @defgroup Occupancy Occupancy
-  !>
-  !>   This section describes the occupancy functions of HIP runtime API.
-  !>
-
-  !>   @defgroup Clang Launch API to support the triple-chevron syntax
-  !>
-  !>   This section describes the API to support the triple-chevron syntax.
-  !>
-
-  !>   @defgroup Callback Callback Activity APIs
-  !>
-  !>   This section describes the callback/Activity of HIP runtime API.
-  !>
-
-  !>   @defgroup Memory Memory Management
-  !>
-  !>   @ingroup API
-  !>
-  !>   Memory management functions of the HIP runtime API.
-  !>
-
-  !>   @defgroup MemoryD Memory Management [Deprecated]
-  !>
-  !>   @ingroup Memory
-  !>
-  !>   Deprecated memory management functions of the HIP runtime API.
-  !>
-
-  !>   @defgroup MemoryM Managed Memory
-  !>
-  !>   @ingroup Memory
-  !>
-  !>   This section describes the managed memory management functions of HIP runtime API.
-  !>
-  !>   @note  The managed memory management APIs are implemented on Linux, under development on Windows.
-  !>
 end module hip

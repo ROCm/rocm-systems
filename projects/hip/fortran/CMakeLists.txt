@@ -273,13 +273,13 @@ set_target_properties(hip_fortran PROPERTIES
 
 # Translate the tri-state into the two macros the generated source is guarded
 # with. assumed-rank implies the F2008 tier: in the source the assumed-rank
-# specific is nested inside USE_FPOINTER_INTERFACES, and selects itself over the
+# specific is nested inside USE_ASSUMED_SHAPE, and selects itself over the
 # per-rank ones.
 if(FORTRAN_ARRAY_INTERFACES STREQUAL "assumed-shape")
-  target_compile_definitions(hip_fortran PRIVATE USE_FPOINTER_INTERFACES=1)
+  target_compile_definitions(hip_fortran PRIVATE USE_ASSUMED_SHAPE=1)
 elseif(FORTRAN_ARRAY_INTERFACES STREQUAL "assumed-rank")
   target_compile_definitions(hip_fortran PRIVATE
-    USE_FPOINTER_INTERFACES=1 USE_ASSUMED_RANK_INTERFACES=1)
+    USE_ASSUMED_SHAPE=1 USE_ASSUMED_RANK=1)
 endif()
 
 # No line-length flag: the generator wraps the emitted source at 112 columns,
