@@ -1,6 +1,7 @@
 #include "constmem.hpp"
 #include "backend_bc.hpp"
 #include "envvar.hpp"
+#include "tdm.hpp"
 #if defined(USE_GDA)
 #include "gda/backend_gda.hpp"
 #endif
@@ -12,6 +13,8 @@
 namespace rocshmem {
 
 extern Backend *backend;
+
+uint32_t tdm_resolved_tile_bytes = 0;
 
 void init_constant_memory(void) {
   std::string envstr;
@@ -39,6 +42,60 @@ void init_constant_memory(void) {
   constmem_values.heap_base =
       reinterpret_cast<uintptr_t>(backend->heap.get_local_heap_base());
   constmem_values.heap_size = backend->heap.get_size();
+
+  constmem_values.tdm_tile_bytes = envvar::tdm::tile_bytes;
+
+#if defined(USE_TDM)
+  {
+    int device_id = 0;
+    CHECK_HIP(hipGetDevice(&device_id));
+    int max_shared_mem_per_block = 0;
+    CHECK_HIP(hipDeviceGetAttribute(&max_shared_mem_per_block,
+                                     hipDeviceAttributeMaxSharedMemoryPerBlock,
+                                     device_id));
+
+    // tile_dim0 is a 16-bit field (see tdm.hpp GROUP1), so the tile can
+    // never encode more than 65535 elements regardless of available LDS.
+    constexpr uint32_t element_bytes = 1u << tdm::FlatCopyElementLog2;
+    constexpr uint32_t max_encodable_tile_bytes = 65535u * element_bytes;
+
+    if (constmem_values.tdm_tile_bytes == 0) {
+      // Auto-size: reserve 16KB for rocSHMEM's own (small) static
+      // __shared__ usage plus headroom for the caller's, then halve the
+      // rest for double buffering.
+      constexpr size_t reserve_bytes = 16 * 1024;
+      const size_t avail_bytes =
+          (static_cast<size_t>(max_shared_mem_per_block) > reserve_bytes)
+              ? static_cast<size_t>(max_shared_mem_per_block) - reserve_bytes
+              : 0;
+      uint32_t auto_tile_bytes =
+          static_cast<uint32_t>((avail_bytes / 2) / element_bytes) * element_bytes;
+      constmem_values.tdm_tile_bytes =
+          (auto_tile_bytes < max_encodable_tile_bytes) ? auto_tile_bytes
+                                                        : max_encodable_tile_bytes;
+      if (constmem_values.tdm_tile_bytes == 0) {
+        LOG_WARN(
+            "Not enough LDS on this device (%d bytes/block) to auto-size a TDM "
+            "tile after reserving %zu bytes; TDM disabled. Set "
+            "ROCSHMEM_TDM_TILE_BYTES explicitly to override.",
+            max_shared_mem_per_block, reserve_bytes);
+      } else {
+        LOG_INFO("TDM tile size auto-sized to %u bytes (device max shared mem/block: %d)",
+                 constmem_values.tdm_tile_bytes, max_shared_mem_per_block);
+      }
+    } else {
+      const size_t tdm_lds_bytes = tdm::lds_bytes_for_tile(constmem_values.tdm_tile_bytes);
+      if (tdm_lds_bytes > static_cast<size_t>(max_shared_mem_per_block)) {
+        LOG_ERROR_ABORT(
+            "ROCSHMEM_TDM_TILE_BYTES=%u needs %zu bytes of LDS (double-buffered) "
+            "but this device only has %d bytes of shared memory per block. "
+            "Lower ROCSHMEM_TDM_TILE_BYTES (or set it to 0 to auto-size).",
+            constmem_values.tdm_tile_bytes, tdm_lds_bytes, max_shared_mem_per_block);
+      }
+    }
+  }
+  tdm_resolved_tile_bytes = constmem_values.tdm_tile_bytes;
+#endif
 
   constmem_values.backend_type = backend->get_type();
 #if defined(USE_GDA)
