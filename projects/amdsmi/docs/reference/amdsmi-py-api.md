@@ -1500,6 +1500,10 @@ finally:
 Description: Returns the pcie metric and static information for the given GPU. For accurate PCIe Bandwidth measurements it is recommended to use this function once per 1000ms
 It is not supported on virtual machine guest
 
+On bare-metal Linux, static PCIe information and available current link attributes are
+returned even when GPU metrics are unsupported. Unavailable metric fields are `"N/A"`;
+link speed and width do not imply that bandwidth or error counters are supported.
+
 Input parameters:
 
 * `processor_handle` device which to query

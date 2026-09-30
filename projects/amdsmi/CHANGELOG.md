@@ -143,6 +143,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - `amd-smi static --nic 999` and `--switch 999` failed while building the "device not found" error, so the command exited `1` with a traceback and no readable message. `--json` and `--csv` produced no parseable output.
   - Both now report `Can not find a device: NIC '999'` (or `SWITCH`) and exit `196`, matching `--gpu`, `--cpu`, and `--core`.
 
+- **Fixed PCIe link information being hidden when GPU metrics are unsupported**.  
+  - Static PCIe information and available current link speed/width are now returned from sysfs; unsupported bandwidth and error counters remain `N/A`.
+  - This also applies when the library does not support the driver's GPU-metrics format.
+  - `amdsmi_get_gpu_metrics_info()` preserves the original read error instead of reporting unsupported data as `AMDSMI_STATUS_UNEXPECTED_DATA`.
+
 - **Fixed `rsmi_dev_reg_table_get()` failing on register-state images that contain no SMN entries**.  
   - The loop-back test ran before the SMN and instance counters reached zero, so an image with no SMN entries re-entered the loop and read past the end of the image; the call then returned an error for a well-formed file.
 

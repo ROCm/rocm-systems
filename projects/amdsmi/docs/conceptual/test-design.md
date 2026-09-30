@@ -224,8 +224,16 @@ machine regardless of GPU** (see `mock_cper/README.md` for provenance).
 
 ### CMake integration
 
+The PCIe metrics unit tests run in a separate `amdsmi_pcie_metrics_test` executable.
+Its linker-wrapped device I/O must not affect `amdsmitst`. The target requires a
+static AMD SMI library (`BUILD_TESTS=ON` builds one by default) and needs no GPU:
+
+```sh
+ctest --test-dir build/tests/amd_smi_test -R '^amdsmi_pcie_metrics_test$' --output-on-failure
+```
+
 `tests/amd_smi_test/CMakeLists.txt` uses `file(GLOB_RECURSE ... CONFIGURE_DEPENDS)` to collect all
-sources under `unit/` and `functional/` automatically. `CONFIGURE_DEPENDS` re-globs at build time,
+other sources under `unit/` and `functional/` automatically. `CONFIGURE_DEPENDS` re-globs at build time,
 so a new test file added to any subdirectory is picked up on the next build with no manual `cmake`
 re-run:
 

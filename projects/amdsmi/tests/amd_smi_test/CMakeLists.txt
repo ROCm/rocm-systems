@@ -26,6 +26,8 @@ if(NOT GTest_FOUND)
         URL_HASH SHA256=78c676fc63881529bf97bf9d45948d905a66833fbfa5318ea2cd7478cb98f399
     )
     FetchContent_MakeAvailable(googletest)
+    # Match the RTTI-enabled locale test without changing imported GTest targets.
+    target_compile_options(gtest PRIVATE -frtti)
 endif()
 
 enable_testing()
@@ -59,6 +61,7 @@ message("")
 # re-running cmake.
 file(GLOB_RECURSE unitSources CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/unit/*.cc)
 file(GLOB_RECURSE functSources CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/functional/*.cc)
+list(REMOVE_ITEM unitSources ${CMAKE_CURRENT_SOURCE_DIR}/unit/gpu/pcie_metrics_test.cc)
 if(NOT ENABLE_WSL_BACKEND)
     list(FILTER unitSources EXCLUDE REGEX "/unit/wsl/")
     list(FILTER functSources EXCLUDE REGEX "/functional/wsl/")
@@ -121,6 +124,27 @@ target_link_libraries(
     ${AMDSMINIC_PATH}
     ${FILESYSTEM_LIB}
 )
+
+# Keep device-I/O interception out of the hardware test executable.
+get_target_property(AMDSMI_TEST_LIBRARY_TYPE ${AMD_SMI_TARGET} TYPE)
+if(AMDSMI_TEST_LIBRARY_TYPE STREQUAL "STATIC_LIBRARY")
+    add_executable(amdsmi_pcie_metrics_test unit/gpu/pcie_metrics_test.cc)
+    target_include_directories(amdsmi_pcie_metrics_test PRIVATE ${PROJECT_SOURCE_DIR}/rocm_smi/include)
+    target_link_libraries(amdsmi_pcie_metrics_test PRIVATE ${AMD_SMI_TARGET} GTest::gtest)
+    # libstdc++ uses dynamic_cast when installing the test's custom locale facet.
+    target_compile_options(amdsmi_pcie_metrics_test PRIVATE -frtti)
+    target_link_options(
+        amdsmi_pcie_metrics_test
+        PRIVATE
+            "LINKER:--wrap=_ZN3amd3smi6Device11readDevInfoENS0_12DevInfoTypesEmPv"
+            "LINKER:--wrap=_Z26get_gpu_device_from_handlePvPPN3amd3smi15AMDSmiGPUDeviceE"
+            "LINKER:--wrap=fopen"
+    )
+    add_test(NAME amdsmi_pcie_metrics_test COMMAND amdsmi_pcie_metrics_test)
+    install(TARGETS amdsmi_pcie_metrics_test DESTINATION ${SHARE_INSTALL_PREFIX}/tests COMPONENT ${TESTS_COMPONENT})
+else()
+    message(STATUS "Skipping amdsmi_pcie_metrics_test: device-I/O interception requires a static AMD SMI library")
+endif()
 
 # Install tests
 install(TARGETS ${TEST} DESTINATION ${SHARE_INSTALL_PREFIX}/tests COMPONENT ${TESTS_COMPONENT})
