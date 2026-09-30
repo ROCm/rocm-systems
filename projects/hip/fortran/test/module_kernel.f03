@@ -55,7 +55,7 @@ program module_kernel
   type(c_ptr) :: stream = c_null_ptr
   type(hipKernelNodeParams) :: kparams
   integer(c_size_t) :: nbytes
-  integer(c_int), target :: maxthreads
+  integer(c_int) :: maxthreads
   integer(c_int) :: gridsize, blocksize, numblocks
   integer(c_int) :: coop
 
@@ -85,7 +85,7 @@ program module_kernel
   call hipCheck(hipModuleLoad(hmod, c_loc(cofile)))
   call hipCheck(hipModuleGetFunction(kfunc, hmod, c_loc(kname)))
 
-  call hipCheck(hipFuncGetAttribute(c_loc(maxthreads), HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK, kfunc))
+  call hipCheck(hipFuncGetAttribute(maxthreads, HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK, kfunc))
   if (maxthreads <= 0 .or. maxthreads > 1024) then
      write(*,*) "FAILED! max threads per block = ", maxthreads
      call exit(1)
