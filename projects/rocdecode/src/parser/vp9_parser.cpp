@@ -588,6 +588,15 @@ ParserResult Vp9VideoParser::ParseUncompressedHeader(uint8_t *p_stream, size_t s
     if ((ret = SegmentationParams(p_stream, offset, p_uncomp_header)) != PARSER_OK) {
         return ret;
     }
+    // The color config is only coded in key and intra only frames and is carried over by
+    // every other frame, so it is still zeroed here if an inter frame arrives before any
+    // frame that codes one. SetupSegDequant() would then index the quantizer tables at
+    // (0 - 8) >> 1.
+    if (p_uncomp_header->color_config.bit_depth != 8 && p_uncomp_header->color_config.bit_depth != 10 &&
+        p_uncomp_header->color_config.bit_depth != 12) {
+        ErrorLog(g_rocdec_logger, "Invalid bit depth (" + ROCDEC_TOSTR(p_uncomp_header->color_config.bit_depth) + "). No key frame or intra only frame has been parsed yet.");
+        return PARSER_WRONG_STATE;
+    }
     SetupSegDequant(p_uncomp_header);
     LoopFilterFrameInit(p_uncomp_header);
     if ((ret = TileInfo(p_stream, offset, p_uncomp_header)) != PARSER_OK) {
@@ -1025,12 +1034,14 @@ static const int16_t ac_qlookup[3][256] = {
   28143, 28687, 29247,}
 };
 
+// The callers check bit_depth before reaching here; clamp the row as well since these
+// cannot report an error, and a bit_depth below 8 makes the row index negative.
 int Vp9VideoParser::DcQ(int bit_depth, int index) {
-    return dc_qlookup[(bit_depth - 8) >> 1][std::clamp(index, 0, 255)];
+    return dc_qlookup[std::clamp((bit_depth - 8) >> 1, 0, 2)][std::clamp(index, 0, 255)];
 }
 
 int Vp9VideoParser::AcQ(int bit_depth, int index) {
-    return ac_qlookup[(bit_depth - 8) >> 1][std::clamp(index, 0, 255)];
+    return ac_qlookup[std::clamp((bit_depth - 8) >> 1, 0, 2)][std::clamp(index, 0, 255)];
 }
 
 int Vp9VideoParser::GetQIndex(Vp9UncompressedHeader *p_uncomp_header, int seg_id) {
