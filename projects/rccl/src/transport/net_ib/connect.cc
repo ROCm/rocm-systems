@@ -65,28 +65,28 @@ NCCL_PARAM(IbQpsPerConn, "IB_QPS_PER_CONNECTION", 1);
 RCCL_PARAM(IbQpsPerP2p, "IB_QPS_PER_P2P", 0);
 
 // nQpsPerDev > 0 wins (GIN passes 1). Otherwise use the IB QP env policy.
-static int ncclIbQpMultiplier(int nQpsPerDev, int isP2p) {
+static int rcclIbQpsPerDev(int nQpsPerDev, int isP2p) {
   if (nQpsPerDev > 0) return nQpsPerDev;
   if (rcclParamIbQpsPerP2p() > 0 && isP2p) return (int)rcclParamIbQpsPerP2p();
   return (int)ncclParamIbQpsPerConn();
 }
 
 // Explicit GIN count sizes the CQ. The env path keeps NCCL_IB_QPS_PER_CONNECTION.
-static int ncclIbCqQpFactor(int nQpsPerDev) {
+static int rcclIbCqQpsPerDev(int nQpsPerDev) {
   return nQpsPerDev > 0 ? nQpsPerDev : (int)ncclParamIbQpsPerConn();
 }
 
-static int ncclIbNqpsForMultiplier(int qpMultiplier, int localNdevs, int remoteNdevs, const char* funcName) {
-  int localNqps = qpMultiplier * localNdevs;
-  int remoteNqps = qpMultiplier * remoteNdevs;
+static int rcclIbMaxNqps(int qpPerDev, int localNdevs, int remoteNdevs, const char* funcName) {
+  int localNqps = qpPerDev * localNdevs;
+  int remoteNqps = qpPerDev * remoteNdevs;
   int maxNqps = (remoteNqps > localNqps) ? remoteNqps : localNqps;
   INFO(NCCL_NET, "NET/IB: %s Max Nqps=%d, localNqps=%d, remoteNqps=%d, qpPerDev=%d", funcName, maxNqps,
-       localNqps, remoteNqps, qpMultiplier);
+       localNqps, remoteNqps, qpPerDev);
   return maxNqps;
 }
 
-static int ncclIbSelectNqps(int nQpsPerDev, int isP2p, int localNdevs, int remoteNdevs, const char* funcName) {
-  return ncclIbNqpsForMultiplier(ncclIbQpMultiplier(nQpsPerDev, isP2p), localNdevs, remoteNdevs, funcName);
+static int rcclIbSelectNqps(int nQpsPerDev, int isP2p, int localNdevs, int remoteNdevs, const char* funcName) {
+  return rcclIbMaxNqps(rcclIbQpsPerDev(nQpsPerDev, isP2p), localNdevs, remoteNdevs, funcName);
 }
 NCCL_PARAM(IbSubnetAwareRouting, "IB_SUBNET_AWARE_ROUTING", 0);
 NCCL_PARAM(IbSubnetPrefixLen, "IB_SUBNET_PREFIX_LEN", 24);
@@ -947,7 +947,7 @@ ib_recv_dev_list:
   // Read isP2p from handle
   isP2p = handle->isP2p;
   INFO(NCCL_NET, "NET/IB: ncclIbConnect isP2p=%d", isP2p);
-  comm->base.nqps = ncclIbSelectNqps(nQpsPerDev, isP2p, comm->base.vProps.ndevs, remoteVProps.ndevs, __func__);
+  comm->base.nqps = rcclIbSelectNqps(nQpsPerDev, isP2p, comm->base.vProps.ndevs, remoteVProps.ndevs, __func__);
 
   comm->base.nDataQps = std::max(comm->base.vProps.ndevs, remoteVProps.ndevs);
 
@@ -960,7 +960,7 @@ ib_recv_dev_list:
   // Sender's CQ size needs to accomodate the upper bound of number of send
   // requests multiplied by the number of QPs used per request.
   int cqSize;
-  cqSize = NET_IB_MAX_REQUESTS * ncclIbCqQpFactor(nQpsPerDev);
+  cqSize = NET_IB_MAX_REQUESTS * rcclIbCqQpsPerDev(nQpsPerDev);
   for (int i = 0; i < comm->base.vProps.ndevs; i++) {
     int ibDevN = comm->base.vProps.devs[i];
     if (comm->base.resiliency) {
@@ -1560,7 +1560,7 @@ ib_recv:
 
   /* copy back the received info */
   memcpy(&remMeta, stage->buffer, sizeof(struct ncclIbConnectionMetadata));
-  rComm->base.nqps = ncclIbSelectNqps(nQpsPerDev, remMeta.isP2p, rComm->base.vProps.ndevs, remMeta.ndevs, __func__);
+  rComm->base.nqps = rcclIbSelectNqps(nQpsPerDev, remMeta.isP2p, rComm->base.vProps.ndevs, remMeta.ndevs, __func__);
 
   // Subnet-aware device selection: use the remote sender's GIDs to find a local
   // NIC on the same subnet. Override lComm->dev and update vProps if a
@@ -1602,7 +1602,7 @@ ib_recv:
   // of a receive request) per QP, in the worst case.
   // +1 reserves space for one in-flight speed update RDMA write completion.
   int cqSize;
-  cqSize = 3 * NET_IB_MAX_REQUESTS * ncclIbCqQpFactor(nQpsPerDev) +
+  cqSize = 3 * NET_IB_MAX_REQUESTS * rcclIbCqQpsPerDev(nQpsPerDev) +
            ((ncclParamIbEventBasedLb() && ncclParamIbEventBasedLbRemote()) ? 1 : 0);
   for (int i = 0; i < rComm->base.vProps.ndevs; i++) {
     rCommDev = rComm->devs + i;
