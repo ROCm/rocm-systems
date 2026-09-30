@@ -176,15 +176,17 @@ Nightly builds of the ROCm Core SDK (including AMD SMI) are published by
    source .venv/bin/activate
    ```
 
-2. Install ROCm with the device extra matching your GPU. For example, for
-   gfx942 (MI300X / MI325X):
+2. Install ROCm. AMD SMI is part of the `rocm-sdk-core` package, which the
+   `rocm` package always installs, so no extras are needed for `amd-smi`:
 
    ```bash
-   pip install --index-url https://rocm.nightlies.amd.com/whl-multi-arch/ \
-       "rocm[libraries,device-gfx942]"
+   pip install --index-url https://nightly.repo.amd.com/rocm/whl-next/ rocm
    ```
 
-   For the full list of `device-*` extras and other release options, see
+   To also install the libraries and device code for your GPU, add the
+   matching extras, for example `"rocm[libraries,device-gfx942]"` for gfx942
+   (MI300X / MI325X). For the full list of `device-*` extras and other release
+   channels, see
    [TheRock RELEASES.md](https://github.com/ROCm/TheRock/blob/main/RELEASES.md#supported-python-device--install-extras).
 
 3. Verify your installation:
