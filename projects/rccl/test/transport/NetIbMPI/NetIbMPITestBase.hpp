@@ -92,6 +92,15 @@ using namespace RCCLTestHelpers;
         }                                                                                \
     } while (0)
 
+// Skip a port recovery test unless every rank can create UD QPs on all devices.
+// Collective (see AllRanksSupportUd), and must be expanded in the test body.
+#define RECOVERY_UD_OR_SKIP()                                                           \
+    do {                                                                                 \
+        if (!AllRanksSupportUd()) {                                                      \
+            GTEST_SKIP() << "UD QP is unsupported. Skipping port recovery test";         \
+        }                                                                                \
+    } while (0)
+
 // External NET IB plugin
 extern ncclNet_t ncclNetIb;
 // External NET IB-CAST plugin (WRR scheduler, multi-QP, AINIC features)
@@ -282,14 +291,24 @@ protected:
     // If the query fails, assume UD works so the test runs as before.
     ncclIbCastDeviceCaps QueryDeviceCaps(int dev = 0) {
         ncclIbCastDeviceCaps caps;
-        caps.hasUd = true;
+        caps.udSupported = true;
         (void)ncclIbCastGetDeviceCaps(dev, &caps);
         return caps;
     }
 
-    // All ranks must skip together; call before any per-connection MPI op.
-    bool AllRanksSupportUd(int dev = 0) {
-        int local = QueryDeviceCaps(dev).hasUd ? 1 : 0;
+    // True if every rank supports UD on dev, or on every plugin device when dev < 0.
+    // Collective: all ranks must call it, before any per-connection MPI op.
+    bool AllRanksSupportUd(int dev = -1) {
+        int local = 1;
+        if (dev >= 0) {
+            local = QueryDeviceCaps(dev).udSupported ? 1 : 0;
+        } else {
+            int ndev = 0;
+            (void)net_->devices(&ndev);
+            for (int d = 0; d < ndev; d++) {
+                if (!QueryDeviceCaps(d).udSupported) local = 0;
+            }
+        }
         int all = 0;
         MPI_Allreduce(&local, &all, 1, MPI_INT, MPI_LAND, MPI_COMM_WORLD);
         return all != 0;

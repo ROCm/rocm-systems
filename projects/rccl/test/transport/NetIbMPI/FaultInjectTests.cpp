@@ -1634,9 +1634,9 @@ TEST_F(NetIbMPITest, RecoveryThreadStartedOnlyWithParam) {
     net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
-    if (!AllRanksSupportUd()) {
-        GTEST_SKIP() << "adapter cannot create a UD queue pair, which port recovery needs";
-    }
+    bool recoveryParamSet = (recoveryEnv && strcmp(recoveryEnv, "1") == 0);
+    // The connection below uses device 0 only.
+    bool udOnAllRanks = recoveryParamSet && AllRanksSupportUd(/*dev=*/0);
 
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
@@ -1665,10 +1665,12 @@ TEST_F(NetIbMPITest, RecoveryThreadStartedOnlyWithParam) {
             << "ncclIbCastGetResiliencyState failed — resiliency context not created; "
             << "is NCCL_IB_RESILIENCY_PORT_FAILOVER=1?";
 
-        bool recoveryParamSet = (recoveryEnv && strcmp(recoveryEnv, "1") == 0);
-        if (recoveryParamSet) {
+        if (recoveryParamSet && udOnAllRanks) {
             EXPECT_EQ(r.recoveryEnabled, 1)
                 << "recoveryEnabled should be true when NCCL_IB_RESILIENCY_PORT_RECOVERY=1";
+        } else if (recoveryParamSet) {
+            EXPECT_EQ(r.recoveryEnabled, 0)
+                << "recoveryEnabled should be false when a NIC cannot create a UD QP";
         } else {
             EXPECT_EQ(r.recoveryEnabled, 0)
                 << "recoveryEnabled should be false when NCCL_IB_RESILIENCY_PORT_RECOVERY is not set";
@@ -1715,9 +1717,7 @@ TEST_F(NetIbMPITest, RecoverySuccessRestoresTraffic) {
     int totalDevs = 0;
     AssertInitAndGetDevices(&totalDevs);
 
-    if (!AllRanksSupportUd()) {
-        GTEST_SKIP() << "adapter cannot create a UD queue pair, which port recovery needs";
-    }
+    RECOVERY_UD_OR_SKIP();
 
     int mergedDev = CreateMergedDeviceForFailover(net_, totalDevs);
     if (mergedDev < 0) {
@@ -1953,9 +1953,7 @@ TEST_F(NetIbMPITest, RecoveryPendingWhileLinkDown) {
     int totalDevs = 0;
     AssertInitAndGetDevices(&totalDevs);
 
-    if (!AllRanksSupportUd()) {
-        GTEST_SKIP() << "adapter cannot create a UD queue pair, which port recovery needs";
-    }
+    RECOVERY_UD_OR_SKIP();
 
     int mergedDev = CreateMergedDeviceForFailover(net_, totalDevs);
     if (mergedDev < 0) {
@@ -2119,9 +2117,7 @@ TEST_F(NetIbMPITest, RecoveryDeviceOneFailure) {
     int totalDevs = 0;
     AssertInitAndGetDevices(&totalDevs);
 
-    if (!AllRanksSupportUd()) {
-        GTEST_SKIP() << "adapter cannot create a UD queue pair, which port recovery needs";
-    }
+    RECOVERY_UD_OR_SKIP();
 
     int mergedDev = CreateMergedDeviceForFailover(net_, totalDevs);
     if (mergedDev < 0) {
@@ -2367,9 +2363,7 @@ TEST_F(NetIbMPITest, RecoveryUdTimeoutExhaustsAttempts) {
     int totalDevs = 0;
     AssertInitAndGetDevices(&totalDevs);
 
-    if (!AllRanksSupportUd()) {
-        GTEST_SKIP() << "adapter cannot create a UD queue pair, which port recovery needs";
-    }
+    RECOVERY_UD_OR_SKIP();
 
     int mergedDev = CreateMergedDeviceForFailover(net_, totalDevs);
     if (mergedDev < 0) {

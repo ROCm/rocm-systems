@@ -687,9 +687,7 @@ ncclResult_t IbCastResiliencyDevInit(struct ncclIbResiliency* resCtx, uint devIn
     struct ncclIbNetCommBase* base = resCtx->baseComm;
     for (int i = 0; i < base->vProps.ndevs; i++) {
       int phys = base->vProps.devs[i];
-      bool ud = false;
-      NCCLCHECK(IbCastCapHasUd(&IbCastDevs[phys], &ud));
-      if (!ud) {
+      if (!IbCastCapUdSupported(&IbCastDevs[phys])) {
         INFO(NCCL_NET, "NET/IB-CAST: device %s has no UD; port recovery off for comm %p", IbCastDevs[phys].devName,
              base);
         resCtx->recoveryEnabled = false;
@@ -873,7 +871,7 @@ static bool IbCastResiliencyPeerHasRecovery(struct ncclIbConnectionMetadata* rem
 
 // Undo what DevInit (and, on the sender, QP creation) allocated for recovery.
 static ncclResult_t IbCastResiliencyRecoveryDisable(struct ncclIbResiliency* resCtx, int nCreatedQps) {
-  INFO(NCCL_NET, "NET/IB-CAST: peer has no port recovery; port recovery off for %s comm %p",
+  WARN("NET/IB-CAST: peer has no port recovery; port recovery off for %s comm %p",
        resCtx->baseComm->isSend ? "send" : "recv", resCtx->baseComm);
   NCCLCHECK(IbCastPortRecoveryQpsDestroy(resCtx, nCreatedQps));
   for (int i = 0; i < nCreatedQps; i++) resCtx->portRecoveryQps[i].qp = NULL;

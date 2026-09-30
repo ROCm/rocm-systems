@@ -15,7 +15,7 @@
 // Probes every device not probed yet. Call once devices and QP globals are initialized.
 ncclResult_t IbCastCapProbeDevices();
 
-// Probes on first use if IbCastCapProbeDevices did not.
-ncclResult_t IbCastCapHasUd(struct ncclIbDev* dev, bool* hasUd);
+// Cached result only; false for a device IbCastCapProbeDevices has not probed.
+bool IbCastCapUdSupported(const struct ncclIbDev* dev);
 
 #endif // NET_IB_CAPABILITY_H_
