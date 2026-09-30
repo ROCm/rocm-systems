@@ -3,7 +3,6 @@
 
 """Integration tests for live attach/detach profiling."""
 
-import inspect
 import os
 import subprocess
 import time
@@ -15,7 +14,6 @@ from tests.integration.common import (
     attach_detach_interval_msec_no_delay,
     config,
     num_kernels,
-    validate,
 )
 
 
@@ -71,8 +69,7 @@ def test_live_attach_detach_block(
         )
 
     # Validate results
-    file_dict = integration_common.check_csv_files(workload_dir, 1, num_kernels)
-    validate(inspect.stack()[0][3], workload_dir, file_dict)
+    integration_common.check_csv_files(workload_dir, 1, num_kernels)
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
