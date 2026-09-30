@@ -29,7 +29,7 @@ for more information.
 
 The following are required to install and use the AMD SMI library through its language interfaces and CLI.
 
-* `amdgpu` driver must be loaded for [`amdsmi_init()`](./docs/how-to/amdsmi-cpp-lib#hello-amd-smi) to work. Refer to the [Instinct documentation](https://instinct.docs.amd.com/projects/amdgpu-docs/en/latest/install/detailed-install/prerequisites.html) for installation instructions.
+* On native Linux, the `amdgpu` driver must be loaded for [`amdsmi_init()`](./docs/how-to/amdsmi-cpp-lib#hello-amd-smi) to find GPUs. CPU-only and NIC-only initialization do not need it. Either the driver included in your distribution's kernel or AMD's `amdgpu-dkms` package works. To install `amdgpu-dkms`, refer to the [Instinct documentation](https://instinct.docs.amd.com/projects/amdgpu-docs/en/latest/install/detailed-install/prerequisites.html).
 
 * AMD EPYC™ CPU support additionally requires the `amd_hsmp` (or `hsmp_acpi`) kernel module with the HSMP interface enabled in BIOS. Without it, CPU discovery is skipped (non-fatal). See the [installation requirements](https://rocm.docs.amd.com/projects/amdsmi/en/latest/install/install.html).
 * Export `LD_LIBRARY_PATH` to the `amdsmi` installation directory.
