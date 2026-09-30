@@ -10,6 +10,7 @@ the loader contract that `py-interface/amdsmi_wrapper.py` implements.
 | Path | Native library (`.so`) | Python module | How the module finds the `.so` |
 | ---- | ---------------------- | ------------- | ------------------------------ |
 | System package (deb/rpm) | `/opt/rocm/lib/libamd_smi.so.<MAJOR>` (+ `ld.so.conf.d` entry) | Installed into the system interpreter's `site-packages`/`dist-packages` **and** `share/amd_smi` | SONAME via the dynamic linker |
+| TheRock native package (`amdrocm-amdsmi`) | `/opt/rocm/core-X.Y/lib/libamd_smi.so.<MAJOR>` | `/opt/rocm/core-X.Y/share/amd_smi/amdsmi` only; importable after adding `share/amd_smi` to `PYTHONPATH` | Resolved relative to the wrapper (`../../../lib`) |
 | Tarball | Present in the extracted tree | Not installed | n/a — CLI and `.so` work; `import amdsmi` is not provided |
 | ROCm via pip (TheRock `rocm_sdk_core`) | `<root>/lib/libamd_smi.so.<MAJOR>` | `<root>/share/amd_smi/amdsmi` | Resolved relative to the wrapper (`../../../lib`) |
 | ROCm via pip in a venv | Same as above, inside the venv | Same as above, inside the venv | Same as above |
