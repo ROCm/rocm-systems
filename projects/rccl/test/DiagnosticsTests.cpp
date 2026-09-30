@@ -11,6 +11,7 @@
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
+#include <hsa/hsa_ext_amd.h>
 #include <rccl/rccl.h>
 
 #include <algorithm>
@@ -115,6 +116,65 @@ static int usableGpus()
     if(hipGetDeviceCount(&devCount) != hipSuccess)
         return 0;
     return std::min(devCount, kMaxGpus);
+}
+
+static std::vector<int> firstDevices(int n)
+{
+    std::vector<int> devices(n);
+    std::iota(devices.begin(), devices.end(), 0);
+    return devices;
+}
+
+// True when every pair of the devices has a direct (one-hop) XGMI link. RCCL's topology makes every such pair
+// P2P-eligible, so the check must test all of them. On other topologies the eligible pairs depend on the host
+// (PCIe layout, P2P level), and a pair may legitimately be left out.
+static bool xgmiFullMesh(const std::vector<int>& devices)
+{
+    for(int a : devices)
+        for(int b : devices)
+        {
+            if(a == b)
+                continue;
+            uint32_t linkType = 0;
+            uint32_t hops     = 0;
+            if(hipExtGetLinkTypeAndHopCount(a, b, &linkType, &hops) != hipSuccess
+               || linkType != HSA_AMD_LINK_INFO_TYPE_XGMI || hops != 1)
+                return false;
+        }
+    return true;
+}
+
+// Checks the p2p summary lines of a report covering one communicator per device group (groups of equal size).
+// On a full XGMI mesh each communicator verifies all of its N * (N - 1) directed pairs. Elsewhere only the tested
+// edges are known: each summary must still be [OK] and bounded by the pair count, and a communicator without
+// eligible pairs prints no summary.
+static void expectEdgeSummaries(const DiagReport& report, const std::vector<std::vector<int>>& groups)
+{
+    const int nRanks  = static_cast<int>(groups.front().size());
+    const int pairs   = nRanks * (nRanks - 1);
+    const int nGroups = static_cast<int>(groups.size());
+    const bool full   = std::all_of(groups.begin(), groups.end(), xgmiFullMesh);
+
+    EXPECT_EQ(report.count("directed GPU P2P edges verified"), report.count(kDiagSummary))
+        << "partial p2p summary:\n"
+        << report.dump();
+    if(full)
+        ASSERT_EQ(report.count(kDiagSummary), nGroups) << report.dump();
+    else
+        EXPECT_LE(report.count(kDiagSummary), nGroups) << report.dump();
+    for(const auto& l : report.lines)
+    {
+        if(l.find(kDiagSummary) == std::string::npos)
+            continue;
+        const int edges = okEdgeCount(l);
+        if(full)
+            EXPECT_EQ(edges, pairs) << l;
+        else
+        {
+            EXPECT_GT(edges, 0) << l;
+            EXPECT_LE(edges, pairs) << l;
+        }
+    }
 }
 
 // The parent test environment (e.g. CI categories) may carry these; each case sets what it needs.
@@ -227,8 +287,8 @@ TEST_F(Diagnostics, DisabledByDefault)
     RUN_ISOLATED_TESTS(diagCase("Unset", body(nullptr)), diagCase("Zero", body("0")));
 }
 
-// Full single-node communicator: one header, one [OK] summary covering every directed pair,
-// one completion line naming the rank count, and no failure lines.
+// Full single-node communicator: one header, an [OK] summary covering every eligible directed pair
+// (all of them on a full XGMI mesh), one completion line naming the rank count, and no failure lines.
 TEST_F(Diagnostics, AllDirectedEdgesVerified)
 {
     RUN_ISOLATED_TESTS(diagCase("AllDirectedEdgesVerified", []() {
@@ -244,10 +304,7 @@ TEST_F(Diagnostics, AllDirectedEdgesVerified)
         const DiagReport report = parseDiagReport(out);
 
         EXPECT_EQ(report.count(kDiagHeader), 1) << report.dump();
-        ASSERT_EQ(report.count(kDiagSummary), 1) << report.dump();
-        for(const auto& l : report.lines)
-            if(l.find(kDiagSummary) != std::string::npos)
-                EXPECT_EQ(okEdgeCount(l), nGpus * (nGpus - 1)) << l;
+        expectEdgeSummaries(report, {firstDevices(nGpus)});
         const std::string done = "across " + std::to_string(nGpus) + " ranks";
         EXPECT_EQ(report.count("NCCL diagnostics completed in"), 1) << report.dump();
         EXPECT_EQ(report.count(done), 1) << report.dump();
@@ -256,7 +313,7 @@ TEST_F(Diagnostics, AllDirectedEdgesVerified)
     }));
 }
 
-// Edge count follows the communicator size (N * (N - 1) directed edges for N local GPUs).
+// Edge count follows the communicator size (N * (N - 1) directed edges for N local GPUs on a full XGMI mesh).
 TEST_F(Diagnostics, EdgeCountFollowsCommSize)
 {
     auto body = [](int nWanted) {
@@ -269,10 +326,7 @@ TEST_F(Diagnostics, EdgeCountFollowsCommSize)
             std::string out;
             initAllCaptured(comms, nWanted, out);
             const DiagReport report = parseDiagReport(out);
-            ASSERT_EQ(report.count(kDiagSummary), 1) << report.dump();
-            for(const auto& l : report.lines)
-                if(l.find(kDiagSummary) != std::string::npos)
-                    EXPECT_EQ(okEdgeCount(l), nWanted * (nWanted - 1)) << l;
+            expectEdgeSummaries(report, {firstDevices(nWanted)});
             EXPECT_TRUE(report.failures().empty()) << report.dump();
             destroyAll(comms);
         };
@@ -343,11 +397,11 @@ TEST_F(Diagnostics, RunsAtEveryCommInit)
 
         const DiagReport report = parseDiagReport(out);
         const int half          = nGpus / 2;
+        std::vector<std::vector<int>> colors(2);
+        for(int i = 0; i < nGpus; ++i)
+            colors[i % 2].push_back(i);
         EXPECT_EQ(report.count(kDiagHeader), 2) << report.dump();
-        EXPECT_EQ(report.count(kDiagSummary), 2) << report.dump();
-        for(const auto& l : report.lines)
-            if(l.find(kDiagSummary) != std::string::npos)
-                EXPECT_EQ(okEdgeCount(l), half * (half - 1)) << l;
+        expectEdgeSummaries(report, colors);
         EXPECT_EQ(report.count("across " + std::to_string(half) + " ranks"), 2) << report.dump();
         EXPECT_TRUE(report.failures().empty()) << report.dump();
         destroyAll(children);
@@ -405,14 +459,16 @@ TEST_F(Diagnostics, ReportOnStdoutOnly)
     }));
 }
 
-// One process driving several GPUs: the check enables peer access between them for its duration and
-// every rank prints one informational notice about it (src/diagnostics/p2p.cc). The notice is not a
-// failure: the summary still reports every edge as verified.
+// One process driving several GPUs on the legacy (non-cuMem) path: a rank that newly enables context-wide
+// peer access to a peer prints one informational notice (src/diagnostics/p2p.cc); with cuMem the access is
+// mapping-scoped and no notice is printed. The check runs before transport setup (src/init.cc), so in a fresh
+// process on a full XGMI mesh every rank enables access and prints the notice. The notice is not a failure.
 TEST_F(Diagnostics, SingleProcessPeerAccessNotice)
 {
     RUN_ISOLATED_TESTS(diagCase("SingleProcessPeerAccessNotice", []() {
         clearDiagEnv();
         setenv("NCCL_RUN_DIAGNOSTICS", "1", 1);
+        setenv("NCCL_CUMEM_ENABLE", "0", 1);
         const int nGpus = usableGpus();
         if(nGpus < 2)
             GTEST_SKIP() << "Requires >= 2 GPUs";
@@ -421,12 +477,19 @@ TEST_F(Diagnostics, SingleProcessPeerAccessNotice)
         initAllCaptured(comms, nGpus, out);
         const DiagReport report = parseDiagReport(out);
 
+        const std::vector<int> devices = firstDevices(nGpus);
+        const bool full                = xgmiFullMesh(devices);
         const std::string notice = "NCCL DIAG [INFO] p2p: temporarily enabled context-wide CUDA peer access rank=";
-        EXPECT_EQ(report.count(notice), nGpus) << report.dump();
+        EXPECT_LE(report.count(notice), nGpus) << report.dump();
         for(int rank = 0; rank < nGpus; ++rank)
-            EXPECT_EQ(report.count(notice + std::to_string(rank) + " "), 1) << "rank " << rank << "\n"
-                                                                            << report.dump();
-        ASSERT_EQ(report.count(kDiagSummary), 1) << report.dump();
+        {
+            const int n = report.count(notice + std::to_string(rank) + " ");
+            if(full)
+                EXPECT_EQ(n, 1) << "rank " << rank << "\n" << report.dump();
+            else
+                EXPECT_LE(n, 1) << "rank " << rank << "\n" << report.dump();
+        }
+        expectEdgeSummaries(report, {devices});
         EXPECT_TRUE(report.failures().empty()) << report.dump();
         destroyAll(comms);
     }));
