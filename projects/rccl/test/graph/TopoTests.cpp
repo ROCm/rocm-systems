@@ -109,9 +109,21 @@ protected:
     EXPECT_EQ(xmlSetAttrInt(link, "count", count), ncclSuccess);
   }
 
+  // Rebuild the fixture XML tree. Needed when one TEST_F walks several CPU
+  // model-id cases and each case has to start from an empty <system>.
+  void resetXml() {
+    free(xml);
+    xml = nullptr;
+    root = nullptr;
+    ASSERT_EQ(xmlAlloc(&xml, kMaxXmlNodes), ncclSuccess);
+    ASSERT_EQ(xmlAddNode(xml, nullptr, "system", &root), ncclSuccess);
+  }
+
   // <cpu> populated with the attributes ncclTopoGetSystemFromXml() requires to
-  // build a full system (numaid, host id, x86/AMD identification).
-  struct ncclXmlNode* addSystemCpu(uint64_t hostHash, int numaId = 0) {
+  // build a full system (numaid, host id, x86 vendor/family/model).
+  struct ncclXmlNode* addSystemCpu(uint64_t hostHash, int numaId = 0,
+                                   const char* vendor = "AuthenticAMD", int familyId = 25,
+                                   int modelId = 1) {
     struct ncclXmlNode* cpu = nullptr;
     EXPECT_EQ(xmlAddNode(xml, root, "cpu", &cpu), ncclSuccess);
     char hash[32];
@@ -120,9 +132,9 @@ protected:
     EXPECT_EQ(xmlSetAttr(cpu, "host_hash", hash), ncclSuccess);
     EXPECT_EQ(xmlSetAttrInt(cpu, "numaid", numaId), ncclSuccess);
     EXPECT_EQ(xmlSetAttr(cpu, "arch", "x86_64"), ncclSuccess);
-    EXPECT_EQ(xmlSetAttr(cpu, "vendor", "AuthenticAMD"), ncclSuccess);
-    EXPECT_EQ(xmlSetAttrInt(cpu, "familyid", 25), ncclSuccess);
-    EXPECT_EQ(xmlSetAttrInt(cpu, "modelid", 1), ncclSuccess);
+    EXPECT_EQ(xmlSetAttr(cpu, "vendor", vendor), ncclSuccess);
+    EXPECT_EQ(xmlSetAttrInt(cpu, "familyid", familyId), ncclSuccess);
+    EXPECT_EQ(xmlSetAttrInt(cpu, "modelid", modelId), ncclSuccess);
     return cpu;
   }
 
@@ -295,6 +307,14 @@ protected:
     return nullptr;
   }
 
+  static struct ncclTopoLink* findSysLink(struct ncclTopoNode* from, struct ncclTopoNode* to) {
+    if (from == nullptr || to == nullptr) return nullptr;
+    for (int i = 0; i < from->nlinks; i++) {
+      if (from->links[i].type == LINK_SYS && from->links[i].remNode == to) return &from->links[i];
+    }
+    return nullptr;
+  }
+
   struct ncclTopoSystem* system = nullptr;
   struct ncclXml* xml = nullptr;
   struct ncclXmlNode* root = nullptr;
@@ -309,6 +329,57 @@ TEST_F(TopoTest, MloPartBusId_DoesNotClobberPciFunction) {
   EXPECT_NE(enc7, enc0);
   EXPECT_EQ(enc0 & ~NCCL_TOPO_MLOPART_MASK, busFn1);
   EXPECT_EQ(enc7 & ~NCCL_TOPO_MLOPART_MASK, busFn1);
+}
+
+// NCCL 2.31.2 (35671f4): Granite Rapids (0xAD/0xAE) and Sierra Forest (0xAF) have
+// lower CPUID model IDs than Emerald Rapids (0xCF). The old `modelId >= 0xCF` test
+// classified them as Sapphire Rapids, so dual-socket SYS (UPI) bandwidth was 22 GB/s
+// instead of 40 GB/s and graph search could under-count channels. Drive a two-NUMA
+// Intel XML through ncclTopoGetSystemFromXml() and check CPU model plus the SYS link.
+TEST_F(TopoTest, IntelCpu_GnrSrfMapToErpAndUseErpUpiBandwidth) {
+  struct Case {
+    const char* name;
+    int modelId;
+    int expectedModel;
+    float expectedSysBw;
+  };
+  const Case cases[] = {
+    {"GraniteRapids", 0xAD, NCCL_TOPO_CPU_MODEL_INTEL_ERP, ERP_QPI_BW},
+    {"GraniteRapidsD", 0xAE, NCCL_TOPO_CPU_MODEL_INTEL_ERP, ERP_QPI_BW},
+    {"SierraForest", 0xAF, NCCL_TOPO_CPU_MODEL_INTEL_ERP, ERP_QPI_BW},
+    {"EmeraldRapids", 0xCF, NCCL_TOPO_CPU_MODEL_INTEL_ERP, ERP_QPI_BW},
+    {"SapphireRapids", 0x8F, NCCL_TOPO_CPU_MODEL_INTEL_SRP, SRP_QPI_BW},
+    {"Skylake", 0x55, NCCL_TOPO_CPU_MODEL_INTEL_SKL, SKL_QPI_BW},
+    {"Broadwell", 0x3F, NCCL_TOPO_CPU_MODEL_INTEL_BDW, BDW_QPI_BW},
+  };
+
+  for (const Case& c : cases) {
+    SCOPED_TRACE(c.name);
+    resetXml();
+    const uint64_t host = 0x2e31;
+    addSystemCpu(host, /*numaId=*/0, "GenuineIntel", /*familyId=*/6, c.modelId);
+    addSystemCpu(host, /*numaId=*/1, "GenuineIntel", /*familyId=*/6, c.modelId);
+
+    struct ncclTopoSystem* built = nullptr;
+    ASSERT_EQ(ncclTopoGetSystemFromXml(xml, &built, host), ncclSuccess);
+    ASSERT_NE(built, nullptr);
+    ASSERT_EQ(built->nodes[CPU].count, 2);
+
+    for (int i = 0; i < 2; i++) {
+      EXPECT_EQ(built->nodes[CPU].nodes[i].cpu.arch, NCCL_TOPO_CPU_ARCH_X86) << c.name;
+      EXPECT_EQ(built->nodes[CPU].nodes[i].cpu.vendor, NCCL_TOPO_CPU_VENDOR_INTEL) << c.name;
+      EXPECT_EQ(built->nodes[CPU].nodes[i].cpu.model, c.expectedModel) << c.name;
+    }
+
+    struct ncclTopoLink* sys01 = findSysLink(&built->nodes[CPU].nodes[0], &built->nodes[CPU].nodes[1]);
+    struct ncclTopoLink* sys10 = findSysLink(&built->nodes[CPU].nodes[1], &built->nodes[CPU].nodes[0]);
+    ASSERT_NE(sys01, nullptr) << c.name;
+    ASSERT_NE(sys10, nullptr) << c.name;
+    EXPECT_FLOAT_EQ(sys01->bw, c.expectedSysBw) << c.name;
+    EXPECT_FLOAT_EQ(sys10->bw, c.expectedSysBw) << c.name;
+
+    ncclTopoFree(built);
+  }
 }
 
 // ncclTopoAddXGMI() is only built on HIP/AMD platforms, so guard these tests
