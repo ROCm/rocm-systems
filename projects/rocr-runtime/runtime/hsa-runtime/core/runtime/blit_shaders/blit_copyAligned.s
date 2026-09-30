@@ -71,6 +71,12 @@
 	.endif
 .endm
 
+.macro S_WAIT_XCNT
+  .if (.amdgcn.gfx_generation_number == 12 && .amdgcn.gfx_generation_minor >= 5)
+    s_wait_xcnt              0x0
+  .endif
+.endm
+
 .macro S_WAITCNT_KMCNT
   .if (.amdgcn.gfx_generation_number == 12 && .amdgcn.gfx_generation_minor >= 5)
     s_wait_kmcnt             0
@@ -147,6 +153,7 @@ compute_pgm_rsrc1_vgprs = CopyAlignedRsrc1VGPRs
 
 
     FLAT_STORE_BYTE         v[4:5], v1
+    S_WAIT_XCNT
     V_ADD_CO_U32            v4, v4, s24
     V_ADD_CO_CI_U32         v5, v5, 0x0
 
@@ -185,8 +192,10 @@ compute_pgm_rsrc1_vgprs = CopyAlignedRsrc1VGPRs
 .macro mCopyAlignedPhase2Load iter iter_end
     .if kCopyAlignedVecWidth == 4
       flat_load_dwordx4    v[8 + (\iter * 4):8 + (\iter * 4) + 3], v[2:3]
+      S_WAIT_XCNT
     .else
       flat_load_dword      v[8 + \iter], v[2:3]
+      S_WAIT_XCNT
     .endif
 
     V_ADD_CO_U32           v2, v2, s25
@@ -204,8 +213,10 @@ mCopyAlignedPhase2Load 0, (kCopyAlignedUnroll - 1)
 .macro mCopyAlignedPhase2Store iter iter_end
     .if kCopyAlignedVecWidth == 4
       flat_store_dwordX4   v[4:5], v[8 + (\iter * 4):8 + (\iter * 4) + 3]
+      S_WAIT_XCNT
     .else
       flat_store_dword     v[4:5], v[8 + \iter]
+      S_WAIT_XCNT
     .endif
 
 	V_ADD_CO_U32         v4, v4, s25
@@ -241,12 +252,14 @@ mCopyAlignedPhase2Store 0, (kCopyAlignedUnroll - 1)
 
 
     FLAT_LOAD_DWORD         v1, v[2:3]
+    S_WAIT_XCNT
     V_ADD_CO_U32            v2, v2, s25
     V_ADD_CO_CI_U32         v3, v3, 0x0
     S_WAITCNT_LOADCNT
 
 
     flat_store_dword        v[4:5], v1
+    S_WAIT_XCNT
     V_ADD_CO_U32            v4, v4, s25
     V_ADD_CO_CI_U32         v5, v5, 0x0
 
