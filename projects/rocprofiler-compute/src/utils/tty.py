@@ -118,22 +118,6 @@ def scale_bw_columns(
     return df_copy
 
 
-def string_multiple_lines(source: str, width: int, max_rows: int) -> str:
-    """
-    Adjust string with multiple lines by inserting '\n'
-    """
-    lines: list[str] = []
-    for i in range(0, len(source), width):
-        if len(lines) >= max_rows:
-            break
-        lines.append(source[i : i + width])
-
-    if len(lines) == max_rows and len(source) > max_rows * width:
-        lines[-1] = lines[-1][:-3] + "..."
-
-    return "\n".join(lines)
-
-
 def get_table_string(
     df: pd.DataFrame, transpose: bool = False, decimal: int = 2
 ) -> str:

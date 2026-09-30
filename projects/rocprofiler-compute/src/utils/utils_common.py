@@ -591,45 +591,6 @@ def capture_subprocess_output(
     return success, output
 
 
-def get_agent_dict(data: dict[str, Any]) -> dict[Any, Any]:
-    """Create a dictionary that maps agent ID to agent objects."""
-    agents = data["rocprofiler-sdk-tool"][0]["agents"]
-    agent_map: dict[Any, Any] = {}
-
-    for agent in agents:
-        agent_id = agent["id"]["handle"]
-        agent_map[agent_id] = agent
-
-    return agent_map
-
-
-def get_gpuid_dict(data: dict[str, Any]) -> dict[Any, int]:
-    """
-    Returns a dictionary that maps agent ID to GPU ID starting at 0.
-    """
-    agents = data["rocprofiler-sdk-tool"][0]["agents"]
-    agent_list: list[tuple[Any, int]] = []
-
-    # Get agent ID and node_id for GPU agents only
-    for agent in agents:
-        if agent["type"] == 2:
-            agent_id = agent["id"]["handle"]
-            node_id = agent["node_id"]
-            agent_list.append((agent_id, node_id))
-
-    # Sort by node ID
-    agent_list.sort(key=lambda x: x[1])
-
-    # Map agent ID to node id
-    gpu_map: dict[Any, int] = {}
-    gpu_id = 0
-    for agent_id, _ in agent_list:
-        gpu_map[agent_id] = gpu_id
-        gpu_id += 1
-
-    return gpu_map
-
-
 def parse_pmc_perf(pmc_perf_file: str) -> list[str]:
     """
     Parse the YAML file to get the pmc counters.
@@ -824,80 +785,6 @@ def build_metric_list(
 
 def get_uuid(length: int = 8) -> str:
     return uuid.uuid4().hex[:length]
-
-
-def format_scientific_notation_if_needed(
-    value: Union[int, float],
-    align: str = ">",
-    width_align: int = 6,
-    precision: int = 2,
-    fmt_type_align: str = "f",
-    max_length: int = 6,  # Deprecated: kept for backward compatibility
-    sci_lower_bound: float = 1e-2,
-    sci_upper_bound: float = 1e6,
-) -> str:
-    """
-    Format a numeric value as normal or scientific notation string.
-
-    Uses scientific notation only if it results in a shorter string than
-    normal notation, or if the value falls outside the bounds:
-    - abs(value) < sci_lower_bound (but not zero)
-    - abs(value) >= sci_upper_bound
-
-    Parameters:
-    - value: numeric value to format
-    - align: alignment character ('<', '>', '^', '=')
-    - width_align: total width of formatted output
-    - precision: number of digits after decimal point
-    - fmt_type_align: format type, e.g., 'f', 'e', 'g'
-    - max_length: deprecated, no longer used
-    - sci_lower_bound: lower bound for scientific notation usage
-    - sci_upper_bound: upper bound for scientific notation usage
-
-    Returns:
-    - formatted string according to the criteria, respecting alignment
-    """
-    del max_length  # Unused, kept for backward compatibility
-
-    abs_val = abs(value)
-    use_sci = False
-
-    # Build format specifiers
-    normal_format_spec = f"{align}{width_align}.{precision}{fmt_type_align}"
-    sci_format_spec = f"{align}{width_align}.{precision}e"
-
-    normal_str = None  # will hold formatted normal string (with padding)
-    sci_str = None  # will hold formatted scientific string (with padding)
-
-    if abs_val != 0:
-        if abs_val < sci_lower_bound or abs_val >= sci_upper_bound:
-            use_sci = True
-        else:
-            try:
-                normal_str = format(value, normal_format_spec)
-                normal_str_strip = normal_str.strip()
-
-                sci_str = format(value, sci_format_spec)
-                sci_str_strip = sci_str.strip()
-
-                # Decide based on length of stripped strings (ignore padding)
-                # Only use scientific notation if it's actually shorter
-                if len(sci_str_strip) < len(normal_str_strip):
-                    use_sci = True
-            except Exception:
-                # Fallback to scientific if formatting fails
-                use_sci = True
-
-    if use_sci:
-        if sci_str is None:
-            sci_str = format(value, sci_format_spec)
-        formatted = sci_str
-    else:
-        if normal_str is None:
-            normal_str = format(value, normal_format_spec)
-        formatted = normal_str
-
-    return formatted
 
 
 def convert_filter_blocks_to_panel_ids(

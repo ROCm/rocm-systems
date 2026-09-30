@@ -18,7 +18,6 @@ Panel Config:
       id: 301
       title: Instruction Cache
       cli_style: mem_chart
-      tui_style: mem_chart
       comparable: false
       header:
         metric: Metric
@@ -51,7 +50,6 @@ Panel Config:
       id: 302
       title: Scalar Data Cache
       cli_style: mem_chart
-      tui_style: mem_chart
       comparable: false
       header:
         metric: Metric
@@ -87,7 +85,6 @@ Panel Config:
       id: 303
       title: GL0 Cache (Vector L0)
       cli_style: mem_chart
-      tui_style: mem_chart
       comparable: false
       header:
         metric: Metric
@@ -117,7 +114,6 @@ Panel Config:
       id: 304
       title: LDS (Local Data Share)
       cli_style: mem_chart
-      tui_style: mem_chart
       comparable: false
       header:
         metric: Metric
@@ -176,7 +172,6 @@ Panel Config:
       id: 305
       title: GL0-GL1 Interface
       cli_style: mem_chart
-      tui_style: mem_chart
       comparable: false
       header:
         metric: Metric
@@ -206,7 +201,6 @@ Panel Config:
       id: 306
       title: GLARB (GL1-GL2 Arbiter)
       cli_style: mem_chart
-      tui_style: mem_chart
       comparable: false
       header:
         metric: Metric
@@ -242,7 +236,6 @@ Panel Config:
       id: 307
       title: GL2 Cache (L2)
       cli_style: mem_chart
-      tui_style: mem_chart
       comparable: false
       header:
         metric: Metric
@@ -269,7 +262,6 @@ Panel Config:
       id: 308
       title: EA to HBM
       cli_style: mem_chart
-      tui_style: mem_chart
       comparable: false
       header:
         metric: Metric
