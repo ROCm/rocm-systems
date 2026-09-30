@@ -10,10 +10,8 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <deque>
 #include <fmt/format.h>
 #include <memory>
-#include <stack>
 #include <stdexcept>
 #include <string>
 #include <thread>

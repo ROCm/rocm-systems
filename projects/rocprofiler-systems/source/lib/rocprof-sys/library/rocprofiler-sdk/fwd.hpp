@@ -8,7 +8,6 @@
 #include "core/perfetto.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"
-#include <cstdint>
 
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/buffer_tracing.h>
@@ -22,6 +21,8 @@
 
 #include "logger/debug.hpp"
 
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <vector>
 

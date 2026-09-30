@@ -9,13 +9,8 @@
 #include "policies/rocprofiler-sdk/domain_service/backend.hpp"
 #include "policies/rocprofiler-sdk/domain_service/externals.hpp"
 
-#include <fmt/format.h>
-
-#include <cstddef>
 #include <cstdint>
-#include <exception>
 #include <optional>
-#include <string>
 
 namespace rocprofsys::domains::buffered
 {

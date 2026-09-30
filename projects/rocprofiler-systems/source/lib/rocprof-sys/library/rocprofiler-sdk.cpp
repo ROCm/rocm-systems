@@ -97,11 +97,11 @@
 #include <regex>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <unistd.h>
 #include <unordered_map>
 #include <unordered_set>
-#include <utility>
 #include <vector>
 
 namespace rocprofsys::rocprofiler_sdk

@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 
 #include <memory>
+#include <string_view>
 
 namespace rocprofsys::domains::buffered
 {

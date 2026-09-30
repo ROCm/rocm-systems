@@ -4,7 +4,6 @@
 #pragma once
 
 #include <concepts>
-#include <cstddef>
 #include <string>
 #include <sys/types.h>
 #include <type_traits>
