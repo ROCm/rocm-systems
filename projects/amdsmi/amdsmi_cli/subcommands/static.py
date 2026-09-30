@@ -206,7 +206,7 @@ class StaticCommands:
             args.cuid = cuid
         if cuid_primary:
             args.cuid_primary = cuid_primary
-        if args.cuid_primary:
+        if getattr(args, "cuid_primary", False):
             # --cuid-primary selects a field of the CUID block, so asking for it
             # asks for the block. Without this it is a no-op alongside any other
             # flag.
@@ -286,7 +286,7 @@ class StaticCommands:
         #         consumer of `amd-smi static --json`, and on a build without
         #         libamdcuid it adds a block of "N/A" to every GPU. Opt in with
         #         --cuid or --cuid-primary.
-        if args.cuid:
+        if getattr(args, "cuid", False):
             current_platform_args += ["cuid"]
             current_platform_values += [args.cuid]
 
@@ -378,7 +378,7 @@ class StaticCommands:
                 logging.debug("Failed to get asic info for gpu %s | %s", gpu_id, e.get_error_info())
 
             static_dict["asic"] = asic_dict
-        if args.cuid:
+        if getattr(args, "cuid", False):
             # Absence is reported, not omitted: to a script, a field that
             # disappears is indistinguishable from a parsing failure. Every key
             # below is always present, primary_cuid carrying a sentinel saying
@@ -406,7 +406,7 @@ class StaticCommands:
                 # The primary embeds the device serial number and static output
                 # ends up in public bug reports, so it is shown only when asked
                 # for and only when the caller could read it.
-                if args.cuid_primary:
+                if getattr(args, "cuid_primary", False):
                     cuid_dict["primary_cuid"] = (
                         cuid_info["primary"] if cuid_info["primary"] else "N/A (requires root)"
                     )

@@ -29,7 +29,6 @@ and skips when there is none.
 """
 
 import argparse
-import importlib.util
 import io
 import json
 import os
@@ -38,35 +37,11 @@ import types
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 
-# ``common.common`` bootstraps the real amdsmi package at import time, which
-# fails on a stale or mismatched install. The CLI classes below fully stub
-# ``amdsmi`` and only need ``amdsmi_path`` to locate the *installed* CLI
-# fallback, so degrade gracefully, as test_cli_set_clk_limit.py does. Exception
-# rather than ImportError: a stale install raises AttributeError out of
-# build_type_lists() rather than failing to import.
-try:
-    from common.common import amdsmi_path
-except Exception:  # pragma: no cover - harness/install unavailable or stale
-    amdsmi_path = None
+from common.common import cli_search_order, fake_module, find_cli_dir, load_cli_module, stub_modules
 
-_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-_SOURCE_CLI_DIR = os.path.normpath(os.path.join(_THIS_DIR, "..", "..", "..", "..", "amdsmi_cli"))
-_INSTALLED_CLI_DIR = (
-    os.path.join(os.path.dirname(os.path.dirname(amdsmi_path)), "libexec", "amdsmi_cli")
-    if amdsmi_path
-    else ""
-)
-
-
-def _resolve_cli_dir():
-    for cli_dir in (_SOURCE_CLI_DIR, _INSTALLED_CLI_DIR):
-        if cli_dir and os.path.isfile(os.path.join(cli_dir, "subcommands", "set_value.py")):
-            return cli_dir
-    return None
-
-
-_CLI_DIR = _resolve_cli_dir()
-SET_VALUE_PATH = os.path.join(_CLI_DIR, "subcommands", "set_value.py") if _CLI_DIR else ""
+_CLI_DIR = find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
+SET_VALUE_PATH = os.path.join(_CLI_DIR, "subcommands", "set_value.py") if _CLI_DIR else None
+STATIC_PATH = os.path.join(_CLI_DIR, "subcommands", "static.py") if _CLI_DIR else None
 
 SEED_SIZE = 32
 
@@ -81,8 +56,8 @@ SEED_32 = bytes(range(0x40, 0x40 + SEED_SIZE))
 PROVISIONED_FINGERPRINT = "1c2d3e4f50617283"
 
 
-def _install_fake_amdsmi():
-    """Register a stub ``amdsmi`` package so ``set_value.py`` imports cleanly."""
+def _fake_amdsmi_modules():
+    """Stub ``amdsmi`` package for ``common.stub_modules``, and its interface."""
     amdsmi_pkg = types.ModuleType("amdsmi")
     interface = types.ModuleType("amdsmi.amdsmi_interface")
     exception = types.ModuleType("amdsmi.amdsmi_exception")
@@ -93,7 +68,12 @@ def _install_fake_amdsmi():
     interface.AMDSMI_MAX_UTIL = 100
     interface.AMDSMI_CUID_SEED_SIZE = SEED_SIZE
     interface.amdsmi_wrapper = wrapper
+    # Real values. amdsmi_helpers reads the CPER ones while its class body runs.
+    wrapper.AMDSMI_STATUS_INVAL = 1
+    wrapper.AMDSMI_STATUS_NOT_SUPPORTED = 2
     wrapper.AMDSMI_STATUS_NO_PERM = 10
+    wrapper.AMDSMI_STATUS_UNEXPECTED_SIZE = 42
+    wrapper.AMDSMI_STATUS_UNEXPECTED_DATA = 43
 
     class _StubLibraryException(Exception):
         """Carries an error code, which the CLI branches on."""
@@ -114,20 +94,13 @@ def _install_fake_amdsmi():
     amdsmi_pkg.amdsmi_interface = interface
     amdsmi_pkg.amdsmi_exception = exception
 
-    sys.modules["amdsmi"] = amdsmi_pkg
-    sys.modules["amdsmi.amdsmi_interface"] = interface
-    sys.modules["amdsmi.amdsmi_exception"] = exception
-    sys.modules["amdsmi.amdsmi_wrapper"] = wrapper
-    return interface
-
-
-def _load_set_value_module():
-    if _CLI_DIR and _CLI_DIR not in sys.path:
-        sys.path.insert(0, _CLI_DIR)
-    spec = importlib.util.spec_from_file_location("set_value_cuid_under_test", SET_VALUE_PATH)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    modules = {
+        "amdsmi": amdsmi_pkg,
+        "amdsmi.amdsmi_interface": interface,
+        "amdsmi.amdsmi_exception": exception,
+        "amdsmi.amdsmi_wrapper": wrapper,
+    }
+    return interface, modules
 
 
 class _RecordingLogger:
@@ -154,28 +127,11 @@ class _RecordingLogger:
 
 
 class _CuidSeedTestBase(unittest.TestCase):
-    _SAVED_MODULE_NAMES = (
-        "amdsmi",
-        "amdsmi.amdsmi_interface",
-        "amdsmi.amdsmi_exception",
-        "amdsmi.amdsmi_wrapper",
-    )
-
     @classmethod
     def setUpClass(cls):
-        if not SET_VALUE_PATH:
-            raise unittest.SkipTest("amd-smi CLI set_value.py not found (source or installed)")
-        cls._saved_modules = {name: sys.modules.get(name) for name in cls._SAVED_MODULE_NAMES}
-        cls.interface = _install_fake_amdsmi()
-        cls.module = _load_set_value_module()
-
-    @classmethod
-    def tearDownClass(cls):
-        for name, saved in cls._saved_modules.items():
-            if saved is None:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = saved
+        cls.interface, modules = _fake_amdsmi_modules()
+        stub_modules(cls, modules)
+        cls.module = load_cli_module("set_value_cuid_under_test", SET_VALUE_PATH, _CLI_DIR)
 
     def setUp(self):
         self.set_calls = []
@@ -222,7 +178,7 @@ class TestCuidSeedLengthIsEnforced(_CuidSeedTestBase):
     def test_sixteen_octet_seed_is_refused(self):
         # Half a seed: a truncated file, not a weaker secret.
         path = self._seed_file(b"\x01" * 16)
-        with self.assertRaises(ValueError) as caught:
+        with self.assertRaises(self.module.AmdSmiInvalidParameterValueException) as caught:
             self.cmd._set_cuid_seed(path)
         message = str(caught.exception)
         self.assertIn("exactly 32 bytes", message)
@@ -238,7 +194,7 @@ class TestCuidSeedLengthIsEnforced(_CuidSeedTestBase):
         # truncating to the first 32 octets would provision something nobody
         # chose.
         path = self._seed_file(b"\x02" * 64)
-        with self.assertRaises(ValueError) as caught:
+        with self.assertRaises(self.module.AmdSmiInvalidParameterValueException) as caught:
             self.cmd._set_cuid_seed(path)
         message = str(caught.exception)
         self.assertIn("exactly 32 bytes", message)
@@ -253,7 +209,7 @@ class TestCuidSeedLengthIsEnforced(_CuidSeedTestBase):
         saved_stdin = sys.stdin
         sys.stdin = types.SimpleNamespace(buffer=io.BytesIO(b"\x03" * 16))
         self.addCleanup(setattr, sys, "stdin", saved_stdin)
-        with self.assertRaises(ValueError) as caught:
+        with self.assertRaises(self.module.AmdSmiInvalidParameterValueException) as caught:
             self.cmd._set_cuid_seed("-")
         self.assertIn("exactly 32 bytes", str(caught.exception))
         self.assertEqual(self.set_calls, [])
@@ -264,6 +220,21 @@ class TestCuidSeedLengthIsEnforced(_CuidSeedTestBase):
         _source, _out, _err = self._provision(SEED_32)
         self.assertEqual(self.set_calls, [SEED_32])
         self.assertEqual(self.logger.output["seed_provisioned"], True)
+
+
+class TestCuidSeedIsNodeWide(_CuidSeedTestBase):
+    """``--cuid-seed`` with ``--gpu`` is refused as an invalid parameter."""
+
+    def test_gpu_selector_is_refused_before_anything_is_provisioned(self):
+        self.cmd.helpers = types.SimpleNamespace(get_output_format=lambda: "human_readable")
+        args = argparse.Namespace(cuid_seed=self._seed_file(SEED_32), gpu=[1], gtt=None)
+        with self.assertRaises(self.module.AmdSmiInvalidParameterException) as caught:
+            self.cmd.set_value(args)
+        # Not 2, which the exit-code contract reserves for the library's
+        # AMDSMI_STATUS_NOT_SUPPORTED.
+        self.assertEqual(caught.exception.value, int(self.module.AmdSmiExitCode.INVALID_PARAMETER))
+        self.assertIn("--cuid-seed", str(caught.exception))
+        self.assertEqual(self.set_calls, [])
 
 
 class TestCuidSeedNeverReachesOutput(_CuidSeedTestBase):
@@ -388,6 +359,9 @@ class _FakeHelpers:
     def handle_gpus(self, args, logger, subcommand):
         return self._real.handle_gpus(self, args, logger, subcommand)
 
+    def run_device_subcommand(self, subcommand, args, **device_kwarg):
+        return self._real.run_device_subcommand(self, subcommand, args, **device_kwarg)
+
     def get_gpu_id_from_device_handle(self, device_handle):
         return device_handle
 
@@ -424,56 +398,32 @@ class TestStaticCuidOutputShape(unittest.TestCase):
     # device handle as "no device selected".
     GPU_HANDLES = [1, 2]
 
-    _SAVED_MODULE_NAMES = (
-        "amdsmi",
-        "amdsmi.amdsmi_interface",
-        "amdsmi.amdsmi_exception",
-        "amdsmi.amdsmi_wrapper",
-        "amdsmi_init",
-        "amdsmi_helpers",
-        "amdsmi_logger",
-        "amdsmi_cli_exceptions",
-        "BDF",
-    )
-
     @classmethod
     def setUpClass(cls):
-        if not _CLI_DIR:
-            raise unittest.SkipTest("amd-smi CLI not found (source or installed)")
-        cls._saved_modules = {name: sys.modules.get(name) for name in cls._SAVED_MODULE_NAMES}
-        cls.interface = _install_fake_amdsmi()
+        cls.interface, modules = _fake_amdsmi_modules()
 
         # amdsmi_helpers pulls in amdsmi_init, which initialises the real
         # library at import time and exits the interpreter when no driver is
         # loaded. Stand in for it with the two names amdsmi_helpers reads.
-        fake_init = types.ModuleType("amdsmi_init")
-        fake_init.AMDSMI_INIT_FLAG = 0
-        fake_init.AMD_VENDOR_ID = 0x1002
-        fake_init.amdsmi_interface = cls.interface
-        fake_init.amdsmi_exception = sys.modules["amdsmi.amdsmi_exception"]
-        sys.modules["amdsmi_init"] = fake_init
+        modules["amdsmi_init"] = fake_module(
+            "amdsmi_init",
+            AMDSMI_INIT_FLAG=0,
+            AMD_VENDOR_ID=0x1002,
+            amdsmi_interface=cls.interface,
+            amdsmi_exception=modules["amdsmi.amdsmi_exception"],
+        )
+        # Dropped so they are imported afresh against the stub amdsmi, and put
+        # back when the class finishes.
+        for name in ("amdsmi_helpers", "amdsmi_logger", "amdsmi_cli_exceptions", "BDF"):
+            modules[name] = None
+        stub_modules(cls, modules)
 
-        if _CLI_DIR not in sys.path:
-            sys.path.insert(0, _CLI_DIR)
+        cls.module = load_cli_module("static_cuid_under_test", STATIC_PATH, _CLI_DIR)
         import amdsmi_helpers
         import amdsmi_logger
 
         cls.helpers_module = amdsmi_helpers
         cls.logger_module = amdsmi_logger
-
-        spec = importlib.util.spec_from_file_location(
-            "static_cuid_under_test", os.path.join(_CLI_DIR, "subcommands", "static.py")
-        )
-        cls.module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(cls.module)
-
-    @classmethod
-    def tearDownClass(cls):
-        for name, saved in cls._saved_modules.items():
-            if saved is None:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = saved
 
     def setUp(self):
         self.seed_calls = []
@@ -617,7 +567,3 @@ class TestStaticCuidOutputShape(unittest.TestCase):
 
         self.assertEqual(document["seed_provisioned"], "N/A (requires root)")
         self.assertEqual(document["seed_fingerprint"], "N/A (requires root)")
-
-
-if __name__ == "__main__":
-    unittest.main()

@@ -8,7 +8,9 @@ import math
 import sys
 
 from amdsmi_cli_exceptions import AmdSmiRequiredCommandException
+from amdsmi_cli_exceptions import AmdSmiInvalidFilePathException
 from amdsmi_cli_exceptions import AmdSmiInvalidParameterException
+from amdsmi_cli_exceptions import AmdSmiInvalidParameterValueException
 from amdsmi_cli_exceptions import AmdSmiExitCode
 
 from amdsmi import amdsmi_exception, amdsmi_interface
@@ -2047,13 +2049,18 @@ class SetValueCommands:
                 with open(source, "rb") as handle:
                     seed = handle.read()
             except OSError as e:
-                raise ValueError(f"Cannot read CUID seed from {source}: {e.strerror}") from e
+                raise AmdSmiInvalidFilePathException(
+                    "set", self.logger.format, f"Cannot read CUID seed from {source}: {e.strerror}"
+                ) from e
 
         if len(seed) != seed_size:
             # Checked here as well as in the library so that the error names the
             # file.
-            raise ValueError(
-                f"CUID seed must be exactly {seed_size} bytes, got {len(seed)} from {source}"
+            raise AmdSmiInvalidParameterValueException(
+                "set",
+                source,
+                self.logger.format,
+                f"CUID seed must be exactly {seed_size} bytes, got {len(seed)} from {source}",
             )
 
         try:
@@ -2162,7 +2169,8 @@ class SetValueCommands:
             process_isolation (int, optional): Value override for args.process_isolation. Defaults to None.
         Raises:
             AmdSmiRequiredCommandException: If no device target or argument is provided
-            AmdSmiInvalidParameterException: If GPU/CPU/CORE arguments are combined or --gtt is misused
+            AmdSmiInvalidParameterException: If GPU/CPU/CORE arguments are combined, or --gtt or
+                --cuid-seed is combined with --gpu
             PermissionError: If a set operation requires elevation (AMDSMI_STATUS_NO_PERM)
 
         Return:
@@ -2218,12 +2226,13 @@ class SetValueCommands:
             if getattr(args, "gpu", None) is not None:
                 # Without this the command re-keys every derived CUID on the
                 # node while appearing to target one device.
-                print(
+                msg = (
                     "amd-smi set: error: argument --cuid-seed: not allowed with argument "
-                    "--gpu/-g (the CUID seed is node-wide, not per-GPU)",
-                    file=sys.stderr,
+                    "--gpu/-g (the CUID seed is node-wide, not per-GPU)"
                 )
-                sys.exit(2)
+                raise AmdSmiInvalidParameterException(
+                    "set", "--cuid-seed", self.helpers.get_output_format(), msg
+                )
             self._set_cuid_seed(args.cuid_seed)
             return
 
