@@ -2040,9 +2040,8 @@ hsa_status_t GpuAgent::DmaCopySwap(
   core::Signal& out_signal = *out_signal_obj;
 
   if (op.num_entries == 0) {
-    // Scalar swap: A side = src_size, B side = dst_size. Asymmetric (A != B) is
-    // not supported here; it is rejected (HSA_STATUS_ERROR_INVALID_ARGUMENT) so
-    // callers fall back to CLR-side decomposition.
+    // Scalar swap: A = src_size, B = dst_size. The blit rejects A != B unless
+    // native asymmetric swap is supported.
     const void* src_arr[1] = { op.src };
     void* dst_arr[1] = { op.dst };
     hsa_agent_t dst_agent_arr[1] = { op.dst_agent };
