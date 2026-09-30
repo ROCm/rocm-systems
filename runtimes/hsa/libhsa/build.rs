@@ -2,6 +2,7 @@ use std::env;
 use std::path::PathBuf;
 
 fn main() {
+    println!("cargo:rerun-if-env-changed=ROCM_RUNTIME_HSA_SONAME");
     if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("linux") {
         return;
     }
@@ -16,5 +17,7 @@ fn main() {
         "cargo:rustc-cdylib-link-arg=-Wl,--version-script={}",
         map.display()
     );
-    println!("cargo:rustc-cdylib-link-arg=-Wl,-soname,libhsa-runtime64.so.1");
+    let soname =
+        env::var("ROCM_RUNTIME_HSA_SONAME").unwrap_or_else(|_| "libhsa-runtime64.so.1".to_owned());
+    println!("cargo:rustc-cdylib-link-arg=-Wl,-soname,{soname}");
 }

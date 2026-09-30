@@ -30,6 +30,3 @@ checkout.
 
 `abce` is not a mirror: `include/abce` is its primary location, and it is
 edited here.
-
-The build-tree CMake target `ROCm::runtime_headers` exposes this include tree
-to runtime consumers and ABI tests. Installation and package exports are deferred.

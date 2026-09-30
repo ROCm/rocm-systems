@@ -28,6 +28,44 @@ def copy_changed(source: Path, destination: Path) -> None:
         shutil.copy2(source, destination)
 
 
+def collect_messages(
+    output: str, artifacts: list[Artifact]
+) -> tuple[dict[Artifact, Path], dict[tuple[str, str], str]]:
+    found: dict[Artifact, Path] = {}
+    native_libraries: dict[tuple[str, str], str] = {}
+    # Cargo --message-format=json emits one JSON object per stdout line.
+    # compiler-artifact provides package/target identity and output filenames;
+    # compiler-message wraps rustc diagnostics, including --print=native-static-libs.
+    for line in output.splitlines():
+        message = json.loads(line)
+        if message.get("reason") == "compiler-message":
+            diagnostic = message["message"]
+            if diagnostic.get("rendered"):
+                print(diagnostic["rendered"], end="", file=sys.stderr)
+            text = diagnostic["message"]
+            if text.startswith("native-static-libs:"):
+                key = (message["package_id"], message["target"]["name"])
+                native_libraries[key] = text.split(":", 1)[1].strip()
+        elif message.get("reason") == "compiler-artifact":
+            for artifact in artifacts:
+                if (
+                    message["package_id"] == artifact.package_id
+                    and message["target"]["name"] == artifact.library
+                    and not message["profile"]["test"]
+                ):
+                    paths = [
+                        Path(p)
+                        for p in message["filenames"]
+                        if p.endswith(artifact.suffix)
+                    ]
+                    if len(paths) != 1:
+                        raise RuntimeError(
+                            f"Expected one {artifact.suffix} artifact for {artifact.library}: {paths}"
+                        )
+                    found[artifact] = paths[0]
+    return found, native_libraries
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--metadata", type=Path, required=True)
@@ -38,14 +76,20 @@ def main() -> int:
         required=True,
         metavar=("PACKAGE", "LIBRARY", "SUFFIX", "DESTINATION"),
     )
-    parser.add_argument("--native-libs", type=Path, required=True)
-    parser.add_argument("command", nargs=argparse.REMAINDER, help="Cargo command after --")
+    parser.add_argument(
+        "--native-libs",
+        nargs=3,
+        action="append",
+        default=[],
+        metavar=("PACKAGE", "LIBRARY", "DESTINATION"),
+    )
+    parser.add_argument(
+        "command", nargs=argparse.REMAINDER, help="Cargo command after --"
+    )
     args = parser.parse_args()
     metadata = json.loads(args.metadata.read_text())
     members = set(metadata["workspace_members"])
-    packages = {
-        p["name"]: p["id"] for p in metadata["packages"] if p["id"] in members
-    }
+    packages = {p["name"]: p["id"] for p in metadata["packages"] if p["id"] in members}
     artifacts = [
         Artifact(packages[p], lib, suffix, Path(dest))
         for p, lib, suffix, dest in args.artifact
@@ -53,58 +97,34 @@ def main() -> int:
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if not command:
         parser.error("a Cargo command is required after --")
-    found: dict[Artifact, Path] = {}
-    native_libraries: str | None = None
-    with subprocess.Popen(command, stdout=subprocess.PIPE, text=True) as process:
-        assert process.stdout is not None
-        for line in process.stdout:
-            message = json.loads(line)
-            if message.get("reason") == "compiler-message":
-                diagnostic = message["message"]
-                if diagnostic.get("rendered"):
-                    print(diagnostic["rendered"], end="", file=sys.stderr)
-                text = diagnostic["message"]
-                if message["package_id"] == packages["libamdf"] and text.startswith(
-                    "native-static-libs:"
-                ):
-                    native_libraries = text.split(":", 1)[1].strip()
-            elif message.get("reason") == "compiler-artifact":
-                for artifact in artifacts:
-                    if (
-                        message["package_id"] == artifact.package_id
-                        and message["target"]["name"] == artifact.library
-                        and not message["profile"]["test"]
-                    ):
-                        paths = [
-                            Path(p)
-                            for p in message["filenames"]
-                            if p.endswith(artifact.suffix)
-                        ]
-                        if len(paths) != 1:
-                            raise RuntimeError(
-                                f"Expected one {artifact.suffix} artifact "
-                                f"for {artifact.library}: {paths}"
-                            )
-                        found[artifact] = paths[0]
-        result = process.wait()
-    if result:
-        return result
+    process = subprocess.run(command, stdout=subprocess.PIPE, text=True, check=False)
+    # Render captured compiler diagnostics even when the build fails; never stage
+    # partial output from a failed Cargo invocation.
+    found, native_libraries = collect_messages(process.stdout, artifacts)
+    if process.returncode:
+        return process.returncode
     if set(found) != set(artifacts):
         raise RuntimeError(
             f"Cargo did not report all requested artifacts: {set(artifacts) - set(found)}"
         )
-    if native_libraries is None:
-        raise RuntimeError(
-            "Cargo did not report AMDF's native-static-libs; "
-            "check the configured Rust flags"
+    responses: dict[Path, str] = {}
+    for package, library, destination in args.native_libs:
+        key = (packages[package], library)
+        if key not in native_libraries:
+            raise RuntimeError(
+                f"Cargo did not report native-static-libs for {package}/{library}; check the configured Rust flags"
+            )
+        # GNU linker response syntax: preserve order and duplication. These must
+        # follow the archive so --as-needed does not discard required libraries.
+        responses[Path(destination)] = (
+            shlex.join(shlex.split(native_libraries[key])) + "\n"
         )
     for artifact, source in found.items():
         copy_changed(source, artifact.destination)
-    # GNU linker response syntax. Pass this after the archive, not as an early
-    # link option, so --as-needed does not discard required native libraries.
-    response = shlex.join(shlex.split(native_libraries)) + "\n"
-    if not args.native_libs.exists() or args.native_libs.read_text() != response:
-        args.native_libs.write_text(response)
+    for path, response in responses.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if not path.exists() or path.read_text() != response:
+            path.write_text(response)
     return 0
 
 

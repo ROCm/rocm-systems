@@ -27,12 +27,8 @@ Rocddi remains an internal `rlib`; it has no standalone native ABI.
 
 ## Build with CMake
 
-The first integration supports native Linux x86-64/AArch64 with single-config
-Ninja. It has no install rules or package exports and is not wired into TheRock.
-Windows backends and cross-compilation are not enabled by this build.
-
 Provision the pinned toolchain from `rust-toolchain.toml` (Rust/Cargo 1.98.0,
-rustfmt, and Clippy) before configuring. CMake 3.25+, Ninja, Python 3.10+, native
+rustfmt, and Clippy) before configuring. CMake 3.25+, Ninja, Python 3.11+, native
 C/C++ compilers, and `ld.lld` must also be available. Existing generated bindings
 are checked in; bindgen and libclang are not needed. Nothing is downloaded by
 the CMake configure or build.
@@ -54,17 +50,28 @@ For example, an existing ROCm installation can supply `llvm/bin/ld.lld`.
 Debug, Release, RelWithDebInfo, and MinSizeRel map to workspace Cargo profiles.
 Use separate CMake build directories for each configuration. All CMake-driven
 Cargo output is under the binary directory's `cargo/`; selected native artifacts
-are copied into `lib/` only when their contents change. HSA's build-tree SONAME
-symlinks are provided there. The `runtime_rust` target invokes Cargo on each
+are copied into `lib/` only when their contents change. Build-tree SONAME
+symlinks are provided there. The `rocm_runtime_rust` target invokes Cargo on each
 build; Cargo decides what needs recompilation.
 
-Build-tree consumers can link `ROCm::amdf_shared`, `ROCm::amdf_static`, or
-`ROCm::hsa_shared`. These targets include headers and build ordering. The AMDF
+Build-tree consumers can link `rocm_runtime::amdf_shared`, `rocm_runtime::amdf_static`, or
+`rocm_runtime::hsa_shared`. These targets include headers and build ordering. The AMDF
 static target propagates rustc's reported native link requirements through a
-generated linker response file. `ROCm::runtime_headers` exposes the source
+generated linker response file. `rocm_runtime::runtime_headers` exposes the source
 header tree for internal tests, not an installed SDK contract.
 
-With `BUILD_TESTING=ON` (the default), CTest runs the Rust unit suite, AMDF C ABI
+The library helper takes keyword arguments for the Cargo package/target, native
+output name, type, and ABI version. Component `project(... VERSION ...)` calls
+own native versions; the helper handles filenames, symlinks, SONAME settings,
+and per-static-library link requirements. Platform-specific conventions live
+in the helper, with explicit errors for Windows/Darwin until implemented.
+The configure helper recognizes native Linux x86-64, AArch64, PPC64/PPC64LE,
+and RISC-V64 toolchains; only x86-64 has been validated locally.
+Python's standard-library TOML parser requires Python 3.11 or newer.
+`runtime-rust-config.cmake` in the build directory records the generated Cargo
+command and environment for inspection.
+
+With `BUILD_TESTING=ON` (the default), CTest runs build-helper tests, the Rust unit suite, AMDF C ABI
 layout and shared/static negotiation checks, and an HSA pre-initialization C ABI
 check. These tests do not require GPU activation. Device execution examples
 remain explicit qualification tools, not automatic build tests.
