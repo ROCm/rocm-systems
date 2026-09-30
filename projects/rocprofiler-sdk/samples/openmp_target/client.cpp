@@ -33,6 +33,7 @@
 
 #include "client.hpp"
 
+#include <rocprofiler-sdk/ompt.h>
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
@@ -41,6 +42,7 @@
 #include "common/filesystem.hpp"
 #include "common/name_info.hpp"
 
+#include <atomic>
 #include <cassert>
 #include <chrono>
 #include <cstddef>
@@ -76,6 +78,9 @@ auto                          bf_name_info     = common::get_buffer_tracing_name
 auto                          client_buffer    = rocprofiler_buffer_id_t{};
 auto                          client_kernels   = kernel_symbol_map_t{};
 auto                          call_stack_mtx   = std::mutex{};
+
+// Counts the OMPT records delivered to this tool.
+auto ompt_callback_count = std::atomic<uint64_t>{};
 
 auto
 get_call_stack_lock()
@@ -152,6 +157,8 @@ tool_callback_tracing_callback(rocprofiler_callback_tracing_record_t record,
     }
     else if(record.kind == ROCPROFILER_CALLBACK_TRACING_OMPT)
     {
+        ompt_callback_count.fetch_add(1, std::memory_order_relaxed);
+
         // demonstrate the use of the ompt_data_t* fields from OMPT
         // The client has its own version of those fields as well as an interface to the
         // ompt API entry points.
@@ -598,6 +605,29 @@ stop()
     }
 }
 }  // namespace client
+
+extern "C" {
+// rocprofiler-sdk does not export ompt_start_tool; a tool provides its own and forwards.
+// The forward returns null unless rocprofiler-sdk is already initialized.
+ompt_start_tool_result_t*
+ompt_start_tool(unsigned int omp_version, const char* runtime_version) CLIENT_API;
+
+ompt_start_tool_result_t*
+ompt_start_tool(unsigned int omp_version, const char* runtime_version)
+{
+    return rocprofiler_ompt_start_tool(omp_version, runtime_version);
+}
+
+// Read by the sample executable, which preloads this library rather than linking it.
+uint64_t
+openmp_target_sample_ompt_count(void) CLIENT_API;
+
+uint64_t
+openmp_target_sample_ompt_count(void)
+{
+    return client::ompt_callback_count.load(std::memory_order_relaxed);
+}
+}
 
 extern "C" rocprofiler_tool_configure_result_t*
 rocprofiler_configure(uint32_t                 version,
