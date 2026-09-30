@@ -802,6 +802,25 @@ namespace hip {
   extern amd::Memory* getMemoryObjectWithOffset(hip::Device* device, const void* ptr,
                                                  const size_t size = 0);
 
+  /// One side of a HIP_MEMCPY3D copy: the memory it reads or writes and the copy path it takes.
+  struct CopyOperand {
+    /// Copy path: hipMemoryTypeHost for host memory without a memory object,
+    /// hipMemoryTypeDevice for memory with one, hipMemoryTypeArray for arrays.
+    hipMemoryType type;
+    amd::Memory* memory;  ///< Memory object that holds the operand pointer, or nullptr.
+    size_t offset;        ///< Offset of the operand pointer inside `memory`.
+  };
+
+  /// Looks up the memory object behind one side of a HIP_MEMCPY3D copy, once, for validation
+  /// and command creation to share. A hipMemoryTypeUnified side is rewritten to host or device
+  /// memory from its `device` pointer; for host memory the pointer is also stored in `host`.
+  /// Host memory registered with HIP (hipHostMalloc, hipHostRegister) keeps the host type in
+  /// `memory_type`, gets its pointer stored in `device`, and takes the device copy path.
+  /// `HostPointer` is `const void*` for the source side and `void*` for the destination side.
+  template <typename HostPointer>
+  CopyOperand ResolveCopyOperand(hipMemoryType& memory_type, HostPointer& host,
+                                 hipDeviceptr_t& device);
+
   /// Convenience wrapper for use in Command::submit() bodies (graph and non-graph) where
   /// hoisting hip::getCurrentDevice() across worker-thread state is unsafe. Re-fetches TLS
   /// each call. Do NOT use from API entry points — use the explicit-device getMemoryObject.

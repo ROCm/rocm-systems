@@ -2311,31 +2311,11 @@ class GraphMemcpyNode : public GraphNode {
   hipError_t ValidateParams(const hipMemcpy3DParms* pNodeParams);
 
   virtual std::string GetLabel(hipGraphDebugDotFlags flag) override {
-    size_t offset = 0;
-    const HIP_MEMCPY3D pCopy = hip::getDrvMemcpy3DDesc(copyParams_);
-    hipMemoryType srcMemoryType = pCopy.srcMemoryType;
-    if (srcMemoryType == hipMemoryTypeUnified) {
-      srcMemoryType =
-          getMemoryObjectForCurrentDevice(pCopy.srcDevice, offset) ? hipMemoryTypeDevice : hipMemoryTypeHost;
-    }
-    offset = 0;
-    hipMemoryType dstMemoryType = pCopy.dstMemoryType;
-    if (dstMemoryType == hipMemoryTypeUnified) {
-      dstMemoryType =
-          getMemoryObjectForCurrentDevice(pCopy.dstDevice, offset) ? hipMemoryTypeDevice : hipMemoryTypeHost;
-    }
-
-    // If {src/dst}MemoryType is hipMemoryTypeHost, check if the memory was prepinned.
-    // In that case upgrade the copy type to hipMemoryTypeDevice to avoid extra pinning.
-    offset = 0;
-    if (srcMemoryType == hipMemoryTypeHost) {
-      amd::Memory* mem = getMemoryObjectForCurrentDevice(pCopy.srcHost, offset);
-      srcMemoryType = mem ? hipMemoryTypeDevice : hipMemoryTypeHost;
-    }
-    if (dstMemoryType == hipMemoryTypeHost) {
-      amd::Memory* mem = getMemoryObjectForCurrentDevice(pCopy.dstHost, offset);
-      dstMemoryType = mem ? hipMemoryTypeDevice : hipMemoryTypeHost;
-    }
+    HIP_MEMCPY3D desc = hip::getDrvMemcpy3DDesc(copyParams_);
+    const hipMemoryType srcMemoryType =
+        ResolveCopyOperand(desc.srcMemoryType, desc.srcHost, desc.srcDevice).type;
+    const hipMemoryType dstMemoryType =
+        ResolveCopyOperand(desc.dstMemoryType, desc.dstHost, desc.dstDevice).type;
     std::string memcpyDirection;
     if ((srcMemoryType == hipMemoryTypeHost) && (dstMemoryType == hipMemoryTypeDevice)) {
       // Host to Device.
@@ -3815,6 +3795,10 @@ class GraphMemFreeNode : public GraphNode {
 
 class GraphDrvMemcpyNode : public GraphNode {
   HIP_MEMCPY3D copyParams_;
+  /// Host pointers of a host-to-host copy, set by CreateCommand of an enabled node for the
+  /// EnqueueCommands call that follows it in the same launch. Null when the copy uses a command.
+  const void* host_src_ = nullptr;
+  void* host_dst_ = nullptr;
 
  protected:
   // Copy constructor is needed for cloning the node, but it should not be used for any other
@@ -3839,30 +3823,29 @@ class GraphDrvMemcpyNode : public GraphNode {
 
   hipError_t CreateCommand(hip::Stream* stream) override {
     hipError_t status = GraphNode::CreateCommand(stream);
-    if (status != hipSuccess) {
+    if (status != hipSuccess || !isEnabled_) {
       return status;
     }
-    if (!isEnabled_ || (copyParams_.srcMemoryType == hipMemoryTypeHost &&
-                        copyParams_.dstMemoryType == hipMemoryTypeHost &&
-                        IsHtoHMemcpy(copyParams_.dstHost, copyParams_.srcHost))) {
+    HIP_MEMCPY3D desc = copyParams_;
+    const CopyOperand src = ResolveCopyOperand(desc.srcMemoryType, desc.srcHost, desc.srcDevice);
+    const CopyOperand dst = ResolveCopyOperand(desc.dstMemoryType, desc.dstHost, desc.dstDevice);
+    if (src.type == hipMemoryTypeHost && dst.type == hipMemoryTypeHost) {
+      host_src_ = desc.srcHost;
+      host_dst_ = desc.dstHost;
       return hipSuccess;
     }
+    host_src_ = nullptr;
+    host_dst_ = nullptr;
     commands_.reserve(1);
     amd::Command* command;
-    status = ihipGetMemcpyParam3DCommand(command, &copyParams_, stream);
+    status = ihipGetMemcpyParam3DCommand(command, desc, src, dst, stream);
     commands_.emplace_back(command);
     return status;
   }
 
   hipError_t EnqueueCommands(hip::Stream* stream) override {
-    bool isHtoH = false;
-    if (copyParams_.srcMemoryType == hipMemoryTypeHost &&
-        copyParams_.dstMemoryType == hipMemoryTypeHost &&
-        IsHtoHMemcpy(copyParams_.dstHost, copyParams_.srcHost)) {
-      isHtoH = true;
-    }
-    if (isEnabled_ && isHtoH) {
-      ihipHtoHMemcpy(copyParams_.dstHost, copyParams_.srcHost,
+    if (isEnabled_ && host_dst_ != nullptr) {
+      ihipHtoHMemcpy(host_dst_, host_src_,
                      copyParams_.WidthInBytes * copyParams_.Height * copyParams_.Depth, *stream);
       return hipSuccess;
     }
