@@ -3,6 +3,8 @@
 
 """Terminal-independent summaries of memory bandwidth analysis results."""
 
+from typing import Tuple
+
 from membw_analysis.models import BottleneckNode, MemBwAnalysisResult
 
 ACTIVE_FALLBACK_TEXT = (
@@ -10,7 +12,7 @@ ACTIVE_FALLBACK_TEXT = (
 )
 
 
-def has_active_nodes(nodes: tuple[BottleneckNode, ...]) -> bool:
+def has_active_nodes(nodes: Tuple[BottleneckNode, ...]) -> bool:
     """Return whether any node in the tree is active."""
     for node in nodes:
         if node.state == "active" or has_active_nodes(node.children):
@@ -30,8 +32,11 @@ def status_text(membw_result: MemBwAnalysisResult) -> str:
             "Memory Bandwidth Analysis: Partial data "
             f"({membw_result.availability_reason})."
         )
-    if bool(membw_result.nodes) and all(
-        node.state == "indeterminate" for node in membw_result.nodes
-    ):
+    if _all_nodes_indeterminate(membw_result.nodes):
         return "Memory Bandwidth Analysis: Inconclusive (insufficient counter data)."
     return "Memory Bandwidth Analysis: No bottlenecks detected (GL1 / GL2 / EA)."
+
+
+def _all_nodes_indeterminate(nodes: Tuple[BottleneckNode, ...]) -> bool:
+    """Return whether every root node is indeterminate."""
+    return bool(nodes) and all(node.state == "indeterminate" for node in nodes)

@@ -7,7 +7,7 @@ import argparse
 import sys
 from io import StringIO
 from types import SimpleNamespace
-from typing import Optional
+from typing import List, Optional
 
 import pandas as pd
 import pytest
@@ -173,8 +173,8 @@ def original_ns_values() -> dict[str, float]:
 )
 def test_resolve_hidden_columns(
     monkeypatch: pytest.MonkeyPatch,
-    include_cols: list[str] | None,
-    expected: list[str],
+    include_cols: Optional[List[str]],
+    expected: List[str],
 ) -> None:
     """Explicitly included columns are removed from the hidden columns."""
     hidden_columns = ["Description", "Unit", "Count"]
@@ -192,6 +192,16 @@ def test_resolve_hidden_columns_does_not_modify_config(
 
     resolved = resolve_hidden_columns(make_args(include_cols=None))
     resolved.append("Avg")
+    assert resolved == ["Description", "Unit", "Count"]
+    assert resolve_hidden_columns(make_args(include_cols=["Unit"])) == [
+        "Description",
+        "Count",
+    ]
+    assert resolve_hidden_columns(make_args(include_cols=["Description"])) == [
+        "Unit",
+        "Count",
+    ]
+    assert resolve_hidden_columns(make_args(include_cols=["Avg"])) == hidden_columns
 
     assert config.HIDDEN_COLUMNS_CLI == ["Description", "Unit", "Count"]
 
