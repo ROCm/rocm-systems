@@ -3,8 +3,11 @@
 
 """SQLAlchemy ORM models and SQLite backend for the analysis database.
 
-After changing a table, column, foreign key, or view, regenerate the diagrams
-under docs/data/analyze/ with tools/schema_visualizer.py and commit them.
+After changing a table, column, foreign key, view, or memchart value set:
+- bump SCHEMA_VERSION by the rules in docs/how-to/analyze/cli.rst,
+- run tools/schema_snapshot.py --write, which checks the bump,
+- regenerate the diagrams under docs/data/analyze/ with
+  tools/schema_visualizer.py, and commit them.
 """
 
 import csv
@@ -46,7 +49,26 @@ from pc_sampling.source_snapshot_analysis import (
 from utils.logger import console_debug, console_error, console_warning
 
 PREFIX = "compute_"
-SCHEMA_VERSION = "2.3.0"
+SCHEMA_VERSION = "2.4.0"
+
+_MEMCHART_CATEGORIES = frozenset({
+    "read",
+    "write",
+    "atomic",
+    "hit",
+    "util",
+    "stall",
+    "bw",
+    "info",
+})
+# Every value a reader may find in these columns. A reader draws each value
+# differently, so adding one is a major schema change.
+MEMCHART_VALUE_SETS: dict[str, frozenset[str]] = {
+    f"{PREFIX}memchart_block.position": frozenset({"grid", "above", "below"}),
+    f"{PREFIX}memchart_block_metric.category": _MEMCHART_CATEGORIES,
+    f"{PREFIX}memchart_arrow.direction": frozenset({"forward", "backward", "both"}),
+    f"{PREFIX}memchart_arrow.category": _MEMCHART_CATEGORIES,
+}
 
 
 Base = declarative_base()
@@ -80,6 +102,13 @@ class Workload(Base):
     code_object_stores = relationship("CodeObjectStore", back_populates="workload")
     # Workload can have multiple source files
     source_files = relationship("SourceFile", back_populates="workload")
+    # Workload has one memory chart, made of blocks and arrows
+    memchart_blocks = relationship("MemoryChartBlock", back_populates="workload")
+    memchart_arrows = relationship(
+        "MemoryChartArrow",
+        back_populates="workload",
+        order_by="MemoryChartArrow.sort_order",
+    )
 
 
 class MetricDefinition(Base):
@@ -529,6 +558,99 @@ class WorkloadRooflineData(Base):
 
     # Relationships
     workload = relationship("Workload", back_populates="workload_roofline_data_points")
+
+
+class MemoryChartBlock(Base):
+    """One block of the workload's memory chart, e.g. L2 or HBM.
+
+    A child block sits inside its parent, and its sort_order is its place
+    among the parent's children.
+    """
+
+    __tablename__ = f"{PREFIX}memchart_block"
+    __table_args__ = (UniqueConstraint("workload_id", "block_id"),)
+
+    block_uuid = Column(Integer, primary_key=True)
+    workload_id = Column(
+        Integer, ForeignKey(f"{PREFIX}workload.workload_id"), nullable=False
+    )
+    block_id = Column(String)  # e.g. l2
+    title = Column(String)  # e.g. L2
+    grid_column = Column(Integer)  # 0 is the leftmost column
+    sort_order = Column(Integer)  # top to bottom within the column
+    position = Column(String)  # grid, above or below the grid
+    # Null for a block that is not nested in another block.
+    parent_block_uuid = Column(
+        Integer, ForeignKey(f"{PREFIX}memchart_block.block_uuid"), nullable=True
+    )
+
+    # Block belongs to one workload
+    workload = relationship("Workload", back_populates="memchart_blocks")
+    # Block can sit inside one parent block
+    parent_block = relationship("MemoryChartBlock", remote_side=[block_uuid])
+    # Block shows many metrics
+    block_metrics = relationship(
+        "MemoryChartBlockMetric",
+        back_populates="block",
+        order_by="MemoryChartBlockMetric.sort_order",
+    )
+
+
+class MemoryChartBlockMetric(Base):
+    """One metric shown inside a memory chart block."""
+
+    __tablename__ = f"{PREFIX}memchart_block_metric"
+    __table_args__ = (UniqueConstraint("block_uuid", "sort_order"),)
+
+    block_metric_uuid = Column(Integer, primary_key=True)
+    block_uuid = Column(
+        Integer, ForeignKey(f"{PREFIX}memchart_block.block_uuid"), nullable=False
+    )
+    metric_uuid = Column(
+        Integer, ForeignKey(f"{PREFIX}metric_definition.metric_uuid"), nullable=False
+    )
+    label = Column(String)  # e.g. Hit
+    category = Column(String)  # one of MEMCHART_VALUE_SETS, e.g. read
+    sort_order = Column(Integer)  # top to bottom within the block
+
+    # Block metric belongs to one block
+    block = relationship("MemoryChartBlock", back_populates="block_metrics")
+    # Block metric shows one metric
+    metric = relationship("MetricDefinition")
+
+
+class MemoryChartArrow(Base):
+    """One arrow between two memory chart blocks, showing one metric."""
+
+    __tablename__ = f"{PREFIX}memchart_arrow"
+    __table_args__ = (UniqueConstraint("workload_id", "sort_order"),)
+
+    arrow_uuid = Column(Integer, primary_key=True)
+    workload_id = Column(
+        Integer, ForeignKey(f"{PREFIX}workload.workload_id"), nullable=False
+    )
+    from_block_uuid = Column(
+        Integer, ForeignKey(f"{PREFIX}memchart_block.block_uuid"), nullable=False
+    )
+    to_block_uuid = Column(
+        Integer, ForeignKey(f"{PREFIX}memchart_block.block_uuid"), nullable=False
+    )
+    direction = Column(String)  # forward, backward or both
+    metric_uuid = Column(
+        Integer, ForeignKey(f"{PREFIX}metric_definition.metric_uuid"), nullable=False
+    )
+    label = Column(String)  # e.g. Read BW
+    category = Column(String)  # one of MEMCHART_VALUE_SETS, e.g. read
+    group_label = Column(String, nullable=True)  # e.g. Buffer Request; null if none
+    sort_order = Column(Integer)  # order of the arrow in the layout
+
+    # Arrow belongs to one workload
+    workload = relationship("Workload", back_populates="memchart_arrows")
+    # Arrow starts at one block and ends at another
+    from_block = relationship("MemoryChartBlock", foreign_keys=[from_block_uuid])
+    to_block = relationship("MemoryChartBlock", foreign_keys=[to_block_uuid])
+    # Arrow shows one metric
+    metric = relationship("MetricDefinition")
 
 
 class Metadata(Base):

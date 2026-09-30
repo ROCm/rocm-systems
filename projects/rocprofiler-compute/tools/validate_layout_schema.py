@@ -22,6 +22,12 @@ from typing import Any
 import yaml
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(_PROJECT_ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT / "src"))
+
+# The analysis db stores these values, so its schema owns the sets.
+from utils.analysis_orm import MEMCHART_VALUE_SETS, PREFIX  # noqa: E402
+
 _LAYOUTS_DIR = _PROJECT_ROOT / "src" / "memory_chart" / "layouts"
 _CONFIGS_DIR = _PROJECT_ROOT / "src" / "rocprof_compute_soc" / "analysis_configs"
 _MANIFEST_PATH = _PROJECT_ROOT / "tools" / "memory_chart_manifest.json"
@@ -29,18 +35,9 @@ _MEMORY_CHART_YAML = "0300_memory_chart.yaml"
 
 CURRENT_SCHEMA_VERSION = 2
 
-VALID_DIRECTIONS = frozenset({"forward", "backward", "both"})
-VALID_POSITIONS = frozenset({"grid", "above", "below"})
-VALID_CATEGORIES = frozenset({
-    "read",
-    "write",
-    "atomic",
-    "hit",
-    "util",
-    "stall",
-    "bw",
-    "info",
-})
+VALID_DIRECTIONS = MEMCHART_VALUE_SETS[f"{PREFIX}memchart_arrow.direction"]
+VALID_POSITIONS = MEMCHART_VALUE_SETS[f"{PREFIX}memchart_block.position"]
+VALID_CATEGORIES = MEMCHART_VALUE_SETS[f"{PREFIX}memchart_arrow.category"]
 
 ARCH_TO_LAYOUT: dict[str, str] = {
     "gfx908": "gfx90x",

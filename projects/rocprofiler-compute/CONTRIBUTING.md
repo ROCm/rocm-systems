@@ -235,12 +235,30 @@ If your PR modifies **metric configurations** — panel YAMLs under `src/rocprof
 
 For full details, see the [metric config management README](./tools/config_management/README.md).
 
-## Analysis Database Schema Diagrams
+## Analysis Database Schema Changes
+
+Readers such as Optiq use `SCHEMA_VERSION` in
+[`src/utils/analysis_orm.py`](src/utils/analysis_orm.py) to tell whether they can
+read a database. If your PR changes a table, column, key, a view definition in
+`Database._compile_view_sql`, or `MEMCHART_VALUE_SETS`:
+
+1. Bump `SCHEMA_VERSION` by the
+   [schema version rules](docs/how-to/analyze/cli.rst): major if a reader can
+   break, minor for additions only.
+2. Rewrite the schema snapshot. The tool refuses if the bump is too small for the
+   change, and a unit test fails while the snapshot is out of date:
+
+   ```bash
+   ./tools/schema_snapshot.py --write
+   ```
+
+3. Regenerate the diagrams, as below.
+
+### Schema Diagrams
 
 The two diagrams in the [analysis data dump docs](docs/how-to/analyze/cli.rst) are
 generated from [`src/utils/analysis_orm.py`](src/utils/analysis_orm.py), not drawn
-by hand. If your PR changes a table, column, foreign key, or a view definition in
-`Database._compile_view_sql`, regenerate them and commit the PNGs:
+by hand. Regenerate them and commit the PNGs:
 
 ```bash
 ./tools/schema_visualizer.py

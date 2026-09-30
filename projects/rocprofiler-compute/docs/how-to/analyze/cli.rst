@@ -726,6 +726,78 @@ Analysis database views
    :align: center
    :alt: Analysis database views
 
+Memory chart tables
+-------------------
+
+Each workload also stores the memory chart of its GPU architecture (panel 3), so a
+tool can draw the chart from the database alone:
+
+* ``compute_memchart_block``: one row per block, such as ``L2`` or ``HBM``.
+  ``grid_column`` and ``sort_order`` place the block, and ``position`` is ``grid``,
+  ``above`` or ``below``. A block nested in another points to it through
+  ``parent_block_uuid``.
+* ``compute_memchart_block_metric``: one row per metric shown in a block, in
+  ``sort_order``.
+* ``compute_memchart_arrow``: one row per arrow between two blocks, with its
+  ``direction`` and an optional ``group_label``. ``from_block_uuid`` is the left
+  or upstream block. ``forward`` points at the ``to`` block, ``backward`` at the
+  ``from`` block, and ``both`` at both. Arrows that share a ``group_label`` are
+  drawn together under it.
+
+``category`` is one of ``read``, ``write``, ``atomic``, ``hit``, ``util``,
+``stall``, ``bw`` or ``info``.
+
+Block metrics and arrows point to the workload's ``compute_metric_definition`` row
+through ``metric_uuid``, so values and units come from the existing tables and no
+metric names need to be matched. Values are raw, and every chart metric has a
+``unit``, such as ``Bytes/s``, ``Percent`` or ``Wavefronts per kernel``. The chart is not written when ``-b`` leaves out
+any of its metrics. These tables have no view and are not part of the ``csv``
+output.
+
+This query lists every arrow of workload 1 with its value:
+
+.. code-block:: sql
+
+   SELECT source.block_id AS from_block, target.block_id AS to_block,
+          arrow.label, metric_value.value, definition.unit
+   FROM compute_memchart_arrow AS arrow
+   JOIN compute_memchart_block AS source
+     ON source.block_uuid = arrow.from_block_uuid
+   JOIN compute_memchart_block AS target
+     ON target.block_uuid = arrow.to_block_uuid
+   JOIN compute_metric_definition AS definition
+     ON definition.metric_uuid = arrow.metric_uuid
+   LEFT JOIN compute_workload_metric_value AS metric_value
+     ON metric_value.metric_uuid = arrow.metric_uuid
+    AND metric_value.value_name = 'Value'
+   WHERE arrow.workload_id = 1
+   ORDER BY arrow.sort_order;
+
+.. _analysis-database-schema-version:
+
+Schema version
+--------------
+
+``compute_metadata.schema_version`` tells a reader whether it can read a database.
+It changes by these rules:
+
+* **Major**: something a reader relies on is removed or changed. A table, view or
+  column is removed or renamed, a column's type or meaning changes, a key changes,
+  or ``position``, ``direction`` or ``category`` gains a value.
+* **Minor**: only additions a reader can ignore, such as new tables, columns or
+  views.
+* **Patch**: no change to tables, columns, views or those value sets.
+
+A reader should accept any minor or patch version of a major version it knows,
+and refuse or warn on a major version it doesn't know.
+
+`analysis_db_schema.json <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-compute/docs/data/analyze/analysis_db_schema.json>`_
+lists every table, column, key, view and value set of the current version.
+
+The memory chart's content is not part of the schema. Blocks, arrows and metrics can
+change in any release, so a reader should draw whatever rows the database holds
+and not depend on block ids, labels or metric names.
+
 Analysis database example
 
 .. note::

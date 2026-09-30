@@ -1,0 +1,1033 @@
+{
+  "schema_version": "2.4.0",
+  "tables": {
+    "compute_code_object_store": {
+      "columns": {
+        "code_object_id": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "INTEGER"
+        },
+        "code_object_uuid": {
+          "not_null": true,
+          "primary_key": true,
+          "type": "INTEGER"
+        },
+        "load_base": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "INTEGER"
+        },
+        "pid": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "INTEGER"
+        },
+        "workload_id": {
+          "not_null": true,
+          "primary_key": false,
+          "type": "INTEGER"
+        }
+      },
+      "foreign_keys": [
+        "workload_id -> compute_workload.workload_id"
+      ],
+      "unique": [
+        [
+          "workload_id",
+          "pid",
+          "code_object_id"
+        ]
+      ]
+    },
+    "compute_dispatch": {
+      "columns": {
+        "dispatch_id": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "INTEGER"
+        },
+        "dispatch_uuid": {
+          "not_null": true,
+          "primary_key": true,
+          "type": "INTEGER"
+        },
+        "end_timestamp": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "INTEGER"
+        },
+        "gpu_id": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "INTEGER"
+        },
+        "kernel_uuid": {
+          "not_null": true,
+          "primary_key": false,
+          "type": "INTEGER"
+        },
+        "start_timestamp": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "INTEGER"
+        }
+      },
+      "foreign_keys": [
+        "kernel_uuid -> compute_kernel.kernel_uuid"
+      ],
+      "unique": [
+        [
+          "kernel_uuid",
+          "dispatch_id"
+        ]
+      ]
+    },
+    "compute_instruction_line": {
+      "columns": {
+        "code_object_offset": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "INTEGER"
+        },
+        "instruction": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "TEXT"
+        },
+        "instruction_type_uuid": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "INTEGER"
+        },
+        "instruction_uuid": {
+          "not_null": true,
+          "primary_key": true,
+          "type": "INTEGER"
+        },
+        "kernel_symbol_uuid": {
+          "not_null": true,
+          "primary_key": false,
+          "type": "INTEGER"
+        }
+      },
+      "foreign_keys": [
+        "instruction_type_uuid -> compute_instruction_type_lookup.instruction_type_lookup_uuid",
+        "kernel_symbol_uuid -> compute_kernel_symbol.kernel_symbol_uuid"
+      ],
+      "unique": [
+        [
+          "kernel_symbol_uuid",
+          "code_object_offset"
+        ]
+      ]
+    },
+    "compute_instruction_sample": {
+      "columns": {
+        "count": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "INTEGER"
+        },
+        "instruction_sample_lookup_uuid": {
+          "not_null": true,
+          "primary_key": false,
+          "type": "INTEGER"
+        },
+        "instruction_sample_uuid": {
+          "not_null": true,
+          "primary_key": true,
+          "type": "INTEGER"
+        },
+        "pc_sample_state_uuid": {
+          "not_null": true,
+          "primary_key": false,
+          "type": "INTEGER"
+        }
+      },
+      "foreign_keys": [
+        "instruction_sample_lookup_uuid -> compute_instruction_sample_lookup.instruction_sample_lookup_uuid",
+        "pc_sample_state_uuid -> compute_pc_sample_state.pc_sample_state_uuid"
+      ],
+      "unique": []
+    },
+    "compute_instruction_sample_lookup": {
+      "columns": {
+        "instruction_sample_lookup_uuid": {
+          "not_null": true,
+          "primary_key": true,
+          "type": "INTEGER"
+        },
+        "text": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "VARCHAR"
+        }
+      },
+      "foreign_keys": [],
+      "unique": [
+        [
+          "text"
+        ]
+      ]
+    },
+    "compute_instruction_source_line": {
+      "columns": {
+        "frame_index": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "INTEGER"
+        },
+        "instruction_source_line_uuid": {
+          "not_null": true,
+          "primary_key": true,
+          "type": "INTEGER"
+        },
+        "instruction_uuid": {
+          "not_null": true,
+          "primary_key": false,
+          "type": "INTEGER"
+        },
+        "source_line_uuid": {
+          "not_null": true,
+          "primary_key": false,
+          "type": "INTEGER"
+        }
+      },
+      "foreign_keys": [
+        "instruction_uuid -> compute_instruction_line.instruction_uuid",
+        "source_line_uuid -> compute_source_line.source_line_uuid"
+      ],
+      "unique": [
+        [
+          "instruction_uuid",
+          "frame_index"
+        ]
+      ]
+    },
+    "compute_instruction_type_lookup": {
+      "columns": {
+        "instruction_type_lookup_uuid": {
+          "not_null": true,
+          "primary_key": true,
+          "type": "INTEGER"
+        },
+        "text": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "VARCHAR"
+        }
+      },
+      "foreign_keys": [],
+      "unique": [
+        [
+          "text"
+        ]
+      ]
+    },
+    "compute_kernel": {
+      "columns": {
+        "kernel_name": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "VARCHAR"
+        },
+        "kernel_uuid": {
+          "not_null": true,
+          "primary_key": true,
+          "type": "INTEGER"
+        },
+        "short_name": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "VARCHAR"
+        },
+        "workload_id": {
+          "not_null": true,
+          "primary_key": false,
+          "type": "INTEGER"
+        }
+      },
+      "foreign_keys": [
+        "workload_id -> compute_workload.workload_id"
+      ],
+      "unique": [
+        [
+          "workload_id",
+          "kernel_name"
+        ]
+      ]
+    },
+    "compute_kernel_metric_value": {
+      "columns": {
+        "kernel_uuid": {
+          "not_null": true,
+          "primary_key": false,
+          "type": "INTEGER"
+        },
+        "metric_uuid": {
+          "not_null": true,
+          "primary_key": false,
+          "type": "INTEGER"
+        },
+        "value": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "FLOAT"
+        },
+        "value_name": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "VARCHAR"
+        },
+        "value_uuid": {
+          "not_null": true,
+          "primary_key": true,
+          "type": "INTEGER"
+        }
+      },
+      "foreign_keys": [
+        "kernel_uuid -> compute_kernel.kernel_uuid",
+        "metric_uuid -> compute_metric_definition.metric_uuid"
+      ],
+      "unique": [
+        [
+          "kernel_uuid",
+          "metric_uuid",
+          "value_name"
+        ]
+      ]
+    },
+    "compute_kernel_roofline_data": {
+      "columns": {
+        "hbm_cache_data": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "FLOAT"
+        },
+        "kernel_uuid": {
+          "not_null": true,
+          "primary_key": false,
+          "type": "INTEGER"
+        },
+        "l0_cache_data": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "FLOAT"
+        },
+        "l1_cache_data": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "FLOAT"
+        },
+        "l2_cache_data": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "FLOAT"
+        },
+        "lds_cache_data": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "FLOAT"
+        },
+        "roofline_uuid": {
+          "not_null": true,
+          "primary_key": true,
+          "type": "INTEGER"
+        },
+        "total_flops": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "FLOAT"
+        }
+      },
+      "foreign_keys": [
+        "kernel_uuid -> compute_kernel.kernel_uuid"
+      ],
+      "unique": [
+        [
+          "kernel_uuid"
+        ]
+      ]
+    },
+    "compute_kernel_symbol": {
+      "columns": {
+        "code_object_offset": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "INTEGER"
+        },
+        "code_object_uuid": {
+          "not_null": true,
+          "primary_key": false,
+          "type": "INTEGER"
+        },
+        "kernel_symbol_uuid": {
+          "not_null": true,
+          "primary_key": true,
+          "type": "INTEGER"
+        },
+        "kernel_uuid": {
+          "not_null": true,
+          "primary_key": false,
+          "type": "INTEGER"
+        }
+      },
+      "foreign_keys": [
+        "code_object_uuid -> compute_code_object_store.code_object_uuid",
+        "kernel_uuid -> compute_kernel.kernel_uuid"
+      ],
+      "unique": [
+        [
+          "code_object_uuid",
+          "code_object_offset"
+        ],
+        [
+          "code_object_uuid",
+          "kernel_uuid"
+        ]
+      ]
+    },
+    "compute_memchart_arrow": {
+      "columns": {
+        "arrow_uuid": {
+          "not_null": true,
+          "primary_key": true,
+          "type": "INTEGER"
+        },
+        "category": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "VARCHAR"
+        },
+        "direction": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "VARCHAR"
+        },
+        "from_block_uuid": {
+          "not_null": true,
+          "primary_key": false,
+          "type": "INTEGER"
+        },
+        "group_label": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "VARCHAR"
+        },
+        "label": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "VARCHAR"
+        },
+        "metric_uuid": {
+          "not_null": true,
+          "primary_key": false,
+          "type": "INTEGER"
+        },
+        "sort_order": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "INTEGER"
+        },
+        "to_block_uuid": {
+          "not_null": true,
+          "primary_key": false,
+          "type": "INTEGER"
+        },
+        "workload_id": {
+          "not_null": true,
+          "primary_key": false,
+          "type": "INTEGER"
+        }
+      },
+      "foreign_keys": [
+        "from_block_uuid -> compute_memchart_block.block_uuid",
+        "metric_uuid -> compute_metric_definition.metric_uuid",
+        "to_block_uuid -> compute_memchart_block.block_uuid",
+        "workload_id -> compute_workload.workload_id"
+      ],
+      "unique": [
+        [
+          "workload_id",
+          "sort_order"
+        ]
+      ]
+    },
+    "compute_memchart_block": {
+      "columns": {
+        "block_id": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "VARCHAR"
+        },
+        "block_uuid": {
+          "not_null": true,
+          "primary_key": true,
+          "type": "INTEGER"
+        },
+        "grid_column": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "INTEGER"
+        },
+        "parent_block_uuid": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "INTEGER"
+        },
+        "position": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "VARCHAR"
+        },
+        "sort_order": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "INTEGER"
+        },
+        "title": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "VARCHAR"
+        },
+        "workload_id": {
+          "not_null": true,
+          "primary_key": false,
+          "type": "INTEGER"
+        }
+      },
+      "foreign_keys": [
+        "parent_block_uuid -> compute_memchart_block.block_uuid",
+        "workload_id -> compute_workload.workload_id"
+      ],
+      "unique": [
+        [
+          "workload_id",
+          "block_id"
+        ]
+      ]
+    },
+    "compute_memchart_block_metric": {
+      "columns": {
+        "block_metric_uuid": {
+          "not_null": true,
+          "primary_key": true,
+          "type": "INTEGER"
+        },
+        "block_uuid": {
+          "not_null": true,
+          "primary_key": false,
+          "type": "INTEGER"
+        },
+        "category": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "VARCHAR"
+        },
+        "label": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "VARCHAR"
+        },
+        "metric_uuid": {
+          "not_null": true,
+          "primary_key": false,
+          "type": "INTEGER"
+        },
+        "sort_order": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "INTEGER"
+        }
+      },
+      "foreign_keys": [
+        "block_uuid -> compute_memchart_block.block_uuid",
+        "metric_uuid -> compute_metric_definition.metric_uuid"
+      ],
+      "unique": [
+        [
+          "block_uuid",
+          "sort_order"
+        ]
+      ]
+    },
+    "compute_metadata": {
+      "columns": {
+        "compute_version": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "VARCHAR"
+        },
+        "git_version": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "VARCHAR"
+        },
+        "id": {
+          "not_null": true,
+          "primary_key": true,
+          "type": "INTEGER"
+        },
+        "schema_version": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "VARCHAR"
+        }
+      },
+      "foreign_keys": [],
+      "unique": []
+    },
+    "compute_metric_definition": {
+      "columns": {
+        "description": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "TEXT"
+        },
+        "metric_id": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "VARCHAR"
+        },
+        "metric_uuid": {
+          "not_null": true,
+          "primary_key": true,
+          "type": "INTEGER"
+        },
+        "name": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "VARCHAR"
+        },
+        "sub_table_name": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "VARCHAR"
+        },
+        "table_name": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "VARCHAR"
+        },
+        "unit": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "VARCHAR"
+        },
+        "workload_id": {
+          "not_null": true,
+          "primary_key": false,
+          "type": "INTEGER"
+        }
+      },
+      "foreign_keys": [
+        "workload_id -> compute_workload.workload_id"
+      ],
+      "unique": [
+        [
+          "workload_id",
+          "metric_id"
+        ]
+      ]
+    },
+    "compute_pc_sample_stall_reason": {
+      "columns": {
+        "count": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "INTEGER"
+        },
+        "pc_sample_stall_reason_lookup_uuid": {
+          "not_null": true,
+          "primary_key": false,
+          "type": "INTEGER"
+        },
+        "pc_sample_stall_reason_uuid": {
+          "not_null": true,
+          "primary_key": true,
+          "type": "INTEGER"
+        },
+        "pc_sample_state_uuid": {
+          "not_null": true,
+          "primary_key": false,
+          "type": "INTEGER"
+        }
+      },
+      "foreign_keys": [
+        "pc_sample_stall_reason_lookup_uuid -> compute_pc_sample_stall_reason_lookup.pc_sample_stall_reason_lookup_uuid",
+        "pc_sample_state_uuid -> compute_pc_sample_state.pc_sample_state_uuid"
+      ],
+      "unique": []
+    },
+    "compute_pc_sample_stall_reason_lookup": {
+      "columns": {
+        "pc_sample_stall_reason_lookup_uuid": {
+          "not_null": true,
+          "primary_key": true,
+          "type": "INTEGER"
+        },
+        "text": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "VARCHAR"
+        }
+      },
+      "foreign_keys": [],
+      "unique": [
+        [
+          "text"
+        ]
+      ]
+    },
+    "compute_pc_sample_state": {
+      "columns": {
+        "active_thread_percent": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "FLOAT"
+        },
+        "dispatch_uuid": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "INTEGER"
+        },
+        "instruction_uuid": {
+          "not_null": true,
+          "primary_key": false,
+          "type": "INTEGER"
+        },
+        "issue_count": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "INTEGER"
+        },
+        "pc_sample_state_uuid": {
+          "not_null": true,
+          "primary_key": true,
+          "type": "INTEGER"
+        },
+        "stall_count": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "INTEGER"
+        },
+        "total_count": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "INTEGER"
+        },
+        "wave_occupancy_percent": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "FLOAT"
+        }
+      },
+      "foreign_keys": [
+        "dispatch_uuid -> compute_dispatch.dispatch_uuid",
+        "instruction_uuid -> compute_instruction_line.instruction_uuid"
+      ],
+      "unique": []
+    },
+    "compute_source_file": {
+      "columns": {
+        "file_path": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "TEXT"
+        },
+        "md5_checksum": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "VARCHAR"
+        },
+        "source_file_uuid": {
+          "not_null": true,
+          "primary_key": true,
+          "type": "INTEGER"
+        },
+        "workload_id": {
+          "not_null": true,
+          "primary_key": false,
+          "type": "INTEGER"
+        }
+      },
+      "foreign_keys": [
+        "workload_id -> compute_workload.workload_id"
+      ],
+      "unique": [
+        [
+          "workload_id",
+          "file_path"
+        ]
+      ]
+    },
+    "compute_source_line": {
+      "columns": {
+        "content": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "TEXT"
+        },
+        "line_number": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "INTEGER"
+        },
+        "source_file_uuid": {
+          "not_null": true,
+          "primary_key": false,
+          "type": "INTEGER"
+        },
+        "source_line_uuid": {
+          "not_null": true,
+          "primary_key": true,
+          "type": "INTEGER"
+        }
+      },
+      "foreign_keys": [
+        "source_file_uuid -> compute_source_file.source_file_uuid"
+      ],
+      "unique": [
+        [
+          "source_file_uuid",
+          "line_number"
+        ]
+      ]
+    },
+    "compute_workload": {
+      "columns": {
+        "name": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "VARCHAR"
+        },
+        "profiling_config_extdata": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "JSON"
+        },
+        "roofline_bench_extdata": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "JSON"
+        },
+        "sub_name": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "VARCHAR"
+        },
+        "sys_info_extdata": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "JSON"
+        },
+        "workload_id": {
+          "not_null": true,
+          "primary_key": true,
+          "type": "INTEGER"
+        }
+      },
+      "foreign_keys": [],
+      "unique": [
+        [
+          "name",
+          "sub_name"
+        ]
+      ]
+    },
+    "compute_workload_metric_value": {
+      "columns": {
+        "metric_uuid": {
+          "not_null": true,
+          "primary_key": false,
+          "type": "INTEGER"
+        },
+        "value": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "FLOAT"
+        },
+        "value_name": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "VARCHAR"
+        },
+        "value_uuid": {
+          "not_null": true,
+          "primary_key": true,
+          "type": "INTEGER"
+        },
+        "workload_id": {
+          "not_null": true,
+          "primary_key": false,
+          "type": "INTEGER"
+        }
+      },
+      "foreign_keys": [
+        "metric_uuid -> compute_metric_definition.metric_uuid",
+        "workload_id -> compute_workload.workload_id"
+      ],
+      "unique": [
+        [
+          "workload_id",
+          "metric_uuid",
+          "value_name"
+        ]
+      ]
+    },
+    "compute_workload_roofline_data": {
+      "columns": {
+        "hbm_cache_data": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "FLOAT"
+        },
+        "l0_cache_data": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "FLOAT"
+        },
+        "l1_cache_data": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "FLOAT"
+        },
+        "l2_cache_data": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "FLOAT"
+        },
+        "lds_cache_data": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "FLOAT"
+        },
+        "roofline_uuid": {
+          "not_null": true,
+          "primary_key": true,
+          "type": "INTEGER"
+        },
+        "total_flops": {
+          "not_null": false,
+          "primary_key": false,
+          "type": "FLOAT"
+        },
+        "workload_id": {
+          "not_null": true,
+          "primary_key": false,
+          "type": "INTEGER"
+        }
+      },
+      "foreign_keys": [
+        "workload_id -> compute_workload.workload_id"
+      ],
+      "unique": [
+        [
+          "workload_id"
+        ]
+      ]
+    }
+  },
+  "value_sets": {
+    "compute_memchart_arrow.category": [
+      "atomic",
+      "bw",
+      "hit",
+      "info",
+      "read",
+      "stall",
+      "util",
+      "write"
+    ],
+    "compute_memchart_arrow.direction": [
+      "backward",
+      "both",
+      "forward"
+    ],
+    "compute_memchart_block.position": [
+      "above",
+      "below",
+      "grid"
+    ],
+    "compute_memchart_block_metric.category": [
+      "atomic",
+      "bw",
+      "hit",
+      "info",
+      "read",
+      "stall",
+      "util",
+      "write"
+    ]
+  },
+  "views": {
+    "compute_kernel_metric_view": [
+      "workload_id",
+      "workload_name",
+      "kernel_uuid",
+      "kernel_name",
+      "metric_uuid",
+      "metric_name",
+      "metric_id",
+      "description",
+      "table_name",
+      "sub_table_name",
+      "unit",
+      "value_uuid",
+      "value_name",
+      "value"
+    ],
+    "compute_kernel_view": [
+      "kernel_uuid",
+      "workload_id",
+      "workload_name",
+      "kernel_name",
+      "short_name",
+      "dispatch_count",
+      "duration_ns_sum",
+      "duration_ns_min",
+      "duration_ns_max",
+      "duration_ns_median",
+      "duration_ns_mean"
+    ],
+    "compute_pc_sampling_summary_view": [
+      "workload_id",
+      "pid",
+      "code_object_id",
+      "kernel_uuid",
+      "kernel_name",
+      "offset",
+      "instruction",
+      "instruction_type",
+      "source",
+      "count",
+      "issue_count",
+      "stall_count",
+      "wave_occupancy_percent",
+      "active_thread_percent",
+      "stall_reason"
+    ],
+    "compute_source_lines_view": [
+      "workload_id",
+      "file_path",
+      "md5_checksum",
+      "line_number",
+      "content"
+    ],
+    "compute_workload_metric_view": [
+      "workload_id",
+      "workload_name",
+      "metric_uuid",
+      "metric_name",
+      "metric_id",
+      "description",
+      "table_name",
+      "sub_table_name",
+      "unit",
+      "value_uuid",
+      "value_name",
+      "value"
+    ]
+  }
+}

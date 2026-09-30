@@ -12,6 +12,7 @@ import pandas as pd
 
 import utils.analysis_orm as orm
 from config import rocprof_compute_home
+from memory_chart.loader import list_architectures, load_layout
 from pc_sampling.code_object_analysis import (
     CodeObjectSymbol,
     InstructionPipelines,
@@ -82,7 +83,12 @@ from utils.utils_analysis import (
     PEAK_COL_PREFERENCE,
     VALUE_COL_PREFERENCE,
 )
-from utils.utils_common import get_uuid, get_version, normalize_filter_to_str_list
+from utils.utils_common import (
+    canonical_config_arch,
+    get_uuid,
+    get_version,
+    normalize_filter_to_str_list,
+)
 from utils.utils_counter_defs import (
     extract_counters_and_variables,
     get_build_in_vars,
@@ -91,6 +97,9 @@ from utils.utils_counter_defs import (
 KernelKey = str
 CodeObjectKey = tuple[int, int]
 KernelSymbolKey = tuple[int, int, str]  # (pid, code_object_id, kernel_name)
+
+# Title of panel 300, which every memory chart layout metric comes from.
+MEMORY_CHART_TABLE_NAME = "Memory Chart"
 
 # db_analysis.evaluate runs once per kernel, so the same expression problem is
 # hit again for every kernel. Collect the messages here and report each
@@ -519,7 +528,7 @@ class db_analysis(OmniAnalyze_Base):
         workload_obj: orm.Workload,
         kernel_objs: dict[KernelKey, orm.Kernel],
     ) -> None:
-        """Add metric definitions and metric values to the database."""
+        """Add metric definitions, metric values and the memory chart."""
         # Add metrics and values - iterate on values, create metrics as needed
         metrics_info_dict = {
             row.metric_id: row
@@ -542,30 +551,20 @@ class db_analysis(OmniAnalyze_Base):
                 continue
 
             # Create or reuse metric object
-            if value.metric_id not in metric_objs:
-                # Fetch metric info
-                if value.metric_id not in metrics_info_dict:
-                    console_warning(
-                        f"Metric {value.metric_id} from values data "
-                        "not found in metrics info. Skipping metric value."
-                    )
-                    continue
-                metric_info = metrics_info_dict[value.metric_id]
-                metric_objs[value.metric_id] = orm.MetricDefinition(
-                    name=metric_info.name,
-                    metric_id=metric_info.metric_id,
-                    description=metric_info.description,
-                    unit=metric_info.unit,
-                    table_name=metric_info.table_name,
-                    sub_table_name=metric_info.sub_table_name,
-                    workload=workload_obj,
+            if value.metric_id not in metrics_info_dict:
+                console_warning(
+                    f"Metric {value.metric_id} from values data "
+                    "not found in metrics info. Skipping metric value."
                 )
-                Database.get_session().add(metric_objs[value.metric_id])
+                continue
+            metric_obj = self._get_or_create_metric_definition(
+                metrics_info_dict[value.metric_id], workload_obj, metric_objs
+            )
 
             # Add kernel-level metric value
             Database.get_session().add(
                 orm.KernelMetricValue(
-                    metric=metric_objs[value.metric_id],
+                    metric=metric_obj,
                     kernel=kernel_objs[kernel_key],
                     value_name=value.value_name,
                     value=value.value,
@@ -591,6 +590,152 @@ class db_analysis(OmniAnalyze_Base):
                     value=value.value,
                 )
             )
+
+        self.add_memory_chart(
+            workload_path, workload_obj, metrics_info_dict, metric_objs
+        )
+
+    def add_memory_chart(
+        self,
+        workload_path: str,
+        workload_obj: orm.Workload,
+        metrics_info_dict: dict[str, MetricInfoRow],
+        metric_objs: dict[str, orm.MetricDefinition],
+    ) -> None:
+        """Add the memory chart of the workload's arch, linked to its metrics.
+
+        The chart is skipped when the arch has no layout, or when -b left out
+        any of the metrics it shows.
+        """
+        gpu_arch = canonical_config_arch(
+            self._runs[workload_path].sys_info.iloc[0]["gpu_arch"]
+        )
+        if gpu_arch not in list_architectures():
+            console_debug(f"No memory chart layout for {gpu_arch}.")
+            return
+        layout = load_layout(gpu_arch)
+
+        chart_metric_infos = self._memory_chart_metric_infos(layout, metrics_info_dict)
+        if chart_metric_infos is None:
+            console_debug(
+                f"Skipping memory chart for {workload_path}: "
+                "some of its metrics were not analyzed."
+            )
+            return
+        # A metric no value created still needs a definition to link to.
+        chart_metrics = {
+            name: self._get_or_create_metric_definition(
+                metric_info, workload_obj, metric_objs
+            )
+            for name, metric_info in chart_metric_infos.items()
+        }
+        block_objs = self._add_memory_chart_blocks(layout, workload_obj, chart_metrics)
+        self._add_memory_chart_arrows(layout, workload_obj, block_objs, chart_metrics)
+
+    @staticmethod
+    def _memory_chart_metric_infos(
+        layout: dict[str, Any],
+        metrics_info_dict: dict[str, MetricInfoRow],
+    ) -> Optional[dict[str, MetricInfoRow]]:
+        """Return the info of every metric the layout shows, keyed by name.
+
+        Returns None when any of those metrics was not analyzed.
+        """
+        chart_metric_infos = {
+            metric_info.name: metric_info
+            for metric_info in metrics_info_dict.values()
+            if metric_info.table_name == MEMORY_CHART_TABLE_NAME
+        }
+        layout_metric_names = {
+            item["metric"] for block in layout["blocks"] for item in block["content"]
+        } | {arrow["metric"] for arrow in layout["arrows"]}
+        if not layout_metric_names <= chart_metric_infos.keys():
+            return None
+        return {name: chart_metric_infos[name] for name in sorted(layout_metric_names)}
+
+    @staticmethod
+    def _add_memory_chart_blocks(
+        layout: dict[str, Any],
+        workload_obj: orm.Workload,
+        chart_metrics: dict[str, orm.MetricDefinition],
+    ) -> dict[str, orm.MemoryChartBlock]:
+        """Add the layout's blocks with their metrics, keyed by block id."""
+        # A child block has no order of its own; it takes its place among
+        # its parent's children.
+        parent_ids: dict[str, str] = {}
+        child_orders: dict[str, int] = {}
+        for block in layout["blocks"]:
+            for child_order, child_id in enumerate(block.get("children", [])):
+                parent_ids[child_id] = block["id"]
+                child_orders[child_id] = child_order
+
+        block_objs = {
+            block["id"]: orm.MemoryChartBlock(
+                workload=workload_obj,
+                block_id=block["id"],
+                title=block["title"],
+                grid_column=block["column"],
+                sort_order=child_orders.get(block["id"], block.get("order")),
+                position=block.get("position", "grid"),
+                block_metrics=[
+                    orm.MemoryChartBlockMetric(
+                        metric=chart_metrics[item["metric"]],
+                        label=item["title"],
+                        category=item["category"],
+                        sort_order=item_order,
+                    )
+                    for item_order, item in enumerate(block["content"])
+                ],
+            )
+            for block in layout["blocks"]
+        }
+        for child_id, parent_id in parent_ids.items():
+            block_objs[child_id].parent_block = block_objs[parent_id]
+        Database.get_session().add_all(block_objs.values())
+        return block_objs
+
+    @staticmethod
+    def _add_memory_chart_arrows(
+        layout: dict[str, Any],
+        workload_obj: orm.Workload,
+        block_objs: dict[str, orm.MemoryChartBlock],
+        chart_metrics: dict[str, orm.MetricDefinition],
+    ) -> None:
+        """Add the layout's arrows between the workload's chart blocks."""
+        Database.get_session().add_all([
+            orm.MemoryChartArrow(
+                workload=workload_obj,
+                from_block=block_objs[arrow["from"]],
+                to_block=block_objs[arrow["to"]],
+                direction=arrow["direction"],
+                metric=chart_metrics[arrow["metric"]],
+                label=arrow["title"],
+                category=arrow["category"],
+                group_label=arrow.get("group"),
+                sort_order=arrow_order,
+            )
+            for arrow_order, arrow in enumerate(layout["arrows"])
+        ])
+
+    @staticmethod
+    def _get_or_create_metric_definition(
+        metric_info: MetricInfoRow,
+        workload_obj: orm.Workload,
+        metric_objs: dict[str, orm.MetricDefinition],
+    ) -> orm.MetricDefinition:
+        """Return the workload's definition for a metric, adding it if absent."""
+        if metric_info.metric_id not in metric_objs:
+            metric_objs[metric_info.metric_id] = orm.MetricDefinition(
+                name=metric_info.name,
+                metric_id=metric_info.metric_id,
+                description=metric_info.description,
+                unit=metric_info.unit,
+                table_name=metric_info.table_name,
+                sub_table_name=metric_info.sub_table_name,
+                workload=workload_obj,
+            )
+            Database.get_session().add(metric_objs[metric_info.metric_id])
+        return metric_objs[metric_info.metric_id]
 
     def calc_pmc_df_data(self) -> dict[str, pd.DataFrame]:
         pmc_df_per_workload: dict[str, pd.DataFrame] = {}
