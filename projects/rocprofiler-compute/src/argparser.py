@@ -1014,11 +1014,6 @@ Examples:
         ),
     )
     analyze_advanced_group.add_argument(
-        "--dependency",
-        action="store_true",
-        help="\t\tList the installation dependency.",
-    )
-    analyze_advanced_group.add_argument(
         "--report-diff", default=0, nargs="?", type=int, help=argparse.SUPPRESS
     )
     analyze_advanced_group.add_argument(
