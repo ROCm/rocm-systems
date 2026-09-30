@@ -3433,6 +3433,35 @@ TEST_CASE("Unit_HRR_FailedMemcpy3D_Direct", "[.][hrr-direct]") {
 }
 
 // ---------------------------------------------------------------------------
+// A host-to-device hipMemcpy3DAsync in a stream capture whose width * height *
+// depth overflows size_t. The runtime accepts it: it validates with the same
+// wrapping product and only adds a graph node, which is never launched.
+// Unit_HRR_OverflowingMemcpy3DNotRecorded checks that capture drops it.
+// ---------------------------------------------------------------------------
+TEST_CASE("Unit_HRR_OverflowingMemcpy3D_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  hipStream_t stream = nullptr;
+  HRR_HIP_CHECK(hipStreamCreate(&stream));
+  void* dst = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&dst, 1024));
+  std::vector<char> host(1024, 1);
+
+  hipMemcpy3DParms p{};
+  p.srcPtr = make_hipPitchedPtr(host.data(), 256, 256, 4);
+  p.dstPtr = make_hipPitchedPtr(dst, 256, 256, 4);
+  p.extent = make_hipExtent(256, (size_t{1} << 56) + 1, 1);  // 2^64 + 256 bytes
+  p.kind = hipMemcpyHostToDevice;
+  HRR_HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+  HRR_HIP_CHECK(hipMemcpy3DAsync(&p, stream));
+  hipGraph_t graph = nullptr;
+  HRR_HIP_CHECK(hipStreamEndCapture(stream, &graph));
+  HRR_HIP_CHECK(hipGraphDestroy(graph));
+
+  HRR_HIP_CHECK(hipFree(dst));
+  HRR_HIP_CHECK(hipStreamDestroy(stream));
+}
+
+// ---------------------------------------------------------------------------
 // One call the runtime rejects for each hand-written shim that inlines a struct,
 // next to accepted calls on the same pool and stream, one of them setting a
 // 4-byte reuse-policy attribute. Unit_HRR_FailedShimCallsNotRecorded checks that

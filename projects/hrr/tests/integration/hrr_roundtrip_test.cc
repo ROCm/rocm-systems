@@ -1518,6 +1518,42 @@ HRR_TEST_CASE(Unit_HRR_FailedMemcpy3DNotRecorded) {
 /**
  * Test Description
  * ----------------
+ *   - Runs Unit_HRR_OverflowingMemcpy3D_Direct under capture: an accepted
+ *     host-to-device hipMemcpy3DAsync whose width * height * depth overflows
+ *     size_t, so no blob can be sized for it.
+ *   - The archive holds no hipMemcpy3DAsync, is marked incomplete and replays
+ *     cleanly. Recorded without a blob, the copy took the device-to-device
+ *     replay path with an unmapped host source, and replay stopped.
+ */
+HRR_TEST_CASE(Unit_HRR_OverflowingMemcpy3DNotRecorded) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_overflowing_memcpy3d"};
+  {
+    hrr::test::SpawnProc proc(HRR_TEST_EXE);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    const int ret = proc.run("\"Unit_HRR_OverflowingMemcpy3D_Direct\"");
+    INFO("Capture exit code: " << ret);
+    REQUIRE(ret == 0);
+  }
+  const auto counts = hrr_info_api_counts(cap.path);
+  const auto it = counts.find("hipStreamBeginCapture");
+  REQUIRE(it != counts.end());  // the capture was live
+  CHECK(it->second == 1);
+  CHECK(counts.count("hipMemcpy3DAsync") == 0);
+
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(cap.path.string(), arc));
+  CHECK_FALSE(arc.complete);
+
+  auto [rc, out] = hrr_playback_merged(hrr_single_process_archive(cap.path));
+  INFO("Replay output:\n" << out);
+  CHECK(rc == 0);
+}
+
+// ---------------------------------------------------------------------------
+/**
+ * Test Description
+ * ----------------
  *   - Runs Unit_HRR_FailedShimCalls_Direct under capture: one rejected call for
  *     each hand-written shim that inlines a struct, plus an accepted and a
  *     rejected hipMemPoolSetAttribute.

@@ -1129,12 +1129,15 @@ hipError_t capture_hipMemPoolCreate(hipMemPool_t* mem_pool,
 // hipMemcpy3D / hipMemcpy3DAsync — inline parms + H2D blob + D2H expected blob
 // ---------------------------------------------------------------------------
 
-// Helper: compute byte count from 3D extent. 0 when the product overflows.
-static size_t memcpy3d_byte_count(const struct hipMemcpy3DParms* p) {
+// Helper: compute byte count from 3D extent into *bytes (0 for a zero extent).
+// Returns false when the product overflows size_t.
+static bool memcpy3d_byte_count(const struct hipMemcpy3DParms* p, size_t* bytes) {
   const size_t w = p->extent.width, h = p->extent.height, d = p->extent.depth;
-  if (w == 0 || h == 0 || d == 0) return 0;
-  if (h > SIZE_MAX / w || d > SIZE_MAX / (w * h)) return 0;
-  return w * h * d;
+  *bytes = 0;
+  if (w == 0 || h == 0 || d == 0) return true;
+  if (h > SIZE_MAX / w || d > SIZE_MAX / (w * h)) return false;
+  *bytes = w * h * d;
+  return true;
 }
 
 // Helper shared by all four 3D variants.
@@ -1149,7 +1152,20 @@ static void capture_memcpy3d_impl(
     return;
   }
   std::memcpy(a.parms_bytes, p, sizeof(a.parms_bytes));
-  size_t byte_count = memcpy3d_byte_count(p);
+  size_t byte_count = 0;
+  const bool sized = memcpy3d_byte_count(p, &byte_count);
+  const bool host_side = (p->kind == hipMemcpyHostToDevice && p->srcPtr.ptr) ||
+                         (p->kind == hipMemcpyDeviceToHost && p->dstPtr.ptr);
+  // The runtime validates with the same wrapping product, so it can accept an
+  // extent that overflows. Without a blob, replay cannot perform a host-side copy.
+  if (!sized && host_side) {
+    LogPrintfError(
+        "[HRR capture] 3D copy extent %zux%zux%zu overflows size_t, so no blob can be "
+        "sized for it: dropping the event and marking the capture INCOMPLETE.",
+        p->extent.width, p->extent.height, p->extent.depth);
+    hrr_cap::writer::mark_incomplete("3D copy extent overflows size_t");
+    return;
+  }
 
   if (p->kind == hipMemcpyHostToDevice && p->srcPtr.ptr && byte_count > 0) {
     // H2D: host source is valid at call time — no stream sync needed.
