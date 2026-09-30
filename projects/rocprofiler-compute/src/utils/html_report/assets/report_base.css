@@ -1,0 +1,298 @@
+/* Copyright (c) Advanced Micro Devices, Inc. */
+/* SPDX-License-Identifier:  MIT */
+
+:root {
+  color-scheme: light;
+  --report-border: #d7dee8;
+  --report-bg-soft: #f4f7fb;
+  --report-surface: #ffffff;
+  --report-accent: #0072b2;
+  --report-text: #1b1f24;
+  --report-muted: #5b6472;
+  --report-selected-bg: rgba(0, 114, 178, 0.12);
+  --report-swatch-border: rgba(0, 0, 0, 0.25);
+  --report-dim-opacity: 0.4;
+  --report-panel-basis: clamp(280px, 26vw, 440px);
+}
+
+:root.report-theme-dark {
+  color-scheme: dark;
+  --report-border: #363c45;
+  --report-bg-soft: #16191e;
+  --report-surface: #0a0b0d;
+  --report-accent: #58a6ff;
+  --report-text: #e6e9ef;
+  --report-muted: #9aa4b2;
+  --report-selected-bg: rgba(88, 166, 255, 0.18);
+  --report-swatch-border: rgba(255, 255, 255, 0.35);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
+    Arial, sans-serif;
+  color: var(--report-text);
+  background: var(--report-surface);
+}
+
+.report-app {
+  width: 100%;
+  max-width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  min-width: 0;
+  min-height: 0;
+  padding: 8px 16px 12px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.report-toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 6px 12px;
+  margin-bottom: 8px;
+  border: 1px solid var(--report-border);
+  border-radius: 8px;
+  background: var(--report-bg-soft);
+}
+
+.report-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--report-muted);
+}
+
+.report-control select {
+  min-width: 0;
+  max-width: min(320px, 55vw);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--report-text);
+  padding: 4px 8px;
+  border: 1px solid var(--report-border);
+  border-radius: 6px;
+  background: var(--report-surface);
+  text-overflow: ellipsis;
+}
+
+.report-hint {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--report-muted);
+}
+
+.report-btn {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 5px 12px;
+  border: 1px solid var(--report-border);
+  border-radius: 6px;
+  background: var(--report-surface);
+  color: var(--report-text);
+  cursor: pointer;
+}
+
+.report-btn:not(:disabled):hover {
+  border-color: var(--report-accent);
+  color: var(--report-accent);
+}
+
+.report-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+  color: var(--report-muted);
+}
+
+.report-btn:focus-visible,
+.report-panel-action:focus-visible {
+  outline: 2px solid var(--report-accent);
+  outline-offset: 2px;
+}
+
+.report-btn-sm {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+}
+
+.report-body {
+  display: flex;
+  align-items: stretch;
+  gap: 16px;
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.report-panel-wrap {
+  flex: 0 1 var(--report-panel-basis);
+  width: var(--report-panel-basis);
+  max-width: 40%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.report-panel {
+  width: 100%;
+  max-width: 100%;
+  border: 1px solid var(--report-border);
+  border-radius: 8px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.report-panel-title {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  background: var(--report-bg-soft);
+  border-bottom: 1px solid var(--report-border);
+}
+
+.report-panel-title-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.report-panel-count {
+  font-weight: 500;
+  color: var(--report-muted);
+}
+
+.report-panel-help {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 6px 12px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--report-muted);
+  border-bottom: 1px solid var(--report-border);
+}
+
+.report-panel-list {
+  flex: 1 1 auto;
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  min-width: 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.report-panel-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.report-panel-action {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 6px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  line-height: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.report-panel-action:hover {
+  background: var(--report-bg-soft);
+}
+
+.report-panel-item.selected .report-panel-action:hover {
+  background: transparent;
+}
+
+.report-panel-item.selected {
+  background: var(--report-selected-bg);
+  font-weight: 600;
+}
+
+.report-panel-item.dimmed {
+  opacity: var(--report-dim-opacity);
+}
+
+.report-panel-item.filtered {
+  display: none;
+}
+
+.report-swatch {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  margin-top: 2px;
+  border-radius: 50%;
+  border: 1px solid var(--report-swatch-border);
+}
+
+.report-panel-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 900px) {
+  .report-body {
+    flex-direction: column;
+  }
+  .report-panel-wrap {
+    flex: 0 1 clamp(180px, 38vh, 360px);
+    flex: 0 1 clamp(180px, 38dvh, 360px);
+    width: 100%;
+    max-width: 100%;
+    height: clamp(180px, 38vh, 360px);
+    height: clamp(180px, 38dvh, 360px);
+  }
+}
