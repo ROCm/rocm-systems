@@ -940,18 +940,14 @@ TEST_F(PerfsimPluginTest, SplitsMixedFlatResourcesInFirstRequestLaneOrder) {
 
   SyntheticInstruction first_local("flat_load_dword", words, MEMORY_OP);
   plugin.onAmdgpuBeforeExecuteInstruction(0x2204, first_local, wave);
-  std::array<uint64_t, 32> rewritten_addresses{};
   std::array<uint64_t, 32> original_addresses{};
-  rewritten_addresses[0] = 10;
-  rewritten_addresses[1] = 20;
-  rewritten_addresses[2] = 30;
   original_addresses[0] = 600;
   original_addresses[1] = 700;
   original_addresses[2] = 800;
   MemoryAccessObservation second = first;
   second.pc = 0x2204;
-  second.route = MemoryRoute::LOCAL;
-  second.normalized_to_local = true;
+  // Mixed requests keep original addresses even when their first lane is LDS.
+  second.route = MemoryRoute::GLOBAL;
   second.active_lane_mask = 0x7;
   second.architectural_exec_lane_mask = 0x7;
   second.valid_lane_mask = 0x7;
@@ -959,8 +955,7 @@ TEST_F(PerfsimPluginTest, SplitsMixedFlatResourcesInFirstRequestLaneOrder) {
   second.flat_local_lane_mask = 0x1;
   second.flat_dds_lane_mask = 0;
   second.scratch_lane_mask = 0x2;
-  second.addresses = rewritten_addresses;
-  second.pre_routing_addresses = original_addresses;
+  second.addresses = original_addresses;
   plugin.onAmdgpuMemoryAccessRouted(second);
 
   const std::array<uint32_t, 1> end_words{0xBF810000};
