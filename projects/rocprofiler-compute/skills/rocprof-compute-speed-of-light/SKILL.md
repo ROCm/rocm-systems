@@ -10,7 +10,6 @@ headline metric next to the hardware peak for the current GPU, so one table
 says whether a kernel is near any limit at all.
 
 Run `rocprof-compute analyze --help` before choosing flags.
-Never use the GUI or TUI.
 
 ## 1. Get the panel
 

@@ -186,7 +186,6 @@ implementation is [`tools/format_yaml.py`](tools/format_yaml.py).
 **Scope.** Equation formatting applies to YAML files under:
 
 - `src/rocprof_compute_soc/analysis_configs/gfx*/*.yaml`
-- `src/rocprof_compute_tui/utils/gfx*/*.yaml`
 
 Template files (`*_template.yaml`) and build artifacts are excluded. Only values
 under these keys are treated as equations: `value`, `avg`, `min`, `max`, `peak`.
@@ -326,7 +325,7 @@ non-stdlib packages are imported.
 These are forbidden in profile mode
 
 **External packages**:
-- `pandas`, `yaml`, `numpy`, `plotly`, `dash`, `textual`, etc.
+- `pandas`, `yaml`, `numpy`, `plotly`, etc.
 - Anything from `requirements.txt`
 
 ### Common Mistakes
