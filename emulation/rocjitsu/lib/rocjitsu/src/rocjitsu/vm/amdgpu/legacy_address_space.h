@@ -1745,10 +1745,9 @@ private:
       for (size_t byte = 0; byte < spans[i].size; ++byte) {
         const size_t index =
             backing_atomic_mutex_index(reinterpret_cast<uintptr_t>(spans[i].host_ptr + byte));
-        if (std::find(lock_indices.begin(), lock_indices.end(), index) != lock_indices.end())
+        if (std::ranges::find(lock_indices, index) != lock_indices.end())
           continue;
-        auto free_slot =
-            std::find(lock_indices.begin(), lock_indices.end(), kBackingAtomicLockStripes);
+        auto free_slot = std::ranges::find(lock_indices, kBackingAtomicLockStripes);
         if (free_slot == lock_indices.end()) {
           atomic_rmw_discarded(discarded);
           return AtomicPageOutcome::Clipped;
@@ -1756,7 +1755,7 @@ private:
         *free_slot = index;
       }
     }
-    std::sort(lock_indices.begin(), lock_indices.end());
+    std::ranges::sort(lock_indices);
     std::array<std::unique_lock<std::mutex>, sizeof(uint64_t)> locks;
     size_t lock_count = 0;
     while (lock_count < lock_indices.size() &&

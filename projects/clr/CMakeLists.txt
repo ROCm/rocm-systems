@@ -41,6 +41,7 @@ endif()
 
 option(CLR_BUILD_HIP "Build HIP" OFF)
 option(CLR_BUILD_OCL "Build OCL" OFF)
+option(CLR_HRR_CODEGEN_CHECK "Generate and validate HRR generated sources during CLR builds" OFF)
 option(USE_NEW_HOSTCALL_IMPL
   "Use the new phase/occupancy-based hostcall implementation" OFF)
 

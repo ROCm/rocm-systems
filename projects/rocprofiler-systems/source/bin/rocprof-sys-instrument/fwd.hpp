@@ -219,12 +219,12 @@ extern CodeCoverageMode coverage_mode;
 //
 struct symtab_data_s
 {
-    std::vector<symtab_module_t*>                           modules              = {};
-    std::map<symtab_module_t*, std::vector<symtab_func_t*>> functions            = {};
-    std::map<symtab_func_t*, std::vector<symtab_symbol_t*>> symbols              = {};
-    std::unordered_map<std::string, symtab_symbol_t*>       mangled_symbol_names = {};
-    std::unordered_map<std::string, symtab_func_t*>         typed_func_names     = {};
-    std::unordered_map<std::string, symtab_symbol_t*>       typed_symbol_names   = {};
+    std::vector<symtab_module_t*>                           modules;
+    std::map<symtab_module_t*, std::vector<symtab_func_t*>> functions;
+    std::map<symtab_func_t*, std::vector<symtab_symbol_t*>> symbols;
+    std::unordered_map<std::string, symtab_symbol_t*>       mangled_symbol_names;
+    std::unordered_map<std::string, symtab_func_t*>         typed_func_names;
+    std::unordered_map<std::string, symtab_symbol_t*>       typed_symbol_names;
 };
 
 extern symtab_data_s                 symtab_data;

@@ -27,6 +27,10 @@
 
 using rocjitsu::test::FindingCount;
 using rocjitsu::test::RaceExpectation;
+using rocjitsu::test::lgkmcnt_capacity_kernel;
+using rocjitsu::test::mixed_lgkmcnt_capacity_kernel;
+using rocjitsu::test::vmcnt_capacity_kernel;
+using rocjitsu::test::wide_scalar_lgkmcnt_capacity_kernel;
 
 using Gfx950RaceTest = rocjitsu::test::RaceTestBase;
 
@@ -81,6 +85,225 @@ TEST_F(Gfx950RaceTest, vgpr_waitcnt_race) {
   vgpr_race_kernel<<<1, 64>>>(src, dst);
   sync();
   ExpectRace(kVgprWaitcntRaceExpectation);
+}
+
+// --- Generic FLAT dual-counter waits ---
+
+// Generic FLAT carries simultaneous VMCNT and LGKMCNT obligations, regardless
+// of whether the uniformly resolved address uses the global or LDS route. The
+// all-ones operands below leave one counter unchanged so each negative test
+// demonstrates that draining only the other counter is insufficient.
+static constexpr int kFlatVmcntNoWait = 63;
+static constexpr int kFlatLgkmcntNoWait = 15;
+
+template <int Vmcnt, int Lgkmcnt>
+__global__ void flat_global_wait_kernel(const float *src, float *dst) {
+  const int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  const uint64_t address = reinterpret_cast<uint64_t>(&src[tid]);
+  float value;
+  asm volatile("flat_load_dword %[value], %[address]\n"
+               "s_waitcnt vmcnt(%c[vmcnt]) lgkmcnt(%c[lgkmcnt])\n"
+               : [value] "=v"(value)
+               : [address] "v"(address), [vmcnt] "n"(Vmcnt), [lgkmcnt] "n"(Lgkmcnt)
+               : "memory");
+  dst[tid] = value;
+}
+
+template <int Vmcnt, int Lgkmcnt> __global__ void flat_lds_wait_kernel(int *dst) {
+  __shared__ int lds[64];
+  const int tid = static_cast<int>(threadIdx.x);
+  lds[tid] = tid + 1;
+  __syncthreads();
+
+  const uint64_t address = reinterpret_cast<uint64_t>(&lds[tid]);
+  int value;
+  asm volatile("flat_load_dword %[value], %[address]\n"
+               "s_waitcnt vmcnt(%c[vmcnt]) lgkmcnt(%c[lgkmcnt])\n"
+               : [value] "=v"(value)
+               : [address] "v"(address), [vmcnt] "n"(Vmcnt), [lgkmcnt] "n"(Lgkmcnt)
+               : "memory");
+  dst[tid] = value;
+}
+
+static constexpr RaceExpectation kFlatPartialWaitRaceExpectation{
+    .findings = FindingCount::OneOrMore,
+    .type = "VGPR",
+    .producer = "flat_load_dword",
+    .consumer = "global_store_dword",
+};
+
+TEST_F(Gfx950RaceTest, flat_global_wait_both) {
+  auto *src = allocWithData<float>(64), *dst = alloc<float>(64);
+  flat_global_wait_kernel<0, 0><<<1, 64>>>(src, dst);
+  sync();
+  ExpectNoRace();
+}
+
+TEST_F(Gfx950RaceTest, flat_global_vmcnt_only_race) {
+  auto *src = allocWithData<float>(64), *dst = alloc<float>(64);
+  flat_global_wait_kernel<0, kFlatLgkmcntNoWait><<<1, 64>>>(src, dst);
+  sync();
+  ExpectRace(kFlatPartialWaitRaceExpectation);
+}
+
+TEST_F(Gfx950RaceTest, flat_global_lgkmcnt_only_race) {
+  auto *src = allocWithData<float>(64), *dst = alloc<float>(64);
+  flat_global_wait_kernel<kFlatVmcntNoWait, 0><<<1, 64>>>(src, dst);
+  sync();
+  ExpectRace(kFlatPartialWaitRaceExpectation);
+}
+
+TEST_F(Gfx950RaceTest, flat_lds_wait_both) {
+  flat_lds_wait_kernel<0, 0><<<1, 64>>>(alloc<int>(64));
+  sync();
+  ExpectNoRace();
+}
+
+TEST_F(Gfx950RaceTest, flat_lds_vmcnt_only_race) {
+  flat_lds_wait_kernel<0, kFlatLgkmcntNoWait><<<1, 64>>>(alloc<int>(64));
+  sync();
+  ExpectRace(kFlatPartialWaitRaceExpectation);
+}
+
+TEST_F(Gfx950RaceTest, flat_lds_lgkmcnt_only_race) {
+  flat_lds_wait_kernel<kFlatVmcntNoWait, 0><<<1, 64>>>(alloc<int>(64));
+  sync();
+  ExpectRace(kFlatPartialWaitRaceExpectation);
+}
+
+// --- All-ones wait operands ---
+
+// CDNA1-CDNA4 use the all-ones wait operand as both the no-wait encoding and
+// the maximum number of outstanding counter tokens.
+static constexpr int kCdnaLgkmcntCapacity = 15;
+static constexpr int kCdnaVmcntCapacity = 63;
+
+__global__ void vmcnt_no_wait_race_kernel(const float *src, float *dst) {
+  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  float val;
+  asm volatile(
+      "global_load_dword %[value], %[address], off\n"
+      "s_waitcnt vmcnt(%c[no_wait])\n"
+      : [value] "=v"(val)
+      : [address] "v"(&src[tid]), [no_wait] "n"(kCdnaVmcntCapacity));
+  dst[tid] = val;
+}
+
+static constexpr RaceExpectation kVmcntNoWaitRaceExpectation{
+    .findings = FindingCount::OneOrMore,
+    .type = "VGPR",
+    .producer = "global_load_dword",
+    .consumer = "global_store_dword",
+};
+
+TEST_F(Gfx950RaceTest, vmcnt_no_wait_race) {
+  auto *src = allocWithData<float>(64), *dst = alloc<float>(64);
+  vmcnt_no_wait_race_kernel<<<1, 64>>>(src, dst);
+  sync();
+  ExpectRace(kVmcntNoWaitRaceExpectation);
+}
+
+__global__ void lgkmcnt_no_wait_race_kernel(int *dst) {
+  __shared__ int lds[64];
+  int tid = threadIdx.x;
+  lds[tid] = tid + 1;
+  __syncthreads();
+
+  int val;
+  asm volatile(
+      "ds_read_b32 %[value], %[address]\n"
+      "s_waitcnt lgkmcnt(%c[no_wait])\n"
+      : [value] "=v"(val)
+      : [address] "v"(tid * 4), [no_wait] "n"(kCdnaLgkmcntCapacity)
+      : "memory");
+  dst[tid] = val;
+}
+
+static constexpr RaceExpectation kLgkmcntNoWaitRaceExpectation{
+    .findings = FindingCount::OneOrMore,
+    .type = "VGPR",
+    .producer = "ds_read_b32",
+    .consumer = "global_store_dword",
+};
+
+TEST_F(Gfx950RaceTest, lgkmcnt_no_wait_race) {
+  auto *dst = alloc<int>(64);
+  lgkmcnt_no_wait_race_kernel<<<1, 64>>>(dst);
+  sync();
+  ExpectRace(kLgkmcntNoWaitRaceExpectation);
+}
+
+// --- Counter-capacity backpressure ---
+
+// The shared kernels consume the oldest result after a configurable number of
+// younger operations. At capacity it is safe; one operation below still races.
+
+static constexpr RaceExpectation kLgkmcntBelowCapacityRaceExpectation{
+    .findings = FindingCount::OneOrMore,
+    .type = "VGPR",
+    .producer = "ds_read_b32",
+    .consumer = "v_mov_b32",
+};
+
+TEST_F(Gfx950RaceTest, lgkmcnt_capacity_boundary) {
+  lgkmcnt_capacity_kernel<kCdnaLgkmcntCapacity><<<1, 64>>>(alloc<int>(64));
+  sync();
+  ExpectNoRace();
+}
+
+TEST_F(Gfx950RaceTest, lgkmcnt_below_capacity_race) {
+  lgkmcnt_capacity_kernel<kCdnaLgkmcntCapacity - 1><<<1, 64>>>(alloc<int>(64));
+  sync();
+  ExpectRace(kLgkmcntBelowCapacityRaceExpectation);
+}
+
+TEST_F(Gfx950RaceTest, mixed_lgkmcnt_capacity_boundary) {
+  mixed_lgkmcnt_capacity_kernel<kCdnaLgkmcntCapacity - 1>
+      <<<1, 64>>>(allocWithData<int>(1), alloc<int>(64));
+  sync();
+  ExpectNoRace();
+}
+
+TEST_F(Gfx950RaceTest, mixed_lgkmcnt_below_capacity_race) {
+  mixed_lgkmcnt_capacity_kernel<kCdnaLgkmcntCapacity - 2>
+      <<<1, 64>>>(allocWithData<int>(1), alloc<int>(64));
+  sync();
+  ExpectRace(kLgkmcntBelowCapacityRaceExpectation);
+}
+
+TEST_F(Gfx950RaceTest, wide_scalar_lgkmcnt_capacity_boundary) {
+  wide_scalar_lgkmcnt_capacity_kernel<kCdnaLgkmcntCapacity - 2>
+      <<<1, 64>>>(allocWithData<uint64_t>(1), alloc<int>(64));
+  sync();
+  ExpectNoRace();
+}
+
+TEST_F(Gfx950RaceTest, wide_scalar_lgkmcnt_below_capacity_race) {
+  wide_scalar_lgkmcnt_capacity_kernel<kCdnaLgkmcntCapacity - 3>
+      <<<1, 64>>>(allocWithData<uint64_t>(1), alloc<int>(64));
+  sync();
+  ExpectRace(kLgkmcntBelowCapacityRaceExpectation);
+}
+
+static constexpr RaceExpectation kVmcntBelowCapacityRaceExpectation{
+    .findings = FindingCount::OneOrMore,
+    .type = "VGPR",
+    .producer = "global_load_dword",
+    .consumer = "v_mov_b32",
+};
+
+TEST_F(Gfx950RaceTest, vmcnt_capacity_boundary) {
+  auto *src = allocWithData<float>(64), *dst = alloc<float>(64);
+  vmcnt_capacity_kernel<kCdnaVmcntCapacity><<<1, 64>>>(src, dst);
+  sync();
+  ExpectNoRace();
+}
+
+TEST_F(Gfx950RaceTest, vmcnt_below_capacity_race) {
+  auto *src = allocWithData<float>(64), *dst = alloc<float>(64);
+  vmcnt_capacity_kernel<kCdnaVmcntCapacity - 1><<<1, 64>>>(src, dst);
+  sync();
+  ExpectRace(kVmcntBelowCapacityRaceExpectation);
 }
 
 // --- SGPR waitcnt ---

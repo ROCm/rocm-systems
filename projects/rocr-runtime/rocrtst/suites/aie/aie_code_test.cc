@@ -30,7 +30,7 @@ std::vector<std::uint8_t> ReadFile(const char* path) {
   return bytes;
 }
 
-// Same hsaco dispatch.cc's HsacoKernelObjectIsPublished loads; built by the same CMake rule.
+// Same hsaco test_dispatch.cc's HsacoKernelObjectIsPublished loads; built by the same CMake rule.
 constexpr const char* kHsaco = "vsadd.hsaco";
 
 TEST(AieCodeParse, ParsesVsaddHsaco) {

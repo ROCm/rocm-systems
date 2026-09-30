@@ -44,7 +44,10 @@ void
 rccl_metadata_initialize_categories()
 {
     static bool _is_initialized = false;
-    if(_is_initialized) return;
+    if(_is_initialized)
+    {
+        return;
+    }
 
     trace_cache::get_metadata_registry().add_string(
         trait::name<category::comm_data>::value);
@@ -271,7 +274,10 @@ rccl_get_device_id(ncclComm_t comm) noexcept
 {
     constexpr std::uint32_t DEFAULT_DEVICE_ID = 0;
 
-    if(comm == nullptr) return DEFAULT_DEVICE_ID;
+    if(comm == nullptr)
+    {
+        return DEFAULT_DEVICE_ID;
+    }
 
     using ncclCommCuDevice_fn = ncclResult_t (*)(ncclComm_t, int*);
 
@@ -290,7 +296,10 @@ rccl_get_device_id(ncclComm_t comm) noexcept
         }
     });
 
-    if(ncclCommCuDevice_ptr == nullptr) return DEFAULT_DEVICE_ID;
+    if(ncclCommCuDevice_ptr == nullptr)
+    {
+        return DEFAULT_DEVICE_ID;
+    }
 
     int          device_id = DEFAULT_DEVICE_ID;
     ncclResult_t result    = ncclCommCuDevice_ptr(comm, &device_id);

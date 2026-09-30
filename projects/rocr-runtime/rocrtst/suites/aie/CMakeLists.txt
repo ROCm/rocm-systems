@@ -22,10 +22,10 @@ find_package(hsa-runtime64 CONFIG REQUIRED NAMES hsa_runtime64 hsa-runtime64)
 
 include(GoogleTest)
 
-# error_callback_test: validates the per-queue error callback for AIE queues. Self-contained;
+# test_error_callback: validates the per-queue error callback for AIE queues. Self-contained;
 # it does not require any AIE kernel artifacts (no aiecc / NPU toolchain needed).
-add_executable(error_callback_test error_callback_test.cc)
-set_target_properties(error_callback_test
+add_executable(test_error_callback test_error_callback.cc)
+set_target_properties(test_error_callback
   PROPERTIES
     CXX_STANDARD                17
     CXX_EXTENSIONS              OFF
@@ -33,25 +33,49 @@ set_target_properties(error_callback_test
     VISIBILITY_INLINES_HIDDEN   ON
     POSITION_INDEPENDENT_CODE   ON
 )
-target_compile_options(error_callback_test
+target_compile_options(test_error_callback
   PRIVATE
     -Wall
     -Wextra
     -Wpedantic
 )
-target_link_libraries(error_callback_test
+target_link_libraries(test_error_callback
   PRIVATE
     hsa-runtime64::hsa-runtime64
     GTest::gtest_main
 )
-gtest_discover_tests(error_callback_test)
+gtest_discover_tests(test_error_callback)
+
+# test_memory: allocation, VMem and sharing tests for AIE agents. Self-contained;
+# it does not require any AIE kernel artifacts (no aiecc / NPU toolchain needed).
+add_executable(test_memory test_memory.cc)
+set_target_properties(test_memory
+  PROPERTIES
+    CXX_STANDARD                17
+    CXX_EXTENSIONS              OFF
+    CXX_VISIBILITY_PRESET       hidden
+    VISIBILITY_INLINES_HIDDEN   ON
+    POSITION_INDEPENDENT_CODE   ON
+)
+target_compile_options(test_memory
+  PRIVATE
+    -Wall
+    -Wextra
+    -Wpedantic
+)
+target_link_libraries(test_memory
+  PRIVATE
+    hsa-runtime64::hsa-runtime64
+    GTest::gtest_main
+)
+gtest_discover_tests(test_memory)
 
 # ---------------------------------------------------------------------------
 # Everything below builds AIE kernel artifacts and the dispatch tests that need
 # them. It is all conditional on the kernel toolchain being present, because
-# error_callback_test above needs none of it and is expected to configure and
-# run on any machine -- a missing NPU or IRON environment must not fail the
-# configure and take that target down with it.
+# test_error_callback and test_memory above need none of it and are expected to
+# configure and run on any machine -- a missing NPU or IRON environment must not
+# fail the configure and take those targets down with it.
 #
 # AIE_KERNEL_TOOLCHAIN is set to FALSE by the first missing piece; each probe
 # below is skipped once it is false, so the reason reported is the first thing
@@ -119,7 +143,7 @@ if(AIE_KERNEL_TOOLCHAIN)
 endif()
 
 if(NOT AIE_KERNEL_TOOLCHAIN)
-  message(STATUS "AIE kernel toolchain incomplete: building error_callback_test only.")
+  message(STATUS "AIE kernel toolchain incomplete: building test_error_callback and test_memory only.")
   return()
 endif()
 
@@ -284,7 +308,7 @@ add_aie_kernel(vsmul "${CMAKE_CURRENT_SOURCE_DIR}/vector_scalar_mul.py" "--scale
 # Unified hsaco packaging
 #
 # Packages the vsadd PDI+insts artifacts into a single AIE hsaco via
-# aie_hsaco.py, so the loader test in dispatch.cc can exercise
+# aie_hsaco.py, so the loader test in test_dispatch.cc can exercise
 # hsa_executable_load_agent_code_object on a PdiInsts hsaco.
 #
 # aie_hsaco.py's --arch uses "aie2"/"aie2p", while NPU_TARGET (detected above)
@@ -304,7 +328,7 @@ add_custom_command(
           --hsaco "${vsadd_HSACO}"
           --arch "${AIE_HSACO_ARCH}"
           # vsadd's kernarg buffer is 2 pointers + 2 sizes (see aie_vector_scalar_kernel::kernarg_bytes
-          # in dispatch.cc); the design uses a single NPU column (NPU1Col1/NPU2Col1).
+          # in test_dispatch.cc); the design uses a single NPU column (NPU1Col1/NPU2Col1).
           --kernel "${VSADD_HSACO_KERNEL_NAME}:${vsadd_INSTS_BIN}:${vsadd_DESIGN_PDI}:32:1"
   # Depend on the target, not its output files: two custom commands racing aiecc in the same
   # build directory produce concurrent runs that clobber each other's intermediates.
@@ -316,7 +340,7 @@ add_custom_target(vsadd_hsaco_artifact DEPENDS "${vsadd_HSACO}")
 
 # The same packaging for the mul design, so the interleaving tests can dispatch two distinct
 # kernels by handle. Its kernarg buffer is 1 pointer + 1 size (see
-# aie_vector_scalar_mul_kernel::kernarg_bytes in dispatch.cc).
+# aie_vector_scalar_mul_kernel::kernarg_bytes in test_dispatch.cc).
 set(VSMUL_HSACO_KERNEL_NAME "vsmul")
 set(vsmul_HSACO "${CMAKE_CURRENT_BINARY_DIR}/vsmul.hsaco")
 add_custom_command(
@@ -333,7 +357,7 @@ add_custom_command(
 add_custom_target(vsmul_hsaco_artifact DEPENDS "${vsmul_HSACO}")
 
 # Packages the vsadd full-ELF artifact into a single AIE hsaco with kind=FullElf, so the
-# loader test in dispatch.cc can exercise hsa_executable_load_agent_code_object on a
+# loader test in test_dispatch.cc can exercise hsa_executable_load_agent_code_object on a
 # FullElf hsaco. The path is set unconditionally (mirroring vsadd_FULL_ELF above) so the test's
 # file-existence check has something to point at; the packaging command itself only runs when the
 # toolchain can emit full ELFs.
@@ -354,11 +378,11 @@ if(AIE_FULL_ELF_SUPPORTED)
 endif()
 
 # A FullElf hsaco whose kernel table has two entries sharing one blob and declaring the same
-# kernel name, for HsacoFullElfRejectsDuplicateKernelName in dispatch.cc. Pointing aie_hsaco.py at
-# the vsadd ELF twice is deliberate: it derives each entry's name from the ELF's own COMDAT
-# symbols, so two references to the same ELF always produce two identical names, and its blob-pool
-# dedup (keyed on raw bytes) collapses the two identical instruction blobs into one shared blob --
-# exactly the "two entries, one blob, same name" shape the loader must reject.
+# kernel name, for HsacoFullElfRejectsDuplicateKernelName in test_dispatch.cc. Pointing
+# aie_hsaco.py at the vsadd ELF twice is deliberate: it derives each entry's name from the ELF's
+# own COMDAT symbols, so two references to the same ELF always produce two identical names, and its
+# blob-pool dedup (keyed on raw bytes) collapses the two identical instruction blobs into one
+# shared blob -- exactly the "two entries, one blob, same name" shape the loader must reject.
 set(vsadd_DUP_ELF_HSACO "${CMAKE_CURRENT_BINARY_DIR}/vsadd_dup_elf.hsaco")
 if(AIE_FULL_ELF_SUPPORTED)
   add_custom_command(
@@ -394,10 +418,10 @@ if(AIE_FULL_ELF_SUPPORTED)
 endif()
 
 # ---------------------------------------------------------------------------
-# dispatch test executable
+# test_dispatch executable
 # ---------------------------------------------------------------------------
-add_executable(dispatch dispatch.cc)
-set_target_properties(dispatch
+add_executable(test_dispatch test_dispatch.cc)
+set_target_properties(test_dispatch
   PROPERTIES
     CXX_STANDARD                17
     CXX_EXTENSIONS              OFF
@@ -405,7 +429,7 @@ set_target_properties(dispatch
     VISIBILITY_INLINES_HIDDEN   ON
     POSITION_INDEPENDENT_CODE   ON
 )
-target_compile_options(dispatch
+target_compile_options(test_dispatch
   PRIVATE
     -Wall
     -Wextra
@@ -413,9 +437,9 @@ target_compile_options(dispatch
 )
 # core/inc is not installed alongside the runtime; needed for amd_aie_section.h, a header-only
 # dependency used to locate and corrupt the AIE `kind` field in AieKindIsValidated.
-target_include_directories(dispatch PRIVATE
+target_include_directories(test_dispatch PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/../../../runtime/hsa-runtime)
-target_compile_definitions(dispatch
+target_compile_definitions(test_dispatch
   PRIVATE
     DEFAULT_PDI_PATH=${vsadd_DESIGN_PDI}
     DEFAULT_INSTS_PATH=${vsadd_INSTS_BIN}
@@ -440,26 +464,26 @@ target_compile_definitions(dispatch
     MUL_HSACO_KERNEL_NAME="${VSMUL_HSACO_KERNEL_NAME}"
     MUL_ELF_HSACO_PATH=${vsmul_ELF_HSACO}
 )
-target_link_libraries(dispatch
+target_link_libraries(test_dispatch
   PRIVATE
     hsa-runtime64::hsa-runtime64
     GTest::gtest_main
 )
-add_dependencies(dispatch vsadd_kernel_artifacts vsmul_kernel_artifacts vsadd_hsaco_artifact
-                          vsmul_hsaco_artifact)
+add_dependencies(test_dispatch vsadd_kernel_artifacts vsmul_kernel_artifacts vsadd_hsaco_artifact
+                               vsmul_hsaco_artifact)
 # Both are empty when the toolchain cannot build full ELFs. The guard is needed because
 # add_dependencies() rejects a call with no dependencies, but it tests the variables themselves
 # rather than AIE_FULL_ELF_SUPPORTED, so adding a kernel here cannot name a target that the
 # function never defined.
 if(vsadd_FULL_ELF_TARGET OR vsmul_FULL_ELF_TARGET)
-  add_dependencies(dispatch ${vsadd_FULL_ELF_TARGET} ${vsmul_FULL_ELF_TARGET})
+  add_dependencies(test_dispatch ${vsadd_FULL_ELF_TARGET} ${vsmul_FULL_ELF_TARGET})
 endif()
 if(AIE_FULL_ELF_SUPPORTED)
-  add_dependencies(dispatch vsadd_elf_hsaco_artifact vsmul_elf_hsaco_artifact
-                            vsadd_dup_elf_hsaco_artifact)
+  add_dependencies(test_dispatch vsadd_elf_hsaco_artifact vsmul_elf_hsaco_artifact
+                                 vsadd_dup_elf_hsaco_artifact)
 endif()
 
-gtest_discover_tests(dispatch)
+gtest_discover_tests(test_dispatch)
 
 # ---------------------------------------------------------------------------
 # elf_parse_test: exercises the in-tree full-ELF reader (core/inc/amd_aie_elf.h)
@@ -494,10 +518,11 @@ add_test(NAME elf_parse_test COMMAND elf_parse_test WORKING_DIRECTORY ${CMAKE_CU
 # ---------------------------------------------------------------------------
 # aie_code_test: exercises the in-tree unified-hsaco reader (core/inc/amd_aie_code.hpp)
 # against vsadd.hsaco, plus garbage/truncated inputs. Host-side only: needs neither hardware
-# nor an AIE agent, unlike dispatch's HsacoKernelObjectIsPublished/AieKindIsValidated. The parser
-# and its amd::elf::Image dependency are compiled directly into the test for the same reason as
-# elf_parse_test's amd_aie_elf.cpp: core/inc is not installed, and amd::elf::Image is built with
-# hidden visibility inside libhsa-runtime64.so, so it cannot be linked against from outside it.
+# nor an AIE agent, unlike test_dispatch's HsacoKernelObjectIsPublished/AieKindIsValidated. The
+# parser and its amd::elf::Image dependency are compiled directly into the test for the same
+# reason as elf_parse_test's amd_aie_elf.cpp: core/inc is not installed, and amd::elf::Image is
+# built with hidden visibility inside libhsa-runtime64.so, so it cannot be linked against from
+# outside it.
 add_executable(aie_code_test
   aie_code_test.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/../../../runtime/hsa-runtime/core/runtime/amd_aie_code.cpp

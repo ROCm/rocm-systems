@@ -60,11 +60,15 @@ static ncclKernelMatch const ncclKerns[6] = {
   {(void*)ncclDevKernel_Generic_16, true}, {(void*)ncclDevKernel_Generic_32, true}
 };
 
+/* Host mirror of device side NCCL_LL128_SHMEM_ELEMS_PER_THREAD. Must match the arch gate in
+ * device.h; gfx1250 reports cudaArch 1250 (100 * major + 10 * minor). */
+constexpr int rcclLL128ShmemElemsPerThread(int cudaArch) { return cudaArch == 1250 ? 32 : 8; }
+
 /* Copy of ncclShmemScratchWarpSize */
 constexpr int rcclShmemScratchWarpSize(int cudaArch = NCCL_CUDA_ARCH, int WarpSize = 32) {
   return (max_constexpr<int>(
             /*LL    */ 0,
-            /*LL128 */ (NCCL_LL128_SHMEM_ELEMS_PER_THREAD * WarpSize) * sizeof(uint64_t),
+            /*LL128 */ (rcclLL128ShmemElemsPerThread(cudaArch) * WarpSize) * sizeof(uint64_t),
             /*SIMPLE*/ (ncclCollUnroll(cudaArch) * WarpSize + 1) * 16,
       // NVLS needs an extra 16B to read unaligned data.
             /*NVLS  */ WarpSize * (cudaArch >= 900 ? ncclNvlsUnrollBytes(cudaArch) : 0) + 16) +
@@ -1511,7 +1515,9 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
         struct ncclConnector* conn =
           dir ? &channelPeers[peerRank]->send[connIndex[dir]] : &channelPeers[peerRank]->recv[connIndex[dir]];
         void* regAddr = NULL;
-        if (conn->conn.flags & (NCCL_P2P_WRITE | NCCL_P2P_READ)) {
+        // CE/memcpy connections stage through proxy buffers and do not provide
+        // the pointer-exchange slot required by the direct registered path.
+        if ((conn->conn.flags & (NCCL_P2P_WRITE | NCCL_P2P_READ)) && conn->conn.ptrExchange != nullptr) {
           // We require users registering buffers on both sides
           NCCLCHECKGOTO(ncclRegisterP2pIpcBuffer(comm, addrs[dir], bytes[dir], peerRank, &regFlag, &regAddr,
                                                  &plan->cleanupQueue),
@@ -4650,10 +4656,7 @@ ncclResult_t ncclEnqueueCheck(struct ncclInfo* info) {
   // RCCL: a collective must not be issued on a suspended communicator. The queues cover a suspend or resume still
   // pending in this group, which the group drains before launching.
   if (info->comm->memManager) {
-    bool commIsSuspended = ncclIntruQueueEmpty(&info->comm->resumeTaskQueue) &&
-                           (!ncclIntruQueueEmpty(&info->comm->suspendTaskQueue) ||
-                            __atomic_load_n(&info->comm->memManager->released, __ATOMIC_ACQUIRE));
-    if (commIsSuspended) {
+    if (ncclCommIsSuspended(info->comm)) {
       WARN("%s: communicator %p is suspended; call ncclCommResume before issuing collectives", info->opName,
            info->comm);
       ret = ncclInvalidUsage;

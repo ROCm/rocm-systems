@@ -1579,7 +1579,11 @@ hsa_status_t XdnaDriver::Map(const core::DriverMemoryHandle& handle, void* mem, 
 hsa_status_t XdnaDriver::Unmap(const core::DriverMemoryHandle& handle, void* mem, size_t offset,
                                size_t size, uint32_t node_id) {
   (void)node_id;
-  if (munmap(mem, size) != 0) {
+  // Map placed the BO at a VA the caller reserved, and the NPU shares the host's page tables, so
+  // that mapping is also every other agent's view of the range. Put the range back to a bare
+  // reservation instead of unmapping it: a hole would let an unrelated mmap claim the range before
+  // hsa_amd_vmem_address_free releases it.
+  if (!os::UncommitMemory(mem, size)) {
     return HSA_STATUS_ERROR;
   }
 
