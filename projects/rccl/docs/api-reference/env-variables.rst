@@ -1297,6 +1297,29 @@ threshold table introduced for gfx1250.
           eligible the selector falls back normally. Off by default.
       - | ``0``: Disabled (default).
         | ``1``: Prefer symmetric kernel for AllReduce.
+    * - | ``RCCL_FORCE_CE_REDUCESCATTER``
+        | Runs CE ReduceScatter without ``NCCL_CTA_POLICY=2`` (``CTA_POLICY_ZERO``).
+          Force mode also preempts an otherwise-eligible symmetric kernel so the
+          staged CE path is used. Requires ``RCCL_CE_REDUCESCATTER=1``.
+      - | ``0``: Disabled (default).
+        | ``1``: Force-enabled (CTA-policy gate bypassed; preempts symk).
+
+    * - | ``RCCL_CE_REDUCE_PER_CHUNK``
+        | Selects a finite reducer for each staged ReduceScatter chunk instead of
+          keeping a persistent reduction grid resident across the pipeline. The
+          reduction stream waits on GPU doorbells before each launch, so reducer
+          blocks do not occupy compute units while SDMA is still staging data.
+          This mode reserves 12 staging slots rather than the default 2.
+      - | ``0``: Use the persistent pipelined reducer (default).
+        | ``1``: Launch one finite reducer per chunk.
+
+    * - | ``RCCL_CE_REDUCE_MAX_BLOCKS``
+        | Caps the local CE reduction grid. The runtime value is clamped to the
+          compiled range of 1 through 92 blocks. Smaller values leave more compute
+          units available to concurrent model kernels; larger values reduce each
+          staged chunk faster.
+      - | ``46``: Default reduction-grid cap.
+        | ``N``: Use ``N`` blocks after clamping to ``[1, 92]``.
 
     * - | ``RCCL_FORCE_DDA``
         | Biases the ``ncclAllReduce`` backend selector to prefer DDA (Direct Data
@@ -1319,15 +1342,17 @@ threshold table introduced for gfx1250.
         | ``N`` (bytes): Use ``N`` as the 2-shot AllReduce size cap.
 
     * - | ``RCCL_CE_AR_STAGING_BYTES``
-        | Overrides the total allocation size of the CE AllReduce staging buffer
-          (``ceARTmpBuf``). When ``-1`` (default), the buffer is allocated at the
-          compile-time constant ``NCCL_CE_AR_STAGING_BYTES`` (16 MiB). Increasing
-          this reduces pipelining overhead for large messages but raises per-rank
-          GPU memory usage. This variable sizes the buffer only; the selector cap
-          is controlled separately by ``RCCL_CE_AR_MAX_MSG_BYTES``.
-      - | ``-1``: Use the compile-time default of 16 MiB (default).
-        | ``N`` (bytes): Set the per-slot payload capacity to ``N``; ``ceARTmpBuf`` is ``NCCL_CE_NUM_SLOTS`` (2) times that.
-
+        | Overrides the per-slot payload capacity of the CE AllReduce and CE
+          ReduceScatter staging buffer (``ceARTmpBuf``). Both collectives share
+          this allocation. When ``-1`` (default), each slot uses the compile-time
+          constant ``NCCL_CE_AR_STAGING_BYTES`` (256 MiB). Increasing this reduces
+          pipelining overhead for large messages but raises per-rank GPU memory
+          usage. The default path reserves 2 slots (512 MiB at the default);
+          ``RCCL_CE_REDUCE_PER_CHUNK=1`` reserves 12 slots (3 GiB at the default).
+          This variable sizes the buffer only; the non-forced selector cap is
+          controlled separately by ``RCCL_CE_AR_MAX_MSG_BYTES``.
+      - | ``-1``: Use the compile-time default of 256 MiB (default).
+        | ``N`` (bytes): Set the per-slot payload capacity to ``N``.
     * - | ``RCCL_TDM_LL128_ENABLE``
         | Routes the LL128 user destination buffer through the gfx1250 tensor data
           mover: each warp's slice is staged in LDS and pushed out as one bulk
