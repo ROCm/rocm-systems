@@ -590,24 +590,22 @@ template <MemcpyKind Kind = MemcpyKind::Put>
   }
 }
 
-// Non-temporal + system scope is correct for both directions of an IPC copy,
-// since either dst or src may be remote peer memory. Split into separate
-// load/store constants (mirroring memcpy_wg's LP/SP) so they can be tuned
-// independently later; both are template parameters because CachePolicy is
-// an immarg to the underlying builtin (see tdm.hpp's load_to_lds comment).
+// Non-temporal + system scope is correct for both directions of an IPC copy
+// (either side may be remote peer memory). Split load/store (like memcpy_wg's
+// LP/SP) so they're independently tunable later.
 constexpr int TdmLoadPolicy = tdm::make_cache_policy(
     tdm::LoadTemporalHint::NonTemporal, tdm::Scope::System);
 constexpr int TdmStorePolicy = tdm::make_cache_policy(
     tdm::StoreTemporalHint::NonTemporal, tdm::Scope::System);
 
 // One thread drives the TDM transfer into the registered LDS buffer while
-// the rest of the block covers whatever TDM doesn't (disjoint byte ranges,
-// so no extra sync is needed). Falls back to a plain memcpy_wg when TDM
-// isn't built, isn't available on this arch, or no LDS buffer was set.
+// the rest of the block covers whatever TDM doesn't (disjoint ranges, no
+// extra sync needed). Falls back to memcpy_wg when TDM isn't available or
+// no LDS buffer was set.
 template <MemcpyKind Kind = MemcpyKind::Put>
 [[maybe_unused]] __device__ __forceinline__ void memcpy_wg_tdm(void* dst, void* src,
                                                                 size_t size) {
-#if defined(USE_TDM) && defined(__GFX12__)
+#if defined(USE_TDM) && defined(__gfx1250__)
   const tdm::LdsRegistration reg = tdm::get_lds();
   // A minimum of 16 bytes (2 x 8-byte element, for double buffering) is
   // required for one usable TDM tile; anything less isn't worth staging.

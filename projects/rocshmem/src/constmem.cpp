@@ -58,21 +58,21 @@ void init_constant_memory(void) {
     // never encode more than 65535 elements regardless of available LDS.
     constexpr uint32_t element_bytes = 1u << tdm::FlatCopyElementLog2;
     constexpr uint32_t max_encodable_tile_bytes = 65535u * element_bytes;
+    // Reserve 16KB for rocSHMEM's own (small) static __shared__ usage plus
+    // headroom for the caller's, then halve the rest for double buffering.
+    constexpr size_t reserve_bytes = 16 * 1024;
+    const size_t avail_bytes =
+        (static_cast<size_t>(max_shared_mem_per_block) > reserve_bytes)
+            ? static_cast<size_t>(max_shared_mem_per_block) - reserve_bytes
+            : 0;
+    const uint32_t avail_tile_bytes =
+        static_cast<uint32_t>((avail_bytes / 2) / element_bytes) * element_bytes;
+    const uint32_t fittable_tile_bytes =
+        (avail_tile_bytes < max_encodable_tile_bytes) ? avail_tile_bytes
+                                                       : max_encodable_tile_bytes;
 
     if (constmem_values.tdm_tile_bytes == 0) {
-      // Auto-size: reserve 16KB for rocSHMEM's own (small) static
-      // __shared__ usage plus headroom for the caller's, then halve the
-      // rest for double buffering.
-      constexpr size_t reserve_bytes = 16 * 1024;
-      const size_t avail_bytes =
-          (static_cast<size_t>(max_shared_mem_per_block) > reserve_bytes)
-              ? static_cast<size_t>(max_shared_mem_per_block) - reserve_bytes
-              : 0;
-      uint32_t auto_tile_bytes =
-          static_cast<uint32_t>((avail_bytes / 2) / element_bytes) * element_bytes;
-      constmem_values.tdm_tile_bytes =
-          (auto_tile_bytes < max_encodable_tile_bytes) ? auto_tile_bytes
-                                                        : max_encodable_tile_bytes;
+      constmem_values.tdm_tile_bytes = fittable_tile_bytes;
       if (constmem_values.tdm_tile_bytes == 0) {
         LOG_WARN(
             "Not enough LDS on this device (%d bytes/block) to auto-size a TDM "
@@ -86,11 +86,15 @@ void init_constant_memory(void) {
     } else {
       const size_t tdm_lds_bytes = tdm::lds_bytes_for_tile(constmem_values.tdm_tile_bytes);
       if (tdm_lds_bytes > static_cast<size_t>(max_shared_mem_per_block)) {
-        LOG_ERROR_ABORT(
+        // Don't abort: fall back to whatever tile size does fit (possibly 0,
+        // which disables TDM for this run) rather than taking the job down.
+        LOG_WARN(
             "ROCSHMEM_TDM_TILE_BYTES=%u needs %zu bytes of LDS (double-buffered) "
-            "but this device only has %d bytes of shared memory per block. "
-            "Lower ROCSHMEM_TDM_TILE_BYTES (or set it to 0 to auto-size).",
-            constmem_values.tdm_tile_bytes, tdm_lds_bytes, max_shared_mem_per_block);
+            "but this device only has %d bytes of shared memory per block; "
+            "falling back to %u bytes.",
+            constmem_values.tdm_tile_bytes, tdm_lds_bytes, max_shared_mem_per_block,
+            fittable_tile_bytes);
+        constmem_values.tdm_tile_bytes = fittable_tile_bytes;
       }
     }
   }
