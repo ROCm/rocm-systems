@@ -27,8 +27,6 @@ size_t constexpr strLiteralLength(char const* str) {
 }
 
 constexpr char const* CLANG_OFFLOAD_BUNDLER_MAGIC_STR = "__CLANG_OFFLOAD_BUNDLE__";
-constexpr char const* OFFLOAD_KIND_HIP = "hip";
-constexpr char const* AMDGCN_TARGET_TRIPLE = "amdgcn-amd-amdhsa-";
 constexpr char const* SPIRV_BUNDLE_ENTRY_ID = "hip-spirv64-amd-amdhsa-unknown-amdgcnspirv";
 
 static constexpr size_t bundle_magic_string_size =
@@ -46,41 +44,6 @@ struct __ClangOffloadBundleHeader {
   uint64_t numOfCodeObjects;
   __ClangOffloadBundleInfo desc[1];
 };
-
-// Consumes the string 'consume_' from the starting of the given input
-// eg: input = amdgcn-amd-amdhsa--gfx908 and consume_ is amdgcn-amd-amdhsa--
-// input will become gfx908.
-static bool consume(std::string& input, const std::string &consume_) {
-  if (input.substr(0, consume_.size()) != consume_) {
-    return false;
-  }
-  input = input.substr(consume_.size());
-  return true;
-}
-
-// Trim String till character, will be used to get gpuname
-// example: input is gfx908:sram-ecc+ and trim char is :
-// input will become sram-ecc+.
-static std::string trimName(std::string& input, char trim) {
-  auto pos_ = input.find(trim);
-  auto res = input;
-  if (pos_ == std::string::npos) {
-    input = "";
-  } else {
-    res = input.substr(0, pos_);
-    input = input.substr(pos_);
-  }
-  return res;
-}
-
-static char getFeatureValue(std::string& input, std::string feature) {
-  char res = ' ';
-  if (consume(input, std::move(feature))) {
-    res = input[0];
-    input = input.substr(1);
-  }
-  return res;
-}
 
 bool addCodeObjData(comgr_helper::ComgrDataSetUniqueHandle& input, std::string_view source,
                     const std::string& name, const amd_comgr_data_kind_t type) {
