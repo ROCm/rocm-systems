@@ -9,6 +9,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
+* Merged the metric listing options into `--list-metrics`, which now shows the alias of each block and the unit and description of each metric. Per-channel metrics are no longer listed.
+  * The GPU architecture is optional. Without it, `--list-metrics` lists the metrics of the current GPU.
+  * Use `-b/--block` to list only some blocks or metrics, for example `rocprof-compute --list-metrics gfx950 -b sol 12.1`.
+
 ### Removed
 
 * Removed the experimental `--gui` and `--tui` analyze modes and the `--random-port` option. Use the default CLI analyze mode for terminal output, or `--output-format db` to explore results in ROCm Optiq.
@@ -19,6 +23,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Resolved issues
 
 ### Upcoming changes
+
+* `--list-blocks` and `--list-available-metrics` are deprecated and will be removed in a future release. Use `--list-metrics` instead.
 
 ### Known issues
 

@@ -116,19 +116,12 @@ def non_negative_int(value: str) -> int:
     return parsed
 
 
-def print_avail_arch(avail_arch: list[str], args: str) -> str:
-    ret_str = f"List all available {args} for analysis on specified arch:"
-    for arch in avail_arch:
-        ret_str += f"\n   {arch}"
-    return ret_str
-
-
 def add_general_group(
     parser: argparse.ArgumentParser,
     rocprof_compute_home: Path,
     supported_archs: dict[str, str],
     rocprof_compute_version: dict[str, Optional[str]],
-) -> None:
+) -> argparse._ArgumentGroup:
     general_group = parser.add_argument_group("General Options")
 
     general_group.add_argument(
@@ -147,19 +140,30 @@ def add_general_group(
     general_group.add_argument(
         "-q", "--quiet", action="store_true", help="Reduce output and run quietly."
     )
+    arch_values = ", ".join(supported_archs)
     general_group.add_argument(
         "--list-metrics",
         dest="list_metrics",
-        metavar="",
-        choices=supported_archs.keys(),
-        help=print_avail_arch(list(supported_archs.keys()), "metrics"),
+        metavar="arch",
+        nargs="?",
+        const="",
+        help=(
+            "List available metrics for specified GPU [arch] "
+            "(Default: current GPU arch).\n"
+            "Use -b to show only some blocks or metrics.\n"
+            f"Values: {arch_values}"
+        ),
     )
     general_group.add_argument(
         "--list-blocks",
         dest="list_blocks",
-        metavar="",
+        metavar="<arch>",
         choices=supported_archs.keys(),
-        help=print_avail_arch(list(supported_archs.keys()), "blocks"),
+        help=(
+            "DEPRECATED: use --list-metrics [arch] instead.\n"
+            "List available blocks and their aliases for specified GPU <arch>.\n"
+            f"Values: {arch_values}"
+        ),
     )
     general_group.add_argument(
         "--config-dir",
@@ -189,6 +193,7 @@ def add_general_group(
             "--pc-sampling-interval)\n"
         ),
     )
+    return general_group
 
 
 def omniarg_parser(
@@ -204,11 +209,25 @@ def omniarg_parser(
 
     ## General Command Line Options
     ## ----------------------------
-    add_general_group(
+    general_group = add_general_group(
         parser,
         rocprof_compute_home,
         supported_archs,
         rocprof_compute_version,
+    )
+    # profile and analyze define their own -b, so it is only added here
+    general_group.add_argument(
+        "-b",
+        "--block",
+        dest="list_filter",
+        metavar="<id>",
+        nargs="+",
+        type=block_token_or_alias,
+        default=[],
+        help=(
+            "Show only the given metric id(s) or block alias(es) in the "
+            "--list-metrics output\n(e.g. 2, 2.1, 2.1.0, sol)."
+        ),
     )
     parser._positionals.title = "Modes"
     parser._optionals.title = "Help"
@@ -401,7 +420,10 @@ Examples:
     profile_group.add_argument(
         "--list-available-metrics",
         dest="list_available_metrics",
-        help="\t\t\tList all available metrics for analysis on current arch",
+        help=(
+            "\t\t\tDEPRECATED: use --list-metrics instead.\n"
+            "\t\t\tList all available metrics for analysis on current arch"
+        ),
         action="store_true",
     )
     profile_group.add_argument(
@@ -419,7 +441,7 @@ Examples:
             "\t\t\tAlternatively, specify block id(s) for filtering "
             "(e.g. 12, 13, 14).\n"
             "\t\t\tAlternatively, specify block alias(es) for filtering.\n"
-            "\t\t\tAliases are arch-specific; run --list-blocks <arch> to see\n"
+            "\t\t\tAliases are arch-specific; run --list-metrics [arch] to see\n"
             "\t\t\tall valid block ids and aliases.\n"
             "\t\t\tCan provide multiple space separated arguments.\n"
             "\t\t\tCannot be used with --set, --roof-only, or --bench-only"
@@ -687,7 +709,10 @@ Examples:
     analyze_group.add_argument(
         "--list-available-metrics",
         dest="list_available_metrics",
-        help="\t\tList all available metrics for analysis on current arch",
+        help=(
+            "\t\tDEPRECATED: use --list-metrics instead.\n"
+            "\t\tList all available metrics for analysis on the workload arch"
+        ),
         action="store_true",
     )
     analyze_group.add_argument(

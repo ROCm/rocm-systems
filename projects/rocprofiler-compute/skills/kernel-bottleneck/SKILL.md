@@ -146,8 +146,9 @@ Resolve block names with aliases, which are stable across releases, instead of
 numeric ids, which are architecture-specific:
 
 ```bash
-rocprof-compute --list-blocks <arch>
-rocprof-compute analyze --path ./workloads/<name>/<gpu_model> --list-available-metrics
+# <arch> is the gpu_arch column of the workload's sysinfo.csv
+rocprof-compute --list-metrics <arch>
+rocprof-compute --list-metrics <arch> -b sol
 ```
 
 Where to go next:

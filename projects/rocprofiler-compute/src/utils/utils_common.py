@@ -39,9 +39,9 @@ PROFILE_OUTPUT_FORMAT = "rocpd"
 # Panel id of block 30, Memory Bandwidth Analysis
 MEMBW_ANALYSIS_PANEL_ID: int = 3000
 
-# Shared suffix for the invalid --block error in the profile and analyze paths.
+# Shared suffix for invalid --block errors.
 INVALID_BLOCK_HINT = (
-    "\n\tRun rocprof-compute --list-blocks <arch> to see all block ids/aliases."
+    "\n\tRun rocprof-compute --list-metrics [arch] to see all block ids/aliases."
 )
 
 
@@ -745,42 +745,94 @@ def _metric_has_valid_expr(entries: dict, data_config: dict) -> bool:
     return False
 
 
+def _iter_metric_list_rows(
+    panel_configs: OrderedDict[int, dict[str, Any]],
+) -> Generator[tuple[str, tuple[str, str, str]], None, None]:
+    """Yield (id, (name, unit, description)) for each block, table and metric."""
+    for panel in panel_configs.values():
+        for data_source in panel["data source"]:
+            for type_key, data_config in data_source.items():
+                if type_key == "metric_table":
+                    yield from _iter_metric_table_rows(panel, data_config)
+                elif type_key in ("raw_csv_table", "pc_sampling_table"):
+                    yield str(data_config["id"] // 100), (panel["title"], "", "")
+
+
+def _iter_metric_table_rows(
+    panel: dict[str, Any], data_config: dict[str, Any]
+) -> Generator[tuple[str, tuple[str, str, str]], None, None]:
+    """Yield the block, table and metric rows of one metric_table."""
+    block_id = str(data_config["id"] // 100)
+    if block_id != "0":
+        yield block_id, (panel["title"], "", "")
+
+    table_id = f"{data_config['id'] // 100}.{data_config['id'] % 100}"
+    yield table_id, (data_config["title"], "", "")
+
+    descriptions = panel.get("metrics_description") or {}
+    for index, (name, entries) in enumerate(data_config["metric"].items()):
+        if not _metric_has_valid_expr(entries, data_config):
+            continue
+        unit = entries.get("unit")
+        description = " ".join(str(descriptions.get(name) or "").split())
+        yield f"{table_id}.{index}", (name, str(unit or ""), description)
+
+
+def _resolve_block_token(token: str, alias_map: dict[str, str]) -> str:
+    """Return the metric id for a --block id or alias; error out if unknown."""
+    if METRIC_ID_RE.match(token):
+        return token
+    if token not in alias_map:
+        console_error(f"Invalid --block value {token!r}.{INVALID_BLOCK_HINT}")
+    return alias_map[token]
+
+
+def _is_same_id_branch(metric_id: str, selected_id: str) -> bool:
+    """Return True if metric_id is selected_id, or above or below it."""
+    return (
+        metric_id == selected_id
+        or metric_id.startswith(f"{selected_id}.")
+        or selected_id.startswith(f"{metric_id}.")
+    )
+
+
+def build_metric_details(
+    panel_configs: OrderedDict[int, dict[str, Any]],
+    sys_info: Optional[dict[str, Any]],
+) -> dict[str, tuple[str, str, str]]:
+    """Map panel/table/metric IDs to (name, unit, description).
+
+    Without sys_info, per-channel tables list no metrics.
+    """
+    expanded_configs = expand_placeholder_ranges(panel_configs, sys_info)
+    return dict(_iter_metric_list_rows(expanded_configs))
+
+
 def build_metric_list(
     panel_configs: OrderedDict[int, dict[str, Any]],
     sys_info: Optional[dict[str, Any]],
 ) -> dict[str, str]:
-    """
-    Build metric_list from the panel configs.
+    """Map panel/table/metric IDs to names. Used by the deprecated list options."""
+    return {
+        metric_id: details[0]
+        for metric_id, details in build_metric_details(panel_configs, sys_info).items()
+    }
 
-    Returns a mapping of (panel/table/metric IDs -> display names)
-    without constructing DataFrames or metric_counters. Use this directly when
-    only the metric listing is needed (e.g. --list-metrics, --list-blocks).
-    """
-    metric_list: dict[str, str] = {}
 
-    expanded_configs = expand_placeholder_ranges(panel_configs, sys_info)
-
-    for panel_id, panel in expanded_configs.items():
-        for data_source in panel["data source"]:
-            for type_key, data_config in data_source.items():
-                if type_key == "metric_table":
-                    data_source_idx = str(data_config["id"] // 100)
-                    if data_source_idx != "0":
-                        metric_list[data_source_idx] = panel["title"]
-
-                    table_idx = f"{data_config['id'] // 100}.{data_config['id'] % 100}"
-                    metric_list[table_idx] = data_config["title"]
-
-                    for i, (key, entries) in enumerate(data_config["metric"].items()):
-                        metric_idx = f"{table_idx}.{i}"
-                        if _metric_has_valid_expr(entries, data_config):
-                            metric_list[metric_idx] = key
-
-                elif type_key in ("raw_csv_table", "pc_sampling_table"):
-                    data_source_idx = str(data_config["id"] // 100)
-                    metric_list[data_source_idx] = panel["title"]
-
-    return metric_list
+def filter_metric_ids(
+    metric_ids: list[str], filter_tokens: list[str], arch: str
+) -> list[str]:
+    """Keep the ids selected by --block tokens, plus their parent ids."""
+    alias_map = get_arch_alias_to_panel_id(arch)
+    selected_ids = [_resolve_block_token(token, alias_map) for token in filter_tokens]
+    for selected_id, token in zip(selected_ids, filter_tokens):
+        if selected_id not in metric_ids:
+            console_error(f"Invalid --block value {token!r}.{INVALID_BLOCK_HINT}")
+    return [
+        metric_id
+        for metric_id in metric_ids
+        if any(_is_same_id_branch(metric_id, selected) for selected in selected_ids)
+    ]
 
 
 def get_uuid(length: int = 8) -> str:
@@ -802,12 +854,8 @@ def convert_filter_blocks_to_panel_ids(
     )
     resolved: set[int] = set()
     for bid in filter_blocks:
-        token = str(bid)
-        if not METRIC_ID_RE.match(token):
-            if token not in alias_map:
-                console_error(f"Invalid --block value {token!r}.{INVALID_BLOCK_HINT}")
-            token = alias_map[token]
-        resolved.add(int(convert_metric_id_to_panel_info(token)[0]))
+        metric_id = _resolve_block_token(str(bid), alias_map)
+        resolved.add(int(convert_metric_id_to_panel_info(metric_id)[0]))
     return resolved
 
 

@@ -58,6 +58,6 @@ it at the end of the description as `(Default: value)`.
 ```text
 --roofline-data-types <types>...   Selects data <type>s to present in roofline (Default: FP32).
                                     Values: FP4, FP6, FP8, FP16, BF16, FP32, FP64, I8, I32, I64.
---list-blocks [arch]               List all available blocks for analysis on specified GPU <arch> (Default: current GPU arch).
-                                    Values: gfx908, gfx90a, gfx940, gfx941, gfx942, gfx950, gfx1151
+--list-metrics [arch]              List available metrics for specified GPU [arch] (Default: current GPU arch).
+                                    Values: gfx908, gfx90a, gfx940, gfx941, gfx942, gfx950, gfx1150, gfx1151, gfx1152, gfx1153, gfx1250
 ```

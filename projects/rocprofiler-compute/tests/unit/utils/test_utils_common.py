@@ -8,6 +8,7 @@ import io
 import logging
 import os
 import tempfile
+from collections import OrderedDict
 from pathlib import Path
 from unittest import mock
 
@@ -15,6 +16,44 @@ import pytest
 
 import utils.utils_common as utils_common
 from utils.utils_common import canonical_config_arch
+
+LISTED_METRIC_IDS = ["2", "2.1", "2.1.0", "2.1.1", "3", "3.1", "3.1.0"]
+
+
+def build_listing_panel_configs():
+    """Return panel_configs with a plain table and a per-channel table."""
+    unit_table = {
+        "id": 1801,
+        "title": "Aggregate Stats",
+        "header": {"metric": "Metric", "avg": "Avg", "unit": "Unit"},
+        "metric": {
+            "Hit Rate": {"avg": "AVG(TCC_HIT)", "unit": "Percent"},
+            "Requests": {"avg": "AVG(TCC_REQ)", "unit": "(Req + $normUnit)"},
+            "No Unit": {"avg": "AVG(TCC_MISS)"},
+        },
+    }
+    channel_table = {
+        "id": 1802,
+        "title": "Hit Rate (per Channel)",
+        "header": {"metric": "Metric", "expr": "Expression"},
+        "metric": {
+            "Channel ::_1": {"expr": "TCC_HIT[::_1]"},
+            "placeholder_range": {"::_1": "$total_l2_chan"},
+        },
+    }
+    panel_configs = OrderedDict()
+    panel_configs[1800] = {
+        "id": 1800,
+        "title": "L2 Cache (per Channel)",
+        "data source": [
+            {"metric_table": unit_table},
+            {"metric_table": channel_table},
+        ],
+        "metrics_description": {
+            "Hit Rate": "The percent of L2\n  requests that hit.",
+        },
+    }
+    return panel_configs
 
 
 class MockArgs:
@@ -990,12 +1029,12 @@ def test_resolve_rocm_library_path(tmp_path):
 
 
 # =============================================================================
-# BUILD METRIC LIST TESTS
+# BUILD METRIC DETAILS TESTS
 # =============================================================================
 
 
-class TestBuildMetricList:
-    """Tests for build_metric_list and _metric_has_valid_expr."""
+class TestBuildMetricDetails:
+    """Tests for build_metric_details and _metric_has_valid_expr."""
 
     # Maps YAML metric expression keys to their SUPPORTED_FIELD display names.
     _EXPR_KEY_TO_HEADER_DISPLAY = {
@@ -1010,9 +1049,9 @@ class TestBuildMetricList:
 
     @classmethod
     def setup_class(cls):
-        from utils.utils_common import build_metric_list
+        from utils.utils_common import build_metric_details
 
-        cls.build_metric_list = staticmethod(build_metric_list)
+        cls.build_metric_details = staticmethod(build_metric_details)
 
     def _build_test_panel_configs_for_single_metric(
         self, metric_name: str, expression_values: dict
@@ -1046,15 +1085,15 @@ class TestBuildMetricList:
         return panel_configs
 
     @staticmethod
-    def _extract_leaf_metric_entries(metric_list):
-        """Return only leaf metric entries whose ID has format 'panel.table.index'."""
-        return {k: v for k, v in metric_list.items() if k.count(".") == 2}
+    def _extract_leaf_metric_entries(metric_details):
+        """Return the names of leaf metrics whose ID has format 'panel.table.index'."""
+        return {k: v[0] for k, v in metric_details.items() if k.count(".") == 2}
 
     def test_given_metric_with_valid_value__it_presents_in_metric_list(self):
         panel_configs = self._build_test_panel_configs_for_single_metric(
             "Valid Metric A", {"value": "AVG(COUNTER_A)"}
         )
-        metric_list = self.build_metric_list(panel_configs, None)
+        metric_list = self.build_metric_details(panel_configs, None)
         leaf_entries = self._extract_leaf_metric_entries(metric_list)
         assert "Valid Metric A" in leaf_entries.values()
 
@@ -1062,7 +1101,7 @@ class TestBuildMetricList:
         panel_configs = self._build_test_panel_configs_for_single_metric(
             "Unsupported Metric B", {"value": None}
         )
-        metric_list = self.build_metric_list(panel_configs, None)
+        metric_list = self.build_metric_details(panel_configs, None)
         leaf_entries = self._extract_leaf_metric_entries(metric_list)
         assert "Unsupported Metric B" not in leaf_entries.values()
 
@@ -1070,7 +1109,7 @@ class TestBuildMetricList:
         panel_configs = self._build_test_panel_configs_for_single_metric(
             "Unsupported Metric C", {"value": "None"}
         )
-        metric_list = self.build_metric_list(panel_configs, None)
+        metric_list = self.build_metric_details(panel_configs, None)
         leaf_entries = self._extract_leaf_metric_entries(metric_list)
         assert "Unsupported Metric C" not in leaf_entries.values()
 
@@ -1078,7 +1117,7 @@ class TestBuildMetricList:
         panel_configs = self._build_test_panel_configs_for_single_metric(
             "Expr Metric", {"expr": "(100 * COUNTER_B / COUNTER_C)"}
         )
-        metric_list = self.build_metric_list(panel_configs, None)
+        metric_list = self.build_metric_details(panel_configs, None)
         leaf_entries = self._extract_leaf_metric_entries(metric_list)
         assert "Expr Metric" in leaf_entries.values()
 
@@ -1086,7 +1125,7 @@ class TestBuildMetricList:
         panel_configs = self._build_test_panel_configs_for_single_metric(
             "Partial Metric", {"avg": "AVG(COUNTER_E)", "min": None, "max": None}
         )
-        metric_list = self.build_metric_list(panel_configs, None)
+        metric_list = self.build_metric_details(panel_configs, None)
         leaf_entries = self._extract_leaf_metric_entries(metric_list)
         assert "Partial Metric" in leaf_entries.values()
 
@@ -1096,9 +1135,70 @@ class TestBuildMetricList:
         panel_configs = self._build_test_panel_configs_for_single_metric(
             "All None Metric", {"avg": None, "min": None, "max": None}
         )
-        metric_list = self.build_metric_list(panel_configs, None)
+        metric_list = self.build_metric_details(panel_configs, None)
         leaf_entries = self._extract_leaf_metric_entries(metric_list)
         assert "All None Metric" not in leaf_entries.values()
+
+
+def test_build_metric_details_without_sys_info_lists_no_per_channel_metrics():
+    metric_details = utils_common.build_metric_details(
+        build_listing_panel_configs(), None
+    )
+    assert list(metric_details) == ["18", "18.1", "18.1.0", "18.1.1", "18.1.2", "18.2"]
+    assert metric_details["18.2"] == ("Hit Rate (per Channel)", "", "")
+
+
+def test_build_metric_details_returns_unit_and_single_line_description():
+    metric_details = utils_common.build_metric_details(
+        build_listing_panel_configs(), None
+    )
+    assert metric_details["18.1.0"] == (
+        "Hit Rate",
+        "Percent",
+        "The percent of L2 requests that hit.",
+    )
+    assert metric_details["18.1.1"] == ("Requests", "(Req + $normUnit)", "")
+    assert metric_details["18.1.2"] == ("No Unit", "", "")
+
+
+# =============================================================================
+# FILTER METRIC IDS TESTS
+# =============================================================================
+
+
+def test_filter_metric_ids_keeps_whole_block(monkeypatch):
+    monkeypatch.setattr(utils_common, "get_arch_alias_to_panel_id", lambda arch: {})
+    assert utils_common.filter_metric_ids(LISTED_METRIC_IDS, ["2"], "gfx950") == [
+        "2",
+        "2.1",
+        "2.1.0",
+        "2.1.1",
+    ]
+
+
+def test_filter_metric_ids_keeps_parents_of_selected_metric(monkeypatch):
+    monkeypatch.setattr(utils_common, "get_arch_alias_to_panel_id", lambda arch: {})
+    filtered_ids = utils_common.filter_metric_ids(
+        LISTED_METRIC_IDS, ["3.1.0", "2.1.1"], "gfx950"
+    )
+    assert filtered_ids == ["2", "2.1", "2.1.1", "3", "3.1", "3.1.0"]
+
+
+def test_filter_metric_ids_resolves_block_alias(monkeypatch):
+    monkeypatch.setattr(
+        utils_common, "get_arch_alias_to_panel_id", lambda arch: {"memchart": "3"}
+    )
+    filtered_ids = utils_common.filter_metric_ids(
+        LISTED_METRIC_IDS, ["memchart"], "gfx950"
+    )
+    assert filtered_ids == ["3", "3.1", "3.1.0"]
+
+
+@pytest.mark.parametrize("token", ["bogus", "9", "2.1.5"])
+def test_filter_metric_ids_rejects_unknown_token(monkeypatch, token):
+    monkeypatch.setattr(utils_common, "get_arch_alias_to_panel_id", lambda arch: {})
+    with pytest.raises(SystemExit):
+        utils_common.filter_metric_ids(LISTED_METRIC_IDS, [token], "gfx950")
 
 
 # =============================================================================
