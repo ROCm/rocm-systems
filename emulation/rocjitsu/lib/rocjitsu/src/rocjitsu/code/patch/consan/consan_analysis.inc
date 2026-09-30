@@ -1780,7 +1780,8 @@ void prune_unreachable_inferred_ranges(const AmdGpuCodeObject &code_object, Deco
 void relay_flat_pointer_provenance_across_calls(
     std::span<const uint8_t> code_object_bytes, const AmdGpuCodeObject &code_object,
     rj_code_arch_t arch, std::span<ProgramContainer> kernels, std::span<ProgramContainer> functions,
-    ProgramSiteArena &sites, std::vector<std::string> &warnings) {
+    ProgramSiteArena &sites, std::vector<std::string> &warnings,
+    detail::ProgramAnalysisCfg &cfg_cache) {
   // This refinement only re-decodes and replaces function-site inventory;
   // kernel sites remain owned by the primary decode. With no non-kernel
   // function container there is consequently no output this relay can
@@ -1802,9 +1803,9 @@ void relay_flat_pointer_provenance_across_calls(
   }
   std::ranges::sort(leaders);
   leaders.erase(std::ranges::unique(leaders).begin(), leaders.end());
-  std::vector<std::unique_ptr<BasicBlock>> blocks;
+  const std::vector<std::unique_ptr<BasicBlock>> *blocks = nullptr;
   try {
-    blocks = BasicBlock::build(code_object, *relay_decoder, arch, leaders, code_ranges);
+    blocks = &cfg_cache.get(leaders, code_ranges);
   } catch (...) {
     // Provenance relay is an optional refinement. The primary bounded decoder
     // remains authoritative for code objects whose CFG cannot be recovered.
@@ -1812,7 +1813,7 @@ void relay_flat_pointer_provenance_across_calls(
   }
 
   std::unordered_map<uint64_t, uint64_t> call_targets;
-  for (const auto &block : blocks) {
+  for (const auto &block : *blocks) {
     if (block == nullptr)
       continue;
     for (const BasicBlock::CallEdge &call : block->call_edges()) {

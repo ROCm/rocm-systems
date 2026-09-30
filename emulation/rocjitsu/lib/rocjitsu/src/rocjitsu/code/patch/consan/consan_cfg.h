@@ -12,8 +12,10 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <memory>
 #include <ranges>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu::consan::detail {
@@ -34,6 +36,46 @@ struct CfgBuildInputs {
   std::vector<uint64_t> kernel_entries;
   /// Nonempty executable ranges within which instructions may be decoded.
   std::vector<BasicBlock::CodeRange> code_ranges;
+};
+
+/// One inventory call's CFG, bound to immutable image bytes and architecture.
+/// Reuse requires exactly the same build arguments. This object must not cross
+/// a patched-image or retry boundary; it owns no process-wide cache state.
+class ProgramAnalysisCfg {
+public:
+  ProgramAnalysisCfg(const AmdGpuCodeObject &image, Decoder &decoder, rj_code_arch_t arch)
+      : image_(image), decoder_(decoder), arch_(arch) {}
+
+  /// Returned blocks are read-only and remain valid until the next get().
+  /// A changed key rebuilds instead of weakening entry/range constraints.
+  [[nodiscard]] const std::vector<std::unique_ptr<BasicBlock>> &
+  get(std::span<const uint64_t> leaders, std::span<const BasicBlock::CodeRange> ranges) {
+    const bool same_ranges =
+        std::ranges::equal(ranges_, ranges, [](const auto &lhs, const auto &rhs) {
+          return lhs.start_offset == rhs.start_offset && lhs.size == rhs.size;
+        });
+    if (ready_ && std::ranges::equal(leaders_, leaders) && same_ranges)
+      return blocks_;
+    // Drop the old graph before constructing its replacement. Failed builds
+    // are never reusable, and retaining two whole-library graphs is unnecessary.
+    ready_ = false;
+    blocks_.clear();
+    auto blocks = BasicBlock::build(image_, decoder_, arch_, leaders, ranges);
+    leaders_.assign(leaders.begin(), leaders.end());
+    ranges_.assign(ranges.begin(), ranges.end());
+    blocks_ = std::move(blocks);
+    ready_ = true;
+    return blocks_;
+  }
+
+private:
+  const AmdGpuCodeObject &image_;
+  Decoder &decoder_;
+  rj_code_arch_t arch_;
+  bool ready_ = false;
+  std::vector<uint64_t> leaders_;
+  std::vector<BasicBlock::CodeRange> ranges_;
+  std::vector<std::unique_ptr<BasicBlock>> blocks_;
 };
 
 /// Derive the one canonical CFG input set shared by ConSan analysis and

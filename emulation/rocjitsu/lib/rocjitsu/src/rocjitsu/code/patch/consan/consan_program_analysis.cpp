@@ -237,9 +237,10 @@ bool analyze_program_inventory(std::span<const uint8_t> code_object_bytes, const
         "ConSan stopped before CFG analysis because an instruction could not be decoded");
     return false;
   }
+  detail::ProgramAnalysisCfg cfg_cache(*code_object, *decoder, arch);
   relay_flat_pointer_provenance_across_calls(
       code_object_bytes, *code_object, arch, inventory_builder.kernels(),
-      inventory_builder.functions(), function_sites, result.warnings);
+      inventory_builder.functions(), function_sites, result.warnings, cfg_cache);
   publish_decoded_sites();
   publish_access_inventory();
   if (request.mode == Mode::SuperCollider && !mutation.fault_dry_run &&
@@ -259,8 +260,8 @@ bool analyze_program_inventory(std::span<const uint8_t> code_object_bytes, const
                                     result.program_inventory.preapplied_mutation().code_ranges,
                                     inventory_builder);
   return analyze_semantic_inventory(code_object_bytes, *code_object, *decoder, arch, request, debug,
-                                    mutation, inventory_builder, supercollider_perturbation,
-                                    result);
+                                    mutation, inventory_builder, supercollider_perturbation, result,
+                                    cfg_cache);
 }
 
 } // namespace rocjitsu::consan

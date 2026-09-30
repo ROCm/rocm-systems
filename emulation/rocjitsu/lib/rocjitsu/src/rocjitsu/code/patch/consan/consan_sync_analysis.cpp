@@ -453,13 +453,13 @@ canonicalize_sync_events_by_physical_site(SynchronizationInventoryBuildView inve
       [](SyncEvent &, const SyncEvent &) {});
 }
 
-[[nodiscard]] std::vector<std::unique_ptr<BasicBlock>>
-build_sync_basic_blocks(const AmdGpuCodeObject &code_object, Decoder &decoder, rj_code_arch_t arch,
+[[nodiscard]] const std::vector<std::unique_ptr<BasicBlock>> &
+build_sync_basic_blocks(const AmdGpuCodeObject &code_object, detail::ProgramAnalysisCfg &cfg_cache,
                         const ProgramInventory &program_inventory, const Request &request,
                         const DebugOverrides &debug) {
   const detail::CfgBuildInputs cfg = detail::build_cfg_inputs_for_selection(
       code_object, program_inventory.containers(), {}, request, debug);
-  return BasicBlock::build(code_object, decoder, arch, cfg.leaders, cfg.code_ranges);
+  return cfg_cache.get(cfg.leaders, cfg.code_ranges);
 }
 
 [[nodiscard]] bool block_is_in_cycle(const BasicBlock *start) {
@@ -2274,7 +2274,8 @@ bool analyze_semantic_inventory(std::span<const uint8_t> code_object_bytes,
                                 const DebugOverrides &debug, const MutationRequest &mutation,
                                 ProgramInventoryBuilder &inventory_builder,
                                 SuperColliderPerturbationPlanningState &supercollider_perturbation,
-                                ProgramAnalysisResult &result) {
+                                ProgramAnalysisResult &result,
+                                detail::ProgramAnalysisCfg &cfg_cache) {
   SynchronizationInventoryBuildView synchronization_inventory = inventory_builder.synchronization();
   const bool needs_semantic_inventory =
       request.mode == Mode::Default || mutation.fault_dry_run || mutation.has_fault_mutation() ||
@@ -2288,7 +2289,13 @@ bool analyze_semantic_inventory(std::span<const uint8_t> code_object_bytes,
       // SuperCollider's ordinary clean transform does not consume
       // synchronization semantics. Shared-function sites still need kernel
       // ownership, while kernel-local sites carry their descriptor directly.
-      annotate_execution_owners(code_object, decoder, arch, nullptr, synchronization_inventory,
+      const std::vector<std::unique_ptr<BasicBlock>> *blocks = nullptr;
+      if (result.program_inventory.preapplied_mutation().code_ranges.empty()) {
+        const auto cfg = detail::build_cfg_inputs_for_selection(
+            code_object, result.program_inventory.containers(), {}, request, debug);
+        blocks = &cfg_cache.get(cfg.leaders, cfg.code_ranges);
+      }
+      annotate_execution_owners(code_object, decoder, arch, blocks, synchronization_inventory,
                                 result, request, debug);
     }
     result.program_inventory = inventory_builder.view();
@@ -2304,8 +2311,8 @@ bool analyze_semantic_inventory(std::span<const uint8_t> code_object_bytes,
   }
 
   const SynchronizationInventoryView sync_events = synchronization_inventory.view();
-  const auto sync_blocks =
-      build_sync_basic_blocks(code_object, decoder, arch, result.program_inventory, request, debug);
+  const auto &sync_blocks =
+      build_sync_basic_blocks(code_object, cfg_cache, result.program_inventory, request, debug);
   build_singleton_sync_sequences(sync_blocks, synchronization_inventory);
   associate_barrier_sync_sequences(sync_blocks,
                                    requires_extended_barrier_pairs(request, debug, mutation),

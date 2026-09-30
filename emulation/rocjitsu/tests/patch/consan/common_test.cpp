@@ -3783,6 +3783,51 @@ TEST(ConSan, StrictFlatProvenanceExcludesMaybeGroupCandidates) {
             AccessPolicyReason::FlatProvenancePolicyExcluded);
 }
 
+TEST(ConSan, ProgramAnalysisCfgReusesOnlyIdenticalBuildInputs) {
+  class CountingDecoder : public Decoder {
+  public:
+    CountingDecoder() : delegate(Decoder::create(ROCJITSU_CODE_ARCH_RDNA4)) {}
+    DecodeResult decode(const rj_code_binary_inst_t *inst,
+                        const DecodeErrorEmitter &emit_error) override {
+      ++calls;
+      return delegate->decode(inst, emit_error);
+    }
+    size_t max_instruction_words() const override { return delegate->max_instruction_words(); }
+    std::unique_ptr<Decoder> delegate;
+    size_t calls = 0;
+  } decoder;
+  const std::array<uint32_t, 4> words{0xBF800000u, 0xBFB00000u, 0xBF800000u, 0xBFB00000u};
+  const auto bytes = make_rdna4_lds_code_object(words);
+  const AmdGpuCodeObject image(bytes.data(), bytes.size());
+  ASSERT_TRUE(image.is_valid());
+  detail::ProgramAnalysisCfg cache(image, decoder, ROCJITSU_CODE_ARCH_RDNA4);
+  const std::array<uint64_t, 2> leaders{0, 8};
+  const std::array<BasicBlock::CodeRange, 1> ranges{{{0, sizeof(words)}}};
+  const auto &first = cache.get(leaders, ranges);
+  ASSERT_EQ(first.size(), 2u);
+  const auto *first_block = first.front().get();
+  const size_t initial_calls = decoder.calls;
+  ASSERT_GT(initial_calls, 0u);
+  EXPECT_EQ(cache.get(leaders, ranges).front().get(), first_block);
+  EXPECT_EQ(decoder.calls, initial_calls) << "identical CFG inputs must not decode again";
+
+  const std::array<uint64_t, 3> split_leaders{0, 4, 8};
+  EXPECT_EQ(cache.get(split_leaders, ranges).size(), 3u);
+  EXPECT_GT(decoder.calls, initial_calls);
+  const size_t split_calls = decoder.calls;
+  const std::array<BasicBlock::CodeRange, 2> split_ranges{{{0, 8}, {8, 8}}};
+  (void)cache.get(split_leaders, split_ranges);
+  EXPECT_GT(decoder.calls, split_calls) << "range changes must rebuild even with the same leaders";
+  const size_t range_calls = decoder.calls;
+  (void)cache.get(split_leaders, split_ranges);
+  EXPECT_EQ(decoder.calls, range_calls);
+
+  // A fresh inventory call, including another image/retry, owns a fresh cache.
+  detail::ProgramAnalysisCfg next_inventory(image, decoder, ROCJITSU_CODE_ARCH_RDNA4);
+  (void)next_inventory.get(split_leaders, split_ranges);
+  EXPECT_GT(decoder.calls, range_calls);
+}
+
 TEST(ConSan, CfgBuildInputsCanonicalizeInventoryAndComposedCodeRanges) {
   constexpr std::array<uint32_t, 1> kernel_words = {
       0xBFB00000u, // s_endpgm
