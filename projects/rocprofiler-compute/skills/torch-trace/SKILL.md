@@ -16,14 +16,19 @@ Never use the GUI or TUI.
 
 ## 1. Check the requirements
 
-Torch tracing needs PyTorch 2.13 or 2.14, installed against a matching ROCm.
-The workload must be a Python command or Python script; the tracer cannot
-annotate a compiled binary. The full requirement list, including the Python
-version matching constraint, is in the Torch trace section of
-[profile mode](../../docs/how-to/profile/mode.rst).
+Torch tracing needs PyTorch installed against a matching ROCm. PyTorch 2.13
+and 2.14 use the prebuilt native collector, which records operators on every
+thread, including autograd workers. Other versions, or a missing or unusable
+collector, warn and use `TorchDispatchMode` with reduced coverage on the Python
+thread where it is active. Confirm the version and check the loader message
+before interpreting missing backward operators as an absence of GPU work.
 
-Confirm the PyTorch version before profiling. A mismatched version fails at
-collection time, after the run has already cost the user its runtime.
+The workload must be a Python command or Python script; the tracer cannot
+annotate a compiled binary. The collector is a generic prebuilt
+`torch_trace_collector.so` and needs no PyTorch or Python development packages
+to build. The workload still needs Python-compatible `roctx` bindings. The
+full requirement list is in the Torch trace section of
+[profile mode](../../docs/how-to/profile/mode.rst).
 
 ## 2. Collect
 
@@ -55,6 +60,13 @@ combined with a PC-sampling-only profile.
 
 When counters are being spread thin across many short operator kernels,
 `--iteration-multiplexing kernel` collects more per pass.
+
+Profile preserves each pass's raw marker and counter CSVs with the
+`ml_api_trace` prefix. Marker `Function` cells describe one call, with
+available arguments and thread correlation fields including `ltid`; they
+contain no repeated ancestor path. Use an analysis version that understands
+this flat marker format. An older analyzer expecting stacked `:#` labels
+cannot interpret these captures correctly.
 
 ## 3. List the captured operators
 

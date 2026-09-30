@@ -3,20 +3,143 @@
 
 #pragma once
 
-#include "stack_entry.h"
-
-#include <string>
-#include <vector>
+#include <algorithm>
+#include <array>
+#include <charconv>
+#include <cstddef>
+#include <cstdint>
+#include <limits>
+#include <optional>
+#include <string_view>
 
 namespace torch_trace_collector::detail
 {
 
-// Encoded forms of '%' and '/' in marker names. Matched by encode_marker_name
-// in utils/inject_roctx/core.py and decode_marker_name in utils/utils_analysis.py.
 inline constexpr const char* kEncodedPercent = "%25";
 inline constexpr const char* kEncodedSlash   = "%2F";
+inline constexpr const char* kUnavailable    = "n/a";
 
-// "marker1/.../markerN:context1/.../contextN". Marker names are percent-encoded.
-std::string build_marker_string(const std::vector<StackEntry>& stack);
+class BoundedTextOutput
+{
+public:
+    BoundedTextOutput(char* output, std::size_t capacity) noexcept
+        : output_{output}
+        , capacity_{output == nullptr ? 0 : capacity}
+    {
+    }
+
+    void append(std::string_view value) noexcept
+    {
+        if (capacity_ > 0 && size_ < capacity_ - 1)
+        {
+            const std::size_t copied = std::min(value.size(), capacity_ - 1 - size_);
+            if (copied > 0)
+            {
+                std::copy_n(value.begin(), copied, output_ + size_);
+            }
+        }
+        size_ += value.size();
+    }
+
+    void append(char value) noexcept { append(std::string_view{&value, 1}); }
+
+    [[nodiscard]] std::size_t finish() noexcept
+    {
+        if (capacity_ > 0)
+        {
+            output_[std::min(size_, capacity_ - 1)] = '\0';
+        }
+        return size_ + 1;
+    }
+
+private:
+    char*       output_   = nullptr;
+    std::size_t capacity_ = 0;
+    std::size_t size_     = 0;
+};
+
+inline void append_encoded_marker_name(BoundedTextOutput& output, std::string_view name) noexcept
+{
+    for (const char character : name)
+    {
+        if (character == '%')
+        {
+            output.append(kEncodedPercent);
+        }
+        else if (character == '/')
+        {
+            output.append(kEncodedSlash);
+        }
+        else
+        {
+            output.append(character);
+        }
+    }
+}
+
+template<typename IntegerT>
+void append_decimal(BoundedTextOutput& output, IntegerT value) noexcept
+{
+    std::array<char, std::numeric_limits<IntegerT>::digits10 + 3> buffer;
+    const auto converted = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value);
+    if (converted.ec == std::errc{})
+    {
+        output.append(std::string_view{buffer.data(),
+                                       static_cast<std::size_t>(converted.ptr - buffer.data())});
+    }
+}
+
+struct RangeNameFields
+{
+    std::string_view             name;
+    std::string_view             context;
+    std::int64_t                 sequence_number;
+    std::uint64_t                thread_id;
+    std::uint64_t                forward_thread_id;
+    std::optional<std::uint64_t> launcher_thread_id;
+    std::string_view             scope;
+    std::string_view             arguments;
+    std::string_view             backend;
+};
+
+inline std::size_t format_range_name(char* destination, std::size_t capacity, const RangeNameFields& fields) noexcept
+{
+    BoundedTextOutput output{destination, capacity};
+    append_encoded_marker_name(output, fields.name);
+    output.append(':');
+    output.append(fields.context);
+    output.append("|seqNr=");
+    if (fields.sequence_number < 0)
+    {
+        output.append(kUnavailable);
+    }
+    else
+    {
+        append_decimal(output, fields.sequence_number);
+    }
+    output.append("|tid=");
+    append_decimal(output, fields.thread_id);
+    output.append("|ftid=");
+    append_decimal(output, fields.forward_thread_id);
+    output.append("|ltid=");
+    if (fields.launcher_thread_id.has_value())
+    {
+        append_decimal(output, *fields.launcher_thread_id);
+    }
+    else
+    {
+        output.append(kUnavailable);
+    }
+    output.append("|scope=");
+    output.append(fields.scope);
+    output.append("|args=");
+    output.append(fields.arguments);
+    if (!fields.backend.empty())
+    {
+        output.append('|');
+        output.append(fields.backend);
+    }
+    return output.finish();
+}
 
 }  // namespace torch_trace_collector::detail

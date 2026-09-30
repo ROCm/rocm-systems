@@ -1,101 +1,88 @@
 ## Copyright (c) Advanced Micro Devices, Inc.
 ## SPDX-License-Identifier:  MIT
 
-# The collector itself builds without PyTorch. This test links the real
-# libtorch so it can check the torch_abi.h layouts against the real headers,
-# so it is built only where PyTorch is installed. rocprofiler-compute requires
-# PyTorch in the same prefix as ROCm, which is the default probed below.
-if(NOT ROCPROFCOMPUTE_TORCH_ROOT AND DEFINED ENV{ROCM_PATH})
-    get_filename_component(_rocm_path "$ENV{ROCM_PATH}" ABSOLUTE)
-    get_filename_component(ROCPROFCOMPUTE_TORCH_ROOT "${_rocm_path}/../torch" ABSOLUTE)
-endif()
+# Only the real-header tests require PyTorch; the shipped collector does not.
 set(ROCPROFCOMPUTE_TORCH_ROOT
     "${ROCPROFCOMPUTE_TORCH_ROOT}"
     CACHE PATH
     "PyTorch install used by test-torch-trace-collector"
 )
-
-if(NOT IS_DIRECTORY "${ROCPROFCOMPUTE_TORCH_ROOT}")
+set(_torch_root "${ROCPROFCOMPUTE_TORCH_ROOT}")
+if(NOT _torch_root AND DEFINED ENV{ROCM_PATH})
+    get_filename_component(_torch_root "$ENV{ROCM_PATH}/../torch" ABSOLUTE)
+    if(NOT IS_DIRECTORY "${_torch_root}")
+        set(_torch_root "")
+    endif()
+endif()
+if(NOT _torch_root)
     message(
         STATUS
-        "test-torch-trace-collector is disabled: no PyTorch install at "
-        "'${ROCPROFCOMPUTE_TORCH_ROOT}'. Set ROCPROFCOMPUTE_TORCH_ROOT to enable it."
+        "test-torch-trace-collector disabled: set ROCPROFCOMPUTE_TORCH_ROOT to enable"
     )
     return()
 endif()
-
-# The directory exists, so an incomplete install is a broken layout rather
-# than an absent one. Fail instead of dropping the test.
-set(_torch_lib_dir "${ROCPROFCOMPUTE_TORCH_ROOT}/lib")
-set(_torch_include_dirs
-    "${ROCPROFCOMPUTE_TORCH_ROOT}/include"
-    "${ROCPROFCOMPUTE_TORCH_ROOT}/include/torch/csrc/api/include"
-)
-if(NOT EXISTS "${ROCPROFCOMPUTE_TORCH_ROOT}/include/ATen/ATen.h")
+if(NOT EXISTS "${_torch_root}/include/ATen/ATen.h")
     message(
         FATAL_ERROR
-        "ROCPROFCOMPUTE_TORCH_ROOT='${ROCPROFCOMPUTE_TORCH_ROOT}' has no "
-        "include/ATen/ATen.h"
+        "PyTorch test install '${_torch_root}' has no include/ATen/ATen.h"
     )
 endif()
+
 set(_torch_libraries "")
 foreach(_lib IN ITEMS torch torch_cpu c10)
+    unset(_torch_test_library CACHE)
     find_library(
-        TORCH_${_lib}_LIBRARY
+        _torch_test_library
         NAMES ${_lib}
-        PATHS "${_torch_lib_dir}"
+        PATHS "${_torch_root}/lib"
         NO_DEFAULT_PATH
     )
-    if(NOT TORCH_${_lib}_LIBRARY)
-        message(FATAL_ERROR "lib${_lib} not found in ${_torch_lib_dir}")
+    if(NOT _torch_test_library)
+        message(FATAL_ERROR "lib${_lib} not found in ${_torch_root}/lib")
     endif()
-    list(APPEND _torch_libraries "${TORCH_${_lib}_LIBRARY}")
+    list(APPEND _torch_libraries "${_torch_test_library}")
 endforeach()
 
 set(target test-torch-trace-collector)
-
-# torch_trace_collector_module.cpp brings in the plain-C entry points so the
-# shipped interface is exercised against the real libtorch.
-add_executable(
+add_executable(${target} test_torch_trace_collector.cpp roctx_range_intercept.cpp)
+target_link_libraries(
     ${target}
-    test_torch_trace_collector.cpp
-    roctx_range_intercept.cpp
-    ../torch_trace_collector_module.cpp
+    PRIVATE
+        torch-trace-collector
+        gtest_main
+        ${_torch_libraries}
+        rocprofiler-sdk-roctx::rocprofiler-sdk-roctx-shared-library
+)
+# Production includes are private; these translation units see real PyTorch.
+target_include_directories(
+    ${target}
+    SYSTEM
+    PRIVATE "${_torch_root}/include" "${_torch_root}/include/torch/csrc/api/include"
+)
+target_compile_features(${target} PRIVATE cxx_std_20)
+target_compile_definitions(${target} PRIVATE _GLIBCXX_USE_CXX11_ABI=1)
+target_link_options(
+    ${target}
+    PRIVATE LINKER:--wrap=roctxRangePushA LINKER:--wrap=roctxRangePop
 )
 
-target_link_libraries(${target} PRIVATE torch-trace-collector gtest_main)
-# roctx_range_intercept.cpp records range strings via __wrap_roctxRangePushA.
-target_link_options(${target} PRIVATE LINKER:--wrap=roctxRangePushA)
-
-target_include_directories(${target} SYSTEM PRIVATE ${_torch_include_dirs})
-target_link_libraries(${target} PRIVATE ${_torch_libraries})
-target_compile_features(${target} PRIVATE cxx_std_20)
-
-# libtorch_cpu needs rocm-openblas but its RUNPATH points at the wheel builder.
-set(_openblas_dir "")
+# ROCm wheels need the SDK's runtime libraries in addition to torch/lib.
+set(_test_ld_paths "${_torch_root}/lib")
 foreach(_rocm_root IN LISTS CMAKE_PREFIX_PATH)
+    # Recent ROCm wheels also depend on the SDK's bundled system libraries.
+    set(_sysdeps_dir "${_rocm_root}/lib/rocm_sysdeps/lib")
+    if(IS_DIRECTORY "${_sysdeps_dir}")
+        target_link_options(${target} PRIVATE "LINKER:-rpath-link,${_sysdeps_dir}")
+        list(APPEND _test_ld_paths "${_sysdeps_dir}")
+    endif()
     foreach(_suffix IN ITEMS lib/host-math/lib lib lib64)
-        file(GLOB _openblas_hits "${_rocm_root}/${_suffix}/librocm-openblas.so*")
-        if(_openblas_hits)
-            set(_openblas_dir "${_rocm_root}/${_suffix}")
-            break()
+        if(IS_DIRECTORY "${_rocm_root}/${_suffix}")
+            target_link_directories(${target} PRIVATE "${_rocm_root}/${_suffix}")
+            list(APPEND _test_ld_paths "${_rocm_root}/${_suffix}")
         endif()
     endforeach()
-    if(_openblas_dir)
-        break()
-    endif()
 endforeach()
-if(_openblas_dir)
-    target_link_directories(${target} PRIVATE "${_openblas_dir}")
-endif()
-
-set(_test_ld_paths "")
-list(APPEND _test_ld_paths "${_torch_lib_dir}")
-if(_openblas_dir)
-    list(APPEND _test_ld_paths "${_openblas_dir}")
-endif()
 list(JOIN _test_ld_paths ":" _test_ld_path)
-
 set_target_properties(
     ${target}
     PROPERTIES ROCPROF_TEST_LD_LIBRARY_PATH "${_test_ld_path}"

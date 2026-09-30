@@ -8,9 +8,10 @@
 namespace
 {
 
-std::mutex               recording_mutex;
-bool                     recording = false;
-std::vector<std::string> recorded_messages;
+std::mutex                       recording_mutex;
+bool                             recording   = false;
+bool                             reject_push = false;
+roctx_range_intercept::Recording recorded;
 
 }  // namespace
 
@@ -19,16 +20,23 @@ namespace roctx_range_intercept
 
 void start_recording()
 {
-    std::lock_guard<std::mutex> lock(recording_mutex);
-    recorded_messages.clear();
-    recording = true;
+    const std::lock_guard<std::mutex> lock(recording_mutex);
+    recorded    = {};
+    reject_push = false;
+    recording   = true;
 }
 
-std::vector<std::string> stop_recording()
+void fail_next_push()
 {
-    std::lock_guard<std::mutex> lock(recording_mutex);
+    const std::lock_guard<std::mutex> lock(recording_mutex);
+    reject_push = true;
+}
+
+Recording stop_recording()
+{
+    const std::lock_guard<std::mutex> lock(recording_mutex);
     recording = false;
-    return recorded_messages;
+    return recorded;
 }
 
 }  // namespace roctx_range_intercept
@@ -36,16 +44,31 @@ std::vector<std::string> stop_recording()
 extern "C"
 {
 int __real_roctxRangePushA(const char* message);
+int __real_roctxRangePop();
 
 int __wrap_roctxRangePushA(const char* message)
 {
+    const std::lock_guard<std::mutex> lock(recording_mutex);
+    if (reject_push)
     {
-        std::lock_guard<std::mutex> lock(recording_mutex);
-        if (recording && message != nullptr)
-        {
-            recorded_messages.emplace_back(message);
-        }
+        reject_push = false;
+        return -1;
     }
-    return __real_roctxRangePushA(message);
+    const int result = __real_roctxRangePushA(message);
+    if (recording && result >= 0 && message != nullptr)
+    {
+        recorded.messages.emplace_back(message);
+    }
+    return result;
+}
+
+int __wrap_roctxRangePop()
+{
+    const std::lock_guard<std::mutex> lock(recording_mutex);
+    if (recording)
+    {
+        ++recorded.pops;
+    }
+    return __real_roctxRangePop();
 }
 }
