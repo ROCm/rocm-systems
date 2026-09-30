@@ -136,7 +136,7 @@ backtrace::filter_and_patch(const std::vector<entry_type>& _data)
         {
             return -1;
         }
-        if(_lbl.find("protozero::") == 0)
+        if(_lbl.starts_with("protozero::"))
         {
             return -1;
         }

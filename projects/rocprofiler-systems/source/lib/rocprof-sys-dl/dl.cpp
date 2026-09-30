@@ -1607,7 +1607,7 @@ extern "C"
             while(envp[_idx] != nullptr)
             {
                 auto const _env_v = std::string_view{ envp[_idx++] };
-                if(_env_v.find("ROCPROFSYS") != 0 &&
+                if(!_env_v.starts_with("ROCPROFSYS") &&
                    _env_v.find("librocprof-sys") == std::string_view::npos)
                 {
                     continue;
