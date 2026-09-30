@@ -12,27 +12,30 @@ if(PROJECT_IS_TOP_LEVEL OR ROCPROFILER_BUILD_CODECOV)
 endif()
 
 # The in-tree CI step is capped at 30 minutes and configure + build + the full suite takes
-# 14-17 of them, so the budgets below share about six minutes of the remaining headroom
-# (with six minutes in total the ubuntu step took 24 minutes).
+# 14-21 of them (the build alone varies by about three minutes), so the budgets below
+# share about five minutes of the remaining headroom (with six minutes in total the ubuntu
+# step took 24-27 minutes).
 set(ROCPROFILER_STRESS_BUDGET_SECONDS
-    "180"
+    "210"
     CACHE STRING "Wall-clock budget for the stress.* repetition test, in seconds")
 set(ROCPROFILER_STRESS_FOCUS_BUDGET_SECONDS
     "60"
     CACHE STRING "Wall-clock budget for stress.repeat-focus, in seconds")
 set(ROCPROFILER_STRESS_FOCUS_REGEX
-    "^unit\\.ThreadTraceQueueHooks\\.StopContextInFlightCompletionRoutesViaHookPath$"
+    ""
     CACHE STRING "Tests stress.repeat-focus repeats on their own; empty disables it")
 set(ROCPROFILER_STRESS_PROBE_BUDGET_SECONDS
-    "120"
+    "90"
     CACHE STRING "Wall-clock budget for the multistream save/restore probe, in seconds")
 
+# --shuffle gives every test different neighbours in each iteration, and each failure
+# records the test that ran just before it.
 add_test(
     NAME stress.repeat-suspects
     COMMAND
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/run_stress.py --ctest
         ${CMAKE_CTEST_COMMAND} --test-dir ${CMAKE_BINARY_DIR} --budget-seconds
-        ${ROCPROFILER_STRESS_BUDGET_SECONDS} --report-only
+        ${ROCPROFILER_STRESS_BUDGET_SECONDS} --shuffle --report-only
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
 # RUN_SERIAL plus the lowest COST makes it the last test ctest starts and keeps it from
@@ -55,9 +58,9 @@ set_tests_properties(
                ENVIRONMENT
                "ROCPROFILER_FAILURE_SIGNAL_HANDLER=1;ROCPROF_FAILURE_SIGNAL_HANDLER=1")
 
-# Repeats a test that hung once under stress, on its own and back to back, so that a hang
-# too rare to recur in a few iterations of the full selection comes back with the stack
-# trace the harness prints for a timeout.
+# Repeats the tests matching ROCPROFILER_STRESS_FOCUS_REGEX on their own and back to back,
+# for a failure too rare to recur in a few iterations of the full selection. Off unless a
+# regex is given.
 if(ROCPROFILER_STRESS_FOCUS_REGEX)
     add_test(
         NAME stress.repeat-focus
