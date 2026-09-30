@@ -211,7 +211,7 @@ It should be possible to migrate one concern at a time without requiring a coord
 > - Baseline comparison is out of scope. However, replacing positional identifiers with stable metric ids makes baseline comparison across architectures and runs structurally easier.
 >
 > **Constraints**
-> - Existing `profile` and `analyze` mode behavior (CLI, WebUI, roofline) must be preserved during transition — same results, different config source.
+> - Existing `profile` and `analyze` mode behavior (CLI, roofline; the WebUI was removed in #12220) must be preserved during transition — same results, different config source.
 
 ### Proposed design
 

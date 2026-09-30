@@ -71,6 +71,9 @@ Add a `membw_analysis` check in `build_dfs` (`src/utils/parser.py`) to skip pane
 - `src/rocprof_compute_tui/utils/tui_utils.py` line 151 -- unnecessary, same reason
 - `src/rocprof_compute_analyze/analysis_webui.py` -- missing check fixed for free
 
+> **Update:** The TUI and WebUI analyze modes were later removed in #12220, so the
+> TUI and WebUI entries above no longer apply.
+
 ---
 
 ## Data Models
@@ -246,7 +249,7 @@ The complete file is shown below. The `thresholds` section defines named values,
 
 ```yaml
 # membw_tree_spec.yaml -- gfx950 bottleneck evaluation tree
-# Location: src/rocprof_compute_analysis/membw/tree_spec/gfx950_membw_tree_spec.yaml
+# Location: src/membw_analysis/tree_spec/gfx950_membw_tree_spec.yaml
 #
 # This is a single file. The GL1, GL2, and EA subtrees are all entries
 # under the top-level `nodes:` key.
@@ -501,7 +504,7 @@ These could be included as `supporting` metrics on parent nodes for context with
 ## Package Layout
 
 ```
-src/rocprof_compute_analysis/membw/
+src/membw_analysis/
 |-- __init__.py
 |-- models.py          # MemBwAnalysisResult, BottleneckNode, SupportingMetric
 |-- metric_extract.py  # keyed metric values from calc_metrics output
