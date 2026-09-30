@@ -11,14 +11,22 @@
 int main(int argc, char **argv)
 {
 // 1. Intercept Child Worker Mode immediately at startup
-    if (argc >= 9 && std::string(argv[1]) == "--child") {
-        int childId           = std::stoi(argv[2]);
-        int childReadFd       = std::stoi(argv[3]);
-        int childWriteFd      = std::stoi(argv[4]);
-        bool verbose          = (std::stoi(argv[5]) != 0);
-        int printValues       = std::stoi(argv[6]);
-        bool useRankThreading = (std::stoi(argv[7]) != 0);
-        RcclUnitTesting::MemAllocType memAllocType = static_cast<RcclUnitTesting::MemAllocType>(std::stoi(argv[8]));
+    using RcclUnitTesting::TestBedChild;
+    if (argc > TestBedChild::CHILD_ARG_FLAG && std::string(argv[TestBedChild::CHILD_ARG_FLAG]) == TestBedChild::kChildFlag) {
+        // A worker must never fall through to RUN_ALL_TESTS: the parent would wait on it forever.
+        if (argc != TestBedChild::NUM_CHILD_ARGS) {
+            std::cerr << "[CHILD FATAL] Expected " << TestBedChild::NUM_CHILD_ARGS
+                      << " worker arguments, got " << argc << std::endl;
+            return 1;
+        }
+        int childId           = std::stoi(argv[TestBedChild::CHILD_ARG_ID]);
+        int childReadFd       = std::stoi(argv[TestBedChild::CHILD_ARG_READ_FD]);
+        int childWriteFd      = std::stoi(argv[TestBedChild::CHILD_ARG_WRITE_FD]);
+        bool verbose          = (std::stoi(argv[TestBedChild::CHILD_ARG_VERBOSE]) != 0);
+        int printValues       = std::stoi(argv[TestBedChild::CHILD_ARG_PRINT_VALUES]);
+        bool useRankThreading = (std::stoi(argv[TestBedChild::CHILD_ARG_RANK_THREADING]) != 0);
+        RcclUnitTesting::MemAllocType memAllocType = static_cast<RcclUnitTesting::MemAllocType>(
+            std::stoi(argv[TestBedChild::CHILD_ARG_MEM_ALLOC_TYPE]));
 
 
         // Verify pipe file descriptors survived execl()
