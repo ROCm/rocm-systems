@@ -25,7 +25,8 @@
 /// Two kernels, because the two halves of the prologue are observed differently.
 ///
 /// Delivery (entry at .text offset 0):
-///   s_mov_b32 s0, 0   ; offset 0:  ENTRY, so the prologue anchors here and this
+///   s_mov_b32 s0, 0   ; offset 0:  ENTRY. Dispatch enters the stub, which runs
+///                     ;            the prologue and branches here, so this
 ///                     ;            runs after it, destroying the kernarg pair
 ///   s_mov_b32 s1, 0   ; offset 4
 ///   v_mov_b32 v1, v0  ; offset 8:  ANCHOR for the probe site

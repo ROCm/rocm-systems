@@ -776,7 +776,10 @@ std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologu
   const uint64_t branch_pc = patch.stub_offset + patch.words.size() * sizeof(uint32_t);
   const auto simm16 = compute_sopp_branch_simm16(branch_pc, entry_offset);
   if (!simm16) {
-    report(error_out, "the entry-prologue stub is out of branch range of the kernel entry");
+    report(error_out, ("the entry-prologue stub is out of branch range of the kernel entry; the "
+                       "entry prologue is required by " +
+                       entry_storage_reader_list(probes))
+                          .c_str());
     return std::nullopt;
   }
   patch.words.push_back(build_s_branch(*simm16, arch_));
@@ -1115,10 +1118,11 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     liveness_scope.push_back(block.get());
   const LivenessAnalysis liveness{KernelBlockScope(liveness_scope)};
 
-  // Lay out the appended region as [probe bodies][trampolines]. Each distinct
-  // probe body is copied once, ahead of the trampolines that call into it, so a
-  // trampoline's target address is known before it is emitted and sites sharing
-  // a probe share its single body.
+  // Lay out the appended region as [probe bodies][s_nop padding][entry stub]
+  // [trampolines], the padding and stub only when the kernel has an entry
+  // prologue. Each distinct probe body is copied once, ahead of the trampolines
+  // that call into it, so a trampoline's target address is known before it is
+  // emitted and sites sharing a probe share its single body.
   const auto &sites = resolved.sites;
   // Allocate offsets for each probe body, starting at the local cave (the first
   // byte after the original .text). The site loop below continues advancing this
@@ -1449,9 +1453,9 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   // Every per-site validation, branch-range check, and trampoline-byte
   // construction has succeeded up to this point. Assemble the new .text in one
   // buffer: the original bytes with each anchor spliced to its forward branch,
-  // followed by every trampoline appended as the local cave. replace_text()
-  // grows .text in place and fixes up the surrounding ELF (section/segment
-  // sizes, moved symbols, descriptor entries).
+  // followed by the local cave. replace_text() grows .text in place and fixes
+  // up the surrounding ELF (section/segment sizes, moved symbols, descriptor
+  // entries).
   const auto text_span = patcher.text_bytes();
   std::vector<uint8_t> new_text(text_span.begin(), text_span.end());
   for (const auto &a : applied) {
@@ -1459,7 +1463,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
                 a.site->original_size);
   }
   // Append in the laid-out order: probe bodies first (one per distinct probe),
-  // then the entry prologue, then the per-site trampolines.
+  // then the padding and the entry stub, then the per-site trampolines.
   for (const ProbeCallable &probe : resolved.probes)
     append_words(new_text, probe.body_words);
   if (entry_patch) {
