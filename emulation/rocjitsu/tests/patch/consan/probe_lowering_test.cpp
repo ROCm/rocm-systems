@@ -204,6 +204,61 @@ TEST(ConSan, UniformAddressFactsDoNotCrossCfgJoins) {
   EXPECT_FALSE(result.program_inventory.access_sites()[0].uniform_lds_address);
 }
 
+TEST(ConSan, UniformTrackingPreservesBlockBoundariesAndInterveningClobbers) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA4;
+  const std::vector<uint32_t> words{
+      build_v_mov_b32_e32(1, 4, arch),
+      build_v_mov_b32_e32(2, 7, arch),
+      build_s_branch(0, arch), // No consumers in this block.
+      build_s_nop(0, arch),
+      build_s_branch(0, arch), // Nor in this intervening block.
+      0xd8340000u,
+      0x00000201u, // Prior blocks' facts must not reach this store.
+      build_v_mov_b32_e32(1, 4, arch),
+      build_v_mov_b32_e32(2, 7, arch),
+      0xd8340000u,
+      0x00000201u, // Both address and data are now uniform.
+      build_v_mov_b32_e32(2, vector_source_vgpr(0), arch),
+      0xd8340000u,
+      0x00000201u, // Must still observe the intervening clobber.
+      build_v_mov_b32_e32(1, vector_source_vgpr(0), arch), // Unneeded tail.
+      build_s_endpgm(arch),
+  };
+  const auto result = test_lower_consan(make_rdna4_lds_code_object(words), test_options());
+  ASSERT_TRUE(patch_succeeded(result)) << testing::PrintToString(result.errors);
+  const auto sites = result.program_inventory.access_sites();
+  ASSERT_EQ(sites.size(), 3u);
+  EXPECT_FALSE(sites[0].uniform_lds_address);
+  EXPECT_FALSE(sites[0].uniform_lds_store);
+  EXPECT_TRUE(sites[1].uniform_lds_address);
+  EXPECT_TRUE(sites[1].uniform_lds_store);
+  EXPECT_TRUE(sites[2].uniform_lds_address);
+  EXPECT_FALSE(sites[2].uniform_lds_store);
+}
+
+TEST(ConSan, UniformTrackingStillChecksRegisterModesInBlocksWithoutConsumers) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA4;
+  const auto hwreg = build_hwreg_imm(1u, 0u, 32u);
+  ASSERT_TRUE(hwreg);
+  const auto mode = build_s_setreg_imm32_b32(*hwreg, 0u, arch);
+  ASSERT_TRUE(mode);
+  const std::vector<uint32_t> words{
+      build_v_mov_b32_e32(1, 4, arch),
+      build_v_mov_b32_e32(2, 7, arch),
+      0xd8340000u,
+      0x00000201u,
+      build_s_branch(0, arch),
+      (*mode)[0],
+      (*mode)[1], // Later block with no memory sites.
+      build_s_endpgm(arch),
+  };
+  const auto result = test_lower_consan(make_rdna4_lds_code_object(words), test_options());
+  ASSERT_TRUE(patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
+  EXPECT_FALSE(result.program_inventory.access_sites()[0].uniform_lds_address);
+  EXPECT_FALSE(result.program_inventory.access_sites()[0].uniform_lds_store);
+}
+
 TEST(ConSan, UniformStoreRequiresProvenAddressAndEveryDataWord) {
   constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA4;
   for (bool varying_address : {false, true}) {

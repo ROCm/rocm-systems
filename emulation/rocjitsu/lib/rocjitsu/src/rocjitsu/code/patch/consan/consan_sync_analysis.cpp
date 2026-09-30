@@ -2225,15 +2225,28 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
   });
   if (!indexed_register_mode) {
     std::unordered_map<uint64_t, std::vector<ProgramSite *>> accesses;
+    std::unordered_map<const BasicBlock *, uint64_t> last_access_by_block;
     for (ProgramSite &site : inventory.program_sites) {
       site.uniform_lds_address = false;
       site.uniform_lds_store = false;
       if (site.lowering.form &&
           site.lowering.form->kind == AccessLoweringFormKind::NativeSingleRange &&
-          site.lowering.form->address_vgpr && site.ranges.size() == 1u)
+          site.lowering.form->address_vgpr && site.ranges.size() == 1u) {
         accesses[site.text_offset()].push_back(&site);
+        if (const BasicBlock *block = block_for_offset(block_index, site.text_offset())) {
+          auto [last, inserted] = last_access_by_block.try_emplace(block, site.text_offset());
+          if (!inserted)
+            last->second = std::max(last->second, site.text_offset());
+        }
+      }
     }
     for (const auto &block : blocks) {
+      // Facts never leave this block. Instructions after its last consumer,
+      // and entire blocks without consumers, cannot affect an annotation.
+      // The object-wide register-mode safety check above still scans all code.
+      const auto last = last_access_by_block.find(block.get());
+      if (last == last_access_by_block.end())
+        continue;
       UniformAddressTracker tracker;
       for (const Instruction &inst : block->instructions()) {
         if (const auto found = accesses.find(inst.src_loc()); found != accesses.end())
@@ -2251,6 +2264,8 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
               uniform_data = tracker.contains(*form.data_vgpr + word);
             site->uniform_lds_store = uniform_data;
           }
+        if (inst.src_loc() >= last->second)
+          break;
         tracker.observe(inst);
       }
     }
