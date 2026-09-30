@@ -170,7 +170,7 @@ struct nic_traits
                 }
                 LOG_INFO("NIC device [{}] ({}) enabled for AI NIC PMC sampling",
                          device->get_index(), device->get_name());
-                auto supported = device->get_supported_metrics();
+                auto const supported = device->get_supported_metrics();
                 entries.push_back(device_entry{ std::move(device), supported });
             }
             else

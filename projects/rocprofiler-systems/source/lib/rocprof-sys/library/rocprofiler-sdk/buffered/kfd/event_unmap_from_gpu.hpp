@@ -26,8 +26,8 @@ on_kfd_event_unmap_from_gpu_configure()
 {
     Externals::add_string(Externals::k_kfd_event_unmap_from_gpu_category_name);
 
-    auto& agent_mgr  = Externals::get_agent_manager();
-    auto  gpu_agents = agent_mgr.get_agents_by_type(Externals::k_agent_type_gpu);
+    auto const& agent_mgr  = Externals::get_agent_manager();
+    auto const  gpu_agents = agent_mgr.get_agents_by_type(Externals::k_agent_type_gpu);
     if(gpu_agents.empty())
     {
         LOG_DEBUG("no GPU agents found; no PMC info will be "
@@ -96,7 +96,7 @@ on_kfd_event_unmap_from_gpu(typename SdkBackend::kfd_event_unmap_record* record,
     Externals::add_thread_info(typename Externals::thread_info_t{
         Externals::get_ppid(), Externals::get_pid(), tid, 0, 0, "{}" });
 
-    auto agent_label = [](const auto* agent_ptr) {
+    auto const agent_label = [](const auto* agent_ptr) {
         if(!agent_ptr)
         {
             return std::string{ "?" };
@@ -106,7 +106,7 @@ on_kfd_event_unmap_from_gpu(typename SdkBackend::kfd_event_unmap_record* record,
         return fmt::format("{} {}", is_gpu ? "GPU" : "CPU", agent_ptr->device_type_index);
     };
 
-    auto track_name = fmt::format("KFD Unmap from GPU [{}]", agent_label(agent));
+    auto const track_name = fmt::format("KFD Unmap from GPU [{}]", agent_label(agent));
     Externals::add_track(typename Externals::track_t{ track_name, tid, "{}" });
 
     constexpr auto k_empty_event_metadata = "{}";

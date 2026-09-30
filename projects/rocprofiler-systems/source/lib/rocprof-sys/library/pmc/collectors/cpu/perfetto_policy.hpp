@@ -77,16 +77,17 @@ struct perfetto_policy
         {
             if(enabled.bits.frequency)
             {
-                auto name =
+                auto const name =
                     fmt::format("CPU [{}] Core [{}] Frequency (S)", socket_id, cpu_id);
-                auto track_id = counter_track::emplace(socket_id, name, "MHz");
+                auto const track_id = counter_track::emplace(socket_id, name, "MHz");
                 tracks.freq_tracks[cpu_id] = track_id;
             }
 
             if(enabled.bits.load)
             {
-                auto name = fmt::format("CPU [{}] Core [{}] Load (S)", socket_id, cpu_id);
-                auto track_id              = counter_track::emplace(socket_id, name, "%");
+                auto const name =
+                    fmt::format("CPU [{}] Core [{}] Load (S)", socket_id, cpu_id);
+                auto const track_id        = counter_track::emplace(socket_id, name, "%");
                 tracks.load_tracks[cpu_id] = track_id;
             }
         }

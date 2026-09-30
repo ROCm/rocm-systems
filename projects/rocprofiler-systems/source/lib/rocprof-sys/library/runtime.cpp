@@ -96,9 +96,12 @@ get_cpu_cid_stack(std::int64_t _tid, std::int64_t _parent)
 
     if(_b_tid && !(*_b_tid))
     {
-        *_b_tid           = true;
-        auto  _parent_tid = _parent;
-        auto& _p_tid      = thread_data_t::instance(construct_on_thread{ _parent_tid });
+        *_b_tid          = true;
+        auto _parent_tid = _parent;
+        // named (not inline) so GCC's dangling-reference check doesn't mistake this
+        // reference for one bound to the constructor argument's temporary
+        auto        _parent_ctor = construct_on_thread{ _parent_tid };
+        auto const& _p_tid       = thread_data_t::instance(std::move(_parent_ctor));
         // if tid != parent and there is not a valid pointer for the provided parent
         // thread id set it to zero since that will always be valid
         if(_tid != _parent_tid && !_p_tid)
@@ -128,7 +131,7 @@ create_cpu_cid_entry(std::int64_t _tid)
 {
     using tim::auto_lock_t;
 
-    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    auto const _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     // unique lock for _tid
     auto&       _mtx = get_cpu_cid_stack_lock(_tid);

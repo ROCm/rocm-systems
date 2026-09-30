@@ -148,7 +148,7 @@ preset_registry::translate_legacy_flag(std::string_view arg) const
         return {};
     }
 
-    auto name = std::string{ arg.substr(2) };
+    auto const name = std::string{ arg.substr(2) };
     if(m_presets.count(name) == 0)
     {
         return {};
@@ -223,9 +223,9 @@ preset_registry::resolve_filepath(const std::string& name_or_path)
         return {};
     }
 
-    auto filepath  = fmt::format("{}/{}.json", m_directory, name_or_path);
-    auto resolved  = common::path::realpath(filepath);
-    auto canon_dir = common::path::realpath(m_directory);
+    auto       filepath  = fmt::format("{}/{}.json", m_directory, name_or_path);
+    auto const resolved  = common::path::realpath(filepath);
+    auto const canon_dir = common::path::realpath(m_directory);
     if(resolved.empty() || canon_dir.empty() || !resolved.starts_with(canon_dir))
     {
         std::cerr << "[rocprof-sys] WARNING: Preset path '" << filepath
@@ -239,13 +239,13 @@ preset_registry::resolve_filepath(const std::string& name_or_path)
 std::optional<preset_registry::preset_info>
 preset_registry::find(const std::string& name_or_path)
 {
-    auto it = m_presets.find(name_or_path);
+    auto const it = m_presets.find(name_or_path);
     if(it != m_presets.end())
     {
         return it->second;
     }
 
-    auto filepath = resolve_filepath(name_or_path);
+    auto const filepath = resolve_filepath(name_or_path);
     if(filepath.empty())
     {
         return std::nullopt;
@@ -286,8 +286,8 @@ preset_registry::ensure_all_loaded()
         return;
     }
 
-    auto dir_closer = [](DIR* d) { closedir(d); };
-    auto dir_guard  = std::unique_ptr<DIR, decltype(dir_closer)>(
+    auto const dir_closer = [](DIR* d) { closedir(d); };
+    auto const dir_guard  = std::unique_ptr<DIR, decltype(dir_closer)>(
         opendir(m_directory.c_str()), dir_closer);
     if(!dir_guard)
     {
@@ -354,7 +354,7 @@ bool
 preset_registry::is_section_enabled(std::string_view preset_name,
                                     std::string_view section, bool default_value) const
 {
-    auto it = m_json_cache.find(std::string{ preset_name });
+    auto const it = m_json_cache.find(std::string{ preset_name });
     if(it == m_json_cache.end())
     {
         return default_value;
@@ -372,7 +372,7 @@ bool
 preset_registry::is_rocpd_output_enabled(std::string_view preset_name,
                                          bool             default_value) const
 {
-    auto iter = m_json_cache.find(std::string{ preset_name });
+    auto const iter = m_json_cache.find(std::string{ preset_name });
     if(iter == m_json_cache.end())
     {
         return default_value;
@@ -408,7 +408,7 @@ preset_registry::list(std::string_view tool_name, std::ostream& os)
     std::map<std::string, std::vector<const preset_info*>> by_category;
     for(const auto& [name, info] : presets)
     {
-        auto cat = info.category.empty() ? "General" : info.category;
+        auto const cat = info.category.empty() ? "General" : info.category;
         by_category[cat].push_back(&info);
     }
 
@@ -503,7 +503,7 @@ preset_registry::describe(std::string_view preset_name)
         if(enabled && tracing.contains("buffer_size_kb"))
         {
             constexpr int KB_PER_GB = 1024 * 1024;
-            auto          buffer_kb = tracing["buffer_size_kb"].value("value", 0);
+            auto const    buffer_kb = tracing["buffer_size_kb"].value("value", 0);
             if(buffer_kb >= KB_PER_GB)
             {
                 entry += " (buffer: " + std::to_string(buffer_kb / KB_PER_GB) + " GB)";
@@ -538,7 +538,7 @@ preset_registry::describe(std::string_view preset_name)
         std::string entry = std::string("CPU Sampling:    ") + (enabled ? "ON" : "OFF");
         if(enabled && sampling.contains("frequency_hz"))
         {
-            auto freq = sampling["frequency_hz"].value("value", 0);
+            auto const freq = sampling["frequency_hz"].value("value", 0);
             if(freq > 0)
             {
                 entry += " @ " + std::to_string(freq) + " Hz";
@@ -560,7 +560,7 @@ preset_registry::describe(std::string_view preset_name)
             std::string entry = "GPU Metrics:     ON";
             if(gpu.contains("metrics"))
             {
-                auto names = collect_enabled_names(gpu["metrics"]);
+                auto const names = collect_enabled_names(gpu["metrics"]);
                 if(!names.empty())
                 {
                     entry += " (" + names + ")";
@@ -576,7 +576,7 @@ preset_registry::describe(std::string_view preset_name)
         const auto& rocm = preset_json["domains"]["rocm"];
         if(rocm.value("enabled", false) && rocm.contains("api_domains"))
         {
-            auto apis = collect_enabled_names(rocm["api_domains"]);
+            auto const apis = collect_enabled_names(rocm["api_domains"]);
             if(!apis.empty())
             {
                 lines.push_back("ROCm Domains:    " + apis);
@@ -590,7 +590,7 @@ preset_registry::describe(std::string_view preset_name)
         const auto& parallel = preset_json["domains"]["parallel"];
         if(parallel.contains("runtimes"))
         {
-            auto runtime_names = collect_enabled_names(parallel["runtimes"]);
+            auto const runtime_names = collect_enabled_names(parallel["runtimes"]);
             if(!runtime_names.empty())
             {
                 lines.push_back("Parallel:        " + runtime_names);
@@ -605,13 +605,13 @@ preset_registry::describe(std::string_view preset_name)
         const auto& counters = preset_json["hardware_counters"];
         if(counters.contains("papi_events"))
         {
-            auto events =
+            auto const events =
                 json_config::json_value_to_string(counters["papi_events"]["value"]);
             lines.push_back("PAPI Events:     " + events);
         }
         if(counters.contains("rocm_events"))
         {
-            auto events =
+            auto const events =
                 json_config::json_value_to_string(counters["rocm_events"]["value"]);
             lines.push_back("ROCm Events:     " + events);
         }

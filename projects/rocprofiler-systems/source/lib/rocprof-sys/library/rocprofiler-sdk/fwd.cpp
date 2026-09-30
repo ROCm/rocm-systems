@@ -40,6 +40,8 @@ dimensions_info_callback(rocprofiler_counter_id_t /*id*/,
 }
 
 rocprofiler_status_t
+// NOLINTNEXTLINE(misc-const-correctness) - signature must match
+// rocprofiler_available_counters_cb_t exactly
 counters_supported_callback(rocprofiler_agent_id_t    agent_id,
                             rocprofiler_counter_id_t* counters, size_t num_counters,
                             void* user_data)
@@ -73,7 +75,7 @@ get_agent_counter_info(const tool_agent_vec_t& _agents)
 {
     auto _data = agent_counter_info_map_t{};
 
-    for(auto itr : _agents)
+    for(auto const itr : _agents)
     {
         const auto& _agent_id = rocprofiler_agent_id_t{ itr.agent->handle };
 
@@ -91,7 +93,7 @@ get_agent_counter_info(const tool_agent_vec_t& _agents)
         }
 
         // Only process if the agent was successfully added to the map
-        auto agent_it = _data.find(_agent_id);
+        auto const agent_it = _data.find(_agent_id);
         if(agent_it != _data.end())
         {
             std::sort(agent_it->second.begin(), agent_it->second.end(),
@@ -131,7 +133,7 @@ client_data::initialize()
 void
 client_data::initialize_event_info()
 {
-    auto& agent_mngr = get_agent_manager_instance();
+    auto const& agent_mngr = get_agent_manager_instance();
 
     if(agent_mngr.get_agents().empty())
     {
@@ -156,14 +158,14 @@ client_data::initialize_event_info()
         {
             auto        _dev_index = aitr.device_id;
             const auto& _agent_id  = rocprofiler_agent_id_t{ aitr.agent->handle };
-            auto        _device_qualifier_sym = fmt::format(":device={}", _dev_index);
-            auto        _device_qualifier =
+            auto const  _device_qualifier_sym = fmt::format(":device={}", _dev_index);
+            auto const  _device_qualifier =
                 tim::hardware_counters::qualifier{ true, static_cast<int>(_dev_index),
                                                    _device_qualifier_sym,
                                                    fmt::format("Device {}", _dev_index) };
 
             // Check if agent info is available ( i.e., counters are supported)
-            auto agent_info_it = agent_counter_info.find(_agent_id);
+            auto const agent_info_it = agent_counter_info.find(_agent_id);
             if(agent_info_it == agent_counter_info.end())
             {
                 LOG_WARNING("Skipping GPU device {} ({}, handle=0x{:X}) due to "
@@ -207,17 +209,17 @@ client_data::initialize_event_info()
 
             for(const auto& ditr : _counter_info)
             {
-                auto _long_desc = std::string{ ditr.description };
-                auto _units     = std::string{};
-                auto _pysym     = std::string{};
+                auto const _long_desc = std::string{ ditr.description };
+                auto const _units     = std::string{};
+                auto const _pysym     = std::string{};
                 if(ditr.is_constant)
                 {
                     continue;
                 }
                 if(ditr.is_derived)
                 {
-                    auto _sym = fmt::format("{}:device={}", ditr.name, _dev_index);
-                    auto _short_desc =
+                    auto const _sym = fmt::format("{}:device={}", ditr.name, _dev_index);
+                    auto const _short_desc =
                         fmt::format("Derived counter: {}", ditr.expression);
                     events_info.emplace_back(hardware_counter_info(
                         true, tim::hardware_counters::api::rocm, events_info.size(), 0,
@@ -230,7 +232,7 @@ client_data::initialize_event_info()
 
                     for(const auto& itr : ditr.dimension_info)
                     {
-                        auto _info =
+                        auto const _info =
                             (itr.instance_size > 1)
                                 ? fmt::format("{}[0:{}]", itr.name, itr.instance_size - 1)
                                 : std::string{};
@@ -240,8 +242,8 @@ client_data::initialize_event_info()
                         }
                     }
 
-                    auto _sym = fmt::format("{}:device={}", ditr.name, _dev_index);
-                    auto _short_desc =
+                    auto const _sym = fmt::format("{}:device={}", ditr.name, _dev_index);
+                    auto       _short_desc =
                         fmt::format("{} on device {}", ditr.name, _dev_index);
                     if(!_dim_info.empty())
                     {
@@ -265,7 +267,7 @@ client_data::set_agents()
 {
     auto& agent_mngr = get_agent_manager_instance();
 
-    auto fill_agents = [&](agent_type type, std::vector<tool_agent>& out) {
+    auto const fill_agents = [&](agent_type type, std::vector<tool_agent>& out) {
         const auto& _agents = agent_mngr.get_agents_by_type(type);
         for(const auto& agent : _agents)
         {

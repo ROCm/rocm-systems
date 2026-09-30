@@ -54,15 +54,15 @@ to_c_argv(std::vector<std::string>& src)
 void
 print_command(const std::vector<std::string>& argv, std::string_view prefix)
 {
-    auto cmd = std::accumulate(argv.begin(), argv.end(), std::string{},
-                               [](std::string acc, const std::string& arg) {
-                                   if(!acc.empty())
-                                   {
-                                       acc += ' ';
-                                   }
-                                   acc += arg;
-                                   return acc;
-                               });
+    auto const cmd = std::accumulate(argv.begin(), argv.end(), std::string{},
+                                     [](std::string acc, const std::string& arg) {
+                                         if(!acc.empty())
+                                         {
+                                             acc += ' ';
+                                         }
+                                         acc += arg;
+                                         return acc;
+                                     });
     if(cmd.empty())
     {
         return;
@@ -86,7 +86,7 @@ print_environment_impl(const std::vector<std::string>&              env,
     auto is_updated = [&](std::string_view entry) {
         return is_updated_key(env_key(entry));
     };
-    auto is_general = [&](std::string_view entry) {
+    auto const is_general = [&](std::string_view entry) {
         return !is_updated(entry) && entry.starts_with(rocprofsys_prefix);
     };
 
@@ -98,7 +98,7 @@ print_environment_impl(const std::vector<std::string>&              env,
         return;
     }
 
-    auto emit_matching = [&](auto pred) {
+    auto const emit_matching = [&](auto pred) {
         for(const auto& entry : entries)
         {
             if(pred(entry))
@@ -129,7 +129,7 @@ strip_flag_prefix(std::string_view name)
 }
 
 translated_args
-translate_arguments(int argc, char** argv, preset_registry& registry,
+translate_arguments(int argc, char* const* argv, preset_registry const& registry,
                     const std::unordered_map<std::string, std::string>& deprecated_flags)
 {
     translated_args result;
@@ -156,11 +156,11 @@ translate_arguments(int argc, char** argv, preset_registry& registry,
             // double-mapping
             if(!deprecated_flags.empty())
             {
-                auto        arg_sv = std::string_view{ argv[arg_idx] };
+                auto const  arg_sv = std::string_view{ argv[arg_idx] };
                 std::string flag_name;
                 std::string eq_suffix;
 
-                auto eq_pos = arg_sv.find('=');
+                auto const eq_pos = arg_sv.find('=');
                 if(eq_pos != std::string_view::npos)
                 {
                     flag_name = std::string{ arg_sv.substr(0, eq_pos) };
@@ -171,7 +171,7 @@ translate_arguments(int argc, char** argv, preset_registry& registry,
                     flag_name = std::string{ arg_sv };
                 }
 
-                auto match = deprecated_flags.find(flag_name);
+                auto const match = deprecated_flags.find(flag_name);
                 if(match != deprecated_flags.end())
                 {
                     std::cerr << "[rocprof-sys] WARNING: '" << flag_name
@@ -247,7 +247,7 @@ void
 print_pre_execution_info(std::string_view tool_name, std::string_view preset_mode,
                          preset_registry& registry)
 {
-    auto output_dir = get_output_directory();
+    auto const output_dir = get_output_directory();
 
     bool tracing_on   = false;
     bool profiling_on = false;
@@ -255,10 +255,10 @@ print_pre_execution_info(std::string_view tool_name, std::string_view preset_mod
 
     if(!preset_mode.empty() && !tool_name.empty())
     {
-        auto normalized = strip_flag_prefix(preset_mode);
-        tracing_on      = registry.is_section_enabled(normalized, "tracing");
-        profiling_on    = registry.is_section_enabled(normalized, "profiling");
-        rocpd_on        = registry.is_rocpd_output_enabled(normalized);
+        auto const normalized = strip_flag_prefix(preset_mode);
+        tracing_on            = registry.is_section_enabled(normalized, "tracing");
+        profiling_on          = registry.is_section_enabled(normalized, "profiling");
+        rocpd_on              = registry.is_rocpd_output_enabled(normalized);
 
         constexpr size_t box_width       = 60;
         constexpr size_t box_inner_width = box_width - 2;
@@ -284,7 +284,7 @@ print_pre_execution_info(std::string_view tool_name, std::string_view preset_mod
 
         std::cerr << "Preset:        " << preset_mode << "\n";
 
-        auto description = registry.describe(normalized);
+        auto const description = registry.describe(normalized);
         if(!description.empty())
         {
             std::cerr << "\n" << description << "\n";
@@ -336,7 +336,7 @@ print_pre_execution_info(std::string_view tool_name, std::string_view preset_mod
 void
 warn_if_output_not_writable(std::string_view tool_name)
 {
-    auto output_dir = get_output_directory();
+    auto const output_dir = get_output_directory();
     if(!check_directory_writable(output_dir))
     {
         std::cerr << "[rocprof-sys][WARNING] Output directory '" << output_dir
@@ -364,7 +364,7 @@ validate_configuration()
 
     // Check ROCPROFSYS_TMPDIR writability
     const char* tmpdir     = std::getenv(env_vars::TMPDIR);
-    auto        tmpdir_str = std::string{ tmpdir ? tmpdir : "/tmp" };
+    auto const  tmpdir_str = std::string{ tmpdir ? tmpdir : "/tmp" };
     if(!check_directory_writable(tmpdir_str))
     {
         std::cerr << "[rocprof-sys][WARNING] Temp directory '" << tmpdir_str
@@ -427,7 +427,7 @@ collect_resolved_settings(const std::vector<std::string>&        current_env,
     std::unordered_map<std::string, std::string> initial_map;
     for(const auto& env_str : initial_envs)
     {
-        auto eq_pos = env_str.find('=');
+        auto const eq_pos = env_str.find('=');
         if(eq_pos != std::string::npos)
         {
             initial_map[env_str.substr(0, eq_pos)] = env_str.substr(eq_pos + 1);
@@ -437,7 +437,7 @@ collect_resolved_settings(const std::vector<std::string>&        current_env,
     for(const auto& env_entry : current_env)
     {
         const std::string_view entry{ env_entry };
-        auto                   eq_pos = entry.find('=');
+        auto const             eq_pos = entry.find('=');
         if(eq_pos == std::string_view::npos)
         {
             continue;
@@ -451,7 +451,7 @@ collect_resolved_settings(const std::vector<std::string>&        current_env,
             continue;
         }
 
-        auto match = initial_map.find(key);
+        auto const match = initial_map.find(key);
         if(match == initial_map.end() || match->second != val)
         {
             result[key] = val;
@@ -466,8 +466,8 @@ export_config(const std::vector<std::string>&        current_env,
               const std::string& preset_name, std::string_view tool_name,
               const std::string& output_file)
 {
-    auto settings = collect_resolved_settings(current_env, initial_envs);
-    auto json_str =
+    auto const settings = collect_resolved_settings(current_env, initial_envs);
+    auto const json_str =
         rocprofsys::json_config::export_config_as_json(settings, preset_name, tool_name);
 
     if(output_file.empty())
@@ -516,14 +516,14 @@ namespace
 bool
 is_section_header(const std::string& line, std::string& bracket_name)
 {
-    auto ansi_stripped = utility::string::strip_ansi(line);
-    auto stripped      = utility::string::ltrim(ansi_stripped);
+    auto const ansi_stripped = utility::string::strip_ansi(line);
+    auto const stripped      = utility::string::ltrim(ansi_stripped);
     if(stripped.empty() || stripped.front() != '[')
     {
         return false;
     }
     // Find the closing bracket -the bracket name ends at the first ']'
-    auto close = stripped.find(']');
+    auto const close = stripped.find(']');
     if(close == std::string::npos)
     {
         return false;
@@ -537,13 +537,13 @@ line_contains_flag(const std::string& line, const std::string& flag)
 {
     auto stripped = utility::string::strip_ansi(line);
     // Flag lines have leading whitespace then the flag name
-    auto pos = stripped.find(flag);
+    auto const pos = stripped.find(flag);
     if(pos == std::string::npos)
     {
         return false;
     }
     // Verify it's a word boundary (not a substring of a longer flag)
-    auto end = pos + flag.size();
+    auto const end = pos + flag.size();
     if(end < stripped.size())
     {
         const char next = stripped[end];
@@ -738,7 +738,7 @@ void
 print_see_also(std::string_view topic, std::ostream& out)
 {
     const auto& relations = get_related_topics_map();
-    auto        it        = relations.find(topic);
+    auto const  it        = relations.find(topic);
     if(it == relations.end() || it->second.empty())
     {
         return;
@@ -838,7 +838,7 @@ print_help_for_topic(const std::string& captured, std::string_view topic,
                      std::string_view tool_name, std::ostream& out)
 {
     const auto& topic_map = get_help_topic_map();
-    auto        match     = topic_map.find(std::string{ topic });
+    auto const  match     = topic_map.find(std::string{ topic });
     if(match == topic_map.end())
     {
         return false;
@@ -909,7 +909,7 @@ print_help_for_domain(const std::string& captured, std::string_view domain,
                       std::string_view tool_name, std::ostream& out)
 {
     const auto& domain_map = get_domain_help_map();
-    auto        match      = domain_map.find(std::string{ domain });
+    auto const  match      = domain_map.find(std::string{ domain });
     if(match == domain_map.end())
     {
         return false;
@@ -934,7 +934,7 @@ print_help_for_domain(const std::string& captured, std::string_view domain,
     size_t options_start = 0;
     for(size_t line_idx = 0; line_idx < lines.size(); ++line_idx)
     {
-        auto stripped = utility::string::strip_ansi(lines[line_idx]);
+        auto const stripped = utility::string::strip_ansi(lines[line_idx]);
         if(utility::string::ltrim(stripped).starts_with("Options:"))
         {
             options_start = line_idx + 1;
@@ -950,8 +950,8 @@ print_help_for_domain(const std::string& captured, std::string_view domain,
     for(size_t idx = options_start; idx < lines.size(); ++idx)
     {
         const auto& current_line = lines[idx];
-        auto        stripped     = utility::string::strip_ansi(current_line);
-        auto        trimmed      = utility::string::ltrim(stripped);
+        auto const  stripped     = utility::string::strip_ansi(current_line);
+        auto const  trimmed      = utility::string::ltrim(stripped);
 
         // Skip separators and empty lines at the top
         if(trimmed.empty())

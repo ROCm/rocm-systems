@@ -104,10 +104,10 @@ post_process()
 
     auto _data = coverage_thread_data_type{};
     {
-        auto _coverage_map = coverage_data_map{};
-        auto _find         = [&_coverage_data, &_coverage_map](data_tuple_t&& _v) {
-            auto& _cache = _coverage_map[std::get<0>(_v)][std::get<1>(_v)];
-            auto  mitr   = _cache.find(std::get<2>(_v));
+        auto       _coverage_map = coverage_data_map{};
+        auto const _find         = [&_coverage_data, &_coverage_map](data_tuple_t&& _v) {
+            auto&      _cache = _coverage_map[std::get<0>(_v)][std::get<1>(_v)];
+            auto const mitr   = _cache.find(std::get<2>(_v));
             if(mitr != _cache.end())
             {
                 return std::make_pair(mitr->second, true);
@@ -172,11 +172,11 @@ post_process()
               std::greater<coverage_data>{});
 
     {
-        auto _tmp_map     = coverage_data_map{};
-        auto _tmp         = std::decay_t<decltype(_coverage_data)>{};
-        auto _find_in_tmp = [&_tmp, &_tmp_map](const auto& _v) {
-            auto& _cache = _tmp_map[_v.module][_v.function];
-            auto  mitr   = _cache.find(_v.address);
+        auto       _tmp_map     = coverage_data_map{};
+        auto       _tmp         = std::decay_t<decltype(_coverage_data)>{};
+        auto const _find_in_tmp = [&_tmp, &_tmp_map](const auto& _v) {
+            auto&      _cache = _tmp_map[_v.module][_v.function];
+            auto const mitr   = _cache.find(_v.address);
             if(mitr != _cache.end())
             {
                 return std::make_pair(mitr->second, true);
@@ -210,7 +210,7 @@ post_process()
     std::sort(_coverage_data.begin(), _coverage_data.end(),
               std::greater<coverage_data>{});
 
-    auto _get_setting = [](const std::string& _v) {
+    auto const _get_setting = [](const std::string& _v) {
         auto&& _b = config::get_setting_value<bool>(_v);
         if(!_b)
         {
@@ -220,8 +220,8 @@ post_process()
         return _b.value_or(true);
     };
 
-    auto _text_output = _get_setting(std::string{ env_vars::TEXT_OUTPUT });
-    auto _json_output = _get_setting(std::string{ env_vars::JSON_OUTPUT });
+    auto const _text_output = _get_setting(std::string{ env_vars::TEXT_OUTPUT });
+    auto const _json_output = _get_setting(std::string{ env_vars::JSON_OUTPUT });
 
     if(_text_output)
     {
@@ -252,7 +252,7 @@ post_process()
         std::stringstream oss{};
         {
             namespace cereal = tim::cereal;
-            auto ar =
+            auto const ar =
                 tim::policy::output_archive<cereal::PrettyJSONOutputArchive>::get(oss);
 
             ar->setNextName("rocprofsys");

@@ -420,7 +420,7 @@ TEST_F(ucx_gotcha_test, test_audit_incoming_rma_put)
 
 TEST_F(ucx_gotcha_test, test_different_gotcha_tool_ids)
 {
-    auto test_incoming = [](const std::string& tool_id) {
+    auto const test_incoming = [](const std::string& tool_id) {
         MockedGotchaData data;
         data.tool_id = tool_id;
         EXPECT_CALL(*test_globals::g_category_region_gmock, start_generic)
