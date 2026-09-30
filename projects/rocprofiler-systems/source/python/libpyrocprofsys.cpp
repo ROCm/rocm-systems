@@ -235,14 +235,14 @@ struct config
     std::int32_t            base_stack_depth   = -1;
     std::int32_t            verbose            = 0;
     std::int64_t            depth_tracker      = 0;
-    std::string             base_module_path   = {};
-    strset_t                restrict_functions = {};
-    strset_t                restrict_filenames = {};
-    strset_t                include_functions  = {};
-    strset_t                include_filenames  = {};
-    strset_t                exclude_functions  = default_exclude_functions;
-    strset_t                exclude_filenames  = default_exclude_filenames;
-    std::vector<profiler_t> records            = {};
+    std::string             base_module_path;
+    strset_t                restrict_functions;
+    strset_t                restrict_filenames;
+    strset_t                include_functions;
+    strset_t                include_filenames;
+    strset_t                exclude_functions = default_exclude_functions;
+    strset_t                exclude_filenames = default_exclude_filenames;
+    std::vector<profiler_t> records;
     annotations_t           annotations = { note_t{ "file", ROCPROFSYS_STRING, nullptr },
                                             note_t{ "line", ROCPROFSYS_INT32, nullptr },
                                             note_t{ "lasti", ROCPROFSYS_INT32, nullptr },

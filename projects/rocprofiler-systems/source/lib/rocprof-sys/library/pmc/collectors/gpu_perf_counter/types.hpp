@@ -37,7 +37,7 @@ using metrics = std::vector<counter_value>;
 
 struct counter_definition
 {
-    std::string name{};
+    std::string name;
     size_t      device_index{ 0 };
 
     [[nodiscard]] std::string to_string() const

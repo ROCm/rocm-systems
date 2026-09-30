@@ -583,7 +583,7 @@ struct group_topic_desc
     const char*                   name;
     const char*                   blurb;
     help_group_names              sections;
-    std::vector<std::string_view> tools{};  // empty => shown for all tools
+    std::vector<std::string_view> tools;  // empty => shown for all tools
 };
 
 const std::vector<group_topic_desc>&

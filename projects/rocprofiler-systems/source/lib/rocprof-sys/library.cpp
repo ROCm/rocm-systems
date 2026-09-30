@@ -325,8 +325,8 @@ struct fini_bundle
         return _ss.str();
     }
 
-    std::string_view m_label = {};
-    data_type        m_data  = {};
+    std::string_view m_label;
+    data_type        m_data = {};
 };
 
 template <typename... Tp>

@@ -66,7 +66,7 @@ using timestamp_t = std::uint64_t;
 struct pending_cache_entry
 {
     timestamp_t start_ts = 0;
-    std::string args     = {};
+    std::string args;
 };
 
 // A type qualifies as a trace-cache argument "name" slot when it is string-like
@@ -451,7 +451,7 @@ private:
     Policy::clock_type                                    clock_{};
     Policy::region_sink_type                              sink_{};
     Policy::thread_metadata_type                          thread_meta_{};
-    std::map<entry_key, std::vector<pending_cache_entry>> map_name_to_args{};
+    std::map<entry_key, std::vector<pending_cache_entry>> map_name_to_args;
 };
 
 }  // namespace rocprofsys::utility
@@ -993,6 +993,6 @@ struct local_category_region : comp::base<local_category_region<CategoryT>, void
     void set_prefix(std::string_view _v) { m_prefix = _v; }
 
 private:
-    std::string_view m_prefix = {};
+    std::string_view m_prefix;
 };
 }  // namespace rocprofsys::component
