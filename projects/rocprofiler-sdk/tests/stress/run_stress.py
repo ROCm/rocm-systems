@@ -37,6 +37,10 @@ the whole budget still get run, and a CUT before a test ever finished is flagged
 hang. A test that genuinely times out twice is dropped for the rest of the run so that one hang
 cannot consume the budget of every other test. Selected tests that never ran are listed.
 
+Before a timed-out test is killed, the harness records where each of its threads is blocked
+(from /proc) and sends it SIGABRT, so that with ROCPROFILER_FAILURE_SIGNAL_HANDLER=1 the output
+also shows the stack of the thread that took the signal.
+
 Must stay Python 3.6 compatible: rhel-8.8 CI images ship 3.6 as python3.
 """
 
@@ -78,6 +82,25 @@ BAD = ("FAIL", "TIMEOUT", "SIGNAL", "SETUP_FAILED")
 # abseil's failure signal handler (enabled via ROCPROFILER_FAILURE_SIGNAL_HANDLER) starts its
 # report with this marker; when present it is the part of the output worth keeping.
 CRASH_MARKER = "*** SIG"
+STATES_MARKER = "---- thread states at timeout ----"
+
+# A test that times out gets SIGABRT first so the fault handler prints the stack of the thread
+# that takes it, and SIGKILL once this many seconds pass without it exiting.
+ABORT_GRACE_SECONDS = 10.0
+
+# x86_64 numbers of the system calls a hung thread is usually blocked in
+SYSCALL_NAMES = {
+    "0": "read",
+    "7": "poll",
+    "16": "ioctl",
+    "35": "nanosleep",
+    "61": "wait4",
+    "202": "futex",
+    "230": "clock_nanosleep",
+    "232": "epoll_wait",
+    "271": "ppoll",
+    "281": "epoll_pwait",
+}
 
 
 def log(msg):
@@ -166,7 +189,56 @@ def classify(test, returncode, output):
     return "PASS" if ok else "FAIL"
 
 
-def run_test(test, timeout, default_cwd):
+def read_proc(path):
+    try:
+        with open(path) as ifs:
+            return ifs.read().strip()
+    except OSError:
+        return "?"
+
+
+def group_pids(pgid):
+    pids = []
+    for entry in os.listdir("/proc"):
+        if not entry.isdigit():
+            continue
+        # the fields after the parenthesized command name start with: state ppid pgrp
+        fields = read_proc("/proc/{}/stat".format(entry)).rsplit(")", 1)[-1].split()
+        if len(fields) > 2 and fields[2] == str(pgid):
+            pids.append(int(entry))
+    return sorted(pids)
+
+
+def thread_states(pgid):
+    """Where each thread of a hung test is blocked, read from /proc without a debugger."""
+    lines = [STATES_MARKER]
+    for pid in group_pids(pgid):
+        cmdline = read_proc("/proc/{}/cmdline".format(pid)).replace("\0", " ")
+        lines.append("pid {}: {}".format(pid, cmdline[:200]))
+        try:
+            tids = sorted(int(tid) for tid in os.listdir("/proc/{}/task".format(pid)))
+        except OSError:
+            continue
+        for tid in tids:
+            base = "/proc/{}/task/{}/".format(pid, tid)
+            syscall = read_proc(base + "syscall").split()
+            name = SYSCALL_NAMES.get(syscall[0], syscall[0]) if syscall else "?"
+            lines.append(
+                "  tid {} {:<16} wchan={} syscall={}".format(
+                    tid, read_proc(base + "comm"), read_proc(base + "wchan"), name
+                )
+            )
+    return "\n".join(lines)
+
+
+def signal_group(pgid, signum):
+    try:
+        os.killpg(pgid, signum)
+    except OSError:
+        pass
+
+
+def run_test(test, timeout, default_cwd, dump_on_timeout=False):
     cwd = test.props.get("WORKING_DIRECTORY") or default_cwd
     start = time.monotonic()
     try:
@@ -181,29 +253,46 @@ def run_test(test, timeout, default_cwd):
     except OSError as err:
         return "FAIL", None, "failed to launch: {}".format(err), 0.0
 
+    states = ""
     try:
         raw, _ = proc.communicate(timeout=timeout)
         status = None
     except subprocess.TimeoutExpired:
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except OSError:
-            pass
-        raw, _ = proc.communicate()
-        status = "TIMEOUT"
+        status, raw = "TIMEOUT", None
+        if dump_on_timeout:
+            states = thread_states(proc.pid)
+            signal_group(proc.pid, signal.SIGABRT)
+            try:
+                raw, _ = proc.communicate(timeout=ABORT_GRACE_SECONDS)
+            except subprocess.TimeoutExpired:
+                pass
+        signal_group(proc.pid, signal.SIGKILL)
+        if raw is None:
+            raw, _ = proc.communicate()
 
     elapsed = time.monotonic() - start
     output = raw.decode("utf-8", "replace")
     if status is None:
         status = classify(test, proc.returncode, output)
+    if states:
+        output = "{}\n{}".format(output, states)
     return status, proc.returncode, output, elapsed
 
 
 def excerpt(output, max_lines, max_bytes):
-    """The crash report if the fault handler printed one, otherwise the tail."""
+    """The crash report if the fault handler printed one (with the lines leading up to it),
+    otherwise the tail, followed by the thread states recorded at a timeout."""
+    states = ""
+    sidx = output.find(STATES_MARKER)
+    if sidx >= 0:
+        output, states = output[:sidx], output[sidx:]
     idx = output.find(CRASH_MARKER)
-    lines = (output[idx:] if idx >= 0 else output).splitlines()
-    lines = lines[:max_lines] if idx >= 0 else lines[-max_lines:]
+    if idx >= 0:
+        lines = output[:idx].splitlines()[-10:] + output[idx:].splitlines()[:max_lines]
+    else:
+        lines = output.splitlines()[-max_lines:]
+    if states:
+        lines += states.splitlines()[:max_lines]
     text = "\n".join(lines)
     if len(text) > max_bytes:
         text = text[:max_bytes] + "\n[... excerpt truncated ...]"
@@ -343,7 +432,9 @@ def run(args):
                     "setup {} failed".format(broken_setup),
                 )
             else:
-                status, rc, output, took = run_test(test, timeout, args.test_dir)
+                status, rc, output, took = run_test(
+                    test, timeout, args.test_dir, dump_on_timeout=not cut
+                )
                 if status == "TIMEOUT" and cut:
                     status = "CUT"
                     if seen is None and test.name not in cut_unseen:
