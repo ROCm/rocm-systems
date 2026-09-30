@@ -442,6 +442,11 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/hip.F90"
 # configuration file". A forwarder gives the search somewhere to land without
 # duplicating the real config, which would also need its own copy of the targets
 # file and would then be a second thing to keep in step.
+#
+# It is written under forward/ because the real config, configured above,
+# already occupies ${CMAKE_CURRENT_BINARY_DIR}/hip-fortran-config.cmake: same
+# basename, so the forwarder needs a directory of its own. file(WRITE) creates
+# that directory.
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/forward/hip-fortran-config.cmake"
 "# Generated forwarder. The real config lives beside the HIP C package, in
 # lib/cmake/hip, so that hip-config.cmake can include it as a sibling. This file
