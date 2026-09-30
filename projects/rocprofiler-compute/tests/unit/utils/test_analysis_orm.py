@@ -12,9 +12,13 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from memory_chart.loader import list_layout_files
 from pc_sampling.source_snapshot_analysis import parse_source_frames
+from tools.schema_snapshot import SNAPSHOT_PATH, build_schema_snapshot
 from utils.analysis_orm import (
+    MEMCHART_VALUE_SETS,
     PER_KERNEL_ISA_FILE_KEY_COLUMN_COUNT,
+    PREFIX,
     CodeObjectStore,
     Database,
     Dispatch,
@@ -1071,3 +1075,35 @@ def test_per_kernel_isa_select_leads_with_the_file_key_columns():
         "code_object_id",
         "pid",
     ]
+
+
+# =============================================================================
+# Schema contract
+# =============================================================================
+
+
+def test_committed_schema_snapshot_matches_the_schema():
+    """Any schema change must bump the version and rewrite the snapshot."""
+    committed = json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8"))
+
+    assert committed == build_schema_snapshot(), (
+        "The analysis db schema changed. Bump SCHEMA_VERSION by the rules in "
+        "docs/how-to/analyze/cli.rst, then run ./tools/schema_snapshot.py --write."
+    )
+
+
+def test_memory_chart_layouts_use_only_the_documented_values():
+    """A layout value outside the value sets would reach readers unannounced."""
+    used = {column: set() for column in MEMCHART_VALUE_SETS}
+    for layout_file in list_layout_files():
+        layout = json.loads(layout_file.read_text(encoding="utf-8"))
+        for block in layout["blocks"]:
+            used[f"{PREFIX}memchart_block.position"].add(block.get("position", "grid"))
+            for item in block["content"]:
+                used[f"{PREFIX}memchart_block_metric.category"].add(item["category"])
+        for arrow in layout["arrows"]:
+            used[f"{PREFIX}memchart_arrow.direction"].add(arrow["direction"])
+            used[f"{PREFIX}memchart_arrow.category"].add(arrow["category"])
+
+    for column, values in used.items():
+        assert values <= MEMCHART_VALUE_SETS[column], column

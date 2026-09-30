@@ -17,8 +17,10 @@ import common
 import numpy as np
 import pandas as pd
 import pytest
+import yaml
 from sqlalchemy import text
 
+from memory_chart.loader import load_layout
 from pc_sampling import per_kernel_isa_export, source_snapshot_analysis
 from pc_sampling.code_object_analysis import CodeObjectInstruction, CodeObjectSymbol
 from pc_sampling.pc_sampling_analysis import SOURCE_LINE_MISSING, InstructionLineRecord
@@ -35,6 +37,7 @@ from utils.metrics.noise_clamper import (
     clear_noise_clamp_warnings,
     get_noise_clamp_warnings,
 )
+from utils.utils_common import canonical_config_arch
 
 ISA_WORKLOAD_NAME = "vector_copy"
 ISA_WORKLOAD_SUB_NAME = "run"
@@ -267,6 +270,73 @@ def cleanup_database() -> None:
         current_engine.dispose()
     orm.Database._session = None
     orm.Database._engine = None
+
+
+ANALYSIS_CONFIGS_DIR = (
+    Path(__file__).resolve().parents[3]
+    / "src"
+    / "rocprof_compute_soc"
+    / "analysis_configs"
+)
+
+# One architecture per layout family.
+MEMORY_CHART_ARCHS = ["gfx90a", "gfx942", "gfx950", "gfx1151", "gfx1250"]
+
+
+def memory_chart_metric_names(layout):
+    """Every metric name a layout shows, in blocks and on arrows."""
+    return {
+        item["metric"] for block in layout["blocks"] for item in block["content"]
+    } | {arrow["metric"] for arrow in layout["arrows"]}
+
+
+def make_memory_chart_metrics_info(layout, omitted_names=()):
+    """Build Memory Chart metric info rows for every metric the layout shows."""
+    names = sorted(memory_chart_metric_names(layout) - set(omitted_names))
+    return pd.DataFrame([
+        {
+            "name": name,
+            "metric_id": f"3.1.{index}",
+            "description": None,
+            "unit": "Pct",
+            "table_name": "Memory Chart",
+            "sub_table_name": "Memory Chart",
+        }
+        for index, name in enumerate(names)
+    ])
+
+
+def add_memory_chart_workload(
+    db_session, gpu_arch, metrics_info, kernel_values=None, name="workload"
+):
+    """Write one workload's metrics, and so its memory chart, and return it."""
+    workload_path = f"/fake/{name}"
+    workload = orm.Workload(name=name, sub_name="run")
+    db_session.add(workload)
+    analyzer = db_analysis(SimpleNamespace(output_name=None, output_format="db"), {})
+    analyzer._runs = {
+        workload_path: schema.Workload(sys_info=pd.DataFrame([{"gpu_arch": gpu_arch}]))
+    }
+    analyzer._metrics_info_data_per_workload = {workload_path: metrics_info}
+    analyzer._kernel_values_data_per_workload = {
+        workload_path: kernel_values if kernel_values is not None else pd.DataFrame()
+    }
+    analyzer._workload_values_data_per_workload = {}
+
+    kernel = orm.Kernel(kernel_name="kernel", workload=workload)
+    db_session.add(kernel)
+    analyzer.run_analysis_metrics(workload_path, workload, {"kernel": kernel})
+    db_session.commit()
+    return workload
+
+
+def linked_metric_definitions(workload):
+    """The metric definitions a workload's chart blocks and arrows point to."""
+    return [
+        block_metric.metric
+        for block in workload.memchart_blocks
+        for block_metric in block.block_metrics
+    ] + [arrow.metric for arrow in workload.memchart_arrows]
 
 
 # =============================================================================
@@ -3562,3 +3632,177 @@ def test_calc_roofline_data_includes_all_kernels(monkeypatch):
     workload_metrics = workload_data[workload_path]
     assert len(workload_metrics) == len(roofline_metrics)
     assert all(v == 42.0 for v in workload_metrics.values())
+
+
+# =============================================================================
+# Memory chart structure
+# =============================================================================
+
+
+@pytest.mark.parametrize("gpu_arch", MEMORY_CHART_ARCHS)
+def test_add_memory_chart_mirrors_the_layout(db_session, gpu_arch):
+    """The stored blocks, nesting, block metrics and arrows match the layout."""
+    layout = load_layout(canonical_config_arch(gpu_arch))
+
+    workload = add_memory_chart_workload(
+        db_session, gpu_arch, make_memory_chart_metrics_info(layout)
+    )
+
+    parent_ids = {
+        child_id: block["id"]
+        for block in layout["blocks"]
+        for child_id in block.get("children", [])
+    }
+    assert {
+        block.block_id: (
+            block.title,
+            block.grid_column,
+            block.position,
+            block.parent_block.block_id if block.parent_block else None,
+            [
+                (block_metric.metric.name, block_metric.label, block_metric.category)
+                for block_metric in block.block_metrics
+            ],
+        )
+        for block in workload.memchart_blocks
+    } == {
+        block["id"]: (
+            block["title"],
+            block["column"],
+            block.get("position", "grid"),
+            parent_ids.get(block["id"]),
+            [
+                (item["metric"], item["title"], item["category"])
+                for item in block["content"]
+            ],
+        )
+        for block in layout["blocks"]
+    }
+    assert [
+        (
+            arrow.from_block.block_id,
+            arrow.to_block.block_id,
+            arrow.direction,
+            arrow.metric.name,
+            arrow.label,
+            arrow.category,
+            arrow.group_label,
+        )
+        for arrow in workload.memchart_arrows
+    ] == [
+        (
+            arrow["from"],
+            arrow["to"],
+            arrow["direction"],
+            arrow["metric"],
+            arrow["title"],
+            arrow["category"],
+            arrow.get("group"),
+        )
+        for arrow in layout["arrows"]
+    ]
+
+
+def test_add_memory_chart_orders_child_blocks_by_their_place_in_the_parent(
+    db_session,
+):
+    """A child block has no order in the layout, so it takes its child index."""
+    layout = load_layout("gfx1250")
+
+    workload = add_memory_chart_workload(
+        db_session, "gfx1250", make_memory_chart_metrics_info(layout)
+    )
+
+    blocks = {block.block_id: block for block in workload.memchart_blocks}
+    assert {
+        block_id: (block.parent_block.block_id, block.sort_order)
+        for block_id, block in blocks.items()
+        if block.parent_block
+    } == {
+        "lds": ("tcp", 0),
+        "gl0": ("tcp", 1),
+        "icache": ("sqc", 0),
+        "dcache": ("sqc", 1),
+    }
+    assert (blocks["tcp"].sort_order, blocks["sqc"].sort_order) == (0, 1)
+
+
+def test_add_memory_chart_adds_definitions_for_metrics_without_values(db_session):
+    """A chart metric no value created still gets its definition and link."""
+    layout = load_layout("gfx950")
+    metrics_info = make_memory_chart_metrics_info(layout)
+    valued_metric = metrics_info.iloc[0]
+    kernel_values = pd.DataFrame([
+        {
+            "metric_id": valued_metric["metric_id"],
+            "kernel_name": "kernel",
+            "value_name": "Value",
+            "value": 1.0,
+        }
+    ])
+
+    add_memory_chart_workload(db_session, "gfx950", metrics_info, kernel_values)
+
+    definitions = db_session.query(orm.MetricDefinition).all()
+    # One definition per chart metric: the valued one is reused, not repeated.
+    assert sorted(definition.name for definition in definitions) == sorted(
+        memory_chart_metric_names(layout)
+    )
+    assert [
+        definition.name for definition in definitions if definition.kernel_metric_values
+    ] == [valued_metric["name"]]
+
+
+def test_add_memory_chart_links_each_workload_to_its_own_definitions(db_session):
+    """Two workloads on one architecture never share metric definitions."""
+    layout = load_layout("gfx942")
+    workloads = [
+        add_memory_chart_workload(
+            db_session, "gfx942", make_memory_chart_metrics_info(layout), name=name
+        )
+        for name in ("first", "second")
+    ]
+
+    for workload in workloads:
+        assert {
+            definition.workload_id for definition in linked_metric_definitions(workload)
+        } == {workload.workload_id}
+
+
+def test_add_memory_chart_skips_a_chart_whose_metrics_were_filtered_out(db_session):
+    """-b leaving out any chart metric writes no chart and no extra definitions."""
+    layout = load_layout("gfx950")
+    metrics_info = make_memory_chart_metrics_info(
+        layout, omitted_names=[layout["arrows"][0]["metric"]]
+    )
+
+    add_memory_chart_workload(db_session, "gfx950", metrics_info)
+
+    assert db_session.query(orm.MemoryChartBlock).count() == 0
+    assert db_session.query(orm.MemoryChartArrow).count() == 0
+    assert db_session.query(orm.MetricDefinition).count() == 0
+
+
+def test_add_memory_chart_skips_an_architecture_without_a_layout(db_session):
+    """An architecture with no layout writes no chart."""
+    add_memory_chart_workload(db_session, "gfx1030", pd.DataFrame())
+
+    assert db_session.query(orm.MemoryChartBlock).count() == 0
+
+
+@pytest.mark.parametrize(
+    "panel_path",
+    sorted(ANALYSIS_CONFIGS_DIR.glob("*/0300_memory_chart.yaml")),
+    ids=lambda path: path.parent.name,
+)
+def test_every_memory_chart_metric_has_a_unit(panel_path):
+    """Readers take each chart metric's unit from its definition in the db."""
+    panel = yaml.safe_load(panel_path.read_text(encoding="utf-8"))["Panel Config"]
+    for data_source in panel["data source"]:
+        for table in data_source.values():
+            assert "unit" in table["header"], table["id"]
+            assert [
+                name
+                for name, metric in table["metric"].items()
+                if not metric.get("unit")
+            ] == []
