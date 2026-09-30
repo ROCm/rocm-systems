@@ -112,7 +112,7 @@ unified_memory_processor_t::unified_memory_processor_t(
 , m_agent_manager(std::move(agent_mgr))
 , m_pid(pid)
 , m_output_dir(config::get_ump_absolute_path())
-, m_output_sink(std::move(output_sink))
+, m_output_sink(output_sink)
 {
     const char* xnack    = std::getenv("HSA_XNACK");
     m_data.xnack_enabled = (xnack && std::strcmp(xnack, "1") == 0);

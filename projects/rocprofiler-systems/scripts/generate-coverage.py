@@ -142,6 +142,74 @@ def changed_files(source_dir: Path, base: Optional[str]) -> set[Path]:
     return dirty | untracked
 
 
+def _gcovr_base_cmd(
+    *,
+    gcov_cmd: str,
+    source_dir: Path,
+    dir_scope: Path,
+    extra_excludes: list[str],
+) -> list[str]:
+    cmd = [
+        sys.executable,
+        "-m",
+        "gcovr",
+        "--root",
+        str(source_dir),
+        "--gcov-executable",
+        gcov_cmd,
+        "--exclude-unreachable-branches",
+        "--exclude-throw-branches",
+        "--gcov-ignore-parse-errors",
+        "--gcov-ignore-errors=source_not_found",
+        "--merge-lines",
+        "--merge-mode-functions=merge-use-line-max",
+        "-s",
+        "-p",
+        "--filter",
+        scope_filter(dir_scope),
+    ]
+    for pattern in GCOVR_EXCLUDE_PATTERNS + extra_excludes:
+        cmd.extend(["--exclude", pattern])
+    return cmd
+
+
+def _run(cmd: list[str], build_dir: Path) -> subprocess.CompletedProcess:
+    print(f"Running: {' '.join(cmd)}")
+    result = subprocess.run([*cmd, str(build_dir)], capture_output=True, text=True)
+    if result.stdout:
+        print(result.stdout)
+    return result
+
+
+def _stale_source_excludes(json_path: Path, source_dir: Path) -> list[str]:
+    """Coverage data recorded for a file that no longer exists on disk.
+
+    Happens when the build directory is reused after files were renamed or
+    deleted (e.g. an incremental CI build): gcovr can still read line counts
+    from the stale .gcda/.gcno pair, but the HTML/single-page writers also
+    read the source file's *content* and hard-fail if it is missing. Excluding
+    those specific paths keeps the report generation from crashing on
+    coverage data that is unavoidably out of date.
+    """
+    data = load_coverage_json(json_path)
+    stale = []
+    for file_data in data.get("files", []):
+        filename = file_data.get("filename", "") or file_data.get("file", "")
+        if not filename:
+            continue
+        path = canonical(filename, source_dir)
+        if not path.is_file():
+            stale.append(path)
+    if stale:
+        print(
+            f"WARNING: {len(stale)} file(s) with coverage data no longer exist on "
+            f"disk; excluding from the report: "
+            f"{', '.join(str(p) for p in stale)}",
+            file=sys.stderr,
+        )
+    return [re.escape(str(p)) for p in stale]
+
+
 def run_gcovr(
     *,
     gcov_cmd: str,
@@ -157,40 +225,34 @@ def run_gcovr(
     xml_path = output_dir / f"{label}.xml"
     html_path = output_dir / f"{label}.html"
 
-    gcovr_cmd = [sys.executable, "-m", "gcovr"]
-    cmd = [
-        *gcovr_cmd,
-        "--root",
-        str(source_dir),
-        "--gcov-executable",
-        gcov_cmd,
-        "--exclude-unreachable-branches",
-        "--exclude-throw-branches",
-        "--gcov-ignore-parse-errors",
-        "--merge-lines",
-        "--merge-mode-functions=merge-use-line-max",
-        "-s",
-        "-p",
-        "--filter",
-        scope_filter(dir_scope),
-        "--json",
-        str(json_path),
-        "--xml",
-        str(xml_path),
-        "--html-details",
-        str(html_path),
-    ]
+    probe_cmd = _gcovr_base_cmd(
+        gcov_cmd=gcov_cmd, source_dir=source_dir, dir_scope=dir_scope, extra_excludes=[]
+    )
+    probe_cmd.extend(["--json", str(json_path)])
+    result = _run(probe_cmd, build_dir)
+    if result.returncode != 0:
+        print(f"gcovr stderr:\n{result.stderr}", file=sys.stderr)
+        sys.exit(1)
 
-    for pattern in GCOVR_EXCLUDE_PATTERNS:
-        cmd.extend(["--exclude", pattern])
+    extra_excludes = _stale_source_excludes(json_path, source_dir)
 
-    cmd.append(str(build_dir))
-
-    print(f"Running: {' '.join(cmd)}")
-    result = subprocess.run(cmd, capture_output=True, text=True)
-
-    if result.stdout:
-        print(result.stdout)
+    cmd = _gcovr_base_cmd(
+        gcov_cmd=gcov_cmd,
+        source_dir=source_dir,
+        dir_scope=dir_scope,
+        extra_excludes=extra_excludes,
+    )
+    cmd.extend(
+        [
+            "--json",
+            str(json_path),
+            "--xml",
+            str(xml_path),
+            "--html-details",
+            str(html_path),
+        ]
+    )
+    result = _run(cmd, build_dir)
     if result.returncode != 0:
         print(f"gcovr stderr:\n{result.stderr}", file=sys.stderr)
         sys.exit(1)

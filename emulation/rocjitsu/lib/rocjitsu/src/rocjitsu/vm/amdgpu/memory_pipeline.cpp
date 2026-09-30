@@ -563,7 +563,7 @@ template <typename T> T apply_int_atomic(AtomicOp op, T old_val, T src_val, T cm
 // Translate the deferred request into the shared ISA floating-point contract.
 template <typename Bits>
 Bits apply_fp_atomic(const VectorMemState &state, Bits old_bits, Bits source_bits,
-                     Bits compare_bits, uint32_t denorm_mode) {
+                     Bits compare_bits, uint32_t denorm_mode, bool local = false) {
   fp_mode::ScalarAtomicOp operation;
   switch (state.atomic_op) {
   case AtomicOp::FADD:
@@ -582,7 +582,7 @@ Bits apply_fp_atomic(const VectorMemState &state, Bits old_bits, Bits source_bit
     return old_bits;
   }
   return fp_mode::atomic_scalar(operation, old_bits, source_bits, compare_bits, denorm_mode,
-                                state.atomic_legacy_minmax);
+                                state.atomic_legacy_minmax, local || state.atomic_source_nan_first);
 }
 
 bool is_packed_add(AtomicOp op) {
@@ -777,8 +777,12 @@ VmAccessOutcome execute_translated_atomic_rmw(VectorMemState &d) {
           std::memcpy(&compare, &d.store_data[lane * source_stride + sizeof(source)],
                       sizeof(compare));
         compare_value = compare;
-        new_value = is_fp ? apply_fp_atomic(d, old32, source, compare, d.atomic_denorm_mode)
-                          : apply_int_atomic(d.atomic_op, old32, source, compare);
+        new_value =
+            is_packed_add(d.atomic_op)
+                ? fp_mode::atomic_add_packed_16(old32, source, d.atomic_op == AtomicOp::PK_ADD_BF16,
+                                                3, d.atomic_source_nan_first)
+            : is_fp ? apply_fp_atomic(d, old32, source, compare, d.atomic_denorm_mode)
+                    : apply_int_atomic(d.atomic_op, old32, source, compare);
       } else if (width == sizeof(uint64_t)) {
         uint64_t source = 0;
         uint64_t compare = 0;
@@ -852,7 +856,7 @@ VmAccessOutcome execute_atomic_rmw(VectorMemState &d, L2Cache *l2, uint32_t vmid
               std::memcpy(&src_val, &d.store_data[lane * src_stride], 4);
               new_val = fp_mode::atomic_add_packed_16(old_val, src_val,
                                                       d.atomic_op == AtomicOp::PK_ADD_BF16,
-                                                      /*denorm_mode=*/3);
+                                                      /*denorm_mode=*/3, d.atomic_source_nan_first);
             } else if (is_fp) {
               uint32_t source_bits = 0, compare_bits = 0;
               std::memcpy(&source_bits, &d.store_data[lane * src_stride], 4);
@@ -954,14 +958,16 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds,
       if (is_packed_add(d.atomic_op)) {
         uint32_t src_val;
         std::memcpy(&src_val, &store_data[lane * src_stride], 4);
-        new_val = fp_mode::atomic_add_packed_16(
-            old_val, src_val, d.atomic_op == AtomicOp::PK_ADD_BF16, d.packed_denorm_mode);
+        new_val =
+            fp_mode::atomic_add_packed_16(old_val, src_val, d.atomic_op == AtomicOp::PK_ADD_BF16,
+                                          d.packed_denorm_mode, /*source_first=*/true);
       } else if (is_fp) {
         uint32_t source_bits = 0, compare_bits = 0;
         std::memcpy(&source_bits, &store_data[lane * src_stride], 4);
         if (uses_two_sources)
           std::memcpy(&compare_bits, &store_data[lane * src_stride + 4], 4);
-        new_val = apply_fp_atomic(d, old_val, source_bits, compare_bits, d.atomic_lds_denorm_mode);
+        new_val = apply_fp_atomic(d, old_val, source_bits, compare_bits, d.atomic_lds_denorm_mode,
+                                  /*local=*/true);
       } else {
         uint32_t src_val = 0, cmp_val = 0;
         std::memcpy(&src_val, &store_data[lane * src_stride], 4);
@@ -985,7 +991,8 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds,
         std::memcpy(&source_bits, &store_data[lane * src_stride], 8);
         if (uses_two_sources)
           std::memcpy(&compare_bits, &store_data[lane * src_stride + 8], 8);
-        new_val = apply_fp_atomic(d, old_val, source_bits, compare_bits, d.atomic_lds_denorm_mode);
+        new_val = apply_fp_atomic(d, old_val, source_bits, compare_bits, d.atomic_lds_denorm_mode,
+                                  /*local=*/true);
       } else {
         uint64_t src_val = 0, cmp_val = 0;
         std::memcpy(&src_val, &store_data[lane * src_stride], 8);
