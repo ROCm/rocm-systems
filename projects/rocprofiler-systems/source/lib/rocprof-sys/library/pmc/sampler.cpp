@@ -492,7 +492,8 @@ register_gpu_perf_counter_source(const std::vector<std::shared_ptr<agent>>& agen
         {
             for(const auto& gpu_agent : agent_list)
             {
-                counters.push_back({ name, gpu_agent->device_type_index });
+                counters.push_back(
+                    { .name = name, .device_index = gpu_agent->device_type_index });
             }
         }
 

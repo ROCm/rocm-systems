@@ -54,7 +54,7 @@ struct find_pool_data {
 // matches the flags and allocatability recorded in the find_pool_data* stored
 // in `data`, storing the result there and returning HSA_STATUS_INFO_BREAK.
 //
-// Note this keys on RUNTIME_ALLOC_REC_GRANULE where memory.cc's equivalent keys on
+// Note this keys on RUNTIME_ALLOC_REC_GRANULE where test_memory.cc's equivalent keys on
 // RUNTIME_ALLOC_GRANULE. The two very likely select the same pool, but that has not been
 // established, so the two files keep their own predicate rather than sharing one.
 hsa_status_t find_memory_pool(hsa_amd_memory_pool_t pool, void* data) {

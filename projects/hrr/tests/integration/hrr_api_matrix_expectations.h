@@ -17,7 +17,7 @@
  * the matrix reporter from drifting into disagreeing about what an API is
  * supposed to do at replay.
  *
- * Generated 2026-09-11 from 553 HIP APIs.
+ * Generated 2026-09-30 from 554 HIP APIs.
  */
 
 #pragma once
@@ -491,6 +491,7 @@ inline constexpr HrrApiExpectation kHrrApiMatrix[] = {
     {"hipMemsetD8", "T4", 0, false, true, false, false, 0},
     {"hipMemsetD8Async", "T4", 0, false, true, false, false, 0},
     {"hipMemset_spt", "T4", 0, false, true, false, false, 0},
+    {"hipModuleEnumerateFunctions", "T4", 1, false, true, false, false, 0},
     {"hipModuleGetFunctionCount", "T4", 1, false, true, false, false, 0},
     {"hipModuleGetTexRef", "T4", 1, false, true, false, false, 1},
     {"hipModuleLaunchCooperativeKernelMultiDevice", "T4", 0, false, true, false, false, 0},

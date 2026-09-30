@@ -59,21 +59,33 @@ inline std::unordered_map<std::uint32_t, track_description>
 make_default_tracks()
 {
     return {
-        { GFX_BUSY_VALUE, { "GFX Busy", "%", {} } },
-        { UMC_BUSY_VALUE, { "UMC Avg. Busy", "%", {} } },
-        { MM_BUSY_VALUE, { "MM Busy", "%", {} } },
-        { TEMPERATURE_VALUE, { "Temperature", "deg C", {} } },
-        { CURRENT_POWER_VALUE, { "Current Power", "watts", {} } },
-        { MEMORY_USAGE_VALUE, { "Memory Usage", "megabytes", {} } },
-        { VCN_ACTIVITY_VALUE, { "VCN Activity", "%", {} } },
-        { JPEG_ACTIVITY_VALUE, { "JPEG Activity", "%", {} } },
-        { VCN_BUSY_VALUE, { "VCN Busy", "%", {} } },
-        { JPEG_BUSY_VALUE, { "JPEG Busy", "%", {} } },
-        { XGMI_VALUE, { "XGMI", "", {} } },
-        { PCIE_VALUE, { "PCIe", "", {} } },
-        { SDMA_USAGE_VALUE, { "SDMA Usage", "%", {} } },
-        { GFX_CLOCK_VALUE, { "GFX Clock", "MHz", {} } },
-        { MEM_CLOCK_VALUE, { "Memory Clock", "MHz", {} } },
+        { GFX_BUSY_VALUE,
+          { .track_name = "GFX Busy", .units = "%", .track_indexes = {} } },
+        { UMC_BUSY_VALUE,
+          { .track_name = "UMC Avg. Busy", .units = "%", .track_indexes = {} } },
+        { MM_BUSY_VALUE, { .track_name = "MM Busy", .units = "%", .track_indexes = {} } },
+        { TEMPERATURE_VALUE,
+          { .track_name = "Temperature", .units = "deg C", .track_indexes = {} } },
+        { CURRENT_POWER_VALUE,
+          { .track_name = "Current Power", .units = "watts", .track_indexes = {} } },
+        { MEMORY_USAGE_VALUE,
+          { .track_name = "Memory Usage", .units = "megabytes", .track_indexes = {} } },
+        { VCN_ACTIVITY_VALUE,
+          { .track_name = "VCN Activity", .units = "%", .track_indexes = {} } },
+        { JPEG_ACTIVITY_VALUE,
+          { .track_name = "JPEG Activity", .units = "%", .track_indexes = {} } },
+        { VCN_BUSY_VALUE,
+          { .track_name = "VCN Busy", .units = "%", .track_indexes = {} } },
+        { JPEG_BUSY_VALUE,
+          { .track_name = "JPEG Busy", .units = "%", .track_indexes = {} } },
+        { XGMI_VALUE, { .track_name = "XGMI", .units = "", .track_indexes = {} } },
+        { PCIE_VALUE, { .track_name = "PCIe", .units = "", .track_indexes = {} } },
+        { SDMA_USAGE_VALUE,
+          { .track_name = "SDMA Usage", .units = "%", .track_indexes = {} } },
+        { GFX_CLOCK_VALUE,
+          { .track_name = "GFX Clock", .units = "MHz", .track_indexes = {} } },
+        { MEM_CLOCK_VALUE,
+          { .track_name = "Memory Clock", .units = "MHz", .track_indexes = {} } },
     };
 }
 
@@ -306,7 +318,8 @@ struct perfetto_policy
                              std::uint64_t timestamp)
     {
         detail::get_perfetto_data()[device_index].samples->emplace_back(
-            detail::perfetto_amd_smi_sample{ timestamp, metric_values });
+            detail::perfetto_amd_smi_sample{ .timestamp = timestamp,
+                                             .metrics   = metric_values });
     }
 
     /**

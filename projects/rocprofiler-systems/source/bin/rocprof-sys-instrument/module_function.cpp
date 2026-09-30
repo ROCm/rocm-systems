@@ -1071,7 +1071,10 @@ module_function::operator()(address_space_t* _addr_space, procedure_t* _entr_tra
     rocprofsys::function_args_t _args{};
     if(!_source_obj_name.empty())
     {
-        _args.push_back({ 0U, "string", "source_object", _source_obj_name });
+        _args.push_back({ .arg_number = 0U,
+                          .arg_type   = "string",
+                          .arg_name   = "source_object",
+                          .arg_value  = _source_obj_name });
     }
     auto _serialized_args = rocprofsys::get_args_string(_args);
     bool use_args_entr    = (!_serialized_args.empty() && _entr_trace_args);
