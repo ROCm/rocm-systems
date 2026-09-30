@@ -341,7 +341,7 @@ public:
 
 
 /**
- * @name UpdateCQ and Ordering.
+ * @name Completion and Ordering.
  *
  * @{
  */

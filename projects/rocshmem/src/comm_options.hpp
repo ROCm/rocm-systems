@@ -10,19 +10,34 @@
  * @section DESCRIPTION
  * Backend-agnostic, compile-time options for communication operations.
  *
- * Each option is a tag describing a property of a communication call. Backends
- * consume the tags they understand and ignore the rest, so the same CommOpt can
- * be threaded uniformly through every API communication call. These options
- * were historically the GDA queue-pair "PostOpt" options; the tag names are
- * preserved here (a later commit gives them backend-agnostic semantic names).
+ * Each option is a tag describing an app-level property/semantic of a
+ * communication call (not a backend implementation detail). Backends consume
+ * the tags they understand and ignore the rest, so the same CommOpt can be
+ * threaded uniformly through every API communication call.
+ *
+ * These options were historically the GDA queue-pair "PostOpt" options; the
+ * tags are named for the app-level semantics they express:
+ *   - initiate     : launch the transfer now, or stage it for a later
+ *                    initiating call (batched submission).
+ *                    (GDA: ring the SQ doorbell.)
+ *   - concurrent   : the issuing context may be accessed by multiple threads
+ *                    concurrently and needs internal serialization; set false
+ *                    when the app guarantees serialized access.
+ *                    (GDA: take the SQ lock.)
+ *   - flow_control : the library enforces capacity/backpressure; set false when
+ *                    the app guarantees outstanding operations stay within
+ *                    capacity. (GDA: poll the CQ for free SQ slots.)
+ *   - completion   : completion-tracking granularity: notify per-op (Every),
+ *                    per-group (Last), or not at all (None).
+ *                    (GDA: set MLX5_WQE_CTRL_CQ_UPDATE.)
  */
 
 #include <type_traits>
 
 #include <hip/hip_runtime.h>
 
-// ActiveWFInfo (used by the CQ-update helper). It only depends on util.hpp, so
-// including it here does not couple CommOpt to any GDA transport.
+// ActiveWFInfo (used by the completion-granularity helper). It only depends on
+// util.hpp, so including it here does not couple CommOpt to any GDA transport.
 #include "gda/queue_pair/queue_pair_common.hpp"
 
 namespace rocshmem {
@@ -54,54 +69,60 @@ namespace CommOption {
   template <template<auto> typename option_tag>
   constexpr inline auto default_option_v = default_option_t<option_tag>::value;
 
-  enum class UpdateThread {
-    All,
-    Last,
-    None,
+  /*
+   * @brief Completion-tracking granularity.
+   */
+  enum class CompletionScope {
+    Every,  // every operation is individually tracked to completion
+    Last,   // only the last operation in a group is tracked
+    None,   // fire-and-forget; no completion tracking
   };
 
   /*
-   * @brief Option: whether the send queue doorbell will be rung.
+   * @brief Option: whether this call initiates (launches) the transfer now, or
+   * stages it to be launched together with a later initiating call.
    */
-  template <bool ring_db>
-  struct ring_db_tag : constant_t<ring_db> { };
+  template <bool initiate>
+  struct initiate_tag : constant_t<initiate> { };
 
-  template <> struct default_option<ring_db_tag> {
-    /* default: DO ring the doorbell */
-    using type = ring_db_tag<true>;
+  template <> struct default_option<initiate_tag> {
+    /* default: DO initiate the transfer now */
+    using type = initiate_tag<true>;
   };
 
   /*
-   * @brief Option: whether thread safety will be enforced.
+   * @brief Option: whether the issuing context may be accessed concurrently by
+   * multiple threads/waves (requiring internal serialization).
    */
-  template <bool thread_safe>
-  struct thread_safe_tag : constant_t<thread_safe> { };
+  template <bool concurrent>
+  struct concurrent_tag : constant_t<concurrent> { };
 
-  template <> struct default_option<thread_safe_tag> {
-    /* default: DO use thread safety */
-    using type = thread_safe_tag<true>;
+  template <> struct default_option<concurrent_tag> {
+    /* default: DO assume concurrent access (serialize internally) */
+    using type = concurrent_tag<true>;
   };
 
   /*
-   * @brief Option: whether the number of available send queue entries will be checked.
+   * @brief Option: whether the library enforces flow control
+   * (capacity/backpressure) for this operation.
    */
-  template <bool check_sq>
-  struct check_sq_tag : constant_t<check_sq> { };
+  template <bool flow_control>
+  struct flow_control_tag : constant_t<flow_control> { };
 
-  template <> struct default_option<check_sq_tag> {
-    /* default: DO check the SQ */
-    using type = check_sq_tag<true>;
+  template <> struct default_option<flow_control_tag> {
+    /* default: DO enforce flow control */
+    using type = flow_control_tag<true>;
   };
 
   /*
-   * @brief Option: which threads' WQEs will generate CQEs.
+   * @brief Option: completion-tracking granularity for this operation.
    */
-  template <UpdateThread update_cq>
-  struct update_cq_tag : constant_t<update_cq> { };
+  template <CompletionScope completion>
+  struct completion_tag : constant_t<completion> { };
 
-  template <> struct default_option<update_cq_tag> {
-    /* default: all WQEs update the CQ */
-    using type = update_cq_tag<UpdateThread::All>;
+  template <> struct default_option<completion_tag> {
+    /* default: track every operation to completion */
+    using type = completion_tag<CompletionScope::Every>;
   };
 
   /* forward declaration */
@@ -123,145 +144,145 @@ namespace CommOption {
 #pragma clang diagnostic pop
 
   /* Base case with all options defined */
-  template <bool ring_db, bool thread_safe, bool check_sq, UpdateThread update_cq>
-  struct CommOpt<ring_db_tag<ring_db>,
-                 thread_safe_tag<thread_safe>,
-                 check_sq_tag<check_sq>,
-                 update_cq_tag<update_cq>> {
+  template <bool initiate, bool concurrent, bool flow_control, CompletionScope completion>
+  struct CommOpt<initiate_tag<initiate>,
+                 concurrent_tag<concurrent>,
+                 flow_control_tag<flow_control>,
+                 completion_tag<completion>> {
     /* explicitly-defaulted default constructor */
     __host__ __device__ constexpr CommOpt() = default;
     /* constructor for type deduction from tags */
-    __host__ __device__ constexpr CommOpt(ring_db_tag<ring_db>,
-                                          thread_safe_tag<thread_safe>,
-                                          check_sq_tag<check_sq>,
-                                          update_cq_tag<update_cq>) { }
+    __host__ __device__ constexpr CommOpt(initiate_tag<initiate>,
+                                          concurrent_tag<concurrent>,
+                                          flow_control_tag<flow_control>,
+                                          completion_tag<completion>) { }
 
     /* static constexpr data members to simplify option access */
-    static constexpr auto RingDB     = ring_db;
-    static constexpr auto ThreadSafe = thread_safe;
-    static constexpr auto CheckSQ    = check_sq;
-    static constexpr auto UpdateCQ   = update_cq;
+    static constexpr auto Initiate    = initiate;
+    static constexpr auto Concurrent  = concurrent;
+    static constexpr auto FlowControl = flow_control;
+    static constexpr auto Completion  = completion;
 
     static __device__ constexpr inline bool signal_completion(const ActiveWFInfo& wf_info) {
-      if constexpr (UpdateCQ == UpdateThread::All) {
-        // all WQEs update the CQ
+      if constexpr (Completion == CompletionScope::Every) {
+        // every operation is tracked to completion
         return true;
-      } else if constexpr (UpdateCQ == UpdateThread::Last) {
-        // only the last WQE in each group updates the CQ
+      } else if constexpr (Completion == CompletionScope::Last) {
+        // only the last operation in each group is tracked
         return wf_info.is_pe_group_last;
       } else {
-        // no WQEs update the CQ
+        // no completion tracking
         return false;
       }
     }
 
     static __device__ constexpr inline bool signal_completion_single() {
-      if constexpr (UpdateCQ == UpdateThread::All) {
-        // all WQEs update the CQ
+      if constexpr (Completion == CompletionScope::Every) {
+        // every operation is tracked to completion
         return true;
-      } else if constexpr (UpdateCQ == UpdateThread::Last) {
-        // singleton groups, so all threads are "last": all WQEs update the CQ
+      } else if constexpr (Completion == CompletionScope::Last) {
+        // singleton groups, so all threads are "last": track all
         return true;
       } else {
-        // no WQEs update the CQ
+        // no completion tracking
         return false;
       }
     }
   };
 
   /* Extraneous parameters,
-   * else matches CommOpt<ring_db_tag, thread_safe_tag, check_sq_tag, update_cq_tag> */
-  template <bool ring_db, bool thread_safe, bool check_sq, UpdateThread update_cq,
+   * else matches CommOpt<initiate_tag, concurrent_tag, flow_control_tag, completion_tag> */
+  template <bool initiate, bool concurrent, bool flow_control, CompletionScope completion,
             typename... Options>
-  struct CommOpt<ring_db_tag<ring_db>,
-                 thread_safe_tag<thread_safe>,
-                 check_sq_tag<check_sq>,
-                 update_cq_tag<update_cq>,
+  struct CommOpt<initiate_tag<initiate>,
+                 concurrent_tag<concurrent>,
+                 flow_control_tag<flow_control>,
+                 completion_tag<completion>,
                  Options...> {
     static_assert(sizeof...(Options) == 0, "Too many or invalid options");
   };
 
-  /* Missing update_cq_tag,
-   * else matches CommOpt<ring_db_tag, thread_safe_tag, check_sq_tag, update_cq_tag, Options...> */
-  template <bool ring_db, bool thread_safe, bool check_sq, typename... Options>
-  struct CommOpt<ring_db_tag<ring_db>,
-                 thread_safe_tag<thread_safe>,
-                 check_sq_tag<check_sq>,
+  /* Missing completion_tag,
+   * else matches CommOpt<initiate_tag, concurrent_tag, flow_control_tag, completion_tag, Options...> */
+  template <bool initiate, bool concurrent, bool flow_control, typename... Options>
+  struct CommOpt<initiate_tag<initiate>,
+                 concurrent_tag<concurrent>,
+                 flow_control_tag<flow_control>,
                  Options...>
-       : CommOpt<ring_db_tag<ring_db>,
-                 thread_safe_tag<thread_safe>,
-                 check_sq_tag<check_sq>,
-                 default_option_t<update_cq_tag>,
+       : CommOpt<initiate_tag<initiate>,
+                 concurrent_tag<concurrent>,
+                 flow_control_tag<flow_control>,
+                 default_option_t<completion_tag>,
                  Options...> {
-    __host__ __device__ constexpr CommOpt(ring_db_tag<ring_db>,
-                                          thread_safe_tag<thread_safe>,
-                                          check_sq_tag<check_sq>,
+    __host__ __device__ constexpr CommOpt(initiate_tag<initiate>,
+                                          concurrent_tag<concurrent>,
+                                          flow_control_tag<flow_control>,
                                           Options...) { }
     /* inherit constructor */
-    using CommOpt<ring_db_tag<ring_db>,
-                  thread_safe_tag<thread_safe>,
-                  check_sq_tag<check_sq>,
-                  default_option_t<update_cq_tag>,
+    using CommOpt<initiate_tag<initiate>,
+                  concurrent_tag<concurrent>,
+                  flow_control_tag<flow_control>,
+                  default_option_t<completion_tag>,
                   Options...
                  >::CommOpt;
   };
 
-  /* Missing check_sq_tag,
-   * else matches CommOpt<ring_db_tag, thread_safe_tag, check_sq_tag, Options...> */
-  template <bool ring_db, bool thread_safe, typename... Options>
-  struct CommOpt<ring_db_tag<ring_db>,
-                 thread_safe_tag<thread_safe>,
+  /* Missing flow_control_tag,
+   * else matches CommOpt<initiate_tag, concurrent_tag, flow_control_tag, Options...> */
+  template <bool initiate, bool concurrent, typename... Options>
+  struct CommOpt<initiate_tag<initiate>,
+                 concurrent_tag<concurrent>,
                  Options...>
-       : CommOpt<ring_db_tag<ring_db>,
-                 thread_safe_tag<thread_safe>,
-                 default_option_t<check_sq_tag>,
+       : CommOpt<initiate_tag<initiate>,
+                 concurrent_tag<concurrent>,
+                 default_option_t<flow_control_tag>,
                  Options...> {
-    __host__ __device__ constexpr CommOpt(ring_db_tag<ring_db>,
-                                          thread_safe_tag<thread_safe>,
+    __host__ __device__ constexpr CommOpt(initiate_tag<initiate>,
+                                          concurrent_tag<concurrent>,
                                           Options...) { }
     /* inherit constructor */
-    using CommOpt<ring_db_tag<ring_db>,
-                  thread_safe_tag<thread_safe>,
-                  default_option_t<check_sq_tag>,
+    using CommOpt<initiate_tag<initiate>,
+                  concurrent_tag<concurrent>,
+                  default_option_t<flow_control_tag>,
                   Options...
                  >::CommOpt;
   };
 
-  /* Missing thread_safe_tag,
-   * else matches CommOpt<ring_db_tag, thread_safe_tag, Options...> */
-  template <bool ring_db, typename... Options>
-  struct CommOpt<ring_db_tag<ring_db>,
+  /* Missing concurrent_tag,
+   * else matches CommOpt<initiate_tag, concurrent_tag, Options...> */
+  template <bool initiate, typename... Options>
+  struct CommOpt<initiate_tag<initiate>,
                  Options...>
-       : CommOpt<ring_db_tag<ring_db>,
-                 default_option_t<thread_safe_tag>,
+       : CommOpt<initiate_tag<initiate>,
+                 default_option_t<concurrent_tag>,
                  Options...> {
-    __host__ __device__ constexpr CommOpt(ring_db_tag<ring_db>,
+    __host__ __device__ constexpr CommOpt(initiate_tag<initiate>,
                                           Options...) { }
     /* inherit constructor */
-    using CommOpt<ring_db_tag<ring_db>,
-                  default_option_t<thread_safe_tag>,
+    using CommOpt<initiate_tag<initiate>,
+                  default_option_t<concurrent_tag>,
                   Options...
                  >::CommOpt;
   };
 
-  /* Missing ring_db_tag,
-   * else matches CommOpt<ring_db_tag, Options...> */
+  /* Missing initiate_tag,
+   * else matches CommOpt<initiate_tag, Options...> */
   template <typename... Options>
   struct CommOpt
-       : CommOpt<default_option_t<ring_db_tag>,
+       : CommOpt<default_option_t<initiate_tag>,
                  Options...> {
     __host__ __device__ constexpr CommOpt(Options...) { }
     /* inherit constructor */
-    using CommOpt<default_option_t<ring_db_tag>,
+    using CommOpt<default_option_t<initiate_tag>,
                   Options...
                  >::CommOpt;
   };
 
   /* ensure default CommOpt<> uses all the default options */
-  static_assert(CommOpt<>::RingDB     == default_option_v<ring_db_tag>     &&
-                CommOpt<>::ThreadSafe == default_option_v<thread_safe_tag> &&
-                CommOpt<>::CheckSQ    == default_option_v<check_sq_tag>    &&
-                CommOpt<>::UpdateCQ   == default_option_v<update_cq_tag>);
+  static_assert(CommOpt<>::Initiate    == default_option_v<initiate_tag>     &&
+                CommOpt<>::Concurrent  == default_option_v<concurrent_tag>   &&
+                CommOpt<>::FlowControl == default_option_v<flow_control_tag> &&
+                CommOpt<>::Completion  == default_option_v<completion_tag>);
 
 }  // namespace CommOption
 
@@ -270,14 +291,14 @@ namespace CommOption {
  */
 using CommOption::CommOpt;
 
-/* bring CommOption::UpdateThread into scope */
-using CommOption::UpdateThread;
+/* bring CommOption::CompletionScope into scope */
+using CommOption::CompletionScope;
 
 /* constexpr variable templates to simplify usage */
-template <auto V> constexpr inline auto RingDB     = CommOption::ring_db_tag<V>{};
-template <auto V> constexpr inline auto ThreadSafe = CommOption::thread_safe_tag<V>{};
-template <auto V> constexpr inline auto CheckSQ    = CommOption::check_sq_tag<V>{};
-template <auto V> constexpr inline auto UpdateCQ   = CommOption::update_cq_tag<V>{};
+template <auto V> constexpr inline auto Initiate    = CommOption::initiate_tag<V>{};
+template <auto V> constexpr inline auto Concurrent  = CommOption::concurrent_tag<V>{};
+template <auto V> constexpr inline auto FlowControl = CommOption::flow_control_tag<V>{};
+template <auto V> constexpr inline auto Completion  = CommOption::completion_tag<V>{};
 
 }  // namespace rocshmem
 

@@ -1089,7 +1089,7 @@ __device__ void GDAContext::alltoallv_copy(rocshmem_team_t team, T *dest,
     if (nelems != 0) {
       T *src = &source[source_displs[j]];
       T *dst = &tmp_buf[my_pe_in_team * tmp_buf_off];
-      qps[dest_pe].put_nbi_single(dst, src, nelems, CommOpt{RingDB<false>});
+      qps[dest_pe].put_nbi_single(dst, src, nelems, CommOpt{Initiate<false>});
     }
 
     qps[dest_pe].atomic_add_single(amo_dst, 1);
@@ -1161,7 +1161,7 @@ __device__ void GDAContext::alltoallv_get(rocshmem_team_t team, T *dest,
 
     static_assert(QueuePair::can_inline<QueuePair::OpCode::RDMA_WRITE>(sizeof(ctrl_msg)),
                   "alltoallv_get control message must be posted inline");
-    qps[dest_pe].put_nbi_single(ctrl_dst, ctrl_src, sizeof(ctrl_msg), CommOpt{RingDB<true>});
+    qps[dest_pe].put_nbi_single(ctrl_dst, ctrl_src, sizeof(ctrl_msg), CommOpt{Initiate<true>});
 
     /* Wait for Ctrl Message */
     uint64_t ctrl_value;
@@ -1178,9 +1178,9 @@ __device__ void GDAContext::alltoallv_get(rocshmem_team_t team, T *dest,
     T *src = &source[displ_bits];
     T *dst = &dest[dest_displs[j]];
 
-    qps[dest_pe].get_nbi_single(dst, src, nelems, CommOpt{RingDB<true>});
+    qps[dest_pe].get_nbi_single(dst, src, nelems, CommOpt{Initiate<true>});
 
-    /* Put UpdateCQ */
+    /* Put Completion */
     long *amo_dst = &pSync[alltoall_pSync_offset + my_pe_in_team];
     qps[dest_pe].atomic_add_single(amo_dst, 1);
 

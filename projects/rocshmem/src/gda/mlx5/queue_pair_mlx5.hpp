@@ -140,11 +140,11 @@ private:
 
 template <typename CommOptions>
 __device__ void QueuePairMLX5::lock_pollcq(int wqe_count) {
-  if constexpr (CommOptions::ThreadSafe || CommOptions::CheckSQ) {
-    if constexpr (CommOptions::ThreadSafe) {
+  if constexpr (CommOptions::Concurrent || CommOptions::FlowControl) {
+    if constexpr (CommOptions::Concurrent) {
       acquire_lock(&sq.lock);
     }
-    if constexpr (CommOptions::CheckSQ) {
+    if constexpr (CommOptions::FlowControl) {
       poll_cq_until(wqe_count);
     }
   } else {
@@ -156,11 +156,11 @@ __device__ void QueuePairMLX5::lock_pollcq(int wqe_count) {
 template <typename CommOptions>
 __device__ void QueuePairMLX5::post_ringdb_unlock(int wqe_count, const gda_mlx5_wqe& wqe) {
   sq.post += wqe_count;
-  if constexpr (CommOptions::RingDB || CommOptions::ThreadSafe) {
-    if constexpr (CommOptions::RingDB) {
+  if constexpr (CommOptions::Initiate || CommOptions::Concurrent) {
+    if constexpr (CommOptions::Initiate) {
       ring_doorbell(sq.post, wqe);
     }
-    if constexpr (CommOptions::ThreadSafe) {
+    if constexpr (CommOptions::Concurrent) {
       release_lock(&sq.lock);
     }
   } else {
