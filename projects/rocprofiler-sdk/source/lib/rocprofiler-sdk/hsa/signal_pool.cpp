@@ -38,21 +38,27 @@ signal_pool_exists()
 {
     return (common::static_object<common::container::pool<signal_t>>::get() != nullptr);
 }
+
+signal_t&
+reset_hsa_signal(signal_t& signal, hsa_signal_value_t initial_value)
+{
+    get_core_table()->hsa_signal_store_screlease_fn(signal.value, initial_value);
+    return signal;
+}
 }  // namespace
 
 signal_t&
-construct_hsa_signal(signal_t&          signal,
-                     hsa_signal_value_t initial_value,
-                     uint32_t           num_consumers,
-                     const hsa_agent_t* consumers,
-                     uint64_t           attributes)
+ensure_hsa_signal(signal_t&          signal,
+                  hsa_signal_value_t initial_value,
+                  uint32_t           num_consumers,
+                  const hsa_agent_t* consumers,
+                  uint64_t           attributes)
 {
-    // The pool creates each signal once, then calls this function again on acquire.
-    // Recreating a live signal would overwrite and leak its handle, so only reset its value.
     if(signal.value.handle != 0)
     {
-        get_core_table()->hsa_signal_store_screlease_fn(signal.value, initial_value);
-        return signal;
+        ROCP_WARNING_IF(num_consumers != 0 || consumers != nullptr || attributes != 0)
+            << "Ignoring HSA signal creation arguments when reusing an existing signal";
+        return reset_hsa_signal(signal, initial_value);
     }
 
     auto status = HSA_STATUS_SUCCESS;
@@ -77,7 +83,7 @@ get_signal_pool()
 
     static auto*& pool = common::static_object<common::container::pool<signal_t>>::construct(
         std::piecewise_construct, default_signal_pool_size, [](signal_t& signal) {
-            if(registration::get_fini_status() == 0) construct_hsa_signal(signal, 0, 0, nullptr, 0);
+            if(registration::get_fini_status() == 0) ensure_hsa_signal(signal, 0, 0, nullptr, 0);
         });
 
     return pool;
