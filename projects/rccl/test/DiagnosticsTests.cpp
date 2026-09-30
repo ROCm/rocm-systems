@@ -186,19 +186,8 @@ static void clearDiagEnv()
     unsetenv("NCCL_P2P_LEVEL");
 }
 
-// Communicators left by a failed init or split may be partially initialized; abort them instead of destroying.
-static void abortAll(std::vector<ncclComm_t>& comms)
-{
-    for(auto& c : comms)
-        if(c != nullptr)
-        {
-            ncclCommAbort(c);
-            c = nullptr;
-        }
-}
-
-// Creates nGpus communicators on devices 0..nGpus-1 while capturing stdout. On failure the created communicators
-// are aborted and a fatal failure is recorded, so callers wrap the call in ASSERT_NO_FATAL_FAILURE.
+// Creates nGpus communicators on devices 0..nGpus-1 while capturing stdout. Callers wrap the call in
+// ASSERT_NO_FATAL_FAILURE so that a failed init stops the case before the communicators are used.
 static void initAllCaptured(std::vector<ncclComm_t>& comms, int nGpus, std::string& captured)
 {
     std::vector<int> devices(nGpus);
@@ -207,21 +196,17 @@ static void initAllCaptured(std::vector<ncclComm_t>& comms, int nGpus, std::stri
     testing::internal::CaptureStdout();
     const ncclResult_t res = ncclCommInitAll(comms.data(), nGpus, devices.data());
     captured               = testing::internal::GetCapturedStdout();
-    if(res != ncclSuccess)
-    {
-        abortAll(comms);
-        FAIL() << "ncclCommInitAll: " << ncclGetErrorString(res);
-    }
+    ASSERT_EQ(res, ncclSuccess) << "ncclCommInitAll: " << ncclGetErrorString(res);
 }
 
-static void destroyAll(std::vector<ncclComm_t>& comms)
+// Destroys the communicators when the returned guards go out of scope.
+static std::vector<RCCLTestGuards::NcclCommAutoGuard> guardComms(const std::vector<ncclComm_t>& comms)
 {
-    for(auto& c : comms)
-        if(c != nullptr)
-        {
-            EXPECT_EQ(ncclCommDestroy(c), ncclSuccess);
-            c = nullptr;
-        }
+    std::vector<RCCLTestGuards::NcclCommAutoGuard> guards;
+    guards.reserve(comms.size());
+    for(ncclComm_t c : comms)
+        guards.push_back(RCCLTestGuards::makeCommAutoGuard(c));
+    return guards;
 }
 
 // Sum-AllReduce of (rank + 1) on every communicator; checks the full result on every device.
@@ -295,9 +280,9 @@ TEST_F(Diagnostics, DisabledByDefault)
             std::vector<ncclComm_t> comms;
             std::string out;
             ASSERT_NO_FATAL_FAILURE(initAllCaptured(comms, nGpus, out));
+            const auto commGuards   = guardComms(comms);
             const DiagReport report = parseDiagReport(out);
             EXPECT_TRUE(report.lines.empty()) << "unexpected report lines:\n" << report.dump();
-            destroyAll(comms);
         };
     };
     RUN_ISOLATED_TESTS(diagCase("Unset", body(nullptr)), diagCase("Zero", body("0")));
@@ -317,6 +302,7 @@ TEST_F(Diagnostics, AllDirectedEdgesVerified)
         std::vector<ncclComm_t> comms;
         std::string out;
         ASSERT_NO_FATAL_FAILURE(initAllCaptured(comms, nGpus, out));
+        const auto commGuards   = guardComms(comms);
         const DiagReport report = parseDiagReport(out);
 
         EXPECT_EQ(report.count(kDiagHeader), 1) << report.dump();
@@ -325,7 +311,6 @@ TEST_F(Diagnostics, AllDirectedEdgesVerified)
         EXPECT_EQ(report.count("NCCL diagnostics completed in"), 1) << report.dump();
         EXPECT_EQ(report.count(done), 1) << report.dump();
         EXPECT_TRUE(report.failures().empty()) << "failure lines:\n" << report.dump();
-        destroyAll(comms);
     }));
 }
 
@@ -341,10 +326,10 @@ TEST_F(Diagnostics, EdgeCountFollowsCommSize)
             std::vector<ncclComm_t> comms;
             std::string out;
             ASSERT_NO_FATAL_FAILURE(initAllCaptured(comms, nWanted, out));
+            const auto commGuards   = guardComms(comms);
             const DiagReport report = parseDiagReport(out);
             expectEdgeSummaries(report, {firstDevices(nWanted)});
             EXPECT_TRUE(report.failures().empty()) << report.dump();
-            destroyAll(comms);
         };
     };
     RUN_ISOLATED_TESTS(diagCase("TwoGpus", body(2)), diagCase("FourGpus", body(4)));
@@ -363,9 +348,9 @@ TEST_F(Diagnostics, CommUsableAfterDiagnostics)
         std::vector<ncclComm_t> comms;
         std::string out;
         ASSERT_NO_FATAL_FAILURE(initAllCaptured(comms, nGpus, out));
+        const auto commGuards = guardComms(comms);
         EXPECT_EQ(parseDiagReport(out).count(kDiagHeader), 1);
         checkAllReduce(comms);
-        destroyAll(comms);
     }));
 }
 
@@ -384,8 +369,8 @@ TEST_F(Diagnostics, RunsAtEveryCommInit)
             std::vector<ncclComm_t> comms;
             std::string out;
             ASSERT_NO_FATAL_FAILURE(initAllCaptured(comms, nGpus, out));
+            const auto commGuards = guardComms(comms);
             EXPECT_EQ(parseDiagReport(out).count(kDiagHeader), 1) << "round " << round;
-            destroyAll(comms);
         }
     };
 
@@ -399,6 +384,7 @@ TEST_F(Diagnostics, RunsAtEveryCommInit)
         std::vector<ncclComm_t> parents;
         std::string out;
         ASSERT_NO_FATAL_FAILURE(initAllCaptured(parents, nGpus, out));
+        const auto parentGuards = guardComms(parents);
         EXPECT_EQ(parseDiagReport(out).count(kDiagHeader), 1);
 
         std::vector<ncclComm_t> children(nGpus, nullptr);
@@ -408,12 +394,9 @@ TEST_F(Diagnostics, RunsAtEveryCommInit)
             res = ncclCommSplit(parents[i], i % 2, i, &children[i], nullptr);
         const ncclResult_t endRes = ncclGroupEnd();
         out                       = testing::internal::GetCapturedStdout();
-        if(res != ncclSuccess || endRes != ncclSuccess)
-        {
-            abortAll(children);
-            destroyAll(parents);
-            FAIL() << "ncclCommSplit: " << ncclGetErrorString(res != ncclSuccess ? res : endRes);
-        }
+        ASSERT_EQ(res, ncclSuccess) << "ncclCommSplit: " << ncclGetErrorString(res);
+        ASSERT_EQ(endRes, ncclSuccess) << "ncclGroupEnd: " << ncclGetErrorString(endRes);
+        const auto childGuards = guardComms(children);
 
         const DiagReport report = parseDiagReport(out);
         const int half          = nGpus / 2;
@@ -424,8 +407,6 @@ TEST_F(Diagnostics, RunsAtEveryCommInit)
         expectEdgeSummaries(report, colors);
         EXPECT_EQ(report.count("across " + std::to_string(half) + " ranks"), 2) << report.dump();
         EXPECT_TRUE(report.failures().empty()) << report.dump();
-        destroyAll(children);
-        destroyAll(parents);
     };
 
     RUN_ISOLATED_TESTS(diagCase("ReinitSameProcess", reinit), diagCase("CommSplit", split));
@@ -445,13 +426,13 @@ TEST_F(Diagnostics, P2pDisabledReportsNoEdges)
         std::vector<ncclComm_t> comms;
         std::string out;
         ASSERT_NO_FATAL_FAILURE(initAllCaptured(comms, nGpus, out));
+        const auto commGuards   = guardComms(comms);
         const DiagReport report = parseDiagReport(out);
         EXPECT_EQ(report.count(kDiagHeader), 1) << report.dump();
         EXPECT_EQ(report.count("NCCL diagnostics completed in"), 1) << report.dump();
         EXPECT_EQ(report.count("directed GPU P2P edges verified"), 0) << report.dump();
         EXPECT_TRUE(report.failures().empty()) << report.dump();
         checkAllReduce(comms);
-        destroyAll(comms);
     }));
 }
 
@@ -472,14 +453,10 @@ TEST_F(Diagnostics, ReportOnStdoutOnly)
         const ncclResult_t res = ncclCommInitAll(comms.data(), nGpus, devices.data());
         const std::string err  = testing::internal::GetCapturedStderr();
         const std::string out  = testing::internal::GetCapturedStdout();
-        if(res != ncclSuccess)
-        {
-            abortAll(comms);
-            FAIL() << "ncclCommInitAll: " << ncclGetErrorString(res);
-        }
+        ASSERT_EQ(res, ncclSuccess) << "ncclCommInitAll: " << ncclGetErrorString(res);
+        const auto commGuards = guardComms(comms);
         EXPECT_EQ(parseDiagReport(out).count(kDiagHeader), 1);
         EXPECT_TRUE(parseDiagReport(err).lines.empty()) << parseDiagReport(err).dump();
-        destroyAll(comms);
     }));
 }
 
@@ -499,6 +476,7 @@ TEST_F(Diagnostics, SingleProcessPeerAccessNotice)
         std::vector<ncclComm_t> comms;
         std::string out;
         ASSERT_NO_FATAL_FAILURE(initAllCaptured(comms, nGpus, out));
+        const auto commGuards   = guardComms(comms);
         const DiagReport report = parseDiagReport(out);
 
         const std::vector<int> devices = firstDevices(nGpus);
@@ -515,7 +493,6 @@ TEST_F(Diagnostics, SingleProcessPeerAccessNotice)
         }
         expectEdgeSummaries(report, {devices});
         EXPECT_TRUE(report.failures().empty()) << report.dump();
-        destroyAll(comms);
     }));
 }
 
