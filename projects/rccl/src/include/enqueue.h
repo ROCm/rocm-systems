@@ -59,6 +59,11 @@ struct rcclAddonLaunchState {
   // Whether the prologue offered the stop event, which is what lets the epilogue tell a taken event from one
   // that was never on offer. False while capturing, where a fused stop event is not bound.
   bool eventOffered;
+  bool capturing;
+  struct ncclCudaGraph graph;
+  // Set once sharedRes->deviceStream is acquired; the epilogue must release it on every path.
+  bool deviceStreamAcquired;
+  cudaStream_t deviceStream;
 };
 
 ncclResult_t rcclAddonLaunchBegin(struct ncclComm* comm, cudaStream_t stream, struct rcclAddonLaunchState* state);

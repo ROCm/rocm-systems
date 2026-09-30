@@ -2157,9 +2157,62 @@ NCCL_PARAM(GraphStreamOrdering, "GRAPH_STREAM_ORDERING", NCCL_CONFIG_UNDEF_INT);
 // sentinel. See ncclComm::lastStreamTag.
 static inline uintptr_t ncclStreamTag(hipStream_t s) { return (uintptr_t)s + 1; }
 
+namespace {
+enum ncclImplicitOrder {
+  ncclImplicitOrderNone,
+  ncclImplicitOrderSerial,
+  ncclImplicitOrderLaunch
+};
+
+// When true, NCCL applies internal capture-time serialization of communication kernels (captureStream path).
+static bool ncclGraphStreamOrderingSerialize(struct ncclComm* comm) {
+  return comm->config.graphStreamOrdering != 0;
+}
+} // namespace
+
+// Joins a captured addon launch to the per-communicator capture chain, as ncclLaunchPrepare does for
+// kernel plans. ncclLaunchPrepare is upstream NCCL code kept verbatim, so this copy has to follow any
+// change to its capture ordering by hand.
+static ncclResult_t rcclAddonCaptureOrderBegin(struct ncclComm* comm, cudaStream_t stream,
+                                               struct rcclAddonLaunchState* state) {
+  struct ncclStrongStream* ss = &comm->sharedRes->deviceStream;
+  if (!ncclGraphStreamOrderingSerialize(comm)) {
+    if (!COMPILER_ATOMIC_LOAD(&ss->graphOriginCaptured, std::memory_order_relaxed)) {
+      CUDACHECK(cudaEventRecord(ss->serialEvent, ss->liveStream));
+      COMPILER_ATOMIC_STORE(&ss->graphOriginCaptured, true, std::memory_order_relaxed);
+    }
+    COMPILER_ATOMIC_STORE(&ss->everCaptured, true, std::memory_order_relaxed);
+    CUDACHECK(cudaStreamWaitEvent(stream, ss->serialEvent, hipEventWaitExternal));
+    return ncclSuccess;
+  }
+  NCCLCHECK(ncclStrongStreamAcquire(state->graph, ss, /*concurrent=*/false, &state->deviceStream));
+  state->deviceStreamAcquired = true;
+  if (state->deviceStream != stream) {
+    NCCLCHECK(ncclStreamWaitStream(stream, state->deviceStream, comm->sharedRes->scratchEvent));
+  }
+  return ncclSuccess;
+}
+
+// The ncclLaunchFinish side of rcclAddonCaptureOrderBegin, under the same constraint. Releasing
+// deviceStream is left to the caller so that it also happens when the launch failed.
+static ncclResult_t rcclAddonCaptureOrderEnd(struct ncclComm* comm, cudaStream_t stream,
+                                             const struct rcclAddonLaunchState& state) {
+  struct ncclStrongStream* ss = &comm->sharedRes->deviceStream;
+  if (!ncclGraphStreamOrderingSerialize(comm)) {
+    return ncclCudaGraphRecordEvent(state.graph, ss->serialEvent, stream);
+  }
+  cudaEvent_t finishedEvent = comm->sharedRes->scratchEvent;
+  CUDACHECK(cudaEventRecord(finishedEvent, stream));
+  NCCLCHECK(ncclStreamAdvanceToEvent(state.graph, state.deviceStream, finishedEvent));
+  return ncclSuccess;
+}
+
 ncclResult_t rcclAddonLaunchBegin(struct ncclComm* comm, cudaStream_t stream, struct rcclAddonLaunchState* state) {
   state->savedDev = -1;
   state->eventOffered = false;
+  state->capturing = false;
+  state->deviceStreamAcquired = false;
+  state->deviceStream = nullptr;
   comm->addonStopEvent = nullptr;
 
   CUDACHECK(hipGetDevice(&state->savedDev));
@@ -2169,20 +2222,21 @@ ncclResult_t rcclAddonLaunchBegin(struct ncclComm* comm, cudaStream_t stream, st
 
   // Both decisions below need the capture state, and one query serves both.
   const bool streamChanged = comm->lastStreamTag != 0 && comm->lastStreamTag != ncclStreamTag(stream);
-  struct ncclCudaGraph graph;
-  NCCLCHECK(ncclCudaGetCapturingGraph(&graph, stream, comm->config.graphUsageMode));
-  const bool capturing = ncclCudaGraphValid(graph);
+  NCCLCHECK(ncclCudaGetCapturingGraph(&state->graph, stream, comm->config.graphUsageMode));
+  state->capturing = ncclCudaGraphValid(state->graph);
 
-  if (streamChanged && !capturing) {
+  if (streamChanged && !state->capturing) {
     // doneEvent may carry a node from another capture or from outside one, and waiting on such an
-    // event inside a capture breaks capture isolation, so a captured stream gets no edge here. The
-    // native path has the same limit and orders captured launches through deviceStream instead.
+    // event inside a capture breaks capture isolation, so a captured stream gets no edge here and is
+    // ordered through deviceStream below instead, as native captured launches are.
     CUDACHECK(hipStreamWaitEvent(stream, comm->doneEvent, 0));
   }
 
   // Capture never binds a fused stopEvent, so under capture nothing is offered and the epilogue
   // records instead, exactly as the native general path does.
-  if (!capturing) {
+  if (state->capturing) {
+    NCCLCHECK(rcclAddonCaptureOrderBegin(comm, stream, state));
+  } else {
     state->eventOffered = true;
     comm->addonStopEvent = comm->doneEvent;
   }
@@ -2200,14 +2254,23 @@ ncclResult_t rcclAddonLaunchEnd(struct ncclComm* comm, cudaStream_t stream,
 
   if (result == ncclSuccess) {
     if (!taken) {
-      CUDACHECKGOTO(hipEventRecord(comm->doneEvent, stream), result, restore);
+      CUDACHECKGOTO(hipEventRecord(comm->doneEvent, stream), result, release);
     }
     // The tag advances however the event was recorded: it is what tells the next collective on
     // another stream that an edge is needed.
     comm->lastStreamTag = ncclStreamTag(stream);
+    if (state.capturing) {
+      NCCLCHECKGOTO(rcclAddonCaptureOrderEnd(comm, stream, state), result, release);
+    }
   }
 
-restore:
+release:
+  if (state.deviceStreamAcquired) {
+    ncclResult_t releaseRes = ncclStrongStreamRelease(state.graph, &comm->sharedRes->deviceStream,
+                                                      /*concurrent=*/false);
+    if (result == ncclSuccess) result = releaseRes;
+  }
+
   if (state.savedDev != -1 && state.savedDev != comm->cudaDev) {
     cudaError_t restoreErr = hipSetDevice(state.savedDev);
     if (restoreErr != cudaSuccess) {
@@ -2217,19 +2280,6 @@ restore:
   }
   return result;
 }
-
-namespace {
-enum ncclImplicitOrder {
-  ncclImplicitOrderNone,
-  ncclImplicitOrderSerial,
-  ncclImplicitOrderLaunch
-};
-
-// When true, NCCL applies internal capture-time serialization of communication kernels (captureStream path).
-static bool ncclGraphStreamOrderingSerialize(struct ncclComm* comm) {
-  return comm->config.graphStreamOrdering != 0;
-}
-} // namespace
 
 static ncclResult_t getImplicitOrder(enum ncclImplicitOrder* mode, struct ncclComm* comm, bool capturing,
                                      int driver = -1) {

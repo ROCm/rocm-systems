@@ -33,6 +33,7 @@
 #include <hip/hip_runtime.h>
 
 #include <cstdio>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -120,6 +121,71 @@ bool logContainsNeedle(const MPIHelpers::TestLogAssertionContext& logCtx, const 
 {
     const std::string merged = logCtx.readNcclDebugLog() + logCtx.readPerRankStderrLog();
     return merged.find(needle) != std::string::npos;
+}
+
+// Kernel, copy and memset nodes of a graph. The captures below enqueue no work of their own, so
+// these are the collectives' nodes.
+std::vector<hipGraphNode_t> graphWorkNodes(hipGraph_t graph)
+{
+    size_t count = 0;
+    EXPECT_EQ(hipSuccess, hipGraphGetNodes(graph, nullptr, &count));
+    std::vector<hipGraphNode_t> all(count), work;
+    EXPECT_EQ(hipSuccess, hipGraphGetNodes(graph, all.data(), &count));
+    for(hipGraphNode_t node : all)
+    {
+        hipGraphNodeType type{};
+        EXPECT_EQ(hipSuccess, hipGraphNodeGetType(node, &type));
+        if(type == hipGraphNodeTypeKernel || type == hipGraphNodeTypeMemcpy
+           || type == hipGraphNodeTypeMemset)
+            work.push_back(node);
+    }
+    return work;
+}
+
+bool graphPathExists(hipGraphNode_t from, hipGraphNode_t to)
+{
+    std::vector<hipGraphNode_t> pending{from};
+    std::set<hipGraphNode_t>    seen{from};
+    while(!pending.empty())
+    {
+        hipGraphNode_t node = pending.back();
+        pending.pop_back();
+        size_t count = 0;
+        EXPECT_EQ(hipSuccess, hipGraphNodeGetDependentNodes(node, nullptr, &count));
+        std::vector<hipGraphNode_t> next(count);
+        EXPECT_EQ(hipSuccess, hipGraphNodeGetDependentNodes(node, next.data(), &count));
+        for(hipGraphNode_t n : next)
+        {
+            if(n == to)
+                return true;
+            if(seen.insert(n).second)
+                pending.push_back(n);
+        }
+    }
+    return false;
+}
+
+size_t countEventNodes(hipGraph_t graph, hipGraphNodeType type, hipEvent_t event)
+{
+    size_t count = 0;
+    EXPECT_EQ(hipSuccess, hipGraphGetNodes(graph, nullptr, &count));
+    std::vector<hipGraphNode_t> all(count);
+    EXPECT_EQ(hipSuccess, hipGraphGetNodes(graph, all.data(), &count));
+    size_t matches = 0;
+    for(hipGraphNode_t node : all)
+    {
+        hipGraphNodeType nodeType{};
+        EXPECT_EQ(hipSuccess, hipGraphNodeGetType(node, &nodeType));
+        if(nodeType != type)
+            continue;
+        hipEvent_t nodeEvent = nullptr;
+        EXPECT_EQ(hipSuccess, type == hipGraphNodeTypeWaitEvent
+                                  ? hipGraphEventWaitNodeGetEvent(node, &nodeEvent)
+                                  : hipGraphEventRecordNodeGetEvent(node, &nodeEvent));
+        if(nodeEvent == event)
+            ++matches;
+    }
+    return matches;
 }
 } // namespace
 
@@ -627,6 +693,163 @@ TEST_F(DdaMPI_AllReduce, CapturedReplayOrderedByAppEvent)
                        kContractCount, /*graphCapturing=*/1);
     reportSelectedTier("DdaMPI_AllReduce/CapturedReplayOrderedByAppEvent (foreign stream)", bufB,
                        bufA, kContractCount);
+}
+
+// AICOMRCCL-2184: two addon collectives of one communicator captured on two streams of one graph
+// are ordered in the graph, as native collectives are through sharedRes->deviceStream. Without that
+// edge a replay may run both at once on the communicator's single DDA scratch buffer and barrier.
+//
+// The side stream forks before either collective, so only RCCL can order them.
+TEST_F(DdaMPI_AllReduce, CapturedOnForkedStreamsSerializedInGraph)
+{
+    if(!validateTestPrerequisites(kMinProcessesForMPI))
+        GTEST_SKIP() << "Need at least 2 MPI ranks";
+
+    ASSERT_EQ(ncclSuccess, createTestCommunicator());
+    if(getActiveCommunicator()->config.graphStreamOrdering == 0)
+        GTEST_SKIP() << "graphStreamOrdering=0 orders captures through serialEvent; covered by "
+                        "CapturedOnGraphOriginJoinsSerialEvent";
+
+    int rank{}, nRanks{};
+    ncclCommUserRank(getActiveCommunicator(), &rank);
+    ncclCommCount(getActiveCommunicator(), &nRanks);
+
+    hipStream_t sideStream = nullptr;
+    ASSERT_EQ(hipSuccess, hipStreamCreate(&sideStream));
+    HipStreamAutoGuard sideStreamGuard(sideStream);
+
+    hipEvent_t forkEvent = nullptr, joinEvent = nullptr;
+    ASSERT_EQ(hipSuccess, hipEventCreateWithFlags(&forkEvent, hipEventDisableTiming));
+    HipEventAutoGuard forkEventGuard(forkEvent);
+    ASSERT_EQ(hipSuccess, hipEventCreateWithFlags(&joinEvent, hipEventDisableTiming));
+    HipEventAutoGuard joinEventGuard(joinEvent);
+
+    const size_t bytes = kContractCount * sizeof(float);
+
+    void *bufA = nullptr, *bufB = nullptr, *bufC = nullptr, *bufD = nullptr;
+    ASSERT_EQ(hipSuccess, hipMalloc(&bufA, bytes));
+    DeviceBufferAutoGuard guardA(bufA);
+    ASSERT_EQ(hipSuccess, hipMalloc(&bufB, bytes));
+    DeviceBufferAutoGuard guardB(bufB);
+    ASSERT_EQ(hipSuccess, hipMalloc(&bufC, bytes));
+    DeviceBufferAutoGuard guardC(bufC);
+    ASSERT_EQ(hipSuccess, hipMalloc(&bufD, bytes));
+    DeviceBufferAutoGuard guardD(bufD);
+
+    fillRankScalar(bufA, kContractCount, rank);
+    fillRankScalar(bufC, kContractCount, rank);
+    ASSERT_EQ(hipSuccess, hipMemset(bufB, 0, bytes));
+    ASSERT_EQ(hipSuccess, hipMemset(bufD, 0, bytes));
+
+    ASSERT_EQ(hipSuccess, hipStreamBeginCapture(getActiveStream(), hipStreamCaptureModeThreadLocal));
+    const hipError_t   forkRecordRes = hipEventRecord(forkEvent, getActiveStream());
+    const hipError_t   forkWaitRes   = hipStreamWaitEvent(sideStream, forkEvent, 0);
+    const ncclResult_t originRes     = ncclAllReduce(bufA, bufB, kContractCount, ncclFloat32,
+                                                     ncclSum, getActiveCommunicator(), getActiveStream());
+    const ncclResult_t sideRes       = ncclAllReduce(bufC, bufD, kContractCount, ncclFloat32,
+                                                     ncclSum, getActiveCommunicator(), sideStream);
+    // HIP refuses to end a capture with an unjoined forked stream.
+    const hipError_t joinRecordRes = hipEventRecord(joinEvent, sideStream);
+    const hipError_t joinWaitRes   = hipStreamWaitEvent(getActiveStream(), joinEvent, 0);
+
+    // End the capture before judging any result; see CapturedForkJoinStaysInsideGraph.
+    hipGraph_t       graph      = nullptr;
+    const hipError_t endCapture = hipStreamEndCapture(getActiveStream(), &graph);
+    ASSERT_EQ(hipSuccess, forkRecordRes);
+    ASSERT_EQ(hipSuccess, forkWaitRes);
+    ASSERT_EQ(ncclSuccess, originRes) << "Rank " << rank << ": " << ncclGetErrorString(originRes);
+    ASSERT_EQ(ncclSuccess, sideRes) << "Rank " << rank << ": " << ncclGetErrorString(sideRes);
+    ASSERT_EQ(hipSuccess, joinRecordRes);
+    ASSERT_EQ(hipSuccess, joinWaitRes);
+    ASSERT_EQ(hipSuccess, endCapture);
+    ASSERT_NE(nullptr, graph);
+    auto graphGuard = makeScopeGuard([&]() { (void)hipGraphDestroy(graph); });
+
+    const std::vector<hipGraphNode_t> work = graphWorkNodes(graph);
+    ASSERT_GE(work.size(), 2u) << "Rank " << rank << ": expected work nodes from both AllReduces";
+    for(size_t i = 0; i < work.size(); ++i)
+        for(size_t j = i + 1; j < work.size(); ++j)
+            EXPECT_TRUE(graphPathExists(work[i], work[j]) || graphPathExists(work[j], work[i]))
+                << "Rank " << rank << ": graph work nodes " << i << " and " << j
+                << " are unordered, so the two captured AllReduces may run concurrently";
+
+    hipGraphExec_t graphExec = nullptr;
+    ASSERT_EQ(hipSuccess, hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+    auto graphExecGuard = makeScopeGuard([&]() { (void)hipGraphExecDestroy(graphExec); });
+    ASSERT_EQ(hipSuccess, hipGraphLaunch(graphExec, getActiveStream()));
+    ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+    const float expectedSum = static_cast<float>(nRanks * (nRanks + 1) / 2);
+    EXPECT_TRUE(verifyBufferData<float>(bufB, kContractCount,
+                                        [expectedSum](size_t) { return expectedSum; }))
+        << "Rank " << rank << ": the AllReduce captured on the origin stream wrote wrong data";
+    EXPECT_TRUE(verifyBufferData<float>(bufD, kContractCount,
+                                        [expectedSum](size_t) { return expectedSum; }))
+        << "Rank " << rank << ": the AllReduce captured on the side stream wrote wrong data";
+
+    reportSelectedTier("DdaMPI_AllReduce/CapturedOnForkedStreamsSerializedInGraph", bufA, bufB,
+                       kContractCount, /*graphCapturing=*/1);
+}
+
+// AICOMRCCL-2184: with graphStreamOrdering=0, native captures are ordered across graph launches by
+// an external wait on sharedRes->deviceStream.serialEvent before the kernel and a record of it
+// after, and a captured addon collective carries the same pair. Run with
+// NCCL_GRAPH_STREAM_ORDERING=0.
+TEST_F(DdaMPI_AllReduce, CapturedOnGraphOriginJoinsSerialEvent)
+{
+    if(!validateTestPrerequisites(kMinProcessesForMPI))
+        GTEST_SKIP() << "Need at least 2 MPI ranks";
+
+    ASSERT_EQ(ncclSuccess, createTestCommunicator());
+    ncclComm_t comm = getActiveCommunicator();
+    if(comm->config.graphStreamOrdering != 0)
+        GTEST_SKIP() << "Needs NCCL_GRAPH_STREAM_ORDERING=0";
+
+    int rank{}, nRanks{};
+    ncclCommUserRank(comm, &rank);
+    ncclCommCount(comm, &nRanks);
+
+    const size_t bytes = kContractCount * sizeof(float);
+
+    void *bufA = nullptr, *bufB = nullptr;
+    ASSERT_EQ(hipSuccess, hipMalloc(&bufA, bytes));
+    DeviceBufferAutoGuard guardA(bufA);
+    ASSERT_EQ(hipSuccess, hipMalloc(&bufB, bytes));
+    DeviceBufferAutoGuard guardB(bufB);
+
+    fillRankScalar(bufA, kContractCount, rank);
+    ASSERT_EQ(hipSuccess, hipMemset(bufB, 0, bytes));
+
+    ASSERT_EQ(hipSuccess, hipStreamBeginCapture(getActiveStream(), hipStreamCaptureModeThreadLocal));
+    const ncclResult_t captureRes
+        = ncclAllReduce(bufA, bufB, kContractCount, ncclFloat32, ncclSum, comm, getActiveStream());
+    hipGraph_t       graph      = nullptr;
+    const hipError_t endCapture = hipStreamEndCapture(getActiveStream(), &graph);
+    ASSERT_EQ(ncclSuccess, captureRes) << "Rank " << rank << ": " << ncclGetErrorString(captureRes);
+    ASSERT_EQ(hipSuccess, endCapture);
+    ASSERT_NE(nullptr, graph);
+    auto graphGuard = makeScopeGuard([&]() { (void)hipGraphDestroy(graph); });
+
+    hipEvent_t serialEvent = comm->sharedRes->deviceStream.serialEvent;
+    EXPECT_EQ(1u, countEventNodes(graph, hipGraphNodeTypeWaitEvent, serialEvent))
+        << "Rank " << rank << ": the captured AllReduce does not wait on serialEvent";
+    EXPECT_EQ(1u, countEventNodes(graph, hipGraphNodeTypeEventRecord, serialEvent))
+        << "Rank " << rank << ": the captured AllReduce does not record serialEvent";
+
+    hipGraphExec_t graphExec = nullptr;
+    ASSERT_EQ(hipSuccess, hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+    auto graphExecGuard = makeScopeGuard([&]() { (void)hipGraphExecDestroy(graphExec); });
+    for(int replay = 0; replay < 2; ++replay)
+        ASSERT_EQ(hipSuccess, hipGraphLaunch(graphExec, getActiveStream()));
+    ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+    const float expectedSum = static_cast<float>(nRanks * (nRanks + 1) / 2);
+    EXPECT_TRUE(verifyBufferData<float>(bufB, kContractCount,
+                                        [expectedSum](size_t) { return expectedSum; }))
+        << "Rank " << rank << ": the replayed AllReduce wrote wrong data";
+
+    reportSelectedTier("DdaMPI_AllReduce/CapturedOnGraphOriginJoinsSerialEvent", bufA, bufB,
+                       kContractCount, /*graphCapturing=*/1);
 }
 
 #endif // MPI_TESTS_ENABLED
