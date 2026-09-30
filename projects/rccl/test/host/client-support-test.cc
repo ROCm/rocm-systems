@@ -1966,6 +1966,8 @@ TEST_F(RasClientSupportMicrotest, EventLoop_SendFullWrite_DequeuesAndDisarmsWhen
   SetRevents(client, POLLOUT);
   rasClientEventLoop(client, client->pfd);
   EXPECT_EQ(g_sentData, "hello");
+  ASSERT_EQ(1u, g_sendFlags.size());
+  EXPECT_EQ(MSG_DONTWAIT | MSG_NOSIGNAL, g_sendFlags[0]);
   EXPECT_TRUE(ncclIntruQueueEmpty(&client->sendQ));
   EXPECT_FALSE(rasPfds[client->pfd].events & POLLOUT);
   FreeClient(client);
@@ -1991,6 +1993,7 @@ TEST_F(RasClientSupportMicrotest, EventLoop_SendPartialWrite_KeepsMetaAtFrontWit
   EXPECT_EQ(g_sentData, "hell");
   ASSERT_FALSE(ncclIntruQueueEmpty(&client->sendQ));
   EXPECT_EQ(ncclIntruQueueHead(&client->sendQ)->offset, 4);
+  EXPECT_EQ(POLLOUT, rasPfds[client->pfd].events);
   DrainSendQueue(client);
   FreeClient(client);
 }
