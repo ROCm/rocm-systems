@@ -176,14 +176,14 @@ def attach(
             else:
                 detach_status = c_lib.rocattach_detach(int(pid))
         except Exception as e:
-            print(f"Exception during detachment: {e}")
+            raise RuntimeError(f"Exception during detachment: {e}") from e
 
         if detach_status != 0:
-            print(
+            raise RuntimeError(
                 f"Calling detach in {attach_library} returned non-zero status {detach_status}"
             )
-        else:
-            print(f"Detaching from PID {pid} using library {attach_library} :: success")
+
+        print(f"Detaching from PID {pid} using library {attach_library} :: success")
 
     def signal_handler(sig, frame):
         print("\nCaught signal SIGINT")

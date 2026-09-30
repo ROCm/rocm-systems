@@ -56,7 +56,16 @@ typedef void (*rocprofiler_client_detach_t)(rocprofiler_client_id_t);
  * @brief Prototype for the start of the attach function that will be called after the
  * configuration.
  * @param [in] tool_data `tool_data` field returned from ::rocprofiler_configure_attach in
- * ::rocprofiler_tool_configure_result_t.
+ * ::rocprofiler_tool_configure_attach_result_t.
+ *
+ * @note This hook runs inside the exclusive process-attachment transition boundary. Calling
+ * `roctxProfilerPause()` or `roctxProfilerResume()` synchronously from this hook is supported.
+ * Calls to these ROCTx control APIs from other threads wait until this hook returns. Recursive
+ * process attachment or detachment is rejected.
+ *
+ * @warning This hook must not wait for or join another thread that can call
+ * `roctxProfilerPause()` or `roctxProfilerResume()` while the hook is running. Doing so can
+ * deadlock because that thread waits for the attachment transition to finish.
  */
 ROCPROFILER_SDK_EXPERIMENTAL
 typedef int (*rocprofiler_tool_attach_t)(rocprofiler_client_detach_t detach_func,
@@ -66,8 +75,17 @@ typedef int (*rocprofiler_tool_attach_t)(rocprofiler_client_detach_t detach_func
 
 /**
  * @brief Prototype for the detach function where a tool can temporarily suspend operations.
- * @param [in] tool_data `tool_data` field returned from ::rocprofiler_configure in
+ * @param [in] tool_data `tool_data` field returned from ::rocprofiler_configure_attach in
  * ::rocprofiler_tool_configure_attach_result_t.
+ *
+ * @note This hook runs inside the exclusive process-attachment transition boundary. Calling
+ * `roctxProfilerPause()` or `roctxProfilerResume()` synchronously from this hook is supported.
+ * Calls to these ROCTx control APIs from other threads wait until this hook returns. Recursive
+ * process attachment or detachment is rejected.
+ *
+ * @warning This hook must not wait for or join another thread that can call
+ * `roctxProfilerPause()` or `roctxProfilerResume()` while the hook is running. Doing so can
+ * deadlock because that thread waits for the detachment transition to finish.
  */
 ROCPROFILER_SDK_EXPERIMENTAL
 typedef void (*rocprofiler_tool_detach_t)(void* tool_data);

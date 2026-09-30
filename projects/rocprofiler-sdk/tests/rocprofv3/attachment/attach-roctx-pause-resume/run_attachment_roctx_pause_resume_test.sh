@@ -98,11 +98,17 @@ ROCPROF_LOG="${OUTPUT_DIR}/${OUTPUT_SUBDIR}/rocprofv3.log"
 APP_PID=""
 APP_OUTPUT_PID=""
 ROCPROF_PID=""
+DETACH_PIPE=""
 
 cleanup() {
     if [ -n "${ROCPROF_PID}" ]; then
-        kill "${ROCPROF_PID}" 2>/dev/null || true
+        kill -2 "${ROCPROF_PID}" 2>/dev/null || true
         wait "${ROCPROF_PID}" 2>/dev/null || true
+    fi
+
+    { exec 3>&-; } 2>/dev/null || true
+    if [ -n "${DETACH_PIPE}" ]; then
+        rm -f "${DETACH_PIPE}"
     fi
 
     if [ -n "${APP_PID}" ]; then
@@ -156,28 +162,74 @@ if [ ! -f "${ROCPROFV3}" ]; then
     exit 1
 fi
 
+copy_session_output() {
+    local session_index=$1
+    local destination_prefix=$2
+    local app_json
+
+    if [ "${session_index}" -eq 0 ]; then
+        app_json=$(find "${OUTPUT_DIR}/${OUTPUT_SUBDIR}/" \
+            -name "${APP_OUTPUT_PID}_results.json" -print -quit)
+    else
+        app_json=$(find "${OUTPUT_DIR}/${OUTPUT_SUBDIR}/" \
+            -name "${APP_OUTPUT_PID}_*_results.json" | sort -V | tail -1)
+    fi
+
+    if [ -z "${app_json}" ]; then
+        echo "Error: Could not find session ${session_index} output for PID ${APP_OUTPUT_PID}"
+        return 1
+    fi
+
+    local app_output_dir
+    local app_output_prefix
+    app_output_dir=$(dirname "${app_json}")
+    app_output_prefix=$(basename "${app_json}" "_results.json")
+
+    for src in "${app_output_dir}/${app_output_prefix}"_*.json; do
+        [ -f "${src}" ] || continue
+        local dst_name
+        dst_name=$(basename "${src}" | sed "s/^${app_output_prefix}_/${destination_prefix}_/")
+        cp "${src}" "${OUTPUT_DIR}/${OUTPUT_SUBDIR}/${dst_name}"
+        echo "Copied $(basename "${src}") -> ${dst_name}"
+    done
+
+    if [ ! -f "${OUTPUT_DIR}/${OUTPUT_SUBDIR}/${destination_prefix}_results.json" ]; then
+        echo "Error: Expected output file ${destination_prefix}_results.json not found"
+        return 1
+    fi
+}
+
 run_attachment() {
     local session_name=$1
     local log_file=$2
     local trigger_file=$3
     local complete_file=$4
-    local duration_msec=$5
+    local destination_prefix=$5
+    local session_index=$6
+
+    DETACH_PIPE="${log_file}.stdin"
+    rm -f "${DETACH_PIPE}"
+    mkfifo "${DETACH_PIPE}"
+    exec 3<>"${DETACH_PIPE}"
 
     echo "${session_name}: attaching profiler to PID ${APP_PID} in ${MODE} mode..."
     PYTHONUNBUFFERED=1 LD_PRELOAD="${ROCPROF_PRELOAD}" "${ROCPROFV3}" \
         --attach "${APP_PID}" \
-        --attach-duration-msec "${duration_msec}" \
         "${ROCPROFV3_FLAGS[@]}" \
         -f json --attach-sync-output \
         -d "${OUTPUT_DIR}/${OUTPUT_SUBDIR}" \
-        --log-level "${LOG_LEVEL}" >"${log_file}" 2>&1 &
+        --log-level "${LOG_LEVEL}" <"${DETACH_PIPE}" >"${log_file}" 2>&1 &
     ROCPROF_PID=$!
 
     if ! wait_for_profiler_attached "${APP_PID}" "${log_file}"; then
         echo "rocprofv3 output:"
         cat "${log_file}" 2>/dev/null || true
+        kill -2 "${ROCPROF_PID}" 2>/dev/null || true
         wait "${ROCPROF_PID}" 2>/dev/null || true
         ROCPROF_PID=""
+        exec 3>&-
+        rm -f "${DETACH_PIPE}"
+        DETACH_PIPE=""
         return 1
     fi
 
@@ -186,6 +238,7 @@ run_attachment() {
         return 1
     fi
 
+    printf '\n' >&3
     if wait "${ROCPROF_PID}"; then
         ROCPROF_PID=""
     else
@@ -195,6 +248,11 @@ run_attachment() {
         return 1
     fi
 
+    exec 3>&-
+    rm -f "${DETACH_PIPE}"
+    DETACH_PIPE=""
+
+    copy_session_output "${session_index}" "${destination_prefix}"
     echo "${session_name}: profiler detached successfully"
 }
 
@@ -202,12 +260,13 @@ if [ "${MODE}" = "selected-ref-count-reattach" ]; then
     FIRST_LOG="${OUTPUT_DIR}/${OUTPUT_SUBDIR}/rocprofv3-first.log"
     SECOND_LOG="${OUTPUT_DIR}/${OUTPUT_SUBDIR}/rocprofv3-second.log"
     run_attachment "First attachment" "${FIRST_LOG}" "${TRIGGER_FILE}-first" \
-        "${TRIGGER_FILE}-first-complete" 3000
+        "${TRIGGER_FILE}-first-complete" "${OUTPUT_FILENAME}-first" 0
     wait_for_attach_ready "${APP_PID}"
     run_attachment "Second attachment" "${SECOND_LOG}" "${TRIGGER_FILE}-second" \
-        "${TRIGGER_FILE}-second-complete" 3000
+        "${TRIGGER_FILE}-second-complete" "${OUTPUT_FILENAME}" 1
 else
-    run_attachment "Attachment" "${ROCPROF_LOG}" "${TRIGGER_FILE}" "" 8000
+    run_attachment "Attachment" "${ROCPROF_LOG}" "${TRIGGER_FILE}" \
+        "${TRIGGER_FILE}-complete" "${OUTPUT_FILENAME}" 0
 fi
 
 kill -2 "${APP_PID}" 2>/dev/null
@@ -229,31 +288,13 @@ if [ "${JSON_COUNT}" -eq 0 ]; then
     exit 1
 fi
 
-if [ "${MODE}" = "selected-ref-count-reattach" ]; then
-    APP_JSON=$(find "${OUTPUT_DIR}/${OUTPUT_SUBDIR}/" \
-        -name "${APP_OUTPUT_PID}_*_results.json" | sort -V | tail -1)
-else
-    APP_JSON=$(find "${OUTPUT_DIR}/${OUTPUT_SUBDIR}/" \
-        -name "${APP_OUTPUT_PID}_results.json" | head -1)
-fi
-if [ -z "$APP_JSON" ]; then
-    echo "Error: Could not find app (PID ${APP_OUTPUT_PID}) JSON output in ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/"
-    exit 1
-fi
-echo "Found app JSON output: $APP_JSON"
-
-APP_OUTPUT_DIR=$(dirname "$APP_JSON")
-APP_OUTPUT_PREFIX=$(basename "$APP_JSON" "_results.json")
-
-for src in "${APP_OUTPUT_DIR}/${APP_OUTPUT_PREFIX}"_*.json; do
-    [ -f "$src" ] || continue
-    dst_name=$(basename "$src" | sed "s/^${APP_OUTPUT_PREFIX}_/${OUTPUT_FILENAME}_/")
-    cp "$src" "${OUTPUT_DIR}/${OUTPUT_SUBDIR}/${dst_name}"
-    echo "Copied $(basename "$src") -> ${dst_name}"
-done
-
 if [ ! -f "${OUTPUT_DIR}/${OUTPUT_SUBDIR}/${OUTPUT_FILENAME}_results.json" ]; then
     echo "Error: Expected output file ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/${OUTPUT_FILENAME}_results.json not found"
+    exit 1
+fi
+if [ "${MODE}" = "selected-ref-count-reattach" ] \
+&& [ ! -f "${OUTPUT_DIR}/${OUTPUT_SUBDIR}/${OUTPUT_FILENAME}-first_results.json" ]; then
+    echo "Error: Expected first-session output file ${OUTPUT_FILENAME}-first_results.json not found"
     exit 1
 fi
 

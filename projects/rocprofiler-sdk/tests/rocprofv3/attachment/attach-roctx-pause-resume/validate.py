@@ -41,7 +41,10 @@ FORBIDDEN_KERNELS = {
         "roctx_attach_outside_before_kernel",
         "roctx_attach_outside_after_kernel",
     ),
-    "selected-ref-count-reattach": ("roctx_attach_reattach_outside_kernel",),
+    "selected-ref-count-reattach": (
+        "roctx_attach_reattach_first_kernel",
+        "roctx_attach_reattach_outside_kernel",
+    ),
 }
 
 
@@ -84,6 +87,26 @@ def test_roctx_pause_resume_kernel_gating(json_data, test_mode):
             f"Paused/outside-region kernel '{forbidden}' was unexpectedly captured. "
             f"Captured kernels: {kernel_names}"
         )
+
+
+def test_roctx_pause_resume_first_reattach_session(first_json_data):
+    if first_json_data is None:
+        return
+
+    kernel_names = _kernel_names(first_json_data)
+
+    assert _has_kernel(kernel_names, "roctx_attach_reattach_first_kernel"), (
+        "Expected first-session kernel was not captured. "
+        f"Captured kernels: {kernel_names}"
+    )
+    assert not _has_kernel(kernel_names, "roctx_attach_reattach_inside_kernel"), (
+        "Second-session kernel was unexpectedly captured in the first session. "
+        f"Captured kernels: {kernel_names}"
+    )
+    assert not _has_kernel(kernel_names, "roctx_attach_reattach_outside_kernel"), (
+        "Second-session outside-region kernel was unexpectedly captured in the first session. "
+        f"Captured kernels: {kernel_names}"
+    )
 
 
 if __name__ == "__main__":

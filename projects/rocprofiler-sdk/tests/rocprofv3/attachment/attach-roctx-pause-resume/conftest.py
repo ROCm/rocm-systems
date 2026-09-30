@@ -33,6 +33,11 @@ from rocprofiler_sdk.pytest_utils.dotdict import dotdict
 
 def pytest_addoption(parser):
     parser.addoption("--json-input", action="store", help="Path to JSON output file")
+    parser.addoption(
+        "--first-json-input",
+        action="store",
+        help="Path to the first-session JSON output for the reattachment test",
+    )
     parser.addoption("--skip-if", action="store", help="Skip test if file exists")
     parser.addoption(
         "--mode",
@@ -47,14 +52,29 @@ def _skip_if(request):
         pytest.skip("Attach tests unavailable due to insufficient ptrace permissions")
 
 
+def _load_json(filename):
+    with open(filename, "r") as inp:
+        return dotdict(collapse_dict_list(json.load(inp)))
+
+
 @pytest.fixture
 def json_data(request):
     _skip_if(request)
     filename = request.config.getoption("--json-input")
     if not filename:
         pytest.skip("--json-input not provided")
-    with open(filename, "r") as inp:
-        return dotdict(collapse_dict_list(json.load(inp)))
+    return _load_json(filename)
+
+
+@pytest.fixture
+def first_json_data(request, test_mode):
+    _skip_if(request)
+    if test_mode != "selected-ref-count-reattach":
+        return None
+    filename = request.config.getoption("--first-json-input")
+    if not filename:
+        pytest.fail("--first-json-input not provided for the reattachment test")
+    return _load_json(filename)
 
 
 @pytest.fixture

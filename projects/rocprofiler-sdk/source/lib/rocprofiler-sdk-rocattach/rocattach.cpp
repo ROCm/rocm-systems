@@ -517,19 +517,19 @@ teardown(int pid)
 
         session = &(sessions->at(pid).session);
     }
-    auto status = ROCATTACH_STATUS_SUCCESS;
+    auto logical_detach_status = ROCATTACH_STATUS_SUCCESS;
 
     uint64_t retval = 0;
-    // Execute the attach function with both parameters
-    status =
+    // Execute the target-side logical detach before releasing ptrace.
+    logical_detach_status =
         session->call_function("librocprofiler-register.so", "rocprofiler_register_detach", retval);
-    if(status != ROCATTACH_STATUS_SUCCESS)
+    if(logical_detach_status != ROCATTACH_STATUS_SUCCESS)
     {
         ROCP_ERROR
             << "[rocprofiler-sdk-rocattach] Failed to call "
                "rocprofiler-register::rocprofiler_register_detach function in target process "
-            << pid << ". status: " << status;
-        // continue to detach anyways
+            << pid << ". status: " << logical_detach_status;
+        // Always continue to the physical detach.
     }
     else if(retval != 0)
     {
@@ -537,15 +537,16 @@ teardown(int pid)
             << "[rocprofiler-sdk-rocattach] rocprofiler-register::rocprofiler_register_detach "
                "function returned non-zero status in target process "
             << pid << ". return: " << retval;
-        // continue to detach anyways
+        // Always continue to the physical detach.
+        logical_detach_status = ROCATTACH_STATUS_ERROR;
     }
 
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] Attempting detachment to pid " << pid;
-    status = session->detach();
-    if(status != ROCATTACH_STATUS_SUCCESS)
+    auto physical_detach_status = session->detach();
+    if(physical_detach_status != ROCATTACH_STATUS_SUCCESS)
     {
         ROCP_ERROR << "[rocprofiler-sdk-rocattach] Detachment failed from pid " << pid;
-        return status;
+        return physical_detach_status;
     }
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] Detachment success from pid " << pid;
 
@@ -554,7 +555,7 @@ teardown(int pid)
         sessions->erase(pid);
     }
 
-    return ROCATTACH_STATUS_SUCCESS;
+    return logical_detach_status;
 }
 
 }  // namespace
@@ -705,11 +706,13 @@ rocattach_detach(int pid)
             }
         }
 
+        auto last_status = ROCATTACH_STATUS_SUCCESS;
         for(int pid_itr : pids)
         {
-            rocprofiler::rocattach::teardown(pid_itr);
+            auto status = rocprofiler::rocattach::teardown(pid_itr);
+            if(status != ROCATTACH_STATUS_SUCCESS) last_status = status;
         }
-        return ROCATTACH_STATUS_SUCCESS;
+        return last_status;
     }
 }
 

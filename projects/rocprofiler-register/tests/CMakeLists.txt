@@ -585,3 +585,24 @@ set_tests_properties(
         "LD_LIBRARY_PATH=${CMAKE_LIBRARY_OUTPUT_DIRECTORY};LD_PRELOAD=librocprofiler-register.so;ROCPROFILER_REGISTER_LIBRARY=$<TARGET_SONAME_FILE:rocprofiler>;ROCPROFILER_REGISTER_SECURE=yes;ROCPROFILER_REGISTER_VERBOSE=3;ROCPROFILER_REGISTER_MONOCHROME=true;${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_ENV}"
         LABELS
         "dlopen;secure")
+
+add_executable(test-detach-status)
+target_sources(test-detach-status PRIVATE test-detach-status.cpp)
+target_link_libraries(
+    test-detach-status PRIVATE rocprofiler-register::tests-common
+                               rocprofiler-register::rocprofiler-register)
+
+add_test(
+    NAME test-detach-status
+    COMMAND $<TARGET_FILE:test-detach-status>
+    WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
+
+set_tests_properties(
+    test-detach-status
+    PROPERTIES
+        ENVIRONMENT
+        "LD_LIBRARY_PATH=${CMAKE_LIBRARY_OUTPUT_DIRECTORY};ROCPROFILER_REGISTER_FORCE_LOAD=1;ROCPROFILER_REGISTER_LOG_LEVEL=fatal;${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_ENV}"
+        PASS_REGULAR_EXPRESSION
+        "Test PASSED: detach status propagated through rocprofiler-register"
+        FAIL_REGULAR_EXPRESSION
+        "Test FAILED")

@@ -1257,23 +1257,12 @@ rocprofiler_register_detach()
     if(existing_scanned_data.detach_fn)
     {
         LOG(INFO) << "rocprofiler-sdk detach starting...";
-        existing_scanned_data.detach_fn();
+        auto _ret = existing_scanned_data.detach_fn();
         LOG(INFO) << "rocprofiler-sdk detach completed.";
-    }
-    else
-    {
-        LOG(ERROR) << "detach entry point is NULL";
-        return ROCP_REG_NO_TOOLS;
+        return (_ret == 0) ? ROCP_REG_SUCCESS : ROCP_REG_ROCPROFILER_ERROR;
     }
 
-    return ROCP_REG_SUCCESS;
-    // auto _scan_result = rocp_reg_scan_for_tools();
-    // if(!_scan_result.detach_fn) return ROCP_REG_NO_TOOLS;
-
-    // LOG(INFO) << "rocprofiler-sdk detach starting...";
-    // auto _ret = _scan_result.detach_fn();
-
-    // LOG(INFO) << "rocprofiler-sdk detach completed.";
-    // return (_ret == 0) ? ROCP_REG_SUCCESS : ROCP_REG_ROCPROFILER_ERROR;
+    LOG(ERROR) << "detach entry point is NULL";
+    return ROCP_REG_NO_TOOLS;
 }
 }

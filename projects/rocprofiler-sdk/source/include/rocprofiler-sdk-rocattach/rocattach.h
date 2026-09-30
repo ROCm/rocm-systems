@@ -135,11 +135,15 @@ rocattach_detach_tree(int pid) ROCATTACH_API;
  * Detaches from a previous attachment to the given process identifier (PID). If successful, the
  * target process pauses rocprofiler-sdk, but the library will remain loaded. The PID can be
  * attached to again after detach is completed. A PID of 0 can be specified to detach from all
- * current sessions.
+ * current sessions. A target-side logical detach failure is returned after the physical ptrace
+ * detachment is attempted, unless the physical detach also fails, in which case that status takes
+ * precedence. When detaching all sessions, the function attempts every session and returns the
+ * last error seen.
  *
  * @param [in] pid Process ID to detach from
  * @return ::rocattach_status_t
  * @retval ::ROCATTACH_STATUS_SUCCESS Detachment successful
+ * @retval ::ROCATTACH_STATUS_ERROR Target-side logical detachment failed
  */
 rocattach_status_t
 rocattach_detach(int pid) ROCATTACH_API;

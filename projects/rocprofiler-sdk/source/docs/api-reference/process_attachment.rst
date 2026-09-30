@@ -171,15 +171,16 @@ The C library ``librocprofiler-sdk-rocattach.so`` defines attach and detach func
    - When profiling applications that spawn child processes, use ``rocattach_attach_tree`` instead.
 
 - **rocattach_detach_tree(int pid)**: Detaches from a process and all of its descendants.
-   - Enumerates the process tree rooted at ``pid`` via ``/proc`` at the time of the call.
-   - Only processes with an active attachment session are detached; others are silently skipped.
+   - Uses the process list recorded by the corresponding ``rocattach_attach_tree`` call.
    - Symmetric counterpart to ``rocattach_attach_tree``; use these two together.
-   - Reentrant: the sessions lock is acquired and released per-process and isn't held across the ``/proc`` traversal, so concurrent calls from multiple threads are safe.
+   - Attempts every recorded process and returns the last error seen.
 
 - **rocattach_detach(int pid)**: Detaches from a single process.
    - Takes the target process ID as a parameter.
    - Cleans up attachment resources and terminates profiling.
-   - A PID of 0 can be specified to detach from all the current sessions.
+   - Always attempts the physical ptrace detach even if target-side logical detachment fails, then
+     returns the logical failure unless the physical detach also fails.
+   - A PID of 0 detaches from all current sessions and returns the last error seen.
 
 Function call sequence
 ======================

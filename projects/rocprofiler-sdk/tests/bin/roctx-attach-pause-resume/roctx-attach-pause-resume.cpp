@@ -275,6 +275,8 @@ main(int argc, char** argv)
             HIP_ASSERT(hipFree(data));
             return EXIT_FAILURE;
         }
+
+        signal_phase_complete(trigger_file + "-complete");
     }
 
     // Keep the target alive until the test driver detaches rocprofv3 and

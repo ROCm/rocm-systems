@@ -22,6 +22,8 @@
 
 #include "lib/rocprofiler-sdk/marker/marker.hpp"
 
+#include <rocprofiler-sdk/fwd.h>
+
 #include <gtest/gtest.h>
 
 #include <sys/wait.h>
@@ -31,6 +33,14 @@
 #include <optional>
 #include <stdexcept>
 #include <thread>
+
+extern "C" {
+rocprofiler_status_t
+rocprofiler_attach(void);
+
+rocprofiler_status_t
+rocprofiler_detach(void);
+}
 
 TEST(marker_control_gate, writer_waits_for_inflight_control_call)
 {
@@ -111,6 +121,50 @@ TEST(marker_control_gate, writer_thread_can_reenter_control_api)
 
     EXPECT_FALSE(rocprofiler::marker::control_api_gate_owned_by_this_thread());
     EXPECT_NO_THROW(auto reader_scope = rocprofiler::marker::control_api_read_scope{});
+}
+
+TEST(marker_control_gate, control_callback_rejects_public_attachment_transitions)
+{
+    auto child_pid = fork();
+    ASSERT_GE(child_pid, 0);
+
+    if(child_pid == 0)
+    {
+        alarm(2);
+        close(STDERR_FILENO);
+
+        auto reader_scope = rocprofiler::marker::control_api_read_scope{};
+        if(rocprofiler_attach() != ROCPROFILER_STATUS_ERROR) _exit(1);
+        if(rocprofiler_detach() != ROCPROFILER_STATUS_ERROR) _exit(2);
+        _exit(0);
+    }
+
+    auto child_status = int{0};
+    ASSERT_EQ(waitpid(child_pid, &child_status, 0), child_pid);
+    EXPECT_TRUE(WIFEXITED(child_status));
+    EXPECT_EQ(WEXITSTATUS(child_status), 0);
+}
+
+TEST(marker_control_gate, attachment_hook_rejects_public_attachment_transitions)
+{
+    auto child_pid = fork();
+    ASSERT_GE(child_pid, 0);
+
+    if(child_pid == 0)
+    {
+        alarm(2);
+        close(STDERR_FILENO);
+
+        auto writer_scope = rocprofiler::marker::control_api_write_scope{};
+        if(rocprofiler_attach() != ROCPROFILER_STATUS_ERROR) _exit(1);
+        if(rocprofiler_detach() != ROCPROFILER_STATUS_ERROR) _exit(2);
+        _exit(0);
+    }
+
+    auto child_status = int{0};
+    ASSERT_EQ(waitpid(child_pid, &child_status, 0), child_pid);
+    EXPECT_TRUE(WIFEXITED(child_status));
+    EXPECT_EQ(WEXITSTATUS(child_status), 0);
 }
 
 TEST(marker_control_gate, failed_read_to_write_upgrade_does_not_poison_gate)

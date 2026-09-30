@@ -3422,7 +3422,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             // function
             ROCPROFILER_CALL(rocprofiler_create_context(&att_device_context), "context creation");
             // The callback API accepts void*, but the callback only reads this attach-invariant
-            // value. Published config generations remain alive until callbacks are drained.
+            // value. Published config generations remain alive for the process lifetime.
             const auto* consecutive_kernels = &tool::get_config().att_consecutive_kernels;
             ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
                                  get_client_ctx(),

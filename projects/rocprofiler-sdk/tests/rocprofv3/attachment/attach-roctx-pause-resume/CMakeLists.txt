@@ -83,6 +83,8 @@ foreach(_MODE normal selected selected-ref-count-reattach)
         FIXTURES_REQUIRED rocprofv3-test-attachment-roctx-pause-resume-${_MODE}
         ARGS --json-input
              ${CMAKE_CURRENT_BINARY_DIR}/attachment-roctx-${_MODE}-output/out_results.json
+             --first-json-input
+             ${CMAKE_CURRENT_BINARY_DIR}/attachment-roctx-${_MODE}-output/out-first_results.json
              --skip-if
              ${CMAKE_CURRENT_BINARY_DIR}/attachment-roctx-${_MODE}-output/skipped
              --mode

@@ -31,14 +31,15 @@ import pytest
 
 
 class _FakeFunction:
-    def __init__(self):
+    def __init__(self, return_value=0):
         self.calls = []
         self.restype = None
         self.argtypes = None
+        self.return_value = return_value
 
     def __call__(self, *args):
         self.calls.append(args)
-        return 0
+        return self.return_value
 
 
 class _FakeAttachLibrary:
@@ -91,6 +92,34 @@ def test_default_attach_library_uses_runtime_soname(
     assert fake_library.rocattach_detach.calls == [(123,)]
     assert not fake_library.rocattach_attach_tree.calls
     assert not fake_library.rocattach_detach_tree.calls
+
+
+def test_detach_failure_is_reported(rocprof_attach, monkeypatch, tmp_path):
+    tool_library = tmp_path / "tool.so"
+    tool_library.touch()
+
+    fake_library = _FakeAttachLibrary()
+    fake_library.rocattach_detach.return_value = 7
+
+    monkeypatch.setattr(rocprof_attach.ctypes, "CDLL", lambda _: fake_library)
+    monkeypatch.setattr(rocprof_attach.signal, "signal", lambda *_: None)
+    monkeypatch.setattr(rocprof_attach.time, "sleep", lambda *_: None)
+
+    with pytest.raises(RuntimeError, match="detach.*non-zero status 7"):
+        rocprof_attach.main(
+            [
+                "--attach",
+                "123",
+                "--attach-tool-library",
+                str(tool_library),
+                "--attach-duration-msec",
+                "0",
+                "--attach-children=false",
+            ]
+        )
+
+    assert fake_library.rocattach_attach.calls == [(123,)]
+    assert fake_library.rocattach_detach.calls == [(123,)]
 
 
 if __name__ == "__main__":
