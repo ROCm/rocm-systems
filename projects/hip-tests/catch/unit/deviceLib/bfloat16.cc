@@ -662,6 +662,23 @@ __global__ void bf162_neq(float* in, char* out, size_t size) {
   }
 }
 
+// Device counterpart of the mismatched-lane checks in Unit_bf162_operators_host.
+__global__ void bf162_lane_compare(char* out) {
+  const auto lt_l = __float22bfloat162_rn(float2{1.0f, 4.0f});
+  const auto lt_r = __float22bfloat162_rn(float2{2.0f, 3.0f});
+  const auto gt_l = __float22bfloat162_rn(float2{4.0f, 1.0f});
+  const auto gt_r = __float22bfloat162_rn(float2{3.0f, 2.0f});
+  const auto eq_x = __float22bfloat162_rn(float2{1.0f, 5.0f});
+  const auto nan_x = __float22bfloat162_rn(float2{NAN, 1.0f});
+  out[0] = lt_l < lt_r;
+  out[1] = lt_l <= lt_r;
+  out[2] = gt_l > gt_r;
+  out[3] = gt_l >= gt_r;
+  out[4] = __hbneu2(lt_l, eq_x);
+  out[5] = __high2float(__hgt2(gt_l, gt_r)) != 0.0f;
+  out[6] = __high2float(__hisnan2(nan_x)) != 0.0f;
+}
+
 HIP_TEST_CASE(Unit_bf162_basic) {
   auto f_in = getAllBF16();
   auto max_bf16_num = f_in.size();
@@ -703,6 +720,23 @@ HIP_TEST_CASE(Unit_bf162_basic) {
       }
     }
     HIP_CHECK(hipFree(in));
+    HIP_CHECK(hipFree(out));
+  }
+
+  SECTION("Mismatched lanes on device") {
+    // Each relation holds in exactly one lane, so every result must be false; the
+    // pre-fix header returned true for all of them.
+    constexpr size_t kNumResults = 7;
+    char* out;
+    HIP_CHECK(hipMalloc(&out, kNumResults));
+    bf162_lane_compare<<<1, 1>>>(out);
+    HIP_CHECK(hipGetLastError());
+    std::vector<char> result(kNumResults, 1);
+    HIP_CHECK(hipMemcpy(result.data(), out, kNumResults, hipMemcpyDeviceToHost));
+    for (size_t i = 0; i < kNumResults; i++) {
+      INFO("Result index: " << i);
+      REQUIRE(result[i] == 0);
+    }
     HIP_CHECK(hipFree(out));
   }
 }
