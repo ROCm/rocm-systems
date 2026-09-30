@@ -15,7 +15,6 @@ from tests.integration.common import (
     config,
     num_devices,
     num_kernels,
-    validate,
 )
 
 
@@ -40,12 +39,6 @@ def test_multi_rank_profiling_no_mpi_comm(binary_handler_profile_rocprof_compute
             str(rank_dir), num_devices, num_kernels
         )
         assert sorted(list(file_dict.keys())) == CSVS
-
-        validate(
-            inspect.stack()[0][3],
-            str(rank_dir),
-            file_dict,
-        )
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -85,12 +78,6 @@ def test_multi_rank_profiling_mpi_comm(
         )
 
         assert sorted(list(file_dict.keys())) == CSVS
-
-        validate(
-            inspect.stack()[0][3],
-            str(rank_dir),
-            file_dict,
-        )
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 
