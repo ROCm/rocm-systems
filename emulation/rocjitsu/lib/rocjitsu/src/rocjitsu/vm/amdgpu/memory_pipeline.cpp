@@ -319,6 +319,8 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
       if (!(oob_mask & (1ULL << lane)))
         continue;
       for (uint32_t i = 0; i < vgpr_count; ++i) {
+        if (i < 32 && !(d.block_dword_mask & (uint32_t{1} << i)))
+          continue;
         uint32_t val = 0;
         if (!cu.sram_ecc() && d.elem_size <= 2 && (d.d16_hi || d.d16_lo)) {
           const uint32_t old = cu.read_vgpr_storage(d.dst_reg_base + i, lane);
@@ -335,6 +337,8 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
   // bookkeeping and deliberately has no instruction-side observation to preserve.
   if (!is_atomic && d.elem_size == sizeof(uint32_t) && !d.sign_extend && !d.d16_hi && !d.d16_lo) {
     for (uint32_t i = 0; i < vgpr_count; ++i) {
+      if (i < 32 && !(d.block_dword_mask & (uint32_t{1} << i)))
+        continue;
       auto *destination = reinterpret_cast<uint32_t *>(cu.raw_vgpr_data(d.dst_reg_base + i));
       uint64_t lanes = d.lane_mask;
       while (lanes) {

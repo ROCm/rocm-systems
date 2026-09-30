@@ -8337,6 +8337,8 @@ class CodeGenerator:
         if sem.name.startswith('CLUSTER_LOAD_'):
             L.append('  d->request_force_l1_bypass = true;')
         L.append('  flat_calculate_addresses(inst_, wf, *d);')
+        if sem.name in ('GLOBAL_LOAD_BLOCK', 'SCRATCH_LOAD_BLOCK'):
+            L.append('  d->set_block_dword_mask(wf.m0());')
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
 
@@ -8359,6 +8361,25 @@ class CodeGenerator:
         L.append(f'  d->mtype = {self._mtype_expr()};')
         L.append(f'  d->non_temporal = {nt};')
         L.append('  flat_calculate_addresses(inst_, wf, *d);')
+        if sem.name in ('GLOBAL_STORE_BLOCK', 'SCRATCH_STORE_BLOCK'):
+            L.append('  d->set_block_dword_mask(wf.m0());')
+            L.append(f'  uint32_t data_base = {data_base};')
+            L.append('  d->store_data.resize(wf.wf_size() * 128);')
+            L.append('  for (uint32_t i = 0; i < 32; ++i) {')
+            L.append('    if (!(d->block_dword_mask & (uint32_t{1} << i))) continue;')
+            L.append(
+                '    auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base + i, 1, d->lane_mask);'
+            )
+            L.append('    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
+            L.append('      if (!(d->lane_mask & (uint64_t{1} << lane))) continue;')
+            L.append('      const uint32_t value = data.lane(0, lane);')
+            L.append(
+                '      std::memcpy(&d->store_data[lane * 128 + i * 4], &value, 4);'
+            )
+            L.append('    }')
+            L.append('  }')
+            L.append('  set_data(std::move(d));')
+            return '\n'.join(L)
         L.append('  uint64_t exec = wf.exec();')
         L.append(f'  uint32_t data_base = {data_base};')
         data_regs = ne if esz == 4 else 1

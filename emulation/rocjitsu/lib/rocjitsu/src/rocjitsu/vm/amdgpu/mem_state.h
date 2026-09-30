@@ -158,6 +158,9 @@ public:
   /// Empty means every element uses lane_mask; otherwise the container has
   /// exactly num_elems masks and lane_mask is their union.
   ElementLaneMasks element_lane_masks;
+  // GFX12 block transfers preserve M0-disabled DWORDs in both memory and VGPRs.
+  // Unlike buffer bounds masks, these holes must not be zeroed on load completion.
+  uint32_t block_dword_mask = 0xffffffffu;
   uint64_t exec_mask = 0; ///< Effective issue mask set by address calculation. This normally
                           ///< snapshots EXEC, but ISA exceptions may replace it (for example,
                           ///< CDNA5 DS transpose loads use an all-lanes mask), while
@@ -265,6 +268,18 @@ public:
   std::vector<uint8_t> ds2_store_data;
   std::vector<uint8_t> ds2_response_data;
   TranslatedMemoryProgress translated;
+
+  void set_block_dword_mask(uint32_t mask) {
+    assert(elem_size == 4 && num_elems == 32);
+    block_dword_mask = mask;
+    element_lane_masks.assign(32, 0);
+    for (uint32_t i = 0; i < 32; ++i) {
+      if (mask & (uint32_t{1} << i))
+        element_lane_masks[i] = lane_mask;
+    }
+    if (mask == 0)
+      lane_mask = 0;
+  }
 
   /// Number of consecutive VGPRs written starting at dst_reg_base.
   [[nodiscard]] uint32_t destination_vgpr_count() const {
