@@ -17,14 +17,11 @@ AMD SMI supports:
 - {ref}`AMD GPUs <rocm:release-supported-hw>` on Linux bare metal systems
 - AMD GPUs in Linux virtual machine guests
 - AMD EPYC™ CPUs through the
-  [esmi_ib_library](https://github.com/amd/esmi_ib_library) (requires the
-  `amd_hsmp` kernel module with HSMP enabled in BIOS at runtime)
+  [esmi_ib_library](https://github.com/amd/esmi_ib_library) (requires an HSMP
+  kernel driver; see {ref}`install_amdgpu_driver`)
 
 For AMD SMI on Linux SR-IOV hosts, refer to
 the [AMD SMI for Virtualization documentation](https://instinct.docs.amd.com/projects/amd-smi-virt/en/latest/index.html).
-
-AMD SMI library runs on AMD ROCm supported platforms. Refer to
-{ref}`AMD hardware support <rocm:release-supported-hw>` for more information.
 
 (install_reqs)=
 ## Requirements
@@ -35,11 +32,15 @@ requirements.
 (install_amdgpu_driver)=
 ### Driver requirements
 
-To run AMD SMI, the following components need to be installed on your system:
+To run AMD SMI, the following kernel drivers need to be loaded on your system:
 
-- The `amdgpu-dkms` driver
-  - For current amdgpu driver installation instructions, see the [AMD GPU
-    Driver (amdgpu)
+- The `amdgpu` driver
+  - On native Linux, `amdsmi_init()` and the `amd-smi` CLI find GPUs only
+    while it is loaded. The `/sys/module/amdgpu` directory exists when it is.
+  - The driver included in your distribution's kernel works. AMD also
+    distributes the driver as the `amdgpu-dkms` package, which builds it out
+    of tree with DKMS; for installation instructions, see the [AMD GPU Driver
+    (amdgpu)
     documentation](https://instinct.docs.amd.com/projects/amdgpu-docs/en/latest/install/detailed-install/prerequisites.html).
 
     :::{note}
@@ -58,14 +59,20 @@ To run AMD SMI, the following components need to be installed on your system:
     that matches your AMD SMI or ROCm release. See {ref}`About N/A values
     <cli-output-na>` for more information.
     :::
-- The `amd_hsmp` or `hsmp_acpi` driver
-  - Required for `amdsmi_init(AMDSMI_INIT_AMD_CPUS)` and `amd-smi` CPU commands.
-  - See [amd_hsmp](https://github.com/amd/amd_hsmp) for more information.
+- The `amd_hsmp` or `hsmp_acpi` kernel driver (AMD EPYC CPUs only, optional)
+  - Required for `amdsmi_init(AMDSMI_INIT_AMD_CPUS)` and `amd-smi` CPU
+    commands. HSMP must also be enabled in the BIOS.
+  - Both drivers are part of the upstream Linux kernel: `amd_hsmp` since
+    Linux 5.18 and `hsmp_acpi` since Linux 6.13. For older kernels, see
+    [amd_hsmp](https://github.com/amd/amd_hsmp).
   - Without it, CPU discovery is skipped non-fatally and only GPU and NIC data
     is reported.
 
 Also confirm that your Linux kernel version matches the system requirements
 described in {ref}`Operating system support <rocm:release-supported-os>`.
+
+For the experimental WSL backend, which uses `/dev/dxg` instead of `amdgpu`,
+see [Using AMD SMI under WSL](../how-to/amdsmi-wsl-mode.md).
 
 ### Interface prerequisites
 
