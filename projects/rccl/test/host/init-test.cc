@@ -8053,7 +8053,10 @@ class Grow_ParentComm {
     comm_->cudaDev = kGrow_ParentCudaDev;
     comm_->config.minCTAs = kGrow_ParentMinCTAs;
     comm_->config.maxCTAs = kGrow_ParentMinCTAs;
-    memset(peerInfo_, 0, sizeof(peerInfo_));
+    for (int i = 0; i < kGrow_TargetRanks; i++) {
+      memset(&peerInfo_[i], 0, sizeof(peerInfo_[i]));
+      peerInfo_[i].hostHash = static_cast<uint64_t>(i) + 1;
+    }
     comm_->peerInfo = peerInfo_;
   }
   ncclComm* get() { return comm_.get(); }
@@ -8958,6 +8961,24 @@ TEST_F(InitMicrotest, InitChildComm_Shrink_ExcludingOnlyRemoteHostRank_DoesNotSe
   ASSERT_EQ(ncclSuccess, Grow_RunShrink(parent.get(), NCCL_SHRINK_DEFAULT, exclude, 1, &out));
 
   EXPECT_FALSE(parent->hasExcludedLocalRank) << "excluded rank 3 is on a different host from rank 0";
+  Rank_ReleaseComm(spy.rec().jobComm, /*ownsAbortResources=*/true);
+}
+
+TEST_F(InitMicrotest, InitChildComm_Shrink_MultiExcludeHitsLocalOnSecondEntry_SetsFlag) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  parent->peerInfo[0].hostHash = 0xAAAA;
+  parent->peerInfo[1].hostHash = 0xBBBB;
+  parent->peerInfo[2].hostHash = 0xBBBB;
+  parent->peerInfo[3].hostHash = 0xAAAA;
+  parent->rank = 0;
+  int exclude[2] = {1, 3};
+  Grow_LaunchSpy spy;
+  ncclComm_t out = kGrow_NewcommPoison;
+
+  ASSERT_EQ(ncclSuccess, Grow_RunShrink(parent.get(), NCCL_SHRINK_DEFAULT, exclude, 2, &out));
+
+  EXPECT_TRUE(parent->hasExcludedLocalRank) << "rank 3 shares host with rank 0; loop must continue past rank 1";
   Rank_ReleaseComm(spy.rec().jobComm, /*ownsAbortResources=*/true);
 }
 
