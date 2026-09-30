@@ -152,12 +152,15 @@ namespace {
 struct ReporterState {
   std::vector<std::string> lines;
   ncclResult_t result = ncclSuccess;
+  int calls = 0;
+  int failCall = 0;
 };
 
 ncclResult_t CaptureLine(void* target, const char* line) {
   auto* state = static_cast<ReporterState*>(target);
   state->lines.emplace_back(line);
-  return state->result;
+  state->calls++;
+  return state->failCall == 0 || state->calls == state->failCall ? state->result : ncclSuccess;
 }
 
 rasDiagnosticsReporter MakeReporter(ReporterState* state) {
@@ -302,6 +305,22 @@ class RasDiagnosticsGpuMicrotest : public ::testing::Test {
                 std::to_string(commHash + 2) + " (RAS overlay may not be ready)",
               state.lines[0]);
   }
+
+  template <typename Payload>
+  void ExpectReporterFailure(
+    SummaryFn summarize, std::initializer_list<std::pair<rasDiagnosticsRankHeader, Payload>> input, int failCall = 1) {
+    state.lines.clear();
+    state.calls = 0;
+    state.failCall = failCall;
+    state.result = ncclRemoteError;
+    auto records = BuildRecords<Payload>(input);
+
+    EXPECT_EQ(ncclRemoteError, summarize(&ctx, &reporter, records.data(), static_cast<int>(records.size())));
+    EXPECT_EQ(failCall, state.calls);
+
+    state.result = ncclSuccess;
+    state.failCall = 0;
+  }
 };
 
 }  // namespace
@@ -351,6 +370,34 @@ TEST_F(RasDiagnosticsGpuMicrotest, GpuModelFillReportsKnownAndUnknownInventory) 
   EXPECT_STREQ(RAS_DIAG_GPU_MODEL_UNKNOWN, data.model);
 }
 
+TEST_F(RasDiagnosticsGpuMicrotest, GpuModelFillSkipsOutOfRangeDevicesAndHandlesLookupFailure) {
+  rasDiagnosticsCommSnapshot snapshot{};
+  ncclNvmlDeviceCount = 2;
+  g_deviceCount = 8;
+  g_deviceName = "MI300X";
+  rasDiagnosticsGpuModelData data{};
+
+  for (int nvmlDev : {-1, ncclNvmlDeviceCount}) {
+    snapshot.nvmlDev = nvmlDev;
+    data = GpuModel(1, "stale");
+    ASSERT_EQ(ncclSuccess, rasDiagnosticsGpuModelFillLocalData(&snapshot, &data));
+    EXPECT_EQ(8, data.nGpus);
+    EXPECT_STREQ(RAS_DIAG_GPU_MODEL_UNKNOWN, data.model);
+  }
+  EXPECT_TRUE(g_handleIndices.empty());
+  EXPECT_TRUE(g_nameDevices.empty());
+
+  snapshot.nvmlDev = 1;
+  g_handleResult = ncclSystemError;
+  data = GpuModel(1, "stale");
+  ASSERT_EQ(ncclSuccess, rasDiagnosticsGpuModelFillLocalData(&snapshot, &data));
+  EXPECT_EQ(8, data.nGpus);
+  EXPECT_STREQ(RAS_DIAG_GPU_MODEL_UNKNOWN, data.model);
+  ASSERT_EQ(1u, g_handleIndices.size());
+  EXPECT_EQ(1u, g_handleIndices[0]);
+  EXPECT_TRUE(g_nameDevices.empty());
+}
+
 TEST_F(RasDiagnosticsGpuMicrotest, DriverVersionFillHandlesSuccessFailureAndZero) {
   rasDiagnosticsCommSnapshot snapshot{};
   rasDiagnosticsCudaDriverVersionData data{};
@@ -391,13 +438,43 @@ TEST_F(RasDiagnosticsGpuMicrotest, EccFillRequiresEveryCounter) {
             g_eccLocations);
   for (nvmlEccCounterType_t counterType : g_eccCounterTypes) EXPECT_EQ(NVML_VOLATILE_ECC, counterType);
 
-  g_eccResults[1][1] = ncclSystemError;
+  const std::array<std::pair<int, int>, 4> failedSlots = {{{0, 0}, {1, 0}, {0, 1}, {1, 1}}};
+  for (size_t slot = 0; slot < failedSlots.size(); slot++) {
+    for (auto& byLocation : g_eccResults) byLocation.fill(ncclSuccess);
+    g_eccResults[failedSlots[slot].first][failedSlots[slot].second] = ncclSystemError;
+    data = EccData(true, 9, 9, 9, 9);
+
+    ASSERT_EQ(ncclSuccess, rasDiagnosticsEccFillLocalData(&snapshot, &data));
+    EXPECT_EQ(slot == 0 ? 0u : 1u, data.correctedSram);
+    EXPECT_EQ(slot == 1 ? 0u : 3u, data.uncorrectedSram);
+    EXPECT_EQ(slot == 2 ? 0u : 2u, data.correctedDram);
+    EXPECT_EQ(slot == 3 ? 0u : 4u, data.uncorrectedDram);
+    EXPECT_EQ(0, data.available);
+  }
+
+  for (auto& byLocation : g_eccResults) byLocation.fill(ncclSuccess);
+  g_handleResult = ncclSystemError;
+  data = EccData(true, 9, 9, 9, 9);
   ASSERT_EQ(ncclSuccess, rasDiagnosticsEccFillLocalData(&snapshot, &data));
+  EXPECT_EQ(0u, data.correctedSram);
+  EXPECT_EQ(0u, data.uncorrectedSram);
+  EXPECT_EQ(0u, data.correctedDram);
+  EXPECT_EQ(0u, data.uncorrectedDram);
   EXPECT_EQ(0, data.available);
 
-  g_handleResult = ncclSystemError;
-  ASSERT_EQ(ncclSuccess, rasDiagnosticsEccFillLocalData(&snapshot, &data));
-  EXPECT_EQ(0, data.available);
+  g_handleResult = ncclSuccess;
+  g_handleIndices.clear();
+  for (int nvmlDev : {-1, ncclNvmlDeviceCount}) {
+    snapshot.nvmlDev = nvmlDev;
+    data = EccData(true, 9, 9, 9, 9);
+    ASSERT_EQ(ncclSuccess, rasDiagnosticsEccFillLocalData(&snapshot, &data));
+    EXPECT_EQ(0u, data.correctedSram);
+    EXPECT_EQ(0u, data.uncorrectedSram);
+    EXPECT_EQ(0u, data.correctedDram);
+    EXPECT_EQ(0u, data.uncorrectedDram);
+    EXPECT_EQ(0, data.available);
+  }
+  EXPECT_TRUE(g_handleIndices.empty());
 }
 
 TEST_F(RasDiagnosticsGpuMicrotest, NvLinkFillCountsValidAndInactiveLinks) {
@@ -420,10 +497,26 @@ TEST_F(RasDiagnosticsGpuMicrotest, NvLinkFillCountsValidAndInactiveLinks) {
   for (nvmlNvLinkCapability_t capability : g_nvLinkCapabilities) EXPECT_EQ(NVML_NVLINK_CAP_VALID, capability);
   EXPECT_EQ((std::vector<int>{0, 0, 0}), g_nvLinkStateDevices);
 
-  snapshot.nvmlDev = 2;
+  g_handleIndices.clear();
+  for (int nvmlDev : {-1, ncclNvmlDeviceCount}) {
+    snapshot.nvmlDev = nvmlDev;
+    data = NvLinkData(9, 9);
+    ASSERT_EQ(ncclSuccess, rasDiagnosticsNvLinkFillLocalData(&snapshot, &data));
+    EXPECT_EQ(0, data.nLinks);
+    EXPECT_EQ(0, data.nInactive);
+  }
+  EXPECT_TRUE(g_handleIndices.empty());
+
+  snapshot.nvmlDev = 0;
+  g_handleResult = ncclSystemError;
+  g_nvLinkCapabilityDevices.clear();
+  data = NvLinkData(9, 9);
   ASSERT_EQ(ncclSuccess, rasDiagnosticsNvLinkFillLocalData(&snapshot, &data));
   EXPECT_EQ(0, data.nLinks);
   EXPECT_EQ(0, data.nInactive);
+  ASSERT_EQ(1u, g_handleIndices.size());
+  EXPECT_EQ(0u, g_handleIndices[0]);
+  EXPECT_TRUE(g_nvLinkCapabilityDevices.empty());
 }
 
 TEST_F(RasDiagnosticsGpuMicrotest, CollectLocalBuildsOneRecordForEachCheck) {
@@ -598,10 +691,57 @@ TEST_F(RasDiagnosticsGpuMicrotest, NvLinkSummaryCoversNoLinksHealthyMismatchInac
   EXPECT_TRUE(Contains(state.lines, "inactive link(s) on rank(s) {0} across 1 ranks in comm 0x7"));
 }
 
-TEST_F(RasDiagnosticsGpuMicrotest, SummaryPropagatesReporterFailure) {
-  state.result = ncclRemoteError;
-  auto records = BuildRecords<rasDiagnosticsGpuModelData>({{MakeRank(1, 0, 1), GpuModel(8, "MI300X")}});
+TEST_F(RasDiagnosticsGpuMicrotest, EveryReporterFailurePropagates) {
+  ExpectReporterFailure<rasDiagnosticsGpuModelData>(rasDiagnosticsGpuModelSummarize,
+                                                     {{MakeRank(1, 0, 2), GpuModel(8, "MI300X")}});
+  ExpectReporterFailure<rasDiagnosticsGpuModelData>(rasDiagnosticsGpuModelSummarize,
+                                                     {{MakeRank(2, 0, 1), GpuModel(8, "MI300X")}});
+  ExpectReporterFailure<rasDiagnosticsGpuModelData>(
+    rasDiagnosticsGpuModelSummarize, {{MakeRank(3, 0, 1), GpuModel(8, RAS_DIAG_GPU_MODEL_UNKNOWN)}});
+  ExpectReporterFailure<rasDiagnosticsGpuModelData>(rasDiagnosticsGpuModelSummarize,
+                                                     {{MakeRank(4, 0, 1), GpuModel(0, "MI300X")}});
+  ExpectReporterFailure<rasDiagnosticsGpuModelData>(
+    rasDiagnosticsGpuModelSummarize, {{MakeRank(5, 0, 1), GpuModel(0, RAS_DIAG_GPU_MODEL_UNKNOWN)}});
+  ExpectReporterFailure<rasDiagnosticsGpuModelData>(
+    rasDiagnosticsGpuModelSummarize,
+    {{MakeRank(6, 0, 2), GpuModel(8, "MI300X")}, {MakeRank(6, 1, 2), GpuModel(4, "MI300X")}});
+  ExpectReporterFailure<rasDiagnosticsGpuModelData>(
+    rasDiagnosticsGpuModelSummarize,
+    {{MakeRank(7, 0, 2), GpuModel(8, "MI300X")}, {MakeRank(7, 1, 2), GpuModel(8, "MI250")}});
 
-  EXPECT_EQ(ncclRemoteError,
-            rasDiagnosticsGpuModelSummarize(&ctx, &reporter, records.data(), static_cast<int>(records.size())));
+  ExpectReporterFailure<rasDiagnosticsCudaDriverVersionData>(
+    rasDiagnosticsCudaDriverVersionSummarize, {{MakeRank(8, 0, 2), DriverVersion(70002000)}});
+  ExpectReporterFailure<rasDiagnosticsCudaDriverVersionData>(
+    rasDiagnosticsCudaDriverVersionSummarize,
+    {{MakeRank(9, 0, 1), DriverVersion(RAS_DIAG_CUDA_DRIVER_VERSION_UNKNOWN)}});
+  ExpectReporterFailure<rasDiagnosticsCudaDriverVersionData>(
+    rasDiagnosticsCudaDriverVersionSummarize, {{MakeRank(10, 0, 1), DriverVersion(70002000)}});
+  ExpectReporterFailure<rasDiagnosticsCudaDriverVersionData>(
+    rasDiagnosticsCudaDriverVersionSummarize,
+    {{MakeRank(11, 0, 2), DriverVersion(70002000)}, {MakeRank(11, 1, 2), DriverVersion(70003000)}});
+
+  ExpectReporterFailure<rasDiagnosticsEccData>(rasDiagnosticsEccSummarize,
+                                               {{MakeRank(12, 0, 2), EccData(true)}});
+  ExpectReporterFailure<rasDiagnosticsEccData>(rasDiagnosticsEccSummarize,
+                                               {{MakeRank(13, 0, 1), EccData(false)}});
+  ExpectReporterFailure<rasDiagnosticsEccData>(rasDiagnosticsEccSummarize,
+                                               {{MakeRank(14, 0, 1), EccData(true)}});
+  ExpectReporterFailure<rasDiagnosticsEccData>(
+    rasDiagnosticsEccSummarize,
+    {{MakeRank(15, 0, 2), EccData(true)}, {MakeRank(15, 1, 2), EccData(false)}});
+  ExpectReporterFailure<rasDiagnosticsEccData>(rasDiagnosticsEccSummarize,
+                                               {{MakeRank(16, 0, 1), EccData(true, 0, 1)}});
+  g_eccThreshold = 5;
+  ExpectReporterFailure<rasDiagnosticsEccData>(rasDiagnosticsEccSummarize,
+                                               {{MakeRank(17, 0, 1), EccData(true, 5)}});
+
+  ExpectReporterFailure<rasDiagnosticsNvLinkData>(rasDiagnosticsNvLinkSummarize,
+                                                  {{MakeRank(18, 0, 2), NvLinkData(8, 0)}});
+  ExpectReporterFailure<rasDiagnosticsNvLinkData>(rasDiagnosticsNvLinkSummarize,
+                                                  {{MakeRank(19, 0, 1), NvLinkData(8, 0)}});
+  ExpectReporterFailure<rasDiagnosticsNvLinkData>(
+    rasDiagnosticsNvLinkSummarize,
+    {{MakeRank(20, 0, 2), NvLinkData(8, 0)}, {MakeRank(20, 1, 2), NvLinkData(6, 0)}});
+  ExpectReporterFailure<rasDiagnosticsNvLinkData>(rasDiagnosticsNvLinkSummarize,
+                                                  {{MakeRank(21, 0, 1), NvLinkData(8, 1)}});
 }
