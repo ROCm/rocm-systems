@@ -1005,17 +1005,41 @@ int RocJpegApiNegativeTests::TestStreamParseFuzz() {
         minimal_scan.push_back(0xFF);
         minimal_scan.push_back(0xD9);
 
-        // The same MCU behind a restart marker, so that the tokens a scan may
+        // The same MCU with a restart marker, so that the tokens a scan may
         // legitimately contain are covered rather than just plain coded bytes.
-        std::vector<uint8_t> restart_then_mcu = empty_scan;
-        restart_then_mcu.push_back(0xFF);
-        restart_then_mcu.push_back(0xD0);
-        restart_then_mcu.insert(restart_then_mcu.end(), complete_mcu.begin(), complete_mcu.end());
-        restart_then_mcu.push_back(0xFF);
-        restart_then_mcu.push_back(0xD9);
+        //
+        // A restart marker is only meaningful at the boundary between restart
+        // intervals, and those intervals only exist once a DRI segment declares
+        // one, so the marker cannot simply be prepended to the single-MCU scan
+        // above: that stream has no DRI and only one MCU, which makes the marker
+        // corrupt data rather than a token, and requiring it to parse would lock
+        // in acceptance of malformed syntax. The fixture is built instead by
+        // widening the seed's frame to 32x16 so it covers two 16x16 4:2:0 MCUs,
+        // inserting a DRI of one MCU ahead of the scan header, and putting RST0
+        // between the two intervals. An independent decoder reads the result as
+        // a 32x16 image with no warnings, and reports corruption as soon as the
+        // DRI segment is taken back out.
+        const size_t restart_sof_offset = FindMarker(color_seed, 0xC0);
+        if (restart_sof_offset + 9 > color_seed.size()) {
+            std::cerr << "The color fuzzing seed no longer carries a parsable SOF segment." << std::endl;
+            return EXIT_FAILURE;
+        }
+        std::vector<uint8_t> restart_between_mcus(color_seed.begin(), color_seed.begin() + scan_start);
+        restart_between_mcus[restart_sof_offset + 7] = 0x00;
+        restart_between_mcus[restart_sof_offset + 8] = 0x20;
+        const std::vector<uint8_t> dri_segment = {0xFF, 0xDD, 0x00, 0x04, 0x00, 0x01};
+        restart_between_mcus.insert(restart_between_mcus.begin() + sos_offset, dri_segment.begin(),
+                                    dri_segment.end());
+        restart_between_mcus.insert(restart_between_mcus.end(), complete_mcu.begin(), complete_mcu.end());
+        restart_between_mcus.push_back(0xFF);
+        restart_between_mcus.push_back(0xD0);
+        restart_between_mcus.insert(restart_between_mcus.end(), complete_mcu.begin(), complete_mcu.end());
+        restart_between_mcus.push_back(0xFF);
+        restart_between_mcus.push_back(0xD9);
 
         accepted_cases.push_back({"scan of one complete MCU", minimal_scan});
-        accepted_cases.push_back({"scan of one complete MCU behind a restart marker", restart_then_mcu});
+        accepted_cases.push_back({"scan of two complete MCUs with a restart marker between them",
+                                  restart_between_mcus});
     }
 
     // A three-component frame header whose chroma sampling factors are zero.
