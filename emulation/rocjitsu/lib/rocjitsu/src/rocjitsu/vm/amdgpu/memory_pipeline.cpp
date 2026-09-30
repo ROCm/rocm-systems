@@ -692,7 +692,7 @@ VmAccessOutcome execute_translated_transfer(VectorMemState &d) {
   return VmAccessOutcome::Complete;
 }
 
-VmAccessOutcome execute_translated_atomic_rmw(VectorMemState &d) {
+VmAccessOutcome execute_translated_atomic_rmw(VectorMemState &d, uint64_t lane_mask) {
   if (d.atomic_op == AtomicOp::APPEND || d.atomic_op == AtomicOp::CONSUME ||
       d.atomic_op == AtomicOp::BARRIER_ARRIVE) {
     return VmAccessOutcome::Malformed;
@@ -707,7 +707,7 @@ VmAccessOutcome execute_translated_atomic_rmw(VectorMemState &d) {
 
   assert(d.translated.access.has_value());
   for (uint32_t lane = d.translated.atomic_lane; lane < d.wf_size; ++lane) {
-    if (!(d.lane_mask & (uint64_t{1} << lane)))
+    if (!(lane_mask & (uint64_t{1} << lane)))
       continue;
 
     if (!d.translated.atomic_loaded) {
@@ -783,7 +783,8 @@ VmAccessOutcome execute_translated_atomic_rmw(VectorMemState &d) {
 /// operation, and writes the new value back. The device coherence epoch makes
 /// cached L1/L2 lines stale at the atomic boundary. Old values are stored in
 /// response_data for GLC return.
-VmAccessOutcome execute_atomic_rmw(VectorMemState &d, L2Cache *l2, uint32_t vmid) {
+VmAccessOutcome execute_atomic_rmw(VectorMemState &d, L2Cache *l2, uint32_t vmid,
+                                   uint64_t lane_mask) {
   const uint32_t esz = d.elem_size;
   d.response_data.resize(d.wf_size * esz);
   const bool uses_two_sources =
@@ -793,7 +794,7 @@ VmAccessOutcome execute_atomic_rmw(VectorMemState &d, L2Cache *l2, uint32_t vmid
   const bool is_fp = (d.atomic_op == AtomicOp::FADD || d.atomic_op == AtomicOp::FMIN ||
                       d.atomic_op == AtomicOp::FMAX || d.atomic_op == AtomicOp::FCMPSWAP);
 
-  if (d.lane_mask == 0)
+  if (lane_mask == 0)
     return VmAccessOutcome::Complete;
   // A retry keeps completed lanes but must not reuse a retired VM generation.
   const auto vm_access = l2->snapshot_atomic_access(vmid);
@@ -802,7 +803,7 @@ VmAccessOutcome execute_atomic_rmw(VectorMemState &d, L2Cache *l2, uint32_t vmid
     return boundary.outcome();
 
   for (uint32_t lane = d.translated.atomic_lane; lane < d.wf_size; ++lane) {
-    if (!(d.lane_mask & (1ULL << lane)))
+    if (!(lane_mask & (1ULL << lane)))
       continue;
 
     uint64_t ea = d.per_lane_addr[lane];
@@ -877,7 +878,7 @@ VmAccessOutcome execute_atomic_rmw(VectorMemState &d, L2Cache *l2, uint32_t vmid
 void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds,
                             const std::array<uint64_t, 64> &per_lane_addr,
                             const std::vector<uint8_t> &store_data,
-                            std::vector<uint8_t> &response_data) {
+                            std::vector<uint8_t> &response_data, uint64_t lane_mask) {
   const uint32_t esz = d.elem_size;
   response_data.resize(d.wf_size * esz);
   const bool uses_two_sources =
@@ -891,7 +892,7 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds,
     uint32_t addr = 0;
     bool any_lane = false;
     for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
-      if (d.lane_mask & (1ULL << lane)) {
+      if (lane_mask & (1ULL << lane)) {
         addr = static_cast<uint32_t>(per_lane_addr[lane]);
         any_lane = true;
         break;
@@ -901,9 +902,9 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds,
       return;
 
     const uint32_t old_val = lds->read32(addr);
-    const uint32_t active_count = static_cast<uint32_t>(std::popcount(d.lane_mask));
+    const uint32_t active_count = static_cast<uint32_t>(std::popcount(lane_mask));
     for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
-      if (!(d.lane_mask & (1ULL << lane)))
+      if (!(lane_mask & (1ULL << lane)))
         continue;
       // Both operations broadcast the pre-operation counter to active lanes.
       std::memcpy(&response_data[lane * 4], &old_val, 4);
@@ -915,7 +916,7 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds,
   }
 
   for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
-    if (!(d.lane_mask & (1ULL << lane)))
+    if (!(lane_mask & (1ULL << lane)))
       continue;
 
     auto addr = static_cast<uint32_t>(per_lane_addr[lane]);
@@ -980,7 +981,33 @@ VmAccessOutcome GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront 
   auto &d = *inst.data_as<VectorMemState>();
   d.wg_id = wf.wg_id();
   d.wf_id = wf.wf_id();
-  const uint64_t request_lanes = transpose_request_lane_mask(d, wf.wf_size());
+  const uint64_t local_lanes = d.flat_lds_lane_mask & d.lane_mask;
+  const auto outcome =
+      initiate_global_access(d, wf, transpose_request_lane_mask(d, wf.wf_size()) & ~local_lanes);
+  if (outcome != VmAccessOutcome::Complete || local_lanes == 0)
+    return outcome;
+
+  // Commit LDS only after all retryable global work completes. In particular,
+  // a global retry must not repeat an LDS atomic or discard either result set.
+  auto addresses = d.per_lane_addr;
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (local_lanes & (uint64_t{1} << lane))
+      addresses[lane] = addresses[lane] - d.flat_lds_aperture_base + wf.lds_base();
+  }
+  auto &lds = wf.lds();
+  if (d.atomic_op != AtomicOp::NONE) {
+    execute_lds_atomic_rmw(d, &lds, addresses, d.store_data, d.response_data, local_lanes);
+  } else if (d.is_load) {
+    lds.vector_load(addresses.data(), local_lanes, d.elem_size, d.num_elems,
+                    d.response_data.data());
+  } else {
+    lds.vector_store(addresses.data(), local_lanes, d.elem_size, d.num_elems, d.store_data.data());
+  }
+  return VmAccessOutcome::Complete;
+}
+
+VmAccessOutcome GlobalMemPipeline::initiate_global_access(VectorMemState &d, Wavefront &wf,
+                                                          uint64_t request_lanes) {
   const uint64_t swizzled_lanes = d.scratch_swizzle ? d.scratch_lane_mask & request_lanes : 0;
   if (d.requires_scratch_backing && swizzled_lanes != 0 && wf.scratch_base() == 0)
     return VmAccessOutcome::Faulted;
@@ -1003,8 +1030,8 @@ VmAccessOutcome GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront 
 
   if (d.atomic_op != AtomicOp::NONE) {
     if (translated_address_space)
-      return execute_translated_atomic_rmw(d);
-    return execute_atomic_rmw(d, l2_, wf.process_id());
+      return execute_translated_atomic_rmw(d, request_lanes);
+    return execute_atomic_rmw(d, l2_, wf.process_id(), request_lanes);
   }
 
   // Swizzle is a per-lane layout property. FLAT can mix private-aperture and
@@ -1087,9 +1114,10 @@ VmAccessOutcome LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &
     return VmAccessOutcome::Complete;
   }
   if (d.atomic_op != AtomicOp::NONE) {
-    execute_lds_atomic_rmw(d, &lds, d.per_lane_addr, d.store_data, d.response_data);
+    execute_lds_atomic_rmw(d, &lds, d.per_lane_addr, d.store_data, d.response_data, d.lane_mask);
     if (d.ds2_active) {
-      execute_lds_atomic_rmw(d, &lds, d.ds2_per_lane_addr, d.ds2_store_data, d.ds2_response_data);
+      execute_lds_atomic_rmw(d, &lds, d.ds2_per_lane_addr, d.ds2_store_data, d.ds2_response_data,
+                             d.lane_mask);
     }
     return VmAccessOutcome::Complete;
   }

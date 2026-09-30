@@ -211,6 +211,10 @@ public:
   // provenance: buffer SRD swizzling still addresses the SRD's global base.
   bool requires_scratch_backing = false;
   uint64_t scratch_lane_mask = 0;
+  // Mixed FLAT requests retain original shared-aperture addresses while their
+  // global/scratch lanes use the global pipeline. Translate only these LDS lanes.
+  uint64_t flat_lds_lane_mask = 0;
+  uint64_t flat_lds_aperture_base = 0;
   uint32_t scratch_addr_stride = 0;
   uint32_t scratch_swizzle_unit = 4; ///< Bytes per swizzle unit; RDNA buffers can use 16.
   // Low bits of the uniform address contribution applied after swizzling. The
