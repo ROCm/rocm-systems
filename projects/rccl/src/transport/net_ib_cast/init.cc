@@ -644,6 +644,21 @@ exit:
     IbCastUseInline = false;
     IbCastAinicCtsInlineData = false;
   }
+  // After all offload/scheduler mutations so BY_ORDER + failover logs match
+  // the scheme comms will actually use (IbCastByOrderRequested reads live).
+  if (ret == ncclSuccess && IbCastNDevs > 0) {
+    if (IbCastByOrderRequested()) {
+      if (ncclParamIbCastResiliencyPortFailover() > 0) {
+        WARN("NET/IB: BY_ORDER matching requested (NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=%d): disabling resiliency "
+             "(port failover and port recovery)", BY_ORDER);
+      }
+      if (ncclParamIbCastOooRq()) {
+        WARN("NET/IB: BY_ORDER matching requested (NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=%d):"
+             " disabling out-of-order RQ", BY_ORDER);
+      }
+    }
+    IbCastReportMatchingScheme();
+  }
   return ret;
 fail:
   if (devices && (ncclSuccess != wrap_ibv_free_device_list(devices))) {
