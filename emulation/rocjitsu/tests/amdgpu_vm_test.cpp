@@ -1154,8 +1154,9 @@ TEST(AqlDispatchTest, RevokedInFlightLoadPublishesQueueMemoryException) {
     ASSERT_EQ(completion_signal_value(fixture.mem(), kCompletionSignal), 1);
     ASSERT_EQ(exception_count, 0u);
 
-    if (invalidate)
+    if (invalidate) {
       ASSERT_TRUE(fixture.soc_ptr->gpu_vm().invalidate(address_space));
+    }
     translator->deferred = false;
     for (uint32_t step = 0; step < 1000 && fixture.engine->step(); ++step) {
     }
