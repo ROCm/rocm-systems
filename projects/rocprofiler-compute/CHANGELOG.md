@@ -7,16 +7,32 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
+* Added Data Fabric to MALL bandwidth arrows to the CDNA (gfx9) Memory Chart. On gfx940–gfx942 these report estimated HBM bandwidth, derived from a 64B-per-request approximation.
+
+* Added the `VL1 Coalesce` metric to the VL1D panel of the CDNA (gfx9) Memory Chart.
+
+* Added the xGMI block to the gfx90a and gfx940–gfx942 Memory Charts, which previously showed it only on gfx950. The block is drawn without bandwidth counters on these architectures.
+
 ### Changed
+
+* Renamed the Memory Chart left-hand panel from "Kernel" to "Compute Units" across all architectures. The panel now shows resource allocation stats (Wave Occupancy, vGPRs, sGPRs, Scratch, LDS Allocation, Workgroups).
+
+* All Memory Chart bandwidth values now use uniform fixed-point GB/s formatting (3 decimal places) for easy cross-level comparison.
 
 ### Removed
 
 * Removed the experimental `--gui` and `--tui` analyze modes and the `--random-port` option. Use the default CLI analyze mode for terminal output, or `--output-format db` to explore results in ROCm Optiq.
   * The `dash`, `dash-bootstrap-components`, `dash-svg`, `textual`, and `textual_plotext` dependencies are no longer installed.
 
+* Removed the HBM and remote traffic percentage metrics from the gfx940–gfx942 Memory Chart. The new Data Fabric to MALL arrows report estimated HBM bandwidth instead.
+
+* Removed Memory Chart metrics that the panel YAMLs defined but never rendered, across all CDNA architectures.
+
 ### Optimized
 
 ### Resolved issues
+
+* Fixed measured zero HBM bandwidth rendering as `N/A` on the CDNA (gfx9) Memory Chart Data Fabric to MALL arrows. It now reports `0.000 GB/s`.
 
 ### Upcoming changes
 
