@@ -13,6 +13,8 @@
 
 #include "fakes/env_fakes.h"
 
+// rasTimeoutFactorSec collides with fakes/ras_param_fakes.cc and rasTimeoutFactorNs with ras-test.cc;
+// the parameter accessor rename keeps this included implementation consistently isolated.
 #define ncclParamRasTimeoutFactor RasParamTestNcclParamRasTimeoutFactor
 #define rasTimeoutFactorNs RasParamTestRasTimeoutFactorNs
 #define rasTimeoutFactorSec RasParamTestRasTimeoutFactorSec
@@ -47,7 +49,7 @@ TEST_F(RasParamMicrotest, LoadTimeoutFactorAcceptsPositiveFiniteValues) {
 }
 
 TEST_F(RasParamMicrotest, LoadTimeoutFactorRejectsInvalidValues) {
-  for (const char* value : {"abc", "1x", "0", "-1", "nan", "inf", "1e9999", "1e-9999"}) {
+  for (const char* value : {"abc", "1x", "0", "-1", "nan", "inf", "1e9999", "1e-9999", "1e-310"}) {
     SetMicroEnv("NCCL_RAS_TIMEOUT_FACTOR", value);
     EXPECT_FLOAT_EQ(1.0f, rasLoadTimeoutFactor()) << value;
   }
