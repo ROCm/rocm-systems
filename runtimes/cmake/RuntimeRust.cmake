@@ -60,6 +60,13 @@ macro(runtime_rust_initialize)
         COMMAND_ERROR_IS_FATAL ANY
     )
     include("${_runtime_binary_dir}/runtime-rust-config.cmake")
+    # Regeneration may run from a different directory than initial configure.
+    set(ROCM_RUNTIMES_CARGO_CONFIG
+        "${_runtime_cargo_config}"
+        CACHE FILEPATH
+        "Optional prepared Cargo configuration"
+        FORCE
+    )
     file(
         GLOB_RECURSE _runtime_manifests
         CONFIGURE_DEPENDS

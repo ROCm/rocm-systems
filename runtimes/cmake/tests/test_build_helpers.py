@@ -1,6 +1,7 @@
 """Host-only regressions for the Cargo/CMake boundary (no Rust build required)."""
 
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -14,6 +15,120 @@ from configure_rust import cmake_set, rust_flags, validate_host
 
 
 class ConfigureTests(unittest.TestCase):
+    def test_cargo_config_paths_survive_working_directory_changes(self):
+        helpers = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source"
+            source.mkdir()
+            (source / "cmake").symlink_to(helpers, target_is_directory=True)
+            (source / "rust-toolchain.toml").write_text(
+                '[toolchain]\nchannel = "1.98.0"\n'
+            )
+            (source / "Cargo.lock").write_text("# fixture\n")
+            config = root / "config with spaces.toml"
+            config.write_text("# fixture config\n")
+            alias = root / "config alias.toml"
+            alias.symlink_to(config)
+            # Fake provisioned tools validate actual subprocess arguments; no Rust
+            # build is needed to exercise configure, generated commands or Ninja.
+            for tool in ("cargo", "rustc", "ld.lld"):
+                executable = root / tool
+                executable.write_text(f"""#!{sys.executable}
+import json
+from pathlib import Path
+import sys
+tool = Path(sys.argv[0]).name
+if tool == "rustc":
+    print("rustc 1.98.0\\nrelease: 1.98.0\\nhost: x86_64-unknown-linux-gnu")
+elif tool == "ld.lld":
+    print("LLD fixture")
+elif "--version" in sys.argv:
+    print("cargo 1.98.0")
+else:
+    if "--config" in sys.argv:
+        config = Path(sys.argv[sys.argv.index("--config") + 1])
+        assert config.is_absolute() and config.is_file(), str(config)
+    print(json.dumps({{"packages": [], "workspace_members": []}}))
+""")
+                executable.chmod(0o755)
+            (source / "CMakeLists.txt").write_text(
+                """cmake_minimum_required(VERSION 3.25)
+project(ConfigFixture LANGUAGES NONE)
+set(CMAKE_SYSTEM_PROCESSOR x86_64)
+set(CMAKE_C_COMPILER "unused compiler")
+set(CMAKE_BUILD_TYPE Release)
+include(cmake/RuntimeRust.cmake)
+runtime_rust_initialize()
+file(APPEND "${CMAKE_BINARY_DIR}/configure-count" "configured\\n")
+add_custom_target(check ALL COMMAND ${_runtime_cargo_command} metadata --frozen
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}" VERBATIM)
+"""
+            )
+            for index, value in enumerate(
+                (config.name, str(config), alias.name, "", "missing.toml")
+            ):
+                with self.subTest(config=value):
+                    binary = root / f"build-{index}"
+                    result = subprocess.run(
+                        [
+                            "cmake",
+                            "-S",
+                            str(source),
+                            "-B",
+                            str(binary),
+                            "-G",
+                            "Ninja",
+                            f"-DROCM_RUNTIMES_CARGO={root / 'cargo'}",
+                            f"-DROCM_RUNTIMES_RUSTC={root / 'rustc'}",
+                            f"-DROCM_RUNTIMES_LLD={root / 'ld.lld'}",
+                            f"-DROCM_RUNTIMES_CARGO_CONFIG:FILEPATH={value}",
+                        ],
+                        cwd=root,
+                        capture_output=True,
+                        text=True,
+                    )
+                    if value == "missing.toml":
+                        self.assertNotEqual(result.returncode, 0)
+                        self.assertIn(
+                            "Cargo configuration does not exist", result.stderr
+                        )
+                        continue
+                    self.assertEqual(
+                        result.returncode, 0, result.stdout + result.stderr
+                    )
+                    settings = (binary / "runtime-rust-config.cmake").read_text()
+                    if value:
+                        expected = os.path.abspath(root / value)
+                        self.assertIn(
+                            cmake_set("_runtime_cargo_config", [expected]), settings
+                        )
+                        self.assertIn(
+                            f"ROCM_RUNTIMES_CARGO_CONFIG:FILEPATH={expected}",
+                            (binary / "CMakeCache.txt").read_text(),
+                        )
+                    else:
+                        self.assertNotIn('"--config"', settings)
+                    subprocess.run(
+                        ["cmake", "--build", str(binary)],
+                        cwd=source,
+                        check=True,
+                        capture_output=True,
+                    )
+                    if value:
+                        before = (binary / "configure-count").read_text()
+                        config.write_text(config.read_text() + "# changed\n")
+                        subprocess.run(
+                            ["cmake", "--build", str(binary)],
+                            cwd=source,
+                            check=True,
+                            capture_output=True,
+                        )
+                        self.assertEqual(
+                            (binary / "configure-count").read_text(),
+                            before + "configured\n",
+                        )
+
     def test_library_registration_uses_project_version_and_platform_guard(self):
         module = Path(__file__).resolve().parents[1] / "RuntimeRust.cmake"
         for system in ("Linux", "Windows", "Darwin"):

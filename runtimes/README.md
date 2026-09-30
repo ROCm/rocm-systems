@@ -66,7 +66,9 @@ own native versions; the helper handles filenames, symlinks, SONAME settings,
 and per-static-library link requirements. Platform-specific conventions live
 in the helper, with explicit errors for Windows/Darwin until implemented.
 The configure helper recognizes native Linux x86-64, AArch64, PPC64/PPC64LE,
-and RISC-V64 toolchains; only x86-64 has been validated locally.
+and RISC-V64 toolchains. This is not runtime backend support: rocddi currently
+supports only Linux x86-64/AArch64 and rejects other architectures at compile
+time in `ddi/rocddi/src/driver/builtin.rs`. Only x86-64 has been validated locally.
 Python's standard-library TOML parser requires Python 3.11 or newer.
 `runtime-rust-config.cmake` in the build directory records the generated Cargo
 command and environment for inspection.
@@ -84,8 +86,12 @@ must be prepared before configuration; missing inputs fail rather than fetch.
 
 - `ROCM_RUNTIMES_CARGO_HOME`: writable Cargo home, defaulting to `cargo-home/`
   in the binary directory. Can point to a prepared registry/Git cache.
-- `ROCM_RUNTIMES_CARGO_CONFIG`: optional absolute path to prepared Cargo
-  configuration, for example source replacement pointing to vendored crates.
+- `ROCM_RUNTIMES_CARGO_CONFIG`: optional path to prepared Cargo configuration,
+  for example source replacement pointing to vendored crates. Relative paths
+  are made absolute against the configure helper's invocation directory before
+  running Cargo, without resolving symlinks. The absolute path is retained in
+  the CMake cache and generated commands so builds and regeneration do not
+  depend on the caller's working directory.
 - `ROCM_RUNTIMES_CARGO_JOBS`: optional positive parallel-job limit.
 
 Native C libraries should be discovered by CMake and explicitly supplied to
