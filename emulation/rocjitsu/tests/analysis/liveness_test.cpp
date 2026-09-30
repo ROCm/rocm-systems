@@ -41,6 +41,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <bitset>
 #include <cstdint>
 #include <cstring>
 #include <initializer_list>
@@ -474,6 +475,121 @@ std::vector<IndirectCallFixup> discover_test_indirect_fixups(const std::vector<u
       std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(words.data()),
                                words.size() * sizeof(uint32_t)),
       arch, leaders, wavefront_size);
+}
+
+TEST(RegisterSetAnalysis, WordIterationMatchesBitsetModelAcrossMutationsAndAlgebra) {
+  constexpr std::array classes{RegClass::SGPR, RegClass::VGPR, RegClass::ACC_VGPR};
+  constexpr std::array capacities{REGISTER_SET_MAX_SGPRS, REGISTER_SET_MAX_VGPRS,
+                                  REGISTER_SET_MAX_ACC_VGPRS};
+  using Model = std::array<std::bitset<REGISTER_SET_MAX_VGPRS>, 3>;
+  const auto check = [&](const RegisterSet &actual, const Model &model) {
+    std::vector<RegisterRef> expected, visited;
+    for (size_t cls = 0; cls < classes.size(); ++cls)
+      for (size_t index = 0; index < model[cls].size(); ++index)
+        if (model[cls].test(index))
+          expected.push_back({classes[cls], static_cast<uint16_t>(index), 1});
+    actual.for_each_ordinary([&](RegisterRef ref) { visited.push_back(ref); });
+    EXPECT_EQ(visited, expected);
+    EXPECT_EQ(actual.ordinary_size(), expected.size());
+    EXPECT_EQ(actual.none(), expected.empty());
+    EXPECT_EQ(actual.size(), expected.size());
+  };
+  std::array<RegisterSet, 2> sets;
+  std::array<Model, 2> models;
+  uint32_t seed = 0x8a021bu;
+  const auto next = [&]() { return seed = seed * 1664525u + 1013904223u; };
+  // Deliberately include word edges, the partial SGPR word, high VGPR banks,
+  // zero widths, clipped wide tuples, and completely out-of-range tuples.
+  constexpr std::array<uint16_t, 20> bases{0,   1,   62,  63,  64,  65,  104, 105,  106,  127,
+                                           128, 255, 256, 511, 512, 767, 768, 1023, 1024, 65535};
+  constexpr std::array<uint8_t, 5> widths{0, 1, 2, 32, 255};
+  for (unsigned step = 0; step < 300; ++step) {
+    SCOPED_TRACE(step);
+    const size_t which = next() % 2;
+    const size_t cls = next() % classes.size();
+    const uint16_t base = bases[next() % bases.size()];
+    const uint8_t width = widths[next() % widths.size()];
+    const RegisterRef ref{classes[cls], base, width};
+    const size_t end = static_cast<size_t>(base) + std::max<unsigned>(1, width);
+    const auto operation = next() % 10;
+    if (operation == 0) {
+      sets[which].clear_class(classes[cls]);
+      models[which][cls].reset();
+    } else {
+      const bool insert = operation < 7;
+      if (insert)
+        sets[which].expand(ref);
+      else
+        sets[which].erase(ref);
+      for (size_t index = base; index < std::min(end, capacities[cls]); ++index)
+        models[which][cls].set(index, insert);
+    }
+    bool contains = true, intersects = false;
+    for (size_t index = base; index < end; ++index) {
+      const bool present = index < capacities[cls] && models[which][cls].test(index);
+      contains &= present;
+      intersects |= present;
+    }
+    EXPECT_EQ(sets[which].contains(ref), contains);
+    EXPECT_EQ(sets[which].intersects(ref), intersects);
+    check(sets[0], models[0]);
+    check(sets[1], models[1]);
+    Model united, common, difference;
+    for (size_t c = 0; c < classes.size(); ++c) {
+      united[c] = models[0][c] | models[1][c];
+      common[c] = models[0][c] & models[1][c];
+      difference[c] = models[0][c] & ~models[1][c];
+    }
+    check(sets[0] | sets[1], united);
+    check(sets[0] & sets[1], common);
+    check(sets[0] - sets[1], difference);
+    EXPECT_EQ(sets[0] == sets[1], models[0] == models[1]);
+    EXPECT_EQ(sets[0].intersects(sets[1]),
+              std::ranges::any_of(common, [](const auto &bits) { return bits.any(); }));
+  }
+}
+
+TEST(RegisterSetAnalysis, WordIterationHandlesFullWordsAndPartialClassTails) {
+  constexpr std::array classes{RegClass::SGPR, RegClass::VGPR, RegClass::ACC_VGPR};
+  constexpr std::array capacities{REGISTER_SET_MAX_SGPRS, REGISTER_SET_MAX_VGPRS,
+                                  REGISTER_SET_MAX_ACC_VGPRS};
+  RegisterSet set;
+  std::vector<RegisterRef> expected, visited;
+  for (size_t cls = 0; cls < classes.size(); ++cls) {
+    for (size_t base = 0; base < capacities[cls]; base += 64)
+      set.expand({classes[cls], static_cast<uint16_t>(base), 64});
+    for (size_t index = 0; index < capacities[cls]; ++index)
+      if (index != 63 && index != 64)
+        expected.push_back({classes[cls], static_cast<uint16_t>(index), 1});
+  }
+  set.expand({RegClass::EXEC, 0, 1});
+  set.for_each_ordinary([&](RegisterRef ref) {
+    visited.push_back(ref);
+    if (ref.index == 0)
+      set.erase({ref.cls, 63, 2});
+  });
+  EXPECT_EQ(visited, expected);
+  EXPECT_EQ(set.ordinary_size(), expected.size());
+  EXPECT_EQ(set.size(), expected.size() + 1);
+  EXPECT_TRUE(set.contains({RegClass::EXEC, 0, 1}));
+}
+
+TEST(RegisterSetAnalysis, WordIterationPreservesForwardCallbackEdits) {
+  RegisterSet set;
+  for (uint16_t index : {0, 1, 63, 64, 1023})
+    set.expand({RegClass::VGPR, index, 1});
+  std::vector<uint16_t> visited;
+  set.for_each_ordinary([&](RegisterRef ref) {
+    visited.push_back(ref.index);
+    if (ref.index == 0) {
+      set.erase({RegClass::VGPR, 1, 1});
+      set.expand({RegClass::VGPR, 2, 1});
+    } else if (ref.index == 63) {
+      set.erase({RegClass::VGPR, 64, 1});
+      set.expand({RegClass::VGPR, 65, 1});
+    }
+  });
+  EXPECT_EQ(visited, (std::vector<uint16_t>{0, 2, 63, 65, 1023}));
 }
 
 TEST(RegisterSetAnalysis, KeepsRegisterClassesSeparate) {
