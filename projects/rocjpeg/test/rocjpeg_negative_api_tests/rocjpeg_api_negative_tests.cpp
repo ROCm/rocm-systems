@@ -1105,16 +1105,33 @@ int RocJpegApiNegativeTests::TestStreamParseFuzz() {
             regressions.push_back({mcu_case.first, oversized_mcu});
         }
 
-        // The other side of the boundary. The largest MCU this decoder supports
-        // is 4:2:0 at six blocks - four luma plus one of each chroma - because
-        // the subsampling layouts that would reach ten are not among the ones it
-        // handles. Keeping it here means a limit applied one block early, or to
-        // the maximum rather than the sum, fails in the same run.
-        std::vector<uint8_t> largest_mcu = color_seed;
-        largest_mcu[sof_offset + 11] = 0x22;
-        largest_mcu[sof_offset + 14] = 0x11;
-        largest_mcu[sof_offset + 17] = 0x11;
-        accepted_cases.push_back({"SOF whose MCU holds six blocks", largest_mcu});
+        // The other side of the boundary. The limit is ten blocks, but the
+        // largest MCU that actually reaches the decoder is smaller than that,
+        // because a frame also has to classify as a subsampling
+        // GetChromaSubsampling recognises. Across every three-component layout
+        // it accepts, the largest sum that is not already over the limit is
+        // eight, from the two 4:2:2 spellings; 4:4:4 at 2x2 or 4x4 would sum to
+        // 12 and 48 and is rejected by the cases above.
+        //
+        // The eight-block layouts are the ones that matter here: a limit
+        // lowered to six, or applied to the largest product rather than the
+        // sum, would still pass a 4:2:0 fixture while rejecting supported
+        // 4:2:2 streams. Keeping the smaller layouts alongside them means an
+        // over-strict limit fails in the same run whichever way it is wrong.
+        const std::vector<std::pair<const char *, std::array<uint8_t, 3>>> supported_mcu_cases = {
+            {"SOF whose MCU holds eight blocks as 4:2:2", {0x22, 0x12, 0x12}},
+            {"SOF whose MCU holds eight blocks as 4:2:2 with wide chroma", {0x22, 0x21, 0x21}},
+            {"SOF whose MCU holds six blocks as 4:2:0", {0x22, 0x11, 0x11}},
+            {"SOF whose MCU holds four blocks as 4:4:0", {0x12, 0x11, 0x11}},
+            {"SOF whose MCU holds three blocks as 4:4:4", {0x11, 0x11, 0x11}},
+        };
+        for (const auto &supported_mcu_case : supported_mcu_cases) {
+            std::vector<uint8_t> largest_mcu = color_seed;
+            largest_mcu[sof_offset + 11] = supported_mcu_case.second[0];
+            largest_mcu[sof_offset + 14] = supported_mcu_case.second[1];
+            largest_mcu[sof_offset + 17] = supported_mcu_case.second[2];
+            accepted_cases.push_back({supported_mcu_case.first, largest_mcu});
+        }
     }
 
     // A single-component frame is not interleaved, so A.2.2 does not apply to it
