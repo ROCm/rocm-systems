@@ -3324,6 +3324,13 @@ create_roctx_client()
 }
 
 void
+check_sdk_version_compatibility()
+{
+    using sdk_backend_t = backends::rocprofiler_sdk::backend<wrapper>;
+    sdk_backend_t::check_version_compatibility();
+}
+
+void
 reset_sdk_session_guards()
 {
     tool_fini_done.store(false);
