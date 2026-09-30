@@ -150,7 +150,24 @@ pre-commit install
 
 Once installed, every commit will run the configured checks automatically:
 
-![A screen capture showing terminal output from a pre-commit hook](docs/data/contributing/pre-commit-hook.png)
+```console
+$ git commit -m "Share global variables across modules"
+check yaml...................................................(no files to check)Skipped
+fix end of files.................................................................Passed
+trim trailing whitespace.........................................................Passed
+ruff check.......................................................................Passed
+ruff format......................................................................Passed
+gersemi......................................................(no files to check)Skipped
+clang-format.................................................(no files to check)Skipped
+Reject staged Python bytecode................................(no files to check)Skipped
+Copyright header check...........................................................Passed
+Sets metric ID validation....................................(no files to check)Skipped
+Membw tree spec metric validation............................(no files to check)Skipped
+Hash consistency check...........................................................Passed
+Analysis config lint (equation format, header/metric keys)...(no files to check)Skipped
+[users/xuchen-amd/analysis_config_lint 88a788cc86] Share global variables across modules
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+```
 
 See the [pre-commit documentation](https://pre-commit.com/#quick-start) for more details.
 
