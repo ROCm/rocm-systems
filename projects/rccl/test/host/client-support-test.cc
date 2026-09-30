@@ -52,6 +52,7 @@
 #include "ScopedHook.h"
 #include "alloc.h"
 #include "fakes/hip_fakes.h"
+#include "fakes/env_fakes.h"
 #include "fakes/libc_fakes.h"
 #include "fakes/ras_fakes.h"
 #include "ras/diagnostics.h"
@@ -69,6 +70,7 @@ namespace {
 // ---------------------------------------------------------------------------
 
 uint64_t g_clockNano = 100 * CLOCK_UNITS_PER_SEC;
+std::string g_parsedSocketAddress;
 
 // peers.cc seams. Tests populate rasPeers/nRasPeers/rasDeadPeers/nRasDeadPeers directly (plain
 // globals, not std::function hooks) -- rasPeerFind/rasPeerIsDead/ncclSocketsCompare below are
@@ -192,9 +194,10 @@ int ncclSocketsCompare(const void* p1, const void* p2) {
   const auto* a2 = static_cast<const union ncclSocketAddress*>(p2);
   int hostCmp = ncclSocketsHostCompare(a1, a2);
   if (hostCmp != 0) return hostCmp;
-  uint16_t port1 = (a1->sa.sa_family == AF_INET ? a1->sin.sin_port : a1->sin6.sin6_port);
-  uint16_t port2 = (a2->sa.sa_family == AF_INET ? a2->sin.sin_port : a2->sin6.sin6_port);
-  return (port1 < port2 ? -1 : (port1 > port2 ? 1 : 0));
+  // Match peers.cc: compare the network-order bytes, not host-endian integers.
+  const uint16_t* port1 = (a1->sa.sa_family == AF_INET ? &a1->sin.sin_port : &a1->sin6.sin6_port);
+  const uint16_t* port2 = (a2->sa.sa_family == AF_INET ? &a2->sin.sin_port : &a2->sin6.sin6_port);
+  return memcmp(port1, port2, sizeof(*port1));
 }
 
 bool ncclSocketsSameNode(const union ncclSocketAddress* a1, const union ncclSocketAddress* a2) {
@@ -277,7 +280,9 @@ ncclResult_t rasDiagnosticsResume(struct rasClient* /*client*/) {
 // Verbatim copy of src/init.cc's own definition.
 // ---------------------------------------------------------------------------
 const char* ncclFuncStr[NCCL_NUM_FUNCTIONS + 4] = {"Broadcast", "Reduce", "AllGather", "ReduceScatter", "AllReduce",
-                                                   "AlltoAllPivot", "AlltoAllGda", "AlltoAllvGda", "SendRecv"};
+                                                   "AlltoAllPivot", "AlltoAllGda", "AlltoAllvGda",
+                                                   "SendRecv"};
+static_assert(NCCL_NUM_FUNCTIONS + 4 == 9, "Update the ncclFuncStr fixture when functions change");
 
 // ---------------------------------------------------------------------------
 // misc/socket.cc externs (only rasClientInitSocket needs these).
@@ -288,7 +293,8 @@ const char* ncclSocketToString(const union ncclSocketAddress*, char* buf, const 
   return buf;
 }
 
-ncclResult_t ncclSocketGetAddrFromString(union ncclSocketAddress* addr, const char*) {
+ncclResult_t ncclSocketGetAddrFromString(union ncclSocketAddress* addr, const char* text) {
+  g_parsedSocketAddress = text;
   memset(addr, 0, sizeof(*addr));
   addr->sin.sin_family = AF_INET;
   addr->sin.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
@@ -304,6 +310,7 @@ namespace {
 
 void ResetWholeFileSeams() {
   ResetRasFakes();
+  g_parsedSocketAddress.clear();
   g_callocCallIndex = 0;
   g_callocFailAt = -1;
   g_reallocCallIndex = 0;
@@ -365,6 +372,16 @@ union ncclSocketAddress MakeAddr(uint16_t port) {
   addr.sin.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
   addr.sin.sin_port = htons(port);
   return addr;
+}
+
+struct rasPeerInfo MakePeer(uint16_t port, uint64_t cudaDevs = 0, int pid = 0,
+                            uint64_t nvmlDevs = UINT64_MAX) {
+  struct rasPeerInfo peer = {};
+  peer.addr = MakeAddr(port);
+  peer.cudaDevs = cudaDevs;
+  peer.nvmlDevs = (nvmlDevs == UINT64_MAX ? cudaDevs : nvmlDevs);
+  peer.pid = pid;
+  return peer;
 }
 
 // MakeAddr()'s addresses all share one host IP, so the default ncclSocketsSameNode() (host
@@ -541,6 +558,7 @@ struct rasCollComms::comm* FirstComm(std::vector<char>& buf) {
 class RasClientSupportMicrotest : public ::testing::Test {
  protected:
   void SetUp() override {
+    ResetEnvFakes();
     ResetLibcFakes();
     ResetHipFakes();
     ResetWholeFileSeams();
@@ -1074,6 +1092,7 @@ TEST_F(RasClientSupportMicrotest, AcceptNewSocket_ClientAllocationFailsBeforeAcc
 }
 
 TEST_F(RasClientSupportMicrotest, AcceptNewSocket_AcceptFails_PropagatesError) {
+  g_acceptErrno = EMFILE;  // Non-retryable: SYSCHECKGOTO must return.
   g_nextAcceptFd = -1;
   EXPECT_NE(rasClientAcceptNewSocket(), ncclSuccess);
   EXPECT_EQ(g_acceptedFds.size(), 1u);
@@ -1096,7 +1115,7 @@ TEST_F(RasClientSupportMicrotest, EnqueueMsg_NormalStatus_ArmsPollout) {
   ASSERT_EQ(rasClientAllocMsg(&msg, 5), ncclSuccess);
   memcpy(msg, "hello", 5);
   rasClientEnqueueMsg(client, msg, 5);
-  EXPECT_TRUE(rasPfds[client->pfd].events & POLLOUT);
+  EXPECT_EQ(rasPfds[client->pfd].events, POLLIN | POLLOUT);
   EXPECT_EQ(DrainSendQueue(client), "hello");
   rasClientSupportTerminate();
 }
@@ -1141,9 +1160,13 @@ TEST_F(RasClientSupportMicrotest, EnqueueText_AppendNewlineFalse_NoTrailingNewli
 TEST_F(RasClientSupportMicrotest, ClientTerminate_OnlyNodeInList_ClearsHeadAndTail) {
   ASSERT_EQ(rasClientAcceptNewSocket(), ncclSuccess);
   struct rasClient* client = rasClientsHead;
+  const int pfd = client->pfd;
+  ASSERT_NE(rasPfds[pfd].fd, NCCL_INVALID_SOCKET);
   rasClientTerminate(client);
   EXPECT_EQ(rasClientsHead, nullptr);
   EXPECT_EQ(rasClientsTail, nullptr);
+  EXPECT_EQ(rasPfds[pfd].fd, NCCL_INVALID_SOCKET);
+  EXPECT_EQ(rasPfds[pfd].events, 0);
 }
 
 TEST_F(RasClientSupportMicrotest, ClientTerminate_HeadOfMultiple_AdvancesHead) {
@@ -1189,18 +1212,7 @@ TEST_F(RasClientSupportMicrotest, ClientTerminate_WithColl_RecordsHistoryAndFree
   EXPECT_EQ(g_collFreeCalls, 1);
 }
 
-TEST_F(RasClientSupportMicrotest, ClientTerminate_DrainsSendQueue) {
-  struct rasClient* client = MakeClient();
-  char* msg = nullptr;
-  ASSERT_EQ(rasClientAllocMsg(&msg, 3), ncclSuccess);
-  rasClientEnqueueMsg(client, msg, 3);
-  int freesBefore = g_msgFreeCalls;
-  rasClientTerminate(client);
-  // rasClientTerminate() frees the queued rasMsgMeta directly (not via rasMsgFree), so the only
-  // observable signal is that the client (and its queue) is gone -- assert via the recorded alloc
-  // count staying put (no double count) rather than g_msgFreeCalls, which this path never touches.
-  EXPECT_EQ(g_msgFreeCalls, freesBefore);
-}
+
 
 TEST_F(RasClientSupportMicrotest, ClientsNotifyEvent_NoMatchingClients_NoOp) {
   ASSERT_EQ(rasClientAcceptNewSocket(), ncclSuccess);
@@ -1266,8 +1278,6 @@ TEST_F(RasClientSupportMicrotest, ClientsNotifyEvent_JsonFormat_PeerAddrResolves
   EXPECT_NE(out.find("\"cuda_devs\": [0,2]"), std::string::npos);
   EXPECT_NE(out.find("\"nvml_devs\": [1]"), std::string::npos);
   rasClientSupportTerminate();
-  rasPeers = nullptr;
-  nRasPeers = 0;
 }
 
 TEST_F(RasClientSupportMicrotest, ClientsNotifyEvent_JsonFormat_UnknownPeerUsesAddress) {
@@ -1309,10 +1319,24 @@ TEST_F(RasClientSupportMicrotest, SupportTerminate_ClosesListeningSocketAndTermi
 // =============================================================================================
 
 TEST_F(RasClientSupportMicrotest, InitSocket_Success_BindsAndListens) {
+  std::vector<int> options;
+  ScopedHook sockoptHook(g_setsockopt, [&options](int, int level, int option, const void* value, socklen_t size) {
+    EXPECT_EQ(level, SOL_SOCKET);
+    EXPECT_EQ(size, sizeof(int));
+    EXPECT_EQ(*static_cast<const int*>(value), 1);
+    options.push_back(option);
+    return 0;
+  });
   ASSERT_EQ(rasClientInitSocket(), ncclSuccess);
   EXPECT_NE(rasClientListeningSocket, -1);
   EXPECT_EQ(g_boundFds.size(), 1u);
   EXPECT_EQ(g_listenedFds.size(), 1u);
+  EXPECT_EQ(g_parsedSocketAddress, "localhost:" STR(NCCL_RAS_CLIENT_PORT));
+  std::vector<int> expected{SO_REUSEADDR};
+#ifdef SO_REUSEPORT
+  expected.push_back(SO_REUSEPORT);
+#endif
+  EXPECT_EQ(options, expected);
   rasClientSupportTerminate();
 }
 
@@ -1323,6 +1347,7 @@ TEST_F(RasClientSupportMicrotest, InitSocket_SocketFails_ReturnsErrorAndResetsFd
 }
 
 TEST_F(RasClientSupportMicrotest, InitSocket_BindFails_ClosesSocketAndReturnsError) {
+  g_bindErrno = EACCES;  // Non-retryable: SYSCHECKGOTO must return.
   g_bindResult = -1;
   EXPECT_NE(rasClientInitSocket(), ncclSuccess);
   EXPECT_EQ(rasClientListeningSocket, -1);
@@ -1330,6 +1355,7 @@ TEST_F(RasClientSupportMicrotest, InitSocket_BindFails_ClosesSocketAndReturnsErr
 }
 
 TEST_F(RasClientSupportMicrotest, InitSocket_ListenFails_ClosesSocketAndReturnsError) {
+  g_listenErrno = EACCES;  // Non-retryable: SYSCHECKGOTO must return.
   g_listenResult = -1;
   EXPECT_NE(rasClientInitSocket(), ncclSuccess);
   EXPECT_EQ(rasClientListeningSocket, -1);
@@ -1345,7 +1371,7 @@ TEST_F(RasClientSupportMicrotest, LocalHandleRunDiag_Success_RunsToFinishedAndTe
   EXPECT_EQ(rasLocalHandleRunDiag(&ctx), ncclSuccess);
   EXPECT_EQ(g_diagClientInitCalls, 1);
   EXPECT_EQ(g_diagStartCalls, 1);
-  // internal==true clients terminate as soon as they reach FINISHED, regardless of sendQ state.
+  // This synchronous diagnostics request reaches FINISHED without producing output.
   EXPECT_EQ(rasClientsHead, nullptr);
 }
 
@@ -1463,8 +1489,7 @@ TEST_F(RasClientSupportMicrotest, ClientRun_Init_NetSendCollReqInProgress_StopsA
 }
 
 TEST_F(RasClientSupportMicrotest, ClientRun_Init_CompletedCollectiveFallsThroughToComms) {
-  struct rasPeerInfo peers[1] = {};
-  peers[0].addr = MakeAddr(6050);
+  struct rasPeerInfo peers[] = {MakePeer(6050)};
   rasPeers = peers;
   nRasPeers = 1;
 
@@ -1484,14 +1509,11 @@ TEST_F(RasClientSupportMicrotest, ClientRun_Init_CompletedCollectiveFallsThrough
   EXPECT_NE(std::string::npos, DrainSendQueue(client).find("Communicators"));
 
   FreeClient(client);
-  rasPeers = nullptr;
-  nRasPeers = 0;
 }
 
 TEST_F(RasClientSupportMicrotest, ClientRun_NonEmptySendQ_NotInternal_DoesNotTerminate) {
   // Use a realistic one-rank communicator with a non-zero status.
-  struct rasPeerInfo peers[1] = {};
-  peers[0].addr = MakeAddr(6000);
+  struct rasPeerInfo peers[] = {MakePeer(6000)};
   rasPeers = peers;
   nRasPeers = 1;
 
@@ -1507,8 +1529,6 @@ TEST_F(RasClientSupportMicrotest, ClientRun_NonEmptySendQ_NotInternal_DoesNotTer
   EXPECT_FALSE(closed);
   DrainSendQueue(client);
   FreeClient(client);
-  rasPeers = nullptr;
-  nRasPeers = 0;
 }
 
 // =============================================================================================
@@ -1527,20 +1547,21 @@ TEST_F(RasClientSupportMicrotest, ClientResume_MatchingClient_InvokesClientRun) 
   // standalone MakeClient() here would silently take the "no matching client" branch instead of
   // exercising rasClientRun() at all. rasClientAcceptNewSocket() gives a properly linked client.
   // Use a real one-rank communicator so the status summary has a valid state.
-  struct rasPeerInfo peers[1] = {};
-  peers[0].addr = MakeAddr(6100);
+  struct rasPeerInfo peers[] = {MakePeer(6100)};
   rasPeers = peers;
   nRasPeers = 1;
 
   ASSERT_EQ(rasClientAcceptNewSocket(), ncclSuccess);
-  struct rasClient* client = rasClientsHead;
+  struct rasClient* other = rasClientsHead;
+  ASSERT_EQ(rasClientAcceptNewSocket(), ncclSuccess);
+  struct rasClient* client = rasClientsTail;
   client->status = RAS_CLIENT_COMMS;
   client->coll = MakeCollective(BuildRasCollComms({MakeCommSpec(1, {RankSpec{0, 0}})}), {MakeAddr(6100)});
   EXPECT_EQ(rasClientResume(client->coll), ncclSuccess);
   EXPECT_EQ(client->status, RAS_CLIENT_FINISHED);
+  EXPECT_EQ(other->status, RAS_CLIENT_CONNECTED);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&other->sendQ));
   rasClientSupportTerminate();
-  rasPeers = nullptr;
-  nRasPeers = 0;
 }
 
 // =============================================================================================
@@ -1548,9 +1569,7 @@ TEST_F(RasClientSupportMicrotest, ClientResume_MatchingClient_InvokesClientRun) 
 // =============================================================================================
 
 TEST_F(RasClientSupportMicrotest, RunComms_JsonFormat_EarlyExit_SkipsTextLogic) {
-  struct rasPeerInfo peers[1] = {};
-  peers[0].addr = MakeAddr(4000);
-  peers[0].pid = 10;
+  struct rasPeerInfo peers[] = {MakePeer(4000, 0, 10, 0)};
   rasPeers = peers;
   nRasPeers = 1;
 
@@ -1564,10 +1583,9 @@ TEST_F(RasClientSupportMicrotest, RunComms_JsonFormat_EarlyExit_SkipsTextLogic) 
   EXPECT_EQ(client->status, RAS_CLIENT_FINISHED);
   std::string out = DrainSendQueue(client);
   EXPECT_NE(out.find("\"communicators\""), std::string::npos);
+  EXPECT_EQ(out.find("Group     Comms     Nodes"), std::string::npos);
   FreeClient(client);
   rasCollFree(coll);
-  rasPeers = nullptr;
-  nRasPeers = 0;
 }
 
 TEST_F(RasClientSupportMicrotest, RunComms_TextFormat_NoCommunicators_PrintsNoDataMessage) {
@@ -1584,7 +1602,7 @@ TEST_F(RasClientSupportMicrotest, RunComms_TextFormat_NoCommunicators_PrintsNoDa
 TEST_F(RasClientSupportMicrotest, RunComms_MismatchedFwdCounts_ReturnsInternalError) {
   struct rasClient* client = MakeClient();
   client->status = RAS_CLIENT_COMMS;
-  client->coll = MakeCollective({}, {});
+  client->coll = MakeCollective(BuildRasCollComms({}), {});
   client->coll->nFwdSent = 2;
   client->coll->nFwdRecv = 1;
   bool closed = false;
@@ -1688,6 +1706,9 @@ TEST_F(RasClientSupportMicrotest, EventLoop_RecvPartialLine_WaitsForMore) {
   SetRevents(client, POLLIN);
   rasClientEventLoop(client, client->pfd);
   EXPECT_EQ(DrainSendQueue(client), "SERVER PROTOCOL " STR(NCCL_RAS_CLIENT_PROTOCOL) "\n");
+  ASSERT_EQ(g_recvFlags.size(), 2u);
+  EXPECT_EQ(g_recvFlags[0], MSG_DONTWAIT);
+  EXPECT_EQ(g_recvFlags[1], MSG_DONTWAIT);
   FreeClient(client);
 }
 
@@ -1894,6 +1915,7 @@ TEST_F(RasClientSupportMicrotest, EventLoop_ControlProfilerMask_Invalid_ReturnsE
   SetRevents(client, POLLIN);
   rasClientEventLoop(client, client->pfd);
   EXPECT_EQ(DrainSendQueue(client), "ERROR: Invalid profiler mask value 'bogus'\n");
+  EXPECT_EQ(g_netSendCollReqCalls, 0);
   FreeClient(client);
 }
 
@@ -1917,10 +1939,12 @@ TEST_F(RasClientSupportMicrotest, EventLoop_UnknownCommand_ReturnsError) {
 
 TEST_F(RasClientSupportMicrotest, EventLoop_CrLf_StripsCarriageReturn) {
   struct rasClient* client = MakeClient();
-  ScriptRecvData("client protocol 2\r\n");
+  client->outputFormat = RAS_OUTPUT_JSON;
+  ScriptRecvData("set format text\r\n");
   SetRevents(client, POLLIN);
   rasClientEventLoop(client, client->pfd);
-  EXPECT_EQ(DrainSendQueue(client), "SERVER PROTOCOL " STR(NCCL_RAS_CLIENT_PROTOCOL) "\n");
+  EXPECT_EQ(DrainSendQueue(client), "OK\n");
+  EXPECT_EQ(client->outputFormat, RAS_OUTPUT_TEXT);
   FreeClient(client);
 }
 
@@ -1969,7 +1993,7 @@ TEST_F(RasClientSupportMicrotest, EventLoop_SendFullWrite_DequeuesAndDisarmsWhen
   ASSERT_EQ(1u, g_sendFlags.size());
   EXPECT_EQ(MSG_DONTWAIT | MSG_NOSIGNAL, g_sendFlags[0]);
   EXPECT_TRUE(ncclIntruQueueEmpty(&client->sendQ));
-  EXPECT_FALSE(rasPfds[client->pfd].events & POLLOUT);
+  EXPECT_EQ(rasPfds[client->pfd].events, 0);
   FreeClient(client);
 }
 
@@ -2070,13 +2094,6 @@ TEST_F(RasClientSupportMicrotest, EventLoop_SendDrainedAndFinished_Terminates) {
 // =============================================================================================
 
 namespace {
-struct rasPeerInfo MakePeer(uint16_t port, uint64_t cudaDevs, int pid = 0) {
-  struct rasPeerInfo p = {};
-  p.addr = MakeAddr(port);
-  p.cudaDevs = p.nvmlDevs = cudaDevs;
-  p.pid = pid;
-  return p;
-}
 
 // Runs rasClientRunInit (via rasClientRun) against whatever rasPeers/nRasPeers the caller already
 // set up, and returns everything enqueued as a single string for substring assertions.
@@ -2096,8 +2113,6 @@ TEST_F(RasClientSupportMicrotest, RunInit_JsonFormat_EnqueuesNothing) {
   client->outputFormat = RAS_OUTPUT_JSON;
   EXPECT_EQ(RunInitAndDrain(client), "");
   FreeClient(client);
-  rasPeers = nullptr;
-  nRasPeers = 0;
 }
 
 TEST_F(RasClientSupportMicrotest, RunInit_HipVersionSentinel_QueriesOnce) {
@@ -2113,8 +2128,6 @@ TEST_F(RasClientSupportMicrotest, RunInit_HipVersionSentinel_QueriesOnce) {
   EXPECT_EQ(drvHook.calls, 1);
   EXPECT_NE(out.find("HIP runtime version 60123456, amdgpu driver version 60123456"), std::string::npos);
   FreeClient(client);
-  rasPeers = nullptr;
-  nRasPeers = 0;
 }
 
 TEST_F(RasClientSupportMicrotest, RunInit_HipVersionAlreadyCached_SkipsQuery) {
@@ -2132,8 +2145,6 @@ TEST_F(RasClientSupportMicrotest, RunInit_HipVersionAlreadyCached_SkipsQuery) {
   EXPECT_EQ(drvHook.calls, 0);
   EXPECT_NE(out.find("HIP runtime version 111, amdgpu driver version 222"), std::string::npos);
   FreeClient(client);
-  rasPeers = nullptr;
-  nRasPeers = 0;
 }
 
 TEST_F(RasClientSupportMicrotest, RunInit_OnePeer_SimpleConsistentTable) {
@@ -2146,8 +2157,6 @@ TEST_F(RasClientSupportMicrotest, RunInit_OnePeer_SimpleConsistentTable) {
   EXPECT_NE(out.find("Nodes  Processes         GPUs  Processes     GPUs"), std::string::npos);
   EXPECT_NE(out.find("Communicators..."), std::string::npos);
   FreeClient(client);
-  rasPeers = nullptr;
-  nRasPeers = 0;
 }
 
 TEST_F(RasClientSupportMicrotest, RunInit_ConsistentTopology_PrintsExactSummaryValues) {
@@ -2161,8 +2170,6 @@ TEST_F(RasClientSupportMicrotest, RunInit_ConsistentTopology_PrintsExactSummaryV
   std::string out = RunInitAndDrain(client);
   EXPECT_NE(out.find("\n      3          2            4          6       24\n"), std::string::npos);
   FreeClient(client);
-  rasPeers = nullptr;
-  nRasPeers = 0;
 }
 
 TEST_F(RasClientSupportMicrotest, RunInit_TwoNodesConsistentGpus_UnequalPeerCounts_PrintsOutlierNode) {
@@ -2178,8 +2185,6 @@ TEST_F(RasClientSupportMicrotest, RunInit_TwoNodesConsistentGpus_UnequalPeerCoun
   EXPECT_NE(out.find("Nodes  Processes         GPUs\n          per node  per process"), std::string::npos);
   EXPECT_NE(out.find("The outlier node"), std::string::npos);
   FreeClient(client);
-  rasPeers = nullptr;
-  nRasPeers = 0;
 }
 
 TEST_F(RasClientSupportMicrotest, RunInit_AuxiliaryPeerAllocationFailure_Propagates) {
@@ -2194,8 +2199,6 @@ TEST_F(RasClientSupportMicrotest, RunInit_AuxiliaryPeerAllocationFailure_Propaga
   EXPECT_EQ(rasClientRunInit(client), ncclSystemError);
   DrainSendQueue(client);
   FreeClient(client);
-  rasPeers = nullptr;
-  nRasPeers = 0;
 }
 
 TEST_F(RasClientSupportMicrotest, RunInit_InconsistentGpusWithinNode_PrintsGpuDistributionNoOutlier) {
@@ -2212,8 +2215,6 @@ TEST_F(RasClientSupportMicrotest, RunInit_InconsistentGpusWithinNode_PrintsGpuDi
   EXPECT_NE(out.find("Processes         GPUs\n                    per process"), std::string::npos);
   EXPECT_EQ(out.find("The outlier node"), std::string::npos);
   FreeClient(client);
-  rasPeers = nullptr;
-  nRasPeers = 0;
 }
 
 TEST_F(RasClientSupportMicrotest, RunInit_InconsistentGpusAcrossNodes_ConsistentWithinNode) {
@@ -2229,8 +2230,6 @@ TEST_F(RasClientSupportMicrotest, RunInit_InconsistentGpusAcrossNodes_Consistent
   std::string out = RunInitAndDrain(client);
   EXPECT_NE(out.find("Processes         GPUs\n                    per process"), std::string::npos);
   FreeClient(client);
-  rasPeers = nullptr;
-  nRasPeers = 0;
 }
 
 TEST_F(RasClientSupportMicrotest, RunInit_VerboseOutlier_PassesVerboseFlagThrough) {
@@ -2247,8 +2246,6 @@ TEST_F(RasClientSupportMicrotest, RunInit_VerboseOutlier_PassesVerboseFlagThroug
   // for a count-of-one group (rasCountIsOutlier's count==1 short-circuit fires regardless).
   EXPECT_NE(out.find("The outlier node"), std::string::npos);
   FreeClient(client);
-  rasPeers = nullptr;
-  nRasPeers = 0;
 }
 
 TEST_F(RasClientSupportMicrotest, RunInit_MultiRankOutlierNode_PrintsProcessList) {
@@ -2269,8 +2266,6 @@ TEST_F(RasClientSupportMicrotest, RunInit_MultiRankOutlierNode_PrintsProcessList
   EXPECT_NE(out.find("Node 127.0.0.1 running processes 10,20"), std::string::npos);
   EXPECT_EQ(out.find("running processes 91,92"), std::string::npos);
   FreeClient(client);
-  rasPeers = nullptr;
-  nRasPeers = 0;
 }
 
 // =============================================================================================
@@ -2296,8 +2291,7 @@ void FreeFailedRunComms(struct rasClient* client, struct rasCollective* coll) {
 }  // namespace
 
 TEST_F(RasClientSupportMicrotest, RunComms_CoreAllocationFailures_Propagate) {
-  struct rasPeerInfo peers[1] = {};
-  peers[0].addr = MakeAddr(100);
+  struct rasPeerInfo peers[] = {MakePeer(100)};
   rasPeers = peers;
   nRasPeers = 1;
 
@@ -2314,14 +2308,10 @@ TEST_F(RasClientSupportMicrotest, RunComms_CoreAllocationFailures_Propagate) {
     FreeFailedRunComms(client, coll);
   }
 
-  rasPeers = nullptr;
-  nRasPeers = 0;
 }
 
 TEST_F(RasClientSupportMicrotest, RunComms_MissingPeerAllocationFailure_Propagates) {
-  struct rasPeerInfo peers[2] = {};
-  peers[0].addr = MakeAddr(100);
-  peers[1].addr = MakeAddr(101);
+  struct rasPeerInfo peers[] = {MakePeer(100), MakePeer(101)};
   rasPeers = peers;
   nRasPeers = 2;
 
@@ -2335,14 +2325,10 @@ TEST_F(RasClientSupportMicrotest, RunComms_MissingPeerAllocationFailure_Propagat
   EXPECT_EQ(rasClientRunComms(client), ncclSystemError);
   g_callocFailAt = -1;
   FreeFailedRunComms(client, coll);
-  rasPeers = nullptr;
-  nRasPeers = 0;
 }
 
 TEST_F(RasClientSupportMicrotest, RunComms_DeadPeerAllocationFailure_Propagates) {
-  struct rasPeerInfo peers[2] = {};
-  peers[0].addr = MakeAddr(100);
-  peers[1].addr = MakeAddr(200);
+  struct rasPeerInfo peers[] = {MakePeer(100), MakePeer(200)};
   rasPeers = peers;
   nRasPeers = 2;
   union ncclSocketAddress deadPeers[] = {MakeAddr(200)};
@@ -2359,16 +2345,10 @@ TEST_F(RasClientSupportMicrotest, RunComms_DeadPeerAllocationFailure_Propagates)
   EXPECT_EQ(rasClientRunComms(client), ncclSystemError);
   g_callocFailAt = -1;
   FreeFailedRunComms(client, coll);
-  rasPeers = nullptr;
-  nRasPeers = 0;
-  rasDeadPeers = nullptr;
-  nRasDeadPeers = 0;
 }
 
 TEST_F(RasClientSupportMicrotest, RunComms_OperationCountAllocationFailure_Propagates) {
-  struct rasPeerInfo peers[2] = {};
-  peers[0].addr = MakeAddr(100);
-  peers[1].addr = MakeAddr(200);
+  struct rasPeerInfo peers[] = {MakePeer(100), MakePeer(200)};
   rasPeers = peers;
   nRasPeers = 2;
   RankSpec rank0{0, 0};
@@ -2385,16 +2365,11 @@ TEST_F(RasClientSupportMicrotest, RunComms_OperationCountAllocationFailure_Propa
   EXPECT_EQ(rasClientRunComms(client), ncclSystemError);
   g_callocFailAt = -1;
   FreeFailedRunComms(client, coll);
-  rasPeers = nullptr;
-  nRasPeers = 0;
 }
 
 TEST_F(RasClientSupportMicrotest, RunComms_UnevenRanksAcrossNodes_PrintsRange) {
   InstallPortBucketNodeGrouping();
-  struct rasPeerInfo peers[3] = {};
-  peers[0].addr = MakeAddr(100);
-  peers[1].addr = MakeAddr(101);
-  peers[2].addr = MakeAddr(200);
+  struct rasPeerInfo peers[] = {MakePeer(100), MakePeer(101), MakePeer(200)};
   rasPeers = peers;
   nRasPeers = 3;
 
@@ -2404,15 +2379,12 @@ TEST_F(RasClientSupportMicrotest, RunComms_UnevenRanksAcrossNodes_PrintsRange) {
       BuildRasCollComms({MakeCommSpec(3, {RankSpec{0, 0}, RankSpec{1, 1}, RankSpec{2, 2}})}),
       {MakeAddr(100), MakeAddr(101), MakeAddr(200)});
   std::string out = RunCommsAndDrain(client);
-  EXPECT_NE(out.find("1-2"), std::string::npos);
+  EXPECT_NE(out.find("\n    0         1         2       1-2         3         3   RUNNING      OK\n"), std::string::npos);
   FreeClient(client);
-  rasPeers = nullptr;
-  nRasPeers = 0;
 }
 
 TEST_F(RasClientSupportMicrotest, RunComms_EquivalentCommunicators_GroupTogether) {
-  struct rasPeerInfo peers[1] = {};
-  peers[0].addr = MakeAddr(100);
+  struct rasPeerInfo peers[] = {MakePeer(100)};
   rasPeers = peers;
   nRasPeers = 1;
   CommSpec first = MakeCommSpec(1, {RankSpec{0, 0}});
@@ -2425,14 +2397,10 @@ TEST_F(RasClientSupportMicrotest, RunComms_EquivalentCommunicators_GroupTogether
   std::string out = RunCommsAndDrain(client);
   EXPECT_NE(out.find("    0         2"), std::string::npos);
   FreeClient(client);
-  rasPeers = nullptr;
-  nRasPeers = 0;
 }
 
 TEST_F(RasClientSupportMicrotest, RunComms_InconsistentPeerList_HandlesExtraMissingPeer) {
-  struct rasPeerInfo peers[2] = {};
-  peers[0].addr = MakeAddr(100);
-  peers[1].addr = MakeAddr(200);
+  struct rasPeerInfo peers[] = {MakePeer(100), MakePeer(200)};
   rasPeers = peers;
   nRasPeers = 2;
 
@@ -2445,15 +2413,10 @@ TEST_F(RasClientSupportMicrotest, RunComms_InconsistentPeerList_HandlesExtraMiss
   ASSERT_NE(std::string::npos, firstProcess);
   EXPECT_EQ(std::string::npos, out.find("Process ", firstProcess + 1));
   FreeClient(client);
-  rasPeers = nullptr;
-  nRasPeers = 0;
 }
 
 TEST_F(RasClientSupportMicrotest, RunComms_MissingRankWithKnownPeer_PrintsProcess) {
-  struct rasPeerInfo peers[2] = {};
-  peers[0].addr = MakeAddr(100);
-  peers[1].addr = MakeAddr(200);
-  peers[1].pid = 66;
+  struct rasPeerInfo peers[] = {MakePeer(100), MakePeer(200, 0, 66, 0)};
   rasPeers = peers;
   nRasPeers = 2;
   CommSpec comm = MakeCommSpec(2, {RankSpec{0, 0}});
@@ -2465,14 +2428,10 @@ TEST_F(RasClientSupportMicrotest, RunComms_MissingRankWithKnownPeer_PrintsProces
   std::string out = RunCommsAndDrain(client);
   EXPECT_NE(out.find("Rank 1 -- GPU 0 managed by process 66"), std::string::npos);
   FreeClient(client);
-  rasPeers = nullptr;
-  nRasPeers = 0;
 }
 
 TEST_F(RasClientSupportMicrotest, RunComms_DeadPeerWithoutMetadata_PrintsFallback) {
-  struct rasPeerInfo peers[2] = {};
-  peers[0].addr = MakeAddr(100);
-  peers[1].addr = MakeAddr(300);
+  struct rasPeerInfo peers[] = {MakePeer(100), MakePeer(300)};
   rasPeers = peers;
   nRasPeers = 2;
   union ncclSocketAddress deadPeers[] = {MakeAddr(200)};
@@ -2485,10 +2444,6 @@ TEST_F(RasClientSupportMicrotest, RunComms_DeadPeerWithoutMetadata_PrintsFallbac
   std::string out = RunCommsAndDrain(client);
   EXPECT_NE(out.find("could not find information on 1 process"), std::string::npos);
   FreeClient(client);
-  rasPeers = nullptr;
-  nRasPeers = 0;
-  rasDeadPeers = nullptr;
-  nRasDeadPeers = 0;
 }
 
 TEST_F(RasClientSupportMicrotest, RunComms_MixedStatusCountsAndUnknownPeer_PrintsAllFallbacks) {
@@ -2497,6 +2452,8 @@ TEST_F(RasClientSupportMicrotest, RunComms_MixedStatusCountsAndUnknownPeer_Print
   peerStorage[1].addr = MakeAddr(100);
   peerStorage[2].addr = MakeAddr(200);
   peerStorage[3].addr = MakeAddr(300);
+  // Reserve peerStorage[0] for the production unknown-peer index (-1).
+  // The status aggregation path indexes it before formatting the unknown-peer fallback.
   rasPeers = peerStorage + 1;
   nRasPeers = 3;
   InstallPortBucketNodeGrouping();
@@ -2518,14 +2475,10 @@ TEST_F(RasClientSupportMicrotest, RunComms_MixedStatusCountsAndUnknownPeer_Print
   EXPECT_NE(out.find("[process information not found]"), std::string::npos);
   EXPECT_NE(out.find("2 ranks have not launched any operations"), std::string::npos);
   FreeClient(client);
-  rasPeers = nullptr;
-  nRasPeers = 0;
 }
 
 TEST_F(RasClientSupportMicrotest, RunComms_KnownStatusAndOperationOutliers_PrintRankDetails) {
-  struct rasPeerInfo peers[1] = {};
-  peers[0].addr = MakeAddr(100);
-  peers[0].pid = 10;
+  struct rasPeerInfo peers[] = {MakePeer(100, 0, 10, 0)};
   rasPeers = peers;
   nRasPeers = 1;
 
@@ -2548,8 +2501,6 @@ TEST_F(RasClientSupportMicrotest, RunComms_KnownStatusAndOperationOutliers_Print
   EXPECT_NE(out.find("2 ranks have launched up to operation 7"), std::string::npos);
   EXPECT_NE(out.find("Rank 5 has not launched any operations -- GPU 0 managed by process 10"), std::string::npos);
   FreeClient(client);
-  rasPeers = nullptr;
-  nRasPeers = 0;
 }
 
 TEST_F(RasClientSupportMicrotest, RunComms_UnknownStatusAndOperationOutliers_PrintFallbacks) {
@@ -2557,6 +2508,8 @@ TEST_F(RasClientSupportMicrotest, RunComms_UnknownStatusAndOperationOutliers_Pri
   peerStorage[1].addr = MakeAddr(100);
   peerStorage[2].addr = MakeAddr(400);
   peerStorage[3].addr = MakeAddr(500);
+  // Reserve peerStorage[0] for the production unknown-peer index (-1).
+  // The status aggregation path indexes it before formatting the unknown-peer fallback.
   rasPeers = peerStorage + 1;
   nRasPeers = 3;
 
@@ -2578,8 +2531,6 @@ TEST_F(RasClientSupportMicrotest, RunComms_UnknownStatusAndOperationOutliers_Pri
   EXPECT_NE(out.find("Rank 6 -- [process information not found]"), std::string::npos);
   EXPECT_NE(out.find("Rank 7 -- [process information not found]"), std::string::npos);
   FreeClient(client);
-  rasPeers = nullptr;
-  nRasPeers = 0;
 }
 
 TEST_F(RasClientSupportMicrotest, RunComms_UnknownSingleRankDetails_PrintEveryFallback) {
@@ -2587,6 +2538,8 @@ TEST_F(RasClientSupportMicrotest, RunComms_UnknownSingleRankDetails_PrintEveryFa
   peerStorage[1].addr = MakeAddr(100);
   peerStorage[2].addr = MakeAddr(400);
   peerStorage[3].addr = MakeAddr(500);
+  // Reserve peerStorage[0] for the production unknown-peer index (-1).
+  // The status aggregation path indexes it before formatting the unknown-peer fallback.
   rasPeers = peerStorage + 1;
   nRasPeers = 3;
 
@@ -2610,14 +2563,10 @@ TEST_F(RasClientSupportMicrotest, RunComms_UnknownSingleRankDetails_PrintEveryFa
   EXPECT_NE(out.find("Rank 7 has not launched any operations -- [process information not found]"), std::string::npos);
   EXPECT_NE(out.find("Rank 7 reported System error -- [process information not found]"), std::string::npos);
   FreeClient(client);
-  rasPeers = nullptr;
-  nRasPeers = 0;
 }
 
 TEST_F(RasClientSupportMicrotest, RunComms_SingleNoCommRankWithoutMetadata_PrintsFallback) {
-  struct rasPeerInfo peers[2] = {};
-  peers[0].addr = MakeAddr(100);
-  peers[1].addr = MakeAddr(300);
+  struct rasPeerInfo peers[] = {MakePeer(100), MakePeer(300)};
   rasPeers = peers;
   nRasPeers = 2;
   CommSpec comm = MakeCommSpec(2, {RankSpec{0, 0}});
@@ -2629,17 +2578,10 @@ TEST_F(RasClientSupportMicrotest, RunComms_SingleNoCommRankWithoutMetadata_Print
   std::string out = RunCommsAndDrain(client);
   EXPECT_NE(out.find("Rank 1 has status NOCOMM -- [process information not found]"), std::string::npos);
   FreeClient(client);
-  rasPeers = nullptr;
-  nRasPeers = 0;
 }
 
 TEST_F(RasClientSupportMicrotest, RunComms_MultipleNoCommRanks_PrintKnownProcesses) {
-  struct rasPeerInfo peers[3] = {};
-  peers[0].addr = MakeAddr(100);
-  peers[1].addr = MakeAddr(200);
-  peers[1].pid = 20;
-  peers[2].addr = MakeAddr(300);
-  peers[2].pid = 30;
+  struct rasPeerInfo peers[] = {MakePeer(100), MakePeer(200, 0, 20, 0), MakePeer(300, 0, 30, 0)};
   rasPeers = peers;
   nRasPeers = 3;
   CommSpec comm = MakeCommSpec(8, {RankSpec{0, 0}, RankSpec{1, 0}, RankSpec{2, 0},
@@ -2654,13 +2596,10 @@ TEST_F(RasClientSupportMicrotest, RunComms_MultipleNoCommRanks_PrintKnownProcess
   EXPECT_NE(out.find("process 20"), std::string::npos);
   EXPECT_NE(out.find("process 30"), std::string::npos);
   FreeClient(client);
-  rasPeers = nullptr;
-  nRasPeers = 0;
 }
 
 TEST_F(RasClientSupportMicrotest, RunComms_MultipleNoCommRanksWithoutMetadata_PrintFallbacks) {
-  struct rasPeerInfo peers[1] = {};
-  peers[0].addr = MakeAddr(100);
+  struct rasPeerInfo peers[] = {MakePeer(100)};
   rasPeers = peers;
   nRasPeers = 1;
   CommSpec comm = MakeCommSpec(8, {RankSpec{0, 0}, RankSpec{1, 0}, RankSpec{2, 0},
@@ -2675,14 +2614,10 @@ TEST_F(RasClientSupportMicrotest, RunComms_MultipleNoCommRanksWithoutMetadata_Pr
   EXPECT_NE(out.find("Rank 1 -- [process information not found]"), std::string::npos);
   EXPECT_NE(out.find("Rank 2 -- [process information not found]"), std::string::npos);
   FreeClient(client);
-  rasPeers = nullptr;
-  nRasPeers = 0;
 }
 
 TEST_F(RasClientSupportMicrotest, RunComms_AllConsistentRunning_SimpleSummaryNoErrorsNoWarnings) {
-  struct rasPeerInfo peers[2] = {};
-  peers[0].addr = MakeAddr(100);
-  peers[1].addr = MakeAddr(200);
+  struct rasPeerInfo peers[] = {MakePeer(100), MakePeer(200)};
   rasPeers = peers;
   nRasPeers = 2;
 
@@ -2695,39 +2630,31 @@ TEST_F(RasClientSupportMicrotest, RunComms_AllConsistentRunning_SimpleSummaryNoE
   EXPECT_NE(out.find("OK"), std::string::npos);
   EXPECT_EQ(out.find("INCOMPLETE"), std::string::npos);
   FreeClient(client);
-  rasPeers = nullptr;
-  nRasPeers = 0;
 }
 
 TEST_F(RasClientSupportMicrotest, RunComms_AbortFlag_SetsAbortStatus) {
-  struct rasPeerInfo peers[1] = {};
-  peers[0].addr = MakeAddr(100);
+  struct rasPeerInfo peers[] = {MakePeer(100)};
   rasPeers = peers;
   nRasPeers = 1;
 
-  RankSpec r0;
-  r0.commRank = 0;
-  r0.peerIdx = 0;
+  RankSpec r0{0, 0};
   r0.abortFlag = true;
+  r0.destroyFlag = true;
+  r0.finalizeCalled = true;
   struct rasClient* client = MakeClient();
   client->status = RAS_CLIENT_COMMS;
   client->coll = MakeCollective(BuildRasCollComms({MakeCommSpec(1, {r0})}), {MakeAddr(100)});
   std::string out = RunCommsAndDrain(client);
-  EXPECT_NE(out.find("ABORT"), std::string::npos);
+  EXPECT_NE(out.find("     ABORT      OK\n"), std::string::npos);
   FreeClient(client);
-  rasPeers = nullptr;
-  nRasPeers = 0;
 }
 
 TEST_F(RasClientSupportMicrotest, RunComms_DestroyFlag_SetsFinalizeStatus) {
-  struct rasPeerInfo peers[1] = {};
-  peers[0].addr = MakeAddr(100);
+  struct rasPeerInfo peers[] = {MakePeer(100)};
   rasPeers = peers;
   nRasPeers = 1;
 
-  RankSpec r0;
-  r0.commRank = 0;
-  r0.peerIdx = 0;
+  RankSpec r0{0, 0};
   r0.destroyFlag = true;
   struct rasClient* client = MakeClient();
   client->status = RAS_CLIENT_COMMS;
@@ -2735,66 +2662,51 @@ TEST_F(RasClientSupportMicrotest, RunComms_DestroyFlag_SetsFinalizeStatus) {
   std::string out = RunCommsAndDrain(client);
   EXPECT_NE(out.find("FINALIZE"), std::string::npos);
   FreeClient(client);
-  rasPeers = nullptr;
-  nRasPeers = 0;
 }
 
 TEST_F(RasClientSupportMicrotest, RunComms_MixedStatusAcrossRanks_MismatchWithBreakdown) {
-  struct rasPeerInfo peers[2] = {};
-  peers[0].addr = MakeAddr(100);
-  peers[1].addr = MakeAddr(200);
+  struct rasPeerInfo peers[] = {MakePeer(100), MakePeer(200)};
   rasPeers = peers;
   nRasPeers = 2;
 
-  RankSpec r0;
-  r0.commRank = 0;
-  r0.peerIdx = 0;  // initState success -> RUNNING
-  RankSpec r1;
-  r1.commRank = 1;
-  r1.peerIdx = 1;
+  RankSpec r0{0, 0};  // initState success -> RUNNING
+  RankSpec r1{1, 1};
   r1.abortFlag = true;  // ABORT -- differs from r0's RUNNING
   struct rasClient* client = MakeClient();
   client->status = RAS_CLIENT_COMMS;
   client->coll = MakeCollective(BuildRasCollComms({MakeCommSpec(2, {r0, r1})}), {MakeAddr(100), MakeAddr(200)});
   std::string out = RunCommsAndDrain(client);
-  EXPECT_NE(out.find("MISMATCH"), std::string::npos);
+  EXPECT_NE(out.find("  MISMATCH\n"), std::string::npos);
   EXPECT_NE(out.find("Communicator ranks have different status"), std::string::npos);
   FreeClient(client);
-  rasPeers = nullptr;
-  nRasPeers = 0;
 }
 
 TEST_F(RasClientSupportMicrotest, RunComms_InitError_TriggersBreakdown) {
-  struct rasPeerInfo peers[1] = {};
-  peers[0].addr = MakeAddr(100);
+  struct rasPeerInfo peers[] = {MakePeer(100)};
   rasPeers = peers;
   nRasPeers = 1;
 
-  RankSpec r0;
-  r0.commRank = 0;
-  r0.peerIdx = 0;
+  RankSpec r0{0, 0};
   r0.initState = ncclSystemError;
+  RankSpec r1{1, 0};
+  RankSpec r2{2, 0};
+  r2.initState = ncclInProgress;
   struct rasClient* client = MakeClient();
   client->status = RAS_CLIENT_COMMS;
-  client->coll = MakeCollective(BuildRasCollComms({MakeCommSpec(1, {r0})}), {MakeAddr(100)});
+  client->coll = MakeCollective(BuildRasCollComms({MakeCommSpec(3, {r0, r1, r2})}), {MakeAddr(100)});
   std::string out = RunCommsAndDrain(client);
-  EXPECT_NE(out.find(") ERROR\n"), std::string::npos);
-  EXPECT_NE(out.find("Initialization error"), std::string::npos);
+  EXPECT_NE(out.find("ERROR,MISMATCH\n"), std::string::npos);
+  EXPECT_NE(out.find("Initialization error on 1 rank\n"), std::string::npos);
   EXPECT_NE(out.find("System error"), std::string::npos);
   FreeClient(client);
-  rasPeers = nullptr;
-  nRasPeers = 0;
 }
 
 TEST_F(RasClientSupportMicrotest, RunComms_AsyncError_TriggersBreakdown) {
-  struct rasPeerInfo peers[1] = {};
-  peers[0].addr = MakeAddr(100);
+  struct rasPeerInfo peers[] = {MakePeer(100)};
   rasPeers = peers;
   nRasPeers = 1;
 
-  RankSpec r0;
-  r0.commRank = 0;
-  r0.peerIdx = 0;
+  RankSpec r0{0, 0};
   r0.asyncError = ncclRemoteError;
   struct rasClient* client = MakeClient();
   client->status = RAS_CLIENT_COMMS;
@@ -2803,29 +2715,18 @@ TEST_F(RasClientSupportMicrotest, RunComms_AsyncError_TriggersBreakdown) {
   EXPECT_NE(out.find("Asynchronous error"), std::string::npos);
   EXPECT_NE(out.find("Remote process error"), std::string::npos);
   FreeClient(client);
-  rasPeers = nullptr;
-  nRasPeers = 0;
 }
 
 TEST_F(RasClientSupportMicrotest, RunComms_MultipleInitErrorKinds_AreReportedByDescendingCount) {
-  struct rasPeerInfo peers[3] = {};
-  peers[0].addr = MakeAddr(100);
-  peers[1].addr = MakeAddr(200);
-  peers[2].addr = MakeAddr(300);
+  struct rasPeerInfo peers[] = {MakePeer(100), MakePeer(200), MakePeer(300)};
   rasPeers = peers;
   nRasPeers = 3;
 
-  RankSpec r0;
-  r0.commRank = 0;
-  r0.peerIdx = 0;
+  RankSpec r0{0, 0};
   r0.initState = ncclSystemError;
-  RankSpec r1;
-  r1.commRank = 1;
-  r1.peerIdx = 1;
+  RankSpec r1{1, 1};
   r1.initState = ncclSystemError;
-  RankSpec r2;
-  r2.commRank = 2;
-  r2.peerIdx = 2;
+  RankSpec r2{2, 2};
   r2.initState = ncclRemoteError;
   struct rasClient* client = MakeClient();
   client->status = RAS_CLIENT_COMMS;
@@ -2838,24 +2739,16 @@ TEST_F(RasClientSupportMicrotest, RunComms_MultipleInitErrorKinds_AreReportedByD
   ASSERT_NE(remoteError, std::string::npos);
   EXPECT_LT(systemError, remoteError);
   FreeClient(client);
-  rasPeers = nullptr;
-  nRasPeers = 0;
 }
 
 TEST_F(RasClientSupportMicrotest, RunComms_CollOpCountsMismatch_PrintsBreakdown) {
-  struct rasPeerInfo peers[2] = {};
-  peers[0].addr = MakeAddr(100);
-  peers[1].addr = MakeAddr(200);
+  struct rasPeerInfo peers[] = {MakePeer(100), MakePeer(200)};
   rasPeers = peers;
   nRasPeers = 2;
 
-  RankSpec r0;
-  r0.commRank = 0;
-  r0.peerIdx = 0;
+  RankSpec r0{0, 0};
   r0.collOpCounts[0] = 5;  // Broadcast count
-  RankSpec r1;
-  r1.commRank = 1;
-  r1.peerIdx = 1;
+  RankSpec r1{1, 1};
   r1.collOpCounts[0] = 7;  // differs from r0
   struct rasClient* client = MakeClient();
   client->status = RAS_CLIENT_COMMS;
@@ -2864,8 +2757,6 @@ TEST_F(RasClientSupportMicrotest, RunComms_CollOpCountsMismatch_PrintsBreakdown)
   EXPECT_NE(out.find("Communicator ranks have different Broadcast operation counts"), std::string::npos);
   EXPECT_NE(out.find("launched up to operation"), std::string::npos);
   FreeClient(client);
-  rasPeers = nullptr;
-  nRasPeers = 0;
 }
 
 TEST_F(RasClientSupportMicrotest, RunComms_MissingRanksAllPeersPresent_NocommMismatch) {
@@ -2874,15 +2765,11 @@ TEST_F(RasClientSupportMicrotest, RunComms_MissingRanksAllPeersPresent_NocommMis
   // names peer200 just means that peer doesn't consider itself part of THIS communicator -- not
   // that it's unreachable. The missing rank's address must match a real coll->peers entry for
   // this scenario to be internally consistent (peer200 responded to the collective overall).
-  struct rasPeerInfo peers[2] = {};
-  peers[0].addr = MakeAddr(100);
-  peers[1].addr = MakeAddr(200);
+  struct rasPeerInfo peers[] = {MakePeer(100), MakePeer(200)};
   rasPeers = peers;
   nRasPeers = 2;
 
-  RankSpec r0;
-  r0.commRank = 0;
-  r0.peerIdx = 0;
+  RankSpec r0{0, 0};
   CommSpec spec = MakeCommSpec(2, {r0});
   MissingSpec m0;
   m0.commRank = 1;
@@ -2893,25 +2780,19 @@ TEST_F(RasClientSupportMicrotest, RunComms_MissingRanksAllPeersPresent_NocommMis
   client->coll = MakeCollective(BuildRasCollComms({spec}), {MakeAddr(100), MakeAddr(200)});
   std::string out = RunCommsAndDrain(client);
   EXPECT_NE(out.find("NOCOMM"), std::string::npos);
-  EXPECT_NE(out.find("MISMATCH"), std::string::npos);
+  EXPECT_NE(out.find("  MISMATCH\n"), std::string::npos);
   EXPECT_EQ(out.find("INCOMPLETE"), std::string::npos);
   FreeClient(client);
-  rasPeers = nullptr;
-  nRasPeers = 0;
 }
 
 TEST_F(RasClientSupportMicrotest, RunComms_MissingRanksWithUnreachablePeer_IncompleteSection) {
   // One known peer never responded, so nPeersMissing>0. The missing rank belongs to another
   // unreachable process whose address does not match coll->peers, yielding INCOMPLETE.
-  struct rasPeerInfo peers[2] = {};
-  peers[0].addr = MakeAddr(100);
-  peers[1].addr = MakeAddr(200);
+  struct rasPeerInfo peers[] = {MakePeer(100), MakePeer(200)};
   rasPeers = peers;
   nRasPeers = 2;
 
-  RankSpec r0;
-  r0.commRank = 0;
-  r0.peerIdx = 0;
+  RankSpec r0{0, 0};
   CommSpec spec = MakeCommSpec(2, {r0});
   MissingSpec m0;
   m0.commRank = 1;
@@ -2925,25 +2806,17 @@ TEST_F(RasClientSupportMicrotest, RunComms_MissingRanksWithUnreachablePeer_Incom
   EXPECT_NE(out.find("Missing communicator data from 1 rank"), std::string::npos);
   EXPECT_NE(out.find("[process information not found]"), std::string::npos);
   FreeClient(client);
-  rasPeers = nullptr;
-  nRasPeers = 0;
 }
 
 TEST_F(RasClientSupportMicrotest, RunComms_NPeersMissingSection_ListsMissingProcess) {
   // Two known peers, but only the first is in coll->peers -> nPeersMissing == 1 for the second,
   // which rasClientRunComms reports (by walking rasPeers/coll->peers, not via any comm's own
   // missingRanks array) in the "Errors" section's own INCOMPLETE-count summary.
-  struct rasPeerInfo peers[2] = {};
-  peers[0].addr = MakeAddr(100);
-  peers[0].pid = 55;
-  peers[1].addr = MakeAddr(101);
-  peers[1].pid = 66;
+  struct rasPeerInfo peers[] = {MakePeer(100, 0, 55, 0), MakePeer(101, 0, 66, 0)};
   rasPeers = peers;
   nRasPeers = 2;
 
-  RankSpec r0;
-  r0.commRank = 0;
-  r0.peerIdx = 0;
+  RankSpec r0{0, 0};
   struct rasClient* client = MakeClient();
   client->status = RAS_CLIENT_COMMS;
   client->coll = MakeCollective(BuildRasCollComms({MakeCommSpec(1, {r0})}), {MakeAddr(100)});
@@ -2951,16 +2824,10 @@ TEST_F(RasClientSupportMicrotest, RunComms_NPeersMissingSection_ListsMissingProc
   EXPECT_NE(out.find("Missing communicator data from 1 job process"), std::string::npos);
   EXPECT_NE(out.find("Process 66 on node 127.0.0.1"), std::string::npos);
   FreeClient(client);
-  rasPeers = nullptr;
-  nRasPeers = 0;
 }
 
 TEST_F(RasClientSupportMicrotest, RunComms_MissingPeerAccountingMismatch_PrintsFallbackCount) {
-  struct rasPeerInfo peers[4] = {};
-  peers[0].addr = MakeAddr(100);
-  peers[1].addr = MakeAddr(200);
-  peers[2].addr = MakeAddr(200);
-  peers[3].addr = MakeAddr(300);
+  struct rasPeerInfo peers[] = {MakePeer(100), MakePeer(200), MakePeer(200), MakePeer(300)};
   rasPeers = peers;
   nRasPeers = 4;
   union ncclSocketAddress deadPeers[1] = {MakeAddr(200)};
@@ -2974,10 +2841,6 @@ TEST_F(RasClientSupportMicrotest, RunComms_MissingPeerAccountingMismatch_PrintsF
   EXPECT_NE(out.find("Missing communicator data from 2 job processes"), std::string::npos);
   EXPECT_NE(out.find("[could not find information on 1 process]"), std::string::npos);
   FreeClient(client);
-  rasPeers = nullptr;
-  nRasPeers = 0;
-  rasDeadPeers = nullptr;
-  nRasDeadPeers = 0;
 }
 
 TEST_F(RasClientSupportMicrotest, RunComms_DeadPeersSection_ListsDeadProcess) {
@@ -2985,20 +2848,14 @@ TEST_F(RasClientSupportMicrotest, RunComms_DeadPeersSection_ListsDeadProcess) {
   // must include it -- an empty coll->peers with a rank still pointing at peerIdx=0 reads past
   // the end of the (zero-sized) peerIdxConv allocation). peer200 is a separate, globally-dead
   // peer (rasDeadPeers), unrelated to any comm -- that's what the DEAD section reports on.
-  struct rasPeerInfo peers[2] = {};
-  peers[0].addr = MakeAddr(100);
-  peers[0].pid = 55;
-  peers[1].addr = MakeAddr(200);
-  peers[1].pid = 77;
+  struct rasPeerInfo peers[] = {MakePeer(100, 0, 55, 0), MakePeer(200, 0, 77, 0)};
   rasPeers = peers;
   nRasPeers = 2;
   union ncclSocketAddress deadPeers[1] = {MakeAddr(200)};
   rasDeadPeers = deadPeers;
   nRasDeadPeers = 1;
 
-  RankSpec r0;
-  r0.commRank = 0;
-  r0.peerIdx = 0;
+  RankSpec r0{0, 0};
   struct rasClient* client = MakeClient();
   client->status = RAS_CLIENT_COMMS;
   client->coll = MakeCollective(BuildRasCollComms({MakeCommSpec(1, {r0})}), {MakeAddr(100)});
@@ -3007,21 +2864,14 @@ TEST_F(RasClientSupportMicrotest, RunComms_DeadPeersSection_ListsDeadProcess) {
   EXPECT_NE(out.find("considered dead"), std::string::npos);
   EXPECT_NE(out.find("Process 77 on node 127.0.0.1"), std::string::npos);
   FreeClient(client);
-  rasPeers = nullptr;
-  nRasPeers = 0;
-  rasDeadPeers = nullptr;
-  nRasDeadPeers = 0;
 }
 
 TEST_F(RasClientSupportMicrotest, RunComms_LegTimeouts_PrintsTimeoutWarning) {
-  struct rasPeerInfo peers[1] = {};
-  peers[0].addr = MakeAddr(100);
+  struct rasPeerInfo peers[] = {MakePeer(100)};
   rasPeers = peers;
   nRasPeers = 1;
 
-  RankSpec r0;
-  r0.commRank = 0;
-  r0.peerIdx = 0;
+  RankSpec r0{0, 0};
   struct rasClient* client = MakeClient();
   client->status = RAS_CLIENT_COMMS;
   client->coll = MakeCollective(BuildRasCollComms({MakeCommSpec(1, {r0})}), {MakeAddr(100)}, /*nLegTimeouts*/ 3);
@@ -3029,30 +2879,17 @@ TEST_F(RasClientSupportMicrotest, RunComms_LegTimeouts_PrintsTimeoutWarning) {
   EXPECT_NE(out.find("TIMEOUT"), std::string::npos);
   EXPECT_NE(out.find("Encountered 3 communication timeouts"), std::string::npos);
   FreeClient(client);
-  rasPeers = nullptr;
-  nRasPeers = 0;
 }
 
 TEST_F(RasClientSupportMicrotest, RunComms_MultipleGroups_LargestCommFirst) {
-  struct rasPeerInfo peers[3] = {};
-  peers[0].addr = MakeAddr(100);
-  peers[1].addr = MakeAddr(200);
-  peers[2].addr = MakeAddr(300);
+  struct rasPeerInfo peers[] = {MakePeer(100), MakePeer(200), MakePeer(300)};
   rasPeers = peers;
   nRasPeers = 3;
 
-  RankSpec a0;
-  a0.commRank = 0;
-  a0.peerIdx = 0;
-  RankSpec a1;
-  a1.commRank = 1;
-  a1.peerIdx = 1;
-  RankSpec a2;
-  a2.commRank = 2;
-  a2.peerIdx = 2;
-  RankSpec b0;
-  b0.commRank = 0;
-  b0.peerIdx = 0;
+  RankSpec a0{0, 0};
+  RankSpec a1{1, 1};
+  RankSpec a2{2, 2};
+  RankSpec b0{0, 0};
   struct rasClient* client = MakeClient();
   client->status = RAS_CLIENT_COMMS;
   // A 3-rank comm and a 1-rank comm in the same collective response.
@@ -3066,8 +2903,6 @@ TEST_F(RasClientSupportMicrotest, RunComms_MultipleGroups_LargestCommFirst) {
   EXPECT_LT(row0, row1);
   EXPECT_NE(out.substr(row0, row1 - row0).find("       3"), std::string::npos);
   FreeClient(client);
-  rasPeers = nullptr;
-  nRasPeers = 0;
 }
 
 TEST_F(RasClientSupportMicrotest, RunComms_JsonFormat_RanksAndMissingRanks_WritesFullDocument) {
@@ -3077,29 +2912,33 @@ TEST_F(RasClientSupportMicrotest, RunComms_JsonFormat_RanksAndMissingRanks_Write
   // (dead=true); missing rank 1 (addr=777) matches neither (unresponsive=true, dead=false) --
   // between the two ranks and two missing ranks, every firstRank/firstMissing comma-branch and
   // unresponsive/dead combination in jsonWriteRankData/jsonWriteMissingRank gets exercised.
-  struct rasPeerInfo peers[1] = {};
-  peers[0].addr = MakeAddr(100);
-  peers[0].pid = 55;
+  struct rasPeerInfo peers[] = {MakePeer(100, 0, 55, 0)};
   rasPeers = peers;
   nRasPeers = 1;
   union ncclSocketAddress deadPeers[1] = {MakeAddr(100)};
   rasDeadPeers = deadPeers;
   nRasDeadPeers = 1;
 
-  RankSpec r0;
-  r0.commRank = 0;
-  r0.peerIdx = 0;
+  RankSpec r0{0, 0};
   r0.cudaDev = 1;
-  r0.nvmlDev = 1;
-  RankSpec r1;
-  r1.commRank = 1;
-  r1.peerIdx = 1;  // -> peerIdxConv[1] == -1 (coll->peers[1] matches no rasPeers entry)
+  r0.nvmlDev = 6;
+  r0.initState = ncclSystemError;
+  r0.asyncError = ncclRemoteError;
+  r0.finalizeCalled = true;
+  r0.abortFlag = true;
+  for (int op = 0; op < NCCL_NUM_FUNCTIONS; ++op) r0.collOpCounts[op] = 17 + op;
+  RankSpec r1{1, 1};  // -> peerIdxConv[1] == -1 (coll->peers[1] matches no rasPeers entry)
+  r1.destroyFlag = true;
   MissingSpec m0;
   m0.commRank = 2;
   m0.addr = MakeAddr(100);  // in coll->peers (unresponsive=false) and in rasDeadPeers (dead=true)
   MissingSpec m1;
   m1.commRank = 3;
   m1.addr = MakeAddr(777);  // in neither (unresponsive=true, dead=false)
+  m0.cudaDev = 2;
+  m0.nvmlDev = 4;
+  m1.cudaDev = 3;
+  m1.nvmlDev = 5;
   CommSpec spec = MakeCommSpec(4, {r0, r1});
   spec.commHash = 0x1234;
   spec.hostHash = 0x5678;
@@ -3140,12 +2979,57 @@ TEST_F(RasClientSupportMicrotest, RunComms_JsonFormat_RanksAndMissingRanks_Write
   EXPECT_NE(out.find("\"missing_ranks\""), std::string::npos);
   EXPECT_NE(out.find("\"collection_time_sec\": 2.000"), std::string::npos);
   EXPECT_NE(out.find("\"timeouts_count\": 7"), std::string::npos);
+  // Restrict every field assertion to the rank that owns it.
+  auto rankObject = [&out](int rank) {
+    const size_t begin = out.find("\"rank\": " + std::to_string(rank) + ",");
+    if (begin == std::string::npos) {
+      ADD_FAILURE() << "Missing rank " << rank;
+      return std::string{};
+    }
+    const size_t end = out.find("\n        }", begin);
+    EXPECT_NE(end, std::string::npos);
+    return out.substr(begin, end - begin);
+  };
+  const std::string rank0 = rankObject(0);
+  EXPECT_NE(rank0.find("\"host\": \"127.0.0.1\""), std::string::npos);
+  EXPECT_NE(rank0.find("\"pid\": 55"), std::string::npos);
+  EXPECT_NE(rank0.find("\"cuda_dev\": 1"), std::string::npos);
+  EXPECT_NE(rank0.find("\"nvml_dev\": 6"), std::string::npos);
+  EXPECT_NE(rank0.find("\"init_state\": " + std::to_string(ncclSystemError)), std::string::npos);
+  EXPECT_NE(rank0.find("\"async_error\": " + std::to_string(ncclRemoteError)), std::string::npos);
+  EXPECT_NE(rank0.find("\"finalize_called\": true"), std::string::npos);
+  EXPECT_NE(rank0.find("\"destroy_flag\": false"), std::string::npos);
+  EXPECT_NE(rank0.find("\"abort_flag\": true"), std::string::npos);
+  EXPECT_NE(rank0.find("\"collective_counts\": {"), std::string::npos);
+  for (int op = 0; op < NCCL_NUM_FUNCTIONS; ++op) {
+    const std::string count = "\"" + std::string(ncclFuncToString(static_cast<ncclFunc_t>(op))) +
+                              "\": " + std::to_string(17 + op);
+    EXPECT_NE(rank0.find(count), std::string::npos);
+  }
+  const std::string rank1 = rankObject(1);
+  EXPECT_NE(rank1.find("\"host\": \"unknown\""), std::string::npos);
+  EXPECT_NE(rank1.find("\"pid\": -1"), std::string::npos);
+  EXPECT_NE(rank1.find("\"finalize_called\": false"), std::string::npos);
+  EXPECT_NE(rank1.find("\"destroy_flag\": true"), std::string::npos);
+  EXPECT_NE(rank1.find("\"abort_flag\": false"), std::string::npos);
+  const std::string missing2 = rankObject(2);
+  EXPECT_NE(missing2.find("\"cuda_dev\": 2"), std::string::npos);
+  EXPECT_NE(missing2.find("\"nvml_dev\": 4"), std::string::npos);
+  EXPECT_NE(missing2.find("\"unresponsive\": false"), std::string::npos);
+  EXPECT_NE(missing2.find("\"considered_dead\": true"), std::string::npos);
+  const std::string missing3 = rankObject(3);
+  EXPECT_NE(missing3.find("\"cuda_dev\": 3"), std::string::npos);
+  EXPECT_NE(missing3.find("\"nvml_dev\": 5"), std::string::npos);
+  EXPECT_NE(missing3.find("\"unresponsive\": true"), std::string::npos);
+  EXPECT_NE(missing3.find("\"considered_dead\": false"), std::string::npos);
+  for (size_t comma = out.find(','); comma != std::string::npos; comma = out.find(',', comma + 1)) {
+    const size_t next = out.find_first_not_of(" \t\r\n", comma + 1);
+    ASSERT_NE(next, std::string::npos);
+    EXPECT_NE(out[next], '}');
+    EXPECT_NE(out[next], ']');
+  }
   FreeClient(client);
   rasCollFree(coll);
-  rasPeers = nullptr;
-  nRasPeers = 0;
-  rasDeadPeers = nullptr;
-  nRasDeadPeers = 0;
 }
 
 TEST_F(RasClientSupportMicrotest, RunComms_MissingRankFoundInHardCase_NocommMismatch) {
@@ -3155,16 +3039,11 @@ TEST_F(RasClientSupportMicrotest, RunComms_MissingRankFoundInHardCase_NocommMism
   // being globally unreachable) while STILL having comm A's own missing rank (peer200) resolve via
   // bsearch -- exercising the loop's "found" arm specifically, not just its "not found" arm
   // (already covered by RunComms_MissingRanksWithUnreachablePeer_IncompleteSection).
-  struct rasPeerInfo peers[3] = {};
-  peers[0].addr = MakeAddr(100);
-  peers[1].addr = MakeAddr(200);
-  peers[2].addr = MakeAddr(300);  // globally missing: not in coll->peers at all
+  struct rasPeerInfo peers[] = {MakePeer(100), MakePeer(200), MakePeer(300)};
   rasPeers = peers;
   nRasPeers = 3;
 
-  RankSpec r0;
-  r0.commRank = 0;
-  r0.peerIdx = 0;
+  RankSpec r0{0, 0};
   CommSpec spec = MakeCommSpec(2, {r0});
   MissingSpec m0;
   m0.commRank = 1;
@@ -3176,83 +3055,43 @@ TEST_F(RasClientSupportMicrotest, RunComms_MissingRankFoundInHardCase_NocommMism
   std::string out = RunCommsAndDrain(client);
   EXPECT_NE(out.find("NOCOMM"), std::string::npos);
   FreeClient(client);
-  rasPeers = nullptr;
-  nRasPeers = 0;
 }
 
 // --- rasClientEventLoop: rasClientEnqueueString() failure arms (forced via g_msgAllocResult) ---
 
-TEST_F(RasClientSupportMicrotest, EventLoop_ClientProtocol_EnqueueFails_Terminates) {
+struct EnqueueFailureCase {
+  const char* name;
+  const char* command;
+  bool json = false;
+  bool diagnosticsBusy = false;
+};
+
+class RasClientSupportEnqueueFailureMicrotest
+    : public RasClientSupportMicrotest, public ::testing::WithParamInterface<EnqueueFailureCase> {};
+
+TEST_P(RasClientSupportEnqueueFailureMicrotest, TerminatesClient) {
+  const auto& param = GetParam();
   ASSERT_EQ(rasClientAcceptNewSocket(), ncclSuccess);
   struct rasClient* client = rasClientsHead;
+  if (param.json) client->outputFormat = RAS_OUTPUT_JSON;
+  g_diagInProgress = param.diagnosticsBusy;
   g_msgAllocResult = ncclSystemError;
-  ScriptRecvData("client protocol 2\n");
+  ScriptRecvData(param.command);
   SetRevents(client, POLLIN);
   rasClientEventLoop(client, client->pfd);
   EXPECT_EQ(rasClientsHead, nullptr);
 }
 
-TEST_F(RasClientSupportMicrotest, EventLoop_Timeout_EnqueueFails_Terminates) {
-  ASSERT_EQ(rasClientAcceptNewSocket(), ncclSuccess);
-  struct rasClient* client = rasClientsHead;
-  g_msgAllocResult = ncclSystemError;
-  ScriptRecvData("timeout 1\n");
-  SetRevents(client, POLLIN);
-  rasClientEventLoop(client, client->pfd);
-  EXPECT_EQ(rasClientsHead, nullptr);
-}
-
-TEST_F(RasClientSupportMicrotest, EventLoop_SetFormat_EnqueueFails_Terminates) {
-  ASSERT_EQ(rasClientAcceptNewSocket(), ncclSuccess);
-  struct rasClient* client = rasClientsHead;
-  g_msgAllocResult = ncclSystemError;
-  ScriptRecvData("set format text\n");
-  SetRevents(client, POLLIN);
-  rasClientEventLoop(client, client->pfd);
-  EXPECT_EQ(rasClientsHead, nullptr);
-}
-
-TEST_F(RasClientSupportMicrotest, EventLoop_DiagnosticsNonText_EnqueueFails_Terminates) {
-  ASSERT_EQ(rasClientAcceptNewSocket(), ncclSuccess);
-  struct rasClient* client = rasClientsHead;
-  client->outputFormat = RAS_OUTPUT_JSON;
-  g_msgAllocResult = ncclSystemError;
-  ScriptRecvData("diagnostics\n");
-  SetRevents(client, POLLIN);
-  rasClientEventLoop(client, client->pfd);
-  EXPECT_EQ(rasClientsHead, nullptr);
-}
-
-TEST_F(RasClientSupportMicrotest, EventLoop_DiagnosticsBusy_EnqueueFails_Terminates) {
-  ASSERT_EQ(rasClientAcceptNewSocket(), ncclSuccess);
-  struct rasClient* client = rasClientsHead;
-  g_diagInProgress = true;
-  g_msgAllocResult = ncclSystemError;
-  ScriptRecvData("diagnostics\n");
-  SetRevents(client, POLLIN);
-  rasClientEventLoop(client, client->pfd);
-  EXPECT_EQ(rasClientsHead, nullptr);
-}
-
-TEST_F(RasClientSupportMicrotest, EventLoop_Monitor_EnqueueFails_Terminates) {
-  ASSERT_EQ(rasClientAcceptNewSocket(), ncclSuccess);
-  struct rasClient* client = rasClientsHead;
-  g_msgAllocResult = ncclSystemError;
-  ScriptRecvData("monitor\n");
-  SetRevents(client, POLLIN);
-  rasClientEventLoop(client, client->pfd);
-  EXPECT_EQ(rasClientsHead, nullptr);
-}
-
-TEST_F(RasClientSupportMicrotest, EventLoop_Control_EnqueueFails_Terminates) {
-  ASSERT_EQ(rasClientAcceptNewSocket(), ncclSuccess);
-  struct rasClient* client = rasClientsHead;
-  g_msgAllocResult = ncclSystemError;
-  ScriptRecvData("control profiler_mask all\n");
-  SetRevents(client, POLLIN);
-  rasClientEventLoop(client, client->pfd);
-  EXPECT_EQ(rasClientsHead, nullptr);
-}
+INSTANTIATE_TEST_SUITE_P(Commands, RasClientSupportEnqueueFailureMicrotest,
+    ::testing::Values(
+        EnqueueFailureCase{"Protocol", "client protocol 2\n"},
+        EnqueueFailureCase{"Timeout", "timeout 1\n"},
+        EnqueueFailureCase{"Format", "set format text\n"},
+        EnqueueFailureCase{"DiagnosticsJson", "diagnostics\n", true},
+        EnqueueFailureCase{"DiagnosticsBusy", "diagnostics\n", false, true},
+        EnqueueFailureCase{"Monitor", "monitor\n"},
+        EnqueueFailureCase{"Control", "control profiler_mask all\n"}),
+    [](const ::testing::TestParamInfo<EnqueueFailureCase>& info) { return info.param.name; });
 
 TEST_F(RasClientSupportMicrotest, EventLoop_UnknownCommand_EnqueueFails_NonFatalSurvives) {
   // The unknown-command arm's own comment: "It should be non-fatal if we don't return a
@@ -3265,4 +3104,159 @@ TEST_F(RasClientSupportMicrotest, EventLoop_UnknownCommand_EnqueueFails_NonFatal
   rasClientEventLoop(client, client->pfd);
   EXPECT_TRUE(ncclIntruQueueEmpty(&client->sendQ));
   FreeClient(client);
+}
+
+TEST_F(RasClientSupportMicrotest, InitSocket_EnvironmentOverride_ReachesAddressParser) {
+  SetMicroEnv("NCCL_RAS_ADDR", "192.0.2.10:34567");
+  ASSERT_EQ(rasClientInitSocket(), ncclSuccess);
+  EXPECT_EQ(g_parsedSocketAddress, "192.0.2.10:34567");
+  rasClientSupportTerminate();
+}
+
+TEST_F(RasClientSupportMicrotest, ClientsNotifyEvent_DifferentGroup_DoesNotEnqueue) {
+  ASSERT_EQ(rasClientAcceptNewSocket(), ncclSuccess);
+  rasClientsHead->monitorMask = RAS_EVENT_LIFECYCLE;
+  struct rasEventNotification event{"trace", "details", nullptr, nullptr};
+  rasClientsNotifyEvent(RAS_EVENT_TRACE, &event);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&rasClientsHead->sendQ));
+  rasClientSupportTerminate();
+}
+
+TEST_F(RasClientSupportMicrotest, ClientRun_InternalFinishedWithQueuedOutput_Terminates) {
+  ASSERT_EQ(rasClientAcceptNewSocket(), ncclSuccess);
+  struct rasClient* client = rasClientsHead;
+  ASSERT_EQ(rasClientEnqueueString(client, "queued"), ncclSuccess);
+  ASSERT_FALSE(ncclIntruQueueEmpty(&client->sendQ));
+  client->internal = true;
+  client->status = RAS_CLIENT_DIAG_FINI;
+  bool closed = false;
+  EXPECT_EQ(rasClientRun(client, &closed), ncclSuccess);
+  EXPECT_TRUE(closed);
+  EXPECT_EQ(rasClientsHead, nullptr);
+}
+
+TEST_F(RasClientSupportMicrotest, DiagnosticsReporter_FormatFailure_Propagates) {
+  struct rasClient* client = MakeClient();
+  g_diagFormatLineResult = ncclSystemError;
+  EXPECT_EQ(rasClientDiagnosticsEmit(client, "line"), ncclSystemError);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&client->sendQ));
+  FreeClient(client);
+}
+
+TEST_F(RasClientSupportMicrotest, ClientRun_DiagnosticsContextFailure_SkipsStart) {
+  struct rasClient* client = MakeClient();
+  client->status = RAS_CLIENT_DIAG_INIT;
+  g_diagContextInitResult = ncclSystemError;
+  EXPECT_EQ(rasClientRun(client, nullptr), ncclSystemError);
+  EXPECT_EQ(g_diagClientInitCalls, 0);
+  EXPECT_EQ(g_diagStartCalls, 0);
+  EXPECT_NE(DrainSendQueue(client).find("ERROR: diagnostics failed to start"), std::string::npos);
+  FreeClient(client);
+}
+
+TEST_F(RasClientSupportMicrotest, ClientRun_DiagnosticsResumeFailure_Terminates) {
+  struct rasClient* client = MakeClient();
+  client->status = RAS_CLIENT_DIAG_FINI;
+  g_diagResumeResult = ncclSystemError;
+  bool closed = false;
+  EXPECT_EQ(rasClientRun(client, &closed), ncclSystemError);
+  EXPECT_TRUE(closed);
+  EXPECT_EQ(g_diagResumeCalls, 1);
+}
+
+TEST_F(RasClientSupportMicrotest, RunInit_MessageAllocationFailures_Propagate) {
+  struct rasPeerInfo peers[] = {MakePeer(100, 1)};
+  rasPeers = peers;
+  nRasPeers = 1;
+  // Initial version header and completed job summary use separate allocations.
+  for (int failAt : {0, 1}) {
+    SCOPED_TRACE(failAt);
+    auto allocate = g_rasMsgAlloc;
+    int calls = 0;
+    ScopedHook hook(g_rasMsgAlloc, [&calls, failAt, allocate](struct rasMsg** msg, size_t length) {
+      if (calls++ == failAt) return ncclSystemError;
+      return allocate(msg, length);
+    });
+    struct rasClient* client = MakeClient();
+    client->status = RAS_CLIENT_INIT;
+    EXPECT_EQ(rasClientRunInit(client), ncclSystemError);
+    EXPECT_EQ(calls, failAt + 1);
+    EXPECT_EQ(g_netSendCollReqCalls, 0);
+    FreeClient(client);
+  }
+}
+
+TEST_F(RasClientSupportMicrotest, RunComms_MessageAllocationFailures_Propagate) {
+  struct rasPeerInfo peers[] = {MakePeer(100, 1)};
+  rasPeers = peers;
+  nRasPeers = 1;
+  // JSON document, or text summary / errors / final report.
+  for (int failAt : {-1, 0, 1, 2}) {
+    SCOPED_TRACE(failAt);
+    auto allocate = g_rasMsgAlloc;
+    int calls = 0;
+    ScopedHook hook(g_rasMsgAlloc, [&calls, failAt, allocate](struct rasMsg** msg, size_t length) {
+      if (calls++ == (failAt < 0 ? 0 : failAt)) return ncclSystemError;
+      return allocate(msg, length);
+    });
+    struct rasClient* client = MakeClient();
+    client->status = RAS_CLIENT_COMMS;
+    client->outputFormat = failAt < 0 ? RAS_OUTPUT_JSON : RAS_OUTPUT_TEXT;
+    struct rasCollective* coll = MakeCollective(
+        BuildRasCollComms({MakeCommSpec(1, {RankSpec{0, 0}})}), {MakeAddr(100)});
+    client->coll = coll;
+    EXPECT_EQ(rasClientRunComms(client), ncclSystemError);
+    EXPECT_EQ(calls, (failAt < 0 ? 0 : failAt) + 1);
+    // The text path frees coll before allocating its final report.
+    EXPECT_EQ(g_collFreeCalls, failAt == 2 ? 1 : 0);
+    FreeClient(client);
+    if (failAt != 2) rasCollFree(coll);
+    g_collFreeCalls = 0;
+  }
+}
+
+TEST_F(RasClientSupportMicrotest, ParseProfilerMask_AboveIntRange_RecordsCurrentNarrowing) {
+  // The parser accepts this long and narrows to int; it does not validate the mask range.
+  if (sizeof(long) <= sizeof(int)) GTEST_SKIP() << "Requires a long wider than int";
+  int mask = 0;
+  EXPECT_TRUE(rasParseProfilerMask("4294967295", &mask));
+  EXPECT_EQ(mask, static_cast<int>(4294967295L));
+}
+
+TEST_F(RasClientSupportMicrotest, RunComms_FinalizeCalled_SetsFinalizeStatus) {
+  struct rasPeerInfo peers[] = {MakePeer(100)};
+  rasPeers = peers;
+  nRasPeers = 1;
+  RankSpec rank{0, 0};
+  rank.finalizeCalled = true;
+  struct rasClient* client = MakeClient();
+  client->status = RAS_CLIENT_COMMS;
+  client->coll = MakeCollective(BuildRasCollComms({MakeCommSpec(1, {rank})}), {MakeAddr(100)});
+  EXPECT_NE(RunCommsAndDrain(client).find("  FINALIZE      OK\n"), std::string::npos);
+  FreeClient(client);
+}
+
+TEST_F(RasClientSupportMicrotest, RunComms_GroupingDistinguishesNodesStatusAndErrors) {
+  InstallPortBucketNodeGrouping();
+  struct rasPeerInfo peers[] = {MakePeer(100), MakePeer(101), MakePeer(200)};
+  rasPeers = peers;
+  nRasPeers = 3;
+  for (int key : {0, 1, 2}) {
+    SCOPED_TRACE(key);
+    CommSpec first = MakeCommSpec(2, {RankSpec{0, 0}, RankSpec{1, 1}});
+    CommSpec second = first;
+    second.commHash = 2;
+    if (key == 0) second.ranks[1].peerIdx = 2;
+    if (key == 1) second.ranks[0].abortFlag = second.ranks[1].abortFlag = true;
+    if (key == 2) second.ranks[0].asyncError = ncclSystemError;
+    struct rasClient* client = MakeClient();
+    client->status = RAS_CLIENT_COMMS;
+    client->coll = MakeCollective(BuildRasCollComms({first, second}),
+                                 {MakeAddr(100), MakeAddr(101), MakeAddr(200)});
+    std::string out = RunCommsAndDrain(client);
+    EXPECT_NE(out.find("\n    0         1"), std::string::npos);
+    EXPECT_NE(out.find("\n    1         1"), std::string::npos);
+    EXPECT_EQ(out.find("\n    0         2"), std::string::npos);
+    FreeClient(client);
+  }
 }

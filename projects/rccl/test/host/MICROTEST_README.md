@@ -100,10 +100,16 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     must immediately follow the unit -- see `fakes/libc_seam.h:9-19`) instead
     of the shared `fakes/nccl_fakes.cc` the other units in this binary use.
   - `ras/client_support.cc` (`CLIENT_SUPPORT_CC_PATH`, from
-    `client-support-test.cc`); suite `RasClientSupportMicrotest.*`. Raw socket
+    `client-support-test.cc`); suites `RasClientSupportMicrotest.*` and
+    `Commands/RasClientSupportEnqueueFailureMicrotest.*`. Raw socket
     I/O is redirected through `fakes/libc_fakes.{h,cc}`, the HIP driver query
     through `fakes/hip_fakes.{h,cc}`, and reusable RAS collaborators through
-    `fakes/ras_fakes.{h,cc}`.
+    `fakes/ras_fakes.{h,cc}`. Inclusion-time symbol renames allow this TU to
+    share `rccl-UnitTestsMicro` with `ras-test.cc` and the RAS fakes; preserve
+    that isolation when adding collaborators. The guard-less positional pair
+    `libc_seam.h` / `libc_seam_undef.h` must bracket the production source
+    include, after system headers and before test helpers. CMake pins the
+    copied `ncclFuncStr` table to `src/init.cc`.
   - `tuning/tuning_general.cc` (`TUNING_GENERAL_CC_PATH`, from
     `tuning-general-test.cc`); suite `TuningGeneralMicrotest.*`. Covers the
     shared step-count, hardware-index, time-estimation, thread-threshold,

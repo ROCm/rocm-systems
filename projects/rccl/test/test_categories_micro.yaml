@@ -40,6 +40,7 @@ test_categories:
       - "RasClientMicrotest.*"
       # ras/client_support.cc
       - "RasClientSupportMicrotest.*"
+      - "Commands/RasClientSupportEnqueueFailureMicrotest.*"
       # rma/rma_proxy_launch.cc
       - "RmaProxyBatchMemOpTest.*"
       - "RmaProxyDescriptorTest.*"

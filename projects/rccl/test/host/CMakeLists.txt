@@ -51,6 +51,17 @@ endforeach()
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/gdr-probe-test.cc"
   "${_rccl_reg_access_flags}" "the production registration flags")
 unset(_rccl_reg_access_flags)
+# Pin the copied function-name table and its order to init.cc.
+foreach(_func_str_line
+    "const char* ncclFuncStr[NCCL_NUM_FUNCTIONS + 4] = {\"Broadcast\", \"Reduce\", \"AllGather\", \"ReduceScatter\", \"AllReduce\","
+    "\"AlltoAllPivot\", \"AlltoAllGda\", \"AlltoAllvGda\","
+    "\"SendRecv\"};")
+  rccl_assert_source_line("${_rccl_src_root}/init.cc" "${_func_str_line}"
+    "client-support-test.cc: ncclFuncStr")
+  rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/client-support-test.cc" "${_func_str_line}"
+    "the production ncclFuncStr table")
+endforeach()
+unset(_func_str_line)
 unset(_rccl_src_root)
 
 # Define the per-target micro-test source lists shared by BOTH build paths.
