@@ -3765,7 +3765,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
     constexpr uint64_t kGeneratedIslandPoolBytes =
         kGeneratedIslandPoolWords * static_cast<uint64_t>(sizeof(uint32_t));
     std::unordered_set<uint64_t> generated_island_pool_offsets;
-    std::unordered_map<uint64_t, uint64_t> generated_island_pool_by_source_offset;
+    std::unordered_map<uint64_t, std::vector<uint64_t>> generated_island_pools_by_source_offset;
     if (guest_arch_ == host_arch_) {
       for (const uint64_t pool_offset : generated_island_pool_candidates) {
         const auto marker_it = source_instruction_by_offset.find(pool_offset);
@@ -3833,11 +3833,30 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
 
         generated_island_pool_offsets.insert(pool_offset);
         for (uint64_t word_index = 0; word_index < kGeneratedIslandPoolWords; ++word_index) {
-          generated_island_pool_by_source_offset.emplace(
-              pool_offset + word_index * sizeof(uint32_t), pool_offset);
+          generated_island_pools_by_source_offset[pool_offset + word_index * sizeof(uint32_t)]
+              .push_back(pool_offset);
         }
-        if (!reachable_header && !reachable_slot)
-          generated_island_pool_by_source_offset.emplace(pool_end, pool_offset);
+        if (!reachable_header && !reachable_slot) {
+          assert(preceding_terminator != nullptr &&
+                 "an unreachable pool needs a reachable preceding terminator");
+          // Preserve source order when the direct target follows the pool. A
+          // backward or indirect transfer has no reachable source instruction
+          // after the pool, so emit the inert pool immediately before that
+          // reachable terminator instead. Either point is visited before fresh
+          // pools are suppressed below.
+          const uint64_t emission_source_offset =
+              preceding_direct_branch_away_from_pool &&
+                      static_cast<uint64_t>(preceding_branch_target) >= pool_end
+                  ? static_cast<uint64_t>(preceding_branch_target)
+                  : preceding_terminator->src_loc();
+          generated_island_pools_by_source_offset[emission_source_offset].push_back(pool_offset);
+        }
+      }
+      for (auto &entry : generated_island_pools_by_source_offset) {
+        auto &pool_offsets = entry.second;
+        std::ranges::sort(pool_offsets);
+        pool_offsets.erase(std::unique(pool_offsets.begin(), pool_offsets.end()),
+                           pool_offsets.end());
       }
     }
     // A recognized pool comes from an already translated body. Reuse that
@@ -4210,86 +4229,100 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
           continue;
         active_generated_island_pool.reset();
 
-        if (const auto pool_it = generated_island_pool_by_source_offset.find(offset);
-            pool_it != generated_island_pool_by_source_offset.end()) {
-          const uint64_t pool_offset = pool_it->second;
-          const uint64_t source_end = pool_offset + kGeneratedIslandPoolBytes;
-          const bool source_instruction_in_pool = offset < source_end;
-          // Candidate qualification already bounds the complete pool.
-          assert(source_end <= text.size());
-          for (uint64_t word_index = kGeneratedIslandPoolHeaderWords;
-               word_index < kGeneratedIslandPoolWords; ++word_index) {
-            const uint64_t source_branch_offset = pool_offset + word_index * sizeof(uint32_t);
-            const auto source_branch_it = source_instruction_by_offset.find(source_branch_offset);
-            // Unused placeholder slots are unreachable and absent from this
-            // scope. Make those slots available to repair any new layout drift;
-            // an unused slot remains s_branch 0 when no fixup allocates it.
-            if (source_branch_it == source_instruction_by_offset.end()) {
-              layout.branch_island_slots.push_back(target_offset + word_index * sizeof(uint32_t));
-              continue;
-            }
-            const Instruction *source_branch = source_branch_it->second;
-            const auto source_branch_delta = source_branch->branch_offset_bytes();
-            assert(source_branch->raw_encoding() != nullptr && source_branch_delta &&
-                   "candidate qualification proved every generated pool slot");
-            if (source_branch->raw_encoding() == nullptr || !source_branch_delta) {
-              auto failure = make_kernel_failure(
-                  DiagnosticKind::Legalization,
-                  "generated direct branch island pool contains malformed live slot",
-                  source_branch_offset);
-              if (fail_or_skip_kernel(scope, std::move(failure), transaction)) {
-                skip_scope = true;
-                break;
+        if (const auto pools_it = generated_island_pools_by_source_offset.find(offset);
+            pools_it != generated_island_pools_by_source_offset.end()) {
+          bool source_instruction_consumed_by_pool = false;
+          for (const uint64_t pool_offset : pools_it->second) {
+            const uint64_t source_end = pool_offset + kGeneratedIslandPoolBytes;
+            const bool source_instruction_in_pool = pool_offset <= offset && offset < source_end;
+            const uint64_t pool_target_offset = kernel_text.size();
+            // Candidate qualification already bounds the complete pool.
+            assert(source_end <= text.size());
+            for (uint64_t word_index = kGeneratedIslandPoolHeaderWords;
+                 word_index < kGeneratedIslandPoolWords; ++word_index) {
+              const uint64_t source_branch_offset = pool_offset + word_index * sizeof(uint32_t);
+              const auto source_branch_it = source_instruction_by_offset.find(source_branch_offset);
+              // Unused placeholder slots are unreachable and absent from this
+              // scope. Make those slots available to repair any new layout drift;
+              // an unused slot remains s_branch 0 when no fixup allocates it.
+              if (source_branch_it == source_instruction_by_offset.end()) {
+                layout.branch_island_slots.push_back(pool_target_offset +
+                                                     word_index * sizeof(uint32_t));
+                continue;
               }
-              return leave_unchanged();
-            }
-            const int64_t source_target =
-                static_cast<int64_t>(source_branch_offset + sizeof(uint32_t)) +
-                static_cast<int64_t>(*source_branch_delta);
-            if (source_target < 0 || static_cast<uint64_t>(source_target) > text.size()) {
-              auto failure = make_kernel_failure(
-                  DiagnosticKind::Legalization,
-                  "generated direct branch island pool targets outside source .text",
-                  source_branch_offset);
-              if (fail_or_skip_kernel(scope, std::move(failure), transaction)) {
-                skip_scope = true;
-                break;
+              const Instruction *source_branch = source_branch_it->second;
+              const auto source_branch_delta = source_branch->branch_offset_bytes();
+              assert(source_branch->raw_encoding() != nullptr && source_branch_delta &&
+                     "candidate qualification proved every generated pool slot");
+              if (source_branch->raw_encoding() == nullptr || !source_branch_delta) {
+                auto failure = make_kernel_failure(
+                    DiagnosticKind::Legalization,
+                    "generated direct branch island pool contains malformed live slot",
+                    source_branch_offset);
+                if (fail_or_skip_kernel(scope, std::move(failure), transaction)) {
+                  skip_scope = true;
+                  break;
+                }
+                return leave_unchanged();
               }
-              return leave_unchanged();
+              const int64_t source_target =
+                  static_cast<int64_t>(source_branch_offset + sizeof(uint32_t)) +
+                  static_cast<int64_t>(*source_branch_delta);
+              if (source_target < 0 || static_cast<uint64_t>(source_target) > text.size()) {
+                auto failure = make_kernel_failure(
+                    DiagnosticKind::Legalization,
+                    "generated direct branch island pool targets outside source .text",
+                    source_branch_offset);
+                if (fail_or_skip_kernel(scope, std::move(failure), transaction)) {
+                  skip_scope = true;
+                  break;
+                }
+                return leave_unchanged();
+              }
+              layout.branch_fixups.push_back(
+                  {.inst = source_branch,
+                   .source_inst_offset = source_branch_offset,
+                   .source_target_offset = static_cast<uint64_t>(source_target),
+                   .target_inst_offset = pool_target_offset + word_index * sizeof(uint32_t),
+                   .target_window_bytes = sizeof(uint32_t),
+                   .allow_window_growth = false,
+                   .translated_words = {source_branch->raw_encoding()[0]}});
             }
-            layout.branch_fixups.push_back(
-                {.inst = source_branch,
-                 .source_inst_offset = source_branch_offset,
-                 .source_target_offset = static_cast<uint64_t>(source_target),
-                 .target_inst_offset = target_offset + word_index * sizeof(uint32_t),
-                 .target_window_bytes = sizeof(uint32_t),
-                 .allow_window_growth = false,
-                 .translated_words = {source_branch->raw_encoding()[0]}});
+            if (skip_scope)
+              break;
+            for (uint64_t source_word = pool_offset; source_word < source_end;
+                 source_word += sizeof(uint32_t)) {
+              target_offset_by_source_offset.emplace(source_word, pool_target_offset +
+                                                                      (source_word - pool_offset));
+            }
+            kernel_text.insert(kernel_text.end(),
+                               text.begin() + static_cast<std::ptrdiff_t>(pool_offset),
+                               text.begin() + static_cast<std::ptrdiff_t>(source_end));
+            target_offset = kernel_text.size();
+            if (source_instruction_in_pool) {
+              active_generated_island_pool = {
+                  .source_begin = pool_offset,
+                  .source_end = source_end,
+                  .target_begin = pool_target_offset,
+              };
+              block_generated_island_pool = active_generated_island_pool;
+              if (block->start_offset() >= pool_offset) {
+                placement.target_start = pool_target_offset + (block->start_offset() - pool_offset);
+              }
+              source_instruction_consumed_by_pool = true;
+            } else if (!source_instruction_consumed_by_pool && offset == block->start_offset()) {
+              // An inert pool scheduled at a block entry precedes the source
+              // instruction but is not part of the source block. Keep branch
+              // targets on the source instruction after the pool. A pool
+              // scheduled at an interior terminator must not move the start of
+              // instructions already emitted for this block.
+              placement.target_start = target_offset;
+            }
           }
           if (skip_scope)
             break;
-          for (uint64_t source_word = pool_offset; source_word < source_end;
-               source_word += sizeof(uint32_t)) {
-            target_offset_by_source_offset.emplace(source_word,
-                                                   target_offset + (source_word - pool_offset));
-          }
-          kernel_text.insert(kernel_text.end(),
-                             text.begin() + static_cast<std::ptrdiff_t>(pool_offset),
-                             text.begin() + static_cast<std::ptrdiff_t>(source_end));
-          if (source_instruction_in_pool) {
-            active_generated_island_pool = {
-                .source_begin = pool_offset,
-                .source_end = source_end,
-                .target_begin = target_offset,
-            };
-            block_generated_island_pool = active_generated_island_pool;
-            if (block->start_offset() >= pool_offset) {
-              placement.target_start = target_offset + (block->start_offset() - pool_offset);
-            }
+          if (source_instruction_consumed_by_pool)
             continue;
-          }
-          placement.target_start = kernel_text.size();
-          target_offset = kernel_text.size();
         }
 
         if (active_marked_long_transfer && offset < active_marked_long_transfer->source_end) {

@@ -3855,16 +3855,14 @@ TEST(BinaryTranslatorE2E, Gfx1250PreservesGeneratedIslandPoolAfterBackwardBranch
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250PreservesGeneratedIslandPoolAfterProgramTerminator) {
+  constexpr uint32_t kGfx1250SNop = 0xBF800000u;
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
-  constexpr int16_t kPoolWords = static_cast<int16_t>(rocjitsu::kGeneratedIslandPoolHeaderWords +
-                                                      rocjitsu::kDirectBranchIslandPoolSlots);
   const uint32_t marker = rocjitsu::build_s_nop(rocjitsu::kBranchIslandPoolMarkerNopImmediate,
                                                 ROCJITSU_CODE_ARCH_CDNA5);
   std::vector<uint32_t> words = {
-      // The conditional keeps the instruction after the pool reachable while
-      // the fallthrough path terminates immediately before the pool.
-      cdna5::build_sopp(cdna5::kSCbranchScc0Sopp,
-                        {.simm16 = static_cast<uint16_t>(kPoolWords + 1)})[0],
+      // No source instruction follows the trailing pool. Preserve it at the
+      // only reachable emission point: before the interior terminator.
+      kGfx1250SNop,
       kGfx1250SEndpgm,
       marker,
       rocjitsu::build_s_branch(static_cast<int16_t>(rocjitsu::kDirectBranchIslandPoolSlots),
@@ -3872,6 +3870,52 @@ TEST(BinaryTranslatorE2E, Gfx1250PreservesGeneratedIslandPoolAfterProgramTermina
   };
   words.insert(words.end(), rocjitsu::kDirectBranchIslandPoolSlots,
                rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA5));
+
+  auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto first = translator.translate(source);
+  ASSERT_TRUE(first.ok()) << (first.diagnostics.empty() ? "" : first.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(first.elf_bytes.data(), first.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto *translated_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t translated_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+  EXPECT_NE(std::find(translated_words, translated_words + translated_word_count, marker),
+            translated_words + translated_word_count);
+
+  const auto second = translator.translate(translated);
+  ASSERT_TRUE(second.ok()) << (second.diagnostics.empty() ? ""
+                                                          : second.diagnostics.front().message);
+  EXPECT_EQ(second.elf_bytes, first.elf_bytes);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250PreservesGeneratedIslandPoolBeforeLaterBranchTarget) {
+  constexpr uint32_t kGfx1250SNop = 0xBF800000u;
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  constexpr int16_t kPoolWords = static_cast<int16_t>(rocjitsu::kGeneratedIslandPoolHeaderWords +
+                                                      rocjitsu::kDirectBranchIslandPoolSlots);
+  const uint32_t marker = rocjitsu::build_s_nop(rocjitsu::kBranchIslandPoolMarkerNopImmediate,
+                                                ROCJITSU_CODE_ARCH_CDNA5);
+  std::vector<uint32_t> words = {
+      // Skip the generated pool and one additional NOP. The pool header,
+      // private slots, and pool_end are unreachable; the first reachable
+      // instruction after the pool is pool_end + 4.
+      rocjitsu::build_s_branch(kPoolWords + 1, ROCJITSU_CODE_ARCH_CDNA5),
+      marker,
+      rocjitsu::build_s_branch(static_cast<int16_t>(rocjitsu::kDirectBranchIslandPoolSlots),
+                               ROCJITSU_CODE_ARCH_CDNA5),
+  };
+  words.insert(words.end(), rocjitsu::kDirectBranchIslandPoolSlots,
+               rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA5));
+  words.push_back(kGfx1250SNop);
+  words.insert(words.end(), 2200, kGfx1250SNop);
   words.push_back(kGfx1250SEndpgm);
 
   auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
@@ -3881,6 +3925,9 @@ TEST(BinaryTranslatorE2E, Gfx1250PreservesGeneratedIslandPoolAfterProgramTermina
       ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0,
       gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
                                rocjitsu::ProcessorRevision::Gfx1250A0));
+  translator.set_instruction_rewrite_callback(
+      [](const rocjitsu::InstructionRewriteContext &)
+          -> std::optional<rocjitsu::InstructionRewrite> { return std::nullopt; });
   const auto first = translator.translate(source);
   ASSERT_TRUE(first.ok()) << (first.diagnostics.empty() ? "" : first.diagnostics.front().message);
 
