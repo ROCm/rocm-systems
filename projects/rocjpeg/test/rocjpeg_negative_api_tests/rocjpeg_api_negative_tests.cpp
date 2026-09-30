@@ -664,7 +664,13 @@ RocJpegStatus RocJpegApiNegativeTests::ParseExactBuffer(const std::vector<uint8_
     // std::vector may over-allocate, which would hide a one-byte overread behind
     // its own spare capacity. An exactly sized allocation puts the sanitizer
     // redzone directly after the last byte of the stream.
-    std::unique_ptr<uint8_t[]> buffer(new uint8_t[data.empty() ? 1 : data.size()]);
+    //
+    // Including when the stream is empty, which both the prefix and the noise
+    // loop below produce. Rounding that up to one byte would leave a readable
+    // byte at data[0] and let a parser that dereferences before checking the
+    // length go unnoticed; a zero-length new[] still returns a distinct
+    // non-null pointer, so the redzone starts at the pointer itself.
+    std::unique_ptr<uint8_t[]> buffer(new uint8_t[data.size()]);
     if (!data.empty()) {
         std::memcpy(buffer.get(), data.data(), data.size());
     }
