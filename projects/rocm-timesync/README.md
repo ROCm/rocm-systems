@@ -142,9 +142,47 @@ cache:
 
 ### `rocr-runtime`
 
+ROCR implements 3 HSA API routines that involve GPU->system time translation, and thus must vector through this
+translation system. They are:
+- [hsa_amd_profiling_get_dispatch_time](https://github.com/ROCm/rocm-systems/blob/users/bkocolos/precision-time/projects/rocr-runtime/runtime/hsa-runtime/inc/hsa_ext_amd.h#L950)
+  - retrieves packet processing timestamps in the system time domain
+- [hsa_amd_profiling_get_async_copy_time](https://github.com/ROCm/rocm-systems/blob/users/bkocolos/precision-time/projects/rocr-runtime/runtime/hsa-runtime/inc/hsa_ext_amd.h#L975)
+  - retrieves asynchronous copy timestamps in the system time domain
+- [hsa_amd_profiling_convert_tick_to_system_domain](https://github.com/ROCm/rocm-systems/blob/users/bkocolos/precision-time/projects/rocr-runtime/runtime/hsa-runtime/inc/hsa_ext_amd.h#L999)
+  - convert an HSA agent's tick to the system time domain
+
 #### API
 
-## Code
+ROCR implements these routines by linking `librocm-timesync` and invoking a set of API routines. The library's
+[header](https://github.com/ROCm/rocm-systems/blob/users/bkocolos/precision-time/projects/rocm-timesync/source/include/rocm-timesync/rocm_timesync.hpp)
+shows the interface. The API includes:
+```cpp
+typedef enum {
+    TIMESYNC_PRECISION_LOW = 0,
+    TIMESYNC_PRECISION_HIGH
+} ts_precision_t;
+
+struct ts_client_config_t {
+    std::string config_file{};
+    std::string stats_file{};
+    ts_precision_t precision{TIMESYNC_PRECISION_LOW};
+};
+
+int timesync_client_init(const ts_client_config_t& cfg);
+int timesync_client_deinit();
+int timesync_client_translate(uint32_t agent_kfd_gpu_id, uint64_t agent_timestamp, uint64_t& system_timestamp);
+```
+
+- `timesync_client_init()` initializes the library for use in the running ROCR instance. ROCR can specify whether it
+  wants "HIGH" precision or can tolerate "LOW" precision in its time translations. "HIGH" is understood as meeting the
+  cluster's PTP standard, if PTP hardware is present, while "LOW" is a low overhead implementation for workloads that do
+  not require tight alignment.
+- `timesync_client_deinit()` tears down the library when the runtime is finished.
+- `timesync_client_translate()` takes the provided agent ID and agent timestamp, and translates them to the
+  corresponding time on the system time domain.
+
+
+## Source code
 
 - [source/producer](./source/producer) implements the `rocm-timesyncd` system service, which calls into KFD to query
   crosststamps at configurable intervals
