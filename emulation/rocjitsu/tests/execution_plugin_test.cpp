@@ -5743,7 +5743,8 @@ TEST(RaceDetectorPluginTest, FlatLoadReadyLanesKnownFalsePositives) {
           ASSERT_NE(load, nullptr);
 
           // Feed the decoded load and resolved masks into both checkers without
-          // executing the unsupported mixed LDS/global memory path (#11456).
+          // executing the unsupported mixed LDS/global memory path:
+          // https://github.com/ROCm/rocm-systems/issues/11456
           // The first requesting lane still selects the whole instruction's route.
           const bool local_route = shared_lanes & 1;
           auto data = std::make_unique<VectorMemState>(local_route ? LOCAL_MEM : GLOBAL_MEM);
@@ -5789,7 +5790,8 @@ TEST(RaceDetectorPluginTest, FlatLoadReadyLanesKnownFalsePositives) {
 
           const bool missing_wait = waited == Wait::None;
           EXPECT_EQ(core_reports != 0, missing_wait);
-          // TODO(newling): #12237: expect only missing_wait here. A zero wait
+          // TODO(newling): https://github.com/ROCm/rocm-systems/issues/12237
+          // Expect only missing_wait here after the fix. A zero wait
           // suffices for the consumed lane group, but the plugin still reports
           // ready lanes for mixed CDNA4 and RDNA4 loads.
           // Track the producing counter separately for each consumed lane group.
