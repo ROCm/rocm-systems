@@ -2693,6 +2693,9 @@ int SimulatedKfd::unmap_memory_ioctl(KfdProcess &proc, void *arg) {
 
 int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
   auto *args = static_cast<kfd_ioctl_create_queue_args *>(arg);
+  const uint32_t scheduling_percentage = args->queue_percentage & 0xff;
+  if (scheduling_percentage > 100)
+    return -EINVAL;
   auto *gpu = find_gpu(args->gpu_id);
   if (!gpu || !gpu->soc)
     return -EINVAL;
@@ -2801,6 +2804,7 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
         is_sdma ? amdgpu::make_sdma_queue_binding_factory(gpu->soc->sdma_queue_scheduler())
                 : amdgpu::make_compute_queue_binding_factory(*target_cp);
     queue_request.engine_id = args->sdma_engine_id;
+    queue_request.scheduling_percentage = scheduling_percentage;
     // doorbell_base is captured here under alloc_mutex_ but register_queue() runs
     // after the lock is released. This is stable because ROCr maps the doorbell
     // page before creating queues, and queue creation for a process is single-
@@ -2900,6 +2904,7 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
         .gpu_ordinal = gpu_ordinal(args->gpu_id),
         .doorbell_offset = queue_request.doorbell.offset,
         .queue_handle = queue_handle,
+        .pm4_target_xcc = is_pm4_compute ? std::optional(owner_ordinal) : std::nullopt,
     };
     proc.queue_snapshot_map_[queue_id] = {
         .ring_base_address = args->ring_base_address,
@@ -3013,6 +3018,10 @@ int SimulatedKfd::set_cu_mask_ioctl(KfdProcess &proc, void *arg) {
 
 int SimulatedKfd::update_queue_ioctl(KfdProcess &proc, void *arg) {
   auto *args = static_cast<kfd_ioctl_update_queue_args *>(arg);
+  // Decode scheduling independently of the native PM4 placement field.
+  const uint32_t scheduling_percentage = args->queue_percentage & 0xff;
+  if (scheduling_percentage > 100)
+    return -EINVAL;
   const std::optional<uint32_t> ring_size = normalize_queue_ring_size(args->ring_size);
   if (!ring_size)
     return -EINVAL;
@@ -3030,12 +3039,21 @@ int SimulatedKfd::update_queue_ioctl(KfdProcess &proc, void *arg) {
   if (!queue || queue->gpu_ordinal >= gpus_.size() || !gpus_[queue->gpu_ordinal].soc)
     return -EFAULT;
 
+  if (queue->pm4_target_xcc) {
+    const uint32_t target_xcc = (args->queue_percentage >> 8) & 0xff;
+    if (target_xcc >= gpus_[queue->gpu_ordinal].soc->num_xcds())
+      return -EINVAL;
+    // Moving a live CP record requires migrating its registers and pending streams.
+    if (target_xcc != *queue->pm4_target_xcc)
+      return -EOPNOTSUPP;
+  }
+
   amdgpu::QueueReconfigureResult update;
   try {
     update = gpus_[queue->gpu_ordinal].soc->queue_registry().reconfigure_queue(
         queue->queue_handle, {.ring_base_address = args->ring_base_address,
                               .ring_size_bytes = *ring_size,
-                              .scheduling_percentage = args->queue_percentage});
+                              .scheduling_percentage = scheduling_percentage});
   } catch (const std::bad_alloc &) {
     return -ENOMEM;
   } catch (...) {

@@ -4,7 +4,6 @@
 #include "cdna5_sim_test_common.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
-#include "rocjitsu/vm/amdgpu/pm4/pm4_queue_controller.h"
 #include "rocjitsu/vm/amdgpu/sdma_queue_binding_factory.h"
 
 #include <sys/mman.h>

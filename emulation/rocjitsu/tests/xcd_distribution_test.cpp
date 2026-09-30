@@ -919,37 +919,72 @@ TEST(XcdDistributionTest, FanoutReplicatesNonKernelPacketsButSignalsThemOnce) {
 }
 
 TEST(XcdDistributionTest, VendorPm4DispatchesOnEveryXcdAndCompletesOnce) {
-  for (const auto threading : {Threading::Single, Threading::ThreadPerXcd}) {
-    XcdDistributionFixture fx(threading);
-    constexpr uint64_t code = 0x8000, ib = 0x4000, signal = 0x70000;
-    fx.memory->write32(code, build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));
-    fx.memory->write64(signal + 8, 5);
-    std::vector<uint32_t> commands{0xc0037600,
-                                   amdgpu::kPm4ComputeNumThreadX,
-                                   64,
-                                   1,
-                                   1,
-                                   0xc0027600,
-                                   amdgpu::kPm4ComputePgmLo,
-                                   uint32_t(code >> 8),
-                                   0};
-    // Each XCD decodes the same stream, but executes only its predicated dispatch.
-    for (uint32_t xcd = 0; xcd < kTotalXcds; ++xcd) {
-      commands.push_back(0xc0002300);
-      commands.push_back((1u << (24 + xcd)) | 5);
-      commands.insert(commands.end(), {0xc0031500, 1, 1, 1, 1});
+  for (const bool cdna5 : {false, true}) {
+    SCOPED_TRACE(cdna5 ? "gfx1250" : "gfx950");
+    for (const auto threading : {Threading::Single, Threading::ThreadPerXcd}) {
+      SCOPED_TRACE(threading == Threading::Single ? "single thread" : "thread per XCD");
+      XcdDistributionFixture fx(threading, 1, cdna5 ? CDNA5_CONFIG_PATH : CONFIG_PATH);
+      constexpr uint64_t code = 0x8000, ib = 0x4000, signal = 0x70000;
+      const uint32_t wave_size = cdna5 ? 32 : 64;
+      const uint32_t initiator = cdna5 ? 0x8001 : 1;
+      fx.memory->write32(
+          code, build_s_endpgm(cdna5 ? ROCJITSU_CODE_ARCH_CDNA5 : ROCJITSU_CODE_ARCH_CDNA4));
+      fx.memory->write64(signal + 8, 5);
+      std::vector<uint32_t> commands{
+          0xc0037600, amdgpu::kPm4ComputeNumThreadX, wave_size,           1, 1,
+          0xc0027600, amdgpu::kPm4ComputePgmLo,      uint32_t(code >> 8), 0};
+      // Distinct grid sizes prove each XCD selects its own dispatch from the
+      // shared stream, rather than every XCD executing the same selection.
+      for (uint32_t xcd = 0; xcd < kTotalXcds; ++xcd) {
+        commands.push_back(0xc0002300);
+        commands.push_back((1u << (24 + xcd)) | 5);
+        commands.insert(commands.end(), {0xc0031500, xcd + 1, 1, 1, initiator});
+      }
+      fx.memory->load_image(reinterpret_cast<const uint8_t *>(commands.data()), commands.size() * 4,
+                            ib);
+      auto *cp = fx.soc->assign_queue_owner_cp(0);
+      auto queue = test::make_fanout_queue(fx.memory, cp);
+      queue->submit(test::make_pm4_ib_packet(ib, commands.size(), signal));
+      fx.engine->run();
+      EXPECT_EQ(fx.memory->read64(signal + 8), 4u);
+      const auto counts = fx.soc->dispatched_workgroups_per_xcd();
+      ASSERT_EQ(counts.size(), kTotalXcds);
+      for (uint32_t xcd = 0; xcd < kTotalXcds; ++xcd) {
+        EXPECT_EQ(counts[xcd], xcd + 1) << "XCD " << xcd;
+        EXPECT_FALSE(fx.soc->xcd(xcd)->command_processor()->queue_faulted_for_test(1, 0));
+      }
     }
-    fx.memory->load_image(reinterpret_cast<const uint8_t *>(commands.data()), commands.size() * 4,
-                          ib);
-    auto *cp = fx.soc->assign_queue_owner_cp(0);
-    auto queue = test::make_fanout_queue(fx.memory, cp);
-    queue->submit(test::make_pm4_ib_packet(ib, commands.size(), signal));
-    fx.engine->run();
-    EXPECT_EQ(fx.memory->read64(signal + 8), 4u);
-    for (const auto count : fx.soc->dispatched_workgroups_per_xcd())
-      EXPECT_EQ(count, 1u);
-    for (uint32_t xcd = 0; xcd < kTotalXcds; ++xcd)
-      EXPECT_FALSE(fx.soc->xcd(xcd)->command_processor()->queue_faulted_for_test(1, 0));
+  }
+}
+
+TEST(XcdDistributionTest, ResumedPm4FaultPropagatesToEveryXcd) {
+  XcdDistributionFixture fx(Threading::Single);
+  constexpr uint64_t ib = 0x4000, signal = 0x70000, gate = 0x9000;
+  fx.memory->write64(signal + 8, 1);
+  // Only XCD 0 executes the wait followed by an invalid opcode.
+  const std::vector<uint32_t> commands{
+      0xc0002300, (1u << 24) | 9, 0xc0053c00, 0x13,      uint32_t(gate), 0, 1, 0xffffffff,
+      4,          0xc000ff00,     0,          0xffff1000};
+  fx.memory->load_image(reinterpret_cast<const uint8_t *>(commands.data()), commands.size() * 4,
+                        ib);
+  auto *cp = fx.soc->assign_queue_owner_cp(0);
+  auto queue = test::make_fanout_queue(fx.memory, cp);
+  queue->submit(test::make_pm4_ib_packet(ib, commands.size(), signal));
+  for (unsigned i = 0; i < 32; ++i)
+    (void)fx.engine->step();
+  for (uint32_t xcd = 0; xcd < kTotalXcds; ++xcd) {
+    auto *peer = fx.soc->xcd(xcd)->command_processor();
+    ASSERT_EQ(peer->accepted_entry_count_for_test(1, 0), 1u) << "XCD " << xcd;
+    ASSERT_FALSE(peer->queue_faulted_for_test(1, 0)) << "XCD " << xcd;
+  }
+  fx.memory->write32(gate, 1);
+  for (unsigned i = 0; i < 128; ++i)
+    (void)fx.engine->step();
+  EXPECT_EQ(fx.memory->read64(signal + 8), 1u);
+  for (uint32_t xcd = 0; xcd < kTotalXcds; ++xcd) {
+    auto *peer = fx.soc->xcd(xcd)->command_processor();
+    EXPECT_TRUE(peer->queue_faulted_for_test(1, 0)) << "XCD " << xcd;
+    EXPECT_FALSE(peer->has_dispatch_for_test(1, 0, 1)) << "XCD " << xcd;
   }
 }
 

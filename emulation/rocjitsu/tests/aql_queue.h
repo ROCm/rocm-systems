@@ -29,9 +29,10 @@ namespace rocjitsu::test {
 
 /// @brief ROCr's vendor envelope enters a PM4 IB and completes through an AQL signal.
 inline hsa_kernel_dispatch_packet_t make_pm4_ib_packet(uint64_t address, uint32_t dwords,
-                                                       uint64_t completion_signal = 0) {
+                                                       uint64_t completion_signal = 0,
+                                                       bool barrier = true) {
   std::array<uint32_t, 16> words{};
-  words[0] = HSA_PACKET_TYPE_VENDOR_SPECIFIC | (1u << HSA_PACKET_HEADER_BARRIER) |
+  words[0] = HSA_PACKET_TYPE_VENDOR_SPECIFIC | (barrier ? (1u << HSA_PACKET_HEADER_BARRIER) : 0) |
              (uint32_t{amdgpu::kAmdAqlFormatPm4Ib} << 16);
   words[1] = 0xc0023f00;
   words[2] = static_cast<uint32_t>(address);

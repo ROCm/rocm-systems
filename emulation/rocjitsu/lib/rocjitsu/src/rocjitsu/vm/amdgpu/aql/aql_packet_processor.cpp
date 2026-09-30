@@ -233,12 +233,20 @@ AqlPacketProcessor::process_vendor(const Request &request,
     // AQL slot length and completion signal. Copy before the ring slot is released.
     std::array<uint32_t, 16> words{};
     std::memcpy(words.data(), &packet, sizeof(packet));
+    constexpr uint32_t kIbSizeMask = 0x000fffff;
+    constexpr uint32_t kIbValid = 1u << 23;
+    // aqlprofile uses cache policy on GFX9/GFX11 and temporal hints on GFX12.
+    // These affect caching, not control flow; CHAIN, VMID and other controls
+    // remain unsupported in the outer AQL envelope.
+    constexpr uint32_t kIbCachePolicyMask = 3u << 28;
+    constexpr uint32_t kSupportedIbControl = kIbSizeMask | kIbValid | kIbCachePolicyMask;
     if (words[1] != 0xc0023f00 || (words[2] & 3) || words[3] > 0xffff ||
-        (words[4] & ~0x000fffffu) != (1u << 23) || !(words[4] & 0xfffff) || words[5] != 10)
+        (words[4] & ~kSupportedIbControl) || !(words[4] & kIbValid) || !(words[4] & kIbSizeMask) ||
+        words[5] != 10)
       return terminal(PacketProcessStatus::Malformed, AqlPacketDiagnostic::MalformedPm4Ib);
     return admit(request, {.kind = AqlPreparedPacketKind::Pm4Ib,
                            .pm4_ib_address = uint64_t{words[2]} | (uint64_t{words[3]} << 32),
-                           .pm4_ib_dwords = words[4] & 0xfffff,
+                           .pm4_ib_dwords = words[4] & kIbSizeMask,
                            .completion_signal = extension.completion_signal.handle,
                            .barrier_bit = ((packet.header >> HSA_PACKET_HEADER_BARRIER) & 1) != 0,
                            .blocks_following = true});

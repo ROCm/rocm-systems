@@ -9,7 +9,6 @@
 #include "rocjitsu/vm/amdgpu/hsa_clock.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/pm4/pm4_queue_binding_factory.h"
-#include "rocjitsu/vm/amdgpu/pm4/pm4_queue_controller.h"
 #include "rocjitsu/vm/amdgpu/pm4/pm4_ring_consumer.h"
 
 #include "rocjitsu/base/rj_compiler.h"
@@ -112,6 +111,7 @@ uint64_t CommandProcessor::register_pm4_queue(Pm4QueueConfig config) {
                          .ring_base_va = config.ring_base,
                          .ring_size = config.ring_size_bytes,
                          .read_ptr_va = config.consumer_pointer_address,
+                         .last_doorbell = config.initial_consumer_cursor.value_or(~uint64_t(0)),
                          .packet_format = QueuePacketFormat::Pm4,
                          .initial_consumer_cursor = config.initial_consumer_cursor,
                          .packet_callbacks = std::move(config.packet_callbacks)});
@@ -133,16 +133,14 @@ CommandProcessor::update_pm4_queue_registration(uint64_t id,
   const auto queue = std::ranges::find(compute_queues_, id, &ComputeQueueRecord::registration_id);
   if (queue == compute_queues_.end())
     return QueueReconfigureStatus::Stale;
-  if (queue->faulted)
+  if (queue->faulted || queue->command_fault_pending || request.scheduling_percentage > 100)
     return QueueReconfigureStatus::Invalid;
   const bool disabled = !request.ring_base_address || !request.scheduling_percentage;
   const uint64_t base = disabled ? queue->ring_base_va : request.ring_base_address;
   const uint32_t bytes = disabled ? queue->ring_size : request.ring_size_bytes;
   if (!disabled && (!base || base % 4 || bytes < 4 || bytes % 4))
     return QueueReconfigureStatus::Invalid;
-  if ((base != queue->ring_base_va || bytes != queue->ring_size) &&
-      (!queue->commands.submissions.empty() || !queue->dispatches.entries.empty() ||
-       queue->read_pointer_journal.publication_pending()))
+  if ((base != queue->ring_base_va || bytes != queue->ring_size) && queue->has_pending_commands())
     return QueueReconfigureStatus::Busy;
   // Ring reconfiguration and runtime suspension share the same wave gates as AQL.
   if (!update_queue_registration(id, base, bytes, disabled ? 0 : request.scheduling_percentage))
@@ -151,24 +149,37 @@ CommandProcessor::update_pm4_queue_registration(uint64_t id,
 }
 
 QueueSubmissionStatus CommandProcessor::notify_pm4_queue_doorbell(uint64_t id, uint64_t producer) {
-  if (engine()) {
-    // Notification only publishes progress; execution stays on the CP's event context.
-    notify_queue_doorbell(id, producer);
-    return QueueSubmissionStatus::Accepted;
-  }
   std::lock_guard lock(hw_queue_mutex_);
   const auto queue = std::ranges::find(compute_queues_, id, &ComputeQueueRecord::registration_id);
-  if (queue == compute_queues_.end() || queue->faulted)
+  if (queue == compute_queues_.end() || queue->faulted || queue->command_fault_pending ||
+      queue->runtime_suspended || queue->packet_format != QueuePacketFormat::Pm4 ||
+      queue->submission_queue)
     return QueueSubmissionStatus::Faulted;
-  queue->last_doorbell = producer;
-  service_pm4_ring(*queue, 0);
+  const uint64_t reference = queue->last_doorbell == ~uint64_t(0)
+                                 ? queue->read_pointer_journal.cursor()
+                                 : queue->last_doorbell;
+  const auto normalized = normalize_pm4_producer_cursor(producer, reference, queue->ring_size / 4);
+  if (!normalized) {
+    // CU cleanup belongs to the event thread, even for a rejected notification.
+    queue->command_fault_pending = true;
+    if (engine())
+      engine()->schedule_event_now(doorbell_event());
+    else
+      fail_pm4_queue(*queue, queue->dispatches);
+    return QueueSubmissionStatus::Faulted;
+  }
+  queue->last_doorbell = *normalized;
+  if (engine()) {
+    // Validate synchronously; packet effects remain on the CP event context.
+    engine()->schedule_event_now(doorbell_event());
+    return QueueSubmissionStatus::Accepted;
+  }
+  for (auto &record : compute_queues_)
+    record.command_retry_pending = false;
   service_command_streams(0);
-  service_pm4_ring(*queue, 0);
-  return queue->faulted ? QueueSubmissionStatus::Faulted
-         : queue->read_pointer_journal.publication_pending() ||
-                 (!engine() && !queue->commands.submissions.empty())
-             ? QueueSubmissionStatus::Retry
-             : QueueSubmissionStatus::Accepted;
+  return queue->faulted                  ? QueueSubmissionStatus::Faulted
+         : queue->has_pending_commands() ? QueueSubmissionStatus::Retry
+                                         : QueueSubmissionStatus::Accepted;
 }
 
 size_t CommandProcessor::registered_pm4_queue_count_for_test() const {
@@ -1104,6 +1115,10 @@ uint64_t CommandProcessor::register_queue(ComputeQueueConfig config, bool fanout
     if (!valid)
       return 0;
   }
+  // Native PM4 has no VM-doorbell poller. Reject it until polling is implemented.
+  if (config.packet_format == QueuePacketFormat::Pm4 &&
+      config.doorbell_mode == QueueDoorbellMode::VmPolled)
+    return 0;
   // A host-polled queue may be registered before its doorbell page is mapped;
   // set_process_doorbell_base() publishes that mapping later. VM polling has no
   // equivalent deferred binding and therefore requires an address up front.
@@ -1363,6 +1378,12 @@ bool CommandProcessor::publish_queue_exception(uint32_t queue_id, uint32_t proce
 
 QueuePrepareCloseStatus
 CommandProcessor::prepare_unregister_queue_registration(uint64_t registration_id) noexcept {
+  if (!engine()) {
+    std::lock_guard lock(hw_queue_mutex_);
+    for (auto &queue : compute_queues_)
+      queue.command_retry_pending = false;
+    service_command_streams(0);
+  }
   return close_queue_registration(registration_id, false);
 }
 
@@ -1394,7 +1415,7 @@ QueuePrepareCloseStatus CommandProcessor::close_queue_registration(uint64_t regi
     if (queue == compute_queues_.end())
       return QueuePrepareCloseStatus::Faulted;
     if (!force) {
-      if (queue->publication_faulted ||
+      if (queue->publication_faulted || queue->command_fault_pending ||
           (queue->faulted && (!queue->entries.empty() || !queue->dispatches.entries.empty())))
         return QueuePrepareCloseStatus::Faulted;
       retry_close = queue->read_pointer_journal.publication_pending() ||
@@ -1403,8 +1424,7 @@ QueuePrepareCloseStatus CommandProcessor::close_queue_registration(uint64_t regi
                     // while allocating backing. Only an unfinished notification publication
                     // must delay that removal.
                     queue->scratch_request.publication_pending() ||
-                    queue->scratch_reclaim.active() || !queue->entries.empty() ||
-                    !queue->commands.submissions.empty() || !queue->dispatches.entries.empty();
+                    queue->scratch_reclaim.active() || queue->has_pending_commands();
     }
     if (!retry_close) {
       queue_id = queue->queue_id;
@@ -1528,10 +1548,11 @@ bool CommandProcessor::update_queue_registration(uint64_t registration_id, uint6
           return false;
         if (q.packet_format == QueuePacketFormat::Pm4 &&
             (q.ring_base_va != ring_base_va || q.ring_size != ring_size)) {
-          if (!q.commands.submissions.empty() || !q.dispatches.entries.empty() ||
-              q.read_pointer_journal.publication_pending())
+          if (q.has_pending_commands())
             return false;
           q.read_pointer_journal.reset();
+          q.command_access.reset();
+          q.last_doorbell = ~uint64_t(0);
         }
         found = true;
         queue_id = q.queue_id;
@@ -1854,7 +1875,7 @@ void CommandProcessor::doorbell_poll_loop(std::stop_token stop) {
           // raise this from several CPs at once.
           if (compute_queues_[queue_index].fanout_replica)
             continue;
-          if (compute_queues_[queue_index].entries.empty() &&
+          if (!compute_queues_[queue_index].has_pending_commands() &&
               compute_queues_[queue_index].process_id != 0) {
             idle_queues.emplace_back(compute_queues_[queue_index].interrupt_sink,
                                      compute_queues_[queue_index].process_id);
@@ -2588,6 +2609,10 @@ bool CommandProcessor::fault_dispatch_local(uint32_t queue_id, uint32_t process_
 
   dispatch_launch_metadata_.erase(static_cast<uint32_t>(dispatch_id));
   queue->faulted = true;
+  // A vendor packet's child shaders have their own dispatch IDs. Cancel its
+  // stream as well when a peer reports failure of the parent AQL dispatch.
+  if (!queue->commands.submissions.empty() || !queue->dispatches.entries.empty())
+    fail_pm4_queue(*queue, queue->dispatches);
   util::Logger::cp([&](auto &os) {
     os << std::format("{}: terminal VM fault pid={} qid={} dispatch={} outcome={}", name(),
                       process_id, queue_id, dispatch_id, static_cast<unsigned>(outcome));
@@ -2882,10 +2907,11 @@ void CommandProcessor::unregister_drm_queue(uint32_t queue_id, uint32_t process_
 
 void CommandProcessor::service_pm4_ring(ComputeQueueRecord &queue, simdojo::Tick now) {
   if (queue.packet_format != QueuePacketFormat::Pm4 || queue.submission_queue ||
-      queue.fanout_replica)
+      queue.fanout_replica || queue.faulted || queue.command_retry_pending)
     return;
   auto outcome = queue.read_pointer_journal.publish();
   if (outcome == VmAccessOutcome::Unavailable) {
+    queue.command_retry_pending = true;
     arm_stall_recheck(now);
     return;
   }
@@ -2894,18 +2920,24 @@ void CommandProcessor::service_pm4_ring(ComputeQueueRecord &queue, simdojo::Tick
     fail_pm4_queue(queue, queue.dispatches);
     return;
   }
-  if (queue.faulted || queue.suspended() || !queue.commands.submissions.empty())
+  if (queue.suspended()) {
+    queue.debug_work_deferred = true;
     return;
-  queue.command_access.reset();
+  }
+  if (!queue.commands.submissions.empty())
+    return;
   if (queue.last_doorbell == ~uint64_t(0))
     return;
-  auto access = gpu_vm_->snapshot_pinned(queue.address_space);
+  if (!queue.command_access)
+    queue.command_access = gpu_vm_->snapshot_pinned(queue.address_space);
+  const auto &access = queue.command_access;
   if (!access) {
     fail_pm4_queue(queue, queue.dispatches);
     return;
   }
   outcome = queue.read_pointer_journal.initialize(*access);
   if (outcome == VmAccessOutcome::Unavailable) {
+    queue.command_retry_pending = true;
     arm_stall_recheck(now);
     return;
   }
@@ -2916,9 +2948,10 @@ void CommandProcessor::service_pm4_ring(ComputeQueueRecord &queue, simdojo::Tick
     fail_pm4_queue(queue, queue.dispatches);
     return;
   }
-  if (*producer == consumer)
+  if (*producer == consumer) {
+    queue.command_access.reset();
     return;
-  queue.command_access = std::move(access);
+  }
   Pm4Submission submission;
   submission.buffers.push_back({.address = consumer * 4,
                                 .dwords = static_cast<uint32_t>(*producer - consumer),
@@ -2934,9 +2967,15 @@ void CommandProcessor::service_pm4_ring(ComputeQueueRecord &queue, simdojo::Tick
 void CommandProcessor::service_command_streams(simdojo::Tick now) {
   for (auto &queue : compute_queues_) {
     auto &state = queue.dispatches;
+    if (queue.command_fault_pending) {
+      queue.command_fault_pending = false;
+      fail_pm4_queue(queue, state);
+    }
     // Publication of a committed packet must finish even while execution is paused.
     service_pm4_ring(queue, now);
-    if (queue.faulted || queue.suspended())
+    if (queue.suspended() && !queue.commands.submissions.empty())
+      queue.debug_work_deferred = true;
+    if (queue.faulted || queue.suspended() || queue.command_retry_pending)
       continue;
     if (!queue.commands.submissions.empty() &&
         queue.commands.submissions.front().failure->failed.load(std::memory_order_acquire)) {
@@ -2953,6 +2992,8 @@ void CommandProcessor::service_command_streams(simdojo::Tick now) {
     }
     fetch_pm4(queue, state, now);
     service_pm4_ring(queue, now);
+    if (!queue.commands.submissions.empty() && state.entries.empty() && !queue.faulted)
+      arm_stall_recheck(now);
     if (queue.faulted || state.entries.empty())
       continue;
     auto &entry = state.entries.front();
@@ -3182,16 +3223,19 @@ void CommandProcessor::fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchStat
   }
   flush_gpu_caches();
   qs.entries.clear();
-  for (auto &submission : queue.commands.submissions)
-    if (submission.complete)
-      submission.complete(false);
+  // Detach callbacks before invoking them: parent fault propagation can cancel
+  // this queue again, and must not invalidate the container being traversed.
+  auto submissions = std::move(queue.commands.submissions);
   queue.commands.submissions.clear();
   queue.command_access.reset();
+  for (auto &submission : submissions)
+    if (submission.complete)
+      submission.complete(false);
 }
 
 void CommandProcessor::fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs,
                                  simdojo::Tick now) {
-  if (queue.faulted)
+  if (queue.faulted || queue.command_retry_pending)
     return;
   auto &state = queue.commands;
   if (state.submissions.empty())
@@ -3209,10 +3253,12 @@ void CommandProcessor::fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs
     if (!access)
       throw std::runtime_error("PM4 queue has no GPU address space");
     // Bound one event's packet work, including IB chains.
-    for (uint32_t budget = 0; budget < 4096 && !state.submissions.empty(); ++budget) {
+    const uint32_t packet_budget = queue.submission_queue ? 4096 : 256;
+    for (uint32_t budget = 0; budget < packet_budget && !state.submissions.empty(); ++budget) {
       // A committed root packet must publish before another packet can execute.
       const auto published = queue.read_pointer_journal.publish();
       if (published == VmAccessOutcome::Unavailable) {
+        queue.command_retry_pending = true;
         arm_stall_recheck(now);
         return;
       }
@@ -3224,6 +3270,7 @@ void CommandProcessor::fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs
       }
       auto &submission = state.submissions.front();
       if (submission.ready && !submission.ready()) {
+        queue.command_retry_pending = true;
         arm_stall_recheck(now);
         return;
       }
@@ -3251,6 +3298,7 @@ void CommandProcessor::fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs
       auto outcome =
           read_commands(ib.address, {reinterpret_cast<std::byte *>(&header), sizeof(header)});
       if (outcome == VmAccessOutcome::Unavailable) {
+        queue.command_retry_pending = true;
         arm_stall_recheck(now);
         return;
       }
@@ -3265,6 +3313,7 @@ void CommandProcessor::fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs
         outcome = read_commands(ib.address + 4,
                                 {reinterpret_cast<std::byte *>(words.data()), words.size() * 4});
         if (outcome == VmAccessOutcome::Unavailable) {
+          queue.command_retry_pending = true;
           arm_stall_recheck(now);
           return;
         }
@@ -3293,7 +3342,8 @@ void CommandProcessor::fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs
       case Pm4Opcode::PredExec: {
         if (words.size() != 1 || cus_.empty() ||
             (cus_[0]->config().arch != ROCJITSU_CODE_ARCH_CDNA3 &&
-             cus_[0]->config().arch != ROCJITSU_CODE_ARCH_CDNA4) ||
+             cus_[0]->config().arch != ROCJITSU_CODE_ARCH_CDNA4 &&
+             cus_[0]->config().arch != ROCJITSU_CODE_ARCH_CDNA5) ||
             (words[0] & 0x00ffc000) || scratch_xcc_id_ >= 8) {
           util::Logger::warn("unsupported PRED_EXEC control or target");
           fail_pm4_queue(queue, qs);
@@ -3397,6 +3447,7 @@ void CommandProcessor::fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs
         if (loaded == VmAccessOutcome::Unavailable) {
           ib.address -= count * 4;
           ib.dwords += count;
+          queue.command_retry_pending = true;
           arm_stall_recheck(now);
           return;
         }
@@ -3433,6 +3484,7 @@ void CommandProcessor::fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs
         if (!ready) {
           ib.address -= count * 4;
           ib.dwords += count;
+          queue.command_retry_pending = true;
           arm_stall_recheck(now);
           return;
         }
@@ -3469,6 +3521,8 @@ void CommandProcessor::fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs
         }
         break;
       case Pm4Opcode::SetUconfigReg: {
+        if (!queue.packet_callbacks.write_uconfig_register && !queue.submission_queue)
+          throw std::runtime_error("SET_UCONFIG_REG requires a register write callback");
         if (queue.packet_callbacks.write_uconfig_register) {
           if (words.size() != 2 || (words[0] & ~0xffffu)) {
             util::Logger::warn("invalid SET_UCONFIG_REG payload");
@@ -3480,6 +3534,7 @@ void CommandProcessor::fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs
           if (result == Pm4RegisterWriteStatus::Blocked) {
             ib.address -= count * 4;
             ib.dwords += count;
+            queue.command_retry_pending = true;
             arm_stall_recheck(now);
             return;
           }
@@ -3492,6 +3547,8 @@ void CommandProcessor::fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs
         break;
       }
       case Pm4Opcode::SetUconfigRegPairs:
+        if (!queue.submission_queue)
+          throw std::runtime_error("SET_UCONFIG_REG_PAIRS is unsupported on a native ring");
         break;
       case Pm4Opcode::AcquireMem: // ACQUIRE_MEM: earlier dispatches and DMA are already retired.
         require(!cus_.empty() && (cus_[0]->config().arch == ROCJITSU_CODE_ARCH_CDNA1 ||
@@ -3588,6 +3645,7 @@ void CommandProcessor::fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs
         queue.read_pointer_journal.retire(retired, retired % (root_ring_bytes / 4), *access);
         const auto published = queue.read_pointer_journal.publish();
         if (published == VmAccessOutcome::Unavailable) {
+          queue.command_retry_pending = true;
           arm_stall_recheck(now);
           return;
         }
@@ -3601,8 +3659,10 @@ void CommandProcessor::fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs
       if (!qs.entries.empty())
         return;
     }
-    if (!state.submissions.empty())
+    if (!state.submissions.empty()) {
+      queue.command_retry_pending = true;
       arm_stall_recheck(now);
+    }
   } catch (const std::exception &error) {
     util::Logger::warn("PM4 queue failed: ", error.what());
     fail_pm4_queue(queue, qs);
@@ -4456,8 +4516,14 @@ bool CommandProcessor::execute_aql_pm4(ComputeQueueRecord &queue, DispatchEntry 
       if (owner == compute_queues_.end())
         return;
       auto parent = std::ranges::find(owner->entries, packet_id, &DispatchEntry::dispatch_id);
-      if (parent != owner->entries.end() && success)
+      if (parent == owner->entries.end())
+        return;
+      if (success) {
         parent->command_stream_complete = true;
+      } else {
+        notify_dispatch_vm_fault(parent->queue_id, parent->process_id, packet_id,
+                                 VmAccessOutcome::Faulted);
+      }
     };
     queue.commands.submissions.push_back(std::move(stream));
     entry.command_stream_started = true;
@@ -4465,11 +4531,9 @@ bool CommandProcessor::execute_aql_pm4(ComputeQueueRecord &queue, DispatchEntry 
   // Child shader dispatches use this queue's normal VM/fault/CU ownership.
   // The next CP pass drives them and resumes this packet after its stream returns.
   fetch_pm4(queue, queue.dispatches, now);
-  if (queue.faulted) {
-    notify_dispatch_vm_fault(entry.queue_id, entry.process_id, entry.dispatch_id,
-                             VmAccessOutcome::Faulted);
+  // Failure callbacks remove the parent entry. Do not dereference it afterward.
+  if (queue.faulted)
     return false;
-  }
   if (!entry.command_stream_complete)
     arm_stall_recheck(now);
   return entry.command_stream_complete;
@@ -4863,8 +4927,7 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
   drain_fanout_inbox();
   drain_doorbell_inbox();
 
-  // PM4 owns its queue lock and executes VM/register callbacks without the AQL
-  // lock, so service it before serializing AQL admission and completion.
+  // AQL admission and PM4 execution share the queue lock and lifetime.
   std::unique_lock<std::recursive_mutex> lock(hw_queue_mutex_);
   util::Logger::cp([&](auto &os) {
     os << std::format("{}: DOORBELL queues={}", name(), compute_queues_.size());
@@ -4874,6 +4937,8 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
   if (!drain_completions())
     return;
 
+  for (auto &queue : compute_queues_)
+    queue.command_retry_pending = false;
   service_command_streams(now);
 
   size_t entries_before = 0;
