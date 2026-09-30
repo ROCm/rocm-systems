@@ -36,7 +36,8 @@ pub use crate::amdsmi_wrapper::{
 
 // Re-export the CUID types
 pub use crate::amdsmi_wrapper::{
-    AmdsmiCuidComponentT, AmdsmiCuidComponentTypeT, AmdsmiCuidInfoT, AmdsmiCuidSourceT,
+    AmdsmiCuidComponentT, AmdsmiCuidComponentTypeT, AmdsmiCuidInfoT, AmdsmiCuidSeedInfoT,
+    AmdsmiCuidSourceT, AMDSMI_CUID_SEED_FINGERPRINT_SIZE, AMDSMI_CUID_SEED_SIZE,
     AMDSMI_GPU_CUID_SIZE,
 };
 

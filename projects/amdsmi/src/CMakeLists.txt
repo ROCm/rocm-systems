@@ -146,7 +146,7 @@ else()
 endif()
 set(AMDCUID_HINT_DIR "${_amdsmi_rocm_dir}/core" CACHE PATH "Additional prefix searched for the amdcuid CMake package")
 unset(_amdsmi_rocm_dir)
-set(AMDSMI_AMDCUID_MIN_VERSION 2.2 CACHE INTERNAL "Oldest installed libamdcuid amd-smi builds against")
+set(AMDSMI_AMDCUID_MIN_VERSION 2.3 CACHE INTERNAL "Oldest installed libamdcuid amd-smi builds against")
 
 # Build the monorepo sibling when no installed package is found, so every
 # packaging channel ships CUID without a separate libamdcuid install.
@@ -173,8 +173,9 @@ else()
     # An installed package wins, so a distribution that ships libamdcuid
     # separately gets the one it shipped rather than a second copy built here.
     # 2.1 adds amdcuid_get_handle_by_dev_path() and AMDCUID_QUERY_SOURCE, and
-    # 2.2 takes GPUs from the driver's cuid_unit_id; an older install is passed
-    # over in favour of the in-tree sources.
+    # 2.2 takes GPUs from the driver's cuid_unit_id, and 2.3 reads and sets the
+    # node key; an older install is passed over in favour of the in-tree
+    # sources.
     find_package(amdcuid ${AMDSMI_AMDCUID_MIN_VERSION} CONFIG QUIET HINTS "${AMDCUID_HINT_DIR}")
 
     if(NOT amdcuid_FOUND AND EXISTS "${AMDCUID_SOURCE_DIR}/CMakeLists.txt")
@@ -267,8 +268,8 @@ else()
         WARNING
         "CUID support: disabled -- BUILD_CUID=AUTO and no amdcuid ${AMDSMI_AMDCUID_MIN_VERSION} CMake package was found "
         "(AMDCUID_HINT_DIR=${AMDCUID_HINT_DIR}), and no sources at AMDCUID_SOURCE_DIR "
-        "(${AMDCUID_SOURCE_DIR}). amdsmi_get_gpu_cuid_info() will return "
-        "AMDSMI_STATUS_NOT_SUPPORTED in this build. "
+        "(${AMDCUID_SOURCE_DIR}). amdsmi_get_gpu_cuid_info() and "
+        "amdsmi_set_cuid_seed() will return AMDSMI_STATUS_NOT_SUPPORTED in this build. "
         "Pass -DBUILD_CUID=ON to make this a hard error, or -DBUILD_CUID=OFF to make it "
         "deliberate."
     )
@@ -344,6 +345,9 @@ function(amdsmi_configure_common_target _TARGET)
             # build never installs.
             target_sources(${_TARGET} PRIVATE ${AMDCUID_IN_TREE_OBJECTS})
             target_include_directories(${_TARGET} SYSTEM PRIVATE ${AMDCUID_INCLUDE_DIRS})
+            # The absorbed objects include rocm-sha256, which an installed
+            # libamdcuid does not export.
+            target_compile_definitions(${_TARGET} PRIVATE AMDSMI_CUID_HAS_SHA256)
         else()
             target_link_libraries(${_TARGET} PRIVATE amdcuid::amdcuid)
         endif()

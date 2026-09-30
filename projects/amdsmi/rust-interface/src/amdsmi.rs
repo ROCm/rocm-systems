@@ -6338,6 +6338,95 @@ pub fn amdsmi_get_cuid_components() -> AmdsmiResult<Vec<AmdsmiCuidComponentT>> {
     }
 }
 
+/// Sets the node key.
+///
+/// The key is node-wide: amdgpu holds it in memory for every GPU and partition until the module
+/// is unloaded or the host reboots. Setting it replaces every CUID derived with the node key.
+/// Only root may set it.
+///
+/// # Arguments
+///
+/// * `seed` - Exactly [`AMDSMI_CUID_SEED_SIZE`] bytes of secret material. A key of any other
+///   length does not compile.
+///
+/// # Returns
+///
+/// * `AmdsmiResult<()>` - Returns `Ok(())` if the key was set, or an error if it fails.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// # use amdsmi::*;
+/// #
+/// # fn main() {
+/// #   amdsmi_init(AmdsmiInitFlagsT::AmdsmiInitAmdGpus).expect("Failed to initialize AMD SMI");
+/// #
+///     let seed: [u8; AMDSMI_CUID_SEED_SIZE as usize] = std::fs::read("node.key")
+///         .expect("Failed to read the node key")
+///         .try_into()
+///         .expect("The node key must be AMDSMI_CUID_SEED_SIZE bytes");
+///
+///     match amdsmi_set_cuid_seed(&seed) {
+///         Ok(()) => println!("Node key set"),
+///         Err(e) => panic!("Failed to set the node key: {}", e),
+///     }
+/// #
+/// #   amdsmi_shut_down().expect("Failed to shut down AMD SMI");
+/// # }
+/// ```
+///
+/// ```rust,compile_fail
+/// # use amdsmi::*;
+/// let _ = amdsmi_set_cuid_seed(&[0x5a; 16]);
+/// ```
+///
+/// # Errors
+///
+/// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_set_cuid_seed` call fails.
+pub fn amdsmi_set_cuid_seed(seed: &[u8; AMDSMI_CUID_SEED_SIZE as usize]) -> AmdsmiResult<()> {
+    call_unsafe!(amdsmi_wrapper::amdsmi_set_cuid_seed(seed.as_ptr()));
+    Ok(())
+}
+
+/// Reports whether a node key is set, and its fingerprint.
+///
+/// The key itself is never returned. Only root may read the state; without amdgpu, or before a
+/// key is set, `provisioned` is zero.
+///
+/// # Returns
+///
+/// * `AmdsmiResult<AmdsmiCuidSeedInfoT>` - Returns `Ok(AmdsmiCuidSeedInfoT)` containing the [`AmdsmiCuidSeedInfoT`] if successful, or an error if it fails.
+///
+/// # Example
+///
+/// ```rust
+/// # use amdsmi::*;
+/// #
+/// # fn main() {
+/// #   amdsmi_init(AmdsmiInitFlagsT::AmdsmiInitAmdGpus).expect("Failed to initialize AMD SMI");
+/// #
+///     match amdsmi_get_cuid_seed_info() {
+///         Ok(info) if info.provisioned != 0 => {
+///             println!("Node key fingerprint: {:02x?}", info.fingerprint)
+///         }
+///         Ok(_) => println!("No node key is set"),
+///         Err(e) => println!("Failed to get the node key state: {}", e),
+///     }
+/// #
+/// #   amdsmi_shut_down().expect("Failed to shut down AMD SMI");
+/// # }
+/// ```
+///
+/// # Errors
+///
+/// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_get_cuid_seed_info` call fails.
+pub fn amdsmi_get_cuid_seed_info() -> AmdsmiResult<AmdsmiCuidSeedInfoT> {
+    let mut info = MaybeUninit::<AmdsmiCuidSeedInfoT>::uninit();
+    call_unsafe!(amdsmi_wrapper::amdsmi_get_cuid_seed_info(info.as_mut_ptr()));
+    let info = unsafe { info.assume_init() };
+    Ok(info)
+}
+
 /// A macro to get all the GPU processor handles directly.
 ///
 /// This macro retrieves all the GPU processor handles by first getting the socket handles

@@ -78,6 +78,9 @@ def make_cli(stack):
     api.amdsmi_get_gpu_kfd_info = Mock(
         return_value={"kfd_id": 1, "node_id": 0, "current_partition_id": "N/A"}
     )
+    api.amdsmi_get_cuid_seed_info = Mock(
+        return_value={"provisioned": True, "fingerprint": "0102030405060708"}
+    )
     api.amdsmi_get_gpu_asic_info = Mock(return_value={})
     errors = types.ModuleType("amdsmi.amdsmi_exception")
     errors.AmdSmiLibraryException = LibraryError
@@ -263,8 +266,22 @@ class TestCliCuidIdentity(unittest.TestCase):
                 result = cli.helpers.get_gpu_cuid_info(1)
                 self.assertEqual(result["source"], source)
                 self.assertEqual(result["auxiliary"], "unknown" if auxiliary is None else auxiliary)
+                expected = "temporary" if auxiliary is True else "unknown"
+                if source in ("DRIVER", "LIBRARY") and auxiliary is False:
+                    expected = "provisioned"
+                self.assertEqual(result["effective_seed"], expected)
                 self.assertEqual(result["primary_cuid"], "N/A (not requested)")
-                self.assertNotIn("effective_seed", result)
+                cli.api.amdsmi_get_cuid_seed_info.assert_not_called()
+
+    def test_whole_device_with_kfd_partition_zero(self):
+        for fmt in ["json", "csv"]:
+            with self.case(fmt=fmt) as cli:
+                cli.api.amdsmi_get_gpu_kfd_info.return_value["current_partition_id"] = 0
+                result = run_list(cli, fmt)
+                self.assertEqual(result["cuid"], CUID)
+                self.assertEqual(result["source"], "DRIVER")
+                self.assertEqual(result["auxiliary"], False if fmt == "json" else "False")
+                self.assertEqual(result["effective_seed"], "provisioned")
 
     def test_enumeration_fields_precede_cuid_fields(self):
         for fmt in ["json", "csv"]:
@@ -299,7 +316,7 @@ class TestCliCuidIdentity(unittest.TestCase):
             output = capture_stdout(list_gpu)
             self.assertIn(f"UUID: {CUID}", output)
             self.assertIn("IDENTIFIER_KIND: cuid", output)
-            self.assertNotIn("SEED", output)
+            self.assertIn("EFFECTIVE_SEED: provisioned", output)
             self.assertNotIn("FINGERPRINT", output)
             self.assertNotIn("PRIMARY", output)
 
@@ -328,10 +345,16 @@ class TestCliCuidIdentity(unittest.TestCase):
                     result["cuid_metadata_status"],
                     "available" if kind == "cuid" else "not_supported",
                 )
-                self.assertNotIn("effective_seed", result)
+                self.assertEqual(
+                    result["effective_seed"],
+                    {"cuid": "provisioned", "legacy_uuid": "not_applicable", "unknown": "N/A"}[
+                        kind
+                    ],
+                )
                 self.assertNotIn("primary_cuid", result)
-                self.assertNotIn("ready", result)
+                self.assertNotIn("seed_fingerprint", result)
                 self.assertNotIn(PRIMARY, str(result))
+                cli.api.amdsmi_get_cuid_seed_info.assert_not_called()
 
     def test_metadata_failure_keeps_available_cuid(self):
         for fmt, code in itertools.product(["json", "csv"], [2, 10, 34]):
@@ -343,10 +366,12 @@ class TestCliCuidIdentity(unittest.TestCase):
                 if code == 2:
                     self.assertEqual(result["source"], "N/A")
                     self.assertEqual(result["auxiliary"], "N/A")
+                    self.assertEqual(result["effective_seed"], "N/A")
                     self.assertEqual(result["cuid_metadata_status"], "not_supported")
                 else:
                     self.assertEqual(result["source"], "UNKNOWN")
                     self.assertEqual(result["auxiliary"], "unknown")
+                    self.assertEqual(result["effective_seed"], "unknown")
                     self.assertEqual(result["cuid_metadata_status"], f"amdsmi_error_{code}")
                 cli.api.amdsmi_get_gpu_device_uuid.assert_not_called()
                 cli.api.amdsmi_get_gpu_enumeration_info.assert_not_called()
@@ -360,6 +385,7 @@ class TestCliCuidIdentity(unittest.TestCase):
                 {k: result[k] for k in ("derived_cuid", "component_type", "auxiliary", "source")},
                 dict.fromkeys(("derived_cuid", "component_type", "auxiliary", "source"), "N/A"),
             )
+            self.assertEqual(result["effective_seed"], "N/A")
             self.assertEqual(result["cuid_metadata_status"], "not_supported")
 
     def test_old_binding_without_snapshot_keeps_cuid(self):
@@ -381,7 +407,7 @@ class TestCliCuidIdentity(unittest.TestCase):
                     expected = str(expected)
                 self.assertEqual(result["auxiliary"], expected)
 
-    def test_static_reports_identity_without_node_state(self):
+    def test_static_reports_node_key_outside_gpu_blocks(self):
         for auxiliary in [False, True]:
             with self.case(auxiliary=auxiliary) as cli:
                 cli.api.amdsmi_get_gpu_cuid_info.return_value["auxiliary"] = auxiliary
@@ -391,15 +417,17 @@ class TestCliCuidIdentity(unittest.TestCase):
                     command.helpers = cli.helpers
                     command.logger = cli.logger(format="json", helpers=cli.helpers)
                     command.group_check_printed = True
+                    command._report_cuid_seed()
                     command.static_gpu(static_args(cuid=True))
                     command.logger.combine_arrays_to_json()
 
                 result = json.loads(capture_stdout(static_gpu))
-                self.assertEqual(list(result), ["gpu_data"])
+                self.assertIs(result["seed_provisioned"], True)
+                self.assertEqual(result["seed_fingerprint"], "0102030405060708")
                 gpu = result["gpu_data"][0]["cuid"]
-                self.assertIs(gpu["auxiliary"], auxiliary)
+                self.assertEqual(gpu["effective_seed"], "temporary" if auxiliary else "provisioned")
                 self.assertEqual(gpu["primary_cuid"], "N/A (not requested)")
-                self.assertNotIn("effective_seed", gpu)
+                self.assertNotIn("seed_fingerprint", gpu)
 
     def test_primary_requires_explicit_selection(self):
         with self.case() as cli:
@@ -410,7 +438,7 @@ class TestCliCuidIdentity(unittest.TestCase):
                 cli.helpers.get_gpu_cuid_info(1, include_primary=True)["primary_cuid"], PRIMARY
             )
 
-    def test_static_without_cuid_does_not_query_identity(self):
+    def test_static_without_cuid_does_not_query_seed_or_identity(self):
         with self.case() as cli:
 
             def static_gpu():
@@ -423,7 +451,9 @@ class TestCliCuidIdentity(unittest.TestCase):
 
             result = json.loads(capture_stdout(static_gpu))
             self.assertNotIn("cuid", result["gpu_data"][0])
+            self.assertNotIn("seed_fingerprint", result)
             cli.api.amdsmi_get_gpu_cuid_info.assert_not_called()
+            cli.api.amdsmi_get_cuid_seed_info.assert_not_called()
 
 
 class TestCliNodeCuid(unittest.TestCase):
@@ -440,7 +470,8 @@ class TestCliNodeCuid(unittest.TestCase):
     def test_every_component_is_named_by_type_and_position(self):
         with self.cli() as cli:
             cuid = run_node(cli, "json", cuid=True)["cuid"]
-        self.assertEqual(list(cuid), ["components"])
+        self.assertIs(cuid["seed_provisioned"], True)
+        self.assertEqual(cuid["seed_fingerprint"], "0102030405060708")
         self.assertEqual(list(cuid["components"]), ["PLATFORM", "GPU 0", "GPU 1"])
         platform = cuid["components"]["PLATFORM"]
         self.assertEqual(platform["derived_cuid"], OTHER_CUID)
@@ -471,13 +502,13 @@ class TestCliNodeCuid(unittest.TestCase):
         with self.cli() as cli:
             rows = run_node(cli, "csv", cuid=True)
         self.assertEqual([row["component"] for row in rows], ["PLATFORM", "GPU 0", "GPU 1"])
-        self.assertNotIn("seed_fingerprint", rows[0])
+        self.assertEqual({row["seed_fingerprint"] for row in rows}, {"0102030405060708"})
         self.assertEqual(rows[1]["derived_cuid"], CUID)
 
     def test_human_readable_lists_each_component(self):
         with self.cli() as cli:
             output = run_node(cli, "human_readable", cuid=True)
-        self.assertIn("    CUID:\n        PLATFORM:", output)
+        self.assertIn("    CUID:\n        SEED_PROVISIONED: True", output)
         self.assertIn("        GPU 1:\n            DERIVED_CUID: " + LEGACY_UUID, output)
 
     def test_a_library_failure_reports_no_components(self):
@@ -494,4 +525,5 @@ class TestCliNodeCuid(unittest.TestCase):
         with self.cli() as cli:
             node = run_node(cli, "json")
             cli.api.amdsmi_get_cuid_components.assert_not_called()
+            cli.api.amdsmi_get_cuid_seed_info.assert_not_called()
         self.assertNotIn("cuid", node)

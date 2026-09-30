@@ -64,6 +64,7 @@ class ListDevicesCommands:
             uuid = self.helpers._query_or_na(amdsmi_interface.amdsmi_get_gpu_device_uuid, args.gpu)
             if uuid and uuid != "N/A":
                 cuid_info["identifier_kind"] = "legacy_uuid"
+                cuid_info["effective_seed"] = "not_applicable"
 
         try:
             kfd_info = amdsmi_interface.amdsmi_get_gpu_kfd_info(args.gpu)
@@ -120,7 +121,13 @@ class ListDevicesCommands:
             )
 
         self.logger.store_output(args.gpu, "cuid", cuid_info["derived_cuid"])
-        for field in ("identifier_kind", "source", "auxiliary", "cuid_metadata_status"):
+        for field in (
+            "identifier_kind",
+            "source",
+            "auxiliary",
+            "effective_seed",
+            "cuid_metadata_status",
+        ):
             self.logger.store_output(args.gpu, field, cuid_info[field])
 
         if multiple_devices:

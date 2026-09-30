@@ -69,6 +69,10 @@ AMDSMI_MAX_CACHE_TYPES = 10
 AMDSMI_MAX_NUM_XGMI_PHYSICAL_LINK = 64
 AMDSMI_GPU_UUID_SIZE = 38
 AMDSMI_GPU_CUID_SIZE = AMDSMI_GPU_UUID_SIZE
+# The generated wrapper carries no #define, so header macros are mirrored here
+# by hand, as every macro above is.
+AMDSMI_CUID_SEED_SIZE = 32
+AMDSMI_CUID_SEED_FINGERPRINT_SIZE = 8
 
 
 class AmdSmiStatus(IntEnum):
@@ -2841,7 +2845,7 @@ def amdsmi_get_gpu_cuid_info(processor_handle: processor_handle_t) -> Dict[str, 
     Retrieves a GPU's Component Unified ID together with its provenance.
 
     Built from several queries, so not atomic under a concurrent rekey or
-    topology change.
+    topology change. Source is lookup provenance, not effective seed state.
 
     Parameters:
         processor_handle (amdsmi_processor_handle_t): The processor handle.
@@ -2859,10 +2863,12 @@ def amdsmi_get_gpu_cuid_info(processor_handle: processor_handle_t) -> Dict[str, 
                 RACK, OTHER), or UNKNOWN.
             source (str): which stage of the staged lookup answered: DRIVER,
                 LIBRARY or UNKNOWN.
-            auxiliary (bool): True when the identity was synthesised from
-                non-privileged information. Such a value changes when the OS
-                is reinstalled and is not unique across nodes. Auxiliary
-                (temporary) CUIDs are keyed by the machine ID.
+            auxiliary (bool): True for a temporary CUID: the driver published
+                no derived CUID and the library could not key one with the node
+                key, because the caller is not root, no key is set, or no
+                hardware serial was reachable. Such a value changes when the OS
+                is reinstalled and is not unique across nodes. Temporary CUIDs
+                are keyed by the machine ID, not the node key.
 
     Raises:
         AmdSmiParameterException: If the input parameters are invalid.
@@ -2887,14 +2893,85 @@ def amdsmi_get_gpu_cuid_info(processor_handle: processor_handle_t) -> Dict[str, 
     }
 
 
+def amdsmi_set_cuid_seed(seed: bytes) -> None:
+    """
+    Sets the node key.
+
+    Node-wide, not per device. Changing the key replaces every CUID derived
+    with the node key and leaves primary and temporary CUIDs unchanged. This is
+    an administrative identity change rather than a routine operation. The key
+    goes to an amdgpu device's cuid_seed; amdgpu holds it in memory until the
+    module is unloaded or the host reboots.
+
+    Parameters:
+        seed (bytes): exactly AMDSMI_CUID_SEED_SIZE bytes of secret material.
+            Any other size is corruption, not a shorter secret.
+
+    Returns:
+        None
+
+    Raises:
+        AmdSmiParameterException: If the seed is not exactly the right length.
+        AmdSmiLibraryException: If the library reports an error: a lack of
+            privilege (AMDSMI_STATUS_NO_PERM, nothing changed), a refused seed
+            (AMDSMI_STATUS_INVAL), a key that changed but whose derived
+            CUIDs were not refreshed (AMDSMI_STATUS_IO), a key that did not
+            change or could not be shown to have changed
+            (AMDSMI_STATUS_API_FAILED), or AMDSMI_STATUS_NOT_SUPPORTED when no
+            amdgpu device exposes cuid_seed or against a libamd_smi.so that
+            predates the call.
+    """
+    if not isinstance(seed, (bytes, bytearray)):
+        raise AmdSmiParameterException(seed, bytes)
+    if len(seed) != AMDSMI_CUID_SEED_SIZE:
+        raise AmdSmiParameterException(len(seed), int, "seed must be exactly 32 bytes")
+
+    entry = _amdsmi_entry_point("amdsmi_set_cuid_seed")
+
+    buffer = (ctypes.c_ubyte * AMDSMI_CUID_SEED_SIZE).from_buffer_copy(bytes(seed))
+    _check_res(entry(buffer))
+
+
+def amdsmi_get_cuid_seed_info() -> Dict[str, Any]:
+    """
+    Reports whether a node key is set, and its fingerprint.
+
+    The key is read from an amdgpu device's cuid_seed and is never returned.
+
+    Returns:
+        Dict[str, Any]: with keys
+
+            provisioned (bool): True when amdgpu holds a node key; False
+                without amdgpu or before an administrator set one.
+            fingerprint (str): the first 8 octets of the unkeyed SHA-256 of the
+                key, as lowercase hex, or "N/A" when no key is set.
+
+    Raises:
+        AmdSmiLibraryException: If the library reports an error, including
+            AMDSMI_STATUS_NOT_SUPPORTED against a libamd_smi.so that predates
+            the call. In particular AMDSMI_STATUS_NO_PERM for a non-root
+            caller; do not report it as provisioned=False.
+    """
+    entry = _amdsmi_entry_point("amdsmi_get_cuid_seed_info")
+
+    info = amdsmi_wrapper.amdsmi_cuid_seed_info_t()
+    _check_res(entry(ctypes.byref(info)))
+
+    provisioned = bool(info.provisioned)
+    fingerprint = bytes(info.fingerprint).hex() if provisioned else "N/A"
+    return {"provisioned": provisioned, "fingerprint": fingerprint}
+
+
 def amdsmi_get_cuid_components() -> List[Dict[str, Any]]:
     """
     Lists every component on the node that has a CUID: the platform, each CPU
     package, each AMD GPU or GPU partition, each NPU, and each NIC, ordered by
     component type, then BDF, then device path. Needs no processor handle.
 
-    Every derived CUID is temporary. For a caller other than root the primary
-    CUIDs are empty.
+    For root, CPU, NIC and platform CUIDs are derived with the node key. For any
+    other caller, or without a node key, they are temporary. Primary CUIDs are
+    empty for any caller other than root, and for a component with no serial
+    number.
 
     Returns:
         List[Dict[str, Any]]: one dictionary per component, with the keys of

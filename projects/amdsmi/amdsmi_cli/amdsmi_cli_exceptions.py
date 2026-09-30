@@ -339,7 +339,7 @@ class AmdSmiInvalidFilePathException(AmdSmiException):
 
 
 class AmdSmiInvalidParameterValueException(AmdSmiException):
-    def __init__(self, command, arg, outputformat: str, hint: str = None):
+    def __init__(self, command, arg, outputformat: str, hint: str = None, message=None):
         super().__init__()
         self.value = int(AmdSmiExitCode.INVALID_PARAMETER_VALUE)
         self.command = command
@@ -349,6 +349,8 @@ class AmdSmiInvalidParameterValueException(AmdSmiException):
         common_message = f"Value '{self.arg}' is not of valid type or format. Run 'amd-smi {self.command} -h' for more info."
         if hint:
             common_message += f" {hint}"
+        if message:
+            common_message = message
 
         self._build_output_messages(common_message)
 

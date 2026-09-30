@@ -133,6 +133,8 @@ pub const AMDSMI_MAX_NUM_PM_POLICIES: u32 = 32;
 pub const AMDSMI_MAX_NIC_PORTS: u32 = 32;
 pub const AMDSMI_MAX_NIC_RDMA_DEV: u32 = 32;
 pub const AMDSMI_MAX_NIC_FW: u32 = 16;
+pub const AMDSMI_CUID_SEED_SIZE: u32 = 32;
+pub const AMDSMI_CUID_SEED_FINGERPRINT_SIZE: u32 = 8;
 pub const AMDSMI_FABRIC_LABEL_MAX_LENGTH: u32 = 32;
 pub const AMDSMI_FABRIC_PPOD_ID_SIZE: u32 = 16;
 pub const AMDSMI_MAX_CARVEOUT_OPTIONS: u32 = 16;
@@ -3901,11 +3903,38 @@ const _: () = {
     ["Offset of field: AmdsmiCuidInfoT::reserved"]
         [::std::mem::offset_of!(AmdsmiCuidInfoT, reserved) - 96usize];
 };
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct AmdsmiCuidSeedInfoT {
+    pub provisioned: u8,
+    pub reserved_flags: [u8; 7usize],
+    pub fingerprint: [u8; 8usize],
+    pub reserved: [u64; 4usize],
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of AmdsmiCuidSeedInfoT"][::std::mem::size_of::<AmdsmiCuidSeedInfoT>() - 48usize];
+    ["Alignment of AmdsmiCuidSeedInfoT"][::std::mem::align_of::<AmdsmiCuidSeedInfoT>() - 8usize];
+    ["Offset of field: AmdsmiCuidSeedInfoT::provisioned"]
+        [::std::mem::offset_of!(AmdsmiCuidSeedInfoT, provisioned) - 0usize];
+    ["Offset of field: AmdsmiCuidSeedInfoT::reserved_flags"]
+        [::std::mem::offset_of!(AmdsmiCuidSeedInfoT, reserved_flags) - 1usize];
+    ["Offset of field: AmdsmiCuidSeedInfoT::fingerprint"]
+        [::std::mem::offset_of!(AmdsmiCuidSeedInfoT, fingerprint) - 8usize];
+    ["Offset of field: AmdsmiCuidSeedInfoT::reserved"]
+        [::std::mem::offset_of!(AmdsmiCuidSeedInfoT, reserved) - 16usize];
+};
 extern "C" {
     pub fn amdsmi_get_gpu_cuid_info(
         processor_handle: AmdsmiProcessorHandle,
         info: *mut AmdsmiCuidInfoT,
     ) -> AmdsmiStatusT;
+}
+extern "C" {
+    pub fn amdsmi_set_cuid_seed(seed: *const u8) -> AmdsmiStatusT;
+}
+extern "C" {
+    pub fn amdsmi_get_cuid_seed_info(info: *mut AmdsmiCuidSeedInfoT) -> AmdsmiStatusT;
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]

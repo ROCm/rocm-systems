@@ -1508,7 +1508,8 @@ class AMDSMIParser(argparse.ArgumentParser):
         process_isolation_help = "The process isolation status"
         cuid_help = (
             "Component Unified ID: the derived CUID, its component type, whether it is a\n"
-            "temporary (auxiliary) identifier, and which layer answered.\n"
+            "temporary (auxiliary) identifier, and which layer answered. The node key's\n"
+            "state is reported once for the node, outside the per-GPU blocks.\n"
             "Not part of the default `amd-smi static` output; ask for it.\n"
             "The primary CUID is not shown by default either: its payload embeds the raw\n"
             "serial number. Add --cuid-primary, as root, to include it."
@@ -2451,6 +2452,19 @@ class AMDSMIParser(argparse.ArgumentParser):
             set_clk_limit_help = "Sets the sclk (aka gfxclk), mclk, or fclk minimum and maximum frequencies. \n\tex: amd-smi set -L (sclk | mclk | fclk) (min | max) value\n\tFor mclk and fclk ONLY, a max value is rounded down to the nearest selectable DPM level; sclk is honored exactly."
             set_process_isolation_help = "Enable or disable the GPU process isolation on a per partition basis:\n    0 for disable and 1 for enable.\n"
 
+        set_cuid_seed_help = (
+            "Set the node key from FILE, which must hold exactly 32 bytes. Use - to\n"
+            "read it from standard input, for example\n"
+            "`head -c 32 /dev/urandom | amd-smi set --cuid-seed -`. The key is never\n"
+            "accepted as an argument value: an argument is readable in /proc by every\n"
+            "user on the machine and is written to shell history.\n"
+            "This replaces every CUID derived with the node key; primary and temporary\n"
+            "CUIDs are unchanged. It is an administrative invalidation, not a routine action.\n"
+            "amdgpu holds the key in memory until it is unloaded or the host reboots, and\n"
+            "stores it nowhere else; set it again after every boot. Fails without amdgpu.\n"
+            "Node-wide, so it cannot be combined with --gpu/-g, and it requires root."
+        )
+
         # Help text for CPU set options
         set_cpu_pwr_limit_help = (
             "Set power limit for the given socket. Input parameter is power limit value."
@@ -2500,9 +2514,9 @@ class AMDSMIParser(argparse.ArgumentParser):
         set_value_parser.formatter_class = lambda prog: AMDSMISubparserHelpFormatter(prog)
         set_value_parser.set_defaults(func=func)
 
+        # set value should only take one of these at a time so args below will be mutually exclusive
+        set_value_exclusive_group = set_value_parser.add_mutually_exclusive_group()
         if self.helpers.is_amdgpu_initialized():
-            # set value should only take one of these at a time so args below will be mutually exclusive
-            set_value_exclusive_group = set_value_parser.add_mutually_exclusive_group()
             if self.helpers.is_baremetal():
                 # Optional GPU Args
                 set_value_exclusive_group.add_argument(
@@ -2678,6 +2692,17 @@ class AMDSMIParser(argparse.ArgumentParser):
                     help=set_gtt_help,
                     metavar="GB",
                 )
+
+        # Registered without amdgpu too, so that the library, not argparse, says
+        # why the key cannot be set.
+        set_value_exclusive_group.add_argument(
+            "-u",
+            "--cuid-seed",
+            action="store",
+            required=False,
+            help=set_cuid_seed_help,
+            metavar=("FILE"),
+        )
 
         if self.helpers.is_amd_hsmp_initialized():
             if self.helpers.is_baremetal():
@@ -3268,7 +3293,8 @@ class AMDSMIParser(argparse.ArgumentParser):
         tray_help = "Displays compute tray type and accelerator count"
         node_cuid_help = (
             "Lists the CUID of every component on the node: the platform, CPU\n"
-            "packages, GPUs, NPUs and NICs. Every derived CUID is temporary."
+            "packages, GPUs and GPU partitions, NPUs and NICs, with the node key's state.\n"
+            "Without root, CPU, NIC and platform CUIDs are temporary."
         )
         node_cuid_primary_help = (
             "Include each component's primary CUID, implying --cuid. Requires root."

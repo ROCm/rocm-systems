@@ -95,6 +95,17 @@ class StaticCommands:
         if not self.logger.is_json_format():
             self.logger.print_output(multiple_device_enabled=multiple_devices_csv_override)
 
+    def _report_cuid_seed(self):
+        """Report the node key once, separate from per-device observations."""
+        seed_dict = self.helpers.get_cuid_seed_state()
+        if self.logger.is_json_format():
+            self.logger.store_node_json_output.update(seed_dict)
+            return
+
+        self.logger.output = seed_dict
+        self.logger.print_output()
+        self.logger.output = {}
+
     def static_gpu(
         self,
         args,
@@ -1728,6 +1739,9 @@ class StaticCommands:
                 if getattr(args, attr):
                     gpu_args_enabled = True
                     break
+
+        if getattr(args, "cuid", False) or getattr(args, "cuid_primary", False):
+            self._report_cuid_seed()
 
         # Handle CPU and GPU initialization cases
         if self.helpers.is_amd_hsmp_initialized() and self.helpers.is_amdgpu_initialized():
