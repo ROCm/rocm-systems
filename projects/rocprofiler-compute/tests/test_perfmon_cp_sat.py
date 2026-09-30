@@ -73,3 +73,16 @@ def test_cp_sat_metric_spread_prefers_colocated_pairs() -> None:
     assert "TCP_REQ_sum" in with_a
     with_b = next(b for b in part if "SQ_B_sum" in b)
     assert "TCP_GL1_sum" in with_b
+
+
+def test_cp_sat_accum_costs_two_slots() -> None:
+    cfg = {"SQ": 3}
+    fits = ["SQ_INST_LEVEL_SMEM_ACCUM", "SQ_WAVES"]  # 2 + 1
+    part = cp_sat_partition_counters(fits, cfg, [], time_limit_s=5.0)
+    assert part is not None
+    assert len(part) == 1
+
+    overflow = ["SQ_INST_LEVEL_SMEM_ACCUM", "SQ_WAVES", "SQ_INSTS"]  # 4 > 3
+    part2 = cp_sat_partition_counters(overflow, cfg, [], time_limit_s=5.0)
+    assert part2 is not None
+    assert len(part2) == 2

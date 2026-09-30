@@ -297,6 +297,39 @@ def test_counter_file_add_and_block_mapping(perfmon_config):
     assert cf.blocks["TCP"].avail == 3
 
 
+def test_counter_file_accum_costs_two_slots(perfmon_config):
+    cf = CounterFile("0", perfmon_config)
+    assert cf.add("SQ_INST_LEVEL_SMEM_ACCUM") is True
+    assert cf.blocks["SQ"].avail == perfmon_config["SQ"] - 2
+    # Duplicate does not double-charge.
+    assert cf.add("SQ_INST_LEVEL_SMEM_ACCUM") is True
+    assert cf.blocks["SQ"].avail == perfmon_config["SQ"] - 2
+
+
+def test_counter_file_accum_shares_base_slot(perfmon_config):
+    """BASE + BASE_ACCUM together still cost 2, order-independent."""
+    forward = CounterFile("fwd", perfmon_config)
+    assert forward.add("SQ_INST_LEVEL_SMEM") is True
+    assert forward.blocks["SQ"].avail == perfmon_config["SQ"] - 1
+    assert forward.add("SQ_INST_LEVEL_SMEM_ACCUM") is True
+    assert forward.blocks["SQ"].avail == perfmon_config["SQ"] - 2
+
+    reverse = CounterFile("rev", perfmon_config)
+    assert reverse.add("SQ_INST_LEVEL_SMEM_ACCUM") is True
+    assert reverse.blocks["SQ"].avail == perfmon_config["SQ"] - 2
+    assert reverse.add("SQ_INST_LEVEL_SMEM") is True
+    assert reverse.blocks["SQ"].avail == perfmon_config["SQ"] - 2
+
+
+def test_limited_set_add_respects_explicit_cost():
+    ls = LimitedSet(3)
+    assert ls.add("SQ_A", cost=2) is True
+    assert ls.avail == 1
+    assert ls.add("SQ_B", cost=2) is False
+    assert ls.add("SQ_B", cost=1) is True
+    assert ls.avail == 0
+
+
 def test_counter_file_reserve_delegates_to_block(perfmon_config):
     """
     `reserve(counter, n)` debits the LimitedSet for the block selected by
@@ -403,8 +436,8 @@ def test_rebuild_tcc_channel_file_map(perfmon_config):
 # =============================================================================
 
 
-def test_allocate_accum_counters_pack_like_ordinary_pmcs(perfmon_config):
-    """Named *_ACCUM counters (sdk accumulate()) use one SQ slot each—no
+def test_allocate_accum_counters_cost_two_sq_slots(perfmon_config):
+    """Named *_ACCUM counters (sdk accumulate()) cost two SQ slots each—no
     dedicated ACCUM files and no SQ_ACCUM_PREV_HIRES pairing reserve."""
     soc = _make_soc(perfmon_config)
     counters = {
@@ -422,8 +455,37 @@ def test_allocate_accum_counters_pack_like_ordinary_pmcs(perfmon_config):
     assert file_count == 1
     flat = set(flat_counters_in_perfmon_file(files[0]))
     assert flat == counters
-    # One slot per ACCUM (and TA uses TA block)—no extra reserve debit.
-    assert files[0].blocks["SQ"].avail == perfmon_config["SQ"] - 2
+    # Two slots per ACCUM (TA uses TA block)—4 SQ slots used.
+    assert files[0].blocks["SQ"].avail == perfmon_config["SQ"] - 4
+
+
+def test_allocate_seven_sq_plus_one_accum_needs_second_bucket(perfmon_config):
+    """7 plain SQ + 1 *_ACCUM is 9 slots against SQ capacity 8."""
+    soc = _make_soc(perfmon_config)
+    counters = {
+        "SQ_ACTIVE_INST_ANY",
+        "SQ_INSTS",
+        "SQ_INSTS_MFMA",
+        "SQ_INSTS_SMEM",
+        "SQ_INSTS_VALU",
+        "SQ_VALU_MFMA_BUSY_CYCLES",
+        "SQ_WAVES",
+        "SQ_INST_LEVEL_SMEM_ACCUM",
+    }
+
+    with patch.object(soc, "_same_bucket_priority_metric_ids", return_value=()):
+        files, _, _ = soc._allocate_perfmon_counter_files(counters)
+
+    assert len(files) >= 2
+    all_flat: set[str] = set()
+    for counter_file in files:
+        all_flat.update(flat_counters_in_perfmon_file(counter_file))
+    assert counters <= all_flat
+    # No single bucket may hold all eight names (7 + ACCUM cost 2).
+    assert not any(
+        counters <= set(flat_counters_in_perfmon_file(counter_file))
+        for counter_file in files
+    )
 
 
 def test_allocate_first_fit_packing(perfmon_config):

@@ -63,7 +63,7 @@ def rebuild_counter_file(
     perfmon_config: dict[str, int],
     counters: set[str],
 ) -> CounterFile | None:
-    """Rebuild a bucket from its PMC set (one slot per counter, including *_ACCUM)."""
+    """Rebuild a bucket from its PMC set (``*_ACCUM`` shares BASE when present)."""
     counter_file = CounterFile(name, perfmon_config)
     for ctr in sorted(counters):
         if not counter_file.add(ctr):

@@ -7,10 +7,11 @@ CP-SAT formulation for a restricted perfmon bucket problem.
 Requires optional dependency ``ortools``. Used when environment variable
 ``ROCPROF_COMPUTE_PERFMON_CP_SAT=1`` is set (see ``OmniSoC_Base`` allocator).
 
-**Model.** Items are PMC counter names. Each item uses one unit of capacity in
-its IP block (same block mapping as ``CounterFile``). Bins have per-block caps
-from ``perfmon_config``. Optional **same-bin groups** (e.g. priority metrics)
-force all counters in a group into a single bin.
+**Model.** Items are PMC counter names. Each item uses ``pmc_slot_cost`` units
+of capacity in its IP block (same block mapping as ``CounterFile``; named
+``*_ACCUM`` costs 2 alone, or +1 when its BASE is already in the same bin).
+Bins have per-block caps from ``perfmon_config``. Optional **same-bin groups**
+(e.g. priority metrics) force all counters in a group into a single bin.
 
 **Limitations.** TCC channel counters are not supported (conservative linear
 capacity does not match ``LimitedSet`` channel sharing). Large instances are
@@ -23,6 +24,11 @@ trades off fewer multi-bucket metrics vs raw bin count (see env in
 """
 
 from __future__ import annotations
+
+from utils.utils_counter_defs import (
+    accum_base_counter,
+    pmc_bucket_slot_cost,
+)
 
 _MAX_ITEMS = 256
 _MAX_BINS_CAP = 48
@@ -63,13 +69,13 @@ def _same_bin_group_constraints_feasible(
         inter = [c for c in grp if c in item_set]
         if len(inter) < 2:
             continue
-        per_block: dict[str, int] = {}
+        per_block: dict[str, list[str]] = {}
         for c in inter:
             b = counter_ip_block_for_perfmon(c)
-            per_block[b] = per_block.get(b, 0) + 1
-        for block_name, need in per_block.items():
+            per_block.setdefault(b, []).append(c)
+        for block_name, ctrs in per_block.items():
             cap = perfmon_config.get(block_name, 0)
-            if need > cap:
+            if pmc_bucket_slot_cost(ctrs) > cap:
                 return False
     return True
 
@@ -140,8 +146,27 @@ def cp_sat_partition_counters(
     for bin_idx in range(num_bins):
         for block_name, cap in perfmon_config.items():
             idxs = [i for i in range(n) if block_of[i] == block_name]
-            if idxs:
-                model.Add(sum(assign[(i, bin_idx)] for i in idxs) <= cap)
+            if not idxs:
+                continue
+            # |S| + extras, where extras is 1 per selected *_ACCUM whose BASE
+            # is not also selected in this bin (BASE may be absent from items).
+            extras: list[object] = []
+            for item_idx in idxs:
+                base = accum_base_counter(items_sorted[item_idx])
+                if base is None:
+                    continue
+                base_idx = item_index.get(base)
+                if base_idx is not None and block_of[base_idx] == block_name:
+                    extra = model.NewIntVar(0, 1, f"ex_{item_idx}_{bin_idx}")
+                    model.Add(
+                        extra
+                        >= assign[(item_idx, bin_idx)] - assign[(base_idx, bin_idx)]
+                    )
+                    model.Add(extra <= assign[(item_idx, bin_idx)])
+                    extras.append(extra)
+                else:
+                    extras.append(assign[(item_idx, bin_idx)])
+            model.Add(sum(assign[(i, bin_idx)] for i in idxs) + sum(extras) <= cap)
 
     for gix, grp_idxs in enumerate(group_index_lists):
         group_vars_per_bin: list[object] = []

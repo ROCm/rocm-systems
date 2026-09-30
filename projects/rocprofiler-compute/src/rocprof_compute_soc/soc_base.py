@@ -41,6 +41,7 @@ from utils.utils_common import (
 from utils.utils_counter_defs import (
     counter_to_block,
     extract_counters_and_variables,
+    pmc_slot_cost,
 )
 from vendored import yaml
 
@@ -737,9 +738,10 @@ class OmniSoC_Base:
         Returns (output_files, file_count, accu_file_count).
 
         Named ``*_ACCUM`` counters from rocprofiler-sdk
-        (``accumulate(LEVEL, HIGH_RES)`` in ``sdk_config.yaml``) pack like ordinary
-        PMCs—one slot each. Legacy ``SQ_ACCUM_PREV_HIRES`` pairing / dedicated
-        accum buckets / extra ``reserve`` slots are not used.
+        (``accumulate(BASE, HIGH_RES)`` in ``sdk_config.yaml``) cost two block
+        slots alone (BASE + HIGH_RES). If BASE is already in the same bucket,
+        only +1 is charged; adding BASE after its ``*_ACCUM`` charges 0. Legacy
+        ``SQ_ACCUM_PREV_HIRES`` pairing / dedicated accum buckets are not used.
 
         **Default:** single-pass-packable — every metric whose PMC set fits one
         ``CounterFile`` gets a full-bucket collection (counters may be duplicated
@@ -1071,15 +1073,20 @@ class LimitedSet:
         self.avail: int = maxsize
         self.elements: list[str] = []
 
-    def add(self, element: str) -> bool:
+    def add(self, element: str, cost: int = 1) -> bool:
         if element in self.elements:
             return True
         # Store all channels for a TCC channel counter in the same file
         if element.split("[")[0] in {elem.split("[")[0] for elem in self.elements}:
             self.elements.append(element)
             return True
-        if self.avail > 0:
-            self.avail -= 1
+        if cost < 0:
+            cost = 0
+        if cost == 0:
+            self.elements.append(element)
+            return True
+        if self.avail >= cost:
+            self.avail -= cost
             self.elements.append(element)
             return True
         return False
@@ -1101,7 +1108,9 @@ class CounterFile:
         }
 
     def add(self, counter: str) -> bool:
-        return self.blocks[counter_to_block(counter)].add(counter)
+        block = counter_to_block(counter)
+        cost = pmc_slot_cost(counter, present=self.blocks[block].elements)
+        return self.blocks[block].add(counter, cost=cost)
 
     def reserve(self, counter: str, n: int) -> bool:
         return self.blocks[counter_to_block(counter)].reserve(n)
