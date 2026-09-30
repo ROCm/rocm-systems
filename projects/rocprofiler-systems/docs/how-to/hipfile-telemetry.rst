@@ -1,6 +1,6 @@
 .. meta::
    :description: ROCm Systems Profiler hipFile GPU-direct storage I/O telemetry
-   :keywords: rocprof-sys, rocprofiler-systems, ROCm, how to, profiler, hipFile, GPU-direct storage, GDS, I/O, telemetry, AMD
+   :keywords: rocprof-sys, rocprofiler-systems, ROCm, how to, profiler, hipFile, Infinity Storage, AIS, I/O, telemetry, AMD
 
 ********************************************
 hipFile GPU-direct storage I/O telemetry
