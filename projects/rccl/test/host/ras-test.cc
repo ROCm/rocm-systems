@@ -36,7 +36,7 @@ int RasTestAtexit(void (*)(void));
 uint64_t RasTestClockNano();
 ncclResult_t RasTestDiagnosticsContextInit(struct rasDiagnosticsContext*, const struct ncclComm*);
 
-// Redirect the process-wide APIs and the one RCCL collaborator used by ras.cc before including that file,
+// Redirect the process-wide APIs used by ras.cc before including that file,
 // then restore their real names immediately afterward. Every header that uses
 // the symbols below must stay above this guard-less macro block.
 #define poll RasTestPoll
