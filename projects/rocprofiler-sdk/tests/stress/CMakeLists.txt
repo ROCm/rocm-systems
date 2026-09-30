@@ -12,11 +12,17 @@ if(PROJECT_IS_TOP_LEVEL OR ROCPROFILER_BUILD_CODECOV)
 endif()
 
 # The in-tree CI step is capped at 30 minutes and configure + build + the full suite takes
-# 14-17 of them, so the two budgets below share about six minutes of the remaining
-# headroom (with six minutes in total the ubuntu step took 24 minutes).
+# 14-17 of them, so the budgets below share about six minutes of the remaining headroom
+# (with six minutes in total the ubuntu step took 24 minutes).
 set(ROCPROFILER_STRESS_BUDGET_SECONDS
-    "240"
+    "180"
     CACHE STRING "Wall-clock budget for the stress.* repetition test, in seconds")
+set(ROCPROFILER_STRESS_FOCUS_BUDGET_SECONDS
+    "60"
+    CACHE STRING "Wall-clock budget for stress.repeat-focus, in seconds")
+set(ROCPROFILER_STRESS_FOCUS_REGEX
+    "^unit\\.ThreadTraceQueueHooks\\.StopContextInFlightCompletionRoutesViaHookPath$"
+    CACHE STRING "Tests stress.repeat-focus repeats on their own; empty disables it")
 set(ROCPROFILER_STRESS_PROBE_BUDGET_SECONDS
     "120"
     CACHE STRING "Wall-clock budget for the multistream save/restore probe, in seconds")
@@ -48,6 +54,34 @@ set_tests_properties(
                "stress"
                ENVIRONMENT
                "ROCPROFILER_FAILURE_SIGNAL_HANDLER=1;ROCPROF_FAILURE_SIGNAL_HANDLER=1")
+
+# Repeats a test that hung once under stress, on its own and back to back, so that a hang
+# too rare to recur in a few iterations of the full selection comes back with the stack
+# trace the harness prints for a timeout.
+if(ROCPROFILER_STRESS_FOCUS_REGEX)
+    add_test(
+        NAME stress.repeat-focus
+        COMMAND
+            ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/run_stress.py --ctest
+            ${CMAKE_CTEST_COMMAND} --test-dir ${CMAKE_BINARY_DIR} --budget-seconds
+            ${ROCPROFILER_STRESS_FOCUS_BUDGET_SECONDS} --select
+            ${ROCPROFILER_STRESS_FOCUS_REGEX} --report-only
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+
+    set_tests_properties(
+        stress.repeat-focus
+        PROPERTIES RUN_SERIAL
+                   TRUE
+                   COST
+                   -999999
+                   TIMEOUT
+                   240
+                   LABELS
+                   "stress"
+                   ENVIRONMENT
+                   "ROCPROFILER_FAILURE_SIGNAL_HANDLER=1;ROCPROF_FAILURE_SIGNAL_HANDLER=1"
+        )
+endif()
 
 # Repeats multistream under rocprofv3 with SQ_WAVES_RESTORED and SQ_WAVES_SAVED next to
 # SQ_WAVES, to test whether the rare SQ_WAVES_sum == 2 in
