@@ -631,14 +631,14 @@ HwregAccessResult read_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t &valu
     return HwregAccessResult::Unsupported;
   }
 
-  // CDNA4 ISA section 3.12 defines SIMD_ID at HW_ID[5:4]. This opt-in
-  // diagnostic selects a kernel path; it does not model wave placement. Only
-  // reads wholly inside that field are backed. Wider reads must still report
-  // Unsupported instead of silently inventing the remaining HW_ID fields.
-  const auto simd = wf.cu().diagnostic_hw_id_simd();
-  if (wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA4 && decoded.id == 4 && simd &&
-      decoded.offset >= 4 && decoded.offset + decoded.size <= 6) {
-    value = (*simd >> (decoded.offset - 4)) & decoded.mask;
+  // CDNA4 ISA section 3.12 defines SIMD_ID at HW_ID[5:4]. Assign the CU's
+  // permanent wave slots cyclically to four logical SIMDs. Slot identity is
+  // retained across reuse and checkpoint restoration; no timing model is
+  // implied. Only reads wholly within this field are backed.
+  if (wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA4 && decoded.id == 4 && decoded.offset >= 4 &&
+      decoded.offset + decoded.size <= 6) {
+    const uint32_t simd_id = wf.wf_id() % 4u;
+    value = (simd_id >> (decoded.offset - 4)) & decoded.mask;
     return HwregAccessResult::Success;
   }
 

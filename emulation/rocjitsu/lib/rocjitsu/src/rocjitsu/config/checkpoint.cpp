@@ -119,10 +119,10 @@ serialize_config(flatbuffers::FlatBufferBuilder &builder, const SoC &soc,
         // means unbounded for a new checkpoint, while field absence remains the
         // legacy signal that restore should use ComputeUnitCore's native default.
         builder.ForceDefaults(true);
-        fb_cu = fb::CreateComputeUnitConfig(
-            builder, cu_cfg.num_wf_slots, cu_cfg.sgprs_per_wf, cu_cfg.vgprs_per_wf,
-            cu_cfg.lds_size_kb, cu_cfg.functional_quantum,
-            se->compute_unit(0)->scratch_slots_per_cu(), cu_cfg.diagnostic_hw_id_simd);
+        fb_cu = fb::CreateComputeUnitConfig(builder, cu_cfg.num_wf_slots, cu_cfg.sgprs_per_wf,
+                                            cu_cfg.vgprs_per_wf, cu_cfg.lds_size_kb,
+                                            cu_cfg.functional_quantum,
+                                            se->compute_unit(0)->scratch_slots_per_cu());
         builder.ForceDefaults(false);
       }
     }
@@ -189,7 +189,6 @@ VirtualMachine::Config config_from_checkpoint(const fb::SimulationConfig *fb_con
           if (flatbuffers::IsFieldPresent(cu, fb::ComputeUnitConfig::VT_FUNCTIONAL_QUANTUM))
             cu_cfg.functional_quantum = cu->functional_quantum();
           vm_config.soc.scratch_slots_per_cu = cu->scratch_slots_per_cu();
-          cu_cfg.diagnostic_hw_id_simd = cu->diagnostic_hw_id_simd();
         }
       }
     }
@@ -282,8 +281,7 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
         auto cus = fb::CreateComputeUnitState(
             builder, name, wfs_vec, 0, cu->config().functional_quantum, true,
             cu->config().memory_wait_diagnostics != amdgpu::MemoryWaitDiagnostics::Off,
-            cu->config().xcnt_diagnostics != amdgpu::MemoryWaitDiagnostics::Off,
-            cu->config().diagnostic_hw_id_simd);
+            cu->config().xcnt_diagnostics != amdgpu::MemoryWaitDiagnostics::Off);
         cu_offsets.push_back(cus);
       }
     }
@@ -446,7 +444,6 @@ LoadedConfig restore_checkpoint(const std::string &path) {
               : cu->config().memory_wait_diagnostics,
           xcnt_checks ? (*xcnt_checks ? MemoryWaitDiagnostics::Warn : MemoryWaitDiagnostics::Off)
                       : cu->config().xcnt_diagnostics);
-      cu->set_diagnostic_hw_id_simd(cu_state->diagnostic_hw_id_simd());
       if (auto *wf_states = cu_state->wavefronts()) {
         for (auto *wf_state : *wf_states) {
           uint32_t num_sgprs =

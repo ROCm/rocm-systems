@@ -61,8 +61,6 @@ table ComputeUnitState {
   // retain the native defaults; false explicitly disables the corresponding check.
   memory_wait_checks: bool = null;
   xcnt_checks: bool = null;
-  // Omitted means no override, including in checkpoints predating this field.
-  diagnostic_hw_id_simd: uint32 = null;
 }
 
 /// Serialized state of a command processor.
