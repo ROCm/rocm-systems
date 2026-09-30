@@ -291,7 +291,7 @@ class TestBuildDfs:
         assert list(ac.dfs[201]["Metric"]) == ["M1"]
         assert list(ac.dfs[1101]["Metric"]) == ["X1"]
 
-    def test_metric_counters_only_for_built_metrics(self):
+    def test_expressions_only_for_built_metrics(self):
         ac = _make_arch_config([
             (
                 200,
@@ -309,9 +309,6 @@ class TestBuildDfs:
             ac, filter_metrics=["2.1.0"], sys_info=_sys_info(), profiling_config={}
         )
 
-        assert "Kept" in ac.metric_counters
-        assert "Dropped" not in ac.metric_counters
-        assert ac.metric_counters["Kept"] == ["COUNTER_KEPT"]
         assert ac.dfs_expressions[201] == ["AVG(COUNTER_KEPT)"]
 
     @pytest.mark.parametrize(

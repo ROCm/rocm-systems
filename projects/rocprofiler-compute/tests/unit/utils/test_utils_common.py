@@ -401,7 +401,7 @@ def test_capture_subprocess_output_profile_mode(monkeypatch):
     monkeypatch.setattr("utils.logger.console_debug", lambda *a, **k: None)
 
     success, output = utils_common.capture_subprocess_output(
-        ["echo", "test"], profileMode=True, enable_logging=False
+        ["echo", "test"], profileMode=True
     )
 
     assert success is True
@@ -548,35 +548,6 @@ def test_parse_pmc_perf_file_not_found():
     """
     with pytest.raises(FileNotFoundError):
         utils_common.parse_pmc_perf("nonexistent_file.yaml")
-
-
-# =============================================================================
-# SUBPROCESS OUTPUT TESTS
-# =============================================================================
-
-
-def test_capture_subprocess_output_with_logging_disabled(monkeypatch):
-    """
-    Test capture_subprocess_output with enable_logging=False doesn't call console_log.
-    """
-
-    monkeypatch.setattr(
-        "subprocess.Popen",
-        lambda *a, **k: make_dummy_process(lines=["test output\n"]),
-    )
-
-    log_calls = []
-    monkeypatch.setattr(
-        "utils.utils_common.console_log", lambda *a, **k: log_calls.append((a, k))
-    )
-    monkeypatch.setattr("utils.logger.console_debug", lambda *a, **k: None)
-
-    success, output = utils_common.capture_subprocess_output(
-        ["echo", "test"], enable_logging=False
-    )
-
-    assert success is True
-    assert len(log_calls) == 0
 
 
 # =============================================================================

@@ -257,7 +257,6 @@ class OmniAnalyze_Base:
                         w.sys_info = parser.correct_sys_info(
                             mspec, args.specs_correction
                         )
-                w.avail_ips = w.sys_info["ip_blocks"].item().split("|")
                 w.dfs = copy.deepcopy(self._arch_configs[arch].dfs)
                 w.dfs_type = self._arch_configs[arch].dfs_type
                 self._runs[path_info[0]] = w

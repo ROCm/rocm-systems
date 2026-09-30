@@ -20,7 +20,6 @@ from utils import schema
 from utils.file_io import validate_kernel_filter_ids
 from utils.logger import console_error, console_warning, demarcate
 from utils.metrics.evaluation_pipeline import eval_metric
-from utils.metrics.expression import gen_counter_list
 from utils.pattern_matching import fnmatch_glob_matches
 from utils.specs import MachineSpecs
 from utils.utils_common import (
@@ -74,7 +73,6 @@ def build_dfs(
     dfs: dict[int, pd.DataFrame] = {}
     dfs_type: dict[int, str] = {}
     dfs_expressions: dict[int, list[str]] = {}
-    metric_counters: dict[str, list[str]] = {}
 
     if filter_metrics:
         numeric_tokens = [t for t in filter_metrics if METRIC_ID_RE.match(str(t))]
@@ -113,7 +111,6 @@ def build_dfs(
                         panel_id=panel_id,
                         user_metric_filter=user_metric_filter,
                         profile_panel_filter=profile_panel_filter,
-                        metric_counters=metric_counters,
                     )
                     # Filter excluded every metric in this panel; skip the empty table.
                     if data_config["metric"] and df.empty:
@@ -159,7 +156,6 @@ def build_dfs(
     arch_configs.dfs = dfs
     arch_configs.dfs_type = dfs_type
     arch_configs.dfs_expressions = dfs_expressions
-    arch_configs.metric_counters = metric_counters
 
 
 def _metric_passes_filter(
@@ -196,11 +192,9 @@ def _build_metric_table_df(
     panel_id: int,
     user_metric_filter: Optional[list[str]],
     profile_panel_filter: set[int],
-    metric_counters: dict[str, list[str]],
 ) -> tuple[pd.DataFrame, list[str]]:
     """Build the metric_table dataframe and its list of formula strings for
-    data_config, dropping rows the active filter excludes. Updates
-    metric_counters in place.
+    data_config, dropping rows the active filter excludes.
     """
     table_id = data_config["id"]
     table_data_source_idx = f"{table_id // 100}.{table_id % 100}"
@@ -260,20 +254,6 @@ def _build_metric_table_df(
             values.append(panel["metrics_description"].get(key, ""))
 
         rows.append(values)
-
-        filtered_counters: dict[str, None] = {}
-        formula_visited = False
-        for formula in eqn_content:
-            if formula is None or formula == "None":
-                continue
-            visited, counters = gen_counter_list(formula)
-            if visited:
-                formula_visited = True
-            for counter in counters:
-                filtered_counters[counter] = None
-
-        if filtered_counters or formula_visited:
-            metric_counters[key] = list(filtered_counters)
 
     df = pd.DataFrame(rows, columns=headers)
     df.set_index("Metric_ID", inplace=True)
