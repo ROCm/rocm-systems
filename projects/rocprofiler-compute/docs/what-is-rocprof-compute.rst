@@ -120,8 +120,8 @@ ROCm Compute Profiler's analysis report is organized into the following views:
      - Which specific hardware block — the compute unit, a cache level, the command processor, or the workgroup manager — is the bottleneck for a kernel, based on utilization and stall metrics for that block.
      - :ref:`profiling-hw-component-filtering`, :doc:`conceptual/performance-model`
    * - Memory chart
-     - Read, write, and atomic transaction counts, hit rates, and latencies at each level of the memory hierarchy: LDS, the L1 caches, the L2 cache, and HBM.
-     - :doc:`conceptual/cdna/vector-l1-cache`, :doc:`conceptual/cdna/l2-cache`
+     - Read, write, and atomic transaction counts, hit rates, and latencies at each level of the memory hierarchy: LDS, the L1 caches, the L2 cache, and HBM. CLI analysis also saves an offline HTML page with aggregate and per-kernel views.
+     - :ref:`cli-memory-chart-html`, :doc:`conceptual/cdna/vector-l1-cache`, :doc:`conceptual/cdna/l2-cache`
    * - Roofline
      - Classifies whether a kernel is compute-bound or memory-bound, and plots its exact position against attainable peak compute throughput and memory bandwidth; combine with kernel filtering for a per-kernel breakdown.
      - :ref:`standalone-roofline`, :ref:`per-kernel-roofline`

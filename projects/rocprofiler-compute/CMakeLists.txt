@@ -682,6 +682,14 @@ add_test(
         ${COV_OPTION} tests/unit/memory_chart/test_html_report.py ${WORKING_DIR_OPTION}
 )
 
+add_test(
+    NAME test_mem_chart_html_analyze
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_mem_chart_html_analyze.xml
+        ${COV_OPTION} tests/integration/test_mem_chart_html_analyze.py
+        ${WORKING_DIR_OPTION}
+)
+
 # -----------------------------------
 # Data imputation tests
 # -----------------------------------
@@ -1162,6 +1170,7 @@ if(${ENABLE_COVERAGE})
         test_html_diagram
         test_html_views
         test_mem_chart_html_report
+        test_mem_chart_html_analyze
         test_instant_button
         test_menu_bar
         test_tui_utils
