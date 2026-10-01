@@ -1336,6 +1336,50 @@ TEST_F(UBR_MultiSegment, Generic)
 }
 
 /**
+ * @brief NET segment count for an odd-sized hipMalloc registration.
+ *
+ * The registration cache rounds endAddr up to a page, but HIP reports a
+ * hipMalloc extent at its requested size. A walk to endAddr queries past the
+ * allocation and fails, and coll_reg.cc drops that error, so the buffer
+ * silently loses NET registration. The count must succeed with one segment.
+ */
+TEST_F(UBR_MultiSegment, NetSegmentCountOddSizedHipMalloc)
+{
+    if (!validateTestPrerequisites(
+            /*min_processes=*/1, /*max_processes=*/kNoProcessLimit,
+            /*require_power_of_two=*/kNoPowerOfTwoRequired,
+            /*min_nodes=*/1, /*max_nodes=*/kNoNodeLimit)) {
+        GTEST_SKIP() << "Requires at least one rank";
+    }
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    ASSERT_TRUE(isUBREnabled()) << "NCCL_LOCAL_REGISTER must be set to 1";
+
+    auto* comm = reinterpret_cast<struct ncclComm*>(getActiveCommunicator());
+    for (const size_t size : {size_t{1000001}, size_t{2 * 1024 * 1024 + 1}}) {
+        SCOPED_TRACE("size=" + std::to_string(size));
+        void* buf = nullptr;
+        ASSERT_MPI_EQ(hipSuccess, hipMalloc(&buf, size));
+        auto bufCleanup = makeScopeGuard([&]() { HIP_EXPECT(hipFree(buf)); });
+
+        void* regHandle = nullptr;
+        ASSERT_MPI_EQ(ncclSuccess, ncclCommRegister(getActiveCommunicator(), buf, size, &regHandle));
+        auto regCleanup = makeScopeGuard([&]() {
+            if (regHandle) HIP_EXPECT(ncclCommDeregister(getActiveCommunicator(), regHandle));
+        });
+
+        struct ncclReg* reg = nullptr;
+        ncclRegFind(comm, buf, size, &reg);
+        ASSERT_MPI_NE(reg, nullptr);
+        // The rounded end must lie past the allocation, or this geometry cannot reach the bug.
+        ASSERT_MPI_TRUE(reg->endAddr > reinterpret_cast<uintptr_t>(buf) + size);
+
+        int numSegments = 0;
+        ASSERT_MPI_EQ(ncclSuccess, rcclNetRegSegmentCount(comm, reg, &numSegments));
+        ASSERT_MPI_EQ(1, numSegments);
+    }
+}
+
+/**
  * @brief Register once, AllReduce twice - exercises the registration reuse fast path.
  *
  * After the first collective on a registered multi-segment buffer, a subsequent
