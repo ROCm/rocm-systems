@@ -110,7 +110,7 @@ inline std::string
 get_args_string(const function_args_t& args)
 {
     std::string args_str;
-    std::for_each(args.begin(), args.end(), [&args_str](const argument_info& arg) {
+    std::ranges::for_each(args, [&args_str](const argument_info& arg) {
         // arg_number is a uint32 and never contains an escapable character
         args_str.append(std::to_string(arg.arg_number)).append(ARG_DELIMITER);
         append_escaped_field(args_str, arg.arg_type);
@@ -128,7 +128,7 @@ process_arguments_string(std::string_view arg_str)
 {
     function_args_t args;
 
-    auto split = [](std::string_view str, std::string_view delimiter) {
+    auto const split = [](std::string_view str, std::string_view delimiter) {
         std::vector<std::string_view> tokens;
         size_t                        start = 0;
         size_t                        end   = str.find(delimiter);

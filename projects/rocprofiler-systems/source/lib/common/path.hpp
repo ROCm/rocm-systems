@@ -176,7 +176,7 @@ find_library(const std::string& _path, int _verbose, const std::string& _search_
         return _path;
     }
 
-    auto _paths = delimit(_search_paths, ":");
+    auto const _paths = delimit(_search_paths, ":");
 
     constexpr int _verbose_lvl = 2;
     for(const auto& itr : _paths)
@@ -267,7 +267,7 @@ filename(std::string_view path)
 read_symlink(const std::string& path)
 {
     std::error_code error;
-    auto            target = std::filesystem::read_symlink(path, error);
+    auto const      target = std::filesystem::read_symlink(path, error);
     return error ? path : target.string();
 }
 
@@ -319,7 +319,7 @@ is_regular_file(std::string_view path)
 realpath(const std::string& path)
 {
     std::error_code error;
-    auto            canon = std::filesystem::canonical(path, error);
+    auto const      canon = std::filesystem::canonical(path, error);
     return error ? path : canon.string();
 }
 
@@ -396,7 +396,7 @@ get_link_map(const char* _name, std::vector<int>&& _open_modes, bool _include_se
 {
     void* _handle = nullptr;
     bool  _noload = false;
-    for(auto _mode : _open_modes)
+    for(auto const _mode : _open_modes)
     {
         _handle = dlopen(_name, _mode);
         _noload = (_mode & RTLD_NOLOAD) == RTLD_NOLOAD;
@@ -441,7 +441,7 @@ get_origin(const std::string& _filename, std::vector<int>&& _open_modes)
 {
     void* _handle = nullptr;
     bool  _noload = false;
-    for(auto _mode : _open_modes)
+    for(auto const _mode : _open_modes)
     {
         _handle = dlopen(_filename.c_str(), _mode);
         _noload = (_mode & RTLD_NOLOAD) == RTLD_NOLOAD;
@@ -451,7 +451,7 @@ get_origin(const std::string& _filename, std::vector<int>&& _open_modes)
         }
     }
 
-    auto _chain = std::vector<std::string>{};
+    auto const _chain = std::vector<std::string>{};
     if(_handle)
     {
         char _buffer[PATH_MAX];
@@ -499,7 +499,7 @@ get_internal_libpath(const std::string& _lib)
 std::string
 get_internal_script_path()
 {
-    auto _root = get_rocprofsys_root();
+    auto const _root = get_rocprofsys_root();
     return _root + "/libexec/rocprofiler-systems";
 }
 
