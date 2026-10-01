@@ -872,6 +872,21 @@ __device__ __forceinline__ void direct_ctx_put_nbi_wave(
       ctx, put_nbi_wave(dest, source, nelems, pe, opts));
 }
 
+template <typename... Options>
+__device__ __forceinline__ void direct_ctx_putmem(
+    rocshmem_ctx_t ctx, void *dest, const void *source, size_t nelems,
+    int pe, CommOpt<Options...> opts) {
+  if (nelems == 0) { return; }
+  get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_PUT);
+  ROCSHMEM_DIRECT_BACKEND_DISPATCH(ctx, putmem(dest, source, nelems, pe, opts));
+}
+
+template <typename T, typename... Options>
+__device__ __forceinline__ void direct_ctx_amo_set(
+    rocshmem_ctx_t ctx, void *dst, T value, int pe, CommOpt<Options...> opts) {
+  ROCSHMEM_DIRECT_BACKEND_DISPATCH(ctx, amo_set(dst, value, pe, opts));
+}
+
 
 #undef ROCSHMEM_DIRECT_CTX_T_MEM_HELPER
 
@@ -1360,6 +1375,31 @@ __device__ void rocshmem_schar_put_nbi_wave(
   rocshmem_put_nbi_wave<signed char>(dest, source, nelems, pe, opts);
 }
 
+template <typename... Options>
+__device__ void rocshmem_ctx_putmem(rocshmem_ctx_t ctx, void *dest,
+                                    const void *source, size_t nelems, int pe,
+                                    CommOpt<Options...> opts) {
+  direct_ctx_putmem(ctx, dest, source, nelems, pe, opts);
+}
+
+template <typename... Options>
+__device__ void rocshmem_putmem(void *dest, const void *source, size_t nelems,
+                                int pe, CommOpt<Options...> opts) {
+  rocshmem_ctx_putmem(ROCSHMEM_CTX_DEFAULT, dest, source, nelems, pe, opts);
+}
+
+template <typename T, typename... Options>
+__device__ void rocshmem_atomic_set(rocshmem_ctx_t ctx, T *dest, T value,
+                                    int pe, CommOpt<Options...> opts) {
+  direct_ctx_amo_set<T>(ctx, dest, value, pe, opts);
+}
+
+template <typename T, typename... Options>
+__device__ void rocshmem_atomic_set(T *dest, T value, int pe,
+                                    CommOpt<Options...> opts) {
+  rocshmem_atomic_set<T>(ROCSHMEM_CTX_DEFAULT, dest, value, pe, opts);
+}
+
 /* Explicit instantiation of the targeted-ordering (RelaxedOrdering) variants so
  * they are emitted into the device bitcode for external (DeepEP) device linking,
  * exactly as the standard typed RMA functions are instantiated above. */
@@ -1370,6 +1410,14 @@ template __device__ void rocshmem_schar_put_nbi_wave<_ro_t>(
     signed char *, const signed char *, size_t, int, CommOpt<_ro_t>);
 template __device__ void rocshmem_ctx_schar_put_nbi_wave<_ro_t>(
     rocshmem_ctx_t, signed char *, const signed char *, size_t, int, CommOpt<_ro_t>);
+template __device__ void rocshmem_putmem<_ro_t>(
+    void *, const void *, size_t, int, CommOpt<_ro_t>);
+template __device__ void rocshmem_ctx_putmem<_ro_t>(
+    rocshmem_ctx_t, void *, const void *, size_t, int, CommOpt<_ro_t>);
+template __device__ void rocshmem_atomic_set<unsigned long, _ro_t>(
+    unsigned long *, unsigned long, int, CommOpt<_ro_t>);
+template __device__ void rocshmem_atomic_set<unsigned long, _ro_t>(
+    rocshmem_ctx_t, unsigned long *, unsigned long, int, CommOpt<_ro_t>);
 
 
 __device__ int rocshmem_wg_ctx_create(long options, rocshmem_ctx_t *ctx) {

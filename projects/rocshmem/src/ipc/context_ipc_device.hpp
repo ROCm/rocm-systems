@@ -188,6 +188,11 @@ class IPCContext : public Context {
   template <typename T>
   __device__ void amo_set(void *dst, T value, int pe);
 
+  // Targeted-ordering amo_set: system-scope but relaxed-order store, no
+  // surrounding L2 flush/invalidate (see context_ipc_tmpl_device.hpp).
+  template <typename T>
+  __device__ void amo_set_relaxed(void *dst, T value, int pe);
+
   template <typename T>
   __device__ T amo_swap(void *dst, T value, int pe);
 
@@ -226,7 +231,10 @@ class IPCContext : public Context {
   template <typename T, typename... Options>
   __device__ void amo_or(void *dst, T value, int pe, CommOpt<Options...>) { amo_or(dst, value, pe); }
   template <typename T, typename... Options>
-  __device__ void amo_set(void *dst, T value, int pe, CommOpt<Options...>) { amo_set(dst, value, pe); }
+  __device__ void amo_set(void *dst, T value, int pe, CommOpt<Options...>) {
+    if constexpr (CommOpt<Options...>::RelaxedOrdering) { amo_set_relaxed<T>(dst, value, pe); }
+    else { amo_set(dst, value, pe); }
+  }
   template <typename T, typename... Options>
   __device__ void amo_xor(void *dst, T value, int pe, CommOpt<Options...>) { amo_xor(dst, value, pe); }
   template <typename T, typename... Options>

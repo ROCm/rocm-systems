@@ -17,6 +17,7 @@ declare -A TEST_NUMBERS=(
   ["get"]="0"
   ["getnbi"]="1"
   ["put"]="2"
+  ["producerconsumer"]="171"
   ["putnbi"]="3"
   ["amo_fadd"]="4"
   ["amo_finc"]="5"
@@ -1287,7 +1288,21 @@ if [ -x "$ROCSHMEM_INFO" ]; then
   "$ROCSHMEM_INFO"
 fi
 
+TestHeatMapRelaxed() {
+  NOTIMEOUT=1
+  NOVERIF=1
+  # Producer-consumer signaling (put->fence->atomic_set->wait_until->load).
+  # ROCSHMEM_PC_RELAXED (0/1) selects ordered vs relaxed; one test sweeps sizes.
+  ##############################################################################
+  #       | Name               | Ranks | Workgroups | Threads | Max Message Size
+  ##############################################################################
+  ExecTest  "producerconsumer"  2       1            1         65536
+}
+
 case $TEST in
+  "heatmaprelaxed")
+    TestHeatMapRelaxed
+    ;;
   "heatmaprma")
     TestHeatMapRMA
     ;;
@@ -1297,6 +1312,7 @@ case $TEST in
   "heatmap")
     TestHeatMapRMA
     TestHeatMapColl
+    TestHeatMapRelaxed
     ;;
   "all"|"gda"|"gda-mlx5"|"gda-bnxt"|"gda-ionic"|"ro"|"all-ro")
     TEST=${TEST#all-} #convert all-ro used in CI scripts into simple ro prefix

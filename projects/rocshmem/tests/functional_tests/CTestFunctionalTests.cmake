@@ -18,6 +18,7 @@
 set(TEST_get 0)
 set(TEST_getnbi 1)
 set(TEST_put 2)
+set(TEST_producerconsumer 171)
 set(TEST_putnbi 3)
 set(TEST_amo_fadd 4)
 set(TEST_amo_finc 5)
@@ -1286,6 +1287,13 @@ function(add_heatmap_tests)
         add_rocshmem_functional_test(NAME waveput RANKS 2 WORKGROUPS 16 THREADS 1024 VOLUME_SIZE 1073741824 TIMEOUT 0 NO_VERIFY)
         add_rocshmem_functional_test(NAME wgput RANKS 2 WORKGROUPS 1 THREADS 1024 VOLUME_SIZE 1073741824 TIMEOUT 0 NO_VERIFY)
         add_rocshmem_functional_test(NAME wgput RANKS 2 WORKGROUPS 16 THREADS 1024 VOLUME_SIZE 1073741824 TIMEOUT 0 NO_VERIFY)
+    end_test_group()
+
+    # Producer-consumer targeted-ordering pattern. Mode is chosen at runtime
+    # by ROCSHMEM_PC_RELAXED (0=ordered baseline, 1=relaxed/targeted); the
+    # perf_compare variant sets it. One test sweeps message sizes internally.
+    begin_test_group(CATEGORY "HEATMAP;RELAXED" TIER full BACKENDS "all" GPUS "all")
+        add_rocshmem_functional_test(NAME producerconsumer RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 65536 TIMEOUT 0 NO_VERIFY)
     end_test_group()
 
     # Heatmap collective tests
