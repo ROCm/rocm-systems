@@ -81,6 +81,27 @@ TEST(SysfsTopologyTest, DefaultGpuInfoHasCoherentSdmaCounts) {
   EXPECT_EQ(props["num_sdma_queues_per_engine"], 0u);
 }
 
+TEST(SysfsTopologyTest, ContextSaveSizesMatchKfdPerXccRequirements) {
+  for (uint32_t xcc_count : {1u, 8u}) {
+    for (uint32_t gfx : {120001u, 120500u}) {
+      SCOPED_TRACE(::testing::Message() << "gfx=" << gfx << " XCCs=" << xcc_count);
+      auto gpu = make_gpu_info(gfx);
+      gpu.num_xcc = xcc_count;
+      gpu.simd_per_cu = gfx == 120001 ? 2 : 4;
+      gpu.simd_count = 128 * xcc_count;
+      gpu.lds_size_kb = gfx == 120001 ? 64 : 320;
+      Sysfs sysfs;
+      const auto directory = sysfs.generate(gpu);
+      ASSERT_FALSE(directory.empty());
+      const auto props = read_properties(directory + "/nodes/1/properties");
+      ASSERT_TRUE(props.count("ctl_stack_size"));
+      ASSERT_TRUE(props.count("cwsr_size"));
+      EXPECT_EQ(props.at("ctl_stack_size"), 0x7000u);
+      EXPECT_EQ(props.at("cwsr_size"), gfx == 120001 ? 0x1d47000u : 0x1c07000u);
+    }
+  }
+}
+
 // Golden per-GFXIP expectations. Each row mirrors what
 // kfd_topology_set_capabilities() in drivers/gpu/drm/amd/amdkfd/kfd_topology.c
 // programs for the corresponding GC hardware IP version. The watch-mask lo/hi

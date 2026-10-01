@@ -12,6 +12,7 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "linux/uapi/kfd_sysfs.h"
 RJ_DIAGNOSTIC_POP
 
+#include <algorithm>
 #include <cerrno>
 #include <charconv>
 #include <csignal>
@@ -296,6 +297,33 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
   const uint32_t num_xcc = gpu.effective_num_xcc();
   const uint32_t node_array_count = gpu.array_count_per_xcc() * num_xcc;
 
+  // Linux kfd_queue_ctx_save_restore_size() sizes each XCC's queue backing:
+  // https://github.com/torvalds/linux/blob/d24e8ac715de2e16a53c144005b1863660a5fbea/drivers/gpu/drm/amd/amdkfd/kfd_queue.c
+  // These allocation requirements are independent of debugger codec support.
+  const uint32_t gfx = gpu.gfx_target_version;
+  uint32_t ctl_stack_size = 0;
+  uint32_t cwsr_size = 0;
+  if (gfx >= 80001 && gpu.simd_per_cu) {
+    const uint32_t cu_count = gpu.simd_count / gpu.simd_per_cu / num_xcc;
+    const bool gfx125 = gfx == 120500 || gfx == 120501;
+    const uint32_t waves = gfx < 100100 ? std::min(cu_count * 40, gpu.num_shader_engines * 512)
+                                        : cu_count * (gfx125 ? 64 : 32);
+    const auto page_align = [](uint32_t bytes) { return (bytes + 4095u) & ~4095u; };
+    ctl_stack_size = page_align(40 + waves * (gfx >= 100100 ? 12 : 8) + 8);
+    if (gfx / 10000 == 10)
+      ctl_stack_size = std::min(ctl_stack_size, 0x7000u);
+    uint32_t vgpr_bytes = 0x40000;
+    if (gfx == 90402 || gfx == 90010 || gfx == 90008 || gfx == 90500 || gfx125)
+      vgpr_bytes = 0x80000;
+    else if (gfx == 110000 || gfx == 110001 || gfx == 110501 || gfx == 120000 || gfx == 120001)
+      vgpr_bytes = 0x60000;
+    const uint32_t sgpr_bytes = gfx125 ? 0x8000 : 0x4000;
+    const uint32_t hwreg_bytes = gfx125 ? 0x8000 : 0x1000;
+    const uint32_t lds_bytes = gfx == 90500 || gfx125 ? gpu.lds_size_kb * 1024 : 0x10000;
+    cwsr_size =
+        ctl_stack_size + page_align(cu_count * (vgpr_bytes + sgpr_bytes + hwreg_bytes + lds_bytes));
+  }
+
   std::ostringstream props;
   props << "cpu_cores_count 0\n"
         << "simd_count " << gpu.simd_count << "\n"
@@ -326,6 +354,8 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
         << "num_sdma_xgmi_engines " << gpu.num_sdma_xgmi_engines << "\n"
         << "num_sdma_queues_per_engine " << gpu.num_sdma_queues_per_engine << "\n"
         << "num_cp_queues " << gpu.num_cp_queues << "\n"
+        << "cwsr_size " << cwsr_size << "\n"
+        << "ctl_stack_size " << ctl_stack_size << "\n"
         << "max_engine_clk_fcompute " << gpu.max_engine_clk_fcompute << "\n"
         << "max_engine_clk_ccompute 0\n"
         << "local_mem_size " << gpu.local_mem_size << "\n"
