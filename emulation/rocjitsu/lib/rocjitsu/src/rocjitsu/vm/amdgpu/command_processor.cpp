@@ -3529,14 +3529,28 @@ void CommandProcessor::fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs
           throw std::runtime_error("PM4 COPY_DATA write failed");
         break;
       }
-      case Pm4Opcode::WaitRegMem: {
-        require(6);
-        if (((words[0] >> 4) & 3) != 1)
-          throw std::runtime_error("unsupported WAIT_REG_MEM register space");
+      case Pm4Opcode::WaitRegMem:
+      case Pm4Opcode::WaitRegMem64: {
+        // PAL's PM4_MEC_WAIT_REG_MEM64 uses the same comparison functions,
+        // with an extra high dword for both the reference and the mask.
+        // https://github.com/GPUOpen-Drivers/pal/blob/c5e800072a32f68b6ccc4422936d96167c6e0728/src/core/hw/gfxip/gfx12/chip/gfx12_merged_f32_mec_pm4_packets.h
+        const bool wide = opcode == uint32_t(Pm4Opcode::WaitRegMem64);
+        const size_t expected_words = wide ? 8 : 6;
+        if (words.size() != expected_words) {
+          util::Logger::warn("PM4 WAIT_REG_MEM", wide ? "64" : "", " expects ", expected_words,
+                             " payload words, got ", words.size());
+          fail_pm4_queue(queue, qs);
+          return;
+        }
+        if (((words[0] >> 4) & 3) != 1) {
+          util::Logger::warn("unsupported WAIT_REG_MEM register space");
+          fail_pm4_queue(queue, qs);
+          return;
+        }
         flush_gpu_caches();
-        uint32_t value = 0;
-        const auto loaded =
-            access->read(address(1), {reinterpret_cast<std::byte *>(&value), sizeof(value)});
+        uint64_t value = 0;
+        const auto loaded = access->read(
+            address(1), {reinterpret_cast<std::byte *>(&value), wide ? size_t{8} : size_t{4}});
         if (loaded == VmAccessOutcome::Unavailable) {
           ib.address -= count * 4;
           ib.dwords += count;
@@ -3544,10 +3558,14 @@ void CommandProcessor::fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs
           arm_stall_recheck(now);
           return;
         }
-        if (loaded != VmAccessOutcome::Complete)
-          throw std::runtime_error("PM4 WAIT_REG_MEM read failed");
-        value &= words[4];
-        uint32_t reference = words[3] & words[4];
+        if (loaded != VmAccessOutcome::Complete) {
+          util::Logger::warn("PM4 WAIT_REG_MEM read failed");
+          fail_pm4_queue(queue, qs);
+          return;
+        }
+        const uint64_t mask = wide ? address(5) : words[4];
+        value &= mask;
+        const uint64_t reference = (wide ? address(3) : words[3]) & mask;
         bool ready;
         switch (words[0] & 7) {
         case 0:
@@ -3572,7 +3590,9 @@ void CommandProcessor::fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs
           ready = value > reference;
           break;
         default:
-          throw std::runtime_error("invalid WAIT_REG_MEM comparison");
+          util::Logger::warn("invalid WAIT_REG_MEM comparison");
+          fail_pm4_queue(queue, qs);
+          return;
         }
         if (!ready) {
           ib.address -= count * 4;

@@ -51,6 +51,7 @@ enum class Pm4Opcode : uint32_t {
   AtomicMem = 0x1e,
   WriteData = 0x37,
   WaitRegMem = 0x3c,
+  WaitRegMem64 = 0x93,
   IndirectBuffer = 0x3f,
   CopyData = 0x40,
   EventWrite = 0x46,

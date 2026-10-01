@@ -923,6 +923,55 @@ TEST_F(Pm4ComputeQueueTest, ComputeQueueRetainsItsSnapshotWhilePacketFetchIsBloc
   EXPECT_TRUE(cp.unregister_queue_registration(id));
 }
 
+TEST_F(Pm4ComputeQueueTest, MalformedWaitMem64FaultsWithoutRetiringThePacket) {
+  const std::array<std::vector<uint32_t>, 4> packets{{
+      {0xc0009300, 0x13},
+      {0xc0079300, 0x03, 0x300, 0, 0, 0, 0xffffffff, 0xffffffff, 4},
+      {0xc0079300, 0x13, 0x2000, 0, 0, 0, 0xffffffff, 0xffffffff, 4},
+      {0xc0079300, 0x17, 0x300, 0, 0, 0, 0xffffffff, 0xffffffff, 4},
+  }};
+  for (const auto &packet : packets) {
+    const uint32_t queue_id = next_queue_id;
+    SCOPED_TRACE(queue_id);
+    for (size_t word = 0; word < packet.size(); ++word)
+      memory->store<uint32_t>(kRing + word * sizeof(uint32_t), packet[word]);
+    const auto registration = attach({});
+    ASSERT_NE(registration, 0u);
+    ASSERT_EQ(cp->notify_pm4_queue_doorbell(registration, packet.size()),
+              QueueSubmissionStatus::Accepted);
+    service();
+    EXPECT_TRUE(cp->queue_faulted_for_test(queue_id, 0));
+    EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 0u);
+    EXPECT_TRUE(cp->unregister_queue_registration(registration));
+  }
+}
+
+TEST_F(Pm4ComputeQueueTest, WaitMem64RetriesUnavailableAndUnsatisfiedHighWord) {
+  CommandProcessor cp("compute");
+  cp.set_gpu_vm(&gpu_vm, address_space);
+  constexpr uint64_t gate = 0x700;
+  const std::array<uint32_t, 9> wait{0xc0079300, 0x13,   uint32_t(gate), 0, 0x10,
+                                     0x80000000, 0xffff, 0xffff0000,     4};
+  for (uint32_t index = 0; index < wait.size(); ++index)
+    memory->store<uint32_t>(kRing + index * 4, wait[index]);
+  const auto id = cp.register_pm4_queue({.address_space = address_space,
+                                         .ring_base = kRing,
+                                         .ring_size_bytes = kRingBytes,
+                                         .consumer_pointer_address = kReadPointer,
+                                         .initial_consumer_cursor = std::nullopt,
+                                         .packet_callbacks = {}});
+  ASSERT_NE(id, 0u);
+  memory->make_read_unavailable(gate);
+  EXPECT_EQ(cp.notify_pm4_queue_doorbell(id, wait.size()), QueueSubmissionStatus::Retry);
+  memory->make_available();
+  memory->store<uint64_t>(gate, 0x8001123456780010ull);
+  EXPECT_EQ(cp.notify_pm4_queue_doorbell(id, wait.size()), QueueSubmissionStatus::Retry);
+  memory->store<uint64_t>(gate, 0x8000fedcba980010ull);
+  EXPECT_EQ(cp.notify_pm4_queue_doorbell(id, wait.size()), QueueSubmissionStatus::Accepted);
+  EXPECT_EQ(memory->load<uint32_t>(kReadPointer), wait.size());
+  EXPECT_TRUE(cp.unregister_queue_registration(id));
+}
+
 TEST_F(Pm4ComputeQueueTest, ComputeQueueCancellationDropsItsNestedStreamAndVmLease) {
   CommandProcessor cp("compute");
   cp.set_gpu_vm(&gpu_vm, address_space);
