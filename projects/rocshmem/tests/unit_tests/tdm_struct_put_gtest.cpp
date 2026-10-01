@@ -12,8 +12,9 @@ TEST_P(TdmStructPutFixture, put_records) {
     run_put(GetParam());
 }
 
-// Default TDM tile size (4096 bytes) expressed in whole TdmTestRecords (32 bytes each).
-static constexpr size_t TDM_TILE_RECORDS = 4096 / sizeof(TdmTestRecord);  // 128
+// Fixed TDM tile size (see TEST_TDM_TILE_BYTES) expressed in whole
+// TdmTestRecords (32 bytes each).
+static constexpr size_t TDM_TILE_RECORDS = TEST_TDM_TILE_BYTES / sizeof(TdmTestRecord);  // 128
 
 INSTANTIATE_TEST_SUITE_P(
     TdmStructPut,

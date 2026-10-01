@@ -1315,6 +1315,9 @@ __device__ __forceinline__ void direct_destroy_ctx(rocshmem_ctx_t *ctx) {
 
 __device__ int rocshmem_wg_ctx_create(long options, rocshmem_ctx_t *ctx) {
   LOGD_API("device::wg_ctx_create (options=%ld)", options);
+#if defined(USE_TDM) && defined(__gfx1250__)
+  tdm::set_lds(nullptr, 0);
+#endif
   bool result{true};
   if (get_flat_block_id() == 0) {
     ctx->team_opaque = reinterpret_cast<TeamInfo *>(ROCSHMEM_CTX_DEFAULT.team_opaque);

@@ -26,9 +26,6 @@
 // __builtin_amdgcn_tensor_load_to_lds/store_from_lds intrinsics (descriptor
 // construction, cache-policy encoding, bulk tile-copy helpers) plus the
 // per-workgroup LDS registration backing rocshmem_set_tdm_lds().
-//
-// See tdm.md (this directory) for hardware background and the verified
-// GROUP0/GROUP1 bit encodings.
 
 #ifndef LIBRARY_SRC_TDM_HPP_
 #define LIBRARY_SRC_TDM_HPP_
@@ -77,8 +74,7 @@ constexpr uint32_t data_size_bytes(DataSize d) {
 
 // ==============================================================================
 // CACHE POLICY (the `cachepolicy` immediate argument of the TDM intrinsics)
-// cachepolicy = th_bits[2:0] | (scope_bits[1:0] << 3); verified by assembly
-// inspection (see Posts/2026-08-06-TDM.md).
+// cachepolicy = th_bits[2:0] | (scope_bits[1:0] << 3);
 // ==============================================================================
 
 // Memory scope (cachepolicy bits[4:3]), pre-shifted into place here.

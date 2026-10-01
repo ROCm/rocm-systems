@@ -413,7 +413,7 @@ class IpcSdmaImpl : public IpcOnImpl {
       }
       return;
     }
-    memcpy_wg<Kind>(dst, src, size);
+    memcpy_wg_tdm<Kind>(dst, src, size);
   }
 
   template <MemcpyKind Kind = MemcpyKind::Put>

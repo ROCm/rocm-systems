@@ -84,6 +84,15 @@ void init_constant_memory(void) {
                  constmem_values.tdm_tile_bytes, max_shared_mem_per_block);
       }
     } else {
+      const uint32_t aligned_tile_bytes =
+          constmem_values.tdm_tile_bytes - (constmem_values.tdm_tile_bytes % element_bytes);
+      if (aligned_tile_bytes != constmem_values.tdm_tile_bytes) {
+        LOG_WARN(
+            "ROCSHMEM_TDM_TILE_BYTES=%u is not a multiple of the %u-byte TDM "
+            "element size; rounding down to %u bytes.",
+            constmem_values.tdm_tile_bytes, element_bytes, aligned_tile_bytes);
+        constmem_values.tdm_tile_bytes = aligned_tile_bytes;
+      }
       const size_t tdm_lds_bytes = tdm::lds_bytes_for_tile(constmem_values.tdm_tile_bytes);
       if (tdm_lds_bytes > static_cast<size_t>(max_shared_mem_per_block)) {
         // Don't abort: fall back to whatever tile size does fit (possibly 0,
