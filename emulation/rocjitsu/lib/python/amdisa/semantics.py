@@ -28,7 +28,22 @@ F16_INPUT_CONVERSION_DTYPES = frozenset({'i16_f16', 'u16_f16', 'f32_f16'})
 
 # Floating VOPC relations that read their sources; F and T/TRU are constants.
 FLOAT_COMPARE_RELATIONS = frozenset(
-    {'lt', 'eq', 'le', 'gt', 'lg', 'ge', 'o', 'u', 'nge', 'nlg', 'ngt', 'nle', 'neq', 'nlt'}
+    {
+        'lt',
+        'eq',
+        'le',
+        'gt',
+        'lg',
+        'ge',
+        'o',
+        'u',
+        'nge',
+        'nlg',
+        'ngt',
+        'nle',
+        'neq',
+        'nlt',
+    }
 )
 FLOAT_COMPARE_DTYPES = frozenset({'f16', 'f32', 'f64'})
 
