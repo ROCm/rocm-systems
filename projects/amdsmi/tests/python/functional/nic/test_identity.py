@@ -9,7 +9,3 @@ import unittest
 
 class TestNicIdentity(unittest.TestCase):
     pass  # Add NIC/IFoE identity tests here
-
-
-if __name__ == "__main__":
-    unittest.main()

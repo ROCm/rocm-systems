@@ -3231,6 +3231,7 @@ hipError_t hipStreamSynchronize(hipStream_t stream);
  * @param[in] flags  Parameters to control the operation
  *
  * @returns #hipSuccess, #hipErrorInvalidHandle, #hipErrorInvalidValue,
+ * #hipErrorStreamCaptureInvalidated, #hipErrorStreamCaptureMerge,
  * #hipErrorStreamCaptureIsolation
  *
  * This function inserts a wait operation into the specified stream.
@@ -5404,8 +5405,10 @@ hipError_t hipMemcpyHtoAAsync(hipArray_t dstArray, size_t dstOffset, const void*
  *  @ingroup Module
  *
  *  Returns in *dptr and *bytes the pointer and size of the global of name name located in module
- * hmod. If no variable of that name exists, it returns hipErrorNotFound. Both parameters dptr and
- * bytes are optional. If one of them is NULL, it is ignored and hipSuccess is returned.
+ * hmod. If no variable of that name exists, it returns hipErrorNotFound. A registered
+ * `__device__` global that the compiler dropped from the loaded code object is also reported as
+ * hipErrorNotFound (the runtime no longer aborts). Both parameters dptr and bytes are optional.
+ * If one of them is NULL, it is ignored and hipSuccess is returned.
  *
  *  @param[out]  dptr  Returns global device pointer
  *  @param[out]  bytes Returns global size in bytes
@@ -5424,7 +5427,7 @@ hipError_t hipModuleGetGlobal(hipDeviceptr_t* dptr, size_t* bytes, hipModule_t h
  *  @param[out]  devPtr  pointer to the device associated the symbole
  *  @param[in]   symbol  pointer to the symbole of the device
  *
- *  @returns #hipSuccess, #hipErrorInvalidValue
+ *  @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidSymbol
  *
  */
 hipError_t hipGetSymbolAddress(void** devPtr, const void* symbol);
@@ -7221,7 +7224,7 @@ hipError_t hipLibraryGetKernelCount(unsigned int *count, hipLibrary_t library);
  * @param [in]  library Input hip library handle.
  * @param [in]  name   Name of the global symbol to look up.
  * @return #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidResourceHandle,
- *         #hipErrorNotFound
+ *         #hipErrorNotFound, #hipErrorInvalidSymbol
  */
 hipError_t hipLibraryGetGlobal(void** dptr, size_t* bytes, hipLibrary_t library,
                                const char* name);
@@ -8811,9 +8814,10 @@ hipError_t hipStreamBeginCaptureToGraph(hipStream_t stream, hipGraph_t graph,
  * @brief Ends capture on a stream, returning the captured graph.
  *
  * @param [in] stream - Stream to end capture.
- * @param [out] pGraph - Captured graph.
+ * @param [out] pGraph - Captured graph. Set to NULL on every error.
  *
- * @returns #hipSuccess, #hipErrorInvalidValue
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorStreamCaptureInvalidated,
+ * #hipErrorStreamCaptureUnjoined
  *
  */
 hipError_t hipStreamEndCapture(hipStream_t stream, hipGraph_t* pGraph);
@@ -8870,7 +8874,8 @@ hipError_t hipStreamIsCapturing(hipStream_t stream, hipStreamCaptureStatus* pCap
  * @param [in] numDependencies  Size of the dependencies array.
  * @param [in] flags  Flag to update dependency set. Should be one of the values
  * in enum #hipStreamUpdateCaptureDependenciesFlags.
- * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorIllegalState
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorIllegalState,
+ * #hipErrorStreamCaptureInvalidated
  *
  */
 hipError_t hipStreamUpdateCaptureDependencies(hipStream_t stream, hipGraphNode_t* dependencies,

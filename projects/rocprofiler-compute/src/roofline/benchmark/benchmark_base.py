@@ -43,8 +43,6 @@ Stats = namedtuple("Stats", ["mean", "stdev", "confidence"])
 PerfMetrics = namedtuple("PerfMetrics", ["mean", "low", "high"])
 
 DEFAULT_WORKGROUP_SIZE = 256
-DEFAULT_WORKGROUPS = 8192
-DEFAULT_THREADS = DEFAULT_WORKGROUP_SIZE * DEFAULT_WORKGROUPS
 DEFAULT_NUM_EXPERIMENTS = 100
 DEFAULT_NUM_ITERS = 10
 
