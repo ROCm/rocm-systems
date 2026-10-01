@@ -6,10 +6,10 @@
 
 #include "TestBedChild.hpp"
 #include "PipeUtils.hpp"
+#include "ResourceGuards.hpp"
 #include "comm.h"
 
 #include <algorithm>
-#include <functional>
 #include <thread>
 #include <execinfo.h>
 #ifdef ENABLE_OPENMP
@@ -698,11 +698,7 @@ namespace RcclUnitTesting
     // Once capture starts, every exit path must end it; otherwise the streams
     // stay in capture mode for the rest of the worker's life.
     bool captureActive = false;
-    struct CaptureGuard
-    {
-      std::function<void()> onExit;
-      ~CaptureGuard() { onExit(); }
-    } captureGuard{[&]()
+    auto captureGuard = RCCLTestGuards::makeScopeGuard([&]()
     {
       if (!captureActive) return;
       for (int localRank : localRanksToExecute)
@@ -719,7 +715,7 @@ namespace RcclUnitTesting
             (void)hipGraphDestroy(graph);
         }
       }
-    }};
+    });
 
     // Start HIP graph stream capture if requested
     if (useHipGraph)
