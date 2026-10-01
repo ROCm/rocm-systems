@@ -9,9 +9,9 @@
 // per-warp staging window, so each write to it drains first.
 
 static constexpr int TdmAlign = 128;
-// Mirrors loadUser128/storeUser128: system scope only when the buffer is registered.
-static constexpr CachePolicy TdmLoadDevPolicy = createCachePolicy(TemporalHint::NT, MemScope::DEV);
-static constexpr CachePolicy TdmLoadSysPolicy = createCachePolicy(TemporalHint::NT, MemScope::SYS);
+// loadUser128 is system scope on gfx1250 either way, since RCCL_LL_FIFO_SYS_SCOPE is 1 there.
+// storeUser128 takes system scope only when the buffer is registered.
+static constexpr CachePolicy TdmLoadPolicy = createCachePolicy(TemporalHint::NT, MemScope::SYS);
 static constexpr CachePolicy TdmStoreDevPolicy = createCachePolicy(TemporalHint::RT, MemScope::DEV);
 static constexpr CachePolicy TdmStoreSysPolicy = createCachePolicy(TemporalHint::RT, MemScope::SYS);
 
@@ -20,6 +20,12 @@ bool tdmLoadAllowed = false;
 // A load issued by tdmLoadBegin() and not yet consumed by tdmLoadFinish().
 bool tdmLoadPending = false;
 int tdmLoadEltN = 0;
+
+__device__ __forceinline__ int tdmSlotIx(int g) const {
+  constexpr int LineElems = NCCL_LL128_LINEELEMS;
+  constexpr int LineSkip = 2 * WARP_SIZE / LineElems;
+  return g * WARP_SIZE - LineSkip * (g / 2) + wid - (g % 2) * (wid / (LineElems / 2));
+}
 
 __device__ __forceinline__ uint8_t* tdmWindow() const {
   uint8_t* p = reinterpret_cast<uint8_t*>(ncclScratchForWarp(warpInBlock));
@@ -40,11 +46,7 @@ __device__ __forceinline__ bool tdmLoadBegin(T const* src, int eltN) {
 
   uint8_t* shm = tdmWindow();
   size_t bytes = static_cast<size_t>(eltN) * sizeof(T);
-  if (userBypass()) {
-    asyncLoadToLDS<SyncPolicy::Async, TdmLoadSysPolicy, true>(reinterpret_cast<const uint8_t*>(src), shm, bytes);
-  } else {
-    asyncLoadToLDS<SyncPolicy::Async, TdmLoadDevPolicy, true>(reinterpret_cast<const uint8_t*>(src), shm, bytes);
-  }
+  asyncLoadToLDS<SyncPolicy::Async, TdmLoadPolicy, true>(reinterpret_cast<const uint8_t*>(src), shm, bytes);
   tdmLoadPending = true;
   tdmLoadEltN = eltN;
   return true;
@@ -56,13 +58,11 @@ __device__ __forceinline__ bool tdmLoadFinish(uint64_t (&regs)[WordPerThread]) {
   if (!tdmLoadPending) return false;
   tdmLoadPending = false;
   constexpr int EltPer16B = 16 / sizeof(T);
-  constexpr int LineElems = NCCL_LL128_LINEELEMS;
-  constexpr int LineSkip = 2 * WARP_SIZE / LineElems;
   uint64_t* shm8 = shmemCvtPtr(reinterpret_cast<uint64_t*>(tdmWindow()));
   asyncWait<0>();
 #pragma unroll
   for (int g = 0; g < WordPerThread / 2; g++) {
-    int ix = g * WARP_SIZE - LineSkip * (g / 2) + wid - (g % 2) * (wid / (LineElems / 2));
+    int ix = tdmSlotIx(g);
     if ((!flagThread || g % 2 == 0) && ix * EltPer16B < tdmLoadEltN)
       loadShmem128(shm8 + 2 * ix, regs[2 * g + 0], regs[2 * g + 1]);
   }
@@ -72,13 +72,11 @@ __device__ __forceinline__ bool tdmLoadFinish(uint64_t (&regs)[WordPerThread]) {
 // Stages the destination slice in LDS and pushes it out as one async store.
 template <int WordPerThread>
 __device__ __forceinline__ bool tdmStoreRegs(T* dst, uint64_t (&regs)[WordPerThread], int eltN) {
-  constexpr int LineElems = NCCL_LL128_LINEELEMS;
-  constexpr int LineSkip = 2 * WARP_SIZE / LineElems;
   asyncWait<0>();  // drain the previous slice before overwriting the window
   uint64_t* shm8 = shmemCvtPtr(reinterpret_cast<uint64_t*>(tdmWindow()));
 #pragma unroll
   for (int g = 0; g < WordPerThread / 2; g++) {
-    int ix = g * WARP_SIZE - LineSkip * (g / 2) + wid - (g % 2) * (wid / (LineElems / 2));
+    int ix = tdmSlotIx(g);
     if (!flagThread || g % 2 == 0) storeShmem128(shm8 + 2 * ix, regs[2 * g + 0], regs[2 * g + 1]);
   }
   __syncwarp();
