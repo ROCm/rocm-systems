@@ -455,16 +455,31 @@ static void index_existing_blobs_locked() {
 }
 
 #ifndef _WIN32
+// Both writer locks are held across fork(), in the usual order, so the child
+// never inherits one taken by a thread that does not exist in it.
 static void atfork_prepare() {
-  BufWriteGuard lk;
+  g_file_mu.lock();
+  g_blob_mu.lock();
+  g_buf_busy.test_and_set(std::memory_order_acquire);
   if (g_events_fd >= 0)
     flush_buffer_locked();
+  g_buf_busy.clear(std::memory_order_release);
+}
+
+static void atfork_parent() {
+  g_blob_mu.unlock();
+  g_file_mu.unlock();
 }
 
 static void atfork_child() {
+  {
+    std::lock_guard<std::mutex> lk(g_blob_mu, std::adopt_lock);
+    // The parent's blob writers are not in the child to finish their claims.
+    g_blob_writes_in_flight = 0;
+  }
   std::string dir;
   {
-    std::lock_guard<std::mutex> lk(g_file_mu);
+    std::lock_guard<std::mutex> lk(g_file_mu, std::adopt_lock);
     if (g_events_fd >= 0) {
       HRR_CLOSE(g_events_fd);
       g_events_fd = -1;
@@ -479,8 +494,8 @@ static void atfork_child() {
   // NOTE: this is hrr_cap::writer::open(const char*) — the writer's archive-open
   // routine — NOT POSIX ::open(). It runs fs::create_directories / fopen,
   // which are not async-signal-safe in general, but pthread_atfork's child
-  // handler runs in the (single-threaded) child immediately after fork() with no
-  // mutex held, so these calls are safe here. We deliberately do NOT call this
+  // handler runs in the (single-threaded) child immediately after fork(), after
+  // the locks above are released, so these calls are safe here. We deliberately do NOT call this
   // from any async-signal context.
   if (!dir.empty())
     (void)writer::open(dir.c_str());
@@ -489,7 +504,7 @@ static void atfork_child() {
 static void install_atfork_handlers_once() {
   static std::once_flag once;
   std::call_once(once, [] {
-    pthread_atfork(atfork_prepare, nullptr, atfork_child);
+    pthread_atfork(atfork_prepare, atfork_parent, atfork_child);
   });
 }
 #endif
@@ -717,9 +732,6 @@ bool open(const char* output_dir) {
   {
     std::lock_guard<std::mutex> lk(g_blob_mu);
     g_written_blobs.clear();
-    // A forked child inherits the writes its parent's other threads had in
-    // flight, and none of those threads exists in the child to finish them.
-    g_blob_writes_in_flight = 0;
   }
 
   if (g_events_fd < 0) {
