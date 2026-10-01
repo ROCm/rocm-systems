@@ -6,7 +6,7 @@
 
 #include "fakes/libc_fakes.h"
 
-// Puts the seam's 15 micro_* prototypes in scope so the compiler checks them against the definitions at the bottom of
+// Puts the seam's 18 micro_* prototypes in scope so the compiler checks them against the definitions at the bottom of
 // this file. Without it the two lists are hand-maintained and both extern "C", so a drifted parameter type would link
 // cleanly and corrupt arguments at run time. Include the undef half immediately: this file's defaults call real libc.
 #include "fakes/libc_seam.h"

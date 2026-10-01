@@ -7,12 +7,12 @@
 #ifndef RCCL_TEST_HOST_FAKES_LIBC_FAKES_H_
 #define RCCL_TEST_HOST_FAKES_LIBC_FAKES_H_
 
-// Controllable seams for the libc socket / stdio / process surface.
+// Controllable seams for the libc socket / stdio / process / heap surface.
 //
 // For units whose external dependencies are libc rather than HIP or nccl --
-// src/ras/client.cc is the first, and the socket-facing halves of
-// ras/client_support.cc, misc/socket.cc and bootstrap.cc are the obvious next
-// ones. Such a unit needs no HIP runtime and no nccl fakes at all.
+// src/ras/client.cc (sockets, stdio, exit) and src/graph/rccl_graph_gen.cc
+// (heap) so far, and the socket-facing halves of ras/client_support.cc,
+// misc/socket.cc and bootstrap.cc are the obvious next ones.
 //
 // fakes/libc_seam.h macro-renames each call in the unit under test to the
 // matching micro_* trampoline, which dispatches through the std::function slot
