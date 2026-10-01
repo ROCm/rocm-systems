@@ -2662,15 +2662,15 @@ class AMDSMIParser(argparse.ArgumentParser):
                     metavar="GB",
                 )
 
-                set_node_balancing_mode_help = "Set NPM balancing mode: PB (Power Balancing) or FB (Frequency Balancing).\n\tThis is a system-wide setting, not per-GPU."
+                set_node_balancing_mode_help = "Set NPM balancing mode: POWER_BALANCING or FREQUENCY_BALANCING.\n\tThis is a system-wide setting, not per-GPU."
                 set_value_exclusive_group.add_argument(
                     "--node-balancing-mode",
                     action="store",
-                    choices=["PB", "FB"],
+                    choices=["POWER_BALANCING", "FREQUENCY_BALANCING"],
                     type=str.upper,
                     required=False,
                     help=set_node_balancing_mode_help,
-                    metavar="{PB,FB}",
+                    metavar="{POWER_BALANCING,FREQUENCY_BALANCING}",
                 )
 
         if self.helpers.is_amd_hsmp_initialized():

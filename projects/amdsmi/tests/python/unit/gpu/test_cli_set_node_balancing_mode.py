@@ -21,7 +21,8 @@ Two layers are covered here, modeled on ``test_cli_set_clk_limit.py`` /
     exception, not a ``SystemExit``; only ``amdsmi_cli.py``'s top-level handler
     (bypassed by calling ``set_value()`` directly here) turns it into
     ``sys.exit()``.
-  * A successful set reports "Successfully set NPM balancing mode to <PB|FB>".
+  * A successful set reports "Successfully set NPM balancing mode to
+    <POWER_BALANCING|FREQUENCY_BALANCING>".
   * ``AMDSMI_STATUS_NO_PERM`` from the library is translated into a raised
     ``PermissionError`` (so the CLI's elevation-prompt wrapper can catch it),
     not swallowed into an output message.
@@ -44,8 +45,13 @@ Two layers are covered here, modeled on ``test_cli_set_clk_limit.py`` /
 
   * ``node_handle is None`` is rejected with a "No node handle available"
     message, without calling the API.
-  * A successful set forwards the requested mode string verbatim to
-    ``amdsmi_set_npm_balancing_mode()``.
+  * A successful set translates the CLI's full-name mode
+    (``POWER_BALANCING``/``FREQUENCY_BALANCING``) to the library's internal
+    ``"PB"``/``"FB"`` strings via ``NPM_BALANCING_MODE_FROM_CLI`` before
+    calling ``amdsmi_set_npm_balancing_mode()``, but echoes the full name back
+    in its own message/return value -- ``amdsmi_interface.py``'s own
+    ``"PB"``/``"FB"`` string contract is unchanged, translation happens only
+    at this CLI-helper boundary.
   * ``AMDSMI_STATUS_NO_PERM`` raises ``PermissionError``.
   * ``AMDSMI_STATUS_NOT_SUPPORTED`` (the balancing-mode-specific divergence
     from ``amdsmi_set_npm_limit()``, which uses ``AMDSMI_STATUS_INVAL`` for
@@ -210,7 +216,7 @@ class TestCliSetNodeBalancingMode(unittest.TestCase):
 
     def test_gpu_conflict_raises_invalid_parameter_exception(self):
         cmd = self._make_command(node_handle=object())
-        args = self._make_args(node_balancing_mode="PB", gpu="gpu0")
+        args = self._make_args(node_balancing_mode="POWER_BALANCING", gpu="gpu0")
 
         with self.assertRaises(self.module.AmdSmiInvalidParameterException) as ctx:
             cmd.set_value(args)
@@ -223,13 +229,13 @@ class TestCliSetNodeBalancingMode(unittest.TestCase):
         self.interface.amdsmi_set_npm_balancing_mode = lambda h, m: calls.append((h, m))
         node_handle = object()
         cmd = self._make_command(node_handle=node_handle)
-        args = self._make_args(node_balancing_mode="FB")
+        args = self._make_args(node_balancing_mode="FREQUENCY_BALANCING")
 
         cmd.set_value(args)
 
-        self.assertEqual(calls, [(node_handle, "FB")])
+        self.assertEqual(calls, [(node_handle, "FREQUENCY_BALANCING")])
         message = cmd.logger.output["set_node_balancing_mode"]
-        self.assertIn("Successfully set NPM balancing mode to FB", message)
+        self.assertIn("Successfully set NPM balancing mode to FREQUENCY_BALANCING", message)
 
     def test_no_perm_raises_permission_error(self):
         def _raise(_handle, _mode):
@@ -239,7 +245,7 @@ class TestCliSetNodeBalancingMode(unittest.TestCase):
 
         self.interface.amdsmi_set_npm_balancing_mode = _raise
         cmd = self._make_command(node_handle=object())
-        args = self._make_args(node_balancing_mode="PB")
+        args = self._make_args(node_balancing_mode="POWER_BALANCING")
 
         with self.assertRaises(PermissionError):
             cmd.set_value(args)
@@ -252,7 +258,7 @@ class TestCliSetNodeBalancingMode(unittest.TestCase):
 
         self.interface.amdsmi_set_npm_balancing_mode = _raise
         cmd = self._make_command(node_handle=object())
-        args = self._make_args(node_balancing_mode="PB")
+        args = self._make_args(node_balancing_mode="POWER_BALANCING")
 
         cmd.set_value(args)  # must not raise
 
@@ -307,6 +313,7 @@ class TestValidateAndSetNodeBalancingMode(unittest.TestCase):
         cls.interface = modules["amdsmi.amdsmi_interface"]
         import amdsmi_helpers as amdsmi_helpers_module
 
+        cls.helpers_cls = amdsmi_helpers_module.AMDSMIHelpers
         # staticmethod() wrapping prevents `self.validate` from auto-binding
         # this TestCase instance as the method's `self` argument.
         cls.validate = staticmethod(
@@ -320,15 +327,18 @@ class TestValidateAndSetNodeBalancingMode(unittest.TestCase):
     def _validate(self, node_handle, requested_mode):
         # A lightweight duck-typed ``self`` -- exercises the real, unbound
         # ``validate_and_set_node_balancing_mode`` method body without paying
-        # for ``AMDSMIHelpers.__init__``'s platform/hypervisor probing.
+        # for ``AMDSMIHelpers.__init__``'s platform/hypervisor probing. Reuses
+        # the real class's NPM_BALANCING_MODE_FROM_CLI translation table.
         fake_self = types.SimpleNamespace(
-            error_collector=mock.Mock(), get_output_format=lambda: "human"
+            error_collector=mock.Mock(),
+            get_output_format=lambda: "human",
+            NPM_BALANCING_MODE_FROM_CLI=self.helpers_cls.NPM_BALANCING_MODE_FROM_CLI,
         )
         logger = _FakeLogger()
         return fake_self, self.validate(fake_self, node_handle, requested_mode, logger)
 
     def test_none_node_handle_rejects_without_calling_api(self):
-        fake_self, result = self._validate(node_handle=None, requested_mode="PB")
+        fake_self, result = self._validate(node_handle=None, requested_mode="POWER_BALANCING")
 
         self.assertIn("No node handle available", result)
         self.assertEqual(self.calls, [], "API must not be called when no node handle is available")
@@ -336,9 +346,9 @@ class TestValidateAndSetNodeBalancingMode(unittest.TestCase):
 
     def test_success_forwards_requested_mode_verbatim(self):
         node_handle = object()
-        _, result = self._validate(node_handle=node_handle, requested_mode="FB")
+        _, result = self._validate(node_handle=node_handle, requested_mode="FREQUENCY_BALANCING")
 
-        self.assertIn("Successfully set NPM balancing mode to FB", result)
+        self.assertIn("Successfully set NPM balancing mode to FREQUENCY_BALANCING", result)
         self.assertEqual(self.calls, [(node_handle, "FB")])
 
     def test_no_perm_raises_permission_error(self):
@@ -347,7 +357,7 @@ class TestValidateAndSetNodeBalancingMode(unittest.TestCase):
         )
 
         with self.assertRaises(PermissionError):
-            self._validate(node_handle=object(), requested_mode="PB")
+            self._validate(node_handle=object(), requested_mode="POWER_BALANCING")
 
     def test_not_supported_returns_message_without_raising(self):
         # The balancing-mode-specific divergence from
@@ -362,7 +372,7 @@ class TestValidateAndSetNodeBalancingMode(unittest.TestCase):
             )
         )
 
-        fake_self, result = self._validate(node_handle=object(), requested_mode="PB")
+        fake_self, result = self._validate(node_handle=object(), requested_mode="POWER_BALANCING")
 
         self.assertIn(
             "NPM balancing mode is not supported on this node; cannot set balancing mode", result
@@ -376,7 +386,7 @@ class TestValidateAndSetNodeBalancingMode(unittest.TestCase):
             _FakeLibraryException(_STATUS_INVAL, "AMDSMI_STATUS_INVAL - Invalid parameters")
         )
 
-        _, result = self._validate(node_handle=object(), requested_mode="PB")
+        _, result = self._validate(node_handle=object(), requested_mode="POWER_BALANCING")
 
         self.assertIn("AMDSMI_STATUS_INVAL", result)
-        self.assertIn("Unable to set NPM balancing mode to PB", result)
+        self.assertIn("Unable to set NPM balancing mode to POWER_BALANCING", result)

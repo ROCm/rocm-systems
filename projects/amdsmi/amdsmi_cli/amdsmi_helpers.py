@@ -3415,12 +3415,17 @@ class AMDSMIHelpers:
                 }
             return error_msg
 
+    # CLI-facing full names for the library's internal "PB"/"FB" strings
+    # (amdsmi_interface.py's own string contract stays unchanged).
+    NPM_BALANCING_MODE_TO_CLI = {"PB": "POWER_BALANCING", "FB": "FREQUENCY_BALANCING"}
+    NPM_BALANCING_MODE_FROM_CLI = {"POWER_BALANCING": "PB", "FREQUENCY_BALANCING": "FB"}
+
     def validate_and_set_node_balancing_mode(self, node_handle, requested_mode, logger):
         """Validate and set the NPM balancing mode for a node.
 
         Args:
             node_handle: Node handle (system-wide, not per-GPU)
-            requested_mode (str): "PB" or "FB"
+            requested_mode (str): "POWER_BALANCING" or "FREQUENCY_BALANCING"
             logger: AMDSMILogger instance for format-aware output
 
         Returns:
@@ -3433,7 +3438,9 @@ class AMDSMIHelpers:
                 return {"status": "error", "message": message}
             return message
         try:
-            amdsmi_interface.amdsmi_set_npm_balancing_mode(node_handle, requested_mode)
+            amdsmi_interface.amdsmi_set_npm_balancing_mode(
+                node_handle, self.NPM_BALANCING_MODE_FROM_CLI[requested_mode]
+            )
             message = f"Successfully set NPM balancing mode to {requested_mode}"
             if logger.is_json_format() or logger.is_csv_format():
                 return {"status": "success", "balancing_mode": requested_mode, "message": message}

@@ -103,8 +103,9 @@ class NodeCommands:
                     npm_dict["threshold"] = ubb_power_threshold
 
                 try:
-                    npm_dict["balancing_mode"] = amdsmi_interface.amdsmi_get_npm_balancing_mode(
-                        args.nodes
+                    mode = amdsmi_interface.amdsmi_get_npm_balancing_mode(args.nodes)
+                    npm_dict["balancing_mode"] = self.helpers.NPM_BALANCING_MODE_TO_CLI.get(
+                        mode, mode
                     )
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     logging.debug("amdsmi_get_npm_balancing_mode failed: %s", e.get_error_info())
