@@ -672,7 +672,13 @@ ncclResult_t ncclRmaIbProxyRegMrSymDmaBuf(void* collComm, void* data, size_t siz
       size_t thisLen = remaining < inSeg ? remaining : inSeg;
       int segFd = -1;
       // Export this segment alone: one physical allocation, so its fd is complete.
-      CUCHECKGOTO(cuMemGetHandleForAddressRange((void*)&segFd, (CUdeviceptr)segPtr, thisLen,
+      // The MR spans whole pages from segPtr's page at dmabuf offset 0 (reg.cc),
+      // so the export must cover that same page range.
+      static size_t hostPageSize = ncclOsGetPageSize();
+      uintptr_t exportBase = segPtr & ~(uintptr_t)(hostPageSize - 1);
+      size_t exportLen = segPtr + thisLen - exportBase;
+      ALIGN_SIZE(exportLen, hostPageSize);
+      CUCHECKGOTO(cuMemGetHandleForAddressRange((void*)&segFd, (CUdeviceptr)exportBase, exportLen,
                                                 CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, 0),
                   ret, reconcile);
       ret = ncclIbRegMrDmaBufInternal(cComm->recvComm, (void*)segPtr, thisLen, type, 0ULL, segFd, mr_flags,
