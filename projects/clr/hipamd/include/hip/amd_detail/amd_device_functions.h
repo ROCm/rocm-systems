@@ -255,6 +255,7 @@ struct uchar2Holder {
 } __attribute__((aligned(8)));
 
 __device__ static inline unsigned int __byte_perm(unsigned int x, unsigned int y, unsigned int s) {
+#if __has_builtin(__builtin_amdgcn_is_invocable) && __has_builtin(__builtin_amdgcn_perm)
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_perm)) {
     // v_perm_b32 takes one selector byte (8 bits) per output byte and indexes {src0, src1} as
     // in[7:4] = src0, in[3:0] = src1.
@@ -269,8 +270,10 @@ __device__ static inline unsigned int __byte_perm(unsigned int x, unsigned int y
     unsigned int sel = __builtin_amdgcn_perm(0u, s, 0x04010400u);
     sel = (sel | (sel << 4)) & 0x07070707u;
     return __builtin_amdgcn_perm(y, x, sel);
-  } else {
-    // Pre-gfx8 fallback
+  }
+#endif
+  // Fallback for targets without v_perm_b32 (pre-gfx8)
+  {
     struct uchar2Holder cHoldVal;
     struct ucharHolder cHoldKey;
     cHoldKey.ui = s;
