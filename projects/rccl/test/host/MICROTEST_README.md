@@ -576,6 +576,10 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   - `coll_net.cc` (`COLL_NET_CC_PATH`, from `coll-net-test.cc`); suites `CollNet*`,
     driven through a fake `ncclCollNet_t`. `RCCL_TRANSPORT_STUBS_OMIT_COLL_NET` drops
     the stub copies of its entry points.
+  - `generic.cc` (`GENERIC_CC_PATH`, from `generic-test.cc`); suites
+    `GenericPatConnectMicrotest.*`. It links no shared fakes: `fakes/transport_stubs.cc`
+    defines fail-loud copies of `generic.cc`'s connect functions, so the test TU fakes
+    `ncclPatEnable`, `ncclTransportP2pConnect` and `ncclTransportP2pSetup` itself.
   - `net_ib/common.cc` and host helpers in `net_ib/common.h`
     (`NET_IB_COMMON_CC_PATH`, from `net_ib/common-test.cc`); suites
     `NetIbCommonMicrotest.*`.
