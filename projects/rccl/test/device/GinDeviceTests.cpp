@@ -915,7 +915,8 @@ TEST_F(GinDeviceTest, Flush_FlushesEveryPeerOnLocalQueue) {
 
   // Pins a gap: an abort-ended flush still publishes lastVisibleGet; correct is unpublished (fix at gin_proxy.h:375).
   for (int pe = 0; pe < Rig::kNranks; pe++) {
-    EXPECT_EQ(visible[pe], Rig::kGetBase + pe) << "lastVisibleGet[" << pe << "] not advanced by Flush";
+    EXPECT_EQ(visible[pe], Rig::kGetBase + pe)
+      << "lastVisibleGet[" << pe << "]: an aborted flush still publishes today; flips when gin_proxy.h:375 is fixed";
     EXPECT_EQ(cis[pe], 0u) << "cis[" << pe << "] is consumer-owned and must be untouched";
   }
   EXPECT_EQ(visible[Rig::kNranks], 0u) << "Flush visited a peer index past nRanks";
@@ -1019,7 +1020,7 @@ TEST_F(GinDeviceTest, FlushTimeout_ReportsLaggingPeer) {
 
 TEST_F(GinDeviceTest, FlushTimeout_CurrentlyLeavesPendingGetsInvisible) {
   using Rig = GinApiFlushRig;
-  constexpr uint64_t kNeverExpiresCycles = 1ULL << 62; // A posted local flush could only end via the raised abort.
+  constexpr uint64_t kNeverExpiresCycles = 1ULL << 62; // Never hit: queues are drained and no GFD is posted.
   Rig rig(/*pad=*/0);
   DeviceBuffer<ncclResult_t> d_rets(Rig::kThreads);
   d_rets.copyFrom(std::vector<ncclResult_t>(Rig::kThreads, ncclInternalError));
@@ -1504,7 +1505,8 @@ TEST_F(GinProxyFlushWaitTest, WaitGateHonorsAbortFlag) {
     if (timed) {
       EXPECT_EQ(d_result.download(), ncclSuccess) << "timed Wait must leave its GFD gate via abortFlag, not time out";
     }
-    EXPECT_EQ(d_state.copyTo(), (std::vector<uint32_t>{1u, 0u})) << "Wait ignored abortFlag; the watchdog drained cis";
+    EXPECT_EQ(d_state.copyTo(), (std::vector<uint32_t>{1u, 0u}))
+      << "{returned, rescued}: Wait must return; rescued=1 (blocking arm only) means the watchdog had to drain cis";
     EXPECT_EQ(d_cis_.copyTo(), cis_) << "nothing consumed the pending GFD";
     EXPECT_EQ(d_pis_.copyTo(), pis_) << "gets are visible, so Wait must not post a flush GFD";
     expectQueuesZero(d_queues_, "aborted Wait");
