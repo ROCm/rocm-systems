@@ -14,30 +14,37 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-try:
-    from common.common import amdsmi_path
-except (ImportError, FileNotFoundError):  # pragma: no cover - harness/install unavailable
-    amdsmi_path = None
+from common.common import cli_search_order, fake_module, find_cli_dir, stub_modules
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-_SOURCE_CLI_DIR = os.path.normpath(os.path.join(_THIS_DIR, "..", "..", "..", "..", "amdsmi_cli"))
 _SOURCE_INTERFACE_DIR = os.path.normpath(
     os.path.join(_THIS_DIR, "..", "..", "..", "..", "py-interface")
 )
-_INSTALLED_CLI_DIR = (
-    os.path.join(os.path.dirname(os.path.dirname(amdsmi_path)), "libexec", "amdsmi_cli")
-    if amdsmi_path
-    else ""
-)
+_CLI_DIR = find_cli_dir(*cli_search_order(_THIS_DIR))
 
 
 def _load_source_amdsmi_interface():
+    """Load the amd-smi Python interface under test.
+
+    Prefer the in-tree ``py-interface`` copy so the test exercises the wrapper
+    carrying local changes rather than a possibly-stale installed package. The
+    module is loaded as a submodule of a synthetic package so its
+    ``from . import amdsmi_wrapper`` resolves to the source wrapper too. When the
+    source tree is absent (the installed CI distro legs ship no ``py-interface``
+    directory), fall back to the installed ``amdsmi`` package, which already
+    reflects the build under test.
+    """
+    candidate = os.path.join(_SOURCE_INTERFACE_DIR, "amdsmi_interface.py")
+    if not os.path.isfile(candidate):
+        from amdsmi import amdsmi_interface as installed
+
+        return installed
+
     package_name = "amdsmi_source_under_test"
     package = types.ModuleType(package_name)
     package.__path__ = [_SOURCE_INTERFACE_DIR]
     sys.modules[package_name] = package
 
-    candidate = os.path.join(_SOURCE_INTERFACE_DIR, "amdsmi_interface.py")
     spec = importlib.util.spec_from_file_location(f"{package_name}.amdsmi_interface", candidate)
     loaded = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = loaded
@@ -49,46 +56,41 @@ ai = _load_source_amdsmi_interface()
 
 
 def _load_amdsmi_logger_cls():
-    """Load ``AMDSMILogger`` directly from the amdsmi_logger source/install file.
+    """Load ``AMDSMILogger`` from the resolved CLI dir, or ``None`` when unavailable.
 
-    ``amdsmi_cli`` is not an importable top-level package in the installed test
-    environment (it ships under ``libexec/amdsmi_cli``), so ``import
-    amdsmi_cli.amdsmi_logger`` raises ``ModuleNotFoundError`` on the CI distro
-    legs. Mirror ``test_event_output_format.py`` and load the module by path with
-    its only non-stdlib dependency (``amdsmi_helpers``) stubbed.
+    The CLI is not an importable top-level package in the installed test
+    environment (it ships under ``libexec``), so the module is loaded by path. Its
+    only non-stdlib dependency (``amdsmi_helpers``) must be stubbed by the caller
+    via ``stub_modules`` before this runs.
     """
-    module = types.ModuleType("amdsmi_helpers")
-    module.AMDSMIHelpers = type("AMDSMIHelpers", (), {})
-    sys.modules["amdsmi_helpers"] = module
-    for cli_dir in (_SOURCE_CLI_DIR, _INSTALLED_CLI_DIR):
-        candidate = os.path.join(cli_dir, "amdsmi_logger.py") if cli_dir else ""
-        if candidate and os.path.isfile(candidate):
-            spec = importlib.util.spec_from_file_location("amdsmi_logger_under_test", candidate)
-            loaded = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(loaded)
-            return loaded.AMDSMILogger
-    return None
-
-
-AMDSMILogger = _load_amdsmi_logger_cls()
+    candidate = os.path.join(_CLI_DIR, "amdsmi_logger.py") if _CLI_DIR else ""
+    if not candidate or not os.path.isfile(candidate):
+        return None
+    spec = importlib.util.spec_from_file_location("amdsmi_logger_under_test", candidate)
+    loaded = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(loaded)
+    return loaded.AMDSMILogger
 
 
 def _load_event_commands_cls():
-    for cli_dir in (_SOURCE_CLI_DIR, _INSTALLED_CLI_DIR):
-        candidate = os.path.join(cli_dir, "subcommands", "event.py") if cli_dir else ""
-        if candidate and os.path.isfile(candidate):
-            spec = importlib.util.spec_from_file_location("event_under_test", candidate)
-            loaded = importlib.util.module_from_spec(spec)
-            sys.modules[spec.name] = loaded
-            spec.loader.exec_module(loaded)
-            return loaded.EventCommands
-    return None
-
-
-EventCommands = _load_event_commands_cls()
+    candidate = os.path.join(_CLI_DIR, "subcommands", "event.py") if _CLI_DIR else ""
+    if not candidate or not os.path.isfile(candidate):
+        return None
+    spec = importlib.util.spec_from_file_location("event_under_test", candidate)
+    loaded = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = loaded
+    spec.loader.exec_module(loaded)
+    return loaded.EventCommands
 
 
 class TestEventTimestamp(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        helpers = fake_module("amdsmi_helpers", AMDSMIHelpers=type("AMDSMIHelpers", (), {}))
+        stub_modules(cls, {"amdsmi_helpers": helpers})
+        cls.logger_cls = _load_amdsmi_logger_cls()
+        cls.event_cls = _load_event_commands_cls()
+
     def _events_from_mock(self, event_values):
         def _notify(timeout, count_ref, event_info):
             for idx, item in enumerate(event_values):
@@ -132,9 +134,9 @@ class TestEventTimestamp(unittest.TestCase):
             self.assertIn("timestamp", rec)
 
     def test_human_readable_event_is_block_with_timestamp(self):
-        if AMDSMILogger is None:
+        if self.logger_cls is None:
             self.skipTest("amdsmi_logger.py not found in source or install")
-        logger = AMDSMILogger()
+        logger = self.logger_cls()
         event = {
             "gpu": 0,
             "timestamp": 1780000000,
@@ -155,7 +157,7 @@ class TestEventTimestamp(unittest.TestCase):
         )
 
     def test_multiple_gpus_use_one_event_reader_thread(self):
-        if EventCommands is None:
+        if self.event_cls is None:
             self.skipTest("event.py not found in source or install")
 
         threads = []
@@ -207,7 +209,7 @@ class TestEventTimestamp(unittest.TestCase):
             def print_event_output(self):
                 pass
 
-        command = EventCommands()
+        command = self.event_cls()
         command.device_handles = [object(), object()]
         command.group_check_printed = True
         command.logger = FakeLogger()
@@ -227,7 +229,3 @@ class TestEventTimestamp(unittest.TestCase):
         self.assertEqual(
             [event["event"] for event in stored_events], ["PROCESS_START", "PROCESS_END"]
         )
-
-
-if __name__ == "__main__":
-    unittest.main()

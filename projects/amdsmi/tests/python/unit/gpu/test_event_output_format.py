@@ -20,41 +20,19 @@ import importlib.util
 import io
 import json
 import os
-import sys
-import types
 import unittest
 from contextlib import redirect_stdout
 
-try:
-    from common.common import amdsmi_path
-except (ImportError, FileNotFoundError):  # pragma: no cover - harness/install unavailable
-    amdsmi_path = None
+from common.common import cli_search_order, fake_module, find_cli_dir, stub_modules
 
-_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-_SOURCE_CLI_DIR = os.path.normpath(os.path.join(_THIS_DIR, "..", "..", "..", "..", "amdsmi_cli"))
-_INSTALLED_CLI_DIR = (
-    os.path.join(os.path.dirname(os.path.dirname(amdsmi_path)), "libexec", "amdsmi_cli")
-    if amdsmi_path
-    else ""
-)
+_CLI_DIR = find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
+LOGGER_PATH = os.path.join(_CLI_DIR, "amdsmi_logger.py") if _CLI_DIR else ""
 
 
-def _resolve_logger_path():
-    for cli_dir in (_SOURCE_CLI_DIR, _INSTALLED_CLI_DIR):
-        candidate = os.path.join(cli_dir, "amdsmi_logger.py") if cli_dir else ""
-        if candidate and os.path.isfile(candidate):
-            return candidate
-    return ""
-
-
-LOGGER_PATH = _resolve_logger_path()
-
-
-def _install_fake_helpers():
-    """Register a stub ``amdsmi_helpers`` so ``amdsmi_logger`` imports cleanly."""
-    module = types.ModuleType("amdsmi_helpers")
-    module.AMDSMIHelpers = type("AMDSMIHelpers", (), {})
-    sys.modules["amdsmi_helpers"] = module
+def _fake_helpers_modules():
+    """``amdsmi_logger``'s only non-stdlib import, stubbed so it loads hardware-free."""
+    helpers = fake_module("amdsmi_helpers", AMDSMIHelpers=type("AMDSMIHelpers", (), {}))
+    return {"amdsmi_helpers": helpers}
 
 
 def _load_logger_module():
@@ -97,7 +75,7 @@ class _LoggerTestBase(unittest.TestCase):
     def setUpClass(cls):
         if not LOGGER_PATH:
             raise unittest.SkipTest("amdsmi_logger.py not found in source or install")
-        _install_fake_helpers()
+        stub_modules(cls, _fake_helpers_modules())
         cls.module = _load_logger_module()
 
     def _make_logger(self, output_format):
@@ -181,7 +159,3 @@ class TestEventJsonOutput(_LoggerTestBase):
         self.assertEqual(len(lines), len(records))
         for line, record in zip(lines, records):
             self.assertEqual(json.loads(line), record)
-
-
-if __name__ == "__main__":
-    unittest.main()
