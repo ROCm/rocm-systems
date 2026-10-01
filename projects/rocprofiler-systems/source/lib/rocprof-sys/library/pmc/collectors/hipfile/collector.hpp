@@ -10,7 +10,7 @@ namespace rocprofsys::pmc::collectors::hipfile
 {
 
 /**
- * @brief hipFile GPU-direct storage I/O collector.
+ * @brief hipFile's AMD Infinity Storage I/O collector.
  *
  * Specializes the base collector template for hipFile. All hipFile-specific behaviour
  * lives in hipfile_traits, so lifecycle, device disabling on repeated failure, sample

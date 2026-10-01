@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 # Drives the collector through a mock backend and stub settings/cache policies, so no
-# hipFile package, no GPU-direct storage hardware, and no trace cache are required. This
+# hipFile package, no AMD Infinity Storage hardware, and no trace cache are required. This
 # is what makes the fastpath and fallback attribution verifiable in CI.
 add_library(
     pmc-hipfile-collector-tests

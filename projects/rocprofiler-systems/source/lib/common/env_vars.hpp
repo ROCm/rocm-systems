@@ -114,7 +114,7 @@ inline constexpr const char* AMD_SMI_METRICS      = "ROCPROFSYS_AMD_SMI_METRICS"
 inline constexpr const char* AMD_SMI_FREQ         = "ROCPROFSYS_AMD_SMI_FREQ";
 inline constexpr const char* AMD_SMI_DEVICES      = "ROCPROFSYS_AMD_SMI_DEVICES";
 
-// --- Domains: hipFile (GPU-direct storage I/O stats) ---
+// --- Domains: hipFile (AMD Infinity Storage I/O stats) ---
 inline constexpr const char* USE_HIPFILE     = "ROCPROFSYS_USE_HIPFILE";
 inline constexpr const char* HIPFILE_METRICS = "ROCPROFSYS_HIPFILE_METRICS";
 // Registered default for HIPFILE_METRICS.

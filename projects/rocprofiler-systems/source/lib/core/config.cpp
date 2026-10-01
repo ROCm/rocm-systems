@@ -838,7 +838,7 @@ configure_settings(bool _init)
 #if defined(ROCPROFSYS_BUILD_HIPFILE) && ROCPROFSYS_BUILD_HIPFILE == 1
     ROCPROFSYS_CONFIG_SETTING(
         bool, env_vars::USE_HIPFILE,
-        "Enable periodic sampling of hipFile GPU-direct storage I/O statistics "
+        "Enable periodic sampling of hipFile's AMD Infinity Storage I/O statistics "
         "(bytes, bandwidth, op counts, errors). Requires the target application to "
         "use hipFile. Collection needs hipFile's statistics server "
         "(HIPFILE_STATS_LEVEL, default 1); 0 disables it and yields no telemetry.",

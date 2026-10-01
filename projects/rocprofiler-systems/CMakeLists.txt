@@ -224,7 +224,7 @@ rocprofiler_systems_add_option(ROCPROFSYS_USE_AINIC
 )
 rocprofiler_systems_add_tristate_option(
     ROCPROFSYS_USE_HIPFILE
-    "Enable hipFile GPU-direct storage I/O telemetry (ON, OFF, or AUTO)"
+    "Enable hipFile's AMD Infinity Storage I/O telemetry (ON, OFF, or AUTO)"
     "AUTO"
 )
 rocprofiler_systems_add_option(CMAKE_CXX_EXTENSIONS

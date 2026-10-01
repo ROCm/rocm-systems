@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: MIT
 
 """
-Tests for the hipfile examples: API tracing (`hipfile-trace`) and GPU-direct
-storage I/O telemetry (`hipfile-io`).
+Tests for the hipfile examples: API tracing (`hipfile-trace`) and AMD Infinity
+Storage I/O telemetry (`hipfile-io`).
 """
 
 from __future__ import annotations
@@ -187,7 +187,7 @@ class TestHipFileTelemetry(RocprofsysTest):
         """hipFile settings must be listed by ``rocprof-sys-avail --settings``.
 
         These settings are only registered when hipFile support is compiled in.
-        No GPU-direct storage hardware is required. The class-level collector
+        No AMD Infinity Storage hardware is required. The class-level collector
         fixture skips when they are absent; this asserts both names appear.
         """
         result = subprocess.run(

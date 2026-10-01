@@ -21,7 +21,7 @@ using ::rocprofsys::pmc::device_selection_mode;
 /**
  * @brief Traits type for hipFile collector configuration.
  *
- * Bridges hipFile's GPU-direct storage I/O stats to base::collector.
+ * Bridges hipFile's AMD Infinity Storage I/O stats to base::collector.
  *
  * @note Unlike the AMD SMI collectors, enumeration does not probe the data source.
  * hipFile stats only become readable once the target performs hipFile I/O, which

@@ -19,7 +19,7 @@ namespace rocprofsys::pmc::collectors::hipfile::testing
  * Satisfies hipfile_backend_contract with no hipFile dependency, so the collector's
  * behaviour - fastpath vs fallback attribution, cumulative counters, wall-clock
  * bandwidth, the unavailable path - is verifiable on any machine, with or without
- * GPU-direct storage hardware.
+ * AMD Infinity Storage hardware.
  */
 struct mock_backend
 {
