@@ -42,19 +42,7 @@ rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.p
 
 find_package(rocprofiler-sdk REQUIRED)
 
-find_library(
-    attdecoder_LIBRARY
-    NAMES rocprof-trace-decoder
-    HINTS ${ROCM_PATH}
-    PATHS ${ROCM_PATH}
-    PATH_SUFFIXES lib)
-
-if(attdecoder_LIBRARY)
-    cmake_path(GET attdecoder_LIBRARY PARENT_PATH attdecoder_LIB_DIR)
-endif()
-
-find_package_handle_standard_args(attdecoder REQUIRED_VARS attdecoder_LIB_DIR
-                                                           attdecoder_LIBRARY)
+rocprofiler_sdk_find_trace_decoder()
 
 set(COMMON_PARAMS_NO_LIB ${PRELOAD_ARGS} --att --output-format json --log-level env -d
                          ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace/)
@@ -366,8 +354,8 @@ endif()
 
 # Other SIMD file tests. Requires both a supported arch (gfx11/12) AND the
 # rocprof-trace-decoder library: the test sets ROCPROF_ATT_LIBRARY_PATH and aborts with
-# "rocprof-trace-decoder library path not found" when the decoder is absent (e.g. WSL, or
-# any environment without the decoder installed). Gate on IS_DISABLED (which is ON when
+# "rocprof-trace-decoder library path not found" when the decoder is absent (any
+# environment without the decoder installed). Gate on IS_DISABLED (which is ON when
 # attdecoder is not found) like the other ATT tests, so it is skipped rather than failing
 # when the decoder is unavailable.
 set(ATT_NO_DETAIL_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/att-no-detail")
