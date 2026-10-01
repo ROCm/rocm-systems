@@ -629,19 +629,20 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_MultiNodeEngramMixedWindowIGetStress)
             FillSentinel(window->ptr, kGpuBytes, kSentinel);
 
         Barrier();
+        bool getOk = true;
         if (worldRank_ == 0)
         {
             void* req = nullptr;
-            ASSERT_EQ(ncclSuccess,
-                      rma_->iget(rmaCtx_, 0, remoteOff, mh, len,
-                                 localOff, mh, /*peerRank=*/1, ncclRmaOptFlagsDefault, &req))
-                << "DeepEP Engram IGet post failed at iteration " << i;
-            ASSERT_TRUE(PollUntilDone(req))
-                << "DeepEP Engram IGet stalled at iteration " << i;
+            getOk = rma_->iget(rmaCtx_, 0, remoteOff, mh, len,
+                               localOff, mh, /*peerRank=*/1, ncclRmaOptFlagsDefault, &req) == ncclSuccess;
+            if (getOk) getOk = PollUntilDone(req);
+        }
+        ASSERT_TRUE(MPIHelpers::allRanksTrue(getOk))
+            << "DeepEP Engram IGet failed at iteration " << i;
+        if (worldRank_ == 0)
             ExpectPayloadIsolated(window->ptr, kGpuBytes, localOff, len,
                                   seed, kSentinel,
                                   "DeepEP Engram iteration " + std::to_string(i));
-        }
         Barrier();
     }
 }
@@ -670,7 +671,7 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridImportedCpuSegmentIGet)
 
     const size_t remoteOff = kGpuBytes + static_cast<size_t>(window->localRank) * kCpuBytes + 4096;
     const int peer = MPIHelpers::findRemotePeerForLocalRank(window->localRank);
-    ASSERT_GE(peer, 0);
+    ASSERT_TRUE(MPIHelpers::allRanksTrue(peer >= 0)) << "no remote peer for local rank " << window->localRank;
 
     FillBuf(static_cast<uint8_t*>(window->ptr) + remoteOff, kPayload,
             static_cast<uint8_t>(0x30 + worldRank_));
@@ -683,10 +684,10 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridImportedCpuSegmentIGet)
 
     Barrier();
     void* req = nullptr;
-    ASSERT_EQ(ncclSuccess,
-              rma_->iget(rmaCtx_, 0, remoteOff, mh, kPayload,
-                         kLocalOff, mh, peer, ncclRmaOptFlagsDefault, &req));
-    ASSERT_TRUE(PollUntilDone(req));
+    bool getOk = rma_->iget(rmaCtx_, 0, remoteOff, mh, kPayload,
+                            kLocalOff, mh, peer, ncclRmaOptFlagsDefault, &req) == ncclSuccess;
+    if (getOk) getOk = PollUntilDone(req);
+    ASSERT_TRUE(MPIHelpers::allRanksTrue(getOk)) << "hybrid IGet failed on at least one rank";
     ExpectPayloadIsolated(window->ptr, kGpuBytes, kLocalOff, kPayload,
                           static_cast<uint8_t>(0x30 + peer), kSentinel,
                           "DeepEP hybrid imported CPU IGet");
@@ -740,17 +741,17 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridMultiNodeIGetStress)
 
         const int sourceLocalRank = (i + window->localRank) % window->localSize;
         const int peer = MPIHelpers::findRemotePeerForLocalRank(sourceLocalRank);
-        ASSERT_GE(peer, 0);
+        ASSERT_TRUE(MPIHelpers::allRanksTrue(peer >= 0))
+            << "no remote peer for local rank " << sourceLocalRank << " at iteration " << i;
         const size_t remoteOff = kGpuBytes +
             static_cast<size_t>(sourceLocalRank) * kCpuBytes + sourceInnerOff;
 
         void* req = nullptr;
-        ASSERT_EQ(ncclSuccess,
-                  rma_->iget(rmaCtx_, 0, remoteOff, mh, len,
-                             localOff, mh, peer, ncclRmaOptFlagsDefault, &req))
-            << "hybrid IGet post failed at iteration " << i;
-        ASSERT_TRUE(PollUntilDone(req))
-            << "hybrid IGet stalled at iteration " << i;
+        bool getOk = rma_->iget(rmaCtx_, 0, remoteOff, mh, len,
+                                localOff, mh, peer, ncclRmaOptFlagsDefault, &req) == ncclSuccess;
+        if (getOk) getOk = PollUntilDone(req);
+        ASSERT_TRUE(MPIHelpers::allRanksTrue(getOk))
+            << "hybrid IGet failed on at least one rank at iteration " << i;
         ExpectPayloadIsolated(window->ptr, kGpuBytes, localOff, len,
                               static_cast<uint8_t>(0x40 + peer + i),
                               kSentinel,
@@ -783,7 +784,7 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridOutOfRangeIGetRejected)
     Barrier();
 
     const int peer = MPIHelpers::findRemotePeerForLocalRank(window->localRank);
-    ASSERT_GE(peer, 0);
+    ASSERT_TRUE(MPIHelpers::allRanksTrue(peer >= 0)) << "no remote peer for local rank " << window->localRank;
     void* req = nullptr;
     EXPECT_EQ(ncclInvalidArgument,
               rma_->iget(rmaCtx_, 0, window->totalSize - 32, mh, 64,
@@ -831,7 +832,9 @@ TEST_F(RmaMultiSegmentMPITest, IFlushMultiSegment)
         void* freq = nullptr;
         EXPECT_EQ(ncclSuccess, rma_->iflush(rmaCtx_, 0, recvMh, /*peerRank=*/0, &freq))
             << "multi-segment iflush post failed";
-        EXPECT_TRUE(PollUntilDone(freq)) << "multi-segment flush did not complete";
+        // A NULL request means GDR flush is disabled; there is nothing to wait for.
+        if (freq != nullptr)
+            EXPECT_TRUE(PollUntilDone(freq)) << "multi-segment flush did not complete";
         EXPECT_TRUE(VerifyBuf(rb->ptr, kSize, /*seed=*/0x3C))
             << "data corrupted across segment boundaries after flush";
     }
@@ -884,7 +887,8 @@ TEST_F(RmaMultiSegmentMPITest, IFlushAfterPartialMultiSegmentPut)
         void* freq = nullptr;
         EXPECT_EQ(ncclSuccess, rma_->iflush(rmaCtx_, 0, recvMh, /*peerRank=*/0, &freq))
             << "multi-segment iflush post failed after partial put";
-        EXPECT_TRUE(PollUntilDone(freq)) << "multi-segment flush did not complete";
+        if (freq != nullptr)
+            EXPECT_TRUE(PollUntilDone(freq)) << "multi-segment flush did not complete";
 
         ExpectPayloadIsolated(rb->ptr, rb->totalSize, off, kSize,
                               /*seed=*/0x4F, kSentinel,
@@ -931,7 +935,8 @@ TEST_F(RmaMultiSegmentMPITest, IFlushSingleSegmentRegression)
         void* freq = nullptr;
         EXPECT_EQ(ncclSuccess, rma_->iflush(rmaCtx_, 0, recvMh, /*peerRank=*/0, &freq))
             << "single-segment iflush post failed";
-        EXPECT_TRUE(PollUntilDone(freq)) << "single-segment flush did not complete";
+        if (freq != nullptr)
+            EXPECT_TRUE(PollUntilDone(freq)) << "single-segment flush did not complete";
         EXPECT_TRUE(VerifyBuf(recvBuf, kSize, /*seed=*/0x2D))
             << "data corrupted after single-segment flush";
     }
