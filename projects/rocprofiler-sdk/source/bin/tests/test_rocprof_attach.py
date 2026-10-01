@@ -37,12 +37,6 @@ import pytest
 
 PID = 123
 
-# ctest fails any test whose output matches this (cmake/rocprofiler_options.cmake)
-CTEST_FAIL_REGEX = re.compile(
-    r"threw an exception|Permission denied|failed with error code|Subprocess aborted|"
-    r"Failed to resolve rocprofiler-sdk shared library path"
-)
-
 OTHER_LIBDIR = "/opt/rocm-other/lib"
 SELF_LIBDIR = "/opt/rocm-self/lib"
 SELF_TOOL = f"{SELF_LIBDIR}/rocprofiler-sdk/librocprofiler-sdk-tool.so"
@@ -169,10 +163,19 @@ def fake_rocattach(rocprof_attach, monkeypatch):
     return fake_library
 
 
+def _ctest_fail_regex():
+    """Integration tests that run rocprof-attach fail when their output matches
+    ROCPROFILER_DEFAULT_FAIL_REGEX (cmake/rocprofiler_options.cmake). CMake sets it in the
+    test environment, which is not present when the tests are collected."""
+    fail_regex = os.environ.get("ROCPROFILER_DEFAULT_FAIL_REGEX")
+    assert fail_regex, "ROCPROFILER_DEFAULT_FAIL_REGEX must be set in the environment"
+    return re.compile(fail_regex)
+
+
 def _output(capsys):
     """Returns (stdout, stderr) and checks that ctest would not flag them as a failure."""
     out, err = capsys.readouterr()
-    assert not CTEST_FAIL_REGEX.search(out + err), out + err
+    assert not _ctest_fail_regex().search(out + err), out + err
     return (out, err)
 
 
@@ -188,16 +191,15 @@ def _main(rocprof_attach, *args):
 
 
 def test_default_attach_library_uses_runtime_soname(
-    rocprof_attach, target, fake_rocattach, tmp_path, capsys
+    rocprof_attach, target, fake_rocattach, capsys
 ):
-    tool_library = tmp_path / "tool.so"
-    tool_library.touch()
+    tool_library = target.add_file("/opt/custom/tool.so")
     target.add_thread(PID + 1, "rocp-bg-attach")
 
     result = _main(
         rocprof_attach,
         "--attach-tool-library",
-        str(tool_library),
+        tool_library,
         "--attach-children=false",
     )
 
@@ -544,15 +546,54 @@ def test_user_tool_library_is_used_verbatim(
 ):
     target.run_sdk(OTHER_LIBDIR)
     target.add_thread(PID + 1, "rocp-bg-attach")
-    user = "/opt/custom/libmissing.so:librelative.so"
+    target.add_file("/opt/custom/libfirst.so")
+    target.add_file("/opt/custom/libsecond.so")
+    user = "/opt/custom/libfirst.so:librelative.so:/opt/custom/libsecond.so"
 
     result = _main(rocprof_attach, "--attach-children=false", "-t", user)
     assert result == 0
     assert os.environ["ROCPROF_ATTACH_TOOL_LIBRARY"] == user
     assert fake_rocattach.rocattach_attach.calls == [(PID,)]
     out, err = _output(capsys)
-    assert "'/opt/custom/libmissing.so' is not visible" in err
+    assert "WARNING" not in err
     assert "'librelative.so' will be resolved by the target's dynamic loader" in out
+
+
+@pytest.mark.parametrize("missing", ["first", "last"])
+def test_missing_user_tool_library_is_an_error(
+    rocprof_attach, target, fake_rocattach, capsys, missing
+):
+    target.run_sdk(OTHER_LIBDIR)
+    target.add_thread(PID + 1, "rocp-bg-attach")
+    if missing != "first":
+        target.add_file("/opt/custom/libfirst.so")
+    if missing != "last":
+        target.add_file("/opt/custom/liblast.so")
+    user = "/opt/custom/libfirst.so:librelative.so:/opt/custom/liblast.so"
+
+    result = _main(rocprof_attach, "--attach-children=false", "-t", user)
+    assert result == 1
+    assert not fake_rocattach.loaded_paths
+    assert "ROCPROF_ATTACH_TOOL_LIBRARY" not in os.environ
+    _, err = _output(capsys)
+    assert (
+        f"ERROR: tool library '/opt/custom/lib{missing}.so' is not a file visible from the "
+        f"target process PID {PID}"
+    ) in err
+
+
+def test_empty_user_tool_library_list_is_an_error(
+    rocprof_attach, target, fake_rocattach, capsys
+):
+    target.run_sdk(OTHER_LIBDIR)
+    target.add_thread(PID + 1, "rocp-bg-attach")
+
+    result = _main(rocprof_attach, "--attach-children=false", "-t", "::")
+    assert result == 1
+    assert not fake_rocattach.loaded_paths
+    assert "ROCPROF_ATTACH_TOOL_LIBRARY" not in os.environ
+    _, err = _output(capsys)
+    assert "ERROR: no tool library was given in the tool library list '::'" in err
 
 
 def test_rocp_tool_libraries_is_ignored(

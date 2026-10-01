@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -32,6 +32,7 @@
 #include <rocprofiler-sdk-rocattach/rocattach.h>
 #include <rocprofiler-sdk-rocattach/types.h>
 #include <rocprofiler-sdk/version.h>
+#include <rocprofiler-sdk/cxx/details/tokenize.hpp>
 
 #include <fstream>
 #include <map>
@@ -333,8 +334,9 @@ setup(int pid)
     const char* tool_lib_path = tool_lib_path_env.c_str();
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] Tool library path: " << tool_lib_path;
 
-    auto tool_path = fs::path{tool_lib_path_env};
-    if(tool_path.empty())
+    // The tool library path is a colon-delimited list of libraries
+    auto tool_paths = sdk::parse::tokenize(tool_lib_path_env, ":");
+    if(tool_paths.empty())
     {
         ROCP_ERROR << "[rocprofiler-sdk-rocattach] Tool library path must not be empty.";
         return ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT;
@@ -342,8 +344,12 @@ setup(int pid)
 
     // Bare or relative library names must be resolved by dlopen in the target
     // process using the target's loader search path and working directory.
-    if(tool_path.is_absolute())
+    // Any invalid library fails the attachment.
+    for(const auto& itr : tool_paths)
     {
+        auto tool_path = fs::path{itr};
+        if(!tool_path.is_absolute()) continue;
+
         status = validate_target_absolute_tool_path(pid, tool_path);
         if(status != ROCATTACH_STATUS_SUCCESS)
         {
