@@ -2,29 +2,16 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Fail an RCCL pull request that changes an env var without documenting it.
+"""Require changelog and documentation updates for RCCL env-var changes.
 
-Watches ``NCCL_PARAM``, ``RCCL_PARAM``, ``RCCL_PARAM_NCCL_ALIAS``,
-``DEFINE_NCCL_PARAM``, and any string literal under ``projects/rccl/src``
-that is exactly an ``NCCL_...`` / ``RCCL_...`` name, which is how ``getenv``,
-``ncclGetEnv``, and ``os.environ`` read a variable. A new name, a removed
-name, or an edit of a default must appear in an added line of
-``projects/rccl/CHANGELOG.md``. A new name that neither env-var page in
-``ENV_DOCS`` names gets a warning and a PR comment, but the check still
-passes. ``[no-behavior-change]`` in the PR title, body, or a commit subject
-records an override and lets the check pass; ``[internal-env]`` silences the
-docs warning, for a knob not meant for users.
+Tracks declarations, exact ``NCCL_`` / ``RCCL_`` string reads, and new
+``ncclParam`` / ``rcclParam`` uses under ``projects/rccl/src``. Documentation
+must change the entry's prose, not only name the variable. NCCL-only findings
+may use either env-var page; findings containing an RCCL name require the RCCL
+page.
 
-A name inside longer text, such as a log message, is not a change by itself;
-it is listed with the variable's other places. A declaration may continue onto
-the following lines until its parentheses balance; comments are not part of
-it. A declaration in a changed file that still does not parse fails the check,
-because its variable cannot be checked. Places are paired by variable across
-all changed files, so moving a declaration is not a change but moving it with
-a new default is. Each variable is reported once: a new or removed one lists
-every line in the changed files that names it, a default change lists its
-declarations. A name that product source already declares or reads is not a
-new variable.
+``[no-behavior-change]`` overrides the check. ``[internal-env]`` waives only
+the documentation update.
 """
 
 import argparse
@@ -42,10 +29,9 @@ from typing import Literal
 
 SRC_TREE = "projects/rccl/src/"
 CHANGELOG = "projects/rccl/CHANGELOG.md"
-ENV_DOCS = (
-    "projects/rccl/docs/userguide/source/env.rst",
-    "projects/rccl/docs/api-reference/env-variables.rst",
-)
+NCCL_ENV_DOC = "projects/rccl/docs/userguide/source/env.rst"
+RCCL_ENV_DOC = "projects/rccl/docs/api-reference/env-variables.rst"
+ENV_DOCS = (NCCL_ENV_DOC, RCCL_ENV_DOC)
 COMMENT_MARKER = "<!-- rccl-default-behavior -->"
 COMMENT_AUTHOR = "github-actions[bot]"
 PASS_MESSAGE = "No undocumented RCCL or NCCL environment-variable changes."
@@ -62,17 +48,26 @@ _PAGE_SIZE = 100
 
 _MACROS = ("DEFINE_NCCL_PARAM", "RCCL_PARAM_NCCL_ALIAS", "RCCL_PARAM", "NCCL_PARAM")
 _OPENER_RE = re.compile(rf"^(?:{'|'.join(_MACROS)})\s*\(")
-_FULL_ENV_RE = re.compile(r"(?:NCCL|RCCL)_[A-Za-z0-9_]+")
-_STRING_RE = re.compile(r'"(?:[^"\\]|\\.)*"')
 _ENV_EDGE = r"[A-Za-z0-9_]"
+_FULL_ENV_RE = re.compile(rf"(?:NCCL|RCCL)_[A-Za-z0-9_]+")
+_ENV_NAME_RE = re.compile(rf"(?<!{_ENV_EDGE})(?:NCCL|RCCL)_[A-Za-z0-9_]+(?!{_ENV_EDGE})")
+_STRING_RE = re.compile(r'"(?:[^"\\]|\\.)*"')
+_ACCESSOR_RE = re.compile(r"\b(?:ncclParam|rcclParam)[A-Za-z0-9_]+\b")
+_DECL_GREP = r"NCCL_PARAM\s*\(|RCCL_PARAM(_NCCL_ALIAS)?\s*\(|DEFINE_NCCL_PARAM\s*\("
+_IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _PREFIXES = {
     "NCCL_PARAM": ("NCCL_",),
     "RCCL_PARAM": ("RCCL_",),
     "RCCL_PARAM_NCCL_ALIAS": ("RCCL_", "NCCL_"),
 }
+_ACCESSOR_PREFIX = {
+    "NCCL_PARAM": "ncclParam",
+    "RCCL_PARAM": "rcclParam",
+    "RCCL_PARAM_NCCL_ALIAS": "rcclParam",
+}
 
-Kind = Literal["added", "removed", "default"]
-_KIND_RANK: dict[Kind, int] = {"default": 0, "removed": 1, "added": 2}
+Kind = Literal["added", "removed", "default", "referenced"]
+_KIND_RANK: dict[Kind, int] = {"default": 0, "removed": 1, "added": 2, "referenced": 3}
 
 
 @dataclass(frozen=True)
@@ -89,6 +84,7 @@ class ParamCall:
     path: str
     line: int
     mention: bool = False
+    accessor: str | None = None
 
 
 @dataclass(frozen=True, order=True)
@@ -176,7 +172,22 @@ def parse_declaration(code: str, path: str, line_no: int) -> ParamCall | None:
         names, default = tuple(prefix + args[1][1:-1] for prefix in _PREFIXES[macro]), args[2]
     else:
         return None
-    return ParamCall(env_names=names, default=default, path=path, line=line_no)
+    return ParamCall(
+        env_names=names,
+        default=default,
+        path=path,
+        line=line_no,
+        accessor=_accessor_symbol(macro, args[0]),
+    )
+
+
+def _accessor_symbol(macro: str, c_name: str) -> str | None:
+    """Derive the accessor symbol, preserving lowercase C names."""
+    if _IDENT_RE.fullmatch(c_name) is None:
+        return None
+    if macro == "DEFINE_NCCL_PARAM":
+        return c_name if _ACCESSOR_RE.fullmatch(c_name) else None
+    return _ACCESSOR_PREFIX[macro] + c_name
 
 
 def _split_args(text: str) -> list[str]:
@@ -294,6 +305,67 @@ def _pair_name(name: str, old: list[ParamCall], new: list[ParamCall]) -> Finding
     )
 
 
+def reference_findings(
+    before: dict[str, str],
+    after: dict[str, str],
+    accessors: dict[str, tuple[str, ...]],
+) -> list[Finding]:
+    """Find declared accessors gained by more changed files than lose them."""
+    gained: dict[str, list[Place]] = {}
+    lost: dict[str, int] = {}
+    for path in sorted(set(before) | set(after)):
+        old = {symbol for symbol, _line in _accessors_in(before.get(path, ""))}
+        by_symbol: dict[str, list[Place]] = {}
+        for symbol, line in _accessors_in(after.get(path, "")):
+            by_symbol.setdefault(symbol, []).append(Place(path, line))
+        for symbol, places in by_symbol.items():
+            if symbol not in old:
+                gained.setdefault(symbol, []).extend(places)
+        for symbol in old - by_symbol.keys():
+            lost[symbol] = lost.get(symbol, 0) + 1
+    found: list[Finding] = []
+    for symbol, places in sorted(gained.items()):
+        env_names = accessors.get(symbol)
+        if not env_names:
+            continue
+        if len({place.path for place in places}) <= lost.get(symbol, 0):
+            continue
+        found.append(
+            Finding(
+                kind="referenced",
+                env_names=env_names,
+                old_default=None,
+                new_default=None,
+                places=tuple(sorted(set(places))),
+            )
+        )
+    return found
+
+
+def _accessors_in(source: str) -> list[tuple[str, int]]:
+    """``ncclParamFoo`` / ``rcclParamFoo`` identifiers outside comments and strings."""
+    found: list[tuple[str, int]] = []
+    for number, line in enumerate(source.splitlines(), start=1):
+        if line.strip().startswith("* "):
+            continue
+        code = _STRING_RE.sub('""', _strip_comments(line))
+        found.extend((match.group(0), number) for match in _ACCESSOR_RE.finditer(code))
+    return found
+
+
+def accessors_defined(sources: dict[str, str]) -> dict[str, tuple[str, ...]]:
+    index: dict[str, list[str]] = {}
+    for path in sorted(sources):
+        for call in calls_in(sources[path], path):
+            if call.accessor is None:
+                continue
+            bucket = index.setdefault(call.accessor, [])
+            for name in call.env_names:
+                if name not in bucket:
+                    bucket.append(name)
+    return {symbol: tuple(names) for symbol, names in index.items()}
+
+
 def _values(calls: list[ParamCall]) -> str | None:
     values = sorted({call.default for call in calls if call.default is not None})
     if not values:
@@ -325,6 +397,8 @@ def mentions(text: str, finding: Finding) -> bool:
 def suggestion(finding: Finding) -> str:
     """A CHANGELOG bullet with the variable and default filled in."""
     name = f"`{finding.primary_env}`"
+    if finding.kind == "referenced":
+        return f"* {name}: <why>"
     if finding.kind == "default":
         old = _tick(finding.old_default) or "none"
         new = _tick(finding.new_default) or "none"
@@ -341,10 +415,12 @@ def suggestion(finding: Finding) -> str:
 def _annotations(finding: Finding) -> list[str]:
     """One annotation per place, so each changed file shows it inline.
 
-    A missing CHANGELOG line is an ``::error`` and a missing doc entry is a
-    ``::warning``. A removal has no line, so it gets one per file.
+    A missing CHANGELOG line and a missing doc entry are both ``::error``.
+    A removal has no line, so it gets one per file.
     """
-    if finding.kind == "added" and finding.new_default is None:
+    if finding.kind == "referenced":
+        detail = "newly referenced"
+    elif finding.kind == "added" and finding.new_default is None:
         detail = "added"
     elif finding.kind == "added":
         detail = f"added with default {finding.new_default}"
@@ -358,9 +434,10 @@ def _annotations(finding: Finding) -> list[str]:
     if finding.needs_changelog:
         asks.append(("error", f"Name it in {CHANGELOG}, or put {SKIP_TOKEN} in the PR title or body."))
     if finding.needs_docs:
+        pages = " or ".join(doc_pages_for(finding))
         asks.append((
-            "warning",
-            f"Document it in {' or '.join(ENV_DOCS)}, or put {INTERNAL_TOKEN} in the PR title or body "
+            "error",
+            f"Describe this change in {pages}, or put {INTERNAL_TOKEN} in the PR title or body "
             "if it is not meant for users.",
         ))
     return list(dict.fromkeys(
@@ -404,11 +481,14 @@ def _summary(undocumented: list[Finding], unreadable: list[Place]) -> str:
         bullets = [suggestion(item) for item in undocumented if item.needs_changelog]
         if bullets:
             sections.append(f"Paste into `{CHANGELOG}`:\n\n" + "\n".join(bullets) + "\n")
-        entries = [suggestion(item).removesuffix(": <why>") for item in undocumented if item.needs_docs]
-        if entries:
-            pages = " or ".join(f"`{path}`" for path in ENV_DOCS)
+        grouped: dict[tuple[str, ...], list[str]] = {}
+        for item in undocumented:
+            if item.needs_docs:
+                grouped.setdefault(doc_pages_for(item), []).append(suggestion(item).removesuffix(": <why>"))
+        for pages, entries in grouped.items():
+            listed = " or ".join(f"`{path}`" for path in pages)
             sections.append(
-                f"Not blocking: document these in {pages}, or put `{INTERNAL_TOKEN}` in the PR title "
+                f"Describe these changes in {listed}, or put `{INTERNAL_TOKEN}` in the PR title "
                 "or body if the variable is not meant for users:\n\n" + "\n".join(entries) + "\n"
             )
     if unreadable:
@@ -417,14 +497,62 @@ def _summary(undocumented: list[Finding], unreadable: list[Place]) -> str:
     return "\n".join(sections)
 
 
+def doc_pages_for(finding: Finding) -> tuple[str, ...]:
+    """NCCL-only findings may use either page; RCCL findings require its page."""
+    nccl = any(name.startswith("NCCL_") for name in finding.env_names)
+    rccl = any(name.startswith("RCCL_") for name in finding.env_names)
+    if nccl and not rccl:
+        return ENV_DOCS
+    return (RCCL_ENV_DOC,)
+
+
+def _doc_regions(text: str) -> dict[str, str]:
+    """Each env var's entry, from its name to the next, with whitespace collapsed."""
+    collapsed = re.sub(r"\s+", " ", text).strip()
+    names = list(_ENV_NAME_RE.finditer(collapsed))
+    regions: dict[str, str] = {}
+    for index, match in enumerate(names):
+        end = names[index + 1].start() if index + 1 < len(names) else len(collapsed)
+        name = match.group(0)
+        regions[name] = regions.get(name, "") + collapsed[match.start() : end].strip()
+    return regions
+
+
+def _entry_prose(region: str | None, name: str) -> str:
+    """Words in an entry besides the variable name. Markup and spacing drop out."""
+    if not region:
+        return ""
+    body = re.sub(rf"(?<!{_ENV_EDGE}){re.escape(name)}(?!{_ENV_EDGE})", " ", region)
+    words = re.findall(r"-?\d+|[A-Za-z0-9]+", body)
+    return " ".join(word.casefold() for word in words)
+
+
+def _region_maps(pages: dict[str, str]) -> dict[str, dict[str, str]]:
+    return {path: _doc_regions(pages.get(path, "")) for path in ENV_DOCS}
+
+
+def _docs_cover(
+    finding: Finding,
+    before: dict[str, dict[str, str]],
+    after: dict[str, dict[str, str]],
+) -> bool:
+    """Accept changed entry prose; it need not repeat the exact code change."""
+    for page in doc_pages_for(finding):
+        old = before.get(page, {})
+        new = after.get(page, {})
+        for name in finding.env_names:
+            if _entry_prose(old.get(name), name) != _entry_prose(new.get(name), name):
+                return True
+    return False
+
+
 def _missing(finding: Finding) -> str:
     needed = [("CHANGELOG", finding.needs_changelog), ("docs", finding.needs_docs)]
     return ", ".join(label for label, missing in needed if missing)
 
 
 def _blocks(undocumented: list[Finding], unreadable: list[Place]) -> bool:
-    """Whether the check fails. A missing doc entry alone does not fail it."""
-    return bool(unreadable) or any(item.needs_changelog for item in undocumented)
+    return bool(unreadable) or any(item.needs_changelog or item.needs_docs for item in undocumented)
 
 
 def report(undocumented: list[Finding], unreadable: list[Place], skipped: bool) -> int:
@@ -550,24 +678,20 @@ def evaluate(
     changed: list[Finding],
     *,
     changelog_added: str,
-    env_docs: str,
+    env_docs: dict[str, str],
     internal: bool,
     known_before: set[str],
     known_after: set[str],
+    env_docs_before: dict[str, str] | None = None,
 ) -> list[Finding]:
-    """Return the findings that still need a CHANGELOG line or a doc entry.
-
-    ``env_docs`` is the text of the ``ENV_DOCS`` pages at HEAD, and
-    ``internal`` is whether the PR records ``[internal-env]``.
-    ``known_before`` / ``known_after`` are the names among ``changed`` that
-    product source has at the base / at HEAD. A new read of a name the base
-    already has is not a new variable, and dropping reads of a name HEAD still
-    has is not a removal.
-    """
+    """Mark findings lacking changelog or documentation coverage."""
+    before_docs = {path: "" for path in ENV_DOCS} if env_docs_before is None else env_docs_before
+    old_regions = _region_maps(before_docs)
+    new_regions = _region_maps(env_docs)
     pending: list[Finding] = []
     for item in _one_per_variable(_without_existing(changed, known_before, known_after)):
         needs_changelog = not mentions(changelog_added, item)
-        needs_docs = item.kind == "added" and not internal and not mentions(env_docs, item)
+        needs_docs = not internal and not _docs_cover(item, old_regions, new_regions)
         if needs_changelog or needs_docs:
             pending.append(replace(item, needs_changelog=needs_changelog, needs_docs=needs_docs))
     return pending
@@ -635,9 +759,7 @@ def changed_sources(repo: Path, base_ref: str) -> tuple[dict[str, str], dict[str
     ).split("\0")
     statuses = list(zip(fields[0::2], fields[1::2]))
     if statuses:
-        # A sparse actions/checkout is a blobless partial clone. One content
-        # diff fetches every missing base blob in a single request; each
-        # `git show` would otherwise fetch its own.
+        # Prefetch base blobs once; repeated `git show` calls fetch them individually.
         _git(repo, ["diff", "--shortstat", base_ref, "HEAD", "--", SRC_TREE, CHANGELOG])
     before: dict[str, str] = {}
     after: dict[str, str] = {}
@@ -679,9 +801,28 @@ def changelog_additions(repo: Path, base_ref: str) -> str:
     )
 
 
-def env_doc_text(repo: Path) -> str:
-    """The ``ENV_DOCS`` pages at HEAD."""
-    return "\n".join(_git(repo, ["show", f"HEAD:{path}"]) for path in ENV_DOCS)
+def accessor_map(repo: Path) -> dict[str, tuple[str, ...]]:
+    """Map ``ncclParamFoo`` / ``rcclParamFoo`` to the env names declared at HEAD."""
+    listed = _git(repo, ["grep", "-I", "-l", "-z", "-E", _DECL_GREP, "HEAD", "--", SRC_TREE], ok=(0, 1))
+    sources: dict[str, str] = {}
+    for entry in listed.split("\0"):
+        if not entry:
+            continue
+        _rev, separator, path = entry.partition(":")
+        if not separator:
+            continue
+        sources[path] = _git(repo, ["show", entry])
+    return accessors_defined(sources)
+
+
+def env_doc_pair(repo: Path, base_ref: str) -> tuple[dict[str, str], dict[str, str]]:
+    """Treat pages missing at either revision as empty."""
+    before: dict[str, str] = {}
+    after: dict[str, str] = {}
+    for path in ENV_DOCS:
+        before[path] = _git(repo, ["show", f"{base_ref}:{path}"], ok=(0, 128))
+        after[path] = _git(repo, ["show", f"HEAD:{path}"], ok=(0, 128))
+    return before, after
 
 
 def git_root() -> Path:
@@ -689,16 +830,28 @@ def git_root() -> Path:
     return Path(_git(Path("."), ["rev-parse", "--show-toplevel"]).strip())
 
 
+def _new_accessor(before: dict[str, str], after: dict[str, str]) -> bool:
+    for path in set(before) | set(after):
+        old = {symbol for symbol, _line in _accessors_in(before.get(path, ""))}
+        if any(symbol not in old for symbol, _line in _accessors_in(after.get(path, ""))):
+            return True
+    return False
+
+
 def check(repo: Path, base_ref: str, override_texts: list[str]) -> int:
     """Run the check against ``base_ref``. Return 0 when the PR may merge."""
     before, after = changed_sources(repo, base_ref)
     changed = findings_between(before, after)
+    if _new_accessor(before, after):
+        changed.extend(reference_findings(before, after, accessor_map(repo)))
     overrides = "\n".join([*override_texts, _git(repo, ["log", "--pretty=%s", f"{base_ref}..HEAD"])])
     added = _env_names(changed, "added")
+    docs_before, docs_after = env_doc_pair(repo, base_ref) if changed else ({}, {})
     pending = evaluate(
         changed,
         changelog_added=changelog_additions(repo, base_ref) if changed else "",
-        env_docs=env_doc_text(repo) if added else "",
+        env_docs=docs_after,
+        env_docs_before=docs_before,
         internal=INTERNAL_TOKEN in overrides,
         known_before=known_names(repo, base_ref, added),
         known_after=known_names(repo, "HEAD", _env_names(changed, "removed")),

@@ -3,13 +3,6 @@
 
 name: RCCL default behavior
 
-# A PR that adds, removes, or changes the default of an RCCL_ / NCCL_
-# environment variable under projects/rccl/src must name it in
-# projects/rccl/CHANGELOG.md. A new variable missing from both RCCL env-var
-# doc pages gets a warning and a PR comment but does not fail the check
-# (AICOMRCCL-1904). The rules are in
-# .github/scripts/rccl_check_default_behavior.py.
-#
 # Every PR into develop waits for this check, so the job runs only git and the
 # script on the runner's python3, and the script must stay standard-library
 # only. Its tests run in rccl-default-behavior-test.yml, which is not required.
@@ -17,11 +10,6 @@ name: RCCL default behavior
 # No `paths:` filter: a path-skipped workflow reports no check, so a required
 # status would never pass on a PR that does not touch RCCL. The script exits 0
 # when the diff has no env-var change.
-#
-# [no-behavior-change] in the PR title or body records an override;
-# [internal-env] silences the docs warning, for a knob not meant for users.
-# Either also counts in a commit subject in the fetched history; at depth 2
-# that is only the PR's latest commit.
 #
 # pull-requests: write lets the script keep one marker-tagged PR comment up to
 # date with the workflow token; it grants no write access to repository
@@ -52,10 +40,7 @@ jobs:
         with:
           # HEAD^ on a pull_request merge commit is the base branch tip.
           fetch-depth: 2
-          # This is a blobless partial clone, so only blobs in the cone are
-          # local. The script greps all of projects/rccl/src at HEAD and HEAD^;
-          # outside the cone every blob it reads would be fetched on demand.
-          # The docs directories hold the script's ENV_DOCS pages.
+          # Broad source scans would otherwise fetch blobs individually.
           sparse-checkout: |
             .github/scripts
             projects/rccl/src

@@ -30,19 +30,27 @@ def _outside_actions(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(name, raising=False)
 
 
+def _pages(value: str | dict[str, str]) -> dict[str, str]:
+    if isinstance(value, str):
+        return {path: value for path in gate.ENV_DOCS}
+    return value
+
+
 def _pending(
     before: dict[str, str],
     after: dict[str, str],
     changelog_added: str = "",
-    env_docs: str = "",
+    env_docs: str | dict[str, str] = "",
     *,
+    env_docs_before: str | dict[str, str] | None = None,
     internal: bool = False,
     known: tuple[str, ...] = (),
 ) -> list[gate.Finding]:
     return gate.evaluate(
         gate.findings_between(before, after),
         changelog_added=changelog_added,
-        env_docs=env_docs,
+        env_docs=_pages(env_docs),
+        env_docs_before=None if env_docs_before is None else _pages(env_docs_before),
         internal=internal,
         known_before=set(known),
         known_after=set(known),
@@ -58,14 +66,64 @@ def test_a_new_param_needs_a_changelog_line_and_a_doc_entry() -> None:
     ]
     assert [(item.needs_changelog, item.needs_docs) for item in pending] == [(True, True)]
     assert [(item.needs_changelog, item.needs_docs) for item in _pending({}, after, changelog)] == [(False, True)]
-    assert _pending({}, after, changelog, env_docs="``NCCL_RMA_DISABLE``\n") == []
+    assert _pending({}, after, changelog, env_docs="``NCCL_RMA_DISABLE``\n") != []
+    assert _pending({}, after, changelog, env_docs="``NCCL_RMA_DISABLE`` turns RMA off.\n") == []
 
 
-def test_only_a_new_variable_needs_a_doc_entry() -> None:
+def test_the_nccl_userguide_covers_only_nccl_variables() -> None:
+    nccl = {SRC: f"{NEW_PARAM}\n"}
+    rccl = {SRC: 'RCCL_PARAM(Fast, "FAST", 1);\n'}
+    nccl_log = "* `NCCL_RMA_DISABLE` (default `0`): off"
+    rccl_log = "* `RCCL_FAST` (default `1`): on"
+    described = "NCCL_RMA_DISABLE disables RMA.\nRCCL_FAST enables the fast path.\n"
+    only_nccl_page = {gate.NCCL_ENV_DOC: described, gate.RCCL_ENV_DOC: ""}
+    only_rccl_page = {gate.NCCL_ENV_DOC: "", gate.RCCL_ENV_DOC: described}
+
+    assert _pending({}, nccl, nccl_log, only_nccl_page) == []
+    assert _pending({}, nccl, nccl_log, only_rccl_page) == []
+    assert _pending({}, rccl, rccl_log, only_rccl_page) == []
+
+    pending = _pending({}, rccl, rccl_log, only_nccl_page)
+    assert [(item.needs_changelog, item.needs_docs, gate.doc_pages_for(item)) for item in pending] == [
+        (False, True, (gate.RCCL_ENV_DOC,))
+    ]
+    assert gate.NCCL_ENV_DOC not in gate._annotations(pending[0])[0]
+    assert gate.RCCL_ENV_DOC in gate._annotations(pending[0])[0]
+
+
+def test_every_change_needs_a_doc_entry_whose_content_changed() -> None:
     before = {SRC: f"{NEW_PARAM}\n"}
     retuned = {SRC: NEW_PARAM.replace(", 0)", ", 1)") + "\n"}
-    assert [(item.kind, item.needs_docs) for item in _pending(before, retuned)] == [("default", False)]
-    assert [(item.kind, item.needs_docs) for item in _pending(before, {SRC: "int x;\n"})] == [("removed", False)]
+    unchanged = {gate.NCCL_ENV_DOC: "``NCCL_RMA_DISABLE`` default 0\n", gate.RCCL_ENV_DOC: ""}
+    spaced = {gate.NCCL_ENV_DOC: "``NCCL_RMA_DISABLE``\n\tdefault   0\n", gate.RCCL_ENV_DOC: ""}
+    updated = {gate.NCCL_ENV_DOC: "``NCCL_RMA_DISABLE`` default 1\n", gate.RCCL_ENV_DOC: ""}
+    changelog = "* `NCCL_RMA_DISABLE` default changed `0` -> `1`"
+
+    assert [(item.kind, item.needs_docs) for item in _pending(before, retuned)] == [("default", True)]
+    assert [(item.kind, item.needs_docs) for item in _pending(before, {SRC: "int x;\n"})] == [("removed", True)]
+    assert _pending(before, retuned, changelog, unchanged, env_docs_before=unchanged) != []
+    assert _pending(before, retuned, changelog, spaced, env_docs_before=unchanged) != []
+    assert _pending(before, retuned, changelog, updated, env_docs_before=unchanged) == []
+    rewritten = {
+        gate.NCCL_ENV_DOC: "``NCCL_RMA_DISABLE`` stays off unless the job asks for RMA.\n",
+        gate.RCCL_ENV_DOC: "",
+    }
+    assert _pending(before, retuned, changelog, rewritten, env_docs_before=unchanged) == []
+    named_only = {
+        gate.NCCL_ENV_DOC: "``NCCL_RMA_DISABLE`` default 0\n``NCCL_RMA_DISABLE``\n",
+        gate.RCCL_ENV_DOC: "",
+    }
+    assert _pending(before, retuned, changelog, named_only, env_docs_before=unchanged) != []
+
+    neighbor = {
+        gate.NCCL_ENV_DOC: "``NCCL_RMA_DISABLE`` default 0\n``NCCL_OTHER`` default 2\n",
+        gate.RCCL_ENV_DOC: "",
+    }
+    neighbor_edit = {
+        gate.NCCL_ENV_DOC: "``NCCL_RMA_DISABLE`` default 0\n``NCCL_OTHER`` default 3\n",
+        gate.RCCL_ENV_DOC: "",
+    }
+    assert _pending(before, retuned, changelog, neighbor_edit, env_docs_before=neighbor) != []
 
 
 def test_internal_env_waives_the_doc_entry_but_not_the_changelog() -> None:
@@ -73,15 +131,15 @@ def test_internal_env_waives_the_doc_entry_but_not_the_changelog() -> None:
     assert [(item.needs_changelog, item.needs_docs) for item in pending] == [(True, False)]
 
 
-def test_a_missing_changelog_line_is_an_error_and_a_missing_doc_entry_a_warning() -> None:
+def test_a_missing_changelog_line_and_a_missing_doc_entry_are_errors() -> None:
     finding = _pending({}, {SRC: f"{NEW_PARAM}\n"})[0]
     pages = f"{gate.ENV_DOCS[0]} or {gate.ENV_DOCS[1]}"
-    error, warning = gate._annotations(finding)
-    assert error.startswith(f"::error file={SRC},line=1::")
-    assert f"Name it in {gate.CHANGELOG}, or put {gate.SKIP_TOKEN}" in error
-    assert warning.startswith(f"::warning file={SRC},line=1::")
-    assert f"Document it in {pages}, or put {gate.INTERNAL_TOKEN}" in warning
-    assert gate._annotations(replace(finding, needs_changelog=False)) == [warning]
+    changelog, docs = gate._annotations(finding)
+    assert changelog.startswith(f"::error file={SRC},line=1::")
+    assert f"Name it in {gate.CHANGELOG}, or put {gate.SKIP_TOKEN}" in changelog
+    assert docs.startswith(f"::error file={SRC},line=1::")
+    assert f"Describe this change in {pages}, or put {gate.INTERNAL_TOKEN}" in docs
+    assert gate._annotations(replace(finding, needs_changelog=False)) == [docs]
 
 
 def test_default_edit_reports_old_and_new_values() -> None:
@@ -172,8 +230,10 @@ def test_removed_param_reports_only_its_old_default() -> None:
     ]
     assert "| removed | `0` |  |" in gate._summary(pending, [])
     annotations = gate._annotations(pending[0])
-    assert len(annotations) == 1
+    assert len(annotations) == 2
     assert annotations[0].startswith(f"::error file={SRC}::")
+    assert "Name it in" in annotations[0]
+    assert gate.NCCL_ENV_DOC in annotations[1]
 
 
 def test_log_text_alone_is_not_an_env_change() -> None:
@@ -193,7 +253,9 @@ def test_a_new_variable_lists_its_log_mentions_too() -> None:
 def test_alias_is_covered_by_either_prefix() -> None:
     after = {SRC: 'RCCL_PARAM_NCCL_ALIAS(IbCast, "IB_CAST", -1);\n'}
     assert _pending({}, after)[0].env_names == ("RCCL_IB_CAST", "NCCL_IB_CAST")
-    assert _pending({}, after, "* NCCL_IB_CAST now aliases RCCL_IB_CAST", env_docs="``RCCL_IB_CAST``") == []
+    assert _pending(
+        {}, after, "* NCCL_IB_CAST now aliases RCCL_IB_CAST", env_docs="``RCCL_IB_CAST`` accepts the NCCL name.\n"
+    ) == []
 
 
 def test_adding_or_dropping_the_nccl_alias_adds_or_removes_that_name() -> None:
@@ -230,8 +292,8 @@ def test_one_entry_per_variable_lists_every_file() -> None:
     assert [line.split("::")[1] for line in gate._annotations(pending[0])] == [
         f"error file={init},line=1",
         f"error file={scheduler},line=1",
-        f"warning file={init},line=1",
-        f"warning file={scheduler},line=1",
+        f"error file={init},line=1",
+        f"error file={scheduler},line=1",
     ]
 
 
@@ -356,6 +418,111 @@ def test_new_getenv_and_define_param_are_env_changes() -> None:
     assert pending[0].new_default == "NCCL_LOG_WARN"
 
 
+def test_a_new_accessor_use_references_an_existing_variable() -> None:
+    decl = 'NCCL_PARAM(IbMatching, "IB_MATCHING", -2);\n'
+    call = "if (ncclParamIbMatching()) return;\n"
+    accessors = gate.accessors_defined({"projects/rccl/src/p2p.cc": decl})
+    assert accessors == {"ncclParamIbMatching": ("NCCL_IB_MATCHING",)}
+
+    init = "projects/rccl/src/init.cc"
+    refs = gate.reference_findings({init: "int x;\n"}, {init: f"int x;\n{call}"}, accessors)
+    pending = gate.evaluate(
+        refs,
+        changelog_added="",
+        env_docs={},
+        internal=False,
+        known_before={"NCCL_IB_MATCHING"},
+        known_after=set(),
+    )
+    assert [(item.kind, item.primary_env, item.needs_changelog, item.needs_docs, item.places) for item in pending] == [
+        ("referenced", "NCCL_IB_MATCHING", True, True, (gate.Place(init, 2),))
+    ]
+    assert "newly referenced" in gate._annotations(pending[0])[0]
+    assert gate.suggestion(pending[0]) == "* `NCCL_IB_MATCHING`: <why>"
+    assert (
+        gate.evaluate(
+            refs,
+            changelog_added="* NCCL_IB_MATCHING now gates init",
+            env_docs={gate.NCCL_ENV_DOC: "NCCL_IB_MATCHING now gates init\n", gate.RCCL_ENV_DOC: ""},
+            internal=False,
+            known_before={"NCCL_IB_MATCHING"},
+            known_after=set(),
+        )
+        == []
+    )
+
+
+def test_rccl_param_and_alias_accessors_resolve() -> None:
+    plain = 'RCCL_PARAM(Fast, "FAST", 1);\n'
+    alias = 'RCCL_PARAM_NCCL_ALIAS(IbCast, "IB_CAST", -1);\n'
+    defined = 'DEFINE_NCCL_PARAM(ncclParamDebugLevel, int, NCCL_DEBUG, 0, 0, parser, "d");\n'
+    accessors = gate.accessors_defined({SRC: plain + alias + defined})
+    assert accessors["rcclParamFast"] == ("RCCL_FAST",)
+    assert accessors["rcclParamIbCast"] == ("RCCL_IB_CAST", "NCCL_IB_CAST")
+    assert accessors["ncclParamDebugLevel"] == ("NCCL_DEBUG",)
+
+    call = {SRC: "if (rcclParamIbCast()) return;\n"}
+    pending = gate.evaluate(
+        gate.reference_findings({}, call, accessors),
+        changelog_added="* `NCCL_IB_CAST`: shared",
+        env_docs={gate.NCCL_ENV_DOC: "", gate.RCCL_ENV_DOC: "RCCL_IB_CAST shared with NCCL\n"},
+        internal=False,
+        known_before={"RCCL_IB_CAST", "NCCL_IB_CAST"},
+        known_after=set(),
+    )
+    assert pending == []
+
+
+def test_an_accessor_already_used_or_only_moved_is_not_new() -> None:
+    decl = 'NCCL_PARAM(IbMatching, "IB_MATCHING", -2);\n'
+    call = "if (ncclParamIbMatching()) return;\n"
+    accessors = gate.accessors_defined({SRC: decl})
+    assert gate.reference_findings({SRC: call}, {SRC: call + call}, accessors) == []
+    moved = gate.reference_findings({SRC: call}, {"projects/rccl/src/other.cc": call}, accessors)
+    assert moved == []
+
+
+def test_a_lowercase_param_name_is_still_an_accessor() -> None:
+    decl = 'RCCL_PARAM(disableReduceCopyPipelining, "DISABLE_REDUCE_COPY_PIPELINING", 0);\n'
+    accessors = gate.accessors_defined({SRC: decl})
+    symbol = "rcclParamdisableReduceCopyPipelining"
+    assert accessors[symbol] == ("RCCL_DISABLE_REDUCE_COPY_PIPELINING",)
+    refs = gate.reference_findings({}, {SRC: f"if ({symbol}()) return;\n"}, accessors)
+    assert [item.primary_env for item in refs] == ["RCCL_DISABLE_REDUCE_COPY_PIPELINING"]
+
+
+def test_param_machinery_and_comments_are_not_accessor_uses() -> None:
+    decl = 'NCCL_PARAM(IbMatching, "IB_MATCHING", -2);\n'
+    accessors = gate.accessors_defined({SRC: decl})
+    source = "\n".join(
+        [
+            "ncclParamOneOf<int> parser;",
+            "struct ncclParamInterface;",
+            "rcclParamMutex##name",
+            " * ncclParamIbMatching() in a comment",
+            '// ncclParamIbMatching()',
+            'WARN("ncclParamIbMatching() is not a call");',
+        ]
+    )
+    assert gate.reference_findings({}, {SRC: source + "\n"}, accessors) == []
+
+
+def test_a_new_variable_and_its_accessor_call_are_one_finding() -> None:
+    source = 'NCCL_PARAM(IbMatching, "IB_MATCHING", -2);\nif (ncclParamIbMatching()) return;\n'
+    accessors = gate.accessors_defined({SRC: source})
+    pending = gate.evaluate(
+        [*gate.findings_between({}, {SRC: source}), *gate.reference_findings({}, {SRC: source}, accessors)],
+        changelog_added="",
+        env_docs={},
+        internal=False,
+        known_before=set(),
+        known_after=set(),
+    )
+    assert [(item.kind, item.primary_env, item.places) for item in pending] == [
+        ("added", "NCCL_IB_MATCHING", (gate.Place(SRC, 1), gate.Place(SRC, 2)))
+    ]
+
+
 def test_a_second_read_of_an_existing_env_is_not_new() -> None:
     first = 'const char* proto = ncclGetEnv("NCCL_PROTO");\n'
     second = first + 'const char* again = getenv("NCCL_PROTO");\n'
@@ -423,6 +590,19 @@ def test_define_nccl_param_forms_from_debug_cc_parse() -> None:
     }
 
 
+def test_accessor_map_resolves_old_params_and_skips_param_machinery() -> None:
+    repo = Path(__file__).resolve().parents[3]
+    if not (repo / gate.SRC_TREE).is_dir():
+        pytest.skip(f"{gate.SRC_TREE} is not in this checkout")
+    mapped = gate.accessor_map(repo)
+    assert "NCCL_P2P_DISABLE" in mapped.get("ncclParamP2pDisable", ())
+    assert mapped["rcclParamIbCastQpSchedEnable"] == ("RCCL_IB_QP_SCHED_ENABLE", "NCCL_IB_QP_SCHED_ENABLE")
+    assert mapped["rcclParamdisableReduceCopyPipelining"] == ("RCCL_DISABLE_REDUCE_COPY_PIPELINING",)
+    assert "ncclParamOneOf" not in mapped
+    assert "ncclParamInterface" not in mapped
+    assert "rcclParamMutex" not in mapped
+
+
 def test_every_declaration_in_the_tree_parses() -> None:
     repo = Path(__file__).resolve().parents[3]
     if not (repo / gate.SRC_TREE).is_dir():
@@ -482,8 +662,8 @@ def test_check_passes_when_the_changelog_and_either_env_page_name_it(tmp_path: P
         {
             SRC: f"int x;\n{NEW_PARAM}\n{fast}\n",
             gate.CHANGELOG: changelog,
-            gate.ENV_DOCS[0]: "NCCL_RMA_DISABLE\n----------------\n",
-            gate.ENV_DOCS[1]: "    * - | ``RCCL_FAST``\n",
+            gate.ENV_DOCS[0]: "NCCL_RMA_DISABLE\n    Turns RMA off.\n",
+            gate.ENV_DOCS[1]: "    * - | ``RCCL_FAST``\n      Enables the fast path.\n",
         },
         "add RMA disable and fast",
     )
@@ -491,7 +671,7 @@ def test_check_passes_when_the_changelog_and_either_env_page_name_it(tmp_path: P
     assert gate.check(repo, "HEAD^", []) == 0
 
 
-def test_a_missing_doc_entry_warns_and_comments_without_failing(
+def test_a_missing_doc_entry_fails_and_comments(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     repo = _repo(tmp_path)
@@ -500,16 +680,18 @@ def test_a_missing_doc_entry_warns_and_comments_without_failing(
     comments: list[dict[str, object]] = []
     _fake_github(monkeypatch, comments)
 
-    assert gate.check(repo, "HEAD^", []) == 0
+    assert gate.check(repo, "HEAD^", []) == 1
     out = capsys.readouterr().out
-    assert f"::warning file={SRC},line=2::NCCL_RMA_DISABLE added with default 0. Document it in" in out
-    assert "::error" not in out
+    assert f"::error file={SRC},line=2::NCCL_RMA_DISABLE added with default 0. Describe this change in" in out
+    assert "::warning" not in out
     assert len(comments) == 1
-    assert "### New RCCL env vars without docs" in str(comments[0]["body"])
-    assert "Not blocking" in str(comments[0]["body"])
+    body = str(comments[0]["body"])
+    assert "### Undocumented RCCL default-behavior changes" in body
+    assert "Describe these changes in" in body
+    assert "Not blocking" not in body
 
     assert gate.check(repo, "HEAD^", [f"debug knob {gate.INTERNAL_TOKEN}"]) == 0
-    assert "::warning" not in capsys.readouterr().out
+    assert "::error" not in capsys.readouterr().out
     assert comments[0]["body"] == f"{gate.COMMENT_MARKER}\n{gate.PASS_MESSAGE}"
 
 
@@ -565,6 +747,56 @@ def test_check_scans_only_product_source(tmp_path: Path, capsys: pytest.CaptureF
 
     assert gate.check(repo, "HEAD^", []) == 0
     assert gate.PASS_MESSAGE in capsys.readouterr().out
+
+
+def test_check_fails_on_a_new_accessor_use_until_the_changelog_names_it(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    _commit(repo, {"projects/rccl/src/p2p.cc": 'NCCL_PARAM(IbMatching, "IB_MATCHING", -2);\n'}, "declare")
+    _commit(repo, {"projects/rccl/src/init.cc": "int x;\nif (ncclParamIbMatching()) return;\n"}, "use it")
+
+    assert gate.check(repo, "HEAD^", []) == 1
+    _commit(
+        repo,
+        {
+            gate.CHANGELOG: "# Changelog\n\n* `NCCL_IB_MATCHING`: init now reads it\n",
+            gate.NCCL_ENV_DOC: "Environment Variables\n\nNCCL_IB_MATCHING\n    now read at init\n",
+        },
+        "document the use",
+    )
+    assert gate.check(repo, "HEAD~2", []) == 0
+
+    other = "projects/rccl/src/other.cc"
+    _commit(
+        repo,
+        {"projects/rccl/src/init.cc": "int x;\n", other: "if (ncclParamIbMatching()) return;\n"},
+        "move the call",
+    )
+    assert gate.check(repo, "HEAD^", []) == 0
+
+
+def test_check_rejects_a_whitespace_only_doc_edit(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    entry = "``NCCL_RMA_DISABLE``\n    default 0\n"
+    changelog = "# Changelog\n\n* `NCCL_RMA_DISABLE` (default `0`): off\n"
+    _commit(
+        repo,
+        {SRC: f"int x;\n{NEW_PARAM}\n", gate.CHANGELOG: changelog, gate.NCCL_ENV_DOC: entry},
+        "add RMA disable",
+    )
+    retuned = NEW_PARAM.replace(", 0)", ", 1)")
+    _commit(
+        repo,
+        {
+            SRC: f"int x;\n{retuned}\n",
+            gate.CHANGELOG: changelog + "* `NCCL_RMA_DISABLE` default changed `0` -> `1`: retune\n",
+            gate.NCCL_ENV_DOC: "``NCCL_RMA_DISABLE``\n\tdefault   0\n",
+        },
+        "retune and rewrap the doc",
+    )
+    assert gate.check(repo, "HEAD^", []) == 1
+
+    _commit(repo, {gate.NCCL_ENV_DOC: "``NCCL_RMA_DISABLE``\n    default 1\n"}, "record the new default")
+    assert gate.check(repo, "HEAD~2", []) == 0
 
 
 def test_check_accepts_a_new_read_of_a_declared_variable(tmp_path: Path) -> None:
