@@ -3766,6 +3766,8 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
         kGeneratedIslandPoolWords * static_cast<uint64_t>(sizeof(uint32_t));
     std::unordered_set<uint64_t> generated_island_pool_offsets;
     std::unordered_map<uint64_t, std::vector<uint64_t>> generated_island_pools_by_source_offset;
+    std::unordered_map<uint64_t, std::vector<uint64_t>>
+        inert_generated_island_pools_by_preceding_block_end;
     if (guest_arch_ == host_arch_) {
       for (const uint64_t pool_offset : generated_island_pool_candidates) {
         const auto marker_it = source_instruction_by_offset.find(pool_offset);
@@ -3839,20 +3841,19 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
         if (!reachable_header && !reachable_slot) {
           assert(preceding_terminator != nullptr &&
                  "an unreachable pool needs a reachable preceding terminator");
-          // Preserve source order when the direct target follows the pool. A
-          // backward or indirect transfer has no reachable source instruction
-          // after the pool, so emit the inert pool immediately before that
-          // reachable terminator instead. Either point is visited before fresh
-          // pools are suppressed below.
-          const uint64_t emission_source_offset =
-              preceding_direct_branch_away_from_pool &&
-                      static_cast<uint64_t>(preceding_branch_target) >= pool_end
-                  ? static_cast<uint64_t>(preceding_branch_target)
-                  : preceding_terminator->src_loc();
-          generated_island_pools_by_source_offset[emission_source_offset].push_back(pool_offset);
+          // The pool was emitted immediately after this terminating block.
+          // Preserve that source position even when a forward branch skips
+          // additional reachable blocks before its target.
+          inert_generated_island_pools_by_preceding_block_end[pool_offset].push_back(pool_offset);
         }
       }
       for (auto &entry : generated_island_pools_by_source_offset) {
+        auto &pool_offsets = entry.second;
+        std::ranges::sort(pool_offsets);
+        pool_offsets.erase(std::unique(pool_offsets.begin(), pool_offsets.end()),
+                           pool_offsets.end());
+      }
+      for (auto &entry : inert_generated_island_pools_by_preceding_block_end) {
         auto &pool_offsets = entry.second;
         std::ranges::sort(pool_offsets);
         pool_offsets.erase(std::unique(pool_offsets.begin(), pool_offsets.end()),
@@ -5020,6 +5021,29 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
               : kernel_text.size();
       layout.blocks.push_back(placement);
       target_offset_by_source_offset.emplace(block->end_offset(), placement.target_end);
+      if (const auto pools_it =
+              inert_generated_island_pools_by_preceding_block_end.find(block->end_offset());
+          pools_it != inert_generated_island_pools_by_preceding_block_end.end()) {
+        for (const uint64_t pool_offset : pools_it->second) {
+          const uint64_t source_end = pool_offset + kGeneratedIslandPoolBytes;
+          const uint64_t pool_target_offset = kernel_text.size();
+          assert(pool_offset == block->end_offset());
+          assert(source_end <= text.size());
+          for (uint64_t word_index = kGeneratedIslandPoolHeaderWords;
+               word_index < kGeneratedIslandPoolWords; ++word_index) {
+            layout.branch_island_slots.push_back(pool_target_offset +
+                                                 word_index * sizeof(uint32_t));
+          }
+          for (uint64_t source_word = pool_offset; source_word < source_end;
+               source_word += sizeof(uint32_t)) {
+            target_offset_by_source_offset.emplace(source_word, pool_target_offset +
+                                                                    (source_word - pool_offset));
+          }
+          kernel_text.insert(kernel_text.end(),
+                             text.begin() + static_cast<std::ptrdiff_t>(pool_offset),
+                             text.begin() + static_cast<std::ptrdiff_t>(source_end));
+        }
+      }
       if (should_emit_branch_island_pools() && !preserve_generated_branch_island_pools &&
           block != scope.blocks.back() && !clause_interior_offsets.contains(block->end_offset()) &&
           kernel_text.size() >= next_branch_island_pool_offset) {

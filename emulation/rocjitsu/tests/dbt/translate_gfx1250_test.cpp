@@ -3807,6 +3807,54 @@ TEST(BinaryTranslatorE2E, Gfx1250RelocatesReachableGeneratedIslandPoolSlotsIdemp
   EXPECT_EQ(second.elf_bytes, first.elf_bytes);
 }
 
+TEST(BinaryTranslatorE2E, Gfx1250GeneratedPoolAfterBackwardBranchRemainsIdempotent) {
+  constexpr uint32_t kGfx1250SNop = 0xBF800000u;
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  constexpr size_t kBodyNops = 2046;
+  const uint32_t backward_branch = rocjitsu::build_s_branch(-1, ROCJITSU_CODE_ARCH_CDNA5);
+  const uint32_t marker = rocjitsu::build_s_nop(rocjitsu::kBranchIslandPoolMarkerNopImmediate,
+                                                ROCJITSU_CODE_ARCH_CDNA5);
+  std::vector<uint32_t> words = {
+      // Keep the instruction after the loop reachable while making the loop's
+      // backward branch land exactly at the 8 KiB pool-placement boundary.
+      cdna5::build_sopp(cdna5::kSCbranchScc0Sopp,
+                        {.simm16 = static_cast<uint16_t>(kBodyNops + 1)})[0],
+  };
+  words.insert(words.end(), kBodyNops, kGfx1250SNop);
+  words.push_back(backward_branch);
+  words.push_back(kGfx1250SEndpgm);
+
+  auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  translator.set_instruction_rewrite_callback(
+      [](const rocjitsu::InstructionRewriteContext &)
+          -> std::optional<rocjitsu::InstructionRewrite> { return std::nullopt; });
+  const auto first = translator.translate(source);
+  ASSERT_TRUE(first.ok()) << (first.diagnostics.empty() ? "" : first.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(first.elf_bytes.data(), first.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto *translated_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t translated_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+  const auto *marker_it =
+      std::find(translated_words, translated_words + translated_word_count, marker);
+  ASSERT_NE(marker_it, translated_words + translated_word_count);
+  ASSERT_NE(marker_it, translated_words);
+  EXPECT_EQ(*(marker_it - 1), backward_branch);
+
+  const auto second = translator.translate(translated);
+  ASSERT_TRUE(second.ok()) << (second.diagnostics.empty() ? ""
+                                                          : second.diagnostics.front().message);
+  EXPECT_EQ(second.elf_bytes, first.elf_bytes);
+}
+
 TEST(BinaryTranslatorE2E, Gfx1250PreservesGeneratedIslandPoolAfterBackwardBranch) {
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   constexpr int16_t kPoolWords = static_cast<int16_t>(rocjitsu::kGeneratedIslandPoolHeaderWords +
@@ -3845,8 +3893,11 @@ TEST(BinaryTranslatorE2E, Gfx1250PreservesGeneratedIslandPoolAfterBackwardBranch
   const auto *translated_words =
       reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
   const size_t translated_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
-  EXPECT_NE(std::find(translated_words, translated_words + translated_word_count, marker),
-            translated_words + translated_word_count);
+  const auto *marker_it =
+      std::find(translated_words, translated_words + translated_word_count, marker);
+  ASSERT_NE(marker_it, translated_words + translated_word_count);
+  ASSERT_NE(marker_it, translated_words);
+  EXPECT_EQ(*(marker_it - 1), rocjitsu::build_s_branch(-2, ROCJITSU_CODE_ARCH_CDNA5));
 
   const auto second = translator.translate(translated);
   ASSERT_TRUE(second.ok()) << (second.diagnostics.empty() ? ""
@@ -3860,8 +3911,8 @@ TEST(BinaryTranslatorE2E, Gfx1250PreservesGeneratedIslandPoolAfterProgramTermina
   const uint32_t marker = rocjitsu::build_s_nop(rocjitsu::kBranchIslandPoolMarkerNopImmediate,
                                                 ROCJITSU_CODE_ARCH_CDNA5);
   std::vector<uint32_t> words = {
-      // No source instruction follows the trailing pool. Preserve it at the
-      // only reachable emission point: before the interior terminator.
+      // No source instruction follows the trailing pool. Preserve it after the
+      // terminator that makes the pool unreachable.
       kGfx1250SNop,
       kGfx1250SEndpgm,
       marker,
@@ -3887,8 +3938,11 @@ TEST(BinaryTranslatorE2E, Gfx1250PreservesGeneratedIslandPoolAfterProgramTermina
   const auto *translated_words =
       reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
   const size_t translated_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
-  EXPECT_NE(std::find(translated_words, translated_words + translated_word_count, marker),
-            translated_words + translated_word_count);
+  const auto *marker_it =
+      std::find(translated_words, translated_words + translated_word_count, marker);
+  ASSERT_NE(marker_it, translated_words + translated_word_count);
+  ASSERT_NE(marker_it, translated_words);
+  EXPECT_EQ(*(marker_it - 1), kGfx1250SEndpgm);
 
   const auto second = translator.translate(translated);
   ASSERT_TRUE(second.ok()) << (second.diagnostics.empty() ? ""
@@ -3903,11 +3957,15 @@ TEST(BinaryTranslatorE2E, Gfx1250PreservesGeneratedIslandPoolBeforeLaterBranchTa
                                                       rocjitsu::kDirectBranchIslandPoolSlots);
   const uint32_t marker = rocjitsu::build_s_nop(rocjitsu::kBranchIslandPoolMarkerNopImmediate,
                                                 ROCJITSU_CODE_ARCH_CDNA5);
+  const uint32_t source_skip_pool_and_nop =
+      rocjitsu::build_s_branch(kPoolWords + 1, ROCJITSU_CODE_ARCH_CDNA5);
+  const uint32_t translated_skip_pool =
+      rocjitsu::build_s_branch(kPoolWords, ROCJITSU_CODE_ARCH_CDNA5);
   std::vector<uint32_t> words = {
       // Skip the generated pool and one additional NOP. The pool header,
       // private slots, and pool_end are unreachable; the first reachable
       // instruction after the pool is pool_end + 4.
-      rocjitsu::build_s_branch(kPoolWords + 1, ROCJITSU_CODE_ARCH_CDNA5),
+      source_skip_pool_and_nop,
       marker,
       rocjitsu::build_s_branch(static_cast<int16_t>(rocjitsu::kDirectBranchIslandPoolSlots),
                                ROCJITSU_CODE_ARCH_CDNA5),
@@ -3937,8 +3995,11 @@ TEST(BinaryTranslatorE2E, Gfx1250PreservesGeneratedIslandPoolBeforeLaterBranchTa
   const auto *translated_words =
       reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
   const size_t translated_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
-  EXPECT_NE(std::find(translated_words, translated_words + translated_word_count, marker),
-            translated_words + translated_word_count);
+  const auto *marker_it =
+      std::find(translated_words, translated_words + translated_word_count, marker);
+  ASSERT_NE(marker_it, translated_words + translated_word_count);
+  ASSERT_NE(marker_it, translated_words);
+  EXPECT_EQ(*(marker_it - 1), translated_skip_pool);
 
   const auto second = translator.translate(translated);
   ASSERT_TRUE(second.ok()) << (second.diagnostics.empty() ? ""
