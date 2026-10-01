@@ -20,6 +20,7 @@
 # function and links against nothing.
 
 import os
+import stat
 import struct
 import sys
 import threading
@@ -77,7 +78,37 @@ def _archive_dir():
     if not root:
         return None
     d = os.path.join(root, "pid-%d" % os.getpid())
-    return d if os.path.isdir(d) else None
+    return d if _private_dir(d) else None
+
+
+def _private_dir(path):
+    """True if path is a real directory owned by us, not a link to one.
+
+    The capture writer refuses a planted pid-<pid> link, and a producer that
+    followed it would write region data wherever it points.
+    """
+    if os.name == "nt":
+        return os.path.isdir(path)
+    try:
+        st = os.lstat(path)
+    except OSError:
+        return False
+    return stat.S_ISDIR(st.st_mode) and st.st_uid == os.geteuid()
+
+
+def _open_private(path):
+    """Open path for append with mode 0600, refusing a link or a file not ours."""
+    flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT
+    flags |= getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_BINARY", 0)
+    fd = os.open(path, flags, 0o600)
+    if os.name != "nt":
+        st = os.fstat(fd)
+        if (not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid()
+                or st.st_nlink != 1):
+            os.close(fd)
+            raise OSError("%s is not a private file of this user" % path)
+    return os.fdopen(fd, "ab", buffering=0)
 
 
 class _Stream:
@@ -102,8 +133,19 @@ class _Stream:
         if self._fh is None or self._pid != os.getpid():
             self.close()
             regions = os.path.join(d, "regions")
-            os.makedirs(regions, exist_ok=True)
-            self._fh = open(os.path.join(regions, "pytorch.hrrr"), "ab", buffering=0)
+            try:
+                os.mkdir(regions, 0o700)
+            except FileExistsError:
+                pass
+            # Private as the README asks, and never through a planted link.
+            if not _private_dir(regions):
+                _log("%s is not a private directory; not writing" % regions)
+                return False
+            try:
+                self._fh = _open_private(os.path.join(regions, "pytorch.hrrr"))
+            except OSError as e:
+                _log("cannot open the region file: %s" % e)
+                return False
             self._pid = os.getpid()
             # Only on a fresh file. The stream is opened for append, and DESIGN.md
             # explicitly supports a process re-opening its own writer on resume, so
