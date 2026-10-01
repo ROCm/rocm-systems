@@ -20,9 +20,9 @@
 #include <mpi.h>
 #include "rocmwrap.h"
 
-// hipMemLocationTypeHost is absent outside NCCL_CUMEM_HOST_VERSION_SUPPORTED
-// (ROCm 7.12 or the 7.0.2.x backport). CUDA HOST == 2.
-#if !NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
+// hipMemLocationTypeHost is absent outside NCCL_CUMEM_HOST_GATE (ROCm 7.12 or
+// the probed 7.0.2.x backport). CUDA HOST == 2.
+#if !NCCL_CUMEM_HOST_GATE
 #ifndef hipMemLocationTypeHost
 #define hipMemLocationTypeHost (static_cast<hipMemLocationType>(2))
 #endif
