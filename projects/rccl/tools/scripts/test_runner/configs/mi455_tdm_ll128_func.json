@@ -75,9 +75,9 @@
           "test_filter": "Broadcast.*"
         },
         {
-          "name": "TDM_LL128_Ring_Scatter",
-          "description": "Scatter under forced Ring + LL128, whose in-place destination offset is arbitrarily aligned",
-          "test_filter": "Scatter.*"
+          "name": "TDM_LL128_Ring_Reduce",
+          "description": "Reduce under forced Ring + LL128",
+          "test_filter": "Reduce.*"
         }
       ]
     },
