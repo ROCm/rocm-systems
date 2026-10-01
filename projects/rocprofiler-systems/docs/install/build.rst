@@ -152,18 +152,23 @@ CMake options.
 Get the source
 --------------
 
-Clone the ``rocm-systems`` repository and check out only the ROCm Systems Profiler project:
+Clone the ``rocm-systems`` repository. A sparse check-out, as described in the
+`contributing guide <https://github.com/ROCm/rocm-systems/blob/develop/CONTRIBUTING.md#option-b-clone-the-super-repo-with-sparse-checkout>`_,
+is recommended to reduce the amount of data downloaded.
 
 .. code-block:: shell
 
-   git clone --filter=blob:none --sparse https://github.com/ROCm/rocm-systems.git
-   git -C rocm-systems sparse-checkout set projects/rocprofiler-systems
-
-CMake presets are defined in ``CMakePresets.json`` in the projects root directory. Run the
-configure and build commands from that directory.
+   git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git
+   cd rocm-systems
+   git sparse-checkout init --cone
+   git sparse-checkout set projects/rocprofiler-systems
+   git checkout develop # or a specific release branch
 
 Configure and build with CMake presets
 --------------------------------------
+
+CMake presets are defined in ``CMakePresets.json`` in the projects root directory. Run the
+configure and build commands from that directory.
 
 The project ships configure presets for common developer and CI layouts. All visible
 presets inherit a hidden ``default`` preset that selects the Ninja generator, the
@@ -176,7 +181,7 @@ configure presets only, so pass the build directory (not ``--preset``) to
 
 .. code-block:: shell
 
-   cd rocm-systems/projects/rocprofiler-systems
+   cd projects/rocprofiler-systems
    cmake --list-presets
    cmake --preset release
    cmake --build build/release --parallel
