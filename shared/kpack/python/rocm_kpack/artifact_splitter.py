@@ -255,20 +255,29 @@ class ArtifactSplitter:
             {base_arch(t) for t in gpu_targets} if gpu_targets else None
         )
 
-    def compute_kpack_search_pattern(self, binary_path: Path, prefix_root: Path) -> str:
+    def compute_kpack_search_paths(
+        self, binary_path: Path, prefix_root: Path
+    ) -> list[str]:
         """
-        Compute the @GFXARCH@ search pattern from a binary to its kpack files.
+        Compute the @GFXARCH@ search patterns from a binary to its kpack files.
 
-        The pattern uses @GFXARCH@ as a placeholder that the runtime expands
+        The patterns use @GFXARCH@ as a placeholder that the runtime expands
         with the requested GPU architecture at load time. This eliminates the
         need for .kpm manifest files that enumerate architectures at build time.
+
+        The first pattern points to the .kpack/ directory at the prefix root.
+        For binaries in subdirectories, a second pattern points to a .kpack/
+        directory next to the binary, so applications that bundle the libraries
+        next to their executable can place .kpack/ in the same directory.
 
         Args:
             binary_path: Path to the binary
             prefix_root: Root of the prefix (where .kpack/ directory will be)
 
         Returns:
-            Relative path pattern like .kpack/{artifact_prefix}_@GFXARCH@.kpack
+            Relative path patterns in search order, like
+            ["../.kpack/{artifact_prefix}_@GFXARCH@.kpack",
+             ".kpack/{artifact_prefix}_@GFXARCH@.kpack"]
         """
         # Get the relative path from prefix root to binary
         rel_path = binary_path.relative_to(prefix_root)
@@ -280,17 +289,17 @@ class ArtifactSplitter:
         kpack_pattern = f".kpack/{self.artifact_prefix}_@GFXARCH@.kpack"
         if depth == 0:
             # Binary is at prefix root
-            search_pattern = kpack_pattern
+            search_paths = [kpack_pattern]
         else:
-            # Binary is in subdirectories
+            # Binary is in subdirectories: prefix root first, then next to the binary
             up_path = "/".join([".."] * depth)
-            search_pattern = f"{up_path}/{kpack_pattern}"
+            search_paths = [f"{up_path}/{kpack_pattern}", kpack_pattern]
 
         if self.verbose:
             print(f"  Binary at: {rel_path}")
-            print(f"  Search pattern: {search_pattern}")
+            print(f"  Search paths: {search_paths}")
 
-        return search_pattern
+        return search_paths
 
     def scan_prefix(
         self, prefix_path: Path, visitor: FileClassificationVisitor
@@ -568,16 +577,14 @@ class ArtifactSplitter:
 
             # Inject kpack search pattern in each binary
             for binary_path in binary_paths:
-                # Compute @GFXARCH@ search pattern from binary to .kpack directory
-                search_pattern = self.compute_kpack_search_pattern(
-                    binary_path, prefix_dir
-                )
+                # Compute @GFXARCH@ search patterns from binary to .kpack directory
+                search_paths = self.compute_kpack_search_paths(binary_path, prefix_dir)
 
                 if self.verbose:
                     print(
                         f"  Processing {binary_path.relative_to(generic_artifact_dir)}"
                     )
-                    print(f"    Search pattern: {search_pattern}")
+                    print(f"    Search paths: {search_paths}")
 
                 # Create temporary output file
                 temp_output = binary_path.with_suffix(binary_path.suffix + ".kpacked")
@@ -597,7 +604,7 @@ class ArtifactSplitter:
                     kpack_offload_binary(
                         input_path=binary_path,
                         output_path=temp_output,
-                        kpack_search_paths=[search_pattern],
+                        kpack_search_paths=search_paths,
                         kernel_name=kernel_name,
                         verbose=self.verbose,
                     )
