@@ -284,6 +284,9 @@ struct sqtt_buffer_status_t
     bool                         gpu_full{};
 };
 
+aqlprofile_att_gpu_clock_t
+get_gpu_clock(aqlprofile_handle_t handle, int shader_engine_id);
+
 // Virtual members for mocking in tests
 class SQTTBufferingPackets
 {
@@ -293,6 +296,7 @@ public:
 
     hsa_ext_amd_aql_pm4_packet_t                query_status{};
     virtual std::optional<sqtt_buffer_status_t> query_buffer_status();
+    virtual aqlprofile_att_gpu_clock_t          get_gpu_clock() const;
     virtual hsa_status_t iterate_data(aqlprofile_att_data_callback_t callback, void* data)
     {
         return aqlprofile_att_iterate_data(handle, callback, data);

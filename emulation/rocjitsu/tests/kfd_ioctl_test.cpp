@@ -2080,6 +2080,105 @@ TEST_F(KfdIoctlCdna5Test, DebuggerResumeRejectsPendingRuntimeExceptionPublicatio
   });
 }
 
+TEST_F(KfdIoctlCdna5Test, DebuggerForwardsQueueExceptionsWithoutRuntimeAcknowledgment) {
+  constexpr uint64_t kExceptionStatusAddress = 0x600900000ULL;
+  constexpr uint32_t kExceptionEventId = 84;
+  constexpr uint64_t kWaveAbort = KFD_EC_MASK(EC_QUEUE_WAVE_ABORT);
+  constexpr uint64_t kMathError = KFD_EC_MASK(EC_QUEUE_WAVE_MATH_ERROR);
+  using Page = std::array<uint8_t, 4096>;
+  alignas(rocjitsu::amdgpu::kAqlPacketBytes) Page ring{};
+  alignas(4096) Page cwsr{};
+  Page exception_page{};
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  process->map_pages(kExceptionStatusAddress, exception_page.data(), exception_page.size());
+  std::memcpy(cwsr.data() + 6 * sizeof(uint32_t), &kExceptionStatusAddress,
+              sizeof(kExceptionStatusAddress));
+  std::memcpy(cwsr.data() + 6 * sizeof(uint32_t) + sizeof(uint64_t), &kExceptionEventId,
+              sizeof(kExceptionEventId));
+
+  kfd_ioctl_runtime_enable_args runtime{};
+  runtime.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_RUNTIME_ENABLE, &runtime), 0);
+  kfd_ioctl_dbg_trap_args enable{};
+  enable.pid = static_cast<uint32_t>(getpid());
+  enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+  enable.enable.dbg_fd = make_debug_fd();
+  enable.enable.exception_mask = kWaveAbort | kMathError;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+
+  alignas(4096) amd_queue_v2_t queue_descriptor{};
+  process->map_pages(reinterpret_cast<uint64_t>(&queue_descriptor), &queue_descriptor,
+                     sizeof(queue_descriptor));
+  kfd_ioctl_create_queue_args create{};
+  create.gpu_id = kCdna5GpuId;
+  create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  create.ring_size = static_cast<uint32_t>(ring.size());
+  create.read_pointer_address = reinterpret_cast<uint64_t>(&queue_descriptor.read_dispatch_id);
+  create.write_pointer_address = reinterpret_cast<uint64_t>(&queue_descriptor.write_dispatch_id);
+  create.ctx_save_restore_address = reinterpret_cast<uint64_t>(cwsr.data());
+  create.ctx_save_restore_size = static_cast<uint32_t>(cwsr.size());
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
+
+  // An immediate deadline makes the old acknowledgment requirement fail
+  // deterministically without a wall-clock assertion or a one-second wait.
+  soc_->for_each_cp([](rocjitsu::amdgpu::CommandProcessor *cp) {
+    cp->set_runtime_exception_ack_timeout_for_testing(std::chrono::milliseconds(0));
+  });
+  std::vector<uint64_t> delivered;
+  driver_->set_interrupt_callback_for_testing([&](uint32_t process_id, uint32_t event_id) {
+    if (event_id != kExceptionEventId)
+      return;
+    EXPECT_EQ(process_id, driver_->local_process_id());
+    delivered.push_back(vm_read64(kExceptionStatusAddress, process_id));
+    // ROCr clears the signal and removes its async handler after the first
+    // fatal exception. Later waves still forward their stops to this queue.
+    if (delivered.size() == 1)
+      (void)vm_write64(kExceptionStatusAddress, 0, process_id);
+  });
+  struct ObserverGuard {
+    rocjitsu::SimulatedKfd *driver;
+    ~ObserverGuard() { driver->set_interrupt_callback_for_testing(nullptr); }
+  } observer_guard{driver_};
+
+  kfd_ioctl_dbg_trap_args forward{};
+  forward.pid = static_cast<uint32_t>(getpid());
+  forward.op = KFD_IOC_DBG_TRAP_SEND_RUNTIME_EVENT;
+  forward.send_runtime_event.gpu_id = kCdna5GpuId;
+  forward.send_runtime_event.queue_id = create.queue_id;
+  forward.send_runtime_event.exception_mask = kWaveAbort;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &forward), 0);
+  EXPECT_EQ(vm_read64(kExceptionStatusAddress, driver_->local_process_id()), 0u);
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &forward), 0);
+  EXPECT_EQ(vm_read64(kExceptionStatusAddress, driver_->local_process_id()), kWaveAbort);
+  forward.send_runtime_event.exception_mask = kMathError;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &forward), 0);
+  EXPECT_EQ(delivered, (std::vector<uint64_t>{kWaveAbort, kWaveAbort, kWaveAbort | kMathError}));
+  soc_->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+    EXPECT_TRUE(
+        cp->queue_exception_suspended_for_test(create.queue_id, driver_->local_process_id()));
+  });
+
+  // Runtime-owned delivery still requires acknowledgment before releasing its
+  // retained debugger fallback. The debugger ioctl's contract is different.
+  EXPECT_FALSE(driver_->signal_runtime_queue_exception_for_testing(
+      kCdna5GpuId, create.queue_id, driver_->local_process_id(), kWaveAbort));
+  const size_t delivered_before_unmap = delivered.size();
+  process->unmap_pages(kExceptionStatusAddress, exception_page.size());
+  EXPECT_LT(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &forward), 0)
+      << "a live queue with inaccessible exception storage must not report publication success";
+  EXPECT_EQ(delivered.size(), delivered_before_unmap);
+
+  // KFD accepts a late forwarding request for a queue already destroyed by
+  // the runtime; there is no live queue to signal or storage to touch.
+  kfd_ioctl_destroy_queue_args destroy{};
+  destroy.queue_id = create.queue_id;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &forward), 0);
+  EXPECT_EQ(delivered.size(), delivered_before_unmap);
+}
+
 TEST_F(KfdIoctlCdna5Test, RuntimeExceptionFanoutCanDrainPendingCuNotification) {
   GTEST_FLAG_SET(death_test_style, "threadsafe");
   using Page = std::array<uint8_t, 4096>;

@@ -36,7 +36,7 @@ agent_manager::insert_agent(agent& _agent)
 const agent&
 agent_manager::get_agent_by_type_index(size_t type_index, agent_type type) const
 {
-    auto _agent =
+    auto const _agent =
         std::find_if(_agents.begin(), _agents.end(), [&](const auto& agent_ptr) {
             return agent_ptr->type == type && agent_ptr->device_type_index == type_index;
         });
@@ -52,7 +52,7 @@ const agent&
 agent_manager::get_agent_by_id(size_t device_id, agent_type type) const
 {
     LOG_TRACE("Getting agent for device id: {}, type {}", device_id, to_string(type));
-    auto _agent =
+    auto const _agent =
         std::find_if(_agents.begin(), _agents.end(), [&](const auto& agent_ptr) {
             return agent_ptr->type == type && agent_ptr->device_id == device_id;
         });
@@ -69,7 +69,7 @@ agent_manager::get_agent_by_handle(std::uint64_t device_handle, agent_type type)
 {
     LOG_TRACE("Getting agent for device handle: {}, type {}", device_handle,
               to_string(type));
-    auto _agent =
+    auto const _agent =
         std::find_if(_agents.begin(), _agents.end(), [&](const auto& agent_ptr) {
             return agent_ptr->type == type && agent_ptr->handle == device_handle;
         });
@@ -86,7 +86,7 @@ const agent&
 agent_manager::get_agent_by_handle(size_t device_handle) const
 {
     LOG_TRACE("Getting agent for device handle: {}", device_handle);
-    auto _agent =
+    auto const _agent =
         std::find_if(_agents.begin(), _agents.end(), [&](const auto& agent_ptr) {
             return agent_ptr->handle == device_handle;
         });
@@ -130,7 +130,7 @@ agent_manager::get_cpu_agents_count() const
 size_t
 agent_manager::get_agent_count(agent_type type) const
 {
-    auto it = _agent_counts.find(type);
+    auto const it = _agent_counts.find(type);
     return it != _agent_counts.end() ? it->second : 0;
 }
 

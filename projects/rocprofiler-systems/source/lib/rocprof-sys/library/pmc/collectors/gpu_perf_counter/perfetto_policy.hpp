@@ -51,7 +51,7 @@ struct perfetto_policy
     {
         for(const auto& entry : device_entries)
         {
-            auto idx                         = entry.device->get_index();
+            auto const idx                   = entry.device->get_index();
             detail::get_perfetto_data()[idx] = {
                 std::make_unique<std::vector<detail::gpu_perf_counter_perfetto_sample>>(),
                 {}
@@ -62,7 +62,7 @@ struct perfetto_policy
     static void setup_counter_tracks(size_t                               device_index,
                                      const std::vector<counter_metadata>& counter_meta)
     {
-        auto it = detail::get_perfetto_data().find(device_index);
+        auto const it = detail::get_perfetto_data().find(device_index);
         if(it == detail::get_perfetto_data().end())
         {
             return;
@@ -70,9 +70,10 @@ struct perfetto_policy
 
         for(const auto& meta : counter_meta)
         {
-            auto qname      = make_qualified_name(meta);
-            auto track_name = format_track_name(device_index, qname);
-            auto track_id   = counter_track::emplace(device_index, track_name, "count");
+            auto const qname      = make_qualified_name(meta);
+            auto       track_name = format_track_name(device_index, qname);
+            auto const track_id =
+                counter_track::emplace(device_index, track_name, "count");
             it->second.counter_tracks[meta.counter_id] = track_id;
             LOG_DEBUG("Created Perfetto counter track: {}", track_name);
         }
@@ -81,14 +82,14 @@ struct perfetto_policy
     static void store_sample(size_t device_index, const metrics& metric_values,
                              std::uint64_t timestamp)
     {
-        auto it = detail::get_perfetto_data().find(device_index);
+        auto const it = detail::get_perfetto_data().find(device_index);
         if(it == detail::get_perfetto_data().end())
         {
             return;
         }
 
-        it->second.samples->emplace_back(
-            detail::gpu_perf_counter_perfetto_sample{ timestamp, metric_values });
+        it->second.samples->emplace_back(detail::gpu_perf_counter_perfetto_sample{
+            .timestamp = timestamp, .values = metric_values });
     }
 
     static void post_process(const enabled_metrics& /*enabled*/)
