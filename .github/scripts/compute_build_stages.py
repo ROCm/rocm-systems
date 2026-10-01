@@ -87,19 +87,6 @@ def _parse_projects(changed_projects: str) -> List[str]:
     return projects
 
 
-def _load_topology(therock_path: str):
-    """Import TheRock's build topology from the checkout (read-only)."""
-    therock_build_tools = (Path(therock_path) / "build_tools").resolve()
-    therock_build_tools_str = os.fspath(therock_build_tools)
-
-    if therock_build_tools_str not in sys.path:
-        sys.path.insert(0, therock_build_tools_str)
-
-    from _therock_utils.build_topology import get_topology
-
-    return get_topology()
-
-
 def compute_build_stages(
     changed_projects: str,
     therock_path: str,
@@ -125,8 +112,18 @@ def compute_build_stages(
         logger.info("Full-build project changed -> build all stages")
         return []
 
+    # Import TheRock's build topology from the checkout. TheRock is the source of
+    # truth for the build graph; we only read it.
+    therock_build_tools = (Path(therock_path) / "build_tools").resolve()
+    therock_build_tools_str = os.fspath(therock_build_tools)
+
+    if therock_build_tools_str not in sys.path:
+        sys.path.insert(0, therock_build_tools_str)
+
     try:
-        topology = _load_topology(therock_path)
+        from _therock_utils.build_topology import get_topology
+
+        topology = get_topology()
         all_stages = set(topology.get_all_stage_names())
     except Exception as e:  # noqa: BLE001 - never let this analysis break CI
         logger.warning(f"Topology load failed ({e}) -> build all stages")
@@ -181,8 +178,14 @@ def compute_windows_families(
     if not projects:
         return ""
 
+    therock_build_tools_str = os.fspath((Path(therock_path) / "build_tools").resolve())
+    if therock_build_tools_str not in sys.path:
+        sys.path.insert(0, therock_build_tools_str)
+
     try:
-        topology = _load_topology(therock_path)
+        from _therock_utils.build_topology import get_topology
+
+        topology = get_topology()
     except Exception as e:  # noqa: BLE001 - never let this analysis break CI
         logger.warning(f"Topology load failed ({e}) -> keep Windows")
         return ""

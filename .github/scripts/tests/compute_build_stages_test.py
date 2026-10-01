@@ -35,50 +35,7 @@ class ParseProjectsTest(unittest.TestCase):
         self.assertEqual(cbs._parse_projects(""), [])
 
 
-class _FakeTopologyMixin:
-    def _install_fake_topology(
-        self, all_stages=(), required=(), known=None, windows_disabled=()
-    ):
-        """Install a fake _therock_utils.build_topology module on sys.path.
-
-        known: set of resolvable project names. Any project not in `known`
-        resolves to None (mirrors BuildTopology.resolve_alias_to_artifact).
-        windows_disabled: artifacts with "windows" in disable_platforms.
-        """
-        known = set(known) if known is not None else None
-        mod = types.ModuleType("_therock_utils.build_topology")
-
-        class _Artifacts(dict):
-            def __missing__(self, name):
-                platforms = ["windows"] if name in windows_disabled else []
-                return types.SimpleNamespace(disable_platforms=platforms)
-
-        class _Topo:
-            artifacts = _Artifacts()
-
-            def get_all_stage_names(self):
-                return set(all_stages)
-
-            def get_stages_for_artifacts(self, artifacts):
-                return set(required)
-
-            def resolve_alias_to_artifact(self, project):
-                if known is None:
-                    return project  # everything resolves
-                return project if project in known else None
-
-        mod.get_topology = lambda: _Topo()
-        pkg = types.ModuleType("_therock_utils")
-        pkg.__path__ = []  # mark as package
-        patcher = patch.dict(
-            sys.modules,
-            {"_therock_utils": pkg, "_therock_utils.build_topology": mod},
-        )
-        patcher.start()
-        self.addCleanup(patcher.stop)
-
-
-class ComputeBuildStagesTest(_FakeTopologyMixin, unittest.TestCase):
+class ComputeBuildStagesTest(unittest.TestCase):
     def test_run_all_tests_builds_everything(self):
         # CI-infra change: empty allowlist == build all.
         self.assertEqual(
@@ -123,6 +80,47 @@ class ComputeBuildStagesTest(_FakeTopologyMixin, unittest.TestCase):
             cbs.compute_build_stages("projects/rdc", "/no/such/therock"), []
         )
 
+    def _install_fake_topology(
+        self, all_stages=(), required=(), known=None, windows_disabled=()
+    ):
+        """Install a fake _therock_utils.build_topology module on sys.path.
+
+        known: set of resolvable project names. Any project not in `known`
+        resolves to None (mirrors BuildTopology.resolve_alias_to_artifact).
+        windows_disabled: artifacts with "windows" in disable_platforms.
+        """
+        known = set(known) if known is not None else None
+        mod = types.ModuleType("_therock_utils.build_topology")
+
+        class _Artifacts(dict):
+            def __missing__(self, name):
+                platforms = ["windows"] if name in windows_disabled else []
+                return types.SimpleNamespace(disable_platforms=platforms)
+
+        class _Topo:
+            artifacts = _Artifacts()
+
+            def get_all_stage_names(self):
+                return set(all_stages)
+
+            def get_stages_for_artifacts(self, artifacts):
+                return set(required)
+
+            def resolve_alias_to_artifact(self, project):
+                if known is None:
+                    return project  # everything resolves
+                return project if project in known else None
+
+        mod.get_topology = lambda: _Topo()
+        pkg = types.ModuleType("_therock_utils")
+        pkg.__path__ = []  # mark as package
+        patcher = patch.dict(
+            sys.modules,
+            {"_therock_utils": pkg, "_therock_utils.build_topology": mod},
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_allowlist_is_required_stages(self):
         self._install_fake_topology(
             all_stages=["compiler-runtime", "dctools-core", "math-libs", "comm-libs"],
@@ -163,9 +161,7 @@ class ComputeBuildStagesTest(_FakeTopologyMixin, unittest.TestCase):
         )
         self.assertEqual(cbs.compute_build_stages("projects/mystery", "_therock"), [])
 
-
-class ComputeWindowsFamiliesTest(_FakeTopologyMixin, unittest.TestCase):
-    def test_all_linux_only_skips_windows(self):
+    def test_windows_all_linux_only_skips_windows(self):
         self._install_fake_topology(windows_disabled={"rocprofiler-compute", "rdc"})
         self.assertEqual(
             cbs.compute_windows_families(
@@ -174,7 +170,7 @@ class ComputeWindowsFamiliesTest(_FakeTopologyMixin, unittest.TestCase):
             "none",
         )
 
-    def test_any_windows_project_keeps_windows(self):
+    def test_windows_any_windows_project_keeps_windows(self):
         self._install_fake_topology(windows_disabled={"rocprofiler-compute"})
         self.assertEqual(
             cbs.compute_windows_families(
@@ -183,7 +179,7 @@ class ComputeWindowsFamiliesTest(_FakeTopologyMixin, unittest.TestCase):
             "",
         )
 
-    def test_unknown_project_keeps_windows(self):
+    def test_windows_unknown_project_keeps_windows(self):
         self._install_fake_topology(
             known={"rocprofiler-compute"}, windows_disabled={"rocprofiler-compute"}
         )
@@ -194,7 +190,7 @@ class ComputeWindowsFamiliesTest(_FakeTopologyMixin, unittest.TestCase):
             "",
         )
 
-    def test_run_all_tests_keeps_windows(self):
+    def test_windows_run_all_tests_keeps_windows(self):
         self._install_fake_topology(windows_disabled={"rocprofiler-compute"})
         self.assertEqual(
             cbs.compute_windows_families(
@@ -203,10 +199,10 @@ class ComputeWindowsFamiliesTest(_FakeTopologyMixin, unittest.TestCase):
             "",
         )
 
-    def test_empty_changed_projects_keeps_windows(self):
+    def test_windows_empty_changed_projects_keeps_windows(self):
         self.assertEqual(cbs.compute_windows_families("", "_therock"), "")
 
-    def test_topology_load_failure_keeps_windows(self):
+    def test_windows_topology_load_failure_keeps_windows(self):
         self.assertEqual(
             cbs.compute_windows_families("projects/rdc", "/no/such/therock"), ""
         )
