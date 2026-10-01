@@ -500,6 +500,12 @@ typedef CUjit_option hipJitOption;
 typedef CUlibraryOption hipLibraryOption;
 typedef CUdevice hipDevice_t;
 typedef enum cudaDeviceP2PAttr hipDeviceP2PAttr;
+typedef enum hipExecAffinityType {
+  hipExecAffinityTypeCUCount = 0,
+  hipExecAffinityTypeMax,
+  hipExtExecAffinityTypeGranularityCU = 0x1000,
+  hipExtExecAffinityTypeGranularityWGP = 0x1001,
+} hipExecAffinityType;
 #define hipDevP2PAttrPerformanceRank cudaDevP2PAttrPerformanceRank
 #define hipDevP2PAttrAccessSupported cudaDevP2PAttrAccessSupported
 #define hipDevP2PAttrNativeAtomicSupported cudaDevP2PAttrNativeAtomicSupported
@@ -3836,6 +3842,39 @@ inline static hipError_t hipDeviceGetLuid(char* luid, unsigned int* deviceNodeMa
   return hipCUResultTohipError(cuDeviceGetLuid(luid, deviceNodeMask, device));
 }
 #endif
+
+inline static hipError_t hipDeviceGetExecAffinitySupport(int* pi, hipExecAffinityType type,
+                                                         hipDevice_t dev) {
+#if CUDA_VERSION >= CUDA_11040
+  if (pi == NULL) {
+    return hipErrorInvalidValue;
+  }
+  int ccMajor = 0;
+  CUresult devStatus =
+      cuDeviceGetAttribute(&ccMajor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, dev);
+  if (devStatus != CUDA_SUCCESS) {
+    return hipCUResultTohipError(devStatus);
+  }
+  switch (type) {
+    case hipExecAffinityTypeCUCount:
+      return hipCUResultTohipError(
+          cuDeviceGetExecAffinitySupport(pi, CU_EXEC_AFFINITY_TYPE_SM_COUNT, dev));
+    case hipExtExecAffinityTypeGranularityCU:
+    case hipExtExecAffinityTypeGranularityWGP:
+      // CU-masking granularity is AMD-only; no NVIDIA device reports it.
+      *pi = 0;
+      return hipSuccess;
+    default:
+      return hipErrorInvalidValue;
+  }
+#else
+  // cuDeviceGetExecAffinitySupport and CUexecAffinityType were introduced in CUDA 11.4.
+  (void)pi;
+  (void)type;
+  (void)dev;
+  return hipErrorNotSupported;
+#endif
+}
 
 inline static hipError_t hipDeviceGetP2PAttribute(int* value, hipDeviceP2PAttr attr, int srcDevice,
                                                   int dstDevice) {
