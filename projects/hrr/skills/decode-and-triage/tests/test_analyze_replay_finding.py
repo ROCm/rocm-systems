@@ -127,6 +127,20 @@ Reason: Write access to a read-only page
         self.assertIn("## Fault details", report)
         self.assertNotIn("## Replay result", report)
 
+    def test_a_replay_that_launched_no_kernels_says_zero(self) -> None:
+        """Zero is a count the summary printed, not a missing one."""
+        text = (
+            "[HRR]   Kernels launched: 0\n"
+            "[HRR]   D2H checks     : 1 pass (1 exact, 0 within tol), "
+            "0 fail, 0 skipped\n"
+            "[HRR] PASS\n"
+        )
+        finding = arf.Finding(outcome="UNKNOWN", fault_class="unknown")
+        arf.parse_text(text, "replay.log", finding)
+        report = arf.render_markdown(arf.finalize(finding))
+        self.assertEqual(finding.kernels_launched, 0)
+        self.assertIn("- **Kernels launched**: 0", report)
+
 
 class RecordedCaptureTests(unittest.TestCase):
     """Checks against replay output recorded from a gfx950 host.

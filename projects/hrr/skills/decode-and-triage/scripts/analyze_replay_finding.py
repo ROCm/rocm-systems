@@ -506,6 +506,8 @@ def render_markdown(f: Finding) -> str:
         f"- **D2H**: pass={f.d2h_pass or 0} fail={f.d2h_fail or 0} "
         f"attempted={f.d2h_attempted or 0}"
     )
+    # A replay can launch no kernels at all, and that zero is still a count.
+    kernels = "n/a" if f.kernels_launched is None else f.kernels_launched
     lines = [
         "# HRR replay finding",
         "",
@@ -525,7 +527,7 @@ def render_markdown(f: Finding) -> str:
         lines += [
             "## Replay result",
             d2h,
-            f"- **Kernels launched**: {f.kernels_launched or 'n/a'}",
+            f"- **Kernels launched**: {kernels}",
             "",
         ]
     else:
@@ -541,7 +543,7 @@ def render_markdown(f: Finding) -> str:
             f"- **Grid / workgroup**: {f.grid or 'n/a'} / {f.workgroup or 'n/a'}",
             "",
             "## Replay progress at fault",
-            f"- **Kernels launched**: {f.kernels_launched or 'n/a'}",
+            f"- **Kernels launched**: {kernels}",
             d2h,
             f"- **Last progress kernel**: `{f.last_progress_kernel or 'n/a'}`",
             f"- **Last launch before fault**: `{f.last_event_kernel or 'n/a'}`",
