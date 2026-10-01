@@ -130,7 +130,7 @@ tool_fini(void* data)
 }
 }  // namespace
 
-TEST(rocprofiler_lib, tracing_service_unknown_kinds)
+TEST(tracing_service_kinds, unknown_kinds)
 {
     static auto _data = tool_data{};
 
