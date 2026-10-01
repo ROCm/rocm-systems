@@ -91,12 +91,6 @@ guarantee and confirm support on the target machine.
    * - Ubuntu 20.04 LTS
      - ``5.4.0-150-generic``
      - No
-   * - Ubuntu 18.04 LTS
-     - Not verified
-     - Not verified
-   * - RHEL 9.5
-     - Not verified
-     - Not verified
    * - RHEL 9.4
      - ``5.14.0-503.29.1.el9_5``
      - Yes
@@ -106,18 +100,9 @@ guarantee and confirm support on the target machine.
    * - RHEL 9.0
      - ``5.14.0-70.30.1.el9_0`` or ``5.14.0-503.29.1.el9_5``
      - Yes
-   * - CentOS Stream 10
-     - Not verified
-     - Not verified
-   * - CentOS Stream 9
-     - Not verified
-     - Not verified
    * - openSUSE Tumbleweed (March 2025)
      - ``6.13.0-1-default``
      - Yes
-   * - SLES 15
-     - Not verified
-     - Not verified
 
 Enable kernel P2PDMA support
 ----------------------------
