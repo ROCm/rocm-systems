@@ -187,6 +187,7 @@ set(TEST_SRC
     hipFree.cc
     hipFreeArray.cc
     hipHostFree.cc
+    hipMemcpyMmapPressure.cc
     hipMemcpySync.cc
     hipMemsetSync.cc
     hipMemsetAsync.cc
