@@ -266,7 +266,7 @@ HIP_TEST_CASE(Unit_svm_shared_address_space_fine_grain_system) {
       HIP_SKIP_TEST(HipTest::SkipReason::kPageableMemoryAccessUnsupported);
     }
     if (!concurrentAccess) {
-      HIP_SKIP_TEST(HipTest::SkipReason::kManagedNoConcurrentAccess);
+      HIP_SKIP_TEST(HipTest::SkipReason::kConcurrentManagedAccessUnsupported);
     }
   }
 
