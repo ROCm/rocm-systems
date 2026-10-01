@@ -717,6 +717,8 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipLibraryUnload",
     "hipLibraryGetKernel",
     "hipLibraryGetKernelCount",
+    "hipLibraryGetModule",
+    "hipLibraryGetUnifiedFunction",
     "hipLibraryEnumerateKernels",
     "hipKernelGetLibrary",
     "hipKernelGetFunction",
