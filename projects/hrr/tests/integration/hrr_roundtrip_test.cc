@@ -1491,11 +1491,12 @@ HRR_TEST_CASE(Unit_HRR_ReplaceKernelBadSpec) {
  * Test Description
  * ----------------
  *   - Runs Unit_HRR_FailedMemcpy3D_Direct under capture: a host-to-device
- *     hipMemcpy3D whose extent is far larger than both buffers, which the
- *     runtime rejects.
- *   - The workload exits cleanly and the archive holds no hipMemcpy3D. Before
- *     the copy was success-gated, capture hashed extent-many bytes from the
- *     4 KiB host buffer and faulted.
+ *     copy whose extent is far larger than both buffers, which the runtime
+ *     rejects, made through hipMemcpy3D, hipMemcpy3DAsync and their _spt
+ *     spellings.
+ *   - The workload exits cleanly and the archive holds none of the four.
+ *     Before the copies were success-gated, capture hashed extent-many bytes
+ *     from the 4 KiB host buffer and faulted.
  */
 HRR_TEST_CASE(Unit_HRR_FailedMemcpy3DNotRecorded) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_failed_memcpy3d"};
@@ -1512,6 +1513,40 @@ HRR_TEST_CASE(Unit_HRR_FailedMemcpy3DNotRecorded) {
   REQUIRE(it != counts.end());  // the capture was live
   CHECK(it->second == 1);
   CHECK(counts.count("hipMemcpy3D") == 0);
+  CHECK(counts.count("hipMemcpy3DAsync") == 0);
+  CHECK(counts.count("hipMemcpy3D_spt") == 0);
+  CHECK(counts.count("hipMemcpy3DAsync_spt") == 0);
+}
+
+// ---------------------------------------------------------------------------
+/**
+ * Test Description
+ * ----------------
+ *   - Runs Unit_HRR_LongKernelName_Direct under capture: a hipModuleLaunchKernel
+ *     of a kernel whose 70,000-character name does not fit the uint16_t length
+ *     on the wire.
+ *   - The workload exits cleanly, the archive holds no launch and is marked
+ *     incomplete. Before the length was checked it wrapped, and the launch was
+ *     recorded under a truncated name in an archive marked complete.
+ */
+HRR_TEST_CASE(Unit_HRR_LongKernelNameNotRecorded) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_long_kernel_name"};
+  {
+    hrr::test::SpawnProc proc(HRR_TEST_EXE);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    const int ret = proc.run("\"Unit_HRR_LongKernelName_Direct\"");
+    INFO("Capture exit code: " << ret);
+    REQUIRE(ret == 0);
+  }
+  const auto counts = hrr_info_api_counts(cap.path);
+  const auto it = counts.find("hipModuleLoadData");
+  REQUIRE(it != counts.end());  // the capture was live
+  CHECK(counts.count("hipModuleLaunchKernel") == 0);
+
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(cap.path.string(), arc));
+  CHECK_FALSE(arc.complete);
 }
 
 // ---------------------------------------------------------------------------

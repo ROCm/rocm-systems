@@ -3415,8 +3415,10 @@ TEST_CASE("Unit_HRR_ChevronLaunch_Direct", "[.][hrr][direct]") {
 }
 
 // ---------------------------------------------------------------------------
-// A hipMemcpy3D the runtime rejects, its extent far larger than both buffers.
-// Unit_HRR_FailedMemcpy3DNotRecorded checks that capture does not record it.
+// A copy the runtime rejects, its extent far larger than both buffers, made
+// through each of the four hipMemcpy3D entry points: each has its own success
+// gate in capture. Unit_HRR_FailedMemcpy3DNotRecorded checks that capture
+// records none of them.
 // ---------------------------------------------------------------------------
 TEST_CASE("Unit_HRR_FailedMemcpy3D_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
@@ -3431,8 +3433,70 @@ TEST_CASE("Unit_HRR_FailedMemcpy3D_Direct", "[.][hrr-direct]") {
   p.kind = hipMemcpyHostToDevice;
   REQUIRE(hipMemcpy3D(&p) == hipErrorInvalidValue);
   (void)hipGetLastError();
+  REQUIRE(hipMemcpy3DAsync(&p, nullptr) == hipErrorInvalidValue);
+  (void)hipGetLastError();
+  REQUIRE(hipMemcpy3D_spt(&p) == hipErrorInvalidValue);
+  (void)hipGetLastError();
+  REQUIRE(hipMemcpy3DAsync_spt(&p, hipStreamPerThread) == hipErrorInvalidValue);
+  (void)hipGetLastError();
 
   HRR_HIP_CHECK(hipFree(dst.ptr));
+}
+
+// ---------------------------------------------------------------------------
+// A hipModuleLaunchKernel of a hipRTC kernel whose name is 70,000 characters,
+// longer than the uint16_t name length on the wire. The launch itself succeeds
+// and its output is checked here; Unit_HRR_LongKernelNameNotRecorded checks
+// that capture drops the launch and marks the archive incomplete.
+// ---------------------------------------------------------------------------
+TEST_CASE("Unit_HRR_LongKernelName_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  constexpr int    LN  = 256;
+  constexpr size_t LSZ = LN * sizeof(int);
+
+  const std::string name = "k" + std::string(70000, 'a');
+  const std::string src = "extern \"C\" __global__ void " + name +
+                          "(int* out, int val, int n) {\n"
+                          "  int i = blockIdx.x * blockDim.x + threadIdx.x;\n"
+                          "  if (i < n) out[i] = val;\n"
+                          "}\n";
+  hiprtcProgram prog = nullptr;
+  HRR_HIPRTC_CHECK(hiprtcCreateProgram(&prog, src.c_str(), "long_name.hip",
+                                   0, nullptr, nullptr));
+  hiprtcResult crc = hiprtcCompileProgram(prog, 0, nullptr);
+  if (crc != HIPRTC_SUCCESS) {
+    size_t log_sz = 0;
+    (void)hiprtcGetProgramLogSize(prog, &log_sz);
+    std::string log(log_sz, '\0');
+    (void)hiprtcGetProgramLog(prog, log.data());
+    (void)hiprtcDestroyProgram(&prog);
+    FAIL("hiprtcCompileProgram failed: " + log);
+  }
+  size_t co_size = 0;
+  HRR_HIPRTC_CHECK(hiprtcGetCodeSize(prog, &co_size));
+  std::vector<char> co(co_size);
+  HRR_HIPRTC_CHECK(hiprtcGetCode(prog, co.data()));
+  HRR_HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
+
+  hipModule_t mod = nullptr;
+  HRR_HIP_CHECK(hipModuleLoadData(&mod, co.data()));
+  hipFunction_t fn = nullptr;
+  HRR_HIP_CHECK(hipModuleGetFunction(&fn, mod, name.c_str()));
+
+  int* d = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&d, LSZ));
+  int   val = 77;
+  int   n   = LN;
+  void* args[] = { &d, &val, &n };
+  HRR_HIP_CHECK(hipModuleLaunchKernel(fn, 1, 1, 1, LN, 1, 1, 0, nullptr, args, nullptr));
+  HRR_HIP_CHECK(hipDeviceSynchronize());
+
+  std::vector<int> h(LN, 0);
+  HRR_HIP_CHECK(hipMemcpy(h.data(), d, LSZ, hipMemcpyDeviceToHost));
+  for (int i = 0; i < LN; ++i) REQUIRE(h[i] == 77);
+
+  HRR_HIP_CHECK(hipFree(d));
+  HRR_HIP_CHECK(hipModuleUnload(mod));
 }
 
 // ---------------------------------------------------------------------------
