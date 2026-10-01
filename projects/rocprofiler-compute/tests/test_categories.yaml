@@ -40,6 +40,7 @@ test_categories:
       - test_inject_roctx_package
       - test_torch_cpp_loader
       - test_conftest
+      - test_mem_chart_common
       - test_mem_chart_gfx9
       - test_mem_chart_gfx11
       - test_mem_chart_gfx1250
@@ -70,6 +71,7 @@ test_categories:
     description: "Core functionality - Run on every PR (target: < 30 min). Slow profile tests (>150s on gfx1151) are covered by nightly full runs."
     test_patterns:
       - test_profile_kernel_execution
+      - test_profile_membw
       - test_pc_sampling
       - test_profile_roofline_bench
       - test_profile_sets_func
@@ -122,6 +124,7 @@ test_categories:
       - test_profiler_base
       - test_pc_sampling_profile
       - test_rocprofv3_avail_interface
+      - test_mem_chart_common
       - test_mem_chart_gfx9
       - test_mem_chart_gfx11
       - test_mem_chart_gfx1250
@@ -158,6 +161,7 @@ test_categories:
       - test_profile_kernel_execution
       - test_profile_misc
       - test_profile_path
+      - test_profile_membw
       - test_pc_sampling
       - test_profile_roofline_dir
       - test_profile_roofline_extra_options
@@ -217,6 +221,7 @@ test_categories:
       - test_profiler_base
       - test_pc_sampling_profile
       - test_rocprofv3_avail_interface
+      - test_mem_chart_common
       - test_mem_chart_gfx9
       - test_mem_chart_gfx11
       - test_mem_chart_gfx1250
@@ -253,6 +258,7 @@ test_categories:
       - test_profile_kernel_execution
       - test_profile_misc
       - test_profile_path
+      - test_profile_membw
       - test_pc_sampling
       - test_profile_roofline_dir
       - test_profile_roofline_extra_options
@@ -312,6 +318,7 @@ test_categories:
       - test_profiler_base
       - test_pc_sampling_profile
       - test_rocprofv3_avail_interface
+      - test_mem_chart_common
       - test_mem_chart_gfx9
       - test_mem_chart_gfx11
       - test_mem_chart_gfx1250
