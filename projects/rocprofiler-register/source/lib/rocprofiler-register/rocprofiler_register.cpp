@@ -29,6 +29,7 @@
 #include "details/library_config.hpp"
 #include "details/logging.hpp"
 #include "details/scope_destructor.hpp"
+#include "details/utility.hpp"
 
 #include <fmt/format.h>
 #include <fmt/ranges.h>
@@ -611,22 +612,17 @@ get_attach_library_anchors()
     append_unique(
         get_library_directory(dlsym(RTLD_DEFAULT, rocprofiler_lib_register_entrypoint)));
 
-    // 2. loader search directories which provide both an attach and an SDK core library
-    auto ld_library_path = common::get_env("LD_LIBRARY_PATH", std::string{});
-    for(size_t pos = 0; pos <= ld_library_path.length();)
+    // 2. LD_LIBRARY_PATH directories which provide both an attach and an SDK core library
+    for(const auto& itr :
+        utility::delimit(common::get_env("LD_LIBRARY_PATH", std::string{}), ":"))
     {
-        auto end = ld_library_path.find(':', pos);
-        if(end == std::string::npos) end = ld_library_path.length();
-        auto directory = fs::path{ ld_library_path.substr(pos, end - pos) };
-        pos            = end + 1;
-
-        if(!directory.empty() &&
-           has_library_candidate<rocprofiler_attach_load_trait>(directory) &&
+        auto directory = fs::path{ itr };
+        if(has_library_candidate<rocprofiler_attach_load_trait>(directory) &&
            has_library_candidate<rocprofiler_sdk_load_trait>(directory))
             append_unique(directory.string());
     }
 
-    // 3. this installation, for layouts without the loader search path configured
+    // 3. this installation, for layouts without LD_LIBRARY_PATH configured
     append_unique(get_this_library_path());
 
     return anchors;
