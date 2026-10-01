@@ -198,7 +198,20 @@ endif()
 
 add_library(profiler-hub SHARED $<TARGET_OBJECTS:profiler-hub-objects>)
 add_library(profiler-hub-static STATIC $<TARGET_OBJECTS:profiler-hub-objects>)
-set_target_properties(profiler-hub-static PROPERTIES OUTPUT_NAME profiler-hub)
+if(WIN32)
+    set_target_properties(profiler-hub PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+    # On MSVC, profiler-hub.lib is the DLL import library; keep the static
+    # archive under a distinct name so consumers link the shared library.
+    set_target_properties(
+        profiler-hub-static
+        PROPERTIES OUTPUT_NAME profiler-hub-static
+    )
+else()
+    set_target_properties(
+        profiler-hub-static
+        PROPERTIES OUTPUT_NAME profiler-hub
+    )
+endif()
 
 if(TARGET profiler-hub-sqlite3-shared)
     set_target_properties(profiler-hub PROPERTIES INSTALL_RPATH "$ORIGIN")

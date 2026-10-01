@@ -102,6 +102,8 @@ downstream consumer of the library.
   stamped in the opened trace's `rocpd_metadata` table, instead of returning
   the profiler-hub library's own version (which can legitimately differ from
   the trace's schema version).
+- Windows/MSVC build support. When SQLite is fetched, Windows downloads the
+  official amalgamation zip instead of running `./configure`.
 
 ## [0.2.0] - 2026-09-02
 
