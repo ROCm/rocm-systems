@@ -302,6 +302,27 @@ class WorkdirDefaultTests(unittest.TestCase):
         finding = proc.stderr.split("[triage] finding=", 1)[1].split("\n", 1)[0]
         Path(finding).unlink()
 
+    def test_a_capture_named_like_the_default_workdir_is_not_written(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            capture = Path(tmp) / f"hrr-triage-{os.getuid()}"
+            archive = capture / "pid-1"
+            archive.mkdir(parents=True)
+            (archive / "events.bin").write_bytes(b"\0" * 64)
+            env = {k: v for k, v in os.environ.items() if k != "HRR_TRIAGE_WORKDIR"}
+            env["TMPDIR"] = tmp
+            proc = subprocess.run(
+                ["bash", str(SCRIPT), "--archive", str(archive), "--no-replay"],
+                capture_output=True,
+                text=True,
+                env=env,
+                check=False,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            inside = sorted(str(p.relative_to(capture)) for p in capture.rglob("*"))
+            self.assertEqual(inside, ["pid-1", "pid-1/events.bin"])
+            finding = proc.stderr.split("[triage] finding=", 1)[1].split("\n", 1)[0]
+            self.assertTrue(Path(finding).is_file(), proc.stderr)
+
     def test_an_explicit_workdir_inside_the_archive_is_refused(self):
         proc, inside = self._run_in_archive({"HRR_TRIAGE_WORKDIR": "out"})
         self.assertNotEqual(proc.returncode, 0)

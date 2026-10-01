@@ -102,9 +102,11 @@ else
   WORKDIR="$tmp_base/hrr-triage-$(id -u)"
   # 0700 and ours, or somewhere else entirely. The name is predictable, so on a
   # shared host another user can get there first, and a finding names a
-  # customer's kernels and addresses.
+  # customer's kernels and addresses. The capture itself can carry that name
+  # too, and then it is ours and writable and still the archive.
   mkdir -p -m 700 "$WORKDIR" 2>/dev/null || true
-  if [[ -L "$WORKDIR" || ! -d "$WORKDIR" || ! -O "$WORKDIR" || ! -w "$WORKDIR" ]]; then
+  if [[ -L "$WORKDIR" || ! -d "$WORKDIR" || ! -O "$WORKDIR" || ! -w "$WORKDIR" ]] ||
+     in_archive "$WORKDIR"; then
     WORKDIR="$(mktemp -d "$tmp_base/hrr-triage-XXXXXX")"
   else
     chmod 700 "$WORKDIR" 2>/dev/null || true
