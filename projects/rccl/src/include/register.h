@@ -25,6 +25,7 @@ enum {
   IPC_REG_COMPLETE = 0x20,
   // RCCL: every peer in this NET register call succeeded. NET_REG_COMPLETE is
   // set on the first peer, so it cannot mean the cached segment count is valid.
+  // Re-check this bit whenever upstream adds a flag here; it must stay unused.
   NET_REG_ALL_PEERS = 0x40
 };
 
