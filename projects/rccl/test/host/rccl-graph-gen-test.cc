@@ -11,7 +11,8 @@
 #include <algorithm>
 #include <climits>
 #include <cstdint>
-#include <cstring>
+#include <cstdlib>
+#include <map>
 #include <set>
 #include <utility>
 #include <vector>
@@ -361,6 +362,25 @@ TEST_P(GraphGenFixedRingTableTest, GenRingsFixed_ExactlyTableEntries_WritesDisti
   EXPECT_EQ(rings.DistinctRingCount(c.tableSize), static_cast<size_t>(c.tableSize));
 }
 
+// Over the whole table every undirected link carries the same number of rings.
+TEST_P(GraphGenFixedRingTableTest, GenRingsFixed_WholeTable_UsesEveryLinkEqually) {
+  const FixedRingTableCase& c = GetParam();
+  RingBuffer rings(c.tableSize, c.nNodes);
+
+  ASSERT_EQ(c.generate(rings.data(), c.tableSize), c.tableSize);
+
+  std::map<Edge, int> linkUse;
+  for (int ch = 0; ch < c.tableSize; ++ch) {
+    for (const Edge& e : RingEdges(rings.channel(ch), c.nNodes, /*directed=*/false)) linkUse[e]++;
+  }
+  const int links = c.nNodes * (c.nNodes - 1) / 2;
+  ASSERT_EQ(static_cast<int>(linkUse.size()), links);
+  const int fairShare = c.tableSize * c.nNodes / links;
+  for (const auto& [edge, uses] : linkUse) {
+    EXPECT_EQ(uses, fairShare) << "link " << edge.first << "-" << edge.second;
+  }
+}
+
 TEST_P(GraphGenFixedRingTableTest, GenRingsFixed_MoreChannelsThanTableEntries_RepeatsTheTableFromTheStart) {
   const FixedRingTableCase& c = GetParam();
   const int nChannels = c.tableSize + 2;
@@ -635,8 +655,10 @@ TEST_F(GraphGenGenerateRingsTest, GenerateRings_FewerThanThreeNodes_GivesEveryCh
 
   for (int nNodes : {1, 2}) {
     RingBuffer rings(kChannels, nNodes);
+    ScopedHook callocHook(g_calloc, [](size_t nmemb, size_t size) { return std::calloc(nmemb, size); });
 
     ASSERT_EQ(generateRings(nNodes, kChannels, rings.data()), ncclSuccess) << "nNodes = " << nNodes;
+    EXPECT_EQ(callocHook.calls, 0) << "nNodes = " << nNodes;
 
     std::vector<int> identity(nNodes);
     for (int n = 0; n < nNodes; ++n) identity[n] = n;
@@ -701,6 +723,7 @@ INSTANTIATE_TEST_SUITE_P(
                       DispatchCase{"EightNodeTable", 8, 17, ExpectTable8, false},
                       DispatchCase{"PrimeStrides", 11, 16, ExpectPrime, false},
                       DispatchCase{"WaleckiOnly", 10, 5, ExpectWalecki, false},
+                      DispatchCase{"OneChannelPastWaleckiOnly", 10, 6, ExpectGreedy, true},
                       DispatchCase{"WaleckiThenGreedy", 10, 18, ExpectGreedy, true}),
     [](const ::testing::TestParamInfo<DispatchCase>& info) { return info.param.name; });
 
@@ -788,17 +811,16 @@ TEST_F(GraphGenCutIndicesTest, FindRingCutIndices_CompetingLoads_NoNodeExceedsTh
   EXPECT_TRUE(cuts.CanaryIntact());
 }
 
-// Reaching the last position depends on the entry wrapping to the ring head.
-TEST_F(GraphGenCutIndicesTest, FindRingCutIndices_OneIdenticalRingPerNode_CutsEveryPositionOnce) {
+// Ties go to the earliest position; reaching the last one depends on the entry
+// wrapping to the ring head.
+TEST_F(GraphGenCutIndicesTest, FindRingCutIndices_OneIdenticalRingPerNode_CutsEachPositionInTurn) {
   constexpr int kNodes = 4;
   const std::vector<int> flattened = RepeatRing({2, 0, 3, 1}, kNodes);
   RingBuffer cuts(1, kNodes);
 
   findRingCutIndices(kNodes, kNodes, flattened.data(), cuts.data());
 
-  std::vector<int> cutIndices = cuts.RingAt(0);
-  std::sort(cutIndices.begin(), cutIndices.end());
-  EXPECT_EQ(cutIndices, std::vector<int>({0, 1, 2, 3}));
+  EXPECT_EQ(cuts.RingAt(0), std::vector<int>({0, 1, 2, 3}));
   EXPECT_TRUE(cuts.CanaryIntact());
 }
 
