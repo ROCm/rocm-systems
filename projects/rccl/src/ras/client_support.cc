@@ -7,6 +7,7 @@
 
 #include <cstdarg>
 #include <cstddef>
+#include <cstdint>
 #include <ctime>
 
 #include "alloc.h"
@@ -481,10 +482,13 @@ void rasClientEventLoop(struct rasClient* client, int pollIdx) {
         char* endPtr = nullptr;
         errno = 0;
         double timeout = strtod(cmd + strlen("timeout "), &endPtr);
-        if (errno != 0 || !endPtr || *endPtr != '\0' || !std::isfinite(timeout) || timeout < 0.0) {
+        double timeoutNs = timeout * CLOCK_UNITS_PER_SEC;
+        // INT64_MAX rounds up to 2^63 as a double, so equality is already out of range.
+        if (errno != 0 || !endPtr || *endPtr != '\0' || !std::isfinite(timeout) || timeout < 0.0 ||
+            timeoutNs >= static_cast<double>(INT64_MAX)) {
           snprintf(rasLine, sizeof(rasLine), "ERROR: Invalid timeout value %s\n", cmd + strlen("timeout "));
         } else {
-          client->timeout = timeout * CLOCK_UNITS_PER_SEC;
+          client->timeout = static_cast<int64_t>(timeoutNs);
           strcpy(rasLine, "OK\n");
         }
         if (rasClientEnqueueString(client, rasLine) != ncclSuccess) {
@@ -1164,7 +1168,7 @@ static ncclResult_t rasClientRunComms(struct rasClient* client) {
   char* msg = nullptr;
   int msgLen;
   struct rasCollective* coll = client->coll;
-  struct rasCollComms* commsData = (struct rasCollComms*)coll->data;
+  struct rasCollComms* commsData = coll ? (struct rasCollComms*)coll->data : nullptr;
   struct rasCollComms::comm* comm;
   struct rasAuxCommRank* auxCommRanks = nullptr;
   struct rasValCount* valCounts = nullptr;
@@ -1189,14 +1193,44 @@ static ncclResult_t rasClientRunComms(struct rasClient* client) {
     "INCOMPLETE,ERROR,MISMATCH"
   };
 
+  // Validate the variable-length peer records before allocating scratch arrays or indexing
+  // status tables. Keep client ownership on rejection so termination frees the collective.
+  if (coll == nullptr || coll->nFwdSent != coll->nFwdRecv || commsData == nullptr ||
+      coll->nData < static_cast<int>(sizeof(*commsData)) || coll->nPeers < 0 ||
+      (coll->nPeers > 0 && coll->peers == nullptr) || commsData->nComms < 0) {
+    INFO(NCCL_RAS, "RAS invalid collective operation data; client status %d", client->status);
+    return ncclInternalError;
+  }
+  {
+    size_t remaining = coll->nData - sizeof(*commsData);
+    comm = commsData->comms;
+    for (int commIdx = 0; commIdx < commsData->nComms; commIdx++) {
+      if (remaining < sizeof(*comm)) return ncclInternalError;
+      remaining -= sizeof(*comm);
+      if (comm->commNRanks < 0 || comm->nRanks < 0 || comm->nMissingRanks < 0 ||
+          comm->nRanks > comm->commNRanks || comm->nMissingRanks > comm->commNRanks - comm->nRanks ||
+          static_cast<size_t>(comm->nRanks) > remaining / sizeof(*comm->ranks))
+        return ncclInternalError;
+      remaining -= comm->nRanks * sizeof(*comm->ranks);
+      if (static_cast<size_t>(comm->nMissingRanks) > remaining / sizeof(struct rasCollCommsMissingRank))
+        return ncclInternalError;
+      remaining -= comm->nMissingRanks * sizeof(struct rasCollCommsMissingRank);
+      for (int rankIdx = 0; rankIdx < comm->nRanks; rankIdx++) {
+        const auto* rank = comm->ranks + rankIdx;
+        if (rank->peerIdx < 0 || rank->peerIdx >= coll->nPeers ||
+            static_cast<unsigned>(rank->status.initState) >= ncclNumResults ||
+            static_cast<unsigned>(rank->status.asyncError) >= ncclNumResults)
+          return ncclInternalError;
+      }
+      comm = (struct rasCollComms::comm*)(((char*)(comm + 1)) + comm->nRanks * sizeof(*comm->ranks) +
+                                          comm->nMissingRanks * sizeof(struct rasCollCommsMissingRank));
+    }
+  }
+
   TRACE(NCCL_RAS, "RAS: rasClientRunComms: starting");
   TRACE(NCCL_RAS, "RAS: coll nLegTimeouts %d, nPeers %d, nData %d; commsData nComms %d", coll->nLegTimeouts,
         coll->nPeers, coll->nData, commsData->nComms);
 
-  if (coll == nullptr || coll->nFwdSent != coll->nFwdRecv) {
-    INFO(NCCL_RAS, "RAS invalid collective operation status; client status %d -- internal error?", client->status);
-    return ncclInternalError;
-  }
   client->coll = nullptr;
 
   rasOutReset();

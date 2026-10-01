@@ -1733,6 +1733,32 @@ TEST_F(RasClientSupportMicrotest, EventLoop_Timeout_Valid_SetsTimeoutAndOk) {
   FreeClient(client);
 }
 
+TEST_F(RasClientSupportMicrotest, EventLoop_Timeout_OutOfRangeFinite_ReturnsErrorAndPreservesTimeout) {
+  struct rasClient* client = MakeClient();
+  // The first value scales to exactly 2^63 nanoseconds; the others exceed it or overflow double.
+  for (const char* value : {"9223372036.854776", "10000000000", "1e308"}) {
+    SCOPED_TRACE(value);
+    client->timeout = 42;
+    ScriptRecvData(std::string("timeout ") + value + "\n");
+    SetRevents(client, POLLIN);
+    rasClientEventLoop(client, client->pfd);
+    EXPECT_EQ(DrainSendQueue(client), std::string("ERROR: Invalid timeout value ") + value + "\n");
+    EXPECT_EQ(client->timeout, 42);
+  }
+  FreeClient(client);
+}
+
+TEST_F(RasClientSupportMicrotest, EventLoop_Timeout_LargestRepresentableNanoseconds_Accepts) {
+  struct rasClient* client = MakeClient();
+  // This scales to the largest double below 2^63: 2^63 - 1024 nanoseconds.
+  ScriptRecvData("timeout 9223372036.854774\n");
+  SetRevents(client, POLLIN);
+  rasClientEventLoop(client, client->pfd);
+  EXPECT_EQ(DrainSendQueue(client), "OK\n");
+  EXPECT_EQ(client->timeout, INT64_C(9223372036854774784));
+  FreeClient(client);
+}
+
 TEST_F(RasClientSupportMicrotest, EventLoop_Timeout_NonNumeric_ReturnsError) {
   struct rasClient* client = MakeClient();
   ScriptRecvData("timeout abc\n");
@@ -3259,4 +3285,51 @@ TEST_F(RasClientSupportMicrotest, RunComms_GroupingDistinguishesNodesStatusAndEr
     EXPECT_EQ(out.find("\n    0         2"), std::string::npos);
     FreeClient(client);
   }
+}
+
+// Malformed peer data must be rejected before scratch allocation and report formatting.
+TEST_F(RasClientSupportMicrotest, RunComms_InvalidPeerRecords_RejectsAndRetainsOwnership) {
+  for (int format : {RAS_OUTPUT_TEXT, RAS_OUTPUT_JSON}) {
+    for (int scenario = 0; scenario < 14; ++scenario) {
+      SCOPED_TRACE(format);
+      SCOPED_TRACE(scenario);
+      auto data = BuildRasCollComms({MakeCommSpec(1, {RankSpec{0, 0}})});
+      auto* header = reinterpret_cast<struct rasCollComms*>(data.data());
+      auto* comm = FirstComm(data);
+      switch (scenario) {
+        case 0: comm->commNRanks = 0; break; // nRanks exceeds the scratch-array capacity.
+        case 1: comm->commNRanks = -1; break;
+        case 2: comm->nRanks = -1; break;
+        case 3: comm->nMissingRanks = -1; break;
+        case 4: comm->nMissingRanks = 1; break; // Present + missing exceeds commNRanks.
+        case 5: comm->ranks[0].status.initState = static_cast<ncclResult_t>(ncclNumResults); break;
+        case 6: comm->ranks[0].status.asyncError = static_cast<ncclResult_t>(15); break;
+        case 7: comm->ranks[0].peerIdx = -1; break;
+        case 8: comm->ranks[0].peerIdx = 1; break;
+        case 9: header->nComms = -1; break;
+        case 10: header->nComms = 2; break; // No second communicator header.
+        case 11: data.resize(sizeof(struct rasCollComms) - 1); break;
+        case 12: data.pop_back(); break; // Truncated rank record.
+        case 13: comm->commNRanks = 2; comm->nMissingRanks = 1; break; // Missing record absent.
+      }
+      auto* client = MakeClient();
+      client->outputFormat = static_cast<decltype(client->outputFormat)>(format);
+      client->status = RAS_CLIENT_COMMS;
+      auto* coll = MakeCollective(std::move(data), {MakeAddr(100)});
+      client->coll = coll;
+      EXPECT_EQ(rasClientRunComms(client), ncclInternalError);
+      EXPECT_EQ(client->coll, coll);
+      EXPECT_TRUE(ncclIntruQueueEmpty(&client->sendQ));
+      EXPECT_EQ(g_collFreeCalls, 0);
+      rasClientTerminate(client);
+      EXPECT_EQ(g_collFreeCalls, 1);
+      ResetWholeFileSeams();
+    }
+  }
+}
+
+TEST_F(RasClientSupportMicrotest, RunComms_NullCollective_Rejects) {
+  auto* client = MakeClient();
+  EXPECT_EQ(rasClientRunComms(client), ncclInternalError);
+  FreeClient(client);
 }
