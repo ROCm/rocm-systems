@@ -1173,7 +1173,7 @@ protected:
                                        MultiSegmentBuffer& buf)
     {
         buf = MultiSegmentBuffer{};
-#if NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
+#if NCCL_CUMEM_HOST_GATE
         ASSERT_GE(numSegments, 1);
         ASSERT_GE(numHostSegments, 0);
         ASSERT_LE(numHostSegments, numSegments);

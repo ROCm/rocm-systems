@@ -48,7 +48,7 @@ TEST(Alloc, ncclIbMallocDebugZeroSize)
     EXPECT_EQ(ptr, nullptr);
 }
 
-#if !NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
+#if !NCCL_CUMEM_HOST_GATE
 // These tests exercise the unsupported-fallback path of ncclCuMemHostAlloc/Free
 // that returns ncclInternalError. They do not apply to native support or the
 // ROCm 7.0.2.x host-VMM backport.
@@ -79,7 +79,7 @@ TEST(Alloc, ncclCuMemHostFree)
         }
     );
 }
-#endif // !NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
+#endif // !NCCL_CUMEM_HOST_GATE
 
 #if ROCM_VERSION < 70000
 // This test is only valid for ROCm versions < 7.0.0

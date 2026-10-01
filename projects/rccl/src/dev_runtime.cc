@@ -47,7 +47,7 @@ extern int64_t ncclParamWinEnable();
 // its own host location type as CPU-backed sysmem.
 static inline bool ncclSymIsHostSegment(CUmemLocationType type) {
 #if defined(__HIP_PLATFORM_AMD__)
-#if NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
+#if NCCL_CUMEM_HOST_GATE
   if (type == hipMemLocationTypeHost) return true;
 #endif
 #else

@@ -111,8 +111,8 @@ private:
 
 #include "fakes/sym_kernels_fakes.h"
 
-// hipMemLocationTypeHost and HostNuma follow NCCL_CUMEM_HOST_VERSION_SUPPORTED:
-// native 7.12.60540 and the 7.0.2.x backport. Outside that, hip_compat.h
+// hipMemLocationTypeHost and HostNuma follow NCCL_CUMEM_HOST_GATE: native
+// 7.12.60540 and the probed 7.0.2.x backport. Outside that, hip_compat.h
 // supplies CUDA enumerator 3. This file is not hipified.
 // ---------------------------------------------------------------------------
 // Shared fixture teardown for suites that leave windows registered.
@@ -141,13 +141,13 @@ static void ReclaimDevrWindows(ncclComm* comm) {
   while (devr->memHead != nullptr) symMemoryDestroy(comm, devr->memHead);
 }
 
-#if defined(__HIP_PLATFORM_AMD__) && !NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
+#if defined(__HIP_PLATFORM_AMD__) && !NCCL_CUMEM_HOST_GATE
 static const hipMemLocationType kLocHostNuma =
     static_cast<hipMemLocationType>(CU_MEM_LOCATION_TYPE_HOST_NUMA);
 #else
 static const hipMemLocationType kLocHostNuma = hipMemLocationTypeHostNuma;
 #endif
-#if !defined(__HIP_PLATFORM_AMD__) || NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
+#if !defined(__HIP_PLATFORM_AMD__) || NCCL_CUMEM_HOST_GATE
 static const hipMemLocationType kLocHost = hipMemLocationTypeHost;
 #else
 // The enumerator arrives with the 7.0.2.2 backport. This arm only needs a
@@ -169,7 +169,7 @@ TEST(SymIsHostSegment, HostNuma_ReturnsTrue) {
 }
 #endif
 
-#if defined(__HIP_PLATFORM_AMD__) && NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
+#if defined(__HIP_PLATFORM_AMD__) && NCCL_CUMEM_HOST_GATE
 // Branch: AMD allocates host segments as plain host, so they count as sysmem.
 TEST(SymIsHostSegment, Host_ReturnsTrue) {
   EXPECT_TRUE(ncclSymIsHostSegment(kLocHost));
@@ -1111,7 +1111,7 @@ TEST_F(SymImportAndMapForRankTest, RemoteRank_ImportsInsteadOfReusing) {
 
 // Off the host-VMM window ncclSymIsHostSegment is false for every AMD value,
 // so the reuse branch cannot fire. Same gate as MixedHostAndDeviceOwners.
-#if defined(__HIP_PLATFORM_AMD__) && NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
+#if defined(__HIP_PLATFORM_AMD__) && NCCL_CUMEM_HOST_GATE
 // Branch: the second clause of reuseLocal -- remote rank, param on, CPU-backed
 // segment -- so the caller's handle is reused without an import.
 TEST_F(SymImportAndMapForRankTest, RemoteHostSegmentWithReuseParam_ReusesHandles) {
@@ -1366,7 +1366,7 @@ TEST_F(SymMemoryMapLsaTeamTest, BarrierFails_ReturnsError) {
   EXPECT_EQ(barrier.calls, 1);
 }
 
-#if defined(__HIP_PLATFORM_AMD__) && NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
+#if defined(__HIP_PLATFORM_AMD__) && NCCL_CUMEM_HOST_GATE
 // A 2-rank host/device split must reject; nHost==1 used to skip the check.
 // Off the host-VMM compile gate ncclSymIsHostSegment(kLocHost) is false.
 TEST_F(SymMemoryMapLsaTeamTest, MixedHostAndDeviceOwners_ReturnsInvalidUsage) {
@@ -1957,7 +1957,7 @@ TEST_F(SymMemoryRegisterGinElasticTest, AgreeingRanks_RegistersOneWindowPerSegme
                    [](hipMemAllocationProp* prop, hipMemGenericAllocationHandle_t) {
                      if (prop) {
                        *prop = hipMemAllocationProp{};
-#if defined(__HIP_PLATFORM_AMD__) && NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
+#if defined(__HIP_PLATFORM_AMD__) && NCCL_CUMEM_HOST_GATE
                        prop->location.type = kLocHost;
 #else
                        prop->location.type = kLocHostNuma;
@@ -2010,7 +2010,7 @@ TEST_F(SymMemoryRegisterGinElasticTest, DeviceSegment_RegistersAsCudaPointer) {
   EXPECT_EQ(types[0], NCCL_PTR_CUDA);
 }
 
-#if defined(__HIP_PLATFORM_AMD__) && NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
+#if defined(__HIP_PLATFORM_AMD__) && NCCL_CUMEM_HOST_GATE
 // One host segment is not maxGlobalNumSegments > 1. needDmabuf still has to
 // be true or ncclGinRegister falls through to ibv_reg_mr on the host VMM pointer.
 TEST_F(SymMemoryRegisterGinElasticTest, SingleHostSegment_RequiresDmabuf) {
@@ -4170,7 +4170,7 @@ TEST_F(DevrWindowRegisterInGroupSymTest, MisalignedWindow_ReturnsInvalidArgument
 // CPU-backed segments need the elastic-buffer param. Compiled only inside
 // NCCL_CUMEM_HOST_VERSION_SUPPORTED so the reject is that gate, not an
 // unsupported location type.
-#if NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
+#if NCCL_CUMEM_HOST_GATE
 TEST_F(DevrWindowRegisterInGroupSymTest, SysmemSegmentWithoutElasticParam_ReturnsInvalidArgument) {
   ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(4096));
   ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle, SegmentsOfType(kLocHost));
@@ -4196,7 +4196,7 @@ TEST_F(DevrWindowRegisterInGroupSymTest, SysmemSegmentWithElasticParam_Registers
   ASSERT_EQ(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, 0, &out), ncclSuccess);
   EXPECT_EQ(comm->devrState.winSortedCount, 1);
 }
-#endif  // NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
+#endif  // NCCL_CUMEM_HOST_GATE
 
 // Device windows must still register when elastic is off. g_loadParam avoids
 // NCCL_PARAM's first-read cache. An always-invalid helper would fail this.
