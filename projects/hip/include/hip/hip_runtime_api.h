@@ -658,8 +658,8 @@ typedef enum hipDeviceAttribute_t {
 typedef enum hipExecAffinityType {
   hipExecAffinityTypeCUCount = 0,     ///< Compute-unit count affinity (== CU_EXEC_AFFINITY_TYPE_SM_COUNT); always supported
   hipExecAffinityTypeMax,             ///< Sentinel (== CU_EXEC_AFFINITY_TYPE_MAX)
-  hipExtExecAffinityTypeGranularityCU = 0x1000,   ///< Per-CU masking granularity (gfx9 / gfx12.5+). Valid only on Rocm device.
-  hipExtExecAffinityTypeGranularityWGP = 0x1001,  ///< Per-WGP masking granularity (RDNA gfx10-12.4). Valid only on Rocm device.
+  hipExtExecAffinityTypeGranularityCU = 0x1000,   ///< Per-CU CU-mask granularity. Valid only on Rocm device.
+  hipExtExecAffinityTypeGranularityWGP = 0x1001,  ///< Per-WGP CU-mask granularity. Valid only on Rocm device.
 } hipExecAffinityType;
 
 // Flags that can be used with hipGetProcAddress.
@@ -2570,6 +2570,17 @@ hipError_t hipDeviceFlushGPUDirectRDMAWrites(enum hipFlushGPUDirectRDMAWritesTar
 /**
  * @brief Returns whether the device supports an execution affinity type, and the
  * device's CU-masking granularity.
+ *
+ * For #hipExecAffinityTypeCUCount, @p pi is always set to 1.
+ *
+ * For #hipExtExecAffinityTypeGranularityCU and #hipExtExecAffinityTypeGranularityWGP,
+ * @p pi reports the granularity the runtime will actually apply to a CU mask on this
+ * device, so exactly one of the two is reported as supported and the other as
+ * unsupported. This is an effective runtime property rather than a fixed hardware one:
+ * WGP granularity is used on gfx10 through gfx12.4 and is controlled by the
+ * GPU_ENABLE_WGP_MODE environment variable, which defaults to 1. Setting
+ * GPU_ENABLE_WGP_MODE=0 makes those devices report CU granularity instead. gfx9 and
+ * gfx12.5 and later always report CU granularity, regardless of that variable.
  *
  * @param [out] pi   Set to 1 if @p type is supported, 0 otherwise.
  * @param [in]  type The ::hipExecAffinityType to query.
