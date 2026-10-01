@@ -797,8 +797,22 @@ static void update_root_manifest() {
 // ---------------------------------------------------------------------------
 
 // A failed open() keeps no archive path, so atfork_child does not reopen one in
-// a forked child.
-static bool open_failed() {
+// a forked child. When this attempt created pid-<pid>, its empty directories go
+// too: producers read an existing pid-<pid> as capture being active. Only empty
+// directories are removed, and a link in their place is not followed.
+static bool open_failed(bool created_pid_dir) {
+  if (created_pid_dir) {
+    for (const char* sub : {"/blobs", "/code_objects", ""}) {
+      const std::string dir = g_output_dir + sub;
+#ifdef _WIN32
+      std::error_code ec;
+      if (fs::is_directory(fs::symlink_status(dir, ec)) && fs::is_empty(dir, ec))
+        fs::remove(dir, ec);
+#else
+      (void)::rmdir(dir.c_str());
+#endif
+    }
+  }
   g_base_dir.clear();
   g_output_dir.clear();
   g_manifest_path[0] = '\0';
@@ -824,6 +838,9 @@ bool open(const char* output_dir) {
   g_events_since_ckpt = 0;
   g_trailer_written   = false;
 
+  std::error_code exists_ec;
+  const bool created_pid_dir =
+      !fs::exists(fs::symlink_status(g_output_dir, exists_ec));
   if (!ensure_dir(g_output_dir) || !claim_private_dir(g_output_dir) ||
       !ensure_dir(g_output_dir + "/blobs") || !claim_private_dir(g_output_dir + "/blobs") ||
       !ensure_dir(g_output_dir + "/code_objects") ||
@@ -833,7 +850,7 @@ bool open(const char* output_dir) {
                    g_output_dir.c_str(), strerror(err));
     fprintf(stderr, "[HRR capture] Capture disabled: cannot use %s as a private archive "
             "directory (%s).\n", g_output_dir.c_str(), strerror(err));
-    return open_failed();
+    return open_failed(created_pid_dir);
   }
 #ifndef _WIN32
   for (auto& claimed : g_blob_prefix_claimed) claimed.store(false, std::memory_order_relaxed);
@@ -850,7 +867,7 @@ bool open(const char* output_dir) {
     LogPrintfError("[HRR capture] Failed to open %s: %s", events_path.c_str(), strerror(err));
     fprintf(stderr, "[HRR capture] Capture disabled: cannot open %s (%s).\n",
             events_path.c_str(), strerror(err));
-    return open_failed();
+    return open_failed(created_pid_dir);
   }
 
   if (existing_size > 0) {
@@ -895,7 +912,7 @@ bool open(const char* output_dir) {
               events_path.c_str(), strerror(err));
       HRR_CLOSE(g_events_fd);
       g_events_fd = -1;
-      return open_failed();
+      return open_failed(created_pid_dir);
     }
 
     g_seq_id.store(next_seq, std::memory_order_relaxed);
