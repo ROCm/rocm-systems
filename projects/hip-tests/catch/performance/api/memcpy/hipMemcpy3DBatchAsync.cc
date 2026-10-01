@@ -136,14 +136,14 @@ void RunBenchmark(hipMemcpyKind kind, size_t total_size, size_t copy_count, int 
 }  // namespace
 
 HIP_TEST_CASE(Performance_hipMemcpy3DBatchAsync_H2D_Aligned) {
-  const size_t total_size = GENERATE(16_KB, 128_KB, 512_KB, 1_MB, 4_MB);
-  const size_t copy_count = GENERATE(16, 128, 1024);
+  const size_t total_size = GENERATE(32_KB, 128_KB, 512_KB, 1_MB, 4_MB);
+  const size_t copy_count = GENERATE(8, 128, 1024);
   RunBenchmark(hipMemcpyHostToDevice, total_size, copy_count);
 }
 
 HIP_TEST_CASE(Performance_hipMemcpy3DBatchAsync_D2H_Aligned) {
-  const size_t total_size = GENERATE(16_KB, 128_KB, 512_KB, 1_MB, 4_MB);
-  const size_t copy_count = GENERATE(16, 128, 1024);
+  const size_t total_size = GENERATE(32_KB, 128_KB, 512_KB, 1_MB, 4_MB);
+  const size_t copy_count = GENERATE(8, 128, 1024);
   RunBenchmark(hipMemcpyDeviceToHost, total_size, copy_count);
 }
 
@@ -163,8 +163,8 @@ HIP_TEST_CASE(Performance_hipMemcpy3DBatchAsync_P2P_Aligned) {
   }
   static_cast<void>(hipGetLastError());
 
-  const size_t total_size = GENERATE(16_KB, 128_KB, 512_KB, 1_MB, 4_MB);
-  const size_t copy_count = GENERATE(16, 128, 1024);
+  const size_t total_size = GENERATE(32_KB, 128_KB, 512_KB, 1_MB, 4_MB);
+  const size_t copy_count = GENERATE(8, 128, 1024);
   RunBenchmark(hipMemcpyDeviceToDevice, total_size, copy_count, 0, 1);
 }
 
