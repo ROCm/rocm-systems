@@ -487,6 +487,9 @@ static void atfork_child() {
     g_buf_len = 0;
     g_events_since_ckpt = 0;
     g_trailer_written = false;
+    // Incomplete is a property of an archive, and the child writes its own: a
+    // failure the parent recorded must not cost the child its trailer.
+    g_capture_incomplete.store(false, std::memory_order_relaxed);
     // Re-open from the *base* dir so the forked child selects its own
     // pid-<pid> sub-archive.
     dir = g_base_dir;
