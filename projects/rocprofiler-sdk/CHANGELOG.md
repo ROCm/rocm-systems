@@ -75,6 +75,11 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - Increased the PC sampling buffer size on MI300, MI350, and MI400 series GPUs. Many samples were dropped or invalid at reasonable sampling rates with the smaller buffer.
 - The thread trace decoder now tries the versioned library names (`librocprof-trace-decoder.so.<major>`, then `.so.<major>.<minor>`, then `.so.<major>.<minor>.<patch>`) before falling back to the unversioned name. This lets `rocprofv3 --att` work on installs that ship only the versioned library, such as TheRock runtime wheels.
 - Tool lifecycle messages are now logged at info level instead of warning. Processes that load a rocprofiler-sdk tool with logging disabled no longer write these messages to stderr.
+- `rocprof-attach` and `rocprofv3 --attach` now profile the target process with the tool library of the rocprofiler-sdk installation that the target is running, located through `/proc/<pid>/maps`. When that library cannot be found, they fall back to the tool library of the attaching installation and print a warning. With `--attach-children`, every process in the tree uses the selection made for the target PID.
+- A warning is printed when the target runs a different rocprofiler-sdk installation, because options that installation does not support are ignored or skipped. Aggregate options such as `--sys-trace` only enable what the target's installation supports.
+- `rocprof-attach -t/--attach-tool-library` is now optional. A tool library given with `-t` or `ROCPROF_ATTACH_TOOL_LIBRARY` is used exactly as given and is interpreted in the target's filesystem. `rocprofv3 --attach` now honors a user-set `ROCPROF_ATTACH_TOOL_LIBRARY`.
+- A user-set `ROCP_TOOL_LIBRARIES` is ignored in attach mode, with a warning. Use `-t` or `ROCPROF_ATTACH_TOOL_LIBRARY` to attach a custom tool library.
+- `rocprof-attach` reports a clear error before touching the target when the target's rocprofiler-sdk attach library predates attachment through the `rocp-bg-attach` thread.
 
 ### Resolved issues
 
@@ -100,6 +105,10 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - Fixed a possible crash when a traced HIP API call had a string (`const char*`) argument that was read after the call returned. String arguments are now copied when the call is traced.
 - Fixed `rocprofv3` process attachment failing with framework workloads and Python wheels. Attachment libraries now load on runtime-only installs that lack unversioned library symlinks. Loading the same library through different paths is no longer treated as a conflict. A compatible library next to `rocprofiler-register` is preferred over an unrelated installation.
 - Fixed `rocprofv3 --att` ignoring `ROCPROF_ATT_LIBRARY_PATH`. It searched the whole filesystem from `/` and used the first trace decoder it found.
+- Fixed `rocprofiler_configure_buffer_tracing_service` and `rocprofiler_configure_callback_tracing_service` throwing an exception for an out-of-range tracing kind. They now return `ROCPROFILER_STATUS_ERROR_KIND_NOT_FOUND`.
+- Fixed the rocprofv3 tool library aborting when it runs with an older rocprofiler-sdk, for example after attaching to a process from a different installation. Tracing kinds that the running rocprofiler-sdk does not support, including those enabled internally (external correlation requests and HIP graph tracing), are skipped with a warning.
+- Thread trace is disabled with a warning when the rocprofv3 tool library runs with a rocprofiler-sdk older than 1.5.0, instead of running with a mismatched thread trace ABI.
+- Fixed `rocprofv3 --attach` replacing the attach tool library with its own through the forwarded `ROCP_TOOL_LIBRARIES` environment variable.
 
 ### Known issues
 
