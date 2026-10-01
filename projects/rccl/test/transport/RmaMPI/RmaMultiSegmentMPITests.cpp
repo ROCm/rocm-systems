@@ -363,6 +363,55 @@ TEST_F(RmaMultiSegmentMPITest, PartialFinalSegmentRegistrationAndTransfer)
                               "partial final physical segment");
 }
 
+// Register from a sub-page offset into the first mapping through a sub-page
+// length into the third. Each per-segment DMA-BUF export must cover every page
+// its MR spans, or ibv_reg_dmabuf_mr rejects the first and last segments.
+TEST_F(RmaMultiSegmentMPITest, SubPageBoundsRegistrationAndTransfer)
+{
+    if (!SetUpFixture(/*minProcs=*/2, /*maxProcs=*/2)) return;
+
+    MultiSegmentVmmBuffer *sb = nullptr, *rb = nullptr;
+    if (!AllocSymPair(&sb, &rb, /*nSegments=*/3))
+        GTEST_SKIP() << "Multi-segment VMM allocation unavailable on this host";
+
+    constexpr size_t kHeadSkip   = 512;
+    constexpr uint8_t kSentinel  = 0xC3;
+    const size_t registeredBytes = 2 * sb->segSize + sb->segSize / 2 + 100 - kHeadSkip;
+    uint8_t* sendBase = static_cast<uint8_t*>(sb->ptr) + kHeadSkip;
+    uint8_t* recvBase = static_cast<uint8_t*>(rb->ptr) + kHeadSkip;
+
+    if (worldRank_ == 0)
+        FillBuf(sendBase, registeredBytes, /*seed=*/0x5D);
+    if (worldRank_ == 1)
+        FillSentinel(rb->ptr, rb->totalSize, kSentinel);
+
+    void *sendMh = nullptr, *sendGh = nullptr;
+    void *recvMh = nullptr, *recvGh = nullptr;
+    ASSERT_EQ(ncclSuccess,
+              RegMr(sendBase, registeredBytes, &sendMh, &sendGh));
+    ASSERT_EQ(ncclSuccess,
+              RegMr(recvBase, registeredBytes, &recvMh, &recvGh));
+
+    if (!MultiSegmentPathAvailable())
+        GTEST_SKIP() << "multi-segment path not exercised on this host";
+
+    Barrier();
+    if (worldRank_ == 0)
+    {
+        void* req = nullptr;
+        ASSERT_EQ(ncclSuccess,
+                  rma_->iput(rmaCtx_, 0, /*srcOff=*/0, sendMh, registeredBytes,
+                             /*dstOff=*/0, recvMh, 1, ncclRmaOptFlagsDefault, &req));
+        ASSERT_TRUE(PollUntilDone(req));
+    }
+    Barrier();
+
+    if (worldRank_ == 1)
+        ExpectPayloadIsolated(rb->ptr, rb->totalSize, kHeadSkip,
+                              registeredBytes, /*seed=*/0x5D, kSentinel,
+                              "sub-page registration bounds");
+}
+
 // IPut starting/ending mid-segment so the WR builder splits on a non-zero
 // per-segment offset on both sides (most prone to addr/lkey/rkey errors).
 TEST_F(RmaMultiSegmentMPITest, IPutCrossSegmentBoundaryAtOffset)
