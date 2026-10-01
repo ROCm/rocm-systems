@@ -3197,12 +3197,6 @@ HIP_PUBLIC_API hipError_t hipLibraryGetModule(hipModule_t* pMod, hipLibrary_t li
   return hip::GetHipDispatchTable()->hipLibraryGetModule_fn(pMod, library);
   CATCH;
 }
-HIP_PUBLIC_API hipError_t hipLibraryGetUnifiedFunction(void** fptr, hipLibrary_t library,
-                                                       const char* symbol) {
-  TRY;
-  return hip::GetHipDispatchTable()->hipLibraryGetUnifiedFunction_fn(fptr, library, symbol);
-  CATCH;
-}
 HIP_PUBLIC_API hipError_t hipKernelGetAttribute(int* pi, hipFunction_attribute attrib, hipKernel_t kernel,
                                  hipDevice_t dev) {
   TRY;

@@ -709,12 +709,9 @@ ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipDeviceFlushGPUDirectRDMAWrites_fn, 5
 ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipKernelSetAttributeForDevice_fn, 546);
 #endif
 
+
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 37
 ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipLibraryGetModule_fn, 547);
-#endif
-
-#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 38
-ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipLibraryGetUnifiedFunction_fn, 548);
 #endif
 
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION == 0
@@ -793,8 +790,6 @@ ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 546)
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 547)
 #elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 37
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 548)
-#elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 38
-ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 549)
 #else
 INTERNAL_CI_ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 0)
 #endif

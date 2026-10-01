@@ -36,11 +36,4 @@ HIP_TEST_CASE(Unit_library_negative) {
     HIP_CHECK_ERROR(hipLibraryGetModule(&mod, nullptr), hipErrorInvalidResourceHandle);
   }
 
-  SECTION("hipLibraryGetUnifiedFunction negative") {
-    void* fptr = nullptr;
-    HIP_CHECK_ERROR(hipLibraryGetUnifiedFunction(nullptr, nullptr, nullptr), hipErrorInvalidValue);
-    HIP_CHECK_ERROR(hipLibraryGetUnifiedFunction(&fptr, nullptr, "sym"), hipErrorInvalidResourceHandle);
-    HIP_CHECK_ERROR(hipLibraryGetUnifiedFunction(&fptr, nullptr, nullptr), hipErrorInvalidValue);
-    HIP_CHECK_ERROR(hipLibraryGetUnifiedFunction(&fptr, nullptr, ""), hipErrorInvalidValue);
-  }
 }

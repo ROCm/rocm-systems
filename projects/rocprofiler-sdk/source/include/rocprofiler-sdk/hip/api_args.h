@@ -3671,14 +3671,6 @@ typedef union rocprofiler_hip_api_args_t
         hipLibrary_t library;
     } hipLibraryGetModule;
 #endif
-#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 38
-    struct
-    {
-        void**        fptr;
-        hipLibrary_t  library;
-        const char*   symbol;
-    } hipLibraryGetUnifiedFunction;
-#endif
 } rocprofiler_hip_api_args_t;
 
 ROCPROFILER_EXTERN_C_FINI

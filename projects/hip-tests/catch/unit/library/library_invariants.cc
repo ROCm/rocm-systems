@@ -237,18 +237,3 @@ HIP_TEST_CASE(Unit_hipLibraryGetModule_Negative_ModuleUnloadRefused) {
   HIP_CHECK(hipLibraryUnload(lib));
 }
 
-// On AMD, hipLibraryGetUnifiedFunction returns hipErrorNotFound for any valid symbol
-// since no AMD GPU supports unified function pointers.
-HIP_TEST_CASE(Unit_hipLibraryGetUnifiedFunction_Negative_NoUnifiedFunctions) {
-  HIP_TEST_DRIVER_INIT();
-  hipLibrary_t lib = nullptr;
-  HIP_CHECK(hipLibraryLoadFromFile(&lib, kCodeFile.c_str(), nullptr, nullptr, 0, nullptr, nullptr,
-                                   0));
-  void* fptr = nullptr;
-#ifdef __HIP_PLATFORM_AMD__
-  HIP_CHECK_ERROR(hipLibraryGetUnifiedFunction(&fptr, lib, "add_kernel"), hipErrorNotFound);
-#else
-  REQUIRE(hipLibraryGetUnifiedFunction(&fptr, lib, "add_kernel") != hipSuccess);
-#endif
-  HIP_CHECK(hipLibraryUnload(lib));
-}

@@ -529,7 +529,6 @@ hipLibraryGetKernelCount
 hipLibraryGetGlobal
 hipLibraryGetManaged
 hipLibraryGetModule
-hipLibraryGetUnifiedFunction
 hipStreamCopyAttributes
 hipLibraryEnumerateKernels
 hipKernelGetLibrary

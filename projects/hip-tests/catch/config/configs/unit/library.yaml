@@ -116,9 +116,7 @@ library:
   Unit_hipLibraryGetModule_Negative_Parameters:
     <<: *level_2
     tags: [module]
-  Unit_hipLibraryGetUnifiedFunction_Negative_Parameters:
     <<: *level_2
     tags: [module]
-  Unit_hipLibraryGetUnifiedFunction_Negative_NoUnifiedFunctions:
     <<: *level_2
     tags: [module]

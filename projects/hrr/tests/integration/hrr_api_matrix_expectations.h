@@ -402,7 +402,6 @@ inline constexpr HrrApiExpectation kHrrApiMatrix[] = {
     {"hipLibraryGetKernelCount", "T4", 1, false, true, false, false},
     {"hipLibraryGetManaged", "T4", 0, false, true, false, false},
     {"hipLibraryGetModule", "T4", 1, false, true, false, false},
-    {"hipLibraryGetUnifiedFunction", "T4", 1, false, true, false, false},
     {"hipLibraryLoadData", "T4", 1, false, true, false, false},
     {"hipLibraryLoadFromFile", "T4", 1, false, true, false, false},
     {"hipLibraryUnload", "T4", 1, false, true, false, false},

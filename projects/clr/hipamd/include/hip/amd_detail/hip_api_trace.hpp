@@ -48,7 +48,7 @@
 #define HIP_API_TABLE_STEP_VERSION 0
 #define HIP_COMPILER_API_TABLE_STEP_VERSION 0
 #define HIP_TOOLS_API_TABLE_STEP_VERSION 1
-#define HIP_RUNTIME_API_TABLE_STEP_VERSION 38
+#define HIP_RUNTIME_API_TABLE_STEP_VERSION 37
 
 // HIP API interface
 // HIP compiler dispatch functions
@@ -1193,8 +1193,6 @@ typedef hipError_t (*t_hipKernelSetAttributeForDevice)(hipKernel_t kernel, hipFu
                                                         int value, int device);
 
 typedef hipError_t (*t_hipLibraryGetModule)(hipModule_t* pMod, hipLibrary_t library);
-typedef hipError_t (*t_hipLibraryGetUnifiedFunction)(void** fptr, hipLibrary_t library,
-                                                     const char* symbol);
 // HIP Compiler dispatch table
 struct HipCompilerDispatchTable {
   // HIP_COMPILER_API_TABLE_STEP_VERSION == 0
@@ -1860,11 +1858,10 @@ struct HipDispatchTable {
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 37
   t_hipLibraryGetModule hipLibraryGetModule_fn;
 
-  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 38
-  t_hipLibraryGetUnifiedFunction hipLibraryGetUnifiedFunction_fn;
-
   // DO NOT EDIT ABOVE!
-  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 39
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 38
+
+
 
   // ******************************************************************************************* //
   //
