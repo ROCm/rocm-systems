@@ -56,10 +56,18 @@ constexpr auto sequential_pred = [](const format_t& f) { return !f.process_paral
 }  // namespace
 
 enabled_formats_t::enabled_formats_t()
-: formats{ { format_kind::rocpd, true, get_use_rocpd(), "rocpd" },
-           { format_kind::perfetto, true, get_caching_perfetto(), "perfetto" },
-           { format_kind::unified_memory, false, get_use_unified_memory_profiling(),
-             "unified_memory" } }
+: formats{ { .kind             = format_kind::rocpd,
+             .process_parallel = true,
+             .enabled          = get_use_rocpd(),
+             .name             = "rocpd" },
+           { .kind             = format_kind::perfetto,
+             .process_parallel = true,
+             .enabled          = get_caching_perfetto(),
+             .name             = "perfetto" },
+           { .kind             = format_kind::unified_memory,
+             .process_parallel = false,
+             .enabled          = get_use_unified_memory_profiling(),
+             .name             = "unified_memory" } }
 {}
 
 enabled_formats_t::enabled_formats_t(std::vector<format_t> _formats) noexcept
@@ -121,23 +129,25 @@ enabled_formats_t::get_sequential_formats() const
 bool
 enabled_formats_t::is_rocpd_enabled() const
 {
-    auto it = std::find_if(formats.begin(), formats.end(),
-                           [](const auto& f) { return f.kind == format_kind::rocpd; });
+    auto const it = std::find_if(formats.begin(), formats.end(), [](const auto& f) {
+        return f.kind == format_kind::rocpd;
+    });
     return it != formats.end() && it->enabled;
 }
 
 bool
 enabled_formats_t::is_perfetto_enabled() const
 {
-    auto it = std::find_if(formats.begin(), formats.end(),
-                           [](const auto& f) { return f.kind == format_kind::perfetto; });
+    auto const it = std::find_if(formats.begin(), formats.end(), [](const auto& f) {
+        return f.kind == format_kind::perfetto;
+    });
     return it != formats.end() && it->enabled;
 }
 
 bool
 enabled_formats_t::is_unified_memory_enabled() const
 {
-    auto it = std::find_if(formats.begin(), formats.end(), [](const auto& f) {
+    auto const it = std::find_if(formats.begin(), formats.end(), [](const auto& f) {
         return f.kind == format_kind::unified_memory;
     });
     return it != formats.end() && it->enabled;

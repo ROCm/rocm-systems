@@ -94,7 +94,7 @@ get_availability<Type>::get_info()
     using value_type     = component_value_type_t<Type>;
     using category_types = trait::component_apis<Type>::type;
 
-    auto _cleanup = [](std::string _type, const std::string& _pattern) {
+    auto const _cleanup = [](std::string _type, const std::string& _pattern) {
         auto _pos = std::string::npos;
         while((_pos = _type.find(_pattern)) != std::string::npos)
         {
@@ -102,8 +102,8 @@ get_availability<Type>::get_info()
         }
         return _type;
     };
-    auto _replace = [](std::string _type, const std::string& _pattern,
-                       const std::string& _with) {
+    auto const _replace = [](std::string _type, const std::string& _pattern,
+                             const std::string& _with) {
         auto _pos = std::string::npos;
         while((_pos = _type.find(_pattern)) != std::string::npos)
         {
@@ -112,13 +112,14 @@ get_availability<Type>::get_info()
         return _type;
     };
 
-    bool has_metadata   = metadata_t::specialized();
-    bool has_properties = property_t::specialized();
-    bool is_available   = trait::is_available<Type>::value;
-    bool file_output    = trait::generates_output<Type>::value;
-    auto name           = component::metadata<Type>::name();
-    auto label = file_output ? (has_metadata ? metadata_t::label() : Type::get_label())
-                             : std::string("");
+    bool const has_metadata   = metadata_t::specialized();
+    bool const has_properties = property_t::specialized();
+    bool const is_available   = trait::is_available<Type>::value;
+    bool const file_output    = trait::generates_output<Type>::value;
+    auto const name           = component::metadata<Type>::name();
+    auto const label          = file_output
+                                    ? (has_metadata ? metadata_t::label() : Type::get_label())
+                                    : std::string("");
     auto description = has_metadata ? metadata_t::description() : Type::get_description();
     auto data_type   = rocprofsys::utility::demangle<value_type>();
     string_t enum_type = property_t::enum_string();
@@ -158,9 +159,9 @@ get_availability<Type>::get_info()
         }
     }
 
-    string_t categories = get_categories(category_types{});
-    description         = _replace(_replace(description, ". .", "."), "..", ".");
-    data_type           = _replace(_cleanup(data_type, "::__1"), "> >", ">>");
+    string_t const categories = get_categories(category_types{});
+    description               = _replace(_replace(description, ". .", "."), "..", ".");
+    data_type                 = _replace(_cleanup(data_type, "::__1"), "> >", ">>");
     return info_type{ name, is_available,
                       str_vec_t{ data_type, enum_type, id_type, ids_str, label,
                                  description, categories } };
