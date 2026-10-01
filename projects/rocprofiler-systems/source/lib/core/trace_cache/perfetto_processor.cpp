@@ -1576,7 +1576,6 @@ perfetto_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sampl
 }
 
 void
-// NOLINTNEXTLINE(readability-function-size)
 perfetto_processor_t::handle(const hipfile_pmc_sample& hipfile_sample)
 {
     using hipfile_track = core::perfetto::counter_track<category::hipfile>;

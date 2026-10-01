@@ -187,8 +187,6 @@ public:
     void handle(const ainic_pmc_sample&) {}
     void handle(const cpu_pmc_sample&) {}
     void handle(const gpu_perf_counter_sample&) {}
-    // needs a refactor of sample_processor's handle for all modes
-    // NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method)
     void handle(const hipfile_pmc_sample&) {}
     void handle(const backtrace_region_sample&) {}
 

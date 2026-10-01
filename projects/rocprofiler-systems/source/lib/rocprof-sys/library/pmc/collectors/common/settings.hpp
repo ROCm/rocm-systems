@@ -140,7 +140,7 @@ struct settings_policy
      */
     static hipfile::enabled_metrics get_hipfile_enabled_metrics() noexcept
     {
-        static auto s_enabled_metrics = []() noexcept {
+        static auto const k_enabled_metrics = []() noexcept {
             try
             {
                 auto setting = get_setting_value<std::string>(
@@ -160,7 +160,7 @@ struct settings_policy
             fallback.value = hipfile::k_all_hipfile_metrics;
             return fallback;
         }();
-        return s_enabled_metrics;
+        return k_enabled_metrics;
     }
 
     static hipfile::enabled_metrics parse_hipfile_enabled_metrics(
@@ -199,7 +199,7 @@ struct settings_policy
 
     static gpu::enabled_metrics get_enabled_metrics() noexcept
     {
-        static auto const s_enabled_metrics = []() noexcept {
+        static auto const k_enabled_metrics = []() noexcept {
             try
             {
                 auto setting = get_setting_value<std::string>(
@@ -219,7 +219,7 @@ struct settings_policy
             }
             return parse_enabled_metrics("busy, temp, power, mem_usage");
         }();
-        return s_enabled_metrics;
+        return k_enabled_metrics;
     }
 
     static bool get_use_perfetto_legacy_metrics() { return get_use_perfetto(); }
