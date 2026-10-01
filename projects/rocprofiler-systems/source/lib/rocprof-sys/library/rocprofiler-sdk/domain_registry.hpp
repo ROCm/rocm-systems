@@ -169,7 +169,7 @@ private:
 
     consteval static auto collect_callback_domains()
     {
-        constexpr auto k_callback_domains_size = 12;
+        constexpr auto k_callback_domains_size = 13;
         simple_static_vector<callback_domain_definition<SdkBackend>,
                              k_callback_domains_size>
             result;

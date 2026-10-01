@@ -806,9 +806,9 @@ struct thread_info_data_t
 
 struct track_data_t
 {
-    std::string   track_name;
-    std::uint64_t thread_id = 0;
-    std::string   extdata;
+    std::string                  track_name;
+    std::optional<std::uint64_t> thread_id;
+    std::string                  extdata;
 
     bool operator==(const track_data_t&) const = default;
 };
