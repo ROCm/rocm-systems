@@ -67,7 +67,7 @@ extern union ncclSocketAddress IbCastIfAddr;
 enum ncclIbRequestMatchingScheme {
   BY_INDEX = 0,
   BY_ID = 1,
-  BY_ORDER = 2, // send requests are posted in the order they are received (CTS OFFLOAD)
+  BY_ORDER = 2, // completions matched by posted WR identity (CTS offload, or software CTS with on-demand recvs)
 };
 
 struct ncclIbMr {
@@ -149,15 +149,67 @@ extern struct ncclIbDev IbCastDevs[MAX_IB_DEVS];
 extern int IbCastRelaxedOrderingEnabled;
 extern bool IbCastUseInline;
 
-#define WR_IMM_RX_REQ_IDX_MASK 0xff
-#define WR_IMM_RX_REQ_IDX_SHIFT 24
-#define WR_IMM_SPLIT_DATA_FLAG 0x00800000
-#define WR_IMM_SIZE_MASK 0x007fffff
+/*
+ * wr_id layout (64-bit, used on receive-side CQ completions):
+ *
+ *   63            48 47                                    0
+ *  +----------------+--------------------------------------+
+ *  |    commId      |         original wr_id index         |
+ *  |   (16 bits)    |            (48 bits)                 |
+ *  +----------------+--------------------------------------+
+ *
+ * commId is non-zero only when QP sharing is enabled; otherwise the
+ * upper 16 bits are zero and the full 64-bit value is the original index.
+ */
+#define WR_ID_RX_COMM_ID_BITS  16
+#define WR_ID_RX_COMM_ID_BIT_POS 48
+#define WR_ID_RX_COMM_ID_MASK  ((uint64_t)((1u << WR_ID_RX_COMM_ID_BITS) - 1) << WR_ID_RX_COMM_ID_BIT_POS)
+
+/*
+ * imm_data layout — default (non-BY_ID) scheme (32-bit):
+ *
+ *   31       24 23  22                           0
+ *  +----------+----+-----------------------------+
+ *  |  reqIdx  | SD |       size (23 bits)        |
+ *  | (8 bits) |    |                             |
+ *  +----------+----+-----------------------------+
+ *
+ *  reqIdx : receiver-side request index
+ *  SD     : split-data flag (set when data spans >1 QPs)
+ *  size   : transfer size in bytes
+ */
+#define WR_IMM_RX_REQ_IDX_BITS  8
+#define WR_IMM_RX_REQ_IDX_BIT_POS 24
+#define WR_IMM_RX_REQ_IDX_MASK  (((1u << WR_IMM_RX_REQ_IDX_BITS) - 1) << WR_IMM_RX_REQ_IDX_BIT_POS)
+#define WR_IMM_SIZE_BITS        23
+#define WR_IMM_SIZE_BIT_POS       0
+#define WR_IMM_SIZE_MASK        (((1u << WR_IMM_SIZE_BITS) - 1) << WR_IMM_SIZE_BIT_POS)
+#define WR_IMM_SPLIT_DATA_FLAG  (1u << WR_IMM_SIZE_BITS)
+
+/*
+ * imm_data layout — BY_ID scheme (32-bit, QP sharing enabled):
+ *
+ *   31    24 23             8 7              0
+ *  +--------+----------------+---------------+
+ *  | unused |    commId      |    reqId      |
+ *  |        |   (16 bits)    |   (8 bits)    |
+ *  +--------+----------------+---------------+
+ *
+ *  reqId  : receiver-side request index (NET_IB_MAX_REQUESTS <= 256)
+ *  commId : receiver commId for routing completions to the right comm
+ */
+#define WR_IMM_BYID_REQ_ID_BITS   8
+#define WR_IMM_BYID_REQ_ID_BIT_POS  0
+#define WR_IMM_BYID_REQ_ID_MASK   (((1u << WR_IMM_BYID_REQ_ID_BITS) - 1) << WR_IMM_BYID_REQ_ID_BIT_POS)
+#define WR_IMM_BYID_COMM_ID_BITS  16
+#define WR_IMM_BYID_COMM_ID_BIT_POS WR_IMM_BYID_REQ_ID_BITS
+#define WR_IMM_BYID_COMM_ID_MASK  (((1u << WR_IMM_BYID_COMM_ID_BITS) - 1) << WR_IMM_BYID_COMM_ID_BIT_POS)
 extern int IbCastGdrFlushDisable;
 extern bool IbCastAinicRoce;
 extern bool IbCastAinicCtsInlineData;
 extern bool IbCastOffloadEnabled;
 extern int64_t rcclParamIbCastP2pDisableCts();
+int64_t ncclParamIbCastOooRq();
 
 #define NCCL_IB_LLSTR(ll) \
   (((ll) == IBV_LINK_LAYER_INFINIBAND) ? "IB" : (((ll) == IBV_LINK_LAYER_ETHERNET) ? "RoCE" : "UNSPECIFIED"))
@@ -477,6 +529,15 @@ struct ncclIbMrHandle {
 // Forward declaration
 struct ncclIbResiliency;
 
+struct IbCastQpSharingInfo {
+  uint16_t netIbCommId;
+  bool     isPrimary;
+  int      groupIdx;
+  int      remIbDevIdx;
+  int      groupNqps;
+  uint64_t peerProcTag;       // remote process identity, 0 = unknown
+};
+
 struct alignas(32) ncclIbNetCommBase {
   ncclNetVDeviceProps_t vProps;
   bool isSend;
@@ -505,6 +566,7 @@ struct alignas(32) ncclIbNetCommBase {
 
   uint64_t fifoHead;
   int nqps;
+  int isP2p;
   int splitDataOnQps;
   struct ncclSocket sock;
   int ready;
@@ -525,6 +587,9 @@ struct alignas(32) ncclIbNetCommBase {
   bool faultQpError[NCCL_IB_MAX_QPS];
 #endif
   struct ncclIbResiliency* resiliency;
+
+  // QP Sharing fields — see qp_sharing.h for state query helpers
+  struct IbCastQpSharingInfo qpSharing;
 };
 
 struct ncclIbNetCommDevBase* IbCastGetNetCommDevBase(ncclIbNetCommBase* base, int devIndex);
@@ -625,6 +690,7 @@ struct ncclIbSendComm {
   // Resolved slot for telChId on this comm's first device (NULL if untracked).
   // Same reasoning as ncclIbQp::telQpStats: avoid re-resolving per completion.
   RcclChannelStats* telChStats;
+  uint16_t remCommId;           // receiver's commId for imm_data encoding (QP sharing)
 };
 // The SendFifo needs to be 32-byte aligned and each element needs
 // to be a 32-byte multiple, so that an entry does not get split and
@@ -724,6 +790,8 @@ static_assert((offsetof(struct ncclIbRecvComm, remCtsFifo) % 32) == 0,
 ncclResult_t IbCastBaseCommInit(struct ncclIbNetCommBase* baseComm, bool isSend);
 ncclResult_t IbCastRecvCommInit(struct ncclIbRecvComm* recvComm);
 ncclResult_t IbCastSendCommInit(struct ncclIbSendComm* sendComm);
+
+bool IbCastByOrderRequested();
 
 struct ncclIbListenComm {
   int dev;
@@ -841,6 +909,7 @@ extern int64_t rcclParamIbQpSchedUpdateInterval();
 extern int64_t rcclParamIbQpSchedSplitDataMin();
 extern int64_t rcclParamIbQpSchedLogInterval();
 
+void IbCastReportMatchingScheme();
 #define QP_SCHED_WEIGHT_ENV_VAR "RCCL_IB_QP_SCHED_WEIGHT"
 #define QP_SCHED_WEIGHT_ENV_VAR_ALIAS "NCCL_IB_QP_SCHED_WEIGHT"
 #define QP_SCHED_LOG_PATH_ENV_VAR "RCCL_IB_QP_SCHED_LOG_PATH"

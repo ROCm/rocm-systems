@@ -154,31 +154,15 @@ if(USE_IPC)
   )
 endif()
 
-# GDA queue_pair implementations are guarded by GDA_MLX5/GDA_IONIC/GDA_BNXT in
-# queue_pair.hpp. Only compile the backend(s) enabled for this build so that
-# declarations and definitions match.
+# GDA QueuePair implementations are guarded by GDA_MUX/GDA_IONIC/GDA_BNXT/GDA_MLX5
+# in queue_pair_provider.hpp and (if GDA_MUX is enabled) queue_pair_mux.hpp.
+# Only compile the backend(s) enabled for this build so that declarations and definitions match.
 if(USE_GDA)
   list(APPEND BITCODE_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/context_gda_device.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/context_gda_device_coll.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/backend_gda.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/queue_pair.cpp
   )
-  if(GDA_MLX5)
-    list(APPEND BITCODE_SOURCES
-      ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/mlx5/queue_pair_mlx5.cpp
-    )
-  endif()
-  if(GDA_IONIC)
-    list(APPEND BITCODE_SOURCES
-      ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/ionic/queue_pair_ionic.cpp
-    )
-  endif()
-  if(GDA_BNXT)
-    list(APPEND BITCODE_SOURCES
-      ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/bnxt/queue_pair_bnxt.cpp
-    )
-  endif()
 endif()
 
 # Build bitcode for each GPU architecture

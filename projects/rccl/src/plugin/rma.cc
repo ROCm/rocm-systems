@@ -2,6 +2,8 @@
  * SPDX-FileCopyrightText: Copyright (c) 2022-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  *
+ * Modifications Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ *
  * See LICENSE.txt for more license information
  *************************************************************************/
 
@@ -18,12 +20,13 @@
 
 typedef ncclRma_t* getNcclRma_t(void* rmaPluginLib);
 
+extern getNcclRma_t getNcclRma_v15;
 extern getNcclRma_t getNcclRma_v14;
 extern getNcclRma_t getNcclRma_v13;
 NCCL_PARAM(RmaPluginRefCount, "RMA_PLUGIN_REF_COUNT", 0);
-#define NCCL_RMA_VERSION_COUNT 2
-int ncclRmaVersion[NCCL_RMA_VERSION_COUNT] = {14, 13};
-getNcclRma_t* getNcclRma[NCCL_RMA_VERSION_COUNT] = {getNcclRma_v14, getNcclRma_v13};
+#define NCCL_RMA_VERSION_COUNT 3
+int ncclRmaVersion[NCCL_RMA_VERSION_COUNT] = {15, 14, 13};
+getNcclRma_t* getNcclRma[NCCL_RMA_VERSION_COUNT] = {getNcclRma_v15, getNcclRma_v14, getNcclRma_v13};
 
 #define NCCL_RMA_NUM_RESERVED_PLUGINS 3
 #define NCCL_RMA_NUM_INTERNAL_PLUGINS 1
@@ -90,9 +93,6 @@ static ncclResult_t ncclRmaPluginLoad(rmaPluginLib_t* pluginLib) {
 exit:
   return ncclSuccess;
 fail:
-  INFO(NCCL_INIT | NCCL_NET, "RMA/Plugin: Failed to load external plugin %s, dlHandle: %p, ncclRma: %p",
-       (ncclPluginLibPaths[ncclPluginTypeRma] ? ncclPluginLibPaths[ncclPluginTypeRma] : pluginLib->name),
-       pluginLib->dlHandle, pluginLib->ncclRma);
   if (pluginLib->dlHandle) {
     NCCLCHECK(ncclClosePluginLib(pluginLib->dlHandle, ncclPluginTypeRma));
   }
@@ -156,7 +156,7 @@ static ncclResult_t ncclRmaPluginDisableOtherExternal(int pluginIndex) {
 
 static void initPluginLibsOnceFunc() {
   char* rmaPluginName = nullptr;
-  const char* defaultRmaPlugin = "libnccl-rma.so";
+  const char* defaultRmaPlugin = "librccl-rma.so";
   const char* envRmaPlugin = nullptr;
   char* envRmaPluginList = nullptr;
   char* savePtr = nullptr;

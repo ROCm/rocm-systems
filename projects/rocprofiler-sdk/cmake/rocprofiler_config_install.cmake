@@ -27,8 +27,9 @@ install(
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}
     COMPONENT samples)
 
-# Installs the full tests tree. TheRock rocprofiler-sdk-spm runs
-# ${prefix}/share/rocprofiler-sdk/tests/spm_runner_preflight.py before CTest.
+# Installs the full tests tree (COMPONENT tests). TheRock rocprofiler-sdk-spm CI runs
+# share/rocprofiler-sdk/tests/spm_runner_preflight.py before ctest -L spm;
+# find_package(rocprofiler-sdk) does not require that script (development install).
 install(
     DIRECTORY ${PROJECT_SOURCE_DIR}/tests
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}

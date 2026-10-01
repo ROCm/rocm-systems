@@ -72,7 +72,7 @@ void VSatPkU8I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     int32_t hi = static_cast<int16_t>(raw >> 16);
     uint32_t result = static_cast<uint32_t>(std::clamp(lo, 0, 255)) |
                       (static_cast<uint32_t>(std::clamp(hi, 0, 255)) << 8);
-    amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, result);
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane, result);
   }
 }
 
@@ -101,7 +101,7 @@ RJ_NOINLINE void VSatPkU8I16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
     int32_t hi = static_cast<int16_t>(raw >> 16);
     uint32_t result = static_cast<uint32_t>(std::clamp(lo, 0, 255)) |
                       (static_cast<uint32_t>(std::clamp(hi, 0, 255)) << 8);
-    amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, result);
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane, result);
   }
   dpp_write_mask_scope_.restore();
 }
@@ -121,7 +121,7 @@ void VSatPk4I4I8Vop3::execute_impl(amdgpu::Wavefront &wf) {
       int32_t value = static_cast<int8_t>(raw >> (i * 8));
       result |= (static_cast<uint32_t>(std::clamp(value, -8, 7)) & 0xfu) << (i * 4);
     }
-    amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, result);
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane, result);
   }
 }
 
@@ -151,7 +151,7 @@ RJ_NOINLINE void VSatPk4I4I8Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
       int32_t value = static_cast<int8_t>(raw >> (i * 8));
       result |= (static_cast<uint32_t>(std::clamp(value, -8, 7)) & 0xfu) << (i * 4);
     }
-    amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, result);
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane, result);
   }
   dpp_write_mask_scope_.restore();
 }
@@ -169,7 +169,7 @@ void VSatPk4U4U8Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t result = 0;
     for (uint32_t i = 0; i < 4; ++i)
       result |= std::min((raw >> (i * 8)) & 0xffu, 15u) << (i * 4);
-    amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, result);
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane, result);
   }
 }
 
@@ -197,7 +197,7 @@ RJ_NOINLINE void VSatPk4U4U8Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
     uint32_t result = 0;
     for (uint32_t i = 0; i < 4; ++i)
       result |= std::min((raw >> (i * 8)) & 0xffu, 15u) << (i * 4);
-    amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, result);
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane, result);
   }
   dpp_write_mask_scope_.restore();
 }
@@ -251,7 +251,8 @@ void VQsadPkU16U8Vop3::execute_impl(amdgpu::Wavefront &wf) {
           static_cast<uint64_t>(inst_.clamp ? std::min(value, 0xffffu) : (value & 0xffffu))
           << (window * 16);
     }
-    amdgpu::sdwa::write_lane64<false>(*this, wf, vdst, lane, packed_result);
+    amdgpu::sdwa::write_lane64<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane,
+                                                                 packed_result);
   }
 }
 
@@ -277,7 +278,8 @@ void VMqsadPkU16U8Vop3::execute_impl(amdgpu::Wavefront &wf) {
           static_cast<uint64_t>(inst_.clamp ? std::min(value, 0xffffu) : (value & 0xffffu))
           << (window * 16);
     }
-    amdgpu::sdwa::write_lane64<false>(*this, wf, vdst, lane, packed_result);
+    amdgpu::sdwa::write_lane64<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane,
+                                                                 packed_result);
   }
 }
 
@@ -313,7 +315,7 @@ void VMqsadU32U8Vop3::execute_impl(amdgpu::Wavefront &wf) {
           sum += a > b ? a - b : b - a;
       }
       dst_word.encoding_value_ = vdst.encoding_value_ + static_cast<int>(window);
-      amdgpu::sdwa::write_lane<false>(
+      amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
           *this, wf, dst_word, lane,
           amdgpu::vop3_integer_add<uint32_t>(accum[window], sum, inst_.clamp));
     }

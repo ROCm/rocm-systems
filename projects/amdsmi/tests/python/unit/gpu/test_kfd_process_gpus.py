@@ -114,7 +114,3 @@ class TestKfdProcessGpuResolution(unittest.TestCase):
         os.remove(target)
         os.makedirs(target)
         self.assertEqual(_resolve_process_gpus(proc_dir), set())
-
-
-if __name__ == "__main__":
-    unittest.main()

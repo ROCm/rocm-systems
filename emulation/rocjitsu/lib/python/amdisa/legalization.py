@@ -52,6 +52,7 @@ class ExpansionKind(Enum):
     ACCVGPR = auto()
     WMMA = auto()
     CMP_REMOVED = auto()
+    ATOMIC_FP_POLICY = auto()
 
 
 @dataclass
@@ -314,21 +315,17 @@ def _build_rename_map() -> dict[str, str]:
     for size in ('F16', 'F32', 'F64'):
         _add(f'V_MIN_{size}', f'V_MIN_NUM_{size}')
         _add(f'V_MAX_{size}', f'V_MAX_NUM_{size}')
-        _add(f'DS_MIN_{size}', f'DS_MIN_NUM_{size}')
-        _add(f'DS_MAX_{size}', f'DS_MAX_NUM_{size}')
-        _add(f'DS_MIN_RTN_{size}', f'DS_MIN_NUM_RTN_{size}')
-        _add(f'DS_MAX_RTN_{size}', f'DS_MAX_NUM_RTN_{size}')
     # Packed
     _add('V_PK_MIN_F16', 'V_PK_MIN_NUM_F16')
     _add('V_PK_MAX_F16', 'V_PK_MAX_NUM_F16')
     _add('V_PK_MIN_F32', 'V_PK_MIN_NUM_F32')
     _add('V_PK_MAX_F32', 'V_PK_MAX_NUM_F32')
-    # Buffer/global/flat atomic min/max float
+    # Legacy float-atomic spellings are equivalent to each other, but not
+    # MIN_NUM/MAX_NUM: signaling NaNs and selected denormals differ. Without
+    # an equivalent target operation DBT must request a semantic expansion.
     for prefix in ('BUFFER_ATOMIC_', 'FLAT_ATOMIC_', 'GLOBAL_ATOMIC_'):
-        _add(f'{prefix}FMIN', f'{prefix}MIN_NUM_F32')
-        _add(f'{prefix}FMAX', f'{prefix}MAX_NUM_F32')
-        _add(f'{prefix}MIN_F32', f'{prefix}MIN_NUM_F32')
-        _add(f'{prefix}MAX_F32', f'{prefix}MAX_NUM_F32')
+        _add(f'{prefix}FMIN', f'{prefix}MIN_F32')
+        _add(f'{prefix}FMAX', f'{prefix}MAX_F32')
 
     # --- Scalar bitwise renames (GFX9→GFX11): S_ANDN2→S_AND_NOT1, etc. ---
     for w in ('32', '64'):
@@ -345,7 +342,7 @@ def _build_rename_map() -> dict[str, str]:
     # --- EXP → EXPORT ---
     _add('EXP', 'EXPORT')
 
-    # --- Conditional subtract: CSUB → COND_SUB ---
+    # --- Clamped subtract: CSUB → SUB_CLAMP ---
     for prefix in (
         'BUFFER_ATOMIC_',
         'FLAT_ATOMIC_',
@@ -353,8 +350,8 @@ def _build_rename_map() -> dict[str, str]:
         'SCRATCH_ATOMIC_',
         'DS_',
     ):
-        _add(f'{prefix}CSUB_U32', f'{prefix}COND_SUB_U32')
-        _add(f'{prefix}CSUB_RTN_U32', f'{prefix}COND_SUB_RTN_U32')
+        _add(f'{prefix}CSUB_U32', f'{prefix}SUB_CLAMP_U32')
+        _add(f'{prefix}CSUB_RTN_U32', f'{prefix}SUB_CLAMP_RTN_U32')
 
     # --- BUFFER_WBL2 / BUFFER_INV / BUFFER_GL0_INV etc. ---
     _add('BUFFER_WBL2', 'BUFFER_GL1_INV')
@@ -503,6 +500,7 @@ class LegalizationGenerator:
         specs: list[tuple[str, IsaSpec, SemanticsSpec | None]],
     ) -> None:
         self._specs = specs
+        self._profiles = {name: spec.profile for name, spec, _ in specs}
         self._records: dict[str, list[_InstRecord]] = {}
         self._uf = _UnionFind()
         self._next_id = 0
@@ -597,7 +595,18 @@ class LegalizationGenerator:
             src_root = self._uf.find(src_rec.eclass_id)
             candidates = dst_by_class.get(src_root, [])
 
-            if not candidates:
+            memory_f32_add = src_rec.mnemonic.startswith(
+                ('BUFFER_ATOMIC_', 'FLAT_ATOMIC_', 'GLOBAL_ATOMIC_')
+            ) and src_rec.mnemonic.endswith(('_ADD_F32', '_FADD'))
+            incompatible_add_policy = memory_f32_add and (
+                self._profiles[src_isa].scalar_atomic_denorm_modes('fadd', 4, ds=False)
+                != self._profiles[dst_isa].scalar_atomic_denorm_modes(
+                    'fadd', 4, ds=False
+                )
+            )
+            if incompatible_add_policy:
+                action = LegalizationAction.expand(ExpansionKind.ATOMIC_FP_POLICY)
+            elif not candidates:
                 action = self._no_match_action(src_rec)
             else:
                 action = self._best_match_action(src_rec, candidates)
@@ -645,6 +654,22 @@ class LegalizationGenerator:
         handler based on the action kind and lowering/expansion tag.
         """
         name = src.mnemonic
+        if name.startswith(
+            ('DS_', 'BUFFER_ATOMIC_', 'FLAT_ATOMIC_', 'GLOBAL_ATOMIC_')
+        ) and any(
+            operation in name
+            for operation in (
+                'MIN_F',
+                'MAX_F',
+                'MIN_RTN_F',
+                'MAX_RTN_F',
+                'MIN_NUM_',
+                'MAX_NUM_',
+                'FMIN',
+                'FMAX',
+            )
+        ):
+            return LegalizationAction.expand(ExpansionKind.ATOMIC_FP_POLICY)
         if name.startswith('V_MFMA_') or name.startswith('V_SMFMAC_'):
             return LegalizationAction.expand(ExpansionKind.MFMA)
         if name.startswith('V_ACCVGPR_'):
@@ -660,7 +685,7 @@ class LegalizationGenerator:
         if name.startswith('IMAGE_'):
             return LegalizationAction.lower(LoweringKind.GENERIC)
         # All remaining unmatched instructions are EXPAND — no target
-        # equivalent exists. BinaryTranslator emits s_nop placeholder.
+        # equivalent exists. BinaryTranslator fails unless an expansion is registered.
         return LegalizationAction.expand(ExpansionKind.CMP_REMOVED)
 
     def generate_all(

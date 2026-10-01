@@ -38,7 +38,10 @@ auto&
 get_perfetto_tmp_file(pid_t _pid = process::get_id())
 {
     static auto _v = std::unordered_map<pid_t, std::shared_ptr<tmp_file>>{};
-    if(_v.find(_pid) == _v.end()) _v.emplace(_pid, std::shared_ptr<tmp_file>{});
+    if(!_v.contains(_pid))
+    {
+        _v.emplace(_pid, std::shared_ptr<tmp_file>{});
+    }
     return _v.at(_pid);
 }
 
@@ -54,8 +57,10 @@ get_session(pid_t _pid = process::get_id())
 {
     static auto _v =
         std::unordered_map<pid_t, std::unique_ptr<::perfetto::TracingSession>>{};
-    if(_v.find(_pid) == _v.end())
+    if(!_v.contains(_pid))
+    {
         _v.emplace(_pid, std::unique_ptr<::perfetto::TracingSession>{});
+    }
     return _v.at(_pid);
 }
 }  // namespace
@@ -68,11 +73,11 @@ setup()
     auto& cfg             = get_config();
 
     // environment settings
-    auto shmem_size_hint = config::get_perfetto_shmem_size_hint();
-    auto buffer_size     = config::get_perfetto_buffer_size();
-    auto flush_period    = config::get_perfetto_flush_period();
+    auto const shmem_size_hint = config::get_perfetto_shmem_size_hint();
+    auto const buffer_size     = config::get_perfetto_buffer_size();
+    auto       flush_period    = config::get_perfetto_flush_period();
 
-    auto _policy =
+    auto const _policy =
         config::get_perfetto_fill_policy() == "discard"
             ? ::perfetto::protos::gen::TraceConfig_BufferConfig_FillPolicy_DISCARD
             : ::perfetto::protos::gen::TraceConfig_BufferConfig_FillPolicy_RING_BUFFER;
@@ -94,8 +99,14 @@ setup()
 
     args.shmem_size_hint_kb = shmem_size_hint;
 
-    if(get_perfetto_backend() != "inprocess") args.backends |= ::perfetto::kSystemBackend;
-    if(get_perfetto_backend() != "system") args.backends |= ::perfetto::kInProcessBackend;
+    if(get_perfetto_backend() != "inprocess")
+    {
+        args.backends |= ::perfetto::kSystemBackend;
+    }
+    if(get_perfetto_backend() != "system")
+    {
+        args.backends |= ::perfetto::kInProcessBackend;
+    }
 
     // Silence all Perfetto log output on log-disabled ranks with empty callback
     if(!config::output_filtering::is_log_output_enabled_for_current_mpi_rank())
@@ -110,11 +121,17 @@ setup()
 void
 start()
 {
-    if(is_system_backend()) return;
+    if(is_system_backend())
+    {
+        return;
+    }
 
     auto& tracing_session = get_session();
 
-    if(!tracing_session) tracing_session = ::perfetto::Tracing::NewTrace();
+    if(!tracing_session)
+    {
+        tracing_session = ::perfetto::Tracing::NewTrace();
+    }
 
     tracing_session = ::perfetto::Tracing::NewTrace();
     auto& _tmp_file = get_perfetto_tmp_file();
@@ -122,17 +139,19 @@ start()
     {
         if(!_tmp_file)
         {
-            _tmp_file = config::get_tmp_file("perfetto-trace", "proto");
+            _tmp_file = config::get_tmp_file("perfetto-trace", "pftrace");
             _tmp_file->open(O_RDWR | O_CREAT | O_TRUNC, 0600);
         }
     }
 
     LOG_DEBUG("Setup perfetto...");
-    const int _fd = (_tmp_file) ? _tmp_file->fd : -1;
-    auto&     cfg = get_config();
+    const int   _fd = _tmp_file ? _tmp_file->fd : -1;
+    auto const& cfg = get_config();
     tracing_session->SetOnErrorCallback([](::perfetto::TracingError _err) {
         if(_err.code == ::perfetto::TracingError::kTracingFailed)
+        {
             LOG_WARNING("Perfetto encountered a tracing error: {}", _err.message);
+        }
     });
     tracing_session->Setup(cfg, _fd);
     tracing_session->StartBlocking();
@@ -141,7 +160,10 @@ start()
 void
 stop()
 {
-    if(is_system_backend()) return;
+    if(is_system_backend())
+    {
+        return;
+    }
 
     auto& tracing_session = get_perfetto_session();
 
@@ -171,11 +193,14 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error,
     stop();
 
     auto& tracing_session = get_perfetto_session();
-    if(!tracing_session) return;
+    if(!tracing_session)
+    {
+        return;
+    }
 
-    auto _get_session_data = [&tracing_session]() {
-        auto _data     = char_vec_t{};
-        auto _tmp_file = get_perfetto_tmp_file();
+    auto const _get_session_data = [&tracing_session]() {
+        auto       _data     = char_vec_t{};
+        auto const _tmp_file = get_perfetto_tmp_file();
         if(_tmp_file && *_tmp_file)
         {
             _tmp_file->close();
@@ -219,9 +244,10 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error,
     {
         using perfetto_mpi_get_t = tim::operation::finalize::mpi_get<char_vec_t, true>;
 
-        auto _trace_data = _get_session_data();
-        auto _rank_data  = std::vector<char_vec_t>{};
-        auto _combine    = [](char_vec_t& _dst, const char_vec_t& _src) -> char_vec_t& {
+        auto const _trace_data = _get_session_data();
+        auto       _rank_data  = std::vector<char_vec_t>{};
+        auto const _combine    = [](char_vec_t&       _dst,
+                                 const char_vec_t& _src) -> char_vec_t& {
             _dst.reserve(_dst.size() + _src.size());
             for(auto&& itr : _src)
                 _dst.emplace_back(itr);
@@ -231,8 +257,7 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error,
         perfetto_mpi_get_t{ get_perfetto_combined_traces(),
                             settings::node_count() }(_rank_data, _trace_data, _combine);
         for(auto& itr : _rank_data)
-            trace_data =
-                (trace_data.empty()) ? std::move(itr) : _combine(trace_data, itr);
+            trace_data = trace_data.empty() ? std::move(itr) : _combine(trace_data, itr);
     }
     else
     {
@@ -253,6 +278,7 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error,
             operation::file_output_message<tim::project::rocprofsys> _fom{};
             // Write the trace into a file.
             if(config::get_verbose() >= 0)
+            {
                 _fom(_filename, std::string{ "perfetto" },
                      " (%.2f KB / %.2f MB / %.2f GB)... ",
                      data_size_cast<kilobytes>(
@@ -264,6 +290,7 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error,
                      data_size_cast<gigabytes>(
                          bytes{ static_cast<double>(trace_data.size()) })
                          .count());
+            }
             std::ofstream ofs{};
             if(!path::create_parent_dirs_and_open_ofstream(
                    ofs, _filename, std::ios::out | std::ios::binary))
@@ -277,7 +304,9 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error,
                 ofs.write(trace_data.data(), trace_data.size());
                 if(config::get_verbose() >= 0) _fom.append("%s", "Done");  // NOLINT
                 if(_timemory_manager)
+                {
                     _timemory_manager->add_file_output("protobuf", "perfetto", _filename);
+                }
                 _output_registry.register_file(_filename, output_format::perfetto);
             }
             ofs.close();
@@ -293,9 +322,9 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error,
     if(dmp::rank() == 0 &&
        config::output_filtering::is_file_output_enabled_for_current_mpi_rank())
     {
-        auto _output_folder = path::parent_path(_filename);
-        auto _script_path   = std::string{ "rocprof-sys-merge-output.sh" };
-        auto _script_dir    = get_env(env_vars::SCRIPT_PATH, std::string{});
+        auto const _output_folder = path::parent_path(_filename);
+        auto       _script_path   = std::string{ "rocprof-sys-merge-output.sh" };
+        auto       _script_dir    = get_env(env_vars::SCRIPT_PATH, std::string{});
 
         if(!_script_dir.empty())
         {

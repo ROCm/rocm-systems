@@ -30,6 +30,7 @@ target_link_libraries(
         rocjitsu_kmd
         rocjitsu_analysis
         rocjitsu_code
+        rocjitsu_code_object
         rocjitsu_isa
         rocjitsu_isa_registry
         simdojo
@@ -41,6 +42,7 @@ target_link_libraries(
         rocjitsu_vm_risc_v
         rocjitsu_config
         rocjitsu_dbt_config
+        rocjitsu_ip_discovery
         util
         flatbuffers
         Threads::Threads

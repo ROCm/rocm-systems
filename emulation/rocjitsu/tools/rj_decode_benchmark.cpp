@@ -135,7 +135,7 @@ void copy_encoding(std::span<const uint32_t> words, std::size_t offset,
                    std::array<uint32_t, kLookaheadWords> &copy) {
   copy.fill(0);
   const std::size_t available = std::min(copy.size(), words.size() - offset);
-  std::copy_n(words.begin() + static_cast<std::ptrdiff_t>(offset), available, copy.begin());
+  std::ranges::copy_n(words.begin() + static_cast<std::ptrdiff_t>(offset), available, copy.begin());
 }
 
 [[nodiscard]] bool collect_corpus(const AmdGpuCodeObject &object, Decoder &decoder,
