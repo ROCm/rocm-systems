@@ -793,7 +793,7 @@ function(ROCPROFILER_SYSTEMS_GET_GFX_ARCHS _VAR)
     endif()
 
     # Match only "Name:" lines to avoid matching gfx in marketing names/descriptions.
-    check_rocminfo("Name:[ \t]+gfx[0-9A-Fa-f][0-9A-Fa-f]+" _RAW_GFXINFO GET_OUTPUT)
+    check_rocminfo("Name:[ \t]+gfx[0-9A-Za-z-]+" _RAW_GFXINFO GET_OUTPUT)
     if(NOT _RAW_GFXINFO)
         message(AUTHOR_WARNING "Could not get system architectures")
         return()
@@ -802,7 +802,7 @@ function(ROCPROFILER_SYSTEMS_GET_GFX_ARCHS _VAR)
     # Extract just the gfx architecture from each "Name: gfxXXXX" match
     set(_GFXINFO "")
     foreach(_match IN LISTS _RAW_GFXINFO)
-        string(REGEX MATCH "gfx[0-9A-Fa-f]+" _arch "${_match}")
+        string(REGEX MATCH "gfx[0-9A-Za-z-]+" _arch "${_match}")
         if(_arch)
             list(APPEND _GFXINFO "${_arch}")
         endif()
