@@ -2130,9 +2130,7 @@ resolve_scratch(std::span<const CandidateResourcePlan> plans, const ProgramInven
     return false;
   const std::vector<std::vector<ProgramContainerId>> owner_components =
       scalar_owner_components(site_plans);
-  const ScalarSiteAvailability availability =
-      collect_scalar_site_availability(state, site_plans, problem.observation_plan(),
-                                       problem.inventory(), options.initialize_owner_epoch);
+  std::optional<ScalarSiteAvailability> availability;
 
   const uint16_t count =
       exec_save_sgpr_count(resolve_exec_save_requirement(request, resources, options), arch);
@@ -2167,11 +2165,6 @@ resolve_scratch(std::span<const CandidateResourcePlan> plans, const ProgramInven
     if (!needs_override)
       continue;
     RegisterSet unavailable;
-    for (ProgramContainerId owner : owners) {
-      if (const auto it = availability.unavailable_by_kernel_id.find(owner.ordinal);
-          it != availability.unavailable_by_kernel_id.end())
-        unavailable |= it->second;
-    }
     // A code-object-wide EXEC window may already have a complete liveness
     // proof while only the persistent dispatch pair excludes this component.
     // Retain that transient window and override just the dispatch
@@ -2188,6 +2181,18 @@ resolve_scratch(std::span<const CandidateResourcePlan> plans, const ProgramInven
     const bool all_owners_use_fixed_stack =
         !owners.empty() && component_contexts->all_use_fixed_stack;
     if (!selected) {
+      // Preserving an already-proven EXEC window (in particular, dispatch-only
+      // fallback) never uses site availability. Gather it only when selecting
+      // a new window, and share the result across all owner components.
+      if (!availability)
+        availability =
+            collect_scalar_site_availability(state, site_plans, problem.observation_plan(),
+                                             problem.inventory(), options.initialize_owner_epoch);
+      for (ProgramContainerId owner : owners) {
+        if (const auto it = availability->unavailable_by_kernel_id.find(owner.ordinal);
+            it != availability->unavailable_by_kernel_id.end())
+          unavailable |= it->second;
+      }
       ScalarPlacementDomain domain(arch, limit, component_contexts->summaries, &unavailable);
       domain.occupy(options.owner_sgpr.base(), 1u);
       domain.occupy(options.dispatch_sgpr.base(), kDispatchStateSgprCount);

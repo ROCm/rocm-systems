@@ -3540,7 +3540,22 @@ TEST(ConSan, Gfx1250AutomaticExecSaveUsesOwnerLocalWindow) {
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, TransformOutcome::ModifiedValid);
   ASSERT_TRUE(test_exec_save_sgpr(result));
-  ASSERT_FALSE(test_transient_sgpr_assignments(result).empty());
+  // The first owner can borrow dead s0:s7. The second keeps that window
+  // live; its apparent tail hole reaches reserved s102:s105, so it must spill.
+  // Lazy availability collection must still happen for a new window and
+  // retain separate per-owner facts when processing the next component.
+  AmdGpuCodeObject original(bytes.data(), bytes.size());
+  ASSERT_TRUE(original.is_valid());
+  ASSERT_EQ(original.kernels().size(), 2u);
+  const auto assignments = test_transient_sgpr_assignments(result);
+  ASSERT_EQ(assignments.size(), 2u);
+  for (const auto &kernel : original.kernels()) {
+    const auto assignment = std::ranges::find(assignments, kernel.descriptor_file_offset,
+                                              &TransientSgprAssignment::descriptor_file_offset);
+    ASSERT_NE(assignment, assignments.end());
+    EXPECT_EQ(assignment->spill_backed, kernel.entry_text_offset != 0u);
+    EXPECT_EQ(assignment->exec_save_sgpr, 0u);
+  }
   EXPECT_EQ(std::ranges::count_if(result.patches,
                                   [](const PatchInfo &patch) {
                                     return patch.kind == PatchKind::InlineWatchpointStore ||
