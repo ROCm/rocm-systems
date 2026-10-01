@@ -33,8 +33,10 @@
 #include <algorithm>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
+#include <initializer_list>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #ifdef MPI_TESTS_ENABLED
@@ -75,6 +77,17 @@ protected:
     {
         return allocSymBuf(bytes, sb) == ncclSuccess;
     }
+
+    // Registers every buffer even after a failure, so all ranks issue the same collective registrations, then votes.
+    std::string allocSymBufsSkipReason(std::initializer_list<std::pair<size_t, SymBuf*>> bufs)
+    {
+        bool ok = true;
+        for(const auto& [bytes, sb] : bufs)
+        {
+            ok = tryAllocSymBuf(bytes, *sb) && ok;
+        }
+        return mpiCoordinatedSkipReason(!ok, "Symmetric memory not available (VMM/cuMem unsupported)");
+    }
 };
 
 // ===========================================================================
@@ -110,10 +123,10 @@ TEST_F(SymmetricKernelCorruptionTest, AllGather_Sub8ByteAlignment)
         size_t recvBytes = count * static_cast<size_t>(nRanks) * sizeof(float);
 
         SymBuf sendSym, recvSym;
-        if(!tryAllocSymBuf(sendBytes, sendSym) ||
-           !tryAllocSymBuf(recvBytes, recvSym))
+        const std::string noSym = allocSymBufsSkipReason({{sendBytes, &sendSym}, {recvBytes, &recvSym}});
+        if(!noSym.empty())
         {
-            GTEST_SKIP() << "Symmetric memory not available (VMM/cuMem unsupported)";
+            GTEST_SKIP() << noSym;
         }
 
         ASSERT_EQ(hipSuccess,
@@ -166,10 +179,10 @@ TEST_F(SymmetricKernelCorruptionTest, ReduceScatter_Sub8ByteAlignment)
         size_t recvBytes = recvCount * sizeof(float);
 
         SymBuf sendSym, recvSym;
-        if(!tryAllocSymBuf(sendBytes, sendSym) ||
-           !tryAllocSymBuf(recvBytes, recvSym))
+        const std::string noSym = allocSymBufsSkipReason({{sendBytes, &sendSym}, {recvBytes, &recvSym}});
+        if(!noSym.empty())
         {
-            GTEST_SKIP() << "Symmetric memory not available (VMM/cuMem unsupported)";
+            GTEST_SKIP() << noSym;
         }
 
         // Each rank fills its send buffer with float(rank + 1) at every position.
@@ -242,10 +255,11 @@ TEST_F(SymmetricKernelCorruptionTest, GroupedAllGather_VaryingSizes)
         sendBufs[i] = std::make_unique<SymBuf>();
         recvBufs[i] = std::make_unique<SymBuf>();
 
-        if(!tryAllocSymBuf(sendBytes, *sendBufs[i]) ||
-           !tryAllocSymBuf(recvBytes, *recvBufs[i]))
+        const std::string noSym
+            = allocSymBufsSkipReason({{sendBytes, sendBufs[i].get()}, {recvBytes, recvBufs[i].get()}});
+        if(!noSym.empty())
         {
-            GTEST_SKIP() << "Symmetric memory not available (VMM/cuMem unsupported)";
+            GTEST_SKIP() << noSym;
         }
 
         ASSERT_EQ(hipSuccess,
@@ -314,10 +328,11 @@ TEST_F(SymmetricKernelCorruptionTest, GroupedReduceScatter_VaryingSizes)
         sendBufs[i] = std::make_unique<SymBuf>();
         recvBufs[i] = std::make_unique<SymBuf>();
 
-        if(!tryAllocSymBuf(sendBytes, *sendBufs[i]) ||
-           !tryAllocSymBuf(recvBytes, *recvBufs[i]))
+        const std::string noSym
+            = allocSymBufsSkipReason({{sendBytes, sendBufs[i].get()}, {recvBytes, recvBufs[i].get()}});
+        if(!noSym.empty())
         {
-            GTEST_SKIP() << "Symmetric memory not available (VMM/cuMem unsupported)";
+            GTEST_SKIP() << noSym;
         }
 
         ASSERT_EQ(hipSuccess,
@@ -374,12 +389,13 @@ TEST_F(SymmetricKernelCorruptionTest, GroupedMixed_AllGatherAndReduceScatter)
     const size_t rsSendCount = rsRecvCount * static_cast<size_t>(nRanks);
 
     SymBuf agSend, agRecv, rsSend, rsRecv;
-    if(!tryAllocSymBuf(agCount * sizeof(float), agSend) ||
-       !tryAllocSymBuf(agCount * nRanks * sizeof(float), agRecv) ||
-       !tryAllocSymBuf(rsSendCount * sizeof(float), rsSend) ||
-       !tryAllocSymBuf(rsRecvCount * sizeof(float), rsRecv))
+    const std::string noSym = allocSymBufsSkipReason({{agCount * sizeof(float), &agSend},
+                                                      {agCount * nRanks * sizeof(float), &agRecv},
+                                                      {rsSendCount * sizeof(float), &rsSend},
+                                                      {rsRecvCount * sizeof(float), &rsRecv}});
+    if(!noSym.empty())
     {
-        GTEST_SKIP() << "Symmetric memory not available (VMM/cuMem unsupported)";
+        GTEST_SKIP() << noSym;
     }
 
     ASSERT_EQ(hipSuccess,
@@ -452,12 +468,13 @@ TEST_F(SymmetricKernelCorruptionTest, GroupedOps_Sub8ByteAlignment)
     const size_t rsSendCount = rsRecvCount * static_cast<size_t>(nRanks);
 
     SymBuf agSend, agRecv, rsSend, rsRecv;
-    if(!tryAllocSymBuf(agCount * sizeof(float), agSend) ||
-       !tryAllocSymBuf(agCount * nRanks * sizeof(float), agRecv) ||
-       !tryAllocSymBuf(rsSendCount * sizeof(float), rsSend) ||
-       !tryAllocSymBuf(rsRecvCount * sizeof(float), rsRecv))
+    const std::string noSym = allocSymBufsSkipReason({{agCount * sizeof(float), &agSend},
+                                                      {agCount * nRanks * sizeof(float), &agRecv},
+                                                      {rsSendCount * sizeof(float), &rsSend},
+                                                      {rsRecvCount * sizeof(float), &rsRecv}});
+    if(!noSym.empty())
     {
-        GTEST_SKIP() << "Symmetric memory not available (VMM/cuMem unsupported)";
+        GTEST_SKIP() << noSym;
     }
 
     ASSERT_EQ(hipSuccess,
@@ -547,16 +564,13 @@ TEST_F(SymmetricKernelCorruptionTest, ReduceScatterLL_PositionDependentData)
     };
 
     // Window registration is collective, so allocate once and agree on the outcome before any rank can skip.
-    SymBuf sendSym;
-    SymBuf recvSym;
-    int    allocOk = (tryAllocSymBuf(maxCount * nRanks * sizeof(float), sendSym) &&
-                   tryAllocSymBuf(maxCount * sizeof(float), recvSym))
-                         ? 1
-                         : 0;
-    ASSERT_EQ(MPI_SUCCESS, MPI_Allreduce(MPI_IN_PLACE, &allocOk, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD));
-    if(!allocOk)
+    SymBuf            sendSym;
+    SymBuf            recvSym;
+    const std::string noSym
+        = allocSymBufsSkipReason({{maxCount * nRanks * sizeof(float), &sendSym}, {maxCount * sizeof(float), &recvSym}});
+    if(!noSym.empty())
     {
-        GTEST_SKIP() << "Symmetric memory not available (VMM/cuMem unsupported)";
+        GTEST_SKIP() << noSym;
     }
 
     // Without symmetricSupport the forced kernel is ineligible; skip with that reason instead of on ncclInvalidUsage.
