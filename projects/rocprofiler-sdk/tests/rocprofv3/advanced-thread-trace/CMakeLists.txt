@@ -464,6 +464,14 @@ rocprofiler_add_integration_execute_test(
     DISABLED ${IS_DISABLED}
     FAIL_REGULAR_EXPRESSION "att-consecutive-kernels options are mutually exclusive")
 
+# --att-no-intercept needs multi-buffer thread trace, which only MI3xx and gfx12 support
+rocprofiler_sdk_sqtt_triple_buffer_disabled(IS_TRIPLE_BUFFER_DISABLED)
+
+set(ATT_NO_INTERCEPT_DISABLE ${IS_DISABLED})
+if(${IS_TRIPLE_BUFFER_DISABLED})
+    set(ATT_NO_INTERCEPT_DISABLE ON)
+endif()
+
 set(ATT_NO_INTERCEPT_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/att-no-intercept-out")
 
 rocprofiler_add_integration_execute_test(
@@ -475,7 +483,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS thread-trace-test-app
     LABELS "integration-tests;thread-trace"
     TIMEOUT 45
-    DISABLED ${IS_DISABLED}
+    DISABLED ${ATT_NO_INTERCEPT_DISABLE}
     ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     FIXTURES_SETUP rocprofv3-test-att-no-intercept)
@@ -488,7 +496,7 @@ rocprofiler_add_integration_validate_test(
     DISCOVERY_ARGS -k test_att_no_intercept_target_kernel
     TIMEOUT 45
     LABELS "integration-tests;thread-trace"
-    DISABLED ${IS_DISABLED}
+    DISABLED ${ATT_NO_INTERCEPT_DISABLE}
     FIXTURES_REQUIRED rocprofv3-test-att-no-intercept
     ARGS --att-no-intercept-out-dir ${ATT_NO_INTERCEPT_OUT_DIR}
     FAIL_REGULAR_EXPRESSION "AssertionError")
