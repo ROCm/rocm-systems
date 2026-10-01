@@ -3615,16 +3615,20 @@ static HrrHostRect hrr_host_rect(size_t pitch, size_t pitch_height,
     return r;
 }
 
-// The copied bytes of a host buffer laid out as `rect`, rows packed end to end.
-static std::vector<uint8_t> hrr_host_rect_rows(const HrrHostRect& rect,
-                                               const uint8_t* base) {
-    std::vector<uint8_t> rows(rect.width * rect.height * rect.depth);
-    if (rows.empty()) return rows;
-    uint8_t* out = rows.data();
+// True when the copied bytes of `rect` are one contiguous run from `first`.
+static bool hrr_host_rect_dense(const HrrHostRect& rect) {
+    return (rect.height == 1 || rect.row == rect.width) &&
+           (rect.depth == 1 || rect.slice == rect.width * rect.height);
+}
+
+// Copies the copied bytes of a host buffer laid out as `rect` to `out`, rows
+// packed end to end. `out` may be `base` itself: row k lands at k*width, which
+// is never past where it is read from, and memmove takes the overlap.
+static void hrr_host_rect_pack(const HrrHostRect& rect, const uint8_t* base, uint8_t* out) {
+    if (rect.width == 0) return;  // nothing copied, and `out` may be null
     for (size_t z = 0; z < rect.depth; ++z)
         for (size_t y = 0; y < rect.height; ++y, out += rect.width)
-            std::memcpy(out, base + rect.first + z * rect.slice + y * rect.row, rect.width);
-    return rows;
+            std::memmove(out, base + rect.first + z * rect.slice + y * rect.row, rect.width);
 }
 
 // Replays a device-to-host copy whose host side is the rect `dst`, and
@@ -3696,9 +3700,19 @@ static hipError_t replay_pitched_d2h(PlaybackContext& ctx, const char* api,
         ctx.note_d2h_fail(hrr_dispatch_seq);
         return hipSuccess;
     }
-    const std::vector<uint8_t> got = hrr_host_rect_rows(dst, host.data());
-    const std::vector<uint8_t> want = hrr_host_rect_rows(dst, expected);
-    hrr_d2h_validate(ctx, api, hrr_dispatch_seq, got.data(), want.data(), got.size());
+    // The scratch buffer and the cached blob are both resident already, so a
+    // dense copy compares in place and a pitched one packs its own rows inside
+    // the scratch buffer: only its expected rows take a buffer of their own.
+    const size_t n = dst.width * dst.height * dst.depth;
+    if (hrr_host_rect_dense(dst)) {
+        hrr_d2h_validate(ctx, api, hrr_dispatch_seq, host.data() + dst.first,
+                         expected + dst.first, n);
+        return hipSuccess;
+    }
+    hrr_host_rect_pack(dst, host.data(), host.data());
+    std::vector<uint8_t> want(n);
+    hrr_host_rect_pack(dst, expected, want.data());
+    hrr_d2h_validate(ctx, api, hrr_dispatch_seq, host.data(), want.data(), n);
     return hipSuccess;
 }
 
