@@ -22,6 +22,8 @@ downstream consumer of the library.
 
 ### Added
 
+- Windows/MSVC build support. When SQLite is fetched, Windows downloads the
+  official amalgamation zip instead of running `./configure`.
 - New public C ABI (`c/profiler_hub.h`, `c/profiler_hub_types.h`):
   `ph_ctx_create`/`ph_ctx_free`, `ph_get_library_version`, `ph_get_schema_version`,
   `ph_get_track_list`, `ph_get_node`, `ph_get_track_events`, `ph_get_track_samples`,
