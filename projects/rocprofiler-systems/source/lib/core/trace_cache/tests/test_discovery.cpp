@@ -113,11 +113,11 @@ TEST_F(temp_dir_fixture, list_dir_files_returns_files_excluding_dot_entries)
     auto files = list_dir_files(m_dir);
 
     EXPECT_EQ(files.size(), 3U);
-    EXPECT_NE(std::find(files.begin(), files.end(), "a.txt"), files.end());
-    EXPECT_NE(std::find(files.begin(), files.end(), "b.bin"), files.end());
-    EXPECT_NE(std::find(files.begin(), files.end(), "c.json"), files.end());
-    EXPECT_EQ(std::find(files.begin(), files.end(), "."), files.end());
-    EXPECT_EQ(std::find(files.begin(), files.end(), ".."), files.end());
+    EXPECT_NE(std::ranges::find(files, "a.txt"), files.end());
+    EXPECT_NE(std::ranges::find(files, "b.bin"), files.end());
+    EXPECT_NE(std::ranges::find(files, "c.json"), files.end());
+    EXPECT_EQ(std::ranges::find(files, "."), files.end());
+    EXPECT_EQ(std::ranges::find(files, ".."), files.end());
 }
 
 TEST(discovery_test, find_cache_files_empty_input_returns_empty)

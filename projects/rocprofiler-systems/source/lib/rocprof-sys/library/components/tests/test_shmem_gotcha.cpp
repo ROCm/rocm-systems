@@ -507,11 +507,9 @@ TEST_F(shmem_gotcha_test, test_reject_list_excludes_from_configure)
     ASSERT_TRUE(initializer);
     initializer();
 
+    EXPECT_EQ(configured_names.end(), std::ranges::find(configured_names, "shmem_init"));
     EXPECT_EQ(configured_names.end(),
-              std::find(configured_names.begin(), configured_names.end(), "shmem_init"));
-    EXPECT_EQ(
-        configured_names.end(),
-        std::find(configured_names.begin(), configured_names.end(), "shmem_finalize"));
+              std::ranges::find(configured_names, "shmem_finalize"));
     EXPECT_EQ(configured_names.size(), static_cast<size_t>(NUMBER_OF_FUNCTIONS - 2));
 
     unsetenv(rocprofsys::env_vars::SHMEM_REJECT_LIST);
@@ -546,10 +544,8 @@ TEST_F(shmem_gotcha_test, test_permit_list_restricts_configure)
     initializer();
 
     EXPECT_EQ(configured_names.size(), 2u);
-    EXPECT_NE(configured_names.end(),
-              std::find(configured_names.begin(), configured_names.end(), "shmem_put32"));
-    EXPECT_NE(configured_names.end(),
-              std::find(configured_names.begin(), configured_names.end(), "shmem_get32"));
+    EXPECT_NE(configured_names.end(), std::ranges::find(configured_names, "shmem_put32"));
+    EXPECT_NE(configured_names.end(), std::ranges::find(configured_names, "shmem_get32"));
 
     unsetenv(rocprofsys::env_vars::SHMEM_REJECT_LIST);
     unsetenv(rocprofsys::env_vars::SHMEM_PERMIT_LIST);

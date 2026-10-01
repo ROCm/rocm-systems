@@ -20,6 +20,7 @@
 #include "library/thread_info.hpp"
 #include "logger/debug.hpp"
 
+#include <algorithm>
 #include <array>
 #include <profiler-hub/storage.hpp>
 #include <profiler-hub/writer.hpp>
@@ -1323,8 +1324,7 @@ rocpd_processor_t::post_process_metadata()
         };
 
         const bool is_cpu_gpu_agent =
-            std::find(cpu_gpu_types.begin(), cpu_gpu_types.end(), pmc_info.type) !=
-            cpu_gpu_types.end();
+            std::ranges::find(cpu_gpu_types, pmc_info.type) != cpu_gpu_types.end();
 
         const agent* pmc_agent_ptr = nullptr;
         try

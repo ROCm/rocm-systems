@@ -10,6 +10,7 @@
 #include "rocprofiler-systems/annotation.h"
 
 #include "common/environment.hpp"
+#include <algorithm>
 #include <fmt/format.h>
 #include <timemory/backends/process.hpp>
 #include <timemory/backends/threading.hpp>
@@ -926,7 +927,7 @@ generate(py::module& _pymod)
 
     auto const _concat_coverage = [](coverage_data_vector_t* _lhs,
                                      coverage_data_vector_t* _rhs) {
-        std::sort(_rhs->begin(), _rhs->end(), std::greater<coverage::coverage_data>{});
+        std::ranges::sort(*_rhs, std::greater<coverage::coverage_data>{});
 
         auto const _find = [_lhs](const auto& _v) {
             for(auto iitr = _lhs->begin(); iitr != _lhs->end(); ++iitr)
@@ -961,7 +962,7 @@ generate(py::module& _pymod)
         }
         _rhs->clear();
 
-        std::sort(_lhs->begin(), _lhs->end(), std::greater<coverage::coverage_data>{});
+        std::ranges::sort(*_lhs, std::greater<coverage::coverage_data>{});
         return _lhs;
     };
 
@@ -1007,7 +1008,7 @@ generate(py::module& _pymod)
 
     auto const _get_top = [](coverage_data_vector_t* _data, size_t _n) {
         auto _ret = *_data;
-        std::sort(_ret.begin(), _ret.end(), std::greater<coverage::coverage_data>{});
+        std::ranges::sort(_ret, std::greater<coverage::coverage_data>{});
         _ret.resize(std::min<size_t>(_n, _ret.size()));
         _ret.shrink_to_fit();
         return _ret;
@@ -1018,7 +1019,7 @@ generate(py::module& _pymod)
 
     auto const _get_bottom = [](coverage_data_vector_t* _data, size_t _n) {
         auto _ret = *_data;
-        std::sort(_ret.begin(), _ret.end(), std::less<coverage::coverage_data>{});
+        std::ranges::sort(_ret, std::less<coverage::coverage_data>{});
         _ret.resize(std::min<size_t>(_n, _ret.size()));
         _ret.shrink_to_fit();
         return _ret;
