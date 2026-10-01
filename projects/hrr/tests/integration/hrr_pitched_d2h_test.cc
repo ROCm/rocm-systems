@@ -29,6 +29,7 @@
 #include "hrr_reader.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -192,6 +193,41 @@ struct ScopedBlobCut {
   ~ScopedBlobCut() {
     std::ofstream out(path, std::ios::binary | std::ios::app);
     out.put(last);
+  }
+};
+
+// Sets the recorded host pitch of the one hipMemcpy3D event in events.bin to
+// SIZE_MAX for the lifetime of the object, so the host rect replay derives from
+// it overflows size_t the way a corrupt or hostile archive's can.
+struct ScopedOverflowingPitch {
+  fs::path events;
+  size_t at = 0;
+  size_t original = 0;
+
+  ScopedOverflowingPitch(const fs::path& cap, const hrr::Archive& arc) {
+    const hrr::Event* event = nullptr;
+    for (const auto& e : arc.events)
+      if (e.header().event_type == static_cast<uint16_t>(HRR_API_HIPMEMCPY3D)) event = &e;
+    REQUIRE(event != nullptr);
+    const std::vector<fs::path> archives = hrr_process_archives(cap);
+    REQUIRE(archives.size() == 1);
+    events = archives.front() / "events.bin";
+    const std::vector<uint8_t> bytes = read_file(events);
+    const auto& payload = event->raw_payload;
+    const auto found = std::search(bytes.begin(), bytes.end(), payload.begin(), payload.end());
+    REQUIRE(found != bytes.end());
+    at = static_cast<size_t>(found - bytes.begin()) + offsetof(hrr_args_hipMemcpy3D, parms_bytes) +
+         offsetof(hipMemcpy3DParms, dstPtr) + offsetof(hipPitchedPtr, pitch);
+    std::memcpy(&original, bytes.data() + at, sizeof(original));
+    REQUIRE(original == kHostPitch);
+    write(SIZE_MAX);
+  }
+  ~ScopedOverflowingPitch() { write(original); }
+
+  void write(size_t pitch) const {
+    std::fstream f(events, std::ios::in | std::ios::out | std::ios::binary);
+    f.seekp(static_cast<std::streamoff>(at));
+    f.write(reinterpret_cast<const char*>(&pitch), sizeof(pitch));
   }
 };
 
@@ -454,6 +490,10 @@ HRR_TEST_CASE(Unit_HRR_PitchedD2HBlobEdits) {
  *     pass.
  *   - With all eleven short, every check is skipped and the replay fails rather
  *     than passing as an archive with no validation blobs.
+ *   - With the recorded host pitch of hipMemcpy3D set to SIZE_MAX, its host
+ *     rect overflows size_t and that check is skipped while the other ten
+ *     pass; with the other ten blobs short as well, every check is skipped and
+ *     the replay fails.
  */
 HRR_TEST_CASE(Unit_HRR_PitchedD2HShortBlobs) {
 #ifdef _WIN32
@@ -489,6 +529,26 @@ HRR_TEST_CASE(Unit_HRR_PitchedD2HShortBlobs) {
   {
     std::vector<std::unique_ptr<ScopedBlobCut>> cuts;
     for (const auto& b : blobs) cuts.push_back(std::make_unique<ScopedBlobCut>(b));
+    const auto [ret, out] = exact_replay(cap.path);
+    INFO("Playback stdout:\n" << out);
+    CHECK(out.find(", 0 fail, " + std::to_string(kPitchedCopies) + " skipped") !=
+          std::string::npos);
+    CHECK(ret == 1);
+  }
+  {
+    ScopedOverflowingPitch overflow(cap.path, arc);
+    {
+      const auto [ret, out] = exact_replay(cap.path);
+      INFO("Playback stdout:\n" << out);
+      int pass = 0, fail = 0;
+      REQUIRE(hrr_parse_d2h_summary(out, pass, fail));
+      CHECK(pass == kPitchedCopies - 1);
+      CHECK(out.find(", 0 fail, 1 skipped") != std::string::npos);
+      CHECK(ret == 0);
+    }
+    std::vector<std::unique_ptr<ScopedBlobCut>> cuts;
+    for (size_t i = 0; i < blobs.size(); ++i)
+      if (i != 3) cuts.push_back(std::make_unique<ScopedBlobCut>(blobs[i]));
     const auto [ret, out] = exact_replay(cap.path);
     INFO("Playback stdout:\n" << out);
     CHECK(out.find(", 0 fail, " + std::to_string(kPitchedCopies) + " skipped") !=

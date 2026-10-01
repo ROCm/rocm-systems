@@ -3755,10 +3755,17 @@ hipError_t playback_hipMemcpy3D(PlaybackContext& ctx, const uint8_t* pl) {
         uint64_t src_rec = reinterpret_cast<uint64_t>(parms.srcPtr.ptr);
         void* src_live = ctx.translate_ptr(src_rec);
         if (!src_live) {
-            fprintf(stderr, "[HRR] hipMemcpy3D D2H validate FAIL: src 0x%llx not mapped — pointer translation bug\n",
-                    (unsigned long long)src_rec);
-            ctx.d2h_attempted++;
-            ctx.note_d2h_fail(hrr_dispatch_seq);
+            // Counted only where replay_pitched_d2h would validate: a copy that
+            // failed at capture, perhaps on this very source, has no output.
+            if (ctx.validate_d2h && (a->d2h_hash_lo || a->d2h_hash_hi) && a->ret == 0) {
+                fprintf(stderr, "[HRR] hipMemcpy3D D2H validate FAIL: src 0x%llx not mapped — pointer translation bug\n",
+                        (unsigned long long)src_rec);
+                ctx.d2h_attempted++;
+                ctx.note_d2h_fail(hrr_dispatch_seq);
+            } else if (a->ret == 0) {
+                fprintf(stderr, "[HRR] hipMemcpy3D D2H: src 0x%llx not mapped, not replayed\n",
+                        (unsigned long long)src_rec);
+            }
             return hipSuccess;
         }
         parms.srcPtr.ptr = src_live;
@@ -3795,10 +3802,17 @@ hipError_t playback_hipMemcpy3DAsync(PlaybackContext& ctx, const uint8_t* pl) {
         uint64_t src_rec = reinterpret_cast<uint64_t>(parms.srcPtr.ptr);
         void* src_live = ctx.translate_ptr(src_rec);
         if (!src_live) {
-            fprintf(stderr, "[HRR] hipMemcpy3DAsync D2H validate FAIL: src 0x%llx not mapped — pointer translation bug\n",
-                    (unsigned long long)src_rec);
-            ctx.d2h_attempted++;
-            ctx.note_d2h_fail(hrr_dispatch_seq);
+            // Counted only where replay_pitched_d2h would validate: a copy that
+            // failed at capture, perhaps on this very source, has no output.
+            if (ctx.validate_d2h && (a->d2h_hash_lo || a->d2h_hash_hi) && a->ret == 0) {
+                fprintf(stderr, "[HRR] hipMemcpy3DAsync D2H validate FAIL: src 0x%llx not mapped — pointer translation bug\n",
+                        (unsigned long long)src_rec);
+                ctx.d2h_attempted++;
+                ctx.note_d2h_fail(hrr_dispatch_seq);
+            } else if (a->ret == 0) {
+                fprintf(stderr, "[HRR] hipMemcpy3DAsync D2H: src 0x%llx not mapped, not replayed\n",
+                        (unsigned long long)src_rec);
+            }
             return hipSuccess;
         }
         parms.srcPtr.ptr = src_live;
