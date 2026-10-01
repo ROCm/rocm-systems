@@ -150,9 +150,11 @@ def main() -> None:
       many packable leftovers—not inside every <code>profile</code> on day one.</li>
       <li><strong>Named <code>*_ACCUM</code> PMCs:</strong> With rocprofiler-sdk,
       counters such as <code>SQ_LEVEL_WAVES_ACCUM</code> are
-      <code>accumulate(LEVEL, HIGH_RES)</code> definitions—packed as ordinary
-      one-slot PMCs. Legacy <code>SQ_ACCUM_PREV_HIRES</code> pairing / dedicated
-      accum buckets are not part of the allocator.</li>
+      <code>accumulate(LEVEL, HIGH_RES)</code> definitions and cost
+      <strong>2</strong> block slots alone (BASE + HIGH_RES); if BASE is already
+      in the same bucket, only +1 is charged. gfx942 <code>SQ</code> cap is
+      <strong>8</strong>. Legacy <code>SQ_ACCUM_PREV_HIRES</code> pairing /
+      dedicated accum buckets are not part of the allocator.</li>
     </ol>
     """
 
@@ -160,22 +162,25 @@ def main() -> None:
     <ol class='comments'>
       <li><strong>Not slot-limited:</strong> For these {len(a["packable_multi"])}, <code>CounterFile</code> trial packing proves the full PMC set fits <em>one</em> hardware bucket; the error is cross-pass evaluation of a single ratio, not impossible HW layout.</li>
       <li><strong>WEIGHTED_AVG is for decomposition:</strong> Phase 2 merge applies when the parent <em>cannot</em> be collected in one bucket and you designed submetrics + proved <code>weight_counter</code> algebra—using it here would invent weights without a partition identity.</li>
-      <li><strong>Wrong fix, new risk:</strong> Averaging sub-ratios with ad hoc weights can change the metric definition (bias vs silent cap); packing fixes preserve the YAML formula on one pass.</li>
+      <li><strong>Wrong fix, new risk:</strong> Averaging sub-passes with ad hoc weights can change the metric definition (bias vs silent cap); packing fixes preserve the YAML formula on one pass.</li>
       <li><strong>Cost:</strong> {len(a["packable_multi"])} decompositions × sub-rows × analyze graph vs one coalesce/repack change that keeps parent formulas unchanged.</li>
     </ol>
     """
 
     packable_n = len(a["packable_multi"])
     slot_n = len(a["slot_limit"])
-    # Experimental single-pass packable plan (offline gfx942 eval):
-    # all packable metrics get a full-bucket guarantee; SLOT_LIMIT stay parents.
-    spp_single = with_pmc - slot_n  # 358 = 374 − 16
-    spp_passes = 14  # after packable + SLOT_LIMIT fill (+0 extra)
-    spp_slot_extra = 0
+    spp = data["spp"]
+    # Default single-pass packable (offline gfx942): all packable metrics get a
+    # full-bucket guarantee; SLOT_LIMIT parents stay multi-pass (Phase 2).
+    spp_single = with_pmc - slot_n  # product narrative: 374 − 16
+    spp_passes = spp["buckets"]
+    spp_slot_extra = spp["slot_additional_passes"]
+    legacy_passes = data["buckets_after"]
+    spp_delta = spp_passes - legacy_passes
     decomp_tree = f"""{data["yaml_metric_total"]} YAML metrics
 ├── {with_pmc} with profile PMCs
 │   ├── <span class="hl">{a["single_count"]}</span> single-pass
-│   │     ← Heuristic + prioritized policy + Refill
+│   │     ← Legacy heuristic + prioritized policy + Refill
 │   └── {len(a["multi"])} multi-pass
 │       ├── <span class="hl">{packable_n}</span> POLICY_GAP (packable leftovers)
 │       │     ← additive +4 passes (est.) / policy / packing
@@ -187,14 +192,13 @@ def main() -> None:
     spp_decomp_tree = f"""{data["yaml_metric_total"]} YAML metrics
 ├── {with_pmc} with profile PMCs
 │   ├── <span class="hl">{spp_single}</span> single-pass (all packable)
-│   │     ← Single-pass packable plan, {spp_passes} passes (Phase 1)
-│   │     ← was {a["single_count"]} + {packable_n} POLICY_GAP under shipping
+│   │     ← Default SPP + SLOT fill, {spp_passes} passes (Phase 1)
+│   │     ← was {a["single_count"]} + {packable_n} POLICY_GAP under legacy
 │   └── <span class="hl">{slot_n}</span> SLOT_LIMIT (parent still multi-pass)
 │         ← WEIGHTED_AVG collectables (Phase 2)
 │         ← PMC presence already in the {spp_passes} (+{spp_slot_extra} passes)
 └── {no_profile_pmc} with no profile PMCs
       ← out of packing scope"""
-
     doc = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -672,7 +676,7 @@ def main() -> None:
     <button type="button" role="tab" id="tab-overview" aria-controls="panel-overview"
       aria-selected="true" data-tab="overview">Overview</button>
     <button type="button" role="tab" id="tab-heuristic" aria-controls="panel-heuristic"
-      aria-selected="false" data-tab="heuristic">Fewer passes (shipping)</button>
+      aria-selected="false" data-tab="heuristic">Fewer passes (legacy)</button>
     <button type="button" role="tab" id="tab-single-pass" aria-controls="panel-single-pass"
       aria-selected="false" data-tab="single-pass">Single-pass packable (how it works)</button>
     <button type="button" role="tab" id="tab-spp-plan" aria-controls="panel-spp-plan"
@@ -743,7 +747,11 @@ def main() -> None:
 
   <section class="doc-section status">
     <h2>1. Current status</h2>
-    <p><strong>Architecture:</strong> gfx942 default analysis config.</p>
+    <p><strong>Architecture:</strong> gfx942 default analysis config.
+    <strong>Default packing:</strong> Single-pass packable + SLOT fill
+    (<strong>{spp_passes}</strong> passes, <code>packable_multi=0</code>).
+    Overview tables below still measure the <em>legacy</em> heuristic + refill
+    path for historical comparison.</p>
     <dl class="status-grid">
       <div>
         <dt>{data["yaml_metric_total"]} YAML metrics total</dt>
@@ -755,11 +763,12 @@ def main() -> None:
         <dd>In the default profile collection set</dd>
       </div>
       <div>
-        <dt>{data["buckets_before"]} perfmon passes</dt>
-        <dd>Hardware buckets in the default profile plan</dd>
+        <dt>{spp_passes} perfmon passes (default SPP)</dt>
+        <dd>Legacy heuristic + refill:
+        <strong>{legacy_passes}</strong> passes</dd>
       </div>
     </dl>
-    <p class="meta" style="margin-top:0.75rem;">Collection contract (of <strong>{with_pmc}</strong> metrics with profile PMCs):</p>
+    <p class="meta" style="margin-top:0.75rem;">Legacy collection contract (of <strong>{with_pmc}</strong> metrics with profile PMCs; heuristic, no refill):</p>
     <div class="collection-highlight">
       <div class="stat-card single">
         <div class="meta">Single-pass collection</div>
@@ -788,35 +797,40 @@ def main() -> None:
     <h2>3. Solution</h2>
     <ol class="solutions">
       <li>
-        <span class="solution-title">1. Heuristic + prioritized single-bucket grouping policy (Phase 1 · Implemented)</span>
-        <p class="solution-body">Metric-aware greedy coalesce plus
-        <code>profiling_counter_grouping_policy.yaml</code>
-        <em>same_bucket_priority_metric_ids</em> (e.g. P0 HBM on gfx942). Places priority
-        metrics&apos; PMCs in one bucket when feasible; remaining counters use first-fit bin packing
-        to minimize total perfmon passes. Code path:
+        <span class="solution-title">1. Single-pass packable + SLOT_LIMIT fill (Phase 1 · Default)</span>
+        <p class="solution-body">Default allocate path: every packable metric gets a bucket
+        containing its full PMC set (counters may duplicate across passes), then
+        <code>SLOT_LIMIT</code> PMCs are filled into those passes.
+        Code:
         <code>_allocate_perfmon_counter_files</code> →
-        <code>_metric_aware_coalesce_pass</code> → per-counter first-fit.
-        See the <strong>Fewer passes (shipping)</strong> tab for the step diagram and
-        walk-through. The experimental single-pass path is on its own tab.</p>
+        <code>try_allocate_single_pass_packable</code> →
+        <code>fill_slot_limit_into_existing_passes</code>.
+        Offline gfx942: <strong>{spp_passes}</strong> passes,
+        <code>packable_multi=0</code>, SLOT +{spp_slot_extra} passes.
+        See the <strong>Single-pass packable</strong> tabs. Opt out with
+        <code>ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC=1</code>.</p>
       </li>
       <li>
-        <span class="solution-title">2. Refill (Phase 1 follow-on · Planned)</span>
-        <p class="solution-body">Second-pass <code>apply_metric_coalesce_refill_pass</code> repairs
-        packable metrics still split across buckets after the initial layout—moves counter groups
-        only when multi-bucket / packable counts improve, without adding perfmon passes.</p>
+        <span class="solution-title">2. Legacy heuristic + prioritized grouping + refill (historical)</span>
+        <p class="solution-body">Previous shipping path: metric-aware coalesce plus
+        <code>profiling_counter_grouping_policy.yaml</code>
+        <em>same_bucket_priority_metric_ids</em>, then per-counter first-fit, then optional
+        <code>apply_metric_coalesce_refill_pass</code>. Still available via
+        <code>ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC=1</code>.
+        Overview tables below measure this path. See the
+        <strong>Fewer passes (legacy)</strong> tab.</p>
       </li>
       <li>
         <span class="solution-title">3. Additive passes for the {packable_n} packable leftovers
-        (estimation · Planned)</span>
-        <p class="solution-body">Keep the current
-        <strong>{data["buckets_after"]}</strong>-pass layout frozen (the
-        <strong>{a["single_count"]}</strong> single-pass metrics after refill stay
-        untouched). Add new buckets that hold each leftover metric&apos;s full PMC set
-        (counters may duplicate across the new passes). Offline estimate: merging the
-        <strong>43</strong> unique PMC unions covers all
-        <strong>{packable_n}</strong> with <strong>+4</strong> passes
-        (total <strong>{data["buckets_after"] + 4}</strong>)—not the old “68”
-        additive upper bound. See Table&nbsp;3.</p>
+        (estimation · superseded by SPP)</span>
+        <p class="solution-body">Under the legacy
+        <strong>{legacy_passes}</strong>-pass layout after refill, the
+        <strong>{a["single_count"]}</strong> single-pass metrics stay
+        untouched. Adding buckets for leftovers was one alternative; SPP covers
+        the same set with duplication instead (total
+        <strong>{spp_passes}</strong> passes). Offline additive estimate on the
+        legacy leftovers: <strong>+4</strong> (total
+        <strong>{legacy_passes + 4}</strong>). See Table&nbsp;3.</p>
       </li>
       <li>
         <span class="solution-title">4. <code>WEIGHTED_AVG</code> collectables (Phase 2 · Planned)</span>
@@ -824,8 +838,7 @@ def main() -> None:
         <code>SLOT_LIMIT</code> metrics whose full PMC set cannot fit one hardware bucket: decompose
         into single-pass sub-collectables, collect submetrics in existing passes, and recompose the
         parent at analyze time with proved <code>weight_counter</code> weights—not for the
-        {len(a["packable_multi"])} packable leftovers (those need better packing or additive
-        passes, not decomposition).</p>
+        former {len(a["packable_multi"])} POLICY_GAP leftovers (SPP covers those).</p>
       </li>
     </ol>
   </section>
@@ -997,14 +1010,16 @@ def main() -> None:
       <code>{a["single_count"]}</code> + <code>{len(a["multi"])}</code>;
       <code>{len(a["multi"])}</code> =
       <code>{packable_n}</code> + <code>{slot_n}</code>.
-      The <code>{a["single_count"]}</code> are from heuristic + prioritized policy + refill.
-      The <code>{slot_n}</code> go to Phase&nbsp;2 <code>WEIGHTED_AVG</code> collectables.
+      The <code>{a["single_count"]}</code> are from legacy heuristic + prioritized policy + refill.
+      Under default SPP those plus the <code>{packable_n}</code> POLICY_GAP become
+      single-pass; the <code>{slot_n}</code> go to Phase&nbsp;2 <code>WEIGHTED_AVG</code>.
     </p>
 
-    <h3>Open discussion — how to improve the {packable_n}?</h3>
-    <p style="max-width:none;">These are <code>POLICY_GAP</code>: the full PMC set
-    <em>fits</em> one hardware bucket, but today&apos;s layout still splits them. Not
-    <code>WEIGHTED_AVG</code> candidates. Options to discuss:</p>
+    <h3>Open discussion — how to improve the {packable_n}? (legacy leftovers)</h3>
+    <p style="max-width:none;">Under the legacy path these are <code>POLICY_GAP</code>: the full PMC set
+    <em>fits</em> one hardware bucket, but that layout still splits them. Default SPP
+    covers them (may add passes / duplicate PMCs). Not
+    <code>WEIGHTED_AVG</code> candidates. Historical options:</p>
     <ul class="open-discuss">
       <li><strong>Additive passes?</strong> Freeze the current
       {data["buckets_after"]}-pass layout and add buckets for the leftovers
@@ -1044,15 +1059,18 @@ def main() -> None:
     aria-labelledby="tab-heuristic" hidden>
 
   <section class="doc-section solution">
-    <h2>Fewer passes — heuristic + prioritized grouping (shipping)</h2>
-    <p class="solution-body">When
+    <h2>Fewer passes — heuristic + prioritized grouping (legacy)</h2>
+    <p class="solution-body">Historical path (opt-in via
+    <code>ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC=1</code>). When
     <code>profiling_counter_grouping_policy.yaml</code> lists
     <em>same_bucket_priority_metric_ids</em>, profiling runs
     <strong>metric-aware coalesce</strong> first (keep a metric&apos;s PMCs in one
     bucket when possible), then <strong>per-counter first-fit</strong> for whatever
-    is left. Code:
+    is left, then optional refill. Code:
     <code>_allocate_perfmon_counter_files</code> →
-    <code>_metric_aware_coalesce_pass</code> → first-fit.</p>
+    <code>_metric_aware_coalesce_pass</code> → first-fit →
+    <code>apply_metric_coalesce_refill_pass</code>.
+    Default allocate uses Single-pass packable instead.</p>
 
     <div class="flow-diagram">
       <div class="flow-title">Flow — minimize passes (metric-aware coalesce + first-fit)</div>
@@ -1073,7 +1091,7 @@ flowchart TD
   W --> M
   M -->|yes| L
   M -->|no| FF
-  FF --> G[pmc_perf buckets<br/>~12 passes on gfx942]
+  FF --> G[pmc_perf buckets<br/>~{legacy_passes} passes on gfx942 after refill]
       </pre>
     </div>
 
@@ -1113,33 +1131,36 @@ Visit order: HBM-like → M1 → M2 → M3
     aria-labelledby="tab-single-pass" hidden>
 
   <section class="doc-section solution">
-    <h2>Single-pass packable (experimental)</h2>
-    <p class="solution-body">Enable with
-    <code>ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE=1</code>.
-    Replaces the shipping coalesce / refill path for that profile.
+    <h2>Single-pass packable (default)</h2>
+    <p class="solution-body">Default allocate path in
+    <code>_allocate_perfmon_counter_files</code> (no env flag required).
+    Restore the legacy coalesce / first-fit / refill path with
+    <code>ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC=1</code>
+    (or <code>ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE=0</code>).
     <strong>Goal:</strong> every packable metric (PMC set fits one hardware bucket)
     has <em>some</em> bucket containing its full PMC set; then fill
     <code>SLOT_LIMIT</code> PMCs into those passes (open new buckets only if a PMC
     is missing); then reduce passes where merges still preserve the packable
-    guarantee.
+    guarantee. Named <code>*_ACCUM</code> PMCs cost 2 SQ slots (SQ ≤ 8 on gfx942).
     <strong>Trade-off:</strong> may use <em>more</em> passes and may
-    <em>duplicate</em> counters across buckets—unlike shipping, which keeps each
-    PMC in at most one pass. Offline gfx942 default: shipping
-    <strong>{data["buckets_after"]}</strong> passes → experimental
-    <strong>14</strong> after packable (+2), then
-    <strong>+0</strong> for <code>SLOT_LIMIT</code> fill (all SLOT_LIMIT PMCs
-    already present in the packable layout). Code:
+    <em>duplicate</em> counters across buckets—unlike legacy, which keeps each
+    PMC in at most one pass. Offline gfx942 default: legacy
+    <strong>{legacy_passes}</strong> passes → default SPP
+    <strong>{spp_passes}</strong> after packable
+    ({"+" if spp_delta >= 0 else ""}{spp_delta}), then
+    <strong>+{spp_slot_extra}</strong> for <code>SLOT_LIMIT</code> fill (all
+    SLOT_LIMIT PMCs already present in the packable layout). Code:
     <code>try_allocate_single_pass_packable</code> /
     <code>fill_slot_limit_into_existing_passes</code> in
     <code>counter_grouping_single_pass.py</code>.</p>
 
     <div class="flow-diagram">
-      <div class="flow-title">Flow — single-pass packable + SLOT_LIMIT fill (experimental)</div>
+      <div class="flow-title">Flow — single-pass packable + SLOT_LIMIT fill (default)</div>
       <pre class="mermaid" id="single-pass-flow">
 flowchart TD
-  A[Profile PMC set] --> B{{SINGLE_PASS_PACKABLE=1?}}
-  B -->|no| SH[Shipping path:<br/>heuristic coalesce + first-fit<br/>+ optional refill]
-  B -->|yes| U[Unique packable PMC unions<br/>skip SLOT_LIMIT for now]
+  A[Profile PMC set] --> B{{LEGACY_HEURISTIC=1<br/>or SINGLE_PASS_PACKABLE=0?}}
+  B -->|yes| SH[Legacy path:<br/>heuristic coalesce + first-fit<br/>+ optional refill]
+  B -->|no default| U[Unique packable PMC unions<br/>skip SLOT_LIMIT for now]
   U --> O[Order unions:<br/>largest PMC sets first]
   O --> L[Next packable union]
   L --> H{{Some bucket already<br/>contains full union?}}
@@ -1154,7 +1175,7 @@ flowchart TD
   FF --> R[Merge bucket pairs<br/>when union still fits<br/>and packable guarantee holds]
   R --> S[SLOT_LIMIT fill:<br/>for each unique SLOT_LIMIT PMC set]
   S --> S1{{Every PMC already<br/>in some bucket?}}
-  S1 -->|yes| G[pmc_perf buckets<br/>gfx942: 14 total, +0 for SLOT_LIMIT]
+  S1 -->|yes| G[pmc_perf buckets<br/>gfx942: {spp_passes} total, +{spp_slot_extra} for SLOT_LIMIT]
   S1 -->|no| S2{{Fit remaining PMCs<br/>into an existing bucket?}}
   S2 -->|yes| S3[Place into existing]
   S2 -->|no| S4[Open new bucket<br/>with largest fitting subset]
@@ -1164,7 +1185,7 @@ flowchart TD
     </div>
 
     <div class="walkthrough">
-      <div class="wt-title">Walk-through (same toy as shipping tab)</div>
+      <div class="wt-title">Walk-through (same toy as legacy tab)</div>
       <div class="wt-setup">Profile PMCs: A B C D E F · 3 counters per bucket
 Packable unions:  HBM-like = {{A, B}}
                   M1 = {{C, D, E}}
@@ -1184,11 +1205,12 @@ Visit order: largest unions first (M1, then HBM-like, M2, M3)</div>
           Only missing PMCs open new buckets.</li>
       </ol>
       <div class="wt-result">
-        <strong>Result:</strong> 3 passes vs shipping&apos;s 2 for the toy.
+        <strong>Result:</strong> 3 passes vs legacy&apos;s 2 for the toy.
         Every packable union has a bucket with its full PMC set (including M3).
-        Shipping leaves M3 as POLICY_GAP to save passes.
-        gfx942 offline: <strong>14</strong> total after packable,
-        <strong>+0</strong> additional for SLOT_LIMIT fill.
+        Legacy leaves M3 as POLICY_GAP to save passes.
+        gfx942 offline: <strong>{spp_passes}</strong> total after packable,
+        <strong>+{spp_slot_extra}</strong> additional for SLOT_LIMIT fill
+        (vs legacy <strong>{legacy_passes}</strong>).
       </div>
     </div>
   </section>
@@ -1200,18 +1222,18 @@ Visit order: largest unions first (M1, then HBM-like, M2, M3)</div>
 
   <section class="doc-section takeaway">
     <h2>Single-pass packable plan (gfx942)</h2>
-    <p style="max-width:none;">Experimental allocator
-    (<code>ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE=1</code>): guarantee a
-    full-bucket collection for every packable metric, then fill
+    <p style="max-width:none;">Default allocator
+    (opt out with <code>ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC=1</code>):
+    guarantee a full-bucket collection for every packable metric, then fill
     <code>SLOT_LIMIT</code> PMCs into those passes. May duplicate counters across
     buckets. See the <strong>how it works</strong> tab for the flowchart.
     Full implementation plan:
     <code>docs/plans/aiprofcomp-865-single-pass-packable-plan.md</code>
-    (Phase&nbsp;1 replace shipping heuristic → 358 single-pass / 14 passes;
-    Phase&nbsp;2 <code>WEIGHTED_AVG</code> for 16 <code>SLOT_LIMIT</code>;
-    multi-arch validation; remove heuristic + update inspector).</p>
+    (Phase&nbsp;1 = default SPP → {spp_single} single-pass / {spp_passes} passes;
+    Phase&nbsp;2 <code>WEIGHTED_AVG</code> for {slot_n} <code>SLOT_LIMIT</code>;
+    multi-arch validation; remove legacy heuristic + update inspector).</p>
 
-    <h3>Decomposed tree (gfx942 default, single-pass packable plan)</h3>
+    <h3>Decomposed tree (gfx942 default, single-pass packable)</h3>
     <div class="decomp-tree">{spp_decomp_tree}</div>
     <p style="max-width:none;margin-top:0.65rem;">
       Shorthand:
@@ -1219,7 +1241,7 @@ Visit order: largest unions first (M1, then HBM-like, M2, M3)</div>
       <code>{with_pmc}</code> + <code>{no_profile_pmc}</code>;
       <code>{with_pmc}</code> →
       <code>{spp_single}</code> + <code>{slot_n}</code>.
-      The <code>{spp_single}</code> absorb today&apos;s
+      The <code>{spp_single}</code> absorb legacy&apos;s
       <code>{a["single_count"]}</code> single-pass plus the
       <code>{packable_n}</code> POLICY_GAP leftovers.
       The <code>{slot_n}</code> still need Phase&nbsp;2
@@ -1239,15 +1261,15 @@ Visit order: largest unions first (M1, then HBM-like, M2, M3)</div>
         </thead>
         <tbody>
           <tr>
-            <td class="topic">Shipping (heuristic + refill)</td>
-            <td><strong>{data["buckets_after"]}</strong></td>
+            <td class="topic">Legacy (heuristic + refill)</td>
+            <td><strong>{legacy_passes}</strong></td>
             <td>—</td>
             <td>{a["single_count"]} single-pass · {packable_n} POLICY_GAP left</td>
           </tr>
           <tr class="improved">
-            <td class="topic">After packable single-pass guarantee</td>
+            <td class="topic">Default SPP packable guarantee</td>
             <td><strong>{spp_passes}</strong></td>
-            <td><strong>+{spp_passes - data["buckets_after"]}</strong></td>
+            <td><strong>{"+" if spp_delta >= 0 else ""}{spp_delta}</strong></td>
             <td>All {spp_single} packable metrics have a full-bucket pass</td>
           </tr>
           <tr class="improved">

@@ -977,6 +977,36 @@ add_test(
 )
 
 # -----------------------------------
+# Single-pass packable (SPP) + refill unit tests
+# -----------------------------------
+
+add_test(
+    NAME test_counter_grouping_single_pass
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_counter_grouping_single_pass.xml ${COV_OPTION}
+        tests/unit/rocprof_compute_soc/test_counter_grouping_single_pass.py
+        ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_counter_grouping_refill
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_counter_grouping_refill.xml
+        ${COV_OPTION} tests/unit/rocprof_compute_soc/test_counter_grouping_refill.py
+        ${WORKING_DIR_OPTION}
+)
+
+# Optional ortools path; pytest.importorskip → exit 5 when missing.
+add_test(
+    NAME test_perfmon_cp_sat
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_perfmon_cp_sat.xml
+        ${COV_OPTION} tests/test_perfmon_cp_sat.py ${WORKING_DIR_OPTION}
+)
+set_tests_properties(test_perfmon_cp_sat PROPERTIES SKIP_RETURN_CODE 5)
+
+# -----------------------------------
 # TTY table rendering unit tests
 # -----------------------------------
 
@@ -1113,6 +1143,9 @@ if(${ENABLE_COVERAGE})
         test_profiler_base
         test_rocprofv3_avail_interface
         test_soc_base
+        test_counter_grouping_single_pass
+        test_counter_grouping_refill
+        test_perfmon_cp_sat
         test_tty
         test_file_io
         test_utils_profile_csv

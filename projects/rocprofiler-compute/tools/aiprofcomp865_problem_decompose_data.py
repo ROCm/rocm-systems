@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 from collections import defaultdict
@@ -29,12 +30,18 @@ from rocprof_compute_soc.counter_grouping_refill import (  # noqa: E402
     apply_metric_coalesce_refill_pass,
     counters_fit_one_bucket,
 )
+from rocprof_compute_soc.counter_grouping_single_pass import (  # noqa: E402
+    try_allocate_single_pass_packable,
+)
 from rocprof_compute_soc.soc_base import (  # noqa: E402
     CounterFile,
     flat_counters_in_perfmon_file,
 )
 from utils.mi_gpu_spec import mi_gpu_specs  # noqa: E402
 from utils.utils_counter_defs import extract_counters_and_variables  # noqa: E402
+
+_LEGACY_ENV = "ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC"
+_SPP_ENV = "ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE"
 
 
 def _counter_to_bucket(output_files: list[CounterFile]) -> dict[str, str]:
@@ -147,21 +154,41 @@ def main() -> None:
     arch = "gfx942"
     config_dir = get_default_config_dir()
     perfmon_config = mi_gpu_specs.get_perfmon_config(arch)
+    saved_env = {key: os.environ.get(key) for key in (_LEGACY_ENV, _SPP_ENV)}
 
-    with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp)
-        soc = _build_inspector_soc(arch, config_dir, None, perfmon_config, root)
-        counters, _ = soc.detect_counters()
-        counters -= {"SQ_ACCUM_PREV_HIRES"}
-        soc.get_rocprof_supported_counters = (  # type: ignore[method-assign]
-            lambda c=counters: _rocprof_supported_superset(c)
-        )
-        before_files, fc, _ = soc._allocate_perfmon_counter_files(
-            counters, apply_refill=False
-        )
-        after_files, fc2, refill_stats = apply_metric_coalesce_refill_pass(
-            soc, before_files, fc, counters, perfmon_config
-        )
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            soc = _build_inspector_soc(arch, config_dir, None, perfmon_config, root)
+            counters, _ = soc.detect_counters()
+            counters -= {"SQ_ACCUM_PREV_HIRES"}
+            soc.get_rocprof_supported_counters = (  # type: ignore[method-assign]
+                lambda c=counters: _rocprof_supported_superset(c)
+            )
+
+            # Overview tables: legacy coalesce / first-fit / refill comparison.
+            os.environ[_LEGACY_ENV] = "1"
+            os.environ.pop(_SPP_ENV, None)
+            before_files, fc, _ = soc._allocate_perfmon_counter_files(
+                set(counters), apply_refill=False
+            )
+            after_files, _fc2, refill_stats = apply_metric_coalesce_refill_pass(
+                soc, before_files, fc, set(counters), perfmon_config
+            )
+
+            # Default allocate path: single-pass packable + SLOT_LIMIT fill.
+            os.environ.pop(_LEGACY_ENV, None)
+            os.environ.pop(_SPP_ENV, None)
+            spp = try_allocate_single_pass_packable(soc, set(counters), perfmon_config)
+            if spp is None:
+                raise RuntimeError("single-pass-packable allocate returned None")
+            spp_files, _spp_fc, spp_stats = spp
+    finally:
+        for key, value in saved_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
     before_rows = _metric_rows(before_files, config_dir, arch, counters)
     after_rows = _metric_rows(after_files, config_dir, arch, counters)
@@ -177,6 +204,17 @@ def main() -> None:
         "refill_consolidated": refill_stats.metrics_consolidated,
         "before": _summarize(before_rows),
         "after": _summarize(after_rows),
+        "spp": {
+            "buckets": spp_stats.bucket_count,
+            "packable_metric_count": spp_stats.packable_metric_count,
+            "unique_packable_unions": spp_stats.unique_packable_unions,
+            "packable_multi_after": spp_stats.packable_multi_after,
+            "merges_applied": spp_stats.merges_applied,
+            "slot_limit_metrics": spp_stats.slot_limit_metrics,
+            "unique_slot_limit_unions": spp_stats.unique_slot_limit_unions,
+            "slot_additional_passes": spp_stats.slot_additional_passes,
+            "pmc_files": len(spp_files),
+        },
     }
     print(json.dumps(payload, indent=2))
 

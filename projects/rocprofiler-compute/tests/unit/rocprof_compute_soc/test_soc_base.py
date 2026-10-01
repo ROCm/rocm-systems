@@ -68,6 +68,16 @@ FIXTURE_COUNTERS = {BASELINE_COUNTER, TABLE_3012_COUNTER, TABLE_3013_COUNTER}
 
 HBM_TRAFFIC_METRIC_NAMES = {"HBM Read Traffic", "HBM Write and Atomic Traffic"}
 
+# gfx942 also prioritizes Workgroup Manager Utilization (6.1.2) so SPI busy
+# and GUI active land in one pass (CPX inflation / AIPROFCOMP-78).
+EXPECTED_SAME_BUCKET_PRIORITY_NAMES = {
+    "gfx908": HBM_TRAFFIC_METRIC_NAMES,
+    "gfx90a": HBM_TRAFFIC_METRIC_NAMES,
+    "gfx940": HBM_TRAFFIC_METRIC_NAMES,
+    "gfx941": HBM_TRAFFIC_METRIC_NAMES,
+    "gfx942": HBM_TRAFFIC_METRIC_NAMES | {"Workgroup Manager Utilization"},
+}
+
 
 @pytest.fixture
 def perfmon_config():
@@ -637,9 +647,10 @@ def test_same_bucket_priority_resolves_gfx115x_policy(gpu_arch):
 
 @pytest.mark.parametrize("gpu_arch", ["gfx908", "gfx90a", "gfx940", "gfx941", "gfx942"])
 def test_same_bucket_priority_hbm_traffic_ids_match_yaml(gpu_arch):
-    """Policy metric IDs must resolve to 'HBM Read Traffic' and
-    'HBM Write and Atomic Traffic' in the analysis YAMLs.  Guards against
-    metric index drift after YAML re-org."""
+    """Policy metric IDs must resolve to the expected priority metric
+    names in the analysis YAMLs. Guards against metric index drift after
+    YAML re-org. CDNA arches prioritize HBM traffic; gfx942 also
+    prioritizes Workgroup Manager Utilization."""
     config_dir = (
         Path(config.rocprof_compute_home) / "rocprof_compute_soc" / "analysis_configs"
     )
@@ -650,10 +661,13 @@ def test_same_bucket_priority_hbm_traffic_ids_match_yaml(gpu_arch):
         f"{gpu_arch}: some policy IDs did not resolve: "
         f"{[mid for mid, name in zip(ids, resolved) if name is None]}"
     )
-    unexpected = set(resolved) - HBM_TRAFFIC_METRIC_NAMES
+    expected = EXPECTED_SAME_BUCKET_PRIORITY_NAMES[gpu_arch]
+    unexpected = set(resolved) - expected
     assert not unexpected, (
         f"{gpu_arch}: policy IDs resolve to unexpected metrics: {unexpected}"
     )
+    missing = expected - set(resolved)
+    assert not missing, f"{gpu_arch}: policy IDs missing expected metrics: {missing}"
 
 
 def test_same_bucket_priority_empty_for_gfx950():
