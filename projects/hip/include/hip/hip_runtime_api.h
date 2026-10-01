@@ -2988,6 +2988,9 @@ hipError_t hipKernelSetAttributeForDevice(hipKernel_t kernel, hipFuncAttribute a
  */
 hipError_t hipKernelGetFunction(hipFunction_t* pFunc, hipKernel_t kernel);
 
+
+hipError_t hipKernelSetCacheConfig(hipKernel_t kernel, hipFuncCache_t config, hipDevice_t dev);
+
 /**
  * @brief Set Cache configuration for a specific function
  *

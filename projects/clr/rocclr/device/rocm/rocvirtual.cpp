@@ -5066,7 +5066,8 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
         percent = 50;
         break;
       default:
-        assert("Unexpected hipFuncCache_t value");
+        assert(false && "Unexpected hipFuncCache_t value");
+        percent = 0;
       }
 
       auto& dispatchPacketExt = dispatchPacketUnion.extKernelDispatch;

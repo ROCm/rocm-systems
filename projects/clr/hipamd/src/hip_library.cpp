@@ -586,7 +586,7 @@ hipError_t hipKernelSetAttributeForDevice(hipKernel_t kernel, hipFuncAttribute a
       if (!work_group_info->hasFuncPreferredShmemCarveout_) {
         work_group_info->groupMemCarveout_ = value;
         // override whatever setting we had in coarseMemCarveout_
-        work_group_info->coarseMemCarveout_ = 0;
+        work_group_info->coarseMemCarveout_ = hipFuncCachePreferNone;
       }
       break;
     case hipFuncAttributeRequiredClusterWidth:
@@ -617,6 +617,62 @@ hipError_t hipKernelSetAttributeForDevice(hipKernel_t kernel, hipFuncAttribute a
       break;
     default:
       HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  HIP_RETURN(hipSuccess);
+}
+
+hipError_t hipKernelSetCacheConfig(hipKernel_t kernel, hipFuncCache_t config, hipDevice_t device)
+{
+  HIP_INIT_API(hipKernelSetCacheConfig, kernel, config, device);
+
+  if (kernel == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  // Load code object for the target device if not already loaded
+  hipKernel_t targetKernel = kernel;
+  hipLibrary_t library = nullptr;
+
+  if (hip::PlatformState::Instance().GetFunctionLibrary(kernel, &library)) {
+    auto* container = reinterpret_cast<hip::LibraryContainer*>(library);
+    const char* kernelName = nullptr;
+    if (container->GetKernelName(&kernelName, kernel) != hipSuccess || kernelName == nullptr) {
+      HIP_RETURN(hipErrorInvalidResourceHandle);
+    }
+    hipError_t status = container->ResolveKernelForDevice(&targetKernel, kernelName, device);
+    if (status != hipSuccess) {
+      HIP_RETURN(status);
+    }
+  }
+
+  amd::Kernel* amdKernel = hip::asKernel(targetKernel);
+  if (amdKernel == nullptr) {
+    HIP_RETURN(hipErrorInvalidResourceHandle);
+  }
+
+  const amd::Device& amdDevice = *hip::g_devices[device]->devices()[0];
+  amd::device::Kernel* deviceKernel =
+      const_cast<amd::device::Kernel*>(amdKernel->getDeviceKernel(amdDevice));
+  if (deviceKernel == nullptr) {
+    HIP_RETURN(hipErrorInvalidDevice);
+  }
+
+  device::Kernel::WorkGroupInfo* wrkGrpInfo = deviceKernel->workGroupInfo();
+
+  if (wrkGrpInfo == nullptr) {
+    HIP_RETURN(hipErrorMissingConfiguration);
+  }
+
+  switch (config) {
+  case hipFuncCachePreferNone:
+  case hipFuncCachePreferShared:
+  case hipFuncCachePreferL1:
+  case hipFuncCachePreferEqual:
+    wrkGrpInfo->coarseMemCarveout_ = static_cast<uint32_t>(config);
+    break;
+  default:
+    HIP_RETURN(hipErrorInvalidValue);
   }
 
   HIP_RETURN(hipSuccess);
