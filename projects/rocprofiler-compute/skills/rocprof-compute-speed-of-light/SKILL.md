@@ -1,5 +1,5 @@
 ---
-name: speed-of-light
+name: rocprof-compute-speed-of-light
 description: Reads the rocprof-compute System Speed-of-Light panel to show how close an AMD GPU kernel runs to hardware peak for compute throughput, memory bandwidth, and utilization. Use when the user asks how close to peak a kernel is, what percent of peak it reaches, whether a measured percentage is good enough or normal, whether a utilization number should be higher, or asks for an overall efficiency summary. Not for CUDA tools, Windows, per-instruction analysis, or looking up a datasheet specification when there is no profile to read.
 ---
 
@@ -24,8 +24,8 @@ pass `-k` with one kernel id from `--list-stats`; a Speed-of-Light table
 averaged over unrelated kernels means nothing.
 
 If the panel is missing or empty, those counters were not collected. Collect
-them with the `kernel-bottleneck` skill, using `-b sol` at profile time for a
-cheap single-topic run.
+them with the `rocprof-compute-kernel-bottleneck` skill, using `-b sol` at
+profile time for a cheap single-topic run.
 
 ## 2. Read it
 
@@ -40,9 +40,9 @@ What the shape of the table tells you:
 
 | Reading | Meaning | Next step |
 |---|---|---|
-| A memory row near peak | bandwidth-limited | the `memory` skill |
-| An MFMA or VALU row near peak | compute-limited | the `roofline` skill |
-| Every row far below peak | not limited by throughput | occupancy and launch limits, via the `kernel-bottleneck` skill |
+| A memory row near peak | bandwidth-limited | the `rocprof-compute-memory` skill |
+| An MFMA or VALU row near peak | compute-limited | the `rocprof-compute-roofline` skill |
+| Every row far below peak | not limited by throughput | occupancy and launch limits, via the `rocprof-compute-kernel-bottleneck` skill |
 | MFMA at zero on a GEMM | matrix pipeline unused | check the kernel's instruction mix with `-b cu_ins` |
 
 A row at zero is a real reading only if the kernel was expected to use that
