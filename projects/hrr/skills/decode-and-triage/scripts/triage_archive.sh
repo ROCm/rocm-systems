@@ -351,7 +351,10 @@ elif [[ "$mode" == "native" ]]; then
   record_replay_stop "$replay_rc" "$LOG"
 fi
 
-CMD=(python3 "$ANALYZER" --format "$FORMAT" --archive "$ARCHIVE" -o "$FINDING")
+# The analyzer prints the finding as well as writing it, so it is the only
+# thing on stdout, and -o naming stdout itself would print it twice.
+CMD=(python3 "$ANALYZER" --format "$FORMAT" --archive "$ARCHIVE")
+[[ "$FINDING" -ef /dev/stdout ]] || CMD+=(-o "$FINDING")
 [[ -n "${HRR_PLAYBACK:-}" ]] && CMD+=(--hrr-playback "$HRR_PLAYBACK")
 [[ -n "$LOG" && -f "$LOG" ]] && CMD+=(--log "$LOG")
 "${CMD[@]}"
@@ -361,5 +364,3 @@ CMD=(python3 "$ANALYZER" --format "$FORMAT" --archive "$ARCHIVE" -o "$FINDING")
 [[ -f "$FINDING" && ! -L "$FINDING" ]] && chmod 600 "$FINDING" 2>/dev/null || true
 [[ -n "$LOG" && -f "$LOG" ]] && chmod 600 "$LOG" 2>/dev/null || true
 echo "[triage] finding=$FINDING" >&2
-# Already on stdout when -o named it.
-[[ "$FINDING" -ef /dev/stdout ]] || cat "$FINDING"

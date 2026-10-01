@@ -317,6 +317,13 @@ class WorkdirDefaultTests(unittest.TestCase):
                 proc, _ = self._run_in_archive({"TMPDIR": tmp}, ["-o", "/dev/stdout"], fh)
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertEqual(out.stat().st_mode & 0o777, 0o644)
+            self.assertEqual(out.read_text().count("**D2H**"), 1)
+
+    def test_the_finding_is_printed_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            proc, _ = self._run_in_archive({"TMPDIR": tmp})
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(proc.stdout.count("**D2H**"), 1)
 
 
 class LibraryPathSafetyTests(unittest.TestCase):

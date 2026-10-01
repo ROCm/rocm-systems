@@ -122,6 +122,18 @@ $Name    = Split-Path $Archive -Leaf
 # The pid keeps two runs in the same second from sharing a log and a finding.
 $Ts      = (Get-Date).ToUniversalTime().ToString("yyyyMMdd'T'HHmmss'Z'") + "-$PID"
 $Workdir = if ($env:HRR_TRIAGE_WORKDIR) { $env:HRR_TRIAGE_WORKDIR } else { Join-Path ([IO.Path]::GetTempPath()) 'hrr-triage' }
+# The archive is not to be written to, as in triage_archive.sh: the archive here
+# is the pid directory and, for a pid-<n> one, the capture directory holding it.
+# The path is resolved before anything is created.
+$ArchiveRoot = if ($Name -like 'pid-*') { Split-Path $Archive -Parent } else { $Archive }
+$ArchiveRoot = [IO.Path]::GetFullPath($ArchiveRoot).TrimEnd('\', '/')
+$WorkdirFull = [IO.Path]::GetFullPath(
+    $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Workdir)).TrimEnd('\', '/')
+if ($WorkdirFull -ieq $ArchiveRoot -or
+    $WorkdirFull.StartsWith($ArchiveRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+    Write-Host "error: the triage work directory is inside the archive: $Workdir; set HRR_TRIAGE_WORKDIR outside it" -ForegroundColor Red
+    exit 1
+}
 New-Item -ItemType Directory -Force -Path $Workdir | Out-Null
 $Ext     = if ($Format -eq "json") { ".finding.json" } else { ".finding.md" }
 $Finding = if ($Output) { $Output } else { Join-Path $Workdir "${Name}-${Ts}${Ext}" }
@@ -417,5 +429,5 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
+# The analyzer has already printed the finding; it is the only thing on stdout.
 Write-Triage "finding=$Finding"
-Get-Content $Finding
