@@ -27,8 +27,10 @@
 #include "MPITestBase.hpp"
 #include "SymmetricBufferHelpers.hpp"
 #include "TestChecks.hpp"
+#include "nccl_device.h"
 #include "rccl/rccl.h"
 
+#include <algorithm>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <memory>
@@ -504,6 +506,108 @@ TEST_F(SymmetricKernelCorruptionTest, GroupedOps_Sub8ByteAlignment)
             0, 1e-5, &errIdx, &expVal, &actVal))
             << "GroupedSub8 ReduceScatter corruption at index=" << errIdx
             << " expected=" << expVal << " got=" << actVal;
+    }
+}
+
+// ===========================================================================
+// Test group 3: LL all-to-all session data placement
+//
+// Forces ReduceScatter_LL, the only caller of ncclLLA2ASession::send, and
+// sends values unique per (rank, index) so a lane or slot permutation in the
+// send path lands a wrong value in a checked output element.
+// ===========================================================================
+
+// A slot shift that leaves a slot unwritten hangs recvReduce instead of failing; only the runner timeout shows it.
+TEST_F(SymmetricKernelCorruptionTest, ReduceScatterLL_PositionDependentData)
+{
+    // ReduceScatter_LL needs a single LSA team: at most 8 ranks on one node.
+    constexpr int kMaxRanks = 8;
+    if(!validateTestPrerequisites(2, kMaxRanks, false, 1, 1))
+    {
+        GTEST_SKIP() << "Need 2 to " << kMaxRanks << " MPI ranks on a single node";
+    }
+
+    // Read at communicator init, so the guard must outlive createTestCommunicator.
+    MPIHelpers::MpiEnvGuard symKernelGuard("NCCL_SYM_KERNEL", "ReduceScatter_LL");
+    ASSERT_EQ(ncclSuccess, createTestCommunicator());
+
+    int rank{};
+    int nRanks{};
+    ASSERT_EQ(ncclSuccess, ncclCommUserRank(getActiveCommunicator(), &rank));
+    ASSERT_EQ(ncclSuccess, ncclCommCount(getActiveCommunicator(), &nRanks));
+
+    // Even counts take the aligned 8-byte path, odd ones the bounded path; 512 floats is one LL iteration per block.
+    const std::vector<size_t> counts   = {1, 2, 7, 512, 1536, 1537, 1538, 4096, 4097};
+    const size_t              maxCount = *std::max_element(counts.begin(), counts.end());
+
+    // value(s, i) = i * 8 + s is injective; the largest sum over 8 ranks is about 2^21, so float addition is exact.
+    auto value = [](int src, size_t idx) {
+        return static_cast<float>(idx * kMaxRanks + static_cast<size_t>(src));
+    };
+
+    // Window registration is collective, so allocate once and agree on the outcome before any rank can skip.
+    SymBuf sendSym;
+    SymBuf recvSym;
+    int    allocOk = (tryAllocSymBuf(maxCount * nRanks * sizeof(float), sendSym) &&
+                   tryAllocSymBuf(maxCount * sizeof(float), recvSym))
+                         ? 1
+                         : 0;
+    ASSERT_EQ(MPI_SUCCESS, MPI_Allreduce(MPI_IN_PLACE, &allocOk, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD));
+    if(!allocOk)
+    {
+        GTEST_SKIP() << "Symmetric memory not available (VMM/cuMem unsupported)";
+    }
+
+    // Without symmetricSupport the forced kernel is ineligible; skip with that reason instead of on ncclInvalidUsage.
+    ncclCommProperties_t props = NCCL_COMM_PROPERTIES_INITIALIZER;
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommQueryProperties(getActiveCommunicator(), &props));
+    int symmetric = props.deviceApiSupport ? 1 : 0;
+    ASSERT_EQ(MPI_SUCCESS, MPI_Allreduce(MPI_IN_PLACE, &symmetric, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD));
+    if(!symmetric)
+    {
+        GTEST_SKIP() << "Symmetric kernels unavailable (symmetricSupport off, e.g. cuMem needs Linux >= 6.8)";
+    }
+
+    for(size_t recvCount : counts)
+    {
+        size_t sendCount = recvCount * static_cast<size_t>(nRanks);
+
+        ASSERT_MPI_EQ(hipSuccess,
+                      initializeBufferWithPattern<float>(
+                          sendSym.ptr, sendCount,
+                          [rank, &value](size_t i) { return value(rank, i); }));
+        ASSERT_MPI_EQ(hipSuccess, zeroInitializeBuffer<float>(recvSym.ptr, recvCount));
+
+        // Tuning is comm-wide, so every rank sees ncclInvalidUsage together; only the first count may skip on it.
+        ncclResult_t res = ncclReduceScatter(sendSym.ptr, recvSym.ptr, recvCount, ncclFloat, ncclSum,
+                                             getActiveCommunicator(), getActiveStream());
+        if(res == ncclInvalidUsage && recvCount == counts.front())
+        {
+            GTEST_SKIP() << "ReduceScatter_LL symmetric kernel not eligible on this topology";
+        }
+        ASSERT_MPI_EQ(ncclSuccess, res);
+        ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+        size_t base     = static_cast<size_t>(rank) * recvCount;
+        auto   expected = [nRanks, base, &value](size_t j) {
+            float sum = 0.0f;
+            for(int s = 0; s < nRanks; ++s)
+            {
+                sum += value(s, base + j);
+            }
+            return sum;
+        };
+
+        size_t errIdx{};
+        float  expVal{}, actVal{};
+        bool   ok = verifyBufferData<float>(recvSym.ptr, recvCount, expected, 0, 1e-5, &errIdx, &expVal, &actVal);
+        if(!ok)
+        {
+            ADD_FAILURE() << "ReduceScatter_LL mismatch at recvCount=" << recvCount << " index=" << errIdx
+                          << " expected=" << expVal << " got=" << actVal;
+        }
+        // Collective so a rank-local mismatch stops every rank instead of leaving peers in the next LL kernel.
+        ASSERT_MPI_TRUE(ok);
     }
 }
 

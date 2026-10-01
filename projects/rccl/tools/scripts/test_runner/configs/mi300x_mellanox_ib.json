@@ -4261,6 +4261,11 @@
           "name": "DeviceApiMPI_GroupD_CustomRedOp",
           "description": "Group D: ncclLsaReduceLsaCopy with test-local Min/Max functors (OpSum-only in headers)",
           "test_filter": "DeviceApiMPITests.Lsa_ReduceLsaCopy_OpMax:DeviceApiMPITests.Lsa_ReduceLsaCopy_OpMin"
+        },
+        {
+          "name": "SymmetricKernel_ReduceScatterLL_PositionDependentData",
+          "description": "Forced ReduceScatter_LL symmetric kernel with per-(rank, index) unique data; skips when the kernel is ineligible",
+          "test_filter": "SymmetricKernelCorruptionTest.ReduceScatterLL_PositionDependentData"
         }
       ]
     },
@@ -5024,7 +5029,7 @@
     
     {
       "name": "Device API MPI - LSA Reduce/Copy",
-      "description": "DeviceApiMPITests memory/LSA pointer, barrier, reduce/copy, and custom RedOp coverage on 2 co-located ranks (NCCL_CUMEM_ENABLE=1)",
+      "description": "DeviceApiMPITests memory/LSA pointer, barrier, reduce/copy, and custom RedOp coverage, plus the ReduceScatter_LL placement test, on 2 co-located ranks (NCCL_CUMEM_ENABLE=1)",
       "config": "device_api_mpi_lsa",
       "enabled": true
     },
