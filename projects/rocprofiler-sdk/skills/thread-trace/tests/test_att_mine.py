@@ -294,7 +294,9 @@ class NextReadTests(unittest.TestCase):
         )
 
     def test_the_stats_csv_names_a_page_by_its_costliest_instruction(self):
-        row = lambda text: {"instructions": [{"text": text}]}
+        def row(text):
+            return {"instructions": [{"text": text}]}
+
         self.assertIn(
             "resources/synchronization.md", mine.next_read_from_stats(row("s_barrier"))
         )

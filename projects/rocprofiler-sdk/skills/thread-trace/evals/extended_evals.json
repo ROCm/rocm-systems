@@ -8,7 +8,7 @@
       "expected_behavior": [
         "Captures the kernel with rocprofv3 --att and reads the stats CSV or the skill's att_mine.py output",
         "Identifies that the loop's s_waitcnt instructions hold the time, and from the disassembly that each data load needs the index loaded just before it, so the waits happen one after another",
-        "Names the responsible source line (the planted defect is at gather_chain.hip:14)"
+        "Names the responsible source line (the planted defect is at gather_chain.hip:34)"
       ],
       "unexpected_behavior": [
         "Blames a cause without evidence from the trace",
@@ -45,7 +45,7 @@
       "expected_behavior": [
         "Captures the kernel with rocprofv3 --att and reads the stats CSV or the skill's att_mine.py output",
         "Identifies that the s_barrier holds most of the time for most waves, while the first wave of each workgroup runs the per-round series before reaching it",
-        "Names the responsible source line (the planted defect is at leader_scale.hip:23)"
+        "Names the responsible source line (the planted defect is at leader_scale.hip:42)"
       ],
       "unexpected_behavior": [
         "Blames a cause without evidence from the trace",
