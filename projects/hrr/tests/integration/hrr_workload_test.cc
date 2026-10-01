@@ -419,6 +419,9 @@ TEST_CASE("Unit_HRR_AllApis_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipMemPoolGetAttribute(pool, hipMemPoolAttrReleaseThreshold, &threshold));
   threshold = static_cast<uint64_t>(-1);  // never release automatically
   HRR_HIP_CHECK(hipMemPoolSetAttribute(pool, hipMemPoolAttrReleaseThreshold, &threshold));
+  // The reuse policies take an int, so capture records 4 bytes rather than 8.
+  int32_t opportunistic = 1;
+  HRR_HIP_CHECK(hipMemPoolSetAttribute(pool, hipMemPoolReuseAllowOpportunistic, &opportunistic));
 
   int *d_pool = nullptr;
   HRR_HIP_CHECK(hipMallocFromPoolAsync(&d_pool, SZ, pool, s0));
