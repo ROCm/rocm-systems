@@ -7869,9 +7869,14 @@ TEST(HwregTest, Gfx1250GetregReadsWgpId) {
               amdgpu::HwregAccessResult::Success);
     EXPECT_EQ(value, 2u);
     EXPECT_EQ(amdgpu::write_hwreg_field(*wf, kWgpId, 0), amdgpu::HwregAccessResult::ReadOnly);
-    // The remaining identity fields still have no modeled backing.
-    for (uint16_t hwreg : {encode_hwreg(23), encode_hwreg(23, 9, 2), encode_hwreg(23, 13, 2),
-                           encode_hwreg(23, 16, 1)}) {
+    EXPECT_EQ(amdgpu::read_hwreg_field(*wf, encode_hwreg(23), value),
+              amdgpu::HwregAccessResult::Success);
+    EXPECT_EQ(value, (5u << 10) | (1u << 16) | slot);
+    EXPECT_EQ(amdgpu::read_hwreg_field(*wf, encode_hwreg(23, 16, 1), value),
+              amdgpu::HwregAccessResult::Success);
+    EXPECT_EQ(value, 1u);
+    // Reserved and unmodeled capability field queries remain unsupported.
+    for (uint16_t hwreg : {encode_hwreg(23, 13, 2), encode_hwreg(23, 29, 3)}) {
       value = 0xFFFFFFFFu;
       EXPECT_EQ(amdgpu::read_hwreg_field(*wf, hwreg, value),
                 amdgpu::HwregAccessResult::Unsupported);
@@ -7880,6 +7885,48 @@ TEST(HwregTest, Gfx1250GetregReadsWgpId) {
   }
   for (uint32_t slot = 0; slot < cfg.num_wf_slots; ++slot)
     cu->wf(slot)->halt();
+}
+
+TEST(HwregTest, Gfx12WholeIdentityDistinguishesSiblingCusArraysAndEngines) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    SCOPED_TRACE(arch);
+    amdgpu::GpuMemory memory("identity_mem");
+    amdgpu::L2Cache l2("identity_l2");
+    amdgpu::ComputeUnitCore::Config config{};
+    config.arch = arch;
+    config.num_wf_slots = 2;
+    config.sgprs_per_wf = 128;
+    config.vgprs_per_wf = 256;
+    auto cu = amdgpu::ComputeUnitCore::create("identity", config, &memory, &l2);
+    ASSERT_NE(cu, nullptr);
+    const bool gfx1250 = arch == ROCJITSU_CODE_ARCH_CDNA5;
+    const uint32_t wgp_width = gfx1250 ? 1 : 2;
+    auto decoder = Decoder::create(arch);
+    for (uint32_t se = 0; se < 2; ++se) {
+      for (uint32_t sa = 0; sa < 2; ++sa) {
+        for (uint32_t sibling = 0; sibling < wgp_width; ++sibling) {
+          cu->set_shader_engine_location(se, (sa * 4 + 2) * wgp_width + sibling, 4 * wgp_width);
+          auto *wave = cu->dispatch_wf(0, 0, 128, 256);
+          ASSERT_NE(wave, nullptr);
+          uint32_t value = 0;
+          ASSERT_EQ(amdgpu::read_hwreg_field(*wave, encode_hwreg(23), value),
+                    amdgpu::HwregAccessResult::Success);
+          EXPECT_EQ((value >> 10) & 15, 2u);
+          EXPECT_EQ((value >> 16) & 1, sa);
+          EXPECT_EQ((value >> 8) & 3, sibling);
+          EXPECT_EQ((value >> 18) & 7, gfx1250 ? 0u : se);
+          if (gfx1250) {
+            const auto words = encode_sop1(cdna5::kSSendmsgRtnB32Sop1, 4, 0x87);
+            std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
+            ASSERT_NE(instruction, nullptr);
+            EXPECT_TRUE(cu->execute_instruction(instruction.get(), *wave).succeeded());
+            EXPECT_EQ(cu->read_sgpr(wave->sgpr_alloc().base + 4), se);
+          }
+          wave->halt();
+        }
+      }
+    }
+  }
 }
 
 TEST(HwregHelperTest, Gfx1250WgpIdRequiresRepresentableShaderArrayWidth) {

@@ -298,6 +298,14 @@ loader warns once per GPU and leaves the shader-array width unknown. Reads
 with unknown or unrepresentable geometry issue an `s_getreg_b32` warning and
 write zero.
 
+Whole-register `WAVE_HW_ID1` reads expose the modeled wave, SIMD, WGP, and
+shader-array IDs on gfx1201 and gfx1250. The model supports two shader arrays
+per engine; gfx1201 represents two CUs per WGP and accepts shader-array widths
+up to 32 CUs. gfx1201 also exposes the shader-engine ID in `WAVE_HW_ID1`;
+gfx1250 obtains it through `MSG_RTN_GET_SE_AID_ID` (AID is currently zero).
+Unmodeled capability and reserved bits read as zero in a whole-register read;
+field reads that span those bits remain unsupported.
+
 Omitted geometry fields inherit defaults selected by `gfx_target_version`.
 For a smaller topology, set both `num_cu_per_sh` and
 `num_shader_arrays_per_engine` to match its CU groups; for example, two arrays
