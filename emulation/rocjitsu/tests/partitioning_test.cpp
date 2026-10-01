@@ -403,10 +403,11 @@ TEST(ExecutionThreadBudgetTest, ShippedServerChoicesAndExplicitSerial) {
 TEST(ExecutionThreadBudgetTest, LaunchBudgetReplanesOnlyTheConfigItRewrites) {
   std::string json = config_json_with_num_threads(CONFIG_PATH, 0);
   json.insert(json.find('{') + 1, R"("cpu_thread_budget":32,)");
-  const std::string relaunched = config::json_with_cpu_thread_budget(json, 4);
+  FailureOr<std::string> relaunched = config::json_with_cpu_thread_budget(json, 4);
+  ASSERT_TRUE(relaunched.succeeded());
 
   const config::LoadedConfig loaded =
-      config::load_config_from_string(relaunched, rocjitsu::kEmbeddedSchema, 64);
+      config::load_config_from_string(relaunched.value(), rocjitsu::kEmbeddedSchema, 64);
   EXPECT_EQ(loaded.cpu_thread_budget, 4u);
   EXPECT_EQ(loaded.execution_threads.engines, 2u);
   EXPECT_EQ(loaded.execution_threads.dispatch, (std::vector<uint32_t>{3}));
