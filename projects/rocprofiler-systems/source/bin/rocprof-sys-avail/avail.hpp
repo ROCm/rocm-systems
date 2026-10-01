@@ -65,7 +65,7 @@ public:
         setNextName(name);
         writeName();
 
-        auto base64string =
+        auto const base64string =
             base64::encode(reinterpret_cast<const unsigned char*>(data), size);
         saveValue(base64string);
     }
@@ -77,19 +77,19 @@ public:
     //! Sets the name for the next node created with startNode
     void setNextName(const char* name)
     {
-        if(exclude_stream.count(name) > 0)
+        if(exclude_stream.contains(name))
         {
             return;
         }
 
-        if((current_entry != nullptr) && value_keys.count(name) > 0)
+        if((current_entry != nullptr) && value_keys.contains(name))
         {
             current_entry->insert({ name, "" });
             current_value = &(*current_entry)[name];
             return;
         }
 
-        if(value_keys.count(name) > 0)
+        if(value_keys.contains(name))
         {
             return;
         }

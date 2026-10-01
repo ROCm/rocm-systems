@@ -1,5 +1,5 @@
 ---
-name: pc-sampling
+name: rocprof-compute-pc-sampling
 description: Collects and analyzes rocprof-compute PC sampling to show which individual instructions in an AMD GPU kernel are hot and why wavefronts stall there, with ISA and source line attribution. Use when the user asks which instruction or source line is slow, asks about stall reasons, wants instruction-level or ISA-level detail, or wants hotspots inside a single kernel. Not for CUDA tools, Windows, or whole-application timing.
 ---
 

@@ -1,5 +1,5 @@
 ---
-name: roofline
+name: rocprof-compute-roofline
 description: Collects and reads rocprof-compute roofline data to place an AMD GPU kernel against the hardware's peak compute and peak bandwidth ceilings. Use when the user asks whether a kernel is compute-bound or memory-bound, asks about arithmetic intensity or FLOPs per byte, asks how much performance is left on the table, or asks for a roofline. Not for CUDA tools, Windows, or per-instruction analysis.
 ---
 
@@ -29,8 +29,8 @@ MI100 (gfx908) does not support the roofline microbenchmarks. Every other
 supported architecture does. On MI100 the benchmark is skipped and the profile
 still succeeds, so a missing roofline there is not a mistake in how the profile
 was run. Never tell an MI100 user to re-profile without `--no-roof`; use
-Speed-of-Light and the `memory` skill instead. Confirm support for a new
-architecture against
+Speed-of-Light and the `rocprof-compute-memory` skill instead. Confirm support
+for a new architecture against
 [compatible-accelerators.rst](../../docs/reference/compatible-accelerators.rst).
 
 `--device` selects the GPU for the roofline microbenchmarks. It does not
@@ -60,12 +60,13 @@ Report two things first, before any tuning advice:
 Read the verdict from the table as:
 
 - Low arithmetic intensity, close to the bandwidth ceiling: memory-bound. Work
-  on traffic, reuse, tiling, and locality. Continue with the `memory` skill.
+  on traffic, reuse, tiling, and locality. Continue with the
+  `rocprof-compute-memory` skill.
 - High arithmetic intensity, close to the compute ceiling: compute-bound. Work
   on instruction mix, matrix instruction use, and divergence.
 - Well below both ceilings: neither is the limit. The kernel is held back by
   occupancy, launch configuration, or stalls. Go back to the
-  `kernel-bottleneck` skill.
+  `rocprof-compute-kernel-bottleneck` skill.
 
 A kernel sitting below both ceilings is the common case and the most
 misread one. Never report it as compute-bound merely because its arithmetic
@@ -106,7 +107,7 @@ L2 and vL1D show whether caches are absorbing the traffic.
 | Cause | What to do |
 |---|---|
 | Profiled with `--no-roof` | re-profile without it |
-| Architecture has no microbenchmark support | use Speed-of-Light and the `memory` skill instead |
+| Architecture has no microbenchmark support | use Speed-of-Light and the `rocprof-compute-memory` skill instead |
 | `roofline.csv` absent from the workload directory | the benchmark did not complete; check the profile log |
 
 The concepts behind the ceilings are in the

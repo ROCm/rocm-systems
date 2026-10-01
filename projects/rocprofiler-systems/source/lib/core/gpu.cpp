@@ -57,7 +57,7 @@ check_amdsmi_error(amdsmi_status_t _code, const char* _file, int _line)
         return;
     }
     const char* _msg = nullptr;
-    auto        _err = amdsmi_status_code_to_string(_code, &_msg);
+    auto const  _err = amdsmi_status_code_to_string(_code, &_msg);
     if(_err != AMDSMI_STATUS_SUCCESS)
     {
         throw std::runtime_error(fmt::format(
@@ -100,10 +100,10 @@ amdsmi_init()
 size_t
 query_rocm_agents()
 {
-    size_t _dev_cnt = 0;
-    auto   iterator = []([[maybe_unused]] rocprofiler_agent_version_t version,
-                       const void** agents, size_t num_agents,
-                       [[maybe_unused]] void* user_data) -> rocprofiler_status_t {
+    size_t     _dev_cnt = 0;
+    auto const iterator = []([[maybe_unused]] rocprofiler_agent_version_t version,
+                             const void** agents, size_t num_agents,
+                             [[maybe_unused]] void* user_data) -> rocprofiler_status_t {
         auto& _agent_manager = get_agent_manager_instance();
         for(size_t i = 0; i < num_agents; ++i)
         {
@@ -111,7 +111,7 @@ query_rocm_agents()
             agent       cur_agent;
             cur_agent.type =
                 (_agent->type == ROCPROFILER_AGENT_TYPE_GPU ? agent_type::gpu
-                                                              : agent_type::cpu);
+                                                            : agent_type::cpu);
             cur_agent.handle               = _agent->id.handle;
             cur_agent.device_id            = _agent->device_id;
             cur_agent.node_id              = _agent->node_id;
@@ -212,9 +212,9 @@ add_device_metadata(ArchiveT& ar)
 
     using agent_vec_t = std::vector<rocprofiler_agent_v0_t>;
 
-    auto iterator_cb = []([[maybe_unused]] rocprofiler_agent_version_t version,
-                          const void** agents, size_t num_agents,
-                          [[maybe_unused]] void* user_data) -> rocprofiler_status_t {
+    auto const iterator_cb =
+        []([[maybe_unused]] rocprofiler_agent_version_t version, const void** agents,
+           size_t num_agents, [[maybe_unused]] void* user_data) -> rocprofiler_status_t {
         auto* agents_vec = static_cast<agent_vec_t*>(user_data);
         for(size_t i = 0; i < num_agents; ++i)
         {
@@ -337,14 +337,14 @@ get_processor_handles()
             {
                 // Helper lambda to check if any value in the array is valid (not
                 // UINT16_MAX)
-                auto has_valid_u16 = [](const auto& arr) {
+                auto const has_valid_u16 = [](const auto& arr) {
                     return std::any_of(std::begin(arr), std::end(arr),
                                        [](auto val) { return val != UINT16_MAX; });
                 };
 
                 // Helper lambda to check if any value in the array is valid (not
                 // UINT64_MAX)
-                auto has_valid_u64 = [](const auto& arr) {
+                auto const has_valid_u64 = [](const auto& arr) {
                     return std::any_of(std::begin(arr), std::end(arr),
                                        [](auto val) { return val != UINT64_MAX; });
                 };
