@@ -159,6 +159,14 @@ protected:
      */
     ParserResult ParseUncompressedHeader(uint8_t *p_stream, size_t size);
 
+    /*! \brief Body of ParseUncompressedHeader(). Call that instead: it restores the carried
+     *         header state when this returns an error.
+     * \param [in] p_stream Pointer to the bit stream
+     * \param [in] size Byte size of the stream
+     * \return <tt>ParserResult</tt>
+     */
+    ParserResult ParseUncompressedHeaderBody(uint8_t *p_stream, size_t size);
+
     /*! \brief Function to parse frame sync syntax (frame_sync_code(), 6.2.1)
      * \param [in] p_stream Pointer to the bit stream
      * \param [in,out] offset Bit offset

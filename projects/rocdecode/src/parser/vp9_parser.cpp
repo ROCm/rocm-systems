@@ -476,6 +476,19 @@ void Vp9VideoParser::CheckAndUpdateDecStatus() {
 }
 
 ParserResult Vp9VideoParser::ParseUncompressedHeader(uint8_t *p_stream, size_t size) {
+    // The uncompressed header carries state forward between frames, and SetupPastIndependence()
+    // resets part of it mid parse. A frame that fails after that point would otherwise leave the
+    // carried state half updated for the next frame in the chunk, which ParsePictureData() goes
+    // on to parse. Roll the state back so only a frame that parsed cleanly can change it.
+    Vp9UncompressedHeader saved_header = uncompressed_header_;
+    ParserResult ret = ParseUncompressedHeaderBody(p_stream, size);
+    if (ret != PARSER_OK) {
+        uncompressed_header_ = saved_header;
+    }
+    return ret;
+}
+
+ParserResult Vp9VideoParser::ParseUncompressedHeaderBody(uint8_t *p_stream, size_t size) {
     ParserResult ret = PARSER_OK;
     size_t offset = 0;  // current bit offset
     Vp9UncompressedHeader *p_uncomp_header = &uncompressed_header_;
