@@ -9924,6 +9924,63 @@ TEST_F(InitMicrotest, InitTransportsRank_PartialTopologyWithoutANetNode_KeepsThe
   EXPECT_EQ(kRingChannels, c.get()->nChannels);
 }
 
+// Preset() runs at min(tree, ring) channels, so a tree graph smaller than the ring leaves it filling only the
+// tree's count (plus duplicates). The NET-less arm then raises the count to the ring's, and the added channels
+// must inherit a Preset() channel rather than stay empty -- an empty tree faults the Tree kernel.
+TEST_F(InitMicrotest, InitTransportsRank_ChannelCountGrowsPastPreset_AddedChannelsCopyPresetChannels) {
+  const int kRingChannels = 6;
+  const int kTreeChannels = 2;
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900", kRingChannels);
+  g_ncclTopoCompute = [](ncclTopoSystem*, ncclTopoGraph* g) {
+    g->nChannels = g->id == 1 ? kTreeChannels : kRingChannels;  // id 1 is the tree graph
+    return ncclSuccess;
+  };
+  ncclComm* comm = c.get();
+  int presetChannels = -1;
+  ScopedHook preset(g_ncclTopoPreset, [&](ncclComm*, ncclTopoRanks*) {
+    presetChannels = comm->nChannels;
+    for (int ch = 0; ch < 2 * comm->nChannels; ch++) {  // Preset() duplicates its channels once
+      comm->channels[ch].tree.up = 100 + ch % comm->nChannels;
+      comm->channels[ch].tree.down[0] = 200 + ch % comm->nChannels;
+    }
+    return ncclSuccess;
+  });
+  const auto gathers = Tr_InstallGathers(c);
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(kTreeChannels, presetChannels);
+  ASSERT_EQ(kRingChannels, comm->nChannels);
+  for (int ch = 0; ch < kRingChannels; ch++) {
+    EXPECT_EQ(100 + ch % kTreeChannels, comm->channels[ch].tree.up) << "channel " << ch;
+    EXPECT_EQ(200 + ch % kTreeChannels, comm->channels[ch].tree.down[0]) << "channel " << ch;
+  }
+}
+
+// The opposite direction: a peer with fewer channels shrinks the count, and Preset()'s duplicates move down.
+TEST_F(InitMicrotest, InitTransportsRank_ChannelCountShrinksPastPreset_MovesTheDuplicatesDown) {
+  const int kLocalChannels = 4;
+  const int kPeerChannels = 2;
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900", kLocalChannels);
+  ncclComm* comm = c.get();
+  ScopedHook preset(g_ncclTopoPreset, [&](ncclComm*, ncclTopoRanks*) {
+    for (int ch = 0; ch < 2 * comm->nChannels; ch++) comm->channels[ch].tree.up = 100 + ch;
+    return ncclSuccess;
+  });
+  const auto gathers = Tr_InstallGathers(c, {}, [](int r, Tr_AllGatherInfo& row) {
+    if (r == 2) {
+      row.graphInfo[NCCL_ALGO_RING].nChannels = kPeerChannels;
+      row.graphInfo[NCCL_ALGO_TREE].nChannels = kPeerChannels;
+    }
+  });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  ASSERT_EQ(kPeerChannels, comm->nChannels);
+  EXPECT_EQ(100, comm->channels[0].tree.up);
+  EXPECT_EQ(101, comm->channels[1].tree.up);
+  EXPECT_EQ(100 + kLocalChannels, comm->channels[2].tree.up);  // duplicate of channel 0
+  EXPECT_EQ(101 + kLocalChannels, comm->channels[3].tree.up);  // duplicate of channel 1
+}
+
 TEST_F(InitMicrotest, InitTransportsRank_Cr8gFullTopology_RaisesChannelCountToFour) {
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   ncclTopoSystem* topo = Tr_ReachAllGather3(c, "gfx900");

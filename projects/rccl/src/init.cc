@@ -2338,6 +2338,14 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     for (int i = 0; i < comm->nChannels; i++) {
       memcpy(comm->channels + comm->nChannels + i, comm->channels + nChannelsOrig + i, sizeof(struct ncclChannel));
     }
+  } else if (comm->nChannels > nChannelsOrig) {
+    // The NET-less arm above can raise the count past what Preset() was given (e.g. Navi graph
+    // generation forces 56 SHM rings while the tree search falls back to a single channel).
+    // Preset() owns the per-channel intra-node state and only filled nChannelsOrig channels (plus
+    // their duplicates), so copy an existing channel into each added one rather than leaving it empty.
+    for (int c = nChannelsOrig; c < comm->nChannels; c++) {
+      memcpy(comm->channels + c, comm->channels + c % nChannelsOrig, sizeof(struct ncclChannel));
+    }
   }
 
   // Determine CollNet support after all-gather now that we know nNodes and each node localRanks
