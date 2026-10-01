@@ -673,9 +673,9 @@ rocpd_processor_t::handle(const hipfile_pmc_sample& hipfile_sample)
 {
     namespace collector = pmc::collectors::hipfile;
 
-    const auto* name         = trait::name<category::hipfile>::value;
-    const auto& process_info = m_metadata->get_process_info();
-    const agent* agent_ptr = nullptr;
+    const auto*  name         = trait::name<category::hipfile>::value;
+    const auto&  process_info = m_metadata->get_process_info();
+    const agent* agent_ptr    = nullptr;
     try
     {
         agent_ptr = &m_agent_manager->get_agent_by_type_index(hipfile_sample.device_id,
@@ -687,7 +687,7 @@ rocpd_processor_t::handle(const hipfile_pmc_sample& hipfile_sample)
             hipfile_sample.device_id, e.what());
         return;
     }
-    
+
     const auto agent_uid = make_agent_uid(*agent_ptr);
     const auto event     = make_event(0, 0, 0, name);
 

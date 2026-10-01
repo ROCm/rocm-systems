@@ -170,7 +170,7 @@ open_scratch_file(const char* path, size_t bytes)
         return -1;
     }
 
-    if(ftruncate(raw_fd, bytes) != 0)
+    if(ftruncate(raw_fd, static_cast<off_t>(bytes)) != 0)
     {
         fprintf(stderr, "ftruncate failed (%s)\n", strerror(errno));
         close(raw_fd);

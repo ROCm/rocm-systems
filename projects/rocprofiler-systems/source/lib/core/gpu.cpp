@@ -262,7 +262,7 @@ hip_ordinal_mapping_is_reliable()
                     unreliable->name, unreliable->value);
         return false;
     }();
-    return k_reliable ;
+    return k_reliable;
 }
 }  // namespace
 

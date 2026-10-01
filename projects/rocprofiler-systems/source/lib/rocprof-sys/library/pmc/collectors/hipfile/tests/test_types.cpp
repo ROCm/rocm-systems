@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/pmc/collectors/hipfile/types.hpp"
+#include <cstdint>
 
 #include <gtest/gtest.h>
 
@@ -46,20 +47,28 @@ TEST(HipFileMetricTable, named_bits_match_metric_table_positions)
     // appending to the union would silently desynchronize them.
     using setter_t = void (*)(enabled_metrics&);
     const std::map<std::string_view, setter_t> expected{
-        { "Read Bytes", [](enabled_metrics& flags) { flags.bits.read_bytes = 1; } },
-        { "Write Bytes", [](enabled_metrics& flags) { flags.bits.write_bytes = 1; } },
-        { "Read Ops", [](enabled_metrics& flags) { flags.bits.read_ops = 1; } },
-        { "Write Ops", [](enabled_metrics& flags) { flags.bits.write_ops = 1; } },
-        { "Fastpath Reads", [](enabled_metrics& flags) { flags.bits.fastpath_reads = 1; } },
-        { "Fastpath Writes", [](enabled_metrics& flags) { flags.bits.fastpath_writes = 1; } },
-        { "Fallback Reads", [](enabled_metrics& flags) { flags.bits.fallback_reads = 1; } },
-        { "Fallback Writes", [](enabled_metrics& flags) { flags.bits.fallback_writes = 1; } },
-        { "Unaligned Reads", [](enabled_metrics& flags) { flags.bits.unaligned_reads = 1; } },
-        { "Unaligned Writes", [](enabled_metrics& flags) { flags.bits.unaligned_writes = 1; } },
-        { "Read Errors", [](enabled_metrics& flags) { flags.bits.read_errors = 1; } },
+        { "Read Bytes", [](enabled_metrics& flags) { flags.bits.read_bytes     = 1; } },
+        { "Write Bytes", [](enabled_metrics& flags) { flags.bits.write_bytes   = 1; } },
+        { "Read Ops", [](enabled_metrics& flags) { flags.bits.read_ops         = 1; } },
+        { "Write Ops", [](enabled_metrics& flags) { flags.bits.write_ops       = 1; } },
+        { "Fastpath Reads",
+          [](enabled_metrics& flags) { flags.bits.fastpath_reads               = 1; } },
+        { "Fastpath Writes",
+          [](enabled_metrics& flags) { flags.bits.fastpath_writes              = 1; } },
+        { "Fallback Reads",
+          [](enabled_metrics& flags) { flags.bits.fallback_reads               = 1; } },
+        { "Fallback Writes",
+          [](enabled_metrics& flags) { flags.bits.fallback_writes              = 1; } },
+        { "Unaligned Reads",
+          [](enabled_metrics& flags) { flags.bits.unaligned_reads              = 1; } },
+        { "Unaligned Writes",
+          [](enabled_metrics& flags) { flags.bits.unaligned_writes             = 1; } },
+        { "Read Errors", [](enabled_metrics& flags) { flags.bits.read_errors   = 1; } },
         { "Write Errors", [](enabled_metrics& flags) { flags.bits.write_errors = 1; } },
-        { "Read Bandwidth", [](enabled_metrics& flags) { flags.bits.read_bandwidth = 1; } },
-        { "Write Bandwidth", [](enabled_metrics& flags) { flags.bits.write_bandwidth = 1; } },
+        { "Read Bandwidth",
+          [](enabled_metrics& flags) { flags.bits.read_bandwidth               = 1; } },
+        { "Write Bandwidth",
+          [](enabled_metrics& flags) { flags.bits.write_bandwidth              = 1; } },
     };
 
     ASSERT_EQ(METRIC_TABLE.size(), expected.size());
