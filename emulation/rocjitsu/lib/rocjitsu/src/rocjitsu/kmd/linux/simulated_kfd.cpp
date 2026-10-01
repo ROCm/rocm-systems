@@ -2114,6 +2114,16 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
   if (daemon_mode_ && alloc.memfd >= 0 && alloc.host_ptr != nullptr)
     return alloc.host_ptr;
 
+  // A VRAM CPU mapping is an alias of the BO, not its GPU backing. Keep the
+  // private driver mapping alive when the client maps or unmaps an alias.
+  if ((alloc.flags & KFD_IOC_ALLOC_MEM_FLAGS_VRAM) && alloc.memfd >= 0) {
+    if (length > alloc.size) {
+      errno = EINVAL;
+      return MAP_FAILED;
+    }
+    return safe_mmap(addr, length, prot, MAP_SHARED | (flags & MAP_FIXED), alloc.memfd, 0);
+  }
+
   void *host_ptr;
   bool host_ptr_owned = true;
 
@@ -2454,10 +2464,11 @@ int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
   auto alloc_mtype = pte_mtype_for_flags(args->flags);
   bool is_userptr = (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR) != 0;
   bool is_doorbell = (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_DOORBELL) != 0;
+  const bool is_vram = (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_VRAM) != 0;
   if (is_userptr && !daemon_mode_) {
     alloc.host_ptr = reinterpret_cast<void *>(va);
     map_to_gpu(proc, va, reinterpret_cast<void *>(va), args->size, alloc_mtype);
-  } else if (daemon_mode_ || !user_provided_va) {
+  } else if (daemon_mode_ || !user_provided_va || is_vram) {
     auto raw_fd = memfd_create("rocjitsu_alloc", MFD_CLOEXEC | MFD_ALLOW_SEALING);
     if (raw_fd >= 0) {
       alloc.memfd = safe_fcntl(raw_fd, F_DUPFD_CLOEXEC, kBackingFdMin);
@@ -2474,7 +2485,10 @@ int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
         fallocate(alloc.memfd, 0, 0, static_cast<off_t>(alloc.size));
         safe_fcntl(alloc.memfd, F_ADD_SEALS, F_SEAL_SHRINK);
 
-        if (daemon_mode_ && !is_doorbell) {
+        // amdgpu_amdkfd_gpuvm_alloc_memory_of_gpu allocates a VRAM BO even
+        // without PUBLIC (CPU access). A supplied GPU VA is not host backing.
+        // https://github.com/torvalds/linux/blob/d24e8ac715de2e16a53c144005b1863660a5fbea/drivers/gpu/drm/amd/amdgpu/amdgpu_amdkfd_gpuvm.c
+        if ((daemon_mode_ || is_vram) && !is_doorbell) {
           auto *mapped =
               safe_mmap(nullptr, alloc.size, PROT_READ | PROT_WRITE, MAP_SHARED, alloc.memfd, 0);
           if (mapped != MAP_FAILED) {
@@ -2641,8 +2655,11 @@ int SimulatedKfd::free_memory_ioctl(KfdProcess &proc, void *arg) {
         proc.imported_dmabufs_.erase(dmabuf_it);
       }
     }
-    if (alloc.host_ptr && !alloc.user_va)
+    const bool vram_backing = (alloc.flags & KFD_IOC_ALLOC_MEM_FLAGS_VRAM) && alloc.host_ptr_owned;
+    if (alloc.host_ptr && (!alloc.user_va || vram_backing))
       unmap_from_gpu(proc, alloc.gpu_va, alloc.size);
+    if (vram_backing)
+      safe_munmap(alloc.host_ptr, alloc.size);
     if (alloc.memfd >= 0) {
       {
         std::lock_guard<std::mutex> lk(owned_fds_mutex_);
