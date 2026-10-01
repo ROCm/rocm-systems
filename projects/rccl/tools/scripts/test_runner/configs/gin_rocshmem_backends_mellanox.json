@@ -122,6 +122,8 @@
         { "name": "PutValue_Inline",          "description": "GIN device inline put-value",                           "test_filter": "GinMPIDeviceTests.PutValue_Inline" },
         { "name": "Signal_NoPayload",         "description": "GIN device signal, no payload",                         "test_filter": "GinMPIDeviceTests.Signal_NoPayload" },
         { "name": "Signal_HighIdNoOverflow",  "description": "GIN device signal with high id, no overflow",           "test_filter": "GinMPIDeviceTests.Signal_HighIdNoOverflow" },
+        { "name": "Signal_ExplicitWeak",      "description": "Weak indexed GIN signal publishes its bundled put",     "test_filter": "GinMPIDeviceTests.Signal_ExplicitWeak" },
+        { "name": "Signal_ExplicitStrong",    "description": "GDA and SDMA do not read the strong bit; a pass shows queue order, not strong-signal enforcement", "test_filter": "GinMPIDeviceTests.Signal_ExplicitStrong" },
         { "name": "WaitCounter_Local",        "description": "GIN device wait-counter, local",                        "test_filter": "GinMPIDeviceTests.WaitCounter_Local" },
         { "name": "WaitCounterAndSignal",     "description": "GIN device wait-counter combined with signal",          "test_filter": "GinMPIDeviceTests.WaitCounterAndSignal" },
         { "name": "Barrier_TwoRanks",         "description": "GIN device two-rank barrier",                           "test_filter": "GinMPIDeviceTests.Barrier_TwoRanks" },

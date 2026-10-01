@@ -24,6 +24,7 @@ THE SOFTWARE.
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 
 namespace {
 // Test value constant
@@ -280,6 +281,60 @@ HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_RoundTripDataIntegrity) {
                                     hipMemRangeAttributeLastPrefetchLocation, managed_memory.ptr(),
                                     kTestBufferBytes));
   REQUIRE(last_prefetch_location == device);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Blocks the stream with a kernel that spins until the host sets a release flag
+ *  - Enqueues a batch prefetch behind the kernel and verifies that hipStreamQuery reports
+ *    hipErrorNotReady until the host releases the kernel
+ */
+HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_Sync_Behavior) {
+  REQUIRE_MANAGED_ACCESS_DEVICE(device);
+
+  const auto stream_type = GENERATE(Streams::perThread, Streams::created);
+  StreamGuard stream_guard(stream_type);
+  LinearAllocGuard<int> release(LinearAllocs::hipHostMalloc, sizeof(int));
+  *release.ptr() = 0;
+  LinearAllocGuard<int> managed_memory(LinearAllocs::hipMallocManaged, kTestBufferBytes);
+
+  std::array<void*, 1> managed_ptrs = {managed_memory.ptr()};
+  std::array<size_t, 1> buffer_sizes = {kTestBufferBytes};
+  std::array<size_t, 1> location_indices = {0};
+  constexpr unsigned long long flags = 0;
+
+  std::array<hipMemLocation, 1> device_location;
+  device_location[0].type = hipMemLocationTypeDevice;
+  device_location[0].id = device;
+
+  std::array<hipMemLocation, 1> host_location;
+  host_location[0].type = hipMemLocationTypeHost;
+  host_location[0].id = 0;
+
+  HIP_CHECK(hipMemPrefetchBatchAsync(managed_ptrs.data(), buffer_sizes.data(), managed_ptrs.size(),
+                                     device_location.data(), location_indices.data(),
+                                     location_indices.size(), flags, stream_guard.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+
+  WaitForHostRelease<<<1, 1, 0, stream_guard.stream()>>>(release.ptr());
+  HIP_CHECK(hipGetLastError());
+
+  const auto prefetch_error = hipMemPrefetchBatchAsync(
+      managed_ptrs.data(), buffer_sizes.data(), managed_ptrs.size(), host_location.data(),
+      location_indices.data(), location_indices.size(), flags, stream_guard.stream());
+
+  auto query_while_blocked = hipErrorNotReady;
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds{100};
+  while (query_while_blocked == hipErrorNotReady && std::chrono::steady_clock::now() < deadline) {
+    query_while_blocked = hipStreamQuery(stream_guard.stream());
+  }
+
+  __atomic_store_n(release.ptr(), 1, __ATOMIC_RELEASE);
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+
+  HIP_CHECK(prefetch_error);
+  REQUIRE(query_while_blocked == hipErrorNotReady);
 }
 
 /**

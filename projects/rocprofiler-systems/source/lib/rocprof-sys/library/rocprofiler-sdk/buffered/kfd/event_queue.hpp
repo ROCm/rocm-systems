@@ -25,8 +25,8 @@ on_kfd_event_queue_configure()
 {
     Externals::add_string(Externals::k_kfd_event_queue_category_name);
 
-    auto& agent_mgr  = Externals::get_agent_manager();
-    auto  gpu_agents = agent_mgr.get_agents_by_type(Externals::k_agent_type_gpu);
+    auto const& agent_mgr  = Externals::get_agent_manager();
+    auto const  gpu_agents = agent_mgr.get_agents_by_type(Externals::k_agent_type_gpu);
     if(gpu_agents.empty())
     {
         LOG_DEBUG("no GPU agents found; no PMC info will be registered");
@@ -93,7 +93,7 @@ on_kfd_event_queue(typename SdkBackend::kfd_event_queue_record* record, void* da
     Externals::add_thread_info(typename Externals::thread_info_t{
         Externals::get_ppid(), Externals::get_pid(), tid, 0, 0, "{}" });
 
-    auto agent_label = [](const auto* agent_ptr) {
+    auto const agent_label = [](const auto* agent_ptr) {
         if(!agent_ptr)
         {
             return std::string{ "?" };
@@ -105,7 +105,7 @@ on_kfd_event_queue(typename SdkBackend::kfd_event_queue_record* record, void* da
 
     constexpr auto k_empty_args           = "";
     constexpr auto k_empty_event_metadata = "{}";
-    auto           track_name = fmt::format("KFD Event Queue [{}]", agent_label(agent));
+    auto const     track_name = fmt::format("KFD Event Queue [{}]", agent_label(agent));
     Externals::add_track(typename Externals::track_t{ track_name, tid, "{}" });
 
     constexpr double k_pmc_value = 1.0;

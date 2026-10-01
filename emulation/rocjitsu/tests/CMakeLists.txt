@@ -609,6 +609,7 @@ add_executable(
     patch/log_buffer_test.cpp
     patch/instruction_builder_test.cpp
     patch/vector_builder_test.cpp
+    patch/smem_builder_test.cpp
     patch/kernarg_extension_test.cpp
     patch/sidecar_metadata_test.cpp
     patch/trampoline_builder_test.cpp
@@ -642,6 +643,7 @@ add_executable(
     vgpr_redispatch_test.cpp
     instruction_execution_harness_test.cpp
     vop3_conversion_modifiers_test.cpp
+    cube_instruction_test.cpp
     division_test.cpp
     division_macro_test.cpp
     valu_floating_policy_test.cpp
@@ -665,10 +667,12 @@ add_executable(
     util_simd_test.cpp
     v_add_simd_benchmark.cpp
     mfma_simd_benchmark.cpp
+    smfmac_simd_benchmark.cpp
     wmma_simd_benchmark.cpp
     swmmac_k64_simd_benchmark.cpp
     simd_correctness/simd_coverage_test.cpp
     simd_correctness/swmmac_k64_simd_exact_test.cpp
+    simd_correctness/smfmac_simd_exact_test.cpp
     simd_correctness/vop1_cvt_f64_scalar_correctness_test.cpp
     simd_correctness/vopc_cmp_class_scalar_correctness_test.cpp
     simd_correctness/vop2_simd_correctness_test.cpp
@@ -720,6 +724,7 @@ add_executable(
     execution_plugin_test.cpp
     plugin_config_resolver_test.cpp
     plugin_loader_test.cpp
+    race-detector/race_detector_counter_capacity_tests.cpp
     race-detector/race_detector_event_registry_test.cpp
     race-detector/race_detector_tests.cpp
     race-detector/interval_set_tests.cpp

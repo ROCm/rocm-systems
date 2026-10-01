@@ -151,7 +151,7 @@ TEST(discovery_test, find_cache_files_pairs_buffered_and_metadata_for_same_pid)
 
 TEST(discovery_test, find_cache_files_skips_mismatched_parent_pid)
 {
-    auto m = find_cache_files(100, { "buffered_storage_999_42.bin" });
+    auto const m = find_cache_files(100, { "buffered_storage_999_42.bin" });
     EXPECT_TRUE(m.empty());
 }
 
