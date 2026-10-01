@@ -27,6 +27,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from rccl_ci_utils import write_github_summary
+
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
 
@@ -118,10 +120,12 @@ SLURM_TERMINAL_STATES = frozenset(
         "TIMEOUT",
     }
 )
-SQUEUE_MAX_CONSECUTIVE_ERRORS = 6
 SQUEUE_POLL_SECONDS = 10
 SACCT_POLL_SECONDS = 2
 SACCT_TIMEOUT_SECONDS = 300
+# Match the accounting retry budget: an unavailable controller must not make
+# the driver cancel a healthy allocation after only one minute.
+SQUEUE_MAX_CONSECUTIVE_ERRORS = SACCT_TIMEOUT_SECONDS // SQUEUE_POLL_SECONDS
 
 
 def _raise_keyboard_interrupt(signum, _frame) -> None:
@@ -408,6 +412,14 @@ def render_slurm_script(
             "    preflight_rc=1",
             "  fi",
             "fi",
+            *[
+                "test \"$(sha256sum "
+                + shlex.quote(str(paths.binaries[binary]))
+                + " | awk '{print $1}')\" = "
+                + shlex.quote(sha256_file(paths.binaries[binary]))
+                + " || preflight_rc=1"
+                for binary in COLLECTIVES
+            ],
             'export ACCL_MPI_HOSTS="$mpi_hosts"',
             (
                 "printf 'mpi_launcher=%s mpi_hosts=%s ranks=%s\\n' "
@@ -434,7 +446,7 @@ def render_slurm_script(
                 paths,
                 config,
                 (
-                    'test "${OMPI_COMM_WORLD_SIZE:-}" = "$ACCL_EXPECT_RANKS"; '
+                    'set -e; test "${OMPI_COMM_WORLD_SIZE:-}" = "$ACCL_EXPECT_RANKS"; '
                     'test "${OMPI_COMM_WORLD_LOCAL_SIZE:-}" = "$ACCL_GPUS_PER_NODE"; '
                     'test "${OMPI_COMM_WORLD_LOCAL_RANK:-}" -lt "$ACCL_GPUS_PER_NODE"; '
                     "printf 'mpi_host=%s rank=%s local_rank=%s world=%s local_size=%s\\n' "
@@ -1005,6 +1017,18 @@ def main() -> int:
     (work_dir / "manifest.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
+    summary = [
+        "ACCL profiler decomposition",
+        f"Slurm job: {job_id or 'not submitted'} ({slurm_state})",
+        "",
+        "Collective | status",
+        "--- | ---",
+    ]
+    summary.extend(
+        f"{binary} | {'PASS' if statuses.get(binary) == 0 else 'FAIL'}"
+        for binary in COLLECTIVES
+    )
+    write_github_summary("\n".join(summary))
     if errors:
         for error in errors:
             log.error("%s", error)
