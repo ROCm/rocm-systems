@@ -22,6 +22,52 @@ rj_add_object_library(
     throughput/plugin.cpp
 )
 
+# Simulator-neutral hazard engine. Its headers include each other by bare name,
+# so this directory has to be on the include path of everything that uses it.
+set(RJ_HAZARD_CORE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/data_hazard/hazard_core)
+set(RJ_HAZARD_CORE_INCLUDE_DIR ${RJ_HAZARD_CORE_DIR}/include)
+set(RJ_HAZARD_CORE_SOURCES
+    ${RJ_HAZARD_CORE_DIR}/src/data_hazard_engine.cpp
+    ${RJ_HAZARD_CORE_DIR}/src/data_hazard_state.cpp
+    ${RJ_HAZARD_CORE_DIR}/src/simulator_api.cpp
+)
+
+# The engine's API surface. Everything under include/detail is an implementation
+# detail of the engine and is deliberately left out of the install so it does
+# not become something out-of-tree consumers can depend on.
+set(RJ_HAZARD_CORE_PUBLIC_HEADERS
+    ${RJ_HAZARD_CORE_INCLUDE_DIR}/data_hazard_engine.h
+    ${RJ_HAZARD_CORE_INCLUDE_DIR}/data_hazard_state.h
+    ${RJ_HAZARD_CORE_INCLUDE_DIR}/frontend_adapter.h
+    ${RJ_HAZARD_CORE_INCLUDE_DIR}/hash_utils.h
+    ${RJ_HAZARD_CORE_INCLUDE_DIR}/hazard_events.h
+    ${RJ_HAZARD_CORE_INCLUDE_DIR}/simulator_api.h
+    ${RJ_HAZARD_CORE_INCLUDE_DIR}/types.h
+    ${RJ_HAZARD_CORE_INCLUDE_DIR}/wait_suggestion.h
+)
+
+# The hazard engine is bundled statically here so the plugin stays
+# self-contained; the standalone core library below is a separate target built
+# from the same sources for out-of-tree consumers.
+rj_add_object_library(
+    rocjitsu_plugin_data_hazard
+    data_hazard/plugin.cpp
+    data_hazard/adapter.cpp
+    data_hazard/report.cpp
+    ${RJ_HAZARD_CORE_SOURCES}
+)
+# PUBLIC so everything that links this object library, including the test
+# binary, can also resolve the engine headers.
+target_include_directories(
+    rocjitsu_plugin_data_hazard
+    PUBLIC ${RJ_HAZARD_CORE_INCLUDE_DIR}
+)
+# The engine state uses util::Spinlock; util is header-only (INTERFACE) so this
+# only puts lib/util/include on the include path.
+target_link_libraries(rocjitsu_plugin_data_hazard PUBLIC util)
+# The plugin reads its own configuration object out of the resolved JSON.
+target_link_libraries(rocjitsu_plugin_data_hazard PRIVATE flatbuffers)
+add_dependencies(rocjitsu_plugin_data_hazard flatbuffers_schemas)
 if(ROCJITSU_ENABLE_PERFSIM_PLUGIN)
     rj_add_object_library(
         rocjitsu_plugin_perfsim
@@ -125,6 +171,64 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     )
     rj_add_plugin_so(throughput rocjitsu_plugin_throughput
         ${CMAKE_CURRENT_SOURCE_DIR}/throughput/plugin_export.cpp
+    )
+    rj_add_plugin_so(data_hazard rocjitsu_plugin_data_hazard
+        ${CMAKE_CURRENT_SOURCE_DIR}/data_hazard/plugin_export.cpp
+    )
+endif()
+
+# Standalone hazard engine for consumers outside this tree, built from the same
+# sources with default visibility because the tree hides symbols by default
+# (see the top-level CMakeLists) and this library exists to be linked against.
+option(
+    RJ_BUILD_DATA_HAZARD_CORE
+    "Build libdata_hazard_core.so for out-of-tree hazard engine consumers"
+    ON
+)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND RJ_BUILD_DATA_HAZARD_CORE)
+    add_library(rocjitsu_data_hazard_core SHARED ${RJ_HAZARD_CORE_SOURCES})
+    target_include_directories(
+        rocjitsu_data_hazard_core
+        PUBLIC
+            $<BUILD_INTERFACE:${RJ_HAZARD_CORE_INCLUDE_DIR}>
+            $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/rocjitsu/data_hazard>
+    )
+    target_link_libraries(rocjitsu_data_hazard_core PUBLIC util)
+    target_compile_features(rocjitsu_data_hazard_core PUBLIC cxx_std_20)
+    set_target_properties(
+        rocjitsu_data_hazard_core
+        PROPERTIES
+            OUTPUT_NAME data_hazard_core
+            POSITION_INDEPENDENT_CODE ON
+            C_VISIBILITY_PRESET default
+            CXX_VISIBILITY_PRESET default
+            VISIBILITY_INLINES_HIDDEN OFF
+    )
+    if(DEFINED RJ_PLUGIN_OUTPUT_DIR)
+        set_target_properties(
+            rocjitsu_data_hazard_core
+            PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${RJ_PLUGIN_OUTPUT_DIR}
+        )
+    endif()
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+        target_compile_options(
+            rocjitsu_data_hazard_core
+            PRIVATE -Wall -Wextra -Wpedantic -Werror
+        )
+    endif()
+    install(
+        TARGETS rocjitsu_data_hazard_core
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    )
+    install(
+        FILES ${RJ_HAZARD_CORE_PUBLIC_HEADERS}
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rocjitsu/data_hazard
+    )
+    # data_hazard_state.h includes "util/spinlock.h", so the header has to ship
+    # next to the engine headers for out-of-tree consumers to resolve it.
+    install(
+        FILES ${CMAKE_SOURCE_DIR}/lib/util/include/util/spinlock.h
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rocjitsu/data_hazard/util
     )
     if(ROCJITSU_ENABLE_PERFSIM_PLUGIN)
         rj_add_plugin_so(perfsim rocjitsu_plugin_perfsim

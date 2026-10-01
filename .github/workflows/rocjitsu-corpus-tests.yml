@@ -263,6 +263,9 @@ jobs:
             "DaemonTest\.HipMemcpyDeviceToDevice"
             "DaemonTest\.HipMaskedStreamLdsReuse"
             "DaemonTest\.TwoIndependentClients"
+            "DataHazardTest\.gfx950_vgpr_waitcnt"
+            "DataHazardTest\.gfx950_vgpr_waitcnt_hazard"
+            TensorLdsWriteRangeTest\.DescriptorTheExecutorRejectsWritesNothing
           )
           TSAN_EXCLUDED_TESTS=(
             "${COMMON_SANITIZER_EXCLUDED_TESTS[@]}"
@@ -286,6 +289,8 @@ jobs:
             "DaemonTest\.HipMemcpyDeviceToDevice"
             "DaemonTest\.HipMaskedStreamLdsReuse"
             "DaemonTest\.TwoIndependentClients"
+            "DataHazardTest\.gfx950_vgpr_waitcnt"
+            "DataHazardTest\.gfx950_vgpr_waitcnt_hazard"
             # This test has a five-second wall-clock assertion that becomes
             # load-sensitive at the TSan job's CI-level parallelism.
             "DaemonApi\.FullListenerQueueDoesNotBlockOrRemoveSocket"

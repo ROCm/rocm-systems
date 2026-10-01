@@ -602,7 +602,8 @@ public:
     }
   }
 
-  void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wfs) override {
+  void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wfs,
+                               AmdgpuBarrierScope /*scope*/) override {
     HookEvent e{HookEvent::BARRIER_RESOLVED};
     if (!wfs.empty()) {
       e.dispatch_id = wfs[0]->dispatch_id();
@@ -6920,7 +6921,7 @@ TEST(FormatTraceTest, ConflictBeforeTraceWindow) {
 }
 
 TEST(DisasmCacheTest, HandlesNonMonotonicPcOrder) {
-  plugins::race_detector::DisasmCache cache;
+  plugins::DisasmCache cache;
   Instruction high_instruction("s_nop 0", nullptr);
   Instruction low_instruction("s_endpgm", nullptr);
   cache.record(0x540024b100, high_instruction);
@@ -6938,7 +6939,7 @@ TEST(DisasmCacheTest, DisassemblesOnlyFirstInstructionAtPc) {
     bool was_disassembled() const { return !disassembly_.empty(); }
   };
 
-  plugins::race_detector::DisasmCache cache;
+  plugins::DisasmCache cache;
   ObservableInstruction first;
   ObservableInstruction duplicate;
 

@@ -1989,7 +1989,8 @@ void CommandProcessor::drain_pending_cluster_barrier_completions() {
       members.insert(members.end(), peer_members.begin(), peer_members.end());
     }
     if (!members.empty())
-      plugin_group_->onAmdgpuBarrierResolved(std::span<Wavefront *>(members));
+      plugin_group_->onAmdgpuBarrierResolved(std::span<Wavefront *>(members),
+                                             AmdgpuBarrierScope::Cluster);
   }
 }
 
@@ -2171,7 +2172,8 @@ void CommandProcessor::mark_cluster_workgroup_complete(uint32_t dispatch_id, uin
       members.insert(members.end(), peer_members.begin(), peer_members.end());
     }
     if (!members.empty())
-      plugin_group_->onAmdgpuBarrierResolved(std::span<Wavefront *>(members));
+      plugin_group_->onAmdgpuBarrierResolved(std::span<Wavefront *>(members),
+                                             AmdgpuBarrierScope::Cluster);
   }
 
   release_cluster_lds_pins(unpin);
