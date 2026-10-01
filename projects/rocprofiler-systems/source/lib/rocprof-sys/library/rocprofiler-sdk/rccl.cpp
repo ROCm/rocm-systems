@@ -77,8 +77,8 @@ struct production_pmc_registrar
         constexpr auto* k_msg         = "bytes";
         constexpr auto* k_target_arch = "GPU";
 
-        auto register_rccl_info = [&](const char* direction_label,
-                                      const char* description) {
+        auto const register_rccl_info = [&](const char* direction_label,
+                                            const char* description) {
             const std::string label =
                 fmt::format("{} GPU {}", direction_label, rccl_device_idx);
             trace_cache::get_metadata_registry().add_pmc_info(
@@ -250,7 +250,7 @@ cache_rccl_comm_data_events(std::uint32_t rccl_device_idx, size_t bytes,
 rccl_gpu_tracking_state&
 rccl_get_gpu_tracking_state()
 {
-    static auto registrar = std::make_shared<production_pmc_registrar>();
+    static auto const registrar = std::make_shared<production_pmc_registrar>();
     static rccl_gpu_tracking_state state{ registrar };
     return state;
 }
@@ -258,7 +258,7 @@ rccl_get_gpu_tracking_state()
 [[nodiscard]] size_t
 rccl_type_size_or_abort(ncclDataType_t datatype) noexcept
 {
-    auto size = rccl_type_size(datatype);
+    auto const size = rccl_type_size(datatype);
     if(size == 0)
     {
         LOG_WARNING("Unsupported RCCL datatype: {}", static_cast<int>(datatype));
@@ -340,8 +340,8 @@ rccl_comm_data_initialize()
  * @param end_ts Timestamp when the API call ended (nanoseconds)
  */
 void
-tool_tracing_callback_rccl(std::uint32_t                                 operation,
-                           rocprofiler_callback_tracing_rccl_api_data_t* payload,
+tool_tracing_callback_rccl(std::uint32_t                                       operation,
+                           rocprofiler_callback_tracing_rccl_api_data_t const* payload,
                            std::uint64_t begin_ts, std::uint64_t end_ts)
 {
     const rccl_event_info info = rccl_get_event_info_impl(operation, *payload);

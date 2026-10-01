@@ -101,7 +101,7 @@ set_setting_value(const std::string& _name, Tp&& _v,
         return false;
     }
 
-    auto _setting = _instance->find(_name);
+    auto const _setting = _instance->find(_name);
     if(_setting == _instance->end())
     {
         return false;
@@ -111,10 +111,10 @@ set_setting_value(const std::string& _name, Tp&& _v,
         return false;
     }
 
-    auto& itr      = _setting->second;
-    auto  _old_upd = itr->get_updated_type();
+    auto const& itr      = _setting->second;
+    auto const  _old_upd = itr->get_updated_type();
 
-    auto _success = itr->set(std::forward<Tp>(_v), _upd);
+    auto const _success = itr->set(std::forward<Tp>(_v), _upd);
     if(!_success)
     {
         itr->set_updated(_old_upd);
@@ -133,7 +133,7 @@ set_default_setting_value(const std::string& _name, Tp&& _v)
         return false;
     }
 
-    auto _setting = _instance->find(_name);
+    auto const _setting = _instance->find(_name);
     if(_setting == _instance->end())
     {
         return false;
@@ -160,7 +160,7 @@ get_setting_value(const std::string& _name)
         return std::nullopt;
     }
 
-    auto _setting = _instance->find(_name);
+    auto const _setting = _instance->find(_name);
     if(_setting == _instance->end() || !_setting->second)
     {
         return std::optional<Tp>{};
@@ -455,9 +455,9 @@ struct tmp_file
 
     explicit operator bool() const;
 
-    std::string  filename = {};
-    std::fstream stream   = {};
-    int          fd       = -1;
+    std::string  filename;
+    std::fstream stream;
+    int          fd = -1;
 
 private:
     void touch() const;
