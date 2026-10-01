@@ -69,8 +69,8 @@ run_impl()
     std::vector<int>    a_i(N), b_i(N), c_i(N), validate_i(N);
     std::vector<float>  a_f(N), b_f(N), c_f(N), validate_f(N);
     std::vector<double> a_d(N), b_d(N), c_d(N), validate_d(N);
-    int           N_errors = 0;
-    bool          flag     = false;
+    int                 N_errors = 0;
+    bool                flag     = false;
 
 #pragma omp parallel for schedule(dynamic, Nc)
     for(int i = 0; i < N; ++i)
