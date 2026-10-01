@@ -493,10 +493,13 @@ static void atfork_child() {
   }
   // NOTE: this is hrr_cap::writer::open(const char*) — the writer's archive-open
   // routine — NOT POSIX ::open(). It runs fs::create_directories / fopen,
-  // which are not async-signal-safe in general, but pthread_atfork's child
-  // handler runs in the (single-threaded) child immediately after fork(), after
-  // the locks above are released, so these calls are safe here. We deliberately do NOT call this
-  // from any async-signal context.
+  // which are not async-signal-safe. POSIX promises only async-signal-safe
+  // calls in the child of a multithreaded process; this relies on glibc
+  // resetting malloc's locks and the stdio list lock in the child, and on the
+  // writer's own locks being held across fork() above. A FILE a vanished thread
+  // held is never touched here. A child that captures calls HIP and the C++
+  // runtime after fork() anyway, so it is already past what POSIX promises.
+  // Never called from an async-signal context.
   if (!dir.empty())
     (void)writer::open(dir.c_str());
 }
