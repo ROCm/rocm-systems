@@ -419,7 +419,9 @@ static FILE* fopen_private(const std::string& path) {
 
 // fopen(path, "r") for a file inside the archive. On POSIX only a regular file
 // is read, never through a symbolic link, and a planted FIFO is refused rather
-// than blocking the open.
+// than blocking the open. What is trusted on the way in passes the same checks
+// as what is written: ours and a single link, or another user's counters and
+// manifests would be taken for this archive's.
 static FILE* fopen_read_regular(const std::string& path) {
 #ifdef _WIN32
   return fopen(path.c_str(), "r");
@@ -427,7 +429,8 @@ static FILE* fopen_read_regular(const std::string& path) {
   const int fd = ::open(path.c_str(), O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
   if (fd < 0) return nullptr;
   struct stat st{};
-  if (::fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
+  if (::fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_nlink != 1 ||
+      !owned_by_euid(st)) {
     ::close(fd);
     return nullptr;
   }

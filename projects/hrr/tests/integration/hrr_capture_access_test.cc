@@ -230,7 +230,8 @@ HRR_TEST_CASE(Unit_HRR_CaptureArchiveIsPrivate) {
  *     which says so on stderr, and the workload still succeeds; with the links
  *     at the blob prefixes the capture runs without its blobs and its manifest
  *     says complete: false; with the hard link at manifest.json the capture
- *     runs and writes events.bin.
+ *     runs and writes events.bin, and a hard-linked file shaped like a process
+ *     manifest is not read into the root manifest.
  */
 HRR_TEST_CASE(Unit_HRR_CaptureRefusesPlantedLinks) {
 #ifdef _WIN32
@@ -322,6 +323,19 @@ HRR_TEST_CASE(Unit_HRR_CaptureRefusesPlantedLinks) {
     REQUIRE(run.ret == 0);
     CHECK(events_bytes(base) > sizeof(hrr_file_header));
     CHECK(read_text_file(victim_file) == contents);
+  }
+
+  SECTION("hard-linked manifest is not read into the root manifest") {
+    // Shaped like a process manifest, so only the link check keeps it out.
+    write_text(victim_file, "{\n  \"pid\": 424242,\n  \"complete\": true\n}\n");
+    const PlantedRun run = capture_after_planting(
+        base, script,
+        "mkdir -p \"$HRR_TEST_BASE/pid-$$\"\n"
+        "ln '" + victim_file.string() + "' \"$HRR_TEST_BASE/pid-$$/manifest.json\"\n");
+    INFO("Workload exit code: " << run.ret << "\n" << run.output);
+    REQUIRE(run.ret == 0);
+    REQUIRE(fs::exists(base / "manifest.json"));
+    CHECK(read_text_file(base / "manifest.json").find("424242") == std::string::npos);
   }
 
   SECTION("hard link at pid-<pid>/manifest.json, crash callback") {
