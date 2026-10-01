@@ -517,6 +517,9 @@ static void atfork_child() {
   g_trailer_written = false;
   g_output_dir.clear();
   g_manifest_path[0] = '\0';
+  // The child's archive is a new one: an event the parent dropped is not
+  // missing from it.
+  g_capture_incomplete.store(false, std::memory_order_relaxed);
   if (!g_base_dir.empty()) g_reopen_after_fork.store(true, std::memory_order_relaxed);
 }
 
