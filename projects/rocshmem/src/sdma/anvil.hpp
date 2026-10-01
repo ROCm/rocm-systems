@@ -46,7 +46,9 @@ namespace sdma_anvil {
 
 class SdmaQueue {
  public:
-  SdmaQueue(int localDeviceId, int remoteDeviceId, const hsa_agent_t& localAgent, uint32_t engineId);
+  SdmaQueue(int localDeviceId, int remoteDeviceId, const hsa_agent_t& localAgent,
+            uint32_t engineId, hsa_status_t preferredStatus, uint32_t preferredMask,
+            bool usedPreferred, uint32_t numSdmaEngines, uint32_t numSdmaXgmiEngines);
   ~SdmaQueue();
 
   SdmaQueueDeviceHandle* deviceHandle() const;
@@ -82,7 +84,8 @@ class AnvilLib {
   void disconnect();
   SdmaQueue* getSdmaQueue(int srcDeviceId, int dstDeviceId, int channel_idx = 0);
   SdmaQueue* createSdmaQueue(int srcDeviceId, int dstDeviceId, uint32_t engineId,
-                             int* channelIdx = nullptr);
+                             hsa_status_t preferredStatus, uint32_t preferredMask,
+                             bool usedPreferred, int* channelIdx = nullptr);
 
  private:
   /*
@@ -111,13 +114,20 @@ class AnvilLib {
   uint32_t numSdmaEngines_{0};
   uint32_t numSdmaXgmiEngines_{0};
   uint32_t numSdmaEnginesTotal_{0};
+  // Last preferred-engine query, so a getOamId failure can print status and mask.
+  hsa_status_t lastPreferredStatus_{HSA_STATUS_ERROR};
+  uint32_t lastPreferredMask_{0};
+  bool lastPreferredQueried_{false};
+  int lastSrcDeviceId_{-1};
+  int lastDstDeviceId_{-1};
 
   void buildGpuAgentMap();
   hsa_agent_t getHipGpuAgent(int hipDeviceId) const;
   void querySdmaEngineCounts();
   int getOamId(int deviceId);
   int getSdmaEngineIdFromOamMap(int srcDeviceId, int dstDeviceId);
-  int getSdmaEngineId(int srcDeviceId, int dstDeviceId);
+  int getSdmaEngineId(int srcDeviceId, int dstDeviceId, hsa_status_t* preferredStatus,
+                      uint32_t* preferredMask, bool* usedPreferred);
 
   std::once_flag init_flag;
   std::vector<hsa_agent_t> gpuAgentsByHipDev_;

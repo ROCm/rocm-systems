@@ -36,6 +36,54 @@
 
 namespace sdma_anvil {
 
+static const char* hsakmtStatusName(HSAKMT_STATUS status) {
+  switch (status) {
+    case HSAKMT_STATUS_SUCCESS:
+      return "SUCCESS";
+    case HSAKMT_STATUS_ERROR:
+      return "ERROR";
+    case HSAKMT_STATUS_DRIVER_MISMATCH:
+      return "DRIVER_MISMATCH";
+    case HSAKMT_STATUS_INVALID_PARAMETER:
+      return "INVALID_PARAMETER";
+    case HSAKMT_STATUS_INVALID_HANDLE:
+      return "INVALID_HANDLE";
+    case HSAKMT_STATUS_INVALID_NODE_UNIT:
+      return "INVALID_NODE_UNIT";
+    case HSAKMT_STATUS_NO_MEMORY:
+      return "NO_MEMORY";
+    case HSAKMT_STATUS_BUFFER_TOO_SMALL:
+      return "BUFFER_TOO_SMALL";
+    case HSAKMT_STATUS_NOT_IMPLEMENTED:
+      return "NOT_IMPLEMENTED";
+    case HSAKMT_STATUS_NOT_SUPPORTED:
+      return "NOT_SUPPORTED";
+    case HSAKMT_STATUS_UNAVAILABLE:
+      return "UNAVAILABLE";
+    case HSAKMT_STATUS_OUT_OF_RESOURCES:
+      return "OUT_OF_RESOURCES";
+    case HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED:
+      return "KERNEL_IO_CHANNEL_NOT_OPENED";
+    case HSAKMT_STATUS_KERNEL_COMMUNICATION_ERROR:
+      return "KERNEL_COMMUNICATION_ERROR";
+    case HSAKMT_STATUS_KERNEL_ALREADY_OPENED:
+      return "KERNEL_ALREADY_OPENED";
+    case HSAKMT_STATUS_HSAMMU_UNAVAILABLE:
+      return "HSAMMU_UNAVAILABLE";
+    case HSAKMT_STATUS_WAIT_FAILURE:
+      return "WAIT_FAILURE";
+    case HSAKMT_STATUS_WAIT_TIMEOUT:
+      return "WAIT_TIMEOUT";
+    case HSAKMT_STATUS_MEMORY_ALREADY_REGISTERED:
+      return "MEMORY_ALREADY_REGISTERED";
+    case HSAKMT_STATUS_MEMORY_NOT_REGISTERED:
+      return "MEMORY_NOT_REGISTERED";
+    case HSAKMT_STATUS_MEMORY_ALIGNMENT:
+      return "MEMORY_ALIGNMENT";
+    default:
+      return "UNKNOWN";
+  }
+}
 
 #define CHECK_HSAKMT_SUCCESS(call, msg) do {                                  \
   if ((call) != HSAKMT_STATUS_SUCCESS)                                        \
@@ -117,17 +165,18 @@ static const std::string getBusId(int deviceId) {
   return std::string(busIdChar);
 }
 
-SdmaQueue::SdmaQueue([[maybe_unused]] int localDeviceId, int remoteDeviceId,
-                     const hsa_agent_t& localAgent, uint32_t engineId)
+SdmaQueue::SdmaQueue(int localDeviceId, int remoteDeviceId, const hsa_agent_t& localAgent,
+                     uint32_t engineId, hsa_status_t preferredStatus, uint32_t preferredMask,
+                     bool usedPreferred, uint32_t numSdmaEngines, uint32_t numSdmaXgmiEngines)
     : remoteDeviceId_(remoteDeviceId) {
   int originalDeviceId;
 
   ANVIL_CHECK_HIP_ERROR(hipGetDevice(&originalDeviceId));  // Save the current device
 
-  uint32_t localNodeId;
+  uint32_t localNodeId = 0;
   hsa_status_t status = hsa_agent_get_info(localAgent, HSA_AGENT_INFO_NODE, &localNodeId);
   if (status != HSA_STATUS_SUCCESS) {
-    LOG_TRACE("Failure to get device info: %#x", status);
+    LOG_ERROR("anvil: HSA_AGENT_INFO_NODE failed device=%d status=%#x", localDeviceId, status);
   }
 
   // Allocate SDMA queue buffer on device side, requires ExecuteAccess
@@ -149,10 +198,21 @@ SdmaQueue::SdmaQueue([[maybe_unused]] int localDeviceId, int remoteDeviceId,
   // Create SDMA Queue
   memset(&queue_, 0, sizeof(HsaQueueResource));
 
-  CHECK_HSAKMT_SUCCESS(hsaKmtCreateQueueExt(localNodeId, HSA_QUEUE_SDMA_BY_ENG_ID,
-                                            DEFAULT_QUEUE_PERCENTAGE, DEFAULT_PRIORITY, engineId,
-                                            queueBuffer_, SDMA_QUEUE_SIZE, nullptr, &queue_),
-                       "hsaKmtCreateQueueExt failed");
+  const HSAKMT_STATUS queueStatus = hsaKmtCreateQueueExt(
+      localNodeId, HSA_QUEUE_SDMA_BY_ENG_ID, DEFAULT_QUEUE_PERCENTAGE, DEFAULT_PRIORITY, engineId,
+      queueBuffer_, SDMA_QUEUE_SIZE, nullptr, &queue_);
+  if (queueStatus != HSAKMT_STATUS_SUCCESS) {
+    const std::string srcBus = getBusId(localDeviceId);
+    const std::string dstBus = getBusId(remoteDeviceId);
+    LOG_ERROR_EXIT(
+        "anvil: hsaKmtCreateQueueExt failed hsakmt=%d (%s) node=%u engineId=%u srcDev=%d (%s) "
+        "dstDev=%d (%s) usedPreferred=%d preferredStatus=%#x preferredMask=0x%x hostEng=%u "
+        "xgmiEng=%u total=%u",
+        static_cast<int>(queueStatus), hsakmtStatusName(queueStatus), localNodeId, engineId,
+        localDeviceId, srcBus.c_str(), remoteDeviceId, dstBus.c_str(), usedPreferred ? 1 : 0,
+        static_cast<unsigned>(preferredStatus), preferredMask, numSdmaEngines, numSdmaXgmiEngines,
+        numSdmaEngines + numSdmaXgmiEngines);
+  }
 
   // Populate Device Handle
   ANVIL_CHECK_HIP_ERROR(hipMalloc(&deviceHandle_, sizeof(SdmaQueueDeviceHandle)));
@@ -414,10 +474,12 @@ void AnvilLib::init() {
 }
 
 SdmaQueue* AnvilLib::createSdmaQueue(int srcDeviceId, int dstDeviceId, uint32_t engineId,
-                                     int* channelIdx) {
+                                     hsa_status_t preferredStatus, uint32_t preferredMask,
+                                     bool usedPreferred, int* channelIdx) {
   auto& vec = sdma_channels_[dstDeviceId];
-  vec.emplace_back(std::make_unique<SdmaQueue>(srcDeviceId, dstDeviceId,
-                                               getHipGpuAgent(srcDeviceId), engineId));
+  vec.emplace_back(std::make_unique<SdmaQueue>(
+      srcDeviceId, dstDeviceId, getHipGpuAgent(srcDeviceId), engineId, preferredStatus,
+      preferredMask, usedPreferred, numSdmaEngines_, numSdmaXgmiEngines_));
   if (channelIdx != nullptr) {
     *channelIdx = static_cast<int>(vec.size() - 1);
   }
@@ -425,11 +487,16 @@ SdmaQueue* AnvilLib::createSdmaQueue(int srcDeviceId, int dstDeviceId, uint32_t 
 }
 
 bool AnvilLib::connect(int srcDeviceId, int dstDeviceId, int numChannels) {
-  uint32_t engineId = getSdmaEngineId(srcDeviceId, dstDeviceId);
+  hsa_status_t preferredStatus = HSA_STATUS_ERROR;
+  uint32_t preferredMask = 0;
+  bool usedPreferred = false;
+  uint32_t engineId = static_cast<uint32_t>(
+      getSdmaEngineId(srcDeviceId, dstDeviceId, &preferredStatus, &preferredMask, &usedPreferred));
   LOG_TRACE("SDMA: Connect from %d to %d with %d channels using engine %d",
             srcDeviceId, dstDeviceId, numChannels, engineId);
   for (int c = 0; c < numChannels; ++c) {
-    createSdmaQueue(srcDeviceId, dstDeviceId, engineId);
+    createSdmaQueue(srcDeviceId, dstDeviceId, engineId, preferredStatus, preferredMask,
+                    usedPreferred);
   }
   return true;
 }
@@ -468,10 +535,28 @@ int AnvilLib::getOamId(int deviceId) {
   int xgmi_physical_id;
   if (file.is_open()) {
     if (!(file >> xgmi_physical_id)) {
-      LOG_ERROR_EXIT("anvil: failed to read xGMI physical id from %s", file_str.c_str());
+      const int preferredEngine =
+          lastPreferredMask_ == 0 ? -1 : __builtin_ctz(lastPreferredMask_);
+      LOG_ERROR_EXIT(
+          "anvil: failed to read xGMI physical id from %s device=%d pair=%d->%d "
+          "preferredQueried=%d preferredStatus=%#x preferredMask=0x%x preferredEngine=%d "
+          "hostEng=%u xgmiEng=%u total=%u",
+          file_str.c_str(), deviceId, lastSrcDeviceId_, lastDstDeviceId_,
+          lastPreferredQueried_ ? 1 : 0, static_cast<unsigned>(lastPreferredStatus_),
+          lastPreferredMask_, preferredEngine, numSdmaEngines_, numSdmaXgmiEngines_,
+          numSdmaEnginesTotal_);
     }
   } else {
-    LOG_ERROR_EXIT("anvil: failed to open file: %s", file_str.c_str());
+    const int preferredEngine =
+        lastPreferredMask_ == 0 ? -1 : __builtin_ctz(lastPreferredMask_);
+    LOG_ERROR_EXIT(
+        "anvil: failed to open file: %s device=%d pair=%d->%d preferredQueried=%d "
+        "preferredStatus=%#x preferredMask=0x%x preferredEngine=%d hostEng=%u xgmiEng=%u "
+        "total=%u",
+        file_str.c_str(), deviceId, lastSrcDeviceId_, lastDstDeviceId_,
+        lastPreferredQueried_ ? 1 : 0, static_cast<unsigned>(lastPreferredStatus_),
+        lastPreferredMask_, preferredEngine, numSdmaEngines_, numSdmaXgmiEngines_,
+        numSdmaEnginesTotal_);
   }
   return xgmi_physical_id;
 }
@@ -496,27 +581,41 @@ int AnvilLib::getSdmaEngineIdFromOamMap(int srcDeviceId, int dstDeviceId) {
   return engineId;
 }
 
-int AnvilLib::getSdmaEngineId(int srcDeviceId, int dstDeviceId) {
+int AnvilLib::getSdmaEngineId(int srcDeviceId, int dstDeviceId, hsa_status_t* preferredStatus,
+                              uint32_t* preferredMask, bool* usedPreferred) {
+  *preferredStatus = HSA_STATUS_ERROR;
+  *preferredMask = 0;
+  *usedPreferred = false;
+  lastPreferredStatus_ = *preferredStatus;
+  lastPreferredMask_ = *preferredMask;
+  lastPreferredQueried_ = false;
+  lastSrcDeviceId_ = srcDeviceId;
+  lastDstDeviceId_ = dstDeviceId;
+
   if (srcDeviceId >= 0 && dstDeviceId >= 0 &&
       srcDeviceId < static_cast<int>(gpuAgentsByHipDev_.size()) &&
       dstDeviceId < static_cast<int>(gpuAgentsByHipDev_.size()) &&
       hsaAgentIsValid(gpuAgentsByHipDev_[static_cast<size_t>(srcDeviceId)]) &&
       hsaAgentIsValid(gpuAgentsByHipDev_[static_cast<size_t>(dstDeviceId)])) {
-    uint32_t engineMask = 0;
     const hsa_agent_t srcAgent = gpuAgentsByHipDev_[static_cast<size_t>(srcDeviceId)];
     const hsa_agent_t dstAgent = gpuAgentsByHipDev_[static_cast<size_t>(dstDeviceId)];
-    const hsa_status_t status = hsa_amd_memory_get_preferred_copy_engine(
-        dstAgent, srcAgent, &engineMask);
-    if (status == HSA_STATUS_SUCCESS && engineMask != 0) {
-      const int engineId = __builtin_ctz(engineMask);
+    *preferredStatus = hsa_amd_memory_get_preferred_copy_engine(dstAgent, srcAgent, preferredMask);
+    lastPreferredStatus_ = *preferredStatus;
+    lastPreferredMask_ = *preferredMask;
+    lastPreferredQueried_ = true;
+    if (*preferredStatus == HSA_STATUS_SUCCESS && *preferredMask != 0) {
+      const int engineId = __builtin_ctz(*preferredMask);
       if (engineId >= 0 && (numSdmaEnginesTotal_ == 0 ||
                             static_cast<uint32_t>(engineId) < numSdmaEnginesTotal_)) {
+        *usedPreferred = true;
         LOG_TRACE("SDMA: HSA preferred engine %d for %d -> %d (mask=0x%x)", engineId, srcDeviceId,
-                  dstDeviceId, engineMask);
+                  dstDeviceId, *preferredMask);
         return engineId;
       }
-      LOG_WARN("anvil: HSA preferred engine %d out of range (total=%u), using OAM map", engineId,
-               numSdmaEnginesTotal_);
+      LOG_WARN("anvil: HSA preferred engine %d out of range (total=%u status=%#x mask=0x%x), "
+               "using OAM map",
+               engineId, numSdmaEnginesTotal_, static_cast<unsigned>(*preferredStatus),
+               *preferredMask);
     }
   }
 
