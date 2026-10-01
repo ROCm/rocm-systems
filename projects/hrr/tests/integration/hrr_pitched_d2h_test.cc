@@ -41,6 +41,11 @@
 #include <utility>
 #include <vector>
 
+#ifndef _WIN32
+#include <sys/mman.h>
+#include <unistd.h>
+#endif
+
 namespace fs = std::filesystem;
 
 namespace {
@@ -555,6 +560,72 @@ HRR_TEST_CASE(Unit_HRR_PitchedD2HShortBlobs) {
           std::string::npos);
     CHECK(ret == 1);
   }
+}
+
+// ---------------------------------------------------------------------------
+// A hipMemcpy2D device-to-host whose two host rows are a page apart, with the
+// page between them PROT_NONE. The copy never touches that page, so capture
+// must not read it either: a blob taken from the first byte to the last faults.
+// ---------------------------------------------------------------------------
+TEST_CASE("Unit_HRR_PitchedD2HGap_Direct", "[.][hrr-direct]") {
+#ifndef _WIN32
+  HRR_HIP_CHECK(hipSetDevice(0));
+  const size_t page = static_cast<size_t>(sysconf(_SC_PAGESIZE));
+  REQUIRE(page > kWidth);
+  void* map = mmap(nullptr, 3 * page, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  REQUIRE(map != MAP_FAILED);
+  uint8_t* base = static_cast<uint8_t*>(map);
+  std::memset(base, kFill[0], 3 * page);
+  REQUIRE(mprotect(base + page, page, PROT_NONE) == 0);
+
+  void* dev = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&dev, kDevBytes));
+  std::vector<uint8_t> image(kDevBytes);
+  for (size_t i = 0; i < kDevBytes; ++i) image[i] = dev_byte(i);
+  HRR_HIP_CHECK(hipMemcpy(dev, image.data(), kDevBytes, hipMemcpyHostToDevice));
+
+  // Row 0 ends page 0 and row 1 ends page 2, so the pitch spans the gap.
+  uint8_t* dst = base + page - kWidth;
+  const size_t dpitch = 2 * page;
+  const auto* src = static_cast<const uint8_t*>(dev) + kSrcY * kDevPitch + kSrcX;
+  HRR_HIP_CHECK(hipMemcpy2D(dst, dpitch, src, kDevPitch, kWidth, 2, hipMemcpyDeviceToHost));
+  for (size_t y = 0; y < 2; ++y)
+    for (size_t x = 0; x < kWidth; ++x)
+      REQUIRE(dst[y * dpitch + x] == dev_byte((kSrcY + y) * kDevPitch + kSrcX + x));
+
+  HRR_HIP_CHECK(hipFree(dev));
+  REQUIRE(munmap(map, 3 * page) == 0);
+#endif
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Capture Unit_HRR_PitchedD2HGap_Direct, whose host destination has a
+ *     PROT_NONE page between its two rows. Capture must finish, and the
+ *     expected blob must hold the two rows and zero across the gap.
+ *   - Replay with HIP_HRR_D2H_EXACT=1: the one check must pass.
+ */
+HRR_TEST_CASE(Unit_HRR_PitchedD2HGapRoundtrip) {
+#ifdef _WIN32
+  HRR_SKIP("pitched D2H HRR roundtrip is disabled on Windows");
+#else
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_pitched_d2h_gap"};
+  hrr_capture_direct("Unit_HRR_PitchedD2HGap_Direct", cap.path);
+  {
+    hrr::Archive arc;
+    REQUIRE(hrr::load_archive(cap.path.string(), arc));
+    const std::vector<uint8_t> blob =
+        read_file(d2h_blob<hrr_args_hipMemcpy2D>(arc, HRR_API_HIPMEMCPY2D));
+    const size_t page = static_cast<size_t>(sysconf(_SC_PAGESIZE));
+    std::vector<uint8_t> want(2 * page + kWidth, 0);
+    for (size_t y = 0; y < 2; ++y)
+      for (size_t x = 0; x < kWidth; ++x)
+        want[y * 2 * page + x] = dev_byte((kSrcY + y) * kDevPitch + kSrcX + x);
+    CHECK(byte_diff(blob, want) == "");
+  }
+  require_replay(cap.path, 0, 1, 0);
+#endif
 }
 
 // ---------------------------------------------------------------------------

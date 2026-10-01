@@ -3728,6 +3728,24 @@ static hipError_t replay_pitched_d2h(PlaybackContext& ctx, const char* api,
     return hipSuccess;
 }
 
+// A D2H copy whose device source has no live mapping. Counted as a failed check
+// only where replay_pitched_d2h would have validated: a copy that failed at
+// capture, perhaps on this very source, has no output to compare.
+static void note_unmapped_d2h_src(PlaybackContext& ctx, const char* api, uint64_t src_rec,
+                                  int32_t recorded_ret, uint64_t hash_lo, uint64_t hash_hi) {
+    if (recorded_ret != 0) return;
+    if (ctx.validate_d2h && (hash_lo || hash_hi)) {
+        fprintf(stderr, "[HRR] %s D2H validate FAIL: src 0x%llx not mapped - "
+                        "pointer translation bug\n",
+                api, (unsigned long long)src_rec);
+        ctx.d2h_attempted++;
+        ctx.note_d2h_fail(hrr_dispatch_seq);
+    } else {
+        fprintf(stderr, "[HRR] %s D2H: src 0x%llx not mapped, not replayed\n", api,
+                (unsigned long long)src_rec);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Manual playback: hipMemcpy3D / hipMemcpy3DAsync
 // ---------------------------------------------------------------------------
@@ -3781,17 +3799,8 @@ hipError_t playback_hipMemcpy3D(PlaybackContext& ctx, const uint8_t* pl) {
         uint64_t src_rec = reinterpret_cast<uint64_t>(parms.srcPtr.ptr);
         void* src_live = ctx.translate_ptr(src_rec);
         if (!src_live) {
-            // Counted only where replay_pitched_d2h would validate: a copy that
-            // failed at capture, perhaps on this very source, has no output.
-            if (ctx.validate_d2h && (a->d2h_hash_lo || a->d2h_hash_hi) && a->ret == 0) {
-                fprintf(stderr, "[HRR] hipMemcpy3D D2H validate FAIL: src 0x%llx not mapped — pointer translation bug\n",
-                        (unsigned long long)src_rec);
-                ctx.d2h_attempted++;
-                ctx.note_d2h_fail(hrr_dispatch_seq);
-            } else if (a->ret == 0) {
-                fprintf(stderr, "[HRR] hipMemcpy3D D2H: src 0x%llx not mapped, not replayed\n",
-                        (unsigned long long)src_rec);
-            }
+            note_unmapped_d2h_src(ctx, "hipMemcpy3D", src_rec, a->ret, a->d2h_hash_lo,
+                                  a->d2h_hash_hi);
             return hipSuccess;
         }
         parms.srcPtr.ptr = src_live;
@@ -3828,17 +3837,8 @@ hipError_t playback_hipMemcpy3DAsync(PlaybackContext& ctx, const uint8_t* pl) {
         uint64_t src_rec = reinterpret_cast<uint64_t>(parms.srcPtr.ptr);
         void* src_live = ctx.translate_ptr(src_rec);
         if (!src_live) {
-            // Counted only where replay_pitched_d2h would validate: a copy that
-            // failed at capture, perhaps on this very source, has no output.
-            if (ctx.validate_d2h && (a->d2h_hash_lo || a->d2h_hash_hi) && a->ret == 0) {
-                fprintf(stderr, "[HRR] hipMemcpy3DAsync D2H validate FAIL: src 0x%llx not mapped — pointer translation bug\n",
-                        (unsigned long long)src_rec);
-                ctx.d2h_attempted++;
-                ctx.note_d2h_fail(hrr_dispatch_seq);
-            } else if (a->ret == 0) {
-                fprintf(stderr, "[HRR] hipMemcpy3DAsync D2H: src 0x%llx not mapped, not replayed\n",
-                        (unsigned long long)src_rec);
-            }
+            note_unmapped_d2h_src(ctx, "hipMemcpy3DAsync", src_rec, a->ret, a->d2h_hash_lo,
+                                  a->d2h_hash_hi);
             return hipSuccess;
         }
         parms.srcPtr.ptr = src_live;
@@ -3955,11 +3955,7 @@ static hipError_t replay_drvmemcpy3d(PlaybackContext& ctx, HIP_MEMCPY3D& parms,
         uint64_t src_rec = reinterpret_cast<uint64_t>(parms.srcDevice);
         void* src_live = ctx.translate_ptr(src_rec);
         if (!src_live) {
-            fprintf(stderr, "[HRR] %s D2H validate FAIL: src 0x%llx not mapped - "
-                            "pointer translation bug\n",
-                    api, (unsigned long long)src_rec);
-            ctx.d2h_attempted++;
-            ctx.note_d2h_fail(hrr_dispatch_seq);
+            note_unmapped_d2h_src(ctx, api, src_rec, recorded_ret, d2h_hash_lo, d2h_hash_hi);
             return hipSuccess;
         }
         parms.srcDevice = reinterpret_cast<hipDeviceptr_t>(src_live);
@@ -4052,11 +4048,7 @@ static hipError_t replay_drvmemcpy2d(PlaybackContext& ctx, const T* a,
         uint64_t src_rec = reinterpret_cast<uint64_t>(parms.srcDevice);
         void* src_live = ctx.translate_ptr(src_rec);
         if (!src_live) {
-            fprintf(stderr, "[HRR] %s D2H validate FAIL: src 0x%llx not mapped - "
-                            "pointer translation bug\n",
-                    api, (unsigned long long)src_rec);
-            ctx.d2h_attempted++;
-            ctx.note_d2h_fail(hrr_dispatch_seq);
+            note_unmapped_d2h_src(ctx, api, src_rec, a->ret, a->d2h_hash_lo, a->d2h_hash_hi);
             return hipSuccess;
         }
         parms.srcDevice = reinterpret_cast<hipDeviceptr_t>(src_live);
@@ -4194,10 +4186,8 @@ static hipError_t replay_memcpy2d(PlaybackContext& ctx, const T* a,
     if (kind == hipMemcpyDeviceToHost) {
         void* src = ctx.translate_ptr(a->src);
         if (!src) {
-            fprintf(stderr, "[HRR] hipMemcpy2D%s D2H validate FAIL: src 0x%llx not mapped\n",
-                    is_async ? "Async" : "", (unsigned long long)a->src);
-            ctx.d2h_attempted++;
-            ctx.note_d2h_fail(hrr_dispatch_seq);
+            note_unmapped_d2h_src(ctx, is_async ? "hipMemcpy2DAsync" : "hipMemcpy2D", a->src,
+                                  a->ret, a->d2h_hash_lo, a->d2h_hash_hi);
             return hipSuccess;
         }
         const HrrHostRect dst = hrr_host_rect(dpitch, /*pitch_height=*/0, 0, 0, 0,
