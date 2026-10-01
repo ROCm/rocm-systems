@@ -56,7 +56,7 @@ schemas/                FlatBuffers schemas
 tests/                  Test suite
 docs/                   Design documents and guides
 website/                Public web applications
-  rocjitsu-dashboard/   React dashboard source and web tests
+  dashboard/            React dashboard source and web tests
 ```
 
 ## Building

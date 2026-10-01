@@ -38,11 +38,12 @@ jobs:
           cache: npm
           cache-dependency-path: emulation/rocjitsu/website/dashboard/package-lock.json
 
-      - name: Build rocjitsu dashboard
+      - name: Verify and build rocjitsu dashboard
         working-directory: emulation/rocjitsu/website/dashboard
         run: |
           npm ci
-          npm run build
+          npm run test:e2e:install
+          npm run verify
 
       - name: Generate publishing token
         id: app-token

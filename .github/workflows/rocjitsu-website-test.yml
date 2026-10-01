@@ -5,12 +5,14 @@ on:
     paths:
       - "emulation/rocjitsu/website/dashboard/**"
       - ".github/workflows/rocjitsu-website-test.yml"
+      - ".github/workflows/rocjitsu-publish-website.yml"
   push:
     branches:
       - develop
     paths:
       - "emulation/rocjitsu/website/dashboard/**"
       - ".github/workflows/rocjitsu-website-test.yml"
+      - ".github/workflows/rocjitsu-publish-website.yml"
   workflow_dispatch:
 
 permissions:
@@ -45,23 +47,8 @@ jobs:
       - name: Install Playwright browser
         run: npm run test:e2e:install
 
-      - name: Lint
-        run: npm run lint
-
-      - name: Build
-        run: npm run build
-
-      - name: Run unit tests
-        run: npm run test:unit
-
-      - name: Run e2e tests
-        run: npm run test:e2e
-
-      - name: Smoke test production hosting and caching
-        run: npm run test:e2e:production
-
-      - name: Run chart race tests
-        run: npm run test:e2e:chart-race
+      - name: Verify website
+        run: npm run verify
 
       - name: Upload Playwright diagnostics
         if: ${{ !cancelled() && failure() }}

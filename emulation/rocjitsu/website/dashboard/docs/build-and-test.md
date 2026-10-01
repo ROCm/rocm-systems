@@ -29,13 +29,14 @@ npm run verify
 ```
 
 `npm run verify` runs ESLint, a production build, Vitest unit tests, Playwright
-desktop and mobile browser tests, and the chart interaction race test ten times
-sequentially. A successful run exits with status 0. Playwright builds the current
+desktop and mobile browser tests, the chart interaction race test ten times
+sequentially, and the production-hosting smoke test. A successful run exits with
+status 0. Playwright builds the current
 source with dummy fixtures into `.test-dist/`, starts its own preview server at
 `http://127.0.0.1:4174`, and stops it when done. Keep port 4174 free. Browser tests
 leave the data-free production build in `dist/` untouched.
 
-`npm run test:e2e:production` separately rebuilds and previews the production
+`npm run test:e2e:production` (also included in `verify`) rebuilds and previews the production
 artifact on port 4175, loads the published GitHub Raw dataset, and verifies real
 browser-cache reuse without request interception. CI runs this live production
 smoke test after the fixture suite; it requires network access and valid
@@ -58,7 +59,7 @@ Individual commands, all run from `website/dashboard/`:
 | `npm run test:e2e:production` | Smoke test the production build, GitHub Raw hosting, and browser caching |
 | `npm run test:e2e:chart-race` | Run the chart interaction race test ten times sequentially |
 | `npm test` | Run the unit tests, the browser suites, and the ten-repeat chart race test |
-| `npm run verify` | Run lint, build, and everything in `npm test` |
+| `npm run verify` | Run lint, build, everything in `npm test`, and the production-hosting smoke test |
 
 Run the two browser commands one at a time. Both rebuild the shared `.test-dist/`
 fixture output before starting their server, so a concurrent run deletes files the other
@@ -121,9 +122,12 @@ validated JSON independently under that directory. It contains
 `metadata.json`, `index.json`, `test-catalogs/`, and `runs/`; a data-only update
 does not require rebuilding the application.
 
-This source package does not provide a deployment workflow. The hosting owner
-chooses how to publish the contents of `dist/` through its existing release
-process.
+The [rocjitsu-publish-website workflow](../../../../../.github/workflows/rocjitsu-publish-website.yml)
+verifies the dashboard and publishes `dist/` from `develop` to
+`gh-pages/rocjitsu-dashboard/`. It runs the same `npm run verify` suite as website
+CI (lint, build, unit, browser, chart-race, and production-hosting tests) before
+creating a publishing token. Benchmark data remains independently published on
+`gh-pages-rocjitsu`.
 
 ```bash
 npm run validate:data -- /absolute/path/to/staged/data
