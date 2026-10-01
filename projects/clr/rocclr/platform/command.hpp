@@ -1235,7 +1235,7 @@ struct BatchCopyOp {
   size_t srcOffset;        //!< Offset in source buffer
   size_t dstOffset;        //!< Offset in destination buffer
   size_t size;             //!< Size of the copy in bytes
-  size_t sizeB{0};         //!< For swap: B-side size (0 = symmetric, same as size)
+  size_t sizeB{0};         //!< Swap dst-side size (0 = symmetric)
   CopyMetadata metadata;   //!< Copy metadata for this operation
 
   BatchCopyOp(Memory* src, Memory* dst, size_t srcOff, size_t dstOff,

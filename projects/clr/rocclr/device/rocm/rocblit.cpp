@@ -787,7 +787,7 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
       std::vector<void*> dsts;
       std::vector<hsa_agent_t> dst_agents;
       std::vector<size_t> sizes;
-      std::vector<size_t> dst_sizes;  // For asymmetric swap
+      std::vector<size_t> dst_sizes;
     };
 
     MultiArrays swapPending;
@@ -865,12 +865,10 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
 
     // --- Emit SWAP batch ---
     if (!swapPending.srcs.empty()) {
-      // Any swap entry with differing src/dst sizes is asymmetric.
       const bool has_asymmetric = swapPending.sizes != swapPending.dst_sizes;
 
       if (has_asymmetric) {
-        // Emit individual single-entry ops (num_entries=0) with separate
-        // src_size/dst_size to support asymmetric swap via ROCr.
+        // Asymmetric: one scalar op per entry.
         for (size_t i = 0; i < swapPending.srcs.size(); ++i) {
           hsa_amd_memory_copy_op_t swap = {};
           swap.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
@@ -885,7 +883,7 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
           finalOps.push_back(swap);
         }
       } else {
-        // Symmetric: batch into multi-entry op
+        // Symmetric: one multi-entry op.
         multiStore.push_back(std::move(swapPending));
         auto& stored = multiStore.back();
 
