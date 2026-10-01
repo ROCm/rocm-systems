@@ -983,6 +983,7 @@ if(BUILD_TESTS)
       transport/NetIbMPI/OptRecvCompletionTests.cpp
       transport/NetIbMPI/FaultInjectTests.cpp
       transport/NetIbMPI/GidChangeTests.cpp
+      transport/NetIbMPI/WqeLatMonTests.cpp
       transport/NetIbMPI/OpsFaultUnitTests.cpp
       transport/RmaMPI/RmaMPITests.cpp
       transport/NetIbMPI/StressTests.cpp

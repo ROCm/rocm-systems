@@ -98,6 +98,33 @@ void ncclIbCastTestGidToString(const uint8_t gid[16], char* buf, int bufLen);
  * loading or querying multiplane state. */
 void ncclIbCastTestMultiplaneReset(void);
 
+/* ── WQE post-to-poll latency monitor introspection (AICOMRCCL-2013 port) ── */
+
+struct ncclIbCastWqeLatQpState {
+  uint32_t qpNum;
+  uint64_t count;
+  uint64_t slowCount;
+  double   meanNs;
+  double   stddevNs;
+  uint64_t maxNs;
+  uint64_t p50Ns;
+  uint64_t p90Ns;
+  uint64_t p99Ns;
+  uint64_t p999Ns;
+};
+
+struct ncclIbCastWqeLatState {
+  bool     enabled;       /* NCCL_IB_WQE_LATENCY_THRESHOLD_NS > 0 */
+  bool     reportEnabled; /* NCCL_IB_WQE_LATENCY_REPORT */
+  uint64_t thresholdNs;
+  int      nqps;
+  struct ncclIbCastWqeLatQpState qps[NCCL_IB_MAX_QPS];
+};
+
+/* Copy per-QP WQE latency monitor state out of a connected send or recv comm.
+ * Returns ncclInvalidArgument on null pointers. */
+ncclResult_t ncclIbCastGetWqeLatState(void* sendOrRecvComm, struct ncclIbCastWqeLatState* out);
+
 /* ── Resiliency state introspection (requires ENABLE_FAULT_INJECTION) ── */
 #ifdef ENABLE_FAULT_INJECTION
 
