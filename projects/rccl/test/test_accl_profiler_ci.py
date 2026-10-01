@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,7 @@ from test_accl_profiler import (  # noqa: E402
     ArtifactPaths,
     COLLECTIVES,
     RunConfig,
+    discover_artifacts,
     parse_collective_status,
     render_node_preflight_script,
     render_slurm_script,
@@ -21,6 +23,7 @@ from test_accl_profiler import (  # noqa: E402
     validate_collective_output,
     wait_for_slurm_job,
 )
+from plan_rccl_ci import plan  # noqa: E402
 
 
 def _artifact_paths(tmp_path: Path, kpack_names: tuple[str, ...] = ()) -> ArtifactPaths:
@@ -137,12 +140,13 @@ def test_slurm_script_runs_only_five_supported_collectives(tmp_path):
     assert "ssh -p 2224" not in script
     assert "oob_tcp_if_include" not in script
     assert "ulimit -l unlimited" in script
-    assert "NCCL_PROFILER_PLUGIN" in script
+    assert f"export NCCL_PROFILER_PLUGIN={paths.profiler_plugin}" in script
 
 
 def test_slurm_script_validates_mpi_rank_placement(tmp_path):
+    paths = _artifact_paths(tmp_path)
     script = render_slurm_script(
-        _artifact_paths(tmp_path), tmp_path / "work", _run_config(tmp_path, nodes=2)
+        paths, tmp_path / "work", _run_config(tmp_path, nodes=2)
     )
 
     assert 'scontrol show hostnames "$SLURM_JOB_NODELIST"' in script
@@ -152,6 +156,11 @@ def test_slurm_script_validates_mpi_rank_placement(tmp_path):
     assert "-x NCCL_PROFILER_PLUGIN" in script
     assert "-x ACCL_PROFILER_OUTPUT_DIR" in script
     assert "NCCL_IGNORE_CPU_AFFINITY" in script
+    assert 'set -e; test "${OMPI_COMM_WORLD_SIZE:-}"' in script
+    assert (
+        f"export ACCL_PROFILER_OUTPUT_DIR={tmp_path}/work/raw/all_reduce_perf"
+        in script
+    )
 
 
 def test_rendered_slurm_script_has_valid_bash_syntax(tmp_path):
@@ -237,6 +246,25 @@ def test_slurm_script_rejects_incomplete_kpack_layout(tmp_path):
         render_slurm_script(paths, tmp_path / "work", _run_config(tmp_path))
 
 
+def test_discover_artifacts_prefers_packaged_layout(tmp_path):
+    (tmp_path / "lib").mkdir()
+    (tmp_path / "bin").mkdir()
+    (tmp_path / "share" / "rccl" / "accl").mkdir(parents=True)
+    (tmp_path / "lib" / "librccl.so").write_text("rccl", encoding="utf-8")
+    plugin = tmp_path / "lib" / "librccl-profiler-accl.so"
+    plugin.write_text("plugin", encoding="utf-8")
+    report = tmp_path / "share" / "rccl" / "accl" / "accl_report.py"
+    report.write_text("report", encoding="utf-8")
+    for binary in COLLECTIVES:
+        (tmp_path / "bin" / binary).write_text(binary, encoding="utf-8")
+
+    paths = discover_artifacts(tmp_path)
+
+    assert paths.profiler_plugin == plugin.resolve()
+    assert paths.report_script == report.resolve()
+    assert set(paths.binaries) == set(COLLECTIVES)
+
+
 def test_validate_collective_output_accepts_complete_rank_coverage(tmp_path):
     for rank in range(2):
         _write_rank_file(tmp_path, rank)
@@ -289,6 +317,65 @@ def test_validate_collective_output_rejects_missing_rank(tmp_path):
     _write_rank_file(tmp_path, 0)
     with pytest.raises(ValueError, match="Rank coverage mismatch"):
         validate_collective_output(tmp_path, "AllReduce", 2, warmup_iterations=2)
+
+
+def test_validate_collective_output_rejects_wrong_collective(tmp_path):
+    _write_rank_file(tmp_path, 0, coll="Broadcast")
+    _write_rank_file(tmp_path, 1)
+    with pytest.raises(ValueError, match="Unexpected collective"):
+        validate_collective_output(tmp_path, "AllReduce", 2, warmup_iterations=2)
+
+
+def test_validate_collective_output_rejects_wrong_rank_count(tmp_path):
+    for rank in range(2):
+        _write_rank_file(tmp_path, rank)
+    path = tmp_path / "rank1.jsonl"
+    objects = [json.loads(line) for line in path.read_text().splitlines()]
+    objects[0]["header"]["n_ranks"] = 3
+    path.write_text("\n".join(json.dumps(obj) for obj in objects) + "\n")
+    with pytest.raises(ValueError, match="reports n_ranks=3"):
+        validate_collective_output(tmp_path, "AllReduce", 2, warmup_iterations=2)
+
+
+def test_validate_collective_output_rejects_missing_decomposition_field(tmp_path):
+    for rank in range(2):
+        _write_rank_file(tmp_path, rank)
+    path = tmp_path / "rank0.jsonl"
+    objects = [json.loads(line) for line in path.read_text().splitlines()]
+    objects[0]["coll_perf"]["decomposition"].pop("proxy_network_us")
+    path.write_text("\n".join(json.dumps(obj) for obj in objects) + "\n")
+    with pytest.raises(ValueError, match="Missing decomposition fields"):
+        validate_collective_output(tmp_path, "AllReduce", 2, warmup_iterations=2)
+
+
+def test_validate_collective_output_rejects_size_coverage_divergence(tmp_path):
+    for rank in range(2):
+        _write_rank_file(tmp_path, rank)
+    path = tmp_path / "rank1.jsonl"
+    objects = [json.loads(line) for line in path.read_text().splitlines()]
+    objects = [
+        obj
+        for obj in objects
+        if obj.get("coll_perf", {}).get("coll_msg_size_bytes") != 2048
+    ]
+    path.write_text("\n".join(json.dumps(obj) for obj in objects) + "\n")
+    with pytest.raises(ValueError, match="Message-size coverage differs"):
+        validate_collective_output(tmp_path, "AllReduce", 2, warmup_iterations=2)
+
+
+def test_validate_collective_output_requires_post_warmup_sample(tmp_path):
+    for rank in range(2):
+        _write_rank_file(tmp_path, rank)
+    with pytest.raises(ValueError, match="No post-warmup sample"):
+        validate_collective_output(tmp_path, "AllReduce", 2, warmup_iterations=3)
+
+
+def test_plan_uses_all_scope_for_saturday_schedule():
+    runs_ci, scope, _ = plan(
+        "schedule", "smoke", datetime(2026, 10, 3, tzinfo=timezone.utc)
+    )
+    assert runs_ci is True
+    assert scope == "all"
 
 
 def test_parse_collective_status_ignores_malformed_rows(tmp_path):
@@ -371,7 +458,7 @@ def test_wait_for_slurm_job_rejects_persistent_squeue_errors(monkeypatch):
     monkeypatch.setattr(accl_ci.subprocess, "run", fake_run)
     monkeypatch.setattr(accl_ci.time, "sleep", lambda _seconds: None)
 
-    with pytest.raises(RuntimeError, match="squeue failed 6 consecutive times"):
+    with pytest.raises(RuntimeError, match="squeue failed 30 consecutive times"):
         wait_for_slurm_job("12345", 90)
 
 

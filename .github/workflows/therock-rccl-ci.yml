@@ -29,13 +29,6 @@ on:
         description: 'Number of SLURM nodes for the ACCL profiler sweep'
         type: string
         default: '2'
-      test_selection:
-        description: 'Optional suite selection for manual runs'
-        type: choice
-        options:
-          - scheduled
-          - accl-profiler
-        default: scheduled
 
 permissions:
   contents: read
@@ -52,47 +45,26 @@ jobs:
   setup:
     runs-on: ubuntu-24.04
     outputs:
-      run_linux_ci: ${{ steps.rccl_check.outputs.run_linux_ci }}
-      test_scope: ${{ steps.scope.outputs.test_scope }}
+      run_linux_ci: ${{ steps.plan.outputs.run_linux_ci }}
+      test_scope: ${{ steps.plan.outputs.test_scope }}
 
     steps:
-      - name: "Determine test scope"
-        id: scope
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" = "schedule" ] && [ "$(date -u +%u)" = "6" ]; then
-            echo "test_scope=all" >> "$GITHUB_OUTPUT"
-            echo "Saturday scheduled run — full test suite"
-          else
-            echo "test_scope=${{ inputs.test_scope || 'smoke' }}" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: "Checking out repository"
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           # We need the parent commit to do a diff
           fetch-depth: 2
 
-      - name: "Detect RCCL file changes"
-        id: rccl_check
+      - name: Plan RCCL CI
+        id: plan
         shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TEST_SCOPE: ${{ inputs.test_scope || 'smoke' }}
         run: |
-          echo "Changed files:"
-          git diff --name-only HEAD^
-
-          # Scheduled and manual runs always execute the full CI pipeline.
-          # PR/push runs only trigger CI when files under projects/rccl/
-          # have changed, to avoid burning GPU runner time on unrelated commits.
-          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "run_linux_ci=true" >> "$GITHUB_OUTPUT"
-            echo "Scheduled/manual run — always run CI"
-          elif git diff --name-only HEAD^ | grep -q '^projects/rccl/'; then
-            echo "run_linux_ci=true" >> "$GITHUB_OUTPUT"
-            echo "RCCL changes detected"
-          else
-            echo "run_linux_ci=false" >> "$GITHUB_OUTPUT"
-            echo "No RCCL changes detected"
-          fi
+          python3 projects/rccl/ci/scripts/plan_rccl_ci.py \
+            --event-name "$EVENT_NAME" \
+            --test-scope "$INPUT_TEST_SCOPE"
 
   therock-ci-linux:
     name: TheRock CI Linux
@@ -104,7 +76,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        amdgpu_family: ${{ fromJSON(inputs.test_selection == 'accl-profiler' && '["gfx950-dcgpu"]' || '["gfx94X-dcgpu", "gfx950-dcgpu"]') }}
+        amdgpu_family: [gfx94X-dcgpu, gfx950-dcgpu]
     uses: ./.github/workflows/therock-rccl-ci-linux.yml
     secrets:
       RCCL_CI_TEAMS_WEBHOOK: ${{ secrets.RCCL_CI_TEAMS_WEBHOOK }}
@@ -119,7 +91,6 @@ jobs:
       notify_webhook: ${{ inputs.notify_webhook }}
       madengine_nodes: ${{ inputs.madengine_nodes || '2' }}
       accl_profiler_nodes: ${{ inputs.accl_profiler_nodes || '2' }}
-      test_selection: ${{ inputs.test_selection || 'scheduled' }}
       cmake_options: >
         -DTHEROCK_ENABLE_ALL=OFF
         -DTHEROCK_BUILD_TESTING=ON
