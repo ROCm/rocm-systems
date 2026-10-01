@@ -406,6 +406,13 @@ def test_perfetto_data(pftrace_data, json_data):
         pftrace_data, json_data, ("hip", "hsa", "marker", "kernel", "memory_copy")
     )
 
+    memory_copies = pftrace_data.loc[pftrace_data["category"] == "memory_copy"]
+    invalid_copies = memory_copies.loc[memory_copies["dur"].astype(int) <= 0]
+    assert invalid_copies.empty, (
+        "Expected positive duration for every memory-copy slice:\n"
+        f"{invalid_copies}"
+    )
+
 
 def test_rocpd_data(rocpd_data, json_data):
     import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
