@@ -423,6 +423,10 @@ def inspect(
         proc = _load_process(pid_dir)
         report.processes.append(proc)
         report.total_bytes += proc.total_bytes
+    # An archive root is sent whole, its own manifest included. A single pid-*
+    # directory passed on its own is sent alone, and its root is only the parent.
+    if root == archive:
+        _, report.total_bytes = _dir_stats(root)
 
     if manifest and isinstance(manifest.get("processes"), list):
         by_pid = {p.pid: p for p in report.processes if p.pid is not None}
@@ -452,7 +456,13 @@ def inspect(
                 )
 
     for proc in report.processes:
-        if proc.recorded and not proc.finalized:
+        if proc.manifest_error:
+            report.warnings.append(
+                f"{proc.path.name}: manifest.json is unreadable ({proc.manifest_error}), so "
+                "its counts and completion state are unknown; whether it recorded anything "
+                "was read off events.bin instead"
+            )
+        elif proc.recorded and not proc.finalized:
             report.warnings.append(
                 f"{proc.path.name}: events.bin holds {proc.events_bytes} bytes but there is "
                 "no manifest, so the process died before finalizing; counts are unknown "
@@ -616,7 +626,9 @@ def render(report: ArchiveReport) -> str:
         # objects among its blobs and so disagrees with both `blobs/` and
         # `hrr-playback --info` for the same archive.
         blobs = f"{proc.blob_files:,}"
-        if proc.complete is None:
+        if proc.manifest_error:
+            state = "unknown (manifest unreadable)"
+        elif proc.complete is None:
             state = "not finalized (no manifest)"
         elif proc.complete:
             state = "complete"

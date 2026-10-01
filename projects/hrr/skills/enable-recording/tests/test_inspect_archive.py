@@ -227,6 +227,25 @@ def test_a_manifest_that_is_not_an_object_is_unreadable_not_fatal(tmp_path, cont
     assert report.root_manifest_error
     assert report.processes[0].manifest_error
     assert report.recorded_processes, "the events are still there"
+    # Said, rather than shown as an ordinary process that never finalized.
+    assert any("pid-56: manifest.json is unreadable" in w for w in report.warnings)
+    assert not any("died before finalizing" in w for w in report.warnings)
+    assert "state: unknown (manifest unreadable)" in inspect_archive.render(report)
+
+
+def test_size_on_disk_counts_the_root_manifest_but_not_the_parent(tmp_path):
+    """The whole archive directory is what gets sent; a single pid-* directory
+    passed on its own is sent alone.
+    """
+    pid_dir = make_process(tmp_path, 58)
+    make_root(tmp_path, [{"pid": 58, "event_count": 100, "blob_count": 5}])
+    process_bytes = sum(f.stat().st_size for f in pid_dir.rglob("*") if f.is_file())
+    root_bytes = (tmp_path / "manifest.json").stat().st_size
+
+    assert inspect_archive.inspect(tmp_path, use_playback=False).total_bytes == (
+        process_bytes + root_bytes
+    )
+    assert inspect_archive.inspect(pid_dir, use_playback=False).total_bytes == process_bytes
 
 
 @pytest.mark.parametrize(
