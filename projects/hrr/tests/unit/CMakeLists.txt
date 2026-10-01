@@ -25,6 +25,7 @@ target_include_directories(hrr-unit-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..
 
 target_link_libraries(hrr-unit-tests PRIVATE
   hrr::reader
+  hrr::warnings
   hip::host
   Catch2::Catch2WithMain)
 
