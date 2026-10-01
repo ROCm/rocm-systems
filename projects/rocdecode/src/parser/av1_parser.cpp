@@ -92,11 +92,9 @@ ParserResult Av1VideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
     pic_data_size_ = pic_data_size;
     curr_byte_offset_ = 0;
 
-    while (true) {
-        ret = ReadObuHeaderAndSize();
-        if (ret == PARSER_EOF) {
-            break;  // The picture data is exhausted.
-        } else if (ret != PARSER_OK) {
+    // PARSER_EOF ends the loop normally: the picture data is exhausted.
+    while ((ret = ReadObuHeaderAndSize()) != PARSER_EOF) {
+        if (ret != PARSER_OK) {
             FunctionExitLog(g_rocdec_logger);
             return ret;
         }
