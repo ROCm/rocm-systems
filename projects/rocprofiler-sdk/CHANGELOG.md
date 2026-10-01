@@ -20,6 +20,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
   - Fixed the rocprofv3 tool library aborting when it runs with an older rocprofiler-sdk, for example after attaching to a process from a different installation. Tracing kinds that the running rocprofiler-sdk does not support, including those enabled internally (external correlation requests and HIP graph tracing), are skipped with a warning.
   - Thread trace is disabled with a warning when the rocprofv3 tool library runs with a rocprofiler-sdk older than 1.5.0, instead of running with a mismatched thread trace ABI.
   - Fixed `rocprofv3 --attach` replacing the attach tool library with its own through the forwarded `ROCP_TOOL_LIBRARIES` environment variable.
+  - Fixed attaching with a colon-delimited list of tool libraries in `-t`/`--attach-tool-library` or `ROCPROF_ATTACH_TOOL_LIBRARY`. Every library in the list is checked, and attachment fails if any of them is not found.
+  - Fixed the last library of a colon-delimited `ROCP_TOOL_LIBRARIES` list not being loaded.
 
 ### Known issues
 

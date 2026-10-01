@@ -360,8 +360,9 @@ def _find_target_tool(pid, libdir, attach_suffix):
 def select_tool_library(pid, sdk, fallback_tool_library=None):
     """Returns (tool library path, source), where source is "target" or "fallback".
 
-    Prefers the tool library of the rocprofiler-sdk installation the target is running. Falls
-    back to this installation's tool library (or the one rocprofv3 resolved) with a warning.
+    Prefers the tool library of the rocprofiler-sdk installation the target is running,
+    otherwise the fallback: this installation's tool library, or the one rocprofv3 resolved.
+    Raises AttachError if the fallback is not visible from the target process.
     """
     fallback = fallback_tool_library or default_tool_library()
     libdir = sdk.libdir
@@ -415,16 +416,24 @@ def select_tool_library(pid, sdk, fallback_tool_library=None):
 
 
 def check_user_tool_library(pid, attach_tool_library):
-    for itr in attach_tool_library.split(":"):
-        if not itr:
-            continue
+    """Checks each library in the colon-delimited list.
+
+    Raises AttachError if the list is empty or if any absolute path is not a file visible from
+    the target process.
+    """
+    libraries = [itr for itr in attach_tool_library.split(":") if itr]
+    if not libraries:
+        raise AttachError(
+            f"no tool library was given in the tool library list '{attach_tool_library}'"
+        )
+    for itr in libraries:
         if not os.path.isabs(itr):
             _info(f"tool library '{itr}' will be resolved by the target's dynamic loader")
             continue
         state = _is_regular_file(pid, itr)
         if state == "absent":
-            _warning(
-                f"tool library '{itr}' is not visible from the target process PID {pid}"
+            raise AttachError(
+                f"tool library '{itr}' is not a file visible from the target process PID {pid}"
             )
         elif state == "unknown":
             _warning(
@@ -528,6 +537,7 @@ def parse_arguments(args=None):
         "-t",
         "--attach-tool-library",
         help="""Colon delimited list of tool libraries to use during attachment. Paths are used as given and are resolved in the target process.
+  Attachment fails if any library in the list cannot be found or loaded.
   When unset, the rocprofiler-sdk tool library of the installation the target process is running is used. If it cannot be located,
   the tool library of this installation is used with a warning. When attaching to process descendants, all of them use the selection made for the target PID.
   Can also be specified in environment variable ROCPROF_ATTACH_TOOL_LIBRARY. This option overrides the environment variable if both are set.""",

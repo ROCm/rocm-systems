@@ -76,6 +76,7 @@
 #include <rocprofiler-sdk/ompt.h>
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/version.h>
+#include <rocprofiler-sdk/cxx/details/tokenize.hpp>
 #include <rocprofiler-sdk/cxx/utility.hpp>
 
 #include <fmt/format.h>
@@ -491,30 +492,8 @@ find_clients()
             return std::vector<std::string>{};
         }
 
-        auto       val       = common::get_env("ROCP_TOOL_LIBRARIES", std::string{});
-        auto       val_arr   = std::vector<std::string>{};
-        size_t     pos       = 0;
-        const auto delimiter = std::string_view{":"};
-        auto       token     = std::string{};
-
-        if(val.empty())
-        {
-            // do nothing
-        }
-        else if(val.find(delimiter) == std::string::npos)
-        {
-            val_arr.emplace_back(val);
-        }
-        else
-        {
-            while((pos = val.find(delimiter)) != std::string::npos)
-            {
-                token = val.substr(0, pos);
-                if(!token.empty()) val_arr.emplace_back(token);
-                val.erase(0, pos + delimiter.length());
-            }
-        }
-        return val_arr;
+        return rocprofiler::sdk::parse::tokenize(
+            common::get_env("ROCP_TOOL_LIBRARIES", std::string{}), ":");
     };
 
     auto env = get_env_libs();
