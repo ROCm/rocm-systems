@@ -434,8 +434,15 @@ main(int argc, char** argv)
     TestResults h_results;
     memset(&h_results, 0, sizeof(TestResults));
 
-    float* h_input  = (float*) malloc(BUFFER_SIZE * sizeof(float));
-    float* h_output = (float*) malloc(BUFFER_SIZE * sizeof(float));
+    // Allocate pinned host staging buffers (H2D/D2H). Device buffers below are
+    // allocated once and reused for all -n iterations (no hipMalloc/hipFree in
+    // the iteration loop; per-iter work is hipMemcpy/hipMemset only).
+    float* h_input  = nullptr;
+    float* h_output = nullptr;
+    HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&h_input),
+                            BUFFER_SIZE * sizeof(float)));
+    HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&h_output),
+                            BUFFER_SIZE * sizeof(float)));
 
     // Initialize input buffer
     for(int i = 0; i < BUFFER_SIZE; i++)
@@ -1007,8 +1014,8 @@ main(int argc, char** argv)
     HIP_CHECK(hipFree(d_async_lds_dst));
     HIP_CHECK(hipFree(d_tdm_src));
     HIP_CHECK(hipFree(d_tdm_dst));
-    free(h_input);
-    free(h_output);
+    HIP_CHECK(hipHostFree(h_input));
+    HIP_CHECK(hipHostFree(h_output));
 
     return (failed_categories == 0) ? 0 : 1;
 }
