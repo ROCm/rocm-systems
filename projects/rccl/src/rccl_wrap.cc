@@ -1497,7 +1497,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   const bool ceRegInWindow = ceArRegMax == kThreshUnlimited || msgBytes <= ceArRegMax;
   const bool ceRegisteredWindows = !symEligible && ceRegInWindow && ceAvailable &&
       ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) || force);
-  const bool ceStagedUnregistered = force && ceArGraphAllowed && ceUsable;
+  const bool ceStagedUnregistered = ncclGroupDepth == 0 && force && ceArGraphAllowed && ceUsable;
   if (!hasSysmemSegment && (ceRegisteredWindows || ceStagedUnregistered)) {
     decision->algo = RCCL_CE_REGISTERED;
     decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, count / comm->nRanks);
