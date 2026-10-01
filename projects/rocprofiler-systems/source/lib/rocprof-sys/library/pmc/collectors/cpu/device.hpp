@@ -128,19 +128,19 @@ private:
     {
         m_supported_metrics.value = 0;
 
-        auto jiffies = m_backend->read_proc_stat();
+        auto const jiffies = m_backend->read_proc_stat();
         if(!jiffies.empty())
         {
             m_supported_metrics.bits.load = 1;
         }
 
-        auto freqs = m_backend->read_cpu_frequencies();
+        auto const freqs = m_backend->read_cpu_frequencies();
         if(!freqs.empty())
         {
             m_supported_metrics.bits.frequency = 1;
         }
 
-        auto rusage                           = m_backend->read_rusage();
+        auto const rusage                     = m_backend->read_rusage();
         m_supported_metrics.bits.page_rss     = 1;
         m_supported_metrics.bits.virt_mem     = 1;
         m_supported_metrics.bits.peak_rss     = (rusage.peak_rss > 0) ? 1u : 0u;
@@ -167,13 +167,13 @@ private:
 
         for(const auto& cpu_id : m_monitored_cpus)
         {
-            auto curr_it = current_jiffies.find(cpu_id);
+            auto const curr_it = current_jiffies.find(cpu_id);
             if(curr_it == current_jiffies.end())
             {
                 continue;
             }
 
-            auto prev_it = m_prev_jiffies.find(cpu_id);
+            auto const prev_it = m_prev_jiffies.find(cpu_id);
             if(prev_it == m_prev_jiffies.end())
             {
                 m_prev_jiffies[cpu_id] = curr_it->second;
@@ -222,7 +222,7 @@ private:
 
         for(const auto& cpu_id : m_monitored_cpus)
         {
-            auto freq_it = freqs.find(cpu_id);
+            auto const freq_it = freqs.find(cpu_id);
             if(freq_it == freqs.end())
             {
                 continue;
@@ -244,7 +244,7 @@ private:
             return;
         }
 
-        auto snap = m_backend->read_rusage();
+        auto const snap = m_backend->read_rusage();
 
         if(m_supported_metrics.bits.page_rss && enabled.bits.page_rss)
         {
@@ -286,9 +286,10 @@ private:
     {
         metrics result;
         result.cpu_data.reserve(m_monitored_cpus.size());
-        for(auto cpu_id : m_monitored_cpus)
+        for(auto const cpu_id : m_monitored_cpus)
         {
-            result.cpu_data.push_back({ cpu_id, 0.0f, 0.0 });
+            result.cpu_data.push_back(
+                { .cpu_id = cpu_id, .frequency = 0.0f, .load = 0.0 });
         }
         return result;
     }
@@ -302,7 +303,7 @@ private:
                 return &entry;
             }
         }
-        result.cpu_data.push_back({ cpu_id, 0.0f, 0.0 });
+        result.cpu_data.push_back({ .cpu_id = cpu_id, .frequency = 0.0f, .load = 0.0 });
         return &result.cpu_data.back();
     }
 
