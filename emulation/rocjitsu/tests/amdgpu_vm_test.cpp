@@ -5275,6 +5275,17 @@ constexpr uint32_t sopc(uint32_t op, uint32_t ssrc0, uint32_t ssrc1) {
 }
 constexpr uint32_t s_cmp_eq_i32(uint32_t s0, uint32_t s1) { return sopc(0, s0, s1); }
 constexpr uint32_t s_cmp_gt_i32(uint32_t s0, uint32_t s1) { return sopc(2, s0, s1); }
+// SOPK: encoding[31:28]=0xB, op[27:23], sdst[22:16], simm16[15:0]
+constexpr uint32_t sopk(uint32_t op, uint32_t sdst, uint16_t simm16) {
+  return (0xBu << 28) | (op << 23) | (sdst << 16) | simm16;
+}
+// hwreg(id, offset, size) operand of S_GETREG/S_SETREG: id[5:0], offset[10:6], size-1[15:11]
+constexpr uint32_t HW_REG_MODE = 1;
+constexpr uint16_t hwreg(uint32_t id, uint32_t offset, uint32_t size) {
+  return static_cast<uint16_t>(id | (offset << 6) | ((size - 1) << 11));
+}
+// The value to write follows as a 32-bit literal dword.
+constexpr uint32_t s_setreg_imm32_b32(uint16_t hwreg) { return sopk(20, 0, hwreg); }
 // VOP1: encoding[31:25]=0x3F, vdst[24:17], op[16:9], src0[8:0]
 constexpr uint32_t vop1(uint32_t op, uint32_t vdst, uint32_t src0) {
   return (0x3Fu << 25) | (vdst << 17) | (op << 9) | src0;
@@ -5987,7 +5998,10 @@ TEST_P(IsaTest, VCmpEqF32_SetsVCC) {
   // Compare v0 (lane index as float-bits) with inline 0 (integer 0).
   // Lane 0: v0=0, compared with 0 -> equal -> VCC[0]=1.
   // Lane 1: v0=1, compared with 0 -> not equal -> VCC[1]=0.
-  fx.load_program({enc::v_cmp_eq_f32(enc::INLINE_CONST(0), 0), SOPP_S_ENDPGM});
+  // Bit pattern 1 is an F32 subnormal. Compares flush it to zero unless MODE
+  // preserves F32 input denormals, so enable them first.
+  fx.load_program({enc::s_setreg_imm32_b32(enc::hwreg(enc::HW_REG_MODE, 4, 2)), 3u,
+                   enc::v_cmp_eq_f32(enc::INLINE_CONST(0), 0), SOPP_S_ENDPGM});
   uint64_t vcc = fx.vcc();
   EXPECT_TRUE(vcc & (1ULL << 0));  // lane 0: 0.0 == 0.0
   EXPECT_FALSE(vcc & (1ULL << 1)); // lane 1: int 1 as float != 0.0
@@ -6001,7 +6015,9 @@ TEST_P(IsaTest, VCndmaskB32) {
   // v_cmp_eq_f32 v0, 0 -> VCC[0]=1 (lane 0 = 0 == 0), VCC[1]=0 (1 != 0)
   // v_mov_b32 v1, inline 99
   // v_cndmask_b32 v2, v0, v1 -> lane 0: VCC=1 -> v1=99; lane 1: VCC=0 -> v0=1
-  fx.load_program({enc::v_cmp_eq_f32(enc::INLINE_CONST(0), 0), // VCC from v0 == 0
+  // Lane 1's bit pattern is an F32 subnormal; preserve F32 input denormals.
+  fx.load_program({enc::s_setreg_imm32_b32(enc::hwreg(enc::HW_REG_MODE, 4, 2)), 3u,
+                   enc::v_cmp_eq_f32(enc::INLINE_CONST(0), 0), // VCC from v0 == 0
                    enc::v_mov_b32(1, enc::INLINE_CONST(42)),   // v1 = 42 (all lanes)
                    enc::v_cndmask_b32(2, enc::VGPR_SRC(0), 1), // v2 = VCC ? v1 : v0
                    SOPP_S_ENDPGM});
