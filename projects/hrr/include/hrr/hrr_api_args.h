@@ -5849,6 +5849,15 @@ typedef struct {
     uint64_t library;
 } hrr_args_hipLibraryGetModule;
 
+/* hipError_t hipDeviceGetExecAffinitySupport(int*, hipExecAffinityType, hipDevice_t) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t p0;
+    int32_t p1;
+    uint64_t p2;
+} hrr_args_hipDeviceGetExecAffinitySupport;
+
 /* ---- API id enumeration ---- */
 typedef enum hrr_api_id {
     HRR_API_HIPAPINAME = 0,
@@ -6398,16 +6407,17 @@ typedef enum hrr_api_id {
     HRR_API_HIPMODULEENUMERATEFUNCTIONS = 544,
     HRR_API_HIPDEVICEFLUSHGPUDIRECTRDMAWRITES = 545,
     HRR_API_HIPLIBRARYGETMODULE = 546,
-    HRR_API_HIPPOPCALLCONFIGURATION = 547,
-    HRR_API_HIPPUSHCALLCONFIGURATION = 548,
-    HRR_API_HIPREGISTERFATBINARY = 549,
-    HRR_API_HIPREGISTERFUNCTION = 550,
-    HRR_API_HIPREGISTERMANAGEDVAR = 551,
-    HRR_API_HIPREGISTERSURFACE = 552,
-    HRR_API_HIPREGISTERTEXTURE = 553,
-    HRR_API_HIPREGISTERVAR = 554,
-    HRR_API_HIPUNREGISTERFATBINARY = 555,
-    HRR_API_COUNT = 556
+    HRR_API_HIPDEVICEGETEXECAFFINITYSUPPORT = 547,
+    HRR_API_HIPPOPCALLCONFIGURATION = 548,
+    HRR_API_HIPPUSHCALLCONFIGURATION = 549,
+    HRR_API_HIPREGISTERFATBINARY = 550,
+    HRR_API_HIPREGISTERFUNCTION = 551,
+    HRR_API_HIPREGISTERMANAGEDVAR = 552,
+    HRR_API_HIPREGISTERSURFACE = 553,
+    HRR_API_HIPREGISTERTEXTURE = 554,
+    HRR_API_HIPREGISTERVAR = 555,
+    HRR_API_HIPUNREGISTERFATBINARY = 556,
+    HRR_API_COUNT = 557
 } hrr_api_id_t;
 
 /* Array of API names indexed by hrr_api_id_t */
@@ -6960,6 +6970,7 @@ const char* const hrr_api_names[HRR_API_COUNT] = {
     "hipModuleEnumerateFunctions",
     "hipDeviceFlushGPUDirectRDMAWrites",
     "hipLibraryGetModule",
+    "hipDeviceGetExecAffinitySupport",
     "__hipPopCallConfiguration",
     "__hipPushCallConfiguration",
     "__hipRegisterFatBinary",
