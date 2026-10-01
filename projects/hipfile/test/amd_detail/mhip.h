@@ -33,6 +33,10 @@ struct MHip : Hip {
     MOCK_METHOD(void, hipStreamWaitValue64,
                 (hipStream_t stream, void *ptr, uint64_t value, unsigned int flags, uint64_t mask),
                 (const, override));
+    MOCK_METHOD(hipEvent_t, hipEventCreateWithFlags, (unsigned int flags), (const, override));
+    MOCK_METHOD(void, hipEventRecord, (hipEvent_t event, hipStream_t stream), (const, override));
+    MOCK_METHOD(void, hipEventSynchronize, (hipEvent_t event), (const, override));
+    MOCK_METHOD(void, hipEventDestroy, (hipEvent_t event), (const, override));
     MOCK_METHOD(void *, hipHostMalloc, (size_t size, unsigned int flags), (const, override));
     MOCK_METHOD(void, hipHostFree, (void *ptr), (const, override));
     MOCK_METHOD(void *, hipExtMallocWithFlags, (size_t size, unsigned int flags), (const, override));

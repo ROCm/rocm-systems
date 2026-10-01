@@ -96,6 +96,32 @@ Hip::hipStreamWaitValue64(hipStream_t stream, void *ptr, uint64_t value, unsigne
     (void)throwOnHipError<Hip::RuntimeError>(::hipStreamWaitValue64(stream, ptr, value, flags, mask));
 }
 
+hipEvent_t
+Hip::hipEventCreateWithFlags(unsigned int flags) const
+{
+    hipEvent_t event;
+    (void)throwOnHipError<Hip::RuntimeError>(::hipEventCreateWithFlags(&event, flags));
+    return event;
+}
+
+void
+Hip::hipEventRecord(hipEvent_t event, hipStream_t stream) const
+{
+    (void)throwOnHipError<Hip::RuntimeError>(::hipEventRecord(event, stream));
+}
+
+void
+Hip::hipEventSynchronize(hipEvent_t event) const
+{
+    (void)throwOnHipError<Hip::RuntimeError>(::hipEventSynchronize(event));
+}
+
+void
+Hip::hipEventDestroy(hipEvent_t event) const
+{
+    (void)throwOnHipError<Hip::RuntimeError>(::hipEventDestroy(event));
+}
+
 void *
 Hip::hipHostMalloc(size_t size, unsigned int flags) const
 {
