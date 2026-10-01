@@ -2124,6 +2124,7 @@ void exec_wmma_f32_scaled_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, ui
   std::vector<Result> results;
   results.reserve(M * N);
   const uint32_t num_scale_blocks = scale16 ? 8u : 4u;
+  const uint32_t block_size = scale16 ? 16u : 32u;
 
   auto scale_for = [](uint64_t scale_word, uint32_t scale_byte, uint32_t scale_fmt) -> float {
     return decode_wmma_scale_byte(static_cast<uint8_t>((scale_word >> (scale_byte * 8)) & 0xffu),
@@ -2143,10 +2144,10 @@ void exec_wmma_f32_scaled_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, ui
             scale_a_word(wmma_a_scale_lane(M, K, row, matrix_a_scale, a_bits, b_bits));
         const uint64_t b_scale_word = scale_b_word(wmma_scale_lane(col, matrix_b_scale));
         for (uint32_t block = 0; block < num_scale_blocks; ++block) {
+          const uint32_t k_begin = block * block_size;
+          const uint32_t k_end = std::min(K, k_begin + block_size);
           float block_sum = 0.0f;
-          for (uint32_t k = 0; k < K; ++k) {
-            if (wmma_block_scale_byte(k, scale16) != block)
-              continue;
+          for (uint32_t k = k_begin; k < k_end; ++k) {
             auto al = wmma_block_scaled_a_input_loc(M, K, row, k, a_bits);
             auto bl = wmma_block_scaled_b_input_loc(N, K, col, k, b_bits);
             block_sum = std::fma(ea(cu, s0, al), eb(cu, s1, bl), block_sum);
@@ -2196,13 +2197,13 @@ void exec_wmma_f32_scaled_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, ui
         const uint64_t a_scale_word =
             scale_a_word(wmma_a_scale_lane(M, K, row, matrix_a_scale, a_bits, b_bits));
         for (uint32_t block = 0; block < num_scale_blocks; ++block) {
+          const uint32_t k_begin = block * block_size;
+          const uint32_t k_end = std::min(K, k_begin + block_size);
           uint32_t col = 0;
           alignas(64) float block_sums[64];
           for (; col + W <= N; col += W) {
             util::native<float> block_sum(0.0f);
-            for (uint32_t k = 0; k < K; ++k) {
-              if (wmma_block_scale_byte(k, scale16) != block)
-                continue;
+            for (uint32_t k = k_begin; k < k_end; ++k) {
               util::native<float> a(Abuf[row * K + k]);
               util::native<float> bv;
               bv.copy_from(&Bbuf[k * stride + col], util::stdx::vector_aligned);
@@ -2218,10 +2219,8 @@ void exec_wmma_f32_scaled_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, ui
           }
           for (; col < N; ++col) {
             float block_sum = 0.0f;
-            for (uint32_t k = 0; k < K; ++k) {
-              if (wmma_block_scale_byte(k, scale16) == block)
-                block_sum = std::fma(Abuf[row * K + k], Bbuf[k * stride + col], block_sum);
-            }
+            for (uint32_t k = k_begin; k < k_end; ++k)
+              block_sum = std::fma(Abuf[row * K + k], Bbuf[k * stride + col], block_sum);
             block_sum *= scale_for(a_scale_word, block, matrix_a_scale_fmt);
             const uint64_t b_scale_word = scale_b_word(wmma_scale_lane(col, matrix_b_scale));
             block_sum *= scale_for(b_scale_word, block, matrix_b_scale_fmt);
