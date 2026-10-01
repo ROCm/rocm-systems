@@ -1,941 +1,630 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 
-#include "leaf_context.h"
-#include "marker_stack.h"
-#include "process_state.h"
-#include "record_function_installation.h"
+#include "../argument_capture.h"
+#include "../torch_trace_collector.h"
+#include "../wire_format.h"
 #include "roctx_range_intercept.h"
-#include "snapshot_store.h"
-#include "stack_entry.h"
-#include "stats.h"
-#include "torch_trace_collector.h"
-#include "user_scope.h"
-#include "wire_format.h"
 
-// Included by path so the real ATen and c10 headers above are not shadowed by
-// the collector's stand-in declarations under torch_abi/.
+// Include only the constants by path, so the shim cannot shadow real headers.
 #include "../torch_abi/torch_abi.h"
 
 #include <ATen/ATen.h>
-#include <ATen/Context.h>
 #include <ATen/ThreadLocalState.h>
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/record_function.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
 #include <gtest/gtest.h>
+#include <torch/library.h>
+#include <torch/version.h>
 
-extern "C"
-{
-#include <rocprofiler-sdk-roctx/roctx.h>
-}
-
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <exception>
+#include <functional>
+#include <future>
 #include <memory>
+#include <optional>
+#include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
+#include <utility>
 #include <vector>
 
-using namespace torch_trace_collector::detail;
+static_assert(sizeof(at::RecordFunction) == torch_abi::kRecordFunctionSize);
+static_assert(alignof(at::RecordFunction) == torch_abi::kRecordFunctionAlignment);
+static_assert(static_cast<std::size_t>(at::RecordScope::NUM_SCOPES) == torch_abi::kScopeCount);
+static_assert(sizeof(at::RecordFunctionCallback) == torch_abi::kCallbackSize);
+static_assert(alignof(at::RecordFunctionCallback) == torch_abi::kCallbackAlignment);
+static_assert(sizeof(at::ObserverContext) == torch_abi::kObserverContextSize);
+static_assert(alignof(at::ObserverContext) == torch_abi::kObserverContextAlignment);
+static_assert(sizeof(c10::DebugInfoKind) == torch_abi::kDebugInfoKindSize);
+static_assert(alignof(c10::DebugInfoKind) == torch_abi::kDebugInfoKindAlignment);
+static_assert(sizeof(c10::DebugInfoBase) == torch_abi::kDebugInfoBaseSize);
+static_assert(alignof(c10::DebugInfoBase) == torch_abi::kDebugInfoBaseAlignment);
+static_assert(sizeof(std::shared_ptr<c10::DebugInfoBase>) == torch_abi::kSharedDebugInfoSize);
+static_assert(alignof(std::shared_ptr<c10::DebugInfoBase>) == torch_abi::kSharedDebugInfoAlignment);
+static_assert(sizeof(c10::IValue) == torch_abi::kIValueSize);
+static_assert(alignof(c10::IValue) == torch_abi::kIValueAlignment);
+static_assert(sizeof(at::Tensor) == torch_abi::kTensorSize);
+static_assert(sizeof(c10::OperatorName) == torch_abi::kOperatorNameSize);
+static_assert(alignof(c10::OperatorName) == torch_abi::kOperatorNameAlignment);
+static_assert(offsetof(c10::OperatorName, name) == torch_abi::kOperatorNameNameOff);
+static_assert(offsetof(c10::OperatorName, overload_name) == torch_abi::kOperatorNameOverloadNameOff);
+static_assert(sizeof(std::optional<c10::OperatorName>) == torch_abi::kOptionalOperatorNameSize);
+static_assert(alignof(std::optional<c10::OperatorName>) == torch_abi::kOptionalOperatorNameAlignment);
+static_assert(sizeof(c10::OperatorHandle) == torch_abi::kOperatorHandleSize);
+static_assert(alignof(c10::OperatorHandle) == torch_abi::kOperatorHandleAlignment);
+static_assert(sizeof(c10::OpRegistrationListener) == torch_abi::kOpRegistrationListenerSize);
+static_assert(alignof(c10::OpRegistrationListener) == torch_abi::kOpRegistrationListenerAlignment);
+static_assert(sizeof(c10::RegistrationHandleRAII) == torch_abi::kRegistrationHandleSize);
+static_assert(alignof(c10::RegistrationHandleRAII) == torch_abi::kRegistrationHandleAlignment);
+static_assert(sizeof(c10::ArrayRef<const c10::IValue>) == torch_abi::kInputArrayViewSize);
+static_assert(alignof(c10::ArrayRef<const c10::IValue>) == torch_abi::kInputArrayViewAlignment);
 
 namespace
 {
 
-// Process-wide state used by these tests.
-Stats& stats()
+template<typename Value, typename Object>
+Value read_at_offset(const Object& object, std::size_t offset)
 {
-    return process_state().stats;
+    Value value{};
+    std::memcpy(&value, reinterpret_cast<const std::byte*>(&object) + offset, sizeof(value));
+    return value;
 }
 
-SnapshotStore& snapshots()
+void emit_record(std::string_view                name,
+                 const std::vector<c10::IValue>& inputs = {},
+                 at::RecordScope                 scope  = at::RecordScope::FUNCTION)
 {
-    return process_state().snapshots;
+    at::RecordFunction record(scope);
+    record.before(name, &inputs);
 }
 
-void reset_state()
+std::string captured_arguments(const std::vector<c10::IValue>& inputs)
 {
-    if (is_installed())
-    {
-        uninstall();
-    }
-    thread_state().stack.clear();
-    thread_state().guards.clear();
-    snapshots().clear();
-    stats().pushes.store(0);
-    stats().pops.store(0);
-    stats().snapshots_saved.store(0);
-    stats().snapshots_consumed.store(0);
-    stats().snapshots_dropped.store(0);
-    stats().snapshots_overwritten.store(0);
-    stats().callback_errors.store(0);
-    stats().user_scope_pushes.store(0);
-    stats().user_scope_pops.store(0);
-    stats().user_scope_inherits.store(0);
-    (void)roctx_range_intercept::stop_recording();
+    at::RecordFunction record(at::RecordScope::FUNCTION);
+    record.before("test.arguments", &inputs);
+    std::array<char, torch_trace_collector::detail::kMaxEncodedArgumentsSize> output{};
+    torch_trace_collector::detail::capture_args(record, output.data(), output.size());
+    return output.data();
+}
+
+std::string captured_schema_arguments(const char*                     name,
+                                      const char*                     overload,
+                                      const std::vector<c10::IValue>& inputs)
+{
+    const auto         handle = c10::Dispatcher::singleton().findSchemaOrThrow(name, overload);
+    at::RecordFunction record(at::RecordScope::FUNCTION);
+    record.before(std::cref(handle.schema()), &inputs);
+    std::array<char, torch_trace_collector::detail::kMaxEncodedArgumentsSize> output{};
+    torch_trace_collector::detail::capture_args(record, output.data(), output.size());
+    return output.data();
 }
 
 class TorchTraceCollectorTest : public ::testing::Test
 {
 protected:
-    void SetUp() override { reset_state(); }
-
-    void TearDown() override { reset_state(); }
-};
-
-class TorchTraceCollectorRealOpsTest : public TorchTraceCollectorTest
-{
-protected:
     void SetUp() override
     {
-        TorchTraceCollectorTest::SetUp();
-        if (!at::hasCUDA())
+        ASSERT_EQ(torch_trace_collector_install(), 0);
+        roctx_range_intercept::start_recording();
+    }
+
+    void TearDown() override
+    {
+        (void)roctx_range_intercept::stop_recording();
+        while (torch_trace_collector_pop_launcher_tid() == 0)
         {
-            GTEST_SKIP() << "ATen built without CUDA support";
         }
     }
 };
 
-// Stand-in thread ids. Real ids come from at::RecordFunction::currentThreadId();
-// zero means no forward identity.
-constexpr std::uint64_t kThreadA = 1;
-constexpr std::uint64_t kThreadB = 2;
-constexpr std::uint64_t kThreadC = 3;
-
-// The first `count` sequence numbers that hash to `shard` for `thread_id`.
-std::vector<std::int64_t> sequence_numbers_on_shard(std::size_t   shard,
-                                                    std::uint64_t thread_id,
-                                                    std::size_t   count)
-{
-    std::vector<std::int64_t> sequence_numbers;
-    sequence_numbers.reserve(count);
-    for (std::int64_t sequence_number = 0; sequence_numbers.size() < count; ++sequence_number)
-    {
-        if (SnapshotStore::shard_index(SnapshotKey{sequence_number, thread_id}) == shard)
-        {
-            sequence_numbers.push_back(sequence_number);
-        }
-    }
-    return sequence_numbers;
-}
-
-std::size_t count_in_marker_path(const std::string& wire, const std::string& needle)
-{
-    const auto  colon = wire.find(':');
-    const auto  path  = (colon == std::string::npos) ? wire : wire.substr(0, colon);
-    std::size_t count = 0;
-    std::size_t pos   = 0;
-    while ((pos = path.find(needle, pos)) != std::string::npos)
-    {
-        ++count;
-        pos += needle.size();
-    }
-    return count;
-}
-
 }  // namespace
 
-TEST(LeafContext, ForwardTopLevelLeafIsAten)
+// CTest runs this group separately because installation lasts for the process.
+TEST(TorchTraceCollectorBeforeInstall, RejectsLauncherUntilConcurrentInstallSucceeds)
 {
-    EXPECT_STREQ(torch_trace_collector::default_leaf_context(false, 42, true),
-                 torch_trace_collector::kAtenTopLevelLeaf);
-}
-
-TEST(LeafContext, ForwardNestedLeafIsAtenNested)
-{
-    EXPECT_STREQ(torch_trace_collector::default_leaf_context(false, 42, false),
-                 torch_trace_collector::kAtenNestedLeaf);
-}
-
-TEST(LeafContext, BackwardWithSeqLeafIsAutogradBwd)
-{
-    EXPECT_STREQ(torch_trace_collector::default_leaf_context(true, 7, true),
-                 torch_trace_collector::kAutogradBackwardLeaf);
-}
-
-TEST(LeafContext, BackwardWithoutSeqLeafIsAutogradEngine)
-{
-    EXPECT_STREQ(torch_trace_collector::default_leaf_context(true, -1, true),
-                 torch_trace_collector::kAutogradEngineLeaf);
-}
-
-namespace
-{
-
-// Reverses build_marker_string: split the operator path on the '/' separator,
-// then decode each segment ('%2F' -> '/', then '%25' -> '%'), matching
-// utils_analysis.build_call_trees.
-std::vector<std::string> decode_marker_path(const std::string& wire)
-{
-    const auto        colon = wire.find(':');
-    const std::string path  = (colon == std::string::npos) ? wire : wire.substr(0, colon);
-
-    std::vector<std::string> segments;
-    std::size_t              start = 0;
-    while (true)
+    EXPECT_EQ(torch_trace_collector_abi_revision(), TORCH_TRACE_COLLECTOR_ABI_REVISION);
+    EXPECT_NE(torch_trace_collector_push_launcher_tid(7), 0);
+    EXPECT_NE(torch_trace_collector_pop_launcher_tid(), 0);
+    std::atomic<int>         failures{0};
+    std::atomic<bool>        start{false};
+    std::vector<std::thread> workers;
+    for (int index = 0; index < 8; ++index)
     {
-        const auto sep = path.find('/', start);
-        const std::string raw = path.substr(start,
-                                            sep == std::string::npos ? std::string::npos : sep - start);
-
-        std::string decoded;
-        for (std::size_t i = 0; i < raw.size();)
-        {
-            if (raw.compare(i, 3, kEncodedSlash) == 0)
+        workers.emplace_back(
+            [&]
             {
-                decoded += '/';
-                i += 3;
-            }
-            else if (raw.compare(i, 3, kEncodedPercent) == 0)
-            {
-                decoded += '%';
-                i += 3;
-            }
-            else
-            {
-                decoded += raw[i];
-                ++i;
-            }
-        }
-        segments.push_back(decoded);
-
-        if (sep == std::string::npos)
-            return segments;
-        start = sep + 1;
-    }
-}
-
-}  // namespace
-
-TEST(MarkerEncoding, EscapesSlashAndPercentWithinNames)
-{
-    // '/' encodes to %2F and '%' to %25 within a name; the '/' between frames
-    // remains the separator.
-    const std::vector<StackEntry> stack = {
-        {"Torch-Compiled Region: 0/0", "#1@a:1"},
-        {"k%2F%name", "#2@b:2"},
-    };
-
-    const std::string wire = build_marker_string(stack);
-
-    EXPECT_EQ(wire, "Torch-Compiled Region: 0%2F0/k%252F%25name:#1@a:1/#2@b:2");
-}
-
-TEST(MarkerEncoding, RoundTripsThroughBuildCallTreesDecode)
-{
-    // Encoding then decoding returns the original names.
-    const std::vector<std::string> names = {
-        "Torch-Compiled Region 0/0",
-        "k%2F%name",
-        "plain_kernel",
-        "literal%2Fnot_a_slash",
-        "100%/sec",
-    };
-
-    std::vector<StackEntry> stack;
-    stack.reserve(names.size());
-    for (const auto& name : names)
-        stack.push_back(StackEntry{name, "ctx"});
-
-    const std::vector<std::string> decoded = decode_marker_path(build_marker_string(stack));
-
-    EXPECT_EQ(decoded, names);
-}
-
-TEST(RoctxRangeIntercept, RecordsPushA)
-{
-    roctx_range_intercept::start_recording();
-    roctxRangePushA("probe");
-    const auto recorded = roctx_range_intercept::stop_recording();
-    roctxRangePop();
-
-    ASSERT_EQ(recorded.size(), 1u);
-    EXPECT_EQ(recorded.front(), "probe");
-}
-
-TEST_F(TorchTraceCollectorTest, SaveThenConsumeReturnsSavedStack)
-{
-    const std::vector<StackEntry> stack = {{"A", "a"}, {"B", "b"}};
-    snapshots().save(42, kThreadA, stack);
-
-    std::vector<StackEntry> out;
-    ASSERT_TRUE(snapshots().consume(42, kThreadA, &out));
-    ASSERT_EQ(out.size(), 2u);
-    EXPECT_EQ(out[0].marker, "A");
-    EXPECT_EQ(out[0].context, "a");
-    EXPECT_EQ(out[1].marker, "B");
-    EXPECT_EQ(out[1].context, "b");
-    EXPECT_EQ(stats().snapshots_saved.load(), 1u);
-    EXPECT_EQ(stats().snapshots_consumed.load(), 1u);
-}
-
-TEST_F(TorchTraceCollectorTest, ConsumeUnknownReturnsFalse)
-{
-    std::vector<StackEntry> out;
-    EXPECT_FALSE(snapshots().consume(999, kThreadA, &out));
-    EXPECT_TRUE(out.empty());
-    EXPECT_EQ(stats().snapshots_consumed.load(), 0u);
-}
-
-TEST_F(TorchTraceCollectorTest, ConsumeIsOneShot)
-{
-    snapshots().save(7, kThreadA, std::vector<StackEntry>{{"X", "x"}});
-
-    std::vector<StackEntry> out;
-    ASSERT_TRUE(snapshots().consume(7, kThreadA, &out));
-    EXPECT_FALSE(snapshots().consume(7, kThreadA, &out));
-    EXPECT_EQ(stats().snapshots_consumed.load(), 1u);
-}
-
-TEST_F(TorchTraceCollectorTest, SaveTwiceReturnsLatest)
-{
-    snapshots().save(1, kThreadA, std::vector<StackEntry>{{"first", "f"}});
-    snapshots().save(1, kThreadA, std::vector<StackEntry>{{"second", "s"}});
-
-    std::vector<StackEntry> out;
-    ASSERT_TRUE(snapshots().consume(1, kThreadA, &out));
-    ASSERT_EQ(out.size(), 1u);
-    EXPECT_EQ(out[0].marker, "second");
-    EXPECT_EQ(stats().snapshots_saved.load(), 2u);
-    EXPECT_EQ(stats().snapshots_overwritten.load(), 1u);
-}
-
-TEST_F(TorchTraceCollectorTest, SameSeqNrOnDifferentThreadsDoesNotCollide)
-{
-    // Concurrent forward passes both count from zero, so one thread's snapshot
-    // must not displace another's under the same sequence number.
-    snapshots().save(0, kThreadA, std::vector<StackEntry>{{"threadA", "a"}});
-    snapshots().save(0, kThreadB, std::vector<StackEntry>{{"threadB", "b"}});
-    EXPECT_EQ(stats().snapshots_saved.load(), 2u);
-    EXPECT_EQ(stats().snapshots_overwritten.load(), 0u);
-    EXPECT_EQ(snapshots().pending(), 2u);
-
-    std::vector<StackEntry> out_a;
-    ASSERT_TRUE(snapshots().consume(0, kThreadA, &out_a));
-    ASSERT_EQ(out_a.size(), 1u);
-    EXPECT_EQ(out_a[0].marker, "threadA");
-
-    std::vector<StackEntry> out_b;
-    ASSERT_TRUE(snapshots().consume(0, kThreadB, &out_b));
-    ASSERT_EQ(out_b.size(), 1u);
-    EXPECT_EQ(out_b[0].marker, "threadB");
-
-    std::vector<StackEntry> out_c;
-    EXPECT_FALSE(snapshots().consume(0, kThreadC, &out_c));
-    EXPECT_EQ(stats().snapshots_consumed.load(), 2u);
-    EXPECT_EQ(snapshots().pending(), 0u);
-}
-
-TEST_F(TorchTraceCollectorTest, EvictsOldestPastMaxEntriesPerShard)
-{
-    const auto sequence_numbers =
-        sequence_numbers_on_shard(0, kThreadA, SnapshotStore::Shard::kMaxEntriesPerShard + 1);
-    for (std::size_t i = 0; i < SnapshotStore::Shard::kMaxEntriesPerShard; ++i)
-    {
-        snapshots().save(sequence_numbers[i], kThreadA, std::vector<StackEntry>{{"k", "v"}});
-    }
-    ASSERT_EQ(stats().snapshots_dropped.load(), 0u);
-
-    snapshots().save(sequence_numbers.back(), kThreadA, std::vector<StackEntry>{{"k", "v"}});
-    EXPECT_EQ(stats().snapshots_dropped.load(), 1u);
-
-    std::vector<StackEntry> out;
-    EXPECT_FALSE(snapshots().consume(sequence_numbers.front(), kThreadA, &out));
-    EXPECT_TRUE(snapshots().consume(sequence_numbers.back(), kThreadA, &out));
-}
-
-TEST_F(TorchTraceCollectorTest, EvictionIsPerShard)
-{
-    const auto sequence_numbers =
-        sequence_numbers_on_shard(0, kThreadA, SnapshotStore::Shard::kMaxEntriesPerShard + 1);
-    const auto other_shard_sequence_numbers = sequence_numbers_on_shard(1, kThreadA, 1);
-    for (std::size_t i = 0; i < SnapshotStore::Shard::kMaxEntriesPerShard; ++i)
-    {
-        snapshots().save(sequence_numbers[i], kThreadA, std::vector<StackEntry>{{"k", "v"}});
-    }
-    snapshots().save(other_shard_sequence_numbers.front(),
-                     kThreadA,
-                     std::vector<StackEntry>{{"shard1", "v"}});
-
-    snapshots().save(sequence_numbers.back(), kThreadA, std::vector<StackEntry>{{"k", "v"}});
-
-    std::vector<StackEntry> out;
-    EXPECT_TRUE(snapshots().consume(other_shard_sequence_numbers.front(), kThreadA, &out));
-    ASSERT_EQ(out.size(), 1u);
-    EXPECT_EQ(out[0].marker, "shard1");
-}
-
-TEST_F(TorchTraceCollectorTest, ConcurrentOverlappingSeqNrsAreIsolated)
-{
-    // Every thread walks the same sequence numbers, mirroring a thread-local
-    // counter. Each must read back its own snapshot.
-    constexpr int            n_threads  = 4;
-    constexpr int            per_thread = 256;
-    std::atomic<int>         lost{0};
-    std::atomic<int>         mismatched{0};
-    std::vector<std::thread> threads;
-    threads.reserve(n_threads);
-    for (int t = 0; t < n_threads; ++t)
-    {
-        threads.emplace_back(
-            [t, &lost, &mismatched]()
-            {
-                const std::uint64_t thread_id = static_cast<std::uint64_t>(t) + 1;
-                const std::string   marker    = "t" + std::to_string(t);
-                for (int i = 0; i < per_thread; ++i)
-                {
-                    const std::int64_t seq = i;
-                    snapshots().save(seq, thread_id, std::vector<StackEntry>{{marker, "v"}});
-                    std::vector<StackEntry> out;
-                    if (!snapshots().consume(seq, thread_id, &out))
-                    {
-                        ++lost;
-                    }
-                    else if (out.size() != 1 || out[0].marker != marker)
-                    {
-                        ++mismatched;
-                    }
-                }
+                while (!start.load())
+                    std::this_thread::yield();
+                if (torch_trace_collector_install() != 0)
+                    ++failures;
             });
     }
-    for (auto& th : threads)
-    {
-        th.join();
-    }
-    EXPECT_EQ(lost.load(), 0);
-    EXPECT_EQ(mismatched.load(), 0);
-    const auto expected = static_cast<std::uint64_t>(n_threads) * per_thread;
-    EXPECT_EQ(stats().snapshots_saved.load(), expected);
-    EXPECT_EQ(stats().snapshots_consumed.load(), expected);
-    EXPECT_EQ(snapshots().pending(), 0u);
-}
-
-TEST_F(TorchTraceCollectorTest, PushPopAreBalanced)
-{
-    constexpr int n = 100;
-    for (int i = 0; i < n; ++i)
-    {
-        push_user_scope("m" + std::to_string(i), "c", "gtest");
-    }
-    EXPECT_EQ(thread_state().stack.size(), static_cast<std::size_t>(n));
-    EXPECT_EQ(thread_state().guards.size(), static_cast<std::size_t>(n));
-
-    for (int i = 0; i < n; ++i)
-    {
-        pop_user_scope();
-    }
-    EXPECT_TRUE(thread_state().stack.empty());
-    EXPECT_TRUE(thread_state().guards.empty());
-    EXPECT_EQ(stats().user_scope_pushes.load(), static_cast<std::uint64_t>(n));
-    EXPECT_EQ(stats().user_scope_pops.load(), static_cast<std::uint64_t>(n));
-}
-
-TEST_F(TorchTraceCollectorTest, PopOnEmptyBumpsCallbackErrors)
-{
-    ASSERT_TRUE(thread_state().stack.empty());
-    pop_user_scope();
-    EXPECT_TRUE(thread_state().stack.empty());
-    EXPECT_EQ(stats().user_scope_pops.load(), 0u);
-    EXPECT_EQ(stats().callback_errors.load(), 1u);
-}
-
-TEST_F(TorchTraceCollectorTest, DeepNestingPreservesOrder)
-{
-    constexpr int depth = 256;
-    for (int i = 0; i < depth; ++i)
-    {
-        push_user_scope("m" + std::to_string(i), "c" + std::to_string(i), "gtest");
-    }
-    ASSERT_EQ(thread_state().stack.size(), static_cast<std::size_t>(depth));
-
-    for (int i = depth - 1; i >= 0; --i)
-    {
-        ASSERT_EQ(thread_state().stack.back().marker, "m" + std::to_string(i));
-        pop_user_scope();
-    }
-    EXPECT_TRUE(thread_state().stack.empty());
-}
-
-TEST_F(TorchTraceCollectorTest, InstallReturnsValidHandle)
-{
-    const auto handle = install();
-    EXPECT_NE(handle, static_cast<std::int64_t>(at::INVALID_CALLBACK_HANDLE));
-    EXPECT_TRUE(is_installed());
-}
-
-TEST_F(TorchTraceCollectorTest, InstallIsIdempotent)
-{
-    const auto first  = install();
-    const auto second = install();
-    EXPECT_EQ(first, second);
-    EXPECT_TRUE(is_installed());
-}
-
-TEST_F(TorchTraceCollectorTest, UninstallClearsState)
-{
-    install();
-    ASSERT_TRUE(is_installed());
-
-    uninstall();
-    EXPECT_FALSE(is_installed());
-    const auto handle = process_state().install.rlock([](const InstallState& state)
-                                                      { return state.handle; });
-    EXPECT_EQ(handle, at::INVALID_CALLBACK_HANDLE);
-}
-
-TEST_F(TorchTraceCollectorTest, UninstallWhenNotInstalledIsNoOp)
-{
-    ASSERT_FALSE(is_installed());
-    uninstall();
-    EXPECT_FALSE(is_installed());
-}
-
-TEST_F(TorchTraceCollectorTest, InstallAfterUninstallReinstalls)
-{
-    install();
-    uninstall();
-
-    const auto handle = install();
-    EXPECT_NE(handle, static_cast<std::int64_t>(at::INVALID_CALLBACK_HANDLE));
-    EXPECT_TRUE(is_installed());
-}
-
-TEST_F(TorchTraceCollectorTest, EmptyParentChainIsNoOp)
-{
-    install();
-    ASSERT_TRUE(thread_state().stack.empty());
-
-    {
-        at::RecordFunction rec(at::RecordScope::FUNCTION);
-        rec.before("probe");
-    }
-
-    EXPECT_TRUE(thread_state().stack.empty());
-    EXPECT_EQ(stats().user_scope_inherits.load(), 0u);
-}
-
-TEST_F(TorchTraceCollectorTest, CopiesParentChain)
-{
-    install();
-    push_user_scope("P1", "c1", "gtest");
-    push_user_scope("P2", "c2", "gtest");
-
-    const at::ThreadLocalState tls;
-    std::uint64_t              inherits = 0;
-    std::vector<std::string>   recorded;
-    bool                       worker_stack_was_empty = false;
-
-    std::thread worker(
-        [&]
-        {
-            at::ThreadLocalStateGuard guard(tls);
-            worker_stack_was_empty = thread_state().stack.empty();
-            roctx_range_intercept::start_recording();
-            {
-                at::RecordFunction rec(at::RecordScope::FUNCTION);
-                rec.before("probe");
-            }
-            recorded = roctx_range_intercept::stop_recording();
-            inherits = stats().user_scope_inherits.load();
-        });
-    worker.join();
-
-    pop_user_scope();
-    pop_user_scope();
-
-    EXPECT_TRUE(worker_stack_was_empty);
-    EXPECT_EQ(inherits, 1u);
-    bool saw_overlay = false;
-    for (const auto& message : recorded)
-    {
-        if (message.rfind("P1/P2/probe", 0) == 0)
-        {
-            saw_overlay = true;
-            break;
-        }
-    }
-    EXPECT_TRUE(saw_overlay);
-}
-
-TEST_F(TorchTraceCollectorRealOpsTest, ForwardBackwardCountersStayBalanced)
-{
-    install();
-
-    auto x = at::randn({8, 8}, at::TensorOptions().device(at::kCUDA)).requires_grad_(true);
-    push_user_scope("test.fwd_bwd", "#1@test:1", "gtest");
-    auto y = (x * 2).sum();
-    pop_user_scope();
-    y.backward();
-
-    EXPECT_GT(stats().snapshots_saved.load(), 0u);
-    EXPECT_GT(stats().snapshots_consumed.load(), 0u);
-    EXPECT_EQ(stats().callback_errors.load(), 0u);
-    EXPECT_EQ(stats().pushes.load(), stats().pops.load());
-    EXPECT_EQ(stats().user_scope_pushes.load(), stats().user_scope_pops.load());
-    EXPECT_LE(snapshots().pending(), 4u);
-}
-
-TEST_F(TorchTraceCollectorRealOpsTest, LeafLabelsAndUserScope)
-{
-    install();
+    start.store(true);
+    for (auto& worker : workers)
+        worker.join();
+    EXPECT_EQ(failures.load(), 0);
+    ASSERT_EQ(torch_trace_collector_push_launcher_tid(7), 0);
     roctx_range_intercept::start_recording();
-
-    {
-        auto warmup = at::randn({4, 4}, at::TensorOptions().device(at::kCUDA));
-        (void)(warmup * 2).sum();
-    }
-
-    push_user_scope("test.outer_step", "#1@test:7", "gtest");
-    auto x = at::randn({32, 32}, at::TensorOptions().device(at::kCUDA)).requires_grad_(true);
-    auto y = (x.matmul(x)).sum();
-    y.backward();
-    pop_user_scope();
-
-    const auto recorded = roctx_range_intercept::stop_recording();
-    ASSERT_FALSE(recorded.empty());
-
-    bool        saw_aten_top      = false;
-    bool        saw_aten_nested   = false;
-    bool        saw_bwd_leaf      = false;
-    bool        saw_legacy        = false;
-    bool        saw_torch_backend = false;
-    std::size_t bwd_total         = 0;
-    std::size_t bwd_under_scope   = 0;
-
-    const std::string backend_suffix = "|torch";
-
-    for (const auto& m : recorded)
-    {
-        if (m.find("aten:0") != std::string::npos)
-            saw_aten_top = true;
-        if (m.find("aten.nested:0") != std::string::npos)
-            saw_aten_nested = true;
-        if (m.find("autograd.bwd:0") != std::string::npos)
-            saw_bwd_leaf = true;
-        if (m.find("dispatcher:0") != std::string::npos)
-            saw_legacy = true;
-
-        const bool is_recordfn_op = m.find("aten:0") != std::string::npos ||
-                                    m.find("aten.nested:0") != std::string::npos ||
-                                    m.find("autograd.bwd:0") != std::string::npos ||
-                                    m.find("autograd.engine:0") != std::string::npos;
-        if (is_recordfn_op && m.size() >= backend_suffix.size() &&
-            m.compare(m.size() - backend_suffix.size(), backend_suffix.size(), backend_suffix) == 0)
-        {
-            saw_torch_backend = true;
-        }
-
-        if (m.find("autograd.bwd:0") != std::string::npos ||
-            m.find("autograd.engine:0") != std::string::npos)
-        {
-            ++bwd_total;
-            if (m.rfind("test.outer_step/", 0) == 0)
-            {
-                ++bwd_under_scope;
-                EXPECT_EQ(count_in_marker_path(m, "test.outer_step"), 1u) << m;
-            }
-        }
-    }
-
-    EXPECT_FALSE(saw_legacy);
-    EXPECT_TRUE(saw_aten_top);
-    EXPECT_TRUE(saw_aten_nested);
-    EXPECT_TRUE(saw_bwd_leaf);
-    EXPECT_TRUE(saw_torch_backend);
-    ASSERT_GT(bwd_total, 0u);
-    EXPECT_GT(bwd_under_scope, 0u);
-    EXPECT_GT(stats().user_scope_inherits.load(), 0u);
+    emit_record("initial-install");
+    const auto captured = roctx_range_intercept::stop_recording();
+    EXPECT_EQ(captured.messages.size(), 1u);
+    EXPECT_EQ(captured.pops, 1u);
+    EXPECT_EQ(torch_trace_collector_pop_launcher_tid(), 0);
 }
 
-TEST_F(TorchTraceCollectorRealOpsTest, ManyStepsCorrelation)
+TEST_F(TorchTraceCollectorTest, RecordFunctionOffsetsMatchRealAccessors)
 {
-    install();
-    constexpr int n_steps = 16;
-    for (int i = 0; i < n_steps; ++i)
-    {
-        auto x = at::randn({128, 128}, at::TensorOptions().device(at::kCUDA)).requires_grad_(true);
-        auto y = ((x.matmul(x)) + x).sum();
-        y.backward();
-    }
-
-    const auto saved    = stats().snapshots_saved.load();
-    const auto consumed = stats().snapshots_consumed.load();
-    EXPECT_GT(saved, 0u);
-    EXPECT_GE(consumed, saved / 2);
-    EXPECT_EQ(stats().snapshots_dropped.load(), 0u);
-    EXPECT_EQ(stats().callback_errors.load(), 0u);
-}
-
-TEST_F(TorchTraceCollectorRealOpsTest, DetachedForwardBounded)
-{
-    install();
-    for (int i = 0; i < 50; ++i)
-    {
-        auto x = at::randn({32, 32}, at::TensorOptions().device(at::kCUDA)).requires_grad_(true);
-        auto y = (x.matmul(x)).sum().detach();
-        (void)y;
-    }
-
-    EXPECT_GT(stats().snapshots_saved.load(), 0u);
-    EXPECT_EQ(stats().callback_errors.load(), 0u);
-    EXPECT_LT(snapshots().pending(), SnapshotStore::Shard::kMaxEntriesPerShard);
-    EXPECT_EQ(stats().snapshots_dropped.load(), 0u);
-}
-
-TEST_F(TorchTraceCollectorRealOpsTest, ConcurrentThreadsScopedMarkers)
-{
-    install();
-    roctx_range_intercept::start_recording();
-
-    constexpr int            n_workers = 4;
-    std::vector<std::thread> threads;
-    threads.reserve(n_workers);
-    for (int wid = 0; wid < n_workers; ++wid)
-    {
-        threads.emplace_back(
-            [wid]()
-            {
-                const std::string scope = "test.concurrent.worker" + std::to_string(wid);
-                push_user_scope(scope, "#1@test_thread:" + std::to_string(wid), "gtest");
-                for (int i = 0; i < 4; ++i)
-                {
-                    auto x = at::randn({64, 64}, at::TensorOptions().device(at::kCUDA)).requires_grad_(true);
-                    (x.matmul(x)).sum().backward();
-                }
-                pop_user_scope();
-            });
-    }
-    for (auto& t : threads)
-    {
-        t.join();
-    }
-
-    const auto recorded = roctx_range_intercept::stop_recording();
-    ASSERT_FALSE(recorded.empty());
-
-    const std::array<std::string, 4> cpp_leaves = {"aten:0",
-                                                   "aten.nested:0",
-                                                   "autograd.bwd:0",
-                                                   "autograd.engine:0"};
-
-    for (int wid = 0; wid < n_workers; ++wid)
-    {
-        const std::string prefix = "test.concurrent.worker" + std::to_string(wid) + "/";
-        bool              saw    = false;
-        for (const auto& m : recorded)
-        {
-            if (m.rfind(prefix, 0) != 0)
-                continue;
-            for (const auto& leaf : cpp_leaves)
-            {
-                if (m.find(leaf) != std::string::npos)
-                {
-                    saw = true;
-                    break;
-                }
-            }
-            if (saw)
-                break;
-        }
-        EXPECT_TRUE(saw) << "worker " << wid;
-    }
-
-    // Each worker's markers must carry only its own scope.
-    for (const auto& m : recorded)
-    {
-        std::size_t workers_named = 0;
-        for (int wid = 0; wid < n_workers; ++wid)
-        {
-            if (m.find("test.concurrent.worker" + std::to_string(wid)) != std::string::npos)
-            {
-                ++workers_named;
-            }
-        }
-        EXPECT_LE(workers_named, 1u) << m;
-    }
-
-    EXPECT_EQ(stats().callback_errors.load(), 0u);
-    EXPECT_EQ(stats().pushes.load(), stats().pops.load());
-    EXPECT_EQ(stats().user_scope_pushes.load(), stats().user_scope_pops.load());
-}
-
-// ---------------------------------------------------------------------------
-// torch_abi.h layouts, checked against the real PyTorch headers.
-// ---------------------------------------------------------------------------
-
-static_assert(sizeof(at::RecordFunction) == torch_abi::kRecordFunctionSize);
-static_assert(alignof(at::RecordFunction) == torch_abi::kRecordFunctionAlignment);
-static_assert(static_cast<std::size_t>(at::RecordScope::NUM_SCOPES) == torch_abi::kScopeCount);
-
-static_assert(sizeof(at::RecordFunctionCallback) == torch_abi::kCallbackSize);
-static_assert(alignof(at::RecordFunctionCallback) == torch_abi::kCallbackAlignment);
-static_assert(sizeof(at::ObserverContext) == torch_abi::kObserverContextSize);
-static_assert(alignof(at::ObserverContext) == torch_abi::kObserverContextAlignment);
-
-static_assert(sizeof(c10::DebugInfoKind) == torch_abi::kDebugInfoKindSize);
-static_assert(alignof(c10::DebugInfoKind) == torch_abi::kDebugInfoKindAlignment);
-static_assert(sizeof(c10::DebugInfoBase) == torch_abi::kDebugInfoBaseSize);
-static_assert(alignof(c10::DebugInfoBase) == torch_abi::kDebugInfoBaseAlignment);
-static_assert(sizeof(c10::DebugInfoGuard) == torch_abi::kDebugInfoGuardSize);
-static_assert(alignof(c10::DebugInfoGuard) == torch_abi::kDebugInfoGuardAlignment);
-static_assert(sizeof(std::shared_ptr<c10::DebugInfoBase>) == torch_abi::kSharedDebugInfoSize);
-static_assert(alignof(std::shared_ptr<c10::DebugInfoBase>) == torch_abi::kSharedDebugInfoAlignment);
-
-namespace
-{
-
-// The fields the collector reads are private in PyTorch, so offsetof is out of
-// reach. Read through the offsets and compare against the public accessors.
-template<typename Tp>
-Tp read_at_offset(const at::RecordFunction& record, std::size_t offset)
-{
-    Tp value{};
-    std::memcpy(&value, reinterpret_cast<const std::byte*>(&record) + offset, sizeof(value));
-    return value;
-}
-
-}  // namespace
-
-TEST(TorchAbiLayout, RecordFunctionOffsetsMatchAccessors)
-{
-    constexpr std::int64_t kProbeSeqNr = 987654321;
-
-    at::RecordFunction record(at::RecordScope::USER_SCOPE);
-    record.before("torch_abi.probe", kProbeSeqNr);
-
+    const std::vector<c10::IValue> inputs{std::int64_t{9}, true};
+    at::RecordFunction             record(at::RecordScope::USER_SCOPE);
+    record.setForwardThreadId(1234);
+    record.before("layout", &inputs, 987654321);
     EXPECT_EQ(read_at_offset<at::RecordScope>(record, torch_abi::kRecordFunctionScopeOff),
               record.scope());
     EXPECT_EQ(read_at_offset<std::int64_t>(record, torch_abi::kRecordFunctionSeqNrOff), record.seqNr());
     EXPECT_EQ(read_at_offset<std::uint64_t>(record, torch_abi::kRecordFunctionFwdThreadOff),
               record.forwardThreadId());
-    EXPECT_EQ(record.seqNr(), kProbeSeqNr);
+    const auto view = read_at_offset<c10::ArrayRef<const c10::IValue>>(record,
+                                                                       torch_abi::kRecordFunctionInputsOff);
+    EXPECT_EQ(view.data(), inputs.data());
+    EXPECT_EQ(view.size(), inputs.size());
+    EXPECT_EQ(record.seqNr(), 987654321);
+    EXPECT_EQ(record.forwardThreadId(), 1234u);
 }
 
-// ---------------------------------------------------------------------------
-// Plain-C interface exported by torch_trace_collector.so.
-// ---------------------------------------------------------------------------
-
-class TorchTraceCollectorCApiTest : public TorchTraceCollectorTest
+TEST(TorchAbiLayout, CallbackOffsetsMatchRealAccessors)
 {
-protected:
-    void TearDown() override
+    const auto start = +[](const at::RecordFunction&) -> std::unique_ptr<at::ObserverContext>
     {
-        EXPECT_EQ(torch_trace_collector_uninstall(), 0);
-        TorchTraceCollectorTest::TearDown();
+        return nullptr;
+    };
+    const auto end = +[](const at::RecordFunction&, at::ObserverContext*) {
+    };
+    at::RecordFunctionCallback callback(start, end);
+    callback.needsInputs(true).samplingProb(0.5).scopes({at::RecordScope::USER_SCOPE});
+    EXPECT_EQ(read_at_offset<at::RecordFunctionCallback::StartCallback>(callback,
+                                                                        torch_abi::kCallbackStartOff),
+              callback.start());
+    EXPECT_EQ(read_at_offset<at::RecordFunctionCallback::EndCallback>(callback, torch_abi::kCallbackEndOff),
+              callback.end());
+    EXPECT_EQ(read_at_offset<double>(callback, torch_abi::kCallbackProbabilityOff),
+              callback.samplingProb());
+    EXPECT_EQ(read_at_offset<bool>(callback, torch_abi::kCallbackNeedsInputsOff),
+              callback.needsInputs());
+    const auto scopes = read_at_offset<std::array<bool, torch_abi::kScopeCount>>(callback,
+                                                                                 torch_abi::kCallbackScopesOff);
+    for (std::size_t index = 0; index < scopes.size(); ++index)
+    {
+        EXPECT_EQ(scopes[index], index == static_cast<std::size_t>(at::RecordScope::USER_SCOPE));
     }
-};
-
-TEST_F(TorchTraceCollectorCApiTest, ReportsExpectedAbiRevision)
-{
-    EXPECT_EQ(torch_trace_collector_abi_revision(), TORCH_TRACE_COLLECTOR_ABI_REVISION);
 }
 
-TEST_F(TorchTraceCollectorCApiTest, InstallIsIdempotentAndVisible)
+TEST(TorchAbiLayout, IValueTensorPayloadAndTagMatchRealTensor)
 {
-    EXPECT_EQ(torch_trace_collector_is_installed(), 0);
-    ASSERT_EQ(torch_trace_collector_install(), 0);
-    EXPECT_EQ(torch_trace_collector_is_installed(), 1);
-    EXPECT_EQ(torch_trace_collector_install(), 0);
-    EXPECT_EQ(torch_trace_collector_is_installed(), 1);
+    const auto        tensor = at::empty({2, 3});
+    const c10::IValue value(tensor);
+    EXPECT_EQ(read_at_offset<std::uint32_t>(value, torch_abi::kIValueTagOff), torch_abi::kIValueTensorTag);
+    EXPECT_EQ(read_at_offset<const void*>(value, torch_abi::kIValuePayloadOff),
+              tensor.unsafeGetTensorImpl());
 }
 
-TEST_F(TorchTraceCollectorCApiTest, RejectsNullUserScopeStrings)
+TEST(TorchAbiLayout, TensorListElementOffsetsMatchRealStorage)
 {
-    ASSERT_EQ(torch_trace_collector_install(), 0);
-
-    EXPECT_NE(torch_trace_collector_push_user_scope(nullptr, "ctx", "gtest"), 0);
-    EXPECT_NE(torch_trace_collector_push_user_scope("marker", nullptr, "gtest"), 0);
-    EXPECT_NE(torch_trace_collector_push_user_scope("marker", "ctx", nullptr), 0);
+    const auto tensor        = at::empty({2, 3});
+    const auto check_storage = [](const c10::IValue& value)
+    {
+        ASSERT_TRUE(value.isTensorList());
+        const auto* impl = static_cast<const c10::detail::ListImpl*>(value.internalToPointer());
+        ASSERT_NE(impl, nullptr);
+        EXPECT_EQ(read_at_offset<const void*>(value, torch_abi::kIValuePayloadOff), impl);
+        const auto elements = value.toListRef();
+        const auto* begin = read_at_offset<const c10::IValue*>(*impl,
+                                                               torch_abi::kListImplElementsBeginOff);
+        const auto* end = read_at_offset<const c10::IValue*>(*impl, torch_abi::kListImplElementsEndOff);
+        EXPECT_EQ(begin, elements.data());
+        EXPECT_EQ(end, elements.empty() ? elements.data() : &elements.back() + 1);
+    };
+    for (const std::size_t size : {0, 1, 9})
+    {
+        SCOPED_TRACE(size);
+        check_storage(c10::IValue(std::vector<at::Tensor>(size, tensor)));
+    }
+    check_storage(c10::IValue(std::vector<at::Tensor>{tensor, at::Tensor{}, tensor}));
+    c10::List<at::Tensor> reserved;
+    reserved.reserve(8);
+    const c10::IValue reserved_value(reserved);
+    ASSERT_NE(reserved_value.toListRef().data(), nullptr);
+    check_storage(reserved_value);
 }
 
-TEST_F(TorchTraceCollectorCApiTest, RejectsUserScopeBeforeInstall)
+TEST_F(TorchTraceCollectorTest, ConcurrentInstallationKeepsOneCallback)
 {
-    EXPECT_NE(torch_trace_collector_push_user_scope("before-install", "n/a", "gtest"), 0);
-}
-
-TEST_F(TorchTraceCollectorCApiTest, RejectsPopWithoutMatchingPush)
-{
-    ASSERT_EQ(torch_trace_collector_install(), 0);
-
-    EXPECT_NE(torch_trace_collector_pop_user_scope(), 0);
-}
-
-TEST_F(TorchTraceCollectorCApiTest, UserScopeEmitsEncodedRange)
-{
-    ASSERT_EQ(torch_trace_collector_install(), 0);
-
-    roctx_range_intercept::start_recording();
-    ASSERT_EQ(torch_trace_collector_push_user_scope("test.outer/%", "#1@test:7", "runtime"), 0);
-    const auto recorded = roctx_range_intercept::stop_recording();
-    ASSERT_EQ(torch_trace_collector_pop_user_scope(), 0);
-
-    ASSERT_EQ(recorded.size(), 1u);
-    EXPECT_EQ(recorded.front(), "test.outer%2F%25:#1@test:7|runtime");
-}
-
-TEST_F(TorchTraceCollectorCApiTest, ScopeOpenedBeforeUninstallCanStillBePopped)
-{
-    ASSERT_EQ(torch_trace_collector_install(), 0);
-    ASSERT_EQ(torch_trace_collector_push_user_scope("lifecycle-scope", "n/a", "gtest"), 0);
-    ASSERT_EQ(torch_trace_collector_uninstall(), 0);
-
-    EXPECT_EQ(torch_trace_collector_pop_user_scope(), 0);
-    EXPECT_EQ(stats().user_scope_pushes.load(), stats().user_scope_pops.load());
-}
-
-TEST_F(TorchTraceCollectorCApiTest, StatsRejectUndersizedOrNullStorage)
-{
-    torch_trace_collector_stats collector_stats{};
-    collector_stats.struct_size = sizeof(collector_stats) - 1;
-    EXPECT_NE(torch_trace_collector_get_stats(&collector_stats), 0);
-    EXPECT_NE(torch_trace_collector_get_stats(nullptr), 0);
-}
-
-TEST_F(TorchTraceCollectorCApiTest, StatsReportUserScopeActivity)
-{
-    ASSERT_EQ(torch_trace_collector_install(), 0);
-    ASSERT_EQ(torch_trace_collector_push_user_scope("test.stats", "#1@test:1", "gtest"), 0);
-    ASSERT_EQ(torch_trace_collector_pop_user_scope(), 0);
-
-    torch_trace_collector_stats collector_stats{};
-    collector_stats.struct_size = sizeof(collector_stats);
-    ASSERT_EQ(torch_trace_collector_get_stats(&collector_stats), 0);
-
-    EXPECT_EQ(collector_stats.installed, 1u);
-    EXPECT_EQ(collector_stats.user_scope_pushes, 1u);
-    EXPECT_EQ(collector_stats.user_scope_pops, 1u);
-    EXPECT_EQ(collector_stats.callback_errors, 0u);
-}
-
-TEST_F(TorchTraceCollectorCApiTest, ConcurrentInstallAndUninstallStayConsistent)
-{
-    constexpr int kThreads    = 8;
-    constexpr int kIterations = 16;
-
-    std::vector<std::thread> workers;
     std::atomic<int>         failures{0};
-    for (int index = 0; index < kThreads; ++index)
+    std::vector<std::thread> workers;
+    for (int index = 0; index < 8; ++index)
     {
         workers.emplace_back(
             [&failures]
             {
-                for (int iteration = 0; iteration < kIterations; ++iteration)
+                for (int iteration = 0; iteration < 16; ++iteration)
                 {
-                    if (torch_trace_collector_install() != 0 || torch_trace_collector_uninstall() != 0)
-                    {
-                        failures.fetch_add(1);
-                        return;
-                    }
+                    if (torch_trace_collector_install() != 0)
+                        ++failures;
                 }
             });
     }
     for (auto& worker : workers)
-    {
         worker.join();
-    }
-
+    emit_record("one-callback");
+    const auto captured = roctx_range_intercept::stop_recording();
     EXPECT_EQ(failures.load(), 0);
-    EXPECT_EQ(torch_trace_collector_is_installed(), 0);
+    ASSERT_EQ(captured.messages.size(), 1u);
+    EXPECT_EQ(captured.pops, 1u);
+}
+
+TEST_F(TorchTraceCollectorTest, EveryRecordScopeProducesOneBalancedRange)
+{
+    constexpr std::array<const char*, 10> names = {"FUNCTION",
+                                                   "BACKWARD_FUNCTION",
+                                                   "TORCHSCRIPT_FUNCTION",
+                                                   "KERNEL_FUNCTION_DTYPE",
+                                                   "CUSTOM_CLASS",
+                                                   "BUILD_FEATURE",
+                                                   "LITE_INTERPRETER",
+                                                   "USER_SCOPE",
+                                                   "STATIC_RUNTIME_OP",
+                                                   "STATIC_RUNTIME_MODEL"};
+    for (std::size_t index = 0; index < names.size(); ++index)
+        emit_record("scope/%", {}, static_cast<at::RecordScope>(index));
+    const auto captured = roctx_range_intercept::stop_recording();
+    ASSERT_EQ(captured.messages.size(), names.size());
+    EXPECT_EQ(captured.pops, names.size());
+    for (std::size_t index = 0; index < names.size(); ++index)
+    {
+        EXPECT_EQ(captured.messages[index].find("scope%2F%25:n/a|seqNr=n/a|"), 0u);
+        EXPECT_NE(captured.messages[index].find(std::string{"|scope="} + names[index] + "|args=n/a|torch"),
+                  std::string::npos);
+    }
+}
+
+TEST_F(TorchTraceCollectorTest, NestedRecordsStayBalancedWhenWorkloadThrows)
+{
+    EXPECT_THROW(
+        {
+            at::RecordFunction outer(at::RecordScope::USER_SCOPE);
+            outer.before("outer");
+            at::RecordFunction inner(at::RecordScope::FUNCTION);
+            inner.before("inner");
+            throw std::runtime_error("workload failure");
+        },
+        std::runtime_error);
+    const auto captured = roctx_range_intercept::stop_recording();
+    EXPECT_EQ(captured.messages.size(), 2u);
+    EXPECT_EQ(captured.pops, 2u);
+}
+
+TEST_F(TorchTraceCollectorTest, FailedPushDoesNotPopTheParentRange)
+{
+    {
+        at::RecordFunction parent(at::RecordScope::USER_SCOPE);
+        parent.before("parent");
+        roctx_range_intercept::fail_next_push();
+        emit_record("failed-child");
+    }
+    const auto captured = roctx_range_intercept::stop_recording();
+    EXPECT_EQ(captured.messages.size(), 1u);
+    EXPECT_EQ(captured.pops, 1u);
+}
+
+TEST_F(TorchTraceCollectorTest, LauncherIdsNestAndRestore)
+{
+    EXPECT_NE(torch_trace_collector_pop_launcher_tid(), 0);
+    ASSERT_EQ(torch_trace_collector_push_launcher_tid(101), 0);
+    emit_record("outer-launcher");
+    ASSERT_EQ(torch_trace_collector_push_launcher_tid(202), 0);
+    emit_record("inner-launcher");
+    ASSERT_EQ(torch_trace_collector_pop_launcher_tid(), 0);
+    emit_record("restored-launcher");
+    ASSERT_EQ(torch_trace_collector_pop_launcher_tid(), 0);
+    emit_record("no-launcher");
+    EXPECT_NE(torch_trace_collector_pop_launcher_tid(), 0);
+    const auto captured = roctx_range_intercept::stop_recording();
+    ASSERT_EQ(captured.messages.size(), 4u);
+    const std::array<const char*, 4> expected = {"101", "202", "101", "n/a"};
+    for (std::size_t index = 0; index < expected.size(); ++index)
+        EXPECT_NE(captured.messages[index].find(std::string{"|ltid="} + expected[index] + "|"),
+                  std::string::npos);
+    EXPECT_EQ(captured.pops, 4u);
+}
+
+TEST_F(TorchTraceCollectorTest, LauncherLifetimeSurvivesPropagationToWorker)
+{
+    ASSERT_EQ(torch_trace_collector_push_launcher_tid(12345), 0);
+    const at::ThreadLocalState launcher_state;
+    ASSERT_EQ(torch_trace_collector_pop_launcher_tid(), 0);
+    std::thread worker(
+        [&launcher_state]
+        {
+            emit_record("before-guard");
+            {
+                at::ThreadLocalStateGuard guard(launcher_state);
+                emit_record("worker", {}, at::RecordScope::BACKWARD_FUNCTION);
+            }
+            emit_record("after-guard");
+        });
+    worker.join();
+    const auto captured = roctx_range_intercept::stop_recording();
+    ASSERT_EQ(captured.messages.size(), 3u);
+    EXPECT_NE(captured.messages[0].find("|ltid=n/a|"), std::string::npos);
+    EXPECT_NE(captured.messages[1].find("|ltid=12345|"), std::string::npos);
+    EXPECT_NE(captured.messages[2].find("|ltid=n/a|"), std::string::npos);
+    EXPECT_EQ(captured.pops, 3u);
+}
+
+TEST_F(TorchTraceCollectorTest, ConcurrentLaunchersRemainIsolated)
+{
+    std::atomic<int>         failures{0};
+    std::vector<std::thread> workers;
+    for (std::uint64_t index = 1; index <= 4; ++index)
+    {
+        workers.emplace_back(
+            [index, &failures]
+            {
+                if (torch_trace_collector_push_launcher_tid(index) != 0)
+                    ++failures;
+                emit_record("worker-" + std::to_string(index));
+                if (torch_trace_collector_pop_launcher_tid() != 0)
+                    ++failures;
+            });
+    }
+    for (auto& worker : workers)
+        worker.join();
+    const auto captured = roctx_range_intercept::stop_recording();
+    EXPECT_EQ(failures.load(), 0);
+    ASSERT_EQ(captured.messages.size(), 4u);
+    for (std::uint64_t index = 1; index <= 4; ++index)
+    {
+        EXPECT_TRUE(std::any_of(captured.messages.begin(),
+                                captured.messages.end(),
+                                [index](const std::string& message)
+                                {
+                                    return message.find("worker-" + std::to_string(index) + ":") == 0 &&
+                                           message.find("|ltid=" + std::to_string(index) + "|") !=
+                                               std::string::npos;
+                                }));
+    }
+    EXPECT_EQ(captured.pops, 4u);
+}
+
+TEST_F(TorchTraceCollectorTest, CapturesTensorShapesDtypesAndScalarTags)
+{
+    const auto matrix = at::empty({2, 3}, at::TensorOptions().dtype(at::kFloat));
+    const auto scalar = at::empty({}, at::TensorOptions().dtype(at::kLong));
+    const auto empty  = at::empty({0, 7}, at::TensorOptions().dtype(at::kBFloat16));
+    EXPECT_EQ(captured_arguments({matrix, scalar, empty, at::Tensor{}, std::int64_t{4}, true, "text"}),
+              "(float32[2x3], int64[], bfloat16[0x7], None, Int, Bool, String)");
+    EXPECT_EQ(captured_arguments({}), "n/a");
+}
+
+TEST_F(TorchTraceCollectorTest, CapturesRealSchemaArgumentNamesAndOverloads)
+{
+    const auto tensor = at::empty({2, 3});
+    EXPECT_EQ(captured_schema_arguments("aten::add", "Tensor", {tensor, tensor, std::int64_t{1}}),
+              "(self=float32[2x3], other=float32[2x3], alpha=Int)");
+    EXPECT_EQ(captured_schema_arguments("aten::add", "Scalar", {tensor, std::int64_t{1}, std::int64_t{1}}),
+              "(self=float32[2x3], other=Int, alpha=Int)");
+    EXPECT_EQ(captured_schema_arguments("aten::to",
+                                        "dtype",
+                                        {tensor, std::int64_t{6}, false, false, c10::IValue{}}),
+              "(self=float32[2x3], dtype=Int, non_blocking=Bool, copy=Bool, memory_format=None)");
+}
+
+TEST_F(TorchTraceCollectorTest, CapturesReloadedSchemaNamesOnWarmAndColdThreads)
+{
+    constexpr auto       name = "schema_cache_regression::reload";
+    constexpr std::array argument_names{"original_input", "replacement_input", "final_input"};
+    torch::Library library(torch::Library::FRAGMENT, "schema_cache_regression", std::nullopt, __FILE__, __LINE__);
+    torch::Library implementation(torch::Library::IMPL, "schema_cache_regression", std::nullopt, __FILE__, __LINE__);
+    implementation.impl("reload", [](std::int64_t input) { return input; });
+    auto original_handle = c10::Dispatcher::singleton().findOp({name, ""});
+    ASSERT_TRUE(original_handle.has_value());
+    const std::vector<c10::IValue> inputs{std::int64_t{7}};
+
+    std::array<std::promise<std::string>, argument_names.size()> worker_captured;
+    std::array<std::future<std::string>, argument_names.size()>  worker_arguments;
+    std::future<void>                                            worker;
+    // Destruction releases the worker before its async future can wait for it.
+    std::array<std::promise<void>, argument_names.size()> schema_ready;
+    std::array<std::future<void>, argument_names.size()>  readiness;
+    for (std::size_t index = 0; index < argument_names.size(); ++index)
+    {
+        worker_arguments[index] = worker_captured[index].get_future();
+        readiness[index]        = schema_ready[index].get_future();
+    }
+    worker = std::async(std::launch::async,
+                        [&, ready = std::move(readiness)]() mutable
+                        {
+                            for (std::size_t index = 0; index < argument_names.size(); ++index)
+                            {
+                                try
+                                {
+                                    ready[index].get();
+                                    worker_captured[index].set_value(
+                                        captured_schema_arguments(name, "", inputs));
+                                }
+                                catch (...)
+                                {
+                                    worker_captured[index].set_exception(std::current_exception());
+                                    return;
+                                }
+                            }
+                        });
+
+    for (std::size_t index = 0; index < argument_names.size(); ++index)
+    {
+        SCOPED_TRACE(argument_names[index]);
+        library.reset();
+        EXPECT_FALSE(c10::Dispatcher::singleton().findSchema({name, ""}).has_value());
+        if (index + 1 == argument_names.size())
+        {
+            original_handle.reset();
+            implementation.reset();
+            EXPECT_FALSE(c10::Dispatcher::singleton().findOp({name, ""}).has_value());
+        }
+        const auto schema = "reload(int " + std::string{argument_names[index]} + ") -> int";
+        library.def(schema.c_str());
+        const auto handle = c10::Dispatcher::singleton().findSchemaOrThrow(name, "");
+        EXPECT_EQ(handle.schema().arguments()[0].name(), argument_names[index]);
+        if (original_handle.has_value())
+        {
+            EXPECT_EQ(handle, *original_handle);
+        }
+
+        const auto expected = "(" + std::string{argument_names[index]} + "=Int)";
+        EXPECT_EQ(captured_schema_arguments(name, "", inputs), expected);
+        schema_ready[index].set_value();
+        EXPECT_EQ(worker_arguments[index].get(), expected);
+        EXPECT_EQ(std::async(std::launch::async,
+                             [&] { return captured_schema_arguments(name, "", inputs); })
+                      .get(),
+                  expected);
+    }
+    worker.get();
+}
+
+TEST_F(TorchTraceCollectorTest, RealForwardBackwardDispatchCapturesArgumentsAndBalances)
+{
+    const auto input = at::randn({2, 3}).requires_grad_(true);
+    roctx_range_intercept::start_recording();
+    const auto loss = (input * 2).sum();
+    loss.backward();
+    const auto captured = roctx_range_intercept::stop_recording();
+    ASSERT_FALSE(captured.messages.empty());
+    EXPECT_EQ(captured.messages.size(), captured.pops);
+    EXPECT_TRUE(std::any_of(captured.messages.begin(),
+                            captured.messages.end(),
+                            [](const std::string& message)
+                            {
+                                return message.find("aten::mul:") == 0 &&
+                                       message.find("|args=(self=float32[2x3],") != std::string::npos;
+                            }));
+    EXPECT_TRUE(
+        std::any_of(captured.messages.begin(),
+                    captured.messages.end(),
+                    [](const std::string& message)
+                    { return message.find("|scope=BACKWARD_FUNCTION|") != std::string::npos; }));
+}
+
+TEST_F(TorchTraceCollectorTest, TensorListsAndTopLevelItemsRespectBounds)
+{
+    const auto                 tensor = at::empty({2}, at::TensorOptions().dtype(at::kHalf));
+    constexpr std::string_view seven_elements =
+        "([float16[2], float16[2], float16[2], float16[2], float16[2], float16[2], float16[2]])";
+    constexpr std::string_view eight_elements = "([float16[2], float16[2], float16[2], float16[2], "
+                                                "float16[2], float16[2], float16[2], float16[2]])";
+    constexpr std::array<std::pair<std::size_t, std::string_view>, 6> cases = {{
+        {0, "([])"},
+        {1, "([float16[2]])"},
+        {7, seven_elements},
+        {8, eight_elements},
+        {9, eight_elements},
+        {1048577, eight_elements},
+    }};
+    for (const auto& [size, expected] : cases)
+    {
+        SCOPED_TRACE(size);
+        EXPECT_EQ(captured_arguments({c10::IValue(std::vector<at::Tensor>(size, tensor))}), expected);
+    }
+    c10::List<at::Tensor> reserved;
+    reserved.reserve(8);
+    EXPECT_EQ(captured_arguments({c10::IValue(reserved)}), "([])");
+    EXPECT_EQ(captured_arguments({c10::IValue(std::vector<at::Tensor>{at::Tensor{}})}), "([None])");
+    const auto matrix = at::empty({3, 4});
+    const auto scalar = at::empty({}, at::TensorOptions().dtype(at::kLong));
+    const auto empty  = at::empty({0, 7}, at::TensorOptions().dtype(at::kBFloat16));
+    const std::vector<at::Tensor>
+        mixed{at::Tensor{}, tensor, matrix, at::Tensor{}, scalar, empty, tensor, at::Tensor{}, matrix};
+    EXPECT_EQ(captured_arguments({c10::IValue(mixed)}),
+              "([None, float16[2], float32[3x4], None, int64[], bfloat16[0x7], float16[2], None])");
+    const std::vector<c10::IValue> inputs(33, true);
+    const auto                     arguments = captured_arguments(inputs);
+    EXPECT_EQ(std::count(arguments.begin(), arguments.end(), ','), 31);
+    EXPECT_EQ(arguments.substr(arguments.size() - 5), "Bool)");
+}
+
+TEST_F(TorchTraceCollectorTest, LongArgumentOutputIsBoundedAndTerminated)
+{
+    const std::vector<std::int64_t> dimensions(64, 1);
+    const auto                      tensor = at::empty(dimensions);
+    const std::vector<c10::IValue>  inputs(32, tensor);
+    const auto                      arguments = captured_arguments(inputs);
+    EXPECT_EQ(arguments.size(), torch_trace_collector::detail::kMaxArgsLength + 4);
+    EXPECT_EQ(arguments.substr(arguments.size() - 4), "...)");
+
+    std::string tensor_text = "float32[1";
+    for (std::size_t index = 1; index < dimensions.size(); ++index)
+        tensor_text += "x1";
+    tensor_text += ']';
+    std::string list_text = "[";
+    for (int index = 0; index < 8; ++index)
+        list_text += (index == 0 ? "" : ", ") + tensor_text;
+    list_text += ']';
+    const c10::IValue list(std::vector<at::Tensor>(100000, tensor));
+    const auto        truncate = [](std::string expected)
+    {
+        expected.resize(torch_trace_collector::detail::kMaxArgsLength);
+        return expected + "...)";
+    };
+    EXPECT_EQ(captured_arguments({list}), truncate("(" + list_text + ")"));
+    EXPECT_EQ(captured_arguments({tensor, tensor, tensor, list}),
+              truncate("(" + tensor_text + ", " + tensor_text + ", " + tensor_text + ", " +
+                       list_text + ")"));
+
+    at::RecordFunction record(at::RecordScope::FUNCTION);
+    record.before("small-output", &inputs);
+    std::array<char, 5> short_output{'?', '?', '?', '?', '!'};
+    const auto required = torch_trace_collector::detail::capture_args(record, short_output.data(), 4);
+    EXPECT_EQ(required, arguments.size() + 1);
+    EXPECT_EQ(short_output[3], '\0');
+    EXPECT_EQ(short_output[4], '!');
+    EXPECT_EQ(torch_trace_collector::detail::capture_args(record, nullptr, 0), required);
+}
+
+TEST_F(TorchTraceCollectorTest, ExtendedDtypesMatchTheRuntimeMinor)
+{
+    const auto tensor = at::empty({2}, at::TensorOptions().dtype(at::ScalarType::UInt16));
+    EXPECT_EQ(captured_arguments({tensor}), "(uint16[2])");
+#if TORCH_VERSION_MAJOR == 2 && TORCH_VERSION_MINOR >= 14
+    static_assert(static_cast<std::int32_t>(at::ScalarType::BComplex32) ==
+                  torch_abi::kBComplex32ScalarType);
+    const auto complex_tensor = at::empty({2}, at::TensorOptions().dtype(at::ScalarType::BComplex32));
+    EXPECT_EQ(captured_arguments({complex_tensor}), "(bcomplex32[2])");
+#else
+    static_assert(static_cast<std::int32_t>(at::ScalarType::Undefined) == torch_abi::kBComplex32ScalarType);
+#endif
+}
+
+TEST(MarkerEncoding, EncodesNamesAndPreservesEncodedArgumentField)
+{
+    using torch_trace_collector::detail::format_range_name;
+    using torch_trace_collector::detail::RangeNameFields;
+    const RangeNameFields fields{"aten::add/%", "n/a", 7, 11, 13, 17, "FUNCTION", "(value=%25%7C%3B%0D%0A)", "torch"};
+    const std::string expected =
+        "aten::add%2F%25:n/"
+        "a|seqNr=7|tid=11|ftid=13|ltid=17|scope=FUNCTION|args=(value=%25%7C%3B%0D%0A)|torch";
+    std::array<char, 256> output{};
+    EXPECT_EQ(format_range_name(output.data(), output.size(), fields), expected.size() + 1);
+    EXPECT_EQ(std::string{output.data()}, expected);
+    std::array<char, 12> short_output{};
+    EXPECT_EQ(format_range_name(short_output.data(), short_output.size(), fields), expected.size() + 1);
+    EXPECT_EQ(std::string{short_output.data()}, expected.substr(0, short_output.size() - 1));
+    EXPECT_EQ(short_output.back(), '\0');
+    EXPECT_EQ(format_range_name(nullptr, 0, fields), expected.size() + 1);
 }

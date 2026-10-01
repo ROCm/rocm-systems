@@ -10,7 +10,6 @@ Inductor kernel launches appear in ROCTX markers.
 
 import importlib.util
 import inspect
-import threading
 from functools import partial, partialmethod
 from pathlib import Path
 from typing import Any, Callable
@@ -36,23 +35,6 @@ class _TritonState:
 
 
 _STATE = _TritonState()
-
-# Per-thread guard so nested launches emit a single marker.
-_thread_local = threading.local()
-
-
-def _in_launch() -> bool:
-    return getattr(_thread_local, "in_launch", False)
-
-
-def _next_launch_index(marker: str) -> int:
-    """Per-thread occurrence count for marker."""
-    counters = getattr(_thread_local, "launch_counters", None)
-    if counters is None:
-        counters = {}
-        _thread_local.launch_counters = counters
-    counters[marker] = counters.get(marker, 0) + 1
-    return counters[marker]
 
 
 def _resolve_triton() -> bool:
@@ -124,23 +106,15 @@ def _run_with_marker(
     marker_prefix: str,
     thunk: Callable[[], Any],
 ) -> object:
-    """Run ``thunk`` inside a ROCTX range; nested launches reuse the outer range."""
-    if _in_launch():
-        return thunk()
+    """Run thunk inside a ROCTX range."""
     kernel_name = _extract_kernel_name(self_obj)
     marker = f"{marker_prefix}.{kernel_name}"
     location = resolve_user_caller_location()
-    index = _next_launch_index(marker)
-    _thread_local.in_launch = True
-    pushed = False
+    _push_scope(marker, location, backend=_BACKEND_NAME)
     try:
-        _push_scope(marker, f"#{index}@{location}", backend=_BACKEND_NAME)
-        pushed = True
         return thunk()
     finally:
-        if pushed:
-            _pop_scope()
-        _thread_local.in_launch = False
+        _pop_scope()
 
 
 def _roctx_method_call(

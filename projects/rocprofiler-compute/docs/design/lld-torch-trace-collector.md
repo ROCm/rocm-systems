@@ -1,218 +1,187 @@
-# LLD: torch_trace_collector
+# LLD: Torch trace collector
 
-## Motivation
+## Scope and source ownership
 
-Implementation of the RecordFunction collector in `hld-torch-trace-collector.md`.
+This document describes the producer defined by the
+[high-level design](hld-torch-trace-collector.md). It emits flat ROCTX markers
+and leaves call-tree construction to analysis.
 
----
+| Source | Responsibility |
+| --- | --- |
+| [torch.py](../../src/utils/inject_roctx/_backends/torch.py) | Structural Python wrappers and TorchDispatchMode fallback |
+| [torch_trace_collector.py](../../src/utils/inject_roctx/_backends/torch_trace_collector.py) | Generic-artifact discovery, runtime loading, C-interface binding, and launcher publication |
+| [core.py](../../src/utils/inject_roctx/core.py) | Python ROCTX I/O, source-location resolution, and flat marker composition |
+| [torch_trace_collector.cpp](../../src/lib/torch_trace_collector/torch_trace_collector.cpp) | Process-wide callback installation, range lifetime, and launcher debug info |
+| [argument_capture.cpp](../../src/lib/torch_trace_collector/argument_capture.cpp) | Bounded input rendering and schema-name lookup |
+| [wire_format.h](../../src/lib/torch_trace_collector/wire_format.h) | Native marker serialization |
+| [torch_abi.h](../../src/lib/torch_trace_collector/torch_abi/torch_abi.h) | Measured private PyTorch layouts used by the local declarations |
+| [utils_profile.py](../../src/utils/utils_profile.py) | Copy marker and counter CSVs into the workload directory |
 
-## Code flow
+## Installation and callback lifetime
 
-```mermaid
-flowchart LR
-  launch["launch.py"] --> torch["torch.py"]
-  torch --> loader["torch_cpp_loader.py"]
-  loader --> finder["native_tool_finder.py"]
-  loader --> cpu["workload libtorch_cpu.so"]
-  loader --> so["torch_trace_collector.so"]
-  cpu --> so
-  so --> api["plain-C entry points"]
-  torch --> api
-  api --> core["torch_trace_collector.cpp"]
-  core --> snap["snapshot_store.cpp"]
-  core --> roctx["roctxRangePushA"]
-```
+The loader imports PyTorch and reduces its version to major.minor. Only 2.13
+and 2.14 select native tracing. It locates torch_trace_collector.so using
+native_tool_finder, with installed artifacts searched before source build
+directories.
 
-The wrap set lives in `torch.py` and does not change when the collector loads.
+The loader reopens the workload's own libtorch_cpu.so with global symbol
+visibility. The collector is then loaded locally through ctypes.CDLL, so its
+unresolved Torch/c10 and AOTI symbols resolve from the workload. Both library
+handles are retained for the process lifetime. No Python extension ABI crosses
+this boundary.
 
----
+After checking the C-interface revision, the loader binds all entry points
+and installs one global RecordFunction callback. Installation is serialized
+and idempotent. The callback requests inputs and observes every RecordFunction
+scope. The Python backend activates TorchDispatchMode only if native loading
+or installation fails; structural Python wrappers remain active in either
+case.
 
-## Threading
+For each RecordFunction start, the callback borrows the current name,
+correlation fields, and inputs for the duration of that callback. It captures
+the arguments, formats one marker, and pushes one ROCTX range. Its observer
+context tells the matching end callback whether that push succeeded. End pops
+only a successfully pushed range. The observer context does not retain tensor
+or RecordFunction pointers.
 
-How workers see Python scopes:
+Exceptions are contained before returning through RecordFunction or plain-C
+entry points. A failed callback does not issue an unmatched range pop.
 
-- Worker RecordFunction sees ATen and autograd names
-  (`evaluate_function`, `AddmmBackward0`). It does not see Python wraps.
-- The worker never runs those wraps, so debug info is how wrap frames
-  reach it.
-- Without that copy, worker ranges start at `evaluate_function` and omit
-  `Tensor.backward`. Forward module and ATen names still appear from the
-  snapshot.
-- Python wraps store the live wrap stack in PyTorch's per-thread debug
-  info.
-- After forward returns, module wraps have popped, so when autograd
-  queues the worker this is typically just `Tensor.backward`.
-- Autograd copies that onto the worker. Whenever the worker stack is empty,
-  those wrap frames are copied onto it.
+## Launcher propagation
 
-```mermaid
-%%{init: {"flowchart": {"htmlLabels": true, "curve": "linear", "nodeSpacing": 8, "rankSpacing": 70, "padding": 4}}}%%
-flowchart TB
-  subgraph top [ ]
-    direction LR
-    subgraph main [Main thread]
-      direction TB
-      D["debug info"]
-      P["forward snapshot"]
-    end
-    AG(["autograd"])
-    subgraph worker [Worker thread]
-      direction TB
-      WpadT["<br/>"]
-      subgraph wflow [ ]
-        direction LR
-        S1["overlay"] --> S2["consume snapshot"]
-        S2 --> S3["push leaf"]
-        S3 --> FIN["ROCTX range"]
-      end
-      WpadB["<br/>"]
-    end
-    D -->|"copies debug info<br/>onto the worker task"| AG
-    AG -->|"RecordFunction,<br/>empty stack"| S1
-  end
-  subgraph store [Process-wide snapshot store]
-    direction TB
-    SpadT["<br/>"]
-    KEY["(seqNr, thread id)"]
-    SpadB["<br/>"]
-  end
-  store -->|"backward op lookup"| S2
-  S2 ~~~ store
-  style top fill:none,stroke:none
-  style wflow fill:none,stroke:none
-  style WpadT fill:none,stroke:none,color:transparent
-  style WpadB fill:none,stroke:none,color:transparent
-  style SpadT fill:none,stroke:none,color:transparent
-  style SpadB fill:none,stroke:none,color:transparent
-```
+Selected Python autograd wrappers publish the current native operating-system
+thread id immediately before calling the wrapped entry point. The native
+collector stores that id in a LauncherTidInfo object under its dedicated
+ThreadLocalDebugInfo key. PyTorch carries the shared debug info into autograd
+worker tasks; a worker callback reads the inherited value for its marker.
 
-| Step | From | Stack |
+Publications may nest. The native code tracks successful pushes per thread,
+and the Python wrapper pops only after its own push succeeded. The pop restores
+the previous publication even when the wrapped workload raises. A worker keeps
+the shared debug info for the task lifetime; the marker never contains a
+pointer to a Python frame or object.
+
+The launcher id matches the CSV Thread_Id namespace. RecordFunction's tid and
+ftid fields use PyTorch's own thread identifiers and must not replace it.
+
+## Argument capture
+
+The callback requests RecordFunction inputs. The capture module reads the
+borrowed input-array view through the shim's recorded offset and uses the
+operator name and overload, when available, to look up schema argument names.
+The collector updates cached argument names when PyTorch registers or removes
+a schema. It reads schemas under PyTorch's registration lock and keeps old
+name data until process exit so other threads can finish reading it safely.
+If names are unavailable, arguments are recorded without them.
+
+| Input | Marker representation |
+| --- | --- |
+| Defined tensor | Dtype followed by dimensions separated by x inside brackets |
+| Undefined tensor | None |
+| TensorList | A bracketed list of rendered tensors, limited to eight entries |
+| Other IValue | Its type tag rather than its full contents |
+| No inputs or unavailable capture | n/a |
+| Individual value capture failure | ? |
+
+Tensor metadata is read through runtime AOTI operations. The module does not
+copy tensor contents or retain their ownership. Common dtype names come from
+AOTI dtype identifiers; version-dependent fallback dtype names use the AOTI
+version independently of the loader's supported-minor check.
+
+TensorLists borrow their existing element array during synchronous capture.
+Traversal stops after eight entries or when the text buffer truncates, without
+copying the list or retaining element ownership.
+
+Capture renders at most 32 top-level arguments and limits the unencoded text
+to 512 bytes of payload. Truncated text may add the four-character closing
+suffix, and percent encoding can expand the wire field further. Python
+wrappers apply the corresponding character-count limit and delimiter encoding
+to their available tensor arguments.
+
+## Marker wire contract
+
+The existing one-level v1 syntax is an encoded name, a colon, and its location,
+followed by pipe-delimited fields in the order below. The v1 label describes
+the wire contract; it is not an additional serialized token. The native C API
+revision is versioned separately.
+
+| Field | Native RecordFunction value | Python wrapper value |
 | --- | --- | --- |
-| debug info | wrap stack on the main thread | **Tensor.backward** |
-| forward snapshot | saved on the main thread during forward | **SimpleNet.forward / Linear.forward / aten::linear / aten::addmm** |
-| overlay | debug info copied onto the worker | **Tensor.backward** |
-| consume snapshot | process-wide store, prefix dedup | **Tensor.backward / SimpleNet.forward / Linear.forward / aten::linear / aten::addmm** |
-| push leaf | RecordFunction name | **… / AddmmBackward0** |
-| ROCTX range | full worker stack | **Tensor.backward / SimpleNet.forward / Linear.forward / aten::linear / aten::addmm / AddmmBackward0** |
+| Name | Current RecordFunction name | Wrapped API or module name |
+| Location | n/a | User file:line when available, otherwise n/a |
+| seqNr | Nonnegative sequence number, otherwise n/a | n/a |
+| tid | Current PyTorch thread id | n/a |
+| ftid | RecordFunction forward thread id, including zero when absent | n/a |
+| ltid | Inherited launcher OS thread id, otherwise n/a | n/a |
+| scope | RecordFunction scope name, otherwise n/a | n/a |
+| args | Encoded, bounded argument text, otherwise n/a | Encoded available arguments, otherwise n/a |
+| Backend | Raw trailing torch token | Raw trailing torch or triton token |
 
-- Debug info shares the wrap stack still live on the main thread. In this
-  example that is `Tensor.backward`.
-- It does not include `SimpleNet.forward` or `aten::addmm`; those frames
-  have already left the stack.
-- Consume appends that frozen forward nest, then the leaf is pushed.
-  Save is not this path; it already ran on the forward thread.
-- The ROCTX range is wrap + forward nest + leaf.
+The metadata field names are followed by an equals sign. The backend is a
+bare final token. Name encoding replaces percent and slash with %25 and %2F.
+Argument encoding replaces percent, pipe, semicolon, carriage return, and
+newline with %25, %7C, %3B, %0D, and %0A. Source locations retain the existing
+unencoded representation.
 
-- Stack and debug-info guards are `thread_local` (`torch_trace_collector.cpp`).
-- Snapshot store and install handle are process-wide.
-- Python thread's `push_user_scope` publishes the **live** wrap stack into `ThreadLocalDebugInfo`.
-- Autograd copies the main thread's `ThreadLocalState` onto the worker thread before `evaluate_function`.
-- Overlay copies that restored `ThreadLocalDebugInfo` chain onto the worker's empty marker stack.
+Each label contains one call. Parent-child relationships come from ROCTX
+timestamps and executing thread ids, not from slash-separated ancestor paths.
+Python wrappers and native callbacks must preserve the same field names and
+encoding for downstream parsing.
 
----
+## CSV storage and analysis boundary
 
-## RecordFunction start and end
-####  `torch_trace_collector.cpp`
+Profile copies each pass's marker and counter CSVs into the workload directory
+with the existing ml_api_trace prefix and marker_api_trace/counter_collection
+suffixes, preserving compression. The Function cell stays unchanged: the
+backend, argument text, and correlation fields are not split into columns at
+collection time.
 
-1. If the stack is empty, overlay debug info. If overlay pushed frames, the leaf is nested.
-2. If the scope is `BACKWARD_FUNCTION`, `seqNr >= 0`, and `forwardThreadId() != 0`, consume `(seqNr, forwardThreadId)` and push frames that are not already a shared prefix. `forwardThreadId() == 0` means no forward identity (`evaluate_function` and other non-Node backward records).
-3. Push the leaf (RecordFunction name plus default leaf context).
-4. If the scope is `FUNCTION` and `seqNr >= 0`, save the stack (including the leaf) under `(seqNr, currentThreadId())`.
-5. Format the stack, append `|torch`, `roctxRangePushA`.
-
-Overlay and consumed snapshot frames are extra pushes. `end_cb` pops the
-ROCTX range, the leaf, then those extras.
-
----
-
-## Snapshot store
-#### `snapshot_store.cpp`, `torch_trace_collector.cpp`
-
-- **Insert:** After a forward leaf with a valid `seqNr` is pushed, the collector copies that thread's stack into this map. The matching backward often runs later on a worker, after those frames have popped.
-- **Consume:** The matching backward looks up `(seqNr, forward thread id(non-zero))` and pushes frames the stack does not already have. This map is not debug info.
-- **Overlay:** If this thread's stack is empty, copy the live wrap chain from debug info onto it (typically `Tensor.backward`). Autograd copied that TLS; it is not this map.
-- **Entry:** Wrap frames plus nested ATen names, including the forward leaf.
-- **Key:** `(seqNr, thread id)`. Save uses `currentThreadId()`; consume uses `forwardThreadId()`. Consume moves the entry out. A second save of the same key overwrites.
-- **Shards:** 64 shards. Hash of the key picks the shard. Each has its own map, LRU, and lock. Keys in the same shard share that lock.
-- **LRU:** Each shard keeps at most 10000 entries. A new key past that drops the oldest in that shard (`snapshots_dropped`).
-- **Lifetime:** `pending()` is the sum of shard sizes. `uninstall()` / `clear()` empties every shard. Detached forwards stay until LRU evicts them.
-- **Counters:** `dump_stats()`: `snapshots_saved`, `snapshots_consumed`, `snapshots_dropped`, `snapshots_overwritten`, and `pending()` as `snapshots_pending`.
-
----
-
-## Wire format
-#### `wire_format.h`
-
-- Each ROCTX range name is the full stack: `marker1/.../markerN:context1/.../contextN[|backend]`.
-- Marker `%` and `/` are `%25` and `%2F`. Contexts are not encoded.
-- RecordFunction ranges append `|torch`. User-scope ranges append `|<backend>` when `backend` is non-empty.
-- Profile post-processing moves `|backend` into a `Backend` column. Unrecognized suffixes are `unknown`.
-
-- **Leaf context** (`leaf_context.h`). RecordFunction runs in C++ and does not carry a location; unlike wrap frames that have it. Dummy locations are set by `leaf_context.h` based on RecordFunction scope, `seqNr`, and whether the stack was empty after overlay — e.g. a backward op vs a nested ATen op.
-
----
+A compatible analysis consumer parses the flat fields, nests marker intervals
+per OS thread, and uses ltid plus timestamp containment to attach worker trees
+to their launcher. Across replay passes, ltid is not a stable identity because
+the OS assigns new thread ids. The consumer can exclude it from its stitch
+key while retaining seqNr, tid, and ftid. Consumers expecting the older stacked
+marker syntax require the flat-marker analysis update.
 
 ## Plain-C interface
 
-The shared library exports an ABI revision query plus operations to install and
-uninstall the callback, query installation state, push and pop user scopes, and
-copy collector statistics into caller-owned storage. Strings cross as UTF-8 C
-strings, and statistics use a size-tagged C structure. No Python objects or
-PyTorch C++ objects cross this public boundary.
+The collector exports exactly four functions at interface revision 2.
 
-The Python facade binds these functions with `ctypes` and preserves the method
-surface previously provided by the extension module. Failures are reported by
-status code, and exceptions are contained before returning through the C or
-RecordFunction callback boundary.
+| Entry point | Contract |
+| --- | --- |
+| torch_trace_collector_abi_revision | Return the interface revision |
+| torch_trace_collector_install | Install the process-wide callback; return zero on success |
+| torch_trace_collector_push_launcher_tid | Publish a uint64 launcher OS thread id; return zero on success |
+| torch_trace_collector_pop_launcher_tid | Restore this thread's preceding successful publication; return zero on success |
 
----
+Each non-query operation reports failure with a nonzero status. Python binds
+the complete interface before installation and verifies the revision before
+using it. The callback remains installed until process exit. This interface
+does not expose the former native user-scope stack, snapshot store, uninstall,
+or statistics operations.
 
-## Build and load
+## Build, tests, and private ABI
 
-- `src/lib/torch_trace_collector/CMakeLists.txt` always builds the collector as
-  C++17. It requires `rocprofiler-sdk-roctx`, but no PyTorch installation,
-  PyTorch headers or libraries, or Python development headers.
-- Small declarations under `torch_abi/` describe only the private PyTorch C++
-  surface required by the existing live-stack collector. The resulting
-  artifact intentionally resolves those symbols from the workload at runtime.
-- CMake produces one `torch_trace_collector.so`, without a Torch-version or
-  Python-SOABI suffix. Library output is `${CMAKE_BINARY_DIR}/lib`; the install
-  destination is `${CMAKE_INSTALL_LIBDIR}/rocprofiler-compute` (`lib` or
-  `lib64`).
-- `torch_cpp_loader.py` imports the workload's PyTorch, reduces its version to
-  `<major>.<minor>`, checks it against `_SUPPORTED_TORCH_VERSIONS`, and locates
-  the artifact. `torch_abi.h` records one set of layouts covering those
-  versions, so the version is the whole gate.
-- The loader reopens the workload's `libtorch_cpu.so` so its Torch/c10 symbols
-  are globally visible, loads the collector locally through `ctypes`, and uses
-  only its plain-C interface. The collector has no Python ABI dependency.
-- A missing artifact, unsupported version, loader error, or rejected
-  installation emits a warning and returns control to `TorchDispatchMode`; it
-  does not terminate the workload.
+Production builds produce one C++17 torch_trace_collector.so using local shim
+declarations and rocprofiler-sdk-roctx. They require neither a PyTorch
+installation nor Python development headers. PyTorch symbols intentionally
+remain unresolved until runtime. The installed artifact belongs in the
+rocprofiler-compute library directory under lib or lib64, without a Torch
+minor or Python-SOABI suffix.
 
-Search is rooted at the executing Python package (checkout: `src/`; install: `<prefix>/libexec/rocprofiler-compute/`). Order, via `find_prebuilt_artifacts` in `native_tool_finder.py`:
+The local shim covers RecordFunction and callback layouts, input views,
+IValue payloads, ListImpl vector begin/end positions and the libstdc++ pointer
+representation, operator names and handles, Dispatcher registration listeners
+and their registration handle, and ThreadLocalDebugInfo. These
+are private PyTorch interfaces. The accepted compatibility boundary is the
+validated 2.13/2.14 layout set, not an upstream ABI guarantee for every build
+of those minors. Extending this set requires real-header and runtime behavior
+validation. No exact wheel identity or paired ELF build-ID gate is used.
 
-1. `<package_root>/../../lib*/rocprofiler-compute/torch_trace_collector.so`
-2. `<package_root>/../build/lib`
-3. `<package_root>/lib/_build/lib`
-
-The first unique resolved path wins. Install is scanned first, so a packaged
-`.so` beats a source build **in the same process**. Run the in-tree
-`rocprof-compute` (package root `src/`) to use a source build; the install glob
-then does not see `/opt/rocm`.
-
----
-
-## Tests
-
-- `src/lib/torch_trace_collector/tests/test_torch_trace_collector.cpp` verifies
-  snapshot join of backward to forward, overlay of wrap frames on a worker,
-  dummy locations, marker encoding, and install. It links the real libtorch, so
-  it also checks every `torch_abi.h` constant against the real PyTorch headers
-  and exercises the plain-C entry points. A layout change fails this test.
-- Loader unit tests verify generic-artifact discovery, version gating,
-  native-library promotion, the plain-C call boundary, and fallback.
-- `tests/integration/test_profile_torch_trace.py` verifies end-to-end
-  `--torch-trace` on a sample workload.
-- `tests/integration/test_torch_trace_coverage.py` compares `--torch-trace`
-  operator and kernel coverage to `torch.profiler`.
+ROCPROFCOMPUTE_TORCH_ROOT selects real headers and libraries for optional native
+layout and behavior tests. It is a test dependency only. Those tests compare
+shim assumptions with real PyTorch types and exercise the C boundary,
+argument rendering, all scopes, balanced callbacks, and launcher propagation.
+Loader and wrapper tests verify discovery, supported minors, revision
+rejection, runtime promotion, fallback, and successful-push/pop pairing.
+Integration tests validate emitted flat markers and the copied CSV contract.
