@@ -34,17 +34,14 @@
   __device__ void rocshmem_##TNAME##_put_wave(T*, const T*, size_t, int);\
   __device__ void rocshmem_##TNAME##_get_wave(T*, const T*, size_t, int);
 
-// Declared in team.cpp; patched at runtime by rocshmem_hipmodule_init.
-extern __device__ void *ROCSHMEM_TEAM_WORLD;
-
 extern "C" {
   __device__ int rocshmem_my_pe();
   __device__ int rocshmem_n_pes();
   __device__ void rocshmem_barrier_all();
   __device__ void rocshmem_barrier_all_wave();
   __device__ int rocshmem_int_sum_reduce_wg(int team, int *dest, const int *source, int nreduce);
-  __device__ void rocshmem_int_alltoall_wg(void *team, int *dest, const int *source, int nelems);
-  __device__ void rocshmem_int_broadcast_wg(void *team, int *dest, const int *source, int nelems, int pe_root);
+  __device__ void rocshmem_int_alltoall_wg(int team, int *dest, const int *source, int nelems);
+  __device__ void rocshmem_int_broadcast_wg(int team, int *dest, const int *source, int nelems, int pe_root);
   __device__ void rocshmem_quiet();
 
   __device__ void rocshmem_putmem(void*, const void*, size_t, int);
@@ -284,16 +281,16 @@ extern "C" __global__ void test_int_sum_reduce(
 // sym_src[j] = my_pe * 100 + j  (n_pes elements, one per destination PE).
 // After alltoall, sym_dest[i] = PE_i * 100 + my_pe.
 extern "C" __global__ void test_int_alltoall_wg(
-    int *sym_dest, int *sym_src, int nelems)
+    int *sym_dest, int *sym_src, int nelems, int team)
 {
-  rocshmem_int_alltoall_wg(ROCSHMEM_TEAM_WORLD, sym_dest, sym_src, nelems);
+  rocshmem_int_alltoall_wg(team, sym_dest, sym_src, nelems);
 }
 
 // Broadcast wg test.
 // Root (pe_root=0) has sym_src[i] = i + 42; all other PEs have sym_src[i] = -1.
 // After broadcast, all PEs should have sym_dest[i] = i + 42.
 extern "C" __global__ void test_int_broadcast_wg(
-    int *sym_dest, int *sym_src, int nelems, int pe_root)
+    int *sym_dest, int *sym_src, int nelems, int team, int pe_root)
 {
-  rocshmem_int_broadcast_wg(ROCSHMEM_TEAM_WORLD, sym_dest, sym_src, nelems, pe_root);
+  rocshmem_int_broadcast_wg(team, sym_dest, sym_src, nelems, pe_root);
 }

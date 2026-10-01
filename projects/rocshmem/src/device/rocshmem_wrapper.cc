@@ -803,7 +803,7 @@ ROCSHMEM_DEVICE_API int rocshmem_tile_broadcast_wg(
 ROCSHMEM_DEVICE_API void rocshmem_##TNAME##_alltoall_wg(                    \
     rocshmem_team_t team, T *dest, const T *source, int nelems) {           \
   rocshmem_ctx_##TNAME##_alltoall_wg(                                       \
-      rocshmem::ROCSHMEM_CTX_DEFAULT, team, dest, source, nelems);  \
+      rocshmem::ROCSHMEM_CTX_DEFAULT, team, dest, source, nelems);          \
 }
 
 ROCSHMEM_ALLTOALL_WG_WRAPPER(float,     float)
@@ -826,7 +826,7 @@ ROCSHMEM_ALLTOALL_WG_WRAPPER(ulonglong, unsigned long long)
 ROCSHMEM_DEVICE_API int rocshmem_##TNAME##_alltoall_wave(                   \
     rocshmem_team_t team, T *dest, const T *source, int nelems) {           \
   return rocshmem_ctx_##TNAME##_alltoall_wave(                              \
-      rocshmem::ROCSHMEM_CTX_DEFAULT, team, dest, source, nelems);  \
+      rocshmem::ROCSHMEM_CTX_DEFAULT, team, dest, source, nelems);          \
 }
 
 ROCSHMEM_ALLTOALL_WAVE_WRAPPER(float,     float)
@@ -863,7 +863,7 @@ ROCSHMEM_DEVICE_API void rocshmem_##TNAME##_broadcast_wg(                   \
     rocshmem_team_t team, T *dest, const T *source,                         \
     int nelems, int pe_root) {                                               \
   rocshmem_ctx_##TNAME##_broadcast_wg(                                      \
-      rocshmem::ROCSHMEM_CTX_DEFAULT, team,                         \
+      rocshmem::ROCSHMEM_CTX_DEFAULT, team,                                 \
       dest, source, nelems, pe_root);                                        \
 }
 
@@ -888,7 +888,7 @@ ROCSHMEM_DEVICE_API int rocshmem_##TNAME##_broadcast_wave(                  \
     rocshmem_team_t team, T *dest, const T *source,                         \
     int nelems, int pe_root) {                                               \
   return rocshmem_ctx_##TNAME##_broadcast_wave(                             \
-      rocshmem::ROCSHMEM_CTX_DEFAULT, team,                         \
+      rocshmem::ROCSHMEM_CTX_DEFAULT, team,                                 \
       dest, source, nelems, pe_root);                                        \
 }
 
@@ -912,16 +912,14 @@ ROCSHMEM_DEVICE_API void rocshmem_broadcastmem_wg(
     rocshmem_team_t team, void *dest, const void *source,
     int nelems, int PE_root) {
   rocshmem_ctx_broadcastmem_wg(
-      rocshmem::ROCSHMEM_CTX_DEFAULT, team,
-      dest, source, nelems, PE_root);
+      rocshmem::ROCSHMEM_CTX_DEFAULT, team, dest, source, nelems, PE_root);
 }
 
 ROCSHMEM_DEVICE_API int rocshmem_broadcastmem_wave(
     rocshmem_team_t team, void *dest, const void *source,
     int nelems, int PE_root) {
   return rocshmem_ctx_broadcastmem_wave(
-      rocshmem::ROCSHMEM_CTX_DEFAULT, team,
-      dest, source, nelems, PE_root);
+      rocshmem::ROCSHMEM_CTX_DEFAULT, team, dest, source, nelems, PE_root);
 }
 
 // Collective - SUM Reduce

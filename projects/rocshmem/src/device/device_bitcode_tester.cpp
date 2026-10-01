@@ -463,7 +463,8 @@ void DeviceBitcodeTester::execute() {
     }
     rocshmem_barrier_all();
 
-    void* kargs[] = {&sym_dst, &sym_src, &nelems};
+    int team = 0;
+    void* kargs[] = {&sym_dst, &sym_src, &nelems, &team};
     launch("test_int_alltoall_wg", kargs);
     rocshmem_barrier_all();
 
@@ -500,7 +501,8 @@ void DeviceBitcodeTester::execute() {
     rocshmem_barrier_all();
 
     int nelems = COUNT;
-    void* kargs[] = {&sym_dst, &sym_src, &nelems, &pe_root};
+    int team = 0;
+    void* kargs[] = {&sym_dst, &sym_src, &nelems, &team, &pe_root};
     launch("test_int_broadcast_wg", kargs);
     rocshmem_barrier_all();
 
