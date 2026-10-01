@@ -717,6 +717,9 @@ bool open(const char* output_dir) {
   {
     std::lock_guard<std::mutex> lk(g_blob_mu);
     g_written_blobs.clear();
+    // A forked child inherits the writes its parent's other threads had in
+    // flight, and none of those threads exists in the child to finish them.
+    g_blob_writes_in_flight = 0;
   }
 
   if (g_events_fd < 0) {
