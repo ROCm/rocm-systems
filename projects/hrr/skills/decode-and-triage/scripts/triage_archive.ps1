@@ -147,6 +147,15 @@ function Resolve-LinkedPath([string]$Path) {
     }
 }
 
+# The archive's own links are followed before anything is derived from its name,
+# as readlink -f does in triage_archive.sh: a link to a pid-<n> directory has to
+# protect the capture directory holding the target, not the one holding the link.
+$ArchiveTarget = Resolve-LinkedPath $Archive
+if (-not $ArchiveTarget) {
+    Write-Host "error: a symbolic link loop in the archive path: $Archive" -ForegroundColor Red
+    exit 1
+}
+$Archive = $ArchiveTarget
 $Name    = Split-Path $Archive -Leaf
 # The pid keeps two runs in the same second from sharing a log and a finding.
 $Ts      = (Get-Date).ToUniversalTime().ToString("yyyyMMdd'T'HHmmss'Z'") + "-$PID"
