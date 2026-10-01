@@ -769,7 +769,9 @@ void checkpoint() {
   g_events_since_ckpt = 0;
 }
 
-void mark_incomplete(const char* reason) {
+// Caller holds g_blob_mu. A claimed write ends here even after flush() has cut
+// off new ones: flush() waits for it before reading the flag, so it still counts.
+static void mark_incomplete_locked(const char* reason) {
   // Record once; the loud, AMD_LOG_LEVEL-routed message is emitted by the caller
   // (e.g. serialize_kernel_launch) which has the relevant context. Here we only
   // need the durable flag and a single breadcrumb so a bare run still surfaces
@@ -782,6 +784,16 @@ void mark_incomplete(const char* reason) {
         "cannot treat this capture as faithful",
         reason ? reason : "(unspecified)");
   }
+}
+
+// Past the trailer decision, an event a shim drops is one nothing would have
+// recorded anyway, and flipping the flag then would leave the trailer and the
+// manifest disagreeing. flush() sets g_trailer_written under g_blob_mu, so
+// taking it here puts the check on the same side of that cut-off as the writes.
+void mark_incomplete(const char* reason) {
+  std::lock_guard<std::mutex> lk(g_blob_mu);
+  if (g_trailer_written) return;
+  mark_incomplete_locked(reason);
 }
 
 bool is_incomplete() { return g_capture_incomplete.load(std::memory_order_relaxed); }
@@ -1001,7 +1013,7 @@ static void finish_claimed_write(const std::string& key, bool ok) {
   if (!ok) {
     g_written_blobs.erase(key);
     g_blob_count.fetch_sub(1, std::memory_order_relaxed);
-    mark_incomplete("a blob or code object could not be written");
+    mark_incomplete_locked("a blob or code object could not be written");
   }
   if (--g_blob_writes_in_flight == 0) g_blob_writes_done.notify_all();
 }
