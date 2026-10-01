@@ -5,7 +5,6 @@
 
 #pragma once
 
-#include "async.h"
 #include "backend.h"
 #include "hipfile.h"
 
@@ -38,21 +37,4 @@ protected:
                      hoff_t file_offset, hoff_t buffer_offset) override;
 };
 
-class AsyncOpHost final : public AsyncOp {
-public:
-    size_t submitted_size;
-
-    AsyncOpHost(IoType ioType, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer,
-                std::shared_ptr<IStream> stream, size_t *size, hoff_t *fileOffset, hoff_t *bufferOffset,
-                ssize_t *bytesTransferred);
-
-    virtual ~AsyncOpHost() override;
-    void  operator delete(void *ptr) noexcept;
-    void *operator new(size_t size);
-};
-
 } // namespace hipFile
-
-extern "C" {
-void async_io_host_do(void *userargs);
-}

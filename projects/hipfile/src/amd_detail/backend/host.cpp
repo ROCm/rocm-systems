@@ -34,38 +34,6 @@
 
 using namespace hipFile;
 
-namespace {
-
-template <typename T> struct HipHostAllocator {
-    using value_type = T;
-
-    HipHostAllocator()                         = default;
-    HipHostAllocator(const HipHostAllocator &) = default;
-
-    // Rebound constructor
-    template <typename U> explicit HipHostAllocator(const HipHostAllocator<U> &)
-    {
-    }
-
-    T *allocate(std::size_t n)
-    try {
-        void *p = Context<Hip>::get()->hipHostMalloc(n * sizeof(T), 0);
-        return static_cast<T *>(p);
-    }
-    catch (...) {
-        throw std::bad_alloc{};
-    }
-
-    void deallocate(T *p, std::size_t n)
-    {
-        if (p && n != 0) {
-            Context<Hip>::get()->hipHostFree(p);
-        }
-    }
-};
-
-}
-
 int
 Host::score(const std::shared_ptr<IFile> &file, const std::shared_ptr<IBuffer> &buffer, size_t size,
             hoff_t file_offset, hoff_t buffer_offset) const
@@ -83,31 +51,6 @@ Host::score(const std::shared_ptr<IFile> &file, const std::shared_ptr<IBuffer> &
     }
     return 1;
 }
-
-void *
-AsyncOpHost::operator new(size_t s)
-{
-    HipHostAllocator<AsyncOpHost> alloc{};
-    return static_cast<void *>(alloc.allocate(s));
-}
-
-void
-AsyncOpHost::operator delete(void *ptr) noexcept
-{
-    HipHostAllocator<AsyncOpHost> alloc{};
-    alloc.deallocate(static_cast<AsyncOpHost *>(ptr), sizeof(AsyncOpHost));
-}
-
-AsyncOpHost::AsyncOpHost(IoType _io_type, std::shared_ptr<IFile> _file, std::shared_ptr<IBuffer> _buffer,
-                         std::shared_ptr<IStream> _stream, size_t *_size, hoff_t *_file_offset,
-                         hoff_t *_buffer_offset, ssize_t *_bytes_transferred)
-    : AsyncOp{_io_type, std::move(_file), std::move(_buffer), std::move(_stream),
-              _size,    _file_offset,     _buffer_offset,     _bytes_transferred},
-      submitted_size{std::min(*_size, hipFile::getMaxRwCount())}
-{
-}
-
-AsyncOpHost::~AsyncOpHost() = default;
 
 namespace {
 
@@ -236,73 +179,5 @@ Host::async_io(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer
                hoff_t *file_offset_p, hoff_t *buffer_offset_p, ssize_t *bytes_transferred_p,
                std::shared_ptr<IStream> stream)
 {
-    size_t limited_size = std::min(*size_p, hipFile::getMaxRwCount());
-
-    if (!paramsValid(buffer, limited_size, *file_offset_p, *buffer_offset_p)) {
-        throw std::invalid_argument("The selected file or buffer region is invalid");
-    }
-
-    *bytes_transferred_p = 0;
-
-    if (*size_p == 0) {
-        return;
-    }
-
-    auto op = std::allocate_shared<AsyncOpHost>(HipHostAllocator<AsyncOpHost>{}, type, std::move(file),
-                                                buffer, stream, size_p, file_offset_p, buffer_offset_p,
-                                                bytes_transferred_p);
-
-    Context<AsyncMonitor>::get()->addOp(op);
-
-    try {
-        auto stream_lock = stream->getLock();
-
-        Context<Hip>::get()->hipLaunchHostFunc(op->stream->getHipStream(), async_io_host_do, op.get());
-        Context<Hip>::get()->hipLaunchHostFunc(op->stream->getHipStream(), async_io_cleanup, op.get());
-    }
-    catch (...) {
-        try {
-            Context<Hip>::get()->hipLaunchHostFunc(op->stream->getHipStream(), async_io_cleanup, op.get());
-        }
-        catch (...) {
-            Context<Sys>::get()->syslog(LOG_CRIT,
-                                        "Unable to enqueue async cleanup function. This will leak memory.");
-        }
-        throw;
-    }
+    throw std::runtime_error("Host::async_io is not implemented");
 }
-
-extern "C" {
-
-void
-async_io_host_do(void *userargs)
-{
-    auto &op = *static_cast<AsyncOpHost *>(userargs);
-
-    size_t size;
-    hoff_t buffer_offset, file_offset;
-
-    // Bind params. Will maintain same value if already bound.
-    buffer_offset = *get_variant_ptr(op.buffer_offset);
-    op.buffer_offset.emplace<const hoff_t>(buffer_offset);
-
-    file_offset = *get_variant_ptr(op.file_offset);
-    op.file_offset.emplace<const hoff_t>(file_offset);
-
-    size = std::min(*get_variant_ptr(op.size), hipFile::getMaxRwCount());
-    op.size.emplace<size_t>(size);
-
-    if (!paramsValid(op)) {
-        op.bytes_transferred_internal = -hipFileInvalidValue;
-        return;
-    }
-
-    size_t bytes_transferred =
-        op.io_type == IoType::Read
-            ? CopyOp<ReadFileFn>(*op.file, *op.buffer, size, file_offset, buffer_offset).run()
-            : CopyOp<WriteFileFn>(*op.file, *op.buffer, size, file_offset, buffer_offset).run();
-
-    op.bytes_transferred_internal = static_cast<ssize_t>(bytes_transferred);
-}
-
-} // extern "C"
