@@ -51,6 +51,9 @@ endforeach()
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/gdr-probe-test.cc"
   "${_rccl_reg_access_flags}" "the production registration flags")
 unset(_rccl_reg_access_flags)
+rccl_assert_source_line("${_rccl_src_root}/graph/topo.cc"
+  "const char* topoPathTypeStr[] = {\"LOC\", \"XGMI\", \"NVB\", \"C2C\", \"PIX\", \"PXB\", \"P2C\", \"PXN\", \"PHB\", \"SYS\", \"NET\", \"DIS\"};"
+  "diagnostics-p2p-test.cc: diagnosticsP2pTestPathNames")
 unset(_rccl_src_root)
 
 # Define the per-target micro-test source lists shared by BOTH build paths.

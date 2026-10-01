@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <functional>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -15,8 +16,12 @@
 
 #include <gtest/gtest.h>
 
+#include "ScopedHook.h"
+#include "fakes/nccl_fakes.h"
+
 // graph/topo.cc owns topoPathTypeStr and is not part of this binary; the report under test only reads it,
-// so this TU supplies its own copy under a private name.
+// so this TU supplies its own copy under a private name. test/host/CMakeLists.txt fails the configure step
+// when the AMD topoPathTypeStr in graph/topo.cc no longer matches this copy.
 #define topoPathTypeStr diagnosticsP2pTestPathNames
 
 #include DIAG_P2P_CC_PATH
@@ -197,6 +202,42 @@ INSTANTIATE_TEST_SUITE_P(DiagnosticsP2pReport, DiagnosticsP2pReportMicrotest, ::
                          [](const ::testing::TestParamInfo<ReportCase>& info) {
                            return std::string(ncclDiagP2pReasonName(info.param.reason));
                          });
+
+// Sets the fakes-owned ncclCuMemHandleType global and restores it on scope exit.
+struct ScopedDiagCuMemHandleType {
+  explicit ScopedDiagCuMemHandleType(hipMemAllocationHandleType type) : saved_(ncclCuMemHandleType) {
+    ncclCuMemHandleType = type;
+  }
+  ~ScopedDiagCuMemHandleType() { ncclCuMemHandleType = saved_; }
+  ScopedDiagCuMemHandleType(const ScopedDiagCuMemHandleType&) = delete;
+  ScopedDiagCuMemHandleType& operator=(const ScopedDiagCuMemHandleType&) = delete;
+
+ private:
+  hipMemAllocationHandleType saved_;
+};
+
+TEST(DiagnosticsP2pMicrotest, HandleTypeFollowsCuMemHandleType) {
+  auto comm = std::make_unique<ncclComm>();
+  auto peers = std::make_unique<ncclPeerInfo[]>(2);
+  peers[0].hostHash = peers[1].hostHash = 1;
+  peers[0].pidHash = 1;
+  peers[1].pidHash = 2;
+  comm->peerInfo = peers.get();
+
+  EXPECT_EQ(ncclDiagP2pHandleType(comm.get(), 0, 0), ncclDiagP2pHandleDirect);
+  EXPECT_EQ(ncclDiagP2pHandleType(comm.get(), 0, 1), ncclDiagP2pHandleLegacyIpc);
+
+  ScopedHook cuMemEnable(g_cuMemEnable, [] { return 1; });
+  {
+    ScopedDiagCuMemHandleType type(hipMemHandleTypePosixFileDescriptor);
+    EXPECT_EQ(ncclDiagP2pHandleType(comm.get(), 0, 1), ncclDiagP2pHandleCuMemPosixFd);
+  }
+  {
+    ScopedDiagCuMemHandleType type(hipMemHandleTypeNone);
+    EXPECT_EQ(ncclDiagP2pHandleType(comm.get(), 0, 1), ncclDiagP2pHandleCuMemOther);
+  }
+  EXPECT_EQ(ncclDiagP2pHandleType(comm.get(), 1, 1), ncclDiagP2pHandleDirect);
+}
 
 TEST(DiagnosticsP2pMicrotest, XgmiReportLineSuggestsXgmiLinkStatus) {
   auto comm = std::make_unique<ncclComm>();

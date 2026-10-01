@@ -219,13 +219,15 @@ The edge fields have the following meaning:
        PCIe path type such as ``PIX``, ``PXB``, ``PHB``, or ``SYS``.
    * - ``handle``
      - How the destination memory was shared: ``DIRECT`` (both GPUs in one
-       process), ``LEGACY_CUDA_IPC`` (HIP IPC handle between processes), or
-       ``CUMEM_OTHER`` (HIP virtual-memory handle between processes, when cuMem
-       is enabled). The report format also defines ``CUMEM_POSIX_FD`` and
-       ``CUMEM_FABRIC``, but RCCL does not report them on AMD GPUs.
+       process), ``LEGACY_CUDA_IPC`` (HIP IPC handle between processes), or,
+       when cuMem is enabled, a HIP virtual-memory handle between processes:
+       ``CUMEM_POSIX_FD`` (file descriptor, the default), ``CUMEM_FABRIC``, or
+       ``CUMEM_OTHER``.
 
-The suggested next step at the end of each line depends on the path and on
-how the destination memory was shared. The following table summarizes it:
+The suggested next step at the end of each line depends on the line. A
+``peer-memory import failed`` line suggests a step for its ``handle``. The
+other edge lines suggest a step for their ``path``. ``local HIP setup failed``
+points to earlier HIP errors only. The following table summarizes the steps:
 
 .. list-table::
    :header-rows: 1
@@ -243,7 +245,7 @@ how the destination memory was shared. The following table summarizes it:
    * - ``handle=LEGACY_CUDA_IPC``
      - Check that all processes see the GPUs and can share IPC handles, see
        :ref:`diagnostics-containers`.
-   * - ``handle=CUMEM_OTHER``
+   * - ``handle=CUMEM_POSIX_FD`` or ``handle=CUMEM_OTHER``
      - Check that HIP virtual memory is supported and that the processes can
        share memory handles, see :ref:`diagnostics-containers`.
    * - ``handle=DIRECT``

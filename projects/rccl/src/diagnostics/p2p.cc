@@ -145,7 +145,8 @@ static bool ncclDiagP2pSameProcess(struct ncclComm* comm, int srcRank, int dstRa
 static int ncclDiagP2pHandleType(struct ncclComm* comm, int srcRank, int dstRank) {
   if (ncclDiagP2pSameProcess(comm, srcRank, dstRank)) return ncclDiagP2pHandleDirect;
   if (!ncclCuMemEnable()) return ncclDiagP2pHandleLegacyIpc;
-#if CUDART_VERSION >= 11030
+  // HIP builds leave CUDART_VERSION undefined but provide both handle types.
+#if CUDART_VERSION >= 11030 || defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   if (ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) return ncclDiagP2pHandleCuMemPosixFd;
   if (ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_FABRIC) return ncclDiagP2pHandleCuMemFabric;
 #endif
