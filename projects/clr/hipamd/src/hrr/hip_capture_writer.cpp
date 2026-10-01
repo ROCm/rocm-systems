@@ -584,14 +584,30 @@ static void index_existing_blobs_locked() {
   // error_code overloads throughout: a missing or unreadable directory only
   // means fewer blobs are known to exist, and a blob written twice is harmless.
   // Only a regular file counts, so a link planted in place of a blob is replaced.
+  // A blobs/<xx> prefix is claimed before its files are trusted: one that fails
+  // claim_private_dir contributes nothing, and write_blob refuses it later.
   std::error_code ec;
   const fs::path blobs_root = g_output_dir + "/blobs";
-  for (fs::recursive_directory_iterator it(blobs_root, ec), end; !ec && it != end;
-       it.increment(ec)) {
+  for (fs::directory_iterator dit(blobs_root, ec), dend; !ec && dit != dend; dit.increment(ec)) {
     std::error_code entry_ec;
-    if (it->symlink_status(entry_ec).type() == fs::file_type::regular &&
-        it->path().extension() == ".blob")
-      g_written_blobs.insert(it->path().stem().string());
+    if (dit->symlink_status(entry_ec).type() != fs::file_type::directory) continue;
+#ifndef _WIN32
+    const std::string name = dit->path().filename().string();
+    const auto nibble = [](char c) -> int {
+      return (c >= '0' && c <= '9') ? c - '0' : (c >= 'a' && c <= 'f') ? c - 'a' + 10 : -1;
+    };
+    if (name.size() != 2 || nibble(name[0]) < 0 || nibble(name[1]) < 0) continue;
+    if (!claim_private_dir(dit->path().string())) continue;
+    g_blob_prefix_claimed[(nibble(name[0]) << 4) | nibble(name[1])].store(
+        true, std::memory_order_release);
+#endif
+    for (fs::directory_iterator it(dit->path(), entry_ec), end; !entry_ec && it != end;
+         it.increment(entry_ec)) {
+      std::error_code file_ec;
+      if (it->symlink_status(file_ec).type() == fs::file_type::regular &&
+          it->path().extension() == ".blob")
+        g_written_blobs.insert(it->path().stem().string());
+    }
   }
 
   ec.clear();
