@@ -120,7 +120,7 @@ def test_live_attach_detach_pc_sampling(
         }
 
         # Profiling step (may fail)
-        _, stdout, stderr = binary_handler_profile_rocprof_compute(
+        code, stdout, stderr = binary_handler_profile_rocprof_compute(
             config,
             workload_dir,
             options,
@@ -146,4 +146,5 @@ def test_live_attach_detach_pc_sampling(
 
     integration_common.skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
 
+    assert code == 0
     common.clean_output_dir(config["cleanup"], workload_dir)
