@@ -9823,9 +9823,10 @@ typedef struct {
  *          ::AMDSMI_STATUS_OUT_OF_RESOURCES if @p profiles is non-NULL but
  *          too small to hold all published profiles,
  *          ::AMDSMI_STATUS_INVAL if @p num_profiles is NULL,
- *          ::AMDSMI_STATUS_UNEXPECTED_DATA if config/writable_slot_mask
- *          exists but its content does not parse as a well-formed hex
- *          bitmask
+ *          ::AMDSMI_STATUS_NO_DATA if active_profile does not exist,
+ *          ::AMDSMI_STATUS_UNEXPECTED_DATA if active_profile or
+ *          config/writable_slot_mask exists but its content does not parse
+ *          as well-formed (e.g. a malformed index or hex bitmask)
  */
 amdsmi_status_t amdsmi_get_ampp_profiles(amdsmi_processor_handle processor_handle,
                                          char version[AMDSMI_MAX_STRING_LENGTH],
@@ -9868,9 +9869,10 @@ amdsmi_status_t amdsmi_get_ampp_profiles(amdsmi_processor_handle processor_handl
  *          unconfigured custom slot (e.g. an empty profile_5),
  *          ::AMDSMI_STATUS_INVAL if @p profile_name does not match any
  *          profile_N directory currently published, or @p num_fields is NULL,
- *          ::AMDSMI_STATUS_UNEXPECTED_DATA if config/writable_slot_mask
- *          exists but its content does not parse as a well-formed hex
- *          bitmask
+ *          ::AMDSMI_STATUS_UNEXPECTED_DATA if a field or limits/min|max
+ *          file exists but its content does not parse, or if
+ *          config/writable_slot_mask exists but its content does not parse
+ *          as a well-formed hex bitmask
  */
 amdsmi_status_t amdsmi_get_ampp_fields(amdsmi_processor_handle processor_handle,
                                        const char* profile_name, uint32_t* num_fields,
@@ -9937,7 +9939,9 @@ amdsmi_status_t amdsmi_activate_ampp_profile(amdsmi_processor_handle processor_h
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
  *          ::AMDSMI_STATUS_NOT_SUPPORTED if the device has no app_modes/, or
  *          if the profile is not listed in config/writable_slot_mask,
- *          ::AMDSMI_STATUS_NO_PERM if the caller lacks root/CAP_SYS_ADMIN,
+ *          ::AMDSMI_STATUS_NO_PERM if the caller lacks write permission on
+ *          app_modes/<profile_name>/config/* (typically requires
+ *          root/CAP_SYS_ADMIN),
  *          ::AMDSMI_STATUS_INVAL if @p profile_name does not match any
  *          published profile_N, if @p fields contains a field name not
  *          recognized for this profile, or if @p fields is NULL or
