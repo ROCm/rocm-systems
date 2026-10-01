@@ -2717,6 +2717,17 @@ typedef struct {
 } amdsmi_npm_info_t;
 
 /**
+ * @brief NPM balancing mode
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef enum {
+  AMDSMI_NPM_BALANCING_MODE_INVALID = 0,      //!< Invalid/unavailable (e.g. unreadable sysfs value)
+  AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING,  //!< Power Balancing (PB), the default mode
+  AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING  //!< Frequency Balancing (FB)
+} amdsmi_npm_balancing_mode_t;
+
+/**
  * @brief Compute tray type
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
@@ -7701,6 +7712,48 @@ amdsmi_status_t amdsmi_get_gpu_xcd_counter(amdsmi_processor_handle processor_han
  * @return ::AMDSMI_STATUS_SUCCESS on success, non-zero on failure.
  */
 amdsmi_status_t amdsmi_get_npm_info(amdsmi_node_handle node_handle, amdsmi_npm_info_t* info);
+
+/**
+ * @brief Retrieves the NPM balancing mode for the specified node.
+ *
+ * @ingroup tagNodeInfo
+ *
+ * @platform{gpu_bm_linux} @platform{host}
+ *
+ * @details Queries whether the node is currently operating in Power Balancing (PB) or Frequency
+ * Balancing (FB) mode. This call is not gated on NPM enablement: it reports the last-selected
+ * mode regardless of whether NPM is currently enabled or disabled on the node.
+ * ::AMDSMI_NPM_BALANCING_MODE_INVALID means the underlying value could not be read or decoded,
+ * and is not treated as an error.
+ *
+ * @param[in]  node_handle Handle to the Node to query.
+ * @param[out] mode Pointer to amdsmi_npm_balancing_mode_t to receive the current balancing mode.
+ *             Must be allocated by the user.
+ *
+ * @return ::AMDSMI_STATUS_SUCCESS on success, non-zero on failure.
+ */
+amdsmi_status_t amdsmi_get_npm_balancing_mode(amdsmi_node_handle node_handle,
+                                              amdsmi_npm_balancing_mode_t* mode);
+
+/**
+ * @brief Sets the NPM balancing mode for the specified node.
+ *
+ * @ingroup tagNodeInfo
+ *
+ * @platform{gpu_bm_linux} @platform{host}
+ *
+ * @details Sets the node to Power Balancing (PB) or Frequency Balancing (FB) mode. This is an
+ * AMD-SMI only operation; it is not exposed via BMC Redfish/APML. Requires elevated privileges.
+ *
+ * @param[in] node_handle Handle to the Node to configure.
+ * @param[in] mode Requested balancing mode (::AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING or
+ *            ::AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING).
+ *
+ * @return ::AMDSMI_STATUS_SUCCESS on success. ::AMDSMI_STATUS_NOT_SUPPORTED if NPM is disabled on
+ * the node (no write is attempted). ::AMDSMI_STATUS_NO_PERM if the caller lacks elevation.
+ */
+amdsmi_status_t amdsmi_set_npm_balancing_mode(amdsmi_node_handle node_handle,
+                                              amdsmi_npm_balancing_mode_t mode);
 
 /**
  * @brief Retrieves compute-tray type and accelerator count for the specified node.

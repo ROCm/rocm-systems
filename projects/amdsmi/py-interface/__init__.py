@@ -18,6 +18,8 @@ from .amdsmi_interface import amdsmi_get_processor_handles_by_type
 from .amdsmi_interface import amdsmi_get_processor_info
 from .amdsmi_interface import amdsmi_get_node_handle
 from .amdsmi_interface import amdsmi_get_npm_info
+from .amdsmi_interface import amdsmi_get_npm_balancing_mode
+from .amdsmi_interface import amdsmi_set_npm_balancing_mode
 from .amdsmi_interface import amdsmi_get_tray_info
 
 # ESMI Dependent Functions
@@ -335,6 +337,7 @@ from .amdsmi_interface import AmdSmiVirtualizationMode
 from .amdsmi_interface import AmdSmiVramType
 from .amdsmi_interface import AmdSmiAffinityScope
 from .amdsmi_interface import AmdSmiPtlData
+from .amdsmi_interface import AmdSmiNpmBalancingMode
 
 from .amdsmi_interface import amdsmi_get_gpu_uma_carveout_info
 from .amdsmi_interface import amdsmi_set_gpu_uma_carveout

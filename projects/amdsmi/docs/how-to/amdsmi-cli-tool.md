@@ -668,6 +668,8 @@ Set Arguments:
   -R, --process-isolation STATUS              Enable or disable the GPU process isolation on a per partition basis: 0 for disable and 1 for enable.
   --ptl-status STATUS                         Enable or disable the PTL on a GPU processor: 0 for disable and 1 for enable
   --ptl-format FRMT1,FRMT2                    Set the PTL format on a GPU processor. For example, --ptl-format I8,F32
+  --node-balancing-mode {PB,FB}                Set NPM balancing mode: PB (Power Balancing) or FB (Frequency Balancing).
+                                                This is a system-wide setting, not per-GPU.
 
 CPU Arguments:
   --cpu-pwr-limit PWR_LIMIT                                      Set power limit for the given socket. Input parameter is power limit value.
@@ -1068,6 +1070,13 @@ NODE:
 On systems without UALoE hardware/session, `amdsmi_get_tray_info()` returns
 `AMDSMI_STATUS_NOT_SUPPORTED` and the `TRAY:` block (and the `tray`/
 `max_acc_per_tray`/`tray_type` keys in `--json`/`--csv`) is omitted entirely.
+
+`amd-smi node --power-management` includes `BALANCING_MODE`, the NPM
+balancing mode (`PB` for Power Balancing, the default, or `FB` for Frequency
+Balancing). This field reads `N/A` when the underlying value is missing or
+unreadable, not when NPM is disabled (see `STATUS` for enablement). Use
+`amd-smi set --node-balancing-mode {PB,FB}` to change it (AMD-SMI-only; not
+exposed via BMC Redfish/APML).
 
 ## Interpreting the output
 

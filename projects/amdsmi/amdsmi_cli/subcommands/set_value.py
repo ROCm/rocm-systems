@@ -2075,6 +2075,7 @@ class SetValueCommands:
         core_msr_floor_limit=None,
         mem_carveout=None,
         gtt=None,
+        node_balancing_mode=None,
     ):
         """Issue reset commands to target gpu(s)
 
@@ -2120,7 +2121,7 @@ class SetValueCommands:
             process_isolation (int, optional): Value override for args.process_isolation. Defaults to None.
         Raises:
             AmdSmiRequiredCommandException: If no device target or argument is provided
-            AmdSmiInvalidParameterException: If GPU/CPU/CORE arguments are combined or --gtt is misused
+            AmdSmiInvalidParameterException: If GPU/CPU/CORE arguments are combined or --gtt/--node-balancing-mode is misused
             PermissionError: If a set operation requires elevation (AMDSMI_STATUS_NO_PERM)
 
         Return:
@@ -2134,6 +2135,8 @@ class SetValueCommands:
             args.cpu = cpu
         if core:
             args.core = core
+        if node_balancing_mode:
+            args.node_balancing_mode = node_balancing_mode
 
         # Special GTT handling (system-wide, not per-GPU) — handle before device dispatch
         if hasattr(args, "gtt") and args.gtt is not None:
@@ -2168,6 +2171,23 @@ class SetValueCommands:
                 self.helpers.error_collector.record_library_error(e.get_error_code())
                 self.logger.print_output()
                 return
+
+        # Special node balancing mode handling (system-wide, not per-GPU) — handle before device dispatch
+        if hasattr(args, "node_balancing_mode") and args.node_balancing_mode is not None:
+            if hasattr(args, "gpu") and args.gpu is not None:
+                msg = (
+                    "amd-smi set: error: argument --node-balancing-mode: not allowed with argument "
+                    "--gpu/-g (--node-balancing-mode is a system-wide setting, not per-GPU)"
+                )
+                raise AmdSmiInvalidParameterException(
+                    "set", "--node-balancing-mode", self.helpers.get_output_format(), msg
+                )
+            result = self.helpers.validate_and_set_node_balancing_mode(
+                self.node_handle, args.node_balancing_mode, self.logger
+            )
+            self.logger.output["set_node_balancing_mode"] = result
+            self.logger.print_output()
+            return
 
         # Check if a GPU argument has been set
         gpu_args_enabled = False

@@ -3092,6 +3092,85 @@ finally:
     amdsmi.amdsmi_shut_down()
 ```
 
+### amdsmi_get_npm_balancing_mode
+
+Description: Returns the NPM balancing mode for a node: Power Balancing (`"PB"`,
+the default) or Frequency Balancing (`"FB"`). This is not gated on NPM
+enablement; it returns `"N/A"` only if the underlying value is missing or
+unreadable (not an error).
+
+Input parameters:
+
+* `node_handle` node handle obtained from `amdsmi_get_node_handle`
+
+Output: `str` — `"PB"`, `"FB"`, or `"N/A"` (value missing or unreadable)
+
+Exceptions that can be thrown by `amdsmi_get_npm_balancing_mode` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        node_handle = amdsmi.amdsmi_get_node_handle(devices[0])
+        mode = amdsmi.amdsmi_get_npm_balancing_mode(node_handle)
+        print(mode)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_npm_balancing_mode
+
+Description: Sets the NPM balancing mode for a node to Power Balancing (`"PB"`)
+or Frequency Balancing (`"FB"`). This setting is AMD-SMI-only; it is not
+exposed via BMC Redfish/APML. Requires elevated (root) privileges.
+
+Input parameters:
+
+* `node_handle` node handle obtained from `amdsmi_get_node_handle`
+* `mode` `"PB"` or `"FB"`
+
+Output: None
+
+Exceptions that can be thrown by `amdsmi_set_npm_balancing_mode` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - NPM is disabled on this node
+- `AMDSMI_STATUS_NO_PERM` - Caller lacks elevated privileges
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        node_handle = amdsmi.amdsmi_get_node_handle(devices[0])
+        amdsmi.amdsmi_set_npm_balancing_mode(node_handle, "FB")
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
 ### amdsmi_get_tray_info
 
 Description: Returns node-scoped compute tray type and accelerator count via UALoE.

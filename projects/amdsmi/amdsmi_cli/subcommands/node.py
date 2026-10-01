@@ -66,7 +66,7 @@ class NodeCommands:
             self.group_check_printed = True
 
         # Initialize variables for both power management and base board temps
-        npm_dict = {"limit": "N/A", "status": "N/A", "threshold": "N/A"}
+        npm_dict = {"limit": "N/A", "status": "N/A", "threshold": "N/A", "balancing_mode": "N/A"}
         power_unit = "W"
         limit = "N/A"
         base_board_temp_dict = {}
@@ -101,6 +101,13 @@ class NodeCommands:
                 # Add UBB power threshold if available
                 if ubb_power_threshold != "N/A":
                     npm_dict["threshold"] = ubb_power_threshold
+
+                try:
+                    npm_dict["balancing_mode"] = amdsmi_interface.amdsmi_get_npm_balancing_mode(
+                        args.nodes
+                    )
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    logging.debug("amdsmi_get_npm_balancing_mode failed: %s", e.get_error_info())
 
         # Get base board temperatures using node_handle
         if args.base_board_temps:
@@ -156,6 +163,8 @@ class NodeCommands:
                 node_output.append(f"        STATUS: {npm_dict.get('status', 'N/A')}")
                 threshold = npm_dict.get("threshold", "N/A")
                 node_output.append(f"        THRESHOLD: {threshold} {power_unit}")
+                balancing_mode = npm_dict.get("balancing_mode", "N/A")
+                node_output.append(f"        BALANCING_MODE: {balancing_mode}")
             if args.base_board_temps and base_board_temp_dict:
                 node_output.append("    BASEBOARD:")
                 node_output.append("        TEMPERATURE:")
@@ -186,6 +195,7 @@ class NodeCommands:
                     csv_dict["limit"] = npm_dict.get("limit", "N/A")
                     csv_dict["status"] = npm_dict.get("status", "N/A")
                     csv_dict["threshold"] = npm_dict.get("threshold", "N/A")
+                    csv_dict["balancing_mode"] = npm_dict.get("balancing_mode", "N/A")
                 if args.base_board_temps and base_board_temp_dict:
                     csv_dict.update(base_board_temp_dict)
                 if args.gtt and gtt_dict:

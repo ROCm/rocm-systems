@@ -1277,8 +1277,10 @@ class AMDSMIParser(argparse.ArgumentParser):
 
     ### Building parsers ###
     @staticmethod
-    def _guard_gtt_gpu_conflict(parser, gtt_flags=("--gtt", "-G")):
-        """Override *parser*.error() so that combining any GTT flag with
+    def _guard_gtt_gpu_conflict(
+        parser, gtt_flags=("--gtt", "-G"), reason="--gtt is a system-wide setting, not per-GPU"
+    ):
+        """Override *parser*.error() so that combining any of *gtt_flags* with
         --gpu / -g produces a clear mutual-exclusion message instead of
         the confusing "expected at least one argument" from --gpu."""
         _original_error = parser.error
@@ -1287,8 +1289,7 @@ class AMDSMIParser(argparse.ArgumentParser):
             if set(gtt_flags).intersection(sys.argv) and {"--gpu", "-g"}.intersection(sys.argv):
                 flag_str = "/".join(gtt_flags)
                 _original_error(
-                    f"argument {flag_str}: not allowed with argument --gpu/-g "
-                    "(--gtt is a system-wide setting, not per-GPU)"
+                    f"argument {flag_str}: not allowed with argument --gpu/-g ({reason})"
                 )
             _original_error(message)
 
@@ -2661,6 +2662,17 @@ class AMDSMIParser(argparse.ArgumentParser):
                     metavar="GB",
                 )
 
+                set_node_balancing_mode_help = "Set NPM balancing mode: PB (Power Balancing) or FB (Frequency Balancing).\n\tThis is a system-wide setting, not per-GPU."
+                set_value_exclusive_group.add_argument(
+                    "--node-balancing-mode",
+                    action="store",
+                    choices=["PB", "FB"],
+                    type=str.upper,
+                    required=False,
+                    help=set_node_balancing_mode_help,
+                    metavar="{PB,FB}",
+                )
+
         if self.helpers.is_amd_hsmp_initialized():
             if self.helpers.is_baremetal():
                 # Optional CPU Args
@@ -2869,6 +2881,15 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Reject --gtt combined with --gpu at the argparse level
         self._guard_gtt_gpu_conflict(set_value_parser, gtt_flags=("--gtt", "-G"))
+        # Improve the --gpu error message if combined with --node-balancing-mode;
+        # actual rejection happens at runtime in set_value.py, since these two
+        # flags sit in separate argparse groups and argparse itself never
+        # raises for this combination.
+        self._guard_gtt_gpu_conflict(
+            set_value_parser,
+            gtt_flags=("--node-balancing-mode",),
+            reason="--node-balancing-mode is a system-wide setting, not per-GPU",
+        )
 
         # Set accepts default devices of all
         self._add_device_arguments(set_value_parser, required=False)

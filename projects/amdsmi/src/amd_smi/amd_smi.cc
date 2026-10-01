@@ -1710,6 +1710,67 @@ amdsmi_status_t amdsmi_get_npm_info(amdsmi_node_handle node_handle, amdsmi_npm_i
   return AMDSMI_STATUS_SUCCESS;
 }
 
+amdsmi_status_t amdsmi_get_npm_balancing_mode(amdsmi_node_handle node_handle,
+                                              amdsmi_npm_balancing_mode_t* mode) {
+  AMDSMI_CHECK_INIT();
+
+  if (node_handle == nullptr || mode == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  auto board_path_str = reinterpret_cast<std::string*>(node_handle);
+  if (board_path_str == nullptr || board_path_str->empty()) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+#ifdef ENABLE_WSL_BACKEND
+  if (amd::smi::WSLGPUBackend::IsActive()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+#endif
+
+  rsmi_npm_balancing_mode_t rsmi_mode;
+  rsmi_status_t rstatus =
+      rsmi_dev_npm_balancing_mode_get(0, reinterpret_cast<uintptr_t>(node_handle), &rsmi_mode);
+  amdsmi_status_t amdsmi_status = amd::smi::rsmi_to_amdsmi_status(rstatus);
+  if (amdsmi_status != AMDSMI_STATUS_SUCCESS) {
+    return amdsmi_status;
+  }
+
+  *mode = static_cast<amdsmi_npm_balancing_mode_t>(rsmi_mode);
+
+  return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t amdsmi_set_npm_balancing_mode(amdsmi_node_handle node_handle,
+                                              amdsmi_npm_balancing_mode_t mode) {
+  AMDSMI_CHECK_INIT();
+
+  if (node_handle == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  auto board_path_str = reinterpret_cast<std::string*>(node_handle);
+  if (board_path_str == nullptr || board_path_str->empty()) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  if (mode != AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING &&
+      mode != AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+#ifdef ENABLE_WSL_BACKEND
+  if (amd::smi::WSLGPUBackend::IsActive()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+#endif
+
+  rsmi_status_t rstatus = rsmi_dev_npm_balancing_mode_set(
+      0, reinterpret_cast<uintptr_t>(node_handle), static_cast<rsmi_npm_balancing_mode_t>(mode));
+  return amd::smi::rsmi_to_amdsmi_status(rstatus);
+}
+
 amdsmi_status_t amdsmi_get_gpu_vram_usage(amdsmi_processor_handle processor_handle,
                                           amdsmi_vram_usage_t* vram_info) {
   AMDSMI_CHECK_INIT();

@@ -55,6 +55,42 @@ rsmi_status_t get_npm_board_status(const std::string& board_path, bool* enabled)
   return RSMI_STATUS_UNEXPECTED_DATA;
 }
 
+rsmi_status_t get_npm_board_mode(const std::string& board_path, std::string* mode) {
+  if (mode == nullptr) return RSMI_STATUS_INVALID_ARGS;
+  if (board_path.empty()) return RSMI_STATUS_INVALID_ARGS;
+
+  fs::path bd(board_path);
+  if (!fs::exists(bd) || !fs::is_directory(bd)) return RSMI_STATUS_NOT_SUPPORTED;
+
+  fs::path p = bd / "npm_mode";
+  if (!fs::exists(p) || !fs::is_regular_file(p)) return RSMI_STATUS_NOT_SUPPORTED;
+
+  std::string s;
+  rsmi_status_t r = read_npm_file(p, s);
+  if (r != RSMI_STATUS_SUCCESS) return RSMI_STATUS_NOT_SUPPORTED;
+
+  if (s != "1" && s != "2") return RSMI_STATUS_UNEXPECTED_DATA;
+  *mode = s;
+  return RSMI_STATUS_SUCCESS;
+}
+
+rsmi_status_t set_npm_board_mode(const std::string& board_path, const std::string& mode) {
+  if (board_path.empty()) return RSMI_STATUS_INVALID_ARGS;
+  if (mode != "1" && mode != "2") return RSMI_STATUS_INVALID_ARGS;
+
+  fs::path bd(board_path);
+  if (!fs::exists(bd) || !fs::is_directory(bd)) return RSMI_STATUS_NOT_SUPPORTED;
+
+  fs::path p = bd / "npm_mode";
+  if (!fs::exists(p) || !fs::is_regular_file(p)) return RSMI_STATUS_NOT_SUPPORTED;
+
+  int ret = WriteSysfsStr(p.string(), mode);
+  if (ret == ENOENT) {
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
+  return ErrnoToRsmiStatus(ret);
+}
+
 static rsmi_status_t read_board_uint64(const std::string& board_path, const char* filename,
                                        uint64_t* value) {
   if (value == nullptr) return RSMI_STATUS_INVALID_ARGS;
