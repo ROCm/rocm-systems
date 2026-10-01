@@ -8,8 +8,8 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
-- **Fixed crashes and mixed-up per-GPU values in GPU process lists**.  
-  - `amdsmi_get_gpu_process_list()` could crash, omit processes, or show a process that uses several GPUs with another GPU's memory usage when called from several threads at once or when the GPUs were queried alternately within the `AMDSMI_PROCESS_INFO_CACHE_MS` period.
+- **Fixed crashes and mixed-up memory usage in GPU process lists**.  
+  - Listing GPU processes from several threads at once could crash or leave processes out, and a process that uses several GPUs could show another GPU's memory and engine usage.
 
 - **Fixed runtime fatal CPERs reporting no AFIDs**.  
   - `amd-smi ras --cper` showed an empty `list afids` column for fatal records, `amd-smi ras --afid --cper-file` printed `-`, and `amdsmi_get_afids_from_cper()` returned no AFIDs. amdgpu writes fatal crashdump sections 32 bytes shorter than `sizeof(cper_sec_crashdump)`, and the section bounds check required the full struct, so every such section was skipped. The check now requires only the dump member the record type uses.
