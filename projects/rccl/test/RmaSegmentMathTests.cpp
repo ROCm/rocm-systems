@@ -10,7 +10,7 @@
 
 #include <gtest/gtest.h>
 
-#include "../src/transport/net_ib/gin.h"
+#include "transport/net_ib/gin.h"
 
 namespace {
 
