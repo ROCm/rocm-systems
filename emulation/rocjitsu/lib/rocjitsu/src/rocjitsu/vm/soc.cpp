@@ -3,7 +3,7 @@
 
 #include "rocjitsu/vm/soc.h"
 
-#include "rocjitsu/vm/amdgpu/aql/aql_queue_binding_factory.h"
+#include "rocjitsu/vm/amdgpu/compute_queue_binding_factory.h"
 #include "rocjitsu/vm/amdgpu/pm4/pm4_queue_binding_factory.h"
 
 #include "simdojo/sim/simulation.h"
@@ -232,8 +232,8 @@ std::optional<amdgpu::ComputeQueueBindingPlan> SoC::make_aql(uint32_t /*queue_or
   // must therefore stay on its selected owner: fanning it out would execute on
   // XCDs the guest did not size resources such as scratch for. The simulated
   // KFD path enables fan-out separately when it publishes every XCD.
-  return amdgpu::ComputeQueueBindingPlan{.factory = amdgpu::make_aql_queue_binding_factory(*owner),
-                                         .xcd_fanout = false};
+  return amdgpu::ComputeQueueBindingPlan{
+      .factory = amdgpu::make_compute_queue_binding_factory(*owner), .xcd_fanout = false};
 }
 
 std::optional<amdgpu::ComputeQueueBindingPlan> SoC::make_pm4(uint32_t /*queue_ordinal*/,
