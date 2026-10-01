@@ -2213,8 +2213,8 @@ constexpr bool mma_f32_native_width_supported(uint32_t n, uint32_t width) {
 }
 
 /// Fast path for v_wmma_f32_16x16x32_f16 (gfx1250, wave32) — the WMMA analogue
-/// of exec_f32_mfma_16x16x32_f16. Compile-time M/N/K let the compiler fully
-/// unroll the 16-row x 32-K matmul into native-width FMA chunks; the f16 inputs
+/// of exec_f32_mfma_16x16x32_f16. Compile-time M/N/K let the compiler
+/// specialize and vectorize the matmul into native-width FMA chunks; the f16 inputs
 /// are bulk-converted once (using F16C when enabled) instead of branchy
 /// per-element extract_f16. VGPRs are accessed through observed register-access
 /// regions and the result scatters directly (no Result staging vector). Falls
@@ -2273,7 +2273,27 @@ inline void exec_wmma_f32_16x16x32_f16(auto &cu, uint32_t dst, uint32_t s0, uint
         auto bl = wmma_input_loc(N, K, col, k, in_bits);
         B_buf[k * N + col] = B_f32[(bl.vgpr_offset * wf + bl.lane) * 2 + bl.sub_element];
       }
-    // Dense 16x32 * 32x16 -> 16x16 matmul in native-width column chunks.
+#if defined(__FMA__)
+    // Keep each row's chunks live together so one A broadcast feeds all of them.
+    constexpr uint32_t CHUNKS = N / W;
+    for (uint32_t row = 0; row < M; ++row) {
+      std::array<util::native<float>, CHUNKS> c_rows;
+      for (uint32_t chunk = 0; chunk < CHUNKS; ++chunk)
+        c_rows[chunk].copy_from(&C_buf[row * N + chunk * W], util::stdx::vector_aligned);
+      for (uint32_t k = 0; k < K; ++k) {
+        const util::native<float> a_bcast(A_buf[row * K + k]);
+        for (uint32_t chunk = 0; chunk < CHUNKS; ++chunk) {
+          util::native<float> b_row;
+          b_row.copy_from(&B_buf[k * N + chunk * W], util::stdx::vector_aligned);
+          c_rows[chunk] = util::stdx::fma(a_bcast, b_row, c_rows[chunk]);
+        }
+      }
+      for (uint32_t chunk = 0; chunk < CHUNKS; ++chunk)
+        c_rows[chunk].copy_to(&C_buf[row * N + chunk * W], util::stdx::vector_aligned);
+    }
+#else
+    // Without native FMA, stdx::fma may scalarize. Keep one chunk live at a time
+    // to avoid register spills across scalar fmaf calls.
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t c0 = 0; c0 < N; c0 += W) {
         util::native<float> c_row;
@@ -2286,6 +2306,7 @@ inline void exec_wmma_f32_16x16x32_f16(auto &cu, uint32_t dst, uint32_t s0, uint
         }
         c_row.copy_to(&C_buf[row * N + c0], util::stdx::vector_aligned);
       }
+#endif
     // Scatter directly back to VGPRs (no Result staging vector).
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
@@ -2354,7 +2375,27 @@ inline void exec_wmma_f32_16x16x32_bf16(auto &cu, uint32_t dst, uint32_t s0, uin
         auto bl = wmma_input_loc(N, K, col, k, in_bits);
         B_buf[k * N + col] = B_f32[(bl.vgpr_offset * wf + bl.lane) * 2 + bl.sub_element];
       }
-    // Dense 16x32 * 32x16 -> 16x16 matmul in native-width column chunks.
+#if defined(__FMA__)
+    // Keep each row's chunks live together so one A broadcast feeds all of them.
+    constexpr uint32_t CHUNKS = N / W;
+    for (uint32_t row = 0; row < M; ++row) {
+      std::array<util::native<float>, CHUNKS> c_rows;
+      for (uint32_t chunk = 0; chunk < CHUNKS; ++chunk)
+        c_rows[chunk].copy_from(&C_buf[row * N + chunk * W], util::stdx::vector_aligned);
+      for (uint32_t k = 0; k < K; ++k) {
+        const util::native<float> a_bcast(A_buf[row * K + k]);
+        for (uint32_t chunk = 0; chunk < CHUNKS; ++chunk) {
+          util::native<float> b_row;
+          b_row.copy_from(&B_buf[k * N + chunk * W], util::stdx::vector_aligned);
+          c_rows[chunk] = util::stdx::fma(a_bcast, b_row, c_rows[chunk]);
+        }
+      }
+      for (uint32_t chunk = 0; chunk < CHUNKS; ++chunk)
+        c_rows[chunk].copy_to(&C_buf[row * N + chunk * W], util::stdx::vector_aligned);
+    }
+#else
+    // Without native FMA, stdx::fma may scalarize. Keep one chunk live at a time
+    // to avoid register spills across scalar fmaf calls.
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t c0 = 0; c0 < N; c0 += W) {
         util::native<float> c_row;
@@ -2367,6 +2408,7 @@ inline void exec_wmma_f32_16x16x32_bf16(auto &cu, uint32_t dst, uint32_t s0, uin
         }
         c_row.copy_to(&C_buf[row * N + c0], util::stdx::vector_aligned);
       }
+#endif
     // Scatter directly back to VGPRs (no Result staging vector).
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {

@@ -6035,6 +6035,77 @@ TEST(ExecutionPluginTest, WmmaF32NativeWidthFastPathUsesRegionReads) {
   }
 }
 
+TEST(ExecutionPluginTest, WmmaF16Bf16NativeWidthFastPathsObserveReadWriteRegions) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "stdx SIMD is unavailable";
+  } else {
+    constexpr uint32_t width = static_cast<uint32_t>(util::native<float>::size());
+    if (!amdgpu::mma_f32_native_width_supported(16, width))
+      GTEST_SKIP() << "f32 WMMA shape is not divisible by the native SIMD width";
+
+    using WmmaFn = void (*)(amdgpu::ComputeUnitCore &, uint32_t, uint32_t, uint32_t, uint32_t,
+                            uint32_t, uint32_t);
+    struct KernelCase {
+      const char *label;
+      WmmaFn fn;
+    };
+    const std::array<KernelCase, 2> kernels{{
+        {"f16", amdgpu::exec_wmma_f32_16x16x32_f16},
+        {"bf16", amdgpu::exec_wmma_f32_16x16x32_bf16},
+    }};
+
+    ForceScalarOverride force_simd(false);
+    constexpr uint32_t S0 = 0, S1 = 16, ACC = 32, DST = 48;
+    constexpr uint32_t matrix_regs = 8;
+    for (const KernelCase &kernel : kernels) {
+      SCOPED_TRACE(kernel.label);
+      for (uint32_t const_acc : {amdgpu::ACC_FROM_VGPR, 0x3F80'0000u}) {
+        SCOPED_TRACE(const_acc == amdgpu::ACC_FROM_VGPR ? "VGPR accumulator"
+                                                        : "constant accumulator");
+        Wave32PluginFixture f;
+        auto *plugin = f.attach_ordering_plugin();
+        auto *cu = f.cu.get();
+        auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+        ASSERT_NE(wf, nullptr);
+        ASSERT_EQ(wf->wf_size(), 32u);
+
+        const uint32_t vb = wf->vgpr_alloc().base;
+        for (uint32_t reg = 0; reg < 64; ++reg)
+          for (uint32_t lane = 0; lane < 32; ++lane)
+            cu->write_vgpr(vb + reg, lane, 0);
+        plugin->events.clear();
+
+        kernel.fn(*cu, vb + DST, vb + S0, vb + S1, vb + ACC, const_acc, 0);
+
+        std::vector<uint32_t> expected_reads;
+        for (uint32_t reg = 0; reg < matrix_regs; ++reg) {
+          expected_reads.push_back(S0 + reg);
+          expected_reads.push_back(S1 + reg);
+          if (const_acc == amdgpu::ACC_FROM_VGPR)
+            expected_reads.push_back(ACC + reg);
+        }
+        std::vector<uint32_t> expected_writes;
+        for (uint32_t reg = 0; reg < matrix_regs; ++reg)
+          expected_writes.push_back(DST + reg);
+        expect_vgpr_read_set(vgpr_read_events(*plugin), vb, std::move(expected_reads),
+                             0xFFFF'FFFFu);
+        expect_vgpr_read_set(vgpr_write_events(*plugin), vb, std::move(expected_writes),
+                             0xFFFF'FFFFu);
+
+        bool saw_write = false;
+        for (const HookEvent &event : plugin->events) {
+          if (event.kind == HookEvent::WRITE_VGPR) {
+            saw_write = true;
+          }
+          if (event.kind == HookEvent::READ_VGPR) {
+            EXPECT_FALSE(saw_write) << "read callback observed after output write";
+          }
+        }
+      }
+    }
+  }
+}
+
 TEST(ExecutionPluginTest, WmmaBf16F32FastPathReadsBeforePackedWrites) {
   if constexpr (!util::has_stdx_simd) {
     GTEST_SKIP() << "stdx SIMD is unavailable";
