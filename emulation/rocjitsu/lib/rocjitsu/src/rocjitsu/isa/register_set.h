@@ -18,9 +18,13 @@
 
 #include <algorithm>
 #include <bit>
-#include <bitset>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
+
+#if defined(__AVX2__)
+#include <immintrin.h>
+#endif
 
 namespace rocjitsu {
 
@@ -119,6 +123,92 @@ struct RegisterRef {
   constexpr bool operator==(const RegisterRef &) const = default;
 };
 
+namespace register_set_detail {
+#if defined(__AVX2__)
+using Word = __m256i;
+inline constexpr size_t kWordBits = 256;
+inline Word word_all_bits() { return _mm256_set1_epi64x(-1); }
+// One occupancy bit per 64-bit lane, scanning all 256 membership bits at once.
+inline unsigned nonempty_lanes(Word word) {
+  const Word empty = _mm256_cmpeq_epi64(word, _mm256_setzero_si256());
+  return ~static_cast<unsigned>(_mm256_movemask_pd(_mm256_castsi256_pd(empty))) & 15u;
+}
+inline Word word_or(Word a, Word b) { return _mm256_or_si256(a, b); }
+inline Word word_and(Word a, Word b) { return _mm256_and_si256(a, b); }
+// Computes a & ~b; the intrinsic complements its first operand.
+inline Word word_and_not(Word a, Word b) { return _mm256_andnot_si256(b, a); }
+inline bool word_none(Word a) { return _mm256_testz_si256(a, a) != 0; }
+inline bool word_equal(Word a, Word b) {
+  return _mm256_movemask_epi8(_mm256_cmpeq_epi8(a, b)) == -1;
+}
+
+// XOR clears the lane-select bits only in the selected lane. Its shift is
+// bitIndex % 64; all other shifts are >= 64 and therefore produce zero.
+inline Word word_bit_mask(unsigned bitIndex) {
+  const Word shiftBits =
+      _mm256_xor_si256(_mm256_set1_epi64x(bitIndex), _mm256_setr_epi64x(0, 64, 128, 192));
+  return _mm256_sllv_epi64(_mm256_set1_epi64x(1), shiftBits);
+}
+
+// A prefix of [0, end), including the empty and full-word cases.
+inline Word word_prefix(unsigned end) {
+  const Word counts = _mm256_sub_epi64(_mm256_set1_epi64x(end), _mm256_set_epi64x(192, 128, 64, 0));
+  const Word positive = _mm256_cmpgt_epi64(counts, _mm256_setzero_si256());
+  const Word high = _mm256_sllv_epi64(word_all_bits(), counts);
+  return _mm256_andnot_si256(high, positive);
+}
+inline Word word_count_lanes(Word bits) {
+  const Word table = _mm256_setr_epi8(0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4, 0, 1, 1, 2, 1,
+                                      2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4);
+  const Word low_mask = _mm256_set1_epi8(15);
+  const Word low = _mm256_shuffle_epi8(table, _mm256_and_si256(bits, low_mask));
+  const Word high =
+      _mm256_shuffle_epi8(table, _mm256_and_si256(_mm256_srli_epi16(bits, 4), low_mask));
+  return _mm256_sad_epu8(_mm256_add_epi8(low, high), _mm256_setzero_si256());
+}
+inline size_t sum_count_lanes(Word sums) {
+  const __m128i halves =
+      _mm_add_epi64(_mm256_castsi256_si128(sums), _mm256_extracti128_si256(sums, 1));
+  const __m128i total = _mm_add_epi64(halves, _mm_unpackhi_epi64(halves, halves));
+  return static_cast<size_t>(_mm_cvtsi128_si64(total));
+}
+#else
+using Word = uint64_t;
+inline constexpr size_t kWordBits = 64;
+inline Word word_all_bits() { return ~Word{0}; }
+inline Word word_or(Word a, Word b) { return a | b; }
+inline Word word_and(Word a, Word b) { return a & b; }
+inline Word word_and_not(Word a, Word b) { return a & ~b; }
+inline bool word_none(Word a) { return a == 0; }
+inline bool word_equal(Word a, Word b) { return a == b; }
+inline Word word_prefix(unsigned end) {
+  return end == kWordBits ? word_all_bits() : (Word{1} << end) - 1;
+}
+inline size_t word_count(Word bits) { return std::popcount(bits); }
+inline Word word_bit_mask(unsigned bitIndex) { return Word{1} << bitIndex; }
+#endif
+// Single-bit helpers require bitIndex < kWordBits.
+inline void word_set_bit(Word &word, unsigned bitIndex) {
+  word = word_or(word, word_bit_mask(bitIndex));
+}
+inline void word_reset_bit(Word &word, unsigned bitIndex) {
+  word = word_and_not(word, word_bit_mask(bitIndex));
+}
+inline bool word_test_bit(Word word, unsigned bitIndex) {
+  return !word_none(word_and(word, word_bit_mask(bitIndex)));
+}
+inline Word word_range(unsigned begin, unsigned end) {
+  return word_and_not(word_prefix(end), word_prefix(begin));
+}
+
+template <size_t Words> bool words_equal(const Word (&a)[Words], const Word (&b)[Words]) {
+  for (size_t i = 0; i < Words; ++i)
+    if (!word_equal(a[i], b[i]))
+      return false;
+  return true;
+}
+} // namespace register_set_detail
+
 /// @brief Per-class register set used for def/use and liveness dataflow.
 ///
 /// @details A RegisterSet can represent an instruction's use set, def set,
@@ -150,7 +240,9 @@ public:
 
   /// @brief Return true if `ref` is present. For ordinary classes every covered
   /// lane must be present; for special classes only membership is checked.
-  [[nodiscard]] bool contains(RegisterRef ref) const;
+  // Expose the read-only contract across translation units so inlined
+  // iteration can omit mutation checks around callbacks using contains().
+  [[nodiscard, gnu::pure]] bool contains(RegisterRef ref) const;
 
   /// @brief Return true if any lane covered by `ref` is present.
   ///
@@ -195,7 +287,11 @@ public:
     return lhs;
   }
 
-  friend bool operator==(const RegisterSet &, const RegisterSet &) = default;
+  friend bool operator==(const RegisterSet &a, const RegisterSet &b) {
+    using register_set_detail::words_equal;
+    return words_equal(a.sgprs_, b.sgprs_) && words_equal(a.vgprs_, b.vgprs_) &&
+           words_equal(a.acc_vgprs_, b.acc_vgprs_) && a.special_regs_ == b.special_regs_;
+  }
 
   /// @brief Return a copy holding only the ordinary members; special singletons
   /// are dropped. This is the projection scratch/liveness/spill consumers use.
@@ -218,18 +314,9 @@ public:
   /// @brief Invoke @p f with each ordinary single-lane register (SGPR, VGPR,
   /// AccVGPR) in ascending index order. Special singletons are not visited.
   template <typename F> void for_each_ordinary(F &&f) const {
-    for (size_t i = 0; i < sgprs_.size(); ++i) {
-      if (sgprs_.test(i))
-        f(RegisterRef{RegClass::SGPR, static_cast<uint16_t>(i), 1});
-    }
-    for (size_t i = 0; i < vgprs_.size(); ++i) {
-      if (vgprs_.test(i))
-        f(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(i), 1});
-    }
-    for (size_t i = 0; i < acc_vgprs_.size(); ++i) {
-      if (acc_vgprs_.test(i))
-        f(RegisterRef{RegClass::ACC_VGPR, static_cast<uint16_t>(i), 1});
-    }
+    for_each_bits<RegClass::SGPR>(sgprs_, f);
+    for_each_bits<RegClass::VGPR>(vgprs_, f);
+    for_each_bits<RegClass::ACC_VGPR>(acc_vgprs_, f);
   }
 
   /// @brief Invoke @p f with each present special class, in ascending
@@ -256,9 +343,89 @@ private:
   static_assert(widest_special_reg_class() < 16,
                 "special_regs_ must hold a bit for every special RegClass");
 
-  std::bitset<REGISTER_SET_MAX_SGPRS> sgprs_;
-  std::bitset<REGISTER_SET_MAX_VGPRS> vgprs_;
-  std::bitset<REGISTER_SET_MAX_ACC_VGPRS> acc_vgprs_;
+  // SIMD words support set algebra and lane-occupancy scans on AVX2;
+  // other targets use scalar words. expand() clips to the class capacity, so
+  // the unused tail bits stay zero under every set operation.
+  template <size_t Capacity>
+  using RegisterBits = register_set_detail::Word[(Capacity + register_set_detail::kWordBits - 1) /
+                                                 register_set_detail::kWordBits];
+
+  // Keep the class constant even when this helper is not inlined. Inline the
+  // callback's available callees too: opaque vector/string helpers otherwise
+  // obstruct alias analysis and retain costly membership reloads and checks.
+  template <RegClass cls, size_t Words, typename F>
+  [[gnu::flatten]] static void for_each_bits(const register_set_detail::Word (&words)[Words],
+                                             F &f) {
+    using namespace register_set_detail;
+#if defined(__AVX2__)
+    for (size_t word = 0; word < Words; ++word) {
+      unsigned lanes = nonempty_lanes(words[word]);
+      while (lanes) {
+        unsigned lane = std::countr_zero(lanes);
+        // Scalar membership cursors avoid carrying a SIMD snapshot across
+        // callbacks. memcpy reads the vector's representation without aliasing
+        // violations and lowers to a scalar load for this fixed-size copy.
+        const auto *address = reinterpret_cast<const unsigned char *>(&words[word]) + lane * 8;
+        const auto load = [&] {
+          uint64_t value;
+          std::memcpy(&value, address, sizeof(value));
+          return value;
+        };
+        uint64_t members = load(), remaining = members;
+        // Full lanes emit consecutive indices. After an edit, resume set-bit
+        // iteration strictly after the last emitted index, including at bit 63.
+        unsigned cursor = 0;
+        if (members == ~uint64_t{0}) {
+#pragma GCC unroll 8
+          for (; cursor < 64; ++cursor) {
+            f(RegisterRef{cls, static_cast<uint16_t>(word * 256 + lane * 64 + cursor), 1});
+            members = load();
+            if (members != ~uint64_t{0}) {
+              remaining = members & (~uint64_t{1} << cursor);
+              break;
+            }
+          }
+          if (cursor == 64)
+            remaining = 0;
+        }
+        while (remaining) {
+          unsigned bit = std::countr_zero(remaining);
+          f(RegisterRef{cls, static_cast<uint16_t>(word * 256 + lane * 64 + bit), 1});
+          // Keep edit recovery on a cold path. In particular, this prevents Clang
+          // from putting its shift and mask on the cursor's dependency chain.
+          const uint64_t updated = load();
+          if (updated != members) [[unlikely]] {
+            remaining = updated & (~uint64_t{1} << bit);
+            members = updated;
+          } else {
+            remaining &= remaining - 1;
+          }
+        }
+        // Observe additions to later, previously empty lanes as well as removals.
+        lanes = nonempty_lanes(words[word]) & (~1u << lane);
+      }
+    }
+#else
+    for (size_t word = 0; word < Words; ++word) {
+      Word members = words[word];
+      Word remaining = members;
+      while (remaining) {
+        unsigned bit = std::countr_zero(remaining);
+        f(RegisterRef{cls, static_cast<uint16_t>(word * 64 + bit), 1});
+        Word updated = words[word];
+        if (updated == members)
+          remaining &= remaining - 1;
+        else
+          remaining = bit == 63 ? 0 : updated & (~Word{0} << (bit + 1));
+        members = updated;
+      }
+    }
+#endif
+  }
+
+  RegisterBits<REGISTER_SET_MAX_SGPRS> sgprs_{};
+  RegisterBits<REGISTER_SET_MAX_VGPRS> vgprs_{};
+  RegisterBits<REGISTER_SET_MAX_ACC_VGPRS> acc_vgprs_{};
 
   /// @brief Bit `static_cast<uint8_t>(cls)` set iff special class `cls` is
   /// present. Only special-class bits are ever set (see `expand`).
